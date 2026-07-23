@@ -9,13 +9,10 @@ let rejection_to_telemetry (r : keeper_path_rejection) : unit =
   let kind =
     match r with
     | Path_required -> "path_required"
-    | Absolute_path_rejected _ -> "absolute_path_rejected"
-    | Outside_project_root _ -> "outside_project_root"
+    | Invalid_lexical_endpoint -> "invalid_lexical_endpoint"
+    | Invalid_normalized_path_projection _ -> "invalid_normalized_path_projection"
     | Allowed_paths_normalized_empty _ -> "allowed_paths_normalized_empty"
     | Outside_sandbox _ -> "out_of_roots"
-    | Not_found_relative _ -> "not_found_relative"
-    | Ambiguous_relative_read_path _ -> "ambiguous_relative_read_path"
-    | Task_state_file_path_blocked _ -> "task_state_file_path_blocked"
   in
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string PathRejection)
@@ -60,157 +57,572 @@ let normalize_path_for_check_stripped path =
   normalize_path_for_check path |> strip_trailing_slashes
 ;;
 
-let normalize_allowed_path_for_check ~(root : string) (path : string) : string option =
+let allowed_path_projection ~(root : string) (path : string) =
   let raw = String.trim path in
   if raw = ""
   then None
   else (
     let candidate = if Filename.is_relative raw then Filename.concat root raw else raw in
+    let candidate = strip_trailing_slashes candidate in
     let normalized = normalize_path_for_check candidate |> strip_trailing_slashes in
-    if normalized = "" then None else Some normalized)
+    if normalized = "" then None else Some (candidate, normalized))
 ;;
 
-let split_relative_components (raw : string) : string list =
-  raw |> String.split_on_char '/' |> List.filter (fun part -> part <> "" && part <> ".")
+let normalize_allowed_path_for_check ~root path =
+  allowed_path_projection ~root path |> Option.map snd
 ;;
 
-let has_parent_component (parts : string list) : bool =
-  List.exists (fun part -> part = "..") parts
+let valid_child_name = Fs_compat.is_capability_leaf
+
+type absolute_path_components =
+  { anchor : string
+  ; components : string list
+  }
+
+type allowed_root_projection =
+  { normalized_path : string
+  ; normalized_components : absolute_path_components
+  ; capability_components : absolute_path_components
+  }
+
+let absolute_path_components path =
+  if Filename.is_relative path || String.equal path ""
+  then None
+  else
+    let rec collect current components =
+      let parent = Filename.dirname current in
+      if String.equal parent current
+      then Some { anchor = current; components }
+      else
+        let component = Filename.basename current in
+        if valid_child_name component
+        then collect parent (component :: components)
+        else None
+    in
+    collect path []
 ;;
 
-let join_path_components = function
-  | [] -> "."
-  | hd :: tl -> List.fold_left Filename.concat hd tl
+let rec drop_component_prefix prefix components =
+  match prefix, components with
+  | [], suffix -> Some suffix
+  | expected :: prefix_rest, actual :: components_rest
+    when String.equal expected actual ->
+    drop_component_prefix prefix_rest components_rest
+  | _ -> None
 ;;
 
-let path_exists (path : string) : bool = Fs_compat.file_exists path
-
-let parent_exists (path : string) : bool =
-  let parent = Filename.dirname path in
-  parent <> path && path_exists parent
+let relative_components_under
+      ~(root : absolute_path_components)
+      ~(target : absolute_path_components)
+  =
+  if String.equal root.anchor target.anchor
+  then drop_component_prefix root.components target.components
+  else None
 ;;
 
 let is_within_root_norm ~(root_norm : string) (path : string) : bool =
   let normalized = normalize_path_for_check path |> strip_trailing_slashes in
-  normalized = root_norm || String.starts_with ~prefix:(root_norm ^ "/") normalized
-;;
-
-let find_suffix_matches_under_root
-      ~root
-      ~anchor
-      ~suffix_rel
-      ?(max_dirs = 2000)
-      ?(max_matches = 8)
-      ()
-  : string list
-  =
-  let root_norm = normalize_path_for_check root |> strip_trailing_slashes in
-  let module StringSet = Set_util.StringSet in
-  let rec walk visited ~dirs_seen acc dir =
-    if dirs_seen >= max_dirs || List.length acc >= max_matches
-    then visited, dirs_seen, acc
-    else (
-      let dir_norm = normalize_path_for_check dir |> strip_trailing_slashes in
-      if (not (is_within_root_norm ~root_norm dir)) || StringSet.mem dir_norm visited
-      then visited, dirs_seen, acc
-      else (
-        let visited = StringSet.add dir_norm visited in
-        let entries =
-          try Sys.readdir dir |> Array.to_list |> List.sort String.compare with
-          | Sys_error _ -> []
-        in
-        List.fold_left
-          (fun (visited, dirs_seen, acc) entry ->
-             if dirs_seen >= max_dirs || List.length acc >= max_matches
-             then visited, dirs_seen, acc
-             else (
-               let path = Filename.concat dir entry in
-               match
-                 try Some (Sys.is_directory path) with
-                 | Sys_error _ -> None
-               with
-               | None -> visited, dirs_seen, acc
-               | Some is_dir ->
-                 let acc =
-                   if entry = anchor
-                   then (
-                     let candidate = Filename.concat path suffix_rel in
-                     if path_exists candidate && is_within_root_norm ~root_norm candidate
-                     then candidate :: acc
-                     else acc)
-                   else acc
-                 in
-                 if is_dir && is_within_root_norm ~root_norm path
-                 then walk visited ~dirs_seen:(dirs_seen + 1) acc path
-                 else visited, dirs_seen, acc))
-          (visited, dirs_seen, acc)
-          entries))
-  in
-  walk StringSet.empty ~dirs_seen:0 [] root |> fun (_, _, matches) -> List.rev matches
-;;
-
-let maybe_resolve_missing_relative_read_path ~(roots : string list) ~(raw_path : string)
-  : (string option, keeper_path_rejection) result
-  =
-  let parts = split_relative_components raw_path in
-  match parts with
-  | [] | [ _ ] -> Ok None
-  | _ when has_parent_component parts -> Ok None
-  | anchor :: rest ->
-    let suffix_rel = join_path_components rest in
-    let matches =
-      roots
-      |> List.concat_map (fun root ->
-        find_suffix_matches_under_root ~root ~anchor ~suffix_rel ())
-      |> List.sort_uniq String.compare
-    in
-    (match matches with
-     | [] -> Ok None
-     | [ match_path ] -> Ok (Some match_path)
-     | many ->
-       (* Tier A3 / Cycle 6: do not echo the resolved match paths
-              into the error string — that leaks the host filesystem
-              layout to the caller (LLM) and dashboards. The match
-              count alone is enough for the caller to course-correct. *)
-       Error (Ambiguous_relative_read_path { raw = raw_path; candidate_count = List.length many }))
-;;
-
-let allows_missing_leaf_read ~(raw : string) ~(candidate : string) : bool =
-  let parts = split_relative_components raw in
-  let trailing_slash = String.ends_with ~suffix:"/" raw in
-  parent_exists candidate && List.length parts > 1 && not trailing_slash
+  match absolute_path_components root_norm, absolute_path_components normalized with
+  | Some root, Some target -> Option.is_some (relative_components_under ~root ~target)
+  | None, _ | _, None -> false
 ;;
 
 let is_within_allowed_norms ~(target_norm : string) (allowed_norms : string list) : bool =
-  List.exists
-    (fun allowed_norm ->
-       target_norm = allowed_norm || String.starts_with ~prefix:(allowed_norm ^ "/") target_norm)
-    allowed_norms
+  match absolute_path_components target_norm with
+  | None -> false
+  | Some target ->
+    List.exists
+      (fun allowed_norm ->
+         match absolute_path_components allowed_norm with
+         | None -> false
+         | Some root -> Option.is_some (relative_components_under ~root ~target))
+      allowed_norms
 ;;
 
-let absolute_allowed_paths ~(config : Workspace.config) ~(allowed_paths : string list)
-  : string list
-  =
-  let root = project_root_of_config config in
-  allowed_paths |> List.filter_map (normalize_allowed_path_for_check ~root)
+type confined_path =
+  { root : string
+  ; root_identity : resource_identity option
+  ; anchor_root : string
+  ; root_relative_path : string
+  ; target_components : string list
+  ; endpoint_components : string list
+  ; lexical_leaf : string option
+  ; host_path : string
+  ; containment_path : string
+  }
+
+and resource_identity =
+  { device : Int64.t
+  ; inode : Int64.t
+  }
+
+type path_effect_operation =
+  | Atomic_replace_entry
+  | Patch_then_atomic_replace_entry
+  | Append_pinned_resource
+  | Create_entry_exclusive
+
+type path_effect_parent_scope =
+  { parent_components : string list
+  ; resource : resource_identity
+  ; create_missing_parents : string list
+  ; created_directory_permissions : int
+  }
+
+type path_effect_locator =
+  { root : string
+  ; root_resource : resource_identity
+  ; target_components : string list
+  ; endpoint_components : string list
+  ; leaf : string
+  ; parent : path_effect_parent_scope option
+  ; target_resource : resource_identity option
+  ; source : path_effect_source option
+  }
+
+and path_effect_source =
+  { components : string list
+  ; resource : resource_identity
+  }
+
+type path_effect =
+  { operation : path_effect_operation
+  ; locator : path_effect_locator
+  ; result_file_permissions : int option
+  }
+
+type path_effect_projection_error =
+  | Allowed_root_identity_unavailable of { root : string }
+  | Invalid_parent_component of
+      { index : int
+      ; value : string
+      }
+  | Invalid_missing_parent_component of
+      { index : int
+      ; value : string
+      }
+  | Target_has_no_lexical_leaf
+  | Parent_scope_does_not_cover_target of
+      { parent_components : string list
+      ; create_missing_parents : string list
+      ; target_parent_components : string list
+      }
+  | Patch_source_has_no_endpoint
+  | Recovery_target_invalid of Fs_compat.atomic_replace_recovery_target_error
+
+type atomic_replace_projection =
+  { gate_effect : path_effect
+  ; recovery_target : Fs_compat.atomic_replace_recovery_target
+  }
+
+type confined_path_endpoint =
+  | Lexical_entry
+  | Follow_referent
+
+let relative_path_of_components = function
+  | [] -> "."
+  | components -> String.concat Filename.dir_sep components
 ;;
 
-let absolute_allowed_paths_result ~(config : Workspace.config) ~(allowed_paths : string list)
-  : (string list, string) result
-  =
-  let normalized = absolute_allowed_paths ~config ~allowed_paths in
-  if allowed_paths <> [] && normalized = []
-  then
-    (* Tier A3 / Cycle 6: redact the raw [allowed_paths] list — those
-       strings frequently include host-absolute prefixes that should
-       not flow back to the LLM caller. The count is enough for the
-       caller to know "you provided N entries, none were valid". *)
+let confined_root (target : confined_path) = target.root
+let confined_anchor_root (target : confined_path) = target.anchor_root
+let confined_root_relative_path (target : confined_path) = target.root_relative_path
+let confined_relative_components (target : confined_path) = target.target_components
+let confined_relative_path (target : confined_path) =
+  relative_path_of_components target.target_components
+;;
+let confined_host_path (target : confined_path) = target.host_path
+let confined_containment_path (target : confined_path) = target.containment_path
+let confined_endpoint_components (target : confined_path) = target.endpoint_components
+let confined_endpoint_relative_path (target : confined_path) =
+  relative_path_of_components target.endpoint_components
+;;
+
+let path_effect_projection_error_to_string = function
+  | Allowed_root_identity_unavailable { root } ->
+    Printf.sprintf
+      "filesystem allowed root identity unavailable for Gate effect: %s"
+      root
+  | Invalid_parent_component { index; value } ->
+    Printf.sprintf
+      "filesystem effect parent component %d is invalid: %S"
+      index
+      value
+  | Invalid_missing_parent_component { index; value } ->
+    Printf.sprintf
+      "filesystem effect missing-parent component %d is invalid: %S"
+      index
+      value
+  | Target_has_no_lexical_leaf ->
+    "filesystem effect target has no lexical leaf"
+  | Parent_scope_does_not_cover_target
+      { parent_components
+      ; create_missing_parents
+      ; target_parent_components
+      } ->
+    Printf.sprintf
+      "filesystem effect parent scope does not cover target: parent=%s missing=%s target_parent=%s"
+      (relative_path_of_components parent_components)
+      (relative_path_of_components create_missing_parents)
+      (relative_path_of_components target_parent_components)
+  | Patch_source_has_no_endpoint ->
+    "filesystem patch source has no confined endpoint"
+  | Recovery_target_invalid error ->
+    Fs_compat.atomic_replace_recovery_target_error_to_string error
+;;
+
+let atomic_replace_gate_effect projection = projection.gate_effect
+let atomic_replace_recovery_target projection = projection.recovery_target
+
+let resource_identity_of_unix_path path =
+  try
+    let stat = Unix.stat path in
+    Some
+      { device = Int64.of_int stat.Unix.st_dev
+      ; inode = Int64.of_int stat.Unix.st_ino
+      }
+  with
+  | Unix.Unix_error _ -> None
+;;
+
+let resource_identity_of_eio_stat (stat : Eio.File.Stat.t) =
+  { device = stat.dev; inode = stat.ino }
+;;
+
+let equal_resource_identity left right =
+  Int64.equal left.device right.device && Int64.equal left.inode right.inode
+;;
+
+let verify_confined_root_capability target root_dir =
+  match target.root_identity with
+  | None ->
     Error
       (Printf.sprintf
-         "allowed_paths_normalized_empty: %d entries provided, none resolved to a valid \
-          path"
-         (List.length allowed_paths))
-  else Ok normalized
+         "filesystem allowed root identity unavailable during resolution: %s"
+         target.root)
+  | Some expected ->
+    (try
+       let stat = Eio.Path.stat ~follow:true root_dir in
+       let actual = resource_identity_of_eio_stat stat in
+       if stat.kind <> `Directory
+       then
+         Error
+           (Printf.sprintf
+              "filesystem allowed root is not a directory: %s"
+              target.root)
+       else if equal_resource_identity expected actual
+       then Ok ()
+       else
+         Error
+           (Printf.sprintf
+              "filesystem allowed root changed between resolution and capability acquisition: %s"
+              target.root)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | Eio.Io _ as exn -> Error (Printexc.to_string exn))
+;;
+
+let validate_components ~invalid components =
+  let rec loop index = function
+    | [] -> Ok components
+    | component :: rest ->
+      if valid_child_name component
+      then loop (index + 1) rest
+      else Error (invalid ~index ~value:component)
+  in
+  loop 0 components
+;;
+
+let path_effect_parent_scope
+      ~parent_components
+      ~(resource : Eio.File.Stat.t)
+      ~create_missing_parents
+      ~created_directory_permissions
+  =
+  match
+    validate_components
+      ~invalid:(fun ~index ~value -> Invalid_parent_component { index; value })
+      parent_components
+  with
+  | Error _ as error -> error
+  | Ok parent_components ->
+    (match
+       validate_components
+         ~invalid:(fun ~index ~value ->
+           Invalid_missing_parent_component { index; value })
+         create_missing_parents
+     with
+     | Error _ as error -> error
+     | Ok create_missing_parents ->
+       Ok
+         { parent_components
+         ; resource = resource_identity_of_eio_stat resource
+         ; create_missing_parents
+         ; created_directory_permissions
+         })
+;;
+
+let split_last components =
+  match List.rev components with
+  | [] -> None
+  | leaf :: reversed_parent -> Some (List.rev reversed_parent, leaf)
+;;
+
+let parent_scope_covers_target
+      (parent : path_effect_parent_scope)
+      (target : confined_path)
+  =
+  match split_last target.target_components with
+  | None -> Error Target_has_no_lexical_leaf
+  | Some (target_parent_components, _leaf) ->
+    let projected_parent_components =
+      parent.parent_components @ parent.create_missing_parents
+    in
+    if List.equal String.equal projected_parent_components target_parent_components
+    then Ok ()
+    else
+      Error
+        (Parent_scope_does_not_cover_target
+           { parent_components = parent.parent_components
+           ; create_missing_parents = parent.create_missing_parents
+           ; target_parent_components
+           })
+;;
+
+let path_effect
+      ~operation
+      ?parent
+      ?target_resource
+      ?source
+      ~result_file_permissions
+      target
+  =
+  match target.root_identity with
+  | None ->
+    Error (Allowed_root_identity_unavailable { root = target.root })
+  | Some root_resource ->
+    (match parent with
+     | Some scope ->
+       (match parent_scope_covers_target scope target with
+        | Error _ as error -> error
+        | Ok () ->
+          (match target.lexical_leaf with
+           | None -> Error Target_has_no_lexical_leaf
+           | Some leaf ->
+             Ok
+               { operation
+               ; locator =
+                   { root = target.root
+                   ; root_resource
+                   ; target_components = target.target_components
+                   ; endpoint_components = target.endpoint_components
+                   ; leaf
+                   ; parent
+                   ; target_resource
+                   ; source
+                   }
+               ; result_file_permissions
+               }))
+     | None ->
+       (match target.lexical_leaf with
+        | None -> Error Target_has_no_lexical_leaf
+        | Some leaf ->
+          Ok
+            { operation
+            ; locator =
+                { root = target.root
+                ; root_resource
+                ; target_components = target.target_components
+                ; endpoint_components = target.endpoint_components
+                ; leaf
+                ; parent
+                ; target_resource
+                ; source
+                }
+            ; result_file_permissions
+            }))
+;;
+
+let atomic_replace_projection
+      ~operation
+      ~parent
+      ?source
+      ~result_file_permissions
+      target
+  =
+  match
+    path_effect
+      ~operation
+      ~parent
+      ?source
+      ~result_file_permissions:(Some result_file_permissions)
+      target
+  with
+  | Error _ as error -> error
+  | Ok gate_effect ->
+    let root_resource = gate_effect.locator.root_resource in
+    let parent_components =
+      parent.parent_components @ parent.create_missing_parents
+    in
+    (match
+       Fs_compat.atomic_replace_recovery_target
+         ~allowed_root_path:target.root
+         ~allowed_root_device:root_resource.device
+         ~allowed_root_inode:root_resource.inode
+         ~parent_components
+         ~target_leaf:gate_effect.locator.leaf
+         ~permissions:result_file_permissions
+     with
+     | Error error -> Error (Recovery_target_invalid error)
+     | Ok recovery_target -> Ok { gate_effect; recovery_target })
+;;
+
+let atomic_replace_effect ~parent ~result_file_permissions target =
+  atomic_replace_projection
+    ~operation:Atomic_replace_entry
+    ~parent
+    ~result_file_permissions
+    target
+;;
+
+let patch_then_atomic_replace_effect
+      ~parent
+      ~(source_resource : Eio.File.Stat.t)
+      ~result_file_permissions
+      (target : confined_path)
+  =
+  match target.endpoint_components with
+  | [] -> Error Patch_source_has_no_endpoint
+  | components ->
+    atomic_replace_projection
+      ~operation:Patch_then_atomic_replace_entry
+      ~parent
+      ~source:
+        { components
+        ; resource = resource_identity_of_eio_stat source_resource
+        }
+      ~result_file_permissions
+      target
+;;
+
+let create_entry_exclusive_effect ~parent ~result_file_permissions target =
+  path_effect
+    ~operation:Create_entry_exclusive
+    ~parent
+    ~result_file_permissions:(Some result_file_permissions)
+    target
+;;
+
+let append_pinned_resource_effect target stat =
+  path_effect
+    ~operation:Append_pinned_resource
+    ~target_resource:(resource_identity_of_eio_stat stat)
+    ~result_file_permissions:None
+    target
+;;
+
+let path_effect_operation_to_string = function
+  | Atomic_replace_entry -> "atomic_replace_entry"
+  | Patch_then_atomic_replace_entry -> "patch_then_atomic_replace_entry"
+  | Append_pinned_resource -> "append_pinned_resource"
+  | Create_entry_exclusive -> "create_entry_exclusive"
+;;
+
+let resource_identity_to_yojson identity =
+  `Assoc
+    [ "device", `Intlit (Int64.to_string identity.device)
+    ; "inode", `Intlit (Int64.to_string identity.inode)
+    ]
+;;
+
+let path_effect_to_yojson gate_effect =
+  let parent =
+    match gate_effect.locator.parent with
+    | None -> []
+    | Some parent ->
+      [ ( "parent"
+        , `Assoc
+            [ ( "relative_path"
+              , `String
+                  (relative_path_of_components parent.parent_components) )
+            ; "resource", resource_identity_to_yojson parent.resource
+            ; ( "create_missing_parents"
+              , `List
+                  (List.map
+                     (fun name ->
+                        `Assoc
+                          [ "name", `String name
+                          ; ( "permissions"
+                            , `Int parent.created_directory_permissions )
+                          ])
+                     parent.create_missing_parents) )
+            ] )
+      ]
+  in
+  let target_resource =
+    match gate_effect.locator.target_resource with
+    | None -> []
+    | Some identity ->
+      [ "target_resource", resource_identity_to_yojson identity ]
+  in
+  let source =
+    match gate_effect.locator.source with
+    | None -> []
+    | Some source ->
+      [ ( "source"
+        , `Assoc
+            [ ( "relative_path"
+              , `String (relative_path_of_components source.components) )
+            ; "resource", resource_identity_to_yojson source.resource
+            ] )
+      ]
+  in
+  let result =
+    match gate_effect.result_file_permissions with
+    | None -> []
+    | Some permissions ->
+      [ ( "result"
+        , `Assoc
+            [ "kind", `String "regular_file"
+            ; "permissions", `Int permissions
+            ] )
+      ]
+  in
+  let relative_path =
+    relative_path_of_components gate_effect.locator.target_components
+  in
+  let endpoint_relative_path =
+    relative_path_of_components gate_effect.locator.endpoint_components
+  in
+  `Assoc
+    ([ "operation", `String (path_effect_operation_to_string gate_effect.operation)
+     ; ( "locator"
+       , `Assoc
+           ([ "kind", `String "confined_path"
+            ; "root", `String gate_effect.locator.root
+            ; "root_resource", resource_identity_to_yojson gate_effect.locator.root_resource
+            ; "relative_path", `String relative_path
+            ; "endpoint_relative_path", `String endpoint_relative_path
+            ; "leaf", `String gate_effect.locator.leaf
+            ]
+            @ parent
+            @ target_resource
+            @ source) )
+     ]
+     @ result)
+;;
+
+let normalize_confined_endpoint endpoint candidate =
+  match endpoint with
+  | Follow_referent -> Ok (normalize_path_for_check_stripped candidate)
+  | Lexical_entry ->
+    let candidate = strip_trailing_slashes candidate in
+    let leaf = Filename.basename candidate in
+    if not (valid_child_name leaf)
+    then Error Invalid_lexical_endpoint
+    else
+      let parent = Filename.dirname candidate |> normalize_path_for_check_stripped in
+      Ok (Filename.concat parent leaf |> strip_trailing_slashes)
 ;;
 
 (* Build a sandbox boundary error message that teaches the LLM
@@ -220,123 +632,169 @@ let absolute_allowed_paths_result ~(config : Workspace.config) ~(allowed_paths :
    re-trying the same broken interpretation. See
    [memory/feedback_tool-error-messages-teach-llm.md]. *)
 
-(** Look for a playground-root allowed path (contains ".masc/playground/")
-    and return the first match. Used to suggest a concrete rewrite when the
-    raw path looks like a playground-subdir pattern that was not prepended. *)
-let playground_root_of_allowed (allowed_norms : string list) : string option =
-  List.find_opt
-    (fun p ->
-       let marker = "/" ^ Common.masc_dirname ^ "/playground/" in
-       let mlen = String.length marker in
-       let slen = String.length p in
-       let rec find i =
-         if i + mlen > slen
-         then false
-         else if String.sub p i mlen = marker
-         then true
-         else find (i + 1)
-       in
-       find 0)
-    allowed_norms
-;;
-
-let raw_looks_like_playground_subdir (raw : string) : bool =
-  String.starts_with ~prefix:"repos/" raw
-  || String.starts_with ~prefix:"mind/" raw
-  || raw = "repos"
-  || raw = "mind"
-;;
-
-(** Detect paths that reference .masc/ internal state files (workspace-level
-    state a keeper must reach via [keeper_tasks_list] / [keeper_context_status],
-    not by probing the files: backlog.json, tasks/, etc.). This preserves the
-    #23807 traversal/symlink write-bypass defence.
-
-    The keeper's own working area — [Playground_paths] [.masc/playground/<keeper>/{mind,repos}]
-    — is EXEMPT: it is where keepers clone repos and write drafts, so blocking
-    it (as the pre-#23843 raw match did, catching every [.masc/] prefix) breaks
-    keeper work. [#23843] removed the whole arm to unblock the playground, but
-    that also dropped the internal-state defence. The fix is to keep the arm
-    and narrow the match so only workspace-level state is blocked. *)
-let is_masc_internal_state_path (raw : string) : bool =
-  match split_relative_components raw with
-  | masc_dir :: "playground" :: _ when String.equal masc_dir Common.masc_dirname ->
-    false
-  | masc_dir :: _ when String.equal masc_dir Common.masc_dirname -> true
-  | _ -> false
-;;
-
-let is_masc_internal_state_norm ~(root_norm : string) ~(target_norm : string) : bool =
-  let root_norm = strip_trailing_slashes root_norm in
-  let target_norm = strip_trailing_slashes target_norm in
-  let masc_root = Filename.concat root_norm Common.masc_dirname in
-  let playground_root = Filename.concat masc_root "playground" in
-  let under_masc =
-    target_norm = masc_root
-    || String.starts_with ~prefix:(masc_root ^ "/") target_norm
-  in
-  let under_playground =
-    target_norm = playground_root
-    || String.starts_with ~prefix:(playground_root ^ "/") target_norm
-  in
-  (* Exempt the keeper playground (Playground_paths SSOT); keep the internal-
-     state traversal/symlink defence for everything else under .masc/. *)
-  under_masc && not under_playground
-;;
-
-let resolve_keeper_target_path
+let resolve_keeper_confined_path
       ~(config : Workspace.config)
       ~(allowed_paths : string list)
+      ~(endpoint : confined_path_endpoint)
       ~(raw_path : string)
-  : (string, keeper_path_rejection) result
+  : (confined_path, keeper_path_rejection) result
   =
   let raw = String.trim raw_path in
   if raw = ""
   then Error Path_required
-  else if is_masc_internal_state_path raw
-  then (
-    let rej = Task_state_file_path_blocked { raw } in
-    rejection_to_telemetry rej;
-    Error rej)
   else (
     let root = project_root_of_config config in
     let candidate = if Filename.is_relative raw then Filename.concat root raw else raw in
-    let root_norm = normalize_path_for_check root in
-    let target_norm = normalize_path_for_check candidate in
-    let within_root =
-      target_norm = root_norm || String.starts_with ~prefix:(root_norm ^ "/") target_norm
-    in
-    if not within_root
-    then
-      (* Tier A3 / Cycle 6: do not echo the resolved [target_norm] or
-         [root_norm] absolute paths — both reveal the host sandbox
-         layout to the caller (LLM). Echo only the caller's [raw]
-         input. The "outside_project_root" label is enough for the
-         caller to course-correct without enumerating the host. *)
-      Error (Outside_project_root { raw })
-    else if is_masc_internal_state_norm ~root_norm ~target_norm
-    then (
-      let rej = Task_state_file_path_blocked { raw } in
-      rejection_to_telemetry rej;
-      Error rej)
-    else if allowed_paths = []
-    then Ok candidate
-    else (
-      let allowed_norms =
-        allowed_paths
-        |> List.filter_map (normalize_allowed_path_for_check ~root:root_norm)
-      in
-      let matches_any =
-        List.exists
-          (fun allowed_norm ->
-             target_norm = allowed_norm
-             || String.starts_with ~prefix:(allowed_norm ^ "/") target_norm)
-          allowed_norms
-      in
-      if matches_any
-      then Ok candidate
-      else Error (Outside_sandbox { raw })))
+    match normalize_confined_endpoint endpoint candidate with
+    | Error rejection -> Error rejection
+    | Ok target_norm ->
+      let project_root_norm = normalize_path_for_check_stripped root in
+      (match absolute_path_components project_root_norm with
+       | None ->
+         Error
+           (Invalid_normalized_path_projection { path = project_root_norm })
+       | Some project_root_components ->
+         let allowed_roots =
+           let projected_roots =
+             if allowed_paths = []
+             then [ project_root_norm, project_root_norm ]
+             else List.filter_map (allowed_path_projection ~root) allowed_paths
+           in
+           List.filter_map
+             (fun (capability_path, normalized_path) ->
+                match absolute_path_components normalized_path with
+                | None -> None
+                | Some normalized_components ->
+                  let capability_path =
+                    match
+                      normalize_confined_endpoint Lexical_entry capability_path
+                    with
+                    | Ok lexical_path -> lexical_path
+                    | Error Invalid_lexical_endpoint -> normalized_path
+                    | Error
+                        ( Path_required
+                        | Invalid_normalized_path_projection _
+                        | Allowed_paths_normalized_empty _
+                        | Outside_sandbox _ ) ->
+                      normalized_path
+                  in
+                  let capability_components =
+                    Option.value
+                      ~default:normalized_components
+                      (absolute_path_components capability_path)
+                  in
+                  Some
+                    { normalized_path
+                    ; normalized_components
+                    ; capability_components
+                    })
+             projected_roots
+         in
+         (match allowed_roots with
+          | [] ->
+            Error
+              (Allowed_paths_normalized_empty
+                 { count = List.length allowed_paths })
+          | _ ->
+            (match absolute_path_components target_norm with
+             | None ->
+               Error
+                 (Invalid_normalized_path_projection { path = target_norm })
+             | Some endpoint_absolute ->
+               (match
+                  List.find_map
+                    (fun root_projection ->
+                       relative_components_under
+                         ~root:root_projection.normalized_components
+                         ~target:endpoint_absolute
+                       |> Option.map (fun endpoint_components ->
+                         root_projection, endpoint_components))
+                    allowed_roots
+                with
+                | None -> Error (Outside_sandbox { raw })
+                | Some (root_projection, endpoint_components) ->
+                  if endpoint = Lexical_entry && endpoint_components = []
+                  then Error Invalid_lexical_endpoint
+                  else
+                    let target_components =
+                      match
+                        normalize_confined_endpoint Lexical_entry candidate
+                      with
+                      | Error Invalid_lexical_endpoint -> endpoint_components
+                      | Error
+                          ( Path_required
+                          | Invalid_normalized_path_projection _
+                          | Allowed_paths_normalized_empty _
+                          | Outside_sandbox _ ) ->
+                        endpoint_components
+                      | Ok lexical_norm ->
+                        (match absolute_path_components lexical_norm with
+                         | None -> endpoint_components
+                         | Some lexical_absolute ->
+                           Option.value
+                             ~default:endpoint_components
+                             (relative_components_under
+                                ~root:
+                                  root_projection.normalized_components
+                                ~target:lexical_absolute))
+                    in
+                    let lexical_leaf =
+                      split_last target_components |> Option.map snd
+                    in
+                    let anchor_root, root_relative_path =
+                      match
+                        relative_components_under
+                          ~root:project_root_components
+                          ~target:root_projection.capability_components
+                      with
+                      | Some capability_components ->
+                        ( project_root_norm
+                        , relative_path_of_components capability_components )
+                      | None ->
+                        (match
+                           relative_components_under
+                             ~root:project_root_components
+                             ~target:root_projection.normalized_components
+                         with
+                         | Some root_components ->
+                           ( project_root_norm
+                           , relative_path_of_components root_components )
+                         | None ->
+                           (match
+                              split_last
+                                root_projection.normalized_components.components
+                            with
+                            | None -> root_projection.normalized_path, "."
+                            | Some (_parent_components, leaf) ->
+                              ( Filename.dirname
+                                  root_projection.normalized_path
+                              , leaf )))
+                    in
+                    Ok
+                      { root = root_projection.normalized_path
+                      ; root_identity =
+                          resource_identity_of_unix_path
+                            root_projection.normalized_path
+                      ; anchor_root
+                      ; root_relative_path
+                      ; target_components
+                      ; endpoint_components
+                      ; lexical_leaf
+                      ; host_path = candidate
+                      ; containment_path = target_norm
+                      })))))
 ;;
+
+let resolve_keeper_path_within_allowed_roots ~config ~allowed_paths ~raw_path =
+  resolve_keeper_confined_path
+    ~config
+    ~allowed_paths
+    ~endpoint:Follow_referent
+    ~raw_path
+  |> Result.map confined_host_path
+;;
+
+let resolve_keeper_target_path = resolve_keeper_path_within_allowed_roots
 
 (* Playground path SSOT lives in [Playground_paths] (masc_config). These
    names preserve the historical keeper-facing API. Do not re-implement
@@ -415,121 +873,11 @@ let resolve_keeper_read_path
       ~(raw_path : string)
   : (string, keeper_path_rejection) result
   =
-  let raw = String.trim raw_path in
-  if raw = ""
-  then Error Path_required
-  else if not (Filename.is_relative raw)
-  then (
-    (* #10349 follow-up: absolute paths bypass the sandbox-relative
-       contract and let the LLM observe host filesystem layout.
-       Reject at the gate; the keeper should use sandbox-relative
-       paths such as 'repos/X/lib/foo.ml'. *)
-    let rej = Absolute_path_rejected { raw } in
-    rejection_to_telemetry rej;
-    Error rej)
-  else if is_masc_internal_state_path raw
-  then (
-    (* Block direct access to .masc/ internal state files.
-       Keepers should use keeper_tasks_list / keeper_context_status
-       instead of probing .masc/backlog.json, .masc/tasks/, etc. *)
-    let rej = Task_state_file_path_blocked { raw } in
-    rejection_to_telemetry rej;
-    Error rej)
-  else (
-    let root = project_root_of_config config in
-    let candidate = Filename.concat root raw in
-    let root_norm = normalize_path_for_check root in
-    let target_norm = normalize_path_for_check candidate in
-    let within_root =
-      target_norm = root_norm || String.starts_with ~prefix:(root_norm ^ "/") target_norm
-    in
-    if not within_root
-    then
-      (* Tier A3 / Cycle 6: do not echo the resolved [target_norm] or
-         [root_norm] absolute paths — both reveal the host sandbox
-         layout to the caller (LLM). Echo only the caller's [raw]
-         input. The "outside_project_root" label is enough for the
-         caller to course-correct without enumerating the host. *)
-      Error (Outside_project_root { raw })
-    else if is_masc_internal_state_norm ~root_norm ~target_norm
-    then (
-      let rej = Task_state_file_path_blocked { raw } in
-      rejection_to_telemetry rej;
-      Error rej)
-    else (
-      let allowed_norms =
-        if allowed_paths = []
-        then []
-        else
-          allowed_paths
-          |> List.filter_map (normalize_allowed_path_for_check ~root:root_norm)
-      in
-      if allowed_paths <> [] && allowed_norms = []
-      then
-        (* Tier A3 / Cycle 6: redact the raw [allowed_paths] list. *)
-        Error (Allowed_paths_normalized_empty { count = List.length allowed_paths })
-      else (
-        let within_allowed =
-          allowed_norms = [] || is_within_allowed_norms ~target_norm allowed_norms
-        in
-        let search_roots = if allowed_norms = [] then [ root_norm ] else allowed_norms in
-        let reject_outside_sandbox () =
-          let rej = Outside_sandbox { raw } in
-          rejection_to_telemetry rej;
-          Error rej
-        in
-        if not within_allowed
-        then
-          if Filename.is_relative raw
-          then (
-            match
-              maybe_resolve_missing_relative_read_path ~roots:search_roots ~raw_path:raw
-            with
-            | Ok (Some resolved) -> Ok resolved
-            | Ok None -> reject_outside_sandbox ()
-            | Error e -> Error e)
-          else reject_outside_sandbox ()
-        else if path_exists candidate || allows_missing_leaf_read ~raw ~candidate
-        then Ok candidate
-        else if Filename.is_relative raw
-        then (
-          match
-            maybe_resolve_missing_relative_read_path ~roots:search_roots ~raw_path:raw
-          with
-          | Ok (Some resolved) -> Ok resolved
-          | Ok None ->
-            (* #10349: keep the rejection signal in the
-                Otel_metric_store counter; do NOT echo the resolved
-                roots back to the LLM.  When keeper identity
-                drifts (turn 433 evidence), the roots can
-                belong to a sibling sandbox, leaking its
-                directory layout to the wrong keeper. *)
-            let rej = Not_found_relative { raw } in
-            rejection_to_telemetry rej;
-            Error rej
-          | Error e -> Error e)
-        else (
-          let rej = Outside_sandbox { raw } in
-          rejection_to_telemetry rej;
-          Error rej))))
+  resolve_keeper_path_within_allowed_roots ~config ~allowed_paths ~raw_path
 ;;
 
 let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =
-  let sem = Masc_exec.Exit_code.of_process_status st in
-  let base =
-    match st with
-    | Unix.WEXITED 124 ->
-      (* Process_eio returns exit code 124 on Eio.Time.Timeout *)
-      [ "kind", `String "timeout" ]
-    | Unix.WEXITED _code -> [ "kind", `String "exit"; "code", `Int sem.code ]
-    | Unix.WSIGNALED sig_num when sig_num = Sys.sigterm -> [ "kind", `String "timeout" ]
-    | Unix.WSIGNALED sig_num -> [ "kind", `String "signaled"; "signal", `Int sig_num ]
-    | Unix.WSTOPPED sig_num -> [ "kind", `String "stopped"; "signal", `Int sig_num ]
-  in
-  let with_label = ("label", `String sem.label) :: base in
-  if sem.hint = ""
-  then `Assoc with_label
-  else `Assoc (("hint", `String sem.hint) :: with_label)
+  Exec_core.process_status_to_json st
 ;;
 
 let extract_user_messages (ctx_work : Keeper_types.working_context) : string list =

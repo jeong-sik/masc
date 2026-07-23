@@ -15,6 +15,44 @@ module SMap = Set_util.StringMap
 
 exception Flock_timeout of { caller : string; path : string; attempts : int }
 
+type durable_lock_phase =
+  | Open_lock_file
+  | Acquire_process_lock
+  | Release_process_lock
+
+type unix_failure =
+  { error : Unix.error
+  ; operation : string
+  ; argument : string
+  }
+
+type durable_lock_error =
+  { lock_path : string
+  ; phase : durable_lock_phase
+  ; cause : unix_failure
+  ; cleanup_failure : unix_failure option
+  }
+
+let durable_lock_phase_to_string = function
+  | Open_lock_file -> "open_lock_file"
+  | Acquire_process_lock -> "acquire_process_lock"
+  | Release_process_lock -> "release_process_lock"
+
+let durable_lock_error_to_string error =
+  let failure_to_string failure =
+    Printf.sprintf "%s(%s): %s"
+      failure.operation
+      failure.argument
+      (Unix.error_message failure.error)
+  in
+  Printf.sprintf "lock_path=%s phase=%s cause=%s%s"
+    error.lock_path
+    (durable_lock_phase_to_string error.phase)
+    (failure_to_string error.cause)
+    (match error.cleanup_failure with
+     | None -> ""
+     | Some failure -> " cleanup=" ^ failure_to_string failure)
+
 (** Observability hook fired after each [acquire_flock_retry*] attempt
     sequence completes — once on success, once on timeout.  Wired at
     startup ([lib/workspace.ml]) to a Otel_metric_store counter + histogram so
@@ -65,16 +103,18 @@ let rec atomic_update atomic f =
 
 let rec atomic_update_with_result atomic f =
   let old_val = Atomic.get atomic in
-  let new_val, result = f old_val in
+  let new_val, result, rollback = f old_val in
   if Atomic.compare_and_set atomic old_val new_val then result
   else begin
+    rollback ();
     observe_cas_retry ();
     atomic_update_with_result atomic f
   end
 
 type lock_entry = {
   mu : Eio.Mutex.t;
-  mutable last_used : float;
+  cross_context_mu : Stdlib.Mutex.t;
+  last_used : float Atomic.t;
   active : int Atomic.t;   (** Number of fibers currently holding or waiting on this mutex *)
 }
 
@@ -101,7 +141,8 @@ let prune_stale_entries () =
     if SMap.cardinal state.entries > max_lock_entries then
       let now = Time_compat.now () in
       let entries = SMap.filter (fun _path entry ->
-        Atomic.get entry.active > 0 || now -. entry.last_used <= stale_lock_seconds
+        Atomic.get entry.active > 0
+        || now -. Atomic.get entry.last_used <= stale_lock_seconds
       ) state.entries in
       publish_entries state entries
     else state
@@ -109,23 +150,30 @@ let prune_stale_entries () =
 
 (** Get or create a lock entry for the given file path.
     Increments [active] to prevent prune_stale_entries from removing
-    in-use entries (see TLA+ FileLockStarvation spec).
-    Falls back to direct Hashtbl access when no Eio context is available
-    (e.g. in unit tests that don't use Eio_main.run). *)
+    in-use entries (see TLA+ FileLockStarvation spec). *)
 let get_entry path =
   prune_stale_entries ();
   let entry =
     atomic_update_with_result table (fun state ->
       match SMap.find_opt path state.entries with
       | Some entry ->
-        entry.last_used <- Time_compat.now ();
-        (state, entry)
+        (* Publish a new version so a stale prune CAS cannot erase this reservation. *)
+        Atomic.set entry.last_used (Time_compat.now ());
+        Atomic.incr entry.active;
+        ( { state with version = state.version + 1 }
+        , entry
+        , fun () -> ignore (Atomic.fetch_and_add entry.active (-1)) )
       | None ->
-        let entry = { mu = Eio.Mutex.create (); last_used = Time_compat.now (); active = Atomic.make 0 } in
+        let entry =
+          { mu = Eio.Mutex.create ()
+          ; cross_context_mu = Stdlib.Mutex.create ()
+          ; last_used = Atomic.make (Time_compat.now ())
+          ; active = Atomic.make 1
+          }
+        in
         let entries = SMap.add path entry state.entries in
-        (publish_entries state entries, entry))
+        (publish_entries state entries, entry, Fun.id))
   in
-  Atomic.incr entry.active;
   entry
 
 let release_entry entry =
@@ -225,14 +273,31 @@ let release_flock_fd fd =
       (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
       Unix.close fd)
 
-(** Run [f] while holding only the cooperative per-path mutex.
+let rec lock_cross_context_cooperatively mutex =
+  if Stdlib.Mutex.try_lock mutex
+  then ()
+  else (
+    Eio.Fiber.yield ();
+    lock_cross_context_cooperatively mutex)
+
+let with_entry_lock entry f =
+  match Eio_guard.execution_context () with
+  | Eio_guard.Non_eio -> Stdlib.Mutex.protect entry.cross_context_mu f
+  | Eio_guard.Eio_fiber ->
+    Eio.Mutex.use_ro entry.mu (fun () ->
+      lock_cross_context_cooperatively entry.cross_context_mu;
+      Fun.protect
+        ~finally:(fun () -> Stdlib.Mutex.unlock entry.cross_context_mu)
+        f)
+
+(** Run [f] while holding only the cross-context per-path mutex.
     Use this for in-memory backends that need single-process fiber
     serialization but do not have a real filesystem artifact to flock. *)
 let with_mutex path f =
   let entry = get_entry path in
   Common.protect ~module_name:"file_lock_eio" ~finally_label:"release_entry"
     ~finally:(fun () -> release_entry entry)
-    (fun () -> Eio_guard.with_mutex entry.mu f)
+    (fun () -> with_entry_lock entry f)
 
 (** Run [f] while holding both the cooperative Eio.Mutex and an
     OS-level flock on [path].lock. The flock uses non-blocking F_TLOCK
@@ -250,6 +315,204 @@ let with_lock ?clock path f =
       f
   in
   with_mutex path (fun () -> run_with_flock ())
+
+let unix_failure (error, operation, argument) =
+  { error; operation; argument }
+
+let close_fd_result fd =
+  try
+    run_blocking_lock_op (fun () -> Unix.close fd);
+    Ok ()
+  with
+  | Unix.Unix_error (error, operation, argument) ->
+    Error (unix_failure (error, operation, argument))
+
+let release_durable_fd_result fd =
+  let unlock =
+    try
+      run_blocking_lock_op (fun () -> Unix.lockf fd Unix.F_ULOCK 0);
+      Ok ()
+    with
+    | Unix.Unix_error (error, operation, argument) ->
+      Error (unix_failure (error, operation, argument))
+  in
+  let close = close_fd_result fd in
+  match unlock, close with
+  | Ok (), Ok () -> Ok ()
+  | Error cause, Ok ()
+  | Ok (), Error cause -> Error (cause, None)
+  | Error cause, Error cleanup_failure -> Error (cause, Some cleanup_failure)
+
+let protect_cleanup execution_context f =
+  match execution_context with
+  | Eio_guard.Eio_fiber -> Eio.Cancel.protect f
+  | Eio_guard.Non_eio -> f ()
+
+let close_fd_after_exception ~lock_path execution_context fd =
+  match protect_cleanup execution_context (fun () -> close_fd_result fd) with
+  | Ok () -> ()
+  | Error failure ->
+    Log.Misc.error
+      "file_lock_eio: fd cleanup failed lock_path=%s operation=%s argument=%s error=%s"
+      lock_path failure.operation failure.argument
+      (Unix.error_message failure.error)
+
+let release_fd_after_exception ~lock_path execution_context fd =
+  match
+    protect_cleanup execution_context (fun () -> release_durable_fd_result fd)
+  with
+  | Ok () -> ()
+  | Error (failure, cleanup_failure) ->
+    Log.Misc.error
+      "file_lock_eio: lock cleanup failed lock_path=%s operation=%s argument=%s error=%s%s"
+      lock_path failure.operation failure.argument
+      (Unix.error_message failure.error)
+      (match cleanup_failure with
+       | None -> ""
+       | Some cleanup ->
+         Printf.sprintf " cleanup_operation=%s cleanup_argument=%s cleanup_error=%s"
+           cleanup.operation cleanup.argument
+           (Unix.error_message cleanup.error))
+
+let durable_lock_error ?cleanup_failure ~lock_path ~phase cause =
+  { lock_path; phase; cause; cleanup_failure }
+
+let open_durable_lock_file ~execution_context lock_path =
+  let opened_fd = Atomic.make None in
+  let result =
+    try
+      Ok
+        (run_blocking_lock_op (fun () ->
+           let fd =
+             Unix.openfile lock_path
+               [ Unix.O_CLOEXEC; Unix.O_CREAT; Unix.O_WRONLY ] 0o644
+           in
+           Atomic.set opened_fd (Some fd);
+           fd))
+    with
+    | Unix.Unix_error (error, operation, argument) ->
+      Error (unix_failure (error, operation, argument))
+    | exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      Option.iter
+        (close_fd_after_exception ~lock_path execution_context)
+        (Atomic.exchange opened_fd None);
+      Printexc.raise_with_backtrace exn backtrace
+  in
+  Atomic.set opened_fd None;
+  result
+
+let acquire_durable_flock ~execution_context lock_path =
+  match open_durable_lock_file ~execution_context lock_path with
+  | Error cause ->
+    Error (durable_lock_error ~lock_path ~phase:Open_lock_file cause)
+  | Ok fd ->
+    let started_at = Time_compat.now () in
+    let process_lock_held = Atomic.make false in
+    let rec acquire_eio retries =
+      match
+        try
+          run_blocking_lock_op (fun () -> Unix.lockf fd Unix.F_TLOCK 0);
+          Atomic.set process_lock_held true;
+          Ok true
+        with
+        | Unix.Unix_error ((Unix.EAGAIN | Unix.EACCES), _, _) -> Ok false
+        | Unix.Unix_error (error, operation, argument) ->
+          Error (unix_failure (error, operation, argument))
+      with
+      | Ok true ->
+        Eio.Fiber.check ();
+        observe_lock_attempt ~caller:"File_lock_eio.durable" ~retries
+          ~started_at ~outcome:"acquired";
+        Ok ()
+      | Ok false ->
+        (* POSIX record locks expose no readiness source to Eio. An unbounded
+           F_TLOCK/yield loop is the portable cancellable admission: no
+           timeout, attempt cap, sleep, or backoff policy is invented. *)
+        Eio.Fiber.yield ();
+        acquire_eio (retries + 1)
+      | Error _ as error -> error
+    in
+    let acquire () =
+      match execution_context with
+      | Eio_guard.Eio_fiber ->
+        Eio.Fiber.check ();
+        acquire_eio 0
+      | Eio_guard.Non_eio ->
+        (try
+           Unix.lockf fd Unix.F_LOCK 0;
+           Atomic.set process_lock_held true;
+           Ok ()
+         with
+         | Unix.Unix_error (error, operation, argument) ->
+           Error (unix_failure (error, operation, argument)))
+    in
+    let acquired =
+      match acquire () with
+      | result -> result
+      | exception exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        if Atomic.get process_lock_held
+        then release_fd_after_exception ~lock_path execution_context fd
+        else close_fd_after_exception ~lock_path execution_context fd;
+        Printexc.raise_with_backtrace exn backtrace
+    in
+    (match acquired with
+     | Ok () -> Ok fd
+     | Error cause ->
+       let cleanup_failure =
+         match
+           protect_cleanup execution_context (fun () -> close_fd_result fd)
+         with
+         | Ok () -> None
+         | Error failure -> Some failure
+       in
+       Error
+         (durable_lock_error
+            ?cleanup_failure
+            ~lock_path
+            ~phase:Acquire_process_lock
+            cause))
+
+let with_durable_lock ~lock_path f =
+  with_mutex lock_path (fun () ->
+    let execution_context = Eio_guard.execution_context () in
+    match acquire_durable_flock ~execution_context lock_path with
+    | Error _ as error -> error
+    | Ok fd ->
+      let admitted () =
+        let body =
+          match f () with
+          | value -> `Returned value
+          | exception exn -> `Raised (exn, Printexc.get_raw_backtrace ())
+        in
+        let release = release_durable_fd_result fd in
+        match body, release with
+        | `Returned value, Ok () -> Ok value
+        | `Returned _, Error (cause, cleanup_failure) ->
+          Error
+            (durable_lock_error
+               ?cleanup_failure
+               ~lock_path
+               ~phase:Release_process_lock
+               cause)
+        | `Raised (exn, backtrace), Ok () ->
+          Printexc.raise_with_backtrace exn backtrace
+        | `Raised (exn, backtrace), Error (release_failure, cleanup_failure) ->
+          Log.Misc.error
+            "file_lock_eio: release failed during body exception lock_path=%s operation=%s argument=%s error=%s%s"
+            lock_path release_failure.operation release_failure.argument
+            (Unix.error_message release_failure.error)
+            (match cleanup_failure with
+             | None -> ""
+             | Some cleanup ->
+               Printf.sprintf
+                 " cleanup_operation=%s cleanup_argument=%s cleanup_error=%s"
+                 cleanup.operation cleanup.argument
+                 (Unix.error_message cleanup.error));
+          Printexc.raise_with_backtrace exn backtrace
+      in
+      protect_cleanup execution_context admitted)
 
 (** Number of tracked lock paths (for diagnostics). *)
 let lock_count () = SMap.cardinal (Atomic.get table).entries

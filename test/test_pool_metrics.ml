@@ -1,32 +1,16 @@
 (** RFC-0107 Phase D.4 — Pool_metrics registry regression test.
 
-    Pinned-name + registry-shape checks for the piaf connection pool
-    metrics.  Verifies:
+    Verifies:
 
-    - Five metric name constants stay stable (dashboards pin these names).
     - [register ()] is idempotent and does not raise.
     - [current_snapshot ()] returns [None] before the pool is
       lazy-initialized (no HTTP traffic from the test).
-    - The Otel_metric_store store registers all metric families with the intended
-      counter/gauge type for the OTel observable source.
+    - The observable export source yields no masc_pool_* samples while
+      no pool exists.
 *)
 
 open Alcotest
 module PM = Pool_metrics
-
-let metric_names = [
-  PM.metric_idle_total, "masc_pool_idle_total";
-  PM.metric_inflight_total, "masc_pool_inflight_total";
-  PM.metric_reuse_total, "masc_pool_reuse_total";
-  PM.metric_evict_total, "masc_pool_evict_total";
-  PM.metric_create_total, "masc_pool_create_total";
-]
-
-let test_metric_name_constants () =
-  List.iter
-    (fun (actual, expected) ->
-      check string (Printf.sprintf "metric name %s" expected) expected actual)
-    metric_names
 
 let test_register_idempotent () =
   PM.register ();
@@ -70,9 +54,6 @@ let test_observable_export_absent_without_pool () =
 
 let () =
   run "Pool_metrics" [
-    "name constants", [
-      test_case "metric names stable" `Quick test_metric_name_constants;
-    ];
     "register", [
       test_case "register is idempotent" `Quick test_register_idempotent;
     ];

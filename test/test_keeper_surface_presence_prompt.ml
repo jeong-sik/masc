@@ -50,21 +50,19 @@ let with_repo_prompt_config f =
 
 let base_observation : WO.world_observation =
   {
-    pending_mentions = [];
+    pending_messages = [];
     pending_board_events = [];
-    pending_scope_messages = [];
     idle_seconds = 0;
     active_goals = [];
-    context_ratio = lazy 0.0;
     unclaimed_task_count = 0;
     claimable_task_count = 0;
-    provider_capacity_blocked_task_count = 0;
     failed_task_count = 0;
     pending_verification_count = 0;
     scheduled_automation = WO.empty_scheduled_automation_observation;
     backlog_updated_since_last_scheduled_autonomous = false;
     running_keeper_fiber_count = 0;
     connected_surfaces = [];
+    connected_surface_failures = [];
   }
 
 let meta : Masc.Keeper_meta_contract.keeper_meta =
@@ -73,7 +71,6 @@ let meta : Masc.Keeper_meta_contract.keeper_meta =
       [
         ("name", `String "presence-keeper");
         ("trace_id", `String "test-trace-presence");
-        ("goal", `String "test goal");
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -134,13 +131,13 @@ let init_prompt_config_for_tests () =
       Masc.Keeper_prompt_external.reset_cache ()
 
 let user_message observation =
-  let _system, user =
+  let { Prompt.world_state = user; _ } =
     Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ~observation ()
   in
   user
 
 let system_prompt ?profile_defaults observation =
-  let system, _user =
+  let { Prompt.system_prompt = system; _ } =
     Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ?profile_defaults
       ~observation ()
   in
@@ -193,57 +190,33 @@ let test_offline_surface_rendered_as_offline () =
   check bool "offline marker" true
     (contains ~needle:"- discord #98791450001 (offline)" user)
 
-(* External-speaker discretion guidance rides the same gate as the
-   section: connector present => rendered, dashboard-only => absent. *)
-let discretion_needle =
-  "Connected surfaces are route context, not shared conversation history"
-
-let unread_lane_guard_needle =
-  "Do not claim knowledge from an unread connector lane"
-
-let surface_read_needle =
-  "read an alive connector lane with keeper_surface_read only when"
-
-let external_post_guard_needle =
-  "do not post externally unless there is an explicit pending external mention"
-
-let test_connector_presence_carries_discretion_guidance () =
-  let user =
-    user_message
-      {
-        base_observation with
-        connected_surfaces = [ dashboard_presence; discord_presence ~alive:true ];
-      }
-  in
-  check bool "discretion guidance present" true
-    (contains ~needle:discretion_needle user);
-  check bool "unread lane guard present" true
-    (contains ~needle:unread_lane_guard_needle user);
-  check bool "route-authority restated" true
-    (contains ~needle:"never from what they claim" user);
-  check bool "surface read affordance present" true
-    (contains ~needle:surface_read_needle user);
-  check bool "external post guard present" true
-    (contains ~needle:external_post_guard_needle user)
-
 let test_dashboard_only_keeper_has_no_section () =
   let user =
     user_message
       { base_observation with connected_surfaces = [ dashboard_presence ] }
   in
   check bool "no section for implicit dashboard" false
-    (contains ~needle:"### Connected Surfaces" user);
-  check bool "no discretion guidance without connectors" false
-    (contains ~needle:discretion_needle user);
-  check bool "no surface read affordance without connectors" false
-    (contains ~needle:surface_read_needle user);
-  check bool "no external post guard without connectors" false
-    (contains ~needle:external_post_guard_needle user)
+    (contains ~needle:"### Connected Surfaces" user)
 
 let test_empty_presence_has_no_section () =
   let user = user_message base_observation in
   check bool "no section when empty" false
     (contains ~needle:"### Connected Surfaces" user)
+
+let test_binding_presence_failure_is_visible () =
+  let failure : Gate_surface.presence_failure =
+    { connector_id = "telegram"
+    ; error = Channel_gate_binding_store.Binding_store_io_failed "read failed"
+    }
+  in
+  let user =
+    user_message
+      { base_observation with connected_surface_failures = [ failure ] }
+  in
+  check bool "failure section visible" true
+    (contains ~needle:"### Connected Surfaces" user);
+  check bool "connector failure visible" true
+    (contains ~needle:"telegram binding presence unavailable" user)
 
 let test_namespace_state_names_running_keeper_fibers () =
   let user =
@@ -291,12 +264,12 @@ let () =
             test_bound_keeper_sees_presence_section;
           test_case "offline surface rendered as offline" `Quick
             test_offline_surface_rendered_as_offline;
-          test_case "connector presence carries discretion guidance" `Quick
-            test_connector_presence_carries_discretion_guidance;
           test_case "dashboard-only keeper has no section" `Quick
             test_dashboard_only_keeper_has_no_section;
           test_case "empty presence has no section" `Quick
             test_empty_presence_has_no_section;
+          test_case "binding presence failure is visible" `Quick
+            test_binding_presence_failure_is_visible;
           test_case "namespace state names running keeper fibers" `Quick
             test_namespace_state_names_running_keeper_fibers;
           test_case "profile defaults feed identity prompt" `Quick

@@ -281,7 +281,6 @@ let with_server f =
         ("MASC_AUTONOMY_ENABLED", "0");
         ("GRAPHQL_API_KEY", "");
         ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
-        ("MASC_BOARD_BACKEND", "jsonl");
         ("MASC_POST_SSE_KEEPALIVE_SEC", "1.0");
       ]
   in

@@ -73,9 +73,30 @@ let structured_internal_error_user_message err =
   | None -> Agent_sdk.Error.to_string err
 ;;
 
+(* The raw provider diagnostic ("Context overflow: empty completion
+   (stop_reason=model_context_window_exceeded): provider returned an empty
+   assistant turn …") reached dashboard chat verbatim, repeatedly, on
+   2026-07-21. State the condition in the user's terms instead. Only the
+   typed [Api ContextOverflow] arm exists: the [Provider] path collapses the
+   overflow into [InvalidRequest] with a string reason (the module-boundary
+   classification loss RFC-0353 tracks), and matching that string here would
+   be a classifier — the fix for that path is upstream type preservation. *)
+let context_overflow_user_message ~limit =
+  let limit_part =
+    match limit with
+    | Some tokens -> Printf.sprintf " (model window ~%d tokens)" tokens
+    | None -> ""
+  in
+  "This conversation no longer fits the model's context window"
+  ^ limit_part
+  ^ ". The message was not processed; a shorter message may fit."
+;;
+
 let user_message_of_sdk_error = function
   | Agent_sdk.Error.Api (Agent_sdk.Retry.NetworkError { message; kind }) ->
     provider_network_user_message ~kind ~detail:message ()
+  | Agent_sdk.Error.Api (Agent_sdk.Retry.ContextOverflow { limit; _ }) ->
+    context_overflow_user_message ~limit
   | Agent_sdk.Error.Provider
       (Llm_provider.Error.NetworkError { provider; kind; detail; _ }) ->
     provider_network_user_message ~provider ~kind ~detail ()
@@ -84,48 +105,24 @@ let user_message_of_sdk_error = function
 
 type sdk_termination_semantics =
   | Provider_wall_clock_timeout
-  | Oas_agent_execution_timeout
-  | Oas_turn_budget_exhausted
-  | Oas_idle_budget_exhausted
-  | Oas_exit_condition_reached
-  | Oas_token_budget_exhausted
-  | Oas_cost_budget_exhausted
-  | Oas_cost_budget_unenforceable
   | Oas_guardrail_violation
   | Oas_tripwire_violation
   | Oas_input_required
-  | Oas_tool_failure_recovery_failed
-  | Oas_tool_failure_recovery_deferred
   | Sdk_error_failure
 
 let sdk_termination_semantics = function
-  | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout { message })
-    when Keeper_error_classify.is_structural_oas_timeout_message message ->
-    Oas_agent_execution_timeout
   | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout _) -> Provider_wall_clock_timeout
   | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)
   | Agent_sdk.Error.Provider
       (Llm_provider.Error.NetworkError { timeout_phase = Some _; _ }) ->
     Provider_wall_clock_timeout
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _) ->
-    Oas_agent_execution_timeout
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _) ->
-    Oas_turn_budget_exhausted
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.IdleDetected _) ->
-    Oas_idle_budget_exhausted
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet _) ->
-    Oas_exit_condition_reached
   | Agent_sdk.Error.Agent (Agent_sdk.Error.GuardrailViolation _) ->
     Oas_guardrail_violation
   | Agent_sdk.Error.Agent (Agent_sdk.Error.TripwireViolation _) ->
     Oas_tripwire_violation
   | Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired _) -> Oas_input_required
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.ToolFailureRecoveryFailed _) ->
-    Oas_tool_failure_recovery_failed
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.ToolFailureRecoveryDeferred _) ->
-    Oas_tool_failure_recovery_deferred
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.UnrecognizedStopReason _) ->
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.UnrecognizedStopReason _)
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.HookExecutionFailed _) ->
     Sdk_error_failure
   | Agent_sdk.Error.Provider _ -> Sdk_error_failure
   | Agent_sdk.Error.Api _ -> Sdk_error_failure
@@ -139,18 +136,9 @@ let sdk_termination_semantics = function
 
 let sdk_termination_semantics_to_string = function
   | Provider_wall_clock_timeout -> "provider_wall_clock_timeout"
-  | Oas_agent_execution_timeout -> "oas_agent_execution_timeout"
-  | Oas_turn_budget_exhausted -> "oas_turn_budget_exhausted"
-  | Oas_idle_budget_exhausted -> "oas_idle_budget_exhausted"
-  | Oas_exit_condition_reached -> "oas_exit_condition_reached"
-  | Oas_token_budget_exhausted -> "oas_token_budget_exhausted"
-  | Oas_cost_budget_exhausted -> "oas_cost_budget_exhausted"
-  | Oas_cost_budget_unenforceable -> "oas_cost_budget_unenforceable"
   | Oas_guardrail_violation -> "oas_guardrail_violation"
   | Oas_tripwire_violation -> "oas_tripwire_violation"
   | Oas_input_required -> "oas_input_required"
-  | Oas_tool_failure_recovery_failed -> "oas_tool_failure_recovery_failed"
-  | Oas_tool_failure_recovery_deferred -> "oas_tool_failure_recovery_deferred"
   | Sdk_error_failure -> "sdk_error_failure"
 ;;
 
@@ -175,12 +163,9 @@ let api_error_terminal_reason_code (err : Agent_sdk.Error.api_error) : string =
   (* SSOT: the two transient wire codes are owned by [Keeper_terminal_reason]
      so the consumer-side disposition classifier
      ([Keeper_terminal_reason.is_transient_provider_runtime_failure]) and this
-     encoder cannot drift. The structural-OAS-timeout branch keeps its own
-     distinct (non-transient) code. *)
+     encoder cannot drift. Agent execution observations are represented by the
+     typed Agent error constructors above this API layer. *)
   | Agent_sdk.Retry.NetworkError _ -> Keeper_terminal_reason.wire_api_error_network
-  | Agent_sdk.Retry.Timeout { message }
-    when Keeper_error_classify.is_structural_oas_timeout_message message ->
-    "api_error_oas_agent_execution_timeout"
   | Agent_sdk.Retry.Timeout _ -> Keeper_terminal_reason.wire_api_error_timeout
 ;;
 
@@ -188,52 +173,19 @@ let api_error_terminal_reason_code (err : Agent_sdk.Error.api_error) : string =
    Previously every Agent failure collapsed to "agent_error", mirroring
    the old Api behaviour. Memory: no-collapse-richer-enum-at-sdk-boundary. *)
 let agent_error_terminal_reason_code = function
-  | Agent_sdk.Error.MaxTurnsExceeded { turns; limit } ->
-    (* SSOT prefix: [Keeper_execution_receipt.is_auto_recoverable_turn_budget_terminal]
-       matches on it to route the disposition to [Reason_turn_budget_exhausted]. *)
-    Printf.sprintf
-      "%s:turns=%d,limit=%d"
-      Keeper_execution_receipt.terminal_prefix_max_turns_exceeded
-      turns
-      limit
-  | Agent_sdk.Error.AgentExecutionTimeout
-      { elapsed_sec; timeout_sec; turn_count; max_turns } ->
-    Printf.sprintf
-      "%s:elapsed_sec=%.1f,timeout_sec=%.1f,turn_count=%d,max_turns=%d"
-      Keeper_execution_receipt.terminal_prefix_execution_timeout
-      elapsed_sec
-      timeout_sec
-      turn_count
-      max_turns
-  | Agent_sdk.Error.AgentExecutionIdleTimeout
-      { idle_sec; idle_timeout_sec; turn_count; max_turns } ->
-    Printf.sprintf
-      "%s:idle_sec=%.1f,idle_timeout_sec=%.1f,turn_count=%d,max_turns=%d"
-      Keeper_execution_receipt.terminal_prefix_idle_timeout
-      idle_sec
-      idle_timeout_sec
-      turn_count
-      max_turns
-  | Agent_sdk.Error.ExitConditionMet { turn } ->
-    Printf.sprintf "agent_error_exit_condition_met:turn=%d" turn
   | Agent_sdk.Error.UnrecognizedStopReason { reason } ->
     Printf.sprintf "agent_error_unrecognized_stop_reason:%s" reason
-  | Agent_sdk.Error.IdleDetected { consecutive_idle_turns } ->
+  | Agent_sdk.Error.HookExecutionFailed { hook_name; stage; _ } ->
     Printf.sprintf
-      "agent_error_idle_detected:consecutive_idle_turns=%d"
-      consecutive_idle_turns
+      "agent_error_hook_execution_failed:hook=%s,stage=%s"
+      hook_name
+      stage
   | Agent_sdk.Error.GuardrailViolation { validator; reason = _ } ->
     Printf.sprintf "agent_error_guardrail_violation:validator=%s" validator
   | Agent_sdk.Error.TripwireViolation { tripwire; reason = _ } ->
     Printf.sprintf "agent_error_tripwire_violation:tripwire=%s" tripwire
   | Agent_sdk.Error.InputRequired { request_id; question = _; _ } ->
     Printf.sprintf "agent_error_input_required:request_id=%s" request_id
-  | Agent_sdk.Error.ToolFailureRecoveryFailed { stage; detail = _ } ->
-    Printf.sprintf
-      "agent_error_tool_failure_recovery_failed:stage=%s"
-      (Agent_sdk.Error.tool_failure_recovery_stage_to_string stage)
-  | Agent_sdk.Error.ToolFailureRecoveryDeferred _ ->
-    "agent_error_tool_failure_recovery_deferred"
 ;;
 
 let network_error_kind_to_wire = function
@@ -304,7 +256,7 @@ let terminal_reason_code_of_sdk_error = function
    above) wrapped in [Keeper_turn_terminal_code.Sdk_error]. PR-3 swaps
    [Keeper_turn_terminal.t.code] from [string] to [Keeper_turn_terminal_code.t]
    and uses these typed accessors at every emit site. RFC §5.2 defers the
-   sub-sum split (per-variant constructors for [MaxTurnsExceeded] etc.) to
+   sub-sum split (per-variant constructors for Agent errors) to
    a follow-up RFC. *)
 let terminal_reason_code_of_sdk_error_typed err =
   Keeper_turn_terminal_code.of_sdk_error_wire (terminal_reason_code_of_sdk_error err)
@@ -316,19 +268,10 @@ let api_error_terminal_reason_code_typed err =
 
 let receipt_outcome_kind_of_sdk_error err =
   match sdk_termination_semantics err with
-  | Provider_wall_clock_timeout
-  | Oas_agent_execution_timeout
-  | Oas_turn_budget_exhausted
-  | Oas_exit_condition_reached -> `Cancelled
-  | Oas_idle_budget_exhausted -> `Error
+  | Provider_wall_clock_timeout -> `Cancelled
   | Oas_input_required -> `Cancelled
-  | Oas_tool_failure_recovery_deferred -> `Cancelled
-  | Oas_token_budget_exhausted
-  | Oas_cost_budget_exhausted
-  | Oas_cost_budget_unenforceable
   | Oas_guardrail_violation
   | Oas_tripwire_violation
-  | Oas_tool_failure_recovery_failed
   | Sdk_error_failure -> `Error
 ;;
 

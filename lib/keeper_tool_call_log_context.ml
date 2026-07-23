@@ -23,7 +23,6 @@ type turn_context =
   ; sandbox_root : string option
   ; allowed_paths : string list option
   ; network_mode : string option
-  ; approval_mode : string option
   ; runtime_profile : string option
   }
 
@@ -45,7 +44,6 @@ let empty_turn_context =
   ; sandbox_root = None
   ; allowed_paths = None
   ; network_mode = None
-  ; approval_mode = None
   ; runtime_profile = None
   }
 ;;
@@ -73,7 +71,6 @@ let set_turn_context
       ?sandbox_root
       ?allowed_paths
       ?network_mode
-      ?approval_mode
       ?runtime_profile
       ()
   =
@@ -95,7 +92,6 @@ let set_turn_context
      ; sandbox_root
      ; allowed_paths
      ; network_mode
-     ; approval_mode
      ; runtime_profile
      }
 ;;
@@ -116,8 +112,7 @@ let get_turn_context ~cell () =
   , ctx.task_id
   , ctx.goal_ids
   , ctx.sandbox_profile
-  , ctx.network_mode
-  , ctx.approval_mode )
+  , ctx.network_mode )
 ;;
 
 let runtime_observability_contract_json_for_call ~keeper_name ~cell () =
@@ -135,7 +130,6 @@ let runtime_observability_contract_json_for_call ~keeper_name ~cell () =
     ?sandbox_root:ctx.sandbox_root
     ?allowed_paths:ctx.allowed_paths
     ?network_mode:ctx.network_mode
-    ?approval_mode:ctx.approval_mode
     ?runtime_profile:ctx.runtime_profile
     ()
 ;;

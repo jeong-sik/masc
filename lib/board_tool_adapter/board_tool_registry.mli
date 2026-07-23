@@ -6,7 +6,6 @@ type operation_policy =
   { visibility : Tool_catalog.visibility
   ; readonly : bool
   ; idempotent : bool
-  ; destructive : bool
   }
 
 val operation_policy : Tool_name.Board_name.t -> operation_policy

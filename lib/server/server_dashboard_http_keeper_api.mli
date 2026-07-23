@@ -14,7 +14,6 @@ module Http = Http_server_eio
 val keeper_api_prefix : string
 (** [/api/v1/keepers/] common prefix for every route below. *)
 
-val keeper_suffix_tools : string
 val keeper_suffix_config : string
 val keeper_suffix_secrets : string
 val keeper_suffix_boot : string
@@ -24,15 +23,13 @@ val keeper_suffix_clear : string
 val keeper_suffix_checkpoints : string
 val keeper_suffix_runtime_trace : string
 val keeper_suffix_directive : string
+val keeper_suffix_paused_work : string
 
 (** {1 Trajectory merge}
 
     The dashboard merges the on-disk turn trajectory with internal-history
     lines (per-turn snapshots from the keeper subprocess) so the operator
     sees both LLM messages and structural events in one feed. *)
-
-val dedupe_tool_names : string list -> string list
-(** Stable dedup preserving first occurrence. *)
 
 val trajectory_line_ts : Trajectory.trajectory_line -> float
 (** Extract the timestamp used as the merge key. *)
@@ -60,22 +57,24 @@ val merge_keeper_trace_lines :
 (** Merge [trajectory_lines] with the internal-history file in
     timestamp order, applying [dedupe_thinking_lines]. *)
 
-(** {1 Tools route} *)
-
-val keeper_tools_response_json :
-  Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
-(** JSON shape returned by [GET /tools]. *)
-
-val handle_keeper_tools_post :
-  Mcp_server.server_state ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Handle [POST /tools] (tool-grant edits). *)
-
 val handle_keeper_catchup_judge_post :
   Mcp_server.server_state ->
   Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 (** Handle [POST /catchup-judge] by recomputing the keeper catch-up digest
     and starting an out-of-band Fusion judge run. *)
+
+val handle_keeper_chat_recovery_post :
+  Mcp_server.server_state ->
+  string ->
+  Httpun.Request.t ->
+  Httpun.Reqd.t ->
+  keeper_name:string ->
+  raw_receipt_id:string ->
+  string ->
+  unit
+(** Resolve exactly one recovery-required chat receipt using the caller's
+    revision and lease evidence. The route is wired only behind token-bound
+    [CanAdmin] authorization. *)
 
 (** {1 POST route classifier}
 
@@ -194,28 +193,38 @@ val handle_keeper_lifecycle_post :
   action:String.t ->
   Mcp_server.server_state ->
   string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Generic handler for boot / shutdown / reset / clear posts; the
-    [action] parameter selects the keeper FSM event. *)
+(** Generic handler for boot / shutdown / reset / clear posts. Boot does not
+    resume an ordinary paused owner; callers must commit [Resume_owner] through
+    the directive endpoint. Dead-tombstone revival remains separate. *)
 
 val handle_keeper_directive_post :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->
   Mcp_server.server_state ->
   string -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
-(** Handle [POST /directive] (operator directive injection). *)
+(** Handle [POST /directive] (operator directive injection). A resume body
+    must carry [owner_generation] and a stable [operator_operation_id], and is
+    committed through the typed paused-work disposition transaction. *)
+
+val handle_keeper_paused_work_post :
+  Mcp_server.server_state ->
+  Httpun.Request.t ->
+  Httpun.Reqd.t ->
+  string ->
+  unit
+(** Handle authenticated [POST /paused-work] for exact Resume, Transfer,
+    Cancel, or source-terminal disposition. *)
 
 val handle_keeper_bulk_directive_post :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->
   Mcp_server.server_state ->
   string -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
-(** Handle [POST /api/v1/keepers_bulk/directive]. Body:
-    [{"names": [...], "action": "pause"|"resume"|"wakeup"}]. Runs the
-    same per-keeper meta read / persist / dispatch path as
-    [handle_keeper_directive_post], but issues a single cache invalidate
-    for the whole batch. Trades per-keeper observability granularity for
-    bulk performance: a fleet-wide resume is 1 round-trip + 1 rebuild
-    instead of N + N. *)
+(** Handle [POST /api/v1/keepers_bulk/directive]. Pause and wakeup use
+    [{"names": [...]}]. Resume uses exact per-owner
+    [{"targets": [{"name", "owner_generation", "operator_operation_id"}, ...]}]
+    fences and commits each target through the typed paused-work disposition
+    transaction. Cache invalidation runs once for the whole batch. *)
 
 val handle_keeper_get_subroutes :
   Mcp_server.server_state ->
@@ -226,13 +235,6 @@ val handle_keeper_get_subroutes :
 val keeper_chat_receipt_route : string -> (string * string) option
 (** Parse the exact
     [/api/v1/keepers/<name>/chat/receipts/<receipt_id>] read route. *)
-
-val keeper_chat_receipt_json :
-  keeper_name:string ->
-  revision:int64 ->
-  Keeper_chat_queue.receipt_view ->
-  Yojson.Safe.t
-(** Read-only typed receipt projection returned by the route above. *)
 
 (** {1 Memory-OS dashboard JSON} *)
 

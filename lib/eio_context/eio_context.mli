@@ -29,6 +29,12 @@ val get_root_switch_opt : unit -> Eio.Switch.t option
     turn-scoped binding. Use only for work that must survive a single
     keeper turn, such as queued background voice playback. *)
 
+val root_switch_on_current_domain : unit -> bool
+(** [true] iff a root switch is installed and the caller is running on the
+    domain that installed it. Eio root-switch fork sites reachable from worker
+    domains must check this exact ownership boundary before forking. This guard
+    does not transfer work to the owner domain. *)
+
 val set_env : Eio_unix.Stdenv.base -> unit
 (** Set the global Eio standard environment.  Required by long-lived
     consumers that need more than [net]/[clock] (e.g. piaf

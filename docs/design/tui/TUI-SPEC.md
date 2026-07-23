@@ -95,7 +95,7 @@ type surface =
 | board comments | `.masc/board_comments.jsonl` |
 | board votes | `.masc/board_votes.jsonl` |
 | board sub-boards | `.masc/board_sub_boards.jsonl` |
-| governance judgments | `.masc/governance/judgments/YYYY-MM/DD.jsonl` |
+| Gate decisions | `.masc/gates/decisions/YYYY-MM/DD.jsonl` |
 | system logs | `.masc/logs/*.log` (또는 stdout redirect) |
 
 ### 3.2 HTTP API (신규 통합)

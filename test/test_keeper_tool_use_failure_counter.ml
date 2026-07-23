@@ -17,7 +17,7 @@ let counter_for ~keeper ~tool =
 let test_metric_name_matches_convention () =
   (* Otel_metric_store _total suffix + masc_ prefix follow the existing
      counter naming in keeper_hooks_oas.  A rename would break
-     dashboards and #9880 governance readers. *)
+     dashboards and historical aggregate readers. *)
   Alcotest.(check string)
     "tool_use_failure counter uses canonical masc_*_total name"
     "masc_keeper_tool_use_failure_total"

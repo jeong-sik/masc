@@ -2,7 +2,6 @@
 status: runbook
 last_verified: 2026-06-11
 code_refs:
-  - lib/exec/exec_semantic.ml
   - lib/exec/exec_buffer.ml
   - lib/exec_core.ml
   - lib/exec/exec_dispatch.ml
@@ -16,8 +15,8 @@ code_refs:
 # Execute Runbook
 
 This runbook documents the current operator surface for `Execute` and
-adjacent structured shell routing. Execute is typed-only: callers provide
-`executable`/`argv` or `pipeline`. Raw command strings and the old
+adjacent structured process routing. Execute is typed-only: callers provide
+one non-empty `argv` process vector or `pipeline`. Raw command strings and the old
 background task lifecycle are not part of the callable surface.
 
 ## Related Documents
@@ -51,14 +50,13 @@ background task lifecycle are not part of the callable surface.
 | --- | --- | --- | --- |
 | `MASC_BASH_SEMANTIC_EXIT` | on | `0`, `false`, `no`, `off` | drops `return_code_interpretation` JSON field |
 | `MASC_BASH_OUTPUT_CAP` | on | none | head+tail truncation; `MASC_BASH_CAP_HEAD` / `MASC_BASH_CAP_TAIL` override per-stream caps |
-| `MASC_BASH_VERIFIABLE_MARKERS` | on | `0`, `false`, `no`, `off` | drops typed `verifiable_markers` from `Cdal_judge` |
 
 ## Typed Input
 
 Single process:
 
 ```json
-{ "executable": "rg", "argv": ["pattern", "lib"], "cwd": "repos/masc" }
+{ "argv": ["rg", "pattern", "lib"], "cwd": "repos/masc" }
 ```
 
 Pipeline:
@@ -66,8 +64,8 @@ Pipeline:
 ```json
 {
   "pipeline": [
-    { "executable": "rg", "argv": ["--files", "lib"] },
-    { "executable": "head", "argv": ["-20"] }
+    { "argv": ["rg", "--files", "lib"] },
+    { "argv": ["head", "-20"] }
   ],
   "cwd": "repos/masc"
 }

@@ -35,9 +35,9 @@ include Keeper_heartbeat_loop
 
 module StringMap = Set_util.StringMap
 
-(* OAS Event_bus — delegated to Keeper_event_bus to avoid dependency cycles. *)
-let set_bus bus = Keeper_event_bus.set bus
-let get_bus () = Keeper_event_bus.get ()
+(* OAS Event_bus — delegated to Event_bus_slots to avoid dependency cycles. *)
+let set_bus bus = Event_bus_slots.set_keeper bus
+let get_bus () = Event_bus_slots.get_keeper ()
 
 (* ── gRPC directive processing ── *)
 
@@ -67,7 +67,11 @@ let persist_directive_meta_update
       ~(updated_meta : keeper_meta)
   : (unit, string) result
   =
-  let keeper_filename = entry.name ^ ".json" in
+  let keeper_filename =
+    Keeper_runtime_root_entry.keeper_basename
+      ~keeper_name:entry.name
+      Keeper_runtime_root_entry.Metadata
+  in
   let masc_root = Workspace_utils.masc_dir_from_base_path ~base_path:entry.base_path in
   let default_path =
     Filename.concat (Filename.concat masc_root "keepers") keeper_filename
@@ -133,34 +137,9 @@ let directive_paused_meta (meta : keeper_meta) paused =
            (Keeper_latched_reason.Operator_paused
               { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive })
        else None);
-    auto_resume_after_sec = None;
     runtime = { meta.runtime with last_blocker = None };
     updated_at = now_iso ();
   }
-;;
-
-let clear_no_progress_loop_for_operator_resume (entry : Keeper_registry.registry_entry) =
-  let previous_failure_reason = entry.last_failure_reason in
-  match
-    Keeper_unified_turn_no_progress.clear_for_operator_resume
-      ~base_path:entry.base_path
-      entry.meta
-  with
-  | Error _ as err -> err
-  | Ok updated_meta ->
-    if updated_meta == entry.meta then Ok updated_meta
-    else (
-      match persist_directive_meta_update entry ~updated_meta with
-      | Ok () -> Ok updated_meta
-      | Error msg ->
-        (* RFC-0303 Phase 3: restore the prior failure_reason on persist failure.
-           The no-progress detector re-latch that used to run here is gone with
-           the retired detector. *)
-        Keeper_registry.set_failure_reason
-          ~base_path:entry.base_path
-          entry.name
-          previous_failure_reason;
-        Error msg)
 ;;
 
 (* Unknown-keeper directives can repeat while boot/crash truth is still
@@ -291,39 +270,7 @@ let set_keeper_paused_state ~agent_name paused =
       log_directive_agent_not_in_registry ~agent_name ~action)
     (fun entry ->
        let previous_failure_reason = entry.last_failure_reason in
-       (* On resume, dropping the no-progress recovery stimulus is a cosmetic
-          cleanup that must NOT gate the authoritative unpause. A disk failure in
-          [clear_no_progress_loop_for_operator_resume] used to short-circuit the
-          resume and leave the keeper paused forever: no_progress pause is
-          [Manual_resume_required], so there is no other recovery path. Run it
-          best-effort and always fall through to the paused-state write below;
-          the authoritative [persist_directive_meta_update] stays fail-closed.
-          KLV-2 / RFC-0152. *)
-       let directive_source_meta =
-         if paused then entry.meta
-         else (
-           match clear_no_progress_loop_for_operator_resume entry with
-           | Ok cleared_meta -> cleared_meta
-           | Error err ->
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string DirectiveFailures)
-               ~labels:[ "keeper", entry.name; "site", "no_progress_resume_clear" ]
-               ();
-             Log.Keeper.warn
-               "directive resume: best-effort no_progress clear failed for %s; \
-                proceeding with unpause: %s"
-               entry.name
-               err;
-             entry.meta)
-       in
-       let cleared_completion_contract =
-         if paused then directive_source_meta
-       else
-         Keeper_unified_turn_completion_contract.clear_for_operator_resume
-           ~base_path:entry.base_path
-           directive_source_meta
-       in
-       let updated_meta = directive_paused_meta cleared_completion_contract paused in
+       let updated_meta = directive_paused_meta entry.meta paused in
        (match persist_directive_meta_update entry ~updated_meta with
         | Error err ->
           Keeper_registry.set_failure_reason
@@ -349,9 +296,6 @@ let set_keeper_paused_state ~agent_name paused =
              else Keeper_state_machine.Operator_resume);
           if not paused
           then (
-            Keeper_turn_livelock.reset_keeper_livelock
-              ~base_path:entry.base_path
-              ~keeper:entry.name;
             (* tla-lint: allow-mutation: fiber signal — Atomic flag wakes the keeper from Eio.Promise.await *)
             Atomic.set entry.fiber_wakeup true;
             (* Cycle 43: KeeperHeartbeat.tla WakeupSignal post-condition.
@@ -393,7 +337,7 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
            ~labels:[ "keeper", entry.name; "site", "claim_persist" ]
            ();
          Log.Keeper.error
-           "directive claim: meta persist failed for %s task=%s: %s"
+           "task assignment directive: meta persist failed for %s task=%s: %s"
            entry.name
            task_id_string
            err
@@ -407,119 +351,44 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
          wakeup_keeper ~base_path:entry.base_path entry.name)
 ;;
 
-(** Process a single directive received from a gRPC HeartbeatAck.
-    Directives are string commands: "pause", "resume", "wakeup",
-    "claim:<task_id>". Unknown directives are logged and ignored. *)
+(** Apply one typed control-plane directive.  Parsing belongs to the transport
+    boundary; this domain path cannot receive an unknown command. *)
 let process_directive ~agent_name directive =
   match directive with
-  | "pause" ->
+  | Keeper_directive.Pause ->
     Log.Keeper.emit
       Log.Info
       ~category:Log.Directive
       ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "pause" ])
       (Printf.sprintf "directive: pausing keeper %s" agent_name);
     set_keeper_paused_state ~agent_name true
-  | "resume" ->
+  | Keeper_directive.Wakeup ->
+    (* Wakeup is only a scheduling signal. It must never clear an operator
+       pause: paused-work disposition belongs to the receipt-first
+       [Resume_owner] transaction. Lifecycle admission keeps a paused lane
+       parked until that transaction commits. *)
+    Log.Keeper.emit
+      Log.Debug
+      ~category:Log.Directive
+      ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "wakeup" ])
+      (Printf.sprintf "directive: waking up %s" agent_name);
+    wakeup_keeper_by_agent_name ~agent_name
+  | Keeper_directive.Assign_task task_id ->
+    let task_id_string = Keeper_id.Task_id.to_string task_id in
     Log.Keeper.emit
       Log.Info
       ~category:Log.Directive
-      ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "resume" ])
-      (Printf.sprintf "directive: resuming keeper %s" agent_name);
-    set_keeper_paused_state ~agent_name false
-  | "wakeup" ->
-    (* Auto-resume on wakeup: dashboard "깨우기" surfaces a single button,
-       but auto-pause (stale_fleet_batch / turn_timeout) silently persists
-       [meta.paused = true]. Without this branch, wakeup signals fiber_wakeup
-       but the heartbeat loop honors paused state and skips — user clicks
-       "깨우기" with no observable effect. Treat wakeup as a superset of
-       resume so paused keepers re-enter the run loop.
-       Also clear any persisted livelock attempt counter regardless of which
-       branch runs: older turn-livelock blocks only recorded a `pause_human`
-       receipt, and current blocks may persist [meta.paused = true] after the
-       guard fires.  In both cases a wakeup should start from a fresh counter
-       instead of immediately re-blocking the same turn. *)
-    let entry_opt = keeper_entry_by_identity_opt agent_name in
-    let entry_paused =
-      match entry_opt with
-      | Some e -> e.meta.paused
-      | None ->
-        (match Keeper_tool_shared_runtime.find_registry_meta
-                 ~keeper_name:agent_name
-                 ~source_layer:"keepalive"
-         with
-         | Some meta -> meta.paused
-         | None -> false)
-    in
-    let clear_wakeup_no_progress_if_needed () =
-      match entry_opt with
-      | None -> true
-      | Some e ->
-        Keeper_turn_livelock.reset_keeper_livelock
-          ~base_path:e.base_path
-          ~keeper:e.name;
-        (match clear_no_progress_loop_for_operator_resume e with
-         | Ok (_ : keeper_meta) -> true
-         | Error err ->
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string DirectiveFailures)
-             ~labels:
-               [ "keeper", e.name; "site", "no_progress_resume_clear" ]
-             ();
-           Log.Keeper.error
-             "directive wakeup: no_progress clear failed for %s: %s"
-             e.name
-           err;
-           false)
-    in
-    if entry_paused
-    then (
-      Log.Keeper.emit
-        Log.Info
-        ~category:Log.Directive
-        ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "wakeup_auto_resume" ])
-        (Printf.sprintf "directive: waking up %s (was paused — auto-resuming)" agent_name);
-      set_keeper_paused_state ~agent_name false)
-    else (
-      Log.Keeper.emit
-        Log.Debug
-        ~category:Log.Directive
-        ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "wakeup" ])
-        (Printf.sprintf "directive: waking up %s" agent_name);
-      if clear_wakeup_no_progress_if_needed ()
-      then wakeup_keeper_by_agent_name ~agent_name)
-  | s when String.length s > 6 && String.starts_with s ~prefix:"claim:" ->
-    let task_id = String.sub s 6 (String.length s - 6) in
-    (match Keeper_id.Task_id.of_string task_id with
-     | Ok parsed_task_id ->
-       Log.Keeper.emit
-         Log.Info
-         ~category:Log.Directive
-         ~details:
-           (`Assoc
-             [ "agent_name", `String agent_name
-             ; "action", `String "claim"
-             ; "task_id", `String task_id
-             ])
-         (Printf.sprintf "directive: server assigned task %s to %s" task_id agent_name);
-       assign_keeper_task_from_directive ~agent_name ~task_id:parsed_task_id
-     | Error err ->
-       Log.Keeper.emit
-         Log.Warn
-         ~category:Log.Directive
-         ~details:
-           (`Assoc
-             [ "agent_name", `String agent_name
-             ; "action", `String "claim"
-             ; "task_id", `String task_id
-             ; "error", `String err
-             ])
-         (Printf.sprintf "directive: ignoring invalid task assignment for %s (%s): %s" agent_name task_id err))
-  | unknown ->
-    Log.Keeper.emit
-      Log.Warn
-      ~category:Log.Directive
-      ~details:(`Assoc [ "agent_name", `String agent_name; "directive", `String unknown ])
-      (Printf.sprintf "unknown gRPC directive for %s: %s" agent_name unknown)
+      ~details:
+        (`Assoc
+          [ "agent_name", `String agent_name
+          ; "action", `String "claim"
+          ; "task_id", `String task_id_string
+          ])
+      (Printf.sprintf
+         "directive: server assigned task %s to %s"
+         task_id_string
+         agent_name);
+    assign_keeper_task_from_directive ~agent_name ~task_id
 ;;
 
 (* ── gRPC heartbeat stream ── *)
@@ -811,7 +680,6 @@ type start_keepalive_outcome =
   | Keepalive_already_registered of Keeper_registry.registry_entry
   | Keepalive_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
   | Keepalive_identity_unrepairable
-  | Keepalive_spawn_slot_denied of Keeper_registry.spawn_slot_denial_reason
   | Keepalive_registration_rejected of Keeper_registry.registration_error
   | Keepalive_fiber_start_rejected of Keeper_state_machine.transition_error
   | Keepalive_lane_ownership_lost
@@ -828,8 +696,6 @@ let start_keepalive_outcome_to_string = function
   | Keepalive_lifecycle_denied denial ->
     Keeper_lifecycle_admission.autonomous_denial_to_wire denial
   | Keepalive_identity_unrepairable -> "keeper identity drift could not be repaired"
-  | Keepalive_spawn_slot_denied reason ->
-    Keeper_registry.spawn_slot_denial_reason_to_detail reason
   | Keepalive_registration_rejected
       (Keeper_registry.Registration_shutdown_reserved operation_id) ->
     Printf.sprintf
@@ -941,8 +807,7 @@ let start_keepalive
       | Keeper_state_machine.HandingOff
       | Keeper_state_machine.Draining
       | Keeper_state_machine.Crashed
-      | Keeper_state_machine.Dead
-      | Keeper_state_machine.Zombie -> finished
+      | Keeper_state_machine.Dead -> finished
       | Keeper_state_machine.Running
       | Keeper_state_machine.Paused
       | Keeper_state_machine.Restarting
@@ -988,20 +853,6 @@ let start_keepalive
         (Printf.sprintf "start_keepalive: skipped %s (already registered)" m.name);
       Keepalive_already_registered registered
     | None ->
-      match Keeper_registry.spawn_slots_decision () with
-      | Error reason ->
-        Keeper_registry.record_spawn_slot_denied ~keeper_name:m.name ~surface:"keepalive" reason;
-        publish_keeper_lifecycle
-          ~event:
-            (Keeper_lifecycle_events.Custom_event
-               { verb = Keeper_lifecycle_events.Admission_denied
-               ; phase = Some Keeper_state_machine.Offline
-               })
-          ~keeper_name:m.name
-          ~detail:(Keeper_registry.spawn_slot_denial_reason_to_detail reason)
-          ();
-        Keepalive_spawn_slot_denied reason
-      | Ok () ->
       (* Register in Keeper_registry first — single source of truth. *)
       (match
          match lifecycle_token with
@@ -1018,7 +869,7 @@ let start_keepalive
              m
        with
        | Error (Keeper_registry.Registration_shutdown_reserved operation_id) ->
-         Log.Keeper.info
+         Log.Keeper.warn
            "start_keepalive: skipped %s because shutdown operation %s owns admission"
            m.name
            (Keeper_shutdown_types.Operation_id.to_string operation_id);
@@ -1071,7 +922,7 @@ let start_keepalive
            keepalive fiber may fork and [Started]/[Running] must not be
            announced. Resolve the fresh entry through the crash path so the
            supervisor sweep observes a typed outcome and re-queues with the
-           usual backoff/budget instead of leaving a never-resolved entry. *)
+           usual lane-local backoff instead of leaving a never-resolved entry. *)
         let reason =
           Printf.sprintf
             "fiber_start_rejected: %s"
@@ -1167,21 +1018,40 @@ let start_keepalive
                ~detail)
         in
         let record_completed_lane () =
-          match current_failure_reason () with
-          | Some
-              (( Keeper_registry.Stale_turn_timeout _
-               | Keeper_registry.Stale_termination_storm _
-               | Keeper_registry.Stale_fleet_batch _
-               | Keeper_registry.Provider_timeout_loop _ ) as reason) ->
-            record_crash reason
-          | Some _ | None ->
-            record_stopped (if Atomic.get stop then "manual stop" else "normal exit")
+          record_stopped (if Atomic.get stop then "manual stop" else "normal exit")
+        in
+        let record_lane_exception ?backtrace exn =
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string HeartbeatFailures)
+            ~labels:[ "keeper", live_meta.name; "phase", "lane_crash" ]
+            ();
+          Log.Keeper.emit
+            Log.Error
+            ~category:Log.Heartbeat
+            ~details:
+              (`Assoc
+                (("keeper", `String live_meta.name)
+                 :: ("error", `String (Printexc.to_string exn))
+                 :: (match backtrace with
+                     | None -> []
+                     | Some backtrace ->
+                       [ ( "backtrace"
+                         , `String (Printexc.raw_backtrace_to_string backtrace) ) ])))
+            (Printf.sprintf
+               "keeper lane for %s crashed: %s"
+               live_meta.name
+               (Printexc.to_string exn));
+          record_crash (Keeper_registry.Exception (Printexc.to_string exn))
         in
         let terminalize_lane = function
           | Keeper_lane.Completed -> record_completed_lane ()
           | Keeper_lane.Shutdown_before_start ->
             record_stopped "shutdown requested before lane start"
           | Keeper_lane.Shutdown_requested -> record_stopped "shutdown requested"
+          | Keeper_lane.Shutdown_cancel_failed failure ->
+            record_lane_exception
+              ~backtrace:failure.backtrace
+              failure.cause
           | Keeper_lane.Cancelled_by_parent _ ->
             if Atomic.get stop || Shutdown.is_shutting_down_global ()
             then record_stopped "cancelled during shutdown"
@@ -1196,27 +1066,11 @@ let start_keepalive
           | Keeper_lane.Failed exn ->
             if Atomic.get stop
             then record_stopped "manual stop"
-            else (
-              Otel_metric_store.inc_counter
-                Keeper_metrics.(to_string HeartbeatFailures)
-                ~labels:[ "keeper", live_meta.name; "phase", "lane_crash" ]
-                ();
-              Log.Keeper.emit
-                Log.Error
-                ~category:Log.Heartbeat
-                ~details:
-                  (`Assoc
-                    [ "keeper", `String live_meta.name
-                    ; "error", `String (Printexc.to_string exn)
-                    ])
-                (Printf.sprintf
-                   "keeper lane for %s crashed: %s"
-                   live_meta.name
-                   (Printexc.to_string exn));
-              record_crash (Keeper_registry.Exception (Printexc.to_string exn)))
+            else record_lane_exception exn
         in
         (* Lane cleanup is declared outside [run] because [Keeper_lane.fork]
-           invokes it only after the run scope and all child fibers join. *)
+           invokes it only after the child-owning switch and all children
+           finish. *)
         let cleanup_tracking outcome =
           let terminal_result =
             try

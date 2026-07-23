@@ -297,7 +297,8 @@ describe('KeeperDetailPage', () => {
       agent_name: 'keeper-analyst-agent',
       runtime_class: 'keeper',
       keepalive_running: true,
-      goal: '현재 대화의 근거와 핵심 수치를 먼저 정리한다.',
+      active_goal_ids: ['goal-evidence-first'],
+      recent_output_preview: '현재 대화의 근거와 핵심 수치를 먼저 정리한다.',
       generation: 0,
       turn_count: 97,
       last_turn_ago_s: 1108,
@@ -319,7 +320,6 @@ describe('KeeperDetailPage', () => {
         last_seen: '2026-05-01T00:48:26Z',
         age_s: 1206,
         last_seen_ago_s: 1111,
-        is_zombie: false,
       },
       diagnostic: {
         summary: 'Keeper runtime is reconciling back into live presence.',
@@ -337,7 +337,7 @@ describe('KeeperDetailPage', () => {
       },
       trust: {
         disposition: 'Blocked',
-        disposition_reason: 'tool_route_recoverable_failure',
+        disposition_reason: 'provider_runtime_error',
         needs_attention: true,
       },
     } as unknown as Keeper

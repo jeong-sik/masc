@@ -33,10 +33,5 @@ val on_broadcast_mention : (string option -> unit) ref
 val broadcast : ?trace_context:string ->
            ?msg_type:string ->
            ?task_cache_invariant_checked:bool ->
-           ?bypass_dedup:bool ->
            Workspace_utils_backend_setup.config ->
            from_agent:string -> content:string -> string
-(** [bypass_dedup] (default [false]): skip the RFC-0040 sender-side
-    mention dedup window check.  Use only for system-level alerts that
-    must always reach the recipient (e.g. incident response).  Keeper
-    code paths leave the default. *)

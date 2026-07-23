@@ -39,7 +39,7 @@ export function classifyCoverageError(error: string | null | undefined): Coverag
   if (!error) return null
   const lower = error.toLowerCase()
   // RFC-0097: keeper-sandbox container reuse — root fix for the 2026-05-16
-  // ENFILE storm that drove Docker_spawn_throttle + container reuse.
+  // ENFILE storm. Current FD tracking is observation-only.
   if (FD_EXHAUSTION_NEEDLES.some(needle => lower.includes(needle))) {
     return {
       reason: 'fd_exhaustion',

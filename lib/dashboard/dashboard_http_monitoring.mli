@@ -1,8 +1,8 @@
-(** Dashboard HTTP monitoring — tool-call health, board, and governance
+(** Dashboard HTTP monitoring — tool-call health, board, and Gate
     JSON builders for the dashboard server.
 
     Extracted from [server_dashboard_http.ml]. All builders are pure
-    reads of on-disk stores ([Audit_log], board state, governance log)
+    reads of on-disk stores ([Audit_log], board state, Gate log)
     plus wall-clock time; no side effects apart from reading. *)
 
 (** [tool_call_health_json ?now_ts config] aggregates [ToolCall] actions
@@ -15,12 +15,6 @@ val tool_call_health_json :
 (** [board_monitoring_json ~now_ts] returns a JSON snapshot of the
     internal board plus a boolean [needs_attention] flag. *)
 val board_monitoring_json : now_ts:float -> Yojson.Safe.t * bool
-
-(** [governance_monitoring_json ~now_ts ~base_path] summarises governance
-    state rooted at [base_path]. Second element is [needs_attention]
-    (e.g. stale pending rulings). *)
-val governance_monitoring_json :
-  now_ts:float -> base_path:string -> Yojson.Safe.t * bool
 
 (** Snapshot of auth/credential runtime drift counters that should
     page an operator, including keeper credential archival after

@@ -8,10 +8,7 @@ type sandbox_profile =
   | Docker
     (** Containerized execution with hardened defaults: cap-drop,
         no-new-privs, read-only rootfs, tmpfs, pids/memory limits.
-        Network defaults to [Network_none]; the internal git/gh
-        dispatcher (see [Keeper_tool_execute_command_semantics.resolve_sandbox_root_git_cwd])
-        uses network egress plus read-only mounts from the selected
-        credential bundle for the duration of a git/gh command. *)
+        Network defaults to [Network_none]. *)
 
 module Sandbox_profile_tla = struct
   type t = sandbox_profile =
@@ -79,10 +76,6 @@ let default_sandbox_profile = Local
 let default_network_mode_for_profile = function
   | Local -> Network_inherit
   | Docker -> Network_none
-  (* git/gh dispatch in Docker upgrades to Network_inherit at runtime
-     via Keeper_tool_execute_command_semantics.resolve_sandbox_root_git_cwd; that upgrade is not
-     visible here because it's a per-command decision, not a profile
-     default. *)
 ;;
 
 (* RFC vision-delegation §2.4 — persisted mechanism-selection axis. Decides how a

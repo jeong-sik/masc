@@ -8,8 +8,6 @@
 (** Goal lifecycle phases. *)
 type t =
   | Executing
-  | Awaiting_verification
-  | Awaiting_approval
   | Blocked
   | Paused
   | Completed
@@ -33,20 +31,15 @@ val all : t list
     string set (MCP schema enum, validator) via [List.map to_string all]. *)
 
 val admits_self_directed_progress : t -> bool
-(** RFC-0310 §3.3: whether a keeper waking on this goal can make progress on
-    it. Only [Executing] qualifies; terminal, operator-gated, and
-    awaiting-verdict phases return [false]. Used to gate stagnation wakes so
-    a completed/dropped/paused/blocked goal never wakes its keeper. *)
+(** Whether a keeper waking on this goal can make progress on it. *)
 
 (** Operator / system actions that may drive a transition. *)
 type action =
   | Request_complete
-  | Approve_completion
-  | Reject_completion
   | Pause
   | Resume
-  | Operator_block
-  | Operator_unblock
+  | Block
+  | Unblock
   | Drop
   | Reopen
 
@@ -58,24 +51,15 @@ val all_actions : action list
 (** Every action in declaration order. SSOT for the schema/validator action
     enum via [List.map action_to_string all_actions]. *)
 
-(** Outcome of {!decide_transition}. [Move_to] is a direct phase
-    change; [Open_verification] / [Open_approval] gate completion
-    behind verifier or operator review; [Complete] is the terminal
-    success transition. *)
+(** Outcome of {!decide_transition}. [Move_to] is a direct phase change and
+    [Complete] is the terminal success transition. *)
 type transition_outcome =
   | Move_to of t
-  | Open_verification
-  | Open_approval
   | Complete
 
 val decide_transition :
   phase:t ->
   action:action ->
-  has_effective_verifier_policy:bool ->
-  require_completion_approval:bool ->
   (transition_outcome, string) result
-(** Pure transition decider. Returns [Error msg] for invalid
-    [(phase, action)] pairs (the message names both for diagnostics).
-    [Awaiting_verification] mirrors [Awaiting_approval] outcomes for
-    verifier verdicts (#10411 fix — verification-pinned goals could
-    not exit before this). *)
+(** Pure transition decider. [Request_complete] completes directly from
+    [Executing]. Returns [Error msg] for invalid pairs. *)

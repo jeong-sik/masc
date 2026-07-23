@@ -776,9 +776,8 @@ let test_runtime_adapter_keeps_auth_out_of_headers () =
     ; cross_verifier_runtime_id = None
     ; keeper_assignments = []
     ; media_failover = []
-    ; pause_threshold = Runtime_schema.pause_threshold_default
-    ; pacing = Runtime_schema.pacing_default
     ; lane_decls = []
+    ; exact_output_lane_decls = []
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -813,9 +812,8 @@ let test_runtime_adapter_filters_toml_auth_headers () =
     ; cross_verifier_runtime_id = None
     ; keeper_assignments = []
     ; media_failover = []
-    ; pause_threshold = Runtime_schema.pause_threshold_default
-    ; pacing = Runtime_schema.pacing_default
     ; lane_decls = []
+    ; exact_output_lane_decls = []
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -851,14 +849,75 @@ let provider_cfg () =
     ; cross_verifier_runtime_id = None
     ; keeper_assignments = []
     ; media_failover = []
-    ; pause_threshold = Runtime_schema.pause_threshold_default
-    ; pacing = Runtime_schema.pacing_default
     ; lane_decls = []
+    ; exact_output_lane_decls = []
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
   | Ok provider_cfg -> provider_cfg
   | Error msg -> failf "unexpected adapter error: %s" msg
+
+(* --- provider_id capability qualification ---
+
+   The adapter must stamp the runtime.toml [providers.<id>] table name into
+   [Provider_config.provider_id]: it is the capability-catalog qualification
+   key ([capability_provider_label] prefers it over the wire kind), and the
+   OAS contract (provider_config.mli, capabilities_for_config_model) only
+   accepts an exact provider-scoped row once a provider is declared. Without
+   it every OpenAI-compatible endpoint collapsed into the "openai_compat"
+   label, which no catalog row carries — the 2026-07-15 boot-gate wipeout
+   where all routed runtimes were reported catalog-missing. *)
+
+let with_model_catalog toml f =
+  match Llm_provider.Model_catalog.of_toml_string ~source:"inline-test-catalog" toml with
+  | Error msg -> failf "test catalog parse failed: %s" msg
+  | Ok catalog ->
+    Llm_provider.Model_catalog.set_global catalog;
+    Fun.protect ~finally:Llm_provider.Model_catalog.clear_global f
+
+let test_adapter_stamps_declared_provider_id () =
+  check
+    (option string)
+    "provider_id"
+    (Some "runpod_mtp")
+    (provider_cfg ()).provider_id
+
+let test_provider_scoped_catalog_row_resolves_for_declared_provider () =
+  with_model_catalog
+    {|
+[[models]]
+id_prefix = "qwen"
+provider_name = "runpod_mtp"
+max_context_tokens = 160000
+|}
+    (fun () ->
+       match
+         Llm_provider.Provider_config.capabilities_for_config_model (provider_cfg ())
+       with
+       | Some caps ->
+         check
+           (option int)
+           "max_context_tokens from provider-scoped row"
+           (Some 160000)
+           caps.Llm_provider.Capabilities.max_context_tokens
+       | None -> fail "provider-scoped catalog row did not resolve")
+
+let test_bare_catalog_row_stays_fail_closed_for_declared_provider () =
+  with_model_catalog
+    {|
+[[models]]
+id_prefix = "qwen"
+max_context_tokens = 160000
+|}
+    (fun () ->
+       match
+         Llm_provider.Provider_config.capabilities_for_config_model (provider_cfg ())
+       with
+       | Some _ ->
+         fail
+           "bare catalog row must not satisfy a declared provider (exact \
+            provider-scoped row required)"
+       | None -> ())
 
 (* Audit F2: TOML keep-alive / num-ctx must reach the wire-level
    Provider_config. Before the fix the adapter dropped both binding
@@ -934,9 +993,8 @@ let runtime_or_fail ?(provider = runpod_provider) () =
     ; cross_verifier_runtime_id = None
     ; keeper_assignments = []
     ; media_failover = []
-    ; pause_threshold = Runtime_schema.pause_threshold_default
-    ; pacing = Runtime_schema.pacing_default
     ; lane_decls = []
+    ; exact_output_lane_decls = []
     }
   in
   match Runtime.of_binding cfg runpod_binding with
@@ -976,7 +1034,7 @@ let assert_dashboard_runtime_probe_reachable runtime =
            , [ "content-type", "application/json" ]
            , {|{"data":[{"id":"qwen"}]}|} ))
       (fun () ->
-         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_for_tests
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
            ~default_id:"runpod_mtp.qwen" [ runtime ])
   in
   let reachable_provider = first_provider_probe reachable_json in
@@ -1005,7 +1063,7 @@ let assert_dashboard_runtime_probe_missing_auth runtime =
       ~finally:(fun () ->
         Server_dashboard_http_runtime_info.clear_dashboard_runtime_provider_http_get_for_tests ())
       (fun () ->
-         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_for_tests
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
            ~default_id:"runpod_mtp.qwen" [ runtime ])
   in
   let provider = first_provider_probe json in
@@ -1034,7 +1092,7 @@ let assert_dashboard_runtime_probe_redacts_url_credentials () =
     with_dashboard_probe_http_get
       (fun ~url:_ ~headers:_ ~timeout_sec:_ -> Ok (200, [], {|{"data":[]}|}))
       (fun () ->
-         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_for_tests
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
            ~default_id:"runpod_mtp.qwen" [ runtime ])
   in
   let provider = first_provider_probe json in
@@ -1112,113 +1170,6 @@ let test_runtime_agent_terminal_error_observation_marks_failed_attempt () =
        (Keeper_agent_error.runtime_outcome_of_observation
           (Some observation)))
 
-let test_not_found_enrichment_includes_runtime_endpoint_model () =
-  let provider_cfg = provider_cfg () in
-  let enriched =
-    Keeper_runtime_attempt.enrich_sdk_error
-      ~runtime_id:"runpod_mtp.qwen"
-      ~provider_cfg
-      (Agent_sdk.Error.Api (Llm_provider.Retry.NotFound { message = "" }))
-  in
-  (match enriched with
-   | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound { message }) ->
-     check bool "mentions 404 marker" true
-       (String_util.contains_substring
-          message
-          "OpenAI-compatible endpoint returned 404");
-     check bool "mentions runtime id" true
-       (String_util.contains_substring message "runtime_id=runpod_mtp.qwen");
-     check bool "mentions model" true
-       (String_util.contains_substring message "model=qwen");
-     check bool "mentions endpoint" true
-       (String_util.contains_substring
-          message
-          "endpoint=https://example-runpod.proxy.runpod.net/v1")
-   | _ -> fail "expected enriched NotFound");
-  check bool "404 is terminal provider failure" true
-    (Keeper_turn_driver.sdk_error_is_terminal_provider_runtime_failure
-       enriched)
-
-let test_runtime_agent_max_turns_is_continuation_checkpoint () =
-  let lifecycle =
-    Runtime_agent.worker_lifecycle_classification_of_result
-      (Error
-         (Agent_sdk.Error.Agent
-            (Agent_sdk.Error.MaxTurnsExceeded { turns = 24; limit = 24 })))
-  in
-  check string "event" "completed" lifecycle.event;
-  check string "status" "continuation_checkpoint" lifecycle.status;
-  check (option string) "no error" None lifecycle.error
-
-let test_runtime_agent_recovery_defer_is_control_checkpoint () =
-  let lifecycle =
-    Runtime_agent.worker_lifecycle_classification_of_result
-      (Error
-         (Agent_sdk.Error.Agent
-            (Agent_sdk.Error.ToolFailureRecoveryDeferred
-               { reason = "wait for repository state"
-               ; tool_names = [ "Execute" ]
-               })))
-  in
-  check string "event" "completed" lifecycle.event;
-  check string "status" "tool_failure_recovery_deferred" lifecycle.status;
-  check (option string) "no provider error" None lifecycle.error
-
-let test_runtime_agent_context_uses_configured_turn_budget () =
-  let config =
-    Runtime_agent.default_config
-      ~name:"oas-runpod_mtp.qwen"
-      ~provider_cfg:(provider_cfg ())
-      ~system_prompt:""
-      ~tools:[]
-  in
-  let config = { config with max_turns = 7 } in
-  Eio_main.run (fun env ->
-    Eio.Switch.run (fun sw ->
-      let builder =
-        Runtime_agent_context.builder_without_approval
-          ~net:(Eio.Stdenv.net env)
-          ~config
-          ()
-      in
-      match Agent_sdk.Builder.build_safe builder with
-      | Error err -> fail (Agent_sdk.Error.to_string err)
-      | Ok agent ->
-        check int "builder max_turns" 7
-          (Agent_sdk.Agent.state agent).config.max_turns;
-        Eio.Switch.on_release sw (fun () ->
-          Agent_sdk.Agent.close agent)));
-  let checkpoint =
-    { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version
-    ; session_id = "session"
-    ; agent_name = "oas-runpod_mtp.qwen"
-    ; model = "qwen"
-    ; system_prompt = Some ""
-    ; messages = []
-    ; usage = Agent_sdk.Types.empty_usage
-    ; turn_count = 24
-    ; created_at = 0.0
-    ; tools = []
-    ; tool_choice = None
-    ; disable_parallel_tool_use = false
-    ; temperature = Some 0.3
-    ; top_p = None
-    ; top_k = None
-    ; min_p = None
-    ; enable_thinking = None
-    ; preserve_thinking = None
-    ; response_format = Agent_sdk.Types.default_config.response_format
-    ; thinking_budget = None
-    ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create_sync ()
-    ; mcp_sessions = []
-    ; working_context = None
-    }
-  in
-  let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
-  check int "resume adds fresh per-call turn budget" 31
-    prepared.agent_config.max_turns
-
 let test_runtime_agent_context_preserves_max_tokens_intent () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
@@ -1232,7 +1183,7 @@ let test_runtime_agent_context_preserves_max_tokens_intent () =
         in
         let config = { config with max_tokens } in
         let builder =
-          Runtime_agent_context.builder_without_approval
+          Runtime_agent_context.builder
             ~net:(Eio.Stdenv.net env)
             ~config
             ()
@@ -1298,7 +1249,7 @@ let test_runtime_agent_context_preserves_provider_sampling_config () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       let builder =
-        Runtime_agent_context.builder_without_approval
+        Runtime_agent_context.builder
           ~net:(Eio.Stdenv.net env)
           ~config
           ()
@@ -1331,9 +1282,10 @@ let test_runtime_agent_context_preserves_provider_sampling_config () =
     ; top_p = Some 0.12
     ; top_k = Some 7
     ; min_p = Some 0.02
+    ; reasoning_effort = None
     ; enable_thinking = None
     ; preserve_thinking = None
-    ; response_format = Agent_sdk.Types.default_config.response_format
+    ; response_format = (Agent_sdk.Types.default_config ~model:"qwen").response_format
     ; thinking_budget = None
     ; cache_system_prompt = false
     ; context = Agent_sdk.Context.create_sync ()
@@ -1354,46 +1306,6 @@ let test_runtime_agent_context_preserves_provider_sampling_config () =
     prepared.agent_config.top_k;
   check (option (float 0.0001)) "resume agent min_p" (Some 0.07)
     prepared.agent_config.min_p
-
-let test_runtime_agent_context_preserves_unbounded_resume_budget () =
-  let config =
-    Runtime_agent.default_config
-      ~name:"oas-runpod_mtp.qwen"
-      ~provider_cfg:(provider_cfg ())
-      ~system_prompt:""
-      ~tools:[]
-  in
-  let config = { config with max_turns = 0 } in
-  let checkpoint =
-    { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version
-    ; session_id = "session"
-    ; agent_name = "oas-runpod_mtp.qwen"
-    ; model = "qwen"
-    ; system_prompt = Some ""
-    ; messages = []
-    ; usage = Agent_sdk.Types.empty_usage
-    ; turn_count = 24
-    ; created_at = 0.0
-    ; tools = []
-    ; tool_choice = None
-    ; disable_parallel_tool_use = false
-    ; temperature = Some 0.3
-    ; top_p = None
-    ; top_k = None
-    ; min_p = None
-    ; enable_thinking = None
-    ; preserve_thinking = None
-    ; response_format = Agent_sdk.Types.default_config.response_format
-    ; thinking_budget = None
-    ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create_sync ()
-    ; mcp_sessions = []
-    ; working_context = None
-    }
-  in
-  let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
-  check int "resume preserves unbounded turn budget" 0
-    prepared.agent_config.max_turns
 
 let test_runtime_agent_context_resume_patches_stale_response_format_to_base_contract () =
   let resume_schema : Yojson.Safe.t =
@@ -1434,6 +1346,7 @@ let test_runtime_agent_context_resume_patches_stale_response_format_to_base_cont
     ; top_p = None
     ; top_k = None
     ; min_p = None
+    ; reasoning_effort = None
     ; enable_thinking = None
     ; preserve_thinking = None
     ; response_format = Agent_sdk.Types.Off
@@ -1470,7 +1383,7 @@ let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       let builder =
-        Runtime_agent_context.builder_without_approval
+        Runtime_agent_context.builder
           ~net:(Eio.Stdenv.net env)
           ~config
           ()
@@ -1486,6 +1399,145 @@ let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
           (Option.map Agent_sdk.Types.show_tool_choice agent_config.tool_choice);
         Eio.Switch.on_release sw (fun () ->
           Agent_sdk.Agent.close agent)))
+
+let fresh_loopback_port () =
+  let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Unix.setsockopt socket Unix.SO_REUSEADDR true;
+  Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
+  let port =
+    match Unix.getsockname socket with
+    | Unix.ADDR_INET (_, port) -> port
+    | _ -> fail "loopback socket did not expose a TCP port"
+  in
+  Unix.close socket;
+  port
+
+let with_native_count_server f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let port = fresh_loopback_port () in
+  let paths = ref [] in
+  let handler _conn request body =
+    let _body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    let path = Cohttp.Request.uri request |> Uri.path in
+    paths := path :: !paths;
+    if String.equal path "/v1/messages/count_tokens"
+    then Cohttp_eio.Server.respond_string ~status:`OK ~body:{|{"input_tokens":500}|} ()
+    else
+      Cohttp_eio.Server.respond_string
+        ~status:`Internal_server_error
+        ~body:{|{"error":"completion must not be dispatched"}|}
+        ()
+  in
+  let socket =
+    Eio.Net.listen
+      net
+      ~sw
+      ~backlog:4
+      ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  let base_url = Printf.sprintf "http://127.0.0.1:%d" port in
+  let result = f ~sw ~net ~base_url in
+  result, List.rev !paths
+
+let context_fit_provider_config base_url =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.Anthropic
+    ~model_id:"context-fit-fixture"
+    ~base_url
+    ~api_key:"test-key"
+    ~headers:[ "Content-Type", "application/json"; "anthropic-version", "2023-06-01" ]
+    ~request_path:"/v1/messages"
+    ~max_tokens:64
+    ~max_context:512
+    ~temperature:0.2
+    ()
+
+let context_fit_runtime_config base_url =
+  Runtime_agent.default_config
+    ~name:"context-fit-fixture"
+    ~provider_cfg:(context_fit_provider_config base_url)
+    ~system_prompt:"Count the exact provider request before dispatch."
+    ~tools:[]
+
+let context_fit_checkpoint () =
+  { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version
+  ; session_id = "context-fit-session"
+  ; agent_name = "context-fit-fixture"
+  ; model = "context-fit-fixture"
+  ; system_prompt = Some "stale"
+  ; messages = []
+  ; usage = Agent_sdk.Types.empty_usage
+  ; turn_count = 3
+  ; created_at = 0.0
+  ; tools = []
+  ; tool_choice = None
+  ; disable_parallel_tool_use = false
+  ; temperature = None
+  ; top_p = None
+  ; top_k = None
+  ; min_p = None
+  ; reasoning_effort = None
+  ; enable_thinking = None
+  ; preserve_thinking = None
+  ; response_format = Agent_sdk.Types.Off
+  ; thinking_budget = None
+  ; cache_system_prompt = false
+  ; context = Agent_sdk.Context.create_sync ()
+  ; mcp_sessions = []
+  ; working_context = None
+  }
+
+let check_context_fit_overflow = function
+  | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.ContextOverflow { limit = Some 512; _ })) ->
+    ()
+  | Error error -> fail (Agent_sdk.Error.to_string error)
+  | Ok _ -> fail "overflowed request must not reach completion dispatch"
+
+let test_runtime_agent_fresh_build_enforces_native_context_fit () =
+  let (), paths =
+    with_native_count_server
+    @@ fun ~sw ~net ~base_url ->
+    let config = context_fit_runtime_config base_url in
+    let agent =
+      match Runtime_agent.build ~sw ~net ~config with
+      | Ok agent -> agent
+      | Error error -> fail (Agent_sdk.Error.to_string error)
+    in
+    Fun.protect
+      ~finally:(fun () -> Agent_sdk.Agent.close agent)
+      (fun () -> Agent_sdk.Agent.run ~sw agent "overflow" |> check_context_fit_overflow)
+  in
+  check (list string) "fresh request paths" [ "/v1/messages/count_tokens" ] paths
+
+let test_runtime_agent_resume_enforces_native_context_fit () =
+  let (), paths =
+    with_native_count_server
+    @@ fun ~sw ~net ~base_url ->
+    let config = context_fit_runtime_config base_url in
+    let agent =
+      match
+        Runtime_agent.resume_from_checkpoint
+          ~sw
+          ~net
+          ~config
+          ~checkpoint:(context_fit_checkpoint ())
+      with
+      | Ok agent -> agent
+      | Error error -> fail (Agent_sdk.Error.to_string error)
+    in
+    Fun.protect
+      ~finally:(fun () -> Agent_sdk.Agent.close agent)
+      (fun () -> Agent_sdk.Agent.run ~sw agent "overflow" |> check_context_fit_overflow)
+  in
+  check (list string) "resumed request paths" [ "/v1/messages/count_tokens" ] paths
 
 (* RFC-OAS-026 §4.6: a configured stream-idle deadline with no resolvable clock
    must fail loudly rather than silently disarm the only I2-legitimate
@@ -1576,6 +1628,18 @@ let () =
         ] )
     ; ( "provider_config"
       , [ test_case
+            "adapter stamps declared provider id"
+            `Quick
+            test_adapter_stamps_declared_provider_id
+        ; test_case
+            "provider-scoped catalog row resolves for declared provider"
+            `Quick
+            test_provider_scoped_catalog_row_resolves_for_declared_provider
+        ; test_case
+            "bare catalog row stays fail-closed for declared provider"
+            `Quick
+            test_bare_catalog_row_stays_fail_closed_for_declared_provider
+        ; test_case
             "runtime adapter carries auth in api_key only"
             `Quick
             test_runtime_adapter_keeps_auth_out_of_headers
@@ -1672,22 +1736,6 @@ let () =
             `Quick
             test_runtime_agent_terminal_error_observation_marks_failed_attempt
         ; test_case
-            "NotFound enrichment includes runtime endpoint and model"
-            `Quick
-            test_not_found_enrichment_includes_runtime_endpoint_model
-        ; test_case
-            "max turns is continuation checkpoint"
-            `Quick
-            test_runtime_agent_max_turns_is_continuation_checkpoint
-        ; test_case
-            "typed recovery defer is a control checkpoint"
-            `Quick
-            test_runtime_agent_recovery_defer_is_control_checkpoint
-        ; test_case
-            "runtime agent context uses configured turn budget"
-            `Quick
-            test_runtime_agent_context_uses_configured_turn_budget
-        ; test_case
             "runtime agent context preserves max_tokens intent"
             `Quick
             test_runtime_agent_context_preserves_max_tokens_intent
@@ -1700,10 +1748,6 @@ let () =
             `Quick
             test_runtime_agent_context_preserves_provider_sampling_config
         ; test_case
-            "runtime agent context preserves unbounded resume budget"
-            `Quick
-            test_runtime_agent_context_preserves_unbounded_resume_budget
-        ; test_case
             "runtime agent context resume patches stale response_format to base contract"
             `Quick
             test_runtime_agent_context_resume_patches_stale_response_format_to_base_contract
@@ -1711,6 +1755,14 @@ let () =
             "runtime agent context leaves tool_choice unset with tools"
             `Quick
             test_runtime_agent_context_leaves_tool_choice_unset_with_tools
+        ; test_case
+            "runtime fresh build enforces native context fit"
+            `Quick
+            test_runtime_agent_fresh_build_enforces_native_context_fit
+        ; test_case
+            "runtime resume enforces native context fit"
+            `Quick
+            test_runtime_agent_resume_enforces_native_context_fit
         ; test_case
             "dashboard runtime provider reachability contracts"
             `Quick

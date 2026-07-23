@@ -9,7 +9,7 @@
     - {!Server_dashboard_http_memory_subsystems}
 
     Plus 21 own helpers + 1 type — board / memory /
-    governance / verification / planning / goals /
+    Gate / verification / planning / goals /
     keeper composite / fleet composite / operator
     action+confirm HTTP route entries.
 
@@ -48,7 +48,7 @@ val approval_resolve_http_error_to_string :
 
 val approval_resolve_decision_required_message : string
 
-(** {1 Board / memory / governance HTTP entries} *)
+(** {1 Board / memory / Gate HTTP entries} *)
 
 val handle_repository_observation_snapshot :
   sw:Eio.Switch.t ->
@@ -83,28 +83,29 @@ val dashboard_memory_subsystems_http_json :
   Httpun.Request.t ->
   Yojson.Safe.t
 
-val dashboard_governance_http_json :
+val dashboard_gate_http_json :
   Httpun.Request.t -> base_path:string -> Yojson.Safe.t
 
-val dashboard_governance_tool_events_http_json :
+val dashboard_gate_tool_events_http_json :
   Httpun.Request.t -> Yojson.Safe.t
 
 val dashboard_proof_http_json :
   config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t
 
-val dashboard_governance_approval_resolve_http_json :
+val dashboard_gate_resolve_http_json :
   base_path:string ->
+  created_by:string ->
   args:Yojson.Safe.t ->
   (Yojson.Safe.t, approval_resolve_http_error) result
 
-val dashboard_governance_approval_rule_delete_http_json :
+val dashboard_gate_retry_http_json :
   base_path:string ->
+  requested_by:string ->
   args:Yojson.Safe.t ->
   (Yojson.Safe.t, string) result
 
-val dashboard_schedule_resolve_http_json :
-  config:Workspace_utils.config ->
-  operator_name:string ->
+val dashboard_gate_rule_delete_http_json :
+  base_path:string ->
   args:Yojson.Safe.t ->
   (Yojson.Safe.t, string) result
 
@@ -152,6 +153,7 @@ val operator_action_http_json :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  authorized_actor:string ->
   Httpun.Request.t ->
   args:Yojson.Safe.t ->
   (Yojson.Safe.t, string) result
@@ -160,6 +162,7 @@ val operator_confirm_http_json :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  authorized_actor:string ->
   Httpun.Request.t ->
   args:Yojson.Safe.t ->
   (Yojson.Safe.t, string) result

@@ -35,6 +35,7 @@ export type DashboardSurfaceIcon =
   | 'overview'
   | 'monitoring'
   | 'keepers'
+  | 'registry'
   | 'board'
   | 'schedule'
   | 'fusion'
@@ -52,13 +53,12 @@ type SurfaceSectionId =
   | 'observatory'
   | 'agents'
   | 'runtime'
-  | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
+  | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + Gate monitoring
   | 'transport-health' // Hidden support route for transport diagnostics; linked from Runtime.
   | 'feature-health' // Hidden support route for feature flag diagnostics; linked from Runtime.
   | 'journey' // Hidden execution-flow drill-down.
-  | 'cognition' // Hidden keeper cognition drill-down.
   // command
-  | 'operations'     // Phase 1+6: absorbs intervene + governance + inspector (Phase 7: connectors split out)
+  | 'operations'     // Phase 1+6: absorbs intervene + Gate + inspector (Phase 7: connectors split out)
   // connectors (Phase 7: top-level surface — sidecar-driven channel bridges)
   // Per-connector sub-tabs (discord/imessage/slack/telegram) were merged into
   // connector-status on 2026-04-30; selection happens inside the page via
@@ -78,6 +78,7 @@ type SurfaceSectionId =
   | 'performance'
   | 'memory-subsystems'
   | 'keeper-memory-health'
+  | 'audit-integrity'
   // code (Stage 5 IDE plane — shell only in PR-1, 4-pane content in PR-2+)
   | 'ide-shell'
 
@@ -120,6 +121,7 @@ export interface DashboardSectionNavItem {
 const V2_PRIMARY_SURFACE_IDS: ReadonlyArray<SurfaceId> = [
   'overview',
   'keepers',
+  'registry',
   'monitoring',
   'workspace',
   'approvals',
@@ -141,6 +143,7 @@ const SECTIONLESS_SURFACE_IDS: ReadonlySet<TabId> = new Set([
   'logs',
   'settings',
   'keepers',
+  'registry',
   'board',
   'schedule',
   'approvals',
@@ -188,6 +191,14 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     tabs: ['keepers'],
   },
   {
+    id: 'registry',
+    label: 'Registry',
+    icon: 'registry',
+    description: 'Persona forms, keeper instances, and runtime bindings',
+    defaultTab: 'registry',
+    tabs: ['registry'],
+  },
+  {
     id: 'board',
     label: 'Board',
     icon: 'board',
@@ -205,9 +216,9 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
   },
   {
     id: 'approvals',
-    label: 'Approvals',
+    label: 'Gate',
     icon: 'approvals',
-    description: 'Keeper HITL approval queue — pending tool-call gates',
+    description: 'Nonblocking Keeper HITL queue and exact Always rules',
     defaultTab: 'approvals',
     tabs: ['approvals'],
   },
@@ -223,7 +234,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'command',
     label: 'Command',
     icon: 'command',
-    description: 'Intervention, governance decisions, and approvals',
+    description: 'Intervention, Gate decisions, and HITL',
     defaultTab: 'command',
     defaultParams: { section: 'operations' },
     tabs: ['command'],
@@ -312,6 +323,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
   // key — the Record is exhaustive over the union, so the empty entry is required.
   approvals: [],
   fusion: [],
+  registry: [],
   monitoring: [
     {
       id: 'agents',
@@ -322,7 +334,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'fleet-health',
       label: 'Tool Monitor',
-      description: 'Tool quality and governance signals.',
+      description: 'Tool quality and Gate signals.',
       params: { section: 'fleet-health' },
     },
     {
@@ -358,13 +370,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       params: { section: 'journey' },
       hidden: true,
     },
-    {
-      id: 'cognition',
-      label: 'Keeper Cognition',
-      description: 'Keeper cognition and memory drill-down.',
-      params: { section: 'cognition' },
-      hidden: true,
-    },
   ],
   keepers: [],
   board: [],
@@ -373,7 +378,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'operations',
       label: 'Actions',
-      description: 'Broadcasts, keeper messages, autonomy approvals, safety, and inspector controls.',
+      description: 'Broadcasts, keeper messages, Gate/HITL, and inspector controls.',
       params: { section: 'operations' },
     },
   ],
@@ -416,7 +421,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'planning',
       label: 'Plans & Goals',
-      description: 'Goal loop, goal tree, and task kanban.',
+      description: 'Goal tree and task kanban.',
       params: { section: 'planning' },
     },
     {
@@ -463,6 +468,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       description: 'Per-keeper fact-store size, GC statistics, and cadence counter.',
       params: { section: 'keeper-memory-health' },
     },
+    {
+      id: 'audit-integrity',
+      label: '감사 무결성',
+      description: 'Per-keeper resilience audit hash-chain verification result.',
+      params: { section: 'audit-integrity' },
+    },
   ],
   code: [
     {
@@ -476,10 +487,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
 }
 
 function validSectionIds(tab: NonHomeTabId): SurfaceSectionId[] {
-  // Total: an unknown/unmapped tab has no sections. Guards against a route
-  // whose tab is not a section-bearing surface (e.g. partial routes in tests
-  // or a not-yet-registered surface) instead of crashing on undefined.map.
-  return (DASHBOARD_SECTION_ITEMS[tab] ?? []).map(item => item.id)
+  return DASHBOARD_SECTION_ITEMS[tab].map(item => item.id)
 }
 
 export function defaultParamsForTab(tabId: TabId): Record<string, string> {
@@ -488,7 +496,7 @@ export function defaultParamsForTab(tabId: TabId): Record<string, string> {
 
 export function sectionItemsForTab(tabId: TabId): DashboardSectionNavItem[] {
   if (isSectionlessSurface(tabId)) return []
-  return DASHBOARD_SECTION_ITEMS[tabId as NonHomeTabId] ?? []
+  return DASHBOARD_SECTION_ITEMS[tabId as NonHomeTabId]
 }
 
 export function visibleSectionItemsForTab(tabId: TabId): DashboardSectionNavItem[] {
@@ -523,12 +531,16 @@ type TabSectionKey = `${TabId}:${string}`
 export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
   // RFC-MASC-006 Phase 0: sessions stub removed
   'monitoring:sessions': { section: 'agents' },
+  // Keeper status SSOT pass (#25578): the hidden cognition lens section was
+  // removed; stale bookmarks redirect (with telemetry) instead of silently
+  // falling back to the default section.
+  'monitoring:cognition': { section: 'agents' },
 
   // Dashboard consolidation Phase 1: monitoring surface
   'monitoring:telemetry':    { section: 'fleet-health', view: 'event-log' },
   'monitoring:fleet':        { section: 'fleet-health', view: 'comparison' },
   'monitoring:tool-quality': { section: 'fleet-health', view: 'tool-quality' },
-  'monitoring:governance':   { section: 'fleet-health', view: 'governance' },
+  'monitoring:gate':          { section: 'fleet-health', view: 'gate' },
   'monitoring:attribution':   { section: 'fleet-health', view: 'attribution' },
   'monitoring:fsm-hub':      { section: 'agents', view: 'fsm' },
   'monitoring:metrics':      { section: 'runtime' },
@@ -536,7 +548,7 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
 
   // Dashboard consolidation Phase 1+6: command surface
   'command:intervene':    { section: 'operations' },
-  'command:governance':   { section: 'operations' },
+  'command:gate':         { section: 'operations', view: 'gate' },
   'command:inspector':    { section: 'operations', view: 'inspector' },
 
   // Dashboard consolidation Phase 1: workspace surface

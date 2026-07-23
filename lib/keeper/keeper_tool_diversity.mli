@@ -9,8 +9,6 @@
 type tool_stat = {
   name : string;
   count : int;
-  successes : int;
-  failures : int;
 }
 
 type diversity_summary = {
@@ -23,7 +21,6 @@ type diversity_summary = {
   overused_tools : string list;
 }
 
-val parse_tool_usage_json : Yojson.Safe.t -> tool_stat list
 val shannon_entropy : int list -> float
 val normalized_entropy : n_categories:int -> float -> float
 val compute_diversity : available_tools:string list -> tool_stat list -> diversity_summary

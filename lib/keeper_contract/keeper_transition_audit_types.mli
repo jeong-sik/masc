@@ -10,32 +10,12 @@ type transition_record =
   ; wall_clock_at_decision : float
   }
 
-type operator_signal =
-  { signal_class : string
-  ; severity : string
-  ; requires_operator_decision : bool
-  ; next_human_action : string option
-  ; summary : string
-  }
-
 val event_type_of_event : Keeper_state_machine.event -> string
-
-val operator_signal
-  :  ?next_human_action:string
-  -> signal_class:string
-  -> severity:string
-  -> requires_operator_decision:bool
-  -> string
-  -> operator_signal
-
-val operator_signal_to_json : operator_signal -> Yojson.Safe.t
-val operator_signal_of_transition : transition_record -> operator_signal
 val to_json : transition_record -> Yojson.Safe.t
 
 type completed_turn_outcome =
   | Turn_substantive
   | Turn_failed
-  | Turn_gate_rejected
 
 type completed_turn_record =
   { turn_id : int

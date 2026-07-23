@@ -22,6 +22,7 @@ type turn_stats = {
 
 type message_request_status =
   | Accepted
+  | Acceptance_uncertain
   | Queued
   | Running
   | Done
@@ -43,6 +44,7 @@ type message_request = {
 
 let message_request_status_to_string = function
   | Accepted -> "accepted"
+  | Acceptance_uncertain -> "acceptance_uncertain"
   | Queued -> "queued"
   | Running -> "running"
   | Done -> "done"
@@ -52,6 +54,7 @@ let message_request_status_to_string = function
 
 let message_request_status_of_string = function
   | "accepted" -> Some Accepted
+  | "acceptance_uncertain" -> Some Acceptance_uncertain
   | "queued" -> Some Queued
   | "running" -> Some Running
   | "done" -> Some Done

@@ -7,10 +7,8 @@
 
     The consumer migration is partial (RFC-0284 §2.3): [mcp_server_eio_execute]
     uses [filter_schema_visible_suggestions] for "did you mean" error paths,
-    and tool guidance uses [allowed_name] for hint rendering — but other
-    producers (e.g. [keeper_tool_execute_command_semantics] recovery strings)
-    still emit schema-allowed text without routing through this module. The
-    cross-module enforcement guard is tracked in RFC-0284 §4.2. *)
+    and tool guidance uses [allowed_name] for hint rendering. The cross-module
+    enforcement guard is tracked in RFC-0284 §4.2. *)
 
 (** Surface context. Internal audit emits the raw internal identifier;
     schema-allowed rendering goes through alias resolution. *)

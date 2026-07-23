@@ -48,10 +48,10 @@ const PROMPTS: DashboardPromptItem[] = [
     char_count: 80,
   }),
   makePrompt({
-    key: 'keeper.turn_intent.board_activity_guidance',
+    key: 'keeper.immediate_task_move',
     category: 'keeper',
-    description: 'board activity guidance',
-    file_path: 'config/prompts/keeper.turn_intent.board_activity_guidance.md',
+    description: 'claimable work guidance',
+    file_path: 'config/prompts/keeper.immediate_task_move.md',
     char_count: 40,
   }),
   makePrompt({
@@ -62,17 +62,17 @@ const PROMPTS: DashboardPromptItem[] = [
     char_count: 60,
   }),
   makePrompt({
-    key: 'verification.action_verifier',
+    key: 'verification.anti_rationalization',
     category: 'verification',
-    description: 'action verifier',
-    file_path: 'config/prompts/verification.action_verifier.md',
+    description: 'anti-rationalization guidance',
+    file_path: 'config/prompts/verification.anti_rationalization.md',
     char_count: 50,
   }),
   makePrompt({
-    key: 'dashboard.operator_judge',
+    key: 'dashboard.gate_judge',
     category: 'dashboard',
-    description: 'operator judge',
-    file_path: 'config/prompts/dashboard.operator_judge.md',
+    description: 'gate judge',
+    file_path: 'config/prompts/dashboard.gate_judge.md',
     char_count: 70,
   }),
   makePrompt({

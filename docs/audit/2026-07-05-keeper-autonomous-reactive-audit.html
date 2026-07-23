@@ -270,8 +270,7 @@
         <li>Durable event-queue backlog degradation is now an explicit health policy: <code>MASC_KEEPER_DURABLE_QUEUE_STALE_SEC</code> / runtime.toml <code>[health].durable_queue_stale_sec</code>. Default <code>0.0</code> preserves existing operator-visible behavior, while larger values keep fresh handoff backlog visible without marking full health degraded.</li>
         <li><code>/health?full=1</code> top-level <code>operator_action_reasons</code> now preserves component-level <code>status_reasons</code>, so reaction-ledger causes such as pending stimuli or stale durable event queues do not collapse into a generic <code>keeper_reaction_ledger:degraded</code>.</li>
         <li>Board-event collection failures now surface as <code>keeper_board_event_collection</code> health with per-Keeper failure details, runtime-resolution visibility, and top-level <code>keeper_board_event_collection:board_event_collection_failure</code> operator reason; the next successful collection clears the failure.</li>
-        <li>Chat waiter cap moved to <code>MASC_KEEPER_TURN_CHAT_WAITING_CAP</code> / runtime.toml <code>[turn].chat_waiting_cap</code>.</li>
-        <li><code>/health?full=1</code> and dashboard runtime resolution now expose <code>keeper_turn_admission</code> with per-Keeper in-flight lane, waiting count, waiting cap, full flag, and rejected-chat counter. A currently full queue contributes <code>keeper_turn_admission:chat_waiting_queue_full</code> to top-level <code>operator_action_reasons</code>.</li>
+        <li>The arbitrary chat waiter cap was removed. <code>keeper_turn_admission</code> keeps one serial lane per Keeper, queues chat work without a policy rejection, and exposes only the in-flight lane and raw waiting count.</li>
         <li>Scheduler can dispatch typed <code>masc.keeper_wake</code> payloads into a Keeper's event queue as <code>Schedule_due</code>, independent of board-post side effects.</li>
         <li>Scheduled autonomous no-op backoff and idle decay caps are named runtime policy: <code>MASC_KEEPER_PROACTIVE_NOOP_BACKOFF_MAX_SHIFT</code>, <code>MASC_KEEPER_PROACTIVE_IDLE_DECAY_MAX_PERIODS</code>, with runtime.toml mappings under <code>[proactive]</code>.</li>
         <li>Removed the dead <code>Keeper_relevance_check</code> keyword coverage module and its dedicated test so it cannot be accidentally wired in as a production relevance authority.</li>
@@ -341,7 +340,7 @@
       <div class="finding">
         <h3><span class="badge p2">P2</span> Chat waiter cap was hard-coded</h3>
         <p>Original finding: <code>max_waiting_chat_requests = 8</code> was typed and observable, but arbitrary.</p>
-        <p><strong>Current source status:</strong> closed in this worktree. The cap is runtime policy via <code>MASC_KEEPER_TURN_CHAT_WAITING_CAP</code> / <code>[turn].chat_waiting_cap</code>, and <code>keeper_turn_admission</code> health exposes in-flight lane, waiting count, waiting cap, full flag, and rejected-chat counter per Keeper.</p>
+        <p><strong>Current source status:</strong> removed in this worktree. There is no chat waiting cap or capacity-derived rejection. <code>keeper_turn_admission</code> exposes the in-flight lane and raw waiting count without escalating queued work into fleet or operator state.</p>
       </div>
 
       <div class="finding">

@@ -12,11 +12,8 @@ module StringMap = Set_util.StringMap
 type turn_state =
   { cycle_completed : bool
   ; manifest_seq : int
-  ; post_commit_failure_reason : Keeper_registry.failure_reason option
-  ; paused_meta_override : Keeper_meta_contract.keeper_meta option
   ; current_turn_blocker_info : Keeper_meta_contract.blocker_info option
   ; last_execution : Keeper_turn_runtime_budget.runtime_execution option
-  ; last_provider_timeout_budget : Keeper_turn_runtime_budget.provider_timeout_budget option
   ; degraded_retry_info : Keeper_error_classify.degraded_retry option
   ; runtime_rotation_attempts : Keeper_execution_receipt.runtime_rotation_attempt list
   ; failure_reason : Keeper_turn_fsm.failure_reason option
@@ -38,28 +35,6 @@ let require_last_execution_for_finalize ~keeper_name turn_state =
 let turn_event_bus_manifest_decision
       (summary : Keeper_turn_runtime_budget.turn_event_bus_summary)
   =
-  let overflow =
-    match summary.overflow_imminent with
-    | None -> `Null
-    | Some overflow ->
-      `Assoc
-        [
-          ("estimated_tokens", `Int overflow.estimated_tokens);
-          ("limit_tokens", `Int overflow.limit_tokens);
-        ]
-  in
-  let last_compaction =
-    match summary.last_compaction with
-    | None -> `Null
-    | Some compaction ->
-      `Assoc
-        [
-          ("before_tokens", `Int compaction.before_tokens);
-          ("after_tokens", `Int compaction.after_tokens);
-          ("tokens_freed", `Int compaction.tokens_freed);
-          ("phase_hint", `String compaction.phase_hint);
-        ]
-  in
   `Assoc
     [
       ("correlation_id", Json_util.string_opt_to_json summary.correlation_id);
@@ -67,29 +42,7 @@ let turn_event_bus_manifest_decision
       ("caused_by", Json_util.string_opt_to_json summary.caused_by);
       ("event_count", `Int summary.event_count);
       ("payload_kinds", Json_util.json_string_list summary.payload_kinds);
-      ("overflow_imminent", overflow);
-      ( "context_compact_started_count",
-        `Int summary.context_compact_started_count );
-      ("context_compacted_count", `Int summary.context_compacted_count);
-      ("last_compaction", last_compaction);
     ]
-;;
-
-let runtime_exhaustion_detail_code detail =
-  let contains needle = String_util.contains_substring_ci detail needle in
-  if contains "no_first_token"
-  then "runtime_exhausted_no_first_token"
-  else if contains "http 429" || contains "usage limit" || contains "rate limit"
-  then "runtime_exhausted_rate_limited"
-  else if contains "max_execution_time"
-  then "runtime_exhausted_max_execution_time"
-  else if contains "wall-clock timeout"
-  then "runtime_exhausted_wall_clock_timeout"
-  else if contains "connection closed by peer"
-  then "runtime_exhausted_connection_closed"
-  else if contains "connection refused"
-  then "runtime_exhausted_connection_refused"
-  else "runtime_exhausted_provider_failure"
 ;;
 
 let runtime_exhaustion_reason_code
@@ -102,12 +55,9 @@ let runtime_exhaustion_reason_code
   | Keeper_internal_error.All_providers_failed -> "runtime_exhausted_all_providers_failed"
   | Keeper_internal_error.Candidates_filtered_after_cycles ->
     "runtime_exhausted_candidates_filtered"
-  | Keeper_internal_error.Max_turns_exceeded -> "runtime_exhausted_max_turns"
   | Keeper_internal_error.Session_conflict -> "runtime_exhausted_session_conflict"
-  | Keeper_internal_error.Structural_attempt_timeout _ ->
-    "runtime_exhausted_structural_attempt_timeout"
   | Keeper_internal_error.Capacity_exhausted -> "runtime_exhausted_capacity_exhausted"
-  | Keeper_internal_error.Other_detail detail -> runtime_exhaustion_detail_code detail
+  | Keeper_internal_error.Other_detail _ -> "runtime_exhausted_provider_failure"
 ;;
 
 let registry_reason_of_internal_reason
@@ -123,12 +73,8 @@ let registry_reason_of_internal_reason
     Keeper_meta_contract.All_providers_failed
   | Keeper_internal_error.Candidates_filtered_after_cycles ->
     Keeper_meta_contract.Candidates_filtered_after_cycles
-  | Keeper_internal_error.Max_turns_exceeded ->
-    Keeper_meta_contract.Max_turns_exceeded
   | Keeper_internal_error.Session_conflict ->
     Keeper_meta_contract.Session_conflict
-  | Keeper_internal_error.Structural_attempt_timeout { detail } ->
-    Keeper_meta_contract.Structural_attempt_timeout { detail }
   | Keeper_internal_error.Capacity_exhausted ->
     Keeper_meta_contract.Capacity_exhausted
   | Keeper_internal_error.Other_detail detail ->
@@ -160,17 +106,14 @@ let runtime_exhausted_failure_reason_of_raw_error ~detail raw_error =
   | Some
       ( Keeper_internal_error.Resumable_cli_session _
       | Keeper_internal_error.Accept_rejected _
-      | Keeper_internal_error.Admission_queue_timeout _
-      | Keeper_internal_error.Admission_queue_rejected _
-      | Keeper_internal_error.Turn_timeout _
-      | Keeper_internal_error.Provider_timeout _
-      | Keeper_internal_error.Ambiguous_post_commit _
       (* RFC-0159 Phase A: typed [Internal_*] variants are not
          runtime-exhaustion reasons; they map to opaque
          internal-error events upstream. *)
       | Keeper_internal_error.Internal_unhandled_exception _
       | Keeper_internal_error.Internal_bridge_exception _
-      | Keeper_internal_error.Internal_contract_rejected _ )
+      | Keeper_internal_error.Internal_contract_rejected _
+      | Keeper_internal_error.Incomplete_tool_transcript _
+      | Keeper_internal_error.Receipt_persistence_failed _ )
   | None -> None
 ;;
 
@@ -202,9 +145,6 @@ let registry_failure_reason_of_terminal_reason
          ; runtime_id = None
          ; reason = None
          })
-  | Keeper_turn_disposition.Completion_contract_unsatisfied
-  | Keeper_turn_disposition.Completion_contract_no_progress ->
-    Some (Keeper_registry.Completion_contract_violation { detail })
   | Keeper_turn_disposition.Runtime_attempts_exhausted ->
     Some
       (Keeper_registry.Provider_runtime_error
@@ -219,33 +159,28 @@ let registry_failure_reason_of_terminal_reason
   | Keeper_turn_disposition.External_cancel
   | Keeper_turn_disposition.Input_required
   | Keeper_turn_disposition.Turn_wall_clock_timeout
-  | Keeper_turn_disposition.Turn_budget_exhausted _
-  | Keeper_turn_disposition.Post_commit_ambiguous
   | Keeper_turn_disposition.Unknown _ -> None
 ;;
 
 (** Tracker for matching ToolCalled/ToolCompleted event pairs within a
     single keeper turn. Pure immutable accumulator: a map from tool name to
-    the FIFO list of pending inputs, a list of committed mutating tools, and
-    the first integrity error observed while matching events. *)
+    the FIFO list of pending inputs and the first integrity error observed
+    while matching events. *)
 type turn_tool_event_tracker =
   { pending_tool_inputs : Yojson.Safe.t list StringMap.t
-  ; mutating_tools_committed : string list
+  ; tool_completed_count : int
   ; integrity_error : Agent_sdk.Error.sdk_error option
   }
 
 let create_turn_tool_event_tracker () =
   { pending_tool_inputs = StringMap.empty
-  ; mutating_tools_committed = []
+  ; tool_completed_count = 0
   ; integrity_error = None
   }
 ;;
 
 let turn_tool_event_integrity_error tracker = tracker.integrity_error
-
-let committed_mutating_tools_from_events tracker =
-  Keeper_error_classify.committed_mutating_tools tracker.mutating_tools_committed
-;;
+let turn_tool_completed_count tracker = tracker.tool_completed_count
 
 let push_turn_tool_input tracker tool_name input =
   let inputs =
@@ -275,7 +210,6 @@ let record_unmatched_tool_completed
       ~keeper_name
       ~tool_name
       ~outcome
-      ~tool_committed
   =
   let message =
     Printf.sprintf
@@ -286,29 +220,13 @@ let record_unmatched_tool_completed
       tool_name
   in
   Log.Keeper.error "%s" message;
-  let mutating_tool_committed =
-    tool_committed && Keeper_tool_dispatch_runtime.has_mutating_side_effect tool_name
-  in
-  let tracker =
-    if mutating_tool_committed
-    then { tracker with mutating_tools_committed = tool_name :: tracker.mutating_tools_committed }
-    else tracker
-  in
   match tracker.integrity_error with
   | Some _ -> tracker
   | None ->
-    let base_error = Agent_sdk.Error.Internal message in
-    let error =
-      if mutating_tool_committed
-      then Keeper_error_classify.reclassify_error_after_side_effect ~tool_names:[ tool_name ] base_error
-      else base_error
-    in
-    { tracker with integrity_error = Some error }
+    { tracker with integrity_error = Some (Agent_sdk.Error.Internal message) }
 ;;
 
 let record_turn_tool_events
-      ?(has_mutating_side_effect_with_input =
-        Keeper_tool_dispatch_runtime.has_mutating_side_effect_with_input)
       ~(keeper_name : string)
       (tracker : turn_tool_event_tracker)
       (events : Agent_sdk.Event_bus.event list)
@@ -320,19 +238,9 @@ let record_turn_tool_events
        | Agent_sdk.Event_bus.ToolCalled { tool_name; input; _ } ->
          push_turn_tool_input tracker tool_name input
        | Agent_sdk.Event_bus.ToolCompleted { tool_name; output = Ok _; _ } ->
-         (match pop_turn_tool_input tracker tool_name with
-          | Some input, tracker ->
-            if has_mutating_side_effect_with_input ~tool_name ~input
-            then { tracker with mutating_tools_committed = tool_name :: tracker.mutating_tools_committed }
-            else tracker
-          | None, tracker ->
-            record_unmatched_tool_completed
-              tracker
-              ~keeper_name
-              ~tool_name
-              ~outcome:"ok"
-              ~tool_committed:true)
-       | Agent_sdk.Event_bus.ToolCompleted { tool_name; output = Error _; _ } ->
+         let tracker =
+           { tracker with tool_completed_count = tracker.tool_completed_count + 1 }
+         in
          (match pop_turn_tool_input tracker tool_name with
           | Some _, tracker -> tracker
           | None, tracker ->
@@ -340,20 +248,38 @@ let record_turn_tool_events
               tracker
               ~keeper_name
               ~tool_name
-              ~outcome:"error"
-              ~tool_committed:false)
+              ~outcome:"ok")
+       | Agent_sdk.Event_bus.ToolCompleted { tool_name; output = Error _; _ } ->
+         let tracker =
+           { tracker with tool_completed_count = tracker.tool_completed_count + 1 }
+         in
+         (match pop_turn_tool_input tracker tool_name with
+          | Some _, tracker -> tracker
+          | None, tracker ->
+            record_unmatched_tool_completed
+              tracker
+              ~keeper_name
+              ~tool_name
+              ~outcome:"error")
        | _ -> tracker)
     tracker
     events
 ;;
 
-(** Record the observation for a streaming turn that was cancelled.
-    [cancel_reason] distinguishes the source:
-      - ["attempt_watchdog_safety_deadline"] — legacy watchdog timeout receipt
-      - ["supervisor_stop"] — supervisor requested stop
-      - ["external_cancel"] — external fiber cancellation *)
+type streaming_cancellation_source =
+  | Supervisor_stop
+  | External_cancel
+
+let streaming_cancellation_source_to_code = function
+  | Supervisor_stop -> "supervisor_stop"
+  | External_cancel -> "external_cancel"
+
+let streaming_cancellation_source_to_fsm = function
+  | Supervisor_stop -> Keeper_turn_fsm.Cancelled_supervisor_stop
+  | External_cancel -> Keeper_turn_fsm.Cancelled_external
+
+(** Record the observation for a streaming turn that was cancelled. *)
 let record_streaming_cancelled_observation
-      ?(cancel_reason : string = "external_cancel")
       ~(config : Workspace.config)
       ~(run_meta : Keeper_meta_contract.keeper_meta)
       ~(run_generation : int)
@@ -367,11 +293,11 @@ let record_streaming_cancelled_observation
     | Some entry -> Atomic.get entry.fiber_stop
     | None -> false
   in
+  let cancellation_source =
+    if fiber_stop_set then Supervisor_stop else External_cancel
+  in
   let terminal_reason_code =
-    (* Priority: explicit cancel_reason > fiber_stop inference *)
-    if cancel_reason <> "external_cancel"
-    then cancel_reason
-    else if fiber_stop_set then "supervisor_stop" else "external_cancel"
+    streaming_cancellation_source_to_code cancellation_source
   in
   if fiber_stop_set
   then
@@ -393,34 +319,10 @@ let record_streaming_cancelled_observation
     ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
     ~keeper_turn_id
     ();
-  let cancelled_variant =
-    match terminal_reason_code with
-    | "attempt_watchdog_safety_deadline" ->
-      (* Legacy receipts from the removed whole-run attempt watchdog were
-         environmental terminals (provider stalled mid-stream), not same-turn
-         re-dispatch storms.
-         [Keeper_turn_livelock.classify_and_decide] keys [Stuck_age_exceeded]
-         off [first_started_at], i.e. the FIRST dispatch of this turn_id; a
-         retry after the watchdog cancel inherits that ~watchdog-budget-old
-         timestamp and trips the stuck-age gate on the very next dispatch,
-         routing the keeper to operator_pause (human-gated resume). That
-         pause on a transport stall contradicts the invariant that a keeper
-         keeps acting autonomously. Reset the livelock entry so the retry is
-         classified Fresh. Rapid re-dispatch storm detection is unaffected:
-         only legacy watchdog/provider_timeout receipts clear the counter, and
-         only for the affected keeper. Current runtime code must not emit this
-         reason from a MASC-created wall-clock timeout around tool execution. *)
-      Keeper_turn_livelock.reset_keeper_livelock
-        ~base_path:config.base_path
-        ~keeper:run_meta.name;
-      Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_provider_timeout
-    | _ ->
-      (* supervisor_stop, external_cancel, or any future reason *)
-      Keeper_turn_fsm.Cancelled Keeper_turn_fsm.Cancelled_supervisor_stop
-  in
   Keeper_turn_fsm.emit_transition
     ~keeper_name:run_meta.name
     ~turn_id:keeper_turn_id
     ~prev:Keeper_turn_fsm.Streaming
-    cancelled_variant
+    (Keeper_turn_fsm.Cancelled
+       (streaming_cancellation_source_to_fsm cancellation_source))
 ;;

@@ -1,9 +1,9 @@
 (** Keeper_stream_media_accum — RFC-0301 item 6.
 
     Accumulates model-generated media streamed during a keeper turn so the turn's
-    persist path can record it as reload-visible chat blocks. Parallel to
-    {!Keeper_stream_text_accum}: fed the same raw OAS stream events, it mirrors the
-    bridge's media validity rules for durable reload persistence. It collects media
+    persist path can record it as reload-visible chat blocks. Fed the same raw OAS
+    stream events, it mirrors the bridge's media validity rules for durable reload
+    persistence. It collects media
     payload per block index, rejects media deltas for tool/invalid blocks, preserves
     the first media metadata for an active block, and finalizes at either
     [ContentBlockStop] or [MessageStop]. {!Keeper_chat_oas_stream_bridge} surfaces

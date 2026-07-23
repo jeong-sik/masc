@@ -86,7 +86,8 @@ let read_file path =
 
 let repo_runtime_toml = "# repo runtime seed\n"
 let local_runtime_toml = "# local runtime seed\n"
-let repo_model_catalog_toml = "[[models]]\nid_prefix = \"repo-runtime\"\n"
+let repo_model_catalog_overlay_toml =
+  "[[models]]\nid_prefix = \"repo-runtime\"\nprovider_name = \"repo-provider\"\n"
 
 let contains_substring haystack needle =
   let haystack_len = String.length haystack in
@@ -156,312 +157,368 @@ let make_config_root root =
   mkdir_p (Filename.concat config "prompts");
   mkdir_p (Filename.concat config "keepers");
   mkdir_p (Filename.concat config "personas");
-  write_file (Filename.concat root "oas-models.toml") repo_model_catalog_toml;
+  write_file
+    (Filename.concat config "oas-models-overlay.toml")
+    repo_model_catalog_overlay_toml;
+  write_file (Filename.concat root "oas-models.toml") "legacy full catalog must be ignored";
   write_file (Filename.concat config "runtime.toml") repo_runtime_toml;
-  write_file (Filename.concat config "tool_policy.toml")
-    "[groups.base]\ntools = [\"keeper_time_now\"]\n";
   write_file (Filename.concat config "prompts/keeper.unified.system.md") "prompt";
-  write_file (Filename.concat config "keepers/example.toml") "[keeper]\ngoal = \"example\"\n";
+  write_file
+    (Filename.concat config "keepers/example.toml")
+    "[keeper]\nautoboot_enabled = true\n";
   write_file (Filename.concat config "personas/example.txt") "persona";
   config
 
-let model_catalog_resolution_source_label
-    (resolution : Server_runtime_bootstrap.model_catalog_env_resolution)
-  =
-  Server_runtime_bootstrap.model_catalog_env_source_to_string
-    resolution.Server_runtime_bootstrap.source
-
-let capability_manifest_resolution_source_label
-    (resolution : Server_runtime_bootstrap.capability_manifest_env_resolution)
-  =
-  Server_runtime_bootstrap.capability_manifest_env_source_to_string
-    resolution.Server_runtime_bootstrap.source
-
-let test_model_catalog_resolution_prefers_explicit_env () =
+let test_model_catalog_configuration_installs_explicit_env_override () =
   let env = function
     | "OAS_MODEL_CATALOG" -> Some "/explicit/oas-models.toml"
-    | "MASC_MODEL_CATALOG" -> Some "/ignored/masc-models.toml"
     | _ -> None
   in
-  (match
-     Server_runtime_bootstrap.resolve_oas_model_catalog_path
-       ~env
-       ~cwd:"/tmp/outside"
-       ~argv0:"/tmp/repo/_build/default/bin/main_eio.exe"
-       ()
-   with
-   | None -> Alcotest.fail "expected explicit OAS_MODEL_CATALOG resolution"
-   | Some resolution ->
-     Alcotest.(check string)
-       "source"
-       "OAS_MODEL_CATALOG"
-       (model_catalog_resolution_source_label resolution);
-     Alcotest.(check string)
-       "path"
-       "/explicit/oas-models.toml"
-       resolution.Server_runtime_bootstrap.path);
-  let env = function
-    | "MASC_MODEL_CATALOG" -> Some "/explicit/masc-models.toml"
-    | _ -> None
-  in
-  match
-    Server_runtime_bootstrap.resolve_oas_model_catalog_path
+  let load_calls = ref [] in
+  let set_calls = ref 0 in
+  let result =
+    Server_runtime_bootstrap.configure_oas_model_catalog_env
       ~env
-      ~cwd:"/tmp/outside"
-      ~argv0:"/tmp/repo/_build/default/bin/main_eio.exe"
+      ~load_catalog:(fun path ->
+        load_calls := path :: !load_calls;
+        Ok Llm_provider.Model_catalog.empty)
+      ~set_catalog:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_calls)
       ()
-  with
-  | None -> Alcotest.fail "expected MASC_MODEL_CATALOG resolution"
-  | Some resolution ->
-    Alcotest.(check string)
-      "source"
-      "MASC_MODEL_CATALOG"
-      (model_catalog_resolution_source_label resolution);
-    Alcotest.(check string)
-	      "path"
-	      "/explicit/masc-models.toml"
-	      resolution.Server_runtime_bootstrap.path
+  in
+  Alcotest.(check (option string))
+    "explicit override path"
+    (Some "/explicit/oas-models.toml")
+    result;
+  Alcotest.(check (list string))
+    "load explicit catalog"
+    [ "/explicit/oas-models.toml" ]
+    (List.rev !load_calls);
+  Alcotest.(check int) "set catalog override" 1 !set_calls
 
-let test_capability_manifest_resolution_prefers_explicit_env () =
+let test_model_catalog_configuration_ignores_legacy_discovery_inputs () =
+  let catalog_calls = ref 0 in
+  let load_calls = ref 0 in
+  let set_calls = ref 0 in
   let env = function
-    | "OAS_CAPABILITY_MANIFEST" -> Some "/explicit/capability-manifest.json"
+    | "MASC_MODEL_CATALOG" -> Some "/legacy/masc-models.toml"
     | _ -> None
   in
-  with_temp_dir "capability-manifest-bootstrap-explicit" (fun dir ->
-    match
-      Server_runtime_bootstrap.resolve_oas_capability_manifest_path
-        ~env
-        ~config_root:dir
-        ()
-    with
-    | None -> Alcotest.fail "expected explicit OAS_CAPABILITY_MANIFEST resolution"
-    | Some resolution ->
-      Alcotest.(check string)
-        "source"
-        "OAS_CAPABILITY_MANIFEST"
-        (capability_manifest_resolution_source_label resolution);
-      Alcotest.(check string)
-        "path"
-        "/explicit/capability-manifest.json"
-        resolution.Server_runtime_bootstrap.path)
+  let result =
+    Server_runtime_bootstrap.configure_oas_model_catalog_env
+      ~env
+      ~agent_sdk_catalog:(fun () ->
+        incr catalog_calls;
+        Some Llm_provider.Model_catalog.empty)
+      ~load_catalog:(fun (_ : string) ->
+        incr load_calls;
+        Ok Llm_provider.Model_catalog.empty)
+      ~set_catalog:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_calls)
+      ()
+  in
+  Alcotest.(check bool) "ambient catalog selected" true (Option.is_none result);
+  Alcotest.(check int) "ambient catalog queried" 1 !catalog_calls;
+  Alcotest.(check int) "legacy catalog not loaded" 0 !load_calls;
+  Alcotest.(check int) "legacy catalog not installed" 0 !set_calls
 
-let test_capability_manifest_configuration_uses_config_root_file () =
-  with_temp_dir "capability-manifest-bootstrap-config-root" (fun config_root ->
-    let manifest = Filename.concat config_root "capability-manifest.json" in
-    write_file manifest {|{"schema_version":1,"models":[]}|};
-    let putenv_calls = ref [] in
-    let clear_calls = ref 0 in
-    let load_calls = ref [] in
-    let set_calls = ref 0 in
-    let env _ = None in
-    let result =
-      Server_runtime_bootstrap.configure_oas_capability_manifest_env
-        ~env
-        ~config_root
-        ~putenv:(fun name value -> putenv_calls := (name, value) :: !putenv_calls)
-        ~clear_manifest:(fun () -> incr clear_calls)
-        ~load_manifest:(fun path ->
-          load_calls := path :: !load_calls;
-          Some [])
-        ~set_manifest:(fun (_ : Llm_provider.Capability_manifest.t) -> incr set_calls)
-        ()
-    in
-    (match result with
-     | None -> Alcotest.fail "expected config-root capability manifest resolution"
-     | Some resolution ->
-       Alcotest.(check string)
-         "source"
-         "config-root:capability-manifest.json"
-         (capability_manifest_resolution_source_label resolution);
-       Alcotest.(check string)
-         "path"
-         (canonical_path manifest)
-         (canonical_path resolution.Server_runtime_bootstrap.path));
-    Alcotest.(check (list (pair string string)))
-      "putenv"
-      [ "OAS_CAPABILITY_MANIFEST", manifest ]
-      (List.rev !putenv_calls);
-    Alcotest.(check int) "clear manifest cache" 1 !clear_calls;
-    Alcotest.(check (list string)) "load manifest" [ manifest ] (List.rev !load_calls);
-    Alcotest.(check int) "set manifest override" 1 !set_calls)
-
-let test_model_catalog_configuration_installs_resolved_catalog () =
-  with_temp_dir "model-catalog-bootstrap-install" (fun dir ->
-    let repo = Filename.concat dir "repo" in
-    let cwd = Filename.concat dir "base" in
-    let bin = Filename.concat repo "_build/default/bin/main_eio.exe" in
-    let catalog = Filename.concat repo "oas-models.toml" in
-    mkdir_p (Filename.dirname bin);
-    mkdir_p cwd;
-    write_file bin "";
-    write_file catalog "[[models]]\nid_prefix = \"example\"\n";
-    let putenv_calls = ref [] in
-    let clear_calls = ref 0 in
-    let load_calls = ref [] in
-    let set_calls = ref 0 in
-    let result =
-      Server_runtime_bootstrap.configure_oas_model_catalog_env
-        ~env:(fun _ -> None)
-        ~cwd
-        ~argv0:bin
-        ~putenv:(fun name value -> putenv_calls := (name, value) :: !putenv_calls)
-        ~clear_catalog:(fun () -> incr clear_calls)
-        ~load_catalog:(fun path ->
-          load_calls := path :: !load_calls;
-          Some Llm_provider.Model_catalog.empty)
-        ~set_catalog:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_calls)
-        ()
-    in
-    (match result with
-     | None -> Alcotest.fail "expected executable-parent model catalog resolution"
-     | Some resolution ->
-       Alcotest.(check string)
-         "source"
-         "argv0-parent:oas-models.toml"
-         (model_catalog_resolution_source_label resolution);
-       Alcotest.(check string)
-         "path"
-         (canonical_path catalog)
-         (canonical_path resolution.Server_runtime_bootstrap.path));
-    Alcotest.(check (list (pair string string)))
-      "putenv"
-      [ "OAS_MODEL_CATALOG", catalog ]
-      (List.rev !putenv_calls);
-    Alcotest.(check int) "clear catalog cache" 1 !clear_calls;
-    Alcotest.(check (list string)) "load catalog" [ catalog ] (List.rev !load_calls);
-    Alcotest.(check int) "set catalog override" 1 !set_calls)
-
-let test_model_catalog_configuration_prefers_config_root_catalog () =
-  with_temp_dir "model-catalog-bootstrap-config-root" (fun dir ->
+let test_model_catalog_overlay_installs_config_root_overlay () =
+  with_temp_dir "model-catalog-overlay-install" (fun dir ->
     let config_root = Filename.concat dir "config-root" in
-    let outside = Filename.concat dir "outside" in
-    let catalog = Filename.concat config_root "oas-models.toml" in
+    let overlay = Filename.concat config_root "oas-models-overlay.toml" in
     mkdir_p config_root;
-    mkdir_p outside;
-    write_file catalog "[[models]]\nid_prefix = \"config-root-runtime\"\n";
-    let putenv_calls = ref [] in
-    let clear_calls = ref 0 in
+    write_file overlay "[[models]]\nid_prefix = \"deployment-delta\"\n";
     let load_calls = ref [] in
-    let set_calls = ref 0 in
+    let set_overlay_calls = ref 0 in
     let result =
-      Server_runtime_bootstrap.configure_oas_model_catalog_env
-        ~env:(fun _ -> None)
+      Server_runtime_bootstrap.configure_oas_model_catalog_overlay
         ~config_root
-        ~cwd:outside
-        ~argv0:(Filename.concat outside "main_eio.exe")
-        ~putenv:(fun name value -> putenv_calls := (name, value) :: !putenv_calls)
-        ~clear_catalog:(fun () -> incr clear_calls)
         ~load_catalog:(fun path ->
           load_calls := path :: !load_calls;
-          Some Llm_provider.Model_catalog.empty)
-        ~set_catalog:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_calls)
+          Ok Llm_provider.Model_catalog.empty)
+        ~set_overlay:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_overlay_calls)
         ()
     in
     (match result with
-     | None -> Alcotest.fail "expected config-root model catalog resolution"
-     | Some resolution ->
-       Alcotest.(check string)
-         "source"
-         "config-root:oas-models.toml"
-         (model_catalog_resolution_source_label resolution);
-       Alcotest.(check string)
-         "path"
-         (canonical_path catalog)
-         (canonical_path resolution.Server_runtime_bootstrap.path));
-    Alcotest.(check (list (pair string string)))
-      "putenv"
-      [ "OAS_MODEL_CATALOG", catalog ]
-      (List.rev !putenv_calls);
-    Alcotest.(check int) "clear catalog cache" 1 !clear_calls;
-    Alcotest.(check (list string)) "load catalog" [ catalog ] (List.rev !load_calls);
-    Alcotest.(check int) "set catalog override" 1 !set_calls)
+     | None -> Alcotest.fail "expected config-root overlay resolution"
+     | Some path ->
+       Alcotest.(check string) "path" (canonical_path overlay) (canonical_path path));
+    Alcotest.(check (list string)) "load overlay" [ overlay ] (List.rev !load_calls);
+    Alcotest.(check int) "set overlay" 1 !set_overlay_calls)
 
-let test_model_catalog_resolution_uses_executable_parent_when_cwd_is_base_path () =
-  with_temp_dir "model-catalog-bootstrap" (fun dir ->
-    let repo = Filename.concat dir "repo" in
-    let bin_dir = Filename.concat repo "_build/default/bin" in
-    mkdir_p bin_dir;
-    let outside = Filename.concat dir "base-path" in
-    Unix.mkdir outside 0o755;
-    let catalog = Filename.concat repo "oas-models.toml" in
-    write_file catalog "# repo-local OAS catalog\n";
-    let argv0 = Filename.concat bin_dir "main_eio.exe" in
-    let env _ = None in
+let test_model_catalog_overlay_absent_is_noop () =
+  with_temp_dir "model-catalog-overlay-absent" (fun dir ->
+    let config_root = Filename.concat dir "config-root" in
+    mkdir_p config_root;
+    let load_calls = ref [] in
+    let set_overlay_calls = ref 0 in
+    let result =
+      Server_runtime_bootstrap.configure_oas_model_catalog_overlay
+        ~config_root
+        ~load_catalog:(fun path ->
+          load_calls := path :: !load_calls;
+          Ok Llm_provider.Model_catalog.empty)
+        ~set_overlay:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_overlay_calls)
+        ()
+    in
+    Alcotest.(check bool) "no overlay resolved" true (Option.is_none result);
+    Alcotest.(check (list string)) "no load" [] !load_calls;
+    Alcotest.(check int) "no install" 0 !set_overlay_calls)
+
+let test_model_catalog_overlay_invalid_fails_loud () =
+  with_temp_dir "model-catalog-overlay-invalid" (fun dir ->
+    let config_root = Filename.concat dir "config-root" in
+    let overlay = Filename.concat config_root "oas-models-overlay.toml" in
+    mkdir_p config_root;
+    write_file overlay "not toml";
+    let set_overlay_calls = ref 0 in
     match
-      Server_runtime_bootstrap.resolve_oas_model_catalog_path
-        ~env
-        ~cwd:outside
-        ~argv0
+      Server_runtime_bootstrap.configure_oas_model_catalog_overlay
+        ~config_root
+        ~load_catalog:(fun (_ : string) -> Error "parse failed")
+        ~set_overlay:(fun (_ : Llm_provider.Model_catalog.t) -> incr set_overlay_calls)
         ()
     with
-    | None ->
-      Alcotest.fail
-        "expected repo oas-models.toml from executable parent when cwd has no catalog"
-    | Some resolution ->
-      Alcotest.(check string)
-        "source"
-        "argv0-parent:oas-models.toml"
-        (model_catalog_resolution_source_label resolution);
-      Alcotest.(check string)
-        "path"
-        (canonical_path catalog)
-        (canonical_path resolution.Server_runtime_bootstrap.path))
+    | (_ : string option) ->
+      Alcotest.fail "expected Config_error for invalid overlay"
+    | exception Env_config_core.Config_error message ->
+      Alcotest.(check bool)
+        "error names overlay path"
+        true
+        (contains_substring message "oas-models-overlay.toml");
+      Alcotest.(check int) "no install" 0 !set_overlay_calls)
 
-let test_model_catalog_resolution_resolves_relative_argv0_from_process_cwd () =
-  with_temp_dir "model-catalog-bootstrap-relative" (fun dir ->
-    let repo = Filename.concat dir "repo" in
-    let bin_dir = Filename.concat repo "_build/default/bin" in
-    mkdir_p bin_dir;
-    let outside = Filename.concat dir "base-path" in
-    Unix.mkdir outside 0o755;
-    let catalog = Filename.concat repo "oas-models.toml" in
-    write_file catalog "# repo-local OAS catalog\n";
-    let env _ = None in
-    with_cwd repo @@ fun () ->
-    match
-      Server_runtime_bootstrap.resolve_oas_model_catalog_path
-        ~env
-        ~cwd:outside
-        ~argv0:"./_build/default/bin/main_eio.exe"
-        ()
-    with
-    | None ->
-      Alcotest.fail
-        "expected repo oas-models.toml from relative executable argv0"
-    | Some resolution ->
-      Alcotest.(check string)
-        "source"
-        "argv0-parent:oas-models.toml"
-        (model_catalog_resolution_source_label resolution);
-      Alcotest.(check string)
-        "path"
-        (canonical_path catalog)
-        (canonical_path resolution.Server_runtime_bootstrap.path))
+let test_explicit_model_catalog_replacement_precedes_overlay () =
+  with_temp_dir "model-catalog-explicit-precedence" (fun config_root ->
+    let overlay_path = Filename.concat config_root "oas-models-overlay.toml" in
+    write_file overlay_path "overlay fixture";
+    let parse source toml =
+      match Llm_provider.Model_catalog.of_toml_string ~source toml with
+      | Ok catalog -> catalog
+      | Error detail -> Alcotest.failf "%s catalog fixture invalid: %s" source detail
+    in
+    let explicit =
+      parse
+        "explicit"
+        "[[models]]\nid_prefix = \"explicit-model\"\nbase = \"openai_chat\"\n"
+    in
+    let overlay =
+      parse
+        "overlay"
+        "[[models]]\nid_prefix = \"overlay-model\"\nbase = \"openai_chat\"\n"
+    in
+    let previous = Llm_provider.Model_catalog.global () in
+    Fun.protect
+      ~finally:(fun () ->
+        match previous with
+        | Some catalog -> Llm_provider.Model_catalog.set_global catalog
+        | None -> Llm_provider.Model_catalog.clear_global ())
+      (fun () ->
+        Llm_provider.Model_catalog.clear_global ();
+        ignore
+          (Server_runtime_bootstrap.configure_oas_model_catalog_env
+             ~env:(function
+               | "OAS_MODEL_CATALOG" -> Some "/explicit/catalog.toml"
+               | _ -> None)
+             ~load_catalog:(fun _ -> Ok explicit)
+             ());
+        ignore
+          (Server_runtime_bootstrap.configure_oas_model_catalog_overlay
+             ~config_root
+             ~load_catalog:(fun _ -> Ok overlay)
+             ());
+        match Llm_provider.Model_catalog.global () with
+        | None -> Alcotest.fail "expected explicit global catalog"
+        | Some effective ->
+          Alcotest.(check bool)
+            "explicit row remains"
+            true
+            (Option.is_some
+               (Llm_provider.Model_catalog.lookup effective "explicit-model"));
+          Alcotest.(check bool)
+            "overlay row does not override explicit full replacement"
+            true
+            (Option.is_none
+               (Llm_provider.Model_catalog.lookup effective "overlay-model"))))
 
 let test_model_catalog_configuration_delegates_to_agent_sdk_ambient () =
-  with_temp_dir "model-catalog-bootstrap-agent-sdk" (fun dir ->
-    let putenv_calls = ref [] in
-    let preload_calls = ref 0 in
-    let env _ = None in
-    let result =
-      Server_runtime_bootstrap.configure_oas_model_catalog_env
-        ~env
-        ~cwd:dir
-        ~argv0:(Filename.concat dir "main_eio.exe")
-        ~putenv:(fun name value -> putenv_calls := (name, value) :: !putenv_calls)
-        ~preload_agent_sdk_catalog:(fun () -> incr preload_calls)
-        ~agent_sdk_catalog:(fun () -> Some Llm_provider.Model_catalog.empty)
+  let env _ = None in
+  let result =
+    Server_runtime_bootstrap.configure_oas_model_catalog_env
+      ~env
+      ~agent_sdk_catalog:(fun () -> Some Llm_provider.Model_catalog.empty)
+      ()
+  in
+  Alcotest.(check bool) "no explicit path resolution" true (Option.is_none result)
+
+let exact_output_lane id slot_ids : Runtime_schema.exact_output_lane_decl =
+  { id; slot_ids }
+;;
+
+let test_exact_output_backfill_adds_seed_lane_for_legacy_config () =
+  let seed_lanes =
+    [ exact_output_lane "compaction_exact" [ "deepseek.deepseek-v4-pro" ] ]
+  in
+  let lanes, backfilled =
+    Server_runtime_bootstrap.backfill_required_exact_output_lanes ~seed_lanes []
+  in
+  Alcotest.(check bool) "backfill reported" true backfilled;
+  match lanes with
+  | [ lane ] ->
+    Alcotest.(check string) "seed lane id" "compaction_exact" lane.id;
+    Alcotest.(check (list string))
+      "seed lane slots"
+      [ "deepseek.deepseek-v4-pro" ]
+      lane.slot_ids
+  | _ -> Alcotest.fail "expected exactly the backfilled seed lane"
+
+let test_exact_output_backfill_keeps_operator_declaration () =
+  let operator_lane = exact_output_lane "compaction_exact" [ "operator.target-a" ] in
+  let seed_lanes =
+    [ exact_output_lane "compaction_exact" [ "deepseek.deepseek-v4-pro" ] ]
+  in
+  let lanes, backfilled =
+    Server_runtime_bootstrap.backfill_required_exact_output_lanes
+      ~seed_lanes
+      [ operator_lane ]
+  in
+  Alcotest.(check bool) "no backfill" false backfilled;
+  match lanes with
+  | [ lane ] ->
+    Alcotest.(check (list string))
+      "operator slots win"
+      [ "operator.target-a" ]
+      lane.slot_ids
+  | _ -> Alcotest.fail "expected the operator lane only"
+
+let test_exact_output_catalog_merge_unions_and_overlay_wins () =
+  let base =
+    "[[providers]]\n\
+     id = \"deepseek\"\n\
+     base_url = \"https://base.example\"\n\
+     \n\
+     [[targets]]\n\
+     id = \"deepseek.deepseek-v4-pro\"\n\
+     provider_ref = \"deepseek\"\n\
+     model_id = \"deepseek-v4-pro\"\n"
+  in
+  let overlay =
+    "[[providers]]\n\
+     id = \"deepseek\"\n\
+     base_url = \"https://overlay.example\"\n\
+     \n\
+     [[targets]]\n\
+     id = \"deployment.extra-target\"\n\
+     provider_ref = \"deepseek\"\n\
+     model_id = \"extra-model\"\n"
+  in
+  match
+    Server_runtime_bootstrap.merge_catalog_overlay_toml
+      ~base_contents:base
+      ~overlay_contents:overlay
+  with
+  | Error detail -> Alcotest.failf "catalog merge failed: %s" detail
+  | Ok merged ->
+    Alcotest.(check bool)
+      "overlay row replaces same-id base row"
+      true
+      (contains_substring merged "https://overlay.example");
+    Alcotest.(check bool)
+      "superseded base row is gone"
+      false
+      (contains_substring merged "https://base.example");
+    Alcotest.(check bool)
+      "base-only target is retained"
+      true
+      (contains_substring merged "deepseek.deepseek-v4-pro");
+    Alcotest.(check bool)
+      "overlay-only target is added"
+      true
+      (contains_substring merged "deployment.extra-target")
+
+let test_exact_output_resolver_overlay_honors_oas_model_catalog () =
+  with_temp_dir "exact-output-full-catalog" (fun dir ->
+    let config_root = Filename.concat dir "config" in
+    mkdir_p config_root;
+    let full_catalog = Filename.concat dir "full-catalog.toml" in
+    write_file full_catalog "[[providers]]\nid = \"replacement-provider\"\n";
+    write_file
+      (Filename.concat config_root "oas-models-overlay.toml")
+      "[[targets]]\n\
+       id = \"deployment.target\"\n\
+       provider_ref = \"replacement-provider\"\n\
+       model_id = \"replacement-model\"\n";
+    let overlay, _description =
+      Server_runtime_bootstrap.exact_output_resolver_overlay
+        ~config_root
+        ~env:(function
+          | "OAS_MODEL_CATALOG" -> Some full_catalog
+          | _ -> None)
         ()
     in
-    Alcotest.(check bool) "no explicit path resolution" true (Option.is_none result);
-    Alcotest.(check int) "preload called once" 1 !preload_calls;
-    Alcotest.(check int) "does not write OAS_MODEL_CATALOG" 0
-      (List.length !putenv_calls))
+    match overlay with
+    | None -> Alcotest.fail "expected a resolver overlay for OAS_MODEL_CATALOG"
+    | Some (overlay : Agent_sdk.Exact_output.catalog_overlay) ->
+      Alcotest.(check bool)
+        "full replacement rows feed the resolver"
+        true
+        (contains_substring overlay.contents "replacement-provider");
+      Alcotest.(check bool)
+        "deployment overlay still applies on top"
+        true
+        (contains_substring overlay.contents "deployment.target"))
+
+let test_exact_output_resolver_overlay_full_catalog_only () =
+  with_temp_dir "exact-output-full-catalog-only" (fun dir ->
+    let config_root = Filename.concat dir "config" in
+    mkdir_p config_root;
+    let full_catalog = Filename.concat dir "full-catalog.toml" in
+    write_file full_catalog "[[providers]]\nid = \"replacement-provider\"\n";
+    let overlay, _description =
+      Server_runtime_bootstrap.exact_output_resolver_overlay
+        ~config_root
+        ~env:(function
+          | "OAS_MODEL_CATALOG" -> Some full_catalog
+          | _ -> None)
+        ()
+    in
+    match overlay with
+    | None -> Alcotest.fail "expected a resolver overlay for OAS_MODEL_CATALOG"
+    | Some (overlay : Agent_sdk.Exact_output.catalog_overlay) ->
+      Alcotest.(check bool)
+        "full replacement rows feed the resolver"
+        true
+        (contains_substring overlay.contents "replacement-provider"))
+
+let test_exact_output_resolver_overlay_defaults_to_config_root_overlay () =
+  with_temp_dir "exact-output-overlay-only" (fun dir ->
+    let config_root = Filename.concat dir "config" in
+    mkdir_p config_root;
+    write_file
+      (Filename.concat config_root "oas-models-overlay.toml")
+      "[[targets]]\n\
+       id = \"deployment.target\"\n\
+       provider_ref = \"deepseek\"\n\
+       model_id = \"deepseek-v4-pro\"\n";
+    let overlay, _description =
+      Server_runtime_bootstrap.exact_output_resolver_overlay
+        ~config_root
+        ~env:(fun _ -> None)
+        ()
+    in
+    match overlay with
+    | None -> Alcotest.fail "expected the config-root overlay"
+    | Some (overlay : Agent_sdk.Exact_output.catalog_overlay) ->
+      Alcotest.(check bool)
+        "config-root overlay feeds the resolver"
+        true
+        (contains_substring overlay.contents "deployment.target"))
+
 
 let write_config_root_keeper_toml config_root name =
   write_file
     (Filename.concat (Filename.concat config_root "keepers") (name ^ ".toml"))
-    (Printf.sprintf "[keeper]\ngoal = \"goal-%s\"\n" name)
+    (Printf.sprintf
+       "[keeper]\ninstructions = \"instructions-%s\"\nautoboot_enabled = true\n"
+       name)
 
 let fixture_runtime_id () =
   match Runtime.get_default_runtime () with
@@ -476,9 +533,10 @@ let write_basepath_keeper_toml base_path name =
   mkdir_p keepers_dir;
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
-    {|[keeper]
-goal = "example"
+{|[keeper]
+instructions = "example"
 proactive_enabled = false
+autoboot_enabled = true
 |}
 let find_free_port_from start =
   let rec loop attempts port =
@@ -947,10 +1005,14 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
       Alcotest.(check bool) "config root created" true (Sys.is_directory config_root);
       Alcotest.(check string) "runtime copied" repo_runtime_toml
         (read_file (Filename.concat config_root "runtime.toml"));
-      Alcotest.(check bool) "tool policy not copied (deleted module)" false
-        (Sys.file_exists (Filename.concat config_root "tool_policy.toml"));
-      Alcotest.(check string) "model catalog copied" repo_model_catalog_toml
-        (read_file (Filename.concat config_root "oas-models.toml"));
+      Alcotest.(check string)
+        "model catalog overlay copied"
+        repo_model_catalog_overlay_toml
+        (read_file (Filename.concat config_root "oas-models-overlay.toml"));
+      Alcotest.(check bool)
+        "legacy full model catalog not copied"
+        false
+        (Sys.file_exists (Filename.concat config_root "oas-models.toml"));
       Alcotest.(check bool) "prompt copied" true
         (Sys.file_exists
            (Filename.concat config_root "prompts/keeper.unified.system.md"));
@@ -959,7 +1021,7 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
       Alcotest.(check bool) "repo keeper TOML not copied" false
         (Sys.file_exists (Filename.concat config_root "keepers/example.toml")))
 
-let test_bootstrap_base_path_config_root_backfills_missing_prompts_and_catalog () =
+let test_bootstrap_base_path_config_root_backfills_missing_prompts_and_overlay () =
   with_temp_dir "startup-config-preserve" (fun dir ->
       let repo = Filename.concat dir "repo" in
       mkdir_p repo;
@@ -985,12 +1047,17 @@ let test_bootstrap_base_path_config_root_backfills_missing_prompts_and_catalog (
            (Filename.concat config_root "prompts/keeper.unified.system.md"));
       Alcotest.(check string) "backfilled prompt content" "prompt"
         (read_file (Filename.concat config_root "prompts/keeper.unified.system.md"));
-      Alcotest.(check string) "model catalog backfilled" repo_model_catalog_toml
-        (read_file (Filename.concat config_root "oas-models.toml"));
+      Alcotest.(check string)
+        "model catalog overlay backfilled"
+        repo_model_catalog_overlay_toml
+        (read_file (Filename.concat config_root "oas-models-overlay.toml"));
+      Alcotest.(check bool)
+        "legacy full model catalog not backfilled"
+        false
+        (Sys.file_exists (Filename.concat config_root "oas-models.toml"));
       Alcotest.(check bool) "versioned persona not resurrected" false
         (Sys.file_exists (Filename.concat config_root "personas/example.txt"));
-      Alcotest.(check bool) "tool policy not backfilled" false
-        (Sys.file_exists (Filename.concat config_root "tool_policy.toml")))
+      ())
 
 let test_bootstrap_base_path_config_root_skips_explicit_config_override () =
   with_temp_dir "startup-config-explicit" (fun dir ->
@@ -1015,8 +1082,6 @@ let test_startup_config_resolution_defaults_to_bootstrapped_root () =
       mkdir_p (Filename.concat config_root "keepers");
       mkdir_p (Filename.concat config_root "personas");
       write_file (Filename.concat config_root "runtime.toml") "";
-      write_file (Filename.concat config_root "tool_policy.toml")
-        "[groups.base]\ntools = [\"keeper_time_now\"]\n";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       let resolution =
         Server_runtime_bootstrap.startup_config_resolution ~base_path
@@ -1095,8 +1160,6 @@ let test_bootstrap_empty_mode_creates_scaffold_without_files () =
         (Sys.is_directory (Filename.concat config_root "prompts"));
       Alcotest.(check bool) "runtime not copied" false
         (Sys.file_exists (Filename.concat config_root "runtime.toml"));
-      Alcotest.(check bool) "tool policy not copied" false
-        (Sys.file_exists (Filename.concat config_root "tool_policy.toml"));
       Alcotest.(check bool) "keeper not copied" false
         (Sys.file_exists (Filename.concat config_root "keepers/example.toml")))
 
@@ -1120,13 +1183,13 @@ let test_constructor_is_pure () =
       let agents_dir = Workspace.agents_dir (Workspace.default_config dir) in
       Fs_compat.mkdir_p agents_dir;
       write_file (Filename.concat agents_dir "alice.json") "{}";
-      let state = Mcp_server.create_state ~base_path:dir in
+      let state = Mcp_server.For_testing.create_state ~base_path:dir in
       Alcotest.(check int) "constructor does not restore persisted sessions" 0
         (List.length (Session.connected_agents state.Mcp_server.session_registry)))
 
 let test_restore_persisted_sessions_uses_flat_agents_dir () =
   with_temp_dir "startup-scope" (fun dir ->
-      let state = Mcp_server.create_state ~base_path:dir in
+      let state = Mcp_server.For_testing.create_state ~base_path:dir in
       let agents = Workspace.agents_dir (Mcp_server.workspace_config state) in
       Fs_compat.mkdir_p agents;
       write_file (Filename.concat agents "test-agent.json") "{}";
@@ -1157,7 +1220,8 @@ let test_tool_usage_log_uses_cluster_root () =
           Tool_usage_log.init ~base_path:dir ~cluster_name:"cluster-alpha" ();
           Tool_usage_log.log_call
             ~on_io_failure:(fun ~site:_ _ -> ())
-            ~tool_name:"keeper_tasks_list" ~success:true
+            ~tool_name:"keeper_tasks_list"
+            ~disposition:(Tool_result.Completed ())
             ~caller:(Some "oracle");
           let expected_dir =
             Filename.concat
@@ -1173,8 +1237,20 @@ let test_tool_usage_log_uses_cluster_root () =
             (Sys.file_exists expected_dir && Sys.is_directory expected_dir);
           Alcotest.(check bool) "legacy tool_usage dir absent" false
             (Sys.file_exists legacy_dir);
-          Alcotest.(check int) "tool_usage row readable from cluster store" 1
-            (List.length (Tool_usage_log.read_recent ~n:10 ()))))
+          match Tool_usage_log.read_recent ~n:10 () with
+          | [ row ] ->
+            Alcotest.(check string)
+              "tool_usage row preserves disposition"
+              "completed"
+              Yojson.Safe.Util.(row |> member "disposition" |> to_string);
+            Alcotest.(check bool)
+              "tool_usage row has no legacy success bool"
+              true
+              Yojson.Safe.Util.(row |> member "success" = `Null)
+          | rows ->
+            Alcotest.failf
+              "expected one tool_usage row from cluster store, got %d"
+              (List.length rows)))
 
 let test_keeper_tool_call_log_uses_cluster_root () =
   with_temp_dir "startup-tool-call-cluster" (fun dir ->
@@ -1249,7 +1325,6 @@ let make_keeper_meta_json ?(name = "sangsu")
           ("name", `String name);
           ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
           ("trace_id", `String trace_id);
-          ("goal", `String ("goal-" ^ name));
           ("runtime_id", `String (fixture_runtime_id ()));
           ("updated_at", `String updated_at);
           ("last_model_used", `String "llama:auto");
@@ -1268,18 +1343,13 @@ let make_keeper_meta ?(paused = false) ?(name = "sangsu")
           ("name", `String name);
           ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
           ("trace_id", `String trace_id);
-          ("goal", `String ("goal-" ^ name));
           ("runtime_id", `String (fixture_runtime_id ()));
           ("updated_at", `String updated_at);
           ("last_model_used", `String "llama:auto");
         ])
   with
   | Ok meta ->
-      {
-        meta with
-        paused;
-        auto_resume_after_sec = (if paused then Some 3600.0 else None);
-      }
+      { meta with paused }
   | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
 
 let make_task ?(title = "Task") ?(description = "") ~id ~status () : Types.task =
@@ -1311,14 +1381,14 @@ let with_running_keeper_metas config metas f =
   let base_path = config.Workspace.base_path in
   List.iter
     (fun (meta : Keeper_meta_contract.keeper_meta) ->
-      Keeper_registry.unregister ~base_path meta.name;
-      ignore (Keeper_registry.register ~base_path meta.name meta))
+      Keeper_registry.For_testing.unregister ~base_path meta.name;
+      ignore (Keeper_registry.For_testing.register ~base_path meta.name meta))
     metas;
   Fun.protect
     ~finally:(fun () ->
       List.iter
         (fun (meta : Keeper_meta_contract.keeper_meta) ->
-          Keeper_registry.unregister ~base_path meta.name)
+          Keeper_registry.For_testing.unregister ~base_path meta.name)
         metas)
     f
 
@@ -1337,29 +1407,17 @@ let dispatch_keeper_event config (meta : Keeper_meta_contract.keeper_meta) event
 
 let mark_keeper_failing config (meta : Keeper_meta_contract.keeper_meta) =
   dispatch_keeper_event config meta
-    (Keeper_state_machine.Turn_failed { consecutive = 1; max_allowed = 10 })
+    (Keeper_state_machine.Turn_failed { consecutive = 1 })
 
 let mark_keeper_stopped config (meta : Keeper_meta_contract.keeper_meta) =
   dispatch_keeper_event config meta Keeper_state_machine.Stop_requested;
   dispatch_keeper_event config meta Keeper_state_machine.Drain_complete
 
-let mark_keeper_zombie config (meta : Keeper_meta_contract.keeper_meta) =
-  dispatch_keeper_event config meta
-    (Keeper_state_machine.Terminal_failure_detected
-       { reason = "terminal fixture structural failure" })
-
-let exhaust_keeper_restart_budget config (meta : Keeper_meta_contract.keeper_meta) =
-  match
-    Keeper_registry.dispatch_event
-      ~base_path:config.Workspace.base_path
-      meta.name
-      Keeper_state_machine.Restart_budget_exhausted
-  with
-  | Ok _ -> ()
-  | Error err ->
-    Alcotest.fail
-      ("keeper restart-budget exhaustion failed: "
-       ^ Keeper_state_machine.transition_error_to_string err)
+let record_keeper_dead_tombstone config (meta : Keeper_meta_contract.keeper_meta) =
+  Keeper_registry.mark_dead
+    ~base_path:config.Workspace.base_path
+    meta.name
+    ~at:(Time_compat.now ())
 
 let terminate_keeper_fiber config (meta : Keeper_meta_contract.keeper_meta) =
   match
@@ -1382,8 +1440,8 @@ let terminate_keeper_fiber config (meta : Keeper_meta_contract.keeper_meta) =
 let mark_keeper_dead_with_registry_cause config
     (meta : Keeper_meta_contract.keeper_meta) =
   let base_path = config.Workspace.base_path in
-  Keeper_registry.record_restart ~base_path meta.name;
-  Keeper_registry.record_restart ~base_path meta.name;
+  Keeper_registry.For_testing.record_restart ~base_path meta.name;
+  Keeper_registry.For_testing.record_restart ~base_path meta.name;
   Keeper_registry.set_failure_reason ~base_path meta.name
     (Some
        (Keeper_registry.Provider_runtime_error
@@ -1404,7 +1462,7 @@ let mark_keeper_dead_with_registry_cause config
        base_path);
   Keeper_registry.record_crash ~base_path meta.name 1780000000.0
     (Printf.sprintf
-       "synthetic crash record github_pat_secret at %s/crash.log"
+       "synthetic crash record Bearer github_pat_secret at %s/crash.log"
        base_path);
   Keeper_registry.mark_dead ~base_path meta.name ~at:1780000001.0
 
@@ -1422,7 +1480,7 @@ let test_health_json_surfaces_durable_paused_keepers () =
           Server_auth.server_state := previous_state;
           Config_dir_resolver.reset ())
         (fun () ->
-          let state = Mcp_server.create_state ~base_path:dir in
+          let state = Mcp_server.For_testing.create_state ~base_path:dir in
           Server_auth.server_state := Some state;
           let config = (Mcp_server.workspace_config state) in
           write_keeper_meta_exn config
@@ -1454,17 +1512,29 @@ let test_health_json_surfaces_durable_paused_keepers () =
           let json = Server_routes_http_runtime.make_health_json request in
           let open Yojson.Safe.Util in
           let paused = json |> member "paused_keepers" in
-          let fd_pressure = json |> member "keeper_fd_pressure" in
+          let fd_observation = json |> member "fd_observation" in
           let fd_accountant = json |> member "fd_accountant" in
+          let disk_observation = json |> member "disk_observation" in
           let runtime_truth = json |> member "runtime_truth" in
           let fleet_safety = json |> member "keeper_fleet_safety" in
+          let publication_recovery =
+            json |> member "publication_recovery_activation"
+          in
           let reaction_ledger = json |> member "keeper_reaction_ledger" in
           let durable_names =
             paused |> member "durable_names" |> to_list |> List.map to_string
           in
 	          let names = paused |> member "names" |> to_list |> List.map to_string in
-	          Alcotest.(check int) "durable paused count" 1
-	            (paused |> member "durable_count" |> to_int);
+          Alcotest.(check int) "durable paused count" 1
+            (paused |> member "durable_count" |> to_int);
+          Alcotest.(check string)
+            "pure test state exposes unavailable recovery activation"
+            "unavailable"
+            (publication_recovery |> member "status" |> to_string);
+          Alcotest.(check string)
+            "pure test state names its missing runtime"
+            "non_runtime_state"
+            (publication_recovery |> member "reason" |> to_string);
 	          Alcotest.(check int) "registry paused count" 0
 	            (paused |> member "registry_paused_count" |> to_int);
 	          Alcotest.(check string) "legacy running count semantics"
@@ -1487,33 +1557,32 @@ let test_health_json_surfaces_durable_paused_keepers () =
             |> List.find (fun detail ->
                  detail |> member "name" |> to_string = "durable-paused")
           in
-          Alcotest.(check string) "pause kind" "auto_recoverable"
+          Alcotest.(check string) "pause kind" "unclassified_paused"
             (durable_paused_detail |> member "pause_kind" |> to_string);
           Alcotest.(check bool) "pause missing root cause" true
             (durable_paused_detail |> member "missing_pause_root_cause" |> to_bool);
           Alcotest.(check bool) "pause detail keeps autoboot" true
             (durable_paused_detail |> member "autoboot_enabled" |> to_bool);
-          Alcotest.(check (option (float 0.0001))) "pause detail auto resume"
-            (Some 3600.0)
-            (durable_paused_detail |> member "auto_resume_after_sec" |> to_float_option);
           Alcotest.(check bool) "union includes durable paused keeper" true
             (List.exists (( = ) "durable-paused") names);
           Alcotest.(check bool) "union excludes active durable keeper" false
             (List.exists (( = ) "durable-active") names);
           Alcotest.(check int) "durable read errors" 0
             (paused |> member "read_error_count" |> to_int);
-          Alcotest.(check int) "health exposes requested 24-keeper FD budget"
-            24
-            (fd_pressure |> member "requested_keepers" |> to_int);
-          Alcotest.(check int) "health exposes target 24-keeper FD budget" 24
-            (fd_pressure |> member "target_keeper_count" |> to_int);
-          ignore (fd_pressure |> member "status" |> to_string);
-          ignore (fd_pressure |> member "admission_blocked" |> to_bool);
-          ignore
-            (fd_pressure |> member "admission_decision" |> member "status" |> to_string);
-          ignore (fd_accountant |> member "fd_open" |> to_int);
-          ignore (fd_accountant |> member "fd_limit" |> to_int);
-          ignore (fd_accountant |> member "pressure_active" |> to_bool);
+          Alcotest.(check string) "FD surface is observation-only"
+            "observation_only"
+            (fd_observation |> member "mode" |> to_string);
+          ignore (fd_observation |> member "active_keepers" |> to_int);
+          ignore (fd_observation |> member "nofile_probe_supported" |> to_bool);
+          Alcotest.(check bool) "FD surface has no admission decision" true
+            (fd_observation |> member "admission_decision" = `Null);
+          Alcotest.(check string) "disk surface is observation-only"
+            "observation_only"
+            (disk_observation |> member "mode" |> to_string);
+          Alcotest.(check bool) "disk surface has no admission decision" true
+            (disk_observation |> member "admission" = `Null);
+          ignore (fd_accountant |> member "fd_open" |> to_int_option);
+          ignore (fd_accountant |> member "fd_limit" |> to_int_option);
           Alcotest.(check string) "runtime truth schema"
             "masc.runtime_truth.v1"
             (runtime_truth |> member "schema" |> to_string);
@@ -1530,9 +1599,8 @@ let test_health_json_surfaces_durable_paused_keepers () =
           ignore (runtime_truth |> member "executable_path" |> to_string);
           ignore (runtime_truth |> member "executable_dir" |> to_string);
           ignore (runtime_truth |> member "keeper_fibers" |> to_int);
-          ignore (runtime_truth |> member "fd_open" |> to_int);
-          ignore (runtime_truth |> member "fd_limit" |> to_int);
-          ignore (runtime_truth |> member "fd_pressure_active" |> to_bool);
+          ignore (runtime_truth |> member "fd_open" |> to_int_option);
+          ignore (runtime_truth |> member "fd_limit" |> to_int_option);
           let fd_accountant_per_kind =
             fd_accountant |> member "per_kind" |> to_list
           in
@@ -1547,10 +1615,12 @@ let test_health_json_surfaces_durable_paused_keepers () =
                 |> List.find (fun row ->
                   String.equal (row |> member "kind" |> to_string) kind_name)
               in
-              ignore (row |> member "in_flight" |> to_int);
-              ignore (row |> member "configured_concurrency" |> to_int);
-              ignore (row |> member "effective_concurrency" |> to_int))
+              ignore (row |> member "active_operations" |> to_int))
             Fd_accountant.all_kinds;
+          Alcotest.(check int) "health exposes typed FD error series"
+            (List.length Fd_accountant.all_kinds
+             * List.length Fd_accountant.all_resource_errors)
+            (fd_accountant |> member "resource_errors" |> to_list |> List.length);
           Alcotest.(check int) "health exposes bootable keeper count" 1
             (fleet_safety |> member "bootable_keeper_count" |> to_int);
           Alcotest.(check int) "health exposes autoboot keeper count" 1
@@ -1595,8 +1665,8 @@ let test_health_json_surfaces_durable_paused_keepers () =
             true
             (reaction_ledger |> member "operator_action_required" |> to_bool)))
 
-let test_health_json_surfaces_keeper_turn_admission_pressure () =
-  with_temp_dir "health-turn-admission-pressure" (fun dir ->
+let test_health_json_observes_keeper_turn_admission_work () =
+  with_temp_dir "health-turn-admission-work" (fun dir ->
     let config_root = make_config_root dir in
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = !Server_auth.server_state in
@@ -1608,7 +1678,7 @@ let test_health_json_surfaces_keeper_turn_admission_pressure () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let keeper_name = "example" in
         Eio.Switch.run (fun sw ->
@@ -1623,7 +1693,7 @@ let test_health_json_surfaces_keeper_turn_admission_pressure () =
                    Eio.Promise.resolve set_started ();
                    Eio.Promise.await release)));
           Eio.Promise.await started;
-          for _ = 1 to Keeper_turn_admission.max_waiting_chat_requests do
+          for _ = 1 to 2 do
             Eio.Fiber.fork ~sw (fun () ->
               ignore
                 (Keeper_turn_admission.run_serialized
@@ -1631,41 +1701,20 @@ let test_health_json_surfaces_keeper_turn_admission_pressure () =
                    ~keeper_name
                    (fun () -> ())))
           done;
-          (match
-             Keeper_turn_admission.run_serialized
-               ~base_path:dir
-               ~keeper_name
-               (fun () -> ())
-           with
-           | `Rejected _ -> ()
-           | `Ran () ->
-             Alcotest.fail "chat request beyond the waiting cap was not rejected");
           let request = Httpun.Request.create `GET "/health" in
           let json = Server_routes_http_runtime.make_health_json request in
           let open Yojson.Safe.Util in
           let admission = json |> member "keeper_turn_admission" in
-          Alcotest.(check string) "turn admission health degraded"
-            "degraded"
+          Alcotest.(check string) "waiting work is not health degradation"
+            "ok"
             (admission |> member "status" |> to_string);
-          Alcotest.(check int) "turn admission health full queue count"
-            1
-            (admission |> member "chat_waiting_full_keeper_count" |> to_int);
-          Alcotest.(check int) "turn admission health rejection count"
-            1
-            (admission |> member "chat_rejected_total_count" |> to_int);
-          Alcotest.(check bool) "turn admission health reason surfaced"
-            true
-            (admission |> member "status_reasons" |> to_list
-             |> List.map to_string
-             |> List.exists (String.equal "chat_waiting_queue_full"));
+          Alcotest.(check int) "turn admission exposes raw waiting count"
+            2
+            (admission |> member "chat_waiting_total_count" |> to_int);
           Alcotest.(check bool)
-            "top-level health preserves turn admission reason"
-            true
-            (json |> member "operator_action_reasons" |> to_list
-             |> List.map to_string
-             |> List.exists
-                  (String.equal
-                     "keeper_turn_admission:chat_waiting_queue_full"));
+            "waiting work does not require an operator"
+            false
+            (admission |> member "operator_action_required" |> to_bool);
           let runtime_resolution =
             `Assoc
               (Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields ())
@@ -1674,14 +1723,9 @@ let test_health_json_surfaces_keeper_turn_admission_pressure () =
             runtime_resolution |> member "keeper_turn_admission"
           in
           Alcotest.(check int)
-            "runtime resolution exposes turn admission full queue count"
-            1
-            (runtime_admission |> member "chat_waiting_full_keeper_count"
-             |> to_int);
-          Alcotest.(check int)
-            "runtime resolution exposes turn admission rejection count"
-            1
-            (runtime_admission |> member "chat_rejected_total_count" |> to_int);
+            "runtime resolution exposes raw waiting count"
+            2
+            (runtime_admission |> member "chat_waiting_total_count" |> to_int);
           let light_runtime_resolution =
             `Assoc
               (Server_routes_http_runtime.keeper_fleet_runtime_resolution_light_fields ())
@@ -1690,10 +1734,9 @@ let test_health_json_surfaces_keeper_turn_admission_pressure () =
             light_runtime_resolution |> member "keeper_turn_admission"
           in
           Alcotest.(check int)
-            "light runtime resolution exposes turn admission full queue count"
-            1
-            (light_runtime_admission |> member "chat_waiting_full_keeper_count"
-             |> to_int);
+            "light runtime resolution exposes raw waiting count"
+            2
+            (light_runtime_admission |> member "chat_waiting_total_count" |> to_int);
           Eio.Promise.resolve set_release ())))
 
 let test_health_json_surfaces_board_event_collection_failure () =
@@ -1709,7 +1752,7 @@ let test_health_json_surfaces_board_event_collection_failure () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let keeper_name = "example" in
         Keeper_heartbeat_loop_board_events.For_testing.record_collection_failure
@@ -1769,7 +1812,7 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
     write_config_root_keeper_toml config_root "mad-improver";
     write_file
       (Filename.concat (Filename.concat config_root "keepers") "operator.toml")
-      "[keeper]\ngoal = \"operator\"\nautoboot_enabled = false\n";
+      "[keeper]\nautoboot_enabled = false\n";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = !Server_auth.server_state in
     Config_dir_resolver.reset ();
@@ -1778,7 +1821,7 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         write_keeper_meta_exn config
@@ -1845,7 +1888,7 @@ let test_keeper_identity_drift_treats_explicit_autoboot_base_as_materializable
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         write_keeper_meta_exn config
@@ -1868,7 +1911,7 @@ let test_keeper_identity_drift_treats_explicit_autoboot_base_as_materializable
           (json |> member "meta_without_config_names" |> to_list
            |> List.map to_string)))
 
-let test_health_json_keeps_timeout_pause_without_policy_manual () =
+let test_health_json_reports_unclassified_timeout_pause_without_mutation () =
   with_temp_dir "health-timeout-paused-without-policy" (fun dir ->
     let config_root = make_config_root dir in
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
@@ -1879,7 +1922,7 @@ let test_health_json_keeps_timeout_pause_without_policy_manual () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = (Mcp_server.workspace_config state) in
         let timeout_paused =
@@ -1889,14 +1932,13 @@ let test_health_json_keeps_timeout_pause_without_policy_manual () =
                ~paused:true
                ())
             with
-            auto_resume_after_sec = None;
             runtime =
               { (make_keeper_meta ()).runtime with
                 last_blocker =
                   Some
                     (Keeper_meta_contract.blocker_info_of_class
                        ~detail:"turn_timeout"
-                       Keeper_meta_contract.Turn_timeout);
+                       Keeper_meta_contract.Stale_turn_timeout);
               };
           }
         in
@@ -1912,17 +1954,9 @@ let test_health_json_keeps_timeout_pause_without_policy_manual () =
           |> List.find (fun row ->
                row |> member "name" |> to_string = "timeout-without-policy")
         in
-        Alcotest.(check string) "pause kind" "auto_recoverable"
+        Alcotest.(check string) "pause kind" "unclassified_paused"
           (detail |> member "pause_kind" |> to_string);
-        Alcotest.(check bool) "effective auto resume is present" true
-          (Option.is_some
-             (detail |> member "auto_resume_after_sec" |> to_float_option));
-        Alcotest.(check (option (float 0.0001))) "persisted auto resume remains absent"
-          None
-          (detail |> member "persisted_auto_resume_after_sec" |> to_float_option);
-        Alcotest.(check string) "auto resume source" "implicit_turn_timeout"
-          (detail |> member "auto_resume_source" |> to_string);
-        Alcotest.(check string) "last blocker class" "turn_timeout"
+        Alcotest.(check string) "last blocker class" "stale_turn_timeout"
           (detail |> member "last_blocker" |> member "klass" |> to_string)))
 
 let test_health_json_reports_dormant_task_owner_as_advisory () =
@@ -1931,7 +1965,7 @@ let test_health_json_reports_dormant_task_owner_as_advisory () =
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
     write_file
       (Filename.concat (Filename.concat config_root "keepers") "executor.toml")
-      "[keeper]\ngoal = \"goal-executor\"\nautoboot_enabled = false\n";
+      "[keeper]\nautoboot_enabled = false\n";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = !Server_auth.server_state in
     Config_dir_resolver.reset ();
@@ -1940,7 +1974,7 @@ let test_health_json_reports_dormant_task_owner_as_advisory () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         let executor =
@@ -2016,7 +2050,7 @@ let test_health_json_ignores_stale_active_task_alias_when_agent_executable () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         let executor =
@@ -2111,7 +2145,7 @@ let test_health_json_degrades_on_active_task_owner_without_keeper_binding () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         let assignee = "missing-keeper-agent" in
@@ -2196,7 +2230,7 @@ let test_health_json_reports_non_keeper_active_task_owner_as_advisory () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         let assignee = "codex-mcp-client" in
@@ -2273,7 +2307,7 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         write_file (Keeper_types_profile.keeper_meta_path config "broken")
@@ -2415,7 +2449,7 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = (Mcp_server.workspace_config state) in
         let paused =
@@ -2431,8 +2465,8 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
                 last_blocker =
                   Some
                     (Keeper_meta_contract.blocker_info_of_class
-                       ~detail:"no_progress loop detected"
-                       Keeper_meta_contract.No_progress_loop);
+                       ~detail:"operator pause diagnostic"
+                       Keeper_meta_contract.Stale_turn_timeout);
               };
           }
         in
@@ -2555,7 +2589,7 @@ let test_health_json_blocked_count_matches_blocked_names_with_non_target_capacit
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         let target_running =
@@ -2604,7 +2638,7 @@ let test_health_json_exposes_disabled_keeper_bootstrap_blocker () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = (Mcp_server.workspace_config state) in
         let phase_counts :
@@ -2673,7 +2707,7 @@ let test_health_json_ignores_persisted_only_keeper_for_capacity_target () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = (Mcp_server.workspace_config state) in
         write_keeper_meta_exn config
@@ -2714,7 +2748,7 @@ let test_health_json_explains_phase_paused_capacity_blocker () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = (Mcp_server.workspace_config state) in
         let phase_paused =
@@ -2760,7 +2794,7 @@ let test_health_json_exposes_dead_keeper_registry_cause () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = (Mcp_server.workspace_config state) in
         let phase_dead =
@@ -2849,7 +2883,7 @@ let test_health_json_explains_terminal_capacity_blocker
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         let terminal = make_keeper_meta ~name:keeper_name ~trace_id () in
@@ -2910,15 +2944,6 @@ let test_health_json_explains_stopped_capacity_blocker_as_terminal () =
     ~expected_action:"restart_or_disable_stopped_keeper"
     mark_keeper_stopped
 
-let test_health_json_explains_zombie_capacity_blocker_as_terminal () =
-  test_health_json_explains_terminal_capacity_blocker
-    ~dir_name:"health-zombie-capacity-blocker"
-    ~keeper_name:"zombie-capacity"
-    ~trace_id:"trace-zombie-capacity"
-    ~expected_phase:"zombie"
-    ~expected_action:"repair_terminal_keeper_failure"
-    mark_keeper_zombie
-
 let test_health_json_distinguishes_failing_executable_keepers () =
   with_temp_dir "health-failing-executable-keepers" (fun dir ->
     let config_root = make_config_root dir in
@@ -2933,7 +2958,7 @@ let test_health_json_distinguishes_failing_executable_keepers () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = (Mcp_server.workspace_config state) in
         let paused =
@@ -2989,7 +3014,7 @@ let test_health_json_explains_nonrecoverable_failing_keeper () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = (Mcp_server.workspace_config state) in
         let failing =
@@ -3006,7 +3031,7 @@ let test_health_json_explains_nonrecoverable_failing_keeper () =
                (Keeper_registry.Stale_turn_timeout
                   (Keeper_registry.Idle_turn { stall_seconds = 2268.0 })));
           terminate_keeper_fiber config failing;
-          exhaust_keeper_restart_budget config failing;
+          record_keeper_dead_tombstone config failing;
           let request = Httpun.Request.create `GET "/health" in
           let json = Server_routes_http_runtime.make_health_json request in
           let open Yojson.Safe.Util in
@@ -3060,7 +3085,7 @@ let test_health_json_redacts_registry_failure_reason () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         let failing =
@@ -3096,7 +3121,7 @@ let test_health_json_redacts_registry_failure_reason () =
                     reason = None;
                   }));
           terminate_keeper_fiber config failing;
-          exhaust_keeper_restart_budget config failing;
+          record_keeper_dead_tombstone config failing;
           let request = Httpun.Request.create `GET "/health" in
           let json = Server_routes_http_runtime.make_health_json request in
           let open Yojson.Safe.Util in
@@ -3135,7 +3160,7 @@ let test_health_json_uses_crash_log_when_restore_clears_failure_reason () =
         Server_auth.server_state := previous_state;
         Config_dir_resolver.reset ())
       (fun () ->
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
         let restored =
@@ -3155,13 +3180,13 @@ let test_health_json_uses_crash_log_when_restore_clears_failure_reason () =
                   (Keeper_registry.Idle_turn { stall_seconds = 2268.0 })));
           terminate_keeper_fiber config restored;
           Keeper_registry.record_crash ~base_path restored.name 1234.0 stale_reason;
-          exhaust_keeper_restart_budget config restored;
+          record_keeper_dead_tombstone config restored;
           Keeper_registry.restore_supervisor_state
             ~base_path
             restored.name
             ~restart_count:10
             ~last_restart_ts:1234.0
-            ~crash_log:(Keeper_registry.crash_log_of ~base_path restored.name);
+            ~crash_log:(Keeper_registry.For_testing.crash_log_of ~base_path restored.name);
           (match Keeper_registry.get ~base_path restored.name with
            | Some entry ->
              Alcotest.(check bool) "restore cleared typed failure reason" true
@@ -3197,7 +3222,7 @@ let test_health_json_reaction_ledger_cursor_sweep_clears_pending () =
           Config_dir_resolver.reset ())
         (fun () ->
         Config_dir_resolver.reset ();
-        let state = Mcp_server.create_state ~base_path:dir in
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = (Mcp_server.workspace_config state) in
         write_keeper_meta_exn config
@@ -3431,9 +3456,7 @@ let test_health_response_default_is_light_probe () =
     (match json |> member "internal_mcp_auth" with `Assoc _ -> true | _ -> false);
   check_otel_health_shape "default health" json;
   Alcotest.(check bool) "default health skips reaction ledger" true
-    (json |> member "keeper_reaction_ledger" = `Null);
-  Alcotest.(check bool) "default health skips cdal snapshot" true
-    (json |> member "cdal" = `Null)
+    (json |> member "keeper_reaction_ledger" = `Null)
 
 let test_health_response_full_query_uses_snapshot_cache () =
   with_temp_dir "health-full-snapshot-cache" (fun dir ->
@@ -3449,7 +3472,7 @@ let test_health_response_full_query_uses_snapshot_cache () =
           Config_dir_resolver.reset ();
           Server_routes_http_runtime.For_testing.reset_full_health_snapshot ())
         (fun () ->
-          Server_auth.server_state := Some (Mcp_server.create_state ~base_path:dir);
+          Server_auth.server_state := Some (Mcp_server.For_testing.create_state ~base_path:dir);
           let request = Httpun.Request.create `GET "/health?full=1" in
           let first =
             Server_routes_http_runtime.make_health_response_json request
@@ -3475,8 +3498,12 @@ let test_health_response_full_query_uses_snapshot_cache () =
             (match first |> member "keeper_reaction_ledger" with
              | `Assoc _ -> true
              | _ -> false);
-          Alcotest.(check bool) "full health skips retired cdal snapshot" true
-            (first |> member "cdal" = `Null);
+          Alcotest.(check bool)
+            "full health response keeps recovery activation shape"
+            true
+            (match first |> member "publication_recovery_activation" with
+             | `Assoc _ -> true
+             | _ -> false);
           Server_routes_http_runtime.For_testing.refresh_full_health_snapshot_now
             request;
           let refreshed =
@@ -3497,10 +3524,11 @@ let test_health_response_full_query_uses_snapshot_cache () =
             (match refreshed |> member "keeper_reaction_ledger" with
              | `Assoc _ -> true
              | _ -> false);
-          Alcotest.(check bool)
-            "refreshed full health skips retired cdal snapshot"
-            true
-            (refreshed |> member "cdal" = `Null)))
+          Alcotest.(check string)
+            "refreshed full health keeps recovery activation"
+            "unavailable"
+            (refreshed |> member "publication_recovery_activation"
+             |> member "status" |> to_string)))
 
 let test_full_health_refresh_timing_uses_dedicated_budget () =
   let interval_sec, timeout_sec, ttl_sec =
@@ -3580,9 +3608,7 @@ let test_full_health_cold_refresh_timeout_is_timeout_not_error () =
   Alcotest.(check bool) "cold timeout stale age is surfaced" true
     (match after |> member "full_health_snapshot" |> member "stale_age_ms" with
      | `Int age -> age >= 0
-     | _ -> false);
-  Alcotest.(check bool) "cold timeout omits retired cdal component" true
-    (after |> member "cdal" = `Null)
+     | _ -> false)
 
 let test_health_response_survives_deleted_cwd () =
   with_temp_dir "health-deleted-cwd" (fun dir ->
@@ -3649,22 +3675,17 @@ let test_lazy_startup_plan_groups_independent_tasks () =
         ~tasks:
           [
             "restore_sessions";
-            "reconcile_active_agents";
-            "prompt_bootstrap";
             "keeper_history_migration";
           ];
       check_lazy_group tool_state ~name:"tool_state" ~execution:"serial"
-        ~tasks:[ "telemetry_warmup"; "tool_metrics_restore" ];
+        ~tasks:[ "tool_metrics_restore" ];
       check_lazy_group cleanup ~name:"cleanup" ~execution:"serial"
         ~tasks:[ "jsonl_prune" ];
       Alcotest.(check (list string))
         "flattened task order"
         [
           "restore_sessions";
-          "reconcile_active_agents";
-          "prompt_bootstrap";
           "keeper_history_migration";
-          "telemetry_warmup";
           "tool_metrics_restore";
           "jsonl_prune";
         ]
@@ -3672,10 +3693,13 @@ let test_lazy_startup_plan_groups_independent_tasks () =
   | _ -> Alcotest.fail "unexpected lazy startup group shape"
 
 let test_startup_state_json () =
-  Server_startup_state.reset ~backend_mode:"postgres-native" ();
-  Server_startup_state.mark_state_ready ~backend_mode:"postgres-native";
-  Server_startup_state.activate_lazy ~backend_mode:"postgres-native"
-    ~tasks:[ "restore_sessions"; "keeper_bootstrap" ];
+  Server_startup_state.reset ~backend_mode:"memory" ();
+  Server_startup_state.mark_state_ready
+    ~backend:Server_startup_state.Memory_backend
+  |> Result.get_ok;
+  Server_startup_state.prepare_lazy_tasks
+    ~tasks:[ "restore_sessions"; "keeper_bootstrap" ]
+  |> Result.get_ok;
   Server_startup_state.finish_lazy_task ~task:"restore_sessions";
   Server_startup_state.fail_lazy_task ~task:"keeper_bootstrap"
     ~error:"keeper failed";
@@ -3689,9 +3713,11 @@ let test_startup_state_json () =
 
 let test_startup_state_catalog_degraded_survives_lazy_activation () =
   Server_startup_state.reset ~backend_mode:"filesystem" ();
-  Server_startup_state.mark_state_ready ~backend_mode:"filesystem";
-  Server_startup_state.activate_lazy ~backend_mode:"filesystem"
-    ~tasks:[ "restore_sessions" ];
+  Server_startup_state.mark_state_ready
+    ~backend:Server_startup_state.Filesystem_backend
+  |> Result.get_ok;
+  Server_startup_state.prepare_lazy_tasks ~tasks:[ "restore_sessions" ]
+  |> Result.get_ok;
   Server_startup_state.mark_degraded
     ~error:"startup catalog validation failed: synthetic";
   Server_startup_state.finish_lazy_task ~task:"restore_sessions";
@@ -3714,7 +3740,7 @@ let test_startup_state_liveness () =
     (Server_startup_state.elapsed_since_start () >= 0.0)
 
 let test_startup_state_readiness_before_init () =
-  Server_startup_state.reset ~backend_mode:"postgres-native" ();
+  Server_startup_state.reset ~backend_mode:"unknown" ();
   let current = Server_startup_state.(!state) in
   Alcotest.(check bool) "not ready before init" false current.state_ready;
   Alcotest.(check string) "phase is blocking" "blocking"
@@ -3722,11 +3748,104 @@ let test_startup_state_readiness_before_init () =
 
 let test_startup_state_readiness_after_init () =
   Server_startup_state.reset ~backend_mode:"filesystem" ();
-  Server_startup_state.mark_state_ready ~backend_mode:"filesystem";
+  Server_startup_state.mark_state_ready
+    ~backend:Server_startup_state.Filesystem_backend
+  |> Result.get_ok;
   let current = Server_startup_state.(!state) in
   Alcotest.(check bool) "ready after init" true current.state_ready;
   Alcotest.(check string) "phase is ready" "ready"
     (Server_startup_state.phase_to_string current.phase)
+
+let test_mcp_transport_requires_explicit_readiness () =
+  let previous_state = !Server_auth.server_state in
+  Fun.protect
+    ~finally:(fun () -> Server_auth.server_state := previous_state)
+    (fun () ->
+       Server_startup_state.reset ~backend_mode:"filesystem" ();
+       Server_startup_state.mark_blocking ~backend_mode:"filesystem";
+       Server_auth.server_state :=
+         Some
+           (Mcp_server.For_testing.create_state
+              ~base_path:(Filename.get_temp_dir_name ()));
+       let deps = Server_routes_http_common.mcp_transport_http_deps () in
+       Alcotest.(check bool)
+         "state publication alone does not admit MCP"
+         false
+         (deps.is_ready ());
+       Server_startup_state.mark_state_ready
+         ~backend:Server_startup_state.Filesystem_backend
+       |> Result.get_ok;
+       Alcotest.(check bool)
+         "explicit readiness admits MCP"
+         true
+         (deps.is_ready ()))
+
+let test_startup_state_lazy_inventory_does_not_publish_readiness () =
+  Server_startup_state.reset ~backend_mode:"filesystem" ();
+  Server_startup_state.mark_blocking ~backend_mode:"filesystem";
+  (match
+     Server_startup_state.prepare_lazy_tasks
+       ~tasks:[ "restore_sessions"; "keeper_history_migration" ]
+   with
+   | Ok () -> ()
+   | Error error ->
+     Alcotest.fail
+       (Server_startup_state.lazy_prepare_error_to_string error));
+  let current = Server_startup_state.(!state) in
+  Alcotest.(check bool) "lazy inventory remains not ready" false current.state_ready;
+  Alcotest.(check string) "startup remains blocking" "blocking"
+    (Server_startup_state.phase_to_string current.phase);
+  Alcotest.(check (list string))
+    "autoboot observes the complete lazy barrier"
+    [ "restore_sessions"; "keeper_history_migration" ]
+    current.pending_lazy_tasks;
+  Server_startup_state.mark_state_ready
+    ~backend:Server_startup_state.Filesystem_backend
+  |> Result.get_ok;
+  let ready = Server_startup_state.(!state) in
+  Alcotest.(check bool) "consumer ACK may publish readiness" true ready.state_ready;
+  Alcotest.(check string) "pending lazy work projects lazy phase" "lazy"
+    (Server_startup_state.phase_to_string ready.phase);
+  Alcotest.(check string)
+    "ready owner preserves resolved backend"
+    "filesystem"
+    ready.backend_mode
+
+let test_startup_state_lazy_inventory_rejects_invalid_product_state () =
+  (* [reset] preserves the diagnostic backend label. Until [mark_blocking]
+     normalizes it to Uninitialized, Booting + Filesystem violates the product
+     invariant. The barrier must report that structural error, not publish an
+     empty inventory and let autoboot pass. *)
+  Server_startup_state.reset ~backend_mode:"filesystem" ();
+  (match Server_startup_state.prepare_lazy_tasks ~tasks:[ "restore_sessions" ] with
+   | Error (Server_startup_state.Lazy_state_transition_rejected reason) ->
+     Alcotest.(check bool)
+       "typed invariant rejection is explicit"
+       true
+       (String.length reason > 0)
+   | Ok () -> Alcotest.fail "invalid lazy barrier transition was silently accepted");
+  Alcotest.(check (list string))
+    "failed transition publishes no partial inventory"
+    []
+    (Server_startup_state.pending_lazy_tasks ())
+
+let test_startup_failure_disposition_requires_readiness_for_degraded_serving () =
+  Alcotest.(check bool)
+    "pre-ready failure is fatal"
+    true
+    (match
+       Server_runtime_bootstrap.startup_failure_disposition ~state_ready:false
+     with
+     | Server_runtime_bootstrap.Fatal_pre_ready -> true
+     | Server_runtime_bootstrap.Degraded_after_ready -> false);
+  Alcotest.(check bool)
+    "post-ready failure may degrade"
+    true
+    (match
+       Server_runtime_bootstrap.startup_failure_disposition ~state_ready:true
+     with
+     | Server_runtime_bootstrap.Degraded_after_ready -> true
+     | Server_runtime_bootstrap.Fatal_pre_ready -> false)
 
 let test_watchdog_timeout_env () =
   with_env "MASC_STARTUP_WATCHDOG_SEC" (Some "90") (fun () ->
@@ -3799,6 +3918,7 @@ let test_create_server_state_records_runtime_resolution () =
       let repo = Filename.concat dir "repo" in
       mkdir_p repo;
       ignore (make_config_root repo);
+      with_env "OAS_MODEL_CATALOG" None @@ fun () ->
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd repo @@ fun () ->
       Eio_main.run @@ fun env ->
@@ -3829,6 +3949,7 @@ let test_create_server_state_preserves_raw_input_base_path () =
       mkdir_p repo;
       mkdir_p raw_input;
       ignore (make_config_root repo);
+      with_env "OAS_MODEL_CATALOG" None @@ fun () ->
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_env "MASC_BASE_PATH" None @@ fun () ->
       with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
@@ -3863,8 +3984,6 @@ let test_prompt_markdown_dir_ignores_repo_seed_prompts () =
       Fs_compat.mkdir_p repo_prompts;
       Fs_compat.mkdir_p expected;
       write_file (Filename.concat config_root "runtime.toml") "";
-      write_file (Filename.concat config_root "tool_policy.toml")
-        "[groups.base]\ntools = [\"keeper_time_now\"]\n";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd dir @@ fun () ->
       Config_dir_resolver.reset ();
@@ -3886,8 +4005,6 @@ let test_prompt_markdown_dir_does_not_use_repo_seed () =
       Fs_compat.mkdir_p repo_prompts;
       Fs_compat.mkdir_p expected;
       write_file (Filename.concat config_root "runtime.toml") "";
-      write_file (Filename.concat config_root "tool_policy.toml")
-        "[groups.base]\ntools = [\"keeper_time_now\"]\n";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd dir @@ fun () ->
       Config_dir_resolver.reset ();
@@ -4001,8 +4118,6 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
       let expected_config = Filename.concat dir ".masc/config" in
-      Alcotest.(check bool) "tool policy not bootstrapped (deleted module)" false
-        (Sys.file_exists (Filename.concat expected_config "tool_policy.toml"));
       let env =
         main_eio_env_overrides
           [
@@ -4232,6 +4347,7 @@ let test_main_eio_preserves_cli_agent_mcp_token_file () =
 
 let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
   with_temp_dir "startup-keeper-credential-sync" (fun dir ->
+      with_env "OAS_MODEL_CATALOG" None @@ fun () ->
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_env "MASC_PERSONAS_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
@@ -4284,6 +4400,7 @@ let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
 
 let test_sync_bootable_keeper_credentials_rotates_shared_keeper_tokens () =
   with_temp_dir "startup-keeper-credential-rotate" (fun dir ->
+      with_env "OAS_MODEL_CATALOG" None @@ fun () ->
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_env "MASC_PERSONAS_DIR" None @@ fun () ->
       with_cwd (project_root ()) @@ fun () ->
@@ -4675,40 +4792,59 @@ let () =
       ( "bootstrap",
         [
           Alcotest.test_case
-            "model catalog resolution prefers explicit env"
-            `Quick test_model_catalog_resolution_prefers_explicit_env;
+            "model catalog installs explicit env override"
+            `Quick test_model_catalog_configuration_installs_explicit_env_override;
           Alcotest.test_case
-            "capability manifest resolution prefers explicit env"
-            `Quick test_capability_manifest_resolution_prefers_explicit_env;
+            "model catalog ignores legacy discovery inputs"
+            `Quick test_model_catalog_configuration_ignores_legacy_discovery_inputs;
           Alcotest.test_case
-            "capability manifest configuration uses config root"
-            `Quick test_capability_manifest_configuration_uses_config_root_file;
+            "model catalog overlay installs config-root overlay"
+            `Quick test_model_catalog_overlay_installs_config_root_overlay;
           Alcotest.test_case
-            "model catalog configuration installs resolved catalog"
-            `Quick test_model_catalog_configuration_installs_resolved_catalog;
+            "model catalog overlay absent is a no-op"
+            `Quick test_model_catalog_overlay_absent_is_noop;
           Alcotest.test_case
-            "model catalog configuration prefers config-root catalog"
-            `Quick test_model_catalog_configuration_prefers_config_root_catalog;
+            "model catalog overlay invalid fails loud"
+            `Quick test_model_catalog_overlay_invalid_fails_loud;
           Alcotest.test_case
-            "model catalog resolution falls back to executable parent"
-            `Quick
-            test_model_catalog_resolution_uses_executable_parent_when_cwd_is_base_path;
-          Alcotest.test_case
-            "model catalog resolution uses process cwd for relative argv0"
-            `Quick
-            test_model_catalog_resolution_resolves_relative_argv0_from_process_cwd;
+            "explicit model catalog replacement precedes overlay"
+            `Quick test_explicit_model_catalog_replacement_precedes_overlay;
           Alcotest.test_case
             "model catalog configuration delegates to agent_sdk ambient catalog"
             `Quick
             test_model_catalog_configuration_delegates_to_agent_sdk_ambient;
           Alcotest.test_case
+            "exact-output backfill adds seed lane for legacy config"
+            `Quick
+            test_exact_output_backfill_adds_seed_lane_for_legacy_config;
+          Alcotest.test_case
+            "exact-output backfill keeps operator declaration"
+            `Quick
+            test_exact_output_backfill_keeps_operator_declaration;
+          Alcotest.test_case
+            "exact-output catalog merge unions and overlay wins"
+            `Quick
+            test_exact_output_catalog_merge_unions_and_overlay_wins;
+          Alcotest.test_case
+            "exact-output resolver honors OAS_MODEL_CATALOG"
+            `Quick
+            test_exact_output_resolver_overlay_honors_oas_model_catalog;
+          Alcotest.test_case
+            "exact-output resolver uses full catalog without overlay"
+            `Quick
+            test_exact_output_resolver_overlay_full_catalog_only;
+          Alcotest.test_case
+            "exact-output resolver defaults to config-root overlay"
+            `Quick
+            test_exact_output_resolver_overlay_defaults_to_config_root_overlay;
+          Alcotest.test_case
             "bootstrap base-path config copies shared seed only"
             `Quick
             test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers;
           Alcotest.test_case
-            "bootstrap base-path config backfills prompts and catalog"
+            "bootstrap base-path config backfills prompts and catalog overlay"
             `Quick
-            test_bootstrap_base_path_config_root_backfills_missing_prompts_and_catalog;
+            test_bootstrap_base_path_config_root_backfills_missing_prompts_and_overlay;
           Alcotest.test_case
             "bootstrap base-path config skips explicit override"
             `Quick
@@ -4758,7 +4894,7 @@ let () =
             `Quick test_health_json_surfaces_durable_paused_keepers;
           Alcotest.test_case
             "health json surfaces turn admission pressure"
-            `Quick test_health_json_surfaces_keeper_turn_admission_pressure;
+            `Quick test_health_json_observes_keeper_turn_admission_work;
           Alcotest.test_case
             "health json surfaces board event collection failure"
             `Quick test_health_json_surfaces_board_event_collection_failure;
@@ -4771,8 +4907,8 @@ let () =
             `Quick
             test_keeper_identity_drift_treats_explicit_autoboot_base_as_materializable;
           Alcotest.test_case
-            "health json keeps timeout pause without policy manual"
-            `Quick test_health_json_keeps_timeout_pause_without_policy_manual;
+            "health json reports unclassified persisted pause without mutation"
+            `Quick test_health_json_reports_unclassified_timeout_pause_without_mutation;
           Alcotest.test_case
             "health json reports dormant task owner as advisory"
             `Quick
@@ -4821,9 +4957,6 @@ let () =
           Alcotest.test_case
             "health json explains stopped capacity blocker as terminal"
             `Quick test_health_json_explains_stopped_capacity_blocker_as_terminal;
-          Alcotest.test_case
-            "health json explains zombie capacity blocker as terminal"
-            `Quick test_health_json_explains_zombie_capacity_blocker_as_terminal;
           Alcotest.test_case
             "health json exposes dead keeper registry cause"
             `Quick test_health_json_exposes_dead_keeper_registry_cause;
@@ -4874,6 +5007,20 @@ let () =
             test_startup_state_readiness_before_init;
           Alcotest.test_case "readiness true after init" `Quick
             test_startup_state_readiness_after_init;
+          Alcotest.test_case "MCP requires explicit readiness" `Quick
+            test_mcp_transport_requires_explicit_readiness;
+          Alcotest.test_case
+            "lazy inventory stays blocking until explicit readiness"
+            `Quick
+            test_startup_state_lazy_inventory_does_not_publish_readiness;
+          Alcotest.test_case
+            "lazy inventory rejects invalid product state explicitly"
+            `Quick
+            test_startup_state_lazy_inventory_rejects_invalid_product_state;
+          Alcotest.test_case
+            "pre-ready init failure cannot degrade-continue"
+            `Quick
+            test_startup_failure_disposition_requires_readiness_for_degraded_serving;
           Alcotest.test_case "watchdog timeout env parsing" `Quick
             test_watchdog_timeout_env;
           Alcotest.test_case "startup json includes watchdog fields" `Quick

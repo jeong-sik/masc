@@ -19,21 +19,25 @@ type 'a context = {
   clock: 'a Eio.Time.clock;
   proc_mgr: Eio_unix.Process.mgr_ty Eio.Resource.t option;
   net: [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
+  publication_recovery_provider:
+    Keeper_publication_recovery_availability.provider;
 }
 
 type tool_result = Tool_result.result
-
-let tool_result_payload body =
-  match Tool_result.structured_payload_of_message body with
-  | Some json -> json
-  | None -> `String body
-;;
 
 let tool_result_ok ?(tool_name = "") body : tool_result =
   Tool_result.make_ok
     ~tool_name
     ~start_time:(Time_compat.now ())
-    ~data:(tool_result_payload body)
+    ~data:(`String body)
+    ()
+;;
+
+let tool_result_ok_data ?(tool_name = "") data : tool_result =
+  Tool_result.make_ok
+    ~tool_name
+    ~start_time:(Time_compat.now ())
+    ~data
     ()
 ;;
 
@@ -47,13 +51,30 @@ let tool_result_error
     ~tool_name
     ~class_
     ~start_time:(Time_compat.now ())
-    ~data:(tool_result_payload body)
+    ~data:(`String body)
     body
 ;;
 
+let tool_result_error_data
+      ?(tool_name = "")
+      ?(class_ = Tool_result.Runtime_failure)
+      data
+  : tool_result
+  =
+  Tool_result.make_err
+    ~tool_name
+    ~class_
+    ~start_time:(Time_compat.now ())
+    ~data
+    (Yojson.Safe.to_string data)
+;;
+
 let tool_result_with_tool_name ~tool_name : tool_result -> tool_result = function
-  | Ok payload -> Ok { payload with tool_name }
-  | Error payload -> Error { payload with tool_name }
+  | Tool_result.Completed payload ->
+    Tool_result.Completed { payload with tool_name }
+  | Tool_result.Deferred payload ->
+    Tool_result.Deferred { payload with tool_name }
+  | Tool_result.Failed payload -> Tool_result.Failed { payload with tool_name }
 ;;
 
 let tool_result_body = Tool_result.message
@@ -129,24 +150,9 @@ let reject_placeholder_persona_profile =
   Keeper_types_profile_persona.reject_placeholder_persona_profile
 ;;
 
-let operator_todo_placeholder_fields =
-  Keeper_types_profile_persona.operator_todo_placeholder_fields
-
-let persona_operator_todo_placeholder_fields
-    (summary : persona_summary)
-    (defaults : keeper_profile_defaults) =
-  operator_todo_placeholder_fields
-    [
-      ("name", Some summary.display_name);
-      ("role", summary.role);
-      ("trait", summary.trait);
-      ("keeper.goal", defaults.goal);
-    ]
-
 let keeper_profile_defaults_materializable (defaults : keeper_profile_defaults) =
   let has_runtime_identity =
     Option.is_some defaults.persona_name
-    || Option.is_some defaults.goal
     || defaults.mention_targets <> []
   in
   match defaults.autoboot_enabled with
@@ -650,7 +656,11 @@ let keeper_dir (config : Workspace.config) =
   ensure_dir d
 
 let keeper_meta_path config name =
-  Filename.concat (keeper_dir config) (name ^ ".json")
+  Filename.concat
+    (keeper_dir config)
+    (Keeper_runtime_root_entry.keeper_basename
+       ~keeper_name:name
+       Keeper_runtime_root_entry.Metadata)
 
 let session_base_dir (config : Workspace.config) =
   let d = Filename.concat (Workspace.masc_root_dir config) "traces" in

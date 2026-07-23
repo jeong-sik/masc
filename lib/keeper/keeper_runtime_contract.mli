@@ -76,7 +76,6 @@ val runtime_contract_json_from_fields :
   ?sandbox_root:string ->
   ?allowed_paths:string list ->
   ?network_mode:string ->
-  ?approval_mode:string ->
   ?runtime_profile:string ->
   unit ->
   Yojson.Safe.t
@@ -96,7 +95,6 @@ val runtime_observability_contract_json_from_fields :
   ?sandbox_root:string ->
   ?allowed_paths:string list ->
   ?network_mode:string ->
-  ?approval_mode:string ->
   ?runtime_profile:string ->
   unit ->
   Yojson.Safe.t

@@ -3,7 +3,7 @@
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
 import { get, post } from './core'
-import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray } from '../components/common/normalize'
+import { isRecord, asBoolean, asInt, asNullableString, asNumber, asStringArray, asRecordArray, isPositiveSafeInteger } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
 import { asKeeperRuntimeBlockerClass } from '../lib/runtime-blocker-class'
 import type { KeeperConfig, KeeperFeatureStatus, KeeperHookSlot } from '../types'
@@ -36,6 +36,14 @@ function asLooseNumber(value: unknown): number | undefined {
 
 function asLooseNullableNumber(value: unknown): number | null {
   return asLooseNumber(value) ?? null
+}
+
+function decodeMaxContextOverride(value: unknown): number | null {
+  if (value === null) return null
+  if (isPositiveSafeInteger(value)) return value
+  throw new Error(
+    'Invalid keeper config response: max_context_override must be a positive safe integer or null',
+  )
 }
 
 function normalizeStringList(value: unknown): string[] {
@@ -147,51 +155,32 @@ function normalizeDefaultSourceKind(value: unknown): KeeperConfig['sources']['de
   }
 }
 
-function normalizePerProviderTimeoutMode(
-  raw: unknown,
-  perProviderTimeoutSec: number | null,
-): KeeperConfig['execution']['per_provider_timeout_mode'] {
-  return asNullableString(raw) === 'override' || perProviderTimeoutSec != null
-    ? 'override'
-    : 'turn_budget_default'
-}
-
 function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfig {
   const data = isRecord(raw) ? raw : {}
   const prompt = isRecord(data.prompt) ? data.prompt : {}
   const promptBlocks = isRecord(prompt.system_prompt_blocks) ? prompt.system_prompt_blocks : {}
   const execution = isRecord(data.execution) ? data.execution : {}
-  const compaction = isRecord(data.compaction) ? data.compaction : {}
   const proactive = isRecord(data.proactive) ? data.proactive : {}
   const drift = isRecord(data.drift) ? data.drift : {}
-  const handoff = isRecord(data.handoff) ? data.handoff : {}
   const hooks = isRecord(data.hooks) ? data.hooks : null
   const runtime = isRecord(data.runtime) ? data.runtime : {}
   const runtimeTrust = isRecord(data.runtime_trust) ? data.runtime_trust : null
   const workspace = isRecord(data.workspace) ? data.workspace : {}
-  const tools = isRecord(data.tools) ? data.tools : {}
   const sources = isRecord(data.sources) ? data.sources : {}
   const metrics = isRecord(data.metrics) ? data.metrics : {}
-  const limits = isRecord(data.limits) ? data.limits : {}
-  const perProviderTimeoutSec = asLooseNullableNumber(execution.per_provider_timeout_sec)
   const lastLatencyMs = asInt(metrics.last_latency_ms)
 
   return {
     name: asNullableString(data.name) ?? requestedName,
     active_goal_ids: normalizeStringList(data.active_goal_ids),
     autoboot_enabled: asLooseBoolean(data.autoboot_enabled, true),
-    max_context_override: asInt(data.max_context_override) ?? null,
-    limits: {
-      min_context_override_tokens: asInt(limits.min_context_override_tokens) ?? null,
-      max_context_override_tokens: asInt(limits.max_context_override_tokens) ?? null,
-    },
+    max_context_override: decodeMaxContextOverride(data.max_context_override),
     sandbox_profile: asNullableString(data.sandbox_profile) ?? '(unknown sandbox_profile)',
     network_mode: asNullableString(data.network_mode) ?? '(unknown network_mode)',
     sandbox_last_error: asNullableString(data.sandbox_last_error),
     allowed_paths: normalizeStringList(data.allowed_paths),
     effective_allowed_paths: normalizeStringList(data.effective_allowed_paths),
     prompt: {
-      goal: asNullableString(prompt.goal) ?? '',
       instructions: asNullableString(prompt.instructions) ?? '',
       system_prompt_blocks: {
         constitution: normalizePromptBlock(promptBlocks.constitution, 'keeper.constitution'),
@@ -208,11 +197,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       active_model: '',
       active_model_label: null,
       last_model_used_label: null,
-      per_provider_timeout_sec: perProviderTimeoutSec,
-      per_provider_timeout_mode: normalizePerProviderTimeoutMode(
-        execution.per_provider_timeout_mode,
-        perProviderTimeoutSec,
-      ),
       verify: asLooseBoolean(execution.verify),
       selected_runtime_id: asNullableString(execution.selected_runtime_id) ?? '',
       selected_runtime_canonical:
@@ -221,17 +205,8 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
         ?? '',
       runtime_options: normalizeStringList(execution.runtime_options),
     },
-    compaction: {
-      profile: asNullableString(compaction.profile) ?? '(unknown compaction profile)',
-      ratio_gate: asLooseNumber(compaction.ratio_gate) ?? 0.85,
-      message_gate: asInt(compaction.message_gate) ?? 0,
-      token_gate: asInt(compaction.token_gate) ?? 0,
-      cooldown_sec: asInt(compaction.cooldown_sec) ?? 0,
-    },
     proactive: {
       enabled: asLooseBoolean(proactive.enabled),
-      idle_sec: asInt(proactive.idle_sec) ?? 0,
-      cooldown_sec: asInt(proactive.cooldown_sec) ?? 0,
     },
     drift: {
       status: normalizeKeeperFeatureStatus(drift.status),
@@ -240,21 +215,10 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       count_total: asInt(drift.count_total) ?? null,
       last_reason: asNullableString(drift.last_reason),
     },
-    handoff: {
-      auto: asLooseBoolean(handoff.auto),
-      threshold: asLooseNumber(handoff.threshold) ?? 0.85,
-      cooldown_sec: asInt(handoff.cooldown_sec) ?? 0,
-    },
     hooks: hooks
       ? {
+          scope: asNullableString(hooks.scope),
           slots: normalizeKeeperHookSlots(hooks.slots),
-          deny_list: normalizeStringList(hooks.deny_list),
-          // deny_list_count is derived (deny_list.length); not stored.
-          destructive_check_tools: normalizeStringList(hooks.destructive_check_tools),
-          cost_budget: {
-            max_cost_usd: asLooseNullableNumber(isRecord(hooks.cost_budget) ? hooks.cost_budget.max_cost_usd : undefined),
-            active: asLooseBoolean(isRecord(hooks.cost_budget) ? hooks.cost_budget.active : undefined),
-          },
         }
       : undefined,
     runtime: {
@@ -267,7 +231,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       active_model_label: null,
       last_model_used_label: null,
       runtime_blocker_summary: asNullableString(runtime.runtime_blocker_summary),
-      runtime_blocker_continue_gate: asLooseNullableBoolean(runtime.runtime_blocker_continue_gate),
     },
     runtime_trust: runtimeTrust,
     workspace: {
@@ -277,14 +240,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
       active_goals: normalizeKeeperConfigActiveGoals(workspace.active_goals),
       active_goal_count: asInt(workspace.active_goal_count) ?? 0,
       missing_active_goal_ids: normalizeStringList(workspace.missing_active_goal_ids),
-    },
-    tools: {
-      tool_access: normalizeStringList(tools.tool_access),
-      resolved_allowlist: normalizeStringList(tools.resolved_allowlist),
-      tool_denylist: normalizeStringList(tools.tool_denylist),
-      active_masc_tool_count: asInt(tools.active_masc_tool_count) ?? 0,
-      active_keeper_tool_count: asInt(tools.active_keeper_tool_count) ?? 0,
-      total_active: asInt(tools.total_active) ?? 0,
     },
     sources: {
       live_meta_path: asNullableString(sources.live_meta_path) ?? '',
@@ -335,22 +290,9 @@ export type KeeperConfigUpdatePayload = {
   sandbox_profile?: SandboxProfile
   network_mode?: SandboxNetworkMode
   // Prompt fields
-  goal?: string
   instructions?: string
   // Proactive
   proactive_enabled?: boolean
-  proactive_idle_sec?: number
-  proactive_cooldown_sec?: number
-  // Compaction
-  compaction_profile?: string
-  compaction_ratio_gate?: number
-  compaction_message_gate?: number
-  compaction_token_gate?: number
-  compaction_cooldown_sec?: number
-  // Handoff
-  auto_handoff?: boolean
-  handoff_threshold?: number
-  handoff_cooldown_sec?: number
 }
 
 export async function patchKeeperConfig(
@@ -362,23 +304,4 @@ export async function patchKeeperConfig(
     `/api/v1/keepers/${encodeURIComponent(name)}/config`,
     payload,
   ).then(raw => normalizeKeeperConfig(raw, name))
-}
-
-// Tool policy is set atomically (tool_access + denylist) via the dedicated
-// /tools endpoint with action=set_policy — a different mutation shape from the
-// /config PATCH above. The endpoint overwrites both tool_access and denylist,
-// and runtime execution gating keys only off the denylist, not tool_access.
-// It returns the updated tools block (not the full config), so we re-fetch the
-// config to get a consistent normalized snapshot.
-export async function setKeeperToolPolicy(
-  name: string,
-  policy: { tool_access: string[]; deny: string[] },
-): Promise<KeeperConfig> {
-  await ensureDevToken()
-  await post<unknown>(`/api/v1/keepers/${encodeURIComponent(name)}/tools`, {
-    action: 'set_policy',
-    tool_access: policy.tool_access,
-    deny: policy.deny,
-  })
-  return fetchKeeperConfig(name)
 }

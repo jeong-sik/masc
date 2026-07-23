@@ -101,15 +101,14 @@ assert_dashboard_matched_supported_non_terminal() {
     | $evidence.schema == "masc.dashboard.scheduled_automation.live_supported_non_terminal_evidence.v1"
       and $evidence.source == "schedule_store"
       and $evidence.projection_status == "matched_supported_non_terminal"
-      and $evidence.criteria == "payload_support=supported && execution_readiness not in {terminal,expired}"
+      and $evidence.criteria == "payload_support=supported && status is non-terminal"
       and ($evidence.supported_request_count >= 1)
       and ($evidence.supported_non_terminal_count >= 1)
       and ($evidence.supported_live_count >= 1)
       and (($evidence.matched_schedule_ids // []) | index($schedule_id) != null)
       and $row.payload_kind == "masc.keeper_wake"
       and $row.payload_support == "supported"
-      and ($row.execution_readiness != "terminal")
-      and ($row.execution_readiness != "expired")
+      and (($row.status | IN("succeeded", "failed", "cancelled", "expired")) | not)
   ' "$DASHBOARD_JSON" >/dev/null
 }
 
@@ -136,7 +135,6 @@ create_payload="$(
       schedule_id: $schedule_id,
       requested_at_unix: $requested_at,
       due_at_unix: $due_at,
-      risk_class: "workspace_write",
       requested_by_id: "contract-operator",
       scheduled_by_id: "contract-scheduler",
       payload_kind: "masc.keeper_wake",

@@ -32,9 +32,7 @@ open Tool_args
 
 (** {1 Agent lookup callback} *)
 
-(** Set once at server startup with the real [Workspace.is_agent_session_bound]
-    check so that board posts are auto-classified without requiring
-    callers to pass config or post_kind. *)
+(** Set once at server startup for optional agent-to-agent feedback hooks. *)
 let agent_lookup_hook : (string -> bool) option Atomic.t = Atomic.make None
 
 let set_agent_lookup f = Atomic.set agent_lookup_hook (Some f)
@@ -76,49 +74,17 @@ let require_post_author ~post_id ~author =
               (Board.Agent_id.to_string post.author)))
 ;;
 
-let normalized_identity_candidate value =
-  let value = String.lowercase_ascii (String.trim value) in
-  if String.equal value "" || String.equal value "anonymous" then None else Some value
-;;
-
-let registered_agent_author ~author ?author_raw_agent_name () =
-  let candidates =
-    [ Some author; author_raw_agent_name ]
-    |> List.filter_map (function
-      | Some value -> normalized_identity_candidate value
-      | None -> None)
-    |> List.sort_uniq String.compare
-  in
-  match Atomic.get agent_lookup_hook with
-  | None -> false
-  | Some lookup -> List.exists lookup candidates
-;;
-
-let resolve_board_post_kind ~author ?author_raw_agent_name (raw_kind : string option)
+let resolve_board_post_kind (raw_kind : string option)
   : (Board.post_kind, string) Stdlib.result
   =
-  let author_lc = String.lowercase_ascii (String.trim author) in
-  let author_is_registered_agent =
-    registered_agent_author ~author ?author_raw_agent_name ()
-  in
   match raw_kind with
   | Some raw ->
     (match Board.post_kind_of_string (String.lowercase_ascii (String.trim raw)) with
      | Some Board.System_post ->
        Error "system posts are reserved for platform/internal surfaces"
-     | Some Board.Human_post when author_is_registered_agent ->
-       Error "registered agent authors cannot create direct board posts; use automation or omit post_kind"
      | Some kind -> Ok kind
      | None -> Error (Printf.sprintf "unknown post_kind: %s" raw))
-  | None ->
-    if String.equal author_lc "" || String.equal author_lc "anonymous"
-    then
-      (* Missing or default author is never direct/manual — classify as
-         automation to prevent misleading direct-attributed posts (#4604). *)
-      Ok Board.Automation_post
-    else if author_is_registered_agent
-    then Ok Board.Automation_post
-    else Ok Board.Human_post
+  | None -> Ok Board.Human_post
 ;;
 
 (** {1 SOUL Evolution callback} *)
@@ -247,12 +213,7 @@ let handle_vote ~tool_name ~start_time args =
 
 let handle_stats ~tool_name ~start_time _args : Tool_result.result =
   let stats = Board_dispatch.stats () in
-  (* Structured result via [Tool_result.ok] so [stats] is parsed back into
-     structured [data] instead of a `String that double-encodes the JSON. *)
-  Tool_result.ok
-    ~tool_name
-    ~start_time
-    (Printf.sprintf "Board Stats:\n%s" (Yojson.Safe.pretty_to_string stats))
+  Tool_result.make_ok ~tool_name ~start_time ~data:stats ()
 ;;
 
 (** Search posts by keyword. *)

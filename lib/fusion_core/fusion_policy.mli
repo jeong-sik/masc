@@ -17,10 +17,8 @@ type panel_group =
   ; system_prompt : string
       (** 그룹 패널 모델 system prompt — config에서 필수(코드 default 없음). *)
   ; web_tools : bool  (** 그룹에 web_search/web_fetch 주입 여부. *)
-  ; max_tool_calls : int  (** 그룹 모델당 최대 tool 호출 수 (0=무제한). *)
   ; max_output_tokens : int option
       (** 그룹 모델당 출력 토큰 예산 override. [None]이면 Runtime_agent 기본값. *)
-  ; timeout_s : float  (** 그룹 패널 호출 구조적 타임아웃 (초). *)
   }
 [@@deriving show, eq]
 
@@ -32,12 +30,8 @@ type judge_spec =
   ; jlabel : string  (** 정체성 라벨. ""면 정체성=jmodel *)
   ; jsystem_prompt : string  (** 이 1차 심판의 lens — config에서 필수(코드 default 없음). *)
   ; jweb_tools : bool  (** web_search/web_fetch 주입 여부. *)
-  ; jmax_tool_calls : int  (** 최대 tool 호출 수 (0=무제한). *)
   ; jmax_output_tokens : int option
       (** 출력 토큰 예산 override. [None]이면 Runtime_agent 기본값. *)
-  ; jtimeout_s : float  (** 호출 구조적 타임아웃 (초). *)
-  ; jmax_timeout_s : float option
-      (** 적응형 타임아웃 확장 상한. None이면 예산 내에서 factor만큼 확장. *)
   }
 [@@deriving show, eq]
 
@@ -48,15 +42,12 @@ type judge_spec =
     desugar한다 — 그 경우 오늘과 byte-identical 동작. *)
 type preset =
   { name : string
-  ; panels : panel_group list  (** 1개 이상 그룹; 모델 총합 {!min_panel}..{!max_panel} *)
+  ; panels : panel_group list  (** 그룹 전체에 모델이 하나 이상 있어야 함. *)
   ; judge : string
   ; judge_system_prompt : string
       (** 심판 모델 system prompt — config에서 필수(코드 default 없음). *)
-  ; judge_timeout_s : float  (** 심판 호출 구조적 타임아웃 (초). *)
   ; judge_max_output_tokens : int option
       (** 단일/refine/meta 심판 출력 토큰 예산 override. [None]이면 기본값. *)
-  ; meta_timeout_s : float
-      (** meta/stage-meta/final-meta 호출 구조적 타임아웃 (초). *)
   ; judges : judge_spec list
       (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
@@ -66,28 +57,15 @@ type preset =
           [judge = Error]로 완료한다 (빈 패널 종합 날조 방지).
           허용 범위는 [1]부터 패널 모델 총합까지; full-panel quorum([총합])도
           명시적으로 설정할 수 있다. *)
-  ; judge_wave_budget_s : float
-      (** 1차 심판 wave 전체 wall-clock 예산 (초). 0=비활성(legacy). *)
-  ; adaptive_timeout_factor : float
-      (** 1차 심판 타임아웃 적응형 확장 계수. 1.0=확장 안 함. *)
   ; fallback_judge_model : string option
-      (** 전원 타임아웃/예산 실패 시 단일 fallback 심판 모델. *)
+      (** Legacy observed value; failures never trigger an automatic call. *)
   }
 [@@deriving show, eq]
-
-(** 패널 크기(모델 총합) 하한/상한 (OpenRouter Fusion: 1..8 모델). *)
-val min_panel : int
-
-val max_panel : int
 
 (** [min_answered] 하한과 기본값. 기본 1 = "응답 패널이 1개도 없을 때만 judge skip". *)
 val min_answered_floor : int
 
 val default_min_answered : int
-
-(** Default JOJ first-judge concurrency. Derived from {!max_panel} so judge
-    fan-out has its own bounded capacity instead of borrowing panel throttling. *)
-val default_max_concurrent_judges : int
 
 (** Default staged JOJ group size. A staged judge-of-judges run groups first
     judges into fixed-size cohorts before a final meta reduction; default 3
@@ -98,22 +76,16 @@ val default_staged_judge_group_size : int
     pass-through and is rejected. *)
 val min_staged_judge_group_size : int
 
-(** 그룹 모델당 [max_tool_calls] 상한 (0..이 값). 0=무제한. named SSOT. *)
-val max_tool_calls_ceiling : int
-
 (** Optional max-output-token overrides must be positive when present. *)
 val valid_max_output_tokens : int option -> bool
-
-(** 패널/심판 타임아웃 기본값 (config 미지정 시). 운영 노브 — named SSOT. *)
-val default_timeout_s : float
 
 (** 모든 그룹의 모델을 평탄화 (그룹순 × 그룹내 모델순 보존). *)
 val preset_models : preset -> string list
 
-(** 패널 모델 총합이 [min_panel]..[max_panel] 범위이고 [panels]가 비어있지 않은가.
-    {!Validated_preset.of_preset}의 검증 술어 (RFC-0280: 게이트는 더 이상 재검증하지
-    않고 [Validated_preset.t]로 타입 증명한다). *)
-val preset_size_ok : preset -> bool
+(** 그룹 전체에 패널 모델이 하나 이상 있는가.
+    {!Validated_preset.of_preset}의 검증 술어. Provider별 cardinality 한계는 이
+    MASC-owned preset 타입을 제한하지 않는다. *)
+val preset_has_models : preset -> bool
 
 (** 패널 정체성 (RFC-0278). [label]이 비면 [model] 그대로(legacy byte-identical),
     있으면 ["label (model)"]. agent 카드명·심판 패널 태그·[panel_answer.model]에
@@ -175,44 +147,9 @@ val staged_judge_groups
   -> judge_spec list
   -> (judge_spec list list, staged_judge_group_error) result
 
-(** 외곽 run_safe 타임아웃 = ceil(패널 총원 / max_fibers) 웨이브 × 그룹 timeout 중 max.
-    [max_fibers]는 패널 fan-out에 실제로 쓰는 동시성(= [max_concurrent_panels])과 같은
-    값을 넘겨야 한다 — 웨이브 직렬화를 무시하면 마지막 웨이브가 외곽 데드라인 밖에
-    놓여 완료된 답변까지 폐기된다. 단일 웨이브(N <= max_fibers)면 그룹 timeout 중 max. *)
-val panel_outer_timeout_of : max_fibers:int -> panel_group list -> float
-
 (** 심판 web_tools를 그룹들에서 derive: [req_web_tools] 또는 어느 그룹이든 web_tools.
     단일 그룹이면 [req_web_tools || group.web_tools] (오늘과 byte-identical). *)
 val judge_web_tools_of : req_web_tools:bool -> panel_group list -> bool
-
-(** 심판 tool budget을 그룹들에서 derive: 0(무제한)이 흡수자, 그 외엔 그룹 max.
-    단일 그룹이면 그 그룹 [max_tool_calls] (오늘과 byte-identical). *)
-val judge_tool_budget_of : panel_group list -> int
-
-(** [adaptive_timeout_enabled preset] — preset의 [adaptive_timeout_factor]가 확장
-    임계값(1.0)을 넘는가. callers(orchestrator)가 float equality 비교 없이 typed bool로
-    adaptive 재시도 분기를 판정한다. *)
-val adaptive_timeout_enabled : preset -> bool
-
-(** [judge_wave_budget_enabled ~wave_budget_s] is false only for the validated
-    legacy disabled value [0.0]. Positive finite or effectively-unbounded
-    budgets still enforce the wave cap. *)
-val judge_wave_budget_enabled : wave_budget_s:float -> bool
-
-(** 적응형 타임아웃: 1차 심판/재시도 호출에 사용할 effective timeout을 계산한다.
-    [wave_budget_s = 0.0]이면 legacy disabled budget으로 간주해 wave cap을 적용하지
-    않는다. [factor <= adaptive_extension_threshold](= 1.0)이면 [base_s]를 반환하고,
-    [already_timed_out]이고 [factor > adaptive_extension_threshold]이면 [base_s *.
-    factor]를 [max_s]로 상한·남은 예산으로 하한해 확장한다. 결과가
-    [min_effective_timeout_s](0.001s) 미만이면 [None]. *)
-val adjust_judge_timeout
-  :  base_s:float
-  -> max_s:float option
-  -> factor:float
-  -> wave_budget_s:float
-  -> elapsed_s:float
-  -> already_timed_out:bool
-  -> float option
 
 (** RFC-0280: 검증을 통과한 preset (Parse, don't validate). [t = private preset]이라
     필드는 자유롭게 읽되([preset] 또는 coercion [(vp :> preset)]) 검증 없이 생성할 수
@@ -223,12 +160,10 @@ module Validated_preset : sig
 
   (** 검증 실패 사유 — 닫힌 합. config 계층이 자기 [config_error]로 매핑한다. *)
   type invalid =
-    | Bad_size of int  (** 모델 총합(panels=[] 포함)이 [min_panel]..[max_panel] 밖 *)
+    | No_panel_models  (** 그룹 전체에 모델이 하나도 없음 *)
     | Missing_prompt  (** 패널 또는 심판 system prompt 비어있음 *)
     | Missing_judge_model  (** 심판 model id 비어있음 *)
     | Duplicate_panelist of string  (** 두 패널이 같은 정체성({!panelist_id}) *)
-    | Bad_max_tool_calls of int
-        (** 그룹 또는 JOJ 1차 심판 max_tool_calls가 0..[max_tool_calls_ceiling] 밖 *)
     | Bad_max_output_tokens of int
         (** 그룹/심판 max_output_tokens override가 양수가 아님 *)
     | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0283) *)
@@ -237,17 +172,9 @@ module Validated_preset : sig
         (** [min_answered]가 하한 [min_answered_floor] 미만. *)
     | Min_answered_above_max of int
         (** [min_answered]가 패널 모델 총합을 초과. *)
-    | Bad_meta_timeout of float
-        (** [meta_timeout_s]가 양수 유한수가 아님. *)
-    | Bad_judge_wave_budget of float
-        (** [judge_wave_budget_s]가 0 미만이거나, 양수 유한인데 최장 1차 심판
-            타임아웃 또는 [meta_timeout_s]보다 작음. *)
-    | Bad_adaptive_factor of float
-        (** [adaptive_timeout_factor]가 1.0 미만. *)
-
-  (** 검증 순서: size → prompt → judge → 정체성 중복 → max_tool_calls →
-      max_output_tokens → 1차 심판 prompt/정체성/max_tool_calls/max_output_tokens →
-      min_answered → timeout 예산/계수. 통과 시 [Ok vp], 첫 위반에서 [Error invalid].
+  (** 검증 순서: model presence → prompt → judge → 정체성 중복 → max_output_tokens →
+      1차 심판 prompt/정체성/max_output_tokens → min_answered.
+      통과 시 [Ok vp], 첫 위반에서 [Error invalid].
       config 로드의 검증 순서와 동일. *)
   val of_preset : preset -> (t, invalid) result
 
@@ -264,8 +191,6 @@ end
 type t =
   { enabled : bool
   ; default_preset : string
-  ; max_concurrent_panels : int
-  ; max_concurrent_judges : int
   ; staged_judge_group_size : int
   ; presets : Validated_preset.t list
   }
@@ -274,6 +199,10 @@ type t =
 (** preset 이름으로 조회. 없으면 [None] (게이트가 [Preset_unknown]으로 변환).
     검증된 preset을 돌려주므로 호출처는 invariant를 재검증할 필요가 없다 (RFC-0280). *)
 val find_preset : t -> string -> Validated_preset.t option
+
+(** Structural admission for a top-level Fusion submission before its
+    canonical async request id exists. This is the SSOT used by {!decide}. *)
+val decide_top_level : policy:t -> preset:string -> (unit, Fusion_types.deny_reason) result
 
 (** 결정론적 게이트 (순수, side-effect 없음).
 

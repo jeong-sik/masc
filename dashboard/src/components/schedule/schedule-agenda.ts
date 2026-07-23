@@ -27,7 +27,6 @@ import {
   cadenceOfRecurrenceKind,
   parseRecurrenceKind,
   schedPayloadSpec,
-  schedRiskSpec,
   type Cadence,
 } from '../v2/schedule-constants'
 
@@ -38,7 +37,7 @@ const WEEKDAY_KO: readonly string[] = ['일', '월', '화', '수', '목', '금',
 // ── derivations ────────────────────────────────────────────────────
 
 function normalizedStatus(request: DashboardScheduledAutomationRequest): string {
-  return (request.effective_status ?? request.status)?.trim().toLowerCase() ?? ''
+  return request.status.trim().toLowerCase()
 }
 
 export function isTerminalRequest(request: DashboardScheduledAutomationRequest): boolean {
@@ -205,10 +204,6 @@ function summaryText(request: DashboardScheduledAutomationRequest): string {
   return request.payload_summary?.trim() || schedPayloadSpec(request.payload_kind).lbl
 }
 
-function isPending(request: DashboardScheduledAutomationRequest): boolean {
-  return normalizedStatus(request) === 'pending_approval'
-}
-
 // ── presentation ───────────────────────────────────────────────────
 
 export function CadenceTag({ cadence, full }: { cadence: Cadence; full?: boolean }) {
@@ -218,11 +213,6 @@ export function CadenceTag({ cadence, full }: { cadence: Cadence; full?: boolean
       ${spec.glyph} ${full ? spec.lbl : spec.short}
     </span>
   `
-}
-
-function RiskTag({ risk }: { risk: string }) {
-  const spec = schedRiskSpec(risk)
-  return html`<span class=${`sch-risk ${spec.cls}`} title=${`risk_class = ${risk}`}>${spec.lbl}</span>`
 }
 
 export function CadenceSummary({
@@ -281,7 +271,7 @@ function PollingCard({
   nextTickMs: number | null
   onOpen: (scheduleId: string) => void
 }) {
-  const tone = automationTone(request.effective_status ?? request.status)
+  const tone = automationTone(request.status)
   // Interval loops drain through the same queue; surface the last execution's
   // drain status so a silently-failing poll is visible without opening the row.
   const drain = queueDrainStatusOf(request)
@@ -294,12 +284,11 @@ function PollingCard({
     >
       <div class="sch-poll-top">
         <span class="sch-poll-int mono">↻ ${recurrenceLabel(request)}</span>
-        <${StatusChip} tone=${tone} uppercase=${false}>${request.effective_status ?? request.status}<//>
+        <${StatusChip} tone=${tone} uppercase=${false}>${request.status}<//>
       </div>
       <div class="sch-poll-title">${summaryText(request)}</div>
       <div class="sch-poll-foot">
         <span class="mono sch-poll-by">${scheduledBy(request)}</span>
-        <${RiskTag} risk=${request.risk_class} />
         ${drain && isCalendarVisible(drain)
           ? html`<${StatusChip}
               tone=${drain.tone}
@@ -358,14 +347,13 @@ function AgendaEventRow({
   onOpen: (scheduleId: string) => void
 }) {
   const request = event.request
-  const tone = automationTone(request.effective_status ?? request.status)
-  const pending = isPending(request)
+  const tone = automationTone(request.status)
   // Queue-drain status of the last keeper-wake execution (calendar parity with
   // the list view). Only the actionable states render — see isCalendarVisible.
   const drain = queueDrainStatusOf(request)
   return html`
     <button
-      class=${`sch-ev st-${tone} ${pending ? 'pending' : ''}`}
+      class=${`sch-ev st-${tone}`}
       data-testid="sch-agenda-event"
       data-schedule-id=${request.schedule_id}
       onClick=${() => onOpen(request.schedule_id)}
@@ -378,8 +366,6 @@ function AgendaEventRow({
         <span class="sch-ev-title">${summaryText(request)}</span>
         <span class="sch-ev-meta">
           <span class="mono sch-ev-by">${scheduledBy(request)}</span>
-          <${RiskTag} risk=${request.risk_class} />
-          ${pending ? html`<span class="sch-ev-need mono">⊙ 승인 필요</span>` : null}
           ${drain && isCalendarVisible(drain)
             ? html`<${StatusChip}
                 tone=${drain.tone}
@@ -390,7 +376,7 @@ function AgendaEventRow({
             : null}
         </span>
       </span>
-      <${StatusChip} tone=${tone} uppercase=${false}>${request.effective_status ?? request.status}<//>
+      <${StatusChip} tone=${tone} uppercase=${false}>${request.status}<//>
     </button>
   `
 }

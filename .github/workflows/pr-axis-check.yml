@@ -2,7 +2,11 @@ name: PR Axis Cross-Check
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    # `edited` re-runs the check when a parent merge auto-retargets a stacked
+    # child's base branch (base change arrives as an `edited` event); the job
+    # is a single API-driven script, so the extra runs on title/body edits
+    # are cheap and cancelled by the concurrency group.
+    types: [opened, synchronize, reopened, edited]
   workflow_dispatch:
     inputs:
       pr_number:

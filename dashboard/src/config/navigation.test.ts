@@ -64,6 +64,7 @@ describe('dashboard surface navigation', () => {
     expect(PRIMARY_DASHBOARD_SURFACES.map(surface => surface.id)).toEqual([
       'overview',
       'keepers',
+      'registry',
       'monitoring',
       'workspace',
       'approvals',
@@ -78,9 +79,10 @@ describe('dashboard surface navigation', () => {
     expect(PRIMARY_DASHBOARD_NAV_ITEMS.map(item => item.label)).toEqual([
       'Overview',
       'Keepers',
+      'Registry',
       'Monitor',
       'Work',
-      'Approvals',
+      'Gate',
       'Schedule',
       'Board',
       'Fusion',
@@ -92,7 +94,7 @@ describe('dashboard surface navigation', () => {
   })
 
   it('uses one sectionless-surface classifier for section stripping and section lookup', () => {
-    const sectionless = ['overview', 'logs', 'settings', 'keepers', 'board', 'schedule', 'approvals', 'fusion'] as const
+    const sectionless = ['overview', 'logs', 'settings', 'keepers', 'registry', 'board', 'schedule', 'approvals', 'fusion'] as const
     expect(sectionless.filter(id => isSectionlessSurface(id))).toEqual([...sectionless])
     expect(sectionItemsForTab('settings')).toEqual([])
     expect(normalizeRouteParams('settings', { section: 'legacy', surface: 'old', panel: 'theme' })).toEqual({
@@ -154,6 +156,7 @@ describe('lab navigation', () => {
       'performance',
       'memory-subsystems',
       'keeper-memory-health',
+      'audit-integrity',
     ])
 
     expect(labSections.map(item => item.label)).toEqual([
@@ -162,6 +165,7 @@ describe('lab navigation', () => {
       'Performance',
       'Memory OS',
       '키퍼 메모리 상태',
+      '감사 무결성',
     ])
     expect(labSections.find(item => item.id === 'memory-subsystems')?.description).toBe(
       'Live episodes, user model projection, Hebbian synapses, and gated memory entries.',
@@ -272,7 +276,7 @@ describe('monitoring navigation labels', () => {
 
     expect(descriptions).toMatchObject({
       agents: 'Live and configured keeper roster.',
-      'fleet-health': 'Tool quality and governance signals.',
+      'fleet-health': 'Tool quality and Gate signals.',
       runtime: 'Runtime lane health.',
       observatory: 'Activity and runtime evidence.',
     })
@@ -321,7 +325,7 @@ describe('monitoring navigation labels', () => {
     expect(ids).not.toContain('fleet')
     expect(ids).not.toContain('telemetry')
     expect(ids).not.toContain('metrics')
-    expect(ids).not.toContain('governance')
+    expect(ids).not.toContain('gate')
   })
 
   it('puts keeper fleet first before tool, runtime, and evidence lanes', () => {
@@ -342,7 +346,6 @@ describe('monitoring navigation labels', () => {
       'transport-health',
       'feature-health',
       'journey',
-      'cognition',
     ])
   })
 
@@ -402,6 +405,12 @@ describe('normalizeRouteParams backward compat (RFC-MASC-006 Phase 0)', () => {
     const redirected = normalizeRouteParams('monitoring', { section: 'sessions', session_id: 's-123' })
     expect(redirected.section).toBe('agents')
     expect(redirected.session_id).toBe('s-123')
+  })
+
+  it('redirects retired ?section=cognition URL to agents and preserves other params', () => {
+    const redirected = normalizeRouteParams('monitoring', { section: 'cognition', keeper: 'k-1' })
+    expect(redirected.section).toBe('agents')
+    expect(redirected.keeper).toBe('k-1')
   })
 
   it('redirects telemetry to fleet-health with event-log view (Phase 1)', () => {

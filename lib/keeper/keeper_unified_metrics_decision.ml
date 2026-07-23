@@ -31,11 +31,6 @@ let append_decision_record
   let now_ts = Time_compat.now () in
   let trigger_signals = observed_triggers_of_observation ~meta observation in
   let affordances = observed_affordances_of_observation ~meta observation in
-  let tool_names =
-    match result with
-    | Some r -> Keeper_agent_result.tool_names r
-    | None -> []
-  in
   let response_preview =
     match result with
     | Some r
@@ -59,8 +54,7 @@ let append_decision_record
       , task_id_opt
       , turn_goal_ids_opt
       , _sandbox_profile
-      , _network_mode
-      , approval_mode ) =
+      , _network_mode ) =
     Keeper_tool_call_log.get_turn_context ~cell:turn_ctx_cell ()
   in
   let turn_id =
@@ -86,9 +80,6 @@ let append_decision_record
   in
   let pending_approval_count =
     Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
-  in
-  let claim_executed =
-    List.exists Keeper_tool_progress.is_claim_tool_name tool_names
   in
   let turn_mode =
     match turn_mode, result with
@@ -140,7 +131,6 @@ let append_decision_record
         ("provider_context", provider_context_json ~meta result);
         ("tool_surface", tool_surface_json result);
         ("pending_approval_count", `Int pending_approval_count);
-        ("approval_mode", Json_util.string_opt_to_json approval_mode);
         ( "channel",
           `String
             (Keeper_world_observation.channel_to_string
@@ -158,16 +148,23 @@ let append_decision_record
         ( "observation",
           `Assoc
             [
-              ("pending_mentions", `Int (List.length observation.pending_mentions));
+              ( "pending_mentions"
+              , `Int
+                  (List.length
+                     (Keeper_world_observation_message_scope.pairs_of_kind
+                        Keeper_world_observation_message_scope.Mention
+                        observation.pending_messages)) );
               ("pending_board_events", `Int (List.length observation.pending_board_events));
-              ("pending_scope_messages", `Int (List.length observation.pending_scope_messages));
+              ( "pending_scope_messages"
+              , `Int
+                  (List.length
+                     (Keeper_world_observation_message_scope.pairs_of_kind
+                        Keeper_world_observation_message_scope.Scope
+                        observation.pending_messages)) );
               ("active_goals", `Int (List.length observation.active_goals));
               ("idle_seconds", `Int observation.idle_seconds);
-              ("context_ratio", `Float (Lazy.force observation.context_ratio));
               ("unclaimed_task_count", `Int observation.unclaimed_task_count);
               ("claimable_task_count", `Int observation.claimable_task_count);
-              ( "provider_capacity_blocked_task_count",
-                `Int observation.provider_capacity_blocked_task_count );
               ( "claim_blocked_task_count",
                 `Int
                   (max 0
@@ -179,14 +176,11 @@ let append_decision_record
                 `Int observation.scheduled_automation.active_count );
               ( "scheduled_automation_due_ready_count",
                 `Int observation.scheduled_automation.due_ready_count );
-              ( "scheduled_automation_blocked_approval_count",
-                `Int observation.scheduled_automation.blocked_approval_count );
               ("running_keeper_fiber_count", `Int observation.running_keeper_fiber_count);
             ] );
         ("claim_absolute_available", `Bool (observation.unclaimed_task_count > 0));
         ("claim_matched_available", `Bool (observation.claimable_task_count > 0));
         ("claim_was_available", `Bool (observation.claimable_task_count > 0));
-        ("claim_executed", `Bool claim_executed);
         ( "action_source",
           match deliberation_execution with
           | Some execution ->
@@ -199,18 +193,13 @@ let append_decision_record
               Keeper_deliberation.execution_result_to_json execution
           | None -> `Null );
         Keeper_delegation_request.delegation_request_field ~requester:meta.name
-          ~goal:meta.goal deliberation_execution;
+          deliberation_execution;
         ( "response_preview", Json_util.string_opt_to_json response_preview );
         ( "response_preview_2000",
           match result with
           | Some r when String.trim r.response_text <> "" ->
               `String (short_preview ~max_len:2000 r.response_text)
           | _ -> `Null );
-        ( "response_requests_confirmation",
-          `Bool
-            (match result with
-             | Some r -> response_requests_confirmation r.response_text
-             | None -> false) );
         ( "error", Json_util.string_opt_to_json error );
         ( "trace_ref",
           match result with
@@ -232,7 +221,6 @@ let append_decision_record
                 classify_usage_trust
                   ~usage_reported:r.usage_reported
                   ~usage:r.usage
-                  ~context_max:0
               in
               let thinking_enabled_field =
                 match turn_thinking_enabled with
@@ -274,33 +262,7 @@ let append_decision_record
                 ]
               in
                 let stop_reason_str =
-                  match r.stop_reason with
-                  | Runtime_agent.Completed -> "completed"
-                  | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
-                      (* Detail-less wire form via the single SSOT [to_wire]:
-                         [Runtime_agent.TurnBudgetExhausted] carries only
-                         {turns_used; limit}, so [detail] is None — the
-                         same form the receipt producer emits. The previous
-                         hardcoded {`Turns; `Oas_sdk} fabricated tags the variant
-                         does not carry and drifted from the receipt path. *)
-                      Keeper_turn_disposition.(
-                        to_wire
-                          (Turn_budget_exhausted
-                             { detail = None; used = turns_used; limit }))
-                  | Runtime_agent.MutationBoundaryReached { turns_used; tool_name } ->
-                      (match tool_name with
-                       | Some tool ->
-                           Printf.sprintf "mutation_boundary(%d:%s)" turns_used tool
-                       | None ->
-                           Printf.sprintf "mutation_boundary(%d)" turns_used)
-                  | Runtime_agent.Yielded_to_chat_waiting { turns_used } ->
-                      Printf.sprintf "yielded_to_chat_waiting(%d)" turns_used
-                  | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
-                      Printf.sprintf "yielded_to_durable_stimulus(%d)" turns_used
-                  | Runtime_agent.InputRequired { turns_used; _ } ->
-                      Printf.sprintf "input_required(%d)" turns_used
-                  | Runtime_agent.ToolFailureRecoveryDeferred { turns_used; _ } ->
-                      Printf.sprintf "tool_failure_recovery_deferred(%d)" turns_used
+                  Keeper_execution_receipt.stop_reason_to_string r.stop_reason
                 in
               let inference_fields =
                 match r.inference_telemetry with
@@ -340,7 +302,10 @@ let append_decision_record
                     ("cache_read_tokens", `Int r.usage.cache_read_input_tokens);
                     ("cost_usd", Json_util.float_opt_to_json r.usage.cost_usd);
                     ( "tokens_per_second",
-                      if usage_trust_is_trusted usage_trust && latency_ms > 0 then
+                      if
+                        r.usage.output_tokens >= 0
+                        && latency_ms > 0
+                      then
                         `Float
                           (float_of_int r.usage.output_tokens
                            /. (float_of_int latency_ms /. 1000.0))
@@ -373,13 +338,14 @@ let append_decision_record
               (* Partial telemetry for turns without a run_result: record
                  what we know without collapsing skipped/cancelled/partial
                  outcomes into telemetry.outcome=error. *)
-              let error_category =
-                error_category_of_no_result_outcome ~outcome ~error
-              in
               `Assoc [
                 ("runtime_id", `String (runtime_id_of_meta meta));
                 ("candidate_models", `List []);
-                ( "error_category", Json_util.string_opt_to_json error_category );
+                (* The terminal reason is the typed failure projection built at
+                   the dispatch boundary. Persist its canonical code directly;
+                   free-form provider/error prose is diagnostic data, never a
+                   classification input. *)
+                ("error_category", `String terminal_reason_code);
                 ("outcome", `String outcome);
                 ("usage_reported", `Bool false);
                 ("telemetry_reported", `Bool false);

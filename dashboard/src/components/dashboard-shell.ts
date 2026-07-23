@@ -1,9 +1,10 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { lazy, Suspense } from 'preact/compat'
+import type { ComponentType } from 'preact'
 import { useEffect, useMemo } from 'preact/hooks'
 import type { GroundedVerdict, RouteState, TabId } from '../types'
-import type { DashboardCdalHealth, DashboardFleetSafetyHealth, DashboardKeeperReactionLedgerHealth, DashboardRuntimeResolution, Keeper } from '../types'
+import type { DashboardFleetSafetyHealth, DashboardKeeperReactionLedgerHealth, DashboardRuntimeResolution, Keeper } from '../types'
 import {
   fetchDashboardRuntimeProbe,
   type DashboardRuntimeProbePayload,
@@ -13,6 +14,7 @@ import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
 import { dashboardWsConnected, dashboardWsLastError, dashboardWsReady, dashboardWsSseFallbackActive } from '../dashboard-ws-state'
 import { isKeeperPaused } from '../lib/keeper-predicates'
+import { KEEPER_STATUS_LABEL_KO } from '../lib/keeper-operational-state'
 import { dashboardLoading, executionError, keepers, serverStatus, shellCounts, shellRuntimeResolution, tasksByStatus } from '../store'
 import { missionSnapshot, missionLoading } from '../mission-signals'
 import { namespaceTruth, namespaceTruthInitializing } from '../namespace-truth-store'
@@ -44,7 +46,7 @@ import { ErrorPanel } from './common/error-panel'
 import { Bell } from 'lucide-preact'
 import { ringFocusClasses } from './common/ring'
 import { SurfaceIcon } from './surface-icon'
-import { governanceData } from './governance-signals'
+import { gateData } from './gate-signals'
 import { Breadcrumb, type BreadcrumbItem } from './common/breadcrumb'
 import { RouteLink } from './common/route-link'
 import {
@@ -80,6 +82,7 @@ const LazyIdeShell = lazy(async () => ({ default: (await import('./ide/ide-shell
 const LazyCockpit = lazy(async () => ({ default: (await import('./cockpit/cockpit')).Cockpit }))
 const LazySettingsSurface = lazy(async () => ({ default: (await import('./settings-surface')).SettingsSurface }))
 const LazyApprovals = lazy(async () => ({ default: (await import('./approvals/approvals-surface')).ApprovalsSurface }))
+const LazyRegistrySurface = lazy(async () => ({ default: (await import('./registry/registry-surface')).RegistrySurface }))
 const LazyFusionSurface = lazy(async () => ({ default: (await import('./fusion/fusion-surface')).FusionSurface }))
 
 function lazyTabFallback(label: string) {
@@ -251,15 +254,6 @@ interface DashboardHealthInput {
 // per `KeeperPhase`) instead of the previous lowercased comparison —
 // this matches the wire type and the three other former chains.
 
-function fdPressureBlockedKeepers(fleetSafety: DashboardFleetSafetyHealth): number {
-  const candidates = [
-    fleetSafety.keeper_fd_pressure?.admission_blocked_keepers,
-    fleetSafety.keeper_fd_pressure?.blocked_keepers,
-    fleetSafety.keeper_fd_pressure?.blocked_count,
-  ].filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
-  return candidates.length > 0 ? Math.max(...candidates) : 0
-}
-
 function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): DashboardHealthChip | null {
   if (!fleetSafety) return null
   const fibers = fleetSafety.keeper_fibers
@@ -283,7 +277,6 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
   const capacityShortfall = fleet?.reaction_capacity_shortfall_count ?? (
     targetCapacity != null && runningFibers != null ? Math.max(0, targetCapacity - runningFibers) : null
   )
-  const fdPressureBlocked = fdPressureBlockedKeepers(fleetSafety)
   const pausedOnlyNoExecutable =
     executableFibers === 0
     && pausedAutobootKeepers != null
@@ -325,14 +318,6 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
       tone: 'bad',
     }
   }
-  if (fdPressureBlocked >= 24) {
-    return {
-      key: 'fleet-liveness-risk',
-      label: 'Fleet liveness risk',
-      detail: `FD pressure admission is blocking ${fdPressureBlocked} keepers; keeper turns may not start.`,
-      tone: 'bad',
-    }
-  }
   if (fleetStatus === 'degraded' || (requiresAction && capacityBelowTarget)) {
     const capacityDetail = [
       `status=${fleetStatus ?? 'degraded'}`,
@@ -371,24 +356,25 @@ function reactionLedgerHealthChip(
   if (!ledger) return null
   const pending = ledgerCount(ledger.pending_stimulus_count)
   const cursorSwept = ledgerCount(ledger.cursor_swept_stimulus_count)
-  const legacySwept = ledgerCount(ledger.legacy_cursor_swept_stimulus_count)
+  const quarantined = ledgerCount(ledger.quarantined_row_count)
   const readErrors = ledgerCount(ledger.read_error_count)
   const cursorAck = ledgerCount(ledger.cursor_ack_count)
   const status = ledger.status ?? 'unknown'
   const requiresAction = ledger.operator_action_required === true
-  const totalSwept = cursorSwept + legacySwept
-  if (!requiresAction && pending === 0 && readErrors === 0 && totalSwept === 0 && status !== 'degraded') {
+  if (!requiresAction && pending === 0 && quarantined === 0 && readErrors === 0 && cursorSwept === 0 && status !== 'degraded') {
     return null
   }
   const tone: DashboardHealthChipTone = readErrors > 0
     ? 'bad'
-    : requiresAction || pending > 0 || status === 'degraded'
+    : requiresAction || pending > 0 || quarantined > 0 || status === 'degraded'
       ? 'warn'
       : 'ok'
   const label = pending > 0
     ? `Reaction ledger pending ${pending}`
-    : totalSwept > 0
-      ? `Reaction ledger swept ${totalSwept}`
+    : quarantined > 0
+      ? `Reaction ledger quarantined ${quarantined}`
+      : cursorSwept > 0
+        ? `Reaction ledger swept ${cursorSwept}`
       : `Reaction ledger ${status}`
   return {
     key: 'reaction-ledger',
@@ -397,7 +383,7 @@ function reactionLedgerHealthChip(
       `status=${status}`,
       `pending=${pending}`,
       `cursor_swept=${cursorSwept}`,
-      `legacy_swept=${legacySwept}`,
+      `quarantined=${quarantined}`,
       `cursor_ack=${cursorAck}`,
       `read_errors=${readErrors}`,
     ].join(', '),
@@ -409,50 +395,6 @@ function reactionLedgerHealthChip(
   }
 }
 
-function contractHealthChip(cdal: DashboardCdalHealth | null | undefined): DashboardHealthChip | null {
-  if (!cdal) return null
-  const writerStatus = cdal.writer_status ?? 'unknown'
-  const proofStatus = cdal.proof_store?.status ?? 'unknown'
-  const taskStatus = cdal.task_scope?.status ?? 'unknown'
-  const incomplete = cdal.proof_store?.completeness?.incomplete_run_dirs ?? 0
-  const stale = cdal.proof_store?.completeness?.stale_incomplete_run_dirs ?? 0
-  const terminal = cdal.proof_store?.completeness?.terminal_incomplete_run_dirs ?? 0
-  const currentMissing = cdal.task_scope?.current_writer_missing_task_scope_rows ?? 0
-  const requiresAction = cdal.operator_action_required === true
-  if (!requiresAction && writerStatus === 'active' && incomplete === 0 && currentMissing === 0) {
-    return null
-  }
-  const tone: DashboardHealthChipTone =
-    requiresAction || stale > 0 || currentMissing > 0 ? 'bad' : terminal > 0 || incomplete > 0 ? 'warn' : 'ok'
-  const label = stale > 0 || terminal > 0 || incomplete > 0
-    ? `Contract proof incomplete ${incomplete}`
-    : currentMissing > 0
-      ? `Contract task scope ${currentMissing}`
-      : `Contract verification ${writerStatus}`
-  return {
-    key: 'cdal-runtime-health',
-    label,
-    detail: [
-      `writer_status=${writerStatus}`,
-      `proof_store=${proofStatus}`,
-      `task_scope=${taskStatus}`,
-      `incomplete=${incomplete}`,
-      `stale=${stale}`,
-      `terminal=${terminal}`,
-      `current_missing_task_scope=${currentMissing}`,
-    ].join(', '),
-    tone,
-    route: {
-      tab: 'monitoring',
-      params: { section: 'fleet-health' },
-    },
-  }
-}
-
-// Drill-down routes for each chip key. Centralized so the builder stays
-// readable and tests can audit the routing table separately. Returning
-// undefined keeps the chip as a static span (transport-offline,
-// execution-error: no view helps; hydrating/runtime-ok: nothing to drill).
 function chipRouteFor(key: string): DashboardHealthChipRoute | undefined {
   switch (key) {
     case 'source-mismatch':
@@ -592,7 +534,7 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
       : runtimeCountSourceLabel(runtimeCounts.source)
   const pausedCountSource = runtimeCounts.source === 'runtime-health'
     ? 'runtime health'
-    : '재개 대기 lifecycle row'
+    : `${KEEPER_STATUS_LABEL_KO.paused} lifecycle row`
   const offlineCountSource = runtimeCounts.source === 'runtime-health'
     ? 'runtime health only; execution offline rows not mixed'
     : '프로세스/하트비트 없음으로 기동 필요 row'
@@ -605,7 +547,7 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
         offlineKeepers: runtimeCounts.live.offlineKeepers,
         configuredKeepers: configured,
       }),
-      detail: `keeper 실행 fiber=${runningCountSource}; 일시정지 keeper=${pausedCountSource}; 오프라인 keeper=${offlineCountSource}; configured keeper=${configuredCountSourceLabel(runtimeCounts.configured.source)} keeper 설정.`,
+      detail: `keeper 실행 fiber=${runningCountSource}; ${KEEPER_STATUS_LABEL_KO.paused} keeper=${pausedCountSource}; ${KEEPER_STATUS_LABEL_KO.offline} keeper=${offlineCountSource}; configured keeper=${configuredCountSourceLabel(runtimeCounts.configured.source)} keeper 설정.`,
       tone: 'muted',
     })
   }
@@ -613,8 +555,8 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
   if (pausedKeepers > 0) {
     chips.push({
       key: 'paused-keepers',
-      label: `일시정지 keeper ${pausedKeepers}`,
-      detail: '재개 대기 상태의 keeper가 있습니다. board/tool 활동은 조용해 보일 수 있습니다.',
+      label: `${KEEPER_STATUS_LABEL_KO.paused} keeper ${pausedKeepers}`,
+      detail: `${KEEPER_STATUS_LABEL_KO.paused} 상태의 keeper가 있습니다. board/tool 활동은 조용해 보일 수 있습니다.`,
       tone: 'warn',
     })
   }
@@ -637,11 +579,6 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
     if (probeErrorChip) {
       chips.push(probeErrorChip)
     }
-  }
-
-  const cdalChip = contractHealthChip(runtime?.cdal)
-  if (cdalChip) {
-    chips.push(cdalChip)
   }
 
   if (configured > 0 && input.keepers.length === 0 && liveKeepers === 0 && pausedKeepers === 0) {
@@ -849,29 +786,6 @@ function shortCommit(commit: string | null | undefined): string {
   return value.length > 10 ? value.slice(0, 10) : value
 }
 
-/** Canonical upstream repo. Used to resolve commit-hash text into a
-    clickable GitHub permalink. Hard-coded because this is the only
-    origin the dashboard is ever built from — a future fork would
-    override this via a build-time constant, not a runtime flag. */
-const UPSTREAM_REPO = 'jeong-sik/masc'
-
-/** Pure: turn a raw commit hash into a GitHub commit URL. Returns
-    null for empty / non-hex-looking input so the dropdown renders
-    the plain string for dev builds without creating a bogus link.
-    Reference: Vercel / Railway / Render deployment dashboards always
-    link commit hashes out to the source host — operators who land
-    on the build identity dropdown usually want the diff, not the
-    hash itself. */
-function githubCommitUrl(commit: string | null | undefined): string | null {
-  const value = commit?.trim() ?? ''
-  if (value === '') return null
-  // Accept full (40-char) or short (≥ 7 char) hex SHAs only. Anything
-  // else (dev labels, semver, free text) gets rendered as plain text
-  // so we never produce a link to github.com/.../commit/dev.
-  if (!/^[0-9a-f]{7,40}$/i.test(value)) return null
-  return `https://github.com/${UPSTREAM_REPO}/commit/${value}`
-}
-
 /** Pure: render uptime seconds as a human-readable duration for the
     build-identity dropdown. Delegates to formatElapsedCompact ("3s",
     "5m 10s", "2h 30m"). Negative / NaN / non-number inputs return
@@ -943,20 +857,7 @@ export function BuildIdentityBadge() {
                 <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>
               <//>
               <${BuildInfoRow} label="Commit">
-                ${(() => {
-                  const url = githubCommitUrl(build?.commit)
-                  const text = build?.commit ?? 'git not detected (dev)'
-                  return url !== null
-                    ? html`<a
-                        href=${url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="v2-mobile-operator-target inline-flex items-center text-right font-bold text-[color:var(--color-fg-secondary)] underline decoration-dotted underline-offset-2 decoration-[color:var(--color-fg-disabled)] hover:decoration-[color:var(--color-accent-fg)] hover:text-[color:var(--color-accent-fg)]"
-                        data-build-commit-link
-                        title="View this commit on GitHub"
-                      >${text} ↗</a>`
-                    : html`<strong class="text-[color:var(--color-fg-secondary)] text-right">${text}</strong>`
-                })()}
+                <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.commit ?? 'git not detected (dev)'}</strong>
               <//>
               <${BuildInfoRow} label="Server started">
                 <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.started_at ? html`<${TimeAgo} timestamp=${build.started_at} />` : 'Unknown'}</strong>
@@ -1128,7 +1029,7 @@ export function SideRail({
   const currentSection = currentSectionForRoute(route.value)
   // Open keeper-approval count for the Approvals nav badge. Same signal the
   // Approvals/Command surfaces read, so the badge tracks resolutions live.
-  const openApprovals = governanceData.value?.approval_queue?.length ?? 0
+  const openApprovals = gateData.value?.approval_queue?.length ?? 0
   const settingsSurface = DASHBOARD_SURFACES.find(surface => surface.id === 'settings')
   const visibleSurfaces = primaryOnly
     ? PRIMARY_DASHBOARD_SURFACES.filter(surface => surface.id !== 'settings')
@@ -1262,107 +1163,34 @@ export function SideRail({
   `
 }
 
-function TabContent() {
-  const tab = route.value.tab
+export const TAB_SURFACE: Readonly<
+  Record<TabId, { readonly label: string; readonly Component: ComponentType }>
+> = {
+  cockpit: { label: 'Cockpit', Component: LazyCockpit },
+  overview: { label: 'Overview', Component: LazyOverview },
+  monitoring: { label: 'Monitor', Component: LazyStatus },
+  keepers: { label: 'Keepers', Component: LazyKeeperDetailPage },
+  registry: { label: 'Registry', Component: LazyRegistrySurface },
+  board: { label: 'Board', Component: LazyBoardSurface },
+  schedule: { label: 'Schedule', Component: LazyScheduleSurface },
+  fusion: { label: 'Fusion', Component: LazyFusionSurface },
+  command: { label: 'Command', Component: LazyOperations },
+  connectors: { label: 'Connectors', Component: LazyConnectors },
+  workspace: { label: 'Work', Component: LazyWork },
+  lab: { label: 'Lab', Component: LazyLabSurface },
+  code: { label: 'Code IDE', Component: LazyIdeShell },
+  logs: { label: 'System Logs', Component: LazyLogViewer },
+  settings: { label: 'Settings', Component: LazySettingsSurface },
+  approvals: { label: 'Approvals', Component: LazyApprovals },
+}
 
-  switch (tab) {
-    case 'overview':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Overview')}>
-          <${LazyOverview} />
-        <//>
-      `
-    case 'monitoring':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Monitor')}>
-          <${LazyStatus} />
-        <//>
-      `
-    case 'keepers':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Keepers')}>
-          <${LazyKeeperDetailPage} />
-        <//>
-      `
-    case 'board':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Board')}>
-          <${LazyBoardSurface} />
-        <//>
-      `
-    case 'schedule':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Schedule')}>
-          <${LazyScheduleSurface} />
-        <//>
-      `
-    case 'approvals':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Approvals')}>
-          <${LazyApprovals} />
-        <//>
-      `
-    case 'fusion':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Fusion')}>
-          <${LazyFusionSurface} />
-        <//>
-      `
-    case 'workspace':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Work')}>
-          <${LazyWork} />
-        <//>
-      `
-    case 'command':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Command')}>
-          <${LazyOperations} />
-        <//>
-      `
-    case 'connectors':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Connectors')}>
-          <${LazyConnectors} />
-        <//>
-      `
-    case 'lab':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Lab')}>
-          <${LazyLabSurface} />
-        <//>
-      `
-    case 'cockpit':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Cockpit')}>
-          <${LazyCockpit} />
-        <//>
-      `
-    case 'code':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Code IDE')}>
-          <${LazyIdeShell} />
-        <//>
-      `
-    case 'logs':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('System Logs')}>
-          <${LazyLogViewer} />
-        <//>
-      `
-    case 'settings':
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Settings')}>
-          <${LazySettingsSurface} />
-        <//>
-      `
-    default:
-      return html`
-        <${Suspense} fallback=${lazyTabFallback('Overview')}>
-          <${LazyOverview} />
-        <//>
-      `
-  }
+function TabContent() {
+  const { label, Component } = TAB_SURFACE[route.value.tab]
+  return html`
+    <${Suspense} fallback=${lazyTabFallback(label)}>
+      <${Component} />
+    <//>
+  `
 }
 
 /** Pure: build the shareable URL for the current section. Uses

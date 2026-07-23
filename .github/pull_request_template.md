@@ -9,7 +9,7 @@
 ## Evidence
 
 <!-- Tests, harness runs, screenshots, logs, or other proof. -->
-- If tool-call behavior or provider tool support changed: include replay-harness or `ToolCallContract` evidence.
+- If tool-call behavior or provider tool support changed: include replay-harness or typed Gate-boundary evidence.
 
 ## Direct evidence
 

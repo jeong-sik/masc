@@ -1,7 +1,7 @@
-(** Workspace_task_schedule — Scheduling: claim_next, release_stale_claims.
+(** Workspace_task_schedule — Scheduling: claim_next.
 
     Extracted from Workspace_task to separate scheduling logic (priority queue,
-    stale detection, existing-claim preservation) from task CRUD and state
+    existing-claim preservation) from task CRUD and state
     transitions. *)
 
 open Masc_domain
@@ -27,16 +27,6 @@ let task_status_label (status : Masc_domain.task_status) : string =
 let task_is_claim_pool_candidate (task : Masc_domain.task) =
   Masc_domain.task_claim_next_action_is_claimable task
 ;;
-
-(* RFC-0220 §3.2: verification state no longer gates the worker claim pool.
-   The cross-store join (request_status -> claim eligibility) is removed: an
-   AwaitingVerification obligation stays claimable by a verifier (§3.5), and a
-   drifted Todo task with a dangling Pending evidence record is just a normal
-   claimable Todo (the evidence record is no longer read for scheduling). This
-   removal is the part that makes the §1.1 stranding disappear — there is
-   nothing left to drift against. (The now-always-empty [verification_blocked_*]
-   plumbing + the [verification_blocked_count] field are cosmetic dead code,
-   removed in a follow-up per §11.) *)
 
 let underscore_name = Workspace_task_receipts.underscore_name
 let hyphen_name = Workspace_task_receipts.hyphen_name
@@ -197,8 +187,8 @@ let reconcile_all_agent_current_tasks_with_fresh_backlog ?(touch_last_seen = tru
     Scheduling logic:
     - Preserves any active claim held by this agent; callers must explicitly
       release or finish before claiming different work.
-    - Applies starvation prevention: tasks waiting >24h get priority boost
-    - Within same effective priority, prefers older tasks (FIFO) *)
+    - Uses the task's explicit priority without time-derived rewriting
+    - Within the same priority, prefers older tasks (FIFO) *)
 let claim_next_r
       config
       ~agent_name
@@ -269,64 +259,21 @@ let claim_next_r
                    { task_id = prev.id
                    ; title = prev.title
                    ; priority = prev.priority
-                   ; released_task_id = None
                    ; message
                    ; scope_widened = false
                    })));
-        let released_task_id, working_tasks = None, backlog.tasks in
-        (* Starvation prevention: Calculate effective priority
-         Tasks waiting >24h get priority boost (-1 per 24h, min 1) *)
-        let now = Time_compat.now () in
-        (* Reuse canonical UTC parser from Types_core *)
-        let parse_time = Types_core.parse_iso8601_opt in
-        let effective_priority (task : Masc_domain.task) =
-          let age_hours =
-            match parse_time task.created_at with
-            | Some created -> (now -. created) /. Masc_time_constants.hour
-            | None -> 0.0
-          in
-          let boost = Float.to_int (Float.round (age_hours /. 24.0)) in
-          max 1 (task.priority - boost)
-        in
-        (* Find highest priority (lowest number) unclaimed task
-         Within same priority, prefer older tasks (FIFO) *)
+        let working_tasks = backlog.tasks in
+        (* Explicit task priority is the scheduling input. Waiting time is
+           observable through [created_at], but never rewrites that priority. *)
         let sorted =
           List.sort
             (fun a b ->
-               let priority_cmp = compare (effective_priority a) (effective_priority b) in
+               let priority_cmp = compare a.priority b.priority in
                if priority_cmp <> 0
                then priority_cmp
                else compare a.created_at b.created_at)
             working_tasks
         in
-        (* RFC-0323 G-10: the typed reclaim claim gate is retired (#23661
-           removed the Todo producer, G-10 the Done producer) — nothing can be
-           blocked-by-reclaim. Kept as a literal empty list, mirroring the
-           RFC-0220 §3.2 [verification_blocked_todo] precedent below, so the
-           claim-next result shape ([blocked_count]) stays stable. *)
-        let blocked_reclaim : Masc_domain.task list = [] in
-        (* RFC-0220 §3.2: no verification-based exclusion from the claim pool. *)
-        let verification_blocked_todo : Masc_domain.task list = [] in
-        if blocked_reclaim <> []
-        then
-          log_event
-            config
-            (`Assoc
-                [ "type", `String "task_claim_next_skip_blocked"
-                ; "agent", `String agent_name
-                ; "blocked", `Int (List.length blocked_reclaim)
-                ; "ts", `String (now_iso ())
-                ]);
-        if verification_blocked_todo <> []
-        then
-          log_event
-            config
-            (`Assoc
-                [ "type", `String "task_claim_next_skip_verification"
-                ; "agent", `String agent_name
-                ; "blocked", `Int (List.length verification_blocked_todo)
-                ; "ts", `String (now_iso ())
-                ]);
         (* RFC-0220 §3.5: eligibility and the claim outcome are one decision
            ([Workspace_task_lifecycle.resolve_claim]). A submitter's own
            [AwaitingVerification] resolves to [Self_owned] and is excluded here,
@@ -352,18 +299,7 @@ let claim_next_r
           |> List.filter Masc_domain.task_claim_next_action_is_claimable
           |> List.filter resolves_claimable
         in
-        (* Also exclude the just-released task: the agent is moving on,
-         re-claiming the same task would be a no-op loop. *)
-        let blocked_ids =
-          List.map (fun (t : Masc_domain.task) -> t.id) blocked_reclaim
-          @ List.map (fun (t : Masc_domain.task) -> t.id) verification_blocked_todo
-          |> List.sort_uniq String.compare
-        in
-        let all_excluded =
-          match released_task_id with
-          | Some rid -> rid :: (blocked_ids @ exclude_task_ids)
-          | None -> blocked_ids @ exclude_task_ids
-        in
+        let all_excluded = exclude_task_ids in
         let task_filter_excluded =
           List.filter
             (fun (t : task) ->
@@ -396,63 +332,16 @@ let claim_next_r
              | [] -> [], false)
           | [] -> scoped_eligible, false
         in
-        let explicit_excluded_count =
-          List.length exclude_task_ids
-          +
-          match released_task_id with
-          | Some _ -> 1
-          | None -> 0
-        in
+        let explicit_excluded_count = List.length exclude_task_ids in
         let no_eligible_excluded_count =
           List.length all_excluded + List.length task_filter_excluded
         in
-        (* Helper: clear agent current_task and reset status after a legacy
-         released_task_id path when no replacement task can be claimed. Delegates to
-         [Workspace_task.update_local_agent_state] so the agent-file write
-         holds [with_file_lock] on the agent file itself, matching the
-         discipline used by [Workspace_task] transitions (PR #6634). *)
-        let clear_agent_state_after_release () =
-          match released_task_id with
-          | Some rid ->
-            (* RFC-0221 §3.2: flush stale current_task from in-memory context cache *)
-            Task_cache_invariant.clear_stale_agent_task config ~agent_name
-              ~task_id:rid ~status:Masc_domain.Todo ~module_name:"claim_next_r";
-            Workspace_task.update_local_agent_state config ~agent_name (fun agent ->
-              { agent with status = Active; current_task = None })
-          | None -> ()
-        in
         (match eligible with
-         | [] when unclaimed = [] && blocked_reclaim = [] ->
-           (* Even if we released a task, there may be nothing else to claim.
-             Write the release if it happened. *)
-           (match released_task_id with
-            | Some _ ->
-              let new_backlog =
-                { tasks = working_tasks
-                ; last_updated = now_iso ()
-                ; version = backlog.version + 1
-                }
-              in
-              write_backlog config new_backlog
-            | None -> ());
-           clear_agent_state_after_release ();
-          Claim_next_no_unclaimed, None
+         | [] when unclaimed = [] ->
+           Claim_next_no_unclaimed, None
          | [] ->
-           (match released_task_id with
-            | Some _ ->
-              let new_backlog =
-                { tasks = working_tasks
-                ; last_updated = now_iso ()
-                ; version = backlog.version + 1
-                }
-              in
-              write_backlog config new_backlog
-            | None -> ());
-           clear_agent_state_after_release ();
-          ( Claim_next_no_eligible
+           ( Claim_next_no_eligible
               { excluded_count = no_eligible_excluded_count
-              ; blocked_count = List.length blocked_reclaim
-              ; verification_blocked_count = List.length verification_blocked_todo
               ; scope_excluded_count = List.length task_filter_excluded
               ; explicit_excluded_count
               ; claim_pool_candidate_count = List.length unclaimed
@@ -509,15 +398,6 @@ let claim_next_r
            Workspace_task.update_local_agent_state config ~agent_name (fun agent ->
              { agent with status = Busy; current_task = Some task.id });
            (* No broadcast — log_event + emit_task_activity below are sufficient. *)
-           (match released_task_id with
-            | Some rid ->
-              Workspace_task.emit_task_activity
-                config
-                ~agent_name
-                ~task_id:rid
-                ~kind:(Event_kind.Task.to_string Event_kind.Task.Released)
-                ~payload:(`Assoc [ "task_id", `String rid ])
-            | None -> ());
            Workspace_task.emit_task_activity
              config
              ~agent_name
@@ -549,28 +429,17 @@ let claim_next_r
                   ~to_status:claimed_status
                   ());
           let message =
-            match released_task_id with
-            | Some rid ->
-               Printf.sprintf
-                 "%s released %s, then claimed [P%d] %s: %s"
-                 agent_name
-                 rid
-                 task.priority
-                 task.id
-                 task.title
-             | None ->
-               Printf.sprintf
-                 "%s auto-claimed [P%d] %s: %s"
-                 agent_name
-                 task.priority
-                 task.id
-                 task.title
+            Printf.sprintf
+              "%s auto-claimed [P%d] %s: %s"
+              agent_name
+              task.priority
+              task.id
+              task.title
            in
           ( Claim_next_claimed
               { task_id = task.id
               ; title = task.title
               ; priority = task.priority
-              ; released_task_id
               ; message
               ; scope_widened
               }
@@ -585,91 +454,17 @@ let claim_next_r
   | Error err -> Claim_next_error (Masc_domain.masc_error_to_string err)
 ;;
 
-(** Claim next highest priority unclaimed task (legacy string API). *)
+(** String-returning convenience API for claiming the next task. *)
 let claim_next config ~agent_name =
   match claim_next_r config ~agent_name () with
   | Claim_next_claimed { message; _ } -> message
   | Claim_next_no_unclaimed ->
     "No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
-  | Claim_next_no_eligible
-      { excluded_count
-      ; scope_excluded_count
-      ; verification_blocked_count
-      ; _
-      } ->
+  | Claim_next_no_eligible { excluded_count; scope_excluded_count; _ } ->
     Printf.sprintf
       "No eligible unclaimed tasks. ACTION: Stop task-checking — \
-       blocked/excluded=%d (goal_scope_or_filter=%d, verification=%d)."
+       excluded=%d (goal_scope_or_filter=%d)."
       excluded_count
       scope_excluded_count
-      verification_blocked_count
   | Claim_next_error e -> Printf.sprintf "Error: %s" e
-;;
-
-(** Release stale task claims older than [ttl_seconds].
-    A Claimed or InProgress task whose assignee has no recent heartbeat
-    and whose task-status timestamp exceeds the TTL is considered stale.
-    Returns list of (task_id, assignee) pairs that were released. *)
-let release_stale_claims config ~ttl_seconds =
-  ensure_initialized config;
-  match read_backlog_r config with
-  | Error msg ->
-    Log.TaskState.warn "release_stale_claims: skipped unreadable backlog: %s" msg;
-    []
-  | Ok _ ->
-    let now = Time_compat.now () in
-    let status_timestamp = function
-      | Masc_domain.Claimed { claimed_at; _ } -> Some claimed_at
-      | Masc_domain.InProgress { started_at; _ } -> Some started_at
-      | Masc_domain.Todo
-      | Masc_domain.AwaitingVerification _
-      | Masc_domain.Done _
-      | Masc_domain.Cancelled _ -> None
-    in
-    let older_than_ttl task =
-      match status_timestamp task.task_status with
-      | None -> false
-      | Some raw_ts ->
-        (match Masc_domain.parse_iso8601_opt raw_ts with
-         | Some ts -> now -. ts > ttl_seconds
-         | None ->
-           Log.TaskState.warn
-             "release_stale_claims: refusing to release task=%s with unparsable \
-              status timestamp %S"
-             task.id
-             raw_ts;
-           false)
-    in
-    let release_one ((task : Masc_domain.task), assignee) =
-      if not (older_than_ttl task)
-      then None
-      else (
-        match
-          Workspace_task.force_release_task_r
-            config
-            ~agent_name:"keeper-stale-claim-gc"
-            ~task_id:task.id
-            ()
-        with
-        | Ok _ ->
-          Task_cache_invariant.clear_stale_agent_task
-            config
-            ~agent_name:assignee
-            ~task_id:task.id
-            ~status:Masc_domain.Todo
-            ~module_name:"release_stale_claims";
-          Some (task.id, assignee)
-        | Error err ->
-          log_event
-            config
-            (`Assoc
-                [ "type", `String "stale_claim_release_error"
-                ; "task_id", `String task.id
-                ; "agent", `String assignee
-                ; "error", `String (Masc_domain.masc_error_to_string err)
-                ; "ts", `String (now_iso ())
-                ]);
-          None)
-    in
-    Workspace_query.audit_orphan_tasks config |> List.filter_map release_one
 ;;

@@ -11,7 +11,6 @@ open Keeper_types_profile
 type run_context =
   { meta : keeper_meta
   ; temperature : float
-  ; max_tokens : int option
   ; context_injector : Agent_sdk.Hooks.context_injector
   ; shared_context : Agent_sdk.Context.t
   ; session_dir : string
@@ -20,11 +19,6 @@ type run_context =
   ; base_system_prompt : string
   ; ctx_work : working_context
   ; resume_oas_checkpoint : Agent_sdk.Checkpoint.t option
-  ; pre_dispatch_compacted : bool
-  ; pre_dispatch_compaction_trigger : string option
-  ; pre_dispatch_compaction_before_tokens : int option
-  ; pre_dispatch_compaction_after_tokens : int option
-  ; pre_dispatch_checkpoint_error : Agent_sdk.Error.sdk_error option
   ; start_turn_count : int
   ; receipt_started_at : string
   ; config_root : string
@@ -62,7 +56,6 @@ let build_base_system_prompt
      prompt any more — the filesystem is the repo truth and the prompt's
      constant <repositories> block instructs self-discovery. *)
   Keeper_prompt.build_keeper_system_prompt
-    ~goal:(prompt_profile_default profile_defaults.goal meta.goal)
     ~instructions:
       (prompt_profile_default profile_defaults.instructions meta.instructions)
     ~persona_extended
@@ -71,27 +64,13 @@ let build_base_system_prompt
     ~home_ground:config.base_path
     ()
 
-(* masc#24067 / oas#2517: no flat int fallback. The only "no explicit
-   override" outcome is [None] — no max_tokens field goes on the request. *)
-let max_tokens_override ~keeper_name profile_defaults =
-  Keeper_types_profile.unified_max_tokens_override_of_oas_env
-    ~keeper_name
-    profile_defaults.oas_env
-
-let resolve_turn_max_tokens ~keeper_name ~profile_defaults ?max_tokens () =
-  match max_tokens with
-  | Some _ as caller_override -> caller_override
-  | None -> max_tokens_override ~keeper_name profile_defaults
-
 let prepare_run_context
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
       ~(base_dir : string)
-      ~(max_context : int)
       ~(runtime_id : string)
       ?temperature
-      ?max_tokens
       ?shared_context
       ~(generation : int)
       ()
@@ -118,16 +97,6 @@ let prepare_run_context
       ~runtime_id
       ~fallback:fallback_temperature
   in
-  let max_tokens =
-    (* Freeze caller/profile intent exactly once for this turn. Every runtime
-       candidate receives this immutable value; OAS owns provider-envelope
-       validation and catalog-ceiling clamp policy (oas#2517). *)
-    resolve_turn_max_tokens
-      ~keeper_name:meta.name
-      ~profile_defaults
-      ?max_tokens
-      ()
-  in
   (* 0b. Create context injector for temporal awareness *)
   let injector_config = Masc_context_injector.default_config () in
   let context_injector = Masc_context_injector.make ~config:injector_config () in
@@ -136,6 +105,11 @@ let prepare_run_context
     | Some ctx -> ctx
     | None -> Agent_sdk.Context.create ()
   in
+  (* OAS uses the caller-supplied context as the checkpoint context for both
+     new and resumed agents. Bind MASC's generation before dispatch so every
+     OAS-produced checkpoint carries the current keeper identity. *)
+  Agent_sdk.Context.set_scoped shared_context Agent_sdk.Context.Session
+    Keeper_checkpoint_store.keeper_generation_context_key (`Int generation);
   (* 1. Ensure session directory tree exists *)
   let session_dir =
     Filename.concat base_dir (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
@@ -144,9 +118,7 @@ let prepare_run_context
   (* 2. Load checkpoint *)
   let session, ctx_opt =
     Keeper_context_runtime.load_context_from_checkpoint
-      ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
       ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-      ~primary_model_max_tokens:max_context
       ~base_dir
   in
   let loaded_checkpoint_present = Option.is_some ctx_opt in
@@ -169,82 +141,19 @@ let prepare_run_context
     | Some c -> c
     | None ->
       Keeper_context_runtime.create ~eio:true ~system_prompt:base_system_prompt
-        ~max_tokens:max_context
   in
   let ctx_work =
     Keeper_context_runtime.set_system_prompt base_ctx ~system_prompt:base_system_prompt
   in
-  let checkpoint_hygiene =
-    Keeper_agent_checkpoint_hygiene.prepare_resume_checkpoint_for_dispatch
-      ~meta
-      ~now_ts:(Time_compat.now ())
-      ~loaded_checkpoint_present
-      ~save_checkpoint:(fun compacted_ctx ->
-        Keeper_context_runtime.save_oas_checkpoint
-          ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
-          ~multimodal_policy:meta.multimodal_policy
-          ~keeper_name:meta.name
-          ~session
-          ~agent_name:meta.agent_name
-          ~ctx:compacted_ctx
-          ~generation)
-      ctx_work
+  (* Preserve the restored context exactly. MASC does not classify, compact,
+     truncate, or re-persist it before dispatch; OAS owns provider context
+     handling. Checkpoint persistence failure therefore cannot block this
+     turn before the provider has observed the input. *)
+  let resume_oas_checkpoint =
+    if loaded_checkpoint_present
+    then Some (Keeper_context_runtime.checkpoint_of_context ctx_work)
+    else None
   in
-  let ctx_work = checkpoint_hygiene.context in
-  let resume_oas_checkpoint = checkpoint_hygiene.resume_checkpoint in
-  let pre_dispatch_compacted = checkpoint_hygiene.compacted in
-  let pre_dispatch_compaction_trigger =
-    match checkpoint_hygiene.trigger with
-    | Some trigger -> Some (Compaction_trigger.to_human trigger)
-    | None -> None
-  in
-  let pre_dispatch_compaction_before_tokens =
-    if checkpoint_hygiene.applied then Some checkpoint_hygiene.before_tokens else None
-  in
-  let pre_dispatch_compaction_after_tokens =
-    if checkpoint_hygiene.applied then Some checkpoint_hygiene.after_tokens else None
-  in
-  let pre_dispatch_checkpoint_error =
-    match checkpoint_hygiene.save_error with
-    | Some detail ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string RunContextFailures)
-        ~labels:[("keeper", meta.name)]
-        ();
-      Log.Keeper.error
-        "%s: pre-dispatch checkpoint compaction save failed: %s"
-        meta.name detail;
-      Some
-        (Keeper_agent_error.checkpoint_persistence_error
-           ~keeper_name:meta.name
-           ~detail:("pre-dispatch checkpoint compaction save failed: " ^ detail))
-    | None -> None
-  in
-  (let decision =
-     match checkpoint_hygiene.trigger with
-     | Some trigger -> Compaction_trigger.to_human trigger
-     | None ->
-       Keeper_compact_policy.compaction_decision_to_string
-         checkpoint_hygiene.decision
-   in
-   let before_ratio =
-     if max_context <= 0 then 0.0
-     else float_of_int checkpoint_hygiene.before_tokens /. float_of_int max_context
-   in
-   if checkpoint_hygiene.applied then
-     Log.Keeper.info
-       "%s: pre-dispatch compaction %s trigger=%s tokens=%d->%d \
-        max_context=%d ratio=%.4f checkpoint=%b"
-       meta.name
-       (if checkpoint_hygiene.meaningful_reduction then "applied" else "attempted")
-       decision checkpoint_hygiene.before_tokens checkpoint_hygiene.after_tokens
-       max_context before_ratio loaded_checkpoint_present
-  else
-     Log.Keeper.routine
-       "%s: pre-dispatch compaction skipped decision=%s tokens=%d \
-        max_context=%d ratio=%.4f checkpoint=%b"
-       meta.name decision checkpoint_hygiene.before_tokens max_context before_ratio
-       loaded_checkpoint_present);
   let start_turn_count =
     match resume_oas_checkpoint with
     | Some cp -> cp.turn_count
@@ -252,7 +161,6 @@ let prepare_run_context
   in
   { meta
   ; temperature
-  ; max_tokens
   ; context_injector
   ; shared_context
   ; session_dir
@@ -261,11 +169,6 @@ let prepare_run_context
   ; base_system_prompt
   ; ctx_work
   ; resume_oas_checkpoint
-  ; pre_dispatch_compacted
-  ; pre_dispatch_compaction_trigger
-  ; pre_dispatch_compaction_before_tokens
-  ; pre_dispatch_compaction_after_tokens
-  ; pre_dispatch_checkpoint_error
   ; start_turn_count
   ; receipt_started_at
   ; config_root

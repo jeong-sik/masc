@@ -36,7 +36,7 @@ val binding_auth_is_no_auth : Runtime_binding.t -> bool
 val binding_base_url_is_loopback : Runtime_binding.t -> bool
 
 val runtime_kind_of_binding : Runtime_binding.t -> string
-(** ["cli_agent"] | ["local"] | ["direct_api"]. *)
+(** ["local"] | ["direct_api"]. *)
 
 val default_local_openai_runtime_provider_id : unit -> string option
 
@@ -51,13 +51,6 @@ val runtime_id_of_label_or_raw : string -> string
 val normalize_runtime_name_for_bucket : string -> string
 
 val label_matches_runtime_id : label:string -> runtime_id:string -> bool
-
-type context_window_hint =
-  { context_window : int
-  ; is_local_model : bool
-  }
-
-val context_window_hint_of_labels : string list -> context_window_hint
 
 val provider_name_matches_default_local_openai_runtime : string -> bool
 

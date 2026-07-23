@@ -26,18 +26,8 @@ module Ws_wsd = Ws_direct_core.Endpoint.Wsd
 module Ws_msg = Ws_direct_core.Connection.Message
 
 (* RNG init is required for both the TLS handshake (ephemeral key exchange)
-   and ws-direct's per-frame masking key (its default [random] is
-   [Mirage_crypto_rng.generate], which needs a seeded generator).
-   [use_default] only installs if no generator is set, so repeated calls are
-   safe. *)
-let rng_initialized = ref false
-
-let init_rng () =
-  if not !rng_initialized
-  then (
-    Mirage_crypto_rng_unix.use_default ();
-    rng_initialized := true)
-;;
+   and ws-direct's per-frame masking key. *)
+let init_rng = Crypto_rng.ensure_default
 
 (** Application-level inbound event delivered to the gateway reader. The
     endpoint auto-replies to Ping, treats Pong observationally, and reassembles
@@ -83,13 +73,27 @@ let close_code_no_status = 1005
    buffering inbound frames without limit. The gateway reader drains promptly. *)
 let inbound_capacity = 64
 
+(* Process-wide cache. [Ca_certs.authenticator] loads the system trust
+   store on every call (macOS: one `security find-certificate` subprocess
+   per keychain plus a full PEM parse of the anchor set), and this runs on
+   every gateway (re)connect. The first successful config is reused for
+   the process lifetime; certificate validity is still evaluated per
+   handshake via the authenticator's clock closure. Failures are not
+   cached — the next reconnect retries the load. *)
+let cached_client_tls_config : Tls.Config.client option Atomic.t = Atomic.make None
+
 let client_tls_config () =
-  match Ca_certs.authenticator () with
-  | Error (`Msg m) -> failwith ("discord_wss_connection: ca-certs: " ^ m)
-  | Ok authenticator ->
-    (match Tls.Config.client ~authenticator () with
-     | Error (`Msg m) -> failwith ("discord_wss_connection: Tls.Config.client: " ^ m)
-     | Ok cfg -> cfg)
+  match Atomic.get cached_client_tls_config with
+  | Some cfg -> cfg
+  | None ->
+    (match Ca_certs.authenticator () with
+     | Error (`Msg m) -> failwith ("discord_wss_connection: ca-certs: " ^ m)
+     | Ok authenticator ->
+       (match Tls.Config.client ~authenticator () with
+        | Error (`Msg m) -> failwith ("discord_wss_connection: Tls.Config.client: " ^ m)
+        | Ok cfg ->
+          Atomic.set cached_client_tls_config (Some cfg);
+          cfg))
 ;;
 
 let host_domain host =
@@ -207,6 +211,7 @@ let run_session ~sw ~setup =
       Eio.Switch.run (fun session_sw ->
         let result =
           try Ok (setup ~sw:session_sw) with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
           | e -> Error e
         in
         (* Hand the session switch back to the caller alongside the session so
@@ -214,13 +219,13 @@ let run_session ~sw ~setup =
            connection's: closing the connection cancels them. *)
         Eio.Promise.resolve setup_resolver
           (Result.map (fun (wsd, events) -> (wsd, events, session_sw)) result);
-        match result with
-        | Error _ -> () (* let session_sw exit; socket/flow get released *)
-        | Ok _ ->
-          Eio.Promise.await close_signal;
-          (* Cancel the driver + any spawned reader by failing the switch (a
-             plain return would only wait for them — see [Session_closed]). *)
-          Eio.Switch.fail session_sw Session_closed)
+        Result.iter
+          (fun _ ->
+             Eio.Promise.await close_signal;
+             (* Cancel the driver + any spawned reader by failing the switch (a
+                plain return would only wait for them — see [Session_closed]). *)
+             Eio.Switch.fail session_sw Session_closed)
+          result)
     with Session_closed -> ());
   match Eio.Promise.await setup_promise with
   | Error e -> raise e
@@ -265,6 +270,7 @@ module For_testing = struct
   let message_to_event = message_to_event
   let close_to_event = close_to_event
   let close_code_no_status = close_code_no_status
+  let client_tls_config = client_tls_config
 
   (* A connection with a real session switch + spawn/close but no socket: the
      wsd is a bare, never-driven endpoint and the event stream stays empty. For

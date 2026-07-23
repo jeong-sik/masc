@@ -14,6 +14,7 @@ import {
   keeperConfigControlInventory,
   keeperRuntimeConfigCanWrite,
   keeperRuntimeConfigWriteUnsupportedReason,
+  parseMaxContextOverrideDraft,
   type HookSlotEntry,
   type RuntimeDraft,
 } from './keeper-config-panel'
@@ -34,17 +35,12 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     active_goal_ids: ['goal-runtime'],
     autoboot_enabled: true,
     max_context_override: null,
-    limits: {
-      min_context_override_tokens: 64_000,
-      max_context_override_tokens: 1_000_000,
-    },
     sandbox_profile: 'local',
     network_mode: 'inherit',
     sandbox_last_error: null,
     allowed_paths: ['/tmp/workspace'],
     effective_allowed_paths: ['/tmp/workspace'],
     prompt: {
-      goal: 'Ship stable keeper ops',
       instructions: 'Prefer direct remediation',
       system_prompt_blocks: {
         constitution: { key: 'keeper.constitution', source: 'file', text: 'constitution text' },
@@ -58,24 +54,13 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     execution: {
       models: ['llama:test-balanced'],
       active_model: 'llama:test-balanced',
-      per_provider_timeout_sec: null,
-      per_provider_timeout_mode: 'turn_budget_default',
       verify: true,
       selected_runtime_id: 'tier-group.keeper_unified',
       selected_runtime_canonical: 'tier-group.keeper_unified',
       runtime_options: ['tier-group.keeper_unified', 'tier.resilient_breaker'],
     },
-    compaction: {
-      profile: 'balanced',
-      ratio_gate: 0.85,
-      message_gate: 16,
-      token_gate: 24000,
-      cooldown_sec: 120,
-    },
     proactive: {
       enabled: true,
-      idle_sec: 900,
-      cooldown_sec: 1800,
     },
     drift: {
       status: 'wired',
@@ -84,18 +69,9 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       count_total: 2,
       last_reason: 'board quiet',
     },
-    handoff: {
-      auto: true,
-      threshold: 0.85,
-      cooldown_sec: 300,
-    },
     hooks: {
+      scope: 'keeper_runtime_composite',
       slots: {},
-      deny_list: [],
-      destructive_check_tools: ['dynamic_boundary (Tool_dispatch.is_destructive)'],
-      cost_budget: {
-        active: false,
-      },
     },
     runtime: {
       paused: false,
@@ -120,15 +96,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       default_source_kind: 'toml',
       precedence: ['live_meta', 'toml', 'persona'],
       has_live_override: true,
-      override_fields: ['goal', 'instructions'],
-    },
-    tools: {
-      tool_access: ['tool_read_file'],
-      resolved_allowlist: ['tool_read_file'],
-      tool_denylist: ['Execute'],
-      active_masc_tool_count: 1,
-      active_keeper_tool_count: 2,
-      total_active: 3,
+      override_fields: ['prompt.instructions'],
     },
     metrics: {
       generation: 3,
@@ -152,9 +120,9 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
 
 describe('filterHookSlots', () => {
   const entries: HookSlotEntry[] = [
-    ['pre_tool_call', makeSlot({ source: 'builtin', gates: ['destructive_check', 'path_scope'] })],
+    ['pre_tool_call', makeSlot({ source: 'builtin', gates: ['typed_input', 'path_scope'] })],
     ['post_turn', makeSlot({ source: 'override', effects: ['handoff_auto'] })],
-    ['compaction_watcher', makeSlot({ source: 'persona', features: ['ratio_gate'] })],
+    ['compaction_watcher', makeSlot({ source: 'persona', features: ['snapshot'] })],
     ['orphan', makeSlot({ source: 'builtin' })],
   ]
 
@@ -177,7 +145,7 @@ describe('filterHookSlots', () => {
   })
 
   it('matches by gates entry', () => {
-    const result = filterHookSlots(entries, 'destructive_check')
+    const result = filterHookSlots(entries, 'typed_input')
     expect(result.map(([name]) => name)).toEqual(['pre_tool_call'])
   })
 
@@ -187,7 +155,7 @@ describe('filterHookSlots', () => {
   })
 
   it('matches by features entry', () => {
-    const result = filterHookSlots(entries, 'ratio_gate')
+    const result = filterHookSlots(entries, 'snapshot')
     expect(result.map(([name]) => name)).toEqual(['compaction_watcher'])
   })
 
@@ -229,11 +197,10 @@ describe('filterHookSlots', () => {
 
   it('matches a feature on a slot that also carries gates (categories coexist)', () => {
     const coexist: HookSlotEntry[] = [
-      ['pre_tool_use', makeSlot({ gates: ['keeper_deny_list'], features: ['cost_telemetry_threshold'] })],
+      ['pre_tool_use', makeSlot({ gates: ['policy_gate'], features: ['tool_start_timing'] })],
     ]
-    // The cost-telemetry feature must remain searchable even though gates is non-empty.
-    expect(filterHookSlots(coexist, 'cost_telemetry_threshold')).toHaveLength(1)
-    expect(filterHookSlots(coexist, 'keeper_deny_list')).toHaveLength(1)
+    expect(filterHookSlots(coexist, 'tool_start_timing')).toHaveLength(1)
+    expect(filterHookSlots(coexist, 'policy_gate')).toHaveLength(1)
   })
 })
 
@@ -359,12 +326,6 @@ describe('keeperConfigControlInventory', () => {
       method: 'GET',
       endpoint: '/api/v1/providers',
     })
-    expect(findItem('policy', c, 'kcf-policy-tool-policy').contracts).toContainEqual({
-      kind: 'api',
-      method: 'POST',
-      endpoint: '/api/v1/keepers/:name/tools',
-      operation: 'set_policy',
-    })
     expect(findItem('goals', c, 'kcf-goals-catalog-filter').contracts).toContainEqual({
       kind: 'api',
       method: 'GET',
@@ -418,7 +379,7 @@ describe('keeperConfigControlInventory', () => {
     const hookSlots = findItem('hooks', c, 'kcf-hooks-slots')
     const hookStatus = keeperConfigControlContractStatus(hookSlots.contracts, c)
     expect(hookStatus.kind).toBe('missing-config-field')
-    expect(hookStatus.missingConfigFields).toEqual(['hooks.slots', 'hooks.deny_list', 'hooks.cost_budget'])
+    expect(hookStatus.missingConfigFields).toEqual(['hooks.scope', 'hooks.slots'])
 
     const contextOverride = findItem('runtime', c, 'kcf-runtime-context-override')
     const contextStatus = keeperConfigControlContractStatus(contextOverride.contracts, c)
@@ -437,12 +398,12 @@ describe('keeperConfigControlInventory', () => {
     const hookSlots = findItem('hooks', c, 'kcf-hooks-slots')
     const hookStatus = keeperConfigControlContractStatus(hookSlots.contracts, c)
 
-    expect(c.hooks?.deny_list).toEqual([])
+    expect(c.hooks?.scope).toBe('keeper_runtime_composite')
     expect(hookStatus.kind).toBe('missing-config-field')
-    expect(hookStatus.missingConfigFields).toEqual(['hooks.deny_list', 'hooks.cost_budget'])
+    expect(hookStatus.missingConfigFields).toEqual(['hooks.scope'])
   })
 
-  it('keeps separate API writers live even when runtime manifest writes are unsupported', () => {
+  it('keeps lifecycle directives live when runtime manifest writes are unsupported', () => {
     const base = makeKeeperConfig()
     const persona = makeKeeperConfig({
       sources: {
@@ -452,8 +413,7 @@ describe('keeperConfigControlInventory', () => {
       },
     })
 
-    expect(findItem('policy', persona, 'kcf-policy-continuity').kind).toBe('unsupported')
-    expect(findItem('policy', persona, 'kcf-policy-tool-policy').kind).toBe('live-write')
+    expect(findItem('policy', persona, 'kcf-policy-proactive').kind).toBe('unsupported')
     expect(findItem('health', persona, 'kcf-health-directives').kind).toBe('live-write')
   })
 
@@ -471,33 +431,16 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
     active_goal_ids: [],
     autoboot_enabled: true,
     max_context_override: null,
-    limits: {
-      min_context_override_tokens: 64_000,
-      max_context_override_tokens: 1_000_000,
-    },
     sandbox_profile: 'local',
     network_mode: 'inherit',
     allowed_paths: [],
     effective_allowed_paths: [],
     prompt: {} as KeeperConfig['prompt'],
     execution: {} as KeeperConfig['execution'],
-    compaction: {
-      ratio_gate: 0.8,
-      message_gate: 0,
-      token_gate: 0,
-      cooldown_sec: 0,
-    } as KeeperConfig['compaction'],
     proactive: {
       enabled: false,
-      idle_sec: 0,
-      cooldown_sec: 0,
     } as KeeperConfig['proactive'],
     drift: {} as KeeperConfig['drift'],
-    handoff: {
-      auto: false,
-      threshold: 0.9,
-      cooldown_sec: 0,
-    } as KeeperConfig['handoff'],
     runtime: {} as KeeperConfig['runtime'],
     workspace: {
       mention_targets: [],
@@ -506,14 +449,6 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
       active_goals: [],
       active_goal_count: 0,
       missing_active_goal_ids: [],
-    },
-    tools: {
-      tool_access: [],
-      resolved_allowlist: [],
-      tool_denylist: [],
-      active_masc_tool_count: 0,
-      active_keeper_tool_count: 0,
-      total_active: 0,
     },
     sources: {} as KeeperConfig['sources'],
     metrics: {} as KeeperConfig['metrics'],
@@ -576,18 +511,6 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     const payload = buildRuntimePayload(draftFrom(c), c)
     expect(payload.sandbox_profile).toBeUndefined()
     expect(payload.network_mode).toBeUndefined()
-  })
-
-  it('omits compaction_token_gate when unchanged but emits it when edited', () => {
-    const c = makeKeeperConfigForSandbox({})
-    // Unchanged draft → not in payload.
-    expect(buildRuntimePayload(draftFrom(c), c).compaction_token_gate).toBeUndefined()
-    // Editing the token gate (now reachable via the InlineNumberRow) → emitted.
-    const edited = buildRuntimePayload(
-      draftFrom(c, { compaction_token_gate: c.compaction.token_gate + 4096 }),
-      c,
-    )
-    expect(edited.compaction_token_gate).toBe(c.compaction.token_gate + 4096)
   })
 
   it('emits runtime_id when selected runtime changes', () => {
@@ -692,64 +615,45 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     expect(payload.mention_targets).toEqual([])
   })
 
-  it('emits compaction_token_gate when the token gate changes', () => {
-    const c = makeKeeperConfigForSandbox({
-      compaction: {
-        profile: 'balanced',
-        ratio_gate: 0.8,
-        message_gate: 0,
-        token_gate: 24000,
-        cooldown_sec: 0,
-      },
-    })
-    const payload = buildRuntimePayload(draftFrom(c, {
-      compaction_token_gate: 32000,
-    }), c)
-    expect(payload.compaction_token_gate).toBe(32000)
-  })
-
-  it('emits compaction_profile, autoboot, and max_context_override edits', () => {
+  it('emits autoboot and max_context_override edits', () => {
     const c = makeKeeperConfigForSandbox({
       autoboot_enabled: true,
       max_context_override: null,
-      compaction: {
-        profile: 'balanced',
-        ratio_gate: 0.8,
-        message_gate: 0,
-        token_gate: 24000,
-        cooldown_sec: 0,
-      },
     })
     const payload = buildRuntimePayload(draftFrom(c, {
       autoboot_enabled: false,
-      max_context_override: 64000,
-      compaction_profile: 'conservative',
+      max_context_override: '64000',
     }), c)
     expect(payload.autoboot_enabled).toBe(false)
     expect(payload.max_context_override).toBe(64000)
-    expect(payload.compaction_profile).toBe('conservative')
   })
 
   it('emits null to clear max_context_override when draft is zero', () => {
     const c = makeKeeperConfigForSandbox({ max_context_override: 64000 })
     const payload = buildRuntimePayload(draftFrom(c, {
-      max_context_override: 0,
+      max_context_override: '0',
     }), c)
     expect(payload.max_context_override).toBeNull()
   })
 
-  it('clamps max_context_override to the backend keeper bound before PATCH', () => {
+  it('preserves an explicit positive max_context_override before PATCH', () => {
     const c = makeKeeperConfigForSandbox({
       max_context_override: null,
-      limits: {
-        min_context_override_tokens: 64_000,
-        max_context_override_tokens: 128_000,
-      },
     })
     const payload = buildRuntimePayload(draftFrom(c, {
-      max_context_override: 128_001,
+      max_context_override: '128001',
     }), c)
-    expect(payload.max_context_override).toBe(128_000)
+    expect(payload.max_context_override).toBe(128_001)
+  })
+
+  it('rejects negative, fractional, and unsafe-integer override drafts without rewriting', () => {
+    expect(parseMaxContextOverrideDraft('')).toMatchObject({ ok: false })
+    expect(parseMaxContextOverrideDraft('01')).toMatchObject({ ok: false })
+    expect(parseMaxContextOverrideDraft('-1')).toMatchObject({ ok: false })
+    expect(parseMaxContextOverrideDraft('3.9')).toMatchObject({ ok: false })
+    expect(parseMaxContextOverrideDraft('9007199254740993')).toMatchObject({ ok: false })
+    expect(parseMaxContextOverrideDraft('128001')).toEqual({ ok: true, value: 128_001 })
+    expect(parseMaxContextOverrideDraft('0')).toEqual({ ok: true, value: null })
   })
 })
 
@@ -767,30 +671,14 @@ const mocks = vi.hoisted(() => {
           status_color: goalFixtureOkColor,
           phase: 'executing',
           phase_color: goalFixtureOkColor,
-          health: 'on_track',
-          health_color: goalFixtureOkColor,
-          badges: [],
-          status_reason: '',
           priority: 2,
           metric: null,
           target_value: null,
           due_date: null,
           parent_goal_id: null,
-          convergence: 0,
-          convergence_pct: 0,
           tasks: [],
           task_count: 0,
           task_done_count: 0,
-          verification_summary: {
-            required_votes: 0,
-            approve_votes: 0,
-            reject_votes: 0,
-            pending_votes: 0,
-            quorum_met: false,
-            rejected: false,
-            votes: [],
-          },
-          pending_verification_count: 0,
           timeline_events: [],
           children: [],
           child_count: 0,
@@ -798,11 +686,7 @@ const mocks = vi.hoisted(() => {
           stagnation_seconds: 0,
           linked_keeper_names: [],
           pending_approval_count: 0,
-          infra_risk_count: 0,
           linkage_source: 'none',
-          linkage_warning_count: 0,
-          blocking_source: 'none',
-          blocking_reason: '',
           created_at: '',
           updated_at: '',
         },
@@ -810,17 +694,10 @@ const mocks = vi.hoisted(() => {
       summary: {
         total_goals: 1,
         active_goals: 1,
-        on_track_goals: 1,
-        done_goals: 0,
-        paused_goals: 0,
-        at_risk_goals: 0,
-        blocked_goals: 0,
+        phase_counts: { executing: 1 },
         total_tasks: 0,
         done_tasks: 0,
         pending_approvals: 0,
-        infra_risk_count: 0,
-        overall_convergence: 0,
-        overall_convergence_pct: 0,
       },
     })),
     fetchRuntimeProfiles: vi.fn(async () => ({
@@ -889,12 +766,8 @@ const mocks = vi.hoisted(() => {
               has_capabilities: true,
               behavior_capabilities: {
                 supports_inline_tools: true,
-                requires_per_keeper_bridging_for_bound_actor_tools: true,
-                identity_runtime_mcp_header_keys: ['x-masc-keeper'],
                 argv_prompt_preflight: true,
                 uses_anthropic_caching: false,
-                max_turns_per_attempt: 3,
-                tolerates_bound_actor_fallback: true,
               },
               custom_header_count: 1,
               connect_timeout_s: 120,
@@ -973,23 +846,9 @@ const mocks = vi.hoisted(() => {
     refreshKeeperRuntimeStatus: vi.fn(async () => undefined),
     showToast: vi.fn(),
     updateKeeperRuntime: vi.fn(async () => ({ ok: true })),
-    setKeeperToolPolicy: vi.fn(async () => makeKeeperConfig()),
-    fetchDashboardTools: vi.fn(async () => ({
-      tool_inventory: {
-        count: 3,
-        tools: [
-          { name: 'tool_read_file', description: 'Read a file', category: 'read', enabled_in_current_mode: true, direct_call_allowed: true, doc_refs: [], prompt_hints: [], surfaces: [], visibility: 'public', lifecycle: 'stable', implementationStatus: 'implemented', tier: 'core' },
-          { name: 'masc_status', description: 'Read workspace status', category: 'coordination', enabled_in_current_mode: true, direct_call_allowed: true, doc_refs: [], prompt_hints: [], surfaces: [], visibility: 'public', lifecycle: 'stable', implementationStatus: 'implemented', tier: 'core' },
-          { name: 'Execute', description: 'Run a shell command', category: 'write', enabled_in_current_mode: true, direct_call_allowed: true, doc_refs: [], prompt_hints: [], surfaces: [], visibility: 'public', lifecycle: 'stable', implementationStatus: 'implemented', tier: 'core' },
-        ],
-      },
-    })),
     pauseKeeper: vi.fn(async () => ({ ok: true, action: 'pause', name: 'keeper-sangsu' })),
     resumeKeeper: vi.fn(async () => ({ ok: true, action: 'resume', name: 'keeper-sangsu' })),
     wakeKeeper: vi.fn(async () => ({ ok: true, action: 'wakeup', name: 'keeper-sangsu' })),
-    // access tab surfaces the GitHub App panel, which reads secret_projection
-    // from the keeper composite; no existing config in the default fixture.
-    fetchKeeperComposite: vi.fn(async () => ({ secret_projection: null })),
   }
 })
 
@@ -1000,15 +859,12 @@ vi.mock('../api/dashboard', () => ({
   fetchRuntimeProviders: mocks.fetchRuntimeProviders,
   patchKeeperConfig: mocks.patchKeeperConfig,
   updateKeeperRuntime: mocks.updateKeeperRuntime,
-  setKeeperToolPolicy: mocks.setKeeperToolPolicy,
-  fetchDashboardTools: mocks.fetchDashboardTools,
 }))
 
 vi.mock('../api/keeper', () => ({
   pauseKeeper: mocks.pauseKeeper,
   resumeKeeper: mocks.resumeKeeper,
   wakeKeeper: mocks.wakeKeeper,
-  fetchKeeperComposite: mocks.fetchKeeperComposite,
 }))
 
 vi.mock('../store', () => ({
@@ -1062,12 +918,9 @@ describe('KeeperConfigPanel', () => {
     mocks.refreshKeeperRuntimeStatus.mockResolvedValue(undefined)
     mocks.showToast.mockClear()
     mocks.updateKeeperRuntime.mockClear()
-    mocks.setKeeperToolPolicy.mockClear()
-    mocks.fetchDashboardTools.mockClear()
     mocks.pauseKeeper.mockClear()
     mocks.resumeKeeper.mockClear()
     mocks.wakeKeeper.mockClear()
-    mocks.fetchKeeperComposite.mockClear()
   })
 
   afterEach(() => {
@@ -1075,25 +928,6 @@ describe('KeeperConfigPanel', () => {
     container.remove()
     resetKeeperConfig()
     resetRuntimeCatalog()
-  })
-
-  it('surfaces the GitHub App credentials panel under the access tab', async () => {
-    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
-    await flush()
-    await flush()
-
-    // The credentials panel is scoped to the access tab, so the default
-    // (identity) tab must not render it.
-    expect(container.querySelector('[data-testid="keeper-github-app-config-panel"]')).toBeNull()
-
-    // 권한·샌드박스 (access) is where operators look for credentials; the panel
-    // is surfaced here in addition to the monitoring detail's 진단/운영 copy.
-    selectKcfTab(container, '권한·샌드박스')
-    await flush()
-    expect(container.querySelector('[data-testid="keeper-github-app-config-panel"]')).not.toBeNull()
-    expect(container.textContent).toContain('GitHub App 자격증명')
-    // The panel's initial projection is loaded from the keeper composite.
-    expect(mocks.fetchKeeperComposite).toHaveBeenCalledWith('keeper-sangsu', expect.anything())
   })
 
   it('separates editable prompt controls from read-only runtime metadata', async () => {
@@ -1145,18 +979,18 @@ describe('KeeperConfigPanel', () => {
     expect(container.textContent).not.toContain('자동 부팅 등록')
 
     // hooks tab: the "전역 런타임 아키텍처" block is keeper-agnostic and
-    // collapsed by default; its content (deny list / destructive tools / cost
-    // budget) is hidden until the operator expands it.
+    // collapsed by default; its authoritative scope and slots are hidden until
+    // the operator expands it.
     selectKcfTab(container, '훅')
     await flush()
-    expect(container.textContent).not.toContain('dynamic_boundary (Tool_dispatch.is_destructive)')
     const archToggle = Array.from(container.querySelectorAll('button')).find(button =>
       button.textContent?.includes('전역 런타임 아키텍처'),
     )
     expect(archToggle).toBeTruthy()
     archToggle?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flush()
-    expect(container.textContent).toContain('dynamic_boundary (Tool_dispatch.is_destructive)')
+    expect(container.textContent).toContain('keeper_runtime_composite')
+    expect(container.textContent).toContain('활성 슬롯 수')
 
     // prompt tab: editable prompt controls.
     selectKcfTab(container, '프롬프트')
@@ -1174,50 +1008,7 @@ describe('KeeperConfigPanel', () => {
 
     const textareas = Array.from(container.querySelectorAll('textarea'))
     expect(textareas.length).toBeGreaterThan(0)
-    expect(textareas[0]?.value).toContain('Ship stable keeper ops')
-  })
-
-  it('surfaces execution attention separately from healthy lifecycle state', async () => {
-    mocks.fetchKeeperConfig.mockResolvedValueOnce(makeKeeperConfig({
-      runtime: {
-        paused: false,
-        registered: true,
-        keepalive_running: true,
-        registry_state: 'running',
-        fiber_health: 'alive',
-      },
-      runtime_trust: {
-        disposition: 'Blocked',
-        disposition_reason: 'completion_contract_result:passive_only',
-        needs_attention: true,
-        attention_reason: 'completion_contract_result:passive_only',
-        next_human_action: null,
-        execution: {
-          completion_contract_result: 'passive_only',
-          latest_receipt_at: '2026-06-28T10:56:23Z',
-        },
-        latest_receipt: {
-          current_task_id: 'task-1537',
-        },
-      } as KeeperConfig['runtime_trust'],
-    }))
-
-    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
-    await flush()
-    await flush()
-
-    selectKcfTab(container, '상태·진단')
-    await flush()
-
-    expect(container.textContent).toContain('킵얼라이브 실행')
-    expect(container.textContent).toContain('파이버 상태')
-    expect(container.textContent).toContain('alive')
-    expect(container.textContent).toContain('실행 주의')
-    expect(container.textContent).toContain('ON · completion_contract_result:passive_only')
-    expect(container.textContent).toContain('완료 계약')
-    expect(container.textContent).toContain('passive_only')
-    expect(container.textContent).toContain('작업 scope')
-    expect(container.textContent).toContain('task-1537')
+    expect(textareas[0]?.value).toContain('Prefer direct remediation')
   })
 
   it('runs lifecycle directives from the health tab and refreshes the config snapshot', async () => {
@@ -1262,7 +1053,7 @@ describe('KeeperConfigPanel', () => {
     await flush()
     await flush()
 
-    expect(mocks.resumeKeeper).toHaveBeenCalledWith('keeper-sangsu')
+    expect(mocks.resumeKeeper).toHaveBeenCalledWith('keeper-sangsu', 3)
     expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(2)
     expect(container.textContent).toContain('running')
     expect(container.textContent).toContain('alive')
@@ -1282,26 +1073,6 @@ describe('KeeperConfigPanel', () => {
     expect(keeperConfigSubscriptionCountsForTests()).toEqual({ reset: 0, update: 0 })
   })
 
-  it('renders the compaction token gate as an editable number input (not a read-only row)', async () => {
-    // Regression guard for the ConfigRow → InlineNumberRow swap: a read-only
-    // ConfigRow renders no <input>, so asserting the input exists verifies the
-    // actual render change (buildRuntimePayload alone passed before the swap).
-    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
-    await flush()
-    await flush()
-
-    selectKcfTab(container, '실행 정책')
-    await flush()
-
-    const tokenGateInput = container.querySelector(
-      'input[aria-label="토큰 게이트"]',
-    ) as HTMLInputElement | null
-    expect(tokenGateInput).not.toBeNull()
-    expect(tokenGateInput!.type).toBe('number')
-    // Value reflects the loaded config (makeKeeperConfig compaction.token_gate = 24000).
-    expect(tokenGateInput!.value).toBe('24000')
-  })
-
   it('keeps runtime config controls read-only when the keeper is not manifest-backed', async () => {
     const base = makeKeeperConfig()
     const personaConfig = makeKeeperConfig({
@@ -1312,7 +1083,6 @@ describe('KeeperConfigPanel', () => {
       },
     })
     mocks.fetchKeeperConfig.mockResolvedValueOnce(personaConfig)
-    mocks.setKeeperToolPolicy.mockResolvedValueOnce(personaConfig)
 
     render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
     await flush()
@@ -1332,26 +1102,8 @@ describe('KeeperConfigPanel', () => {
 
     selectKcfTab(container, '실행 정책')
     await flush()
-    expect(container.querySelector('select[aria-label="compaction_profile"]')).toBeNull()
     expect(container.querySelector('input[aria-label="토큰 게이트"]')).toBeNull()
     expect(container.querySelector('button[aria-label="자동 부팅"]')).toBeNull()
-    expect(container.querySelector('textarea[aria-label="tool_access"]')).not.toBeNull()
-    const denylist = container.querySelector('textarea[aria-label="tool_denylist"]') as HTMLTextAreaElement | null
-    expect(denylist).not.toBeNull()
-    denylist!.value = 'Execute\nDangerTool'
-    denylist!.dispatchEvent(new Event('input', { bubbles: true }))
-    await flush()
-    const policySave = Array.from(container.querySelectorAll('button')).find(button =>
-      button.textContent?.includes('정책 저장'),
-    )
-    policySave?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await flush()
-    await flush()
-    expect(mocks.setKeeperToolPolicy).toHaveBeenCalledWith('keeper-sangsu', {
-      tool_access: ['tool_read_file'],
-      deny: ['Execute', 'DangerTool'],
-    })
-
     selectKcfTab(container, '권한·샌드박스')
     await flush()
     expect(container.querySelector('select[aria-label="sandbox_profile"]')).toBeNull()
@@ -1389,132 +1141,19 @@ describe('KeeperConfigPanel', () => {
     const hookRow = container.querySelector('[data-control-id="kcf-hooks-slots"]')
     expect(hookRow?.getAttribute('data-control-contract-status')).toBe('missing-config-field')
     expect(hookRow?.getAttribute('data-control-missing-config-fields'))
-      .toBe('hooks.slots | hooks.deny_list | hooks.cost_budget')
-    expect(hookRow?.textContent).toContain('missing 3 config fields')
+      .toBe('hooks.scope | hooks.slots')
+    expect(hookRow?.textContent).toContain('missing 2 config fields')
 
     const hookFilter = container.querySelector('[data-control-id="kcf-hooks-filter"]')
     expect(hookFilter?.getAttribute('data-control-contract-status')).toBe('ok')
     expect(hookFilter?.getAttribute('data-control-missing-config-fields')).toBe('')
   })
 
-  it('saves the tool denylist via set_policy, echoing current tool_access and deduping entries', async () => {
-    mocks.setKeeperToolPolicy.mockClear()
-    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
-    await flush()
-    await flush()
-
-    selectKcfTab(container, '실행 정책')
-    await flush()
-
-    const denylist = container.querySelector(
-      'textarea[aria-label="tool_denylist"]',
-    ) as HTMLTextAreaElement | null
-    expect(denylist).not.toBeNull()
-    expect(denylist!.value).toBe('Execute') // reflects loaded tool_denylist
-
-    // Operator edits: add a tool, with a blank line and a duplicate.
-    denylist!.value = 'Execute\nmcp__masc__masc_board_delete\nExecute\n'
-    denylist!.dispatchEvent(new Event('input', { bubbles: true }))
-    await flush()
-
-    const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
-      button.textContent?.includes('정책 저장'),
-    )
-    expect(saveButton).toBeTruthy()
-    saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await flush()
-    await flush()
-
-    // set_policy overwrites tool_access AND deny atomically, so the editor
-    // echoes the current tool_access unchanged (preserving the configured
-    // allowlist record); the deny list is trimmed + deduped.
-    expect(mocks.setKeeperToolPolicy).toHaveBeenCalledWith('keeper-sangsu', {
-      tool_access: ['tool_read_file'],
-      deny: ['Execute', 'mcp__masc__masc_board_delete'],
-    })
-  })
-
-  it('echoes an empty tool_access allowlist unchanged (never fabricates access)', async () => {
-    mocks.setKeeperToolPolicy.mockClear()
-    const base = makeKeeperConfig()
-    mocks.fetchKeeperConfig.mockResolvedValueOnce(
-      makeKeeperConfig({ tools: { ...base.tools, tool_access: [] } }),
-    )
-    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
-    await flush()
-    await flush()
-
-    selectKcfTab(container, '실행 정책')
-    await flush()
-
-    const denylist = container.querySelector(
-      'textarea[aria-label="tool_denylist"]',
-    ) as HTMLTextAreaElement | null
-    expect(denylist).not.toBeNull()
-    denylist!.value = 'Execute\nDangerTool'
-    denylist!.dispatchEvent(new Event('input', { bubbles: true }))
-    await flush()
-
-    const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
-      button.textContent?.includes('정책 저장'),
-    )
-    saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await flush()
-    await flush()
-
-    // An empty allowlist round-trips as []; the editor must not substitute a
-    // non-empty set. (Runtime gates on the denylist, not tool_access, so [] here
-    // means "all candidates", which the operator's config already chose.)
-    expect(mocks.setKeeperToolPolicy).toHaveBeenCalledWith('keeper-sangsu', {
-      tool_access: [],
-      deny: ['Execute', 'DangerTool'],
-    })
-  })
-
-  it('saves edited tool_access and denylist together via set_policy', async () => {
-    mocks.setKeeperToolPolicy.mockClear()
-    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
-    await flush()
-    await flush()
-
-    selectKcfTab(container, '실행 정책')
-    await flush()
-
-    const toolAccess = container.querySelector(
-      'textarea[aria-label="tool_access"]',
-    ) as HTMLTextAreaElement | null
-    const denylist = container.querySelector(
-      'textarea[aria-label="tool_denylist"]',
-    ) as HTMLTextAreaElement | null
-    expect(toolAccess).not.toBeNull()
-    expect(denylist).not.toBeNull()
-
-    toolAccess!.value = 'tool_read_file\nmasc_status\ntool_read_file\n'
-    toolAccess!.dispatchEvent(new Event('input', { bubbles: true }))
-    denylist!.value = 'Execute\nDangerTool\nExecute\n'
-    denylist!.dispatchEvent(new Event('input', { bubbles: true }))
-    await flush()
-
-    const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
-      button.textContent?.includes('정책 저장'),
-    )
-    saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await flush()
-    await flush()
-
-    expect(mocks.setKeeperToolPolicy).toHaveBeenCalledWith('keeper-sangsu', {
-      tool_access: ['tool_read_file', 'masc_status'],
-      deny: ['Execute', 'DangerTool'],
-    })
-    expect(mocks.refreshKeeperRuntimeStatus).toHaveBeenCalledTimes(1)
-    expect(mocks.refreshKeeperRuntimeStatus).toHaveBeenCalledWith({ force: true })
-  })
-
   it('refreshes shared keeper surfaces after prompt save', async () => {
     const updated = makeKeeperConfig({
       prompt: {
         ...makeKeeperConfig().prompt,
-        goal: 'Ship refreshed keeper surfaces',
+        instructions: 'Ship refreshed keeper surfaces',
       },
     })
     mocks.patchKeeperConfig.mockResolvedValueOnce(updated)
@@ -1532,11 +1171,11 @@ describe('KeeperConfigPanel', () => {
     editButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flush()
 
-    const goal = container.querySelector('textarea') as HTMLTextAreaElement | null
-    expect(goal).not.toBeNull()
-    goal!.value = 'Ship refreshed keeper surfaces'
-    goal!.dispatchEvent(new Event('input', { bubbles: true }))
-    goal!.dispatchEvent(new FocusEvent('blur', { bubbles: true }))
+    const instructions = container.querySelector('textarea') as HTMLTextAreaElement | null
+    expect(instructions).not.toBeNull()
+    instructions!.value = 'Ship refreshed keeper surfaces'
+    instructions!.dispatchEvent(new Event('input', { bubbles: true }))
+    instructions!.dispatchEvent(new FocusEvent('blur', { bubbles: true }))
     await flush()
 
     const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
@@ -1549,41 +1188,10 @@ describe('KeeperConfigPanel', () => {
 
     expect(mocks.patchKeeperConfig).toHaveBeenCalledWith(
       'keeper-sangsu',
-      expect.objectContaining({ goal: 'Ship refreshed keeper surfaces' }),
+      expect.objectContaining({ instructions: 'Ship refreshed keeper surfaces' }),
     )
     expect(mocks.refreshKeeperRuntimeStatus).toHaveBeenCalledTimes(1)
     expect(mocks.refreshKeeperRuntimeStatus).toHaveBeenCalledWith({ force: true })
-  })
-
-  it('surfaces post-save refresh failure without turning the save into failure', async () => {
-    mocks.refreshKeeperRuntimeStatus.mockRejectedValueOnce(new Error('runtime projection unavailable'))
-
-    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
-    await flush()
-    await flush()
-    selectKcfTab(container, '실행 정책')
-    await flush()
-
-    const toolAccess = container.querySelector(
-      'textarea[aria-label="tool_access"]',
-    ) as HTMLTextAreaElement | null
-    expect(toolAccess).not.toBeNull()
-    toolAccess!.value = 'tool_read_file\nmasc_status'
-    toolAccess!.dispatchEvent(new Event('input', { bubbles: true }))
-    await flush()
-
-    const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
-      button.textContent?.includes('정책 저장'),
-    )
-    expect(saveButton).toBeDefined()
-    expect(saveButton!.hasAttribute('disabled')).toBe(false)
-    saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await flush()
-    await flush()
-
-    expect(mocks.setKeeperToolPolicy).toHaveBeenCalledTimes(1)
-    expect(mocks.showToast).toHaveBeenCalledWith('도구 정책 저장 완료', 'success')
-    expect(mocks.showToast).toHaveBeenCalledWith('runtime projection unavailable', 'warning')
   })
 
   it('patches runtime_id from the dashboard panel', async () => {
@@ -1675,17 +1283,13 @@ describe('KeeperConfigPanel', () => {
     )
   })
 
-  it('patches mention targets and compaction token gate from the dashboard panel', async () => {
+  it('patches mention targets without re-emitting retired compaction gates', async () => {
     const base = makeKeeperConfig()
     mocks.patchKeeperConfig.mockResolvedValueOnce(
       makeKeeperConfig({
         workspace: {
           ...base.workspace,
           mention_targets: ['alpha', 'beta'],
-        },
-        compaction: {
-          ...base.compaction,
-          token_gate: 32000,
         },
       }),
     )
@@ -1694,22 +1298,12 @@ describe('KeeperConfigPanel', () => {
     await flush()
     await flush()
 
-    // mention_targets lives in the access tab; the runtime draft is a shared
-    // signal, so editing it there persists when we switch to the policy tab.
     selectKcfTab(container, '권한·샌드박스')
     await flush()
     const mentionTargets = container.querySelector('textarea[aria-label="mention_targets"]') as HTMLTextAreaElement | null
     expect(mentionTargets).not.toBeNull()
     mentionTargets!.value = 'alpha\n beta \nalpha\n'
     mentionTargets!.dispatchEvent(new Event('input', { bubbles: true }))
-    await flush()
-
-    selectKcfTab(container, '실행 정책')
-    await flush()
-    const tokenGate = container.querySelector('input[aria-label="토큰 게이트"]') as HTMLInputElement | null
-    expect(tokenGate).not.toBeNull()
-    tokenGate!.value = '32000'
-    tokenGate!.dispatchEvent(new Event('input', { bubbles: true }))
     await flush()
 
     const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
@@ -1721,23 +1315,17 @@ describe('KeeperConfigPanel', () => {
 
     expect(mocks.patchKeeperConfig).toHaveBeenCalledWith(
       'keeper-sangsu',
-      expect.objectContaining({
+      {
         mention_targets: ['alpha', 'beta'],
-        compaction_token_gate: 32000,
-      }),
+      },
     )
   })
 
-  it('patches compaction profile, autoboot, and max-context override from the dashboard panel', async () => {
-    const base = makeKeeperConfig()
+  it('patches autoboot and max-context override from the dashboard panel', async () => {
     mocks.patchKeeperConfig.mockResolvedValueOnce(
       makeKeeperConfig({
         autoboot_enabled: false,
         max_context_override: 64000,
-        compaction: {
-          ...base.compaction,
-          profile: 'conservative',
-        },
       }),
     )
 
@@ -1755,12 +1343,6 @@ describe('KeeperConfigPanel', () => {
 
     selectKcfTab(container, '실행 정책')
     await flush()
-    const compactionProfile = container.querySelector('select[aria-label="compaction_profile"]') as HTMLSelectElement | null
-    expect(compactionProfile).not.toBeNull()
-    compactionProfile!.value = 'conservative'
-    compactionProfile!.dispatchEvent(new Event('change', { bubbles: true }))
-    await flush()
-
     const autoboot = container.querySelector('button[aria-label="자동 부팅"]') as HTMLButtonElement | null
     expect(autoboot).not.toBeNull()
     autoboot!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -1778,9 +1360,29 @@ describe('KeeperConfigPanel', () => {
       expect.objectContaining({
         autoboot_enabled: false,
         max_context_override: 64000,
-        compaction_profile: 'conservative',
       }),
     )
+  })
+
+  it('blocks an invalid max-context override instead of silently clearing it', async () => {
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '런타임')
+    await flush()
+    const maxContext = container.querySelector('input[aria-label="컨텍스트 오버라이드"]') as HTMLInputElement | null
+    expect(maxContext).not.toBeNull()
+    maxContext!.value = '-1'
+    maxContext!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+
+    expect(container.textContent).toContain('컨텍스트 오버라이드는 양의 정수여야 합니다')
+    const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('런타임 설정 저장'),
+    )
+    expect(saveButton?.disabled).toBe(true)
+    expect(mocks.patchKeeperConfig).not.toHaveBeenCalled()
   })
 
   it('shows the sandbox preflight guide when docker is selected', async () => {
@@ -1841,11 +1443,11 @@ describe('KeeperConfigPanel', () => {
   })
 
   it('renders the keeper-scoped prompt assembly trace with an override win badge', async () => {
-    // Real server override_fields are dot-namespaced (prompt.goal); mark only goal.
+    // Real server override_fields are dot-namespaced; mark instructions.
     const base = makeKeeperConfig()
     mocks.fetchKeeperConfig.mockResolvedValueOnce(
       makeKeeperConfig({
-        sources: { ...base.sources, override_fields: ['prompt.goal'], has_live_override: true },
+        sources: { ...base.sources, override_fields: ['prompt.instructions'], has_live_override: true },
       }),
     )
     render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
@@ -1857,86 +1459,12 @@ describe('KeeperConfigPanel', () => {
 
     expect(container.textContent).toContain('조립 추적')
     expect(container.querySelector('.kasm')).not.toBeNull()
-    // 3 base blocks + goal + instructions + goals = 6 segments
-    expect(container.querySelectorAll('.kasm-seg').length).toBe(6)
-    // only prompt.goal is overridden → exactly one win badge
+    // 3 base blocks + instructions + goals = 5 segments
+    expect(container.querySelectorAll('.kasm-seg').length).toBe(5)
+    // only prompt.instructions is overridden → exactly one win badge
     const winBadges = container.querySelectorAll('.kasm-seg-win')
     expect(winBadges.length).toBe(1)
     expect(winBadges[0]!.textContent).toContain('매니페스트 덮어씀')
-  })
-
-  it('renders the per-tool grid from the live registry and toggles tool_access via set_policy', async () => {
-    mocks.setKeeperToolPolicy.mockClear()
-    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
-    await flush()
-    await flush()
-
-    selectKcfTab(container, '실행 정책')
-    await flush()
-    await flush() // tool inventory resolves
-
-    // grid derived from the 3 live-registry tools, with the real category badge
-    expect(container.querySelectorAll('.kcf-tool').length).toBe(3)
-    expect(container.textContent).toContain('coordination')
-
-    // tool_read_file is in tool_access → its switch is on; masc_status is off
-    const readToggle = container.querySelector('button[aria-label^="tool_read_file"]') as HTMLButtonElement
-    expect(readToggle.getAttribute('aria-checked')).toBe('true')
-    const statusToggle = container.querySelector('button[aria-label^="masc_status"]') as HTMLButtonElement
-    expect(statusToggle.getAttribute('aria-checked')).toBe('false')
-
-    // toggling masc_status ON rewrites the shared tool_access draft (textarea view)
-    statusToggle.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await flush()
-    const accessTa = container.querySelector('textarea[aria-label="tool_access"]') as HTMLTextAreaElement
-    expect(accessTa.value.split('\n')).toEqual(['tool_read_file', 'masc_status'])
-
-    // save routes through the existing set_policy path with the updated allowlist
-    const saveButton = Array.from(container.querySelectorAll('button')).find((b) =>
-      b.textContent?.includes('정책 저장'),
-    )
-    saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await flush()
-    await flush()
-    expect(mocks.setKeeperToolPolicy).toHaveBeenCalledWith('keeper-sangsu', {
-      tool_access: ['tool_read_file', 'masc_status'],
-      deny: ['Execute'],
-    })
-  })
-
-  it('preserves an empty tool_access as all-candidates — grid is read-only, toggle is a no-op', async () => {
-    mocks.setKeeperToolPolicy.mockClear()
-    const base = makeKeeperConfig()
-    mocks.fetchKeeperConfig.mockResolvedValueOnce(
-      makeKeeperConfig({ tools: { ...base.tools, tool_access: [] } }),
-    )
-    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
-    await flush()
-    await flush()
-
-    selectKcfTab(container, '실행 정책')
-    await flush()
-    await flush() // tool inventory resolves
-
-    // empty tool_access = all candidates: banner shown, every tool ON (not all-off),
-    // and every toggle disabled so it cannot silently narrow [] to one explicit tool.
-    expect(container.querySelector('[data-testid="tool-all-candidates-note"]')).not.toBeNull()
-    const toggles = Array.from(container.querySelectorAll('.kcf-tool-toggle')) as HTMLButtonElement[]
-    expect(toggles.length).toBe(3)
-    expect(toggles.every((t) => t.getAttribute('aria-checked') === 'true')).toBe(true)
-    expect(toggles.every((t) => t.disabled)).toBe(true)
-
-    // a click on the read-only grid must not mutate the draft (stays empty → [])
-    toggles[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await flush()
-    const accessTa = container.querySelector('textarea[aria-label="tool_access"]') as HTMLTextAreaElement
-    expect(accessTa.value).toBe('')
-
-    // and the save button stays disabled because nothing changed (no accidental narrow)
-    const saveButton = Array.from(container.querySelectorAll('button')).find((b) =>
-      b.textContent?.includes('정책 저장'),
-    ) as HTMLButtonElement
-    expect(saveButton.disabled).toBe(true)
   })
 
   it('resets runtime draft when switching from keeper A to keeper B to prevent stale settings leakage', async () => {
@@ -2020,10 +1548,8 @@ describe('buildKcfAssemblySegments', () => {
       sources: { ...base.sources, override_fields: ['prompt.instructions'] },
     })
     const segs = buildKcfAssemblySegments(c)
-    expect(segs.map((s) => s.src)).toEqual(['base', 'base', 'base', 'manifest', 'override', 'goals'])
-    const goalSeg = segs.find((s) => s.field.includes('objective'))
+    expect(segs.map((s) => s.src)).toEqual(['base', 'base', 'base', 'override', 'goals'])
     const instrSeg = segs.find((s) => s.field.includes('instructions'))
-    expect(goalSeg?.win).toBe(false)
     expect(instrSeg?.win).toBe(true)
     expect(instrSeg?.src).toBe('override')
   })
@@ -2031,7 +1557,7 @@ describe('buildKcfAssemblySegments', () => {
   it('omits empty prompt fields and the goals segment when there are no active goals', () => {
     const base = makeKeeperConfig()
     const c = makeKeeperConfig({
-      prompt: { ...base.prompt, goal: '', instructions: '' },
+      prompt: { ...base.prompt, instructions: '' },
       workspace: { ...base.workspace, active_goals: [] },
     })
     const segs = buildKcfAssemblySegments(c)

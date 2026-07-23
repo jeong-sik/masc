@@ -64,7 +64,7 @@ entry states why the site cannot route through the canonical surface. Summary:
   for `Out_of_memory` / `Stack_overflow` (must not allocate through the logging
   stack), and the `login` / `init` CLI subcommands whose stderr/stdout is
   user-facing CLI output.
-- **Standalone CLI tools** (`bin/masc_trace.ml`, `bin/trace_to_tla.ml`,
+- **Standalone CLI tools** (`bin/masc_trace.ml`,
   `bin/masc_tui_loader.ml`, `bin/masc_cost.ml`, `bin/masc_compaction_audit.ml`,
   `bin/keeper_feature_proof_report.ml`, `bin/env_knob_catalog.ml`) — one-shot
   binaries; their I/O is the tool's user interface, not server logging.

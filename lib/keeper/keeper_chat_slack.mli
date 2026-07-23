@@ -43,6 +43,20 @@ val content_blocks_of_text : string -> Yojson.Safe.t list
     already delivered via the [content] field; fusion cards also have no
     Slack-native projection yet. *)
 
+val link_block_json :
+  url:string -> title:string -> description:string option -> Yojson.Safe.t
+(** Block Kit section block of the form [*<url|title>*\ndescription]. The
+    url/title/description are redacted and mrkdwn-escaped; the result is
+    truncated to the per-block text limit. *)
+
+val image_block_json : url:string -> caption:string option -> Yojson.Safe.t
+(** Block Kit image block; [caption] becomes the redacted [alt_text]. *)
+
+val section_block_json : text:string -> Yojson.Safe.t
+(** Plain Block Kit mrkdwn section for notices that carry no URL (e.g. an
+    attachment whose stored metadata failed the typed decode). The text is
+    redacted, mrkdwn-escaped, and truncated like every other builder. *)
+
 val adapter_loop :
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   token:string ->

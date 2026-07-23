@@ -65,8 +65,12 @@ let test_descriptor_is_typed_only () =
     false
     (List.mem "cmd" props);
   Alcotest.(check bool)
-    "executable present in properties"
+    "argv present in properties"
     true
+    (List.mem "argv" props);
+  Alcotest.(check bool)
+    "retired executable absent from properties"
+    false
     (List.mem "executable" props);
   Alcotest.(check bool)
     "pipeline present in properties"
@@ -96,14 +100,16 @@ let test_description_does_not_advertise_cmd () =
     |> find_execute_schema
   in
   Alcotest.(check bool)
-    "description mentions typed argv"
-    true
-    (Astring.String.is_infix ~affix:"typed argv" execute_schema.description);
-  Alcotest.(check bool)
-    "description says legacy cmd is rejected"
+    "description names the non-empty argv process vector"
     true
     (Astring.String.is_infix
-       ~affix:"legacy 'cmd' string field is no longer accepted"
+       ~affix:"non-empty argv process vector"
+       execute_schema.description);
+  Alcotest.(check bool)
+    "description says cmd and command are rejected"
+    true
+    (Astring.String.is_infix
+       ~affix:"cmd and command string fields are rejected"
        execute_schema.description);
   Alcotest.(check bool)
     "description does not advertise cmd examples"

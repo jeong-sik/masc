@@ -97,18 +97,19 @@ else
   echo "PASS: legacy checkout follow-up helper surface is absent."
 fi
 
+legacy_effect_pattern='effect_''domain|effect''Domain'
 if [ "${#tool_catalog_files[@]}" -gt 0 ] \
-  && rg -q 'type effect_domain' "${tool_catalog_files[@]}"; then
-  echo "PASS: Tool_catalog exposes typed effect_domain metadata."
+  && rg -q "$legacy_effect_pattern" "${tool_catalog_files[@]}"; then
+  mark_confirmed "Tool_catalog still exposes generic effect-domain metadata"
 else
-  mark_confirmed "Tool_catalog lacks typed effect_domain metadata"
+  echo "PASS: generic Tool_catalog effect-domain metadata is absent."
 fi
 
 section "Confirmed String/Heuristic Semantics"
 print_matches \
   "keeper agent surface still derives affordance groups from tool-name strings" \
   lib/keeper/keeper_agent_run.ml \
-  'tool_required_affordances|String\.starts_with|String\.equal[[:space:]]+[a-zA-Z_]+[[:space:]]+"(keeper|masc)_[^"]+"|List\.mem[[:space:]]+[a-zA-Z_]+[[:space:]]+turn_affordances'
+  'tool_required_affordances|String\.starts_with|String\.equal[[:space:]]+[a-zA-Z_]+[[:space:]]+"(keeper|masc)_[^"]+"'
 
 if [ -e lib/provider_adapter.ml ] || [ -e lib/provider_adapter.mli ]; then
   mark_confirmed "legacy Provider_adapter implementation files still exist"

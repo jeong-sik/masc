@@ -15,8 +15,6 @@ open Keeper_types_profile
     profile-default. *)
 type parsed_args =
   { name : string
-  ; compaction_profile_opt : string option
-  ; goal_opt : string option
   ; runtime_id_opt : string option
   ; allowed_paths_opt : string list option
   ; autoboot_enabled_opt : bool option
@@ -25,26 +23,12 @@ type parsed_args =
   ; max_context_override_opt : int option
   ; max_context_override_present : bool
   ; proactive_enabled_opt : bool option
-  ; proactive_idle_sec_opt : int option
-  ; proactive_cooldown_sec_opt : int option
-  ; compaction_ratio_gate_opt : float option
-  ; compaction_message_gate_opt : int option
-  ; compaction_token_gate_opt : int option
-  ; compaction_cooldown_sec_opt : int option
   ; sandbox_profile_opt : string option
   ; network_mode_opt : string option
-  ; tool_access_opt : string list option
-  ; tool_denylist_opt : string list option
-  ; auto_handoff_opt : bool option
-  ; handoff_threshold_opt : float option
-  ; handoff_cooldown_sec_opt : int option
   ; instructions_arg : string option
   ; profile_defaults : keeper_profile_defaults
   ; instructions_opt : string option
   }
-
-(** Trim, drop blanks, and dedupe while preserving order. *)
-val normalize_tool_name_list : string list -> string list
 
 (** Project an [`Assoc] member at [key]; [None] for non-objects or
     missing keys. *)
@@ -52,24 +36,15 @@ val normalize_tool_name_list : string list -> string list
     [`Null]. *)
 val json_non_null_member_present : string -> Yojson.Safe.t -> bool
 
-(** Parse an optional tool-name list field at [key]. *)
-val parse_present_tool_name_list_opt :
-  Yojson.Safe.t -> string -> (string list option, string) result
-
 (** Parse an optional string-list field at [key]; uses
     [normalize_name_list]. *)
 val parse_present_string_list_opt :
   Yojson.Safe.t -> string -> (string list option, string) result
 
-(** Resolve a tool-name list with [preferred] taking priority over
-    [fallback], then normalize. *)
-val resolve_tool_name_list :
-  preferred:string list option -> fallback:string list option -> string list
-
-(** Parse the canonical [tool_access] field. *)
-val parse_tool_access_input :
-  Yojson.Safe.t ->
-  (string list option, string) result
+(** Parse the explicit context override. Missing is [(false, None)]; null or
+    zero explicitly clears it; positive integers are preserved exactly. *)
+val parse_max_context_override :
+  Yojson.Safe.t -> (bool * int option, string) result
 
 (** Top-level parser: project the [keeper_up] tool args JSON to a
     [parsed_args] record, or return a [tool_result] error envelope. *)

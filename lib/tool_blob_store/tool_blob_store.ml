@@ -1,6 +1,38 @@
 module SS = Set_util.StringSet
 
-type t = { root : string } [@@unboxed]
+type t =
+  { root : string
+  ; ownership_root : string
+  }
+
+(* sha256 validation SSOT lives in {!Tool_output} (the artifact-ref owner);
+   re-exported here so the store boundary keeps its historical surface. *)
+type invalid_sha256 = Tool_output.invalid_sha256 =
+  | Invalid_sha256_length of { actual : int }
+  | Invalid_sha256_character of { index : int; found : char }
+
+let validate_sha256 = Tool_output.validate_sha256
+let invalid_sha256_to_string = Tool_output.invalid_sha256_to_string
+
+type fetch_error =
+  | Invalid_sha256 of invalid_sha256
+  | Owned_read_failed of Fs_compat.owned_regular_file_read_error
+  | Integrity_mismatch of {
+      path : string;
+      expected : string;
+      actual : string;
+    }
+
+let fetch_error_to_string = function
+  | Invalid_sha256 invalid -> invalid_sha256_to_string invalid
+  | Owned_read_failed error ->
+      Fs_compat.owned_regular_file_read_error_to_string error
+  | Integrity_mismatch { path; expected; actual } ->
+      Printf.sprintf
+        "integrity mismatch path=%s expected=%s actual=%s"
+        path
+        expected
+        actual
 
 let preview_max = 200
 
@@ -23,6 +55,7 @@ let create ~base_path =
       Filename.concat
         (Common.masc_dir_from_base_path ~base_path)
         "tool_blobs";
+    ownership_root = base_path;
   }
 
 let root_dir t = t.root
@@ -40,35 +73,47 @@ let rec mkdir_p p =
 
 let ensure_parent_dir path = mkdir_p (Filename.dirname path)
 
+let fetch t ~sha256 =
+  match validate_sha256 sha256 with
+  | Error invalid -> Error (Invalid_sha256 invalid)
+  | Ok () ->
+      let path = shard_path t sha256 in
+      (match
+         Fs_compat.load_owned_regular_file
+           ~ownership_root:t.ownership_root
+           path
+       with
+       | Error error -> Error (Owned_read_failed error)
+       | Ok None -> Ok None
+       | Ok (Some bytes) ->
+         let actual = Digestif.SHA256.(digest_string bytes |> to_hex) in
+         if String.equal sha256 actual
+         then Ok (Some bytes)
+         else Error (Integrity_mismatch { path; expected = sha256; actual }))
+
 let put t ~bytes ~mime =
   let sha256 = Digestif.SHA256.(digest_string bytes |> to_hex) in
   let path = shard_path t sha256 in
-  if not (Fs_compat.file_exists path) then begin
-    ensure_parent_dir path;
-    (* Propagate a failed write instead of swallowing it. Returning [Stored]
-       after [save_file_atomic] failed produced a blob marker for bytes that
-       were never persisted, so the keeper permanently lost the full tool
-       output (only the preview survived). The sole caller,
-       [Tool_bridge.maybe_externalize], already catches storage failures and
-       falls back to the inline bytes (its docstring promises exactly this);
-       raising here is what activates that fallback. *)
-    match Fs_compat.save_file_atomic path bytes with
-    | Ok () -> ()
-    | Error msg ->
-        raise (Sys_error (Printf.sprintf "tool_blob_store.put: %s" msg))
-  end;
-  Tool_output.Stored {
-    sha256;
-    bytes = String.length bytes;
-    preview = make_preview bytes;
-    mime;
-  }
-
-let fetch t ~sha256 =
-  let path = shard_path t sha256 in
-  if Fs_compat.file_exists path then
-    Safe_ops.protect ~default:None (fun () -> Some (Fs_compat.load_file path))
-  else None
+  ensure_parent_dir path;
+  (* An authoritative atomic rewrite avoids reading and hashing a second full
+     copy on idempotent puts, and repairs any corrupt prior bytes at this
+     content address. Concurrent writers have byte-identical payloads. *)
+  (match Fs_compat.save_file_atomic path bytes with
+   | Ok () -> ()
+   | Error msg ->
+       raise (Sys_error (Printf.sprintf "tool_blob_store.put: %s" msg)));
+  (* A digestif-produced sha256 and a byte length are always valid; an empty
+     [mime] is the only reachable rejection and is a caller bug, raised
+     visibly rather than stored. *)
+  match
+    Tool_output.make_artifact_ref ~sha256 ~bytes:(String.length bytes)
+      ~preview:(make_preview bytes) ~mime
+  with
+  | Ok artifact_ref -> Tool_output.Stored artifact_ref
+  | Error err ->
+    invalid_arg
+      (Printf.sprintf "tool_blob_store.put: %s"
+         (Tool_output.make_error_to_string err))
 
 let list_all t =
   if not (Sys.file_exists t.root) then []

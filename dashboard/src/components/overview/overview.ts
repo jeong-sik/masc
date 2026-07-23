@@ -34,6 +34,7 @@ import { isAgentOffline } from '../../lib/agent-status'
 import { keeperRowLooksRunning } from '../../runtime-counts'
 import { createAsyncResource, type AsyncResource, type AsyncState } from '../../lib/async-state'
 import { navigate } from '../../router'
+import { gateData } from '../gate-signals'
 import type { TabId } from '../../types/sse'
 import {
   fetchTelemetry,
@@ -89,16 +90,8 @@ export function deriveKeeperAttentionReason(keeper: Keeper): KeeperAttentionReas
   const attention = attentionReasonLabel(attentionRaw, false) ?? undefined
   const nextAction = nextHumanActionLabel(nextActionRaw) ?? undefined
 
-  if (keeper.runtime_blocker_continue_gate) {
-    return {
-      sev: 'warn',
-      text: attention ?? blockerLabel ?? '계속 진행 승인 대기',
-      act: nextAction ?? '승인 검토',
-    }
-  }
-
   if (hasOperatorAttentionBlocker(blockerClass)) {
-    return { sev: 'warn', text: attention ?? '운영자 조치 대기', act: nextAction ?? '승인 검토' }
+    return { sev: 'warn', text: attention ?? 'Human 판단 대기', act: nextAction ?? 'HITL 검토' }
   }
 
   const isCritical = hasCriticalAttentionBlocker(blockerClass)
@@ -125,7 +118,6 @@ export function pickAttentionKeepers(keeperList: readonly Keeper[]): Keeper[] {
   return keeperList.filter(k =>
     k.needs_attention === true
     || k.trust?.needs_attention === true
-    || k.runtime_blocker_continue_gate === true
     || hasOperatorAttentionBlocker(k.runtime_blocker_class)
     || !!k.attention_reason?.trim()
     || !!k.trust?.attention_reason?.trim(),
@@ -180,10 +172,8 @@ export function computeOverviewStats(keeperList: readonly Keeper[], taskList: re
 // "Unknown → Permissive Default": absence is shown as unknown, not as 0.
 
 export interface OverviewDigest {
-  /** Keepers blocked awaiting an operator decision (the approval queue). */
-  openApprovals: number
-  /** Whether any awaiting-operator keeper is in a critical (bad) state. */
-  approvalsCritical: boolean
+  /** Exact pending requests from the Gate queue SSOT. */
+  openGateRequests: number
   /** Top goals by priority (highest first), up to 3. */
   topGoals: Goal[]
   /** Most urgent goal label for the "최우선 목표" KPI, or null when none. */
@@ -206,19 +196,10 @@ function goalPriorityClass(priority: number): 'high' | 'normal' | 'low' {
 }
 
 export function computeOverviewDigest(
-  keeperList: readonly Keeper[],
+  openGateRequests: number,
   goalList: readonly Goal[],
   fusionList: readonly FusionRunRecord[],
 ): OverviewDigest {
-  const awaiting = keeperList.filter(
-    k => k.runtime_blocker_continue_gate === true || hasOperatorAttentionBlocker(k.runtime_blocker_class),
-  )
-  const approvalsCritical = keeperList.some(
-    k => hasCriticalAttentionBlocker(k.runtime_blocker_class)
-      || k.lifecycle_phase === 'Dead'
-      || k.lifecycle_phase === 'Crashed',
-  )
-
   // Highest priority first; ties keep input order (stable sort).
   const topGoals = [...goalList].sort((a, b) => b.priority - a.priority).slice(0, 3)
   const lead = topGoals[0] ?? null
@@ -229,8 +210,7 @@ export function computeOverviewDigest(
   const fusionLatest = [...fusionList].sort((a, b) => b.startedAt - a.startedAt)[0] ?? null
 
   return {
-    openApprovals: awaiting.length,
-    approvalsCritical,
+    openGateRequests,
     topGoals,
     topGoalLabel,
     fusionRunning,
@@ -683,7 +663,7 @@ function OverviewHeader() {
         <!-- eyebrow + display header + purpose: overview.jsx:99-101 (copy verbatim) -->
         <span class="ov-eyebrow">운영 홈</span>
         <h1>지금, 전체</h1>
-        <p class="ov-sub">fleet 전체 — 목표 · 승인 · 심의 · 연결 한눈에</p>
+        <p class="ov-sub">fleet 전체 — 목표 · Gate · Fusion · 연결 한눈에</p>
       </div>
       <div class="ov-clock v2-overview-clock mono" data-testid="overview-clock">
         ${clock} <span>KST</span>
@@ -738,10 +718,10 @@ function OverviewKpiStrip({ stats, digest }: { stats: OverviewStats; digest: Ove
     <section class="ov-kpis v2-overview-kpis" aria-label="Cross-surface KPIs" data-testid="overview-kpis">
       <${OverviewKpi} label="실행 중 keeper" value=${String(stats.run)} sub=${` / ${stats.total}`} tone="ok" testId="kpi-run" onClick=${() => navigate('monitoring')} />
       <${OverviewKpi} label="주의 필요" value=${String(stats.att)} tone=${stats.att > 0 ? 'bad' : undefined} testId="kpi-att" onClick=${() => navigate('monitoring')} />
-      <${OverviewKpi} label="열린 승인" value=${String(digest.openApprovals)} tone=${digest.approvalsCritical ? 'bad' : digest.openApprovals > 0 ? 'warn' : undefined} testId="kpi-approvals" onClick=${() => navigate('approvals')} />
+      <${OverviewKpi} label="열린 Gate" value=${String(digest.openGateRequests)} tone=${digest.openGateRequests > 0 ? 'warn' : undefined} testId="kpi-approvals" onClick=${() => navigate('approvals')} />
       <${OverviewKpi} label="최우선 목표" value=${digest.topGoalLabel ?? '—'} tone="volt" testId="kpi-top-goal" onClick=${() => navigate('workspace', { section: 'work' })} />
       <${OverviewKpi} label="활성 커넥터" value="—" testId="kpi-connectors" onClick=${() => navigate('connectors')} />
-      <${OverviewKpi} label="예약 승인" value="—" testId="kpi-schedule" onClick=${() => navigate('schedule')} />
+      <${OverviewKpi} label="예약 HITL" value="—" testId="kpi-schedule" onClick=${() => navigate('schedule')} />
       <${OverviewKpi} label="진행 심의" value=${String(digest.fusionRunning)} sub=${digest.fusionDone > 0 ? ` · 완료 ${digest.fusionDone}` : undefined} tone=${digest.fusionRunning > 0 ? 'volt' : undefined} testId="kpi-fusion" onClick=${() => navigate('fusion')} />
     </section>
   `
@@ -950,22 +930,22 @@ function OverviewDomainSection({
 
       <!-- APPROVALS · overview.jsx:182-198 -->
       <${DomainCard}
-        title="승인 큐"
-        count=${String(digest.openApprovals)}
-        tone=${digest.approvalsCritical ? 'bad' : 'warn'}
-        linkLabel="승인"
+        title="Gate · HITL"
+        count=${String(digest.openGateRequests)}
+        tone="warn"
+        linkLabel="Gate"
         nav=${{ tab: 'approvals' }}
         testId="domain-approvals"
       >
         <div class="ov-mini-list">
-          ${digest.openApprovals > 0
+          ${digest.openGateRequests > 0
             ? html`
                 <div class="ov-mini-row">
-                  <span class="inline-block size-1.5 rounded-full ${digest.approvalsCritical ? 'bg-destructive' : 'bg-warning'}"></span>
-                  <span class="ov-mini-txt">운영자 조치 대기 ${digest.openApprovals}건</span>
+                  <span class="inline-block size-1.5 rounded-full bg-warning"></span>
+                  <span class="ov-mini-txt">Human 판단 대기 ${digest.openGateRequests}건 · Keeper lane nonblocking</span>
                 </div>
               `
-            : html`<div class="ov-mini-empty ov-empty">대기 중 승인 없음</div>`}
+            : html`<div class="ov-mini-empty ov-empty">Human 판단 대기 없음</div>`}
         </div>
       <//>
 
@@ -1043,10 +1023,11 @@ export function Overview() {
   const keeperList = keepers.value
   const goalList = goals.value
   const fusionList = fusionRuns.value
+  const openGateRequests = gateData.value?.approval_queue?.length ?? 0
   const stats = useMemo(() => computeOverviewStats(keeperList, taskList), [keeperList, taskList])
   const digest = useMemo(
-    () => computeOverviewDigest(keeperList, goalList, fusionList),
-    [keeperList, goalList, fusionList],
+    () => computeOverviewDigest(openGateRequests, goalList, fusionList),
+    [openGateRequests, goalList, fusionList],
   )
   const telemetry = overviewTelemetryResource.state.value
 

@@ -53,22 +53,26 @@ end
 module Backend = struct
   type phase =
     | Uninitialized
+    | Memory
     | Filesystem
     | Degraded
 
   let phase_to_string = function
     | Uninitialized -> "uninitialized"
+    | Memory -> "memory"
     | Filesystem -> "filesystem"
     | Degraded -> "degraded"
 
-  let all_phases = [Uninitialized; Filesystem; Degraded]
+  let all_phases = [Uninitialized; Memory; Filesystem; Degraded]
 
   type event =
+    | Resolve_memory
     | Resolve_fs
     | Degrade of string
     | Recover
 
   let event_to_string = function
+    | Resolve_memory -> "resolve_memory"
     | Resolve_fs -> "resolve_fs"
     | Degrade s -> "degrade:" ^ s
     | Recover -> "recover"
@@ -77,8 +81,9 @@ module Backend = struct
 
   let apply_event ~current event =
     match current, event with
+    | Uninitialized, Resolve_memory -> Applied Memory
     | Uninitialized, Resolve_fs -> Applied Filesystem
-    | Filesystem, Degrade _ -> Applied Degraded
+    | (Memory | Filesystem), Degrade _ -> Applied Degraded
     | Degraded, Recover -> Applied Filesystem
     | phase, event -> Ignored { phase; event }
 
@@ -224,16 +229,16 @@ let check_invariants (state : product) : (unit, string) result =
        | Readiness.Ready ->
          Some "backend=Degraded but readiness=Ready (degraded backend must not serve traffic)"
        | Readiness.NotReady -> None)
-    | Backend.Uninitialized | Backend.Filesystem -> None
+    | Backend.Uninitialized | Backend.Memory | Backend.Filesystem -> None
   in
-  (* Backend.Filesystem | Backend.Degraded are enumerated explicitly so a new
+  (* Every initialized backend variant is enumerated explicitly so a new
      Backend variant fails compilation here rather than silently passing. *)
   let booting_implies_uninitialized_backend =
     match state.lifecycle with
     | Lifecycle.Booting ->
       (match state.backend with
        | Backend.Uninitialized -> None
-       | (Backend.Filesystem | Backend.Degraded) as b ->
+       | (Backend.Memory | Backend.Filesystem | Backend.Degraded) as b ->
          Some (Printf.sprintf "lifecycle=Booting but backend=%s (expected Uninitialized)"
                  (Backend.phase_to_string b)))
     | Lifecycle.Serving | Lifecycle.Draining | Lifecycle.Stopped -> None

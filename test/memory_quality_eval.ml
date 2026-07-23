@@ -41,10 +41,6 @@ let pct n total = if total = 0 then 0.0 else 100.0 *. float_of_int n /. float_of
 (* default number of rows to print in top-N listings. *)
 let default_top_n = 15
 
-(* near-duplicate heuristic granularity: two fact_keys are flagged as the same
-   slot if they share this many leading normalized words. Measurement-only. *)
-let near_dup_prefix_words = 6
-
 (* ---------- recall record ---------- *)
 
 type recall_record =
@@ -162,23 +158,6 @@ let churn_stats records =
   avg keys_per, maxl keys_per, maxl store_sizes
 ;;
 
-(* ---------- near-duplicate helpers ---------- *)
-
-let strip_key_prefix k =
-  match String.index_opt k ':' with
-  | Some i -> String.sub k (i + 1) (String.length k - i - 1)
-  | None -> k
-;;
-
-let first_words n s =
-  (* normalize_claim collapses whitespace runs and trims, so split yields no empty
-     tokens; the [length > 0] guard holds that invariant explicit, it is not load-bearing. *)
-  Types.normalize_claim s
-  |> String.split_on_char ' '
-  |> List.filteri (fun i w -> i < n && String.length w > 0)
-  |> String.concat " "
-;;
-
 (* ---------- self-test (the harness's own harness) ---------- *)
 
 let self_test () =
@@ -221,15 +200,6 @@ let self_test () =
        && r.n_facts_in_store = 5
      | None -> false);
   check "parse junk -> None" (parse_recall_line "not json" = None);
-  check "near-dup heuristic is coarse: punctuation-differing rewordings do NOT merge"
-    (String.equal
-       (first_words near_dup_prefix_words
-          (strip_key_prefix "claim:checkpoint saved; keeper remains scheduled for the next cycle"))
-       (first_words near_dup_prefix_words
-          (strip_key_prefix "claim:checkpoint saved and keeper remains scheduled")) = false
-     (* honest: normalize_claim is whitespace/case only, so these do NOT collide
-        on a 6-word prefix ("saved;" vs "saved" differ) — proving the heuristic
-        is a coarse flag, not a real dedup; the real fix is a stable claim_id. *));
   (* churn arithmetic over the same fixture: keys/turn lengths [2;1;2;1] -> mean 1.5,
      max 2; n_facts_in_store [2;2;3;1] -> max 3. report_churn shares churn_stats. *)
   let mean_kp, max_kp, max_store = churn_stats recs in
@@ -278,36 +248,6 @@ let report_churn records =
   note "n_facts_in_store: max=%d" max_store
 ;;
 
-let report_near_dup records ~top_n =
-  section "NEAR-DUPLICATE SLOT FRAGMENTATION (measurement-only heuristic)";
-  note "groups distinct fact_keys sharing the first %d normalized words" near_dup_prefix_words;
-  note "(NOT a classifier; flags conclusions split across slots a stable claim_id would merge)";
-  let keys = Hashtbl.fold (fun k _ acc -> k :: acc) (echo_counts records) [] in
-  let groups = Hashtbl.create 256 in
-  List.iter
-    (fun k ->
-       let prefix = first_words near_dup_prefix_words (strip_key_prefix k) in
-       if String.length prefix > 0
-       then
-         Hashtbl.replace groups prefix
-           (k :: Option.value (Hashtbl.find_opt groups prefix) ~default:[]))
-    keys;
-  let frag =
-    Hashtbl.fold (fun pfx ks acc -> if List.length ks > 1 then (pfx, ks) :: acc else acc) groups []
-    |> List.sort (fun (p1, a) (p2, b) ->
-      if List.length a <> List.length b then compare (List.length b) (List.length a)
-      else String.compare p1 p2)
-  in
-  note "fragmented slots (>=2 keys, same prefix): %d" (List.length frag);
-  List.iteri
-    (fun i (pfx, ks) ->
-       if i < top_n
-       then (
-         Printf.printf "    [%d keys] %s...\n%!" (List.length ks) pfx;
-         List.iter (fun k -> Printf.printf "        %s\n%!" k) (List.sort String.compare ks)))
-    frag
-;;
-
 let load_facts ~keepers_dir =
   if not (Sys.file_exists keepers_dir && (try Sys.is_directory keepers_dir with _ -> false))
   then []
@@ -337,14 +277,10 @@ let report_composition facts =
     let all = List.concat_map snd facts in
     let total = List.length all in
     let durable = List.length (List.filter (fun (f : Types.fact) -> f.valid_until = None) all) in
-    let volatile =
-      List.length (List.filter (fun (f : Types.fact) -> f.external_ref <> None) all)
-    in
     let with_id = List.length (List.filter (fun (f : Types.fact) -> f.claim_id <> None) all) in
     note "keepers with fact store: %d" (List.length facts);
     note "total facts: %d" total;
     note "durable (valid_until=None): %d (%.0f%%)" durable (pct durable total);
-    note "volatile (external_ref): %d (%.0f%%)" volatile (pct volatile total);
     note "with claim_id: %d (%.0f%%)" with_id (pct with_id total);
     let idtbl = Hashtbl.create 256 in
     List.iter
@@ -384,7 +320,6 @@ let () =
      report_echo records ~top_n;
      report_per_keeper records;
      report_churn records;
-     report_near_dup records ~top_n;
      (match arg_value "--keepers-dir" Sys.argv with
       | Some kd -> report_composition (load_facts ~keepers_dir:kd)
       | None -> note "no --keepers-dir; fact composition skipped"));

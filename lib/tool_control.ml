@@ -29,17 +29,9 @@ type context = {
 
 (* Handlers *)
 
-(* RFC-0189 PR-1b: typed [Tool_result.result] success helper. Mirrors the
-   round-trip-safe [text_ok] pattern introduced in #18767 — if [body] is
-   itself a serialized JSON envelope, lift it back into the structured
-   [data] field. Plain text falls through as [`String body]. *)
+(* Plain-text success remains opaque. Typed producers pass [~data] directly. *)
 let text_ok ~tool_name ~start_time body : Tool_result.result =
-  let data =
-    match Tool_result.structured_payload_of_message body with
-    | Some json -> json
-    | None -> `String body
-  in
-  Tool_result.make_ok ~tool_name ~start_time ~data ()
+  Tool_result.ok ~tool_name ~start_time body
 ;;
 
 let handle_pause ~tool_name ~start_time ctx args : Tool_result.result =
@@ -143,7 +135,7 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
                 "Server is initializing; pause state is not available yet" );
           ]
   in
-  text_ok ~tool_name ~start_time (Yojson.Safe.to_string payload)
+  Tool_result.make_ok ~tool_name ~start_time ~data:payload ()
 ;;
 
 (* Schemas are generated from the RFC-0057 specs and projected through

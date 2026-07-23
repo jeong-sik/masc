@@ -206,16 +206,9 @@ env \
   -u MASC_PERSONAS_DIR \
   -u MASC_HOST \
   -u MASC_PORT \
-  -u MASC_FULL_SURFACE \
   -u MASC_PUBLIC_TOOLS_EXTRA \
   bash "$RUN_LOCAL_SCRIPT" --target-dir "$BASE_PATH" --host 127.0.0.1 --port "$PORT" \
   --bootstrap-only >"$LOG_FILE" 2>&1
-
-[[ -f "${BASE_PATH}/.masc/config/tool_policy.toml" ]] || {
-  echo "FAIL: run-local bootstrap did not materialize tool_policy.toml under ${BASE_PATH}/.masc/config" >&2
-  harness_print_log_tail "$LOG_FILE"
-  exit 1
-}
 
 (
   env \
@@ -224,7 +217,6 @@ env \
     -u MASC_PERSONAS_DIR \
     -u MASC_HOST \
     -u MASC_PORT \
-    -u MASC_FULL_SURFACE \
     -u MASC_PUBLIC_TOOLS_EXTRA \
     MASC_KEEPER_BOOTSTRAP_ENABLED=0 \
     bash "$RUN_LOCAL_SCRIPT" --target-dir "$BASE_PATH" --host 127.0.0.1 --port "$PORT"

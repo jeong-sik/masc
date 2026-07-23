@@ -127,6 +127,11 @@ type append_once_result =
   | Appended of { row_id : string }
   | Already_present of { row_id : string }
 
+type user_row_origin =
+  | Needs_append
+  | Already_persisted of { row_id : string }
+  | Already_persisted_upstream
+
 let stream_lifecycle_event_to_label = function
   | Run_started -> "RUN_STARTED"
   | Text_message_start -> "TEXT_MESSAGE_START"
@@ -196,6 +201,7 @@ type chat_message = {
          [surface] field.  [None] on rows written before P5. *)
   conversation_id : string option;
   external_message_id : string option;
+  workspace_id : string option;
   speaker : speaker option;
   audio : audio_clip option;
   blocks : Keeper_chat_blocks.chat_block list option;
@@ -512,7 +518,8 @@ let legacy_message_id ~ts ~content =
     (String.sub (Digest.to_hex (Digest.string content)) 0 12)
 
 let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_call_id
-    ?tool_call_name ?surface ?conversation_id ?external_message_id ?speaker
+    ?tool_call_name ?surface ?conversation_id ?external_message_id ?workspace_id
+    ?speaker
     ?audio ?blocks ?(mentions = []) ?(kind = Row_kind.Utterance) ?turn_ref
     ?stream_lifecycle ?delivery_key ?transcript_slot ()
     : string =
@@ -594,6 +601,7 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
     @ surface_field
     @ opt_string_field "conversation_id" conversation_id
     @ opt_string_field "external_message_id" external_message_id
+    @ opt_string_field "workspace_id" workspace_id
     @ speaker_fields speaker
     @ audio_fields audio
     @ blocks_fields blocks
@@ -948,6 +956,7 @@ let append_user_message_once
       ?surface
       ?conversation_id
       ?external_message_id
+      ?workspace_id
       ?speaker
       ?(extra_mentions = [])
       ()
@@ -972,6 +981,7 @@ let append_user_message_once
         ?surface
         ?conversation_id
         ?external_message_id
+        ?workspace_id
         ?speaker
         ~mentions:(user_line_mentions ~extra_mentions content)
         ~delivery_key
@@ -1029,6 +1039,7 @@ let parse_line ~file_path (line : string) : chat_message option =
     in
     let conversation_id = opt_string "conversation_id" in
     let external_message_id = opt_string "external_message_id" in
+    let workspace_id = opt_string "workspace_id" in
     let speaker =
       let speaker_id = opt_string "speaker_id" in
       let speaker_name = opt_string "speaker_name" in
@@ -1234,7 +1245,8 @@ let parse_line ~file_path (line : string) : chat_message option =
           in
           Some
             { id; role; content; ts; attachments; tool_call_id; tool_call_name;
-              source; surface; conversation_id; external_message_id; speaker;
+              source; surface; conversation_id; external_message_id;
+              workspace_id; speaker;
               audio; blocks; mentions; kind; turn_ref; stream_lifecycle }
   with Yojson.Json_error detail ->
     report_persistence_read_drop
@@ -1400,6 +1412,26 @@ let load_page ~base_dir ~keeper_name ?before () : page =
 let load ~base_dir ~keeper_name : chat_message list =
   (load_page ~base_dir ~keeper_name ()).messages
 
+let load_all ~base_dir ~keeper_name : chat_message list =
+  let path = chat_path ~base_dir ~keeper_name in
+  if not (Sys.file_exists path) then []
+  else
+    match Safe_ops.read_file_safe path with
+    | Error detail ->
+      report_persistence_read_drop
+        ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
+        ~path
+        ~detail;
+      []
+    | Ok contents ->
+      let redaction = redaction_for ~base_dir ~keeper_name in
+      contents
+      |> String.split_on_char '\n'
+      |> List.filter_map (fun line ->
+        let trimmed = String.trim line in
+        if trimmed = "" then None else parse_line ~file_path:path trimmed)
+      |> List.map (redact_message redaction)
+
 (* RFC-0235 P3: the history endpoint can tell the dashboard that a clip
    has been reaped by checking the same audio directory the synthesis side
    writes to. This keeps the TTL reaper simple while avoiding a broken
@@ -1551,6 +1583,7 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
                  | Some s -> [ ("surface", Surface_ref.to_json s) ])
               @ opt_string_field "conversation_id" m.conversation_id
               @ opt_string_field "external_message_id" m.external_message_id
+              @ opt_string_field "workspace_id" m.workspace_id
               @ speaker_fields m.speaker
               @ (match m.attachments with
                  | None | Some [] -> []

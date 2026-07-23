@@ -237,7 +237,6 @@ const STATE_DESCRIPTIONS: Record<string, string> = {
   // KDP (Decision Pipeline)
   undecided: '아직 결정 없음 — 턴 시작 대기 중',
   guard_ok: '모든 safety guard 통과, 도구 실행으로 진행',
-  gate_rejected: 'safety gate 가 행동 차단 (비용, deny list 등)',
   tool_policy_selected: '도구 목록 적용됨, 도구 필터링 완료',
   // KCL (Runtime)
   selecting: 'runtime 목록에서 최적 provider 선택 중',
@@ -259,7 +258,6 @@ const STATE_DESCRIPTIONS: Record<string, string> = {
   crashed: 'crash 후 재시작 또는 조사 필요',
   restarting: 'supervisor 재시작 흐름 활성',
   dead: '재시작 예산 소진',
-  zombie: 'terminal failure latched — 운영자 개입 필요',
 }
 
 export function HeroPhase({

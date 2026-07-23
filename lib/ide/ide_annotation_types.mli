@@ -9,6 +9,16 @@ type annotation_kind =
 val annotation_kind_to_string : annotation_kind -> string
 val annotation_kind_of_string : string -> annotation_kind option
 
+type annotation_reference = Agent_observation.annotation_reference =
+  { relation : string
+  ; reference : string
+  }
+
+val annotation_references_to_json : annotation_reference list -> Yojson.Safe.t
+
+val annotation_references_of_json :
+  Yojson.Safe.t -> (annotation_reference list, string) result
+
 type annotation =
   { id : string
   ; file_path : string
@@ -19,14 +29,7 @@ type annotation =
   ; content : string
   ; goal_id : string option
   ; task_id : string option
-  ; board_post_id : string option
-  ; comment_id : string option
-  ; pr_id : string option
-  ; git_ref : string option
-  ; log_id : string option
-  ; session_id : string option
-  ; operation_id : string option
-  ; worker_run_id : string option
+  ; references : annotation_reference list
   ; created_at_ms : int64
   ; updated_at_ms : int64
   }

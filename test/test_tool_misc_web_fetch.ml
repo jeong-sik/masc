@@ -102,12 +102,12 @@ let test_plain_text_preserves_angle_brackets () =
       check bool "literal brackets preserved" true
         (contains_substring text "<literal>"))
 
-let test_redirect_block_is_workflow_rejection () =
+let test_invalid_redirect_is_workflow_rejection () =
   Masc.Tool_misc_web_fetch.with_http_fetch_for_test
     (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ _url ->
       Error
-        (Masc.Tool_misc_web_fetch.Redirect_blocked
-           "target host is blocked: localhost is not allowed"))
+        (Masc.Tool_misc_web_fetch.Invalid_redirect
+           "redirect target must be a valid http or https URL"))
     (fun () ->
       let result = handle "https://example.com/redirects-local" in
       check bool "failed" false (Tool_result.is_success result);
@@ -118,7 +118,7 @@ let test_redirect_block_is_workflow_rejection () =
         (Tool_result.failure_class result
         |> Option.map Tool_result.tool_failure_class_to_string);
       check bool "message" true
-        (contains_substring (Tool_result.message result) "redirect blocked"))
+        (contains_substring (Tool_result.message result) "invalid redirect"))
 
 let () =
   run "tool_misc_web_fetch"
@@ -129,7 +129,7 @@ let () =
             test_html_metadata_and_article_extraction;
           test_case "plain text preserves angle brackets" `Quick
             test_plain_text_preserves_angle_brackets;
-          test_case "redirect block class" `Quick
-            test_redirect_block_is_workflow_rejection;
+          test_case "invalid redirect class" `Quick
+            test_invalid_redirect_is_workflow_rejection;
         ] );
     ]

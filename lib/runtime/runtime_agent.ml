@@ -62,77 +62,58 @@ let transport_error_kind_of_exception = function
 type stop_reason =
   Runtime_agent_context.stop_reason =
   | Completed
-  | TurnBudgetExhausted of { turns_used : int; limit : int }
-  | MutationBoundaryReached of { turns_used : int; tool_name : string option }
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
   | InputRequired of {
       turns_used : int;
       request : Agent_sdk.Error.input_required;
     }
-  | ToolFailureRecoveryDeferred of {
-      turns_used : int;
-      reason : string;
-      tool_names : string list;
-    }
+
+type cooperative_yield_reason =
+  | Chat_waiting
+  | Durable_stimulus_waiting
+
+type cooperative_yield_decision =
+  | Continue
+  | Yield of cooperative_yield_reason
+
+type cooperative_yield_probe =
+  Agent_sdk.Agent.Advanced.tool_boundary ->
+  (cooperative_yield_decision, Agent_sdk.Error.sdk_error) result
 
 type config =
   Runtime_agent_context.config = {
   name : string;
   provider_cfg : Llm_provider.Provider_config.t;
-  provider : Agent_sdk.Provider.config;
   model_id : string;
-  priority : Llm_provider.Request_priority.t option;
   system_prompt : string;
   tools : Agent_sdk.Tool.t list;
-  runtime_mcp_policy :
-    Llm_provider.Llm_transport.runtime_mcp_policy option;
-  max_turns : int;
-  max_idle_turns : int;
   stream_idle_timeout_s : float option;
-  max_execution_time_s : float option;
   body_timeout_s : float option;
   max_tokens : int option;
-  temperature : float;
+  temperature : float option;
   hooks : Agent_sdk.Hooks.hooks option;
-  context_reducer : Agent_sdk.Context_reducer.t option;
-  guardrails : Agent_sdk.Guardrails.t option;
   event_bus : Agent_sdk.Event_bus.t option;
-  checkpoint_dir : string option;
   session_id : string option;
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
+  model_input_projection
+      : (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) option;
   raw_trace : Agent_sdk.Raw_trace.t option;
   trace_link : (string * string) option;
   enable_thinking : bool option;
   preserve_thinking : bool option;
   transport : Masc_grpc_transport.t;
-  allowed_paths : string list;
   checkpoint_sidecar : Yojson.Safe.t option;
   cache_system_prompt : bool;
   yield_on_tool : bool;
-  tool_failure_judge : Agent_sdk.Tool_failure_recovery.judge option;
-  compact_ratio : float option;
-  context_window_tokens : int option;
-  oas_auto_context_overflow_retry : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
-  approval : Agent_sdk.Hooks.approval_callback option;
-  exit_condition : (int -> bool) option;
-  exit_condition_result : (int -> stop_reason * string option) option;
-  summarizer : (Agent_sdk.Types.message list -> string) option;
-      (** Custom summarizer for OAS [Budget_strategy.reduce_for_budget]
-          Emergency-phase compaction. Defaults to OAS's extractive default. *)
-  execution_idle_timeout_s : float option;
   thinking_budget : int option;
   top_p : float option;
   top_k : int option;
   min_p : float option;
   on_run_complete : (bool -> unit) option;
-  disclosure_level : Agent_sdk.Tool.disclosure_level option;
-  disclosure_resolver
-      : (Agent_sdk.Types.tool_result list -> Agent_sdk.Tool.disclosure_level option) option;
-  tool_selector : Agent_sdk.Tool_selector.strategy option;
   checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
 }
 
@@ -157,17 +138,8 @@ type worker_lifecycle_classification =
 
 let worker_lifecycle_classification_of_result = function
   | Ok _ -> { event = "completed"; status = "completed"; error = None }
-  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _)) ->
-    { event = "completed"; status = "continuation_checkpoint"; error = None }
-  | Error
-      (Agent_sdk.Error.Agent (Agent_sdk.Error.ToolFailureRecoveryDeferred _)) ->
-    { event = "completed"; status = "tool_failure_recovery_deferred"; error = None }
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired _)) ->
     { event = "completed"; status = "input_required"; error = None }
-  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)) ->
-    { event = "failed"; status = "agent_execution_timeout"; error = None }
-  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _)) ->
-    { event = "failed"; status = "agent_idle_timeout"; error = None }
   | Error e ->
     { event = "failed"; status = "failed"; error = Some (Agent_sdk.Error.to_string e) }
 
@@ -202,168 +174,101 @@ let provider_caps_of_config =
 let provider_supports_inline_tools =
   Runtime_transport.provider_supports_inline_tools
 
-let provider_supports_runtime_mcp_lane =
-  Runtime_transport.provider_supports_runtime_mcp_lane
-
-let dedupe_preserve_order =
-  Runtime_transport.dedupe_preserve_order
-
-let public_mcp_tool_names_of_oas_tools =
-  Runtime_transport.public_mcp_tool_names_of_oas_tools
-
-let public_mcp_tool_requires_bound_actor =
-  Runtime_transport.public_mcp_tool_requires_bound_actor
-
-let runtime_mcp_tool_requires_bound_actor =
-  Runtime_transport.runtime_mcp_tool_requires_bound_actor
-
-let runtime_mcp_policy_with_masc_agent_name =
-  Runtime_transport.runtime_mcp_policy_with_masc_agent_name
-
-let codex_cli_can_auth_keeper_bound_runtime_mcp =
-  Runtime_transport.codex_cli_can_auth_keeper_bound_runtime_mcp
-
-let runtime_mcp_policy_for_provider =
-  Runtime_transport.runtime_mcp_policy_for_provider
-
-let public_mcp_tools_of_oas_tools =
-  Runtime_transport.public_mcp_tools_of_oas_tools
-
-let tool_names_are_public_mcp =
-  Runtime_transport.tool_names_are_public_mcp
-
-let public_mcp_runtime_policy_of_tool_names =
-  Runtime_transport.public_mcp_runtime_policy_of_tool_names
-
-let runtime_mcp_policy_of_tool_names =
-  Runtime_transport.runtime_mcp_policy_of_tool_names
-
 let provider_label =
   Runtime_transport.provider_label
 
-let resolve_tool_lane_for_oas_tools =
-  Runtime_transport.resolve_tool_lane_for_oas_tools
-
-let request_runtime_fields_on_base_config
-    ~(base : Llm_provider.Provider_config.t)
-    (req_config : Llm_provider.Provider_config.t)
-  =
-  let request_option_or_base req base =
-    match req with
-    | Some _ as value -> value
-    | None -> base
-  in
-  let response_format, output_schema =
-    match req_config.response_format, req_config.output_schema with
-    | Agent_sdk.Types.Off, None -> base.response_format, base.output_schema
-    | _, Some schema ->
-      let response_format = Agent_sdk.Types.JsonSchema schema in
-      ( response_format
-      , Llm_provider.Provider_config.output_schema_of_response_format response_format )
-    | Agent_sdk.Types.JsonMode, None -> Agent_sdk.Types.JsonMode, None
-    | Agent_sdk.Types.JsonSchema schema, None ->
-      let response_format = Agent_sdk.Types.JsonSchema schema in
-      ( response_format
-      , Llm_provider.Provider_config.output_schema_of_response_format response_format )
-  in
-  { base with
-    max_tokens = req_config.max_tokens;
-    temperature = req_config.temperature;
-    top_p = request_option_or_base req_config.top_p base.top_p;
-    top_k = request_option_or_base req_config.top_k base.top_k;
-    min_p = request_option_or_base req_config.min_p base.min_p;
-    system_prompt = req_config.system_prompt;
-    enable_thinking = req_config.enable_thinking;
-    preserve_thinking = req_config.preserve_thinking;
-    thinking_budget = req_config.thinking_budget;
-    clear_thinking = req_config.clear_thinking;
-    tool_stream = req_config.tool_stream;
-    tool_choice = req_config.tool_choice;
-    disable_parallel_tool_use = req_config.disable_parallel_tool_use;
-    (* structured output 계약은 [supports_tool_choice_override]와 같은
-       "요청이 의견을 낼 때만 요청 우선" 병합이다. OAS Agent의 요청 config는
-       [Agent_sdk.Provider.config](라우팅 삼중항)에서 파생되어 schema 필드를
-       구조적으로 운반할 수 없으므로 언제나 [Off]/[None]으로 도착한다 — 이를
-       무조건 복사하면 base(빌드 시 validate까지 통과한 schema-carrying config)의
-       계약이 와이어 직전에 조용히 증발한다. 실제로 #22768 이후 fusion judge/panel,
-       verifier, dashboard judge 등 모든 Keeper_structured_output_schema 소비자의
-       native schema가 HTTP body에 실린 적이 없었다 (2026-07-02 hop-by-hop 추적,
-       masc#23003 후속). [Off]/[None] = 무의견 → base 유지; 요청이 명시하면 요청 우선. *)
-    response_format;
-    output_schema;
-    cache_system_prompt = req_config.cache_system_prompt;
-    supports_tool_choice_override =
-      (match req_config.supports_tool_choice_override with
-       | Some _ as override -> override
-       | None -> base.supports_tool_choice_override);
-    seed = req_config.seed;
-  }
-
-let provider_resource_slot_transport
+let provider_resource_observation_transport
     ~(kind : Fd_accountant.kind)
     (transport : Llm_provider.Llm_transport.t)
   : Llm_provider.Llm_transport.t =
   { complete_sync =
       (fun req ->
-        Fd_accountant.with_slot ~kind (fun () ->
+        Fd_accountant.observe ~kind (fun () ->
           transport.complete_sync req));
     complete_stream =
       (fun ?on_telemetry ~on_event req ->
-        Fd_accountant.with_slot ~kind (fun () ->
+        Fd_accountant.observe ~kind (fun () ->
           transport.complete_stream ?on_telemetry ~on_event req));
   }
 
-let provider_http_slot_transport transport =
-  provider_resource_slot_transport ~kind:Provider_http transport
+let provider_http_observation_transport transport =
+  provider_resource_observation_transport ~kind:Provider_http transport
 
-let provider_config_preserving_http_transport
+let observed_http_transport
     ~sw
     ~net
     ?clock
-    ?stream_idle_timeout_s
     ?body_timeout_s
-    ~(provider_cfg : Llm_provider.Provider_config.t)
+    ?model_input_projection
     ()
   : Llm_provider.Llm_transport.t =
+  (* RFC-OAS-026: stream_idle_timeout_s moved off transport construction
+     (OAS 0.211.10 "remove implicit execution limits") and is now applied at
+     the agent builder via [Agent_sdk.Builder.with_stream_idle_timeout]. The
+     transport itself carries no idle deadline; OAS does not infer one. *)
   let http_transport =
+    (* OAS owns stream-idle liveness on
+       [Llm_transport.completion_request.stream_idle_timeout_s]. The exact
+       typed provider request reaches this transport unchanged. *)
     Llm_provider.Complete.make_http_transport
       ?clock
-      ?stream_idle_timeout_s
       ?body_timeout_s
       ~sw
       ~net
       ()
   in
-  let patch_request (req : Llm_provider.Llm_transport.completion_request) =
-    { req with
-      config =
-        request_runtime_fields_on_base_config ~base:provider_cfg req.config;
-    }
+  let project_request
+      (request : Llm_provider.Llm_transport.completion_request)
+    =
+    let messages =
+      match model_input_projection with
+      | None -> request.messages
+      | Some project -> project request.messages
+    in
+    { request with messages }
   in
-  provider_http_slot_transport
+  provider_http_observation_transport
     { complete_sync =
       (fun req ->
         (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
            per turn for each provider. Removed at Phase 0 closeout. *)
         Log.Misc.debug
           "rfc0095-trace: runtime_runner http_transport.complete_sync invoked";
-        http_transport.complete_sync (patch_request req));
+        http_transport.complete_sync (project_request req));
       complete_stream =
       (fun ?on_telemetry ~on_event req ->
         (* RFC-0095 Phase 0 diagnostic trace — verify which transport path is invoked
            per turn for each provider. Removed at Phase 0 closeout. *)
         Log.Misc.debug
           "rfc0095-trace: runtime_runner http_transport.complete_stream invoked";
-        http_transport.complete_stream ?on_telemetry ~on_event
-          (patch_request req));
+        http_transport.complete_stream
+          ?on_telemetry
+          ~on_event
+          (project_request req));
     }
 
-let transport_for_provider ~sw ~net ?clock ?stream_idle_timeout_s ?body_timeout_s ~provider_cfg () =
+let transport_for_provider
+    ~sw
+    ~net
+    ?clock
+    ?body_timeout_s
+    ?model_input_projection
+    ()
+  =
   (* CLI subprocess transport removed (2026-05-31); every provider dispatches
      over HTTP. Runtime MCP policy is applied via the tool-lane resolver and
      per-request patching, not at transport construction, so it is no longer
-     threaded here. *)
-  Ok (Some (provider_config_preserving_http_transport ~sw ~net ?clock ?stream_idle_timeout_s ?body_timeout_s ~provider_cfg ()))
+     threaded here. stream_idle_timeout_s is applied at the builder, not here
+     (see RFC-OAS-026 note above). *)
+  Ok
+    (Some
+       (observed_http_transport
+          ~sw
+          ~net
+          ?clock
+          ?body_timeout_s
+          ?model_input_projection
+          ()))
 
 let runtime_id_of_config (config : config) =
   let runtime_prefix = "runtime:" in
@@ -547,12 +452,41 @@ let supported_modalities_of_capabilities
   @ (if caps.supports_multimodal_inputs then [ "document" ] else [])
   @ (if caps.supports_audio_input then [ "audio" ] else [])
 
+(* The modality a content block demands of a runtime. The producers
+   ([block_required_modality], [required_modalities_of_content_blocks]) match
+   exhaustively over [content_block], so the set is closed — it travels as a
+   string only because the capability count list and the public
+   [strip_unsupported_modality_blocks] surface are keyed by string. Parsing it
+   back here keeps the decision below exhaustive: the catch-all lives at the
+   parse boundary, not in the capability logic. *)
+type required_modality =
+  | Modality_text
+  | Modality_image
+  | Modality_document
+  | Modality_audio
+
+let required_modality_of_string = function
+  | "text" -> Some Modality_text
+  | "image" -> Some Modality_image
+  | "document" -> Some Modality_document
+  | "audio" -> Some Modality_audio
+  | _ -> None
+
+(* An unrecognised modality reports unsupported rather than supported. The
+   previous [_ -> true] was the permissive-default shape: a string the
+   producers never emit could only arrive through producer/consumer drift, and
+   answering "supported" would send a block the runtime cannot handle to the
+   provider. Answering "unsupported" routes it into the media reroute and
+   degrade paths that already exist, so the drift is visible. Unreachable
+   today — every producer emits one of the four above. *)
 let supports_required_modality
-    (caps : Llm_provider.Capabilities.capabilities) = function
-  | "image" -> caps.supports_image_input
-  | "document" -> caps.supports_multimodal_inputs
-  | "audio" -> caps.supports_audio_input
-  | _ -> true
+    (caps : Llm_provider.Capabilities.capabilities) modality =
+  match required_modality_of_string modality with
+  | Some Modality_text -> true
+  | Some Modality_image -> caps.supports_image_input
+  | Some Modality_document -> caps.supports_multimodal_inputs
+  | Some Modality_audio -> caps.supports_audio_input
+  | None -> false
 
 let supported_non_text_capability_count
     (caps : Llm_provider.Capabilities.capabilities) =
@@ -767,37 +701,6 @@ let input_capabilities_of_runtime (rt : Runtime.t) =
     (Option.value rt.Runtime.model.capabilities
        ~default:Runtime_schema.model_capabilities_default)
 
-(* Ordered (runtime_id, input_caps) reroute candidates: [\[runtime\].media_failover]
-   order first (validated at load to resolve), then the remaining configured
-   runtimes in declaration order, excluding [exclude] (the assigned runtime).
-   Deterministic — no provider liveness (RFC-0260 deferred). *)
-let media_reroute_candidates ~(exclude : string) :
-    (string * Llm_provider.Capabilities.capabilities) list =
-  let all = Runtime.get_runtimes () in
-  let failover = Runtime.media_failover () in
-  let by_id id =
-    List.find_opt (fun (r : Runtime.t) -> String.equal r.Runtime.id id) all
-  in
-  let from_failover = List.filter_map by_id failover in
-  let rest =
-    List.filter (fun (r : Runtime.t) -> not (List.mem r.Runtime.id failover)) all
-  in
-  from_failover @ rest
-  |> List.filter (fun (r : Runtime.t) -> not (String.equal r.Runtime.id exclude))
-  |> List.map (fun (r : Runtime.t) ->
-       (r.Runtime.id, input_capabilities_of_runtime r))
-
-(* First configured runtime that admits [modality] as input, in media_failover
-   order then declaration order. Reuses the RFC-0265 candidate ordering and the
-   single admit predicate ([caps_admit_required_modalities]), so the pick is
-   exactly a runtime the dispatch capability gate would accept (the SSOT
-   invariant above). [exclude:""] = consider every configured runtime. *)
-let first_media_capable_runtime ~(modality : string) : string option =
-  media_reroute_candidates ~exclude:""
-  |> List.find_opt (fun (_id, caps) ->
-       caps_admit_required_modalities caps [ modality ])
-  |> Option.map fst
-
 let validate_content_blocks_for_config
     ?oas_checkpoint
     ~(config : config)
@@ -845,21 +748,6 @@ let decide_modality_reroute
           }
     | None -> No_capable_runtime { required = required_modalities }
 
-(* Keeper-dispatch convenience (RFC-0265): gather candidates from the runtime
-   cache and decide a reroute for [assigned] given the active run view (prior
-   [initial_messages] plus current [blocks]). Pure [decide_modality_reroute] over
-   impure candidate gathering. *)
-let decide_modality_reroute_for_runtime ~(assigned : Runtime.t)
-    ?(checkpoint_messages = [])
-    ?(initial_messages = [])
-    (blocks : Agent_sdk.Types.content_block list) : reroute_decision =
-  decide_modality_reroute
-    ~assigned_caps:(input_capabilities_of_runtime assigned)
-    ~required_modalities:
-      (required_modalities_for_run_with_checkpoint ~checkpoint_messages ~initial_messages
-         ~goal_blocks:blocks)
-    ~candidates:(media_reroute_candidates ~exclude:assigned.Runtime.id)
-
 let decide_modality_reroute_for_runtime_candidates ~(assigned : Runtime.t)
     ~(candidates : Runtime.t list)
     ?(checkpoint_messages = [])
@@ -877,11 +765,13 @@ let decide_modality_reroute_for_runtime_candidates ~(assigned : Runtime.t)
        |> List.map (fun (runtime : Runtime.t) ->
          runtime.Runtime.id, input_capabilities_of_runtime runtime))
 
-module For_testing = struct
-  let request_runtime_fields_on_base_config =
-    request_runtime_fields_on_base_config
+let select_agent_result ~checkpoint ~resume ~build =
+  match checkpoint with
+  | Some checkpoint -> resume checkpoint
+  | None -> build ()
 
-  let provider_http_slot_transport = provider_http_slot_transport
+module For_testing = struct
+  let provider_http_observation_transport = provider_http_observation_transport
   let runtime_id_of_config = runtime_id_of_config
   let runtime_observation_for_completed_config =
     runtime_observation_for_completed_config
@@ -907,6 +797,7 @@ module For_testing = struct
     validate_content_blocks_against_capabilities
   let apply_runtime_model_input_capabilities =
     apply_runtime_model_input_capabilities
+  let select_agent_result = select_agent_result
 end
 
 (* ================================================================ *)
@@ -949,9 +840,6 @@ end
 (* Internal: checkpoint persistence                                  *)
 (* ================================================================ *)
 
-let persist_checkpoint =
-  Runtime_oas_checkpoint.persist_checkpoint
-
 let build_checkpoint =
   Runtime_oas_checkpoint.build_checkpoint
 
@@ -975,52 +863,26 @@ let build
          ~sw
          ~net
          ?clock
-         ?stream_idle_timeout_s:config.stream_idle_timeout_s
          ?body_timeout_s:config.body_timeout_s
-         ~provider_cfg:config.provider_cfg
+         ?model_input_projection:config.model_input_projection
          ()
      with
      | Error _ as e -> e
      | Ok transport ->
-      let builder =
-        Runtime_agent_context.builder_without_approval ~net ~config ?transport ()
-      in
-      let builder =
-        match config.approval with
-        | Some cb -> Agent_sdk.Builder.with_approval cb builder
-        | None -> builder
-      in
+      let builder = Runtime_agent_context.builder ~net ~config ?transport () in
       Agent_sdk.Builder.build_safe builder)
-
-(* ================================================================ *)
-(* Idle-detail enrichment                                           *)
-(* ================================================================ *)
-
-(** Enrich an [Agent_sdk.Error.to_string] detail with the name of the most
-    recently called tool when the error is an "Idle detected" failure.
-    For all other error strings the input is returned unchanged.
-
-    Exposed at module level so it can be unit-tested independently of
-    the network-bound [run] function. *)
-let enrich_idle_detail =
-  Runtime_oas_checkpoint.enrich_idle_detail
 
 let run_duration_ms_since started_at =
   Float.max 0.0 ((Unix.gettimeofday () -. started_at) *. 1000.0)
 
 let dashboard_status_of_stop_reason = function
   | Completed -> Dashboard_oas_bridge.Success
-  | TurnBudgetExhausted _ -> Dashboard_oas_bridge.Error { transient = false }
-  | MutationBoundaryReached _ ->
-      Dashboard_oas_bridge.Cancelled { reason = "mutation_boundary_reached" }
   | Yielded_to_chat_waiting _ ->
       Dashboard_oas_bridge.Cancelled { reason = "yielded_to_chat_waiting" }
   | Yielded_to_durable_stimulus _ ->
       Dashboard_oas_bridge.Cancelled { reason = "yielded_to_durable_stimulus" }
   | InputRequired _ ->
       Dashboard_oas_bridge.Cancelled { reason = "input_required" }
-  | ToolFailureRecoveryDeferred _ ->
-      Dashboard_oas_bridge.Cancelled { reason = "tool_failure_recovery_deferred" }
 
 let record_dashboard_oas_response ~config ~total_duration_ms ?serialization_ms
     ~status (response : Agent_sdk.Types.api_response) =
@@ -1059,15 +921,14 @@ let close_agent_for_cleanup ?(propagate_cancel = true) ~config agent =
 
     The checkpoint provides: messages, turn_count, usage_stats.
     The MASC config provides: provider, model_id, system_prompt,
-    temperature, tools, hooks, guardrails, etc.
+    temperature, tools, hooks, etc.
 
     @boundary-contract
     - MASC owns: per-turn config selection (model, temperature, tools,
       system_prompt), checkpoint field patching to align MASC intent with
       OAS resume semantics.
-    - OAS owns: cumulative token/cost telemetry, turn_count tracking,
-      Agent.resume state restoration, loop guard enforcement (max_turns,
-      idle).
+    - OAS owns: cumulative token/cost telemetry, turn_count tracking, and
+      Agent.resume state restoration.
     - OAS no longer enforces cost or cumulative-token budgets; cost is
       observe-only telemetry. *)
 let resume_from_checkpoint
@@ -1084,9 +945,8 @@ let resume_from_checkpoint
          ~sw
          ~net
          ?clock
-         ?stream_idle_timeout_s:config.stream_idle_timeout_s
          ?body_timeout_s:config.body_timeout_s
-         ~provider_cfg:config.provider_cfg
+         ?model_input_projection:config.model_input_projection
          ()
      with
      | Error _ as e -> e
@@ -1101,9 +961,10 @@ let resume_from_checkpoint
       Ok
         (Agent_sdk.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
            ~tools:config.tools ?context:config.context
+           ~provider_config:config.provider_cfg
+           ~context_fit_admission:prepared_resume.context_fit_admission
            ~options ~config:prepared_resume.agent_config
-           ?tool_failure_judge:config.tool_failure_judge
-           ~auto_context_overflow_retry:config.oas_auto_context_overflow_retry
+           ?checkpoint_sink:config.checkpoint_sink
            ()))
 
 (* ================================================================ *)
@@ -1147,6 +1008,29 @@ let content_blocks_detail (blocks : Agent_sdk.Types.content_block list) =
   |> String.concat "\n"
   |> String.trim
 
+let config_with_boundary_response_capture
+      (config : config)
+      response_ref
+  =
+  let capture =
+    { Agent_sdk.Hooks.empty with
+      after_turn =
+        Some
+          (function
+            | Agent_sdk.Hooks.AfterTurn { response; _ } ->
+              response_ref := Some response;
+              Agent_sdk.Hooks.Continue
+            | _ -> Agent_sdk.Hooks.Continue)
+    }
+  in
+  let hooks =
+    match config.hooks with
+    | None -> capture
+    | Some hooks -> Agent_sdk.Hooks.compose ~outer:hooks ~inner:capture
+  in
+  { config with hooks = Some hooks }
+;;
+
 let run_blocks
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
@@ -1156,6 +1040,7 @@ let run_blocks
     ?(on_yield : (unit -> unit) option)
     ?(on_resume : (unit -> unit) option)
     ?(agent_ref : Agent_sdk.Agent.t option ref option)
+    ?cooperative_yield_probe
     ?goal_detail
     (goal_blocks : Agent_sdk.Types.content_block list)
   : (run_result, Agent_sdk.Error.sdk_error) result =
@@ -1167,6 +1052,12 @@ let run_blocks
   with
   | Error _ as err -> err
   | Ok () ->
+  let boundary_response = ref None in
+  let config =
+    match cooperative_yield_probe with
+    | None -> config
+    | Some _ -> config_with_boundary_response_capture config boundary_response
+  in
   let goal_detail =
     match goal_detail with
     | Some detail -> detail
@@ -1188,16 +1079,12 @@ let run_blocks
   publish_lifecycle ~name:config.name ~event:"build" ~detail:goal_detail
     ~attrs:(provider_lifecycle_attrs config)
     ();
-  let agent_result = match oas_checkpoint with
-    | Some checkpoint ->
-      (try resume_from_checkpoint ~sw ~net ~config ~checkpoint
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Log.Misc.warn "oas_worker %s: resume_from_checkpoint failed (%s), falling back to build"
-           config.name (Printexc.to_string exn);
-         build ~sw ~net ~config)
-    | None -> build ~sw ~net ~config
+  let agent_result =
+    select_agent_result
+      ~checkpoint:oas_checkpoint
+      ~resume:(fun checkpoint ->
+        resume_from_checkpoint ~sw ~net ~config ~checkpoint)
+      ~build:(fun () -> build ~sw ~net ~config)
   in
   match agent_result with
   | Error e ->
@@ -1214,11 +1101,6 @@ let run_blocks
   let run_started_at = Unix.gettimeofday () in
   (try
     let result =
-      (* Pass the process-level Eio clock when available so agent_sdk's
-         [with_optional_timeout] can fire on hang when the caller has
-         also set [config.max_execution_time_s]. Both inputs must be
-         [Some] for the timeout to engage; absent either, behaviour is
-         historical (block until provider closes). *)
       let clock =
         match Process_eio.get_clock () with
         | Ok c -> Some c
@@ -1232,30 +1114,123 @@ let run_blocks
           "masc.runtime_id", `String config.name;
         ]
         (fun _trace_id ->
-          match on_event with
-          | Some cb ->
-              Agent_sdk.Agent.run_stream_blocks ~sw ?clock ?on_yield ?on_resume
-                ~on_event:cb agent goal_blocks
-          | None ->
-              Agent_sdk.Agent.run_blocks ~sw ?clock ?on_yield ?on_resume agent
-                goal_blocks)
+          let boundary_probe =
+            match cooperative_yield_probe with
+            | None -> None
+            | Some probe ->
+              Some
+                (fun (boundary : Agent_sdk.Agent.Advanced.tool_boundary) ->
+                   Result.map
+                     (function
+                       | Continue -> None
+                       | Yield reason -> Some reason)
+                     (probe boundary))
+          in
+          match boundary_probe with
+            | None ->
+              (match on_event with
+               | Some cb ->
+                 Agent_sdk.Agent.run_stream_blocks
+                   ~sw
+                   ?clock
+                   ?on_yield
+                   ?on_resume
+                   ~on_event:cb
+                   agent
+                   goal_blocks
+               | None ->
+                 Agent_sdk.Agent.run_blocks
+                   ~sw
+                   ?clock
+                   ?on_yield
+                   ?on_resume
+                   agent
+                   goal_blocks)
+              |> Result.map (fun response -> `Completed response)
+            | Some probe ->
+              let probe_error = ref None in
+              let yield_decision = ref None in
+              let on_tool_boundary
+                    (boundary : Agent_sdk.Agent.Advanced.tool_boundary)
+                =
+                match probe boundary with
+                | Ok None -> Agent_sdk.Agent.Advanced.Continue
+                | Ok (Some decision) ->
+                  yield_decision := Some decision;
+                  Agent_sdk.Agent.Advanced.Yield
+                | Error error ->
+                  probe_error := Some error;
+                  Agent_sdk.Agent.Advanced.Yield
+              in
+              let api_strategy =
+                match on_event with
+                | None -> Agent_sdk.Agent.Sync
+                | Some on_event ->
+                  let on_telemetry =
+                    Option.map
+                      (fun bus ->
+                         Agent_sdk.Telemetry_bus.publish
+                           (Agent_sdk.Telemetry_bus.of_event_bus bus))
+                      (Agent_sdk.Agent.options agent).event_bus
+                  in
+                  Agent_sdk.Agent.Stream { on_event; on_telemetry }
+              in
+              let advanced_result =
+                Agent_sdk.Agent.Advanced.run_blocks
+                  ~sw
+                  ?clock
+                  ?on_yield
+                  ?on_resume
+                  ~api_strategy
+                  ~on_tool_boundary
+                  agent
+                  goal_blocks
+              in
+              (match !probe_error, advanced_result with
+               | Some error, _ -> Error error
+               | None, Error e -> Error e
+               | None, Ok (Agent_sdk.Agent.Advanced.Completed response) ->
+                 Ok (`Completed response)
+               | None, Ok (Agent_sdk.Agent.Advanced.Yielded yielded) ->
+                 (match !yield_decision, !boundary_response with
+                  | Some decision, Some response ->
+                    Ok (`Yielded (decision, yielded, response))
+                  | None, _ ->
+                    Error
+                      (Agent_sdk.Error.Internal
+                         "cooperative yield returned without a typed decision")
+                  | Some _, None ->
+                    Error
+                      (Agent_sdk.Error.Internal
+                         "cooperative yield returned without its provider response"))))
     in
     let run_total_duration_ms = run_duration_ms_since run_started_at in
     let checkpoint =
-      let ckpt =
-        build_checkpoint ~session_id
-          ?checkpoint_sidecar:config.checkpoint_sidecar agent
-      in
-      (match config.checkpoint_dir with
-       | Some dir ->
-         (match persist_checkpoint ~dir ~session_id ckpt with
-          | Ok () -> ()
-          | Error err ->
-            Log.Misc.error "oas_worker: %s" err)
-       | None -> ());
-      Some ckpt
+      match result with
+      | Ok (`Yielded (_, yielded, _)) ->
+        Some
+          { yielded.checkpoint with
+            Agent_sdk.Checkpoint.session_id
+          ; working_context =
+              (match config.checkpoint_sidecar with
+               | Some _ as sidecar -> sidecar
+               | None -> yielded.checkpoint.working_context)
+          }
+      | Ok (`Completed _) | Error _ ->
+        Some
+          (build_checkpoint
+             ~session_id
+             ?checkpoint_sidecar:config.checkpoint_sidecar
+             agent)
     in
-    let lifecycle = worker_lifecycle_classification_of_result result in
+    let lifecycle =
+      match result with
+      | Ok (`Completed response) ->
+        worker_lifecycle_classification_of_result (Ok response)
+      | Ok (`Yielded _) ->
+        { event = "completed"; status = "cooperative_yield"; error = None }
+      | Error error -> worker_lifecycle_classification_of_result (Error error)
+    in
     publish_lifecycle ~name:config.name ~event:lifecycle.event
       ~detail:(Printf.sprintf "session=%s" session_id)
       ?error:lifecycle.error
@@ -1280,7 +1255,7 @@ let run_blocks
       | None -> None
     in
     (match result with
-    | Ok response ->
+    | Ok (`Completed response) ->
       close_after_success ();
       record_dashboard_oas_response ~config
         ~total_duration_ms:run_total_duration_ms
@@ -1300,37 +1275,34 @@ let run_blocks
           runtime_observation = Some runtime_observation;
           stop_reason = Completed;
         }
-    | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded r)) ->
+    | Ok (`Yielded (decision, yielded, response)) ->
       close_after_success ();
-      let partial_response =
-        partial_response_of_stop
-          ~session_id
-          (* Display text only.  Checkpoint classification flows through
-             [stop_reason] → [Keeper_turn_outcome] (RFC-0232 P2); no
-             consumer may sniff this string. *)
-          ~text:
-            "Continuation checkpoint saved; keeper remains scheduled for the \
-             next cycle."
+      let stop_reason =
+        match decision with
+        | Chat_waiting ->
+          Yielded_to_chat_waiting { turns_used = yielded.turn }
+        | Durable_stimulus_waiting ->
+          Yielded_to_durable_stimulus { turns_used = yielded.turn }
       in
-      record_dashboard_oas_response ~config
+      record_dashboard_oas_response
+        ~config
         ~total_duration_ms:run_total_duration_ms
-        ~status:(dashboard_status_of_stop_reason
-                   (TurnBudgetExhausted { turns_used = r.turns; limit = r.limit }))
-        partial_response;
+        ~status:(dashboard_status_of_stop_reason stop_reason)
+        response;
       let runtime_observation =
         runtime_observation_for_completed_config
-          ~total_duration_ms:run_total_duration_ms config
+          ~total_duration_ms:run_total_duration_ms
+          config
       in
       Ok
-        {
-          response = partial_response;
-          checkpoint;
-          session_id;
-          turns;
-          trace_ref;
-          run_validation;
-          runtime_observation = Some runtime_observation;
-          stop_reason = TurnBudgetExhausted { turns_used = r.turns; limit = r.limit };
+        { response
+        ; checkpoint
+        ; session_id
+        ; turns = yielded.turn
+        ; trace_ref
+        ; run_validation
+        ; runtime_observation = Some runtime_observation
+        ; stop_reason
         }
     | Error
         (Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired request)) ->
@@ -1364,127 +1336,8 @@ let run_blocks
         ; runtime_observation = Some runtime_observation
         ; stop_reason
         }
-    | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet r)) -> (
-      match config.exit_condition_result with
-      | Some render ->
-        close_after_success ();
-        let stop_reason, response_text_opt = render r.turn in
-        let response_text =
-          match response_text_opt with
-          | Some text when String.trim text <> "" -> text
-          | _ -> Printf.sprintf "[exit condition met at turn %d]" r.turn
-        in
-        let partial_response =
-          partial_response_of_stop
-            ~session_id
-            ~text:response_text
-        in
-        record_dashboard_oas_response ~config
-          ~total_duration_ms:run_total_duration_ms
-          ~status:(dashboard_status_of_stop_reason stop_reason)
-          partial_response;
-        let runtime_observation =
-          runtime_observation_for_completed_config
-            ~total_duration_ms:run_total_duration_ms config
-        in
-        Ok
-          {
-            response = partial_response;
-            checkpoint;
-            session_id;
-            turns;
-            trace_ref;
-            run_validation;
-            runtime_observation = Some runtime_observation;
-            stop_reason;
-          }
-      | None ->
-        close_agent_for_cleanup ~propagate_cancel:false ~config agent;
-        Error (Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet r)))
-    | Error
-        (Agent_sdk.Error.Agent
-           (Agent_sdk.Error.ToolFailureRecoveryDeferred
-              { reason; tool_names })) ->
-      close_after_success ();
-      let stop_reason =
-        ToolFailureRecoveryDeferred { turns_used = turns; reason; tool_names }
-      in
-      let partial_response = partial_response_of_stop ~session_id ~text:"" in
-      record_dashboard_oas_response
-        ~config
-        ~total_duration_ms:run_total_duration_ms
-        ~status:(dashboard_status_of_stop_reason stop_reason)
-        partial_response;
-      Log.Misc.info
-        "oas_worker %s: typed tool-failure recovery deferred tools=%s \
-         reason_digest=%s"
-        config.name
-        (String.concat "," tool_names)
-        (Auth.sha256_hash reason);
-      let runtime_observation =
-        runtime_observation_for_completed_config
-          ~total_duration_ms:run_total_duration_ms
-          config
-      in
-      Ok
-        { response = partial_response
-        ; checkpoint
-        ; session_id
-        ; turns
-        ; trace_ref
-        ; run_validation
-        ; runtime_observation = Some runtime_observation
-        ; stop_reason
-        }
-    | Error
-        (Agent_sdk.Error.Agent
-           (Agent_sdk.Error.AgentExecutionTimeout r as agent_err)) ->
-      let partial_response =
-        partial_response_of_stop
-          ~session_id
-          ~text:
-            (Printf.sprintf
-               "[agent execution timeout: elapsed=%.1fs timeout=%.1fs turns=%d]"
-               r.elapsed_sec
-               r.timeout_sec
-               r.turn_count)
-      in
-      record_dashboard_oas_response
-        ~config
-        ~total_duration_ms:run_total_duration_ms
-        ~status:Dashboard_oas_bridge.Timeout
-        partial_response;
-      close_agent_for_cleanup ~propagate_cancel:false ~config agent;
-      Error (Agent_sdk.Error.Agent agent_err)
-    | Error
-        (Agent_sdk.Error.Agent
-           (Agent_sdk.Error.AgentExecutionIdleTimeout r as agent_err)) ->
-      (* No-progress (idle) timeout. Keeper runtime config may set
-         [execution_idle_timeout_s] to catch Agent-level stalls while leaving
-         healthy streaming runs alive. Treat it like a timeout for the
-         dashboard, preserving idle-specific fields/text. *)
-      let partial_response =
-        partial_response_of_stop
-          ~session_id
-          ~text:
-            (Printf.sprintf
-               "[agent idle timeout: idle=%.1fs timeout=%.1fs turns=%d]"
-               r.idle_sec
-               r.idle_timeout_sec
-               r.turn_count)
-      in
-      record_dashboard_oas_response
-        ~config
-        ~total_duration_ms:run_total_duration_ms
-        ~status:Dashboard_oas_bridge.Timeout
-        partial_response;
-      close_agent_for_cleanup ~propagate_cancel:false ~config agent;
-      Error (Agent_sdk.Error.Agent agent_err)
     | Error err ->
       let detail = Agent_sdk.Error.to_string err in
-      let detail =
-        enrich_idle_detail detail (Agent_sdk.Agent.state agent).messages
-      in
       let error_response =
         partial_response_of_stop ~session_id ~text:detail
       in
@@ -1537,10 +1390,11 @@ let run
     ?on_yield
     ?on_resume
     ?agent_ref
+    ?cooperative_yield_probe
     (goal : string)
   : (run_result, Agent_sdk.Error.sdk_error) result =
   run_blocks ~sw ~net ~config ?oas_checkpoint ?on_event ?on_yield ?on_resume
-    ?agent_ref ~goal_detail:goal [Agent_sdk.Types.Text goal]
+    ?agent_ref ?cooperative_yield_probe ~goal_detail:goal [Agent_sdk.Types.Text goal]
 
 (* ================================================================ *)
 (* Convenience: run_with_masc_tools                                  *)
@@ -1549,7 +1403,6 @@ let run
 let run_with_masc_tools
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
-    ~base_path
     ~(config : config)
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
@@ -1557,18 +1410,9 @@ let run_with_masc_tools
     ?on_yield
     ?on_resume
     (goal : string)
-	  : (run_result, Agent_sdk.Error.sdk_error) result =
-  match
-    public_mcp_runtime_policy_of_tool_names
-      ~base_path
-      (List.map (fun (td : Masc_domain.tool_schema) -> td.name) masc_tools)
-  with
-  | Some runtime_mcp_policy
-    when Provider_tool_support.provider_supports_runtime_mcp_policy
-           config.provider_cfg runtime_mcp_policy ->
-      let config = { config with runtime_mcp_policy = Some runtime_mcp_policy } in
-      run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal
-  | _ when masc_tools = [] ->
+  : (run_result, Agent_sdk.Error.sdk_error) result =
+  match masc_tools with
+  | [] ->
       run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal
   | _ when provider_supports_inline_tools config.provider_cfg ->
       (match !oas_tool_of_masc_hook with
@@ -1586,4 +1430,5 @@ let run_with_masc_tools
          in
          let config = { config with tools = oas_tools @ config.tools } in
          run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal)
-  | _ -> run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal
+  | _ ->
+    Error (invalid_runtime_config "tools" "provider lacks inline tool support")

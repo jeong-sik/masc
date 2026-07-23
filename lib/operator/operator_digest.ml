@@ -110,8 +110,7 @@ let keeper_attention_kind reason =
 let keeper_attention_severity ~reason ~runtime_blocker_class =
   match reason, runtime_blocker_class with
   | Some "runtime_blocked", _
-  | Some "provider_timeout", _
-  | Some "continue_gate_required", _ -> Sev_bad
+  | Some "provider_timeout", _ -> Sev_bad
   | _, Some _ -> Sev_bad
   | _ -> Sev_warn
 
@@ -329,7 +328,6 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
           ("judgment_owner", `String "fallback_read_model");
           ("authoritative_judgment_available", `Bool false);
           ("judgment", `Null);
-          ("operator_judge_runtime", operator_judge_runtime_json config);
           ("attention_items", `List []);
           ("attention_summary", summary_of_attention_items []);
           ("pending_confirm_summary", pending_confirm_summary_json_of_scope (pending_confirm_scope_of_entries ?actor []));
@@ -384,7 +382,6 @@ let digest_json ?actor ?target_type ?target_id:_target_id ?include_workers:_incl
               , `String Operator_action_constants.workspace_target_type );
               ("target_id", `Null);
               ("health", `String (health_from_attention_items attention_items));
-              ("operator_judge_runtime", operator_judge_runtime_json config);
               ("attention_items", `List (List.map attention_item_to_yojson attention_items));
               ("attention_summary", summary_of_attention_items attention_items);
               ("pending_confirm_summary", pending_confirm_summary_json_of_scope confirm_scope);

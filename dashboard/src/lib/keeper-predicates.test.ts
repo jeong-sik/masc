@@ -51,14 +51,14 @@ describe('isKeeperPaused — RFC-0135 PR-3 SSOT', () => {
 
 describe('isKeeperOffline', () => {
   it.each<[Keeper['phase']]>([
-    ['Offline'], ['Stopped'], ['Dead'], ['Crashed'], ['Zombie'],
+    ['Offline'], ['Stopped'], ['Dead'], ['Crashed'],
   ])('phase=%s ⇒ offline', (phase) => {
     expect(isKeeperOffline(k({ phase }))).toBe(true)
   })
   it('lifecycle_phase overrides stale phase for offline classification', () => {
     expect(isKeeperOffline(k({ lifecycle_phase: 'Offline', phase: 'Running' }))).toBe(true)
   })
-  it.each(['offline', 'stopped', 'dead', 'crashed', 'zombie'])('lowercase phase=%s ⇒ offline', (phase) => {
+  it.each(['offline', 'stopped', 'dead', 'crashed'])('lowercase phase=%s ⇒ offline', (phase) => {
     expect(isKeeperOffline({ phase })).toBe(true)
   })
   it.each([['offline'], ['inactive'], ['unbooted'], ['stopped']])('status=%s ⇒ offline', (status) => {
@@ -92,7 +92,7 @@ describe('isKeeperOperatorTargetable', () => {
 
 describe('isKeeperCrashed — audit A1 (2026-05-19)', () => {
   it.each<[Keeper['phase']]>([
-    ['Crashed'], ['Dead'], ['Zombie'],
+    ['Crashed'], ['Dead'],
   ])('phase=%s ⇒ crashed', (phase) => {
     expect(isKeeperCrashed(k({ phase }))).toBe(true)
   })
@@ -114,7 +114,7 @@ describe('isKeeperCrashed — audit A1 (2026-05-19)', () => {
 })
 
 describe('isCrashedPhase — SSE-safe casing checker', () => {
-  it.each(['Crashed', 'crashed', 'Dead', 'dead', 'Zombie', 'zombie'])(
+  it.each(['Crashed', 'crashed', 'Dead', 'dead'])(
     'phase=%s ⇒ crashed',
     (phase) => {
       expect(isCrashedPhase(phase)).toBe(true)
@@ -180,7 +180,7 @@ describe('isKeeperRunningExcludingRestarting — RFC-0135 PR-11', () => {
     expect(isKeeperRunningExcludingRestarting(k({ status: 'unknown', phase: 'Restarting' }))).toBe(false)
   })
   it.each([
-    ['Offline'], ['Stopped'], ['Crashed'], ['Dead'], ['Zombie'], ['Paused'],
+    ['Offline'], ['Stopped'], ['Crashed'], ['Dead'], ['Paused'],
   ])('phase=%s ⇒ NOT running', (phase) => {
     expect(isKeeperRunningExcludingRestarting(k({ status: 'unknown', phase: phase as Keeper['phase'] }))).toBe(false)
   })

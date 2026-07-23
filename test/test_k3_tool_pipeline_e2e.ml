@@ -113,7 +113,7 @@ let phase1_tool_surface_emits () =
 (* ── Phase 2: K1 wirein consumes ──────────────────────────────── *)
 let phase2_consumer wc =
   print_endline "── Phase 2: K1 wirein consumes ──";
-  let raws, wc_rest = Wirein.extract_raw_artifacts wc in
+  let raws, wc_rest = Result.get_ok (Wirein.extract_raw_artifacts wc) in
   assert_eq_int ~label:"extracted" 4 (List.length raws);
   (match wc_rest with
    | Some (`Assoc kv) ->

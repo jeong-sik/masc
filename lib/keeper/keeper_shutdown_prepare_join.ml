@@ -16,8 +16,6 @@ type error =
       ; actual : int
       }
   | Meta_snapshot_read_failed of string
-  | Stale_prune_meta_changed
-  | Stale_prune_lane_not_paused of Keeper_state_machine.phase
   | Task_discovery_failed of string
   | Prepare_persist_failed of Keeper_shutdown_store.error
   | Cancellation_failed of Keeper_shutdown_types.t
@@ -42,12 +40,6 @@ let error_to_string = function
       actual
   | Meta_snapshot_read_failed detail ->
     Printf.sprintf "Keeper shutdown metadata read failed: %s" detail
-  | Stale_prune_meta_changed ->
-    "stale paused Keeper metadata changed before durable prune prepare"
-  | Stale_prune_lane_not_paused phase ->
-    Printf.sprintf
-      "stale paused Keeper lane changed phase before durable prune prepare: expected paused, actual %s"
-      (Keeper_state_machine.phase_to_string phase)
   | Task_discovery_failed detail ->
     Printf.sprintf "Keeper shutdown task discovery failed: %s" detail
   | Prepare_persist_failed error -> Keeper_shutdown_store.error_to_string error
@@ -127,21 +119,6 @@ let validate_cleanup_reason reason (meta : Keeper_meta_contract.keeper_meta) =
   | Operator_stop_retain_meta
   | Operator_stop_remove_meta
   | Dead_tombstone_cleanup -> Ok ()
-  | Stale_paused_prune context ->
-    if not (Int.equal meta.meta_version context.meta_version)
-    then
-      Error
-        (Meta_snapshot_version_changed
-           { expected = context.meta_version; actual = meta.meta_version })
-    else if
-      meta.paused
-      && String.equal meta.updated_at context.last_updated
-      && Option.equal
-           Keeper_latched_reason.equal
-           meta.latched_reason
-           context.latched_reason
-    then Ok ()
-    else Error Stale_prune_meta_changed
   | Dashboard_keeper_purge context ->
     if Int.equal meta.meta_version context.meta_version
     then Ok ()
@@ -203,6 +180,8 @@ let lane_outcome = function
   | Keeper_lane.Completed -> Lane_completed
   | Keeper_lane.Shutdown_before_start -> Lane_shutdown_requested
   | Keeper_lane.Shutdown_requested -> Lane_shutdown_requested
+  | Keeper_lane.Shutdown_cancel_failed failure ->
+    Lane_failed (Printexc.to_string failure.cause)
   | Keeper_lane.Cancelled_by_parent exn ->
     Lane_cancelled_by_parent (Printexc.to_string exn)
   | Keeper_lane.Failed exn -> Lane_failed (Printexc.to_string exn)
@@ -230,74 +209,60 @@ let prepare ~config ~(entry : Keeper_registry.registry_entry) ~request =
         if not (Atomic.get durable_prepare_committed)
         then rollback_reservation ~config ~keeper_name:entry.name operation_id)
       (fun () ->
-    (match current_entry ~config entry with
-     | Error error -> Error error
-     | Ok current ->
-       let stale_prune_phase_error =
-         match request.cleanup_intent.reason, current.phase with
-         | Stale_paused_prune _, Keeper_state_machine.Paused -> None
-         | Stale_paused_prune _, phase -> Some (Stale_prune_lane_not_paused phase)
-         | ( Operator_stop_retain_meta
-           | Operator_stop_remove_meta
-           | Dead_tombstone_cleanup
-           | Dashboard_keeper_purge _ )
-           , _ -> None
-       in
-       (match stale_prune_phase_error with
-        | Some error -> Error error
-        | None ->
-       (match
-          read_guarded_meta
-            ~config
-            ~observed:current.meta
-            ~cleanup_reason:request.cleanup_intent.reason
-        with
-        | Error _ as error -> error
-        | Ok durable_meta ->
-          (match
-             Keeper_current_task_reconcile.owned_active_tasks_snapshot_for_meta_strict
-               ~config
-               ~meta:durable_meta
-           with
-           | Error detail -> Error (Task_discovery_failed detail)
-           | Ok owned_snapshot ->
-          let owned_tasks = owned_snapshot.tasks in
-          let now = Masc_domain.now_iso () in
-          let turn_disposition = active_turn_of_snapshots reservation current in
-          let operation =
-            { schema_version
-            ; revision = 0
-            ; operation_id
-            ; keeper_name = current.name
-            ; lane_ownership = Registered_lane (Keeper_lane.id current.lane)
-            ; trace_id = durable_meta.runtime.trace_id
-            ; generation = durable_meta.runtime.generation
-            ; actor = request.actor
-            ; cleanup_intent = request.cleanup_intent
-            ; turn_disposition
-            ; expected_backlog_version = owned_snapshot.backlog_version
-            ; owned_task_ids =
-                List.map
-                  (fun task -> task.Keeper_current_task_reconcile.task_id)
-                  owned_tasks
-            ; join_evidence = None
-            ; phase = Prepared
-            ; created_at = now
-            ; updated_at = now
-            }
-          in
-          let persist_result =
-            Eio.Cancel.protect (fun () ->
-              match Keeper_shutdown_store.persist_new ~config operation with
-              | Ok () as committed ->
-                Atomic.set durable_prepare_committed true;
-                committed
-              | Error _ as error -> error)
-          in
-          (match persist_result with
-           | Error store_error ->
-             Error (Prepare_persist_failed store_error)
-           | Ok () -> Ok operation))))))
+         match current_entry ~config entry with
+         | Error error -> Error error
+         | Ok current ->
+           (match
+              read_guarded_meta
+                ~config
+                ~observed:current.meta
+                ~cleanup_reason:request.cleanup_intent.reason
+            with
+            | Error _ as error -> error
+            | Ok durable_meta ->
+              (match
+                 Keeper_current_task_reconcile.owned_active_tasks_snapshot_for_meta_strict
+                   ~config
+                   ~meta:durable_meta
+               with
+               | Error detail -> Error (Task_discovery_failed detail)
+               | Ok owned_snapshot ->
+                 let owned_tasks = owned_snapshot.tasks in
+                 let now = Masc_domain.now_iso () in
+                 let turn_disposition = active_turn_of_snapshots reservation current in
+                 let operation =
+                   { schema_version
+                   ; revision = 0
+                   ; operation_id
+                   ; keeper_name = current.name
+                   ; lane_ownership = Registered_lane (Keeper_lane.id current.lane)
+                   ; trace_id = durable_meta.runtime.trace_id
+                   ; generation = durable_meta.runtime.generation
+                   ; actor = request.actor
+                   ; cleanup_intent = request.cleanup_intent
+                   ; turn_disposition
+                   ; expected_backlog_version = owned_snapshot.backlog_version
+                   ; owned_task_ids =
+                       List.map
+                         (fun task -> task.Keeper_current_task_reconcile.task_id)
+                         owned_tasks
+                   ; join_evidence = None
+                   ; phase = Prepared
+                   ; created_at = now
+                   ; updated_at = now
+                   }
+                 in
+                 let persist_result =
+                   Eio.Cancel.protect (fun () ->
+                     match Keeper_shutdown_store.persist_new ~config operation with
+                     | Ok () as committed ->
+                       Atomic.set durable_prepare_committed true;
+                       committed
+                     | Error _ as error -> error)
+                 in
+                 (match persist_result with
+                  | Error store_error -> Error (Prepare_persist_failed store_error)
+                  | Ok () -> Ok operation))))
 ;;
 
 let prepare_dormant
@@ -401,8 +366,15 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
      | Some detail -> cancellation_error ~config operation Turn_cancel detail
      | None ->
        (match Keeper_lane.request_cancel current.lane with
-        | Keeper_lane.Cancel_signal_failed exn ->
+        | Keeper_lane.Cancel_not_committed exn
+        | Keeper_lane.Cancel_committed_with_failure exn ->
           cancellation_error ~config operation Lane_cancel (Printexc.to_string exn)
+        | Keeper_lane.Cancel_wrong_domain ->
+          cancellation_error
+            ~config
+            operation
+            Lane_cancel
+            "lane cancellation requested from a non-owning domain"
         | Keeper_lane.Cancel_requested
         | Keeper_lane.Cancel_already_requested
         | Keeper_lane.Cancel_already_exiting ->
@@ -428,6 +400,7 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
                   detail)
            | Keeper_lane.Completed
            | Keeper_lane.Shutdown_requested
+           | Keeper_lane.Shutdown_cancel_failed _
            | Keeper_lane.Cancelled_by_parent _
            | Keeper_lane.Failed _ -> ());
           let terminal_result = Eio.Promise.await current.done_p in
@@ -437,11 +410,31 @@ let join_prepared ~config ~(entry : Keeper_registry.registry_entry) ~operation =
             ; cleanup_error = lane_exit.cleanup_error
             }
           in
-          let phase =
-            match operation.turn_disposition with
-            | No_inflight_turn -> Joined_idle
-            | Inflight_effect_unknown turn -> Reconciliation_required turn
-          in
+          (* [operation.turn_disposition] is an admission-time snapshot: it
+             records that a turn was in flight when the shutdown fence was
+             committed. By this point that turn has terminally ended in this
+             process — [await_idle_after_shutdown] returned (turn mutex
+             released), [await_exit] returned (lane fiber exited) and
+             [done_p] resolved — so the in-flight question the snapshot
+             raised is settled by the join itself. Deriving the phase from
+             the stale snapshot parked live keepers in
+             [Reconciliation_required], a phase with no exit transition
+             (#25491): the 2026-07-20/21 fleet wedge was created here with
+             join evidence already showing [Terminal_stopped]. The snapshot
+             stays on the operation as an audit record; the phase follows
+             the join evidence. [Reconciliation_required] remains reachable
+             only from boot recovery, where the owning process died before
+             the join could observe the lane exit. *)
+          (match operation.turn_disposition with
+           | No_inflight_turn -> ()
+           | Inflight_effect_unknown turn ->
+             Log.Keeper.info
+               "%s: shutdown join settled admission-time in-flight turn %s (lane exited, terminal resolved)"
+               current.name
+               (match turn.observed_turn_id with
+                | Some turn_id -> string_of_int turn_id
+                | None -> "id-unobserved"));
+          let phase = Joined_idle in
           let joined =
             { operation with
               revision = operation.revision + 1

@@ -5,37 +5,6 @@
 
     @since 2.260.0 *)
 
-(** Classify a failed tool call output string into an error category.
-    Strips known prefixes ("error: ", "tool_error: ") before JSON parsing
-    so prefixed outputs like ["error: {\"ok\":false,\"error\":\"msg\"}"]
-    yield the actual error key instead of "parse_error". *)
-let normalize_failure_text (text : string) : string =
-  let trimmed = String.trim text in
-  let lowered = String.lowercase_ascii trimmed in
-  let prefix_rules =
-    [
-      ("path_not_in_allowed_paths:", "path_not_in_allowed_paths");
-      ("path_outside_sandbox:", "path_outside_sandbox");
-      ("path_not_found_under_allowed_roots:", "path_not_found_under_allowed_roots");
-      ("path_outside_project_root:", "path_outside_project_root");
-      ("allowed_paths_normalized_empty:", "allowed_paths_normalized_empty");
-      ("ambiguous_relative_read_path:", "ambiguous_relative_read_path");
-      ("cwd_not_directory:", "cwd_not_directory");
-      ("path blocked:", "path_blocked");
-      ("query looks like it may contain secrets", "query_secret_like");
-      ("web search rate limit exceeded", "web_search_rate_limit");
-      ("all web search providers failed", "web_search_provider_failure");
-      ("query must be at most", "query_too_long");
-      ("query is required", "query_required");
-    ]
-  in
-  match List.find_opt (fun (prefix, _category) ->
-    String.starts_with ~prefix lowered
-  ) prefix_rules with
-  | Some (_, category) -> category
-  | None when trimmed = "" -> "empty_output"
-  | None -> trimmed
-
 let classify_process_status (json : Yojson.Safe.t) : string option =
   match Json_util.assoc_member_opt "status" json with
   | Some (`Assoc _ as status) ->
@@ -60,63 +29,13 @@ let classify_process_status (json : Yojson.Safe.t) : string option =
 let classify_failure_output (output : string) : string =
   if String.length output = 0 then "empty_output"
   else
-    let json_str =
-      let prefixes = ["error: "; "tool_error: "] in
-      match List.find_opt (fun p ->
-        String.length output > String.length p
-        && String.starts_with output ~prefix:p
-      ) prefixes with
-      | Some p -> String.sub output (String.length p)
-                    (String.length output - String.length p)
-      | None -> output
-    in
-    match Yojson.Safe.from_string json_str with
+    match Yojson.Safe.from_string output with
     | j ->
-      let semantic_status =
-        Safe_ops.json_string_opt "semantic_status" j |> Option.map String.trim
-      in
-      let failure_class =
-        Safe_ops.json_string_opt "failure_class" j |> Option.map String.trim
-      in
-      let diagnosis = Option.value ~default:`Null (Json_util.assoc_member_opt "diagnosis" j) in
-      let diagnosis_rule =
-        Safe_ops.json_string_opt "rule_id" diagnosis |> Option.map String.trim
-      in
-      let fallback_category () =
-        match Safe_ops.json_string_opt "error" j |> Option.map String.trim with
-        | Some "command_blocked_readonly" ->
-          (* The block payload normally carries a [category] string
-             naming which readonly policy rule fired (e.g. "write",
-             "exec", "network").  Dashboard groups on the full key
-             [command_blocked_readonly:<category>], so a bare "unknown"
-             tells the operator the rule fired but hides which policy
-             class.  Use a structured marker so the operator can grep
-             the source events and find the producer that omitted the
-             field. *)
-          let category =
-            Safe_ops.json_string_opt "category" j
-            |> Option.value ~default:"<missing category field>"
-          in
-          Printf.sprintf "command_blocked_readonly:%s" category
-        | Some error when error <> "" -> normalize_failure_text error
-        | _ ->
-          (match Safe_ops.json_string_opt "message" j |> Option.map String.trim with
-           | Some message when message <> "" -> normalize_failure_text message
-           | _ ->
-             classify_process_status j |> Option.value ~default:"unknown_error")
-      in
-      (match Safe_ops.json_string_opt "shape_block" j |> Option.map String.trim with
-       | Some shape when shape <> "" -> "shape_block:" ^ shape
+      (match Safe_ops.json_string_opt "error" j with
+       | Some error when String.trim error <> "" -> error
        | _ ->
-         (match diagnosis_rule with
-          | Some rule when rule <> "" -> normalize_failure_text rule
-          | _ ->
-            (match failure_class, semantic_status with
-             | Some "workflow_rejection", Some "blocked" -> "workflow_rejection:blocked"
-             | _, Some (("timeout" | "runtime_error" | "partial") as status) ->
-               "semantic_status:" ^ status
-             | _ -> fallback_category ())))
-    | exception Yojson.Json_error _ -> "parse_error"
+         classify_process_status j |> Option.value ~default:"unknown_error")
+    | exception Yojson.Json_error _ -> "unstructured_failure"
 
 let bucket_key record field ~default =
   Safe_ops.json_string_opt field record |> Option.value ~default
@@ -154,17 +73,9 @@ let bool_field_opt record field =
   | _ -> None
 
 let tool_success_of_record record =
-  match bool_field_opt record "semantic_success" with
+  match bool_field_opt record "success" with
   | Some value -> value
-  | None ->
-    (match bool_field_opt record "success" with
-     | Some value -> value
-     | None -> false)
-
-let semantic_outcome_of_record record ~ok =
-  match Safe_ops.json_string_opt "semantic_outcome" record with
-  | Some value when String.trim value <> "" -> value
-  | _ -> if ok then "success" else "tool_failure"
+  | None -> false
 
 let hour_key_of_record record =
   let hour_of_unix ts =
@@ -246,7 +157,6 @@ let empty_summary ~window_hours ~n ~sampling_mode =
     ; ("by_lane", `List [])
     ; ("by_thinking_mode", `List [])
     ; ("by_tool_choice", `List [])
-    ; ("by_semantic_outcome", `List [])
     ; ("failure_categories", `List [])
     ; ("hourly_trend", `List [])
     ])
@@ -292,9 +202,6 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
   let tool_choice_stats : (string, int ref * int ref) Hashtbl.t =
     Hashtbl.create 8
   in
-  let semantic_outcome_stats : (string, int ref * int ref) Hashtbl.t =
-    Hashtbl.create 8
-  in
   (* error category -> count *)
   let failure_cats : (string, int ref) Hashtbl.t = Hashtbl.create 32 in
   List.iter (fun record ->
@@ -315,7 +222,6 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
       |> Option.value ~default:"<missing keeper field>"
     in
     let ok = tool_success_of_record record in
-    let semantic_outcome = semantic_outcome_of_record record ~ok in
     let dur = match record with
       | `Assoc fields ->
         (match List.assoc_opt "duration_ms" fields with
@@ -384,7 +290,6 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
     update_rate_table thinking_mode_stats (thinking_mode_of_record record) ok;
     update_rate_table tool_choice_stats
       (bucket_key record "tool_choice" ~default:"unknown") ok;
-    update_rate_table semantic_outcome_stats semantic_outcome ok;
     (* failure category *)
     if not ok then begin
       let output =
@@ -402,11 +307,7 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
            | _ -> "")
         | _ -> ""
       in
-      let cat =
-        match semantic_outcome with
-        | "policy_denied" | "structured_error" -> semantic_outcome
-        | _ -> classify_failure_output output
-      in
+      let cat = classify_failure_output output in
       let r = match Hashtbl.find_opt failure_cats cat with
         | Some r -> r
         | None -> let r = ref 0 in Hashtbl.replace failure_cats cat r; r
@@ -458,9 +359,6 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
   let by_tool_choice =
     render_rate_table ~field:"name" tool_choice_stats
   in
-  let by_semantic_outcome =
-    render_rate_table ~field:"name" semantic_outcome_stats
-  in
   let failure_categories =
     Hashtbl.fold (fun cat r acc ->
       (!r, `Assoc [("category", `String cat); ("count", `Int !r)]) :: acc
@@ -510,7 +408,6 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
     ("by_lane", `List by_lane);
     ("by_thinking_mode", `List by_thinking_mode);
     ("by_tool_choice", `List by_tool_choice);
-    ("by_semantic_outcome", `List by_semantic_outcome);
     ("failure_categories", `List failure_categories);
     ("hourly_trend", `List hourly);
   ])

@@ -21,17 +21,7 @@ let keeper_cost_aggregates_json
     List.map
       (fun (m : Keeper_meta_contract.keeper_meta) ->
         let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
-        let all_metrics_lines =
-          let dated = Dated_jsonl.read_recent_lines metrics_store 500 in
-          if dated <> []
-          then dated
-          else (
-            let metrics_path = Keeper_types_support.keeper_metrics_path config m.name in
-            Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_cost_metrics"
-              metrics_path
-              ~max_bytes:200000
-              ~max_lines:500)
-        in
+        let all_metrics_lines = Dated_jsonl.read_recent_lines metrics_store 500 in
         let costs_rev = ref [] in
         let latencies_rev = ref [] in
         let input_tokens = ref 0 in

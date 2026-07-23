@@ -60,12 +60,12 @@ let make_telemetry ?timings ?(request_latency_ms = 0) ?ttfrc_ms ?prefill_ms ()
   { system_fingerprint = None
   ; timings
   ; reasoning_tokens = None
-  ; reasoning_tokens_estimated = false
   ; request_latency_ms = Some request_latency_ms
   ; peak_memory_gb = None
   ; provider_kind = None
   ; reasoning_effort = None
   ; canonical_model_id = None
+  ; reasoning_source = None
   ; effective_context_window = None
   ; provider_internal_action_count = None
   ; ttfrc_ms

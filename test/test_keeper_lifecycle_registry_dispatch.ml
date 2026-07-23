@@ -1,6 +1,7 @@
 open Alcotest
 
 module KEC = Masc.Keeper_context_runtime
+module KMC = Masc.Keeper_manual_compaction
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_meta_json = Masc.Keeper_meta_json
 module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
@@ -13,6 +14,9 @@ module KST = Keeper_state_machine
 module KFS = Masc.Keeper_fs
 module KTS = Masc.Keeper_types_support
 module P = Masc.Otel_metric_store
+module Publication_scope = Masc.Keeper_publication_recovery_scope
+module Publication_availability =
+  Masc.Keeper_publication_recovery_availability
 
 let temp_dir prefix =
   let dir = Filename.temp_file prefix "" in
@@ -30,6 +34,21 @@ let cleanup_dir dir =
         Unix.unlink path
   in
   try rm dir with _ -> ()
+
+let publication_recovery_registry env sw config =
+  let registry_root =
+    Eio.Path.(Eio.Stdenv.fs env / Masc.Workspace.masc_root_dir config)
+  in
+  match
+    Fs_compat.Publication_recovery.open_registry
+      ~sw
+      ~fs:(Eio.Stdenv.fs env)
+      ~registry_root
+  with
+  | Ok registry -> registry
+  | Error error ->
+    fail
+      (Fs_compat.Publication_recovery.registry_error_to_string error)
 
 let write_lines path lines =
   let dir = KFS.ensure_dir (Filename.dirname path) in
@@ -131,51 +150,24 @@ let make_keeper_meta ?(name = "keeper-lifecycle-test")
           ("agent_name", `String name);
           ("trace_id", `String trace_id);
           ("last_model_used", `String "llama:auto");
-          ("tool_access", `List []);
         ])
   with
   | Ok meta -> meta
   | Error err -> fail ("meta_of_json failed: " ^ err)
 
-let base_lifecycle ~(meta : Keeper_meta_contract.keeper_meta) : KEC.post_turn_lifecycle =
-  {
-    updated_meta = meta;
-    checkpoint = None;
-    handoff_json = None;
-    handoff_attempted = false;
-    handoff_failure_reason = None;
-    compaction =
-      {
-        attempted = false;
-        applied = false;
-        started_dispatched = false;
-        failure_reason = None;
-        trigger = None;
-        decision = KEC.Blocked_below_thresholds;
-        before_tokens = 0;
-        after_tokens = 0;
-        saved_tokens = 0;
-      };
-    turn_generation = meta.runtime.generation;
-    context_ratio = 0.0;
-    context_tokens = 0;
-    context_max = 0;
-    message_count = 0;
-  }
-
 let test_registry_rejects_meta_name_mismatch_update () =
   let base_dir = temp_dir "keeper_lifecycle_registry_meta_mismatch" in
   Fun.protect
     ~finally:(fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-registry-meta-mismatch" () in
-      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      ignore (KR.For_testing.register ~base_path:config.base_path meta.name meta);
       let bad_meta = { meta with name = "wrong-keeper-name" } in
       KR.update_meta ~base_path:config.base_path meta.name bad_meta;
       match KR.get ~base_path:config.base_path meta.name with
@@ -187,18 +179,18 @@ let test_registry_canonicalizes_mismatched_meta_on_register () =
   let base_dir = temp_dir "keeper_lifecycle_registry_register_repair" in
   Fun.protect
     ~finally:(fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let registry_name = "keeper-registry-register-repair" in
       let bad_meta =
         { (make_keeper_meta ~name:"wrong-register-name" ()) with agent_name = "" }
       in
-      ignore (KR.register ~base_path:config.base_path registry_name bad_meta);
+      ignore (KR.For_testing.register ~base_path:config.base_path registry_name bad_meta);
       match KR.get ~base_path:config.base_path registry_name with
       | Some entry ->
           check string "registry repairs meta name" registry_name entry.meta.name;
@@ -211,26 +203,29 @@ let test_registry_reload_meta_from_disk_repairs_stale_meta () =
   let base_dir = temp_dir "keeper_lifecycle_registry_meta_reload" in
   Fun.protect
     ~finally:(fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let name = "keeper-registry-meta-reload" in
       write_keeper_toml
         ~base_dir
         name
-        [ "[keeper]"; {|sandbox_profile = "local"|}; {|tool_denylist = ["Write"]|} ];
+        [ "[keeper]"
+        ; {|sandbox_profile = "local"|}
+        ; {|instructions = "fresh instructions"|}
+        ];
       let persisted_meta = make_keeper_meta ~name () in
-      let stale_meta = { persisted_meta with tool_denylist = [ "stale_tool" ] } in
-      ignore (KR.register ~base_path:config.base_path name stale_meta);
+      let stale_meta = { persisted_meta with instructions = "stale instructions" } in
+      ignore (KR.For_testing.register ~base_path:config.base_path name stale_meta);
       write_keeper_meta_json_for_name config name persisted_meta;
-      match KR.reload_meta_from_disk ~base_path:config.base_path name with
+      match KR.For_testing.reload_meta_from_disk ~base_path:config.base_path name with
       | Ok (Some entry) ->
-          check (list string) "reload applies base-path TOML denylist" [ "Write" ]
-            entry.meta.tool_denylist
+          check string "reload applies base-path TOML instructions" "fresh instructions"
+            entry.meta.instructions
       | Ok None -> fail "expected reload to update registered keeper"
       | Error msg -> fail ("reload_meta_from_disk failed: " ^ msg))
 
@@ -241,10 +236,10 @@ let test_dispatch_keeper_phase_event_uses_workspace_base_path () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-phase-regression" () in
-      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      ignore (KR.For_testing.register ~base_path:config.base_path meta.name meta);
       KEC.dispatch_keeper_phase_event
         ~config
         ~origin:KR.Post_turn_lifecycle
@@ -256,66 +251,50 @@ let test_dispatch_keeper_phase_event_uses_workspace_base_path () =
             (KST.phase_to_string entry.phase)
       | None -> fail "expected registered keeper after compaction dispatch")
 
-let test_dispatch_post_turn_lifecycle_events_uses_workspace_base_path () =
+let test_dispatch_compaction_completed_uses_workspace_base_path () =
   let base_dir = temp_dir "keeper_lifecycle_registry_outcome" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-outcome-regression" () in
-      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      ignore (KR.For_testing.register ~base_path:config.base_path meta.name meta);
       KEC.dispatch_keeper_phase_event
         ~config
         ~origin:KR.Post_turn_lifecycle
         ~keeper_name:meta.name
         KST.Compaction_started;
-      let lifecycle =
-        {
-          (base_lifecycle ~meta) with
-          compaction =
-            {
-              attempted = true;
-              applied = true;
-              started_dispatched = true;
-              failure_reason = None;
-              trigger = Some Compaction_trigger.Manual;
-              decision = KEC.Applied Compaction_trigger.Manual;
-              before_tokens = 42;
-              after_tokens = 21;
-              saved_tokens = 21;
-            };
-        }
-      in
-      KEC.dispatch_post_turn_lifecycle_events
+      KEC.dispatch_compaction_completed
         ~config
+        ~origin:KR.Post_turn_lifecycle
         ~keeper_name:meta.name
-        lifecycle;
+      |> Result.get_ok;
       match KR.get ~base_path:config.base_path meta.name with
       | Some entry ->
           check string "compaction completion reaches registry" "running"
             (KST.phase_to_string entry.phase)
       | None -> fail "expected registered keeper after lifecycle dispatch")
 
-let test_post_turn_compaction_runs_from_failing_health_lane () =
+let test_compaction_runs_from_failing_health_lane () =
   let base_dir = temp_dir "keeper_lifecycle_registry_failing_compaction" in
   Fun.protect
     ~finally:(fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-failing-compaction" () in
-      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      ignore (KR.For_testing.register ~base_path:config.base_path meta.name meta);
       KEC.dispatch_keeper_phase_event
         ~config
         ~keeper_name:meta.name
-        (KST.Heartbeat_failed { consecutive = 1; max_allowed = 3 });
+        (KST.Heartbeat_failed { consecutive = 1 });
       (match KR.get ~base_path:config.base_path meta.name with
        | Some entry ->
            check string "heartbeat failure reaches failing" "failing"
@@ -331,27 +310,11 @@ let test_post_turn_compaction_runs_from_failing_health_lane () =
            check string "post-turn compaction starts while failing" "compacting"
              (KST.phase_to_string entry.phase)
        | None -> fail "expected registered keeper after compaction start");
-      let lifecycle =
-        {
-          (base_lifecycle ~meta) with
-          compaction =
-            {
-              attempted = true;
-              applied = true;
-              started_dispatched = true;
-              failure_reason = None;
-              trigger = Some Compaction_trigger.Manual;
-              decision = KEC.Applied Compaction_trigger.Manual;
-              before_tokens = 42;
-              after_tokens = 21;
-              saved_tokens = 21;
-            };
-        }
-      in
-      KEC.dispatch_post_turn_lifecycle_events
+      KEC.dispatch_compaction_completed
         ~config
+        ~origin:KR.Post_turn_lifecycle
         ~keeper_name:meta.name
-        lifecycle;
+      |> Result.get_ok;
       match KR.get ~base_path:config.base_path meta.name with
       | Some entry ->
           check string "compaction completion preserves failing health lane" "failing"
@@ -362,17 +325,17 @@ let test_compaction_completion_without_started_is_nonfatal () =
   let base_dir = temp_dir "keeper_lifecycle_registry_missing_start" in
   Fun.protect
     ~finally:(fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-missing-compaction-start" () in
-      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      ignore (KR.For_testing.register ~base_path:config.base_path meta.name meta);
       let labels =
-        [ ("keeper", meta.name); ("event", "compaction_completed(42->21)") ]
+        [ ("keeper", meta.name); ("event", "compaction_completed") ]
       in
       let before =
         Masc.Otel_metric_store.get_metric_value
@@ -380,27 +343,11 @@ let test_compaction_completion_without_started_is_nonfatal () =
           ~labels ()
         |> Option.value ~default:0.0
       in
-      let lifecycle =
-        {
-          (base_lifecycle ~meta) with
-          compaction =
-            {
-              attempted = true;
-              applied = true;
-              started_dispatched = true;
-              failure_reason = None;
-              trigger = Some Compaction_trigger.Manual;
-              decision = KEC.Applied Compaction_trigger.Manual;
-              before_tokens = 42;
-              after_tokens = 21;
-              saved_tokens = 21;
-            };
-        }
-      in
-      KEC.dispatch_post_turn_lifecycle_events
+      KEC.dispatch_compaction_completed
         ~config
+        ~origin:KR.Post_turn_lifecycle
         ~keeper_name:meta.name
-        lifecycle;
+      |> ignore;
       let after =
         Masc.Otel_metric_store.get_metric_value
           Keeper_metrics.(to_string LifecycleDispatchRejections)
@@ -414,37 +361,20 @@ let test_compaction_completion_without_started_is_nonfatal () =
             (KST.phase_to_string entry.phase)
       | None -> fail "expected registered keeper after rejected completion")
 
-let test_post_turn_compaction_restarts_after_done_stage () =
+let test_compaction_restarts_after_done_stage () =
   let base_dir = temp_dir "keeper_lifecycle_registry_repeat_compaction" in
   Fun.protect
     ~finally:(fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-repeat-compaction" () in
-      ignore (KR.register ~base_path:config.base_path meta.name meta);
-      let lifecycle before_tokens after_tokens =
-        {
-          (base_lifecycle ~meta) with
-          compaction =
-            {
-              attempted = true;
-              applied = true;
-              started_dispatched = true;
-              failure_reason = None;
-              trigger = Some Compaction_trigger.Manual;
-              decision = KEC.Applied Compaction_trigger.Manual;
-              before_tokens;
-              after_tokens;
-              saved_tokens = before_tokens - after_tokens;
-            };
-        }
-      in
-      let run_compaction label before_tokens after_tokens =
+      ignore (KR.For_testing.register ~base_path:config.base_path meta.name meta);
+      let run_compaction label =
         KEC.dispatch_keeper_phase_event
           ~config
           ~origin:KR.Post_turn_lifecycle
@@ -455,32 +385,33 @@ let test_post_turn_compaction_restarts_after_done_stage () =
              check string (label ^ " start reaches compacting") "compacting"
                (KST.phase_to_string entry.phase)
          | None -> fail "expected registered keeper after compaction start");
-        KEC.dispatch_post_turn_lifecycle_events
+        KEC.dispatch_compaction_completed
           ~config
+          ~origin:KR.Post_turn_lifecycle
           ~keeper_name:meta.name
-          (lifecycle before_tokens after_tokens);
+        |> Result.get_ok;
         match KR.get ~base_path:config.base_path meta.name with
         | Some entry ->
             check string (label ^ " completion returns running") "running"
               (KST.phase_to_string entry.phase)
         | None -> fail "expected registered keeper after compaction completion"
       in
-      run_compaction "first" 42 21;
-      run_compaction "second" 84 42)
+      run_compaction "first";
+      run_compaction "second")
 
 let test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event () =
   let base_dir = temp_dir "keeper_lifecycle_registry_origin_guard" in
   Fun.protect
     ~finally:(fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-origin-guard" () in
-      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      ignore (KR.For_testing.register ~base_path:config.base_path meta.name meta);
       let labels =
         [ ("keeper", meta.name); ("event", "compaction_started") ]
       in
@@ -524,10 +455,16 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
           ~labels ()
         |> Option.value ~default:0.0
       in
-      KEC.dispatch_keeper_phase_event
-        ~config
-        ~keeper_name:"missing-keeper"
-        KST.Compaction_started;
+      (match
+         KEC.dispatch_keeper_phase_event_result
+           ~config
+           ~keeper_name:"missing-keeper"
+           KST.Compaction_started
+       with
+       | Error (KEC.Transition_rejected _) -> ()
+       | Error (KEC.Compaction_invariant_violation _) ->
+         fail "missing keeper must be a transition rejection"
+       | Ok () -> fail "missing keeper lifecycle dispatch unexpectedly succeeded");
       let after =
         Masc.Otel_metric_store.get_metric_value
           Keeper_metrics.(to_string LifecycleDispatchRejections)
@@ -536,17 +473,51 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
       in
       check bool "rejection metric increments" true (after > before))
 
+let test_manual_compaction_preserves_failed_failure_dispatch () =
+  let primary =
+    KEC.Transition_rejected
+      (KST.Precondition_violation
+         { event = "compaction_started"; reason = "primary rejection" })
+  in
+  let failure_dispatch =
+    KEC.Transition_rejected
+      (KST.Precondition_violation
+         { event = "compaction_failed"; reason = "failure dispatch rejection" })
+  in
+  let failure =
+    KMC.Lifecycle_with_failure_dispatch
+      { stage = KMC.Compaction_started
+      ; checkpoint_applied = false
+      ; error = primary
+      ; failure_dispatch = Error failure_dispatch
+      }
+  in
+  let detail = KMC.failure_to_string failure in
+  check bool "primary rejection is rendered" true
+    (Astring.String.is_infix ~affix:"primary rejection" detail);
+  check bool "failure dispatch rejection is rendered" true
+    (Astring.String.is_infix ~affix:"failure dispatch rejection" detail);
+  let recovery_detail =
+    KMC.failure_to_string
+      (KMC.Recovery
+         ( Masc.Keeper_post_turn.Compaction_rejected
+             Masc.Keeper_compact_policy.Exact_execution_context_unavailable
+         , Error failure_dispatch ))
+  in
+  check bool "recovery failure dispatch rejection is rendered" true
+    (Astring.String.is_infix ~affix:"failure dispatch rejection" recovery_detail)
+
 let test_keepalive_dispatch_event_rejection_increments_metric () =
   let base_dir = temp_dir "keeper_lifecycle_keepalive_rejection" in
   Fun.protect
     ~finally:(fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Eio.Switch.run @@ fun sw ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let ctx : _ Keeper_types_profile.context =
         {
@@ -556,6 +527,9 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          publication_recovery_provider =
+            Publication_availability.constant
+              Publication_availability.Non_runtime;
         }
       in
       let labels =
@@ -580,83 +554,107 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
       check bool "keepalive registry rejection metric increments" true
         (after > before))
 
-let test_heartbeat_history_fallback_counts_malformed_rows () =
-  let base_dir = temp_dir "keeper_lifecycle_heartbeat_history_drops" in
+let test_publication_recovery_turn_resolution_is_filesystem_idle () =
+  let base_dir = temp_dir "keeper_publication_recovery_scope" in
   Fun.protect
     ~finally:(fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
-      Eio_main.run @@ fun env ->
-      Eio.Switch.run @@ fun sw ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
-      ignore (Masc.Workspace.init config ~agent_name:None);
-      let meta =
-        make_keeper_meta
-          ~name:"keeper-heartbeat-history-drop"
-          ~trace_id:"trace-heartbeat-history-drop"
-          ()
+      let keeper_name = "publication-scope-exact-lane" in
+      let meta = make_keeper_meta ~name:keeper_name () in
+      let entry = KR.For_testing.register ~base_path:config.base_path keeper_name meta in
+      let provider_reads = Atomic.make 0 in
+      let provider () =
+        Atomic.incr provider_reads;
+        Publication_availability.Non_runtime
       in
-      ignore (KR.register ~base_path:config.base_path meta.name meta);
-      let trace_id =
-        Keeper_id.Trace_id.to_string meta.runtime.trace_id
+      match
+        Publication_scope.resolve_turn_resources
+          ~provider
+          ~base_path:config.base_path
+          ~keeper_name
+      with
+      | Error failure -> fail (Publication_scope.failure_to_string failure)
+      | Ok resources ->
+        check bool "turn resolves exact registry entry" true
+          (resources.entry == entry);
+        check string
+          "turn retains exact publication owner"
+          keeper_name
+          resources.publication_recovery.keeper_name;
+        check bool
+          "turn retains live provider"
+          true
+          (resources.publication_recovery.provider == provider);
+        check int "turn resolution performs no provider or FS acquisition" 0
+          (Atomic.get provider_reads))
+
+let test_publication_recovery_scope_preserves_typed_lookup_failures () =
+  let base_dir = temp_dir "keeper_publication_recovery_failures" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      KR.For_testing.clear ();
+      let config = Masc.Workspace.default_config base_dir in
+      let keeper_name = "publication-scope-failures" in
+      let provider =
+        Publication_availability.constant Publication_availability.Non_runtime
       in
-      let history_path = KTS.keeper_history_path config trace_id in
-      write_lines history_path
-        [
-          {|{"role":"user","content":"keep continuity","source":"user"}|};
-          "[]";
-          "{not-json";
-        ];
-      let surface = "keeper_heartbeat_history" in
-      let entry_reason = "entry_load_error" in
-      let invalid_reason = "invalid_payload" in
-      let before_entry =
-        persistence_read_drop_total ~surface ~reason:entry_reason
+      let expect_failure label expected = function
+        | Error failure when expected failure -> ()
+        | Error failure ->
+          failf
+            "%s returned wrong failure: %s"
+            label
+            (Publication_scope.failure_to_string failure)
+        | Ok _ -> failf "%s unexpectedly resolved turn resources" label
       in
-      let before_invalid =
-        persistence_read_drop_total ~surface ~reason:invalid_reason
+      expect_failure
+        "missing keeper entry"
+        (function
+          | Publication_scope.Registry_entry_not_found
+              { base_path; keeper_name = missing_name } ->
+            String.equal base_path config.base_path
+            && String.equal missing_name keeper_name
+          | _ -> false)
+        (Publication_scope.resolve_turn_resources
+           ~provider
+           ~base_path:config.base_path
+           ~keeper_name);
+      let entry =
+        KR.For_testing.register
+          ~base_path:config.base_path
+          keeper_name
+          (make_keeper_meta ~name:keeper_name ())
       in
-      let ctx : _ Keeper_types_profile.context =
-        {
-          config;
-          agent_name = "test-operator";
-          sw;
-          clock = Eio.Stdenv.clock env;
-          proc_mgr = Some (Eio.Stdenv.process_mgr env);
-          net = None;
+      let corrupted =
+        { entry with
+          meta =
+            { entry.meta with
+              runtime = { entry.meta.runtime with generation = -1 }
+            }
         }
       in
-      KHB.write_heartbeat_snapshot
-        ~ctx
-        ~meta_current:meta
-        ~now_ts:(Time_compat.now ())
-        ~consecutive_hb_failures:0
-        ~timing_ring:[||]
-        ~timing_filled:0;
-      check_persistence_read_drop_delta ~surface ~reason:entry_reason
-        ~before:before_entry ~delta:1;
-      check_persistence_read_drop_delta ~surface ~reason:invalid_reason
-        ~before:before_invalid ~delta:2)
-
-(* RFC-0239 R4: the board-wakeup debounce keys on a content fingerprint, not
-   the post_id, so a keeper that re-posts the same conclusion (fresh post_id
-   each cycle) does not re-wake peers. *)
-let test_board_wakeup_dedup_key_collapses_reposts () =
-  let k ~post_id ~content =
-    KHS.board_wakeup_dedup_key ~post_id ~author:"garnet" ~title:"closure" ~content
-  in
-  check string "identical content, different post_id => same dedup key"
-    (k ~post_id:"p1" ~content:"operator's turn now")
-    (k ~post_id:"p2" ~content:"operator's   turn   NOW");
-  check bool "different content => different dedup key" false
-    (String.equal
-       (k ~post_id:"p1" ~content:"operator's turn")
-       (k ~post_id:"p1" ~content:"keeper layer complete"));
-  check string "empty title+content => post_id fallback" "p9"
-    (KHS.board_wakeup_dedup_key ~post_id:"p9" ~author:"garnet" ~title:"" ~content:"")
+      KR.For_testing.unsafe_put_entry
+        ~base_path:config.base_path
+        keeper_name
+        corrupted;
+      expect_failure
+        "unhealthy keeper entry"
+        (function
+          | Publication_scope.Registry_entry_unhealthy
+              (KR.Required_field_missing { field }) ->
+            String.equal field "generation"
+          | _ -> false)
+        (Publication_scope.resolve_turn_resources
+           ~provider
+           ~base_path:config.base_path
+           ~keeper_name))
 
 let () =
   run "keeper_lifecycle_registry_dispatch"
@@ -665,29 +663,31 @@ let () =
         [
           test_case "phase event uses workspace base_path" `Quick
             test_dispatch_keeper_phase_event_uses_workspace_base_path;
-          test_case "post-turn lifecycle events use workspace base_path" `Quick
-            test_dispatch_post_turn_lifecycle_events_uses_workspace_base_path;
-          test_case "post-turn compaction runs from failing health lane" `Quick
-            test_post_turn_compaction_runs_from_failing_health_lane;
+          test_case "compaction completion uses workspace base_path" `Quick
+            test_dispatch_compaction_completed_uses_workspace_base_path;
+          test_case "compaction runs from failing health lane" `Quick
+            test_compaction_runs_from_failing_health_lane;
           test_case "compaction completion without started is nonfatal" `Quick
             test_compaction_completion_without_started_is_nonfatal;
-          test_case "post-turn compaction restarts after done stage" `Quick
-            test_post_turn_compaction_restarts_after_done_stage;
+          test_case "compaction restarts after done stage" `Quick
+            test_compaction_restarts_after_done_stage;
           test_case "unscoped lifecycle event is rejected" `Quick
             test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event;
           test_case "phase event rejection increments metric" `Quick
             test_dispatch_keeper_phase_event_rejection_increments_metric;
+          test_case "manual compaction preserves failed failure dispatch" `Quick
+            test_manual_compaction_preserves_failed_failure_dispatch;
           test_case "keepalive event rejection increments metric" `Quick
             test_keepalive_dispatch_event_rejection_increments_metric;
+          test_case "publication recovery turn resolution is filesystem idle" `Quick
+            test_publication_recovery_turn_resolution_is_filesystem_idle;
+          test_case "publication recovery scope preserves typed lookup failures" `Quick
+            test_publication_recovery_scope_preserves_typed_lookup_failures;
           test_case "registry rejects mismatched meta update" `Quick
             test_registry_rejects_meta_name_mismatch_update;
           test_case "registry canonicalizes mismatched meta on register" `Quick
             test_registry_canonicalizes_mismatched_meta_on_register;
           test_case "registry reload repairs stale meta from disk" `Quick
             test_registry_reload_meta_from_disk_repairs_stale_meta;
-          test_case "heartbeat history fallback counts malformed rows" `Quick
-            test_heartbeat_history_fallback_counts_malformed_rows;
-          test_case "board wakeup dedup key collapses reposts (RFC-0239 R4)" `Quick
-            test_board_wakeup_dedup_key_collapses_reposts;
         ] );
     ]

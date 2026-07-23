@@ -6,9 +6,7 @@
 
     1. Structured crash flow (3 catch branches)
     2. Dead tombstone lifecycle
-    3. Self-preservation gate (dominant cohort suppression)
-    4. Self-preservation passthrough (below threshold)
-    5. Reconcile predicate logic (sweep-owned vs reconcile-eligible)
+    3. Reconcile predicate logic (sweep-owned vs reconcile-eligible)
 
     @since Phase 2 post-merge improvement *)
 
@@ -17,13 +15,13 @@ open Alcotest
 module R = Masc.Keeper_registry
 module Workspace = Masc.Workspace
 module Keeper_types_profile = Masc.Keeper_types_profile
+module Keeper_profile_defaults = Masc.Keeper_types_profile_defaults
 module Sup = Masc.Keeper_supervisor
 module KT = Keeper_types
 module KSM = Keeper_state_machine
 module Cfg = Env_config
 module KHL = Masc.Keeper_heartbeat_loop
 module Keeper_lifecycle_admission = Masc.Keeper_lifecycle_admission
-module Obs = Masc.Keeper_heartbeat_loop_observations
 module WO = Masc.Keeper_world_observation
 module Health = Masc.Health
 module Lane = Masc.Keeper_lane
@@ -32,6 +30,9 @@ module Shutdown_store = Masc.Keeper_shutdown_store
 module Shutdown_prepare_join = Masc.Keeper_shutdown_prepare_join
 module Shutdown_finalize = Masc.Keeper_shutdown_finalize
 module Shutdown_runtime = Masc.Keeper_shutdown_runtime
+module Shutdown_supersession = Masc.Keeper_shutdown_supersession
+module Turn_up_args = Masc.Keeper_turn_up_args
+module Turn_up_update = Masc.Keeper_turn_up_update
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_meta_store = Masc.Keeper_meta_store
 module Keeper_types_support = Masc.Keeper_types_support
@@ -105,12 +106,18 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let publication_recovery_registry env sw config =
+  Masc_test_deps.with_publication_recovery_registry
+    ~sw
+    ~fs:(Eio.Stdenv.fs env)
+    ~registry_root:(Workspace.masc_root_dir config)
+    Fun.id
+
 let make_meta name =
   let json = `Assoc [
     ("name", `String name);
     ("agent_name", `String ("agent-" ^ name));
     ("trace_id", `String ("trace-integ-" ^ name));
-    ("goal", `String "integration test");
   ] in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
@@ -160,19 +167,6 @@ let configure_keeper_chat_persistence ~base_path =
     Alcotest.failf
       "keeper chat persistence fixture failed: %s"
       (String.concat "; " (List.map describe errors))
-let stale_paused_cleanup (meta : Keeper_meta_contract.keeper_meta)
-    : Shutdown_types.cleanup_intent
-  =
-  { reason =
-      Shutdown_types.Stale_paused_prune
-        { meta_version = meta.meta_version
-        ; last_updated = meta.updated_at
-        ; latched_reason = meta.latched_reason
-        }
-  ; remove_session = false
-  }
-;;
-
 let dashboard_purge_cleanup requested_name
     (meta : Keeper_meta_contract.keeper_meta)
     : Shutdown_types.cleanup_intent
@@ -203,8 +197,6 @@ let shutdown_schema3_fixture (operation : Shutdown_types.t) =
     | Shutdown_types.Operator_stop_retain_meta -> "retain_operator_pause"
     | Shutdown_types.Operator_stop_remove_meta -> "remove_meta"
     | Shutdown_types.Dead_tombstone_cleanup -> "retain_dead_tombstone"
-    | Shutdown_types.Stale_paused_prune _ ->
-      fail "schema 3 fixture cannot encode stale paused cleanup"
     | Shutdown_types.Dashboard_keeper_purge _ ->
       fail "schema 3 fixture cannot encode dashboard Keeper purge"
   in
@@ -249,6 +241,56 @@ let shutdown_schema4_fixture (operation : Shutdown_types.t) =
   | _ -> fail "shutdown JSON codec did not return an object"
 ;;
 
+let shutdown_schema5_fixture (operation : Shutdown_types.t) =
+  match Shutdown_store.to_json operation with
+  | `Assoc fields ->
+    `Assoc (replace_assoc_field "schema_version" (`Int 5) fields)
+  | _ -> fail "shutdown JSON codec did not return an object"
+;;
+
+let retired_stale_paused_schema5_fixture (operation : Shutdown_types.t) =
+  match Shutdown_store.to_json operation with
+  | `Assoc fields ->
+    `Assoc
+      (fields
+       |> replace_assoc_field "schema_version" (`Int 5)
+       |> replace_assoc_field
+            "cleanup_intent"
+            (`Assoc
+              [ ( "reason"
+                , `Assoc
+                    [ "kind", `String "stale_paused_prune"
+                    ; "meta_version", `Int 21383
+                    ; "last_updated", `String "2026-07-11T09:04:05Z"
+                    ; "latched_reason", `Null
+                    ] )
+              ; "remove_session", `Bool false
+              ])
+       |> replace_assoc_field
+            "phase"
+            (`Assoc
+              [ "kind", `String "finalized"
+              ; ( "evidence"
+                , `Assoc
+                    [ ( "cleanup"
+                      , `Assoc
+                          [ "settled_task_ids", `List []
+                          ; "pending_confirms_removed", `Int 0
+                          ] )
+                    ; "meta_removed", `Bool true
+                    ; "session_removed", `Bool false
+                    ; "registry_unregistered", `Bool false
+                    ; "accumulator_dropped", `Bool true
+                    ; ( "completion"
+                      , `Assoc
+                          [ "kind", `String "delivered"
+                          ; "action", `String "paused_meta_pruned"
+                          ] )
+                    ] )
+              ]))
+  | _ -> fail "shutdown JSON codec did not return an object"
+;;
+
 let resolve_done_for_test reg value =
   ignore (R.resolve_done reg ~source:"test_fixture" value);
   match
@@ -262,21 +304,19 @@ let eio_test name fn =
   Fs_compat.set_fs (Eio.Stdenv.fs env); fn ())
 
 let base_observation : WO.world_observation =
-  { pending_mentions = []
+  { pending_messages = []
   ; pending_board_events = []
-  ; pending_scope_messages = []
   ; idle_seconds = 0
   ; active_goals = []
-  ; context_ratio = lazy 0.0
   ; unclaimed_task_count = 0
   ; claimable_task_count = 0
-  ; provider_capacity_blocked_task_count = 0
   ; failed_task_count = 0
   ; pending_verification_count = 0
   ; scheduled_automation = WO.empty_scheduled_automation_observation
   ; backlog_updated_since_last_scheduled_autonomous = false
   ; running_keeper_fiber_count = 0
   ; connected_surfaces = []
+  ; connected_surface_failures = []
   }
 
 (* ══════════════════════════════════════════════════════════
@@ -288,9 +328,9 @@ let base_observation : WO.world_observation =
     exception carries no payload (RFC-0002).
     Verifies: state = Crashed, failure_reason stored, done_p resolved. *)
 let test_crash_heartbeat_failure () =
-  R.clear ();
+  R.For_testing.clear ();
   let meta = make_meta "hb-crash" in
-  let reg = R.register ~base_path:bp "hb-crash" meta in
+  let reg = R.For_testing.register ~base_path:bp "hb-crash" meta in
   (* Simulate what launch_supervised_fiber does on Keeper_fiber_crash *)
   let reason = R.Heartbeat_consecutive_failures 5 in
   let reason_str = R.failure_reason_to_string reason in
@@ -320,9 +360,9 @@ let test_crash_heartbeat_failure () =
 
 (** Simulate the generic exception catch branch (lines 67-77). *)
 let test_crash_generic_exception () =
-  R.clear ();
+  R.For_testing.clear ();
   let meta = make_meta "exn-crash" in
-  let reg = R.register ~base_path:bp "exn-crash" meta in
+  let reg = R.For_testing.register ~base_path:bp "exn-crash" meta in
   let exn_str = "Sys_error(disk full)" in
   let fr = R.Exception exn_str in
   let reason_str = R.failure_reason_to_string fr in
@@ -343,9 +383,9 @@ let test_crash_generic_exception () =
 
 (** Simulate the fiber_unresolved fallback (finally block, lines 78-94). *)
 let test_crash_fiber_unresolved () =
-  R.clear ();
+  R.For_testing.clear ();
   let meta = make_meta "unresolved" in
-  let reg = R.register ~base_path:bp "unresolved" meta in
+  let reg = R.For_testing.register ~base_path:bp "unresolved" meta in
   (* Simulate: fiber exits without resolving done_r → finally fires.
      Issue #18901: Unexpected cause (not shutdown) — represents the
      genuine missed-resolution bug path the supervisor must restart. *)
@@ -369,27 +409,20 @@ let test_crash_fiber_unresolved () =
    2. Dead tombstone lifecycle
    ══════════════════════════════════════════════════════════ *)
 
-(** Full lifecycle: Running → Crashed → budget exhausted → Dead.
+(** Full lifecycle: Running → Crashed → explicit tombstone → Dead.
     Verifies: Dead is terminal, is_registered=true, Dead→Running blocked,
     only unregister can remove a Dead entry. *)
 let test_dead_tombstone_full_lifecycle () =
-  R.clear ();
+  R.For_testing.clear ();
   let meta = make_meta "mortal" in
-  let reg = R.register ~base_path:bp "mortal" meta in
+  let reg = R.For_testing.register ~base_path:bp "mortal" meta in
   check string "initially running" "running"
     (KSM.phase_to_string (Option.get (R.get ~base_path:bp "mortal")).phase);
   (* Crash *)
   resolve_done_for_test reg (`Crashed "test");
   ignore (R.dispatch_event ~base_path:bp "mortal"
     (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
-  (* Simulate budget exhaustion *)
-  let max_restarts = Cfg.KeeperSupervisor.max_restarts in
-  R.restore_supervisor_state ~base_path:bp "mortal"
-    ~restart_count:max_restarts ~last_restart_ts:0.0 ~crash_log:[];
-  (match R.get ~base_path:bp "mortal" with
-   | Some e -> check bool "budget exhausted" true (e.restart_count >= max_restarts)
-   | None -> fail "expected mortal");
-  (* Transition to Dead (what sweep does) *)
+  (* Only an explicit durable tombstone transitions to Dead. *)
   R.mark_dead ~base_path:bp "mortal" ~at:(Unix.gettimeofday ());
   (* Invariant checks *)
   check bool "Dead is registered" true (R.is_registered ~base_path:bp "mortal");
@@ -409,78 +442,9 @@ let test_dead_tombstone_full_lifecycle () =
        (KSM.phase_to_string e.phase)
    | None -> fail "expected mortal");
   (* Only unregister removes Dead entry *)
-  R.unregister ~base_path:bp "mortal";
+  R.For_testing.unregister ~base_path:bp "mortal";
   check bool "gone after unregister" false
     (R.is_registered ~base_path:bp "mortal")
-
-(* ══════════════════════════════════════════════════════════
-   3. Self-preservation: dominant cohort suppressed
-   ══════════════════════════════════════════════════════════ *)
-
-(** 3 keepers crashed with same reason, 1 non-dominant.
-    With total_keepers=4, ratio=3/4=0.75 > 0.3, candidates=3 >= min(2).
-    Dominant cohort (heartbeat) suppressed, non-dominant (exception) passes. *)
-let test_self_preservation_suppresses_dominant () =
-  R.clear ();
-  (* Create 3 heartbeat-failure entries + 1 exception entry *)
-  let names = ["sp-hb1"; "sp-hb2"; "sp-hb3"; "sp-exn"] in
-  let entries = List.map (fun name ->
-    let _reg = R.register ~base_path:bp name (make_meta name) in
-    ignore (R.dispatch_event ~base_path:bp name
-      (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
-    let reason = if String.length name > 4 && String.sub name 3 2 = "hb"
-      then Some (R.Heartbeat_consecutive_failures 5)
-      else Some (R.Exception "timeout") in
-    R.set_failure_reason ~base_path:bp name reason;
-    match R.get ~base_path:bp name with
-    | Some e -> (e, "crash msg")
-    | None -> fail ("missing entry: " ^ name)
-  ) names in
-  (* Only the first 3 are heartbeat failures *)
-  let to_restart = List.filteri (fun i _ -> i <> 3) entries in
-  (* total=4: all keepers including the running one *)
-  let result = Sup.apply_self_preservation ~keepers_dir:"/tmp/test-keepers" ~total_keepers:4
-    (to_restart @ [List.nth entries 3]) in
-  (* Dominant cohort (heartbeat, 3 entries) should be suppressed.
-     Only the exception entry (1) should remain. *)
-  check int "only non-dominant survives" 1 (List.length result);
-  let survivor_name = (fst (List.hd result)).R.name in
-  check string "survivor is exception entry" "sp-exn" survivor_name
-
-(* ══════════════════════════════════════════════════════════
-   4. Self-preservation: below threshold — all pass through
-   ══════════════════════════════════════════════════════════ *)
-
-(** 1 crashed out of 10 total: ratio=0.1 < 0.3.
-    Self-preservation gate does not activate. *)
-let test_self_preservation_below_threshold () =
-  R.clear ();
-  let _reg = R.register ~base_path:bp "lone" (make_meta "lone") in
-  ignore (R.dispatch_event ~base_path:bp "lone"
-    (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
-  R.set_failure_reason ~base_path:bp "lone"
-    (Some (R.Heartbeat_consecutive_failures 3));
-  let entry = match R.get ~base_path:bp "lone" with
-    | Some e -> e | None -> fail "missing lone" in
-  let to_restart = [(entry, "crash")] in
-  let result = Sup.apply_self_preservation ~keepers_dir:"/tmp/test-keepers" ~total_keepers:10 to_restart in
-  check int "all pass through" 1 (List.length result)
-
-(** min_candidates not met: 1 candidate < 2 minimum.
-    Even with high ratio, gate does not activate. *)
-let test_self_preservation_min_candidates_not_met () =
-  R.clear ();
-  let _reg = R.register ~base_path:bp "solo" (make_meta "solo") in
-  ignore (R.dispatch_event ~base_path:bp "solo"
-    (KSM.Fiber_terminated { outcome = "test"; provider_id = None; http_status = None }));
-  R.set_failure_reason ~base_path:bp "solo"
-    (Some (R.Heartbeat_consecutive_failures 3));
-  let entry = match R.get ~base_path:bp "solo" with
-    | Some e -> e | None -> fail "missing solo" in
-  let to_restart = [(entry, "crash")] in
-  (* ratio = 1/1 = 1.0 > 0.3, BUT candidates=1 < min(2) *)
-  let result = Sup.apply_self_preservation ~keepers_dir:"/tmp/test-keepers" ~total_keepers:1 to_restart in
-  check int "passes despite high ratio" 1 (List.length result)
 
 (* ══════════════════════════════════════════════════════════
    5. Reconcile predicate: sweep-owned vs reconcile-eligible
@@ -491,9 +455,9 @@ let test_self_preservation_min_candidates_not_met () =
     Stopped with a resolved terminal and joined lane = reconcile-eligible.
     Stopped with an unjoined lane = sweep will handle. *)
 let test_reconcile_predicate_sweep_owned () =
-  R.clear ();
+  R.For_testing.clear ();
   (* Running = sweep-owned *)
-  let _e = R.register ~base_path:bp "r1" (make_meta "r1") in
+  let _e = R.For_testing.register ~base_path:bp "r1" (make_meta "r1") in
   (match R.get ~base_path:bp "r1" with
    | Some e ->
      check string "running" "running" (KSM.phase_to_string e.phase);
@@ -516,8 +480,8 @@ let test_reconcile_predicate_sweep_owned () =
    | None -> fail "expected r1")
 
 let test_reconcile_predicate_stopped_resolved () =
-  R.clear ();
-  let reg = R.register ~base_path:bp "s1" (make_meta "s1") in
+  R.For_testing.clear ();
+  let reg = R.For_testing.register ~base_path:bp "s1" (make_meta "s1") in
   ignore (R.dispatch_event ~base_path:bp "s1" KSM.Stop_requested);
   ignore (R.dispatch_event ~base_path:bp "s1" KSM.Drain_complete);
   resolve_done_for_test reg `Stopped;
@@ -529,7 +493,7 @@ let test_reconcile_predicate_stopped_resolved () =
        (Option.is_some (Eio.Promise.peek e.done_p));
      (* dominated_by_sweep logic: Stopped with resolved → NOT dominated *)
      let dominated = match e.phase with
-       | KSM.Running | KSM.Paused | KSM.Crashed | KSM.Dead | KSM.Zombie -> true
+       | KSM.Running | KSM.Paused | KSM.Crashed | KSM.Dead -> true
        | KSM.Failing | KSM.Overflowed | KSM.Compacting | KSM.HandingOff
        | KSM.Draining | KSM.Restarting -> true
        | KSM.Offline -> false
@@ -539,8 +503,8 @@ let test_reconcile_predicate_stopped_resolved () =
    | None -> fail "expected s1")
 
 let test_reconcile_predicate_stopped_unresolved () =
-  R.clear ();
-  let _reg = R.register ~base_path:bp "s2" (make_meta "s2") in
+  R.For_testing.clear ();
+  let _reg = R.For_testing.register ~base_path:bp "s2" (make_meta "s2") in
   ignore (R.dispatch_event ~base_path:bp "s2" KSM.Stop_requested);
   ignore (R.dispatch_event ~base_path:bp "s2" KSM.Drain_complete);
   (* Stopped + unresolved done_p = sweep will handle *)
@@ -550,7 +514,7 @@ let test_reconcile_predicate_stopped_unresolved () =
      check bool "done_p NOT resolved" true
        (Option.is_none (Eio.Promise.peek e.done_p));
      let dominated = match e.phase with
-       | KSM.Running | KSM.Paused | KSM.Crashed | KSM.Dead | KSM.Zombie -> true
+       | KSM.Running | KSM.Paused | KSM.Crashed | KSM.Dead -> true
        | KSM.Failing | KSM.Overflowed | KSM.Compacting | KSM.HandingOff
        | KSM.Draining | KSM.Restarting -> true
        | KSM.Offline -> false
@@ -566,15 +530,15 @@ let test_reconcile_predicate_stopped_unresolved () =
 (** Simulate crash → re-register → restore_supervisor_state.
     Verifies restart_count and crash_log survive across re-registration. *)
 let test_restart_state_preservation () =
-  R.clear ();
+  R.For_testing.clear ();
   let meta = make_meta "restartable" in
-  let reg1 = R.register ~base_path:bp "restartable" meta in
+  let reg1 = R.For_testing.register ~base_path:bp "restartable" meta in
   resolve_done_for_test reg1 (`Crashed "first crash");
   ignore (R.dispatch_event ~base_path:bp "restartable"
     (KSM.Fiber_terminated { outcome = "first crash"; provider_id = None; http_status = None }));
   R.record_crash ~base_path:bp "restartable" 100.0 "first crash";
   (* Simulate sweep restart: re-register then restore state *)
-  let _reg2 = R.register ~base_path:bp "restartable" meta in
+  let _reg2 = R.For_testing.register ~base_path:bp "restartable" meta in
   R.restore_supervisor_state ~base_path:bp "restartable"
     ~restart_count:1 ~last_restart_ts:200.0
     ~crash_log:[(100.0, "first crash")];
@@ -598,9 +562,9 @@ let test_restart_state_preservation () =
 (** Simulate the turn failure crash path: supervisor catch sets
     Turn_consecutive_failures as failure_reason, state = Crashed. *)
 let test_crash_turn_failures () =
-  R.clear ();
+  R.For_testing.clear ();
   let meta = make_meta "turn-crash" in
-  let reg = R.register ~base_path:bp "turn-crash" meta in
+  let reg = R.For_testing.register ~base_path:bp "turn-crash" meta in
   let reason = R.Turn_consecutive_failures 10 in
   let reason_str = R.failure_reason_to_string reason in
   R.set_failure_reason ~base_path:bp "turn-crash" (Some reason);
@@ -619,9 +583,9 @@ let test_crash_turn_failures () =
      | _ -> fail "expected Turn_consecutive_failures");
     check bool "crash log" true (List.length e.crash_log > 0)
 
-(** Turn failures produce a distinct cohort key for self-preservation. *)
+(** Turn failures retain a distinct typed grouping key for crash observation. *)
 let test_cohort_key_turn_failures () =
-  let key = Sup.cohort_key_of_reason
+  let key = R.failure_reason_cohort_key
     (Some (R.Turn_consecutive_failures 10)) in
   check string "turn failure cohort" "turn_failures" key
 
@@ -633,11 +597,11 @@ let test_fresh_presence_preserves_turn_failures () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun sw ->
-  R.clear ();
+  R.For_testing.clear ();
   let base_path = temp_dir "fresh-presence-turn-failure" in
   Fun.protect
     ~finally:(fun () ->
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_path)
     (fun () ->
       let config = Masc.Workspace.default_config base_path in
@@ -649,16 +613,18 @@ let test_fresh_presence_preserves_turn_failures () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = None;
           net = None;
+          publication_recovery_provider =
+            Masc_test_deps.non_runtime_publication_recovery_provider;
         }
       in
       let meta = make_meta "fresh-presence-turn-failure" in
-      ignore (R.register ~base_path:config.base_path meta.name meta);
+      ignore (R.For_testing.register ~base_path:config.base_path meta.name meta);
       R.increment_turn_failures ~base_path:config.base_path meta.name;
       ignore
         (R.dispatch_event
            ~base_path:config.base_path
            meta.name
-           (KSM.Turn_failed { consecutive = 1; max_allowed = 3 }));
+           (KSM.Turn_failed { consecutive = 1 }));
       (match R.get_phase ~base_path:config.base_path meta.name with
        | Some phase -> check string "phase after turn failure" "failing" (KSM.phase_to_string phase)
        | None -> fail "expected registered keeper phase");
@@ -686,16 +652,16 @@ let test_fresh_presence_preserves_turn_failures () =
 let test_crashed_cycle_records_turn_failure () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  R.clear ();
+  R.For_testing.clear ();
   let base_path = temp_dir "crashed-cycle-turn-failure" in
   Fun.protect
     ~finally:(fun () ->
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_path)
     (fun () ->
       let config = Masc.Workspace.default_config base_path in
       let meta = make_meta "crashed-cycle" in
-      ignore (R.register ~base_path:config.base_path meta.name meta);
+      ignore (R.For_testing.register ~base_path:config.base_path meta.name meta);
       check int "no failures before crash" 0
         (R.get_turn_failures ~base_path:config.base_path meta.name);
       KHL.record_crashed_cycle_failure
@@ -706,11 +672,10 @@ let test_crashed_cycle_records_turn_failure () =
       check int "crash recorded as turn failure" 1 count;
       (* Same registry read + event mapping the caller loop performs
          after [run_keepalive_unified_turn] returns. *)
-      let event = KHL.turn_status_event ~turn_fail_count:count ~max_allowed:10 in
+      let event = KHL.turn_status_event ~turn_fail_count:count in
       (match event with
-       | KSM.Turn_failed { consecutive; max_allowed } ->
-         check int "consecutive" 1 consecutive;
-         check int "max_allowed" 10 max_allowed
+       | KSM.Turn_failed { consecutive } ->
+         check int "consecutive" 1 consecutive
        | _ -> fail "expected Turn_failed for crashed cycle");
       ignore (R.dispatch_event ~base_path:config.base_path meta.name event);
       (match R.get_phase ~base_path:config.base_path meta.name with
@@ -719,7 +684,7 @@ let test_crashed_cycle_records_turn_failure () =
            (KSM.phase_to_string phase)
        | None -> fail "expected registered keeper phase");
       (* Clean cycle (count = 0) still maps to Turn_succeeded. *)
-      match KHL.turn_status_event ~turn_fail_count:0 ~max_allowed:10 with
+      match KHL.turn_status_event ~turn_fail_count:0 with
       | KSM.Turn_succeeded -> ()
       | _ -> fail "expected Turn_succeeded when no failures recorded")
 
@@ -730,7 +695,7 @@ let test_crashed_cycle_records_turn_failure () =
 let test_direct_start_keepalive_resolves_done_on_stop () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  R.clear ();
+  R.For_testing.clear ();
   let base_dir = temp_dir "direct-keepalive" in
   let keeper_name = "direct-lifecycle" in
   Fun.protect
@@ -751,6 +716,9 @@ let test_direct_start_keepalive_resolves_done_on_stop () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config);
         }
       in
       seed_keeper_sandbox_profile ~base_dir keeper_name;
@@ -811,6 +779,10 @@ let test_keeper_lane_join_waits_for_children_and_cleanup () =
    | Lane.Completed -> ()
    | Lane.Shutdown_before_start -> fail "unexpected shutdown before lane start"
    | Lane.Shutdown_requested -> fail "unexpected lane shutdown"
+   | Lane.Shutdown_cancel_failed failure ->
+     fail
+       ("unexpected shutdown cancellation failure: "
+        ^ Printexc.to_string failure.cause)
    | Lane.Cancelled_by_parent cause ->
      fail ("unexpected parent cancellation: " ^ Printexc.to_string cause)
    | Lane.Failed exn -> fail ("unexpected lane failure: " ^ Printexc.to_string exn));
@@ -854,25 +826,17 @@ let test_keeper_lane_identity_is_typed_and_unique () =
   | Ok decoded -> check bool "lane id round-trip" true (Lane.Id.equal first_id decoded)
   | Error detail -> fail detail
 
-(* Codex #24135 finding 1 (predicate half): [request_cancel] records a shutdown
-   request so a supervised body can classify the resulting cancellation as an
-   operator shutdown (graceful stop) rather than a parent/restart cancel. The
-   supervised-body routing that consumes this flag is covered by review against
-   the tested normal-exit path (a full fork+cancel finally harness is not
-   available: the supervisor tests mock [supervise_keepalive]). *)
-let test_lane_records_shutdown_request_on_cancel () =
+let test_lane_cancel_before_start_is_joinable () =
   Eio_main.run @@ fun _env ->
   let lane = Lane.create () in
-  check bool "fresh lane has no shutdown request" false
-    (Lane.shutdown_requested lane);
   (match Lane.request_cancel lane with
    | Lane.Cancel_requested -> ()
    | Lane.Cancel_already_requested
    | Lane.Cancel_already_exiting
-   | Lane.Cancel_signal_failed _ ->
+   | Lane.Cancel_wrong_domain
+   | Lane.Cancel_not_committed _
+   | Lane.Cancel_committed_with_failure _ ->
      fail "expected request_cancel to be accepted on a fresh lane");
-  check bool "request_cancel records the shutdown request" true
-    (Lane.shutdown_requested lane);
   match Lane.await_exit lane with
   | { outcome = Lane.Shutdown_before_start; _ } -> ()
   | { outcome = _; _ } ->
@@ -883,26 +847,54 @@ let test_keeper_lane_cancel_is_lane_local_and_joinable () =
   Eio.Switch.run @@ fun parent_sw ->
   let lane = Lane.create () in
   let never_p, _never_r = Eio.Promise.create () in
+  let observed_origin = Atomic.make None in
   (match
      Lane.fork
        ~sw:parent_sw
        lane
-       ~run:(fun _lane_sw -> Eio.Promise.await never_p)
+       ~run:(fun _lane_sw ->
+         try Eio.Promise.await never_p with
+         | Eio.Cancel.Cancelled cause ->
+           Atomic.set observed_origin (Some (Lane.classify_cancellation_cause cause)))
        ~cleanup:(fun _outcome -> Ok ())
    with
    | Ok () -> ()
    | Error error -> fail (Lane.start_error_to_string error));
   Eio.Fiber.yield ();
+  (match Domain.join (Domain.spawn (fun () -> Lane.request_cancel lane)) with
+   | Lane.Cancel_wrong_domain -> ()
+   | Lane.Cancel_requested -> fail "cross-domain cancellation mutated the lane"
+   | Lane.Cancel_already_requested ->
+     fail "cross-domain cancellation observed a committed request"
+   | Lane.Cancel_already_exiting -> fail "lane exited during cross-domain probe"
+   | Lane.Cancel_not_committed exn
+   | Lane.Cancel_committed_with_failure exn ->
+     fail ("cross-domain cancellation touched Eio state: " ^ Printexc.to_string exn));
+  check bool
+    "cross-domain rejection leaves lane running"
+    true
+    (Option.is_none (Lane.peek_exit lane));
   (match Lane.request_cancel lane with
    | Lane.Cancel_requested -> ()
    | Lane.Cancel_already_requested
    | Lane.Cancel_already_exiting
-   | Lane.Cancel_signal_failed _ -> fail "first lane cancellation was not accepted");
+   | Lane.Cancel_wrong_domain
+   | Lane.Cancel_not_committed _
+   | Lane.Cancel_committed_with_failure _ ->
+     fail "first lane cancellation was not accepted");
   let exit = Lane.await_exit lane in
+  (match Atomic.get observed_origin with
+   | Some Lane.Shutdown_request -> ()
+   | Some (Lane.External_cancel cause) ->
+     fail ("lane body observed external cancellation: " ^ Printexc.to_string cause)
+   | None -> fail "lane body did not observe cancellation origin");
   match exit.outcome with
   | Lane.Shutdown_requested -> ()
   | Lane.Shutdown_before_start -> fail "running lane reported pre-start shutdown"
   | Lane.Completed -> fail "cancelled lane reported normal completion"
+  | Lane.Shutdown_cancel_failed failure ->
+    fail
+      ("lane shutdown cancellation failed: " ^ Printexc.to_string failure.cause)
   | Lane.Cancelled_by_parent cause ->
     fail ("lane cancellation escaped to parent: " ^ Printexc.to_string cause)
   | Lane.Failed exn -> fail ("lane cancellation failed: " ^ Printexc.to_string exn)
@@ -1187,7 +1179,8 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
        | Shutdown_types.Cleanup_ready _
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Finalized _
-       | Shutdown_types.Blocked _ ->
+       | Shutdown_types.Blocked _
+       | Shutdown_types.Superseded _ ->
          fail "unhandled worker failure did not persist typed blocked evidence");
       Shutdown_runtime.For_testing.persist_unhandled_failure
         ~now:Masc_domain.now_iso
@@ -1227,6 +1220,370 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
       | Error (Shutdown_store.Decode_error _) -> ()
       | Error error -> fail (Shutdown_store.error_to_string error)
       | Ok _ -> fail "unsupported shutdown schema was accepted")
+
+let test_operator_update_supersedes_exact_blocked_shutdown () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir "shutdown-supersession" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "tester")
+      in
+      let backlog_version =
+        match Workspace_backlog.read_backlog_r config with
+        | Ok backlog -> backlog.version
+        | Error detail -> fail detail
+      in
+      let operation ~name ~reason ~phase =
+        let meta = make_meta name in
+        let now = Masc_domain.now_iso () in
+        { Shutdown_types.schema_version = Shutdown_types.schema_version
+        ; revision = 0
+        ; operation_id = Shutdown_types.Operation_id.generate ()
+        ; keeper_name = name
+        ; lane_ownership = Shutdown_types.Registered_lane (Lane.id (Lane.create ()))
+        ; trace_id = meta.runtime.trace_id
+        ; generation = meta.runtime.generation
+        ; actor = "tester"
+        ; cleanup_intent = { reason; remove_session = false }
+        ; turn_disposition = Shutdown_types.No_inflight_turn
+        ; expected_backlog_version = backlog_version
+        ; owned_task_ids = []
+        ; join_evidence = None
+        ; phase
+        ; created_at = now
+        ; updated_at = now
+        }
+      in
+      let blocked_phase =
+        Shutdown_types.Blocked
+          { stage = Shutdown_types.Record_update
+          ; detail = "operator repair required"
+          }
+      in
+      let blocked =
+        operation
+          ~name:"superseded-keeper"
+          ~reason:Shutdown_types.Operator_stop_retain_meta
+          ~phase:blocked_phase
+      in
+      (match Shutdown_store.persist_new ~config blocked with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      let blocked_path =
+        match
+          Shutdown_store.path
+            ~config
+            ~keeper_name:blocked.keeper_name
+            blocked.operation_id
+        with
+        | Ok path -> path
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      (match
+         Keeper_fs.save_json_atomic
+           blocked_path
+           (shutdown_schema5_fixture blocked)
+       with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let migrated_v5 =
+        match
+          Shutdown_store.load
+            ~config
+            ~keeper_name:blocked.keeper_name
+            blocked.operation_id
+        with
+        | Ok operation -> operation
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      check int
+        "schema 5 blocked record decodes at current schema"
+        Shutdown_types.schema_version
+        migrated_v5.schema_version;
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:blocked.keeper_name
+           ~operation_id:blocked.operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         fail "fixture admission was already reserved");
+      let token =
+        match
+          Shutdown_supersession.preflight
+            ~config
+            ~keeper_name:blocked.keeper_name
+            ~actor:"tester"
+        with
+        | Ok token -> token
+        | Error error -> fail (Shutdown_supersession.error_to_string error)
+      in
+      let superseded =
+        match Shutdown_supersession.commit_after_metadata_update ~config token with
+        | Ok (Shutdown_supersession.Shutdown_superseded operation) -> operation
+        | Ok Shutdown_supersession.No_shutdown_admission ->
+          fail "blocked admission was not superseded"
+        | Error error -> fail (Shutdown_supersession.error_to_string error)
+      in
+      check int
+        "schema 5 CAS write upgrades the durable record to schema 6"
+        6
+        superseded.schema_version;
+      (match superseded.phase with
+       | Shutdown_types.Superseded
+           (Shutdown_types.Operator_metadata_update { actor }) ->
+         check string "supersession preserves validated operator actor" "tester" actor
+       | _ -> fail "blocked shutdown did not reach typed Superseded");
+      let released =
+        Masc.Keeper_turn_admission.snapshot_for
+          ~base_path:config.base_path
+          ~keeper_name:blocked.keeper_name
+      in
+      check (option string)
+        "exact superseded admission is released"
+        None
+        (Option.map
+           Shutdown_types.Operation_id.to_string
+           released.snapshot_shutdown_operation_id);
+      let persisted_json =
+        Fs_compat.load_file blocked_path |> Yojson.Safe.from_string
+      in
+      let persisted_schema =
+        match persisted_json with
+        | `Assoc fields ->
+          (match List.assoc_opt "schema_version" fields with
+           | Some (`Int version) -> version
+           | _ -> fail "persisted supersession omitted schema_version")
+        | _ -> fail "persisted supersession is not an object"
+      in
+      check int "supersession wire schema is upgraded" 6 persisted_schema;
+      let invalid_superseded =
+        { superseded with
+          operation_id = Shutdown_types.Operation_id.generate ()
+        ; cleanup_intent =
+            { reason = Shutdown_types.Operator_stop_remove_meta
+            ; remove_session = false
+            }
+        }
+      in
+      (match Shutdown_store.persist_new ~config invalid_superseded with
+       | Error
+           (Shutdown_store.Invalid_operation
+             (Shutdown_types.Superseded_cleanup_reason_mismatch _)) -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error)
+       | Ok () -> fail "Superseded accepted a non-retained cleanup intent");
+      (match
+         superseded
+         |> shutdown_schema5_fixture
+         |> Shutdown_store.of_json
+       with
+       | Error (Shutdown_store.Decode_error _) -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error)
+       | Ok _ -> fail "schema 5 accepted the schema 6 superseded phase");
+      (match
+         Masc.Keeper_turn_admission.restore_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:blocked.keeper_name
+           ~operation_id:blocked.operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_restored -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_restored
+       | Masc.Keeper_turn_admission.Shutdown_restore_conflict _ ->
+         fail "crash-window admission fixture could not be restored");
+      let retry_token =
+        match
+          Shutdown_supersession.preflight
+            ~config
+            ~keeper_name:blocked.keeper_name
+            ~actor:"tester"
+        with
+        | Ok token -> token
+        | Error error -> fail (Shutdown_supersession.error_to_string error)
+      in
+      (match
+         Shutdown_supersession.commit_after_metadata_update
+           ~config
+           retry_token
+       with
+       | Ok (Shutdown_supersession.Shutdown_superseded _) -> ()
+       | Ok Shutdown_supersession.No_shutdown_admission ->
+         fail "idempotent supersession lost the exact admission owner"
+       | Error error -> fail (Shutdown_supersession.error_to_string error));
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      let inventory =
+        match Shutdown_store.scan_inventory ~config with
+        | Ok inventory -> inventory
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      (match Shutdown_runtime.restore_inventory_admission ~config inventory with
+       | Ok { blocked_keeper_names = []; _ } -> ()
+       | Ok restored ->
+         failf
+           "Superseded boot restore fenced keepers: %s"
+           (String.concat "," restored.blocked_keeper_names)
+       | Error detail -> fail detail);
+
+      let conflict =
+        operation
+          ~name:"supersession-conflict"
+          ~reason:Shutdown_types.Operator_stop_retain_meta
+          ~phase:blocked_phase
+      in
+      (match Shutdown_store.persist_new ~config conflict with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      ignore
+        (Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:conflict.keeper_name
+           ~operation_id:conflict.operation_id
+          : Masc.Keeper_turn_admission.begin_shutdown_result);
+      let conflict_token =
+        match
+          Shutdown_supersession.preflight
+            ~config
+            ~keeper_name:conflict.keeper_name
+            ~actor:"tester"
+        with
+        | Ok token -> token
+        | Error error -> fail (Shutdown_supersession.error_to_string error)
+      in
+      let concurrently_advanced =
+        { conflict with
+          revision = conflict.revision + 1
+        ; phase =
+            Shutdown_types.Blocked
+              { stage = Shutdown_types.Meta_update
+              ; detail = "new durable failure"
+              }
+        }
+      in
+      (match
+         Shutdown_store.replace
+           ~config
+           ~expected_revision:conflict.revision
+           concurrently_advanced
+       with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      (match
+         Shutdown_supersession.commit_after_metadata_update
+           ~config
+           conflict_token
+       with
+       | Error
+           (Shutdown_supersession.Metadata_committed_supersession_failed
+             (Shutdown_store.Revision_conflict _)) -> ()
+       | Error error -> fail (Shutdown_supersession.error_to_string error)
+       | Ok _ -> fail "stale preflight token superseded a newer revision");
+      let still_fenced =
+        Masc.Keeper_turn_admission.snapshot_for
+          ~base_path:config.base_path
+          ~keeper_name:conflict.keeper_name
+      in
+      check (option string)
+        "failed supersession leaves exact admission fenced"
+        (Some (Shutdown_types.Operation_id.to_string conflict.operation_id))
+        (Option.map
+           Shutdown_types.Operation_id.to_string
+           still_fenced.snapshot_shutdown_operation_id);
+
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      let live_name = "update-blocked-admission" in
+      let live_meta = { (make_meta live_name) with paused = true } in
+      (match Keeper_meta_store.write_meta config live_meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let live_blocked =
+        { (operation
+             ~name:live_name
+             ~reason:Shutdown_types.Operator_stop_retain_meta
+             ~phase:blocked_phase) with
+          trace_id = live_meta.runtime.trace_id
+        ; generation = live_meta.runtime.generation
+        }
+      in
+      (match Shutdown_store.persist_new ~config live_blocked with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      ignore
+        (Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:live_name
+           ~operation_id:live_blocked.operation_id
+          : Masc.Keeper_turn_admission.begin_shutdown_result);
+      let profile_defaults =
+        { Keeper_profile_defaults.empty_keeper_profile_defaults with
+          sandbox_profile = Some live_meta.sandbox_profile
+        }
+      in
+      let parsed : Turn_up_args.parsed_args =
+        { name = live_name
+        ; runtime_id_opt = None
+        ; allowed_paths_opt = None
+        ; autoboot_enabled_opt = None
+        ; mention_targets_opt = None
+        ; active_goal_ids_opt = None
+        ; max_context_override_opt = None
+        ; max_context_override_present = false
+        ; proactive_enabled_opt = None
+        ; sandbox_profile_opt = None
+        ; network_mode_opt = None
+        ; instructions_arg = Some "new operator intent"
+        ; profile_defaults
+        ; instructions_opt = profile_defaults.instructions
+        }
+      in
+      let ctx : _ Keeper_types_profile.context =
+        { config
+        ; agent_name = "tester"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = None
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.non_runtime_publication_recovery_provider
+        }
+      in
+      let result = Turn_up_update.update_keeper ctx parsed live_meta in
+      check bool
+        "keeper_up restarts despite the stale blocked admission"
+        true
+        (Keeper_types_profile.tool_result_success result);
+      let live_operation =
+        match
+          Shutdown_store.load
+            ~config
+            ~keeper_name:live_name
+            live_blocked.operation_id
+        with
+        | Ok operation -> operation
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      (match live_operation.phase with
+       | Shutdown_types.Superseded
+           (Shutdown_types.Operator_metadata_update { actor = "tester" }) -> ()
+       | _ -> fail "update_keeper did not supersede the blocked operator stop");
+      let live_after =
+        match Keeper_meta_store.read_meta config live_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "update_keeper removed retained metadata"
+        | Error detail -> fail detail
+      in
+      check bool "update_keeper persisted the new resume intent" false live_after.paused;
+      ignore
+        (Masc.Keeper_keepalive.stop_keepalive_and_await
+           ~base_path:config.base_path
+           live_name
+          : Masc.Keeper_keepalive.joined_stop_result))
 
 let test_keeper_shutdown_store_isolates_corrupt_owner () =
   Eio_main.run @@ fun env ->
@@ -1317,6 +1674,8 @@ let test_keeper_shutdown_store_isolates_corrupt_owner () =
         List.fold_left
           (fun (operations, corrupt_records) -> function
              | Shutdown_store.Operation operation -> operation :: operations, corrupt_records
+             | Shutdown_store.Retired_terminal _ ->
+               fail "corrupt-owner fixture produced a retired terminal"
              | Shutdown_store.Corrupt_record corrupt ->
                operations, corrupt :: corrupt_records)
           ([], [])
@@ -1385,6 +1744,7 @@ let test_keeper_shutdown_store_isolates_corrupt_owner () =
               corrupt_operation.operation_id
               operation_id)
        | `Busy (Masc.Keeper_turn_admission.Turn_busy _)
+       | `Busy (Masc.Keeper_turn_admission.Chat_backlog _)
        | `Ran () -> fail "corrupt owner admission was reopened");
       match Shutdown_runtime.recover_operation ~config recoverable_operation with
       | Ok recovered ->
@@ -1394,6 +1754,256 @@ let test_keeper_shutdown_store_isolates_corrupt_owner () =
           (recovered.phase = recoverable_operation.phase)
       | Error detail -> fail detail)
 
+let test_retired_stale_paused_terminal_releases_exact_fence () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir "retired-stale-paused-terminal" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let (_init_message : string) =
+        Masc.Workspace.init config ~agent_name:(Some "operator")
+      in
+      let backlog_version =
+        match Workspace_backlog.read_backlog_r config with
+        | Ok backlog -> backlog.version
+        | Error detail -> fail detail
+      in
+      let meta = make_meta "retired-stale-paused-owner" in
+      let operation_id = Shutdown_types.Operation_id.generate () in
+      let operation : Shutdown_types.t =
+        { schema_version = Shutdown_types.schema_version
+        ; revision = 3
+        ; operation_id
+        ; keeper_name = meta.name
+        ; lane_ownership = Shutdown_types.Dormant_meta
+        ; trace_id = meta.runtime.trace_id
+        ; generation = meta.runtime.generation
+        ; actor = "keeper-autoboot"
+        ; cleanup_intent = remove_meta_cleanup
+        ; turn_disposition = Shutdown_types.No_inflight_turn
+        ; expected_backlog_version = backlog_version
+        ; owned_task_ids = []
+        ; join_evidence = None
+        ; phase =
+            Shutdown_types.Finalized
+              { cleanup = { settled_task_ids = []; pending_confirms_removed = 0 }
+              ; meta_removed = true
+              ; session_removed = false
+              ; registry_unregistered = false
+              ; accumulator_dropped = true
+              ; completion = Shutdown_types.Completion_not_requested
+              }
+        ; created_at = "2026-07-12T09:36:07Z"
+        ; updated_at = "2026-07-12T09:36:07Z"
+        }
+      in
+      let blocked_meta = make_meta "current-blocked-owner" in
+      let blocked_operation_id = Shutdown_types.Operation_id.generate () in
+      let blocked_operation : Shutdown_types.t =
+        { operation with
+          operation_id = blocked_operation_id
+        ; keeper_name = blocked_meta.name
+        ; trace_id = blocked_meta.runtime.trace_id
+        ; cleanup_intent = retain_operator_cleanup
+        ; phase =
+            Shutdown_types.Blocked
+              { stage = Shutdown_types.Unhandled_worker
+              ; detail = "Sys_error(\"Mutex.lock: Resource deadlock avoided\")"
+              }
+        }
+      in
+      let malformed_meta = make_meta "retired-malformed-owner" in
+      let malformed_operation_id = Shutdown_types.Operation_id.generate () in
+      let malformed_operation : Shutdown_types.t =
+        { operation with
+          operation_id = malformed_operation_id
+        ; keeper_name = malformed_meta.name
+        ; trace_id = malformed_meta.runtime.trace_id
+        }
+      in
+      (match Shutdown_store.persist_new ~config operation with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      (match Shutdown_store.persist_new ~config blocked_operation with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      (match Shutdown_store.persist_new ~config malformed_operation with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      let operation_path =
+        match Shutdown_store.path ~config ~keeper_name:meta.name operation_id with
+        | Ok path -> path
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      (match
+         Fs_compat.save_file_atomic
+           operation_path
+           (retired_stale_paused_schema5_fixture operation |> Yojson.Safe.to_string)
+       with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let malformed_operation_path =
+        match
+          Shutdown_store.path
+            ~config
+            ~keeper_name:malformed_meta.name
+            malformed_operation_id
+        with
+        | Ok path -> path
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      let malformed_fixture =
+        match retired_stale_paused_schema5_fixture malformed_operation with
+        | `Assoc fields -> `Assoc (replace_assoc_field "trace_id" (`Int 7) fields)
+        | _ -> fail "retired fixture did not return an object"
+      in
+      (match
+         Fs_compat.save_file_atomic
+           malformed_operation_path
+           (Yojson.Safe.to_string malformed_fixture)
+       with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:meta.name
+           ~operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         fail "retired fixture unexpectedly found an existing fence");
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:blocked_meta.name
+           ~operation_id:blocked_operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         fail "current blocked fixture unexpectedly found an existing fence");
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:malformed_meta.name
+           ~operation_id:malformed_operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         fail "malformed retired fixture unexpectedly found an existing fence");
+      let inventory =
+        match Shutdown_store.scan_inventory ~config with
+        | Ok inventory -> inventory
+        | Error error -> fail (Shutdown_store.error_to_string error)
+      in
+      let current_operations, retired_terminals, corrupt_records =
+        List.fold_left
+          (fun (operations, terminals, corrupt) -> function
+             | Shutdown_store.Operation current ->
+               current :: operations, terminals, corrupt
+             | Shutdown_store.Retired_terminal terminal ->
+               operations, terminal :: terminals, corrupt
+             | Shutdown_store.Corrupt_record record ->
+               operations, terminals, record :: corrupt)
+          ([], [], [])
+          inventory
+      in
+      (match retired_terminals with
+       | [ terminal ] ->
+         check string "retired terminal keeps path owner" meta.name terminal.keeper_name;
+         check bool
+           "retired terminal keeps operation identity"
+           true
+           (Shutdown_types.Operation_id.equal operation_id terminal.operation_id)
+       | _ -> fail "retired terminal was not isolated from current operations");
+      (match current_operations with
+       | [ current ] ->
+         check string
+           "current blocked operation remains current"
+           blocked_meta.name
+           current.keeper_name
+       | _ -> fail "current blocked operation changed inventory class");
+      (match corrupt_records with
+       | [ corrupt ] ->
+         check string
+           "malformed retired record keeps its path owner"
+           malformed_meta.name
+           corrupt.keeper_name;
+         check bool
+           "malformed retired record keeps its operation identity"
+           true
+           (Shutdown_types.Operation_id.equal
+              malformed_operation_id
+              corrupt.operation_id)
+       | _ -> fail "malformed retired record did not remain corrupt");
+      let restored =
+        match Shutdown_runtime.restore_inventory_admission ~config inventory with
+        | Ok restored -> restored
+        | Error detail -> fail detail
+      in
+      check
+        (list string)
+        "only the current blocked owner remains blocked"
+        [ blocked_meta.name; malformed_meta.name ]
+        restored.blocked_keeper_names;
+      check int "retired terminal remains observable" 1
+        (List.length restored.retired_terminal_records);
+      check bool
+        "retired terminal releases only its exact fence"
+        true
+        (Option.is_none
+           (Masc.Keeper_turn_admission.snapshot_for
+              ~base_path:config.base_path
+             ~keeper_name:meta.name)
+             .snapshot_shutdown_operation_id);
+      check
+        (option string)
+        "current blocked operation keeps its exact fence"
+        (Some (Shutdown_types.Operation_id.to_string blocked_operation_id))
+        (Option.map
+           Shutdown_types.Operation_id.to_string
+           (Masc.Keeper_turn_admission.snapshot_for
+              ~base_path:config.base_path
+              ~keeper_name:blocked_meta.name)
+             .snapshot_shutdown_operation_id);
+      check
+        (option string)
+        "malformed retired record keeps its exact fence"
+        (Some (Shutdown_types.Operation_id.to_string malformed_operation_id))
+        (Option.map
+           Shutdown_types.Operation_id.to_string
+           (Masc.Keeper_turn_admission.snapshot_for
+              ~base_path:config.base_path
+              ~keeper_name:malformed_meta.name)
+             .snapshot_shutdown_operation_id);
+      let newer_operation_id = Shutdown_types.Operation_id.generate () in
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:meta.name
+           ~operation_id:newer_operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         fail "newer shutdown fixture was already reserved");
+      (match Shutdown_runtime.restore_inventory_admission ~config inventory with
+       | Ok _ -> ()
+       | Error detail -> fail detail);
+      check
+        (option string)
+        "retired terminal does not clear a newer owner"
+        (Some (Shutdown_types.Operation_id.to_string newer_operation_id))
+        (Option.map
+           Shutdown_types.Operation_id.to_string
+           (Masc.Keeper_turn_admission.snapshot_for
+              ~base_path:config.base_path
+              ~keeper_name:meta.name)
+             .snapshot_shutdown_operation_id))
+
 let test_dashboard_purge_resolution_is_fail_closed () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1401,7 +2011,7 @@ let test_dashboard_purge_resolution_is_fail_closed () =
   Fun.protect
     ~finally:(fun () ->
       Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -1508,268 +2118,6 @@ let test_dashboard_purge_resolution_is_fail_closed () =
       | Ok _ -> fail "configuration-only Keeper fell through to agent purge")
 ;;
 
-let test_stale_prune_dormant_prepare_rejects_version_change () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_dir = temp_dir "stale-prune-prepare-version" in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      let (_init_message : string) =
-        Masc.Workspace.init config ~agent_name:(Some "supervisor")
-      in
-      let name = "stale-prune-version-race" in
-      let initial =
-        { (make_meta name) with
-          paused = true
-        ; updated_at = "2026-01-01T00:00:00Z"
-        }
-      in
-      (match Keeper_meta_store.write_meta config initial with
-       | Ok () -> ()
-       | Error detail -> fail detail);
-      let observed =
-        match Keeper_meta_store.read_meta config name with
-        | Ok (Some meta) -> meta
-        | Ok None -> fail "stale prune fixture metadata disappeared"
-        | Error detail -> fail detail
-      in
-      (match Keeper_meta_store.write_meta config observed with
-       | Ok () -> ()
-       | Error detail -> fail detail);
-      let latest =
-        match Keeper_meta_store.read_meta config name with
-        | Ok (Some meta) -> meta
-        | Ok None -> fail "version-raced metadata disappeared"
-        | Error detail -> fail detail
-      in
-      check int
-        "precondition: metadata version advanced"
-        (observed.meta_version + 1)
-        latest.meta_version;
-      (match
-         Shutdown_prepare_join.prepare_dormant
-           ~config
-           ~meta:observed
-           ~request:
-             { actor = "supervisor"
-             ; cleanup_intent = stale_paused_cleanup observed
-             }
-       with
-       | Error
-           (Shutdown_prepare_join.Meta_snapshot_version_changed
-             { expected; actual }) ->
-         check int "guard expected version" observed.meta_version expected;
-         check int "guard actual version" latest.meta_version actual
-       | Error error -> fail (Shutdown_prepare_join.error_to_string error)
-       | Ok _ -> fail "stale prune accepted metadata after its version changed");
-      let snapshot =
-        Masc.Keeper_turn_admission.snapshot_for
-          ~base_path:config.base_path
-          ~keeper_name:name
-      in
-      check bool
-        "failed dormant prepare rolls back admission"
-        true
-        (Option.is_none snapshot.snapshot_shutdown_operation_id);
-      (match Shutdown_store.list_for_keeper ~config ~keeper_name:name with
-       | Ok [] -> ()
-       | Ok _ -> fail "failed dormant prepare persisted a shutdown operation"
-       | Error error -> fail (Shutdown_store.error_to_string error)))
-
-let test_stale_prune_registered_prepare_requires_paused_lane () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_dir = temp_dir "stale-prune-phase-guard" in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      let (_init_message : string) =
-        Masc.Workspace.init config ~agent_name:(Some "supervisor")
-      in
-      let name = "stale-prune-running-lane" in
-      let initial =
-        { (make_meta name) with
-          paused = true
-        ; updated_at = "2026-01-01T00:00:00Z"
-        }
-      in
-      (match Keeper_meta_store.write_meta config initial with
-       | Ok () -> ()
-       | Error detail -> fail detail);
-      let observed =
-        match Keeper_meta_store.read_meta config name with
-        | Ok (Some meta) -> meta
-        | Ok None -> fail "stale prune fixture metadata disappeared"
-        | Error detail -> fail detail
-      in
-      let entry = R.register ~base_path:config.base_path name observed in
-      check string
-        "precondition: registered lane is running"
-        "running"
-        (KSM.phase_to_string entry.phase);
-      (match
-         Shutdown_prepare_join.prepare
-           ~config
-           ~entry
-           ~request:
-             { actor = "supervisor"
-             ; cleanup_intent = stale_paused_cleanup observed
-             }
-       with
-       | Error (Shutdown_prepare_join.Stale_prune_lane_not_paused KSM.Running) ->
-         ()
-       | Error error -> fail (Shutdown_prepare_join.error_to_string error)
-       | Ok _ -> fail "stale prune accepted a non-paused registered lane");
-      let snapshot =
-        Masc.Keeper_turn_admission.snapshot_for
-          ~base_path:config.base_path
-          ~keeper_name:name
-      in
-      check bool
-        "failed registered prepare rolls back admission"
-        true
-        (Option.is_none snapshot.snapshot_shutdown_operation_id))
-
-let test_stale_prune_cleanup_ready_preserves_newer_meta () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_dir = temp_dir "stale-prune-finalize-version" in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Masc.Workspace.default_config base_dir in
-      let (_init_message : string) =
-        Masc.Workspace.init config ~agent_name:(Some "supervisor")
-      in
-      let name = "stale-prune-finalize-race" in
-      let initial =
-        { (make_meta name) with
-          paused = true
-        ; updated_at = "2026-01-01T00:00:00Z"
-        }
-      in
-      (match Keeper_meta_store.write_meta config initial with
-       | Ok () -> ()
-       | Error detail -> fail detail);
-      let observed =
-        match Keeper_meta_store.read_meta config name with
-        | Ok (Some meta) -> meta
-        | Ok None -> fail "stale prune fixture metadata disappeared"
-        | Error detail -> fail detail
-      in
-      let backlog_version =
-        match Workspace_backlog.read_backlog_r config with
-        | Ok backlog -> backlog.version
-        | Error detail -> fail detail
-      in
-      let operation : Shutdown_types.t =
-        { schema_version = Shutdown_types.schema_version
-        ; revision = 0
-        ; operation_id = Shutdown_types.Operation_id.generate ()
-        ; keeper_name = name
-        ; lane_ownership = Shutdown_types.Dormant_meta
-        ; trace_id = observed.runtime.trace_id
-        ; generation = observed.runtime.generation
-        ; actor = "supervisor"
-        ; cleanup_intent = stale_paused_cleanup observed
-        ; turn_disposition = Shutdown_types.No_inflight_turn
-        ; expected_backlog_version = backlog_version
-        ; owned_task_ids = []
-        ; join_evidence = None
-        ; phase =
-            Shutdown_types.Cleanup_ready
-              { settled_task_ids = []; pending_confirms_removed = 0 }
-        ; created_at = Masc_domain.now_iso ()
-        ; updated_at = Masc_domain.now_iso ()
-        }
-      in
-      (match Shutdown_store.persist_new ~config operation with
-       | Ok () -> ()
-       | Error error -> fail (Shutdown_store.error_to_string error));
-      (match
-         Masc.Keeper_turn_admission.restore_shutdown
-           ~base_path:config.base_path
-           ~keeper_name:name
-           ~operation_id:operation.operation_id
-       with
-       | Masc.Keeper_turn_admission.Shutdown_restored -> ()
-       | Masc.Keeper_turn_admission.Shutdown_already_restored
-       | Masc.Keeper_turn_admission.Shutdown_restore_conflict _ ->
-         fail "stale prune fixture could not restore its admission owner");
-      (match Keeper_meta_store.write_meta config observed with
-       | Ok () -> ()
-       | Error detail -> fail detail);
-      let latest =
-        match Keeper_meta_store.read_meta config name with
-        | Ok (Some meta) -> meta
-        | Ok None -> fail "version-raced metadata disappeared"
-        | Error detail -> fail detail
-      in
-      (match Shutdown_finalize.run ~config ~entry:None operation with
-       | Error
-           (Shutdown_finalize.Finalization_blocked
-             { phase =
-                 Shutdown_types.Blocked
-                   { stage = Shutdown_types.Meta_remove; _ }
-             ; _
-             }) -> ()
-       | Error error -> fail (Shutdown_finalize.error_to_string error)
-       | Ok _ -> fail "stale prune deleted metadata after its version changed");
-      let preserved =
-        match Keeper_meta_store.read_meta config name with
-        | Ok (Some meta) -> meta
-        | Ok None -> fail "stale prune removed newer metadata"
-        | Error detail -> fail detail
-      in
-      check int
-        "newer metadata version is preserved"
-        latest.meta_version
-        preserved.meta_version;
-      let durable =
-        match
-          Shutdown_store.load
-            ~config
-            ~keeper_name:name
-            operation.operation_id
-        with
-        | Ok operation -> operation
-        | Error error -> fail (Shutdown_store.error_to_string error)
-      in
-      (match durable.phase with
-       | Shutdown_types.Blocked { stage = Shutdown_types.Meta_remove; _ } -> ()
-       | Shutdown_types.Prepared
-       | Shutdown_types.Joined_idle
-       | Shutdown_types.Finalizing_tasks _
-       | Shutdown_types.Cleanup_ready _
-       | Shutdown_types.Reconciliation_required _
-       | Shutdown_types.Finalized _
-       | Shutdown_types.Blocked _ ->
-         fail "stale prune version race was not durably blocked");
-      let snapshot =
-        Masc.Keeper_turn_admission.snapshot_for
-          ~base_path:config.base_path
-          ~keeper_name:name
-      in
-      check bool
-        "blocked destructive cleanup keeps admission fenced"
-        true
-        (match snapshot.snapshot_shutdown_operation_id with
-         | Some operation_id ->
-           Shutdown_types.Operation_id.equal operation.operation_id operation_id
-         | None -> false))
-
 let test_keeper_shutdown_prepare_joins_idle_lane () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1779,7 +2127,7 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
     ~finally:(fun () ->
       Masc.Keeper_chat_queue.For_testing.reset ();
       Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -1787,7 +2135,11 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
         Masc.Workspace.init config ~agent_name:(Some "operator")
       in
       let name = "shutdown-idle-lane" in
-      let entry = R.register ~base_path:config.base_path name (make_meta name) in
+      let meta = make_meta name in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let entry = R.For_testing.register ~base_path:config.base_path name meta in
       let never_p, _never_r = Eio.Promise.create () in
       (match
          Lane.fork
@@ -1829,7 +2181,8 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
        | Shutdown_types.Cleanup_ready _
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Finalized _
-       | Shutdown_types.Blocked _ -> fail "idle lane did not reach Joined_idle");
+       | Shutdown_types.Blocked _
+       | Shutdown_types.Superseded _ -> fail "idle lane did not reach Joined_idle");
       check bool
         "shutdown operation records lane join evidence"
         true
@@ -1845,7 +2198,9 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
            "shutdown admission fence retains operation identity"
            true
            (Shutdown_types.Operation_id.equal operation.operation_id operation_id)
-      | `Busy (Masc.Keeper_turn_admission.Turn_busy _) | `Ran () ->
+      | `Busy (Masc.Keeper_turn_admission.Turn_busy _)
+      | `Busy (Masc.Keeper_turn_admission.Chat_backlog _)
+      | `Ran () ->
          fail "shutdown admission fence reopened before finalization"))
 
 let test_keeper_shutdown_prepare_joins_not_started_lane () =
@@ -1856,7 +2211,7 @@ let test_keeper_shutdown_prepare_joins_not_started_lane () =
     ~finally:(fun () ->
       Masc.Keeper_chat_queue.For_testing.reset ();
       Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -1864,7 +2219,11 @@ let test_keeper_shutdown_prepare_joins_not_started_lane () =
         Masc.Workspace.init config ~agent_name:(Some "operator")
       in
       let name = "shutdown-not-started-lane" in
-      let entry = R.register ~base_path:config.base_path name (make_meta name) in
+      let meta = make_meta name in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let entry = R.For_testing.register ~base_path:config.base_path name meta in
       let operation =
         match
           Shutdown_prepare_join.run
@@ -1885,7 +2244,8 @@ let test_keeper_shutdown_prepare_joins_not_started_lane () =
        | Shutdown_types.Cleanup_ready _
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Finalized _
-       | Shutdown_types.Blocked _ -> fail "not-started lane did not reach Joined_idle");
+       | Shutdown_types.Blocked _
+       | Shutdown_types.Superseded _ -> fail "not-started lane did not reach Joined_idle");
       (match Lane.peek_exit entry.lane with
        | Some { outcome = Lane.Shutdown_before_start; cleanup_error = None } -> ()
        | Some _ -> fail "not-started lane recorded the wrong exit evidence"
@@ -1903,7 +2263,7 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
     ~finally:(fun () ->
       Masc.Keeper_chat_queue.For_testing.reset ();
       Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -1911,7 +2271,11 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
         Masc.Workspace.init config ~agent_name:(Some "operator")
       in
       let name = "shutdown-prepare-rollback-lane" in
-      let entry = R.register ~base_path:config.base_path name (make_meta name) in
+      let meta = make_meta name in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error detail -> fail detail);
+      let entry = R.For_testing.register ~base_path:config.base_path name meta in
       let probe_operation_id = Shutdown_types.Operation_id.generate () in
       let records_dir =
         match Shutdown_store.path ~config ~keeper_name:name probe_operation_id with
@@ -1933,7 +2297,6 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
        | Error (Shutdown_prepare_join.Prepare_persist_failed _) -> ()
        | Error error -> fail (Shutdown_prepare_join.error_to_string error)
        | Ok _ -> fail "shutdown prepare unexpectedly persisted through a file blocker");
-      configure_keeper_chat_persistence ~base_path:config.base_path;
       match
         Masc.Keeper_turn_admission.run_if_free
           ~base_path:config.base_path
@@ -1950,7 +2313,11 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
       | `Busy (Masc.Keeper_turn_admission.Turn_busy _) ->
         fail
           "failed shutdown prepare left the keeper admission fence closed: \
-           Turn_busy owns the slot")
+           Turn_busy owns the slot"
+      | `Busy (Masc.Keeper_turn_admission.Chat_backlog _) ->
+        fail
+          "failed shutdown prepare left the keeper admission fence closed: \
+           chat backlog fences the slot")
 
 let test_keeper_shutdown_finalizes_idle_operation () =
   Eio_main.run @@ fun env ->
@@ -1961,7 +2328,7 @@ let test_keeper_shutdown_finalizes_idle_operation () =
       Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
       Masc.Keeper_chat_queue.For_testing.reset ();
       Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -2025,7 +2392,8 @@ let test_keeper_shutdown_finalizes_idle_operation () =
        | Shutdown_types.Finalizing_tasks _
        | Shutdown_types.Cleanup_ready _
        | Shutdown_types.Reconciliation_required _
-       | Shutdown_types.Blocked _ -> fail "shutdown did not reach Finalized");
+       | Shutdown_types.Blocked _
+       | Shutdown_types.Superseded _ -> fail "shutdown did not reach Finalized");
       (match
          Masc.Keeper_turn_admission.begin_shutdown
            ~base_path:config.base_path
@@ -2059,26 +2427,24 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir "shutdown-dead-tombstone-completion" in
-  let completion_bus =
-    Agent_sdk.Event_bus.create
-      ~policy:Agent_sdk.Event_bus.Drop_oldest
-      ()
-  in
+  let completion_bus = Agent_sdk.Event_bus.create () in
   let completion_subscription =
-    Agent_sdk.Event_bus.subscribe
+    Masc.Agent_sdk_metrics_bridge.subscribe
+      ~capacity:256
+      ~overflow:Agent_sdk.Event_bus.Drop_oldest
       ~purpose:"dead-tombstone-completion-test"
       completion_bus
   in
-  Masc_event_bus.set completion_bus;
+  Event_bus_slots.set_masc completion_bus;
   Fun.protect
     ~finally:(fun () ->
-      Agent_sdk.Event_bus.unsubscribe completion_bus completion_subscription;
+      Masc.Agent_sdk_metrics_bridge.unsubscribe completion_bus completion_subscription;
       Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
       Shutdown_finalize.For_testing.reset_completion_handler ();
       Lifecycle_hooks.reset_for_testing ();
       Subprocess_registry.reset_for_testing ();
       Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -2094,7 +2460,7 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error detail -> fail detail);
-      let entry = R.register ~base_path:config.base_path meta.name meta in
+      let entry = R.For_testing.register ~base_path:config.base_path meta.name meta in
       let hook_deliveries = ref 0 in
       Subprocess_registry.register_default_cleanup_hook ();
       Lifecycle_hooks.register (fun ~keeper_id event ->
@@ -2174,7 +2540,8 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
        | Shutdown_types.Cleanup_ready _
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Blocked _
-       | Shutdown_types.Finalized _ ->
+       | Shutdown_types.Finalized _
+       | Shutdown_types.Superseded _ ->
          fail "completion outage did not retain a pending durable receipt");
       check int "pending receipt did not fire hook" 0 !hook_deliveries;
       (match
@@ -2187,6 +2554,7 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
          check bool "pending receipt retains exact admission owner" true
            (Shutdown_types.Operation_id.equal operation_id reserved)
        | `Busy (Masc.Keeper_turn_admission.Turn_busy _)
+       | `Busy (Masc.Keeper_turn_admission.Chat_backlog _)
        | `Ran () -> fail "pending completion reopened admission");
       Masc.Keeper_turn_admission.For_testing.reset ();
       let boot_inventory =
@@ -2216,6 +2584,7 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
          check bool "boot-restored fence keeps exact completion owner" true
            (Shutdown_types.Operation_id.equal operation_id reserved)
        | `Busy (Masc.Keeper_turn_admission.Turn_busy _)
+       | `Busy (Masc.Keeper_turn_admission.Chat_backlog _)
        | `Ran () -> fail "boot recovery reopened pending completion admission");
       Shutdown_finalize.register_completion_handler
         Tombstone_cleanup.handle_completion;
@@ -2242,10 +2611,11 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
        | Shutdown_types.Cleanup_ready _
        | Shutdown_types.Reconciliation_required _
        | Shutdown_types.Blocked _
-       | Shutdown_types.Finalized _ ->
+       | Shutdown_types.Finalized _
+       | Shutdown_types.Superseded _ ->
           fail "dead tombstone completion receipt was not delivered");
       check int "Tombstone_reaped delivered once" 1 !hook_deliveries;
-      (match Agent_sdk.Event_bus.drain completion_subscription with
+      (match Masc.Agent_sdk_metrics_bridge.drain completion_subscription with
        | [ event ] ->
          (match event.Agent_sdk.Event_bus.payload with
           | Agent_sdk.Event_bus.Custom
@@ -2296,7 +2666,7 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
       check int
         "delivered receipt prevents duplicate lifecycle event"
         0
-        (List.length (Agent_sdk.Event_bus.drain completion_subscription));
+        (List.length (Masc.Agent_sdk_metrics_bridge.drain completion_subscription));
       check
         bool
         "delivered dead completion releases admission fence"
@@ -2311,24 +2681,22 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir "dashboard-purge-finalization" in
-  let completion_bus =
-    Agent_sdk.Event_bus.create
-      ~policy:Agent_sdk.Event_bus.Drop_oldest
-      ()
-  in
+  let completion_bus = Agent_sdk.Event_bus.create () in
   let completion_subscription =
-    Agent_sdk.Event_bus.subscribe
+    Masc.Agent_sdk_metrics_bridge.subscribe
+      ~capacity:256
+      ~overflow:Agent_sdk.Event_bus.Drop_oldest
       ~purpose:"dashboard-purge-completion-test"
       completion_bus
   in
-  Masc_event_bus.set completion_bus;
+  Event_bus_slots.set_masc completion_bus;
   Fun.protect
     ~finally:(fun () ->
-      Agent_sdk.Event_bus.unsubscribe completion_bus completion_subscription;
+      Masc.Agent_sdk_metrics_bridge.unsubscribe completion_bus completion_subscription;
       Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
       Shutdown_finalize.For_testing.reset_completion_handler ();
       Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -2350,14 +2718,13 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         | Ok backlog -> backlog.version
         | Error detail -> fail detail
       in
+      let metrics_dir = Keeper_types_support.keeper_metrics_dir config meta.name in
+      write_file (Filename.concat metrics_dir "2026-07/15.jsonl") "{}\n";
       let sidecar_paths =
-        [ Keeper_types_support.keeper_metrics_path config meta.name
-        ; Keeper_types_support.keeper_memory_bank_path config meta.name
+        [ Keeper_types_support.keeper_memory_bank_path config meta.name
         ; Keeper_types_support.keeper_generation_index_path config meta.name
-        ; Keeper_types_support.keeper_policy_log_path config meta.name
         ; Keeper_types_support.keeper_decision_log_path config meta.name
         ; Keeper_types_support.keeper_feedback_log_path config meta.name
-        ; Keeper_types_support.keeper_dataset_export_path config meta.name
         ]
       in
       List.iter (fun path -> write_file path "fixture") sidecar_paths;
@@ -2503,6 +2870,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
        | _ -> fail "dashboard purge did not persist its delivered receipt");
       let removed_paths =
         [ Keeper_types_profile.keeper_meta_path config meta.name
+        ; metrics_dir
         ; runtime_dir
         ; session_dir
         ; configuration_path
@@ -2532,7 +2900,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
               (fun (heartbeat : Heartbeat.t) ->
                  String.equal heartbeat.agent_name meta.agent_name)
               (Heartbeat.list ())));
-      (match Agent_sdk.Event_bus.drain completion_subscription with
+      (match Masc.Agent_sdk_metrics_bridge.drain completion_subscription with
        | [ event ] ->
          (match event.Agent_sdk.Event_bus.payload with
           | Agent_sdk.Event_bus.Custom
@@ -2556,7 +2924,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
       check int
         "delivered dashboard purge receipt prevents duplicate event"
         0
-        (List.length (Agent_sdk.Event_bus.drain completion_subscription));
+        (List.length (Masc.Agent_sdk_metrics_bridge.drain completion_subscription));
       let admission =
         Masc.Keeper_turn_admission.snapshot_for
           ~base_path:config.base_path
@@ -2575,7 +2943,7 @@ let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
   Fun.protect
     ~finally:(fun () ->
       Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -2641,7 +3009,7 @@ let test_keeper_shutdown_recovers_committed_task_receipt () =
     ~finally:(fun () ->
       Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
       Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -2745,12 +3113,12 @@ let test_keeper_shutdown_recovers_committed_task_receipt () =
 let test_start_keepalive_denies_dead_tombstone_before_registration () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  R.clear ();
+  R.For_testing.clear ();
   let base_dir = temp_dir "dead-tombstone-keepalive-admission" in
   let keeper_name = "dead-tombstone-admission" in
   Fun.protect
     ~finally:(fun () ->
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -2768,6 +3136,8 @@ let test_start_keepalive_denies_dead_tombstone_before_registration () =
         ; clock = Eio.Stdenv.clock env
         ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
         ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.non_runtime_publication_recovery_provider
         }
       in
       (match Masc.Keeper_keepalive.start_keepalive ctx meta with
@@ -2782,24 +3152,24 @@ let test_start_keepalive_denies_dead_tombstone_before_registration () =
 let test_start_keepalive_preserves_unresolved_failing_entry () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  R.clear ();
+  R.For_testing.clear ();
   let base_dir = temp_dir "direct-keepalive-live-failing" in
   let keeper_name = "live-failing-entry" in
   Fun.protect
     ~finally:(fun () ->
       Masc.Keeper_keepalive.stop_keepalive keeper_name;
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
       ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
       let meta = make_meta keeper_name in
-      let original = R.register ~base_path:config.base_path keeper_name meta in
+      let original = R.For_testing.register ~base_path:config.base_path keeper_name meta in
       ignore
         (R.dispatch_event
            ~base_path:config.base_path
            keeper_name
-           (KSM.Turn_failed { consecutive = 1; max_allowed = 3 }));
+           (KSM.Turn_failed { consecutive = 1 }));
       Eio.Switch.run @@ fun sw ->
       let ctx : _ Keeper_types_profile.context =
         {
@@ -2809,6 +3179,9 @@ let test_start_keepalive_preserves_unresolved_failing_entry () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config);
         }
       in
       seed_keeper_sandbox_profile ~base_dir keeper_name;
@@ -2827,24 +3200,24 @@ let test_start_keepalive_preserves_unresolved_failing_entry () =
 let test_start_keepalive_reclaims_finished_failing_entry () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  R.clear ();
+  R.For_testing.clear ();
   let base_dir = temp_dir "direct-keepalive-stale-failing" in
   let keeper_name = "stale-failing-entry" in
   Fun.protect
     ~finally:(fun () ->
       Masc.Keeper_keepalive.stop_keepalive keeper_name;
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
       ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
       let meta = make_meta keeper_name in
-      let original = R.register ~base_path:config.base_path keeper_name meta in
+      let original = R.For_testing.register ~base_path:config.base_path keeper_name meta in
       ignore
         (R.dispatch_event
            ~base_path:config.base_path
            keeper_name
-           (KSM.Turn_failed { consecutive = 1; max_allowed = 3 }));
+           (KSM.Turn_failed { consecutive = 1 }));
       resolve_done_for_test original (`Crashed "provider runtime error");
       Eio.Switch.run @@ fun sw ->
       let ctx : _ Keeper_types_profile.context =
@@ -2855,6 +3228,9 @@ let test_start_keepalive_reclaims_finished_failing_entry () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config);
         }
       in
       seed_keeper_sandbox_profile ~base_dir keeper_name;
@@ -2872,9 +3248,9 @@ let test_start_keepalive_reclaims_finished_failing_entry () =
         Masc.Keeper_keepalive.stop_keepalive keeper_name)
 
 let test_stop_keepalive_only_requests_lane_stop () =
-  R.clear ();
+  R.For_testing.clear ();
   let keeper_name = "manual-stop-entry" in
-  let reg = R.register ~base_path:bp keeper_name (make_meta keeper_name) in
+  let reg = R.For_testing.register ~base_path:bp keeper_name (make_meta keeper_name) in
   Masc.Keeper_keepalive.stop_keepalive keeper_name;
   match R.get ~base_path:bp keeper_name with
   | None -> fail "expected manual-stop-entry in registry"
@@ -2895,9 +3271,9 @@ let test_stop_keepalive_only_requests_lane_stop () =
       (not (R.lane_has_exited entry))
 
 let test_stop_keepalive_preserves_existing_crash_outcome () =
-  R.clear ();
+  R.For_testing.clear ();
   let keeper_name = "crashed-before-stop" in
-  let reg = R.register ~base_path:bp keeper_name (make_meta keeper_name) in
+  let reg = R.For_testing.register ~base_path:bp keeper_name (make_meta keeper_name) in
   let reason = "already crashed" in
   ignore (R.dispatch_event ~base_path:bp keeper_name
     (KSM.Fiber_terminated { outcome = "already crashed"; provider_id = None; http_status = None }));
@@ -2916,9 +3292,9 @@ let test_stop_keepalive_preserves_existing_crash_outcome () =
      | None -> fail "expected crash promise to remain resolved")
 
 let test_resolve_done_reports_prior_outcome () =
-  R.clear ();
+  R.For_testing.clear ();
   let keeper_name = "double-resolve-contract" in
-  let reg = R.register ~base_path:bp keeper_name (make_meta keeper_name) in
+  let reg = R.For_testing.register ~base_path:bp keeper_name (make_meta keeper_name) in
   (match R.resolve_done reg ~source:"test_first" (`Crashed "first") with
    | R.Done_resolved { source } -> check string "first source" "test_first" source
    | R.Done_already_resolved _ -> fail "first resolve should succeed");
@@ -2933,9 +3309,7 @@ let test_resolve_done_reports_prior_outcome () =
 (* ══════════════════════════════════════════════════════════
    9. RFC-0002: pipeline_stage_of_phase deterministic mapping
 
-   NOTE: The "set_failure_reason before raise Keeper_fiber_crash"
-   ordering invariant is a code convention enforced by review,
-   not a runtime property testable by unit tests. See PR #5560.
+   Failure streaks are observational and do not terminate the Keeper lane.
    ══════════════════════════════════════════════════════════ *)
 
 module ES = Masc.Keeper_status_runtime
@@ -2968,7 +3342,7 @@ let test_pipeline_stage_detail_distinguishes_offline_projection () =
   let cases = [
     (KSM.Offline, "offline", "launch_pending_no_fiber");
     (KSM.Stopped, "offline", "clean_stop_terminal");
-    (KSM.Dead, "offline", "restart_budget_exhausted_terminal");
+    (KSM.Dead, "offline", "dead_tombstone_terminal");
   ] in
   List.iter
     (fun (phase, expected_stage, expected_detail) ->
@@ -2987,13 +3361,13 @@ let test_pipeline_stage_detail_distinguishes_offline_projection () =
     a non-None mapping. This tests the production boundary:
     get_phase feeds into pipeline_stage_of_phase. *)
 let test_pipeline_stage_unregistered_is_offline () =
-  R.clear ();
+  R.For_testing.clear ();
   (* Unregistered: get_phase must return None *)
   check bool "unregistered → no phase"
     true (Option.is_none (R.get_phase ~base_path:bp "ghost"));
   (* Registered: get_phase returns real phase, of_phase gives deterministic stage *)
   let meta = make_meta "alive" in
-  let _reg = R.register ~base_path:bp "alive" meta in
+  let _reg = R.For_testing.register ~base_path:bp "alive" meta in
   (match R.get_phase ~base_path:bp "alive" with
    | Some phase ->
      let stage = ES.pipeline_stage_of_phase phase in
@@ -3035,138 +3409,74 @@ let test_pipeline_stage_sensitivity () =
       "offline" stage
   ) offline_phases
 
-let test_runtime_backpressure_blocks_requested_turn () =
-  let meta = make_meta "runtime-backpressure" in
+let test_runtime_observation_cannot_block_requested_turn () =
+  let meta = make_meta "runtime-observation" in
   let obs =
     { base_observation with
-      pending_mentions = [ "operator", "please run" ]
+      pending_messages =
+        [ { Masc.Keeper_world_observation_message_scope.message_id = "mention-1"
+          ; speaker = "operator"
+          ; content = "please run"
+          ; kind = Mention
+          }
+        ]
     }
   in
   let decision =
     KHL.decide_keepalive_scheduling
-      ~runtime_id_of_meta:(fun _ -> "runtime-test")
-      ~runtime_resilience_of_name:(fun _ -> Some "provider_capacity")
       ~stop:(Atomic.make false)
       ~meta
       obs
   in
-  check bool "world observation requested a turn" true
-    decision.requested_should_run_turn;
-  check bool "runtime backpressure blocks admission" false decision.should_run_turn;
-  (match decision.runtime_backpressure with
-   | Obs.Runtime_backpressured { reason; _ } ->
-     check string "backpressure reason" "runtime_resilience_provider_capacity" reason
-   | Obs.Runtime_admitted -> fail "runtime backpressure should reject turn");
-  check bool "verdict reasons include runtime backpressure" true
-    (List.mem "runtime_backpressure" decision.verdict_reasons)
+  check bool "eligible turn reaches runtime boundary" true decision.should_run_turn;
+  check (list string) "only the typed mention reason is retained"
+    [ "mention_pending" ]
+    decision.verdict_reasons
 
-let test_keeper_health_backpressure_uses_keeper_name () =
-  let meta = make_meta "keeper-health-gate" in
-  let obs = { base_observation with pending_mentions = [ "operator", "please run" ] } in
-  let consulted = ref [] in
-  let decision =
-    KHL.decide_keepalive_scheduling
-      ~runtime_id_of_meta:(fun _ -> "runtime-test")
-      ~runtime_resilience_of_name:(fun _ ->
-        fail "runtime resilience should not be consulted after keeper health blocks")
-      ~keeper_resilience_of_name:(fun keeper_name ->
-        consulted := keeper_name :: !consulted;
-        Some "unhealthy")
-      ~stop:(Atomic.make false)
-      ~meta
-      obs
-  in
-  check (list string) "keeper health consulted by keeper name" [ meta.name ] !consulted;
-  check bool "world observation requested a turn" true decision.requested_should_run_turn;
-  check bool "keeper health blocks admission" false decision.should_run_turn;
-  (match decision.runtime_backpressure with
-   | Obs.Runtime_backpressured { reason; _ } ->
-     check string "keeper health reason" "keeper_health_unhealthy" reason
-   | Obs.Runtime_admitted -> fail "keeper health should reject turn")
-
-let test_pacing_block_delays_requested_turn () =
-  (* RFC-0313 W3: with pacing enforced, the caller wires
-     [Keeper_pacing_shadow.next_due_remaining] as [pacing_block_of_name];
-     a positive remaining delay gates the requested turn without touching
-     keeper existence. *)
-  let meta = make_meta "pacing-gate" in
+let test_explicit_stop_blocks_requested_turn () =
+  let meta = make_meta "stopped-scheduling" in
   let obs =
-    { base_observation with pending_mentions = [ "operator", "please run" ] }
+    { base_observation with
+      pending_messages =
+        [ { Masc.Keeper_world_observation_message_scope.message_id = "mention-1"
+          ; speaker = "operator"
+          ; content = "please run"
+          ; kind = Mention
+          }
+        ]
+    }
   in
-  let consulted = ref [] in
   let decision =
     KHL.decide_keepalive_scheduling
-      ~runtime_id_of_meta:(fun _ -> "runtime-test")
-      ~pacing_block_of_name:(fun keeper_name ->
-        consulted := keeper_name :: !consulted;
-        Some 42.0)
-      ~stop:(Atomic.make false)
+      ~stop:(Atomic.make true)
       ~meta
       obs
   in
-  check (list string) "pacing consulted by keeper name" [ meta.name ] !consulted;
-  check bool "world observation requested a turn" true
-    decision.requested_should_run_turn;
-  check bool "pacing block delays admission" false decision.should_run_turn;
-  (match decision.pacing_block with
-   | Some remaining ->
-     check (float 1e-6) "remaining seconds surfaced" 42.0 remaining
-   | None -> fail "pacing_block should carry the remaining delay");
-  check bool "verdict reasons include pacing_pending" true
-    (List.mem "pacing_pending" decision.verdict_reasons);
-  let admitted =
-    KHL.decide_keepalive_scheduling
-      ~runtime_id_of_meta:(fun _ -> "runtime-test")
-      ~stop:(Atomic.make false)
-      ~meta
-      obs
-  in
-  check bool "default pacing closure never blocks" true admitted.should_run_turn
+  check bool "explicit loop stop prevents dispatch" false decision.should_run_turn
 
-let test_blocking_gates_are_classified_before_intake () =
+let test_turn_intake_uses_only_lifecycle () =
   let lifecycle =
     Keeper_lifecycle_admission.Autonomous_admitted
   in
   (match
-     KHL.classify_turn_intake_admission
-       ~lifecycle
-       ~pressure:Keeper_pressure_admission.Admitted
-       ~blocking_approval_pending:true
+     KHL.classify_turn_intake_admission ~lifecycle
    with
-   | KHL.Intake_blocking_approval_pending -> ()
-   | KHL.Intake_admitted
-   | KHL.Intake_lifecycle_blocked _
-   | KHL.Intake_pressure_blocked _ ->
-     fail "blocking approval must stop intake before durable dequeue");
+   | KHL.Intake_admitted -> ()
+   | KHL.Intake_lifecycle_blocked _ ->
+     fail "active lifecycle must admit intake");
   let paused_lifecycle =
     Keeper_lifecycle_admission.state ~paused:true ~latched_reason:None
     |> Keeper_lifecycle_admission.admit_autonomous
   in
   (match
-     KHL.classify_turn_intake_admission
-       ~lifecycle:paused_lifecycle
-       ~pressure:Keeper_pressure_admission.Admitted
-       ~blocking_approval_pending:false
+     KHL.classify_turn_intake_admission ~lifecycle:paused_lifecycle
    with
    | KHL.Intake_lifecycle_blocked
        (Keeper_lifecycle_admission.Autonomous_paused _) -> ()
    | KHL.Intake_admitted
    | KHL.Intake_lifecycle_blocked
-       Keeper_lifecycle_admission.Autonomous_dead_tombstone
-   | KHL.Intake_blocking_approval_pending
-   | KHL.Intake_pressure_blocked _ ->
-     fail "explicit Keeper pause must stop intake before durable dequeue");
-  match
-    KHL.classify_turn_intake_admission
-      ~lifecycle
-      ~pressure:Keeper_pressure_admission.Admitted
-      ~blocking_approval_pending:false
-  with
-  | KHL.Intake_admitted -> ()
-  | KHL.Intake_lifecycle_blocked _
-  | KHL.Intake_blocking_approval_pending
-  | KHL.Intake_pressure_blocked _ ->
-    fail "no blocking approval should leave intake admitted"
+       Keeper_lifecycle_admission.Autonomous_dead_tombstone ->
+     fail "explicit Keeper pause must stop intake before durable dequeue")
 
 let test_lifecycle_is_classified_before_intake () =
   let lifecycle =
@@ -3174,18 +3484,13 @@ let test_lifecycle_is_classified_before_intake () =
       Keeper_lifecycle_admission.Autonomous_dead_tombstone
   in
   match
-    KHL.classify_turn_intake_admission
-      ~lifecycle
-      ~pressure:Keeper_pressure_admission.Admitted
-      ~blocking_approval_pending:false
+    KHL.classify_turn_intake_admission ~lifecycle
   with
   | KHL.Intake_lifecycle_blocked
       Keeper_lifecycle_admission.Autonomous_dead_tombstone -> ()
   | KHL.Intake_admitted
   | KHL.Intake_lifecycle_blocked
-      (Keeper_lifecycle_admission.Autonomous_paused _)
-  | KHL.Intake_blocking_approval_pending
-  | KHL.Intake_pressure_blocked _ ->
+      (Keeper_lifecycle_admission.Autonomous_paused _) ->
     fail "dead lifecycle must stop intake before durable dequeue"
 
 let test_crashed_cycle_records_health_failure () =
@@ -3194,18 +3499,14 @@ let test_crashed_cycle_records_health_failure () =
   let base_path = temp_dir "health-feed" in
   let keeper_name = "health-feed-keeper" in
   Health.record_success ~agent_name:keeper_name;
-  check bool "keeper starts healthy" true (Health.is_healthy ~agent_name:keeper_name);
   for i = 1 to 3 do
     KHL.record_crashed_cycle_failure
       ~base_path
       ~keeper_name
       (Failure (Printf.sprintf "boom-%d" i))
   done;
-  check
-    bool
-    "crashed cycles feed Health breaker"
-    false
-    (Health.is_healthy ~agent_name:keeper_name)
+  let summary = Health.get_summary ~agent_name:keeper_name in
+  check int "crashed cycles are observed" 3 summary.failure_count
 
 (* ── Test runner ──────────────────────────────────────────── *)
 
@@ -3218,11 +3519,6 @@ let () =
     ];
     "dead_tombstone", [
       eio_test "full lifecycle" test_dead_tombstone_full_lifecycle;
-    ];
-    "self_preservation", [
-      eio_test "suppresses dominant cohort" test_self_preservation_suppresses_dominant;
-      eio_test "below threshold passes" test_self_preservation_below_threshold;
-      eio_test "min candidates not met" test_self_preservation_min_candidates_not_met;
     ];
     "reconcile_predicates", [
       eio_test "sweep-owned states" test_reconcile_predicate_sweep_owned;
@@ -3251,20 +3547,18 @@ let () =
         test_keeper_lane_identity_is_typed_and_unique;
       test_case "lane cancellation is local and joinable" `Quick
         test_keeper_lane_cancel_is_lane_local_and_joinable;
-      test_case "lane records shutdown request on cancel" `Quick
-        test_lane_records_shutdown_request_on_cancel;
+      test_case "lane cancel before start is joinable" `Quick
+        test_lane_cancel_before_start_is_joinable;
       test_case "shutdown store round-trip and identity guard" `Quick
         test_keeper_shutdown_store_round_trip_and_identity_guard;
+      test_case "operator update supersedes exact blocked shutdown" `Quick
+        test_operator_update_supersedes_exact_blocked_shutdown;
       test_case "shutdown store isolates corrupt owner" `Quick
         test_keeper_shutdown_store_isolates_corrupt_owner;
+      test_case "retired stale paused terminal releases exact fence" `Quick
+        test_retired_stale_paused_terminal_releases_exact_fence;
       test_case "dashboard purge resolution is fail closed" `Quick
         test_dashboard_purge_resolution_is_fail_closed;
-      test_case "stale dormant prepare rejects a newer meta version" `Quick
-        test_stale_prune_dormant_prepare_rejects_version_change;
-      test_case "stale registered prepare requires a paused lane" `Quick
-        test_stale_prune_registered_prepare_requires_paused_lane;
-      test_case "stale cleanup-ready preserves a newer meta version" `Quick
-        test_stale_prune_cleanup_ready_preserves_newer_meta;
       test_case "shutdown prepare joins idle lane" `Quick
         test_keeper_shutdown_prepare_joins_idle_lane;
       test_case "shutdown prepare joins not-started lane" `Quick
@@ -3305,15 +3599,13 @@ let () =
         test_pipeline_stage_sensitivity;
     ];
     "scheduling", [
-      test_case "runtime backpressure blocks requested turn" `Quick
-        test_runtime_backpressure_blocks_requested_turn;
-      test_case "keeper health blocks by keeper name" `Quick
-        test_keeper_health_backpressure_uses_keeper_name;
-      test_case "pacing block delays requested turn (RFC-0313 W3)" `Quick
-        test_pacing_block_delays_requested_turn;
-      test_case "blocking gates are classified before intake" `Quick
-        test_blocking_gates_are_classified_before_intake;
-      test_case "lifecycle is classified before intake" `Quick
+      test_case "runtime observations cannot block requested turn" `Quick
+        test_runtime_observation_cannot_block_requested_turn;
+      test_case "explicit stop blocks requested turn" `Quick
+        test_explicit_stop_blocks_requested_turn;
+      test_case "active and paused lifecycle classify intake" `Quick
+        test_turn_intake_uses_only_lifecycle;
+      test_case "dead lifecycle is classified before intake" `Quick
         test_lifecycle_is_classified_before_intake;
       test_case "crashed cycles feed agent health breaker" `Quick
         test_crashed_cycle_records_health_failure;

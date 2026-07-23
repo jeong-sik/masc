@@ -9,7 +9,6 @@ module Http = Http_server_eio
 module Common = Server_routes_http_common
 module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
-module Keeper_stream = Server_routes_http_keeper_stream
 
 let respond_redirect ~location reqd =
   let response =

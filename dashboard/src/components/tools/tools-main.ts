@@ -71,7 +71,7 @@ export function Tools() {
       <//>
 
       <${SectionCard} label="예약 자동화 FSM" class="section v2-lab-panel mb-4">
-        <${ScheduledAutomationPanel} automation=${data?.scheduled_automation ?? null} onResolved=${loadTools} />
+        <${ScheduledAutomationPanel} automation=${data?.scheduled_automation ?? null} />
       <//>
 
       <${SectionCard} label="Keeper Waiting Inventory" class="section v2-lab-panel mb-4">

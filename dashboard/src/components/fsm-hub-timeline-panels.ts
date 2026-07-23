@@ -55,8 +55,6 @@ const SWIMLANE_LANES: Array<{
 //   - KSM phase: `phase_to_string` in lib/keeper/keeper_state_machine.ml:21-35
 //     emits 'running' | 'failing' | 'handing_off' etc.
 //   - KTC/KDP/KCL/KMC: keeper_composite_observer.ml:141-201 lowercase.
-//   - KCB display state: keeper_failure_circuit_breaker.ml:438 emits
-//     'clean' | 'warning' | 'cooling'.
 // Prior PascalCase entries ('Failing', 'Overflowed', 'Stable', 'HandingOff')
 // never matched backend emit; swimlane segments for those phases fell
 // through to the default indigo color, losing the alarm/warn/handoff
@@ -69,7 +67,6 @@ const IDLE_LIKE_VALUES = new Set([
 
 const ALARM_VALUES = new Set([
   'failing',
-  'gate_rejected',
   'exhausted',
 ])
 

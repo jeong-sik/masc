@@ -57,7 +57,7 @@ read, (3) 관련 `.mli`/문서/RFC 인용, (4) `git log`로 최근 활동 확인
 
 | 클레임 | 분류 | 근거 | 해소 |
 |--------|------|------|------|
-| §3.1 `with_permit` 100% passthrough | **B** | `lib/admission_queue.ml:139-148` 코멘트가 "provider-level throttling belongs in OAS (runtime), not in MASC. ... cannot express per-provider capacity" 명시. RFC-0026 PR-E-1.6/1.7가 runtime-layer router로 이동. **Audit이 file path를 잘못 적음**(`dashboard_bonsai/src/admission_queue.ml` ≠ 실제 `lib/admission_queue.ml`) — stale snapshot 신호. | 코드 코멘트에 RFC-0026 reference + audit-response 링크 추가 (PR-B). |
+| §3.1 `with_permit` 100% passthrough | **B** | 당시 코멘트도 provider-level throttling은 OAS 소유라고 명시했다. 해당 MASC admission 모듈은 2026-07-13 완전히 제거되었다. Audit의 경로 역시 stale snapshot이었다. | provider-capacity gate를 MASC에 복원하지 않는다. |
 | §3.2 `snapshot()` 항상 `0/0/max`, `insert_sorted`/`waiter`/`global.waiters` dead code | **C** | 코드는 클레임대로 동작. 그러나 dead code는 **의도된 RFC-0026 admission router 관측 scaffolding** — 삭제하면 runtime-layer router 도입 시 재구현 비용. | 코드 코멘트에 "observability scaffolding; do not delete" 추가 (PR-B). |
 | §3.3 metric `inflight` ↔ 실제 concurrency 불일치 (`wait_ms:0` 항상) | B | passthrough 의도이므로 wait_ms:0이 정확한 표현. 단 metric histogram의 외부 관찰자가 "passthrough mode" label을 못 보기 때문에 misread 위험. | follow-up: dashboard label + RFC-0026 runtime router 도입 시 같이 정리. |
 
@@ -142,6 +142,6 @@ read, (3) 관련 `.mli`/문서/RFC 인용, (4) `git log`로 최근 활동 확인
 ## 다음 audit 작성자에게
 
 1. 본 문서의 분류를 starting point로 사용. 같은 클레임을 재제기하기 전 본 매트릭스 확인.
-2. file path가 stale일 가능성 항상 의심 (audit이 `dashboard_bonsai/src/admission_queue.ml`로 잘못 적은 사례).
+2. file path가 stale일 가능성 항상 의심 (이미 삭제된 legacy admission 모듈을 잘못 지목한 사례).
 3. `passthrough` / `deferred` / `archive` 같은 키워드는 audit memory의 **의도된 설계** 신호.
 4. 30-50줄 caller context 인용 없는 클레임은 draft로 처리, verify 후 file.

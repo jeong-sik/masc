@@ -97,6 +97,11 @@ type lifecycle_outcome =
   | Dispatch_none
   | Persist_failed
 
+type boot_preflight =
+  | Boot_allowed
+  | Boot_operator_paused
+  | Boot_meta_read_failed of string
+
 let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
     state agent_name req reqd =
   let req_path = Http.Request.path req in
@@ -117,57 +122,16 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
   if String.length name = 0 then
     respond_error reqd "keeper name is required"
   else
-    let config = (Mcp_server.workspace_config state) in
-    let resolve_keeper_agent_name () =
-      match Keeper_registry_lookup.find_by_name name with
-      | Some entry -> Some entry.meta.agent_name
-      | None -> (
-          match Keeper_meta_store.read_meta config name with
-          | Ok (Some meta) -> Some meta.agent_name
-          | Ok None -> None
-          | Error err ->
-              Log.Keeper.warn
-                "resolve_keeper_agent_name %s: read_meta failed: %s"
-                name err;
-              None)
-    in
-    let persist_keeper_paused_state paused =
+    let workspace_scope = Mcp_server.workspace_scope state in
+    let config = workspace_scope.config in
+    let persist_keeper_pause () =
       match Keeper_meta_store.read_meta config name with
-      | Ok (Some meta) when Bool.equal meta.paused paused -> true
+      | Ok (Some meta) when meta.paused -> true
       | Ok (Some meta) ->
-        let source_meta_result =
-          if paused
-          then Ok meta
-          else
-            Keeper_unified_turn_no_progress.clear_for_operator_resume
-              ~base_path:config.base_path
-              meta
-        in
-        (match source_meta_result with
-         | Error err ->
-           Log.Keeper.error
-             "keeper %s %s: no_progress resume clear failed: %s"
-             name
-             (if paused then "pause" else "resume")
-             err;
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string PausedStatePersistErrors)
-             ~labels:
-               [ ( "phase"
-                 , Keeper_paused_state_persist_phase.(to_label Boot_resume_persist)
-                 )
-               ; ("reason", "no_progress_clear_error")
-               ]
-             ();
-           false
-         | Ok source_meta ->
            let updated_meta =
-             {
-               source_meta with
-               paused;
-               auto_resume_after_sec =
-                 (if paused then source_meta.auto_resume_after_sec else None);
-               updated_at = Keeper_meta_contract.now_iso ();
+             { meta with
+               paused = true
+             ; updated_at = Keeper_meta_contract.now_iso ()
              }
            in
            (match
@@ -177,74 +141,34 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             | Ok () -> true
             | Error err ->
               Log.Keeper.warn
-                "keeper %s %s: write_meta failed: %s"
+                "keeper %s pause: write_meta failed: %s"
                 name
-                (if paused then "pause" else "resume")
                 err;
-              false))
+              false)
       (* Issue #8391 HIGH #1: split [Ok None] (meta vanished) from
-         [Error _] (IO/parse failure) so silent failures become visible.
-         The boot HTTP contract is unchanged — auto-resume cleanup is a
-         best-effort side effect of [boot], not the primary action. *)
+         [Error _] (IO/parse failure) so lifecycle pause persistence after
+         clear/shutdown cannot silently disappear. *)
       | Ok None ->
           Log.Keeper.warn
-            "keeper %s %s: meta missing — skipping paused-state persist"
-            name
-            (if paused then "pause" else "resume");
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string PausedStatePersistErrors)
-            ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Boot_resume_persist));
-                     ("reason", "meta_missing")]
-            ();
-          false
-      | Error err ->
-          Log.Keeper.error
-            "keeper %s %s: read_meta failed: %s"
-            name
-            (if paused then "pause" else "resume")
-            err;
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string PausedStatePersistErrors)
-            ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Boot_resume_persist));
-                     ("reason", "read_meta_error")]
-            ();
-          false
-    in
-    let resume_booted_keeper_if_needed () =
-      match Keeper_meta_store.read_meta config name with
-      | Ok (Some meta) when meta.paused ->
-          if persist_keeper_paused_state false
-          then (
-            match resolve_keeper_agent_name () with
-            | Some keeper_agent_name ->
-              Keeper_keepalive.process_directive ~agent_name:keeper_agent_name "resume"
-            | None ->
-              Log.Keeper.warn
-                "keeper boot: agent_name not found for paused keeper %s"
-                name)
-      | Ok (Some _) -> ()
-      (* Issue #8391 HIGH #1: split [Ok None] from [Error _] — boot itself
-         already succeeded via Keeper_tool_surface.dispatch, so we don't change the
-         HTTP status. We make the failure observable instead. *)
-      | Ok None ->
-          Log.Keeper.warn
-            "keeper %s boot: meta missing — skipping auto-resume check"
+            "keeper %s pause: meta missing — skipping paused-state persist"
             name;
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string PausedStatePersistErrors)
-            ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Boot_resume_check));
+            ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Lifecycle_pause_persist));
                      ("reason", "meta_missing")]
-            ()
+            ();
+          false
       | Error err ->
           Log.Keeper.error
-            "keeper %s boot: read_meta failed during auto-resume check: %s"
+            "keeper %s pause: read_meta failed: %s"
             name
             err;
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string PausedStatePersistErrors)
-            ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Boot_resume_check));
+            ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Lifecycle_pause_persist));
                      ("reason", "read_meta_error")]
-            ()
+            ();
+          false
     in
     let keeper_ctx : _ Keeper_tool_surface.context =
       {
@@ -254,6 +178,8 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
         clock;
         proc_mgr = state.Mcp_server.proc_mgr;
         net = state.Mcp_server.net;
+        publication_recovery_provider =
+          Mcp_server.publication_recovery_availability_provider state;
       }
     in
     let args_result =
@@ -305,6 +231,41 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
         in
         Log.Server.info "keeper lifecycle %s name=%s actor=%s started"
           action name agent_name;
+        let boot_preflight =
+          if not (String.equal action "boot")
+          then Boot_allowed
+          else
+            match Keeper_meta_store.read_meta config name with
+            | Error error -> Boot_meta_read_failed error
+            | Ok None -> Boot_allowed
+            | Ok (Some meta) ->
+              (match
+                 Keeper_lifecycle_admission.state
+                   ~paused:meta.paused
+                   ~latched_reason:meta.latched_reason
+               with
+               | Keeper_lifecycle_admission.Paused _ -> Boot_operator_paused
+               | Keeper_lifecycle_admission.Active
+               | Keeper_lifecycle_admission.Dead_tombstone -> Boot_allowed)
+        in
+        (match boot_preflight with
+         | Boot_meta_read_failed error ->
+           log_lifecycle_result Persist_failed;
+           respond_error
+             ~status:`Internal_server_error
+             ~request:req
+             ~ok:false
+             reqd
+             (Printf.sprintf "keeper boot preflight read failed: %s" error)
+         | Boot_operator_paused ->
+           log_lifecycle_result Rejected;
+           respond_error
+             ~status:`Conflict
+             ~request:req
+             ~ok:false
+             reqd
+             "keeper is operator-paused; commit Resume_owner through the directive endpoint"
+         | Boot_allowed ->
         let live_boot_entry =
           match Keeper_registry.get ~base_path:config.base_path name with
           | Some entry
@@ -317,17 +278,24 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
           | Some _ | None -> None
         in
         (match live_boot_entry with
+         | Some entry when entry.phase = Keeper_state_machine.Paused ->
+           log_lifecycle_result Rejected;
+           respond_error
+             ~status:`Conflict
+             ~request:req
+             ~ok:false
+             reqd
+             "keeper registry lane is paused; commit Resume_owner through the directive endpoint"
          | Some entry ->
            (* Dashboard boot is an idempotent lifecycle action.  If a keeper
               is already live, do not send it through masc_keeper_up's update
               path: that path intentionally stop/starts changed keepers, and
               doing so during an active turn creates duplicate fibers and
-              contradictory stopped/executing surfaces.  Resume and wake the
-              existing fiber instead. *)
-           resume_booted_keeper_if_needed ();
+              contradictory stopped/executing surfaces. Wake an already
+              running fiber without changing its pause disposition. *)
            Keeper_keepalive.process_directive
              ~agent_name:entry.meta.agent_name
-             "wakeup";
+             Keeper_directive.Wakeup;
            refresh_keeper_execution_surfaces ~config ~name "started";
            let detail =
              match Keeper_registry.get ~base_path:config.base_path name with
@@ -354,13 +322,12 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               let post_action_result =
                 if String.equal action "boot"
                 then (
-                  resume_booted_keeper_if_needed ();
                   refresh_keeper_execution_surfaces ~config ~name "started";
                   Ok ())
                 else (
                   match Keeper_registry.get_phase ~base_path:config.base_path name with
                   | Some Keeper_state_machine.Paused
-                    when not (persist_keeper_paused_state true) ->
+                    when not (persist_keeper_pause ()) ->
                     Error "paused-state persist failed after clear"
                   | Some Keeper_state_machine.Paused | Some _ | None ->
                     invalidate_keeper_execution_surfaces ~config ();
@@ -390,7 +357,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               let post_action_result =
                 match action with
                 | "shutdown" ->
-                  if persist_keeper_paused_state true
+                  if persist_keeper_pause ()
                   then (
                     refresh_keeper_execution_surfaces ~config ~name "stopped";
                     Ok ())
@@ -427,10 +394,4 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             | None ->
               log_lifecycle_result Dispatch_none;
               respond_error ~status:`Internal_server_error ~request:req ~ok:false
-                reqd "dispatch returned None"))
-
-(** POST /api/v1/keepers/:name/directive — pause / resume / wakeup.
-
-    Delegates to [Keeper_keepalive.process_directive] which updates
-    registry state, dispatches a state-machine event, and optionally
-    wakes up the keeper fiber. *)
+                reqd "dispatch returned None")))

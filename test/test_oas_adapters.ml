@@ -1,38 +1,6 @@
-(** Tests for OAS adapter modules: Keeper_context_runtime.compact (which routes
-    through Context_compact_oas), message roundtrip, and compaction strategies.
-
-    Note: Context_compact_oas is an internal module not directly accessible
-    from tests (installed opam masc may lack it). Tests go through the
-    public Context_manager API which delegates to Context_compact_oas. *)
+(** Tests for OAS shared message types and response projections. *)
 
 open Masc
-
-let ctx_messages = Keeper_context_runtime.messages_of_context
-let ctx_system_prompt = Keeper_context_runtime.system_prompt_of_context
-
-(* ================================================================ *)
-(* Helper: create MASC messages with all 4 roles                    *)
-(* ================================================================ *)
-
-let make_test_messages () : Agent_sdk.Types.message list =
-  [
-    Agent_sdk.Types.system_msg "You are a helpful assistant.";
-    Agent_sdk.Types.user_msg "Hello, what is 2+2?";
-    Agent_sdk.Types.assistant_msg "The answer is 4.";
-    { Agent_sdk.Types.role = Agent_sdk.Types.Tool;
-      content =
-        [ Agent_sdk.Types.ToolResult
-            { tool_use_id = "call-1"
-            ; content = "result: 4"
-            ; outcome = Agent_sdk.Types.Tool_succeeded
-            ; json = None
-            ; content_blocks = None
-            }
-        ];
-      name = None; tool_call_id = None; metadata = [] };
-    Agent_sdk.Types.user_msg "Thanks, now solve x^2 = 9.";
-    Agent_sdk.Types.assistant_msg "x = 3 or x = -3.";
-  ]
 
 (* ================================================================ *)
 (* Message roundtrip tests via Llm_client to/from OAS               *)
@@ -83,99 +51,13 @@ let test_roundtrip_tool_msg () =
   | None -> Alcotest.fail "tool message should not be dropped"
   | Some oas ->
     let rt = Fun.id oas in
-    (* Both Oas_type_adapters and Context_compact_oas preserve Tool role
-       directly — MASC and OAS share the same Agent_sdk.Types.message type. *)
+    (* MASC and OAS share the same Agent_sdk.Types.message type. *)
     Alcotest.(check string) "tool role preserved"
       "tool"
       (match rt.role with Agent_sdk.Types.Tool -> "tool" | _ -> "other");
     let text = Agent_sdk.Types.text_of_message rt in
     Alcotest.(check bool) "content preserved"
       true (String.length text > 0)
-
-(* ================================================================ *)
-(* Compaction tests (via Context_compact_oas directly) *)
-
-let compact_ctx (ctx : Keeper_context_runtime.working_context) strategies =
-  let messages =
-    (* Issue #8597 #1: ~system_prompt dropped from compact signature. *)
-    Context_compact_oas.compact
-      ~messages:(ctx_messages ctx)
-      ~strategies () in
-  Keeper_context_runtime.sync_oas_context
-    {
-      ctx with
-      checkpoint =
-        { (Keeper_context_runtime.checkpoint_of_context ctx) with messages };
-    }
-(* ================================================================ *)
-
-let test_compact_prune_tool_outputs () =
-  let ctx =
-    Keeper_context_runtime.create ~eio:false ~system_prompt:"test system"
-      ~max_tokens:4000
-  in
-  let ctx = List.fold_left Keeper_context_runtime.append ctx (make_test_messages ()) in
-  let compacted = compact_ctx ctx [Context_compact_oas.PruneToolOutputs] in
-  (* PruneToolOutputs on short tool output should not drop messages *)
-  Alcotest.(check bool) "messages preserved"
-    true (List.length (ctx_messages compacted) > 0);
-  Alcotest.(check bool) "token count positive"
-    true (Keeper_context_runtime.token_count compacted > 0);
-  (* Short tool output (< 1500 chars) should not be truncated *)
-  Alcotest.(check int) "message count unchanged for short tool output"
-    (List.length (make_test_messages ()))
-    (List.length (ctx_messages compacted))
-
-let test_compact_merge_contiguous () =
-  let ctx =
-    Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
-      ~max_tokens:4000
-  in
-  let msgs = [
-    Agent_sdk.Types.user_msg "part 1";
-    Agent_sdk.Types.user_msg "part 2";
-    Agent_sdk.Types.assistant_msg "response";
-  ] in
-  let ctx = List.fold_left Keeper_context_runtime.append ctx msgs in
-  let compacted = compact_ctx ctx [Context_compact_oas.MergeContiguous] in
-  (* MergeContiguous should merge the two consecutive user messages *)
-  Alcotest.(check bool) "merged reduces count"
-    true (List.length (ctx_messages compacted) <= List.length msgs)
-
-let test_compact_summarize_old () =
-  (* Create enough messages to trigger keep-first-and-last behavior *)
-  let ctx =
-    Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
-      ~max_tokens:8000
-  in
-  let msgs = List.init 12 (fun i ->
-    if i mod 2 = 0 then
-      Agent_sdk.Types.user_msg (Printf.sprintf "user message %d with content" i)
-    else
-      Agent_sdk.Types.assistant_msg (Printf.sprintf "assistant response %d" i)
-  ) in
-  let ctx = List.fold_left Keeper_context_runtime.append ctx msgs in
-  let compacted = compact_ctx ctx [Context_compact_oas.SummarizeOld] in
-  (* SummarizeOld with keep-first-and-last should reduce message count *)
-  Alcotest.(check bool) "summarize_old reduces messages"
-    true (List.length (ctx_messages compacted) < List.length msgs);
-  Alcotest.(check bool) "token count positive"
-    true (Keeper_context_runtime.token_count compacted > 0)
-
-let test_compact_small_list_unchanged () =
-  let ctx =
-    Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
-      ~max_tokens:4000
-  in
-  let msgs = [
-    Agent_sdk.Types.user_msg "hello";
-    Agent_sdk.Types.assistant_msg "world";
-  ] in
-  let ctx = List.fold_left Keeper_context_runtime.append ctx msgs in
-  let compacted = compact_ctx ctx [Context_compact_oas.SummarizeOld] in
-  (* Small list (< first_n + last_n = 7) should be unchanged *)
-  Alcotest.(check int) "small list unchanged"
-    (List.length msgs) (List.length (ctx_messages compacted))
 
 (* ================================================================ *)
 (* Restore messages (identity — types are shared)                  *)
@@ -270,16 +152,6 @@ let () =
         test_roundtrip_system_msg_dropped;
       Alcotest.test_case "tool msg roundtrip" `Quick
         test_roundtrip_tool_msg;
-    ];
-    "context_compact", [
-      Alcotest.test_case "PruneToolOutputs" `Quick
-        test_compact_prune_tool_outputs;
-      Alcotest.test_case "MergeContiguous" `Quick
-        test_compact_merge_contiguous;
-      Alcotest.test_case "SummarizeOld (keep first+last)" `Quick
-        test_compact_summarize_old;
-      Alcotest.test_case "SummarizeOld small list unchanged" `Quick
-        test_compact_small_list_unchanged;
     ];
     "message_restore", [
       Alcotest.test_case "restore messages all roles" `Quick

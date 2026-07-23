@@ -18,7 +18,7 @@ vi.mock('../store', () => ({
   refreshKeeperRuntimeStatus: vi.fn(async () => undefined),
 }))
 
-import { pauseKeeper } from '../api/keeper'
+import { pauseKeeper, resumeKeeper } from '../api/keeper'
 import { keeperActionVisibility } from '../lib/keeper-predicates'
 import { applyOptimisticKeeperDirective, refreshKeeperRuntimeStatus } from '../store'
 import { runKeeperAction } from './keeper-action-panel'
@@ -30,6 +30,9 @@ function makeKeeper(overrides: Partial<Keeper>): Keeper {
     status: 'active',
     phase: 'Running',
     paused: false,
+    // A keeper with its fiber alive is the normal case; tests that exercise
+    // the dead-paused boot path override this to false explicitly.
+    keepalive_running: true,
     ...overrides,
   } as unknown as Keeper
 }
@@ -99,6 +102,27 @@ describe('keeperActionVisibility', () => {
     })
   })
 
+  describe('paused keeper whose fiber died (keepalive_running=false)', () => {
+    it('exposes boot instead of resume — resume needs a live owner_generation', () => {
+      const k = makeKeeper({ status: 'active', phase: 'Paused', paused: true, keepalive_running: false })
+      const v = keeperActionVisibility(k)
+      expect(v.canResume).toBe(false)
+      expect(v.canBoot).toBe(true)
+      expect(v.canPause).toBe(false)
+      expect(v.canShutdown).toBe(true)
+    })
+
+    it('still exposes boot when phase is null but the paused flag lingers', () => {
+      // Reproduces the live incident: paused directive persisted after the
+      // process died, phase never repopulated — resume errored with
+      // "current owner generation is unavailable" while boot stayed hidden.
+      const k = makeKeeper({ status: 'active', phase: null, paused: true, keepalive_running: false })
+      const v = keeperActionVisibility(k)
+      expect(v.canResume).toBe(false)
+      expect(v.canBoot).toBe(true)
+    })
+  })
+
   describe('offline keeper', () => {
     it('can boot, cannot pause or resume or shutdown', () => {
       const k = makeKeeper({ status: 'offline', phase: 'Offline', paused: false })
@@ -152,5 +176,13 @@ describe('runKeeperAction', () => {
 
     expect(applyOptimisticKeeperDirective).toHaveBeenCalledWith('rondo', 'pause')
     expect(refreshKeeperRuntimeStatus).toHaveBeenCalledWith()
+  })
+
+  it('forwards the observed owner generation for typed resume', async () => {
+    vi.mocked(resumeKeeper).mockResolvedValueOnce({ ok: true })
+
+    await runKeeperAction('rondo', 'resume', 7)
+
+    expect(resumeKeeper).toHaveBeenCalledWith('rondo', 7)
   })
 })

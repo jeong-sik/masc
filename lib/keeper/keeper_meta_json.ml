@@ -23,7 +23,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
         | None -> `Null )
     ; "instructions", `String m.instructions
     ; "trace_id", `String (Keeper_id.Trace_id.to_string rt.trace_id)
-    ; "tool_access", Json_util.json_string_list m.tool_access
     ; "multimodal_policy", `String (multimodal_policy_to_string m.multimodal_policy)
     ; "trace_history", `List (List.map (fun s -> `String s) rt.trace_history)
     ; "generation", `Int rt.generation
@@ -44,6 +43,8 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "last_compaction_ts", `Float rt.compaction_rt.last_ts
     ; "last_compaction_before_tokens", `Int rt.compaction_rt.last_before_tokens
     ; "last_compaction_after_tokens", `Int rt.compaction_rt.last_after_tokens
+    ; ( "compaction_consecutive_failures"
+      , `Int rt.compaction_rt.consecutive_failures )
     ; "proactive_count_total", `Int rt.proactive_rt.count_total
     ; "last_proactive_ts", `Float rt.proactive_rt.last_ts
     ; "proactive_visible_count_total", `Int rt.proactive_rt.visible_count_total
@@ -66,7 +67,12 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "board_reactive_turn_count", `Int rt.board_reactive_turn_count
     ; "mention_reactive_turn_count", `Int rt.mention_reactive_turn_count
     ; "noop_turn_count", `Int rt.noop_turn_count
-    ; "last_seen_message_seq", `Int rt.last_seen_message_seq
+    ; ( "message_scope_ack_id"
+      , match rt.message_scope_ack_id with
+        | Some id -> `String id
+        | None -> `Null )
+    ; ( "transcript_quarantine_consecutive_retries"
+      , `Int rt.transcript_quarantine_consecutive_retries )
     ; ( "last_blocker"
       , match rt.last_blocker with
         | Some info -> blocker_info_to_json info
@@ -86,7 +92,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       , match m.latched_reason with
         | Some reason -> Keeper_latched_reason.Stable.to_yojson reason
         | None -> `Null )
-    ; "auto_resume_after_sec", Json_util.float_opt_to_json m.auto_resume_after_sec
     ; ( "current_task_id"
       , Json_util.string_opt_to_json
           (Option.map Keeper_id.Task_id.to_string m.current_task_id) )
@@ -101,68 +106,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
 
 include Keeper_meta_json_parse
 
-(* Runtime-only keys — used as fallback when seed round-trip fails.
-   Config keys are TOML-only and no longer appear in JSON. *)
-let fallback_canonical_keeper_meta_key_names =
-  [ "name"
-  ; "agent_name"
-  ; "persona"
-  ; "instructions"
-  ; "trace_id"
-  ; "tool_access"
-  ; "multimodal_policy"
-  ; "trace_history"
-  ; "generation"
-  ; "last_handoff_ts"
-  ; "created_at"
-  ; "updated_at"
-  ; "total_turns"
-  ; "total_input_tokens"
-  ; "total_output_tokens"
-  ; "total_tokens"
-  ; "total_cost_usd"
-  ; "last_turn_ts"
-  ; "last_input_tokens"
-  ; "last_output_tokens"
-  ; "last_total_tokens"
-  ; "last_latency_ms"
-  ; "compaction_count"
-  ; "last_compaction_ts"
-  ; "last_compaction_before_tokens"
-  ; "last_compaction_after_tokens"
-  ; "proactive_count_total"
-  ; "last_proactive_ts"
-  ; "proactive_visible_count_total"
-  ; "last_visible_proactive_ts"
-  ; "last_proactive_outcome"
-  ; "last_proactive_reason"
-  ; "last_proactive_preview"
-  ; "consecutive_noop_count"
-  ; "last_compaction_check_ts"
-  ; "last_compaction_decision"
-  ; "active_goal_ids"
-  ; "last_autonomous_action_at"
-  ; "autonomous_action_count"
-  ; "autonomous_turn_count"
-  ; "autonomous_text_turn_count"
-  ; "autonomous_tool_turn_count"
-  ; "board_reactive_turn_count"
-  ; "mention_reactive_turn_count"
-  ; "noop_turn_count"
-  ; "last_seen_message_seq"
-  ; "last_blocker"
-  ; "last_runtime_attempt"
-  ; "last_turn_tool_calls"
-  ; "paused"
-  ; "latched_reason"
-  ; "auto_resume_after_sec"
-  ; "current_task_id"
-  ; "keeper_id"
-  ; "oas_env"
-  ; "meta_version"
-  ]
-;;
-
 (* Seed round-trip: parse a minimal canonical JSON then serialize to derive
    the canonical key set. *)
 let canonical_keeper_meta_key_names =
@@ -172,23 +115,15 @@ let canonical_keeper_meta_key_names =
       ; "agent_name", `String "__keeper-meta-key-seed__"
       ; "persona", `String "__keeper-meta-key-seed__"
       ; "trace_id", `String "__keeper-meta-key-seed__"
-      ; "tool_access", `List []
       ]
   in
   match meta_of_json seed_json with
   | Ok meta ->
     (match meta_to_json meta with
      | `Assoc fields -> fields |> List.map fst |> dedupe_keep_order
-     | _ -> fallback_canonical_keeper_meta_key_names)
+     | _ -> invalid_arg "Keeper_meta_json.meta_to_json must return an object")
   | Error msg ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string MetaJsonFailures)
-      ~labels:[("site", "seed_parse")]
-      ();
-    Log.Keeper.warn
-      "canonical_keeper_meta_key_names seed failed: %s; falling back to static keys"
-      msg;
-    fallback_canonical_keeper_meta_key_names
+    invalid_arg ("Keeper_meta_json canonical seed is invalid: " ^ msg)
 ;;
 
 let unknown_keeper_meta_keys (json : Yojson.Safe.t) : string list =

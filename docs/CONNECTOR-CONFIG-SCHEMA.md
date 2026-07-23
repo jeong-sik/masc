@@ -5,17 +5,21 @@ each sidecar without hand-editing files. This document enumerates what config
 each sidecar actually reads, where it reads it from, and how the dashboard
 should surface it in a form.
 
-All four current sidecars share the same resolution order (via Pydantic
-`BaseSettings` + `TomlConfigSettingsSource`):
+The remaining external sidecars share the following resolution order via
+Pydantic `BaseSettings` + `TomlConfigSettingsSource`:
 
 ```
 env  >  runtime TOML  >  field defaults
 ```
 
-- Runtime TOML path: `${MASC_BASE_PATH}/.gate/runtime/<name>/config.toml`
+- External-sidecar TOML path: `${MASC_BASE_PATH}/.gate/runtime/<name>/config.toml`
 - Env file: `sidecars/<name>-bot/.env` (cwd-relative at process start)
 - Dashboard should **write the TOML**, not the `.env` — TOML is the persistent
   surface, `.env` is developer scratch.
+
+Discord is no longer a sidecar. Its in-process OCaml gateway resolves the
+trigger-policy env override and the `[discord]` table in MASC `runtime.toml` as
+documented in the Discord section below.
 
 ## Common fields (all sidecars)
 
@@ -24,8 +28,6 @@ env  >  runtime TOML  >  field defaults
 | `gate_base_url` | `GATE_BASE_URL` (Discord/Slack/Telegram), `MASC_GATE_URL` (iMessage) | `http://localhost:8935` | MASC server. Loopback host relaxes auth. |
 | `gate_api_token` | `GATE_API_TOKEN`, `MASC_GATE_API_TOKEN` (iMessage) | `""` | Required unless `gate_base_url` is loopback. |
 | `gate_timeout_sec` | `GATE_TIMEOUT_SEC` | 120 (30 for iMessage) | int/float seconds, must be positive. |
-| `gate_breaker_failure_threshold` | `GATE_BREAKER_FAILURE_THRESHOLD` | 3 (5 for iMessage) | consecutive 5xx/timeout before circuit opens. |
-| `gate_breaker_reset_sec` | `GATE_BREAKER_RESET_SEC` | 30 (60 for iMessage) | half-open wait. |
 | `status_cache_ttl_sec` | `STATUS_CACHE_TTL_SEC` | 15 (10 for iMessage) | gate status cache. |
 | `keeper_cache_ttl_sec` | `KEEPER_CACHE_TTL_SEC` | 30 | keeper discovery cache. |
 | `binding_store_path` | `<NAME>_BINDING_STORE_PATH` | `.gate/runtime/<name>/bindings.json` | runtime-bind file. |
@@ -43,7 +45,11 @@ the gate-state extension in `lib/gate/channel_gate_discord_state.{ml,mli}`.
 | Env var | Required | Notes |
 |---|---|---|
 | `DISCORD_BOT_TOKEN` | **yes** | Developer Portal → Bot → Reset Token. Read at every `send_message` call, so token rotation does not require a server restart. If unset the gateway logs a warning and skips startup; the rest of the server boots normally. |
-| `MASC_DISCORD_TRIGGER_POLICY` | no (default `mention_only`) | One of `mention_only`, `user_only:<discord_user_id>`, `all`. Closed sum; unknown values fall back to `mention_only`. |
+| `MASC_DISCORD_TRIGGER_POLICY` | no (default `mention_or_thread`) | Closed sum: `mention_only`, `mention_or_thread`, `user_only:<discord_user_id>`, or `all`. Resolution is env > `[discord].trigger_policy` in resolved `runtime.toml` > default. A non-empty invalid env or TOML value is a typed configuration error and the Discord gateway does not start; it is never coerced to a fallback policy. |
+
+An absent or blank env value is unset and falls through to TOML. A missing
+`runtime.toml`, missing `[discord].trigger_policy`, or blank TOML value is also
+unset and yields the default only after both configured planes are absent.
 
 Channel→keeper bindings live where they always did:
 `Channel_gate_discord_state.bind` / `unbind` write to

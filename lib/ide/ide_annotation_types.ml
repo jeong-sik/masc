@@ -55,6 +55,14 @@ let annotation_kind_of_string = function
   | _ -> None
 ;;
 
+type annotation_reference = Agent_observation.annotation_reference =
+  { relation : string
+  ; reference : string
+  }
+
+let annotation_references_to_json = Agent_observation.annotation_references_to_json
+let annotation_references_of_json = Agent_observation.annotation_references_of_json
+
 type annotation =
   { id : string
   ; file_path : string
@@ -65,14 +73,7 @@ type annotation =
   ; content : string
   ; goal_id : string option
   ; task_id : string option
-  ; board_post_id : string option
-  ; comment_id : string option
-  ; pr_id : string option
-  ; git_ref : string option
-  ; log_id : string option
-  ; session_id : string option
-  ; operation_id : string option
-  ; worker_run_id : string option
+  ; references : annotation_reference list
   ; created_at_ms : int64
   ; updated_at_ms : int64
   }
@@ -114,14 +115,7 @@ let annotation_to_json (a : annotation) : Yojson.Safe.t =
     ; "content", `String a.content
     ; "goal_id", string_opt_to_json a.goal_id
     ; "task_id", string_opt_to_json a.task_id
-    ; "board_post_id", string_opt_to_json a.board_post_id
-    ; "comment_id", string_opt_to_json a.comment_id
-    ; "pr_id", string_opt_to_json a.pr_id
-    ; "git_ref", string_opt_to_json a.git_ref
-    ; "log_id", string_opt_to_json a.log_id
-    ; "session_id", string_opt_to_json a.session_id
-    ; "operation_id", string_opt_to_json a.operation_id
-    ; "worker_run_id", string_opt_to_json a.worker_run_id
+    ; "references", annotation_references_to_json a.references
     ; "created_at_ms", `Intlit (Int64.to_string a.created_at_ms)
     ; "updated_at_ms", `Intlit (Int64.to_string a.updated_at_ms)
     ]
@@ -149,6 +143,21 @@ let kind_label : Yojson.Safe.t -> string = function
 let annotation_of_json (json : Yojson.Safe.t) : (annotation, string) result =
   match json with
   | `Assoc fields ->
+    let allowed_fields =
+      [ "id"
+      ; "file_path"
+      ; "line_start"
+      ; "line_end"
+      ; "keeper_id"
+      ; "kind"
+      ; "content"
+      ; "goal_id"
+      ; "task_id"
+      ; "references"
+      ; "created_at_ms"
+      ; "updated_at_ms"
+      ]
+    in
     let find_string key default =
       match List.assoc_opt key fields with
       | Some (`String s) -> s
@@ -184,27 +193,29 @@ let annotation_of_json (json : Yojson.Safe.t) : (annotation, string) result =
       | Some k -> k
       | None -> Comment
     in
-    Ok
-      { id = find_string "id" ""
-      ; file_path = find_string "file_path" ""
-      ; line_start = find_int "line_start" 1
-      ; line_end = find_int "line_end" 1
-      ; keeper_id = find_string "keeper_id" ""
-      ; kind
-      ; content = find_string "content" ""
-      ; goal_id = find_opt_string "goal_id"
-      ; task_id = find_opt_string "task_id"
-      ; board_post_id = find_opt_string "board_post_id"
-      ; comment_id = find_opt_string "comment_id"
-      ; pr_id = find_opt_string "pr_id"
-      ; git_ref = find_opt_string "git_ref"
-      ; log_id = find_opt_string "log_id"
-      ; session_id = find_opt_string "session_id"
-      ; operation_id = find_opt_string "operation_id"
-      ; worker_run_id = find_opt_string "worker_run_id"
-      ; created_at_ms = find_int64 "created_at_ms" 0L
-      ; updated_at_ms = find_int64 "updated_at_ms" 0L
-      }
+    (match List.find_opt (fun (key, _) -> not (List.mem key allowed_fields)) fields with
+     | Some (key, _) -> Error (Printf.sprintf "Unknown annotation field: %s" key)
+     | None ->
+       let references_json =
+         Option.value ~default:`Null (List.assoc_opt "references" fields)
+       in
+       (match annotation_references_of_json references_json with
+        | Error msg -> Error msg
+        | Ok references ->
+          Ok
+            { id = find_string "id" ""
+            ; file_path = find_string "file_path" ""
+            ; line_start = find_int "line_start" 1
+            ; line_end = find_int "line_end" 1
+            ; keeper_id = find_string "keeper_id" ""
+            ; kind
+            ; content = find_string "content" ""
+            ; goal_id = find_opt_string "goal_id"
+            ; task_id = find_opt_string "task_id"
+            ; references
+            ; created_at_ms = find_int64 "created_at_ms" 0L
+            ; updated_at_ms = find_int64 "updated_at_ms" 0L
+            }))
   | other ->
     Error
       (Printf.sprintf

@@ -154,7 +154,11 @@ let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
     get_origin;
     cors_headers;
     auth_token_from_request;
-    is_ready = (fun () -> Option.is_some (current_server_state_opt ()));
+    is_ready =
+      (fun () ->
+        match current_server_state_opt () with
+        | None -> false
+        | Some _ -> Server_startup_state.(!state).state_ready);
     get_runtime_result =
       (fun () ->
         match current_server_state_opt () with

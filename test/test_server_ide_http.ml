@@ -11,6 +11,7 @@ open Alcotest
 module Auth = Masc.Auth
 module Http = Masc.Http_server_eio
 module Json = Yojson.Safe.Util
+module Workspace = Masc.Workspace
 
 let has_route meth path router =
   List.exists
@@ -297,7 +298,7 @@ let annotation_count router path =
 
 let setup_state base_path =
   save_auth_config base_path;
-  let state = Masc.Mcp_server.create_state ~base_path in
+  let state = Masc.Mcp_server.For_testing.create_state ~base_path in
   Server_auth.server_state := Some state;
   state
 ;;
@@ -313,6 +314,112 @@ let with_ide_server f =
          f ~base_path ~state ~router))
 ;;
 
+let presence_agent ?keeper_name ?last_seen ~status name : Masc_domain.agent =
+  let now = Masc_domain.now_iso () in
+  let last_seen = Option.value last_seen ~default:now in
+  let meta : Masc_domain.agent_meta =
+    { session_id = "ide-presence:" ^ name
+    ; agent_type = "test"
+    ; pid = None
+    ; hostname = None
+    ; tty = None
+    ; parent_task = None
+    ; keeper_name
+    ; keeper_id = None
+    }
+  in
+  { id = None
+  ; name
+  ; agent_type = "test"
+  ; status
+  ; capabilities = []
+  ; current_task = None
+  ; session_bound_at = now
+  ; last_seen
+  ; meta = Some meta
+  }
+;;
+
+let test_presence_projects_only_canonical_keeper_identity () =
+  with_ide_server (fun ~base_path:_ ~state ~router ->
+    let config = Masc.Mcp_server.workspace_config state in
+    ignore (Workspace.init config ~agent_name:None);
+    let write_agent (agent : Masc_domain.agent) =
+      let path =
+        Filename.concat
+          (Workspace.agents_dir config)
+          (Workspace.safe_filename agent.name ^ ".json")
+      in
+      match Workspace.write_json_result config path (Masc_domain.agent_to_yojson agent) with
+      | Ok () -> ()
+      | Error message -> failf "write presence agent failed: %s" message
+    in
+    List.iter
+      write_agent
+      [ presence_agent
+          ~keeper_name:"busy-keeper"
+          ~last_seen:"2020-01-01T00:00:00Z"
+          ~status:Masc_domain.Busy
+          "runtime-busy"
+      ; presence_agent ~keeper_name:"idle-keeper" ~status:Masc_domain.Listening
+          "runtime-idle"
+      ; presence_agent ~status:Masc_domain.Active "ordinary-agent"
+      ; presence_agent ~keeper_name:"inactive-keeper" ~status:Masc_domain.Inactive
+          "runtime-inactive"
+      ];
+    let response =
+      dispatch router (http_request ~meth:`GET ~path:"/api/v1/ide/presence" ())
+    in
+    check_status "GET presence succeeds" 200 response;
+    let entries =
+      response
+      |> response_body
+      |> Yojson.Safe.from_string
+      |> Json.member "data"
+      |> json_list_member "presence response" "entries"
+    in
+    let entry_by_id keeper_id =
+      List.find_opt
+        (fun entry ->
+           String.equal
+             keeper_id
+             (json_string_member "presence entry" "keeper_id" entry))
+        entries
+    in
+    check int "only active keeper-owned agents are projected" 2 (List.length entries);
+    let busy =
+      match entry_by_id "busy-keeper" with
+      | Some entry -> entry
+      | None -> fail "busy keeper missing from presence"
+    in
+    let idle =
+      match entry_by_id "idle-keeper" with
+      | Some entry -> entry
+      | None -> fail "idle keeper missing from presence"
+    in
+    check string "busy keeper is active presence" "active"
+      (json_string_member "busy keeper" "status" busy);
+    check string "listening keeper is idle presence" "idle"
+      (json_string_member "idle keeper" "status" idle);
+    check string "role is canonical keeper role" "keeper"
+      (json_string_member "busy keeper" "role" busy))
+;;
+
+let test_presence_last_seen_ms_shared_projection () =
+  let valid =
+    presence_agent
+      ~keeper_name:"ms-keeper"
+      ~last_seen:"2020-01-01T00:00:00Z"
+      ~status:Masc_domain.Active
+      "runtime-ms"
+  in
+  check int64 "valid ISO8601 maps to epoch milliseconds" 1577836800000L
+    (Server_presence.last_seen_ms ~context:"test presence" valid);
+  let invalid = { valid with Masc_domain.last_seen = "not-a-timestamp" } in
+  check int64 "invalid timestamp maps to 0" 0L
+    (Server_presence.last_seen_ms ~context:"test presence" invalid)
+;;
+
 let test_post_annotations_rejects_client_keeper_id () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let token = create_worker_token base_path "alice" in
@@ -322,6 +429,33 @@ let test_post_annotations_rejects_client_keeper_id () =
     let request = http_request ~meth:`POST ~path:"/api/v1/ide/annotations" ~body ~token:(Some token) () in
     let response = dispatch router request in
     check_status "POST with keeper_id returns 403" 403 response)
+;;
+
+let test_post_annotations_rejects_unknown_route_fields () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let token = create_worker_token base_path "alice" in
+    let body =
+      Yojson.Safe.to_string
+        (`Assoc
+            [ "file_path", `String "lib/a.ml"
+            ; "line_start", `Int 1
+            ; "line_end", `Int 2
+            ; "content", `String "note"
+            ; ("pr_" ^ "id"), `String "external-product-value"
+            ])
+    in
+    let request =
+      http_request
+        ~meth:`POST
+        ~path:"/api/v1/ide/annotations"
+        ~body
+        ~token:(Some token)
+        ()
+    in
+    let response = dispatch router request in
+    check_status "POST with unknown route field returns 400" 400 response;
+    check string "unknown route field has typed error code" "invalid_annotation_request"
+      (error_code_of_response response))
 ;;
 
 let test_post_cursors_rejects_client_keeper_id () =
@@ -928,6 +1062,16 @@ let () =
             test_post_cursors_route_is_registered
         ; test_case "read routes stay public" `Quick test_read_routes_stay_public
         ] )
+    ; ( "presence_contract"
+      , [ test_case
+            "presence projects canonical keeper identity and status"
+            `Quick
+            test_presence_projects_only_canonical_keeper_identity
+        ; test_case
+            "last_seen_ms shared projection maps valid ISO and invalid to 0"
+            `Quick
+            test_presence_last_seen_ms_shared_projection
+        ] )
     ; ( "scope_contract"
       , [ test_case
             "GET annotations rejects missing scope"
@@ -983,6 +1127,8 @@ let () =
     ; ( "mutation_auth"
       , [ test_case "POST annotation rejects client keeper_id" `Quick
             test_post_annotations_rejects_client_keeper_id
+        ; test_case "POST annotation rejects unknown route fields" `Quick
+            test_post_annotations_rejects_unknown_route_fields
         ; test_case "POST cursor rejects client keeper_id" `Quick
             test_post_cursors_rejects_client_keeper_id
         ; test_case "POST cursor rejects invalid focus_mode" `Quick

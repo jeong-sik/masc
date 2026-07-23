@@ -35,7 +35,7 @@ const BACKEND_EMITTED: Record<string, string> = {
   'approval:pending': '../lib/keeper/keeper_approval_queue.ml',
   'approval:resolved': '../lib/keeper/keeper_approval_queue.ml',
   execution_snapshot: '../lib/server/server_dashboard_http_execution_surfaces.ml',
-  governance_param_changed: '../lib/server/server_routes_http_routes_activity.ml',
+  runtime_param_changed: '../lib/server/server_routes_http_routes_activity.ml',
   keeper_chat_appended: '../lib/keeper/keeper_chat_broadcast.ml',
   keeper_chat_queue_changed: '../lib/keeper/keeper_chat_broadcast.ml',
   keeper_composite_changed: '../lib/server/server_mcp_transport_ws.ml',

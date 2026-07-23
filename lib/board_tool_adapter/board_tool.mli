@@ -4,8 +4,7 @@
     Owns:
     - the {b agent-lookup callback} ({!set_agent_lookup} /
       {!set_agent_lookup_none} / {!is_agent}) wired at
-      server bootstrap so post-kind classification can ask
-      whether a name is currently bound to the namespace,
+      server bootstrap for optional agent-to-agent feedback hooks,
     - the {b post / comment / vote handlers} routed
       through {!handle_tool} (one entry per
       [masc_board_*] tool name),
@@ -13,10 +12,6 @@
       (post/list/get, comments, votes, reactions, stats,
       search, profile, hearths, curation, cleanup/delete,
       and sub-board operations),
-    - the {b truncated-markdown detector}
-      ({!detect_truncated_markdown_with_reason}) used by
-      the post-create path to flag chat-suffix paste
-      accidents,
     - the {b sort-order parser} ({!parse_sort_order})
       shared with the dashboard board route.
 
@@ -42,30 +37,6 @@
     [board_tool_cleanup], [tool_spec_read_only]). *)
 
 open Masc_board_handlers
-
-(** {1 Truncated markdown detection} *)
-
-type truncation_signal =
-  | Odd_fence
-      (** odd count of triple-backtick code fences. *)
-  | Odd_inline_tick
-      (** odd count of single backticks outside fences. *)
-  | Unfinished_link
-      (** trailing [\[text\](] with no closing [)]. *)
-  | Unfinished_image
-      (** trailing [\!\[alt\](] with no closing [)]. *)
-  | Odd_double_asterisk
-      (** odd count of [**] outside fences. *)
-
-val truncation_signal_to_string : truncation_signal -> string
-
-val detect_truncated_markdown_with_reason :
-  string -> truncation_signal option
-(** Returns the first {!truncation_signal} that fires for
-    the input, [None] when the markdown looks complete.
-    Used by [handle_post_create] to surface a precise
-    reason in the response when a paste appears
-    truncated. *)
 
 (** {1 Sort order} *)
 
@@ -121,9 +92,8 @@ val visibility_of_string : string -> Board.visibility option
 (** {1 Agent lookup callback} *)
 
 val set_agent_lookup : (string -> bool) -> unit
-(** Wires the [is_agent_session_bound] check used by the
-    auto-classifier to decide whether a [system_*] author
-    name resolves to a live agent.  Installed once at
+(** Wires the [is_agent_session_bound] check used by optional
+    agent-to-agent feedback hooks. Installed once at
     server bootstrap from [server_state.workspace_config]. *)
 
 val set_agent_lookup_none : unit -> unit

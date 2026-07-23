@@ -36,7 +36,7 @@ let main_result () =
             },
           1 )
     | Ok spec ->
-        Mirage_crypto_rng_unix.use_default ();
+        Crypto_rng.ensure_default ();
         Eio_main.run @@ fun env ->
         Eio_guard.enable ();
         Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -63,7 +63,7 @@ let main_result () =
                 match
                   Lib.Worker_runtime.run_worker_oas ~sw
                     ~net:(Eio.Stdenv.net env)
-                    ~workspace_config:None spec ()
+                    spec ()
                 with
                 | Ok run_result ->
                     ( Lib.Worker_runtime_helper_protocol.success_json run_result,

@@ -1,200 +1,24 @@
 ---
-status: reference
-last_verified: 2026-05-12
-code_refs:
-  - lib/cdal/
-  - lib/keeper/keeper_agent_run.ml
+status: withdrawn
+updated: 2026-07-13
+scope: historical CDAL cross-run aggregation proposal
 ---
 
 # Cross-Run Loader and Window Spec
 
-**Status**: Draft (v2 — late-arrival, schema compat, API signatures added)
-**Date**: 2026-03-30 (v2), 2026-03-28 (v1)
-**Scope**: Cross-run `friction_projection` enumeration, window semantics, and loader requirements
-**One sentence**: Define the infrastructure and selection rules required before `Last_n_runs`, `Session`, or `Rolling_seconds` become valid CDAL surfaces.
+> **Withdrawn.** The previous window and friction projection was part of the
+> retired CDAL policy-update loop. Cross-run counts, recency windows, and
+> derived scores must not become authority over Task completion, external
+> effects, or Keeper lifecycle.
 
-## Related Documents
+Raw run artifacts may still be enumerated for observability or benchmark
+analysis. A reader must preserve run identity, timestamps, provenance, and
+explicit read/decode errors. If it publishes an aggregation, it must expose the
+selected source set and window; an empty set is unknown rather than a passing
+or failing result.
 
-- `./contract-driven-agent-loop-rfc.md`
-- `./cdal-contract-kernel-and-advisory-split.md`
-- `./proof-bundle-check-mapping.md`
-- `./error-handling-and-operations-spec.md`
+Active runtime decisions remain request-local:
 
-## 1. Current Shipping Boundary
-
-Pre-production Phase-1 supports:
-
-- `Single_run`
-
-It does not support:
-
-- `Last_n_runs`
-- `Session`
-- `Rolling_seconds`
-
-Reason:
-
-- no public read-side run enumeration API
-- no stable cross-run ordering rule
-- no retention guarantee by window type
-- no aggregation error policy
-
-## 2. Required Read-Side APIs
-
-Cross-run windows require at least:
-
-- `Runtime_store.list_runs`
-- `Runtime_store.Last_n_runs`
-- `Runtime_store.Session`
-- `Runtime_store.Rolling_seconds`
-- `Runtime_replay.sync_windows_from_store`
-
-`list_runs` must define:
-
-- stable ordering key
-- filtering scope
-- corruption handling
-- compatibility behavior across schema versions
-
-## 3. Window Semantics
-
-| window | selection rule | required infra | allowed in pre-production |
-|---|---|---|---|
-| `Single_run(run_id)` | exactly one run by ID | manifest + artifact reader | yes |
-| `Last_n_runs(n)` | latest `n` runs within a declared scope and ordering | run index + stable ordering + retention | no |
-| `Session(session_id)` | all runs bound to one declared session identifier | session/run link + run index | no |
-| `Rolling_seconds(s)` | all runs whose selected timestamp falls within the last `s` seconds in a declared scope | run index + clock basis + retention + late-arrival policy | no |
-
-## 4. Scope and Ordering Rules
-
-Cross-run aggregation must declare both:
-
-- scope
-  - for example keeper, task, workspace, benchmark cohort, or explicit run set
-- ordering basis
-  - for example `ended_at`, evaluator completion time, or manifest creation time
-
-These must not be implicit.
-
-Recommended initial ordering:
-
-- `ended_at` ascending for replay order
-- tie-break by `run_id`
-
-## 5. Missing-Run and Partial-Failure Policy
-
-Cross-run aggregation must specify what happens when:
-
-- a listed run is missing
-- a manifest exists but some refs are unreadable
-- some runs are schema v1 and some are schema v2
-- a window would exceed configured resource limits
-
-Recommended default:
-
-- missing or unreadable runs become aggregation-level completeness gaps
-- aggregation may still emit partial observability artifacts only if declared policy allows it
-- gate-authoritative verdicts must not be synthesized from partial cross-run windows
-
-## 6. Basis Hash Composition
-
-Cross-run `friction_projection.basis_hash` should include:
-
-- declared window
-- scope selector
-- ordering basis
-- selected run IDs in order
-- projection semantics version
-- tripwire policy ID
-
-This prevents the same summary label from hiding different underlying run sets.
-
-## 7. Retention Dependency
-
-No cross-run window may be enabled unless artifact retention is at least as long as the maximum enabled window.
-
-Examples:
-
-- `Last_n_runs(5)` requires at least the last 5 runs in the selected scope
-- `Rolling_seconds(2592000)` requires at least 30-day manifest and evidence retention
-
-## 8. Resource Bounds
-
-Cross-run aggregation must define:
-
-- max runs per aggregation
-- max artifacts dereferenced per aggregation
-- max bytes scanned
-- timeout behavior
-
-If a bound is exceeded:
-
-- emit an explicit aggregation error
-- do not silently shrink the window
-
-## 9. Late-Arrival Policy
-
-A run may complete after the window query has already been issued. This happens when:
-
-- a keeper or swarm agent is still writing its proof bundle while another agent queries cross-run data
-- clock skew causes `ended_at` to appear out of order
-- a run's manifest is written before all evidence artifacts are flushed
-
-Rules:
-
-- a window query is a snapshot: it captures runs visible at query time and does not retroactively include late arrivals
-- `basis_hash` (section 6) makes the snapshot deterministic: the same selected run IDs produce the same hash regardless of what arrives later
-- callers that need consistency across retries must compare `basis_hash` values; a hash change means the underlying run set changed
-- late-arriving runs are picked up by the next window query, not patched into the previous result
-- timestamp proximity (e.g., "runs within 5 seconds of now") must not be used as an ordering key. Use `ended_at` from the proof manifest, which is written atomically at the end of proof capture
-
-This avoids the complexity of retroactive window mutation and keeps aggregation results reproducible.
-
-## 10. Schema Version Compatibility
-
-Runs may use different proof manifest schema versions. The loader must handle version heterogeneity:
-
-| Scenario | Behavior |
-| --- | --- |
-| All runs same schema version | normal aggregation |
-| Mixed versions, all loadable | normalize to latest schema, note version in metadata |
-| Unknown schema version | treat as corruption, apply partial-failure policy (section 5) |
-| Schema version too old to normalize | same as unknown |
-
-Since the current schema remains at version 1 (with optional fields added via `[@yojson.default]`), normalization is handled by the existing `Cdal_proof.of_json` decoder. A separate `normalize_manifest` function is not needed at this time. If a future schema v2 introduces breaking field changes, an explicit normalizer should be added.
-
-## 11. Runtime_store / Runtime_replay Read-Side API (OAS, Current)
-
-OAS now owns the runtime replay/run-window surface through `Agent_sdk.Runtime_store`
-and `Agent_sdk.Runtime_replay`.  The historical `proof-store://` read side
-(`Agent_sdk.Proof_store`) was removed; MASC should not reference it.
-
-Current public read surface in OAS:
-
-- `Runtime_store.list_runs`
-- `Runtime_store.Last_n_runs`
-- `Runtime_store.Session`
-- `Runtime_store.Rolling_seconds`
-- `Runtime_replay.sync_windows_from_store`
-- checkpoint delta projection helpers
-
-MASC consumes these through `lib/cdal_runtime/` evidence writers and runtime
-adapters rather than through a separate `proof_artifact_reader.ml` module.
-
-These signatures replace the historical `list_runs_ordered` / `load_window`
-Proof_store API with a replay-oriented window model.  Implementation and layout
-validation stay in OAS `runtime_store.ml` / `runtime_replay.ml`; MASC adapters
-only delegate.
-
-## 12. Regression Checklist
-
-Future cross-run reader changes must preserve:
-
-- `Runtime_store.list_runs` / `Runtime_replay.sync_windows_from_store` are implemented with stable ordering
-- scope and ordering rules are explicit
-- late-arrival policy is enforced (snapshot semantics, no retroactive mutation)
-- retention is documented and enforced
-- schema version normalization handles all known versions
-- aggregation errors have a documented policy
-- basis-hash composition is frozen
-- resource bounds are configured and enforced
+- configured-LLM Task verification: [Keeper Agent](../spec/05-keeper-agent.md)
+- external-effect Gate: [Command Plane](../spec/06-command-plane.md)
+- OAS run observations: [OAS Integration](../spec/13-oas-integration.md)

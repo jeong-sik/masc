@@ -29,7 +29,6 @@ type EditorState = 'loading' | 'idle' | 'saving' | 'saved' | 'error'
 type FusionSettingsDraft = {
   readonly enabled: boolean
   readonly defaultPreset: string
-  readonly maxConcurrentPanels: string
   readonly minAnswered: string
   readonly panel: readonly string[]
   readonly judge: string
@@ -41,7 +40,6 @@ function draftFromSettings(sourceText: string, s: FusionSettings): FusionSetting
   return {
     enabled: s.enabled,
     defaultPreset: s.defaultPreset,
-    maxConcurrentPanels: String(s.maxConcurrentPanels),
     minAnswered: String(s.minAnswered),
     panel: flatPreset?.panel ?? [],
     judge: flatPreset?.judge ?? '',
@@ -58,14 +56,11 @@ function parseDraftPositiveInt(label: string, raw: string): number | string {
 function settingsFromDraft(draft: FusionSettingsDraft): FusionSettings | string {
   const defaultPreset = draft.defaultPreset
   if (defaultPreset !== '' && defaultPreset.trim() === '') return 'default_preset은 공백만 입력할 수 없습니다.'
-  const maxConcurrentPanels = parseDraftPositiveInt('max_concurrent_panels', draft.maxConcurrentPanels)
-  if (typeof maxConcurrentPanels === 'string') return maxConcurrentPanels
   const minAnswered = parseDraftPositiveInt('min_answered', draft.minAnswered)
   if (typeof minAnswered === 'string') return minAnswered
   return {
     enabled: draft.enabled,
     defaultPreset,
-    maxConcurrentPanels,
     minAnswered,
   }
 }
@@ -323,8 +318,8 @@ export function FusionSettingsPanel() {
   const str = (e: Event) => (e.target as HTMLInputElement).value
   const checked = (e: Event) => (e.target as HTMLInputElement).checked
 
-  // Read-only view of the active preset's composition (panel models · judge ·
-  // timeouts · max_tool_calls), parsed from the same runtime.toml source the
+  // Read-only view of the active preset's composition (panel models · judge),
+  // parsed from the same runtime.toml source the
   // editor already loaded. Shown only when the default_preset resolves to a real
   // [fusion.presets.<preset>] table that actually declares panel models — a
   // preset with no panel has no composition worth displaying. The editor scalars
@@ -337,7 +332,6 @@ export function FusionSettingsPanel() {
   const showPresetView = showPresetEditor && presetView.panel.length > 0
   const showGroupedNote = presetView !== null && presetView.grouped
   const runtimeOptions = runtimeOptionsFromSource(source, draft)
-  const timeoutLabel = (value: number | null): string => (value === null ? '—' : `${value}s`)
   const judgeLabel = presetView?.judgeGroupCount ? 'Judge-of-judges runtime' : 'Judge runtime'
 
   return html`
@@ -349,11 +343,6 @@ export function FusionSettingsPanel() {
       <label class="set-line">
         <span>기본 프리셋 (default_preset)</span>
         <input type="text" value=${draft.defaultPreset} onInput=${(e: Event) => patchDefaultPreset(str(e))} />
-      </label>
-      <label class="set-line">
-        <span>동시 패널 수 (max_concurrent_panels)</span>
-        <input type="number" step="1" data-testid="fusion-max-concurrent-panels" value=${draft.maxConcurrentPanels}
-          onInput=${(e: Event) => patch({ maxConcurrentPanels: str(e) })} />
       </label>
       <label class="set-line">
         <span>최소 응답 패널 (${draft.defaultPreset || '프리셋'} min_answered)</span>
@@ -416,9 +405,6 @@ export function FusionSettingsPanel() {
                   ? html`<div class="set-fus-model judge mono" data-testid="fusion-preset-judge">${presetView.judge}</div>`
                   : html`<div class="set-fus-model judge mono" data-testid="fusion-preset-judge">미지정</div>`}
               </div>
-            </div>
-            <div class="set-mcp-detail mono" data-testid="fusion-preset-timing" style=${{ marginTop: 10 }}>
-              panel_timeout ${timeoutLabel(presetView.panelTimeoutS)} · judge_timeout ${timeoutLabel(presetView.judgeTimeoutS)} · max_tool_calls_per_panel ${presetView.maxToolCallsPerPanel ?? '—'} (0 = 무제한)
             </div>
           `
         : null}

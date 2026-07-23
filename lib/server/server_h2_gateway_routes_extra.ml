@@ -4,7 +4,7 @@ open Server_voice_config
 open Server_routes_http
 open Server_h2_gateway_helpers
 
-(* Dispatch board, governance, voice, karma, and static asset routes.
+(* Dispatch board, Gate, voice, karma, and static asset routes.
    Returns [true] if the route was handled, [false] otherwise. *)
 let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
     (httpun_meth : [ `GET | `POST | `DELETE | `OPTIONS | `PUT | `HEAD
@@ -88,16 +88,14 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
       in
       let reactions_for = board_reactions_lookup reaction_rows in
       let contributor_quality_for = board_contributor_quality_lookup ?config () in
-      let claim_evidence_for = board_claim_evidence_lookup () in
       let posts_json = List.map (fun (p : Board.post) ->
         let author = Board.Agent_id.to_string p.author in
         let post_id = Board.Post_id.to_string p.id in
         let current_vote = board_current_vote_for_post ~voter ~post_id in
         let reactions = reactions_for (Board.Reaction_post, post_id) in
         let contributor_quality = contributor_quality_for author in
-        let claim_evidence = claim_evidence_for post_id in
         board_post_dashboard_json ~blind_votes ?current_vote ~reactions
-          ?contributor_quality ?claim_evidence ~author_karma:(get_karma author) p
+          ?contributor_quality ~author_karma:(get_karma author) p
       ) paged in
       let json = `Assoc [
         ("posts", `List posts_json);

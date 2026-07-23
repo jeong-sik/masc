@@ -1,56 +1,39 @@
 (** Tool_shard_types_schemas_execute — [typed_execute_tools] tool_execute
     schema.
 
-    The public descriptor exposes only the typed argv / pipeline forms:
-    [executable]/[argv] for a single process and [pipeline] for
-    explicit Shell IR pipelines. Raw [cmd] strings are intentionally absent
-    from the schema. *)
+    The public descriptor exposes one command SSOT: a non-empty [argv] process
+    vector for a single process, or [pipeline] containing non-empty [argv]
+    vectors for explicit Shell IR pipelines. Raw [cmd] strings and the retired
+    duplicate [executable] field are intentionally absent from the schema.
+
+    Accepted fields: argv, pipeline, env, cwd, timeout_sec, stdin, stdout,
+    stderr. This sentence is the contract line checked by
+    scripts/check-execute-async-surface.sh — update both together. *)
 
 let tool_execute_exec_stage_schema =
   `Assoc
     [ "type", `String "object"
     ; ( "properties"
       , `Assoc
-          [ ( "executable"
-            , `Assoc
-                [ "type", `String "string"
-                ; "minLength", `Float 1.
-                ; ( "description"
-                  , `String "Allowlisted executable name, e.g. rg, sed, sort, head." )
-                ] )
-          ; ( "argv"
+          [ ( "argv"
             , `Assoc
                 [ "type", `String "array"
                 ; "items", `Assoc [ "type", `String "string" ]
+                ; "minItems", `Int 1
                 ; ( "description"
                   , `String
-                      "Arguments after executable, passed verbatim. Do not repeat \
-                       executable as argv[0]. Example: executable='grep', argv=['-rn', \
-                       'pattern', 'lib']; not argv=['grep', ...]. Shell \
+                      "Non-empty process vector: argv[0] is the executable and \
+                       remaining tokens are arguments. Shell \
                        metacharacters are data; use pipeline for multi-stage \
                        execution. Wildcards (*, ?, [...]) are NOT expanded: argv \
                        reaches the process unchanged with no shell, so 'foo*.ml' \
                        matches a file literally named 'foo*.ml'. Pass exact paths, \
-                       or list the directory first (executable='ls', argv=['some/dir']) \
-                       then act on the names it returns." )
+                       or discover exact paths before invoking the program." )
                 ] )
           ] )
-    ; "required", `List [ `String "executable" ]
+    ; "required", `List [ `String "argv" ]
     ; "additionalProperties", `Bool false
     ]
-;;
-
-let tool_execute_executable_field =
-  ( "executable"
-  , `Assoc
-      [ "type", `String "string"
-      ; "minLength", `Float 1.
-      ; ( "description"
-        , `String
-            "Typed argv form: allowlisted executable name. Provide argv separately; \
-             do not combine shell syntax into this field. Mutually exclusive with \
-             pipeline." )
-      ] )
 ;;
 
 let tool_execute_argv_field =
@@ -58,11 +41,11 @@ let tool_execute_argv_field =
   , `Assoc
       [ "type", `String "array"
       ; "items", `Assoc [ "type", `String "string" ]
+      ; "minItems", `Int 1
       ; ( "description"
         , `String
-            "Typed argv form: arguments after executable, passed verbatim. Do not \
-             repeat executable as argv[0]. Example: executable='git', argv=['status', \
-             '--short']; example: executable='grep', argv=['-rn', 'pattern', 'lib']. \
+            "Typed single-process form: a non-empty process vector. argv[0] is \
+             the executable and remaining tokens are arguments, all passed verbatim. \
              A literal '|' token is data, not a pipe. Wildcards (*, ?, [...]) are \
              NOT expanded either: there is no shell, so 'foo*.ml' is a literal \
              filename, not a glob. Use exact paths or list a directory first." )
@@ -77,7 +60,7 @@ let tool_execute_pipeline_field =
       ; ( "description"
         , `String
             "Typed pipeline form: ordered exec stages. Use this instead of putting \
-             '|' in argv. Mutually exclusive with executable." )
+             '|' in argv. Mutually exclusive with top-level argv." )
       ] )
 ;;
 
@@ -105,23 +88,14 @@ let tool_execute_cwd_field =
 ;;
 
 let tool_execute_timeout_sec_field =
-  (* Historical schema carry-over (Issue #18472, 2026-06-08 cleanup):
-     caller-side timeout fields were removed as part of the spirit of
-     PR #20479 ("tool 자체가 알아서 타임아웃으로 튕기든 해야지 그걸
-     왜 되나 안 되나 우리가 관찰하고 있나?"). The LLM-facing JSON
-     schema is preserved for backwards compatibility with callers
-     that still emit the field; the wire-format quirk (string vs
-     number) is still accepted but is now advisory only — the
-     dispatch path no longer reads it. *)
   ( "timeout_sec"
   , `Assoc
-      [ ( "type"
-        , `List [ `String "number"; `String "string" ] )
+      [ "type", `String "number"
+      ; "exclusiveMinimum", `Float 0.0
       ; ( "description"
         , `String
-            "Deprecated. The caller-side timeout knob is no longer \
-             observed; the tool itself owns hang protection. Numeric \
-             strings (e.g. \"30\") are accepted but ignored." )
+            "Optional explicit subprocess wall-clock timeout in seconds. \
+             When absent, Execute is unbounded and remains cancellable." )
       ] )
 ;;
 
@@ -199,41 +173,21 @@ let tool_execute_stderr_field =
 ;;
 
 let tool_execute_description =
-  "Execute one command through the typed execution gates via typed argv. \
-   Provide EITHER executable/argv OR pipeline, never both. Use executable/argv for one process, \
-   or pipeline for explicit Shell IR pipelines. IMPORTANT: there is no 'cmd' \
-   or 'command' field; the legacy 'cmd' string field is no longer accepted. \
-   Those fields are not supported and will be rejected. \
-   Always use 'executable' (string) and 'argv' (string array) instead. \
-   Accepted fields: executable, argv, pipeline, env, cwd, timeout_sec, stdin, stdout, stderr. \
-   For I/O redirection use the typed stdin/stdout/stderr objects \
-   ({\"discard\":true} or {\"file\":\"/abs/path\"}) — putting shell \
-   redirection syntax like '2>/dev/null' or '>/tmp/out' inside argv \
-   is rejected at the typed gate per RFC-0198 Phase A. \
-   Shell metacharacters in argv are \
-   data, not syntax. Good: executable='git' argv=['status','--short'], \
-   pipeline=[{executable='git',...}, {executable='head',...}]. Runs in the \
-   keeper sandbox by default; use cwd to target an explicit allowed directory. \
-   Paths resolve automatically — never include host storage prefixes such as \
-   '.masc/playground/your-name/' in cwd. Use 'repos/X' instead. Sandbox root is \
-   NOT a git repository: git/gh calls require cwd='repos/<REPO_NAME>' (or the \
-   worktree path under it). 'not a git repository' or 'path_outside_sandbox' \
-   from the sandbox root means you forgot the cwd. For read-only search/listing \
-   use Grep when visible; for file edits use Edit. Long-running commands must \
-   be split or run through a dedicated structured workflow; this tool no longer \
-   exposes background task lifecycle tools. \
-   COMMON REJECTIONS: 'executable' must be a non-empty allowlisted command name \
-   (e.g. 'cat', 'ls', 'gh'); never the empty string ''. Never collapse the entire \
-   command into a single string like \"'' -c 'ls -la'\" — that is shell-style and \
-   will be rejected by the typed gate with Empty_executable. The validation gate \
-   emits Empty_executable for any missing or empty 'executable' field; do not \
-   retry the same empty payload — restructure to executable='X' argv=['arg1',...]."
+  "Execute a typed process invocation inside the Keeper sandbox. Accepted fields: argv, pipeline, env, cwd, timeout_sec, stdin, stdout, stderr. Provide either \
+   one non-empty argv process vector or an explicit pipeline of typed stages, \
+   never both; this tool does not expose background task lifecycle tools. The \
+   cmd and command string fields are rejected. Shell \
+   metacharacters in argv are data, not syntax; use typed stdin/stdout/stderr \
+   objects for redirection and the pipeline field for pipelines. Use Grep for \
+   structured file-content search. cwd must resolve inside the Keeper path jail. \
+   MASC does not interpret program or subcommand \
+   meaning: after typed lowering, path containment, sandbox resolution, and the \
+   external-effect Gate, the invoked program owns its syntax and exit result."
 ;;
 
 let tool_execute_schema : Masc_domain.tool_schema =
   let properties =
-    [ tool_execute_executable_field
-    ; tool_execute_argv_field
+    [ tool_execute_argv_field
     ; tool_execute_pipeline_field
     ; tool_execute_env_field
     ; tool_execute_cwd_field
@@ -253,24 +207,24 @@ let tool_execute_schema : Masc_domain.tool_schema =
         ; ( "oneOf"
           , `List
               [ `Assoc
-                  [ "required", `List [ `String "executable" ]
+                  [ "required", `List [ `String "argv" ]
                   ; ( "not"
                     , `Assoc [ "required", `List [ `String "pipeline" ] ] )
                   ; ( "description"
                     , `String
-                        "Single-process form: include 'executable' (and \
-                         optional 'argv').  DO NOT also include 'pipeline' \
+                        "Single-process form: include one non-empty 'argv'. \
+                         DO NOT also include 'pipeline' \
                          in the same call." )
                   ]
               ; `Assoc
                   [ "required", `List [ `String "pipeline" ]
                   ; ( "not"
                     , `Assoc
-                        [ "required", `List [ `String "executable" ] ] )
+                        [ "required", `List [ `String "argv" ] ] )
                   ; ( "description"
                     , `String
                         "Pipeline form: include 'pipeline' array of exec \
-                         stages.  DO NOT also include 'executable' in the \
+                         stages.  DO NOT also include top-level 'argv' in the \
                          same call." )
                   ]
               ] )

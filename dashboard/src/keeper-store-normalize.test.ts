@@ -15,7 +15,6 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
     expect(toKeeperPhase('crashed')).toBe('Crashed')
     expect(toKeeperPhase('restarting')).toBe('Restarting')
     expect(toKeeperPhase('dead')).toBe('Dead')
-    expect(toKeeperPhase('zombie')).toBe('Zombie')
   })
 
   it('accepts PascalCase input for forward compatibility', () => {
@@ -23,7 +22,6 @@ describe('toKeeperPhase — backend lowercase to PascalCase normalization', () =
     expect(toKeeperPhase('Running')).toBe('Running')
     expect(toKeeperPhase('Overflowed')).toBe('Overflowed')
     expect(toKeeperPhase('HandingOff')).toBe('HandingOff')
-    expect(toKeeperPhase('Zombie')).toBe('Zombie')
   })
 
   it('trims surrounding whitespace before matching', () => {
@@ -104,7 +102,7 @@ describe('normalizeKeepers phase field', () => {
 })
 
 describe('normalizeKeepers lifecycle metrics', () => {
-  it('preserves keeper compaction gates from the backend surface', () => {
+  it('drops retired compaction policy fields', () => {
     const [keeper] = normalizeKeepers([
       {
         name: 'sangsu',
@@ -116,10 +114,26 @@ describe('normalizeKeepers lifecycle metrics', () => {
       },
     ])
 
-    expect(keeper?.compaction_profile).toBe('balanced')
-    expect(keeper?.compaction_ratio_gate).toBe(0.72)
-    expect(keeper?.compaction_message_gate).toBe(120)
-    expect(keeper?.compaction_token_gate).toBe(240000)
+    expect('compaction_profile' in (keeper ?? {})).toBe(false)
+    expect('compaction_ratio_gate' in (keeper ?? {})).toBe(false)
+    expect('compaction_message_gate' in (keeper ?? {})).toBe(false)
+    expect('compaction_token_gate' in (keeper ?? {})).toBe(false)
+  })
+
+  it('surfaces last_compaction_decision emitted by the backend row', () => {
+    const [withDecision] = normalizeKeepers([
+      {
+        name: 'sangsu',
+        status: 'active',
+        last_compaction_decision: 'provider_overflow_recovery_failed: plan_provider_unavailable',
+      },
+    ])
+    expect(withDecision?.last_compaction_decision).toBe(
+      'provider_overflow_recovery_failed: plan_provider_unavailable',
+    )
+
+    const [withoutDecision] = normalizeKeepers([{ name: 'sangsu', status: 'active' }])
+    expect(withoutDecision?.last_compaction_decision).toBeNull()
   })
 
   it('normalizes live activity projection and current approval gate', () => {
@@ -139,7 +153,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
           kind: 'approval_required',
           source: 'audit_approvals',
           tool: 'Write',
-          risk: 'high',
           turn_id: 178,
           at: '2026-06-06T02:49:01Z',
         },
@@ -157,7 +170,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
       kind: 'approval_required',
       source: 'audit_approvals',
       tool: 'Write',
-      risk: 'high',
       turn_id: 178,
     })
   })
@@ -316,11 +328,11 @@ describe('normalizeKeepers lifecycle metrics', () => {
             prompt_fingerprint: 'prompt-fp-001',
             prompt: {
               fingerprint: 'prompt-fp-001',
-              estimated_total_tokens: 321,
-              estimated_cacheable_tokens: 144,
-              system_prompt: { bytes: 512, estimated_tokens: 144, fingerprint: 'seg-system' },
-              dynamic_context: { bytes: 220, estimated_tokens: 61, fingerprint: 'seg-dynamic' },
-              user_message: { bytes: 98, estimated_tokens: 28, fingerprint: 'seg-user' },
+              total_bytes: 830,
+              cacheable_bytes: 512,
+              system_prompt: { bytes: 512, fingerprint: 'seg-system' },
+              dynamic_context: { bytes: 220, fingerprint: 'seg-dynamic' },
+              user_message: { bytes: 98, fingerprint: 'seg-user' },
             },
           },
         ],
@@ -334,12 +346,12 @@ describe('normalizeKeepers lifecycle metrics', () => {
     expect(metric.prompt_fingerprint).toBe('prompt-fp-001')
     expect(metric.prompt_metrics).toEqual({
       fingerprint: 'prompt-fp-001',
-      estimated_total_tokens: 321,
-      estimated_cacheable_tokens: 144,
+      total_bytes: 830,
+      cacheable_bytes: 512,
       segments: {
-        system_prompt: { bytes: 512, estimated_tokens: 144, fingerprint: 'seg-system' },
-        dynamic_context: { bytes: 220, estimated_tokens: 61, fingerprint: 'seg-dynamic' },
-        user_message: { bytes: 98, estimated_tokens: 28, fingerprint: 'seg-user' },
+        system_prompt: { bytes: 512, fingerprint: 'seg-system' },
+        dynamic_context: { bytes: 220, fingerprint: 'seg-dynamic' },
+        user_message: { bytes: 98, fingerprint: 'seg-user' },
       },
     })
   })
@@ -362,11 +374,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
           blocked_task_count: 2,
           convergence: 0.25,
         },
-        approval_policy_effective: {
-          allow_rules: 1,
-          deny_rules: 0,
-          persisted_rules: 1,
-        },
       },
     ])
 
@@ -380,10 +387,6 @@ describe('normalizeKeepers lifecycle metrics', () => {
         linked_task_count: 4,
         blocked_task_count: 2,
         convergence: 0.25,
-      },
-      approval_policy_effective: {
-        allow_rules: 1,
-        persisted_rules: 1,
       },
     })
   })
@@ -407,7 +410,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
           },
           execution_summary: {
             sandbox_summary: 'docker / none',
-            mutation_guard_summary: 'mutation_contract_not_observed',
+            completion_observation_summary: 'not_observed',
             latest_receipt_at: '2026-04-23T00:10:00Z',
           },
           latest_causal_event: {
@@ -441,7 +444,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
       },
       execution_summary: {
         sandbox_summary: 'docker / none',
-        mutation_guard_summary: 'mutation_contract_not_observed',
+        completion_observation_summary: 'not_observed',
       },
       latest_causal_event: {
         kind: 'approval_pending',
@@ -680,14 +683,12 @@ describe('normalizeKeepers lifecycle metrics', () => {
             compacted: false,
             ctx_composition: {
               actual_input_tokens: 1000,
-              display_total_tokens: 1000,
-              estimated_known_tokens: 740,
+              attributed_bytes: 1160,
               segments: {
-                system_prompt: { bytes: 320, estimated_tokens: 120, fingerprint: null },
-                history_user: { bytes: 210, estimated_tokens: 90, fingerprint: null },
-                history_tool_use: { bytes: 90, estimated_tokens: 60, fingerprint: null },
-                history_tool_result: { bytes: 540, estimated_tokens: 330, fingerprint: null },
-                unattributed: { bytes: 0, estimated_tokens: 260, fingerprint: null },
+                system_prompt: { bytes: 320, fingerprint: null },
+                history_user: { bytes: 210, fingerprint: null },
+                history_tool_use: { bytes: 90, fingerprint: null },
+                history_tool_result: { bytes: 540, fingerprint: null },
               },
             },
           },
@@ -699,14 +700,12 @@ describe('normalizeKeepers lifecycle metrics', () => {
     const metric = keeper?.metrics_series?.[0]
     expect(metric?.ctx_composition).toEqual({
       actual_input_tokens: 1000,
-      display_total_tokens: 1000,
-      estimated_known_tokens: 740,
+      attributed_bytes: 1160,
       segments: {
-        system_prompt: { bytes: 320, estimated_tokens: 120, fingerprint: null },
-        history_user: { bytes: 210, estimated_tokens: 90, fingerprint: null },
-        history_tool_use: { bytes: 90, estimated_tokens: 60, fingerprint: null },
-        history_tool_result: { bytes: 540, estimated_tokens: 330, fingerprint: null },
-        unattributed: { bytes: 0, estimated_tokens: 260, fingerprint: null },
+        system_prompt: { bytes: 320, fingerprint: null },
+        history_user: { bytes: 210, fingerprint: null },
+        history_tool_use: { bytes: 90, fingerprint: null },
+        history_tool_result: { bytes: 540, fingerprint: null },
       },
     })
   })
@@ -798,11 +797,9 @@ describe('normalizeKeepers lifecycle metrics', () => {
         paused: true,
         keepalive_running: true,
         pause_state: 'paused',
-        runtime_blocker_state: 'continue_gate',
-        runtime_blocker_class: 'ambiguous_post_commit_timeout',
-        runtime_blocker_summary:
-          'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
-        runtime_blocker_continue_gate: true,
+        runtime_blocker_state: 'blocked',
+        runtime_blocker_class: 'turn_timeout',
+        runtime_blocker_summary: 'Provider turn timed out.',
         last_blocker: 'missing social headers',
         last_autonomous_action_at: '2026-04-04T14:08:35Z',
         created_at: '2026-04-03T14:59:29Z',
@@ -815,115 +812,15 @@ describe('normalizeKeepers lifecycle metrics', () => {
       paused: true,
       keepalive_running: true,
       pause_state: 'paused',
-      runtime_blocker_state: 'continue_gate',
-      runtime_blocker_class: 'ambiguous_post_commit_timeout',
-      runtime_blocker_summary:
-        'Mutating tools [keeper_fs_edit] committed before the turn timed out.',
-      runtime_blocker_continue_gate: true,
+      runtime_blocker_state: 'blocked',
+      runtime_blocker_class: 'turn_timeout',
+      runtime_blocker_summary: 'Provider turn timed out.',
       last_blocker: 'missing social headers',
       last_autonomous_action_at: '2026-04-04T14:08:35Z',
       created_at: '2026-04-03T14:59:29Z',
       updated_at: '2026-04-04T14:08:35Z',
       last_activity_ago_s: 42,
     })
-  })
-})
-
-describe('normalizeKeepers turn_budget', () => {
-  it('normalizes override reactive + env autonomous with provenance fields', () => {
-    const [k] = normalizeKeepers([
-      {
-        name: 'poe',
-        status: 'active',
-        turn_budget: {
-          reactive: {
-            value: 25,
-            source: 'override',
-            env_default: 15,
-            env_var: 'MASC_KEEPER_OAS_MAX_TURNS_PER_CALL',
-          },
-          scheduled_autonomous: {
-            value: 2,
-            source: 'env',
-            env_default: 2,
-            env_var: 'MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS',
-          },
-          manifest_path: '/abs/config/keepers/poe.toml',
-          clamp_min: 1,
-          clamp_max: 50,
-        },
-      },
-    ])
-    expect(k?.turn_budget).toEqual({
-      reactive: {
-        value: 25,
-        source: 'override',
-        env_default: 15,
-        env_var: 'MASC_KEEPER_OAS_MAX_TURNS_PER_CALL',
-        raw_override: null,
-      },
-      scheduled_autonomous: {
-        value: 2,
-        source: 'env',
-        env_default: 2,
-        env_var: 'MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS',
-        raw_override: null,
-      },
-      manifest_path: '/abs/config/keepers/poe.toml',
-      clamp_min: 1,
-      clamp_max: 50,
-    })
-  })
-
-  it('returns null when turn_budget is absent', () => {
-    const [k] = normalizeKeepers([{ name: 'no-budget', status: 'active' }])
-    expect(k?.turn_budget).toBeNull()
-  })
-
-  it('returns null when either slot is missing value', () => {
-    const [k] = normalizeKeepers([
-      {
-        name: 'partial',
-        status: 'active',
-        turn_budget: {
-          reactive: { value: 15, source: 'env' },
-          // scheduled_autonomous missing — should reject the whole budget
-        },
-      },
-    ])
-    expect(k?.turn_budget).toBeNull()
-  })
-
-  it('defaults env_default to current value and clamp to [1,50] when backend omits them', () => {
-    const [k] = normalizeKeepers([
-      {
-        name: 'minimal',
-        status: 'active',
-        turn_budget: {
-          reactive: { value: 15, source: 'env' },
-          scheduled_autonomous: { value: 2, source: 'env' },
-        },
-      },
-    ])
-    expect(k?.turn_budget?.reactive.env_default).toBe(15)
-    expect(k?.turn_budget?.clamp_min).toBe(1)
-    expect(k?.turn_budget?.clamp_max).toBe(50)
-    expect(k?.turn_budget?.manifest_path).toBeNull()
-  })
-
-  it('coerces unknown source string to env (safe fallback)', () => {
-    const [k] = normalizeKeepers([
-      {
-        name: 'unknown-source',
-        status: 'active',
-        turn_budget: {
-          reactive: { value: 15, source: 'garbage' },
-          scheduled_autonomous: { value: 2, source: 'override' },
-        },
-      },
-    ])
-    expect(k?.turn_budget?.reactive.source).toBe('env')
-    expect(k?.turn_budget?.scheduled_autonomous.source).toBe('override')
   })
 })
 

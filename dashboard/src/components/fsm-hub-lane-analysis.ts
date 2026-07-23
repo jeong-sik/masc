@@ -97,8 +97,6 @@ function laneMeaning(
           return { tone: snapshot.is_live ? 'info' : 'ok', meaning: snapshot.is_live ? 'decision work 미커밋' : '진행 중인 turn 이 없어 결정 단계 없음' }
         case 'guard_ok':
           return { tone: 'info', meaning: 'guardrail 통과 — turn 계속 진행 허용' }
-        case 'gate_rejected':
-          return { tone: 'warn', meaning: 'guardrail 이 tool/model work 전 turn 차단' }
         case 'tool_policy_selected':
           return { tone: 'info', meaning: '도구 목록 선택 커밋됨 — execution 진행 가능' }
         default:
@@ -129,19 +127,6 @@ function laneMeaning(
           return { tone: 'ok', meaning: '관측된 turn 의 compaction 완료' }
         default:
           return { tone: 'info', meaning: 'compaction state 관측됨' }
-      }
-    case 'breaker':
-      // LT-16-KCB Phase 3. Tripped is not representable here because
-      // it is never observed at snapshot time (see display_state.mli).
-      switch (value) {
-        case 'clean':
-          return { tone: 'ok', meaning: 'circuit breaker clean — 최근 tool failure streak 없음' }
-        case 'warning':
-          return { tone: 'warn', meaning: '동일 유형 도구 실패가 누적 중 — 계속되면 breaker 작동 가능' }
-        case 'cooling':
-          return { tone: 'info', meaning: 'breaker 가 과거에 trip — 현재 reset 됐고 active streak 없음' }
-        default:
-          return { tone: 'info', meaning: 'circuit breaker state 관측됨' }
       }
     }
   })()

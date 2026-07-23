@@ -40,7 +40,7 @@ include Workspace_status
 (* Task lifecycle: add, claim, transition, complete, cancel *)
 include Workspace_task
 
-(* Task scheduling: claim_next, release_stale_claims *)
+(* Task scheduling: claim_next *)
 include Workspace_task_schedule
 
 (* Task/agent/message query and listing *)
@@ -124,14 +124,6 @@ end
    error here so the audit-log mapping cannot silently fall into the
    [Custom "task_<other>"] catch-all that the prior string-typed
    classifier produced. (#8605 family -- exhaustive-match template) *)
-
-
-(* force_release_task — zombie cleanup needs task management logic *)
-let () =
-  Atomic.set Workspace_hooks.force_release_task_fn (fun config ~agent_name ~task_id () ->
-    force_release_task_r config ~agent_name ~task_id ())
-;;
-
 
 
 let clear_agent_current_task_cache config ~task_id =

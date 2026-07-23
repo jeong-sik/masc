@@ -76,6 +76,37 @@ let test_event_to_json_custom () =
   check_json_field json "name" "MY_EVENT";
   check_json_has_field json "value"
 
+let test_event_to_json_run_error () =
+  let e =
+    run_error
+      ~thread_id:"workspace-1"
+      ~run_id:"run-1"
+      ~message:"boom"
+      ~code:"keeper_failed"
+      ()
+  in
+  let json = event_to_json e in
+  check_json_field json "type" "RUN_ERROR";
+  check_json_field json "message" "boom";
+  check_json_field json "code" "keeper_failed";
+  assert (Yojson.Safe.Util.member "value" json = `Null)
+
+let test_run_error_requires_message () =
+  match make_event ~thread_id:"workspace-1" Run_error with
+  | _ -> failwith "RUN_ERROR without message was accepted"
+  | exception Invalid_argument _ -> ()
+
+let test_run_error_rejects_custom_envelope () =
+  match
+    make_event
+      ~thread_id:"workspace-1"
+      ~message:(Some "boom")
+      ~custom_value:(Some (`Assoc [ "message", `String "legacy" ]))
+      Run_error
+  with
+  | _ -> failwith "RUN_ERROR Custom value envelope was accepted"
+  | exception Invalid_argument _ -> ()
+
 let test_event_to_sse_format () =
   let e = make_event ~thread_id:"workspace-1" Run_started in
   let sse = event_to_sse e in
@@ -196,6 +227,9 @@ let () =
     ("event_to_json_basic", test_event_to_json_basic);
     ("event_to_json_optional_fields", test_event_to_json_with_optional_fields);
     ("event_to_json_custom", test_event_to_json_custom);
+    ("event_to_json_run_error", test_event_to_json_run_error);
+    ("run_error_requires_message", test_run_error_requires_message);
+    ("run_error_rejects_custom_envelope", test_run_error_rejects_custom_envelope);
     ("event_to_sse_format", test_event_to_sse_format);
     ("of_agent_session_bound", test_of_agent_session_bound);
     ("of_agent_unbound", test_of_agent_unbound);

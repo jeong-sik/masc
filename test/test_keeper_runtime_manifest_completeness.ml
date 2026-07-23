@@ -121,6 +121,63 @@ let test_is_complete_turn () =
   Alcotest.(check bool) "finished+receipt+checkpoint is complete" true
     (M.is_complete_turn complete)
 
+let test_compaction_evidence_public_projection () =
+  let evidence =
+    Keeper_compaction_evidence.create
+~target_identity_fingerprint:"target-identity"
+~catalog_generation_fingerprint:"catalog-generation"
+~catalog_evidence_sha256:"catalog-evidence"
+~plan_fingerprint:"plan-fingerprint"
+~receipt_plan_fingerprint:"plan-fingerprint"
+~receipt_request_body_sha256:"request-body"
+      ~selected_target_ref:"compact-runtime"
+      ~before_checkpoint_bytes:4096
+      ~after_checkpoint_bytes:1024
+      ~before_message_count:12
+      ~after_message_count:4
+      ~summarized_message_count:4
+      ~dropped_message_count:8
+      ~before_tool_use_count:3
+      ~after_tool_use_count:3
+      ~before_tool_result_count:3
+      ~after_tool_result_count:3
+    |> Result.get_ok
+    |> Keeper_compaction_evidence.to_json
+  in
+  let decision =
+    let evidence_with_cross_scope_field =
+      match evidence with
+      | `Assoc fields -> `Assoc (("error", `String "must-not-leak") :: fields)
+      | _ -> Alcotest.fail "canonical compaction evidence must be an object"
+    in
+    M.with_payload_role
+      ~payload_role:M.Checkpoint
+      (`Assoc
+        [ "exact_evidence", evidence_with_cross_scope_field ])
+  in
+  let json =
+    manifest ~event:M.Context_compacted ~decision ~links:(links ())
+    |> M.public_to_json
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "checkpoint role retained"
+    "checkpoint"
+    (json |> member "decision" |> member "payload_role" |> to_string);
+  Alcotest.(check int)
+    "exact before bytes retained"
+    4096
+    (json
+     |> member "decision"
+     |> member "exact_evidence"
+     |> member "before_checkpoint_bytes"
+     |> to_int);
+  Alcotest.check
+    (Alcotest.testable Yojson.Safe.pp Yojson.Safe.equal)
+    "all canonical evidence fields retained"
+    evidence
+    (json |> member "decision" |> member "exact_evidence")
+
 let () =
   Alcotest.run "keeper_runtime_manifest_completeness"
     [ ( "completeness"
@@ -133,5 +190,7 @@ let () =
         ; Alcotest.test_case "is_finished_turn" `Quick test_is_finished_turn
         ; Alcotest.test_case "is_complete_turn" `Quick
             test_is_complete_turn
+        ; Alcotest.test_case "compaction evidence public projection" `Quick
+            test_compaction_evidence_public_projection
         ] )
     ]

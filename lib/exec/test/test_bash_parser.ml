@@ -133,7 +133,7 @@ let test_input_redirect_parsed () =
 let test_general_redirect_rejected_before_dispatch () =
   match Bash.parse_string "echo hi > /tmp/out" with
   | Parsed.Parsed ir ->
-    let result = Masc_exec.Exec_dispatch.dispatch_decided (Shell_ir_risk.classify (Shell_ir_risk.undecided ir)) in
+    let result = Masc_exec.Exec_dispatch.dispatch ir in
     assert (result.status = Unix.WEXITED 1);
     assert (result.stdout = "");
     assert (String.contains result.stderr 'w');
@@ -236,7 +236,7 @@ let test_env_prefix_dispatch_overlay () =
       "MASC_SHELL_IR_ENV_PREFIX_TEST=ok printenv MASC_SHELL_IR_ENV_PREFIX_TEST"
   with
   | Parsed.Parsed ir ->
-    let result = Masc_exec.Exec_dispatch.dispatch_decided (Shell_ir_risk.classify (Shell_ir_risk.undecided ir)) in
+    let result = Masc_exec.Exec_dispatch.dispatch ir in
     assert (result.status = Unix.WEXITED 0);
     assert (String.trim result.stdout = "ok")
   | _ -> assert false

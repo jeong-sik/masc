@@ -11,20 +11,12 @@ module Io = Masc.Keeper_memory_os_io
 module Recall = Masc.Keeper_memory_os_recall
 module Atypes = Agent_sdk.Types
 
-let message_text (m : Atypes.message) =
-  m.content
-  |> List.filter_map (function
-    | Atypes.Text s -> Some s
-    | _ -> None)
-  |> String.concat "\n"
-
 let now = 1_000_000.0
 let unconfigured_runtime_id = "test.unconfigured"
 
 let fact claim =
   { Types.claim
   ; category = Types.Fact
-  ; external_ref = None
   ; claim_kind = None
   ; source = { Types.trace_id = "t"; turn = 1; tool_call_id = None }
   ; observed_by = []
@@ -126,8 +118,6 @@ let test_accumulate_consolidate_recall () =
             Recall.render_context
               ~keeper_id
               ~now
-              ~max_facts:8
-              ~max_episodes:2
               ()
           in
           Alcotest.(check int) "recall sees consolidated store" 4 (List.length (Io.read_facts_all ~keeper_id));
@@ -159,37 +149,43 @@ let test_skips_when_too_few () =
           Alcotest.(check int) "store unchanged when too few facts" 1 after_count))))
 ;;
 
-let test_parallel_timeout_per_keeper () =
+(* The tick must not fan out one provider call per keeper concurrently: every
+   call lands on the same runtime, so an N-keeper burst floods that endpoint's
+   admission FIFO and starves turn/judge/compaction traffic for the whole
+   burst (#25401). The fake yields inside the provider call so any concurrent
+   scheduling would be observed as in_flight > 1. *)
+let test_tick_serializes_provider_calls () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       with_prompts (fun () ->
         with_temp_keepers (fun () ->
-          (* Two keepers each have enough facts to be considered for consolidation. *)
-          List.iter (Io.append_fact ~keeper_id:"keeper-slow") [ fact "slow 1"; fact "slow 2" ];
-          List.iter (Io.append_fact ~keeper_id:"keeper-fast") [ fact "fast 1"; fact "fast 2" ];
-          let slow_count_before = List.length (Io.read_facts_all ~keeper_id:"keeper-slow") in
-          let fast_count_before = List.length (Io.read_facts_all ~keeper_id:"keeper-fast") in
-          Alcotest.(check int) "slow keeper accumulated" 2 slow_count_before;
-          Alcotest.(check int) "fast keeper accumulated" 2 fast_count_before;
-          let slow_complete ~sw:_ ~net:_ ?clock ~config:_ ~messages:_ () =
-            (match clock with
-             | Some clock -> Eio.Time.sleep clock 2.0
-             | None -> ());
-            Ok (fake_response "{\"groups\":[],\"drop_indices\":[]}")
+          let keeper_ids = [ "keeper-1"; "keeper-2"; "keeper-3" ] in
+          List.iter
+            (fun keeper_id ->
+               List.iter
+                 (Io.append_fact ~keeper_id)
+                 [ fact "deploy uses blue-green"
+                 ; fact "deployment is blue-green based"
+                 ; fact "build runs on dune 3.x"
+                 ; fact "tests live under test/"
+                 ; fact "ci runs on github actions"
+                 ])
+            keeper_ids;
+          let in_flight = ref 0 in
+          let max_in_flight = ref 0 in
+          let calls = ref 0 in
+          let observing_complete :
+                Masc.Keeper_memory_os_consolidation_runtime.complete_fn =
+            fun ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () ->
+              incr in_flight;
+              incr calls;
+              if !in_flight > !max_in_flight then max_in_flight := !in_flight;
+              Eio.Fiber.yield ();
+              decr in_flight;
+              Ok (fake_response {|{"groups":[],"drop_indices":[]}|})
           in
-          let fast_complete = fake_complete "{\"groups\":[],\"drop_indices\":[]}" in
-          let complete ~sw ~net ?clock ~config ~messages () =
-            if List.exists
-                 (fun (m : Agent_sdk.Types.message) ->
-                    String.contains (message_text m) 'f')
-                 messages
-            then fast_complete ~sw ~net ?clock ~config ~messages ()
-            else slow_complete ~sw ~net ?clock ~config ~messages ()
-          in
-          let start = Unix.gettimeofday () in
           Server_bootstrap_maintenance.run_memory_os_consolidation_tick
-            ~complete
-            ~timeout_sec:0.1
+            ~complete:observing_complete
             ~sw
             ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env)
@@ -197,16 +193,11 @@ let test_parallel_timeout_per_keeper () =
             ~provider_cfg:(provider_cfg ())
             ~now
             ();
-          let elapsed = Unix.gettimeofday () -. start in
-          (* The slow keeper should hit the 0.1s timeout and the fast keeper should
-             complete; the total elapsed time must be far below the slow keeper's
-             2.0s sleep, proving per-keeper timeout and parallel scheduling. *)
-          Alcotest.(check bool) "tick returns before slow keeper sleep" true (elapsed < 1.0);
-          (* The fast keeper store should be unchanged (no groups). The slow keeper
-             may or may not have been rewritten depending on timing; we only assert
-             that the fast path completed. *)
-          let fast_count_after = List.length (Io.read_facts_all ~keeper_id:"keeper-fast") in
-          Alcotest.(check int) "fast keeper unchanged" fast_count_before fast_count_after))))
+          Alcotest.(check int) "every keeper consolidated" 3 !calls;
+          Alcotest.(check int)
+            "provider calls never overlap"
+            1
+            !max_in_flight))))
 ;;
 
 let () =
@@ -222,9 +213,9 @@ let () =
             `Quick
             test_skips_when_too_few
         ; Alcotest.test_case
-            "parallel per-keeper timeout"
+            "tick serializes provider calls"
             `Quick
-            test_parallel_timeout_per_keeper
+            test_tick_serializes_provider_calls
         ] )
     ]
 ;;

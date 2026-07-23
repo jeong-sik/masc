@@ -41,27 +41,19 @@ let find_jsonl_row_by_action_id rows action_id =
          | _ -> None)
 
 let resolved_keeper_args_to_json
-    ~name ~persona_name ~goal
+    ~name ~persona_name
     ~instructions
     ~mention_targets
     ~allowed_paths_opt
     ~autoboot_enabled_opt
-    ~tool_access_opt
-    ~tool_denylist
-    ~proactive_enabled ~shards
-    ~auto_handoff ~handoff_threshold ~handoff_cooldown_sec =
+    ~proactive_enabled =
   let base =
     [
       ("name", `String name);
       ("persona_name", `String persona_name);
-      ("goal", `String goal);
       ("instructions", `String instructions);
       ("mention_targets", Json_util.json_string_list mention_targets);
-      ("tool_denylist", Json_util.json_string_list tool_denylist);
       ("proactive_enabled", `Bool proactive_enabled);
-      ("auto_handoff", `Bool auto_handoff);
-      ("handoff_threshold", `Float handoff_threshold);
-      ("handoff_cooldown_sec", `Int handoff_cooldown_sec);
     ]
   in
   let allowed_paths_field =
@@ -74,36 +66,8 @@ let resolved_keeper_args_to_json
     | Some value -> [ ("autoboot_enabled", `Bool value) ]
     | None -> []
   in
-  let tool_policy_field =
-    match tool_access_opt with
-    | Some tool_access -> [("tool_access", Json_util.json_string_list tool_access)]
-    | None -> []
-  in
-  let shards_field =
-    match shards with
-    | Some xs -> [("shards", Json_util.json_string_list xs)]
-    | None -> []
-  in
   `Assoc
-    ( base @ allowed_paths_field @ autoboot_field
-    @ tool_policy_field @ shards_field )
-
-let validate_resolved_keeper_create_json (json : Yojson.Safe.t) : string list =
-  let errors = ref [] in
-  let name = Safe_ops.json_string ~default:"" "name" json in
-  let goal = Safe_ops.json_string ~default:"" "goal" json |> String.trim in
-  let mention_targets = Safe_ops.json_string_list "mention_targets" json in
-  if not (validate_name name) then
-    errors :=
-      Printf.sprintf
-        "invalid keeper name %S (must be non-empty and match \
-         [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
-        name
-      :: !errors;
-  if goal = "" then errors := "goal is required" :: !errors;
-  if mention_targets = [] then
-    errors := "mention_targets is required" :: !errors;
-  List.rev !errors
+    (base @ allowed_paths_field @ autoboot_field)
 
 let toml_escape_string value =
   let buf = Buffer.create (String.length value + 8) in
@@ -122,10 +86,6 @@ let toml_string value = "\"" ^ toml_escape_string value ^ "\""
 
 let toml_string_array values =
   values |> List.map toml_string |> String.concat ", " |> Printf.sprintf "[%s]"
-
-let toml_float value =
-  if Float.is_finite value then Ok (Printf.sprintf "%.17g" value)
-  else Error "non-finite float cannot be persisted to keeper TOML"
 
 let required_resolved_string key json =
   match Safe_ops.json_string_opt key json with
@@ -170,16 +130,6 @@ let append_present_string_list_field acc key json =
       append_string_list_field acc key (Safe_ops.json_string_list key json)
   | Some _ | None -> acc
 
-let tool_access_toml_section json =
-  match Safe_ops.json_member_opt "tool_access" json with
-  | Some (`List _ as tool_access) -> (
-      match tool_access_of_meta_json (`Assoc [ ("tool_access", tool_access) ]) with
-      | Ok tools ->
-          Ok [ Printf.sprintf "tool_access = %s" (toml_string_array tools) ]
-      | Error msg -> Error msg)
-  | Some _ -> Error "tool_access must be an array of strings for durable TOML"
-  | None -> Ok []
-
 let render_keeper_toml_from_resolved_args (json : Yojson.Safe.t) :
     (string, string) result =
   match required_resolved_string "name" json with
@@ -197,7 +147,6 @@ let render_keeper_toml_from_resolved_args (json : Yojson.Safe.t) :
               let fields = [] in
               let fields = append_string_field fields "name" name in
               let fields = append_string_field fields "persona_name" persona_name in
-              let fields = append_optional_string_field fields "goal" json in
               let fields = append_optional_string_field fields "instructions" json in
               let fields =
                 append_optional_bool_field fields "autoboot_enabled" json
@@ -209,47 +158,19 @@ let render_keeper_toml_from_resolved_args (json : Yojson.Safe.t) :
                 append_optional_bool_field fields "proactive_enabled" json
               in
               let fields =
-                append_optional_int_field fields "proactive_idle_sec" json
-              in
-              let fields =
-                append_optional_int_field fields "proactive_cooldown_sec" json
-              in
-              let fields = append_present_string_list_field fields "shards" json in
-              let fields =
                 append_present_string_list_field fields "allowed_paths" json
               in
               let fields =
                 append_present_string_list_field fields "active_goal_ids" json
               in
-              (match tool_access_toml_section json with
-              | Error _ as err -> err
-              | Ok tool_access_section ->
-                  let fields =
-                    append_present_string_list_field fields "tool_denylist" json
-                  in
-                  let timeout_fields =
-                    match Safe_ops.json_float_opt "per_provider_timeout" json with
-                    | None -> Ok fields
-                    | Some value -> (
-                        match toml_float value with
-                        | Error _ as err -> err
-                        | Ok rendered ->
-                            Ok
-                              ((Printf.sprintf "per_provider_timeout = %s"
-                                  rendered)
-                              :: fields))
-                  in
-                  Result.map
-                    (fun fields ->
-                      String.concat "\n"
-                        ([
-                           "# Generated by masc_keeper_create_from_persona.";
-                           "[keeper]";
-                         ]
-                        @ List.rev fields
-                        @ tool_access_section)
-                      ^ "\n")
-                    timeout_fields)
+              Ok
+                (String.concat "\n"
+                   ([
+                      "# Generated by masc_keeper_create_from_persona.";
+                      "[keeper]";
+                    ]
+                    @ List.rev fields)
+                 ^ "\n")
 
 let persist_keeper_toml_from_resolved_args (json : Yojson.Safe.t) :
     (Yojson.Safe.t, string) result =
@@ -312,23 +233,8 @@ let resolved_keeper_args_from_persona args :
         let defaults_source =
           Option.value defaults.manifest_path ~default:persona.profile_path
         in
-        (match persona_operator_todo_placeholder_fields persona defaults with
-        | _ :: _ as fields ->
-            Error
-              (Printf.sprintf
-                 "keeper defaults at %s contain OPERATOR_TODO placeholder(s): %s; \
-                  replace placeholders before masc_keeper_create_from_persona"
-                 defaults_source
-                 (String.concat ", " fields))
-        | [] ->
         let name =
           get_string_opt args "name" |> Option.value ~default:persona_name
-        in
-        let goal =
-          get_string_opt args "goal"
-          |> Dashboard_utils.first_some defaults.goal
-          |> Option.value ~default:""
-          |> normalize_goal_text
         in
         let instructions =
           get_string_opt args "instructions"
@@ -352,50 +258,23 @@ let resolved_keeper_args_from_persona args :
               |> Option.value ~default:false
             in
             let autoboot_enabled = get_bool_opt args "autoboot_enabled" in
-            (match
-               Keeper_turn_up_args.parse_tool_access_input args,
-               Keeper_turn_up_args.parse_present_string_list_opt args "allowed_paths"
-             with
-            | Error err, _ | _, Error err -> Error err
-            | Ok tool_access_opt, Ok allowed_paths_opt ->
-                 let tool_denylist =
-                   match get_string_list args "tool_denylist" with
-                   | _ :: _ as xs -> xs
-                   | [] -> Option.value ~default:[] defaults.tool_denylist
-                 in
+            (match Keeper_turn_up_args.parse_present_string_list_opt args "allowed_paths" with
+            | Error err -> Error err
+            | Ok allowed_paths_opt ->
                  let allowed_paths =
                    match allowed_paths_opt with
                    | Some _ as paths -> paths
                    | None -> defaults.allowed_paths
                  in
-                 let shards =
-                   match get_string_list args "shards" with
-                   | _ :: _ as xs -> Some xs
-                   | [] -> defaults.shards
-                 in
-                 let auto_handoff = get_bool args "auto_handoff" true in
-                 let handoff_threshold =
-                   Safe_ops.json_float_opt "handoff_threshold" args
-                   |> Option.value ~default:0.85
-                 in
-                 let handoff_cooldown_sec =
-                   Safe_ops.json_int_opt "handoff_cooldown_sec" args
-                   |> Option.value ~default:300
-                 in
                  let resolved =
                    resolved_keeper_args_to_json
                      ~name
                      ~persona_name
-                     ~goal
                      ~instructions
                      ~mention_targets
                      ~allowed_paths_opt:allowed_paths
                      ~autoboot_enabled_opt:autoboot_enabled
-                     ~tool_access_opt
-                     ~tool_denylist
-                     ~proactive_enabled ~shards
-                     ~auto_handoff ~handoff_threshold
-                     ~handoff_cooldown_sec
+                     ~proactive_enabled
                  in
                  (match json_operator_todo_placeholder_paths resolved with
                   | _ :: _ as fields ->
@@ -406,4 +285,4 @@ let resolved_keeper_args_from_persona args :
                           masc_keeper_create_from_persona"
                          defaults_source
                          (String.concat ", " fields))
-                  | [] -> Ok (persona, resolved)))))
+                  | [] -> Ok (persona, resolved))))

@@ -5,15 +5,13 @@
     integer [version] counter and an ISO-8601 [updated_at]
     stamp.  Each goal carries:
 
-    - a {!Goal_phase.t} (canonical lifecycle: [Executing] /
-      [Awaiting_verification] / [Blocked] / [Completed] /
-      [Paused] / [Dropped]),
-    - a legacy {!goal_status} kept for backward-compat with
-      consumers that have not migrated to phases yet
-      (derived from phase on write, inferred on read for
-      old rows),
-    - an optional {!Goal_verification.goal_verifier_policy}
-      that gates entry into [Goal_phase.Completed].
+    - a {!Goal_phase.t} (canonical lifecycle: [Executing] / [Blocked] /
+      [Completed] / [Paused] / [Dropped]) — the only persisted
+      lifecycle representation.  The legacy [status] duplicate was
+      removed in RFC-0352 slice 1 after a live-store measurement
+      found zero phase-less rows; the decoder still accepts and
+      ignores an incoming ["status"] field during the transition
+      window.
 
     Every type is exposed concretely because external
     callers ([test/test_dashboard_goals],
@@ -34,50 +32,14 @@
 
     Internal helpers that stay private: [normalize_lower], [now_ms],
     [gen_goal_id], [find_goal], [replace_goal], [update_state],
-    [normalize_goal], [sort_goals], [active_goals], [ensure_dirs],
+    [sort_goals], [active_goals], [ensure_dirs],
     [default_state], [clamp_priority]. *)
 
-(** {1 Status variants} *)
-
-type goal_status =
-  | Active
-  | Paused
-  | Done
-  | Dropped
-  (** Legacy lifecycle status.  Persisted alongside
-      {!Goal_phase.t} for backward-compat; derived from the
-      phase on write via {!goal_status_of_phase} and
-      inferred on read for old rows.  New code paths should
-      branch on [.phase] instead of [.status]. *)
-
-val goal_status_to_yojson : goal_status -> Yojson.Safe.t
-val goal_status_of_yojson :
-  Yojson.Safe.t -> (goal_status, string) result
-
 (** {1 Parsers (string → variant option)} *)
-
-val parse_goal_status : string option -> goal_status option
-(** Same shape as {!parse_horizon}. *)
 
 val parse_goal_phase : string option -> Goal_phase.t option
 (** Delegates to {!Goal_phase.parse}.  [None] passes
     through. *)
-
-(** {1 Phase ↔ legacy status bridge} *)
-
-val goal_status_of_phase : Goal_phase.t -> goal_status
-(** Forward derivation used on write.  Maps every phase to
-    its canonical legacy status:
-    - [Executing] / [Awaiting_verification] → [Active]
-    - [Paused] → [Paused]
-    - [Completed] → [Done]
-    - [Blocked] / [Dropped] → [Dropped] *)
-
-val phase_of_goal_status : goal_status -> Goal_phase.t
-(** Reverse inference used on read for rows persisted
-    before phases existed.  Maps [Active] → [Executing],
-    [Paused] → [Paused], [Done] → [Completed], [Dropped] →
-    [Dropped]. *)
 
 (** {1 Goal record} *)
 
@@ -88,23 +50,15 @@ type goal = {
   target_value : string option;
   due_date : string option;
   priority : int;
-  status : goal_status;
   phase : Goal_phase.t;
-  verifier_policy : Goal_verification.goal_verifier_policy option;
-  require_completion_approval : bool;
-  active_verification_request_id : string option;
   parent_goal_id : string option;
   last_review_note : string option;
   last_review_at : string option;
   created_at : string;
   updated_at : string;
 }
-(** A single goal entry.  [priority] is clamped to [1..5]
-    on every write through the internal [normalize_goal]
-    pass.  [active_verification_request_id] tracks an open
-    {!Goal_verification.goal_verification_request} when the
-    phase is [Awaiting_verification]; cleared on every
-    phase transition out of the verification path. *)
+(** A single goal entry. [priority] is clamped to [1..5] on every
+    write. *)
 
 val goal_to_yojson : goal -> Yojson.Safe.t
 
@@ -134,7 +88,9 @@ type rollup = {
 val rollup_to_yojson : rollup -> Yojson.Safe.t
 
 val compute_rollup : goal list -> rollup
-(** Field-wise count of goals per legacy status.  Single
+(** Field-wise count of goals per lifecycle bucket
+    ([Executing] → active, [Paused]/[Blocked] → paused,
+    [Completed] → done, [Dropped] → dropped).  Single
     pass; no allocation beyond the result record. *)
 
 (** {1 Persistence paths} *)
@@ -207,7 +163,6 @@ val delete_goal :
 
 val list_goals :
   Workspace_utils.config ->
-  ?status:goal_status ->
   ?phase:Goal_phase.t ->
   unit ->
   goal list
@@ -222,11 +177,8 @@ val upsert_goal :
   ?target_value:string ->
   ?due_date:string ->
   ?priority:int ->
-  ?status:goal_status ->
   ?phase:Goal_phase.t ->
   ?parent_goal_id:string ->
-  ?verifier_policy:Goal_verification.goal_verifier_policy ->
-  ?require_completion_approval:bool ->
   unit ->
   (goal * [ `created | `updated ], string) result
 (** Creates a new goal when [id] is omitted (mints

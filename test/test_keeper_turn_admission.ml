@@ -19,14 +19,97 @@ let check name cond =
     Printf.printf "  ✗ %s\n%!" name)
 ;;
 
+let temp_dir prefix =
+  let path = Filename.temp_file prefix "" in
+  Sys.remove path;
+  Unix.mkdir path 0o755;
+  path
+;;
+
+let rec remove_tree path =
+  if Sys.file_exists path
+  then if Sys.is_directory path
+    then (
+      Sys.readdir path
+      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path)
+    else Sys.remove path
+;;
+
+let rec ensure_dir path =
+  if not (Sys.file_exists path)
+  then (
+    ensure_dir (Filename.dirname path);
+    Unix.mkdir path 0o755)
+;;
+
 let base_path = "/tmp/masc_test_turn_admission"
 let keeper_name = "admission-keeper"
 let reset () =
   Keeper_turn_admission.For_testing.reset ();
   Keeper_chat_queue.For_testing.reset ();
+  remove_tree base_path;
+  (* [Keeper_fs] never creates a filesystem root, only descendants
+     (durable-directory ownership guard), so enqueue after this wipe fails
+     with [Missing_root] unless the fixture recreates its own root. *)
+  ensure_dir base_path;
   ignore
     (Keeper_chat_queue.configure_persistence ~base_path
       : Keeper_chat_queue.configure_report)
+
+let queued_message : Keeper_chat_queue.queued_message =
+  { content = "typed queue boundary"
+  ; user_blocks = []
+  ; attachments = []
+  ; timestamp = 1.0
+  ; source = Keeper_chat_queue.Dashboard { thread_id = "keeper:admission" }
+  ; user_row_origin = Keeper_chat_store.Needs_append
+  }
+;;
+
+let test_autonomous_admits_when_chat_persistence_is_not_configured () =
+  Keeper_turn_admission.For_testing.reset ();
+  Keeper_chat_queue.For_testing.reset ();
+  Printf.printf
+    "Test 0a: unconfigured Chat persistence does not close autonomous admission\n%!";
+  (match Keeper_chat_queue.enqueue ~keeper_name queued_message with
+   | Error Keeper_chat_queue.Persistence_not_configured ->
+     check "Chat enqueue keeps its typed persistence error" true
+   | Error _ | Ok _ -> check "Chat enqueue keeps its typed persistence error" false);
+  match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> "ran") with
+  | `Ran "ran" -> check "independent autonomous lane remains open" true
+  | `Ran _ | `Busy _ -> check "independent autonomous lane remains open" false
+;;
+
+let test_global_chat_load_error_does_not_close_autonomous_admission () =
+  let error_base_path = temp_dir "masc_test_turn_admission_load_error_" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_turn_admission.For_testing.reset ();
+      Keeper_chat_queue.For_testing.reset ();
+      remove_tree error_base_path)
+    (fun () ->
+      Keeper_turn_admission.For_testing.reset ();
+      Keeper_chat_queue.For_testing.reset ();
+      let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path:error_base_path in
+      ensure_dir (Filename.dirname keepers_dir);
+      Out_channel.with_open_text keepers_dir (fun channel ->
+        output_string channel "not a directory");
+      let report = Keeper_chat_queue.configure_persistence ~base_path:error_base_path in
+      check "registry discovery failure is explicit" (report.load_errors <> []);
+      (match Keeper_chat_queue.enqueue ~keeper_name queued_message with
+       | Error (Keeper_chat_queue.Snapshot_unavailable _) ->
+         check "Chat enqueue retains its typed snapshot error" true
+       | Error _ | Ok _ -> check "Chat enqueue retains its typed snapshot error" false);
+      match
+        Keeper_turn_admission.run_if_free
+          ~base_path:error_base_path
+          ~keeper_name
+          (fun () -> "ran")
+      with
+      | `Ran "ran" -> check "global Chat read error does not block autonomy" true
+      | `Ran _ | `Busy _ -> check "global Chat read error does not block autonomy" false)
+;;
 
 let test_free_slot_admits () =
   reset ();
@@ -37,6 +120,46 @@ let test_free_slot_admits () =
   match Keeper_turn_admission.run_serialized ~base_path ~keeper_name (fun () -> "ok") with
   | `Ran "ok" -> check "run_serialized admits on a free slot" true
   | `Ran _ | `Rejected _ -> check "run_serialized admits on a free slot" false
+;;
+
+let test_dispatchability_transitions_are_observed () =
+  reset ();
+  Printf.printf "Test 1a: dispatchability transitions are observed exactly\n%!";
+  let observed = ref [] in
+  Keeper_turn_admission.set_slot_transition_observer
+    (Some
+       (fun ~base_path:observed_base_path ~keeper_name:observed_keeper
+            ~transition ->
+          observed :=
+            (observed_base_path, observed_keeper, transition) :: !observed));
+  ignore
+    (Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ())
+      : [ `Ran of unit | `Busy of Keeper_turn_admission.autonomous_block ]);
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  ignore
+    (Keeper_turn_admission.begin_shutdown
+       ~base_path
+       ~keeper_name
+       ~operation_id
+      : Keeper_turn_admission.begin_shutdown_result);
+  ignore
+    (Keeper_turn_admission.rollback_shutdown
+       ~base_path
+       ~keeper_name
+       ~operation_id
+      : Keeper_turn_admission.rollback_shutdown_result);
+  let observed = List.rev !observed in
+  check "turn release and shutdown rollback both publish"
+    (match observed with
+     | [ (turn_base, turn_keeper, Keeper_turn_admission.Turn_released)
+       ; (rollback_base, rollback_keeper, Keeper_turn_admission.Shutdown_rolled_back)
+       ] ->
+       String.equal turn_base base_path
+       && String.equal rollback_base base_path
+       && String.equal turn_keeper keeper_name
+       && String.equal rollback_keeper keeper_name
+     | _ -> false);
+  Keeper_turn_admission.set_slot_transition_observer None
 ;;
 
 let test_chat_if_free_never_parks () =
@@ -88,7 +211,8 @@ let test_chat_if_free_rechecks_durable_queue_after_stale_peek () =
     ; user_blocks = []
     ; attachments = []
     ; timestamp = Time_compat.now ()
-    ; source = Keeper_chat_queue.Dashboard
+    ; source = Keeper_chat_queue.Dashboard { thread_id = "keeper:admission" }
+    ; user_row_origin = Keeper_chat_store.Needs_append
     }
   in
   let receipt = Keeper_chat_queue.enqueue ~keeper_name message in
@@ -103,9 +227,9 @@ let test_chat_if_free_rechecks_durable_queue_after_stale_peek () =
    | `Busy _ | `Ran () -> check "pending receipt blocks direct admission" false);
   check "pending receipt is not overtaken" (not !direct_ran);
   let lease =
-    match Keeper_chat_queue.lease_batch ~keeper_name with
+    match Keeper_chat_queue.lease_next ~keeper_name with
     | `Leased lease -> lease
-    | `Empty | `Already_leased _ | `Error _ ->
+    | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
       failwith "expected the committed receipt to lease"
   in
   (match
@@ -231,9 +355,9 @@ let test_distinct_keepers_do_not_block_each_other () =
     Eio.Promise.resolve set_release ())
 ;;
 
-let test_waiting_cap_rejects () =
+let test_waiting_work_is_observed_without_policy_rejection () =
   reset ();
-  Printf.printf "Test 5: chat requests beyond the waiting cap are rejected\n%!";
+  Printf.printf "Test 5: queued chat work is observed without policy rejection\n%!";
   Eio.Switch.run (fun sw ->
     let started, set_started = Eio.Promise.create () in
     let release, set_release = Eio.Promise.create () in
@@ -243,73 +367,33 @@ let test_waiting_cap_rejects () =
            Eio.Promise.resolve set_started ();
            Eio.Promise.await release)));
     Eio.Promise.await started;
-    (* Park exactly [max_waiting_chat_requests] waiters behind the holder.
-       [Fiber.fork] runs the child until its first suspension point, so each
-       waiter has joined the queue before the next fork. *)
-    for _ = 1 to Keeper_turn_admission.max_waiting_chat_requests do
+    for _ = 1 to 3 do
       Eio.Fiber.fork ~sw (fun () ->
         ignore (Keeper_turn_admission.run_serialized ~base_path ~keeper_name (fun () -> ())))
     done;
     (match Keeper_turn_admission.For_testing.peek ~base_path ~keeper_name with
      | Some (_, waiting) ->
-       check
-         (Printf.sprintf
-            "queue holds %d waiters (cap %d)"
-            waiting
-            Keeper_turn_admission.max_waiting_chat_requests)
-         (waiting = Keeper_turn_admission.max_waiting_chat_requests)
+       check "queue observes every parked chat" (waiting = 3)
      | None -> check "slot exists after queueing" false);
-    (match Keeper_turn_admission.run_serialized ~base_path ~keeper_name (fun () -> ()) with
-     | `Rejected
-         { Keeper_turn_admission.waiting
-         ; in_flight
-         ; shutdown_operation_id = None
-         } ->
-       check "request beyond the cap is rejected" true;
-       check
-         "rejection reports a full queue"
-         (waiting >= Keeper_turn_admission.max_waiting_chat_requests);
-       (match in_flight with
-        | Some { Keeper_turn_admission.lane = Chat; _ } ->
-          check "rejection reports the in-flight lane" true
-        | Some _ | None -> check "rejection reports the in-flight lane" false)
-     | `Rejected { shutdown_operation_id = Some _; _ } ->
-       check "queue-cap rejection is not a shutdown" false
-     | `Ran () -> check "request beyond the cap is rejected" false);
     let snapshot = Keeper_turn_admission.snapshot_for ~base_path ~keeper_name in
     check
       "snapshot reports the slot was created"
       snapshot.Keeper_turn_admission.snapshot_slot_created;
     check
-      "snapshot reports the full waiting queue"
-      (snapshot.Keeper_turn_admission.snapshot_waiting
-       = Keeper_turn_admission.max_waiting_chat_requests);
-    check
-      "snapshot reports waiting cap"
-      (snapshot.Keeper_turn_admission.snapshot_waiting_cap
-       = Keeper_turn_admission.max_waiting_chat_requests);
-    check
-      "snapshot marks the waiting queue full"
-      snapshot.Keeper_turn_admission.snapshot_waiting_full;
-    check
-      "snapshot counts the rejected chat request"
-      (snapshot.Keeper_turn_admission.snapshot_rejected_chat_count = 1);
+      "snapshot reports raw waiting work"
+      (snapshot.Keeper_turn_admission.snapshot_waiting = 3);
     let health =
       Keeper_turn_admission.fleet_health_json
         ~base_path
         ~keeper_names:[ keeper_name ]
     in
     let open Yojson.Safe.Util in
-    check "fleet health degrades while the queue is full"
-      (String.equal "degraded" (health |> member "status" |> to_string));
-    check "fleet health exposes full queue count"
-      (health |> member "chat_waiting_full_keeper_count" |> to_int = 1);
-    check "fleet health exposes rejection counter"
-      (health |> member "chat_rejected_total_count" |> to_int = 1);
-    check "fleet health names the full queue reason"
-      (health |> member "status_reasons" |> to_list
-       |> List.map to_string
-       |> List.exists (String.equal "chat_waiting_queue_full"));
+    check "waiting work is not fleet degradation"
+      (String.equal "ok" (health |> member "status" |> to_string));
+    check "fleet health exposes raw waiting work"
+      (health |> member "chat_waiting_total_count" |> to_int = 3);
+    check "fleet health has no capacity-derived operator action"
+      (not (health |> member "operator_action_required" |> to_bool));
     Eio.Promise.resolve set_release ());
   (* The switch only exits after every parked waiter ran; the slot must be
      fully drained. *)
@@ -319,13 +403,7 @@ let test_waiting_cap_rejects () =
   let snapshot = Keeper_turn_admission.snapshot_for ~base_path ~keeper_name in
   check
     "snapshot clears waiting count after release"
-    (snapshot.Keeper_turn_admission.snapshot_waiting = 0);
-  check
-    "snapshot clears full flag after release"
-    (not snapshot.Keeper_turn_admission.snapshot_waiting_full);
-  check
-    "snapshot retains rejection counter after release"
-    (snapshot.Keeper_turn_admission.snapshot_rejected_chat_count = 1)
+    (snapshot.Keeper_turn_admission.snapshot_waiting = 0)
 ;;
 
 let test_exception_releases_slot () =
@@ -428,8 +506,8 @@ let test_idle_loop_yields_to_parked_chat () =
        per-turn-boundary exit check. Each iteration yields (a turn boundary)
        and inspects [chat_waiting]; a parked chat ends the loop early, the
        admission slot releases, and the chat admits by direct handoff. This
-       harnesses the admission-level contract; the SDK-level [exit_condition]
-       wiring in [Keeper_agent_run] drives the real loop the same way. *)
+       harnesses the admission-level contract; the production path checks the
+       same queue at OAS's typed post-tool boundary. *)
     Eio.Fiber.fork ~sw (fun () ->
       match
         Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () ->
@@ -488,6 +566,7 @@ let test_autonomous_yields_to_queued_connector_message () =
              ; team_id = Some "T-test"
              ; thread_ts = Some "171.001"
              }
+       ; user_row_origin = Keeper_chat_store.Already_persisted_upstream
        }
    with
    | Ok _ -> ()
@@ -508,10 +587,10 @@ let test_autonomous_yields_to_queued_connector_message () =
   (* Leasing changes the receipt to Inflight but does not make it disappear.
      The autonomous lane keeps yielding until the terminal decision commits. *)
   let lease =
-    match Keeper_chat_queue.lease_batch ~keeper_name with
+    match Keeper_chat_queue.lease_next ~keeper_name with
     | `Leased lease -> Some lease
-    | `Empty | `Already_leased _ | `Error _ ->
-      check "lease_batch leases the queued connector message" false;
+    | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
+      check "lease_next leases the queued connector message" false;
       None
   in
   let inflight = Keeper_chat_queue.snapshot ~keeper_name in
@@ -562,7 +641,9 @@ let test_shutdown_reservation_fences_and_rolls_back () =
      check
        "autonomous lane sees typed shutdown fence"
        (Keeper_shutdown_types.Operation_id.equal reserved operation_id)
-   | `Busy (Keeper_turn_admission.Turn_busy _) | `Ran () ->
+   | `Busy (Keeper_turn_admission.Turn_busy _)
+   | `Busy (Keeper_turn_admission.Chat_backlog _)
+   | `Ran () ->
      check "autonomous lane cannot cross shutdown fence" false);
   (match Keeper_turn_admission.run_serialized ~base_path ~keeper_name (fun () -> ()) with
    | `Rejected { shutdown_operation_id = Some reserved; _ } ->
@@ -647,20 +728,94 @@ let test_shutdown_reservation_restores_durable_owner () =
     check "registration cannot cross restored fence" false
 ;;
 
+let test_compaction_lane_bypasses_chat_backlog () =
+  reset ();
+  Printf.printf
+    "Test 10b: manual-compaction lane admits despite a durable chat backlog (#24865)\n%!";
+  (match Keeper_chat_queue.enqueue ~keeper_name queued_message with
+   | Ok _ -> ()
+   | Error error ->
+     check
+       ("enqueue succeeds: " ^ Keeper_chat_queue.mutation_error_to_string error)
+       false);
+  (* The standard lane reports the backlog as a typed [Chat_backlog] with the
+     exact counts, not as [Turn_busy None]. Before this variant existed the
+     queue fence logged "holder info not yet published", which mis-directed
+     the #24865 diagnosis toward a stale slot. *)
+  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
+   | `Busy (Keeper_turn_admission.Chat_backlog { pending_count = 1; inflight_count = 0 })
+     -> check "standard lane reports the backlog as typed Chat_backlog" true
+   | `Busy _ | `Ran () ->
+     check "standard lane reports the backlog as typed Chat_backlog" false);
+  (match
+     Keeper_turn_admission.run_compaction_if_free ~base_path ~keeper_name (fun () -> 7)
+   with
+   | `Ran 7 -> check "compaction lane admits despite a pending receipt" true
+   | `Ran _ | `Busy _ -> check "compaction lane admits despite a pending receipt" false);
+  (* Leasing moves the receipt to inflight; the compaction lane still admits
+     (an inflight receipt whose delivery cannot progress is exactly the
+     #24865 wedge), while the standard lane keeps yielding. *)
+  (match Keeper_chat_queue.lease_next ~keeper_name with
+   | `Leased _ -> ()
+   | `Empty | `Already_leased _ | `Recovery_required _ | `Error _ ->
+     check "lease_next leases the queued message" false);
+  (match
+     Keeper_turn_admission.run_compaction_if_free ~base_path ~keeper_name (fun () -> 8)
+   with
+   | `Ran 8 -> check "compaction lane admits despite an inflight receipt" true
+   | `Ran _ | `Busy _ -> check "compaction lane admits despite an inflight receipt" false);
+  (* Production order (#24865 review): the compaction admission released the
+     slot on return, and a follow-up turn re-entering the standard lane still
+     yields to the remaining backlog — the bypass covers the compaction
+     commit only, never the turn that follows it. *)
+  (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
+   | `Busy (Keeper_turn_admission.Chat_backlog _) ->
+     check "standard lane still yields to the backlog after compaction admission" true
+   | `Busy _ | `Ran () ->
+     check "standard lane still yields to the backlog after compaction admission" false);
+  (* A genuinely held slot still refuses the compaction lane: it must never
+     interleave with an in-flight turn. *)
+  Keeper_turn_admission.For_testing.with_unpublished_turn_lock
+    ~base_path
+    ~keeper_name
+    (fun () ->
+       match
+         Keeper_turn_admission.run_compaction_if_free ~base_path ~keeper_name (fun () -> ())
+       with
+       | `Busy (Keeper_turn_admission.Turn_busy _) ->
+         check "compaction lane still refuses a held slot" true
+       | `Busy _ | `Ran () -> check "compaction lane still refuses a held slot" false);
+  (* A durable shutdown reservation still fences the compaction lane. *)
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  ignore
+    (Keeper_turn_admission.begin_shutdown ~base_path ~keeper_name ~operation_id
+      : Keeper_turn_admission.begin_shutdown_result);
+  match
+    Keeper_turn_admission.run_compaction_if_free ~base_path ~keeper_name (fun () -> ())
+  with
+  | `Busy (Keeper_turn_admission.Shutdown_requested _) ->
+    check "compaction lane still honors the shutdown fence" true
+  | `Busy _ | `Ran () -> check "compaction lane still honors the shutdown fence" false
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
+  test_autonomous_admits_when_chat_persistence_is_not_configured ();
+  test_global_chat_load_error_does_not_close_autonomous_admission ();
   test_free_slot_admits ();
+  test_dispatchability_transitions_are_observed ();
   test_chat_if_free_never_parks ();
   test_chat_if_free_rechecks_durable_queue_after_stale_peek ();
   test_autonomous_skips_in_flight_chat ();
   test_chat_turns_serialize ();
   test_distinct_keepers_do_not_block_each_other ();
-  test_waiting_cap_rejects ();
+  test_waiting_work_is_observed_without_policy_rejection ();
   test_exception_releases_slot ();
   test_cancelled_waiter_leaves_queue ();
   test_autonomous_yields_to_parked_chat ();
   test_idle_loop_yields_to_parked_chat ();
   test_autonomous_yields_to_queued_connector_message ();
+  test_compaction_lane_bypasses_chat_backlog ();
   test_shutdown_reservation_fences_and_rolls_back ();
   test_shutdown_reservation_restores_durable_owner ();
   if !failures > 0

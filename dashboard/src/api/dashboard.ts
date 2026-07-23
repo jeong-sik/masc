@@ -39,9 +39,6 @@ export type {
   GoalTreeNode,
   GoalTreeSummary,
   GoalTreeTask,
-  GoalVerificationRequest,
-  GoalVerificationSummary,
-  GoalVerificationVote,
 } from '../types'
 export { fetchDashboardGoalsTree, fetchDashboardGoalDetail } from './dashboard-goals'
 export type {
@@ -124,22 +121,16 @@ export {
 } from './dashboard-execution'
 
 export type {
-  DashboardScheduleDecision,
-  DashboardScheduleResolveResponse,
-  SetApprovalModeResponse,
-} from './dashboard-governance'
+  SetGateModeResponse,
+} from './dashboard-gate'
 export {
-  fetchDashboardGovernance,
-  resolveGovernanceApproval,
-  deleteGovernanceApprovalRule,
-  setApprovalMode,
-  resolveScheduleApproval,
-  pruneSchedules,
-  fetchGovernanceCaseStatus,
-  submitGovernancePetition,
-  submitGovernanceCaseBrief,
-  decideGovernanceExecutionOrder,
-} from './dashboard-governance'
+  fetchDashboardGate,
+  resolveGateApproval,
+  retryGateAutoJudge,
+  deleteGateApprovalRule,
+  setGateMode,
+} from './dashboard-gate'
+export { pruneSchedules } from './dashboard-schedule'
 export { fetchDashboardBriefing, fetchDashboardMission, fetchDashboardMissionSession } from './dashboard-mission'
 
 export type {
@@ -157,7 +148,7 @@ export type {
   DashboardRuntimeEffectiveCapabilities,
   DashboardRuntimeReasoningStreamingFormat,
   DashboardRuntimeAssignment,
-  DashboardRuntimeAssignmentGovernance,
+  DashboardRuntimeAssignmentStatus,
   DashboardRuntimeStartupDegradation,
   DashboardRuntimeStartupDroppedAssignment,
   DashboardRuntimeStartupDroppedLane,
@@ -216,7 +207,6 @@ export type {
   DashboardScheduledAutomationDispatchReceipt,
   DashboardScheduledAutomationKeeperReactionEvidence,
   DashboardScheduledAutomationKeeperQueueEvidence,
-  DashboardScheduledAutomationKeeperToolStatus,
   DashboardScheduledAutomationActor,
   DashboardScheduledAutomationSignal,
   DashboardScheduledAutomationRequest,
@@ -273,7 +263,6 @@ export type {
 export {
   fetchKeeperConfig,
   patchKeeperConfig,
-  setKeeperToolPolicy,
 } from './dashboard-keeper-config'
 
 export type { TrajectoryEntry, TrajectoryResponse } from './dashboard-keeper-trajectory'
@@ -304,8 +293,6 @@ export type {
   MemoryOsFact,
   MemoryOsSelectionPolicy,
   MemoryOsTurnRecordSnapshot,
-  KeeperUserModelItem,
-  KeeperUserModelSnapshot,
   TurnRecordsResponse,
   KeeperCompactionSnapshotLinks,
   KeeperCompactionSnapshot,
@@ -314,7 +301,6 @@ export type {
   TurnTranscript,
 } from './dashboard-turn-records'
 export {
-  MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER,
   fetchKeeperTurnRecords,
   fetchKeeperCompactionSnapshots,
   fetchKeeperTurnTranscript,
@@ -338,15 +324,10 @@ export {
 } from './dashboard-telemetry'
 
 export type {
-  ExcusePattern,
   MemorySubsystemsSynapse,
   MemorySubsystemsEpisode,
   MemorySubsystemsMemoryEntry,
   MemorySubsystemsMemoryEntryError,
-  MemorySubsystemsUserModelItem,
-  MemorySubsystemsUserModelError,
-  MemorySubsystemsUserModelPrompt,
-  MemorySubsystemsDraftSkillCandidate,
   MemorySubsystemsDelegationRequest,
   MemorySubsystemsResponse,
   KeeperMemoryHealthAlert,
@@ -355,6 +336,8 @@ export type {
   KeeperMemoryHealthAlertTarget,
   KeeperMemoryHealthKeeperEntry,
   KeeperMemoryHealthResponse,
+  AuditIntegrityKeeperEntry,
+  AuditIntegrityResponse,
   VerificationRequestStatus,
   VerificationRequestVerdict,
   VerificationRequest,
@@ -370,10 +353,9 @@ export type {
   AuditLedgerParams,
 } from './dashboard-misc'
 export {
-  fetchExcusePatterns,
-  updateExcusePatterns,
   fetchMemorySubsystems,
   fetchKeeperMemoryHealth,
+  fetchAuditIntegrity,
   fetchVerificationRequests,
   resolveVerificationRequest,
   fetchTlaSpecs,

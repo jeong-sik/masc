@@ -9,6 +9,7 @@
    falls back to the default rather than producing a half-formed policy. *)
 
 open Alcotest
+open Masc
 module G = Server_slack_in_process_gateway
 module State = Channel_gate_slack_state
 
@@ -201,6 +202,151 @@ let test_startup_error_is_operator_visible () =
              Yojson.Safe.Util.(status |> member "error" |> to_string))))
 ;;
 
+let slack_message ~ts =
+  Slack_gateway_state.Message_create
+    { channel_id = "C123"
+    ; thread_ts = None
+    ; user_id = "U123"
+    ; user_name = Some "operator"
+    ; text = "wake the keeper"
+    ; ts
+    ; mentions_bot = true
+    ; bot_id = None
+    }
+;;
+
+let test_bound_message_queues_exact_slack_ts () =
+  try
+    with_temp_base (fun () ->
+    match
+      State.bind ~channel_id:"C123" ~keeper_name:"luna" ~actor_name:"test"
+    with
+    | Error detail -> fail detail
+    | Ok _ ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      let observed, resolve_observed = Eio.Promise.create () in
+      let ingress =
+        Connector_ingress_lane.create ~sw
+          ~on_failure:(fun failure ->
+            Eio.Promise.resolve resolve_observed failure)
+          ()
+      in
+      let accepted_before_delivery = ref false in
+      let observed_delivery = ref None in
+      let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+          ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_
+          ~content:_ =
+        accepted_before_delivery := true;
+        Gate_protocol.Reply
+          { content = "queued"
+          ; structured = None
+          ; stats = None
+          ; message_request = None
+          }
+      in
+      let dispatch_for_delivery delivery =
+        observed_delivery := Some delivery;
+        dispatch
+      in
+      G.For_testing.submit_event
+        ~team_id:"T123"
+        ~deliver:(fun () ->
+          if not !accepted_before_delivery then
+            failwith "delivery ran before durable accept";
+          failwith "observe Slack ingress identity")
+        ingress ~dispatch_for_delivery
+        ~clock:(Eio.Stdenv.clock env)
+        ~base_dir:(Env_config_core.base_path ())
+        (slack_message ~ts:"1710000000.123456");
+      check bool "accept completed before handoff" true !accepted_before_delivery;
+      (match !observed_delivery with
+       | Some
+           { source =
+               Keeper_chat_queue.Slack
+                 { channel_id; user_id; user_name; team_id; thread_ts }
+           ; surface =
+               Surface_ref.Slack
+                 { team_id = surface_team_id
+                 ; channel_id = surface_channel_id
+                 ; thread_ts = surface_thread_ts
+                 }
+           ; conversation_id
+           ; external_message_id
+           ; workspace_id
+           } ->
+         check string "Slack delivery channel" "C123" channel_id;
+         check string "Slack delivery actor" "U123" user_id;
+         check string "Slack delivery actor name" "operator" user_name;
+         check (option string) "Slack delivery team" (Some "T123") team_id;
+         check (option string) "Slack delivery workspace identity"
+           (Some "T123") workspace_id;
+         check (option string) "Slack reply thread"
+           (Some "1710000000.123456") thread_ts;
+         check string "Slack surface channel" "C123" surface_channel_id;
+         check (option string) "Slack surface team" (Some "T123") surface_team_id;
+         check (option string) "Slack source message is top-level" None
+           surface_thread_ts;
+         check (option string) "Slack conversation identity"
+           (Some "slack:channel:C123") conversation_id;
+         check (option string) "Slack external event identity"
+           (Some "1710000000.123456") external_message_id
+       | Some _ -> fail "Slack leaf emitted another connector projection"
+       | None -> fail "Slack leaf did not emit a delivery projection");
+      let failure = Eio.Promise.await observed in
+      check string "exact Slack event ts" "1710000000.123456"
+        failure.Connector_ingress_lane.event_id.opaque_id;
+      check string "typed source" "slack_triggered"
+        failure.event_id.source;
+      (match failure.lane with
+       | Connector_ingress_lane.Keeper_lane keeper_name ->
+         check string "resolved Keeper lane" "luna" keeper_name
+       | Connector_ingress_lane.Connector_lane connector_id ->
+         failf "expected Keeper lane, got connector:%s" connector_id);
+      Eio.Switch.fail sw Exit)
+  with Exit -> ()
+;;
+
+let test_binding_store_failure_does_not_enqueue () =
+  try
+    with_temp_base (fun () ->
+    let binding_path =
+      Filename.concat
+        (Env_config_core.base_path ())
+        ".gate/runtime/slack/bindings.json"
+    in
+    Fs_compat.mkdir_p (Filename.dirname binding_path);
+    let out = open_out_bin binding_path in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr out)
+      (fun () -> output_string out "{not-json");
+    Eio_main.run @@ fun env ->
+    Eio.Switch.run @@ fun sw ->
+    let dispatch_called = ref false in
+    let ingress =
+      Connector_ingress_lane.create ~sw
+        ~on_failure:(fun _ -> fail "binding failure must not enqueue")
+        ()
+    in
+    let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+        ~channel_workspace_id:_ ~keeper_name:_ ~idempotency_key:_ ~metadata:_
+        ~content:_ =
+      dispatch_called := true;
+      Gate_protocol.Unavailable_result
+    in
+    let dispatch_for_delivery _delivery = dispatch in
+    G.For_testing.submit_event
+      ~deliver:(fun () -> fail "binding failure must not schedule delivery")
+      ingress ~dispatch_for_delivery
+      ~clock:(Eio.Stdenv.clock env)
+      ~base_dir:(Env_config_core.base_path ())
+      (slack_message ~ts:"1710000000.654321");
+    Eio.Fiber.yield ();
+    check bool "no volatile job accepted" false !dispatch_called;
+    Eio.Switch.fail sw Exit)
+  with Exit -> ()
+;;
+
 let () =
   run "server_slack_trigger_policy"
     [ ( "parse_trigger_policy"
@@ -233,5 +379,11 @@ let () =
             test_invalid_runtime_toml_policy_is_error
         ; test_case "startup error => offline with error" `Quick
             test_startup_error_is_operator_visible
+        ] )
+    ; ( "ingress handoff"
+      , [ test_case "bound message retains exact Slack ts" `Quick
+            test_bound_message_queues_exact_slack_ts
+        ; test_case "binding store failure does not enqueue" `Quick
+            test_binding_store_failure_does_not_enqueue
         ] )
     ]

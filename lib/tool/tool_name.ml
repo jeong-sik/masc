@@ -148,20 +148,17 @@ module Goal_name = struct
     | Goal_list
     | Goal_transition
     | Goal_upsert
-    | Goal_verify
 
   let to_string = function
     | Goal_list -> "masc_goal_list"
     | Goal_transition -> "masc_goal_transition"
     | Goal_upsert -> "masc_goal_upsert"
-    | Goal_verify -> "masc_goal_verify"
   ;;
 
   let of_string = function
     | "masc_goal_list" -> Some Goal_list
     | "masc_goal_transition" -> Some Goal_transition
     | "masc_goal_upsert" -> Some Goal_upsert
-    | "masc_goal_verify" -> Some Goal_verify
     | _ -> None
   ;;
 
@@ -171,22 +168,28 @@ end
 module Operator_name = struct
   type t =
     | Operator_action
+    | Operator_chat_recovery_resolve
     | Operator_confirm
     | Operator_digest
     | Operator_snapshot
+    | Operator_task_recovery_resolve
 
   let to_string = function
     | Operator_action -> "masc_operator_action"
+    | Operator_chat_recovery_resolve -> "masc_operator_chat_recovery_resolve"
     | Operator_confirm -> "masc_operator_confirm"
     | Operator_digest -> "masc_operator_digest"
     | Operator_snapshot -> "masc_operator_snapshot"
+    | Operator_task_recovery_resolve -> "masc_operator_task_recovery_resolve"
   ;;
 
   let of_string = function
     | "masc_operator_action" -> Some Operator_action
+    | "masc_operator_chat_recovery_resolve" -> Some Operator_chat_recovery_resolve
     | "masc_operator_confirm" -> Some Operator_confirm
     | "masc_operator_digest" -> Some Operator_digest
     | "masc_operator_snapshot" -> Some Operator_snapshot
+    | "masc_operator_task_recovery_resolve" -> Some Operator_task_recovery_resolve
     | _ -> None
   ;;
 
@@ -194,30 +197,25 @@ module Operator_name = struct
 end
 
 module Operator_remote_name = struct
-  type t =
-    | Operator_tool of Operator_name.t
-    | Surface_audit
+  type t = Operator_tool of Operator_name.t
 
   let to_string = function
     | Operator_tool tool -> Operator_name.to_string tool
-    | Surface_audit -> "masc_surface_audit"
   ;;
 
   let of_string value =
     match Operator_name.of_string value with
     | Some tool -> Some (Operator_tool tool)
-    | None ->
-      (match value with
-       | "masc_surface_audit" -> Some Surface_audit
-       | _ -> None)
+    | None -> None
   ;;
 
   let all =
     [ Operator_tool Operator_name.Operator_snapshot
     ; Operator_tool Operator_name.Operator_digest
     ; Operator_tool Operator_name.Operator_action
+    ; Operator_tool Operator_name.Operator_chat_recovery_resolve
+    ; Operator_tool Operator_name.Operator_task_recovery_resolve
     ; Operator_tool Operator_name.Operator_confirm
-    ; Surface_audit
     ]
   ;;
 
@@ -228,9 +226,9 @@ end
 (** Domain_tool — the single domain-owned grouping of Task/Board/Goal/Operator
     tool names.
 
-    This module owns only name construction and string round-tripping. Dispatch,
-    effect, risk, and resource policy live in their own registries instead of
-    being inferred from this typed name carrier. *)
+    This module owns only name construction and string round-tripping. Dispatch
+    and execution decisions are supplied by their explicit boundaries instead
+    of being inferred from this typed name carrier. *)
 module Domain_tool = struct
   type t =
     | Task of Task_name.t

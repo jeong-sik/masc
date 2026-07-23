@@ -52,16 +52,14 @@ type context = {
 }
 
 type task_owner_hooks =
-  { is_registered_agent_alias : Workspace.config -> string -> bool
+  { is_keeper_agent_identity : Workspace.config -> agent_name:string -> bool
   ; sync_current_task_binding : Workspace.config -> agent_name:string -> unit
-  ; transition_action_denylist : Workspace.config -> agent_name:string -> string list
   ; active_goal_phases_for_agent : Workspace.config -> agent_name:string -> string list
   }
 
 let default_task_owner_hooks =
-  { is_registered_agent_alias = (fun _ _ -> false)
+  { is_keeper_agent_identity = (fun _ ~agent_name:_ -> false)
   ; sync_current_task_binding = (fun _ ~agent_name:_ -> ())
-  ; transition_action_denylist = (fun _ ~agent_name:_ -> [])
   ; active_goal_phases_for_agent = (fun _ ~agent_name:_ -> [])
   }
 ;;
@@ -134,39 +132,20 @@ let client_side_transition_gate_error ~task_opt ~action ~action_s =
 
 include Tool_task_payloads
 
-let is_registered_owner_agent_alias_name config agent_name =
-  (current_task_owner_hooks ()).is_registered_agent_alias config agent_name
-
 let sync_planning_current_task_with_owned_task (ctx : context) =
-  let actual_name =
-    (* Asymmetric silent-failure unification: previously [Sys_error _ |
-       Yojson.Json_error _] (the *more common* read-side failure class —
-       missing agents file, malformed JSON) returned [ctx.agent_name]
-       silently while only the rare [exn] catch-all logged. Operators
-       saw the loud path but missed the common one. Single warn arm
-       mirrors [Tool_workspace.safe_read_backlog]. *)
-    try Workspace.resolve_agent_name ctx.config ctx.agent_name with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-        Log.Task.warn "resolve_agent_name failed for %s: %s" ctx.agent_name
-          (Stdlib.Printexc.to_string exn);
-        ctx.agent_name
-  in
   if
-    is_registered_owner_agent_alias_name ctx.config ctx.agent_name
-    || is_registered_owner_agent_alias_name ctx.config actual_name
+    (current_task_owner_hooks ()).is_keeper_agent_identity
+      ctx.config
+      ~agent_name:ctx.agent_name
   then ()
   else
-    let matches_you assignee =
-      String.equal assignee ctx.agent_name || String.equal assignee actual_name
-    in
     let owned_task =
       Workspace.get_tasks_raw ctx.config
       |> List.find_map (fun (task : Masc_domain.task) ->
              match task.task_status with
              | Masc_domain.Claimed { assignee; _ }
              | Masc_domain.InProgress { assignee; _ } ->
-                 if matches_you assignee then Some task.id else None
+                 if String.equal assignee ctx.agent_name then Some task.id else None
              | Masc_domain.Todo
              | Masc_domain.AwaitingVerification _
              | Masc_domain.Done _
@@ -187,20 +166,16 @@ let sync_owner_current_task_binding (ctx : context) =
     ctx.config
     ~agent_name:ctx.agent_name
 
-let owner_transition_action_denylist (ctx : context) =
-  (current_task_owner_hooks ()).transition_action_denylist
-    ctx.config
-    ~agent_name:ctx.agent_name
-
 let review_completion_notes
     ~(completion_contract : string list option)
     ~(evaluator_runtime : string option)
-    ~(operator_override : bool)
     ~(ctx : context)
     ~(task_opt : Masc_domain.task option)
     ~(task_id : string)
     ~(notes : string)
-    ~(evidence_refs : string list) : string option =
+    ~(evidence_refs : string list)
+  : Masc_domain.configured_llm_completion_verdict option
+  =
   match task_opt with
   | None -> None
   | Some task ->
@@ -246,28 +221,47 @@ let review_completion_notes
           ~verify_gate_evidence
           ~on_verdict
           ~few_shot_block
-          ~operator_override
           ~sw:ctx.sw
           ar_req
       in
-      match ar_result.verdict with
-      | Anti_rationalization.Reject reason -> Some reason
-      | Anti_rationalization.Approve -> None
+      let decision, rationale =
+        match ar_result.verdict, ar_result.gate with
+        | Some Anti_rationalization.Approve, Anti_rationalization.Structured_tool ->
+          Masc_domain.Completion_pass, None
+        | Some (Anti_rationalization.Reject reason), Anti_rationalization.Structured_tool ->
+          Masc_domain.Completion_reject reason, Some reason
+        | None, Anti_rationalization.Invalid_verdict ->
+          let reason =
+            Option.value
+              ~default:"configured LLM returned no valid structured completion verdict"
+              ar_result.fallback_reason
+          in
+          Masc_domain.Completion_verdict_unavailable reason, Some reason
+        | None, Anti_rationalization.Evaluator_unavailable ->
+          let reason =
+            Option.value
+              ~default:"configured LLM completion evaluator unavailable"
+              ar_result.fallback_reason
+          in
+          Masc_domain.Completion_verdict_unavailable reason, Some reason
+        | Some _,
+          (Anti_rationalization.Invalid_verdict | Anti_rationalization.Evaluator_unavailable)
+        | None, Anti_rationalization.Structured_tool ->
+          let reason = "inconsistent configured LLM completion result" in
+          Masc_domain.Completion_verdict_unavailable reason, Some reason
+      in
+      Some
+        { Masc_domain.decision
+        ; runtime_id = ar_result.evaluator_runtime
+        ; rationale
+        ; evaluated_at = Masc_domain.now_iso ()
+        }
 
 include Tool_task_completion_review
 
 include Tool_task_args
 
 include Tool_task_contract_gate
-
-(* [persisted_contract_rejection] takes [~agent_name] as a plain label so
-   that {!Tool_task_contract_gate} stays free of the {!Tool_task} context
-   record. The facade re-exports a context-bound shim so existing
-   downstream code shape ([~ctx]) is preserved. *)
-let persisted_contract_rejection ~(ctx : context)
-    ~(task_opt : Masc_domain.task option) ~(notes : string) =
-  Tool_task_contract_gate.persisted_contract_rejection
-    ~agent_name:ctx.agent_name ~task_opt ~notes
 
 (* Handlers *)
 
@@ -344,10 +338,6 @@ let handle_add_task ~tool_name ~start_time ctx args =
           Workspace.add_task_with_result ?contract
             ?goal_id
             ?predecessor_task_id
-            ~reject_if:
-              (Workspace_task_capacity.rejection_for_add_task_for_config
-                 ctx.config
-                 ?goal_id)
             ~created_by:ctx.agent_name ctx.config ~title:trimmed_title
             ~priority ~description
         in
@@ -406,13 +396,16 @@ let handle_set_goal ~tool_name ~start_time ctx args =
     else (
       match Task_goal_assignment.set_task_goal ctx.config ~task_id ~goal_id with
       | Ok () ->
-        Tool_result.ok ~tool_name ~start_time
-          (Yojson.Safe.to_string
+        Tool_result.make_ok
+          ~tool_name
+          ~start_time
+          ~data:
             (`Assoc
-              [ ("ok", `Bool true)
-              ; ("task_id", `String task_id)
-              ; ("goal_id", `String goal_id)
-              ]))
+               [ ("ok", `Bool true)
+               ; ("task_id", `String task_id)
+               ; ("goal_id", `String goal_id)
+               ])
+          ()
       | Error err ->
         Tool_result.error
           ~failure_class:(Some Tool_result.Workflow_rejection)
@@ -534,29 +527,17 @@ let handle_claim ~tool_name ~start_time ctx args =
     Workspace.claim_task_r ctx.config ~agent_name:ctx.agent_name ~task_id ()
   in
   (match result with
-   | Ok outcome ->
+   | Ok _ ->
        sync_owner_current_task_binding ctx;
        sync_planning_current_task_with_owned_task ctx;
-       (* Issue #18839: surface auto-released task IDs to subscribers so an
-          MCP operator (or agent consuming the event stream) can react
-          to an implicit hot-potato instead of substring-parsing
-          ["… (auto-released X, Y)"] out of the response message. Empty
-          list when the claim did not displace any prior holding. *)
-       let auto_released_json =
-         `List (List.map (fun id -> `String id) outcome.Workspace.auto_released_task_ids)
-       in
         (Atomic.get push_event_to_sessions_fn) (`Assoc [
           ("type", `String "masc/task_claimed");
           ("task_id", `String task_id);
           ("agent_name", `String ctx.agent_name);
-          ("auto_released_task_ids", auto_released_json);
           ("timestamp", `Float (Time_compat.now ()));
         ])
    | Error e -> task_log_warn ~task_id "task claim failed for %s: %s" task_id (Masc_domain.masc_error_to_string e));
-  let response_result =
-    Result.map (fun (o : Workspace.claim_outcome) -> o.message) result
-  in
-  result_to_response ~tool_name ~start_time response_result
+  result_to_response ~tool_name ~start_time result
 
 (* Look up the current Goal_store phase for each goal id in the agent's
    active_goal_ids. Returns a list of "<goal_id>=<phase>" strings, e.g.
@@ -573,21 +554,16 @@ let active_goal_phases_for_agent ctx =
 
 let no_eligible_diagnostics_json =
   Tool_task_no_eligible.no_eligible_diagnostics_json
-let no_eligible_blocker_summary =
-  Tool_task_no_eligible.no_eligible_blocker_summary
+let no_eligible_exclusion_summary =
+  Tool_task_no_eligible.no_eligible_exclusion_summary
 
 let format_no_eligible
       ctx
       ~excluded_count
-      ~blocked_count
-      ~verification_blocked_count
       ~scope_excluded_count
   =
   let diagnostics =
-    no_eligible_blocker_summary
-      ~blocked_count
-      ~verification_blocked_count
-      ~scope_excluded_count
+    no_eligible_exclusion_summary ~scope_excluded_count
   in
   match active_goal_phases_for_agent ctx with
   | [] ->
@@ -615,7 +591,7 @@ let handle_claim_next ~tool_name ~start_time ctx _args =
      agents_dir. *)
   let result = Workspace.claim_next_r ctx.config ~agent_name:ctx.agent_name () in
   match result with
-  | Workspace.Claim_next_claimed { message; task_id; scope_widened } ->
+  | Workspace.Claim_next_claimed { message; task_id; scope_widened; _ } ->
     sync_owner_current_task_binding ctx;
     sync_planning_current_task_with_owned_task ctx;
     append_claim_observation message ~now:(Time_compat.now ())
@@ -625,8 +601,6 @@ let handle_claim_next ~tool_name ~start_time ctx _args =
     Tool_result.ok ~tool_name ~start_time "No unclaimed tasks available"
   | Workspace.Claim_next_no_eligible
       { excluded_count
-      ; blocked_count
-      ; verification_blocked_count
       ; scope_excluded_count
       ; explicit_excluded_count
       ; claim_pool_candidate_count
@@ -635,28 +609,17 @@ let handle_claim_next ~tool_name ~start_time ctx _args =
       format_no_eligible
         ctx
         ~excluded_count
-        ~blocked_count
-        ~verification_blocked_count
         ~scope_excluded_count
     in
     let diagnostics =
       no_eligible_diagnostics_json
         ~excluded_count
-        ~blocked_count
-        ~verification_blocked_count
         ~scope_excluded_count
         ~explicit_excluded_count
         ~claim_pool_candidate_count
     in
-    (* #18954: build the structured payload directly via [make_ok ~data]
-       so the message and diagnostics live in the JSON [data] field.
-       The previous form [Tool_result.ok (message ^ "\n" ^ payload)]
-       routed through [structured_payload_of_message], which parsed the
-       trailing JSON object out and discarded the prefix line — leaving
-       [Tool_result.message] able to round-trip only the JSON, not the
-       human-readable lead.  LLM/JSON consumers still see the message
-       inside the JSON [.message] field; we keep the same Assoc shape
-       that callers already inspect. *)
+    (* Build the structured payload directly so message and diagnostics
+       remain first-class typed fields. *)
     let data =
       `Assoc [ "message", `String message; "diagnostics", diagnostics ]
     in
@@ -700,11 +663,11 @@ let handle_release ~tool_name ~start_time ctx args =
            Workspace.release_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
              ?expected_version ?handoff_context ()
          in
-         (match result with
-          | Ok _ ->
-            sync_owner_current_task_binding ctx;
-            sync_planning_current_task_with_owned_task ctx
-          | Error _ -> ());
+         Result.iter
+           (fun _ ->
+              sync_owner_current_task_binding ctx;
+              sync_planning_current_task_with_owned_task ctx)
+           result;
          result_to_response ~tool_name ~start_time result)
 
 let transition_known_args =
@@ -715,7 +678,6 @@ let transition_known_args =
     "reason";
     "expected_version";
     "agent_name";
-    "force";
     "completion_contract";
     "evaluator_runtime";
     "handoff_context";

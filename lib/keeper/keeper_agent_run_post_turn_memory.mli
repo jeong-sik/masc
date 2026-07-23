@@ -1,9 +1,9 @@
 (** Post-turn memory write series for [Keeper_agent_run.run_turn].
 
-    Extracts the four post-turn side-effect stages from Step 8 body
-    (deterministic write, episodic record, compaction, quality-metrics
-    JSONL append) into a single typed boundary so that the orchestrator
-    only sees [run ~config ~meta ...].
+    Extracts deterministic writes, LLM librarian records, and quality metrics
+    from Step 8 behind [run ~config ~meta ...]. It does not rewrite or delete
+    memory-bank rows: semantic consolidation requires an explicit typed LLM
+    Memory operation, never a storage-pressure survival rule.
 
     Each sub-stage is best-effort: non-cancel exceptions are logged and
     counted, never propagated.  [Eio.Cancel.Cancelled] is re-raised. *)
@@ -17,6 +17,7 @@ val run :
   response_text:string ->
   actual_tools:string list ->
   librarian_messages:Agent_sdk.Types.message list ->
+  memory_extraction_record:Keeper_run_prompt.memory_extraction_record ->
   post_turn_t0:float ->
   runtime_id:string ->
   inference_telemetry:Agent_sdk.Types.inference_telemetry option ->
@@ -34,4 +35,11 @@ val run :
 
     [deliberation_execution], when available, is persisted as advisory
     delegation request artifacts on this post-turn memory lane rather than on
-    the decision-record append path. *)
+    the decision-record append path.
+
+    [memory_extraction_record] gates only the librarian sub-stage. On
+    [Skip_inert_turn] the librarian unit is never submitted, so its cadence
+    counter does not advance and an idle stretch spends no extraction budget.
+    The deterministic write series runs either way: a model-owned
+    [keeper_memory_write] on an otherwise inert turn is an explicit decision to
+    remember, not an extraction from prose. *)

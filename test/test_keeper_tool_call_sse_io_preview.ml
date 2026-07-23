@@ -53,7 +53,7 @@ let test_tool_io_preview_fields_are_redacted () =
     (Yojson.Safe.Util.to_string tool_result)
 ;;
 
-let test_denied_tool_omits_io_previews () =
+let test_sensitive_named_tool_preserves_redacted_io () =
   let fields =
     Keeper_tools_oas_handler_telemetry.tool_io_preview_fields
       ~tool_name:"keeper_auth_token"
@@ -62,26 +62,74 @@ let test_denied_tool_omits_io_previews () =
       ()
   in
   let json = `Assoc fields in
+  Alcotest.(check bool)
+    "input preview present"
+    true
+    (Option.is_some (string_member "tool_args_preview" json));
+  Alcotest.(check bool)
+    "output preview present"
+    true
+    (Option.is_some (string_member "tool_output_preview" json));
+  Alcotest.(check bool)
+    "structured input present"
+    true
+    (member "tool_args" json <> `Null);
+  Alcotest.(check bool)
+    "structured output present"
+    true
+    (member "tool_result" json <> `Null);
+  Alcotest.(check string)
+    "input secret redacted"
+    "[REDACTED]"
+    (member "tool_args" json |> member "token" |> Yojson.Safe.Util.to_string)
+;;
+
+let test_tool_call_event_uses_canonical_disposition () =
+  let event =
+    Keeper_tools_oas_handler_telemetry.keeper_tool_call_event_json
+      ~keeper_name:"sangsu"
+      ~tool_name:"keeper_file_write"
+      ~duration_ms:12
+      ~disposition:(Tool_result.Deferred ())
+      ~ts:1.0
+      ()
+  in
+  Alcotest.(check (option string))
+    "deferred disposition preserved"
+    (Some "deferred")
+    (string_member "disposition" event);
   Alcotest.(check (option bool))
-    "redacted flag"
-    (Some true)
-    (bool_member "tool_io_redacted" json);
-  Alcotest.(check bool)
-    "input preview omitted"
-    true
-    (Option.is_none (string_member "tool_args_preview" json));
-  Alcotest.(check bool)
-    "output preview omitted"
-    true
-    (Option.is_none (string_member "tool_output_preview" json));
-  Alcotest.(check bool)
-    "structured input omitted"
-    true
-    (member "tool_args" json = `Null);
-  Alcotest.(check bool)
-    "structured output omitted"
-    true
-    (member "tool_result" json = `Null)
+    "legacy success bool absent"
+    None
+    (bool_member "success" event)
+;;
+
+let test_oas_invocation_fields_preserve_exact_occurrence () =
+  let invocation =
+    Agent_sdk.Tool.Invocation.create
+      ~tool_use_id:""
+      ~turn:11
+      ~schedule:
+        { planned_index = 3
+        ; batch_index = 0
+        ; batch_size = 1
+        ; execution_mode = Agent_sdk.Tool.Serial
+        }
+  in
+  let json =
+    `Assoc
+      (Keeper_tools_oas_handler_telemetry.oas_invocation_fields
+         (Some invocation))
+  in
+  Alcotest.(check (option string))
+    "blank provider id preserved"
+    (Some "")
+    (string_member "tool_use_id" json);
+  Alcotest.(check int) "turn preserved" 11 Yojson.Safe.Util.(member "turn" json |> to_int);
+  Alcotest.(check int)
+    "planned index preserved"
+    3
+    Yojson.Safe.Util.(member "planned_index" json |> to_int)
 ;;
 
 let () =
@@ -93,9 +141,17 @@ let () =
             `Quick
             test_tool_io_preview_fields_are_redacted
         ; Alcotest.test_case
-            "omits denied tool io"
+            "preserves redacted sensitive-named tool io"
             `Quick
-            test_denied_tool_omits_io_previews
+            test_sensitive_named_tool_preserves_redacted_io
+        ; Alcotest.test_case
+            "preserves canonical disposition"
+            `Quick
+            test_tool_call_event_uses_canonical_disposition
+        ; Alcotest.test_case
+            "preserves exact OAS occurrence"
+            `Quick
+            test_oas_invocation_fields_preserve_exact_occurrence
         ] )
     ]
 ;;

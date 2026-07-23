@@ -22,13 +22,13 @@ import {
   jsonHeaders,
   post,
   runOperatorAction,
+  fetchControlPlane,
   fetchWithTimeout,
   fetchJsonWithTimeout,
   DEFAULT_GET_TIMEOUT_MS,
-  DEFAULT_POST_TIMEOUT_MS,
 } from './core'
 import { ensureDevToken, resetDevTokenBootstrap } from './dev-token'
-import { isKeeperChatReceiptId } from '../lib/keeper-chat-receipt'
+import { isKeeperChatReceiptId, parseKeeperQueueRevision } from '../lib/keeper-chat-receipt'
 import type {
   KeeperCompositeSnapshot,
   FleetCompositeSnapshot,
@@ -47,7 +47,7 @@ export type {
   KeeperLastOutcome,
   KeeperLiveTurn,
   KeeperLastSkip,
-  KeeperLivelock,
+  KeeperTurnAttempt,
   KeeperBoardCursor,
   KeeperCompositeExecution,
   KeeperRuntimeAttention,
@@ -107,6 +107,7 @@ export type {
   BulkKeeperDirectiveAction,
   BulkKeeperDirectiveResult,
   BulkKeeperDirectiveResponse,
+  BulkKeeperResumeTarget,
 } from './keeper-lifecycle'
 export {
   bootKeeper,
@@ -131,10 +132,12 @@ export interface KeeperToolReply {
 export type QueuedKeeperMessageStatus =
   | 'queued'
   | 'running'
+  | 'cancelling'
   | 'done'
   | 'error'
   | 'lost'
   | 'cancelled'
+  | 'persistence_failed'
 
 export interface QueuedKeeperMessageSubmission {
   requestId: string
@@ -156,7 +159,7 @@ export interface QueuedKeeperMessageResult {
 
 export interface QueuedKeeperMessageCancelResult {
   requestId: string
-  status: QueuedKeeperMessageStatus
+  status: 'cancelling' | 'cancelled'
   message?: string
 }
 
@@ -165,6 +168,7 @@ const TERMINAL_QUEUED_KEEPER_MESSAGE_STATUSES = new Set<QueuedKeeperMessageStatu
   'error',
   'lost',
   'cancelled',
+  'persistence_failed',
 ])
 
 function normalizeQueuedKeeperMessageStatus(value: unknown): QueuedKeeperMessageStatus {
@@ -173,6 +177,8 @@ function normalizeQueuedKeeperMessageStatus(value: unknown): QueuedKeeperMessage
       return 'queued'
     case 'running':
       return 'running'
+    case 'cancelling':
+      return 'cancelling'
     case 'done':
       return 'done'
     case 'error':
@@ -181,8 +187,10 @@ function normalizeQueuedKeeperMessageStatus(value: unknown): QueuedKeeperMessage
       return 'lost'
     case 'cancelled':
       return 'cancelled'
+    case 'persistence_failed':
+      return 'persistence_failed'
     default:
-      return 'error'
+      throw new Error(`unsupported keeper message status: ${JSON.stringify(value)}`)
   }
 }
 
@@ -229,9 +237,13 @@ function parseQueuedKeeperMessageCancelResult(data: unknown): QueuedKeeperMessag
   if (!requestId) {
     throw new Error('keeper message cancel response missing request_id')
   }
+  const status = normalizeQueuedKeeperMessageStatus(record?.status)
+  if (status !== 'cancelling' && status !== 'cancelled') {
+    throw new Error(`keeper message cancel response has non-cancellation status: ${status}`)
+  }
   return {
     requestId,
-    status: normalizeQueuedKeeperMessageStatus(record?.status),
+    status,
     message: asString(record?.message),
   }
 }
@@ -247,7 +259,7 @@ export async function interruptKeeperTurn(
   opts: { signal?: AbortSignal } = {},
 ): Promise<KeeperTurnInterruptResult> {
   const path = '/api/v1/keepers/turn/interrupt'
-  const resp = await fetchWithTimeout(
+  const resp = await fetchControlPlane(
     path,
     {
       method: 'POST',
@@ -255,7 +267,6 @@ export async function interruptKeeperTurn(
       body: JSON.stringify({ name: keeperName.trim() }),
       signal: opts.signal,
     },
-    DEFAULT_POST_TIMEOUT_MS,
   )
   if (!resp.ok) {
     throw await apiRequestErrorFromResponse('POST', path, resp)
@@ -273,7 +284,7 @@ export function isTerminalQueuedKeeperMessage(result: QueuedKeeperMessageResult)
 }
 
 // Server no longer enforces an external timeout for keeper_msg.
-// Keeper internal limits (max_turns, max_cost_usd, max_tokens) control duration.
+// Keeper turn/token/cost fields are observability data; lifecycle control is explicit.
 // Client-side abort via AbortSignal is the recommended cancellation path.
 
 export interface KeeperChatStreamEvent {
@@ -284,6 +295,8 @@ export interface KeeperChatStreamEvent {
   role?: string
   delta?: string
   snapshot?: string
+  message?: string
+  code?: string
   name?: string
   value?: unknown
   timestamp?: number
@@ -374,7 +387,7 @@ export async function cancelQueuedKeeperMessage(
   opts: { signal?: AbortSignal } = {},
 ): Promise<QueuedKeeperMessageCancelResult> {
   const path = `/api/v1/gate/message/requests/${encodeURIComponent(requestId)}/cancel`
-  const resp = await fetchWithTimeout(
+  const resp = await fetchControlPlane(
     path,
     {
       method: 'POST',
@@ -382,7 +395,6 @@ export async function cancelQueuedKeeperMessage(
       body: '{}',
       signal: opts.signal,
     },
-    DEFAULT_POST_TIMEOUT_MS,
   )
   if (!resp.ok) {
     throw await apiRequestErrorFromResponse('POST', path, resp)
@@ -695,6 +707,12 @@ export type KeeperChatReceiptFailureKind = KeeperQueueReceiptFailureKind
 export type KeeperChatReceiptState =
   | { kind: 'pending' }
   | { kind: 'inflight'; leaseId: string; startedAt: number }
+  | {
+      kind: 'recovery_required'
+      leaseId: string
+      startedAt: number
+      dispatchable: false
+    }
   | { kind: 'delivered'; completedAt: number; outcomeRef: string | null }
   | {
       kind: 'failed'
@@ -707,37 +725,49 @@ export type KeeperChatReceiptState =
 export interface KeeperChatReceipt {
   keeperName: string
   receiptId: string
-  revision: number
+  revision: string
   state: KeeperChatReceiptState
+}
+
+export type KeeperChatRecoveryDecision =
+  | { kind: 'requeue_unconfirmed' }
+  | {
+      kind: 'cancel_unconfirmed'
+      detail: string
+      outcomeRef: string | null
+    }
+
+export interface KeeperChatRecoveryResult {
+  decision: KeeperChatRecoveryDecision['kind']
+  receipt: KeeperChatReceipt
+  audit: { recorded: true } | { recorded: false; error: string }
 }
 
 const KEEPER_CHAT_RECEIPT_FAILURE_KINDS = new Set<KeeperChatReceiptFailureKind>([
   'turn_failed',
-  'timed_out',
   'no_visible_reply',
   'transcript_persist_failed',
   'connector_unavailable',
   'delivery_failed',
   'cancelled',
   'internal_error',
+  'recovery_interrupted',
 ])
 
 export function parseKeeperChatReceipt(value: unknown): KeeperChatReceipt {
-  if (!isRecord(value) || value.schema !== 'keeper_chat_queue.receipt.v1') {
+  if (!isRecord(value) || value.schema !== 'keeper_chat_queue.receipt.v2') {
     throw new Error('Keeper chat receipt response has an unsupported schema')
   }
   const keeperName = asString(value.keeper_name, '').trim()
   const receiptId = asString(value.receipt_id, '').trim()
-  const revision = asNumber(value.revision)
+  const revision = parseKeeperQueueRevision(value.revision)
   const rawState = isRecord(value.state) ? value.state : null
   const kind = asString(rawState?.kind, '').trim()
   if (
     !keeperName
     || !isKeeperChatReceiptId(receiptId)
     || !rawState
-    || typeof revision !== 'number'
-    || !Number.isSafeInteger(revision)
-    || revision < 0
+    || revision === undefined
   ) {
     throw new Error('Keeper chat receipt response is missing identity or state')
   }
@@ -764,6 +794,15 @@ export function parseKeeperChatReceipt(value: unknown): KeeperChatReceipt {
         throw new Error('Keeper chat inflight receipt is missing lease metadata')
       }
       state = { kind, leaseId, startedAt }
+      break
+    }
+    case 'recovery_required': {
+      const leaseId = asString(rawState.lease_id, '').trim()
+      const startedAt = asNumber(rawState.started_at)
+      if (!leaseId || typeof startedAt !== 'number' || rawState.dispatchable !== false) {
+        throw new Error('Keeper chat recovery-required receipt has invalid recovery evidence')
+      }
+      state = { kind, leaseId, startedAt, dispatchable: false }
       break
     }
     case 'delivered': {
@@ -813,6 +852,52 @@ export async function fetchKeeperChatReceipt(
     throw new Error(`fetchKeeperChatReceipt: HTTP ${resp.status} ${resp.statusText}`)
   }
   return parseKeeperChatReceipt(data)
+}
+
+export async function resolveKeeperChatRecovery(
+  keeperName: string,
+  receiptId: string,
+  expectedRevision: string,
+  leaseId: string,
+  decision: KeeperChatRecoveryDecision,
+): Promise<KeeperChatRecoveryResult> {
+  const decisionPayload = decision.kind === 'requeue_unconfirmed'
+    ? { kind: decision.kind }
+    : {
+        kind: decision.kind,
+        detail: decision.detail,
+        outcome_ref: decision.outcomeRef,
+      }
+  const raw = await post<unknown>(
+    `/api/v1/keepers/${encodeURIComponent(keeperName)}/chat/receipts/${encodeURIComponent(receiptId)}/recovery`,
+    {
+      schema: 'keeper_chat_queue.recovery.request.v1',
+      expected_revision: expectedRevision,
+      lease_id: leaseId,
+      decision: decisionPayload,
+    },
+  )
+  if (
+    !isRecord(raw)
+    || raw.schema !== 'keeper_chat_queue.recovery.result.v1'
+    || raw.ok !== true
+    || raw.decision !== decision.kind
+    || !isRecord(raw.audit)
+    || typeof raw.audit.recorded !== 'boolean'
+  ) {
+    throw new Error('resolveKeeperChatRecovery: invalid response envelope')
+  }
+  const receipt = parseKeeperChatReceipt(raw.receipt)
+  if (receipt.keeperName !== keeperName || receipt.receiptId !== receiptId) {
+    throw new Error('resolveKeeperChatRecovery: response identity mismatch')
+  }
+  const audit = raw.audit.recorded
+    ? { recorded: true as const }
+    : {
+        recorded: false as const,
+        error: asString(raw.audit.error, '').trim() || 'recovery audit persistence failed',
+      }
+  return { decision: decision.kind, receipt, audit }
 }
 
 export async function fetchKeeperChatHistory(
@@ -922,14 +1007,10 @@ export interface KeeperStateDiagramResponse {
   keeper: string
   current_phase: string
   mermaid: string
-  decision_pipeline_mermaid?: string
   runtime_fsm_mermaid?: string
   compaction_submachine_mermaid?: string | null
   // Structured data for Cytoscape FSM rendering
-  thompson_alpha?: number
-  thompson_beta?: number
   tool_count?: number
-  recovery_floor_count?: number
   runtime_models?: string[]
   last_provider_result?: string | null
   runtime_models_source?: string

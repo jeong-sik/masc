@@ -8,7 +8,6 @@ open Keeper_types_profile
 type run_context =
   { meta : keeper_meta
   ; temperature : float
-  ; max_tokens : int option
   ; context_injector : Agent_sdk.Hooks.context_injector
   ; shared_context : Agent_sdk.Context.t
   ; session_dir : string
@@ -17,11 +16,6 @@ type run_context =
   ; base_system_prompt : string
   ; ctx_work : working_context
   ; resume_oas_checkpoint : Agent_sdk.Checkpoint.t option
-  ; pre_dispatch_compacted : bool
-  ; pre_dispatch_compaction_trigger : string option
-  ; pre_dispatch_compaction_before_tokens : int option
-  ; pre_dispatch_compaction_after_tokens : int option
-  ; pre_dispatch_checkpoint_error : Agent_sdk.Error.sdk_error option
   ; start_turn_count : int
   ; receipt_started_at : string
   ; config_root : string
@@ -36,32 +30,17 @@ val build_base_system_prompt :
 (** Build the keeper base system prompt from the same persisted meta/profile
     inputs used by {!prepare_run_context}. *)
 
-val resolve_turn_max_tokens :
-     keeper_name:string
-  -> profile_defaults:Keeper_types_profile.keeper_profile_defaults
-  -> ?max_tokens:int
-  -> unit
-  -> int option
-(** Resolve output-token intent exactly once at turn start. An explicit caller
-    value wins; otherwise the validated keeper profile override is used.
-    Absent both, return [None]. Runtime candidates must receive this result
-    unchanged. *)
-
 val prepare_run_context :
      config:Workspace.config
   -> meta:keeper_meta
   -> profile_defaults:Keeper_types_profile.keeper_profile_defaults
   -> base_dir:string
-  -> max_context:int
   -> runtime_id:string
   -> ?temperature:float
-  -> ?max_tokens:int
   -> ?shared_context:Agent_sdk.Context.t
   -> generation:int
   -> unit
   -> run_context
 (** Resolve [temperature] as the caller fallback; a temperature declared by the
     selected runtime model always wins. [profile_defaults] is the immutable
-    pre-dispatch snapshot. [max_tokens] is resolved once from the explicit
-    caller value or that snapshot and remains unchanged for every runtime
-    candidate in this turn. *)
+    pre-dispatch snapshot. *)

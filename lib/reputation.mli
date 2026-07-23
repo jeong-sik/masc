@@ -36,8 +36,6 @@ type agent_reputation = {
   response_rate: float;       (** responded / received, 0.0 if no mentions *)
   board_posts: int;
   board_comments: int;
-  accountability_score: float; (** Evidence-backed trust modifier, 0.0-1.0 *)
-  accountability_risk_band: string; (** low | medium | high from the accountability ledger *)
   accountability_evidence_coverage: float;
   accountability_unsupported_completion_rate: float;
   accountability_open_overdue_commitments: int;
@@ -54,9 +52,6 @@ type agent_reputation = {
   safety_compliance: float;
   (** Penalty-adjusted safety score; decreases with sandbox violations. 0.0–1.0.
       Defaults to 1.0 when no v2 ledger events exist. *)
-  autonomy_level: string;
-  (** Derived operational envelope: "restricted" | "standard" | "elevated" | "full".
-      Advisory only until calibration Phase 5 is complete. *)
   thompson_confidence: float;
   (** Thompson Sampling Beta expected value (alpha/(alpha+beta)).
       0.5 is the neutral prior (alpha=1.0, beta=1.0). *)
@@ -91,12 +86,3 @@ val reputation_to_json : agent_reputation -> Yojson.Safe.t
 val reputation_of_json : Yojson.Safe.t -> agent_reputation option
 (** Wraps {!agent_reputation_of_yojson}. Returns None on parse failure
     or when [agent_name] is empty. *)
-
-val compute_accountability_score :
-  evidence_coverage:float ->
-  unsupported_completion_rate:float ->
-  open_overdue_commitments:int ->
-  float
-(** Compute an evidence-backed penalty score from accountability metrics.
-    A score of [1.0] means no penalty; [0.0] means the agent's activity
-    score should not be trusted for routing/reward decisions. *)

@@ -15,7 +15,7 @@ type toml_value =
   | Toml_bool of bool
   | Toml_string_array of string list
 
-(** A parsed TOML document: mapping from dotted key (e.g. ["keeper.goal"])
+(** A parsed TOML document: mapping from dotted key (e.g. ["keeper.instructions"])
     to value. Tables are flattened with dot separators. *)
 type toml_doc = (string * toml_value) list
 

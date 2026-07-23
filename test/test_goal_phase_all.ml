@@ -20,15 +20,13 @@ let test_phase_roundtrip () =
 
 let test_phase_set () =
   let strs = List.map GP.to_string GP.all in
-  check int "phase count" 7 (List.length GP.all);
+  check int "phase count" 5 (List.length GP.all);
   check int "no duplicate phase strings"
     (List.length strs)
     (List.length (List.sort_uniq String.compare strs));
   check (list string) "phase set and order"
     [
       "executing";
-      "awaiting_verification";
-      "awaiting_approval";
       "blocked";
       "paused";
       "completed";
@@ -47,19 +45,17 @@ let test_action_roundtrip () =
 
 let test_action_set () =
   let strs = List.map GP.action_to_string GP.all_actions in
-  check int "action count" 9 (List.length GP.all_actions);
+  check int "action count" 7 (List.length GP.all_actions);
   check int "no duplicate action strings"
     (List.length strs)
     (List.length (List.sort_uniq String.compare strs));
   check (list string) "action set and order"
     [
       "request_complete";
-      "approve_completion";
-      "reject_completion";
       "pause";
       "resume";
-      "operator_block";
-      "operator_unblock";
+      "block";
+      "unblock";
       "drop";
       "reopen";
     ]

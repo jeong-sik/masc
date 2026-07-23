@@ -5,6 +5,10 @@
 
 include Server_dashboard_http_keeper_api_post
 
+let handle_keeper_paused_work_post =
+  Server_dashboard_http_keeper_paused_work.handle_post
+;;
+
 let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 let freshness_slo_s = Server_dashboard_http_core_cache.freshness_slo_s
 
@@ -34,6 +38,10 @@ let compaction_snapshot_manifest_tail_max_lines =
 
 (* Maximum number of trajectory/trace entries returned per query. *)
 let trajectory_max_limit = 500
+
+(* Maximum per-keeper entries for /tool-calls; also sizes the shared
+   fleet-row window that per-keeper responses derive from. *)
+let tool_calls_limit_max = 200
 
 let cached_assoc_body_or_self cached fields =
   match List.assoc_opt "body" fields with
@@ -171,14 +179,14 @@ let keeper_chat_allowed_trace_ids (m : Keeper_meta_contract.keeper_meta) =
   |> Json_util.dedupe_keep_order
 ;;
 
-let memory_os_read_episodes ~keeper_id ~n =
-  try Keeper_memory_os_io.read_episodes_tail ~keeper_id ~n, None with
+let memory_os_read_episodes ~keeper_id =
+  try Keeper_memory_os_io.read_episodes_all ~keeper_id, None with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> [], Some (Printexc.to_string exn)
 ;;
 
-let memory_os_read_facts ~keeper_id ~n =
-  try Keeper_memory_os_io.read_facts_tail ~keeper_id ~n, None with
+let memory_os_read_facts ~keeper_id =
+  try Keeper_memory_os_io.read_facts_all ~keeper_id, None with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> [], Some (Printexc.to_string exn)
 ;;
@@ -209,11 +217,9 @@ let memory_os_episode_json ~now (episode : Keeper_memory_os_types.episode) =
    RFC-0247): they are absent from the [fact] record, so the type system makes
    re-emitting them unrepresentable. [reference_time] is the shared staleness
    anchor (last_verified_at else first_seen), reused rather than re-inlined.
-   [prompt_recallable] is projected from [fact_prompt_recallable], the same typed
-   SSOT recall uses, so the UI does not infer prompt eligibility from labels.
    [claim_kind] is omitted when [None] so a claim without optional metadata stays a
-   minimal row. [external_ref] is intentionally not surfaced; PR/issue text remains
-   claim context rather than a machine status field. *)
+   minimal row. Product-specific references remain connector/tool context rather
+   than Memory schema fields. *)
 let memory_os_fact_json ~now (fact : Keeper_memory_os_types.fact) =
   `Assoc
     ([ "claim", `String fact.claim
@@ -226,7 +232,6 @@ let memory_os_fact_json ~now (fact : Keeper_memory_os_types.fact) =
 	     ; "valid_until_iso", json_time_iso_opt fact.valid_until
 	     ; "last_verified_at", json_float_opt fact.last_verified_at
 	     ; "current", `Bool (memory_os_fact_is_current ~now fact)
-	     ; "prompt_recallable", `Bool (Keeper_memory_os_types.fact_prompt_recallable fact)
 	     ]
      @ (match fact.claim_kind with
         | Some k -> [ "claim_kind", `String (Keeper_memory_os_types.claim_kind_to_string k) ]
@@ -235,15 +240,8 @@ let memory_os_fact_json ~now (fact : Keeper_memory_os_types.fact) =
 
 type memory_os_selection_policy =
   { keeper_scope : string
-  ; shared_scope : string option
   ; facts_source : string
-  ; shared_facts_source : string option
   ; episodes_source : string
-  ; dashboard_fact_tail_limit : int
-  ; dashboard_episode_tail_limit : int
-  ; recall_private_fact_limit : int
-  ; recall_shared_fact_limit : int
-  ; recall_episode_limit : int
   ; category_source : string
   ; claim_kind_source : string
   ; recall_block : string
@@ -253,15 +251,8 @@ type memory_os_selection_policy =
 let memory_os_selection_policy_json (policy : memory_os_selection_policy) =
   `Assoc
     [ "keeper_scope", `String policy.keeper_scope
-    ; "shared_scope", json_string_opt policy.shared_scope
     ; "facts_source", `String policy.facts_source
-    ; "shared_facts_source", json_string_opt policy.shared_facts_source
     ; "episodes_source", `String policy.episodes_source
-    ; "dashboard_fact_tail_limit", `Int policy.dashboard_fact_tail_limit
-    ; "dashboard_episode_tail_limit", `Int policy.dashboard_episode_tail_limit
-    ; "recall_private_fact_limit", `Int policy.recall_private_fact_limit
-    ; "recall_shared_fact_limit", `Int policy.recall_shared_fact_limit
-    ; "recall_episode_limit", `Int policy.recall_episode_limit
     ; "category_source", `String policy.category_source
     ; "claim_kind_source", `String policy.claim_kind_source
     ; "recall_block", `String policy.recall_block
@@ -269,23 +260,10 @@ let memory_os_selection_policy_json (policy : memory_os_selection_policy) =
     ]
 ;;
 
-let memory_os_selection_policy ~keeper_id ~fact_tail_limit ~recent_episode_limit =
-  let has_shared_tier =
-    not (String.equal keeper_id Keeper_memory_os_types.shared_store_id)
-  in
+let memory_os_selection_policy ~keeper_id =
   { keeper_scope = keeper_id
-  ; shared_scope =
-      (if has_shared_tier then Some Keeper_memory_os_types.shared_store_id else None)
-  ; facts_source = "Keeper_memory_os_io.read_facts_tail"
-  ; shared_facts_source =
-      (if has_shared_tier then Some "Keeper_memory_os_io.read_facts_all" else None)
-  ; episodes_source = "Keeper_memory_os_io.read_episodes_tail"
-  ; dashboard_fact_tail_limit = fact_tail_limit
-  ; dashboard_episode_tail_limit = recent_episode_limit
-  ; recall_private_fact_limit = Keeper_memory_os_policy.recall_default_max_facts
-  ; recall_shared_fact_limit =
-      (if has_shared_tier then Keeper_memory_os_policy.recall_default_max_shared_facts else 0)
-  ; recall_episode_limit = Keeper_memory_os_policy.recall_default_max_episodes
+  ; facts_source = "Keeper_memory_os_io.read_facts_all"
+  ; episodes_source = "Keeper_memory_os_io.read_episodes_all"
   ; category_source = "Keeper_memory_os_types.category_to_string"
   ; claim_kind_source = "Keeper_memory_os_types.claim_kind_to_string"
   ; recall_block = "Keeper_memory_os_recall.render_if_enabled"
@@ -295,12 +273,8 @@ let memory_os_selection_policy ~keeper_id ~fact_tail_limit ~recent_episode_limit
 
 let memory_os_dashboard_json ~keeper_id =
   let now = Time_compat.now () in
-  let recent_episode_limit = 12 in
-  let fact_tail_limit = Keeper_memory_os_policy.fact_store_max in
-  let episodes, episode_error =
-    memory_os_read_episodes ~keeper_id ~n:recent_episode_limit
-  in
-  let facts, fact_error = memory_os_read_facts ~keeper_id ~n:fact_tail_limit in
+  let episodes, episode_error = memory_os_read_episodes ~keeper_id in
+  let facts, fact_error = memory_os_read_facts ~keeper_id in
   let facts_path = Keeper_memory_os_io.facts_path ~keeper_id in
   let keepers_dir = Filename.dirname facts_path in
   let episodes_store = Filename.concat (Filename.concat keepers_dir keeper_id) "episodes" in
@@ -318,11 +292,7 @@ let memory_os_dashboard_json ~keeper_id =
     ; "source", `String "memory_os_files"
     ; "producer", `String "keeper_librarian|keeper_memory_os_recall"
     ; ( "selection_policy"
-      , memory_os_selection_policy
-          ~keeper_id
-          ~fact_tail_limit
-          ~recent_episode_limit
-        |> memory_os_selection_policy_json )
+      , memory_os_selection_policy ~keeper_id |> memory_os_selection_policy_json )
     ; "facts_store", `String facts_path
     ; "episodes_store", `String episodes_store
     ; "recall_enabled", `Bool (Keeper_memory_os_recall.enabled ())
@@ -336,8 +306,7 @@ let memory_os_dashboard_json ~keeper_id =
              [ "episodes", episode_error; "facts", fact_error ]) )
     ; ( "episodes"
       , `Assoc
-          [ "tail_limit", `Int recent_episode_limit
-          ; "shown", `Int (List.length episodes)
+          [ "shown", `Int (List.length episodes)
           ; "current", `Int current_episodes
           ; "expired", `Int (List.length episodes - current_episodes)
           ; "terminal_markers", `Int terminal_marker_count
@@ -345,13 +314,10 @@ let memory_os_dashboard_json ~keeper_id =
           ] )
     ; ( "facts"
       , `Assoc
-          [ "tail_limit", `Int fact_tail_limit
-          ; "shown", `Int (List.length facts)
+          [ "shown", `Int (List.length facts)
           ; "current", `Int current_facts
           ; "expired", `Int (List.length facts - current_facts)
-            (* RFC-keeper-memory-panel-real-data §4a: the individual fact rows (previously counts-only).
-               Bounded by [fact_tail_limit]; [shown] documents the bound so a
-               truncated tail is visible, not silent. *)
+            (* RFC-keeper-memory-panel-real-data §4a: every individual fact row. *)
           ; "items", `List (List.map (memory_os_fact_json ~now) facts)
           ] )
     ]
@@ -604,6 +570,8 @@ type compaction_snapshot_item =
   ; compaction_source : string option
   ; status : string
   ; links : Yojson.Safe.t
+  ; exact_evidence : Yojson.Safe.t option
+  ; reinjection_observation : Yojson.Safe.t
   }
 
 let compaction_snapshot_item_json (item : compaction_snapshot_item) =
@@ -631,7 +599,130 @@ let compaction_snapshot_item_json (item : compaction_snapshot_item) =
     ; "compaction_source", Json_util.string_opt_to_json item.compaction_source
     ; "status", `String item.status
     ; "links", item.links
+    ; ( "exact_evidence"
+      , match item.exact_evidence with
+        | Some evidence -> evidence
+        | None -> `Null )
+    ; "reinjection_observation", item.reinjection_observation
     ]
+;;
+
+type compaction_reinjection_state =
+  | Not_linked
+  | Awaiting_load
+  | Checkpoint_not_loaded
+  | Loaded_not_injected
+  | Reinserted
+  | Sequence_incomplete
+  | Sequence_reversed
+  | Duplicate_receipt
+
+let compaction_reinjection_state_to_string = function
+  | Not_linked -> "not_linked"
+  | Awaiting_load -> "awaiting_load"
+  | Checkpoint_not_loaded -> "checkpoint_not_loaded"
+  | Loaded_not_injected -> "loaded_not_injected"
+  | Reinserted -> "reinserted"
+  | Sequence_incomplete -> "sequence_incomplete"
+  | Sequence_reversed -> "sequence_reversed"
+  | Duplicate_receipt -> "duplicate_receipt"
+;;
+
+let compaction_not_linked_observation_json =
+  `Assoc
+    [ "state", `String (compaction_reinjection_state_to_string Not_linked)
+    ; "keeper_turn_id", `Null
+    ; "checkpoint_loaded_receipts", `Int 0
+    ; "context_injected_receipts", `Int 0
+    ]
+;;
+
+type compaction_receipt_kind =
+  | Checkpoint_load of bool option
+  | Context_injection
+
+type compaction_receipt =
+  { index : int
+  ; keeper_turn_id : int option
+  ; kind : compaction_receipt_kind
+  }
+
+let compaction_reinjection_observation_json ~manifest_rows ~row_index row =
+  let observation state ?keeper_turn_id ~loads ~injections () =
+    `Assoc
+      [ "state", `String (compaction_reinjection_state_to_string state)
+      ; "keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id
+      ; "checkpoint_loaded_receipts", `Int loads
+      ; "context_injected_receipts", `Int injections
+      ]
+  in
+  match row.Keeper_runtime_manifest.links.checkpoint_path with
+  | None -> compaction_not_linked_observation_json
+  | Some checkpoint_path ->
+    let receipts =
+      manifest_rows
+      |> List.filter_map (fun (index, (candidate : Keeper_runtime_manifest.t)) ->
+        if index <= row_index
+           || not (String.equal candidate.Keeper_runtime_manifest.trace_id row.trace_id)
+           || candidate.links.checkpoint_path <> Some checkpoint_path
+        then None
+        else
+          match candidate.event with
+          | Keeper_runtime_manifest.Checkpoint_loaded ->
+            Some
+              { index
+              ; keeper_turn_id = candidate.keeper_turn_id
+              ; kind =
+                  Checkpoint_load
+                    (Json_util.get_bool
+                       candidate.decision
+                       "loaded_checkpoint_present")
+              }
+          | Keeper_runtime_manifest.Context_injected ->
+            Some
+              { index
+              ; keeper_turn_id = candidate.keeper_turn_id
+              ; kind = Context_injection
+              }
+          | _ -> None)
+    in
+    (match receipts with
+     | [] -> observation Awaiting_load ~loads:0 ~injections:0 ()
+     | first :: _ ->
+       let turn_receipts =
+         List.filter
+           (fun receipt -> receipt.keeper_turn_id = first.keeper_turn_id)
+           receipts
+       in
+       let loads, injections =
+         List.fold_left
+           (fun (loads, injections) receipt ->
+             match receipt.kind with
+             | Checkpoint_load _ -> receipt :: loads, injections
+             | Context_injection -> loads, receipt :: injections)
+           ([], [])
+           turn_receipts
+       in
+       let state =
+         match loads, injections, first.keeper_turn_id with
+         | _, _, None -> Sequence_incomplete
+         | _ :: _ :: _, _, _ | _, _ :: _ :: _, _ -> Duplicate_receipt
+         | [ { kind = Checkpoint_load (Some true); index = load_index; _ } ]
+         , [ { index = injection_index; _ } ]
+         , _ ->
+           if load_index < injection_index then Reinserted else Sequence_reversed
+         | [ { kind = Checkpoint_load (Some true); _ } ], [], _ ->
+           Loaded_not_injected
+         | [ { kind = Checkpoint_load (Some false); _ } ], [], _ ->
+           Checkpoint_not_loaded
+         | _ -> Sequence_incomplete
+       in
+       observation
+         state
+         ?keeper_turn_id:first.keeper_turn_id
+         ~loads:(List.length loads)
+         ~injections:(List.length injections)
+         ())
 ;;
 
 let compaction_saved_tokens before_tokens after_tokens =
@@ -678,6 +769,8 @@ let compaction_event_bus_snapshot_json ~keeper_id (row : Keeper_runtime_manifest
              compaction_snapshot_clock_string row.decision "compaction_source"
          ; status = row.status
          ; links = compaction_snapshot_links_json row.links
+         ; exact_evidence = None
+         ; reinjection_observation = compaction_not_linked_observation_json
          })
   | _ ->
     (match Json_util.get_int row.decision "context_compacted_count" with
@@ -709,29 +802,25 @@ let compaction_event_bus_snapshot_json ~keeper_id (row : Keeper_runtime_manifest
             ; compaction_source
             ; status = row.status
             ; links = compaction_snapshot_links_json row.links
+            ; exact_evidence = None
+            ; reinjection_observation = compaction_not_linked_observation_json
             })
      | Some _ | None -> None)
 ;;
 
-let compaction_context_snapshot_json ~keeper_id (row : Keeper_runtime_manifest.t) =
+let compaction_context_snapshot_json
+      ~keeper_id
+      ~manifest_rows
+      ~row_index
+      (row : Keeper_runtime_manifest.t)
+  =
   (* TEL-OK: read-only dashboard projection; compaction telemetry is emitted by
      the keeper runtime/event bridge that produced the manifest row. *)
-  let pre_dispatch_compacted =
-    Json_util.get_bool row.decision "pre_dispatch_compacted" = Some true
-  in
-  if (not pre_dispatch_compacted) && Keeper_runtime_manifest.status_is_skipped row
+  if Keeper_runtime_manifest.status_is_skipped row
   then None
   else
-    let before_tokens =
-      match Json_util.get_int row.decision "before_tokens" with
-      | Some tokens -> Some tokens
-      | None -> Json_util.get_int row.decision "pre_dispatch_compaction_before_tokens"
-    in
-    let after_tokens =
-      match Json_util.get_int row.decision "after_tokens" with
-      | Some tokens -> Some tokens
-      | None -> Json_util.get_int row.decision "pre_dispatch_compaction_after_tokens"
-    in
+    let before_tokens = Json_util.get_int row.decision "before_tokens" in
+    let after_tokens = Json_util.get_int row.decision "after_tokens" in
     let compaction_source =
       compaction_snapshot_clock_string row.decision "compaction_source"
     in
@@ -749,7 +838,7 @@ let compaction_context_snapshot_json ~keeper_id (row : Keeper_runtime_manifest.t
          ; source = "runtime_manifest"
          (* DET-OK: manifest projection fallback only; a missing source maps to
             a stable UI label and does not drive keeper policy. *)
-         ; trigger = Option.value ~default:"pre_dispatch_hygiene" compaction_source
+         ; trigger = Option.value ~default:"context_compacted" compaction_source
          ; runtime_id = row.runtime_id
          ; before_tokens
          ; after_tokens
@@ -758,15 +847,28 @@ let compaction_context_snapshot_json ~keeper_id (row : Keeper_runtime_manifest.t
          ; compaction_source
          ; status = row.status
          ; links = compaction_snapshot_links_json row.links
+         ; exact_evidence =
+             Json_util.assoc_member_opt
+               Keeper_compaction_evidence.exact_evidence_key
+               row.decision
+         ; reinjection_observation =
+             compaction_reinjection_observation_json
+               ~manifest_rows
+               ~row_index
+               row
          })
 ;;
 
-let compaction_snapshot_of_manifest_row ~keeper_id (row : Keeper_runtime_manifest.t) =
+let compaction_snapshot_of_manifest_row
+      ~keeper_id
+      ~manifest_rows
+      (row_index, (row : Keeper_runtime_manifest.t))
+  =
   match row.event with
   | Keeper_runtime_manifest.Event_bus_correlated ->
     compaction_event_bus_snapshot_json ~keeper_id row
   | Keeper_runtime_manifest.Context_compacted ->
-    compaction_context_snapshot_json ~keeper_id row
+    compaction_context_snapshot_json ~keeper_id ~manifest_rows ~row_index row
   | _ -> None
 ;;
 
@@ -808,6 +910,8 @@ let keeper_meta_compaction_snapshot_json ~config ~keeper_id =
              ; compaction_source = None
              ; status = "latest"
              ; links = `Assoc []
+             ; exact_evidence = None
+             ; reinjection_observation = compaction_not_linked_observation_json
              })
       , [] )
   | Ok None -> None, []
@@ -840,12 +944,14 @@ let compaction_snapshots_json ~config ~keeper_id ~limit =
   in
   let scan_truncated = path_scan_truncated || tail_scan_truncated in
   let manifest_items =
+    let manifest_rows = List.mapi (fun index row -> index, row) manifest_rows in
     manifest_rows
     |> List.sort (fun a b ->
       Float.compare
-        (compaction_snapshot_manifest_sort_value b)
-        (compaction_snapshot_manifest_sort_value a))
-    |> List.filter_map (compaction_snapshot_of_manifest_row ~keeper_id)
+        (compaction_snapshot_manifest_sort_value (snd b))
+        (compaction_snapshot_manifest_sort_value (snd a)))
+    |> List.filter_map
+         (compaction_snapshot_of_manifest_row ~keeper_id ~manifest_rows)
     |> compaction_snapshot_take limit
   in
   let items, read_errors =
@@ -932,6 +1038,93 @@ let cached_keeper_config_json config name =
     let body = cached_assoc_body_or_self cached fields in
     status, body
   | other -> `OK, other
+;;
+
+(* Dashboard hydration fetches every keeper's chat history concurrently on
+   page load. The uncached build ran inline on the main Eio domain at
+   ~1-2 s per keeper (chat tail parse + per-trace trajectory and
+   internal-history tail reads + redaction), so a 16-keeper hydration
+   serialized 15 s+ of main-domain work and pushed unrelated HTTP/WS
+   responses past the dashboard's 35 s client timeout.
+
+   Freshness lives in the cached VALUE, not the key: the key space is
+   exactly one entry per (validated) keeper name, so append bursts can
+   never grow cache cardinality. Each entry stamps the chat file's
+   (mtime, size) observed by its compute; a request whose current stat
+   differs invalidates the entry and recomputes, so a newly persisted
+   message is served fresh on the next request without an invalidation
+   hook at every append site. Enrichment-only drift (trajectory/meta
+   appends with no chat append) is bounded by the TTL, the same
+   staleness contract as the cached trajectory handler above. *)
+let keeper_chat_history_freshness config name =
+  let base_dir = (config : Workspace.config).base_path in
+  let path = Keeper_chat_store.chat_path ~base_dir ~keeper_name:name in
+  (* Sound-partial: a missing chat file is its own state ("absent"),
+     never conflated with a real (mtime, size) pair. A half-readable
+     stat (racing writer) also maps to "absent", which only costs a
+     recompute on the next request. *)
+  match Fs_compat.file_mtime path, Fs_compat.file_size path with
+  | Some mtime, Some size -> Printf.sprintf "%h:%d" mtime size
+  | Some _, None | None, Some _ | None, None -> "absent"
+;;
+
+let keeper_chat_history_json config name =
+  let base_dir = (config : Workspace.config).base_path in
+  let messages = Keeper_chat_store.load ~base_dir ~keeper_name:name in
+  let trace_block_by_turn_ref =
+    match Keeper_meta_store.read_meta config name with
+    | Ok (Some m) ->
+      Some
+        (Server_dashboard_http_keeper_api_trace.chat_trace_block_by_turn_ref
+           ~max_lines:trajectory_max_limit
+           ~max_internal_lines:trajectory_max_limit
+           ~config
+           ~keeper_name:name
+           ~allowed_trace_ids:(keeper_chat_allowed_trace_ids m))
+    | Ok None -> None
+    | Error err ->
+      Log.Keeper.warn
+        "dashboard keeper chat history: read_meta failed for %s; trace enrichment skipped: %s"
+        name
+        err;
+      None
+  in
+  Keeper_chat_store.to_json_array ~base_dir ?trace_block_by_turn_ref messages
+;;
+
+let cached_keeper_chat_history_json config name =
+  let cache_key =
+    Printf.sprintf "keeper:chat-history:%s:%s"
+      (Workspace.masc_root_dir config) name
+  in
+  let current = keeper_chat_history_freshness config name in
+  (match Dashboard_cache.peek cache_key with
+   | Some (`Assoc fields) ->
+     (match List.assoc_opt "freshness" fields with
+      | Some (`String stamped) when String.equal stamped current -> ()
+      | Some _ | None -> Dashboard_cache.invalidate cache_key)
+   | Some _ -> Dashboard_cache.invalidate cache_key
+   | None -> ());
+  let cached =
+    Dashboard_cache.get_or_compute cache_key ~ttl:keeper_hot_path_cache_ttl_s
+      (fun () ->
+        Domain_pool_ref.submit_io_or_inline (fun () ->
+          (* Stamp the stat observed by THIS compute (stat before load):
+             an append racing the load makes the data newer than the
+             stamp, which the next request's stat comparison detects and
+             recomputes — never silently stale. *)
+          let stamped = keeper_chat_history_freshness config name in
+          `Assoc
+            [ ("freshness", `String stamped)
+            ; ("body", keeper_chat_history_json config name)
+            ]))
+  in
+  match cached with
+  | `Assoc fields ->
+    (match List.assoc_opt "body" fields with
+     | Some body -> body
+     | None -> cached)
+  | other -> other
 ;;
 
 let offline_keeper_composite_json ~config name (m : Keeper_meta_contract.keeper_meta) =
@@ -1041,117 +1234,6 @@ let cached_keeper_composite_json config name =
   | other -> `OK, other
 ;;
 
-let user_model_item_source_json = function
-  | Keeper_user_model.Keeper_private -> "keeper", []
-  | Keeper_user_model.Shared keepers -> "shared", keepers
-;;
-
-let user_model_item_json (item : Keeper_user_model.item) =
-  let source, observed_by = user_model_item_source_json item.source in
-  `Assoc
-    [ "claim", `String item.claim
-    ; "category", `String (Keeper_memory_os_types.category_to_string item.category)
-    ; "source", `String source
-    ; "observed_by", `List (List.map (fun name -> `String name) observed_by)
-    ; "turn", `Int item.turn
-    ; "first_seen", `Float item.first_seen
-    ; "first_seen_iso", `String (Masc_domain.iso8601_of_unix_seconds item.first_seen)
-    ; "last_verified_at", json_float_opt item.last_verified_at
-    ; "last_verified_at_iso", json_time_iso_opt item.last_verified_at
-    ]
-;;
-
-let user_model_dashboard_json ~keeper_id =
-  let now = Time_compat.now () in
-  let facts_store = Keeper_memory_os_io.facts_path ~keeper_id in
-  let shared_facts_store =
-    Keeper_memory_os_io.facts_path ~keeper_id:Keeper_memory_os_types.shared_store_id
-  in
-  try
-    let model = Keeper_user_model.build ~keeper_id ~now () in
-    `Assoc
-      [ "schema", `String "keeper.user_model.dashboard.v1"
-      ; "keeper", `String keeper_id
-      ; "source", `String "memory_os_facts"
-      ; "producer", `String "keeper_user_model"
-      ; "facts_store", `String facts_store
-      ; "shared_facts_store", `String shared_facts_store
-      ; "enabled", `Bool (Keeper_user_model.enabled ())
-      ; "now", `Float now
-      ; "now_iso", `String (Masc_domain.iso8601_of_unix_seconds now)
-      ; "read_errors", `List []
-      ; "source_fact_count", `Int model.source_fact_count
-      ; "shared_fact_count", `Int model.shared_fact_count
-      ; "preferences", `List (List.map user_model_item_json model.preferences)
-      ; "constraints", `List (List.map user_model_item_json model.constraints)
-      ]
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    `Assoc
-      [ "schema", `String "keeper.user_model.dashboard.v1"
-      ; "keeper", `String keeper_id
-      ; "source", `String "memory_os_facts"
-      ; "producer", `String "keeper_user_model"
-      ; "facts_store", `String facts_store
-      ; "shared_facts_store", `String shared_facts_store
-      ; "enabled", `Bool (Keeper_user_model.enabled ())
-      ; "now", `Float now
-      ; "now_iso", `String (Masc_domain.iso8601_of_unix_seconds now)
-      ; ( "read_errors"
-        , `List
-            [ `Assoc
-                [ "scope", `String "user_model"
-                ; "error", `String (Printexc.to_string exn)
-                ]
-            ] )
-      ; "source_fact_count", `Int 0
-      ; "shared_fact_count", `Int 0
-      ; "preferences", `List []
-      ; "constraints", `List []
-      ]
-;;
-
-let keeper_chat_receipt_state_json = function
-  | Keeper_chat_queue.Pending ->
-    `Assoc [ "kind", `String "pending" ]
-  | Keeper_chat_queue.Inflight { lease_id; started_at } ->
-    `Assoc
-      [ "kind", `String "inflight"
-      ; "lease_id", `String lease_id
-      ; "started_at", `Float started_at
-      ]
-  | Keeper_chat_queue.Delivered completion ->
-    `Assoc
-      [ "kind", `String "delivered"
-      ; "completed_at", `Float completion.completed_at
-      ; "outcome_ref", json_string_opt completion.outcome_ref
-      ]
-  | Keeper_chat_queue.Failed failure ->
-    `Assoc
-      [ "kind", `String "failed"
-      ; ( "failure_kind"
-        , `String (Keeper_chat_queue.failure_kind_to_string failure.kind) )
-      ; ( "detail"
-        , `String (Observability_redact.redact_text failure.detail) )
-      ; "completed_at", `Float failure.completed_at
-      ; "outcome_ref", json_string_opt failure.outcome_ref
-      ]
-;;
-
-let keeper_chat_receipt_json ~keeper_name ~revision
-    (receipt : Keeper_chat_queue.receipt_view) =
-  `Assoc
-    [ "schema", `String "keeper_chat_queue.receipt.v1"
-    ; "keeper_name", `String keeper_name
-    ; ( "receipt_id"
-      , `String
-          (Keeper_chat_queue.Receipt_id.to_string receipt.receipt_id) )
-    ; "revision", `Intlit (Int64.to_string revision)
-    ; "state", keeper_chat_receipt_state_json receipt.state
-    ]
-;;
-
 let keeper_chat_receipt_route req_path =
   if not (String.starts_with ~prefix:keeper_api_prefix req_path)
   then None
@@ -1240,33 +1322,17 @@ let handle_keeper_get_subroutes state req request reqd =
     if name = "" then
       Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
         (error_json "missing keeper name")
+    else if not (Keeper_config.validate_name name) then
+      (* Reject before touching the cache: the cache key embeds the raw
+         name, so unvalidated garbage names would mint unbounded
+         process-global cache entries (the sibling /tool-calls route
+         already validates). *)
+      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+        (error_json (Printf.sprintf "invalid keeper name: %s" name))
     else
       let config = Mcp_server.workspace_config state in
-      let base_dir = config.base_path in
-      let messages =
-        Keeper_chat_store.load ~base_dir ~keeper_name:name
-      in
-      let trace_block_by_turn_ref =
-        match Keeper_meta_store.read_meta config name with
-        | Ok (Some m) ->
-          Some
-            (Server_dashboard_http_keeper_api_trace.chat_trace_block_by_turn_ref
-               ~max_lines:trajectory_max_limit
-               ~max_internal_lines:trajectory_max_limit
-               ~config
-               ~keeper_name:name
-               ~allowed_trace_ids:(keeper_chat_allowed_trace_ids m))
-        | Ok None -> None
-        | Error err ->
-          Log.Keeper.warn
-            "dashboard keeper chat history: read_meta failed for %s; trace enrichment skipped: %s"
-            name
-            err;
-          None
-      in
       Server_auth.respond_json_value_with_cors ~status:`OK request reqd
-        (Keeper_chat_store.to_json_array ~base_dir ?trace_block_by_turn_ref
-           messages)
+        (cached_keeper_chat_history_json config name)
   else if ends_with "/person-notes" then
     (* RFC-0229 P2: keeper-authored person notes for the roster pane.
        Read-only fold over the notes store; same shape as the tool
@@ -1297,6 +1363,8 @@ let handle_keeper_get_subroutes state req request reqd =
         match st with `OK -> `OK | `Not_found -> `Not_found
       in
       Http.Response.json_value ~status ~compress:true ~request:req json reqd
+  else if ends_with keeper_suffix_paused_work then
+    Server_dashboard_http_keeper_paused_work.handle_get state req reqd
   else if ends_with keeper_suffix_runtime_trace then
     let name = extract_name keeper_suffix_runtime_trace in
     if String.length name = 0 then
@@ -1458,75 +1526,119 @@ let handle_keeper_get_subroutes state req request reqd =
     else
       let limit =
         Server_utils.int_query_param req "limit" ~default:50
-        |> max 1 |> min 200
-      in
-      let entries =
-        Keeper_tool_call_log.read_recent ~keeper_name:name ~n:limit ()
+        |> max 1 |> min tool_calls_limit_max
       in
       let config = (Mcp_server.workspace_config state) in
       let masc_root = Workspace.masc_root_dir config in
-      let latest_ts =
-        List.fold_left
-          (fun acc json ->
-            match Safe_ops.json_float_opt "ts" json with
-            | Some ts -> (
-                match acc with
-                | Some existing when existing >= ts -> acc
-                | _ -> Some ts)
-            | None -> acc)
-          None entries
+      (* The per-keeper read Yojson-parsed the newest [limit * 5] rows of
+         the fleet-wide dated store just to filter one keeper (~3.6 s
+         measured at limit=200), inline on the main Eio domain for every
+         keeper pane the dashboard hydrates — a 16-keeper cold hydration
+         ran 16 identical fleet parses. Parse the fleet window once per
+         TTL on the CPU pool lane (the cost is JSON parsing, not
+         blocking IO) and derive each keeper's slice from it. The window
+         is sized to reproduce [read_recent]'s coverage at this
+         endpoint's maximum limit; deriving smaller limits from the
+         wider window can only widen per-keeper coverage, never narrow
+         it. TTL-bounded staleness also freezes the [latest_age_s] /
+         [health] fields for up to the TTL, which is well inside the
+         freshness SLO this surface reports on. *)
+      let fleet_rows =
+        match
+          Dashboard_cache.get_or_compute
+            (Printf.sprintf "keeper:tool-calls:fleet-rows:%s" masc_root)
+            ~ttl:keeper_hot_path_cache_ttl_s (fun () ->
+              Domain_pool_ref.submit_cpu_or_inline (fun () ->
+                `List
+                  (Keeper_tool_call_log.read_recent_rows
+                     ~n:
+                       (tool_calls_limit_max
+                        * Keeper_tool_call_log.read_over_scan_factor)
+                     ())))
+        with
+        | `List rows -> rows
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+        | `Assoc _ -> []
       in
-      let dashboard_surface = "/api/v1/keepers/:name/tool-calls" in
-      let latest_age_s =
-        match latest_ts with
-        | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
-        | None -> None
+      (* No per-keeper cache entry: the expensive part (the fleet parse)
+         is behind the single fleet-rows key above, and the per-request
+         remainder — filtering an in-memory window plus a bounded
+         coverage-gap tail read — is milliseconds off the main domain.
+         Skipping the per-(name, limit) entry keeps this route's cache
+         cardinality at exactly one key and never pins a per-keeper
+         response shape. *)
+      let json =
+        Domain_pool_ref.submit_io_or_inline (fun () ->
+              let entries =
+                Keeper_tool_call_log.filter_rows_for_keeper
+                  ~keeper_name:name ~n:limit fleet_rows
+              in
+              let latest_ts =
+                List.fold_left
+                  (fun acc json ->
+                    match Safe_ops.json_float_opt "ts" json with
+                    | Some ts -> (
+                        match acc with
+                        | Some existing when existing >= ts -> acc
+                        | Some _ | None -> Some ts)
+                    | None -> acc)
+                  None entries
+              in
+              let dashboard_surface = "/api/v1/keepers/:name/tool-calls" in
+              let latest_age_s =
+                match latest_ts with
+                | Some ts -> Some (max 0.0 (Time_compat.now () -. ts))
+                | None -> None
+              in
+              let coverage_gaps =
+                Telemetry_coverage_gap.read_recent ~masc_root ~n:32
+                |> List.filter (fun gap ->
+                     String.equal "tool_call_io"
+                       (Safe_ops.json_string ~default:"" "source" gap)
+                     &&
+                     match Safe_ops.json_string_opt "keeper_name" gap with
+                     | Some keeper_name -> String.equal keeper_name name
+                     | None -> true)
+              in
+              let latest_gap =
+                List.rev coverage_gaps |> List.find_opt (fun _ -> true)
+              in
+              let health, stale_reason =
+                match latest_gap with
+                | Some gap ->
+                  ( "coverage_gap",
+                    Safe_ops.json_string ~default:"coverage_gap" "stale_reason"
+                      gap )
+                | None -> (
+                    match latest_age_s with
+                    | None -> ("empty", "no_entries")
+                    | Some age when age > freshness_slo_s ->
+                        ("stale", "freshness_slo_exceeded")
+                    | Some _ -> ("ok", ""))
+              in
+              `Assoc [
+                ("keeper", `String name);
+                ("count", `Int (List.length entries));
+                ("source", `String "tool_call_io");
+                ( "producer",
+                  `String
+                    "keeper_hooks_oas.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
+                ("durable_store", `String (Filename.concat masc_root "tool_calls"));
+                ("dashboard_surface", `String dashboard_surface);
+                ("freshness_slo_s", `Float freshness_slo_s);
+                ("latest_ts_unix", Json_util.float_opt_to_json latest_ts);
+                ( "latest_ts_iso",
+                  match latest_ts with
+                  | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
+                  | None -> `Null );
+                ("latest_age_s", Json_util.float_opt_to_json latest_age_s);
+                ("health", `String health);
+                ( "stale_reason",
+                  if stale_reason = "" then `Null else `String stale_reason );
+                ("coverage_gaps", `List coverage_gaps);
+                ("entries", `List entries);
+              ])
       in
-      let coverage_gaps =
-        Telemetry_coverage_gap.read_recent ~masc_root ~n:32
-        |> List.filter (fun gap ->
-             String.equal "tool_call_io"
-               (Safe_ops.json_string ~default:"" "source" gap)
-             &&
-             match Safe_ops.json_string_opt "keeper_name" gap with
-             | Some keeper_name -> String.equal keeper_name name
-             | None -> true)
-      in
-      let latest_gap = List.rev coverage_gaps |> List.find_opt (fun _ -> true) in
-      let health, stale_reason =
-        match latest_gap with
-        | Some gap ->
-          ( "coverage_gap",
-            Safe_ops.json_string ~default:"coverage_gap" "stale_reason" gap )
-        | None -> (
-            match latest_age_s with
-            | None -> ("empty", "no_entries")
-            | Some age when age > freshness_slo_s ->
-                ("stale", "freshness_slo_exceeded")
-            | Some _ -> ("ok", ""))
-      in
-      let json = `Assoc [
-        ("keeper", `String name);
-        ("count", `Int (List.length entries));
-        ("source", `String "tool_call_io");
-        ( "producer",
-          `String
-            "keeper_hooks_oas.post_tool_use|mcp_server_eio_call_tool.runtime_mcp" );
-        ("durable_store", `String (Filename.concat masc_root "tool_calls"));
-        ("dashboard_surface", `String dashboard_surface);
-        ("freshness_slo_s", `Float freshness_slo_s);
-        ("latest_ts_unix", Json_util.float_opt_to_json latest_ts);
-        ( "latest_ts_iso",
-          match latest_ts with
-          | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
-          | None -> `Null );
-        ("latest_age_s", Json_util.float_opt_to_json latest_age_s);
-        ("health", `String health);
-        ( "stale_reason",
-          if stale_reason = "" then `Null else `String stale_reason );
-        ("coverage_gaps", `List coverage_gaps);
-        ("entries", `List entries);
-      ] in
       Http.Response.json_value ~compress:true ~request:req json reqd
   else if ends_with "/feedback" then
     (* keeper-v2 #9: aggregated response-feedback tally (read API).
@@ -1671,7 +1783,6 @@ let handle_keeper_get_subroutes state req request reqd =
         ( "stale_reason",
           if stale_reason = "" then `Null else `String stale_reason );
         ("memory_os", memory_os_dashboard_json ~keeper_id:name);
-        ("user_model", user_model_dashboard_json ~keeper_id:name);
         ("entries", `List entries);
       ] in
       Http.Response.json_value ~compress:true ~request:req json reqd
@@ -1923,24 +2034,8 @@ let handle_keeper_get_subroutes state req request reqd =
       let current = match phase with Some p -> p | None -> Keeper_state_machine.Offline in
       let mermaid = Keeper_state_machine_mermaid.phase_to_mermaid ~current in
       let phase_str = Keeper_state_machine.phase_to_string current in
-      let stats = Thompson_sampling.get_stats name in
       let meta = Keeper_meta_store.read_meta
           (Mcp_server.workspace_config state) name in
-      let turn_outcome : [`Ok | `Failed] option =
-        match Keeper_registry.get ~base_path:(Mcp_server.workspace_config state).base_path name with
-        | Some entry when entry.turn_consecutive_failures > 0 ->
-          Some `Failed
-        | Some _ -> Some `Ok
-        | None -> None
-      in
-      let decision_pipeline_mermaid =
-        Keeper_decision_audit.decision_pipeline_to_mermaid
-          ?turn_outcome
-          ~phase:current
-          ~thompson_alpha:stats.alpha
-          ~thompson_beta:stats.beta
-          ()
-      in
       let runtime_projection =
         state_diagram_runtime_projection
           (match meta with
@@ -2002,7 +2097,7 @@ let handle_keeper_get_subroutes state req request reqd =
           let b = Buffer.create 256 in
           Buffer.add_string b "stateDiagram-v2\n";
           Buffer.add_string b "    [*] --> Accumulating\n";
-          Buffer.add_string b "    Accumulating --> Compacting: ratio_gate\n";
+          Buffer.add_string b "    Accumulating --> Compacting: Compaction_started\n";
           Buffer.add_string b "    Compacting --> Done: Compaction_completed\n";
           Buffer.add_string b "    Compacting --> Accumulating: Compaction_failed\n";
           Buffer.add_string b "    Done --> [*]\n";
@@ -2022,11 +2117,8 @@ let handle_keeper_get_subroutes state req request reqd =
           ([ "keeper", `String name
            ; "current_phase", `String phase_str
            ; "mermaid", `String mermaid
-           ; "decision_pipeline_mermaid", `String decision_pipeline_mermaid
            ; "runtime_fsm_mermaid", `String runtime_fsm_mermaid
            ; "compaction_submachine_mermaid", compaction_submachine_mermaid
-           ; "thompson_alpha", `Float stats.alpha
-           ; "thompson_beta", `Float stats.beta
            ]
            @ runtime_projection_fields
            @ [ "memory_kind_usage", memory_kind_usage
@@ -2069,44 +2161,5 @@ let handle_keeper_get_subroutes state req request reqd =
         | `Internal_server_error -> `Internal_server_error
       in
       Http.Response.json_value ~status ~compress:true ~request:req json reqd
-  else if req_path = prefix ^ "regime" then
-    (* 7th FSM axis MVP: fleet-wide behavioral-regime snapshot. Same
-       purity contract as the composite route above, uses the
-       [Keeper_behavioral_regime_observer] pure projection. *)
-    let base_path = (Mcp_server.workspace_config state).base_path in
-    let snapshots =
-      Keeper_behavioral_regime_observer.all_snapshots ~base_path ()
-    in
-    let json =
-      `Assoc [
-        "generated_at", `String (Masc_domain.now_iso ());
-        "count", `Int (List.length snapshots);
-        "snapshots",
-          `List
-            (List.map
-               Keeper_behavioral_regime_observer.snapshot_to_json
-               snapshots);
-      ]
-    in
-    Http.Response.json_value ~compress:true ~request:req json reqd
-  else if ends_with "/regime" then
-    (* Per-keeper behavioral-regime snapshot. *)
-    let name = extract_name "/regime" in
-    if String.length name = 0 then
-      respond_error reqd "keeper name is required"
-    else
-      let base_path = (Mcp_server.workspace_config state).base_path in
-      (match Keeper_registry.get ~base_path name with
-       | None ->
-         respond_error ~status:`Not_found reqd
-           (Printf.sprintf "keeper %S not registered" name)
-       | Some entry ->
-         let snapshot =
-           Keeper_behavioral_regime_observer.observe entry
-         in
-         let json =
-           Keeper_behavioral_regime_observer.snapshot_to_json snapshot
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd)
   else
     respond_error ~status:`Not_found reqd "not found"

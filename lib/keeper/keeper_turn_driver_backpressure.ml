@@ -7,23 +7,6 @@
 
 open Keeper_internal_error
 
-(* Synthetic backoff default for paths where the upstream provides no
-   [retry_after] hint.  Carried as [Synthetic_default] so provenance is
-   preserved: telemetry shows the value with a synthetic flag rather than a
-   laundered explicit hint. *)
-let synthetic_retry_after_sec =
-  Keeper_binding_health_config.default_capacity_backpressure_backoff_sec
-
-(* Emit a structured log line whenever a synthetic (default) backoff is used
-   instead of an explicit retry_after hint.  Replaces the retired metric
-   path per task-714. *)
-let log_synthetic_backoff ~synthetic_sec ~source ~detail =
-  Log.Server.info
-    "Synthetic backoff applied (source=%s, backoff_sec=%.0f, detail=%s)"
-    source
-    synthetic_sec
-    detail
-
 let capacity_backpressure_source_of_http_error = function
   | Llm_provider.Http_client.NetworkError
       { kind = Llm_provider.Http_client.Local_resource_exhaustion; _ } ->
@@ -59,11 +42,7 @@ let capacity_backpressure_of_http_error ?source ~runtime_id last_err =
            retry_after =
              (match retry_after with
               | Some s -> Explicit s
-              | None ->
-                let syn_sec = synthetic_retry_after_sec in
-                log_synthetic_backoff ~synthetic_sec:syn_sec
-                  ~source:"Provider_capacity" ~detail:message;
-                Synthetic_default syn_sec);
+              | None -> No_retry_hint);
            (* Genuine upstream capacity exhaustion, not a pre-dispatch health
               cooldown block — no arming cause to carry.  #23438. *)
            cooldown_cause = None;
@@ -80,11 +59,7 @@ let capacity_backpressure_of_http_error ?source ~runtime_id last_err =
            runtime_id;
            source = Option.value source ~default:Runtime_slot;
            detail = message;
-           retry_after =
-             (let syn_sec = synthetic_retry_after_sec in
-              log_synthetic_backoff ~synthetic_sec:syn_sec
-                ~source:"Runtime_slot" ~detail:message;
-              Synthetic_default syn_sec);
+           retry_after = No_retry_hint;
            cooldown_cause = None;
          })
   | Some

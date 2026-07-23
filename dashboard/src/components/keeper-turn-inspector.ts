@@ -16,8 +16,6 @@ import {
   fetchKeeperTurnTranscript,
 } from '../api/dashboard'
 import type {
-  KeeperUserModelItem,
-  KeeperUserModelSnapshot,
   MemoryOsEpisodeSummary,
   MemoryOsTurnRecordSnapshot,
   ToolCallEntry,
@@ -122,10 +120,6 @@ function latestBlockByName(rows: TurnRecordRow[], blockName: string): TurnBlock 
 
 function latestMemoryOsBlock(rows: TurnRecordRow[]): TurnBlock | null {
   return latestBlockByName(rows, 'memory_os_recall')
-}
-
-function latestUserModelBlock(rows: TurnRecordRow[]): TurnBlock | null {
-  return latestBlockByName(rows, 'user_model')
 }
 
 function compactIso(value: string | null): string {
@@ -260,118 +254,6 @@ export function KeeperMemoryOsRecallPanel({ keeperName }: { keeperName: string }
     <div class="p-2 v2-monitoring-surface">
       <${MemoryOsRecallSourcePanel} snapshot=${response.memory_os} rows=${response.entries} />
     </div>
-  `
-}
-
-function userModelSourceLabel(item: KeeperUserModelItem): string {
-  if (item.source !== 'shared') return item.source
-  return item.observed_by.length > 0
-    ? `shared via ${item.observed_by.join(',')}`
-    : 'shared'
-}
-
-function UserModelItemRow({ item }: { item: KeeperUserModelItem }) {
-  return html`
-    <div class="min-w-0 border-t border-[var(--color-border-muted)] py-2 first:border-t-0 v2-monitoring-row">
-      <div class="mb-1 flex min-w-0 flex-wrap items-center gap-2">
-        <span class="font-mono text-3xs text-[var(--color-fg-muted)]">
-          ${userModelSourceLabel(item)}
-        </span>
-        <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">
-          ${item.category} turn=${item.turn}
-        </span>
-        ${item.last_verified_at_iso
-          ? html`<span class="font-mono text-3xs text-[var(--color-fg-disabled)]">
-              verified ${compactIso(item.last_verified_at_iso)}
-            </span>`
-          : null}
-      </div>
-      <div class="line-clamp-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
-        ${item.claim}
-      </div>
-    </div>
-  `
-}
-
-function UserModelList({
-  title,
-  items,
-}: {
-  title: string
-  items: KeeperUserModelItem[]
-}) {
-  const shown = items.slice(0, 5)
-  return html`
-    <div class="min-w-0 flex-1">
-      <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)] mb-1">
-        ${title} ${items.length}
-      </div>
-      <div class="divide-y divide-[var(--color-border-muted)] v2-monitoring-row">
-        ${shown.length === 0
-          ? html`<div class="py-2 text-2xs text-[var(--color-fg-disabled)] v2-monitoring-row">기록 없음</div>`
-          : shown.map(item => html`<${UserModelItemRow} key=${`${item.source}-${item.turn}-${item.claim}`} item=${item} />`)}
-      </div>
-    </div>
-  `
-}
-
-function UserModelSourcePanel({
-  snapshot,
-  rows,
-}: {
-  snapshot: KeeperUserModelSnapshot
-  rows: TurnRecordRow[]
-}) {
-  const latestBlock = latestUserModelBlock(rows)
-  const readErrorText = snapshot.read_errors.map(item => `${item.scope}: ${item.error}`).join(' · ')
-
-  return html`
-    <section
-      class="mb-3 border-y border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-3 v2-monitoring-panel"
-      data-testid="user-model-source"
-    >
-      <div class="flex min-w-0 flex-wrap items-start gap-3 v2-monitoring-toolbar">
-        <div class="min-w-0 flex-1">
-          <div class="text-xs font-semibold text-[var(--color-fg-primary)]">User model</div>
-          <div class="mt-0.5 text-3xs text-[var(--color-fg-muted)]">
-            ${snapshot.enabled ? 'enabled' : 'disabled'}
-            <span class="mx-1" aria-hidden="true">·</span>
-            ${latestBlock
-              ? html`latest block <span class="font-mono">${latestBlock.bytes}B</span> <span class="font-mono text-[var(--color-fg-disabled)]">${latestBlock.digest.slice(0, 12)}</span>`
-              : 'latest block 없음'}
-          </div>
-        </div>
-        <div class="flex flex-wrap gap-2 text-3xs">
-          <span class="font-mono text-[var(--color-fg-muted)]">
-            pref ${snapshot.preferences.length}
-          </span>
-          <span class="font-mono text-[var(--color-fg-muted)]">
-            constraints ${snapshot.constraints.length}
-          </span>
-          <span class="font-mono text-[var(--color-fg-muted)]">
-            facts ${snapshot.source_fact_count}
-          </span>
-          <span class="font-mono text-[var(--color-fg-muted)]">
-            shared ${snapshot.shared_fact_count}
-          </span>
-        </div>
-      </div>
-
-      ${readErrorText
-        ? html`<div class="mt-2 text-2xs text-[var(--color-status-err)]">${readErrorText}</div>`
-        : null}
-
-      <div class="mt-2 grid gap-3 md:grid-cols-2">
-        <${UserModelList} title="Preferences" items=${snapshot.preferences} />
-        <${UserModelList} title="Constraints" items=${snapshot.constraints} />
-      </div>
-
-      <details class="mt-2 text-3xs text-[var(--color-fg-disabled)] v2-monitoring-detail">
-        <summary class="cursor-pointer">stores</summary>
-        <div class="mt-1 break-all font-mono">facts: ${snapshot.facts_store}</div>
-        <div class="mt-1 break-all font-mono">shared: ${snapshot.shared_facts_store}</div>
-      </details>
-    </section>
   `
 }
 
@@ -534,7 +416,7 @@ ${record.execution_ids.length
 
 function toolCallStatus(entry: ToolCallEntry | null): 'ok' | 'bad' | 'unknown' {
   if (!entry) return 'unknown'
-  return entry.success && entry.semantic_success !== false ? 'ok' : 'bad'
+  return entry.success ? 'ok' : 'bad'
 }
 
 function toolStatusClass(status: TurnToolDetail['status']): string {
@@ -1405,15 +1287,11 @@ export function KeeperTurnInspector({
   const memoryOsPanel = response?.memory_os
     ? html`<${MemoryOsRecallSourcePanel} snapshot=${response.memory_os} rows=${rows} />`
     : null
-  const userModelPanel = response?.user_model
-    ? html`<${UserModelSourcePanel} snapshot=${response.user_model} rows=${rows} />`
-    : null
 
   if (rows.length === 0) {
     return html`
       <div class="p-4 space-y-1 v2-monitoring-panel">
         ${memoryOsPanel}
-        ${userModelPanel}
         <div class="text-xs text-[var(--color-fg-muted)]">턴 레코드 없음 (서버 재시작 이후 keeper 턴까지 기록됩니다)</div>
         <${FreshnessLine} data=${response ?? { source: 'turn_record' }} />
       </div>
@@ -1436,7 +1314,6 @@ export function KeeperTurnInspector({
           : null}
       </div>
       ${memoryOsPanel}
-      ${userModelPanel}
       ${initialMatchState === 'missed'
         ? html`
           <div

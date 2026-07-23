@@ -61,14 +61,6 @@ type continuity_context = {
   json : Yojson.Safe.t;
 }
 
-type tool_audit_snapshot = {
-  latest_tool_names : string list;
-  latest_tool_call_count : int option;
-  latest_action_source : string option;
-  tool_audit_source : string option;
-  tool_audit_at : string option;
-}
-
 let option_or_else fallback = function
   | Some _ as value -> value
   | None -> fallback ()
@@ -115,50 +107,6 @@ let execution_tool_preview_limit = 8
 
 let cap_string_list ?(limit = execution_tool_preview_limit) values =
   take limit values
-
-let tool_audit_snapshot _agent_name =
-  (* TODO(task-1823): Replace with live tool audit data from keeper telemetry.
-     This stub is a fake Keeper v2 dashboard field — all values are hardcoded. *)
-  {
-    latest_tool_names = [];
-    latest_tool_call_count = None;
-    latest_action_source = None;
-    tool_audit_source = None;
-    tool_audit_at = None;
-  }
-
-let skill_route_summary_of_keeper keeper =
-  let route = member_assoc "skill_route" keeper in
-  let primary =
-    String_util.trim_to_option (string_field "primary" route)
-    |> option_or_else (fun () -> String_util.trim_to_option (string_field "skill_primary" keeper))
-  in
-  let secondary =
-    let route_secondary = string_list_of_field "secondary" route in
-    if route_secondary <> [] then route_secondary
-    else string_list_of_field "skill_secondary" keeper
-  in
-  let provenance = String_util.trim_to_option (string_field "provenance" route) in
-  match primary, secondary, provenance with
-  | None, [], None -> None
-  | Some value, [], None -> Some value
-  | Some value, [], Some source -> Some (Printf.sprintf "%s · %s" value source)
-  | Some value, extra, source ->
-      let extra_summary =
-        if extra = [] then None else Some (Printf.sprintf "+%d" (List.length extra))
-      in
-      Some
-        (String.concat " · "
-           (List.filter_map (fun item -> item) [ Some value; extra_summary; source ]))
-  | None, extra, source ->
-      Some
-        (String.concat " · "
-           (List.filter_map
-              (fun item -> item)
-              [
-                (if extra = [] then None else Some (Printf.sprintf "%d route(s)" (List.length extra)));
-                source;
-              ]))
 
 let dedup_strings = Dashboard_utils.dedup_strings
 

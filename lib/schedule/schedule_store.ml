@@ -4,24 +4,25 @@ type state =
   { version : int
   ; updated_at : float
   ; schedules : Schedule_domain.schedule_request list
-  ; grants : Schedule_domain.execution_grant list
   ; executions : Schedule_domain.execution_record list
   }
 
 type store_error =
   | Schedule_already_exists
   | Schedule_not_found
-  | Grant_already_recorded
   | Invalid_initial_status of string
   | Invalid_status_transition of string
   | Schedule_not_due_candidate
   | Schedule_not_running
-  | Grant_validation_failed of Schedule_domain.grant_error
   | Persistence_failed of string
   | Corrupt_ledger of
       { primary_err : string
       ; recovery_err : string option
       }
+
+type running_recovery_reason =
+  | Retryable_dispatch_failure of string
+  | Interrupted_by_process_restart
 
 type read_error =
   | Corrupt_read_ledger of
@@ -33,8 +34,7 @@ type read_error =
    absent (empty store, [default_state] is correct). [Corrupt] = the file is
    present but neither it nor the [.last-good] recovery file parses; callers must
    NOT collapse this to [default_state] and must NOT overwrite the on-disk file,
-   because the bytes may still hold operator pending-approval grants worth manual
-   recovery. *)
+   because the bytes may still hold schedule intent worth manual recovery. *)
 type load_outcome =
   | Loaded of state
   | Fresh
@@ -73,16 +73,20 @@ let corrupt_message ~primary_err ~recovery_err =
 let store_error_to_string = function
   | Schedule_already_exists -> "schedule already exists"
   | Schedule_not_found -> "schedule not found"
-  | Grant_already_recorded -> "grant already recorded"
   | Invalid_initial_status reason -> "invalid initial schedule status: " ^ reason
   | Invalid_status_transition reason -> "invalid schedule status transition: " ^ reason
-  | Schedule_not_due_candidate -> "schedule is not an approved due candidate"
+  | Schedule_not_due_candidate -> "schedule is not due"
   | Schedule_not_running -> "schedule is not running"
-  | Grant_validation_failed err ->
-    "grant validation failed: " ^ Schedule_domain.grant_error_to_string err
   | Persistence_failed msg -> "schedule persistence failed: " ^ msg
   | Corrupt_ledger { primary_err; recovery_err } ->
     corrupt_message ~primary_err ~recovery_err
+;;
+
+let running_recovery_reason_to_string = function
+  | Retryable_dispatch_failure detail ->
+    "retryable schedule dispatch failure: " ^ detail
+  | Interrupted_by_process_restart ->
+    "schedule execution interrupted by process restart"
 ;;
 
 let read_error_to_string = function
@@ -103,7 +107,7 @@ let recovery_path config = schedules_path config ^ ".last-good"
 let ensure_dirs config = Workspace_utils.mkdir_p (Workspace_utils.masc_dir config)
 
 let default_state () =
-  { version = 1; updated_at = now (); schedules = []; grants = []; executions = [] }
+  { version = 1; updated_at = now (); schedules = []; executions = [] }
 ;;
 
 let state_to_yojson (state : state) =
@@ -113,7 +117,6 @@ let state_to_yojson (state : state) =
     ; ( "schedules"
       , `List (List.map Schedule_domain.schedule_request_to_yojson state.schedules)
       )
-    ; "grants", `List (List.map Schedule_domain.execution_grant_to_yojson state.grants)
     ; ( "executions"
       , `List
           (List.map Schedule_domain.execution_record_to_yojson state.executions) )
@@ -164,18 +167,14 @@ let state_of_yojson = function
     let* version = int_field "version" fields in
     let* updated_at = float_field "updated_at" fields in
     let* schedules_json = list_field "schedules" fields in
-    let* grants_json = list_field "grants" fields in
     let* executions_json = optional_list_field "executions" fields in
     let* schedules =
       collect_results Schedule_domain.schedule_request_of_yojson schedules_json
     in
-    let* grants =
-      collect_results Schedule_domain.execution_grant_of_yojson grants_json
-    in
     let* executions =
       collect_results Schedule_domain.execution_record_of_yojson executions_json
     in
-    Ok { version; updated_at; schedules; grants; executions }
+    Ok { version; updated_at; schedules; executions }
   | json -> Error ("state_of_yojson: " ^ Yojson.Safe.to_string json)
 ;;
 
@@ -270,8 +269,8 @@ let write_state config state =
   Ok ()
 ;;
 
-let bump_state state ~schedules ~grants ~executions =
-  { version = state.version + 1; updated_at = now (); schedules; grants; executions }
+let bump_state state ~schedules ~executions =
+  { version = state.version + 1; updated_at = now (); schedules; executions }
 ;;
 
 let find_schedule state schedule_id =
@@ -291,40 +290,10 @@ let replace_schedule schedules (updated : schedule_request) =
     schedules
 ;;
 
-let grant_exists state grant_id =
-  List.exists
-    (fun (grant : Schedule_domain.execution_grant) ->
-      String.equal grant.grant_id grant_id)
-    state.grants
-;;
-
-let grant_matches_current_request (request : schedule_request) (grant : execution_grant) =
-  let expected = Schedule_domain.evidence_of_request request in
-  String.equal grant.schedule_id request.schedule_id
-  &&
-  match grant.decision with
-  | Reject _ -> false
-  | Approve ->
-    String.equal grant.evidence.schedule_id expected.schedule_id
-    && String.equal grant.evidence.payload_digest expected.payload_digest
-    && grant.evidence.due_at = expected.due_at
-    && grant.evidence.risk_class = expected.risk_class
-;;
-
-let has_current_approved_grant state (request : schedule_request) =
-  List.exists
-    (fun (grant : execution_grant) ->
-      grant_matches_current_request request grant)
-    state.grants
-;;
-
-let is_due_execution_candidate state (request : schedule_request) =
+let is_due_execution_candidate (request : schedule_request) =
   match request.status with
-  | Due ->
-    (not (requires_separate_human_grant request))
-    || has_current_approved_grant state request
-  | Pending_approval | Scheduled | Running | Succeeded | Failed | Rejected | Cancelled
-  | Expired ->
+  | Due -> true
+  | Scheduled | Running | Succeeded | Failed | Cancelled | Expired ->
     false
 ;;
 
@@ -396,23 +365,25 @@ let update_latest_running_execution executions ~schedule_id update =
   loop [] executions
 ;;
 
+let fail_execution_for_recovery ~now ~reason execution =
+  { execution with
+    status = Execution_failed
+  ; finished_at = Some now
+  ; detail = None
+  ; error = Some (running_recovery_reason_to_string reason)
+  }
+;;
+
 let validate_initial_request (request : Schedule_domain.schedule_request) =
   if Schedule_domain.is_terminal request.status then
     Error (Invalid_initial_status "terminal requests cannot be inserted")
-  else if Schedule_domain.requires_separate_human_grant request then
-    match request.status with
-    | Pending_approval -> Ok ()
-    | _ ->
-      Error
-        (Invalid_initial_status
-           "side-effecting requests must start pending approval")
   else
     match request.status with
     | Scheduled -> Ok ()
     | _ ->
       Error
         (Invalid_initial_status
-           "requests without approval requirements must start scheduled")
+           "new requests must start scheduled")
 ;;
 
 let insert_request config (request : Schedule_domain.schedule_request) =
@@ -424,32 +395,10 @@ let insert_request config (request : Schedule_domain.schedule_request) =
       let* () = validate_initial_request request in
       let schedules = request :: state.schedules in
       let next_state =
-        bump_state state ~schedules ~grants:state.grants
-          ~executions:state.executions
+        bump_state state ~schedules ~executions:state.executions
       in
       let* () = write_state config next_state in
       Ok request)
-;;
-
-let record_grant config (grant : Schedule_domain.execution_grant) =
-  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
-    let* state = load_for_mutation config in
-    if grant_exists state grant.grant_id then
-      Error Grant_already_recorded
-    else (
-      match find_schedule state grant.schedule_id with
-      | None -> Error Schedule_not_found
-      | Some request ->
-        match Schedule_domain.apply_execution_grant request grant with
-        | Error err -> Error (Grant_validation_failed err)
-        | Ok updated_request ->
-          let schedules = replace_schedule state.schedules updated_request in
-          let grants = grant :: state.grants in
-          let next_state =
-            bump_state state ~schedules ~grants ~executions:state.executions
-          in
-          let* () = write_state config next_state in
-          Ok updated_request))
 ;;
 
 let cancel_request config ~schedule_id =
@@ -462,15 +411,14 @@ let cancel_request config ~schedule_id =
       then
         Error
           (Invalid_status_transition
-             "only pending, scheduled, or due requests can be cancelled")
+             "only scheduled or due requests can be cancelled")
       else
         let updated_request =
           { request with Schedule_domain.status = Schedule_domain.Cancelled }
         in
         let schedules = replace_schedule state.schedules updated_request in
         let next_state =
-          bump_state state ~schedules ~grants:state.grants
-            ~executions:state.executions
+          bump_state state ~schedules ~executions:state.executions
         in
         let* () = write_state config next_state in
         Ok updated_request)
@@ -488,7 +436,7 @@ let update_request config ~schedule_id ~due_at ~expires_at ~payload =
       then
         Error
           (Invalid_status_transition
-             "only pending or scheduled requests can be updated")
+             "only scheduled requests can be updated")
       else
         let updated_request =
           { request with
@@ -499,8 +447,7 @@ let update_request config ~schedule_id ~due_at ~expires_at ~payload =
         in
         let schedules = replace_schedule state.schedules updated_request in
         let next_state =
-          bump_state state ~schedules ~grants:state.grants
-            ~executions:state.executions
+          bump_state state ~schedules ~executions:state.executions
         in
         let* () = write_state config next_state in
         Ok updated_request)
@@ -523,8 +470,7 @@ let refresh_due config ~now =
       Ok (state, 0)
     else (
       let next_state =
-        bump_state state ~schedules ~grants:state.grants
-          ~executions:state.executions
+        bump_state state ~schedules ~executions:state.executions
       in
       let* () = write_state config next_state in
       Ok (next_state, !changed)))
@@ -553,8 +499,7 @@ let reschedule_due_recurring config ~now ~schedule_ids =
       Ok (state, 0)
     else (
       let next_state =
-        bump_state state ~schedules ~grants:state.grants
-          ~executions:state.executions
+        bump_state state ~schedules ~executions:state.executions
       in
       let* () = write_state config next_state in
       Ok (next_state, !changed)))
@@ -566,13 +511,13 @@ let start_due_candidate config ~now ~schedule_id =
     match find_schedule state schedule_id with
     | None -> Error Schedule_not_found
     | Some request ->
-      if not (is_due_execution_candidate state request) then
+      if not (is_due_execution_candidate request) then
         Error Schedule_not_due_candidate
       else
         let updated = { request with status = Running } in
         let schedules = replace_schedule state.schedules updated in
         let executions = make_execution_record ~now request :: state.executions in
-        let next_state = bump_state state ~schedules ~grants:state.grants ~executions in
+        let next_state = bump_state state ~schedules ~executions in
         let* () = write_state config next_state in
         Ok updated)
 ;;
@@ -602,7 +547,7 @@ let complete_running config ~now ~schedule_id ?detail () =
                ; error = None
                })
         in
-        let next_state = bump_state state ~schedules ~grants:state.grants ~executions in
+        let next_state = bump_state state ~schedules ~executions in
         let* () = write_state config next_state in
         Ok updated)
 ;;
@@ -628,9 +573,62 @@ let fail_running config ~now ~schedule_id ~error =
                ; error = Some error
                })
         in
-        let next_state = bump_state state ~schedules ~grants:state.grants ~executions in
+        let next_state = bump_state state ~schedules ~executions in
         let* () = write_state config next_state in
         Ok updated)
+;;
+
+let retry_running config ~now ~schedule_id ~reason =
+  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+    let* state = load_for_mutation config in
+    match find_schedule state schedule_id with
+    | None -> Error Schedule_not_found
+    | Some request ->
+      if request.status <> Running then
+        Error Schedule_not_running
+      else
+        let updated = { request with status = Due } in
+        let schedules = replace_schedule state.schedules updated in
+        let* executions =
+          update_latest_running_execution state.executions ~schedule_id
+            (fail_execution_for_recovery ~now ~reason)
+        in
+        let next_state = bump_state state ~schedules ~executions in
+        let* () = write_state config next_state in
+        Ok updated)
+;;
+
+let recover_running_on_startup config ~now =
+  let reason = Interrupted_by_process_restart in
+  Workspace_utils.with_file_lock config (schedules_path config) (fun () ->
+    let* state = load_for_mutation config in
+    let rec recover schedules_rev executions recovered = function
+      | [] -> Ok (List.rev schedules_rev, executions, recovered)
+      | (request : schedule_request) :: rest ->
+        (match request.status with
+         | Running ->
+           let* executions =
+             update_latest_running_execution executions
+               ~schedule_id:request.schedule_id
+               (fail_execution_for_recovery ~now ~reason)
+           in
+           recover
+             ({ request with status = Due } :: schedules_rev)
+             executions
+             (recovered + 1)
+             rest
+         | Scheduled | Due | Succeeded | Failed | Cancelled | Expired ->
+           recover (request :: schedules_rev) executions recovered rest)
+    in
+    let* schedules, executions, recovered =
+      recover [] state.executions 0 state.schedules
+    in
+    if recovered = 0 then
+      Ok (state, 0)
+    else
+      let next_state = bump_state state ~schedules ~executions in
+      let* () = write_state config next_state in
+      Ok (next_state, recovered))
 ;;
 
 let fail_due_candidate config ~now ~schedule_id ~error =
@@ -639,7 +637,7 @@ let fail_due_candidate config ~now ~schedule_id ~error =
     match find_schedule state schedule_id with
     | None -> Error Schedule_not_found
     | Some request ->
-      if not (is_due_execution_candidate state request) then
+      if not (is_due_execution_candidate request) then
         Error Schedule_not_due_candidate
       else
         let updated = { request with status = Failed } in
@@ -652,7 +650,7 @@ let fail_due_candidate config ~now ~schedule_id ~error =
         in
         let schedules = replace_schedule state.schedules updated in
         let executions = execution :: state.executions in
-        let next_state = bump_state state ~schedules ~grants:state.grants ~executions in
+        let next_state = bump_state state ~schedules ~executions in
         let* () = write_state config next_state in
         Ok updated)
 ;;
@@ -665,8 +663,8 @@ let prune_completed config =
       List.filter
         (fun (request : schedule_request) ->
            match request.status with
-           | Pending_approval | Scheduled | Due | Running -> true
-           | Succeeded | Failed | Rejected | Cancelled | Expired -> false)
+           | Scheduled | Due | Running -> true
+           | Succeeded | Failed | Cancelled | Expired -> false)
         state.schedules
     in
     let after_count = List.length schedules in
@@ -674,24 +672,18 @@ let prune_completed config =
     let remaining_ids =
       List.map (fun (r : schedule_request) -> r.schedule_id) schedules
     in
-    let grants =
-      List.filter
-        (fun (grant : execution_grant) ->
-           List.mem grant.schedule_id remaining_ids)
-        state.grants
-    in
     let executions =
       List.filter
         (fun (exec : execution_record) ->
            List.mem exec.schedule_id remaining_ids)
         state.executions
     in
-    let next_state = bump_state state ~schedules ~grants ~executions in
+    let next_state = bump_state state ~schedules ~executions in
     let* () = write_state config next_state in
     Ok (next_state, pruned_count))
 ;;
 
 let due_execution_candidates state =
   state.schedules
-  |> List.filter (is_due_execution_candidate state)
+  |> List.filter is_due_execution_candidate
 ;;

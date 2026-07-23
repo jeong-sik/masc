@@ -5,8 +5,8 @@
     invariant checking. Each dimension evolves independently; synchronization
     happens only at explicit guard points.
 
-    Follows the UML orthogonal regions pattern. Mirrors
-    {!State_product} conventions and [specs/server-state/ServerState.tla].
+    Follows the UML orthogonal regions pattern and
+    [specs/server-state/ServerState.tla].
 
     Current mode: enforcing — invariant violations return [Error].
 
@@ -43,6 +43,7 @@ end
 module Backend : sig
   type phase =
     | Uninitialized (** Backend not yet resolved *)
+    | Memory        (** In-process fallback backend *)
     | Filesystem    (** Fallback to filesystem backend *)
     | Degraded      (** Backend connection failed *)
 
@@ -50,6 +51,7 @@ module Backend : sig
   val all_phases : phase list
 
   type event =
+    | Resolve_memory
     | Resolve_fs
     | Degrade of string
     | Recover

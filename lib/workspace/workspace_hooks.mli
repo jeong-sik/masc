@@ -1,7 +1,7 @@
 (** Workspace lifecycle hook registry.
 
     Atomic refs filled at boot by the runtime so the workspace layer
-    can call back into keeper / agent / economy / relation
+    can call back into keeper / agent / relation
     subsystems without a static dependency. Default values are
     no-ops; the runtime overrides each ref via the wiring in
     [lib/workspace.ml]. *)
@@ -28,19 +28,12 @@ type agent_lifecycle_event =
   | Session_rebound
   | Session_ended
 
-val force_release_task_fn : (Workspace_utils_backend_setup.config ->
-            agent_name:string ->
-            task_id:string -> unit -> string Masc_domain.masc_result)
-           Atomic.t
 val activity_emit_fn : (Workspace_utils_backend_setup.config ->
             actor:activity_entity ->
             ?subject:activity_entity ->
             kind:string ->
             payload:Yojson.Safe.t -> tags:string list -> unit -> unit)
            Atomic.t
-val agent_economy_earn_fn : (base_path:string -> agent_name:string -> reason:string -> unit)
-           Atomic.t
-val stop_keeper_fn : (string -> unit) Atomic.t
 val runtime_agents_fn :
   (Workspace_utils_backend_setup.config -> Masc_domain.agent list) Atomic.t
 val relation_on_leave_fn : (leaving_agent:string -> active_agents:string list -> unit)
@@ -83,21 +76,14 @@ val operator_pending_confirm_remove_fn :
   (Workspace_utils_backend_setup.config -> string -> (unit, string) result) Atomic.t
 
 val subscribe_messages_fn : (subscriber:string -> unit) Atomic.t
-val fsm_drift_observer_fn : (variant:string -> force:bool -> agent_name:string -> unit)
-           Atomic.t
 val distributed_lock_acquire_failed_fn : (key:string -> attempts:int -> unit) Atomic.t
 val tool_assigned_fn : (agent_id:string ->
             profile:string ->
             tool_list:string list ->
-            ?allow_set:string list ->
-            ?deny_set:string list ->
             ?config_hash:string -> ?reason:string -> unit -> string)
            Atomic.t
 val task_completion_path_observed_fn : (path:string -> contract_state:string -> agent_name:string -> unit)
            Atomic.t
-val task_auto_release_observed_fn :
-  (agent_name:string -> from_status:string -> unit) Atomic.t
-
 (** Fires once per [Workspace_broadcast.broadcast] return, with the wall-clock
     duration of the broadcast body (next_seq + agent.json read +
     msg.json write + activity emit + on_broadcast_mention).  Wired at
@@ -108,12 +94,6 @@ val task_auto_release_observed_fn :
 val workspace_broadcast_observed_fn :
   (msg_type:string -> elapsed_s:float -> unit) Atomic.t
 
-(** RFC-0040: sender-side mention dedup decision counter.
-    Wired at startup ([lib/workspace.ml]) to
-    [masc_mention_dedup_decisions_total{outcome}].
-    Outcome vocabulary: [skipped|passed|no_target|bypassed]. *)
-val mention_dedup_decision_fn :
-  (outcome:string -> unit) Atomic.t
 val cache_desync_cleared_fn :
   (Workspace_utils_backend_setup.config ->
    module_name:string -> task_id:string -> status:string -> unit) Atomic.t
@@ -189,17 +169,3 @@ val verification_notify_verdict_fn :
 
 val is_admin_agent_fn :
   (base_path:string -> agent_name:string -> bool) Atomic.t
-
-type evidence_gate_verdict =
-  | Pass
-  | Reject of { reason : string; rule_id : string; hint : string; payload_json : Yojson.Safe.t }
-
-val task_completion_gate_decide_fn :
-  (base_path:string ->
-   task_id:string ->
-   task_opt:Masc_domain.task option ->
-   notes:string ->
-   handoff:Masc_domain.task_handoff_context option ->
-   unit ->
-   evidence_gate_verdict)
-  Atomic.t

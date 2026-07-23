@@ -1,8 +1,10 @@
-(** Read-only operator report for Memory OS fact-store GC dry-runs. *)
+(** Read-only operator report for Memory OS GC dry-runs (fact store + episode
+    store). *)
 
 type keeper_error =
   | Missing_fact_store of { facts_path : string }
   | Corrupt_fact_store of { message : string }
+  | Corrupt_episode_store of { message : string }
   | Fact_store_access_error of { message : string }
   | Fact_store_locked of
       { caller : string
@@ -18,8 +20,9 @@ type keeper_result =
       ; ttl_expired_ephemeral : int
       ; ttl_expired_non_ephemeral : int
       ; ttl_expired_by_category : (string * int) list
-      ; dedup_removed : int
       ; written : int
+      ; episodes_total : int
+      ; episodes_expired : int
       }
   | Keeper_error of
       { keeper_id : string
@@ -34,8 +37,9 @@ type t =
   ; ttl_expired_ephemeral : int
   ; ttl_expired_non_ephemeral : int
   ; ttl_expired_by_category : (string * int) list
-  ; dedup_removed : int
   ; written : int
+  ; episodes_total : int
+  ; episodes_expired : int
   ; error_count : int
   }
 
@@ -61,7 +65,9 @@ let access_error_message = function
 
 let keeper_error_message = function
   | Missing_fact_store { facts_path } -> Printf.sprintf "fact store not found: %s" facts_path
-  | Corrupt_fact_store { message } | Fact_store_access_error { message } -> message
+  | Corrupt_fact_store { message }
+  | Corrupt_episode_store { message }
+  | Fact_store_access_error { message } -> message
   | Fact_store_locked { caller; lock_path; attempts } ->
     Printf.sprintf
       "fact store lock timeout: caller=%s lock_path=%s attempts=%d"
@@ -73,6 +79,7 @@ let keeper_error_message = function
 let keeper_error_code = function
   | Missing_fact_store _ -> "fact_store_missing"
   | Corrupt_fact_store _ -> "fact_store_corrupt"
+  | Corrupt_episode_store _ -> "episode_store_corrupt"
   | Fact_store_access_error _ -> "fact_store_access_error"
   | Fact_store_locked _ -> "fact_store_locked"
 ;;
@@ -100,16 +107,45 @@ let default_run_gc_for_keepers_dir ~keepers_dir ~dry_run ~keeper_id ~now () =
     ()
 ;;
 
-let run_one ~keepers_dir ~run_gc_for_keepers_dir ~explicit ~keeper_id ~now =
+let default_run_episode_gc_for_keepers_dir ~keepers_dir ~dry_run ~keeper_id ~now () =
+  Keeper_memory_os_gc.run_episode_gc_for_keepers_dir
+    ~keepers_dir
+    ~dry_run
+    ~keeper_id
+    ~now
+    ()
+;;
+
+let run_one
+      ~keepers_dir
+      ~run_gc_for_keepers_dir
+      ~run_episode_gc_for_keepers_dir
+      ~explicit
+      ~keeper_id
+      ~now
+  =
   let facts_path =
     Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id
   in
-  if explicit && not (Sys.file_exists facts_path)
+  (* A keeper with an episode store but no [*.facts.jsonl] (episodes whose
+     claims were all empty) is still a scannable store — only a keeper with
+     neither store is missing. *)
+  if explicit
+     && (not (Sys.file_exists facts_path))
+     && not (Keeper_memory_os_io.has_episode_store_for_keepers_dir ~keepers_dir ~keeper_id)
   then fact_store_missing_error ~keepers_dir ~keeper_id
   else (
     try
       let (report : Keeper_memory_os_gc.gc_report) =
         run_gc_for_keepers_dir
+          ~keepers_dir
+          ~dry_run:true
+          ~keeper_id
+          ~now
+          ()
+      in
+      let (episode_report : Keeper_memory_os_gc.episode_gc_report) =
+        run_episode_gc_for_keepers_dir
           ~keepers_dir
           ~dry_run:true
           ~keeper_id
@@ -123,8 +159,9 @@ let run_one ~keepers_dir ~run_gc_for_keepers_dir ~explicit ~keeper_id ~now =
         ; ttl_expired_ephemeral = report.ttl_expired_ephemeral
         ; ttl_expired_non_ephemeral = report.ttl_expired_non_ephemeral
         ; ttl_expired_by_category = report.ttl_expired_by_category
-        ; dedup_removed = report.dedup_removed
         ; written = report.written
+        ; episodes_total = episode_report.episodes_total
+        ; episodes_expired = episode_report.episodes_expired
         }
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -133,6 +170,8 @@ let run_one ~keepers_dir ~run_gc_for_keepers_dir ~explicit ~keeper_id ~now =
         { keeper_id; error = Fact_store_locked { caller; lock_path = path; attempts } }
     | Keeper_memory_os_gc.Fact_store_corrupt message ->
       Keeper_error { keeper_id; error = Corrupt_fact_store { message } }
+    | Keeper_memory_os_gc.Episode_store_corrupt message ->
+      Keeper_error { keeper_id; error = Corrupt_episode_store { message } }
     | exn ->
       (match access_error_message exn with
        | Some message -> Keeper_error { keeper_id; error = Fact_store_access_error { message } }
@@ -142,6 +181,7 @@ let run_one ~keepers_dir ~run_gc_for_keepers_dir ~explicit ~keeper_id ~now =
 let run_for_keepers_dir_with_runner
       ~keepers_dir
       ~run_gc_for_keepers_dir
+      ~run_episode_gc_for_keepers_dir
       ?keeper_ids
       ~now
       ()
@@ -151,12 +191,22 @@ let run_for_keepers_dir_with_runner
     | Some ids -> true, unique_sorted ids
     | None ->
       ( false
-      , Keeper_memory_os_io.list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir )
+      , List.sort_uniq
+          String.compare
+          (Keeper_memory_os_io.list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir
+           @ Keeper_memory_os_io.list_episode_store_keeper_ids_for_keepers_dir ~keepers_dir)
+      )
   in
   let results =
     List.map
       (fun keeper_id ->
-         run_one ~keepers_dir ~run_gc_for_keepers_dir ~explicit ~keeper_id ~now)
+         run_one
+           ~keepers_dir
+           ~run_gc_for_keepers_dir
+           ~run_episode_gc_for_keepers_dir
+           ~explicit
+           ~keeper_id
+           ~now)
       keeper_ids
   in
   let
@@ -165,8 +215,9 @@ let run_for_keepers_dir_with_runner
     ttl_expired_ephemeral,
     ttl_expired_non_ephemeral,
     ttl_expired_by_category,
-    dedup_removed,
     written,
+    episodes_total,
+    episodes_expired,
     error_count
     =
     List.fold_left
@@ -176,8 +227,9 @@ let run_for_keepers_dir_with_runner
         , ttl_expired_ephemeral
         , ttl_expired_non_ephemeral
         , ttl_expired_by_category
-        , dedup_removed
         , written
+        , episodes_total
+        , episodes_expired
         , error_count )
         -> function
          | Keeper_ok row ->
@@ -186,8 +238,9 @@ let run_for_keepers_dir_with_runner
            , ttl_expired_ephemeral + row.ttl_expired_ephemeral
            , ttl_expired_non_ephemeral + row.ttl_expired_non_ephemeral
            , merge_category_counts ttl_expired_by_category row.ttl_expired_by_category
-           , dedup_removed + row.dedup_removed
            , written + row.written
+           , episodes_total + row.episodes_total
+           , episodes_expired + row.episodes_expired
            , error_count )
          | Keeper_error _ ->
            ( total_input
@@ -195,10 +248,11 @@ let run_for_keepers_dir_with_runner
            , ttl_expired_ephemeral
            , ttl_expired_non_ephemeral
            , ttl_expired_by_category
-           , dedup_removed
            , written
+           , episodes_total
+           , episodes_expired
            , error_count + 1 ))
-      (0, 0, 0, 0, [], 0, 0, 0)
+      (0, 0, 0, 0, [], 0, 0, 0, 0)
       results
   in
   { keepers_dir
@@ -208,8 +262,9 @@ let run_for_keepers_dir_with_runner
   ; ttl_expired_ephemeral
   ; ttl_expired_non_ephemeral
   ; ttl_expired_by_category
-  ; dedup_removed
   ; written
+  ; episodes_total
+  ; episodes_expired
   ; error_count
   }
 ;;
@@ -218,16 +273,25 @@ let run_for_keepers_dir ~keepers_dir ?keeper_ids ~now () =
   run_for_keepers_dir_with_runner
     ~keepers_dir
     ~run_gc_for_keepers_dir:default_run_gc_for_keepers_dir
+    ~run_episode_gc_for_keepers_dir:default_run_episode_gc_for_keepers_dir
     ?keeper_ids
     ~now
     ()
 ;;
 
 module For_testing = struct
-  let run_for_keepers_dir ~keepers_dir ~run_gc_for_keepers_dir ?keeper_ids ~now () =
+  let run_for_keepers_dir
+        ~keepers_dir
+        ~run_gc_for_keepers_dir
+        ~run_episode_gc_for_keepers_dir
+        ?keeper_ids
+        ~now
+        ()
+    =
     run_for_keepers_dir_with_runner
       ~keepers_dir
       ~run_gc_for_keepers_dir
+      ~run_episode_gc_for_keepers_dir
       ?keeper_ids
       ~now
       ()
@@ -248,9 +312,9 @@ let result_to_json = function
       ; "ttl_expired_ephemeral", `Int row.ttl_expired_ephemeral
       ; "ttl_expired_non_ephemeral", `Int row.ttl_expired_non_ephemeral
       ; "ttl_expired_by_category", category_counts_to_json row.ttl_expired_by_category
-      ; "migration_candidate_expired", `Int row.ttl_expired_non_ephemeral
-      ; "dedup_removed", `Int row.dedup_removed
       ; "written", `Int row.written
+      ; "episodes_total", `Int row.episodes_total
+      ; "episodes_expired", `Int row.episodes_expired
       ]
   | Keeper_error row ->
     Tool_args.error_assoc
@@ -272,9 +336,9 @@ let to_json report =
     ; "ttl_expired_ephemeral", `Int report.ttl_expired_ephemeral
     ; "ttl_expired_non_ephemeral", `Int report.ttl_expired_non_ephemeral
     ; "ttl_expired_by_category", category_counts_to_json report.ttl_expired_by_category
-    ; "migration_candidate_expired", `Int report.ttl_expired_non_ephemeral
-    ; "dedup_removed", `Int report.dedup_removed
     ; "written", `Int report.written
+    ; "episodes_total", `Int report.episodes_total
+    ; "episodes_expired", `Int report.episodes_expired
     ; "keepers", `List (List.map result_to_json report.results)
     ]
 ;;
@@ -282,14 +346,15 @@ let to_json report =
 let render_result = function
   | Keeper_ok row ->
     Printf.sprintf
-      "%s\tok\ttotal=%d\tttl_expired=%d\tephemeral_expired=%d\tmigration_candidates=%d\tdedup_removed=%d\twould_write=%d\n"
+      "%s\tok\ttotal=%d\tttl_expired=%d\tephemeral_expired=%d\tnon_ephemeral_expired=%d\twould_write=%d\tepisodes_total=%d\tepisodes_expired=%d\n"
       row.keeper_id
       row.total_input
       row.ttl_expired
       row.ttl_expired_ephemeral
       row.ttl_expired_non_ephemeral
-      row.dedup_removed
       row.written
+      row.episodes_total
+      row.episodes_expired
   | Keeper_error row ->
     Printf.sprintf
       "%s\t%s\t%s\n"
@@ -301,14 +366,14 @@ let render_result = function
 let render_text report =
   let body =
     match report.results with
-    | [] -> "no keeper fact stores found\n"
+    | [] -> "no keeper memory stores found\n"
     | rows -> rows |> List.map render_result |> String.concat ""
   in
   Printf.sprintf
     "Memory OS GC dry-run\n\
      keepers_dir: %s\n\
      keepers: %d, errors: %d\n\
-     totals: total=%d ttl_expired=%d ephemeral_expired=%d migration_candidates=%d dedup_removed=%d would_write=%d\n\
+     totals: total=%d ttl_expired=%d ephemeral_expired=%d non_ephemeral_expired=%d would_write=%d episodes_total=%d episodes_expired=%d\n\
      %s"
     report.keepers_dir
     (List.length report.results)
@@ -317,7 +382,8 @@ let render_text report =
     report.ttl_expired
     report.ttl_expired_ephemeral
     report.ttl_expired_non_ephemeral
-    report.dedup_removed
     report.written
+    report.episodes_total
+    report.episodes_expired
     body
 ;;

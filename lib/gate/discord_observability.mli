@@ -34,6 +34,7 @@ type inbound_outcome =
 
 type ambient_outcome =
   | Ambient_recorded
+  | Ambient_binding_store_error
   | Ambient_dropped_unbound
   | Ambient_dropped_empty
   | Ambient_dropped_too_long

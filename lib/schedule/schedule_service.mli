@@ -1,7 +1,7 @@
 (** User-facing service boundary for scheduled internal automation.
 
-    This module creates and approves durable schedule records. It does not run
-    due work and does not interact with consumer lifecycle state. *)
+    This module creates durable schedule records. It does not run due work,
+    authorize payload effects, or interact with consumer lifecycle state. *)
 
 type service_error =
   | Invalid_request of string
@@ -14,12 +14,10 @@ val create :
   ?schedule_id:string ->
   ?requested_at:float ->
   ?expires_at:float ->
-  ?approval_required:bool ->
   requested_by:Schedule_domain.actor ->
   scheduled_by:Schedule_domain.actor ->
   due_at:float ->
   payload:Yojson.Safe.t ->
-  risk_class:Schedule_domain.risk_class ->
   source:Schedule_domain.schedule_source ->
   ?recurrence:Schedule_domain.recurrence ->
   unit ->
@@ -35,25 +33,6 @@ val get :
   Workspace_utils.config ->
   schedule_id:string ->
   Schedule_domain.schedule_request option
-
-val approve :
-  Workspace_utils.config ->
-  ?grant_id:string ->
-  ?approved_at:float ->
-  schedule_id:string ->
-  approved_by:Schedule_domain.actor ->
-  unit ->
-  (Schedule_domain.schedule_request, service_error) result
-
-val reject :
-  Workspace_utils.config ->
-  ?grant_id:string ->
-  ?approved_at:float ->
-  schedule_id:string ->
-  approved_by:Schedule_domain.actor ->
-  reason:string ->
-  unit ->
-  (Schedule_domain.schedule_request, service_error) result
 
 val cancel :
   Workspace_utils.config ->

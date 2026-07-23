@@ -1,131 +1,8 @@
-(* WORKAROUND-CARRYOVER: tracked by docs/rfc/RFC-0144-workaround-sunset-keeper-dedup-carryover.md.
-   Removal: per-[error_kind] sunset criteria (§4). This layer demotes repeated
-   ERROR lines to DEBUG; the root fix is reducing the underlying error rate
-   (per-arm root-fix table in RFC §3). *)
+(* Exact-message occurrence state for [Keeper_registry.record_error].
 
-(* Dedupe state for [Keeper_registry.record_error] noise.
-
-   See [.mli] for the rationale. This module is intentionally stdlib-only
-   (Digest + [Bounded_event_dedupe]) so it can be linked into both the
-   main library and standalone unit tests without dragging Eio in.
-
-   Threading: [Bounded_event_dedupe] guards the in-memory table with a
-   [Mutex.t]. Public entry points perform only key creation and integer
-   state updates, so contention is bounded.
-
-   Memory: there is no eviction policy. The MASC server lifetime is in
-   the hour-to-day range; the number of distinct [(keeper, error)]
-   fingerprints over that window is empirically <1k from production
-   logs (cf. system_log_2026-05-16.jsonl analysis), so unbounded
-   accumulation is acceptable for this iteration. If a runaway-error
-   producer is identified later, an LRU layer is the right
-   addition — not a probabilistic filter. *)
-
-type error_kind =
-  | Sandbox_docker
-  | Stale_turn_timeout
-  | Fiber_unresolved
-  | Provider_timeout
-  | State_machine_guard
-  | Expected_version_mismatch
-  | Runtime_resolution_failure
-  | Unknown_phase_transition
-  | Auth_token_mismatch
-  | Shutdown_artifact
-  | Other
-
-let error_kind_to_string = function
-  | Sandbox_docker -> "sandbox_docker"
-  | Stale_turn_timeout -> "stale_turn_timeout"
-  | Fiber_unresolved -> "fiber_unresolved"
-  | Provider_timeout -> "provider_timeout"
-  | State_machine_guard -> "state_machine_guard"
-  | Expected_version_mismatch -> "expected_version_mismatch"
-  | Runtime_resolution_failure -> "runtime_resolution_failure"
-  | Unknown_phase_transition -> "unknown_phase_transition"
-  | Auth_token_mismatch -> "auth_token_mismatch"
-  | Shutdown_artifact -> "shutdown_artifact"
-  | Other -> "other"
-;;
-
-let canonical_error_kind_label = function
-  | value -> value
-
-let error_kind_of_string raw =
-  match canonical_error_kind_label raw with
-  | "sandbox_docker" -> Some Sandbox_docker
-  | "stale_turn_timeout" -> Some Stale_turn_timeout
-  | "fiber_unresolved" -> Some Fiber_unresolved
-  | "provider_timeout" -> Some Provider_timeout
-  | "state_machine_guard" -> Some State_machine_guard
-  | "expected_version_mismatch" -> Some Expected_version_mismatch
-  | "runtime_resolution_failure" -> Some Runtime_resolution_failure
-  | "unknown_phase_transition" -> Some Unknown_phase_transition
-  | "auth_token_mismatch" -> Some Auth_token_mismatch
-  | "shutdown_artifact" -> Some Shutdown_artifact
-  | "other" -> Some Other
-  | _ -> None
-;;
-
-let all_error_kinds =
-  [ Sandbox_docker
-  ; Stale_turn_timeout
-  ; Fiber_unresolved
-  ; Provider_timeout
-  ; State_machine_guard
-  ; Expected_version_mismatch
-  ; Runtime_resolution_failure
-  ; Unknown_phase_transition
-  ; Auth_token_mismatch
-  ; Shutdown_artifact
-  ; Other
-  ]
-;;
-
-(* Substring-based classifier. Order matters: longer / more specific
-   markers come first so a "state machine guard violation: expected_version
-   mismatch" string is not silently re-classified as the second bucket.
-   Production samples (system_log_2026-05-16, 299 events) showed the
-   promoted buckets covered ~95% of traffic before the legacy path-tokenizer
-   bucket was retired; remaining unmatched text lands in [Other] and is a
-   candidate for future arm promotion. *)
-let classify_error (err : string) : error_kind =
-  let contains_in haystack needle = String.length haystack >= String.length needle
-    && (
-      let nlen = String.length needle in
-      let elen = String.length haystack in
-      let rec go i =
-        if i + nlen > elen then false
-        else if String.sub haystack i nlen = needle then true
-        else go (i + 1)
-      in
-      go 0)
-  in
-  let contains needle = contains_in err needle in
-  if contains "shutdown"
-  then Shutdown_artifact
-  else if contains "sandbox docker"
-  then Sandbox_docker
-  else if contains "stale_turn_timeout"
-  then Stale_turn_timeout
-  else if contains "fiber_unresolved"
-  then Fiber_unresolved
-  else if contains "oas_timeout_budget_loop"
-  then Provider_timeout
-  else if contains "provider_timeout"
-  then Provider_timeout
-  else if contains "state machine guard" || contains "guard violation"
-  then State_machine_guard
-  else if contains "expected_version" && contains "mismatch"
-  then Expected_version_mismatch
-  else if contains "runtime" && contains "resolution"
-  then Runtime_resolution_failure
-  else if contains "unknown phase"
-  then Unknown_phase_transition
-  else if contains "auth" && contains "token" && contains "mismatch"
-  then Auth_token_mismatch
-  else Other
-;;
+   This module intentionally does not classify free-form diagnostics. Typed
+   producers own error categories; this leaf only counts identical
+   [(keeper, error)] pairs for an observational repetition metric. *)
 
 type record_outcome =
   [ `First
@@ -147,12 +24,6 @@ let record ~keeper ~error =
   match Bounded_event_dedupe.record state ~key with
   | Bounded_event_dedupe.First -> `First
   | Bounded_event_dedupe.Repeated count -> `Repeated count
-;;
-
-let classify_outcome ~keeper ~error =
-  let kind = classify_error error in
-  let outcome = record ~keeper ~error in
-  kind, outcome
 ;;
 
 let reset_for_test () =

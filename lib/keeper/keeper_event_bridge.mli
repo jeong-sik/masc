@@ -1,16 +1,16 @@
 (** OAS Event_bus → SSE Bridge.
 
     Subscribes to all OAS Event_bus events, relays them as SSE broadcasts
-    to connected dashboard clients, and durably appends the same event stream
-    to [.masc/oas-events/].
+    to connected dashboard clients, and appends the events this subscriber
+    observes to [.masc/oas-events/]. The store is not a complete bus replay.
 
     @since 2.96.0 *)
 
 (** Start the bridge fiber. Subscribes to [bus], drains events on an
     env-configurable interval
     ([MASC_OAS_SSE_DRAIN_INTERVAL_SEC], default 0.25s),
-    broadcasts each as an SSE event, and appends each serializable event to
-    the cluster-aware [.masc/oas-events/] store for offline/debug replay.
+    broadcasts each as an SSE event, and appends each observed serializable
+    event to the cluster-aware [.masc/oas-events/] store for offline/debugging.
     The durable store prunes old date-split files on append using
     [MASC_OAS_EVENTS_RETENTION_DAYS] (default 30; non-positive disables).
     Runs as a background Eio fiber under [sw]. *)

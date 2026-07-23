@@ -6,9 +6,7 @@ Plan - 2026-05-18.html`, PR-A).
 Each row in `baseline.jsonl` is one fixture used by
 `test_exec_shell_command_gate.ml` to pin both:
 
-- The `Exec_policy.validate_command_tool_execute`
-  verdict (`policy_verdict`; stored under the legacy JSONL key
-  `expected_worker_verdict`).
+- The `Exec_policy.validate_command_tool_execute` policy verdict.
 - The Phase 1 SSOT `Masc_exec_command_gate.Shell_command_gate.gate`
   verdict (`ir_verdict`).
 
@@ -24,7 +22,7 @@ Each line is a single object:
 {
   "raw_cmd": "<the input string>",
   "category": "<corpus category>",
-  "expected_worker_verdict": "<ok | injection | chain_or_redirect | ...>",
+  "expected_policy_verdict": "<ok | injection | chain_or_redirect | ...>",
   "expected_ir_verdict": "<allow | reject | cannot_parse | too_complex>",
   "ir_detail": "<optional tag — reject_reason, parse_reason, or too_complex_reason>",
   "note": "<one-line rationale>"
@@ -56,7 +54,6 @@ Each line is a single object:
 - `process_substitution` — `Error Process_substitution`.
 - `unsafe_redirect` — `Error Unsafe_redirect`.
 - `pipes_not_allowed` — `Error Pipes_not_allowed`.
-- `command_not_allowed` — `Error (Command_not_allowed _)`.
 
 ## IR verdict tags
 
@@ -67,8 +64,7 @@ Each line is a single object:
 `ir_detail` carries the sub-reason tag:
 
 - For `reject`: see `reject_reason_tag` —
-  `pipes_not_allowed` / `redirect_disallowed_in_caller` /
-  `path_outside_policy`.
+  `pipes_not_allowed` / `redirect_disallowed_in_caller`.
 - For `cannot_parse`: see `parse_reason_tag` — `parse_error` /
   `timeout` / `depth_limit` / `token_limit`.
 - For `too_complex`: see `too_complex_reason_tag` —
@@ -84,5 +80,5 @@ row), update the JSONL and reference the PR/RFC in the
 commit. Mechanical drift is what this corpus is built to detect —
 do not "fix" rows without an explicit reason.
 
-IR verdicts now use syntax/path policy only; executable-name admission is not
-part of this corpus.
+IR verdicts now use structural syntax policy only. Executable-name admission
+and positional-argv path inference are not part of this corpus.

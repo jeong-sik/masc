@@ -5,19 +5,13 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_context_runtime
 
-let string_contains_substring = String_util.string_contains_substring
-
-let string_contains_substring_ci = String_util.string_contains_substring_ci
-
-
 (* ── Observation / decision helpers ─────────────── *)
 
 let decision_channel_of_observation
     (observation : Keeper_world_observation.world_observation) :
     Keeper_world_observation.keeper_cycle_channel =
-  if observation.pending_mentions <> []
+  if observation.pending_messages <> []
      || observation.pending_board_events <> []
-     || observation.pending_scope_messages <> []
   then
     Keeper_world_observation.Reactive
   else
@@ -58,9 +52,8 @@ type usage_trust = Keeper_usage_trust.t =
 let runtime_lane_label = Boundary_redaction.to_string Boundary_redaction.runtime_lane_label
 
 let classify_usage_trust ~(usage_reported : bool)
-    ~(usage : Agent_sdk.Types.api_usage)
-    ~(context_max : int) : usage_trust =
-  Keeper_usage_trust.classify ~usage_reported ~usage ~context_max
+    ~(usage : Agent_sdk.Types.api_usage) : usage_trust =
+  Keeper_usage_trust.classify ~usage_reported ~usage
 
 (* #9953: bucket the raw [context_max] integer into a tightly
    bounded vocabulary so the Otel_metric_store label cardinality stays
@@ -178,17 +171,14 @@ let record_turn_latency_by_model_bucket
     ()
 
 
-let usage_trust_is_trusted = Keeper_usage_trust.is_trusted
-
-(* cost_usd is the provider's authoritative cost field; it is independent of
-   whether token *counts* are trusted (token⊥cost). This function accounts the
-   reported cost directly and does NOT gate it on token-trust. Token counts may
-   still be zeroed for untrusted usage — that is the separate token-metrics
-   concern handled by callers, not a reason to drop a real reported cost. *)
+(* cost_usd is the provider's authoritative observation. Preserve every
+   reported value verbatim, including zero and invalid negative values, so the
+   anomaly remains diagnosable instead of being silently rewritten. Missing is
+   represented by the existing 0.0 aggregate identity. *)
 let estimate_usage_cost_usd usage =
   match usage.Agent_sdk.Types.cost_usd with
-  | Some cost when cost > 0.0 -> cost
-  | Some _ | None -> 0.0
+  | Some cost -> cost
+  | None -> 0.0
 
 let usage_trust_to_string = Keeper_usage_trust.to_string
 
@@ -205,9 +195,7 @@ let usage_trust_json_fields = Keeper_usage_trust.json_fields
    - [masc_keeper_usage_trust_total{keeper, outcome}] — high-level
      outcome (trusted / missing / untrusted).
    - [masc_keeper_usage_anomaly_reason_total{keeper, reason}] —
-     per-reason drill-down for untrusted outcomes (e.g.
-     [input_tokens_gt_1m], [input_tokens_gt_2x_context_max],
-     [zero_token_usage_reported]).
+     per-reason drill-down for objectively invalid negative counters.
 
    Called once per turn from [update_metrics_from_result]; other
    classify sites (append_metrics_snapshot, keeper_turn) serialize
@@ -217,7 +205,7 @@ let usage_trust_outcome_metric = Keeper_metrics.(to_string UsageTrust)
 let usage_anomaly_reason_metric = Keeper_metrics.(to_string UsageAnomalyReason)
 
 let keeper_total_cost_usd_help =
-  "Accumulated trusted USD cost per keeper (labels: keeper_name)"
+  "Accumulated provider-reported USD cost per keeper (labels: keeper_name)"
 
 let record_usage_trust ~keeper_name ~(trust : usage_trust) =
   let outcome = usage_trust_to_string trust in
@@ -235,9 +223,8 @@ let record_usage_trust ~keeper_name ~(trust : usage_trust) =
       if warns_operator then Log.Keeper.warn else Log.Keeper.info
     in
     log_usage
-      "#9959 usage_anomaly keeper=%s reasons=[%s] severity=%s — upstream \
-       fix tracked in jeong-sik/oas#1181; cost accounting is suppressed \
-       to 0.0 for this turn by [usage_trust_is_trusted] gate."
+      "usage anomaly keeper=%s reasons=[%s] severity=%s; raw token and cost \
+       observations remain recorded"
       keeper_name
       (String.concat "," reasons)
       (if warns_operator then "warn" else "info")
@@ -266,29 +253,18 @@ let turn_mode_to_string = Turn_mode_codec.turn_mode_to_string
 let turn_mode_of_string = Turn_mode_codec.turn_mode_of_string
 let work_kind_of_turn_mode = Turn_mode_codec.work_kind_of_turn_mode
 
-let is_observation_only_tool_name name =
-  not (Keeper_tool_progress.is_execution_progress_tool_name name)
-
 let has_substantive_tool_calls (tools_used : string list) : bool =
-  List.exists Keeper_tool_progress.is_execution_progress_tool_name tools_used
+  tools_used <> []
 
-(** A cycle is noop when it produced no text AND all tools used (if any)
-    are passive-status only (e.g. board_list, context_status).  A turn whose
-    only tool is a [Claim_context] action such as [keeper_task_claim] is NOT
-    a noop: claiming a task mutates server-side assignment state and is the
-    documented first step of the multi-turn task lifecycle (claim -> act ->
-    done) per the prompt.  The noop-backoff was originally introduced in
-    #7168 to penalise the [board_list]-only pattern; sweeping
-    [Claim_context] into noop was an unintended side-effect that pinned
-    real keepers at the 8x cooldown cap. *)
+(** A cycle is empty only when it emitted neither text nor a tool call. Tool
+    meaning is not inferred from its name. *)
 let is_noop_cycle ~has_text ~(tools_used : string list) : bool =
-  not has_text
-  && List.for_all Keeper_tool_progress.is_passive_status_tool_name tools_used
+  (not has_text) && tools_used = []
 
 let visible_run_validation (result : Keeper_agent_run.run_result) :
     Agent_sdk.Raw_trace.run_validation option =
   match result.run_validation with
-  | Some v when v.ok && (v.evidence <> [] || v.has_file_write) -> Some v
+  | Some v when v.ok && v.evidence <> [] -> Some v
   | _ -> None
 
 let telemetry_reported_of_result
@@ -323,52 +299,21 @@ let coverage_reason_of_no_result_outcome = function
   | "error" -> "error_turn"
   | _ -> "no_run_result"
 
-let error_category_of_no_result_outcome ~outcome ~error =
-  match outcome with
-  | "error" | "partial" -> (
-      match error with
-      | Some e when String.length e > 0 ->
-          let e_lower = String.lowercase_ascii e in
-          let starts_with prefix =
-            String.starts_with e_lower ~prefix
-          in
-          let contains needle =
-            string_contains_substring ~needle e_lower
-          in
-          (* starts_with checks first (more specific), then contains *)
-          if starts_with "invalid request" then Some "invalid_request"
-          else if starts_with "network error" then Some "network_error"
-          else if starts_with "internal error" then Some "internal_error"
-          else if starts_with "input to" then Some "input_budget_exceeded"
-          (* contains checks second (broader, order matters) *)
-          else if contains "turn outcome ambiguous" then Some "ambiguous_side_effect"
-          else if contains "connection_failure"
-                  || contains "connection refused" then Some "network_error"
-          else if contains "timeout" || contains "timed out" then Some "timeout"
-          else if contains "context length"
-                  || contains "token budget" then Some "input_budget_exceeded"
-          else Some "other"
-      | Some _ | None -> Some "unknown")
-  | _ -> None
-
 let has_visible_tool_signal (result : Keeper_agent_run.run_result) : bool =
   has_substantive_tool_calls (Keeper_agent_result.tool_names result)
   || Option.is_some (visible_run_validation result)
 
 let validated_evidence_preview
     (v : Agent_sdk.Raw_trace.run_validation) : string =
-  if v.has_file_write then "(validated evidence: file_write)"
-  else
-    match v.tool_names with
-    | [] -> "(validated evidence)"
-    | names ->
-      Printf.sprintf "(validated evidence: %s)"
-        (String.concat ", " names)
+  match v.tool_names with
+  | [] -> "(validated evidence)"
+  | names ->
+    Printf.sprintf "(validated evidence: %s)" (String.concat ", " names)
 
 (* RFC-0232: the scheduled-autonomous "what is this keeper doing" preview, by
    precedence. [is_visible_reply] is the typed reply-surface outcome
-   ([Keeper_turn_outcome.of_result_surface]) — a budget-exhausted turn
-   substitutes a synthetic continuation notice for the reply text, and a
+   ([Keeper_turn_outcome.of_result_surface]) — an OAS turn-limit observation
+   may have no visible reply text, and a
    completed runtime turn may still have no visible reply. Neither case may be
    sniffed as model output, so visible model text only wins when the outcome is
    [Visible_reply]. Then substantive tool calls, then validated evidence, else
@@ -405,16 +350,10 @@ let accountability_evidence_refs
   let validation_refs =
     match validated_evidence with
     | Some validation ->
-        let base =
-          validation.evidence
-          |> List.map String.trim
-          |> List.filter (fun entry -> entry <> "")
-          |> List.map (fun entry -> "validation:" ^ entry)
-        in
-        if validation.has_file_write then
-          "validation:file_write" :: base
-        else
-          base
+      validation.evidence
+      |> List.map String.trim
+      |> List.filter (fun entry -> entry <> "")
+      |> List.map (fun entry -> "validation:" ^ entry)
     | None -> []
   in
   let turn_refs = [ Printf.sprintf "turn:%s:%d" trace_id turn_number ] in
@@ -440,7 +379,6 @@ let work_kind_of_json = Turn_mode_codec.work_kind_of_json
 let claim_backlog_actionable
     (observation : Keeper_world_observation.world_observation) : bool =
   observation.claimable_task_count > 0
-  && observation.provider_capacity_blocked_task_count = 0
 
 let singleton_when condition label =
   if condition then [ label ] else []
@@ -452,14 +390,17 @@ let observed_triggers_of_observation
   let actionable_backlog = claim_backlog_actionable observation in
   List.concat
     [
-      singleton_when (observation.pending_mentions <> []) "direct_mention";
+      singleton_when
+        (Keeper_world_observation_message_scope.has_kind
+           Keeper_world_observation_message_scope.Mention observation.pending_messages)
+        "direct_mention";
       singleton_when (observation.pending_board_events <> []) "board_activity";
-      singleton_when (observation.pending_scope_messages <> []) "scope_message";
+      singleton_when
+        (Keeper_world_observation_message_scope.has_kind
+           Keeper_world_observation_message_scope.Scope observation.pending_messages)
+        "scope_message";
       singleton_when actionable_backlog "new_unclaimed_task";
       singleton_when actionable_backlog "claimable_task";
-      singleton_when
-        (observation.provider_capacity_blocked_task_count > 0)
-        "provider_capacity_blocked_backlog";
       singleton_when (observation.failed_task_count > 0) "failed_task";
       singleton_when
         (observation.pending_verification_count > 0)
@@ -467,9 +408,6 @@ let observed_triggers_of_observation
       singleton_when
         (observation.scheduled_automation.due_ready_count > 0)
         "scheduled_automation_due_ready";
-      singleton_when
-        (observation.scheduled_automation.blocked_approval_count > 0)
-        "scheduled_automation_blocked_approval";
       singleton_when
         (observation.active_goals <> [] && observation.idle_seconds > 0)
         "idle_timeout_candidate";
@@ -480,28 +418,18 @@ let observed_affordances_of_observation
     (observation : Keeper_world_observation.world_observation) : string list =
   let affordances = ref [] in
   let add affordance = affordances := affordance :: !affordances in
-  if observation.pending_board_events <> [] then add "board_post_or_comment";
+  if observation.pending_board_events <> []
+  then (
+    add "board_post_or_comment";
+    add "board_curation");
   let _ = meta in
-  if List.length observation.pending_board_events >= 2 then add "board_curation";
-  if observation.pending_scope_messages <> [] then add "message_sweep";
-  if observation.provider_capacity_blocked_task_count > 0 then
-    add "provider_capacity_blocked";
+  if Keeper_world_observation_message_scope.has_kind
+       Keeper_world_observation_message_scope.Scope observation.pending_messages
+  then add "message_sweep";
   if claim_backlog_actionable observation then add "task_claim";
   if observation.failed_task_count > 0 then add "task_audit";
   if observation.pending_verification_count > 0 then
     add "task_verify";
   if observation.scheduled_automation.due_ready_count > 0 then
     add "schedule_dispatch_monitor";
-  if observation.scheduled_automation.blocked_approval_count > 0 then
-    add "schedule_grant_followup";
   List.rev !affordances
-
-let response_requests_confirmation (text : string) : bool =
-  let trimmed = String.trim text in
-  trimmed <> ""
-  && (String.contains trimmed '?'
-      || string_contains_substring_ci ~needle:"would you like" trimmed
-      || string_contains_substring_ci ~needle:"do you want" trimmed
-      || string_contains_substring_ci ~needle:"let me know" trimmed
-      || string_contains_substring_ci ~needle:"어떻게 할까" trimmed
-      || string_contains_substring_ci ~needle:"할까" trimmed)

@@ -30,11 +30,10 @@
     context_max_bucket].  Bucket vocabulary:
     [64k | 128k | 200k | 256k | 1m | other | zero]. *)
 
-(** #10121: keeper turn livelock observer counters.  Labels:
+(** Objective Keeper turn-attempt observer counters. Labels:
     [keeper].  Re-attempt = same turn id started again before
     the counter advanced; regression = turn id moved strictly
-    backwards (write_meta race symptom — #9733); livelock blocks
-    are labeled by [keeper, reason]. *)
+    backwards (write_meta race symptom — #9733). *)
 
 (** #9943: per-keeper turn latency distribution.  Labels:
     [keeper, bucket].  Bucket vocabulary:
@@ -124,15 +123,8 @@ val metric_keeper_waiting_age_seconds : string
 (** Gauge of keepers by inventory state. Labels: [state]. *)
 val metric_keeper_waiting_keeper_count : string
 
-(** Gauge of due scheduled automation requests blocked on human approval. *)
-val metric_schedule_approval_blocked_count : string
-
-(** Gauge of the oldest due scheduled automation approval wait in seconds. *)
-val metric_schedule_approval_wait_seconds : string
-
-(** Schedule unsupported payload counter. Labels: [phase] in
-    {[creation | dispatch]} and [risk_class] in
-    [Schedule_domain.risk_class_to_string] labels. Raw payload kinds are not
+(** Schedule unsupported payload counter. Label: [phase] in
+    {[creation | dispatch]}. Raw payload kinds are not
     labels; they remain in typed errors/projections to avoid unbounded metric
     cardinality. *)
 val metric_schedule_payload_unsupported_total : string
@@ -172,10 +164,6 @@ val metric_tool_keeper_cache_ttl_parse_failures : string
     FIFO wait queue. Reactive turn depth is intentionally not inferred from
     semaphore availability. *)
 
-(** #9662: cooperative-cancel timeout overshoot counter emitted by
-    [Timeout_policy].  Labels: [layer, origin]. *)
-val metric_timeout_policy_overshoot : string
-
 (** #9943: per-keeper noop compaction counter.  Increments when
     a snapshot records [compaction_before_tokens =
     compaction_after_tokens > 0] — the trigger fired but the
@@ -209,22 +197,24 @@ val metric_timeout_policy_overshoot : string
     allowed roots ([(roots=[<list>])] and
     [(sandbox roots: [<list>])]) which became a side-channel
     oracle for sibling sandboxes when keeper identity drifted
-    across contract/gate/FS-resolver layers.  Labels:
-    [kind="out_of_roots"|"not_found_relative"]. *)
+    across contract/gate/FS-resolver layers. Label [kind="out_of_roots"]
+    records objective allowed-root containment failures. *)
 
 val metric_write_meta_cas_retry_total : string
 
 (** Total board signals that did not produce a wake decision for a
-    running keeper. Increments per (keeper, kind) when
-    [Keeper_world_observation.board_signal_wake_reason] returns
-    [None] — no explicit_mention, scope feed disabled, and no
-    external reply after a self-comment. Discoverability for the
-    REPO_WAKE_UP audit finding: keepers with narrow mention targets
-    can silently drop board posts. Labels: keeper, kind=post_created|comment_added. *)
+    running keeper ([masc_keeper_board_signal_no_wake_total]).
+    Increments per (keeper, kind, audience) when typed-audience routing
+    ([Keeper_board_audience.route_for_keeper]) returns [Ignore], or
+    [Judge_discoverable] — the latter issues no wake and records a board
+    attention candidate instead, so the [audience] label distinguishes
+    the two. Discoverability for the REPO_WAKE_UP audit finding:
+    keepers with narrow mention targets can silently drop board posts.
+    Labels: keeper, kind=post_created|comment_added, audience. *)
 
 val metric_cache_desync_cleared : string
 
-(** Runtime state synchronization failures: pause/resume/auto-pause paths
+(** Runtime state synchronization failures: explicit pause/resume paths
     only. Local discovery refresh failures use
     [metric_keeper_local_discovery_failures] so dashboards can attribute
     distinct failure classes. *)
@@ -273,11 +263,3 @@ val metric_persistence_read_drops : string
 
 (** Goal-loop Observe counter for persistence UTF-8 repairs. No labels. *)
 val metric_persistence_utf8_repair : string
-
-val metric_discovery_history_failures : string
-
-(** #18855: per-tool correction_pipeline fix counter.
-    Incremented when the OAS agent_tools module reports that
-    correction_pipeline fixed input fields for a tool.
-    Labels: [tool_name]. *)
-val metric_oas_correction_pipeline_fixes_total : string

@@ -46,7 +46,6 @@ type boot_meta_failure_cause =
   | Meta_read_error
   | Config_invalid
   | Sandbox_profile_required
-  | Goal_required
   | Materialization_failed
 (** Structured cause for the last boot/materialization failure.  Labels are
     rendered only at JSON/log boundaries; fleet recovery policy should pattern
@@ -78,8 +77,13 @@ type autoboot_exclusion_reason =
   | Paused
   | Declarative_autoboot_disabled
   | Autoboot_disabled
+  | Shutdown_admission_fence
 (** Closed reason why a configured keeper is intentionally absent from
-    {!bootable_keeper_names}. *)
+    {!bootable_keeper_names}. [Shutdown_admission_fence] is not derivable
+    from keeper config: the autoboot caller holds the boot-scan shutdown
+    inventory and stamps it for keepers whose admission a durable shutdown
+    operation still owns — previously those keepers were silently dropped
+    from both the boot set and the excluded list. *)
 
 val autoboot_exclusion_reason_to_string : autoboot_exclusion_reason -> string
 (** Stable JSON/log label for {!autoboot_exclusion_reason}. *)
@@ -113,13 +117,6 @@ val autoboot_exclusion_reason : Workspace.config -> string -> autoboot_exclusion
 val autoboot_excluded_keeper_reasons : Workspace.config -> autoboot_exclusion list
 (** Configured keepers skipped by autoboot with operator-facing reason labels. *)
 
-val auto_recoverable_paused_keeper_names : ?now:float -> Workspace.config -> string list
-(** Configured, autoboot-enabled keepers that are currently paused but whose
-    supervisor-owned auto-resume timer has elapsed.  These keepers remain
-    excluded from {!bootable_keeper_names} until the supervisor clears
-    [paused=false], but they are enough reason to start the supervisor sweep on
-    cold boot. *)
-
 val canonicalize_if_keeper : Workspace.config -> string -> string
 (** [canonicalize_if_keeper config name] returns [keeper-<n>-agent]
     when [name] (bare or already canonical) refers to a configured
@@ -143,12 +140,6 @@ val effective_declarative_runtime_id :
   Keeper_meta_contract.keeper_meta -> string
 (** Resolve the runtime id for a keeper meta given its profile
     defaults; falls back to the profile default when the meta omits one. *)
-
-val resynced_tool_access :
-  Keeper_types_profile.keeper_profile_defaults ->
-  Keeper_meta_contract.keeper_meta -> string list
-(** Re-derive the tool-access record after merging profile defaults so
-    the meta-level [tool_access] and per-tool overrides stay consistent. *)
 
 val ensure_keeper_meta :
   Workspace.config ->
@@ -178,19 +169,6 @@ val bootstrap_existing_keepers :
 (** Walk every bootable keeper and start/recover its keepalive fiber.
     Returns counts for the boot summary log line. *)
 
-val supervisor_sweeps : (string, Pulse.t) Hashtbl.t
-(** Per-keeper supervisor-sweep [Pulse] handle.  Mutated under
-    [supervisor_sweeps_mu]; readers use [with_sweeps_ro]. *)
-
-val supervisor_sweeps_mu : Eio.Mutex.t
-(** Lock guarding the [supervisor_sweeps] hashtable. *)
-
-val with_sweeps_ro : (unit -> 'a) -> 'a
-(** Run [f] with the sweeps lock held in read mode. *)
-
-val with_sweeps_rw : (unit -> 'a) -> 'a
-(** Run [f] with the sweeps lock held in write mode. *)
-
 val supervisor_sweep_running : string -> bool
 (** [true] when a supervisor sweep is currently registered for the
     keeper. *)
@@ -212,11 +190,6 @@ val supervisor_sweep_age_seconds : base_path:string -> float option
     [None] when no marker exists. *)
 
 (** {1 Keepalive bootstrap registry} *)
-
-val existing_keepalive_bootstrap_done : (string, unit) Hashtbl.t
-(** Set of keeper names whose keepalive fiber has already been
-    bootstrapped during this process lifetime; prevents duplicate
-    spawns on hot-reload. *)
 
 val has_boot_entries : Workspace.config -> bool
 (** [true] when at least one configured keeper is a bootstrap candidate,

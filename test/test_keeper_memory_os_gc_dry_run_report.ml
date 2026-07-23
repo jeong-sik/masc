@@ -6,7 +6,6 @@ module Report = Masc.Keeper_memory_os_gc_dry_run_report
 let fact_fixture ~now ~claim =
   { Types.claim
   ; category = Types.Fact
-  ; external_ref = None
   ; claim_kind = None
   ; source = { Types.trace_id = "trace-gc-dry-run"; turn = 1; tool_call_id = None }
   ; observed_by = []
@@ -15,6 +14,22 @@ let fact_fixture ~now ~claim =
   ; last_verified_at = Some now
   ; schema_version = Types.schema_version
   ; claim_id = None
+  }
+;;
+
+let episode_fixture ~now ~trace_id ~summary =
+  { Types.trace_id
+  ; generation = 0
+  ; episode_summary = summary
+  ; claims = []
+  ; open_items = []
+  ; constraints = []
+  ; preserved_tool_refs = []
+  ; source_turn_range = None
+  ; created_at = now
+  ; valid_until = None
+  ; terminal_marker = None
+  ; schema_version = Types.schema_version
   }
 ;;
 
@@ -47,6 +62,14 @@ let test_report_summarizes_dry_run_without_rewrite () =
       in
       List.iter (Memory_io.append_fact ~keeper_id:"alpha") [ live; expired ];
       Memory_io.append_fact ~keeper_id:"beta" (fact_fixture ~now ~claim:"beta fact");
+      Memory_io.append_episode
+        ~keeper_id:"alpha"
+        { (episode_fixture ~now ~trace_id:"trace-alpha-expired" ~summary:"alpha expired episode") with
+          Types.valid_until = Some (now -. 1.0)
+        };
+      Memory_io.append_episode
+        ~keeper_id:"alpha"
+        (episode_fixture ~now ~trace_id:"trace-alpha-live" ~summary:"alpha live episode");
       let report = Report.run_for_keepers_dir ~keepers_dir ~now () in
       Alcotest.(check int) "keeper count" 2 (List.length report.results);
       Alcotest.(check int) "total input" 3 report.total_input;
@@ -55,11 +78,17 @@ let test_report_summarizes_dry_run_without_rewrite () =
         "non-ephemeral expired is a migration candidate"
         1
         report.ttl_expired_non_ephemeral;
+      Alcotest.(check int) "episodes total" 2 report.episodes_total;
+      Alcotest.(check int) "episodes expired" 1 report.episodes_expired;
       Alcotest.(check int) "error count" 0 report.error_count;
       Alcotest.(check int)
         "alpha file unchanged by dry-run"
         2
         (List.length (Memory_io.read_facts_all ~keeper_id:"alpha"));
+      Alcotest.(check int)
+        "alpha episode files unchanged by dry-run"
+        2
+        (Array.length (Sys.readdir (Memory_io.episodes_dir ~keeper_id:"alpha")));
       match result_for "alpha" report with
       | Some (Report.Keeper_ok row) ->
         Alcotest.(check int) "alpha ttl expired" 1 row.ttl_expired;
@@ -71,7 +100,9 @@ let test_report_summarizes_dry_run_without_rewrite () =
           "alpha expired by category"
           [ "fact", 1 ]
           row.ttl_expired_by_category;
-        Alcotest.(check int) "alpha would write" 1 row.written
+        Alcotest.(check int) "alpha would write" 1 row.written;
+        Alcotest.(check int) "alpha episodes total" 2 row.episodes_total;
+        Alcotest.(check int) "alpha episodes expired" 1 row.episodes_expired
       | Some (Report.Keeper_error row) ->
         Alcotest.failf
           "unexpected alpha error: %s"
@@ -79,6 +110,7 @@ let test_report_summarizes_dry_run_without_rewrite () =
            | Report.Missing_fact_store { facts_path } ->
              Printf.sprintf "missing %s" facts_path
            | Report.Corrupt_fact_store { message }
+           | Report.Corrupt_episode_store { message }
            | Report.Fact_store_access_error { message } -> message
            | Report.Fact_store_locked { lock_path; _ } ->
              Printf.sprintf "locked %s" lock_path)
@@ -106,6 +138,7 @@ let test_explicit_missing_keeper_is_error () =
          | Report.Missing_fact_store { facts_path } ->
            Alcotest.(check string) "missing fact store path" expected_path facts_path
          | Report.Corrupt_fact_store _
+         | Report.Corrupt_episode_store _
          | Report.Fact_store_access_error _
          | Report.Fact_store_locked _ ->
            Alcotest.fail "expected structured missing fact store error");
@@ -137,10 +170,21 @@ let fake_gc_report ?(total_input = 1) ?(ttl_expired = 0) ?(written = 1) () =
   ; ttl_expired_ephemeral = 0
   ; ttl_expired_non_ephemeral = ttl_expired
   ; ttl_expired_by_category = (if ttl_expired > 0 then [ "fact", ttl_expired ] else [])
-  ; dedup_removed = 0
   ; written
   ; dry_run = true
   }
+;;
+
+let fake_episode_gc_report ?(episodes_total = 0) ?(episodes_expired = 0) () =
+  { GC.episodes_total
+  ; episodes_expired
+  ; episodes_deleted = 0
+  ; dry_run = true
+  }
+;;
+
+let noop_run_episode_gc_for_keepers_dir ~keepers_dir:_ ~dry_run:_ ~keeper_id:_ ~now:_ () =
+  fake_episode_gc_report ()
 ;;
 
 let seed_keeper ~now keeper_id =
@@ -161,6 +205,7 @@ let test_lock_timeout_is_per_keeper_error () =
         Report.For_testing.run_for_keepers_dir
           ~keepers_dir
           ~run_gc_for_keepers_dir
+          ~run_episode_gc_for_keepers_dir:noop_run_episode_gc_for_keepers_dir
           ~keeper_ids:[ "locked" ]
           ~now
           ()
@@ -187,6 +232,7 @@ let test_corrupt_store_is_per_keeper_error () =
         Report.For_testing.run_for_keepers_dir
           ~keepers_dir
           ~run_gc_for_keepers_dir
+          ~run_episode_gc_for_keepers_dir:noop_run_episode_gc_for_keepers_dir
           ~keeper_ids:[ "corrupt" ]
           ~now
           ()
@@ -198,6 +244,60 @@ let test_corrupt_store_is_per_keeper_error () =
       | Some (Report.Keeper_error _) -> Alcotest.fail "expected corrupt store error"
       | Some (Report.Keeper_ok _) -> Alcotest.fail "expected corrupt keeper error"
       | None -> Alcotest.fail "missing corrupt result"))
+;;
+
+let test_corrupt_episode_store_is_per_keeper_error () =
+  with_eio (fun () ->
+    with_temp_keepers_dir (fun keepers_dir ->
+      let now = 1_000.0 in
+      seed_keeper ~now "corrupt-episode";
+      let run_gc_for_keepers_dir ~keepers_dir:_ ~dry_run:_ ~keeper_id:_ ~now:_ () =
+        fake_gc_report ()
+      in
+      let run_episode_gc_for_keepers_dir ~keepers_dir:_ ~dry_run:_ ~keeper_id:_ ~now:_ () =
+        raise (GC.Episode_store_corrupt "bad episode")
+      in
+      let report =
+        Report.For_testing.run_for_keepers_dir
+          ~keepers_dir
+          ~run_gc_for_keepers_dir
+          ~run_episode_gc_for_keepers_dir
+          ~keeper_ids:[ "corrupt-episode" ]
+          ~now
+          ()
+      in
+      Alcotest.(check int) "one corrupt episode error" 1 report.error_count;
+      match result_for "corrupt-episode" report with
+      | Some (Report.Keeper_error { error = Report.Corrupt_episode_store { message }; _ }) ->
+        Alcotest.(check string) "message" "bad episode" message
+      | Some (Report.Keeper_error _) -> Alcotest.fail "expected corrupt episode store error"
+      | Some (Report.Keeper_ok _) -> Alcotest.fail "expected corrupt episode keeper error"
+      | None -> Alcotest.fail "missing corrupt episode result"))
+;;
+
+(* A keeper with an episode store but no [*.facts.jsonl] (e.g. every extracted
+   episode carried zero claims) must still be discovered and swept — the scan
+   unions fact-store ids and episode-store ids. *)
+let test_episode_only_keeper_is_scanned () =
+  with_eio (fun () ->
+    with_temp_keepers_dir (fun keepers_dir ->
+      let now = 1_000.0 in
+      Memory_io.append_episode
+        ~keeper_id:"gamma"
+        { (episode_fixture ~now ~trace_id:"trace-gamma-expired" ~summary:"gamma expired episode") with
+          Types.valid_until = Some (now -. 1.0)
+        };
+      let report = Report.run_for_keepers_dir ~keepers_dir ~now () in
+      Alcotest.(check int) "episode-only keeper discovered" 1 (List.length report.results);
+      Alcotest.(check int) "error count" 0 report.error_count;
+      Alcotest.(check int) "episodes total" 1 report.episodes_total;
+      Alcotest.(check int) "episodes expired" 1 report.episodes_expired;
+      match result_for "gamma" report with
+      | Some (Report.Keeper_ok row) ->
+        Alcotest.(check int) "gamma has no fact store rows" 0 row.total_input;
+        Alcotest.(check int) "gamma episodes expired" 1 row.episodes_expired
+      | Some (Report.Keeper_error _) -> Alcotest.fail "unexpected gamma error"
+      | None -> Alcotest.fail "missing gamma result"))
 ;;
 
 let test_mixed_results_keep_ok_totals_and_errors () =
@@ -214,6 +314,7 @@ let test_mixed_results_keep_ok_totals_and_errors () =
         Report.For_testing.run_for_keepers_dir
           ~keepers_dir
           ~run_gc_for_keepers_dir
+          ~run_episode_gc_for_keepers_dir:noop_run_episode_gc_for_keepers_dir
           ~keeper_ids:[ "alpha"; "broken" ]
           ~now
           ()
@@ -227,8 +328,7 @@ let test_mixed_results_keep_ok_totals_and_errors () =
 (* The two expiry corners the External_state coverage in test_keeper_memory_os
    does not pin: the boundary equality ([ts >= now] is current, so [now > ts] is
    expired — explicit [valid_until] behavior is unchanged by the SSOT switch in
-   #23426), and explicit [valid_until] taking precedence over the legacy
-   [External_state] first_seen horizon in [fact_effective_valid_until]. *)
+   #23426), and claim kind/first_seen never creating an implicit horizon. *)
 let test_ttl_expired_matches_explicit_horizon_boundary () =
   let now = 1_000_000.0 in
   let base = fact_fixture ~now ~claim:"horizon boundary fixture" in
@@ -241,14 +341,13 @@ let test_ttl_expired_matches_explicit_horizon_boundary () =
     false
     (GC.ttl_expired ~now { base with Types.valid_until = Some now });
   Alcotest.(check bool)
-    "explicit valid_until overrides the legacy External_state horizon"
+    "explicit valid_until is the only horizon"
     false
     (GC.ttl_expired
        ~now
-       { base with
-         Types.claim_kind = Some Types.External_state
-       ; Types.first_seen = now -. Types.external_state_ttl_seconds -. 1.0
-       ; Types.valid_until = Some (now +. 60.0)
+       { base with Types.claim_kind = Some Types.External_state
+       ; first_seen = now -. 1_000_000.0
+       ; valid_until = Some (now +. 60.0)
        })
 ;;
 
@@ -281,6 +380,14 @@ let () =
             "corrupt store is per-keeper error"
             `Quick
             test_corrupt_store_is_per_keeper_error
+        ; Alcotest.test_case
+            "corrupt episode store is per-keeper error"
+            `Quick
+            test_corrupt_episode_store_is_per_keeper_error
+        ; Alcotest.test_case
+            "episode-only keeper is scanned"
+            `Quick
+            test_episode_only_keeper_is_scanned
         ; Alcotest.test_case
             "mixed results keep ok totals and errors"
             `Quick

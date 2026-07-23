@@ -328,49 +328,6 @@ function ingestRuntimeProjection(
   const agentName = agentNameFromEnvelope(event)
   recordEvidenceRefsForEvent(event)
   switch (event.type) {
-    case 'oas:masc:autonomy:agent_selected':
-      pushOasAgentEvent({
-        type: 'selected',
-        agent_name: agentName,
-        actor_kind: 'agent',
-        trigger: asString(payload.trigger),
-        thompson_score: asNumber(payload.thompson_score),
-        final_score: asNumber(payload.final_score),
-        event_type: runtimeEventType(event),
-        correlation_id: asString(event.correlation_id),
-        run_id: asString(event.run_id),
-        event_key: runtimeEventKey(event),
-        timestamp: asNumber(payload.timestamp) ?? eventUnixSeconds(event),
-      })
-      return
-    case 'oas:masc:autonomy:agent_decision':
-      pushOasAgentEvent({
-        type: 'decision',
-        agent_name: agentName,
-        actor_kind: 'agent',
-        action: asString(payload.action),
-        trigger_reason: asString(payload.trigger_reason),
-        event_type: runtimeEventType(event),
-        correlation_id: asString(event.correlation_id),
-        run_id: asString(event.run_id),
-        event_key: runtimeEventKey(event),
-        timestamp: asNumber(payload.timestamp) ?? eventUnixSeconds(event),
-      })
-      return
-    case 'oas:masc:autonomy:agent_action_executed':
-      pushOasAgentEvent({
-        type: 'action_executed',
-        agent_name: agentName,
-        actor_kind: 'agent',
-        action: asString(payload.action),
-        success: typeof payload.success === 'boolean' ? payload.success : undefined,
-        event_type: runtimeEventType(event),
-        correlation_id: asString(event.correlation_id),
-        run_id: asString(event.run_id),
-        event_key: runtimeEventKey(event),
-        timestamp: asNumber(payload.timestamp) ?? eventUnixSeconds(event),
-      })
-      return
     case 'oas:masc:keeper:snapshot':
       updateOasKeeperSnapshot({
         keeper_name: asString(payload.keeper_name) ?? '',

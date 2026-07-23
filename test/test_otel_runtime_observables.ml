@@ -92,8 +92,12 @@ let test_fd_samples_present () =
   with_temp_masc_root (fun root ->
     Obs.For_testing.reset_store_cache ();
     let samples = Obs.For_testing.samples ~masc_root:root () in
-    check bool "fd pressure gauge present" true
-      (Option.is_some (find "masc_fd_pressure_active" samples)))
+    check bool "active-operation gauge present" true
+      (Option.is_some (find "masc_fd_active_operations" samples));
+    check bool "typed resource-error counter present" true
+      (Option.is_some (find "masc_fd_resource_errors_total" samples));
+    check bool "legacy pressure gauge absent" true
+      (Option.is_none (find "masc_fd_pressure_active" samples)))
 
 let () =
   run "otel_runtime_observables"

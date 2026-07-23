@@ -40,7 +40,6 @@
   (re_export masc.lockfree_atomic)
   (re_export masc.worker_execution_backend)
   (re_export masc.worker_execution_spec)
-  (re_export masc.worker_runtime_config)
   (re_export masc.otel_dispatch_hook)
   (re_export masc.otel_genai)
   (re_export masc.otel_metrics)
@@ -61,15 +60,6 @@
   (re_export masc.masc_board)
   (re_export masc.board_handlers)
   (re_export masc.board_tool_adapter)
-  ;; PR #14267 atomic flip moved Cdal_proof / Proof_store / Risk_class /
-  ;; Execution_mode / Risk_contract from agent_sdk into this sub-library;
-  ;; tests need it re-exported so [Masc_cdal_runtime.*] resolves.
-  (re_export masc.cdal_runtime)
-  ;; RFC-0056 Phase 0 — contract Phase 1A evaluator extracted to lib/cdal/.
-  ;; Hosts Cdal_types + Adversarial_eval + Labeling. Re-exported so
-  ;; test_cdal_types / test_labeling / test_adversarial_eval and other
-  ;; consumers keep resolving these unprefixed module names.
-  (re_export masc.cdal)
   ;; RFC-0056 Phase 1A — Trajectory leaf module sub-library.
   ;; Tests previously wrote `Masc.Trajectory.X` (wrapped pattern);
   ;; after this re-export they use bare `Trajectory.X` per the
@@ -87,8 +77,6 @@
   ;; Re-exported so test_dashboard_tla_specs keeps resolving the module
   ;; after the carve (test rewrites Masc.Dashboard_tla_specs -> bare per G5).
   (re_export masc.dashboard_tla_specs)
-  ;; RFC-0056 Phase 1G — Chronicle_event leaf module sub-library.
-  (re_export masc.chronicle_event)
   ;; RFC-0056 Phase 1H — Tool_call_quality_benchmark family sub-library.
   (re_export masc.tool_call_quality_benchmark)
   (re_export masc.keeper_runtime)
@@ -105,9 +93,8 @@
   (re_export masc.keeper_types)
   (re_export masc.keeper_types_profile_sandbox)
   (re_export masc.keeper_usage_trust)
-  (re_export masc.keeper_event_bus)
+  (re_export masc.event_bus_slots)
   (re_export masc.keeper_toml)
-  (re_export masc.keeper_failure_policy)
   ;; Model inference metrics + runtime provider label leaves.
   (re_export masc.runtime_provider_labels)
   (re_export masc.model_inference_metrics)
@@ -116,13 +103,13 @@
   (re_export masc.config)
   (re_export masc.fs_compat)
   (re_export masc.gate)
-  (re_export masc.command_descriptor)
   (re_export masc.agent_observation)
   (re_export masc.ide)
   (re_export masc.masc_backend)
   (re_export masc.masc_compression)
   (re_export masc.mcp_session)
   (re_export masc.mcp_transport_protocol)
+  (re_export masc.tool_invocation_ref)
   (re_export masc.multimodal)
   (re_export masc.prompt_registry)
   (re_export masc.pulse)
@@ -132,7 +119,6 @@
   (re_export masc.operator)
   (re_export masc.server)
   (re_export masc.runtime)
-  (re_export masc.masc_event_bus)
   (re_export masc.provider_tool_support)
   (re_export masc.pool_metrics)
   (re_export masc.auth)
@@ -140,6 +126,7 @@
   (re_export masc.response)
   (re_export masc.shared_audit)
   (re_export masc.tool_schemas)
+  (re_export masc.tool_schemas_specs)
   (re_export masc.tool_catalog_surfaces)
   (re_export masc.config_dir_resolver)
   ;; RFC-0163 Phase D1 — Runtime_name leaf extracted to lib/runtime_id/.
@@ -162,13 +149,10 @@
   ;; Pure Turn FSM extracted to lib/turn_fsm/ (masc_turn). Re-export so test
   ;; code using bare Turn_fsm.X resolves after the FSM carve.
   (re_export masc_turn)
-  ;; Agent token-ledger extracted to lib/agent_economy/ (masc_economy).
-  ;; Re-export so test code using bare Economy.X resolves after the carve.
-  (re_export masc_economy)
   ;; Tool dispatch substrate extracted to lib/tool/ (masc_tool_dispatch, PR-S3).
   ;; Re-export so test code using bare Tool_dispatch.X / Tool_catalog.X /
-  ;; Tool_registry.X / Tool_name.X / Tool_token.X / Dispatch_outcome.X /
-  ;; Tool_catalog_inference.X resolves after the carve.
+  ;; Tool_registry.X / Tool_name.X / Tool_token.X / Dispatch_outcome.X resolves
+  ;; after the carve.
   (re_export masc.masc_tool_dispatch)
   ;; Tool surface leaf extracted to lib/tool_surface/ (masc_tool_surface, RFC-0056
   ;; Phase 2 / LANE 6). Re-export so test code using bare Tool_spec.X /

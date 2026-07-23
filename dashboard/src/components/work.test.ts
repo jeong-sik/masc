@@ -62,7 +62,7 @@ import { goalTreeData } from '../goal-tree-state'
 import { selectedTask } from './goals/task-detail-selection'
 import { showGoalCreate } from './goals/goal-create-state'
 import { Work } from './work'
-import type { GoalTreeNode, GoalTreeTask, GoalTreeSummary, GoalVerificationRequest } from '../types'
+import type { GoalTreeNode, GoalTreeTask, GoalTreeSummary } from '../types'
 
 const GOAL_FIXTURE_OK_COLOR = '#4ade80'
 
@@ -70,17 +70,10 @@ function emptyGoalTreeSummary(overrides: Partial<GoalTreeSummary> = {}): GoalTre
   return {
     total_goals: 0,
     active_goals: 0,
-    on_track_goals: 0,
-    done_goals: 0,
-    paused_goals: 0,
-    at_risk_goals: 0,
-    blocked_goals: 0,
+    phase_counts: {},
     total_tasks: 0,
     done_tasks: 0,
     pending_approvals: 0,
-    infra_risk_count: 0,
-    overall_convergence: 0,
-    overall_convergence_pct: 0,
     ...overrides,
   }
 }
@@ -107,8 +100,6 @@ function goalTreeNode(overrides: Partial<GoalTreeNode> = {}): GoalTreeNode {
   return {
     id: 'G-1',
     title: 'Goal One',
-    status: 'active',
-    status_color: GOAL_FIXTURE_OK_COLOR,
     phase,
     phase_color: GOAL_FIXTURE_OK_COLOR,
     goal_fsm: {
@@ -116,20 +107,12 @@ function goalTreeNode(overrides: Partial<GoalTreeNode> = {}): GoalTreeNode {
       source: 'goal.phase',
       next_actions: [],
       activity_observation: 'goal_metadata',
-      stagnation_status: 'recent',
     },
-    health: 'on_track',
-    health_color: GOAL_FIXTURE_OK_COLOR,
-    badges: [],
-    status_reason: '',
     priority: 1,
     metric: null,
     target_value: null,
-    require_completion_approval: false,
     due_date: null,
     parent_goal_id: null,
-    convergence: 0,
-    convergence_pct: 0,
     attainment: {
       state: 'unmeasured',
       basis: 'unmeasured',
@@ -148,49 +131,17 @@ function goalTreeNode(overrides: Partial<GoalTreeNode> = {}): GoalTreeNode {
     tasks: [],
     task_count: 0,
     task_done_count: 0,
-    verification_summary: {
-      effective_policy: null,
-      open_request: null,
-      latest_request: null,
-      approve_count: 0,
-      reject_count: 0,
-      remaining_possible: 0,
-    },
-    pending_verification_count: 0,
     timeline_events: [],
     children: [],
     child_count: 0,
     last_activity_at: '2026-01-02',
     stagnation_seconds: 0,
     activity_observation: 'goal_metadata',
-    stagnation_status: 'recent',
     linked_keeper_names: [],
     pending_approval_count: 0,
-    infra_risk_count: 0,
     linkage_source: 'explicit',
-    linkage_warning_count: 0,
-    blocking_source: 'none',
-    blocking_reason: '',
     created_at: '2026-01-01',
     updated_at: '2026-01-02',
-    ...overrides,
-  }
-}
-
-function goalVerificationRequest(overrides: Partial<GoalVerificationRequest> = {}): GoalVerificationRequest {
-  return {
-    id: 'VR-1',
-    goal_id: 'G-1',
-    target_phase: 'awaiting_approval',
-    requested_by: { id: 'operator' },
-    policy_snapshot: {
-      principals: [{ id: 'keeper-reviewer' }, { id: 'operator' }],
-      eligible_principals: [{ id: 'keeper-reviewer' }, { id: 'operator' }],
-      required_verdicts: 2,
-    },
-    votes: [],
-    status: 'open',
-    created_at: '2026-01-03',
     ...overrides,
   }
 }
@@ -287,8 +238,8 @@ describe('Work', () => {
 
     it('renders the reference 5 KPI counts from goals and tasks', () => {
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
-        { id: 'G-2', title: 'Goal Two', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-2', title: 'Goal Two', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         { id: 'J-1', title: 'Job one', goal_id: 'G-1', status: 'done' },
@@ -313,7 +264,7 @@ describe('Work', () => {
 
     it('avoids repeating Task scope labels across the KPI row and kanban columns', () => {
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         { id: 'T-todo', title: 'Todo item', goal_id: 'G-1', status: 'todo' },
@@ -353,7 +304,7 @@ describe('Work', () => {
 
     it('renders the new-goal button as enabled and opens the form on click', () => {
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
 
       render(html`<${Work} />`)
@@ -374,7 +325,7 @@ describe('Work', () => {
 
     it('renders a collapsed goal card per goal and expands on click', () => {
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         { id: 'J-1', title: 'Job one', goal_id: 'G-1', status: 'in_progress' },
@@ -394,7 +345,7 @@ describe('Work', () => {
 
     it('renders all goals in a flat list regardless of any legacy horizon field', () => {
       goals.value = [
-        { id: 'G-X', title: 'Goal visible in flat list', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-X', title: 'Goal visible in flat list', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = []
 
@@ -406,7 +357,7 @@ describe('Work', () => {
 
     it('renders job rows with state, id, title, and blocker note', () => {
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         { id: 'J-1', title: 'Blocked job', goal_id: 'G-1', status: 'cancelled', handoff_context: { summary: '', reason: 'dependency missing' } },
@@ -431,7 +382,7 @@ describe('Work', () => {
 
     it('navigates to keeper workspace when keeper assignment is clicked', () => {
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         { id: 'J-1', title: 'Assigned job', goal_id: 'G-1', status: 'in_progress', assignee: 'sangsu' },
@@ -453,7 +404,7 @@ describe('Work', () => {
 
     it('surfaces claimable backlog tasks in a dedicated backlog section', () => {
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         { id: 'J-1', title: 'Linked job', goal_id: 'G-1', status: 'todo' },
@@ -510,7 +461,7 @@ describe('Work', () => {
 
     it('expands inline task detail for gate evidence and handoff context', () => {
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         {
@@ -549,7 +500,7 @@ describe('Work', () => {
 
     it('expands inline task detail for execution links and contract evidence without synthetic lineage', () => {
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         {
@@ -601,7 +552,7 @@ describe('Work', () => {
 
     it('renders all defined gate evaluations including verify_to_review', () => {
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         {
@@ -629,10 +580,10 @@ describe('Work', () => {
       expect(detail?.textContent).toContain('verify check')
     })
 
-    it('maps known goal status IDs to Korean labels', () => {
+    it('maps known goal phase IDs to Korean labels', () => {
       goals.value = [
-        { id: 'G-1', title: 'Active goal', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
-        { id: 'G-2', title: 'Completed goal', priority: 3, status: 'completed', phase: 'done', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Active goal', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-2', title: 'Completed goal', priority: 3, phase: 'completed', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = []
 
@@ -643,14 +594,12 @@ describe('Work', () => {
       expect(cards[1]?.textContent).toContain('완료')
     })
 
-    // Pixel-match: .wk-gstatus carries a semantic status variant class so the
-    // prototype's ok/warn/bad/volt color rules (work-v2.css) apply.
-    it('applies the semantic status variant class to the goal status chip', () => {
+    it('styles only explicit stored goal phases', () => {
       goals.value = [
-        { id: 'G-ok', title: 'Active', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
-        { id: 'G-warn', title: 'At risk', priority: 2, status: 'at_risk', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
-        { id: 'G-bad', title: 'Blocked', priority: 2, status: 'blocked', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
-        { id: 'G-volt', title: 'Verifying', priority: 2, status: 'verifying', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-ok', title: 'Active', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-done', title: 'Completed', priority: 2, phase: 'completed', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-warn', title: 'Paused', priority: 2, phase: 'paused', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-bad', title: 'Cancelled', priority: 2, phase: 'dropped', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = []
 
@@ -658,63 +607,24 @@ describe('Work', () => {
 
       const chipFor = (id: string) =>
         container.querySelector(`[data-goal-id="${id}"] .wk-gstatus`)
-      expect(chipFor('G-ok')?.classList.contains('ok')).toBe(true)
+      expect(chipFor('G-ok')?.classList.contains('neutral')).toBe(true)
+      expect(chipFor('G-done')?.classList.contains('ok')).toBe(true)
       expect(chipFor('G-warn')?.classList.contains('warn')).toBe(true)
       expect(chipFor('G-bad')?.classList.contains('bad')).toBe(true)
-      expect(chipFor('G-volt')?.classList.contains('volt')).toBe(true)
     })
 
-    it('falls back to the ok status variant for unknown goal statuses', () => {
+    it('keeps unknown goal phases neutral', () => {
       goals.value = [
-        { id: 'G-x', title: 'Mystery', priority: 2, status: 'something_new', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-x', title: 'Mystery', priority: 2, phase: 'something_new', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = []
 
       const { container } = render(html`<${Work} />`)
 
       const chip = container.querySelector('[data-goal-id="G-x"] .wk-gstatus')
-      expect(chip?.classList.contains('ok')).toBe(true)
-      // unknown status text is passed through verbatim
+      expect(chip?.classList.contains('neutral')).toBe(true)
+      // unknown phase text is passed through verbatim
       expect(chip?.textContent).toContain('something_new')
-    })
-
-    // Pixel-match: the completion-approval pill (.wk-approval, volt theme) and
-    // verifier chips (.wk-vchip, mono) render when a goal requires approval.
-    it('renders the completion-approval pill and verifier chips', () => {
-      goals.value = [
-        {
-          id: 'G-1',
-          title: 'Goal needing approval',
-          priority: 9,
-          // 'active' status does not auto-expand on mount (work.ts:403 only
-          // auto-expands priority===1 / at_risk / verifying / blocked). A
-          // 'verifying' goal would start open, so the click below would CLOSE
-          // it and drop the .wk-vchip chips. approval pill is status-independent
-          // (driven by require_completion_approval), so it still renders.
-          status: 'active',
-          phase: 'executing',
-          require_completion_approval: true,
-          verifier_policy: {
-            inherit_mode: 'replace',
-            principals: [{ id: 'operator' }, { id: 'sangsu' }],
-          },
-          created_at: '2026-01-01',
-          updated_at: '2026-01-01',
-        },
-      ]
-      tasks.value = []
-
-      const { container } = render(html`<${Work} />`)
-
-      const approval = container.querySelector('[data-goal-id="G-1"] .wk-approval')
-      expect(approval).toBeTruthy()
-      expect(approval?.textContent).toContain('완료 승인')
-
-      // open the card to expose the verifier policy chips
-      fireEvent.click(container.querySelector('[data-goal-id="G-1"] .wk-goal-h')!)
-      const chips = Array.from(container.querySelectorAll('[data-goal-id="G-1"] .wk-vchip'))
-      expect(chips.map(c => c.textContent)).toEqual(['operator', 'sangsu'])
-      expect(chips.every(c => c.classList.contains('mono'))).toBe(true)
     })
 
     it('does not render a task dossier sidebar for route-selected tasks', () => {
@@ -724,7 +634,7 @@ describe('Work', () => {
         postId: null,
       }
       goals.value = [
-        { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
       ]
       tasks.value = [
         { id: 'J-1', title: 'Selectable job', goal_id: 'G-1', status: 'todo' },
@@ -808,7 +718,7 @@ describe('Work', () => {
 
       it('renders the aside panel alongside the main goal list', () => {
         goals.value = [
-          { id: 'G-1', title: 'Active Goal', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Active Goal', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = []
 
@@ -822,7 +732,7 @@ describe('Work', () => {
 
       it('shows calm empty state when no flagged goals, no todos, and no recent tasks', () => {
         goals.value = [
-          { id: 'G-1', title: 'Normal Goal', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Normal Goal', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = []
 
@@ -838,12 +748,11 @@ describe('Work', () => {
         expect(aside.querySelector('[data-testid="wka-recent-calm"]')?.textContent).toContain('완료된 task 없음')
       })
 
-      it('flags goals whose phase is not executing (blocked, paused, awaiting_verification, awaiting_approval)', () => {
+      it('flags blocked and paused goals without synthetic verification phases', () => {
         goals.value = [
-          { id: 'G-ok', title: 'Executing Goal', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
-          { id: 'G-bl', title: 'Blocked Goal', priority: 2, status: 'active', phase: 'blocked', created_at: '2026-01-01', updated_at: '2026-01-01' },
-          { id: 'G-pa', title: 'Paused Goal', priority: 3, status: 'active', phase: 'paused', created_at: '2026-01-01', updated_at: '2026-01-01' },
-          { id: 'G-vf', title: 'Verify Goal', priority: 4, status: 'active', phase: 'awaiting_verification', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-ok', title: 'Executing Goal', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-bl', title: 'Blocked Goal', priority: 2, phase: 'blocked', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-pa', title: 'Paused Goal', priority: 3, phase: 'paused', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = []
 
@@ -851,60 +760,19 @@ describe('Work', () => {
 
         const aside = screen.getByTestId('work-aside')
         const flaggedItems = aside.querySelectorAll('[data-testid="wka-flagged-item"]')
-        // G-ok (executing) must NOT appear; the other 3 must appear
-        expect(flaggedItems.length).toBe(3)
+        // G-ok (executing) must NOT appear; blocked and paused do.
+        expect(flaggedItems.length).toBe(2)
         const titles = Array.from(flaggedItems).map(el => el.textContent ?? '')
         expect(titles.some(t => t.includes('Blocked Goal'))).toBe(true)
         expect(titles.some(t => t.includes('Paused Goal'))).toBe(true)
-        expect(titles.some(t => t.includes('Verify Goal'))).toBe(true)
         expect(titles.some(t => t.includes('Executing Goal'))).toBe(false)
         // No calm state should be shown
         expect(aside.querySelector('[data-testid="wka-flagged-calm"]')).toBeNull()
       })
 
-      it('surfaces approval items for goals with require_completion_approval=true and phase=awaiting_approval', () => {
-        goals.value = [
-          {
-            id: 'G-ap',
-            title: 'Approval Goal',
-            priority: 1,
-            status: 'active',
-            phase: 'awaiting_approval',
-            require_completion_approval: true,
-            verifier_policy: {
-              inherit_mode: 'replace' as const,
-              principals: [{ id: 'lead-keeper' }],
-            },
-            created_at: '2026-01-01',
-            updated_at: '2026-01-01',
-          },
-          // require_completion_approval=true but NOT awaiting_approval phase → no approval item
-          {
-            id: 'G-ex',
-            title: 'Executing With Approval Policy',
-            priority: 2,
-            status: 'active',
-            phase: 'executing',
-            require_completion_approval: true,
-            created_at: '2026-01-01',
-            updated_at: '2026-01-01',
-          },
-        ]
-        tasks.value = []
-
-        render(html`<${Work} />`)
-
-        const aside = screen.getByTestId('work-aside')
-        const approvalItems = aside.querySelectorAll('[data-testid="wka-approval-item"]')
-        expect(approvalItems.length).toBe(1)
-        expect(approvalItems[0]?.classList.contains('approve')).toBe(true)
-        expect(approvalItems[0]?.textContent).toContain('Approval Goal')
-        expect(approvalItems[0]?.textContent).toContain('lead-keeper')
-      })
-
       it('surfaces verify tasks (awaiting_verification status) with unsatisfied gate count', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = [
           {
@@ -932,7 +800,7 @@ describe('Work', () => {
 
       it('surfaces tasks with a blocker note (cancelled with handoff_context.reason)', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = [
           {
@@ -956,7 +824,7 @@ describe('Work', () => {
 
       it('surfaces claimable backlog tasks as a single aggregate claim button', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = [
           { id: 'J-1', title: 'Unassigned A', goal_id: 'G-1', status: 'todo' },
@@ -975,7 +843,7 @@ describe('Work', () => {
 
       it('surfaces done tasks in the 최근 한 일 section', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = [
           { id: 'J-done1', title: 'Finished Task', goal_id: 'G-1', status: 'done' },
@@ -996,7 +864,7 @@ describe('Work', () => {
 
       it('toggles to collapsed rail on collapse button click and back on railbtn click', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = []
 
@@ -1032,7 +900,7 @@ describe('Work', () => {
         // Regression guard: goals in `executing` phase must never appear as flagged,
         // even if their title/status string contains substrings like 'blocked'.
         goals.value = [
-          { id: 'G-tricky', title: 'Not blocked — just named oddly', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-tricky', title: 'Not blocked — just named oddly', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = []
 
@@ -1070,7 +938,7 @@ describe('Work', () => {
 
       it('switches to kanban board on clicking the 칸반 button', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = [
           { id: 'J-1', title: 'Todo task', goal_id: 'G-1', status: 'todo' },
@@ -1124,7 +992,7 @@ describe('Work', () => {
 
       it('switches back to list view on clicking the 리스트 button', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = []
 
@@ -1142,7 +1010,7 @@ describe('Work', () => {
 
       it('places tasks in the correct column by status using typed KANBAN_COLUMNS (no string-match classification)', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         // One task per non-cancelled status
         tasks.value = [
@@ -1172,7 +1040,7 @@ describe('Work', () => {
 
       it('renders an owning-goal jump button on kanban cards that returns to the list view', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = [
           { id: 'J-1', title: 'Todo task', goal_id: 'G-1', status: 'todo' },
@@ -1195,8 +1063,8 @@ describe('Work', () => {
 
       it('includes recursive goal tree tasks in KPIs and kanban, normalizing completed to done', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
-          { id: 'G-child', title: 'Child Goal', priority: 2, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-child', title: 'Child Goal', priority: 2, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = []
         goalTreeData.value = {
@@ -1236,7 +1104,7 @@ describe('Work', () => {
 
       it('keeps unscoped execution tasks visible in kanban instead of requiring a goal_id', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         goalTreeData.value = {
           tree: [
@@ -1265,7 +1133,7 @@ describe('Work', () => {
 
       it('uses Goal Store fields as nullable fallback when merging execution tasks', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         goalTreeData.value = {
           tree: [
@@ -1295,7 +1163,7 @@ describe('Work', () => {
 
       it('shows task titles on kanban cards and hides the backlog strip in kanban view', () => {
         goals.value = [
-          { id: 'G-1', title: 'Target Goal', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Target Goal', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = [
           { id: 'J-1', title: 'Some task', goal_id: 'G-1', status: 'in_progress', assignee: 'keeper-a' },
@@ -1317,7 +1185,7 @@ describe('Work', () => {
 
       it('opens the shared task detail overlay when a kanban card is clicked', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = [
           { id: 'T-todo', title: 'Todo item', goal_id: 'G-1', status: 'todo' },
@@ -1383,9 +1251,8 @@ describe('Work', () => {
       })
 
       it('renders Goal Store projection dossier evidence on matching goal cards', () => {
-        const openRequest = goalVerificationRequest()
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 5, status: 'active', phase: 'awaiting_approval', created_at: '2026-01-01', updated_at: '2026-01-04' },
+          { id: 'G-1', title: 'Goal One', priority: 5, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-04' },
         ]
         tasks.value = []
         goalTreeData.value = {
@@ -1394,27 +1261,15 @@ describe('Work', () => {
               id: 'G-1',
               title: 'Goal One',
               priority: 5,
-              phase: 'awaiting_approval',
+              phase: 'executing',
               goal_fsm: {
-                state: 'awaiting_approval',
+                state: 'executing',
                 source: 'goal.phase',
-                next_actions: ['request operator approval'],
-                activity_observation: 'approval',
-                stagnation_status: 'stalled',
+                next_actions: ['request completion'],
+                activity_observation: 'task',
               },
-              verification_summary: {
-                effective_policy: openRequest.policy_snapshot,
-                open_request: openRequest,
-                latest_request: null,
-                approve_count: 1,
-                reject_count: 0,
-                remaining_possible: 1,
-              },
-              effective_verifier_policy: openRequest.policy_snapshot,
-              active_verification_request: openRequest,
-              pending_verification_count: 1,
               completion_summary: {
-                state: 'awaiting_approval',
+                state: 'in_progress',
                 pct: 75,
                 pct_source: 'goal_store',
                 attainment_state: 'in_progress',
@@ -1426,24 +1281,14 @@ describe('Work', () => {
                 is_complete: false,
                 is_terminal: false,
                 ready_to_request_completion: false,
-                gate: 'approval',
-                requires_verifier: true,
-                requires_completion_approval: true,
-                active_verification_request: true,
-                blocking_source: 'approval',
-                blocking_reason: 'awaiting human approval',
               },
               timeline_events: [{ kind: 'turn' }],
               last_activity_at: '2026-01-04T10:00:00Z',
               stagnation_seconds: 3600,
               linked_keeper_names: ['sangsu'],
               pending_approval_count: 2,
-              infra_risk_count: 1,
-              blocking_source: 'approval',
-              blocking_reason: 'awaiting human approval',
               latest_keeper_ref: 'sangsu',
               latest_turn_ref: 42,
-              stalled_since: '2026-01-04T09:00:00Z',
             }),
           ],
           summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1 }),
@@ -1456,22 +1301,15 @@ describe('Work', () => {
 
         const dossier = within(goalCard).getByTestId('goal-dossier')
         expect(dossier).toHaveAttribute('data-goal-dossier', 'G-1')
-        expect(dossier).toHaveAttribute('data-goal-dossier-fsm-state', 'awaiting_approval')
-        expect(dossier).toHaveAttribute('data-goal-dossier-verification', 'open_request')
-        expect(dossier).toHaveAttribute('data-goal-dossier-blocking-source', 'approval')
+        expect(dossier).toHaveAttribute('data-goal-dossier-fsm-state', 'executing')
         expect(dossier).toHaveAttribute('data-goal-dossier-timeline-count', '1')
-        expect(dossier.textContent).toContain('state awaiting_approval')
-        expect(dossier.textContent).toContain('request operator approval')
-        expect(dossier.textContent).toContain('open_request VR-1')
-        expect(dossier.textContent).toContain('approve 1')
-        expect(dossier.textContent).toContain('remaining 1')
-        expect(dossier.textContent).toContain('state awaiting_approval')
-        expect(dossier.textContent).toContain('gate approval')
+        expect(dossier.textContent).toContain('state executing')
+        expect(dossier.textContent).toContain('request completion')
+        expect(dossier.textContent).toContain('state in_progress')
         expect(dossier.textContent).toContain('tasks 3/4')
         expect(dossier.textContent).toContain('keeper sangsu')
         expect(dossier.textContent).toContain('turn 42')
-        expect(dossier.textContent).toContain('infra risk 1')
-        expect(dossier.textContent).toContain('awaiting human approval')
+        expect(dossier.textContent).toContain('approvals 2')
       })
 
       it('renders tree-only Goal Store goals in the list without an execution goal mirror', () => {
@@ -1483,19 +1321,14 @@ describe('Work', () => {
               id: 'G-tree',
               title: 'Tree Only Goal',
               priority: 4,
-              status: 'active',
               phase: 'blocked',
               goal_fsm: {
                 state: 'blocked',
                 source: 'goal.phase',
                 next_actions: ['unblock linked task'],
                 activity_observation: 'task',
-                stagnation_status: 'stalled',
               },
               tasks: [goalTreeTask({ id: 'T-tree', goal_id: 'G-tree', status: 'todo' })],
-              blocking_source: 'task_fsm',
-              blocking_reason: 'linked task blocked',
-              stalled_since: '2026-01-05T09:00:00Z',
             }),
           ],
           summary: emptyGoalTreeSummary({ total_goals: 1, active_goals: 1, total_tasks: 1 }),
@@ -1510,15 +1343,13 @@ describe('Work', () => {
 
         const dossier = within(goalCard).getByTestId('goal-dossier')
         expect(dossier).toHaveAttribute('data-goal-dossier-fsm-state', 'blocked')
-        expect(dossier).toHaveAttribute('data-goal-dossier-blocking-source', 'task_fsm')
         expect(dossier.textContent).toContain('unblock linked task')
-        expect(dossier.textContent).toContain('linked task blocked')
         expect(screen.getByTestId('work-backlog').textContent).toContain('Tree Only Goal')
       })
 
       it('preserves blocked and unknown Goal Store task statuses instead of remapping them', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         tasks.value = []
         goalTreeData.value = {
@@ -1546,7 +1377,7 @@ describe('Work', () => {
 
       it('falls back to Goal Store fields when execution fields are empty strings', () => {
         goals.value = [
-          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+          { id: 'G-1', title: 'Goal One', priority: 1, phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
         ]
         goalTreeData.value = {
           tree: [

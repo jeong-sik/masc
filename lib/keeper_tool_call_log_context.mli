@@ -26,7 +26,6 @@ type turn_context =
   ; sandbox_root : string option
   ; allowed_paths : string list option
   ; network_mode : string option
-  ; approval_mode : string option
   ; runtime_profile : string option
   }
 
@@ -55,7 +54,6 @@ val set_turn_context :
   ?sandbox_root:string ->
   ?allowed_paths:string list ->
   ?network_mode:string ->
-  ?approval_mode:string ->
   ?runtime_profile:string ->
   unit ->
   unit
@@ -79,7 +77,6 @@ val get_turn_context :
   * int option
   * string option
   * string list option
-  * string option
   * string option
   * string option
 

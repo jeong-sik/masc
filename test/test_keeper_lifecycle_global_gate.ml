@@ -29,8 +29,6 @@ let contains haystack needle =
   nl = 0 || at 0
 ;;
 
-let no_provider_cooldown ~keeper_name:_ ~runtime_id:_ = None
-
 let runtime_toml =
   {|
 [runtime]
@@ -70,7 +68,6 @@ let make_meta name =
       [ ("name", `String name)
       ; ("agent_name", `String ("agent-" ^ name))
       ; ("trace_id", `String ("trace-gate-" ^ name))
-      ; ("goal", `String "lifecycle global gate test")
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -86,7 +83,7 @@ let ready_meta () =
   let now = Time_compat.now () in
   { meta with
     autoboot_enabled = true
-  ; proactive = { enabled = true; idle_sec = 600; cooldown_sec = 60 }
+  ; proactive = { enabled = true }
   ; runtime =
       { meta.runtime with
         proactive_rt =
@@ -99,21 +96,19 @@ let ready_meta () =
 ;;
 
 let base_obs : WO.world_observation =
-  { pending_mentions = []
+  { pending_messages = []
   ; pending_board_events = []
-  ; pending_scope_messages = []
   ; idle_seconds = 0
   ; active_goals = []
-  ; context_ratio = lazy 0.0
   ; unclaimed_task_count = 0
   ; claimable_task_count = 0
-  ; provider_capacity_blocked_task_count = 0
   ; failed_task_count = 0
   ; pending_verification_count = 0
   ; scheduled_automation = WO.empty_scheduled_automation_observation
   ; backlog_updated_since_last_scheduled_autonomous = false
   ; running_keeper_fiber_count = 1
   ; connected_surfaces = []
+  ; connected_surface_failures = []
   }
 ;;
 
@@ -127,7 +122,16 @@ let schedule_attention_obs =
   }
 ;;
 
-let mention_obs = { base_obs with pending_mentions = [ ("peer", "ping") ] }
+let mention_obs =
+  { base_obs with
+    pending_messages =
+      [ { Masc.Keeper_world_observation_message_scope.message_id = "mention-1"
+        ; speaker = "peer"
+        ; content = "ping"
+        ; kind = Mention
+        }
+      ]
+  }
 
 (* Drive a real registry flag through a boot override, cleaned up afterwards. *)
 let with_flag name value f =
@@ -143,7 +147,6 @@ let without_overrides f =
 
 let decide ~meta obs =
   WO.keeper_cycle_decision
-    ~provider_cooldown_remaining_sec:no_provider_cooldown
     ~reactive_wake:false
     ~meta
     obs
@@ -181,14 +184,12 @@ let test_default_reactive_runs () =
   check bool "on reactive channel" true
     (match d.channel with WO.Reactive -> true | WO.Scheduled_autonomous -> false)
 
-let test_global_reactive_off_suppresses () =
+let test_global_reactive_off_does_not_suppress_typed_mention () =
   with_flag "MASC_KEEPER_REACTIVE_ENABLED" "false" @@ fun () ->
   let d = decide ~meta:(ready_meta ()) mention_obs in
-  check bool "global reactive off suppresses the mention turn" false d.should_run;
-  check bool "suppressed on reactive channel" true
-    (match d.channel with WO.Reactive -> true | WO.Scheduled_autonomous -> false);
-  check bool "skip reason reactive_disabled" true
-    (List.exists (( = ) WO.Reactive_disabled) (skip_reasons d))
+  check bool "typed mention remains runnable" true d.should_run;
+  check (list string) "typed mention has no skip reasons" []
+    (List.map WO.skip_reason_to_string (skip_reasons d))
 
 (* Review-flagged: a pending reactive trigger must not, on its own, starve
    the scheduled-autonomous decision when the reactive gate is off -- a
@@ -197,7 +198,7 @@ let test_global_reactive_off_suppresses () =
    the keeper is due for scheduled work. *)
 let test_global_reactive_off_does_not_starve_scheduled_autonomous () =
   with_flag "MASC_KEEPER_REACTIVE_ENABLED" "false" @@ fun () ->
-  let obs = { schedule_attention_obs with pending_mentions = mention_obs.pending_mentions } in
+  let obs = { schedule_attention_obs with pending_messages = mention_obs.pending_messages } in
   let d = decide ~meta:(ready_meta ()) obs in
   check bool "scheduled-autonomous still runs despite the suppressed reactive trigger"
     true d.should_run;
@@ -365,19 +366,13 @@ let test_health_projection_uses_typed_lifecycle () =
     (match Readiness.pause_kind dead_meta with
      | Readiness.Dead_tombstone -> true
      | Readiness.Active
-     | Readiness.Reconcile_gated
-     | Readiness.Auto_recoverable
      | Readiness.Operator_paused
-     | Readiness.Latched_paused
      | Readiness.Unclassified_paused -> false);
   check bool "health does not mislabel missing reason as operator pause" true
     (match Readiness.pause_kind unclassified_meta with
      | Readiness.Unclassified_paused -> true
      | Readiness.Active
-     | Readiness.Reconcile_gated
-     | Readiness.Auto_recoverable
      | Readiness.Operator_paused
-     | Readiness.Latched_paused
      | Readiness.Dead_tombstone -> false)
 ;;
 
@@ -392,8 +387,8 @@ let () =
         ] )
     ; ( "reactive"
       , [ test_case "default runs" `Quick test_default_reactive_runs
-        ; test_case "global off suppresses" `Quick
-            test_global_reactive_off_suppresses
+        ; test_case "global off does not suppress typed mention" `Quick
+            test_global_reactive_off_does_not_suppress_typed_mention
         ; test_case "global off does not starve scheduled-autonomous" `Quick
             test_global_reactive_off_does_not_starve_scheduled_autonomous
         ] )

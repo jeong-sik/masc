@@ -14,6 +14,7 @@ and worker_start_error =
 
 type restored_inventory =
   { operations : Keeper_shutdown_types.t list
+  ; retired_terminal_records : Keeper_shutdown_store.retired_terminal_record list
   ; blocked_keeper_names : string list
   ; corrupt_records : Keeper_shutdown_store.corrupt_record list
   }
@@ -40,16 +41,7 @@ let submit_error_to_string = function
 ;;
 
 let operation_requires_fence (operation : Keeper_shutdown_types.t) =
-  match operation.phase with
-  | Finalized { completion = Completion_pending _; _ } -> true
-  | Finalized
-      { completion = (Completion_not_requested | Completion_delivered _); _ } -> false
-  | Prepared
-  | Joined_idle
-  | Finalizing_tasks _
-  | Cleanup_ready _
-  | Reconciliation_required _
-  | Blocked _ -> true
+  Keeper_shutdown_types.requires_admission_fence operation
 ;;
 
 let restore_admission ~config ~keeper_name ~operation_id =
@@ -71,10 +63,11 @@ let restore_admission ~config ~keeper_name ~operation_id =
 ;;
 
 let restore_inventory_admission ~config inventory =
-  let rec loop operations blocked corrupt_records = function
+  let rec loop operations retired_terminal_records blocked corrupt_records = function
     | [] ->
       Ok
         { operations = List.rev operations
+        ; retired_terminal_records = List.rev retired_terminal_records
         ; blocked_keeper_names = List.sort_uniq String.compare blocked
         ; corrupt_records = List.rev corrupt_records
         }
@@ -91,10 +84,33 @@ let restore_inventory_admission ~config inventory =
          | Ok () ->
            loop
              (operation :: operations)
+             retired_terminal_records
              (operation.keeper_name :: blocked)
              corrupt_records
              rest)
-      else loop (operation :: operations) blocked corrupt_records rest
+      else
+        loop
+          (operation :: operations)
+          retired_terminal_records
+          blocked
+          corrupt_records
+          rest
+    | Keeper_shutdown_store.Retired_terminal terminal :: rest ->
+      (match
+         Keeper_turn_admission.rollback_shutdown
+           ~base_path:config.Workspace.base_path
+           ~keeper_name:terminal.keeper_name
+           ~operation_id:terminal.operation_id
+       with
+       | Keeper_turn_admission.Shutdown_rolled_back
+       | Keeper_turn_admission.Shutdown_not_reserved
+       | Keeper_turn_admission.Shutdown_reserved_by_other _ ->
+         loop
+           operations
+           (terminal :: retired_terminal_records)
+           blocked
+           corrupt_records
+           rest)
     | Keeper_shutdown_store.Corrupt_record corrupt :: rest ->
       (match
          restore_admission
@@ -106,11 +122,12 @@ let restore_inventory_admission ~config inventory =
        | Ok () ->
          loop
            operations
+           retired_terminal_records
            (corrupt.keeper_name :: blocked)
            (corrupt :: corrupt_records)
            rest)
   in
-  loop [] [] [] inventory
+  loop [] [] [] [] inventory
 ;;
 
 let worker_mu = Eio.Mutex.create ()
@@ -192,7 +209,8 @@ let finalize_if_ready ~config ~entry operation =
          (Keeper_shutdown_finalize.error_to_string error))
   | Prepared
   | Reconciliation_required _
-  | Blocked _ -> ()
+  | Blocked _
+  | Superseded _ -> ()
 ;;
 
 let run_worker ~config ~entry operation =
@@ -224,7 +242,8 @@ let run_worker ~config ~entry operation =
   | Cleanup_ready _
   | Finalized _ -> finalize_if_ready ~config ~entry operation
   | Reconciliation_required _
-  | Blocked _ -> ()
+  | Blocked _
+  | Superseded _ -> ()
 ;;
 
 type worker_start_result =
@@ -320,45 +339,93 @@ let submit_dormant ~config ~meta ~request =
   | Error error -> Error (Prepare_error error)
 ;;
 
+(* Boot recovery is the reconciliation procedure for an admission-time
+   in-flight turn (#25491). Recovery runs exactly once per boot over
+   operations scanned at startup, so any turn such an operation references
+   ran inside a previous server process — a process that has terminally
+   ended. The turn therefore cannot still be executing, and the admission
+   fence has no live execution left to serialize against. What stays
+   unresolved is whether that turn's external effects completed before the
+   process died; holding the fence cannot answer that, so the question is
+   recorded durably instead: [turn_disposition] keeps the admission-time
+   observation and [join_evidence.terminal = Terminal_crashed] names the
+   process death. Cleanup then settles durable state as it exists.
+   Before this settlement existed, [Reconciliation_required] was an
+   absorbing phase — worker no-op, recovery no-op, finalize
+   [Unsupported_phase], supersession rejected — and five keepers stayed
+   unbootable across restarts (2026-07-20/21 fleet wedge). *)
+let process_boundary_evidence =
+  { lane_outcome = Lane_cancelled_by_parent "server process ended before lane receipt"
+  ; terminal = Terminal_crashed "server process ended before lane receipt"
+  ; cleanup_error = None
+  }
+
+let log_boot_settled_inflight_turn operation turn =
+  Log.Keeper.warn
+    "boot recovery settled in-flight-turn shutdown: keeper=%s operation=%s observed_turn=%s — owning process ended, turn cannot still be executing; external-effect completion stays recorded as unknown"
+    operation.keeper_name
+    (Operation_id.to_string operation.operation_id)
+    (match turn.observed_turn_id with
+     | Some turn_id -> string_of_int turn_id
+     | None -> "id-unobserved")
+;;
+
 let recovered_join_state operation =
-  let evidence =
-    { lane_outcome = Lane_cancelled_by_parent "server process ended before lane receipt"
-    ; terminal = Terminal_crashed "server process ended before lane receipt"
-    ; cleanup_error = None
-    }
-  in
-  let phase =
-    match operation.turn_disposition with
-    | No_inflight_turn -> Joined_idle
-    | Inflight_effect_unknown turn -> Reconciliation_required turn
+  (match operation.turn_disposition with
+   | No_inflight_turn -> ()
+   | Inflight_effect_unknown turn -> log_boot_settled_inflight_turn operation turn);
+  { operation with
+    revision = operation.revision + 1
+  ; join_evidence = Some process_boundary_evidence
+  ; phase = Joined_idle
+  ; updated_at = Masc_domain.now_iso ()
+  }
+;;
+
+(* A durable [Reconciliation_required] operation reaching boot recovery was
+   written either by a previous boot's recovery (before that phase settled
+   here) or by the pre-fix live join path that derived the phase from the
+   stale admission-time snapshot. Both classes reference a turn owned by an
+   ended process; settle them identically. Join evidence already recorded by
+   a live join is preserved — it is more precise than the process-boundary
+   evidence. *)
+let settled_reconciliation_state operation turn =
+  log_boot_settled_inflight_turn operation turn;
+  let join_evidence =
+    match operation.join_evidence with
+    | Some _ as recorded -> recorded
+    | None -> Some process_boundary_evidence
   in
   { operation with
     revision = operation.revision + 1
-  ; join_evidence = Some evidence
-  ; phase
+  ; join_evidence
+  ; phase = Joined_idle
   ; updated_at = Masc_domain.now_iso ()
   }
 ;;
 
 let recover_operation ~config operation =
+  let persist_recovered recovered =
+    match
+      Keeper_shutdown_store.replace
+        ~config
+        ~expected_revision:operation.revision
+        recovered
+    with
+    | Ok () -> Ok recovered
+    | Error error -> Error (Keeper_shutdown_store.error_to_string error)
+  in
   let operation_result =
     match operation.phase with
-    | Prepared ->
-      let recovered = recovered_join_state operation in
-      (match
-         Keeper_shutdown_store.replace
-           ~config
-           ~expected_revision:operation.revision
-           recovered
-       with
-       | Ok () -> Ok recovered
-       | Error error -> Error (Keeper_shutdown_store.error_to_string error))
+    | Prepared -> persist_recovered (recovered_join_state operation)
+    | Reconciliation_required turn ->
+      persist_recovered (settled_reconciliation_state operation turn)
     | Joined_idle
     | Finalizing_tasks _
     | Cleanup_ready _
-    | Reconciliation_required _
     | Finalized _
-    | Blocked _ -> Ok operation
+    | Blocked _
+    | Superseded _ -> Ok operation
   in
   match operation_result with
   | Error _ as error -> error
@@ -372,7 +439,8 @@ let recover_operation ~config operation =
        |> Result.map_error Keeper_shutdown_finalize.error_to_string
      | Prepared
      | Reconciliation_required _
-     | Blocked _ -> Ok recovered)
+     | Blocked _
+     | Superseded _ -> Ok recovered)
 ;;
 
 let recover_at_boot ~config =
@@ -384,7 +452,7 @@ let recover_at_boot ~config =
      | Ok restored ->
        let corrupt_results =
          List.map
-           (fun corrupt ->
+           (fun (corrupt : Keeper_shutdown_store.corrupt_record) ->
               Error
                 (Printf.sprintf
                    "corrupt shutdown operation fenced: keeper=%s operation=%s path=%s error=%s"

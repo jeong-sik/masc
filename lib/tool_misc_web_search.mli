@@ -4,13 +4,13 @@
 
     Tries providers in priority order ([Searxng] / [Brave] /
     [Tavily] / [Exa] / [Bing_api] / [Ddg] / [Bing_rss]) with
-    cache + rate-limit + secret-redaction safeguards.
+    response caching.
 
     Internal: ~50+ helpers + 5 internal types stay private —
     \[normalized_hit] / \[provider] (7-variant) /
     \[provider_response] / \[cache_entry] (cache + provider data
     types kept internal so callers cannot construct half-formed
-    state), \[max_web_search_query_length] (= 500),
+    state),
     9 pre-compiled regex constants (\[whitespace_re], \[html_tag_re],
     \[cdata_*_re], \[rss_re], \[channel_re], \[item_re],
     \[title_re], \[link_re], \[description_re], \[ddg_result_re],
@@ -24,15 +24,13 @@
     behind the per-provider parsers), \[provider_to_string] /
     \[provider_of_string] / \[parse_provider_csv] /
     \[default_provider_order] / \[provider_order],
-    \[is_secret_token_char] / \[contains_secret_token_prefix] /
-    \[query_contains_secret_like_content] (secret detection),
     \[take_results], \[normalize_hits], \[provider_error],
-    \[result_json], all 7 \[fetch_*] HTTP fetchers,
+    \[result_data], all 7 \[fetch_*] HTTP fetchers,
     \[fetch_provider], the cache state cells
     (\[initial_cache_capacity = 32], \[cache_entries] hashtable,
-    \[cache_mutex], \[request_times] queue, \[rate_limit_mutex]),
+    \[cache_mutex]),
     \[cache_key], \[cache_lookup], \[cache_store],
-    \[enforce_rate_limit], and \[search_impl].  All consumed
+    and \[search_impl].  All consumed
     only inside {!handle} / {!simulate_for_test} pipelines. *)
 
 (** {1 Simulation outcome (test-only)} *)
@@ -59,23 +57,12 @@ val provider_plan : unit -> string list
     gap.  Drift to caching the result would silently freeze
     operator-visible provider order. *)
 
-(** {1 Validation + redaction} *)
+(** {1 Typed validation} *)
 
 val validate_query : string -> (string, string) Result.t
-(** [validate_query query] returns [Ok normalized] (whitespace
-    collapsed) when:
-
-    - [normalized] is non-empty after whitespace normalization
-    - length is at most 500 chars (pinned literal)
-    - no secret-like patterns are detected (Authorization:
-      header, Bearer token, x-api-key:, [api_key=], [token=]
-      markers, plus prefix probes for [ghp_], [github_pat_],
-      [sk-]).
-
-    Returns [Error _] otherwise.  Secret detection is
-    fail-closed at the contract seam — drift to permissive
-    matching would re-open the credential leak window into
-    third-party search APIs. *)
+(** [validate_query query] normalizes whitespace and rejects only an empty
+    query. Query semantics remain opaque to this leaf and authorization belongs
+    to the Keeper Gate. *)
 
 val redact_transport_error_detail : string -> string
 (** [redact_transport_error_detail message] truncates a
@@ -149,14 +136,10 @@ val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_resul
     and [contentTimeout] controls. This module remains the search-provider
     boundary to avoid depending on fetch.
 
-    On success the payload [data] is wrapped as
-    [`Assoc [ "text", `String json ]] where [json] is the
-    serialized search result envelope.
+    On success [data] is the typed search result envelope.
 
     Failure classes (RFC-0189):
-    - [Workflow_rejection]: [validate_query] rejection (empty /
-      length / secret-like — caller-input violation).
-    - [Transient_error]:    rate-limit hit (retry after window).
+    - [Workflow_rejection]: empty query input.
     - [Runtime_failure]:    aggregate "all web search providers
       failed: ..." — provider fallback chain exhausted.
       Per-provider transport/server distinction is collapsed in

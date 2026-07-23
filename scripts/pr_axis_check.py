@@ -194,6 +194,16 @@ def get_repo_slug() -> Tuple[str, str]:
     return data["owner"]["login"], data["name"]
 
 
+def merged_pr_in_scope(pr_base_ref: Optional[str], merged_base_ref: Optional[str]) -> bool:
+    """A merged PR is comparison-relevant only when it landed on the open PR's
+    own base branch: default-branch PRs compare against default-branch merges,
+    stacked PRs compare against sibling merges into the same parent branch.
+    Missing refs stay in scope (conservative: never silently drop a signal)."""
+    if not pr_base_ref or not merged_base_ref:
+        return True
+    return merged_base_ref == pr_base_ref
+
+
 def get_pr_base_info(
     pr_number: int, owner: str, repo: str
 ) -> Tuple[Optional[str], Optional[str]]:
@@ -325,12 +335,16 @@ def check_pr_axis_stale(
     limit: int = 20,
 ) -> List[AxisRisk]:
     """Check if an open PR is at risk of being stale from recent merges."""
+    pr_base_sha, pr_base_ref = get_pr_base_info(pr_number, owner, repo)
+    if not pr_base_ref:
+        print(f"Could not determine base ref for PR #{pr_number}.", file=sys.stderr)
+        sys.exit(2)
+
     open_files = get_pr_files(pr_number, owner, repo)
     if not open_files:
         print(f"Warning: no files found for PR #{pr_number}", file=sys.stderr)
         return []
 
-    pr_base_sha, pr_base_ref = get_pr_base_info(pr_number, owner, repo)
     if not pr_base_sha:
         print(
             f"Warning: could not determine base SHA for PR #{pr_number}",
@@ -353,12 +367,10 @@ def check_pr_axis_stale(
         if not overlap:
             continue
 
-        # This guard is about stale PRs caused by recent merges into the same
-        # target branch. Stacked PRs can be merged into another feature branch;
-        # treating those as mainline merges creates a false BUILD_DEP_BREAK
-        # blocker for their own base PR.
-        merged_base_ref = merged.get("baseRefName")
-        if pr_base_ref and merged_base_ref and merged_base_ref != pr_base_ref:
+        # Staleness is scoped per base branch: a default-branch PR compares
+        # against default-branch merges, a stacked PR against sibling merges
+        # into the same parent branch (the #25063/#25044 incident class).
+        if not merged_pr_in_scope(pr_base_ref, merged.get("baseRefName")):
             continue
 
         # Skip if the merged PR is already included in the current PR's base.
@@ -565,7 +577,20 @@ def self_test() -> int:
     assert detect_rfc_collisions(noise) == [], "non-RFC-claim paths must not collide"
     print("self-test: non-RFC paths ignored -> no collision (PASS)")
 
-    print("pr_axis_check self-test: all RFC-collision cases passed")
+    assert merged_pr_in_scope("trunk", "trunk"), "same-base merge is in scope"
+    assert not merged_pr_in_scope("trunk", "stack-parent"), (
+        "merge into another branch is out of scope for a trunk PR"
+    )
+    assert merged_pr_in_scope("stack-parent", "stack-parent"), (
+        "sibling merge into the same parent branch is in scope for a stacked PR"
+    )
+    assert not merged_pr_in_scope("stack-parent", "trunk"), (
+        "trunk merge is out of scope for a stacked PR (parent PR owns it)"
+    )
+    assert merged_pr_in_scope(None, "trunk"), "missing base ref stays in scope"
+    print("self-test: per-base staleness scope incl. stacked siblings (PASS)")
+
+    print("pr_axis_check self-test: all structural cases passed")
     return 0
 
 

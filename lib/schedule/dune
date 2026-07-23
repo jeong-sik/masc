@@ -10,9 +10,13 @@
  (wrapped false)
  (modules
   schedule_domain
+  schedule_occurrence_id
+  schedule_ical_recur
+  schedule_ical_content_line
+  schedule_ical_vevent
   schedule_supported_kinds
   schedule_store
   schedule_service
   schedule_runner
   schedule_runner_status)
- (libraries digestif masc_workspace dated_jsonl masc_log masc_core unix yojson))
+ (libraries digestif masc_workspace dated_jsonl masc_log masc_core masc_cancel_safe unix yojson))

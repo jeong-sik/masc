@@ -43,7 +43,6 @@ const replayOasRuntimeTelemetry = vi.fn<() => Promise<void>>(async () => {})
 const compositeTick = signal({ name: '', ts_unix: 0 })
 const hydrateFleetCompositeSnapshot = vi.fn<(payload: unknown) => void>()
 const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
-const hydrateGoalLoopSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
 const noteKeeperChatAppended = vi.fn<(name: string, audio?: unknown, blocks?: unknown) => void>()
 const refreshActiveKeeperChatHistory = vi.fn<(opts?: { force?: boolean }) => void>()
 const reconcileKeeperChatReceipts = vi.fn<(name: string) => Promise<void>>(async () => {})
@@ -98,9 +97,6 @@ async function loadSseStore() {
   vi.doMock('./goal-tree-state', () => ({
     hydrateGoalTreeSnapshot,
   }))
-  vi.doMock('./goal-loop-state', () => ({
-    hydrateGoalLoopSnapshot,
-  }))
   vi.doMock('./keeper-runtime', () => ({
     noteKeeperChatAppended,
     reconcileKeeperChatReceipts,
@@ -141,8 +137,6 @@ describe('setupSSEReaction reconnect hydration', () => {
     hydrateFleetCompositeSnapshot.mockClear()
     hydrateGoalTreeSnapshot.mockClear()
     hydrateGoalTreeSnapshot.mockReturnValue(true)
-    hydrateGoalLoopSnapshot.mockClear()
-    hydrateGoalLoopSnapshot.mockReturnValue(true)
     namespaceTruth.value = null
     namespaceTruthError.value = null
     boardPosts.value = []
@@ -188,11 +182,11 @@ describe('setupSSEReaction reconnect hydration', () => {
     cleanup()
   })
 
-  it('refreshes the governance approval queue on reconnect (nav-rail badge recovery)', async () => {
+  it('refreshes the Gate approval queue on reconnect (nav-rail badge recovery)', async () => {
     const { sseStore, sse } = await loadSseStore()
     const cleanup = sseStore.setupSSEReaction()
-    const refreshGovernance = vi.fn<(opts?: { force?: boolean }) => void>()
-    sseStore.registerGovernanceRefresh(refreshGovernance)
+    const refreshGate = vi.fn<(opts?: { force?: boolean }) => void>()
+    sseStore.registerGateRefresh(refreshGate)
 
     sse.connected.value = true
     sse.lastDisconnectedAt.value = Date.now() - 1_000
@@ -200,8 +194,8 @@ describe('setupSSEReaction reconnect hydration', () => {
     await flushAsyncWork()
 
     // Approvals can arrive/resolve during a disconnect; the always-visible
-    // badge must recover them on reconnect, not only on the governance surface.
-    expect(refreshGovernance).toHaveBeenCalled()
+    // badge must recover them on reconnect, not only on the Gate surface.
+    expect(refreshGate).toHaveBeenCalled()
 
     vi.clearAllTimers()
     cleanup()
@@ -250,13 +244,13 @@ describe('setupSSEReaction reconnect hydration', () => {
     consoleWarn.mockRestore()
   })
 
-  it('routes an approval:pending SSE event to the governance refresh (HITL badge contract)', async () => {
+  it('routes an approval:pending SSE event to the Gate refresh (HITL badge contract)', async () => {
     const { sseStore } = await loadSseStore()
-    const refreshGovernance = vi.fn<(opts?: { force?: boolean }) => void>()
-    sseStore.registerGovernanceRefresh(refreshGovernance)
+    const refreshGate = vi.fn<(opts?: { force?: boolean }) => void>()
+    sseStore.registerGateRefresh(refreshGate)
 
     // Pins the FRONTEND routing contract: an `approval:pending` event must
-    // reach the governance refresh (and thus the nav-rail/topbar badge). This
+    // reach the Gate refresh (and thus the nav-rail/topbar badge). This
     // asserts only the FE literal — the cross-boundary pin that also fails when
     // the backend (keeper_approval_queue.ml) renames the emitted string lives
     // in sse-approval-event-drift.test.ts.
@@ -264,7 +258,7 @@ describe('setupSSEReaction reconnect hydration', () => {
     vi.advanceTimersByTime(1_000)
     await flushAsyncWork()
 
-    expect(refreshGovernance).toHaveBeenCalledWith({ force: true })
+    expect(refreshGate).toHaveBeenCalledWith({ force: true })
   })
 
   it('hydrates the canonical project_snapshot SSE event without an HTTP fetch', async () => {
@@ -838,7 +832,6 @@ describe('setupSSEReaction reconnect hydration', () => {
     sseStore.hydrateDashboardSlice('goals', {
       planning: { goals: [], generated_at: 'now' },
       tree: { tree: [], summary: { total_goals: 0 } },
-      loop: { schema_version: 1, loop_iteration: '3', overall_status: 'ok' },
     })
     sseStore.hydrateDashboardSlice('composite', {
       generated_at: 1,
@@ -849,31 +842,11 @@ describe('setupSSEReaction reconnect hydration', () => {
     expect(hydrateBoardSnapshot).toHaveBeenCalledWith({ posts: [], generated_at: 'now' })
     expect(hydratePlanningSnapshot).toHaveBeenCalledWith({ goals: [], generated_at: 'now' })
     expect(hydrateGoalTreeSnapshot).toHaveBeenCalledWith({ tree: [], summary: { total_goals: 0 } })
-    // RFC-0284: the goals snapshot's loop sub-field hydrates the goal-loop store.
-    expect(hydrateGoalLoopSnapshot).toHaveBeenCalledWith({
-      schema_version: 1,
-      loop_iteration: '3',
-      overall_status: 'ok',
-    })
     expect(hydrateFleetCompositeSnapshot).toHaveBeenCalledWith({
       generated_at: 1,
       count: 0,
       snapshots: [],
     })
-  })
-
-  it('routes the goal_loop_status delta to the goal-loop store, not as a goals snapshot', async () => {
-    const { sseStore } = await loadSseStore()
-
-    // RFC-0284: live goal-loop delta bridged onto the "goals" slice carries the
-    // status directly + the goal_loop_status event type. It must hydrate the
-    // goal-loop store and must NOT be unpacked as a {planning,tree} snapshot.
-    const status = { schema_version: 1, loop_iteration: '8', overall_status: 'warning' }
-    sseStore.hydrateDashboardSlice('goals', status, 'goal_loop_status')
-
-    expect(hydrateGoalLoopSnapshot).toHaveBeenCalledWith(status)
-    expect(hydratePlanningSnapshot).not.toHaveBeenCalled()
-    expect(hydrateGoalTreeSnapshot).not.toHaveBeenCalled()
   })
 
   it('handles every dashboard push slice advertised to route subscriptions', async () => {

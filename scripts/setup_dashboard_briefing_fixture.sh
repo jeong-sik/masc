@@ -127,7 +127,6 @@ async function seedWorkspace() {
     models: ['glm:auto'],
     presence_keepalive: false,
     proactive_enabled: false,
-    auto_handoff: false,
   });
 }
 
@@ -174,7 +173,6 @@ function seedExecutionSession() {
         supervisor_actor: 'mission-local64-smoke',
         model_tier: '35b',
         task_profile: 'decide',
-        risk_level: 'high',
         routing_confidence: 0.94,
         routing_reason: 'manager must hold root synthesis',
         routing_escalated: false,
@@ -194,7 +192,6 @@ function seedExecutionSession() {
         supervisor_actor: 'llama-local-alpha',
         model_tier: '27b',
         task_profile: 'verify',
-        risk_level: 'medium',
         routing_confidence: 0.68,
         routing_reason: 'low confidence because spawn failures hide runtime census',
         routing_escalated: true,
@@ -214,7 +211,6 @@ function seedExecutionSession() {
         supervisor_actor: 'llama-local-alpha',
         model_tier: '9b',
         task_profile: 'extract',
-        risk_level: 'medium',
         routing_confidence: 0.88,
         routing_reason: 'executor covers direct runtime checks',
         routing_escalated: false,

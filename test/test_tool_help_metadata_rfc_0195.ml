@@ -2,8 +2,8 @@
 
    RFC-0195 P0 — help_entry record gains two optional, additive
    metadata fields: [examples] and [alternatives]. These fields
-   exist so LLMs can recover from workflow_rejection / governance
-   denial / catalog miss without parsing prose hints (RFC-0194 §2).
+   exist so LLMs can recover from a typed rejection or catalog miss
+   without parsing prose hints (RFC-0194 §2).
 
    This test pins:
    - The six target tools curated in this PR carry non-empty
@@ -22,8 +22,8 @@
 
    Same MASC_BASE_PATH setenv pattern as
    test_tool_help_registry_shard_coverage_10101.ml — module init
-   triggers Cdal_verdict_gate.default_base_path which raises
-   under HOME. *)
+   resolves the runtime base path, which the #9903 prod-guard
+   rejects under HOME. *)
 
 let () =
   let dir =

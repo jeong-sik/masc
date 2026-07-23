@@ -179,10 +179,6 @@ val board_contributor_quality_lookup :
 (** [board_contributor_quality_lookup ?config ()] returns a request-local
     memoized lookup by author.  Without [config], it returns [None]. *)
 
-val board_claim_evidence_lookup : unit -> string -> Yojson.Safe.t option
-(** [board_claim_evidence_lookup ()] snapshots the board-claim sidecar once and
-    returns a request-local lookup by target post id. *)
-
 (** {1 Dashboard helpers} *)
 
 val board_comment_dashboard_json :
@@ -203,7 +199,6 @@ val board_post_dashboard_json :
   ?include_moderation:bool ->
   ?blind_votes:bool ->
   ?contributor_quality:Yojson.Safe.t ->
-  ?claim_evidence:Yojson.Safe.t ->
   ?current_vote:Board.vote_direction option ->
   ?reactions:Board.reaction_summary list ->
   author_karma:int ->

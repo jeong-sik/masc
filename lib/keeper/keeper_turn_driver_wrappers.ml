@@ -23,16 +23,11 @@ let config_for_label
     ~(system_prompt : string)
     ~(tools : Agent_sdk.Tool.t list)
     ~(max_tokens : int option)
-    ~(temperature : float)
-    ?(max_idle_turns = 3)
+    ~(temperature : float option)
     ?stream_idle_timeout_s
-    ?guardrails
     ?hooks
-    ?context_reducer
     ?enable_thinking
-    ?compact_ratio
     ?provider_config_transform
-    ?approval
     ~(description : string option)
     () : (Runtime_agent.config, Agent_sdk.Error.sdk_error) result =
   let* provider =
@@ -44,22 +39,24 @@ let config_for_label
     | None -> Ok provider
     | Some transform -> transform provider
   in
+  let base_config =
+    Runtime_agent.default_config ~name ~provider_cfg:provider ~system_prompt ~tools
+  in
+  (* The resolved model declaration is authoritative; a caller value only fills
+     an omitted provider temperature. *)
+  let temperature =
+    match base_config.temperature with
+    | Some _ as configured -> configured
+    | None -> temperature
+  in
   Ok
-    {
-      (Runtime_agent.default_config ~name ~provider_cfg:provider
-         ~system_prompt ~tools)
-      with
+    { base_config with
       max_tokens;
       temperature;
-      max_idle_turns;
       stream_idle_timeout_s;
-      guardrails;
       hooks;
-      context_reducer;
       enable_thinking;
       description;
-      compact_ratio;
-      approval;
     }
 
 (* RFC-0206: the runtime CLI-preflight wrapper is gone; run the attempt
@@ -73,17 +70,12 @@ let run_model_by_label
     ~goal
     ?(system_prompt = "")
     ?(tools = [])
-    ?(max_idle_turns = 3)
     ?stream_idle_timeout_s
-    ?(temperature = Runtime_provider_defaults.agent_default_temperature)
+    ?temperature
     ?max_tokens
-    ?wait_timeout_sec
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
-    ?guardrails
     ?hooks
-    ?context_reducer
     ?enable_thinking
-    ?compact_ratio
     ?provider_config_transform
     ?on_event
     ?transport
@@ -91,13 +83,10 @@ let run_model_by_label
     ?net
     ()
   : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
-  let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
     config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
-      ~tools ~max_tokens ~temperature
-      ~max_idle_turns ?stream_idle_timeout_s ?guardrails ?hooks ?context_reducer
+      ~tools ~max_tokens ~temperature ?stream_idle_timeout_s ?hooks
       ?enable_thinking
-      ?compact_ratio
       ?provider_config_transform
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))
       ()
@@ -110,14 +99,9 @@ let run_model_by_label
         | None -> Masc_grpc_transport.from_env ()
       in
       let config = { config with transport = transport_resolved } in
-      match
-        let admission_runtime_id =
-          model_label
-        in
-        Admission_queue.with_permit ?wait_timeout_sec
-          ~priority:Llm_provider.Request_priority.Proactive
+      Inference_inflight_observation.with_observation
           ~keeper_name:"oas-label-model"
-          ~runtime_id:admission_runtime_id
+          ~runtime_id:model_label
           (fun () ->
             with_cli_preflight
               ~scope:(Printf.sprintf "model_label:%s" model_label)
@@ -158,33 +142,21 @@ let run_model_by_label
                                   rejection.response_shape;
                               (* RFC-0271 §4.5: preserve provider stop_reason. *)
                               stop_reason = Some result.response.stop_reason;
-                              last_tool_effect = None;
-                              any_mutating_tool = None;
-                              tool_effects_seen = [];
                               reason = rejection.reason;
                             }))
                 | Error e -> Error e))
-      with
-      | Ok result -> result
-      | Error (`Host_resource_saturated reason) ->
-          Error
-            (sdk_error_of_masc_internal_error
-               (Admission_queue_rejected { keeper_name = "oas-label-model"; reason }))
 
 let run_named_with_masc_tools
     ~runtime_id
     ?(keeper_name = "")
     ~goal
     ~base_path
-    ?priority
     ?(system_prompt = "")
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ?stream_idle_timeout_s
-    ?(temperature = Runtime_provider_defaults.agent_default_temperature)
-    ?max_tokens
+    ?temperature
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
-    ?guardrails
     ?hooks
     ?raw_trace
     ?on_event
@@ -192,10 +164,6 @@ let run_named_with_masc_tools
     ?on_resume
     ?transport
     ?(yield_on_tool = false)
-    ?compact_ratio
-    ?approval
-    ?max_turns
-    ?(max_idle_turns = 3)
     ?provider_config_transform
     ?sw
     ?net
@@ -207,32 +175,24 @@ let run_named_with_masc_tools
       ~input_schema:td.input_schema
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
-  Keeper_turn_driver.run_named ~runtime_id ~keeper_name ~goal ~base_path ?priority ~system_prompt ~tools:oas_tools
-    ?max_turns
-    ~max_idle_turns
-    ~temperature ?max_tokens
-    ?stream_idle_timeout_s ?guardrails ?hooks
+  Keeper_turn_driver.run_named ~runtime_id ~keeper_name ~goal ~base_path ~system_prompt ~tools:oas_tools
+    ?temperature
+    ?stream_idle_timeout_s ?hooks
     ~accept
-    ?compact_ratio
-    ?approval
     ?raw_trace ?on_event ?on_yield ?on_resume 
     ?transport ~yield_on_tool ?provider_config_transform ?sw ?net ()
 
 let run_model_with_masc_tools
     ~(model_label : string)
     ~goal
-    ~base_path
     ?(system_prompt = "")
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ?stream_idle_timeout_s
-    ?(temperature = Runtime_provider_defaults.agent_default_temperature)
+    ?temperature
     ?max_tokens
-    ?wait_timeout_sec
-    ?guardrails
     ?hooks
     ?enable_thinking
-    ?compact_ratio
     ?provider_config_transform
     ?raw_trace
     ?on_event
@@ -241,12 +201,10 @@ let run_model_with_masc_tools
     ?net
     ()
   : (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result =
-  let stream_idle_timeout_s = apply_stream_idle_timeout_default stream_idle_timeout_s in
   let* config =
     config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
       ~tools:[] ~max_tokens ~temperature
-      ?stream_idle_timeout_s ?guardrails ?hooks ?enable_thinking
-      ?compact_ratio
+      ?stream_idle_timeout_s ?hooks ?enable_thinking
       ?provider_config_transform
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))
       ()
@@ -259,24 +217,19 @@ let run_model_with_masc_tools
         | None -> Masc_grpc_transport.from_env ()
       in
       let config = { config with raw_trace; transport = transport_resolved } in
-      match
-        let admission_runtime_id =
-          model_label
-        in
-        Admission_queue.with_permit ?wait_timeout_sec
-          ~priority:Llm_provider.Request_priority.Proactive
+      Inference_inflight_observation.with_observation
           ~keeper_name:"oas-explicit-model"
-          ~runtime_id:admission_runtime_id
+          ~runtime_id:model_label
           (fun () ->
             with_cli_preflight
               ~scope:(Printf.sprintf "explicit_model:%s" model_label)
               ~config ~goal
               (fun () ->
-                Runtime_agent.run_with_masc_tools ~sw ~net ~base_path ~config ~masc_tools ~dispatch  ?on_event
-	                  goal))
-      with
-      | Ok result -> result
-      | Error (`Host_resource_saturated reason) ->
-          Error
-            (sdk_error_of_masc_internal_error
-               (Admission_queue_rejected { keeper_name = "oas-explicit-model"; reason }))
+                Runtime_agent.run_with_masc_tools
+                  ~sw
+                  ~net
+                  ~config
+                  ~masc_tools
+                  ~dispatch
+                  ?on_event
+                  goal))

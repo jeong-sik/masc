@@ -9,7 +9,6 @@ module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
 type runtime_kind =
   | Local
-  | Cli_agent
   | Direct_api
 
 type default_model_source =
@@ -57,16 +56,13 @@ let binding_auth_is_no_auth (binding : Runtime_binding.t) =
   match binding.Runtime_binding.auth with
   | Runtime_binding.No_auth -> true
   | Runtime_binding.Api_key_env _
-  | Runtime_binding.Oauth_cached_login
   | Runtime_binding.Setup_token_env _ -> false
 ;;
 
 let runtime_kind_of_binding (binding : Runtime_binding.t) =
-  match binding.Runtime_binding.transport with
-  | Runtime_binding.Http | Runtime_binding.Managed ->
-    if binding_auth_is_no_auth binding && binding_base_url_is_loopback binding
-    then Local
-    else Direct_api
+  if binding_auth_is_no_auth binding && binding_base_url_is_loopback binding
+  then Local
+  else Direct_api
 ;;
 
 let binding_labels (binding : Runtime_binding.t) =
@@ -101,7 +97,7 @@ let default_model_id_of_binding (binding : Runtime_binding.t) =
   | None ->
     (match runtime_kind_of_binding binding with
      | Local -> None
-     | Cli_agent | Direct_api -> Some "auto")
+     | Direct_api -> Some "auto")
 ;;
 
 let supported_models_of_binding (binding : Runtime_binding.t) =
@@ -207,14 +203,13 @@ let binding_auth_available (binding : Runtime_binding.t) =
   | Runtime_binding.No_auth -> true
   | Runtime_binding.Api_key_env env_name | Runtime_binding.Setup_token_env env_name ->
     env_present env_name
-  | Runtime_binding.Oauth_cached_login -> binding.Runtime_binding.available
 ;;
 
 let default_model_label_for_binding (binding : Runtime_binding.t) =
   let profile = profile_of_binding binding in
   match profile.runtime_kind with
   | Local -> Ok (profile.runtime_prefix ^ ":auto")
-  | Cli_agent | Direct_api ->
+  | Direct_api ->
     (match default_model_candidate_of_binding binding with
      | Some _ -> Ok (profile.runtime_prefix ^ ":auto")
      | None ->

@@ -2,13 +2,6 @@
 
 open Masc_board_handlers
 
-type truncation_signal =
-  | Odd_fence
-  | Odd_inline_tick
-  | Unfinished_link
-  | Unfinished_image
-  | Odd_double_asterisk
-
 type sort_order = Board_dispatch.sort_order =
   | Hot
   | Trending
@@ -27,8 +20,6 @@ val format_post : Board.post -> string
 val format_post_compact : Board.post -> string
 val format_comment_tree : ?max_depth:int -> Board.comment list -> string list
 val sources_footer : Yojson.Safe.t list -> string
-val truncation_signal_to_string : truncation_signal -> string
-val detect_truncated_markdown_with_reason : string -> truncation_signal option
 val parse_sort_order : string -> (sort_order, string) Result.t
 val judgment_arg : Yojson.Safe.t -> Yojson.Safe.t option
 val normalize_board_post_meta : Yojson.Safe.t -> Yojson.Safe.t option

@@ -2,8 +2,8 @@
 
     Two new counters were added in PR-J:
     1. [masc_keeper_lifecycle_callback_failures_total{callback,...}] —
-       bumped when post-turn lifecycle callbacks or per-keeper OAS hook
-       side effects raise. Lifecycle wrappers emit [callback] only;
+       bumped when lifecycle or per-keeper OAS hook side effects raise.
+       Lifecycle wrappers emit [callback] only;
        per-keeper hook sites also include [keeper].
     2. [masc_keeper_event_bus_drain_total{site,outcome}] — bumped on
        every drain, with [outcome=drained] when at least one event
@@ -44,8 +44,8 @@ let read_keeper_hook_failure ~keeper ~callback =
     ~labels:[("keeper", keeper); ("callback", callback)] ()
 
 let test_lifecycle_callback_label_isolation () =
-  let cb_a = "on_compaction_started" in
-  let cb_b = "on_handoff_started" in
+  let cb_a = "guard_tool_call_log" in
+  let cb_b = "after_turn_sse_broadcast" in
   let a_before = read_lifecycle_failure ~callback:cb_a in
   let b_before = read_lifecycle_failure ~callback:cb_b in
   P.inc_counter Keeper_metrics.(to_string LifecycleCallbackFailures)
@@ -113,16 +113,14 @@ let test_drain_outcome_label_distinction () =
     empty_before empty_after
 
 (* ── Documented label vocabulary check ──────────────────────
-   The wrappers in keeper_post_turn.ml / keeper_rollover.ml and the
-   per-keeper hook sites in keeper_hooks_oas.ml must stay aligned with
+   The lifecycle wrappers and the per-keeper hook sites in
+   keeper_hooks_oas.ml must stay aligned with
    otel_metric_store.mli. This test pins the callback vocabulary so a future
    refactor that renames a label without updating the docs is caught. *)
 
 let test_documented_callback_label_vocabulary () =
   let documented_labels =
     [
-      "on_compaction_started";
-      "on_handoff_started";
       "guard_tool_call_log";
       "after_turn_sse_broadcast";
       "post_tool_log_write";

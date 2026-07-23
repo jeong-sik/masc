@@ -706,10 +706,14 @@ function handleEvent(event: SSEEvent): void {
     case 'keeper_tool_call': {
       const toolName = event.tool_name ?? '?'
       const durationMs = event.duration_ms ?? 0
-      const isError = event.success === false
+      const isError = event.disposition === 'failed'
+      const isDeferred = event.disposition === 'deferred'
+      let dispositionSuffix = ''
+      if (isError) dispositionSuffix = ' ERR'
+      else if (isDeferred) dispositionSuffix = ' DEFERRED'
       addTypedJournalEntry(
         event.name ?? agent,
-        `Tool: ${toolName} (${durationMs}ms)${isError ? ' ERR' : ''}`,
+        `Tool: ${toolName} (${durationMs}ms)${dispositionSuffix}`,
         'keepers',
         'keeper_tool_call',
         {
@@ -727,7 +731,7 @@ function handleEvent(event: SSEEvent): void {
         appendLiveToolCall(keeperName, {
           toolName,
           durationMs,
-          success: event.success !== false,
+          success: !isError,
           error: event.error_text ?? null,
           tsUnix: typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000,
           toolArgs,
@@ -765,15 +769,6 @@ function handleEvent(event: SSEEvent): void {
       break
     }
     // OAS bridge events
-    case 'oas:masc:autonomy:agent_selected': {
-      break
-    }
-    case 'oas:masc:autonomy:agent_decision': {
-      break
-    }
-    case 'oas:masc:autonomy:agent_action_executed': {
-      break
-    }
     case 'oas:masc:keeper:snapshot': {
       const p = (event.payload ?? {}) as Record<string, unknown>
       const snap = {

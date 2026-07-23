@@ -7,7 +7,7 @@ let keeper_tool_call_event_json
       ~keeper_name
       ~tool_name
       ~duration_ms
-      ~success
+      ~disposition
       ?error_text
       ?(extra_fields = [])
       ~ts
@@ -18,7 +18,7 @@ let keeper_tool_call_event_json
     ; "name", `String keeper_name
     ; "tool_name", `String tool_name
     ; "duration_ms", `Int duration_ms
-    ; "success", `Bool success
+    ; "disposition", `String (Tool_result.string_of_disposition disposition)
     ; "ts_unix", `Float ts
     ]
   in
@@ -53,20 +53,26 @@ let tool_io_preview_fields ~tool_name ~input ?output () =
     | Some output -> Observability_redact.redacted_tool_output_json ~tool_name output
     | None -> None
   in
-  (if Observability_redact.is_denied_tool ~tool_name
-   then [ "tool_io_redacted", `Bool true ]
-   else [])
-  @ json_field "tool_args" input_json
+  json_field "tool_args" input_json
   @ json_field "tool_result" output_json
   @ string_preview_field "tool_args_preview" input_preview
   @ string_preview_field "tool_output_preview" output_preview
+;;
+
+let oas_invocation_fields = function
+  | None -> []
+  | Some invocation ->
+    [ "tool_use_id", `String (Agent_sdk.Tool.Invocation.tool_use_id invocation)
+    ; "turn", `Int (Agent_sdk.Tool.Invocation.turn invocation)
+    ; "planned_index", `Int (Agent_sdk.Tool.Invocation.planned_index invocation)
+    ]
 ;;
 
 let broadcast_keeper_tool_call_event
       ~keeper_name
       ~tool_name
       ~duration_ms
-      ~success
+      ~disposition
       ?error_text
       ?(extra_fields = [])
       ~site
@@ -79,7 +85,7 @@ let broadcast_keeper_tool_call_event
          ~keeper_name
          ~tool_name
          ~duration_ms
-         ~success
+         ~disposition
          ?error_text
          ~extra_fields
          ~ts

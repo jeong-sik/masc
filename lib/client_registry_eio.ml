@@ -30,7 +30,6 @@ module Random = Stdlib.Random
     - Call [init ()] once during server startup (within Eio context)
     - Use [get_or_create_identity] in tool handlers
     - Identity persists across tool calls via MCP session ID
-    - Optionally call [start_cleanup_loop ~sw ~clock] to enable background eviction
 
     @since 0.5.0
 *)
@@ -69,37 +68,16 @@ let with_state_rw f =
 let with_state_ro f =
   Eio.Mutex.use_ro state_mu (fun () -> f !state)
 
-(** Maximum session cache entries before forced eviction.
-    Prevents unbounded growth when many MCP sessions connect over time. *)
-let max_session_cache_entries = 1024
-
 (** {1 Initialization} *)
 
-(** Reset registry for testing.
-    Replaces all state with a fresh empty record. *)
-let reset_for_testing () =
+(** Replace the registry and both session maps as one lifecycle operation. *)
+let clear_all () =
   Eio.Mutex.use_rw ~protect:true state_mu (fun () ->
     state := make_state ()
   )
 
-let clear_session_caches () =
-  with_state_rw (fun s ->
-    s := { !s with session_map = SMap.empty; resolved_map = SMap.empty }
-  )
-
-(** Evict session caches when either map exceeds [max_session_cache_entries].
-    Caller must hold [state_mu]. *)
-let maybe_evict_caches_locked s =
-  if SMap.cardinal s.session_map > max_session_cache_entries
-     || SMap.cardinal s.resolved_map > max_session_cache_entries
-  then begin
-    Log.Identity.info
-      "[AgentRegistry] session cache eviction: session_map=%d resolved_map=%d (max=%d)"
-      (SMap.cardinal s.session_map)
-      (SMap.cardinal s.resolved_map)
-      max_session_cache_entries;
-    { s with session_map = SMap.empty; resolved_map = SMap.empty }
-  end else s
+(** Reset registry for testing. *)
+let reset_for_testing () = clear_all ()
 
 (** {1 Internal helpers — must be called under [state_mu]} *)
 
@@ -123,55 +101,43 @@ let get_registry_locked s = s.registry
     @return Agent identity for this request
 *)
 let get_or_create_identity ?mcp_session_id params =
-  with_state_rw (fun s ->
-    let reg = get_registry_locked !s in
-    let find_from_cache sid =
-      match SMap.find_opt sid (!s).session_map with
-      | Some session_key -> Client_identity.Registry.find_by_session reg session_key
-      | None -> None
-    in
-    let existing =
-      match mcp_session_id with
-      | None -> None
-      | Some sid -> find_from_cache sid
-    in
-    match existing with
-    | Some identity ->
-        Client_identity.Registry.touch reg identity.Client_identity.session_key
-          ();
-        (match Client_identity.Registry.find_by_session reg identity.session_key with
-         | Some updated -> updated
-         | None -> identity)
-    | None ->
+  match mcp_session_id with
+  | None ->
+    (* A call without a transport session has no explicit lifecycle owner.
+       Return its typed identity without inserting an immortal registry row. *)
+    Client_identity.from_mcp_params params
+  | Some sid ->
+    with_state_rw (fun s ->
+      let reg = get_registry_locked !s in
+      match
+        Option.bind
+          (SMap.find_opt sid (!s).session_map)
+          (Client_identity.Registry.find_by_session reg)
+      with
+      | Some identity ->
+        Client_identity.Registry.touch reg identity.Client_identity.session_key ();
+        Option.value
+          (Client_identity.Registry.find_by_session reg identity.session_key)
+          ~default:identity
+      | None ->
         let identity = Client_identity.from_mcp_params params in
         let registered = Client_identity.Registry.register reg identity in
         let s' =
-          match mcp_session_id with
-          | Some sid ->
-              { !s with session_map = SMap.add sid registered.Client_identity.session_key (!s).session_map }
-          | None -> !s
+          { !s with
+            session_map =
+              SMap.add sid registered.Client_identity.session_key (!s).session_map
+          }
         in
-        let s'' = maybe_evict_caches_locked s' in
-        s := s'';
-        Log.Session.info "[AgentRegistry] New identity: %s (session=%s, mcp=%s)"
+        s := s';
+        Log.Session.info
+          "[AgentRegistry] New identity: %s (session=%s, mcp=%s)"
           registered.agent_name
-          (String.sub registered.session_key 0
+          (String.sub
+             registered.session_key
+             0
              (min 8 (String.length registered.session_key)))
-          (Option.value mcp_session_id ~default:"none");
-        registered
-  )
-
-(** Get identity by agent name. Returns [None] if not found. *)
-let get_by_name agent_name =
-  with_state_ro (fun s ->
-    Client_identity.Registry.find_by_name s.registry agent_name
-  )
-
-(** Get identity by session key. Returns [None] if not found. *)
-let get_by_session session_key =
-  with_state_ro (fun s ->
-    Client_identity.Registry.find_by_session s.registry session_key
-  )
+          sid;
+        registered)
 
 (** {1 Resolved Agent Name Cache}
 
@@ -188,86 +154,27 @@ let set_resolved_name sid name ~is_ephemeral =
 
 (** {1 Statistics} *)
 
-(** Get count of active agents *)
-let active_count ?(within_seconds = Env_config.Zombie.threshold_seconds) () =
-  with_state_ro (fun s ->
-    List.length (Client_identity.Registry.list_active s.registry ~within_seconds)
-  )
-
 (** Get total registered count *)
 let total_count () =
   with_state_ro (fun s -> Client_identity.Registry.count s.registry)
 
-(** List all active identities *)
-let list_active ?(within_seconds = Env_config.Zombie.threshold_seconds) () =
-  with_state_ro (fun s ->
-    Client_identity.Registry.list_active s.registry ~within_seconds
-  )
-
 (** {1 Cleanup} *)
 
-(** Clean up stale session mappings and resolved-name cache entries.
-
-    Runs under [state_mu] so that a concurrent [get_or_create_identity]
-    cannot install a fresh entry between the stale-detection scan and the
-    removal step. *)
-let cleanup_stale_sessions () =
+(** End one explicit MCP-session registration. The identity row is removed
+    only when no other MCP session references the same session key. *)
+let unregister_mcp_session mcp_session_id =
   with_state_rw (fun s ->
     let reg = get_registry_locked !s in
-    let to_remove =
-      SMap.fold (fun sid session_key acc ->
-        match Client_identity.Registry.find_by_session reg session_key with
-        | None -> sid :: acc
-        | Some _ -> acc
-      ) (!s).session_map []
-    in
-    let remove_from map sids =
-      List.fold_left (fun m sid -> SMap.remove sid m) map sids
-    in
-    s := { !s with
-      session_map = remove_from (!s).session_map to_remove;
-      resolved_map = remove_from (!s).resolved_map to_remove;
-    };
-    List.length to_remove
-  )
-
-(** Unregister an identity and remove all associated cache entries. *)
-let unregister session_key =
-  with_state_rw (fun s ->
-    let reg = get_registry_locked !s in
-    Client_identity.Registry.unregister reg session_key;
-    let to_remove =
-      SMap.fold (fun sid sk acc ->
-        if String.equal sk session_key then sid :: acc else acc
-      ) (!s).session_map []
-    in
-    let remove_from map sids =
-      List.fold_left (fun m sid -> SMap.remove sid m) map sids
-    in
-    s := { !s with
-      session_map = remove_from (!s).session_map to_remove;
-      resolved_map = remove_from (!s).resolved_map to_remove;
-    }
-  )
-
-(** {1 Background Maintenance} *)
-
-(** Start a periodic cleanup fiber that removes stale sessions and evicts
-    caches when they grow too large.  Call once at server startup. *)
-let start_cleanup_loop ~sw ~clock ?(interval = 300.0) () =
-  Eio.Fiber.fork ~sw (fun () ->
-    let rec loop () =
-      Eio.Time.sleep clock interval;
-      (try
-         let removed = cleanup_stale_sessions () in
-         if removed > 0 then
-           Log.Identity.info "[AgentRegistry] cleanup: removed %d stale sessions" removed
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-           Log.Identity.warn "[AgentRegistry] cleanup error: %s"
-             (Stdlib.Printexc.to_string exn));
-      loop ()
-    in
-    loop ()
-  )
+    match SMap.find_opt mcp_session_id (!s).session_map with
+    | None -> ()
+    | Some session_key ->
+      let session_map = SMap.remove mcp_session_id (!s).session_map in
+      let still_referenced =
+        SMap.exists (fun _ mapped -> String.equal mapped session_key) session_map
+      in
+      if not still_referenced then Client_identity.Registry.unregister reg session_key;
+      s :=
+        { !s with
+          session_map
+        ; resolved_map = SMap.remove mcp_session_id (!s).resolved_map
+        })

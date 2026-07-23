@@ -3,20 +3,9 @@ type t =
   ; cleanup : unit -> unit
   }
 
-type github_app_token_minter =
-  app_id:string ->
-  installation_id:string ->
-  pem:string ->
-  now:int ->
-  (string, string) result
-
 type source_kind =
   | Env_source
   | File_source
-
-type file_projection_policy =
-  | Mount_into_keeper
-  | Projection_layer_only
 
 type secret_root_info =
   { root : string
@@ -253,30 +242,13 @@ let overlay_env_entries base entries =
   Array.of_list (inherited @ overrides)
 ;;
 
-(* Prevent [gh] from falling back to the operator's HOME/XDG config when the
-   keeper supplies token env credentials but no explicit GH_CONFIG_DIR. *)
-let local_empty_gh_config_dir = "/var/empty"
-
-let env_entries_have key entries =
-  List.exists (fun (name, _) -> String.equal name key) entries
-;;
-
-let local_env_entries_with_defaults entries =
-  if env_entries_have "GH_CONFIG_DIR" entries
-     || not (path_exists local_empty_gh_config_dir && is_directory local_empty_gh_config_dir)
-  then entries
-  else ("GH_CONFIG_DIR", local_empty_gh_config_dir) :: entries
-;;
-
 let local_base_host_env ?host_env () =
   let base =
     match host_env with
     | Some env -> env
     | None -> Unix.environment ()
   in
-  base
-  |> Env_keeper_scrub.filter_environment
-  |> Env_git_noninteractive.inject_into_environment
+  Env_keeper_scrub.filter_environment base
 ;;
 
 let valid_rel_component component =
@@ -887,295 +859,39 @@ let cleanup_files paths =
     paths
 ;;
 
-let github_token_env_names = [ "GH_TOKEN"; "GITHUB_TOKEN" ]
-
-let has_github_token entries =
-  List.exists
-    (fun key ->
-       List.exists
-         (fun (name, value) -> String.equal name key && not (String.equal value ""))
-         entries)
-    github_token_env_names
-;;
-
-let git_config_global_env_name = "GIT_CONFIG_GLOBAL"
-
-let git_config_helper_content =
-  "[credential \"https://github.com\"]\n\thelper = \"!gh auth git-credential\"\n"
-;;
-
-let local_git_config_global_path ~base_path ~keeper_name =
-  let playground =
-    Filename.concat base_path (Playground_paths.bundle_root keeper_name)
-  in
-  Filename.concat playground ".gitconfig"
-;;
-
-let ensure_local_git_config_global ~path =
-  try
-    ensure_dir (Filename.dirname path);
-    match Fs_compat.save_file_atomic path git_config_helper_content with
-    | Ok () -> Ok ()
-    | Error err -> Error err
-  with
-  | Sys_error msg -> Error msg
-  | Unix.Unix_error (err, fn, arg) ->
-    Error
-      (Printf.sprintf
-         "%s%s%s"
-         (Unix.error_message err)
-         (if String.equal fn "" then "" else ": " ^ fn)
-         (if String.equal arg "" then "" else " " ^ arg))
-;;
-
-let github_app_pem_rel = [ "github-app"; "private-key.pem" ]
-let github_app_pem_subpath = String.concat "/" github_app_pem_rel
-let github_app_pem_container_path = container_path_of_rel github_app_pem_rel
-
-let file_projection_policy ~container_path =
-  if String.equal container_path github_app_pem_container_path
-  then Projection_layer_only
-  else Mount_into_keeper
-
-let keeper_mount_file_entries entries =
-  List.filter
-    (fun (_, container_path) ->
-       match file_projection_policy ~container_path with
-       | Mount_into_keeper -> true
-       | Projection_layer_only -> false)
-    entries
-
-let github_app_pem_host_path ~base_path ~keeper_name =
-  let root = secret_root ~base_path ~keeper_name in
-  Filename.concat (Filename.concat root "files") github_app_pem_subpath
-;;
-
-let read_file_result path =
-  if not (path_exists path)
-  then Error (Printf.sprintf "file does not exist: %s" path)
-  else
-    try Ok (read_file path) with
-    | Sys_error msg -> Error msg
-    | Unix.Unix_error (err, fn, arg) -> Error (unix_error_message err fn arg)
-;;
-
-let default_github_app_token_minter ~app_id ~installation_id ~pem ~now =
-  match Eio_context.get_clock_opt () with
-  | None ->
-    Error "github_app_eio_clock_unavailable: token mint timeout cannot be enforced"
-  | Some clock ->
-    Keeper_github_app_installation_token.get
-      ~clock
-      ~timeout_sec:Keeper_github_app_installation_token.mint_timeout_sec
-      ~app_id
-      ~installation_id
-      ~pem
-      ~now
-      ()
-;;
-
-(* [github_app_token_overlay] mints (or reuses the cached) GitHub App
-   installation token for the keeper. [Ok None] means no GitHub App config is
-   present, so the existing static token path remains available. Once either
-   GitHub App env key is configured, missing config, unreadable PEM, or mint
-   failure returns [Error] so the keeper does not silently fall back to a
-   broader static PAT. *)
-let github_app_token_overlay
-      ?(mint_github_app_token = default_github_app_token_minter)
-      ~base_path
-      ~keeper_name
-      ~env_entries
-      ()
-  =
-  let app_id = List.assoc_opt "MASC_GITHUB_APP_ID" env_entries in
-  let installation_id =
-    List.assoc_opt "MASC_GITHUB_APP_INSTALLATION_ID" env_entries
-  in
-  match (app_id, installation_id) with
-  | Some app_id, Some installation_id ->
-    (match
-       github_app_pem_host_path ~base_path ~keeper_name |> read_file_result
-     with
-     | Error reason ->
-       Error
-         (Printf.sprintf
-            "github_app_private_key_unavailable: %s"
-            reason)
-     | Ok pem ->
-       let now = Time_compat.now () |> int_of_float in
-       mint_github_app_token ~app_id ~installation_id ~pem ~now
-       |> (function
-        | Ok token -> Ok (Some token)
-        | Error reason ->
-          Log.Keeper.warn
-            "GitHub App installation token mint failed for keeper %s: %s"
-            keeper_name reason;
-          Error
-            (Printf.sprintf
-               "github_app_installation_token_unavailable: %s"
-               reason)))
-  | None, None -> Ok None
-  | Some _, None -> Error "github_app_config_incomplete: missing MASC_GITHUB_APP_INSTALLATION_ID"
-  | None, Some _ -> Error "github_app_config_incomplete: missing MASC_GITHUB_APP_ID"
-;;
-
-let without_github_token_env entries =
-  List.filter
-    (fun (name, _) ->
-       not
-         (List.exists
-            (fun github_token_name -> String.equal name github_token_name)
-            github_token_env_names))
-    entries
-;;
-
-let with_github_app_token_env ~token entries =
-  ("GH_TOKEN", token) :: without_github_token_env entries
-;;
-
-let env_entries_with_github_app_overlay
-      ?mint_github_app_token
-      ~base_path
-      ~keeper_name
-      env_entries
-  =
-  match
-    github_app_token_overlay
-      ?mint_github_app_token
-      ~base_path
-      ~keeper_name
-      ~env_entries
-      ()
-  with
-  | Error _ as err -> err
-  | Ok (Some token) -> Ok (with_github_app_token_env ~token env_entries)
-  | Ok None -> Ok env_entries
-;;
-
-let local_env_for_keeper ?mint_github_app_token ?host_env ~base_path ~keeper_name () =
+let local_env_for_keeper ?host_env ~base_path ~keeper_name () =
   match load_secret_roots ~base_path ~keeper_name with
   | Error _ as err -> err
   | Ok roots ->
     let env_entries = merge_env_entries roots in
-    (match
-       env_entries_with_github_app_overlay
-         ?mint_github_app_token
-         ~base_path
-         ~keeper_name
-         env_entries
-     with
-     | Error _ as err -> err
-     | Ok env_entries ->
-       let git_config_path = local_git_config_global_path ~base_path ~keeper_name in
-    let needs_managed_git_config =
-      has_github_token env_entries
-      && not (env_entries_have git_config_global_env_name env_entries)
-    in
-    if needs_managed_git_config
-    then (
-      match ensure_local_git_config_global ~path:git_config_path with
-      | Error _ as err -> err
-      | Ok () ->
-        let env_entries =
-          (git_config_global_env_name, git_config_path) :: env_entries
-        in
-        let env_entries = local_env_entries_with_defaults env_entries in
-        let base = local_base_host_env ?host_env () in
-        Ok (Some (overlay_env_entries base env_entries)))
-    else
-      let env_entries = local_env_entries_with_defaults env_entries in
-      let base = local_base_host_env ?host_env () in
-       Ok (Some (overlay_env_entries base env_entries)))
+    let base = local_base_host_env ?host_env () in
+    Ok (Some (overlay_env_entries base env_entries))
 ;;
 
-let docker_git_config_global_path =
-  Filename.concat
-    (Keeper_sandbox_runtime_setup.container_masc_dir ~container_root:"")
-    "gitconfig"
-;;
-
-let docker_git_config_host_path ~base_path ~keeper_name =
-  let dir =
-    Filename.concat
-      (Filename.concat (Common.masc_dir_from_base_path ~base_path) "tmp")
-      "gitconfig"
-  in
-  Filename.concat dir (Workspace_utils.safe_filename keeper_name ^ ".gitconfig")
-;;
-
-let ensure_docker_git_config_global ~base_path ~keeper_name =
-  let path = docker_git_config_host_path ~base_path ~keeper_name in
-  try
-    ensure_dir (Filename.dirname path);
-    match Fs_compat.save_file_atomic path git_config_helper_content with
-    | Ok () -> Ok path
-    | Error err -> Error err
-  with
-  | Sys_error msg -> Error msg
-  | Unix.Unix_error (err, fn, arg) ->
-    Error
-      (Printf.sprintf
-         "%s%s%s"
-         (Unix.error_message err)
-         (if String.equal fn "" then "" else ": " ^ fn)
-         (if String.equal arg "" then "" else " " ^ arg))
-;;
-
-let docker_args_for_keeper ?mint_github_app_token ~base_path ~keeper_name ~container_name () =
+let docker_args_for_keeper ~base_path ~keeper_name ~container_name () =
   match load_secret_roots ~base_path ~keeper_name with
   | Error _ as err -> err
   | Ok roots ->
     let env_entries = merge_env_entries roots in
-    (match
-       env_entries_with_github_app_overlay
-         ?mint_github_app_token
-         ~base_path
-         ~keeper_name
-         env_entries
-     with
+    let file_entries = merge_file_entries roots in
+    (match write_env_file ~base_path ~container_name env_entries with
      | Error _ as err -> err
-     | Ok env_entries ->
-       let file_entries = merge_file_entries roots |> keeper_mount_file_entries in
-    let git_config =
-      if env_entries_have git_config_global_env_name env_entries
-         || not (has_github_token env_entries)
-      then Ok None
-      else
-        match ensure_docker_git_config_global ~base_path ~keeper_name with
-        | Error _ as err -> err
-        | Ok path -> Ok (Some path)
-    in
-    (match git_config with
-     | Error _ as err -> err
-     | Ok git_config ->
-       let env_entries =
-         match git_config with
-         | None -> env_entries
-         | Some _ -> (git_config_global_env_name, docker_git_config_global_path) :: env_entries
+     | Ok env_file ->
+       let env_args =
+         match env_file with
+         | None -> []
+         | Some path -> [ "--env-file"; path ]
        in
-       (match write_env_file ~base_path ~container_name env_entries with
-        | Error _ as err -> err
-        | Ok env_file ->
-          let env_args =
-            match env_file with
-            | None -> []
-            | Some path -> [ "--env-file"; path ]
-          in
-          let git_config_mount =
-            match git_config with
-            | None -> []
-            | Some path -> [ path, docker_git_config_global_path ]
-          in
-          let file_args =
-            file_entries @ git_config_mount
-            |> List.concat_map (fun (host, container) ->
-              [ "-v"; host ^ ":" ^ container ^ ":ro" ])
-          in
-          let cleanup_paths =
-            (match env_file with
-             | None -> []
-             | Some path -> [ path ])
-          in
-          let cleanup = fun () -> cleanup_files cleanup_paths in
-          Ok { docker_args = env_args @ file_args; cleanup })))
+       let file_args =
+         file_entries
+         |> List.concat_map (fun (host, container) ->
+           [ "-v"; host ^ ":" ^ container ^ ":ro" ])
+       in
+       let cleanup_paths =
+         match env_file with
+         | None -> []
+         | Some path -> [ path ]
+       in
+       let cleanup () = cleanup_files cleanup_paths in
+       Ok { docker_args = env_args @ file_args; cleanup })
 ;;

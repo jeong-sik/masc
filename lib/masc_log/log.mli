@@ -163,10 +163,17 @@ module Ring : sig
       latest metadata, and file-sink state without raw log message text or
       [details] payloads. *)
 
-  val init_file_sink : string -> unit
+  val init_file_sink : ?identity_recheck_interval_s:float -> string -> unit
   (** Initialize file-based log persistence. Loads previous entries from disk
       into the ring buffer, then opens the file for appending new entries.
-      [dir] is the directory for dated JSONL log files. *)
+      [dir] is the directory for dated JSONL log files.
+
+      [identity_recheck_interval_s] (default 5.0) throttles the per-emit
+      sink-identity stat pair that detects external unlink/rename of the
+      live log file. Records emitted inside the window after an external
+      unlink are lost with the unlinked inode; the loss window is bounded
+      by the interval. Date-roll rotation is checked on every emit and is
+      not affected by the throttle. *)
 
   val cleanup_old_files : ?keep_days:int -> string -> unit
   (** Remove log files older than [keep_days] (default 7). *)
@@ -219,7 +226,7 @@ module Feed : LOGGER
 module Telemetry : LOGGER
 module Noosphere : LOGGER
 module CmdPlane : LOGGER
-module Governance : LOGGER
+module Gate : LOGGER
 module Social : LOGGER
 module Transport : LOGGER
 module Gc : LOGGER
@@ -257,7 +264,6 @@ module KeeperExec : LOGGER
 module LocalWorker : LOGGER
 module Worker : LOGGER
 module Sse : LOGGER
-module Verifier : LOGGER
 module Planner : LOGGER
 module Compact : LOGGER
 module Harness : LOGGER

@@ -19,8 +19,8 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
   let cache_key =
     Printf.sprintf "%s:%d:%b" config.base_path limit detailed
   in
-  let body =
-    cached_text_by_key keeper_list_cache ~key:cache_key
+  let data =
+    cached_json_by_key keeper_list_cache ~key:cache_key
       ~ttl_s:(keeper_list_cache_ttl_s ()) (fun () ->
         let registry_names =
           Keeper_registry.all ~base_path:config.base_path ()
@@ -53,9 +53,9 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
                 ("keepers", `List rows);
               ]
         in
-        Yojson.Safe.pretty_to_string json)
+        json)
   in
-  tool_result_ok body
+  tool_result_ok_data data
 
 let handle_keeper_list ctx args : tool_result =
   keeper_list_body ~config:ctx.config args
@@ -72,6 +72,106 @@ let parse_network_mode_or_error raw =
       Error
         (Printf.sprintf "invalid network_mode %S (allowed: %s)" raw
            (String.concat ", " valid_network_mode_strings))
+
+let validation_error_data message =
+  error_assoc
+    [ "error_code", `String (error_code_to_string Validation_error)
+    ; "message", `String message
+    ]
+
+let compaction_dispatch_error_data ~stage ~checkpoint_applied error =
+  let detail = Keeper_context_runtime.lifecycle_dispatch_error_to_string error in
+  error_assoc
+    [ "error_code", `String (error_code_to_string Conflict)
+    ; "message", `String (Printf.sprintf "compaction lifecycle dispatch failed: %s" detail)
+    ; "lifecycle_stage", `String stage
+    ; "checkpoint_applied", `Bool checkpoint_applied
+    ; "dispatch_error", `String detail
+    ]
+
+type compaction_checkpoint_commit_state =
+  | Not_installed
+  | Installed_durability_unknown
+  | Outcome_unknown
+
+let compaction_checkpoint_commit_state_to_string = function
+  | Not_installed -> "not_installed"
+  | Installed_durability_unknown -> "installed_durability_unknown"
+  | Outcome_unknown -> "transaction_outcome_unknown"
+
+let compaction_recovery_error_data ?dispatch_error error =
+  let tag = Keeper_post_turn.compaction_recovery_error_to_tag error in
+  let detail = Keeper_post_turn.compaction_recovery_error_to_string error in
+  let checkpoint_commit_state, checkpoint_applied =
+    match error with
+    | Keeper_post_turn.Checkpoint_cas_failed
+        (Keeper_checkpoint_store.Commit_durability_unknown _) ->
+      Installed_durability_unknown, `Bool true
+    | Checkpoint_cas_failed (Transaction_outcome_unknown _) ->
+      Outcome_unknown, `Null
+    | Checkpoint_ref_load_failed _
+    | Checkpoint_cas_failed _
+    | Checkpoint_candidate_failed _
+    | Compaction_rejected _
+    | No_compaction _
+    (* Manual prepares bypass the suspension gate, so this surface cannot
+       observe [Retry_suspended] today; the arm keeps the classification
+       total if that routing ever changes. *)
+    | Retry_suspended _ ->
+      Not_installed, `Bool false
+  in
+  let recovery_code =
+    match error with
+    | Keeper_post_turn.Checkpoint_ref_load_failed
+        Keeper_checkpoint_store.Ref_not_found -> Not_found
+    | Compaction_rejected Exact_target_selection_failed
+    | Compaction_rejected Exact_admission_failed
+    | Compaction_rejected (Invalid_structure _)
+    | Compaction_rejected No_eligible_history
+    | Compaction_rejected Structurally_unchanged
+    | Compaction_rejected Checkpoint_not_reduced
+    | No_compaction _ ->
+      Precondition_failed
+    | Retry_suspended _ -> Precondition_failed
+    | Compaction_rejected Exact_execution_context_unavailable
+    | Compaction_rejected Exact_execution_failed_before_dispatch
+    | Compaction_rejected Exact_execution_failed_after_dispatch
+    | Compaction_rejected Invalid_compaction_plan
+    | Compaction_rejected (Invalid_structural_evidence _)
+    | Checkpoint_ref_load_failed _
+    | Checkpoint_cas_failed (Source_unavailable _)
+    | Checkpoint_cas_failed (Candidate_identity_invalid _)
+    | Checkpoint_cas_failed (Candidate_session_mismatch _)
+    | Checkpoint_cas_failed (Candidate_generation_mismatch _)
+    | Checkpoint_cas_failed (Candidate_turn_regressed _)
+    | Checkpoint_cas_failed (Commit_not_installed _)
+    | Checkpoint_candidate_failed _ -> Internal_error
+    | Checkpoint_cas_failed (Source_changed _)
+    | Checkpoint_cas_failed (Commit_durability_unknown _)
+    | Checkpoint_cas_failed (Transaction_outcome_unknown _) -> Conflict
+  in
+  let code =
+    match dispatch_error with
+    | None -> recovery_code
+    | Some _ -> Conflict
+  in
+  error_assoc
+    ([ "error_code", `String (error_code_to_string code)
+     ; "message", `String detail
+     ; "compaction_error", `String tag
+     ; ( "checkpoint_commit_state"
+       , `String
+           (compaction_checkpoint_commit_state_to_string checkpoint_commit_state) )
+     ; "checkpoint_applied", checkpoint_applied
+     ]
+     @
+     match dispatch_error with
+     | None -> []
+     | Some error ->
+       [ "recovery_error_code", `String (error_code_to_string recovery_code)
+       ; ( "lifecycle_dispatch_error"
+         , `String
+             (Keeper_context_runtime.lifecycle_dispatch_error_to_string error) ) ])
 
 let keeper_sandbox_status_fleet_names ctx =
   let registry_names =
@@ -218,13 +318,12 @@ let handle_keeper_sandbox_status ctx args : tool_result =
                 keeper_sandbox_status_error_item_json ctx.config ~name ~error)
           unique_items
       in
-      tool_result_ok
-        (Yojson.Safe.pretty_to_string
-           (`Assoc
-              [
-                ("count", `Int (List.length items));
-                ("items", `List items);
-              ]))
+      tool_result_ok_data
+        (`Assoc
+           [
+             ("count", `Int (List.length items));
+             ("items", `List items);
+           ])
   | _ ->
       (match prepare_passive_keeper_identity ctx args with
        | Error err -> tool_result_error err
@@ -243,24 +342,20 @@ let handle_keeper_sandbox_status ctx args : tool_result =
                  ]
                  |> attach_identity_reseed ?identity_reseed
                in
-               tool_result_ok (Yojson.Safe.pretty_to_string json)))
+               tool_result_ok_data json))
 
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_sandbox_start_body ~(config : Workspace.config) args : tool_result =
   match resolve_keeper_meta_config ~config args with
   | Error err -> tool_result_error err
   | Ok meta ->
-      let module Contract = Keeper_sandbox_control_contract in
-      let timeout_sec =
-        Contract.clamp
-          Contract.operation_timeout_sec
-          (get_float args "timeout_sec" Contract.operation_timeout_sec.default)
-      in
-      let ttl_sec =
-        Contract.clamp
-          Contract.managed_ttl_sec
-          (get_float args "ttl_sec" Contract.managed_ttl_sec.default)
-      in
+      let timeout_sec = get_float args "timeout_sec" nan in
+      let ttl_sec = Option.value ~default:0.0 (get_float_opt args "ttl_sec") in
+      if (not (Float.is_finite timeout_sec)) || timeout_sec <= 0.0
+      then tool_result_error "timeout_sec must be a positive finite number"
+      else if (not (Float.is_finite ttl_sec)) || ttl_sec < 0.0
+      then tool_result_error "ttl_sec must be a non-negative finite number"
+      else
       let network_mode_raw =
         String.trim
           (get_string args "network_mode"
@@ -275,27 +370,23 @@ let keeper_sandbox_start_body ~(config : Workspace.config) args : tool_result =
            with
            | Error err -> tool_result_error err
            | Ok result ->
-               invalidate_status_cache meta.name;
-               tool_result_ok
-                 (Yojson.Safe.pretty_to_string
-                    (`Assoc
-                       [
-                         ("keeper", `String meta.name);
-                         ("action", `String "start");
-                         ("sandbox", result);
-                       ]))))
+               tool_result_ok_data
+                 (`Assoc
+                    [
+                      ("keeper", `String meta.name);
+                      ("action", `String "start");
+                      ("sandbox", result);
+                    ])))
 
 let handle_keeper_sandbox_start ctx args : tool_result =
   keeper_sandbox_start_body ~config:ctx.config args
 
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let keeper_sandbox_stop_body ~(config : Workspace.config) args : tool_result =
-  let module Contract = Keeper_sandbox_control_contract in
-  let timeout_sec =
-    Contract.clamp
-      Contract.operation_timeout_sec
-      (get_float args "timeout_sec" Contract.operation_timeout_sec.default)
-  in
+  let timeout_sec = get_float args "timeout_sec" nan in
+  if (not (Float.is_finite timeout_sec)) || timeout_sec <= 0.0
+  then tool_result_error "timeout_sec must be a positive finite number"
+  else
   let prune_stale = get_bool args "prune_stale" false in
   let container_kind_raw =
     get_string args "container_kind" Keeper_sandbox_control.managed_kind
@@ -306,7 +397,7 @@ let keeper_sandbox_stop_body ~(config : Workspace.config) args : tool_result =
     | name -> Some name
   in
   match Keeper_sandbox_control.parse_stop_scope container_kind_raw with
-  | Error err -> tool_result_error (error_response_typed ~code:Validation_error err)
+  | Error err -> tool_result_error_data (validation_error_data err)
   | Ok scope ->
       let stop_result =
         Keeper_sandbox_control.stop_containers
@@ -316,13 +407,10 @@ let keeper_sandbox_stop_body ~(config : Workspace.config) args : tool_result =
         if prune_stale then
           Some
             (Keeper_sandbox_control.cleanup_stale ~config
-               ~timeout_sec:(Stdlib.Float.min timeout_sec 5.0) ())
+               ~timeout_sec ())
         else
           None
       in
-      (match keeper_name with
-       | Some name -> invalidate_status_cache name
-       | None -> Keeper_status_detail.invalidate_status_cache_all ());
       let stop_json =
         `Assoc
           [
@@ -344,16 +432,15 @@ let keeper_sandbox_stop_body ~(config : Workspace.config) args : tool_result =
                  `List (List.map (fun err -> `String err) cleanup.errors));
               ]
       in
-      tool_result_ok
-        (Yojson.Safe.pretty_to_string
-           (`Assoc
-              [
-                ("action", `String "stop");
-                ("keeper", Json_util.string_opt_to_json keeper_name);
-                ("container_kind", `String (Keeper_sandbox_control.stop_scope_to_string scope));
-                ("stop_result", stop_json);
-                ("stale_cleanup", stale_json);
-              ]))
+      tool_result_ok_data
+        (`Assoc
+           [
+             ("action", `String "stop");
+             ("keeper", Json_util.string_opt_to_json keeper_name);
+             ("container_kind", `String (Keeper_sandbox_control.stop_scope_to_string scope));
+             ("stop_result", stop_json);
+             ("stale_cleanup", stale_json);
+           ])
 
 let handle_keeper_sandbox_stop ctx args : tool_result =
   keeper_sandbox_stop_body ~config:ctx.config args
@@ -367,12 +454,18 @@ let handle_keeper_sandbox_stop ctx args : tool_result =
 
 let should_bootstrap_existing_keepalives name args =
   match name with
+  | "masc_keeper_delegate" ->
+      (match Keeper_invocation_contract.request_of_json args with
+       | Ok request ->
+         not (String.equal (String.trim (Keeper_invocation_contract.prompt request)) "")
+       | Error _ -> false)
   | "masc_keeper_msg" ->
       not (String.equal (String.trim (get_string args "message" "")) "")
   | _ -> false
 
 let maybe_bootstrap_existing_keepalives ctx ~name ~args =
-  if should_bootstrap_existing_keepalives name args then
+  if should_bootstrap_existing_keepalives name args
+  then
     (try start_existing_keepalives ctx
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        Log.Keeper.error "start_existing_keepalives failed: %s"
@@ -401,132 +494,107 @@ let keeper_reset_body ~(config : Workspace.config) args : tool_result =
 let handle_keeper_reset ctx args : tool_result =
   keeper_reset_body ~config:ctx.config args
 
-(** Resolve the primary model max context for a keeper.
+let manual_compaction_wakeup_observation ~base_path keeper_name =
+  match
+    Keeper_registry.wakeup_running
+      ~intent:Keeper_registry.Compaction_signal
+      ~base_path
+      keeper_name
+  with
+  | Keeper_registry.Signaled -> `Assoc [ "outcome", `String "signaled" ]
+  | Keeper_registry.Deferred_unregistered ->
+    Log.Keeper.info
+      "%s: manual compaction request queued without a registered wake target"
+      keeper_name;
+    `Assoc [ "outcome", `String "deferred_unregistered" ]
+  | Keeper_registry.Deferred_not_running phase ->
+    let phase = Keeper_state_machine.phase_to_string phase in
+    Log.Keeper.info
+      "%s: manual compaction request wake deferred in phase=%s"
+      keeper_name
+      phase;
+    `Assoc
+      [ "outcome", `String "deferred_not_running"; "phase", `String phase ]
+  | Keeper_registry.Deferred_lifecycle denial ->
+    let reason = Keeper_lifecycle_admission.autonomous_denial_to_wire denial in
+    Log.Keeper.info
+      "%s: manual compaction request wake deferred by lifecycle reason=%s"
+      keeper_name
+      reason;
+    `Assoc
+      [ "outcome", `String "deferred_lifecycle"; "reason", `String reason ]
+;;
 
-    Returns the resolved primary provider/runtime budget, separate from any
-    requested [max_context_override] turn-budget widening.
-    Returns [min_keeper_context_tokens] when meta is unavailable. *)
-let resolve_primary_max_context (meta : Keeper_meta_contract.keeper_meta option) : int =
-  let min_ctx = Keeper_config.min_keeper_context_tokens in
-  match meta with
-  | None -> min_ctx
-  | Some meta ->
-    let resolution =
-      Keeper_context_runtime.resolve_max_context_resolution_of_meta meta
-    in
-    max min_ctx resolution.effective_budget
-
-(** Operator-initiated context compaction.
-
-    Dispatches [Operator_compact_requested] to the FSM, then compacts the
-    keeper's latest checkpoint via OAS checkpoint recovery.  Returns
-    before/after token counts on success. *)
+(** Queue an operator compaction for the target Keeper's owning lane. *)
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let keeper_compact_body ~(config : Workspace.config) args : tool_result =
+let keeper_compact_body
+      ?invocation_ref
+      ~(config : Workspace.config)
+      args
+  : tool_result
+  =
   match resolve_keeper_name_config ~config args with
   | Error err -> tool_result_error err
   | Ok name ->
-    let force = get_bool args "force" false in
-    (* Registry race: [resolve_keeper_name] succeeded but the registry entry
-       can still disappear if another fiber unregistered the keeper.  Treat
-       this as a distinct "not found" error rather than an opaque
-       "phase=unknown" precondition failure. *)
     match Keeper_registry.get ~base_path:config.base_path name with
     | None ->
       Otel_metric_store.inc_counter Keeper_metrics.(to_string OperatorCompact)
         ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Not_found))] ();
-      tool_result_error
-        (error_response_typed
-           ~code:Validation_error
+      tool_result_error_data
+        (validation_error_data
            (Printf.sprintf "keeper %s is not in the registry" name))
     | Some entry ->
-    let phase_before = Keeper_state_machine.phase_to_string entry.phase in
-    (* Phase precondition: Overflowed, Paused, or (Running/Failing with force).
-       Match on the variant directly so the compiler warns when new phases
-       are added — the catch-all wildcard would silently default to [false]. *)
-    let allowed =
-      match entry.phase with
-      | Overflowed | Paused | Compacting -> true
-      | Running | Failing -> force
-      | Offline | Stopped | Dead | Zombie | Crashed | Restarting | HandingOff | Draining -> false
-    in
-    if not allowed then begin
+    if Keeper_state_machine.is_terminal entry.phase then begin
       Otel_metric_store.inc_counter Keeper_metrics.(to_string OperatorCompact)
         ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Precondition))] ();
-      tool_result_error
-        (error_response_typed
-           ~code:Validation_error
-           (Printf.sprintf
-              "keeper %s is in phase %s; compaction requires Overflowed, Paused, or force=true"
-              name phase_before))
+      tool_result_error_data
+        (validation_error_data
+           (Printf.sprintf "keeper %s is explicitly stopped" name))
     end
-    else begin
-      (* Dispatch FSM event *)
-      Keeper_context_runtime.dispatch_keeper_phase_event
-        ~config ~keeper_name:name
-        Keeper_state_machine.Operator_compact_requested;
-      (* Read meta for checkpoint access *)
-      match read_meta_resolved config name with
-      | Ok None | Error _ ->
-        tool_result_error (Printf.sprintf "keeper %s: meta unavailable for compaction" name)
-      | Ok (Some (_resolved, meta)) ->
-        let base_dir = Keeper_types_profile.session_base_dir config in
-        let checkpoint_label = "runtime" in
-        let max_tokens = resolve_primary_max_context (Some meta) in
-        Keeper_context_runtime.dispatch_keeper_phase_event
-          ~config ~keeper_name:name
-          ~origin:Keeper_registry.Operator_compact
-          Keeper_state_machine.Compaction_started;
-        match
-          Keeper_context_runtime.recover_latest_checkpoint_for_overflow_retry
-            ~base_dir ~meta ~model:checkpoint_label ~primary_model_max_tokens:max_tokens
-        with
-        | Some recovery ->
-          Keeper_context_runtime.dispatch_compaction_completed
-            ~config ~keeper_name:name
-            ~origin:Keeper_registry.Operator_compact
-            ~before_tokens:recovery.compaction.before_tokens
-            ~after_tokens:recovery.compaction.after_tokens;
-          invalidate_status_cache name;
-          Otel_metric_store.inc_counter Keeper_metrics.(to_string OperatorCompact)
-            ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Ok))] ();
-          tool_result_ok
-            (Yojson.Safe.to_string
-               (`Assoc
-                 [
-                   ("name", `String name);
-                   ("phase_before", `String phase_before);
-                   ( "phase_after"
-                   , `String
-                       (match Keeper_registry.get ~base_path:config.base_path name with
-                        | Some entry -> Keeper_state_machine.phase_to_string entry.phase
-                        | None -> "unknown") );
-                   ("before_tokens", `Int recovery.compaction.before_tokens);
-                   ("after_tokens", `Int recovery.compaction.after_tokens);
-                 ]))
-        | None ->
-          (* Compaction infrastructure unavailable — emit [Compaction_failed]
-             so [context_overflow] stays set and [derive_phase] re-projects
-             to Overflowed.  A subsequent [Compact_retry_exhausted] dispatch
-             (owned by the retry-loop caller) will latch the keeper to Paused.
-             Emitting [Compaction_completed] here would be a false success
-             signal. *)
-          Keeper_context_runtime.dispatch_keeper_phase_event
-            ~config ~keeper_name:name
-            ~origin:Keeper_registry.Operator_compact
-            (Keeper_state_machine.Compaction_failed {
-               reason = "no_valid_checkpoint";
-            });
-          Otel_metric_store.inc_counter Keeper_metrics.(to_string OperatorCompact)
-            ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label No_checkpoint))] ();
-          tool_result_error
-            (Printf.sprintf
-               "keeper %s: checkpoint compaction unavailable (no valid checkpoint found)"
-               name)
-    end
+    else
+      let stimulus : Keeper_event_queue.stimulus =
+        { post_id = Keeper_event_queue.manual_compaction_post_id
+        ; urgency = Immediate
+        ; arrived_at = Time_compat.now ()
+        ; payload = Manual_compaction_requested
+        }
+      in
+      let queued queue_outcome =
+        tool_result_ok_data
+          (`Assoc
+            [ "name", `String name
+            ; "queued", `Bool true
+            ; "queue_outcome", `String queue_outcome
+            ; "stimulus", `String (Keeper_event_queue.payload_kind_label stimulus.payload)
+            ; ( "producer_invocation"
+              , Option.fold
+                  ~none:`Null
+                  ~some:Tool_invocation_ref.to_yojson
+                  invocation_ref )
+            ; ( "wake"
+              , manual_compaction_wakeup_observation
+                  ~base_path:config.base_path
+                  name )
+            ])
+      in
+      (match
+         Keeper_registry_event_queue.enqueue_stimulus_durable_result
+           ~base_path:config.base_path
+           name
+           stimulus
+       with
+       | Stimulus_storage_error detail ->
+         Log.Keeper.error
+           ~keeper_name:name
+           "manual compaction request enqueue failed: %s"
+           detail;
+         tool_result_error
+           (Printf.sprintf "keeper %s: compaction request enqueue failed: %s" name detail)
+       | Stimulus_enqueued -> queued "enqueued"
+       | Stimulus_already_present -> queued "already_present")
 
-let handle_keeper_compact ctx args : tool_result =
-  keeper_compact_body ~config:ctx.config args
+let handle_keeper_compact ?invocation_ref ctx args : tool_result =
+  keeper_compact_body ?invocation_ref ~config:ctx.config args
 
 (** Last-resort context clear.
 
@@ -540,9 +608,8 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
   | Ok name ->
     let reason = String.trim (get_string args "reason" "") in
     if String.equal reason "" then
-      tool_result_error
-        (error_response_typed
-           ~code:Validation_error
+      tool_result_error_data
+        (validation_error_data
            "reason is required for masc_keeper_clear (audit trail)")
     else
     (* Same registry race guard as [handle_keeper_compact]: if the keeper
@@ -550,9 +617,8 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
        rather than silently proceed with a half-applied clear. *)
     match Keeper_registry.get ~base_path:config.base_path name with
     | None ->
-      tool_result_error
-        (error_response_typed
-           ~code:Validation_error
+      tool_result_error_data
+        (validation_error_data
            (Printf.sprintf "keeper %s is not in the registry" name))
     | Some entry ->
       let preserve_system = get_bool args "preserve_system_prompt" true in
@@ -572,17 +638,9 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
         | Some meta -> Keeper_id.Trace_id.to_string meta.runtime.trace_id
         | None -> Keeper_context_runtime.generate_trace_id ()
       in
-      let max_tokens = resolve_primary_max_context meta_for_trace in
-      let max_checkpoint_messages =
-        match meta_for_trace with
-        | Some meta -> meta.compaction.max_checkpoint_messages
-        | None -> 100
-      in
       let session, ctx_opt =
         Keeper_context_runtime.load_context_from_checkpoint
-          ~max_checkpoint_messages
           ~trace_id
-          ~primary_model_max_tokens:max_tokens
           ~base_dir
       in
       let checkpoint_found = Option.is_some ctx_opt in
@@ -602,16 +660,12 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
             else
               []
           in
-          let cleared_ctx =
-            {
-              wctx with
-              checkpoint =
-                {
-                  (Keeper_context_runtime.checkpoint_of_context wctx) with
-                  messages = cleared_messages;
-                };
+          let checkpoint =
+            { (Keeper_context_runtime.checkpoint_of_context wctx) with
+              messages = cleared_messages
             }
           in
+          let cleared_ctx = { checkpoint } in
           (* Increment generation from meta to signal a new context epoch.
              Using a hardcoded value would violate generation monotonicity
              — the keeper_unified_turn retry loop uses meta.runtime.generation
@@ -625,7 +679,6 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
            | Some meta ->
                (match
                   Keeper_context_runtime.save_oas_checkpoint
-                    ~max_checkpoint_messages
                     ~multimodal_policy:meta.multimodal_policy
                     ~keeper_name:meta.name
                     ~session
@@ -635,9 +688,14 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                 with
                 | Ok _ -> ()
                 | Error err ->
+                    let detail =
+                      Keeper_context_core.checkpoint_write_error_to_string
+                        ~persistence_error_to_string:Fun.id
+                        err
+                    in
                     Log.Keeper.warn
                       "%s: failed to save cleared OAS checkpoint: %s"
-                      name err)
+                      name detail)
            | None -> ());
           msg_count - List.length cleared_messages
       in
@@ -648,17 +706,17 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
       (* Clear registry failure state *)
       Keeper_registry.set_failure_reason ~base_path:config.base_path name None;
       Keeper_registry.reset_turn_failures ~base_path:config.base_path name;
-      invalidate_status_cache name;
+      Keeper_unified_turn_failure.reset_invalid_request_failures ~keeper_name:name;
+      Keeper_unified_turn_failure.note_turn_success name;
       Log.Keeper.warn
         "%s: context cleared by operator (reason=%s, preserve_system=%b, cleared=%d msgs)"
         name reason preserve_system cleared_count;
       Otel_metric_store.inc_counter Keeper_metrics.(to_string OperatorClear)
         ~labels:[("keeper", name);
                  ("preserve_system", Bool.to_string preserve_system)] ();
-      tool_result_ok
-        (Yojson.Safe.to_string
-           (`Assoc
-             [
+      tool_result_ok_data
+        (`Assoc
+          [
                ("name", `String name);
                ("phase_before", `String phase_before);
                ( "phase_after"
@@ -669,36 +727,46 @@ let keeper_clear_body ~(config : Workspace.config) args : tool_result =
                ("cleared_message_count", `Int cleared_count);
                ("checkpoint_found", `Bool checkpoint_found);
                ("preserve_system_prompt", `Bool preserve_system);
-               ("reason", `String reason);
-             ]))
+            ("reason", `String reason);
+          ])
 
 let handle_keeper_clear ctx args : tool_result =
   keeper_clear_body ~config:ctx.config args
 
-let dispatch ?continuation_channel ctx ~name ~args : tool_result option =
+let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
   let ctx = resolve_ctx ctx ~name args in
   match name with
   | "masc_persona_list" -> Some (tool_result_with_tool_name ~tool_name:name (Persona.handle_persona_list ctx args))
   | "masc_persona_create" -> Some (tool_result_with_tool_name ~tool_name:name (Keeper_tool_persona_crud.handle_persona_create ctx args))
   | "masc_persona_update" -> Some (tool_result_with_tool_name ~tool_name:name (Keeper_tool_persona_crud.handle_persona_update ctx args))
+  | "masc_persona_delete" -> Some (tool_result_with_tool_name ~tool_name:name (Keeper_tool_persona_crud.handle_persona_delete ctx args))
   | "masc_keeper_create_from_persona" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_create_from_persona ctx args))
   | "masc_keeper_up" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_up ctx args))
   | "masc_keeper_status" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_status ctx args))
-  | "masc_keeper_msg" ->
+  | "masc_keeper_delegate" ->
       Some
         (tool_result_with_tool_name
            ~tool_name:name
-           (handle_keeper_msg
-              ?continuation_channel
+           (Keeper_tool_surface_ops.handle_keeper_delegate
               ~submitted_by:ctx.agent_name
               ctx
               args))
-  | "masc_keeper_msg_result" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_result ctx args))
-  | "masc_keeper_msg_cancel" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_cancel ctx args))
-  | "masc_keeper_msg_queue" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_msg_queue ctx args))
-  | "masc_keeper_adversarial_review" ->
-      Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_adversarial_review ctx args))
+  | "masc_keeper_delegate_status" ->
+      Some
+        (tool_result_with_tool_name ~tool_name:name
+           (Keeper_tool_surface_ops.keeper_delegate_status_body
+              ~config:ctx.config ~caller:ctx.agent_name args))
+  | "masc_keeper_delegate_cancel" ->
+      Some
+        (tool_result_with_tool_name ~tool_name:name
+           (Keeper_tool_surface_ops.keeper_delegate_cancel_body
+              ~config:ctx.config ~caller:ctx.agent_name args))
+  | "masc_keeper_delegate_list" ->
+      Some
+        (tool_result_with_tool_name ~tool_name:name
+           (Keeper_tool_surface_ops.keeper_delegate_list_body
+              ~config:ctx.config ~caller:ctx.agent_name args))
   | "masc_keeper_down" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_down ctx args))
   | "masc_keeper_list" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_list ctx args))
   | "masc_keeper_persona_audit" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_persona_audit ctx args))
@@ -708,7 +776,11 @@ let dispatch ?continuation_channel ctx ~name ~args : tool_result option =
            ~tool_name:name
            (handle_keeper_sandbox_status ctx args))
   | "masc_keeper_reset" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_reset ctx args))
-  | "masc_keeper_compact" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_compact ctx args))
+  | "masc_keeper_compact" ->
+    Some
+      (tool_result_with_tool_name
+         ~tool_name:name
+         (handle_keeper_compact ?invocation_ref ctx args))
   | "masc_keeper_clear" -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_clear ctx args))
   | _ -> None
 
@@ -721,63 +793,53 @@ let dispatch_keeper_msg ~submitted_by ?continuation_channel ctx ~args : tool_res
     (handle_keeper_msg ?continuation_channel ~submitted_by ctx args)
 ;;
 
-(** Streaming dispatch: only handles keeper_msg with text delta forwarding.
-    Returns None for all other tool names.
-    Called from server_routes_http_keeper_stream. *)
-let dispatch_stream
+(** Private direct-delivery stream used by connector and dashboard adapters. *)
+let dispatch_keeper_msg_stream
       ?on_text_delta
       ?on_event
       ?continuation_channel
       ?on_admission_rejected
       ?on_admitted
       ctx
-      ~name
       ~args
   : tool_result option
   =
+  let name = "masc_keeper_msg" in
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
   let ctx = resolve_ctx ctx ~name args in
-  match name with
-  | "masc_keeper_msg" ->
-      Some
-        (tool_result_with_tool_name
-           ~tool_name:name
-           (handle_keeper_msg_stream
-              ?on_text_delta
-              ?on_event
-              ?continuation_channel
-              ?on_admission_rejected
-              ?on_admitted
-              ctx
-              args))
-  | _ -> None
+  Some
+    (tool_result_with_tool_name
+       ~tool_name:name
+       (handle_keeper_msg_stream
+          ?on_text_delta
+          ?on_event
+          ?continuation_channel
+          ?on_admission_rejected
+          ?on_admitted
+          ctx
+          args))
 
-let dispatch_stream_if_free
+let dispatch_keeper_msg_stream_if_free
       ?on_text_delta
       ?on_event
       ?continuation_channel
       ctx
-      ~name
       ~args
   =
+  let name = "masc_keeper_msg" in
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
   let ctx = resolve_ctx ctx ~name args in
-  match name with
-  | "masc_keeper_msg" ->
-      (match
-         handle_keeper_msg_stream_if_free
-           ?on_text_delta
-           ?on_event
-           ?continuation_channel
-           ctx
-           args
-       with
-       | `Busy rejection -> `Busy rejection
-       | `Ran result ->
-         `Ran
-           (Some
-              (tool_result_with_tool_name ~tool_name:name result)))
-  | _ -> `Ran None
+  match
+    handle_keeper_msg_stream_if_free
+      ?on_text_delta
+      ?on_event
+      ?continuation_channel
+      ctx
+      args
+  with
+  | `Busy rejection -> `Busy rejection
+  | `Ran result ->
+    `Ran (Some (tool_result_with_tool_name ~tool_name:name result))
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
@@ -809,15 +871,12 @@ let register_keeper_surface_schema (s : Masc_domain.tool_schema) =
        ~is_read_only:policy.is_read_only
        ~mcp_context_required:policy.mcp_context_required
        ~is_idempotent:policy.is_idempotent
-       ~is_destructive:policy.is_destructive
        ~visibility:metadata.visibility
        ~implementation_status:metadata.implementation_status
        ?canonical_name:metadata.canonical_name
        ?replacement:metadata.replacement
        ?reason:metadata.reason
        ~allow_direct_call_when_hidden:metadata.allow_direct_call_when_hidden
-       ?effect_domain:metadata.effect_domain
-       ?requires_actor_binding:metadata.requires_actor_binding
        ())
 let () =
   List.iter register_keeper_surface_schema schemas
@@ -834,47 +893,56 @@ let () =
    provides them via PR-A.2 plumbing. *)
 let eio_context_missing tool_name =
   Some
-    (tool_result_error
+    (tool_result_error_data
        ~tool_name
-       (Printf.sprintf
-          {|{"error":"%s requires Eio context (sw + clock); call via Mcp_server_eio_execute"}|}
-          tool_name))
+       (`Assoc
+          [ ( "error"
+            , `String
+                (Printf.sprintf
+                   "%s requires Eio context (sw + clock); call via Mcp_server_eio_execute"
+                   tool_name) ) ]))
 ;;
 
 let () =
   Keeper_dispatch_ref.dispatch
-  := fun ~config ~agent_name ?sw ?clock ?proc_mgr ?net ?mcp_session_id:_ ~name ~args () ->
+  := fun ~config ~agent_name ~publication_recovery_provider ?sw ?clock ?proc_mgr ?net ?mcp_session_id:_ ?authorize_external_effect ~name ~args () ->
+    let run_external_effect continue =
+      match authorize_external_effect with
+      | None -> continue ()
+      | Some authorize -> authorize ~operation:name ~input:args ~continue
+    in
     match name with
     | "masc_keeper_list" ->
       Some (tool_result_with_tool_name ~tool_name:name (keeper_list_body ~config args))
-    | "masc_keeper_msg_result" ->
+    | "masc_keeper_delegate_status" ->
       Some
         (tool_result_with_tool_name
            ~tool_name:name
-           (Keeper_tool_surface_ops.keeper_msg_result_body
+           (Keeper_tool_surface_ops.keeper_delegate_status_body
               ~config
               ~caller:agent_name
               args))
-    | "masc_keeper_msg_cancel" ->
+    | "masc_keeper_delegate_cancel" ->
       Some
         (tool_result_with_tool_name
            ~tool_name:name
-           (Keeper_tool_surface_ops.keeper_msg_cancel_body
+           (Keeper_tool_surface_ops.keeper_delegate_cancel_body
               ~config
               ~caller:agent_name
               args))
-    | "masc_keeper_msg_queue" ->
+    | "masc_keeper_delegate_list" ->
       Some
         (tool_result_with_tool_name
            ~tool_name:name
-           (Keeper_tool_surface_ops.keeper_msg_queue_body
+           (Keeper_tool_surface_ops.keeper_delegate_list_body
               ~config
               ~caller:agent_name
               args))
     | "masc_keeper_compact" ->
       Some (tool_result_with_tool_name ~tool_name:name (keeper_compact_body ~config args))
     | "masc_keeper_clear" ->
-      Some (tool_result_with_tool_name ~tool_name:name (keeper_clear_body ~config args))
+      run_external_effect (fun () ->
+        Some (tool_result_with_tool_name ~tool_name:name (keeper_clear_body ~config args)))
     | "masc_keeper_reset" ->
       Some (tool_result_with_tool_name ~tool_name:name (keeper_reset_body ~config args))
     | "masc_keeper_persona_audit" ->
@@ -887,16 +955,18 @@ let () =
         (tool_result_with_tool_name
            ~tool_name:name
            (Keeper_tool_surface_ops.keeper_status_body ~config ~agent_name args))
-    | "masc_keeper_adversarial_review" ->
-      Some
-        (tool_result_with_tool_name
-           ~tool_name:name
-           (Keeper_tool_surface_ops.adversarial_review_body ~config ~agent_name args))
     | "masc_keeper_sandbox_status" ->
       (match sw, clock with
        | Some sw, Some clock ->
          let ctx : _ Keeper_types_profile.context =
-           { config; agent_name; sw; clock; proc_mgr; net }
+           { config
+           ; agent_name
+           ; sw
+           ; clock
+           ; proc_mgr
+           ; net
+           ; publication_recovery_provider
+           }
          in
          Some
            (tool_result_with_tool_name
@@ -904,44 +974,48 @@ let () =
               (handle_keeper_sandbox_status ctx args))
        | _ -> eio_context_missing name)
     | "masc_keeper_sandbox_start" ->
-      Some
-        (tool_result_with_tool_name
-           ~tool_name:name
-           (keeper_sandbox_start_body ~config args))
+      run_external_effect (fun () ->
+        Some
+          (tool_result_with_tool_name
+             ~tool_name:name
+             (keeper_sandbox_start_body ~config args)))
     | "masc_keeper_sandbox_stop" ->
-      Some
-        (tool_result_with_tool_name
-           ~tool_name:name
-           (keeper_sandbox_stop_body ~config args))
+      run_external_effect (fun () ->
+        Some
+          (tool_result_with_tool_name
+             ~tool_name:name
+             (keeper_sandbox_stop_body ~config args)))
     | "masc_keeper_down" ->
-      Keeper_tool_surface_ops.invalidate_keeper_list_cache ();
-      Keeper_tool_surface_ops.invalidate_status_cache (Tool_args.get_string args "name" "");
       (match sw, clock with
        | Some sw, Some clock ->
          let ctx : _ Keeper_types_profile.context =
-           { config; agent_name; sw; clock; proc_mgr; net }
+           { config
+           ; agent_name
+           ; sw
+           ; clock
+           ; proc_mgr
+           ; net
+           ; publication_recovery_provider
+           }
          in
-         Some
-           (tool_result_with_tool_name
-              ~tool_name:name
-              (Keeper_turn_lifecycle.handle_keeper_down ctx args))
+         run_external_effect (fun () ->
+           Keeper_tool_surface_ops.invalidate_keeper_list_cache ();
+           Some
+             (tool_result_with_tool_name
+                ~tool_name:name
+                (Keeper_turn_lifecycle.handle_keeper_down ctx args)))
        | _ -> eio_context_missing name)
     (* RFC-0182 Phase 5 PR-B: Eio-bound keeper tools.  Require both
        sw and clock from caller; gracefully fail when invoked from a
        path without Eio context. *)
-    | "masc_keeper_msg" ->
+    | "masc_keeper_delegate" ->
       (match sw, clock with
        | Some sw, Some clock ->
-         Some
-           (Keeper_tool_surface_ops.keeper_msg_body
-              ~config
-              ~agent_name
-              ~sw
-              ~clock
-              ?proc_mgr
-              ?net
-              args)
-       | _ -> eio_context_missing "masc_keeper_msg")
+         let ctx : _ Keeper_types_profile.context =
+           { config; agent_name; sw; clock; proc_mgr; net; publication_recovery_provider }
+         in
+         Some (Keeper_tool_surface_ops.handle_keeper_delegate ~submitted_by:agent_name ctx args)
+       | _ -> eio_context_missing "masc_keeper_delegate")
     | "masc_keeper_up" ->
       (match sw, clock with
        | Some sw, Some clock ->
@@ -951,6 +1025,7 @@ let () =
               ~agent_name
               ~sw
               ~clock
+              ~publication_recovery_provider
               ?proc_mgr
               ?net
               args)

@@ -57,23 +57,9 @@ let active_ownership_conflict_for_claim config ~agent_name ~requested_task_id
     Some (active_ownership_conflict_message ~agent_name ~requested_task_id task_ids)
 ;;
 
-(** RFC-0088 §1 child step (issue #18839): typed surface for the
-    implicit auto-release that [task_claim_next] performs when the
-    agent already holds another task. Previously the only signal was
-    a substring in the [Ok msg] string ["… (auto-released X, Y)"];
-    MCP handlers and tests had to re-parse it. Lifting it into a
-    typed field lets callers — including the MCP envelope that feeds
-    the LLM keeper — react without string parsing, which is the
-    enabling step before behaviour change (reject + explicit release)
-    can be staged. *)
-type claim_outcome = {
-  message : string;
-  auto_released_task_ids : string list;
-}
-
 (** Result-returning version of claim_task for type-safe error handling. *)
 let claim_task_r config ~agent_name ~task_id ()
-  : claim_outcome Masc_domain.masc_result
+  : string Masc_domain.masc_result
   =
   let open Result.Syntax in
   let* () = if not (is_initialized config) then Error (Masc_domain.System Masc_domain.System_error.NotInitialized) else Ok () in
@@ -175,9 +161,7 @@ let claim_task_r config ~agent_name ~task_id ()
          | `Already_mine ->
            Ok
              (`Existing_claim
-               { message = Printf.sprintf "Task %s is already claimed by you" task_id
-               ; auto_released_task_ids = []
-               })
+               (Printf.sprintf "Task %s is already claimed by you" task_id))
          | `Claimed_verification ->
            (* Issue #19314 / RFC-0220 §3.5: cross-agent verification dispatch.
               The task stays [AwaitingVerification]; [resolve_claim] has bound
@@ -223,15 +207,16 @@ let claim_task_r config ~agent_name ~task_id ()
              (`Assoc
                [ "type", `String "task_claim_verification"
                ; "agent", `String agent_name
-               ; "actor_kind", `String (Workspace_task_classify.task_actor_kind agent_name)
+               ; ( "actor_kind"
+                 , `String
+                     (Workspace_task_classify.task_actor_kind_to_string
+                        Workspace_task_classify.Agent) )
                ; "task", `String task_id
                ; "ts", `String (now_iso ())
                ]);
            Ok
              (`New_claim
-               { message = Printf.sprintf "%s assigned as verifier for %s" agent_name task_id
-               ; auto_released_task_ids = []
-               })
+               (Printf.sprintf "%s assigned as verifier for %s" agent_name task_id))
          | `Claimed_ok ->
            let claimed_task =
              List.find (fun (t : Masc_domain.task) -> String.equal t.id task_id) new_tasks
@@ -267,7 +252,10 @@ let claim_task_r config ~agent_name ~task_id ()
              (`Assoc
                     [ "type", `String "task_claim"
                     ; "agent", `String agent_name
-                    ; "actor_kind", `String (Workspace_task_classify.task_actor_kind agent_name)
+                    ; ( "actor_kind"
+                      , `String
+                          (Workspace_task_classify.task_actor_kind_to_string
+                             Workspace_task_classify.Agent) )
                     ; "task", `String task_id
                     ; "ts", `String (now_iso ())
                     ]);
@@ -283,9 +271,7 @@ let claim_task_r config ~agent_name ~task_id ()
                     (Masc_domain.Claimed { assignee = agent_name; claimed_at = now_iso () })
                   ());
            let claim_msg = Printf.sprintf "%s claimed %s" agent_name task_id in
-           Ok
-             (`New_claim
-               { message = claim_msg; auto_released_task_ids = [] })
+           Ok (`New_claim claim_msg)
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | e -> Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e)))))
@@ -296,16 +282,15 @@ let claim_task_r config ~agent_name ~task_id ()
   | Error _ as err -> err
 ;;
 
-(** Legacy string-returning claim_task. Delegates to [claim_task_r]. *)
+(** String-returning convenience wrapper over [claim_task_r]. *)
 let claim_task config ~agent_name ~task_id =
   match claim_task_r config ~agent_name ~task_id () with
-  | Ok outcome -> outcome.message
+  | Ok message -> message
   | Error e -> Masc_domain.to_string e
 ;;
 
-(** Unified task transition (single entrypoint).
-    When [~force:true], release/cancel/done bypass the assignee guard.
-    Used by keeper for orphan task cleanup. *)
+(** Collect typed release handoff text. Task ownership and orphan
+    reconciliation are enforced by their respective transition services. *)
 let release_handoff_texts (handoff_context : Masc_domain.task_handoff_context option) =
   let fields =
     match handoff_context with

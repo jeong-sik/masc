@@ -67,7 +67,7 @@ module SubscriptionStore = struct
 
   (** Generate subscription ID *)
   let generate_id () : string =
-    let bytes = Mirage_crypto_rng.generate 8 in
+    let bytes = Crypto_rng.generate 8 in
     let buf = Buffer.create 16 in
     for i = 0 to String.length bytes - 1 do
       Printf.bprintf buf "%02x" (Char.code (String.get bytes i))

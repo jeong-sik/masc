@@ -90,7 +90,8 @@ let outer_wall_for_attempt ~mode ~observer_attached ~per_provider_timeout_s ~can
   | ...
 ```
 
-`MASC_RUNTIME_ATTEMPT_LIVENESS` default = `enforce` (RFC-0022 mli line 16). 따라서 `outer_wall_for_provider = None` → `keeper_turn_driver_try_provider.ml:516-517`:
+The retired RFC-0022 mode defaulted to `Enforce`. In that historical build,
+`outer_wall_for_provider = None` led to `keeper_turn_driver_try_provider.ml:516-517`:
 ```ocaml
 match outer_wall_for_provider with
 | None -> run_fn ()             (* wrap 없이 그냥 run *)
@@ -247,7 +248,7 @@ Doc only, code = 0.
 ## References
 
 - RFC-0192 (runtime deadline propagation) — PR-1/2/3 MERGED
-- RFC-0022 (runtime attempt liveness) — `MASC_RUNTIME_ATTEMPT_LIVENESS` Enforce mode
+- RFC-0022 (retired runtime attempt liveness mode)
 - RFC-0194 (Meta-RFC) — §1 (typed SSOT), §4 (anti-pattern negation)
 - 메모: `feedback-runtime-budget-no-hard-gates` (math composition only)
 - 메모: `feedback-runtime-dual-ssot-diagnosis-must-compare-both-toml` (runtime toml 확인 완료)

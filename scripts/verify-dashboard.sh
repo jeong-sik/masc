@@ -131,23 +131,6 @@ check_http "dashboard briefing 200" "$BASE/api/v1/dashboard/briefing" "200"
 check_json "dashboard briefing exposes summary and keepers" "$BASE/api/v1/dashboard/briefing" "'summary' in d and 'keeper_briefs' in d" '^True$'
 check_http "dashboard briefing sections 200" "$BASE/api/v1/dashboard/briefing/sections" "200"
 check_json "dashboard briefing sections exposes provenance" "$BASE/api/v1/dashboard/briefing/sections" "'provenance' in d and 'criteria' in d" '^True$'
-check_http "surface-readiness 200" "$BASE/api/v1/dashboard/surface-readiness" "200"
-check_json \
-  "surface-readiness has canonical surface count" \
-  "$BASE/api/v1/dashboard/surface-readiness" \
-  "len(d.get('surfaces', []))" \
-  '^22$'
-check_json \
-  "surface-readiness matches canonical surface ids" \
-  "$BASE/api/v1/dashboard/surface-readiness" \
-  "sorted(s.get('id') for s in d.get('surfaces', [])) == sorted(['cockpit', 'overview', 'monitoring.runtime', 'monitoring.agents', 'monitoring.fleet-health', 'monitoring.transport-health', 'monitoring.feature-health', 'monitoring.journey', 'monitoring.observatory', 'monitoring.cognition', 'command.operations', 'connectors.connector-status', 'workspace.board', 'workspace.sub-boards', 'workspace.moderation', 'workspace.planning', 'workspace.repositories', 'workspace.verification', 'lab.tools', 'lab.harness', 'code.ide-shell', 'logs'])" \
-  '^True$'
-check_json \
-  "surface-readiness dropped retired surfaces" \
-  "$BASE/api/v1/dashboard/surface-readiness" \
-  "all(not any(s.get('id') == retired for s in d.get('surfaces', [])) for retired in ['monitoring.sessions', 'monitoring.memory-subsystems', 'monitoring.runtime-config', 'workspace.collab-mvp'])" \
-  '^True$'
-
 echo "[3/7] Monitoring"
 check_http "namespace-truth 200" "$BASE/api/v1/dashboard/namespace-truth" "200"
 check_json_eventually \
@@ -196,8 +179,8 @@ check_http "attribution summary 200" "$BASE/api/v1/attribution/summary" "200"
 check_json "attribution summary has gates" "$BASE/api/v1/attribution/summary" "'gates' in d" '^True$'
 check_http "attribution recent 200" "$BASE/api/v1/attribution/recent?limit=1" "200"
 check_json "attribution recent exposes events" "$BASE/api/v1/attribution/recent?limit=1" "'events' in d and 'count' in d" '^True$'
-check_http "dashboard governance 200" "$BASE/api/v1/dashboard/governance" "200"
-check_json "dashboard governance exposes judge and queue" "$BASE/api/v1/dashboard/governance" "'summary' in d and 'judge' in d and 'approval_queue' in d" '^True$'
+check_http "dashboard Gate 200" "$BASE/api/v1/dashboard/gate" "200"
+check_json "dashboard Gate exposes mode and queue" "$BASE/api/v1/dashboard/gate" "'hitl' in d and 'approval_queue' in d and 'approval_rules' in d" '^True$'
 check_http "dashboard proof 200" "$BASE/api/v1/dashboard/proof" "200"
 check_json "dashboard proof exposes verification and sources" "$BASE/api/v1/dashboard/proof" "'summary' in d and 'verification' in d and 'proof_sources' in d" '^True$'
 check_http "keeper feature proof 200" "$BASE/api/v1/dashboard/keeper-feature-proof?window_hours=24" "200"

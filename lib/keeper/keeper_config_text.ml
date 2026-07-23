@@ -1,5 +1,5 @@
 (** Keeper_config_text — String/UTF-8 processing, bool parsing, input key
-    validation, and goal-horizon text normalization.
+    validation, and prompt text normalization.
 
     Extracted from [keeper_config.ml] during godfile decomposition.
     These functions have no back-references to keeper_config itself —
@@ -39,26 +39,21 @@ let bool_of_env_opt name =
 
 let validate_name = Safe_identifier.is_portable_name
 
+let invalid_name_error name =
+  Printf.sprintf
+    "invalid keeper name %S: %s"
+    name
+    (Safe_identifier.portable_name_error ~field:"keeper name")
+;;
+
 (* ── Configuration constants ────────────────────────────────── *)
 
 let default_proactive_enabled = true
-let default_proactive_idle_sec = 120
-let default_proactive_cooldown_sec = 300
-let approval_queue_stale_max_wait_sec = 600.0
 
 (* Environment-configurable caps. Defaults were raised from 480/320 to 4096
    because silent truncation in the dashboard made operators think edits were
    not persisting. Operators can lower them via env vars if a deployment needs
    tighter prompt budgets. *)
-let default_goal_max_chars =
-  match Env_config_core.raw_value_opt "MASC_KEEPER_GOAL_MAX_CHARS" with
-  | Some v ->
-    (match int_of_string_opt (String.trim v) with
-     | Some n when n > 0 -> n
-     | _ -> 4096)
-  | None -> 4096
-
-
 let prompt_render_max_bytes =
   match Env_config_core.raw_value_opt "MASC_KEEPER_PROMPT_RENDER_MAX_BYTES" with
   | Some v ->
@@ -71,6 +66,7 @@ let prompt_render_max_bytes =
 
 let removed_keeper_input_key_names =
   [
+    "goal";
     "models";
     "allowed_models";
     "active_model";
@@ -84,6 +80,15 @@ let removed_keeper_input_key_names =
     "policy_shell_mode";
     "persona_ref";
     "runtime_ref";
+    "tool_access";
+    "tool_denylist";
+    "shards";
+    "policy_voice_enabled";
+    "compaction_cooldown_sec";
+    "compaction_profile";
+    "compaction_ratio_gate";
+    "compaction_message_gate";
+    "compaction_token_gate";
   ]
 
 let removed_keeper_sandbox_input_key_names =
@@ -92,26 +97,35 @@ let removed_keeper_sandbox_input_key_names =
     "network_mode";
   ]
 
-let removed_keeper_msg_input_key_names =
-  [
-    "goal";
-    "short_goal";
-    "mid_goal";
-    "long_goal";
-    "instructions";
-    "require_existing";
-    "new_goal";
-    "new_short_goal";
-    "new_mid_goal";
-    "new_long_goal";
-    "new_instructions";
+type removed_keeper_msg_input_owner =
+  | Request_lifecycle
+  | Keeper_definition
+  | Tool_selection
 
-    (* Tool-task coupling purged (#19806): keeper turns no longer accept
-       per-message tool forcing hints; reject them so older harnesses fail
-       loud rather than have the keys silently ignored. *)
-    "required_tools";
-    "required_tool_names";
+type removed_keeper_msg_input =
+  { name : string
+  ; owner : removed_keeper_msg_input_owner
+  }
+
+let removed_keeper_msg_inputs =
+  [ { name = "timeout_sec"; owner = Request_lifecycle }
+  ; { name = "goal"; owner = Keeper_definition }
+  ; { name = "short_goal"; owner = Keeper_definition }
+  ; { name = "mid_goal"; owner = Keeper_definition }
+  ; { name = "long_goal"; owner = Keeper_definition }
+  ; { name = "instructions"; owner = Keeper_definition }
+  ; { name = "require_existing"; owner = Keeper_definition }
+  ; { name = "new_goal"; owner = Keeper_definition }
+  ; { name = "new_short_goal"; owner = Keeper_definition }
+  ; { name = "new_mid_goal"; owner = Keeper_definition }
+  ; { name = "new_long_goal"; owner = Keeper_definition }
+  ; { name = "new_instructions"; owner = Keeper_definition }
+  ; { name = "required_tools"; owner = Tool_selection }
+  ; { name = "required_tool_names"; owner = Tool_selection }
   ]
+
+let removed_keeper_msg_input_key_names =
+  List.map (fun input -> input.name) removed_keeper_msg_inputs
 
 let present_json_keys (keys : string list) (json : Yojson.Safe.t) : string list =
   match json with
@@ -127,7 +141,7 @@ let reject_removed_keeper_input_keys ?(allow_sandbox_fields = false) ~tool_name
   then
     Error
       (Printf.sprintf
-         "removed keeper args for %s: %s. Keepers are always-on by definition."
+         "removed keeper args for %s: %s. These fields have no keeper runtime contract."
          tool_name
          (String.concat ", " present))
   else
@@ -148,15 +162,35 @@ let reject_removed_keeper_input_keys ?(allow_sandbox_fields = false) ~tool_name
              (String.concat ", " sandbox_fields))
 
 let reject_removed_keeper_msg_input_keys ~tool_name (args : Yojson.Safe.t) =
-  let present = present_json_keys removed_keeper_msg_input_key_names args in
+  let present =
+    match args with
+    | `Assoc fields ->
+      List.filter
+        (fun input -> List.mem_assoc input.name fields)
+        removed_keeper_msg_inputs
+    | _ -> []
+  in
+  let remediation input =
+    match input.owner with
+    | Request_lifecycle ->
+      "request-level whole-turn deadline is retired; use explicit operator \
+       cancellation, provider progress deadlines, or tool-local deadlines"
+    | Keeper_definition ->
+      "use masc_keeper_up for keeper creation or persisted updates"
+    | Tool_selection ->
+      "Keeper runtime selects tools from its declared capability surface"
+  in
+  let describe input =
+    Printf.sprintf "%s (%s)" input.name (remediation input)
+  in
   match present with
   | [] -> Ok ()
-  | fields ->
+  | inputs ->
       Error
         (Printf.sprintf
-           "removed keeper message args for %s: %s. Use masc_keeper_up for keeper creation or persisted updates."
+           "removed keeper message args for %s: %s."
            tool_name
-           (String.concat ", " fields))
+           (String.concat "; " (List.map describe inputs)))
 
 (* ── UTF-8 string processing ────────────────────────────────── *)
 
@@ -199,8 +233,3 @@ let normalize_prompt_text ~(max_bytes : int) (raw : string) : string =
   else
     let cut = String_util.utf8_prefix ~max_bytes s in
     String.trim cut
-
-let normalize_goal_text ?(max_len = default_goal_max_chars) (raw : string) : string =
-  let s = String.trim raw in
-  if s = "" then ""
-  else String_util.utf8_prefix ~max_bytes:max_len s

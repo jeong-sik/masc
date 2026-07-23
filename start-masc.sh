@@ -102,7 +102,7 @@ run_dune_local() {
         echo "Run builds through scripts/dune-local.sh so local agents share the machine-wide Dune lock." >&2
         return 127
     fi
-    env DUNE_LOCAL_JOBS="$DUNE_JOBS" DUNE_JOBS="$DUNE_JOBS" "$wrapper" "$@"
+    env DUNE_JOBS="$DUNE_JOBS" "$wrapper" "$@"
 }
 
 dune_build_with_stale_retry() {
@@ -167,6 +167,7 @@ dune_build_with_stale_retry() {
 build_dune_target_with_lock() {
     local target="$1"
     local label="$2"
+    local build_status=0
     if ! acquire_build_lock; then
         if is_truthy "${MASC_ALLOW_STALE_EXE_ON_BUILD_LOCK:-0}"; then
             echo "Warning: proceeding without rebuilding $label because MASC_ALLOW_STALE_EXE_ON_BUILD_LOCK=1." >&2
@@ -175,12 +176,14 @@ build_dune_target_with_lock() {
         echo "Error: unable to acquire build lock for $label; refusing to continue with a stale or missing executable." >&2
         return 1
     fi
-    if ! dune_build_with_stale_retry "$target" "$label"; then
+    if dune_build_with_stale_retry "$target" "$label"; then
         release_build_lock
-        return 1
+        return 0
+    else
+        build_status=$?
+        release_build_lock
+        return "$build_status"
     fi
-    release_build_lock
-    return 0
 }
 
 is_truthy() {
@@ -188,6 +191,72 @@ is_truthy() {
         1|true|yes|y|on) return 0 ;;
         *) return 1 ;;
     esac
+}
+
+RUNTIME_ARTIFACT_CONTRACT="${MASC_RUNTIME_ARTIFACT_CONTRACT:-$SCRIPT_DIR/scripts/lib/runtime-artifact-contract.sh}"
+USING_VERIFIED_LKG=""
+
+runtime_artifact_contract_requested() {
+    [ -n "${MASC_RUNTIME_CANDIDATE_FILE:-}" ] \
+        || [ -n "${MASC_RUNTIME_LKG_FILE:-}" ] \
+        || is_truthy "${MASC_ENABLE_VERIFIED_LKG_FALLBACK:-0}"
+}
+
+if runtime_artifact_contract_requested; then
+    if [ ! -r "$RUNTIME_ARTIFACT_CONTRACT" ]; then
+        echo "Error: runtime artifact contract is unavailable: $RUNTIME_ARTIFACT_CONTRACT" >&2
+        exit 78
+    fi
+    # shellcheck source=/dev/null
+    source "$RUNTIME_ARTIFACT_CONTRACT"
+fi
+
+select_verified_lkg() {
+    local lkg_file="${MASC_RUNTIME_LKG_FILE:-}"
+    if [ -z "$lkg_file" ]; then
+        echo "Error: verified LKG fallback requested without MASC_RUNTIME_LKG_FILE." >&2
+        return 1
+    fi
+    if ! masc_runtime_artifact_descriptor_verify "$lkg_file"; then
+        echo "Error: last-known-good artifact failed exact verification: $lkg_file" >&2
+        return 1
+    fi
+    USING_VERIFIED_LKG="1"
+    MASC_EIO_EXE="$MASC_ARTIFACT_PATH"
+    echo "[startup] using health-verified last-known-good artifact: $MASC_EIO_EXE sha256=$MASC_ARTIFACT_SHA256" >&2
+    return 0
+}
+
+recover_verified_lkg_after_build_failure() {
+    local build_status="$1"
+    local label="$2"
+    if is_truthy "${MASC_ENABLE_VERIFIED_LKG_FALLBACK:-0}" \
+        && select_verified_lkg
+    then
+        echo "[startup] $label build unavailable (status=$build_status); availability preserved by exact LKG fallback." >&2
+        return 0
+    fi
+    return "$build_status"
+}
+
+publish_runtime_candidate() {
+    local candidate_file="${MASC_RUNTIME_CANDIDATE_FILE:-}"
+    local selected_exe="$1"
+    local selected_host="$2"
+    local selected_port="$3"
+    local sha256
+
+    [ -n "$candidate_file" ] || return 0
+    sha256="$(masc_runtime_artifact_hash "$selected_exe")" || {
+        echo "Error: failed to hash selected runtime artifact: $selected_exe" >&2
+        return 1
+    }
+    if ! masc_runtime_artifact_descriptor_write "$candidate_file" http \
+        "$selected_exe" "$sha256" "$selected_host" "$selected_port"
+    then
+        echo "Error: failed to publish runtime candidate descriptor: $candidate_file" >&2
+        return 1
+    fi
 }
 
 is_absolute_path() {
@@ -660,13 +729,6 @@ if [ -z "${MASC_SYNC_MCP_CONFIG+x}" ]; then
     export MASC_SYNC_MCP_CONFIG=1
 fi
 
-# macOS Docker Desktop hotspot detection is visibility-first by default.
-# Export the safe default from the launcher too, so a stale OCaml executable
-# compiled with an older nonzero default cannot re-enable false blocking.
-if [ -z "${MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM+x}" ]; then
-    export MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM=0
-fi
-
 # Default arguments
 PORT="${MASC_PORT:-8935}"
 PORT_EXPLICIT=0
@@ -862,11 +924,18 @@ if [ "$HTTP_MODE" = "true" ] && [ -z "$MASC_EIO_EXE" ]; then
         echo "Error: dune not found. Install dune first." >&2
         exit 1
     fi
-    if ! build_dune_target_with_lock "bin/main_eio.exe" "main_eio.exe"; then
-        echo "Error: build failed." >&2
-        exit 1
+    if build_dune_target_with_lock "bin/main_eio.exe" "main_eio.exe"; then
+        :
+    else
+        build_status=$?
+        if ! recover_verified_lkg_after_build_failure "$build_status" "main_eio.exe"; then
+            echo "Error: build failed (status=$build_status) and no exact verified LKG is available." >&2
+            exit "$build_status"
+        fi
     fi
-    if [ -x "$LOCAL_EIO_EXE" ]; then
+    if [ -n "$USING_VERIFIED_LKG" ]; then
+        :
+    elif [ -x "$LOCAL_EIO_EXE" ]; then
         MASC_EIO_EXE="$LOCAL_EIO_EXE"
     else
         echo "Error: build failed." >&2
@@ -896,17 +965,25 @@ fi
 
 # Rebuild Eio version if sources are newer than the executable (avoids stale binary runs)
 # NOTE: Lwt version (main.exe) is deprecated - Eio is now the default
-if [ "$HTTP_MODE" = "true" ] && [ -n "$MASC_EIO_EXE" ] && command -v dune >/dev/null 2>&1; then
+if [ "$HTTP_MODE" = "true" ] && [ -n "$MASC_EIO_EXE" ] \
+    && [ -z "$USING_VERIFIED_LKG" ] && command -v dune >/dev/null 2>&1; then
     if find "$SCRIPT_DIR/bin" "$SCRIPT_DIR/lib" \
         -type f \( -name '*.ml' -o -name '*.mli' -o -name 'dune' \) \
         -newer "$MASC_EIO_EXE" 2>/dev/null | head -n 1 | grep -q .; then
         echo "Rebuilding MASC MCP server (stale executable detected)..." >&2
-        if ! build_dune_target_with_lock "bin/main_eio.exe" "main_eio.exe"; then
-            echo "Error: rebuild failed." >&2
-            exit 1
+        if build_dune_target_with_lock "bin/main_eio.exe" "main_eio.exe"; then
+            :
+        else
+            build_status=$?
+            if ! recover_verified_lkg_after_build_failure "$build_status" "main_eio.exe"; then
+                echo "Error: rebuild failed (status=$build_status) and no exact verified LKG is available." >&2
+                exit "$build_status"
+            fi
         fi
 
-        if [ -x "$LOCAL_EIO_EXE" ]; then
+        if [ -n "$USING_VERIFIED_LKG" ]; then
+            :
+        elif [ -x "$LOCAL_EIO_EXE" ]; then
             MASC_EIO_EXE="$LOCAL_EIO_EXE"
         elif [ -x "$WORKSPACE_EIO_EXE" ]; then
             MASC_EIO_EXE="$WORKSPACE_EIO_EXE"
@@ -984,11 +1061,18 @@ if [ "$EIO_MODE" = "true" ]; then
             echo "Error: dune not found. Cannot build Eio server." >&2
             exit 1
         fi
-        if ! build_dune_target_with_lock "bin/main_eio.exe" "main_eio.exe"; then
-            echo "Error: Failed to build Eio server (main_eio.exe)." >&2
-            exit 1
+        if build_dune_target_with_lock "bin/main_eio.exe" "main_eio.exe"; then
+            :
+        else
+            build_status=$?
+            if ! recover_verified_lkg_after_build_failure "$build_status" "main_eio.exe"; then
+                echo "Error: Failed to build Eio server (status=$build_status) and no exact verified LKG is available." >&2
+                exit "$build_status"
+            fi
         fi
-        if [ -x "$WORKSPACE_EIO_EXE" ]; then
+        if [ -n "$USING_VERIFIED_LKG" ]; then
+            :
+        elif [ -x "$WORKSPACE_EIO_EXE" ]; then
             MASC_EIO_EXE="$WORKSPACE_EIO_EXE"
         elif [ -x "$LOCAL_EIO_EXE" ]; then
             MASC_EIO_EXE="$LOCAL_EIO_EXE"
@@ -1024,8 +1108,7 @@ launch_from_base_path() {
     if [ -n "${MASC_LOG_FILE:-}" ]; then
         mkdir -p "$(dirname "$MASC_LOG_FILE")"
         echo "  Log file: $MASC_LOG_FILE (stdout+stderr tee'd)" >&2
-        set -o pipefail
-        exec "$@" 2>&1 | tee -a "$MASC_LOG_FILE"
+        exec "$@" > >(tee -a "$MASC_LOG_FILE") 2>&1
     else
         exec "$@"
     fi
@@ -1051,6 +1134,9 @@ if [ "$EIO_MODE" = "true" ] && [ "$HTTP_MODE" = "true" ]; then
         echo "  MCP endpoint: /mcp (set MASC_HTTP_BASE_URL for an absolute origin)" >&2
     fi
     echo "  MCP Accept: application/json, text/event-stream" >&2
+    if ! publish_runtime_candidate "$SELECTED_EXE" "$HOST" "$PORT"; then
+        exit 78
+    fi
     launch_from_base_path "$SELECTED_EXE" --host="$HOST" --port="$PORT" --base-path="$RESOLVED_BASE_PATH"
 elif [ "$HTTP_MODE" = "true" ]; then
     echo "Starting MASC MCP server (HTTP mode, $RUNTIME_NAME)..." >&2

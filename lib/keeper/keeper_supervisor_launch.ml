@@ -11,16 +11,11 @@ module Startup_helpers = Keeper_supervisor_startup_helpers
 
 (* ── Pure helpers ────────────────────────────────────────── *)
 
-let backoff_delay = Startup_helpers.backoff_delay
 let keep_last_n = Startup_helpers.keep_last_n
 
 (** supervision_cohort cluster moved to Keeper_supervisor_types
     (intra-library file split, 2026-05-16). *)
 include Keeper_supervisor_types
-
-let committed_tools_of_ambiguous_blocker =
-  Startup_helpers.committed_tools_of_ambiguous_blocker
-;;
 
 type done_signal_resolution =
   | Done_signal_resolved_now
@@ -36,6 +31,20 @@ let should_publish_lifecycle_for_done_signal = function
   | Done_signal_resolved_now -> true
   | Done_signal_already_resolved
   | Done_signal_already_seen -> false
+;;
+
+type cleanup_attempt_outcome =
+  | Cleanup_completed
+  | Cleanup_cancelled
+  | Cleanup_failed of exn
+
+let run_cleanup_best_effort cleanup =
+  try
+    cleanup ();
+    Cleanup_completed
+  with
+  | Eio.Cancel.Cancelled _ -> Cleanup_cancelled
+  | exn -> Cleanup_failed exn
 ;;
 
 (* ── Event publishing (see Keeper_supervisor_publish_lifecycle, #8856/#8605) ─ *)
@@ -203,17 +212,12 @@ let launch_supervised_fiber_body
     fork_body (fun lane_sw ->
       let ctx = { ctx with sw = lane_sw } in
       let resolved = Atomic.make false in
-      (* Issue #18901 follow-up: distinguish parent-cancellation from
-         genuine missed-resolution in the finally branch. The body's
-         try/with re-raises [Eio.Cancel.Cancelled] (line 281 area)
-         which then propagates to the surrounding switch, leaving the
-         finally to fire with [resolved=false]. Without this flag the
-         finally cannot tell whether the unresolved drop was a parent
-         cancel (supervisor restart, sibling failure) or a real
-         missed-resolution bug — both collapsed into [Unexpected].
-         Setting the flag from the cancel handler keeps the typed
-         [fiber_drop_cause] payload accurate. *)
+      (* Preserve the exact typed cancellation origin after the supervised
+         body consumes [Eio.Cancel.Cancelled]. The finally branch can then
+         distinguish an operator lane shutdown from parent cancellation and
+         from a genuine missed-resolution bug. *)
       let cancelled_by_parent = Atomic.make false in
+      let cancelled_by_shutdown_request = Atomic.make false in
       let resolve_done ~source value =
         if not (Atomic.get resolved) then
           (* Issue #18335: the keepalive layer (keeper_keepalive.ml:760-791)
@@ -233,102 +237,29 @@ let launch_supervised_fiber_body
       Eio_guard.protect
         (fun () ->
            try
-             (* RFC-0125 P4 의 keeper-level max-turn watchdog (구 [In_turn_hung]
-                wall-clock timer) 를 제거한다 (RFC-0250 §"deliberately removed"
-                정렬). 그 타이머는 [Eio.Fiber.first] 로 keepalive loop 전체를 감싸
-                keeper *launch* 이후 wall-clock 을 쟀고 — 턴 경계마다 리셋되지
-                않으므로 — 단일 턴이 아니라 keeper lifetime 을 cap 했다. 결과적으로
-                30 분 넘게 사는 정상 keeper (짧은 턴을 여러 번 처리했든 idle 이든)
-                도 강제 재시작되었다. 이름과 달리 "현재 턴이 너무 오래" 가 아니라
-                "프로세스가 너무 오래" 를 측정한 것이다.
-
-                per-turn wall-clock timeout 은 의도적으로 금지된 패턴이다:
-                [Keeper_unified_turn_attempt_watchdog] .mli — "MASC must not impose
-                a wall-clock timeout around the whole provider/tool". in-turn /
-                idle 복구는 supervisor sweep 의 [assess_in_turn_progress]
-                ([Mid_turn_no_progress], turn observation 의 last_progress_at 기준)
-                + [assess_stale_run] ([Idle_turn], last_turn_ts 기준) 가 담당하며,
-                둘 다 turn-scoped 라 이 원칙을 준수한다 (각각
-                test_assess_in_turn_progress / test_assess_stale_run 로 커버).
-                따라서 keepalive loop 를 race 없이 직접 실행한다. watchdog 의 유일
-                producer 였던 [In_turn_hung] kill-class variant 와 그 opt-in env
-                knob ([MASC_KEEPER_MAX_TURN_WATCHDOG_TIMEOUT_SEC]) 도 함께 제거됐다.
-                아래 watchdog_triggered 분기는 sweep 이 stamp 한 다른 stale reason
-                ([Idle_turn] / [Mid_turn_no_progress] 등) 으로 계속 작동한다. *)
+             (* Ambient Board semantic judgment is a sibling worker on this
+                exact Keeper lifecycle switch. It owns Provider calls and
+                returns only durable completed partitions to the short owner
+                admission path; cancellation joins it with the Keeper lane. *)
+             Eio.Fiber.fork ~sw:lane_sw (fun () ->
+               Keeper_board_attention_worker.run
+                 ~sw:lane_sw
+                 ~clock:ctx.clock
+                 ~net:ctx.net
+                 ~base_path
+                 ~keeper_name:meta.name);
+             (* Keeper lifetime, idle duration, and progress age are
+                observations only. The supervisor runs the lane directly;
+                configured provider/tool boundaries and explicit operator
+                lifecycle events remain independent typed mechanisms. *)
              Keeper_keepalive.run_heartbeat_loop
                ~proactive_warmup_sec
                ctx
                meta
                reg.fiber_stop
                ~wakeup:reg.fiber_wakeup;
-             (* Check if watchdog set a failure reason that should trigger
-              crash recovery instead of a clean stop. When the stale
-              watchdog sets fiber_stop + Stale_turn_timeout, the heartbeat
-              loop exits normally but the supervisor must treat this as a
-              crash so sweep_and_recover restarts the keeper. Storm and
-              budget-loop cohorts still route to auto-pause; legacy
-              Stale_fleet_batch remains a watchdog signal but no longer
-              pauses the keeper. *)
-             let watchdog_triggered =
-               match Keeper_registry.get ~base_path meta.name with
-               | Some e ->
-                 (match e.last_failure_reason with
-                  | Some (Keeper_registry.Stale_turn_timeout _)
-                  | Some (Keeper_registry.Stale_termination_storm _)
-                  | Some (Keeper_registry.Stale_fleet_batch _)
-                  | Some (Keeper_registry.Provider_timeout_loop _) -> true
-                  (* Other failure reasons are not stale-watchdog signals. *)
-                  | Some (Keeper_registry.Heartbeat_consecutive_failures _)
-                  | Some (Keeper_registry.Turn_consecutive_failures _)
-                  | Some (Keeper_registry.Provider_runtime_error _)
-                  | Some (Keeper_registry.Completion_contract_violation _)
-                  | Some Keeper_registry.Turn_overflow_pause
-                  | Some Keeper_registry.Turn_livelock_pause
-                  | Some (Keeper_registry.Ambiguous_partial_commit _)
-                  | Some (Keeper_registry.Fiber_unresolved _)
-                  | Some (Keeper_registry.Exception _)
-                  | Some Keeper_registry.Operator_interrupt
-                  | None -> false)
-               | None -> false
-             in
-             if watchdog_triggered
-             then (
-               let reason =
-                 match Keeper_registry.get ~base_path meta.name with
-                 | Some e ->
-                   Option.map
-                     Keeper_registry.failure_reason_to_string
-                     e.last_failure_reason
-                   |> Option.value ~default:"stale_turn_timeout"
-                 | None -> "stale_turn_timeout"
-	               in
-	               let outcome = reason in
-	               (match
-	                  Keeper_registry.dispatch_event
-	                    ~base_path
-	                    meta.name
-	                    (Keeper_state_machine.Fiber_terminated { outcome; provider_id = None; http_status = None })
-	                with
-                | Ok _ -> ()
-                | Error e ->
-                  Otel_metric_store.inc_counter
-                    Keeper_metrics.(to_string DispatchEventFailures)
-                    ~labels:[ "keeper", meta.name; "event", "fiber_terminated" ]
-                    ();
-                  Log.Keeper.warn
-                    "supervisor: Fiber_terminated dispatch failed: %s"
-                    (Keeper_state_machine.transition_error_to_string e));
-               if
-                 resolve_done ~source:"supervisor_watchdog_crash" (`Crashed reason)
-                 |> should_publish_lifecycle_for_done_signal
-               then
-                 publish_phase_lifecycle
-                   ~phase:Keeper_state_machine.Crashed
-                   meta.name
-                   reason
-                   ())
-             else (
-               (* Normal exit: stop flag was set — dispatch typed events *)
+             (* A normal return is an explicit stop/shutdown path. Observed
+                idle/progress ages never rewrite it into a crash. *)
                (match
                   Keeper_registry.dispatch_event
                     ~base_path
@@ -367,10 +298,13 @@ let launch_supervised_fiber_body
                    ~phase:Keeper_state_machine.Stopped
                    meta.name
                    "normal exit"
-                   ())
+                   ()
            with
-           | Eio.Cancel.Cancelled _ ->
-             Atomic.set cancelled_by_parent true;
+           | Eio.Cancel.Cancelled cause ->
+             (match Keeper_lane.classify_cancellation_cause cause with
+              | Keeper_lane.Shutdown_request ->
+                Atomic.set cancelled_by_shutdown_request true
+              | Keeper_lane.External_cancel _ -> Atomic.set cancelled_by_parent true);
              (* Do NOT re-raise Cancelled in a forked fiber, as it cancels the parent switch. *)
              ()
            | exn ->
@@ -438,25 +372,9 @@ let launch_supervised_fiber_body
            crashing the server (see masc crash 2026-04-17). Swallow
            everything and log — cleanup is advisory, state-machine events
            already fired on the body's happy/error paths. *)
-          try
+          match run_cleanup_best_effort (fun () ->
             Keeper_registry.cleanup_tracking ~base_path meta.name;
-            (* #14187 follow-up: a keeper that crashed after exhausting its
-             turn-livelock budget would restart into the same turn_id
-             (because blocked turns do not increment total_turns).  The
-             in-memory livelock state then immediately re-blocked the
-             fresh restart, making recovery impossible.  Clear the
-             per-keeper livelock bookkeeping during cleanup so the next
-             restart starts with a fresh counter. *)
-            Keeper_turn_livelock.reset_keeper_livelock
-              ~base_path
-              ~keeper:meta.name;
-            (* ETA-LIVELOCK: keep the typed-escalation classifier in
-               lock-step with the upstream livelock bookkeeping so a
-               restarted keeper sees the first block at ERROR again.
-               Without this reset the [Threshold_park] state from a
-               previous lifetime would silently demote the new
-               keeper's First block to DEBUG. *)
-            Keeper_livelock_state.reset_for_keeper ~keeper:meta.name;
+            Keeper_turn_attempt_observer.reset_keeper ~base_path ~keeper:meta.name;
             if not (Atomic.get resolved)
             then
               if Shutdown.is_shutting_down_global ()
@@ -467,7 +385,7 @@ let launch_supervised_fiber_body
                    ERROR cohort. Severity stays at INFO via the
                    [Log.Keeper.info] call below — record_crash is not
                    invoked here because shutdown drops are bookkeeping,
-                   not restart-budget signal. *)
+                   not crash observations. *)
                 Log.Keeper.info
                   "%s: fiber unresolved during shutdown (graceful, not a crash)"
                   meta.name;
@@ -475,24 +393,22 @@ let launch_supervised_fiber_body
                   ~base_path
                   meta.name
                   (Some (Keeper_registry.Fiber_unresolved Graceful_shutdown));
-                Keeper_registry.mark_dead ~base_path meta.name ~at:(Time_compat.now ());
+                Keeper_registry.dispatch_event_unit
+                  ~base_path
+                  meta.name
+                  (Keeper_state_machine.Fiber_terminated
+                     { outcome = "shutdown"; provider_id = None; http_status = None });
                 (* fire-and-forget: resolve_done signals completion *)
                 ignore
                   (resolve_done
                      ~source:"supervisor_shutdown_cleanup"
                      (`Crashed "shutdown")))
-              else if Keeper_lane.shutdown_requested reg.lane
+              else if Atomic.get cancelled_by_shutdown_request
               then (
-                (* Codex #24135 finding 1: operator-sanctioned shutdown of this
-                   supervised keeper. [Keeper_shutdown_prepare_join] called
-                   [Keeper_lane.request_cancel], which failed the lane switch
-                   with [Shutdown_cancel]; the body caught the resulting
-                   cancellation and set [cancelled_by_parent]. Global shutdown
-                   is not in progress, so without this branch the keeper would
-                   fall through to the parent-cancel path and be
-                   crashed/tombstoned. A requested shutdown is a graceful stop:
-                   record it as [Stopped] exactly like the normal-exit path so
-                   the operator observes a joined stop, not a crash. *)
+                (* Exact exception identity distinguishes an operator lane
+                   shutdown from parent cancellation. A requested shutdown is
+                   a graceful stop, so the operator observes a joined stop
+                   rather than a crash/tombstone. *)
                 Log.Keeper.info
                   "%s: fiber stopped by shutdown request (graceful, not a crash)"
                   meta.name;
@@ -544,7 +460,7 @@ let launch_supervised_fiber_body
                    (restart, sibling failure propagating cancel) rather
                    than a missed-resolution bug. WARN severity, separate
                    cohort, no record_crash — parent cancels are
-                   expected lifecycle events, not restart-budget signal. *)
+                   expected lifecycle events, not crash observations. *)
                 Log.Keeper.warn
                   "%s: fiber unresolved after parent cancellation (transient)"
                   meta.name;
@@ -552,7 +468,14 @@ let launch_supervised_fiber_body
                   ~base_path
                   meta.name
                   (Some (Keeper_registry.Fiber_unresolved Cancelled_by_parent));
-                Keeper_registry.mark_dead ~base_path meta.name ~at:(Time_compat.now ());
+                Keeper_registry.dispatch_event_unit
+                  ~base_path
+                  meta.name
+                  (Keeper_state_machine.Fiber_terminated
+                     { outcome = "cancelled_by_parent"
+                     ; provider_id = None
+                     ; http_status = None
+                     });
                 (* fire-and-forget: resolve_done signals completion *)
                 ignore
                   (resolve_done
@@ -568,15 +491,13 @@ let launch_supervised_fiber_body
 	                  ~base_path
                   meta.name
                   (Some (Keeper_registry.Fiber_unresolved Unexpected));
-                (* 2026-05-05 fleet-stuck cycle: keeper meta runtime
-                 [last_blocker] stayed null for 5+ hours while supervisor
-                 self-preservation suppressed restarts under
-                 [cohort=fiber_unresolved].  The diagnosis was buried in the
+                (* Keeper meta runtime [last_blocker] can remain null after an
+                 unresolved fiber. The diagnosis would otherwise stay buried in the
                  crash registry but invisible on the per-keeper meta surface
                  dashboards read.  Stamp the same cohort onto runtime so
                  operators (and the dashboard "차단된 키퍼" card) see why a
                  keeper is silent.  Best-effort: write_meta failure does not
-                 abort cleanup, mirroring [handle_crash_auto_pause]. *)
+                 abort cleanup. *)
                 (match Keeper_registry.get ~base_path meta.name with
                  | Some entry ->
                    let stamped_meta =
@@ -634,9 +555,10 @@ let launch_supervised_fiber_body
                     ~phase:Keeper_state_machine.Crashed
                     meta.name
                     reason
-                    ())
+                    ()))
           with
-          | Eio.Cancel.Cancelled _ ->
+          | Cleanup_completed -> ()
+          | Cleanup_cancelled ->
             (* Swallow cleanup cancellation without incrementing the cleanup
              failure counter. Re-raising Cancelled here is what the docstring
              above warns against: [Fun.protect] would wrap it as
@@ -648,7 +570,7 @@ let launch_supervised_fiber_body
               "%s: supervisor finally cleanup cancelled (suppressed to avoid \
                Fun.Finally_raised)"
               meta.name
-          | exn ->
+          | Cleanup_failed exn ->
             (* Swallow non-cancellation cleanup failures too. Cleanup is
              advisory; re-raising here would still become [Fun.Finally_raised]
              and could mask the body outcome. Count only these unexpected
@@ -682,7 +604,7 @@ let launch_supervised_fiber
        new fiber. Forking anyway created a live keepalive loop in a state
        the sweep and dashboard treat as not running. Resolve [done_p]
        through the crash path so supervise/restart waiters observe a typed
-       outcome and the next sweep re-queues with the usual backoff/budget. *)
+       outcome and the next sweep re-queues with the usual lane-local backoff. *)
     let reason =
       Printf.sprintf
         "fiber_start_rejected: %s"
@@ -766,20 +688,6 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_m
     meta
 ;;
 
-let resume_keeper_after_reconcile_gate (ctx : _ context) (meta : keeper_meta) =
-  Keeper_supervisor_resume_reconcile_gate.resume_keeper_after_reconcile_gate
-    ~supervise_keepalive
-    ctx
-    meta
-;;
-
-let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =
-  Keeper_supervisor_restore_reconcile_gate.restore_reconcile_continue_gate
-    ~supervise_keepalive
-    ctx
-    meta
-;;
-
 (* ── Sweep and recover ───────────────────────────────────── *)
 
 (** Reconcile only orphaned or cleanly stopped durable keepers.
@@ -810,45 +718,3 @@ let cleanup_dead_tombstone (ctx : _ context) (entry : Keeper_registry.registry_e
     new variant in keeper_registry forces a same-PR converter update via
     the source module's exhaustive-match check, instead of breaking main
     here on first build (the recurring P0 pattern from #10490 + #10574). *)
-
-(* See Keeper_supervisor_self_preservation for probe mechanism (#10887). *)
-let reset_self_preservation_escape_state_for_test () =
-  Keeper_supervisor_self_preservation.reset_for_test ()
-;;
-
-
-(* Self-preservation gate — see Keeper_supervisor_self_preservation for rationale. *)
-let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
-  Keeper_supervisor_self_preservation.apply
-    ~keepers_dir
-    ~publish_lifecycle
-    ~total_keepers
-    to_restart
-;;
-
-
-(* Crash-driven pause policy — see Keeper_supervisor_pause_policy (#10765). *)
-module Pause_policy = Keeper_supervisor_pause_policy
-
-type crash_pause_resume_policy = Pause_policy.crash_pause_resume_policy =
-  | Manual_resume_required
-  | Auto_resume_with_backoff
-
-let handle_crash_auto_pause ctx entry =
-  Pause_policy.handle_crash_auto_pause ~publish_phase_lifecycle ctx entry
-;;
-
-let handle_stale_storm_pause ctx entry =
-  Pause_policy.handle_stale_storm_pause ~publish_phase_lifecycle ctx entry
-;;
-
-let handle_provider_timeout_pause ctx entry =
-  Pause_policy.handle_provider_timeout_pause ~publish_phase_lifecycle ctx entry
-;;
-
-let handle_turn_failure_streak_pause ctx entry =
-  Pause_policy.handle_turn_failure_streak_pause ~publish_phase_lifecycle ctx entry
-;;
-
-let failure_reason_policy_decision = Pause_policy.failure_reason_policy_decision
-let failure_reason_policy_decision_for_test = failure_reason_policy_decision

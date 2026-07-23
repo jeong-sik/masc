@@ -1,50 +1,43 @@
-(** RFC-0313 W2 — total failure routing over [Agent_sdk.Error.sdk_error].
+(** Total typed failure routing over [Agent_sdk.Error.sdk_error].
 
     Every turn-failure error maps to exactly one typed route; there is no
-    [None] family and no catch-all arm. In W2 the route is recorded
-    (telemetry + shadow pacing + judgment stimulus) alongside the existing
-    streak/pause/rotation machinery, which stays authoritative until the
-    RFC-0313 W3 flip.
+    [None] family and no catch-all arm. A route is an observation for telemetry
+    and downstream handling; it cannot pause a Keeper or invent a wake-up
+    deadline.
 
-    Route semantics (RFC-0313 §2):
-    - [Retry_after_pacing] — the failure is provider/infrastructure-paced:
-      widen the failed runtime's revisit deadline and continue on the next
-      eligible runtime. Carries the typed provider [retry_after] hint when
-      one exists.
+    Route semantics:
+    - [Retry_after_observed] — a typed provider/infrastructure failure was
+      observed. Carries the provider's exact [retry_after] hint when one
+      exists, but does not synthesize or enforce a delay.
     - [Rotate_now] — a different runtime may succeed immediately
-      (credentials, model availability, no-progress recovery hints);
-      today's same-turn degraded rotation behavior, kept.
+      (credentials, model availability, no-progress recovery hints).
     - [Escalate_judgment] — deterministic failure: mechanical retry or
-      rotation cannot change the outcome (oas#2482 class). The keeper keeps
-      running; the failure becomes a typed stimulus
+      rotation cannot change the outcome. The keeper keeps running; the
+      failure becomes a typed stimulus
       ([Keeper_event_queue.Failure_judgment]) for an LLM-boundary verdict.
 
-    Classification is typed-only: this module deliberately does not import
-    the CLI-wrapped hard-quota substring scan
-    ([Keeper_turn_driver.message_looks_like_cli_wrapped_hard_quota]); a
-    quota error that only a string scan would catch routes by its typed
-    class instead. Divergence between this route and the legacy
+    Classification is typed-only: a quota error routes by its typed class.
+    Divergence between this route and the legacy
     [Keeper_error_classify.recoverable_runtime_failure_reason] opinion is
-    expected W2 shadow data, not a bug (#23483 retired the scan's most
-    recent false positive).
+    an explicit typed-boundary mismatch, not scheduling authority.
 
-    The one string-derived input is [Llm_provider.Retry.is_hard_quota],
-    OAS's own boundary predicate over its [api_error] payloads — consuming
-    it is the allowed MASC→OAS direction; replacing its internals with a
-    typed variant is OAS-side work tracked by RFC-0313 §6. *)
+    Hard quota is recognized only from the typed [PaymentRequired] and
+    [HardQuota] constructors. Rate-limit messages and status prose are never
+    reclassified. *)
 
-(** Why a runtime's revisit is widened instead of retried immediately. *)
-type pacing_class =
-  | Rate_limited  (** soft 429 throttle; rotation keeps the credential-pool filter *)
+(** Typed class of the observed retryable provider/runtime failure. *)
+type retry_class =
+  | Rate_limited  (** soft 429 throttle; declared runtimes remain eligible *)
   | Hard_quota  (** account-level quota/balance exhaustion (402 family) *)
   | Capacity_backpressure
-      (** provider overload / Cloudflare 524 / capacity-exhausted pools;
-          the 2026-07-06 storm class *)
-  | Server_error  (** transient 5xx / provider unavailable *)
+      (** typed provider overload / capacity-exhausted pools *)
+  | Server_error  (** typed server failure / provider unavailable *)
   | Network_transient  (** transport-level network failure *)
   | Provider_timeout  (** provider or transport deadline expiry *)
-  | Turn_timeout  (** keeper turn budget expiry *)
-  | Admission_backpressure  (** MASC lane admission queue timeout/rejection *)
+
+val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
+(** True only for the typed [PaymentRequired] and provider [HardQuota]
+    constructors. Free-form messages and numeric status codes are ignored. *)
 
 (** Why a different runtime is tried in the same turn. *)
 type rotate_class =
@@ -56,7 +49,6 @@ type rotate_class =
   | Candidates_filtered  (** candidate set emptied after cycles *)
   | Runtime_exhausted  (** generic whole-runtime exhaustion *)
   | No_progress_empty
-  | No_progress_read_only
   | No_progress_thinking_only
       (** accept-rejections carrying an explicit no-progress recovery hint:
           a different model may make progress *)
@@ -68,9 +60,6 @@ type judgment_class =
   | Contract_violation
       (** completion/progress contract rejections without a recovery hint,
           max-tokens ceiling violations, internal contract rejections *)
-  | Mutating_ambiguity
-      (** ambiguous post-commit failure after mutating tools; needs
-          reconcile-grade judgment, HITL for mutating scope *)
   | Protocol_error  (** MCP protocol failures *)
   | Config_mismatch  (** invalid/missing configuration or API key *)
   | Provider_integration
@@ -83,14 +72,11 @@ type judgment_class =
 
 (** Typed origin of a judgment request. The route class says what kind of
     decision is needed; this provenance says which execution boundary produced
-    it. [Oas_agent_idle_detected] retains the behavioral counter that was
-    previously collapsed into [Contract_violation]. [Legacy_unattributed] is a
-    decode-only state for persisted pre-provenance stimuli and is never emitted
-    by current producers. *)
+    it. [Legacy_unattributed] is a decode-only state for persisted
+    pre-provenance stimuli and is never emitted by current producers. *)
 type judgment_provenance =
   | Oas_api_error
   | Oas_provider_error
-  | Oas_agent_idle_detected of { consecutive_idle_turns : int }
   | Oas_agent_error
   | Oas_mcp_error
   | Oas_config_error
@@ -109,12 +95,11 @@ type error_boundary =
     such as [Config] and [Internal] do not carry their own origin. *)
 
 type route =
-  | Retry_after_pacing of
-      { pacing : pacing_class
+  | Retry_after_observed of
+      { retry_class : retry_class
       ; retry_after : float option
         (** typed provider hint, seconds; [None] when the provider gave
-            none. Clamping to the pacing policy cap happens in
-            [Keeper_pacing.on_failure], not here. *)
+            none. The value is preserved rather than clamped or replaced. *)
       }
   | Rotate_now of { rotate : rotate_class }
   | Escalate_judgment of
@@ -132,15 +117,16 @@ val route_of_error : boundary:error_boundary -> Agent_sdk.Error.sdk_error -> rou
     [Masc_execution]. No arm returns "no route". *)
 
 val retry_after_of_route : route -> float option
-(** [Some hint] only for [Retry_after_pacing] carrying a provider hint.
-    W2 threads this into [Keeper_pacing_shadow.observe_failure]. *)
+(** [Some hint] only for [Retry_after_observed] carrying a provider hint. *)
 
 val route_kind_label : route -> string
-(** Stable telemetry label: ["retry_after_pacing" | "rotate_now" |
+(** Stable telemetry label: ["retry_after_observed" | "rotate_now" |
     "escalate_judgment"]. *)
 
-val pacing_class_label : pacing_class -> string
+val retry_class_label : retry_class -> string
+val retry_class_of_label : string -> retry_class option
 val rotate_class_label : rotate_class -> string
+val rotate_class_of_label : string -> rotate_class option
 val judgment_class_label : judgment_class -> string
 
 val judgment_provenance_label : judgment_provenance -> string
@@ -161,7 +147,7 @@ val judgment_provenance_of_yojson :
     counters are explicit [Error] values. *)
 
 val route_class_label : route -> string
-(** The route's class label ([pacing_class_label] / [rotate_class_label] /
+(** The route's class label ([retry_class_label] / [rotate_class_label] /
     [judgment_class_label] respectively). *)
 
 val judgment_class_of_label : string -> judgment_class option

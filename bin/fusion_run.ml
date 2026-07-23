@@ -21,12 +21,11 @@
    each sample is printed verbatim so a deterministic provider is visible rather
    than silently collapsing [2] into [1].
 
-   It is keeper-independent: it bypasses [Fusion_orchestrator.run] (gate +
-   keeper chat-lane sink) and calls [Fusion_panel.run] and
-   [Fusion_judge.run] directly. Bypassing the orchestrator avoids the sink
+   It is keeper-independent: it bypasses the Keeper async delivery boundary
+   and calls [Fusion_panel.run] and [Fusion_judge.run] directly. This avoids the sink
    side effect (which writes a transcript to a keeper chat lane and, for a
-   synthetic keeper, can return [Sink_failed] and discard the computed panel
-   and judge results). (An hourly budget counter used to be listed here; it
+   synthetic keeper, would mix benchmark evidence with production delivery).
+   (An hourly budget counter used to be listed here; it
    was removed in PR #22051 and no invocation rate limit exists.)
 
    The baseline and the self-consistency arm reuse [Fusion_panel.run] so the
@@ -115,7 +114,6 @@ let synthesize ~sw ~net ~(preset : Fusion_policy.preset) ~(prompt : string)
   Masc.Fusion_judge.run
     ~sw
     ~net
-    ~timeout_s:preset.Fusion_policy.judge_timeout_s
     ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
     ~judge_model:preset.Fusion_policy.judge
     ~question:prompt
@@ -123,7 +121,6 @@ let synthesize ~sw ~net ~(preset : Fusion_policy.preset) ~(prompt : string)
     ~web_tools:
       (Fusion_policy.judge_web_tools_of ~req_web_tools:false
          preset.Fusion_policy.panels)
-    ~max_tool_calls:(Fusion_policy.judge_tool_budget_of preset.Fusion_policy.panels)
     ()
   |> Result.map_error (fun (failure, _usage) ->
     Fusion_types.judge_failure_text failure)
@@ -156,9 +153,8 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
     ~(prompt : string) ~(config_path : string) : unit =
   let models_all = Fusion_policy.preset_models preset in
   let n = List.length models_all in
-  let max_fibers = max 1 policy.Fusion_policy.max_concurrent_panels in
   (* 하네스는 동질 arm 비교 도구다(RFC-0252 §11). 이종 preset이면 첫 그룹의 plumbing
-     (system_prompt/web_tools/max_tool_calls/timeout)을 대표로 써 모든 arm을 같은
+     (system_prompt/web_tools)을 대표로 써 모든 arm을 같은
      설정으로 돌린다 — arm 차이는 모델 집합·judge이지 plumbing이 아니다(legacy 단일
      그룹이면 그 그룹 값 = 오늘과 동일). *)
   let g0 = List.hd preset.Fusion_policy.panels in
@@ -175,13 +171,11 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
     preset.Fusion_policy.judge
     prompt;
 
-  let run_panel ~max_fibers ~models =
+  let run_panel ~models =
     let groups = [ { g0 with Fusion_policy.models } ] in
     Masc.Fusion_panel.run
       ~sw
       ~net
-      ~max_fibers
-      ~outer_timeout_s:(Fusion_policy.panel_outer_timeout_of ~max_fibers groups)
       ~groups
       ~prompt
       ()
@@ -193,7 +187,7 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
     rule
     preset.Fusion_policy.judge
     rule;
-  let baseline = run_panel ~max_fibers:1 ~models:[ preset.Fusion_policy.judge ] in
+  let baseline = run_panel ~models:[ preset.Fusion_policy.judge ] in
   List.iter (print_outcome ~tag:"baseline") baseline;
   let baseline_answer =
     match first_some answer_of_outcome baseline with
@@ -216,7 +210,7 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
     n
     rule;
   let sc_models = List.init n (fun _ -> preset.Fusion_policy.judge) in
-  let sc_panel = run_panel ~max_fibers ~models:sc_models in
+  let sc_panel = run_panel ~models:sc_models in
   List.iter (print_outcome ~tag:"self-consistency") sc_panel;
   let sc_answers = List.filter_map answer_of_outcome sc_panel in
   let sc_answer =
@@ -262,7 +256,7 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
     rule
     n
     rule;
-  let fusion_panel = run_panel ~max_fibers ~models:models_all in
+  let fusion_panel = run_panel ~models:models_all in
   List.iter (print_outcome ~tag:"fusion") fusion_panel;
   let fusion_answer, fusion_judge_in, fusion_judge_out =
     match
@@ -381,22 +375,18 @@ let () =
          exit 2)
   in
   Eio_main.run @@ fun env ->
-  Mirage_crypto_rng_unix.use_default ();
+  Crypto_rng.ensure_default ();
   Time_compat.set_clock (Eio.Stdenv.clock env);
-  (* Register the ambient Eio clock the agent runtime resolves via
-     [Process_eio.get_clock]. Without this, any runtime config that sets
-     [stream_idle_timeout_s] fails closed at agent build time ("no clock
-     resolvable ... refusing to run with a silently disarmed stream idle
-     timeout") and every panel/judge call aborts before the first request. *)
+  (* Register the ambient Eio clock for resolved runtime transport behavior.
+     A runtime/provider may own an idle timeout; Fusion does not add one. *)
   Process_eio.init
     ~cwd_default:(Eio.Stdenv.fs env)
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock:(Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let net = Eio.Stdenv.net env in
-  (* Capture the Eio handles the OAS/fusion call path reads via
-     [Masc_eio_env.get_opt]. Without this, [Masc_oas_bridge.run_safe] fails
-     closed before starting panel/judge calls. *)
+  (* Capture the Eio handles used by Fusion runtime dependencies and elapsed
+     telemetry. This does not install a Fusion-owned execution deadline. *)
   Masc.Masc_eio_env.init ~sw ~net ~clock:(Eio.Stdenv.clock env) ();
   let config_path = Masc.Fusion_config_loader.runtime_toml_path ~base_path in
   (match Runtime.init_default_strict ~config_path with

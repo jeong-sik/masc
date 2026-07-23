@@ -332,7 +332,6 @@ let purge_agent_filesystem_artifacts config agent_names =
             List.map
               (fun agent_name ->
                  let heartbeats_stopped = Heartbeat.stop_by_agent ~agent_name in
-                 Tool_shard.remove_agent_shards agent_name;
                  { agent_name
                  ; heartbeats_stopped
                  ; workspace_unbound =
@@ -368,20 +367,16 @@ let purge_agent_filesystem_artifacts config agent_names =
 let keeper_artifact_path config keeper_name artifact =
   let open Keeper_shutdown_types in
   match artifact with
-  | Keeper_metrics_artifact ->
-    Some (Keeper_types_support.keeper_metrics_path config keeper_name)
+  | Keeper_metrics_store_artifact ->
+    Some (Keeper_types_support.keeper_metrics_dir config keeper_name)
   | Keeper_memory_bank_artifact ->
     Some (Keeper_types_support.keeper_memory_bank_path config keeper_name)
   | Keeper_generation_index_artifact ->
     Some (Keeper_types_support.keeper_generation_index_path config keeper_name)
-  | Keeper_policy_log_artifact ->
-    Some (Keeper_types_support.keeper_policy_log_path config keeper_name)
   | Keeper_decision_log_artifact ->
     Some (Keeper_types_support.keeper_decision_log_path config keeper_name)
   | Keeper_feedback_log_artifact ->
     Some (Keeper_types_support.keeper_feedback_log_path config keeper_name)
-  | Keeper_dataset_export_artifact ->
-    Some (Keeper_types_support.keeper_dataset_export_path config keeper_name)
   | Keeper_runtime_directory_artifact ->
     Some (Filename.concat (Keeper_fs.keeper_dir config) keeper_name)
   | Keeper_configuration_artifact ->
@@ -419,13 +414,11 @@ let purge_dashboard_keeper_artifacts config operation =
               (match artifact with
                | Keeper_runtime_directory_artifact ->
                  Keeper_fs.invalidate_dir path
-               | Keeper_metrics_artifact
+               | Keeper_metrics_store_artifact
                | Keeper_memory_bank_artifact
                | Keeper_generation_index_artifact
-               | Keeper_policy_log_artifact
                | Keeper_decision_log_artifact
                | Keeper_feedback_log_artifact
-               | Keeper_dataset_export_artifact
                | Keeper_configuration_artifact
                | Agent_artifact_bundle _ -> ());
               Log.Keeper.debug
@@ -440,13 +433,12 @@ let purge_dashboard_keeper_artifacts config operation =
     remove artifacts
   | Operator_stop_retain_meta
   | Operator_stop_remove_meta
-  | Dead_tombstone_cleanup
-  | Stale_paused_prune _ ->
+  | Dead_tombstone_cleanup ->
     Error "dashboard Keeper purge artifacts require a dashboard purge operation"
 ;;
 
 let handle_dashboard_keeper_purge_completion config operation =
-  match Masc_event_bus.get () with
+  match Event_bus_slots.get_masc () with
   | None -> Error "MASC lifecycle event bus is not installed"
   | Some _ ->
     (match operation.Keeper_shutdown_types.cleanup_intent.reason with
@@ -475,16 +467,14 @@ let handle_dashboard_keeper_purge_completion config operation =
           Ok ())
      | Operator_stop_retain_meta
      | Operator_stop_remove_meta
-     | Dead_tombstone_cleanup
-     | Stale_paused_prune _ ->
+     | Dead_tombstone_cleanup ->
        Error "dashboard purge completion does not belong to a dashboard purge operation")
 ;;
 
 let handle_keeper_lifecycle_completion config operation = function
   | Keeper_shutdown_types.Dashboard_keeper_purged ->
     handle_dashboard_keeper_purge_completion config operation
-  | Dead_tombstone_reaped
-  | Paused_meta_pruned as action ->
+  | Dead_tombstone_reaped as action ->
     Keeper_supervisor_cleanup_tombstone.handle_completion config operation action
 ;;
 
@@ -531,8 +521,7 @@ let respond_keeper_purge_operation_accepted ~request reqd operation =
       reqd
   | Operator_stop_retain_meta
   | Operator_stop_remove_meta
-  | Dead_tombstone_cleanup
-  | Stale_paused_prune _ ->
+  | Dead_tombstone_cleanup ->
     respond_error
       ~status:`Internal_server_error
       ~request

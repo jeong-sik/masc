@@ -27,8 +27,9 @@ Implemented on branch `codex/keeper-autonomy-audit-20260705` after the audit:
 - `/health?full=1` top-level `operator_action_reasons` now preserves component-level
   `status_reasons`, so reaction-ledger causes such as pending stimuli or stale durable event queues do not collapse into a generic `keeper_reaction_ledger:degraded`.
 - Board-event collection failures now surface as `keeper_board_event_collection` health with per-Keeper failure details, runtime-resolution visibility, and top-level `keeper_board_event_collection:board_event_collection_failure` operator reason; the next successful collection clears the failure.
-- Chat waiter cap moved to `MASC_KEEPER_TURN_CHAT_WAITING_CAP` / runtime.toml `[turn].chat_waiting_cap`.
-- `/health?full=1` and dashboard runtime resolution now expose `keeper_turn_admission` with per-Keeper in-flight lane, waiting count, waiting cap, full flag, and rejected-chat counter. A currently full queue contributes `keeper_turn_admission:chat_waiting_queue_full` to top-level `operator_action_reasons`.
+- The arbitrary chat waiter cap was removed. `keeper_turn_admission` keeps one
+  serial lane per Keeper, queues chat work without a policy rejection, and
+  exposes only the per-Keeper in-flight lane and raw waiting count.
 - Scheduler can dispatch typed `masc.keeper_wake` payloads into a Keeper's event queue as `Schedule_due`, independent of board-post side effects.
 - Scheduled autonomous no-op backoff and idle decay caps are named runtime policy:
   `MASC_KEEPER_PROACTIVE_NOOP_BACKOFF_MAX_SHIFT`,
@@ -112,9 +113,10 @@ Evidence:
 
 Current worktree update:
 
-- `max_waiting_chat_requests` is no longer hard-coded. It is sourced from `MASC_KEEPER_TURN_CHAT_WAITING_CAP` / runtime.toml `[turn].chat_waiting_cap`.
-- `Keeper_turn_admission` now records per-Keeper waiting count, waiting cap, full flag, in-flight lane, and rejected-chat counter.
-- `/health?full=1` exposes the same admission state as `keeper_turn_admission`; a currently full queue is degraded with `chat_waiting_queue_full`.
+- `Keeper_turn_admission` records the per-Keeper waiting count and in-flight
+  lane without inventing a capacity threshold.
+- `/health?full=1` exposes the same raw admission state; waiting work is not
+  converted into a rejection, fleet degradation, or operator requirement.
 
 ### 2. Autonomous And Proactive Scheduling
 
@@ -310,11 +312,11 @@ Current source status: closed in this worktree.
 
 Original finding: `max_waiting_chat_requests = 8` was typed and observable, but arbitrary.
 
-Current source status: closed in this worktree.
+Current source status: removed in this worktree.
 
-- The cap is now runtime policy: `MASC_KEEPER_TURN_CHAT_WAITING_CAP` / `[turn].chat_waiting_cap`.
-- `keeper_turn_admission` health exposes in-flight lane, waiting count, waiting cap, full flag, and rejected-chat counter per Keeper.
-- A currently full queue contributes `keeper_turn_admission:chat_waiting_queue_full` to top-level `operator_action_reasons`.
+- There is no chat waiting cap or capacity-derived rejection.
+- `keeper_turn_admission` health exposes the in-flight lane and raw waiting
+  count per Keeper without escalating it into fleet or operator state.
 
 ### P2 - Scheduler was not yet a general Keeper wake mechanism
 

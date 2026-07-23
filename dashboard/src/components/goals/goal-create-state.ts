@@ -25,7 +25,6 @@ export const goalCreateError = signal<GoalCreateError | null>(null)
 export interface GoalCreateInput {
   title: string
   priority: number
-  require_completion_approval: boolean
 }
 
 export function goalCreateErrorMessage(err: GoalCreateError | null): string | null {
@@ -46,9 +45,6 @@ export async function createGoal(input: GoalCreateInput): Promise<boolean> {
     const args: Record<string, unknown> = {
       title: trimmedTitle,
       priority: input.priority,
-    }
-    if (input.require_completion_approval) {
-      args.require_completion_approval = true
     }
     await callMcpTool('masc_goal_upsert', args)
     showToast('목표 생성 완료', 'success')

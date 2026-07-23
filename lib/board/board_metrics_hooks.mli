@@ -11,19 +11,13 @@ type observer =
   { observe_persist_lock_acquire_sec : float -> unit
   ; observe_persist_lock_held_sec : float -> unit
   ; inc_dispatch_flusher_start_outcome : outcome:flusher_outcome -> unit
-  ; inc_vote_fixture_detected : count:int -> unit
   ; inc_persistence_read_drop :
       surface:board_persist_surface -> reason:Read_drop_reason.t -> unit
-  ; inc_legacy_migrate_post_kind :
-      author:string -> automation_label:Board_types.automation_label -> unit
   }
 
 val set_observer : observer -> unit
 val observe_persist_lock_acquire_sec : float -> unit
 val observe_persist_lock_held_sec : float -> unit
 val inc_dispatch_flusher_start_outcome : outcome:flusher_outcome -> unit
-val inc_vote_fixture_detected : count:int -> unit
 val inc_persistence_read_drop :
   surface:board_persist_surface -> reason:Read_drop_reason.t -> unit
-val inc_legacy_migrate_post_kind :
-  author:string -> automation_label:Board_types.automation_label -> unit

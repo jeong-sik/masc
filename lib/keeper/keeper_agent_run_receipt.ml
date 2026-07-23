@@ -52,10 +52,6 @@ let finalize
     ~receipt_started_at
     ~runtime_manifest_context
     ~(acc : Keeper_run_tools.hook_accumulator)
-    ~pre_dispatch_compacted
-    ~pre_dispatch_compaction_trigger
-    ~pre_dispatch_compaction_before_tokens
-    ~pre_dispatch_compaction_after_tokens
     ~degraded_retry_applied
     ~degraded_retry_runtime
     ~fallback_reason
@@ -72,13 +68,6 @@ let finalize
    | Error err ->
      let status, exception_kind =
        match err with
-       | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout { message })
-         when Keeper_error_classify.is_structural_oas_timeout_message message ->
-         "timeout", Some "oas_agent_execution_timeout"
-       | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _) ->
-         "timeout", Some "oas_agent_execution_timeout"
-       | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionIdleTimeout _) ->
-         "timeout", Some "oas_agent_idle_timeout"
        | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) ->
          "timeout", Some "outer_oas_timeout"
        | _ -> "error", Some "outer_oas_error"
@@ -193,10 +182,6 @@ let finalize
     ; extra_system_context_digest
     ; extra_system_context_computed_size
     ; extra_system_context_injected_size
-    ; pre_dispatch_compacted
-    ; pre_dispatch_compaction_trigger
-    ; pre_dispatch_compaction_before_tokens
-    ; pre_dispatch_compaction_after_tokens
     }
   in
   let disposition, reason = Keeper_execution_receipt.operator_disposition receipt in
@@ -285,8 +270,9 @@ let finalize
     | Ok _, Ok () -> turn_result_with_operator_disposition
     | Ok _, Error err_msg ->
       Error
-        (Agent_sdk.Error.Internal
-           (Printf.sprintf "execution_receipt_append_failed: %s" err_msg))
+        (Keeper_internal_error.sdk_error_of_masc_internal_error
+           (Keeper_internal_error.Receipt_persistence_failed
+              { detail = err_msg }))
   in
   let final_status =
     match final_result with

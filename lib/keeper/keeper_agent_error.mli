@@ -17,23 +17,13 @@ val user_message_of_sdk_error : Agent_sdk.Error.sdk_error -> string
     keeper boundary.
 
     DD-015: adjacent runtimes use "turn" and "timeout" at different
-    layers.  This contract keeps OAS turn-budget stops distinct from
-    keeper wall-clock/provider timeouts before they collapse to receipt
-    outcomes. *)
+    layers. This contract preserves OAS observations without granting them
+    Keeper pause, retry, or blocker authority. *)
 type sdk_termination_semantics =
   | Provider_wall_clock_timeout
-  | Oas_agent_execution_timeout
-  | Oas_turn_budget_exhausted
-  | Oas_idle_budget_exhausted
-  | Oas_exit_condition_reached
-  | Oas_token_budget_exhausted
-  | Oas_cost_budget_exhausted
-  | Oas_cost_budget_unenforceable
   | Oas_guardrail_violation
   | Oas_tripwire_violation
   | Oas_input_required
-  | Oas_tool_failure_recovery_failed
-  | Oas_tool_failure_recovery_deferred
   | Sdk_error_failure
 
 val sdk_termination_semantics
@@ -65,10 +55,9 @@ val api_error_terminal_reason_code_typed
   :  Agent_sdk.Error.api_error
   -> Keeper_turn_terminal_code.t
 
-(** Receipt outcome for terminal SDK errors.  Provider/time-budget stop
-    semantics retain their existing [`Cancelled] mapping.  Behavioral
-    [IdleDetected] is an ordinary failed receipt: it is not evidence of a
-    user or supervisor cancellation. *)
+(** Receipt outcome for terminal SDK values. OAS turn-limit and execution-time
+    observations remain successful even if they reach this defensive bridge;
+    they are neither cancellation nor lifecycle-failure authority. *)
 val receipt_outcome_kind_of_sdk_error
   :  Agent_sdk.Error.sdk_error
   -> Keeper_execution_receipt.outcome_kind

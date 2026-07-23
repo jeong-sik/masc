@@ -241,7 +241,7 @@ describe('dashboardSlicesForRoute', () => {
       { tab: 'workspace', params: { section: 'board' } },
       { tab: 'monitoring', params: { section: 'agents' } },
       { tab: 'keepers', params: { keeper: 'sangsu' } },
-      { tab: 'monitoring', params: { section: 'cognition' } },
+      { tab: 'registry', params: {} },
       { tab: 'monitoring', params: { section: 'fleet-health', view: 'comparison' } },
       { tab: 'command', params: {} },
     ] as const
@@ -266,8 +266,6 @@ describe('dashboardSlicesForRoute', () => {
     expect(dashboardSlicesForRoute({ tab: 'workspace', params: { section: 'planning' } }))
       .toContain('execution')
     expect(dashboardSlicesForRoute({ tab: 'monitoring', params: { section: 'observatory' } }))
-      .toContain('execution')
-    expect(dashboardSlicesForRoute({ tab: 'monitoring', params: { section: 'cognition' } }))
       .toContain('execution')
     expect(dashboardSlicesForRoute({
       tab: 'monitoring',
@@ -300,8 +298,14 @@ describe('dashboardSlicesForRoute', () => {
         'shell',
         'transport',
       ])
-    expect(dashboardSlicesForRoute({ tab: 'monitoring', params: { section: 'cognition' } }))
-      .toContain('composite')
+    expect(dashboardSlicesForRoute({ tab: 'registry', params: {} }))
+      .toEqual([
+        'composite',
+        'execution',
+        'namespace',
+        'shell',
+        'transport',
+      ])
   })
 
   it('subscribes operator only for the active command surface', () => {

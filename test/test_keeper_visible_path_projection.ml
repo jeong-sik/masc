@@ -44,48 +44,65 @@ let write_file path content =
     (fun () -> output_string oc content)
 ;;
 
-let make_meta ?(sandbox = Keeper_types_profile_sandbox.Local) name =
+let make_meta
+      ?(sandbox = Keeper_types_profile_sandbox.Local)
+      ?(always_allow = false)
+      name
+  =
   let json =
     `Assoc
       [ "name", `String name
       ; "agent_name", `String ("agent-" ^ name)
       ; "trace_id", `String ("trace-" ^ name)
-      ; "goal", `String "visible path projection test"
       ; ( "sandbox_profile"
         , `String (Keeper_types_profile_sandbox.sandbox_profile_to_string sandbox) )
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
-  | Ok meta -> meta
+  | Ok meta -> if always_allow then { meta with always_allow = Some true } else meta
   | Error e -> Alcotest.fail e
 ;;
 
 let with_eio_fs f =
   Eio_main.run
   @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run
+  @@ fun sw ->
+  let fs = Eio.Stdenv.fs env in
+  Fs_compat.set_fs fs;
   Process_eio.init
     ~cwd_default:(Eio.Stdenv.cwd env)
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock:(Eio.Stdenv.clock env);
-  f ()
+  f ~fs ~sw ()
 ;;
 
-let setup ?sandbox f =
+let setup ?sandbox ?always_allow f =
   with_eio_fs
-  @@ fun () ->
+  @@ fun ~fs ~sw () ->
   let base = temp_dir () in
   ensure_dir (Filename.concat base Common.masc_dirname);
   Fun.protect
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
-       Keeper_registry.clear ();
+       Keeper_registry.For_testing.clear ();
        let config = Workspace.default_config base in
-       let meta = make_meta ?sandbox "tester" in
+       let meta = make_meta ?sandbox ?always_allow "tester" in
        let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
        ensure_dir playground;
-       ignore (Keeper_registry.register ~base_path:base meta.name meta);
-       f ~config ~meta ~playground)
+       ignore (Keeper_registry.For_testing.register ~base_path:base meta.name meta);
+       Masc_test_deps.with_publication_recovery_registry
+         ~sw
+         ~fs
+         ~registry_root:(Workspace.masc_root_dir config)
+       @@ fun registry ->
+       let publication_recovery =
+         { Masc.Keeper_publication_recovery_availability.provider =
+             Masc_test_deps.publication_recovery_provider registry
+         ; keeper_name = meta.name
+         }
+       in
+       f ~config ~meta ~playground ~publication_recovery)
 ;;
 
 let parse raw = Yojson.Safe.from_string raw
@@ -131,7 +148,7 @@ let allow_repo ~config ~(meta : Masc.Keeper_meta_contract.keeper_meta) repo_id =
 
 let test_visible_mind_read_resolves_to_private_storage () =
   setup
-  @@ fun ~config ~meta ~playground ->
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
   let target = Filename.concat playground "mind/README.md" in
   write_file target "visible mind\n";
   match
@@ -144,54 +161,53 @@ let test_visible_mind_read_resolves_to_private_storage () =
   | Error e -> Alcotest.fail ("visible mind path should resolve: " ^ e)
 ;;
 
-let test_playground_internal_path_now_allowed () =
-  (* RFC-0006: the keeper playground (.masc/playground/<keeper>/...) is the
-     keeper's own working area — its internal paths (mind/, drafts) are
-     reachable. #23843 unblocked the whole arm; this keeps the playground half
-     unblocked after re-narrowing the helper to exempt .masc/playground. *)
+let test_absolute_playground_path_is_allowed () =
   setup
-  @@ fun ~config ~meta ~playground ->
-  let private_raw =
-    Masc.Keeper_sandbox.allowed_root_rel_of_meta ~meta ^ "mind/README.md"
-  in
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
   let target = Filename.concat playground "mind/README.md" in
   write_file target "private storage fixture\n";
   (match
      Keeper_tool_shared_runtime.resolve_keeper_read_path
        ~config
        ~meta
-       ~raw_path:private_raw
+       ~raw_path:target
    with
    | Ok path ->
      Alcotest.(check string) "resolved private path" target path
    | Error e -> Alcotest.fail ("playground-internal path should resolve: " ^ e))
 ;;
 
-let test_masc_internal_state_read_stays_blocked () =
-  (* The narrowing is load-bearing: workspace-level internal state
-     (.masc/backlog.json, .masc/tasks/) must stay blocked — keepers reach it
-     via keeper_tasks_list / keeper_context_status, not by probing the files.
-     This is the #23807 traversal/symlink write-bypass defence that #23843
-     dropped. *)
+let test_relative_path_does_not_depend_on_project_root_allowlist () =
   setup
-  @@ fun ~config ~meta ~playground:_ ->
-  (match
-     Keeper_tool_shared_runtime.resolve_keeper_read_path
-       ~config
-       ~meta
-       ~raw_path:".masc/backlog.json"
-   with
-   | Ok path -> Alcotest.fail (".masc internal state should be blocked: " ^ path)
-   | Error e ->
-     Alcotest.(check bool)
-       "masc internal state blocked"
-       true
-       (String.starts_with ~prefix:"task_state_file_path_blocked:" e))
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
+  let target = Filename.concat playground "mind/README.md" in
+  let project_root_meta = { meta with allowed_paths = [ "mind" ] } in
+  match
+    Keeper_tool_shared_runtime.resolve_keeper_read_path
+      ~config
+      ~meta:project_root_meta
+      ~raw_path:"mind/README.md"
+  with
+  | Ok path -> Alcotest.(check string) "relative path stays in playground" target path
+  | Error e -> Alcotest.fail ("relative path should resolve in playground: " ^ e)
+;;
+
+let test_relative_parent_escape_is_rejected () =
+  setup
+  @@ fun ~config ~meta ~playground:_ ~publication_recovery:_ ->
+  match
+    Keeper_tool_shared_runtime.resolve_keeper_read_path
+      ~config
+      ~meta
+      ~raw_path:"../outside.txt"
+  with
+  | Error _ -> ()
+  | Ok path -> Alcotest.failf "relative parent escape resolved unexpectedly: %s" path
 ;;
 
 let test_read_with_visible_repo_cwd_and_relative_file_path () =
   setup
-  @@ fun ~config ~meta ~playground ->
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
   allow_repo ~config ~meta "masc";
   let target = Filename.concat playground "repos/masc/README.md" in
   write_file target "repo readme\n";
@@ -199,7 +215,7 @@ let test_read_with_visible_repo_cwd_and_relative_file_path () =
     Keeper_tool_filesystem_runtime.handle_read_file
       ~turn_sandbox_factory:None
       ~config
-      ~keeper_name:meta.name
+      ~meta
       ~args:
         (`Assoc
             [ "cwd", `String "repos/masc"
@@ -216,7 +232,7 @@ let test_read_with_visible_repo_cwd_and_relative_file_path () =
 
 let test_repository_backlog_file_is_readable () =
   setup
-  @@ fun ~config ~meta ~playground ->
+  @@ fun ~config ~meta ~playground ~publication_recovery:_ ->
   allow_repo ~config ~meta "masc";
   let target = Filename.concat playground "repos/masc/docs/backlog.json" in
   write_file target {|{"scope":"repository fixture"}|};
@@ -224,7 +240,7 @@ let test_repository_backlog_file_is_readable () =
     Keeper_tool_filesystem_runtime.handle_read_file
       ~turn_sandbox_factory:None
       ~config
-      ~keeper_name:meta.name
+      ~meta
       ~args:
         (`Assoc
             [ "path", `String "repos/masc/docs/backlog.json"
@@ -238,24 +254,17 @@ let test_repository_backlog_file_is_readable () =
     (parse_string "content" raw)
 ;;
 
-(* Regression: a repo-prefixed read of a path that does not exist (e.g.
-   the masc-mcp->masc rename-drift case, or a hallucinated file) routes
-   through resolve_shared. Before the fix, resolve_shared wrapped every
-   error as Read_path_error -> bare {error}, so the keeper-facing result
-   omitted your_playground / available_repos even though the message text
-   says "check your_playground for available files". The fix mirrors
-   resolve_projected: a path_not_found_under_allowed_roots rejection
-   becomes Missing_file -> rich missing_file_error_json. Assert the rich
-   hint reaches the keeper-facing result. *)
-let test_repo_prefixed_missing_read_surfaces_playground_hint () =
+(* A repo-prefixed missing read preserves producer facts without inventing
+   repository or retry advice at the dispatch boundary. *)
+let test_repo_prefixed_missing_read_preserves_exact_input () =
   setup
-  @@ fun ~config ~meta ~playground:_ ->
+  @@ fun ~config ~meta ~playground:_ ~publication_recovery:_ ->
   allow_repo ~config ~meta "masc";
   let raw =
     Keeper_tool_filesystem_runtime.handle_read_file
       ~turn_sandbox_factory:None
       ~config
-      ~keeper_name:meta.name
+      ~meta
       ~args:
         (`Assoc
             [ "path", `String "repos/masc/lib/keeper/does_not_exist_xyz.ml"
@@ -263,33 +272,31 @@ let test_repo_prefixed_missing_read_surfaces_playground_hint () =
             ])
   in
   if parse_ok raw then Alcotest.failf "expected Read to fail, got ok: %s" raw;
-  (* missing_file_error_json carries your_playground + available_repos;
-     Read_path_error (the old behaviour) carries neither. *)
-  let has_hint =
-    let json = parse raw in
-    (match Json.member "your_playground" json with `Null -> false | _ -> true)
-    || (match Json.member "available_repos" json with `Null -> false | _ -> true)
-  in
-  Alcotest.(check bool)
-    "repo-prefixed not-found surfaces your_playground/available_repos hint"
-    true
-    has_hint
+  let json = parse raw in
+  Alcotest.(check (option string))
+    "repo-prefixed input path preserved"
+    (Some "repos/masc/lib/keeper/does_not_exist_xyz.ml")
+    (Json.member "input_file_path" json |> Json.to_string_option);
+  Alcotest.(check bool) "no inferred repository list" true
+    (Json.member "available_repos" json = `Null)
 ;;
 
 let test_write_visible_mind_path () =
-  setup ~sandbox:Keeper_types_profile_sandbox.Docker
-  @@ fun ~config ~meta ~playground ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker ~always_allow:true
+  @@ fun ~config ~meta ~playground ~publication_recovery ->
   let raw =
     Keeper_tool_filesystem_runtime.handle_file_write
       ~turn_sandbox_factory:None
       ~config
-      ~keeper_name:meta.name
+      ~meta
+      ~publication_recovery
       ~args:
         (`Assoc
             [ "path", `String "mind/allowed.txt"
             ; "mode", `String "overwrite"
             ; "content", `String "allowed"
             ])
+      ()
   in
   if not (parse_ok raw) then Alcotest.failf "expected Write ok, got: %s" raw;
   Alcotest.(check string)
@@ -307,13 +314,17 @@ let () =
             `Quick
             test_visible_mind_read_resolves_to_private_storage
         ; Alcotest.test_case
-            "direct private storage read is allowed"
+            "absolute playground storage read is allowed"
             `Quick
-            test_playground_internal_path_now_allowed
+            test_absolute_playground_path_is_allowed
         ; Alcotest.test_case
-            "internal masc state read stays blocked"
+            "relative path ignores project-root allowlist additions"
             `Quick
-            test_masc_internal_state_read_stays_blocked
+            test_relative_path_does_not_depend_on_project_root_allowlist
+        ; Alcotest.test_case
+            "relative parent escape is rejected"
+            `Quick
+            test_relative_parent_escape_is_rejected
         ] )
     ; ( "file_tools"
       , [ Alcotest.test_case
@@ -331,7 +342,7 @@ let () =
         ; Alcotest.test_case
             "repo-prefixed missing read surfaces playground hint"
             `Quick
-            test_repo_prefixed_missing_read_surfaces_playground_hint
+            test_repo_prefixed_missing_read_preserves_exact_input
         ] )
     ]
 ;;

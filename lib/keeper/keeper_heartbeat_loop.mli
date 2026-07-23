@@ -33,9 +33,6 @@ val collect_keepalive_board_events :
   ctx:'a context ->
   meta_current:keeper_meta ->
   proactive_warmup_elapsed:bool ->
-  approval_pending:bool ->
-  keeper_backpressured:bool ->
-  provider_cooldown_pending:bool ->
   Keeper_world_observation.pending_board_event list * keeper_meta
 
 val in_turn_liveness_pulse_interval_sec : unit -> float
@@ -66,27 +63,16 @@ type heartbeat_event_intake = {
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
-type single_claim_admission =
-  | Admit_ready_single
-  | Defer_failure_judgment
-
-(** Closed pre-intake admission result. Lifecycle, blocking approval, and
-    fd/disk pressure are classified before durable dequeue, so a blocked cycle
-    does not repeatedly lease and requeue the same stimulus. *)
+(** Closed pre-intake lifecycle result. *)
 type turn_intake_admission =
   | Intake_admitted
   | Intake_lifecycle_blocked of Keeper_lifecycle_admission.autonomous_denial
-  | Intake_pressure_blocked of Keeper_pressure_admission.block
-  | Intake_blocking_approval_pending
 
 val classify_turn_intake_admission :
   lifecycle:Keeper_lifecycle_admission.autonomous_admission ->
-  pressure:Keeper_pressure_admission.decision ->
-  blocking_approval_pending:bool ->
   turn_intake_admission
 
 val heartbeat_event_intake :
-  single_claim_admission:single_claim_admission ->
   ctx:'a context ->
   meta_after_triage:keeper_meta ->
   pending_board_events:Keeper_world_observation.pending_board_event list ->
@@ -94,19 +80,12 @@ val heartbeat_event_intake :
 
 type keepalive_scheduling_decision = {
   turn_decision : Keeper_world_observation.keeper_cycle_decision;
-  requested_should_run_turn : bool;
-  runtime_backpressure : Keeper_heartbeat_loop_observations.runtime_backpressure_decision;
-  pacing_block : float option;
   should_run_turn : bool;
   verdict_reasons : string list;
   channel : string;
 }
 
 val decide_keepalive_scheduling :
-  ?runtime_id_of_meta:(keeper_meta -> string) ->
-  ?runtime_resilience_of_name:(string -> string option) ->
-  ?keeper_resilience_of_name:(string -> string option) ->
-  ?pacing_block_of_name:(string -> float option) ->
   ?reactive_wake:bool ->
   ?event_queue_triggers:Keeper_world_observation.event_queue_trigger list ->
   stop:bool Atomic.t ->
@@ -118,12 +97,6 @@ val provider_timeout_observation_reasons : string list
 
 val record_provider_timeout_observation :
   base_path:string -> keeper_name:string -> unit
-
-val provider_timeout_policy_decision :
-  strikes:int -> Agent_sdk.Error.sdk_error -> Keeper_failure_policy.decision option
-(** Return the policy decision for a structured provider-timeout error.
-    This heartbeat-loop path is reached after the keeper turn returned, so
-    timeout evidence is not liveness loss by itself. *)
 
 (** Outcome of one keepalive cycle evaluation.
 
@@ -149,22 +122,88 @@ val record_crashed_cycle_failure :
 
 val settlement_of_failure :
   settled_at:float ->
+  compaction_consecutive_failures:int ->
+  transcript_quarantine_consecutive_retries:int ->
   Keeper_unified_turn.turn_failure ->
   Keeper_registry_event_queue.settlement
 (** Pure queue disposition for a failed cycle. Retry/rotation requeue and a
     deterministic failure creates one judgment successor. This mapping is
     identical when the source lease carried an earlier judgment: the failed
     action's new typed route remains authoritative rather than being collapsed
-    into a generic judgment failure. *)
+    into a generic judgment failure.
+
+    [compaction_consecutive_failures] is the keeper's persisted failure streak
+    from [keeper_meta.runtime.compaction_rt]. When the disposition carries an
+    in-lane provider-overflow compaction outcome that made no durable progress
+    ([Compaction_attempt_failed] or a terminal no-compaction), the settlement
+    escalates as [Compaction_retry_exhausted] once this failure would reach
+    [Keeper_meta_contract.compaction_retry_escalation_threshold] — without the
+    ceiling this lane requeues forever, one summarizer LLM call per heartbeat
+    cycle (RFC-0351 S0, #25461; 2026-07-21 storm: 284 provider-overflow
+    rejections over ~10h, ended only by operator keeper_down). A
+    [Compaction_committed] disposition always requeues: the retry reloads a
+    durably smaller checkpoint. [Escalate_after_exact_output_terminal] ignores
+    the ordinary route and immediately settles as a typed escalation with no
+    successor.
+
+    [transcript_quarantine_consecutive_retries] is the keeper's persisted
+    quarantine streak from
+    [keeper_meta.runtime.transcript_quarantine_consecutive_retries]. A
+    [Requeue_after_transcript_quarantine] disposition requeues below
+    [Keeper_meta_contract.transcript_quarantine_retry_escalation_threshold]
+    and escalates as [Transcript_quarantine_retry_exhausted] at it — the
+    poisoned checkpoint is preserved unmodified by design, so without the
+    ceiling the same stimulus loops through the full turn pipeline on every
+    heartbeat (#25296). *)
+
+val compaction_outcome_of_cycle_outcome :
+  Keeper_heartbeat_loop_cycle.cycle_outcome option ->
+  [ `Committed | `Overflow_episode_committed | `Failed | `Recovered ] option
+(** Pure mapping from a settled cycle outcome to the compaction-streak stamp
+    ([Keeper_meta_store.persist_compaction_outcome]). Manual-lane
+    applied/failed outcomes and in-lane provider-overflow dispositions join
+    the same per-keeper streak. The streak counts consecutive
+    provider-overflow episodes (#25538): an in-lane commit maps to
+    [`Overflow_episode_committed] (advances the streak — committed savings
+    under an incompressible floor must still reach the ceiling), a completed
+    overflow-free turn maps to [`Recovered] (resets it), and only the
+    operator's manual commit maps to [`Committed] (count + reset).
+    Outcomes with no compaction involvement return [None]. *)
+
+val transcript_quarantine_outcome_of_cycle_outcome :
+  Keeper_heartbeat_loop_cycle.cycle_outcome option ->
+  [ `Retried | `Recovered ] option
+(** Pure mapping from a settled cycle outcome to the transcript-quarantine
+    streak stamp
+    ({!Keeper_meta_store.persist_transcript_quarantine_outcome}). A failed
+    turn with a [Requeue_after_transcript_quarantine] disposition maps to
+    [`Retried] (advances the streak — the settlement reads it to escalate
+    instead of requeuing at
+    [Keeper_meta_contract.transcript_quarantine_retry_escalation_threshold]);
+    a completed turn maps to [`Recovered] (resets it — the keeper is no
+    longer pinned to the poisoned transcript). Outcomes with no quarantine
+    involvement return [None] (#25296). *)
 
 val settlement_of_cycle_outcome :
+  base_path:string ->
   settled_at:float ->
   stop_requested:bool ->
+  compaction_consecutive_failures:int ->
+  transcript_quarantine_consecutive_retries:int ->
   lease:Keeper_registry_event_queue.lease ->
   Keeper_heartbeat_loop_cycle.cycle_outcome option ->
   Keeper_registry_event_queue.settlement
 (** Pure lease settlement boundary. Completed work acknowledges; typed
-    cancellation and non-executable-phase skips requeue. *)
+    cancellation and non-executable-phase skips requeue.
+
+    [compaction_consecutive_failures] is the keeper's current failure streak
+    from [keeper_meta.runtime.compaction_rt]. A manual-compaction failure — or
+    a failed cycle whose disposition carries a no-progress in-lane compaction
+    outcome (via {!settlement_of_failure}) — settles as
+    [Escalate Compaction_retry_exhausted] once this failure would reach
+    [Keeper_meta_contract.compaction_retry_escalation_threshold], and retries
+    below it — a requeue is not an ack, so without the ceiling the same
+    stimulus re-enters every cycle (RFC-0351 S0, #25461). *)
 
 val project_transition_outbox :
   base_path:string -> keeper_name:string -> (unit, string) result
@@ -176,10 +215,10 @@ val project_transition_outbox :
     turn-failure counter. [turn_fail_count > 0] maps to [Turn_failed];
     [0] maps to [Turn_succeeded]. *)
 val turn_status_event :
-  turn_fail_count:int -> max_allowed:int -> Keeper_state_machine.event
+  turn_fail_count:int -> Keeper_state_machine.event
 
 (** Runs one keepalive turn (event intake, scheduling, optional cycle dispatch).
-    The caller classifies lifecycle state, fd/disk pressure, and typed Blocking HITL ownership
+    The caller classifies lifecycle state and fd/disk pressure
     with {!classify_turn_intake_admission} BEFORE this is invoked, so this
     function must not re-add inline admission gates: doing so would reinstate
     the consume-before-gate churn that hoisting the decision removed. *)
@@ -202,67 +241,10 @@ val refresh_work_as_heartbeat :
   consecutive_failures:int ref ->
   unit
 
-val dispatch_recurring_keepalive :
-  ctx:'a context ->
-  meta_after_proactive:keeper_meta ->
-  now_ts:float ->
-  int
-
-(** Pure: whether a [Keeper_heartbeat_smart] decision should allow the keepalive
-    cycle (presence/snapshot/board/turn/recurring) to run.
-
-    Contract: [Skip_busy] -> [true] (cycle continues).
-    [Skip_idle] -> [false] (keeper idle, back off).
-    [Emit] -> [true]. *)
-val smart_heartbeat_cycle_continues : Keeper_heartbeat_smart.decision -> bool
-
-(** Pure: post-sleep refinement of [smart_heartbeat_cycle_continues] that
-    closes the [MissedWakeup] gap in [KeeperHeartbeat.tla].
-
-    The base helper is computed before the idle sleep, but during a
-    [Skip_idle] sleep an external [wakeup_keeper] / board signal can
-    flip the wakeup atomic — [interruptible_sleep] returns [Woken] in
-    that case. The spec's honest [HeartbeatTick] action requires
-    [turn_state' = "running"] when wakeup is consumed, so the cycle
-    must continue even though the original decision was [Skip_idle].
-    This sibling of #10078 (which lifted the same restriction for
-    [Skip_busy]) closes the [Skip_idle] half intentionally left open
-    by that fix.
-
-    Contract: returns the base decision unchanged for [Skip_busy] and
-    [Emit]; for [Skip_idle], promotes to [true] iff the sleep ended
-    with [Woken] (not [Timeout] / [Stopped]). *)
-val cycle_continues_after_wake :
-  Keeper_heartbeat_smart.decision -> Keeper_keepalive_signal.sleep_outcome -> bool
-
-val visible_consumer_count : unit -> int
-
-val visibility_gate_decision :
-  visible_consumers:int ->
-  has_pending_signal:bool ->
-  now:float ->
-  last_heartbeat_cycle_ts:float ->
-  Keeper_heartbeat_smart.decision ->
-  Keeper_heartbeat_smart.decision
-
-val run_smart_heartbeat_gate :
-  config:Workspace.config ->
-  clock:'a Eio.Time.clock ->
-  stop:bool Atomic.t ->
-  wakeup:bool Atomic.t ->
-  meta_current:keeper_meta ->
-  smart_hb_enabled:(unit -> bool) ->
-  smart_hb_config:Keeper_heartbeat_smart.config ->
-  last_successful_heartbeat_ts:float ref ->
-  last_heartbeat_cycle_ts:float ref ->
-  wake_source:Keeper_keepalive_signal.sleep_outcome ref ->
-  bool
-
 val maybe_write_heartbeat_snapshot :
   ctx:'a context ->
   meta_current:keeper_meta ->
   now_ts:float ->
-  consecutive_hb_failures:int ->
   last_snapshot_ts:float ref ->
   snapshot_interval_sec:int ->
   timing_ring:Keeper_keepalive_signal.stage_timing array ->
@@ -282,8 +264,6 @@ val record_keepalive_stage_timing :
   t_board_end:float ->
   t_turn_start:float ->
   t_turn_end:float ->
-  t_recurring_start:float ->
-  t_recurring_end:float ->
   unit
 
 (** The heartbeat loop body, extracted for reuse by the supervisor.

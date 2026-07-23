@@ -15,13 +15,21 @@ type 'a context =
   ; clock : 'a Eio.Time.clock
   ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option
+  ; publication_recovery_provider :
+      Keeper_publication_recovery_availability.provider
   }
 
 type tool_result = Tool_result.result
 
 val tool_result_ok : ?tool_name:string -> string -> tool_result
+val tool_result_ok_data : ?tool_name:string -> Yojson.Safe.t -> tool_result
 val tool_result_error :
   ?tool_name:string -> ?class_:Tool_result.tool_failure_class -> string -> tool_result
+val tool_result_error_data :
+  ?tool_name:string ->
+  ?class_:Tool_result.tool_failure_class ->
+  Yojson.Safe.t ->
+  tool_result
 
 val tool_result_with_tool_name : tool_name:string -> tool_result -> tool_result
 val tool_result_body : tool_result -> string
@@ -54,34 +62,9 @@ val string_has_operator_todo_placeholder : string -> bool
 val json_has_operator_todo_placeholder : Yojson.Safe.t -> bool
 val json_operator_todo_placeholder_paths : Yojson.Safe.t -> string list
 val reject_placeholder_persona_profile : label:string -> path:string -> Yojson.Safe.t -> bool
-val operator_todo_placeholder_fields : (string * string option) list -> string list
-val persona_operator_todo_placeholder_fields : persona_summary -> keeper_profile_defaults -> string list
 val keeper_profile_defaults_materializable : keeper_profile_defaults -> bool
 val keeper_profile_defaults_materializable_for_name :
   ?base_path:string -> string -> bool
-
-val normalize_per_provider_timeout_opt : source:string -> float option -> float option
-
-val per_provider_timeout_of_declared_float_opt :
-  source:string ->
-  declared:bool ->
-  float option ->
-  per_provider_timeout_state * float option
-
-val per_provider_timeout_of_toml :
-  source:string ->
-  Keeper_toml_loader.toml_doc ->
-  string ->
-  per_provider_timeout_state * float option
-
-val per_provider_timeout_of_json_field :
-  source:string ->
-  field:string ->
-  Yojson.Safe.t ->
-  per_provider_timeout_state * float option
-
-val normalize_per_provider_timeout_json_field :
-  source:string -> field:string -> Yojson.Safe.t -> float option
 
 val personas_root_opt : unit -> string option
 val persona_profile_path_opt : string -> string option

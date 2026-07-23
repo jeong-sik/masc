@@ -122,6 +122,160 @@ let count_calls_in_value_binding ~module_path ~binding_name ~callee =
   !total
 ;;
 
+let call_count_in_expression ~callee expression =
+  let count = ref 0 in
+  let iter =
+    { Ast_iterator.default_iterator with
+      expr =
+        (fun self e ->
+          (match e.pexp_desc with
+           | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, _)
+             when String.equal (longident_to_string txt) callee -> incr count
+           | _ -> ());
+          Ast_iterator.default_iterator.expr self e)
+    }
+  in
+  iter.expr iter expression;
+  !count
+;;
+
+let count_applications_with_label_containing_call_in_value_binding
+      ~module_path
+      ~binding_name
+      ~callee
+      ~label
+      ~nested_callee
+  =
+  let structure = parse_implementation_or_fail module_path in
+  let count_in_expression expression =
+    let count = ref 0 in
+    let labelled_argument_contains_call args =
+      List.exists
+        (fun (argument_label, argument) ->
+           let label_matches =
+             match argument_label with
+             | Asttypes.Labelled name | Asttypes.Optional name ->
+               String.equal name label
+             | Asttypes.Nolabel -> false
+           in
+           label_matches
+           && call_count_in_expression ~callee:nested_callee argument > 0)
+        args
+    in
+    let iter =
+      { Ast_iterator.default_iterator with
+        expr =
+          (fun self expression ->
+            (match expression.pexp_desc with
+             | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, args)
+               when String.equal (longident_to_string txt) callee
+                    && labelled_argument_contains_call args -> incr count
+             | _ -> ());
+            Ast_iterator.default_iterator.expr self expression)
+      }
+    in
+    iter.expr iter expression;
+    !count
+  in
+  let total = ref 0 in
+  let iter =
+    { Ast_iterator.default_iterator with
+      value_binding =
+        (fun self binding ->
+          (match binding.pvb_pat.ppat_desc with
+           | Ppat_var { txt; _ } when String.equal txt binding_name ->
+             total := !total + count_in_expression binding.pvb_expr
+           | _ -> ());
+          Ast_iterator.default_iterator.value_binding self binding)
+    }
+  in
+  iter.structure iter structure;
+  !total
+;;
+
+let rec pattern_has_constructor_leaf ~name (pattern : Parsetree.pattern) =
+  match pattern.ppat_desc with
+  | Ppat_construct ({ txt; _ }, _) -> String.equal (longident_leaf txt) name
+  | Ppat_alias (nested, _) | Ppat_constraint (nested, _) ->
+    pattern_has_constructor_leaf ~name nested
+  | _ -> false
+;;
+
+(* Conservative structural proof for the common Result launch-gate shape:
+
+     match <every branch calls gate> with
+     | Error _ -> ...
+     | Ok _ -> guarded side effects
+
+   The proof fails closed for any other shape. It also compares the complete
+   named binding with the [Ok] branch, so a lexical call before the match or in
+   an error branch is reported as unguarded. *)
+let result_ok_match_dominates_call_in_value_binding
+      ~module_path
+      ~binding_name
+      ~gate
+      ~callee
+  =
+  let structure = parse_implementation_or_fail module_path in
+  let rec every_result_path_calls_gate (expression : Parsetree.expression) =
+    match expression.pexp_desc with
+    | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, _) ->
+      String.equal (longident_to_string txt) gate
+    | Pexp_match (_, cases) ->
+      cases <> []
+      && List.for_all
+           (fun (case : Parsetree.case) -> every_result_path_calls_gate case.pc_rhs)
+           cases
+    | Pexp_constraint (nested, _) | Pexp_coerce (nested, _, _) ->
+      every_result_path_calls_gate nested
+    | _ -> false
+  in
+  let binding_expressions = ref [] in
+  let iter =
+    { Ast_iterator.default_iterator with
+      value_binding =
+        (fun self vb ->
+          (match vb.pvb_pat.ppat_desc with
+           | Ppat_var { txt; _ } when String.equal txt binding_name ->
+             binding_expressions := vb.pvb_expr :: !binding_expressions
+           | _ -> ());
+          Ast_iterator.default_iterator.value_binding self vb)
+    }
+  in
+  iter.structure iter structure;
+  match !binding_expressions with
+  | [ binding_expression ] ->
+    let total_calls = call_count_in_expression ~callee binding_expression in
+    if total_calls = 0
+    then false
+    else (
+      let dominated = ref false in
+      let match_iter =
+        { Ast_iterator.default_iterator with
+          expr =
+            (fun self expression ->
+              (match expression.pexp_desc with
+               | Pexp_match (scrutinee, cases)
+                 when every_result_path_calls_gate scrutinee ->
+                 let guarded_calls =
+                   cases
+                   |> List.filter (fun (case : Parsetree.case) ->
+                     pattern_has_constructor_leaf ~name:"Ok" case.pc_lhs)
+                   |> List.fold_left
+                        (fun count (case : Parsetree.case) ->
+                           count + call_count_in_expression ~callee case.pc_rhs)
+                        0
+                 in
+                 if guarded_calls = total_calls then dominated := true
+               | _ -> ());
+              Ast_iterator.default_iterator.expr self expression)
+        }
+      in
+      match_iter.expr match_iter binding_expression;
+      !dominated)
+  | [] | _ :: _ :: _ -> false
+;;
+
 let count_calls_with_label ~module_path ~callee ~label =
   let structure = parse_implementation_or_fail module_path in
   let count = ref 0 in

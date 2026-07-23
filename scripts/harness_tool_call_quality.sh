@@ -330,7 +330,6 @@ write_benchmark_persona_profile() {
         long_goal: $long_goal,
         instructions: $instructions,
         mention_targets: [$mention],
-        tool_access: ["masc_status", "masc_tasks", "masc_claim_next", "masc_transition", "masc_board_post"],
         proactive_enabled: false,
         telemetry_feedback_enabled: false,
         runtime_id: "keeper_unified",
@@ -656,7 +655,6 @@ run_live_case() {
       persona_name: $persona_name,
       autoboot_enabled: false,
       proactive_enabled: false,
-      auto_handoff: false,
       allowed_paths: $allowed_paths
     }')"
 
@@ -695,7 +693,7 @@ run_live_case() {
 
   start_epoch="$(date +%s)"
   if ! call_mcp_tool 3000 "masc_keeper_msg" \
-    "$(jq -cn --arg name "${keeper_name}" --arg message "${message}" --argjson timeout "${TIMEOUT_SEC}" '{name:$name, message:$message, timeout_sec:$timeout}')" \
+    "$(jq -cn --arg name "${keeper_name}" --arg message "${message}" '{name:$name, message:$message}')" \
     "$((TIMEOUT_SEC + 30))"; then
     local msg_error
     msg_error="$(tool_error_text)"

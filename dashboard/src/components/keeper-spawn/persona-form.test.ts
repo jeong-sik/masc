@@ -35,11 +35,12 @@ describe('PersonaForm', () => {
 
   it('returns non-null when editingPersona is set', () => {
     editingPersona.value = {
-      name: 'test-persona',
-      displayName: 'Test',
+      persona_name: 'test-persona',
+      display_name: 'Test',
       role: 'reviewer',
-      mode: 'chat',
-      description: 'test',
+      trait: 'test',
+      profile_path: '/personas/test-persona/profile.json',
+      has_keeper_defaults: true,
     }
     const result = PersonaForm()
     expect(result).not.toBeNull()

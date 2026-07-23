@@ -12,22 +12,87 @@ type lease = Keeper_event_queue_persistence.lease
 type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
   | Cycle_busy
   | Turn_not_scheduled
-  | Retry_after_pacing
   | Rotate_now
   | Cancelled
   | Cycle_crashed
   | Registration_recovery
+  | Retry_after_observed
+  | Context_compaction_retry
+  | Transcript_quarantine_retry
+  | Approval_grant_unconsumed
+  | Approval_grant_state_unavailable
 
 type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
   | Failure_judgment_requested
   | Failure_judgment_boundary_failed of { detail : string }
-  | Failure_judgment_operator_required of
+  | Failure_judgment_external_input_requested of
       { judge_runtime_id : string
       ; rationale : string
       }
+  | Compaction_execution_may_have_dispatched
+  | Compaction_domain_invalid_output
+  | Compaction_retry_exhausted of
+      { attempts : int
+      ; detail : string
+      }
+  | Compaction_floor_exceeded of
+      { attempts : int
+      ; detail : string
+      }
+  | Transcript_quarantine_retry_exhausted of
+      { attempts : int
+      ; detail : string
+      }
+
+type no_compaction_reason = Keeper_event_queue_persistence.no_compaction_reason =
+  | No_eligible_history
+  | Invalid_structural_source
+  | Structurally_unchanged
+  | Checkpoint_not_reduced
+  | Execution_may_have_dispatched
+  | Domain_invalid_output
+
+type no_compaction = Keeper_event_queue_persistence.no_compaction =
+  { source : Keeper_checkpoint_ref.t
+  ; reason : no_compaction_reason
+  }
+
+type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellation =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; reason : string
+  }
+
+type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; from_keeper : string
+  ; to_keeper : string
+  }
+
+type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_receipt =
+  | Fusion_terminal of Keeper_event_queue.fusion_completion
+  | Background_job_terminal of Keeper_event_queue.bg_job_completion
+  | Hitl_terminal of Keeper_event_queue.hitl_resolution
+
+type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_terminal =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; source_receipt : source_terminal_receipt
+  }
 
 type settlement = Keeper_event_queue_persistence.settlement =
   | Ack
+  | No_compaction of no_compaction
+  | Cancel_accepted of accepted_cancellation
+  | Transfer_accepted of accepted_transfer
+  | Settle_from_source_terminal of accepted_source_terminal
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -40,6 +105,11 @@ type outbox_entry = Keeper_event_queue_persistence.outbox_entry
 type settle_result = Keeper_event_queue_persistence.settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
+  | Committed_followup_failed of
+      { receipt : transition_receipt
+      ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
+      ; detail : string
+      }
 
 let lease_stimuli = Keeper_event_queue_persistence.lease_stimuli
 let lease_kind = Keeper_event_queue_persistence.lease_kind
@@ -158,6 +228,124 @@ let enqueue_durable_result ~base_path name stimulus =
          Ok pending)
 ;;
 
+type enqueue_if_missing_durable_result =
+  | Enqueued
+  | Already_present
+  | Identity_conflict of string
+  | Storage_error of string
+
+let board_attention_event_id (stimulus : Keeper_event_queue.stimulus) =
+  match stimulus.payload with
+  | Keeper_event_queue.Board_attention attention -> Some attention.candidate_id
+  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Bootstrap
+  | Keeper_event_queue.Fusion_completed _
+  | Keeper_event_queue.Bg_completed _
+  | Keeper_event_queue.Schedule_due _
+  | Keeper_event_queue.Connector_attention _
+  | Keeper_event_queue.Hitl_resolved _
+  | Keeper_event_queue.Failure_judgment _
+  | Keeper_event_queue.Manual_compaction_requested
+  | Keeper_event_queue.Goal_assigned _ ->
+    None
+;;
+
+let stimulus_with_board_attention_event_id queue event_id =
+  let rec loop = function
+    | [] -> None
+    | stimulus :: rest ->
+      (match board_attention_event_id stimulus with
+       | Some candidate_id when String.equal candidate_id event_id -> Some stimulus
+       | Some _ | None -> loop rest)
+  in
+  loop (Keeper_event_queue.to_list queue)
+;;
+
+let enqueue_if_missing_durable_result ~base_path ~event_id name stimulus =
+  match board_attention_event_id stimulus with
+  | None ->
+    Identity_conflict
+      "opaque durable event identity requires a Board_attention payload"
+  | Some payload_event_id when not (String.equal payload_event_id event_id) ->
+    Identity_conflict
+      (Printf.sprintf
+         "durable event identity mismatch: argument=%S payload=%S"
+         event_id
+         payload_event_id)
+  | Some _ when String.equal event_id "" ->
+    Identity_conflict "durable event identity must not be empty"
+  | Some _ ->
+    let committed_pending = ref None in
+    let commit_result = ref Enqueued in
+    let identity_conflict = ref None in
+    (match
+       Keeper_event_queue_persistence.update_checked_result
+         ~base_path
+         ~keeper_name:name
+         ~after_commit:(fun () ->
+           match !committed_pending with
+           | None -> ()
+           | Some pending -> publish_pending ~base_path name pending)
+         (fun queue ->
+            match stimulus_with_board_attention_event_id queue event_id with
+            | None ->
+              let pending = Keeper_event_queue.enqueue queue stimulus in
+              committed_pending := Some pending;
+              commit_result := Enqueued;
+              Ok pending
+            | Some existing
+              when Keeper_event_queue.stimulus_identity_equal existing stimulus ->
+              committed_pending := Some queue;
+              commit_result := Already_present;
+              Ok queue
+            | Some _ ->
+              let detail =
+                Printf.sprintf
+                  "conflicting durable Board-attention event for event_id=%s"
+                  event_id
+              in
+              identity_conflict := Some detail;
+              Error detail)
+     with
+     | Ok () -> !commit_result
+     | Error detail ->
+       (match !identity_conflict with
+        | Some conflict -> Identity_conflict conflict
+        | None -> Storage_error detail))
+;;
+
+type enqueue_stimulus_durable_result =
+  | Stimulus_enqueued
+  | Stimulus_already_present
+  | Stimulus_storage_error of string
+
+let enqueue_stimulus_durable_result ~base_path name stimulus =
+  match
+    Keeper_event_queue_persistence.enqueue_stimulus_if_absent_result
+      ~base_path
+      ~keeper_name:name
+      ~after_commit:(publish_pending ~base_path name)
+      stimulus
+  with
+  | Ok Keeper_event_queue_persistence.Enqueued -> Stimulus_enqueued
+  | Ok Keeper_event_queue_persistence.Already_present -> Stimulus_already_present
+  | Error detail -> Stimulus_storage_error detail
+;;
+
+let project_accepted_transfer_durable_result ~base_path name ~transfer =
+  match
+    Keeper_event_queue_persistence.project_accepted_transfer_result
+      ~base_path
+      ~keeper_name:name
+      ~after_commit:(publish_pending ~base_path name)
+      ~transfer
+  with
+  | Ok Keeper_event_queue_persistence.Transfer_projected -> Stimulus_enqueued
+  | Ok Keeper_event_queue_persistence.Transfer_already_projected ->
+    Stimulus_already_present
+  | Error detail -> Stimulus_storage_error detail
+;;
+
 let enqueue_hitl_resolution_durable_result
     ~base_path
     ~keeper_name
@@ -235,6 +423,76 @@ let settle_result ~base_path name ~settled_at ~lease ~settlement =
     ~settled_at
     ~lease
     ~settlement
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+;;
+
+let cancel_accepted_result
+      ~base_path
+      name
+      ~current_owner_generation
+      ~settled_at
+      ~lease
+      ~cancellation
+  =
+  Keeper_event_queue_persistence.cancel_accepted_result
+    ~base_path
+    ~keeper_name:name
+    ~current_owner_generation
+    ~settled_at
+    ~lease
+    ~cancellation
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+;;
+
+let cancel_pending_accepted_result
+      ~base_path
+      name
+      ~current_owner_generation
+      ~settled_at
+      ~cancellation
+  =
+  Keeper_event_queue_persistence.cancel_pending_accepted_result
+    ~base_path
+    ~keeper_name:name
+    ~current_owner_generation
+    ~settled_at
+    ~cancellation
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+;;
+
+let transfer_pending_accepted_result
+      ~base_path
+      name
+      ~current_owner_generation
+      ~settled_at
+      ~transfer
+  =
+  Keeper_event_queue_persistence.transfer_pending_accepted_result
+    ~base_path
+    ~keeper_name:name
+    ~current_owner_generation
+    ~settled_at
+    ~transfer
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+;;
+
+let settle_pending_from_source_terminal_result
+      ~base_path
+      name
+      ~current_owner_generation
+      ~settled_at
+      ~source_terminal
+  =
+  Keeper_event_queue_persistence.settle_pending_from_source_terminal_result
+    ~base_path
+    ~keeper_name:name
+    ~current_owner_generation
+    ~settled_at
+    ~source_terminal
     ~after_commit:(publish_pending ~base_path name)
     ()
 ;;

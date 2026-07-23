@@ -35,6 +35,7 @@ type keeper_continuity =
 type tool_call_entry = {
   count : int;
   successes : int;
+  deferred : int;
   failures : int;
   last_used_at : float;
 }
@@ -43,7 +44,6 @@ type tool_call_entry = {
 
 type working_context = {
   checkpoint : Agent_sdk.Checkpoint.t;
-  max_tokens : int;
 }
 
 type session_context = {

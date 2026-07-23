@@ -132,6 +132,27 @@ let test_get_https_connector_result_is_idempotent () =
   | _ ->
     Alcotest.fail "HTTPS connector result is not stable across repeated reads"
 
+(** The Board flusher is a process-lifetime daemon that may attach to the
+    server root switch. The owner domain that installed that switch must see
+    [true], while a worker domain reading the same process-global binding must
+    see [false]. The switch and owner are published as one atomic binding. *)
+let test_root_switch_ownership_is_domain_local () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun root_sw ->
+  Eio_context.set_switch root_sw;
+  Alcotest.(check bool)
+    "owner domain owns the root switch"
+    true
+    (Eio_context.root_switch_on_current_domain ());
+  let worker_saw_ownership =
+    Eio.Domain_manager.run (Eio.Stdenv.domain_mgr env) (fun () ->
+      Eio_context.root_switch_on_current_domain ())
+  in
+  Alcotest.(check bool)
+    "worker domain does not own the root switch"
+    false
+    worker_saw_ownership
+
 let () =
   Alcotest.run "eio_context_fiber_local"
     [
@@ -164,5 +185,11 @@ let () =
           Alcotest.test_case "get_https_connector_result is idempotent"
             `Quick
             test_get_https_connector_result_is_idempotent;
+        ] );
+      ( "root switch domain ownership",
+        [
+          Alcotest.test_case "owner true, worker false"
+            `Quick
+            test_root_switch_ownership_is_domain_local;
         ] );
     ]

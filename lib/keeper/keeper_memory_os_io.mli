@@ -15,6 +15,16 @@ val facts_path_for_keepers_dir : keepers_dir:string -> keeper_id:string -> strin
 val list_fact_store_keeper_ids : unit -> string list
 val list_fact_store_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
 
+(** Keeper ids that currently have an on-disk episode store ([<id>/episodes/]).
+    A keeper whose episodes all carried zero claims has no [*.facts.jsonl] but
+    still accumulates episode files, so episode sweeps cannot enumerate from
+    fact stores alone. Excludes the reserved shared id; sorted. *)
+val list_episode_store_keeper_ids : unit -> string list
+val list_episode_store_keeper_ids_for_keepers_dir : keepers_dir:string -> string list
+
+(** Read-only check for an on-disk episode store; never creates the directory. *)
+val has_episode_store_for_keepers_dir : keepers_dir:string -> keeper_id:string -> bool
+
 (** Base-path-scoped variant of {!list_fact_store_keeper_ids}; avoids ambient
     config-dir reads in multi-workspace dashboard routes. *)
 val list_fact_store_keeper_ids_for_base_path : base_path:string -> string list
@@ -45,9 +55,19 @@ val episode_path : keeper_id:string -> trace_id:string -> generation:int -> stri
     the episode. *)
 val next_generation : keeper_id:string -> trace_id:string -> int
 
+(** BasePath-scoped variant of {!next_generation}. Use this whenever the
+    caller already owns a workspace config; it does not derive the runtime root
+    from cached ambient BasePath/cwd state. *)
+val next_generation_for_base_path :
+  base_path:string -> keeper_id:string -> trace_id:string -> int
+
 (** Like {!next_generation}, but preserves a caller-provided generation lower
     bound while still advancing the counter past it. *)
 val next_generation_with_floor : floor:int -> keeper_id:string -> trace_id:string -> int
+
+(** BasePath-scoped variant of {!next_generation_with_floor}. *)
+val next_generation_with_floor_for_base_path :
+  base_path:string -> floor:int -> keeper_id:string -> trace_id:string -> int
 
 (** {1 Atomic writes} *)
 
@@ -61,6 +81,12 @@ val with_out_channel : out_channel -> f:(out_channel -> unit) -> unit
 val append_fact : keeper_id:string -> fact -> unit
 val append_event : keeper_id:string -> episode -> unit
 val append_episode : keeper_id:string -> episode -> unit
+
+(** Lock path used by {!with_episode_bundle_lock}; the episode retention sweep
+    serializes against episode writers on the same lock. *)
+val episode_bundle_lock_path : keeper_id:string -> string
+val episode_bundle_lock_path_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> string
 
 (** Serialize a cross-file episode bundle write for one keeper. Callers that
     write facts plus episode/event artifacts should take this before the facts
@@ -117,87 +143,35 @@ val read_facts_tail : keeper_id:string -> n:int -> fact list
 val read_facts_tail_for_base_path : base_path:string -> keeper_id:string -> n:int -> fact list
 val read_events_tail : keeper_id:string -> n:int -> episode list
 val read_episodes_tail : keeper_id:string -> n:int -> episode list
+val read_episodes_all : keeper_id:string -> episode list
+(** Read every persisted episode in source order. Any malformed row/file raises;
+    no child episode is silently dropped. *)
 
-(** {1 Retention (RFC-0239 Q4, supersedes RFC-0238 Capped_by_score)} *)
+(** Strict episode-file read for destructive sweeps: every
+    [<keeper_id>/episodes/*.json] file as [(path, episode)] in filename order,
+    or [Error] on the first malformed file. Never creates the episodes
+    directory — a keeper with no episode store is [Ok []]. *)
+val read_episode_files_all_strict :
+  keeper_id:string -> ((string * episode) list, string) result
+val read_episode_files_all_strict_for_keepers_dir :
+  keepers_dir:string -> keeper_id:string -> ((string * episode) list, string) result
 
-(** Alias for {!Keeper_memory_os_policy.fact_recall_window}; retained on the IO
-    surface for compatibility with existing callers. *)
-val fact_recall_window : int
-
-(** Alias for {!Keeper_memory_os_policy.fact_store_max}; retained on the IO
-    surface for compatibility with existing callers. *)
-val fact_store_max : int
-
-(** RFC-0272 (defect D): aliases for the episode-log retention bounds in
-    {!Keeper_memory_os_policy}. The low-water values exceed
-    {!Keeper_memory_os_policy.recall_episode_tail_scan}, so a trim cannot starve
-    recall. *)
-val event_recall_window : int
-
-val event_store_max : int
-val episode_file_window : int
-val episode_file_store_max : int
-
-(** Pure hysteresis decision for the episode-log caps: [None] below [trigger]
-    (no-op), [Some keep] above. Exposed for the watermark unit tests. *)
-val trim_target : count:int -> keep:int -> trigger:int -> int option
-
-(** RFC-0272 (defect D): bound [events.jsonl] by line count. When the line count
-    exceeds [trigger], keep the last [keep] raw lines (newest, byte-faithful,
-    malformed-line tolerant) and atomically rewrite; otherwise no-op. Returns the
-    number of lines dropped. *)
-val cap_events : keeper_id:string -> keep:int -> trigger:int -> int
-
-(** RFC-0272 (defect D): bound the [episodes/] directory by file count. When the
-    parseable-file count exceeds [trigger], keep the [keep] most-recent files by
-    recency and best-effort unlink the rest; otherwise no-op. Unparseable files
-    are left untouched. Returns the number unlinked. *)
-val cap_episode_files : keeper_id:string -> keep:int -> trigger:int -> int
-
-(** Read and parse every fact in the store (unbounded; used by retention). *)
+(** Read and parse every fact in the store. *)
 val read_all_facts : keeper_id:string -> fact list
 
-(** When the fact store exceeds [trigger], keep the [keep] highest-[rank]ed
-    facts and atomically rewrite the file; otherwise no-op. Returns the number
-    of facts dropped. The hysteresis ([trigger] > [keep]) keeps rewrites off the
-    per-turn hot path. RFC-0259 §3.6 (P5): rows expired at [now] (typed
-    [valid_until] boundary) are dropped before the trigger gate and ranking, so
-    an under-cap store does not retain them; expired rows count toward the
-    returned total. *)
-val cap_facts :
-  now:float
-  -> keeper_id:string
-  -> keep:int
-  -> trigger:int
-  -> rank:(fact -> float)
-  -> int
-
-(** Outcome of a [merge_and_cap_facts] write: how many incoming claims were
-    folded into an existing fact ([merged]), persisted as new facts
-    ([appended]), and removed by the retention cap ([dropped]). *)
+(** Outcome of a [merge_facts] write: how many incoming claims were folded into
+    an existing fact and persisted as new facts. *)
 type fact_merge_stats =
   { merged : int
   ; appended : int
-  ; dropped : int
   }
 
-(** RFC-0243: the librarian write path. Upsert [incoming] facts into the store by
-    normalized claim identity — a re-observation of an existing claim is folded
-    in via [merge] (so confidence/access/verification evolve) instead of
-    appending an immortal duplicate — then apply the [keep]/[trigger]/[rank]
-    retention cap, all in a single atomic rewrite. Replaces the blind append +
-    [cap_facts] pair, giving the store write-time dedup. RFC-0259 §3.6 (P5): rows
-    expired at [now] are dropped on the same [valid_until] boundary the GC sweep
-    uses, before the trigger gate, so the librarian write path keeps the on-disk
-    store free of expired rows even below the cap; they count toward [dropped]. *)
-val merge_and_cap_facts :
-  now:float
-  -> keeper_id:string
+(** Librarian write path. Upsert [incoming] facts by explicit identity and retain
+    every resulting row. *)
+val merge_facts :
+  keeper_id:string
   -> merge:(existing:fact -> incoming:fact -> fact)
   -> incoming:fact list
-  -> keep:int
-  -> trigger:int
-  -> rank:(fact -> float)
   -> fact_merge_stats
 
 module For_testing : sig

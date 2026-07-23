@@ -7,6 +7,8 @@
 
 module Oas = Agent_sdk
 
+exception Resume_failed
+
 (* ================================================================ *)
 (* Helpers                                                          *)
 (* ================================================================ *)
@@ -28,11 +30,9 @@ let require_net () =
     If this roundtrip breaks, runtime fallback loses prior turns. *)
 let test_checkpoint_roundtrip () =
   let net = require_net () in
-  let config = { Agent_sdk.Types.default_config with
+  let config = { (Agent_sdk.Types.default_config ~model:"mock-model") with
     name = "mid-turn-test";
-    model = "mock-model";
     system_prompt = Some "test system prompt";
-    max_turns = 10;
   } in
   let agent = Agent_sdk.Agent.create ~net ~config () in
   (* Simulate 3 completed turns by manually updating state *)
@@ -72,7 +72,11 @@ let test_checkpoint_roundtrip () =
     Mid-turn resume should not thread an empty checkpoint. *)
 let test_zero_turns_no_checkpoint () =
   let net = require_net () in
-  let agent = Agent_sdk.Agent.create ~net () in
+  let agent =
+    Agent_sdk.Agent.create ~net
+      ~config:(Agent_sdk.Types.default_config ~model:"mock-model")
+      ()
+  in
   let state = Agent_sdk.Agent.state agent in
   Alcotest.(check int) "fresh agent turn_count" 0 state.turn_count;
   (* The mid-turn resume code checks turn_count > 0 before extracting *)
@@ -85,8 +89,11 @@ let test_zero_turns_no_checkpoint () =
 let test_multi_runtime_accumulation () =
   let net = require_net () in
   (* Provider A: 2 turns *)
-  let agent_a = Agent_sdk.Agent.create ~net ~config:{ Agent_sdk.Types.default_config with
-    name = "runtime-a"; model = "anthropic" } () in
+  let agent_a = Agent_sdk.Agent.create ~net
+    ~config:{ (Agent_sdk.Types.default_config ~model:"anthropic") with
+      name = "runtime-a" }
+    ()
+  in
   Agent_sdk.Agent.set_state agent_a { (Agent_sdk.Agent.state agent_a) with
     messages = [
       Agent_sdk.Types.user_msg "t1";
@@ -124,8 +131,10 @@ let test_multi_runtime_accumulation () =
     resume_from_checkpoint which patches config separately. *)
 let test_resume_preserves_checkpoint_model () =
   let net = require_net () in
-  let agent = Agent_sdk.Agent.create ~net ~config:{ Agent_sdk.Types.default_config with
-    model = "anthropic-model" } () in
+  let agent = Agent_sdk.Agent.create ~net
+    ~config:(Agent_sdk.Types.default_config ~model:"anthropic-model")
+    ()
+  in
   Agent_sdk.Agent.set_state agent { (Agent_sdk.Agent.state agent) with
     messages = [Agent_sdk.Types.user_msg "hello"];
     turn_count = 1;
@@ -137,6 +146,26 @@ let test_resume_preserves_checkpoint_model () =
   let state = Agent_sdk.Agent.state resumed in
   Alcotest.(check string) "resumed keeps checkpoint model" "anthropic-model"
     (Agent_sdk.Types.model_to_string state.config.model)
+
+(** A persisted checkpoint is authoritative. If resume fails before returning a
+    typed result, Runtime_agent must not hide the failure by creating a fresh
+    agent with an empty conversation. *)
+let test_resume_exception_does_not_build_fresh_agent () =
+  let build_calls = ref 0 in
+  let propagated =
+    match
+      Runtime_agent.For_testing.select_agent_result
+        ~checkpoint:(Some ())
+        ~resume:(fun () -> raise Resume_failed)
+        ~build:(fun () ->
+          incr build_calls;
+          `Fresh)
+    with
+    | exception Resume_failed -> true
+    | `Fresh -> false
+  in
+  Alcotest.(check bool) "resume exception propagated" true propagated;
+  Alcotest.(check int) "fresh build not attempted" 0 !build_calls
 
 (* ================================================================ *)
 (* Runner                                                           *)
@@ -155,5 +184,7 @@ let () =
         test_multi_runtime_accumulation;
       Alcotest.test_case "resume preserves checkpoint model" `Quick
         test_resume_preserves_checkpoint_model;
+      Alcotest.test_case "resume exception never falls back to fresh agent" `Quick
+        test_resume_exception_does_not_build_fresh_agent;
     ];
   ]

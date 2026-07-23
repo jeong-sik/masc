@@ -32,16 +32,6 @@ let board_stimulus ?(post_id = "post-42") ?updated_at () :
   }
 ;;
 
-let no_progress_recovery_stimulus ?(keeper_name = "no-progress-keeper") () :
-  Keeper_event_queue.stimulus
-  =
-  { post_id = "no-progress-loop:" ^ keeper_name
-  ; urgency = Immediate
-  ; arrived_at = 1234.5
-  ; payload = Keeper_event_queue.No_progress_recovery
-  }
-;;
-
 let fusion_completed_stimulus ?(run_id = "fus-ledger-1") () :
   Keeper_event_queue.stimulus
   =
@@ -51,8 +41,7 @@ let fusion_completed_stimulus ?(run_id = "fus-ledger-1") () :
   ; payload =
       Keeper_event_queue.Fusion_completed
         { run_id
-        ; ok = true
-        ; resolved_answer = "use approach B"
+        ; terminal = Keeper_event_queue.Fusion_succeeded "use approach B"
         ; board_post_id = "post-fus"
         ; channel = Keeper_continuation_channel.unrouted "test fixture"
         }
@@ -96,14 +85,53 @@ let require_ok label = function
   | Error message -> failf "%s: %s" label message
 ;;
 
-let transition_receipt ~settlement stimulus =
-  let pending = Keeper_event_queue.enqueue Keeper_event_queue.empty stimulus in
-  let state = Keeper_event_queue_state.with_pending pending Keeper_event_queue_state.empty in
-  let state, lease =
-    Keeper_event_queue_state.claim_when
-      ~claimed_at:1235.0
-      ~ready:(fun _ -> true)
-      state
+let manual_compaction_stimulus () : Keeper_event_queue.stimulus =
+  { post_id = Keeper_event_queue.manual_compaction_post_id
+  ; urgency = Keeper_event_queue.Immediate
+  ; arrived_at = 1234.5
+  ; payload = Keeper_event_queue.Manual_compaction_requested
+  }
+;;
+
+let no_compaction_settlement ~turn_count reason :
+  Keeper_event_queue_state.settlement
+  =
+  let trace_id =
+    Keeper_id.Trace_id.of_string "trace-ledger-no-compaction"
+    |> require_ok "parse no-compaction trace"
+  in
+  let source =
+    Keeper_checkpoint_ref.of_persisted
+      ~trace_id
+      ~generation:3
+      ~turn_count
+      ~sha256:(String.make 64 'a')
+    |> Result.get_ok
+  in
+  Keeper_event_queue_state.No_compaction { source; reason }
+;;
+
+let persist_transition_outbox ~base_path ~keeper_name ~settlement stimuli =
+  Keeper_event_queue_persistence.update_result
+    ~base_path
+    ~keeper_name
+    (fun pending -> List.fold_left Keeper_event_queue.enqueue pending stimuli)
+  |> require_ok "persist transition sources";
+  let lease =
+    (match stimuli with
+     | [ _ ] ->
+       Keeper_event_queue_persistence.claim_when_result
+         ~base_path
+         ~keeper_name
+         ~claimed_at:1235.0
+         ~ready:(fun _ -> true)
+         ()
+     | _ ->
+       Keeper_event_queue_persistence.claim_board_result
+         ~base_path
+         ~keeper_name
+         ~claimed_at:1235.0
+         ())
     |> require_ok "claim transition receipt stimulus"
   in
   let lease =
@@ -111,32 +139,37 @@ let transition_receipt ~settlement stimulus =
     | Some lease -> lease
     | None -> fail "transition receipt stimulus was not claimed"
   in
-  let _state, result =
-    Keeper_event_queue_state.settle
+  let receipt =
+    Keeper_event_queue_persistence.settle_result
+      ~base_path
+      ~keeper_name
       ~settled_at:1236.0
       ~lease
       ~settlement
-      state
+      ()
     |> require_ok "settle transition receipt stimulus"
+    |> function
+    | Keeper_event_queue_persistence.Settled receipt -> receipt
+    | Keeper_event_queue_persistence.Already_settled _ ->
+      fail "first transition receipt settlement was already settled"
+    | Keeper_event_queue_persistence.Committed_followup_failed { detail; _ } ->
+      failf "settlement follow-up failed: %s" detail
   in
-  match result with
-  | Keeper_event_queue_state.Settled receipt -> receipt
-  | Keeper_event_queue_state.Already_settled _ ->
-    fail "first transition receipt settlement was already settled"
+  (match
+     Keeper_event_queue_persistence.transition_outbox_result
+       ~base_path
+       ~keeper_name
+     |> require_ok "read persisted transition outbox"
+   with
+   | [ entry ] ->
+     check bool "outbox retains the settled receipt" true
+       (Keeper_event_queue_state.transition_receipt_equal entry.receipt receipt)
+   | [] | _ :: _ :: _ -> fail "settled transition did not produce one outbox entry");
+  receipt
 ;;
 
 let check_member_string label expected key json =
   check string label expected (json |> member key |> to_string)
-;;
-
-let result_count_by_label json label =
-  json
-  |> member "completion_contract_result_counts"
-  |> to_list
-  |> List.find_opt (fun item ->
-    match item |> member "result" with
-    | `String value -> String.equal value label
-    | _ -> false)
 ;;
 
 let check_list_has_string label expected json =
@@ -166,6 +199,58 @@ let event_queue_snapshot_path ~base_path ~keeper_name =
     "event-queue.json"
 ;;
 
+let reaction_ledger_dir ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat
+       (Filename.concat
+          (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
+          keeper_name)
+       "reaction-ledger")
+    "v4"
+;;
+
+let reaction_ledger_store ~base_path ~keeper_name =
+  Dated_jsonl.create
+    ~base_dir:(reaction_ledger_dir ~base_path ~keeper_name)
+    ()
+;;
+
+let read_recent_rows ~base_path ~keeper_name ~limit =
+  match
+    Dated_jsonl.read_recent_result
+      (reaction_ledger_store ~base_path ~keeper_name)
+      limit
+  with
+  | Error error -> fail (Dated_jsonl.read_error_to_string error)
+  | Ok entries ->
+    List.map
+      (function
+        | Dated_jsonl.Parsed row -> row
+        | Dated_jsonl.Malformed_json { path; line_number; detail } ->
+          failf
+            "unexpected malformed test row %s%s: %s"
+            path
+            (match line_number with
+             | Some value -> Printf.sprintf ":%d" value
+             | None -> "")
+            detail)
+      entries
+;;
+
+let require_complete_evidence label = function
+  | Error error ->
+    failf
+      "%s: %s"
+      label
+      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+  | Ok (Keeper_reaction_ledger.Evidence_complete evidence) -> evidence
+  | Ok (Keeper_reaction_ledger.Evidence_quarantined { first_reason; _ }) ->
+    failf
+      "%s: quarantined (%s)"
+      label
+      (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
+;;
+
 let latest_row rows =
   match List.rev rows with
   | row :: _ -> row
@@ -180,17 +265,16 @@ let test_event_queue_stimulus_and_turn_reaction () =
     ~base_path
     ~keeper_name
     stimulus;
-  Keeper_reaction_ledger.record_event_queue_reaction
+  Keeper_reaction_ledger.record_event_queue_turn_started
     ~base_path
     ~keeper_name
-    ~reaction_kind:Keeper_reaction_ledger.Turn_started
     stimulus;
   let rows =
-    Keeper_reaction_ledger.read_recent_for_keeper ~base_path ~keeper_name ~limit:10
+    read_recent_rows ~base_path ~keeper_name ~limit:10
   in
   check int "two rows persisted" 2 (List.length rows);
   let stimulus_row = List.nth rows 0 in
-  check_member_string "stimulus schema" "keeper.reaction_ledger.v1" "schema" stimulus_row;
+  check_member_string "stimulus schema" "keeper.reaction_ledger.v4" "schema" stimulus_row;
   check_member_string "stimulus record kind" "stimulus" "record_kind" stimulus_row;
   check_member_string "board stimulus id" "board:post-42" "stimulus_id" stimulus_row;
   check_member_string
@@ -214,6 +298,7 @@ let test_event_queue_reaction_evidence_matches_exact_stimulus_id () =
   let stimulus = schedule_due_stimulus () in
   let unrelated = schedule_due_stimulus ~schedule_id:"sched-ledger-other" () in
   let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+  check string "scheduled ledger id preserves occurrence" stimulus.post_id stimulus_id;
   Keeper_reaction_ledger.record_event_queue_stimulus
     ~base_path
     ~keeper_name
@@ -223,114 +308,293 @@ let test_event_queue_reaction_evidence_matches_exact_stimulus_id () =
     ~keeper_name
     unrelated;
   let stimulus_only =
-    Keeper_reaction_ledger.event_queue_reaction_evidence
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
       ~base_path
       ~keeper_name
       ~stimulus_id
+    |> require_complete_evidence "stimulus-only evidence"
   in
   check bool "exact stimulus seen" true stimulus_only.stimulus_seen;
   check bool "turn reaction absent" false stimulus_only.turn_started_seen;
   check bool "event queue ack absent" false stimulus_only.event_queue_ack_seen;
+  check bool "event queue cancellation absent" false
+    stimulus_only.event_queue_cancelled_seen;
   check int "one exact row before reaction" 1 stimulus_only.matched_record_count;
-  Keeper_reaction_ledger.record_event_queue_reaction
+  Keeper_reaction_ledger.record_event_queue_turn_started
     ~base_path
     ~keeper_name
-    ~reaction_kind:Keeper_reaction_ledger.Turn_started
     stimulus;
   let reacted =
-    Keeper_reaction_ledger.event_queue_reaction_evidence
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
       ~base_path
       ~keeper_name
       ~stimulus_id
+    |> require_complete_evidence "turn-started evidence"
   in
   check bool "exact stimulus still seen" true reacted.stimulus_seen;
   check bool "turn reaction seen" true reacted.turn_started_seen;
   check bool "event queue ack still absent" false reacted.event_queue_ack_seen;
+  check bool "event queue cancellation still absent" false
+    reacted.event_queue_cancelled_seen;
   check int "two exact rows after reaction" 2 reacted.matched_record_count;
-  Keeper_reaction_ledger.record_event_queue_reaction
+  ignore
+    (persist_transition_outbox
+       ~base_path
+       ~keeper_name
+       ~settlement:Keeper_event_queue_state.Ack
+       [ stimulus ]);
+  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
     ~base_path
     ~keeper_name
-    ~reaction_kind:Keeper_reaction_ledger.Event_queue_ack
-    stimulus;
+  |> require_ok "record event queue ack";
   let acknowledged =
-    Keeper_reaction_ledger.event_queue_reaction_evidence
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
       ~base_path
       ~keeper_name
       ~stimulus_id
+    |> require_complete_evidence "acknowledged evidence"
   in
   check bool "event queue ack seen" true acknowledged.event_queue_ack_seen;
+  check bool "ack is not cancellation" false
+    acknowledged.event_queue_cancelled_seen;
   check int "three exact rows after ack" 3 acknowledged.matched_record_count;
   let summary =
     Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
   in
   check int "summary counts event queue ack" 1
     (summary |> member "event_queue_ack_count" |> to_int);
-  check int "event queue ack is not unknown" 0
-    (summary |> member "unknown_reaction_count" |> to_int);
+  check int "current rows are not quarantined" 0
+    (summary |> member "quarantined_row_count" |> to_int);
   let missing =
-    Keeper_reaction_ledger.event_queue_reaction_evidence
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
       ~base_path
       ~keeper_name
       ~stimulus_id:"stimulus:missing"
+    |> require_complete_evidence "missing evidence"
   in
   check bool "missing stimulus absent" false missing.stimulus_seen;
   check bool "missing reaction absent" false missing.turn_started_seen;
   check bool "missing ack absent" false missing.event_queue_ack_seen;
-  check int "missing exact rows" 0 missing.matched_record_count
+  check bool "missing cancellation absent" false missing.event_queue_cancelled_seen;
+  check int "missing exact rows" 0 missing.matched_record_count;
+  match
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id:""
+  with
+  | Error Keeper_reaction_ledger.Evidence_invalid_stimulus_id -> ()
+  | Error (Keeper_reaction_ledger.Evidence_read_error _) ->
+    fail "empty evidence identity reached storage"
+  | Ok _ -> fail "empty evidence identity was accepted"
 ;;
 
-let test_failure_judgment_operator_attention_is_typed_and_visible () =
+let test_failure_judgment_external_input_is_typed_history () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "judgment-attention-keeper" in
   let stimulus = failure_judgment_stimulus () in
-  let receipt =
-    transition_receipt
+  ignore
+    (persist_transition_outbox
+       ~base_path
+       ~keeper_name
       ~settlement:
         (Keeper_event_queue_state.Escalate
            { reason =
-               Keeper_event_queue_state.Failure_judgment_operator_required
+               Keeper_event_queue_state.Failure_judgment_external_input_requested
                  { judge_runtime_id = "opaque-judge-runtime"
-                 ; rationale = "Operator-owned configuration must change."
+                 ; rationale = "Required external input is unavailable."
                  }
            ; successor = None
            })
-      stimulus
-  in
+       [ stimulus ]);
   Keeper_reaction_ledger.record_event_queue_stimulus
     ~base_path
     ~keeper_name
     stimulus;
-  Keeper_reaction_ledger.record_event_queue_transition_reaction_result
+  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
     ~base_path
     ~keeper_name
-    ~reaction_kind:Keeper_reaction_ledger.Event_queue_escalated
-    ~receipt
-    stimulus
-  |> require_ok "record operator-required judgment transition";
+  |> require_ok "record external-input judgment transition";
   let summary =
     Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
   in
-  check_member_string "operator-required judgment degrades" "degraded" "status" summary;
-  check bool "operator-required judgment requires action" true
+  check_member_string "resolved judgment is historical" "ok" "status" summary;
+  check bool "historical judgment is not current action" false
     (summary |> member "operator_action_required" |> to_bool);
-  check int "terminal judgment attention counted" 1
-    (summary |> member "event_queue_operator_attention_count" |> to_int);
-  check int "typed transition receipt parsed" 0
-    (summary |> member "event_queue_transition_parse_error_count" |> to_int);
+  check int "external-input judgment counted" 1
+    (summary |> member "event_queue_external_input_count" |> to_int);
+  check int "typed transition row is current" 0
+    (summary |> member "quarantined_row_count" |> to_int);
   let fleet =
     Keeper_reaction_ledger.fleet_summary_json
       ~base_path
       ~keeper_names:[ keeper_name ]
       ~limit_per_keeper:10
   in
-  check bool "fleet judgment attention requires action" true
+  check bool "fleet history is not current action" false
     (fleet |> member "operator_action_required" |> to_bool);
-  check int "fleet judgment attention counted" 1
-    (fleet |> member "event_queue_operator_attention_count" |> to_int);
-  check_list_has_string
-    "fleet explains judgment attention"
-    "event_queue_operator_attention"
-    (fleet |> member "status_reasons")
+  check int "fleet external-input history counted" 1
+    (fleet |> member "event_queue_external_input_count" |> to_int);
+  check (list string) "fleet has no false current reason" []
+    (fleet |> member "status_reasons" |> to_list |> List.map to_string)
+;;
+
+let test_transition_reactions_distinguish_ordered_sources () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "batch-projection-keeper" in
+  let first = board_stimulus ~post_id:"shared-post" ~updated_at:1.0 () in
+  let second = board_stimulus ~post_id:"shared-post" ~updated_at:2.0 () in
+  let receipt =
+    persist_transition_outbox
+      ~base_path
+      ~keeper_name
+      ~settlement:Keeper_event_queue_state.Ack
+      [ first; second ]
+  in
+  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+    ~base_path
+    ~keeper_name
+  |> require_ok "record ordered settlement sources";
+  let rows =
+    read_recent_rows
+      ~base_path
+      ~keeper_name
+      ~limit:10
+  in
+  check (list string)
+    "ordered source ids are collision-free"
+    [ receipt.event_id ^ ":source:0"; receipt.event_id ^ ":source:1" ]
+    (List.map (fun row -> row |> member "event_id" |> to_string) rows);
+  check (list int)
+    "source index remains observable"
+    [ 0; 1 ]
+    (List.map
+       (fun row -> row |> member "reaction" |> member "source_index" |> to_int)
+       rows);
+  check (list int)
+    "every source is bound to the exact outbox cardinality"
+    [ 2; 2 ]
+    (List.map
+       (fun row -> row |> member "reaction" |> member "source_count" |> to_int)
+       rows);
+  check (list string)
+    "shared stimulus id does not collapse ordered sources"
+    [ "board:shared-post"; "board:shared-post" ]
+    (List.map (fun row -> row |> member "stimulus_id" |> to_string) rows);
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    (List.hd rows);
+  let evidence =
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id:"board:shared-post"
+    |> require_complete_evidence "crash replay evidence"
+  in
+  check bool "replayed transition remains acknowledged" true
+    evidence.event_queue_ack_seen;
+  check int "deterministic event identity deduplicates crash replay" 2
+    evidence.matched_record_count
+;;
+
+let test_transition_reaction_rejects_recombined_stimulus_identity () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "receipt-binding-keeper" in
+  let stimulus = board_stimulus ~post_id:"receipt-source" () in
+  ignore
+    (persist_transition_outbox
+       ~base_path
+       ~keeper_name
+       ~settlement:Keeper_event_queue_state.Ack
+       [ stimulus ]);
+  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+    ~base_path
+    ~keeper_name
+  |> require_ok "record receipt-bound settlement";
+  let valid_row =
+    read_recent_rows ~base_path ~keeper_name ~limit:1 |> latest_row
+  in
+  let forged_stimulus_id = "board:recombined-source" in
+  let recombined_row =
+    match valid_row with
+    | `Assoc fields ->
+      `Assoc
+        (("stimulus_id", `String forged_stimulus_id)
+         :: List.remove_assoc "stimulus_id" fields)
+    | _ -> fail "settlement writer did not emit an object"
+  in
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    recombined_row;
+  match
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id:forged_stimulus_id
+  with
+  | Ok
+      (Keeper_reaction_ledger.Evidence_quarantined
+        { evidence; first_reason }) ->
+    check bool "recombined receipt cannot become an ack" false
+      evidence.event_queue_ack_seen;
+    check int "recombined row is quarantined" 1
+      evidence.quarantined_record_count;
+    check string
+      "source binding failure is typed"
+      "transition_source_identity_mismatch"
+      (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
+  | Ok (Keeper_reaction_ledger.Evidence_complete _) ->
+    fail "recombined receipt evidence was accepted"
+  | Error error ->
+    fail
+      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+;;
+
+let test_current_rows_require_complete_writer_shape () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "closed-row-shape-keeper" in
+  let stimulus = board_stimulus ~post_id:"closed-row" () in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  Keeper_reaction_ledger.record_event_queue_turn_started
+    ~base_path
+    ~keeper_name
+    stimulus;
+  let rows = read_recent_rows ~base_path ~keeper_name ~limit:2 in
+  let remove_nested_field outer inner = function
+    | `Assoc fields ->
+      let nested =
+        match List.assoc_opt outer fields with
+        | Some (`Assoc nested_fields) ->
+          `Assoc (List.remove_assoc inner nested_fields)
+        | _ -> failf "missing nested object %s" outer
+      in
+      `Assoc ((outer, nested) :: List.remove_assoc outer fields)
+    | _ -> fail "ledger writer did not emit an object"
+  in
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    (remove_nested_field "stimulus" "urgency" (List.nth rows 0));
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    (remove_nested_field "reaction" "post_id" (List.nth rows 1));
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check int "incomplete current rows are quarantined" 2
+    (summary |> member "quarantined_row_count" |> to_int);
+  let reasons =
+    summary
+    |> member "quarantine_reason_counts"
+    |> to_list
+    |> List.map (fun item -> item |> member "reason" |> to_string)
+  in
+  check bool "missing stimulus urgency is typed" true
+    (List.mem "missing_stimulus_urgency" reasons);
+  check bool "missing reaction post id is typed" true
+    (List.mem "missing_reaction_post_id" reasons)
 ;;
 
 let test_cursor_ack_is_replayable_state_entry () =
@@ -343,7 +607,7 @@ let test_cursor_ack_is_replayable_state_entry () =
     ~post_id:(Some "post-99")
     ();
   let row =
-    Keeper_reaction_ledger.read_recent_for_keeper ~base_path ~keeper_name ~limit:1
+    read_recent_rows ~base_path ~keeper_name ~limit:1
     |> latest_row
   in
   check_member_string "cursor ack record kind" "cursor_ack" "record_kind" row;
@@ -353,321 +617,6 @@ let test_cursor_ack_is_replayable_state_entry () =
   check_member_string "cursor post id" "post-99" "post_id" (row |> member "cursor");
   check bool "cursor acked" true
     (row |> member "reaction" |> member "cursor_acked" |> to_bool)
-;;
-
-let test_execution_receipt_links_to_reaction_ledger () =
-  with_temp_base @@ fun base_path ->
-  let config = Workspace.default_config base_path in
-  let keeper_name = "receipt-keeper" in
-  let receipt_json =
-    `Assoc
-      [ "schema", `String "keeper.execution_receipt.v1"
-      ; "trace_id", `String "trace-1"
-      ; "outcome", `String "receipt_failed"
-      ; "terminal_reason_code", `String "completion_contract_violation"
-      ]
-  in
-  Keeper_reaction_ledger.record_execution_receipt_reaction
-    config
-    ~keeper_name
-    ~trace_id:"trace-1"
-    ~turn_count:7
-    ~current_task_id:(Some "task-275")
-    ~goal_ids:[ "goal-world-reactivity-p0-20260517" ]
-    ~outcome:"receipt_failed"
-    ~reaction_kind:Keeper_reaction_ledger.Terminal_reason
-    ~terminal_reason_code:"completion_contract_violation"
-    ~receipt_json
-    ();
-  let row =
-    Keeper_reaction_ledger.read_recent_for_keeper ~base_path ~keeper_name ~limit:1
-    |> latest_row
-  in
-  check_member_string "receipt reaction record kind" "reaction" "record_kind" row;
-  check_member_string "receipt reaction stimulus id" "task:task-275" "stimulus_id" row;
-  let reaction = row |> member "reaction" in
-  check_member_string "terminal reaction kind" "terminal_reason" "kind" reaction;
-  check_member_string
-    "terminal reason"
-    "completion_contract_violation"
-    "terminal_reason_code"
-    reaction;
-  check_member_string
-    "embedded receipt schema"
-    "keeper.execution_receipt.v1"
-    "schema"
-    (reaction |> member "receipt")
-;;
-
-let test_summary_observes_passive_only_without_attention () =
-  with_temp_base @@ fun base_path ->
-  let config = Workspace.default_config base_path in
-  let keeper_name = "contract-attention-keeper" in
-  let record ?(terminal_reason_code = "success") ?current_task_id
-        ~trace_id ~completion_contract_result () =
-    let receipt_json =
-      `Assoc
-        [ "schema", `String "keeper.execution_receipt.v1"
-        ; "trace_id", `String trace_id
-        ; "outcome", `String "receipt_done"
-        ; "terminal_reason_code", `String terminal_reason_code
-        ; "operator_disposition", `String "pause_human"
-        ; "operator_disposition_reason", `String "completion_contract_unsatisfied"
-        ; "completion_contract_result", `String completion_contract_result
-        ]
-    in
-    Keeper_reaction_ledger.record_execution_receipt_reaction
-      config
-      ~keeper_name
-      ~trace_id
-      ~turn_count:1
-      ~current_task_id
-      ~goal_ids:[]
-      ~outcome:"receipt_done"
-      ~reaction_kind:Keeper_reaction_ledger.Execution_receipt
-      ~terminal_reason_code
-      ~receipt_json
-      ()
-  in
-  record
-    ~trace_id:"trace-passive-1"
-    ~current_task_id:"task-passive-1"
-    ~completion_contract_result:"passive_only"
-    ();
-  record
-    ~trace_id:"trace-passive-2"
-    ~current_task_id:"task-passive-2"
-    ~completion_contract_result:"passive_only"
-    ();
-  record
-    ~trace_id:"trace-satisfied"
-    ~current_task_id:"task-satisfied"
-    ~completion_contract_result:"satisfied_execution"
-    ();
-  record
-    ~trace_id:"trace-violated"
-    ~current_task_id:"task-violated"
-    ~completion_contract_result:"violated"
-    ();
-  let summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "contract summary remains mechanically ok" "ok" "status" summary;
-  check int "completion contract attention count" 1
-    (summary |> member "completion_contract_attention_count" |> to_int);
-  check int "passive-only observation count" 2
-    (summary |> member "completion_contract_passive_only_count" |> to_int);
-  check string "latest contract attention" "violated"
-    (summary |> member "latest_completion_contract_attention" |> to_string);
-  let result_count =
-    match result_count_by_label summary "passive_only" with
-    | Some value -> value
-    | None -> fail "passive_only observation count missing"
-  in
-  check_member_string "contract result label" "passive_only" "result" result_count;
-  check int "contract result count" 2 (result_count |> member "count" |> to_int);
-  let fleet =
-    Keeper_reaction_ledger.fleet_summary_json
-      ~base_path
-      ~keeper_names:[ keeper_name ]
-      ~limit_per_keeper:10
-  in
-  check int "fleet contract attention count" 1
-    (fleet |> member "completion_contract_attention_count" |> to_int);
-  check int "fleet passive-only observation count" 2
-    (fleet |> member "completion_contract_passive_only_count" |> to_int);
-  let keeper_attention =
-    fleet
-    |> member "completion_contract_attention_by_keeper"
-    |> to_list
-    |> List.hd
-  in
-  check_member_string
-    "fleet contract attention keeper"
-    keeper_name
-    "keeper_name"
-    keeper_attention;
-  check int "fleet keeper contract attention count" 1
-    (keeper_attention |> member "completion_contract_attention_count" |> to_int)
-;;
-
-let test_summary_degrades_unknown_completion_contract_result () =
-  with_temp_base @@ fun base_path ->
-  let config = Workspace.default_config base_path in
-  let keeper_name = "contract-unknown-keeper" in
-  let record ~trace_id ~completion_contract_result () =
-    let receipt_json =
-      `Assoc
-        [ "schema", `String "keeper.execution_receipt.v1"
-        ; "trace_id", `String trace_id
-        ; "outcome", `String "receipt_done"
-        ; "terminal_reason_code", `String "success"
-        ; "operator_disposition", `String "continue"
-        ; "operator_disposition_reason", `String "none"
-        ; "completion_contract_result", `String completion_contract_result
-        ]
-    in
-    Keeper_reaction_ledger.record_execution_receipt_reaction
-      config
-      ~keeper_name
-      ~trace_id
-      ~turn_count:1
-      ~current_task_id:None
-      ~goal_ids:[]
-      ~outcome:"receipt_done"
-      ~reaction_kind:Keeper_reaction_ledger.Execution_receipt
-      ~terminal_reason_code:"success"
-      ~receipt_json
-      ()
-  in
-  record ~trace_id:"trace-unknown" ~completion_contract_result:"passive-only" ();
-  record
-    ~trace_id:"trace-satisfied"
-    ~completion_contract_result:"satisfied_execution"
-    ();
-  let summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string
-    "unknown contract result degrades summary"
-    "degraded"
-    "status"
-    summary;
-  check bool "unknown contract result requires operator action" true
-    (summary |> member "operator_action_required" |> to_bool);
-  check int "unknown contract result is not attention" 0
-    (summary |> member "completion_contract_attention_count" |> to_int);
-  check int "unknown contract result counted" 1
-    (summary |> member "completion_contract_unknown_result_count" |> to_int);
-  check int "unknown contract result does not use reaction bucket" 0
-    (summary |> member "unknown_reaction_count" |> to_int);
-  let unknown_result_count =
-    summary
-    |> member "completion_contract_unknown_result_counts"
-    |> to_list
-    |> List.hd
-  in
-  check_member_string "unknown contract result label" "passive-only" "result"
-    unknown_result_count;
-  check int "unknown contract result label count" 1
-    (unknown_result_count |> member "count" |> to_int);
-  let fleet =
-    Keeper_reaction_ledger.fleet_summary_json
-      ~base_path
-      ~keeper_names:[ keeper_name ]
-      ~limit_per_keeper:10
-  in
-  check_member_string "fleet unknown contract result degrades" "degraded" "status"
-    fleet;
-  check bool "fleet unknown contract result requires operator action" true
-    (fleet |> member "operator_action_required" |> to_bool);
-  check int "fleet unknown contract result counted" 1
-    (fleet |> member "completion_contract_unknown_result_count" |> to_int);
-  let keeper_unknown =
-    fleet
-    |> member "completion_contract_unknown_results_by_keeper"
-    |> to_list
-    |> List.hd
-  in
-  check_member_string
-    "fleet unknown contract result keeper"
-    keeper_name
-    "keeper_name"
-    keeper_unknown;
-  check int "fleet keeper unknown contract result count" 1
-    (keeper_unknown |> member "completion_contract_unknown_result_count" |> to_int)
-;;
-
-let test_completion_contract_result_canonical_roundtrip () =
-  let module Receipt = Keeper_execution_receipt_types in
-  let cases =
-    [ Receipt.Contract_unknown, false
-    ; Receipt.Contract_not_dispatched, false
-    ; Receipt.Contract_violated, true
-    ; Receipt.Contract_surface_mismatch, true
-    ; Receipt.Contract_no_capable_provider, true
-    ; Receipt.Contract_claim_only_after_owned_task, true
-    ; Receipt.Contract_needs_execution_progress, true
-    ; Receipt.Contract_passive_only, false
-    ; Receipt.Contract_satisfied_completion, false
-    ; Receipt.Contract_satisfied_execution, false
-    ]
-  in
-  List.iter
-    (fun (result, requires_attention) ->
-       let label = Receipt.completion_contract_result_to_string result in
-       let parsed_label =
-         Receipt.completion_contract_result_of_string label
-         |> Option.map Receipt.completion_contract_result_to_string
-       in
-       check
-         (option string)
-         ("completion-contract parser roundtrip: " ^ label)
-         (Some label)
-         parsed_label;
-       check
-         bool
-         ("completion-contract attention classification: " ^ label)
-         requires_attention
-         (Receipt.completion_contract_result_requires_attention result))
-    cases;
-  check
-    (option string)
-    "completion-contract parser rejects prose drift"
-    None
-    (Receipt.completion_contract_result_of_string "passive-only"
-     |> Option.map Receipt.completion_contract_result_to_string)
-;;
-
-let test_summary_observes_passive_only_without_work_scope_attention () =
-  with_temp_base @@ fun base_path ->
-  let config = Workspace.default_config base_path in
-  let keeper_name = "passive-no-work-keeper" in
-  let receipt_json =
-    `Assoc
-      [ "schema", `String "keeper.execution_receipt.v1"
-      ; "trace_id", `String "trace-passive-no-work"
-      ; "outcome", `String "receipt_done"
-      ; "terminal_reason_code", `String "success"
-      ; "operator_disposition", `String "pass"
-      ; "operator_disposition_reason", `String "healthy"
-      ; "completion_contract_result", `String "passive_only"
-      ]
-  in
-  Keeper_reaction_ledger.record_execution_receipt_reaction
-    config
-    ~keeper_name
-    ~trace_id:"trace-passive-no-work"
-    ~turn_count:1
-    ~current_task_id:None
-    ~goal_ids:[]
-    ~outcome:"receipt_done"
-    ~reaction_kind:Keeper_reaction_ledger.Execution_receipt
-    ~terminal_reason_code:"success"
-    ~receipt_json
-    ();
-  let summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check int "passive-only no-work attention not counted" 0
-    (summary |> member "completion_contract_attention_count" |> to_int);
-  check int "passive-only no-work observation counted" 1
-    (summary |> member "completion_contract_passive_only_count" |> to_int);
-  check
-    string
-    "passive-only no-work summary remains ok"
-    "ok"
-    (summary |> member "status" |> to_string);
-  let fleet =
-    Keeper_reaction_ledger.fleet_summary_json
-      ~base_path
-      ~keeper_names:[ keeper_name ]
-      ~limit_per_keeper:10
-  in
-  check int "fleet passive-only no-work attention not counted" 0
-    (fleet |> member "completion_contract_attention_count" |> to_int);
-  check int "fleet passive-only no-work observation counted" 1
-    (fleet |> member "completion_contract_passive_only_count" |> to_int)
 ;;
 
 let test_summary_marks_unreacted_and_reacted_stimuli () =
@@ -692,10 +641,9 @@ let test_summary_marks_unreacted_and_reacted_stimuli () =
      |> to_list
      |> List.hd
      |> to_string);
-  Keeper_reaction_ledger.record_event_queue_reaction
+  Keeper_reaction_ledger.record_event_queue_turn_started
     ~base_path
     ~keeper_name
-    ~reaction_kind:Keeper_reaction_ledger.Turn_started
     stimulus;
   let reacted_summary =
     Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
@@ -787,236 +735,7 @@ let test_summary_cursor_ack_respects_post_id_tiebreaker () =
     (complete_summary |> member "pending_stimulus_count" |> to_int)
 ;;
 
-let test_no_progress_recovery_stimulus_is_typed () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "no-progress-keeper" in
-  let stimulus = no_progress_recovery_stimulus ~keeper_name () in
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    stimulus;
-  let row =
-    Keeper_reaction_ledger.read_recent_for_keeper ~base_path ~keeper_name ~limit:1
-    |> latest_row
-  in
-  check_member_string
-    "no-progress stimulus kind"
-    "no_progress_recovery"
-    "kind"
-    (row |> member "stimulus");
-  check string "stable stimulus prefix" "stimulus:"
-    (String.sub (row |> member "stimulus_id" |> to_string) 0 9)
-;;
-
-let test_no_progress_recovery_reaction_clears_pending () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "no-progress-keeper" in
-  let stimulus = no_progress_recovery_stimulus ~keeper_name () in
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    stimulus;
-  let pending_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "pending recovery summary status" "degraded" "status" pending_summary;
-  check int "recovery stimulus pending" 1
-    (pending_summary |> member "pending_stimulus_count" |> to_int);
-  check int "pending recovery stimulus kind counted" 1
-    (pending_summary |> member "pending_no_progress_recovery_count" |> to_int);
-  check int "pending recovery stimulus id surfaced" 1
-    (pending_summary
-     |> member "pending_no_progress_recovery_ids"
-     |> to_list
-     |> List.length);
-  Keeper_reaction_ledger.record_event_queue_reaction
-    ~base_path
-    ~keeper_name
-    ~reaction_kind:Keeper_reaction_ledger.Turn_started
-    stimulus;
-  let reacted_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "reacted recovery summary status" "ok" "status" reacted_summary;
-  check bool "reacted recovery needs no operator action" false
-    (reacted_summary |> member "operator_action_required" |> to_bool);
-  check int "recovery stimulus cleared" 0
-    (reacted_summary |> member "pending_stimulus_count" |> to_int);
-  check int "pending recovery stimulus kind cleared" 0
-    (reacted_summary |> member "pending_no_progress_recovery_count" |> to_int);
-  check int "turn-start reaction counted" 1
-    (reacted_summary |> member "turn_started_count" |> to_int)
-;;
-
-let test_no_progress_recovery_unrelated_reaction_does_not_clear_pending () =
-  with_temp_base @@ fun base_path ->
-  let config = Workspace.default_config base_path in
-  let keeper_name = "no-progress-unrelated-reaction-keeper" in
-  let stimulus = no_progress_recovery_stimulus ~keeper_name () in
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    stimulus;
-  let pending_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string "pending recovery summary status" "degraded" "status" pending_summary;
-  check int "recovery stimulus initially pending" 1
-    (pending_summary |> member "pending_no_progress_recovery_count" |> to_int);
-  let receipt_json =
-    `Assoc
-      [ "schema", `String "keeper.execution_receipt.v1"
-      ; "trace_id", `String "trace-later-reaction"
-      ; "outcome", `String "receipt_done"
-      ; "terminal_reason_code", `String "success"
-      ; "operator_disposition", `String "pass"
-      ; "operator_disposition_reason", `String "healthy"
-      ; "completion_contract_result", `String "satisfied_execution"
-      ]
-  in
-  Keeper_reaction_ledger.record_execution_receipt_reaction
-    config
-    ~keeper_name
-    ~trace_id:"trace-later-reaction"
-    ~turn_count:1
-    ~current_task_id:None
-    ~goal_ids:[]
-    ~outcome:"receipt_done"
-    ~reaction_kind:Keeper_reaction_ledger.Execution_receipt
-    ~terminal_reason_code:"success"
-    ~receipt_json
-    ();
-  let unrelated_reaction_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string
-    "unrelated reaction recovery summary remains degraded"
-    "degraded"
-    "status"
-    unrelated_reaction_summary;
-  check bool "unrelated reaction recovery still needs operator action" true
-    (unrelated_reaction_summary |> member "operator_action_required" |> to_bool);
-  check int "unrelated reaction leaves recovery stimulus pending" 1
-    (unrelated_reaction_summary |> member "pending_stimulus_count" |> to_int);
-  check int "unrelated reaction leaves no-progress recovery kind pending" 1
-    (unrelated_reaction_summary |> member "pending_no_progress_recovery_count" |> to_int);
-  check int "execution receipt reaction still counted" 1
-    (unrelated_reaction_summary |> member "execution_receipt_count" |> to_int)
-;;
-
-let test_no_progress_recovery_cursor_ack_does_not_clear_pending () =
-  with_temp_base @@ fun base_path ->
-  let keeper_name = "no-progress-cursor-only-keeper" in
-  let stimulus = no_progress_recovery_stimulus ~keeper_name () in
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    stimulus;
-  let pending_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  let stimulus_id =
-    pending_summary
-    |> member "pending_no_progress_recovery_ids"
-    |> to_list
-    |> List.hd
-    |> to_string
-  in
-  Keeper_reaction_ledger.record_board_cursor_ack
-    ~base_path
-    ~keeper_name
-    ~stimulus_id
-    ~cursor_ts:9999.0
-    ~post_id:(Some "cursor-only-post")
-    ();
-  let cursor_only_summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check_member_string
-    "cursor-only recovery summary remains degraded"
-    "degraded"
-    "status"
-    cursor_only_summary;
-  check bool "cursor-only recovery still needs operator action" true
-    (cursor_only_summary |> member "operator_action_required" |> to_bool);
-  check int "cursor-only recovery stimulus remains pending" 1
-    (cursor_only_summary |> member "pending_stimulus_count" |> to_int);
-  check int "cursor-only recovery kind remains pending" 1
-    (cursor_only_summary |> member "pending_no_progress_recovery_count" |> to_int);
-  check int "cursor ack still counted" 1
-    (cursor_only_summary |> member "cursor_ack_count" |> to_int);
-  check int "cursor ack does not sweep non-board recovery stimulus" 0
-    (cursor_only_summary |> member "cursor_swept_stimulus_count" |> to_int)
-;;
-
-let test_summary_links_passive_only_observation_to_pending_recovery () =
-  with_temp_base @@ fun base_path ->
-  let config = Workspace.default_config base_path in
-  let keeper_name = "passive-recovery-keeper" in
-  let receipt_json =
-    `Assoc
-      [ "schema", `String "keeper.execution_receipt.v1"
-      ; "trace_id", `String "trace-passive"
-      ; "outcome", `String "receipt_done"
-      ; "terminal_reason_code", `String "success"
-      ; "operator_disposition", `String "pause_human"
-      ; "operator_disposition_reason", `String "completion_contract_unsatisfied"
-      ; "completion_contract_result", `String "passive_only"
-      ]
-  in
-  Keeper_reaction_ledger.record_execution_receipt_reaction
-    config
-    ~keeper_name
-    ~trace_id:"trace-passive"
-    ~turn_count:1
-    ~current_task_id:(Some "task-passive")
-    ~goal_ids:[]
-    ~outcome:"receipt_done"
-    ~reaction_kind:Keeper_reaction_ledger.Terminal_reason
-    ~terminal_reason_code:"success"
-    ~receipt_json
-    ();
-  Keeper_reaction_ledger.record_event_queue_stimulus
-    ~base_path
-    ~keeper_name
-    (no_progress_recovery_stimulus ~keeper_name ());
-  let summary =
-    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
-  in
-  check int "passive-only observation counted" 1
-    (summary |> member "completion_contract_passive_only_count" |> to_int);
-  check int "passive-only does not count as attention" 0
-    (summary |> member "completion_contract_attention_count" |> to_int);
-  check int "pending no-progress recovery counted" 1
-    (summary |> member "pending_no_progress_recovery_count" |> to_int);
-  let fleet =
-    Keeper_reaction_ledger.fleet_summary_json
-      ~base_path
-      ~keeper_names:[ keeper_name ]
-      ~limit_per_keeper:10
-  in
-  check int "fleet passive-only observation counted" 1
-    (fleet |> member "completion_contract_passive_only_count" |> to_int);
-  check int "fleet passive-only does not count as attention" 0
-    (fleet |> member "completion_contract_attention_count" |> to_int);
-  check int "fleet pending no-progress recovery counted" 1
-    (fleet |> member "pending_no_progress_recovery_count" |> to_int);
-  let recovery_keeper =
-    fleet
-    |> member "pending_no_progress_recovery_by_keeper"
-    |> to_list
-    |> List.hd
-  in
-  check_member_string
-    "fleet pending recovery keeper"
-    keeper_name
-    "keeper_name"
-    recovery_keeper;
-  check int "fleet keeper pending recovery count" 1
-    (recovery_keeper |> member "pending_no_progress_recovery_count" |> to_int)
-;;
-
-let test_fleet_summary_surfaces_durable_event_queue_backlog () =
+ let test_fleet_summary_surfaces_durable_event_queue_backlog () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "durable-backlog-keeper" in
   Keeper_registry_event_queue.enqueue
@@ -1026,7 +745,7 @@ let test_fleet_summary_surfaces_durable_event_queue_backlog () =
   Keeper_registry_event_queue.enqueue
     ~base_path
     keeper_name
-    (no_progress_recovery_stimulus ~keeper_name ());
+    (board_stimulus ~post_id:"post-live-backlog-2" ());
   Keeper_event_queue_persistence.record_inflight
     ~base_path
     ~keeper_name
@@ -1086,15 +805,7 @@ let test_fleet_summary_surfaces_durable_event_queue_backlog () =
     (List.exists
        (fun json ->
          String.equal (json |> member "payload_kind" |> to_string) "board_signal"
-         && json |> member "count" |> to_int = 1)
-       payload_counts);
-  check bool "no_progress_recovery durable payload count is surfaced" true
-    (List.exists
-       (fun json ->
-         String.equal
-           (json |> member "payload_kind" |> to_string)
-           "no_progress_recovery"
-         && json |> member "count" |> to_int = 1)
+         && json |> member "count" |> to_int = 2)
        payload_counts);
   check bool "inflight fusion_completed durable payload count is surfaced" true
     (List.exists
@@ -1329,29 +1040,63 @@ let test_fleet_summary_surfaces_durable_event_queue_parse_error () =
   check_member_string "durable queue parse error path" path "path" read_error
 ;;
 
-let test_unknown_reaction_degrades_summary () =
+let test_unknown_reaction_is_quarantined_without_clearing_pending () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "unknown-reaction-keeper" in
   let stimulus = board_stimulus ~post_id:"post-unknown-reaction" () in
+  let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
   Keeper_reaction_ledger.record_event_queue_stimulus
     ~base_path
     ~keeper_name
     stimulus;
-  Keeper_reaction_ledger.record_event_queue_reaction
-    ~base_path
-    ~keeper_name
-    ~reaction_kind:(Keeper_reaction_ledger.Unknown_reaction "legacy_custom")
-    stimulus;
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    (`Assoc
+        [ "schema", `String "keeper.reaction_ledger.v4"
+        ; "record_kind", `String "reaction"
+        ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
+        ; "keeper_name", `String keeper_name
+        ; "recorded_at_unix", `Float 1235.0
+        ; "stimulus_id", `String stimulus_id
+        ; ( "reaction"
+          , `Assoc
+              [ "kind", `String "unknown_custom"
+              ; "source", `String "keeper_event_queue"
+              ] )
+        ]);
   let summary =
     Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
   in
   check_member_string "unknown reaction summary status" "degraded" "status" summary;
   check bool "unknown reaction requires operator action" true
     (summary |> member "operator_action_required" |> to_bool);
-  check int "unknown reaction counted" 1
-    (summary |> member "unknown_reaction_count" |> to_int);
-  check int "pending cleared by reaction row" 0
-    (summary |> member "pending_stimulus_count" |> to_int)
+  check int "unknown reaction quarantined" 1
+    (summary |> member "quarantined_row_count" |> to_int);
+  check int "unknown reaction contributes no current reaction" 0
+    (summary |> member "reaction_count" |> to_int);
+  check int "unknown reaction cannot clear pending" 1
+    (summary |> member "pending_stimulus_count" |> to_int);
+  match
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+  with
+  | Ok
+      (Keeper_reaction_ledger.Evidence_quarantined
+        { evidence; first_reason }) ->
+    check int "only current stimulus matches" 1 evidence.matched_record_count;
+    check int "matching invalid row is explicit" 1 evidence.quarantined_record_count;
+    check bool "invalid reaction is not a turn" false evidence.turn_started_seen;
+    check string
+      "typed quarantine reason"
+      "unknown_reaction_kind"
+      (Keeper_reaction_ledger.row_quarantine_reason_to_string first_reason)
+  | Error error ->
+    fail
+      (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+  | Ok (Keeper_reaction_ledger.Evidence_complete _) ->
+    fail "matching invalid row was projected as complete evidence"
 ;;
 
 (* RFC-0020: the stimulus payload is a typed closed variant, so a malformed
@@ -1360,7 +1105,7 @@ let test_unknown_reaction_degrades_summary () =
 
 (* RFC-0266 regression: a recorded [Fusion_completed] stimulus is a recognized
    closed-sum kind and must NOT be miscounted as an unsupported stimulus.  The
-   prior string whitelist ([board_signal]/[bootstrap]/[no_progress_recovery])
+   prior string whitelist
    dropped [fusion_completed] into [unsupported_stimulus_count], degrading the
    summary on every async fusion wake.  (We assert only the unsupported counter:
    with no reaction row the stimulus is still legitimately pending.) *)
@@ -1374,8 +1119,8 @@ let test_fusion_completed_stimulus_is_supported () =
   let summary =
     Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
   in
-  check int "fusion_completed is not an unsupported stimulus" 0
-    (summary |> member "unsupported_stimulus_count" |> to_int)
+  check int "fusion_completed survives the closed row decoder" 0
+    (summary |> member "quarantined_row_count" |> to_int)
 ;;
 
 (* Drift guard: [stimulus_kind_of_string] must stay the inverse of
@@ -1399,48 +1144,399 @@ let test_stimulus_kind_string_roundtrip () =
       check bool "stimulus_kind round-trips through string" true (roundtrips k))
     [ Keeper_reaction_ledger.Board_signal
     ; Keeper_reaction_ledger.Bootstrap
-    ; Keeper_reaction_ledger.No_progress_recovery
     ; Keeper_reaction_ledger.Fusion_completed
     ; Keeper_reaction_ledger.Bg_completed
     ; Keeper_reaction_ledger.Schedule_due
     ; Keeper_reaction_ledger.Connector_attention
     ; Keeper_reaction_ledger.Hitl_resolved
-    ; Keeper_reaction_ledger.Goal_verification_failed
     ; Keeper_reaction_ledger.Failure_judgment
+    ; Keeper_reaction_ledger.Manual_compaction
     ; Keeper_reaction_ledger.Goal_assigned
-    ; Keeper_reaction_ledger.Goal_stagnation
     ];
   check bool "unknown stimulus kind string is None" true
     (Option.is_none (Keeper_reaction_ledger.stimulus_kind_of_string "totally_unknown"))
 ;;
 
-(* Drift guard: [reaction_kind_of_string] is total — known strings round-trip to
-   their typed variant, unknown strings preserve the original via
-   [Unknown_reaction].  Pairs with the exhaustive match in [note_reaction_kind]. *)
+(* Drift guard: known reaction labels round-trip through the closed decoder;
+   unknown labels remain typed failures and never enter the reaction algebra. *)
 let test_reaction_kind_string_roundtrip () =
   let roundtrips k =
-    String.equal
-      (Keeper_reaction_ledger.reaction_kind_to_string
-         (Keeper_reaction_ledger.reaction_kind_of_string
-            (Keeper_reaction_ledger.reaction_kind_to_string k)))
-      (Keeper_reaction_ledger.reaction_kind_to_string k)
+    match
+      Keeper_reaction_ledger.reaction_kind_of_string
+        (Keeper_reaction_ledger.reaction_kind_to_string k)
+    with
+    | Ok parsed ->
+      String.equal
+        (Keeper_reaction_ledger.reaction_kind_to_string parsed)
+        (Keeper_reaction_ledger.reaction_kind_to_string k)
+    | Error _ -> false
   in
   List.iter
     (fun k ->
       check bool "reaction_kind round-trips through string" true (roundtrips k))
     [ Keeper_reaction_ledger.Turn_started
     ; Keeper_reaction_ledger.Event_queue_ack
+    ; Keeper_reaction_ledger.Event_queue_no_compaction
+    ; Keeper_reaction_ledger.Event_queue_cancelled
     ; Keeper_reaction_ledger.Event_queue_requeued
     ; Keeper_reaction_ledger.Event_queue_escalated
-    ; Keeper_reaction_ledger.Execution_receipt
-    ; Keeper_reaction_ledger.Terminal_reason
     ; Keeper_reaction_ledger.Cursor_ack
-    ; Keeper_reaction_ledger.Operator_escalation
-    ; Keeper_reaction_ledger.Supervisor_recovery_requested
     ];
-  check string "unknown reaction string preserved as Unknown_reaction" "legacy_custom"
-    (Keeper_reaction_ledger.reaction_kind_to_string
-       (Keeper_reaction_ledger.reaction_kind_of_string "legacy_custom"))
+  match Keeper_reaction_ledger.reaction_kind_of_string "unknown_custom" with
+  | Error (Keeper_reaction_ledger.Unknown_reaction_kind value) ->
+    check string "unknown reaction decoder preserves evidence" "unknown_custom" value
+  | Ok _ -> fail "unknown reaction string must not decode"
+;;
+
+let test_cancelled_transition_is_projected_as_typed_history () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "cancelled-transition-keeper" in
+  let stimulus = board_stimulus () in
+  let pending = Keeper_event_queue.enqueue Keeper_event_queue.empty stimulus in
+  let state = Keeper_event_queue_state.with_pending pending Keeper_event_queue_state.empty in
+  let claimed, lease =
+    Keeper_event_queue_state.claim_when
+      ~claimed_at:1235.0
+      ~ready:(fun _ -> true)
+      state
+    |> require_ok "claim cancellation stimulus"
+  in
+  let lease =
+    match lease with
+    | Some lease -> lease
+    | None -> fail "cancellation stimulus was not claimed"
+  in
+  let cancellation : Keeper_event_queue_state.accepted_cancellation =
+    { source = stimulus
+    ; source_revision = Keeper_event_queue_state.revision claimed
+    ; owner_generation = 7
+    ; operator_operation_id = "operator-cancel-1"
+    ; reason = "operator rejected paused work"
+    }
+  in
+  let cancelled, _ =
+    Keeper_event_queue_state.cancel_accepted
+      ~current_owner_generation:7
+      ~settled_at:1236.0
+      ~lease
+      ~cancellation
+      claimed
+    |> require_ok "commit cancellation receipt"
+  in
+  let snapshot_path = event_queue_snapshot_path ~base_path ~keeper_name in
+  mkdir_p (Filename.dirname snapshot_path);
+  write_file
+    snapshot_path
+    (Yojson.Safe.to_string (Keeper_event_queue_state.to_yojson cancelled));
+  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+    ~base_path
+    ~keeper_name
+  |> require_ok "project cancellation receipt";
+  let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+  let evidence =
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id
+    |> require_complete_evidence "accepted cancellation evidence"
+  in
+  check bool "accepted cancellation is exact terminal evidence" true
+    evidence.event_queue_cancelled_seen;
+  check bool "accepted cancellation is not ack evidence" false
+    evidence.event_queue_ack_seen;
+  check bool "accepted cancellation keeps its timestamp" true
+    (Option.is_some evidence.event_queue_cancelled_recorded_at);
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check int "summary counts accepted cancellation" 1
+    (summary |> member "event_queue_cancelled_count" |> to_int);
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check int "fleet counts accepted cancellation" 1
+    (fleet |> member "event_queue_cancelled_count" |> to_int);
+  check int "unavailable fleet preserves cancellation field" 0
+    (Keeper_reaction_ledger.unavailable_fleet_summary_json ()
+     |> member "event_queue_cancelled_count"
+     |> to_int);
+  check int "typed cancellation row is current" 0
+    (summary |> member "quarantined_row_count" |> to_int)
+;;
+
+let test_unexpected_schema_rows_are_quarantined_without_double_counting () =
+  with_temp_base
+  @@ fun base_path ->
+  let keeper_name = "sangsu" in
+  let stimulus = board_stimulus () in
+  let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  let current_event_id =
+    read_recent_rows ~base_path ~keeper_name ~limit:1
+    |> latest_row
+    |> member "event_id"
+    |> to_string
+  in
+  let store = reaction_ledger_store ~base_path ~keeper_name in
+  Dated_jsonl.append
+    store
+    (`Assoc
+        [ "schema", `String "keeper.reaction_ledger.foreign"
+        ; "record_kind", `String "stimulus"
+        ; "event_id", `String current_event_id
+        ; "keeper_name", `String keeper_name
+        ; "recorded_at_unix", `Float 1200.0
+        ; "stimulus_id", `String stimulus_id
+        ; ( "stimulus"
+          , `Assoc
+              [ "kind", `String "board_signal"
+              ; "source", `String "keeper_event_queue"
+              ; "post_id", `String stimulus.post_id
+              ] )
+        ]);
+  Dated_jsonl.append
+    store
+    (`Assoc
+        [ "schema", `String "keeper.reaction_ledger.foreign"
+        ; "record_kind", `String "reaction"
+        ; "event_id", `String (stimulus_id ^ ":reaction:turn_started")
+        ; "keeper_name", `String keeper_name
+        ; "recorded_at_unix", `Float 1201.0
+        ; "stimulus_id", `String stimulus_id
+        ; ( "reaction"
+          , `Assoc
+              [ "kind", `String "turn_started"
+              ; "source", `String "keeper_event_queue"
+              ] )
+        ]);
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check
+    int
+    "only the current generation contributes"
+    1
+    (summary |> member "stimulus_count" |> to_int);
+  check int "unexpected reaction contributes zero" 0
+    (summary |> member "reaction_count" |> to_int);
+  check int "unexpected reaction cannot clear current pending" 1
+    (summary |> member "pending_stimulus_count" |> to_int);
+  check
+    int
+    "both unexpected rows are quarantined"
+    2
+    (summary |> member "quarantined_row_count" |> to_int);
+  let unexpected_reason =
+    summary |> member "quarantine_reason_counts" |> to_list |> List.hd
+  in
+  check_member_string
+    "unexpected schema reason is typed"
+    "unexpected_schema"
+    "reason"
+    unexpected_reason;
+  check int "unexpected schema reason count" 2
+    (unexpected_reason |> member "count" |> to_int);
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check int "fleet exposes quarantined rows" 2
+    (fleet |> member "quarantined_row_count" |> to_int);
+  check_list_has_string
+    "fleet status names quarantine"
+    "reaction_ledger_quarantined_row"
+    (fleet |> member "status_reasons")
+;;
+
+let test_quarantine_is_keeper_local () =
+  with_temp_base
+  @@ fun base_path ->
+  let quarantined_keeper = "quarantined-keeper" in
+  let healthy_keeper = "healthy-keeper" in
+  let quarantined_stimulus = board_stimulus ~post_id:"post-quarantined" () in
+  let quarantined_stimulus_id =
+    Keeper_reaction_ledger.stimulus_id_of_event_queue quarantined_stimulus
+  in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name:quarantined_keeper
+    quarantined_stimulus;
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name:quarantined_keeper)
+    (`Assoc
+        [ "schema", `String "keeper.reaction_ledger.v2"
+        ; "record_kind", `String "reaction"
+        ; ( "event_id"
+          , `String (quarantined_stimulus_id ^ ":reaction:turn_started") )
+        ; "keeper_name", `String quarantined_keeper
+        ; "recorded_at_unix", `Float 1201.0
+        ; "stimulus_id", `String quarantined_stimulus_id
+        ; ( "reaction"
+          , `Assoc
+              [ "kind", `String "turn_started"
+              ; "source", `String "keeper_event_queue"
+              ] )
+        ]);
+  let healthy_stimulus = board_stimulus ~post_id:"post-healthy" () in
+  let healthy_stimulus_id =
+    Keeper_reaction_ledger.stimulus_id_of_event_queue healthy_stimulus
+  in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name:healthy_keeper
+    healthy_stimulus;
+  Keeper_reaction_ledger.record_event_queue_turn_started
+    ~base_path
+    ~keeper_name:healthy_keeper
+    healthy_stimulus;
+  (match
+     Keeper_reaction_ledger.event_queue_reaction_evidence_result
+       ~base_path
+       ~keeper_name:healthy_keeper
+       ~stimulus_id:healthy_stimulus_id
+   with
+   | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
+     check bool "healthy keeper turn remains visible" true evidence.turn_started_seen;
+     check int "healthy keeper has no quarantine" 0 evidence.quarantined_record_count
+   | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
+     fail "quarantine leaked across keeper stores"
+   | Error error ->
+     fail
+       ("healthy keeper read failed: "
+        ^ Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string
+            error));
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ quarantined_keeper; healthy_keeper ]
+      ~limit_per_keeper:10
+  in
+  let healthy_summary =
+    fleet
+    |> member "keepers"
+    |> to_list
+    |> List.find (fun summary ->
+      String.equal (summary |> member "keeper_name" |> to_string) healthy_keeper)
+  in
+  check_member_string "healthy keeper summary stays ok" "ok" "status" healthy_summary;
+  check int "healthy keeper pending stays cleared" 0
+    (healthy_summary |> member "pending_stimulus_count" |> to_int);
+  check int "healthy keeper current reaction is preserved" 1
+    (healthy_summary |> member "reaction_count" |> to_int)
+;;
+
+let test_syntax_error_does_not_claim_an_occurrence_identity () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "strict-evidence-keeper" in
+  let ledger_dir = reaction_ledger_dir ~base_path ~keeper_name in
+  let malformed_month = Filename.concat ledger_dir "2026-01" in
+  mkdir_p malformed_month;
+  let malformed_path = Filename.concat malformed_month "01.jsonl" in
+  write_file malformed_path "not-json\n";
+  let evidence =
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id:"schedule:test-occurrence"
+    |> require_complete_evidence "unattributed syntax row"
+  in
+  check int "no row is assigned to the queried occurrence" 0
+    evidence.matched_record_count;
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check int "malformed summary row is quarantined" 1
+    (summary |> member "quarantined_row_count" |> to_int);
+  let reason = summary |> member "quarantine_reason_counts" |> to_list |> List.hd in
+  check_member_string "syntax quarantine reason" "malformed_json" "reason" reason
+;;
+
+let test_missing_identity_does_not_claim_an_occurrence_identity () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "identity-incomplete-keeper" in
+  Dated_jsonl.append
+    (reaction_ledger_store ~base_path ~keeper_name)
+    (`Assoc
+        [ "schema", `String "keeper.reaction_ledger.v4"
+        ; "record_kind", `String "stimulus"
+        ; "event_id", `String "unattributed-event"
+        ; "keeper_name", `String keeper_name
+        ; "recorded_at_unix", `Float 1234.0
+        ; ( "stimulus"
+          , `Assoc
+              [ "kind", `String "schedule_due"
+              ; "source", `String "keeper_event_queue"
+              ] )
+        ]);
+  let evidence =
+    Keeper_reaction_ledger.event_queue_reaction_evidence_result
+      ~base_path
+      ~keeper_name
+      ~stimulus_id:"schedule:test-occurrence"
+    |> require_complete_evidence "identity-less row"
+  in
+  check int "identity-less row is not assigned to the query" 0
+    evidence.matched_record_count;
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check int "identity-less row remains operator-visible" 1
+    (summary |> member "quarantined_row_count" |> to_int);
+  let reason = summary |> member "quarantine_reason_counts" |> to_list |> List.hd in
+  check_member_string "identity quarantine reason" "missing_stimulus_id" "reason" reason
+;;
+
+let test_fleet_summary_aggregates_no_compaction_count () =
+  with_temp_base
+  @@ fun base_path ->
+  let record_no_compaction keeper_name =
+    let stimulus = manual_compaction_stimulus () in
+    ignore
+      (persist_transition_outbox
+         ~base_path
+         ~keeper_name
+         ~settlement:
+           (no_compaction_settlement
+              ~turn_count:7
+              Keeper_event_queue_state.No_eligible_history)
+         [ stimulus ]);
+    Keeper_reaction_ledger.record_event_queue_stimulus
+      ~base_path
+      ~keeper_name
+      stimulus;
+    Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+      ~base_path
+      ~keeper_name
+    |> require_ok "project no-compaction transition"
+  in
+  let keeper_a = "no-compaction-keeper-a" in
+  let keeper_b = "no-compaction-keeper-b" in
+  record_no_compaction keeper_a;
+  record_no_compaction keeper_b;
+  List.iter
+    (fun keeper_name ->
+      let summary =
+        Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+      in
+      check int "per-keeper no-compaction count" 1
+        (summary |> member "event_queue_no_compaction_count" |> to_int))
+    [ keeper_a; keeper_b ];
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_a; keeper_b ]
+      ~limit_per_keeper:10
+  in
+  check int "fleet summary aggregates no-compaction across keepers" 2
+    (fleet |> member "event_queue_no_compaction_count" |> to_int)
 ;;
 
 let () =
@@ -1452,37 +1548,45 @@ let () =
             `Quick
             test_event_queue_stimulus_and_turn_reaction
         ; test_case
+            "unexpected schema rows cannot double-count current occurrences"
+            `Quick
+            test_unexpected_schema_rows_are_quarantined_without_double_counting
+        ; test_case
+            "quarantine remains keeper-local"
+            `Quick
+            test_quarantine_is_keeper_local
+        ; test_case
             "event queue reaction evidence matches exact stimulus id"
             `Quick
             test_event_queue_reaction_evidence_matches_exact_stimulus_id
         ; test_case
-            "failure judgment operator attention is typed and visible"
+            "syntax error cannot claim an occurrence identity"
             `Quick
-            test_failure_judgment_operator_attention_is_typed_and_visible
+            test_syntax_error_does_not_claim_an_occurrence_identity
+        ; test_case
+            "missing identity cannot claim an occurrence identity"
+            `Quick
+            test_missing_identity_does_not_claim_an_occurrence_identity
+        ; test_case
+            "failure judgment external input is typed history"
+            `Quick
+            test_failure_judgment_external_input_is_typed_history
+        ; test_case
+            "transition reactions distinguish ordered sources"
+            `Quick
+            test_transition_reactions_distinguish_ordered_sources
+        ; test_case
+            "transition reaction rejects recombined stimulus identity"
+            `Quick
+            test_transition_reaction_rejects_recombined_stimulus_identity
+        ; test_case
+            "current rows require complete writer shape"
+            `Quick
+            test_current_rows_require_complete_writer_shape
         ; test_case
             "cursor ack is replayable state entry"
             `Quick
             test_cursor_ack_is_replayable_state_entry
-        ; test_case
-            "execution receipt links to reaction ledger"
-            `Quick
-            test_execution_receipt_links_to_reaction_ledger
-        ; test_case
-            "summary observes passive-only without attention"
-            `Quick
-            test_summary_observes_passive_only_without_attention
-        ; test_case
-            "summary degrades unknown completion-contract result"
-            `Quick
-            test_summary_degrades_unknown_completion_contract_result
-        ; test_case
-            "completion-contract parser and attention use canonical receipt type"
-            `Quick
-            test_completion_contract_result_canonical_roundtrip
-        ; test_case
-            "summary observes passive-only without work-scope attention"
-            `Quick
-            test_summary_observes_passive_only_without_work_scope_attention
         ; test_case
             "summary marks unreacted and reacted stimuli"
             `Quick
@@ -1495,26 +1599,6 @@ let () =
             "summary cursor ack respects board post id tiebreaker"
             `Quick
             test_summary_cursor_ack_respects_post_id_tiebreaker
-        ; test_case
-            "no-progress recovery stimulus is typed"
-            `Quick
-            test_no_progress_recovery_stimulus_is_typed
-        ; test_case
-            "no-progress recovery reaction clears pending"
-            `Quick
-            test_no_progress_recovery_reaction_clears_pending
-        ; test_case
-            "unrelated keeper reaction does not clear no-progress recovery pending"
-            `Quick
-            test_no_progress_recovery_unrelated_reaction_does_not_clear_pending
-        ; test_case
-            "cursor ack alone does not clear no-progress recovery pending"
-            `Quick
-            test_no_progress_recovery_cursor_ack_does_not_clear_pending
-        ; test_case
-            "summary links passive-only observation to pending recovery"
-            `Quick
-            test_summary_links_passive_only_observation_to_pending_recovery
         ; test_case
             "fleet summary surfaces durable event queue backlog"
             `Quick
@@ -1540,9 +1624,9 @@ let () =
             `Quick
             test_fleet_summary_surfaces_durable_event_queue_parse_error
         ; test_case
-            "unknown reaction degrades summary"
+            "unknown reaction is quarantined without clearing pending"
             `Quick
-            test_unknown_reaction_degrades_summary
+            test_unknown_reaction_is_quarantined_without_clearing_pending
         ; test_case
             "fusion_completed stimulus is supported (RFC-0266)"
             `Quick
@@ -1555,6 +1639,14 @@ let () =
             "reaction_kind string round-trip drift guard"
             `Quick
             test_reaction_kind_string_roundtrip
+        ; test_case
+            "fleet summary aggregates no-compaction count across keepers"
+            `Quick
+            test_fleet_summary_aggregates_no_compaction_count
+        ; test_case
+            "accepted cancellation projects as typed history"
+            `Quick
+            test_cancelled_transition_is_projected_as_typed_history
         ] )
     ]
 ;;

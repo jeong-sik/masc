@@ -6,8 +6,7 @@ open Masc
 
 let () = Mirage_crypto_rng_unix.use_default ()
 
-(* RFC-0323 G-2: wires the verification-store hooks (among others) so the
-   machine_verify tests can assert the store record lifecycle. *)
+(* Install production workspace hooks for verification and metrics tests. *)
 let () = Workspace_metric_hooks.install ()
 
 (* UTF-8 emoji helpers: ✅ is E2 9C 85, ⚠ is E2 9A A0, 🔒 is F0 9F 94 92, 🔓 is F0 9F 94 93 *)
@@ -69,6 +68,13 @@ let contains_warning result =
   has_legacy_result_prefix "\xE2\x9A\xA0" result || contains_problem_result result
 
 let contains_error = contains_problem_result
+
+let configured_llm_completion_pass : Masc_domain.configured_llm_completion_verdict =
+  { decision = Masc_domain.Completion_pass
+  ; runtime_id = "workspace-test-reviewer"
+  ; rationale = None
+  ; evaluated_at = "2026-07-13T00:00:00Z"
+  }
 
 let backlog_recovery_path config =
   Workspace.backlog_path config ^ ".last-good"
@@ -226,10 +232,12 @@ let test_broadcast_replaces_terminal_task_cache_desync () =
   let _ = Workspace.add_task config ~title:"Terminal task" ~priority:1 ~description:"" in
   let _ = Workspace.claim_task config ~agent_name:"nick0cave" ~task_id:"task-001" in
   (match
-     Workspace.force_done_task_r
+     Workspace.transition_task_r
        config
-       ~agent_name:"operator"
+       ~agent_name:"nick0cave"
        ~task_id:"task-001"
+       ~action:Masc_domain.Done_action
+       ~configured_llm_verdict:configured_llm_completion_pass
        ~notes:"terminal in backlog"
        ()
    with
@@ -327,7 +335,9 @@ let test_event_log () =
 
 let transition_done_r config ~agent_name ~task_id ~notes =
   Workspace.transition_task_r config ~agent_name ~task_id
-    ~action:Masc_domain.Done_action ~notes ()
+    ~action:Masc_domain.Done_action
+    ~configured_llm_verdict:configured_llm_completion_pass
+    ~notes ()
 
 let transition_done config ~agent_name ~task_id ~notes =
   match transition_done_r config ~agent_name ~task_id ~notes with
@@ -791,144 +801,6 @@ let test_read_backlog_r_reports_parse_error_when_recovery_is_also_invalid () =
           (str_contains msg "recovery")
   )
 
-let test_release_stale_claims_skips_invalid_backlog () =
-  with_test_env (fun config ->
-    Out_channel.with_open_text (Workspace.backlog_path config) (fun oc ->
-      output_string oc "{\n  \"tasks\": [\n");
-    let released = Workspace.release_stale_claims config ~ttl_seconds:60.0 in
-    Alcotest.(check (list (pair string string))) "no stale claims released" [] released
-  )
-
-(* RFC-0034.d: release_stale_claims must clear the assignee's
-   on-disk current_task mirror so the agent file no longer points at
-   a backlog task that has been forced back to Todo. *)
-let agent_current_task config ~agent_name =
-  let agents = Workspace.get_all_agents config in
-  match List.find_opt (fun (a : Masc_domain.agent) -> a.name = agent_name) agents with
-  | Some agent -> agent.current_task
-  | None -> None
-
-(* Use pre-formed nicknames so the assignee written into the backlog
-   by [Workspace.claim_task] matches the [<nickname>.json] agent file. The
-   production board issue (RFC-0034.d §1) was reported with nicknames
-   (e.g. nick0cave), so this models the actual desync surface. *)
-let stale_nick = "claude-stale-fox"
-let other_nick = "claude-other-bear"
-let old_release_timestamp = "2020-01-01T00:00:00Z"
-
-let mark_agent_stale_for_release config ~agent_name =
-  Workspace.update_local_agent_state config ~agent_name (fun agent ->
-    { agent with status = Masc_domain.Active; last_seen = old_release_timestamp })
-;;
-
-let rewrite_task_status config ~task_id ~f =
-  let backlog = Workspace.read_backlog config in
-  let updated_tasks =
-    List.map
-      (fun (task : Masc_domain.task) ->
-         if String.equal task.id task_id
-         then { task with task_status = f task.task_status }
-         else task)
-      backlog.tasks
-  in
-  Workspace.write_backlog config { backlog with tasks = updated_tasks }
-;;
-
-let age_claimed_task_for_release config ~task_id =
-  rewrite_task_status config ~task_id ~f:(function
-    | Masc_domain.Claimed { assignee; _ } ->
-      Masc_domain.Claimed { assignee; claimed_at = old_release_timestamp }
-    | other -> other)
-;;
-
-let assert_task_todo config ~task_id =
-  let backlog = Workspace.read_backlog config in
-  match List.find_opt (fun t -> (t : Masc_domain.task).id = task_id) backlog.tasks with
-  | Some { task_status = Masc_domain.Todo; _ } -> ()
-  | Some task ->
-    Alcotest.failf
-      "expected %s to be Todo, got %s"
-      task_id
-      (Masc_domain.task_status_to_string task.task_status)
-  | None -> Alcotest.failf "%s not found in backlog" task_id
-;;
-
-let test_release_stale_claims_clears_agent_current_task () =
-  with_test_env (fun config ->
-    let _ = Workspace.bind_session config ~agent_name:stale_nick ~capabilities:[] () in
-    let _ = Workspace.add_task config ~title:"Stale work" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:stale_nick ~task_id:"task-001" in
-    Workspace.update_local_agent_state config ~agent_name:stale_nick
-      (fun agent -> { agent with current_task = Some "task-001" });
-    Alcotest.(check (option string)) "precondition: agent.current_task set"
-      (Some "task-001") (agent_current_task config ~agent_name:stale_nick);
-    mark_agent_stale_for_release config ~agent_name:stale_nick;
-    age_claimed_task_for_release config ~task_id:"task-001";
-    let released = Workspace.release_stale_claims config ~ttl_seconds:0.0 in
-    Alcotest.(check (list (pair string string)))
-      "task-001 released from stale claim"
-      [ "task-001", stale_nick ]
-      released;
-    Alcotest.(check (option string)) "agent.current_task cleared" None
-      (agent_current_task config ~agent_name:stale_nick);
-    assert_task_todo config ~task_id:"task-001"
-  )
-
-(* Spec: agent A claimed task X, then its on-disk pointer moved to a
-   different task Y (e.g. a fresh claim under a different lock window).
-   When the stale sweep releases X, A's [current_task] must remain
-   [Some Y] — only the task-X-specific pointer gets cleared. *)
-let test_release_stale_claims_preserves_other_agent_task () =
-  with_test_env (fun config ->
-    let _ = Workspace.bind_session config ~agent_name:other_nick ~capabilities:[] () in
-    let _ = Workspace.add_task config ~title:"Stale work" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:other_nick ~task_id:"task-001" in
-    Workspace.update_local_agent_state config ~agent_name:other_nick
-      (fun agent -> { agent with current_task = Some "task-999" });
-    mark_agent_stale_for_release config ~agent_name:other_nick;
-    age_claimed_task_for_release config ~task_id:"task-001";
-    let released = Workspace.release_stale_claims config ~ttl_seconds:0.0 in
-    Alcotest.(check (list (pair string string)))
-      "task-001 released from backlog"
-      [ "task-001", other_nick ]
-      released;
-    Alcotest.(check (option string)) "agent kept its newer current_task"
-      (Some "task-999") (agent_current_task config ~agent_name:other_nick);
-    assert_task_todo config ~task_id:"task-001"
-  )
-
-
-(* AwaitingVerification is not a Claim/InProgress ownership state in the
-   Release FSM. Verification deadlocks need a separate recovery path instead
-   of being forced through release_stale_claims. *)
-let test_release_stale_claims_skips_stale_verification () =
-  with_test_env (fun config ->
-    let _ = Workspace.bind_session config ~agent_name:stale_nick ~capabilities:[] () in
-    let _ = Workspace.add_task config ~title:"Stale verification" ~priority:1 ~description:"" in
-    let _ = Workspace.claim_task config ~agent_name:stale_nick ~task_id:"task-001" in
-    (* Force task into AwaitingVerification with an old submitted_at
-       by reading the backlog, mutating the task status, and writing back. *)
-    rewrite_task_status config ~task_id:"task-001" ~f:(fun _ ->
-      Masc_domain.AwaitingVerification
-        { assignee = stale_nick
-        ; submitted_at = old_release_timestamp
-        ; verification_id = "vrf-test"
-        ; phase = Masc_domain.Awaiting_verifier
-        });
-    (* ttl_seconds:0.0 forces any timestamp to be stale *)
-    let released = Workspace.release_stale_claims config ~ttl_seconds:0.0 in
-    Alcotest.(check (list (pair string string)))
-      "stale verification is handled outside release_stale_claims" [] released;
-    let backlog = Workspace.read_backlog config in
-    match List.find_opt (fun t -> (t : Masc_domain.task).id = "task-001") backlog.tasks with
-    | Some task ->
-      (match task.task_status with
-       | Masc_domain.AwaitingVerification _ -> ()
-       | other -> Alcotest.failf "expected AwaitingVerification, got %s"
-           (Masc_domain.task_status_to_string other))
-    | None -> Alcotest.fail "task-001 not found in backlog"
-  )
-
 let test_heartbeat_nonexistent_agent () =
   with_test_env (fun config ->
     (* Heartbeat for non-bound agent *)
@@ -938,124 +810,6 @@ let test_heartbeat_nonexistent_agent () =
 
 (* test_get_agents_status removed (2026-06-09): get_agents_status deleted with
    the dead agent-status surface. *)
-
-let test_cleanup_zombies_empty () =
-  with_test_env (fun config ->
-    (* Cleanup with no zombies returns a structured result *)
-    let result = Workspace.cleanup_zombies config in
-    let has_result =
-      match result with
-      | Workspace.No_agents_dir -> true
-      | Workspace.No_zombies -> true
-      | Workspace.Cleaned _ -> true
-    in
-    Alcotest.(check bool) "cleanup result" true has_result
-  )
-
-(** Return ISO8601 timestamp offset by seconds from now *)
-let iso_ago seconds =
-  let t = Unix.gettimeofday () -. seconds in
-  let tm = Unix.gmtime t in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
-
-(** Helper: join an agent then overwrite its last_seen to simulate staleness *)
-let make_stale_agent ?(agent_type = "test") config ~name ~age_seconds =
-  let _ = Workspace.bind_session config ~agent_name:name ~capabilities:[] () in
-  (* Overwrite the agent file with a stale last_seen *)
-  let agents_path = Filename.concat (Workspace.masc_dir config) "agents" in
-  let path = Filename.concat agents_path (Workspace.safe_filename name ^ ".json") in
-  let stale_ts = iso_ago age_seconds in
-  let agent_json = Printf.sprintf
-    {|{"name":"%s","agent_type":"%s","status":"inactive","capabilities":[],"joined_at":"%s","last_seen":"%s"}|}
-    name agent_type stale_ts stale_ts
-  in
-  Workspace.write_json config path (Yojson.Safe.from_string agent_json)
-
-(* Age a bound agent's last_seen while keeping status:active — simulates a live
-   agent that has gone quiet between heartbeats. Unlike make_stale_agent (which
-   marks the agent inactive, so the include_inactive:false load drops it before
-   any threshold check), this exercises the staleness threshold path in
-   audit_orphan_tasks. *)
-let age_active_agent ?(agent_type = "test") config ~name ~age_seconds =
-  let agents_path = Filename.concat (Workspace.masc_dir config) "agents" in
-  let path = Filename.concat agents_path (Workspace.safe_filename name ^ ".json") in
-  let stale_ts = iso_ago age_seconds in
-  let agent_json = Printf.sprintf
-    {|{"name":"%s","agent_type":"%s","status":"active","capabilities":[],"joined_at":"%s","last_seen":"%s"}|}
-    name agent_type stale_ts stale_ts
-  in
-  Workspace.write_json config path (Yojson.Safe.from_string agent_json)
-
-let test_cleanup_zombies_detects_regular () =
-  with_test_env (fun config ->
-    (* Create a regular agent idle for 10 minutes (> 300s threshold) *)
-    make_stale_agent config ~name:"stale-regular-agent" ~age_seconds:700.0;
-    let result = Workspace.cleanup_zombies config in
-    let found = match result with
-      | Workspace.Cleaned { names; _ } -> List.mem "stale-regular-agent" names
-      | _ -> false
-    in
-    Alcotest.(check bool) "regular zombie detected" true found
-  )
-
-let test_cleanup_zombies_detects_keeper () =
-  with_test_env (fun config ->
-    (* Create a keeper agent idle for 2 hours (> 3600s keeper threshold) *)
-    make_stale_agent config ~name:"keeper-longplay-agent" ~age_seconds:7200.0;
-    let result = Workspace.cleanup_zombies config in
-    let found = match result with
-      | Workspace.Cleaned { names; _ } -> List.mem "keeper-longplay-agent" names
-      | _ -> false
-    in
-    Alcotest.(check bool) "keeper zombie detected after keeper threshold" true found
-  )
-
-let test_cleanup_zombies_spares_recent_keeper () =
-  with_test_env (fun config ->
-    (* Create a keeper agent idle for 10 minutes (< 3600s keeper threshold) *)
-    make_stale_agent
-      ~agent_type:"keeper"
-      config
-      ~name:"keeper-active-agent"
-      ~age_seconds:600.0;
-    let result = Workspace.cleanup_zombies config in
-    let spared = match result with
-      | Workspace.Cleaned { names; _ } -> not (List.mem "keeper-active-agent" names)
-      | _ -> true
-    in
-    Alcotest.(check bool) "recent keeper spared" true spared
-  )
-
-let test_cleanup_zombies_spares_type_keeper () =
-  with_test_env (fun config ->
-    (* Non-pattern keeper agents also use the keeper threshold. *)
-    make_stale_agent
-      ~agent_type:"keeper"
-      config
-      ~name:"regular-keeper-runtime"
-      ~age_seconds:600.0;
-    let result = Workspace.cleanup_zombies config in
-    let spared = match result with
-      | Workspace.Cleaned { names; _ } -> not (List.mem "regular-keeper-runtime" names)
-      | _ -> true
-    in
-    Alcotest.(check bool) "agent_type=keeper spared below keeper threshold" true spared
-  )
-
-let test_cleanup_zombies_removes_broken_agent_file () =
-  with_test_env (fun config ->
-    (* Write an empty JSON object — unparseable as agent *)
-    let agents_path = Filename.concat (Workspace.masc_dir config) "agents" in
-    let path = Filename.concat agents_path "broken-agent.json" in
-    Workspace.write_json config path (Yojson.Safe.from_string "{}");
-    Alcotest.(check bool) "broken file exists before GC"
-      true (Sys.file_exists path);
-    let _result = Workspace.cleanup_zombies config in
-    Alcotest.(check bool) "broken file removed by GC"
-      false (Sys.file_exists path)
-  )
 
 let test_fd_pressure_exn_classification () =
   Alcotest.(check bool)
@@ -1073,21 +827,6 @@ let test_fd_pressure_exn_classification () =
     false
     (Workspace.is_fd_pressure_exn
        (Unix.Unix_error (Unix.ETIMEDOUT, "connect", "api")))
-
-let test_cleanup_zombies_preserves_non_json_files () =
-  with_test_env (fun config ->
-    (* Place a non-JSON file in the agents directory *)
-    let agents_path = Filename.concat (Workspace.masc_dir config) "agents" in
-    let path = Filename.concat agents_path ".gitkeep" in
-    let oc = open_out path in
-    output_string oc "";
-    close_out oc;
-    Alcotest.(check bool) "non-json file exists before GC"
-      true (Sys.file_exists path);
-    let _result = Workspace.cleanup_zombies config in
-    Alcotest.(check bool) "non-json file preserved by GC"
-      true (Sys.file_exists path)
-  )
 
 (* ============================================================ *)
 (* Agent Discovery / Capability Tests                           *)
@@ -1312,232 +1051,30 @@ let test_xss_in_message_type () =
    (Nickname.is_generated_nickname requires 3+ dash-separated parts) *)
 let admin_keeper_agent = "admin-board-keeper"
 let test_agent_a = "agent-test-alpha"
-let test_agent_z = "agent-test-zombie"
-
-let test_force_release_bypasses_assignee () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Orphan Task" ~priority:1 ~description:"" in
-    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
-    (* Different agent cannot release without force *)
-    let normal = Workspace.transition_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001"
-        ~action:Masc_domain.Release () in
-    Alcotest.(check bool) "normal release blocked" true
-      (match normal with Error _ -> true | Ok _ -> false);
-    (* Force release succeeds *)
-    let forced = Workspace.force_release_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001" () in
-    Alcotest.(check bool) "force release ok" true
-      (match forced with Ok _ -> true | Error _ -> false);
-    (* Task should be back to Todo *)
-    let tasks = Workspace.list_tasks config in
-    Alcotest.(check bool) "task is todo" true (str_contains tasks "Todo" || str_contains tasks "todo")
-  )
-
-let test_force_done_bypasses_assignee () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Force Done Task" ~priority:1 ~description:"" in
-    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
-    (* Normal done by different agent fails *)
-    let normal = Workspace.transition_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001"
-        ~action:Masc_domain.Done_action ~notes:"forced" () in
-    Alcotest.(check bool) "normal done blocked" true
-      (match normal with Error _ -> true | Ok _ -> false);
-    (* Force done succeeds *)
-    let forced = Workspace.force_done_task_r config ~agent_name:admin_keeper_agent ~task_id:"task-001"
-        ~notes:"auto-closed by admin" () in
-    Alcotest.(check bool) "force done ok" true
-      (match forced with Ok _ -> true | Error _ -> false);
-    (* Task should be done *)
-    let tasks = Workspace.list_tasks ~include_done:true config in
-    Alcotest.(check bool) "task is done" true (str_contains tasks "Done" || str_contains tasks "done")
-  )
-
-(* === RFC-0323 G-2: submit_and_approve_task_r (machine-verified completion) === *)
 
 let find_task config task_id =
   Workspace.get_tasks_raw config
   |> List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id)
 
-let test_submit_and_approve_completes_via_verification () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Probe Task" ~priority:1 ~description:"" in
-    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
-    (* Uses the exported probe identity so this test also pins that the
-       constant passes Agent_id validation and is distinct from a plain
-       agent identity, end-to-end through the real FSM. evidence_refs=[]
-       pins the RFC-0323 Phase A boundary: a task without a strict contract
-       machine-verifies with no evidence (the #23719 gate is strict-scoped). *)
-    let result =
-      Workspace.submit_and_approve_task_r config ~agent_name:test_agent_a
-        ~verifier_name:Keeper_tool_task_runtime.deterministic_probe_verifier
-        ~task_id:"task-001"
-        ~notes:"deterministic evidence satisfied" ~approve_notes:"machine-verified"
-        ~evidence_refs:[] ()
-    in
-    Alcotest.(check bool) "submit+approve ok" true
-      (match result with Ok _ -> true | Error _ -> false);
-    (* Verification-store lifecycle (hooks installed above): the submit
-       created a record and the machine verdict resolved it — nothing
-       actionable remains to wake verifiers or linger in the dashboard
-       panel. *)
-    let requests = Verification.list_requests config.Workspace.base_path in
-    Alcotest.(check bool) "store record created" true
-      (List.length requests >= 1);
-    Alcotest.(check int) "no actionable record remains" 0
-      (List.length (List.filter Verification.request_is_actionable requests));
-    match find_task config "task-001" with
-    | Some { task_status = Masc_domain.Done { assignee; notes; _ }; _ } ->
-      Alcotest.(check string) "assignee preserved" test_agent_a assignee;
-      Alcotest.(check bool) "approved-by verifier recorded" true
-        (match notes with
-         | Some n ->
-           str_contains n Keeper_tool_task_runtime.deterministic_probe_verifier
-         | None -> false)
-    | Some _ -> Alcotest.fail "task not Done after submit+approve"
-    | None -> Alcotest.fail "task-001 missing")
-
-let test_submit_and_approve_rejects_same_identity () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Probe Task" ~priority:1 ~description:"" in
-    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
-    let result =
-      Workspace.submit_and_approve_task_r config ~agent_name:test_agent_a
-        ~verifier_name:test_agent_a ~task_id:"task-001"
-        ~notes:"n" ~approve_notes:"a" ~evidence_refs:[] ()
-    in
-    Alcotest.(check bool) "rejected as not distinct" true
-      (match result with
-       | Error (Workspace.Machine_verify_verifier_not_distinct _) -> true
-       | Ok _ | Error _ -> false);
-    (* Rejected before any mutation: task must still be Claimed. *)
-    Alcotest.(check bool) "task still claimed" true
-      (match find_task config "task-001" with
-       | Some { task_status = Masc_domain.Claimed _; _ } -> true
-       | Some _ | None -> false))
-
-let test_submit_and_approve_rejects_invalid_verifier () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Probe Task" ~priority:1 ~description:"" in
-    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
-    let result =
-      Workspace.submit_and_approve_task_r config ~agent_name:test_agent_a
-        ~verifier_name:"probe:bad:double" ~task_id:"task-001"
-        ~notes:"n" ~approve_notes:"a" ~evidence_refs:[] ()
-    in
-    Alcotest.(check bool) "rejected as invalid verifier" true
-      (match result with
-       | Error (Workspace.Machine_verify_invalid_verifier _) -> true
-       | Ok _ | Error _ -> false);
-    Alcotest.(check bool) "task still claimed" true
-      (match find_task config "task-001" with
-       | Some { task_status = Masc_domain.Claimed _; _ } -> true
-       | Some _ | None -> false))
-
-let test_submit_and_approve_non_assignee_submit_fails () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Probe Task" ~priority:1 ~description:"" in
-    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
-    let result =
-      Workspace.submit_and_approve_task_r config ~agent_name:admin_keeper_agent
-        ~verifier_name:Keeper_tool_task_runtime.deterministic_probe_verifier
-        ~task_id:"task-001" ~notes:"n" ~approve_notes:"a" ~evidence_refs:[] ()
-    in
-    Alcotest.(check bool) "submit failed typed" true
-      (match result with
-       | Error (Workspace.Machine_verify_submit_failed _) -> true
-       | Ok _ | Error _ -> false);
-    Alcotest.(check bool) "task still claimed" true
-      (match find_task config "task-001" with
-       | Some { task_status = Masc_domain.Claimed _; _ } -> true
-       | Some _ | None -> false))
-
-(* The #23719 evidence gate, scoped to strict contracts: a strict task
-   machine-verifies when the probe supplies evidence_refs, and fail-closes
-   before any mutation when it does not. *)
-
-let g2_strict_contract : Masc_domain.task_contract =
-  { strict = true
-  ; completion_contract = [ "machine-verifiable deliverable" ]
-  ; required_evidence = []
-  ; inspect_gate_evidence = []
-  ; verify_gate_evidence = []
-  ; evidence_claims = []
-  ; stale_claim_timeout_sec = 0
-  ; links = { operation_id = None; session_id = None }
-  }
-
-let test_submit_and_approve_strict_with_evidence_completes () =
-  with_test_env (fun config ->
-    let _ =
-      Workspace.add_task config ~contract:g2_strict_contract
-        ~title:"Strict Probe Task" ~priority:1 ~description:""
-    in
-    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
-    let result =
-      Workspace.submit_and_approve_task_r config ~agent_name:test_agent_a
-        ~verifier_name:Keeper_tool_task_runtime.deterministic_probe_verifier
-        ~task_id:"task-001" ~notes:"claims satisfied" ~approve_notes:"machine-verified"
-        ~evidence_refs:[ "file exists: proof.json" ] ()
-    in
-    Alcotest.(check bool) "strict submit+approve ok" true
-      (match result with Ok _ -> true | Error _ -> false);
-    match find_task config "task-001" with
-    | Some { task_status = Masc_domain.Done _; handoff_context; _ } ->
-      (* The approve re-supplies the machine handoff, so the Done record
-         keeps the evidence for audit consumers instead of wiping it. *)
-      Alcotest.(check bool) "Done record carries the machine evidence" true
-        (match handoff_context with
-         | Some ctx -> ctx.evidence_refs = [ "file exists: proof.json" ]
-         | None -> false)
-    | Some _ -> Alcotest.fail "strict task not Done after submit+approve"
-    | None -> Alcotest.fail "task-001 missing")
-
-let test_submit_and_approve_strict_without_evidence_fail_closed () =
-  with_test_env (fun config ->
-    let _ =
-      Workspace.add_task config ~contract:g2_strict_contract
-        ~title:"Strict Probe Task" ~priority:1 ~description:""
-    in
-    let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
-    let result =
-      Workspace.submit_and_approve_task_r config ~agent_name:test_agent_a
-        ~verifier_name:Keeper_tool_task_runtime.deterministic_probe_verifier
-        ~task_id:"task-001" ~notes:"no evidence" ~approve_notes:"a"
-        ~evidence_refs:[] ()
-    in
-    Alcotest.(check bool) "strict submit without evidence fail-closed" true
-      (match result with
-       | Error (Workspace.Machine_verify_submit_failed _) -> true
-       | Ok _ | Error _ -> false);
-    Alcotest.(check bool) "task unchanged (still claimed)" true
-      (match find_task config "task-001" with
-       | Some { task_status = Masc_domain.Claimed _; _ } -> true
-       | Some _ | None -> false))
-
 (* === RFC-0323 G-3: completion side effects are state-keyed === *)
 
-(* Records economy-earn calls while [f] runs, restoring the previous hook. *)
-let with_economy_recorder f =
+(* Records done-hook dispatch targets while [f] runs, restoring the previous
+   hook.  Observes [relation_on_task_done_fn] because it receives the assignee
+   the completion side effects are keyed on. *)
+let with_done_hook_recorder f =
   let recorded = ref [] in
   let prev =
-    Atomic.exchange Workspace_hooks.agent_economy_earn_fn
-      (fun ~base_path:_ ~agent_name ~reason:_ ->
-        recorded := agent_name :: !recorded)
+    Atomic.exchange Workspace_hooks.relation_on_task_done_fn
+      (fun ~assignee ~active_agents:_ ->
+        recorded := assignee :: !recorded)
   in
   Fun.protect
-    ~finally:(fun () -> Atomic.set Workspace_hooks.agent_economy_earn_fn prev)
+    ~finally:(fun () -> Atomic.set Workspace_hooks.relation_on_task_done_fn prev)
     (fun () -> f recorded)
 
 let test_approve_completion_credits_assignee () =
   with_test_env (fun config ->
-    with_economy_recorder (fun recorded ->
+    with_done_hook_recorder (fun recorded ->
       let _ = Workspace.add_task config ~title:"Parity Task" ~priority:1 ~description:"" in
       let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
       let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
@@ -1547,35 +1084,18 @@ let test_approve_completion_credits_assignee () =
       in
       Alcotest.(check bool) "submit ok" true
         (match submitted with Ok _ -> true | Error _ -> false);
-      Alcotest.(check (list string)) "no earn before approve" [] !recorded;
+      Alcotest.(check (list string)) "no done hook before approve" [] !recorded;
       let approved =
         Workspace.transition_task_r config ~agent_name:admin_keeper_agent
-          ~task_id:"task-001" ~action:Masc_domain.Approve_verification ()
+          ~task_id:"task-001" ~action:Masc_domain.Approve_verification
+          ~configured_llm_verdict:configured_llm_completion_pass ()
       in
       Alcotest.(check bool) "approve ok" true
         (match approved with Ok _ -> true | Error _ -> false);
-      (* The acting agent is the verifier; the earn must credit the assignee. *)
+      (* The acting agent is the verifier; the done hook must fire for the
+         assignee. *)
       Alcotest.(check (list string))
         "approve completion credits assignee" [ test_agent_a ] !recorded))
-
-let test_force_done_still_credits_forcing_actor () =
-  with_test_env (fun config ->
-    with_economy_recorder (fun recorded ->
-      let _ = Workspace.add_task config ~title:"Parity Force" ~priority:1 ~description:"" in
-      let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
-      let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
-      let forced =
-        Workspace.force_done_task_r config ~agent_name:admin_keeper_agent
-          ~task_id:"task-001" ~notes:"forced by admin" ()
-      in
-      Alcotest.(check bool) "force done ok" true
-        (match forced with Ok _ -> true | Error _ -> false);
-      (* Regression pin: G-3 keys the earn off the resulting Done record's
-         assignee. [done_status] sets that to the acting agent, so a forced
-         done still credits the forcing actor — unchanged behavior. *)
-      Alcotest.(check (list string))
-        "force done still credits the forcing actor" [ admin_keeper_agent ]
-        !recorded))
 
 let test_submit_and_approve_rejects_empty_justification () =
   with_test_env (fun config ->
@@ -1588,7 +1108,8 @@ let test_submit_and_approve_rejects_empty_justification () =
     in
     let approved =
       Workspace.transition_task_r config ~agent_name:admin_keeper_agent
-        ~task_id:"task-001" ~action:Masc_domain.Approve_verification ~notes:"   " ()
+        ~task_id:"task-001" ~action:Masc_domain.Approve_verification
+        ~configured_llm_verdict:configured_llm_completion_pass ~notes:"   " ()
     in
     Alcotest.(check bool) "approve transition ok" true
       (match approved with Ok _ -> true | Error _ -> false))
@@ -1598,22 +1119,15 @@ let test_submit_and_approve_rejects_empty_justification () =
 let strict_contract : Masc_domain.task_contract =
   { strict = true
   ; completion_contract = [ "deliverable verified by a second agent" ]
-  ; (* Declared up front so the #23719/#23740 strict evidence precheck is
-       satisfied by the contract itself and direct done reaches the RFC-0308
-       G-1 guard, whose error names the submit lane. With an empty
-       required_evidence the precheck fires first and its message does not
-       mention submit_for_verification (main red #23901, family A); the
-       precheck fail-closed path is pinned separately by
-       [test_submit_and_approve_strict_without_evidence_fail_closed]. *)
+  ; (* Declared up front so the strict evidence precheck is satisfied by the
+       contract itself and direct done reaches the verification-lane guard. *)
     required_evidence = [ "artifact:deliverable" ]
   ; inspect_gate_evidence = []
   ; verify_gate_evidence = []
-  ; evidence_claims = []
-  ; stale_claim_timeout_sec = 0
   ; links = { operation_id = None; session_id = None }
   }
 
-let test_strict_task_done_routes_to_submit () =
+let test_strict_task_done_requires_and_accepts_llm_verdict () =
   with_test_env (fun config ->
     let _ =
       Workspace.add_task config ~contract:strict_contract ~title:"Strict Task"
@@ -1621,43 +1135,28 @@ let test_strict_task_done_routes_to_submit () =
     in
     let _ = Workspace.bind_session config ~agent_name:test_agent_a ~capabilities:[] () in
     let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
-    (* Direct done is blocked by the RFC-0308 lifecycle guard (G-1), whose
-       error routes to submit_for_verification. *)
+    (* The low-level workspace boundary never fabricates a verdict. *)
     let direct =
       Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
         ~action:Masc_domain.Done_action ~notes:"done" ()
     in
     (match direct with
      | Error e ->
-       Alcotest.(check bool) "error routes to submit_for_verification" true
-         (str_contains (Masc_domain.masc_error_to_string e) "submit_for_verification")
-     | Ok _ -> Alcotest.fail "strict task completed via direct done");
-    (* The verification lane completes it — a strict submit carries evidence
-       (the #23719 gate, strict-scoped). *)
-    let submitted =
+       Alcotest.(check bool) "error requires configured LLM verdict" true
+         (str_contains
+            (Masc_domain.masc_error_to_string e)
+            "Configured LLM completion verdict required")
+     | Ok _ -> Alcotest.fail "task completed without configured LLM verdict");
+    let reviewed =
       Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
-        ~action:Masc_domain.Submit_for_verification ~notes:"evidence attached"
-        ~handoff_context:
-          { Masc_domain.summary = "evidence attached"
-          ; reason = None
-          ; next_step = None
-          ; failure_mode = None
-          ; reclaim_policy = None
-          ; evidence_refs = [ "tests green: dune runtest" ]
-          ; updated_at = None
-          ; updated_by = None
-          }
+        ~action:Masc_domain.Done_action
+        ~configured_llm_verdict:configured_llm_completion_pass
+        ~notes:"evidence attached"
         ()
     in
-    Alcotest.(check bool) "submit ok" true
-      (match submitted with Ok _ -> true | Error _ -> false);
-    let approved =
-      Workspace.transition_task_r config ~agent_name:admin_keeper_agent
-        ~task_id:"task-001" ~action:Masc_domain.Approve_verification ()
-    in
-    Alcotest.(check bool) "approve ok" true
-      (match approved with Ok _ -> true | Error _ -> false);
-    Alcotest.(check bool) "task done via verification" true
+    Alcotest.(check bool) "configured LLM pass completes task" true
+      (match reviewed with Ok _ -> true | Error _ -> false);
+    Alcotest.(check bool) "task done via configured LLM verdict" true
       (match find_task config "task-001" with
        | Some { task_status = Masc_domain.Done _; _ } -> true
        | Some _ | None -> false))
@@ -1671,7 +1170,9 @@ let test_default_task_done_unchanged () =
     let _ = Workspace.claim_task config ~agent_name:test_agent_a ~task_id:"task-001" in
     let direct =
       Workspace.transition_task_r config ~agent_name:test_agent_a ~task_id:"task-001"
-        ~action:Masc_domain.Done_action ~notes:"done" ()
+        ~action:Masc_domain.Done_action
+        ~configured_llm_verdict:configured_llm_completion_pass
+        ~notes:"done" ()
     in
     Alcotest.(check bool) "default task direct done ok" true
       (match direct with Ok _ -> true | Error _ -> false))
@@ -1696,14 +1197,7 @@ let test_audit_orphan_tasks () =
 
 let test_audit_orphan_awaiting_verification_tasks () =
   with_test_env (fun config ->
-    let previous = Sys.getenv_opt "MASC_VERIFICATION_FSM_ENABLED" in
-    Fun.protect
-      ~finally:(fun () ->
-        match previous with
-        | Some value -> Unix.putenv "MASC_VERIFICATION_FSM_ENABLED" value
-        | None -> Unix.putenv "MASC_VERIFICATION_FSM_ENABLED" "")
-      (fun () ->
-        Unix.putenv "MASC_VERIFICATION_FSM_ENABLED" "true";
+    (
         let _ =
           Workspace.add_task config ~title:"Verification Orphan Candidate"
             ~priority:1 ~description:""
@@ -1733,107 +1227,65 @@ let test_audit_orphan_awaiting_verification_tasks () =
             Alcotest.(check string) "verification orphan task id" "task-001"
               task.id))
 
-(* Regression for #21418: a live keeper that has gone quiet between heartbeats
-   (last_seen past the 300s default, but within the 3600s keeper grace) must NOT
-   have its own claimed task classified as an orphan. With the pre-fix
-   [Time.is_stale] (300s flat) predicate this returned 1 orphan, which drove the
-   keeper self-wake loop that #21418 papered over by filtering self from the
-   count. The root fix routes typed/meta-confirmed keepers through
-   [Zombie.is_zombie_for_agent]. *)
-let test_audit_orphan_spares_live_keeper_within_grace () =
+let test_audit_orphan_ignores_elapsed_last_seen_for_active_agent () =
   with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Keeper Task" ~priority:1 ~description:"" in
-    let keeper = "keeper-grace-agent" in
-    let _ = Workspace.bind_session config ~agent_name:keeper ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:keeper ~task_id:"task-001" in
-    age_active_agent config ~agent_type:"keeper" ~name:keeper ~age_seconds:600.0;
-    let orphans = Workspace.audit_orphan_tasks config in
-    Alcotest.(check int) "live keeper within grace is not an orphan" 0
-      (List.length orphans)
-  )
-
-(* A keeper quiet beyond the 3600s keeper grace IS still an orphan, so its task
-   remains reclaimable — the fix extends the grace window, it does not exempt
-   keepers permanently. *)
-let test_audit_orphan_detects_dead_keeper_beyond_grace () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Keeper Task" ~priority:1 ~description:"" in
-    let keeper = "keeper-dead-agent" in
-    let _ = Workspace.bind_session config ~agent_name:keeper ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:keeper ~task_id:"task-001" in
-    age_active_agent config ~agent_type:"keeper" ~name:keeper ~age_seconds:4000.0;
-    let orphans = Workspace.audit_orphan_tasks config in
-    Alcotest.(check int) "dead keeper beyond grace is an orphan" 1
-      (List.length orphans);
-    let (_, assignee) = List.hd orphans in
-    Alcotest.(check string) "orphan assignee is the dead keeper" keeper assignee
-  )
-
-(* Non-keeper agents keep the 300s default threshold — 10 minutes quiet orphans
-   the task, confirming the keeper grace is scoped to keepers only. *)
-let test_audit_orphan_nonkeeper_uses_default_threshold () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Regular Task" ~priority:1 ~description:"" in
-    let agent = "claude-worker-agent" in
+    let _ = Workspace.add_task config ~title:"Observed Task" ~priority:1 ~description:"" in
+    let agent = "observed-active-agent" in
     let _ = Workspace.bind_session config ~agent_name:agent ~capabilities:[] () in
     let _ = Workspace.claim_task config ~agent_name:agent ~task_id:"task-001" in
-    age_active_agent config ~agent_type:"claude" ~name:agent ~age_seconds:600.0;
+    Workspace.update_local_agent_state config ~agent_name:agent (fun record ->
+      { record with last_seen = "2020-01-01T00:00:00Z" });
     let orphans = Workspace.audit_orphan_tasks config in
-    Alcotest.(check int) "non-keeper past default threshold is an orphan" 1
+    Alcotest.(check int) "elapsed last_seen cannot orphan an active task" 0
       (List.length orphans)
   )
 
-(* A keeper-shaped non-keeper (name matches the pattern, but agent_type is not
-   "keeper" and the record is not keeper-owned) must use the ordinary 300s
-   threshold, not the 3600s keeper grace. Regression for review follow-up. *)
-let test_audit_orphan_detects_keeper_shaped_non_keeper () =
+let assert_prefixed_identity_does_not_claim_membership ~assignee ~active_name =
   with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Spoof task" ~priority:1 ~description:"" in
-    let spoof = "keeper-spoof-agent" in
-    let _ = Workspace.bind_session config ~agent_name:spoof ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:spoof ~task_id:"task-001" in
-    age_active_agent config ~agent_type:"spoof" ~name:spoof ~age_seconds:600.0;
+    let _ =
+      Workspace.add_task
+        config
+        ~title:"Identity Boundary"
+        ~priority:1
+        ~description:""
+    in
+    let backlog = Workspace.read_backlog config in
+    let tasks =
+      List.map
+        (fun (task : Masc_domain.task) ->
+           if String.equal task.id "task-001"
+           then
+             { task with
+               task_status =
+                 Masc_domain.Claimed { assignee; claimed_at = "test" }
+             }
+           else task)
+        backlog.tasks
+    in
+    Workspace.write_backlog
+      config
+      { backlog with tasks; version = backlog.version + 1 };
+    let state = Workspace.read_state config in
+    Workspace.write_state
+      config
+      { state with active_agents = active_name :: state.active_agents };
     let orphans = Workspace.audit_orphan_tasks config in
-    Alcotest.(check int)
-      "keeper-shaped non-keeper past default threshold is an orphan"
-      1
-      (List.length orphans);
-    let (_, assignee) = List.hd orphans in
-    Alcotest.(check string) "orphan assignee is the spoof worker" spoof assignee
-  )
+    Alcotest.(check bool)
+      (Printf.sprintf "%s does not confer identity to %s" active_name assignee)
+      true
+      (List.exists
+         (fun ((task : Masc_domain.task), orphan_assignee) ->
+            String.equal task.id "task-001"
+            && String.equal orphan_assignee assignee)
+         orphans))
 
-(* An agent whose record is stamped as keeper-owned (via meta.keeper_name)
-   gets the keeper threshold even when its agent_type is not "keeper". *)
-let test_audit_orphan_spares_keeper_owned_meta_within_grace () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Keeper-owned task" ~priority:1 ~description:"" in
-    let worker = "claude-runtime-agent" in
-    let _ = Workspace.bind_session config ~agent_name:worker ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:worker ~task_id:"task-001" in
-    age_active_agent config ~agent_type:"claude" ~name:worker ~age_seconds:600.0;
-    Workspace.update_local_agent_state config ~agent_name:worker (fun agent ->
-      let open Masc_domain in
-      let meta =
-        match agent.meta with
-        | Some m -> { m with keeper_name = Some "keeper-sangsu" }
-        | None ->
-          { session_id = ""
-          ; agent_type = agent.agent_type
-          ; pid = None
-          ; hostname = None
-          ; tty = None
-          ; parent_task = None
-          ; keeper_name = Some "keeper-sangsu"
-          ; keeper_id = None
-          }
-      in
-      { agent with meta = Some meta });
-    let orphans = Workspace.audit_orphan_tasks config in
-    Alcotest.(check int)
-      "keeper-owned worker within grace is not an orphan"
-      0
-      (List.length orphans)
-  )
+let test_audit_orphan_requires_exact_registered_identity () =
+  assert_prefixed_identity_does_not_claim_membership
+    ~assignee:"alice"
+    ~active_name:"alice-worker";
+  assert_prefixed_identity_does_not_claim_membership
+    ~assignee:"alice-worker"
+    ~active_name:"alice"
 
 let keeper_meta_for_self_filter agent_name =
   let json =
@@ -1841,7 +1293,6 @@ let keeper_meta_for_self_filter agent_name =
       [ ("name", `String "self-filter-keeper")
       ; ("agent_name", `String agent_name)
       ; ("trace_id", `String "trace-self-filter")
-      ; ("goal", `String "self-filter regression")
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -1854,7 +1305,6 @@ let keeper_meta_for_goal_filter agent_name active_goal_ids =
       [ ("name", `String "goal-filter-keeper")
       ; ("agent_name", `String agent_name)
       ; ("trace_id", `String "trace-goal-filter")
-      ; ("goal", `String "goal filter regression")
       ; ( "active_goal_ids"
         , `List (List.map (fun goal_id -> `String goal_id) active_goal_ids) )
       ]
@@ -1897,6 +1347,41 @@ let test_read_backlog_counts_falls_back_to_unscoped_claimable_task () =
       claimable
   )
 
+(* The self-authored exclusion must hold through [read_backlog_counts], not
+   only in [task_is_self_authored]: dropping the filter clause leaves every
+   predicate-level test green while the feedback loop stays open. Counts are
+   compared against a baseline because the fixture seeds its own tasks. *)
+let test_read_backlog_counts_excludes_self_authored_task () =
+  with_test_env (fun config ->
+    let meta = keeper_meta_for_self_filter "keeper-self-filter-agent" in
+    let _, claimable_before, _, _, _ =
+      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    in
+    let _ =
+      Workspace.add_task config ~created_by:meta.name
+        ~title:"self-authored routing task" ~priority:3 ~description:""
+    in
+    let unclaimed_after_self, claimable_after_self, _, _, _ =
+      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    in
+    Alcotest.(check int)
+      "a keeper's own task is not offered back to it as claimable"
+      claimable_before claimable_after_self;
+    let _ =
+      Workspace.add_task config ~created_by:"peer-keeper"
+        ~title:"peer authored task" ~priority:3 ~description:""
+    in
+    let unclaimed_after_peer, claimable_after_peer, _, _, _ =
+      Keeper_world_observation_inputs.read_backlog_counts ~config ~meta
+    in
+    Alcotest.(check int)
+      "a peer-authored task is still claimable"
+      (claimable_before + 1) claimable_after_peer;
+    Alcotest.(check int)
+      "the unclaimed count still reports both tasks"
+      (unclaimed_after_self + 1) unclaimed_after_peer
+  )
+
 let test_keeper_tasks_audit_excludes_self_owned_orphan () =
   with_test_env (fun config ->
     let keeper = "keeper-task-audit-self-filter-agent" in
@@ -1917,37 +1402,6 @@ let test_keeper_tasks_audit_excludes_self_owned_orphan () =
       Yojson.Safe.Util.(payload |> member "orphan_count" |> to_int)
     in
     Alcotest.(check int) "keeper's own orphan excluded from audit" 0 orphan_count
-  )
-
-let test_cleanup_zombies_releases_tasks () =
-  with_test_env (fun config ->
-    let _ = Workspace.add_task config ~title:"Zombie Task" ~priority:1 ~description:"" in
-    let _ = Workspace.bind_session config ~agent_name:test_agent_z ~capabilities:[] () in
-    let _ = Workspace.claim_task config ~agent_name:test_agent_z ~task_id:"task-001" in
-    (* Manually set agent's last_seen to a very old timestamp to make it a zombie *)
-    let agents_path = Filename.concat
-      (Filename.concat config.base_path Common.masc_dirname) "agents" in
-    let agent_file = Filename.concat agents_path (test_agent_z ^ ".json") in
-    let json = Workspace.read_json config agent_file in
-    let updated_json = match json with
-      | `Assoc pairs ->
-          `Assoc (List.map (fun (k, v) ->
-            if k = "last_seen" then (k, `String "2020-01-01T00:00:00Z") else (k, v)
-          ) pairs)
-      | other -> other
-    in
-    Workspace.write_json config agent_file updated_json;
-    (* Run cleanup — should remove zombie agent AND release its tasks *)
-    let result = Workspace.cleanup_zombies config in
-    Alcotest.(check bool) "cleanup ran" true
-      (match result with
-       | Workspace.No_agents_dir -> true
-       | Workspace.No_zombies -> true
-       | Workspace.Cleaned _ -> true);
-    (* Verify task is released (back to Todo) *)
-    let tasks = Workspace.list_tasks config in
-    Alcotest.(check bool) "task released to todo" true
-      (str_contains tasks "Todo" || str_contains tasks "todo")
   )
 
 (* --- Rejoin Identity Preservation (BUG-003) --- *)
@@ -2070,77 +1524,6 @@ let test_rejoin_event_log () =
     ) events in
     Alcotest.(check bool) "rejoin event logged" true has_rejoin
   )
-
-(** BUG-2: Zombie file deletion failure preserves state consistency *)
-let test_zombie_file_delete_failure_keeps_state () =
-  with_test_env (fun config ->
-    (* Create a stale agent *)
-    make_stale_agent config ~name:"unremovable-agent" ~age_seconds:700.0;
-
-    (* Make the agent file read-only to prevent deletion *)
-    let agents_path = Filename.concat (Workspace.masc_dir config) "agents" in
-    let path = Filename.concat agents_path (Workspace.safe_filename "unremovable-agent" ^ ".json") in
-    Unix.chmod path 0o444;
-    (* Make directory non-writable so Sys.remove fails *)
-    Unix.chmod agents_path 0o555;
-
-    (* Run cleanup — file deletion should fail *)
-    let _result = Workspace.cleanup_zombies config in
-
-    (* Restore permissions for cleanup *)
-    Unix.chmod agents_path 0o755;
-    Unix.chmod path 0o644;
-
-    (* Key assertion: agent should still be in active_agents since file deletion failed *)
-    let state = Workspace.read_state config in
-    let still_present = List.exists (fun name ->
-      str_contains name "unremovable"
-    ) state.active_agents in
-    (* With BUG-2 fix: agent remains in state when file delete fails *)
-    (* File should still exist *)
-    Alcotest.(check bool) "file still exists" true (Sys.file_exists path);
-    (* Agent MAY or may not be in active_agents depending on Phase 2 transition.
-       But the file should definitely still exist — that's the core BUG-2 fix. *)
-    ignore still_present
-  )
-
-(** BUG-4: Zombie cleanup transitions status to Inactive before deletion *)
-let test_zombie_cleanup_transitions_to_inactive () =
-  with_test_env (fun config ->
-    (* Create stale agent *)
-    make_stale_agent config ~name:"transition-test-agent" ~age_seconds:700.0;
-
-    (* Make file undeletable to observe Inactive transition without removal *)
-    let agents_path = Filename.concat (Workspace.masc_dir config) "agents" in
-    let path = Filename.concat agents_path (Workspace.safe_filename "transition-test-agent" ^ ".json") in
-    Unix.chmod path 0o444;
-    Unix.chmod agents_path 0o555;
-
-    let _result = Workspace.cleanup_zombies config in
-
-    (* Restore permissions *)
-    Unix.chmod agents_path 0o755;
-    Unix.chmod path 0o644;
-
-    (* Read agent file — should be Inactive now (Phase 2 ran before Phase 4 failed) *)
-    let json = Workspace.read_json config path in
-    let status = Yojson.Safe.Util.(member "status" json |> to_string) in
-    Alcotest.(check string) "status transitioned to inactive" "inactive" status
-  )
-
-(** BUG-5: Keeper detection uses agent_type/metadata evidence, not just name *)
-let test_keeper_detection_by_agent_type () =
-  (* A non-keeper-named agent with agent_type="keeper" should get keeper threshold *)
-  let is_keeper_by_type = Workspace_resilience.Zombie.is_keeper ~name:"regular-bot" ~agent_type:"keeper" in
-  Alcotest.(check bool) "agent_type=keeper detected" true is_keeper_by_type;
-
-  (* A keeper-shaped name alone is not authoritative. *)
-  let is_keeper_by_name = Workspace_resilience.Zombie.is_keeper ~name:"keeper-test-agent" ~agent_type:"test" in
-  Alcotest.(check bool) "keeper-*-agent name alone rejected" false is_keeper_by_name;
-
-  (* Neither name nor type matches *)
-  let not_keeper = Workspace_resilience.Zombie.is_keeper ~name:"regular-bot" ~agent_type:"claude" in
-  Alcotest.(check bool) "non-keeper correctly rejected" false not_keeper
 
 (** BUG-6: Heartbeat Mutex protects concurrent access *)
 let test_heartbeat_concurrent_start_stop () =
@@ -2315,7 +1698,7 @@ let () =
       Alcotest.test_case "log on claim/done" `Quick test_event_log_on_claim_done;
     ];
 
-    (* === Heartbeat & Zombie Detection Tests === *)
+    (* === Heartbeat Tests === *)
     "heartbeat", [
       Alcotest.test_case "updates last_seen" `Quick test_heartbeat_updates_lastseen;
       Alcotest.test_case "default join keeps bound status" `Quick test_is_agent_session_bound_after_default_join;
@@ -2326,22 +1709,7 @@ let () =
         test_read_backlog_r_recovers_from_last_good_snapshot;
       Alcotest.test_case "read_backlog_r reports parse error when recovery also invalid" `Quick
         test_read_backlog_r_reports_parse_error_when_recovery_is_also_invalid;
-      Alcotest.test_case "release stale claims skips invalid backlog" `Quick
-        test_release_stale_claims_skips_invalid_backlog;
-      Alcotest.test_case "release stale claims clears agent current_task" `Quick
-        test_release_stale_claims_clears_agent_current_task;
-      Alcotest.test_case "release stale claims preserves other agent task" `Quick
-        test_release_stale_claims_preserves_other_agent_task;
-      Alcotest.test_case "release stale claims skips stale verification" `Quick
-        test_release_stale_claims_skips_stale_verification;
-      Alcotest.test_case "cleanup zombies empty" `Quick test_cleanup_zombies_empty;
-      Alcotest.test_case "cleanup detects regular zombie" `Quick test_cleanup_zombies_detects_regular;
-      Alcotest.test_case "cleanup detects keeper zombie" `Quick test_cleanup_zombies_detects_keeper;
-      Alcotest.test_case "cleanup spares recent keeper" `Quick test_cleanup_zombies_spares_recent_keeper;
-      Alcotest.test_case "cleanup spares type keeper" `Quick test_cleanup_zombies_spares_type_keeper;
-      Alcotest.test_case "cleanup removes broken agent file" `Quick test_cleanup_zombies_removes_broken_agent_file;
       Alcotest.test_case "fd pressure exn is not broken JSON" `Quick test_fd_pressure_exn_classification;
-      Alcotest.test_case "cleanup preserves non-json files" `Quick test_cleanup_zombies_preserves_non_json_files;
     ];
 
 
@@ -2391,75 +1759,48 @@ let () =
       Alcotest.test_case "xss in message type" `Quick test_xss_in_message_type;
     ];
 
-    (* === RFC-0323 G-2: machine-verified completion === *)
-    "machine_verify", [
-      Alcotest.test_case "submit+approve completes via verification" `Quick
-        test_submit_and_approve_completes_via_verification;
-      Alcotest.test_case "same identity rejected before mutation" `Quick
-        test_submit_and_approve_rejects_same_identity;
-      Alcotest.test_case "invalid verifier rejected before mutation" `Quick
-        test_submit_and_approve_rejects_invalid_verifier;
-      Alcotest.test_case "non-assignee submit fails typed" `Quick
-        test_submit_and_approve_non_assignee_submit_fails;
-      Alcotest.test_case "strict + evidence completes, Done keeps evidence" `Quick
-        test_submit_and_approve_strict_with_evidence_completes;
-      Alcotest.test_case "strict without evidence fail-closed pre-mutation" `Quick
-        test_submit_and_approve_strict_without_evidence_fail_closed;
-    ];
-
     (* === RFC-0323 G-3: state-keyed completion side effects === *)
     "done_side_effects", [
       Alcotest.test_case "approve completion credits assignee" `Quick
         test_approve_completion_credits_assignee;
-      Alcotest.test_case "force done still credits forcing actor" `Quick
-        test_force_done_still_credits_forcing_actor;
       Alcotest.test_case "submit and approve rejects empty justification" `Quick
         test_submit_and_approve_rejects_empty_justification;
     ];
 
     (* === RFC-0323 G-1: verification-required done guard === *)
     "verification_guard", [
-      Alcotest.test_case "strict task done routes to submit" `Quick
-        test_strict_task_done_routes_to_submit;
+      Alcotest.test_case "strict task done requires configured LLM verdict" `Quick
+        test_strict_task_done_requires_and_accepts_llm_verdict;
       Alcotest.test_case "default task done unchanged" `Quick
         test_default_task_done_unchanged;
     ];
 
     (* === Board Admin Tests === *)
     "board_admin", [
-      Alcotest.test_case "force release bypasses assignee" `Quick test_force_release_bypasses_assignee;
-      Alcotest.test_case "force done bypasses assignee" `Quick test_force_done_bypasses_assignee;
       Alcotest.test_case "audit orphan tasks" `Quick test_audit_orphan_tasks;
       Alcotest.test_case
         "audit orphan awaiting verification tasks"
         `Quick
         test_audit_orphan_awaiting_verification_tasks;
-      Alcotest.test_case "audit orphan spares live keeper within grace" `Quick
-        test_audit_orphan_spares_live_keeper_within_grace;
-      Alcotest.test_case "audit orphan detects dead keeper beyond grace" `Quick
-        test_audit_orphan_detects_dead_keeper_beyond_grace;
-      Alcotest.test_case "audit orphan non-keeper uses default threshold" `Quick
-        test_audit_orphan_nonkeeper_uses_default_threshold;
-      Alcotest.test_case "audit orphan detects keeper-shaped non-keeper" `Quick
-        test_audit_orphan_detects_keeper_shaped_non_keeper;
-      Alcotest.test_case "audit orphan spares keeper-owned meta within grace" `Quick
-        test_audit_orphan_spares_keeper_owned_meta_within_grace;
+      Alcotest.test_case "audit orphan ignores elapsed last_seen" `Quick
+        test_audit_orphan_ignores_elapsed_last_seen_for_active_agent;
+      Alcotest.test_case "audit orphan requires exact identity" `Quick
+        test_audit_orphan_requires_exact_registered_identity;
       Alcotest.test_case "read backlog counts excludes self-owned orphan" `Quick
         test_read_backlog_counts_excludes_self_owned_orphan;
       Alcotest.test_case "read backlog counts falls back to unscoped claimable"
         `Quick
         test_read_backlog_counts_falls_back_to_unscoped_claimable_task;
+      Alcotest.test_case "read backlog counts excludes self-authored task"
+        `Quick
+        test_read_backlog_counts_excludes_self_authored_task;
       Alcotest.test_case "keeper tasks audit excludes self-owned orphan" `Quick
         test_keeper_tasks_audit_excludes_self_owned_orphan;
-      Alcotest.test_case "cleanup zombies runtime" `Quick test_cleanup_zombies_releases_tasks;
     ];
 
     (* === Lifecycle Bug Fix Tests (#1655) === *)
     "lifecycle_bugs", [
       Alcotest.test_case "BUG-1: rejoin event log" `Quick test_rejoin_event_log;
-      Alcotest.test_case "BUG-2: file delete failure keeps state" `Quick test_zombie_file_delete_failure_keeps_state;
-      Alcotest.test_case "BUG-4: zombie transitions to inactive" `Quick test_zombie_cleanup_transitions_to_inactive;
-      Alcotest.test_case "BUG-5: keeper detection by agent_type" `Quick test_keeper_detection_by_agent_type;
       Alcotest.test_case "BUG-6: heartbeat concurrent start/stop" `Quick test_heartbeat_concurrent_start_stop;
     ];
 

@@ -10,76 +10,72 @@ val config_bootstrap_mode : unit -> [ `Auto | `Empty | `Skip ]
 val bootstrap_base_path_config_root : base_path:string -> unit
 val startup_config_resolution : base_path:string -> Config_dir_resolver.resolution
 
-type model_catalog_env_resolution =
-  { path : string
-  ; source : model_catalog_env_source
-  }
-
-and capability_manifest_env_resolution =
-  { path : string
-  ; source : capability_manifest_env_source
-  }
-
-and model_catalog_env_source =
-  | Env_var of model_catalog_env_var
-  | Config_root_catalog_file of string
-  | Parent_file of
-      { origin : model_catalog_parent_origin
-      ; filename : string
-      }
-
-and capability_manifest_env_source =
-  | Capability_manifest_env_var
-  | Config_root_file of string
-
-and model_catalog_env_var =
-  | Oas_model_catalog
-  | Masc_model_catalog
-
-and model_catalog_parent_origin =
-  | Cwd_parent
-  | Argv0_parent
-
-val model_catalog_env_source_to_string : model_catalog_env_source -> string
-val capability_manifest_env_source_to_string : capability_manifest_env_source -> string
-
-val resolve_oas_model_catalog_path :
-  ?env:(string -> string option) ->
-  ?config_root:string ->
-  ?cwd:string ->
-  ?argv0:string ->
-  unit ->
-  model_catalog_env_resolution option
-
-val resolve_oas_capability_manifest_path :
-  ?env:(string -> string option) ->
-  config_root:string ->
-  unit ->
-  capability_manifest_env_resolution option
-
 val configure_oas_model_catalog_env :
   ?env:(string -> string option) ->
-  ?config_root:string ->
-  ?cwd:string ->
-  ?argv0:string ->
-  ?putenv:(string -> string -> unit) ->
-  ?preload_agent_sdk_catalog:(unit -> unit) ->
   ?agent_sdk_catalog:(unit -> Llm_provider.Model_catalog.t option) ->
-  ?clear_catalog:(unit -> unit) ->
-  ?load_catalog:(string -> Llm_provider.Model_catalog.t option) ->
+  ?load_catalog:(string -> (Llm_provider.Model_catalog.t, string) result) ->
   ?set_catalog:(Llm_provider.Model_catalog.t -> unit) ->
   unit ->
-  model_catalog_env_resolution option
+  string option
+(** Install only an operator-supplied [OAS_MODEL_CATALOG] as a full catalog
+    replacement. Without it, require OAS's packaged catalog and leave it
+    eligible for the deployment overlay. Config-root and executable-parent
+    full catalogs are deliberately not discovered (RFC-0342 D1). *)
 
-val configure_oas_capability_manifest_env :
-  ?env:(string -> string option) ->
-  config_root:string ->
-  ?putenv:(string -> string -> unit) ->
-  ?clear_manifest:(unit -> unit) ->
-  ?load_manifest:(string -> Llm_provider.Capability_manifest.t option) ->
-  ?set_manifest:(Llm_provider.Capability_manifest.t -> unit) ->
+val configure_oas_model_catalog_overlay :
+  ?config_root:string ->
+  ?load_catalog:(string -> (Llm_provider.Model_catalog.t, string) result) ->
+  ?set_overlay:(Llm_provider.Model_catalog.t -> unit) ->
   unit ->
-  capability_manifest_env_resolution option
+  string option
+(** Install the deployment capability overlay (RFC-0342 D1 / RFC-OAS-036).
+    Resolves config-root [oas-models-overlay.toml] only; there is no parent
+    or env fallback. When present, the parsed overlay is installed with
+    [Model_catalog.set_global_overlay], so [Model_catalog.global] serves the
+    embedded catalog merged with the deployment's delta rows. An explicit
+    [OAS_MODEL_CATALOG] installed by {!configure_oas_model_catalog_env} keeps
+    replacement precedence over the overlay. Returns the installed overlay path. An
+    unreadable or invalid overlay raises [Env_config_core.Config_error]
+    (fail-loud at boot, same as the full-catalog path). *)
+
+val compaction_exact_lane_id : string
+(** Lane id the compaction summarizer resolves by name; every published
+    exact-output registry must carry it. *)
+
+val backfill_required_exact_output_lanes
+  :  seed_lanes:Runtime_schema.exact_output_lane_decl list
+  -> Runtime_schema.exact_output_lane_decl list
+  -> Runtime_schema.exact_output_lane_decl list * bool
+(** Append the seed {!compaction_exact_lane_id} declaration when the operator
+    config does not declare the lane (legacy runtime.toml from before
+    [runtime.exact_output_lanes] existed). Returns the effective lane list and
+    whether a backfill happened. Operator declarations always win. *)
+
+val merge_catalog_overlay_toml
+  :  base_contents:string
+  -> overlay_contents:string
+  -> (string, string) result
+(** Deep-merge two TOML catalog documents: tables merge recursively, table
+    arrays ([[providers]]/[[models]]/[[targets]]) union with overlay rows
+    replacing same-identity base rows (provider/target [id], model
+    [id_prefix]+[provider_name]), scalars take the overlay value. Used to fold
+    an [OAS_MODEL_CATALOG] full replacement (base) and the config-root
+    deployment overlay into the single overlay document
+    [Exact_output.load_resolver_snapshot] accepts. *)
+
+val exact_output_resolver_overlay
+  :  ?config_root:string
+  -> ?env:(string -> string option)
+  -> unit
+  -> Agent_sdk.Exact_output.catalog_overlay option * string
+(** Resolve the catalog document the exact-output resolver loads on top of the
+    OAS embedded catalog, plus a human-readable description for the boot log.
+    Without [OAS_MODEL_CATALOG] this is the config-root
+    [oas-models-overlay.toml] (or [None]); with it, the full replacement is
+    folded in ahead of the deployment overlay via
+    {!merge_catalog_overlay_toml}, so exact-output resolution sees the same
+    catalog source runtime routing installed through
+    {!configure_oas_model_catalog_env}. *)
 
 (** {1 Runtime Context}
 
@@ -102,6 +98,7 @@ val init_runtime_context :
 val create_server_state :
   sw:Eio.Switch.t ->
   base_path:string ->
+  ?input_base_path:string ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
   net:[ `Generic | `Unix] Eio.Net.ty Eio.Resource.t ->
@@ -110,7 +107,9 @@ val create_server_state :
   ?env:Eio_unix.Stdenv.base ->
   unit ->
   Mcp_server.server_state
-(** [env] is optional for backwards compatibility with existing
+(** [input_base_path] preserves the operator's pre-canonical path for
+    diagnostics while [base_path] remains the sole effective runtime path.
+    [env] is optional for backwards compatibility with existing
     [create_server_state] callers (tests, MCP execute contexts);
     when supplied (server bootstrap path), it is recorded into
     [Eio_context.set_env] so long-lived HTTP consumers like
@@ -123,13 +122,11 @@ val runtime_path_diagnostics :
   Server_base_path_diagnostics.t
 
 val restore_persisted_sessions : Mcp_server.server_state -> unit
-val reconcile_active_agents_gauge : Mcp_server.server_state -> unit
 val bootstrap_server_state_blocking : Mcp_server.server_state -> unit
 val bootstrap_prompt_state : Mcp_server.server_state -> unit
 
 (** {1 Startup Tasks} *)
 
-val warm_tool_registry_from_telemetry : Mcp_server.server_state -> unit
 val startup_prune_jsonl : Mcp_server.server_state -> unit
 val startup_migrate_keeper_histories : Mcp_server.server_state -> unit
 val sync_bootable_keeper_credentials : Mcp_server.server_state -> unit
@@ -153,6 +150,87 @@ val lazy_startup_task_names : unit -> string list
 (** Flattened task names in the same dependency order used to activate
     {!Server_startup_state}'s lazy task queue. *)
 
+type startup_failure_disposition =
+  | Fatal_pre_ready
+  | Degraded_after_ready
+
+val startup_failure_disposition : state_ready:bool -> startup_failure_disposition
+(** Classify an exception from the initialization subtree. Before readiness,
+    continuing would leave an unpublished partial owner mutating the
+    workspace, so the only valid disposition is fatal. Degraded serving is
+    available only after readiness has been published. *)
+
+type owner_initialization_error =
+  | Runtime_config_path_unavailable
+  | Runtime_default_initialization_failed of Runtime.strict_init_error
+  | Keeper_persistence_preparation_failed of
+      Server_bootstrap_loops.keeper_persistence_prepare_error
+  | Keeper_persistence_claim_failed of
+      Server_bootstrap_loops.keeper_persistence_claim_error
+  | Keeper_persistence_start_failed of
+      Server_bootstrap_loops.keeper_persistence_start_error
+  | Startup_path_guard_rejected of Server_base_path_diagnostics.t
+  | Strict_path_guard_rejected of Server_base_path_diagnostics.t
+  | Lazy_startup_barrier_failed of Server_startup_state.lazy_prepare_error
+  | Readiness_transition_failed of Server_startup_state.state_ready_error
+  | Readiness_publication_failed of
+      { expected_backend_mode : string
+      ; observed_backend_mode : string
+      ; observed_phase : Server_startup_state.phase
+      }
+
+exception Owner_initialization_failed of owner_initialization_error
+
+val owner_initialization_error_to_string : owner_initialization_error -> string
+
+type initialized_owner_state
+
+type activated_owner_state =
+  { state : Mcp_server.server_state
+  ; path_diagnostics : Server_base_path_diagnostics.t
+  ; domain_pool : Domain_pool.t
+  }
+
+val initialize_owner_state_blocking
+  :  sw:Eio.Switch.t
+  -> env:Eio_unix.Stdenv.base
+  -> base_path:string
+  -> ?input_base_path:string
+  -> clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> mono_clock:Eio.Time.Mono.ty Eio.Resource.t
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> domain_mgr:[> Eio.Domain_manager.ty ] Eio.Domain_manager.t
+  -> proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
+  -> fs:Eio.Fs.dir_ty Eio.Path.t
+  -> unit
+  -> initialized_owner_state
+(** Complete every transport-neutral, fallible owner-initialization step and
+    return the still-unclaimed persistence preparation. A transport must
+    pass this opaque value directly to {!activate_owner_state}; the prepared
+    ownership token is intentionally not exposed to transports. *)
+
+val activate_owner_state
+  :  sw:Eio.Switch.t
+  -> clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> domain_mgr:[> Eio.Domain_manager.ty ] Eio.Domain_manager.t
+  -> proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
+  -> initialized_owner_state
+  -> activated_owner_state
+(** Shared HTTP/stdio commit protocol: restore the durable Gate, schedule the
+    bounded legacy-temp migration in an observed maintenance fiber under the
+    exclusive BasePath lease, publish the lazy-task barrier, claim canonical
+    persistence ownership, then immediately start the affine Keeper token.
+    Current request writers use a disjoint staging namespace, so forensic
+    cleanup cannot hold readiness. Readiness remains an explicit transport
+    commit after its required surfaces are installed. *)
+
+val mark_owner_state_ready
+  :  Mcp_server.server_state
+  -> (unit, owner_initialization_error) result
+(** Publish and verify readiness after the transport has installed every
+    surface required by its own serving contract. *)
+
 (** {1 Main Entry Point} *)
 
 val run :
@@ -161,6 +239,7 @@ val run :
   host:string ->
   port:int ->
   base_path:string ->
+  ?input_base_path:string ->
   make_routes:(port:int -> host:string -> sw:Eio.Switch.t ->
                clock:float Eio.Time.clock_ty Eio.Resource.t -> 'a) ->
   make_request_handler:(trust_policy:Server_request_authority.trust_policy ->
@@ -176,4 +255,5 @@ val run :
   make_h2_error_handler:(unit ->
                          Eio.Net.Sockaddr.stream ->
                          H2.Server_connection.error_handler) ->
+  unit ->
   unit

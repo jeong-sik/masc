@@ -54,12 +54,9 @@ type harness_verdict_item =
 type pre_compact_event =
   { timestamp : float
   ; keeper_name : string
-  ; context_ratio : float
+  ; checkpoint_bytes : int
   ; message_count : int
-  ; token_count : int
   ; strategies : string list
-  ; context_window : int
-  ; is_local_model : bool
   ; trigger : Compaction_trigger.t
   }
 
@@ -67,24 +64,21 @@ type pre_compact_event =
 
 (** Wake-time payload observation captured once per
     keeper turn (just before [Keeper_turn_driver.run_named]
-    fires).  [approx_body_bytes] is a MASC-side estimate;
-    expect the real HTTP body to be ~1.3–1.5× this.
+    fires). Component byte fields measure the exact canonical values
+    MASC owns, not a provider-specific HTTP request body.
     Reached as a type by [keeper_agent_run]. *)
 type wake_payload_event =
   { timestamp : float
   ; keeper_name : string
   ; trace_id : string
   ; turn_index : int
-  ; model_id : string
   ; context_window : int
-  ; approx_body_bytes : int
   ; system_prompt_bytes : int
-  ; tool_defs_bytes : int
-  ; messages_bytes : int
+  ; tool_schema_json_bytes : int
+  ; message_content_bytes : int
   ; message_count : int
   ; role_counts : (string * int) list
   ; tool_count : int
-  ; has_compact_happened : bool
   }
 
 (** {1 Recorders} *)
@@ -96,12 +90,9 @@ type wake_payload_event =
     record-pattern access. *)
 val record_pre_compact
   :  keeper_name:string
-  -> context_ratio:float
+  -> checkpoint_bytes:int
   -> message_count:int
-  -> token_count:int
   -> strategies:string list
-  -> context_window:int
-  -> is_local_model:bool
   -> trigger:Compaction_trigger.t
   -> pre_compact_event
 
@@ -111,34 +102,27 @@ val record_pre_compact
 val record_pre_compact_at
   :  timestamp:float
   -> keeper_name:string
-  -> context_ratio:float
+  -> checkpoint_bytes:int
   -> message_count:int
-  -> token_count:int
   -> strategies:string list
-  -> context_window:int
-  -> is_local_model:bool
   -> trigger:Compaction_trigger.t
   -> pre_compact_event
 
 (** Records one wake-time payload sample and returns the
     constructed event.  Threaded by [keeper_agent_run] /
-    [keeper_wake_telemetry] (and indirectly by
-    [env_config_keeper]); callers may reach the
+    [keeper_wake_telemetry]; callers may reach the
     [wake_payload_event] fields directly. *)
 val record_wake_payload
   :  keeper_name:string
   -> trace_id:string
   -> turn_index:int
-  -> model_id:string
   -> context_window:int
-  -> approx_body_bytes:int
   -> system_prompt_bytes:int
-  -> tool_defs_bytes:int
-  -> messages_bytes:int
+  -> tool_schema_json_bytes:int
+  -> message_content_bytes:int
   -> message_count:int
   -> role_counts:(string * int) list
   -> tool_count:int
-  -> has_compact_happened:bool
   -> wake_payload_event
 
 (** {1 Verdict readers} *)
@@ -169,7 +153,8 @@ val read_recent_verdicts_for_agents
 
 (** Returns the wake-payload samples within the
     [?since] / [?until] ISO-date window, sorted by
-    descending timestamp. *)
+    descending timestamp. Records missing required exact fields, carrying a
+    wrong JSON type, or containing malformed role counts are warned and rejected. *)
 val read_wake_payload_events
   :  ?since:string
   -> ?until:string

@@ -405,6 +405,7 @@ describe('IdeEditor', () => {
           content: 'Keep this task linked to the line',
           goal_id: 'goal-1',
           task_id: 'task-1',
+          references: [],
           created_at_ms: 1,
           updated_at_ms: 1,
         }],
@@ -458,6 +459,7 @@ describe('IdeEditor', () => {
           content: 'Keep this task linked to the line',
           goal_id: 'goal-1',
           task_id: 'task-1',
+          references: [],
           created_at_ms: 1,
           updated_at_ms: 1,
         }],
@@ -493,6 +495,7 @@ describe('IdeEditor', () => {
             content: 'Keep this task linked to the line',
             goal_id: 'goal-1',
             task_id: 'task-1',
+            references: [],
             created_at_ms: 1,
             updated_at_ms: 1,
           },
@@ -506,6 +509,7 @@ describe('IdeEditor', () => {
             content: 'Is this still the active goal?',
             goal_id: null,
             task_id: null,
+            references: [],
             created_at_ms: 2,
             updated_at_ms: 2,
           },
@@ -519,6 +523,7 @@ describe('IdeEditor', () => {
             content: 'Not this file',
             goal_id: null,
             task_id: null,
+            references: [],
             created_at_ms: 3,
             updated_at_ms: 3,
           },
@@ -548,6 +553,7 @@ describe('IdeEditor', () => {
       content: 'Keep this task linked to the active goal',
       goal_id: 'goal-runtime',
       task_id: 'task-runtime',
+      references: [{ relation: 'evidence', reference: 'urn:example:42' }],
     })
 
     expect(links.map(link => link.label)).toEqual(['Code', 'Goal', 'Task', 'Keeper'])

@@ -39,16 +39,10 @@ describe('GoalCreateForm side panel', () => {
     expect(screen.getByText('P1')).toBeTruthy()
   })
 
-  it('shows the risk readout', () => {
+  it('does not fabricate a derived execution status', () => {
     render(h(GoalCreateForm, {}))
-    expect(screen.getByText('Safe')).toBeTruthy()
-    expect(screen.getByText('가드 통과 · 자율 실행')).toBeTruthy()
-  })
-
-  it('wraps the approval checkbox in the runtime mobile target contract', () => {
-    render(h(GoalCreateForm, {}))
-    expect(screen.getByTestId('goal-create-approval-checkbox').closest('label'))
-      .toHaveClass('v2-mobile-operator-target')
+    expect(screen.queryByText('Safe')).toBeNull()
+    expect(screen.queryByText('가드 통과 · 자율 실행')).toBeNull()
   })
 
   it('does not render removed horizon or lead keeper fields', () => {

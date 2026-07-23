@@ -307,18 +307,33 @@ module Registry = struct
       match StringMap.find_opt session_key !(reg.identities) with
       | Some identity ->
           reg.identities := StringMap.remove session_key !(reg.identities);
-          reg.by_agent_name := StringMap.remove identity.agent_name !(reg.by_agent_name)
+          let by_agent_name = StringMap.remove identity.agent_name !(reg.by_agent_name) in
+          let replacement =
+            StringMap.fold
+              (fun replacement_session candidate found ->
+                 match found with
+                 | Some _ -> found
+                 | None when String.equal candidate.agent_name identity.agent_name ->
+                   Some replacement_session
+                 | None -> None)
+              !(reg.identities)
+              None
+          in
+          reg.by_agent_name :=
+            (match replacement with
+             | None -> by_agent_name
+             | Some replacement_session ->
+               StringMap.add identity.agent_name replacement_session by_agent_name)
       | None -> ()
     )
 
-  (** List all active identities (active within last N seconds) *)
-  let list_active reg ~within_seconds =
+  (** List all registered identities. Lifecycle authority belongs to explicit
+      registration/unregistration, not an elapsed-time cutoff. *)
+  let list_all reg =
     with_lock reg (fun () ->
-      let cutoff = Time_compat.now () -. within_seconds in
       !(reg.identities)
       |> StringMap.bindings
-      |> List.filter_map (fun (_, id) ->
-        if Stdlib.Float.compare id.last_seen cutoff > 0 then Some id else None)
+      |> List.map snd
     )
 
   (** Get identity count *)

@@ -3,6 +3,10 @@
 > 디자인/리뷰 과정에서 떠오른 "아직 기능 없음" 아이디어를 여기에 모읍니다.
 > 디자인 결정과 분리해서, 기획팀에 그대로 넘길 수 있는 형태로 적습니다.
 > 상태: 💡 아이디어 · 🔧 설계중 · ✅ 디자인 반영됨
+>
+> 이 문서는 비권위적 UI 프로토타입 기록이다. Keeper lifecycle, Tool access,
+> Gate, Scheduler, Task/Goal semantics는 `docs/spec/` 계약을 따른다. 로컬 상태
+> 전이와 위험 색상은 실제 권한이나 정책을 의미하지 않는다.
 
 | # | 아이디어 | 출처(코멘트) | 상태 | 메모 |
 |---|---|---|---|---|
@@ -32,7 +36,7 @@
 | 24 | **도크 화면 인지** — Copilot이 보는 화면을 명시(co-view 패널 + 헤더 라벨) | cc-1 (m0190) | ✅(동작) | 화면별 구조화 컨텍스트 전달. 실제 화면 상태 동기화는 백엔드 필요 |
 | 25 | **keeper 12-FSM 실제 전이 + 상태 색 + 모바일 lifecycle** — 일시정지/재개/컴팩션/핸드오프/중지/재시작/시작이 phase를 실제로 변경. 전이 phase(Compacting·Draining·HandingOff·Restarting)는 자동으로 다음 상태로 진행. phase→색(ok/warn/bad/busy+pulse)로 위험(Crashed·Dead·Overflowed·Failing=red)·전이(busy)·정상·정지 구분. 모바일은 헤더 ⋯ 오버플로 메뉴로 동일 명령 노출 | m0267·m0269 | ✅(동작) | keeper 상태를 App state로 리프트, `FSM_ACTIONS`/`PHASE_TONE`/`PHASE_PULSE`(data.jsx). 합법 전이만 노출(가드). 실제 런타임 FSM 집행·영속성은 백엔드 필요 |
 | 26 | **메모리 인스펙터** — keeper별/전체 컨텍스트 구성·핀 고정 사실·장기 메모리 스토어(memory-os)·회상 타임라인·압축 유지/폐기 | m0044 외 | ✅(표시) | 컨텍스트 레일 `메모리 보기` 오버레이. 읽기 전용. 실제 memory-os 연동 필요 |
-| 27 | **예약 자동화 스케줄러** — keeper가 미래 작업 예약 → operator 승인 → runner가 due에 실행. risk_class·recurrence·승인 게이팅(직무분리)·wake signal 피드 | m0045 | ✅(동작) | `lib/schedule/` 기반 surface. 승인/거부/취소 동작 + 결과 배너. 실제 schedule_runner 집행은 백엔드 |
+| 27 | **예약 자동화 스케줄러** — Keeper가 명시적 시간/이벤트 조건으로 미래 stimulus를 예약하고 due 시 origin lane을 깨움 | m0045 | ✅(동작) | `lib/schedule/` 기반 surface. 선택적 검토는 generic nonblocking Gate를 사용하며 risk class나 operator hierarchy를 만들지 않는다. 실제 schedule runner 집행은 백엔드 |
 | 28 | **런타임 편집기** — provider×model×binding 구조의 config/runtime.toml 편집(라우팅 레인·프로바이더·모델 능력·바인딩·keeper 배정·실시간 toml). 현재 대화 keeper의 multimodal·effort 조정 가능 여부 표시 | m0045·m0071 | ✅(동작) | `lib/runtime/runtime_schema.mli` 기반. 픽션 oas· id를 실제 provider.model로 전면 마이그레이션. 실제 toml 저장·reload는 백엔드 |
 | 29 | **Slash command 팔레트** — composer에서 `/`로 keeper 명령(FSM 라이프사이클) + 화면 이동(작업·승인·예약·로그). ↑↓ 탐색, Enter/Tab 실행 | m0154 | ✅(동작) | FSM_ACTIONS 동적 연결 → phase 실제 변경. 화면 이동은 navTo |
 | 30 | **이메일 통합 + 메모 통합** — keeper가 이메일을 인입 맥락/발신 채널로 사용, operator 메모(노트) 작성·고정·keeper 컨텍스트 주입 | m0171 | 💡 | 아이디어. 이메일=#3 다중 surface 인입의 한 채널로 편입 가능(provenance 칩 재사용). 메모=#26 메모리 스토어의 operator 수동 핀과 통합 여지. 별도 설계 필요 |

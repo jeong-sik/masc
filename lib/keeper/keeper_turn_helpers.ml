@@ -236,11 +236,10 @@ let record_pre_dispatch_terminal_observation
     ; terminal_reason_code
     ; response_text_present = false
     ; model_used = None
-    ; completion_contract_result = Keeper_execution_receipt.Contract_not_dispatched
+    ; completion_contract_result = Keeper_execution_receipt.Completion_not_dispatched
     ; actionable_signal = None
       (* Pre-dispatch receipt: the turn never ran, so no world observation was
-         captured. [Contract_not_dispatched] never reaches the
-         [passive_only_without_work_scope] carve-out, so [None] is inert here. *)
+         captured. Completion evidence remains observation-only. *)
     ; tool_surface = pre_dispatch_tool_surface
     ; sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta
     ; sandbox_root = Some (Keeper_sandbox.host_root_abs_of_meta ~config meta)
@@ -262,10 +261,6 @@ let record_pre_dispatch_terminal_observation
     ; extra_system_context_digest = None
     ; extra_system_context_injected_size = None
     ; extra_system_context_computed_size = None
-    ; pre_dispatch_compacted = false
-    ; pre_dispatch_compaction_trigger = None
-    ; pre_dispatch_compaction_before_tokens = None
-    ; pre_dispatch_compaction_after_tokens = None
     ; oas_internal_runtime_allowed = false
     }
   in
@@ -324,8 +319,6 @@ let record_pre_dispatch_terminal_observation
         ();
       false
   in
-  if receipt_append_ok then
-    Keeper_status_detail.invalidate_status_cache_for meta.name;
   if receipt_append_ok then
     append_manifest
       ~site:"pre_dispatch_receipt_appended"

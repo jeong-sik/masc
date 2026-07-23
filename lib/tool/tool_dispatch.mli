@@ -73,19 +73,6 @@ val register_pre_hook : pre_hook -> unit
 val register_dispatch_observer : dispatch_observer -> unit
 (** Register a dispatch observer. See {!dispatch_observer} for the contract. *)
 
-(** {2 Result transformer (RFC-0084 PR-I-2.d)} *)
-
-type result_transformer = Tool_result.result -> Tool_result.result
-(** Single-step transformer applied to the handler's
-    {!Tool_result.result} on the [Handled] arm before observers fire. *)
-
-val set_result_transformer : result_transformer -> unit
-(** Install the single result transformer.  Today's only in-tree
-    caller is {!Tool_output_validation.install}. *)
-
-val apply_result_transformer : Tool_result.result -> Tool_result.result
-(** Apply the registered transformer (identity when none registered). *)
-
 (** {2 Telemetry span wrapper (injected)} *)
 
 type trace_id = string
@@ -164,13 +151,12 @@ type module_tag =
   | Mod_compact
   | Mod_agent | Mod_task | Mod_state
   | Mod_control | Mod_agent_timeline | Mod_schedule | Mod_misc
-  | Mod_library | Mod_recurring
+  | Mod_library
   (* [Mod_external]: dispatched by a server-boundary handler in the
      composition root, not by a peer [Tool_*] module. The tool layer
      stays agnostic to which subsystem (e.g. keeper) actually handles it. *)
   | Mod_external
   | Mod_inline
-  | Mod_shard
   | Mod_keeper_task
 
 val register_module_tag : schemas:Masc_domain.tool_schema list -> tag:module_tag -> unit

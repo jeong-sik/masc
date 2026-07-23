@@ -3,7 +3,7 @@
 
 export * from './types/core'
 export * from './types/error'
-export * from './types/governance'
+export * from './types/gate'
 export * from './types/dashboard-execution'
 export * from './types/dashboard-mission'
 export * from './types/sse'

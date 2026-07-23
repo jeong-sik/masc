@@ -21,7 +21,9 @@ module type S = sig
     channel_id:string ->
     actor_name:string ->
     (Yojson.Safe.t, string) result
-  val bound_channels : keeper_name:string -> string list
+  val bound_channels :
+    keeper_name:string ->
+    (string list, Channel_gate_binding_store.binding_store_error) result
   val connected : unit -> bool
 end
 
@@ -63,17 +65,11 @@ let connectors_json ?gate_status_json ?(audit_limit = 10) () =
         else acc)
       0 connector_jsons
   in
-  let policy_str =
-    match Channel_gate_discord_state.get_trigger_policy () with
-    | None -> "unknown"
-    | Some p -> Discord_gateway_state.trigger_policy_to_string p
-  in
   `Assoc
     [
       ("connectors", `List connector_jsons);
       ("total", `Int (List.length connectors));
       ("active_count", `Int active_count);
-      ("discord_trigger_policy", `String policy_str);
       ("generated_at",
        `String (Gate_time_util.iso8601_of_unix (Unix.gettimeofday ())));
     ]

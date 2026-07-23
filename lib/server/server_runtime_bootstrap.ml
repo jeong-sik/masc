@@ -5,64 +5,14 @@ open Server_routes_http
 module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 module Config_root_bootstrap = Server_runtime_config_root_bootstrap
+module Exact_output = Agent_sdk.Exact_output
 
 let config_bootstrap_mode = Config_root_bootstrap.config_bootstrap_mode
 let bootstrap_base_path_config_root = Config_root_bootstrap.bootstrap_base_path_config_root
 let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
 
-type model_catalog_env_resolution =
-  { path : string
-  ; source : model_catalog_env_source
-  }
-
-and capability_manifest_env_resolution =
-  { path : string
-  ; source : capability_manifest_env_source
-  }
-
-and model_catalog_env_source =
-  | Env_var of model_catalog_env_var
-  | Config_root_catalog_file of string
-  | Parent_file of
-      { origin : model_catalog_parent_origin
-      ; filename : string
-      }
-
-and capability_manifest_env_source =
-  | Capability_manifest_env_var
-  | Config_root_file of string
-
-and model_catalog_env_var =
-  | Oas_model_catalog
-  | Masc_model_catalog
-
-and model_catalog_parent_origin =
-  | Cwd_parent
-  | Argv0_parent
-
-let model_catalog_env_var_name = function
-  | Oas_model_catalog -> "OAS_MODEL_CATALOG"
-  | Masc_model_catalog -> "MASC_MODEL_CATALOG"
-
-let model_catalog_parent_origin_label = function
-  | Cwd_parent -> "cwd-parent"
-  | Argv0_parent -> "argv0-parent"
-
-let model_catalog_env_source_to_string = function
-  | Env_var var -> model_catalog_env_var_name var
-  | Config_root_catalog_file filename -> Printf.sprintf "config-root:%s" filename
-  | Parent_file { origin; filename } ->
-    Printf.sprintf "%s:%s" (model_catalog_parent_origin_label origin) filename
-
-let oas_capability_manifest_env_var_name = "OAS_CAPABILITY_MANIFEST"
-
-let capability_manifest_env_source_to_string = function
-  | Capability_manifest_env_var -> oas_capability_manifest_env_var_name
-  | Config_root_file filename -> Printf.sprintf "config-root:%s" filename
-
-let models_toml_filename = "models.toml"
-let oas_models_toml_filename = "oas-models.toml"
-let capability_manifest_filename = "capability-manifest.json"
+let oas_model_catalog_env_var_name = "OAS_MODEL_CATALOG"
+let oas_models_overlay_toml_filename = "oas-models-overlay.toml"
 
 let nonempty_env env name =
   match env name with
@@ -81,234 +31,391 @@ let existing_file path =
     with
     | Sys_error _ -> None
 
-let rec find_in_parents filename dir depth =
-  if depth <= 0 then
-    None
-  else
-      let path = Filename.concat dir filename in
-      match existing_file path with
-      | Some _ as found -> found
-      | None ->
-        let parent = Filename.dirname dir in
-        if String.equal parent dir then None else find_in_parents filename parent (depth - 1)
-
-let find_catalog_in_parents ~origin dir =
-  match find_in_parents models_toml_filename dir 10 with
-  | Some path ->
-    Some { path; source = Parent_file { origin; filename = models_toml_filename } }
-  | None ->
-    (match find_in_parents oas_models_toml_filename dir 10 with
-     | Some path ->
-       Some { path; source = Parent_file { origin; filename = oas_models_toml_filename } }
-     | None -> None)
-
-let find_catalog_in_config_root config_root =
-  let catalog_file filename =
-    let candidate = Filename.concat config_root filename in
-    match existing_file candidate with
-    | Some path -> Some { path; source = Config_root_catalog_file filename }
-    | None -> None
-  in
-  match catalog_file models_toml_filename with
-  | Some _ as found -> found
-  | None -> catalog_file oas_models_toml_filename
-
-let absolute_or_cwd ~cwd path =
-  let path = String.trim path in
-  if String.equal path "" then
-    None
-  else if String.length path > 0 && Char.equal path.[0] '/' then
-    Some path
-  else
-    Some (Filename.concat cwd path)
-
-let argv0_parent_dir ~cwd argv0 =
-  match absolute_or_cwd ~cwd argv0 with
-  | None -> None
-  | Some path -> Some (Filename.dirname path)
-
-let resolve_oas_model_catalog_path
-      ?(env = Sys.getenv_opt)
-      ?config_root
-      ?cwd
-      ?argv0
-      ()
-  =
-  match nonempty_env env (model_catalog_env_var_name Oas_model_catalog) with
-  | Some path -> Some { path; source = Env_var Oas_model_catalog }
-  | None ->
-    (match nonempty_env env (model_catalog_env_var_name Masc_model_catalog) with
-     | Some path -> Some { path; source = Env_var Masc_model_catalog }
-     | None ->
-       let search_cwd =
-         match cwd with
-         | Some cwd when String.trim cwd <> "" -> cwd
-         | _ -> Config_dir_resolver.base_path_or_cwd ()
-       in
-       let process_cwd =
-         try Sys.getcwd () with Sys_error _ -> search_cwd
-       in
-       let argv0 =
-         match argv0 with
-         | Some argv0 -> argv0
-         | None ->
-           (match Array.to_list Sys.argv with
-           | head :: _ -> head
-           | [] -> "")
-       in
-       (match
-          config_root
-          |> Option.map String.trim
-          |> (fun opt ->
-               match opt with
-               | Some value when not (String.equal value "") -> Some value
-               | _ -> None)
-          |> (fun root -> Option.bind root find_catalog_in_config_root)
-        with
-        | Some _ as found -> found
-        | None ->
-          (match find_catalog_in_parents ~origin:Cwd_parent search_cwd with
-           | Some _ as found -> found
-           | None ->
-             (match argv0_parent_dir ~cwd:process_cwd argv0 with
-              | Some dir -> find_catalog_in_parents ~origin:Argv0_parent dir
-              | None -> None))))
-
-let resolve_oas_capability_manifest_path ?(env = Sys.getenv_opt) ~config_root ()
-  : capability_manifest_env_resolution option
-  =
-  match nonempty_env env oas_capability_manifest_env_var_name with
-  | Some path ->
-    Some ({ path; source = Capability_manifest_env_var } : capability_manifest_env_resolution)
-  | None ->
-    let candidate = Filename.concat config_root capability_manifest_filename in
-    (match existing_file candidate with
-     | Some path ->
-       Some
-         ({ path; source = Config_root_file capability_manifest_filename }
-          : capability_manifest_env_resolution)
-     | None -> None)
-
-let install_runtime_model_catalog_override ~clear_catalog ~load_catalog ~set_catalog path =
-  clear_catalog ();
+let install_runtime_model_catalog_override ~load_catalog ~set_catalog path =
   match load_catalog path with
-  | Some catalog ->
-    set_catalog catalog;
-    true
-  | None -> false
-
-let install_runtime_capability_manifest_override
-      ~clear_manifest
-      ~load_manifest
-      ~set_manifest
-      path
-  =
-  clear_manifest ();
-  match load_manifest path with
-  | Some manifest ->
-    set_manifest manifest;
-    true
-  | None -> false
-
-let configure_oas_capability_manifest_env
-      ?(env = Sys.getenv_opt)
-      ~config_root
-      ?(putenv = Unix.putenv)
-      ?(clear_manifest = Llm_provider.Capability_manifest.clear_global)
-      ?(load_manifest = Llm_provider.Capability_manifest.load_runtime_file)
-      ?(set_manifest = Llm_provider.Capability_manifest.set_global)
-      ()
-      : capability_manifest_env_resolution option
-  =
-  match resolve_oas_capability_manifest_path ~env ~config_root () with
-  | Some { source = Capability_manifest_env_var; path } as resolution ->
-    let installed =
-      install_runtime_capability_manifest_override
-        ~clear_manifest
-        ~load_manifest
-        ~set_manifest
-        path
-    in
-    Log.Misc.info
-      "capability_manifest: OAS_CAPABILITY_MANIFEST=%s already configured%s"
-      path
-      (if installed then " and loaded" else "");
-    resolution
-  | Some { source; path } as resolution ->
-    putenv oas_capability_manifest_env_var_name path;
-    let installed =
-      install_runtime_capability_manifest_override
-        ~clear_manifest
-        ~load_manifest
-        ~set_manifest
-        path
-    in
-    Log.Misc.info
-      "capability_manifest: OAS_CAPABILITY_MANIFEST=%s resolved from %s%s"
-      path
-      (capability_manifest_env_source_to_string source)
-      (if installed then " and loaded" else "");
-    resolution
-  | None ->
-    Log.Misc.info
-      "capability_manifest: no config-root capability-manifest.json found; using \
-       agent_sdk ambient capability manifest state";
-    None
+  | Ok catalog -> set_catalog catalog
+  | Error detail ->
+    raise (Env_config_core.Config_error (Printf.sprintf "catalog %s: %s" path detail))
 
 let configure_oas_model_catalog_env
       ?(env = Sys.getenv_opt)
-      ?config_root
-      ?cwd
-      ?argv0
-      ?(putenv = Unix.putenv)
-      ?(preload_agent_sdk_catalog = Llm_provider.Model_catalog.preload_global)
       ?(agent_sdk_catalog = Llm_provider.Model_catalog.global)
-      ?(clear_catalog = Llm_provider.Model_catalog.clear_global)
-      ?(load_catalog = Llm_provider.Model_catalog.load_runtime_file)
+      ?(load_catalog = Llm_provider.Model_catalog.load_file)
       ?(set_catalog = Llm_provider.Model_catalog.set_global)
       ()
   =
-  match resolve_oas_model_catalog_path ~env ?config_root ?cwd ?argv0 () with
-  | Some { source = Env_var Oas_model_catalog; path } as resolution ->
-    let installed =
-      install_runtime_model_catalog_override
-        ~clear_catalog
-        ~load_catalog
-        ~set_catalog
-        path
-    in
+  match nonempty_env env oas_model_catalog_env_var_name with
+  | Some path ->
+    install_runtime_model_catalog_override ~load_catalog ~set_catalog path;
     Log.Misc.info
-      "model_catalog: OAS_MODEL_CATALOG=%s already configured%s"
-      path
-      (if installed then " and loaded" else "");
-    resolution
-  | Some { source; path } as resolution ->
-    putenv (model_catalog_env_var_name Oas_model_catalog) path;
-    let installed =
-      install_runtime_model_catalog_override
-        ~clear_catalog
-        ~load_catalog
-        ~set_catalog
-        path
-    in
-    Log.Misc.info
-      "model_catalog: OAS_MODEL_CATALOG=%s resolved from %s%s"
-      path
-      (model_catalog_env_source_to_string source)
-      (if installed then " and loaded" else "");
-    resolution
+      "model_catalog: OAS_MODEL_CATALOG=%s already configured and loaded"
+      path;
+    Some path
   | None ->
-    preload_agent_sdk_catalog ();
     (match agent_sdk_catalog () with
      | Some _ ->
        Log.Misc.info
          "model_catalog: no explicit catalog path resolved; using agent_sdk ambient \
           model catalog"
      | None ->
-       Log.Misc.warn
-         "model_catalog: no explicit or agent_sdk ambient model catalog resolved; \
-          capability lookups may fall back to provider_default");
+       raise (Env_config_core.Config_error "model_catalog: OAS embedded model catalog is unavailable"));
     None
+
+let warn_ignored_config_root_full_catalogs
+      ?(env = Sys.getenv_opt)
+      ~config_root
+      ()
+  =
+  if Option.is_none (nonempty_env env oas_model_catalog_env_var_name)
+  then
+    [ "models.toml"; "oas-models.toml" ]
+    |> List.iter (fun filename ->
+      let path = Filename.concat config_root filename in
+      if Option.is_some (existing_file path)
+      then
+        Log.Misc.warn
+          "model_catalog: ignoring retired config-root full catalog %s; OAS embedded catalog plus oas-models-overlay.toml is the deployment SSOT (set OAS_MODEL_CATALOG explicitly only for a deliberate full replacement)"
+          path)
+
+(* RFC-0342 D1 / RFC-OAS-036: deployment-local capability deltas live in a
+   config-root overlay merged onto the embedded catalog
+   ([Model_catalog.set_global_overlay]), instead of a full-catalog fork that
+   shadows every embedded row and goes stale on each OAS release. Only an
+   operator-supplied [OAS_MODEL_CATALOG] keeps full-replacement precedence. *)
+let resolve_oas_model_catalog_overlay_path ?config_root () =
+  match config_root with
+  | None -> None
+  | Some root ->
+    let root = String.trim root in
+    if String.equal root "" then
+      None
+    else
+      existing_file (Filename.concat root oas_models_overlay_toml_filename)
+
+let configure_oas_model_catalog_overlay
+      ?config_root
+      ?(load_catalog = Llm_provider.Model_catalog.load_file)
+      ?(set_overlay = Llm_provider.Model_catalog.set_global_overlay)
+      ()
+  =
+  match resolve_oas_model_catalog_overlay_path ?config_root () with
+  | None -> None
+  | Some path ->
+    (match load_catalog path with
+     | Ok overlay ->
+       set_overlay overlay;
+       Log.Misc.info
+         "model_catalog: deployment overlay %s installed onto embedded catalog"
+         path;
+       Some path
+     | Error detail ->
+       raise
+         (Env_config_core.Config_error
+            (Printf.sprintf "catalog overlay %s: %s" path detail)))
+
+let exact_output_catalog_source_to_string = function
+  | Exact_output.Embedded_catalog -> "embedded"
+  | Exact_output.Overlay_catalog -> "overlay"
+;;
+
+let exact_output_collision_to_string = function
+  | Exact_output.Duplicate_provider_identity -> "duplicate provider identity"
+  | Exact_output.Duplicate_model_identity -> "duplicate model identity"
+  | Exact_output.Duplicate_target_identity -> "duplicate target identity"
+  | Exact_output.Provider_alias_shadow -> "provider alias shadow"
+  | Exact_output.Target_identity_shadow -> "target identity shadow"
+  | Exact_output.Model_identity_shadow -> "model identity shadow"
+;;
+
+let exact_output_binding_component_to_string = function
+  | Exact_output.Target_provider -> "provider"
+  | Exact_output.Target_model -> "model"
+;;
+
+let exact_output_endpoint_error_to_string = function
+  | Exact_output.Malformed_base_url -> "malformed base URL"
+  | Exact_output.Base_url_userinfo_not_allowed -> "base URL userinfo is not allowed"
+  | Exact_output.Base_url_query_not_allowed -> "base URL query is not allowed"
+  | Exact_output.Base_url_fragment_not_allowed -> "base URL fragment is not allowed"
+  | Exact_output.Invalid_request_path -> "invalid request path"
+  | Exact_output.Unsupported_gemini_request_path ->
+    "Gemini exact targets require the generated endpoint surface"
+  | Exact_output.Invalid_gemini_model_path -> "invalid Gemini model path"
+;;
+
+let exact_output_snapshot_error_to_string = function
+  | Exact_output.Catalog_parse_failed { source; detail } ->
+    Printf.sprintf
+      "%s catalog parse failed: %s"
+      (exact_output_catalog_source_to_string source)
+      detail
+  | Exact_output.Target_catalog_invalid { source; detail } ->
+    Printf.sprintf
+      "%s target catalog is invalid: %s"
+      (exact_output_catalog_source_to_string source)
+      detail
+  | Exact_output.Catalog_collision collision ->
+    exact_output_collision_to_string collision
+  | Exact_output.Target_binding_missing { target_ref; component } ->
+    Printf.sprintf
+      "target %S is missing its %s binding"
+      (Exact_output.target_ref_id target_ref)
+      (exact_output_binding_component_to_string component)
+  | Exact_output.Target_endpoint_invalid { target_ref; cause } ->
+    Printf.sprintf
+      "target %S endpoint is invalid: %s"
+      (Exact_output.target_ref_id target_ref)
+      (exact_output_endpoint_error_to_string cause)
+  | Exact_output.Environment_read_failed { environment_variable } ->
+    Printf.sprintf "failed to read environment variable %s" environment_variable
+  | Exact_output.Target_credential_invalid
+      { target_ref; environment_variable } ->
+    Printf.sprintf
+      "target %S has an invalid credential in environment variable %s"
+      (Exact_output.target_ref_id target_ref)
+      environment_variable
+;;
+
+let read_exact_output_overlay path =
+  try Ok (In_channel.with_open_bin path In_channel.input_all) with
+  | Sys_error detail -> Error detail
+;;
+
+let load_exact_output_lane_declarations () =
+  match Runtime.config_path () with
+  | None ->
+    raise
+      (Env_config_core.Config_error
+         "exact-output registry: runtime.toml path is unavailable")
+  | Some config_path ->
+    (match Runtime_toml.parse_file config_path with
+     | Ok (config : Runtime_schema.config) -> config.exact_output_lane_decls
+     | Error errors ->
+       raise
+         (Env_config_core.Config_error
+            (Printf.sprintf
+               "exact-output registry: runtime config parse failed (%s): %d error(s)"
+               config_path
+               (List.length errors))))
+;;
+
+(* The compaction summarizer resolves this lane by name; it must exist in
+   every published registry for manual/provider-overflow compaction to run. *)
+let compaction_exact_lane_id = "compaction_exact"
+
+(* Upgraded workspaces keep their operator-owned runtime.toml
+   ([Config_root_bootstrap] preserves existing roots), which predates
+   [runtime.exact_output_lanes]. Without a backfill the bootstrap would
+   publish a valid registry with zero lanes and every compaction would fail at
+   execution with [Exact_target_selection_failed]. The seed declaration comes
+   from the binary-embedded seed config so repo config and backfill share one
+   source; operator declarations always win. *)
+let seed_exact_output_lane_declarations () =
+  match Embedded_config.read "runtime.toml" with
+  | None ->
+    Log.Misc.warn
+      "exact_output: embedded seed runtime.toml is unavailable; cannot backfill the %S lane"
+      compaction_exact_lane_id;
+    []
+  | Some contents ->
+    (match Runtime_toml.parse_string contents with
+     | Ok (config : Runtime_schema.config) -> config.exact_output_lane_decls
+     | Error errors ->
+       Log.Misc.warn
+         "exact_output: embedded seed runtime.toml parse failed (%d error(s)); cannot backfill the %S lane"
+         (List.length errors)
+         compaction_exact_lane_id;
+       [])
+
+let backfill_required_exact_output_lanes ~seed_lanes lanes =
+  let has_compaction_exact (lane : Runtime_schema.exact_output_lane_decl) =
+    String.equal lane.id compaction_exact_lane_id
+  in
+  if List.exists has_compaction_exact lanes
+  then lanes, false
+  else
+    match List.find_opt has_compaction_exact seed_lanes with
+    | None -> lanes, false
+    | Some seed_lane -> lanes @ [ seed_lane ], true
+;;
+
+(* Row identity for catalog table arrays, mirroring [Model_catalog] merge
+   keys: [[providers]]/[[targets]] rows key on [id], [[models]] rows key on
+   [id_prefix] + [provider_name]. *)
+let catalog_row_key = function
+  | Otoml.TomlTable entries ->
+    (match List.assoc_opt "id" entries with
+     | Some (Otoml.TomlString id) -> Some ("row", id)
+     | _ ->
+       (match
+          List.assoc_opt "id_prefix" entries, List.assoc_opt "provider_name" entries
+        with
+        | Some (Otoml.TomlString id_prefix), Some (Otoml.TomlString provider_name) ->
+          Some ("model", provider_name ^ "/" ^ id_prefix)
+        | _ -> None))
+  | _ -> None
+;;
+
+let rec merge_catalog_toml_values ~base ~overlay =
+  match base, overlay with
+  | Otoml.TomlTable base_entries, Otoml.TomlTable overlay_entries ->
+    let kept_base =
+      List.filter
+        (fun (key, _) -> not (List.mem_assoc key overlay_entries))
+        base_entries
+    in
+    let merged_overlay =
+      List.map
+        (fun (key, overlay_value) ->
+           let value =
+             match List.assoc_opt key base_entries with
+             | Some base_value ->
+               merge_catalog_toml_values ~base:base_value ~overlay:overlay_value
+             | None -> overlay_value
+           in
+           key, value)
+        overlay_entries
+    in
+    Otoml.TomlTable (kept_base @ merged_overlay)
+  | Otoml.TomlTableArray base_items, Otoml.TomlTableArray overlay_items ->
+    let overlay_keys = List.filter_map catalog_row_key overlay_items in
+    let kept_base =
+      List.filter
+        (fun item ->
+           match catalog_row_key item with
+           | Some key -> not (List.mem key overlay_keys)
+           | None -> true)
+        base_items
+    in
+    Otoml.TomlTableArray (kept_base @ overlay_items)
+  | _, overlay -> overlay
+;;
+
+let merge_catalog_overlay_toml ~base_contents ~overlay_contents =
+  match
+    ( Otoml.Parser.from_string_result base_contents
+    , Otoml.Parser.from_string_result overlay_contents )
+  with
+  | Error detail, _ -> Error (Printf.sprintf "base catalog: %s" detail)
+  | _, Error detail -> Error (Printf.sprintf "overlay catalog: %s" detail)
+  | Ok base, Ok overlay ->
+    Ok (Otoml.Printer.to_string (merge_catalog_toml_values ~base ~overlay))
+;;
+
+(* The exact-output resolver must route against the same catalog the runtime
+   path uses. [Exact_output.load_resolver_snapshot] only accepts
+   embedded-plus-overlay, so an operator-supplied [OAS_MODEL_CATALOG] full
+   replacement is folded into the resolver's overlay document *ahead* of the
+   config-root overlay: table rows the overlay re-declares replace the
+   replacement's rows, everything else unions. The resolver still unions the
+   result onto the OAS embedded catalog (the OAS API exposes no full-base
+   replacement), which is a superset of the runtime catalog — every target and
+   credential declaration from the replacement is visible to exact-output
+   resolution. *)
+let exact_output_resolver_overlay ?config_root ?(env = Sys.getenv_opt) () =
+  let overlay_path = resolve_oas_model_catalog_overlay_path ?config_root () in
+  let full_catalog_path = nonempty_env env oas_model_catalog_env_var_name in
+  let read_contents label path =
+    match read_exact_output_overlay path with
+    | Ok contents -> contents
+    | Error detail ->
+      raise
+        (Env_config_core.Config_error
+           (Printf.sprintf "exact-output %s %s: %s" label path detail))
+  in
+  match full_catalog_path, overlay_path with
+  | None, None -> None, " from OAS embedded catalog"
+  | Some full_path, None ->
+    ( Some
+        ({ source = full_path; contents = read_contents "full catalog" full_path }
+         : Exact_output.catalog_overlay)
+    , " from OAS_MODEL_CATALOG full catalog " ^ full_path )
+  | None, Some path ->
+    ( Some { source = path; contents = read_contents "catalog overlay" path }
+    , " with deployment overlay " ^ path )
+  | Some full_path, Some path ->
+    let contents =
+      match
+        merge_catalog_overlay_toml
+          ~base_contents:(read_contents "full catalog" full_path)
+          ~overlay_contents:(read_contents "catalog overlay" path)
+      with
+      | Ok contents -> contents
+      | Error detail ->
+        raise
+          (Env_config_core.Config_error
+             (Printf.sprintf "exact-output catalog merge: %s" detail))
+    in
+    ( Some { source = full_path ^ " + " ^ path; contents }
+    , Printf.sprintf
+        " from OAS_MODEL_CATALOG full catalog %s merged with deployment overlay %s"
+        full_path
+        path )
+;;
+
+let configure_exact_output_registry ?config_root ?(env = Sys.getenv_opt) () =
+  let overlay, overlay_description =
+    exact_output_resolver_overlay ?config_root ~env ()
+  in
+  let io : Exact_output.resolver_io =
+    { getenv =
+        (fun name ->
+          try Ok (Sys.getenv_opt name) with
+          | Sys_error _ | Invalid_argument _ -> Error ())
+    }
+  in
+  match Exact_output.load_resolver_snapshot ~io ?overlay () with
+  | Error error ->
+    raise
+      (Env_config_core.Config_error
+         ("exact-output resolver snapshot: "
+          ^ exact_output_snapshot_error_to_string error))
+  | Ok resolver_snapshot ->
+    let operator_lanes = load_exact_output_lane_declarations () in
+    let lanes, backfilled =
+      backfill_required_exact_output_lanes
+        ~seed_lanes:(seed_exact_output_lane_declarations ())
+        operator_lanes
+    in
+    (match Runtime_exact_output_registry.publish ~lanes resolver_snapshot with
+     | Ok registry ->
+       Log.Misc.info
+         "exact_output: immutable resolver-and-lane registry generation %Ld published%s%s"
+         (Runtime_exact_output_registry.generation registry)
+         (if backfilled
+          then Printf.sprintf " (backfilled seed lane %S)" compaction_exact_lane_id
+          else "")
+         overlay_description
+     | Error error ->
+       (* A backfilled seed lane must never abort startup: legacy config roots
+          may predate the deployment overlay that declares the seed target.
+          Degrade to the operator-declared lanes — compaction then fails at
+          execution with an actionable lane-missing error instead of blocking
+          the whole server boot. Errors in operator-declared lanes stay
+          fatal. *)
+       if backfilled
+       then
+         (match
+            Runtime_exact_output_registry.publish ~lanes:operator_lanes resolver_snapshot
+          with
+          | Ok registry ->
+            Log.Misc.warn
+              "exact_output: seed lane %S failed validation (%s); published operator lanes only, generation %Ld%s"
+              compaction_exact_lane_id
+              (Runtime_exact_output_registry.error_to_string error)
+              (Runtime_exact_output_registry.generation registry)
+              overlay_description
+          | Error operator_error ->
+            raise
+              (Env_config_core.Config_error
+                 ("exact-output resolver-and-lane registry: "
+                  ^ Runtime_exact_output_registry.error_to_string operator_error)))
+       else
+         raise
+           (Env_config_core.Config_error
+              ("exact-output resolver-and-lane registry: "
+               ^ Runtime_exact_output_registry.error_to_string error)))
+;;
 
 (* GC tuning for long-running server with bursty allocation.
 
@@ -407,11 +514,13 @@ let ensure_thompson_persistence ~base_path =
     Shutdown.register ~name:"thompson_sampling_save" ~priority:24 (fun () ->
       Thompson_sampling.save_stats ())
 
-let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
-    ?env ()
+let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
+    ~proc_mgr ~fs ?env ()
     : Mcp_server.server_state =
   let input_base_path =
-    match String.trim base_path with
+    (* DET-OK: absent transport input selects the explicit owner BasePath;
+       normalization below remains the sole interpretation boundary. *)
+    match String.trim (Option.value input_base_path ~default:base_path) with
     | "" -> None
     | raw -> Some raw
   in
@@ -451,12 +560,10 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   ensure_thompson_persistence ~base_path;
   bootstrap_base_path_config_root ~base_path;
   let config_root = (startup_config_resolution ~base_path).config_root.path in
-  let (_ : model_catalog_env_resolution option) =
-    configure_oas_model_catalog_env ~config_root ()
-  in
-  let (_ : capability_manifest_env_resolution option) =
-    configure_oas_capability_manifest_env ~config_root ()
-  in
+  warn_ignored_config_root_full_catalogs ~config_root ();
+  let (_ : string option) = configure_oas_model_catalog_env () in
+  let (_ : string option) = configure_oas_model_catalog_overlay ~config_root () in
+  configure_exact_output_registry ~config_root ();
   (* Apply keeper runtime overrides from the resolved config root's
      runtime.toml. Must run before any module that reads
      [Env_config_keeper.KeeperKeepalive] env vars at init time. Existing
@@ -467,8 +574,41 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
        Log.Server.info "runtime.toml: applied %d override(s)" n
    | Error msg ->
        record_runtime_toml_load_failure msg;
-       Log.Server.warn "runtime.toml load failed: %s (continuing with env defaults)" msg);
+       Log.Server.error "runtime.toml load failed: %s" msg;
+       raise (Env_config_core.Config_error msg));
   Keeper_runtime_resolved.init ();
+  (* Boot-time observability: emit the resolved runtime knobs once, right after
+     they freeze. Without this line a knob that is CONFIGURED in runtime.toml but
+     did not reach Keeper_runtime_resolved is indistinguishable at runtime from an
+     unset one — the exact ambiguity that blocked diagnosing #25128 (idle timeout
+     configured yet never observed to fire). The body-timeout override is None
+     when unset; stream_idle_timeout_sec now resolves to the RFC-0345 fail-safe
+     floor when unset (stated on the dedicated line below). No existing surface
+     exposes the resolved value. *)
+  Log.Runtime.info
+    ~category:Log.Boundary
+    "resolved runtime config: %s"
+    (Yojson.Safe.to_string
+       (Keeper_runtime_resolved.to_yojson (Keeper_runtime_resolved.current ())));
+  (* RFC-0345 (#25128): state the effective streaming idle timeout and whether it
+     came from an operator value (env/toml) or the fail-safe floor, so operators
+     can see the floor is active and raise it if their provider legitimately
+     idles longer. The resolver always yields [Some] after the floor; the [None]
+     arm is retained as total handling and reports the pre-floor freeze-risk
+     posture should the floor ever be removed. *)
+  Keeper_runtime_resolved.(
+    let idle = (current ()).stream_idle_timeout_sec in
+    match idle.value with
+    | Some seconds ->
+      Log.Runtime.info
+        ~category:Log.Boundary
+        "keeper stream idle timeout resolved: %.1fs (source: %s)"
+        seconds
+        (source_to_string idle.source)
+    | None ->
+      Log.Runtime.info
+        ~category:Log.Boundary
+        "keeper stream idle timeout resolved: disabled (no inter-line idle bound)");
   Keeper_task_owner_backend.install_hooks ();
   let state =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock
@@ -511,10 +651,6 @@ let restore_persisted_sessions (state : Mcp_server.server_state) =
   Session.restore_from_disk state.session_registry
     ~agents_path:(Workspace.agents_dir (Mcp_server.workspace_config state))
 
-let reconcile_active_agents_gauge (state : Mcp_server.server_state) =
-  Otel_metric_store.reconcile_active_agents_gauge (Workspace.masc_dir (Mcp_server.workspace_config state))
-
-
 (* Startup maintenance extracted to
    [Server_runtime_startup_maintenance] (godfile decomp). *)
 include Server_runtime_startup_maintenance
@@ -551,15 +687,13 @@ let lazy_startup_plan () =
         task_names =
           [
             "restore_sessions";
-            "reconcile_active_agents";
-            "prompt_bootstrap";
             "keeper_history_migration";
           ];
       };
       {
         group_name = "tool_state";
         execution = Serial;
-        task_names = [ "telemetry_warmup"; "tool_metrics_restore" ];
+        task_names = [ "tool_metrics_restore" ];
       };
     ]
   in
@@ -578,6 +712,306 @@ let lazy_startup_task_names () =
   lazy_startup_plan ()
   |> List.concat_map (fun group -> group.task_names)
 
+type startup_failure_disposition =
+  | Fatal_pre_ready
+  | Degraded_after_ready
+
+let startup_failure_disposition ~state_ready =
+  if state_ready then Degraded_after_ready else Fatal_pre_ready
+
+type owner_initialization_error =
+  | Runtime_config_path_unavailable
+  | Runtime_default_initialization_failed of Runtime.strict_init_error
+  | Keeper_persistence_preparation_failed of
+      Server_bootstrap_loops.keeper_persistence_prepare_error
+  | Keeper_persistence_claim_failed of
+      Server_bootstrap_loops.keeper_persistence_claim_error
+  | Keeper_persistence_start_failed of
+      Server_bootstrap_loops.keeper_persistence_start_error
+  | Startup_path_guard_rejected of Server_base_path_diagnostics.t
+  | Strict_path_guard_rejected of Server_base_path_diagnostics.t
+  | Lazy_startup_barrier_failed of Server_startup_state.lazy_prepare_error
+  | Readiness_transition_failed of Server_startup_state.state_ready_error
+  | Readiness_publication_failed of
+      { expected_backend_mode : string
+      ; observed_backend_mode : string
+      ; observed_phase : Server_startup_state.phase
+      }
+
+exception Owner_initialization_failed of owner_initialization_error
+
+type initialized_owner_state =
+  { state : Mcp_server.server_state
+  ; path_diagnostics : Server_base_path_diagnostics.t
+  ; prepared_keeper_persistence : Server_bootstrap_loops.prepared_keeper_persistence
+  ; domain_pool : Domain_pool.t
+  }
+
+type activated_owner_state =
+  { state : Mcp_server.server_state
+  ; path_diagnostics : Server_base_path_diagnostics.t
+  ; domain_pool : Domain_pool.t
+  }
+
+let owner_initialization_error_to_string = function
+  | Runtime_config_path_unavailable ->
+    "no runtime config path; cannot initialize the default Runtime"
+  | Runtime_default_initialization_failed error ->
+    "Runtime.init_default_degraded failed: "
+    ^ Runtime.strict_init_error_to_string error
+  | Keeper_persistence_preparation_failed error ->
+    "Keeper persistence preparation failed: "
+    ^ Server_bootstrap_loops.keeper_persistence_prepare_error_to_string error
+  | Keeper_persistence_claim_failed error ->
+    "Keeper persistence claim failed: "
+    ^ Server_bootstrap_loops.keeper_persistence_claim_error_to_string error
+  | Keeper_persistence_start_failed error ->
+    "Keeper persistence Keeper-loop start failed: "
+    ^ Server_bootstrap_loops.keeper_persistence_start_error_to_string error
+  | Startup_path_guard_rejected diagnostics ->
+    Option.value
+      diagnostics.Server_base_path_diagnostics.warning
+      ~default:"startup path guard rejected malformed runtime state"
+  | Strict_path_guard_rejected diagnostics ->
+    Option.value
+      diagnostics.Server_base_path_diagnostics.warning
+      ~default:"strict BasePath guard rejected the runtime path configuration"
+  | Lazy_startup_barrier_failed error ->
+    Server_startup_state.lazy_prepare_error_to_string error
+  | Readiness_transition_failed error ->
+    Server_startup_state.state_ready_error_to_string error
+  | Readiness_publication_failed
+      { expected_backend_mode; observed_backend_mode; observed_phase } ->
+    Printf.sprintf
+      "owner readiness publication failed for backend=%s (observed_backend=%s observed_phase=%s)"
+      expected_backend_mode
+      observed_backend_mode
+      (Server_startup_state.phase_to_string observed_phase)
+
+let initialize_owner_state_blocking
+      ~sw
+      ~env
+      ~base_path
+      ?input_base_path
+      ~clock
+      ~mono_clock
+      ~net
+      ~domain_mgr
+      ~proc_mgr
+      ~fs
+      ()
+  =
+  (* DET-OK: the optional transport spelling and the required owner BasePath
+     denote the same requested path when the former is absent. *)
+  let requested_base_path = Option.value input_base_path ~default:base_path in
+  let base_path =
+    match Eio_unix.run_in_systhread (fun () -> Unix.realpath base_path) with
+    | canonical -> canonical
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception ((Unix.Unix_error _ | Sys_error _) as exception_) ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      let failure : Server_bootstrap_loops.keeper_persistence_failure =
+        { phase = Server_bootstrap_loops.Resolving_base_path
+        ; base_path
+        ; cause =
+            Server_bootstrap_loops.Base_path_identity_unavailable_cause
+              { exception_; backtrace }
+        }
+      in
+      raise
+        (Owner_initialization_failed
+           (Keeper_persistence_preparation_failed
+              (Server_bootstrap_loops.Preparation_base_path_identity_unavailable
+                 failure)))
+  in
+  let path_diagnostics =
+    Server_base_path_diagnostics.detect
+      ~input_base_path:requested_base_path
+      ?env_masc_base_path:((Host_config.from_env ()).base_path_raw)
+      ~effective_base_path:base_path
+      ~effective_masc_root:(Common.masc_dir_from_base_path ~base_path)
+      ()
+  in
+  Server_base_path_diagnostics.log_startup_warning path_diagnostics;
+  if Server_base_path_diagnostics.startup_should_abort path_diagnostics
+  then
+    raise
+      (Owner_initialization_failed
+         (Startup_path_guard_rejected path_diagnostics));
+  if Server_base_path_diagnostics.strict_violation path_diagnostics
+  then
+    raise
+      (Owner_initialization_failed
+         (Strict_path_guard_rejected path_diagnostics));
+  (* [main_eio] caches the normalized operator input before entering Eio.
+     Replace that preflight value with the canonical owner identity before
+     [Workspace.default_config_eio] constructs its backend, otherwise the
+     config record says canonical while its backend still follows an alias. *)
+  Workspace_utils_backend_setup.cache_resolved_base_path base_path;
+  Discovery_cache.set_env ~sw ~net;
+  Gc_sampler.run ~sw ~clock ~interval:30.0;
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      Eio.Time.sleep clock 5.0;
+      (try Keeper_registry_tool_usage_persistence.flush_all_dirty () with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Keeper.warn
+           "tool_usage flush_all_dirty failed: %s"
+           (Printexc.to_string exn));
+      loop ()
+    in
+    loop ());
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      Eio.Time.sleep clock 2.0;
+      (try Trajectory.flush_all_pending () with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+         Log.Keeper.warn
+           "trajectory flush_all_pending failed: %s"
+           (Printexc.to_string exn));
+      loop ()
+    in
+    loop ());
+  let t0 = Eio.Time.now clock in
+  Llm_metric_bridge.install ();
+  Log.Server.info
+    "Llm_metric_bridge installed (masc_llm_provider_http_status_total, inference-events JSONL)";
+  Backend.FileSystem.set_mutex_observers
+    ~acquire:(fun ~op ~seconds ->
+      Otel_metric_store.observe_histogram
+        Otel_metric_store.metric_backend_mutex_acquire_sec
+        ~labels:[ "op", op ]
+        seconds)
+    ~held:(fun ~op ~seconds ->
+      Otel_metric_store.observe_histogram
+        Otel_metric_store.metric_backend_mutex_held_sec
+        ~labels:[ "op", op ]
+        seconds);
+  Log.Server.info "Backend_mutex_metrics installed (masc_backend_mutex_* metrics)";
+  Fd_accountant.install_observers
+    ~nofile_soft_limit:Keeper_fd_pressure.process_nofile_soft_limit
+    ~on_resource_error:(fun ~kind error exn ->
+      let kind_name = Fd_accountant.kind_to_string kind in
+      let error_name = Fd_accountant.resource_error_to_string error in
+      let site = "fd_accountant." ^ kind_name in
+      Log.Server.error
+        "Fd_accountant observed OS resource error kind=%s error=%s exception=%s"
+        kind_name
+        error_name
+        (Printexc.to_string exn);
+      match error with
+      | Fd_accountant.Process_fd_exhausted
+      | Fd_accountant.System_fd_exhausted ->
+        Keeper_fd_pressure.note_exception ~site exn
+      | Fd_accountant.Storage_space_exhausted ->
+        Keeper_disk_pressure.note_exception ~site exn);
+  Log.Server.info "Fd_accountant OS resource observers installed";
+  Agent_sdk_log_bridge.install ();
+  Log.Server.info
+    "Agent_sdk_log_bridge installed (agent_sdk.Log -> masc structured log)";
+  let state =
+    create_server_state
+      ~sw
+      ~base_path
+      ~input_base_path:requested_base_path
+      ~clock
+      ~mono_clock
+      ~net
+      ~proc_mgr
+      ~fs
+      ~env
+      ()
+  in
+  (match Runtime.config_path () with
+   | None ->
+     raise (Owner_initialization_failed Runtime_config_path_unavailable)
+   | Some config_path ->
+     (match Runtime.init_default_degraded_report ~config_path with
+      | Ok Runtime.Initialized ->
+        Log.Server.info
+          "Runtime default initialized: %s"
+          (Runtime.get_default_runtime_id ())
+      | Ok (Runtime.Initialized_degraded degradation) ->
+        Log.Server.warn
+          "Runtime default initialized in degraded catalog mode: %s"
+          (Runtime.startup_degradation_to_string degradation);
+        Log.Server.warn
+          "Runtime degraded effective default: %s"
+          (Runtime.get_default_runtime_id ())
+      | Error error ->
+        raise
+          (Owner_initialization_failed
+             (Runtime_default_initialization_failed error))));
+  let t1 = Eio.Time.now clock in
+  Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
+  bootstrap_server_state_blocking state;
+  startup_recover_keeper_lifecycle_transactions state;
+  startup_migrate_retired_keeper_meta_keys state;
+  sync_admin_token_env state;
+  sync_internal_keeper_token_env state;
+  sync_bootable_keeper_credentials state;
+  let prepared_keeper_persistence =
+    match
+      Server_bootstrap_loops.prepare_keeper_persistence
+        ~requested_base_path
+        ~config:(Mcp_server.workspace_config state)
+        ()
+    with
+    | Ok prepared -> prepared
+    | Error error ->
+      raise
+        (Owner_initialization_failed
+           (Keeper_persistence_preparation_failed error))
+  in
+  Runtime_settings.ensure_init ();
+  Runtime_params.restore ~base_path;
+  Log.Server.info "Runtime_params restored from %s" base_path;
+  Keeper_crash_persistence.start_drain_fiber ~sw ~clock;
+  (try
+     Auth.audit_token_uniqueness base_path
+     |> List.iter (fun (token_hash_prefix, agent_names) ->
+       Otel_metric_store.inc_counter
+         Otel_metric_store.metric_auth_credential_token_duplicate
+         ~labels:[ "token_hash_prefix", token_hash_prefix ]
+         ();
+       Log.Server.warn
+         "#9786 credential token shared by %d agents [%s] (token_hash_prefix=%s) — rotate via Auth.create_token to prevent bearer-token routing ambiguity"
+         (List.length agent_names)
+         (String.concat ", " agent_names)
+         token_hash_prefix)
+   with
+   | Eio.Cancel.Cancelled _ as exn -> raise exn
+   | exn ->
+     Log.Server.error
+       "boot: credential token uniqueness audit failed: %s"
+       (Printexc.to_string exn));
+  Log.Server.info "Bootstrap completed in %.1fs" (Eio.Time.now clock -. t1);
+  let stale_threshold_hours = 12 in
+  let build = Build_identity.current () in
+  (match build.binary_commit, build.binary_commit_age_seconds with
+   | Some binary_commit, Some age
+     when age > stale_threshold_hours * Masc_time_constants.hour_int ->
+     let hours = age / Masc_time_constants.hour_int in
+     Log.Server.warn
+       "Server binary commit %s is %d hours old (>%dh threshold). Rebuild + restart recommended to pick up newer fixes; see /health build.binary_commit_age_seconds."
+       binary_commit
+       hours
+       stale_threshold_hours
+   | _ -> ());
+  let domain_pool =
+    Domain_pool.create
+      ~sw
+      ?domain_count:(Env_config.Executor.domain_count_override ())
+      domain_mgr
+  in
+  Domain_pool_ref.set domain_pool;
+  Log.Server.info
+    "Domain_pool created (%d domains) for dashboard/keeper compute"
+    (Domain_pool.domain_count domain_pool);
+  { state; path_diagnostics; prepared_keeper_persistence; domain_pool }
+
 (* Cap the per-boot file list in the sync log line; full counts are always
    logged, names are illustrative. *)
 let max_logged_prompt_sync_entries = 10
@@ -590,16 +1024,22 @@ let sync_prompt_assets_from_binary () =
       ~prompts_dir:(Config_dir_resolver.prompts_dir ())
       ()
   in
-  (match sync.Prompt_defaults.copied, sync.Prompt_defaults.overwritten with
-   | [], [] -> ()
-   | copied, overwritten ->
-       let names = copied @ overwritten in
+  (match
+     sync.Prompt_defaults.copied,
+     sync.Prompt_defaults.overwritten,
+     sync.Prompt_defaults.removed
+   with
+   | [], [], [] -> ()
+   | copied, overwritten, removed ->
+       let names = copied @ overwritten @ removed in
        let shown =
          List.filteri (fun i _ -> i < max_logged_prompt_sync_entries) names
        in
        Log.Misc.info
-         "prompt assets synced from binary: %d copied, %d overwritten [%s%s]"
-         (List.length copied) (List.length overwritten)
+         "prompt assets synced from binary: %d copied, %d overwritten, %d retired [%s%s]"
+         (List.length copied)
+         (List.length overwritten)
+         (List.length removed)
          (String.concat ", " shown)
          (if List.length names > max_logged_prompt_sync_entries then ", …"
           else ""));
@@ -645,38 +1085,6 @@ let bootstrap_prompt_state (state : Mcp_server.server_state) =
       |> String.concat ", ")
   end
 
-let warm_tool_registry_from_telemetry (state : Mcp_server.server_state) =
-  (try
-     let summary =
-       Telemetry_eio.summarize_tool_usage (Mcp_server.workspace_config state)
-     in
-     if summary.telemetry_available then
-       (* PR-S3: project the persisted Telemetry_eio summary into the registry's
-          neutral [warm_up_stats] shape at the composition root, so
-          [Tool_registry] (lib/tool/, masc_tool_dispatch) does not code-depend
-          on the telemetry persistence layer. *)
-       let stats_by_tool =
-         Hashtbl.fold
-           (fun tool_name (stats : Telemetry_eio.tool_usage_stats) acc ->
-              ( tool_name
-              , { Tool_registry.count = stats.count
-                ; success_count = stats.success_count
-                ; failure_count = stats.failure_count
-                ; last_used_at = stats.last_used_at
-                } )
-              :: acc)
-           summary.stats_by_tool
-           []
-       in
-       let n = Tool_registry.warm_up stats_by_tool in
-       Log.Misc.info "tool registry: warmed up %d tools (%d calls) from telemetry"
-         n summary.total_calls
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-     Log.Misc.warn "tool registry warm-up failed: %s (lazy init on first call)"
-       (Printexc.to_string exn))
-
 let restore_tool_metrics_from_disk (state : Mcp_server.server_state) =
   (try
      let n = Tool_metrics_persist.restore
@@ -689,55 +1097,220 @@ let restore_tool_metrics_from_disk (state : Mcp_server.server_state) =
      Log.Misc.warn "tool metrics restore failed: %s (metrics empty until next emission)"
        (Printexc.to_string exn))
 
+let start_owner_lazy_tasks ~sw state =
+  let run_lazy_task (task_name, task_fn) =
+    Log.Server.info "lazy_task: starting %s" task_name;
+    try
+      task_fn ();
+      Log.Server.info "lazy_task: finished %s" task_name;
+      Server_startup_state.finish_lazy_task ~task:task_name
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      let error = Printexc.to_string exn in
+      Log.Server.error "lazy startup task %s failed: %s" task_name error;
+      Server_startup_state.fail_lazy_task ~task:task_name ~error
+  in
+  let task_fn = function
+    | "restore_sessions" -> fun () -> restore_persisted_sessions state
+    | "keeper_history_migration" -> fun () -> startup_migrate_keeper_histories state
+    | "tool_metrics_restore" -> fun () -> restore_tool_metrics_from_disk state
+    | "jsonl_prune" -> fun () -> startup_prune_jsonl state
+    | task_name ->
+      raise
+        (Invalid_argument
+           (Printf.sprintf "unknown lazy startup task: %s" task_name))
+  in
+  let task_names = lazy_startup_task_names () in
+  let task_groups =
+    lazy_startup_plan ()
+    |> List.map (fun group ->
+      group, List.map (fun name -> name, task_fn name) group.task_names)
+  in
+  let execution_to_string = function
+    | Parallel -> "parallel"
+    | Serial -> "serial"
+  in
+  let run_lazy_task_group (group, tasks) =
+    Log.Server.info
+      "lazy_task_group: starting %s (%s, %d tasks)"
+      group.group_name
+      (execution_to_string group.execution)
+      (List.length tasks);
+    (match group.execution with
+     | Parallel ->
+       Eio.Fiber.all (List.map (fun task () -> run_lazy_task task) tasks)
+       |> ignore
+     | Serial -> List.iter run_lazy_task tasks);
+    Log.Server.info "lazy_task_group: finished %s" group.group_name
+  in
+  (match Server_startup_state.prepare_lazy_tasks ~tasks:task_names with
+   | Ok () -> ()
+   | Error error ->
+     raise (Owner_initialization_failed (Lazy_startup_barrier_failed error)));
+  Eio.Fiber.fork ~sw (fun () -> List.iter run_lazy_task_group task_groups)
+
+let claim_and_start_keeper_persistence
+      ~prepared_persistence
+      ~sw
+      ~clock
+      ~net
+      ~domain_mgr
+      ~proc_mgr
+      state
+  =
+  let claimed_persistence =
+    match
+      Server_bootstrap_loops.claim_prepared_keeper_persistence
+        ~config:(Mcp_server.workspace_config state)
+        prepared_persistence
+    with
+    | Ok claimed -> claimed
+    | Error error ->
+      raise
+        (Owner_initialization_failed
+           (Keeper_persistence_claim_failed error))
+  in
+  try
+    Server_bootstrap_loops.start_keeper_loops
+      ~claimed_persistence
+      ~sw
+      ~clock
+      ~net
+      ~domain_mgr
+      ~proc_mgr
+      state
+  with
+  | Server_bootstrap_loops.Keeper_persistence_start_failed error ->
+    raise
+      (Owner_initialization_failed
+         (Keeper_persistence_start_failed error))
+;;
+
+let mark_owner_state_ready state =
+  let backend =
+    match (Mcp_server.workspace_config state).Workspace.backend with
+    | Workspace.Memory _ -> Server_startup_state.Memory_backend
+    | Workspace.FileSystem _ -> Server_startup_state.Filesystem_backend
+  in
+  let expected_backend_mode = Server_startup_state.ready_backend_to_string backend in
+  match Server_startup_state.mark_state_ready ~backend with
+  | Error error -> Error (Readiness_transition_failed error)
+  | Ok () ->
+    let observed = Server_startup_state.(!state) in
+    if
+      observed.state_ready
+      && String.equal observed.backend_mode expected_backend_mode
+    then Ok ()
+    else
+      Error
+        (Readiness_publication_failed
+           { expected_backend_mode
+           ; observed_backend_mode = observed.backend_mode
+           ; observed_phase = observed.phase
+           })
+
+let install_keeper_gate_persistence state =
+  let base_path = (Mcp_server.workspace_config state).base_path in
+  match Keeper_approval_queue.install_persistence ~base_path with
+  | Error error ->
+    (* Gate persistence is lane-local. Keep unrelated server subsystems
+       available, but surface the unavailable Gate explicitly instead of
+       treating a malformed durable queue as empty. *)
+    Log.Server.error
+      "keeper_gate: durable queue install failed base_path=%s error=%s"
+      base_path
+      (Keeper_approval_queue.install_error_to_string error)
+  | Ok report ->
+    Log.Server.info
+      "keeper_gate: installed durable queue base_path=%s pending=%d replayed=%d replay_failed=%d"
+      base_path
+      report.loaded_pending
+      report.replayed_deliveries
+      (List.length report.delivery_replay_failures);
+    List.iter
+      (fun (failure : Keeper_approval_queue.delivery_replay_failure) ->
+         Log.Server.error
+           "keeper_gate: durable delivery replay failed approval=%s error=%s"
+           failure.approval_id
+           failure.reason)
+      report.delivery_replay_failures;
+    let resume_report = Keeper_gate.resume_persisted_auto_judges ~base_path in
+    Log.Server.info
+      "keeper_gate: recovered Auto Judge work requested=%d started=%d finalized=%d skipped=%d failed=%d"
+      resume_report.requested
+      (List.length resume_report.started_ids)
+      (List.length resume_report.finalized_ids)
+      (List.length resume_report.skipped_ids)
+      (List.length resume_report.failures);
+    List.iter
+      (fun approval_id ->
+         Log.Server.warn
+           "keeper_gate: recovered Auto Judge no longer startable approval=%s"
+           approval_id)
+      resume_report.skipped_ids;
+    List.iter
+      (fun (failure : Keeper_gate.auto_judge_resume_failure) ->
+         Log.Server.error
+           "keeper_gate: recovered Auto Judge start failed approval=%s error=%s"
+           failure.approval_id
+           failure.reason)
+      resume_report.failures
+;;
+
+let activate_owner_state
+      ~sw
+      ~clock
+      ~net
+      ~domain_mgr
+      ~proc_mgr
+      (initialized : initialized_owner_state)
+  =
+  let state = initialized.state in
+  (* Establish the complete barrier before the irreversible ownership commit.
+     Gate restore, claim, and start stay ordered inside one transport-neutral
+     function. Each composition root publishes readiness only after its own
+     required transport surfaces are installed. *)
+  (* Auto Judge recovery renders prompts immediately. Prompt state is therefore
+     a recovery prerequisite, not an eventually-consistent lazy task. *)
+  bootstrap_prompt_state state;
+  install_keeper_gate_persistence state;
+  start_owner_lazy_tasks ~sw state;
+  claim_and_start_keeper_persistence
+    ~prepared_persistence:initialized.prepared_keeper_persistence
+    ~sw
+    ~clock
+    ~net
+    ~domain_mgr
+    ~proc_mgr
+    state;
+  { state
+  ; path_diagnostics = initialized.path_diagnostics
+  ; domain_pool = initialized.domain_pool
+  }
+;;
+
 (* bootstrap_keepers removed: the keeper_autoboot subsystem in
    start_keeper_loops now handles keeper startup in a dedicated
    fiber with a 5-second delay, avoiding runtime bootstrap contention with
    the 7+ dashboard refresh loops that start alongside it. *)
 
-let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
-    ~make_h2_request_handler ~make_h2_error_handler =
+let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_request_handler
+    ~make_h2_request_handler ~make_h2_error_handler () =
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
     init_runtime_context env
   in
-
-  Discovery_cache.set_env ~sw ~net;
-  Discovery_cache.set_base_path base_path;
-  (* Start global rate-limit bucket cleanup loop to prevent unbounded growth of
-     per-client buckets.  The loop is a background fiber that wakes periodically
-     and removes stale entries according to MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC. *)
+  (* Route OAS provider diagnostics into the structured log before any
+     provider call runs (#25148). *)
+  Oas_diag_sink.install ();
+  (* 0. Dashboard bundle freshness — a stale bundle silently keeps calling
+     routes the current binary already removed (#24332 governance->gate:
+     the served SPA still called DELETE'd /api/v1/dashboard/governance for
+     3+ days because scripts/build-dashboard-if-needed.sh was never re-run
+     after the binary shipped). Cheap synchronous stat comparison; not worth
+     its own fiber. *)
+  Web_dashboard.log_bundle_freshness_warning ();
   Rate_limit.start_global_cleanup_loop ~sw ~clock;
-  (* PR-0.2.D: OCaml runtime GC sampler.  Polls Gc.quick_stat every
-     30s and writes six masc_gc_* gauges so the telemetry backend can
-     answer GC pressure questions without a separate dump endpoint.
-     quick_stat does not walk the heap, so the call cost stays
-     bounded next to the request path. *)
-  Gc_sampler.run ~sw ~clock ~interval:30.0;
-  (* Background fiber: flush dirty tool-usage persistence every 5 seconds.
-     Avoids per-tool-call disk I/O in the hot path. *)
-  Eio.Fiber.fork ~sw (fun () ->
-    let rec loop () =
-      Eio.Time.sleep clock 5.0;
-      (try Keeper_registry_tool_usage_persistence.flush_all_dirty ()
-       with Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Log.Keeper.warn "tool_usage flush_all_dirty failed: %s"
-           (Printexc.to_string exn));
-      loop ()
-    in
-    loop ());
-  (* Background fiber: flush pending trajectory entries every 2 seconds.
-     Batches per-tool-call JSONL writes to reduce disk I/O. *)
-  Eio.Fiber.fork ~sw (fun () ->
-    let rec loop () =
-      Eio.Time.sleep clock 2.0;
-      (try Trajectory.flush_all_pending ()
-       with Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Log.Keeper.warn "trajectory flush_all_pending failed: %s"
-           (Printexc.to_string exn));
-      loop ()
-    in
-    loop ());
   (* 1. HTTP socket first — Railway healthcheck can reach /health immediately *)
   let config = Server_bootstrap_http.make_http_config ~host ~port in
   (* The listener identity comes only from the effective CLI/bootstrap config
@@ -785,299 +1358,57 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
   server_state := None;
   Server_startup_state.reset ~backend_mode:initial_backend_mode ();
 
-  (* 2. All init in background fiber — isolated on its own switch so a
-     failure in any init-time subsystem (keepers, maintenance, dashboard
-     refresh, etc.) cancels only that subtree and leaves the HTTP accept
-     loop running on the parent switch.  This is P1-5 Hierarchical
-     Supervision Phase 1.
-
-     [create_server_state] still attaches to the parent switch because
-     the resulting [server_state] (and its switch reference) is used by
-     the HTTP request path; we only want background init/maintenance
-     fibers to live on the child switch. *)
+  (* 2. Run owner initialization outside the accept loop. The state and
+     long-lived owner fibers attach to the parent switch because HTTP request
+     handlers use them after this setup fiber returns. A pre-readiness failure
+     exits immediately rather than leaving that partial owner alive; only an
+     auxiliary failure after readiness may continue as degraded serving. *)
   Eio.Fiber.fork ~sw (fun () ->
-    Eio.Switch.run @@ fun init_sw ->
-    let governance_level = Env_config_core.governance_level () in
-    let init_state_blocking () =
-      let t0 = Eio.Time.now clock in
-      (* Install the LLM provider metrics bridge BEFORE any subsystem
-         that might issue an LLM call.  Placed here — before server
-         state creation — so it is impossible for an init-time LLM
-         call (e.g. a warmup probe, early keeper fiber) to capture
-         the default noop sink instead of the Otel_metric_store-backed one. *)
-      Llm_metric_bridge.install ();
-      Llm_metric_bridge.init ~base_path;
-      Log.Server.info "Llm_metric_bridge installed (masc_llm_provider_http_status_total, inference-events JSONL)";
-      (* #13885: install backend mutex observers from the top-level
-         masc layer.  Backend/workspace sub-libraries cannot depend on
-         Otel_metric_store without creating dependency cycles, but the global
-         observer refs can be wired before any FileSystem backend writes. *)
-      Backend.FileSystem.set_mutex_observers
-        ~acquire:(fun ~op ~seconds ->
-          Otel_metric_store.observe_histogram
-            Otel_metric_store.metric_backend_mutex_acquire_sec
-            ~labels:[ ("op", op) ]
-            seconds)
-        ~held:(fun ~op ~seconds ->
-          Otel_metric_store.observe_histogram
-            Otel_metric_store.metric_backend_mutex_held_sec
-            ~labels:[ ("op", op) ]
-            seconds);
-      Log.Server.info "Backend_mutex_metrics installed (masc_backend_mutex_* metrics)";
-      Fd_accountant.set_pressure_hooks
-        ~active:Keeper_fd_pressure.active
-        ~nofile_soft_limit:Keeper_fd_pressure.process_nofile_soft_limit;
-      Log.Server.info "Fd_accountant pressure hooks installed";
-      (* Forward Agent_sdk.Log records (per-turn timing from oas#816 and
-         any subsequent structured emits) into the masc log ring so
-         they land in <base_path>/.masc/logs/system_log_*.jsonl alongside
-         masc's own records.  Without this, OAS's structured Log
-         global sink registry is empty and every Log.info inside
-         agent_sdk is a silent drop. *)
-      Agent_sdk_log_bridge.install ();
-      Log.Server.info "Agent_sdk_log_bridge installed (agent_sdk.Log -> masc structured log)";
-      let state =
-        create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr
-          ~fs ~env ()
-      in
-      (* Initialize the default Runtime singleton from runtime TOML.
-         Must happen after Config_dir_resolver is set up (inside
-         create_server_state) and before any runtime name resolution.
-
-         fail-fast: a missing config path or a missing/broken [runtime].default
-         is fatal — the server cannot route turns without a default Runtime.
-         The OAS capability-catalog gate may degrade only by removing
-         uncatalogued runtimes from the active routing set; it never dispatches
-         through OAS provider_default. *)
-      (match Runtime.config_path () with
-       | Some config_path ->
-         (match Runtime.init_default_degraded_report ~config_path with
-          | Ok Runtime.Initialized ->
-            Log.Server.info "Runtime default initialized: %s"
-              (Runtime.get_default_runtime_id ())
-          | Ok (Runtime.Initialized_degraded degradation) ->
-            Log.Server.warn
-              "Runtime default initialized in degraded catalog mode: %s"
-              (Runtime.startup_degradation_to_string degradation);
-            Log.Server.warn
-              "Runtime degraded effective default: %s"
-              (Runtime.get_default_runtime_id ())
-          | Error err ->
-            Log.Server.error
-              "Runtime.init_default_degraded failed (fatal, refusing to boot): %s"
-              (Runtime.strict_init_error_to_string err);
-            exit 1)
-       | None ->
-         Log.Server.error
-           "No runtime config path; cannot initialize default Runtime \
-            (fatal, refusing to boot)";
-         exit 1);
-      let t1 = Eio.Time.now clock in
-      Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
-      bootstrap_server_state_blocking state;
-      (* Recover per-keeper lifecycle transactions before any other keeper
-         metadata writer or autoboot reader is published. A changed keeper
-         generation is never overwritten; its journal remains visible as an
-         unresolved recovery record. *)
-      startup_recover_keeper_lifecycle_transactions state;
-      (* The retired-key migration performs a raw atomic rewrite without version CAS.
-         Run it before [server_state := Some state] publishes mutation routes,
-         and before connectors, maintenance, or keeper loops can write meta.
-         This makes writer exclusion structural instead of relying on a
-         best-effort boot timing window. *)
-      startup_migrate_retired_keeper_meta_keys state;
-      sync_admin_token_env state;
-      sync_internal_keeper_token_env state;
-      sync_bootable_keeper_credentials state;
-      let path_diagnostics =
-        runtime_path_diagnostics ~input_base_path:base_path state
-      in
-      Server_base_path_diagnostics.log_startup_warning path_diagnostics;
-      if Server_base_path_diagnostics.startup_should_abort path_diagnostics then begin
-        Log.Server.error "%s\nStartup guard rejected malformed runtime state."
-          (Option.value path_diagnostics.warning
-             ~default:
-               "startup guard triggered without a diagnostic warning");
-        exit 1
-      end;
-      if Server_base_path_diagnostics.strict_violation path_diagnostics then begin
-        Log.Server.error "%s\nBase-path strict mode rejected the resolved runtime path configuration."
-          (Option.value path_diagnostics.warning
-             ~default:
-               "strict base-path guard triggered without a diagnostic warning");
-        exit 1
-      end;
-      Governance_registry.ensure_init ();
-      Runtime_params.restore ~base_path;
-      Log.Server.info "Runtime_params restored from %s" base_path;
-      Keeper_crash_persistence.start_drain_fiber ~sw ~clock;
-      (* #10130: sweep [save_file_atomic] orphan temp files left by
-         SIGKILL'd or ENFILE-crashed prior processes.  Zero-byte
-         orphans are deleted; non-zero orphans (evidence of silent
-         atomic-save data loss) are preserved in
-         [<base_path>/.recovered/] for forensic inspection.  Always
-         runs at boot so each restart publishes fresh cleanup
-         counters.
-
-         #10205 finding 5: the sweep walks every keeper subdirectory
-         under [base_path] ([Sys.readdir] per directory + [Unix.stat]
-         per orphan candidate).  It does NOT need to gate
-         [install_tooling] or the [Bootstrap completed] log line —
-         the sweep results are advisory diagnostics, not a
-         precondition for serving.  Fork it into a background fiber
-         so the boot hot path completes immediately; the counter
-         and WARN publish asynchronously, which is the right shape
-         for operator dashboards (delta-from-zero, not synchronous
-         readback). *)
-      Eio.Fiber.fork ~sw (fun () ->
-        try
-          let deleted, preserved =
-            Fs_compat.cleanup_atomic_orphans ~base_path ()
-          in
-          if deleted > 0 then
-            Otel_metric_store.inc_counter
-              Otel_metric_store.metric_fs_atomic_orphans_cleaned
-              ~labels:[ ("size_class", Atomic_orphan_size_class.(to_label Empty)) ]
-              ~delta:(float_of_int deleted)
-              ();
-          if preserved > 0 then
-            Otel_metric_store.inc_counter
-              Otel_metric_store.metric_fs_atomic_orphans_cleaned
-              ~labels:[ ("size_class", Atomic_orphan_size_class.(to_label With_data)) ]
-              ~delta:(float_of_int preserved)
-              ();
-          if deleted + preserved > 0 then
-            Log.Server.warn
-              "boot: cleaned %d save_file_atomic orphans (%d empty, \
-               %d preserved with data in .recovered/ — see #10130)"
-              (deleted + preserved) deleted preserved
-        with Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-             Log.Server.error
-               "boot: atomic orphan sweep failed: %s"
-               (Printexc.to_string exn));
-      (* #9786: audit credential store for shared bearer tokens.
-         When two credentials hash to the same token,
-         [find_credential_by_token] silently routes to the FIRST
-         match — which is exactly the [bearer token belongs to X]
-         rejection observed when the second agent's name does not
-         match the first agent's credential.  Surface the
-         duplicate at boot so operators can rotate tokens before
-         requests start failing. *)
-      (try
-         let groups = Auth.audit_token_uniqueness base_path in
-         List.iter
-           (fun (token_hash_prefix, agent_names) ->
-             Otel_metric_store.inc_counter
-               Otel_metric_store.metric_auth_credential_token_duplicate
-               ~labels:[ ("token_hash_prefix", token_hash_prefix) ]
-               ();
-             Log.Server.warn
-               "#9786 credential token shared by %d agents \
-                [%s] (token_hash_prefix=%s) — rotate via \
-                Auth.create_token to prevent bearer-token routing \
-                ambiguity"
-               (List.length agent_names)
-               (String.concat ", " agent_names)
-               token_hash_prefix)
-           groups
-       with Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-            Log.Server.error
-              "boot: credential token uniqueness audit failed: %s"
-              (Printexc.to_string exn));
-      let t2 = Eio.Time.now clock in
-      Log.Server.info "Bootstrap completed in %.1fs" (t2 -. t1);
-      (* 2026-05-05 deploy-gap audit (#12943 follow-up): warn loudly when
-         the running binary is more than [stale_threshold_hours] behind
-         the build-env commit timestamp.  Runtime repo HEAD is intentionally
-         ignored here: it is checkout truth, not proof that this executable
-         was rebuilt from that commit. *)
-      let stale_threshold_hours = 12 in
-      let build = Build_identity.current () in
-      (match build.binary_commit, build.binary_commit_age_seconds with
-       | Some binary_commit, Some age
-         when age > stale_threshold_hours * Masc_time_constants.hour_int ->
-         let hours = age / Masc_time_constants.hour_int in
-         Log.Server.warn
-           "Server binary commit %s is %d hours old (>%dh threshold). \
-            Rebuild + restart recommended to pick up newer fixes; see \
-            /health build.binary_commit_age_seconds."
-           binary_commit
-           hours stale_threshold_hours
-       | _ -> ());
-      Server_bootstrap_loops.install_tooling ~governance_level state;
-      Log.Server.info "Tooling + schemas in %.1fs" (Eio.Time.now clock -. t2);
-      (state, path_diagnostics)
-    in
-    let run_lazy_task (task_name, task_fn) =
-      Log.Server.info "lazy_task: starting %s" task_name;
-      try
-        task_fn ();
-        Log.Server.info "lazy_task: finished %s" task_name;
-        Server_startup_state.finish_lazy_task ~task:task_name
+    let handle_initialization_failure error =
+      match
+        startup_failure_disposition
+          ~state_ready:Server_startup_state.(!state).state_ready
       with
-      | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn ->
-          let error = Printexc.to_string exn in
-          Log.Server.error "lazy startup task %s failed: %s" task_name error;
-          Server_startup_state.fail_lazy_task ~task:task_name ~error
-    in
-    let start_lazy_startup state =
-      let task_fn = function
-        | "restore_sessions" -> fun () -> restore_persisted_sessions state
-        | "reconcile_active_agents" -> fun () ->
-            reconcile_active_agents_gauge state
-        | "prompt_bootstrap" -> fun () -> bootstrap_prompt_state state
-        | "keeper_history_migration" -> fun () ->
-            startup_migrate_keeper_histories state
-        | "telemetry_warmup" -> fun () ->
-            warm_tool_registry_from_telemetry state
-        | "tool_metrics_restore" -> fun () ->
-            restore_tool_metrics_from_disk state
-        | "jsonl_prune" -> fun () -> startup_prune_jsonl state
-        | task_name ->
-            raise
-              (Invalid_argument
-                 (Printf.sprintf "unknown lazy startup task: %s" task_name))
-      in
-      let task_names = lazy_startup_task_names () in
-      let task_groups =
-        lazy_startup_plan ()
-        |> List.map (fun group ->
-               (group, List.map (fun name -> (name, task_fn name)) group.task_names))
-      in
-      let execution_to_string = function
-        | Parallel -> "parallel"
-        | Serial -> "serial"
-      in
-      let run_lazy_task_group (group, tasks) =
-        Log.Server.info
-          "lazy_task_group: starting %s (%s, %d tasks)"
-          group.group_name
-          (execution_to_string group.execution)
-          (List.length tasks);
-        (match group.execution with
-         | Parallel ->
-             Eio.Fiber.all
-               (List.map (fun task () -> run_lazy_task task) tasks)
-             |> ignore
-         | Serial -> List.iter run_lazy_task tasks);
-        Log.Server.info "lazy_task_group: finished %s" group.group_name
-      in
-      Server_startup_state.activate_lazy
-        ~backend_mode:(Workspace.backend_name (Mcp_server.workspace_config state))
-        ~tasks:task_names;
-      Eio.Fiber.fork ~sw (fun () -> List.iter run_lazy_task_group task_groups)
+      | Fatal_pre_ready ->
+        Log.Server.error
+          "[FATAL] Critical startup failed before readiness; refusing partial BasePath ownership: %s"
+          error;
+        exit 1
+      | Degraded_after_ready ->
+        Server_startup_state.mark_degraded ~error;
+        Log.Server.error
+          "Auxiliary initialization failed after readiness (HTTP remains available in degraded state): %s"
+          error
     in
     try
       Server_startup_state.mark_blocking ~backend_mode:initial_backend_mode;
-      let state, path_diagnostics =
-        init_state_blocking ()
+      let initialized_owner =
+        initialize_owner_state_blocking ~sw ~env ~base_path ?input_base_path
+          ~clock ~mono_clock ~net ~domain_mgr ~proc_mgr ~fs ()
       in
+      let activated_owner =
+        activate_owner_state
+        ~sw
+        ~clock
+        ~net
+        ~domain_mgr
+        ~proc_mgr
+        initialized_owner
+      in
+      let state = activated_owner.state in
+      (* Authentication wrappers treat [server_state = Some _] as the mutation
+         capability boundary. Publish only after transport-neutral activation
+         has restored Gate state and started the owner persistence lanes. *)
       server_state := Some state;
-      Server_startup_state.mark_state_ready
-        ~backend_mode:(Workspace.backend_name (Mcp_server.workspace_config state));
+      (* Global readiness is the transport-neutral owner capability, not a
+         quorum over optional transports. Mark it before starting fallible
+         Discord/gRPC/WS/WebRTC/dashboard auxiliaries so one transport cannot
+         turn an already-published HTTP owner into a process-wide fatal
+         pre-readiness failure. Each auxiliary owns its typed health state. *)
+      (match mark_owner_state_ready state with
+       | Ok () -> ()
+       | Error error -> raise (Owner_initialization_failed error));
+      let path_diagnostics = activated_owner.path_diagnostics in
       let resolved_base, masc_dir =
         Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
       in
@@ -1092,35 +1423,30 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Server_slack_in_process_gateway.start ~sw ~env ~state;
       Server_bootstrap_http.print_startup_banner ~config ~resolved_base ~base_path
         ~masc_dir ~path_diagnostics;
-      (* Create the shared Domain_pool for dashboard compute and optional
-         keeper offload.  The raw Executor_pool reference remains available
-         for existing dashboard call sites, but new runtime call sites should
-         go through Domain_pool_ref to preserve IO/CPU weight policy. *)
-      let domain_pool =
-        Domain_pool.create
-          ~sw
-          ?domain_count:(Env_config.Executor.domain_count_override ())
-          domain_mgr
-      in
-      Domain_pool_ref.set domain_pool;
-      Server_dashboard_http.set_executor_pool (Domain_pool.executor_pool domain_pool);
-      Log.Server.info
-        "Domain_pool created (%d domains) for dashboard/keeper compute"
-        (Domain_pool.domain_count domain_pool);
-      (* Start auxiliary transports before optional warmups and keeper loops.
-         Otherwise HTTP can report ready while gRPC/WS startup is still stuck
-         behind heavier startup work. *)
+      (* Dashboard owns only its executor projection; the shared pool itself
+         belongs to the transport-neutral owner bootstrap so stdio Keepers get
+         the same offload behavior. *)
+      Server_dashboard_http.set_executor_pool
+        (Domain_pool.executor_pool activated_owner.domain_pool);
+      (* Auxiliary transports start after owner readiness and report their own
+         availability. They must not gain lifecycle authority over HTTP or
+         unrelated Keeper lanes. *)
       (* gRPC workspace transport (default-on, opt-out via MASC_GRPC_ENABLED=0) *)
       let tool_dispatcher tool_name args_json =
         let arguments =
           try Yojson.Safe.from_string args_json
           with Yojson.Json_error _ -> `Assoc []
         in
+        let workspace_scope = Mcp_server.workspace_scope state in
         let result =
-          Mcp_server_eio_execute.execute_tool_eio ~sw ~clock state
+          Mcp_server_eio_execute.execute_tool_eio
+            ~sw
+            ~clock
+            ~workspace_scope
+            state
             ~name:tool_name ~arguments
         in
-        let success = Tool_result.is_success result
+        let success = not (Tool_result.is_failed result)
         and result_str = Tool_result.message result
         in
         if not success then
@@ -1368,11 +1694,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock;
-      (* RFC-0284: push goal-loop OODA status over SSE on change so the panel
-         stops polling. The worker is out-of-process (Python), so the trigger
-         is this server-side tick reading the cached status.json. *)
-      Server_dashboard_http_goal_loop_broadcast.start_goal_loop_refresh_loop
-        ~state ~sw ~clock;
       (* Pre-warm shell cache in a separate fiber so it cannot block
          lazy startup tasks or later keeper loop startup
          (#keeper-bootstrap-stuck). *)
@@ -1402,16 +1723,13 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           ~sw
           ~clock
           ~request_authority:background_request_authority);
-      start_lazy_startup state;
-      (* RFC-0206: runtime catalog startup validation removed; Runtime.init_default
-         already fail-fasts on an invalid runtime config at boot. *)
-      Server_bootstrap_loops.start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr state
+      ()
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
+    | Owner_initialization_failed error ->
+      handle_initialization_failure (owner_initialization_error_to_string error)
     | exn ->
-      Server_startup_state.mark_degraded ~error:(Printexc.to_string exn);
-      Log.Server.error "Background init failed (HTTP still serving): %s"
-        (Printexc.to_string exn));
+      handle_initialization_failure (Printexc.to_string exn));
 
   (* 2b. Startup watchdog: if init does not reach state_ready within timeout,
      log and exit so external process managers can restart the server.

@@ -87,7 +87,7 @@ let strict_success_names =
 let strict_guard_cases =
   [
     ("masc_reset", [ "confirm" ]);
-    ("masc_keeper_msg", [ "requires Eio context" ]);
+    ("masc_keeper_delegate", [ "requires Eio context" ]);
   ]
 
 let endpoint_unavailable_guard_names =
@@ -108,9 +108,9 @@ let endpoint_unavailable_guard_fragments =
 
 let generic_matrix_excluded_names =
   [
-    "masc_keeper_msg";
+    "masc_keeper_delegate";
     "masc_operator_snapshot";
-    (* Excluded: masc_keeper_msg / masc_operator_snapshot require a live
+    (* Excluded: masc_keeper_delegate / masc_operator_snapshot require a live
        keeper context to pass tag_registry validation in the standalone runner.
        TODO: wire into the matrix runner with a minimal keeper stub,
        or split into a keeper-matrix suite. *)
@@ -227,16 +227,8 @@ let temp_dir prefix =
   dir
 
 (* Must equal the keeper registry's normalized identity for the keeper
-   fixture registered in test_keeper_tool_matrix_cases.ml's [make_fixture]
-   ("tool-matrix" — Keeper_registry strips the "keeper-" prefix from
-   meta.name when resolving the keeper's own agent_name for dispatch
-   context). Confirmed empirically: ctx.agent_name inside
-   Workspace_goals.principal_matches_authenticated_caller is "tool-matrix",
-   not meta.name/meta.agent_name ("keeper-tool-matrix"). Self-attested
-   actor/principal fields built here (via [goal_principal]) must match, or
-   masc_goal_transition/masc_goal_verify's identity-binding guard rejects
-   every matrix call ("<field> id must match authenticated caller") instead
-   of exercising the real transition/verification path. *)
+   fixture registered in [make_fixture]. The auth token and dispatch context
+   use this identity for tools that require an authenticated actor. *)
 let tool_matrix_agent_name = "tool-matrix"
 
 let rec waitpid_nointr pid =
@@ -299,7 +291,10 @@ let setup_git_repo base_path =
   sandbox_dir
 
 let execute_tool fixture ~name ~arguments =
-  Mcp_eio.execute_tool_eio ~sw:fixture.sw ~clock:fixture.clock
+  Mcp_eio.execute_tool_eio
+    ~sw:fixture.sw
+    ~clock:fixture.clock
+    ~workspace_scope:(Mcp_server.workspace_scope fixture.state)
     ~auth_token:fixture.auth_token
     ~mcp_session_id:fixture.sid fixture.state ~name ~arguments
 
@@ -638,7 +633,6 @@ let field_value fixture ~tool_name field_name schema =
   | "progress" -> `String "tool matrix progress"
   | "reason" when tool_name = "masc_handover_create" -> `String "explicit"
   | "notes" | "note" | "reason" -> `String "tool matrix note"
-  | "override_note" -> `String "tool matrix override"
   | "priority" -> `Int 2
   | "assertions" -> `List [ `String "joined" ]
   | "agents" -> `List [ `String "definitely-missing-agent" ]
@@ -662,15 +656,21 @@ let field_value fixture ~tool_name field_name schema =
           "masc_keeper_up";
         ] ->
       `String "bad keeper!"
-  | "name" when tool_name = "masc_keeper_msg" ->
-      `String "bad keeper!"
+  | "target" when tool_name = "masc_keeper_delegate" ->
+      `Assoc [ "kind", `String "keeper"; "name", `String "bad keeper!" ]
+  | "run_ref"
+    when List.mem tool_name
+           [ "masc_keeper_delegate_status"; "masc_keeper_delegate_cancel" ] ->
+      `Assoc
+        [ "run_id", `String "missing-run"
+        ; "target", `Assoc [ "kind", `String "keeper"; "name", `String "tool-matrix" ]
+        ; "capability", `String "invoke_turn"
+        ]
   | "name" -> `String "tool-matrix"
   | "verification_id" -> `String (ensure_verification_request fixture)
   | "verifier" -> `String fixture.agent_name
   | "verdict" -> `String "pass"
   | "score" -> `Float 0.9
-  | "timeout_sec" when tool_name = "masc_keeper_msg" ->
-      `Float 1.0
   | "timeout" when tool_name = "masc_listen" -> `Int 1
   | "interval" when tool_name = "masc_heartbeat_start" -> `Int 5
   | "ice_candidates" -> `List [ `String "candidate:tool-matrix" ]
@@ -754,8 +754,6 @@ let tool_arguments fixture (schema : Masc_domain.tool_schema) =
       match name with
       | "masc_start" -> [ "path"; "task_title" ]
       | "masc_heartbeat_start" -> [ "interval" ]
-      | "masc_keeper_msg" ->
-          [ "timeout_sec" ]
       | "masc_board_post" ->
           (* Schema no longer requires content|author (both are validated at
              the handler layer so body/content aliases both work). Matrix
@@ -766,8 +764,7 @@ let tool_arguments fixture (schema : Masc_domain.tool_schema) =
              (validated at the handler layer), but the matrix fixture must
              supply a non-empty body or the handler rejects the edit. *)
           [ "body" ]
-      | "masc_goal_transition" ->
-          [ "override_note"; "note" ]
+      | "masc_goal_transition" -> [ "note" ]
       | _ -> []
     in
     List.sort_uniq String.compare (required @ optional)

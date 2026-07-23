@@ -6,7 +6,7 @@
 
     1. Runtime enumeration: operators can query all flags and their values
     2. Consistency verification: CI lint compares registry defaults against actual get_bool calls
-    3. Lifecycle tracking: Active → Deprecated → Removed state machine
+    3. Lifecycle tracking for supported public flags
     4. Documentation: machine-readable flag catalog
 
     @since 2.162.0
@@ -14,7 +14,9 @@
 
 open Env_config_core
 
-(** Flag lifecycle state machine: Active → Deprecated → (removed from registry) *)
+(** Lifecycle for supported public flags. A setting proven to have no runtime
+    consumer is not a supported flag and is hard-deleted from its reader,
+    registry entry, and operator documentation in one change. *)
 type lifecycle =
   | Active
   | Deprecated of string  (** reason for deprecation *)
@@ -64,11 +66,6 @@ let all_flags : flag list = [
   (* RFC-0084 host-config-cleanup-J — MASC_DISPATCH_V2 entry removed.
      The Hashtbl dispatch path is the only path. *)
 
-  { env_name = "MASC_FULL_SURFACE";
-    description = "Include hidden/developer tools in tool list";
-    default = false; category = "tool";
-    lifecycle = Active; since = "2.90.0" };
-
   { env_name = Env_config_core.parse_warn_env_key;
     description = "Escalate malformed env parses to Config_error";
     default = false; category = "tool";
@@ -110,25 +107,10 @@ let all_flags : flag list = [
     default = true; category = "keeper";
     lifecycle = Active; since = "2.162.0" };
 
-  { env_name = "MASC_KEEPER_SMART_HEARTBEAT";
-    description = "Skip heartbeat cycles when busy (task proves liveness) or extend interval when idle";
-    default = true; category = "keeper";
-    lifecycle = Active; since = "2.163.0" };
-
-  { env_name = "MASC_KEEPER_VISIBILITY_GATE";
-    description = "Delay proactive idle turns when no SSE consumer is observing and no pending signal exists";
-    default = true; category = "keeper";
-    lifecycle = Active; since = "2.250.0" };
-
   { env_name = "MASC_KEEPER_WIRE_CAPTURE";
     description = "Default-off diagnostic MASC-to-OAS request/response wire capture";
     default = false; category = "keeper";
     lifecycle = Experimental; since = "2.254.0" };
-
-  { env_name = "MASC_CONNECTOR_AMBIENT_WAKE_ENABLED";
-    description = "Wake an idle keeper on an ambient connector message via an external-attention edge stimulus (RFC-connector-ambient-attention-wake). Off until the spurious-wake throttle (P4) lands; enabling without it would run a turn on every ambient line.";
-    default = false; category = "keeper";
-    lifecycle = Experimental; since = "2.252.0" };
 
   { env_name = "MASC_KEEPER_DEBUG";
     description = "Keeper debug logging";
@@ -140,25 +122,10 @@ let all_flags : flag list = [
     default = false; category = "keeper";
     lifecycle = Active; since = "2.233.0" };
 
-  (* ── Dashboard & Governance ───────────────────────────────── *)
-  { env_name = "MASC_DISABLE_HITL";
-    description = "Disable Human-in-the-loop (HITL) approval gates globally";
-    default = false; category = "dashboard";
-    lifecycle = Active; since = "2.250.0" };
-
+  (* ── Dashboard ────────────────────────────────────────────── *)
   { env_name = "MASC_DASHBOARD_FIXTURES_ENABLED";
     description = "Load dashboard fixture data for testing";
     default = false; category = "dashboard";
-    lifecycle = Active; since = "2.140.0" };
-
-  { env_name = "MASC_DASHBOARD_GOVERNANCE_JUDGE_ENABLED";
-    description = "Governance judgment background loop";
-    default = true; category = "dashboard";
-    lifecycle = Active; since = "2.140.0" };
-
-  { env_name = "MASC_OPERATOR_JUDGE_ENABLED";
-    description = "Operator background judgment loop";
-    default = true; category = "dashboard";
     lifecycle = Active; since = "2.140.0" };
 
   { env_name = "MASC_OPERATOR_CACHE_BACKGROUND_REVALIDATE";
@@ -166,44 +133,18 @@ let all_flags : flag list = [
     default = true; category = "dashboard";
     lifecycle = Active; since = "2.150.0" };
 
-  (* ── Inference & Chain ────────────────────────────────────── *)
-  { env_name = "MASC_INFERENCE_CACHE_ENABLED";
-    description = "L1+L2 inference response caching";
-    default = true; category = "inference";
-    lifecycle = Active; since = "2.110.0" };
-
   (* ── Runtime ──────────────────────────────────────────────── *)
   { env_name = Env_config_core.orchestrator_enabled_env_key;
-    description = "Auto-orchestration background loop (superseded by zero-zombie cleanup)";
+    description = "Enable the orchestrator task-availability check loop";
     default = false; category = "runtime";
-    lifecycle = Deprecated "superseded by zero-zombie cleanup since v2.130.0"; since = "2.0.0" };
+    lifecycle = Active; since = "2.0.0" };
 
   { env_name = "MASC_LOCAL_RUNTIME_DEBUG";
     description = "Local LLM runtime debug output";
     default = false; category = "runtime";
     lifecycle = Active; since = "2.200.0" };
 
-  { env_name = "MASC_SHELL_IR_APPROVAL_GATE_ENABLED";
-    description = "Route Execute tool calls through the capability-based Shell IR approval policy gate";
-    default = true; category = "runtime";
-    lifecycle = Active; since = "2.234.0" };
   (* ── Contract verification ───────────────────────────────── *)
-  { env_name = "MASC_VERIFICATION_FSM_ENABLED";
-    description = "Task verification FSM: AwaitingVerification state and cross-agent approval";
-    default = true; category = "runtime";
-    lifecycle = Active; since = "0.9.3" };
-
-  (* RFC-0323 G-5 Phase B: route all task completion through submit→approve
-     (verification-required) regardless of contract.strict. Default off —
-     flip only when the readiness gate §5 holds (≥2 distinct verifier
-     identities per submitting room, else solo-room starvation with no timer
-     backstop, RFC-0220 §5/§11). Only the done guard flips; the evidence
-     gate stays on contract.strict (Phase A scope). *)
-  { env_name = "MASC_VERIFICATION_DEFAULT_ON";
-    description = "RFC-0323 G-5 Phase B: verification-required by default (submit→approve)";
-    default = false; category = "runtime";
-    lifecycle = Active; since = "0.20.0" };
-
 ]
 
 (** Lookup a flag by env var name. O(n) — acceptable for ~30 flags. *)

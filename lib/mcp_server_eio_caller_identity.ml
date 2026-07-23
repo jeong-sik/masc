@@ -1,5 +1,9 @@
 type owner_keeper_identity = string * string option
 
+type direct_call_authority =
+  | Catalog_policy
+  | Restricted_profile
+
 type t = {
   agent_name : string;
   agent_name_is_ephemeral : bool;
@@ -13,7 +17,6 @@ type t = {
   token : string option;
   has_explicit_agent_name : bool;
   verified_internal_keeper_runtime : bool;
-  internal_keeper_runtime_tool : bool;
   owner_keeper_identity : owner_keeper_identity option;
   mode_gate_error : string option;
 }
@@ -231,8 +234,8 @@ let resolve_explicit_bound_alias ~config ~workspace_initialized ~log_mcp_exn
     agent_name
 
 let resolve ~(config : Workspace_utils_backend_setup.config) ~tool_name ~arguments ~identity
-    ~cached_resolved_agent ~auth_token ~internal_keeper_runtime ~workspace_initialized
-    ~log_mcp_exn =
+    ~cached_resolved_agent ~auth_token ~internal_keeper_runtime
+    ~direct_call_authority ~workspace_initialized ~log_mcp_exn =
   let explicit_agent_name = caller_agent_name_from_arguments arguments in
   let has_explicit_agent_name = Option.is_some explicit_agent_name in
   let minted_name =
@@ -246,11 +249,6 @@ let resolve ~(config : Workspace_utils_backend_setup.config) ~tool_name ~argumen
     | Some raw -> Auth.verify_internal_keeper_token config.base_path ~token:raw
     | None -> false
   in
-  (* The Agent_internal surface was empty (agent_internal_surface_tools = []),
-     so this flag was already always [false].  Surface deleted in the
-     surface-cut refactor; flag retained because [mcp_server_eio_execute]
-     reads it to skip the direct-call block for internal keeper runtimes. *)
-  let internal_keeper_runtime_tool = false in
   let owner_keeper_identity =
     match token with
     | None -> None
@@ -265,8 +263,9 @@ let resolve ~(config : Workspace_utils_backend_setup.config) ~tool_name ~argumen
   in
   let mode_gate_error =
     if
-      (not internal_keeper_runtime_tool)
-      && not (Tool_catalog.allow_direct_call tool_name)
+      match direct_call_authority with
+      | Restricted_profile -> false
+      | Catalog_policy -> not (Tool_catalog.allow_direct_call tool_name)
     then
       Some (direct_call_block_message tool_name)
     else
@@ -293,7 +292,6 @@ let resolve ~(config : Workspace_utils_backend_setup.config) ~tool_name ~argumen
     token;
     has_explicit_agent_name;
     verified_internal_keeper_runtime;
-    internal_keeper_runtime_tool;
     owner_keeper_identity;
     mode_gate_error;
   }

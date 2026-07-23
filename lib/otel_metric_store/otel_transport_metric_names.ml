@@ -97,6 +97,10 @@ let metric_slack_inbound_dispatch =
   Otel_metric_store_core.declare_counter "masc_slack_inbound_dispatch_total"
 ;;
 
+let metric_slack_ambient_record =
+  Otel_metric_store_core.declare_counter "masc_slack_ambient_record_total"
+;;
+
 let metric_slack_outbound_replies =
   Otel_metric_store_core.declare_counter "masc_slack_outbound_replies_total"
 ;;

@@ -18,13 +18,6 @@ include Keeper_status_bridge
 (* Re-export handle_keeper_status from the detail module *)
 let handle_keeper_status = Keeper_status_detail.handle_keeper_status
 
-let read_tail_lines_or_empty ~site path ~max_bytes ~max_lines =
-  match read_file_tail_lines_result path ~max_bytes ~max_lines with
-  | Ok lines -> lines
-  | Error exn_class ->
-      record_memory_recall_read_error ~site path exn_class;
-      []
-
 let handle_keeper_list ctx args : tool_result =
   let limit = max 0 (get_int args "limit" 50) in
   let detailed = get_bool args "detailed" false in
@@ -38,7 +31,7 @@ let handle_keeper_list ctx args : tool_result =
       ("count", `Int (List.length keeper_names));
       ("keepers", `List (List.map (fun k -> `String k) keeper_names));
     ] in
-    tool_result_ok (Yojson.Safe.to_string json)
+    tool_result_ok_data json
   else
     let now_ts = Time_compat.now () in
     let keepers =
@@ -65,18 +58,8 @@ let handle_keeper_list ctx args : tool_result =
           let last_compaction_saved_tokens =
             max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
           in
-          let (compact_ratio_gate, compact_message_gate, compact_token_gate) =
-            compaction_policy_of_keeper m
-          in
           let metrics_store = Keeper_types_support.keeper_metrics_store ctx.config m.name in
-          let metrics_path = Keeper_types_support.keeper_metrics_path ctx.config m.name in
-          let metrics_window_lines =
-            let dated = Dated_jsonl.read_recent_lines metrics_store 120 in
-            if dated <> [] then dated
-            else
-              read_tail_lines_or_empty ~site:"keeper_status_metrics" metrics_path
-                ~max_bytes:120000 ~max_lines:120
-          in
+          let metrics_window_lines = Dated_jsonl.read_recent_lines metrics_store 120 in
           let last_metrics =
             match List.rev metrics_window_lines with
             | line :: _ -> (try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None)
@@ -84,19 +67,6 @@ let handle_keeper_list ctx args : tool_result =
           in
           let metrics_overview =
             summarize_metrics_lines metrics_window_lines ~default_generation:m.runtime.generation
-          in
-          let last_skill_metrics =
-            let rec find_latest = function
-              | [] -> None
-              | line :: tl ->
-                  (try
-                     let j = Yojson.Safe.from_string line in
-                     match Safe_ops.json_string_opt "skill_primary" j with
-                     | Some primary when String.trim primary <> "" -> Some j
-                     | _ -> find_latest tl
-                   with Yojson.Json_error _ -> find_latest tl)
-            in
-            find_latest (List.rev metrics_window_lines)
           in
           (* RFC-0149 §3.1 — single typed read drives both the structured
              [memory_bank_summary] (consumed by [memory_bank] / counts
@@ -137,16 +107,6 @@ let handle_keeper_list ctx args : tool_result =
               in
               empty, note
           in
-            let compaction_cooldown_remaining_s =
-              let cooldown = Float.of_int m.compaction.cooldown_sec in
-              if cooldown <= 0.0 then
-                0.0
-              else if m.runtime.compaction_rt.last_ts <= 0.0 then
-                0.0
-              else
-                let elapsed = now_ts -. m.runtime.compaction_rt.last_ts in
-                max 0.0 (cooldown -. elapsed)
-          in
           let context_json =
             match last_metrics with
             | None -> `Assoc [("source", `String "none")]
@@ -158,37 +118,6 @@ let handle_keeper_list ctx args : tool_result =
                 ("context_max", `Int (Safe_ops.json_int "context_max" metrics));
                 ("message_count", `Int (Safe_ops.json_int "message_count" metrics));
               ]
-          in
-          let skill_route_json =
-            let fallback_selection_mode_string = "agent" in
-            let fallback_selection_provenance = "fallback" in
-            match last_skill_metrics with
-            | None -> `Null
-            | Some metrics ->
-                let primary = Safe_ops.json_string_opt "skill_primary" metrics in
-                let secondary =
-                  match Json_util.assoc_member_opt "skill_secondary" metrics with
-                  | Some (`List xs) ->
-                      xs
-                      |> List.filter_map (fun v ->
-                           match v with `String s when String.trim s <> "" -> Some s | _ -> None)
-                  | None | Some _ -> []
-                in
-                let reason = Safe_ops.json_string_opt "skill_reason" metrics in
-                `Assoc [
-                  ("primary", Json_util.string_opt_to_json primary);
-                  ("secondary", `List (List.map (fun s -> `String s) secondary));
-                  ("reason", Json_util.string_opt_to_json reason);
-                  ( "selection_mode",
-                    `String
-                      (Safe_ops.json_string_opt "skill_selection_mode" metrics
-                       |> Option.value ~default:fallback_selection_mode_string) );
-                  ( "provenance",
-                    `String
-                      (Safe_ops.json_string_opt "skill_provenance" metrics
-                       |> Option.value ~default:fallback_selection_provenance) );
-                  ("authoritative", `Bool false);
-                ]
           in
           let runtime_blocker_fields =
             runtime_blocker_fields_json ctx.config m
@@ -220,7 +149,6 @@ let handle_keeper_list ctx args : tool_result =
               ("agent_name", `String m.agent_name);
               ("trace_id", `String (Keeper_id.Trace_id.to_string m.runtime.trace_id));
               ("generation", `Int m.runtime.generation);
-              ("goal", `String m.goal);
               ("keepalive_running", `Bool (runtime_keepalive_running ctx.config m));
               ("run_state", run_state_json);
               ("active_model", `String active_model);
@@ -232,23 +160,19 @@ let handle_keeper_list ctx args : tool_result =
               ("handoff_count_total", `Int trace_history_count);
               ("compaction_count", `Int m.runtime.compaction_rt.count);
               ("last_compaction_saved_tokens", `Int last_compaction_saved_tokens);
-              ("compaction_profile", `String m.compaction.profile);
-              ("compaction_ratio_gate", `Float compact_ratio_gate);
-              ("compaction_message_gate", `Int compact_message_gate);
-              ("compaction_token_gate", `Int compact_token_gate);
+              ( "compaction_consecutive_failures",
+                `Int m.runtime.compaction_rt.consecutive_failures );
+              ( "compaction_retry_suspended",
+                `Bool
+                  (Keeper_meta_contract.compaction_retry_suspended
+                     m.runtime.compaction_rt) );
               ("autoboot_enabled", `Bool m.autoboot_enabled);
               ("proactive_enabled", `Bool m.proactive.enabled);
-              ("proactive_idle_sec", `Int m.proactive.idle_sec);
-              ("proactive_cooldown_sec", `Int m.proactive.cooldown_sec);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);
               ("proactive_visible_count_total", `Int m.runtime.proactive_rt.visible_count_total);
               ("last_compaction_check_ts", `Float m.runtime.compaction_rt.last_check_ts);
               ( "last_compaction_decision",
-                let decision =
-                  compaction_runtime_decision_to_string
-                    m.runtime.compaction_rt.last_decision
-                in
-                if String.trim decision = "" then `Null else `String decision );
+                compaction_decision_json_or_null m.runtime.compaction_rt.last_decision );
               ("last_proactive_ts", `Float m.runtime.proactive_rt.last_ts);
               ("last_visible_proactive_ts", `Float m.runtime.proactive_rt.last_visible_ts);
               ("last_visible_proactive_ago_s", `Float last_visible_proactive_ago_s);
@@ -267,8 +191,6 @@ let handle_keeper_list ctx args : tool_result =
             ]
             @ runtime_blocker_fields
             @ attention_fields @ [
-              ("compaction_cooldown_sec", `Int m.compaction.cooldown_sec);
-              ("compaction_cooldown_remaining_s", `Float compaction_cooldown_remaining_s);
               ("autonomous_turn_count", `Int m.runtime.autonomous_turn_count);
               ("autonomous_text_turn_count", `Int m.runtime.autonomous_text_turn_count);
               ("autonomous_tool_turn_count", `Int m.runtime.autonomous_tool_turn_count);
@@ -282,23 +204,15 @@ let handle_keeper_list ctx args : tool_result =
               ("memory_recent_note",
                 Json_util.string_opt_to_json memory_recent_note);
               ("context", context_json);
-              ("skill_route", skill_route_json);
               ("metrics_overview", metrics_summary_to_json metrics_overview);
               ("memory_bank", memory_summary_to_json memory_bank_summary);
               ("storage_paths", `Assoc [
                 ("meta", `String (keeper_meta_path ctx.config m.name));
                 ("metrics", `String (Dated_jsonl.base_dir metrics_store));
-                ("metrics_single_file", `String metrics_path);
                 ( "memory_bank"
                 , `String (Keeper_types_support.keeper_memory_bank_path ctx.config m.name) );
-                ( "policy"
-                , `String (Keeper_types_support.keeper_policy_log_path ctx.config m.name) );
                 ( "feedback"
                 , `String (Keeper_types_support.keeper_feedback_log_path ctx.config m.name) );
-                ( "dataset_export"
-                , `String
-                    (Keeper_types_support.keeper_dataset_export_path ctx.config m.name)
-                );
                 ( "session_dir"
                 , `String
                     (Keeper_types_support.keeper_session_dir
@@ -322,16 +236,12 @@ let handle_keeper_list ctx args : tool_result =
         ("count", `Int (List.length keepers));
         ("keepers", `List keepers);
       ] in
-      tool_result_ok (Yojson.Safe.to_string json)
+      tool_result_ok_data json
 
 let handle_keeper_trajectory ctx args : tool_result =
   let requested_name = String.trim (get_string args "name" "") in
   if not (validate_name requested_name) then
-    tool_result_error
-      (Printf.sprintf
-         "invalid keeper name %S (must be non-empty and match \
-          [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
-         requested_name)
+    tool_result_error (invalid_name_error requested_name)
   else
     match read_meta_resolved ctx.config requested_name with
     | Error e -> tool_result_error ("read error: " ^ e)
@@ -366,16 +276,12 @@ let handle_keeper_trajectory ctx args : tool_result =
           ("showing", `Int (List.length recent));
           ("entries", `List json_list);
         ] in
-        tool_result_ok (Yojson.Safe.to_string json)
+        tool_result_ok_data json
 
 let handle_keeper_eval ctx args : tool_result =
   let requested_name = String.trim (get_string args "name" "") in
   if not (validate_name requested_name) then
-    tool_result_error
-      (Printf.sprintf
-         "invalid keeper name %S (must be non-empty and match \
-          [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
-         requested_name)
+    tool_result_error (invalid_name_error requested_name)
   else
     match read_meta_resolved ctx.config requested_name with
     | Error e -> tool_result_error ("read error: " ^ e)
@@ -434,4 +340,4 @@ let handle_keeper_eval ctx args : tool_result =
           ("scenario_file", scenario_info);
           ("autonomous_action_count", `Int m.runtime.autonomous_action_count);
         ] in
-        tool_result_ok (Yojson.Safe.to_string json)
+        tool_result_ok_data json

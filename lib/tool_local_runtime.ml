@@ -33,13 +33,13 @@ let ok_response ~tool_name ~start_time fields : Core.tool_result =
 ;;
 
 let err_response ~tool_name ~start_time ~class_ msg : Core.tool_result =
-  let body = Tool_args.error_response msg in
-  let data =
-    match Tool_result.structured_payload_of_message body with
-    | Some json -> json
-    | None -> `String body
-  in
-  Tool_result.make_err ~tool_name ~class_ ~start_time ~data body
+  let data = Tool_args.error_assoc [ "message", `String msg ] in
+  Tool_result.make_err
+    ~tool_name
+    ~class_
+    ~start_time
+    ~data
+    (Yojson.Safe.to_string data)
 ;;
 
 let handle_models _ctx : Core.tool_result =
@@ -164,7 +164,7 @@ let handle_runtime_bench _ctx args : Core.tool_result =
         ~class_:Tool_result.Runtime_failure
         err
 
-let handle_runtime_ollama_probe _ctx args : Core.tool_result =
+let run_runtime_ollama_probe ?timeout_sec args : Core.tool_result =
   let tool_name = "masc_runtime_ollama_probe" in
   let start_time = Time_compat.now () in
   let server_url = Json_util.get_string args "server_url" in
@@ -188,15 +188,6 @@ let handle_runtime_ollama_probe _ctx args : Core.tool_result =
         | Some parsed -> parsed
         | None -> 16)
     | _ -> 16
-  in
-  let timeout_sec =
-    match Json_util.assoc_member_opt "timeout_sec" args with
-    | Some (`Int value) -> value
-    | Some (`Intlit value) ->
-        (match Core.parse_int_opt value with
-         | Some parsed -> parsed
-         | None -> 6)
-    | _ -> 6
   in
   let think_mode =
     match Json_util.assoc_member_opt "think_mode" args with
@@ -236,9 +227,42 @@ let handle_runtime_ollama_probe _ctx args : Core.tool_result =
         [
           ( "result",
             runtime_ollama_probe_json ?server_url ?model ?prompt ?keep_alive
-              ~probe_runs ~max_tokens ~think_mode ~timeout_sec
+              ~probe_runs ~max_tokens ~think_mode ?timeout_sec
               ~generate_when_unloaded ~run_generate () );
         ]
+
+let runtime_ollama_probe_timeout_sec args =
+  match Json_field.int args "timeout_sec" with
+  | Json_field.Field_absent -> Ok None
+  | Json_field.Found value ->
+      Result.map
+        (fun timeout_sec -> Some timeout_sec)
+        (Tool_local_runtime_probe.validate_timeout_sec value)
+  | Json_field.Wrong_shape { expected; got } ->
+      Error
+        (Printf.sprintf
+           "timeout_sec must be a positive %s, got %s"
+           expected
+           got)
+
+let handle_runtime_ollama_probe (ctx : Core.context) args : Core.tool_result =
+  match runtime_ollama_probe_timeout_sec args with
+  | Error message ->
+      err_response
+        ~tool_name:"masc_runtime_ollama_probe"
+        ~start_time:(Time_compat.now ())
+        ~class_:Tool_result.Workflow_rejection
+        message
+  | Ok timeout_sec ->
+      let continue () = run_runtime_ollama_probe ?timeout_sec args in
+      (match ctx.authorize_external_effect with
+       | None -> continue ()
+       | Some authorize ->
+         authorize
+           ~operation:"masc_runtime_ollama_probe"
+           ~input:args
+           ~continue)
+;;
 
 let dispatch ctx ~name ~args : Core.tool_result option =
   match name with

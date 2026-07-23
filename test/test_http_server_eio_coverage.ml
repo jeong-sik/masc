@@ -7,7 +7,6 @@
 
 open Alcotest
 module Http_server_eio = Masc.Http_server_eio
-module Compression_codec = Compression_codec
 
 (* ============================================================
    config Type Tests
@@ -53,95 +52,6 @@ let test_default_config_valid () =
 ;;
 
 (* ============================================================
-   Compression Module Tests
-   ============================================================ *)
-
-module Compression = Http_server_eio.Compression
-
-let test_compress_zstd_small_data () =
-  (* Small data should not be compressed *)
-  let small_data = "hello" in
-  let result, compressed = Compression.compress_zstd small_data in
-  check bool "small data not compressed" false compressed;
-  check string "unchanged" small_data result
-;;
-
-let test_compress_zstd_threshold () =
-  let data = String.make Compression_codec.legacy_min_size 'a' in
-  let _, compressed = Compression.compress_zstd data in
-  (* Repetitive data compresses well *)
-  check bool "threshold data compressed" true compressed
-;;
-
-let test_compress_zstd_large_repetitive () =
-  (* Large repetitive data compresses well *)
-  let large_data = String.make 1000 'x' in
-  let result, compressed = Compression.compress_zstd large_data in
-  check bool "compressed" true compressed;
-  check bool "smaller" true (String.length result < String.length large_data)
-;;
-
-let test_compress_zstd_incompressible () =
-  (* Random-like data doesn't compress well *)
-  let data = String.init 500 (fun i -> Char.chr (((i * 17) + 31) mod 256)) in
-  let result, compressed = Compression.compress_zstd data in
-  (* Either compressed or not - depends on data *)
-  check bool "result not empty" true (String.length result > 0);
-  (* At least we shouldn't crash *)
-  ignore compressed
-;;
-
-let test_compress_zstd_empty () =
-  (* Empty string should not be compressed *)
-  let result, compressed = Compression.compress_zstd "" in
-  check bool "empty not compressed" false compressed;
-  check string "empty unchanged" "" result
-;;
-
-let test_compress_zstd_below_threshold () =
-  let data = String.make (Compression_codec.legacy_min_size - 1) 'b' in
-  let result, compressed = Compression.compress_zstd data in
-  check bool "below threshold not compressed" false compressed;
-  check string "unchanged" data result
-;;
-
-let test_compress_zstd_level () =
-  (* Test with different compression level *)
-  let data = String.make 500 'c' in
-  let result1, _ = Compression.compress_zstd ~level:1 data in
-  let result9, _ = Compression.compress_zstd ~level:19 data in
-  check bool "level 1 result exists" true (String.length result1 > 0);
-  check bool "level 19 result exists" true (String.length result9 > 0)
-;;
-
-let test_compress_zstd_dictionary_result_returns_original () =
-  let original = String.make Compression_codec.legacy_min_size 'd' in
-  let dictionary_payload = "dictionary-compressed-bytes" in
-  let result, compressed =
-    Compression_codec.legacy_standard_result
-      ~original
-      (Compression_codec.Compressed
-         { payload = dictionary_payload; encoding = Compression_codec.Dictionary })
-  in
-  check bool "dictionary not advertised as zstd" false compressed;
-  check string "dictionary payload not leaked" original result
-;;
-
-let test_compress_wrapper_small_data () =
-  let small_data = "hello" in
-  let result, encoding = Compression.compress small_data in
-  check string "small unchanged" small_data result;
-  check (option string) "no encoding" None encoding
-;;
-
-let test_compress_wrapper_large_data () =
-  let large_data = String.make 1000 'x' in
-  let result, encoding = Compression.compress large_data in
-  check bool "large shrinks" true (String.length result < String.length large_data);
-  check (option string) "standard encoding" (Some "zstd") encoding
-;;
-
-(* ============================================================
    Test Runners
    ============================================================ *)
 
@@ -161,21 +71,6 @@ let () =
         ; test_case "host" `Quick test_default_config_host
         ; test_case "max_connections" `Quick test_default_config_max_connections
         ; test_case "valid" `Quick test_default_config_valid
-        ] )
-    ; ( "compress_zstd"
-      , [ test_case "small data" `Quick test_compress_zstd_small_data
-        ; test_case "threshold" `Quick test_compress_zstd_threshold
-        ; test_case "large repetitive" `Quick test_compress_zstd_large_repetitive
-        ; test_case "incompressible" `Quick test_compress_zstd_incompressible
-        ; test_case "empty" `Quick test_compress_zstd_empty
-        ; test_case "below threshold" `Quick test_compress_zstd_below_threshold
-        ; test_case "level" `Quick test_compress_zstd_level
-        ; test_case "dictionary result returns original" `Quick
-            test_compress_zstd_dictionary_result_returns_original
-        ] )
-    ; ( "compress"
-      , [ test_case "small data" `Quick test_compress_wrapper_small_data
-        ; test_case "large repetitive" `Quick test_compress_wrapper_large_data
         ] )
     ]
 ;;

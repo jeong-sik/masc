@@ -37,7 +37,6 @@ type t = {
   handler_binding : handler_binding;
   is_read_only : bool;
   mcp_context_required : bool;
-  is_destructive : bool;
   is_idempotent : bool;
   visibility : Tool_catalog.visibility;
   implementation_status : Tool_catalog.implementation_status;
@@ -46,8 +45,6 @@ type t = {
   reason : string option;
   allow_direct_call_when_hidden : bool;
   title : string option;
-  effect_domain : Tool_catalog.effect_domain option;
-  requires_actor_binding : bool option;
 }
 
 (** {1 Builder} *)
@@ -60,7 +57,6 @@ val create :
   handler_binding:handler_binding ->
   ?is_read_only:bool ->
   ?mcp_context_required:bool ->
-  ?is_destructive:bool ->
   ?is_idempotent:bool ->
   ?visibility:Tool_catalog.visibility ->
   ?implementation_status:Tool_catalog.implementation_status ->
@@ -69,8 +65,6 @@ val create :
   ?reason:string ->
   ?allow_direct_call_when_hidden:bool ->
   ?title:string ->
-  ?effect_domain:Tool_catalog.effect_domain ->
-  ?requires_actor_binding:bool ->
   unit -> t
 (** Build a tool spec. The first five arguments are required (compile error
     if omitted). All optional arguments default to fail-closed values:

@@ -13,7 +13,6 @@ type phase =
   | Crashed
   | Restarting
   | Dead
-  | Zombie
 
 val phase_to_string : phase -> string
 val phase_of_string : string -> phase option

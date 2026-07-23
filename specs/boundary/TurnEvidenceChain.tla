@@ -20,7 +20,7 @@
 \*
 \* Bug model:
 \*   TerminalWithoutReceipt and TerminalWithoutCheckpoint model the exact
-\*   operator-risk class this spec prevents: a terminal turn appears done
+\*   evidence gap this spec prevents: a terminal turn appears done
 \*   while one durable evidence leg is missing.
 
 EXTENDS Naturals

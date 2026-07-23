@@ -11,10 +11,25 @@ type error =
       { expected : int
       ; actual : int
       }
+  | Supersession_phase_mismatch of Keeper_shutdown_types.t
+  | Supersession_intent_mismatch of Keeper_shutdown_types.t
+  | Invalid_supersession_actor of string
 
 type persist_blocked_result =
   | State_preserved of Keeper_shutdown_types.t
   | Blocked_persisted of Keeper_shutdown_types.t
+
+type supersede_blocked_result =
+  | Superseded_persisted of Keeper_shutdown_types.t
+  | Superseded_already_persisted of Keeper_shutdown_types.t
+
+type operator_metadata_supersession_token =
+  { base_path : string
+  ; keeper_name : string
+  ; operation_id : Operation_id.t
+  ; expected_revision : int
+  ; actor : string
+  }
 
 type corrupt_record =
   { keeper_name : string
@@ -23,8 +38,23 @@ type corrupt_record =
   ; error : error
   }
 
+type retired_terminal_kind =
+  | Stale_paused_prune_completed of
+      { meta_version : int
+      ; last_updated : string
+      ; latched_reason : Keeper_latched_reason.t option
+      }
+
+type retired_terminal_record =
+  { keeper_name : string
+  ; operation_id : Operation_id.t
+  ; path : string
+  ; kind : retired_terminal_kind
+  }
+
 type inventory_entry =
   | Operation of Keeper_shutdown_types.t
+  | Retired_terminal of retired_terminal_record
   | Corrupt_record of corrupt_record
 
 let error_to_string = function
@@ -43,6 +73,19 @@ let error_to_string = function
       "shutdown operation revision conflict: expected %d, actual %d"
       expected
       actual
+  | Supersession_phase_mismatch operation ->
+    Printf.sprintf
+      "shutdown operation is not an operator-supersedable blocked operation: keeper=%s operation=%s"
+      operation.keeper_name
+      (Operation_id.to_string operation.operation_id)
+  | Supersession_intent_mismatch operation ->
+    Printf.sprintf
+      "shutdown operation cleanup intent cannot be superseded by metadata update: keeper=%s operation=%s reason=%s"
+      operation.keeper_name
+      (Operation_id.to_string operation.operation_id)
+      (cleanup_reason_label operation.cleanup_intent.reason)
+  | Invalid_supersession_actor detail ->
+    Printf.sprintf "shutdown supersession actor is invalid: %s" detail
 ;;
 
 type operation_lock =
@@ -240,6 +283,14 @@ let finalization_evidence_to_json evidence =
     ]
 ;;
 
+let supersession_to_json = function
+  | Operator_metadata_update { actor } ->
+    `Assoc
+      [ "kind", `String "operator_metadata_update"
+      ; "actor", `String actor
+      ]
+;;
+
 let lane_ownership_to_json = function
   | Registered_lane lane_id ->
     `Assoc
@@ -256,16 +307,6 @@ let cleanup_reason_to_json = function
     `Assoc [ "kind", `String "operator_stop_remove_meta" ]
   | Dead_tombstone_cleanup ->
     `Assoc [ "kind", `String "dead_tombstone_cleanup" ]
-  | Stale_paused_prune context ->
-    `Assoc
-      [ "kind", `String "stale_paused_prune"
-      ; "meta_version", `Int context.meta_version
-      ; "last_updated", `String context.last_updated
-      ; ( "latched_reason"
-        , match context.latched_reason with
-          | None -> `Null
-          | Some reason -> Keeper_latched_reason.Stable.to_yojson reason )
-      ]
   | Dashboard_keeper_purge context ->
     `Assoc
       [ "kind", `String "dashboard_keeper_purge"
@@ -302,6 +343,11 @@ let phase_to_json = function
     `Assoc
       [ "kind", `String "blocked"
       ; "failure", failure_to_json failure
+      ]
+  | Superseded supersession ->
+    `Assoc
+      [ "kind", `String "superseded"
+      ; "supersession", supersession_to_json supersession
       ]
 ;;
 
@@ -521,14 +567,17 @@ let completion_receipt_of_json json =
 
 type wire_schema =
   | Current_schema
+  | Shutdown_schema_v5
   | Lifecycle_schema_v4
   | Shutdown_schema_v3
 
+let shutdown_schema_v5 = 5
 let lifecycle_schema_v4 = 4
 let shutdown_schema_v3 = 3
 
 let wire_schema_of_version = function
   | version when Int.equal version schema_version -> Ok Current_schema
+  | version when Int.equal version shutdown_schema_v5 -> Ok Shutdown_schema_v5
   | version when Int.equal version lifecycle_schema_v4 -> Ok Lifecycle_schema_v4
   | version when Int.equal version shutdown_schema_v3 -> Ok Shutdown_schema_v3
   | version ->
@@ -539,13 +588,13 @@ let wire_schema_of_version = function
 
 let completion_action_supported_by_wire_schema wire_schema action =
   match wire_schema, action with
-  | Current_schema,
-    (Dead_tombstone_reaped | Paused_meta_pruned | Dashboard_keeper_purged) ->
+  | (Current_schema | Shutdown_schema_v5),
+    (Dead_tombstone_reaped | Dashboard_keeper_purged) ->
     true
-  | Lifecycle_schema_v4, (Dead_tombstone_reaped | Paused_meta_pruned) -> true
+  | Lifecycle_schema_v4, Dead_tombstone_reaped -> true
   | Shutdown_schema_v3, Dead_tombstone_reaped -> true
   | Lifecycle_schema_v4, Dashboard_keeper_purged
-  | Shutdown_schema_v3, (Paused_meta_pruned | Dashboard_keeper_purged) -> false
+  | Shutdown_schema_v3, Dashboard_keeper_purged -> false
 ;;
 
 let validate_completion_receipt_wire_schema wire_schema = function
@@ -571,6 +620,7 @@ let finalization_evidence_of_json ~wire_schema json =
   let* accumulator_dropped =
     match wire_schema with
     | Current_schema
+    | Shutdown_schema_v5
     | Lifecycle_schema_v4 -> bool "accumulator_dropped" json
     | Shutdown_schema_v3 ->
       (* Schema 3 dropped the in-memory accumulator exactly when its
@@ -589,6 +639,18 @@ let finalization_evidence_of_json ~wire_schema json =
     ; accumulator_dropped
     ; completion
     }
+;;
+
+let supersession_of_json json =
+  let* kind = string "kind" json in
+  match kind with
+  | "operator_metadata_update" ->
+    let* actor = string "actor" json in
+    Ok (Operator_metadata_update { actor })
+  | value ->
+    Error
+      (Decode_error
+         (Printf.sprintf "unknown shutdown supersession: %S" value))
 ;;
 
 let phase_of_json ~wire_schema json =
@@ -617,6 +679,18 @@ let phase_of_json ~wire_schema json =
     let* failure_json = assoc "failure" json in
     let* failure = failure_of_json failure_json in
     Ok (Blocked failure)
+  | "superseded" ->
+    (match wire_schema with
+     | Current_schema ->
+       let* supersession_json = assoc "supersession" json in
+       let* supersession = supersession_of_json supersession_json in
+       Ok (Superseded supersession)
+     | Shutdown_schema_v5
+     | Lifecycle_schema_v4
+     | Shutdown_schema_v3 ->
+       Error
+         (Decode_error
+            "shutdown supersession is not valid before shutdown schema 6"))
   | value -> Error (Decode_error (Printf.sprintf "unknown shutdown phase: %S" value))
 ;;
 
@@ -660,6 +734,100 @@ let optional_join_evidence_of_json json =
   | Error _ as error -> error
 ;;
 
+let retired_stale_paused_terminal_payload_of_json
+    ~operation_path
+    ~keeper_name:path_keeper_name
+    ~operation_id:path_operation_id
+    json
+  =
+  let* schema = int "schema_version" json in
+  let* () =
+    if Int.equal schema shutdown_schema_v5
+    then Ok ()
+    else Error (Decode_error "retired shutdown terminal must use schema 5")
+  in
+  let* keeper_name = string "keeper_name" json in
+  let* operation_id_wire = string "operation_id" json in
+  let* operation_id =
+    Operation_id.of_string operation_id_wire
+    |> Result.map_error (fun detail -> Decode_error detail)
+  in
+  let* () =
+    if
+      String.equal keeper_name path_keeper_name
+      && Operation_id.equal operation_id path_operation_id
+    then Ok ()
+    else
+      Error
+        (Identity_mismatch
+           (Printf.sprintf
+              "%s: path owner=%s operation=%s, payload owner=%s operation=%s"
+              operation_path
+              path_keeper_name
+              (Operation_id.to_string path_operation_id)
+              keeper_name
+              (Operation_id.to_string operation_id)))
+  in
+  let* cleanup_intent = assoc "cleanup_intent" json in
+  let* remove_session = bool "remove_session" cleanup_intent in
+  let* reason = assoc "reason" cleanup_intent in
+  let* reason_kind = string "kind" reason in
+  let* () =
+    if String.equal reason_kind "stale_paused_prune"
+    then Ok ()
+    else Error (Decode_error "shutdown terminal is not a retired stale paused prune")
+  in
+  let* meta_version = int "meta_version" reason in
+  let* last_updated = string "last_updated" reason in
+  let* latched_reason =
+    match assoc "latched_reason" reason with
+    | Ok `Null -> Ok None
+    | Ok reason_json ->
+      Keeper_latched_reason.Stable.of_yojson reason_json
+      |> Result.map Option.some
+      |> Result.map_error (fun detail -> Decode_error detail)
+    | Error _ as error -> error
+  in
+  let* phase = assoc "phase" json in
+  let* phase_kind = string "kind" phase in
+  let* () =
+    if String.equal phase_kind "finalized"
+    then Ok ()
+    else Error (Decode_error "retired stale paused prune is not finalized")
+  in
+  let* evidence = assoc "evidence" phase in
+  let* cleanup = assoc "cleanup" evidence in
+  let* (_settled_task_ids : Keeper_id.Task_id.t list) =
+    task_ids_field_of_json "settled_task_ids" cleanup
+  in
+  let* (_pending_confirms_removed : int) = int "pending_confirms_removed" cleanup in
+  let* meta_removed = bool "meta_removed" evidence in
+  let* session_removed = bool "session_removed" evidence in
+  let* (_registry_unregistered : bool) = bool "registry_unregistered" evidence in
+  let* accumulator_dropped = bool "accumulator_dropped" evidence in
+  let* () =
+    if meta_removed && Bool.equal session_removed remove_session && accumulator_dropped
+    then Ok ()
+    else Error (Decode_error "retired stale paused prune has invalid terminal evidence")
+  in
+  let* completion = assoc "completion" evidence in
+  let* completion_kind = string "kind" completion in
+  let* completion_action = string "action" completion in
+  let* () =
+    if
+      String.equal completion_kind "delivered"
+      && String.equal completion_action "paused_meta_pruned"
+    then Ok ()
+    else Error (Decode_error "retired stale paused prune lacks its delivered receipt")
+  in
+  Ok
+    { keeper_name
+    ; operation_id
+    ; path = operation_path
+    ; kind = Stale_paused_prune_completed { meta_version; last_updated; latched_reason }
+    }
+;;
+
 let lane_ownership_of_json json =
   let* kind = string "kind" json in
   match kind with
@@ -681,19 +849,6 @@ let cleanup_reason_of_json json =
   | "operator_stop_retain_meta" -> Ok Operator_stop_retain_meta
   | "operator_stop_remove_meta" -> Ok Operator_stop_remove_meta
   | "dead_tombstone_cleanup" -> Ok Dead_tombstone_cleanup
-  | "stale_paused_prune" ->
-    let* meta_version = int "meta_version" json in
-    let* last_updated = string "last_updated" json in
-    let* latched_reason =
-      match assoc "latched_reason" json with
-      | Ok `Null -> Ok None
-      | Ok reason_json ->
-        Keeper_latched_reason.Stable.of_yojson reason_json
-        |> Result.map Option.some
-        |> Result.map_error (fun detail -> Decode_error detail)
-      | Error _ as error -> error
-    in
-    Ok (Stale_paused_prune { meta_version; last_updated; latched_reason })
   | "dashboard_keeper_purge" ->
     let* requested_name = string "requested_name" json in
     let* agent_name = string "agent_name" json in
@@ -707,6 +862,7 @@ let cleanup_reason_of_json json =
 let lane_ownership_of_versioned_json ~wire_schema json =
   match wire_schema with
   | Current_schema
+  | Shutdown_schema_v5
   | Lifecycle_schema_v4 ->
     let* lane_ownership_json = assoc "lane_ownership" json in
     lane_ownership_of_json lane_ownership_json
@@ -717,9 +873,53 @@ let lane_ownership_of_versioned_json ~wire_schema json =
     |> Result.map_error (fun detail -> Decode_error detail)
 ;;
 
+let retired_stale_paused_terminal_of_json
+    ~operation_path
+    ~keeper_name
+    ~operation_id
+    json
+  =
+  let* terminal =
+    retired_stale_paused_terminal_payload_of_json
+      ~operation_path
+      ~keeper_name
+      ~operation_id
+      json
+  in
+  (* A retired terminal may bypass the current cleanup-reason decoder only
+     after every other schema-5 field has passed the same typed decoders as a
+     current operation. This keeps the compatibility boundary fail-closed: a
+     damaged common field remains [Corrupt_record] and retains its exact
+     admission fence. *)
+  let* (_revision : int) = int "revision" json in
+  let* (_lane_ownership : lane_ownership) =
+    lane_ownership_of_versioned_json ~wire_schema:Shutdown_schema_v5 json
+  in
+  let* trace_id_wire = string "trace_id" json in
+  let* (_trace_id : Keeper_id.Trace_id.t) =
+    Keeper_id.Trace_id.of_string trace_id_wire
+    |> Result.map_error (fun detail -> Decode_error detail)
+  in
+  let* (_generation : int) = int "generation" json in
+  let* (_actor : string) = string "actor" json in
+  let* turn_json = assoc "turn_disposition" json in
+  let* (_turn_disposition : turn_disposition) =
+    turn_disposition_of_json turn_json
+  in
+  let* (_expected_backlog_version : int) = int "expected_backlog_version" json in
+  let* (_owned_task_ids : Keeper_id.Task_id.t list) =
+    task_ids_field_of_json "owned_task_ids" json
+  in
+  let* (_join_evidence : join_evidence option) = optional_join_evidence_of_json json in
+  let* (_created_at : string) = string "created_at" json in
+  let* (_updated_at : string) = string "updated_at" json in
+  Ok terminal
+;;
+
 let cleanup_reason_of_versioned_json ~wire_schema cleanup_json =
   match wire_schema with
-  | Current_schema ->
+  | Current_schema
+  | Shutdown_schema_v5 ->
     let* cleanup_reason_json = assoc "reason" cleanup_json in
     cleanup_reason_of_json cleanup_reason_json
   | Lifecycle_schema_v4 ->
@@ -728,8 +928,7 @@ let cleanup_reason_of_versioned_json ~wire_schema cleanup_json =
     (match reason with
      | Operator_stop_retain_meta
      | Operator_stop_remove_meta
-     | Dead_tombstone_cleanup
-     | Stale_paused_prune _ -> Ok reason
+     | Dead_tombstone_cleanup -> Ok reason
      | Dashboard_keeper_purge _ ->
        Error
          (Decode_error
@@ -809,7 +1008,13 @@ let contextualize_error operation_path = function
   | Io_error detail -> Io_error (Printf.sprintf "%s: %s" operation_path detail)
   | Identity_mismatch detail ->
     Identity_mismatch (Printf.sprintf "%s: %s" operation_path detail)
-  | (Already_exists _ | Not_found _ | Invalid_operation _ | Revision_conflict _) as error ->
+  | ( Already_exists _
+    | Not_found _
+    | Invalid_operation _
+    | Revision_conflict _
+    | Supersession_phase_mismatch _
+    | Supersession_intent_mismatch _
+    | Invalid_supersession_actor _ ) as error ->
     error
 ;;
 
@@ -839,6 +1044,28 @@ let load_path_unlocked ~operation_path ~keeper_name ~operation_id =
                 (Operation_id.to_string operation_id)
                 operation.keeper_name
                 (Operation_id.to_string operation.operation_id)))
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Yojson.Json_error detail ->
+      Error (Decode_error (Printf.sprintf "%s: %s" operation_path detail))
+    | exn ->
+      Error
+        (Io_error
+           (Printf.sprintf "%s: %s" operation_path (Printexc.to_string exn)))
+;;
+
+let load_retired_terminal_path_unlocked ~operation_path ~keeper_name ~operation_id =
+  if not (Fs_compat.file_exists operation_path)
+  then Error (Not_found operation_path)
+  else
+    try
+      Fs_compat.load_file operation_path
+      |> Yojson.Safe.from_string
+      |> retired_stale_paused_terminal_of_json
+           ~operation_path
+           ~keeper_name
+           ~operation_id
+      |> Result.map_error (contextualize_error operation_path)
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Yojson.Json_error detail ->
@@ -900,6 +1127,104 @@ let replace ~config ~expected_revision operation =
                 (Operation_id.to_string operation.operation_id))))
 ;;
 
+let prepare_operator_metadata_supersession
+      ~config
+      ~keeper_name
+      ~operation_id
+      ~actor
+  =
+  let base_path =
+    Keeper_registry_types.canonical_base_path_exn config.Workspace.base_path
+  in
+  let* actor =
+    Workspace.validate_agent_name actor
+    |> Result.map_error (fun detail -> Invalid_supersession_actor detail)
+  in
+  let* operation_path = path ~config ~keeper_name operation_id in
+  match
+    with_operation_lock ~access:Read operation_path (fun () ->
+      load_path_unlocked ~operation_path ~keeper_name ~operation_id)
+  with
+  | Error _ as error -> error
+  | Ok
+      ({ phase = Blocked _
+       ; cleanup_intent = { reason = Operator_stop_retain_meta; _ }
+       ; revision
+       ; _ } as _operation) ->
+    Ok { base_path; keeper_name; operation_id; expected_revision = revision; actor }
+  | Ok
+      ({ phase = Superseded (Operator_metadata_update _)
+       ; revision
+       ; _ } as _operation) ->
+    Ok { base_path; keeper_name; operation_id; expected_revision = revision; actor }
+  | Ok ({ phase = Blocked _; _ } as operation) ->
+    Error (Supersession_intent_mismatch operation)
+  | Ok operation -> Error (Supersession_phase_mismatch operation)
+;;
+
+let supersession_token_operation_id (token : operator_metadata_supersession_token) =
+  token.operation_id
+
+let supersede_blocked_operator_stop ~config ~token ~now =
+  let config_base_path =
+    Keeper_registry_types.canonical_base_path_exn config.Workspace.base_path
+  in
+  if not (String.equal config_base_path token.base_path)
+  then
+    Error
+      (Identity_mismatch
+         (Printf.sprintf
+            "supersession token BasePath mismatch: expected=%s actual=%s"
+            token.base_path
+            config_base_path))
+  else
+  let operation_path =
+    path
+      ~config
+      ~keeper_name:token.keeper_name
+      token.operation_id
+  in
+  let* operation_path = operation_path in
+  with_keeper_inventory_lock
+    ~access:Write
+    ~config
+    ~keeper_name:token.keeper_name
+    (fun () ->
+       with_operation_lock ~access:Write operation_path (fun () ->
+         match
+           load_path_unlocked
+             ~operation_path
+             ~keeper_name:token.keeper_name
+             ~operation_id:token.operation_id
+         with
+         | Error _ as error -> error
+         | Ok ({ phase = Superseded (Operator_metadata_update _); _ } as existing) ->
+           Ok (Superseded_already_persisted existing)
+         | Ok
+             ({ phase = Blocked _
+              ; cleanup_intent = { reason = Operator_stop_retain_meta; _ }
+              ; _ } as existing) ->
+           if not (Int.equal existing.revision token.expected_revision)
+           then
+             Error
+               (Revision_conflict
+                  { expected = token.expected_revision; actual = existing.revision })
+           else
+             let superseded =
+               { existing with
+                 revision = existing.revision + 1
+               ; phase = Superseded (Operator_metadata_update { actor = token.actor })
+               ; updated_at = now ()
+               }
+             in
+             Keeper_fs.save_json_atomic operation_path (to_json superseded)
+             |> Result.map_error (fun detail -> Io_error detail)
+             |> Result.map (fun () -> Superseded_persisted superseded)
+         | Ok ({ phase = Blocked _; _ } as existing) ->
+           Error (Supersession_intent_mismatch existing)
+         | Ok existing -> Error (Supersession_phase_mismatch existing)))
+;;
+
 let persist_blocked_latest ~config ~identity ~failure ~now =
   let* () = validate_operation identity in
   let* operation_path = path_for_operation ~config identity in
@@ -922,7 +1247,7 @@ let persist_blocked_latest ~config ~identity ~failure ~now =
            Error (Identity_mismatch (Operation_id.to_string identity.operation_id))
          | Ok existing ->
            (match existing.phase with
-            | Finalized _ | Blocked _ | Reconciliation_required _ ->
+            | Finalized _ | Blocked _ | Reconciliation_required _ | Superseded _ ->
               Ok (State_preserved existing)
             | Prepared | Joined_idle | Finalizing_tasks _ | Cleanup_ready _ ->
               let blocked =
@@ -945,36 +1270,18 @@ let load ~config ~keeper_name operation_id =
 
 let scan_keeper_dir ~config ~keeper_name =
   let* dir = keeper_records_dir config keeper_name in
-  if not (Fs_compat.file_exists dir)
-  then Ok []
-  else
+  match Fs_compat.path_kind ~follow:false dir with
+  | Fs_compat.Missing -> Ok []
+  | Fs_compat.Other ->
+    Error
+      (Decode_error
+         (Printf.sprintf
+            "shutdown store owner entry is not a directory: %s"
+            dir))
+  | Fs_compat.Directory ->
     with_operation_lock ~access:Read dir (fun () ->
-    let* () =
-      try
-        match (Unix.lstat dir).Unix.st_kind with
-        | Unix.S_DIR -> Ok ()
-        | Unix.S_REG
-        | Unix.S_LNK
-        | Unix.S_CHR
-        | Unix.S_BLK
-        | Unix.S_FIFO
-        | Unix.S_SOCK ->
-          Error
-            (Decode_error
-               (Printf.sprintf
-                  "shutdown store owner entry is not a directory: %s"
-                  dir))
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-        Error
-          (Io_error
-             (Printf.sprintf "%s: %s" dir (Printexc.to_string exn)))
-    in
     (try
-      Sys.readdir dir
-      |> Array.to_list
-      |> List.sort String.compare
+      Fs_compat.read_dir dir
       |> List.fold_left
            (fun result filename ->
               let* entries = result in
@@ -993,19 +1300,26 @@ let scan_keeper_dir ~config ~keeper_name =
                   |> Result.map_error (fun e -> Decode_error e)
                 in
                 let operation_path = Filename.concat dir filename in
-                let loaded =
-                  with_operation_lock ~access:Read operation_path (fun () ->
-                    load_path_unlocked
-                      ~operation_path
-                      ~keeper_name
-                      ~operation_id)
-                in
                 let entry =
-                  match loaded with
-                  | Ok operation -> Operation operation
-                  | Error error ->
-                    Corrupt_record
-                      { keeper_name; operation_id; path = operation_path; error }
+                  with_operation_lock ~access:Read operation_path (fun () ->
+                    match
+                      load_path_unlocked
+                        ~operation_path
+                        ~keeper_name
+                        ~operation_id
+                    with
+                    | Ok operation -> Operation operation
+                    | Error error ->
+                      (match
+                         load_retired_terminal_path_unlocked
+                           ~operation_path
+                           ~keeper_name
+                           ~operation_id
+                       with
+                       | Ok terminal -> Retired_terminal terminal
+                       | Error _ ->
+                         Corrupt_record
+                           { keeper_name; operation_id; path = operation_path; error }))
                 in
                 Ok (entry :: entries))
            (Ok [])
@@ -1017,13 +1331,17 @@ let scan_keeper_dir ~config ~keeper_name =
 
 let scan_inventory ~config =
   let dir = records_dir config in
-  if not (Fs_compat.file_exists dir)
-  then Ok []
-  else
-    try
-      Sys.readdir dir
-      |> Array.to_list
-      |> List.sort String.compare
+  try
+    match Fs_compat.path_kind ~follow:false dir with
+    | Fs_compat.Missing -> Ok []
+    | Fs_compat.Other ->
+      Error
+        (Decode_error
+           (Printf.sprintf
+              "shutdown store inventory is not a directory: %s"
+              dir))
+    | Fs_compat.Directory ->
+      Fs_compat.read_dir dir
       |> List.fold_left
            (fun result owner_dir_name ->
               let* entries = result in
@@ -1043,9 +1361,9 @@ let scan_inventory ~config =
               Ok (List.rev_append keeper_entries entries))
            (Ok [])
       |> Result.map List.rev
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Io_error (Printexc.to_string exn))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Io_error (Printexc.to_string exn))
 ;;
 
 let list_for_keeper ~config ~keeper_name =
@@ -1056,6 +1374,7 @@ let list_for_keeper ~config ~keeper_name =
           let* operations = result in
           match entry with
           | Operation operation -> Ok (operation :: operations)
+          | Retired_terminal _ -> Ok operations
           | Corrupt_record corrupt -> Error corrupt.error)
        (Ok [])
   |> Result.map List.rev

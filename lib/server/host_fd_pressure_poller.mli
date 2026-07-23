@@ -12,9 +12,9 @@
     every 1s. On parse success + advancing [ts] it invokes
     [Keeper_fd_pressure.engage_external] with the matching level.
 
-    Concurrency: idempotent. [Keeper_fd_pressure.engage_external] is
-    monotonic on its own [cooldown_until] CAS, so stale or duplicate
-    reads are absorbed there — no separate dedup atomic is needed.
+    Concurrency: idempotent. [Keeper_fd_pressure.engage_external] absorbs exact
+    duplicate [(level, ts)] reads, so an unchanged state file contributes one
+    observation rather than one observation per poll tick.
 
     Failure modes: malformed JSON, partial writes, missing file,
     stat(2) errors — all no-ops. Single throttled WARN log per hour. *)

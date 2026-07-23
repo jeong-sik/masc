@@ -56,7 +56,7 @@ For each `sandbox_profile=docker` keeper:
 2. From the masc client, dispatch `Execute` with the
    container hostname probe:
    ```text
-   Execute { "executable": "cat", "argv": ["/etc/hostname"] }
+   Execute { "argv": ["cat", "/etc/hostname"] }
    ```
 3. Pass criteria — the response body must contain a hostname
    matching `masc-keeper-turn-<name>-*` (the convention from
@@ -69,7 +69,7 @@ For each `sandbox_profile=docker` keeper:
 
 A second probe pins the cwd mapping:
 ```text
-Execute { "executable": "pwd" }
+Execute { "argv": ["pwd"] }
 ```
 The response should report a path under
 `Keeper_turn_sandbox_runtime.container_root` (e.g.
@@ -78,7 +78,7 @@ The response should report a path under
 ## Negative test — Local keeper
 
 For one `sandbox_profile=local` keeper:
-1. Same probe (`Execute { "executable": "cat", "argv": ["/etc/hostname"] }`).
+1. Same probe (`Execute { "argv": ["cat", "/etc/hostname"] }`).
 2. Pass criteria — the response contains the host hostname and the
    `via` field reads `host`.  This confirms PR-3 did not over-rotate
    Local→Docker.

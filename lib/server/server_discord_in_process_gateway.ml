@@ -31,205 +31,93 @@ let bot_token_opt () = trimmed_env "DISCORD_BOT_TOKEN"
    "quiet, mention-triggered bot" baseline per RFC-0203. *)
 let default_trigger_policy : Gw.trigger_policy = Gw.Mention_or_thread
 
-(* Parse a configured trigger policy. Delegates to the single strict
-   parser in Discord_gateway_state so config and the (test-covered)
-   canonical grammar can never drift. An empty value is "unset" and
-   silently takes the default; a non-empty value that fails to parse
-   (typo, removed variant) is logged and falls back to the default
-   rather than being silently coerced into a policy the operator did
-   not write. *)
-let parse_trigger_policy raw : Gw.trigger_policy =
-  let s = String.trim raw in
-  if String.equal s "" then default_trigger_policy
-  else
-    match Discord_gateway_state.parse_trigger_policy s with
-    | Ok policy -> policy
-    | Error msg ->
-      Log.Server.warn
-        "discord trigger_policy %S rejected (%s); using default %s"
-        s msg
-        (Discord_gateway_state.trigger_policy_to_string default_trigger_policy);
-      default_trigger_policy
+(* Typed trigger-policy loading, mirroring the Slack sibling
+   ([Server_slack_in_process_gateway.load_trigger_policy_from_toml]): a
+   missing file or missing key is "unset" (default applies); an unreadable
+   file, malformed TOML, wrong field type, or a value the strict grammar
+   rejects is an explicit load error and the gateway does not start —
+   never a silent fallback onto a policy the operator did not write
+   (masc#25123 / PR #25126 recut). *)
 
+type trigger_policy_toml_load =
+  | Runtime_toml_missing
+  | Trigger_policy_missing
+  | Trigger_policy_loaded of Gw.trigger_policy
+
+type trigger_policy_load_error =
+  | Runtime_toml_unreadable of { path : string; detail : string }
+  | Runtime_toml_invalid of { path : string; detail : string }
+  | Trigger_policy_invalid of { path : string; detail : string }
+  | Trigger_policy_env_invalid of { detail : string }
+
+let trigger_policy_load_error_to_string = function
+  | Runtime_toml_unreadable { path; detail } ->
+    Printf.sprintf "cannot read %s: %s" path detail
+  | Runtime_toml_invalid { path; detail } ->
+    Printf.sprintf "invalid TOML in %s: %s" path detail
+  | Trigger_policy_invalid { path; detail } ->
+    Printf.sprintf "invalid discord.trigger_policy in %s: %s" path detail
+  | Trigger_policy_env_invalid { detail } ->
+    Printf.sprintf "invalid MASC_DISCORD_TRIGGER_POLICY: %s" detail
+;;
+
+let load_trigger_policy_from_toml ~path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok Runtime_toml_missing
+  | exception Unix.Unix_error (code, _, _) ->
+    Error (Runtime_toml_unreadable { path; detail = Unix.error_message code })
+  | _ ->
+    (match Safe_ops.read_file_safe path with
+     | Error detail -> Error (Runtime_toml_unreadable { path; detail })
+     | Ok content ->
+       (match Otoml.Parser.from_string_result content with
+        | Error detail -> Error (Runtime_toml_invalid { path; detail })
+        | Ok toml ->
+          (match
+             Field_resolution.resolve_string toml [ "discord"; "trigger_policy" ]
+           with
+           | Field_resolution.Missing -> Ok Trigger_policy_missing
+           | Field_resolution.Type_mismatch { expected; message; _ } ->
+             Error
+               (Trigger_policy_invalid
+                  { path
+                  ; detail = Printf.sprintf "expected %s: %s" expected message
+                  })
+           | Field_resolution.Present raw ->
+             let raw = String.trim raw in
+             if String.equal raw ""
+             then Ok Trigger_policy_missing
+             else
+               (match Discord_gateway_state.parse_trigger_policy raw with
+                | Ok policy -> Ok (Trigger_policy_loaded policy)
+                | Error detail ->
+                  Error (Trigger_policy_invalid { path; detail })))))
+;;
+
+(* Env > TOML > default — the precedence config/runtime.toml documents for
+   this key. An invalid env value is a load error like an invalid TOML value;
+   an empty/unset env falls through to the TOML plane. *)
 let resolved_trigger_policy () =
-  let from_toml () =
-    try
-      let resolution = Config_dir_resolver.resolve () in
-      let toml_path =
-        Filename.concat resolution.Config_dir_resolver.config_root.path
-          Config_dir_resolver.runtime_toml_filename
-      in
-      if Sys.file_exists toml_path then
-        let tbl = Otoml.Parser.from_file toml_path in
-        Otoml.find_opt tbl Otoml.get_string [ "discord"; "trigger_policy" ]
-      else None
-    with _ -> None
-  in
-  match from_toml () with
-  | Some raw -> parse_trigger_policy raw
+  match trimmed_env "MASC_DISCORD_TRIGGER_POLICY" with
+  | Some raw ->
+    (match Discord_gateway_state.parse_trigger_policy raw with
+     | Ok policy -> Ok policy
+     | Error detail -> Error (Trigger_policy_env_invalid { detail }))
   | None ->
-    (match trimmed_env "MASC_DISCORD_TRIGGER_POLICY" with
-    | None -> Gw.Mention_or_thread
-    | Some raw -> parse_trigger_policy raw)
+    let resolution = Config_dir_resolver.resolve () in
+    let toml_path =
+      Filename.concat resolution.Config_dir_resolver.config_root.path
+        Config_dir_resolver.runtime_toml_filename
+    in
+    (match load_trigger_policy_from_toml ~path:toml_path with
+     | Error _ as error -> error
+     | Ok (Trigger_policy_loaded policy) -> Ok policy
+     | Ok (Runtime_toml_missing | Trigger_policy_missing) ->
+       Ok default_trigger_policy)
 
 (* ---------------------------------------------------------------- *)
 (* Inbound delivery                                                 *)
 (* ---------------------------------------------------------------- *)
-
-(* Discord typing indicators expire after 10s. Refresh below that window while
-   the accepted inbound is waiting for keeper output. *)
-let typing_refresh_interval_s = 8.0
-
-let trigger_typing_once ~channel_id =
-  match State.trigger_typing ~channel_id () with
-  | Ok () -> ()
-  | Error State.Missing_token ->
-      Log.Server.debug
-        "discord trigger_typing skipped: DISCORD_BOT_TOKEN is unset"
-  | Error e ->
-      Log.Server.debug
-        "discord trigger_typing failed (channel=%s): %s"
-        channel_id
-        (Format.asprintf "%a" State.pp_send_error e)
-
-(* Discord exposes only a typing indicator; MASC still treats
-   "response requested", "waiting for a keeper response", and "streaming
-   response text" as separate runtime phases. This helper projects only the
-   waiting phase to Discord UX without making typing a MASC state source of
-   truth. If the keeper is already running another lane, the dispatch waits
-   behind the same turn-admission slot; this refresh loop is the Discord-side
-   projection of that derived Busy/waiting state. Streaming text should be a
-   separate edit-loop transport. *)
-let with_response_wait_typing_indicator ~clock ~channel_id f =
-  trigger_typing_once ~channel_id;
-  Eio.Switch.run (fun typing_sw ->
-    let done_p, done_r = Eio.Promise.create () in
-    let finish () = Eio.Promise.resolve done_r () in
-    Eio.Fiber.fork ~sw:typing_sw (fun () ->
-      let rec loop () =
-        match
-          Eio.Fiber.first
-            (fun () ->
-              Eio.Promise.await done_p;
-              `Done)
-            (fun () ->
-              Eio.Time.sleep clock typing_refresh_interval_s;
-              `Tick)
-        with
-        | `Done -> ()
-        | `Tick ->
-            trigger_typing_once ~channel_id;
-            loop ()
-      in
-      loop ());
-    match f () with
-    | result ->
-        finish ();
-        result
-    | exception exn ->
-        finish ();
-        raise exn)
-
-type stream_finish =
-  | Stream_not_started
-  | Stream_completed
-  | Stream_final_edit_failed of State.send_error
-  | Stream_overflow_send_failed of State.send_error
-
-type discord_stream_reply =
-  { channel_id : string
-  ; reply_to_message_id : string
-  ; mutable message_id : string option
-  ; mutable last_edit_time : float
-  ; mutable last_edited_text : string
-  ; mutable disabled : bool
-  }
-
-let streaming_edit_interval_s = 1.0
-
-let make_discord_stream_reply ~channel_id ~reply_to_message_id =
-  { channel_id
-  ; reply_to_message_id
-  ; message_id = None
-  ; last_edit_time = 0.0
-  ; last_edited_text = ""
-  ; disabled = false
-  }
-
-let discord_stream_content snapshot =
-  snapshot
-  |> Observability_redact.redact_text
-  |> Discord_rest_client.truncate_to_limit
-
-let log_stream_error stage state error =
-  Log.Server.warn
-    "discord streaming %s failed (channel=%s reply_to=%s): %s"
-    stage state.channel_id state.reply_to_message_id
-    (Format.asprintf "%a" State.pp_send_error error)
-
-let publish_discord_stream_snapshot state snapshot =
-  if not state.disabled then begin
-    let content = discord_stream_content snapshot in
-    if not (String.equal content "" || String.equal content state.last_edited_text)
-    then
-      match state.message_id with
-      | None -> (
-          match
-            State.send_message ~channel_id:state.channel_id ~content
-              ~reply_to_message_id:state.reply_to_message_id ()
-          with
-          | Ok message_id ->
-              state.message_id <- Some message_id;
-              state.last_edit_time <- Unix.gettimeofday ();
-              state.last_edited_text <- content
-          | Error error ->
-              state.disabled <- true;
-              log_stream_error "initial send" state error)
-      | Some message_id ->
-          let elapsed = Unix.gettimeofday () -. state.last_edit_time in
-          if elapsed >= streaming_edit_interval_s then
-            match
-              State.edit_message ~channel_id:state.channel_id ~message_id
-                ~content ()
-            with
-            | Ok () ->
-                state.last_edit_time <- Unix.gettimeofday ();
-                state.last_edited_text <- content
-            | Error error ->
-                log_stream_error "edit" state error
-  end
-
-let finish_discord_stream_reply state ~final_content =
-  match state.message_id with
-  | None -> Stream_not_started
-  | Some message_id ->
-      let redacted = Observability_redact.redact_text final_content in
-      let head, overflow =
-        Discord_rest_client.split_at_codepoint redacted
-          ~limit:Discord_rest_client.message_content_limit
-      in
-      let edit_result =
-        if String.equal head state.last_edited_text then Ok ()
-        else
-          State.edit_message ~channel_id:state.channel_id ~message_id
-            ~content:head ()
-      in
-      (match edit_result with
-       | Error error ->
-           log_stream_error "final edit" state error;
-           Stream_final_edit_failed error
-       | Ok () ->
-           state.last_edited_text <- head;
-           if String.equal overflow "" then Stream_completed
-           else
-             match
-               State.send_message ~channel_id:state.channel_id
-                 ~content:overflow ()
-             with
-             | Ok _ -> Stream_completed
-             | Error error ->
-                 log_stream_error "overflow send" state error;
-                 Stream_overflow_send_failed error)
 
 let metadata_opt key = function
   | None -> []
@@ -257,6 +145,21 @@ let discord_chat_metadata ~guild_id ~channel_id ~message_id =
     ("conversation_id", discord_conversation_id ~guild_id ~channel_id);
     ("external_message_id", message_id);
   ]
+
+let discord_delivery ~guild_id ~channel_id ~message_id ~author_id :
+    Gate_keeper_backend.connector_delivery =
+  let parent_channel_id = State.parent_channel_of_thread ~channel_id in
+  let thread_id = Option.map (fun _ -> channel_id) parent_channel_id in
+  { source = Keeper_chat_queue.Discord { channel_id; user_id = author_id }
+  ; surface =
+      Surface_ref.Discord
+        { guild_id; channel_id; parent_channel_id; thread_id }
+  ; conversation_id = Some (discord_conversation_id ~guild_id ~channel_id)
+  ; external_message_id = Some message_id
+    (* The guild IS the workspace identity; a DM has none, which rides the
+       typed delivery as explicit absence ([None]), never an empty string. *)
+  ; workspace_id = guild_id
+  }
 
 let record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
       ~message_id ~author_id ~author_name ~content ~mentions_bot ~route ~urgency
@@ -320,31 +223,20 @@ let mark_attention_resolved ~base_dir ~keeper_name ~event_id ~reason =
         "discord external attention resolve failed (keeper=%s event=%s): %s"
         keeper_name event_id error
 
-let resolve_binding_for_message ~channel_id ~message_reference_channel_id =
-  match State.resolve_keeper_for_channel ~channel_id with
-  | Some resolution -> Some (resolution, [])
-  | None -> (
-      match message_reference_channel_id with
-      | None -> None
-      | Some reference_channel_id ->
-          let reference_channel_id = String.trim reference_channel_id in
-          if reference_channel_id = "" || String.equal reference_channel_id channel_id
-          then None
-          else
-            match State.resolve_keeper_for_channel ~channel_id:reference_channel_id with
-            | None -> None
-            | Some resolution ->
-                Some
-                  ( {
-                      State.keeper_name = resolution.State.keeper_name;
-                      incoming_channel_id = channel_id;
-                      bound_channel_id = resolution.bound_channel_id;
-                      via_parent = true;
-                    },
-                    [ ("discord.binding_reference_channel_id", reference_channel_id) ] ))
+let log_binding_lookup_failure ~channel_id error =
+  let detail =
+    Format.asprintf "%a" State.pp_binding_lookup_error error
+  in
+  Log.Server.error
+    "Discord binding lookup failed (channel=%s): %s"
+    channel_id
+    detail
 
-let handle_message_create ~dispatch
-      ~clock
+let resolve_binding_for_message ~channel_id =
+  State.resolve_keeper_for_channel_result ~channel_id
+  |> Result.map (Option.map (fun resolution -> resolution, []))
+
+let accept_message_create ~resolved_binding ~dispatch_for_delivery
       ~(channel_id : string) ~(message_id : string)
       ~(guild_id : string option)
       ~base_dir
@@ -354,15 +246,25 @@ let handle_message_create ~dispatch
       ~(explicit_mentions_bot : bool)
       ~(message_reference_channel_id : string option)
       ~(message_reference_message_id : string option)
-      ~(referenced_message_author_id : string option) =
-  match resolve_binding_for_message ~channel_id ~message_reference_channel_id with
-  | None ->
+      ~(referenced_message_author_id : string option) () =
+  let binding =
+    match resolved_binding with
+    | Some binding -> Ok (Some binding)
+    | None -> resolve_binding_for_message ~channel_id
+  in
+  match binding with
+  | Error error ->
+    log_binding_lookup_failure ~channel_id error;
+    Discord_observability.record_inbound_dispatch
+      Discord_observability.Gate_error;
+    None
+  | Ok None ->
     (* No binding for this channel — drop quietly. The bot may be in
        channels it isn't bound to (e.g. server-wide guild messages). *)
     Discord_observability.record_inbound_dispatch
       Discord_observability.Dropped_unbound;
-    ()
-  | Some (resolution, resolution_metadata) ->
+    None
+  | Ok (Some (resolution, resolution_metadata)) ->
     let keeper_name = resolution.State.keeper_name in
     let metadata =
       discord_chat_metadata ~guild_id ~channel_id ~message_id
@@ -409,23 +311,25 @@ let handle_message_create ~dispatch
            P1); the snowflake stands in only for malformed payloads
            missing both — the gate contract requires a non-empty name,
            and the id fallback preserves the pre-P1 behavior. *)
-      ; channel_workspace_id = channel_id
+      ; channel_workspace_id = Option.value guild_id ~default:""
+        (* sound-partial: allow — [guild_id]=None is a DM (a known state,
+           not a parse failure), so the "" default at the stringly gate
+           layer is total, not permissive; the typed
+           [delivery.workspace_id] carries the explicit absence ([None]). *)
       ; keeper_name
       ; content
       ; idempotency_key = Printf.sprintf "discord-msg-%s" message_id
       ; metadata
       }
     in
-    let stream_reply =
-      make_discord_stream_reply ~channel_id ~reply_to_message_id:message_id
+    let delivery =
+      discord_delivery ~guild_id ~channel_id ~message_id ~author_id
     in
-    let on_text_snapshot =
-      publish_discord_stream_snapshot stream_reply
+    let outcome =
+      Channel_gate.handle_inbound ~dispatch:(dispatch_for_delivery delivery) msg
     in
-    (match
-       with_response_wait_typing_indicator ~clock ~channel_id (fun () ->
-         Channel_gate.handle_inbound_streaming ~dispatch ~on_text_snapshot msg)
-     with
+    Some (fun () ->
+     match outcome with
      | Error gate_err ->
        (match gate_err with
         | Channel_gate.Dispatch_unavailable ->
@@ -472,53 +376,36 @@ let handle_message_create ~dispatch
          Discord_observability.record_reply Discord_observability.Reply_empty
        end
        else
-         (match finish_discord_stream_reply stream_reply ~final_content:out.content with
-          | Stream_completed ->
-              (match attention_event_id with
-               | Some event_id ->
-                   mark_attention_resolved ~base_dir ~keeper_name ~event_id
-                     ~reason:"discord_reply_streamed"
-               | None -> ());
-              Discord_observability.record_inbound_dispatch
-                Discord_observability.Reply_sent;
-              Discord_observability.record_reply
-                Discord_observability.Reply_send_ok
-          | Stream_not_started | Stream_final_edit_failed _ ->
-              (match State.send_message ~channel_id ~content:out.content ~reply_to_message_id:message_id () with
-               | Ok _ ->
-                 (match attention_event_id with
-                  | Some event_id ->
-                      mark_attention_resolved ~base_dir ~keeper_name ~event_id
-                        ~reason:"discord_reply_sent"
-                  | None -> ());
-                 Discord_observability.record_inbound_dispatch
-                   Discord_observability.Reply_sent;
-                 Discord_observability.record_reply
-                   Discord_observability.Reply_send_ok
-               | Error e ->
-                 Discord_observability.record_inbound_dispatch
-                   Discord_observability.Reply_send_error;
-                 Discord_observability.record_reply
-                   Discord_observability.Reply_send_failed;
-                 Log.Server.error "discord send_message failed (channel=%s): %s"
-                   channel_id
-                   (Format.asprintf "%a" State.pp_send_error e))
-          | Stream_overflow_send_failed _ ->
-              (match attention_event_id with
-               | Some event_id ->
-                   mark_attention_resolved ~base_dir ~keeper_name ~event_id
-                     ~reason:"discord_reply_partial_overflow"
-               | None -> ());
-              Discord_observability.record_inbound_dispatch
-                Discord_observability.Reply_send_error;
-              Discord_observability.record_reply
-                Discord_observability.Reply_send_failed))
+         (match
+            State.send_message ~channel_id ~content:out.content
+              ~reply_to_message_id:message_id ()
+          with
+          | Ok _ ->
+            (match attention_event_id with
+             | Some event_id ->
+               mark_attention_resolved ~base_dir ~keeper_name ~event_id
+                 ~reason:"discord_reply_sent"
+             | None -> ());
+            Discord_observability.record_inbound_dispatch
+              Discord_observability.Reply_sent;
+            Discord_observability.record_reply
+              Discord_observability.Reply_send_ok
+          | Error e ->
+            Discord_observability.record_inbound_dispatch
+              Discord_observability.Reply_send_error;
+            Discord_observability.record_reply
+              Discord_observability.Reply_send_failed;
+            Log.Server.error "discord send_message failed (channel=%s): %s"
+              channel_id
+              (Format.asprintf "%a" State.pp_send_error e)))
 
-let on_event ~dispatch ~clock ~base_dir (ev : Gw.gateway_event) =
+let accept_event ~resolved_binding ~dispatch_for_delivery ~base_dir
+    (ev : Gw.gateway_event) =
   match ev with
   | Gw.Ready { bot_user_id; _ } ->
     State.record_ready ~bot_user_id;
-    Log.Server.info "Discord gateway READY (bot_user_id=%s)" bot_user_id
+    Log.Server.info "Discord gateway READY (bot_user_id=%s)" bot_user_id;
+    None
   | Gw.Message_create
       { channel_id
       ; message_id
@@ -535,48 +422,61 @@ let on_event ~dispatch ~clock ~base_dir (ev : Gw.gateway_event) =
       } ->
     (* mentions_bot is already enforced by the trigger policy at the
        gateway-state layer; nothing extra to check here. *)
-    handle_message_create ~dispatch ~clock ~channel_id ~message_id ~author_id
+    accept_message_create ~resolved_binding ~dispatch_for_delivery ~channel_id
+      ~message_id ~author_id
       ~guild_id ~base_dir ~author_name ~content ~mentions_bot ~explicit_mentions_bot
       ~message_reference_channel_id ~message_reference_message_id
-      ~referenced_message_author_id
+      ~referenced_message_author_id ()
   | Gw.Reaction_add _ ->
     (* The previous Python sidecar used a configurable emoji
        trigger to drain pending messages. That feature is dropped in
        the in-process gateway; re-add as a follow-up if needed. *)
-    ()
+    None
   | Gw.Thread_tracked { thread_id; parent_channel_id } ->
     State.register_thread ~thread_id ~parent_channel_id;
     Log.Server.info
       "Discord thread registered: %s -> parent %s (total=%d)"
       thread_id parent_channel_id
-      (State.registered_thread_count ())
+      (State.registered_thread_count ());
+    None
   | Gw.Threads_bulk_tracked { threads } ->
     List.iter (fun (tid, pid) -> State.register_thread ~thread_id:tid ~parent_channel_id:pid) threads;
     Log.Server.info
       "Discord guild threads bulk registered: %d threads (total=%d)"
       (List.length threads)
-      (State.registered_thread_count ())
+      (State.registered_thread_count ());
+    None
   | Gw.Thread_removed { thread_id } ->
     State.unregister_thread ~thread_id;
     Log.Server.info
       "Discord thread removed: %s (total=%d)"
       thread_id
-      (State.registered_thread_count ())
+      (State.registered_thread_count ());
+    None
   | Gw.Ignored _ ->
-    ()
+    None
 
 (* RFC-0226 ambient lane recording: a bound-channel message that failed
    the trigger policy is still conversation the keeper sits in. Persist
    a single user line — no dispatch, no turn. Unbound channels drop, as
    on the dispatch path. *)
-let handle_ambient ~base_dir
+let handle_ambient ?resolved_keeper_name ~base_dir
       ~(channel_id : string) ~(guild_id : string option) ~(message_id : string)
-      ~(author_id : string) ~(author_name : string option) ~(content : string) =
-  match State.keeper_for_channel ~channel_id with
-  | None ->
+      ~(author_id : string) ~(author_name : string option) ~(content : string) () =
+  let keeper_name =
+    match resolved_keeper_name with
+    | Some keeper_name -> Ok (Some keeper_name)
+    | None -> State.keeper_for_channel_result ~channel_id
+  in
+  match keeper_name with
+  | Error error ->
+    log_binding_lookup_failure ~channel_id error;
+    Discord_observability.record_ambient
+      Discord_observability.Ambient_binding_store_error
+  | Ok None ->
     Discord_observability.record_ambient
       Discord_observability.Ambient_dropped_unbound
-  | Some keeper_name ->
+  | Ok (Some keeper_name) ->
     let trimmed = String.trim content in
     if String.equal trimmed "" then
       Discord_observability.record_ambient
@@ -616,23 +516,14 @@ let handle_ambient ~base_dir
           }
         ();
       Keeper_chat_broadcast.chat_appended ~keeper_name ~source:State.channel ();
-      (* RFC-connector-ambient-attention-wake P3: wake the (possibly idle) keeper
-         on this ambient message via an edge stimulus carrying the external-
-         attention event_id (not content — content stays in the durable store),
-         plus a wakeup hint for sub-second propagation. Gated off by default:
-         until the spurious-wake throttle (P4) lands, running a turn on every
-         ambient line in a chatty channel is the anti-pattern the trigger policy
-         deliberately filtered. *)
+      (* Every accepted Connector event is a durable per-Keeper stimulus. The
+         event identity comes from the producer-owned external-attention row;
+         no content, channel activity, elapsed-time window, or rollout flag may
+         suppress it. The wake is only a hint after the durable commit, so a
+         busy or lifecycle-deferred Keeper retains the exact event for its next
+         lane cycle. *)
       (match attention_event_id with
-       | Some event_id
-         when Feature_flag_registry.get_bool "MASC_CONNECTOR_AMBIENT_WAKE_ENABLED"
-              (* P4 throttle: the flag short-circuits first (cheap, no side
-                 effect); the debounce records a timestamp only when reached, so
-                 a chatty channel wakes the keeper at most once per window and a
-                 no-progress-latched keeper is not re-woken (RFC-0246). *)
-              && Keeper_keepalive_signal.connector_reactive_wakeup_allowed
-                   ~base_path:base_dir ~keeper_name ~channel_id
-         ->
+       | Some event_id ->
          let stimulus =
            { Keeper_event_queue.post_id = event_id
            ; urgency = Keeper_event_queue.Low
@@ -644,37 +535,152 @@ let handle_ambient ~base_dir
                Keeper_event_queue.Connector_attention
                  { event_id
                  ; channel =
-                     Keeper_continuation_channel.Discord
-                       { guild_id
-                       ; channel_id
-                       ; parent_channel_id
-                       ; thread_id
-                       ; user_id = author_id
-                       }
+                     (match
+                        Keeper_continuation_channel.discord
+                          ~guild_id
+                          ~channel_id
+                          ~parent_channel_id
+                          ~thread_id
+                          ~user_id:author_id
+                      with
+                      | Ok channel -> channel
+                      | Error message -> invalid_arg message)
                  }
            }
          in
-         Keeper_registry_event_queue.enqueue ~base_path:base_dir keeper_name stimulus;
-         let (_ : Keeper_registry.wakeup_outcome) =
-           Keeper_registry.wakeup
-             ~intent:Keeper_registry.Reactive_signal
-             ~base_path:base_dir
-             keeper_name
-         in
-         ()
-       | Some _ | None -> ());
+         (match
+            Keeper_registry_event_queue.enqueue_stimulus_durable_result
+              ~base_path:base_dir
+              keeper_name
+              stimulus
+          with
+          | Keeper_registry_event_queue.Stimulus_storage_error detail ->
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string KeepaliveSignalFailures)
+              ~labels:
+                [ ("keeper", keeper_name)
+                ; ("phase", "connector_attention_delivery")
+                ]
+              ();
+            Log.Server.error
+              "connector attention durable delivery failed (keeper=%s event=%s): %s"
+              keeper_name
+              event_id
+              detail
+          | Keeper_registry_event_queue.Stimulus_enqueued
+          | Keeper_registry_event_queue.Stimulus_already_present ->
+            (match
+               Keeper_registry.wakeup_running
+                 ~intent:Keeper_registry.Reactive_signal
+                 ~base_path:base_dir
+                 keeper_name
+             with
+             | Keeper_registry.Signaled -> ()
+             | Keeper_registry.Deferred_unregistered ->
+               Log.Server.info
+                 "connector attention durably queued; wake deferred for unregistered Keeper (keeper=%s event=%s)"
+                 keeper_name
+                 event_id
+             | Keeper_registry.Deferred_not_running phase ->
+               Log.Server.info
+                 "connector attention durably queued; wake deferred by Keeper phase (keeper=%s event=%s phase=%s)"
+                 keeper_name
+                 event_id
+                 (Keeper_state_machine.phase_to_string phase)
+             | Keeper_registry.Deferred_lifecycle denial ->
+               Log.Server.info
+                 "connector attention durably queued; wake deferred by lifecycle (keeper=%s event=%s reason=%s)"
+                 keeper_name
+                 event_id
+                 (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)))
+       | None -> ());
       Discord_observability.record_ambient
         Discord_observability.Ambient_recorded
     end
 
-let on_ambient ~base_dir (ev : Gw.gateway_event) =
+let on_ambient ?resolved_keeper_name ~base_dir (ev : Gw.gateway_event) =
   match ev with
   | Gw.Message_create
       { channel_id; guild_id; message_id; author_id; author_name; content; _ }
     ->
-    handle_ambient ~base_dir ~channel_id ~guild_id ~message_id ~author_id
-      ~author_name ~content
+    handle_ambient ?resolved_keeper_name ~base_dir ~channel_id ~guild_id
+      ~message_id ~author_id ~author_name ~content ()
   | Gw.Ready _ | Gw.Reaction_add _ | Gw.Thread_tracked _ | Gw.Threads_bulk_tracked _ | Gw.Thread_removed _ | Gw.Ignored _ -> ()
+
+let submit_ingress ingress ~lane ~event_id run =
+  match Connector_ingress_lane.submit ingress ~lane ~event_id run with
+  | Ok () -> ()
+  | Error error ->
+    Log.Server.error
+      "Discord ingress submission rejected lane=%s event=%s: %s"
+      (Connector_ingress_lane.lane_to_string lane)
+      (Connector_ingress_lane.event_id_to_string event_id)
+      (Connector_ingress_lane.submit_error_to_string error)
+;;
+
+  let submit_triggered_event ?deliver ingress ~dispatch_for_delivery ~base_dir
+    (ev : Gw.gateway_event) =
+  match ev with
+  | Gw.Message_create { channel_id; message_id; _ } ->
+    (match resolve_binding_for_message ~channel_id with
+     | Error error ->
+       log_binding_lookup_failure ~channel_id error;
+       Discord_observability.record_inbound_dispatch
+         Discord_observability.Gate_error
+     | Ok None ->
+       Discord_observability.record_inbound_dispatch
+         Discord_observability.Dropped_unbound
+     | Ok (Some ((resolution, _) as resolved_binding)) ->
+       (match
+          accept_event
+            ~resolved_binding:(Some resolved_binding)
+            ~dispatch_for_delivery ~base_dir ev
+        with
+        | None -> ()
+        | Some accepted_delivery ->
+          submit_ingress
+            ingress
+            ~lane:(Connector_ingress_lane.Keeper_lane resolution.State.keeper_name)
+            ~event_id:{ source = "discord_triggered"; opaque_id = message_id }
+            (* DET-OK: override-vs-admitted delivery, both from one typed
+               admission — deterministic, not an unknown-input default. *)
+            (Option.value deliver ~default:accepted_delivery)))
+  | Gw.Ready _
+  | Gw.Reaction_add _
+  | Gw.Thread_tracked _
+  | Gw.Threads_bulk_tracked _
+  | Gw.Thread_removed _
+  | Gw.Ignored _ ->
+    ignore
+      (accept_event ~resolved_binding:None ~dispatch_for_delivery ~base_dir ev)
+;;
+
+module For_testing = struct
+  let submit_triggered_event = submit_triggered_event
+end
+
+let submit_ambient_event ingress ~base_dir (ev : Gw.gateway_event) =
+  match ev with
+  | Gw.Message_create { channel_id; message_id; _ } ->
+    (match State.keeper_for_channel_result ~channel_id with
+     | Error error ->
+       log_binding_lookup_failure ~channel_id error;
+       Discord_observability.record_ambient
+         Discord_observability.Ambient_binding_store_error
+     | Ok None -> on_ambient ~base_dir ev
+     | Ok (Some keeper_name) ->
+       submit_ingress
+         ingress
+         ~lane:(Connector_ingress_lane.Keeper_lane keeper_name)
+         ~event_id:{ source = "discord_ambient"; opaque_id = message_id }
+         (fun () -> on_ambient ~resolved_keeper_name:keeper_name ~base_dir ev))
+  | Gw.Ready _
+  | Gw.Reaction_add _
+  | Gw.Thread_tracked _
+  | Gw.Threads_bulk_tracked _
+  | Gw.Thread_removed _
+  | Gw.Ignored _ -> on_ambient ~base_dir ev
+;;
 
 (* ---------------------------------------------------------------- *)
 (* Start                                                            *)
@@ -686,21 +692,30 @@ let start ~sw ~env ~clock ~state =
     Log.Server.warn
       "RFC-0203: DISCORD_BOT_TOKEN is unset; in-process Discord gateway not started"
   | Some token ->
-    let policy = resolved_trigger_policy () in
+    (match resolved_trigger_policy () with
+     | Error error ->
+       (* Same fail-closed posture as the Slack sibling (RFC-0317): a
+          malformed policy configuration must stop the gateway, not boot it
+          on a policy the operator did not write. *)
+       Log.Server.error
+         "RFC-0203: Discord trigger-policy configuration rejected; gateway \
+          not started (%s)"
+         (trigger_policy_load_error_to_string error)
+     | Ok policy ->
     State.set_trigger_policy policy;
-    let dispatch =
-      (* RFC-connector-deferred-reply-via-chat-queue: tag this dispatch as the Discord connector so a message that
-         arrives while the keeper is in flight is enqueued onto
-         [Keeper_chat_queue] (drained by the serial consumer, delivered back to
-         the channel via [Keeper_chat_discord.adapter_loop]) rather than the
-         outbound-less async poll store ([Keeper_msg_async]). *)
-      Gate_keeper_backend.dispatch_with_text_snapshot
-        ~connector_kind:Gate_keeper_backend.Discord
-        ~submission_owner:Gate_keeper_backend.Channel_actor
-        ~sw ~clock
-        ~proc_mgr:state.Mcp_server.proc_mgr
-        ~net:state.Mcp_server.net
-        ~config:(Mcp_server.workspace_config state)
+    let ingress =
+      Connector_ingress_lane.create
+        ~sw
+        ~on_failure:(fun failure ->
+          Log.Server.error
+            "Discord ingress callback failed lane=%s event=%s: %s"
+            (Connector_ingress_lane.lane_to_string failure.lane)
+            (Connector_ingress_lane.event_id_to_string failure.event_id)
+            (Connector_ingress_lane.failure_reason_to_string failure.reason))
+        ()
+    in
+    let dispatch_for_config config delivery =
+      Gate_keeper_backend.accept_connector ~delivery ~clock ~config
     in
     let policy_label = Discord_gateway_state.trigger_policy_to_string policy in
     Log.Server.info
@@ -714,22 +729,19 @@ let start ~sw ~env ~clock ~state =
           ~intents:default_intents
           ~trigger_policy:policy
           ~on_event:(fun ev ->
-            (* Read base_path per event: [workspace_config] is mutable
-               (workspace-switch tools swap it). *)
-            on_event
-              ~dispatch
-              ~clock
-              ~base_dir:(Mcp_server.workspace_config state).base_path
+            let config = Mcp_server.workspace_config state in
+            submit_triggered_event
+              ingress
+              ~dispatch_for_delivery:(dispatch_for_config config)
+              ~base_dir:config.base_path
               ev)
           ~on_ambient:(fun ev ->
-            (* Read base_path per event: [workspace_config] is mutable
-               (workspace-switch tools swap it). *)
-            on_ambient
-              ~base_dir:(Mcp_server.workspace_config state).base_path ev)
+            let config = Mcp_server.workspace_config state in
+            submit_ambient_event ingress ~base_dir:config.base_path ev)
           ()
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
         Log.Server.error
           "RFC-0203: in-process Discord gateway crashed: %s"
-          (Printexc.to_string exn))
+          (Printexc.to_string exn)))

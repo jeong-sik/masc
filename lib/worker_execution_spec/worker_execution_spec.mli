@@ -21,6 +21,6 @@ type t = {
 
 val to_yojson : t -> Yojson.Safe.t
 
-(** [of_yojson json] parses a previously serialized spec and rejects
-    removed worker contract fields. *)
+(** [of_yojson json] parses a serialized spec and rejects fields outside
+    the current worker invocation contract. *)
 val of_yojson : Yojson.Safe.t -> (t, string) result

@@ -7,15 +7,16 @@
    [write_to_sink]. The process stayed alive, [stderr] kept receiving
    records, but the structured JSON log just ended.
 
-   This test exercises the smaller of the two paths the patch closes —
-   the [output_string] failure path — by deleting the underlying file
-   after the sink is open, then emitting and checking that the channel
-   was dropped and reopened. The atomic-rotate path ([try_open_channel]
-   returning [None] from the rotate code) is harder to drive without
-   monkey-patching [open_out_gen], so we keep the contract pinned by
-   construction: [rotate_if_needed] now reads through [try_open_channel]
-   which protects against the raise — the absence of a [None]-on-success
-   transition is enforced by the source structure.
+   2026-07-17 (#25003): the sink-identity check that detects external
+   unlink/rename (a dev/ino stat pair inside [sink_matches_path]) used to
+   run on every emit — three stat-family syscalls per record, measured as
+   27% of main-thread samples. It is now throttled by
+   [identity_recheck_interval_s] (default 5s). The contract changed from
+   "external unlink detected on the next emit" to "external unlink detected
+   within the interval": records emitted inside the window go to the
+   unlinked inode and are lost with it. These tests pin both halves of that
+   contract — within the window the check is skipped (no recreate), past
+   the window the sink self-heals.
 
    These tests run in process and mutate global [Log.Ring] state, so they
    share state with anything else that runs in the same alcotest binary.
@@ -36,17 +37,16 @@ let date_string_utc () =
 
 let log_path dir = Filename.concat dir (Printf.sprintf "system_log_%s.jsonl" (date_string_utc ()))
 
-let rm_rf path =
+(* Removes [path] itself, not just its contents — [fresh_dir] follows with
+   [Sys.mkdir], which raises [File exists] on leftovers from a prior run of
+   this binary (the tmp root is shared across runs and worktrees). *)
+let rec rm_rf path =
   if Sys.file_exists path then
-    if Sys.is_directory path then
-      Array.iter (fun n ->
-        let p = Filename.concat path n in
-        if Sys.is_directory p then
-          ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote p)))
-        else Sys.remove p)
-        (Sys.readdir path)
-    else
-      Sys.remove path
+    if Sys.is_directory path then begin
+      Array.iter (fun n -> rm_rf (Filename.concat path n)) (Sys.readdir path);
+      Sys.rmdir path
+    end
+    else Sys.remove path
 
 let fresh_dir name =
   let dir = Filename.concat tmp_root name in
@@ -86,35 +86,51 @@ let normal_emit_lands_on_disk () =
   check bool "message recorded" true
     (contains body "test_log_file_sink_self_heal:normal:hello world")
 
-(* Self-heal: open sink, emit once, delete the underlying file, emit
-   again. With the fix, the second emit must re-create the file and
-   include its own message. Without the fix, [output_string] would
-   raise into the [match !file_channel with Some oc -> ...] arm; the
-   [output_string] arm is wrapped in [try ... with exn -> close_sink ()],
-   so the channel drops to [None] and the next emit reopens. *)
-let emit_after_file_unlink_reopens () =
+(* Throttle half of the contract: with a long recheck interval, emits that
+   land inside the window after an external unlink must NOT recreate the
+   file — the identity stat pair is skipped, and the records go to the
+   still-open unlinked inode. The absence of the file is the observable
+   proof that no stat check ran. *)
+let unlink_within_window_is_throttled () =
+  let dir = fresh_dir "throttled" in
+  R.init_file_sink ~identity_recheck_interval_s:60.0 dir;
+  (* First emit consumes the initial identity check (armed at init). *)
+  L.info "test_log_file_sink_self_heal:throttled:before";
+  let path = log_path dir in
+  check bool "file exists before unlink" true (Sys.file_exists path);
+  Sys.remove path;
+  check bool "file removed" false (Sys.file_exists path);
+  L.info "test_log_file_sink_self_heal:throttled:inside_window_1";
+  L.info "test_log_file_sink_self_heal:throttled:inside_window_2";
+  check bool "file NOT recreated inside the throttle window" false
+    (Sys.file_exists path)
+
+(* Self-heal half of the contract: past the recheck interval, the next emit
+   must detect the unlink through the identity check, reopen the sink at the
+   correct path, and record its own message. *)
+let unlink_after_window_recreates () =
   let dir = fresh_dir "unlinked" in
-  R.init_file_sink dir;
+  R.init_file_sink ~identity_recheck_interval_s:0.05 dir;
   L.info "test_log_file_sink_self_heal:unlinked:before";
   let path = log_path dir in
   check bool "file exists before unlink" true (Sys.file_exists path);
   Sys.remove path;
   check bool "file removed" false (Sys.file_exists path);
-  (* First post-unlink emit may drop the channel (if output_string raises),
-     then the same call's self-heal logic, or the next call's, must
-     reopen. We emit twice to cover both single-call and split-call
-     cases. *)
-  L.info "test_log_file_sink_self_heal:unlinked:after_first";
-  L.info "test_log_file_sink_self_heal:unlinked:after_second";
-  check bool "file re-created after self-heal" true (Sys.file_exists path);
+  Unix.sleepf 0.12;
+  L.info "test_log_file_sink_self_heal:unlinked:after_window";
+  check bool "file re-created after the throttle window" true
+    (Sys.file_exists path);
   let body = file_contents path in
   check bool "post-heal message recorded" true
-    (contains body "test_log_file_sink_self_heal:unlinked:after_second")
+    (contains body "test_log_file_sink_self_heal:unlinked:after_window")
 
 let () =
   run "log_file_sink_self_heal"
     [ "normal", [ test_case "emit lands on disk" `Quick normal_emit_lands_on_disk ]
     ; "self-heal"
-    , [ test_case "post-unlink emit reopens" `Quick emit_after_file_unlink_reopens
+    , [ test_case "unlink inside window stays throttled" `Quick
+          unlink_within_window_is_throttled
+      ; test_case "unlink past window reopens" `Quick
+          unlink_after_window_recreates
       ]
     ]

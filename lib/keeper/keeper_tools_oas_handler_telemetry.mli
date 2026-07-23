@@ -5,7 +5,7 @@ val keeper_tool_call_event_json
   :  keeper_name:string
   -> tool_name:string
   -> duration_ms:int
-  -> success:bool
+  -> disposition:('completed, 'deferred, 'failed) Tool_result.disposition
   -> ?error_text:string
   -> ?extra_fields:(string * Yojson.Safe.t) list
   -> ts:float
@@ -23,13 +23,19 @@ val tool_io_preview_fields
   -> unit
   -> (string * Yojson.Safe.t) list
 
+(** Exact OAS model-tool occurrence fields. Blank or repeated [tool_use_id]
+    values are preserved because [turn] and [planned_index] provide the scope. *)
+val oas_invocation_fields
+  :  Agent_sdk.Tool.Invocation.t option
+  -> (string * Yojson.Safe.t) list
+
 (** Broadcast a keeper tool-call event via SSE, swallowing non-cancellation
     exceptions and logging a warning instead of crashing the turn. *)
 val broadcast_keeper_tool_call_event
   :  keeper_name:string
   -> tool_name:string
   -> duration_ms:int
-  -> success:bool
+  -> disposition:('completed, 'deferred, 'failed) Tool_result.disposition
   -> ?error_text:string
   -> ?extra_fields:(string * Yojson.Safe.t) list
   -> site:string

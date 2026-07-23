@@ -41,41 +41,6 @@ let payload_agent_name payload =
      | None -> Json_util.get_string payload "keeper_name")
 ;;
 
-let tool_failure_attempt_observation
-      (attempt : Agent_sdk.Tool_failure_episode.failed_attempt)
-  =
-  `Assoc
-    [ "tool_use_id", `String attempt.tool_use_id
-    ; "tool_name", `String attempt.tool_name
-    ; "failure_kind", Agent_sdk.Types.tool_failure_kind_to_yojson attempt.failure_kind
-    ; ( "error_class"
-      , match attempt.error_class with
-        | Some error_class -> Agent_sdk.Types.tool_error_class_to_yojson error_class
-        | None -> `Null )
-    ]
-;;
-
-let tool_failure_episode_observation
-      (episode : Agent_sdk.Tool_failure_episode.t)
-  =
-  `Assoc
-    [ "previous", tool_failure_attempt_observation episode.previous
-    ; "current", tool_failure_attempt_observation episode.current
-    ]
-;;
-
-let sha256_hex value = Digestif.SHA256.(digest_string value |> to_hex)
-
-let recovery_decision_observation_fields decision =
-  match
-    Agent_sdk.Tool_failure_recovery.decision_observation_to_yojson decision
-  with
-  | `Assoc fields -> fields
-  | _ ->
-    invalid_arg
-      "keeper_event_bridge: OAS recovery decision observation must be an object"
-;;
-
 let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.t) =
   let log_at level message =
     Log.Oas_event.emit level ~details:json message
@@ -88,8 +53,8 @@ let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.
      Info, because it is a redundant TEXT rendering of events already carried by
      two authoritative planes: (1) for keeper agents, the keeper hook logs the
      richer "[Keeper] ... tool_call ... outcome=... out_len=" / "[Keeper/...] turn="
-     lines at Info; (2) for every agent, [Event_log.publish] + [Sse.broadcast]
-     (see [prepare_pending_event]) carry the structured stream the dashboard and
+     lines at Info; (2) for every agent, [Sse.broadcast]
+     (see [prepare_pending_event]) carries the structured stream the dashboard and
      REST/SSE subscribers actually consume. Demoting these four high-frequency
      arms removes the Info-level console doubling without losing the data — it
      stays retrievable at Debug and the structured/SSE planes are untouched. This
@@ -116,29 +81,10 @@ let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.
   | Agent_sdk.Event_bus.ToolCompleted { agent_name; tool_name; _ } ->
     log_routine
       (Printf.sprintf "tool completed agent=%s tool_name=%s" agent_name tool_name)
-  | Agent_sdk.Event_bus.ToolFailureEpisodeDetected { agent_name; turn; episodes } ->
-    log
-      (Printf.sprintf
-         "typed tool failure episode detected agent=%s turn=%d episodes=%d"
-         agent_name
-         turn
-         (List.length episodes))
-  | Agent_sdk.Event_bus.ToolFailureRecoveryDecided { agent_name; turn; _ } ->
-    log
-      (Printf.sprintf
-         "typed tool failure recovery decided agent=%s turn=%d"
-         agent_name
-         turn)
-  | Agent_sdk.Event_bus.ToolFailureRecoveryJudgeFailed { agent_name; turn; _ } ->
-    log
-      (Printf.sprintf
-         "typed tool failure recovery judge failed agent=%s turn=%d"
-         agent_name
-         turn)
   | Agent_sdk.Event_bus.TurnReady { agent_name; turn; tool_names } ->
     (* [substrate:tool_surface] — deterministic per-turn snapshot of the
          tool list the LLM actually sees this turn (after guardrails,
-         operator policy, tool_filter_override).  Emitted as a single
+         and operator policy).  Emitted as a single
          grep-friendly line with a stable hash so operators can confirm
          which tools were on the LLM's surface for a given turn without
          enabling verbose tool dumps. *)
@@ -150,27 +96,6 @@ let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.
          turn
          (List.length tool_names)
          (String.sub names_hash 0 16))
-  | Agent_sdk.Event_bus.ContextCompacted
-      { agent_name; before_tokens; after_tokens; phase } ->
-    log
-      (Printf.sprintf
-         "context compacted agent=%s before_tokens=%d after_tokens=%d phase=%s"
-         agent_name
-         before_tokens
-         after_tokens
-         phase)
-  | Agent_sdk.Event_bus.ContextOverflowImminent
-      { agent_name; estimated_tokens; limit_tokens; ratio } ->
-    log
-      (Printf.sprintf
-         "context overflow imminent agent=%s estimated_tokens=%d limit_tokens=%d \
-          ratio=%.3f"
-         agent_name
-         estimated_tokens
-         limit_tokens
-         ratio)
-  | Agent_sdk.Event_bus.ContextCompactStarted { agent_name; trigger } ->
-    log (Printf.sprintf "context compact started agent=%s trigger=%s" agent_name trigger)
   (* Variants below previously absorbed by [_ -> ()] catch-all.  Each is
      enumerated explicitly so adding a new [Agent_sdk.Event_bus.payload]
      variant fails the build instead of silently dropping the log line. *)
@@ -178,9 +103,6 @@ let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.
   | Agent_sdk.Event_bus.HandoffRequested _
   | Agent_sdk.Event_bus.HandoffCompleted _
   | Agent_sdk.Event_bus.ElicitationCompleted _
-  | Agent_sdk.Event_bus.ContentReplacementReplaced _
-  | Agent_sdk.Event_bus.ContentReplacementKept _
-  | Agent_sdk.Event_bus.SlotSchedulerObserved _
   | Agent_sdk.Event_bus.InferenceTelemetry _
   | Agent_sdk.Event_bus.Custom _ -> ()
 ;;
@@ -245,6 +167,14 @@ let wrap_event
     Suppressing warning 11 ([@warning "-11"]) is therefore the entire
     point of this function's shape — do not remove it without also
     removing the catch-all. *)
+let invocation_payload_fields invocation =
+  let tool_use_id = Agent_sdk.Tool.Invocation.tool_use_id invocation in
+  [ "turn", `Int (Agent_sdk.Tool.Invocation.turn invocation)
+  ; "planned_index", `Int (Agent_sdk.Tool.Invocation.planned_index invocation)
+  ]
+  @ (if tool_use_id = "" then [] else [ "tool_use_id", `String tool_use_id ])
+;;
+
 let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t option =
   let { Agent_sdk.Event_bus.correlation_id; run_id; ts; caused_by; _ } = evt.meta in
   let wrap = wrap_event ~ts ~correlation_id ~run_id ?caused_by in
@@ -267,7 +197,10 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          | None -> None
        in
        observe_inference_cost ~provider ~model_bucket cost_usd
-     | Error _ -> ());
+     | Error error ->
+       Log.Oas_event.routine
+         "agent completion has no inference cost observation because the run failed: %s"
+         (Agent_sdk.Error.to_string error));
     let payload =
       `Assoc
         ([ "agent_name", `String agent_name
@@ -294,21 +227,22 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          ~error_retryable:projection.error_retryable
          ~error_detail:projection.error_detail
          ())
-  | Agent_sdk.Event_bus.ToolCalled { agent_name; tool_name; tool_use_id; _ } ->
+  | Agent_sdk.Event_bus.ToolCalled { invocation; agent_name; tool_name; _ } ->
     (* tool_called publishes before execution, so the keeper hook has not
        minted an execution_id yet — this row carries the provider call id
        only; the matching tool_completed row carries both. *)
     let payload =
       `Assoc
         ([ "agent_name", `String agent_name; "tool_name", `String tool_name ]
-         @ (if tool_use_id = "" then [] else [ "tool_use_id", `String tool_use_id ]))
+         @ invocation_payload_fields invocation)
     in
     Some (wrap ~event_type:"tool_called" ~payload ~agent_name ~tool_name ())
-  | Agent_sdk.Event_bus.ToolCompleted { agent_name; tool_name; tool_use_id; _ } ->
+  | Agent_sdk.Event_bus.ToolCompleted { invocation; agent_name; tool_name; _ } ->
     (* RFC-0233 PR-2: the keeper post_tool_use hook registered the
        tool_use_id ↔ execution_id pair before OAS published this event,
        so the lookup is deterministic. A miss means the execution did not
        go through a keeper hook (worker/eval lanes), not a failure. *)
+    let tool_use_id = Agent_sdk.Tool.Invocation.tool_use_id invocation in
     let execution_id_fields =
       match
         if tool_use_id = "" then None
@@ -320,60 +254,10 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
     let payload =
       `Assoc
         ([ "agent_name", `String agent_name; "tool_name", `String tool_name ]
-         @ (if tool_use_id = "" then [] else [ "tool_use_id", `String tool_use_id ])
+         @ invocation_payload_fields invocation
          @ execution_id_fields)
     in
     Some (wrap ~event_type:"tool_completed" ~payload ~agent_name ~tool_name ())
-  | Agent_sdk.Event_bus.ToolFailureEpisodeDetected { agent_name; turn; episodes } ->
-    let payload =
-      `Assoc
-        [ "agent_name", `String agent_name
-        ; "turn", `Int turn
-        ; "episode_count", `Int (List.length episodes)
-        ; ( "episodes"
-          , `List (List.map tool_failure_episode_observation episodes) )
-        ]
-    in
-    Some
-      (wrap
-         ~event_type:"tool_failure_episode_detected"
-         ~payload
-         ~agent_name
-         ~turn
-         ())
-  | Agent_sdk.Event_bus.ToolFailureRecoveryDecided
-      { agent_name; turn; decision } ->
-    let payload =
-      `Assoc
-        ([ "agent_name", `String agent_name; "turn", `Int turn ]
-         @ recovery_decision_observation_fields decision)
-    in
-    Some
-      (wrap
-         ~event_type:"tool_failure_recovery_decided"
-         ~payload
-         ~agent_name
-         ~turn
-         ())
-  | Agent_sdk.Event_bus.ToolFailureRecoveryJudgeFailed
-      { agent_name; turn; kind; detail } ->
-    let payload =
-      `Assoc
-        [ "agent_name", `String agent_name
-        ; "turn", `Int turn
-        ; ( "kind"
-          , `String
-              (Agent_sdk.Tool_failure_recovery.judge_error_kind_to_string kind) )
-        ; "detail_digest", `String (sha256_hex detail)
-        ]
-    in
-    Some
-      (wrap
-         ~event_type:"tool_failure_recovery_judge_failed"
-         ~payload
-         ~agent_name
-         ~turn
-         ())
   | Agent_sdk.Event_bus.TurnStarted { agent_name; turn } ->
     let payload = `Assoc [ "agent_name", `String agent_name; "turn", `Int turn ] in
     Some (wrap ~event_type:"turn_started" ~payload ~agent_name ~turn ())
@@ -410,90 +294,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
         ]
     in
     Some (wrap ~event_type:"handoff_completed" ~payload ~agent_name:from_agent ())
-  | Agent_sdk.Event_bus.ContextCompacted
-      { agent_name; before_tokens; after_tokens; phase } ->
-    (* #9935: compaction completed — clears any pending
-         imminent and fires action-taken counter. *)
-    Context_overflow_action_tracker.record_action ~keeper_name:agent_name;
-    let payload =
-      `Assoc
-        [ "agent_name", `String agent_name
-        ; "before_tokens", `Int before_tokens
-        ; "after_tokens", `Int after_tokens
-        ; "phase", `String phase
-        ]
-    in
-    Some (wrap ~event_type:"context_compacted" ~payload ~agent_name ())
   | Agent_sdk.Event_bus.ElicitationCompleted _ -> None (* Internal; no SSE relay needed *)
-  | Agent_sdk.Event_bus.ContextOverflowImminent
-      { agent_name; estimated_tokens; limit_tokens; ratio } ->
-    (* #9935: track imminent→action pairing so an unanswered
-         overflow (no compact_started/compacted within grace
-         window) is observable via metric + warn log, rather
-         than silently burning out as provider_timeout. *)
-    Otel_metric_store.set_gauge
-      Otel_metric_store.metric_oas_context_overflow_ratio
-      ~labels:[ "agent_name", agent_name ]
-      ratio;
-    Context_overflow_action_tracker.record_imminent
-      ~keeper_name:agent_name
-      ~ts:(Time_compat.now ());
-    let payload =
-      `Assoc
-        [ "agent_name", `String agent_name
-        ; "estimated_tokens", `Int estimated_tokens
-        ; "limit_tokens", `Int limit_tokens
-        ; "ratio", `Float ratio
-        ]
-    in
-    Some (wrap ~event_type:"context_overflow_imminent" ~payload ~agent_name ())
-  | Agent_sdk.Event_bus.ContextCompactStarted { agent_name; trigger } ->
-    (* #9935: compaction started — clears pending imminent
-         and fires action-taken counter. *)
-    Context_overflow_action_tracker.record_action ~keeper_name:agent_name;
-    Otel_metric_store.inc_counter
-      Otel_metric_store.metric_oas_context_compaction_total
-      ~labels:[ "agent_name", agent_name; "trigger", trigger ]
-      ();
-    let payload =
-      `Assoc [ "agent_name", `String agent_name; "trigger", `String trigger ]
-    in
-    Some (wrap ~event_type:"context_compact_started" ~payload ~agent_name ())
-  | Agent_sdk.Event_bus.ContentReplacementReplaced
-      { tool_use_id; preview; original_chars; seen_count_after } ->
-    let payload =
-      `Assoc
-        [ "tool_use_id", `String tool_use_id
-        ; "preview", `String preview
-        ; "original_chars", `Int original_chars
-        ; "seen_count_after", `Int seen_count_after
-        ]
-    in
-    Some (wrap ~event_type:"content_replacement_replaced" ~payload ())
-  | Agent_sdk.Event_bus.ContentReplacementKept { tool_use_id; seen_count_after } ->
-    let payload =
-      `Assoc
-        [ "tool_use_id", `String tool_use_id; "seen_count_after", `Int seen_count_after ]
-    in
-    Some (wrap ~event_type:"content_replacement_kept" ~payload ())
-  | Agent_sdk.Event_bus.SlotSchedulerObserved
-      { max_slots; active; available; queue_length; state } ->
-    let state_str =
-      match state with
-      | Agent_sdk.Event_bus.Idle -> "idle"
-      | Agent_sdk.Event_bus.Queued -> "queued"
-      | Agent_sdk.Event_bus.Saturated -> "saturated"
-    in
-    let payload =
-      `Assoc
-        [ "max_slots", `Int max_slots
-        ; "active", `Int active
-        ; "available", `Int available
-        ; "queue_length", `Int queue_length
-        ; "state", `String state_str
-        ]
-    in
-    Some (wrap ~event_type:"slot_scheduler_observed" ~payload ())
   | Agent_sdk.Event_bus.Custom (name, payload) ->
     (* Wire compatibility: dashboard consumers historically decoded
          [masc:broadcast] / [masc:keeper:snapshot] (all colons).
@@ -724,12 +525,6 @@ let prepare_pending_event evt =
          retry queue so every retry uses the same sanitized payload. *)
     let json = Inference_utils.sanitize_json_utf8 json in
     emit_native_event_log evt json;
-    (* P2-2: canonical in-memory event log. OAS events are published here so
-       REST/SSE subscribers and future replay tools have a single ordered
-       stream to consume. The log is bounded (10k events). *)
-    let (_ : Event_log.event_id) =
-      Event_log.publish ~source:"oas_event_bridge" ~kind:(relay_event_type json) json
-    in
     Some { json; attempts = 0; appended = false }
 ;;
 
@@ -808,31 +603,9 @@ let rec process_pending ?store_ref acc = function
      | Delivered -> process_pending ?store_ref acc rest
      | Retryable_failure (pending, stage, exn) ->
        let attempt = pending.attempts + 1 in
-       let fd_pressure =
-         Keeper_fd_pressure.active () || Keeper_fd_pressure.is_fd_exhaustion_exn exn
-       in
-       let disk_pressure =
-         Keeper_disk_pressure.active ()
-         || Keeper_disk_pressure.is_disk_exhaustion_exn exn
-       in
-       if disk_pressure
-       then Keeper_disk_pressure.note_exception ~site:"oas_event_bridge.relay" exn;
-       if fd_pressure || disk_pressure
-       then (
-         if fd_pressure
-         then Keeper_fd_pressure.note_exception ~site:"oas_event_bridge.relay" exn;
-         Otel_metric_store.inc_counter
-           Otel_metric_store.metric_oas_sse_relay_drops
-           ~labels:[ "stage", relay_stage_to_string stage ]
-           ();
-         let stage_label =
-           relay_stage_to_string stage
-           ^ (if fd_pressure then ":fd_pressure" else ":disk_pressure")
-         in
-         emit_relay_drop_log ~pending ~stage_label ~attempts:attempt;
-         broadcast_drop_marker ~pending ~stage_label ~attempts:attempt;
-         process_pending ?store_ref acc rest)
-       else if attempt >= relay_max_attempts
+       Keeper_fd_pressure.note_exception ~site:"oas_event_bridge.relay" exn;
+       Keeper_disk_pressure.note_exception ~site:"oas_event_bridge.relay" exn;
+       if attempt >= relay_max_attempts
        then (
          Otel_metric_store.inc_counter
            Otel_metric_store.metric_oas_sse_relay_drops
@@ -929,6 +702,8 @@ let start_impl ~interval_s ~sw ~clock ~(config : Workspace.config) ~bus =
   let store = ref (oas_event_store ~config) in
   let sub =
     Agent_sdk_metrics_bridge.subscribe
+      ~capacity:256
+      ~overflow:Agent_sdk.Event_bus.Drop_oldest
       ~purpose:"sse_bridge"
       ~filter:Agent_sdk.Event_bus.accept_all
       bus

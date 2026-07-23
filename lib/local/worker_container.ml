@@ -43,9 +43,6 @@ let worker_raw_trace_path ~base_path ~worker_name =
 let oas_tool_error ?(recoverable = false) message : Agent_sdk.Types.tool_result =
   Error { Agent_sdk.Types.message; recoverable; error_class = None }
 
-let oas_trace_session_root ~base_path =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "oas-runtime"
-
 let ensure_worker_container_dirs ~base_path ~worker_name =
   let dir = worker_container_dir ~base_path ~worker_name in
   Fs_compat.mkdir_p dir;
@@ -92,25 +89,16 @@ let worker_meta_allowed_fields =
     "last_run_at";
   ]
 
-let worker_meta_removed_fields =
-  [ "max_turns_override"; "tool_profile"; "shell_profile"; "worker_class" ]
-
 let validate_worker_meta_fields fields =
   let field_names = List.map fst fields in
-  match List.find_opt (fun name -> List.mem name worker_meta_removed_fields) field_names with
+  match
+    List.find_opt
+      (fun name -> not (List.mem name worker_meta_allowed_fields))
+      field_names
+  with
   | Some field ->
-      Error
-        (Printf.sprintf
-           "worker meta field %S has been removed; worker runtime state is now backend-only"
-           field)
-  | None -> (
-      match List.find_opt
-              (fun name -> not (List.mem name worker_meta_allowed_fields))
-              field_names
-      with
-      | Some field ->
-          Error (Printf.sprintf "unknown worker meta field %S" field)
-      | None -> Ok ())
+      Error (Printf.sprintf "unknown worker meta field %S" field)
+  | None -> Ok ()
 
 let worker_meta_to_yojson (meta : worker_container_meta) =
   `Assoc
@@ -331,30 +319,13 @@ let build_oas_mcp_tools ~sw ~auth_token ~session_id ~worker_name =
                }))
     listed_schemas
 
-(** Convert a model label to an OAS Provider.config.
-    Returns Error when the label cannot be parsed. *)
-let oas_provider_of_label (label : string) :
-    (Agent_sdk.Provider.config, string) result =
-  match Runtime_model_string.parse_model_string label with
-  | Some pc -> Ok (Agent_sdk.Provider.config_of_provider_config pc)
-  | None ->
-    let msg = Printf.sprintf "Cannot parse model label: %S (expected provider:model)" label in
-    Log.Misc.error "%s" msg;
-    Error msg
-
 (** Resolve provider from a model label string.
     Returns the provider config and model_id on success. *)
 let resolve_oas_provider_of_label (label : string) :
-    (Agent_sdk.Provider.config * string, string) result =
+    (Llm_provider.Provider_config.t * string, string) result =
   match Runtime_model_string.parse_model_string label with
   | None -> Error (Printf.sprintf "Cannot parse model: %s" label)
-  | Some pc ->
-    Ok
-      ( Agent_sdk.Provider.config_of_provider_config pc,
-        pc.Llm_provider.Provider_config.model_id )
-
-let oas_tool_names (tools : Agent_sdk.Tool.t list) =
-  List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) tools
+  | Some pc -> Ok (pc, pc.Llm_provider.Provider_config.model_id)
 
 let make_worker_meta ~base_path ~workspace_path ~worker_name
     ~mcp_session_id ~role ~selection_note ~runtime_backend
@@ -381,7 +352,7 @@ let make_worker_meta ~base_path ~workspace_path ~worker_name
 
 let append_worker_completion_log ~base_path ~worker_name
     ~prompt ~tool_names ~status ~output ?error ?raw_trace_run
-    ?evidence_session_id ?proof_run_id ?proof_result_status () =
+    ?evidence_session_id () =
   append_worker_turn_log ~base_path ~worker_name
     (`Assoc
       [
@@ -397,100 +368,30 @@ let append_worker_completion_log ~base_path ~worker_name
         ( "evidence_session_id",
           Option.fold ~none:`Null ~some:(fun value -> `String value)
             evidence_session_id );
-        ( "proof_run_id",
-          Option.fold ~none:`Null ~some:(fun value -> `String value)
-            proof_run_id );
-        ( "proof_result_status",
-          Option.fold ~none:`Null ~some:(fun value -> `String value)
-            proof_result_status );
         ( "error",
           Option.fold ~none:`Null ~some:(fun value -> `String value) error );
       ])
 
 (** Build (config, options) for Agent.resume — the continue_worker path.
     New workers use Worker_oas.build_agent (Builder pattern) instead.
-    Accepts [~provider] + [~model_id] as resolved values. *)
-let build_resume_config ~worker_name ~provider ~model_id ~system_prompt ~tools
-    ~max_turns ~thinking_enabled ~hooks ~raw_trace ?(periodic_callbacks = [])
-    ?(guardrails : Agent_sdk.Guardrails.t option)
+    The exact provider config is passed directly to [Agent.resume]. *)
+let build_resume_config ~worker_name ~model_id ~system_prompt
+    ~thinking_enabled ~hooks ~raw_trace ?(periodic_callbacks = [])
     () =
   let config =
     {
-      Agent_sdk.Types.default_config with
+      (Agent_sdk.Types.default_config ~model:model_id) with
       name = worker_name;
-      model = model_id;
       system_prompt = Some system_prompt;
-      max_tokens = Some (local_worker_max_tokens ());
-      max_turns;
-      temperature = Some Runtime_provider_defaults.worker_default_temperature;
-      top_p = Some 0.95;
-      top_k = Some 40;
-      (* min_p is effectively disabled (0.0) and some cloud providers
-         reject the field itself even when the value is a no-op. *)
-      min_p = None;
       enable_thinking = Some thinking_enabled;
     }
-  in
-  let effective_guardrails =
-    match guardrails with
-    | Some g -> g
-    | None ->
-        { Agent_sdk.Guardrails.tool_filter =
-            Agent_sdk.Guardrails.AllowList (oas_tool_names tools);
-          max_tool_calls_per_turn = Some 30;
-        }
   in
   let options =
     {
       Agent_sdk.Agent.default_options with
-      provider = Some provider;
       hooks;
-      guardrails = effective_guardrails;
       raw_trace = Some raw_trace;
       periodic_callbacks;
     }
   in
   (config, options)
-
-let materialize_direct_evidence ~base_path ~worker_name
-    ~(worker_run_id : string option) ~(meta : worker_container_meta) ~prompt
-    ~workspace_path ~agent ~raw_trace =
-  match evidence_session_id_of_worker_run worker_run_id with
-  | None -> ()
-  | Some session_id ->
-      let aliases =
-        Json_util.dedupe_keep_order
-          ([ worker_name ]
-          @
-          match meta.role with
-          | Some role
-            when String.trim role <> ""
-                 && not (String.equal role worker_name) ->
-              [ role ]
-          | _ -> [])
-      in
-      let options =
-        {
-          Masc_cdal_runtime.Direct_evidence.session_root =
-            Some (oas_trace_session_root ~base_path);
-          session_id;
-          goal = prompt;
-          title = Some (Printf.sprintf "MASC worker %s" worker_name);
-          tag = Some "masc-team-worker";
-          worker_id =
-            Some (stable_worker_session_id worker_name);
-          runtime_actor = Some worker_name;
-          role = meta.role;
-          aliases;
-          requested_provider = Some "local";
-          requested_model = Some meta.effective_model;
-          requested_policy = None;
-          workdir = Some workspace_path;
-        }
-      in
-      match Masc_cdal_runtime.Direct_evidence.persist ~agent ~raw_trace ~options () with
-      | Ok _ -> ()
-      | Error err ->
-          Log.LocalWorker.error
-            "direct evidence persist failed for %s/%s: %s"
-            worker_name session_id (Agent_sdk.Error.to_string err)

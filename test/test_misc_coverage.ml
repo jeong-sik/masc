@@ -129,33 +129,9 @@ let test_config_of_json_invalid () =
   check bool "pause allowed on admin/catalog surface" true
     (Config.is_tool_allowed "masc_pause")
 
-(* ============================================================
-   Env_config Tests
-   ============================================================ *)
-
-let test_env_zombie_threshold () =
-  let threshold = Env_config.Zombie.threshold_seconds in
-  check bool "positive threshold" true (threshold > 0.0)
-
-let test_env_zombie_cleanup_interval () =
-  let interval = Env_config.Zombie.cleanup_interval_seconds in
-  check bool "positive interval" true (interval > 0.0)
-
-let test_env_lock_timeout () =
-  let timeout = Env_config.Lock.timeout_seconds in
-  check bool "positive timeout" true (timeout > 0.0)
-
-let test_env_lock_expiry_warning () =
-  let warning = Env_config.Lock.expiry_warning_seconds in
-  check bool "positive warning" true (warning > 0.0)
-
 let test_env_session_max_age () =
   let max_age = Env_config.Session.max_age_seconds in
   check bool "positive max_age" true (max_age > 0.0)
-
-let test_env_session_rate_limit () =
-  let window = Env_config.Session.rate_limit_window_seconds in
-  check bool "positive window" true (window > 0.0)
 
 let test_env_tempo_min () =
   let min = Env_config.Tempo.min_interval_seconds in
@@ -181,10 +157,6 @@ let test_env_orchestrator_interval () =
 let test_env_orchestrator_agent_name () =
   let name = Env_config.Orchestrator.agent_name in
   check bool "non-empty name" true (String.length name > 0)
-
-let test_env_cancellation_max_age () =
-  let max_age = Env_config.Cancellation.token_max_age_seconds in
-  check bool "positive max_age" true (max_age > 0.0)
 
 let test_env_get_string () =
   let v = Env_config.get_string ~default:"fallback" "NONEXISTENT_VAR_12345" in
@@ -229,17 +201,8 @@ let () =
       test_case "of_json custom" `Quick test_config_of_json_custom;
       test_case "of_json invalid" `Quick test_config_of_json_invalid;
     ];
-    "env_config.zombie", [
-      test_case "threshold" `Quick test_env_zombie_threshold;
-      test_case "cleanup_interval" `Quick test_env_zombie_cleanup_interval;
-    ];
-    "env_config.lock", [
-      test_case "timeout" `Quick test_env_lock_timeout;
-      test_case "expiry_warning" `Quick test_env_lock_expiry_warning;
-    ];
     "env_config.session", [
       test_case "max_age" `Quick test_env_session_max_age;
-      test_case "rate_limit" `Quick test_env_session_rate_limit;
     ];
     "env_config.tempo", [
       test_case "min" `Quick test_env_tempo_min;
@@ -250,9 +213,6 @@ let () =
     "env_config.orchestrator", [
       test_case "interval" `Quick test_env_orchestrator_interval;
       test_case "agent_name" `Quick test_env_orchestrator_agent_name;
-    ];
-    "env_config.cancellation", [
-      test_case "max_age" `Quick test_env_cancellation_max_age;
     ];
     "env_config.helpers", [
       test_case "get_string" `Quick test_env_get_string;

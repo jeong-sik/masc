@@ -1,34 +1,21 @@
-type per_provider_timeout_state =
-  | Per_provider_timeout_unset
-  | Per_provider_timeout_invalid
-  | Per_provider_timeout_set
-
 type keeper_profile_defaults = {
   id : Ids.Keeper_id.t option;
   manifest_path : string option;
   persona_name : string option;
-  goal : string option;
   instructions : string option;
   autoboot_enabled : bool option;
   mention_targets : string list;
   proactive_enabled : bool option;
-  proactive_idle_sec : int option;
-  proactive_cooldown_sec : int option;
-  shards : string list option;
   allowed_paths : string list option;
   sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile option;
   sandbox_image : string option;
   network_mode : Keeper_types_profile_sandbox.network_mode option;
   multimodal_policy : Keeper_types_profile_sandbox.multimodal_policy option;
-  tool_access : string list option;
-  tool_denylist : string list option;
   active_goal_ids : string list option;
   (* Telemetry Feedback — inject behavioral stats into keeper context *)
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
-  per_provider_timeout_state : per_provider_timeout_state;
-  per_provider_timeout : float option;
-  always_approve : bool option;
+  always_allow : bool option;
   (* Per-keeper OAS CLI transport env vars (OAS 0.159+).
      Parsed from [[keeper.oas_env]] table.  Keys MUST match
      ^OAS_[A-Z]+_.+ — any other entries are dropped with
@@ -50,27 +37,19 @@ let empty_keeper_profile_defaults =
     id = None;
     manifest_path = None;
     persona_name = None;
-    goal = None;
     instructions = None;
     autoboot_enabled = None;
     mention_targets = [];
     proactive_enabled = None;
-    proactive_idle_sec = None;
-    proactive_cooldown_sec = None;
-    shards = None;
     allowed_paths = None;
     sandbox_profile = None;
     sandbox_image = None;
     network_mode = None;
     multimodal_policy = None;
-    tool_access = None;
-    tool_denylist = None;
     active_goal_ids = None;
     telemetry_feedback_enabled = None;
     telemetry_feedback_window_hours = None;
-    per_provider_timeout_state = Per_provider_timeout_unset;
-    per_provider_timeout = None;
-    always_approve = None;
+    always_allow = None;
     unknown_toml_keys = [];
     oas_env = [];
   }

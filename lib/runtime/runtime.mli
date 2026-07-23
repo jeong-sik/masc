@@ -214,19 +214,14 @@ val structured_judge_runtime_id : unit -> string option
 val hitl_summary_runtime_id : unit -> string option
 (** [\[runtime\].hitl_summary] runtime id for HITL approval context summaries,
     or [None] when unset. Validated at load so a [Some] resolves to a configured
-    runtime. *)
+    runtime. Auto Judge does not inherit another subsystem's runtime. *)
 
 val runtime_id_for_structured_judge : unit -> string
-(** Resolved runtime id for dashboard/operator/governance structured-output judge
-    calls. Uses [\[runtime\].structured_judge] first, then the existing
+(** Resolved runtime id for configured structured-output judgment calls.
+    Uses [\[runtime\].structured_judge] first, then the existing
     [\[runtime\].librarian] migration lane, then [\[runtime\].default]. The final
     default path still fails loudly at each caller's schema validation if the
     runtime cannot satisfy provider-native structured output. *)
-
-val runtime_id_for_hitl_summary : unit -> string
-(** Resolved runtime id for HITL approval context summaries. Uses
-    [\[runtime\].hitl_summary] first, then the existing structured-judge routing
-    chain. *)
 
 val media_failover : unit -> string list
 (** [\[runtime\].media_failover] (RFC-0265) — ordered runtime ids consulted when a
@@ -247,18 +242,6 @@ val resolve_assignment :
 (** Resolve a keeper assignment id to either a lane or a single runtime. Lanes
     shadow runtimes. [Missing] means the id does not name a known lane or
     runtime. *)
-
-val pause_threshold : unit -> pause_threshold
-(** [\[pause\]] threshold knobs from runtime.toml, or
-    {!Runtime_schema.pause_threshold_default} when runtime.toml is unavailable or
-    invalid. Operational pause decision paths use this accessor instead of the
-    legacy top-level fallback constants. *)
-
-val pacing : unit -> pacing
-(** [\[pacing\]] policy from runtime.toml (RFC-0313 W3), or
-    {!Runtime_schema.pacing_default} when runtime.toml is unavailable.
-    An unknown [pacing.mode] value fails config parse at load (fail-closed)
-    rather than defaulting. *)
 
 val get_runtime_by_id : string -> t option
 (** [get_runtime_by_id id] is the materialized runtime whose binding-key id
@@ -303,6 +286,14 @@ val max_context_of_runtime : t -> int
     produced by {!materialize_config}, which rejects a runtime whose max
     context cannot be resolved at load time (no silent default —
     RFC-0206 §2.1). *)
+
+val resolve_max_context_of_runtime_id : string -> (int * max_context_source) option
+(** {!resolve_max_context_of_runtime} looked up by runtime id: the effective
+    input context window together with the source that produced it, or [None]
+    when the id is not configured. Budget surfaces must carry the source —
+    dropping it rendered a runtime.toml override as ["runtime_provider_cap"]
+    in keeper status JSON, which disguised the #25463 config drift as a
+    provider fact. *)
 
 val max_context_of_runtime_id : string -> int option
 (** Effective input context window for the materialized runtime [id], or [None]

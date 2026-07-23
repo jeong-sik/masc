@@ -11,12 +11,12 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | Keeper |
-| Maps to | `lib/keeper/` (72 files) |
+| Maps to | `lib/keeper/` |
 | Dependencies | 02-types-and-invariants, 13-oas-integration |
-| Modules | 67 (.ml) + 5 (.mli-only) |
-| LOC | ~17.8K |
+| Modules | `lib/keeper/` source tree is the inventory SSOT |
+| LOC | Derived from the source tree, not duplicated here |
 | MCP Tools | `tool_keeper` |
-| External Deps | `Agent_sdk` (OAS), `Llm_provider`, `Workspace`, `Runtime_inference`, `Verifier_oas` |
+| External Deps | `Agent_sdk` (OAS), `Llm_provider`, `Workspace`, `Runtime_inference` |
 
 ---
 
@@ -94,11 +94,10 @@ Keeper의 전체 상태를 담는 레코드. `lib/keeper/keeper_types.ml`에 정
 - **Lineage**: `generation`, `trace_id`, `trace_history`, `last_handoff_ts`
 - **Goal/Task links**: `active_goal_ids`, `current_task_id`, typed goal/task transitions
 - **Model**: `runtime_id`, `last_model_used`, derived `active_model`
-- **Capability**: `policy_voice_enabled`, `allowed_paths`
+- **Capability boundary**: the flat Tool catalog plus objective `allowed_paths`
+  containment; external effects pass through the Gate.
 - **Scope**: `mention_targets`, `bound_workspace_ids`
 - **Proactive**: `proactive_enabled`, `proactive_idle_sec`, `proactive_cooldown_sec`
-- **Compaction**: `compaction_profile`, `compaction_ratio_gate`, `compaction_message_gate`
-- **Handoff**: `auto_handoff`, `handoff_threshold`, `handoff_cooldown_sec`
 - **Metrics**: `total_turns`, `total_tokens`, `total_cost_usd`, `last_turn_ts` 등
 - **Team/Autonomy**: `active_goal_ids`, `autonomous_turn_count`, `board_reactive_turn_count`, `mention_reactive_turn_count`
 
@@ -201,7 +200,7 @@ stateDiagram-v2
 
 | 경계 | OCaml owner | 저장소 | TLA/FSM |
 |------|-------------|--------|---------|
-| compaction | `keeper_post_turn.ml` | 현재 trace checkpoint | `KeeperContextLifecycle.tla` |
+| compaction | `keeper_post_turn.ml` | 현재 trace checkpoint | post-turn single-writer |
 | handoff rollover | `keeper_post_turn.ml` + `keeper_rollover.ml` | 새 trace checkpoint + keeper meta lineage | `KeeperGenerationLineage.tla`, keeper FSM `Handoff_*` events |
 | typed checkpoint metadata | `keeper_post_turn.ml` | keeper meta | keeper post-turn contract |
 | memory bank | `keeper_agent_run.ml` | `.masc/keepers/<name>.memory.jsonl` | memory policy / bank compaction |
@@ -214,48 +213,36 @@ stateDiagram-v2
   [*] --> Init : supervise_keepalive 호출
   Init --> Alive : fiber 시작 + Promise 등록
   Alive --> Alive : heartbeat loop 반복
-  Alive --> Zombie : fiber 종료 (Promise 해소)
-  Zombie --> Alive : sweep_and_recover (backoff 내)
-  Zombie --> Dead : restart budget 소진
-  Dead --> [*] : 수동 복구 필요
+  Alive --> Crashed : fiber 종료 (Promise 해소)
+  Crashed --> Restarting : 다음 lane-local supervisor sweep
+  Restarting --> Alive : sweep_and_recover
+  Alive --> Dead : 명시적 durable tombstone 기록
+  Crashed --> Dead : 명시적 durable tombstone 기록
+  Dead --> [*] : 명시적 operator revival 또는 정리
 ```
 
 - `supervise_keepalive`: keeper heartbeat loop을 supervised fiber로 실행
-- `sweep_and_recover`: 주기적으로 zombie 감지, exponential backoff로 재시작
-- Backoff: `MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S` * 2^attempt (최대 `_MAX_S`)
+- `sweep_and_recover`: crash가 관측된 정확한 Keeper lane만 재시작
+- 재시작에는 fleet-wide 정지나 exponential backoff admission을 두지 않는다.
 - 최근 5건의 crash log 유지
 
-### 4.3 Compaction Policy
+### 4.3 Compaction Runtime
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Check
-  Check --> Blocked : ratio < ratio_gate AND messages < message_gate AND tokens < token_gate
-  Check --> CooldownHold : continuity_reflection 쿨다운 미충족
-  Check --> Apply : threshold 초과 + 쿨다운 충족
-  Apply --> PruneToolOutputs
-  PruneToolOutputs --> MergeContiguous
-  MergeContiguous --> DropLowImportance
-  DropLowImportance --> SummarizeOld
-  SummarizeOld --> [*] : compacted context 반환
-  Blocked --> [*]
-  CooldownHold --> [*]
+  [*] --> Requested : typed Compaction_started 또는 provider overflow
+  Requested --> LlmPlan : owner Keeper lane
+  LlmPlan --> Apply : configured LLM의 유효한 plan
+  LlmPlan --> Preserve : runtime/plan 오류
+  Apply --> [*] : LLM plan이 만든 context
+  Preserve --> [*] : 원문 checkpoint 유지
 ```
 
-Compaction은 OAS `Context_compact_oas` 모듈에 위임하며, 4단계 전략을 순차 적용:
-1. `PruneToolOutputs` -- 도구 출력 축소
-2. `MergeContiguous` -- 연속 메시지 병합
-3. `DropLowImportance` -- 중요도 낮은 메시지 제거
-4. `SummarizeOld` -- 오래된 메시지 요약
-
-Compaction profile별 gate 기본값:
-
-| Profile | ratio_gate | message_gate | token_gate |
-|---------|-----------|--------------|------------|
-| `aggressive` | 0.35 | 120 | 60,000 |
-| `balanced` | 0.50 | 240 | 120,000 |
-| `conservative` | 0.70 | 480 | 250,000 |
-| `custom` | env 기반 | env 기반 | env 기반 |
+MASC에는 message importance scorer나 deterministic reducer fallback이 없다.
+MASC는 typed compaction stimulus와 provider overflow를 Keeper owner lane에서
+처리하고 configured LLM plan만 적용한다. OAS는 model call과 provider 오류를
+typed 결과로 전달하며, MASC의 compaction profile이나 ratio/message/token gate를
+알지 않는다.
 
 ### 4.4 Deliberation Pipeline
 
@@ -272,8 +259,8 @@ Triage -> BudgetCheck -> (ModelDeliberation | DeterministicBaseline) -> Execute 
 1. `handle_keeper_msg` -> `run_turn` 호출
 2. `load_context_from_checkpoint`로 세션/컨텍스트 복원
 3. `build_keeper_system_prompt` + `build_turn_prompt` callback으로 프롬프트 구성
-4. `make_tools` (keeper tool bridge) + `make_hooks` (safety gates) 생성
-5. `Keeper_turn_driver.run_named` -> OAS `Agent.run` loop (tool calls -> hooks -> response)
+4. `make_tools` (keeper tool bridge) + `make_hooks` (passive timing/usage/tool-result observation) 생성
+5. `Keeper_turn_driver.run_named` -> OAS `Agent.run` loop. OAS Guardrails는 permissive이며 실제 외부 효과 adapter가 실행 직전에 Keeper Gate를 호출
 6. `persist_message` (assistant 응답 영속화)
 7. 결과 반환: `run_result { response_text, model_used, turn_count, tool_calls_made, usage, tools_used }`
 
@@ -287,7 +274,12 @@ Triage -> BudgetCheck -> (ModelDeliberation | DeterministicBaseline) -> Execute 
 
 ### 5.3 OAS 통합 구성
 
-`run_turn`이 OAS에 전달: `runtime_id`(모델 선택), `tools`(keeper_tools_oas), `hooks`(cost/destructive guard), `context_reducer`(keep_last 30 + Prune_tool_outputs + Merge_contiguous), `memory`(institution + procedures + bank + episodes), `initial_messages`(checkpoint 복원).
+`run_turn`은 OAS에 `runtime_id`, model-visible `tools`, passive observation
+`hooks`, configured `context_reducer`, `initial_messages`를 전달한다. OAS
+Guardrails는 permissive이고 hooks는 timing, usage, trajectory, tool outcome을
+기록할 뿐 실행 권한을 만들지 않는다. 외부 효과는 MASC adapter가 실제
+effect sink 직전에 opaque operation + normalized input으로 Keeper Gate를
+호출한다. MASC-owned memory object는 OAS에 투영하지 않는다.
 
 ---
 
@@ -337,27 +329,18 @@ Profile별 종류당 보존 상한:
 
 ## 7. Evaluation and Verification
 
-### 7.1 Keeper Verifier (Generator-Verifier Loop)
+### 7.1 Task verification and product judgments
 
-**소스**: `lib/verifier_core.ml`, `lib/verifier_oas.ml`; guards는 `lib/keeper/keeper_guards.ml`에 분리됨 (구 `keeper_verifier.ml`은 #2589에서 제거)
+Task completion evidence is assembled by
+`lib/workspace/workspace_task_verification.ml` and persisted through the
+typed verification-request protocol. Evidence strings are observations; local
+substring classifiers do not decide completion.
 
-파이프라인: `evaluate_next_action` -> `generate_action_plan` -> `verify_action`
-
-```
-proposed_action
-  |-- Verifier_oas.verify -> Pass/Warn/Fail -> Proceed/Caution/Block
-```
-
-판정 결과:
-
-| Verdict | 의미 |
-|---------|------|
-| `Proceed` | 실행 진행 |
-| `ProceedWithCaution(reason)` | 실행하되 trajectory에 경고 기록 |
-| `Block(reason)` | 실행 거부, broadcast 알림 |
-
-Risk 판단은 goal metadata의 고정 조합으로 계산하지 않는다. 판단이 필요한
-경우 verifier LLM 경계가 구조화된 verdict를 내고, 비용/turn 정보는 관측만 한다.
+Model judgment belongs to the product operation that consumes it. Fusion,
+Keeper failure judgment, board attention, and Task completion review each own
+their prompt, structured schema, and result type. There is no generic
+Pass/Warn/Fail action-verifier gate shared across these domains. Cost, token,
+turn, and latency values remain observations.
 
 ### 7.2 Eval Harness (`lib/eval_harness.ml`)
 
@@ -383,19 +366,28 @@ OAS Agent.run의 hook lifecycle에 keeper 동작을 주입:
 
 | 검사 | 동작 |
 |------|------|
-| Destructive pattern | `rm -rf`, `drop table`, `force push` 등 위험 패턴 감지 시 거부 |
-| Autonomy filter | autonomy_level에 따라 허용 tool 목록 필터링 |
-| Cost telemetry | 비용은 ledger/dashboard에 기록한다. Cost threshold는 tool call 거부 사유가 아니다. |
+| Tool timing | 호출 시작 시각을 기록하고 항상 `Continue`한다. |
+| Tool observation | 호출, 결과, latency, cost를 trajectory/ledger/dashboard에 기록한다. |
+| External effect | hook에서 명령 의미를 분류하지 않는다. normalized Gate 경계가 판정한다. |
 
-Destructive check 대상 도구: `tool_execute`, `tool_edit_file`, `keeper_edit`
+`pre_tool_use` hook은 tool 이름과 input 의미를 검사하거나
+`Override`/`Block`/`ApprovalRequired`를 반환하지 않는다.
 
-### 8.2 Autonomy Level Tool Gating
+### 8.2 Tool surface projection
 
-| Level | 허용 도구 |
-|-------|----------|
-| `l3_guided` | board ops + read-only shell + code navigation |
-| `l4_autonomous` | l3 + `tool_execute` + `tool_edit_file` + `keeper_edit` |
-| `l5_independent` | 제한 없음 (AllowAll) |
+`Keeper_tool_descriptor.model_visible_descriptors`가 선언한 모델 이름과 schema는
+매 turn 실제 OAS `Tool.t`로 전부 materialize된다. Keeper, runtime, provider,
+credential 상태는 이 목록을 줄이지 않으며 per-turn ranking, Top-K, allow/deny
+list, affinity, discovery overlay를 적용하지 않는다.
+
+비노출은 동일 capability를 이미 가리키는 exact transport alias와 유효한 canonical
+schema가 없는 descriptor에만 허용된다. transport alias는 자신을 대신해 노출되는
+정확한 model name을 descriptor evidence에 기록한다.
+
+이 경계가 하는 일은 descriptor/registered handler의 존재와 schema join을 exact
+검증하는 것뿐이다. 외부 효과는 tool을 숨겨 예방하지 않고 호출 시 normalized
+Gate가 Always Allowed, LLM Auto Judge, 비차단 HITL 중 하나로 결정한다. 외부
+dependency가 unavailable이면 해당 handler가 명시적 typed failure를 반환한다.
 
 ---
 
@@ -411,7 +403,10 @@ Destructive check 대상 도구: `tool_execute`, `tool_edit_file`, `keeper_edit`
 
 **Cost Gates**: `TOOL_COST_MAX_USD`(disabled by default; set a positive USD value to enable the live unified-turn accumulated cost ceiling, `0` keeps it disabled), `COST_GATE_USD`(0.10, legacy compatibility knob; not used by the unified turn cost guard)
 
-**Unified Turn**: `UNIFIED_TEMP`(0.4), `UNIFIED_MAX_TOKENS`(2048), `UNIFIED_MAX_TURNS`(1000)
+**Unified Turn**: runtime/provider capabilities determine temperature and output
+token intent. OAS `max_turns = 0` and Keeper `max_idle_turns = 0` are the
+unbounded sentinels; MASC observes turn/token/cost usage but does not impose a
+Keeper work budget.
 
 **Execution**: `MAX_TOOL_ROUNDS`(3), `AUTONOMOUS_MAX_TOKENS`(4000), `DELIBERATION_MAX_TOKENS`(1024), `DELIBERATION_DAILY_BUDGET_USD`
 
@@ -489,7 +484,7 @@ Keeper turn에서 어떤 "skill" 경로를 사용할지 결정:
 
 ### INV-KEEPER-001: keeper_meta.name 유효성
 
-`validate_name`이 `^[A-Za-z0-9._-]+$` 정규식으로 이름을 검증한다. 빈 문자열 또는 특수문자 포함 시 `meta_of_json`이 `Error`를 반환한다.
+`validate_name`이 공유 portable-name 계약(`[A-Za-z0-9._-]+`, 경로 예약값 `.`/`..` 제외)으로 이름을 검증한다. 빈 문자열, 예약값 또는 특수문자 포함 시 `meta_of_json`이 `Error`를 반환한다.
 
 ### INV-KEEPER-002: trace_id 유일성
 
@@ -499,37 +494,42 @@ Keeper turn에서 어떤 "skill" 경로를 사용할지 결정:
 
 `max_checkpoints_retained = 3`. `save` 후 `prune`이 호출되어 초과분을 삭제한다.
 
-### INV-KEEPER-004: compaction cooldown 강제
+### INV-KEEPER-006: proactive judgment boundary
 
-`compact_if_needed`는 실제 완료된 마지막 compaction 시각을 기준으로
-`compaction_cooldown_sec`를 적용한다. Assistant text나 proactive turn은 이
-clock을 갱신하지 않는다.
+proactive 행동의 의미와 품질은 configured LLM이 판단한다. 문장 종결어미, 단어 목록, 유사도, 재시도 횟수 같은 로컬 휴리스틱은 최종 판정이나 의미 있는 fallback을 만들 수 없다. 빈 출력과 모델 실패는 관측 가능한 오류로 남으며 Keeper의 다른 활동을 중단시키지 않는다.
 
+### INV-KEEPER-007: cost observation
 
+cost, token, turn은 집계와 관측 대상이다. MASC의 임의 임계값이 Keeper 행동을 차단하거나 pause/stop으로 전이시키지 않는다.
 
-### INV-KEEPER-006: proactive quality gate
+Provider가 보고한 token/cache/cost 값은 원값 그대로 ledger, runtime aggregate,
+최근 inference entry에 남긴다. `0`과 큰 값은 정상적인 관측이며 로컬 상한으로
+누락시키지 않는다. 음수 counter는 원값과 `negative_*` anomaly를 함께 노출한다.
+`usage_trust`는 provenance일 뿐 수치를 `0`/`null`로 바꾸거나 cost/token 집계를
+건너뛰는 권한이 없다. Provider가 usage 자체를 보내지 않은 경우만 명시적
+`usage_missing`/`null`로 표현한다.
 
-`proactive_quality_check`가 fragmentary 텍스트, 종결 어미 미포함 텍스트, 빈 텍스트를 거부한다. 3회 실패 시 deterministic fallback을 사용하여 빈 proactive 출력이 발생하지 않는다.
+### INV-KEEPER-008: non-hierarchical effect Gate
 
-### INV-KEEPER-007: cost guard
+외부 효과는 exact Always Allowed, configured LLM Auto Judge, non-blocking HITL 중 하나로 판정하며, 한 요청의 대기는 다른 Keeper나 작업을 차단하지 않는다.
 
-`keeper_verifier.cost_guard`가 `estimated_cost_usd > 0.10` 초과 시 자율 행동을 차단한다. Hooks의 `pre_tool_use`에서도 누적 cost를 확인한다.
+Gate 입력은 제품·도구·명령·위험 등급을 해석하지 않는 opaque operation과 완전히 정규화된 입력이다. 판정은 exact rule/profile, configured LLM, durable HITL 응답, exact one-shot grant만으로 이루어지고, HITL 완료는 해당 Keeper lane만 깨운다. Executor가 Gate 판정을 뒤집거나 추가로 거부할 수 있는 근거는 typed input, capability identity, path jail, sandbox confinement처럼 실행 시점에 직접 증명되는 불변식뿐이다.
 
-### INV-KEEPER-008: risk guard
+한 번 admit한 User 입력 뒤 `ToolCompleted`가 관측된 같은 턴을 다시 실행하려면, 최신 ToolResult checkpoint를 보존하면서 User 입력을 다시 append하지 않는 typed continuation이 있어야 한다. continuation이 없는 runtime 후보 교체는 현재 턴의 명시적 실패로 끝내고 Keeper lane과 다음 cycle은 계속 사용할 수 있게 한다. 이 조건은 tool 이름, read/write 분류, 명령 의미로 추론하지 않는다.
 
-`Dangerous` risk level의 행동은 자동 차단된다. `Moderate`는 verifier를 거쳐 Proceed/Caution/Block으로 분류된다.
+Filesystem capability는 같은 부모에 동등한 쓰기 권한을 이미 가진 독립 same-UID hostile writer와의 MAC 격리를 제공한다고 주장하지 않는다. 그런 격리가 필요하면 Gate 분류를 추가하지 않고 UID, mount namespace, 또는 exclusive writer 경계에서 제공한다.
 
 ### INV-KEEPER-009: fiber_health 정합성
 
-`supervised_state.fiber_health`는 Promise 해소 여부와 동기화된다. Promise resolved + registry에 존재 = Zombie. Promise resolved + restart budget 소진 = Dead.
+`supervised_state.fiber_health`는 Promise 해소 여부와 동기화된다. Promise resolved + registry에 존재하면 Crashed로 관측하며 해당 lane의 재시작을 계속 시도한다. Dead는 실패 횟수가 아니라 명시적 durable tombstone으로만 성립한다.
 
 ### INV-KEEPER-010: UTF-8 안전성
 
 `utf8_safe_prefix_bytes`가 max_bytes에서 UTF-8 코드포인트 경계를 지키며 절단한다. `utf8_repair_string`이 잘못된 바이트를 U+FFFD로 치환한다. Checkpoint 직렬화 시 `sanitize_text_utf8`이 적용된다.
 
-### INV-KEEPER-012: destructive pattern screening
+### INV-KEEPER-012: structural execution invariants
 
-`keeper_hooks_oas`가 `tool_execute`, `tool_edit_file`, `keeper_edit` 도구에 대해 `rm -rf`, `drop table`, `force push` 등 위험 패턴을 검사한다. 감지 시 tool call을 거부한다.
+실행 경계는 typed argv/input, path jail, sandbox confinement와 같이 객관적으로 검증 가능한 불변식만 강제한다. 명령 문자열이나 도구 이름을 destructive pattern으로 분류하지 않으며, 주관적 실행 판정은 Gate의 LLM 또는 HITL 경계가 담당한다.
 
 ---
 
@@ -571,8 +571,8 @@ External memory projection은 제거됐다. 남은 경계 이슈는 keeper conte
 | Agent Run | `lib/keeper/keeper_agent_run.ml` |
 | Unified Turn | `lib/keeper/keeper_unified_turn.ml` |
 | Deliberation | `lib/keeper/keeper_deliberation.ml` |
-| Verifier Core | `lib/verifier_core.ml`, `lib/verifier_oas.ml` |
-| Guards | `lib/keeper/keeper_guards.ml` |
+| Task verification evidence | `lib/workspace/workspace_task_verification.ml` |
+| OAS hook observations | `lib/keeper/keeper_hooks_oas.ml` |
 | Eval Harness | `lib/eval_harness.ml` |
 | Trajectory | `lib/trajectory.ml` |
 | Supervisor | `lib/keeper/keeper_supervisor.ml` |

@@ -1,6 +1,6 @@
 (** Keeper lifecycle phase variant + bijection helpers.
 
-    SSOT for the 13-state lifecycle phase enum referenced by the
+    SSOT for the lifecycle phase enum referenced by the
     [Keeper_state_machine] FSM, dashboard UI, persona audits, and
     operator-facing keeper status surfaces. Verbatim extract from the
     head of [Keeper_state_machine]; the parent retains a transparent
@@ -25,7 +25,6 @@ type phase =
   | Crashed
   | Restarting
   | Dead
-  | Zombie
 
 let phase_to_string = function
   | Offline -> "offline"
@@ -40,7 +39,6 @@ let phase_to_string = function
   | Crashed -> "crashed"
   | Restarting -> "restarting"
   | Dead -> "dead"
-  | Zombie -> "zombie"
 ;;
 
 let phase_of_string = function
@@ -56,7 +54,6 @@ let phase_of_string = function
   | "crashed" -> Some Crashed
   | "restarting" -> Some Restarting
   | "dead" -> Some Dead
-  | "zombie" -> Some Zombie
   | _ -> None
 ;;
 
@@ -73,6 +70,5 @@ let all_phases =
   ; Crashed
   ; Restarting
   ; Dead
-  ; Zombie
   ]
 ;;

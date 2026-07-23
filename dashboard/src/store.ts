@@ -53,7 +53,6 @@ import { timeBoardRequest } from './board-metrics'
 import { namespaceTruth, namespaceTruthError, namespaceTruthInitializing } from './namespace-truth-signals'
 import { normalizeNamespaceTruth } from './namespace-truth-normalizers'
 import { goalTreeData, goalTreeError, goalTreeLoading, hydrateGoalTreeSnapshot } from './goal-tree-state'
-import { hydrateGoalLoopSnapshot } from './goal-loop-state'
 import {
   WORK_GOAL_LOAD_ERROR,
   WORK_GOAL_LOAD_PARTIAL_ERROR,
@@ -144,8 +143,9 @@ function patchForDirective(action: OptimisticKeeperDirective): Partial<Keeper> {
     case 'pause':
       return { paused: true, phase: 'Paused', lifecycle_phase: 'Paused', pipeline_stage: 'paused', status: 'paused' }
     case 'resume':
-    case 'wakeup':
       return { paused: false, phase: 'Running', lifecycle_phase: 'Running', pipeline_stage: 'idle', status: 'idle' }
+    case 'wakeup':
+      return {}
   }
 }
 
@@ -415,25 +415,6 @@ function sameOasAgentEvent(left: OasAgentEvent, right: OasAgentEvent): boolean {
     return false
   }
   switch (left.type) {
-    case 'selected':
-      return (
-        right.type === 'selected'
-        && left.trigger === right.trigger
-        && left.thompson_score === right.thompson_score
-        && left.final_score === right.final_score
-      )
-    case 'decision':
-      return (
-        right.type === 'decision'
-        && left.action === right.action
-        && left.trigger_reason === right.trigger_reason
-      )
-    case 'action_executed':
-      return (
-        right.type === 'action_executed'
-        && left.action === right.action
-        && left.success === right.success
-      )
     case 'keeper_lifecycle':
       return (
         right.type === 'keeper_lifecycle'
@@ -735,11 +716,6 @@ function hydrateDashboardBootstrap(data: DashboardBootstrapResponse): void {
   if (data.goals && !bootstrapSliceError(data.goals)) {
     hydrateGoalTreeSnapshot(data.goals)
   }
-  if (data.goal_loop_status && !bootstrapSliceError(data.goal_loop_status)) {
-    // RFC-0284: seed the goal-loop store on first page load so the panel
-    // renders without its own fetch; live updates then arrive over SSE.
-    hydrateGoalLoopSnapshot(data.goal_loop_status)
-  }
 }
 
 export async function refreshDashboard(opts?: RefreshOptions): Promise<void> {
@@ -894,11 +870,10 @@ function applyPlanningEnvelope(data: DashboardPlanningResponse): void {
       if (!isRecord(row)) return null
       const id = asString(row.id)
       const title = asString(row.title)
-      const status = asString(row.status)
       const phase = asString(row.phase)
       const createdAt = asString(row.created_at)
       const updatedAt = asString(row.updated_at)
-      if (!id || !title || !status || !phase || !createdAt || !updatedAt) return null
+      if (!id || !title || !phase || !createdAt || !updatedAt) return null
       return {
         id,
         title,
@@ -906,11 +881,7 @@ function applyPlanningEnvelope(data: DashboardPlanningResponse): void {
         target_value: asString(row.target_value) ?? null,
         due_date: asString(row.due_date) ?? null,
         priority: asNumber(row.priority) ?? 3,
-        status,
         phase,
-        verifier_policy: (isRecord(row.verifier_policy) ? row.verifier_policy : null) as Goal['verifier_policy'],
-        require_completion_approval: row.require_completion_approval === true,
-        active_verification_request_id: asString(row.active_verification_request_id) ?? null,
         parent_goal_id: asString(row.parent_goal_id) ?? null,
         last_review_note: asString(row.last_review_note) ?? null,
         last_review_at: asString(row.last_review_at) ?? null,

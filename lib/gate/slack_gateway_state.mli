@@ -113,6 +113,12 @@ type gateway_effect =
   | Send_ack of { envelope_id : string }
       (** Ack an envelope — Slack retransmits + eventually drops without it. *)
   | Emit_event of slack_event      (** Surface to the caller's [on_event]. *)
+  | Emit_ambient of slack_event
+      (** Record-only delivery (RFC-0226 parity with the Discord FSM): a
+          [Message_create] from a human author that failed [trigger_policy],
+          or a [Reaction_added] from someone other than the bot itself. The
+          I/O layer routes it to the caller's [on_ambient]; it must not start
+          a turn. *)
   | Schedule_backoff of { delay_ms : int }
   | Log of { level : [ `Info | `Warn | `Error ]; message : string }
 

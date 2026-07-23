@@ -4,7 +4,6 @@ module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
 type runtime_kind =
   | Local
-  | Cli_agent
   | Direct_api
 
 type default_model_source =

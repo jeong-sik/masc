@@ -34,6 +34,35 @@ let is_keeper_authored_message author =
   Option.is_some (Keeper_identity.canonical_keeper_name_from_agent_name author)
 ;;
 
+type pending_kind =
+  | Mention
+  | Scope
+
+type pending_message =
+  { message_id : string
+  ; speaker : string
+  ; content : string
+  ; kind : pending_kind
+  }
+
+let kind_equal left right =
+  match left, right with
+  | Mention, Mention | Scope, Scope -> true
+  | Mention, Scope | Scope, Mention -> false
+;;
+
+let pairs_of_kind kind messages =
+  messages
+  |> List.filter_map (fun message ->
+    if kind_equal kind message.kind
+    then Some (message.speaker, message.content)
+    else None)
+;;
+
+let has_kind kind messages =
+  List.exists (fun message -> kind_equal kind message.kind) messages
+;;
+
 (* RFC-0232 P1: the direct-line role is a closed sum, not a string label.
    The projection has exactly three shapes (a tool row is shown as its call
    name); [to_label] is the single place the display vocabulary lives, so the
@@ -175,45 +204,49 @@ let render_recent_direct_conversation_context
        @ List.map render_line lines)
 ;;
 
-(* RFC-0230: the lane is the state. A mention is pending when it arrives after
-   the keeper's own last lane line; the keeper replying (a new assistant line,
-   written when it posts to the lane) advances that watermark and clears the
-   mention. No cursor, no stored engagement — "have I answered" is "is the
-   mention newer than my last line". An unanswered mention stays pending across
-   observations (it keeps the keeper reactive until it replies in the lane).
+module StringSet = Set_util.StringSet
 
-   RFC-0232 P1: "newer" is lane order, not wall-clock. The lane is an
-   append-only file, so its line order is the true arrival order; the
-   watermark is the *position* of the keeper's last assistant line. Folding
-   forward, an assistant line clears every candidate accumulated so far —
-   no float comparisons, no equal-timestamp conventions, no skew
-   sensitivity. [append_turn]'s user→tool→assistant write order makes a
-   turn's own user line answered by its own reply, as before.
-
-   Pure over the loaded lane so it is testable without I/O; [collect_message_scope]
-   only adds the [Keeper_chat_store.load]. *)
-
-(* User lines after the keeper's last assistant line, in lane order. The
-   shared positional watermark for mentions and scope. Only an assistant
-   *utterance* is a self reply; a [Transport_failure] row is the server
-   persisting a failed request terminal — the keeper never answered, so
-   the user line stays pending until the keeper's next real utterance
-   (which, per positional semantics, clears every pending line). *)
-let user_lines_after_last_self (messages : Keeper_chat_store.chat_message list)
-  : Keeper_chat_store.chat_message list
-  =
+let acknowledged_turn_refs messages =
   List.fold_left
-    (fun acc (m : Keeper_chat_store.chat_message) ->
-      match m.role with
-      | Keeper_chat_store.Role.Assistant -> (
-        match m.kind with
-        | Keeper_chat_store.Row_kind.Utterance -> []
-        | Keeper_chat_store.Row_kind.Transport_failure -> acc)
-      | Keeper_chat_store.Role.User -> m :: acc
-      | Keeper_chat_store.Role.Tool -> acc)
-    []
+    (fun refs (message : Keeper_chat_store.chat_message) ->
+      match message.role, message.kind, message.turn_ref with
+      | Keeper_chat_store.Role.Assistant,
+        Keeper_chat_store.Row_kind.Utterance,
+        Some turn_ref ->
+        StringSet.add (Ids.Turn_ref.to_string turn_ref) refs
+      | Keeper_chat_store.Role.Assistant,
+        Keeper_chat_store.Row_kind.Transport_failure,
+        _
+      | Keeper_chat_store.Role.Assistant,
+        Keeper_chat_store.Row_kind.Utterance,
+        None
+      | Keeper_chat_store.Role.User, _, _
+      | Keeper_chat_store.Role.Tool, _, _ -> refs)
+    StringSet.empty
     messages
-  |> List.rev
+;;
+
+let messages_after_ack ~ack_id messages =
+  match ack_id with
+  | None -> messages
+  | Some acknowledged_id ->
+    let rec drop = function
+      | [] -> None
+      | (message : Keeper_chat_store.chat_message) :: rest ->
+        if String.equal message.id acknowledged_id then Some rest else drop rest
+    in
+    Option.value ~default:messages (drop messages)
+;;
+
+let pending_user_lines ?ack_id (messages : Keeper_chat_store.chat_message list) =
+  let acknowledged = acknowledged_turn_refs messages in
+  messages_after_ack ~ack_id messages
+  |> List.filter (fun (message : Keeper_chat_store.chat_message) ->
+    match message.role, message.turn_ref with
+    | Keeper_chat_store.Role.User, Some turn_ref ->
+      not (StringSet.mem (Ids.Turn_ref.to_string turn_ref) acknowledged)
+    | Keeper_chat_store.Role.User, None -> true
+    | Keeper_chat_store.Role.Assistant, _ | Keeper_chat_store.Role.Tool, _ -> false)
 ;;
 
 let is_owner_authored (m : Keeper_chat_store.chat_message) : bool =
@@ -222,16 +255,31 @@ let is_owner_authored (m : Keeper_chat_store.chat_message) : bool =
   | None -> false
 ;;
 
-let pending_mentions_of_messages
+let pending_messages_of_messages
+      ?ack_id
       ~(targets : string list)
       (messages : Keeper_chat_store.chat_message list)
-  : (string * string) list
+  : pending_message list
   =
   let target_ids = Keeper_lane_mentions.target_ids_of targets in
-  user_lines_after_last_self messages
+  pending_user_lines ?ack_id messages
   |> List.filter_map (fun (m : Keeper_chat_store.chat_message) ->
     if Keeper_lane_mentions.ids_match ~target_ids m.mentions
-    then Some (speaker_display m, m.content)
+    then
+      Some
+        { message_id = m.id
+        ; speaker = speaker_display m
+        ; content = m.content
+        ; kind = Mention
+        }
+    else if is_owner_authored m
+    then
+      Some
+        { message_id = m.id
+        ; speaker = speaker_display m
+        ; content = m.content
+        ; kind = Scope
+        }
     else None)
 ;;
 
@@ -242,27 +290,34 @@ let pending_mentions_of_messages
    channel does not flood the keeper. Same watermark as mentions; the mention
    exclusion keeps the two reactive signals disjoint. *)
 let pending_scope_of_messages
+      ?ack_id
       ~(targets : string list)
       (messages : Keeper_chat_store.chat_message list)
   : (string * string) list
   =
-  let target_ids = Keeper_lane_mentions.target_ids_of targets in
-  user_lines_after_last_self messages
-  |> List.filter_map (fun (m : Keeper_chat_store.chat_message) ->
-    if
-      is_owner_authored m
-      && not (Keeper_lane_mentions.ids_match ~target_ids m.mentions)
-    then Some (speaker_display m, m.content)
-    else None)
+  pending_messages_of_messages ?ack_id ~targets messages
+  |> pairs_of_kind Scope
+;;
+
+let pending_mentions_of_messages
+      ?ack_id
+      ~(targets : string list)
+      (messages : Keeper_chat_store.chat_message list)
+  : (string * string) list
+  =
+  pending_messages_of_messages ?ack_id ~targets messages
+  |> pairs_of_kind Mention
 ;;
 
 let collect_message_scope ~(config : Workspace.config) ~(meta : keeper_meta)
-  : (string * string) list * (string * string) list
+  : pending_message list
   =
   let messages =
-    Keeper_chat_store.load ~base_dir:config.base_path ~keeper_name:meta.name
+    Keeper_chat_store.load_all ~base_dir:config.base_path ~keeper_name:meta.name
   in
   let targets = message_feed_targets meta in
-  ( pending_mentions_of_messages ~targets messages
-  , pending_scope_of_messages ~targets messages )
+  pending_messages_of_messages
+    ?ack_id:meta.runtime.message_scope_ack_id
+    ~targets
+    messages
 ;;

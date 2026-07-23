@@ -33,10 +33,9 @@ let metric_evaluation_of_string = function
   | "absent" -> Some Metric_absent
   | _ -> None
 
-(* A goal with a declared metric is always [Metric_unevaluated]: the task
-   convergence gate may use [Convergence.check_convergence], but no metric
-   measurement source is wired yet, so [goal.metric] is never turned into an
-   observed value. See the type comment in
+(* A goal with a declared metric is [Metric_unevaluated] until a measurement
+   source records an observation. This is display-only and never gates Goal
+   lifecycle transitions. See the type comment in
    Dashboard_goals_types_accessor. *)
 let metric_evaluation_of_goal (goal : Goal_store.goal) =
   match goal.metric with
@@ -332,8 +331,7 @@ let assoc_string_opt = Json_util.assoc_string_opt
 
 let assoc_int_opt = Json_util.assoc_int_opt
 
-let goal_completion_to_json ~effective_policy ~open_request
-    (goal : Goal_store.goal) (node : tree_node) ~attainment =
+let goal_completion_to_json (goal : Goal_store.goal) (node : tree_node) ~attainment =
   let task_count = List.length node.tasks in
   let task_done_count =
     List.length
@@ -369,11 +367,6 @@ let goal_completion_to_json ~effective_policy ~open_request
         | None -> metric_evaluation_of_goal goal )
     | None -> metric_evaluation_of_goal goal
   in
-  let metric_completion_blocked =
-    match metric_evaluation with
-    | Metric_unevaluated -> true
-    | Metric_absent -> false
-  in
   let pct, pct_source =
     match attainment_pct, task_completion_pct with
     | Some pct, _ -> (Some pct, "attainment")
@@ -382,13 +375,8 @@ let goal_completion_to_json ~effective_policy ~open_request
   in
   let ready_to_request_completion =
     match goal.phase with
-    | Goal_phase.Executing ->
-        (not metric_completion_blocked)
-        && (String.equal attainment_state "attained"
-            || (task_count > 0 && task_open_count = 0 && task_done_count > 0))
-    | Goal_phase.Awaiting_verification | Goal_phase.Awaiting_approval
-    | Goal_phase.Blocked | Goal_phase.Paused | Goal_phase.Completed
-    | Goal_phase.Dropped ->
+    | Goal_phase.Executing -> true
+    | Goal_phase.Blocked | Goal_phase.Paused | Goal_phase.Completed | Goal_phase.Dropped ->
         false
   in
   let state =
@@ -397,34 +385,12 @@ let goal_completion_to_json ~effective_policy ~open_request
     | Goal_phase.Dropped -> "dropped"
     | Goal_phase.Blocked -> "blocked"
     | Goal_phase.Paused -> "paused"
-    | Goal_phase.Awaiting_verification -> "awaiting_verification"
-    | Goal_phase.Awaiting_approval -> "awaiting_approval"
-    | Goal_phase.Executing ->
-        if ready_to_request_completion then
-          "ready_for_completion"
-        else if task_count = 0 && Option.is_none pct then
-          "unmeasured"
-        else if task_done_count = 0 then
-          "not_started"
-        else
-          "in_progress"
-  in
-  let gate =
-    match goal.phase with
-    | Goal_phase.Awaiting_verification -> "verification"
-    | Goal_phase.Awaiting_approval -> "approval"
-    | Goal_phase.Executing | Goal_phase.Blocked | Goal_phase.Paused
-    | Goal_phase.Completed | Goal_phase.Dropped ->
-        if Option.is_some open_request then
-          "verification"
-        else
-          "none"
+    | Goal_phase.Executing -> "ready_for_completion"
   in
   let is_terminal =
     match goal.phase with
     | Goal_phase.Completed | Goal_phase.Dropped -> true
-    | Goal_phase.Executing | Goal_phase.Awaiting_verification
-    | Goal_phase.Awaiting_approval | Goal_phase.Blocked | Goal_phase.Paused ->
+    | Goal_phase.Executing | Goal_phase.Blocked | Goal_phase.Paused ->
         false
   in
   `Assoc
@@ -444,11 +410,4 @@ let goal_completion_to_json ~effective_policy ~open_request
       ("is_complete", `Bool (goal.phase = Goal_phase.Completed));
       ("is_terminal", `Bool is_terminal);
       ("ready_to_request_completion", `Bool ready_to_request_completion);
-      ("gate", `String gate);
-      ("requires_verifier", `Bool (Option.is_some effective_policy));
-      ( "requires_completion_approval",
-        `Bool goal.Goal_store.require_completion_approval );
-      ("active_verification_request", `Bool (Option.is_some open_request));
-      ("blocking_source", `String node.blocking_source);
-      ("blocking_reason", `String node.blocking_reason);
     ]

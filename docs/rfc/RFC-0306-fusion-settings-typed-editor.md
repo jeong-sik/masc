@@ -3,7 +3,7 @@ rfc: "0306"
 title: "Typed, comment-preserving fusion settings editor"
 status: Draft
 created: 2026-07-04
-updated: 2026-07-04
+updated: 2026-07-17
 author: vincent
 supersedes: []
 superseded_by: null
@@ -16,11 +16,11 @@ implementation_prs:
 
 ## 1. Problem
 
-The dashboard fusion settings surface (`#settings?section=fusion`) exposes four
+The dashboard fusion settings surface (`#settings?section=fusion`) exposes three
 editable scalars while the fusion backend schema and the judge-of-judges (JoJ,
 RFC-0283) engine behind it are fully implemented. The operator cannot edit the
-panel roster, the meta judge, the JoJ first-round judges, or any timeout from the
-UI; they render read-only. The complaint "fusion 자유도 zero / JoJ 설정 불가" is
+panel roster, the meta judge, or the JoJ first-round judges from the UI; they
+render read-only. The complaint "fusion 자유도 zero / JoJ 설정 불가" is
 accurate.
 
 ### 1.1 What is editable today vs what the backend supports
@@ -28,15 +28,18 @@ accurate.
 Editable in the panel (frontend line-surgical scalar writer,
 `dashboard/src/lib/fusion-settings.ts:262-277`):
 
-- `[fusion].enabled`, `[fusion].default_preset`, `[fusion].max_concurrent_panels`
+- `[fusion].enabled`, `[fusion].default_preset`
 - `[fusion.presets.<default>].min_answered`
 
 Read-only display only (`dashboard/src/lib/fusion-preset-view.ts`, header comment
 "display-only reader — it never writes back"):
 
 - `panel = [...]` roster, `judge` (meta), `[[fusion.presets.<name>.judges]]` (JoJ
-  first-round judges), `panel_timeout_s`, `judge_timeout_s`,
-  `max_tool_calls_per_panel`, `max_concurrent_judges`, `staged_judge_group_size`.
+  first-round judges), `max_tool_calls_per_panel`, `staged_judge_group_size`.
+
+`max_concurrent_panels` and `max_concurrent_judges` were removed in the Fusion
+concurrency hard-cut. They were inert settings, not execution controls;
+configured model identities are now the only Fusion-local fan-out authority.
 
 Backend schema (`lib/fusion_core/fusion_config.ml`, `lib/fusion_core/fusion_policy.ml`)
 and orchestrator (`lib/fusion/fusion_orchestrator.ml:145` `run_judge_of_judges`)
@@ -48,9 +51,9 @@ The frontend edits `runtime.toml` by line-surgical string replacement of scalar
 keys. That method cannot express multi-line arrays (`panel`) or array-of-tables
 (`[[...judges]]`), so those fields were left read-only rather than given a wrong
 writer. The reason the frontend does line surgery at all is comment preservation:
-`config/runtime.toml`'s `[fusion]` block carries 38 comment lines that document
-per-field intent (concurrency knob separation, capability requirements, prompt
-sourcing). Those comments are load-bearing operator documentation.
+`config/runtime.toml`'s `[fusion]` block carries comments that document
+per-field intent (capability requirements, topology, and prompt sourcing).
+Those comments are load-bearing operator documentation.
 
 Otoml cannot round-trip them: its lexer discards comments
 (`toml_lexer.ml:read_comment` emits no token) and its AST has no comment node
@@ -88,7 +91,7 @@ in Phase 0. This RFC covers the remaining editability work.
    the same source the default-runtime select already uses. `runtime_id` is
    `provider.model`.
 5. **MASC → OAS stays one-way.** Model resolution uses the existing MASC→OAS
-   catalog path (`oas-models.toml` seed projection; `Runtime_oas_runner`,
+   catalog path (OAS embedded catalog plus deployment overlay; `Runtime_oas_runner`,
    `Fusion_oas`). No new coupling; OAS remains unaware of fusion.
 6. **No silent failure.** Every write step returns `result`; failures produce a
    JSON error body plus an audit `Failure` record, mirroring
@@ -103,7 +106,7 @@ in Phase 0. This RFC covers the remaining editability work.
 
 Add `GET /api/v1/runtime/config/fusion` returning a typed JSON projection of the
 active `Fusion_policy.t` (presets, panel rosters, meta judge, JoJ judges,
-timeouts, concurrency knobs). No serializer exists today
+concurrency knobs). No serializer exists today
 (`Fusion_policy.t`/`preset`/`judge_spec` derive only `show`/`eq`;
 `fusion-runs` serializes run history with preset-as-name only). A new
 `fusion_config_json.ml` serializer is required. The raw endpoint remains for
@@ -160,8 +163,8 @@ Flow, all `result`, short-circuit on first error:
 Replace the read-only preset view with an editing form matching the approved
 layout: enabled checkbox; default_preset select (from preset names); panel roster
 multi-select (add/remove from catalog); meta judge select; JoJ first-round judges
-list (add/remove; each: model select + system-prompt textarea + timeout);
-timeouts and `max_tool_calls_per_panel`; concurrency knobs. Populated from §3.1,
+list (add/remove; each: model select + system-prompt textarea);
+`max_tool_calls_per_panel`; concurrency knobs. Populated from §3.1,
 submitted to §3.3, errors rendered from §3.4. Model options come from the shared
 runtime catalog resource (Principle 4).
 
@@ -188,9 +191,6 @@ no longer enforces.
 - Budget/cost/turn controls — collected, not edited (product rule).
 - Creating/deleting whole presets from the UI (edit existing presets only); preset
   CRUD is a possible follow-up, see §7.2.
-- Per-call `timeout_s` range validation beyond what `of_preset` already checks
-  (`Bad_meta_timeout`, `Bad_judge_wave_budget`, `Bad_adaptive_factor`).
-
 ## 5. Implementation plan
 
 Each phase is independently mergeable and keeps main deployable.

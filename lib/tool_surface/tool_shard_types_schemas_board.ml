@@ -46,8 +46,7 @@ let board_tools : Masc_domain.tool_schema list =
                 [ ( "content"
                   , `Assoc
                       [ "type", `String "string"
-                      ; "maxLength", `Int 4000
-                      ; "description", `String "Post body text (max 4000 chars)"
+                      ; "description", `String "Post body text"
                       ] )
                 ; ( "hearth"
                   , `Assoc
@@ -105,16 +104,6 @@ let board_tools : Masc_domain.tool_schema list =
                                   ] )
                             ] )
                       ] )
-                ; ( "quantitative_evidence"
-                  , `Assoc
-                      [ ( "type"
-                        , `List [ `String "object"; `String "string"; `String "array" ] )
-                      ; ( "description"
-                        , `String
-                            "Required for code-count or line-number claims. Include the \
-                             exact command/output or checked count that supports the \
-                             quantitative claim." )
-                      ] )
                 ] )
           ; "required", `List [ `String "content" ]
           ; "additionalProperties", `Bool false
@@ -143,21 +132,21 @@ let board_tools : Masc_domain.tool_schema list =
                       ] )
                 ; ( "limit"
                   , `Assoc
-                      [ (* Issue #18472: same wire-format widening as
-                           PR #19383 on [tool_execute.timeout_sec]. The
-                           board_list runtime accepts both shapes; the
-                           strict ["integer"] only fires Anthropic-SDK
-                           [correction_pipeline] coerce. *)
-                        ( "type"
-                        , `List [ `String "integer"; `String "string" ] )
+                      [ (* #18472 widening removed: a multi-type schema trips
+                           OAS #2343 fail-closed and crashes the keeper cycle, so
+                           [limit] stays a single scalar "integer". Tool_input_validation
+                           rejects a string [limit] against this integer schema, so the
+                           description must ask for a bare integer, not a numeric string
+                           (codex #25274 P2). *)
+                        ( "type", `String "integer" )
                       ; "default", `Int 20
                       ; "minimum", `Int 1
                       ; "maximum", `Int 50
                       ; ( "description"
                         , `String
-                            "Max posts to return (default: 20, max: 50). \
-                             Numeric strings are accepted; prefer the bare \
-                             integer form." )
+                            "Max posts to return (default: 20, max: 50). Must \
+                             be a bare integer (e.g. 20); a quoted value is \
+                             rejected." )
                       ] )
                 ; (* Issue #8513: derive from local mirror tracking
            [Board_dispatch.valid_sort_order_strings].  Schema used to
@@ -222,8 +211,7 @@ let board_tools : Masc_domain.tool_schema list =
                 ; ( "content"
                   , `Assoc
                       [ "type", `String "string"
-                      ; "maxLength", `Int 4000
-                      ; "description", `String "Comment content (max 4000 chars)"
+                      ; "description", `String "Comment content"
                       ] )
                 ] )
           ; "required", `List [ `String "post_id"; `String "content" ]
@@ -295,20 +283,20 @@ let board_tools : Masc_domain.tool_schema list =
                       ] )
                 ; ( "limit"
                   , `Assoc
-                      [ (* Issue #18472: same widening as PR #19383 / sibling
-                           sites above. No fleet evidence yet on this site
-                           (board_search), but bundled here per RFC-0088 §3
-                           N-of-M avoidance — three [limit] sites with the
-                           same defect; fix all at once. *)
-                        ( "type"
-                        , `List [ `String "integer"; `String "string" ] )
+                      [ (* #18472 widening removed: a multi-type schema trips
+                           OAS #2343 fail-closed and crashes the keeper cycle, so
+                           [limit] stays a single scalar "integer". Tool_input_validation
+                           rejects a string [limit] against this integer schema, so the
+                           description must ask for a bare integer, not a numeric string
+                           (codex #25274 P2). *)
+                        ( "type", `String "integer" )
                       ; "default", `Int 20
                       ; "minimum", `Int 1
                       ; "maximum", `Int 100
                       ; ( "description"
                         , `String
-                            "Max results (default: 20, max: 100). Numeric \
-                             strings are accepted; prefer the bare integer form." )
+                            "Max results (default: 20, max: 100). Must be a \
+                             bare integer (e.g. 20); a quoted value is rejected." )
                       ] )
                 ; (* Mirror masc_board_search: the search backend
                      (board_tool_handlers.ml handle_search) already reads

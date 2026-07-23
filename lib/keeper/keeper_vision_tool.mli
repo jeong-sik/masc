@@ -9,21 +9,13 @@
     conversation. Every failure path is a typed JSON error — never a silent empty
     success (the failure class the RFC targets).
 
-    Mirrors the provider-sub-call shape of [Keeper_librarian_runtime]; the small
-    [complete_fn] / [with_timeout] helpers are replicated here rather than shared,
-    until a third sub-call consumer justifies extracting a common module.
+    Uses the shared {!Keeper_provider_subcall} boundary, so the tool owns no
+    wall-clock cancellation layer.
     Artifact filesystem I/O is offloaded through {!Eio_guard.run_in_systhread}
     when the Eio runtime is active, so durable fsync/rename work does not block
     the shared Eio domain. *)
 
-type complete_fn =
-  sw:Eio.Switch.t ->
-  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  config:Llm_provider.Provider_config.t ->
-  messages:Agent_sdk.Types.message list ->
-  unit ->
-  (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
+type complete_fn = Keeper_provider_subcall.complete_fn
 
 val vision_default_max_tokens : int
 (** Fallback output budget for the one-shot vision sub-call when the selected
@@ -59,15 +51,14 @@ val message_of_request
     [data:<media_type>;base64,<data>]). *)
 
 val provider_for_vision
-  :  runtime_id:string
-  -> Llm_provider.Provider_config.t
+  :  Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
 (** A one-shot, non-thinking, structured-output vision config: thinking off (avoids the
     2026-06-25 gemma4 thinking-budget exhaustion that produced empty replies),
     [response_format = JsonSchema _], [output_schema = Some _],
-    [tool_choice = None], the selected runtime's declared temperature (or the
-    deterministic subsystem fallback), and a fallback [max_tokens] only when
-    the selected runtime has not configured one. *)
+    [tool_choice = None], the selected provider config's exact temperature
+    (including omission), and a fallback [max_tokens] only when the selected
+    runtime has not configured one. *)
 
 val vision_runtime_ids : unit -> string list
 (** Ordered schema-capable image runtime ids: [\[runtime\].media_failover] order
@@ -111,7 +102,6 @@ type vision_outcome =
 
 val run_vision
   :  ?complete:complete_fn
-  -> ?timeout_sec:float
   -> sw:Eio.Switch.t
   -> clock:float Eio.Time.clock_ty Eio.Resource.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -120,17 +110,15 @@ val run_vision
   -> bytes:string
   -> unit
   -> vision_outcome
-(** The bounded one-shot vision sub-call core (runtime resolution + provider
-    call under [with_timeout] + §2.2 classification). Used by {!handle} and by
-    eager ingestion. Requires the turn clock, so eager ingestion cannot run an
-    unbounded provider call. Non-cancellation exceptions are converted to
+(** The one-shot vision sub-call core (runtime resolution + Provider-boundary
+    call + §2.2 classification). Used by {!handle} and by eager ingestion.
+    Non-cancellation exceptions are converted to
     [Vo_provider]; provider success with malformed structured output is
     [Vo_invalid_structured_response], so eager ingestion can keep the turn alive
     with a typed unread placeholder. *)
 
 val handle
   :  ?complete:complete_fn
-  -> ?timeout_sec:float
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -138,6 +126,16 @@ val handle
   -> args:Yojson.Safe.t
   -> unit
   -> string
+
+val handle_with_outcome
+  :  ?complete:complete_fn
+  -> ?sw:Eio.Switch.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> args:Yojson.Safe.t
+  -> unit
+  -> Keeper_tool_execution.t
 (** Tool entry. [args] = [{ "artifact": handle; "query": string;
     "media_type"?: string }]. [media_type], when provided, must be a supported
     image MIME type; otherwise the stored bytes are sniffed fail-closed. Requires
@@ -145,7 +143,7 @@ val handle
     string: [{"ok":true,"text":...}] or
     [{"ok":false,"error":code,"failure_class":class[,"detail":...]}] with code
     one of [invalid_args | eio_context_unavailable | artifact_load_failed |
-    invalid_timeout | image_too_large | invalid_media_type | invalid_request |
+    image_too_large | invalid_media_type | invalid_request |
     no_capable_runtime | timeout | provider_error | empty_extraction |
     truncated_extraction]. [complete] defaults to the live provider call (inject
     in tests). Never returns a raw empty success. *)

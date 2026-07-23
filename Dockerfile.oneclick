@@ -4,9 +4,9 @@
 # prebuilt masc-linux-x64), this needs no external artifact: `docker build` on a
 # fresh clone produces a runnable image. First build is slow (OCaml 5.5 + deps).
 #
-# The server binary and the seeded runtime.toml / oas-models.toml come from the
-# same tree, so the model catalog stays coherent with the execution logic by
-# construction. On Apple Silicon this builds a native arm64 image (no emulation).
+# The server binary and deployment overlay come from the same tree; the base
+# capability catalog is embedded by OAS. On Apple Silicon this builds a native
+# arm64 image (no emulation).
 
 # ---- Stage 1: OCaml server from source --------------------------------------
 # Mirrors .github/workflows/release.yml: pin external deps, deps-only install,
@@ -69,10 +69,9 @@ WORKDIR /app
 COPY --from=ocaml-builder /tmp/masc /app/masc
 RUN chmod +x /app/masc
 
-# Immutable seed sources. config-seed carries catalogs + prompts; the repo's own
+# Immutable seed sources. config-seed carries runtime/overlay config + prompts; the repo's own
 # abstract keepers are dropped so the only keepers are the chosen team preset.
 COPY config/ /app/config-seed/
-COPY oas-models.toml /app/config-seed/oas-models.toml
 RUN rm -rf /app/config-seed/keepers
 COPY presets/ /app/presets/
 COPY scripts/seed-team.sh scripts/docker-entrypoint.sh /app/scripts/

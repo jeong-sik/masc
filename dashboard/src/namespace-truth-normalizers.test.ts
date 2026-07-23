@@ -131,7 +131,7 @@ describe('normalizeNamespaceTruth', () => {
           },
           data_quality: {
             board_contract_ok: true,
-            governance_feed_ok: false,
+            gate_feed_ok: false,
             last_sync_at: '2026-04-17T09:55:00Z',
           },
         },
@@ -154,7 +154,7 @@ describe('normalizeNamespaceTruth', () => {
       },
       data_quality: {
         board_contract_ok: true,
-        governance_feed_ok: false,
+        gate_feed_ok: false,
         last_sync_at: '2026-04-17T09:55:00Z',
       },
     })
@@ -379,11 +379,11 @@ describe('normalizeNamespaceTruth', () => {
       attention_events: [
         {
           severity: 'warn',
-          kind: 'continue_gate',
+          kind: 'hitl_pending',
           summary: 'keeper-alpha needs a decision.',
           requires_decision: true,
           keeper_name: 'keeper-alpha',
-          recommended_action: 'Review the pending continue gate.',
+          recommended_action: 'Review the pending Gate request.',
           provenance: 'runtime',
         },
       ],
@@ -396,7 +396,7 @@ describe('normalizeNamespaceTruth', () => {
     expect(result.readiness!.pillars).toHaveLength(2)
     expect(result.readiness!.pillars[1]!.blocking_reasons).toEqual(['1 keeper has no active goal link.'])
     expect(result.attention_events).toHaveLength(1)
-    expect(result.attention_events![0]!.kind).toBe('continue_gate')
+    expect(result.attention_events![0]!.kind).toBe('hitl_pending')
     expect(result.attention_events![0]!.requires_decision).toBe(true)
   })
 

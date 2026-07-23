@@ -2,7 +2,7 @@
 
     Tests for:
     - Dashboard: section types, formatting, constants, timestamp parsing
-    - Resilience: Time utilities, Zombie detection, ZeroZombie protocol
+    - Resilience: Time utilities and Zombie detection
 *)
 
 open Alcotest
@@ -111,13 +111,6 @@ let test_parse_iso_timestamp_partial () =
   | Some _ -> fail "should reject partial"
   | None -> ()
 
-(* ============================================================
-   Resilience default thresholds Tests
-   ============================================================ *)
-
-let test_resilience_default_zombie_threshold () =
-  check bool "positive threshold" true (Workspace_resilience.default_zombie_threshold > 0.0)
-
 let test_resilience_default_warning_threshold () =
   check bool "warning threshold" true (abs_float (Workspace_resilience.default_warning_threshold -. 120.0) < 0.001)
 
@@ -145,81 +138,6 @@ let test_time_parse_iso8601_empty () =
   match Workspace_resilience.Time.parse_iso8601_opt "" with
   | Some _ -> fail "should reject empty"
   | None -> ()
-
-let test_time_is_stale_old () =
-  (* Timestamp from 2020 should be stale *)
-  let old = "2020-01-01T00:00:00Z" in
-  check bool "old is stale" true (Workspace_resilience.Time.is_stale old)
-
-let test_time_is_stale_recent () =
-  (* Generate a recent timestamp *)
-  let now = Unix.gettimeofday () in
-  let tm = Unix.gmtime now in
-  let recent = Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec in
-  (* Give a large threshold so recent timestamp is not stale *)
-  check bool "recent not stale" false (Workspace_resilience.Time.is_stale ~threshold:3600.0 recent)
-
-let test_time_is_stale_invalid () =
-  (* Invalid timestamps should be treated as stale *)
-  check bool "invalid is stale" true (Workspace_resilience.Time.is_stale "garbage")
-
-let test_time_is_stale_custom_threshold () =
-  let old = "2020-01-01T00:00:00Z" in
-  (* Even with a very large threshold, 2020 is still old *)
-  check bool "2020 stale with 1 year threshold" true
-    (Workspace_resilience.Time.is_stale ~threshold:31536000.0 old)
-
-(* ============================================================
-   Workspace_resilience.Zombie Tests
-   ============================================================ *)
-
-let test_zombie_is_zombie_old () =
-  let old = "2020-01-01T00:00:00Z" in
-  check bool "old agent is zombie" true (Workspace_resilience.Zombie.is_zombie old)
-
-let test_zombie_is_zombie_recent () =
-  let now = Unix.gettimeofday () in
-  let tm = Unix.gmtime now in
-  let recent = Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec in
-  check bool "recent not zombie" false (Workspace_resilience.Zombie.is_zombie ~threshold:3600.0 recent)
-
-let test_zombie_is_zombie_custom_threshold () =
-  (* With a very short threshold, even "recent" could be stale *)
-  let old = "2020-01-01T00:00:00Z" in
-  check bool "zombie with short threshold" true
-    (Workspace_resilience.Zombie.is_zombie ~threshold:1.0 old)
-
-(* ============================================================
-   Workspace_resilience.ZeroZombie Tests
-   ============================================================ *)
-
-let test_zero_zombie_global_stats () =
-  let stats = Workspace_resilience.ZeroZombie.global_stats in
-  check bool "total_cleanups non-negative" true (stats.total_cleanups >= 0)
-
-let test_zero_zombie_cleanup () =
-  (* Mock cleanup function that returns empty list *)
-  let cleanup_fn () = [] in
-  let cleaned = Workspace_resilience.ZeroZombie.cleanup ~cleanup_fn in
-  check int "no cleaned agents" 0 (List.length cleaned)
-
-let test_zero_zombie_cleanup_with_agents () =
-  (* Mock cleanup function that returns some agents *)
-  let cleanup_fn () = ["zombie1"; "zombie2"] in
-  let cleaned = Workspace_resilience.ZeroZombie.cleanup ~cleanup_fn in
-  check int "2 cleaned agents" 2 (List.length cleaned)
-
-let test_zero_zombie_stats_update () =
-  let initial_cleanups = Workspace_resilience.ZeroZombie.global_stats.total_cleanups in
-  let cleanup_fn () = ["agent1"] in
-  ignore (Workspace_resilience.ZeroZombie.cleanup ~cleanup_fn);
-  check bool "cleanups incremented" true
-    (Workspace_resilience.ZeroZombie.global_stats.total_cleanups > initial_cleanups ||
-     Workspace_resilience.ZeroZombie.global_stats.total_cleanups = initial_cleanups + 1)
 
 (* ============================================================
    Test Runners
@@ -251,7 +169,6 @@ let () =
       test_case "partial" `Quick test_parse_iso_timestamp_partial;
     ];
     "resilience.thresholds", [
-      test_case "zombie threshold" `Quick test_resilience_default_zombie_threshold;
       test_case "warning threshold" `Quick test_resilience_default_warning_threshold;
     ];
     "resilience.time", [
@@ -259,20 +176,5 @@ let () =
       test_case "parse valid" `Quick test_time_parse_iso8601_valid;
       test_case "parse invalid" `Quick test_time_parse_iso8601_invalid;
       test_case "parse empty" `Quick test_time_parse_iso8601_empty;
-      test_case "is_stale old" `Quick test_time_is_stale_old;
-      test_case "is_stale recent" `Quick test_time_is_stale_recent;
-      test_case "is_stale invalid" `Quick test_time_is_stale_invalid;
-      test_case "is_stale custom threshold" `Quick test_time_is_stale_custom_threshold;
-    ];
-    "resilience.zombie", [
-      test_case "is_zombie old" `Quick test_zombie_is_zombie_old;
-      test_case "is_zombie recent" `Quick test_zombie_is_zombie_recent;
-      test_case "is_zombie custom threshold" `Quick test_zombie_is_zombie_custom_threshold;
-    ];
-    "resilience.zero_zombie", [
-      test_case "global stats" `Quick test_zero_zombie_global_stats;
-      test_case "cleanup empty" `Quick test_zero_zombie_cleanup;
-      test_case "cleanup with agents" `Quick test_zero_zombie_cleanup_with_agents;
-      test_case "stats update" `Quick test_zero_zombie_stats_update;
     ];
   ]

@@ -20,7 +20,7 @@ let split_provider_model = Runtime_model_id_split.split_provider_model
 
 (** Build a config for ["custom:model@url"] specs. *)
 let make_custom_config
-  ~temperature
+  ?temperature
   ?max_tokens
   ?system_prompt
   ?supports_tool_choice_override
@@ -41,7 +41,7 @@ let make_custom_config
            (Binding.normalize_openai_compat_request_path
               ~base_url
               ~request_path:Masc_network_defaults.openai_chat_completions_path)
-         ~temperature
+         ?temperature
          ?max_tokens
          ?system_prompt
          ?supports_tool_choice_override
@@ -72,7 +72,7 @@ let resolve_effective_api_key_env
 
 (** Build a {!Llm_provider.Provider_config.t} from a resolved registry entry. *)
 let make_registry_config
-  ~temperature
+  ?temperature
   ?max_tokens
   ?system_prompt
   ?(api_key_env_overrides = [])
@@ -113,14 +113,7 @@ let make_registry_config
       (Runtime_model_resolve.model_selector_of_string model_id)
   in
   let resolved_model_id = model_resolution.resolved_model_id in
-  let base_url =
-    if Binding.provider_name_matches_default_local_openai_runtime provider_name
-    then (
-      match Llm_provider.Discovery.endpoint_for_model resolved_model_id with
-      | Some url -> url
-      | None -> Llm_provider.Provider_registry.next_llama_endpoint ())
-    else defaults.base_url
-  in
+  let base_url = defaults.base_url in
   let request_path =
     match defaults.kind with
     | OpenAI_compat ->
@@ -136,7 +129,7 @@ let make_registry_config
         (Llm_provider.Capabilities.for_model_id resolved_model_id)
     in
     match caps.max_context_tokens with
-    | Some n -> n
+    | Some n -> Some n
     | None -> entry.max_context
   in
   Llm_provider.Provider_config.make
@@ -146,9 +139,9 @@ let make_registry_config
     ~api_key
     ~headers
     ~request_path
-    ~temperature
+    ?temperature
     ?max_tokens
-    ~max_context
+    ?max_context
     ?system_prompt
     ?supports_tool_choice_override
     ?keep_alive
@@ -162,7 +155,7 @@ let make_registry_config
     {!Provider_kind_resolver} (Provider_registry as SSOT) — unknown specs are
     never flattened to [OpenAI_compat]. *)
 let parse_model_string
-  ?(temperature = Runtime_provider_defaults.agent_default_temperature)
+  ?temperature
   ?max_tokens
   ?system_prompt
   ?(api_key_env_overrides = [])
@@ -176,7 +169,7 @@ let parse_model_string
   match split_provider_model trimmed with
   | Some ("custom", model_id) ->
     make_custom_config
-      ~temperature
+      ?temperature
       ?max_tokens
       ?system_prompt
       ?supports_tool_choice_override
@@ -197,7 +190,7 @@ let parse_model_string
           else
             Some
               (make_registry_config
-                 ~temperature
+                 ?temperature
                  ?max_tokens
                  ?system_prompt
                  ~api_key_env_overrides

@@ -8,18 +8,26 @@
 
 type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t
 
+type root_switch_binding =
+  { switch : Eio.Switch.t
+  ; owner_domain : Domain.id
+  }
+
 type state_snapshot = {
   net : eio_net option;
   clock : float Eio.Time.clock_ty Eio.Resource.t option;
   mono_clock : Eio.Time.Mono.ty Eio.Resource.t option;
-  sw : Eio.Switch.t option;
+  root_switch : root_switch_binding option;
   net_initialized : bool;
 }
 
 let current_net : eio_net option Atomic.t = Atomic.make None
 let current_clock : float Eio.Time.clock_ty Eio.Resource.t option Atomic.t = Atomic.make None
 let current_mono_clock : Eio.Time.Mono.ty Eio.Resource.t option Atomic.t = Atomic.make None
-let current_sw : Eio.Switch.t option Atomic.t = Atomic.make None
+(* The root switch and its owning domain form one immutable atomic value. This
+   prevents the switch and owner identity from drifting across concurrent reads
+   or temporary test snapshots. *)
+let current_sw : root_switch_binding option Atomic.t = Atomic.make None
 (* RFC-0107 Phase D.2c — full Eio standard environment, required by
    piaf [Client.create] (and any other API needing more than just
    [net]/[clock]).  Set once at server bootstrap; read by long-lived
@@ -45,7 +53,7 @@ let snapshot_state () =
     net = Atomic.get current_net;
     clock = Atomic.get current_clock;
     mono_clock = Atomic.get current_mono_clock;
-    sw = Atomic.get current_sw;
+    root_switch = Atomic.get current_sw;
     net_initialized = Atomic.get net_initialized;
   }
 
@@ -53,7 +61,7 @@ let restore_state snapshot =
   Atomic.set current_net snapshot.net;
   Atomic.set current_clock snapshot.clock;
   Atomic.set current_mono_clock snapshot.mono_clock;
-  Atomic.set current_sw snapshot.sw;
+  Atomic.set current_sw snapshot.root_switch;
   Atomic.set net_initialized snapshot.net_initialized
 
 let set_net net =
@@ -75,10 +83,17 @@ let get_mono_clock_opt () =
   Atomic.get current_mono_clock
 
 let set_switch sw =
-  Atomic.set current_sw (Some sw)
+  Atomic.set
+    current_sw
+    (Some { switch = sw; owner_domain = Domain.self () })
 
 let get_root_switch_opt () =
-  Atomic.get current_sw
+  Option.map (fun binding -> binding.switch) (Atomic.get current_sw)
+
+let root_switch_on_current_domain () =
+  match Atomic.get current_sw with
+  | Some binding -> binding.owner_domain = Domain.self ()
+  | None -> false
 
 let set_env env =
   Atomic.set current_env (Some env)
@@ -143,7 +158,7 @@ let get_switch_opt () =
   in
   match from_fiber with
   | Some _ as some_sw -> some_sw
-  | None -> Atomic.get current_sw
+  | None -> get_root_switch_opt ()
 
 let get_net () : (eio_net, string) result =
   match Atomic.get current_net with

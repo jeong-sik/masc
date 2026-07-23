@@ -28,7 +28,7 @@ constraints.
 MASC should keep the public model-facing surface small:
 
 - `Execute` for external CLI work, including `gh`, `git`, `jira`, `notion`,
-  `figma`, or local vendor CLIs, always as typed `executable` plus `argv`.
+  `figma`, or local vendor CLIs, always as one typed non-empty `argv` process vector.
 - `Read`, `Grep`, `Edit`, and `Write` for structured filesystem work.
 - `WebSearch` and `WebFetch` for current external evidence.
 - MASC-owned domain tools for board, task, goal, memory, keeper lifecycle, and

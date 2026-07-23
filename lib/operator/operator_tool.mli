@@ -47,11 +47,13 @@ val dispatch :
     - [masc_operator_digest] — daily digest.
     - [masc_operator_action] — schedule an action (requires
       confirm via separate call).
+    - [masc_operator_chat_recovery_resolve] — exact receipt recovery CAS.
+    - [masc_operator_task_recovery_resolve] — exact Task owner/version
+      recovery CAS.
     - [masc_operator_confirm] — confirm a pending action.
     - [masc_operator_judgment_write] — record a judgment (hidden
       from default catalog).
-    - [masc_operator_judgment_latest] — read latest judgment.
-    - [masc_surface_audit] — operator-only surface drift audit. *)
+    - [masc_operator_judgment_latest] — read latest judgment. *)
 
 (** {1 Catalog surfaces}
 

@@ -330,8 +330,6 @@ let json_string_list_field key (fields : (string * Yojson.Safe.t) list) =
 
 (* ── Usage trust inference ──────────────────────────────── *)
 
-let usage_absurd_token_threshold = 1_000_000
-
 (* [usage_reported] is now an [option]: [None] means the row carried no
    [usage_reported] field at all (older jsonl rows or providers that don't
    emit it). The pre-existing semantics treated absent and explicit-[false]
@@ -341,7 +339,6 @@ let usage_absurd_token_threshold = 1_000_000
 let infer_usage_trust_from_fields
       fields
       ~(usage_reported : bool option)
-      ~(model : string)
       ~(input_tokens : int option)
       ~(output_tokens : int option)
   : string option * string list
@@ -358,25 +355,30 @@ let infer_usage_trust_from_fields
       let add reason =
         if not (List.mem reason !reasons) then reasons := reason :: !reasons
       in
-      let model = String.trim model in
-      if model = "" || String.equal model model_id_unknown then add "missing_model_id";
       (match input_tokens with
        | Some n when n < 0 -> add "negative_input_tokens"
-       | Some n when n > usage_absurd_token_threshold -> add "input_tokens_gt_1m"
        | _ -> ());
       (match output_tokens with
        | Some n when n < 0 -> add "negative_output_tokens"
-       | Some n when n > usage_absurd_token_threshold -> add "output_tokens_gt_1m"
        | _ -> ());
-      (match input_tokens, output_tokens with
-       | Some 0, Some 0 -> add "zero_token_usage_reported"
+      (match
+         match json_int_field_opt "cache_creation_tokens" fields with
+         | Some _ as value -> value
+         | None -> json_int_field_opt "cache_creation_input_tokens" fields
+       with
+       | Some n when n < 0 -> add "negative_cache_creation_tokens"
+       | _ -> ());
+      (match
+         match json_int_field_opt "cache_read_tokens" fields with
+         | Some _ as value -> value
+         | None -> json_int_field_opt "cache_read_input_tokens" fields
+       with
+       | Some n when n < 0 -> add "negative_cache_read_tokens"
+       | _ -> ());
+      (match json_int_field_opt "reasoning_tokens" fields with
+       | Some n when n < 0 -> add "negative_reasoning_tokens"
        | _ -> ());
       match List.rev !reasons with
       | [] -> Some "trusted", []
       | reasons -> Some "untrusted", reasons))
-;;
-
-let usage_trust_untrusted = function
-  | Some "untrusted" -> true
-  | _ -> false
 ;;

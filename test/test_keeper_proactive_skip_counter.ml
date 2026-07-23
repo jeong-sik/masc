@@ -41,22 +41,11 @@ let test_skip_reason_labels_match_counter () =
   in
   Alcotest.(check string) "keeper_paused label"
     "keeper_paused" (reason_str (mk KW.Keeper_paused));
-  Alcotest.(check string) "approval_pending label"
-    "approval_pending" (reason_str (mk KW.Approval_pending));
   Alcotest.(check string) "scheduled_autonomous_disabled label"
     "scheduled_autonomous_disabled"
     (reason_str (mk KW.Scheduled_autonomous_disabled));
-  Alcotest.(check string) "no_signal label"
-    "no_signal" (reason_str (mk KW.No_signal));
-  Alcotest.(check string) "idle_gate_pending label"
-    "idle_gate_pending"
-    (reason_str (mk (KW.Idle_gate_pending { remaining_sec = 42 })));
-  Alcotest.(check string) "cooldown_pending label"
-    "cooldown_pending"
-    (reason_str (mk (KW.Cooldown_pending { remaining_sec = 42 })));
-  Alcotest.(check string) "provider_cooldown_pending label"
-    "provider_cooldown_pending"
-    (reason_str (mk (KW.Provider_cooldown_pending { remaining_sec = 42 })))
+  Alcotest.(check string) "reactive_disabled label"
+    "reactive_disabled" (reason_str (mk KW.Reactive_disabled))
 
 let () =
   Alcotest.run "keeper_proactive_skip_counter_10008fm3"

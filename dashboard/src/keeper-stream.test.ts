@@ -100,9 +100,10 @@ describe('applyKeeperStreamEvent', () => {
         keeper_name: 'sangsu',
         status: 'queued',
         receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
-        queue_revision: 12,
+        queue_revision: '12',
         pending_count: 3,
         inflight_count: 1,
+        recovery_required_count: 1,
         shutdown_operation_id: ' shutdown-op-7 ',
       },
     })).toBeNull()
@@ -113,9 +114,10 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.details).toMatchObject({
       queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000007',
       queueShutdownOperationId: 'shutdown-op-7',
-      queueRevision: 12,
+      queueRevision: '12',
       queuePendingCount: 3,
       queueInflightCount: 1,
+      queueRecoveryRequiredCount: 1,
     })
     expect(entry?.streamContract).toMatchObject({
       source: 'queue_event',
@@ -133,6 +135,7 @@ describe('applyKeeperStreamEvent', () => {
         status: 'queued',
         pending_count: 1,
         inflight_count: 0,
+        recovery_required_count: 0,
         shutdown_operation_id: null,
       },
     })).toBe('Keeper queue acceptance is missing its durable receipt metadata.')
@@ -145,9 +148,10 @@ describe('applyKeeperStreamEvent', () => {
       name: 'KEEPER_CHAT_QUEUED',
       value: {
         receipt_id: 'not-a-chat-receipt',
-        queue_revision: 1,
+        queue_revision: '1',
         pending_count: 1,
         inflight_count: 0,
+        recovery_required_count: 0,
         shutdown_operation_id: null,
       },
     })).toBe('Keeper queue acceptance is missing its durable receipt metadata.')
@@ -159,6 +163,22 @@ describe('applyKeeperStreamEvent', () => {
         receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
         pending_count: 1,
         inflight_count: 0,
+        recovery_required_count: 0,
+        shutdown_operation_id: null,
+      },
+    })).toBe('Keeper queue acceptance is missing its durable receipt metadata.')
+  })
+
+  it('rejects queue acceptance that omits recovery-required depth', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CHAT_QUEUED',
+      value: {
+        receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
+        queue_revision: '1',
+        pending_count: 1,
+        inflight_count: 0,
         shutdown_operation_id: null,
       },
     })).toBe('Keeper queue acceptance is missing its durable receipt metadata.')
@@ -168,9 +188,10 @@ describe('applyKeeperStreamEvent', () => {
     assistantEntry()
     const baseValue = {
       receipt_id: 'chatq_00000000-0000-4000-8000-000000000007',
-      queue_revision: 1,
+      queue_revision: '1',
       pending_count: 1,
       inflight_count: 0,
+      recovery_required_count: 0,
     }
 
     for (const shutdownOperationId of [undefined, '   ', 7]) {
@@ -576,7 +597,7 @@ describe('applyKeeperStreamEvent', () => {
   it('extracts error messages from events', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'RUN_ERROR',
-      value: { message: 'boom' },
+      message: 'boom',
     })).toBe('boom')
   })
 
@@ -718,7 +739,7 @@ describe('applyKeeperStreamEvent', () => {
     ])
   })
 
-  it('drops pending thinking deltas when aborting a live stream', () => {
+  it('preserves received thinking deltas when aborting a live stream', () => {
     assistantEntry()
     setActiveStream('sangsu', 'reply-1', new AbortController())
     applyKeeperStreamEvent('sangsu', 'reply-1', {
@@ -733,7 +754,10 @@ describe('applyKeeperStreamEvent', () => {
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.delivery).toBe('cancelled')
     expect(entry?.streamState).toBeNull()
-    expect(entry?.traceSteps).toBeUndefined()
+    expect(entry?.text).toBe('요청이 취소되었습니다.')
+    expect(entry?.traceSteps).toEqual([
+      { kind: 'think', text: 'half-written reasoning', ts: expect.any(String) },
+    ])
   })
 
   it('splits thinking trace steps by OAS content block index', () => {
@@ -968,8 +992,8 @@ describe('applyKeeperStreamEvent tool calls', () => {
 
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'RUN_ERROR',
-      value: { message: 'request exceeded timeout_sec=300.000 before completion' },
-    })).toBe('request exceeded timeout_sec=300.000 before completion')
+      message: 'request was cancelled by operator',
+    })).toBe('request was cancelled by operator')
 
     const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
     expect(reply?.text).toBe('')

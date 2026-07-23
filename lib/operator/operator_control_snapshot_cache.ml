@@ -112,14 +112,14 @@ let wait_poll_interval_sec = 0.25
     evicting it and recomputing. Derived from the configured TTL so the bound
     scales with the freshness window rather than a fixed magic number. *)
 let max_wait_sec () =
-  Float.max 60.0 (Env_config_governance.Operator.cache_ttl_sec *. 10.0)
+  Float.max 60.0 (Env_config_runtime_services.Operator.cache_ttl_sec *. 10.0)
 ;;
 
 (** Background recompute fiber. Runs [compute] and writes back the result if
     the slot still belongs to [token]. On failure, restores the stale fallback
     with an extended stale window so callers are not blocked. *)
 let do_bg_compute ~key ~token ~ttl ~stale_value compute =
-  let stale_grace = ttl *. Env_config_governance.Operator.cache_stale_grace_factor in
+  let stale_grace = ttl *. Env_config_runtime_services.Operator.cache_stale_grace_factor in
   let run () =
     try
       let value = compute () in
@@ -193,7 +193,7 @@ let do_bg_compute ~key ~token ~ttl ~stale_value compute =
     Returns the computed value on success. On exception, restores [stale] if
     present and re-raises; otherwise removes the slot and re-raises. *)
 let run_compute_inline ~key ~token ~ttl ~stale compute =
-  let stale_grace = ttl *. Env_config_governance.Operator.cache_stale_grace_factor in
+  let stale_grace = ttl *. Env_config_runtime_services.Operator.cache_stale_grace_factor in
   try
     let value = compute () in
     let ts = now () in
@@ -258,7 +258,7 @@ let get_or_compute key ~ttl compute =
   if not (Eio_guard.is_ready ())
   then compute ()
   else (
-    let bg_enabled = Env_config_governance.Operator.cache_background_revalidate in
+    let bg_enabled = Env_config_runtime_services.Operator.cache_background_revalidate in
     let rec try_get ~waited ~watching_token =
       let action =
         atomic_update table (fun map ->

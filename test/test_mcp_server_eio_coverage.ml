@@ -8,6 +8,7 @@ open Alcotest
 module Mcp_server_eio = Masc.Mcp_server_eio
 module Mcp_server = Masc.Mcp_server
 module Mcp_server_eio_protocol = Masc.Mcp_server_eio_protocol
+module Request_id = Mcp_transport_protocol
 (* ============================================================
    is_jsonrpc_v2 Tests
    ============================================================ *)
@@ -214,7 +215,7 @@ let test_get_id_none () =
    ============================================================ *)
 
 let test_is_valid_request_id_null () =
-  check bool "null valid" true (Mcp_server.is_valid_request_id `Null)
+  check bool "null invalid" false (Mcp_server.is_valid_request_id `Null)
 
 let test_is_valid_request_id_string () =
   check bool "string valid" true (Mcp_server.is_valid_request_id (`String "id-1"))
@@ -223,7 +224,50 @@ let test_is_valid_request_id_int () =
   check bool "int valid" true (Mcp_server.is_valid_request_id (`Int 123))
 
 let test_is_valid_request_id_float () =
-  check bool "float valid" true (Mcp_server.is_valid_request_id (`Float 1.5))
+  check bool "float invalid" false (Mcp_server.is_valid_request_id (`Float 1.5))
+
+let test_request_id_preserves_large_integer_lexeme () =
+  let lexeme = "92233720368547758081234567890" in
+  match Request_id.request_id_of_yojson (`Intlit lexeme) with
+  | Error _ -> fail "expected exact large integer request id"
+  | Ok request_id ->
+    check string "exact lexeme" lexeme
+      (Yojson.Safe.to_string (Request_id.request_id_to_yojson request_id))
+
+let invocation_ref_exn request_id =
+  match
+    Tool_invocation_ref.external_mcp
+      ~request_id
+      ~session_id:"mcp-session-1"
+  with
+  | Ok invocation -> invocation
+  | Error error -> fail (Tool_invocation_ref.error_to_string error)
+
+let test_tool_invocation_identity_distinguishes_string_and_integer () =
+  let string_id =
+    Request_id.request_id_of_yojson (`String "1")
+    |> Result.get_ok
+    |> invocation_ref_exn
+  in
+  let integer_id =
+    Request_id.request_id_of_yojson (`Int 1)
+    |> Result.get_ok
+    |> invocation_ref_exn
+  in
+  check bool "typed ids remain distinct" true
+    (not (Tool_invocation_ref.equal string_id integer_id))
+
+let test_tool_invocation_identity_rejects_invalid_session () =
+  let request_id =
+    Request_id.request_id_of_yojson (`Int 1) |> Result.get_ok
+  in
+  match
+    Tool_invocation_ref.external_mcp
+      ~request_id
+      ~session_id:"invalid session"
+  with
+  | Error Tool_invocation_ref.Invalid_mcp_session_id -> ()
+  | Ok _ -> fail "expected invalid MCP session id to be rejected"
 
 let test_is_valid_request_id_array () =
   check bool "array invalid" false (Mcp_server.is_valid_request_id (`List []))
@@ -322,45 +366,6 @@ let test_detect_mode_partial_content () =
   check bool "partial is line delimited" true (result = Mcp_server_eio_protocol.LineDelimited)
 
 (* ============================================================
-   governance_defaults Tests
-   ============================================================ *)
-
-let test_governance_defaults_development () =
-  let g = Mcp_server_eio.governance_defaults "development" in
-  check string "level" "development" g.level;
-  check bool "audit disabled" false g.audit_enabled;
-  check bool "anomaly disabled" false g.anomaly_detection
-
-let test_governance_defaults_production () =
-  let g = Mcp_server_eio.governance_defaults "production" in
-  check string "level" "production" g.level;
-  check bool "audit enabled" true g.audit_enabled;
-  check bool "anomaly disabled" false g.anomaly_detection
-
-let test_governance_defaults_enterprise () =
-  let g = Mcp_server_eio.governance_defaults "enterprise" in
-  check string "level" "enterprise" g.level;
-  check bool "audit enabled" true g.audit_enabled;
-  check bool "anomaly enabled" true g.anomaly_detection
-
-let test_governance_defaults_paranoid () =
-  let g = Mcp_server_eio.governance_defaults "paranoid" in
-  check string "level" "paranoid" g.level;
-  check bool "audit enabled" true g.audit_enabled;
-  check bool "anomaly enabled" true g.anomaly_detection
-
-let test_governance_defaults_unknown () =
-  let g = Mcp_server_eio.governance_defaults "custom" in
-  check string "level lowercase" "custom" g.level;
-  check bool "audit disabled" false g.audit_enabled;
-  check bool "anomaly disabled" false g.anomaly_detection
-
-let test_governance_defaults_mixed_case () =
-  let g = Mcp_server_eio.governance_defaults "PRODUCTION" in
-  check string "level normalized" "production" g.level;
-  check bool "audit enabled" true g.audit_enabled
-
-(* ============================================================
    mcp_session_to_json Tests
    ============================================================ *)
 
@@ -454,6 +459,13 @@ let test_mcp_session_roundtrip () =
       check (float 0.001) "last_seen roundtrip" session.last_seen decoded.last_seen
   | None -> fail "roundtrip failed"
 
+let test_tool_schema_component_bytes () =
+  check int "UTF-8 bytes plus JSON bytes" 11
+    (Mcp_server_eio.tool_schema_component_bytes
+       ~name:"도구"
+       ~description:"x"
+       ~input_schema:`Null)
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -468,6 +480,9 @@ let () =
     "normalize_protocol_version", [
       test_case "basic" `Quick test_normalize_protocol_version;
       test_case "unknown" `Quick test_normalize_protocol_version_unknown;
+    ];
+    "tool_schema_component_bytes", [
+      test_case "exact UTF-8 bytes" `Quick test_tool_schema_component_bytes;
     ];
     "protocol_version_from_params", [
       test_case "none" `Quick test_protocol_version_from_params_none;
@@ -514,6 +529,14 @@ let () =
       test_case "array" `Quick test_is_valid_request_id_array;
       test_case "object" `Quick test_is_valid_request_id_object;
     ];
+    "typed_request_identity", [
+      test_case "large integer lexeme" `Quick
+        test_request_id_preserves_large_integer_lexeme;
+      test_case "string and integer distinct" `Quick
+        test_tool_invocation_identity_distinguishes_string_and_integer;
+      test_case "invalid session rejected" `Quick
+        test_tool_invocation_identity_rejects_invalid_session;
+    ];
     "validate_initialize_params", [
       test_case "valid" `Quick test_validate_initialize_params_valid;
       test_case "none" `Quick test_validate_initialize_params_none;
@@ -530,14 +553,6 @@ let () =
       test_case "line delimited" `Quick test_detect_mode_line_delimited;
       test_case "empty" `Quick test_detect_mode_empty;
       test_case "partial content" `Quick test_detect_mode_partial_content;
-    ];
-    "governance_defaults", [
-      test_case "development" `Quick test_governance_defaults_development;
-      test_case "production" `Quick test_governance_defaults_production;
-      test_case "enterprise" `Quick test_governance_defaults_enterprise;
-      test_case "paranoid" `Quick test_governance_defaults_paranoid;
-      test_case "unknown" `Quick test_governance_defaults_unknown;
-      test_case "mixed case" `Quick test_governance_defaults_mixed_case;
     ];
     "mcp_session_to_json", [
       test_case "full" `Quick test_mcp_session_to_json_full;

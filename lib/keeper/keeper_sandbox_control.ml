@@ -200,16 +200,12 @@ let start_managed_container
                     @ network_args
                     @ [ image; "tail"; "-f"; "/dev/null" ]
                   in
-                  (* Throttle the managed-container [docker run -d] just like
-                     the per-call sandbox spawns (PR #15727). RFC-0097 calls
-                     out the "24+ keepers starting simultaneously after a
-                     server restart" scenario explicitly — without this wrap
-                     it was the only first-class start path bypassing the
-                     fleet-wide spawn semaphore. *)
+                  (* Record the exact Docker spawn dynamic extent without
+                     delaying or rejecting the keeper lane. *)
                   let st, out =
-                    Docker_spawn_throttle.with_slot (fun () ->
+                    Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
                       Masc_exec.Exec_gate.run_argv_with_status
-                        ~actor:`System_sandbox
+                        ~actor:(Masc_exec.Agent_id.of_string "system/sandbox")
                         ~raw_source:(String.concat " " argv)
                         ~summary:"keeper sandbox control exec"
                         ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
@@ -267,13 +263,14 @@ let cleanup_stale ~(config : Workspace.config) ~(timeout_sec : float) () =
     ~timeout_sec
     ()
 
-let safe_file_exists path =
-  try Fs_compat.file_exists path with
-  | Sys_error _ -> false
-
-let safe_is_dir path =
+let observed_is_dir path =
   try Fs_compat.file_exists path && Sys.is_directory path with
-  | Sys_error _ -> false
+  | Sys_error error ->
+    Log.Keeper.warn
+      "playground filesystem observation failed path=%s error=%s"
+      path
+      error;
+    false
 
 let repo_name_of_json = function
   | `Assoc fields -> (
@@ -294,245 +291,6 @@ let repo_name_of_json = function
 
 let upsert_assoc key value fields =
   (key, value) :: List.remove_assoc key fields
-
-type playground_policy_status =
-  | Policy_allowed
-  | Policy_unregistered_repository
-  | Policy_mapping_load_error
-  | Policy_repository_identity_mismatch
-  | Policy_repository_store_error
-
-let playground_policy_status_to_string = function
-  | Policy_allowed -> "allowed"
-  | Policy_unregistered_repository -> "unregistered_repository"
-  | Policy_mapping_load_error -> "mapping_load_error"
-  | Policy_repository_identity_mismatch -> "repository_identity_mismatch"
-  | Policy_repository_store_error -> "repository_store_error"
-
-let playground_policy_reason = function
-  | Policy_allowed -> None
-  | Policy_unregistered_repository ->
-      Some
-        "repository is not registered in the repository catalog; access is \
-         denied fail-closed"
-  | Policy_mapping_load_error ->
-      Some
-        "keeper repository mapping could not be loaded; advisory mapping is \
-         ignored"
-  | Policy_repository_identity_mismatch ->
-      Some
-        "repository identity does not match the playground clone; access is \
-         denied fail-closed"
-  | Policy_repository_store_error ->
-      Some
-        "repository catalog could not be loaded; access is denied fail-closed"
-
-(* Which config file actually decided this status. The binding allow/deny gate
-   is the repository catalog (repositories.toml): a repo is usable iff it is
-   registered there, and [access_decision] never denies on the mapping — per
-   RFC-0312 the keeper_repo_mappings.toml scope is advisory. So every
-   catalog-sourced verdict (allowed / unregistered / identity mismatch / store
-   load error) is labelled with the catalog basename; only the
-   mapping-file-load failure is sourced from the advisory mapping. Exhaustive
-   so a new status cannot silently inherit the wrong source. *)
-let policy_source_basename_of_status : playground_policy_status -> string
-  = function
-  | Policy_allowed
-  | Policy_unregistered_repository
-  | Policy_repository_identity_mismatch
-  | Policy_repository_store_error ->
-      Config_dir_resolver.repositories_toml_basename
-  | Policy_mapping_load_error -> Keeper_repo_mapping.mappings_toml_basename
-
-let playground_repo_policy ~(base_path : string) ~(keeper_name : string) =
-  match Keeper_repo_mapping.lookup_mapping ~base_path ~keeper_id:keeper_name with
-  | Keeper_repo_mapping.Mapping_load_error msg as r ->
-    Keeper_repo_mapping.log_mapping_load_error_if_new ~keeper_id:keeper_name msg;
-    r
-  | r -> r
-
-let playground_repo_policy_repository_id ~base_path ~repo_catalog ~repo_name
-    ~repo_path =
-  match repo_catalog with
-  | Error msg -> Error (`Store_error msg)
-  | Ok repos -> (
-  match
-    Keeper_repo_mapping.repository_resolution_of_path_from_catalog ~base_path
-      ~path:repo_path repos
-  with
-  | Keeper_repo_mapping.Repository { repository_id; _ } -> Ok repository_id
-  | Keeper_repo_mapping.No_repository -> Ok repo_name
-  | Keeper_repo_mapping.Repository_identity_mismatch _ ->
-    Error
-      (`Identity_mismatch
-        "repository identity mismatch; access is denied fail-closed")
-  | Keeper_repo_mapping.Repository_store_error msg -> Error (`Store_error msg))
-
-let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id:_ policy
-      ~repo_name ~repo_path =
-  let field status allowed ?repository_id ?error ?mapping_error
-        ?(default_scope = false) () =
-    let status_text = playground_policy_status_to_string status in
-    let reason_fields =
-      match playground_policy_reason status with
-      | None -> []
-      | Some reason -> [ ("policy_reason", `String reason) ]
-    in
-    let repository_id_fields =
-      match repository_id with
-      | None -> []
-      | Some repository_id -> [ ("policy_repository_id", `String repository_id) ]
-    in
-    let error_fields =
-      match error with
-      | None -> []
-      | Some msg -> [ ("policy_error", `String msg) ]
-    in
-    let mapping_error_fields =
-      match mapping_error with
-      | None -> []
-      | Some msg -> [ ("policy_mapping_error", `String msg) ]
-    in
-    let default_scope_fields =
-      if default_scope then [ ("policy_default_scope", `Bool true) ] else []
-    in
-    ( "policy_source"
-    , `String (policy_source_basename_of_status status) )
-    :: ("policy_status", `String status_text)
-    :: ("policy_allowed", `Bool allowed)
-    :: (default_scope_fields @ repository_id_fields @ reason_fields
-        @ error_fields @ mapping_error_fields)
-  in
-  let repository_id_in_catalog repository_id =
-    match repo_catalog with
-    | Error msg -> Error (`Store_error msg)
-    | Ok repos ->
-      Ok
-        (List.exists
-           (fun (repo : Repo_manager_types.repository) ->
-             String.equal repo.id repository_id)
-           repos)
-  in
-  let field_resolved_registered ?mapping_error ~default_scope () =
-    match
-      playground_repo_policy_repository_id ~base_path ~repo_catalog ~repo_name
-        ~repo_path
-    with
-    | Error (`Identity_mismatch msg) ->
-      field Policy_repository_identity_mismatch false
-        ~repository_id:repo_name ~error:msg ()
-    | Error (`Store_error msg) ->
-      field Policy_repository_store_error false ~repository_id:repo_name
-        ~error:msg ()
-    | Ok repository_id ->
-      (match repository_id_in_catalog repository_id with
-       | Error (`Store_error msg) ->
-         field Policy_repository_store_error false ~repository_id ~error:msg ()
-       | Ok true ->
-         field Policy_allowed true ~repository_id ?mapping_error ~default_scope ()
-       | Ok false -> field Policy_unregistered_repository false ~repository_id ())
-  in
-  match policy with
-  | Keeper_repo_mapping.Mapping_load_error msg ->
-      field_resolved_registered ~mapping_error:msg ~default_scope:true ()
-  | Keeper_repo_mapping.Mapping_missing _ ->
-      field_resolved_registered ~default_scope:true ()
-  | Keeper_repo_mapping.Mapping_found mapping ->
-      (match
-       playground_repo_policy_repository_id ~base_path ~repo_catalog ~repo_name
-         ~repo_path
-       with
-       | Error (`Identity_mismatch msg) ->
-         field Policy_repository_identity_mismatch false
-           ~repository_id:repo_name ~error:msg ()
-       | Error (`Store_error msg) ->
-         field Policy_repository_store_error false ~repository_id:repo_name
-           ~error:msg ()
-       | Ok repository_id ->
-         (match repository_id_in_catalog repository_id with
-          | Error (`Store_error msg) ->
-            field Policy_repository_store_error false ~repository_id ~error:msg ()
-          | Ok false -> field Policy_unregistered_repository false ~repository_id ()
-          | Ok true ->
-            let default_scope =
-              Keeper_repo_mapping.mapping_allows_repository mapping ~repository_id
-            in
-            field Policy_allowed true ~repository_id ~default_scope ()))
-
-let with_playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id policy
-      ~repo_name ~repo_path = function
-  | `Assoc fields ->
-      playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id policy
-        ~repo_name ~repo_path
-      |> List.fold_left
-           (fun fields (key, value) -> upsert_assoc key value fields)
-           fields
-      |> fun fields -> `Assoc fields
-  | json ->
-      Log.Misc.warn
-        "[KeeperSandboxControl] playground repo entry for %s is not a JSON object; \
-         preserving original value (%s)"
-        repo_name (Yojson.Safe.to_string json);
-      json
-
-let git_metadata_timeout_sec = 2.0
-let max_live_git_enrichment_repos = 20
-
-let git_string_opt repo_path args =
-  (* RFC-0106 P1: Cancelled re-raise centralised via Cancel_safe.protect.
-     The [_ -> None] silent default is pre-existing behaviour (git
-     metadata is treated as optional by callers) and is preserved
-     verbatim. Promoting it to a logged/counted failure is a separate
-     visibility concern outside this PR's migration scope. *)
-  Cancel_safe.protect
-    ~on_exn:(fun _ -> None)
-    (fun () ->
-      match
-        Repo_git.run_git ~cwd:repo_path
-          ~timeout_sec:git_metadata_timeout_sec args
-      with
-      | Ok (line :: _) ->
-          let trimmed = String.trim line in
-          if String.equal trimmed "" then None else Some trimmed
-      | Ok [] | Error _ -> None)
-
-let enrich_playground_repo_from_git
-      ~(source : string) ~(repo_name : string) ~(repo_path : string)
-      (repo_json : Yojson.Safe.t) =
-  let observed_at_unix = Time_compat.now () in
-  let fields =
-    match repo_json with
-    | `Assoc fields -> fields
-    | _ -> [ ("name", `String repo_name) ]
-  in
-  let fields =
-    fields
-    |> upsert_assoc "name" (`String repo_name)
-    |> upsert_assoc "path" (`String (Filename.concat "repos" repo_name))
-    |> upsert_assoc "source" (`String source)
-    |> upsert_assoc "observed_at"
-         (`String (Masc_domain.iso8601_of_unix_seconds observed_at_unix))
-    |> upsert_assoc "observed_at_unix" (`Float observed_at_unix)
-  in
-  let fields =
-    match git_string_opt repo_path [ "rev-parse"; "--abbrev-ref"; "HEAD" ] with
-    | Some branch -> upsert_assoc "branch" (`String branch) fields
-    | None -> fields
-  in
-  let fields =
-    match git_string_opt repo_path [ "log"; "--oneline"; "-1" ] with
-    | Some commit -> upsert_assoc "latest_commit" (`String commit) fields
-    | None -> fields
-  in
-  let fields =
-    match git_string_opt repo_path [ "rev-parse"; "--is-shallow-repository" ] with
-    | Some raw ->
-        upsert_assoc "shallow"
-          (`Bool (String.equal (String.lowercase_ascii raw) "true"))
-          fields
-    | None -> fields
-  in
-  `Assoc fields
 
 let playground_repo_entry_json ~(source : string) ~(repo_name : string)
     (repo_json : Yojson.Safe.t) =
@@ -561,55 +319,49 @@ let cached_playground_repo_entries playground_abs =
         | _ -> [])
     | _ -> []
   with
-  | Sys_error _ | Yojson.Json_error _ -> []
+  | Sys_error error ->
+    Log.Keeper.warn
+      "playground cache observation failed path=%s error=%s"
+      cache_path
+      error;
+    []
+  | Yojson.Json_error error ->
+    Log.Keeper.warn
+      "playground cache JSON invalid path=%s error=%s"
+      cache_path
+      error;
+    []
 
 let filesystem_playground_repo_names playground_abs =
   let repos_dir = Filename.concat playground_abs "repos" in
-  if not (safe_is_dir repos_dir) then []
+  if not (observed_is_dir repos_dir) then []
   else
     try
       Sys.readdir repos_dir
       |> Array.to_list
       |> List.filter (fun name ->
         let repo_path = Filename.concat repos_dir name in
-        safe_is_dir repo_path
-        && safe_file_exists (Filename.concat repo_path ".git"))
+        observed_is_dir repo_path)
       |> List.sort String.compare
     with
-    | Sys_error _ -> []
+    | Sys_error error ->
+      Log.Keeper.warn
+        "playground directory observation failed path=%s error=%s"
+        repos_dir
+        error;
+      []
 
 let playground_repos_json ~(config : Workspace.config) ~(meta : keeper_meta) =
   let playground_abs =
     Keeper_sandbox.host_root_abs_of_meta ~config meta
     |> normalize_path
   in
-  let repos_dir = Filename.concat playground_abs "repos" in
-  let policy =
-    playground_repo_policy ~base_path:config.base_path ~keeper_name:meta.name
-  in
-  let repo_catalog = Repo_store.load_all ~base_path:config.base_path in
-  let live_enriched_count = ref 0 in
   let cached =
     cached_playground_repo_entries playground_abs
     |> List.map (fun repo ->
       match repo_name_of_json repo with
       | Some name ->
-          let repo_path = Filename.concat repos_dir name in
-          if safe_is_dir repo_path
-             && safe_file_exists (Filename.concat repo_path ".git")
-             && !live_enriched_count < max_live_git_enrichment_repos
-          then
-            (incr live_enriched_count;
-            enrich_playground_repo_from_git ~source:"git" ~repo_name:name
-              ~repo_path repo
-            |> with_playground_repo_policy_fields ~base_path:config.base_path
-                 ~repo_catalog ~keeper_id:meta.name policy ~repo_name:name
-                 ~repo_path)
-          else
-            playground_repo_entry_json ~source:"cache" ~repo_name:name repo
-            |> with_playground_repo_policy_fields ~base_path:config.base_path
-                 ~repo_catalog ~keeper_id:meta.name policy ~repo_name:name
-                 ~repo_path
+        playground_repo_entry_json ~source:"cache" ~repo_name:name repo
       | None -> repo)
   in
   let cached_names = List.filter_map repo_name_of_json cached in
@@ -618,10 +370,7 @@ let playground_repos_json ~(config : Workspace.config) ~(meta : keeper_meta) =
     |> List.filter (fun name -> not (List.mem name cached_names))
     |> List.map (fun name ->
       playground_repo_entry_json ~source:"filesystem" ~repo_name:name
-        (`Assoc [])
-      |> with_playground_repo_policy_fields ~base_path:config.base_path
-           ~repo_catalog ~keeper_id:meta.name policy ~repo_name:name
-           ~repo_path:(Filename.concat repos_dir name))
+        (`Assoc []))
   in
   `List (cached @ fs_entries)
 
@@ -681,7 +430,7 @@ let recommendation (meta : keeper_meta) ~preflight containers =
     | _ ->
         Some
           (Printf.sprintf
-             "Run masc_keeper_sandbox_start with name=%S only when you need a visible prewarmed container; repo access also requires playground_repos to include the target repo."
+             "Run masc_keeper_sandbox_start with name=%S only when you need a visible prewarmed container. playground_repos is an observation of cached and filesystem-visible directories, not an access verdict."
              meta.name)
 
 let identity_json (meta : keeper_meta) =

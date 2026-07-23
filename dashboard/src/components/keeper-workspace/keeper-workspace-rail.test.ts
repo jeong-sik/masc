@@ -6,6 +6,7 @@ import { navigate } from '../../router'
 import { callMcpTool } from '../../api/mcp'
 import { fetchKeeperCompactionSnapshots, fetchKeeperTurnRecords, fetchRuntimeProviders } from '../../api/dashboard'
 import { requestConfirm } from '../common/confirm-dialog'
+import { showToast } from '../common/toast'
 import { KeeperWorkspaceRail, runtimeRawSpecOpen } from './keeper-workspace-rail'
 import type { Keeper, Task } from '../../types'
 import type { KeeperRuntimeLensConfigDriftAxis } from '../../api/keeper-runtime-trace'
@@ -46,7 +47,6 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
       stale_reason: null,
       coverage_gaps: [],
       memory_os: null,
-      user_model: null,
       entries: [
         {
           record: {
@@ -109,6 +109,17 @@ vi.mock('../../api/dashboard', async (importOriginal) => {
           compaction_source: 'event_bus',
           status: 'observed',
           links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
+          exact_evidence: {
+            before_checkpoint_bytes: 4096, after_checkpoint_bytes: 1024,
+            before_message_count: 8, after_message_count: 3,
+            summarized_message_count: 4, dropped_message_count: 1,
+            before_tool_use_count: 2, after_tool_use_count: 1,
+            before_tool_result_count: 2, after_tool_result_count: 1,
+          },
+          reinjection_observation: {
+            state: 'reinserted', keeper_turn_id: 13,
+            checkpoint_loaded_receipts: 1, context_injected_receipts: 1,
+          },
         },
       ],
     }),
@@ -125,6 +136,11 @@ vi.mock('../../api/mcp', () => ({
 
 vi.mock('../common/confirm-dialog', () => ({
   requestConfirm: vi.fn().mockResolvedValue(true),
+}))
+
+vi.mock('../common/toast', () => ({
+  showToast: vi.fn(),
+  showActionToast: vi.fn(),
 }))
 
 function mkKeeper(partial: Partial<Keeper>): Keeper {
@@ -159,9 +175,6 @@ describe('KeeperWorkspaceRail', () => {
     context_ratio: 0.62,
     context_tokens: 124000,
     context_max: 200000,
-    compaction_profile: 'balanced',
-    compaction_ratio_gate: 0.72,
-    compaction_message_gate: 120,
     recent_tool_names: ['masc_amplitude_query', 'masc_board_metrics'],
   })
 
@@ -401,12 +414,8 @@ describe('KeeperWorkspaceRail', () => {
               has_capabilities: true,
               behavior_capabilities: {
                 supports_inline_tools: true,
-                requires_per_keeper_bridging_for_bound_actor_tools: true,
-                identity_runtime_mcp_header_keys: ['x-masc-keeper'],
                 argv_prompt_preflight: true,
                 uses_anthropic_caching: true,
-                max_turns_per_attempt: 3,
-                tolerates_bound_actor_fallback: true,
               },
               custom_header_count: 1,
               connect_timeout_s: 120,
@@ -525,7 +534,7 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('temp:0.65')
     expect(container.textContent).toContain('sampling-config:top_p:0.91,top_k:42,min_p:0.07')
     expect(container.textContent).toContain('budget:32768')
-    expect(container.textContent).toContain('behavior:inline-tools,keeper-bridge')
+    expect(container.textContent).toContain('behavior:inline-tools,argv-preflight,anthropic-cache')
     expect(container.textContent).toContain(
       'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
     )
@@ -753,12 +762,10 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).not.toContain('점검이 필요합니다')
   })
 
-  it('renders the auto-compact threshold label', () => {
+  it('does not invent an auto-compact threshold from retired gate data', () => {
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
-    // With meter data the gate renders as the "compact NN%" meter mark.
-    expect(container.textContent).toContain('compact 72%')
-    // The meter mark also exposes the gate percentage via its label element.
-    expect(container.querySelector('.meter-mark-lbl')?.textContent).toContain('compact 72%')
+    expect(container.textContent).not.toContain('compact 72%')
+    expect(container.querySelector('.meter-mark-lbl')).toBeNull()
   })
 
   it('renders context metrics as missing when only a zero default exists', () => {
@@ -828,6 +835,55 @@ describe('KeeperWorkspaceRail', () => {
     expect(callMcpTool).not.toHaveBeenCalled()
   })
 
+  it('shows a pending (not complete) toast when compaction is only enqueued', async () => {
+    // The real masc_keeper_compact ENQUEUES the request and returns
+    // {queued, queue_outcome}; it does NOT return before/after tokens. Enqueue is
+    // not completion — a queue stuck behind an unrecovered inflight turn stays
+    // pending, so the toast must say pending, never "완료".
+    vi.mocked(callMcpTool).mockResolvedValueOnce(
+      '{"name":"masc-improver","queued":true,"queue_outcome":"enqueued","stimulus":"manual_compaction_requested"}',
+    )
+    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Overflowed' })} />`)
+    fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
+
+    // The compaction toast names the keeper; a later refresh toast does not, so
+    // filter by name to avoid asserting on the unrelated refresh notification.
+    await waitFor(() =>
+      expect(
+        vi.mocked(showToast).mock.calls.some(([msg]) => typeof msg === 'string' && msg.includes('masc-improver')),
+      ).toBe(true),
+    )
+    const compactCall = vi.mocked(showToast).mock.calls.find(
+      ([msg]) => typeof msg === 'string' && msg.includes('masc-improver'),
+    )
+    expect(compactCall?.[0]).toContain('예약됨')
+    expect(compactCall?.[0]).not.toContain('완료')
+    expect(compactCall?.[1]).toBe('warning')
+    // A request that only queued must not leave a phantom (null-token) snapshot.
+    expect(compactionSnapshots.value['masc-improver']).toBeUndefined()
+  })
+
+  it('reports completion only when the tool returns measured before/after tokens', async () => {
+    vi.mocked(callMcpTool).mockResolvedValueOnce('{"before_tokens":1000,"after_tokens":800}')
+    shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Overflowed' })} />`)
+    fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
+
+    await waitFor(() =>
+      expect(
+        vi.mocked(showToast).mock.calls.some(([msg]) => typeof msg === 'string' && msg.includes('masc-improver')),
+      ).toBe(true),
+    )
+    const compactCall = vi.mocked(showToast).mock.calls.find(
+      ([msg]) => typeof msg === 'string' && msg.includes('masc-improver'),
+    )
+    expect(compactCall?.[0]).toContain('완료')
+    expect(compactCall?.[1]).toBe('success')
+    // A measured compaction is recorded as a durable snapshot.
+    expect(compactionSnapshots.value['masc-improver']).toBeDefined()
+  })
+
   it('opens the compaction inspector overlay from the context rail and hydrates durable snapshots', async () => {
     const { container, findByTestId } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
     const btn = Array.from(container.querySelectorAll('.cmp-open')).find(
@@ -846,6 +902,9 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('proactive(85%)')
     expect(container.textContent).toContain('runtime_manifest · observed')
     expect(container.textContent).toContain('trace-cmp#12')
+    expect(container.textContent).toContain('reinserted · load=1 · inject=1')
+    expect(container.textContent).toContain('checkpoint bytes')
+    expect(container.textContent).toContain('summarized=4 · dropped=1')
     const promptContext = await findByTestId('compaction-prompt-context')
     expect(fetchKeeperTurnRecords).toHaveBeenCalledWith('masc-improver', 12, expect.any(Object))
     expect(promptContext.textContent).toContain('snapshot-linked turn-record')
@@ -887,6 +946,11 @@ describe('KeeperWorkspaceRail', () => {
           compaction_source: 'pre_dispatch_hygiene',
           status: 'compacted',
           links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
+          exact_evidence: null,
+          reinjection_observation: {
+            state: 'not_linked', keeper_turn_id: null,
+            checkpoint_loaded_receipts: 0, context_injected_receipts: 0,
+          },
         },
       ],
     })
@@ -998,6 +1062,11 @@ describe('KeeperWorkspaceRail', () => {
         compaction_source: 'event_bus',
         status: 'observed',
         links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
+        exact_evidence: null,
+        reinjection_observation: {
+          state: 'not_linked', keeper_turn_id: null,
+          checkpoint_loaded_receipts: 0, context_injected_receipts: 0,
+        },
       },
     ])
 

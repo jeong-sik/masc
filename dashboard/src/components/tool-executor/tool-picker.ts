@@ -13,7 +13,6 @@ const TIER_OPTIONS = [
 ]
 
 function ToolRow({ tool, isSelected }: { tool: McpToolSchema; isSelected: boolean }) {
-  const isDestructive = tool.annotations?.destructiveHint === true
   const isReadOnly = tool.annotations?.readOnlyHint === true
   const isDeprecated = tool.annotations?.deprecated === true
   return html`
@@ -26,7 +25,6 @@ function ToolRow({ tool, isSelected }: { tool: McpToolSchema; isSelected: boolea
       onClick=${() => selectTool(tool)}>
       <div class="flex items-center gap-1.5">
         <span class="text-xs text-[var(--color-fg-secondary)] font-mono truncate flex-1">${tool.name}</span>
-        ${isDestructive ? html`<${CountBadge} tone="bad">D<//>` : null}
         ${isReadOnly ? html`<${CountBadge} tone="ok">R<//>` : null}
       </div>
       <div class="text-3xs text-[var(--color-fg-muted)] mt-0.5 line-clamp-1">${tool.description}</div>

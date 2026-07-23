@@ -226,7 +226,7 @@ let test_masc_transition_schema () =
       Alcotest.(check bool) "description pins the verification completion path"
         true
         (contains_substring
-           ~needle:"a verifier (not the assignee) then approves it to done"
+           ~needle:"configured LLM completion reviewer"
            schema.description);
       (* RFC-0323 G-4: the weak-lane teaching sentence must stay gone. *)
       Alcotest.(check bool) "description omits the verifier-bypass teaching"
@@ -393,10 +393,6 @@ let test_masc_goal_upsert_schema () =
             (List.mem_assoc "status" props);
           Alcotest.(check bool) "omits phase lifecycle field" false
             (List.mem_assoc "phase" props);
-          Alcotest.(check bool) "has verifier_policy" true
-            (List.mem_assoc "verifier_policy" props);
-          Alcotest.(check bool) "has require_completion_approval" true
-            (List.mem_assoc "require_completion_approval" props);
           Alcotest.(check bool) "has parent_goal_id" true
             (List.mem_assoc "parent_goal_id" props)
       | None -> Alcotest.fail "masc_goal_upsert missing properties"
@@ -411,12 +407,10 @@ let test_masc_goal_transition_schema () =
             (List.mem_assoc "goal_id" props);
           Alcotest.(check bool) "has action" true
             (List.mem_assoc "action" props);
-          Alcotest.(check bool) "has actor" true
+          Alcotest.(check bool) "actor is authenticated context, not input" false
             (List.mem_assoc "actor" props);
           Alcotest.(check bool) "has note" true
-            (List.mem_assoc "note" props);
-          Alcotest.(check bool) "has override_note" true
-            (List.mem_assoc "override_note" props)
+            (List.mem_assoc "note" props)
       | None -> Alcotest.fail "masc_goal_transition missing properties");
       match get_json_list "required" schema.input_schema with
       | Some reqs ->
@@ -424,36 +418,9 @@ let test_masc_goal_transition_schema () =
             (List.mem (`String "goal_id") reqs);
           Alcotest.(check bool) "action required" true
             (List.mem (`String "action") reqs);
-          Alcotest.(check bool) "actor required" true
+          Alcotest.(check bool) "actor is not required input" false
             (List.mem (`String "actor") reqs)
       | None -> Alcotest.fail "masc_goal_transition missing required field"
-
-let test_masc_goal_verify_schema () =
-  match find_registered_tool "masc_goal_verify" with
-  | None -> Alcotest.fail "masc_goal_verify not found"
-  | Some schema ->
-      (match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has goal_id" true
-            (List.mem_assoc "goal_id" props);
-          Alcotest.(check bool) "has request_id" true
-            (List.mem_assoc "request_id" props);
-          Alcotest.(check bool) "has principal" true
-            (List.mem_assoc "principal" props);
-          Alcotest.(check bool) "has decision" true
-            (List.mem_assoc "decision" props);
-          Alcotest.(check bool) "has evidence_refs" true
-            (List.mem_assoc "evidence_refs" props)
-      | None -> Alcotest.fail "masc_goal_verify missing properties");
-      match get_json_list "required" schema.input_schema with
-      | Some reqs ->
-          Alcotest.(check bool) "goal_id required" true
-            (List.mem (`String "goal_id") reqs);
-          Alcotest.(check bool) "principal required" true
-            (List.mem (`String "principal") reqs);
-          Alcotest.(check bool) "decision required" true
-            (List.mem (`String "decision") reqs)
-      | None -> Alcotest.fail "masc_goal_verify missing required field"
 
 let test_retired_front_door_tools_absent_from_schema_inventory () =
   let retired_tools =
@@ -461,10 +428,11 @@ let test_retired_front_door_tools_absent_from_schema_inventory () =
       "masc_operator_snapshot";
       "masc_operator_digest";
       "masc_operator_action";
+      "masc_operator_chat_recovery_resolve";
+      "masc_operator_task_recovery_resolve";
       "masc_operator_confirm";
       "masc_operator_judgment_write";
       "masc_keeper_repair";
-      "masc_surface_audit";
       "masc_operation_start";
       "masc_dispatch_tick";
       "masc_goal_review";
@@ -578,9 +546,58 @@ let test_masc_keeper_create_from_persona_schema () =
       | Some props ->
           Alcotest.(check bool) "has persona_name" true
             (List.mem_assoc "persona_name" props);
-          Alcotest.(check bool) "has canonical tool_access" true
-            (List.mem_assoc "tool_access" props)
+          Alcotest.(check bool) "omits removed goal" false
+            (List.mem_assoc "goal" props);
+          Alcotest.(check bool) "omits retired shards" false
+            (List.mem_assoc "shards" props)
       | None -> Alcotest.fail "masc_keeper_create_from_persona missing properties"
+
+let test_keeper_shards_arg_rejected () =
+  let args = `Assoc [ "shards", `List [ `String "base" ] ] in
+  match
+    Masc.Keeper_config.reject_removed_keeper_input_keys
+      ~tool_name:"masc_keeper_create_from_persona"
+      args
+  with
+  | Ok () -> Alcotest.fail "retired shards arg should be rejected"
+  | Error msg ->
+    Alcotest.(check bool)
+      "shards mentioned"
+      true
+      (contains_substring ~needle:"shards" msg)
+
+let test_keeper_goal_arg_rejected () =
+  let args = `Assoc [ "goal", `String "removed" ] in
+  match
+    Masc.Keeper_config.reject_removed_keeper_input_keys
+      ~tool_name:"masc_keeper_up"
+      args
+  with
+  | Ok () -> Alcotest.fail "removed goal arg should be rejected"
+  | Error msg ->
+    Alcotest.(check bool) "goal mentioned" true
+      (contains_substring ~needle:"goal" msg)
+
+let test_keeper_removed_compaction_args_rejected () =
+  [ "compaction_cooldown_sec"
+  ; "compaction_profile"
+  ; "compaction_ratio_gate"
+  ; "compaction_message_gate"
+  ; "compaction_token_gate"
+  ]
+  |> List.iter (fun key ->
+    let args = `Assoc [ key, `Int 15 ] in
+    match
+      Masc.Keeper_config.reject_removed_keeper_input_keys
+        ~tool_name:"masc_keeper_up"
+        args
+    with
+    | Ok () -> Alcotest.failf "removed %s arg should be rejected" key
+    | Error msg ->
+      Alcotest.(check bool)
+        (key ^ " mentioned")
+        true
+        (contains_substring ~needle:key msg))
 
 let test_masc_keeper_up_schema () =
   match find_registered_tool "masc_keeper_up" with
@@ -594,14 +611,22 @@ let test_masc_keeper_up_schema () =
             (List.mem_assoc "network_mode" props);
           Alcotest.(check bool) "has autoboot_enabled" true
             (List.mem_assoc "autoboot_enabled" props);
-          Alcotest.(check bool) "has canonical tool_access" true
-            (List.mem_assoc "tool_access" props);
+          Alcotest.(check bool) "omits removed goal" false
+            (List.mem_assoc "goal" props);
           Alcotest.(check bool) "omits models" false
             (List.mem_assoc "models" props);
           Alcotest.(check bool) "omits allowed_models" false
             (List.mem_assoc "allowed_models" props);
           Alcotest.(check bool) "omits active_model" false
-            (List.mem_assoc "active_model" props)
+            (List.mem_assoc "active_model" props);
+          [ "compaction_profile"
+          ; "compaction_ratio_gate"
+          ; "compaction_message_gate"
+          ; "compaction_token_gate"
+          ]
+          |> List.iter (fun key ->
+            Alcotest.(check bool) ("omits " ^ key) false
+              (List.mem_assoc key props))
       | None -> Alcotest.fail "masc_keeper_up missing properties"
 
 let test_keeper_sandbox_args_rejected () =
@@ -636,20 +661,6 @@ let test_keeper_sandbox_args_allowed_for_dashboard_patch () =
   with
   | Error msg -> Alcotest.failf "dashboard config patch should accept sandbox posture args: %s" msg
   | Ok () -> ()
-
-let test_masc_keeper_msg_schema () =
-  match find_registered_tool "masc_keeper_msg" with
-  | None -> Alcotest.fail "masc_keeper_msg not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "omits new_goal" false
-            (List.mem_assoc "new_goal" props);
-          Alcotest.(check bool) "omits required_tools" false
-            (List.mem_assoc "required_tools" props);
-          Alcotest.(check bool) "omits required_tool_names" false
-            (List.mem_assoc "required_tool_names" props)
-      | None -> Alcotest.fail "masc_keeper_msg missing properties"
 
 (* keeper policy schema tests removed — policy tool schemas no longer exist *)
 
@@ -801,6 +812,31 @@ let test_property_types_valid () =
   ) schema_inventory
 
 (* ============================================================ *)
+(* Keeper runtime front door                                     *)
+(* ============================================================ *)
+
+(* A keeper whose context outgrows its provider window cannot shrink it on its
+   own, so an explicit compaction request is the operator's escape hatch. It
+   must therefore be reachable from the MCP front door, not only from the
+   keeper-internal tool surface. *)
+let test_keeper_compact_is_public_mcp () =
+  Alcotest.(check bool)
+    "masc_keeper_compact is on the public MCP surface"
+    true
+    (Tool_catalog.is_public_mcp "masc_keeper_compact")
+;;
+
+(* Pin the deliberate scope boundary: [masc_keeper_clear] wipes transcript
+   messages, which is a different operator decision from asking a keeper to
+   compact. Opening the escape hatch must not also expose the destructive one. *)
+let test_keeper_clear_stays_internal () =
+  Alcotest.(check bool)
+    "masc_keeper_clear stays off the public MCP surface"
+    false
+    (Tool_catalog.is_public_mcp "masc_keeper_clear")
+;;
+
+(* ============================================================ *)
 (* Test Runner                                                   *)
 (* ============================================================ *)
 
@@ -857,7 +893,6 @@ let () =
       Alcotest.test_case "goal_list" `Quick test_masc_goal_list_schema;
       Alcotest.test_case "goal_upsert" `Quick test_masc_goal_upsert_schema;
       Alcotest.test_case "goal_transition" `Quick test_masc_goal_transition_schema;
-      Alcotest.test_case "goal_verify" `Quick test_masc_goal_verify_schema;
     ];
     "vote_tools", [
     ];
@@ -867,14 +902,18 @@ let () =
     "keeper_runtime_tools", [
       Alcotest.test_case "keeper-create-from-persona" `Quick
         test_masc_keeper_create_from_persona_schema;
+      Alcotest.test_case "keeper-shards-arg-rejected" `Quick
+        test_keeper_shards_arg_rejected;
+      Alcotest.test_case "keeper-goal-arg-rejected" `Quick
+        test_keeper_goal_arg_rejected;
+      Alcotest.test_case "keeper-compaction-policy-args-rejected" `Quick
+        test_keeper_removed_compaction_args_rejected;
       Alcotest.test_case "keeper-up" `Quick
         test_masc_keeper_up_schema;
       Alcotest.test_case "keeper-sandbox-args-rejected" `Quick
         test_keeper_sandbox_args_rejected;
       Alcotest.test_case "keeper-sandbox-args-dashboard-allowed" `Quick
         test_keeper_sandbox_args_allowed_for_dashboard_patch;
-      Alcotest.test_case "keeper-msg" `Quick
-        test_masc_keeper_msg_schema;
     ];
     "legacy_swarm_removed", [
       Alcotest.test_case "removed_from_public_schemas" `Quick
@@ -899,5 +938,11 @@ let () =
       Alcotest.test_case "description_not_long" `Quick test_description_not_too_long;
       Alcotest.test_case "no_duplicate_props" `Quick test_no_duplicate_properties;
       Alcotest.test_case "valid_prop_types" `Quick test_property_types_valid;
+    ];
+    "keeper_front_door", [
+      Alcotest.test_case "compact_is_public_mcp" `Quick
+        test_keeper_compact_is_public_mcp;
+      Alcotest.test_case "clear_stays_internal" `Quick
+        test_keeper_clear_stays_internal;
     ];
   ]

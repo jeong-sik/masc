@@ -13,39 +13,7 @@ let take = List.take
 
 let keeper_reaction_ledger_health_json () =
   match current_server_state_opt () with
-  | None ->
-    `Assoc
-      [ "schema", `String "keeper.reaction_ledger.fleet_summary.v1"
-      ; "status", `String "unavailable"
-      ; "status_reasons", `List []
-      ; "operator_action_required", `Bool false
-      ; "keeper_count", `Int 0
-      ; "keeper_names", `List []
-      ; "scanned_row_limit_per_keeper", `Int 20
-      ; "row_count", `Int 0
-      ; "stimulus_count", `Int 0
-      ; "reaction_count", `Int 0
-      ; "pending_stimulus_count", `Int 0
-      ; "durable_event_queue_count", `Int 0
-      ; "durable_event_queue_pending_count", `Int 0
-      ; "durable_event_queue_inflight_count", `Int 0
-      ; "durable_event_queue_discovered_keeper_count", `Int 0
-      ; "durable_event_queue_discovered_keeper_names", `List []
-      ; "durable_event_queue_discovery_error", `Null
-      ; "durable_event_queue_discovery_error_count", `Int 0
-      ; ( "durable_event_queue_stale_after_sec"
-        , `Float (Env_config.KeeperHealth.durable_queue_stale_sec ()) )
-      ; "durable_event_queue_stale_count", `Int 0
-      ; "durable_event_queue_stale_keeper_count", `Int 0
-      ; "durable_event_queue_read_error_count", `Int 0
-      ; "durable_event_queue_read_errors_by_keeper", `List []
-      ; "durable_event_queue_by_keeper", `List []
-      ; "durable_event_queue_stale_by_keeper", `List []
-      ; "durable_event_queue_payload_counts", `List []
-      ; "pending_by_keeper", `List []
-      ; "read_error_count", `Int 0
-      ; "keepers", `List []
-      ]
+  | None -> Keeper_reaction_ledger.unavailable_fleet_summary_json ()
   | Some state ->
     let config = (Mcp_server.workspace_config state) in
     let keeper_names =
@@ -73,11 +41,8 @@ let keeper_turn_admission_health_json () =
       ; "status_reasons", `List []
       ; "keeper_count", `Int 0
       ; "keeper_names", `List []
-      ; "max_waiting_chat_requests", `Int Keeper_turn_admission.max_waiting_chat_requests
       ; "chat_waiting_keeper_count", `Int 0
       ; "chat_waiting_total_count", `Int 0
-      ; "chat_waiting_full_keeper_count", `Int 0
-      ; "chat_rejected_total_count", `Int 0
       ; "in_flight_keeper_count", `Int 0
       ; "shutdown_keeper_count", `Int 0
       ; "keepers", `List []
@@ -152,10 +117,10 @@ let runtime_base_path_opt () =
   | None -> None
 
 let keeper_event_queue_health_json () =
-  match runtime_base_path_opt () with
+  match current_server_state_opt () with
   | None ->
     `Assoc
-      [ "schema", `String "masc.keeper_event_queue.fleet_summary.v1"
+      [ "schema", `String "masc.keeper_event_queue.fleet_summary.v2"
       ; "status", `String "unavailable"
       ; "operator_action_required", `Bool false
       ; "keeper_count", `Int 0
@@ -167,19 +132,53 @@ let keeper_event_queue_health_json () =
       ; "counts_complete", `Bool false
       ; "oldest_arrived_at_unix", `Null
       ; "oldest_age_seconds", `Null
+      ; "runnable_pending_count", `Int 0
+      ; "runnable_inflight_count", `Int 0
+      ; "runnable_backlog_count", `Int 0
+      ; "runnable_oldest_arrived_at_unix", `Null
+      ; "runnable_oldest_age_seconds", `Null
+      ; "runnable_by_keeper", `List []
+      ; "paused_retained_pending_count", `Int 0
+      ; "paused_retained_inflight_count", `Int 0
+      ; "paused_retained_count", `Int 0
+      ; "paused_retained_oldest_arrived_at_unix", `Null
+      ; "paused_retained_oldest_age_seconds", `Null
+      ; "paused_retained_by_keeper", `List []
+      ; "unclassified_pending_count", `Int 0
+      ; "unclassified_inflight_count", `Int 0
+      ; "unclassified_count", `Int 0
+      ; "unclassified_oldest_arrived_at_unix", `Null
+      ; "unclassified_oldest_age_seconds", `Null
+      ; "unclassified_by_keeper", `List []
       ; "pending_by_keeper", `List []
       ; "inflight_by_keeper", `List []
       ; "read_error_count", `Int 0
       ; "read_errors", `List []
       ; "keepers", `List []
       ]
-  | Some base_path ->
+  | Some state ->
+    let config = Mcp_server.workspace_config state in
+    let base_path = config.base_path in
     let now =
       Unix.gettimeofday ()
       (* NDT-OK: full health samples wall-clock at the HTTP boundary to report
          durable queue ages; queue parsing below stays deterministic. *)
     in
-    Keeper_event_queue_persistence.fleet_summary_json ~now ~base_path
+    let owner_lifecycle ~keeper_name =
+      match Keeper_meta_store.read_meta config keeper_name with
+      | Ok (Some meta) ->
+        (match pause_kind meta with
+         | Active -> Keeper_event_queue_persistence.Runnable
+         | Operator_paused | Unclassified_paused | Dead_tombstone ->
+           Keeper_event_queue_persistence.Paused_retained)
+      | Ok None ->
+        Keeper_event_queue_persistence.Lifecycle_unknown "durable keeper metadata missing"
+      | Error detail -> Keeper_event_queue_persistence.Lifecycle_unknown detail
+    in
+    Keeper_event_queue_persistence.fleet_summary_json
+      ~now
+      ~base_path
+      ~owner_lifecycle
 
 let keeper_fleet_runtime_resolution_base_fields
     ?meta_scan
@@ -216,14 +215,23 @@ let keeper_fleet_runtime_resolution_base_fields
       ~paused_keepers_json
       ()
   in
+  let disk_observation =
+    match base_path with
+    | Some base_path ->
+      Keeper_disk_pressure.snapshot_json
+        ~masc_root:(Workspace_utils.masc_dir_from_base_path ~base_path)
+        ()
+    | None -> `Null
+  in
   let fields =
     [ "keeper_fibers", `Int keeper_fibers
     ; "paused_keepers", `Int (paused_keeper_count paused_keepers_json)
     ; "paused_keepers_health", paused_keepers_json
     ; "keeper_fleet_no_fibers", `Bool (bool_field "no_running_fibers" fleet_safety)
-    ; ( "keeper_fd_pressure"
+    ; ( "fd_observation"
       , Keeper_fd_pressure.runtime_state_json ~active_keepers:keeper_fibers
-          ~starting_keepers:0 ~requested_keepers:24 () )
+          () )
+    ; "disk_observation", disk_observation
     ; "keeper_fleet_safety", fleet_safety
     ; "keeper_turn_admission", keeper_turn_admission_health_json ()
     ; "keeper_board_event_collection", keeper_board_event_collection_health_json ()
@@ -236,22 +244,33 @@ let keeper_fleet_runtime_resolution_base_fields
 
 let fd_accountant_snapshot_json () =
   let snapshot = Fd_accountant.fd_snapshot () in
+  let observed_int = function
+    | Some value -> `Int value
+    | None -> `Null
+  in
   let per_kind =
     snapshot.per_kind
-    |> List.map (fun (kind, in_flight) ->
+    |> List.map (fun (kind, active_operations) ->
       let kind_name = Fd_accountant.kind_to_string kind in
       `Assoc
         [ "kind", `String kind_name
-        ; "in_flight", `Int in_flight
-        ; "configured_concurrency", `Int (Fd_accountant.configured_concurrency ~kind)
-        ; "effective_concurrency", `Int (Fd_accountant.effective_concurrency ~kind)
+        ; "active_operations", `Int active_operations
+        ])
+  in
+  let resource_errors =
+    snapshot.resource_errors
+    |> List.map (fun (kind, error, count) ->
+      `Assoc
+        [ "kind", `String (Fd_accountant.kind_to_string kind)
+        ; "error", `String (Fd_accountant.resource_error_to_string error)
+        ; "count", `Int count
         ])
   in
   `Assoc
-    [ "fd_open", `Int snapshot.fd_open
-    ; "fd_limit", `Int snapshot.fd_limit
-    ; "pressure_active", `Bool snapshot.pressure_active
+    [ "fd_open", observed_int snapshot.fd_open
+    ; "fd_limit", observed_int snapshot.fd_limit
     ; "per_kind", `List per_kind
+    ; "resource_errors", `List resource_errors
     ]
 ;;
 
@@ -280,7 +299,6 @@ let runtime_truth_json ~build ~path_diagnostics ~keeper_fibers ~fd_accountant =
     ; "keeper_fibers", `Int keeper_fibers
     ; "fd_open", (match Json_util.assoc_member_opt "fd_open" fd_accountant with Some v -> v | None -> `Null)
     ; "fd_limit", (match Json_util.assoc_member_opt "fd_limit" fd_accountant with Some v -> v | None -> `Null)
-    ; "fd_pressure_active", (match Json_util.assoc_member_opt "pressure_active" fd_accountant with Some v -> v | None -> `Null)
     ]
 ;;
 

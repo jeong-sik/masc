@@ -21,10 +21,7 @@ function phaseInlineStyle(phase: string): string {
   return `color: ${style.color}; background: ${style.bg}; border: 1px solid ${style.border};`
 }
 
-function signalColor(t: KeeperTransition): string {
-  const severity = t.operator_signal?.severity
-  if (severity === 'bad') return 'var(--color-status-err)'
-  if (severity === 'warn') return 'var(--color-status-warn)'
+function transitionColor(t: KeeperTransition): string {
   return phaseColor(t.new_phase)
 }
 
@@ -69,8 +66,7 @@ export async function refreshKeeperPhaseTimeline() {
 }
 
 function TransitionDot({ t, idx }: { t: KeeperTransition; idx: number }) {
-  const color = signalColor(t)
-  const signal = t.operator_signal
+  const color = transitionColor(t)
   return html`
     <div class="group relative flex flex-col items-center v2-monitoring-row" key=${idx}>
       <div
@@ -81,14 +77,7 @@ function TransitionDot({ t, idx }: { t: KeeperTransition; idx: number }) {
         <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 shadow-[var(--shadow-1)] text-2xs whitespace-nowrap">
           <div class="font-semibold">${t.prev_phase} → ${t.new_phase}</div>
           <div class="text-[var(--color-fg-muted)] mt-0.5">${t.event_type ?? eventLabel(t.selected_event)}</div>
-          ${signal ? html`
-            <div class="mt-1 text-[var(--color-fg-primary)]">${signal.summary}</div>
-            ${signal.requires_operator_decision ? html`
-              <div class="mt-1 font-semibold text-[var(--color-status-warn)]">
-                decision required${signal.next_human_action ? ` · ${signal.next_human_action}` : ''}
-              </div>
-            ` : null}
-          ` : null}
+          <div class="mt-1 text-[var(--color-fg-primary)]">${t.transition_outcome}</div>
           <div class="text-[var(--color-fg-muted)]"><${TimeAgo} timestamp=${t.wall_clock_at_decision * 1000} /></div>
         </div>
       </div>

@@ -7,9 +7,15 @@ let portable_name_re =
 ;;
 
 let is_portable_name name =
-  (not (String.equal name "")) && Re.execp portable_name_re name
+  (not (String.equal name ""))
+  && (not (String.equal name "."))
+  && (not (String.equal name ".."))
+  && Re.execp portable_name_re name
 ;;
 
 let portable_name_error ~field =
-  Printf.sprintf "%s must match %s" field portable_name_pattern
+  Printf.sprintf
+    "%s must match %s and must not be a reserved path component (. or ..)"
+    field
+    portable_name_pattern
 ;;

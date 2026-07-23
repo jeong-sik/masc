@@ -7,8 +7,10 @@
     - {b File}: markdown file at
       [<markdown_dir>/<key>.md] (frontmatter stripped via
       [parse_frontmatter]).
-    - {b Default}: registered template registered through
-      {!register_default} during plugin init.
+    - {b Default}: the template registered when
+      {!load_prompts_from_directory} parsed the prompt's
+      markdown frontmatter. There is no in-code default
+      registration API — prompts are added as files.
 
     Persistence: {!persist_overrides} writes a versioned,
     contract-bound envelope to [.masc/prompt_overrides.json];
@@ -37,16 +39,20 @@
     [version_index], [meta_tbl], [prompts_dir],
     [markdown_dir], [make_key], [is_valid_prompt_key],
     [prompt_markdown_path], [read_file_if_exists],
-    [get_versions], [list_all], [list_ids], [exists],
-    [unregister], [deprecate], [update_metrics],
-    [replace_substring_all], [render_template], [stats], [count], [count_unique],
-    [to_json], [of_json], [default_prompt_value_unlocked],
+    [replace_substring_all], [render_template],
+    [default_prompt_value_unlocked],
     [build_resolved_from_snapshot], [resolved_of_snapshot],
     [unexpected_template_variables],
     [prompt_item_json_of_resolved], [compare_prompt_items],
-    [register_prompt], [register_prompt_unlocked], [register_default],
-    [validated_override], [prompt_snapshot] type,
-    [register], [init], [render]). *)
+    [register_prompt], [register_prompt_unlocked],
+    [validated_override], [prompt_snapshot] type).
+
+    The mutable entry API ([register], [init], [get], [render],
+    [register_default], [get_versions], [list_all], [list_ids], [exists],
+    [unregister], [deprecate], [update_metrics], [stats], [count],
+    [count_unique], [to_json], [of_json]) was deleted, not hidden: nothing
+    called it. Prompts are added by dropping a markdown file into the
+    directory read by {!load_prompts_from_directory}. *)
 
 (** {1 Type re-exports} *)
 
@@ -124,8 +130,11 @@ val set_markdown_dir : string -> unit
     looks under for [<key>.md]. *)
 
 val get_markdown_dir : unit -> string option
-(** Returns the currently-pinned markdown dir, [None] if
-    {!set_markdown_dir} was never called. *)
+(** Returns the effective markdown dir: the {!set_markdown_dir} pin when
+    one exists, else — only when DUNE_SOURCEROOT is set (dune build/test
+    context, never production) and [<root>/config/prompts] exists — that
+    directory. [None] otherwise. Tests that need true prompt absence pin
+    an explicit empty directory instead of relying on the unset state. *)
 
 val load_prompts_from_directory : string -> unit
 (** Auto-discovers [*.md] files under [dir], parses YAML

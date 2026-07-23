@@ -10,7 +10,6 @@ code_refs:
   - lib/keeper/keeper_execution_receipt.ml
   - lib/turn_fsm/turn_fsm.mli
   - specs/keeper-turn-fsm/KeeperTurnFSM.tla
-  - test/test_keeper_turn_fsm_wired_sites.ml
 ---
 
 # MASC Turn FSM Drift / SSOT Gap Audit
@@ -144,7 +143,11 @@ MASC has a typed turn FSM (`lib/turn_fsm/turn_fsm.mli`), a keeper-side emitter (
 **Severity**: Low
 
 **Evidence**:
-- `test/test_keeper_turn_fsm_wired_sites.ml:62-103` asserts that `Keeper_turn_fsm.emit_transition` appears at least 15 times in `keeper_unified_turn.ml`.
+- At the time of this audit, `test/test_keeper_turn_fsm_wired_sites.ml`
+  asserted that `Keeper_turn_fsm.emit_transition` appeared at least 15 times
+  in `keeper_unified_turn.ml`. The source-text assertion was retired on
+  2026-07-16 because it measured implementation shape rather than runtime
+  transition behavior.
 
 **Impact**: The test prevents accidental deletion of emit sites but cannot detect:
 - duplicate emissions (finding #1),
@@ -185,5 +188,5 @@ MASC has a typed turn FSM (`lib/turn_fsm/turn_fsm.mli`), a keeper-side emitter (
 
 - `docs/spec/04-turn-lifecycle.md` — SSOT for turn lifecycle; Open Questions table references #1/#2 (`OQ-TURN-001`, `OQ-TURN-002`) and #3 (`OQ-TURN-003`).
 - `docs/keeper-turn-lifecycle.md` — historical state table and open-work table.
-- `docs/observability/keeper-turn-fsm-metrics.md` — wiring sites table (referenced by `test_keeper_turn_fsm_wired_sites`).
+- `docs/observability/keeper-turn-fsm-metrics.md` — historical wiring-sites table.
 - `specs/keeper-turn-fsm/KeeperTurnFSM.tla` — formal model including bug actions.

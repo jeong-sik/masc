@@ -64,12 +64,15 @@ val get_clock : unit -> (float Eio.Time.clock_ty Eio.Resource.t, string) result
 
 (** {1 State Management} *)
 
-(** Create server state (synchronous, no effect)
-    @param test_mode When [true], disable workspace authentication so
-    unit tests can exercise handlers without provisioning credentials.
-    Production callers must leave this unset.
-    @param base_path Workspace/base path; MASC data lives under [<base_path>/.masc]. *)
-val create_state : ?test_mode:bool -> base_path:string -> unit -> server_state
+module For_testing : sig
+  val create_state : base_path:string -> unit -> server_state
+  (** Create non-runtime state and explicitly disable workspace authentication.
+      This constructor is isolated from the production bootstrap surface. *)
+end
+
+(** Exact UTF-8 byte size of the visible schema components recorded at boot. *)
+val tool_schema_component_bytes :
+  name:string -> description:string -> input_schema:Yojson.Safe.t -> int
 
 (** Create server state with Eio context.
 
@@ -122,8 +125,10 @@ val handle_request :
 val execute_tool_eio :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  workspace_scope:Mcp_server.workspace_scope ->
   ?profile:tool_profile ->
   ?mcp_session_id:string ->
+  ?invocation_ref:Tool_invocation_ref.t ->
   ?auth_token:string ->
   ?internal_keeper_runtime:bool ->
   server_state ->
@@ -146,21 +151,6 @@ val clear_resource_subscriptions_for_session : string -> unit
     @param env Eio environment (for stdin/stdout)
     @param state Server state *)
 val run_stdio : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> server_state -> unit
-
-(** {1 Governance} *)
-
-(** Governance configuration *)
-type governance_config = {
-  level: string;
-  audit_enabled: bool;
-  anomaly_detection: bool;
-}
-
-(** Get default governance config for a given level.
-    - "development" (default): audit=false, anomaly=false
-    - "production": audit=true, anomaly=false
-    - "enterprise"/"paranoid": audit=true, anomaly=true *)
-val governance_defaults : string -> governance_config
 
 (** {1 MCP Sessions} *)
 

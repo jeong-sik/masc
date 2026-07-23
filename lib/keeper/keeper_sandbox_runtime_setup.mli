@@ -1,35 +1,29 @@
 val docker_command : unit -> string
 val docker_command_argv : unit -> string list
 val docker_run_pull_never_args : unit -> string list
-val docker_image_missing_next_action : string
+val docker_image_inspect_next_action : string
 val run_docker_argv_with_status :
   summary:string ->
-  timeout_sec:float -> string list -> Unix.process_status * string
+  ?timeout_sec:float -> string list -> Unix.process_status * string
 type classified_error = {
   message : string;
   failure_class : Keeper_sandbox_runtime_classify.docker_failure_class;
 }
 val process_status_is_timeout : Unix.process_status -> bool
-val lower_contains : string -> string -> bool
-val output_looks_docker_daemon_unavailable : string -> bool
-val output_looks_image_missing : string -> bool
-val output_looks_timeout : string -> bool
-val docker_output_looks_oci_mount_failure : string -> bool
 val classify_docker_info_failure :
-  status:Unix.process_status -> output:string -> Keeper_sandbox_runtime_classify.docker_failure_class
+  status:Unix.process_status -> Keeper_sandbox_runtime_classify.docker_failure_class
 val classify_docker_run_failure :
-  status:Unix.process_status -> output:string -> Keeper_sandbox_runtime_classify.docker_failure_class
+  status:Unix.process_status -> Keeper_sandbox_runtime_classify.docker_failure_class
 val classify_image_inspect_failure :
-  status:Unix.process_status -> output:string -> Keeper_sandbox_runtime_classify.docker_failure_class
-val classify_image_inventory_failure :
-  status:Unix.process_status -> output:string -> Keeper_sandbox_runtime_classify.docker_failure_class
-val docker_run_looks_daemon_pressure :
-  status:Unix.process_status -> output:string -> bool
+  status:Unix.process_status -> Keeper_sandbox_runtime_classify.docker_failure_class
 val docker_info_security_options_with_class :
   timeout_sec:float -> (string list, classified_error) result
+val docker_info_security_options_with_class_optional :
+  ?timeout_sec:float -> unit -> (string list, classified_error) result
 val docker_info_security_options :
   timeout_sec:float -> (string list, string) result
-type required_command_check = { command : string; available : bool; }
+val docker_info_security_options_optional :
+  ?timeout_sec:float -> unit -> (string list, string) result
 type docker_preflight = {
   ok : bool;
   image : string;
@@ -40,14 +34,8 @@ type docker_preflight = {
   image_present : bool;
   image_error : string option;
   failure_classes : string list;
-  required_commands : required_command_check list;
-  missing_commands : string list;
   next_actions : string list;
 }
-val docker_preflight_min_sec : float
-val docker_preflight_max_sec : float
-val docker_preflight_timeout : timeout_sec:float -> float
-val required_commands : string list
 type cleanup_result =
   { scanned : int
   ; removed : int

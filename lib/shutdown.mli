@@ -161,6 +161,27 @@ val initiate :
     start {!start_process_deadline_watchdog} outside that switch and disarm it
     only after the switch has actually returned. *)
 
+(** {1 Termination classification} *)
+
+val is_benign_termination : benign:(exn -> bool) -> exn -> bool
+(** [is_benign_termination ~benign exn] is [true] when [exn] satisfies [benign],
+    or is a wrapper — [Eio.Exn.Multiple] (non-empty, every member benign) or
+    [Fun.Finally_raised] — whose unwrapped exception(s) are benign. Unwrapping
+    recurses, so a member that is [Finally_raised (Cancelled _)] resolves to its
+    leaf.
+
+    Ending shutdown by failing the Eio switch cancels in-flight fibers. A
+    cancellable [Fun.protect] finalizer then raises [Cancelled], wrapped as
+    [Fun.Finally_raised]; [Eio.Exn.combine] keeps that wrapper over a bare
+    [Cancelled] and combines it with the switch's termination exception into one
+    [Eio.Exn.Multiple]. A shutdown initiator matching only its bare termination
+    exception misclassifies that combined value as an unhandled crash.
+
+    [benign] is caller-supplied and classifies only leaf exceptions (e.g. the
+    entrypoint's termination exception plus [Eio.Cancel.Cancelled]); this
+    function owns the [Multiple]/[Finally_raised] wrapper structure so callers
+    need not know how Eio combines shutdown exceptions. *)
+
 (** {1 Queries} *)
 
 val current_phase : state -> phase

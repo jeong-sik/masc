@@ -1,6 +1,6 @@
 [keeper]
 base = "base.toml"
 # autoboot_enabled = true because base.toml is now autoboot_enabled=false
-# (loader template, not bootable). See fix/base-toml-goal-required PR.
+# (loader template, not bootable).
 autoboot_enabled = true
 persona_name = "taskmaster"

@@ -1,4 +1,4 @@
-(* #9774: shared helpers for governance / operator judge LLM-output
+(* #9774: shared helpers for structured judge LLM-output
    diagnostics. Formatting remains pure. [record_lenient_fallback] keeps the
    legacy metric counter name for dashboard compatibility, but structured-output
    judges no longer recover prose-prefixed JSON. *)
@@ -33,11 +33,11 @@ let format_unparseable_response ~judge_label ~reason raw =
 let record_lenient_fallback ~judge_label raw =
   let labels = [("judge", String.lowercase_ascii judge_label)] in
   Otel_metric_store.inc_counter
-    Otel_metric_store.metric_governance_judge_unparseable
+    Otel_metric_store.metric_structured_judge_unparseable
     ~labels
     ();
   Otel_metric_store.inc_counter
-    Otel_metric_store.metric_governance_lenient_json_fallback_hit
+    Otel_metric_store.metric_structured_judge_lenient_json_fallback_hit
     ~labels
     ();
   format_lenient_fallback ~judge_label raw
@@ -45,7 +45,7 @@ let record_lenient_fallback ~judge_label raw =
 let record_unparseable_response ~judge_label ~reason raw =
   let labels = [("judge", String.lowercase_ascii judge_label)] in
   Otel_metric_store.inc_counter
-    Otel_metric_store.metric_governance_judge_unparseable
+    Otel_metric_store.metric_structured_judge_unparseable
     ~labels
     ();
   format_unparseable_response ~judge_label ~reason raw
@@ -59,12 +59,13 @@ let lenient_fallback_metrics_json ~judge_label =
   `Assoc
     [
       ("judge", `String judge);
-      ( "governance_judge_unparseable_total",
+      ( "structured_judge_unparseable_total",
         `Int
-          (int_metric_value Otel_metric_store.metric_governance_judge_unparseable
+          (int_metric_value Otel_metric_store.metric_structured_judge_unparseable
              ~labels) );
-      ( "governance_lenient_json_fallback_hit_total",
+      ( "structured_judge_lenient_json_fallback_hit_total",
         `Int
           (int_metric_value
-             Otel_metric_store.metric_governance_lenient_json_fallback_hit ~labels) );
+             Otel_metric_store.metric_structured_judge_lenient_json_fallback_hit
+             ~labels) );
     ]

@@ -491,11 +491,8 @@ type lifecycle_legacy_wire_event =
 let display_of_custom_event (verb : Keeper_lifecycle_events.t) : lifecycle_display =
   let open Keeper_lifecycle_events in
   match verb with
-  | Started | Restarted | Reconciled | Self_preservation | Auto_resumed ->
+  | Started | Restarted | Reconciled ->
     { ld_keepalive_running = true; ld_phase = "running"; ld_pipeline_stage = "idle"; ld_paused = false }
-  | Paused_pruned ->
-    (* prune == removed from supervision *)
-    { ld_keepalive_running = false; ld_phase = "stopped"; ld_pipeline_stage = "offline"; ld_paused = true }
   | Purged ->
     { ld_keepalive_running = false; ld_phase = "stopped"; ld_pipeline_stage = "offline"; ld_paused = false }
   | Admission_denied ->

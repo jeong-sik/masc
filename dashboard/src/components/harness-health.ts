@@ -405,7 +405,7 @@ export function HarnessHealth() {
         ` : html`
           <div class="space-y-4">
             <${RailHeader}
-              title="컨텍스트 압축 압력"
+              title="압축 전 체크포인트"
               description=${data.pre_compact.description}
               status=${data.pre_compact.status}
               lastEventAt=${data.pre_compact.last_event_at}
@@ -416,9 +416,9 @@ export function HarnessHealth() {
               cells=${[
                 {
                   variant: 'stacked',
-                  label: '최근 컨텍스트 사용률',
-                  value: data.overview.latest_pre_compact_ratio != null
-                    ? `${Math.round(data.overview.latest_pre_compact_ratio * 100)}%`
+                  label: '최근 체크포인트 크기',
+                  value: data.overview.latest_pre_compact_checkpoint_bytes != null
+                    ? `${data.overview.latest_pre_compact_checkpoint_bytes.toLocaleString()} B`
                     : '-',
                   caption: `최근 ${data.pre_compact.total_recent}건`,
                 },

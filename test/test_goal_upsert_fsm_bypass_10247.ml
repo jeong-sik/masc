@@ -1,7 +1,7 @@
 (** #10247 root cause: [masc_goal_upsert] used to let callers write
     lifecycle fields directly into the Goal Store.  Goal lifecycle
-    moves must go through the FSM tools so verifier policy, approvals,
-    and audit bookkeeping cannot be bypassed. *)
+    moves must go through the FSM tool so transition audit bookkeeping
+    cannot be bypassed. *)
 
 open Alcotest
 open Masc
@@ -39,12 +39,6 @@ let with_workspace f =
 
 let workspace_ctx ?(agent_name = "planner") config : Tool_workspace.context =
   { Tool_workspace.config; agent_name }
-;;
-
-let operator_ctx config = workspace_ctx ~agent_name:"operator" config
-
-let seed_goal_operator (config : Workspace.config) ~agent_name =
-  Auth_credential_base.write_initial_admin config.base_path agent_name
 ;;
 
 let dispatch_upsert ctx args =
@@ -102,8 +96,6 @@ let string_field json field =
          (Yojson.Safe.to_string other))
 ;;
 
-let principal_json ~id = `Assoc [ "id", `String id ]
-
 let create_goal_id config ~title =
   let body = dispatch_upsert_must_succeed (workspace_ctx config) [ "title", `String title ] in
   string_field body "goal_id"
@@ -118,7 +110,6 @@ let dispatch_transition_must_succeed (ctx : Tool_workspace.context) ~goal_id ~ac
         (`Assoc
             [ "goal_id", `String goal_id
             ; "action", `String action
-            ; "actor", principal_json ~id:ctx.Tool_workspace.agent_name
             ])
   with
   | Some result when (Tool_result.is_success result) -> ()
@@ -154,8 +145,6 @@ let test_any_phase_field_rejected () =
   with_workspace
   @@ fun config ->
   [ "executing"
-  ; "awaiting_verification"
-  ; "awaiting_approval"
   ; "completed"
   ; "dropped"
   ; "blocked"
@@ -203,9 +192,8 @@ let test_no_lifecycle_field_still_round_trips () =
 let test_existing_blocked_cannot_resume_with_executing_phase () =
   with_workspace
   @@ fun config ->
-  seed_goal_operator config ~agent_name:"operator";
   let goal_id = create_goal_id config ~title:"Blocked goal" in
-  dispatch_transition_must_succeed (operator_ctx config) ~goal_id ~action:"operator_block";
+  dispatch_transition_must_succeed (workspace_ctx config) ~goal_id ~action:"block";
   check string "fixture moved to blocked" "blocked" (saved_phase config goal_id);
   let body =
     dispatch_upsert_must_fail

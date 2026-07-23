@@ -24,7 +24,6 @@ let () = Mirage_crypto_rng_unix.use_default ()
 
 open Alcotest
 module Auth = Masc.Auth
-module Auth_base = Masc.Auth_credential_base
 
 let setup_test_workspace () =
   let unique_id =
@@ -118,22 +117,6 @@ let test_delete_credential_invalidates_cache () =
                cred.agent_name)
         | Error _ -> ()))
 
-let test_explicit_invalidate_clears_entry () =
-  let dir = setup_test_workspace () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_test_workspace dir)
-    (fun () ->
-      with_eio_runtime (fun () ->
-        let raw = create_token_for dir ~agent_name:"gamma" ~role:Masc_domain.Worker in
-        (match Auth.find_credential_by_token dir ~token:raw with
-         | Ok _ -> ()
-         | Error e -> fail (Masc_domain.masc_error_to_string e));
-        Auth_base.invalidate_credential_index_cache dir;
-        match Auth.find_credential_by_token dir ~token:raw with
-        | Ok cred -> check string "gamma still resolved after invalidate"
-                      "gamma" cred.agent_name
-        | Error e -> fail (Masc_domain.masc_error_to_string e)))
-
 let test_unknown_token_is_mismatch () =
   let dir = setup_test_workspace () in
   Fun.protect
@@ -162,8 +145,6 @@ let () =
           `Quick test_save_credential_invalidates_cache
         ; test_case "delete_credential invalidates cache"
           `Quick test_delete_credential_invalidates_cache
-        ; test_case "explicit invalidate clears entry"
-          `Quick test_explicit_invalidate_clears_entry
         ; test_case "unknown token is mismatch (cold + warm)"
           `Quick test_unknown_token_is_mismatch
         ] )

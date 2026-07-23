@@ -121,7 +121,36 @@ let test_slack_binding_store_error_is_typed () =
         ~channel_id:"C123"
     with
     | Ok _ -> fail "expected invalid Slack binding store to return Error"
-    | Error err -> check bool "reports read error" true (String.length err > 0))
+    | Error _ -> ())
+
+let check_binding_store_failure_projection label json =
+  check bool (label ^ " binding read failed") false
+    (json |> U.member "binding_store_read_ok" |> U.to_bool);
+  check bool (label ^ " unavailable") false
+    (json |> U.member "available" |> U.to_bool);
+  check bool (label ^ " binding error retained") true
+    (json |> U.member "binding_store_error" |> U.to_string
+     |> String.length |> ( < ) 0)
+
+let test_slack_status_surfaces_binding_store_failure () =
+  with_temp_dir @@ fun dir ->
+  with_sidecar_paths "slack" dir (fun () ->
+    let oc = open_out_bin (Filename.concat dir "slack-bindings.json") in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc "{not-json");
+    check_binding_store_failure_projection "slack"
+      (Channel_gate_slack_state.connector_json ()))
+
+let test_telegram_status_surfaces_binding_store_failure () =
+  with_temp_dir @@ fun dir ->
+  with_sidecar_paths "telegram" dir (fun () ->
+    let oc = open_out_bin (Filename.concat dir "telegram-bindings.json") in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc "{not-json");
+    check_binding_store_failure_projection "telegram"
+      (Channel_gate_telegram_state.connector_json ()))
 
 
 let test_slack_default_paths_resolve_under_base_path () =
@@ -243,10 +272,14 @@ let () =
             test_slack_bind_persists_binding_and_audit;
           test_case "slack binding read errors are typed" `Quick
             test_slack_binding_store_error_is_typed;
+          test_case "slack status surfaces binding read failure" `Quick
+            test_slack_status_surfaces_binding_store_failure;
           test_case "slack default paths resolve under base path" `Quick
             test_slack_default_paths_resolve_under_base_path;
           test_case "telegram connector json reads runtime status" `Quick
             test_telegram_connector_json_reads_runtime_status;
+          test_case "telegram status surfaces binding read failure" `Quick
+            test_telegram_status_surfaces_binding_store_failure;
           test_case "slack connector json carries connector_id/display_name" `Quick
             test_slack_connector_json_carries_identity;
         ] );

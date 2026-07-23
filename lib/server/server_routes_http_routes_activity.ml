@@ -10,7 +10,6 @@ module Server_activity_http = Server_activity_http
 module Common = Server_routes_http_common
 module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
-module Keeper_stream = Server_routes_http_keeper_stream
 module Keeper_api_types = Server_dashboard_http_keeper_api_types
 
 let activity_result_json ~ok ~message =
@@ -148,27 +147,6 @@ let sub_board_owner_error ~owner ~sub_board_id (sb : Board.sub_board) =
              sub_board_id
              (Board.Agent_id.to_string sb.Board.owner)) )
     ]
-
-let governance_surface_for_param_key param_key =
-  Governance_registry.surfaces
-  |> List.find_opt (fun (surface : Governance_registry.surface) ->
-       List.mem param_key surface.param_keys)
-
-let governance_param_risk param_key =
-  governance_surface_for_param_key param_key
-  |> Option.map (fun (surface : Governance_registry.surface) -> surface.risk)
-
-let respond_high_risk_param_blocked request reqd ~param_key ~risk =
-  respond_json_value_with_cors ~status:`Forbidden request reqd
-    (`Assoc
-       [
-         ("ok", `Bool false);
-         ( "error",
-           `String
-             (Printf.sprintf
-                "runtime param %s is %s risk and no longer supports direct dashboard mutation"
-                param_key risk) );
-       ])
 
 let board_curation_json () =
   match Board_dispatch.latest_curation_snapshot () with
@@ -372,7 +350,8 @@ let board_context_inference_submission_json ~post_id ~target_source tool_data =
 
 let dispatch_board_context_inference ~state ~sw ~clock ~request ~target_keeper
     ~target_source ~(post : Board.post) ~comments =
-  let config = Mcp_server.workspace_config state in
+  let workspace_scope = Mcp_server.workspace_scope state in
+  let config = workspace_scope.config in
   let agent_name = board_tool_agent_name_from_request request in
   let keeper_ctx : _ Keeper_tool_surface.context =
     {
@@ -382,6 +361,8 @@ let dispatch_board_context_inference ~state ~sw ~clock ~request ~target_keeper
       clock;
       proc_mgr = state.Mcp_server.proc_mgr;
       net = state.Mcp_server.net;
+      publication_recovery_provider =
+        Mcp_server.publication_recovery_availability_provider state;
     }
   in
   let post_id = Board.Post_id.to_string post.id in
@@ -395,18 +376,21 @@ let dispatch_board_context_inference ~state ~sw ~clock ~request ~target_keeper
           board_context_inference_surface_context post comments );
       ]
   in
-  match Keeper_tool_surface.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args with
-  | None -> Error (`Internal_server_error "masc_keeper_msg tool is unavailable")
-  | Some result ->
-      if Tool_result.is_success result
-      then
-        (match
-           board_context_inference_submission_json ~post_id ~target_source
-             (Tool_result.data result)
-         with
-         | Ok json -> Ok json
-         | Error msg -> Error (`Internal_server_error msg))
-      else Error (`Bad_request (Tool_result.message result))
+  let result =
+    Keeper_tool_surface.dispatch_keeper_msg
+      ~submitted_by:agent_name
+      keeper_ctx
+      ~args
+  in
+  if Tool_result.is_success result
+  then
+    (match
+       board_context_inference_submission_json ~post_id ~target_source
+         (Tool_result.data result)
+     with
+     | Ok json -> Ok json
+     | Error msg -> Error (`Internal_server_error msg))
+  else Error (`Bad_request (Tool_result.message result))
 
 let respond_board_context_inference_error request reqd ~status ~message =
   respond_json_value_with_cors ~status request reqd
@@ -479,7 +463,7 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/governance/params" (fun request reqd ->
+  |> Http.Router.get "/api/v1/runtime/params" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
          let params = Runtime_params.registry () in
          let meta_to_json = function
@@ -505,7 +489,7 @@ let add_routes ~sw ~clock router =
                  ])
              params
          in
-         let surfaces = Governance_registry.surfaces_json () in
+         let surfaces = Runtime_settings.surfaces_json () in
          let json =
            `Assoc
              [
@@ -516,7 +500,7 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value json reqd
        ) request reqd)
 
-  |> Http.Router.get "/api/v1/governance/params/audit" (fun request reqd ->
+  |> Http.Router.get "/api/v1/runtime/params/audit" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let base_path = (Mcp_server.workspace_config state).base_path in
          let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
@@ -632,7 +616,6 @@ let add_routes ~sw ~clock router =
                   let contributor_quality_for =
                     board_contributor_quality_lookup ~config ()
                   in
-                  let claim_evidence_for = board_claim_evidence_lookup () in
                   let posts_json =
                     List.map
                       (fun (p : Board.post) ->
@@ -641,9 +624,8 @@ let add_routes ~sw ~clock router =
                          let current_vote = board_current_vote_for_post ~voter ~post_id in
                          let reactions = reactions_for (Board.Reaction_post, post_id) in
                          let contributor_quality = contributor_quality_for author in
-                         let claim_evidence = claim_evidence_for post_id in
                          board_post_dashboard_json ~include_moderation ~blind_votes
-                           ?contributor_quality ?claim_evidence ~reactions
+                           ?contributor_quality ~reactions
                            ?current_vote
                            ~author_karma:(get_karma author) p)
                       paged
@@ -742,7 +724,7 @@ let add_routes ~sw ~clock router =
        respond_board_json reqd (board_sub_boards_json ()))
 
   |> Http.Router.post "/api/v1/board/context-inference" (fun request reqd ->
-       with_tool_auth ~tool_name:"masc_keeper_msg"
+       with_tool_auth ~tool_name:"masc_keeper_delegate"
          (fun state _req reqd ->
          Http.Request.read_body_async reqd
            (handle_board_context_inference_request ~state ~sw ~clock ~request
@@ -1129,22 +1111,6 @@ let add_routes ~sw ~clock router =
                 (Reputation.reputation_to_json rep) reqd)
        ) request reqd)
 
-  (* Activity Feed API *)
-  |> Http.Router.get "/api/v1/activity" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let agent_name = query_param req "agent" in
-         let limit = int_query_param req "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
-         let items =
-           Activity_feed.recent_activity (Mcp_server.workspace_config state)
-             ?agent_name ~limit ()
-         in
-         let json = `Assoc [
-           ("items", `List (List.map Activity_feed.activity_item_to_json items));
-           ("count", `Int (List.length items));
-         ] in
-         Http.Response.json_value json reqd
-       ) request reqd)
-
   (* Prompt Registry API *)
   |> Http.Router.get "/api/v1/prompts" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
@@ -1237,8 +1203,8 @@ let add_routes ~sw ~clock router =
          )
        ) request reqd)
 
-  (* Governance Runtime Params: set / clear *)
-  |> Http.Router.post "/api/v1/governance/params/set" (fun request reqd ->
+  (* Runtime Params: set / clear *)
+  |> Http.Router.post "/api/v1/runtime/params/set" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_set_param"
          (fun state _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
@@ -1262,44 +1228,35 @@ let add_routes ~sw ~clock router =
                  (`Assoc
                     [ ("ok", `Bool false); ("error", `String "value is required") ])
              | Some value ->
-               (match governance_param_risk param_key with
-                | Some "high" ->
-                    respond_high_risk_param_blocked request reqd
-                      ~param_key ~risk:"high"
-                | _ ->
-                    let old_value =
-                      match Runtime_params.registry ()
-                        |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
-                      | Some (_, current, _, _, _) -> current
-                      | None -> `Null
-                    in
-                    (match Runtime_params.set_by_key param_key value ~actor with
-                     | Error msg ->
-                         respond_json_value_with_cors ~status:`Bad_request request reqd
-                           (`Assoc
-                              [
-                                ("ok", `Bool false);
-                                ("error", `String msg);
-                              ])
-                     | Ok () ->
-                         Sse.broadcast
-                           (`Assoc
-                              [
-                                ("type", `String "governance_param_changed");
-                                ("param_key", `String param_key);
-                                ("old_value", old_value);
-                                ("new_value", value);
-                                ("actor", `String actor);
-                              ]);
-                         respond_json_value_with_cors request reqd
-                           (`Assoc
-                              [
-                                ("ok", `Bool true);
-                                ( "message",
-                                  `String
-                                    (Printf.sprintf "Set %s = %s" param_key
-                                       (Yojson.Safe.to_string value)) );
-                              ])))
+               let old_value =
+                 match Runtime_params.registry ()
+                   |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
+                 | Some (_, current, _, _, _) -> current
+                 | None -> `Null
+               in
+               (match Runtime_params.set_by_key param_key value ~actor with
+                | Error msg ->
+                  respond_json_value_with_cors ~status:`Bad_request request reqd
+                    (`Assoc [ "ok", `Bool false; "error", `String msg ])
+                | Ok () ->
+                  Sse.broadcast
+                    (`Assoc
+                       [ "type", `String "runtime_param_changed"
+                       ; "param_key", `String param_key
+                       ; "old_value", old_value
+                       ; "new_value", value
+                       ; "actor", `String actor
+                       ]);
+                  respond_json_value_with_cors request reqd
+                    (`Assoc
+                       [ "ok", `Bool true
+                       ; ( "message"
+                         , `String
+                             (Printf.sprintf
+                                "Set %s = %s"
+                                param_key
+                                (Yojson.Safe.to_string value)) )
+                       ]))
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_value_with_cors ~status:`Bad_request request reqd
                (`Assoc
@@ -1310,7 +1267,7 @@ let add_routes ~sw ~clock router =
          )
        ) request reqd)
 
-  |> Http.Router.post "/api/v1/governance/params/clear" (fun request reqd ->
+  |> Http.Router.post "/api/v1/runtime/params/clear" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_set_param"
          (fun state _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
@@ -1327,51 +1284,38 @@ let add_routes ~sw ~clock router =
                respond_json_value_with_cors ~status:`Bad_request request reqd
                  (`Assoc
                     [ ("ok", `Bool false); ("error", `String "param_key is required") ])
-             else begin
-               match governance_param_risk param_key with
-               | Some "high" ->
-                   respond_high_risk_param_blocked request reqd
-                     ~param_key ~risk:"high"
-               | _ ->
-                   let old_value =
-                     match Runtime_params.registry ()
-                       |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
-                     | Some (_, current, _, _, _) -> current
-                     | None -> `Null
-                   in
-                   match Runtime_params.clear_by_key param_key ~actor with
-                   | Error msg ->
-                       respond_json_value_with_cors ~status:`Bad_request request reqd
-                         (`Assoc
-                            [
-                              ("ok", `Bool false);
-                              ("error", `String msg);
-                            ])
-                   | Ok () ->
-                       let new_value =
-                         match Runtime_params.registry ()
-                           |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
-                         | Some (_, _, default, _, _) -> default
-                         | None -> `Null
-                       in
-                       Sse.broadcast
-                         (`Assoc
-                            [
-                              ("type", `String "governance_param_changed");
-                              ("param_key", `String param_key);
-                              ("old_value", old_value);
-                              ("new_value", new_value);
-                              ("actor", `String actor);
-                            ]);
-                       respond_json_value_with_cors request reqd
-                         (`Assoc
-                            [
-                              ("ok", `Bool true);
-                              ( "message",
-                                `String
-                                  (Printf.sprintf "Cleared %s to default" param_key) );
-                            ])
-             end
+             else
+               let old_value =
+                 match Runtime_params.registry ()
+                   |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
+                 | Some (_, current, _, _, _) -> current
+                 | None -> `Null
+               in
+               (match Runtime_params.clear_by_key param_key ~actor with
+                | Error msg ->
+                  respond_json_value_with_cors ~status:`Bad_request request reqd
+                    (`Assoc [ "ok", `Bool false; "error", `String msg ])
+                | Ok () ->
+                  let new_value =
+                    match Runtime_params.registry ()
+                      |> List.find_opt (fun (k, _, _, _, _) -> k = param_key) with
+                    | Some (_, _, default, _, _) -> default
+                    | None -> `Null
+                  in
+                  Sse.broadcast
+                    (`Assoc
+                       [ "type", `String "runtime_param_changed"
+                       ; "param_key", `String param_key
+                       ; "old_value", old_value
+                       ; "new_value", new_value
+                       ; "actor", `String actor
+                       ]);
+                  respond_json_value_with_cors request reqd
+                    (`Assoc
+                       [ "ok", `Bool true
+                       ; ( "message"
+                         , `String (Printf.sprintf "Cleared %s to default" param_key) )
+                       ]))
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              respond_json_value_with_cors ~status:`Bad_request request reqd
                (`Assoc

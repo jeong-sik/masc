@@ -25,7 +25,6 @@ type surface_ref = Surface_ref.t =
       channel_id : string;
       thread_ts : string option;
     }
-  | Github of { repo : string; notification_id : string option }
   | Webhook of { source : string; event_id : string }
   | Agent
   | Gate of { label : string; address : (string * string) list }

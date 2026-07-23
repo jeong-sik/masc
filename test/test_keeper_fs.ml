@@ -17,12 +17,12 @@ let temp_dir () =
 
 let cleanup_dir dir =
   let rec rm path =
-    if Sys.file_exists path then
-      if Sys.is_directory path then (
-        Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
-        Unix.rmdir path)
-      else
-        Unix.unlink path
+    match Unix.lstat path with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+    | stat when stat.Unix.st_kind = Unix.S_DIR ->
+      Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
+      Unix.rmdir path
+    | _ -> Unix.unlink path
   in
   try rm dir with _ -> ()
 
@@ -138,6 +138,384 @@ let test_save_json_atomic () =
   check int "gen field" 1 (loaded |> member "gen" |> to_int);
   cleanup_dir base
 
+let test_durable_raw_bytes_contract () =
+  Eio_main.run
+  @@ fun _env ->
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let save path bytes =
+         match KF.save_bytes_durable_atomic path bytes with
+         | Ok () -> ()
+         | Error error -> fail (KF.durable_write_error_to_string error)
+       in
+       let path = Filename.concat base "raw.bin" in
+       let bytes = "\000raw\r\n\255" in
+       save path bytes;
+       check string "exact bytes" bytes (read_file path);
+       check int "private mode" 0o600 ((Unix.stat path).st_perm land 0o777);
+       let fail_at expected path bytes =
+         KF.For_testing.save_bytes_durable_atomic
+           ~before_stage:(fun stage ->
+             if stage = expected then failwith "injected")
+           path
+           bytes
+       in
+       let absent = Filename.concat base "absent.bin" in
+       (match fail_at KF.Payload_fsync absent "not-published" with
+        | Error { renamed = false; stage = KF.Payload_fsync; _ } -> ()
+        | Error error -> fail (KF.durable_write_error_to_string error)
+        | Ok () -> fail "pre-rename fault succeeded");
+       check bool "failed first create stays absent" false
+         (Sys.file_exists absent);
+       save absent "retry\000bytes";
+       check string "same path retry" "retry\000bytes" (read_file absent);
+       let published = "\255new\000bytes" in
+       (match fail_at KF.Parent_directory_fsync_after_rename path published with
+        | Error
+            { renamed = true
+            ; stage = KF.Parent_directory_fsync_after_rename
+            ; _
+            } -> ()
+        | Error error -> fail (KF.durable_write_error_to_string error)
+        | Ok () -> fail "post-rename fault succeeded");
+       check string "renamed bytes visible" published (read_file path))
+
+let test_durable_write_pre_publish_failure_preserves_target () =
+  Eio_main.run
+  @@ fun _env ->
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let path = Filename.concat base "durable.json" in
+       let old_content = {|{"version":"old"}|} in
+       require_ok "seed durable target" (KF.save_atomic path old_content);
+       let result =
+         KF.For_testing.save_json_durable_atomic
+           ~before_stage:(function
+             | KF.Payload_fsync -> failwith "injected payload fsync failure"
+             | _ -> ())
+           path
+           (`Assoc [ "version", `String "new" ])
+       in
+       (match result with
+        | Error { renamed = false; stage = KF.Payload_fsync; _ } -> ()
+        | Error error ->
+          failf
+            "unexpected durable write error: %s"
+            (KF.durable_write_error_to_string error)
+        | Ok () -> fail "pre-publish failure unexpectedly succeeded");
+       check string "old target remains authoritative" old_content (read_file path);
+       check bool "failed temp is removed" false (has_tmp_files base))
+
+let test_durable_write_commits_new_directory_chain () =
+  Eio_main.run
+  @@ fun _env ->
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let directory = Filename.concat base "new/active" in
+       let path = Filename.concat directory "request.json" in
+       let json = `Assoc [ "status", `String "queued" ] in
+       (match KF.save_json_durable_atomic path json with
+        | Ok () -> ()
+        | Error error ->
+          failf
+            "first durable partition write failed: %s"
+            (KF.durable_write_error_to_string error));
+       check bool "nested partition exists" true (Sys.is_directory directory);
+       check
+         string
+         "first record is visible"
+         (Yojson.Safe.pretty_to_string json)
+         (read_file path))
+
+let test_durable_sibling_preparation_is_serialized () =
+  Eio_main.run
+  @@ fun _env ->
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       KF.clear_dir_cache ();
+       let request_root = Filename.concat base "keeper_msg_requests" in
+       let active_path = Filename.concat request_root "active/request.json" in
+       let terminal_path = Filename.concat request_root "terminal/request.json" in
+       let first_entered, resolve_first_entered = Eio.Promise.create () in
+       let second_started, resolve_second_started = Eio.Promise.create () in
+       let release_first, resolve_release_first = Eio.Promise.create () in
+       let second_prepare_entered = Atomic.make false in
+       let second_entered_before_release = Atomic.make false in
+       let first_result = ref None in
+       let second_result = ref None in
+       let first () =
+         first_result :=
+           Some
+             (KF.For_testing.save_json_durable_atomic
+                ~before_stage:(function
+                  | KF.Directory_prepare ->
+                    Eio.Promise.resolve resolve_first_entered ();
+                    Eio.Promise.await release_first
+                  | _ -> ())
+                active_path
+                (`Assoc [ "partition", `String "active" ]))
+       in
+       let second () =
+         Eio.Promise.await first_entered;
+         Eio.Promise.resolve resolve_second_started ();
+         second_result :=
+           Some
+             (KF.For_testing.save_json_durable_atomic
+                ~before_stage:(function
+                  | KF.Directory_prepare -> Atomic.set second_prepare_entered true
+                  | _ -> ())
+                terminal_path
+                (`Assoc [ "partition", `String "terminal" ]))
+       in
+       let observe_ordering () =
+         Eio.Promise.await second_started;
+         Eio.Fiber.yield ();
+         Atomic.set
+           second_entered_before_release
+           (Atomic.get second_prepare_entered);
+         Eio.Promise.resolve resolve_release_first ()
+       in
+       Eio.Fiber.all [ first; second; observe_ordering ];
+       check
+         bool
+         "sibling preparation waits for ancestor durability"
+         false
+         (Atomic.get second_entered_before_release);
+       check bool "second sibling eventually prepares" true (Atomic.get second_prepare_entered);
+       let require_durable label = function
+         | Some (Ok ()) -> ()
+         | Some (Error error) ->
+           failf "%s failed: %s" label (KF.durable_write_error_to_string error)
+         | None -> failf "%s did not return" label
+       in
+       require_durable "active sibling" !first_result;
+       require_durable "terminal sibling" !second_result)
+
+let test_durable_write_post_publish_failure_reports_visible_target () =
+  Eio_main.run
+  @@ fun _env ->
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let path = Filename.concat base "durable.json" in
+       require_ok
+         "seed durable target"
+         (KF.save_atomic path {|{"version":"old"}|});
+       let json = `Assoc [ "version", `String "new" ] in
+       let result =
+         KF.For_testing.save_json_durable_atomic
+           ~before_stage:(function
+             | KF.Parent_directory_fsync_after_rename ->
+               failwith "injected parent fsync failure"
+             | _ -> ())
+           path
+           json
+       in
+       (match result with
+        | Error
+            { renamed = true
+            ; stage = KF.Parent_directory_fsync_after_rename
+            ; _
+            } -> ()
+        | Error error ->
+          failf
+            "unexpected durable write error: %s"
+            (KF.durable_write_error_to_string error)
+        | Ok () -> fail "post-publish failure unexpectedly succeeded");
+       check
+         string
+         "published bytes remain visible"
+         (Yojson.Safe.pretty_to_string json)
+         (read_file path);
+       check bool "renamed temp is absent" false (has_tmp_files base))
+
+let test_durable_write_uses_explicit_atomic_staging_directory () =
+  Eio_main.run
+  @@ fun _env ->
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let target_dir = Filename.concat base "active" in
+       let staging_dir = Filename.concat base ".atomic-staging" in
+       let path = Filename.concat target_dir "request.json" in
+       let observed_staging_temp = Atomic.make false in
+       let observed_target_temp = Atomic.make false in
+       let result =
+         KF.For_testing.save_json_durable_atomic
+           ~temp_dir:staging_dir
+           ~before_stage:(function
+             | KF.Payload_write ->
+               Atomic.set observed_staging_temp (has_tmp_files staging_dir);
+               Atomic.set observed_target_temp (has_tmp_files target_dir)
+             | _ -> ())
+           path
+           (`Assoc [ "status", `String "queued" ])
+       in
+       (match result with
+        | Ok () -> ()
+        | Error error ->
+          failf
+            "staged durable write failed: %s"
+            (KF.durable_write_error_to_string error));
+       check bool "temp observed in staging" true
+         (Atomic.get observed_staging_temp);
+       check bool "no temp observed beside target" false
+         (Atomic.get observed_target_temp);
+       check bool "staging drained after rename" false
+         (has_tmp_files staging_dir);
+       check bool "target published" true (Sys.file_exists path))
+
+let test_durable_write_reports_staging_directory_fsync_failure () =
+  Eio_main.run
+  @@ fun _env ->
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let staging_dir = Filename.concat base ".atomic-staging" in
+       let path = Filename.concat base "active/request.json" in
+       let result =
+         KF.For_testing.save_json_durable_atomic
+           ~temp_dir:staging_dir
+           ~before_stage:(function
+             | KF.Temp_directory_fsync_after_rename ->
+               failwith "injected staging directory fsync failure"
+             | _ -> ())
+           path
+           (`Assoc [ "status", `String "queued" ])
+       in
+       (match result with
+        | Error
+            { renamed = true
+            ; stage = KF.Temp_directory_fsync_after_rename
+            ; _
+            } -> ()
+        | Error error ->
+          failf
+            "unexpected staged write error: %s"
+            (KF.durable_write_error_to_string error)
+        | Ok () -> fail "staging directory fsync failure was hidden");
+       check bool "rename remains visible" true (Sys.file_exists path))
+
+let test_durable_remove_absent_path_still_fsyncs_parent () =
+  Eio_main.run
+  @@ fun _env ->
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let parent_fsync_observed = ref false in
+       let path = Filename.concat base "absent.json" in
+       let result =
+         KF.For_testing.remove_file_durable
+           ~before_stage:(function
+             | KF.Parent_directory_fsync -> parent_fsync_observed := true
+             | KF.Unlink -> ())
+           path
+       in
+       (match result with
+        | Ok () -> ()
+        | Error error ->
+          failf
+            "absent durable remove failed: %s"
+            (KF.durable_remove_error_to_string error));
+       check bool "ENOENT still verifies parent durability" true !parent_fsync_observed)
+
+let test_durable_remove_reports_absent_parent_fsync_failure () =
+  Eio_main.run
+  @@ fun _env ->
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let path = Filename.concat base "absent.json" in
+       match
+         KF.For_testing.remove_file_durable
+           ~before_stage:(function
+             | KF.Parent_directory_fsync ->
+               failwith "injected parent fsync failure"
+             | KF.Unlink -> ())
+           path
+       with
+       | Error { removed = false; failure = KF.Parent_directory_fsync, _ } -> ()
+       | Error error ->
+         failf
+           "unexpected durable remove error: %s"
+           (KF.durable_remove_error_to_string error)
+       | Ok () -> fail "absent remove hid the parent fsync failure")
+
+let test_owned_regular_file_read_rejects_symbolic_links () =
+  Eio_main.run
+  @@ fun _env ->
+  let base = temp_dir () in
+  let outside = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_dir base;
+      cleanup_dir outside)
+    (fun () ->
+       let outside_path = Filename.concat outside "outside.json" in
+       require_ok "seed outside file" (KF.save_atomic outside_path "outside");
+       let owned_parent = Filename.concat base "keepers/alpha" in
+       let owned_path = Filename.concat owned_parent "record.json" in
+       ignore (KF.ensure_dir owned_parent : string);
+       Unix.symlink outside_path owned_path;
+       (match Fs_compat.load_owned_regular_file ~ownership_root:base owned_path with
+        | Error
+            { failure =
+                Fs_compat.Path_is_not_regular_file
+                  { kind = Unix.S_LNK; _ }
+            ; _
+            } -> ()
+        | Error error ->
+          failf
+            "unexpected final-link error: %s"
+            (Fs_compat.owned_regular_file_read_error_to_string error)
+        | Ok _ -> fail "final symbolic link was accepted");
+       check string "outside target is never read or changed" "outside"
+         (read_file outside_path);
+       Unix.unlink owned_path;
+       require_ok "seed owned regular file" (KF.save_atomic owned_path "owned");
+       (match Fs_compat.load_owned_regular_file ~ownership_root:base owned_path with
+        | Ok (Some content) -> check string "regular file loads" "owned" content
+        | Ok None -> fail "owned regular file was reported absent"
+        | Error error ->
+          failf
+            "owned regular file failed: %s"
+            (Fs_compat.owned_regular_file_read_error_to_string error));
+       Unix.unlink owned_path;
+       (match Fs_compat.load_owned_regular_file ~ownership_root:base owned_path with
+        | Ok None -> ()
+        | Ok (Some _) -> fail "absent owned file returned content"
+        | Error error ->
+          failf
+            "absent owned file failed: %s"
+            (Fs_compat.owned_regular_file_read_error_to_string error));
+       let linked_parent = Filename.concat base "linked-parent" in
+       Unix.symlink outside linked_parent;
+       (match
+          Fs_compat.load_owned_regular_file
+            ~ownership_root:base
+            (Filename.concat linked_parent "outside.json")
+        with
+        | Error
+            { failure = Fs_compat.Ownership_boundary_rejected _; _ } -> ()
+        | Error error ->
+          failf
+            "unexpected parent-link error: %s"
+            (Fs_compat.owned_regular_file_read_error_to_string error)
+        | Ok _ -> fail "symbolic-link parent escaped ownership root"))
+
 (* ================================================================ *)
 (* Keeper_identity tests                                            *)
 (* ================================================================ *)
@@ -211,6 +589,46 @@ let () =
           test_case "overwrites" `Quick test_save_atomic_overwrites;
           test_case "creates parent dir" `Quick test_save_atomic_creates_parent_dir;
           test_case "json atomic" `Quick test_save_json_atomic;
+          test_case "durable raw bytes" `Quick test_durable_raw_bytes_contract;
+        ] );
+      ( "durability",
+        [ test_case
+            "first write commits directory chain"
+            `Quick
+            test_durable_write_commits_new_directory_chain
+        ; test_case
+            "sibling preparation serializes ancestor durability"
+            `Quick
+            test_durable_sibling_preparation_is_serialized
+        ; test_case
+            "pre-publish failure preserves target"
+            `Quick
+            test_durable_write_pre_publish_failure_preserves_target;
+          test_case
+            "post-publish failure reports visible target"
+            `Quick
+            test_durable_write_post_publish_failure_reports_visible_target;
+          test_case
+            "explicit staging directory owns temp file"
+            `Quick
+            test_durable_write_uses_explicit_atomic_staging_directory;
+          test_case
+            "staging directory fsync failure is typed"
+            `Quick
+            test_durable_write_reports_staging_directory_fsync_failure;
+          test_case
+            "absent remove still fsyncs parent"
+            `Quick
+            test_durable_remove_absent_path_still_fsyncs_parent;
+          test_case
+            "absent remove reports parent fsync failure"
+            `Quick
+            test_durable_remove_reports_absent_parent_fsync_failure;
+        ] );
+      ( "owned_read",
+        [ test_case
+            "regular files only and no symbolic-link parents"
+            `Quick test_owned_regular_file_read_rejects_symbolic_links
         ] );
       ( "identity",
         [

@@ -1,22 +1,69 @@
 // MASC Dashboard — Keeper lifecycle (boot/shutdown/reset/clear/checkpoints/pause/resume/wake/bulk) (split from keeper.ts)
 
 import { isRecord } from '../components/common/normalize'
+import { isAbortError } from '../lib/async-state'
 import {
+  fetchControlPlane,
   fetchWithTimeout,
   jsonHeaders,
   DEFAULT_GET_TIMEOUT_MS,
-  DEFAULT_POST_TIMEOUT_MS,
-  KEEPER_LIFECYCLE_TIMEOUT_MS,
 } from './core'
 
 // --- Keeper lifecycle (boot / shutdown) ---
 
 interface KeeperLifecycleResponse {
   ok: boolean
-  action?: 'boot' | 'shutdown' | 'reset' | 'clear'
+  action?: 'boot' | 'shutdown' | 'reset' | 'clear' | 'pause' | 'resume' | 'wakeup'
   name?: string
   detail?: unknown
   error?: string
+  committed?: boolean
+}
+interface KeeperControlOptions {
+  signal?: AbortSignal
+}
+interface KeeperResumeOptions extends KeeperControlOptions {
+  operatorOperationId?: string
+}
+
+interface PendingResumeIntent {
+  ownerGeneration: number
+  operatorOperationId: string
+}
+
+const pendingResumeIntents = new Map<string, PendingResumeIntent>()
+
+function createResumeOperationId(): string {
+  return `dashboard-resume-${crypto.randomUUID()}`
+}
+
+function resumeIntent(
+  name: string,
+  ownerGeneration: number,
+  explicitOperationId?: string,
+): PendingResumeIntent {
+  if (explicitOperationId) {
+    return { ownerGeneration, operatorOperationId: explicitOperationId }
+  }
+  const pending = pendingResumeIntents.get(name)
+  if (pending?.ownerGeneration === ownerGeneration) return pending
+  const created = {
+    ownerGeneration,
+    operatorOperationId: createResumeOperationId(),
+  }
+  pendingResumeIntents.set(name, created)
+  return created
+}
+
+function clearCommittedResumeIntent(name: string, intent: PendingResumeIntent): void {
+  const pending = pendingResumeIntents.get(name)
+  if (pending?.operatorOperationId === intent.operatorOperationId) {
+    pendingResumeIntents.delete(name)
+  }
+}
+
+function isOwnerGeneration(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0
 }
 async function safeJsonResponse<T>(resp: Response, fallbackError: string): Promise<T> {
   try {
@@ -45,11 +92,11 @@ async function safeKeeperLifecycle(
   init?: RequestInit,
 ): Promise<KeeperLifecycleResponse> {
   try {
-    const resp = await fetchWithTimeout(url, {
+    const resp = await fetchControlPlane(url, {
       method: 'POST',
       headers: jsonHeaders(),
       ...init,
-    }, KEEPER_LIFECYCLE_TIMEOUT_MS)
+    })
     const payload = await safeJsonResponse<KeeperLifecycleResponse>(resp, fallbackError)
     if (resp.ok) return payload
 
@@ -66,6 +113,7 @@ async function safeKeeperLifecycle(
 
     return { ok: false, error }
   } catch (err) {
+    if (isAbortError(err)) throw err
     return { ok: false, error: err instanceof Error ? err.message : fallbackError }
   }
 }
@@ -74,13 +122,15 @@ async function safeKeeperPostWithBody(
   url: string,
   body: Record<string, unknown>,
   fallbackError: string,
+  opts: KeeperControlOptions = {},
 ): Promise<KeeperLifecycleResponse> {
   try {
-    const resp = await fetchWithTimeout(url, {
+    const resp = await fetchControlPlane(url, {
       method: 'POST',
       headers: jsonHeaders(),
       body: JSON.stringify(body),
-    }, DEFAULT_POST_TIMEOUT_MS)
+      signal: opts.signal,
+    })
     const payload = await safeJsonResponse<KeeperLifecycleResponse>(resp, fallbackError)
     if (resp.ok) return payload
 
@@ -97,28 +147,41 @@ async function safeKeeperPostWithBody(
 
     return { ok: false, error }
   } catch (err) {
+    if (isAbortError(err)) throw err
     return { ok: false, error: err instanceof Error ? err.message : fallbackError }
   }
 }
 
-export function bootKeeper(name: string): Promise<KeeperLifecycleResponse> {
+export function bootKeeper(
+  name: string,
+  opts: KeeperControlOptions = {},
+): Promise<KeeperLifecycleResponse> {
   return safeKeeperLifecycle(
     `/api/v1/keepers/${encodeURIComponent(name)}/boot`,
     `Failed to boot ${name}`,
+    { signal: opts.signal },
   )
 }
 
-export function shutdownKeeper(name: string): Promise<KeeperLifecycleResponse> {
+export function shutdownKeeper(
+  name: string,
+  opts: KeeperControlOptions = {},
+): Promise<KeeperLifecycleResponse> {
   return safeKeeperLifecycle(
     `/api/v1/keepers/${encodeURIComponent(name)}/shutdown`,
     `Failed to shut down ${name}`,
+    { signal: opts.signal },
   )
 }
 
-export function resetKeeper(name: string): Promise<KeeperLifecycleResponse> {
+export function resetKeeper(
+  name: string,
+  opts: KeeperControlOptions = {},
+): Promise<KeeperLifecycleResponse> {
   return safeKeeperLifecycle(
     `/api/v1/keepers/${encodeURIComponent(name)}/reset`,
     `Failed to reset ${name}`,
+    { signal: opts.signal },
   )
 }
 
@@ -130,12 +193,14 @@ interface KeeperClearRequest {
 export function clearKeeper(
   name: string,
   payload: KeeperClearRequest,
+  opts: KeeperControlOptions = {},
 ): Promise<KeeperLifecycleResponse> {
   return safeKeeperLifecycle(
     `/api/v1/keepers/${encodeURIComponent(name)}/clear`,
     `Failed to clear ${name}`,
     {
       body: JSON.stringify(payload),
+      signal: opts.signal,
     },
   )
 }
@@ -213,31 +278,65 @@ export async function deleteKeeperHistorySnapshots(
   return resp.json() as Promise<KeeperCheckpointDeleteResponse>
 }
 
-export function pauseKeeper(name: string): Promise<KeeperLifecycleResponse> {
+export function pauseKeeper(
+  name: string,
+  opts: KeeperControlOptions = {},
+): Promise<KeeperLifecycleResponse> {
   return safeKeeperPostWithBody(
     `/api/v1/keepers/${encodeURIComponent(name)}/directive`,
     { action: 'pause' },
     `Failed to pause ${name}`,
+    opts,
   )
 }
 
-export function resumeKeeper(name: string): Promise<KeeperLifecycleResponse> {
-  return safeKeeperPostWithBody(
+export async function resumeKeeper(
+  name: string,
+  ownerGeneration: number | null | undefined,
+  opts: KeeperResumeOptions = {},
+): Promise<KeeperLifecycleResponse> {
+  if (!isOwnerGeneration(ownerGeneration)) {
+    return {
+      ok: false,
+      action: 'resume',
+      name,
+      error: `Cannot resume ${name}: current owner generation is unavailable`,
+    }
+  }
+  const intent = resumeIntent(name, ownerGeneration, opts.operatorOperationId)
+  const result = await safeKeeperPostWithBody(
     `/api/v1/keepers/${encodeURIComponent(name)}/directive`,
-    { action: 'resume' },
+    {
+      action: 'resume',
+      owner_generation: intent.ownerGeneration,
+      operator_operation_id: intent.operatorOperationId,
+    },
     `Failed to resume ${name}`,
+    opts,
   )
+  if (result.ok) clearCommittedResumeIntent(name, intent)
+  return result
 }
 
-export function wakeKeeper(name: string): Promise<KeeperLifecycleResponse> {
+export function wakeKeeper(
+  name: string,
+  opts: KeeperControlOptions = {},
+): Promise<KeeperLifecycleResponse> {
   return safeKeeperPostWithBody(
     `/api/v1/keepers/${encodeURIComponent(name)}/directive`,
     { action: 'wakeup' },
     `Failed to wake ${name}`,
+    opts,
   )
 }
 
 export type BulkKeeperDirectiveAction = 'pause' | 'resume' | 'wakeup'
+
+export interface BulkKeeperResumeTarget {
+  name: string
+  ownerGeneration: number
+  operatorOperationId?: string
+}
 
 export interface BulkKeeperDirectiveResult {
   name: string
@@ -259,27 +358,78 @@ export interface BulkKeeperDirectiveResponse {
  * invalidate at the end, so dashboard rebuild cost is O(1) instead of
  * O(N). Returns a per-keeper result array for granular UI feedback.
  */
-export async function bulkKeeperDirective(
+export function bulkKeeperDirective(
+  targets: BulkKeeperResumeTarget[],
+  action: 'resume',
+  opts?: KeeperControlOptions,
+): Promise<BulkKeeperDirectiveResponse>
+export function bulkKeeperDirective(
   names: string[],
+  action: 'pause' | 'wakeup',
+  opts?: KeeperControlOptions,
+): Promise<BulkKeeperDirectiveResponse>
+export async function bulkKeeperDirective(
+  subjects: string[] | BulkKeeperResumeTarget[],
   action: BulkKeeperDirectiveAction,
+  opts: KeeperControlOptions = {},
 ): Promise<BulkKeeperDirectiveResponse> {
-  const fallbackError = `Failed to ${action} ${names.length} keeper(s)`
+  const names = subjects.map(subject => typeof subject === 'string' ? subject : subject.name)
+  const fallbackError = `Failed to ${action} ${subjects.length} keeper(s)`
+  const resumeTargets = action === 'resume' ? subjects as BulkKeeperResumeTarget[] : []
+  const invalidResumeTarget = resumeTargets.find(
+    target => typeof target.name !== 'string' || !isOwnerGeneration(target.ownerGeneration),
+  )
+  if (invalidResumeTarget) {
+    const error = `Cannot resume ${invalidResumeTarget.name}: current owner generation is unavailable`
+    return {
+      ok: false,
+      action,
+      requested: subjects.length,
+      succeeded: 0,
+      results: names.map(name => ({ name, ok: false, error })),
+    }
+  }
+  const resumeIntents = action === 'resume'
+    ? resumeTargets.map(target => ({
+        name: target.name,
+        intent: resumeIntent(
+          target.name,
+          target.ownerGeneration,
+          target.operatorOperationId,
+        ),
+      }))
+    : []
+  const body = action === 'resume'
+    ? {
+        action,
+        targets: resumeIntents.map(({ name, intent }) => ({
+          name,
+          owner_generation: intent.ownerGeneration,
+          operator_operation_id: intent.operatorOperationId,
+        })),
+      }
+    : { names, action }
   try {
-    const resp = await fetchWithTimeout(
+    const resp = await fetchControlPlane(
       '/api/v1/keepers_bulk/directive',
       {
         method: 'POST',
         headers: jsonHeaders(),
-        body: JSON.stringify({ names, action }),
+        body: JSON.stringify(body),
+        signal: opts.signal,
       },
-      DEFAULT_POST_TIMEOUT_MS,
     )
     const payload = await safeJsonResponse<BulkKeeperDirectiveResponse>(
       resp,
       fallbackError,
     )
-    if (resp.ok && isRecord(payload) && payload.ok === true) {
-      return payload
+    if (isRecord(payload) && Array.isArray(payload.results)) {
+      for (const result of payload.results) {
+        if (!isRecord(result) || result.ok !== true || typeof result.name !== 'string') continue
+        const committed = resumeIntents.find(({ name }) => name === result.name)
+        if (committed) clearCommittedResumeIntent(committed.name, committed.intent)
+      }
+      return payload as unknown as BulkKeeperDirectiveResponse
     }
     return {
       ok: false,
@@ -289,6 +439,7 @@ export async function bulkKeeperDirective(
       results: names.map(name => ({ name, ok: false, error: fallbackError })),
     }
   } catch (err) {
+    if (isAbortError(err)) throw err
     return {
       ok: false,
       action,

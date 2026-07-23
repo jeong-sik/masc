@@ -14,42 +14,10 @@
     {!map_runtime} / {!map_usage}).  All consumed only via the runtime
     contract or the JSON pipeline. *)
 
-(** {1 Tool-access persisted-meta helpers} *)
-
-(** Trim, drop blanks, dedupe (preserve first-seen order). *)
-val normalize_tool_names : string list -> string list
-
-(** Parse [tool_access] from persisted meta JSON. Canonical form is a JSON
-    array of tool names. *)
-val tool_access_of_meta_json :
-  Yojson.Safe.t -> (string list, string) result
-
 (** {1 Policy types} *)
-
-type compaction_policy = {
-  profile : string;
-  mode : Keeper_config.compaction_mode;
-    (** HOW the checkpoint is summarized: [Deterministic] extractive chain
-        (fail-closed default) or opt-in [Llm] librarian-lane summarizer
-        (W2). Orthogonal to [profile], which decides WHEN to compact. *)
-  ratio_gate : float;
-  message_gate : int;
-  token_gate : int;
-  cooldown_sec : int;
-  max_checkpoint_messages : int;
-  keep_recent_tool_results : int;
-    (** Verbatim tool-result tail length passed to
-        [Agent_sdk.Context_reducer.stub_tool_results ~keep_recent].
-        Default
-        {!Keeper_config.default_keep_recent_tool_results} (2);
-        loader clamps to
-        [[0, Keeper_config.keep_recent_tool_results_max]]. *)
-}
 
 type proactive_policy = {
   enabled : bool;
-  idle_sec : int;
-  cooldown_sec : int;
 }
 
 type proactive_cycle_outcome =
@@ -80,6 +48,14 @@ val compaction_runtime_decision_to_string :
 val compaction_runtime_decision_of_string :
   string -> compaction_runtime_decision
 
+val compaction_decision_json_or_null :
+  compaction_runtime_decision -> Yojson.Safe.t
+(** API/dashboard projection of [last_compaction_decision]: the decision
+    string, or [`Null] when empty. Shared by keeper_status.ml and
+    dashboard_http_keeper.ml so the null-guard policy has one definition
+    (issue #25323). Not used by keeper_meta_json.ml, whose on-disk
+    representation serializes the raw string. *)
+
 type compaction_runtime = {
   count : int;
   last_ts : float;
@@ -87,7 +63,31 @@ type compaction_runtime = {
   last_after_tokens : int;
   last_check_ts : float;
   last_decision : compaction_runtime_decision;
+  consecutive_failures : int;
+      (** RFC-0351 S0 / #25461: consecutive compaction failures across the
+          manual lane and the in-lane provider-overflow recovery.  Reset to 0
+          on a committed compaction from either lane; the heartbeat settlement
+          escalates instead of requeuing once it reaches
+          {!compaction_retry_escalation_threshold}. *)
 }
+
+val compaction_retry_escalation_threshold : int
+(** RFC-0351 S0 / #25461: consecutive compaction failures tolerated before the
+    settlement escalates ([Compaction_retry_exhausted]) instead of retrying.
+    Single definition shared by the heartbeat settlement and the
+    status/dashboard projections. *)
+
+val compaction_retry_suspended : compaction_runtime -> bool
+(** [true] once the persisted failure streak has reached
+    {!compaction_retry_escalation_threshold} — the settlement has stopped
+    retrying compaction for this keeper and each further stimulus escalates
+    after a single bounded attempt, pending operator inspection. *)
+
+val transcript_quarantine_retry_escalation_threshold : int
+(** #25296: consecutive transcript-quarantine requeues tolerated before the
+    settlement escalates ([Transcript_quarantine_retry_exhausted]) instead of
+    retrying.  Single definition shared by the heartbeat settlement and
+    tests. *)
 
 type proactive_runtime = {
   count_total : int;
@@ -132,15 +132,9 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
   | No_providers_available
   | All_providers_failed
   | Candidates_filtered_after_cycles
-  | Max_turns_exceeded
   | Session_conflict
       (** The provider session lease is owned by another process. This remains
           terminal for automatic retry and is never inferred from message text. *)
-  | Structural_attempt_timeout of { detail : string }
-      (** Agent SDK [with_optional_timeout] wrapper fired its per-OAS-call
-          ceiling ([max_execution_time_s]). Distinct from transport-level
-          provider timeouts. This variant is accepted only from typed
-          envelopes; free-form messages stay [Other_detail]. *)
   | Capacity_exhausted
       (** Typed surface for capacity-induced runtime exhaustion.
           Previously [ProviderFailure { kind = Capacity_exhausted _ }] fell
@@ -151,28 +145,13 @@ type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason
 type blocker_class =
   | Runtime_exhausted of runtime_exhaustion_reason
   | Capacity_backpressure
-  | Ambiguous_post_commit_timeout
-  | Ambiguous_post_commit_failure
-  | Admission_queue_wait_timeout
-  | Turn_timeout_after_queue_wait
-  | Turn_timeout
-  | Turn_livelock_blocked
-  | Completion_contract_violation
-  | No_progress_loop
   | Fiber_unresolved
   | Stale_turn_timeout
-  | Stale_fleet_batch
-  | Oas_agent_execution_timeout
-  | Sdk_max_turns_exceeded
-  | Sdk_token_budget_exceeded
-  | Sdk_cost_budget_exceeded
+  | Sdk_context_window_exceeded
   | Sdk_unrecognized_stop_reason
-  | Sdk_idle_detected
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
-  | Sdk_exit_condition_met
   | Sdk_input_required
-  | Sdk_tool_failure_recovery_failed
 
 val blocker_class_to_string : blocker_class -> string
 (** Canonical lowercase labels.  Pinned literals — operator
@@ -185,28 +164,10 @@ val runtime_exhaustion_summary :
 
 val runtime_exhaustion_reason_retryable : runtime_exhaustion_reason -> bool
 (** Total typed retryability per reason variant. Transient/connectivity
-    reasons and bounded-cycle/turn/capacity exhaustion are retryable;
+    reasons and candidate/capacity exhaustion are retryable;
     [Session_conflict] and [Other_detail] (unknown free-text) are not. Replaces
     a string-prefix reparse with a [_ -> false] catch-all that mis-biased
     transient faults to terminal. *)
-
-val blocker_class_continue_gate : blocker_class -> bool
-(** [blocker_class_continue_gate b] is [true] iff the supervisor
-    should retry past this blocker.  Currently only
-    [Ambiguous_post_commit_timeout] and
-    [Ambiguous_post_commit_failure] are continue-gated — every
-    other blocker terminates the keeper.  Pinned at the
-    contract seam — drift changes keeper recovery semantics. *)
-
-val blocker_class_auto_approval_blocked : blocker_class -> bool
-(** [blocker_class_auto_approval_blocked b] is [true] iff this blocker
-    class should prevent auto-approval of the keeper's next tool call
-    (including [always_approve] and remembered allow-rules).  Only
-    safety/uncertainty classes are hard-forbidden; transient liveness
-    signals such as [Capacity_backpressure], [Turn_timeout], and SDK
-    budget/idle/input conditions are intentionally excluded so
-    automated recovery flows are not stalled.  Exhaustive — adding a
-    variant forces an explicit auto-approval policy decision. *)
 
 val runtime_exhaustion_reason_to_json :
   runtime_exhaustion_reason -> Yojson.Safe.t
@@ -228,23 +189,9 @@ val blocker_class_of_serialized_string :
 
 (** {1 Unified blocker_info} *)
 
-type no_progress_blocker_facts = {
-  no_progress_reason : string;
-  no_progress_streak : int;
-  no_progress_threshold : int;
-  no_progress_latched : bool;
-}
-(** Structured facts for a persisted [No_progress_loop] blocker.  These fields
-    are machine-readable state; [blocker_info.detail] remains presentation
-    text only. *)
-
-type blocker_facts =
-  | No_progress_loop_facts of no_progress_blocker_facts
-
 type blocker_info = {
   klass : blocker_class;
   detail : string;
-  facts : blocker_facts option;
 }
 (** Authoritative blocker representation: a typed [blocker_class]
     paired with optional free-form [detail] (UI / Otel_metric_store label).
@@ -255,21 +202,9 @@ type blocker_info = {
     [klass] is always populated and [detail] may be ["" ]. *)
 
 val blocker_info_of_class :
-  ?detail:string -> ?facts:blocker_facts -> blocker_class -> blocker_info
+  ?detail:string -> blocker_class -> blocker_info
 (** [blocker_info_of_class ?detail klass] constructs a [blocker_info]
     for [klass].  [detail] defaults to [""]. *)
-
-val blocker_info_of_no_progress_loop :
-  ?detail:string ->
-  reason:string ->
-  streak:int ->
-  threshold:int ->
-  latched:bool ->
-  unit ->
-  blocker_info
-(** [blocker_info_of_no_progress_loop] stamps [No_progress_loop] with
-    structured telemetry facts so downstream status surfaces do not parse
-    the human-readable [detail]. *)
 
 val blocker_info_to_json : blocker_info -> Yojson.Safe.t
 (** Round-trippable JSON encoding.  [Runtime_exhausted reason] uses
@@ -327,8 +262,14 @@ type agent_runtime_state = {
   last_blocker : blocker_info option;
   last_runtime_attempt : runtime_attempt_record option;
   last_turn_tool_calls : tool_call_summary list;
-  last_seen_message_seq : int;
-  (** Highest message seq this keeper has scanned for direct mentions. *)
+  message_scope_ack_id : string option;
+  (** Stable chat-row id of the newest message-scope row injected into a
+      completed Keeper turn. *)
+  transcript_quarantine_consecutive_retries : int;
+  (** #25296: consecutive transcript-quarantine requeue settlements for this
+      keeper.  Reset to 0 on a completed turn; the heartbeat settlement
+      escalates instead of requeuing once it reaches
+      {!transcript_quarantine_retry_escalation_threshold}. *)
 }
 
 (** {1 Keeper meta record} *)
@@ -339,22 +280,15 @@ type keeper_meta = {
   name : string;
   agent_name : string;
   persona : string option;
-  goal : string;
   instructions : string;
   (* Policy *)
   sandbox_profile : Keeper_types_profile.sandbox_profile;
   sandbox_image : string option;
   network_mode : Keeper_types_profile.network_mode;
   allowed_paths : string list;
-  tool_access : string list;
-  tool_denylist : string list;
   mention_targets : string list;
   proactive : proactive_policy;
-  compaction : compaction_policy;
   multimodal_policy : Keeper_types_profile.multimodal_policy;
-  auto_handoff : bool;
-  handoff_threshold : float;
-  handoff_cooldown_sec : int;
   (* Lifecycle *)
   created_at : string;
   updated_at : string;
@@ -364,13 +298,9 @@ type keeper_meta = {
   active_goal_ids : string list;
   paused : bool;
   latched_reason : Keeper_latched_reason.t option;
-      (** Typed companion to [paused]: why this keeper is latched.
-          Producers set it alongside [paused = true]; consumers surface
-          it via the status bridge. Display/observability only. *)
-  auto_resume_after_sec : float option;
-      (** Self-healing circuit breaker: when [Some sec] the supervisor
-          can auto-resume this keeper after [sec] seconds following the
-          updated pause timestamp. [None] means operator-owned pause. *)
+      (** Typed companion to [paused]. Only explicit operator pause and terminal
+          dead-tombstone paths may write it. [None] while paused is an
+          unclassified legacy state requiring operator action. *)
   autoboot_enabled : bool;
   current_task_id : Keeper_id.Task_id.t option;
       (** Currently claimed task ID for cost attribution.  Set
@@ -379,7 +309,7 @@ type keeper_meta = {
           trajectory accumulator for per-task cost tracking. *)
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
-  always_approve : bool option;
+  always_allow : bool option;
   (* Agent runtime state *)
   runtime : agent_runtime_state;
   (* Identity & concurrency *)
@@ -388,10 +318,22 @@ type keeper_meta = {
   meta_version : int;
 }
 
+(** Sanctioned unpause transform: sets [paused = false] while clearing the
+    typed latch ([Dead_tombstone] included) and [runtime.last_blocker], so a
+    resumed keeper can never retain a terminal latch. Callers set [updated_at]
+    themselves. Dead-tombstone revival still runs the crash-recoverable
+    transaction at its call site; this only normalizes the meta fields. *)
+val mark_resumed : keeper_meta -> keeper_meta
+
+(** [dead_tombstone_pause_violation m] is [Some detail] when [m] has
+    [paused = false] together with a [Dead_tombstone] latch — the
+    un-recoverable, out-of-invariant state. Used by the meta store to reject
+    such writes at the boundary. [None] when the meta is consistent. *)
+val dead_tombstone_pause_violation : keeper_meta -> string option
+
 (** Overlay TOML/persona defaults onto persisted runtime meta for
     status-facing reads. Persisted runtime JSON intentionally omits
-    TOML-owned fields such as [sandbox_profile], [network_mode], and
-    [tool_access]. *)
+    TOML-owned fields such as [sandbox_profile] and [network_mode]. *)
 val effective_meta_result :
   base_path:string -> keeper_meta -> (keeper_meta, string) result
 

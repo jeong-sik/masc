@@ -57,21 +57,19 @@ let with_repo_prompt_config f =
 
 let base_observation : WO.world_observation =
   {
-    pending_mentions = [];
+    pending_messages = [];
     pending_board_events = [];
-    pending_scope_messages = [];
     idle_seconds = 0;
     active_goals = [];
-    context_ratio = lazy 0.0;
     unclaimed_task_count = 0;
     claimable_task_count = 0;
-    provider_capacity_blocked_task_count = 0;
     failed_task_count = 0;
     pending_verification_count = 0;
     scheduled_automation = WO.empty_scheduled_automation_observation;
     backlog_updated_since_last_scheduled_autonomous = false;
     running_keeper_fiber_count = 0;
     connected_surfaces = [];
+    connected_surface_failures = [];
   }
 
 let meta_of_json json =
@@ -85,7 +83,6 @@ let meta : Masc.Keeper_meta_contract.keeper_meta =
       [
         ("name", `String "wake-context-keeper");
         ("trace_id", `String "test-trace-wake-context");
-        ("goal", `String "test goal");
       ])
 
 (* Same throwaway runtime default as test_keeper_surface_presence_prompt:
@@ -168,7 +165,7 @@ let make_task ?(handoff_context = None) ~task_status () : Masc_domain.task =
   }
 
 let user_message ?turn_decision ?current_task ?active_goal_summaries observation =
-  let _system, user =
+  let { Prompt.world_state = user; _ } =
     Prompt.build_prompt ~meta ~base_path:"/tmp/unused" ?turn_decision
       ?current_task ?active_goal_summaries ~observation ()
   in
@@ -245,8 +242,8 @@ let test_hitl_resolution_steers_continuation () =
   in
   check bool "fixture: hitl decision runs" true decision.WO.should_run;
   let threaded = user_message ~turn_decision:decision base_observation in
-  check bool "continuation steers a keeper_surface_post reply" true
-    (contains ~needle:"keeper_surface_post" threaded);
+  check bool "continuation steers a connected-surface reply" true
+    (contains ~needle:"visible connected-surface capability" threaded);
   check bool "continuation names the resolved approval" true
     (contains ~needle:"approval you were waiting on was just resolved" threaded)
 
@@ -298,11 +295,10 @@ let test_goal_holder_gets_self_direction_directive () =
         [
           ("name", `String "wake-context-keeper");
           ("trace_id", `String "test-trace-wake-context");
-          ("goal", `String "test goal");
           ("active_goal_ids", `List [ `String "goal-x" ]);
         ])
   in
-  let system, _user =
+  let { Prompt.system_prompt = system; _ } =
     Prompt.build_prompt ~meta:meta_with_goal ~base_path:"/tmp/unused"
       ~observation:base_observation ()
   in
@@ -310,7 +306,7 @@ let test_goal_holder_gets_self_direction_directive () =
     (contains ~needle:"advance one of your active" system);
   check bool "defer is stated as valid" true
     (contains ~needle:"Deferring is a valid choice" system);
-  let no_goal_system, _user =
+  let { Prompt.system_prompt = no_goal_system; _ } =
     Prompt.build_prompt ~meta ~base_path:"/tmp/unused"
       ~observation:base_observation ()
   in

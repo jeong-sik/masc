@@ -15,28 +15,22 @@
    defined in keeper_meta_json.ml from here would create
    Keeper_meta_json -> Keeper_meta_json_scrub -> Keeper_meta_json. *)
 let config_field_names =
-  [ "goal"
-  ; "runtime_id"
+  [ "runtime_id"
   ; "sandbox_profile"; "sandbox_image"; "network_mode"; "allowed_paths"
-  ; "tool_denylist"
   ; "mention_targets"
-  ; "proactive_enabled"; "proactive_idle_sec"; "proactive_cooldown_sec"
-  ; "compaction_profile"; "compaction_ratio_gate"
-  ; "compaction_message_gate"; "compaction_token_gate"
-  ; "compaction_cooldown_sec"
+  ; "proactive_enabled"
   ; "max_checkpoint_messages"; "keep_recent_tool_results"
     (* tool_heavy_* fields were removed with the tool_heavy compaction
        trigger; kept here so legacy persisted JSON sheds the dead keys. *)
   ; "tool_heavy_msg_threshold"; "tool_heavy_ratio_floor"
-  ; "auto_handoff"; "handoff_threshold"; "handoff_cooldown_sec"
-  ; "per_provider_timeout_s"; "always_approve"
+  ; "always_allow"
     (* NOTE: multimodal_policy is a PERSISTED runtime field: meta_to_json emits
        it (keeper_meta_json.ml) and it is a canonical key. It must NOT be in this
        config-only scrub list: any call-site that rewrites persisted JSON with
        this list would delete "delegate", after which parsing falls back to
        Mm_inherit and the next write re-emits "inherit". The
-       test/test_config_runtime_split invariant (no meta_to_json key may be in
-       config_field_names) guards this. *)
+       test/test_keeper_effective_meta_overlay invariant (no persisted runtime
+       snapshot key may leak through config_field_names) guards this. *)
   ; "autoboot_enabled"; "max_context_override"
   ; "telemetry_feedback_enabled"; "telemetry_feedback_window_hours"
   ]

@@ -52,14 +52,6 @@ function AnnotationRailCard({ annotation }: { readonly annotation: IdeAnnotation
     sourceId: `annotation:${annotation.id}`,
     goalId: annotation.goal_id ?? undefined,
     taskId: annotation.task_id ?? undefined,
-    boardPostId: annotation.board_post_id ?? undefined,
-    commentId: annotation.comment_id ?? undefined,
-    prId: annotation.pr_id ?? undefined,
-    gitRef: annotation.git_ref ?? undefined,
-    logId: annotation.log_id ?? undefined,
-    sessionId: annotation.session_id ?? undefined,
-    operationId: annotation.operation_id ?? undefined,
-    workerRunId: annotation.worker_run_id ?? undefined,
     keeperId: annotation.keeper_id,
   })
   const focus = (): void => {
@@ -93,6 +85,13 @@ function AnnotationRailCard({ annotation }: { readonly annotation: IdeAnnotation
         <${KeeperBadge} id=${annotation.keeper_id} variant="sigil" size="sm" />
         <span>${annotation.keeper_id}</span>
         <span class="ide-annotation-rail-path">${annotation.file_path}</span>
+        ${annotation.references.map((reference, index) => html`
+          <span
+            key=${`${reference.relation}:${reference.reference}:${index}`}
+            class="ide-annotation-rail-reference"
+            data-testid="ide-annotation-reference"
+          >${reference.relation}: ${reference.reference}</span>
+        `)}
         ${routeLinks.length > 0 ? html`<span class="ide-annotation-rail-context">CTX ${routeLinks.length}</span>` : null}
       </div>
     </li>

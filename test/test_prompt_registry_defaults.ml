@@ -33,10 +33,10 @@ let prompt_metadata key =
   | "keeper.deliberation" ->
       ("test prompt for " ^ key,
        [ "keeper_name"; "soul_profile"; "goal"; "triggers"; "world_state" ])
-  | "dashboard.operator_judge"
-  | "dashboard.governance_judge"
-  | "dashboard_interaction_judge" ->
+  | "dashboard.gate_judge" ->
       ("test prompt for " ^ key, [ "facts_json" ])
+  | "keeper.board_attention_judgment" ->
+      ("test prompt for " ^ key, [ "judgment_request_json" ])
   | _ -> ("test prompt for " ^ key, [])
 
 let markdown_fixture key body =
@@ -66,11 +66,11 @@ let fixtures =
     ("keeper.capabilities", "Capabilities from markdown");
     ("keeper.unified.system", "{{identity_header}}\n{{instructions_block}}{{goal_lines}}");
     ("keeper.deliberation", "Keeper {{keeper_name}} {{soul_profile}} {{goal}} {{triggers}} {{world_state}}");
-    ("governance.deliberation", "governance deliberation prompt");
-    ("governance.dry_run", "DRY RUN governance prompt");
-    ("dashboard.operator_judge", "operator facts {{facts_json}}");
-    ("dashboard.governance_judge", "governance facts {{facts_json}}");
-    ("dashboard_interaction_judge", "interaction facts {{facts_json}}");
+    ("deliberation.decision", "structured deliberation prompt");
+    ("analysis.dry_run", "DRY RUN analysis prompt");
+    ("dashboard.gate_judge", "Gate facts {{facts_json}}");
+    ( "keeper.board_attention_judgment"
+    , "Board attention {{judgment_request_json}}" );
     ("test.unlisted.vars", "template body still has {{missing_var}}");
   ]
 
@@ -141,15 +141,18 @@ let () =
           test_case "all markdown-backed prompts are registered" `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               let prompts = Prompt_registry.list_prompts () in
-              check int "registered prompt count" 11 (List.length prompts));
+              check int
+                "registered prompt count"
+                (List.length fixtures)
+                (List.length prompts));
           test_case "get_prompt resolves markdown content" `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               check string "keeper.constitution"
                 (fixture "keeper.constitution")
                 (Prompt_registry.get_prompt "keeper.constitution");
-              check string "governance.dry_run"
-                (fixture "governance.dry_run")
-                (Prompt_registry.get_prompt "governance.dry_run"));
+              check string "analysis.dry_run"
+                (fixture "analysis.dry_run")
+                (Prompt_registry.get_prompt "analysis.dry_run"));
           test_case "prompt_source reports file" `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               check string "file source" "file"
@@ -157,11 +160,10 @@ let () =
           test_case "validate_required_prompt_files detects missing file" `Quick
             (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir ->
-              Sys.remove
-                (Filename.concat prompts_dir "dashboard.governance_judge.md");
+              Sys.remove (Filename.concat prompts_dir "dashboard.gate_judge.md");
               let missing = Prompt_registry.validate_required_prompt_files () in
               check bool "missing file found" true
-                (List.mem_assoc "dashboard.governance_judge" missing));
+                (List.mem_assoc "dashboard.gate_judge" missing));
         ] );
       ( "rendering",
         [
@@ -186,7 +188,7 @@ let () =
             (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               match
-                Prompt_registry.render_prompt_template "dashboard.operator_judge"
+                Prompt_registry.render_prompt_template "dashboard.gate_judge"
                   [ ("facts_json", {|{"template":"{{ .Release.Name }}"}|}) ]
               with
               | Ok rendered ->
@@ -198,18 +200,6 @@ let () =
                             rendered 0);
                        true
                      with Not_found -> false)
-              | Error msg -> fail msg);
-          test_case "interaction judge prompt renders from registry" `Quick
-            (fun () ->
-              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
-              match
-                Prompt_registry.render_prompt_template "dashboard_interaction_judge"
-                  [ ("facts_json", {|{"keepers":[]}|}) ]
-              with
-              | Ok rendered ->
-                  check string "rendered interaction prompt"
-                    {|interaction facts {"keepers":[]}|}
-                    rendered
               | Error msg -> fail msg);
           test_case "render_prompt_template replaces whitespace placeholders" `Quick
             (fun () ->
@@ -244,11 +234,11 @@ let () =
             (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir ->
               write_file
-                (Filename.concat prompts_dir "dashboard.operator_judge.md")
-                (markdown_fixture "dashboard.operator_judge"
-                   "operator facts {{runtime_only}}");
+                (Filename.concat prompts_dir "dashboard.gate_judge.md")
+                (markdown_fixture "dashboard.gate_judge"
+                   "Gate facts {{runtime_only}}");
               match
-                Prompt_registry.render_prompt_template "dashboard.operator_judge"
+                Prompt_registry.render_prompt_template "dashboard.gate_judge"
                   [ ("facts_json", "{}") ]
               with
               | Error msg ->
@@ -395,15 +385,15 @@ let () =
             `Quick (fun () ->
               with_registry @@ fun ~dir ~prompts_dir ->
               (match
-                 Prompt_registry.set_override "dashboard.operator_judge"
+                 Prompt_registry.set_override "dashboard.gate_judge"
                    "persisted facts {{facts_json}}"
                with
               | Ok () -> ()
               | Error message -> fail message);
               persist_overrides_or_fail dir;
-              let body = fixture "dashboard.operator_judge" in
+              let body = fixture "dashboard.gate_judge" in
               write_file
-                (Filename.concat prompts_dir "dashboard.operator_judge.md")
+                (Filename.concat prompts_dir "dashboard.gate_judge.md")
                 (String.concat "\n"
                    [
                      "---";
@@ -420,9 +410,9 @@ let () =
                 (before +. 1.0)
                 (override_restore_failure_count ());
               check string "variable drift falls back to file" body
-                (Prompt_registry.get_prompt "dashboard.operator_judge");
+                (Prompt_registry.get_prompt "dashboard.gate_judge");
               check string "variable drift source" "file"
-                (Prompt_registry.prompt_source "dashboard.operator_judge"));
+                (Prompt_registry.prompt_source "dashboard.gate_judge"));
           test_case "malformed versioned envelopes fail closed observably" `Quick
             (fun () ->
               with_registry @@ fun ~dir ~prompts_dir:_ ->

@@ -15,6 +15,7 @@ type call_source =
 type call_stats = {
   call_count : int Atomic.t;
   success_count : int Atomic.t;
+  deferred_count : int Atomic.t;
   failure_count : int Atomic.t;
   last_called_at : float Atomic.t;
   total_duration_ms : int Atomic.t;
@@ -27,9 +28,13 @@ type call_stats = {
 
 val string_of_source : call_source -> string
 val record_call :
-  ?source:call_source -> ?assignment_id:string -> tool_name:string -> success:bool -> duration_ms:int -> unit -> unit
+  ?source:call_source -> ?assignment_id:string -> tool_name:string ->
+  disposition:('completed, 'deferred, 'failed) Tool_result.disposition ->
+  duration_ms:int -> unit -> unit
 val record_call_if_known :
-  ?source:call_source -> ?assignment_id:string -> tool_name:string -> success:bool -> duration_ms:int -> unit -> unit
+  ?source:call_source -> ?assignment_id:string -> tool_name:string ->
+  disposition:('completed, 'deferred, 'failed) Tool_result.disposition ->
+  duration_ms:int -> unit -> unit
 
 (** {1 Queries} *)
 
@@ -49,19 +54,5 @@ val stats_to_json : string * call_stats -> Yojson.Safe.t
 val stats_report : top_n:int -> all_tool_names:string list -> Yojson.Safe.t
 
 (** {1 Lifecycle} *)
-
-type warm_up_stats = {
-  count : int;
-  success_count : int;
-  failure_count : int;
-  last_used_at : float option;
-}
-(** Per-tool seed stats for {!warm_up}. The composition root projects
-    persisted [Telemetry_eio.tool_usage_stats] into this neutral shape so the
-    Tool dispatch substrate stays free of the telemetry persistence layer. *)
-
-val warm_up : (string * warm_up_stats) list -> int
-(** Seed registry counters from persisted per-tool stats (skips tools already
-    present). Returns the number of tools seeded. *)
 
 val reset : unit -> unit

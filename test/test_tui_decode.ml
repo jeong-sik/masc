@@ -49,6 +49,7 @@ let keeper_json ?(models = `List [ `String "glm-5.1" ]) ?(last_turn_ts = `String
     ([
        ("goal", `String "keep the system healthy");
        ("soul_profile", `String "balanced");
+       ("active_goal_ids", `List []);
        ("generation", `Int 2);
        ("models", models);
        ("proactive_enabled", `Bool true);
@@ -57,10 +58,8 @@ let keeper_json ?(models = `List [ `String "glm-5.1" ]) ?(last_turn_ts = `String
        ("total_cost_usd", `Float 0.42);
        ("last_turn_ts", last_turn_ts);
        ("compaction_count", `Int 1);
-       ("compaction_ratio_gate", `Float 0.8);
        ("trigger_mode", `String "mention");
        ("context_budget", `Int 32000);
-       ("handoff_threshold", `Float 0.85);
        ("drift_enabled", `Bool true);
        ("verify", `Bool true);
        ("created_at", `String "2026-03-31T12:00:00Z");

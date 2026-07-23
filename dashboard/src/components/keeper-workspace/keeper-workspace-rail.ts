@@ -27,7 +27,6 @@ import { requestConfirm } from '../common/confirm-dialog'
 import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
 import { errorToString } from '../../lib/format-string'
 import { refreshAfterRuntimeAction } from '../keeper-detail-helpers'
-import { contextThresholds } from '../../config/context-thresholds'
 import {
   loadRuntimeCatalog,
   resolveRuntimeCatalogEntry,
@@ -367,14 +366,6 @@ function RuntimeSection({
   `
 }
 
-function compactionGatePct(keeper: Keeper): number {
-  const raw = keeper.compaction_ratio_gate
-  const ratio = typeof raw === 'number' && Number.isFinite(raw) && raw > 0
-    ? raw
-    : contextThresholds.value.compacting
-  return Math.max(1, Math.min(99, Math.round(ratio * 100)))
-}
-
 function compactRequiresForce(keeper: Keeper): boolean {
   const phase = phaseTokenFromKeeper(keeper)
   if (phase === 'overflowed' || phase === 'paused' || phase === 'compacting') return false
@@ -394,8 +385,6 @@ function ContextSection({
 }): VNode {
   const [compacting, setCompacting] = useState(false)
   const pct = contextPercent(keeper)
-  const compactAt = compactionGatePct(keeper)
-  const hot = pct !== null && pct >= compactAt
   const max = contextMax(keeper)
   const baseTokens = keeper.context_tokens ?? keeper.context?.context_tokens ?? null
   const tokens = formatK(baseTokens)
@@ -425,19 +414,41 @@ function ContextSection({
       setCompacting(true)
       try {
         const raw = await callMcpTool('masc_keeper_compact', { name: keeper.name, force })
-        const parsed = JSON.parse(raw) as { before_tokens?: number; after_tokens?: number; phase_after?: string }
+        const parsed = JSON.parse(raw) as {
+          before_tokens?: number
+          after_tokens?: number
+          phase_after?: string
+          queued?: boolean
+          queue_outcome?: string
+        }
         const before = formatK(parsed.before_tokens)
         const after = formatK(parsed.after_tokens)
-        recordManualCompaction(
-          keeper.name,
-          parsed.before_tokens,
-          parsed.after_tokens,
-          keeperRuntimeLabel(keeper) ?? '—',
-        )
-        showToast(
-          before && after ? `${keeper.name} compact 완료: ${before} -> ${after}` : `${keeper.name} compact 완료`,
-          'success',
-        )
+        if (before && after) {
+          // Measured before/after present: a compaction actually ran and reduced tokens.
+          recordManualCompaction(
+            keeper.name,
+            parsed.before_tokens,
+            parsed.after_tokens,
+            keeperRuntimeLabel(keeper) ?? '—',
+          )
+          showToast(`${keeper.name} compact 완료: ${before} -> ${after}`, 'success')
+        } else if (parsed.queued) {
+          // masc_keeper_compact only ENQUEUES the request; the compaction runs later on the
+          // keeper's owning lane. Queuing is not completion: a queue stuck behind an
+          // unrecovered inflight turn stays pending indefinitely, so rendering it as "완료"
+          // is a false success. Surface the pending state, and do not record a phantom
+          // (null-token) compaction snapshot for a request that has not run.
+          const alreadyQueued = parsed.queue_outcome === 'already_present'
+          showToast(
+            alreadyQueued
+              ? `${keeper.name} compaction 이미 예약됨 — 대기열에서 실행 대기 중`
+              : `${keeper.name} compaction 예약됨 — 대기열에서 실행 대기 중`,
+            'warning',
+          )
+        } else {
+          // Unrecognized response shape: acknowledge receipt without claiming completion.
+          showToast(`${keeper.name} compaction 요청 접수됨 (상태 미확인)`, 'warning')
+        }
         await refreshAfterRuntimeAction()
       } catch (err) {
         showToast(`compact 실패: ${errorToString(err)}`, 'error', 8000)
@@ -451,7 +462,7 @@ function ContextSection({
   // heading — the percentage and the 사용/전체 line below are self-explanatory.
   const usageHeader = html`
     <div class="ctx-meter-head">
-      <span class=${`ctx-meter-pct mono${hot ? ' hot' : ''}`}>${pct ?? 0}%</span>
+      <span class="ctx-meter-pct mono">${pct ?? 0}%</span>
     </div>
   `
 
@@ -464,16 +475,13 @@ function ContextSection({
               ${usageHeader}
               <div class="meter-wrap">
                 <div
-                  class=${`meter${hot ? ' hot' : ''}`}
+                  class="meter"
                   role="meter"
                   aria-label="컨텍스트 윈도우 사용률"
                   aria-valuenow=${pct ?? 0}
                   aria-valuemin="0"
                   aria-valuemax="100"
                 ><span style=${{ width: `${pct ?? 0}%` }}></span></div>
-                <span class=${`meter-mark${hot ? ' hot' : ''}`} style=${{ left: `${compactAt}%` }}>
-                  <i class="meter-mark-lbl">compact ${compactAt}%</i>
-                </span>
               </div>
             `
           : html`<div class="ctx-empty" data-missing="context-window"><strong>윈도우 사용률 미수신</strong><span>런타임이 전체 윈도우 총량을 아직 보내지 않았습니다.</span></div>`}
@@ -537,7 +545,14 @@ function OwnedTasksSection({ keeper }: { keeper: Keeper }): VNode {
 
 function toMemoryKeeper(k: Keeper): MemoryKeeper {
   const bucket = keeperBucket(k)
-  const status = bucket === 'running' ? 'run' : bucket === 'paused' ? 'pause' : 'off'
+  // stuck keepers still hold a live fiber — keep them on the 'run' glyph
+  // (the 3-value MemoryKeeper vocabulary has no attention state).
+  const status =
+    bucket === 'running' || bucket === 'stuck'
+      ? 'run'
+      : bucket === 'paused'
+        ? 'pause'
+        : 'off'
   return {
     id: k.name,
     ctx: contextRatio(k) ?? 0,

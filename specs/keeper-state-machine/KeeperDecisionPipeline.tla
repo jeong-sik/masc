@@ -6,11 +6,10 @@
 (* [Keeper_registry.current_turn_observation.decision_stage]. The current  *)
 (* runtime no longer uses the old Thompson/tool_count feedback loop that   *)
 (* an earlier TLA draft described. Instead, the live decision pipeline is  *)
-(* a narrow per-turn contract driven by four write points:                 *)
+(* a narrow per-turn contract driven by three write points:                *)
 (*   - mark_turn_started                    → undecided                    *)
 (*   - mark_turn_measurement + guard pass   → guard_ok                     *)
 (*   - keeper_agent_run tool disclosure     → tool_policy_selected         *)
-(*   - keeper_guards override/approval gate → gate_rejected               *)
 (* plus retry/finalize resets.                                              *)
 (*                                                                         *)
 (* OCaml <-> TLA+ mapping (see #8642 family):                              *)
@@ -21,7 +20,6 @@
 (*   turn_phase         | type turn_phase = Turn_idle | ...        | lib/keeper/keeper_registry.ml — type turn_phase *)
 (*   decision_stage     | type decision_stage = Decision_undecided | lib/keeper/keeper_registry.ml — type decision_stage *)
 (*                      |   | Decision_guard_ok                    | (mli mirror at keeper_registry.mli — type decision_stage_active) *)
-(*                      |   | Decision_gate_rejected               | *)
 (*                      |   | Decision_tool_policy_selected        | *)
 (*   runtime_state      | type runtime_state = ...                 | lib/keeper/keeper_registry.ml — type runtime_state *)
 (*   measurement_bound  | observation.measurement_bound : bool     | record on observation *)
@@ -36,7 +34,6 @@
 (*   - mark_turn_measurement                   -- sets measurement_bound      *)
 (*   - set_turn_decision_stage                 -- Decision_guard_ok | _selected *)
 (*   - prepare_turn_retry_after_compaction     -- reset to Decision_guard_ok   *)
-(*   - mark_turn_gate_rejected_by_name         -- Decision_gate_rejected       *)
 (*   - mark_turn_finished                      -- reset to Decision_undecided  *)
 (*                                                                         *)
 (* Variant exhaustiveness re-export                                         *)
@@ -53,8 +50,7 @@
 (* Scope projection: this spec is the per-turn DECISION lane only --       *)
 (*   - sibling KeeperRuntimeLifecycle covers runtime_state for the same    *)
 (*     turn (selecting / trying / done / exhausted),                       *)
-(*   - sibling KeeperConditionsGovernPhase covers the divergent-conditions *)
-(*     handoff signal that runs orthogonally.                              *)
+(*   - handoff remains an orthogonal lifecycle event outside this model.   *)
 (*   The full keeper lifecycle FSM (Offline / Running / Crashed / etc.)    *)
 (*   in lib/keeper_registry/keeper_state_machine.ml is OUT OF SCOPE here.     *)
 (*                                                                         *)
@@ -64,8 +60,7 @@
 (* require updating this spec UNLESS they introduce a new entry in the    *)
 (* OCaml decision_stage type. Adding a new decision_stage CONSTRUCTOR     *)
 (* DOES require updating DecisionSet here AND adding the corresponding     *)
-(* gating condition (mirror GuardOkRequiresMeasurement / GateRejected-     *)
-(* RequiresFinalizing).                                                    *)
+(* gating condition (mirror GuardOkRequiresMeasurement).                   *)
 (***************************************************************************)
 
 VARIABLES
@@ -78,7 +73,7 @@ VARIABLES
 vars == <<turn_live, turn_phase, decision_stage, runtime_state, measurement_bound>>
 
 TurnPhaseSet == {"idle", "prompting", "routing", "executing", "compacting", "finalizing", "exhausted"}
-DecisionSet  == {"undecided", "guard_ok", "gate_rejected", "tool_policy_selected"}
+DecisionSet  == {"undecided", "guard_ok", "tool_policy_selected"}
 RuntimeSet   == {"idle", "selecting", "trying", "done", "exhausted"}
 ActionSet    == {
     "StartTurn",
@@ -86,7 +81,6 @@ ActionSet    == {
     "GuardOk",
     "SelectToolPolicy",
     "RuntimeTrying",
-    "GateRejected",
     "RetryAfterCompaction",
     "FinishTurn"
 }
@@ -95,7 +89,6 @@ InvariantSet == {
     "IdleRequiresUndecided",
     "GuardOkRequiresMeasurement",
     "DecisionBoundaryRequiresMeasurement",
-    "GateRejectedRequiresFinalizing",
     "NonIdleRuntimeRequiresDecisionBoundary",
     "SelectingRequiresPrompting"
 }
@@ -162,16 +155,6 @@ RuntimeTrying ==
     /\ runtime_state' = "trying"
     /\ UNCHANGED <<turn_live, decision_stage, measurement_bound>>
 
-\* Guards short-circuit during pre_tool_use while the live attempt is trying.
-GateRejected ==
-    /\ turn_live
-    /\ turn_phase = "executing"
-    /\ decision_stage = "tool_policy_selected"
-    /\ runtime_state = "trying"
-    /\ turn_phase' = "finalizing"
-    /\ decision_stage' = "gate_rejected"
-    /\ UNCHANGED <<turn_live, runtime_state, measurement_bound>>
-
 \* Overflow retry resets the decision lane to a fresh post-guard posture.
 RetryAfterCompaction ==
     /\ turn_live
@@ -197,7 +180,6 @@ Next ==
     \/ GuardOk
     \/ SelectToolPolicy
     \/ RuntimeTrying
-    \/ GateRejected
     \/ RetryAfterCompaction
     \/ FinishTurn
 
@@ -222,19 +204,14 @@ GuardOkRequiresMeasurement ==
         /\ runtime_state = "idle"
 
 DecisionBoundaryRequiresMeasurement ==
-    decision_stage \in {"guard_ok", "tool_policy_selected", "gate_rejected"} =>
+    decision_stage \in {"guard_ok", "tool_policy_selected"} =>
         /\ turn_live
         /\ measurement_bound
-
-GateRejectedRequiresFinalizing ==
-    decision_stage = "gate_rejected" =>
-        /\ turn_live
-        /\ turn_phase = "finalizing"
 
 NonIdleRuntimeRequiresDecisionBoundary ==
     runtime_state \in {"selecting", "trying", "done", "exhausted"} =>
         /\ turn_live
-        /\ decision_stage \in {"tool_policy_selected", "gate_rejected"}
+        /\ decision_stage = "tool_policy_selected"
 
 SelectingRequiresPrompting ==
     runtime_state = "selecting" =>
@@ -247,7 +224,6 @@ Safety ==
     /\ IdleRequiresUndecided
     /\ GuardOkRequiresMeasurement
     /\ DecisionBoundaryRequiresMeasurement
-    /\ GateRejectedRequiresFinalizing
     /\ NonIdleRuntimeRequiresDecisionBoundary
     /\ SelectingRequiresPrompting
 

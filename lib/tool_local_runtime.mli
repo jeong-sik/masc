@@ -59,7 +59,8 @@ val runtime_ollama_probe_json :
 (** Re-export of {!Tool_local_runtime_probe.runtime_ollama_probe_json}.
     All parameters are optional with defaults: [probe_runs = 2],
     [max_tokens = 16], [think_mode = Think_auto],
-    [timeout_sec = 6], [ps_timeout_sec = 2],
+    [timeout_sec = 6] (positive explicit values are preserved),
+    [ps_timeout_sec = 2],
     [generate_when_unloaded = true], [run_generate = true].  Per
     PR #20479 spirit: the tool itself (ollama [OLLAMA_LOAD_TIMEOUT])
     owns hang protection; callers do not observe these timeouts. *)
@@ -118,7 +119,7 @@ val kv_cache_assessment_json : Yojson.Safe.t list -> Yojson.Safe.t
 (** {1 MCP dispatch contract} *)
 
 val dispatch :
-  'ctx ->
+  Tool_local_runtime_core.context ->
   name:string ->
   args:Yojson.Safe.t ->
   Tool_local_runtime_core.tool_result option

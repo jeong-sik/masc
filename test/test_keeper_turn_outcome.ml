@@ -50,23 +50,12 @@ let test_of_stop_reason () =
   in
   check outcome "completed -> visible" TO.Visible_reply
     (TO.of_stop_reason Runtime_agent.Completed);
-  check outcome "budget exhausted -> checkpoint" TO.Continuation_checkpoint
-    (TO.of_stop_reason
-       (Runtime_agent.TurnBudgetExhausted { turns_used = 3; limit = 3 }));
-  check outcome "mutation boundary -> checkpoint" TO.Continuation_checkpoint
-    (TO.of_stop_reason
-       (Runtime_agent.MutationBoundaryReached
-          { turns_used = 2; tool_name = Some "masc_add_task" }));
   check outcome "chat yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.Yielded_to_chat_waiting { turns_used = 2 }));
   check outcome "durable stimulus yield -> checkpoint" TO.Continuation_checkpoint
     (TO.of_stop_reason
        (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 }));
-  check outcome "typed recovery defer -> checkpoint" TO.Continuation_checkpoint
-    (TO.of_stop_reason
-       (Runtime_agent.ToolFailureRecoveryDeferred
-          { turns_used = 2; reason = "wait"; tool_names = [ "Execute" ] }));
   check outcome "typed input required -> visible" TO.Visible_reply
     (TO.of_stop_reason
        (Runtime_agent.InputRequired { turns_used = 2; request }))
@@ -76,64 +65,24 @@ let test_of_result_surface () =
     (TO.of_result_surface ~response_text:"done" Runtime_agent.Completed);
   check outcome "completed with empty text -> no visible reply"
     TO.No_visible_reply
-    (TO.of_result_surface ~response_text:"   " Runtime_agent.Completed);
-  check outcome "budget exhausted -> checkpoint" TO.Continuation_checkpoint
-    (TO.of_result_surface ~response_text:"done"
-       (Runtime_agent.TurnBudgetExhausted { turns_used = 3; limit = 3 }))
+    (TO.of_result_surface ~response_text:"   " Runtime_agent.Completed)
 
 let test_autonomous_yield_boundary_contract () =
   let module F = Masc.Keeper_agent_run.For_testing in
-  let start_turn = 11570 in
-  let immediate_chat : Masc.Keeper_agent_run.autonomous_yield_request =
-    { reason = Masc.Keeper_agent_run.Chat_waiting
-    ; boundary = Masc.Keeper_agent_run.Yield_immediately
-    }
-  in
-  let reactive_chat : Masc.Keeper_agent_run.autonomous_yield_request =
-    { reason = Masc.Keeper_agent_run.Chat_waiting
-    ; boundary = Masc.Keeper_agent_run.Yield_after_current_turn
-    }
+  let chat : Masc.Keeper_agent_run.autonomous_yield_request =
+    { reason = Masc.Keeper_agent_run.Chat_waiting }
   in
   let durable_stimulus : Masc.Keeper_agent_run.autonomous_yield_request =
-    { reason = Masc.Keeper_agent_run.Durable_stimulus_waiting
-    ; boundary = Masc.Keeper_agent_run.Yield_after_current_turn
-    }
+    { reason = Masc.Keeper_agent_run.Durable_stimulus_waiting }
   in
-  check bool "chat may yield before first provider dispatch" true
-    (F.autonomous_yield_allowed_at_turn
-       ~start_turn
-       ~turn:start_turn
-       immediate_chat);
-  check bool "reactive chat cannot skip the leased stimulus" false
-    (F.autonomous_yield_allowed_at_turn
-       ~start_turn
-       ~turn:start_turn
-       reactive_chat);
-  check bool "durable backlog cannot skip the leased stimulus" false
-    (F.autonomous_yield_allowed_at_turn
-       ~start_turn
-       ~turn:start_turn
-       durable_stimulus);
-  check bool "durable backlog yields after one provider turn" true
-    (F.autonomous_yield_allowed_at_turn
-       ~start_turn
-       ~turn:(start_turn + 1)
-       durable_stimulus);
-  match
-    F.stop_reason_of_autonomous_yield
-      ~turn:(start_turn + 1)
-      durable_stimulus
-  with
-  | Runtime_agent.Yielded_to_durable_stimulus { turns_used } ->
-    check int "typed durable yield carries the OAS turn" (start_turn + 1)
-      turns_used
-  | Runtime_agent.Completed
-  | Runtime_agent.TurnBudgetExhausted _
-  | Runtime_agent.MutationBoundaryReached _
-  | Runtime_agent.Yielded_to_chat_waiting _
-  | Runtime_agent.InputRequired _
-  | Runtime_agent.ToolFailureRecoveryDeferred _ ->
-    fail "durable request mapped to the wrong stop reason"
+  (match F.runtime_yield_reason chat with
+   | Runtime_agent.Chat_waiting -> ()
+   | Runtime_agent.Durable_stimulus_waiting ->
+     fail "chat request mapped to the durable reason");
+  match F.runtime_yield_reason durable_stimulus with
+  | Runtime_agent.Durable_stimulus_waiting -> ()
+  | Runtime_agent.Chat_waiting ->
+    fail "durable request mapped to the chat reason"
 
 let payload fields = Some (`Assoc fields)
 
@@ -255,7 +204,23 @@ let test_queued_delivery_requires_exact_turn_ref () =
   | Stream.Failed _ | Stream.Deferred _ ->
     fail "valid turn_ref must produce Delivered"
 
-let body fields = Yojson.Safe.to_string (`Assoc fields)
+let test_terminal_commit_error_cannot_become_delivery_success () =
+  let persist_error = "terminal transcript fsync failed" in
+  let check_error label queued_turn =
+    match
+      Stream.For_testing.committed_delivery_outcome
+        ~queued_turn
+        ~turn_ref:None
+        (Error persist_error)
+    with
+    | Error observed -> check string label persist_error observed
+    | Ok None -> fail (label ^ " was downgraded to direct delivery success")
+    | Ok (Some _) -> fail (label ^ " was downgraded to queued delivery success")
+  in
+  check_error "direct commit preserves typed Error" false;
+  check_error "queued commit preserves typed Error" true
+
+let body fields = `Assoc fields
 
 let test_direct_reply_visible_text () =
   check (option string) "declared checkpoint -> None" None
@@ -310,6 +275,8 @@ let () =
             test_turn_ref_payload_decode;
           test_case "queued delivery requires exact turn_ref" `Quick
             test_queued_delivery_requires_exact_turn_ref;
+          test_case "terminal commit error cannot become delivery success" `Quick
+            test_terminal_commit_error_cannot_become_delivery_success;
         ] );
       ( "direct_reply",
         [

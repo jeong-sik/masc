@@ -26,12 +26,7 @@ val version_conflict_re : Re.re
 val read_meta_file_path :
   string -> (Keeper_meta_contract.keeper_meta option, string) result
 
-(** Sidecar stem suffixes (without the trailing [.json]). Files
-    matching [<name><suffix>.json] are filtered out of the keeper
-    discovery scan (e.g. [<name>.dataset.json]). *)
-val keeper_sidecar_stem_suffixes : string list
-
-(** [true] iff [f] is a [.json] file whose stem is not a sidecar. *)
+(** [true] when [f] has an exact canonical Keeper-metadata interpretation. *)
 val is_keeper_meta_file : string -> bool
 
 (** List keeper names with persisted JSON in [.masc/keepers/].
@@ -57,12 +52,6 @@ val effective_autoboot_enabled :
     (issue #8377). *)
 val keepalive_keeper_names : Workspace.config -> string list
 
-(** Names of paused keepers whose durable meta should still be inspected
-    during supervisor reconciliation. These keepers are not keepalive
-    execution candidates, but a previous runtime may have left them paused
-    while still owning an active backlog task. *)
-val paused_reconcile_keeper_names : Workspace.config -> string list
-
 (** Names of keepers expected to persist across sessions. Mirrors
     [keepalive_keeper_names] for readers caring about durability
     rather than the keepalive fiber. *)
@@ -82,8 +71,7 @@ val read_meta :
 
 (** Read persisted keeper meta and overlay TOML/persona defaults before
     returning it. Status/list/operator surfaces should use this for
-    TOML-owned fields such as [sandbox_profile], [network_mode], and
-    [tool_access]. *)
+    TOML-owned fields such as [sandbox_profile] and [network_mode]. *)
 val read_effective_meta_resolved :
   Workspace.config ->
   string ->
@@ -209,8 +197,8 @@ val is_version_conflict_error : string -> bool
     dormant keepers never save). Deletion is destructive, so the drop
     set is an explicit in-code list ([retired_keeper_meta_key_names]),
     not a set derived from the codec: parser-consumed keys the
-    serializer never emits ([autoboot_enabled], [compaction_mode],
-    [keeper_name], ...) must survive, and deriving the complement was
+    serializer never emits ([autoboot_enabled], [keeper_name], ...)
+    must survive, and deriving the complement was
     twice shown to misclassify them. Forgetting to extend the list is
     fail-safe — the unknown-keys warning keeps firing until the key is
     added. Retired keys are filtered out of the raw JSON in place
@@ -245,3 +233,56 @@ val write_meta_with_merge_for_lifecycle :
   Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
   (unit, string) result
+
+(** [persist_compaction_decision config ~keeper_name ~decision] stamps [decision]
+    onto the durable on-disk [compaction_rt.last_decision], the field the
+    status and dashboard read paths surface as [last_compaction_decision].
+
+    Used by the reactive provider-overflow failure path, whose registry stamp is
+    in-memory only and whose turn-failure meta flush persists a pre-overflow meta
+    without the decision. Reads the current on-disk meta, stamps only
+    [last_decision], and writes back via {!write_meta_with_merge} so a CAS race
+    with a concurrent heartbeat/turn write re-applies the stamp. [`No_durable_meta]
+    reports that no on-disk meta exists to stamp (non-fatal); [Error] carries a
+    read/write failure. *)
+val persist_compaction_decision :
+  Workspace.config ->
+  keeper_name:string ->
+  decision:Keeper_meta_contract.compaction_runtime_decision ->
+  ([ `Persisted | `No_durable_meta ], string) result
+
+val persist_compaction_outcome :
+  Workspace.config ->
+  keeper_name:string ->
+  outcome:
+    [ `Committed | `Overflow_episode_committed | `Failed | `Recovered ] ->
+  ([ `Persisted | `No_durable_meta ], string) result
+(** Advance the compaction outcome counters on [compaction_rt] using the same
+    read/stamp/merge shape as {!persist_compaction_decision}.
+
+    [`Overflow_episode_committed] (an in-lane reactive commit) increments
+    [count] AND the streak — committed savings under an incompressible floor
+    must still count toward the ceiling (#25538). [`Recovered] (a turn
+    completed without provider overflow) resets the streak; callers skip the
+    write when the streak is already 0.
+
+    [`Committed] increments [count] and resets [consecutive_failures] to 0;
+    [`Failed] increments [consecutive_failures]. The streak is what
+    {!settlement_of_cycle_outcome} reads to escalate instead of requeuing a
+    failing compaction (RFC-0351 S0, #25461); [count] had no writer before this
+    despite being serialized and rendered. *)
+
+val persist_transcript_quarantine_outcome :
+  Workspace.config ->
+  keeper_name:string ->
+  outcome:[ `Retried | `Recovered ] ->
+  ([ `Persisted | `No_durable_meta ], string) result
+(** Advance the transcript-quarantine retry streak on
+    [agent_runtime_state.transcript_quarantine_consecutive_retries] using the
+    same read/stamp/merge shape as {!persist_compaction_outcome}.
+
+    [`Retried] increments the streak — including the escalated terminal
+    attempt, so the persisted meta shows the streak at the ceiling.
+    [`Recovered] (a completed turn) resets it; callers skip the write when the
+    streak is already 0.  The streak is what the heartbeat settlement reads to
+    escalate instead of requeuing a poisoned transcript quarantine (#25296). *)

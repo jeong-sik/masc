@@ -70,7 +70,7 @@ let run_all () =
   Log.Server.info "[Shutdown] registered hooks completed (%.2fs)" registered_elapsed_s;
   (* Clear transient A2A state to free memory *)
   (* Clear session identity caches *)
-  Client_registry_eio.clear_session_caches ();
+  Client_registry_eio.clear_all ();
   (* Best-effort cleanup of transient files under <base>/.masc/tmp/.
      Durable JSONL state and lock files outside of the tmp/ directory are
      never touched. Dir missing or symlinked → noop. Per-file errors are

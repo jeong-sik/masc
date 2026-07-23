@@ -3,7 +3,10 @@ open Masc
 module Types = Masc_domain
 
 let () = Mirage_crypto_rng_unix.use_default ()
-let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
+let () =
+  Server_startup_state.mark_state_ready
+    ~backend:Server_startup_state.Filesystem_backend
+  |> Result.get_ok
 
 let temp_dir () =
   let dir = Filename.temp_file "test_operator_control_" "" in
@@ -15,8 +18,25 @@ let temp_dir () =
     Call inside Eio_main.run before creating Workspace config. *)
 let ensure_fs env =
   Masc_test_deps.init_eio_clock env;
-  if not (Fs_compat.has_fs ()) then
-    Fs_compat.set_fs (Eio.Stdenv.fs env)
+  (* An Eio filesystem capability is owned by the current scheduler. This test
+     executable creates a fresh [Eio_main.run] per case, so retaining the first
+     capability would leak a dead scheduler resource into later cases. *)
+  Fs_compat.set_fs (Eio.Stdenv.fs env)
+
+let publication_recovery_registry env sw config =
+  let registry_root =
+    Eio.Path.(Eio.Stdenv.fs env / Workspace.masc_root_dir config)
+  in
+  match
+    Fs_compat.Publication_recovery.open_registry
+      ~sw
+      ~fs:(Eio.Stdenv.fs env)
+      ~registry_root
+  with
+  | Ok registry -> registry
+  | Error error ->
+    Alcotest.fail
+      (Fs_compat.Publication_recovery.registry_error_to_string error)
 
 let cleanup_dir dir =
   let rec rm path =
@@ -37,6 +57,10 @@ let result_field json = Yojson.Safe.Util.member "result" json
 
 let operator_ctx ?mcp_session_id env sw config agent_name :
     _ Operator_control.context =
+  let publication_recovery_provider =
+    Masc_test_deps.publication_recovery_provider
+      (publication_recovery_registry env sw config)
+  in
   {
     config;
     agent_name;
@@ -44,6 +68,17 @@ let operator_ctx ?mcp_session_id env sw config agent_name :
     clock = Eio.Stdenv.clock env;
     proc_mgr = Some (Eio.Stdenv.process_mgr env);
     net = Some (Eio.Stdenv.net env);
+    delegated_dispatch =
+      Some
+        (Masc.Keeper_tool_boundary.delegated_dispatch
+           ~config
+           ~agent_name
+           ~sw
+           ~clock:(Eio.Stdenv.clock env)
+           ~proc_mgr:(Some (Eio.Stdenv.process_mgr env))
+           ~net:(Some (Eio.Stdenv.net env))
+           ~publication_recovery_provider
+           ());
     mcp_session_id;
   }
 

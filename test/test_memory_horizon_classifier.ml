@@ -68,22 +68,33 @@ let test_typed_policy () =
     "long-term cap"
     4
     (Policy.cap_for_kind (Policy.kind_caps ()) Policy.Long_term);
+  (* RFC-0351 L1: a kind names its store, not its writability. [Long_term] is
+     the durable claim recall reads back on later turns; the rest are working
+     notes for the run in progress. *)
   check bool
-    "long-term is not writable"
-    false
-    (Policy.memory_kind_is_writable Policy.Long_term);
+    "long-term goes to the durable fact store"
+    true
+    (match Policy.memory_write_destination Policy.Long_term with
+     | Policy.Durable_fact_store -> true
+     | Policy.Turn_scoped_bank -> false);
+  List.iter
+    (fun kind ->
+      check bool
+        (Printf.sprintf "%s is a turn-scoped note" (Policy.memory_kind_to_wire kind))
+        true
+        (match Policy.memory_write_destination kind with
+         | Policy.Turn_scoped_bank -> true
+         | Policy.Durable_fact_store -> false))
+    [ Policy.Decision; Policy.Goal; Policy.Progress; Policy.Open_question ];
   check (list string)
-    "writable wire kinds"
+    "bank wire kinds"
     [ "decision"; "goal"; "progress"; "open_question" ]
-    Policy.writable_memory_kind_strings;
-  check (list string)
-    "search schema mirror"
-    Policy.valid_memory_kind_strings
-    Masc.Tool_shard.memory_kind_enum_strings;
+    Policy.bank_writable_memory_kind_strings;
+  (* The write tool now offers every kind: each one has a store. *)
   check (list string)
     "write schema mirror"
-    Policy.writable_memory_kind_strings
-    Masc.Tool_shard.writable_memory_kind_enum_strings
+    Policy.valid_memory_kind_strings
+    Masc.Tool_shard.memory_kind_enum_strings
 ;;
 
 let test_json_strict_classifier () =

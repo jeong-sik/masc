@@ -123,8 +123,7 @@ let test_drops_retired_keys_and_preserves_canonical_fields () =
 (* Regressions from verify workflows wf_9a9ec740 / wf_ccff1ece: "unknown
    to the serializer" is not "retired". The parser still consumes keys
    the serializer never emits — TOML-owned config (autoboot_enabled),
-   the fail-closed persisted compaction_mode override, and the identity
-   key keeper_name (which wins over name). Only the explicitly listed
+   and the identity key keeper_name (which wins over name). Only the explicitly listed
    continuity keys may be dropped; everything else survives even though
    the unknown-keys warning classifies it as unknown. *)
 let test_parser_consumed_keys_survive_the_pass () =
@@ -134,7 +133,6 @@ let test_parser_consumed_keys_survive_the_pass () =
     ~extra:
       [
         ("autoboot_enabled", `Bool false);
-        ("compaction_mode", `String "llm");
         ("keeper_name", `String "dormant");
       ];
   Keeper_meta_store.migrate_retired_keeper_meta_keys config;
@@ -154,7 +152,6 @@ let test_parser_consumed_keys_survive_the_pass () =
            "%s destroyed by retired-key migration — parser-consumed value lost" key)
   in
   expect_preserved "autoboot_enabled" (`Bool false);
-  expect_preserved "compaction_mode" (`String "llm");
   expect_preserved "keeper_name" (`String "dormant")
 
 let test_clean_files_are_not_rewritten () =

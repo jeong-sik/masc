@@ -150,6 +150,28 @@ let test_keeper_post_route_classifies_catchup_judge () =
     (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix path
        Server_dashboard_http_keeper_api.keeper_suffix_catchup_judge)
 
+let test_keeper_paused_work_route_is_admin_exact () =
+  let path = "/api/v1/keepers/idealist/paused-work" in
+  check bool
+    "paused-work POST route kind"
+    true
+    (Server_dashboard_http_keeper_api.classify_keeper_post_route path
+     = Server_dashboard_http_keeper_api.Keeper_post_paused_work);
+  check bool
+    "paused-work GET route kind"
+    true
+    (Server_dashboard_http_keeper_api.is_keeper_paused_work_get_path path);
+  check string
+    "paused-work keeper name"
+    "idealist"
+    (Server_dashboard_http_keeper_api.extract_keeper_name_for_suffix
+       path
+       Server_dashboard_http_keeper_api.keeper_suffix_paused_work);
+  check bool
+    "paused-work route rejects trailing segment"
+    false
+    (Server_dashboard_http_keeper_api.is_keeper_paused_work_get_path (path ^ "/extra"))
+
 let test_keeper_chat_receipt_route_and_json () =
   let receipt_id =
     match
@@ -186,8 +208,7 @@ let test_keeper_chat_receipt_route_and_json () =
     (json |> member "state" |> member "kind" |> to_string);
   check string "receipt JSON revision" "7"
     (match json |> member "revision" with
-     | `Int revision -> string_of_int revision
-     | `Intlit revision -> revision
+     | `String revision -> revision
      | _ -> "invalid");
   check string "receipt JSON failure kind" "delivery_failed"
     (json |> member "state" |> member "failure_kind" |> to_string);
@@ -195,6 +216,20 @@ let test_keeper_chat_receipt_route_and_json () =
     (contains_substring
        (json |> member "state" |> member "detail" |> to_string)
        "sk-proj-abcdefghijklmnopqrstuvwxyz")
+
+let test_keeper_chat_recovery_route_is_exact () =
+  let receipt_id = "chatq_00000000-0000-4000-8000-000000000123" in
+  let path =
+    "/api/v1/keepers/idealist/chat/receipts/" ^ receipt_id ^ "/recovery"
+  in
+  (match Server_dashboard_http_keeper_api.classify_keeper_post_route path with
+   | Server_dashboard_http_keeper_api.Keeper_post_chat_recovery route ->
+       check string "recovery route keeper" "idealist" route.keeper_name;
+       check string "recovery route receipt" receipt_id route.receipt_id
+   | _ -> fail "exact recovery route was not classified");
+  check bool "recovery route rejects extra segments" true
+    (Server_dashboard_http_keeper_api.classify_keeper_post_route (path ^ "/bulk")
+     = Server_dashboard_http_keeper_api.Keeper_post_unknown)
 
 let with_test_env f =
   let dir = test_dir () in
@@ -600,7 +635,7 @@ let test_dashboard_query_cache_key_encodes_delimiter_values () =
 let test_operator_snapshot_default_route_exposes_provenance () =
   with_test_env @@ fun ~env ~sw ~config ->
   let state =
-    Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:config.base_path ()
+    Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
   in
   let seed =
     `Assoc
@@ -646,7 +681,7 @@ let test_operator_snapshot_default_route_exposes_provenance () =
 let test_operator_digest_default_route_exposes_provenance () =
   with_test_env @@ fun ~env ~sw ~config ->
   let state =
-    Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:config.base_path ()
+    Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
   in
   let seed =
     `Assoc
@@ -777,6 +812,62 @@ let test_dashboard_proof_route_registered_in_http_routers () =
   check bool "HTTP/2 dashboard proof route registered" true
     (contains_substring h2 "\"/api/v1/dashboard/proof\"")
 
+let test_gate_mode_change_json_separates_saved_mode_from_recovery () =
+  let open Yojson.Safe.Util in
+  let change : Masc.Keeper_gate_mode.change =
+    { previous = Some Masc.Keeper_gate_mode.Manual
+    ; current = Masc.Keeper_gate_mode.Auto_judge
+    ; actor = "operator"
+    ; changed_at = "2026-07-16T00:00:00Z"
+    ; replaced_read_error = None
+    }
+  in
+  let json recovery =
+    Server_routes_http_routes_dashboard.For_testing.gate_mode_change_json
+      change
+      recovery
+  in
+  let completed =
+    json
+      (Server_routes_http_routes_dashboard.For_testing.Recovery_completed
+         { Masc.Keeper_gate.reopened_ids = [ "approval-1"; "approval-2" ]
+         ; started_ids = [ "approval-1" ]
+         ; queued = 1
+         })
+  in
+  check string "completed status" "completed"
+    (completed |> member "recovery_status" |> to_string);
+  check bool "completed error is null" true
+    (completed |> member "recovery_error" = `Null);
+  check int "completed reopened" 2 (completed |> member "reopened" |> to_int);
+  check int "completed started" 1 (completed |> member "started" |> to_int);
+  check int "completed queued" 1 (completed |> member "queued" |> to_int);
+  let failed =
+    json
+      (Server_routes_http_routes_dashboard.For_testing.Recovery_failed
+         "judge worker unavailable")
+  in
+  check string "failed status" "failed"
+    (failed |> member "recovery_status" |> to_string);
+  check string "failed detail" "judge worker unavailable"
+    (failed |> member "recovery_error" |> to_string);
+  check int "failed reopened" 0 (failed |> member "reopened" |> to_int);
+  check int "failed started" 0 (failed |> member "started" |> to_int);
+  check int "failed queued" 0 (failed |> member "queued" |> to_int);
+  let not_requested =
+    json Server_routes_http_routes_dashboard.For_testing.Recovery_not_requested
+  in
+  check string "not requested status" "not_requested"
+    (not_requested |> member "recovery_status" |> to_string);
+  check bool "not requested error is null" true
+    (not_requested |> member "recovery_error" = `Null);
+  check int "not requested reopened" 0
+    (not_requested |> member "reopened" |> to_int);
+  check int "not requested started" 0
+    (not_requested |> member "started" |> to_int);
+  check int "not requested queued" 0
+    (not_requested |> member "queued" |> to_int)
+
 let test_dashboard_ide_snapshot_json_surfaces_legacy_partition_metadata () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   Fun.protect
@@ -787,6 +878,44 @@ let test_dashboard_ide_snapshot_json_surfaces_legacy_partition_metadata () =
     ~finally:Masc.Client_registry_eio.reset_for_testing
     (fun () ->
       Masc.Client_registry_eio.reset_for_testing ();
+      ignore (Workspace.init config ~agent_name:None);
+      let now = Masc_domain.now_iso () in
+      let meta : Masc_domain.agent_meta =
+        { session_id = "dashboard-presence:runtime-busy"
+        ; agent_type = "test"
+        ; pid = None
+        ; hostname = None
+        ; tty = None
+        ; parent_task = None
+        ; keeper_name = Some "busy-keeper"
+        ; keeper_id = None
+        }
+      in
+      let agent : Masc_domain.agent =
+        { id = None
+        ; name = "runtime-busy"
+        ; agent_type = "test"
+        ; status = Masc_domain.Busy
+        ; capabilities = []
+        ; current_task = None
+        ; session_bound_at = now
+        ; last_seen = "2020-01-01T00:00:00Z"
+        ; meta = Some meta
+        }
+      in
+      let agent_path =
+        Filename.concat
+          (Workspace.agents_dir config)
+          (Workspace.safe_filename agent.name ^ ".json")
+      in
+      (match
+         Workspace.write_json_result
+           config
+           agent_path
+           (Masc_domain.agent_to_yojson agent)
+       with
+       | Ok () -> ()
+       | Error message -> failf "write dashboard presence agent failed: %s" message);
       let json = Server_dashboard_http.dashboard_ide_snapshot_json ~config in
       let partition = Ide_paths.Legacy_default in
       let open Yojson.Safe.Util in
@@ -802,12 +931,20 @@ let test_dashboard_ide_snapshot_json_surfaces_legacy_partition_metadata () =
         (json |> member "annotations_count" |> to_int);
       check int "regions count metadata" 0
         (json |> member "regions_count" |> to_int);
-      check int "active keepers count metadata" 0
+      check int "active keepers count metadata" 1
         (json |> member "active_keepers_count" |> to_int);
       check int "events nested count remains" 0
         (json |> member "events" |> member "count" |> to_int);
-      check int "presence nested count remains" 0
-        (json |> member "presence" |> member "count" |> to_int))
+      check int "presence nested count remains" 1
+        (json |> member "presence" |> member "count" |> to_int);
+      check string "presence uses canonical keeper identity" "busy-keeper"
+        (json
+         |> member "presence"
+         |> member "active_keepers"
+         |> to_list
+         |> List.hd
+         |> member "keeper_id"
+         |> to_string))
 
 let test_dashboard_planning_http_json_keeps_utf8_valid_after_truncation () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
@@ -931,6 +1068,36 @@ let test_dashboard_shell_auth_json_rejects_stale_token_actor_hint () =
   check bool "keeper message blocked" false
     (auth |> member "can_keeper_msg" |> to_bool)
 
+let test_dashboard_shell_auth_json_rejects_malformed_credential () =
+  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
+  let cfg =
+    { Masc_domain.default_auth_config with enabled = true; require_token = false }
+  in
+  Auth.save_auth_config config.base_path cfg;
+  let json =
+    Server_dashboard_http_core.dashboard_shell_http_json
+      ~request:
+        (request_with_headers "/api/v1/dashboard/shell"
+           [ ("authorization", "Basic malformed")
+           ; ("x-masc-agent", "forged-dashboard")
+           ])
+      config
+  in
+  let open Yojson.Safe.Util in
+  let auth = json |> member "auth" in
+  check bool "credential presence retained" true
+    (auth |> member "token_present" |> to_bool);
+  check bool "malformed credential invalid" false
+    (auth |> member "token_valid" |> to_bool);
+  check bool "effective actor unavailable" true
+    (match auth |> member "effective_agent" with `Null -> true | _ -> false);
+  check bool "effective role unavailable" true
+    (match auth |> member "effective_role" with `Null -> true | _ -> false);
+  check string "malformed credential code surfaced" "missing_token"
+    (auth |> member "auth_error_code" |> to_string);
+  check bool "keeper message blocked" false
+    (auth |> member "can_keeper_msg" |> to_bool)
+
 let test_dashboard_shell_snapshot_selector_injects_auth () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   Dashboard_snapshot.reset_for_test ();
@@ -987,7 +1154,7 @@ let test_execution_actor_for_request_canonicalizes_token_owner () =
 let test_dashboard_execution_force_refresh_bypasses_default_cache () =
   with_test_env @@ fun ~env ~sw ~config ->
   let state =
-    Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:config.base_path ()
+    Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
   in
   let seed =
     `Assoc
@@ -1023,7 +1190,7 @@ let test_dashboard_execution_force_refresh_bypasses_default_cache () =
 let test_dashboard_execution_trust_default_route_uses_cached_surface () =
   with_test_env @@ fun ~env ~sw ~config ->
   let state =
-    Lib.Mcp_server_eio.create_state ~test_mode:true ~base_path:config.base_path ()
+    Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
   in
   let seed =
     `Assoc
@@ -1582,7 +1749,7 @@ let test_telemetry_summary_snapshot_wire_falls_back_when_empty () =
    [test_dashboard_namespace_truth.ml] integration coverage. *)
 
 let test_project_snapshot_wire_returns_snapshot_when_populated () =
-  with_test_env @@ fun ~env ~sw ~config:_ ->
+  with_test_env @@ fun ~env ~sw ~config ->
   Dashboard_snapshot.reset_for_test ();
   let marker =
     `Assoc [ "namespace_truth_marker", `String "from-snapshot" ]
@@ -1592,7 +1759,9 @@ let test_project_snapshot_wire_returns_snapshot_when_populated () =
        ~shell:`Null ~tools:`Null
        ~namespace_truth:marker ~telemetry_summary:`Null ());
   let clock = Eio.Stdenv.clock env in
-  let state = Lib.Mcp_server.create_state ~base_path:"/tmp/rfc-0138-step3" in
+  let state =
+    Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path
+  in
   let req = request "/api/v1/dashboard/project-snapshot" in
   let timing = Server_timing.create () in
   let json =
@@ -1618,7 +1787,7 @@ let assoc_has key = function
 
 let test_dashboard_bootstrap_omits_eager_goal_tree () =
   with_test_env @@ fun ~env ~sw ~config ->
-  let state = Lib.Mcp_server.create_state ~base_path:config.base_path in
+  let state = Lib.Mcp_server.For_testing.create_state ~base_path:config.base_path in
   let clock = Eio.Stdenv.clock env in
   let req = request "/api/v1/dashboard/bootstrap" in
   let json = Server_dashboard_http.dashboard_bootstrap_http_json ~state ~sw ~clock req in
@@ -1629,8 +1798,6 @@ let test_dashboard_bootstrap_omits_eager_goal_tree () =
     (assoc_has "planning" json);
   Alcotest.(check bool) "bootstrap includes namespace truth" true
     (assoc_has "namespace_truth" json);
-  Alcotest.(check bool) "bootstrap includes goal-loop status" true
-    (assoc_has "goal_loop_status" json);
   Alcotest.(check bool) "bootstrap omits eager goal tree" false
     (assoc_has "goals" json)
 
@@ -1728,12 +1895,9 @@ let test_lifecycle_event_display_values () =
     [ ("started", true, "running", "idle", false);
       ("restarted", true, "running", "idle", false);
       ("reconciled", true, "running", "idle", false);
-      ("self_preservation", true, "running", "idle", false);
-      ("auto_resumed", true, "running", "idle", false);
       ("running", true, "running", "idle", false);
       ("resumed", true, "running", "idle", false);
       ("paused", true, "paused", "paused", true);
-      ("paused_pruned", false, "stopped", "offline", true);
       ("purged", false, "stopped", "offline", false);
       ("admission_denied", false, "offline", "offline", false);
       ("dead_cleaned", false, "dead", "offline", false);
@@ -1763,6 +1927,70 @@ let test_lifecycle_event_display_values () =
         (Some paused)
         (Server_dashboard_http_execution_surfaces.paused_of_lifecycle_event name))
     cases
+
+let test_composite_blocked_uses_terminal_contract_not_observational_metadata () =
+  let execution ~terminal_reason_code ~operator_disposition_reason =
+    `Assoc
+      [ "terminal_reason_code", `String terminal_reason_code
+      ; "operator_disposition", `String "pass"
+      ; "operator_disposition_reason", `String operator_disposition_reason
+      ; "error", `Null
+      ]
+  in
+  let blocked = Server_dashboard_http_composite_claims.composite_execution_blocked in
+  check bool
+    "observation metadata does not block a successful execution"
+    false
+    (blocked
+       (execution
+          ~terminal_reason_code:"success"
+          ~operator_disposition_reason:"trace_observation_present"));
+  check bool
+    "unknown terminal wire follows the generic failure path"
+    true
+    (blocked
+       (execution
+          ~terminal_reason_code:"opaque_terminal_failure"
+          ~operator_disposition_reason:"success"))
+
+(* Context-window shrink guard (#25062/#25268): reducing max_context_override
+   must be detected so the config POST can require an explicit
+   confirm_context_shrink, instead of silently applying a window smaller than the
+   live context and triggering a reactive Provider_overflow on the next turn. *)
+module Keeper_config_post = Server_dashboard_http_keeper_api_post
+
+let shrink_base_meta () =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ ("name", `String "shrink-fixture"); ("trace_id", `String "shrink-t") ])
+  with
+  | Ok m -> m
+  | Error e -> Alcotest.fail ("shrink meta fixture: " ^ e)
+
+let with_max_override meta o =
+  { meta with Masc.Keeper_meta_contract.max_context_override = o }
+
+let shrink_result = Alcotest.(option (pair string int))
+
+let test_context_shrink_detection () =
+  let base = shrink_base_meta () in
+  let shrink meta fields = Keeper_config_post.context_shrink_of_patch ~meta fields in
+  check shrink_result "cap introduced where there was none is a shrink"
+    (Some ("unset (full model window)", 1000))
+    (shrink (with_max_override base None) [ ("max_context_override", `Int 1000) ]);
+  check shrink_result "lowering an existing cap is a shrink"
+    (Some ("2000", 1000))
+    (shrink (with_max_override base (Some 2000)) [ ("max_context_override", `Int 1000) ]);
+  check shrink_result "raising the cap is not a shrink"
+    None
+    (shrink (with_max_override base (Some 1000)) [ ("max_context_override", `Int 2000) ]);
+  check shrink_result "removing the cap (Null) is not a shrink"
+    None
+    (shrink (with_max_override base (Some 1000)) [ ("max_context_override", `Null) ]);
+  check shrink_result "a patch without the field is not a shrink"
+    None
+    (shrink (with_max_override base (Some 1000)) [ ("name", `String "shrink-fixture") ])
+;;
 
 let () =
   run "dashboard_http_core"
@@ -1805,6 +2033,8 @@ let () =
             test_dashboard_proof_http_json_surfaces_verification_index;
           test_case "proof route registered in HTTP routers" `Quick
             test_dashboard_proof_route_registered_in_http_routers;
+          test_case "Gate mode save reports recovery independently" `Quick
+            test_gate_mode_change_json_separates_saved_mode_from_recovery;
           test_case "IDE snapshot exposes legacy partition metadata" `Quick
             test_dashboard_ide_snapshot_json_surfaces_legacy_partition_metadata;
           test_case "bootstrap omits eager goal tree" `Quick
@@ -1817,6 +2047,8 @@ let () =
             test_dashboard_shell_auth_json_reports_missing_token;
           test_case "shell auth rejects stale token actor hint" `Quick
             test_dashboard_shell_auth_json_rejects_stale_token_actor_hint;
+          test_case "shell auth rejects malformed credential" `Quick
+            test_dashboard_shell_auth_json_rejects_malformed_credential;
           test_case "shell snapshot selector injects auth" `Quick
             test_dashboard_shell_snapshot_selector_injects_auth;
           test_case "execution actor canonicalizes token owner" `Quick
@@ -1861,8 +2093,14 @@ let () =
             test_state_diagram_runtime_projection_missing_meta_stays_empty;
           test_case "keeper catch-up judge route is classified" `Quick
             test_keeper_post_route_classifies_catchup_judge;
+          test_case "keeper paused-work route is exact" `Quick
+            test_keeper_paused_work_route_is_admin_exact;
           test_case "keeper chat receipt route is typed" `Quick
             test_keeper_chat_receipt_route_and_json;
+          test_case "keeper chat recovery route is exact" `Quick
+            test_keeper_chat_recovery_route_is_exact;
+          test_case "observation metadata does not override terminal contract" `Quick
+            test_composite_blocked_uses_terminal_contract_not_observational_metadata;
         ] );
       ( "lifecycle event classification (#22071)",
         [ test_case "event_of_string round-trips to_string" `Quick
@@ -1871,5 +2109,9 @@ let () =
             test_lifecycle_event_cache_patcher_coverage;
           test_case "cache patchers pin byte-identical values" `Quick
             test_lifecycle_event_display_values;
+        ] );
+      ( "context-window shrink guard (#25062/#25268)",
+        [ test_case "shrink of max_context_override is detected" `Quick
+            test_context_shrink_detection;
         ] );
     ]

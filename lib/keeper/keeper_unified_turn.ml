@@ -12,7 +12,6 @@ open Keeper_meta_store
 open Keeper_types_profile
 open Keeper_context_runtime
 include Keeper_turn_helpers
-include Keeper_turn_liveness
 include Keeper_turn_runtime_budget
 include Keeper_unified_turn_types
 
@@ -20,9 +19,34 @@ include Keeper_unified_turn_types
 
 include Keeper_unified_turn_phase_plan
 
+type in_lane_compaction =
+  | Compaction_committed
+  | Compaction_attempt_failed of { reason : string }
+
+type exact_output_terminal_reason =
+  | Execution_may_have_dispatched
+  | Domain_invalid_output
+
 type source_lease_disposition =
   | Follow_failure_route
+  | Follow_failure_route_after_no_compaction of
+      { reason : Keeper_event_queue_state.no_compaction_reason }
+  | Escalate_after_exact_output_terminal of exact_output_terminal_reason
+  | Requeue_after_context_compaction of in_lane_compaction
+  | Requeue_after_transcript_quarantine
   | Acknowledge_after_in_turn_handling
+
+let source_lease_disposition_after_no_compaction = function
+  | Keeper_event_queue_state.Execution_may_have_dispatched ->
+    Escalate_after_exact_output_terminal Execution_may_have_dispatched
+  | Keeper_event_queue_state.Domain_invalid_output ->
+    Escalate_after_exact_output_terminal Domain_invalid_output
+  | ( Keeper_event_queue_state.No_eligible_history
+    | Keeper_event_queue_state.Invalid_structural_source
+    | Keeper_event_queue_state.Structurally_unchanged
+    | Keeper_event_queue_state.Checkpoint_not_reduced ) as reason ->
+    Follow_failure_route_after_no_compaction { reason }
+;;
 
 type turn_failure =
   { error : Agent_sdk.Error.sdk_error
@@ -31,14 +55,367 @@ type turn_failure =
   ; source_lease_disposition : source_lease_disposition
   }
 
+let is_incomplete_tool_transcript_error error =
+  match Keeper_internal_error.classify_masc_internal_error error with
+  | Some (Keeper_internal_error.Incomplete_tool_transcript _) -> true
+  | Some
+      ( Keeper_internal_error.Runtime_exhausted _
+      | Keeper_internal_error.Capacity_backpressure _
+      | Keeper_internal_error.Resumable_cli_session _
+      | Keeper_internal_error.Accept_rejected _
+      | Keeper_internal_error.Internal_unhandled_exception _
+      | Keeper_internal_error.Internal_bridge_exception _
+      | Keeper_internal_error.Internal_contract_rejected _
+      | Keeper_internal_error.Receipt_persistence_failed _ )
+  | None ->
+    false
+;;
+
 type turn_success =
   | Turn_completed of keeper_meta
   | Turn_cancelled of keeper_meta
   | Turn_skipped of keeper_meta
 
+let user_message_with_hitl_resolution ~base_path ~user_message = function
+  | Some
+      { Keeper_event_queue.approval_id
+      ; decision = Hitl_approved
+      ; _
+      } ->
+    (match
+       Keeper_approval_queue.approved_resolution_request
+         ~base_path
+         ~id:approval_id
+     with
+     | Ok (Some request) ->
+       String.concat
+         "\n"
+         [ user_message
+         ; ""
+         ; "Gate resolution delivered:"
+         ; Printf.sprintf "- approval_id: %s" approval_id
+         ; Printf.sprintf "- operation: %s" request.tool_name
+         ; "- exact input:"
+         ; "```json"
+         ; Yojson.Safe.pretty_to_string request.input
+         ; "```"
+         ; "The one-shot authorization belongs to this exact operation and input. Other external effects follow the ordinary Gate independently."
+         ]
+     | Ok None ->
+       Log.Keeper.info
+         "approved Gate request already consumed approval=%s"
+         approval_id;
+       String.concat
+         "\n"
+         [ user_message
+         ; ""
+         ; "Gate resolution delivered:"
+         ; Printf.sprintf "- approval_id: %s" approval_id
+         ; "- state: authorization already consumed"
+         ; "This replay grants no authorization. Continue independent work; any new external effect follows the ordinary Gate."
+         ]
+     | Error error ->
+       Log.Keeper.error
+         "approved Gate request unavailable approval=%s: %s"
+         approval_id
+         (Keeper_approval_queue.grant_error_to_string error);
+       String.concat
+         "\n"
+         [ user_message
+         ; ""
+         ; Printf.sprintf
+             "Gate resolution %s could not be read from its durable journal. Continue independent work; this event will be retried."
+             approval_id
+         ])
+  | Some
+      { Keeper_event_queue.approval_id
+      ; decision = Hitl_rejected rationale
+      ; _
+      } ->
+    String.concat
+      "\n"
+      [ user_message
+      ; ""
+      ; "Gate resolution delivered:"
+      ; Printf.sprintf "- approval_id: %s" approval_id
+      ; "- decision: rejected"
+      ; Printf.sprintf "- rationale: %s" rationale
+      ; "This resolution grants no authorization. Continue independent work or revise the request using the rationale."
+      ]
+  | Some
+      { Keeper_event_queue.approval_id
+      ; decision = Hitl_edited edited_input
+      ; _
+      } ->
+    String.concat
+      "\n"
+      [ user_message
+      ; ""
+      ; "Gate resolution delivered:"
+      ; Printf.sprintf "- approval_id: %s" approval_id
+      ; "- decision: edited"
+      ; "- edited input:"
+      ; "```json"
+      ; Yojson.Safe.pretty_to_string edited_input
+      ; "```"
+      ; "This edit grants no authorization. Treat the edited input as operator guidance; any external effect follows the ordinary Gate independently."
+      ]
+  | None -> user_message
+;;
+
+type provider_overflow_recovery =
+  | Not_provider_overflow
+  | Provider_overflow_applied of Keeper_context_runtime.compaction_recovery
+  | Provider_overflow_no_compaction of Keeper_post_turn.no_compaction
+  | Provider_overflow_retry_without_checkpoint of
+      { trigger : Compaction_trigger.t
+      ; reason : string
+      }
+  | Provider_overflow_retry_with_checkpoint of
+      { reason : string
+      ; recovery : Keeper_context_runtime.compaction_recovery
+      }
+
+let recover_provider_context_overflow_in_lane
+      ~(config : Workspace.config)
+      ~base_dir
+      ~(meta : keeper_meta)
+      ~projection_request
+      error
+  =
+  match context_overflow_event_of_error error with
+  | None -> Not_provider_overflow
+  | Some
+      ((Keeper_state_machine.Context_overflow_detected { limit_tokens }) as
+       overflow_event) ->
+    let origin = Keeper_registry.Post_turn_lifecycle in
+    let trigger = Compaction_trigger.Provider_overflow { limit_tokens } in
+    let dispatch stage event =
+      match
+        dispatch_keeper_phase_event_result
+          ~config
+          ~origin
+          ~keeper_name:meta.name
+          event
+      with
+      | Ok () -> Ok ()
+      | Error error ->
+        let detail = lifecycle_dispatch_error_to_string error in
+        Log.Keeper.error
+          ~keeper_name:meta.name
+          "provider overflow recovery lifecycle rejected stage=%s: %s"
+          stage
+          detail;
+        Error detail
+    in
+    let release_failed_lifecycle reason =
+      match
+        dispatch
+          "compaction_failed"
+          (Keeper_state_machine.Compaction_failed { reason })
+      with
+      | Ok () -> Ok ()
+      | Error detail ->
+        Log.Keeper.error
+          ~keeper_name:meta.name
+          "provider overflow recovery could not release compaction lifecycle: %s"
+          detail;
+        Error detail
+    in
+    let retry_after_started ?recovery reason =
+      record_overflow_failure ~config ~meta ~reason;
+      (* fire-and-forget: retry proceeds from the recorded failure either way. *)
+      ignore (release_failed_lifecycle reason);
+      match recovery with
+      | None -> Provider_overflow_retry_without_checkpoint { trigger; reason }
+      | Some recovery -> Provider_overflow_retry_with_checkpoint { reason; recovery }
+    in
+    (match dispatch "context_overflow_detected" overflow_event with
+     | Error reason ->
+       record_overflow_failure ~config ~meta ~reason;
+       Provider_overflow_retry_without_checkpoint { trigger; reason }
+     | Ok () ->
+       (match dispatch "compaction_started" Keeper_state_machine.Compaction_started with
+        | Error reason -> retry_after_started reason
+        | Ok () ->
+          (try
+             match
+               recover_latest_checkpoint_for_compaction
+                 ~base_dir
+                 ~meta
+                 ~trigger
+                 ~projection_request
+             with
+             | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
+               let reason = Keeper_post_turn.compaction_recovery_error_to_string error in
+               record_overflow_failure ~config ~meta ~reason;
+               (match release_failed_lifecycle reason with
+                | Ok () -> Provider_overflow_no_compaction no_compaction
+                | Error _ -> Provider_overflow_retry_without_checkpoint { trigger; reason })
+             | Error error ->
+               retry_after_started
+                 (Keeper_post_turn.compaction_recovery_error_to_string error)
+             | Ok recovery ->
+               (match
+                  dispatch_compaction_completed
+                    ~config
+                    ~origin
+                    ~keeper_name:meta.name
+                with
+                | Ok () ->
+                  Log.Keeper.info
+                    ~keeper_name:meta.name
+                    "provider overflow compaction committed; source stimulus will be requeued";
+                  Keeper_unified_metrics.broadcast_compaction
+                    ~name:meta.name
+                    recovery;
+                  Provider_overflow_applied recovery
+                | Error error ->
+                  retry_after_started
+                    ~recovery
+                    (lifecycle_dispatch_error_to_string error))
+           with
+           | Eio.Cancel.Cancelled _ as exn ->
+             let backtrace = Printexc.get_raw_backtrace () in
+             Eio.Cancel.protect (fun () ->
+               try
+                 match
+                   release_failed_lifecycle
+                     "provider overflow compaction cancelled"
+                 with
+                 | Ok () -> ()
+                 | Error detail ->
+                   Log.Keeper.error
+                     ~keeper_name:meta.name
+                     "provider overflow cancellation cleanup failed: %s"
+                     detail
+               with
+               | Eio.Cancel.Cancelled _ as exn -> raise exn
+               | cleanup_exn ->
+                 Log.Keeper.error
+                   ~keeper_name:meta.name
+                   "provider overflow cancellation cleanup raised: %s"
+                   (Printexc.to_string cleanup_exn));
+             Printexc.raise_with_backtrace exn backtrace
+           | exn -> retry_after_started (Printexc.to_string exn))))
+  | Some event ->
+    Log.Keeper.error
+      ~keeper_name:meta.name
+      "context overflow classifier returned a non-overflow event: %s"
+      (Keeper_state_machine.event_to_string event);
+    Not_provider_overflow
+;;
+
+let append_provider_overflow_manifest
+      ~config
+      ~runtime_manifest_context
+      ~turn_start
+      ~turn_state
+      ~base_dir
+      outcome
+  =
+  let append_recovery ~status ~error ~recovery turn_state =
+    let evidence = recovery.evidence in
+    let trigger = recovery.trigger in
+    let session_id = recovery.checkpoint.session_id in
+    let checkpoint_path =
+      Keeper_checkpoint_store.oas_checkpoint_path
+        ~session_dir:(Filename.concat base_dir session_id)
+        ~session_id
+    in
+    let turn_state =
+      Keeper_unified_turn_manifest.append_manifest
+        ~config
+        ~runtime_manifest_context
+        ~turn_start
+        ~turn_state
+        ~site:"provider_overflow_compaction"
+        ~status
+        ~compaction_source:"provider_overflow"
+        ~checkpoint_path
+        ~decision:
+          (Keeper_runtime_manifest.with_payload_role
+             ~payload_role:Checkpoint
+             (`Assoc
+               [ "trigger", `String (Compaction_trigger.to_label trigger)
+               ; "trigger_detail", Compaction_trigger.to_detail_json trigger
+               ; "source_requeued", `Bool true
+               ; "error", error
+               ; ( Keeper_compaction_evidence.exact_evidence_key
+                 , Keeper_compaction_evidence.to_json evidence )
+               ]))
+        Keeper_runtime_manifest.Context_compacted
+    in
+    turn_state
+  in
+  match outcome with
+  | Not_provider_overflow -> Follow_failure_route, turn_state
+  | Provider_overflow_no_compaction no_compaction ->
+    Log.Keeper.info
+      "provider overflow compaction reached a typed no-compaction terminal trace_id=%s generation=%d turn_count=%d reason=%s"
+      (Keeper_id.Trace_id.to_string no_compaction.source.trace_id)
+      no_compaction.source.generation
+      no_compaction.source.turn_count
+      (Keeper_event_queue_state.no_compaction_reason_label no_compaction.reason);
+    (* [No_compaction] is terminal evidence for an explicit manual-compaction
+       operation, not successful handling of the product event whose provider
+       turn overflowed. Deterministic no-progress reasons preserve the bounded
+       failure route. Effect-boundary and domain-invalid reasons instead become
+       an immediate typed escalation: replaying the source could issue a second
+       exact-output request after dispatch. *)
+    source_lease_disposition_after_no_compaction no_compaction.reason,
+    turn_state
+  | Provider_overflow_applied recovery ->
+    let turn_state =
+      append_recovery
+        ~status:"compacted"
+        ~error:`Null
+        ~recovery
+        turn_state
+    in
+    Requeue_after_context_compaction Compaction_committed, turn_state
+  | Provider_overflow_retry_with_checkpoint { reason; recovery } ->
+    let turn_state =
+      append_recovery
+        ~status:"retryable_failure"
+        ~error:(`String reason)
+        ~recovery
+        turn_state
+    in
+    (* The checkpoint commit succeeded ([recovery] exists); only the lifecycle
+       completion dispatch failed. The retry reloads a durably smaller
+       checkpoint, so this counts as compaction progress for the streak. *)
+    Requeue_after_context_compaction Compaction_committed, turn_state
+  | Provider_overflow_retry_without_checkpoint { trigger; reason } ->
+    let turn_state =
+      Keeper_unified_turn_manifest.append_manifest
+        ~config
+        ~runtime_manifest_context
+        ~turn_start
+        ~turn_state
+        ~site:"provider_overflow_compaction_failed"
+        ~status:"retryable_failure"
+        ~compaction_source:"provider_overflow"
+        ~decision:
+          (Keeper_runtime_manifest.with_payload_role
+             ~payload_role:Checkpoint
+             (`Assoc
+               [ "trigger", `String (Compaction_trigger.to_label trigger)
+               ; "trigger_detail", Compaction_trigger.to_detail_json trigger
+               ; "source_requeued", `Bool true
+               ; "error", `String reason
+               ]))
+        Keeper_runtime_manifest.Context_compacted
+    in
+    Requeue_after_context_compaction (Compaction_attempt_failed { reason }),
+    turn_state
+;;
+
 let run_keeper_cycle
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
+      ~(publication_recovery_provider :
+          Keeper_publication_recovery_availability.provider)
       ~(observation : Keeper_world_observation.world_observation)
       ~(generation : int)
       ~(wake : Keeper_registry.wake_reason)
@@ -51,6 +428,32 @@ let run_keeper_cycle
       ()
   : (turn_success, turn_failure) result
   =
+  match
+    Keeper_publication_recovery_scope.resolve_turn_resources
+      ~provider:publication_recovery_provider
+      ~base_path:config.base_path
+      ~keeper_name:meta.name
+  with
+  | Error failure ->
+    let error =
+      Agent_sdk.Error.Config
+        (Agent_sdk.Error.InvalidConfig
+           { field = "keeper.publication_recovery_scope"
+           ; detail =
+               Keeper_publication_recovery_scope.failure_to_string failure
+           })
+    in
+    Error
+      { error
+      ; runtime_id = Keeper_meta_contract.runtime_id_of_meta meta
+      ; route =
+          Keeper_runtime_failure_route.route_of_error
+            ~boundary:Keeper_runtime_failure_route.Masc_execution
+            error
+      ; source_lease_disposition = Follow_failure_route
+      }
+  | Ok { entry; publication_recovery } ->
+  let meta = entry.meta in
   (* Spec navigation: see specs/keeper-state-machine/KeeperTaskAcquisition.tla
      (Cycle 8/Tier B2, PR #11412).  Action mapping:
      SubmitTask=external producers, AssignTask=channel decision below,
@@ -66,16 +469,8 @@ let run_keeper_cycle
      phases like Overflowed. *)
   let registry_base_path = config.base_path in
   let exact_failure_execution = ref None in
-  let hitl_approval_grant =
-    Option.bind
-      hitl_resolution
-      Governance_pipeline.hitl_approval_grant_of_resolution
-  in
-  (* Decide turn_id at function entry so phase-gate / runtime-routing /
-     livelock skip paths can include it in the receipt and observability
-     stream.  Previously this was [let turn_id = ...] only after several
-     pre-dispatch checks (see turn_livelock guard below), leaving silent
-     skip paths without a turn correlator. *)
+  (* Decide turn_id at function entry so phase-gate and runtime-routing
+     terminal paths can include it in the receipt and observability stream. *)
   let keeper_turn_id = meta.runtime.usage.total_turns + 1 in
   let runtime_manifest_context : Keeper_runtime_manifest.turn_context =
     { manifest_keeper_name = meta.name
@@ -89,11 +484,8 @@ let run_keeper_cycle
   let initial_turn_state : Keeper_unified_turn_types.turn_state =
     { cycle_completed = false
     ; manifest_seq = 0
-    ; post_commit_failure_reason = None
-    ; paused_meta_override = None
     ; current_turn_blocker_info = None
     ; last_execution = None
-    ; last_provider_timeout_budget = None
     ; degraded_retry_info = None
     ; runtime_rotation_attempts = []
     ; failure_reason = None
@@ -185,7 +577,6 @@ let run_keeper_cycle
            | Ok profile_defaults ->
              Keeper_unified_turn_pre_dispatch.build_runtime_execution
                ~meta
-               ~profile_defaults
                ~runtime_id:effective_runtime_runtime_name
              |> Result.map (fun execution -> profile_defaults, execution)
          in
@@ -254,32 +645,17 @@ let run_keeper_cycle
             Keeper_event_publisher.publish_runtime_execution_built
               ~keeper_name:meta.name
               ~runtime_id:initial_execution.runtime_id
-              ~max_tokens:initial_execution.max_tokens
               ~max_context:initial_execution.max_context
               ~effective_budget:initial_execution.max_context_resolution.effective_budget
               ~temperature:initial_execution.temperature
               ~generation;
             let turn_id = keeper_turn_id in
-            (match
-               Keeper_turn_livelock.guard_and_record_turn_start
-                 ~base_path:registry_base_path
-                 ~keeper:meta.name
-                 ~turn_id
-                 ~max_attempts:(turn_livelock_max_attempts ())
-                 ~stuck_after_sec:(turn_livelock_stuck_after_sec ())
-                 ()
-             with
-             | Keeper_turn_livelock.Blocked reason ->
-               ( Keeper_unified_turn_livelock_block.handle
-                   ~config
-                   ~meta
-                   ~generation
-                   ~keeper_turn_id
-                   ~turn_id
-                   ~initial_execution
-                   ~reason
-               , turn_state )
-             | Keeper_turn_livelock.Started _ ->
+            let (_ : Keeper_turn_attempt_observer.start_observation) =
+              Keeper_turn_attempt_observer.record_turn_start
+                ~base_path:registry_base_path
+                ~keeper:meta.name
+                ~turn_id
+            in
                Keeper_turn_fsm.emit_transition
                  ~keeper_name:meta.name
                  ~turn_id:keeper_turn_id
@@ -306,7 +682,7 @@ let run_keeper_cycle
                      | None -> (goal_id, ""))
                    meta.active_goal_ids
                in
-               let system_prompt, user_message =
+               let { Keeper_unified_prompt.system_prompt; world_state; user_message } =
                  Keeper_unified_prompt.build_prompt
                    ~meta
                    ~base_path:config.base_path
@@ -316,6 +692,12 @@ let run_keeper_cycle
                    ~active_goal_summaries
                    ~observation
                    ()
+               in
+               let user_message =
+                 user_message_with_hitl_resolution
+                   ~base_path:config.base_path
+                   ~user_message
+                   hitl_resolution
                in
                Eio.Fiber.yield ();
                let base_dir = session_base_dir config in
@@ -345,45 +727,27 @@ let run_keeper_cycle
                let build_turn_prompt ~base_system_prompt:_ ~messages:_
                  : Keeper_agent_run.turn_prompt
                  =
-                 (* Unified path already places soft context (continuity, worktree)
-           in the user_message via Keeper_unified_prompt.build_prompt.
-           No dynamic_context needed here. *)
-                 { system_prompt; dynamic_context = "" }
+                 (* The observation frame rides [dynamic_context]: rebuilt fresh
+                    every turn and composed into the per-turn system prompt, so
+                    it never enters the persisted OAS conversation. Persisting
+                    it as a user message re-fed the model its own observations
+                    (943/945 identical frames in one live checkpoint, #25193)
+                    and starved compaction. Persisted user content is utterances
+                    only (wake marker + HITL resolutions). *)
+                 { system_prompt; dynamic_context = world_state }
                in
-               let prompt_timeout_metrics =
-                 Keeper_agent_run.build_prompt_metrics
-                   ~system_prompt
-                   ~dynamic_context:""
-                   ~user_message
-               in
-               let prompt_timeout_estimate_tokens =
-                 max 1 prompt_timeout_metrics.estimated_total_tokens
-               in
-               let turn_affordances =
-                 Keeper_unified_metrics.observed_affordances_of_observation
-                   ~meta
-                   observation
-               in
-               (* 5. Run via OAS Agent.run() with transient-error retry *)
-               (* Track whether side-effecting tool calls have been executed.
-         If a board_post/comment/shell/file edit succeeded and then a
-         transient error occurs, retrying would replay those tool calls and
-         produce duplicates. In that case, we propagate the error instead of
-         retrying.
-
-         Uses the OAS Event_bus (ToolCalled + ToolCompleted) rather than
-         MASC-side observers. The per-turn subscription is scoped by
-         [filter_agent meta.name], so no cross-keeper contamination.
-         The same events now drive Streaming⇄Awaiting_tool_result FSM
-         transitions unconditionally (see
-         [Keeper_unified_turn_event_bus.record_fsm_tool_transitions]). *)
+               (* 5. Run via OAS Agent.run() with transient-error retry.
+                  The turn-local OAS Event_bus preserves factual
+                  ToolCalled/ToolCompleted pairing and drives
+                  Streaming⇄Awaiting_tool_result FSM transitions. It does
+                  not infer tool effects or veto retry. *)
                let turn_state =
                  { turn_state with last_execution = Some initial_execution }
                in
                let turn_event_bus_state =
                  Keeper_unified_turn_event_bus.create
                    ?event_bus
-                 (* RFC-0197 P1-4a: mirror the in-flight tool count into the
+                 (* Mirror the in-flight tool count into the
                     live turn_observation so the supervisor sweep excludes
                     active tool execution from the no-progress window. *)
                    ~on_pending_count_change:(fun count ->
@@ -403,12 +767,11 @@ let run_keeper_cycle
                let drain_turn_event_bus ?(site = "unspecified") () =
                  Keeper_unified_turn_event_bus.drain ~site turn_event_bus_state
                in
-               let committed_mutating_tools_snapshot () =
-                 Keeper_unified_turn_event_bus.committed_mutating_tools
-                   turn_event_bus_state
-               in
                let event_bus_integrity_error_snapshot () =
                  Keeper_unified_turn_event_bus.integrity_error turn_event_bus_state
+               in
+               let tool_completed_count_snapshot () =
+                 Keeper_unified_turn_event_bus.tool_completed_count turn_event_bus_state
                in
                let start_background_turn_event_bus_drain ~clock =
                  Keeper_unified_turn_event_bus.start_background_drain
@@ -500,20 +863,10 @@ let run_keeper_cycle
                      | Error msg -> Error (Agent_sdk.Error.Internal msg), turn_state
                      | Ok clock ->
                        start_background_turn_event_bus_drain ~clock;
-                       let { Keeper_unified_turn_retry_setup.timeout_sec
-                           ; turn_started_at
-                           ; turn_deadline
-                           ; remaining_turn_budget_s
-                           ; elapsed_ms
-                           ; current_turn_phase_elapsed_ms
-                           ; max_idle_turns
-                           }
+                       let { Keeper_unified_turn_retry_setup.current_turn_phase_elapsed_ms }
                          =
                          Keeper_unified_turn_retry_setup.build
                            ~now:(fun () -> Eio.Time.now clock)
-                           ~keeper_name:meta.name
-                           ~channel
-                           ~turn_affordances
                        in
                        let run_result, turn_state =
                          Keeper_unified_turn_execution.run
@@ -522,34 +875,29 @@ let run_keeper_cycle
                            ; build_turn_prompt
                            ; channel
                            ; continuation_delivery_channel
-                           ; hitl_approval_grant
+                           ; hitl_resolution
                            ; cleanup
-                           ; committed_mutating_tools_snapshot
                            ; config
                            ; drain_turn_event_bus
                            ; event_bus
                            ; event_bus_integrity_error_snapshot
+                           ; tool_completed_count_snapshot
                            ; generation
                            ; keeper_turn_id
                            ; meta
                            ; turn_ctx_cell
                            ; observation
                            ; profile_defaults
-                           ; prompt_timeout_estimate_tokens
+                           ; publication_recovery
                            ; shared_context
                            ; trajectory_acc
-                           ; turn_affordances
                            ; turn_id = keeper_turn_id
                            }
                            ~initial_execution
                            ~turn_state
-                           ~timeout_sec
-                           ~remaining_turn_budget_s
                            ~current_turn_phase_elapsed_ms
-                           ~max_idle_turns
                            ~user_message
                            ~registry_base_path
-                           ~degraded_retry_slot_phase_budget_sec
                            ~record_streaming_cancelled_observation
                            ~runtime_id_of_meta
                            ~start_background_turn_event_bus_drain
@@ -576,14 +924,7 @@ let run_keeper_cycle
                     correlation_id
                 | None -> ());
                let event_bus_manifest_status =
-                 match turn_event_bus.correlation_id with
-                 | Some _ -> "observed"
-                 | None ->
-                   if turn_event_bus.context_compact_started_count > 0
-                      || turn_event_bus.context_compacted_count > 0
-                      || turn_event_bus.overflow_imminent <> None
-                   then "observed"
-                   else "empty"
+                 if turn_event_bus.event_count > 0 then "observed" else "empty"
                in
                let turn_state =
                  Keeper_unified_turn_manifest.append_manifest
@@ -604,11 +945,6 @@ let run_keeper_cycle
                      (Keeper_runtime_manifest.with_payload_role ~payload_role:Operator_evidence
                         (turn_event_bus_manifest_decision turn_event_bus))
                    Keeper_runtime_manifest.Event_bus_correlated
-               in
-               let run_result =
-                 match event_bus_integrity_error_snapshot () with
-                 | Some integrity_err -> Error integrity_err
-                 | None -> run_result
                in
                let degraded_retry_info = turn_state.degraded_retry_info in
                let degraded_retry_applied = Option.is_some degraded_retry_info in
@@ -657,40 +993,19 @@ let run_keeper_cycle
                        (Trajectory.Failed (Agent_sdk.Error.to_string err));
                   let e_str = Agent_sdk.Error.to_string err in
                   let is_transient = EC.is_transient_network_error err in
-                  (match Keeper_turn_driver.classify_masc_internal_error err with
-                   | Some (Keeper_turn_driver.Provider_timeout _) ->
-                     Otel_metric_store.inc_counter
-                       Keeper_metrics.(to_string OasTimeoutClassifications)
-                       ~labels:[ "classification", "structural_budget" ]
-                       ()
-                   | Some (Keeper_turn_driver.Turn_timeout _) ->
-                     Otel_metric_store.inc_counter
-                       Keeper_metrics.(to_string OasTimeoutClassifications)
-                       ~labels:[ "classification", "turn_wall_clock" ]
-                       ()
-                   | _ ->
-                     (match err with
-                      | Agent_sdk.Error.Api (Timeout { message }) ->
-                        let classification =
-                          if is_transient
-                          then "transient_network"
-                          else if EC.is_structural_oas_timeout_message message
-                          then "structural_budget"
-                          else "other_timeout"
-                        in
+                  (match err with
+                      | Agent_sdk.Error.Api (Timeout _) ->
                         Otel_metric_store.inc_counter
                           Keeper_metrics.(to_string OasTimeoutClassifications)
-                          ~labels:[ "classification", classification ]
+                          ~labels:[ "classification", "transient_network" ]
                           ()
-                      | _ -> ()));
+                      | _ -> ());
                   let is_server_parse_rejection = EC.is_server_rejected_parse_error err in
                   let is_auto_recoverable = EC.is_auto_recoverable_turn_error err in
-                  let ambiguous_commit_tools =
-                    EC.ambiguous_side_effect_commit_tools
-                      ~tool_names:(committed_mutating_tools_snapshot ())
-                      err
+                  let counts_toward_crash =
+                    Keeper_unified_turn_failure.account_failure_counting
+                      ~keeper_name:meta.name ~is_auto_recoverable err
                   in
-                  let is_ambiguous_partial = ambiguous_commit_tools <> [] in
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string Turns)
                     ~labels:[ "keeper", meta.name; "outcome", "failure" ]
@@ -725,18 +1040,11 @@ let run_keeper_cycle
                     then Log.Keeper.warn
                     else Log.Keeper.error
                   in
-                  let failure_context_ratio =
-                    if final_execution.max_context <= 0
-                    then 0.0
-                    else
-                      float_of_int prompt_timeout_estimate_tokens
-                      /. float_of_int final_execution.max_context
-                  in
                   log_keeper_cycle_failed
                     ~keeper_name:meta.name
                     "%s: keeper cycle FAILED runtime=%s max_context=%d context_budget=%d \
-                     primary_budget=%d requested_override=%s estimated_input_tokens=%d \
-                     context_ratio=%.4f latency=%dms%s error=%s"
+                     primary_budget=%d requested_override=%s system_and_user_bytes=%d \
+                     latency=%dms%s error=%s"
                     meta.name
                     final_execution.runtime_id
                     final_execution.max_context
@@ -747,13 +1055,14 @@ let run_keeper_cycle
                      with
                      | Some requested -> string_of_int requested
                      | None -> "none")
-                    prompt_timeout_estimate_tokens
-                    failure_context_ratio
+                    (String.length system_prompt
+                     + String.length world_state
+                     + String.length user_message)
                     latency_ms
-                    (if is_ambiguous_partial
-                     then " (ambiguous partial commit)"
+                    (if is_server_parse_rejection && counts_toward_crash
+                     then " (server parse rejection, counts toward crash threshold)"
                      else if is_server_parse_rejection
-                     then " (server parse rejection, auto-recoverable)"
+                     then " (server parse rejection, auto-recoverable: crash counting skipped)"
                      else if is_transient
                      then " (transient, cooldown preserved)"
                      else if EC.should_warn_keeper_cycle_failed err
@@ -764,143 +1073,39 @@ let run_keeper_cycle
                     Keeper_metrics.(to_string OasExecutionErrors)
                     ~labels:[ "keeper", meta.name; "phase", Keeper_oas_execution_error_phase.(to_label Cycle_failed) ]
                     ();
-                  let failure_meta_base =
-                    match turn_state.paused_meta_override with
-                    | Some paused_meta -> paused_meta
-                    | None -> meta
-                  in
                   let updated_meta =
                     Keeper_unified_metrics.update_metrics_from_failure
-                      failure_meta_base
+                      meta
                       ~latency_ms
                       ~observation
                       ~reason:e_str
                       ~sdk_error:err
                       ()
                   in
-                  let err, updated_meta =
-                    if is_ambiguous_partial
-                    then (
-                      (* Ambiguous partial commit must not auto-resume silently.
-                 The keeper is paused and an explicit continue gate is
-                 raised for the operator. Approving the gate auto-resumes
-                 the keeper; rejecting it leaves the keeper paused. *)
-                      let committed_tools = ambiguous_commit_tools in
-                      let turn_event_summary = turn_event_bus in
-                      let failure_reason =
-                        Option.value
-                          ~default:
-                            (Keeper_registry.Ambiguous_partial_commit
-                               { kind = Keeper_registry.Post_commit_failure
-                               ; detail = e_str
-                               })
-                          turn_state.post_commit_failure_reason
-                      in
-                      Keeper_registry.set_failure_reason
-                        ~base_path:config.base_path
-                        meta.name
-                        (Some failure_reason);
-                      match
-                        sync_keeper_paused_state ~config ~meta:updated_meta ~paused:true
-                      with
-                      | Ok paused_meta ->
-                        let approval_id =
-                          enqueue_partial_commit_continue_gate
-                            ~config
-                            ~meta:paused_meta
-                            ~failure_reason
-                            ~committed_tools
-                            ~error_detail:e_str
-                        in
-                        Otel_metric_store.inc_counter
-                          Keeper_metrics.(to_string TurnErrorAfterTools)
-                          ~labels:[ "keeper", meta.name; "reason", "ambiguous_partial" ]
-                          ();
-                        Log.Keeper.warn
-                          ~keeper_name:meta.name
-                          "%s: ambiguous partial commit \
-                           (committed_mutating_tools=[%s], turn_events=%d, \
-                           payload_kinds=[%s], reason=%s); paused keeper and opened \
-                           continue gate id=%s"
-                          meta.name
-                          (String.concat ", " committed_tools)
-                          turn_event_summary.event_count
-                          (String.concat ", " turn_event_summary.payload_kinds)
-                          (Keeper_registry.failure_reason_to_string failure_reason)
-                          approval_id;
-                        err, paused_meta
-                      | Error sync_err ->
-                        let combined_err =
-                          Agent_sdk.Error.Internal
-                            (Printf.sprintf
-                               "%s: ambiguous partial commit pause sync failed: %s \
-                                (original_error=%s)"
-                               meta.name
-                               sync_err
-                               (short_preview e_str))
-                        in
-                        Log.Keeper.error
-                          ~keeper_name:meta.name
-                          "%s"
-                          (Agent_sdk.Error.to_string combined_err);
-                        Otel_metric_store.inc_counter
-                          Keeper_metrics.(to_string RuntimeSyncFailures)
-                          ~labels:
-                            [ "keeper", meta.name; "site", "ambiguous_partial_pause" ]
-                          ();
-                        combined_err, updated_meta)
-                    else err, updated_meta
-                  in
                   let e_str = Agent_sdk.Error.to_string err in
                   let terminal_reason =
                     Keeper_turn_terminal.of_failure
-                      ~post_commit_ambiguous:is_ambiguous_partial
                       ~raw_error:e_str
                       err
                   in
-                  if not is_ambiguous_partial
-                  then (
-                    match
-                      registry_failure_reason_of_terminal_reason
-                        terminal_reason
-                        ~raw_error:e_str
-                    with
-                    | Some failure_reason ->
-                      (* masc_keeper_contract_violations_total (RFC exhaustive
-                         match, not [_ -> ()]): a new failure_reason variant
-                         must explicitly opt in or out of this counter rather
-                         than silently landing in a catch-all. *)
-                      (match failure_reason with
-                       | Keeper_registry.Completion_contract_violation _ ->
-                         Otel_metric_store.inc_counter
-                           Keeper_metrics.(to_string ContractViolations)
-                           ~labels:[ "keeper", meta.name ]
-                           ()
-                       | Keeper_registry.Heartbeat_consecutive_failures _
-                       | Keeper_registry.Turn_consecutive_failures _
-                       | Keeper_registry.Stale_turn_timeout _
-                       | Keeper_registry.Stale_termination_storm _
-                       | Keeper_registry.Stale_fleet_batch _
-                       | Keeper_registry.Provider_timeout_loop _
-                       | Keeper_registry.Provider_runtime_error _
-                       | Keeper_registry.Ambiguous_partial_commit _
-                       | Keeper_registry.Fiber_unresolved _
-                       | Keeper_registry.Exception _
-                       | Keeper_registry.Turn_overflow_pause
-                       | Keeper_registry.Turn_livelock_pause
-                       | Keeper_registry.Operator_interrupt -> ());
-                      Keeper_registry.set_failure_reason
-                        ~base_path:config.base_path
-                        meta.name
-                        (Some failure_reason)
-                    | None -> ());
+                  (match
+                     registry_failure_reason_of_terminal_reason
+                       terminal_reason
+                       ~raw_error:e_str
+                   with
+                   | Some failure_reason ->
+                     Keeper_registry.set_failure_reason
+                       ~base_path:config.base_path
+                       meta.name
+                       (Some failure_reason)
+                   | None -> ());
                   Keeper_unified_metrics.append_decision_record
                     ~config
                     ~meta:updated_meta
                     ~turn_ctx_cell
                     ~observation
                     ~latency_ms
-                    ~outcome:(if is_ambiguous_partial then "partial" else "error")
+                    ~outcome:"error"
                     ~degraded_retry_applied
                     ?degraded_retry_runtime
                     ?fallback_reason:
@@ -945,48 +1150,54 @@ dominant source of the observed CAS race exhaustion after
                     Keeper_metrics.(to_string WriteMetaCycleFailures)
                     ~labels:[ "keeper", meta.name; "site", Keeper_write_meta_cycle_failure_site.(to_label Turn_failure) ]
                     ();
-                  if is_ambiguous_partial
-                  then (
-                    let failure_reason =
-                      Option.value
-                        ~default:
-                          (Keeper_registry.Ambiguous_partial_commit
-                             { kind = Keeper_registry.Post_commit_failure
-                             ; detail = e_str
-                             })
-                        turn_state.post_commit_failure_reason
-                    in
-                    Keeper_registry.set_failure_reason
-                      ~base_path:config.base_path
-                      meta.name
-                      (Some failure_reason);
-                    let committed_tools = ambiguous_commit_tools in
-                    let turn_event_summary = turn_event_bus in
-                    Log.Keeper.info
-                      ~keeper_name:meta.name
-                      "%s: reconcile-required failure latched as %s after \
-                       committed_mutating_tools [%s] (turn_events=%d, payload_kinds=[%s])"
-                      meta.name
-                      (Keeper_registry.failure_reason_to_string failure_reason)
-                      (String.concat ", " committed_tools)
-                      turn_event_summary.event_count
-                      (String.concat ", " turn_event_summary.payload_kinds));
                   (* RFC-0313: route the failure (total over sdk_error), retain
-                     the exact final execution identity, and record pacing plus
+                     the exact final execution identity, and record failure plus
                      telemetry here. Queue ownership lives one boundary out:
                      the heartbeat settles the current lease and, for
                      [Escalate_judgment], enqueues its typed successor in the
                      same durable event-queue transaction. *)
                   let failure_route =
                     Keeper_runtime_failure_route.route_of_error
-                      ~boundary:Keeper_runtime_failure_route.Oas_execution
+                      ~boundary:
+                        (if is_incomplete_tool_transcript_error err
+                         then Keeper_runtime_failure_route.Masc_execution
+                         else Keeper_runtime_failure_route.Oas_execution)
                       err
+                  in
+                  let source_lease_disposition, turn_state =
+                    if is_incomplete_tool_transcript_error err
+                    then Requeue_after_transcript_quarantine, turn_state
+                    else (
+                      (* The checkpoint helper reports [Ok] only after the
+                         compacted checkpoint is durably saved. The heartbeat
+                         settles the owning lease after this cycle returns, so
+                         no source stimulus is acknowledged ahead of it. *)
+                      let overflow_recovery =
+                        recover_provider_context_overflow_in_lane
+                          ~config
+                          ~base_dir
+                          ~meta
+                          ~projection_request:
+                            (Keeper_compaction_projection_target.request
+                               ~assignment_id:final_execution.runtime_id
+                               ~resolve_context_window:(fun _ ->
+                                 Keeper_compaction_projection_target.Resolved_context_window
+                                   final_execution.max_context_resolution.effective_budget))
+                          err
+                      in
+                      append_provider_overflow_manifest
+                        ~config
+                        ~runtime_manifest_context
+                        ~turn_start
+                        ~turn_state
+                        ~base_dir
+                        overflow_recovery)
                   in
                   exact_failure_execution :=
                     Some
                       ( final_execution.runtime_id
                       , failure_route
-                      , Follow_failure_route );
+                      , source_lease_disposition );
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string FailureRoute)
                     ~labels:
@@ -997,17 +1208,10 @@ dominant source of the observed CAS race exhaustion after
                       ; "class", Keeper_runtime_failure_route.route_class_label failure_route
                       ]
                     ();
-                  Keeper_pacing_shadow.observe_failure
-                    ~keeper_name:meta.name
-                    ~runtime_id:final_execution.runtime_id
-                    ~retry_after:
-                      (Keeper_runtime_failure_route.retry_after_of_route failure_route);
-                  Keeper_unified_turn_failure.record_failure_and_maybe_escalate
+                  Keeper_unified_turn_failure.record_failure_observation
                     ~config
                     ~meta
-                    ~updated_meta
-                    ~is_auto_recoverable
-                    ~pacing_enforced:(Keeper_pacing_shadow.pacing_enforced ())
+                    ~counts_toward_crash
                     ~err
                     ~error_text:e_str;
                   (* RFC-0221 §3.4: emit turn_completed telemetry on all exit paths
@@ -1032,11 +1236,6 @@ dominant source of the observed CAS race exhaustion after
                        ~keeper_name:meta.name
                        trajectory_acc
                        Trajectory.Completed;
-                  (* RFC-0313 W1 shadow: a success clears this runtime's
-                     shadow revisit. *)
-                  Keeper_pacing_shadow.observe_success
-                    ~keeper_name:meta.name
-                    ~runtime_id:final_execution.runtime_id;
                   (* SSOT: success-path terminal FSM transitions
                      (Streaming -> Completing -> Done) are emitted once inside
                      [Keeper_unified_turn_success.handle]. Do not duplicate them
@@ -1044,58 +1243,24 @@ dominant source of the observed CAS race exhaustion after
                   let success =
                     Keeper_unified_turn_success.handle
                       ~config
-                      ~base_dir
                       ~meta
                       ~turn_ctx_cell
                       ~observation
-                      ~final_execution
                       ~latency_ms
                       ~degraded_retry_applied
                       ~degraded_retry_runtime
                       ~fallback_reason
-                      ~last_provider_timeout_budget:turn_state.last_provider_timeout_budget
-                      ~current_turn_blocker_info:turn_state.current_turn_blocker_info
                       ~keeper_turn_id
                       result
                   in
                   (match success with
-                   | Keeper_unified_turn_success.Failed_completion_contract
-                       { failure_judgment = judgment
-                       ; judgment_delivery
-                       ; _
-                       } ->
-                     let route =
-                       Keeper_runtime_failure_route.Escalate_judgment
-                         { judgment = judgment.fj_judgment
-                         ; provenance = judgment.fj_provenance
-                         ; detail = judgment.fj_detail
-                         }
-                     in
-                     let source_lease_disposition =
-                       match judgment_delivery with
-                       | Keeper_unified_turn_success.Queue_successor ->
-                         Follow_failure_route
-                       | Keeper_unified_turn_success.Handled_in_turn ->
-                         Acknowledge_after_in_turn_handling
-                     in
-                     exact_failure_execution :=
-                       Some
-                         ( final_execution.runtime_id
-                         , route
-                         , source_lease_disposition );
-                     let error =
-                       Keeper_internal_error.sdk_error_of_masc_internal_error
-                         (Keeper_internal_error.Internal_contract_rejected
-                            { reason = judgment.fj_detail })
-                     in
-                     Error error, turn_state
                    | Keeper_unified_turn_success.Completed updated_meta ->
                      (* Cycle 45: KeeperTaskAcquisition.tla TurnComplete post-action. *)
                      let turn_state =
                        { turn_state with cycle_completed = true }
                      in
                      post_turn_complete_task ~cycle_completed:turn_state.cycle_completed;
-                     Ok updated_meta, turn_state))))))
+                     Ok updated_meta, turn_state)))))
   in
   let append_phase_gate_decision_for_gate turn_plan turn_state =
     Keeper_unified_turn_manifest.append_phase_gate_decision

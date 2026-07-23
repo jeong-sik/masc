@@ -1,88 +1,92 @@
-(** LLM-backed keeper context compaction (RFC-0313-adjacent W2).
+(** MASC-owned compaction planning over the provider-neutral OAS exact-output
+    surface. Target selection, admission, wire serialization, credentials, and
+    dispatch receipts remain OAS-owned. *)
 
-    Default compaction path, selected per keeper via [meta.compaction.mode]
-    ([Llm] unless overridden). Requests a structured {!compaction_plan} from a
-    librarian-lane provider that classifies each working-set message (by
-    0-based index) into kept / summarized / dropped, plus one [summary] prose
-    block standing in for the summarized indices.
+type compaction_plan
 
-    Fail-closed by construction: {!make} returns [None] (caller falls back to
-    the deterministic chain) whenever the Eio context is unavailable, no
-    schema-capable direct-completion provider resolves, or the produced plan
-    is structurally invalid. This mirrors {!Keeper_memory_llm_summary.make};
-    it never lies about effects — the provider call happens inside the
-    fiber-local Eio context captured at construction, and the summarizer type
-    stays synchronous+total. *)
+type exact_execution_evidence
 
-(** A validated compaction plan over a working set of [n] messages. Every
-    index in [kept]/[summarized]/[dropped] is in [\[0, n)], the three sets are
-    pairwise disjoint, and together they cover every index exactly once. For
-    non-empty inputs, at least one [kept] or [summarized] index is required so
-    applying the plan cannot erase the entire working set. *)
-type compaction_plan = private
-  { summary : string
-  ; kept : int list
-  ; summarized : int list
-  ; dropped : int list
+type completed_plan
+
+type prepared_lane
+
+type attempt_observation =
+  { slot_id : string
+  ; phase : Agent_sdk.Exact_output.effect_phase
+  ; dispatch_count : int
+  ; catalog_generation_fingerprint : string
   }
 
-(** [summarizer ~messages] returns [Some plan] when the LLM produced a valid
-    plan over [messages], or [None] on any failure (timeout, http error, empty
-    or invalid structured response). Total and synchronous; the effect is
-    hidden in the closure captured by {!make}. *)
-type summarizer = messages:Agent_sdk.Types.message list -> compaction_plan option
+type summarization_failure =
+  | Exact_target_selection_failed
+  | Exact_admission_failed
+  | Exact_execution_context_unavailable
+  | Exact_execution_failed_before_dispatch
+  | Exact_execution_failed_after_dispatch
+  | Invalid_plan
 
-(** The low-level provider completion the summarizer drives. Defaulted to
-    {!Llm_provider.Complete.complete}; overridable in tests. *)
-type complete_fn =
-  sw:Eio.Switch.t ->
-  net:Eio_context.eio_net ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  config:Llm_provider.Provider_config.t ->
-  messages:Agent_sdk.Types.message list ->
-  unit ->
-  (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
+type summarizer =
+  units:Keeper_compaction_unit.closed_unit list ->
+  (completed_plan, summarization_failure) result
 
-(** [make ~runtime_id ~keeper_name ()] builds a summarizer bound to the
-    librarian lane resolved from [runtime_id], or [None] if the Eio context
-    or a schema-capable provider is unavailable. The caller treats [None] as
-    "use the deterministic chain". [complete]/[timeout_sec] override the
-    provider call and deadline (tests). *)
-val make
-  :  ?complete:complete_fn
-  -> ?timeout_sec:float
-  -> runtime_id:string
-  -> keeper_name:string
-  -> unit
-  -> summarizer option
+(** Pure lane lookup, selection, and admission against exactly one
+    caller-supplied immutable registry. Every candidate is considered in
+    declaration order, all admitted plans and their real receipts are retained
+    before any network effect, and the returned lane is abstract so callers
+    cannot replace ready plans. *)
+val prepare_lane
+  :  keeper_name:string
+  -> registry:Runtime_exact_output_registry.t
+  -> lane_id:string
+  -> units:Keeper_compaction_unit.closed_unit list
+  -> (prepared_lane, summarization_failure) result
 
-(** Parse+validate a raw structured response into a plan over [message_count]
-    messages. Exposed for tests. Returns [Error] with a reason on any
-    structural violation (out-of-range / negative / duplicate / non-covering
-    indices, empty output for a non-empty working set, or a missing/empty
-    summary). *)
+(** Execute each admitted ready plan at most once. Only a real receipt at
+    [Before_dispatch] with dispatch count zero advances to the next slot.
+    Cancellation is not caught, and a dispatched failure or MASC-invalid domain
+    plan is terminal. *)
+val execute_prepared_lane
+  :  keeper_name:string
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?clock:_ Eio.Time.clock
+  -> prepared_lane
+  -> (completed_plan, summarization_failure) result
+
+(** Resolve [compaction_exact] from one published immutable registry, admit all
+    resolved slots for valid JSON syntax before dispatch, then execute each
+    admitted plan at most once. OAS guarantees JSON syntax; [plan_of_json]
+    enforces the MASC-owned compaction schema and domain rules. Invalid domain
+    output is terminal and never advances to another slot. Only a receipt still
+    at [Before_dispatch] with dispatch count zero permits advancing. *)
+val make : keeper_name:string -> unit -> summarizer option
+
+val has_eligible_units : Keeper_compaction_unit.closed_unit list -> bool
+
 val plan_of_json
-  :  message_count:int
+  :  units:Keeper_compaction_unit.closed_unit list
   -> Yojson.Safe.t
   -> (compaction_plan, string) result
 
-(** [apply plan ~messages] rebuilds the working set from a validated [plan]:
-    [kept] indices survive verbatim, the [summarized] indices are replaced by a
-    single assistant memory-summary message ([plan.summary]), and [dropped]
-    indices are removed. Original message order is preserved; the summary is
-    inserted at the position of the first summarized index. [plan] is assumed
-    to have been validated against [List.length messages] (it partitions the
-    index space), so this is total. *)
-val apply
-  :  compaction_plan
-  -> messages:Agent_sdk.Types.message list
-  -> Agent_sdk.Types.message list
+val completed_plan : completed_plan -> compaction_plan
+val completed_exact_execution_evidence : completed_plan -> exact_execution_evidence
+val exact_execution_evidence_selected_target_ref : exact_execution_evidence -> string
+val exact_execution_evidence_target_identity_fingerprint : exact_execution_evidence -> string
+val exact_execution_evidence_catalog_generation_fingerprint : exact_execution_evidence -> string
+val exact_execution_evidence_catalog_evidence_sha256 : exact_execution_evidence -> string
+val exact_execution_evidence_plan_fingerprint : exact_execution_evidence -> string
+val exact_execution_evidence_receipt_plan_fingerprint : exact_execution_evidence -> string
+val exact_execution_evidence_receipt_request_body_sha256 : exact_execution_evidence -> string
+val apply : compaction_plan -> Agent_sdk.Types.message list
+val summarized_indices : compaction_plan -> int list
+val dropped_indices : compaction_plan -> int list
+val has_changes : compaction_plan -> bool
 
 module For_testing : sig
-  (** Apply the compaction request policy while preserving the per-runtime
-      temperature override from runtime.toml. *)
-  val provider_for_plan
-    :  runtime_id:string
-    -> Llm_provider.Provider_config.t
-    -> Llm_provider.Provider_config.t
+  val messages_for_plan
+    :  units:Keeper_compaction_unit.closed_unit list
+    -> Agent_sdk.Types.message list
+
+  val admitted_slot_ids : prepared_lane -> string list
+
+  val attempt_observations : prepared_lane -> attempt_observation list
 end

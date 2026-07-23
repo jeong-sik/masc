@@ -29,9 +29,6 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
   const extras: { title: string; value: string; mono?: boolean }[] = []
   if (keeper.trace_id) extras.push({ title: '추적 ID', value: keeper.trace_id, mono: true })
   if (keeper.agent_name) extras.push({ title: '에이전트', value: keeper.agent_name })
-  if (keeper.skill_primary) extras.push({ title: '스킬 (주)', value: keeper.skill_primary })
-  if (keeper.skill_secondary?.length) extras.push({ title: '스킬 (보조)', value: keeper.skill_secondary.join(', ') })
-  if (keeper.skill_reason) extras.push({ title: '스킬 사유', value: keeper.skill_reason })
   if (keeper.context_source) extras.push({ title: '컨텍스트 소스', value: keeper.context_source })
   if (keeper.context_tokens != null) extras.push({ title: '컨텍스트 토큰', value: formatTokens(keeper.context_tokens) })
   if (keeper.context_max != null) extras.push({ title: '컨텍스트 최대', value: formatTokens(keeper.context_max) })
@@ -41,6 +38,7 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
   if (keeper.handoff_count_total != null) extras.push({ title: '핸드오프 총합', value: String(keeper.handoff_count_total) })
   if (keeper.compaction_count != null) extras.push({ title: '압축 횟수', value: String(keeper.compaction_count) })
   if (keeper.last_compaction_saved_tokens != null) extras.push({ title: '마지막 압축 절약', value: formatTokens(keeper.last_compaction_saved_tokens) })
+  if (keeper.last_compaction_decision) extras.push({ title: '마지막 압축 결정', value: keeper.last_compaction_decision })
   if (keeper.context?.message_count != null) extras.push({ title: '메시지 수', value: String(keeper.context.message_count) })
   if (keeper.context?.has_checkpoint != null) extras.push({ title: '체크포인트 보유', value: keeper.context.has_checkpoint ? '예' : '아니오' })
 

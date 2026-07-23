@@ -303,8 +303,6 @@ report="$(
                  "tool dispatch_registered must be true")
           + emit(($tool.direct_call_allowed == true);
                  "tool direct_call_allowed must be true")
-          + emit(($tool.effectDomain == "read_only");
-                 "tool effectDomain must be read_only")
           + emit(($tool.implementationStatus == "real");
                  "tool implementationStatus must be real")
           + emit((.waiting_projection.present == true);

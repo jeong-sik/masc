@@ -42,7 +42,6 @@ let make_meta ~name =
         ("name", `String name);
         ("agent_name", `String ("agent-" ^ name));
         ("trace_id", `String ("trace-" ^ name));
-        ("goal", `String "via discriminator regression");
         ("allowed_paths", `List [ `String "*" ]);
         ("sandbox_profile", `String "local");
       ]
@@ -58,7 +57,7 @@ let setup f =
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   ensure_dir (Filename.concat base Common.masc_dirname);
   let config = Workspace.default_config base in
-  Keeper_registry.clear ();
+  Keeper_registry.For_testing.clear ();
   let meta = make_meta ~name:"via-keeper" in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
@@ -92,7 +91,7 @@ let assert_error_contains ~needle raw =
 
 let invoke ~config ~meta args =
   Keeper_tool_command_runtime.handle_tool_search_files ~turn_sandbox_factory:None
-    ~exec_cache:None ~config ~meta ~args
+    ~config ~meta ~args
 
 let test_rg_host_includes_via () =
   setup @@ fun ~config ~meta ~playground:_ ~sample:_ ->

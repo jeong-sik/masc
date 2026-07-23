@@ -107,27 +107,6 @@ describe('normalizeOperatorDigest', () => {
     expect(result.root).toEqual({})
   })
 
-  it('extracts operator_judge_runtime', () => {
-    const result = normalizeOperatorDigest({
-      operator_judge_runtime: {
-        enabled: true,
-        judge_online: true,
-        refreshing: false,
-        model_used: 'gpt-4',
-      },
-    })
-    expect(result.operator_judge_runtime).not.toBeNull()
-    expect(result.operator_judge_runtime!.enabled).toBe(true)
-    expect(result.operator_judge_runtime!.model_used).toBeNull()
-  })
-
-  it('returns null operator_judge_runtime for invalid input', () => {
-    const result = normalizeOperatorDigest({
-      operator_judge_runtime: 'invalid',
-    })
-    expect(result.operator_judge_runtime).toBeNull()
-  })
-
   it('extracts judgment', () => {
     const result = normalizeOperatorDigest({
       judgment: {
@@ -171,8 +150,7 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.sessions).toEqual([])
     expect(result.keepers).toEqual([])
     expect(result.persistent_agents).toEqual([])
-    expect(result.admission_queue).toBeNull()
-    expect(result.admission_queue_error).toBeNull()
+    expect(result.inference_inflight).toBeNull()
     expect(result.recent_messages).toEqual([])
     expect(result.pending_confirms).toEqual([])
     expect(result.available_actions).toEqual([])
@@ -310,6 +288,66 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.keepers[0]!.context_source).toBe('keeper_context_status')
   })
 
+  it('preserves typed keeper context metrics storage failures', () => {
+    const result = normalizeOperatorSnapshot({
+      keepers: [
+        {
+          name: 'sojin',
+          context_metrics_unavailable: {
+            kind: 'storage_read_failed',
+            reason: 'io_error',
+            path: '/tmp/metrics.jsonl',
+            detail: 'permission denied',
+          },
+        },
+      ],
+    })
+
+    expect(result.keepers[0]!.context_metrics_unavailable).toEqual({
+      kind: 'storage_read_failed',
+      reason: 'io_error',
+      path: '/tmp/metrics.jsonl',
+      detail: 'permission denied',
+    })
+  })
+
+  it('preserves malformed metrics rows and makes invalid diagnostics explicit', () => {
+    const result = normalizeOperatorSnapshot({
+      persistent_agents: [
+        {
+          name: 'watcher',
+          context_metrics_unavailable: {
+            kind: 'malformed_json',
+            reason: 'malformed_metrics_row',
+            path: '/tmp/metrics.jsonl',
+            line_number: 7,
+            detail: 'unexpected end of input',
+          },
+        },
+        {
+          name: 'broken-wire-contract',
+          context_metrics_unavailable: {
+            kind: 'new_failure_kind',
+            reason: 'new_reason',
+          },
+        },
+      ],
+    })
+
+    expect(result.persistent_agents![0]!.context_metrics_unavailable).toEqual({
+      kind: 'malformed_json',
+      reason: 'malformed_metrics_row',
+      path: '/tmp/metrics.jsonl',
+      line_number: 7,
+      detail: 'unexpected end of input',
+    })
+    expect(result.persistent_agents![1]!.context_metrics_unavailable).toEqual({
+      kind: 'invalid_payload',
+      reported_kind: 'new_failure_kind',
+      reported_reason: 'new_reason',
+    })
+  })
+
   it('filters keepers without name', () => {
     const result = normalizeOperatorSnapshot({
       keepers: [
@@ -437,79 +475,28 @@ describe('normalizeOperatorSnapshot', () => {
     expect(result.available_actions[0]!.action_type).toBe('pause')
   })
 
-  it('extracts operator_judge_runtime', () => {
+  it('normalizes the exact OAS inference observation', () => {
     const result = normalizeOperatorSnapshot({
-      operator_judge_runtime: {
-        enabled: true,
-        judge_online: false,
-      },
-    })
-    expect(result.operator_judge_runtime).not.toBeNull()
-    expect(result.operator_judge_runtime!.enabled).toBe(true)
-  })
-
-  it('normalizes admission queue ownership metadata', () => {
-    const result = normalizeOperatorSnapshot({
-      admission_queue: {
-        throttle_owner: 'oas_runtime',
-        max_concurrent: 3,
+      inference_inflight: {
+        boundary_owner: 'oas_runtime',
         active: 1,
-        available: 2,
-        queue_depth: 0,
       },
     })
-    expect(result.admission_queue).toEqual({
-      throttle_owner: 'oas_runtime',
-      max_concurrent: 3,
+    expect(result.inference_inflight).toEqual({
+      boundary_owner: 'oas_runtime',
       active: 1,
-      available: 2,
-      queue_depth: 0,
     })
-    expect(result.admission_queue_error).toBeNull()
-  })
-
-  it('preserves an oversubscribed admission snapshot as observable runtime truth', () => {
-    const result = normalizeOperatorSnapshot({
-      admission_queue: {
-        throttle_owner: 'oas_runtime',
-        max_concurrent: 3,
-        active: 4,
-        available: 0,
-        queue_depth: 1,
-      },
-    })
-
-    expect(result.admission_queue).toEqual({
-      throttle_owner: 'oas_runtime',
-      max_concurrent: 3,
-      active: 4,
-      available: 0,
-      queue_depth: 1,
-    })
-    expect(result.admission_queue_error).toBeNull()
-  })
-
-  it('rejects incomplete admission queue snapshots instead of fabricating zero capacity', () => {
-    const result = normalizeOperatorSnapshot({
-      admission_queue: {
-        throttle_owner: 'oas_runtime',
-        max_concurrent: 3,
-      },
-    })
-
-    expect(result.admission_queue).toBeNull()
-    expect(result.admission_queue_error).toBe('Admission projection contains invalid counters.')
   })
 
   it.each([
-    [{ throttle_owner: '', max_concurrent: 3, active: 1, available: 2, queue_depth: 0 }, 'Admission projection is missing throttle ownership.'],
-    [{ throttle_owner: 'runtime', max_concurrent: 3, active: 4, available: 1, queue_depth: 0 }, 'Admission projection counters are inconsistent.'],
-    [{ throttle_owner: 'runtime', max_concurrent: 3, active: 1, available: 1, queue_depth: 0 }, 'Admission projection counters are inconsistent.'],
-  ])('reports an invalid admission projection instead of silently omitting it', (admissionQueue, error) => {
-    const result = normalizeOperatorSnapshot({ admission_queue: admissionQueue })
+    { boundary_owner: 'runtime', active: 1 },
+    { boundary_owner: 'oas_runtime', active: -1 },
+    { boundary_owner: 'oas_runtime', active: 1.5 },
+    { boundary_owner: 'oas_runtime' },
+  ])('rejects inference observations outside the exact boundary contract', (inferenceInflight) => {
+    const result = normalizeOperatorSnapshot({ inference_inflight: inferenceInflight })
 
-    expect(result.admission_queue).toBeNull()
-    expect(result.admission_queue_error).toBe(error)
+    expect(result.inference_inflight).toBeNull()
   })
 
   it('extracts persistent_agents using same keeper normalizer', () => {
@@ -555,15 +542,15 @@ describe('normalizeOperatorSnapshot', () => {
           name: 'blocked-keeper',
           status: 'paused',
           needs_attention: true,
-          attention_reason: 'tool_route_recoverable_failure',
-          next_human_action: 'inspect_provider_tool_contract',
+          attention_reason: 'provider_runtime_error',
+          next_human_action: 'inspect_provider_runtime_cause',
         },
       ],
     })
     const k = result.keepers[0]
     expect(k?.needs_attention).toBe(true)
-    expect(k?.attention_reason).toBe('tool_route_recoverable_failure')
-    expect(k?.next_human_action).toBe('inspect_provider_tool_contract')
+    expect(k?.attention_reason).toBe('provider_runtime_error')
+    expect(k?.next_human_action).toBe('inspect_provider_runtime_cause')
   })
 
   it('defaults top-level attention fields to null when absent', () => {

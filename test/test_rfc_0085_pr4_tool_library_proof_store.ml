@@ -6,11 +6,9 @@ open Alcotest
     - lib/tool_library.ml: ~default:"/tmp" 리터럴 fallback 제거
       (Host_config.host()-based로 변경).
 
-    The companion cdal proof_store guards were dropped: lib/cdal_runtime/proof_store.ml
-    was purged in #19469 ("Track B", 2026-05-29), so reading it as a source fixture
-    is unrepresentable — the [(deps ../lib/cdal_runtime/proof_store.ml)] entry made
-    dune fail with "No rule found". The /tmp-fallback invariant it guarded is moot
-    once the module is gone.
+    The companion contract proof-store guards were dropped with the CDAL
+    purge (#19469 Track B and the final removal): the module is gone, so the
+    /tmp-fallback invariant it guarded is moot.
 
     AST-based via Ast_grep. *)
 

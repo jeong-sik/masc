@@ -1,7 +1,7 @@
 (** Workspace Hooks — Callback refs for upper-layer dependencies.
 
     Workspace modules must not depend on Activity_graph, Board,
-    Economy, Relation_materializer, or Oas_worker directly.
+    Relation_materializer or Oas_worker directly.
     Instead, they call these callback refs which are wired at startup
     by workspace.ml (the hub module that already depends on everything).
 
@@ -31,16 +31,6 @@ type operator_pending_confirm_request =
   }
 
 (* ============================================ *)
-(* Callback refs (migrated from workspace_gc.ml)     *)
-(* ============================================ *)
-
-(** Force-release a task — avoids Workspace_gc → Workspace_task circular dep. *)
-let force_release_task_fn
-  : (Workspace_utils_backend_setup.config -> agent_name:string -> task_id:string -> unit -> string masc_result) Atomic.t
-  = Atomic.make (fun _config ~agent_name:_ ~task_id:_ () ->
-      Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState "Workspace_hooks: force_release_task_fn not connected")))
-
-(* ============================================ *)
 (* New callback refs (Phase 4A)                 *)
 (* ============================================ *)
 
@@ -55,18 +45,6 @@ let activity_emit_fn
      tags:string list ->
      unit -> unit) Atomic.t
   = Atomic.make (fun _config ~actor:_ ?subject:_ ~kind:_ ~payload:_ ~tags:_ () -> ())
-
-(** Agent economy earn — wraps Economy.earn for task completion credits. *)
-let agent_economy_earn_fn
-  : (base_path:string -> agent_name:string -> reason:string -> unit) Atomic.t
-  = Atomic.make (fun ~base_path:_ ~agent_name:_ ~reason:_ -> ())
-
-(** Stop keeper keepalive fiber — avoids Workspace_gc → Keeper_keepalive dep.
-    Called during zombie cleanup to terminate keeper fibers that would
-    otherwise continue making tool calls after agent removal. *)
-let stop_keeper_fn
-  : (string -> unit) Atomic.t
-  = Atomic.make (fun _name -> ())
 
 (** Runtime-visible agents supplied by upper layers such as the keeper
     registry.  Workspace code consumes [Masc_domain.agent] rows without
@@ -190,16 +168,6 @@ let subscribe_messages_fn
   : (subscriber:string -> unit) Atomic.t
   = Atomic.make (fun ~subscriber:_ -> ())
 
-(** #9795: FSM drift observability.  [Workspace_task.transition]
-    signals TLA+ KeeperTaskInterlock violations (currently the
-    [Claimed_to_done_skip] branch) through this hook; [lib/workspace.ml]
-    wires it to a Otel_metric_store counter emit at startup.  Keeping the
-    hook here avoids a [masc_workspace → masc.Otel_metric_store]
-    dependency cycle. *)
-let fsm_drift_observer_fn
-  : (variant:string -> force:bool -> agent_name:string -> unit) Atomic.t
-  = Atomic.make (fun ~variant:_ ~force:_ ~agent_name:_ -> ())
-
 (** #9645: distributed lock acquire failure observability.
 
     [Workspace_utils_ops.with_distributed_lock] / [..._r] raise
@@ -225,13 +193,11 @@ let tool_assigned_fn
   : (agent_id:string ->
      profile:string ->
      tool_list:string list ->
-     ?allow_set:string list ->
-     ?deny_set:string list ->
      ?config_hash:string ->
      ?reason:string ->
      unit ->
      string) Atomic.t
-  = Atomic.make (fun ~agent_id:_ ~profile:_ ~tool_list:_ ?allow_set:_ ?deny_set:_ ?config_hash:_ ?reason:_ () -> "")
+  = Atomic.make (fun ~agent_id:_ ~profile:_ ~tool_list:_ ?config_hash:_ ?reason:_ () -> "")
 
 (** #10449: Task completion path observability.
 
@@ -252,8 +218,7 @@ let tool_assigned_fn
     This hook fires once per successful transition into [Done] and
     classifies the path along two axes:
 
-    - [path]: ["claimed_to_done_skip"] / ["in_progress_to_done"] /
-      ["via_verification"] / ["forced_done"]
+    - [path]: ["direct_llm_verdict"] / ["via_verification"]
     - [contract_state]: ["no_contract"] / ["empty_contract"] /
       ["with_contract"]
 
@@ -263,31 +228,6 @@ let tool_assigned_fn
 let task_completion_path_observed_fn
   : (path:string -> contract_state:string -> agent_name:string -> unit) Atomic.t
   = Atomic.make (fun ~path:_ ~contract_state:_ ~agent_name:_ -> ())
-
-(** #10421: task_claim_next implicit auto-release observability.
-
-    When a keeper calls [task_claim_next] while still holding a
-    previous claim, the scheduler implicitly transitions that prior
-    claim back to [Todo] before issuing the new one.  Field log
-    showed 43 [claimed → todo] transitions vs 24 [todo → claimed]
-    in a single day (179% release/claim ratio), with only 1/71
-    transitions reaching [done] — the same task hot-potatoed up to
-    5x as keepers churned through claim_next without finishing.
-
-    The structured event already carries [reason] and
-    [from_status], but a Otel_metric_store counter is the missing surface:
-    operators cannot alert on auto-release rate or split it by
-    keeper from a JSONL tail alone.  The split by [from_status]
-    matters because [Claimed → Todo] (just claimed, no work yet)
-    and [InProgress → Todo] (mid-work, lost progress) are
-    operationally distinct symptoms.
-
-    Cardinality bounded by fleet size (~10 keepers) ×
-    [from_status] (claimed | in_progress) = ~20 series.  Emit at
-    [lib/workspace.ml] to avoid a [masc_workspace → Otel_metric_store] dep cycle. *)
-let task_auto_release_observed_fn
-  : (agent_name:string -> from_status:string -> unit) Atomic.t
-  = Atomic.make (fun ~agent_name:_ ~from_status:_ -> ())
 
 (** Wall-clock latency of [Workspace_broadcast.broadcast] including
     [next_seq] (state.json file lock + read + write), agent.json read
@@ -301,14 +241,6 @@ let task_auto_release_observed_fn
 let workspace_broadcast_observed_fn
   : (msg_type:string -> elapsed_s:float -> unit) Atomic.t
   = Atomic.make (fun ~msg_type:_ ~elapsed_s:_ -> ())
-
-(** RFC-0040: sender-side mention dedup decision counter.  Default
-    no-op; emit lives in [lib/workspace.ml] to avoid a
-    [masc_workspace → Otel_metric_store] dep cycle.
-    Outcome vocabulary: [skipped|passed|no_target|bypassed]. *)
-let mention_dedup_decision_fn
-  : (outcome:string -> unit) Atomic.t
-  = Atomic.make (fun ~outcome:_ -> ())
 
 (** #13460: stale task-state cache emission observability.
     Workspace sub-modules fire this when they replace a stale active-task
@@ -419,26 +351,3 @@ let verification_notify_verdict_fn
 let is_admin_agent_fn
   : (base_path:string -> agent_name:string -> bool) Atomic.t
   = Atomic.make (fun ~base_path:_ ~agent_name:_ -> false)
-
-type evidence_gate_verdict =
-  | Pass
-  | Reject of { reason : string; rule_id : string; hint : string; payload_json : Yojson.Safe.t }
-
-let task_completion_gate_decide_fn
-  : (base_path:string ->
-     task_id:string ->
-     task_opt:Masc_domain.task option ->
-     notes:string ->
-     handoff:Masc_domain.task_handoff_context option ->
-     unit ->
-     evidence_gate_verdict)
-    Atomic.t
-  = (Atomic.make (fun ~base_path:_ ~task_id:_ ~task_opt:_ ~notes:_ ~handoff:_ () -> Pass)
-     : (base_path:string ->
-        task_id:string ->
-        task_opt:Masc_domain.task option ->
-        notes:string ->
-        handoff:Masc_domain.task_handoff_context option ->
-        unit ->
-        evidence_gate_verdict)
-       Atomic.t)

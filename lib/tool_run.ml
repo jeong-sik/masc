@@ -114,24 +114,26 @@ let dispatch ctx ~name ~args : Tool_result.result option =
 
 let schemas : Masc_domain.tool_schema list = Tool_schemas_run.schemas
 
-(* ================================================================ *)
-(* Tool_spec registration                                           *)
-(* ================================================================ *)
-
-let read_only_tools = [ "masc_run_list" ]
-
 let () =
   List.iter
     (fun (s : Masc_domain.tool_schema) ->
-      let is_ro = List.mem s.name read_only_tools in
-      Tool_spec.register
-        (Tool_spec.create
-           ~name:s.name
-           ~description:s.description
-           ~module_tag:Tool_dispatch.Mod_run
-           ~input_schema:s.input_schema
-           ~handler_binding:Tag_dispatch
-           ~is_read_only:is_ro
-           ~is_idempotent:is_ro
-           ()))
+      match
+        Tool_catalog.execution_policy_of_metadata
+          ~tool_name:s.name
+          (Tool_catalog.metadata s.name)
+      with
+      | Error error ->
+        invalid_arg (Tool_catalog.execution_policy_error_to_string error)
+      | Ok policy ->
+        Tool_spec.register
+          (Tool_spec.create
+             ~name:s.name
+             ~description:s.description
+             ~module_tag:Tool_dispatch.Mod_run
+             ~input_schema:s.input_schema
+             ~handler_binding:Tag_dispatch
+             ~is_read_only:policy.is_read_only
+             ~is_idempotent:policy.is_idempotent
+             ~mcp_context_required:policy.mcp_context_required
+             ()))
     schemas

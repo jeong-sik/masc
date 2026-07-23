@@ -35,24 +35,19 @@ type agent_reputation = {
   response_rate: float; [@default 0.0]
   board_posts: int; [@default 0]
   board_comments: int; [@default 0]
-  accountability_score: float; [@default 1.0]
-  accountability_risk_band: string; [@default "low"]
   accountability_evidence_coverage: float; [@default 1.0]
   accountability_unsupported_completion_rate: float; [@default 0.0]
   accountability_open_overdue_commitments: int; [@default 0]
   accountability_keeper_name: string; [@default ""]
   accountability_source: string; [@default "none"]
   accountability_source_label: string; [@default "No accountability history"]
-  (* v2 multi-dimensional scores — additive fields; absent in v1 records
-     are interpreted as the neutral default (1.0 for rates, "standard" for level). *)
+  (* v2 multi-dimensional observations — absent fields use neutral defaults. *)
   execution_reliability: float; [@default 1.0]
   (** Tool-call success rate from the v2 ledger. 0.0–1.0. *)
   goal_adherence: float; [@default 1.0]
   (** Proportion of goal completions that were on-topic and within budget. 0.0–1.0. *)
   safety_compliance: float; [@default 1.0]
   (** Penalty-adjusted safety score; decreases with each sandbox violation. 0.0–1.0. *)
-  autonomy_level: string; [@default "standard"]
-  (** Derived autonomy envelope: "restricted" | "standard" | "elevated" | "full". *)
   thompson_confidence: float; [@default 0.5]
   (** Thompson Sampling Beta expected value (alpha/(alpha+beta)).
       0.5 is the neutral prior (alpha=1.0, beta=1.0). *)
@@ -71,8 +66,6 @@ let default_reputation ~(agent_name : string) : agent_reputation =
     response_rate = 0.0;
     board_posts = 0;
     board_comments = 0;
-    accountability_score = 1.0;
-    accountability_risk_band = "low";
     accountability_evidence_coverage = 1.0;
     accountability_unsupported_completion_rate = 0.0;
     accountability_open_overdue_commitments = 0;
@@ -82,7 +75,6 @@ let default_reputation ~(agent_name : string) : agent_reputation =
     execution_reliability = 1.0;
     goal_adherence = 1.0;
     safety_compliance = 1.0;
-    autonomy_level = "standard";
     thompson_confidence = 0.5;
     evidence_state = "default";
   }
@@ -249,19 +241,7 @@ let count_mention_activity (config : Workspace.config) ~(agent_name : string)
   let responded = List_util.count_if (fun r -> Stdlib.Float.compare r.Mention_inbox.read_at 0.0 > 0) all in
   (received, responded)
 
-(** {1 Overall Score Computation} *)
-
-let clamp01 value = Float.max 0.0 (Float.min 1.0 value)
-
-let compute_accountability_score ~evidence_coverage
-    ~unsupported_completion_rate ~open_overdue_commitments : float =
-  let overdue_penalty =
-    Float.min 0.5 (0.1 *. Float.of_int open_overdue_commitments)
-  in
-  clamp01
-    (evidence_coverage -. unsupported_completion_rate -. overdue_penalty)
-
-(** {1 Accountability Penalty} *)
+(** {1 Accountability observations} *)
 
 let accountability_metrics (config : Workspace.config) ~(agent_name : string) =
   let keeper_name = keeper_name_of_agent agent_name in
@@ -278,9 +258,6 @@ let accountability_metrics (config : Workspace.config) ~(agent_name : string) =
   let open_overdue_commitments =
     Safe_ops.json_int ~default:0 "open_overdue_commitments" summary
   in
-  let risk_band =
-    Safe_ops.json_string ~default:"low" "risk_band" summary
-  in
   let source =
     Safe_ops.json_string ~default:"none" "source" summary
   in
@@ -288,11 +265,7 @@ let accountability_metrics (config : Workspace.config) ~(agent_name : string) =
     Safe_ops.json_string ~default:"No accountability history" "source_label"
       summary
   in
-  let score =
-    compute_accountability_score ~evidence_coverage
-      ~unsupported_completion_rate ~open_overdue_commitments
-  in
-  (score, risk_band, evidence_coverage, unsupported_completion_rate,
+  (evidence_coverage, unsupported_completion_rate,
    open_overdue_commitments, keeper_name, source, source_label)
 
 (** {1 Main Computation} *)
@@ -331,8 +304,7 @@ let compute_reputation (config : Workspace.config) ~(agent_name : string)
     else 0.0
   in
   let (board_posts, board_comments) = count_board_activity config ~agent_name in
-  let (accountability_score, accountability_risk_band,
-       accountability_evidence_coverage,
+  let (accountability_evidence_coverage,
        accountability_unsupported_completion_rate,
        accountability_open_overdue_commitments,
        accountability_keeper_name,
@@ -350,13 +322,6 @@ let compute_reputation (config : Workspace.config) ~(agent_name : string)
      | Eio.Cancel.Cancelled _ as e -> raise e
      | _exn ->
        Reputation_ledger_v2.default_ledger_metrics)
-  in
-  let autonomy =
-    Reputation_autonomy.compute_autonomy_level
-      ~execution_reliability:v2_metrics.Reputation_ledger_v2.execution_reliability
-      ~goal_adherence:v2_metrics.Reputation_ledger_v2.goal_adherence
-      ~safety_compliance:v2_metrics.Reputation_ledger_v2.safety_compliance
-      ~accountability_score:(clamp01 accountability_score)
   in
   let has_evidence =
     tasks_claimed > 0
@@ -377,8 +342,6 @@ let compute_reputation (config : Workspace.config) ~(agent_name : string)
     tasks_completed; tasks_claimed; completion_rate;
     mentions_received; mentions_responded; response_rate;
     board_posts; board_comments;
-    accountability_score;
-    accountability_risk_band;
     accountability_evidence_coverage;
     accountability_unsupported_completion_rate;
     accountability_open_overdue_commitments;
@@ -388,7 +351,6 @@ let compute_reputation (config : Workspace.config) ~(agent_name : string)
     execution_reliability = v2_metrics.Reputation_ledger_v2.execution_reliability;
     goal_adherence = v2_metrics.Reputation_ledger_v2.goal_adherence;
     safety_compliance = v2_metrics.Reputation_ledger_v2.safety_compliance;
-    autonomy_level = Reputation_autonomy.autonomy_level_to_string autonomy;
     thompson_confidence;
     evidence_state;
   }

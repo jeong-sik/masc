@@ -112,11 +112,7 @@ function makeGoal(overrides: Partial<Goal> = {}): Goal {
     target_value: null,
     due_date: null,
     priority: 3,
-    status: 'active',
     phase: 'executing',
-    verifier_policy: null,
-    require_completion_approval: false,
-    active_verification_request_id: null,
     parent_goal_id: null,
     last_review_note: null,
     last_review_at: null,
@@ -128,9 +124,9 @@ function makeGoal(overrides: Partial<Goal> = {}): Goal {
 
 describe('filterGoalRelations', () => {
   const store: Record<string, Goal> = {
-    'g-alpha': makeGoal({ id: 'g-alpha', title: 'Reduce tool error rate', status: 'active', metric: 'error_rate' }),
-    'g-beta': makeGoal({ id: 'g-beta', title: 'Lift runtime coverage', status: 'paused', metric: 'coverage_pct' }),
-    'g-gamma': makeGoal({ id: 'g-gamma', title: 'Keeper idle audit', status: 'completed', metric: null }),
+    'g-alpha': makeGoal({ id: 'g-alpha', title: 'Reduce tool error rate', metric: 'error_rate' }),
+    'g-beta': makeGoal({ id: 'g-beta', title: 'Lift runtime coverage', metric: 'coverage_pct', phase: 'paused' }),
+    'g-gamma': makeGoal({ id: 'g-gamma', title: 'Keeper idle audit', metric: null }),
   }
   const ids: string[] = ['g-alpha', 'g-beta', 'g-gamma', 'g-orphan']
   const resolve = (id: string): Goal | undefined => store[id]
@@ -152,7 +148,7 @@ describe('filterGoalRelations', () => {
     expect(out).toEqual(['g-beta'])
   })
 
-  it('matches resolved goal status', () => {
+  it('matches resolved goal phase', () => {
     const out = filterGoalRelations(ids, 'paused', resolve)
     expect(out).toEqual(['g-beta'])
   })

@@ -1,7 +1,8 @@
-(** Runtime_params — Typed parameter store with governance override.
+(** Runtime_params — Typed runtime parameter store.
 
     Provides a layer above env_config defaults that can be changed at runtime
-    via governance decisions or MCP tools. All access is Eio.Mutex-protected.
+    through the authenticated runtime-settings API. All access is
+    Eio.Mutex-protected.
 
     Override values persist to [.masc/runtime_params.json] via atomic rename.
     Changes are logged to [.masc/param_audit.jsonl].
@@ -55,7 +56,7 @@ val get : 'a param -> 'a
     base path is available via [initialize] or [?base_path]. *)
 val set : ?base_path:string -> ?actor:string -> 'a param -> 'a -> (unit, string) result
 
-(** Set override by string key and JSON value (for MCP / governance).
+(** Set override by string key and JSON value.
     Persists and audits on success when a base path is available. *)
 val set_by_key :
   ?base_path:string -> ?actor:string -> string -> Yojson.Safe.t -> (unit, string) result
@@ -85,13 +86,13 @@ val restore : base_path:string -> unit
 
 (** {1 Audit} *)
 
-(** Record a change to the audit log with optional governance case_id. *)
+(** Record a change to the audit log with an optional correlation id. *)
 val record_audit :
   base_path:string ->
   key:string ->
   old_value:Yojson.Safe.t ->
   new_value:Yojson.Safe.t ->
-  ?case_id:string ->
+  ?correlation_id:string ->
   actor:string ->
   unit ->
   unit

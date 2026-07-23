@@ -18,6 +18,12 @@ Related: RFC-0064 (LLM-native two-surface tool model), RFC-0179 (keeper_* descri
 
 > Renumber note: This RFC was authored and merged as RFC-0181 (PR #18726, 2026-05-26 11:39 UTC). PR #18697 (capability/intent-based runtime SSOT, OPEN/Draft) had previously claimed the 0181 slot. The 0181 collision was resolved by renumbering this document to 0182; user-authored #18697 retains 0181. All other content is unchanged from the merged body.
 
+> Current-state amendment (2026-07-13): runtime tool-family membership and its
+> mutation surface were retired. `Tool_shard` now only assembles the immutable,
+> complete Keeper catalog; the Gate decides requested external effects. Numeric
+> inventories below remain point-in-time audit evidence, not an authorization
+> model.
+
 ## 0. Problem framing
 
 RFC-0179 (PR #18710, 2026-05-26 merged) brought `keeper_*` workspace collaboration tools — 39 entries — under the `Agent_tool_descriptor.t` projection layer. `internal_descriptors` grew from 1 to 39, `Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome` lost its legacy match chain (12 arms → 0), and 38 additional tools began emitting `route_evidence_json` per call.
@@ -71,7 +77,7 @@ The registration matrix audit found 21 of 124 `masc_*` tools live as metadata-on
 - Execution: `masc_execute`, `masc_execute_dry_run`
 - Portal: `masc_portal_open`, `masc_portal_close`, `masc_portal_send`
 - Approval queue access is no longer a MASC tool surface.
-- Admin/destructive: `masc_admin_cleanup`, `masc_admin_reset`, `masc_gc_force`, `masc_workspace_delete`, `masc_force_unbind`, `masc_set_param`, `masc_spawn`, `masc_tool_revoke`
+- Admin/destructive: `masc_admin_cleanup`, `masc_admin_reset`, `masc_gc_force`, `masc_workspace_delete`, `masc_force_unbind`, `masc_set_param`, `masc_spawn`
 
 Three observations:
 
@@ -91,7 +97,7 @@ After the body merged (PR #18726 → renumber #18731), a 5-prong dead/live audit
 |---|---|---|
 | **dead** (no handler, no live caller) | `masc_execute`, `masc_execute_dry_run`, `masc_admin_cleanup`, `masc_admin_reset`, `masc_gc_force`, `masc_workspace_delete`, `masc_force_unbind` | delete tool_catalog metadata; do not migrate |
 | **dead** (after ambiguous decision) | `masc_spawn` (dispatch explicitly removed with comment `"masc_spawn removed: vendor-specific agent spawning belongs to OAS domain"` at `mcp_tool_runtime.ml:287`; metadata and test fixture left behind) | delete metadata + test fixture (completes the in-progress cleanup) |
-| **live** | `masc_bind`, `masc_unbind`, `masc_broadcast`, `masc_messages`, `channel_gate`, `masc_set_param`, `masc_tool_revoke` (7 tools) | migrate to `Tool_spec.register`; descriptor projection added |
+| **live at audit time** | `masc_bind`, `masc_unbind`, `masc_broadcast`, `masc_messages`, `channel_gate`, `masc_set_param` plus one subsequently retired membership mutation entry | migrate surviving entries to `Tool_spec.register`; descriptor projection added |
 | **deferred** (separate RFC) | `masc_portal_open`, `masc_portal_close`, `masc_portal_send` | live, but dispatch is at `mcp_server_eio_protocol.ml` protocol level — not in-process. This RFC's cluster-variant pattern does not fit. Tracked for a separate RFC (RFC-0183 candidate). Excluded from this RFC's scope. |
 
 Q2 (`channel_gate`) and Q3 (`masc_set_param`) — initially flagged for removal in §11 open questions — are now confirmed live by the audit (HTTP subsystem dispatch at `server_routes_http_routes_channel_gate.ml` and `server_routes_http_routes_activity.ml:with_tool_auth` respectively). They are migrated to `Tool_spec.register`, not removed. `masc_set_param` retains its current `Hidden` visibility (`hidden_active` semantics preserved through `Tool_spec.create ~visibility:Hidden`).
@@ -118,7 +124,6 @@ Add 113 entries to `internal_descriptors` in `lib/keeper/agent_tool_descriptor.m
 | `masc_agent_*` | ~5 | `Tool_masc_agent_dispatch` |
 | `masc_library_*` | ~5 | `Tool_masc_library_dispatch` |
 | `masc_control_*` (pause/resume) | ~3 | `Tool_masc_control_dispatch` |
-| `masc_shard_*` (tool_grant/revoke) | ~2 | `Tool_masc_shard_dispatch` |
 | `masc_local_runtime_*` | ~2 | `Tool_masc_local_runtime_dispatch` |
 | `masc_agent_timeline` | 1 | `Tool_masc_agent_timeline` |
 | Singletons (`masc_bind`, `masc_broadcast`, `masc_execute`, etc.) | ~32 | individual variants |
@@ -144,11 +149,10 @@ Each of the 10 live metadata-only tools gets a corresponding `Tool_spec.register
 |---|---|---|
 | `masc_bind`, `masc_unbind`, `masc_broadcast`, `masc_messages`, `channel_gate` | `mcp_tool_runtime.ml` (Mod_inline) | `Default` (preserved) |
 | `masc_set_param` | `mcp_tool_runtime.ml` | **`Hidden`** (preserved from current `hidden_active`, Q3 decision) |
-| `masc_tool_revoke` | `tool_shard.ml` (Mod_shard) — existing `masc_tool_grant` is registered here | `Default` (preserved) |
 
 All 7 use `handler_binding = Tag_dispatch` to match the existing 103-tool norm. Permission metadata (`required_permission = Some Masc_domain.CanXxx`) is preserved as-is — moved from raw `tool_catalog.ml` entries to `Tool_spec.create ~required_permission`.
 
-Q1 (module layout) resolution: existing dispatchers only. Audit found existing dispatchers (`mcp_tool_runtime.ml`, `tool_shard.ml`) already host functionally-adjacent registrations. New single-purpose modules would proliferate files and violate `[feedback_radical_improvement_over_diff_size]` (avoid unnecessary file growth in user-of-one codebase). `masc_set_param` stays with `mcp_tool_runtime.ml`.
+Q1 (module layout) resolution: existing dispatchers only. `masc_set_param` stays with `mcp_tool_runtime.ml`; the immutable tool-family catalog is not a runtime authorization dispatcher.
 
 ### 3.3 Dead tool metadata + test cleanup (8 tools)
 
@@ -246,13 +250,13 @@ Rollback: revert is a single PR revert. RFC-0179 set the precedent — squash me
 | 3 | Closeout: flip RFC-0182 status from Draft → Implemented, add the implementation PR number to `implementation_prs:` frontmatter, audit `scripts/audit-rfc-closeout-lag.sh`. |
 | 4 (separate) | RFC-0183 candidate: portal trio descriptor model (protocol-level dispatch layer). |
 
-Implementation PR target diff: ~1200-1800 LoC, ~8-9 files (`agent_tool_descriptor.ml`, `agent_tool_descriptor.mli`, `agent_tool_in_process_runtime.ml`, `agent_tool_in_process_runtime.mli`, `agent_tool_runtime.ml`, `agent_tool_runtime.mli`, `tool_spec.ml` (remove Match_chain), `tool_spec.mli`, `tool_catalog.ml` (delete 8 dead rows), `mcp_tool_runtime.ml` (add 9-10 registrations), `tool_shard.ml` (add masc_tool_revoke), test files affected by dead-tool cleanup).
+Implementation PR target diff: ~1200-1800 LoC, ~8-9 files (`agent_tool_descriptor.ml`, `agent_tool_descriptor.mli`, `agent_tool_in_process_runtime.ml`, `agent_tool_in_process_runtime.mli`, `agent_tool_runtime.ml`, `agent_tool_runtime.mli`, `tool_spec.ml` (remove Match_chain), `tool_spec.mli`, `tool_catalog.ml` (delete 8 dead rows), `mcp_tool_runtime.ml` (add registrations), test files affected by dead-tool cleanup).
 
 ## 11. Open questions — resolved
 
 The original §11 had three open architectural questions. The post-merge audit (§2a) and user decision chain resolved them as follows:
 
-- **Q1 (module layout)** — *resolved*: existing dispatchers only. Keep approval dispatch in the keeper-owned surface (`Keeper_tool_surface` / `Keeper_tool_in_process_runtime`) and reuse `tool_shard.ml` for shard tools (existing `masc_tool_grant` lives there). `masc_set_param` stays with `mcp_tool_runtime.ml`. Rationale in §3.2.
+- **Q1 (module layout)** — *resolved*: existing dispatchers only. Keep approval dispatch in the keeper-owned surface (`Keeper_tool_surface` / `Keeper_tool_in_process_runtime`). The immutable tool-family catalog is not a runtime authorization dispatcher. `masc_set_param` stays with `mcp_tool_runtime.ml`. Rationale in §3.2.
 - **Q2 (`channel_gate` rename)** — *resolved*: keep as-is. The audit (§2a) confirmed `channel_gate` is live with HTTP subsystem dispatch (`server_routes_http_routes_channel_gate.ml`). Renaming would force prompt/persona/config updates with no architectural benefit; the unconventional name is preserved for backward compatibility. Migration is to `Tool_spec.register` only.
 - **Q3 (`masc_set_param` visibility)** — *resolved*: keep `Hidden`. The audit confirmed live HTTP dispatch with admin auth (`server_routes_http_routes_activity.ml:with_tool_auth`). Visibility-level isolation reflects the original design intent (internal HTTP runtime-parameter mutation route). Registered as `Tool_spec.create ~visibility:Hidden ~required_permission:(Some CanAdmin)`.
 

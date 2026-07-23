@@ -6,7 +6,6 @@
 
 val metric_fd_open : string
 val metric_fd_limit : string
-val metric_fd_pressure_active : string
 val metric_mcp_requests : string
 val metric_llm_inference_duration : string
 

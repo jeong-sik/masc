@@ -1,4 +1,4 @@
-"""Base Channel Gate client with circuit breaker and HTTP transport.
+"""Base Channel Gate client with HTTP transport.
 
 Connector-specific clients subclass this and provide their
 ``_channel_context()`` method.
@@ -10,35 +10,58 @@ import json as json_mod
 import logging
 import time
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
 from typing import Any, cast
 
 import httpx
 
 try:
-    import httpx_sse
-
-    _HAS_SSE = True
+    import httpx_sse as _httpx_sse
 except ImportError:
-    _HAS_SSE = False
+    _httpx_sse = None
 
 from .gate_response import GateResponse
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
-class BreakerSnapshot:
-    """Current transport breaker state."""
+class GateStreamError(RuntimeError):
+    """Base class for explicit keeper stream failures."""
 
-    open: bool
-    remaining_sec: int
-    consecutive_failures: int
-    last_failure: str
+
+class GateStreamUnavailable(GateStreamError):
+    """The stream request was not sent because a local dependency is absent."""
+
+
+class GateStreamRejected(GateStreamError):
+    """The Gate returned an HTTP error before opening an SSE stream."""
+
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+        super().__init__(f"keeper stream rejected with HTTP {status_code}")
+
+
+class GateStreamAcceptedFailure(GateStreamError):
+    """The Gate accepted the stream request, so callers must not resubmit it."""
+
+
+class GateStreamRunError(GateStreamAcceptedFailure):
+    """The accepted Keeper run emitted a terminal RUN_ERROR event."""
+
+
+class GateStreamIncomplete(GateStreamAcceptedFailure):
+    """An accepted stream ended without RUN_FINISHED or RUN_ERROR."""
+
+
+class GateStreamProtocolError(GateStreamAcceptedFailure):
+    """An accepted stream emitted a malformed SSE event."""
+
+
+class GateStreamTransportAmbiguous(GateStreamError):
+    """Transport failed after dispatch began; Keeper acceptance is unknown."""
 
 
 class GateClientBase:
-    """HTTP client for the Channel Gate API with circuit breaker.
+    """HTTP client for the Channel Gate API.
 
     Subclass and implement ``_channel_context()`` for each connector.
     """
@@ -51,8 +74,6 @@ class GateClientBase:
         gate_api_token: str,
         gate_origin: str,
         timeout_sec: float = 30.0,
-        breaker_failure_threshold: int = 3,
-        breaker_reset_sec: int = 30,
         status_cache_ttl_sec: int = 15,
         keeper_cache_ttl_sec: int = 30,
     ) -> None:
@@ -65,16 +86,11 @@ class GateClientBase:
         self._keeper_status_url = f"{base}/api/v1/gate/keeper-status"
         self._stream_url = f"{base}/api/v1/keepers/chat/stream"
         self._timeout = timeout_sec
-        self._breaker_failure_threshold = breaker_failure_threshold
-        self._breaker_reset_sec = breaker_reset_sec
         self._status_cache_ttl = status_cache_ttl_sec
         self._keeper_cache_ttl = keeper_cache_ttl_sec
 
         self._headers = self._build_headers(gate_api_token, gate_origin)
         self._client: httpx.AsyncClient | None = None
-        self._consecutive_failures = 0
-        self._breaker_open_until = 0.0
-        self._last_failure = ""
         self._status_cache: tuple[float, dict[str, Any]] | None = None
         self._keeper_names_cache: tuple[float, list[str]] | None = None
         self._keeper_status_cache: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -90,51 +106,13 @@ class GateClientBase:
             headers["Origin"] = origin
         return headers
 
-    # ── Time / Circuit Breaker ─────────────────────────────
+    # ── Time ───────────────────────────────────────────────
 
     def _now(self) -> float:
         return time.monotonic()
 
-    def _breaker_is_open(self) -> bool:
-        return self._breaker_open_until > self._now()
-
-    def _breaker_enabled(self) -> bool:
-        return self._breaker_failure_threshold > 0 and self._breaker_reset_sec > 0
-
-    def _breaker_error(self) -> str:
-        remaining = max(1, int(round(self._breaker_open_until - self._now())))
-        if self._last_failure:
-            return (
-                f"connector circuit open for {remaining}s after transport failures: "
-                f"{self._last_failure}"
-            )
-        return f"connector circuit open for {remaining}s after transport failures"
-
-    def _note_success(self) -> None:
-        self._consecutive_failures = 0
-        self._breaker_open_until = 0.0
-        self._last_failure = ""
-
-    def _note_transport_failure(self, reason: str) -> None:
-        self._consecutive_failures += 1
-        self._last_failure = reason
-        if self._breaker_enabled() and self._consecutive_failures >= self._breaker_failure_threshold:
-            self._breaker_open_until = self._now() + self._breaker_reset_sec
-        logger.warning(
-            "Gate transport failure %d/%d: %s",
-            self._consecutive_failures,
-            self._breaker_failure_threshold,
-            reason,
-        )
-
-    def breaker_snapshot(self) -> BreakerSnapshot:
-        remaining = max(0, int(round(self._breaker_open_until - self._now())))
-        return BreakerSnapshot(
-            open=self._breaker_is_open(),
-            remaining_sec=remaining,
-            consecutive_failures=self._consecutive_failures,
-            last_failure=self._last_failure,
-        )
+    def _observe_transport_failure(self, reason: str) -> None:
+        logger.warning("Gate transport failure: %s", reason)
 
     # ── HTTP Client ────────────────────────────────────────
 
@@ -163,41 +141,31 @@ class GateClientBase:
         *,
         json_body: dict[str, Any] | None = None,
         params: dict[str, str] | None = None,
-        allow_breaker_cache: tuple[float, dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
-        if self._breaker_is_open():
-            if allow_breaker_cache is not None and self._cache_fresh(
-                allow_breaker_cache, self._status_cache_ttl
-            ):
-                return allow_breaker_cache[1]
-            logger.warning("Gate request short-circuited: %s", self._breaker_error())
-            return None
-
         client = self._get_client()
         try:
             response = await client.request(method, url, json=json_body, params=params)
             if response.status_code >= 500:
-                self._note_transport_failure(f"gate returned {response.status_code}")
+                self._observe_transport_failure(f"gate returned {response.status_code}")
                 return None
             if response.status_code >= 400:
-                logger.info("Gate returned %d for %s %s", response.status_code, method, url)
-                self._note_success()
+                logger.info(
+                    "Gate returned %d for %s %s", response.status_code, method, url
+                )
                 return None
             raw_data = response.json()
             if not isinstance(raw_data, dict):
                 logger.warning("Gate returned non-object JSON from %s %s", method, url)
-                self._note_success()
                 return None
-            self._note_success()
             return cast(dict[str, Any], raw_data)
         except httpx.TimeoutException:
-            self._note_transport_failure(f"gate timeout after {self._timeout}s")
+            self._observe_transport_failure(f"gate timeout after {self._timeout}s")
             return None
         except httpx.HTTPError as e:
-            self._note_transport_failure(f"gate http error: {e}")
+            self._observe_transport_failure(f"gate http error: {e}")
             return None
         except Exception as e:
-            self._note_transport_failure(f"gate error: {e}")
+            self._observe_transport_failure(f"gate error: {e}")
             return None
 
     # ── Gate API Methods ───────────────────────────────────
@@ -218,9 +186,6 @@ class GateClientBase:
             context: Channel-specific context (channel, channel_user_id, etc.)
             idempotency_key: Unique key to prevent duplicate processing.
         """
-        if self._breaker_is_open():
-            return GateResponse.from_error(self._breaker_error())
-
         payload = {
             **context,
             "keeper_name": keeper_name,
@@ -232,27 +197,24 @@ class GateClientBase:
         try:
             resp = await client.post(self._message_url, json=payload)
             if resp.status_code == 409:
-                self._note_success()
                 return GateResponse.from_error("duplicate message")
             if resp.status_code >= 500:
-                self._note_transport_failure(f"gate returned {resp.status_code}")
+                self._observe_transport_failure(f"gate returned {resp.status_code}")
                 return GateResponse.from_error(f"gate returned {resp.status_code}")
 
             raw_data = resp.json()
             if not isinstance(raw_data, dict):
-                self._note_success()
                 return GateResponse.from_error("gate returned invalid json")
 
-            self._note_success()
             return GateResponse.from_json(cast(dict[str, Any], raw_data))
         except httpx.TimeoutException:
-            self._note_transport_failure(f"gate timeout after {self._timeout}s")
+            self._observe_transport_failure(f"gate timeout after {self._timeout}s")
             return GateResponse.from_error(f"gate timeout after {self._timeout}s")
         except httpx.HTTPError as e:
-            self._note_transport_failure(f"gate http error: {e}")
+            self._observe_transport_failure(f"gate http error: {e}")
             return GateResponse.from_error(f"gate http error: {e}")
         except Exception as e:
-            self._note_transport_failure(f"gate error: {e}")
+            self._observe_transport_failure(f"gate error: {e}")
             return GateResponse.from_error(f"gate error: {e}")
 
     async def health_check(self) -> bool:
@@ -261,8 +223,6 @@ class GateClientBase:
             self._status_cache, self._status_cache_ttl
         ):
             return True
-        if self._breaker_is_open():
-            return False
         data = await self._request_json("GET", self._health_url)
         return data is not None
 
@@ -274,7 +234,6 @@ class GateClientBase:
         data = await self._request_json(
             "GET",
             self._status_url,
-            allow_breaker_cache=self._status_cache,
         )
         if data is None:
             if self._cache_fresh(self._status_cache, self._status_cache_ttl):
@@ -286,7 +245,9 @@ class GateClientBase:
 
     async def list_keepers(self, *, force: bool = False) -> list[str]:
         """Return keeper names for autocomplete and binding validation."""
-        if not force and self._cache_fresh(self._keeper_names_cache, self._keeper_cache_ttl):
+        if not force and self._cache_fresh(
+            self._keeper_names_cache, self._keeper_cache_ttl
+        ):
             assert self._keeper_names_cache is not None
             return self._keeper_names_cache[1]
 
@@ -357,14 +318,13 @@ class GateClientBase:
 
         Uses POST /api/v1/keepers/chat/stream which returns AG-UI SSE events.
         Only TEXT_MESSAGE_CONTENT deltas are yielded as strings.
-        Requires httpx-sse; yields nothing if the library is not installed.
+        Requires httpx-sse. Every failure is explicit; once dispatch begins,
+        callers must not assume the Keeper did not accept the request.
         """
-        if not _HAS_SSE:
-            logger.warning("httpx-sse not installed; streaming unavailable")
-            return
-        if self._breaker_is_open():
-            return
-
+        if _httpx_sse is None:
+            error = GateStreamUnavailable("httpx-sse is not installed")
+            logger.warning("Keeper stream unavailable: %s", error)
+            raise error
         payload = {
             "name": keeper_name,
             "message": message,
@@ -373,50 +333,81 @@ class GateClientBase:
         client = self._get_client()
 
         try:
-            async with httpx_sse.aconnect_sse(
+            async with _httpx_sse.aconnect_sse(
                 client,
                 "POST",
                 self._stream_url,
                 json=payload,
-                timeout=httpx.Timeout(timeout=300.0, connect=10.0),
+                timeout=httpx.Timeout(
+                    connect=self._timeout,
+                    read=None,
+                    write=self._timeout,
+                    pool=self._timeout,
+                ),
             ) as event_source:
                 if event_source.response.status_code >= 400:
-                    self._note_transport_failure(
-                        f"stream returned {event_source.response.status_code}"
-                    )
-                    return
-                self._note_success()
+                    status_code = event_source.response.status_code
+                    if status_code >= 500:
+                        self._observe_transport_failure(
+                            f"stream returned {status_code}"
+                        )
+                    else:
+                        logger.warning(
+                            "Keeper stream rejected with HTTP %d", status_code
+                        )
+                    raise GateStreamRejected(status_code)
                 async for sse in event_source.aiter_sse():
                     if not sse.data:
                         continue
                     try:
                         event = json_mod.loads(sse.data)
-                    except json_mod.JSONDecodeError:
-                        continue
+                    except json_mod.JSONDecodeError as error:
+                        raise GateStreamProtocolError(
+                            "keeper stream emitted invalid JSON"
+                        ) from error
                     if not isinstance(event, dict):
-                        continue
+                        raise GateStreamProtocolError(
+                            "keeper stream emitted a non-object event"
+                        )
                     event_data = cast(dict[str, Any], event)
-                    event_type = str(event_data.get("type", ""))
+                    event_type = event_data.get("type")
+                    if not isinstance(event_type, str) or not event_type:
+                        raise GateStreamProtocolError(
+                            "keeper stream event is missing a string type"
+                        )
                     if event_type == "TEXT_MESSAGE_CONTENT":
-                        delta = str(event_data.get("delta", ""))
+                        delta = event_data.get("delta", "")
+                        if not isinstance(delta, str):
+                            raise GateStreamProtocolError(
+                                "keeper stream text delta is not a string"
+                            )
                         if delta:
                             yield delta
-                    elif event_type == "RUN_ERROR":
-                        custom_raw = event_data.get("customValue", {})
-                        custom = (
-                            cast(dict[str, Any], custom_raw)
-                            if isinstance(custom_raw, dict)
-                            else {}
-                        )
-                        err = str(custom.get("message", ""))
-                        logger.warning("Keeper stream error: %s", err)
+                    elif event_type == "RUN_FINISHED":
                         return
-        except httpx.TimeoutException:
-            self._note_transport_failure("stream timeout after 300s")
+                    elif event_type == "RUN_ERROR":
+                        message_raw = event_data.get("message")
+                        if not isinstance(message_raw, str) or not message_raw:
+                            raise GateStreamProtocolError(
+                                "keeper stream RUN_ERROR is missing a non-empty "
+                                "string message"
+                            )
+                        message = message_raw
+                        logger.warning("Keeper stream RUN_ERROR: %s", message)
+                        raise GateStreamRunError(message)
+                raise GateStreamIncomplete(
+                    "keeper stream ended without a terminal event"
+                )
+        except GateStreamError:
+            raise
+        except httpx.TimeoutException as e:
+            reason = f"stream transport timeout: {e}"
+            self._observe_transport_failure(reason)
+            raise GateStreamTransportAmbiguous(reason) from e
         except httpx.HTTPError as e:
-            self._note_transport_failure(f"stream http error: {e}")
-        except Exception as e:  # pragma: no cover
-            self._note_transport_failure(f"stream error: {e}")
+            reason = f"stream http error: {e}"
+            self._observe_transport_failure(reason)
+            raise GateStreamTransportAmbiguous(reason) from e
 
     # ── Activity Polling ─────────────────────────────────
 
@@ -455,7 +446,9 @@ class GateClientBase:
             if isinstance(data, dict):
                 events = data.get("events", [])
                 if isinstance(events, list):
-                    return [cast(dict[str, Any], e) for e in events if isinstance(e, dict)]
+                    return [
+                        cast(dict[str, Any], e) for e in events if isinstance(e, dict)
+                    ]
         except Exception as e:  # pragma: no cover
             logger.warning("Activity poll error: %s", e)
         return []

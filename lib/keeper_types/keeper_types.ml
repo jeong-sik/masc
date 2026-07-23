@@ -14,7 +14,7 @@
 type fiber_health =
   | Fiber_alive (** Fiber running, promise unresolved *)
   | Fiber_zombie (** Registry entry exists but fiber terminated *)
-  | Fiber_dead (** Restart budget exhausted, manual recovery needed *)
+  | Fiber_dead (** Fiber resolved; lane restart is required *)
   | Fiber_unknown (** Not in supervised registry *)
 
 (** Keeper-level health state — derived from agent status, keepalive
@@ -25,10 +25,10 @@ type keeper_health =
   | KH_healthy (** Keepalive alive, recent turns, no quiet_reason *)
   | KH_idle (** Keepalive alive but no recent activity *)
   | KH_offline (** Agent not present or status=offline/inactive *)
-  | KH_stale (** Last seen too long ago or zombie flag from agent *)
+  | KH_stale (** Last observed signal is outside the health projection window *)
   | KH_degraded (** graphql_error or model_error quiet_reason *)
   | KH_zombie (** Fiber terminated but registry entry exists *)
-  | KH_dead (** Restart budget exhausted *)
+  | KH_dead (** Explicit durable Dead tombstone *)
 
 (** Keeper continuity state — derived from health + keepalive status. *)
 type keeper_continuity =
@@ -42,6 +42,7 @@ type keeper_continuity =
 type tool_call_entry =
   { count : int
   ; successes : int
+  ; deferred : int
   ; failures : int
   ; last_used_at : float
   }
@@ -51,9 +52,7 @@ type tool_call_entry =
 (* ================================================================ *)
 
 type working_context =
-  { checkpoint : Agent_sdk.Checkpoint.t
-  ; max_tokens : int
-  }
+  { checkpoint : Agent_sdk.Checkpoint.t }
 
 type session_context =
   { session_id : string

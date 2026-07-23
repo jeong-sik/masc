@@ -19,6 +19,10 @@ let string_of_field = function
   | Some (`String s) -> Some s
   | _ -> None
 
+let int_of_field = function
+  | Some (`Int value) -> Some value
+  | _ -> None
+
 (* ── Join table semantics ─────────────────────────────── *)
 
 let test_record_take_roundtrip () =
@@ -60,18 +64,36 @@ let mk_event ?caused_by payload : Agent_sdk.Event_bus.event =
   ; payload
   }
 
+let invocation ?(turn = 0) ?(planned_index = 0) tool_use_id =
+  Agent_sdk.Tool.Invocation.create
+    ~tool_use_id
+    ~turn
+    ~schedule:
+      { planned_index
+      ; batch_index = 0
+      ; batch_size = 1
+      ; execution_mode = Agent_sdk.Tool.Serial
+      }
+
 let test_tool_called_carries_tool_use_id () =
   Join.For_testing.clear ();
   let json =
     Bridge.native_event_to_json
       (mk_event
          (Agent_sdk.Event_bus.ToolCalled
-            { agent_name = "oas-r1"; tool_name = "Read"; tool_use_id = "tu-3"
-            ; input = `Null; turn = 0 }))
+            { invocation = invocation "tu-3"
+            ; agent_name = "oas-r1"
+            ; tool_name = "Read"
+            ; input = `Null
+            }))
     |> Option.get
   in
   check (option string) "payload tool_use_id" (Some "tu-3")
     (string_of_field (payload_member "tool_use_id" json));
+  check (option int) "payload turn" (Some 0)
+    (int_of_field (payload_member "turn" json));
+  check (option int) "payload planned_index" (Some 0)
+    (int_of_field (payload_member "planned_index" json));
   check bool "tool_called has no execution_id (mint happens after publish)"
     true
     (payload_member "execution_id" json = None)
@@ -84,14 +106,21 @@ let test_tool_completed_stamps_execution_id () =
     Bridge.native_event_to_json
       (mk_event ~caused_by:"run-called-1"
          (Agent_sdk.Event_bus.ToolCompleted
-            { agent_name = "keeper-x-agent"; tool_name = "Read"
-            ; tool_use_id = "tu-4"; output = Ok { content = "ok"; _meta = None }; turn = 1 }))
+            { invocation = invocation ~turn:1 ~planned_index:3 "tu-4"
+            ; agent_name = "keeper-x-agent"
+            ; tool_name = "Read"
+            ; output = Ok { content = "ok"; _meta = None }
+            }))
     |> Option.get
   in
   check (option string) "payload execution_id" (Some "exec-2-0001")
     (string_of_field (payload_member "execution_id" json));
   check (option string) "payload tool_use_id" (Some "tu-4")
     (string_of_field (payload_member "tool_use_id" json));
+  check (option int) "payload exact turn" (Some 1)
+    (int_of_field (payload_member "turn" json));
+  check (option int) "payload exact planned_index" (Some 3)
+    (int_of_field (payload_member "planned_index" json));
   check (option string) "envelope caused_by survives serialization"
     (Some "run-called-1")
     (string_of_field (member "caused_by" json));
@@ -104,8 +133,11 @@ let test_tool_completed_without_entry_omits_execution_id () =
     Bridge.native_event_to_json
       (mk_event
          (Agent_sdk.Event_bus.ToolCompleted
-            { agent_name = "oas-worker"; tool_name = "Execute"
-            ; tool_use_id = "tu-5"; output = Ok { content = "ok"; _meta = None }; turn = 2 }))
+            { invocation = invocation ~turn:2 "tu-5"
+            ; agent_name = "oas-worker"
+            ; tool_name = "Execute"
+            ; output = Ok { content = "ok"; _meta = None }
+            }))
     |> Option.get
   in
   check bool "no execution_id field for non-keeper execution" true
@@ -119,8 +151,11 @@ let test_empty_tool_use_id_omitted_from_payload () =
     Bridge.native_event_to_json
       (mk_event
          (Agent_sdk.Event_bus.ToolCalled
-            { agent_name = "oas-r1"; tool_name = "Read"; tool_use_id = ""
-            ; input = `Null; turn = 0 }))
+            { invocation = invocation ""
+            ; agent_name = "oas-r1"
+            ; tool_name = "Read"
+            ; input = `Null
+            }))
     |> Option.get
   in
   check bool "empty provider id is omitted" true
@@ -131,8 +166,21 @@ let test_agent_failed_matches_typed_sse_event () =
   let task_id = "task-failed-1" in
   let elapsed_s = 4.25 in
   let caused_by = "run-agent-started-1" in
-  let error = Agent_sdk.Error.Internal "bridge failure" in
+  let error =
+    Agent_sdk.Error.Agent
+      (Agent_sdk.Error.HookExecutionFailed
+         { hook_name = "post_tool_use"
+         ; stage = "execute"
+         ; tool_name = Some "Execute"
+         ; tool_use_id = Some "tool-1"
+         ; detail = "hook failed"
+         })
+  in
   let projection = Error_json.agent_failed_error_projection error in
+  check (option string)
+    "hook failure variant"
+    (Some "hook_execution_failed")
+    (string_of_field (member "variant" projection.error_detail));
   let actual =
     Bridge.native_event_to_json
       (mk_event
@@ -183,105 +231,6 @@ let test_authorization_errors_have_typed_projection () =
        (Llm_provider.Error.AuthorizationError
           { provider = "provider"; detail = "permission refused" }))
 
-let recovery_failed_attempt ~tool_use_id ~input ~error =
-  { Agent_sdk.Tool_failure_episode.tool_use_id = tool_use_id
-  ; tool_name = "Execute"
-  ; input
-  ; failure_kind = Agent_sdk.Types.Validation_error
-  ; error_class = Some Agent_sdk.Types.Deterministic
-  ; error
-  }
-
-let recovery_episode () : Agent_sdk.Tool_failure_episode.t =
-  { previous =
-      recovery_failed_attempt
-        ~tool_use_id:"tool-previous"
-        ~input:(`Assoc [ "cmd", `String "secret previous input" ])
-        ~error:"secret previous error"
-  ; current =
-      recovery_failed_attempt
-        ~tool_use_id:"tool-current"
-        ~input:(`Assoc [ "cmd", `String "secret current input" ])
-        ~error:"secret current error"
-  }
-
-let test_tool_failure_episode_projection_omits_inputs_and_error_text () =
-  let json =
-    Bridge.native_event_to_json
-      (mk_event
-         (Agent_sdk.Event_bus.ToolFailureEpisodeDetected
-            { agent_name = "oas-r1"; turn = 3; episodes = [ recovery_episode () ] }))
-    |> Option.get
-  in
-  let previous =
-    match payload_member "episodes" json with
-    | Some (`List [ `Assoc episode ]) ->
-      (match List.assoc_opt "previous" episode with
-       | Some (`Assoc fields) -> fields
-       | _ -> fail "missing previous failed-attempt projection")
-    | _ -> fail "missing tool-failure episode projection"
-  in
-  check bool "input omitted" true (List.assoc_opt "input" previous = None);
-  check bool "error prose omitted" true (List.assoc_opt "error" previous = None);
-  check (option string) "tool identity retained" (Some "Execute")
-    (string_of_field (List.assoc_opt "tool_name" previous))
-
-let recovery_defer_decision () =
-  Eio_main.run
-  @@ fun _env ->
-  Eio.Switch.run
-  @@ fun sw ->
-  let judge =
-    Agent_sdk.Tool_failure_recovery.create
-      ~complete:(fun ~sw:_ _request ->
-        Ok {|{"action":"defer","reason":"secret recovery reason"}|})
-  in
-  match
-    Agent_sdk.Tool_failure_recovery.decide
-      ~sw
-      ~agent_name:"oas-r1"
-      ~turn:3
-      ~episodes:[ recovery_episode () ]
-      judge
-  with
-  | Ok decision -> decision
-  | Error error ->
-    failf
-      "failed to construct validated recovery decision: %s"
-      (Agent_sdk.Tool_failure_recovery.judge_error_to_string error)
-
-let test_recovery_decision_projection_omits_model_payload () =
-  let json =
-    Bridge.native_event_to_json
-      (mk_event
-         (Agent_sdk.Event_bus.ToolFailureRecoveryDecided
-            { agent_name = "oas-r1"; turn = 3; decision = recovery_defer_decision () }))
-    |> Option.get
-  in
-  check (option string) "typed action retained" (Some "defer")
-    (string_of_field (payload_member "action" json));
-  check bool "legacy decision digest omitted" true
-    (payload_member "decision_digest" json = None);
-  check bool "model reason omitted" true (payload_member "reason" json = None)
-
-let test_recovery_judge_failure_projection_omits_detail () =
-  let json =
-    Bridge.native_event_to_json
-      (mk_event
-         (Agent_sdk.Event_bus.ToolFailureRecoveryJudgeFailed
-            { agent_name = "oas-r1"
-            ; turn = 3
-            ; kind = Agent_sdk.Tool_failure_recovery.Provider_call_failed
-            ; detail = "secret provider body"
-            }))
-    |> Option.get
-  in
-  check (option string) "typed failure kind retained" (Some "provider_call_failed")
-    (string_of_field (payload_member "kind" json));
-  check bool "detail digest retained" true
-    (Option.is_some (string_of_field (payload_member "detail_digest" json)));
-  check bool "raw detail omitted" true (payload_member "detail" json = None)
-
 let () =
   run "keeper_execution_join"
     [ ( "join_table"
@@ -303,11 +252,5 @@ let () =
             test_agent_failed_matches_typed_sse_event
         ; test_case "authorization errors have typed projection" `Quick
             test_authorization_errors_have_typed_projection
-        ; test_case "tool failure episode omits input and error prose" `Quick
-            test_tool_failure_episode_projection_omits_inputs_and_error_text
-        ; test_case "recovery decision omits model payload" `Quick
-            test_recovery_decision_projection_omits_model_payload
-        ; test_case "recovery judge failure omits raw detail" `Quick
-            test_recovery_judge_failure_projection_omits_detail
         ] )
     ]

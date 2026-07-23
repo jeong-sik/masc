@@ -19,72 +19,112 @@ vi.mock('../../store', () => ({
 }))
 
 import {
-  normalizePersonaSummaries,
-  normalizePersonaSummary,
+  createPersona,
+  deletePersona,
+  loadPersonas,
+  personasResource,
   spawnKeeperFromPersona,
   spawnResult,
+  updatePersona,
 } from './keeper-spawn-state'
 
 afterEach(() => {
   spawnResult.value = null
+  personasResource.reset()
   vi.clearAllMocks()
 })
 
-describe('normalizePersonaSummary', () => {
-  it('accepts backend persona summary fields and keeps the handle for spawning', () => {
-    expect(
-      normalizePersonaSummary({
-        persona_name: 'sonsukku',
-        display_name: '손석구',
-        role: '무심한 로코형 동네 형',
-        trait: '건조한 농담과 낮은 텐션',
-      }),
-    ).toEqual({
-      name: 'sonsukku',
-      displayName: '손석구',
-      role: '무심한 로코형 동네 형',
-      mode: undefined,
-      description: '건조한 농담과 낮은 텐션',
+describe('loadPersonas', () => {
+  it('requests and stores only the detailed backend contract', async () => {
+    callMcpTool.mockResolvedValue(JSON.stringify({
+      count: 1,
+      personas: [{
+        persona_name: 'reviewer',
+        display_name: 'Reviewer',
+        role: null,
+        trait: 'strict',
+        profile_path: '/personas/reviewer/profile.json',
+        has_keeper_defaults: true,
+      }],
+    }))
+
+    await loadPersonas()
+
+    expect(callMcpTool).toHaveBeenCalledWith('masc_persona_list', { detailed: true })
+    expect(personasResource.state.value).toMatchObject({
+      status: 'loaded',
+      data: [{ persona_name: 'reviewer', has_keeper_defaults: true }],
     })
   })
 
-  it('falls back to existing dashboard-shaped fields when they already match', () => {
-    expect(
-      normalizePersonaSummary({
-        name: 'sangsu',
-        displayName: '상수',
-        role: '찌질한 영화감독',
-        description: '직설적이고 현실 감각 있는 동네 형',
-      }),
-    ).toEqual({
-      name: 'sangsu',
-      displayName: '상수',
-      role: '찌질한 영화감독',
-      mode: undefined,
-      description: '직설적이고 현실 감각 있는 동네 형',
+  it('surfaces malformed entries through the resource error state', async () => {
+    callMcpTool.mockResolvedValue(JSON.stringify({ count: 1, personas: ['legacy-name'] }))
+
+    await loadPersonas()
+
+    expect(personasResource.state.value).toMatchObject({
+      status: 'error',
     })
   })
 })
 
-describe('normalizePersonaSummaries', () => {
-  it('reads both wrapped and bare arrays and filters invalid entries', () => {
-    expect(
-      normalizePersonaSummaries({
-        personas: [
-          { persona_name: 'sonsukku', display_name: '손석구' },
-          { name: '' },
-          'skip-me',
-        ],
-      }),
-    ).toEqual([
-      {
-        name: 'sonsukku',
-        displayName: '손석구',
-        role: undefined,
-        mode: undefined,
-        description: undefined,
-      },
-    ])
+describe('createPersona', () => {
+  it('forwards identity and keeper-template fields to masc_persona_create', async () => {
+    callMcpTool.mockResolvedValue('{"personas":[]}')
+    const ok = await createPersona({
+      persona_name: 'code-reviewer',
+      display_name: '코드 리뷰어',
+      role: 'reviewer',
+      trait: '꼼꼼한 검증가',
+      instructions: '너는 리뷰어다',
+      mention_targets: ['reviewer', '리뷰어'],
+      proactive_enabled: true,
+    })
+    expect(ok).toBe(true)
+    expect(callMcpTool).toHaveBeenCalledWith('masc_persona_create', {
+      persona_name: 'code-reviewer',
+      display_name: '코드 리뷰어',
+      role: 'reviewer',
+      trait: '꼼꼼한 검증가',
+      instructions: '너는 리뷰어다',
+      mention_targets: ['reviewer', '리뷰어'],
+      proactive_enabled: true,
+    })
+  })
+
+  it('omits unset fields and empty mention_targets from the payload', async () => {
+    callMcpTool.mockResolvedValue('{"personas":[]}')
+    await createPersona({
+      persona_name: 'minimal',
+      display_name: '미니멀',
+      mention_targets: [],
+    })
+    expect(callMcpTool).toHaveBeenCalledWith('masc_persona_create', {
+      persona_name: 'minimal',
+      display_name: '미니멀',
+    })
+  })
+})
+
+describe('updatePersona', () => {
+  it('sends only the provided fields so unspecified ones keep their value', async () => {
+    callMcpTool.mockResolvedValue('{"personas":[]}')
+    await updatePersona('oracle', { instructions: 'new instructions' })
+    expect(callMcpTool).toHaveBeenCalledWith('masc_persona_update', {
+      persona_name: 'oracle',
+      instructions: 'new instructions',
+    })
+  })
+})
+
+describe('deletePersona', () => {
+  it('calls masc_persona_delete with the persona name', async () => {
+    callMcpTool.mockResolvedValue('{"personas":[]}')
+    const ok = await deletePersona('oracle')
+    expect(ok).toBe(true)
+    expect(callMcpTool).toHaveBeenCalledWith('masc_persona_delete', {
+      persona_name: 'oracle',
+    })
   })
 })
 

@@ -48,16 +48,14 @@ let payload_json text =
 
 let create_ok
   ?(schedule_id = "sched-1")
-  ?(risk_class = Read_only)
-  ?approval_required
   ?recurrence
   config
   =
   match
-    create config ~schedule_id ?approval_required ~requested_at:100.0
+    create config ~schedule_id ~requested_at:100.0
       ~requested_by:(human "requester") ~scheduled_by:(human "scheduler")
-      ~due_at:200.0 ~payload:(payload_json "wake me") ~risk_class
-      ~source:Operator_request ?recurrence ()
+      ~due_at:200.0 ~payload:(payload_json "wake me") ~source:Operator_request
+      ?recurrence ()
   with
   | Ok request -> request
   | Error err -> fail (service_error_to_string err)
@@ -75,6 +73,19 @@ let check_kind label expected actual =
 
 let check_dispatch_status label expected actual =
   check string label (dispatch_status_to_string expected) (dispatch_status_to_string actual)
+;;
+
+let test_occurrence_id schedule_id =
+  Schedule_occurrence_id.make
+    ~schedule_id
+    ~due_at:200.0
+    ~payload_digest:"test-payload"
+;;
+
+let read_recent_signals_exn config n =
+  match read_recent_signals config n with
+  | Ok signals -> signals
+  | Error error -> fail error
 ;;
 
 let json_field key = function
@@ -104,6 +115,11 @@ let json_float key json =
   | None -> failf "missing float field %s" key
 ;;
 
+let replace_json_field key value = function
+  | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+  | json -> json
+;;
+
 let accepting_consumer ?(accept = Ok ()) ?dispatch_result calls =
   let dispatch_result =
     Option.value
@@ -112,7 +128,7 @@ let accepting_consumer ?(accept = Ok ()) ?dispatch_result calls =
   in
   { accepts = (fun _request -> accept)
   ; dispatch =
-      (fun _config ~now:_ request ->
+      (fun _config ~now:_ _signal request ->
         calls := request.schedule_id :: !calls;
         dispatch_result)
   }
@@ -136,7 +152,8 @@ let test_tick_emits_due_candidate_once () =
     signal.payload_digest;
   let repeated = tick_ok config ~now:202.0 in
   check int "dedupe repeated tick" 0 (List.length repeated.emitted);
-  check int "durable signal count" 1 (List.length (read_recent_signals config 10))
+  check int "durable signal count" 1
+    (List.length (read_recent_signals_exn config 10))
 ;;
 
 let test_tick_dispatches_due_candidate_to_success () =
@@ -150,6 +167,11 @@ let test_tick_dispatches_due_candidate_to_success () =
   check int "one dispatch" 1 (List.length result.dispatches);
   check_dispatch_status "dispatch status" Dispatch_succeeded
     (List.hd result.dispatches).status;
+  (match result.emitted, result.dispatches with
+   | [ signal ], [ dispatch ] ->
+     check bool "dispatch keeps exact occurrence identity" true
+       (Schedule_occurrence_id.equal signal.occurrence_id dispatch.occurrence_id)
+   | _ -> fail "expected one emitted and dispatched occurrence");
   check Alcotest.(list string) "consumer called" [ request.schedule_id ] !calls;
   (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
    | None -> fail "schedule missing after dispatch"
@@ -207,28 +229,6 @@ let test_tick_marks_unsupported_candidate_failed () =
     (List.length repeated.dispatches)
 ;;
 
-let test_tick_emits_approval_blocker_then_candidate_after_grant () =
-  with_workspace
-  @@ fun config ->
-  let request =
-    create_ok ~schedule_id:"write-1" ~risk_class:Workspace_write config
-  in
-  let blocked = tick_ok config ~now:201.0 in
-  check int "blocked signal" 1 (List.length blocked.emitted);
-  let blocked_signal = List.hd blocked.emitted in
-  check_kind "blocked kind" Due_blocked_approval blocked_signal.kind;
-  check string "blocked id" request.schedule_id blocked_signal.schedule_id;
-  let blocked_again = tick_ok config ~now:202.0 in
-  check int "blocked dedupe" 0 (List.length blocked_again.emitted);
-  (match approve config ~schedule_id:request.schedule_id ~approved_by:(human "approver") () with
-   | Ok _ -> ()
-   | Error err -> fail (service_error_to_string err));
-  let due = tick_ok config ~now:203.0 in
-  check int "candidate after approval" 1 (List.length due.emitted);
-  check_kind "candidate kind" Due_candidate (List.hd due.emitted).kind;
-  check int "two durable signals" 2 (List.length (read_recent_signals config 10))
-;;
-
 let test_tick_reschedules_recurring_candidate_after_signal () =
   with_workspace
   @@ fun config ->
@@ -252,7 +252,8 @@ let test_tick_reschedules_recurring_candidate_after_signal () =
   let second_due = tick_ok config ~now:260.0 in
   check int "second signal" 1 (List.length second_due.emitted);
   check int "second reschedule" 1 second_due.rescheduled;
-  check int "two durable signals" 2 (List.length (read_recent_signals config 10))
+  check int "two durable signals" 2
+    (List.length (read_recent_signals_exn config 10))
 ;;
 
 let test_tick_dispatches_recurring_candidate_to_next_due () =
@@ -287,21 +288,15 @@ let test_tick_dispatches_recurring_candidate_to_next_due () =
      check (float 0.001) "recurring execution due" 200.0 execution.due_at)
 ;;
 
-let test_tick_blocks_recurring_side_effect_until_fresh_grant () =
+let test_tick_dispatches_every_recurring_occurrence () =
   with_workspace
   @@ fun config ->
   let calls = ref [] in
   let request =
-    create_ok ~schedule_id:"write-loop-dispatch-1" ~risk_class:Workspace_write
+    create_ok ~schedule_id:"loop-dispatch-every-occurrence"
       ~recurrence:(Interval { interval_sec = 60 })
       config
   in
-  (match
-     approve config ~grant_id:"grant-loop-1" ~approved_at:150.0
-       ~schedule_id:request.schedule_id ~approved_by:(human "approver-1") ()
-   with
-   | Ok _ -> ()
-   | Error err -> fail (service_error_to_string err));
   let first =
     tick_ok config ~now:201.0 ~consumer:(accepting_consumer calls)
   in
@@ -313,21 +308,8 @@ let test_tick_blocks_recurring_side_effect_until_fresh_grant () =
      check string "stored scheduled after first dispatch" "scheduled"
        (schedule_status_to_string stored.status);
      check (float 0.001) "second due_at" 260.0 stored.due_at);
-  let blocked =
-    tick_ok config ~now:260.0 ~consumer:(accepting_consumer calls)
-  in
-  check int "blocked signal" 1 (List.length blocked.emitted);
-  check_kind "blocked kind" Due_blocked_approval (List.hd blocked.emitted).kind;
-  check int "no stale-grant dispatch" 0 (List.length blocked.dispatches);
-  check Alcotest.(list string) "no second consumer call yet" [ request.schedule_id ] !calls;
-  (match
-     approve config ~grant_id:"grant-loop-2" ~approved_at:260.5
-       ~schedule_id:request.schedule_id ~approved_by:(human "approver-2") ()
-   with
-   | Ok stored -> check string "fresh grant keeps due" "due" (schedule_status_to_string stored.status)
-   | Error err -> fail (service_error_to_string err));
   let second =
-    tick_ok config ~now:261.0 ~consumer:(accepting_consumer calls)
+    tick_ok config ~now:260.0 ~consumer:(accepting_consumer calls)
   in
   check int "second dispatch" 1 (List.length second.dispatches);
   check Alcotest.(list string) "second consumer call"
@@ -335,14 +317,17 @@ let test_tick_blocks_recurring_side_effect_until_fresh_grant () =
     !calls
 ;;
 
-let test_tick_marks_dispatch_failure_failed () =
+let test_tick_marks_terminal_dispatch_rejection_failed () =
   with_workspace
   @@ fun config ->
   let calls = ref [] in
   let request = create_ok ~schedule_id:"dispatch-fail-1" config in
   let result =
     tick_ok config ~now:201.0
-      ~consumer:(accepting_consumer ~dispatch_result:(Error "boom") calls)
+      ~consumer:
+        (accepting_consumer
+           ~dispatch_result:(Error (Terminal_dispatch_rejection "boom"))
+           calls)
   in
   check int "one dispatch" 1 (List.length result.dispatches);
   check_dispatch_status "failed" Dispatch_failed (List.hd result.dispatches).status;
@@ -362,6 +347,110 @@ let test_tick_marks_dispatch_failure_failed () =
        execution.error)
 ;;
 
+let test_tick_retries_same_occurrence_without_blocking_other_schedule () =
+  with_workspace
+  @@ fun config ->
+  let retry_request = create_ok ~schedule_id:"retry-1" config in
+  let healthy_request = create_ok ~schedule_id:"healthy-1" config in
+  let retry_first_attempt = ref true in
+  let retry_signal_ids = ref [] in
+  let healthy_calls = ref 0 in
+  let consumer : Schedule_runner.consumer =
+    { accepts = (fun _request -> Ok ())
+    ; dispatch =
+        (fun _config ~now:_ signal request ->
+           if String.equal request.schedule_id retry_request.schedule_id then (
+             retry_signal_ids :=
+               Schedule_occurrence_id.to_string signal.occurrence_id
+               :: !retry_signal_ids;
+             if !retry_first_attempt then (
+               retry_first_attempt := false;
+               Error (Retryable_dispatch_failure "queue storage unavailable"))
+             else Ok (`Assoc [ "retried", `Bool true ]))
+           else (
+             incr healthy_calls;
+             Ok (`Assoc [ "healthy", `Bool true ])))
+    }
+  in
+  let first = tick_ok config ~now:201.0 ~consumer in
+  check int "both schedules dispatched" 2 (List.length first.dispatches);
+  check int "healthy schedule dispatched once" 1 !healthy_calls;
+  let occurrence_id =
+    match !retry_signal_ids with
+    | [ occurrence_id ] -> occurrence_id
+    | _ -> fail "retry schedule did not dispatch exactly once"
+  in
+  (match Schedule_store.get_schedule config ~schedule_id:retry_request.schedule_id with
+   | Some stored -> check string "retry schedule remains due" "due"
+                      (schedule_status_to_string stored.status)
+   | None -> fail "retry schedule missing");
+  (match Schedule_store.get_schedule config ~schedule_id:healthy_request.schedule_id with
+   | Some stored -> check string "other schedule succeeded" "succeeded"
+                      (schedule_status_to_string stored.status)
+   | None -> fail "healthy schedule missing");
+  let second = tick_ok config ~now:202.0 ~consumer in
+  check int "durable signal is not duplicated" 0 (List.length second.emitted);
+  check int "only retry schedule dispatched" 1 (List.length second.dispatches);
+  check Alcotest.(list string) "same occurrence identity reused"
+    [ occurrence_id; occurrence_id ]
+    (List.rev !retry_signal_ids);
+  check int "healthy schedule not replayed" 1 !healthy_calls;
+  (match Schedule_store.get_schedule config ~schedule_id:retry_request.schedule_id with
+   | Some stored -> check string "retry eventually succeeded" "succeeded"
+                      (schedule_status_to_string stored.status)
+   | None -> fail "retry schedule missing after success");
+  check Alcotest.(list string) "failed attempt remains beside successful retry"
+    [ "succeeded"; "failed" ]
+    (Schedule_store.executions_for_schedule
+       (Schedule_store.read_state config)
+       ~schedule_id:retry_request.schedule_id
+     |> List.map (fun (execution : execution_record) ->
+       execution_status_to_string execution.status))
+;;
+
+let test_recent_signal_decode_error_is_explicit () =
+  with_workspace
+  @@ fun config ->
+  Dated_jsonl.append
+    (Dated_jsonl.create ~base_dir:(signals_dir config) ())
+    (`Assoc
+      [ "event_type", `String "schedule.due_candidate"
+      ; "occurrence_id", `String "malformed"
+      ]);
+  match read_recent_signals config 10 with
+  | Ok _ -> fail "malformed durable signal was silently ignored"
+  | Error error ->
+    check bool "decode error identifies row" true
+      (String_util.contains_substring error "schedule signal row 0")
+;;
+
+let test_occurrence_decode_rejects_tampered_facts () =
+  with_workspace
+  @@ fun config ->
+  let _request = create_ok ~schedule_id:"codec-1" config in
+  let signal =
+    tick_ok config ~now:201.0 |> fun result -> List.hd result.emitted
+  in
+  let encoded = wake_signal_to_yojson signal in
+  (match wake_signal_of_yojson encoded with
+   | Ok decoded ->
+     check bool "round trip occurrence identity" true
+       (Schedule_occurrence_id.equal signal.occurrence_id decoded.occurrence_id)
+   | Error error -> fail error);
+  let tampered_id =
+    replace_json_field "occurrence_id" (`String "tampered") encoded
+  in
+  (match wake_signal_of_yojson tampered_id with
+   | Error _ -> ()
+   | Ok _ -> fail "tampered occurrence_id was accepted");
+  let tampered_payload =
+    replace_json_field "payload" (payload_json "different payload") encoded
+  in
+  match wake_signal_of_yojson tampered_payload with
+  | Error _ -> ()
+  | Ok _ -> fail "payload facts diverging from payload_digest were accepted"
+;;
+
 let test_runner_status_snapshot_tracks_liveness () =
   Schedule_runner_status.reset_for_test ();
   let render ?(now = 0.0) ?(stale_after_sec = 10.0) () =
@@ -377,7 +466,8 @@ let test_runner_status_snapshot_tracks_liveness () =
     ; emitted = []
     ; rescheduled = 2
     ; dispatches =
-        [ { schedule_id = "status-1"
+        [ { occurrence_id = test_occurrence_id "status-1"
+          ; schedule_id = "status-1"
           ; status = Dispatch_succeeded
           ; detail = Some (`Assoc [ "ok", `Bool true ])
           ; error = None
@@ -411,17 +501,20 @@ let test_runner_status_snapshot_tracks_liveness () =
     ; emitted = []
     ; rescheduled = 0
     ; dispatches =
-        [ { schedule_id = "status-dispatch-failed"
+        [ { occurrence_id = test_occurrence_id "status-dispatch-failed"
+          ; schedule_id = "status-dispatch-failed"
           ; status = Dispatch_failed
           ; detail = None
           ; error = Some "dispatch failed"
           }
-        ; { schedule_id = "status-dispatch-unsupported"
+        ; { occurrence_id = test_occurrence_id "status-dispatch-unsupported"
+          ; schedule_id = "status-dispatch-unsupported"
           ; status = Dispatch_unsupported
           ; detail = None
           ; error = Some "unsupported"
           }
-        ; { schedule_id = "status-dispatch-start-rejected"
+        ; { occurrence_id = test_occurrence_id "status-dispatch-start-rejected"
+          ; schedule_id = "status-dispatch-start-rejected"
           ; status = Dispatch_start_rejected
           ; detail = None
           ; error = Some "start rejected"
@@ -496,16 +589,20 @@ let () =
             test_tick_dispatches_due_candidate_to_success
         ; test_case "marks unsupported candidate failed" `Quick
             test_tick_marks_unsupported_candidate_failed
-        ; test_case "emits approval blocker then candidate after grant" `Quick
-            test_tick_emits_approval_blocker_then_candidate_after_grant
         ; test_case "reschedules recurring candidate after signal" `Quick
             test_tick_reschedules_recurring_candidate_after_signal
         ; test_case "dispatches recurring candidate to next due" `Quick
             test_tick_dispatches_recurring_candidate_to_next_due
-        ; test_case "blocks recurring side-effect until fresh grant" `Quick
-            test_tick_blocks_recurring_side_effect_until_fresh_grant
-        ; test_case "marks dispatch failure failed" `Quick
-            test_tick_marks_dispatch_failure_failed
+        ; test_case "dispatches every recurring occurrence" `Quick
+            test_tick_dispatches_every_recurring_occurrence
+        ; test_case "marks terminal dispatch rejection failed" `Quick
+            test_tick_marks_terminal_dispatch_rejection_failed
+        ; test_case "retries same occurrence without blocking other schedule" `Quick
+            test_tick_retries_same_occurrence_without_blocking_other_schedule
+        ; test_case "recent signal decode error is explicit" `Quick
+            test_recent_signal_decode_error_is_explicit
+        ; test_case "occurrence decode rejects tampered facts" `Quick
+            test_occurrence_decode_rejects_tampered_facts
         ] )
     ; ( "status",
         [ test_case "tracks liveness snapshot" `Quick

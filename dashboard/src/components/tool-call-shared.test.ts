@@ -5,8 +5,7 @@ import {
   durationColor,
   formatArgs,
   prettyArgs,
-  extractEmbeddedJson,
-  prettyJsonDeep,
+  prettyJson,
 } from './tool-call-shared'
 
 // ================================================================
@@ -189,74 +188,29 @@ describe('prettyArgs', () => {
 })
 
 // ================================================================
-// extractEmbeddedJson / prettyJsonDeep (double-encoded tool results)
+// prettyJson (opaque string fields)
 // ================================================================
 
-describe('extractEmbeddedJson', () => {
-  it('returns the object for a pure-JSON string', () => {
-    expect(extractEmbeddedJson('{"id":"p-1"}')).toEqual({ id: 'p-1' })
-  })
-
-  it('extracts the JSON after a "<prose>\\n{json}" prefix', () => {
-    expect(extractEmbeddedJson('Post created:\n{"id":"p-1","body":"hi"}')).toEqual({
-      id: 'p-1',
-      body: 'hi',
-    })
-  })
-
-  it('wraps a bare top-level array as {items: [...]} to match OCaml ensure_object', () => {
-    expect(extractEmbeddedJson('[1,2]')).toEqual({ items: [1, 2] })
-  })
-
-  it('wraps a suffix array as {items: [...]} to match OCaml ensure_object', () => {
-    expect(extractEmbeddedJson('Items:\n[1,2]')).toEqual({ items: [1, 2] })
-  })
-
-  it('returns null for plain prose without embedded JSON', () => {
-    expect(extractEmbeddedJson('just a note, see {a:1}')).toBeNull()
-  })
-
-  it('returns null when the suffix after newline is not valid JSON', () => {
-    expect(extractEmbeddedJson('header\n{not json')).toBeNull()
-  })
-})
-
-describe('prettyJsonDeep', () => {
+describe('prettyJson', () => {
   it('returns null for non-JSON input', () => {
-    expect(prettyJsonDeep('not json at all')).toBeNull()
+    expect(prettyJson('not json at all')).toBeNull()
   })
 
-  // The core bug: a tool result envelope whose `result` field embeds a
-  // "Post created:\n{json}" string. JSON.stringify(parse(...)) alone re-escapes
-  // the inner newlines to literal "\n"; prettyJsonDeep un-nests it instead.
-  it('un-nests a double-encoded board_post result so no literal \\n remains', () => {
-    const legacy = JSON.stringify({
-      ok: true,
-      result: 'Post created:\n{\n  "id": "p-240532",\n  "body": "hi"\n}',
-    })
-    const out = prettyJsonDeep(legacy)
+  it('pretty-prints the outer JSON value', () => {
+    expect(prettyJson('{"ok":true,"items":[1,2]}')).toBe(
+      '{\n  "ok": true,\n  "items": [\n    1,\n    2\n  ]\n}',
+    )
+  })
+
+  it('keeps a newline JSON suffix opaque inside a string field', () => {
+    const out = prettyJson(JSON.stringify({ result: 'header\n{"n":1}' }))
     expect(out).not.toBeNull()
-    // No literal backslash-n escape sequences survive in the rendered output.
-    expect(out).not.toContain('\\n')
-    // The inner post fields are now structurally addressable.
-    expect(out).toContain('"id": "p-240532"')
-    expect(out).toContain('"body": "hi"')
-  })
-
-  it('un-nests a field whose value is a "<prose>\\n{json}" string', () => {
-    const out = prettyJsonDeep(JSON.stringify({ result: 'header\n{"n":1}' }))
-    expect(out).not.toBeNull()
-    expect(out).not.toContain('\\n')
-    expect(out).toContain('"n": 1')
-  })
-
-  it('leaves plain string values untouched (no over-coercion)', () => {
-    const out = prettyJsonDeep(JSON.stringify({ note: 'hello world' }))
-    expect(out).toBe('{\n  "note": "hello world"\n}')
+    expect(out).toContain('header\\n{\\"n\\":1}')
+    expect(out).not.toContain('"n": 1')
   })
 
   it('preserves legitimate JSON-text string values (no over-coercion)', () => {
-    const out = prettyJsonDeep(JSON.stringify({ note: '{"x":1}' }))
+    const out = prettyJson(JSON.stringify({ note: '{"x":1}' }))
     expect(out).toBe('{\n  "note": "{\\"x\\":1}"\n}')
   })
 })

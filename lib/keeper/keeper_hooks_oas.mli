@@ -1,20 +1,15 @@
 (** Keeper Hooks (OAS bridge) — runtime telemetry, cost ledger, and
-    pre-/post-tool hook factory.
+    pre-/post-tool observation factory.
 
     Bridges OAS [Agent_sdk.Hooks] callbacks with MASC's keeper accounting:
     records OAS-reported usage/cost with explicit unknowns, records
-    Otel_metric_store metrics, and gates pre-tool execution via [Keeper_guards].
+    Otel_metric_store metrics, and records tool timing without making an
+    execution decision.
     Concrete provider/model identity remains OAS-owned; keeper-facing
     projections use neutral runtime lanes.  The [make_hooks] entry point
     wires every callback used by the keeper runtime turn loop. *)
 
-(** {1 Static configuration} *)
-
-val keeper_denied_tools : string list
-(** Tool names that are always denied for keeper-bound execution
-    regardless of runtime or persona policy. *)
-
-(** usage_has_tokens / is_keeper_board_write_tool_name / current_keeper_model
+(** usage_has_tokens / current_keeper_model
     moved to Keeper_hooks_oas_types (intra-library file split, 2026-05-16). *)
 
 (** {1 Tool-failure metrics} *)
@@ -52,9 +47,8 @@ val record_response_content_quality_metric :
 
 val classify_usage_trust :
   ?usage:Agent_sdk.Types.api_usage ->
-  telemetry:Agent_sdk.Types.inference_telemetry option ->
   unit -> Keeper_usage_trust.t
-(** Combine usage and OAS capability telemetry into a usage-trust verdict. *)
+(** Validate objective non-negative usage-counter invariants. *)
 
 val record_usage_anomaly_metrics :
   keeper_name:string -> Keeper_usage_trust.t -> unit
@@ -106,7 +100,6 @@ val cost_emit_source_metric : string
 
 val classify_cost_usd_source :
   usage_missing:bool ->
-  usage_trusted:bool ->
   runtime_unmetered:bool -> cost_usd:float -> string
 (** Classify the source of the emitted cost number for telemetry. *)
 
@@ -156,10 +149,6 @@ val make_hooks :
   meta_ref:Keeper_meta_contract.keeper_meta ref ->
   turn_ctx_cell:Keeper_tool_call_log.turn_ctx_cell ->
   generation:int ->
-  ?max_cost_usd:float ->
-  ?destructive_ops_policy:Destructive_ops_policy.t ->
-  ?pre_tool_use_guard:(tool_name:string ->
-                       input:Yojson.Safe.t -> string option) ->
   ?on_tool_executed:(tool_name:string ->
                      input:Yojson.Safe.t ->
                      output_text:string ->
@@ -169,19 +158,15 @@ val make_hooks :
   ?trajectory_acc:Trajectory.accumulator ->
   unit -> Agent_sdk.Hooks.hooks
 (** Build the [Agent_sdk.Hooks.hooks] record used by the keeper turn loop:
-    pre-tool gate, post-tool accounting, idle-detection, cost telemetry,
-    and trajectory hooks all wired together. *)
+    passive pre-tool timing, post-tool accounting, idle detection, and
+    trajectory hooks wired together. Cost remains part of post-turn
+    observation. *)
 
-val hook_introspection_json :
-  ?max_cost_usd:float ->
-  ?destructive_ops_policy:Destructive_ops_policy.t ->
-  unit -> Yojson.Safe.t
+val hook_introspection_json : unit -> Yojson.Safe.t
 (** JSON snapshot describing which hooks are active for the dashboard
-    diagnostics surface. The destructive-pattern gate reflects whether
-    [destructive_ops_policy] is enabled. *)
+    diagnostics surface. *)
 
 module For_testing : sig
   val tool_input_shape_for_log : Yojson.Safe.t -> string
   val tool_input_keys_for_log : Yojson.Safe.t -> string
-  val tool_completion_records_watchdog_progress : string -> bool
 end

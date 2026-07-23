@@ -17,13 +17,6 @@ type run_result =
 
 type error_disposition = Escalate_judge_failure
 
-type claim_eligibility =
-  | Claim_eligible
-  | Claim_deferred_by_runtime_pacing of
-      { runtime_id : string
-      ; remaining_seconds : float
-      }
-
 let prompt_name = Keeper_prompt_names.failure_judgment
 let schema_name = "keeper_failure_judgment"
 
@@ -70,12 +63,13 @@ let build_prompt ~keeper_name request =
     [ "failure_request_json", Yojson.Safe.to_string (request_json ~keeper_name request) ]
 ;;
 
+(* config/prompts/keeper.failure_judgment.md states the contract more tightly
+   than the schema can: it fixes the exact field set and couples decision to
+   guidance (null for await_external_input, non-empty otherwise), which JSON
+   Schema cannot express without oneOf. Keeper_failure_judgment_contract
+   re-checks every one of those on the way in. *)
 let apply_output_schema provider_config =
-  Ok
-    (Keeper_structured_output_schema.apply_schema_or_prompt_tier
-       ~log_label:"keeper failure judgment output contract"
-       Keeper_structured_output_schema.failure_judgment_output_schema
-       provider_config)
+  Ok (Keeper_structured_output_schema.without_response_format provider_config)
 ;;
 
 let reject_unregistered_tool ~name ~args:_ =
@@ -89,19 +83,6 @@ let resolve_runtime_id () =
   match Runtime.runtime_id_for_structured_judge () with
   | runtime_id -> Ok runtime_id
   | exception Failure detail -> Error (Runtime_configuration_error detail)
-;;
-
-let claim_eligibility ~keeper_name =
-  if not (Keeper_pacing_shadow.pacing_enforced ())
-  then Claim_eligible
-  else
-    match resolve_runtime_id () with
-    | Error _ -> Claim_eligible
-    | Ok runtime_id ->
-      (match Keeper_pacing_shadow.remaining_for_runtime ~keeper_name ~runtime_id with
-       | None -> Claim_eligible
-       | Some remaining_seconds ->
-         Claim_deferred_by_runtime_pacing { runtime_id; remaining_seconds })
 ;;
 
 let parse_response ~runtime_id response =
@@ -130,7 +111,6 @@ let run ~base_path ~keeper_name request =
             ~base_path
             ~masc_tools:[]
             ~dispatch:reject_unregistered_tool
-            ~temperature:Runtime_provider_defaults.deterministic_temperature
             ~provider_config_transform:apply_output_schema
             ()
         with

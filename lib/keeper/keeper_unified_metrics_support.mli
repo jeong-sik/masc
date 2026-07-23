@@ -24,14 +24,13 @@ val observed_affordances_of_observation :
 val classify_usage_trust :
   usage_reported:bool ->
   usage:Agent_sdk.Types.api_usage ->
-  context_max:int ->
   usage_trust
-
-val usage_trust_is_trusted : usage_trust -> bool
 
 val estimate_usage_cost_usd :
   Agent_sdk.Types.api_usage ->
   float
+(** Return the provider-reported value verbatim. Missing cost uses the numeric
+    aggregate identity [0.0]; anomaly provenance is emitted separately. *)
 
 val usage_trust_to_string : usage_trust -> string
 val usage_trust_reasons : usage_trust -> string list
@@ -64,7 +63,6 @@ val record_turn_latency_by_model_bucket :
   latency_ms:int ->
   unit
 
-val is_observation_only_tool_name : string -> bool
 val has_substantive_tool_calls : string list -> bool
 val is_noop_cycle : has_text:bool -> tools_used:string list -> bool
 
@@ -76,7 +74,6 @@ val coverage_reason_of_result : Keeper_agent_run.run_result -> string option
 val coverage_stage_of_result : Keeper_agent_run.run_result -> string option
 val coverage_stage_of_no_result_outcome : string -> string
 val coverage_reason_of_no_result_outcome : string -> string
-val error_category_of_no_result_outcome : outcome:string -> error:string option -> string option
 val validated_evidence_preview : Agent_sdk.Raw_trace.run_validation -> string
 
 val accountability_evidence_refs :
@@ -108,8 +105,6 @@ val decision_channel_of_observation :
 val is_scheduled_autonomous_cycle_of_observation :
   Keeper_world_observation.world_observation -> bool
 
-val response_requests_confirmation : string -> bool
-
 val select_proactive_preview :
   previous:string ->
   has_text:bool ->
@@ -120,6 +115,6 @@ val select_proactive_preview :
   validated_evidence_preview:string option ->
   string
 (** RFC-0232 scheduled-autonomous work preview, by precedence: visible model
-    text (only when [is_visible_reply], so the synthetic continuation notice on
-    a budget-exhausted turn is not shown as output) -> substantive tool calls ->
+    text (only when [is_visible_reply], so a no-output turn-limit observation
+    is not shown as output) -> substantive tool calls ->
     validated evidence -> [previous]. Pure for unit testing. *)

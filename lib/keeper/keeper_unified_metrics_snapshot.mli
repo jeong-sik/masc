@@ -10,13 +10,9 @@ val append_metrics_snapshot :
   turn_generation:int ->
   channel:Keeper_world_observation.keeper_cycle_channel ->
   snapshot_source:string ->
-  context_ratio:float ->
-  context_tokens:int ->
-  context_max:int ->
+  checkpoint_bytes:int ->
   message_count:int ->
-  compaction:Keeper_context_runtime.compaction_event ->
   handoff_json:Yojson.Safe.t option ->
-  ?provider_timeout_plan_json:Yojson.Safe.t ->
   ?count_completed_turn:bool ->
   ?deliberation_execution:Keeper_deliberation.execution_result ->
   unit ->

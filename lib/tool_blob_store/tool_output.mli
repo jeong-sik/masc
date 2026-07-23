@@ -1,41 +1,74 @@
-(** Typed wrapper for tool outputs that may be inline or externally stored.
+(** Tool_output — typed reference for externalized tool payloads (#25096).
 
-    Used by [tool_bridge] to externalize large outputs and by the keeper
-    artifact hydrator to lazily resolve refs at LLM-call time.
+    Tool outputs too large for inline transport are persisted in
+    {!Tool_blob_store}; the OAS [content] field then carries a marker
+    rendered by {!encode_for_oas}. The marker wire format is unchanged
+    ([[masc:blob sha256=… bytes=… mime=… preview=…]], consumed by durable
+    keeper histories and the dashboard inspector), but the codec is now
+    exact:
 
-    OAS [Agent_sdk.Types.ToolResult.content] is a fixed [string] field; we
-    embed [Stored] refs as a blob-reference marker inside that string so
-    the OAS type surface stays untouched. *)
+    - {!artifact_ref} is [private]: construction goes through
+      {!make_artifact_ref}, so every reference in flight has a valid sha256,
+      a non-negative byte count, and a non-empty media type.
+    - {!decode_from_oas} distinguishes [Not_marker], a valid {!Stored}, and
+      [Invalid_marker] — a marker-shaped payload that fails to parse is now a
+      visible, typed outcome instead of the previous silent [Inline]
+      fallback. *)
+
+(** {1 sha256 validation (SSOT, re-exported by {!Tool_blob_store})} *)
+
+type invalid_sha256 =
+  | Invalid_sha256_length of { actual : int }
+  | Invalid_sha256_character of { index : int; found : char }
+
+val validate_sha256 : string -> (unit, invalid_sha256) result
+val invalid_sha256_to_string : invalid_sha256 -> string
+
+(** {1 Typed artifact reference} *)
+
+type artifact_ref = private
+  { sha256 : string
+  ; bytes : int
+  ; preview : string
+  ; mime : string
+  }
+
+type make_error =
+  | Invalid_sha256 of invalid_sha256
+  | Negative_bytes of int
+  | Empty_mime
+
+val make_artifact_ref :
+  sha256:string ->
+  bytes:int ->
+  preview:string ->
+  mime:string ->
+  (artifact_ref, make_error) result
+
+val make_error_to_string : make_error -> string
+
+val with_preview : artifact_ref -> string -> artifact_ref
+(** Replace the preview, keeping the validated identity fields. Total — the
+    existing reference already passed validation. *)
+
+(** {1 Wire codec} *)
 
 type t =
   | Inline of string
-  | Stored of {
-      sha256 : string;  (** lowercase hex, 64 chars *)
-      bytes : int;
-      preview : string;
-      mime : string;
-    }
+  | Stored of artifact_ref
 
 val marker_prefix : string
-(** ["[masc:blob "] — the 11-byte discriminator at offset 0 of an encoded
-    [Stored] value. Distinct from the existing [tool:] mask prefix used by
-    [Context_compact_oas]; real tool outputs do not start with this prefix. *)
-
 val is_marker : string -> bool
-(** True iff [s] starts with [marker_prefix]. *)
 
 val encode_for_oas : t -> string
-(** Encode for embedding in OAS [Agent_sdk.Types.ToolResult.content].
 
-    [Inline s] -> [s].
-    [Stored {...}] -> blob marker, e.g.
-      [["[masc:blob sha256=ab12... bytes=128934 mime=text/plain preview=\"...\"]"]].
+(** Exact decode outcome. [Invalid_marker] means the input starts with
+    {!marker_prefix} but the payload is malformed or fails validation — the
+    caller must decide visibly (keep the raw text, log, or fail) rather than
+    inherit a silent inline fallback. *)
+type decode_result =
+  | Not_marker
+  | Invalid_marker of { detail : string }
+  | Decoded of artifact_ref
 
-    Round-trip property: [decode_from_oas (encode_for_oas x) = x]. *)
-
-val decode_from_oas : string -> t
-(** Decode a string from OAS [ToolResult.content].
-
-    Returns [Inline s] for any string not starting with [marker_prefix]
-    (backward compatibility with old checkpoints) or for malformed markers
-    (fail-safe — never raises). *)
+val decode_from_oas : string -> decode_result

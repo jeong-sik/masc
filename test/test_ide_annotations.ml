@@ -4,6 +4,7 @@ module Types = Ide_annotation_types
 module Store = Ide_annotations
 module Region = Ide_region_tracker
 module Lsp = Lsp_overlay_provider
+let yojson = testable Yojson.Safe.pp Yojson.Safe.equal
 
 (* Ide_annotations.create generates ids via [Uuidm.v4_gen (Random.get_state ())].
    [Random.get_state] returns a COPY of the global state, so two
@@ -23,14 +24,13 @@ let route_annotation : Types.annotation =
   ; content = "Connect this line to the active review context."
   ; goal_id = Some "goal-ide"
   ; task_id = Some "task-42"
-  ; board_post_id = Some "post-1"
-  ; comment_id = Some "comment-1"
-  ; pr_id = Some "15035"
-  ; git_ref = Some "feat/context-lens"
-  ; log_id = Some "turn-9"
-  ; session_id = Some "sess-9"
-  ; operation_id = Some "op-9"
-  ; worker_run_id = Some "wr-9"
+  ; references =
+      [ { relation = "discussion"; reference = "thread-1" }
+      ; { relation = "review"; reference = "review-15035" }
+      ; { relation = "revision"; reference = "feat/context-lens" }
+      ; { relation = "evidence"; reference = "turn-9" }
+      ; { relation = "telemetry"; reference = "trace-9" }
+      ]
   ; created_at_ms = 1L
   ; updated_at_ms = 2L
   }
@@ -114,14 +114,9 @@ let test_annotation_json_preserves_route_context () =
   match Types.annotation_of_json (Types.annotation_to_json route_annotation) with
   | Error msg -> fail msg
   | Ok decoded ->
-    check (option string) "board post" route_annotation.board_post_id decoded.board_post_id;
-    check (option string) "comment" route_annotation.comment_id decoded.comment_id;
-    check (option string) "pr" route_annotation.pr_id decoded.pr_id;
-    check (option string) "git" route_annotation.git_ref decoded.git_ref;
-    check (option string) "log" route_annotation.log_id decoded.log_id;
-    check (option string) "session" route_annotation.session_id decoded.session_id;
-    check (option string) "operation" route_annotation.operation_id decoded.operation_id;
-    check (option string) "worker" route_annotation.worker_run_id decoded.worker_run_id
+    check yojson "opaque references"
+      (Agent_observation.annotation_references_to_json route_annotation.references)
+      (Agent_observation.annotation_references_to_json decoded.references)
 ;;
 
 let test_create_lists_route_context () =
@@ -137,19 +132,12 @@ let test_create_lists_route_context () =
         ~content:"Should this trace be attached to the PR review?"
         ~goal_id:"goal-ide"
         ~task_id:"task-42"
-        ~board_post_id:"post-1"
-        ~comment_id:"comment-1"
-        ~pr_id:"15035"
-        ~git_ref:"feat/context-lens"
-        ~log_id:"turn-9"
-        ~session_id:"sess-9"
-        ~operation_id:"op-9"
-        ~worker_run_id:"wr-9"
+        ~references:route_annotation.references
         ()
     with
     | Error msg -> fail msg
     | Ok created ->
-      check (option string) "created pr" (Some "15035") created.pr_id;
+      check int "created references" 5 (List.length created.references);
       let filter =
         { Types.file_path = Some "lib/keeper/keeper_tool_ide_runtime.ml"
         ; keeper_id = None
@@ -160,8 +148,9 @@ let test_create_lists_route_context () =
       (match Store.list ~base_dir ~filter () with
        | [ listed ] ->
          check string "id" created.id listed.id;
-         check (option string) "listed comment" (Some "comment-1") listed.comment_id;
-         check (option string) "listed log" (Some "turn-9") listed.log_id
+         check yojson "listed references"
+           (Agent_observation.annotation_references_to_json route_annotation.references)
+           (Agent_observation.annotation_references_to_json listed.references)
        | rows -> failf "expected one listed annotation, got %d" (List.length rows)))
 ;;
 
@@ -179,14 +168,7 @@ let test_lsp_overlay_exposes_route_context () =
         ~content:"Should this trace be attached to the PR review?"
         ~goal_id:"goal-ide"
         ~task_id:"task-42"
-        ~board_post_id:"post-1"
-        ~comment_id:"comment-1"
-        ~pr_id:"15035"
-        ~git_ref:"feat/context-lens"
-        ~log_id:"turn-9"
-        ~session_id:"sess-9"
-        ~operation_id:"op-9"
-        ~worker_run_id:"wr-9"
+        ~references:route_annotation.references
         ()
     with
     | Error msg -> fail msg
@@ -198,8 +180,8 @@ let test_lsp_overlay_exposes_route_context () =
       (match codelenses with
        | [ codelens ] ->
          let title = Option.value ~default:"" (codelens_title codelens) in
-         check_contains "codelens carries PR route" "PR:15035" title;
-         check_contains "codelens carries log route" "log:turn-9" title
+         check_contains "codelens carries opaque review reference" "review:review-15035" title;
+         check_contains "codelens carries evidence reference" "evidence:turn-9" title
        | rows -> failf "expected one codelens, got %d" (List.length rows));
       let inlay_hints =
         Lsp.inlay_hints ~base_dir ~file_path:"lib/keeper/keeper_tool_ide_runtime.ml"
@@ -209,8 +191,8 @@ let test_lsp_overlay_exposes_route_context () =
          let label = Option.value ~default:"" (string_field "label" hint) in
          let tooltip = Option.value ~default:"" (string_field "tooltip" hint) in
          check_contains "inlay carries task route" "task:task-42" label;
-         check_contains "inlay carries telemetry route" "worker:wr-9" label;
-         check_contains "inlay tooltip carries comment route" "comment:comment-1" tooltip
+         check_contains "inlay carries telemetry reference" "telemetry:trace-9" label;
+         check_contains "inlay tooltip carries discussion reference" "discussion:thread-1" tooltip
        | rows -> failf "expected one inlay hint, got %d" (List.length rows));
       let diagnostics =
         Lsp.diagnostics
@@ -221,7 +203,7 @@ let test_lsp_overlay_exposes_route_context () =
       (match diagnostics with
        | [ diagnostic ] ->
          let message = Option.value ~default:"" (string_field "message" diagnostic) in
-         check_contains "diagnostic carries git route" "git:feat/context-lens" message
+         check_contains "diagnostic carries revision reference" "revision:feat/context-lens" message
        | rows -> failf "expected one diagnostic, got %d" (List.length rows));
       let hover =
         Lsp.enrich_hover
@@ -234,8 +216,8 @@ let test_lsp_overlay_exposes_route_context () =
              ])
       in
       let value = Option.value ~default:"" (hover_value hover) in
-      check_contains "hover carries board route" "board:post-1" value;
-      check_contains "hover carries operation route" "op:op-9" value))
+      check_contains "hover carries review reference" "review:review-15035" value;
+      check_contains "hover carries telemetry reference" "telemetry:trace-9" value))
 ;;
 
 let test_region_tracker_writes_fixed_regions_file () =
@@ -735,14 +717,7 @@ let test_compact_preserves_annotations () =
           ~content
           ~goal_id:"g"
           ~task_id:"t"
-          ~board_post_id:"p"
-          ~comment_id:"c"
-          ~pr_id:"1"
-          ~git_ref:"r"
-          ~log_id:"l"
-          ~session_id:"s"
-          ~operation_id:"o"
-          ~worker_run_id:"w"
+          ~references:[ { relation = "evidence"; reference = "opaque-1" } ]
           ()
       with
       | Error msg -> fail msg

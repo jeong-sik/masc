@@ -1,7 +1,7 @@
 (* RFC-0057 Phase 2 — tool descriptor codegen.
 
-   Mirrors bin/gen_shell_ir_walkers.ml: spec-as-OCaml-value -> Buffer.emit
-   -> stdout. The dune rule in lib/tool_schemas/ captures stdout into
+   Emits a spec-as-OCaml-value through [Buffer] to stdout. The dune rule in
+   lib/tool_schemas/ captures stdout into
    tool_descriptors_gen.ml inside the masc_tool_schemas library, so the
    generated schemas live alongside the hand-written ones in the same
    module namespace.
@@ -14,37 +14,12 @@
 
 open Tool_schemas_specs_types
 
-(* === Phase 0 spec data ==============================================
+(* === Phase 1 SSOT spec data =========================================
 
-   masc_config — single optional `category` filter. The enum mirrors
-   Tool_schemas_misc.config_category_enum_strings (Issue #8493). Phase
-   0 keeps a third copy in this generator to stay self-contained; the
-   regression test guarantees this copy stays aligned with the
-   hand-written schema, and Phase 1 collapses all three into a typed
-   SSOT. *)
+   masc_config — single optional `category` filter. The enum references
+   Tool_schemas_specs_types.config_category_enum_strings (Issue #8493 / #15257). *)
 
-let config_category_enum_strings =
-  [ "server"
-  ; "auth"
-  ; "transport"
-  ; "storage"
-  ; "runtime"
-  ; "rate_limiting"
-  ; "inference"
-  ; "keeper"
-  ; "keeper_execution"
-  ; "keeper_guardrails"
-  ; "autonomy"
-  ; "level2"
-  ; "dashboard"
-  ; "economy"
-  ; "governance"
-  ; "channel"
-  ; "process"
-  ; "worker"
-  ; "web_search"
-  ; "session"
-  ]
+let config_category_enum_strings = Tool_schemas_specs_types.config_category_enum_strings
 ;;
 
 let masc_config_spec : tool_spec =
@@ -117,13 +92,12 @@ let masc_keeper_waiting_inventory_spec : tool_spec =
 let masc_gc_spec : tool_spec =
   { name = "masc_gc"
   ; description =
-      "Run garbage collection: remove zombie agents, archive stale tasks, delete old \
-       messages (default: 7-day threshold)."
+      "Run explicit age-based garbage collection. Agent lifecycle is not modified."
   ; parameters =
       [ { p_name = "days"
-        ; p_type = T_int { min = None; max = None; default = Some 7 }
-        ; p_description = "Age threshold in days (default: 7)"
-        ; p_required = false
+        ; p_type = T_int { min = Some 1; max = None; default = None }
+        ; p_description = "Operator-selected retention horizon in days"
+        ; p_required = true
         }
       ]
   ; additional_properties = false
@@ -148,16 +122,6 @@ let masc_tool_stats_spec : tool_spec =
   }
 ;;
 
-let masc_cleanup_zombies_spec : tool_spec =
-  { name = "masc_cleanup_zombies"
-  ; description =
-      "Remove zombie agents (no heartbeat for 5+ min) and release their file locks."
-  ; parameters = []
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
 let masc_pause_spec : tool_spec =
   { name = "masc_pause"
   ; description =
@@ -177,6 +141,17 @@ let masc_pause_spec : tool_spec =
 let masc_resume_spec : tool_spec =
   { name = "masc_resume"
   ; description = "Resume a workspace that was paused by an operator."
+  ; parameters = []
+  ; additional_properties = false
+  ; behavior_contract = []
+  }
+;;
+
+let masc_pause_status_spec : tool_spec =
+  { name = "masc_pause_status"
+  ; description =
+      "Return the current pause status of the workspace and any paused keepers. \
+       Read-only; takes no arguments."
   ; parameters = []
   ; additional_properties = false
   ; behavior_contract = []
@@ -316,7 +291,7 @@ let masc_deliver_spec : tool_spec =
       "Attach final output/result to a task for handoff or review. Use for: code diffs, \
        PR URLs, analysis reports, generated files. Deliverables persist with task and \
        are visible to other agents. Call before masc_transition(action='done'). Example: \
-       masc_deliver({task_id: 'task-001', content: 'PR: github.com/org/repo/pull/123'})"
+       masc_deliver({task_id: 'task-001', content: 'artifact:review-123'})"
   ; parameters =
       [ { p_name = "task_id"
         ; p_type = T_string { enum = None; default = None }
@@ -419,7 +394,6 @@ let phase6_specs : tool_spec list =
   ; masc_keeper_waiting_inventory_spec
   ; masc_gc_spec
   ; masc_tool_stats_spec
-  ; masc_cleanup_zombies_spec
     (* PR-2: plan group *)
   ; masc_plan_init_spec
   ; masc_plan_update_spec
@@ -601,6 +575,7 @@ let () =
   emit_header buf;
   emit_named_tool_schema buf "masc_pause_schema" masc_pause_spec;
   emit_named_tool_schema buf "masc_resume_schema" masc_resume_spec;
+  emit_named_tool_schema buf "masc_pause_status_schema" masc_pause_status_spec;
   emit_schemas_list buf phase6_specs;
   print_string (Buffer.contents buf)
 ;;

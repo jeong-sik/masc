@@ -28,7 +28,6 @@ const joinedToolOutput: ToolCallEntry = {
   input: { scope: 'current' },
   output: 'context status joined from tool_calls_endpoint',
   success: true,
-  semantic_success: true,
   duration_ms: 84,
 }
 

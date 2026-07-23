@@ -29,12 +29,10 @@ let taskboard_tools : Masc_domain.tool_schema list =
                       ] )
                 ; ( "limit"
                   , `Assoc
-                      [ (* Issue #18472: wire-format widening — same
-                           pattern as PR #19383 on [limit] siblings.
-                           The runtime accepts both shapes; strict
-                           ["integer"] only fires correction_pipeline. *)
-                        ( "type"
-                        , `List [ `String "integer"; `String "string" ] )
+                      [ (* #18472 widening removed: a multi-type schema trips
+                           OAS #2343 fail-closed and crashes the keeper cycle.
+                           Runtime coerces string->int, so strict integer is safe. *)
+                        ( "type", `String "integer" )
                       ; "description", `String "Max tasks to return (default: 50)"
                       ; "minimum", `Int 1
                       ; "maximum", `Int 100
@@ -45,9 +43,9 @@ let taskboard_tools : Masc_domain.tool_schema list =
     }
   ; { name = "keeper_tasks_audit"
     ; description =
-        "Find orphaned tasks: claimed/in_progress tasks assigned to agents that are \
-         offline (no heartbeat >10 min). Returns orphan list with assignee and \
-         last_seen. The workspace GC auto-releases orphaned tasks; this audit is read-only."
+        "Find tasks whose exact assignee identity is absent from explicit active \
+         workspace/session membership. Returns the task status and assignee. This \
+         audit is read-only: it never releases or reassigns tasks."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -55,11 +53,10 @@ let taskboard_tools : Masc_domain.tool_schema list =
             , `Assoc
                 [ ( "limit"
                   , `Assoc
-                      [ (* Issue #18472: wire-format widening — bundled
-                           with keeper_tasks_list.limit above per
-                           RFC-0088 §3 N-of-M avoidance. *)
-                        ( "type"
-                        , `List [ `String "integer"; `String "string" ] )
+                      [ (* #18472 widening removed: a multi-type schema trips
+                           OAS #2343 fail-closed and crashes the keeper cycle.
+                           Runtime coerces string->int, so strict integer is safe. *)
+                        ( "type", `String "integer" )
                       ; "description", `String "Max orphans to return (default: 20)"
                       ; "minimum", `Int 1
                       ; "maximum", `Int 50
@@ -171,7 +168,7 @@ let taskboard_tools : Masc_domain.tool_schema list =
   ; { name = "keeper_task_create"
     ; description =
         "Create a new task on the MASC backlog. The task appears for any keeper to \
-         claim. Duplicate titles are rejected automatically (dedup by normalized title)."
+         claim."
     ; input_schema =
         `Assoc
           [ "type", `String "object"

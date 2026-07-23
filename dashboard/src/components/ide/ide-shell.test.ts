@@ -1104,7 +1104,7 @@ describe('IdeShell', () => {
         },
       ]]),
       heatmap: new Map([[94, 1]]),
-      collisions: [{ line: 94, keeper_ids: ['sangsu', 'nick0cave'], risk_level: 'medium' }],
+      collisions: [{ line: 94, keeper_ids: ['sangsu', 'nick0cave'] }],
       active_file: 'lib/scheduler/round.ml',
     }
 

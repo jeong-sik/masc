@@ -31,9 +31,14 @@ val run_bench :
 (** [run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt
       ~max_tokens ~timeout_sec ()] runs a concurrency benchmark.
 
-    {b Reachability gate}: returns [Error _] immediately if
-    {!ensure_runtime_reachable} fails for the requested
-    [runtime_pool].  No samples are taken.
+    [runtime_pool] is an exact materialized runtime id from [runtime.toml].
+    When omitted, the initialized default {!Runtime.t} is used.  [model_id],
+    when present, must exactly match that runtime's materialized provider
+    config. Unknown runtimes and model mismatches return [Error _]; URLs and
+    legacy pool aliases are not interpreted.
+
+    {b Reachability gate}: when the runtime declares a provider healthcheck,
+    returns [Error _] immediately if that check fails. No samples are taken.
 
     {b Schedule}: [rounds] sequential rounds, each with
     [parallelism] concurrent fibers via {!Eio.Fiber.all}.  Total
@@ -49,8 +54,8 @@ val run_bench :
       \{
         "server_url": string,
         "source": "oas_complete",
-        "model_id": string|null,
-        "runtime_pool": string|null,
+        "model_id": string,
+        "runtime_pool": string,
         "parallelism": int,
         "rounds": int,
         "total_requests": int,

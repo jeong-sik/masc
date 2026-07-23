@@ -28,7 +28,6 @@ module Dashboard_briefing = Dashboard_briefing
 (* module Dashboard_proof removed *)
 module Dashboard_briefing_sections = Dashboard_briefing_sections
 module Build_identity = Masc.Build_identity
-module Auth_login = Masc.Auth_login
 module Keeper_msg_async = Masc.Keeper_msg_async
 module Keeper_status_bridge = Masc.Keeper_status_bridge
 module Keeper_tool_call_log = Masc.Keeper_tool_call_log
@@ -253,62 +252,6 @@ let dispatch_route ~router ~request ~path ~upgrade reqd =
   | `DELETE, "/mcp/operator" ->
       handle_delete_mcp
         ~profile:Server_mcp_transport_http.Operator_remote request reqd
-  | `GET, "/api/v1/board/flairs" ->
-      let flairs = List.map Board.flair_to_yojson Board.available_flairs in
-      let json = `Assoc [("flairs", `List flairs)] in
-      Http.Response.json (Yojson.Safe.to_string json) reqd
-  | `GET, "/api/v1/board/hearths" ->
-      let hearths = Board_dispatch.list_hearths () in
-      let json = `Assoc [
-        ("hearths", `List (List.map (fun (name, count) ->
-          `Assoc [("name", `String name); ("count", `Int count)]
-        ) hearths));
-      ] in
-      Http.Response.json (Yojson.Safe.to_string json) reqd
-  | `GET, "/api/v1/board/curation" ->
-      let json =
-        match Board_dispatch.latest_curation_snapshot () with
-        | None -> `Assoc [ ("snapshot", `Null) ]
-        | Some snap ->
-            `Assoc [ ("snapshot", Board_curation.snapshot_to_yojson snap) ]
-      in
-      Http.Response.json (Yojson.Safe.to_string json) reqd
-  | `GET, "/api/v1/board/sub-boards" ->
-      let sub_boards = Board_dispatch.list_sub_boards () in
-      let json =
-        `Assoc
-          [
-            ( "sub_boards",
-              `List (List.map Board.sub_board_to_yojson sub_boards) );
-          ]
-      in
-      Http.Response.json (Yojson.Safe.to_string json) reqd
-  | `GET, "/api/v1/board/karma/ledger" ->
-      let agent = query_param request "agent" in
-      let limit =
-        int_query_param request "limit" ~default:500 |> clamp ~min_v:1 ~max_v:5000
-      in
-      let events = Board_dispatch.get_karma_ledger ?agent ~limit () in
-      let totals =
-        Board_dispatch.get_all_karma ()
-        |> List.sort (fun (_, a) (_, b) -> compare b a)
-      in
-      let json =
-        `Assoc
-          [
-            ("events", `List (List.map Board.karma_event_to_yojson events));
-            ("count", `Int (List.length events));
-            ("scoring_rule", `String "up=+1,down=0");
-            ( "totals",
-              `List
-                (List.map
-                   (fun (agent_name, k) ->
-                     `Assoc
-                       [ ("agent", `String agent_name); ("karma", `Int k) ])
-                   totals) );
-          ]
-      in
-      Http.Response.json (Yojson.Safe.to_string json) reqd
   (* Board reads/reactions are owned by the typed route table: exact routes
      ([/api/v1/board/reactions], [/catalog]) win over the board prefix route,
      and the prefix route resolves the bearer-bound reaction actor itself. *)
@@ -424,7 +367,7 @@ let make_extended_handler ~trust_policy routes =
              | None -> try_internal_error_response reqd msg)))
 
 (** Main server loop *)
-let run_server ~sw ~env ~host ~port ~base_path =
+let run_server ~sw ~env ~host ~port ~base_path ~input_base_path =
   (* Use the parent switch directly so that ALL fibers spawned by
      Server_runtime_bootstrap (background maintenance, keeper loops,
      dashboard refresh, etc.) are children of this switch.  Graceful
@@ -433,10 +376,12 @@ let run_server ~sw ~env ~host ~port ~base_path =
      switch propagates cancellation to every child fiber, preventing
      the 10s force-exit timeout. *)
   try
-    Server_runtime_bootstrap.run ~sw ~env ~host ~port ~base_path ~make_routes
+    Server_runtime_bootstrap.run ~sw ~env ~host ~port ~base_path
+      ~input_base_path ~make_routes
       ~make_request_handler:make_extended_handler
       ~make_h2_request_handler:Server_h2_gateway.make_request_handler
       ~make_h2_error_handler:Server_h2_gateway.make_error_handler
+      ()
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -545,14 +490,22 @@ let acquire_pid_lock port =
            pid port pid);
       exit 1
 
-let acquire_base_path_lock base_path =
-  match Server_startup_takeover.acquire_base_path_lock base_path with
-  | Server_startup_takeover.Acquired -> ()
-  | Server_startup_takeover.Already_running { pid } ->
+let acquire_base_path_lock ~run_dir base_path =
+  match Server_startup_takeover.acquire_base_path_lock ~run_dir base_path with
+  | Server_startup_takeover.Base_path_acquired lease -> lease
+  | Server_startup_takeover.Base_path_already_owned { pid } ->
+      let owner = Option.fold ~none:"unknown" ~some:string_of_int pid in
       Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
         (Printf.sprintf
-           "[FATAL] Another MASC server (PID %d) already owns base path %s. Kill it first: kill %d"
-           pid base_path pid);
+           "[FATAL] Another MASC runtime (PID %s) already owns base path %s"
+           owner base_path);
+      exit 1
+  | Server_startup_takeover.Base_path_rejected rejection ->
+      Log.legacy_stderr ~level:Log.Error ~module_name:"Server"
+        (Printf.sprintf
+           "[FATAL] BasePath ownership boundary rejected %s: %s"
+           base_path
+           (Server_startup_takeover.base_path_lock_rejection_to_string rejection));
       exit 1
 
 let run_cmd host port cli_base_path =
@@ -572,11 +525,48 @@ let run_cmd host port cli_base_path =
   let stripped_base_path =
     Env_config.strip_path_trailing_slashes (String.trim raw_base_path)
   in
-  let masc_dir = Filename.concat normalized_base_path Common.masc_dirname in
-  Fs_compat.mkdir_p masc_dir;
+  (* Preserve support for a not-yet-created explicit workspace root, then
+     freeze one canonical identity before acquiring any ownership lease or
+     constructing paths that survive startup. *)
+  Fs_compat.mkdir_p normalized_base_path;
+  let canonical_base_path =
+    match Server_base_path_guard.canonicalize_existing normalized_base_path with
+    | Ok canonical -> canonical
+    | Error error ->
+      Printf.eprintf
+        "%s\n"
+        (Server_base_path_guard.format_canonicalization_error error);
+      exit 1
+  in
+  Server_base_path_guard.exit_on_violation
+    (Server_base_path_guard.enforce
+       { resolved_base_path with normalized_base_path = canonical_base_path });
+  let masc_dir = Filename.concat canonical_base_path Common.masc_dirname in
+  let run_dir = (Host_config.host ()).run_dir in
+  let _base_path_lease = acquire_base_path_lock ~run_dir canonical_base_path in
   acquire_pid_lock port;
-  acquire_base_path_lock normalized_base_path;
   Log.init_from_env ();
+  (* Report a fresh takeover breadcrumb at boot: after a SIGKILL escalation
+     the victim could not log, so this is the only place the kill becomes
+     visible. Skip the breadcrumb this process wrote itself while reclaiming
+     the lock (the killer already logged its own WARN). *)
+  (match
+     Server_startup_takeover.read_takeover_breadcrumb
+       ~lock_path:(Server_startup_takeover.pid_lock_path port)
+       ()
+   with
+   | Server_startup_takeover.Breadcrumb_found { killer_pid = Some killer; _ }
+     when killer = Unix.getpid () -> ()
+   | Server_startup_takeover.Breadcrumb_found { breadcrumb_path; age_sec; payload; _ }
+     ->
+     Log.Server.warn
+       "[Startup] takeover breadcrumb found (%.0fs old, %s) — previous instance was killed by a takeover: %s"
+       age_sec breadcrumb_path payload
+   | Server_startup_takeover.Breadcrumb_stale _ | Server_startup_takeover.Breadcrumb_absent
+     -> ()
+   | Server_startup_takeover.Breadcrumb_unreadable { breadcrumb_path; reason } ->
+     Log.Server.warn "[Startup] takeover breadcrumb unreadable at %s: %s"
+       breadcrumb_path reason);
   let shutdown_cfg =
     match Masc.Shutdown.config_from_env_result () with
     | Ok config -> config
@@ -595,10 +585,10 @@ let run_cmd host port cli_base_path =
   then
     Log.Server.warn
       "Normalizing --base-path from %s to %s because runtime base paths must point at the workspace root, not the .masc directory."
-      raw_base_path normalized_base_path;
+      raw_base_path canonical_base_path;
   Unix.putenv "MASC_BASE_PATH_INPUT" raw_base_path;
-  Unix.putenv "MASC_BASE_PATH" normalized_base_path;
-  Workspace_utils_backend_setup.cache_resolved_base_path normalized_base_path;
+  Unix.putenv "MASC_BASE_PATH" canonical_base_path;
+  Workspace_utils_backend_setup.cache_resolved_base_path canonical_base_path;
   Unix.putenv "MASC_BASE_PATH_RESOLUTION_SOURCE" resolution_source;
   (* Persist logs inside .masc/logs/ — colocated with state, not a sibling.
      Previous code wrote to base_path/logs/ which diverged from .masc/ when
@@ -606,7 +596,7 @@ let run_cmd host port cli_base_path =
   let log_dir = Filename.concat masc_dir "logs" in
   Fs_compat.mkdir_p log_dir;
   (* Migration: move .jsonl files from old base_path/logs/ if they exist *)
-  let old_log_dir = Filename.concat normalized_base_path "logs" in
+  let old_log_dir = Filename.concat canonical_base_path "logs" in
   (if Sys.file_exists old_log_dir && Sys.is_directory old_log_dir then
      let files = try Sys.readdir old_log_dir with Sys_error _ -> [||] in
      Array.iter (fun fname ->
@@ -621,8 +611,7 @@ let run_cmd host port cli_base_path =
   Log.Ring.init_file_sink log_dir;
   Log.Ring.cleanup_old_files log_dir;
   Eio_main.run @@ fun env ->
-  (* Initialize Mirage_crypto RNG - MUST be inside Eio_main.run for thread-local state *)
-  Mirage_crypto_rng_unix.use_default ();
+  Crypto_rng.ensure_default ();
 
   (* Enable Eio-aware locking globally (single call replaces per-module enable_eio) *)
   Eio_guard.enable ();
@@ -676,6 +665,31 @@ let run_cmd host port cli_base_path =
             Log.Server.info
               "[MASC] Received %s, shutting down gracefully (timeout=%.0fs, hard_exit=%d)..."
               signal_name force_timeout Masc.Shutdown.process_deadline_exit_code;
+            (* Signal-sender attribution for the restart-cycle investigation:
+               a takeover killer writes a breadcrumb next to the pid lock
+               right before signalling; its absence means the sender is
+               external (user, pkill, system). *)
+            (match
+               Server_startup_takeover.read_takeover_breadcrumb
+                 ~lock_path:(Server_startup_takeover.pid_lock_path port)
+                 ()
+             with
+             | Server_startup_takeover.Breadcrumb_found { age_sec; payload; _ } ->
+               Log.Server.info
+                 "[Shutdown] signal attribution: takeover breadcrumb (%.1fs old): %s"
+                 age_sec payload
+             | Server_startup_takeover.Breadcrumb_stale { age_sec; _ } ->
+               Log.Server.info
+                 "[Shutdown] signal attribution: no fresh takeover breadcrumb (stale one is %.0fs old) — sender is external (user/pkill/system)"
+                 age_sec
+             | Server_startup_takeover.Breadcrumb_absent ->
+               Log.Server.info
+                 "[Shutdown] signal attribution: no takeover breadcrumb — sender is external (user/pkill/system)"
+             | Server_startup_takeover.Breadcrumb_unreadable { breadcrumb_path; reason }
+               ->
+               Log.Server.warn
+                 "[Shutdown] signal attribution: breadcrumb unreadable at %s: %s"
+                 breadcrumb_path reason);
             (* Phase 1: Notify SSE clients *)
             let t_phase = Unix.gettimeofday () in
             let shutdown_data =
@@ -751,7 +765,14 @@ let run_cmd host port cli_base_path =
             ()
             in
             Eio.Fiber.first
-            (fun () -> run_server ~sw ~env ~host ~port ~base_path:normalized_base_path)
+            (fun () ->
+              run_server
+                ~sw
+                ~env
+                ~host
+                ~port
+                ~base_path:canonical_base_path
+                ~input_base_path:raw_base_path)
             await_shutdown_signal;
             (* Server stopped; close SSE connections after server is down. *)
             (try close_all_sse_connections ()
@@ -773,6 +794,22 @@ let run_cmd host port cli_base_path =
         Log.Server.info "MASC MCP: Background fibers finished, shutdown complete."
     | Eio.Cancel.Cancelled _ ->
         Log.Server.info "MASC MCP: Server cancelled, waiting for background fibers..."
+    | exn
+      when Masc.Shutdown.is_benign_termination
+             ~benign:(function
+               | Graceful_shutdown | Eio.Cancel.Cancelled _ -> true
+               | _ -> false)
+             exn ->
+        (* Failing the switch to end shutdown cancels in-flight fibers; a
+           cancellable finalizer then raises [Cancelled] wrapped as
+           [Fun.Finally_raised], which Eio combines with [Graceful_shutdown]
+           into one [Eio.Exn.Multiple].  [is_benign_termination] unwraps that
+           wrapper structure and classifies the leaves, so the combined value
+           is recognised as a clean shutdown rather than falling through to the
+           [FATAL] handler below and exiting 1 on every restart (#25118). The
+           caller-side [benign] classifies only leaf exceptions. *)
+        Log.Server.info
+          "MASC MCP: Background fibers finished, shutdown complete (with benign in-flight cancellations)."
     | Unix.Unix_error (Unix.EADDRINUSE, _, _) when attempt < max_bind_retries ->
         let delay = Float.min 30.0 (2.0 ** Float.of_int attempt) in
         Log.Server.warn "Port %d in use, retrying in %.0fs (attempt %d/%d)"
@@ -1141,9 +1178,10 @@ let memory_os_gc_dry_run_cmd_exit base_path keeper_ids as_json =
 
 let memory_os_gc_dry_run_cmd =
   let doc =
-    "Run the Memory OS fact-store GC in dry-run mode and print the TTL/dedup \
-     report without rewriting stores. The scan still takes each keeper fact-store \
-     lock; contended stores are reported as per-keeper errors."
+    "Run the Memory OS GC (fact store and episode store) in dry-run mode and \
+     print the TTL report without rewriting or deleting anything. The scan \
+     still takes each keeper store lock; contended stores are reported as \
+     per-keeper errors."
   in
   let info = Cmd.info "memory-os-gc-dry-run" ~doc in
   Cmd.v info
@@ -1203,7 +1241,7 @@ let schedule_prune_cmd_exit base_path =
 
 let schedule_prune_cmd =
   let doc =
-    "Prune completed (Succeeded/Failed/Rejected/Cancelled/Expired) schedules and associated executions/grants."
+    "Prune completed (Succeeded/Failed/Cancelled/Expired) schedules and associated executions."
   in
   let info = Cmd.info "schedule-prune" ~doc in
   Cmd.v info Term.(const schedule_prune_cmd_exit $ base_path)

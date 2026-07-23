@@ -71,10 +71,6 @@ val current : unit -> t option
 (** Atomic.get from the live slot. Returns [None] before the first
     successful publish.  Wait-free; never blocks. *)
 
-val current_or_bootstrap : config:Workspace.config -> t
-(** [current ()] if populated; otherwise the bootstrap value computed
-    once at server start.  Still wait-free in steady state. *)
-
 val refresh_loop :
   sw:Eio.Switch.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
@@ -95,7 +91,7 @@ val publish_for_test : t -> unit
 | Step | PR scope | Confidence required to proceed | Status (2026-05-20) |
 |---|---|---|---|
 | **0. This RFC + prototype** | RFC-0138 + `Dashboard_snapshot` module + harness tests | Required before any handler wire | merged (prereq) |
-| **1. Wire /shell as read-only snapshot getter** | Replace `dashboard_shell_http_json` cache path with `Dashboard_snapshot.current_or_bootstrap` for the read; keep `Dashboard_cache` as fallback for one sprint | Must show Server-Timing `cache_lookup;dur~0ms` p99 for /shell | **MERGED** via PR #16694 |
+| **1. Wire /shell as read-only snapshot getter** | Read `Dashboard_snapshot.current`; retain the projection-specific cold fallback until the refresh producer publishes | Must show Server-Timing `cache_lookup;dur~0ms` p99 for /shell | **MERGED** via PR #16694 |
 | **2. Wire /tools and /telemetry/summary** | Same pattern. /telemetry (query-keyed) stays cache-based as it is per-query. | p99 < 5ms on both warm | **MERGED** via PR #16730. Incidental: latent paren regression at `server_dashboard_shell_snapshot.ml` line ~76 was undetected by sandbox CI (see `reference_masc_ci_build_test_skips`); bundled hotfix carried into Step 4 / Step 5 PRs |
 | **3. Wire /project-snapshot** | Highest-risk migration — uses Eio fiber timeouts. Move the fiber-with-timeout pattern to the refresh fiber, not the HTTP path. | All 6 timeout env vars (`MASC_NAMESPACE_TRUTH_*`) become dead code | **MERGED** via PR #16738 (also wires `/namespace-truth` and `/workspace-truth` aliases) |
 | **4. Retire 4 `MASC_NAMESPACE_TRUTH_*_TIMEOUT_S` env knobs** | Remove env reads on the namespace-truth read path; emit one-shot WARN at server start if any are still set. | Originally gated on "Server-Timing `snapshot_read;dur~0ms` p99 on retired paths"; **per user override, advanced on code-fact (Step 3 wire merge) instead of p99 measurement**. | **Draft PR #16752** (build-passing). Caveat: `MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S` is **not** retired — it has a live consumer at `server_dashboard_http_execution_surfaces.ml:572` (proactive refresh loop); only its fallback-path lookup at `namespace_truth:100` was retired |
@@ -103,7 +99,7 @@ val publish_for_test : t -> unit
 
 ### 3.4 Phase 3 closeout notes (2026-05-20)
 
-- Steps 1-3 wired all five read endpoints (`/shell`, `/tools`, `/telemetry/summary`, `/project-snapshot`, `/namespace-truth` + `/workspace-truth` aliases) to `Dashboard_snapshot.current_or_bootstrap` and merged in three sequential PRs (#16694, #16730, #16738).
+- Steps 1-3 wired all five read endpoints (`/shell`, `/tools`, `/telemetry/summary`, `/project-snapshot`, `/namespace-truth` + `/workspace-truth` aliases) to snapshot-first selectors and merged in three sequential PRs (#16694, #16730, #16738). The later `current_or_bootstrap` full-snapshot helper was never consumed by those selectors and was removed after a zero-caller audit; cold behavior remains projection-owned.
 - Step 4 (env-knob retirement) was advanced before the originally specified p99 measurement gate. The retire criterion in the table above was relaxed per user override: progression is keyed on the Step 3 wire merge (code-fact) rather than measured p99 latency on retired paths. Outstanding measurement work tracked separately.
 - Step 4 scope was narrowed at execution time: only the four `MASC_NAMESPACE_TRUTH_*_TIMEOUT_S` knobs are retired. `MASC_DASHBOARD_EXECUTION_REFRESH_TIMEOUT_S` is retained — it is read by a live proactive refresh loop (`server_dashboard_http_execution_surfaces.ml:572`), not just by fallback lookup.
 - Step 5 retires `Dashboard_cache` from the read path and renames `Server_dashboard_shell_snapshot` → `Server_dashboard_snapshot_select` (the module now serves multiple endpoints, not just `/shell`). The fallback function `dashboard_namespace_truth_http_json` remains alive as a cold-start safety net; deletion is gated on a future RFC for cold-start snapshot-hit observability.
@@ -125,7 +121,7 @@ val publish_for_test : t -> unit
 
 1. **Stale data window**: 5 s freshness budget. For dashboard read traffic this is acceptable — frontend already polls at 3 s, so worst-case staleness is 5 s + 3 s + RTT. Critical alerts route through a separate streaming surface (`/api/v1/dashboard/stream`) which is unaffected.
 2. **Refresh fiber crash**: One fiber's failure stops all updates. Mitigation: `Eio.Switch` supervisor restarts on `Some _exn` other than `Cancelled`, with backoff. Tested via `BugAction` (sw-dev §TLA+ Bug Model).
-3. **First-request latency**: Until first publish, `current_or_bootstrap` does a one-shot compute. Identical to current cold-start cost; not worse.
+3. **First-request latency**: Until first publish, each selector uses its existing projection-specific cold fallback. A request never constructs unrelated snapshot projections merely to satisfy its own cold read.
 4. **Memory**: Each snapshot holds the previous payload's JSON until GC. With 5 s interval and ~30 KB payload, peak is ~60 KB. Negligible.
 
 ## 5. Workaround Rejection Bar Self-Check

@@ -23,7 +23,7 @@
   pbrt
   mtime
   mtime.clock.os
-  mirage-crypto-rng.unix
+  masc.crypto_rng
   masc.http_client
   masc.masc_log
   masc.masc_core

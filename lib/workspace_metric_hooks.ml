@@ -179,54 +179,6 @@ let observe_task_transition_event
     warn_telemetry_drop ~event:(Accountability transition) exn
 ;;
 
-(* #9795: wire the FSM drift hook to a Otel_metric_store counter emit. *)
-let fsm_drift_metric = "masc_task_fsm_drift_total"
-
-let () =
-  Otel_metric_store.register_counter
-    ~name:fsm_drift_metric
-    ~help:
-      "Total task FSM drift transitions observed by Workspace_task_lifecycle.decide (e.g. \
-       InProgress -> Done skipping the verifier path). Labels: variant (drift variant \
-       tag from Workspace_task_lifecycle), force (true | false — was the transition forced \
-       past the soft gate). #9795 fleet-wide ratchet-readiness signal."
-    ()
-;;
-
-let record_fsm_drift ~variant ~force =
-  Otel_metric_store.inc_counter
-    fsm_drift_metric
-    ~labels:[ "variant", variant; ("force", if force then "true" else "false") ]
-    ()
-;;
-
-(* #9795 follow-up: per-agent breakout so operators can identify
-   which keepers most often skip [in_progress] before [done]. *)
-let fsm_drift_per_agent_metric = "masc_task_fsm_drift_per_agent_total"
-
-let () =
-  Otel_metric_store.register_counter
-    ~name:fsm_drift_per_agent_metric
-    ~help:
-      "Per-agent breakout of task FSM drift transitions (companion to \
-       masc_task_fsm_drift_total — purely additive). Lets operators identify which \
-       keepers most often skip [in_progress] before [done]. Labels: variant, agent_name, \
-       force. Cardinality bounded by fleet size."
-    ()
-;;
-
-let record_fsm_drift_with_agent ~variant ~force ~agent_name =
-  record_fsm_drift ~variant ~force;
-  Otel_metric_store.inc_counter
-    fsm_drift_per_agent_metric
-    ~labels:
-      [ "variant", variant
-      ; "agent_name", agent_name
-      ; ("force", if force then "true" else "false")
-      ]
-    ()
-;;
-
 (* #10449: Task completion path + contract-presence observability. *)
 let task_completion_path_metric = "masc_task_completion_path_total"
 
@@ -236,8 +188,8 @@ let () =
     ~help:
       "Total task Done emits classified by completion path and contract presence. Lets \
        operators attribute bypass-rate to creation-side (missing contracts) vs. \
-       gate-side (verifier-redirect not firing). Labels: path (claimed_to_done_skip | \
-       in_progress_to_done | via_verification | forced_done), contract_state \
+       gate-side (review adapter not firing). Labels: path (direct_llm_verdict | \
+       via_verification), contract_state \
        (no_contract | empty_contract | with_contract), agent_name. Cardinality bounded \
        at ~4 x 3 x fleet_size (#10449)."
     ()
@@ -250,40 +202,11 @@ let record_task_completion_path ~path ~contract_state ~agent_name =
     ()
 ;;
 
-(* #10421: implicit auto-release rate from [task_claim_next]. *)
-let task_auto_release_metric = "masc_task_auto_release_total"
-
-let () =
-  Otel_metric_store.register_counter
-    ~name:task_auto_release_metric
-    ~help:
-      "Total implicit task auto-releases triggered by [task_claim_next] (mid-work churn \
-       or just-claimed churn). Labels: agent_name, from_status (separates [InProgress -> \
-       Todo] from [Claimed -> Todo]). Field log motivation: observed 179% release/claim \
-       ratio with task hot-potatoed up to 5x in one day (#10421). Cardinality bounded at \
-       ~fleet x 2."
-    ()
-;;
-
-let record_task_auto_release ~agent_name ~from_status =
-  Otel_metric_store.inc_counter
-    task_auto_release_metric
-    ~labels:[ "agent_name", agent_name; "from_status", from_status ]
-    ()
-;;
-
 let record_workspace_broadcast ~msg_type ~elapsed_s =
   Otel_metric_store.observe_histogram
     Otel_metric_store.metric_workspace_broadcast_duration
     ~labels:[ "msg_type", msg_type ]
     elapsed_s
-;;
-
-let record_mention_dedup_decision ~outcome =
-  Otel_metric_store.inc_counter
-    Otel_metric_store.metric_mention_dedup_decisions_total
-    ~labels:[ "outcome", outcome ]
-    ()
 ;;
 
 let record_file_lock_attempt ~caller ~retries ~elapsed_s ~outcome =
@@ -319,13 +242,6 @@ let record_process_timeout ~program ~timeout_sec ~origin =
     ()
 ;;
 
-let record_discovery_history_failure ~site =
-  Otel_metric_store.inc_counter
-    Otel_metric_store.metric_discovery_history_failures
-    ~labels:[ "site", site ]
-    ()
-;;
-
 let distributed_lock_acquire_failed_metric =
   Otel_metric_store.metric_distributed_lock_acquire_failed
 ;;
@@ -355,18 +271,10 @@ let record_telemetry_observe_failure kind =
     ~labels:[("kind", kind)] ()
 ;;
 
-let record_anti_rationalization_excuse_pattern ~pattern ~outcome =
-  let decision = Task.Anti_rationalization.excuse_pattern_decision_to_string outcome in
+let record_anti_rationalization_outcome ~outcome ~runtime =
   Otel_metric_store.inc_counter
-    Otel_metric_store.metric_anti_rationalization_excuse_pattern
-    ~labels:[ "pattern", pattern; "decision", decision ]
-    ()
-;;
-
-let record_anti_rationalization_fallback ~mode ~runtime =
-  Otel_metric_store.inc_counter
-    Otel_metric_store.metric_anti_rationalization_fallback
-    ~labels:[ "mode", mode; "runtime", runtime ]
+    Otel_metric_store.metric_anti_rationalization_outcome
+    ~labels:[ "outcome", outcome; "runtime", runtime ]
     ()
 ;;
 
@@ -427,11 +335,6 @@ let install () =
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn -> Log.Workspace.warn "activity_graph emit failed: %s" (Printexc.to_string exn));
 
-  Atomic.set Workspace_hooks.agent_economy_earn_fn (fun ~base_path ~agent_name ~reason ->
-    match Economy.earn ~base_path ~agent_name ~kind:Earn_task_done ~reason () with
-    | Ok _bal -> ()
-    | Error msg -> Log.Misc.error "task earn failed: %s" msg);
-
   Atomic.set Workspace_hooks.relation_on_leave_fn Relation_materializer.on_agent_session_ended;
   Atomic.set Workspace_hooks.relation_on_task_done_fn Relation_materializer.on_task_done;
 
@@ -446,81 +349,80 @@ let install () =
 
   Atomic.set Workspace_hooks.tool_assigned_fn Tool_assignment_telemetry.emit_assigned;
 
-  Atomic.set Workspace_hooks.fsm_drift_observer_fn record_fsm_drift_with_agent;
   Atomic.set Workspace_hooks.task_completion_path_observed_fn record_task_completion_path;
-  Atomic.set Workspace_hooks.task_auto_release_observed_fn record_task_auto_release;
   Atomic.set Workspace_hooks.workspace_broadcast_observed_fn record_workspace_broadcast;
-  Atomic.set Workspace_hooks.mention_dedup_decision_fn record_mention_dedup_decision;
   Atomic.set File_lock_eio.on_lock_attempt_fn record_file_lock_attempt;
   Atomic.set File_lock_eio.on_cas_retry_fn record_file_lock_table_cas_retry;
   Atomic.set Process_eio.process_timeout_observer_fn record_process_timeout;
-  Atomic.set Discovery_history.failure_observer_fn record_discovery_history_failure;
   Atomic.set Workspace_hooks.distributed_lock_acquire_failed_fn record_distributed_lock_acquire_failed;
   Atomic.set Workspace_hooks.active_agents_change_fn record_active_agents_change;
   Atomic.set Workspace_hooks.workspace_telemetry_drop_fn record_workspace_telemetry_drop;
   Atomic.set Workspace_hooks.telemetry_observe_failure_fn record_telemetry_observe_failure;
 
-  Atomic.set Task.Anti_rationalization.excuse_pattern_observer_fn record_anti_rationalization_excuse_pattern;
-  Atomic.set Task.Anti_rationalization.fallback_observer_fn record_anti_rationalization_fallback;
+  Atomic.set Task.Anti_rationalization.outcome_observer_fn record_anti_rationalization_outcome;
 
   Atomic.set Task.Anti_rationalization.run_llm_reviewer_fn (fun ?sw ~evaluator_runtime ~prompt ~report_tool_schema () ->
     let verdict_ref = ref None in
+    let protocol_error_ref = ref None in
     let dispatch ~name ~args =
       let start_time = Time_compat.now () in
-      match Task.Anti_rationalization.parse_review_verdict_from_json args with
-      | Ok v ->
-        verdict_ref := Some v;
+      match !verdict_ref with
+      | Some verdict ->
+        let detail =
+          Printf.sprintf
+            "Task completion verdict already recorded (%s); report_review_verdict must be called exactly once"
+            (Task.Anti_rationalization.verdict_constructor_name verdict)
+        in
+        protocol_error_ref := Some detail;
         Tool_result.error
           ~tool_name:name
           ~start_time
-          (match v with
-           | Approve -> "Approved"
-           | Reject r -> "Rejected: " ^ r)
-      | Error msg ->
-        Log.Task.warn
-          "[anti-rationalization] structured verdict parse failed: %s"
-          msg;
-        Tool_result.error
-          ~tool_name:name
-          ~start_time
-          (Printf.sprintf "Invalid verdict format: %s" msg)
+          detail
+      | None ->
+        (match Task.Anti_rationalization.parse_review_verdict_from_json args with
+         | Ok verdict ->
+           verdict_ref := Some verdict;
+           Tool_result.ok
+             ~tool_name:name
+             ~start_time
+             (match verdict with
+              | Approve -> "Completion verdict recorded: APPROVE"
+              | Reject reason -> "Completion verdict recorded: REJECT: " ^ reason)
+         | Error msg ->
+           protocol_error_ref := Some msg;
+           Log.Task.warn
+             "[anti-rationalization] structured verdict parse failed: %s"
+             msg;
+           Tool_result.error
+             ~tool_name:name
+             ~start_time
+             (Printf.sprintf "Invalid verdict format: %s" msg))
     in
     let apply_review_verdict_output_schema provider_cfg =
-      let provider_cfg =
-        Keeper_structured_output_schema.apply_to_provider_config
-          Keeper_structured_output_schema.anti_rationalization_verdict_output_schema
-          provider_cfg
-      in
-      match Llm_provider.Provider_config.validate_output_schema_request provider_cfg with
-      | Ok () -> Ok provider_cfg
-      | Error detail ->
-        Error
-          (Agent_sdk.Error.Config
-             (Agent_sdk.Error.InvalidConfig
-                { field = "task.anti_rationalization.output_schema"; detail }))
+      Ok
+        (Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config
+           provider_cfg)
     in
     match
-	      Masc_oas_bridge.run_with_caller
-	        ~caller:Env_config_oas_bridge.Anti_rationalization
-	        (fun () ->
-	           let base_path = Env_config_core.base_path () in
-	           Keeper_turn_driver_wrappers.run_named_with_masc_tools
-	             ~runtime_id:evaluator_runtime
-	             ~base_path
-	             ~goal:prompt
-             ~masc_tools:[ report_tool_schema ]
-             ~dispatch
-             
-             ~temperature:Runtime_provider_defaults.deterministic_temperature
-             ~max_tokens:200
-             ~approval:Approval_callbacks.auto_approve
-             ~provider_config_transform:apply_review_verdict_output_schema
-             ?sw
-             ())
+      Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Anti_rationalization (fun () ->
+        let base_path = Env_config_core.base_path () in
+        Keeper_turn_driver_wrappers.run_named_with_masc_tools
+          ~runtime_id:evaluator_runtime
+          ~base_path
+          ~goal:prompt
+          ~masc_tools:[ report_tool_schema ]
+          ~dispatch
+          ~provider_config_transform:apply_review_verdict_output_schema
+          ?sw
+          ())
     with
     | Ok result ->
-      let text = Agent_sdk_response.text_of_response result.response in
-      Ok (!verdict_ref, text)
+      (match !protocol_error_ref with
+       | Some detail ->
+         Error
+           (Agent_sdk.Error.Internal
+              ("task completion verdict protocol violation: " ^ detail))
+       | None -> Ok !verdict_ref)
     | Error err ->
       Error err);
 
@@ -540,10 +442,6 @@ let install () =
     try let _ = Metrics_store_eio.record config metric in ()
     with Eio.Cancel.Cancelled _ as e -> raise e
        | exn -> Log.Task.error ~keeper_name:task_id "Metrics_store_eio.record dynamic hook failed: %s" (Stdlib.Printexc.to_string exn));
-
-  Atomic.set Task.Anti_rationalization.is_runtime_permanently_dead_fn (fun err ->
-    match Keeper_turn_driver.classify_masc_internal_error err with
-    | _ -> false);
 
   Atomic.set Workspace_hooks.record_thompson_result_fn (fun ~agent_name ~success ~reason ->
     let direction = if success then `Up else `Down in
@@ -634,20 +532,5 @@ let install () =
       ~labels:[ "module", module_name; "status", status ]
       ());
 
-  let decide_hook
-        ~(base_path : string)
-        ~(task_id : string)
-        ~(task_opt : Masc_domain.task option)
-        ~(notes : string)
-        ~(handoff : Masc_domain.task_handoff_context option)
-        ()
-      : Workspace_hooks.evidence_gate_verdict
-    =
-    match Task_completion_gate.decide ~base_path ~task_id ~task_opt ~notes ~handoff_context:handoff () with
-    | Task_completion_gate.Pass -> Workspace_hooks.Pass
-    | Task_completion_gate.Reject { reason; rule_id; hint; payload_json } ->
-      Workspace_hooks.Reject { reason; rule_id; hint; payload_json }
-  in
-  Atomic.set Workspace_hooks.task_completion_gate_decide_fn decide_hook;
   ()
 ;;

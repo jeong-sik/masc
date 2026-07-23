@@ -100,11 +100,6 @@ let test_find_opt_first_registered () =
 	       | Some f -> assert (f.R.env_name = first.R.env_name)
 	       | None -> assert false)
 
-let test_hitl_disable_flag_defaults_false () =
-  match R.find_opt "MASC_DISABLE_HITL" with
-  | Some flag -> assert (flag.R.default = false)
-  | None -> assert false
-
 let test_path_jail_kill_switch_removed () =
   match R.find_opt "MASC_SHELL_IR_PATH_JAIL_ENABLED" with
   | None -> ()
@@ -216,7 +211,6 @@ let () =
   test_every_category_in_documented_set ();
   test_find_opt_unknown ();
   test_find_opt_first_registered ();
-  test_hitl_disable_flag_defaults_false ();
   test_path_jail_kill_switch_removed ();
   test_flag_to_json_eight_fields ();
   test_flag_to_json_canonical_default_is_bool ();

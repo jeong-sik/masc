@@ -1,5 +1,5 @@
-(** Worker_container_runners — OAS-backed and legacy-backed worker
-    spawn entry points.
+(** Worker_container_runners — OAS-backed worker spawn entry
+    point.
 
     Re-exported by {!Worker_runtime} (the public facade) which
     does \[include module type of Worker_container_runners\] in its
@@ -11,9 +11,8 @@
     {!Worker_container_types} surfaces into scope (notably
     [list_masc_tools], [parse_text_tool_calls], [run_result]).
 
-    Internal: 6 helpers stay private — \[resolve_net\],
-    \[build_execution_spec\],
-    \[workspace_path_of_spec\], \[effective_model_of_resume\],
+    Internal helpers stay private — \[resolve_net\],
+    \[workspace_path_of_spec\],
     \[dedupe_tools_by_name\], \[create_raw_trace\].  All consumed
     inside the run / preflight pipelines. *)
 
@@ -26,17 +25,16 @@ end
 val run_worker_oas :
   sw:Eio.Switch.t ->
   ?net:Eio_context.eio_net ->
-  workspace_config:Workspace.config option ->
   Worker_execution_spec.t ->
   unit ->
   (run_result, string) result
-(** [run_worker_oas ~sw ?net ~workspace_config spec] returns a thunk
+(** [run_worker_oas ~sw ?net spec] returns a thunk
     that runs (or resumes) the worker via OAS:
 
     - Resolve net (from [?net] or {!Eio_context}).
-    - Resolve effective model from
-      {!Worker_container.load_worker_meta} when checkpoint
-      exists, otherwise from the spec.
+    - Resolve the spec's model label once into an exact provider config.
+      Cold start and resume receive the same typed value; resume fails
+      explicitly when the checkpoint model differs.
     - Build the MASC/OAS tool set and dedupe by tool name.
     - Create / open raw trace under
       [<base_path>/workers/<worker_name>/raw_trace.jsonl].

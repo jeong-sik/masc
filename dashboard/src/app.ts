@@ -17,7 +17,7 @@ import { signal } from '@preact/signals'
 import { persistentSignal } from './lib/persistent-signal'
 import { route, initRouter } from './router'
 import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './namespace-truth-store'
-import { cancelPendingSSERefreshes, registerGovernanceRefresh, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
+import { cancelPendingSSERefreshes, registerGateRefresh, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { initNotificationDelivery } from './notifications'
 import { refreshShell } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
@@ -38,7 +38,7 @@ import { startErrorCleanup, stopErrorCleanup } from './components/common/error-n
 import { DashboardStatusTray } from './components/status-tray'
 import { DashboardFocusModeToggle, dashboardFocusMode } from './components/focus-mode-toggle'
 import { isPrimaryDashboardSurface } from './config/navigation'
-import { governanceData } from './components/governance-signals'
+import { gateData } from './components/gate-signals'
 import type { TabId } from './types'
 import { useKeyboardShortcutHost } from '../design-system/headless-preact/use-keyboard-shortcut'
 import { globalShortcutManager } from './lib/global-shortcut-manager'
@@ -64,8 +64,6 @@ import {
 } from './components/tweaks-panel'
 import { TopBarV2 } from './components/v2/top-bar-v2'
 import { NavRailV2 } from './components/v2/nav-rail-v2'
-import { loadTools, toolsData, toolsLoading } from './components/tools/tool-state'
-import { scheduledPendingApprovalCount } from './components/tools/scheduled-automation-panel'
 
 // Sidebar collapsed state persists across reloads (kept for compatibility with
 // downstream consumers / tests). The v2 rail is a fixed 58px icon rail, so this
@@ -200,28 +198,21 @@ export function App() {
         })
     })
 
-    // Governance/HITL approvals feed the always-visible nav-rail approvals
+    // Gate/HITL approvals feed the always-visible nav-rail approvals
     // badge and topbar attention indicator (see approvalsBadge below), so the
-    // governance resource must refresh globally. Keep boot on the read-only
-    // refresh module instead of governance-actions: first paint should not load
+    // Gate resource must refresh globally. Keep boot on the read-only
+    // refresh module instead of gate-actions: first paint should not load
     // toast/action write handlers just to count pending approvals.
-    const refreshGovernanceLazy = (opts?: { force?: boolean }) => {
-      void import('./components/governance-refresh')
-        .then(({ refreshGovernance }) => refreshGovernance(opts))
+    const refreshGateLazy = (opts?: { force?: boolean }) => {
+      void import('./components/gate-refresh')
+        .then(({ refreshGate }) => refreshGate(opts))
         .catch(err => {
-          console.warn('[app] governance refresh unavailable', err instanceof Error ? err.message : err)
+          console.warn('[app] Gate refresh unavailable', err instanceof Error ? err.message : err)
         })
     }
-    registerGovernanceRefresh(refreshGovernanceLazy)
-    refreshGovernanceLazy()
+    registerGateRefresh(refreshGateLazy)
+    refreshGateLazy()
 
-    // The scheduled-automation projection backs the always-visible nav-rail
-    // schedule badge + topbar chip (schedule.jsx: chip/badge stay in sync). Like
-    // the governance approvals badge, the count must be available before the
-    // operator visits the schedule surface, so load the projection once at boot.
-    if (!toolsData.value && !toolsLoading.value) {
-      void loadTools()
-    }
 
     const unsubSSE = setupSSEReaction()
     const unsubNotify = initNotificationDelivery()
@@ -289,8 +280,7 @@ export function App() {
     document.documentElement.setAttribute('data-theme', tweaksTheme.value === 'paper' ? 'paper' : '')
   }, [tweaksVolt.value, tweaksTheme.value])
 
-  const approvalsBadge = governanceData.value?.approval_queue?.length ?? 0
-  const scheduleBadge = scheduledPendingApprovalCount(toolsData.value?.scheduled_automation ?? null)
+  const approvalsBadge = gateData.value?.approval_queue?.length ?? 0
 
   // Body grid columns. Desktop: nav rail (58px) + single content column. Mobile:
   // a single 1fr column — the nav becomes a fixed bottom tab bar (.v2-nav.is-mnav),
@@ -336,7 +326,7 @@ export function App() {
 
       <div class="v2-stage">
         <div class="v2-body" style=${{ gridTemplateColumns: cols }}>
-          ${compactChromeMode ? null : html`<${NavRailV2} badges=${{ approvals: approvalsBadge, schedule: scheduleBadge }} mobile=${isMobile} />`}
+          ${compactChromeMode ? null : html`<${NavRailV2} badges=${{ approvals: approvalsBadge }} mobile=${isMobile} />`}
           <main
             id="main-content"
             tabindex=${-1}

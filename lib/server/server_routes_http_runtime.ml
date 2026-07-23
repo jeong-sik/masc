@@ -380,11 +380,12 @@ let health_status_rank = Health_status.rank_string
 let max_health_status = Health_status.max_string
 
 let full_health_operator_summary ~keeper_fleet_safety
-    ~keeper_identity_drift_json ~reaction_ledger_json ~turn_admission_json
-    ~board_event_collection_json ~keeper_event_queue_json
-    ~runtime_startup_degradation_json ~keeper_config_schema_status
-    ~keeper_config_schema_blocking ~keeper_config_schema_terminal_reason
-    ~keeper_config_operator_action_required ~lazy_task_boot_guard_fires_total =
+    ~keeper_identity_drift_json ~publication_recovery_activation_json
+    ~reaction_ledger_json ~turn_admission_json ~board_event_collection_json
+    ~keeper_event_queue_json ~runtime_startup_degradation_json
+    ~keeper_config_schema_status ~keeper_config_schema_blocking
+    ~keeper_config_schema_terminal_reason ~keeper_config_operator_action_required
+    ~lazy_task_boot_guard_fires_total =
   let status = ref "ok" in
   let reasons = ref [] in
   let note_status component json fallback_reason =
@@ -426,6 +427,10 @@ let full_health_operator_summary ~keeper_fleet_safety
     (assoc_string_opt "blocker" keeper_fleet_safety);
   note_status "keeper_identity_drift" keeper_identity_drift_json
     (assoc_string_opt "terminal_reason" keeper_identity_drift_json);
+  note_status
+    "publication_recovery_activation"
+    publication_recovery_activation_json
+    (assoc_string_opt "reason" publication_recovery_activation_json);
   note_status "keeper_reaction_ledger" reaction_ledger_json None;
   note_status "keeper_turn_admission" turn_admission_json None;
   note_status "keeper_board_event_collection" board_event_collection_json None;
@@ -488,10 +493,11 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
   let phase_snapshot = keeper_phase_snapshot ?base_path () in
   let phase_counts = phase_snapshot.counts in
   let keeper_fibers = phase_counts.running in
+  let server_state = current_server_state_opt () in
   (* Single-pass fleet meta scan: reads each keeper meta file once,
      shared by paused-keepers and fleet-safety sections. *)
   let fleet_meta_scan =
-    match current_server_state_opt () with
+    match server_state with
     | Some state ->
       Some (keeper_fleet_meta_scan (Mcp_server.workspace_config state))
     | None -> None
@@ -499,7 +505,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
   let keeper_identity_drift_json =
     compute_section ~name:"keeper_identity_drift" ?section_timings_ref
       (fun () ->
-        match current_server_state_opt () with
+        match server_state with
         | Some state ->
           keeper_identity_drift_health_json (Mcp_server.workspace_config state)
         | None ->
@@ -522,6 +528,24 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
               ("meta_without_config_names", `List []);
               ("next_action", `String "none");
             ])
+  in
+  let publication_recovery_activation_json =
+    compute_section
+      ~name:"publication_recovery_activation"
+      ?section_timings_ref
+      (fun () ->
+        match server_state with
+        | None ->
+          `Assoc
+            [ "status", `String "unavailable"
+            ; "operator_action_required", `Bool false
+            ; "reason", `String "server_state_not_ready"
+            ]
+        | Some state ->
+          let workspace_scope = Mcp_server.workspace_scope state in
+          workspace_scope
+          |> Mcp_server.workspace_scope_publication_recovery_snapshot
+          |> Mcp_server.publication_recovery_snapshot_to_health_yojson)
   in
   let paused_keepers_json =
     compute_section ~name:"paused_keepers" ?section_timings_ref
@@ -551,6 +575,12 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
   in
   let fd_accountant_json =
     compute_section ~name:"fd_accountant" ?section_timings_ref fd_accountant_snapshot_json
+  in
+  let disk_observation_json =
+    compute_section ~name:"disk_observation" ?section_timings_ref (fun () ->
+      Keeper_disk_pressure.snapshot_json
+        ~masc_root:path_diagnostics.effective_masc_root
+        ())
   in
   let keeper_fleet_safety =
     compute_section ~name:"keeper_fleet_safety" ?section_timings_ref
@@ -585,6 +615,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     full_health_operator_summary
       ~keeper_fleet_safety
       ~keeper_identity_drift_json
+      ~publication_recovery_activation_json
       ~reaction_ledger_json
       ~turn_admission_json
       ~board_event_collection_json
@@ -631,22 +662,22 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     ( "operator_action_reasons",
       `List (List.map (fun reason -> `String reason) operator_action_reasons) );
     ("keeper_fibers", `Int keeper_fibers);
-    ( "keeper_fd_pressure"
+    ( "fd_observation"
     , Keeper_fd_pressure.runtime_state_json ~active_keepers:keeper_fibers
-        ~starting_keepers:0 ~requested_keepers:24 () );
+        () );
     ("fd_accountant", fd_accountant_json);
+    ("disk_observation", disk_observation_json);
     ("server_hibernation", Server_hibernation.status_json ());
     ("keeper_fleet_safety", keeper_fleet_safety);
     ("keeper_identity_drift", keeper_identity_drift_json);
+    ("publication_recovery_activation", publication_recovery_activation_json);
     ("keeper_reaction_ledger", reaction_ledger_json);
     ("keeper_turn_admission", turn_admission_json);
     ("keeper_board_event_collection", board_event_collection_json);
     ("keeper_event_queue", keeper_event_queue_json);
     (* Paused-keeper visibility: a keeper with [meta.paused = true] does not
-       run turns, and auto-paused keepers may no longer have a live registry
-       entry. The dashboard "깨우기" button now auto-resumes paused keepers,
-       but ops still need a quick count without external telemetry. List names
-       so an operator can correlate with the structured blocker cause. *)
+       run turns and may no longer have a live registry entry. Operators still
+       need a durable count and the typed pause cause. *)
     (key_paused_keepers, paused_keepers_json);
     ("keeper_config_error_count",
      `Int keeper_config_error_count);
@@ -740,10 +771,12 @@ let full_health_cached_field_names =
     "operator_action_required";
     "operator_action_reasons";
     "keeper_fibers";
-    "keeper_fd_pressure";
+    "fd_observation";
     "fd_accountant";
+    "disk_observation";
     "keeper_fleet_safety";
     "keeper_identity_drift";
+    "publication_recovery_activation";
     "keeper_reaction_ledger";
     "keeper_turn_admission";
     "keeper_board_event_collection";
@@ -774,12 +807,15 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ("operator_action_required", `Bool false);
     ("operator_action_reasons", `List []);
     ("keeper_fibers", `Int 0);
-    ( "keeper_fd_pressure",
+    ( "fd_observation",
       full_health_component_placeholder ?error ~component_timed_out ~status
-        "keeper_fd_pressure" );
+        "fd_observation" );
     ( "fd_accountant",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "fd_accountant" );
+    ( "disk_observation",
+      full_health_component_placeholder ?error ~component_timed_out ~status
+        "disk_observation" );
     ( "keeper_fleet_safety",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "keeper_fleet_safety" );
@@ -804,6 +840,12 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
           ("next_action", `String "none");
           ("component_timed_out", `Bool component_timed_out);
         ] );
+    ( "publication_recovery_activation",
+      full_health_component_placeholder
+        ?error
+        ~component_timed_out
+        ~status
+        "publication_recovery_activation" );
     ( "keeper_reaction_ledger",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "keeper_reaction_ledger" );
@@ -815,7 +857,7 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
         "keeper_board_event_collection" );
     ( "keeper_event_queue",
       `Assoc
-        [ ("schema", `String "masc.keeper_event_queue.fleet_summary.v1")
+        [ ("schema", `String "masc.keeper_event_queue.fleet_summary.v2")
         ; ("status", `String status)
         ; ("operator_action_required", `Bool false)
         ; ("keeper_count", `Int 0)
@@ -825,6 +867,24 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
         ; ("total_count", `Int 0)
         ; ("oldest_arrived_at_unix", `Null)
         ; ("oldest_age_seconds", `Null)
+        ; ("runnable_pending_count", `Int 0)
+        ; ("runnable_inflight_count", `Int 0)
+        ; ("runnable_backlog_count", `Int 0)
+        ; ("runnable_oldest_arrived_at_unix", `Null)
+        ; ("runnable_oldest_age_seconds", `Null)
+        ; ("runnable_by_keeper", `List [])
+        ; ("paused_retained_pending_count", `Int 0)
+        ; ("paused_retained_inflight_count", `Int 0)
+        ; ("paused_retained_count", `Int 0)
+        ; ("paused_retained_oldest_arrived_at_unix", `Null)
+        ; ("paused_retained_oldest_age_seconds", `Null)
+        ; ("paused_retained_by_keeper", `List [])
+        ; ("unclassified_pending_count", `Int 0)
+        ; ("unclassified_inflight_count", `Int 0)
+        ; ("unclassified_count", `Int 0)
+        ; ("unclassified_oldest_arrived_at_unix", `Null)
+        ; ("unclassified_oldest_age_seconds", `Null)
+        ; ("unclassified_by_keeper", `List [])
         ; ("pending_by_keeper", `List [])
         ; ("inflight_by_keeper", `List [])
         ; ("read_error_count", `Int 0)
@@ -1320,10 +1380,9 @@ let board_post_detail_json ~include_moderation ~blind_votes ~config ~voter
       let contributor_quality =
         board_contributor_quality_lookup ?config () author
       in
-      let claim_evidence = board_claim_evidence_lookup () post_id in
       let post_json =
         board_post_dashboard_json ~include_moderation ~blind_votes ?current_vote
-          ?contributor_quality ?claim_evidence ~reactions ~author_karma post
+          ?contributor_quality ~reactions ~author_karma post
       in
       let comments_json =
         `List (List.map (fun (comment : Board.comment) ->

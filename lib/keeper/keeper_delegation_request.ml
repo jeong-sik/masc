@@ -23,16 +23,10 @@ type t = {
   requester : string;
   topic : string;
   reason : string;
-  goal : string option;
   source_action : string;
   promotion_state : promotion_state;
   task_seed : task_seed;
 }
-
-let normalize_opt value =
-  match String.trim value with
-  | "" -> None
-  | text -> Some text
 
 let compact_whitespace text =
   let buf = Buffer.create (String.length text) in
@@ -55,20 +49,9 @@ let truncate ~max_len text =
   in
   prefix
 
-let optional_identity_component ~field = function
-  | None -> field ^ ":none"
-  | Some value -> field ^ ":some:" ^ value
-;;
-
-let digest_id ~requester ?goal ~topic ~reason () =
+let digest_id ~requester ~topic ~reason () =
   let raw =
-    String.concat "\n"
-      [
-        requester;
-        topic;
-        reason;
-        optional_identity_component ~field:"goal" goal;
-      ]
+    String.concat "\n" [ requester; topic; reason ]
   in
   let hex = Digest.to_hex (Digest.string raw) in
   "delegation-" ^ String.sub hex 0 12
@@ -80,10 +63,9 @@ let identity_key request =
       request.requester;
       request.topic;
       request.reason;
-      optional_identity_component ~field:"goal" request.goal;
     ]
 
-let task_seed ~requester ?goal ~topic ~reason () =
+let task_seed ~requester ~topic ~reason () =
   let title_topic = topic |> compact_whitespace |> truncate ~max_len:80 in
   let title =
     if title_topic = "" then "Delegate keeper work"
@@ -93,11 +75,6 @@ let task_seed ~requester ?goal ~topic ~reason () =
     match compact_whitespace reason with
     | "" -> "(no reason supplied)"
     | text -> text
-  in
-  let goal_lines =
-    match goal with
-    | Some goal -> [ ""; "Goal:"; goal ]
-    | None -> []
   in
   let description =
     String.concat "\n"
@@ -110,7 +87,6 @@ let task_seed ~requester ?goal ~topic ~reason () =
          "Reason:";
          reason;
        ]
-      @ goal_lines
       @ [
           "";
           "Execution contract:";
@@ -120,19 +96,11 @@ let task_seed ~requester ?goal ~topic ~reason () =
         ])
   in
   let tags =
-    [
-      "keeper_delegation";
-      "propose_spawn";
-      "requester:" ^ requester;
-    ]
-    @
-    match goal with
-    | Some _ -> [ "has_goal" ]
-    | None -> []
+    [ "keeper_delegation"; "propose_spawn"; "requester:" ^ requester ]
   in
   { title; description; tags }
 
-let make ~requester ?goal ~topic ~reason () =
+let make ~requester ~topic ~reason () =
   let requester =
     match compact_whitespace requester with
     | "" -> "unknown"
@@ -140,33 +108,31 @@ let make ~requester ?goal ~topic ~reason () =
   in
   let topic = compact_whitespace topic in
   let reason = compact_whitespace reason in
-  let goal = Option.bind goal normalize_opt in
   let source_action =
     deliberation_action_to_string (ProposeSpawn { topic; reason })
   in
   {
-    id = digest_id ~requester ?goal ~topic ~reason ();
+    id = digest_id ~requester ~topic ~reason ();
     requester;
     topic;
     reason;
-    goal;
     source_action;
     promotion_state = Candidate;
-    task_seed = task_seed ~requester ?goal ~topic ~reason ();
+    task_seed = task_seed ~requester ~topic ~reason ();
   }
 
-let rec of_action ~requester ?goal = function
+let rec of_action ~requester = function
   | ProposeSpawn { topic; reason } ->
-      [ make ~requester ?goal ~topic ~reason () ]
+      [ make ~requester ~topic ~reason () ]
   | MultiStep actions ->
-      List.concat_map (of_action ~requester ?goal) actions
+      List.concat_map (of_action ~requester) actions
   | Noop _ | BoardPost _ | BoardComment _ | BoardVote _ | TaskClaim _
   | TaskCreate _ | Broadcast _ ->
       []
 
 
-let of_execution_result ~requester ?goal result =
-  of_action ~requester ?goal result.selected_action
+let of_execution_result ~requester result =
+  of_action ~requester result.selected_action
 
 let task_seed_to_json seed =
   `Assoc
@@ -184,18 +150,17 @@ let to_json request =
       ("requester", `String request.requester);
       ("topic", `String request.topic);
       ("reason", `String request.reason);
-      ("goal", Json_util.string_opt_to_json request.goal);
       ("source_action", `String request.source_action);
       ( "promotion_state",
         `String (promotion_state_to_string request.promotion_state) );
       ("task_seed", task_seed_to_json request.task_seed);
     ]
 
-let delegation_request_json ~requester ?goal = function
+let delegation_request_json ~requester = function
   | Some execution ->
-      let requests = of_execution_result ~requester ?goal execution in
+      let requests = of_execution_result ~requester execution in
       `List (List.map to_json requests)
   | None -> `List []
 
-let delegation_request_field ~requester ?goal execution =
-  ("delegation_request", delegation_request_json ~requester ?goal execution)
+let delegation_request_field ~requester execution =
+  ("delegation_request", delegation_request_json ~requester execution)

@@ -7,6 +7,12 @@ val handle_ide_annotate :
   meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   string
+
+val handle_ide_annotate_with_outcome :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  args:Yojson.Safe.t ->
+  Keeper_tool_execution.t
 (** Handle [keeper_ide_annotate] tool call. Creates a line-bound
     annotation in the [.masc-ide/] store and returns the created
     record's id and positions on success, or an error message.

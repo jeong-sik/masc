@@ -1,191 +1,33 @@
-# RFC-0058 Phase 5: Erase Provider/Model Variants from OCaml Code
+---
+rfc: "0058-phase-5"
+title: "Withdraw provider-variant migration plan"
+status: Withdrawn
+updated: 2026-07-13
+---
+
+# RFC-0058 Phase 5: Withdrawn provider-variant migration plan
 
 | | |
 |---|---|
-| Status | Draft |
-| Depends-on | RFC-0058 §2.4, Phase 4 (PR #14550) |
-| Scope | OCaml dispatch sites — remove vendor/model literals from code |
+| Status | Withdrawn |
+| Withdrawn | 2026-07-13 |
+| Reason | Runtime capability truth belongs to OAS; MASC does not infer Keeper authorization from provider identity, model identity, or MCP header support. |
 
-## 1. Problem
+## Historical disposition
 
-RFC-0058 §2.4 states *"Code dispatches by `api_format`, never by provider
-name"*. Phase 4 delivered the TOML SSOT but the dispatch sites still
-type-discriminate on closed variants and string literals tied to specific
-vendors. Audit (2026-05-11) found at least the following sources of leakage
-on `feat/rfc-0058-phase4`:
+This proposal coupled MASC authorization to provider-specific capability
+records and identity-bearing runtime MCP headers. That boundary is retired.
 
-| File | Symptom |
-|------|---------|
-| `lib/provider_adapter.ml` | `runtime_prefix = "cli-tool-d" / "cli-tool-a" / "cli-tool-c" / "cli-tool-b" / "provider-k-coding"` and per-provider `aliases = [...]` lists hardcode every vendor name and its synonyms |
-| `lib/provider_tool_support.ml` | Closed variant `Claude_code | Gemini_cli | Kimi_cli | Codex_cli` with per-variant capability lookup |
-| `lib/runtime/runtime_attempt_liveness_config.ml:54-56` | Liveness tunables keyed by literal `"cli-tool-a"` / `"cli-tool-d"` / `"provider-k-coding"` etc. |
-| `lib/runtime/runtime_catalog_validator.ml:162-168` | Warn message and detection logic enumerate provider names |
-| `lib/runtime/runtime_config.mli:152-154` | `auto` expansion logic referencing `"cli-tool-b:auto"` etc. |
-| `lib/runtime/runtime_error_classify.mli:147-168` | `cli-tool-a_prompt_preflight` type and helpers — preflight is provider-specific by design |
-| `legacy metrics backend module:530` | Metric name `masc_cli-tool-a_mcp_tool_omission_total` baked into code |
-| `lib/dashboard_runtime.mli` | Documentation literals (`cli:cli-tool-d`, `cli-tool-c`, …) — driven by runtime data but the contract surface still spells them out |
+The current contract is:
 
-The provider name leaks into call sites in three forms:
+- OAS reports the actual capabilities of the selected provider/model call.
+- MASC supplies the tool schemas requested for that call without reclassifying
+  them by provider, model, command, or product name.
+- An inbound Keeper request is authenticated by its exact token owner. A
+  caller-supplied Keeper name or provider capability does not grant authority.
+- External effects converge on the generic Keeper Gate: exact Always Allowed,
+  LLM Auto Judge, then non-blocking HITL. Objective path and sandbox
+  invariants remain at their execution boundaries.
 
-1. **Closed variant** (`type provider_id = Claude_code | …`) — exhaustive
-   match enforces that any new vendor needs a code change in every dispatch
-   site.
-2. **Runtime prefix literal** (`"cli-tool-d"`, `"cli-tool-a"`, …) —
-   string compared against runtime config; adding a vendor means hunting
-   for every match site.
-3. **Per-vendor configuration tables** baked into OCaml (`auto_register_for_candidates`,
-   liveness tunables, capability defaults) — duplicates the TOML SSOT.
-
-## 2. Goals
-
-- Remove closed `provider_id` variant types from public dispatch surfaces.
-- Eliminate every literal vendor runtime prefix from OCaml under `lib/`.
-- Move per-vendor capability/liveness/pricing/concurrency knobs out of
-  OCaml into `config/runtime.toml` (the Phase 4 SSOT).
-- After Phase 5, adding a vendor that uses an existing `api_format` is
-  TOML-only.
-
-## 3. Non-Goals
-
-- Removing per-vendor *adapter modules* (`Kimi_cli_adapter`, `Messages_api_adapter`,
-  …) — those legitimately encode wire-format quirks and remain dispatched
-  by `api_format`.
-- Backward-compatible env-var fallback for legacy `MASC_PROVIDER=*` reads —
-  that lives in a separate runtime-pin RFC.
-
-## 4. Approach
-
-Phased to keep `main` green at every step. Each step is one PR.
-
-### Phase 5.1 — Erase `provider_id` variant from `provider_tool_support`
-
-- Replace `type provider_id = Claude_code | …` with `Provider_id of string`
-  (id is the TOML `[providers.<id>]` key).
-- Move per-provider capability defaults from
-  `Llm_provider.Capabilities.{cli-tool-d,cli-tool-b,cli-tool-c,cli-tool-a}_capabilities`
-  into a `[providers.<p>.capabilities]` TOML sub-table. New section parses
-  to `provider_capabilities` record and the dispatch reads from it.
-- Caller-site grep: `provider_tool_support`, `runtime_mcp_policy_requires_http_headers`,
-  `cli-tool-a_identity_runtime_mcp_header`. Each becomes a TOML lookup.
-
-### Phase 5.2 — Remove static liveness classes
-
-The provider-level liveness schema was superseded before productization.
-Do not add a provider liveness sub-table or provider liveness class field
-back to declarative runtime config.
-
-Runtime liveness now uses:
-
-- an explicit bootstrap budget for candidates with no successful history,
-- recent successful attempt samples keyed by concrete provider/model candidate,
-- no training from failed, killed, rejected, or cancelled attempts.
-
-This keeps provider ids and model-size labels out of liveness policy.
-Follow-up hardening should focus on receipts/debug surfaces that expose
-the candidate key, budget source (`bootstrap` or `observed_success`), and
-resolved budget used for the attempt.
-
-**Former Phase 5.2b caller migration — obsolete**
-- Do not replace the old match with a provider-id keyed budget lookup;
-  that still makes provider identity the budget taxonomy. Keeper dispatch
-  should use a concrete provider/model candidate key.
-- The hardcoded `match runtime_prefix with "cli-tool-a" | "cli-tool-d" |
-  …` block is deleted without replacing it with static provider classes.
-- If validator rules are added, they should ensure no shipped provider
-  declares a liveness class so future entries cannot silently regress.
-
-### Phase 5.3 — Erase `runtime_prefix` literals from `provider_adapter`
-
-- `provider_adapter.ml` becomes a thin lookup over the TOML
-  `[providers.<id>]` table — `aliases` synonyms move into TOML
-  `aliases = [...]` field on each provider.
-- Removes the giant per-provider record list at the bottom of the file.
-
-### Phase 5.4 — Generalize legacy metrics backend metric names
-
-- `metric_cli-tool-a_mcp_tool_omission` becomes a labelled metric:
-  `masc_provider_mcp_tool_omission_total{provider="<id>"}`. Dashboards
-  follow.
-
-### Phase 5.5 — Validator hardens R11 globally
-
-- Promote `validate_strict` (introduced in Phase 5.2a alongside R11)
-  to be the default validator used by every runtime.toml load site.
-  Legacy `validate` removed once test fixtures all carry
-  `max-concurrent`.
-
-### Phase 5.6 — Erase residual `provider_cfg.kind` sites from keeper
-
-Closed by an 8-PR sweep (2026-05-11):
-
-| PR | Site | Boundary helper / structural change |
-|----|------|-------------------------------------|
-| #14691 | `keeper_turn_liveness.ml` (8 ollama tokens) | `Runtime_capacity_probe.can_probe` registry replaces the inline `is_ollama_cfg` variant match |
-| #14710 | `runtime_http_probe.ml` (3 internal `is_ollama_url` calls) | Explicit URL registry — `Http_probe.register_url` retires the `:11434` substring scan |
-| #14717 | `keeper_agent_context.ml:83` (`OpenAI_compat + Local` rewrap) | `Provider_adapter.apply_wire_overlay` — keeper layer no longer inspects either `Provider_config` or `Agent_sdk.Provider` variants |
-| #14721 | `runtime_client_capacity.auto_register_for_candidates` (substring auto-register) | `Provider_adapter.is_http_probe_capable_kind` predicate; caller registers explicitly |
-| #14729 | `keeper_turn_fsm.guard_transition` violation warn | dead-after-raise log line moved above `wrap_unit` — diagnostics reach operators |
-| #14736 | `keeper_turn_driver_helpers.ml:41` (per-provider attempt timeout bounds) | `Provider_adapter.timeout_bounds_of_kind` — last keeper-layer `match provider_cfg.kind` site closed |
-| #14745 | `keeper_bootstrap_stats.enabled` (producer-only field) | Removed; `should_start_supervisor_sweep` had already ignored it after the 2026-04-24 incident |
-| #14753 | `handle_keeper_down` swallowed `pending_confirms_removed` count | Log + JSON response now expose the count; aligned with `server_dashboard_http_delete_actions.purge_agent_filesystem_artifacts` |
-
-End-state invariant verified against `origin/main` HEAD `d3dd1086b`:
-
-```bash
-rg "match provider_cfg\.kind with" lib/keeper/ | grep -v provider_adapter
-# (no matches — keeper layer is variant-agnostic)
-```
-
-The `with` anchor is intentional: it matches OCaml `match … with`
-expressions only, so the two `[match provider_cfg.kind]` references that
-remain inside `keeper_turn_driver_helpers.{ml,mli}` docstrings (Phase 5.6
-history notes) do not trip the invariant.
-
-The only `provider_cfg.kind` reads left in `lib/` outside
-`provider_adapter` are out of scope:
-
-- `runtime_transport.ml:1706` uses `provider_cfg.kind` as a `Hashtbl`
-  registry key (lookup, not variant dispatch) — legitimate runtime
-  registry, passes the workaround rejection bar.
-- `runtime_catalog_runtime.ml:511` matches `strategy_cfg.kind`, not a
-  provider kind — strategy-side dispatch over a separate
-  `Runtime_strategy_config` type, unrelated to Phase 5.
-
-## 5. Acceptance Gates
-
-For each Phase 5.N PR:
-
-- G1: `rg "Claude_code|Codex_cli|Kimi_cli|Gemini_cli" lib/ -t ocaml` shrinks
-  monotonically. Phase 5.1 must zero out the variant occurrences in
-  `provider_tool_support`.
-- G2: `rg '"cli-tool-d"|"cli-tool-a"|"cli-tool-c"|"cli-tool-b"|"provider-k-coding"' lib/ -t ocaml`
-  shrinks monotonically. Phase 5.3 must zero them out under `lib/` (test
-  fixtures and migration tools excluded).
-- G3: `dune build --root .` and `dune test` pass. Test fixtures may be
-  amended in the same PR but production runtime.toml schema does not change.
-- G4: New TOML fields (`[providers.<p>.capabilities]`, provider `aliases`)
-  ship with parser + R-rule validator coverage. Provider liveness classes
-  remain absent.
-
-## 6. Risks
-
-- **Build runtime**: 30+ files touch `provider_id` variant. Sequence the
-  PRs so the variant survives in one place at a time. Use compiler
-  exhaustiveness to enumerate the call sites instead of grep.
-- **TOML bloat**: per-provider capability sub-tables grow the file. Mitigation:
-  the bloat is structured and replaces unstructured OCaml records — net
-  reduction in maintenance surface.
-- **Phase 4 PR rebase**: each Phase 5.N branches from Phase 4. Keep Phase 4
-  merged before Phase 5.1 opens.
-
-## 7. Open Questions
-
-1. Should provider `aliases` (synonym strings like `"agent-llm-a"`/`"agent-llm-a-code"`/`"cli-tool-d"`)
-   be moved to TOML or eliminated entirely by canonicalizing all callers
-   to the TOML id? Eliminating is cleaner but touches more call sites.
-2. Per-provider preflight (`cli-tool-a_prompt_preflight`) — is the argv/prompt
-   length check truly Agent-Code-specific, or a general constraint that should
-   live as a TOML `[providers.<p>.preflight]` policy?
-3. Dashboard contract literals (`dashboard_runtime.mli` docstrings, JSON
-   shape examples) — leave them as documentation, or drive examples from
-   the live config snapshot at doc-generation time?
+This document is retained only as a record of the rejected migration. It is
+not an implementation plan and provides no compatibility contract.

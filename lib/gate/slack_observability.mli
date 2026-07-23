@@ -23,6 +23,13 @@ type inbound_outcome =
   | Reply_sent
   | Reply_send_error
 
+type ambient_outcome =
+  | Ambient_recorded
+  | Ambient_binding_store_error
+  | Ambient_dropped_unbound
+  | Ambient_dropped_empty
+  | Ambient_dropped_too_long
+
 type reply_outcome =
   | Reply_empty
   | Reply_send_ok
@@ -31,6 +38,7 @@ type reply_outcome =
 val gateway_route_label : gateway_route -> string
 val gateway_event_label : gateway_event -> string
 val inbound_outcome_label : inbound_outcome -> string
+val ambient_outcome_label : ambient_outcome -> string
 val reply_outcome_label : reply_outcome -> string
 
 val record_gateway_event : route:gateway_route -> gateway_event -> unit
@@ -40,6 +48,11 @@ val record_gateway_event : route:gateway_route -> gateway_event -> unit
 val record_inbound_dispatch : inbound_outcome -> unit
 (** Increment [masc_slack_inbound_dispatch_total] with an [outcome] label for a
     triggered inbound message after keeper binding lookup. *)
+
+val record_ambient : ambient_outcome -> unit
+(** Increment [masc_slack_ambient_record_total] with an [outcome] label for a
+    record-only ambient message after keeper binding lookup (RFC-0226 parity
+    with the Discord gateway). *)
 
 val record_reply : reply_outcome -> unit
 (** Increment [masc_slack_outbound_replies_total] with an [outcome] label for a

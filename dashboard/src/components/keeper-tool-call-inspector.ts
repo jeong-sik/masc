@@ -12,7 +12,7 @@ import { formatMsCompact } from '../lib/format-number'
 import { LoadingState } from './common/feedback-state'
 import { asRecord, mergeRouteRecord, hasRouteContext, type MutableRouteContext } from './common/normalize'
 import { SectionCap } from './common/section-cap'
-import { toolCategory, durationColor, prettyJsonDeep } from './tool-call-shared'
+import { toolCategory, durationColor, prettyJson } from './tool-call-shared'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { parseToolBlobMarker, type ToolBlobMarker } from '../lib/tool-blob-marker'
 import { fetchToolBlob } from '../api/tool-blob'
@@ -65,10 +65,8 @@ export function formatInput(input: unknown): string {
   }
 }
 
-// Pretty-print and recursively un-nest double-encoded JSON (mirror of the
-// OCaml Tool_result structured-payload extraction). Returns null for non-JSON.
 function tryPrettyJson(s: string): string | null {
-  return prettyJsonDeep(s)
+  return prettyJson(s)
 }
 
 function parseInputRecord(input: string): Record<string, unknown> | null {
@@ -207,6 +205,10 @@ function entryScopeLabel(entry: ToolCallEntry): string {
   const goalIds = entry.goal_ids ?? []
   const parts = [
     typeof entry.turn === 'number' ? `turn ${entry.turn}` : null,
+    typeof entry.planned_index === 'number' ? `plan ${entry.planned_index}` : null,
+    entry.tool_use_id !== undefined
+      ? `tool_use_id ${entry.tool_use_id === '' ? '(blank)' : entry.tool_use_id}`
+      : null,
     typeof entry.keeper_turn_id === 'number' ? `keeper ${entry.keeper_turn_id}` : null,
     entry.lane ? `lane ${entry.lane}` : null,
     entry.task_id ? `task ${entry.task_id}` : null,
@@ -218,20 +220,11 @@ function entryScopeLabel(entry: ToolCallEntry): string {
   return parts.length > 0 ? parts.join(' · ') : 'scope unavailable'
 }
 
-// Whether the call succeeded at the *semantic* layer. A tool can report
-// transport success=true while its parsed output signals failure
-// (semantic_success=false, e.g. blocked/timeout); fall back to transport
-// success when the semantic flag is absent (pre-field rows).
 function toolCallSucceeded(entry: ToolCallEntry): boolean {
-  return entry.semantic_success ?? entry.success
+  return entry.success
 }
 
 function toolCallStatusLabel(entry: ToolCallEntry): string {
-  // Show the precise failure mode (blocked/timeout/partial/runtime_error/...)
-  // when the parsed output named one; fall back to ok/failed otherwise.
-  if (entry.semantic_outcome && entry.semantic_outcome !== 'success') {
-    return entry.semantic_outcome
-  }
   return toolCallSucceeded(entry) ? 'ok' : 'failed'
 }
 
@@ -501,7 +494,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
         </span>
         <span
           class=${`flex-shrink-0 w-5 text-center ${toolCallSucceeded(entry) ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-err)]'}`}
-          title=${entry.semantic_outcome ?? (entry.success ? 'ok' : 'failed')}
+          title=${entry.success ? 'ok' : 'failed'}
         >
           ${toolCallSucceeded(entry) ? 'O' : 'X'}
         </span>
@@ -515,6 +508,9 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
           ${entry.model ? html`
             <div class="text-3xs text-[var(--color-fg-muted)]">model: <span class="text-[var(--color-fg-secondary)] font-mono">${entry.model}</span></div>
           ` : null}
+          <div class="text-3xs text-[var(--color-fg-muted)]">
+            occurrence: <span class="text-[var(--color-fg-secondary)] font-mono">${entryScopeLabel(entry)}</span>
+          </div>
           ${routeLinks.length > 0 ? html`
             <div class="flex items-center justify-between gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2 v2-monitoring-toolbar">
               <span class="min-w-0 truncate text-3xs font-mono text-[var(--color-fg-muted)]" title=${routeLinks.map(link => link.evidence).join(' · ')}>

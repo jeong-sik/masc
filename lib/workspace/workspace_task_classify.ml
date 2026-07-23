@@ -16,18 +16,6 @@ open Workspace_identity
 
 (* activity_workspace_id removed — namespace retired (#unify-namespace). *)
 
-(* #9795: FSM drift observability. [masc_workspace] sits below the
-   [masc] library in the dep graph, so it cannot call
-   [Otel_metric_store.inc_counter] directly. The variant→label mapping
-   stays here (pattern-matches the sealed drift enum), and the
-   emit runs through a [Workspace_hooks] callback wired by
-   [lib/workspace.ml] at startup.  Exhaustive pattern-match forces
-   any new drift variant to be named alongside existing
-   dashboards. *)
-let drift_variant_label = function
-  | Workspace_task_lifecycle.Claimed_to_done_skip -> "claimed_to_done_skip"
-;;
-
 (* #10449: classify a task's contract surface so the completion-path
    metric can split bypass-rate by creation-side data presence.
    Three states: missing field, present-but-empty, populated. *)
@@ -38,37 +26,28 @@ let classify_contract_state (contract : Masc_domain.task_contract option) =
   | Some _ -> "with_contract"
 ;;
 
-(* #10449: classify which FSM path produced a [Done] new_status.
-   Approve_verification remains an explicit verification-submission path.
-   Normal contracted [Done_action] completions are LLM-reviewed in
-   [Tool_task] and then complete through the ordinary Done path. [forced_done]
-   only fires when [force=true] short-circuited the same-agent guard;
-   the lifecycle module emits the same drift variant for both forced
-   and consensual claimed→done jumps, so the [force] flag is the
-   only distinguisher. *)
-let classify_completion_path
-      ~(action : Masc_domain.task_action)
-      ~(drift : Workspace_task_lifecycle.drift option)
-      ~(force : bool)
-  =
+(* Completion path is descriptive telemetry only. Both paths require the same
+   configured-LLM verdict at the Workspace transition boundary. *)
+let classify_completion_path ~(action : Masc_domain.task_action) =
   match action with
   | Masc_domain.Approve_verification -> "via_verification"
-  | Masc_domain.Claim | Masc_domain.Start | Masc_domain.Done_action
+  | Masc_domain.Done_action -> "direct_llm_verdict"
+  | Masc_domain.Claim
+  | Masc_domain.Start
   | Masc_domain.Cancel | Masc_domain.Release
   | Masc_domain.Submit_for_verification | Masc_domain.Reject_verification ->
-    if force then "forced_done"
-    else (match drift with
-          | Some Workspace_task_lifecycle.Claimed_to_done_skip -> "claimed_to_done_skip"
-          | None -> "in_progress_to_done")
+    "not_completion"
 ;;
 
-let task_actor_kind agent_name =
-  let normalized = String.lowercase_ascii (String.trim agent_name) in
-  if normalized = "" || normalized = "system"
-  then "system"
-  else if Workspace_resilience.Zombie.is_keeper_name normalized
-  then "keeper"
-  else "agent"
+type task_actor_kind =
+  | Agent
+  | Operator
+  | System
+
+let task_actor_kind_to_string = function
+  | Agent -> "agent"
+  | Operator -> "operator"
+  | System -> "system"
 ;;
 
 let trim_opt = Env_config_core.trim_opt
@@ -124,49 +103,8 @@ let update_local_agent_state config ~agent_name f =
         Log.Misc.error "update_local_agent_state: parse failed for %s: %s" agent_name msg)
 ;;
 
-(** Tighter variant of [resolve_agent_name] for task ownership guards.
-    Only accepts the resolved identity when it is the exact [-agent] suffix
-    form of the normalised input (e.g. "keeper-bob" -> "keeper-bob-agent").
-    Arbitrary prefix matches from [resolve_agent_name] that do not conform to
-    this pattern are silently discarded and the normalised input is returned
-    unchanged, preventing one caller from being mistakenly mapped to a
-    different agent's identity. *)
-let resolve_agent_name_strict config agent_name =
-  let normalized = String.lowercase_ascii (String.trim agent_name) in
-  let resolved = resolve_agent_name config normalized in
-  if resolved = normalized
-  then normalized
-  else if resolved = normalized ^ "-agent"
-  then resolved
-  else normalized
-;;
-
-let keeper_transport_alias_key name =
-  let prefix = "keeper-" in
-  let suffix = "-agent" in
-  let prefix_len = String.length prefix in
-  let suffix_len = String.length suffix in
-  let len = String.length name in
-  if
-    len > prefix_len + suffix_len
-    && String.starts_with ~prefix name
-    && String.ends_with ~suffix name
-  then Some (String.sub name prefix_len (len - prefix_len - suffix_len))
-  else None
-;;
-
-let task_identity_key config name =
-  let resolved = resolve_agent_name_strict config name in
-  match keeper_transport_alias_key resolved with
-  | Some keeper -> keeper
-  | None ->
-    if Nickname.is_dictionary_generated_nickname resolved
-    then Option.value (Nickname.extract_agent_type resolved) ~default:resolved
-    else resolved
-;;
-
-let same_task_actor config left right =
-  String.equal (task_identity_key config left) (task_identity_key config right)
+let same_task_actor _config left right =
+  String.equal left right
 ;;
 
 let normalize_execution_links (links : Masc_domain.task_execution_links) =
@@ -191,8 +129,6 @@ let empty_task_contract =
   ; required_evidence = []
   ; inspect_gate_evidence = []
   ; verify_gate_evidence = []
-  ; evidence_claims = []
-  ; stale_claim_timeout_sec = 0
   ; links = { operation_id = None; session_id = None }
   }
 ;;
@@ -200,16 +136,10 @@ let empty_task_contract =
 (* RFC-0311 Phase 1: the default verification contract declares no *specific*
    descriptive evidence entries. The prior default
    [ "completion_notes"; "reviewable_evidence_ref" ] could be satisfied only by
-   pasting those two literal tokens into the completion notes (the gate matched
-   them as substrings). That single mechanism simultaneously (a) over-blocked
-   keepers who did not know the tokens and (b) let any completion be faked by
-   pasting the labels. The completion gate ([Task_completion_gate]) no longer
-   reads these entries at all: it accepts a completion only when the caller
-   supplies at least one locally validated typed Evidence_ref (base-path file /
-   file URI, local git commit, or local .masc trace/turn/receipt artifact) on
-   handoff_context.evidence_refs — one flexible bar across code and non-code
-   tasks. [required_evidence] now serves only as human/LLM/verifier
-   description; typed-kind binding (a code task must cite a PR) is Phase 2. *)
+   pasting those two literal tokens into the completion notes. That mechanism
+   simultaneously over-blocked unaware keepers and let a completion be faked by
+   copying labels. [required_evidence] now serves only as a fact supplied to the
+   LLM reviewer and human verifier; the workspace FSM does not interpret it. *)
 let default_verification_evidence_refs = []
 
 let first_line text =
@@ -247,9 +177,7 @@ let ensure_task_contract_for_verification ?contract ~title ~description () =
   let required_evidence =
     if base.required_evidence <> []
     then base.required_evidence
-    (* A verify-only task can require verifier input without widening the
-       completion gate. Keep required_evidence empty in that case; the
-       verifier projection combines verify_gate_evidence separately. *)
+    (* A verify-only task can describe verifier input separately. *)
     else if base.verify_gate_evidence <> []
     then []
     else default_verification_evidence_refs
@@ -300,12 +228,25 @@ let merge_envelope_into_payload ?correlation_id ?run_id payload =
       payload)
 ;;
 
-let emit_task_activity ?correlation_id ?run_id config ~agent_name ~task_id ~kind ~payload =
+let emit_task_activity
+    ?correlation_id
+    ?run_id
+    ?(actor_kind = Agent)
+    config
+    ~agent_name
+    ~task_id
+    ~kind
+    ~payload
+  =
   let payload = merge_envelope_into_payload ?correlation_id ?run_id payload in
   try
     (Atomic.get Workspace_hooks.activity_emit_fn)
       config
-      ~actor:Workspace_hooks.{ kind = task_actor_kind agent_name; id = agent_name }
+      ~actor:
+        Workspace_hooks.
+          { kind = task_actor_kind_to_string actor_kind
+          ; id = agent_name
+          }
       ~subject:Workspace_hooks.{ kind = "task"; id = task_id }
       ~kind
       ~payload
@@ -346,10 +287,8 @@ let task_assignee_of_status = Masc_domain.task_assignee_of_status
     Exhaustive [match] over [Masc_domain.task_status]: adding a 7th constructor
     will fail to compile. Each branch lists actions that
     [transition_task_r]'s match-arms accept for that status — keep this
-    in sync if you add new transitions there. Verifier-FSM transitions
-    require [MASC_VERIFICATION_FSM_ENABLED=true] but are listed
-    unconditionally so the hint stays accurate when the flag is on; the
-    flag-off case still rejects them and produces a more specific error. *)
+    in sync if you add new transitions there. Completion actions still require
+    a request-local configured-LLM verdict at execution time. *)
 let valid_next_actions_for_status
   : Masc_domain.task_status -> Masc_domain.task_action list
   = function
@@ -400,7 +339,7 @@ let task_transition_details
       ?notes
       ?reason
       ?duration_ms
-      ?(forced = false)
+      ?configured_llm_verdict
       ()
   =
   let optional_field name = function
@@ -410,11 +349,13 @@ let task_transition_details
   `Assoc
     ([ "from_status", `String (task_status_to_string from_status)
      ; "to_status", `String (task_status_to_string to_status)
-     ; "forced", `Bool forced
      ]
      @ optional_field "notes" (Option.map (fun value -> `String value) notes)
      @ optional_field "reason" (Option.map (fun value -> `String value) reason)
-     @ optional_field "duration_ms" (Option.map (fun value -> `Int value) duration_ms))
+     @ optional_field "duration_ms" (Option.map (fun value -> `Int value) duration_ms)
+     @ optional_field
+         "configured_llm_verdict"
+         (Option.map Masc_domain.configured_llm_completion_verdict_to_yojson configured_llm_verdict))
 ;;
 
 let observe_task_transition
@@ -448,10 +389,10 @@ let transition_event_type_to_string = function
 (** SSOT structured event for [log_event] sink. Wraps [task_transition_details]
     with an envelope (type/agent/actor_kind/task/from_status/to_status/ts) so
     every transition log line carries the same schema. Optional [?action]
-    preserves the legacy "action" field used by the unified transition path
-    so existing dashboard readers do not break. *)
+    carries the typed transition label used by the unified transition path. *)
 let transition_log_event
       ~(event_type : transition_event_type)
+      ?(actor_kind = Agent)
       ~agent_name
       ~task_id
       ~from_status
@@ -461,8 +402,7 @@ let transition_log_event
       ?reason
       ?duration_ms
       ?handoff_context
-      ?(forced = false)
-      ?(authority = Assignee)
+      ?configured_llm_verdict
       ?assignee
       ?(now = now_iso ())
       ()
@@ -475,16 +415,10 @@ let transition_log_event
   `Assoc
     ([ "type", `String (transition_event_type_to_string event_type)
      ; "agent", `String agent_name
-     ; "actor_kind", `String (task_actor_kind agent_name)
+     ; "actor_kind", `String (task_actor_kind_to_string actor_kind)
      ; "task", `String task_id
      ; "from_status", `String (task_status_to_string from_status)
      ; "to_status", `String (task_status_to_string to_status)
-     ; "forced", `Bool forced
-       (* RFC-0262 §9: the typed authority the FSM granted this transition.
-          [forced] is now the derived projection ([authority <> Assignee]); the
-          §9 auditor (Completion_trust_audit) keys off [authority] to tell an
-          Operator override from a System code-path satisfier. *)
-     ; "authority", `String (completion_authority_to_string authority)
      ; "ts", `String now
      ]
      (* RFC-0262 §9: the task's owner *before* this transition (the [from_status]
@@ -497,6 +431,9 @@ let transition_log_event
      @ optional_field "notes" (Option.map (fun v -> `String v) notes)
      @ optional_field "reason" (Option.map (fun v -> `String v) reason)
      @ optional_field "duration_ms" (Option.map (fun v -> `Int v) duration_ms)
+     @ optional_field
+         "configured_llm_verdict"
+         (Option.map Masc_domain.configured_llm_completion_verdict_to_yojson configured_llm_verdict)
      @ optional_field
          "handoff_context"
          (Option.map Masc_domain.task_handoff_context_to_yojson handoff_context))

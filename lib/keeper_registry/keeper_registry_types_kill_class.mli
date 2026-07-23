@@ -1,14 +1,4 @@
-(** Typed sub-classes for the keeper registry stale-watchdog kill +
-    the [Ambiguous_partial_commit] failure-reason payload. *)
-
-type ambiguous_partial_commit_kind =
-  | Post_commit_timeout
-  | Post_commit_failure
-
-type ambiguous_partial_commit =
-  { kind : ambiguous_partial_commit_kind
-  ; detail : string
-  }
+(** Typed sub-classes for the keeper registry stale-watchdog kill. *)
 
 type stale_kill_class =
   | Idle_turn of { stall_seconds : float }
@@ -22,4 +12,3 @@ type stale_kill_class =
 
 val progress_kind_label : string option -> string
 val stale_kill_class_to_string : stale_kill_class -> string
-val ambiguous_partial_commit_kind_to_string : ambiguous_partial_commit_kind -> string

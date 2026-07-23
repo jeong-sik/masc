@@ -87,10 +87,6 @@ type run_result =
   ; stop_reason : Runtime_agent.stop_reason
   ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
   ; tool_surface : tool_surface_metrics
-  ; pre_dispatch_compacted : bool
-  ; pre_dispatch_compaction_trigger : string option
-  ; pre_dispatch_compaction_before_tokens : int option
-  ; pre_dispatch_compaction_after_tokens : int option
   }
 
 let tool_names (result : run_result) = tool_names_of_calls result.tool_calls

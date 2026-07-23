@@ -3,6 +3,8 @@ type waiting_source =
   | Event_queue_inflight
   | Chat_queue_pending
   | Chat_queue_inflight
+  | Chat_queue_recovery_required
+  | Chat_queue_persistence_blocked
   | Hitl_pending
   | External_attention
   | Fusion_running
@@ -21,9 +23,9 @@ type keeper_state =
 
 type wake_producer =
   | Board_dispatch
+  | Board_attention_judge
   | Keeper_chat_queue_store
   | Keeper_supervisor
-  | Keeper_no_progress_recovery
   | Fusion_sink
   | Bg_task_completion
   | Connector_attention_hook
@@ -33,10 +35,9 @@ type wake_producer =
   | Schedule_runner
   | Keeper_turn_admission
   | Operator_pending_confirm_store
-  | Goal_verification_store
   | Keeper_turn_failure_route
   | Keeper_goal_assignment
-  | Keeper_goal_stagnation
+  | Keeper_compaction_request
   | Read_model_reader
 
 type waiting_row =
@@ -57,6 +58,8 @@ let source_to_string = function
   | Event_queue_inflight -> "event_queue_inflight"
   | Chat_queue_pending -> "chat_queue_pending"
   | Chat_queue_inflight -> "chat_queue_inflight"
+  | Chat_queue_recovery_required -> "chat_queue_recovery_required"
+  | Chat_queue_persistence_blocked -> "chat_queue_persistence_blocked"
   | Hitl_pending -> "hitl_pending"
   | External_attention -> "external_attention"
   | Fusion_running -> "fusion_running"
@@ -73,6 +76,8 @@ let all_waiting_sources =
   ; Event_queue_inflight
   ; Chat_queue_pending
   ; Chat_queue_inflight
+  ; Chat_queue_recovery_required
+  ; Chat_queue_persistence_blocked
   ; Hitl_pending
   ; External_attention
   ; Fusion_running
@@ -96,9 +101,9 @@ let all_keeper_states = [ Idle; Busy; Waiting; Deferred ]
 
 let wake_producer_to_string = function
   | Board_dispatch -> "board_dispatch"
+  | Board_attention_judge -> "board_attention_judge"
   | Keeper_chat_queue_store -> "keeper_chat_queue_store"
   | Keeper_supervisor -> "keeper_supervisor"
-  | Keeper_no_progress_recovery -> "keeper_no_progress_recovery"
   | Fusion_sink -> "fusion_sink"
   | Bg_task_completion -> "bg_task_completion"
   | Connector_attention_hook -> "connector_attention_hook"
@@ -108,27 +113,25 @@ let wake_producer_to_string = function
   | Schedule_runner -> "schedule_runner"
   | Keeper_turn_admission -> "keeper_turn_admission"
   | Operator_pending_confirm_store -> "operator_pending_confirm_store"
-  | Goal_verification_store -> "goal_verification_store"
   | Keeper_turn_failure_route -> "keeper_turn_failure_route"
   | Keeper_goal_assignment -> "keeper_goal_assignment"
-  | Keeper_goal_stagnation -> "keeper_goal_stagnation"
+  | Keeper_compaction_request -> "keeper_compaction_request"
   | Read_model_reader -> "read_model_reader"
 ;;
 
 let wake_producer_of_payload : Keeper_event_queue.stimulus_payload -> wake_producer =
   function
   | Board_signal _ -> Board_dispatch
+  | Board_attention _ -> Board_attention_judge
   | Bootstrap -> Keeper_supervisor
-  | No_progress_recovery -> Keeper_no_progress_recovery
   | Fusion_completed _ -> Fusion_sink
   | Bg_completed _ -> Bg_task_completion
   | Schedule_due _ -> Schedule_runner
   | Connector_attention _ -> Connector_attention_hook
   | Hitl_resolved _ -> Hitl_resolution_hook
-  | Goal_verification_failed _ -> Goal_verification_store
   | Failure_judgment _ -> Keeper_turn_failure_route
+  | Manual_compaction_requested -> Keeper_compaction_request
   | Goal_assigned _ -> Keeper_goal_assignment
-  | Goal_stagnation _ -> Keeper_goal_stagnation
 ;;
 
 let unix_iso_json = function
@@ -240,13 +243,17 @@ let schedule_read_error_detail = function
 ;;
 
 let chat_queue_source_label = function
-  | Keeper_chat_queue.Dashboard -> "dashboard"
+  | Keeper_chat_queue.Dashboard _ -> "dashboard"
   | Keeper_chat_queue.Discord _ -> "discord"
   | Keeper_chat_queue.Slack _ -> "slack"
 ;;
 
 let chat_queue_source_json = function
-  | Keeper_chat_queue.Dashboard -> `Assoc [ "kind", `String "dashboard" ]
+  | Keeper_chat_queue.Dashboard { thread_id } ->
+    `Assoc
+      [ "kind", `String "dashboard"
+      ; "thread_id", `String thread_id
+      ]
   | Keeper_chat_queue.Discord { channel_id; user_id } ->
     `Assoc
       [ "kind", `String "discord"
@@ -304,14 +311,7 @@ let chat_queue_invariant_error_row keeper_name queue_index
 
 let chat_queue_load_error_row keeper_name
     (error : Keeper_chat_queue.snapshot_load_error) =
-  let kind =
-    match error.kind with
-    | Keeper_chat_queue.Invalid_path -> "invalid_path"
-    | Keeper_chat_queue.Read_failed -> "read_failed"
-    | Keeper_chat_queue.Parse_failed -> "parse_failed"
-    | Keeper_chat_queue.Migration_failed -> "migration_failed"
-    | Keeper_chat_queue.Recovery_failed -> "recovery_failed"
-  in
+  let kind = Keeper_chat_queue.snapshot_load_error_kind_to_string error.kind in
   read_error_row ~keeper_name ~waiting_on:"chat_queue_snapshot"
     ~next_action:"repair_keeper_chat_queue_snapshot"
     (`Assoc
@@ -321,7 +321,45 @@ let chat_queue_load_error_row keeper_name
       ])
 ;;
 
-let chat_queue_rows keeper_name =
+let chat_queue_persistence_blocked_rows ~base_path keeper_name =
+  match
+    Keeper_chat_consumer.persistence_blocked_status
+      ~base_path
+      ~keeper_name
+  with
+  | Ok None -> []
+  | Error message ->
+    [ read_error_row
+        ~keeper_name
+        ~waiting_on:"chat_queue_persistence_blocked_observation"
+        ~next_action:"repair_keeper_chat_consumer_state"
+        (`Assoc [ "message", `String message ])
+    ]
+  | Ok (Some status) ->
+    let operation =
+      match status.Keeper_chat_consumer.operation with
+      | Keeper_chat_consumer.Lease_next_blocked -> "lease_next"
+      | Keeper_chat_consumer.Finalize_blocked -> "finalize"
+      | Keeper_chat_consumer.Nack_blocked -> "nack"
+    in
+    [ { keeper_name = Some keeper_name
+      ; source = Chat_queue_persistence_blocked
+      ; waiting_on = "operator_reconciliation"
+      ; wake_producer = Keeper_chat_queue_store
+      ; since = None
+      ; due_at = None
+      ; next_action = "reconcile_keeper_chat_queue"
+      ; detail =
+          `Assoc
+            [ "operation", `String operation
+            ; "lease_id", Json_util.string_opt_to_json status.lease_id
+            ; "error", Keeper_chat_queue.mutation_error_to_json status.error
+            ]
+      }
+    ]
+;;
+
+let chat_queue_rows ~base_path keeper_name =
   let snapshot = Keeper_chat_queue.snapshot ~keeper_name in
   let pending =
     snapshot.pending
@@ -334,6 +372,7 @@ let chat_queue_rows keeper_name =
                  ~lifecycle_fields:[ "state", `String "pending" ] keeper_name
                  queue_index receipt
            | Keeper_chat_queue.Inflight _ | Keeper_chat_queue.Delivered _
+           | Keeper_chat_queue.Recovery_required _
            | Keeper_chat_queue.Failed _ ->
                chat_queue_invariant_error_row keeper_name queue_index receipt
                  "pending")
@@ -354,11 +393,36 @@ let chat_queue_rows keeper_name =
                    ]
                  keeper_name queue_index receipt
            | Keeper_chat_queue.Pending | Keeper_chat_queue.Delivered _
+           | Keeper_chat_queue.Recovery_required _
            | Keeper_chat_queue.Failed _ ->
                chat_queue_invariant_error_row keeper_name queue_index receipt
                  "inflight")
   in
-  pending @ inflight
+  let recovery_required =
+    snapshot.recovery_required
+    |> List.mapi (fun queue_index
+                       (receipt : Keeper_chat_queue.active_receipt) ->
+           match receipt.Keeper_chat_queue.state with
+           | Keeper_chat_queue.Recovery_required { lease_id; started_at } ->
+             chat_queue_active_row ~source:Chat_queue_recovery_required
+               ~next_action:"resolve_keeper_chat_queue_recovery"
+               ~lifecycle_fields:
+                 [ "state", `String "recovery_required"
+                 ; "lease_id", `String lease_id
+                 ; "started_at", `Float started_at
+                 ; "started_at_iso", unix_iso_json (Some started_at)
+                 ; "dispatchable", `Bool false
+                 ]
+               keeper_name queue_index receipt
+           | Keeper_chat_queue.Pending
+           | Keeper_chat_queue.Inflight _
+           | Keeper_chat_queue.Delivered _
+           | Keeper_chat_queue.Failed _ ->
+             chat_queue_invariant_error_row keeper_name queue_index receipt
+               "recovery_required")
+  in
+  pending @ inflight @ recovery_required
+  @ chat_queue_persistence_blocked_rows ~base_path keeper_name
   @ List.map (chat_queue_load_error_row keeper_name) snapshot.load_errors
 ;;
 
@@ -414,8 +478,6 @@ let turn_admission_rows ~base_path keeper_name =
             ; "waiting_since", float_json snapshot.snapshot_waiting_since
             ; "waiting_since_iso", unix_iso_json snapshot.snapshot_waiting_since
             ; "chat_waiting_count", `Int snapshot.snapshot_waiting
-            ; "chat_waiting_cap", `Int snapshot.snapshot_waiting_cap
-            ; "chat_waiting_full", `Bool snapshot.snapshot_waiting_full
             ; "in_flight", in_flight_detail
             ]
       }
@@ -440,8 +502,7 @@ let hitl_rows keeper_name pending =
         `Assoc
           [ "approval_id", `String entry.id
           ; "tool_name", `String entry.tool_name
-          ; "risk_level", `String (Keeper_approval_queue.risk_level_to_string entry.risk_level)
-          ; "phase", `String (Keeper_approval_queue.pending_phase_to_string entry.phase)
+          ; "summary_status", Keeper_approval_queue.summary_status_to_yojson entry.summary_status
           ; "turn_id", Json_util.int_opt_to_json entry.turn_id
           ; "task_id", Json_util.string_opt_to_json entry.task_id
           ; "goal_id", Json_util.string_opt_to_json entry.goal_id
@@ -584,11 +645,10 @@ let schedule_active (request : Schedule_domain.schedule_request) =
 
 let schedule_next_action (request : Schedule_domain.schedule_request) =
   match request.status with
-  | Pending_approval -> "operator_grant_schedule"
   | Scheduled -> "wait_until_due"
   | Due -> "schedule_runner_dispatch"
   | Running -> "await_schedule_completion"
-  | Succeeded | Failed | Rejected | Cancelled | Expired -> "none"
+  | Succeeded | Failed | Cancelled | Expired -> "none"
 ;;
 
 let schedule_waiting_on (request : Schedule_domain.schedule_request) =
@@ -615,8 +675,7 @@ let schedule_rows ~keeper_names state =
     ; wake_producer =
         (match request.status with
          | Scheduled | Due | Running -> Schedule_runner
-         | Pending_approval -> Schedule_store
-         | Succeeded | Failed | Rejected | Cancelled | Expired -> Schedule_store)
+         | Succeeded | Failed | Cancelled | Expired -> Schedule_store)
     ; since = Some request.requested_at
     ; due_at = Some request.due_at
     ; next_action = schedule_next_action request
@@ -624,7 +683,6 @@ let schedule_rows ~keeper_names state =
         `Assoc
           [ "schedule_id", `String request.schedule_id
           ; "status", `String (Schedule_domain.schedule_status_to_string request.status)
-          ; "risk_class", `String (Schedule_domain.risk_class_to_string request.risk_class)
           ; "payload_digest", `String (Schedule_domain.payload_digest request.payload)
           ; ( "payload_kind"
             , match Schedule_payload_projection.kind request with
@@ -836,7 +894,7 @@ let keeper_rows ~base_path ~pending_approvals ~fusion_runs ~pending_confirms kee
     in
     let rows =
       event_queue_rows ~base_path ~keeper_name
-      @ chat_queue_rows keeper_name
+      @ chat_queue_rows ~base_path keeper_name
       @ turn_admission_rows ~base_path keeper_name
       @ hitl_rows keeper_name pending_approvals
       @ external_attention_rows

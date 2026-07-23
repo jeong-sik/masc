@@ -1,6 +1,37 @@
 open Alcotest
 
 module Uid = Keeper_id.Uid
+module Keeper_name = Keeper_id.Keeper_name
+module Trace_id = Keeper_id.Trace_id
+
+let expect_valid parse to_string label value =
+  match parse value with
+  | Ok parsed -> check string label value (to_string parsed)
+  | Error error -> failf "%s rejected valid value %S: %s" label value error
+;;
+
+let expect_invalid parse label value =
+  match parse value with
+  | Error _ -> ()
+  | Ok _ -> failf "%s accepted invalid value %S" label value
+;;
+
+let test_keeper_name_portable_grammar () =
+  expect_valid
+    Keeper_name.of_string
+    Keeper_name.to_string
+    "dotted keeper name"
+    "owner.with.internal.dots";
+  expect_invalid Keeper_name.of_string "reserved current-directory component" ".";
+  expect_invalid Keeper_name.of_string "reserved parent-directory component" "..";
+  expect_invalid Keeper_name.of_string "path separator" "owner/escape"
+;;
+
+let test_trace_id_keeps_bounded_non_dotted_grammar () =
+  expect_valid Trace_id.of_string Trace_id.to_string "trace id" "trace-01";
+  expect_invalid Trace_id.of_string "dotted trace id" "trace.with.dot";
+  expect_invalid Trace_id.of_string "overlong trace id" (String.make 65 't')
+;;
 
 let test_generate_format () =
   let uid = Uid.generate () in
@@ -63,5 +94,17 @@ let () =
           test_case "of_string valid" `Quick test_of_string_valid;
           test_case "of_string invalid" `Quick test_of_string_invalid;
           test_case "equal" `Quick test_equal;
+        ] );
+      ( "Keeper_name",
+        [ test_case
+            "portable grammar and reserved path components"
+            `Quick
+            test_keeper_name_portable_grammar
+        ] );
+      ( "Trace_id",
+        [ test_case
+            "bounded non-dotted grammar remains independent"
+            `Quick
+            test_trace_id_keeps_bounded_non_dotted_grammar
         ] );
     ]

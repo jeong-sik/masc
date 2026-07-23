@@ -1,10 +1,7 @@
-(** Compaction audit: Event_bus subscriber + paired JSONL persistence +
-    rolling retention.
+(** MASC compaction audit: paired JSONL persistence + rolling retention.
 
-    Subscribes to OAS {!Agent_sdk.Event_bus} for [ContextCompactStarted]
-    and [ContextCompacted] payloads, synthesizes a stable [compaction_id]
-    correlating start/complete pairs per keeper, and appends each event
-    to [{base_path}/data/harness-compact/YYYY-MM/DD.jsonl].
+    MASC compaction owners persist explicit start/complete records to
+    [{base_path}/data/harness-compact/YYYY-MM/DD.jsonl].
 
     Retention: on each write the oldest files beyond
     [retention_days] (default 14, override via
@@ -14,22 +11,17 @@
 
     {1 Design notes}
 
-    - Start/Complete pairing uses subscriber-local state
-      ([Hashtbl] keyed by keeper/agent name) — OAS event_bus does not
-      carry a compaction-scoped correlation id.
-    - Loose string fields from OAS payload ([trigger], [phase_hint])
-      are parsed into variants with [Unknown] fallback. Unknown tags
-      are preserved, not rejected, so forward compat with OAS is
-      automatic.
+    - Start/Complete rows carry an explicit [compaction_id].
+    - Loose persisted trigger strings are preserved through [Unknown_trigger].
     - Reads and writes use only the paired audit store. Historical
       [harness-pre-compact/] rows are not projected into this API. *)
 
 (** {1 Types} *)
 
 type trigger =
-  | Proactive          (** OAS string ["proactive"] *)
-  | Emergency          (** OAS string ["emergency"] *)
-  | Operator           (** OAS string ["operator"] *)
+  | Proactive          (** MASC proactive compaction *)
+  | Emergency          (** MASC typed-overflow recovery *)
+  | Operator           (** Explicit operator request *)
   | Unknown_trigger of string
 
 val parse_trigger : string -> trigger
@@ -41,8 +33,8 @@ type start_record = {
   ts_unix : float;
   keeper_name : string;
   trigger : trigger;
-  correlation_id : string;  (** From OAS envelope *)
-  run_id : string;          (** From OAS envelope *)
+  correlation_id : string;  (** Supplied by the MASC compaction owner *)
+  run_id : string;          (** Supplied by the MASC compaction owner *)
 }
 
 type complete_record = {
@@ -125,48 +117,16 @@ type pair_result =
   | Paired          of { start : start_record; complete : complete_record }
   | Orphan_start    of start_record
   | Orphan_complete of complete_record
-    (** Should be rare — indicates subscriber missed the Start event
-        (e.g. server restart mid-compaction). *)
+    (** Indicates that the MASC compaction owner persisted only completion. *)
 
 (** Pair Start and Complete rows by [compaction_id]. *)
 val pair_events : row list -> pair_result list
 
-(** Test-only hooks for the in-memory pending-start cache. *)
+(** Test-only retention resolver. *)
 module For_testing : sig
-  val clear_pending : unit -> unit
-
-  val evict_pending_older_than
-    :  max_age_s:float
-    -> now:float
-    -> (string * string * float) list
-
-  val handle_event_at
-    :  received_ts:float
-    -> base_path:string
-    -> retention_days:int
-    -> Agent_sdk.Event_bus.event
-    -> unit
-
   (** Resolve [MASC_COMPACTION_AUDIT_RETENTION_DAYS] without side effects,
       returning the typed outcome. Reads from process env at call time. *)
   val resolve_retention_outcome
     :  default:int
     -> Keeper_compact_audit_retention_outcome.t
 end
-
-(** {1 Subscriber wireup} *)
-
-(** Spawn a background Eio fiber bound to [sw] that subscribes to
-    [bus], converts compaction events into records, and persists them.
-    Fiber is cancelled on switch release; subscription is unsubscribed.
-
-    [drain_interval_s] controls the poll period (default 0.25s,
-    matching [docs/spec/13-oas-integration.md] §322). *)
-val spawn_subscriber
-  :  sw:Eio.Switch.t
-  -> clock:[> float Eio.Time.clock_ty ] Eio.Std.r
-  -> base_path:string
-  -> retention_days:int
-  -> ?drain_interval_s:float
-  -> Agent_sdk.Event_bus.t
-  -> unit

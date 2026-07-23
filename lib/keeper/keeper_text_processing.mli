@@ -1,8 +1,4 @@
-(** Keeper_text_processing — text processing functions shared by
-    [Keeper_context_runtime] and [Keeper_prompt].
-
-    Handles reply markup stripping, proactive text normalisation,
-    quality checks, and fragment detection. *)
+(** Keeper text normalization and legacy fragment diagnostics. *)
 
 (** {1 Reply Markup} *)
 
@@ -11,18 +7,9 @@
     input. *)
 val truncate_utf8_prefix : max_bytes:int -> string -> string * bool
 
-(** Trim whitespace; return [None] for empty strings. *)
-
-(** Strip skill-route lines from a reply. *)
-val strip_internal_reply_markup : string -> string
-
-(** Return user-visible reply text, stripping internal markup.
-    Falls back through the optional [fallback] string. *)
-val user_visible_reply_text : ?fallback:string -> string -> string
-
 (** {1 Proactive Text} *)
 
-(** Normalise proactive text: strip markup and collapse whitespace. *)
+(** Normalise proactive text by collapsing whitespace. *)
 val normalize_proactive_text : string -> string
 
 (** Extract check-in text from a proactive reply. *)

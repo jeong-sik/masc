@@ -28,9 +28,7 @@ type context = {
 
    [json_ok]    : Yojson.Safe.t passes as [~data:json] first-class
                   (drops the [Yojson.Safe.to_string] round-trip).
-   [text_ok]    : envelope-string body uses [#18767] pattern —
-                  parse via [structured_payload_of_message],
-                  fallback [`String body].
+   [text_ok]    : opaque text remains [`String body].
    [workflow_err_envelope] : error wrapped through
                   [Tool_args.error_response_typed ~code msg].  Both
                   call sites (Not_found in get_metrics,
@@ -47,26 +45,21 @@ let json_ok ~tool_name ~start_time (json : Yojson.Safe.t) : Tool_result.result =
   Tool_result.make_ok ~tool_name ~start_time ~data:json ()
 
 let text_ok ~tool_name ~start_time body : Tool_result.result =
-  let data =
-    match Tool_result.structured_payload_of_message body with
-    | Some json -> json
-    | None -> `String body
-  in
-  Tool_result.make_ok ~tool_name ~start_time ~data ()
+  Tool_result.ok ~tool_name ~start_time body
 
 let workflow_err_envelope ~tool_name ~start_time ~code msg : Tool_result.result =
-  let envelope = Tool_args.error_response_typed ~code msg in
   let data =
-    match Tool_result.structured_payload_of_message envelope with
-    | Some json -> json
-    | None -> `String envelope
+    Tool_args.error_assoc
+      [ "error_code", `String (Tool_args.error_code_to_string code)
+      ; "message", `String msg
+      ]
   in
   Tool_result.make_err
     ~tool_name
     ~class_:Tool_result.Workflow_rejection
     ~start_time
     ~data
-    envelope
+    (Yojson.Safe.to_string data)
 
 let workflow_err_plain ~tool_name ~start_time msg : Tool_result.result =
   Tool_result.make_err
@@ -493,6 +486,5 @@ let () =
            ~input_schema:s.input_schema
            ~handler_binding:Tag_dispatch
            ~is_read_only:(List.mem s.name tool_spec_read_only)
-           ~is_idempotent:(List.mem s.name tool_spec_read_only)
            ()))
     schemas

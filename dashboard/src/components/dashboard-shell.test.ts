@@ -208,11 +208,11 @@ describe('dashboardHealthChips', () => {
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.label)
       .toBe('keeper 실행 fiber 1 / 일시정지 keeper 1 / configured keeper 2')
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.detail)
-      .toBe('keeper 실행 fiber=shell; 일시정지 keeper=재개 대기 lifecycle row; 오프라인 keeper=프로세스/하트비트 없음으로 기동 필요 row; configured keeper=shell keeper 설정.')
+      .toBe('keeper 실행 fiber=shell; 일시정지 keeper=일시정지 lifecycle row; 중지 keeper=프로세스/하트비트 없음으로 기동 필요 row; configured keeper=shell keeper 설정.')
     expect(chips.find(chip => chip.key === 'paused-keepers')?.label)
       .toBe('일시정지 keeper 1')
     expect(chips.find(chip => chip.key === 'paused-keepers')?.detail)
-      .toBe('재개 대기 상태의 keeper가 있습니다. board/tool 활동은 조용해 보일 수 있습니다.')
+      .toBe('일시정지 상태의 keeper가 있습니다. board/tool 활동은 조용해 보일 수 있습니다.')
   })
 
   it('does not label an intentional server/base split as data source mismatch', () => {
@@ -323,7 +323,7 @@ describe('dashboardHealthChips', () => {
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.label)
       .toBe('keeper 실행 fiber 2 / configured keeper 16')
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.detail)
-      .toBe('keeper 실행 fiber=shell; 일시정지 keeper=재개 대기 lifecycle row; 오프라인 keeper=프로세스/하트비트 없음으로 기동 필요 row; configured keeper=project snapshot keeper 설정.')
+      .toBe('keeper 실행 fiber=shell; 일시정지 keeper=일시정지 lifecycle row; 중지 keeper=프로세스/하트비트 없음으로 기동 필요 row; configured keeper=project snapshot keeper 설정.')
   })
 
   it('uses runtime health as the paused keeper count authority when detail rows are absent', () => {
@@ -341,7 +341,6 @@ describe('dashboardHealthChips', () => {
           paused_keepers: 2,
           paused_keepers_health: { count: 3 },
           keeper_fleet_no_fibers: false,
-          keeper_fd_pressure: null,
           keeper_fleet_safety: {
             running_keeper_fiber_count: 0,
             paused_keeper_count: 4,
@@ -355,7 +354,7 @@ describe('dashboardHealthChips', () => {
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.label)
       .toBe('keeper 실행 fiber 0 / 일시정지 keeper 3 / configured keeper 13')
     expect(chips.find(chip => chip.key === 'keeper-count-basis')?.detail)
-      .toBe('keeper 실행 fiber=runtime health; 일시정지 keeper=runtime health; 오프라인 keeper=runtime health only; execution offline rows not mixed; configured keeper=shell keeper 설정.')
+      .toBe('keeper 실행 fiber=runtime health; 일시정지 keeper=runtime health; 중지 keeper=runtime health only; execution offline rows not mixed; configured keeper=shell keeper 설정.')
     expect(chips.find(chip => chip.key === 'paused-keepers')?.label)
       .toBe('일시정지 keeper 3')
     expect(chips.find(chip => chip.key === 'no-keeper-rows')).toBeUndefined()
@@ -389,7 +388,6 @@ describe('dashboardHealthChips', () => {
           keeper_fibers: 1,
           paused_keepers: 3,
           keeper_fleet_no_fibers: null,
-          keeper_fd_pressure: null,
           keeper_fleet_safety: null,
         },
       } as any,
@@ -417,13 +415,10 @@ describe('dashboardHealthChips', () => {
           keeper_fibers: 0,
           paused_keepers: 13,
           keeper_fleet_no_fibers: true,
-          keeper_fd_pressure: null,
           keeper_fleet_safety: {
             status: 'blocked',
             reason: null,
             blocker: 'no_running_fibers',
-            admission_blocked: null,
-            admission_blocked_keepers: null,
             blocked_keepers: 14,
             blocked_count: 14,
             bootable_keeper_count: 1,
@@ -477,13 +472,10 @@ describe('dashboardHealthChips', () => {
           keeper_fibers: 0,
           paused_keepers: 3,
           keeper_fleet_no_fibers: true,
-          keeper_fd_pressure: null,
           keeper_fleet_safety: {
             status: 'blocked',
             reason: null,
             blocker: 'no_executable_keeper_fibers',
-            admission_blocked: null,
-            admission_blocked_keepers: null,
             blocked_keepers: 3,
             blocked_count: 3,
             bootable_keeper_count: 3,
@@ -535,13 +527,10 @@ describe('dashboardHealthChips', () => {
           keeper_fibers: 0,
           paused_keepers: 14,
           keeper_fleet_no_fibers: true,
-          keeper_fd_pressure: null,
           keeper_fleet_safety: {
             status: 'blocked',
             reason: null,
             blocker: 'no_executable_keeper_fibers',
-            admission_blocked: null,
-            admission_blocked_keepers: null,
             blocked_keepers: 16,
             blocked_count: 16,
             bootable_keeper_count: 2,
@@ -592,13 +581,10 @@ describe('dashboardHealthChips', () => {
           keeper_fibers: 3,
           paused_keepers: 2,
           keeper_fleet_no_fibers: false,
-          keeper_fd_pressure: null,
           keeper_fleet_safety: {
             status: 'degraded',
             reason: null,
             blocker: 'reaction_capacity_below_target',
-            admission_blocked: null,
-            admission_blocked_keepers: null,
             blocked_keepers: 10,
             blocked_count: 10,
             bootable_keeper_count: 11,
@@ -654,13 +640,10 @@ describe('dashboardHealthChips', () => {
           keeper_fibers: 8,
           paused_keepers: 0,
           keeper_fleet_no_fibers: false,
-          keeper_fd_pressure: null,
           keeper_fleet_safety: {
             status: 'degraded',
             reason: null,
             blocker: 'reaction_capacity_below_target',
-            admission_blocked: null,
-            admission_blocked_keepers: null,
             blocked_keepers: 24,
             blocked_count: 24,
             bootable_keeper_count: 24,
@@ -698,105 +681,7 @@ describe('dashboardHealthChips', () => {
     expect(chip?.detail).not.toContain('FD pressure')
   })
 
-  it('surfaces fleet liveness risk when FD pressure blocks 24 keepers', () => {
-    const chips = dashboardHealthChips({
-      connected: true,
-      counts: { keepers: 24, configured_keepers: 24 },
-      keepers: [],
-      runtimeResolution: {
-        status: 'ready',
-        warnings: [],
-        fleet_safety: {
-          keeper_fibers: 8,
-          paused_keepers: 0,
-          keeper_fleet_no_fibers: null,
-          keeper_fd_pressure: {
-            status: 'blocked',
-            reason: 'fd_pressure',
-            admission_blocked: true,
-            admission_blocked_keepers: 24,
-            blocked_keepers: null,
-            blocked_count: null,
-          },
-          keeper_fleet_safety: null,
-        },
-      } as any,
-      executionError: null,
-      loading: false,
-    })
-
-    const chip = chips.find(c => c.key === 'fleet-liveness-risk')
-    expect(chip).toEqual(expect.objectContaining({
-      label: 'Fleet liveness risk',
-      tone: 'bad',
-    }))
-    expect(chip?.detail).toContain('blocking 24 keepers')
-  })
-
-  it('prioritizes FD pressure over degraded capacity when both are present', () => {
-    const chips = dashboardHealthChips({
-      connected: true,
-      counts: { keepers: 24, configured_keepers: 24 },
-      keepers: [],
-      runtimeResolution: {
-        status: 'ready',
-        warnings: [],
-        fleet_safety: {
-          keeper_fibers: 8,
-          paused_keepers: 0,
-          keeper_fleet_no_fibers: false,
-          keeper_fd_pressure: {
-            status: 'blocked',
-            reason: 'fd_pressure',
-            admission_blocked: true,
-            admission_blocked_keepers: 24,
-            blocked_keepers: null,
-            blocked_count: null,
-          },
-          keeper_fleet_safety: {
-            status: 'degraded',
-            reason: null,
-            blocker: 'reaction_capacity_below_target',
-            admission_blocked: null,
-            admission_blocked_keepers: null,
-            blocked_keepers: null,
-            blocked_count: null,
-            bootable_keeper_count: 24,
-            running_keeper_fiber_count: 8,
-            healthy_running_keeper_fiber_count: 8,
-            failing_keeper_fiber_count: 0,
-            executable_keeper_fiber_count: 8,
-            minimum_running_fibers: 2,
-            no_running_fibers: false,
-            no_executable_keeper_fibers: false,
-            low_running_fiber_margin: false,
-            reaction_capacity_below_target: true,
-            reaction_capacity_shortfall_count: 16,
-            executable_reaction_capacity_below_target: true,
-            executable_reaction_capacity_shortfall_count: 16,
-            paused_keeper_count: 0,
-            autoboot_enabled_keeper_count: 24,
-            paused_autoboot_enabled_keeper_count: 0,
-            effective_reaction_capacity_count: 8,
-            executable_reaction_capacity_count: 8,
-            target_reaction_capacity_count: 24,
-            operator_action_required: true,
-          },
-        },
-      } as any,
-      executionError: null,
-      loading: false,
-    })
-
-    const chip = chips.find(c => c.key === 'fleet-liveness-risk')
-    expect(chip).toEqual(expect.objectContaining({
-      label: 'Fleet liveness risk',
-      tone: 'bad',
-    }))
-    expect(chip?.detail).toContain('blocking 24 keepers')
-  })
-
-  it('surfaces reaction ledger cursor sweeps even when pending backlog is clear', () => {
+  it('surfaces quarantined reaction ledger rows even when pending backlog is clear', () => {
     const chips = dashboardHealthChips({
       connected: true,
       counts: { keepers: 2, configured_keepers: 2 },
@@ -808,14 +693,13 @@ describe('dashboardHealthChips', () => {
           keeper_fibers: null,
           paused_keepers: null,
           keeper_fleet_no_fibers: null,
-          keeper_fd_pressure: null,
           keeper_fleet_safety: null,
           keeper_reaction_ledger: {
             status: 'ok',
             operator_action_required: false,
             cursor_ack_count: 4,
             cursor_swept_stimulus_count: 3,
-            legacy_cursor_swept_stimulus_count: 1,
+            quarantined_row_count: 1,
             pending_stimulus_count: 0,
             read_error_count: 0,
           },
@@ -827,11 +711,11 @@ describe('dashboardHealthChips', () => {
 
     const chip = chips.find(c => c.key === 'reaction-ledger')
     expect(chip).toEqual(expect.objectContaining({
-      label: 'Reaction ledger swept 4',
-      tone: 'ok',
+      label: 'Reaction ledger quarantined 1',
+      tone: 'warn',
     }))
     expect(chip?.detail).toContain('cursor_swept=3')
-    expect(chip?.detail).toContain('legacy_swept=1')
+    expect(chip?.detail).toContain('quarantined=1')
   })
 
   it('warns on real reaction ledger pending backlog', () => {
@@ -846,14 +730,13 @@ describe('dashboardHealthChips', () => {
           keeper_fibers: null,
           paused_keepers: null,
           keeper_fleet_no_fibers: null,
-          keeper_fd_pressure: null,
           keeper_fleet_safety: null,
           keeper_reaction_ledger: {
             status: 'degraded',
             operator_action_required: true,
             cursor_ack_count: 4,
             cursor_swept_stimulus_count: 3,
-            legacy_cursor_swept_stimulus_count: 1,
+            quarantined_row_count: 1,
             pending_stimulus_count: 2,
             read_error_count: 0,
           },
@@ -886,7 +769,6 @@ describe('dashboardHealthChips', () => {
           paused_keepers: 0,
           paused_keepers_health: null,
           keeper_fleet_no_fibers: false,
-          keeper_fd_pressure: null,
           keeper_fleet_safety: null,
         },
       } as any,
@@ -918,7 +800,6 @@ describe('dashboardHealthChips', () => {
           keeper_fibers: 0,
           paused_keepers: 1,
           keeper_fleet_no_fibers: false,
-          keeper_fd_pressure: null,
           keeper_fleet_safety: null,
         },
       } as any,
@@ -961,7 +842,7 @@ describe('dashboardHealthChips', () => {
             status: 'degraded',
             pending_stimulus_count: 2,
             cursor_swept_stimulus_count: 0,
-            legacy_cursor_swept_stimulus_count: 0,
+            quarantined_row_count: 0,
             read_error_count: 0,
             cursor_ack_count: 5,
             operator_action_required: false,
@@ -979,49 +860,6 @@ describe('dashboardHealthChips', () => {
     })
   })
 
-  it('surfaces contract proof and task-scope blockers as a routed health chip', () => {
-    const chips = dashboardHealthChips({
-      connected: true,
-      counts: { keepers: 2, configured_keepers: 2 },
-      keepers: [],
-      runtimeResolution: {
-        status: 'ready',
-        warnings: [],
-        fleet_safety: null,
-        cdal: {
-          writer_status: 'proof_store_incomplete',
-          operator_action_required: true,
-          proof_store_path_drift: false,
-          proof_store: {
-            status: 'stale_incomplete_runs',
-            completeness: {
-              incomplete_run_dirs: 6,
-              stale_incomplete_run_dirs: 3,
-              terminal_incomplete_run_dirs: 1,
-            },
-          },
-          task_scope: {
-            status: 'partial_task_scope',
-            current_writer_missing_task_scope_rows: 5,
-          },
-        },
-      } as any,
-      executionError: null,
-      loading: false,
-    })
-
-    const cdal = chips.find(c => c.key === 'cdal-runtime-health')
-    expect(cdal).toMatchObject({
-      label: 'Contract proof incomplete 6',
-      tone: 'bad',
-      route: {
-        tab: 'monitoring',
-        params: { section: 'fleet-health' },
-      },
-    })
-    expect(cdal?.detail).toContain('stale=3')
-    expect(cdal?.detail).toContain('current_missing_task_scope=5')
-  })
 })
 
 describe('SideRail v2 chrome', () => {

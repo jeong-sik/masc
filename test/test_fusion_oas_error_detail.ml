@@ -1,21 +1,5 @@
 open Masc
 
-let provider_cfg () =
-  Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.Anthropic
-    ~model_id:"fusion-test"
-    ~base_url:"http://localhost"
-    ()
-;;
-
-let runtime_config () =
-  Runtime_agent.default_config
-    ~name:"fusion-test"
-    ~provider_cfg:(provider_cfg ())
-    ~system_prompt:""
-    ~tools:[]
-;;
-
 let test_rewrites_unknown_provider () =
   let detail =
     Fusion_oas.provider_error_detail ~runtime_id:"ollama_cloud.kimi-k2-6"
@@ -211,26 +195,6 @@ let test_panel_failure_yojson_round_trips_current_shapes () =
           (Fusion_types.Empty_response "empty response (stop_reason=max_tokens)")))
 ;;
 
-let test_timeout_budget_does_not_set_total_execution_ceiling () =
-  let config =
-    Fusion_oas.For_testing.apply_timeout_budget
-      ~timeout_s:300.0
-      (runtime_config ())
-  in
-  Alcotest.(check (option (float 0.001)))
-    "stream idle timeout"
-    (Some 300.0)
-    config.stream_idle_timeout_s;
-  Alcotest.(check (option (float 0.001)))
-    "body timeout"
-    (Some 300.0)
-    config.body_timeout_s;
-  Alcotest.(check (option (float 0.001)))
-    "no total execution ceiling"
-    None
-    config.max_execution_time_s
-;;
-
 let () =
   Alcotest.run
     "Fusion_oas_error_detail"
@@ -275,10 +239,6 @@ let () =
             "panel failure yojson round-trips current shapes"
             `Quick
             test_panel_failure_yojson_round_trips_current_shapes
-        ; Alcotest.test_case
-            "timeout budget does not arm OAS total execution ceiling"
-            `Quick
-            test_timeout_budget_does_not_set_total_execution_ceiling
         ] )
     ]
 ;;

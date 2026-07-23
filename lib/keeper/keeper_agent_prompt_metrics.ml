@@ -1,35 +1,13 @@
-(** Prompt metrics and adaptive inference helpers for keeper Agent.run turns. *)
+(** Prompt metrics for keeper Agent.run turns. *)
 
 module Canonical_tool = Agent_sdk.Canonical_tool
-
-let adaptive_thinking_budget
-      ~enabled
-      ~is_retry
-      ~last_tool_results
-      ~current_budget
-  =
-  if not enabled
-  then current_budget
-  else (
-    let had_error =
-      List.exists
-        (fun (r : Agent_sdk.Types.tool_result) ->
-           match r with
-           | Error _ -> true
-           | Ok _ -> false)
-        last_tool_results
-    in
-    if is_retry || had_error
-    then Some 1500
-    else current_budget)
-;;
 
 (** Structured prompt result from [build_turn_prompt] callback.
     [system_prompt] contains hard constraints (identity, policy guards,
     tool guidance, direct-reply mode) that must stay in the system prompt.
     [dynamic_context] contains soft context (continuity, skill route,
     worktree changes, turn instructions) injected via OAS
-    [extra_system_context] — prepended as a User message after reduction. *)
+    [extra_system_context] at request assembly. *)
 type turn_prompt =
   { system_prompt : string
   ; dynamic_context : string
@@ -39,17 +17,14 @@ type turn_prompt =
     Bytes are stored rather than character counts because prompts are UTF-8. *)
 type prompt_segment_metrics =
   { bytes : int
-  ; estimated_tokens : int
   ; fingerprint : string option
   }
 
-(** Effective prompt metrics for a keeper turn.
-    [estimated_cacheable_tokens] tracks the system prompt portion only because
-    OAS prompt caching is enabled via [cache_system_prompt:true]. *)
+(** Effective byte metrics for a keeper turn. *)
 type prompt_metrics =
   { fingerprint : string
-  ; estimated_total_tokens : int
-  ; estimated_cacheable_tokens : int
+  ; total_bytes : int
+  ; cacheable_bytes : int
   ; system_prompt_segment : prompt_segment_metrics
   ; dynamic_context_segment : prompt_segment_metrics
   ; user_message_segment : prompt_segment_metrics
@@ -57,20 +32,17 @@ type prompt_metrics =
 
 type ctx_composition_metrics =
   { actual_input_tokens : int option
-  ; display_total_tokens : int
-  ; estimated_known_tokens : int
+  ; attributed_bytes : int
   ; segments : (string * prompt_segment_metrics) list
   }
 
 let empty_prompt_segment_metrics =
-  { bytes = 0; estimated_tokens = 0; fingerprint = None }
+  { bytes = 0; fingerprint = None }
 
 let prompt_segment_metrics_of_text (text : string) : prompt_segment_metrics =
   let text = Inference_utils.sanitize_text_utf8 text in
   {
     bytes = String.length text;
-    estimated_tokens =
-      (if text = "" then 0 else Agent_sdk.Context_reducer.estimate_char_tokens text);
     fingerprint =
       (if text = ""
        then None
@@ -96,11 +68,11 @@ let build_prompt_metrics ~(system_prompt : string) ~(dynamic_context : string)
   in
   {
     fingerprint = Digestif.SHA256.(digest_string fingerprint_input |> to_hex);
-    estimated_total_tokens =
-      (system_prompt_metrics.estimated_tokens
-       + dynamic_context_metrics.estimated_tokens
-       + user_message_metrics.estimated_tokens);
-    estimated_cacheable_tokens = system_prompt_metrics.estimated_tokens;
+    total_bytes =
+      (system_prompt_metrics.bytes
+       + dynamic_context_metrics.bytes
+       + user_message_metrics.bytes);
+    cacheable_bytes = system_prompt_metrics.bytes;
     system_prompt_segment = system_prompt_metrics;
     dynamic_context_segment = dynamic_context_metrics;
     user_message_segment = user_message_metrics;
@@ -111,7 +83,6 @@ let prompt_segment_metrics_to_json (segment : prompt_segment_metrics) :
   `Assoc
     [
       ("bytes", `Int segment.bytes);
-      ("estimated_tokens", `Int segment.estimated_tokens);
       ("fingerprint", Json_util.string_opt_to_json segment.fingerprint);
     ]
 
@@ -119,15 +90,12 @@ let prompt_metrics_to_json (metrics : prompt_metrics) : Yojson.Safe.t =
   `Assoc
     [
       ("fingerprint", `String metrics.fingerprint);
-      ("estimated_total_tokens", `Int metrics.estimated_total_tokens);
-      ("estimated_cacheable_tokens", `Int metrics.estimated_cacheable_tokens);
+      ("total_bytes", `Int metrics.total_bytes);
+      ("cacheable_bytes", `Int metrics.cacheable_bytes);
       ("system_prompt", prompt_segment_metrics_to_json metrics.system_prompt_segment);
       ("dynamic_context", prompt_segment_metrics_to_json metrics.dynamic_context_segment);
       ("user_message", prompt_segment_metrics_to_json metrics.user_message_segment);
     ]
-
-let synthetic_prompt_segment_metrics ~estimated_tokens : prompt_segment_metrics =
-  { bytes = 0; estimated_tokens; fingerprint = None }
 
 let add_segment_metric
     (totals : (string, prompt_segment_metrics) Hashtbl.t)
@@ -141,12 +109,11 @@ let add_segment_metric
   Hashtbl.replace totals bucket
     {
       bytes = prev.bytes + metric.bytes;
-      estimated_tokens = prev.estimated_tokens + metric.estimated_tokens;
       fingerprint = None;
     }
 
 let metric_of_block
-    ~(role : Agent_sdk.Types.role)
+    ~role:(_ : Agent_sdk.Types.role)
     (block : Agent_sdk.Types.content_block) : prompt_segment_metrics =
   let bytes =
     match Canonical_tool.tool_result_of_block block with
@@ -178,12 +145,7 @@ let metric_of_block
                 "keeper_agent_prompt_metrics: OAS canonical tool-call projection unavailable"
           | _ -> 0))
   in
-  let msg : Agent_sdk.Types.message = Agent_sdk.Types.make_message ~role [ block ] in
-  {
-    bytes;
-    estimated_tokens = Keeper_context_core.msg_tokens msg;
-    fingerprint = None;
-  }
+  { bytes; fingerprint = None }
 
 let history_bucket_of_block
     ~(role : Agent_sdk.Types.role)
@@ -220,7 +182,7 @@ let build_ctx_composition_metrics
   let totals : (string, prompt_segment_metrics) Hashtbl.t = Hashtbl.create 16 in
   let add_text_segment bucket text =
     let metric = prompt_segment_metrics_of_text text in
-    if metric.estimated_tokens > 0 then add_segment_metric totals ~bucket metric
+    if metric.bytes > 0 then add_segment_metric totals ~bucket metric
   in
   add_text_segment "system_prompt" system_prompt;
   add_text_segment "dynamic_context" dynamic_context;
@@ -233,7 +195,7 @@ let build_ctx_composition_metrics
         (fun block ->
           let bucket = history_bucket_of_block ~role:message.role block in
           let metric = metric_of_block ~role:message.role block in
-          if metric.estimated_tokens > 0 then add_segment_metric totals ~bucket metric)
+          if metric.bytes > 0 then add_segment_metric totals ~bucket metric)
         message.content)
     history_messages;
   let segments =
@@ -241,9 +203,9 @@ let build_ctx_composition_metrics
     |> List.of_seq
     |> List.sort (fun (left, _) (right, _) -> String.compare left right)
   in
-  let estimated_known_tokens =
+  let attributed_bytes =
     List.fold_left
-      (fun acc (_, metric) -> acc + metric.estimated_tokens)
+      (fun acc (_, metric) -> acc + metric.bytes)
       0 segments
   in
   let actual_input_tokens =
@@ -251,23 +213,9 @@ let build_ctx_composition_metrics
     | Some n when n > 0 -> Some n
     | Some _ | None -> None
   in
-  let display_total_tokens =
-    match actual_input_tokens with
-    | Some actual -> max actual estimated_known_tokens
-    | None -> estimated_known_tokens
-  in
-  let segments =
-    if display_total_tokens > estimated_known_tokens then
-      segments
-      @ [ ( "unattributed",
-            synthetic_prompt_segment_metrics
-              ~estimated_tokens:(display_total_tokens - estimated_known_tokens) ) ]
-    else segments
-  in
   {
     actual_input_tokens;
-    display_total_tokens;
-    estimated_known_tokens;
+    attributed_bytes;
     segments;
   }
 
@@ -275,8 +223,7 @@ let ctx_composition_to_json (metrics : ctx_composition_metrics) : Yojson.Safe.t 
   `Assoc
     [
       ("actual_input_tokens", Json_util.int_opt_to_json metrics.actual_input_tokens);
-      ("display_total_tokens", `Int metrics.display_total_tokens);
-      ("estimated_known_tokens", `Int metrics.estimated_known_tokens);
+      ("attributed_bytes", `Int metrics.attributed_bytes);
       ( "segments",
         `Assoc
           (List.map

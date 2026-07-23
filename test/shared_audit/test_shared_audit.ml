@@ -39,6 +39,14 @@ let audit_path ~base_dir ~ts =
   let dd = Printf.sprintf "%02d" tm.Unix.tm_mday in
   Filename.concat (Filename.concat base_dir yyyy_mm) (dd ^ ".jsonl")
 
+let expect_corrupt_jsonl ~path f =
+  match f () with
+  | exception Store.Corrupt_jsonl { path = actual_path; line_number; detail } ->
+    check string "corrupt audit path" path actual_path;
+    check int "corrupt audit line" 2 line_number;
+    check bool "corrupt audit detail is explicit" true (String.trim detail <> "")
+  | _ -> fail "expected Store.Corrupt_jsonl"
+
 (* ──────────────────────────────────────────────────────────── *)
 (* Envelope                                                      *)
 (* ──────────────────────────────────────────────────────────── *)
@@ -193,6 +201,50 @@ let test_store_verify_chain_detects_tampering () =
          because its prev_hash no longer matches. *)
       check bool "broken link reported" true (idx >= 2))
 
+let test_store_verify_empty_log () =
+  let dir = unique_temp_dir "audit_verify_empty" in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let store = Store.create ~base_dir:dir in
+    let report = Store.verify store in
+    check int "no entries checked" 0 report.entries_checked;
+    check bool "no failure on empty log" true (report.failure = None))
+
+let test_store_verify_reports_intact_chain () =
+  let dir = unique_temp_dir "audit_verify_report_ok" in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let store = Store.create ~base_dir:dir in
+    for i = 1 to 4 do
+      let _ = Store.append store ~category:"V" ~payload:(`Int i) in ()
+    done;
+    let report = Store.verify store in
+    check int "all entries checked" 4 report.entries_checked;
+    check bool "no failure" true (report.failure = None))
+
+let test_store_verify_reports_on_disk_tampering () =
+  let dir = unique_temp_dir "audit_verify_report_broken" in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let store = Store.create ~base_dir:dir in
+    let _ = Store.append store ~category:"X" ~payload:(`Int 1) in
+    let e2 = Store.append store ~category:"X" ~payload:(`Int 2) in
+    (* Forge a third line whose prev_hash does not chain to e2. The line
+       lands in the same day-file as e2 so it is read after it. *)
+    let forged =
+      Env.make ~category:"X" ~payload:(`Int 3)
+        ~prev_hash:(Some (String.make 64 '0'))
+    in
+    let path = audit_path ~base_dir:dir ~ts:e2.ts in
+    let oc = open_out_gen [ Open_append; Open_wronly ] 0o644 path in
+    output_string oc (Yojson.Safe.to_string (Env.to_json forged));
+    output_char oc '\n';
+    close_out oc;
+    let report = Store.verify store in
+    check int "two links checked before break" 2 report.entries_checked;
+    match report.failure with
+    | Some (idx, reason) ->
+      check int "break at forged index" 2 idx;
+      check bool "reason non-empty" true (String.trim reason <> "")
+    | None -> fail "expected broken chain report")
+
 let test_store_resume_continues_chain () =
   let dir = unique_temp_dir "audit_resume" in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
@@ -205,7 +257,7 @@ let test_store_resume_continues_chain () =
       "resumed chain: e2.prev_hash = hash of e1"
       (Some (Env.hash_for_chain e1)) e2.prev_hash)
 
-let test_store_skips_malformed_jsonl_lines () =
+let test_store_rejects_malformed_jsonl_lines () =
   let dir = unique_temp_dir "audit_malformed" in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
     let store = Store.create ~base_dir:dir in
@@ -214,13 +266,9 @@ let test_store_skips_malformed_jsonl_lines () =
     let oc = open_out_gen [ Open_append; Open_wronly ] 0o644 path in
     output_string oc "{not json\n";
     close_out oc;
-    let entries = Store.recent store ~n:10 in
-    check int "malformed line skipped" 1 (List.length entries);
-    match entries with
-    | [ entry ] -> check string "valid entry preserved" valid.id entry.id
-    | _ -> fail "expected exactly one valid audit entry")
+    expect_corrupt_jsonl ~path (fun () -> ignore (Store.recent store ~n:10)))
 
-let test_store_skips_invalid_envelope_jsonl_lines () =
+let test_store_rejects_invalid_envelope_jsonl_lines () =
   let dir = unique_temp_dir "audit_invalid_envelope" in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
     let store = Store.create ~base_dir:dir in
@@ -231,13 +279,9 @@ let test_store_skips_invalid_envelope_jsonl_lines () =
       {|{"id":"bad-envelope","ts":1.0,"payload":{"kind":"missing-category"}}|};
     output_char oc '\n';
     close_out oc;
-    let entries = Store.recent store ~n:10 in
-    check int "invalid envelope line skipped" 1 (List.length entries);
-    match entries with
-    | [ entry ] -> check string "valid entry preserved" valid.id entry.id
-    | _ -> fail "expected exactly one valid audit entry")
+    expect_corrupt_jsonl ~path (fun () -> ignore (Store.recent store ~n:10)))
 
-let test_store_resume_skips_malformed_jsonl_lines () =
+let test_store_resume_rejects_malformed_jsonl_lines () =
   let dir = unique_temp_dir "audit_malformed_resume" in
   Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
     let store = Store.create ~base_dir:dir in
@@ -246,11 +290,7 @@ let test_store_resume_skips_malformed_jsonl_lines () =
     let oc = open_out_gen [ Open_append; Open_wronly ] 0o644 path in
     output_string oc "{not json\n";
     close_out oc;
-    let resumed = Store.create ~base_dir:dir in
-    let next = Store.append resumed ~category:"X" ~payload:(`Int 2) in
-    check (option string)
-      "resume links to last valid entry after malformed line"
-      (Some (Env.hash_for_chain valid)) next.prev_hash)
+    expect_corrupt_jsonl ~path (fun () -> ignore (Store.create ~base_dir:dir)))
 
 let test_store_base_dir_inspector () =
   let dir = unique_temp_dir "audit_inspector" in
@@ -280,10 +320,13 @@ let () =
       test_case "since filters by timestamp" `Quick test_store_since_filters;
       test_case "verify_chain intact" `Quick test_store_verify_chain_intact;
       test_case "verify_chain detects tampering" `Quick test_store_verify_chain_detects_tampering;
+      test_case "verify empty log" `Quick test_store_verify_empty_log;
+      test_case "verify reports intact chain" `Quick test_store_verify_reports_intact_chain;
+      test_case "verify reports on-disk tampering" `Quick test_store_verify_reports_on_disk_tampering;
       test_case "resume continues chain" `Quick test_store_resume_continues_chain;
-      test_case "skips malformed JSONL lines" `Quick test_store_skips_malformed_jsonl_lines;
-      test_case "skips invalid envelope JSONL lines" `Quick test_store_skips_invalid_envelope_jsonl_lines;
-      test_case "resume skips malformed JSONL lines" `Quick test_store_resume_skips_malformed_jsonl_lines;
+      test_case "rejects malformed JSONL lines" `Quick test_store_rejects_malformed_jsonl_lines;
+      test_case "rejects invalid envelope JSONL lines" `Quick test_store_rejects_invalid_envelope_jsonl_lines;
+      test_case "resume rejects malformed JSONL lines" `Quick test_store_resume_rejects_malformed_jsonl_lines;
       test_case "base_dir inspector" `Quick test_store_base_dir_inspector;
     ];
   ]

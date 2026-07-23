@@ -18,6 +18,7 @@
       ({!runtime_resolution_json},
       {!light_runtime_resolution_json},
       {!dashboard_runtime_probe_http_json},
+      {!dashboard_runtime_probe_payload_json_of_runtimes},
       {!runtime_inventory_json},
       {!dashboard_perf_http_json},
       {!scheduled_automation_dashboard_json},
@@ -25,7 +26,6 @@
     - {b runtime probe test seams}
       ({!set_dashboard_runtime_probe_runner_for_tests},
       {!clear_dashboard_runtime_probe_runner_for_tests},
-      {!dashboard_runtime_probe_payload_json_for_tests},
       {!set_dashboard_runtime_provider_http_get_for_tests},
       {!clear_dashboard_runtime_provider_http_get_for_tests},
       {!clear_dashboard_runtime_probe_cache_for_tests}).
@@ -111,26 +111,24 @@ val maybe_fork_dashboard_runtime_probe_refresh : unit -> unit
     the server boot path to warm the cache before the first dashboard request
     so the first response is not a [warming_up] placeholder. *)
 
-val dashboard_runtime_probe_payload_json_for_tests :
+val dashboard_runtime_probe_payload_json_of_runtimes :
   ?default_id:string -> Runtime.t list -> Yojson.Safe.t
-(** Test-only pure projection for the production runtime reachability payload.
-    HTTP execution is supplied through
-    {!set_dashboard_runtime_provider_http_get_for_tests}. *)
+(** Pure reachability-probe projection over an explicit [Runtime.t list].
+    [run_dashboard_runtime_probe] calls this with the live runtime fleet;
+    exposed directly (rather than via a [_for_tests] alias) so tests can drive
+    it with synthetic runtimes. HTTP execution is supplied by the production
+    GET path or, in tests, {!set_dashboard_runtime_provider_http_get_for_tests}. *)
 
-val governance_hitl_json : unit -> Yojson.Safe.t
-(** Returns the human-in-the-loop governance state surfaced inside
-    {!runtime_resolution_json} (schema [masc.governance_hitl.v1]): whether HITL is
-    [enabled] (the fail-closed [Env_config_core.disable_hitl] default), the
-    [disable_env_key], and the production confirm thresholds from
-    {!Governance_pipeline}. Pure read of config + governance policy; surfaces the
-    "whether and why" so operators do not have to infer it from the environment. *)
+val gate_hitl_json : unit -> Yojson.Safe.t
+(** Returns the always-available, nonblocking human-decision handler state
+    surfaced inside {!runtime_resolution_json}. *)
 
 val runtime_inventory_json : unit -> Yojson.Safe.t
 (** Returns the materialized runtime.toml inventory loaded by
     {!Runtime.init_default}. This is the dashboard-compatible projection for
     the legacy [/api/v1/providers] route; it does not execute providers or
     infer defaults outside the Runtime SSOT. The envelope includes
-    [assignment_governance] so operators can see explicit keeper-runtime
+    [assignment_status] so operators can see explicit keeper-runtime
     assignment blast radius without the dashboard parsing TOML independently. *)
 
 val dashboard_perf_http_json : Workspace.config -> Yojson.Safe.t

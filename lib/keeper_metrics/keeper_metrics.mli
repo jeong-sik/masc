@@ -10,24 +10,17 @@ type t =
   | TotalCostUsd
   | TurnScheduled
   | TurnCompleted
-  | PacingShadowEvents
-  | PacingShadowNextDueSec
   | FailureRoute
   | FailureJudgmentOutcome
-  | FailureDrivenPause
   | IdleSeconds
-  | ContractViolations
+  | StreamProjectionEventCutoff
   | MetricEmitDropped
   | ContextMaxObserved
   | TurnStarts
   | TurnReattempts
   | TurnRegressions
-  | TurnLivelockBlocks
-  | TurnLivelockBlocksRepeated
-  | TurnLivelockBlocksThresholdPark
   | TurnLatencyBucket
   | TurnLatencyByModelBucket
-  | ProviderCooldownSkip
   | ProviderCooldownRemainingSec
   | ProviderBlockDurationSec
   | TurnQueueDepth
@@ -38,12 +31,9 @@ type t =
   | Compactions
   | CompactionRatioChange
   | CompactionSavedTokens
-  | CompactionPairRepairDrops
   | EmergencyCompactRatioThreshold
   | OperatorCompact
   | OperatorClear
-  | CompactionNoop
-  | ToolPairRepair
   | ToolEmissionRegistrySize
   | ToolEmissionPushes
   | ToolUnderusedAllowedCount
@@ -63,25 +53,26 @@ type t =
   | MetaReadFailures
   | ApprovalQueueFailures
   | ApprovalResolutionSignal
-  | GuardsFailures
   | ProfileLoadFailures
   | CompactAuditFailures
-  | CompactAuditRetentionParse
-  | CompactAuditDrainBatches
-  | CompactAuditDrainBatchSizeBucket
   | FsFailures
+  | PersistencePreparationStageDuration
+  | PersistencePreparationExamined
+  | PersistenceLaneWaits
+  | PersistenceLanePending
+  | PersistenceLaneInFlight
+  | PersistenceLaneDuration
   | CrashPersistenceFailures
   | GenerationLineageFailures
   | KeepaliveSignalFailures
-  | BoardSignalWakeupCappedTotal
+  | BoardSignalRoutedTotal
+  | BoardSignalDeliveryTotal
   | BoardSignalNoWakeTotal
   | BoardSignalAttentionCandidateTotal
   | MetaJsonFailures
   | ToolsOasFailures
-  | ToolsOasDeterministicFailures
   | TurnUpUpdateFailures
   | AgentToolDispatchRuntimeFailures
-  | CircuitBreakerTrips
   | PromptFailures
   | RunContextFailures
   | SearchFilesFailures
@@ -90,7 +81,6 @@ type t =
   | TransitionAuditFailures
   | ExecutionReceiptFailures
   | OperatorBroadcastSuppressed
-  | LlmBridgeFailures
   | SessionCleanupFailures
   | ToolExecuteFailures
   | RolloverFailures
@@ -104,7 +94,6 @@ type t =
   | OasTimeoutClassifications
   | NoToolProvider
   | ProactiveOutcome
-  | OllamaSaturationSkip
   | TaskLoadFailures
   | ToolSelectionFailures
   | ReconcileFailures
@@ -114,15 +103,11 @@ type t =
   | PersonaDriftMissing
   | WorkspaceInitFailures
   | PresenceSyncFailures
-  | SelfPreservationUniversal
   | StaleStormPaused
-  | ProviderTimeoutLoopPaused
   | TurnFailureStreakPaused
   | CycleExceptions
   | SnapshotReadFailures
   | SnapshotWriteFailures
-  | PromptUnknownToolTokens
-  | PromptTokenStripped
   | SseBroadcastFailures
   | WorkspaceHeartbeatFailures
   | TurnMetricsSnapshotFailures
@@ -141,12 +126,9 @@ type t =
   | ThinkingPersistFailures
   | CheckpointFailures
   | DecisionAuditRingOverflows
-  | ReplySkillRouteStrips
-  | ReplySkillRouteLinesRemoved
   | MemoryLlmSummaryOutcomes
   | MemoryLlmSummaryChainExhausted
   | HitlSummaryOutcomes
-  | UserVisibleReplySource
   | OasEnvKeyRejections
   | MemoryWriteFailures
   | MemoryLaneUnitFailures
@@ -158,9 +140,7 @@ type t =
   | MemoryLaneInFlight
   | MemoryLaneProviderSlotBusy
   | MemoryBankCompactionFailures
-  | MemoryOsMaintenanceKeeperTimeout
   | WriteMetaCycleFailures
-  | AlertPersistFailures
   | MetricsSseFailures
   | ChatStoreFailures
   | ChatTransportFailures
@@ -174,55 +154,42 @@ type t =
   | TurnPhaseDuration
   | LifecycleTransitions
   | LifecycleCallbackFailures
-  | CompactionCallbackRecoveries
   | EventBusDrain
   | SupervisorCleanupFailures
-  | SpawnSlotDenied
   | RegistryUpdateDropped
   | RegistryOrphanThresholdBreached
   | RegistryInvalidEntry
-  | DeadTotal
-  | AutoResumedTotal
-  | AutoResumeBlockedTotal
-  | SkipIdleWakeResumed
-  | EventQueueOverride
   | StimulusConsumed
   | UnsupportedStimulus
-  | NearExhaustionTotal
   | RestartAttempts
   | RestartOutcomes
-  | LastProductiveTs
-  | ProviderTimeoutStrike
-  | StaleTerminationTotal
-  | StaleTerminationByClass
-  | ProviderTimeoutWatchdogTermination
-  | StaleTerminationThresholdBreached
-  | StaleTerminationBatch
-  | StaleBroadcastEmitFailures
   | OasRunTimeout
-  | RuntimeSaturationSignal
   | RuntimeSelected
   | RuntimeRotation
   | ToolUseFailure
   | ToolNotAllowed
-  | TurnGateRejectedTerminal
   | ReceiptUnmappedDisposition
   | ExecuteNetworkUpgrade
   | ExecuteLocalExecution
   | DockerRuntimeDiscarded
   | ProactiveSkip
-  | NoProgressLoopDetected
   | NoProgressStreak
   | UsageTrust
   | UsageAnomalyReason
   | ConfigEnvParseFailures
   | PostTurnWireinFailures
-  | RecurringFailures
   | TurnCleanupFailures
   | MemoryBankLoadHistorySwallowedExceptions
   | MemoryRecallReadErrors
   | MemoryOsRecallUnavailable
   | MemoryOsReobserveEchoSuppressed
+  | MemoryOsExplicitFactWrite
+  | MemoryOsInertTurnExtractionSkipped
+  | MemoryOsRecallFactsTruncated
+  | MemoryOsRecallEpisodesTruncated
+  | MemoryOsRecallBytesOverBudget
+  | MemoryOsEpisodeRetentionPruned
+  | MemoryOsConsolidationGroupRejected
   | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze
   | VisionCandidateAttempts
@@ -232,24 +199,21 @@ type t =
   | ToolCallParamCompleteness
   | KeeperTurnInstructionHash
   | KeeperToolCallRetryLoop
-  | AttemptWatchdogFired
   | ShellIrEffectTotal
-  | ToolExecutePrActionTotal
-  | GhClassificationTotal
-  | GatedGhLifecycleTotal
-  | GatedGhBlockTimeSeconds
-  | KeeperRepoMappingDefaultScopeAllowed
-  | KeeperRepoMappingDeniedUnregistered
-  | KeeperRepoMappingLoadError
-  | KeeperRepoMappingRepositoryIdentityMismatch
-  | KeeperRepoMappingRepositoryStoreError
   | RawTraceSinkDegraded
   | WireCaptureResponseSuppressed
   | WireCaptureWriteFailures
   | WireCaptureRecordSkipped
-  | ContinuationDeliveryOutcome
 
 val to_string : t -> string
+
+type collection =
+  | Metric_store
+  | External_observable
+
+val collection : t -> collection
+(** Typed ownership of a metric's exported value. [External_observable]
+    metrics must not also be registered in the mutable metric store. *)
 
 val emit_runtime_selected :
   keeper_name:string -> runtime_id:string -> fallback_reason:string -> unit

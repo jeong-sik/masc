@@ -6,39 +6,6 @@
 
     @since Unified Keeper Loop *)
 
-(** RFC-0247: typed provenance of a board observation, classified once at the
-    world-observation boundary by {!provenance_of}. Drives the trusted-vs-
-    observational split in the unified prompt: fleet-authored narrative
-    ({Self_narrative}/{Peer_keeper}/{Automation}/{Unknown}) is rendered inside
-    the observational-data envelope so a keeper cannot treat its own or a
-    peer's board narrative as trusted instruction. *)
-type observation_provenance =
-  | Self_narrative
-  | Peer_keeper
-  | Human_direct
-  | Automation
-  | Unknown
-
-(** RFC-0247: classify a board event's provenance from primitives already
-    present at the boundary ([post_kind] + [author] + the keeper's own identity
-    set [self_ids]). Pure, no new data plumbing.
-
-    - own author ([is_self_author]) -> [Self_narrative]
-    - [Human_post] + non-keeper author -> [Human_direct]
-    - [Human_post] + keeper author -> [Unknown] (classification drift)
-    - [Automation_post]/[System_post] + typed keeper author -> [Peer_keeper]
-    - [Automation_post]/[System_post] + non-keeper author -> [Automation] *)
-val provenance_of :
-  self_ids:Keeper_identity.Keeper_id.t list ->
-  Board_types.post_kind ->
-  author:string ->
-  observation_provenance
-
-(** RFC-0247: trust tier for rendering. [Unknown] defaults to [true]
-    (defense-in-depth: unclassifiable events are untrusted fleet output, never
-    trusted operator direction). *)
-val should_quarantine : observation_provenance -> bool
-
 (** Structured board activity delivered to keepers without routing heuristics. *)
 type board_reaction_event = {
   target_type : Board_types.reaction_target_type;
@@ -56,16 +23,12 @@ type pending_board_event_kind =
   | Bg_completed
   | Schedule_due
   | External_attention
-  | Goal_verification_failed
   | Failure_judgment
       (** RFC-0313 W2: deterministic turn failure escalated for an
           LLM-boundary verdict on the keeper's next turn. *)
   | Goal_assigned
       (** RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids];
           the assignment edge surfaces as actionable turn input. *)
-  | Goal_stagnation
-      (** RFC-0310 §3.3: a live goal went stale past the threshold; the
-          stagnation edge surfaces as a resume-or-hand-off prompt. *)
 
 type pending_board_event = {
   event_kind : pending_board_event_kind;
@@ -86,9 +49,6 @@ type pending_board_event = {
   (** Author of the most recent external comment (for prompt context). *)
   latest_external_preview : string option;
   (** Preview of the most recent external comment content. *)
-  provenance : observation_provenance;
-  (** RFC-0247: provenance classified at construction; drives the
-      trusted-vs-observational rendering split. *)
 }
 
 (** Read-only projection of one schedule row that needs keeper attention. *)
@@ -98,7 +58,6 @@ type scheduled_automation_item = {
   status : string;
   payload_kind : string option;
   recurrence_summary : string;
-  risk_class : string;
   due_at : float;
   keeper_next_tool : string option;
   keeper_next_action : string;
@@ -108,7 +67,6 @@ type scheduled_automation_item = {
 type scheduled_automation_observation = {
   active_count : int;
   due_ready_count : int;
-  blocked_approval_count : int;
   next_due_at : float option;
   items : scheduled_automation_item list;
 }
@@ -117,16 +75,11 @@ val empty_scheduled_automation_observation : scheduled_automation_observation
 
 (** Snapshot of the world as seen by a keeper at heartbeat time. *)
 type world_observation = {
-  pending_mentions : (string * string) list;
-  (** [(from_agent, content)] pairs of unprocessed direct mentions. *)
+  pending_messages : Keeper_world_observation_message_scope.pending_message list;
+  (** Unacknowledged mention/scope rows in durable source order. *)
 
   pending_board_events : pending_board_event list;
   (** Structured board events needing triage. *)
-
-  pending_scope_messages : (string * string) list;
-  (** [(from_agent, content)] pairs of unprocessed non-direct messages that a
-      global/all keeper is explicitly allowed to observe in the flattened
-      namespace. *)
 
   idle_seconds : int;
   (** Seconds since last keeper activity (turn or scheduled autonomous cycle). *)
@@ -134,19 +87,12 @@ type world_observation = {
   active_goals : string list;
   (** Goal IDs currently assigned to this keeper. *)
 
-  context_ratio : float Lazy.t;
-  (** Current context window utilization [0.0, 1.0]. *)
-
   unclaimed_task_count : int;
   (** Number of unclaimed tasks in the workspace backlog. *)
 
   claimable_task_count : int;
   (** Number of unclaimed tasks this keeper can claim with its current tool
       surface. This is a matched subset of [unclaimed_task_count]. *)
-
-  provider_capacity_blocked_task_count : int;
-  (** Number of otherwise-claimable tasks currently held back by provider
-      capacity/cooldown when no fail-open runtime is available. *)
 
   failed_task_count : int;
   (** Number of failed/cancelled tasks in the workspace backlog. *)
@@ -156,8 +102,7 @@ type world_observation = {
 
   scheduled_automation : scheduled_automation_observation;
   (** Durable schedule-store state that needs keeper attention, such as due
-      requests ready to dispatch or side-effecting due requests blocked on a
-      separate human grant. *)
+      requests ready to dispatch. *)
 
   backlog_updated_since_last_scheduled_autonomous : bool;
   (** [true] when the backlog changed after the keeper's last scheduled
@@ -172,6 +117,10 @@ type world_observation = {
       Recomputed from binding stores + connector liveness on every
       observation; the dashboard entry is always present. Presence
       only — no conversation content, no counts. *)
+
+  connected_surface_failures : Gate_surface.presence_failure list;
+  (** Connector binding stores that could not be read during presence
+      observation. Healthy connector surfaces remain available. *)
 }
 
 type keeper_cycle_channel =
@@ -180,11 +129,11 @@ type keeper_cycle_channel =
 
 type event_queue_trigger =
   | Bootstrap_stimulus
-  | No_progress_recovery_stimulus
   | Scheduled_automation_stimulus
   | Connector_attention_stimulus
   | Hitl_resolved_stimulus
   | Failure_judgment_stimulus
+  | Manual_compaction_stimulus
 
 (** Typed reason for running a keeper cycle. Each variant corresponds to
     exactly one code path in {!keeper_cycle_decision}. *)
@@ -193,29 +142,20 @@ type turn_reason =
   | Board_event_pending
   | Scope_message_pending
   | Bootstrap_stimulus_pending
-  | No_progress_recovery_stimulus_pending
   | Connector_attention_pending
   | Hitl_resolved_pending
   | Failure_judgment_pending
+  | Manual_compaction_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
-  | Idle_cooldown_elapsed of { idle_sec : int; cooldown : int }
-  | Cooldown_elapsed
   | Task_backlog of { unclaimed : int; failed : int }
-  | Task_reactive_cooldown_elapsed
   | Never_started
-  | Min_interval_elapsed
 
 (** Typed reason for skipping a keeper turn. *)
 type skip_reason =
   | Keeper_paused
-  | Approval_pending
   | Scheduled_autonomous_disabled
   | Reactive_disabled
-  | Provider_cooldown_pending of { remaining_sec : int }
-  | Idle_gate_pending of { remaining_sec : int }
-  | Cooldown_pending of { remaining_sec : int }
-  | No_signal
 
 (** Keeper cycle decision with non-empty reason list (NEL).
     [Run] guarantees at least one trigger reason.
@@ -258,18 +198,16 @@ type keeper_cycle_decision = {
   channel : keeper_cycle_channel;
   verdict : turn_verdict;
   since_last_scheduled_autonomous : int option;
-  effective_cooldown : int option;
-  task_reactive_cooldown : int option;
-  idle_gate_sec : int option;
 }
 
 type board_signal_match = {
   explicit_mention : bool;
   matched_targets : string list;
-  score : int;
 }
 
-(** Collect recent board activity within the keeper's heartbeat window.
+(** Collect board activity after the keeper's durable cursor. A keeper without
+    a cursor starts at the beginning of Board history; no time window may hide
+    undelivered posts.
     Returns [(events, new_post_count, mention_count)].
     Used by both the world observation builder and the deliberation triage
     in keepalive to populate board-related triggers. *)
@@ -288,15 +226,9 @@ val board_signal_match :
   signal:Board_dispatch.board_signal ->
   board_signal_match
 
-val board_signal_wake_reason :
-  meta:Keeper_meta_contract.keeper_meta ->
-  signal:Board_dispatch.board_signal ->
-  Keeper_world_observation_board_signal.wake_reason option
-
 (** RFC-0266: build the actionable [pending_board_event] for a completed async
     [masc_fusion] deliberation. Surfaces the sink's board result as a just-arrived
-    event so the woken turn acts on it; classified [Self_narrative] (own author +
-    System_post) so it renders inside the observational-data envelope (RFC-0247).
+    event so the woken turn can inspect it as neutral Board context.
     [board_post_id = ""] falls back to a synthetic [fusion-run:<id>] post id. *)
 val pending_board_event_of_fusion_completion :
   meta:Keeper_meta_contract.keeper_meta ->
@@ -306,40 +238,28 @@ val pending_board_event_of_fusion_completion :
 
 (** RFC-0290: build the actionable [pending_board_event] for a completed
     background job. Mirrors {!pending_board_event_of_fusion_completion}: the
-    synthetic System_post event wakes the keeper with the job outcome, while
-    provenance keeps it in the observational-data envelope. [bg_board_post_id =
-    ""] falls back to a synthetic [bg-run:<id>] post id. *)
+    synthetic System_post event wakes the keeper with the job outcome.
+    [bg_board_post_id = ""] falls back to a synthetic [bg-run:<id>] post id. *)
 val pending_board_event_of_bg_job_completion :
   meta:Keeper_meta_contract.keeper_meta ->
   arrived_at:float ->
   Keeper_event_queue.bg_job_completion ->
   pending_board_event
 
-(** Build the actionable observation for a direct scheduled keeper wake. The
-    schedule itself is the trusted timing source; the message is rendered as
-    automation-origin observational data, not trusted operator instruction. *)
+(** Build the actionable observation for a direct scheduled keeper wake. *)
 val pending_board_event_of_scheduled_wake :
   meta:Keeper_meta_contract.keeper_meta ->
+  post_id:Keeper_event_queue.post_id ->
   arrived_at:float ->
   Keeper_event_queue.scheduled_wake ->
   pending_board_event
 
 (** Build the actionable observation for a connector-recorded external
-    attention item. Ambient connector chatter remains observational by default:
-    it is not trusted operator instruction unless another typed path makes it
-    an explicit mention. *)
+    attention item. Mention state and connector coordinates remain context
+    fields; they do not grant instruction authority. *)
 val pending_board_event_of_external_attention :
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_external_attention.item ->
-  pending_board_event
-
-(** Build the actionable observation for a rejected goal verification. The
-    event is synthetic system output, not trusted operator direction, but it is
-    actionable because the assigned keeper must resume goal work. *)
-val pending_board_event_of_goal_verification_failure :
-  meta:Keeper_meta_contract.keeper_meta ->
-  arrived_at:float ->
-  Keeper_event_queue.goal_verification_failure ->
   pending_board_event
 
 val apply_failure_judgment_guidance :
@@ -357,13 +277,17 @@ val apply_failure_judgment_guidance :
 
 (** Convert a queued Event Layer stimulus back into structured board activity
     for the next keeper prompt. [Board_signal], [Fusion_completed] (RFC-0266),
-    [Bg_completed] (RFC-0290), [Schedule_due], and
-    [Goal_verification_failed] produce [Some];
-    [Bootstrap]/[No_progress_recovery] return [None] (no prompt injection). *)
+    [Bg_completed] (RFC-0290), and [Schedule_due] produce [Some];
+    [Bootstrap] returns [None] (no prompt injection).
+    [Error unavailable] means the underlying board read for [Board_signal] /
+    [Board_attention] failed (board-unavailable-result). Callers classify via
+    {!Keeper_world_observation_board_signal.disposition_of_unavailable} and
+    decide whether to drop or retain the stimulus — this function only
+    reports the read failure, it does not decide. *)
 val pending_board_event_of_stimulus :
   meta:Keeper_meta_contract.keeper_meta ->
   Keeper_event_queue.stimulus ->
-  pending_board_event option
+  (pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
 
 val read_scheduled_automation_observation :
   keeper_name:string option ->
@@ -373,8 +297,8 @@ val read_scheduled_automation_observation :
 
 (** Build a world observation from workspace state and keeper metadata.
 
-    Reads workspace backlog, agent list, checkpoint context, economy state,
-    and recent board activity.
+    Reads workspace backlog, agent list, checkpoint context, and recent
+    board activity.
     All I/O errors are caught and produce safe defaults (0, empty, Normal).
 
     @param pending_board_events Pre-collected board event summaries for this
@@ -400,46 +324,10 @@ val observe_direct_keeper_msg :
   meta:Keeper_meta_contract.keeper_meta ->
   world_observation
 
-(** Non-mutating probe for the smart-heartbeat gate.
-
-    Returns [true] when durable workspace state already contains work that should
-    force a keeper cycle even if the adaptive heartbeat would otherwise
-    [Skip_idle]. Unlike {!observe}, this helper does not advance board or
-    message cursors. *)
-val durable_signal_present :
-  pending_board_events:pending_board_event list option ->
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  bool
-
 (** Structured work signal present in the observation itself. *)
 val actionable_signal_present : world_observation -> bool
 
-(** Compute effective scheduled autonomous cooldown with idle decay.
-    After extended idle (> base cooldown), halve the cooldown each
-    additional period, down to a configurable floor.
-
-    Board health no longer adjusts this cooldown: the curation
-    health_score was an LLM-submitted projection and using it to gate
-    keeper polling violated the projection-only contract (board-karma-v2 S1). *)
-val effective_scheduled_autonomous_cooldown :
-  base_cooldown:int -> since_last:int ->
-  ?consecutive_noop_count:int -> unit -> int
-
-val provider_cooldown_remaining_sec_for_runtime :
-  keeper_name:string -> runtime_id:string -> int option
-
-val provider_capacity_blocked_task_count :
-  ?provider_cooldown_remaining_sec:
-    (keeper_name:string -> runtime_id:string -> int option) ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  claimable_task_count:int ->
-  unit ->
-  int
-
 val keeper_cycle_decision :
-  ?provider_cooldown_remaining_sec:
-    (keeper_name:string -> runtime_id:string -> int option) ->
   ?reactive_wake:bool ->
   ?event_queue_triggers:event_queue_trigger list ->
   meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision

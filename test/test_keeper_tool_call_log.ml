@@ -14,6 +14,11 @@ let eio_env_test name fn =
     Fs_compat.set_fs (Eio.Stdenv.fs env);
     fn env)
 
+let artifact_ref_exn ~sha256 ~bytes ~preview ~mime =
+  match Tool_output.make_artifact_ref ~sha256 ~bytes ~preview ~mime with
+  | Ok r -> r
+  | Error e -> Alcotest.fail (Tool_output.make_error_to_string e)
+
 let counter = ref 0
 
 let with_tmp_log f =
@@ -100,17 +105,83 @@ let test_read_recent_keeper_filter () =
     Alcotest.(check int) "bob gets 1 entry" 1 (List.length bob_entries);
     Alcotest.(check int) "all gets 2 entries" 2 (List.length all_entries))
 
-(* ── Redaction: denied tools are skipped ────────────── *)
-
-let test_denied_tool_not_logged () =
+(* The dashboard /tool-calls handler derives each keeper's slice from one
+   shared fleet read instead of per-keeper [read_recent] calls. The
+   derivation must be observationally equal to [read_recent]. *)
+let test_fleet_rows_derivation_matches_read_recent () =
   with_tmp_log (fun () ->
-    (* tool name containing "_auth" infix is denied by Observability_redact *)
+    List.iter
+      (fun (keeper, tool) ->
+        Keeper_tool_call_log.log_call
+          ~keeper_name:keeper ~tool_name:tool
+          ~input:(`Assoc []) ~output_text:"out"
+          ~success:true ~duration_ms:1.0 ())
+      [ ("alice", "t1"); ("bob", "t2"); ("alice", "t3");
+        ("carol", "t4"); ("alice", "t5"); ("bob", "t6") ];
+    let n = 2 in
+    let fleet =
+      Keeper_tool_call_log.read_recent_rows
+        ~n:(n * Keeper_tool_call_log.read_over_scan_factor) ()
+    in
+    List.iter
+      (fun keeper ->
+        let direct =
+          Keeper_tool_call_log.read_recent ~keeper_name:keeper ~n ()
+        in
+        let derived =
+          Keeper_tool_call_log.filter_rows_for_keeper
+            ~keeper_name:keeper ~n fleet
+        in
+        Alcotest.(check (list string))
+          (Printf.sprintf "derived slice equals read_recent for %s" keeper)
+          (List.map Yojson.Safe.to_string direct)
+          (List.map Yojson.Safe.to_string derived))
+      [ "alice"; "bob"; "carol"; "absent-keeper" ])
+
+let test_exact_oas_occurrence_persisted () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k"
+      ~tool_name:"tool_a"
+      ~input:(`Assoc [])
+      ~output_text:"ok"
+      ~success:true
+      ~duration_ms:1.0
+      ~tool_use_id:""
+      ~turn:9
+      ~planned_index:4
+      ();
+    match Keeper_tool_call_log.read_recent ~n:1 () with
+    | [ entry ] ->
+      Alcotest.(check (option string))
+        "blank provider id persisted"
+        (Some "")
+        (Safe_ops.json_string_opt "tool_use_id" entry);
+      Alcotest.(check int)
+        "turn persisted"
+        9
+        (Safe_ops.json_int ~default:(-1) "turn" entry);
+      Alcotest.(check int)
+        "planned index persisted"
+        4
+        (Safe_ops.json_int ~default:(-1) "planned_index" entry)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
+(* ── Redaction: tool names do not suppress evidence ────────────── *)
+
+let test_sensitive_named_tool_logged_with_redaction () =
+  with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"mcp_auth_create"
       ~input:(`Assoc [("token", `String "secret123")]) ~output_text:"done"
       ~success:true ~duration_ms:1.0 ();
     let result = Keeper_tool_call_log.read_recent () in
-    Alcotest.(check int) "denied tool not logged" 0 (List.length result))
+    Alcotest.(check int) "tool call logged" 1 (List.length result);
+    let encoded = Yojson.Safe.to_string (List.hd result) in
+    Alcotest.(check bool)
+      "sensitive value redacted"
+      false
+      (String_util.contains_substring encoded "secret123"))
 
 (* ── Redaction: sensitive fields stripped ────────────── *)
 
@@ -153,83 +224,6 @@ let test_model_field_stored () =
       (Some "local_qwen3_27b_only")
       (Safe_ops.json_string_opt "runtime_profile" (List.hd entries)))
 
-let test_policy_denied_structured_error_gets_semantic_failure () =
-  with_tmp_log (fun () ->
-    Keeper_tool_call_log.log_call
-      ~keeper_name:"k" ~tool_name:"tool_read_file"
-      ~input:(`Assoc [("path", `String "blocked.txt")])
-      ~output_text:
-        {|{"ok":false,"error":"tool_not_allowed","tool":"tool_read_file"}|}
-      ~success:true ~duration_ms:1.0 ();
-    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
-    Alcotest.(check int) "one entry" 1 (List.length entries);
-    let entry = List.hd entries in
-    Alcotest.(check bool) "transport success preserved" true
-      (Safe_ops.json_bool ~default:false "success" entry);
-    Alcotest.(check bool) "semantic success is false" false
-      (Safe_ops.json_bool ~default:true "semantic_success" entry);
-    Alcotest.(check (option string)) "semantic outcome"
-      (Some "policy_denied")
-      (Safe_ops.json_string_opt "semantic_outcome" entry);
-    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
-    Alcotest.(check int) "dashboard semantic success count" 0
-      (Safe_ops.json_int ~default:(-1) "success" summary);
-    Alcotest.(check int) "dashboard semantic failure count" 1
-      (Safe_ops.json_int ~default:(-1) "failure" summary);
-    let failure_category =
-      summary
-      |> Yojson.Safe.Util.member "failure_categories"
-      |> Yojson.Safe.Util.to_list
-      |> List.hd
-    in
-    Alcotest.(check (option string)) "failure category"
-      (Some "policy_denied")
-      (Safe_ops.json_string_opt "category" failure_category))
-
-let test_structured_ok_overrides_transport_failure_for_semantic_success () =
-  with_tmp_log (fun () ->
-    Keeper_tool_call_log.log_call
-      ~keeper_name:"k" ~tool_name:"tool_execute"
-      ~input:(`Assoc [ "cmd", `String "rg missing lib" ])
-      ~output_text:
-        {|{"ok":true,"semantic_status":"no_match","summary":"Search completed with no matches."}|}
-      ~success:false ~duration_ms:1.0 ();
-    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
-    let entry = List.hd entries in
-    Alcotest.(check bool) "transport failure preserved" false
-      (Safe_ops.json_bool ~default:true "success" entry);
-    Alcotest.(check bool) "semantic success follows structured output" true
-      (Safe_ops.json_bool ~default:false "semantic_success" entry);
-    Alcotest.(check (option string)) "semantic outcome"
-      (Some "no_match")
-      (Safe_ops.json_string_opt "semantic_outcome" entry))
-
-let test_blocked_structured_output_keeps_semantic_category () =
-  with_tmp_log (fun () ->
-    Keeper_tool_call_log.log_call
-      ~keeper_name:"k" ~tool_name:"tool_execute"
-      ~input:(`Assoc [ "cmd", `String "git log --oneline | head -5" ])
-      ~output_text:
-        {|{"ok":false,"error":"tool_execute_command_shape_blocked","failure_class":"workflow_rejection","semantic_status":"blocked","shape_block":"pipe_or_redirect"}|}
-      ~success:false ~duration_ms:1.0 ();
-    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
-    let entry = List.hd entries in
-    Alcotest.(check bool) "semantic success is false" false
-      (Safe_ops.json_bool ~default:true "semantic_success" entry);
-    Alcotest.(check (option string)) "semantic outcome"
-      (Some "blocked")
-      (Safe_ops.json_string_opt "semantic_outcome" entry);
-    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
-    let failure_category =
-      summary
-      |> Yojson.Safe.Util.member "failure_categories"
-      |> Yojson.Safe.Util.to_list
-      |> List.hd
-    in
-    Alcotest.(check (option string)) "failure category keeps shape tag"
-      (Some "shape_block:pipe_or_redirect")
-      (Safe_ops.json_string_opt "category" failure_category))
-
 let test_turn_context_fields_stored () =
   with_tmp_log (fun () ->
     (* Mirrors the production reader (keeper_hooks_oas): context is
@@ -255,7 +249,6 @@ let test_turn_context_fields_stored () =
       ~sandbox_root:"/tmp/k-sandbox"
       ~allowed_paths:["/tmp/k-sandbox"; "/tmp/shared"]
       ~network_mode:"inherit"
-      ~approval_mode:"manual"
       ~runtime_profile:"tool_use_strict"
       ();
     let tctx : Keeper_tool_call_log_context.turn_context =
@@ -279,7 +272,6 @@ let test_turn_context_fields_stored () =
       ?sandbox_root:tctx.sandbox_root
       ?allowed_paths:tctx.allowed_paths
       ?network_mode:tctx.network_mode
-      ?approval_mode:tctx.approval_mode
       ?runtime_profile:tctx.runtime_profile
       ();
     let entries = Keeper_tool_call_log.read_recent () in
@@ -327,9 +319,6 @@ let test_turn_context_fields_stored () =
     Alcotest.(check (option string)) "network_mode field"
       (Some "inherit")
       (Safe_ops.json_string_opt "network_mode" entry);
-    Alcotest.(check (option string)) "approval_mode field"
-      (Some "manual")
-      (Safe_ops.json_string_opt "approval_mode" entry);
     let runtime_contract =
       Yojson.Safe.Util.member "runtime_contract" entry
     in
@@ -464,10 +453,10 @@ let test_route_evidence_stored_for_git_push () =
       ~input:
         (`Assoc
            [
-             ("executable", `String "git");
              ( "argv",
                `List
                  [
+                   `String "git";
                    `String "push";
                    `String "-u";
                    `String "origin";
@@ -523,13 +512,12 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
   with_tmp_log (fun () ->
     let marker =
       Tool_output.encode_for_oas
-        (Tool_output.Stored {
-          sha256 = String.make 64 'b';
-          bytes = 8192;
-          mime = "application/json";
-          preview =
-            {|{"ok":true,"via":"docker","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|};
-        })
+        (Tool_output.Stored
+           (artifact_ref_exn
+              ~sha256:(String.make 64 'b')
+              ~bytes:8192
+              ~mime:"application/json"
+              ~preview:{|{"ok":true,"via":"docker","sandbox_profile":"docker","network_mode":"bridge","status":{"label":"success","kind":"exit","code":0},"output":"branch pushed"}|}))
     in
     Keeper_tool_call_log.log_call
       ~keeper_name:"executor"
@@ -537,10 +525,10 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
       ~input:
         (`Assoc
            [
-             ("executable", `String "git");
              ( "argv",
                `List
                  [
+                   `String "git";
                    `String "push";
                    `String "-u";
                    `String "origin";
@@ -755,9 +743,6 @@ let test_route_evidence_records_masc_board_descriptor () =
       Alcotest.(check (option string)) "executor"
         (Some "in_process")
         (Safe_ops.json_string_opt "executor" evidence);
-      Alcotest.(check (option string)) "effect domain"
-        (Some "masc_workspace")
-        (Safe_ops.json_string_opt "effect_domain" evidence);
       Alcotest.(check (option string)) "runtime handler"
         (Some "tool_masc_board_dispatch")
         (Safe_ops.json_string_opt "runtime_handler" evidence)
@@ -796,7 +781,7 @@ let test_non_object_input_still_logs_action_radius () =
       ~keeper_name:"executor"
       ~tool_name:"tool_write_file"
       ~input:(`String "raw pre-tool gate payload")
-      ~output_text:"approval_required:governance_approval"
+      ~output_text:"gate_waiting_for_operator"
       ~success:false
       ~duration_ms:3.0
       ();
@@ -1144,12 +1129,12 @@ let test_output_blob_marker_normalized () =
   with_tmp_log (fun () ->
     let marker =
       Tool_output.encode_for_oas
-        (Tool_output.Stored {
-          sha256 = String.make 64 'a';
-          bytes = 6436;
-          mime = "text/plain";
-          preview = "{\"ok\":true,\"result\":\"42\"}";
-        })
+        (Tool_output.Stored
+           (artifact_ref_exn
+              ~sha256:(String.make 64 'a')
+              ~bytes:6436
+              ~mime:"text/plain"
+              ~preview:"{\"ok\":true,\"result\":\"42\"}"))
     in
     Keeper_tool_call_log.log_call
       ~keeper_name:"k" ~tool_name:"tool_blob"
@@ -1269,17 +1254,15 @@ let () =
         [ eio_test "n=0 returns []" test_read_recent_n_zero
         ; eio_test "n<0 returns []" test_read_recent_n_negative
         ; eio_test "keeper filter" test_read_recent_keeper_filter
+        ; eio_test "fleet-row derivation equals read_recent"
+            test_fleet_rows_derivation_matches_read_recent
+        ; eio_test "exact OAS occurrence" test_exact_oas_occurrence_persisted
         ] )
     ; ( "redaction",
-        [ eio_test "denied tool not logged" test_denied_tool_not_logged
+        [ eio_test "sensitive-named tool logged with redaction"
+            test_sensitive_named_tool_logged_with_redaction
         ; eio_test "sensitive input fields redacted" test_sensitive_input_fields_redacted
         ; eio_test "model field stored" test_model_field_stored
-        ; eio_test "policy denied is semantic failure"
-            test_policy_denied_structured_error_gets_semantic_failure
-        ; eio_test "structured ok overrides transport failure"
-            test_structured_ok_overrides_transport_failure_for_semantic_success
-        ; eio_test "blocked output keeps semantic category"
-            test_blocked_structured_output_keeps_semantic_category
         ; eio_test "turn context fields stored" test_turn_context_fields_stored
         ; Alcotest.test_case "turn context cells do not cross runs" `Quick
             test_turn_context_cells_do_not_cross_runs

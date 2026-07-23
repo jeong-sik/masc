@@ -91,7 +91,6 @@ let default_auto_models_for_profile (profile : Provider_runtime_projection.provi
   =
   match profile.supported_models, profile.runtime_kind with
   | _ :: _ as models, _ -> Some models
-  | [], Provider_runtime_projection.Cli_agent -> Some [ "auto" ]
   | [], (Provider_runtime_projection.Local | Provider_runtime_projection.Direct_api) ->
     None
 ;;

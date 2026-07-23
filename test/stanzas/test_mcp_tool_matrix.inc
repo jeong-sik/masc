@@ -12,4 +12,7 @@
  (action
   (setenv HOME ""
    (run %{test})))
- (libraries masc_test_deps keeper_tool_matrix_cases_lib))
+ (libraries
+  masc_test_deps
+  keeper_tool_matrix_cases_lib
+  fs_compat_test_support))

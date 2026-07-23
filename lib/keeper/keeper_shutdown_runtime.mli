@@ -14,15 +14,18 @@ and worker_start_error =
 
 type restored_inventory =
   { operations : Keeper_shutdown_types.t list
+  ; retired_terminal_records : Keeper_shutdown_store.retired_terminal_record list
   ; blocked_keeper_names : string list
   ; corrupt_records : Keeper_shutdown_store.corrupt_record list
   }
 
 val submit_error_to_string : submit_error -> string
 
-(** Restore admission from owner-addressable durable inventory. Corrupt
-    payloads fence their path owner and remain explicit in [corrupt_records];
-    valid operations for unrelated Keepers remain recoverable. *)
+(** Restore admission from owner-addressable durable inventory. Verified
+    retired terminal records release only a matching in-memory fence and remain
+    explicit in [retired_terminal_records]. Corrupt payloads fence their path
+    owner and remain explicit in [corrupt_records]; valid operations for
+    unrelated Keepers remain recoverable. *)
 val restore_inventory_admission :
   config:Workspace.config ->
   Keeper_shutdown_store.inventory_entry list ->

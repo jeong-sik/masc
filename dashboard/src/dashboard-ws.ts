@@ -395,11 +395,15 @@ function routeKey(routeState: DashboardRouteState): string {
 export function dashboardSlicesForRoute(routeState: DashboardRouteState): string[] {
   const slices = new Set<DashboardPushSlice>(GLOBAL_DASHBOARD_PUSH_SLICES)
 
-  // Overview tab needs execution slice for World Visualizer keeper fleet data.
+  // Overview fleet statistics consume keeper data from the execution slice.
   if (routeState.tab === 'overview') {
     slices.add('execution')
   }
   if (routeState.tab === 'keepers') {
+    slices.add('execution')
+    slices.add('composite')
+  }
+  if (routeState.tab === 'registry') {
     slices.add('execution')
     slices.add('composite')
   }
@@ -418,10 +422,10 @@ export function dashboardSlicesForRoute(routeState: DashboardRouteState): string
   // board refreshes through sse-store.
   if (routeState.tab === 'monitoring') {
     const section = routeState.params.section
-    if (section === 'observatory' || section === 'journey' || section === 'agents' || section === 'cognition') {
+    if (section === 'observatory' || section === 'journey' || section === 'agents') {
       slices.add('execution')
     }
-    if (section === 'agents' || section === 'cognition') {
+    if (section === 'agents') {
       slices.add('composite')
     }
     if (section === 'fleet-health' && routeState.params.view === 'comparison') {

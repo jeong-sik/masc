@@ -63,15 +63,12 @@
   masc.runtime
   masc.model_inference_metrics
   masc.types_boundary
-  masc.cdal_runtime
-  masc.cdal
   masc.trajectory
   masc.keeper_tooling
   masc.host_config
   masc.briefing_compactors
   masc.dashboard_eval_feed
   masc.sse_event
-  masc.chronicle_event
   masc.tool_call_quality_benchmark
   masc.keeper_contract
   masc.compaction_trigger
@@ -114,7 +111,6 @@
   masc_workspace
   masc_goal
   masc_turn
-  masc_economy
   masc.masc_tool_dispatch
   masc_thompson
   masc.config
@@ -133,7 +129,6 @@
   opentelemetry.client
   ambient-context
   ambient-context-eio
-  masc.autonomous
   masc.shared_audit
   masc.shared_types
   masc.resilience

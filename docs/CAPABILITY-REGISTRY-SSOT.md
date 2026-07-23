@@ -11,7 +11,7 @@ This document defines the canonical split between:
 
 - external MCP tools exposed to MCP clients
 - internal tool surfaces exposed to MASC-managed agents
-- privileged internal executor tools
+- internal and Keeper tool projections
 
 ## Core Rule
 
@@ -22,9 +22,7 @@ Each capability may project into multiple surfaces:
 - `public_mcp`
 - `spawned_agent_mcp`
 - `local_worker`
-- `keeper_standard`
-- `keeper_privileged`
-- `privileged_executor`
+- `keeper`
 
 Removed surfaces (historical record):
 
@@ -78,21 +76,9 @@ Example:
 
 ### Keeper
 
-- uses keeper-specific projected tools
-- safe/default keeper tools and privileged keeper tools are tracked separately
-
-## Privileged Internal Tools
-
-The privileged executor class is internal-only.
-
-Examples:
-
-- `tool_execute`
-- `tool_edit_file`
-- `keeper_edit`
-
-These tools are:
-
-- not part of public MCP discovery
-- separated from standard keeper surfaces
-- expected to remain behind explicit policy and audit gates
+- receives the complete descriptor-declared Keeper projection
+- excludes only exact transport aliases (which name their visible projection)
+  and descriptors with missing or structurally invalid schemas
+- has no standard/privileged surface split
+- routes concrete external effects through the non-hierarchical Keeper Gate;
+  tool visibility itself is not an authorization decision

@@ -3,15 +3,15 @@
    .turn-* overlay; everything new is .sch-*. v2 tokens only.
    ══════════════════════════════════════════════════════════════ */
 
-/* status/risk tone helper — map cls → color var */
-.sch-pill, .sch-risk, .sch-decision, .sch-exec, .sch-sig-kind { --tone: var(--text-dim); }
+/* status tone helper — map cls → color var */
+.sch-pill, .sch-exec, .sch-sig-kind { --tone: var(--text-dim); }
 .ok   { }
-.sch-pill.ok,   .sch-decision.ok,   .sch-exec.ok,   .sch-sig-kind.ok   { --tone: var(--status-ok); }
-.sch-pill.warn, .sch-decision.warn, .sch-sig-kind.warn { --tone: var(--status-warn); }
-.sch-pill.bad,  .sch-decision.bad,  .sch-exec.bad   { --tone: var(--status-bad); }
+.sch-pill.ok,   .sch-exec.ok,   .sch-sig-kind.ok   { --tone: var(--status-ok); }
+.sch-pill.warn, .sch-sig-kind.warn { --tone: var(--status-warn); }
+.sch-pill.bad,  .sch-exec.bad   { --tone: var(--status-bad); }
 .sch-pill.info  { --tone: var(--info); }
 .sch-pill.volt  { --tone: var(--volt-strong); }
-.sch-pill.dim,  .sch-decision.dim   { --tone: var(--text-dim); }
+.sch-pill.dim   { --tone: var(--text-dim); }
 
 /* ── filter tabs ── */
 .sch-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 18px 0 14px; }
@@ -25,16 +25,12 @@
 
 /* ── post-action result banner (어디로 갔는지) ── */
 .sch-banner { display: flex; align-items: center; gap: 11px; margin: 0 0 14px; padding: 11px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-main); background: var(--bg-card); font-size: 12.5px; color: var(--text-mid); animation: turn-in 0.18s ease; }
-.sch-banner.approve { border-color: color-mix(in oklab, var(--status-ok) 40%, transparent); background: color-mix(in oklab, var(--status-ok) 8%, transparent); }
-.sch-banner.reject { border-color: color-mix(in oklab, var(--status-bad) 38%, transparent); background: color-mix(in oklab, var(--status-bad) 7%, transparent); }
-.sch-banner.cancel { border-color: var(--border-highlight); }
+.sch-banner.ok { border-color: color-mix(in oklab, var(--status-ok) 40%, transparent); background: color-mix(in oklab, var(--status-ok) 8%, transparent); }
 .sch-banner.payload { align-items: flex-start; border-color: color-mix(in oklab, var(--status-warn) 40%, transparent); background: color-mix(in oklab, var(--status-warn) 8%, transparent); }
 .sch-banner.payload.bad { border-color: color-mix(in oklab, var(--status-bad) 44%, transparent); background: color-mix(in oklab, var(--status-bad) 8%, transparent); }
 .sch-banner.payload.warn { border-color: color-mix(in oklab, var(--status-warn) 40%, transparent); background: color-mix(in oklab, var(--status-warn) 8%, transparent); }
 .sch-banner-ico { flex: none; font-size: var(--fs-14); }
-.sch-banner.approve .sch-banner-ico { color: var(--status-ok); }
-.sch-banner.reject .sch-banner-ico { color: var(--status-bad); }
-.sch-banner.cancel .sch-banner-ico { color: var(--text-dim); }
+.sch-banner.ok .sch-banner-ico { color: var(--status-ok); }
 .sch-banner.payload.bad .sch-banner-ico { color: var(--status-bad); }
 .sch-banner.payload.warn .sch-banner-ico { color: var(--status-warn); }
 .sch-banner-txt { flex: 1; min-width: 0; }
@@ -105,13 +101,6 @@
 .sch-rec { font-size: 10.5px; color: var(--text-mid); }
 
 .sch-pill { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-ui); font-size: 10.5px; letter-spacing: 0.02em; padding: 2px 9px; border-radius: var(--radius-pill); color: var(--tone); border: 1px solid color-mix(in oklab, var(--tone) 38%, transparent); background: color-mix(in oklab, var(--tone) 10%, transparent); white-space: nowrap; }
-.sch-risk { font-family: var(--font-mono); font-size: var(--fs-10); padding: 1px 7px; border-radius: var(--radius-xs); color: var(--tone); border: 1px solid color-mix(in oklab, var(--tone) 32%, transparent); }
-.sch-risk.dim  { --tone: var(--text-dim); }
-.sch-risk.ok   { --tone: var(--status-ok); }
-.sch-risk.info { --tone: var(--info); }
-.sch-risk.warn { --tone: var(--status-warn); }
-.sch-risk.bad  { --tone: var(--status-bad); }
-.sch-risk.volt { --tone: var(--volt-strong); }
 .sch-payload-support { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: var(--fs-10); padding: 1px 7px; border-radius: var(--radius-pill); color: var(--tone); border: 1px solid color-mix(in oklab, var(--tone) 34%, transparent); background: color-mix(in oklab, var(--tone) 8%, transparent); white-space: nowrap; }
 .sch-payload-support.ok { --tone: var(--status-ok); }
 .sch-payload-support.warn { --tone: var(--status-warn); }
@@ -126,26 +115,10 @@
 .sch-klink:hover { color: var(--volt); text-decoration: underline; }
 .sch-actor-kind { font-size: var(--fs-9); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); border: 1px solid var(--border-main); padding: 1px 5px; border-radius: var(--radius-pill); }
 .sch-due { display: inline-flex; align-items: baseline; gap: 4px; color: var(--text-mid); }
-.sch-need { color: var(--status-warn); }
-.sch-grant { color: var(--status-ok); }
 .sch-wake-evidence { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--border-soft); color: var(--text-dim); font-size: var(--fs-11); }
 .sch-wake-title { flex: none; font-family: var(--font-ui); font-size: var(--fs-10); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); }
 .sch-wake-item { display: inline-flex; align-items: center; gap: 5px; min-width: 0; color: var(--text-mid); white-space: nowrap; }
 .sch-wake-join { overflow: hidden; min-width: 0; max-width: 100%; text-overflow: ellipsis; color: var(--text-dim); }
-
-.sch-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 13px; }
-.sch-act { font-family: var(--font-ui); font-size: var(--fs-12); padding: 6px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border-main); background: transparent; color: var(--text-mid); cursor: pointer; transition: 0.16s; }
-.sch-act:hover { border-color: var(--border-highlight); color: var(--text-bright); }
-.sch-act.approve { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 45%, transparent); }
-.sch-act.approve:hover { background: var(--status-ok); color: var(--bg-deep); border-color: var(--status-ok); }
-.sch-act.deny { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 40%, transparent); }
-.sch-act.deny:hover { background: color-mix(in oklab, var(--status-bad) 16%, transparent); }
-.sch-act.deny:disabled { opacity: 0.45; cursor: not-allowed; }
-.sch-act.ghost { color: var(--text-dim); }
-
-.sch-reject { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
-.sch-reject-in { flex: 1; min-width: 0; background: var(--bg-sunken); border: 1px solid var(--border-main); border-radius: var(--radius-sm); padding: 7px 10px; color: var(--text-bright); font-size: var(--fs-12); }
-.sch-reject-in:focus { outline: none; border-color: var(--volt-dim); }
 
 /* ── detail overlay ── */
 .v2-app .sch-drawer { width: min(620px, 96vw); }
@@ -161,11 +134,8 @@
 .sch-kv .v { font-size: 12.5px; color: var(--text-bright); word-break: break-word; }
 .sch-sod { margin-top: 10px; padding: 9px 11px; font-size: 11.5px; line-height: 1.55; color: var(--text-mid); background: var(--bg-sunken); border: 1px solid var(--border-soft); border-left: 2px solid var(--volt-dim); border-radius: var(--radius-sm); }
 .sch-sod b { color: var(--volt-strong); }
-.sch-decision { font-size: 12.5px; padding: 9px 11px; border-radius: var(--radius-sm); border: 1px solid color-mix(in oklab, var(--tone) 32%, transparent); background: color-mix(in oklab, var(--tone) 9%, transparent); color: var(--tone); }
-.sch-decision + .sch-decision { margin-top: 7px; }
 .sch-reason { margin-top: 5px; color: var(--text-mid); font-style: italic; }
 .sch-exec { margin-top: 8px; font-family: var(--font-mono); font-size: 11.5px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--bg-sunken); border: 1px solid color-mix(in oklab, var(--tone) 28%, transparent); color: var(--tone); }
-.sch-detail-actions { display: flex; flex-wrap: wrap; gap: 9px; border-top: 1px solid var(--border-soft); padding-top: 14px; }
 
 /* ── wake signal feed ── */
 .sch-signals { margin-top: 26px; }

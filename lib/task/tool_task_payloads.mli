@@ -1,27 +1,20 @@
 (** Pure payload builders and task-policy helpers. *)
 
-val transition_action_denylist_prefix : string
-
-val normalize_transition_action : string -> string
-
-val transition_action_denylist_entry : string -> string
-
-val is_transition_action_denylist_entry : string -> bool
-
-val transition_action_denied_by_denylist :
-  tool_denylist:string list -> action:string -> bool
-
-val transition_action_policy_applies : string list -> bool
-
-val transition_action_allowed_actions : tool_denylist:string list -> string list
-
 val is_verdict_transition_action : Masc_domain.task_action -> bool
-
-val transition_action_policy_rejection :
-  agent_name:string -> action:string -> allowed_actions:string list -> string
 
 val terminal_verdict_noop_message :
   task_id:string -> action:string -> status:string -> string
+
+val workflow_rejection_payload :
+  ?rule_id:string ->
+  ?tool_suggestion:string ->
+  ?hint:string ->
+  ?scope_policy:string ->
+  ?recoverable:bool ->
+  ?alternatives:string list ->
+  ?extra_fields:(string * Yojson.Safe.t) list ->
+  string ->
+  Yojson.Safe.t
 
 val workflow_rejection_payload_json :
   ?rule_id:string ->

@@ -87,6 +87,74 @@ let test_submit_or_inline_preserves_mutex () =
         check bool "shared mutex is not poisoned after offload" false
           (poisons mu))))
 
+let context_label = function
+  | Eio_guard.Eio_fiber -> "eio_fiber"
+  | Eio_guard.Non_eio -> "non_eio"
+
+let test_ready_raw_domain_uses_non_eio_path () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      Eio_guard.enable ();
+      Fun.protect ~finally:Eio_guard.disable (fun () ->
+        let pool =
+          Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env)
+        in
+        Executor_pool_ref.set (Domain_pool.executor_pool pool);
+        check string "main caller has Eio handler" "eio_fiber"
+          (context_label (Eio_guard.execution_context ()));
+        let raw_mutex = Eio.Mutex.create () in
+        let durable_dir = Filename.temp_file "masc-raw-domain-dir-" "" in
+        Unix.unlink durable_dir;
+        Eio.Switch.on_release sw (fun () ->
+          if Sys.file_exists durable_dir then Unix.rmdir durable_dir);
+        let caller_context, submitted_context, systhread_value, cleanup_ran,
+            mutex_rejected, directory_result =
+          Domain.spawn (fun () ->
+            let cleanup_ran = ref false in
+            let protected_value =
+              Eio_guard.protect
+                ~finally:(fun () -> cleanup_ran := true)
+                (fun () -> 17)
+            in
+            let mutex_rejected =
+              match Eio_guard.with_mutex raw_mutex (fun () -> ()) with
+              | () -> false
+              | exception
+                  Eio_guard.Non_eio_mutex_context Eio_guard.Read_write -> true
+              | exception
+                  Eio_guard.Non_eio_mutex_context Eio_guard.Read_only -> false
+            in
+            let directory_result =
+              Masc.Keeper_fs_durable_directory.ensure
+                ~before_prepare:(fun () -> ())
+                ~before_directory_fsync:(fun _ -> ())
+                durable_dir
+            in
+            ( Eio_guard.execution_context ()
+            , Executor_pool_ref.submit_or_inline Eio_guard.execution_context
+            , Eio_guard.run_in_systhread (fun () -> protected_value)
+            , !cleanup_ran
+            , mutex_rejected
+            , directory_result ))
+          |> Domain.join
+        in
+        check string "raw Domain is not inferred from global ready" "non_eio"
+          (context_label caller_context);
+        check string "raw Domain does not enter the Eio executor" "non_eio"
+          (context_label submitted_context);
+        check int "raw Domain executes blocking body directly" 17 systhread_value;
+        check bool "raw Domain cleanup uses Fun.protect" true cleanup_ran;
+        check bool "ready raw Domain cannot enter an Eio mutex" true
+          mutex_rejected;
+        (match directory_result with
+         | Ok _ -> check bool "raw Domain prepares durable directory" true
+                     (Sys.is_directory durable_dir)
+         | Error (Masc.Keeper_fs_durable_directory.Directory_chain_failed _) ->
+           fail "raw Domain durable-directory chain failed"
+         | Error (Masc.Keeper_fs_durable_directory.Operation_failed (exn, _)) ->
+           fail ("raw Domain durable-directory operation failed: "
+                 ^ Printexc.to_string exn)))))
+
 let () =
   Alcotest.run "Executor_pool_ref Eio mutex safety"
     [ ( "offload"
@@ -96,5 +164,7 @@ let () =
             test_systhread_offload_raises_actionable_failure
         ; test_case "submit_or_inline preserves the mutex (fix)" `Quick
             test_submit_or_inline_preserves_mutex
+        ; test_case "ready raw Domain uses the non-Eio path" `Quick
+            test_ready_raw_domain_uses_non_eio_path
         ] )
     ]

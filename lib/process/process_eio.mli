@@ -27,11 +27,9 @@ val should_retry_unix_fallback : exn -> bool
 
 (** Origin at which a [run_argv*] timeout budget was exhausted.
 
-    - [Timeout_origin.Slot_wait] — reserved for callers that wrap [run_argv*] with their
-      own slot/semaphore (e.g. [Docker_spawn_throttle.with_slot]) and want
-      to attribute a timeout to slot contention.  Not emitted by
-      [Process_eio] directly because [Eio.Time.with_timeout_exn] starts
-      the clock after slot acquisition.
+    - [Timeout_origin.Slot_wait] — retained only for decoding historical
+      telemetry. Current process execution has no pre-admission slot wait and
+      [Process_eio] never emits it.
     - [Timeout_origin.Spawn] — timeout fired before [Eio.Process.spawn] returned, i.e.
       process creation itself stalled (docker daemon backpressure, container
       cold start during [docker run]).
@@ -61,7 +59,7 @@ val argv_program : string list -> string
 type spawn_guard = { run : 'a. (unit -> 'a) -> 'a }
 (** Process-wide wrapper around foreground [run_argv*] subprocess calls.
     The default guard runs the callback immediately. Higher-level runtimes can
-    install resource accounting/backpressure without making this lower
+    install resource observation without making this lower
     [masc_process] library depend on those policy modules. *)
 
 val set_spawn_guard : spawn_guard -> unit
@@ -70,26 +68,21 @@ val set_spawn_guard : spawn_guard -> unit
 val reset_spawn_guard_for_testing : unit -> unit
 (** Restore the default no-op foreground spawn guard. *)
 
-val default_timeout_sec : float
-(** Default subprocess wall-clock budget shared by every [run_argv*],
-    [run_unix_argv*_fallback], and [with_unix_capture] [?timeout_sec]
-    parameter when the caller does not pass one explicitly.
-
-    Read once at module load from [MASC_PROCESS_DEFAULT_TIMEOUT_SEC]
-    (default [60.0], floor [1.0]). Operator overrides take effect on
-    next process restart. Exposed primarily for regression tests that
-    pin the historical [60.0] literal against silent shifts. *)
-
 (** {1 Eio-native process execution (global refs)} *)
 
+(** Every [?timeout_sec] below is an explicit caller boundary. When omitted,
+    process execution is unbounded but remains subject to Eio cancellation.
+    A non-finite or non-positive explicit value raises [Invalid_argument]
+    before spawning a child. *)
+
 (** Run command with explicit argv (no shell). Safe from injection.
-    @param timeout_sec Timeout in seconds (default: 60.0)
+    @param timeout_sec Optional explicit wall-clock timeout. Absent means unbounded.
     @param env Optional environment (Unix-style ["K=V"; ...]).
     @since 2.45.0 *)
 val run_argv : ?timeout_sec:float -> ?env:string array -> string list -> string
 
 (** Run command with explicit argv and stdin input (no shell).
-    @param timeout_sec Timeout in seconds (default: 60.0)
+    @param timeout_sec Optional explicit wall-clock timeout. Absent means unbounded.
     @param env Optional environment (Unix-style ["K=V"; ...]).
     @param stdin_content Body piped to process stdin
     @since 2.45.0 *)
@@ -97,7 +90,7 @@ val run_argv_with_stdin : ?timeout_sec:float -> ?env:string array -> stdin_conte
 
 (** Run command with explicit argv and stdin input (no shell), return (Unix.process_status, stdout).
     Uses spawn + await to get exit status without raising.
-    @param timeout_sec Timeout in seconds (default: 60.0)
+    @param timeout_sec Optional explicit wall-clock timeout. Absent means unbounded.
     @param env Optional environment (Unix-style ["K=V"; ...]).
     @param stdin_content Body piped to process stdin *)
 val run_argv_with_stdin_and_status :
@@ -125,7 +118,7 @@ val run_argv_with_stdin_and_status_split :
 
 (** Run command with explicit argv, return (Unix.process_status, stdout).
     Uses spawn + await to get exit status without raising.
-    @param timeout_sec Timeout in seconds (default: 60.0)
+    @param timeout_sec Optional explicit wall-clock timeout. Absent means unbounded.
     @param env Optional environment (Unix-style ["K=V"; ...]).
     @param cwd Override working directory for the spawned process.
            Absolute paths replace the default cwd; relative paths append to it.

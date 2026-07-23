@@ -44,16 +44,19 @@ val container_cwd_of_host :
 val host_cwd_of_container :
   t -> container_cwd:string -> (string, string) result
 
-val run_argv_with_stdin_and_status_retry_eintr :
+val run_argv_with_stdin_and_status_split :
   ?timeout_sec:float ->
+  ?on_stdout_chunk:(string -> unit) ->
+  ?on_stderr_chunk:(string -> unit) ->
   stdin_content:string ->
   string list ->
-  Unix.process_status * string
+  Unix.process_status * string * string
 (** Run a sandbox-management argv with stdin through the owned Docker execution
-    boundary and retry transient EINTR-shaped failures. This is intentionally
-    lower-level than the turn-scoped [t] operations because one-shot sandbox
-    startup paths need the same execution boundary before a reusable container
-    exists. *)
+    boundary exactly once. The returned status, stdout, and stderr are the
+    subprocess result without text-based classification, retry, or output
+    suppression. This is intentionally lower-level than the turn-scoped [t]
+    operations because one-shot sandbox startup paths need the same execution
+    boundary before a reusable container exists. *)
 
 val run_command_with_status :
   ?ok_exit_codes:int list ->
@@ -69,7 +72,7 @@ val run_exec_with_status :
   ?stdin_content:string ->
   ?on_stdout_chunk:(string -> unit) ->
   ?on_stderr_chunk:(string -> unit) ->
-  timeout_sec:float ->
+  ?timeout_sec:float ->
   t ->
   cwd:string ->
   command_argv:string list ->
@@ -82,7 +85,7 @@ val run_exec_with_status_split :
   ?stdin_content:string ->
   ?on_stdout_chunk:(string -> unit) ->
   ?on_stderr_chunk:(string -> unit) ->
-  timeout_sec:float ->
+  ?timeout_sec:float ->
   t ->
   cwd:string ->
   command_argv:string list ->
@@ -99,7 +102,7 @@ type exec_pipeline_stage = {
 val run_exec_pipeline_with_status :
   ?on_stdout_chunk:(string -> unit) ->
   ?on_stderr_chunk:(string -> unit) ->
-  timeout_sec:float ->
+  ?timeout_sec:float ->
   t ->
   cwd:string ->
   stages:exec_pipeline_stage list ->
@@ -125,19 +128,3 @@ val run_bash_with_status :
   cmd:string ->
   unit ->
   (Unix.process_status * string, string) result
-
-val overwrite_file :
-  timeout_sec:float ->
-  t ->
-  host_path:string ->
-  content:string ->
-  unit ->
-  (unit, string) result
-
-val append_file :
-  timeout_sec:float ->
-  t ->
-  host_path:string ->
-  content:string ->
-  unit ->
-  (unit, string) result

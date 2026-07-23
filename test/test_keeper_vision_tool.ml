@@ -53,7 +53,6 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
       [ "name", `String name
       ; "agent_name", `String (name ^ "-agent")
       ; "trace_id", `String (name ^ "-trace")
-      ; "goal", `String "vision tool test"
       ; "allowed_paths", `List [ `String "*" ]
       ; "sandbox_profile", `String "none"
       ]
@@ -245,15 +244,11 @@ let test_provider_for_vision_preserves_configured_max_tokens () =
       ()
   in
   let configured =
-    Vt.provider_for_vision
-      ~runtime_id:"test.unconfigured"
-      { base with max_tokens = Some 4096 }
+    Vt.provider_for_vision { base with max_tokens = Some 4096 }
   in
   assert (configured.max_tokens = Some 4096);
   let fallback =
-    Vt.provider_for_vision
-      ~runtime_id:"test.unconfigured"
-      { base with max_tokens = None }
+    Vt.provider_for_vision { base with max_tokens = None }
   in
   assert (fallback.max_tokens = Some Vt.vision_default_max_tokens);
   let expected_schema = Structured_schema.vision_analyze_output_schema in
@@ -358,27 +353,6 @@ let test_missing_clock_is_runtime_failure_without_provider_call () =
     in
     let json = json_of_output raw in
     assert (String.equal (assoc_string "error" json) "eio_context_unavailable");
-    assert (String.equal (assoc_string "failure_class" json) "runtime_failure"))
-
-let test_invalid_timeout_is_runtime_failure_without_provider_call () =
-  with_temp_base (fun _ ->
-    let meta = make_meta "vision-invalid-timeout" in
-    let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
-    let raw =
-      Eio_main.run (fun env ->
-        Eio.Switch.run (fun sw ->
-          Vt.handle
-            ~complete:complete_should_not_run
-            ~timeout_sec:0.0
-            ~sw
-            ~clock:(Eio.Stdenv.clock env)
-            ~net:(Eio.Stdenv.net env)
-            ~meta
-            ~args:(artifact_args handle)
-            ()))
-    in
-    let json = json_of_output raw in
-    assert (String.equal (assoc_string "error" json) "invalid_timeout");
     assert (String.equal (assoc_string "failure_class" json) "runtime_failure"))
 
 let test_non_string_media_type_is_policy_rejection () =
@@ -508,11 +482,10 @@ let with_temp_runtime_toml content f =
 
 (* The structured-output capability gate (SDK [validate_output_schema_request])
    resolves a model's [supports_structured_output] from the global
-   [Model_catalog], not from the runtime.toml [capabilities] block. Production
-   wires this by walking cwd parents for oas-models.toml and exporting
-   OAS_MODEL_CATALOG (server_runtime_bootstrap), which the SDK lazily loads.
-   These pure tests never run that bootstrap, so without an installed catalog
-   the synthetic ollama vision runtimes resolve to [default_capabilities]
+   [Model_catalog], not from the runtime.toml [capabilities] block. OAS owns
+   production catalog loading from its packaged models.toml or an explicit
+   operator override. These pure tests use synthetic model ids that are absent
+   from the packaged catalog, so they resolve to [default_capabilities]
    (supports_structured_output = false); [vision_runtime_candidates] then
    filters them out and the tool short-circuits to no_capable_runtime before
    ever reaching the provider sub-call. Install a minimal catalog so the
@@ -629,7 +602,7 @@ let test_provider_for_vision_uses_runtime_temperature () =
        | None -> failwith "selected vision runtime should resolve"
        | Some runtime ->
          let configured =
-           Vt.provider_for_vision ~runtime_id runtime.Runtime.provider_config
+           Vt.provider_for_vision runtime.Runtime.provider_config
          in
          assert (configured.temperature = Some 1.0)))
 
@@ -770,7 +743,9 @@ let test_retryable_provider_error_tries_next_runtime () =
         incr calls;
         models := config.Llm_provider.Provider_config.model_id :: !models;
         if !calls = 1 then
-          Error (Llm_provider.Http_client.HttpError { code = 500; body = "down" })
+          Error
+            (Llm_provider.Http_client.HttpError
+               { code = 500; body = "down"; retry_after_header = None })
         else Ok (ok_response "second runtime answered")
       in
       let raw =
@@ -799,7 +774,7 @@ let test_retryable_provider_error_tries_next_runtime () =
         before_ok
         (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels)))
 
-let test_deadline_exhaustion_preserves_provider_error () =
+let test_candidate_failover_is_not_cut_off_by_local_deadline () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     with_temp_base (fun _ ->
       let meta = make_meta "vision-deadline-provider-error" in
@@ -809,14 +784,15 @@ let test_deadline_exhaustion_preserves_provider_error () =
       let complete ~sw:_ ~net:_ ?clock:_ ~config ~messages:_ () =
         incr calls;
         models := config.Llm_provider.Provider_config.model_id :: !models;
-        Error (Llm_provider.Http_client.HttpError { code = 500; body = "down" })
+        Error
+          (Llm_provider.Http_client.HttpError
+             { code = 500; body = "down"; retry_after_header = None })
       in
       let raw =
         Eio_main.run (fun env ->
           Eio.Switch.run (fun sw ->
             Vt.handle
               ~complete
-              ~timeout_sec:0.001
               ~sw
               ~clock:(Eio.Stdenv.clock env)
               ~net:(Eio.Stdenv.net env)
@@ -825,8 +801,8 @@ let test_deadline_exhaustion_preserves_provider_error () =
               ()))
       in
       let json = json_of_output raw in
-      assert (!calls = 1);
-      assert (List.rev !models = [ "vision-a" ]);
+      assert (!calls = 2);
+      assert (List.rev !models = [ "vision-a"; "vision-b" ]);
       assert (String.equal (assoc_string "error" json) "provider_error");
       assert (String.equal (assoc_string "failure_class" json) "transient_error")))
 
@@ -842,7 +818,7 @@ let test_non_retryable_provider_error_stops_without_trying_next_runtime () =
         models := config.Llm_provider.Provider_config.model_id :: !models;
         Error
           (Llm_provider.Http_client.HttpError
-             { code = 401; body = "bad credentials" })
+             { code = 401; body = "bad credentials"; retry_after_header = None })
       in
       let raw =
         Eio_main.run (fun env ->
@@ -1127,7 +1103,6 @@ let () =
   test_missing_eio_context_is_runtime_failure ();
   test_invalid_media_type_is_policy_rejection ();
   test_missing_clock_is_runtime_failure_without_provider_call ();
-  test_invalid_timeout_is_runtime_failure_without_provider_call ();
   test_non_string_media_type_is_policy_rejection ();
   test_unknown_magic_bytes_are_policy_rejection ();
   test_oversize_image_is_runtime_failure_before_provider_call ();
@@ -1142,7 +1117,7 @@ let () =
     test_invalid_structured_vision_response_is_runtime_failure ();
     test_run_vision_invalid_structured_response_is_typed ();
     test_retryable_provider_error_tries_next_runtime ();
-    test_deadline_exhaustion_preserves_provider_error ();
+  test_candidate_failover_is_not_cut_off_by_local_deadline ();
     test_non_retryable_provider_error_stops_without_trying_next_runtime ();
     test_accept_rejected_is_policy_rejection_without_failover ();
     test_eager_eviction_reason_preserves_typed_outcome ());

@@ -8,15 +8,11 @@
 
 type cascade_decision_kind =
   | Degraded_retry_allowed
-  | Degraded_retry_slot_phase_exhausted
   | No_degraded_retry
-  | Transient_network_retry
 
 let decision_kind_to_string : cascade_decision_kind -> string = function
   | Degraded_retry_allowed -> "degraded_retry_allowed"
-  | Degraded_retry_slot_phase_exhausted -> "degraded_retry_slot_phase_exhausted"
   | No_degraded_retry -> "no_degraded_retry"
-  | Transient_network_retry -> "transient_network_retry"
 
 let publish_cascade_resolution
     ~keeper_name
@@ -43,10 +39,10 @@ let publish_cascade_resolution
     ; "timestamp", `Float (Time_compat.now ())
     ]
   in
-  match Masc_event_bus.get () with
+  match Event_bus_slots.get_masc () with
   | None ->
     Log.Keeper.debug
-      "cascade_resolution: no Masc_event_bus available, skipping telemetry"
+      "cascade_resolution: no masc event bus available, skipping telemetry"
   | Some bus ->
     let open Agent_sdk.Event_bus in
     publish bus (mk_event (Custom ("telemetry_event", payload)))

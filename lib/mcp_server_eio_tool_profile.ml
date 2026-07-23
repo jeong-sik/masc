@@ -11,10 +11,12 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Operator_remote
 
 let operator_remote_instructions =
-  "MASC remote operator profile exposes only four control-plane tools: \
-masc_operator_snapshot, masc_operator_digest, masc_operator_action, and masc_operator_confirm. \
+  "MASC remote operator profile exposes six operator tools: \
+masc_operator_snapshot, masc_operator_digest, masc_operator_action, masc_operator_chat_recovery_resolve, masc_operator_task_recovery_resolve, and masc_operator_confirm. \
 Read raw state with masc_operator_snapshot first when needed, and prefer masc_operator_digest for intervention-oriented supervision. \
 Use masc_operator_action for guided actions only. \
+Use masc_operator_chat_recovery_resolve only with the exact receipt_id, revision, and lease_id observed from queue state; it never auto-redelivers. \
+Use masc_operator_task_recovery_resolve only with the exact task owner and backlog version observed from Task state; it performs no liveness inference. \
 When confirm_required=true, you must call masc_operator_confirm with the returned confirm_token before the action executes. \
 Do not assume access to any other MASC tool from this endpoint."
 
@@ -71,7 +73,7 @@ let tool_schemas_for_profile ?(include_hidden = false)
   let schemas =
     match profile with
     | Full ->
-        let show_all = include_hidden || Tool_catalog.full_surface_override () in
+        let show_all = include_hidden in
         (* The Agent_internal surface was empty (agent_internal_surface_tools =
            []), so no schema was ever agent-internal.  Surface deleted in the
            surface-cut refactor; [include_agent_internal] no longer adds any
@@ -85,8 +87,7 @@ let tool_schemas_for_profile ?(include_hidden = false)
         let full_profile_tools =
           List.filter
             (fun (schema : Masc_domain.tool_schema) ->
-              (not (Tool_catalog_surfaces.is_system_internal_hidden schema.name))
-              && (show_all || Tool_catalog.is_public_mcp schema.name))
+              show_all || Tool_catalog.is_public_mcp schema.name)
             all
         in
         full_profile_tools
@@ -132,33 +133,12 @@ let tool_annotations_for_profile _profile tool_name =
   let read_only =
     Keeper_tool_descriptor_resolution.capability_has Tool_capability.Read_only tool_name
   in
-  let destructive =
-    Keeper_tool_descriptor_resolution.capability_has Tool_capability.Destructive tool_name
-  in
   let idempotent =
     Keeper_tool_descriptor_resolution.capability_has Tool_capability.Idempotent tool_name
   in
-  (* MCP 2025-03-26: [openWorldHint] signals whether the tool can
-     interact with systems outside the server's closed world.
-     Default per spec is [true]. We emit an explicit value when we
-     are confident:
-     - destructive shell/git tools → open world (external side effects)
-     - pure MASC read-only tools   → closed world (server state only)
-     Otherwise we omit the hint so the spec default applies. This is
-     intentionally coarse (see #7480 Step 1); refinement comes as more
-     tools register explicit metadata. *)
-  let open_world_hint =
-    if destructive then Some true
-    else if read_only then Some false
-    else None
-  in
   let fields =
     [ ("readOnlyHint", `Bool read_only) ]
-    @ (if destructive then [ ("destructiveHint", `Bool true) ] else [])
     @ (if idempotent then [ ("idempotentHint", `Bool true) ] else [])
-    @ (match open_world_hint with
-       | Some v -> [ ("openWorldHint", `Bool v) ]
-       | None -> [])
   in
   if fields = [] then None else Some (`Assoc fields)
 
@@ -174,15 +154,6 @@ let descriptor_metadata_fields tool_name fields =
   match Keeper_tool_descriptor_resolution.descriptor_for_tool_name tool_name with
   | None -> fields
   | Some descriptor ->
-    let fields =
-      match descriptor.policy.effect_domain with
-      | Some effect_domain ->
-        add_metadata_field_if_absent
-          "effectDomain"
-          (`String (Tool_catalog.effect_domain_to_string effect_domain))
-          fields
-      | None -> fields
-    in
     fields
     |> add_metadata_field_if_absent "descriptorId" (`String descriptor.id)
     |> add_metadata_field_if_absent "descriptorPublicName" (`String descriptor.public_name)
@@ -243,11 +214,10 @@ let custom_tool_titles : (string * string) list = [
   ("masc_operator_snapshot", "Operator Snapshot");
   ("masc_operator_digest", "Operator Digest");
   ("masc_operator_action", "Operator Action");
+  ("masc_operator_chat_recovery_resolve", "Resolve Chat Recovery");
+  ("masc_operator_task_recovery_resolve", "Resolve Task Recovery");
   ("masc_operator_confirm", "Operator Confirm");
   (* SDK projections *)
-  (* Misc *)
-  ("masc_cleanup_zombies", "Clean Up Zombie Agents");
-
 ]
 
 let custom_title_table : string StringMap.t =

@@ -190,17 +190,19 @@ describe('post', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
+    const controller = new AbortController()
     await runOperatorAction({
       actor: 'dashboard-manual-actor',
       action_type: 'keeper_probe',
       target_type: 'keeper',
       target_id: 'keeper-one',
       payload: {},
-    })
+    }, { signal: controller.signal })
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     const headers = init.headers as Record<string, string>
     expect(headers['X-MASC-Agent'] ?? headers['x-masc-agent']).toBe('dashboard-manual-actor')
+    expect(init.signal).toBe(controller.signal)
   })
 
   it('uses the confirmation actor for operator confirm headers when query agent differs', async () => {
@@ -214,11 +216,18 @@ describe('post', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await confirmOperatorAction('dashboard-manual-actor', 'opc_test_token')
+    const controller = new AbortController()
+    await confirmOperatorAction(
+      'dashboard-manual-actor',
+      'opc_test_token',
+      'confirm',
+      { signal: controller.signal },
+    )
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     const headers = init.headers as Record<string, string>
     expect(headers['X-MASC-Agent'] ?? headers['x-masc-agent']).toBe('dashboard-manual-actor')
+    expect(init.signal).toBe(controller.signal)
   })
   it('surfaces invalid JSON in 200 operator action responses as ApiRequestError', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
@@ -358,7 +367,7 @@ describe('get bootstrap warm-up mapping', () => {
 
   it('surfaces JSON error messages from failed GET responses', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response('{"error":"computation_timeout","message":"Dashboard governance timed out after 30s"}', {
+      new Response('{"error":"computation_timeout","message":"Dashboard Gate timed out after 30s"}', {
         status: 504,
         statusText: 'Gateway Timeout',
         headers: { 'Content-Type': 'application/json' },
@@ -366,12 +375,12 @@ describe('get bootstrap warm-up mapping', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(get('/api/v1/dashboard/governance')).rejects.toMatchObject({
+    await expect(get('/api/v1/dashboard/gate')).rejects.toMatchObject({
       name: 'ApiRequestError',
       status: 504,
-      detail: 'Dashboard governance timed out after 30s',
+      detail: 'Dashboard Gate timed out after 30s',
       errorCode: 'computation_timeout',
-      message: 'GET /api/v1/dashboard/governance: Dashboard governance timed out after 30s',
+      message: 'GET /api/v1/dashboard/gate: Dashboard Gate timed out after 30s',
     })
   })
 
@@ -520,11 +529,11 @@ describe('get bootstrap warm-up mapping', () => {
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(get('/api/v1/dashboard/governance')).rejects.toMatchObject({
+    await expect(get('/api/v1/dashboard/gate')).rejects.toMatchObject({
       name: 'ApiRequestError',
       status: 200,
       detail: 'invalid JSON response',
-      message: 'GET /api/v1/dashboard/governance: invalid JSON response',
+      message: 'GET /api/v1/dashboard/gate: invalid JSON response',
     })
   })
 })
@@ -550,10 +559,10 @@ describe('extractApiError', () => {
   it('stores structured error codes on ApiRequestError', () => {
     const err = new ApiRequestError({
       method: 'GET',
-      path: '/api/v1/dashboard/governance',
+      path: '/api/v1/dashboard/gate',
       status: 504,
       statusText: 'Gateway Timeout',
-      detail: 'Dashboard governance timed out after 30s',
+      detail: 'Dashboard Gate timed out after 30s',
       errorCode: 'computation_timeout',
     })
     expect(err.errorCode).toBe('computation_timeout')

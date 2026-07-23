@@ -20,8 +20,6 @@
 type tool_stat = {
   name : string;
   count : int;
-  successes : int;
-  failures : int;
 }
 
 (** Summary of a keeper's tool diversity. *)
@@ -34,22 +32,6 @@ type diversity_summary = {
   underused_tools : string list;
   overused_tools : string list;
 }
-
-(** Parse keeper tool_usage JSON (the .masc/keepers/tool_usage/{name}.json
-    format) into a list of tool_stat. *)
-let parse_tool_usage_json (json : Yojson.Safe.t) : tool_stat list =
-  match Json_util.assoc_member_opt "tools" json with
-  | Some (`List items) ->
-    List.filter_map (fun item ->
-      match Json_util.get_string item "tool" with
-      | Some name ->
-        let count = Json_util.get_int item "count" |> Option.value ~default:0 in
-        let successes = Json_util.get_int item "successes" |> Option.value ~default:0 in
-        let failures = Json_util.get_int item "failures" |> Option.value ~default:0 in
-        Some { name; count; successes; failures }
-      | None -> None
-    ) items
-  | _ -> []
 
 (** Shannon entropy in bits from a list of counts.
     Returns 0.0 for empty input or all-zero counts. *)
@@ -128,7 +110,7 @@ let default_entropy_threshold = 0.35
 let stats_of_registry_entries
     (entries : (string * Keeper_types.tool_call_entry) list) : tool_stat list =
   List.map (fun (name, (e : Keeper_types.tool_call_entry)) ->
-    { name; count = e.count; successes = e.successes; failures = e.failures }
+    { name; count = e.count }
   ) entries
 
 (* Tests are in test/test_tool_diversity.ml (Alcotest + QCheck). *)

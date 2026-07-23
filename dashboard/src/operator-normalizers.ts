@@ -11,7 +11,7 @@ import {
   normalizeRecommendedAction,
 } from './store-normalizers'
 import type {
-  AdmissionQueueSnapshot,
+  InferenceInflightSnapshot,
   Message,
   OperatorActionDescriptor,
   OperatorAttentionItem,
@@ -19,15 +19,17 @@ import type {
   OperatorGuidanceSummary,
   OperatorJudgment,
   OperatorKeeperSnapshot,
+  OperatorContextMetricsStorageReadFailureReason,
+  OperatorContextMetricsUnavailable,
   OperatorReviewDecision,
   OperatorRecommendedAction,
-  OperatorJudgeRuntime,
   OperatorSessionSnapshot,
   OperatorSnapshot,
   OperatorNamespaceSnapshot,
   PendingConfirmation,
 } from './types'
 import { SYSTEM_ACTOR_NAME } from './types/core'
+import { OPERATOR_CONTEXT_METRICS_STORAGE_READ_FAILURE_REASONS } from './types/dashboard-mission'
 
 function normalizeMessage(raw: unknown): Message | null {
   if (!isRecord(raw)) return null
@@ -53,6 +55,50 @@ function normalizeNamespace(raw: unknown): OperatorNamespaceSnapshot {
   }
 }
 
+const contextMetricsStorageReadFailureReasons = new Set<OperatorContextMetricsStorageReadFailureReason>([
+  ...OPERATOR_CONTEXT_METRICS_STORAGE_READ_FAILURE_REASONS,
+])
+
+function normalizeContextMetricsUnavailable(raw: unknown): OperatorContextMetricsUnavailable | undefined {
+  if (raw === null || raw === undefined) return undefined
+  if (!isRecord(raw)) {
+    return { kind: 'invalid_payload', reported_kind: null, reported_reason: null }
+  }
+
+  const kind = asString(raw.kind) ?? null
+  const reason = asString(raw.reason) ?? null
+  const path = raw.path === null ? null : asString(raw.path)
+  const detail = typeof raw.detail === 'string' ? raw.detail : undefined
+
+  if (
+    kind === 'storage_read_failed'
+    && reason !== null
+    && contextMetricsStorageReadFailureReasons.has(reason as OperatorContextMetricsStorageReadFailureReason)
+    && path !== undefined
+    && detail !== undefined
+  ) {
+    return {
+      kind,
+      reason: reason as OperatorContextMetricsStorageReadFailureReason,
+      path,
+      detail,
+    }
+  }
+
+  const lineNumber = raw.line_number === null ? null : asNumber(raw.line_number)
+  if (
+    kind === 'malformed_json'
+    && reason === 'malformed_metrics_row'
+    && typeof path === 'string'
+    && (lineNumber === null || (lineNumber !== undefined && Number.isSafeInteger(lineNumber)))
+    && detail !== undefined
+  ) {
+    return { kind, reason, path, line_number: lineNumber, detail }
+  }
+
+  return { kind: 'invalid_payload', reported_kind: kind, reported_reason: reason }
+}
+
 function normalizeStringRecord(raw: unknown): Record<string, string> | undefined {
   if (!isRecord(raw)) return undefined
   const entries = Object.entries(raw)
@@ -64,63 +110,11 @@ function normalizeStringRecord(raw: unknown): Record<string, string> | undefined
   return entries.length > 0 ? Object.fromEntries(entries) : undefined
 }
 
-function normalizeOperatorJudgeRuntime(raw: unknown): OperatorJudgeRuntime | null {
-  if (!isRecord(raw)) return null
-  return {
-    enabled: asBoolean(raw.enabled),
-    judge_online: asBoolean(raw.judge_online),
-    refreshing: asBoolean(raw.refreshing),
-    generated_at: asString(raw.generated_at) ?? null,
-    expires_at: asString(raw.expires_at) ?? null,
-    model_used: null,
-    keeper_name: asString(raw.keeper_name) ?? null,
-    last_error: asString(raw.last_error) ?? null,
-  }
-}
-
-interface AdmissionQueueNormalization {
-  value: AdmissionQueueSnapshot | null
-  error: string | null
-}
-
-function normalizeAdmissionQueue(raw: unknown): AdmissionQueueNormalization {
-  if (raw === undefined || raw === null) return { value: null, error: null }
-  if (!isRecord(raw)) return { value: null, error: 'Admission projection has an invalid shape.' }
-  const throttleOwner = asString(raw.throttle_owner)
-  const maxConcurrent = asNumber(raw.max_concurrent)
+function normalizeInferenceInflight(raw: unknown): InferenceInflightSnapshot | null {
+  if (!isRecord(raw) || raw.boundary_owner !== 'oas_runtime') return null
   const active = asNumber(raw.active)
-  const available = asNumber(raw.available)
-  const queueDepth = asNumber(raw.queue_depth)
-  if (!throttleOwner?.trim()) {
-    return { value: null, error: 'Admission projection is missing throttle ownership.' }
-  }
-  if (
-    maxConcurrent === undefined
-    || active === undefined
-    || available === undefined
-    || queueDepth === undefined
-    || !Number.isSafeInteger(maxConcurrent)
-    || maxConcurrent < 1
-    || !Number.isSafeInteger(active)
-    || active < 0
-    || !Number.isSafeInteger(available)
-    || available < 0
-    || !Number.isSafeInteger(queueDepth)
-    || queueDepth < 0
-  ) return { value: null, error: 'Admission projection contains invalid counters.' }
-  if (available !== Math.max(0, maxConcurrent - active)) {
-    return { value: null, error: 'Admission projection counters are inconsistent.' }
-  }
-  return {
-    value: {
-      throttle_owner: throttleOwner.trim(),
-      max_concurrent: maxConcurrent,
-      active,
-      available,
-      queue_depth: queueDepth,
-    },
-    error: null,
-  }
+  if (active === undefined || !Number.isSafeInteger(active) || active < 0) return null
+  return { boundary_owner: 'oas_runtime', active }
 }
 
 function normalizeGuidanceSummary(raw: unknown): OperatorGuidanceSummary | null {
@@ -212,7 +206,6 @@ export function normalizeOperatorDigest(raw: unknown): OperatorDigest {
     health: asString(root.health),
     judgment_owner: asString(root.judgment_owner) ?? null,
     authoritative_judgment_available: asBoolean(root.authoritative_judgment_available),
-    operator_judge_runtime: normalizeOperatorJudgeRuntime(root.operator_judge_runtime),
     judgment: normalizeOperatorJudgment(root.judgment),
     active_guidance_layer: asString(root.active_guidance_layer) ?? null,
     active_summary: normalizeGuidanceSummary(root.active_summary),
@@ -291,6 +284,7 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
     context_tokens: asNumber(raw.context_tokens) ?? asNumber(contextRaw?.context_tokens),
     context_max: asNumber(raw.context_max) ?? asNumber(contextRaw?.context_max),
     context_source: asString(raw.context_source) ?? asString(contextRaw?.source),
+    context_metrics_unavailable: normalizeContextMetricsUnavailable(raw.context_metrics_unavailable),
     generation: asNumber(raw.generation),
     active_goal_ids: asStringArray(raw.active_goal_ids),
     last_autonomous_action_at: asString(raw.last_autonomous_action_at) ?? null,
@@ -306,7 +300,6 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
 export function normalizeOperatorSnapshot(raw: unknown): OperatorSnapshot {
   const root = isRecord(raw) ? raw : {}
   const pendingConfirmEnvelope = normalizePendingConfirmEnvelope(root.pending_confirm_envelope)
-  const admissionQueue = normalizeAdmissionQueue(root.admission_queue)
   return {
     root: normalizeNamespace(root.root),
     sessions: extractArray(root.sessions, ['items', 'sessions'])
@@ -315,9 +308,7 @@ export function normalizeOperatorSnapshot(raw: unknown): OperatorSnapshot {
     keepers: extractArray(root.keepers, ['items', 'keepers'])
       .map(normalizeKeeper)
       .filter((item): item is OperatorKeeperSnapshot => item !== null),
-    admission_queue: admissionQueue.value,
-    admission_queue_error: admissionQueue.error,
-    operator_judge_runtime: normalizeOperatorJudgeRuntime(root.operator_judge_runtime),
+    inference_inflight: normalizeInferenceInflight(root.inference_inflight),
     persistent_agents: extractArray(root.persistent_agents, ['items', 'persistent_agents'])
       .map(normalizeKeeper)
       .filter((item): item is OperatorKeeperSnapshot => item !== null),

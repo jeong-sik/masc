@@ -47,7 +47,7 @@ Prior Art 는 `~/me/knowledge/research/2026-05-17-piaf-ocsigen-eio-fd-prior-art.
 
 ### 1.4 Subprocess-heavy Docker
 
-- **모든 live Docker 호출** 이 `lib/docker_spawn_throttle.ml` 의 `with_slot` 으로 감싼 subprocess `docker run/exec` (`lib/worker_runtime_docker.ml`, `lib/keeper/keeper_sandbox_*.ml`). RFC-0070 executor-track removal 이후 sandbox Execute runner 의 mockable executor path 는 더 이상 live caller 가 아니다.
+- **모든 live Docker 호출** 은 subprocess `docker run/exec`의 실제 dynamic extent를 `Fd_accountant.observe`로 기록한다 (`lib/worker_runtime_docker.ml`, `lib/keeper/keeper_sandbox_*.ml`). 관측은 호출을 지연하거나 거부하지 않는다.
 - **Docker HTTP API (`/var/run/docker.sock`) 사용 0건**. sandbox Execute runner 가 명시적으로 `blocked_mount_paths` 에 등재 (security 의도).
 - **fd 비용**: subprocess 1회 = daemon socket 1 + stdio pipe 3 + cgroup fd. SDK/HTTP API 호출 = 같은 daemon socket 재사용. *runtime-storm 의 가장 큰 spike 원인*.
 - **RFC-0097 (container reuse)** 는 Draft, spec-only — 머지 후 *spec body 만* 존재하고 구현 PR 없음. 본 RFC 가 §3.4 에서 활성화.
@@ -146,7 +146,7 @@ let run_turn ... =
 sandbox_exec
    │
    ├─ env MASC_DOCKER_TRANSPORT=api      → docker_api.ml (UDS + L1 transport)
-   └─ env MASC_DOCKER_TRANSPORT=subprocess → 기존 docker_spawn_throttle (fallback)
+   └─ env MASC_DOCKER_TRANSPORT=subprocess → 직접 subprocess + FD observation
 ```
 
 - 기본값: `api` (Phase E 머지 후).
@@ -195,13 +195,13 @@ Gate 입력은 두 개의 보완적 evidence — *결정론적 in-process witnes
 - ENFILE count = 0 (24h × 30일)
 
 Gate 통과 = Witness 1 reproducer green AND Witness 2 두 임계 충족. 통과 시:
-- `Fd_accountant.with_slot` → `Fd_accountant.observe` (counter only, no blocking)
+- blocking accountant API → `Fd_accountant.observe` (counter only, no blocking)
 - `_shared_pressure_mutex` 제거 (재진입 deadlock 위험 해소)
 - dead variant (`Provider_http`, `Sandbox_exec`, `Log_writer`) 삭제
 
 **90일** 후:
 - `Fd_accountant` 모듈 전체 제거 또는 metrics-only stub 으로 강등
-- `Docker_spawn_throttle` 모듈 retire
+- legacy Docker-only pre-admission 모듈 제거 (2026-07-13 완료)
 
 ### 5.3 cohttp-eio 워크어라운드 sunset
 

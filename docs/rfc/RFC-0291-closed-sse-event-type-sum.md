@@ -15,7 +15,7 @@ implementation_prs: []
 
 Status: Draft · The SSE wire `type` discriminator is stringly-typed across ~34
 backend emit sites. The frontend parity gate only inventories exact-match
-routes, so slice-bridged events (e.g. `goal_loop_status`) are protected only by
+routes, so slice-bridged events (e.g. `goal_loop_status`, retired 2026-07-21 with the goal-loop surface — RFC-0352) are protected only by
 hand-written drift-guard tests. This RFC closes the discriminator into an OCaml
 sum with a typed broadcast builder and a raw-string ban-lint, so the compiler —
 not a parallel test — enforces that every emitted event-type is declared and FE
@@ -91,15 +91,15 @@ A full inventory of the ~34 broadcast sites (5-lens grounding, 2026-06-23) finds
 ### §3.1 Fixed-literal `type`-keyed events (closeable) — ~30
 Plain literals set at a single (or few) site(s). Examples: `project_snapshot`,
 `namespace_truth_snapshot`, `operator_snapshot`, `operator_digest`,
-`execution_snapshot`, `transport_health_snapshot`, `goal_loop_status`,
+`execution_snapshot`, `transport_health_snapshot`, ~~`goal_loop_status`~~ (retired 2026-07-21, RFC-0352),
 `keeper_chat_appended`, `keeper_composite_changed`, `keeper_phase_changed`,
 `keeper_heartbeat`, `keeper_compaction`, `keeper_handoff`, `keeper_tool_skipped`,
 `keeper_turn_complete`, `keeper_tool_call`, `approval:pending`,
-`approval:resolved`, `fusion_run_status`, `governance_param_changed`,
-`dashboard_yjs_update`. These close into fixed variants directly.
+`approval:resolved`, `fusion_run_status`, and `gate_configuration_changed`.
+These close into fixed variants directly.
 
 Some literals are emitted from **multiple sites** (`keeper_heartbeat` ×2,
-`keeper_tool_call` ×2, `governance_param_changed` ×2, and the
+`keeper_tool_call` ×2, `gate_configuration_changed` ×2, and the
 `project_snapshot`/`namespace_truth_snapshot` alias pair). A typed constructor
 centralizes them; §8 requires confirming payload-shape compatibility before
 collapsing co-emitters to one variant.
@@ -161,9 +161,10 @@ type oas_event =
   | Unknown_oas of string   (* Custom(name,_) and the pin-bump catch-all *)
 type t = … | Oas of oas_event | …
 ```
-- `to_string (Oas (Unknown_oas s)) = "oas:" ^ s` preserves the upstream string —
-  the TOTAL-with-escape policy of `keeper_reaction_ledger.reaction_kind`
-  (`Unknown_reaction of string`).
+- `to_string (Oas (Unknown_oas s)) = "oas:" ^ s` preserves the upstream string.
+  This exception is specific to the upstream OAS custom-event boundary; MASC-owned
+  closed codecs such as `keeper_reaction_ledger.reaction_kind_of_string` reject
+  unknown labels as typed decoder failures.
 - The 16 native arms become a no-catch-all exhaustive match, so a new
   `Event_bus` variant forces a compile error at the bridge (the mechanism
   `lifecycle_display`'s `display_of_custom_event` already uses).

@@ -1,8 +1,8 @@
 (** Event-Layer stimulus intake for the keeper heartbeat loop.
 
-    Drains at most one Event Layer stimulus per turn following
-    RFC-0020 §3 Rule 4. Board signals are coalesced by a debounce
-    window before falling back to a single non-board queue dequeue. *)
+    Leases the earliest ready Event Layer stimulus per turn following
+    RFC-0020 §3 Rule 4. Payload families share one order; an unready input
+    remains queued without blocking later ready work in the same Keeper lane. *)
 
 open Keeper_types
 open Keeper_meta_contract
@@ -15,20 +15,27 @@ val stimulus_urgency_to_string : Keeper_event_queue.urgency -> string
 
 (** [pending_board_event_of_stimulus ~meta_after_triage stim] wraps a
     stimulus into a pending board event, threading the keeper meta's
-    continuity summary. *)
+    continuity summary. [Error unavailable] reports a failed board read
+    (board-unavailable-result); this function only reports, it does not
+    decide disposition — see [pending_board_events_of_stimulus_result] for
+    the consuming layer's classify + drop/retain behavior. *)
 val pending_board_event_of_stimulus
   :  meta_after_triage:keeper_meta
   -> Keeper_event_queue.stimulus
-  -> Keeper_world_observation.pending_board_event option
+  -> (Keeper_world_observation.pending_board_event option, Keeper_world_observation_board_signal.board_unavailable) result
 
-(** [record_recovery_stimulus_turn_started ~ctx ~keeper_name stim] writes
-    a [Turn_started] reaction to the keeper reaction ledger for [stim].
-    Logs and swallows errors except [Eio.Cancel.Cancelled]. *)
-val record_recovery_stimulus_turn_started
-  :  ctx:_ context
-  -> keeper_name:string
+(** [pending_board_events_of_stimulus_result ~meta_after_triage stim] renders
+    [stim] into zero-or-one pending board events. On [Error unavailable] it
+    classifies the failure via
+    {!Keeper_world_observation_board_signal.disposition_of_unavailable},
+    logs and counts it, and returns [] — the stimulus is treated as consumed
+    for this turn either way. See the [.ml] for why a queued stimulus has no
+    per-item requeue lever distinct from the whole-lease Ack/Requeue
+    decision. *)
+val pending_board_events_of_stimulus_result
+  :  meta_after_triage:keeper_meta
   -> Keeper_event_queue.stimulus
-  -> unit
+  -> Keeper_world_observation.pending_board_event list
 
 (** [record_event_queue_stimulus_turn_started ~ctx ~keeper_name stim] writes
     a generic [Turn_started] reaction for an event-queue stimulus after the
@@ -51,14 +58,10 @@ type heartbeat_event_intake = {
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
-type single_claim_admission =
-  | Admit_ready_single
-  | Defer_failure_judgment
-
 (** [consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim]
     increments Otel_metric_store, logs the consumption, and returns a list of
     pending board events derived from [stim] (empty for non-board
-    classes). [No_progress_recovery] also writes a reaction-ledger entry. *)
+    classes). *)
 val consume_single_heartbeat_stimulus
   :  ctx:_ context
   -> meta_after_triage:keeper_meta
@@ -73,19 +76,17 @@ val consume_board_stimulus_batch
   -> Keeper_event_queue.stimulus list
   -> Keeper_world_observation.pending_board_event list
 
-(** [heartbeat_event_intake ?single_claim_admission ~ctx ~meta_after_triage
+(** [heartbeat_event_intake ~ctx ~meta_after_triage
      ~pending_board_events]
     drains the Event-Layer queue (per RFC-0020 §3 Rule 4) and merges
     newly-consumed board events with the [pending_board_events] already
     accumulated by the caller, deduplicating by [post_id]. A
-    [Hitl_resolved] head remains queued until its exact approval id has left
-    the pending map, so domain callbacks complete before continuation intake.
-    [single_claim_admission] is a closed coordinator-owned decision for the
-    non-board single-stimulus fallback. [Defer_failure_judgment] leaves only a
-    failure-judgment stimulus pending; it cannot suppress unrelated kinds. *)
+    [Hitl_resolved] stimulus remains queued until its exact approval id has
+    left the pending map, while later ready stimuli can still be leased.
+    Runtime/provider availability cannot defer a durable claim; boundary
+    failures settle explicitly through the existing failure route. *)
 val heartbeat_event_intake
-  :  single_claim_admission:single_claim_admission
-  -> ctx:'a context
+  :  ctx:'a context
   -> meta_after_triage:keeper_meta
   -> pending_board_events:Keeper_world_observation.pending_board_event list
   -> heartbeat_event_intake

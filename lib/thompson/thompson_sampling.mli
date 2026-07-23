@@ -1,17 +1,10 @@
-(** Thompson Sampling — Agent Selection with Fairness Guarantees
+(** Thompson Sampling — per-agent Beta-prior bookkeeping.
 
-    Implements agent selection using Thompson Sampling
-    for quality-based selection with starvation prevention.
-
-    Algorithm based on:
-    - [A Tutorial on Thompson Sampling](https://web.stanford.edu/~bvr/pubs/TS_Tutorial.pdf)
-    - [Thompson Sampling with Fairness Constraints](https://arxiv.org/abs/2005.06725)
-
-    Key features:
-    - Beta distribution sampling for exploration/exploitation balance
-    - Logarithmic starvation bonus to prevent agent neglect
-    - Persistent statistics across server restarts
-    - Vote feedback integration for quality signal *)
+    Maintains per-agent Beta(alpha, beta) priors fed by vote and quality
+    feedback, persisted across restarts.  The selection engine that once
+    consumed these priors was removed as production-unreachable
+    (2026-07-21 dead-surface audit); the priors stay live as the
+    reputation/confidence source for dashboard and board surfaces. *)
 
 type quality_verdict =
   | Pass
@@ -19,13 +12,6 @@ type quality_verdict =
   | Fail of string
 
 (** {1 Types} *)
-
-(** Canonical Otel_metric_store metric name for priority-trigger selection
-    events.  Labels: [("agent", <name>); ("trigger", "mentioned" |
-    "content_alert" | "other")].  Exposed so tests and Grafana
-    rules can pin the name without hard-coding a string literal.
-    #9919 audit follow-up (tick #24). *)
-val priority_trigger_selected_metric : string
 
 (** Agent statistics for Thompson Sampling.
     Alpha/beta are Beta distribution priors, updated by vote feedback. *)
@@ -47,24 +33,6 @@ type agent_stats = {
   mutable updated_at : float;
 }
 
-(** Selection trigger types *)
-type selection_trigger =
-  | Mentioned of string    (** Mentioned by another agent *)
-  | ContentAlert of string (** Content requires attention *)
-  | Scheduled              (** Regular scheduled selection *)
-  | Starved                (** Forced selection due to long inactivity *)
-  | Thompson               (** Selected by Thompson Sampling *)
-
-(** Selection result with reasoning *)
-type selection_result = {
-  agent_name : string;
-  trigger : selection_trigger;
-  thompson_score : float;     (** Raw Thompson sample (0-1) *)
-  starvation_bonus : float;   (** Logarithmic bonus for inactivity *)
-  final_score : float;        (** Combined weighted score *)
-  ticks_since_selection : int;
-}
-
 (** {1 Configuration} *)
 
 (** Set base path for stats storage (cluster root, e.g. ~/me).
@@ -79,55 +47,17 @@ val get_stats : string -> agent_stats
 (** Get all agent stats *)
 val get_all_stats : unit -> agent_stats list
 
-(** Initialize stats for a new agent with default priors *)
-val init_agent : string -> unit
-
-(** {1 Selection Algorithm} *)
-
-(** Select agents using Thompson Sampling with starvation prevention.
-
-    @param is_healthy Injected health predicate (dependency inversion). The
-      caller supplies the agent-health check so this module stays a leaf and
-      does not depend on the masc mega-library root. Required: a default
-      would silently make every agent eligible. Production callers pass
-      [Health.is_healthy].
-    @param on_priority_selected Injected observability hook fired once per
-      priority-trigger selection (Mentioned/ContentAlert), with the agent
-      name and trigger label ("mentioned" | "content_alert"). Defaults to a
-      no-op; an instrumented caller supplies the Otel_metric_store increment for
-      [priority_trigger_selected_metric].
-    @param agents List of agent names to consider
-    @param max_n Maximum number of agents to select
-    @param pending_triggers Priority triggers (Mentioned, ContentAlert).
-      Mentioned bypasses the health gate; ContentAlert does not.
-    @param tick_interval_s Tick interval in seconds (for starvation calc)
-    @return List of selection results, highest score first *)
-val select_with_feedback :
-  is_healthy:(agent_name:string -> bool) ->
-  ?on_priority_selected:(agent_name:string -> trigger_label:string -> unit) ->
-  agents:string list ->
-  max_n:int ->
-  pending_triggers:(string * selection_trigger) list ->
-  tick_interval_s:float ->
-  unit ->
-  selection_result list
-
 (** {1 Feedback Updates} *)
 
 (** Record a vote on agent content.
     Called from Board.vote after successful vote.
-    Updates are batched; call [flush_pending_votes] at tick end. *)
+    Votes batch in memory and reach disk via the pending-vote overlay in
+    [save_stats]; the live table reflects them after the next
+    [load_stats]. *)
 val record_vote :
   agent_name:string ->
   direction:[`Up | `Down] ->
   unit
-
-(** Flush pending votes to agent stats.
-    Called at tick end for batch update with decay. *)
-val flush_pending_votes : unit -> unit
-
-(** Record that an agent was selected in a tick *)
-val record_selection : agent_name:string -> unit
 
 (** Record agent action (post/comment/skip) *)
 val record_action :
@@ -149,19 +79,3 @@ val load_stats : unit -> unit
 
 (** Save stats to persistent storage *)
 val save_stats : unit -> unit
-
-(** {1 Utilities} *)
-
-(** Calculate ticks since last selection *)
-val ticks_since_selection : stats:agent_stats -> tick_interval_s:float -> int
-
-(** Sample from Beta distribution using Gamma decomposition.
-    Pure OCaml implementation without external dependencies. *)
-val sample_beta : alpha:float -> beta:float -> float
-
-(** Calculate logarithmic starvation bonus *)
-val starvation_bonus : ticks:int -> float
-
-(** Selection entropy for monitoring (higher = more balanced selection).
-    Returns value in [0, log(n_agents)] where max indicates uniform selection. *)
-val selection_entropy : unit -> float

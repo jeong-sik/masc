@@ -68,15 +68,11 @@ at all.
 
 ## 3. Design
 
-The wake must satisfy the **actionability invariant**
-(`lib/keeper/keeper_world_observation.ml:919-930`, `RFC-keeper-proactive-wake-actionability-invariant`):
-a signal may drive a proactive turn only if the keeper holds a tool affordance
-that can *clear* it. A pending connector message qualifies — the keeper can reply
-on the connector surface, and the reply resolves it — **provided** an outbound
-reply path and a resolution step exist. Therefore the wake, the content, the
-outbound, and the resolution are **one coupled unit**: shipping the wake without
-the rest would re-create the `failed_task` anti-pattern (a wake that produces no
-clearing action → infinite spin), which the invariant explicitly forbids.
+The connector records a typed durable stimulus and wakes only the bound Keeper.
+The runtime does not inspect tool names or infer whether a local affordance can
+"clear" the signal. The Keeper sees the connector context and decides through
+its configured model whether to reply, defer, or perform another action; any
+external effect still crosses the generic Gate.
 
 ### 3.1 Trigger: edge stimulus carrying the event_id (not the content)
 

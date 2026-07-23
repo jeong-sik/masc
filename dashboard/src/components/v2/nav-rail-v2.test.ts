@@ -18,7 +18,7 @@ function scheduleNavItem(container: HTMLElement): Element | undefined {
   return Array.from(container.querySelectorAll('.nav-item')).find(el => el.textContent?.includes('예약'))
 }
 
-describe('NavRailV2 schedule badge', () => {
+describe('NavRailV2 schedule item', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
@@ -33,17 +33,10 @@ describe('NavRailV2 schedule badge', () => {
     container.remove()
   })
 
-  it('renders the pending-schedule count on the schedule nav item', () => {
-    render(html`<${NavRailV2} badges=${{ approvals: 0, schedule: 3 }} />`, container)
+  it('does not derive a badge from schedule lifecycle state', () => {
+    render(html`<${NavRailV2} badges=${{ approvals: 3 }} />`, container)
 
-    const item = scheduleNavItem(container)
-    expect(item).toBeTruthy()
-    expect(item?.querySelector('.nav-badge')?.textContent).toBe('3')
-  })
-
-  it('omits the schedule badge when there are no pending schedules', () => {
-    render(html`<${NavRailV2} badges=${{ approvals: 0, schedule: 0 }} />`, container)
-
+    expect(scheduleNavItem(container)).toBeTruthy()
     expect(scheduleNavItem(container)?.querySelector('.nav-badge')).toBeNull()
   })
 
@@ -61,7 +54,7 @@ describe('NavRailV2 schedule badge', () => {
     expect(walk).toEqual([
       'brand',
       '개요', '|',
-      'Keepers', 'Monitor', '|',
+      'Keepers', '레지스트리', 'Monitor', '|',
       '작업', '승인', '예약', '|',
       '보드', 'Fusion', '로그', '|',
       'IDE', '커넥터',

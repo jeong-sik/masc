@@ -116,8 +116,10 @@ val ok_result :
 
 (** {1 Required field extractors (Parse, Don't Validate)}
 
-    Return [Ok value] on success, [Error json_error_string] on missing /
-    empty input. Combine with {!val-(let*!)} for early-return chaining. *)
+    Return [Ok value] on success, [Error message] on missing / empty input.
+    Messages are opaque text; callers that need typed failure fields must use
+    {!error_result_typed}. Combine with {!val-(let*!)} for early-return
+    chaining. *)
 
 (** Trim whitespace; reject empty. *)
 val get_string_required : Yojson.Safe.t -> string -> (string, string) Result.t
@@ -160,6 +162,7 @@ type field_error = {
 }
 
 val field_error_to_yojson : field_error -> Yojson.Safe.t
+val validation_error_assoc : field_error list -> Yojson.Safe.t
 
 (** [{"status":"error","error_code":"validation_error",
     "field_errors":[…],"message":"N field error(s)"}] *)

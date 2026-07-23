@@ -85,6 +85,14 @@ type append_once_result =
   | Appended of { row_id : string }
   | Already_present of { row_id : string }
 
+(** Exact ownership of the accepted user transcript row. This provenance is
+    shared by direct and queued delivery, while lifecycle authority remains in
+    the owning request or queue store. *)
+type user_row_origin =
+  | Needs_append
+  | Already_persisted of { row_id : string }
+  | Already_persisted_upstream
+
 (** Authority class of the human (or agent) whose message opened a
     turn. Derived structurally from the arrival route, never from
     message content: the authenticated dashboard route is [Owner];
@@ -153,6 +161,11 @@ type chat_message = {
           to decode (reported as a persistence read drop, row kept). *)
   conversation_id : string option;
   external_message_id : string option;
+  workspace_id : string option;
+      (** The connector workspace (guild/team) identity from the typed
+          delivery. Written on connector-intake user lines; [None] on
+          workspace-less deliveries (e.g. Discord DM), rows written before
+          this field existed, and non-connector lines. *)
   speaker : speaker option;
       (** Present on user lines written since RFC-0223 P1; [None] on
           older lines, tool/assistant lines, and lines whose persisted
@@ -333,16 +346,29 @@ val append_user_message_once :
   ?surface:Surface_ref.t ->
   ?conversation_id:string ->
   ?external_message_id:string ->
+  ?workspace_id:string ->
   ?speaker:speaker ->
   ?extra_mentions:Keeper_identity.Keeper_id.t list ->
   unit ->
   (append_once_result, string) result
+
+(** [chat_path ~base_dir ~keeper_name] is the on-disk JSONL path backing
+    this keeper's chat history. The file is append-only, so its
+    (mtime, size) pair changes on every persisted message — callers use
+    that pair as a freshness component in read-side cache keys. *)
+val chat_path : base_dir:string -> keeper_name:string -> string
 
 (** [load ~base_dir ~keeper_name] returns the most recent messages in
     chronological order: the last 100 user/assistant messages plus the
     tool lines belonging to them (absolute bound 400 lines). Missing
     files return [[]]. Unparseable lines are skipped. *)
 val load :
+  base_dir:string -> keeper_name:string -> chat_message list
+
+(** [load_all ~base_dir ~keeper_name] returns every valid persisted row in
+    source order. It is intentionally uncapped and is reserved for durable
+    acknowledgement scans whose correctness cannot tolerate a tail window. *)
+val load_all :
   base_dir:string -> keeper_name:string -> chat_message list
 
 type page = { messages : chat_message list; has_more : bool }
@@ -363,7 +389,7 @@ val load_page :
 
 (** JSON array of messages. Entries without a timestamp omit the
     [ts] field; [tool_call_id] / [tool_call_name] / [source] /
-    [conversation_id] / [external_message_id] /
+    [conversation_id] / [external_message_id] / [workspace_id] /
     [speaker_id] / [speaker_name] / [speaker_authority] appear only
     when present. When [base_dir] is supplied, the history endpoint marks
     audio clips as [expired] when the underlying MP3 file is gone. *)

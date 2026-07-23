@@ -44,6 +44,14 @@ let set_current_task_ok config ~task_id =
   | Error msg -> failwith msg
 ;;
 
+let completion_pass : Masc_domain.configured_llm_completion_verdict =
+  { decision = Masc_domain.Completion_pass
+  ; runtime_id = "test-completion-reviewer"
+  ; rationale = Some "workspace status fixture approval"
+  ; evaluated_at = Masc_domain.now_iso ()
+  }
+;;
+
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in
   let restore () =
@@ -116,7 +124,7 @@ let write_agent ctx agent =
 ;;
 
 let seed_stale_current_task ctx =
-  let old_last_seen = Masc_domain.iso8601_of_unix_seconds (Time_compat.now () -. 10.0) in
+  let old_last_seen = "2020-01-01T00:00:00Z" in
   let agent = read_agent ctx in
   write_agent
     ctx
@@ -267,7 +275,7 @@ let () =
         | Some result ->
           assert (Tool_result.is_success result);
           let message = Tool_result.message result in
-          assert_contains message "Snapshot: agents=2 zombies=0";
+          assert_contains message "Snapshot: agents=2";
           assert_contains message "keeper-runtime-visible-agent -> active"
         | None -> failwith "dispatch returned None"))
 ;;
@@ -324,6 +332,7 @@ let () =
          ~task_id:"task-001"
          ~action:Masc_domain.Done_action
          ~notes:"ok"
+         ~configured_llm_verdict:completion_pass
          ()
      with
      | Ok _ -> ()
@@ -342,7 +351,7 @@ let () =
 
 let () =
   test "dispatch_status_surfaces_awaiting_verification_assignment" (fun () ->
-    with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    (
       let ctx = make_test_ctx () in
       let _ = Workspace.init ctx.config ~agent_name:(Some "test-agent") in
       let actual_name = Workspace.resolve_agent_name ctx.config "test-agent" in
@@ -402,6 +411,7 @@ let () =
          ~task_id:"task-001"
          ~action:Masc_domain.Done_action
          ~notes:"ok"
+         ~configured_llm_verdict:completion_pass
          ()
      with
      | Ok _ -> ()

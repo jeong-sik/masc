@@ -16,18 +16,25 @@ val write_backlog :
   Workspace_utils_backend_setup.config ->
   Masc_domain.backlog ->
   unit
-(** [write_backlog ?after_commit config backlog] persists the backlog to
-    both the primary and recovery paths, then invokes [after_commit] if
-    provided.  Use [after_commit] for cache-invalidation side-effects that
-    must not fire unless the backlog commit succeeded (RFC-0221 §3.3).
-    Non-transition callers (GC, init, query) omit the callback. *)
+(** [write_backlog ?after_commit config backlog] commits the primary SSOT,
+    then attempts the recovery copy. Recovery-copy failure is logged and does
+    not turn a committed primary mutation into a reported failure.
+    Non-transition callers (GC, init, query) omit the callback.
+    Raises [Backlog_write_failed] only when the primary SSOT did not commit. *)
+
+exception Backlog_write_failed of string
+
+type write_backlog_outcome =
+  { primary_mirror_error : string option
+  ; recovery_error : string option
+  ; post_commit_error : string option
+  }
 
 val write_backlog_result :
   ?after_commit:(unit -> unit) ->
   Workspace_utils_backend_setup.config ->
   Masc_domain.backlog ->
-  (unit, string) result
-(** Result-returning variant of {!write_backlog}.  The backlog is considered
-    persisted only after both primary/recovery writes succeed and the primary
-    copy can be read back and decoded.  The cache is cleared and [after_commit]
-    runs only on success. *)
+  (write_backlog_outcome, string) result
+(** Result-returning variant of {!write_backlog}. [Error] means the primary
+    SSOT did not commit. Failures after a primary commit are returned in the
+    corresponding [Ok] fields and logged explicitly. *)

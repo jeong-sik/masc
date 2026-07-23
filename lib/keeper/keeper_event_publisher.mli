@@ -7,7 +7,7 @@
     [masc.broadcast], [masc.heartbeat], [masc.keeper.lifecycle],
     ...
 
-    Every publish routes to {!Masc_event_bus.get} so the OAS/MASC
+    Every publish routes to {!Event_bus_slots.get_masc} so the OAS/MASC
     layer boundary is preserved.  OAS's [event_bus.mli:103-107]
     explicitly warns against publishing domain events onto OAS's bus.
 
@@ -84,30 +84,9 @@ val publish_keeper_lifecycle :
     Subscribe to {!Keeper_lifecycle_events.all_event_names} to
     receive the full stream.  Issue #8575: prior docstring
     listed only five names, so operators silently missed
-    cleanup / self-healing events ([reconciled],
-    [dead_cleaned], [self_preservation], [paused_pruned]) —
+    cleanup / recovery events ([reconciled], [dead_cleaned]) —
     exactly the events that signal supervisor recovery actions
     where observability matters most. *)
-
-val publish_keeper_dead :
-  keeper_name:string ->
-  reason:string ->
-  restart_count:int ->
-  last_failure_reason:string option ->
-  unit ->
-  unit
-(** Publishes [masc.keeper.dead] with payload
-    [{keeper_name, reason, restart_count, last_failure_reason, timestamp}].
-
-    Emitted when {!Keeper_supervisor.sweep_and_recover} gives
-    up on a keeper after [restart_count >= max_restarts].
-    Operators should treat this as actionable: the supervisor
-    will NOT retry the keeper.
-
-    Independent from the [event="dead"] entry on
-    [masc.keeper.lifecycle] (which is unstructured free-form
-    [detail]) so subscribers can filter on a stable topic and
-    pull the structured fields directly. *)
 
 (** {1 Audit Ledger Events} *)
 
@@ -130,13 +109,9 @@ val publish_audit_event :
 
     Shape: [{id, ts, actor, kind, target?, summary, severity, payload?}]. *)
 
-(** [max_tokens] is always represented on the wire as an integer or [null].
-    The payload also carries [max_tokens_source]: [explicit_override] for
-    [Some _], [omitted] for [None]. *)
 val publish_runtime_execution_built :
   keeper_name:string ->
   runtime_id:string ->
-  max_tokens:int option ->
   max_context:int ->
   effective_budget:int ->
   temperature:float ->

@@ -1,5 +1,5 @@
 ; RFC-0195 P0 — same MASC_BASE_PATH setenv as
-; test_tool_help_registry_shard_coverage_10101 (Cdal_verdict_gate
+; test_tool_help_registry_shard_coverage_10101 (module-init base-path
 ; prod-guard raises under HOME).
 
 (test

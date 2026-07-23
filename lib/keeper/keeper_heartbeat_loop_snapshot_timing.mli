@@ -4,7 +4,6 @@ val maybe_write_heartbeat_snapshot :
   ctx:'a Keeper_types_profile.context ->
   meta_current:Keeper_meta_contract.keeper_meta ->
   now_ts:float ->
-  consecutive_hb_failures:int ->
   last_snapshot_ts:float ref ->
   snapshot_interval_sec:int ->
   timing_ring:Keeper_keepalive_signal.stage_timing array ->
@@ -25,7 +24,5 @@ val record_keepalive_stage_timing :
   t_board_end:float ->
   t_turn_start:float ->
   t_turn_end:float ->
-  t_recurring_start:float ->
-  t_recurring_end:float ->
   unit
 (** Record one keepalive cycle's stage timing in the ring buffer. *)

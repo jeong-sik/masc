@@ -16,10 +16,6 @@ let check_no_binding ~file ~name =
 
 let test_masc_delegates_canonical_oas_projections () =
   check_calls
-    ~file:"lib/context_compact_oas.ml"
-    ~callee:"Agent_sdk.Types.role_to_string"
-    ~expected:1;
-  check_calls
     ~file:"lib/keeper/keeper_context_core_message_json.ml"
     ~callee:"Agent_sdk.Types.role_to_string"
     ~expected:1;
@@ -36,8 +32,8 @@ let test_masc_delegates_canonical_oas_projections () =
     ~callee:"Agent_sdk.Types.params_to_input_schema"
     ~expected:1;
   check_calls
-    ~file:"lib/sdk_tool_contract.ml"
-    ~callee:"Agent_sdk.Types.param_type_of_string"
+    ~file:"lib/tool_bridge.ml"
+    ~callee:"Agent_sdk.Mcp.json_schema_to_params"
     ~expected:1
 ;;
 
@@ -74,14 +70,6 @@ let test_masc_routes_response_text_projection_through_adapter () =
 
 let test_masc_delegates_oas_tool_call_projection () =
   check_calls
-    ~file:"lib/keeper/keeper_context_tool_message_pairs.ml"
-    ~callee:"Canonical_tool.tool_call_of_block"
-    ~expected:2;
-  check_calls
-    ~file:"lib/keeper/keeper_context_core_accessors.ml"
-    ~callee:"Canonical_tool.tool_call_of_block"
-    ~expected:1;
-  check_calls
     ~file:"lib/keeper/keeper_agent_prompt_metrics.ml"
     ~callee:"Canonical_tool.tool_call_of_block"
     ~expected:2;
@@ -98,10 +86,6 @@ let test_masc_delegates_oas_tool_call_projection () =
 let test_masc_delegates_oas_reasoning_details_projection () =
   check_calls
     ~file:"lib/keeper/keeper_chat_oas_stream_bridge.ml"
-    ~callee:"Agent_sdk.Types.reasoning_details_text"
-    ~expected:1;
-  check_calls
-    ~file:"lib/keeper/keeper_context_core.ml"
     ~callee:"Agent_sdk.Types.reasoning_details_text"
     ~expected:1;
   check_calls

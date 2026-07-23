@@ -1,7 +1,9 @@
 module Workspace = Masc.Workspace
 module Store = Masc.Keeper_meta_store
 module Profile = Masc.Keeper_types_profile
+module Keeper_schema = Masc.Keeper_schema
 module Status_detail = Masc.Keeper_status_detail
+module Status_options_defaults = Masc.Keeper_status_options_defaults
 module Turn_setup = Masc.Keeper_turn_setup
 module Turn = Masc.Keeper_turn
 module Keeper_tool_surface = Masc.Keeper_tool_surface
@@ -139,8 +141,6 @@ let seed_runtime_meta config name =
         ("name", `String name);
         ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
         ("trace_id", `String ("trace-" ^ name));
-        ("goal", `String "effective meta overlay regression");
-        ("tool_access", `List [ `String "masc_status" ]);
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -150,18 +150,18 @@ let seed_runtime_meta config name =
       | Ok () -> meta
   | Error err -> Alcotest.failf "write_meta failed: %s" err)
 
-let write_keeper_toml ~keepers_dir ~name ~sandbox_profile ~goal =
+let write_keeper_toml ~keepers_dir ~name ~sandbox_profile ~instructions =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     (Printf.sprintf
        {|[keeper]
 sandbox_profile = "%s"
-goal = "%s"
+instructions = "%s"
 |}
        sandbox_profile
-       goal)
+       instructions)
 
-let status_goal_with ?(agent_name = "test-agent") ?name config =
+let status_instructions_with ?(agent_name = "test-agent") ?name config =
   let args =
     match name with
     | Some name -> `Assoc [ ("name", `String name); ("fast", `Bool true) ]
@@ -176,11 +176,11 @@ let status_goal_with ?(agent_name = "test-agent") ?name config =
   if not (Profile.tool_result_success result) then
     Alcotest.failf "status failed: %s" (Profile.tool_result_body result);
   let json = Yojson.Safe.from_string (Profile.tool_result_body result) in
-  match json_string_field "goal" json with
-  | Some goal -> goal
-  | None -> Alcotest.fail "status response missing goal"
+  match json_string_field "instructions" json with
+  | Some instructions -> instructions
+  | None -> Alcotest.fail "status response missing instructions"
 
-let status_goal config name = status_goal_with ~name config
+let status_instructions config name = status_instructions_with ~name config
 
 let status_json_with ?(agent_name = "test-agent") ?name config =
   let args =
@@ -195,6 +195,23 @@ let status_json_with ?(agent_name = "test-agent") ?name config =
     Alcotest.failf "status failed: %s" (Profile.tool_result_body result);
   Yojson.Safe.from_string (Profile.tool_result_body result)
 
+let status_json_with_args config args =
+  let result =
+    Status_detail.handle_keeper_status_config
+      ~config
+      ~agent_name:"test-agent"
+      args
+  in
+  if not (Profile.tool_result_success result) then
+    Alcotest.failf "status failed: %s" (Profile.tool_result_body result);
+  Yojson.Safe.from_string (Profile.tool_result_body result)
+
+let status_result_with_args config args =
+  Status_detail.handle_keeper_status_config
+    ~config
+    ~agent_name:"test-agent"
+    args
+
 let resolved_keeper_name config name =
   match
     Keeper_tool_surface_ops.resolve_keeper_name_config
@@ -208,21 +225,21 @@ let test_status_resolves_keeper_alias_names () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "aliasprobe" in
   write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
-    ~goal:"alias status goal";
+    ~instructions:"alias status instructions";
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   Alcotest.(check string)
     "explicit agent alias reaches canonical keeper"
-    "alias status goal"
-    (status_goal_with ~name:"keeper-aliasprobe-agent" config);
+    "alias status instructions"
+    (status_instructions_with ~name:"keeper-aliasprobe-agent" config);
   Alcotest.(check string)
     "prefixed alias reaches canonical keeper"
-    "alias status goal"
-    (status_goal_with ~name:"keeper-aliasprobe" config);
+    "alias status instructions"
+    (status_instructions_with ~name:"keeper-aliasprobe" config);
   Alcotest.(check string)
     "self fallback agent alias reaches canonical keeper"
-    "alias status goal"
-    (status_goal_with ~agent_name:"keeper-aliasprobe-agent" config)
+    "alias status instructions"
+    (status_instructions_with ~agent_name:"keeper-aliasprobe-agent" config)
 
 let test_keeper_surface_resolves_alias_names () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
@@ -245,7 +262,6 @@ let test_toml_overlay_reaches_effective_meta () =
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
 sandbox_profile = "docker"
-tool_access = ["tool_execute", "tool_read_file"]
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -260,11 +276,7 @@ tool_access = ["tool_execute", "tool_read_file"]
       Alcotest.(check string)
         "docker default network overlays from TOML profile"
         "none"
-        (Profile.network_mode_to_string meta.network_mode);
-      Alcotest.(check (list string))
-        "tool_access overlays from TOML"
-        [ "tool_execute"; "tool_read_file" ]
-        meta.tool_access
+        (Profile.network_mode_to_string meta.network_mode)
 
 let test_profile_identity_snapshot_reaches_meta_json () =
   with_config_dir @@ fun ~base ~config_dir ~keepers_dir ->
@@ -287,7 +299,6 @@ let test_profile_identity_snapshot_reaches_meta_json () =
 persona_name = "probe"
 sandbox_profile = "local"
 multimodal_policy = "delegate"
-tool_access = ["tool_execute"]
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -349,11 +360,8 @@ let test_ensure_keeper_meta_persists_toml_identity_snapshot () =
     {|[keeper]
 persona_name = "masc-improver"
 sandbox_profile = "docker"
-goal = "Improve MASC autonomously"
+instructions = "Improve MASC autonomously"
 proactive_enabled = true
-proactive_idle_sec = 77
-proactive_cooldown_sec = 88
-tool_access = ["tool_execute", "tool_read_file"]
 allowed_paths = ["workspace/yousleepwhen/masc"]
 active_goal_ids = ["goal-masc-improver"]
 |};
@@ -369,9 +377,8 @@ active_goal_ids = ["goal-masc-improver"]
     {
       persisted with
       persona = Some "analyst";
-      goal = "stale goal";
-      proactive = { enabled = false; idle_sec = 1; cooldown_sec = 2 };
-      tool_access = [ "masc_status" ];
+      instructions = "stale instructions";
+      proactive = { enabled = false };
       allowed_paths = [ "/tmp/stale-local-path" ];
       active_goal_ids = [ "stale-goal" ];
     }
@@ -408,25 +415,13 @@ active_goal_ids = ["goal-masc-improver"]
     (Some "masc-improver")
     returned.persona;
   Alcotest.(check string)
-    "returned goal is TOML canonical"
+    "returned instructions are TOML canonical"
     "Improve MASC autonomously"
-    returned.goal;
+    returned.instructions;
   Alcotest.(check bool)
     "returned proactive enabled is TOML canonical"
     true
     returned.proactive.enabled;
-  Alcotest.(check int)
-    "returned proactive idle is TOML canonical"
-    77
-    returned.proactive.idle_sec;
-  Alcotest.(check int)
-    "returned proactive cooldown is TOML canonical"
-    88
-    returned.proactive.cooldown_sec;
-  Alcotest.(check (list string))
-    "returned tool_access is TOML canonical"
-    [ "tool_execute"; "tool_read_file" ]
-    returned.tool_access;
   Alcotest.(check string)
     "returned sandbox_profile is TOML canonical"
     "docker"
@@ -447,7 +442,6 @@ let test_turn_setup_uses_effective_meta () =
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
 sandbox_profile = "docker"
-tool_access = ["tool_search_files", "tool_read_file"]
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -461,6 +455,8 @@ tool_access = ["tool_search_files", "tool_read_file"]
       clock = Eio.Stdenv.clock env;
       proc_mgr = None;
       net = None;
+      publication_recovery_provider =
+        Masc_test_deps.non_runtime_publication_recovery_provider;
     }
   in
   match Turn_setup.ensure_keeper_exists ~ctx ~name with
@@ -469,11 +465,7 @@ tool_access = ["tool_search_files", "tool_read_file"]
       Alcotest.(check string)
         "turn setup sees TOML sandbox overlay"
         "docker"
-        (Profile.sandbox_profile_to_string meta.sandbox_profile);
-      Alcotest.(check (list string))
-        "turn setup sees TOML tool overlay"
-        [ "tool_search_files"; "tool_read_file" ]
-        meta.tool_access
+        (Profile.sandbox_profile_to_string meta.sandbox_profile)
 
 let test_keepalive_meta_selection_overlays_disk_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
@@ -511,7 +503,7 @@ let test_missing_sandbox_profile_fails_loud_for_profile_source () =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-goal = "missing sandbox profile"
+instructions = "missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -529,7 +521,7 @@ let test_keeper_up_rejects_profile_source_without_sandbox_profile () =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-goal = "missing sandbox profile"
+instructions = "missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -543,6 +535,8 @@ goal = "missing sandbox profile"
       clock = Eio.Stdenv.clock env;
       proc_mgr = None;
       net = None;
+      publication_recovery_provider =
+        Masc_test_deps.non_runtime_publication_recovery_provider;
     }
   in
   let result = Turn.handle_keeper_up ctx (`Assoc [ ("name", `String name) ]) in
@@ -570,6 +564,8 @@ let test_keeper_up_rejects_missing_profile_source () =
       clock = Eio.Stdenv.clock env;
       proc_mgr = None;
       net = None;
+      publication_recovery_provider =
+        Masc_test_deps.non_runtime_publication_recovery_provider;
     }
   in
   let result = Turn.handle_keeper_up ctx (`Assoc [ ("name", `String name) ]) in
@@ -595,28 +591,369 @@ let test_missing_profile_source_fails_loud () =
         true
         (contains_substring ~needle:"sandbox_profile is required" err)
 
-let test_status_cache_tracks_toml_overlay_changes () =
+let test_status_tracks_toml_overlay_changes () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "statuscache" in
   write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
-    ~goal:"first cache goal";
+    ~instructions:"first cache instructions";
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   Alcotest.(check string)
-    "initial TOML goal reaches status"
-    "first cache goal"
-    (status_goal config name);
+    "initial TOML instructions reach status"
+    "first cache instructions"
+    (status_instructions config name);
   write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
-    ~goal:"second cache goal after toml edit";
+    ~instructions:"second cache instructions after toml edit";
   Alcotest.(check string)
     "TOML edit invalidates cached status"
-    "second cache goal after toml edit"
-    (status_goal config name)
+    "second cache instructions after toml edit"
+    (status_instructions config name)
+
+let test_status_reports_normalized_options () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "status-options-cache" in
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
+    ~instructions:"normalized status options";
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  let common_fields =
+    [ "name", `String name
+    ; "fast", `Bool false
+    ; "include_metrics_overview", `Bool false
+    ; "include_memory_bank", `Bool false
+    ; "include_history_tail", `Bool false
+    ; "include_compaction_history", `Bool false
+    ]
+  in
+  let context_enabled = status_json_with_args config (`Assoc common_fields) in
+  let default_options = json_assoc_field "status_options" context_enabled in
+  Alcotest.(check (option int))
+    "tail turns runtime default"
+    (Some Masc.Keeper_status_options_defaults.tail_turns)
+    (json_int_field "tail_turns" default_options);
+  Alcotest.(check (option int))
+    "tail messages runtime default"
+    (Some Masc.Keeper_status_options_defaults.tail_messages)
+    (json_int_field "tail_messages" default_options);
+  Alcotest.(check (option int))
+    "tail compactions runtime default"
+    (Some Masc.Keeper_status_options_defaults.tail_compactions)
+    (json_int_field "tail_compactions" default_options);
+  Alcotest.(check (option int))
+    "tail bytes runtime default"
+    (Some Masc.Keeper_status_options_defaults.tail_bytes)
+    (json_int_field "tail_bytes" default_options);
+  Alcotest.(check (option bool))
+    "derived include_context default is true"
+    (Some true)
+    (json_assoc_field "status_options" context_enabled
+     |> json_bool_field "include_context");
+  let context_disabled =
+    status_json_with_args config
+      (`Assoc (("include_context", `Bool false) :: common_fields))
+  in
+  Alcotest.(check (option bool))
+    "explicit include_context false is reported"
+    (Some false)
+    (json_assoc_field "status_options" context_disabled
+     |> json_bool_field "include_context");
+  Alcotest.(check (option bool))
+    "disabled context is observable"
+    (Some true)
+    (json_assoc_field "context" context_disabled |> json_bool_field "skipped");
+  let first_window =
+    status_json_with_args config
+      (`Assoc
+        [ "name", `String name
+        ; "fast", `Bool true
+        ; "tail_compactions", `Int 1
+        ; ( "tail_bytes"
+          , `Int Masc.Keeper_status_options_defaults.min_tail_bytes )
+        ])
+  in
+  let first_options = json_assoc_field "status_options" first_window in
+  Alcotest.(check (option int))
+    "minimum tail bytes is preserved"
+    (Some Masc.Keeper_status_options_defaults.min_tail_bytes)
+    (json_int_field "tail_bytes" first_options);
+  let second_window =
+    status_json_with_args config
+      (`Assoc
+        [ "name", `String name
+        ; "fast", `Bool true
+        ; "tail_compactions", `Int 7
+        ; "tail_bytes", `Int 8_000
+        ])
+  in
+  let second_options = json_assoc_field "status_options" second_window in
+  Alcotest.(check (option int))
+    "tail compaction window is reported"
+    (Some 7)
+    (json_int_field "tail_compactions" second_options);
+  Alcotest.(check (option int))
+    "tail byte window is reported"
+    (Some 8_000)
+    (json_int_field "tail_bytes" second_options)
+
+let test_status_rejects_tail_order_outside_schema () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "status-tail-order" in
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
+    ~instructions:"strict tail order";
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  let result =
+    status_result_with_args config
+      (`Assoc
+        [ "name", `String name
+        ; "fast", `Bool true
+        ; "tail_order", `String "desc"
+        ])
+  in
+  Alcotest.(check bool)
+    "unadvertised alias is rejected"
+    false
+    (Profile.tool_result_success result);
+  Alcotest.(check bool)
+    "error names exact allowed values"
+    true
+    (contains_substring
+       ~needle:"allowed: oldest_first, newest_first"
+       (Profile.tool_result_body result))
+
+let test_status_rejects_malformed_options () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "status-malformed-options" in
+  write_keeper_toml
+    ~keepers_dir
+    ~name
+    ~sandbox_profile:"local"
+    ~instructions:"strict status options";
+  let config = Workspace.default_config base in
+  ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+  let check_rejected label args needle =
+    let result = status_result_with_args config args in
+    Alcotest.(check bool)
+      (label ^ " fails")
+      false
+      (Profile.tool_result_success result);
+    Alcotest.(check bool)
+      (label ^ " explains the rejected field")
+      true
+      (contains_substring ~needle (Profile.tool_result_body result))
+  in
+  check_rejected
+    "tail bytes below schema minimum"
+    (`Assoc
+      [ "name", `String name
+      ; ( "tail_bytes"
+        , `Int (Masc.Keeper_status_options_defaults.min_tail_bytes - 1) )
+      ])
+    "tail_bytes\" must be at least";
+  check_rejected
+    "negative tail turns"
+    (`Assoc [ "name", `String name; "tail_turns", `Int (-1) ])
+    "tail_turns\" must be at least";
+  check_rejected
+    "tail turns above schema maximum"
+    (`Assoc
+      [ "name", `String name
+      ; ( "tail_turns"
+        , `Int (Masc.Keeper_status_options_defaults.max_tail_turns + 1) )
+      ])
+    "tail_turns\" must be at most";
+  check_rejected
+    "tail bytes above schema maximum"
+    (`Assoc
+      [ "name", `String name
+      ; ( "tail_bytes"
+        , `Int (Masc.Keeper_status_options_defaults.max_tail_bytes + 1) )
+      ])
+    "tail_bytes\" must be at most";
+  check_rejected
+    "string tail messages"
+    (`Assoc [ "name", `String name; "tail_messages", `String "10" ])
+    "tail_messages\" must be an integer";
+  check_rejected
+    "integer fast flag"
+    (`Assoc [ "name", `String name; "fast", `Int 1 ])
+    "fast\" must be a boolean";
+  check_rejected
+    "non-string tail order"
+    (`Assoc [ "name", `String name; "tail_order", `Bool true ])
+    "tail_order\" must be a string";
+  check_rejected
+    "non-string keeper name"
+    (`Assoc [ "name", `Int 7 ])
+    "name\" must be a string";
+  check_rejected
+    "non-object arguments"
+    (`List [])
+    "must be a JSON object";
+  check_rejected
+    "unknown argument"
+    (`Assoc [ "name", `String name; "mystery", `Bool true ])
+    "unknown keeper_status argument \"mystery\"";
+  check_rejected
+    "duplicate known argument"
+    (`Assoc
+      [ "name", `String name
+      ; "fast", `Bool true
+      ; "fast", `Bool false
+      ])
+    "argument \"fast\" must occur at most once";
+  check_rejected
+    "blank keeper name"
+    (`Assoc [ "name", `String " " ])
+    "argument \"name\" must not be blank";
+  check_rejected
+    "blank tail order"
+    (`Assoc
+      [ "name", `String name
+      ; "tail_order", `String " "
+      ])
+    "invalid tail_order";
+  check_rejected
+    "padded tail order"
+    (`Assoc
+      [ "name", `String name
+      ; "tail_order", `String " oldest_first "
+      ])
+    "invalid tail_order"
+
+let test_status_schema_tracks_argument_contract () =
+  let schema =
+    List.find_opt
+      (fun (schema : Masc_domain.tool_schema) ->
+        String.equal schema.name "masc_keeper_status")
+      Keeper_schema.keeper_schemas
+    |> Option.get
+  in
+  let properties =
+    match json_field "properties" schema.input_schema with
+    | Some (`Assoc fields) -> List.map fst fields
+    | _ -> Alcotest.fail "keeper_status schema has no object properties"
+  in
+  Alcotest.(check (list string))
+    "schema properties use the runtime argument SSOT"
+    (List.sort String.compare Status_options_defaults.Argument.all)
+    (List.sort String.compare properties);
+  Alcotest.(check (option bool))
+    "schema rejects unknown properties"
+    (Some false)
+    (json_bool_field "additionalProperties" schema.input_schema);
+  let tail_order_values =
+    match
+      List.assoc_opt
+        Status_options_defaults.Argument.tail_order
+        (match json_field "properties" schema.input_schema with
+         | Some (`Assoc fields) -> fields
+         | _ -> [])
+    with
+    | Some (`Assoc fields) ->
+        (match List.assoc_opt "enum" fields with
+         | Some (`List values) ->
+             List.filter_map
+               (function
+                 | `String value -> Some value
+                 | _ -> None)
+               values
+         | _ -> [])
+    | _ -> []
+  in
+  Alcotest.(check (list string))
+    "tail order schema follows the typed variants"
+    Status_detail.valid_tail_order_strings
+    tail_order_values;
+  let properties =
+    match json_field "properties" schema.input_schema with
+    | Some (`Assoc fields) -> fields
+    | _ -> []
+  in
+  let schema_maximum argument =
+    match List.assoc_opt argument properties with
+    | Some (`Assoc fields) ->
+        (match List.assoc_opt "maximum" fields with
+         | Some (`Int value) -> Some value
+         | _ -> None)
+    | _ -> None
+  in
+  Alcotest.(check (option int))
+    "tail turns schema maximum follows runtime SSOT"
+    (Some Status_options_defaults.max_tail_turns)
+    (schema_maximum Status_options_defaults.Argument.tail_turns);
+  Alcotest.(check (option int))
+    "tail bytes schema maximum follows runtime SSOT"
+    (Some Status_options_defaults.max_tail_bytes)
+    (schema_maximum Status_options_defaults.Argument.tail_bytes)
+
+let test_status_tracks_persisted_meta_without_updated_at () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "status-persisted-meta-cache" in
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
+    ~instructions:"persisted meta cache";
+  let config = Workspace.default_config base in
+  let meta = seed_runtime_meta config name in
+  let initial = status_json_with ~name config in
+  Alcotest.(check (option bool))
+    "initial status is active"
+    (Some false)
+    (json_assoc_field "meta" initial |> json_bool_field "paused");
+  let paused = { meta with paused = true } in
+  write_file
+    (Profile.keeper_meta_path config name)
+    (Masc.Keeper_meta_json.meta_to_json paused |> Yojson.Safe.to_string);
+  let refreshed = status_json_with ~name config in
+  Alcotest.(check (option bool))
+    "persisted paused change is observed without updated_at change"
+    (Some true)
+    (json_assoc_field "meta" refreshed |> json_bool_field "paused")
+
+let test_status_reads_live_registry_each_call () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
+  let name = "status-live-registry" in
+  write_keeper_toml
+    ~keepers_dir
+    ~name
+    ~sandbox_profile:"local"
+    ~instructions:"live registry observation";
+  let config = Workspace.default_config base in
+  let meta = seed_runtime_meta config name in
+  Masc.Keeper_registry.For_testing.clear ();
+  Fun.protect
+    ~finally:Masc.Keeper_registry.For_testing.clear
+    (fun () ->
+      ignore
+        (Masc.Keeper_registry.For_testing.register
+           ~base_path:config.base_path
+           name
+           meta);
+      let status () =
+        status_json_with_args config
+          (`Assoc [ "name", `String name; "fast", `Bool true ])
+      in
+      Masc.Keeper_registry.set_last_error_entry
+        ~base_path:config.base_path
+        ~name
+        "first live error";
+      Alcotest.(check (option string))
+        "first registry observation"
+        (Some "first live error")
+        (json_string_field "sandbox_last_error" (status ()));
+      Masc.Keeper_registry.set_last_error_entry
+        ~base_path:config.base_path
+        ~name
+        "second live error";
+      Alcotest.(check (option string))
+        "second registry observation is not frozen by a response cache"
+        (Some "second live error")
+        (json_string_field "sandbox_last_error" (status ())))
 
 let test_status_surfaces_chat_queue_runtime () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "chatqueue-status" in
-  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local" ~goal:"chat queue status";
+  write_keeper_toml ~keepers_dir ~name ~sandbox_profile:"local"
+    ~instructions:"chat queue status";
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
   Eio_main.run @@ fun _env ->
@@ -645,7 +982,10 @@ let test_status_surfaces_chat_queue_runtime () =
              user_blocks = [];
              attachments = [];
              timestamp = 1.0;
-             source = Masc.Keeper_chat_queue.Dashboard;
+             source =
+               Masc.Keeper_chat_queue.Dashboard
+                 { thread_id = "keeper:meta-overlay" };
+             user_row_origin = Masc.Keeper_chat_store.Needs_append;
            }
        with
        | Ok _receipt -> ()
@@ -669,7 +1009,7 @@ let test_keeper_list_row_surfaces_effective_meta_errors () =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-goal = "missing sandbox profile"
+instructions = "missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
@@ -694,14 +1034,14 @@ let test_keeper_list_error_row_preserves_keepalive_state () =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-goal = "missing sandbox profile"
+instructions = "missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   let meta = seed_runtime_meta config name in
-  Masc.Keeper_registry.clear ();
-  ignore (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
+  Masc.Keeper_registry.For_testing.clear ();
+  ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path meta.name meta);
   Fun.protect
-    ~finally:Masc.Keeper_registry.clear
+    ~finally:Masc.Keeper_registry.For_testing.clear
     (fun () ->
       match Keeper_tool_surface_ops.keeper_list_row_json ~runtime_class:"keeper" config name with
       | None -> Alcotest.fail "expected error row for invalid effective meta"
@@ -717,17 +1057,32 @@ let test_sandbox_status_fleet_surfaces_effective_meta_errors () =
   write_file
     (Filename.concat keepers_dir (name ^ ".toml"))
     {|[keeper]
-goal = "missing sandbox profile"
+instructions = "missing sandbox profile"
 |};
   let config = Workspace.default_config base in
   let meta = seed_runtime_meta config name in
-  Masc.Keeper_registry.clear ();
-  ignore (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
+  Masc.Keeper_registry.For_testing.clear ();
+  ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path meta.name meta);
   Fun.protect
-    ~finally:Masc.Keeper_registry.clear
+    ~finally:Masc.Keeper_registry.For_testing.clear
     (fun () ->
       Eio_main.run @@ fun env ->
       Eio.Switch.run @@ fun sw ->
+      let registry_root =
+        Eio.Path.(Eio.Stdenv.fs env / Workspace.masc_root_dir config)
+      in
+      let publication_recovery_registry =
+        match
+          Fs_compat.Publication_recovery.open_registry
+            ~sw
+            ~fs:(Eio.Stdenv.fs env)
+            ~registry_root
+        with
+        | Ok registry -> registry
+        | Error error ->
+          Alcotest.fail
+            (Fs_compat.Publication_recovery.registry_error_to_string error)
+      in
       let ctx : _ Keeper_tool_surface.context =
         {
           config;
@@ -736,6 +1091,9 @@ goal = "missing sandbox profile"
           clock = Eio.Stdenv.clock env;
           proc_mgr = None;
           net = None;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              publication_recovery_registry;
         }
       in
       match
@@ -772,13 +1130,71 @@ goal = "missing sandbox profile"
           | Some (`Assoc _) -> ()
           | _ -> Alcotest.fail "fleet error row missing effective_meta_error")
 
+(* Regression: before the fix the reactive provider-overflow path recorded only a
+   generic Turn_overflow_failure, so compaction_rt.last_decision (surfaced as
+   last_compaction_decision) never showed why a compaction failed. The stamp must
+   now carry the specific recovery reason. *)
+let test_reactive_overflow_stamps_compaction_decision () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
+  let name = "overflow-observability" in
+  let config = Workspace.default_config base in
+  let meta = seed_runtime_meta config name in
+  Masc.Keeper_registry.For_testing.clear ();
+  ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path meta.name meta);
+  Fun.protect ~finally:Masc.Keeper_registry.For_testing.clear (fun () ->
+      let reason = "plan_provider_unavailable" in
+      Masc.Keeper_turn_runtime_budget.record_overflow_failure ~config ~meta ~reason;
+      let latest =
+        Masc.Keeper_turn_runtime_budget.current_keeper_meta
+          ~config
+          ~fallback_meta:meta
+      in
+      let decision =
+        Masc.Keeper_meta_contract.compaction_runtime_decision_to_string
+          latest.runtime.compaction_rt.last_decision
+      in
+      Alcotest.(check string)
+        "reactive overflow stamps the specific recovery decision onto compaction_rt"
+        (Masc.Keeper_turn_runtime_budget.provider_overflow_decision ~reason)
+        decision)
+
+(* Regression (codex #25270 P2#1): the reactive overflow decision must be durable
+   on disk. Status (read_meta_resolved) and the dashboard projection read
+   last_compaction_decision from the persisted meta, not the in-memory registry.
+   Counterfactual: without the disk write-through in record_overflow_failure the
+   on-disk last_decision stays at the seeded/empty value and the recovery reason
+   is never surfaced (or is lost across a restart). *)
+let test_reactive_overflow_persists_compaction_decision_to_disk () =
+  with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir:_ ->
+  let name = "overflow-durable" in
+  let config = Workspace.default_config base in
+  let meta = seed_runtime_meta config name in
+  Masc.Keeper_registry.For_testing.clear ();
+  ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path meta.name meta);
+  Fun.protect ~finally:Masc.Keeper_registry.For_testing.clear (fun () ->
+      let reason = "plan_provider_unavailable" in
+      Masc.Keeper_turn_runtime_budget.record_overflow_failure ~config ~meta ~reason;
+      match Store.read_meta config name with
+      | Error err -> Alcotest.failf "read_meta failed: %s" err
+      | Ok None ->
+        Alcotest.fail "keeper meta missing from disk after overflow failure"
+      | Ok (Some disk_meta) ->
+        let decision =
+          Masc.Keeper_meta_contract.compaction_runtime_decision_to_string
+            disk_meta.runtime.compaction_rt.last_decision
+        in
+        Alcotest.(check string)
+          "reactive overflow persists the recovery decision to the durable on-disk meta"
+          (Masc.Keeper_turn_runtime_budget.provider_overflow_decision ~reason)
+          decision)
+
 let () =
   init_runtime_default_for_tests ();
   Alcotest.run "keeper_effective_meta_overlay"
     [
       ( "effective_meta",
         [
-          Alcotest.test_case "TOML sandbox/tool overlay reaches effective meta"
+          Alcotest.test_case "TOML sandbox overlay reaches effective meta"
             `Quick test_toml_overlay_reaches_effective_meta;
           Alcotest.test_case
             "profile identity snapshot reaches meta JSON"
@@ -806,8 +1222,20 @@ let () =
           Alcotest.test_case
             "missing profile source fails loudly"
             `Quick test_missing_profile_source_fails_loud;
-          Alcotest.test_case "status cache tracks TOML overlay edits" `Quick
-            test_status_cache_tracks_toml_overlay_changes;
+          Alcotest.test_case "status tracks TOML overlay edits" `Quick
+            test_status_tracks_toml_overlay_changes;
+          Alcotest.test_case "status reports normalized options"
+            `Quick test_status_reports_normalized_options;
+          Alcotest.test_case "status rejects tail order outside schema" `Quick
+            test_status_rejects_tail_order_outside_schema;
+          Alcotest.test_case "status rejects malformed options" `Quick
+            test_status_rejects_malformed_options;
+          Alcotest.test_case "status schema tracks argument contract" `Quick
+            test_status_schema_tracks_argument_contract;
+          Alcotest.test_case "status tracks persisted meta without updated_at"
+            `Quick test_status_tracks_persisted_meta_without_updated_at;
+          Alcotest.test_case "status reads live registry each call" `Quick
+            test_status_reads_live_registry_each_call;
           Alcotest.test_case "status surfaces chat queue runtime" `Quick
             test_status_surfaces_chat_queue_runtime;
           Alcotest.test_case "keeper list surfaces effective meta errors"
@@ -818,5 +1246,11 @@ let () =
           Alcotest.test_case
             "sandbox status fleet surfaces effective meta errors"
             `Quick test_sandbox_status_fleet_surfaces_effective_meta_errors;
+          Alcotest.test_case
+            "reactive overflow stamps compaction decision for observability"
+            `Quick test_reactive_overflow_stamps_compaction_decision;
+          Alcotest.test_case
+            "reactive overflow persists compaction decision to durable disk meta"
+            `Quick test_reactive_overflow_persists_compaction_decision_to_disk;
         ] );
     ]

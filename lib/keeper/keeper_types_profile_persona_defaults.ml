@@ -23,18 +23,28 @@ let load_from_path ~name path : (keeper_profile_defaults, load_error) result =
         Keeper_types_profile_persona.reject_placeholder_persona_profile
           ~label:"load_keeper_profile_defaults" ~path json
       then Ok empty_keeper_profile_defaults
-      else
+      else (
         let keeper_json =
           match Json_util.assoc_member_opt "keeper" json with
           | Some v -> v
           | None -> `Null
         in
-        let per_provider_timeout_state, per_provider_timeout =
-          Normalizers.per_provider_timeout_of_json_field
-            ~source:(Printf.sprintf "persona profile %s" path)
-            ~field:"per_provider_timeout"
-            keeper_json
+        let removed_fields =
+          [ "goal"
+          ; "tool_access"
+          ; "tool_denylist"
+          ; "shards"
+          ; "policy_voice_enabled"
+          ]
+          |> List.filter (fun key ->
+            Option.is_some (Json_util.assoc_member_opt key keeper_json))
         in
+        if removed_fields <> [] then
+          error Persona_parse_error
+            (Printf.sprintf
+               "removed persona keeper fields are no longer supported: %s"
+               (String.concat ", " removed_fields))
+        else (
         (* Persona profiles do not own a
            runtime/model selection. Warn so stale manifests are visible. *)
         (match Safe_ops.json_string_opt "model" keeper_json with
@@ -52,38 +62,25 @@ let load_from_path ~name path : (keeper_profile_defaults, load_error) result =
               id = Some (Ids.Keeper_id.generate ~name ~path);
               manifest_path = Some path;
               persona_name = Some name;
-              goal = Safe_ops.json_string_opt "goal" keeper_json;
               instructions = Safe_ops.json_string_opt "instructions" keeper_json;
               autoboot_enabled = None;
               mention_targets = Safe_ops.json_string_list "mention_targets" keeper_json;
               proactive_enabled = Safe_ops.json_bool_opt "proactive_enabled" keeper_json;
-              proactive_idle_sec = Safe_ops.json_int_opt "proactive_idle_sec" keeper_json;
-              proactive_cooldown_sec = Safe_ops.json_int_opt "proactive_cooldown_sec" keeper_json;
-              shards =
-                (match Safe_ops.json_string_list "shards" keeper_json with
-                 | [] -> None
-                 | xs -> Some xs);
               allowed_paths = None;
               sandbox_profile = None;
               sandbox_image = None;
               network_mode = None;
               multimodal_policy = None;
-              tool_access = None;
-              tool_denylist =
-                Normalizers.normalize_name_list_opt
-                  (Safe_ops.json_string_list "tool_denylist" keeper_json);
               active_goal_ids = None;
               telemetry_feedback_enabled =
                 Safe_ops.json_bool_opt "telemetry_feedback_enabled" keeper_json;
               telemetry_feedback_window_hours =
                 Safe_ops.json_int_opt "telemetry_feedback_window_hours" keeper_json;
-              per_provider_timeout_state;
-              per_provider_timeout;
-              always_approve = Safe_ops.json_bool_opt "always_approve" keeper_json;
+              always_allow = Safe_ops.json_bool_opt "always_allow" keeper_json;
               oas_env = [];
               unknown_toml_keys = [];
               }
-        | _ -> Ok { empty_keeper_profile_defaults with manifest_path = Some path })
+        | _ -> Ok { empty_keeper_profile_defaults with manifest_path = Some path })))
 
 let load_from_dirs ~persona_dirs ~name : (keeper_profile_defaults, load_error) result =
   match

@@ -1,13 +1,9 @@
 (** Regression tests for outcome-derived log severity
     (docs/spec/18-log-severity-taxonomy.md § 3.6).
 
-    These pin the two pure level-selection helpers introduced to stop an
+    This pins the pure level-selection helper introduced to stop an
     outcome-carrying line from being emitted at a static [Info] level:
 
-    - {!Dashboard_governance_judge.level_of_compute_outcome} — the
-      [refresh_once: compute_judgments telemetry outcome=…] line. An errored
-      compute was previously logged at [Info] with no companion WARN/ERROR, so
-      operators grepping [-p warning] never saw the governance judge failing.
     - {!Mcp_server_eio_helpers.mcp_exn_level_and_tag} — the MCP exception logger.
       An [UNEXPECTED]-tagged exception was previously emitted at [Info].
 
@@ -21,20 +17,6 @@ open Masc
 (* Compare [Log.level] values structurally; the printer uses the public
    [level_to_string] so a mismatch reports readable severities. *)
 let level = Alcotest.testable (fun fmt l -> Format.pp_print_string fmt (Log.level_to_string l)) ( = )
-
-let governance_cases () =
-  let f = Dashboard_governance_judge.level_of_compute_outcome in
-  Alcotest.(check level)
-    "ok outcome stays Info" Log.Info (f ~outcome:"ok" ~reason:"ok");
-  Alcotest.(check level)
-    "graceful cancellation stays Info" Log.Info
-    (f ~outcome:"error" ~reason:"cancelled");
-  Alcotest.(check level)
-    "genuine error becomes Warn" Log.Warn
-    (f ~outcome:"error" ~reason:"timeout");
-  Alcotest.(check level)
-    "any non-cancelled error reason becomes Warn" Log.Warn
-    (f ~outcome:"error" ~reason:"http_503")
 
 exception Surprise_exn
 
@@ -53,7 +35,4 @@ let mcp_exn_cases () =
 
 let () =
   Alcotest.run "log_severity_outcome_level"
-    [
-      ("governance_compute_outcome", [ Alcotest.test_case "level mapping" `Quick governance_cases ]);
-      ("mcp_exn_level_and_tag", [ Alcotest.test_case "level + tag mapping" `Quick mcp_exn_cases ]);
-    ]
+    [ "mcp_exn_level_and_tag", [ Alcotest.test_case "level + tag mapping" `Quick mcp_exn_cases ] ]

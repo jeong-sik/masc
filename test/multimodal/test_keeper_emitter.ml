@@ -151,7 +151,7 @@ let test_round_trip_to_keeper_bridge () =
       ~metadata:(`Assoc [ ("dim", `String "512x512") ])
   in
   let raws, _wc_rest =
-    Multimodal.Wirein_helpers.extract_raw_artifacts wc
+    Result.get_ok (Multimodal.Wirein_helpers.extract_raw_artifacts wc)
   in
   assert (List.length raws = 1);
   let raw = List.hd raws in

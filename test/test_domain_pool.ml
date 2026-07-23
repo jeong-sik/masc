@@ -173,6 +173,29 @@ let test_ref_submits_to_shared_pool () =
         (worker_domain <> main_domain);
       R.clear_for_tests ()))
 
+let test_ref_inline_from_raw_domain_with_pool () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      R.clear_for_tests ();
+      let dm = Eio.Stdenv.domain_mgr env in
+      let pool = D.create ~sw ~domain_count:1 dm in
+      R.set pool;
+      (* A raw Domain has no Eio effect handler, so a pool submit from it
+         would raise [Effect.Unhandled]. With the pool installed, the ref
+         must detect the non-Eio caller and run inline in that caller's own
+         domain (#25158). *)
+      let raw =
+        Domain.spawn (fun () ->
+          let self = (Domain.self () :> int) in
+          let observed =
+            R.submit_cpu_or_inline (fun () -> (Domain.self () :> int))
+          in
+          (self, observed))
+      in
+      let self, observed = Domain.join raw in
+      check int "raw-domain caller runs inline in its own domain" self observed;
+      R.clear_for_tests ()))
+
 (* ── Suite ──────────────────────────────────────────────── *)
 
 let () =
@@ -210,5 +233,7 @@ let () =
     "ref", [
       test_case "inline when absent" `Quick test_ref_runs_inline_when_absent;
       test_case "submits to shared pool" `Quick test_ref_submits_to_shared_pool;
+      test_case "inline from raw domain with pool installed" `Quick
+        test_ref_inline_from_raw_domain_with_pool;
     ];
   ]

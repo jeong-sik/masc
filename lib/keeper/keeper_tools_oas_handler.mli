@@ -1,7 +1,6 @@
 (** Keeper_tools_oas_handler — Tool handler factory for Agent.run().
 
-    Skeleton module: validation, circuit-breaking, workflow-rejection
-    gating, and resource-gate wrapping.  The heavy execution body lives
+    Skeleton module: validation and dispatch. The heavy execution body lives
     in [Keeper_tools_oas_handler_exec]; telemetry helpers live in
     [Keeper_tools_oas_handler_telemetry].  Bundle assembly lives in
     [Keeper_tools_oas_bundle].
@@ -23,18 +22,22 @@ val make_keeper_tool_handler
   -> input_schema:Yojson.Safe.t
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
+  -> publication_recovery:
+       Keeper_publication_recovery_availability.turn_context
   -> ctx_snapshot:Keeper_types.working_context
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
-  -> exec_cache:Masc_exec.Exec_cache.t option
-  -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
-  -> ?on_tool_called:(string -> unit)
+  -> ?search_fn:(unit -> Keeper_tool_execution.t)
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?continuation_channel:Keeper_continuation_channel.t
+  -> ?gate_context:(unit -> Keeper_gate.causal_context)
+  -> ?gate_grant:Keeper_gate.cycle_grant
+  -> ?record_gate_result:
+       (operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit)
   -> ?pre_validate_input:
        (Yojson.Safe.t -> (Yojson.Safe.t, Tool_result.result) result)
   -> ?translate_input:(Yojson.Safe.t -> Yojson.Safe.t)
   -> ?validate_translated_input:bool
-  -> failure_counts:Keeper_tools_oas.failure_counts
   -> unit
+  -> ?oas_invocation:Agent_sdk.Tool.Invocation.t
   -> Yojson.Safe.t
   -> Tool_result.result

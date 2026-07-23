@@ -18,20 +18,14 @@ type session_context = Keeper_types.session_context
 (** {1 Working Context Operations} *)
 
 val text_of_message : Agent_sdk.Types.message -> string
-val msg_tokens : Agent_sdk.Types.message -> int
-val count_tokens : string -> Agent_sdk.Types.message list -> int
-val max_tokens_of_context : working_context -> int
-val token_count : working_context -> int
 val message_count : working_context -> int
-val context_ratio : working_context -> float
+val serialized_bytes : working_context -> int
 val checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
-val resume_checkpoint_of_context :
-  max_checkpoint_messages:int -> working_context -> Agent_sdk.Checkpoint.t
+val resume_checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
 val oas_context_of_context : working_context -> Agent_sdk.Context.t
-val with_max_tokens : working_context -> int -> working_context
 val system_prompt_of_context : working_context -> string
 val messages_of_context : working_context -> Agent_sdk.Types.message list
-val create : eio:bool -> system_prompt:string -> max_tokens:int -> working_context
+val create : eio:bool -> system_prompt:string -> working_context
 val set_system_prompt : working_context -> system_prompt:string -> working_context
 val append : working_context -> Agent_sdk.Types.message -> working_context
 val append_many : working_context -> Agent_sdk.Types.message list -> working_context
@@ -47,8 +41,6 @@ val role_of_string_opt : string -> Agent_sdk.Types.role option
 val message_to_json : Agent_sdk.Types.message -> Yojson.Safe.t
 val message_of_json : Yojson.Safe.t -> Agent_sdk.Types.message
 val serialize_context : working_context -> string
-val deserialize_context : eio:bool -> string -> max_tokens:int -> working_context
-val context_to_json : working_context -> Yojson.Safe.t
 val create_session : session_id:string -> base_dir:string -> session_context
 val persist_message : ?source:string -> session_context -> Agent_sdk.Types.message -> unit
 
@@ -62,49 +54,19 @@ val total_tokens : Agent_sdk.Types.api_usage -> int
 (** {1 Keeper Context Lifecycle} *)
 
 val log_keeper_exn : label:string -> exn -> unit
-val checkpoint_max_tokens : Agent_sdk.Checkpoint.t -> fallback:int -> int
 
 val context_of_oas_checkpoint
-  :  ?repair_orphans:bool
-  -> max_checkpoint_messages:int
-  -> Agent_sdk.Checkpoint.t
-  -> primary_model_max_tokens:int
+  :  Agent_sdk.Checkpoint.t
   -> working_context
 
 val save_oas_checkpoint
-  :  max_checkpoint_messages:int
-  -> multimodal_policy:Keeper_types_profile.multimodal_policy
+  :  multimodal_policy:Keeper_types_profile.multimodal_policy
   -> keeper_name:string
   -> session:session_context
   -> agent_name:string
   -> ctx:working_context
   -> generation:int
-  -> (Agent_sdk.Checkpoint.t, string) result
-
-(** {1 Handoff Rollover} *)
-
-type handoff_rollover =
-  { updated_meta : keeper_meta
-  ; handoff_json : Yojson.Safe.t option
-  ; attempted : bool
-  ; failure_reason : string option
-  ; context_ratio : float
-  ; context_tokens : int
-  ; context_max : int
-  ; message_count : int
-  }
-
-type compaction_event =
-  { attempted : bool
-  ; applied : bool
-  ; started_dispatched : bool
-  ; failure_reason : string option
-  ; trigger : Compaction_trigger.t option
-  ; decision : Keeper_compact_policy.compaction_decision
-  ; before_tokens : int
-  ; after_tokens : int
-  ; saved_tokens : int
-  }
+  -> (Agent_sdk.Checkpoint.t, string Keeper_context_core.checkpoint_write_error) result
 
 type post_turn_lifecycle =
   { updated_meta : keeper_meta
@@ -112,11 +74,8 @@ type post_turn_lifecycle =
   ; handoff_json : Yojson.Safe.t option
   ; handoff_attempted : bool
   ; handoff_failure_reason : string option
-  ; compaction : compaction_event
   ; turn_generation : int
-  ; context_ratio : float
-  ; context_tokens : int
-  ; context_max : int
+  ; checkpoint_bytes : int
   ; message_count : int
   }
 
@@ -124,94 +83,55 @@ type max_context_resolution =
   { requested_override : int option
   ; primary_budget : int
   ; runtime_budget : int
-  ; turn_budget : int
+  ; runtime_budget_source : Runtime.max_context_source option
+    (** Where [runtime_budget] came from (capability catalog, runtime.toml
+        override, or override clamped by capability). [None] only when the
+        legacy ordered-label path fell back to the precomputed default. *)
+  ; requested_context_window : int
   ; effective_budget : int
   }
+
+type max_context_resolution_error =
+  | Invalid_requested_context_override of int
+  | Runtime_context_window_unavailable of { runtime_id : string }
 
 type context_budget_source =
   | Runtime_provider_cap
   | Requested_override
   | Requested_override_clamped_to_provider
 
-type overflow_retry_recovery =
+type compaction_recovery =
   { checkpoint : Agent_sdk.Checkpoint.t
-  ; compaction : compaction_event
+  ; trigger : Compaction_trigger.t
+  ; evidence : Keeper_compaction_evidence.t
   ; turn_generation : int
+  ; projection_target : Keeper_compaction_projection_target.committed
   }
-
-val maybe_rollover_oas_handoff
-  :  on_started:(unit -> unit)
-  -> base_dir:string
-  -> meta:keeper_meta
-  -> model:string
-  -> primary_model_max_tokens:int
-  -> current_turn_blocker_info:blocker_info option
-  -> checkpoint:Agent_sdk.Checkpoint.t option
-  -> handoff_rollover
-
-(** {2 Pure gate helpers (for testing)} *)
-
-type rollover_gate_decision =
-  | Skip of string
-  | Go of string
-
-(** [blocker_class_indicates_overflow klass] returns true when [klass] is
-    the typed equivalent of a provider context-overflow signal.  Pure —
-    keeper layer reasons over [blocker_class], never substring-matching
-    error phrasing. *)
-val blocker_class_indicates_overflow : blocker_class -> bool
-
-(** [classify_rollover_gate] is the pure decision function used by
-    [maybe_rollover_oas_handoff]. Exposed for unit tests.
-
-    Returns [Go reason] when a handoff should be attempted; [Skip reason]
-    otherwise. The [reason] string is surfaced in logs and [handoff_json]. *)
-val classify_rollover_gate
-  :  auto_handoff:bool
-  -> cooldown_elapsed:bool
-  -> ratio:float
-  -> handoff_threshold:float
-  -> last_outcome:proactive_cycle_outcome
-  -> last_blocker_info:blocker_info option
-  -> ?current_turn_blocker_info:blocker_info option
-  -> unit
-  -> rollover_gate_decision
 
 (** {1 Checkpoint Loading} *)
 
 val load_context_from_checkpoint
-  :  max_checkpoint_messages:int
-  -> trace_id:string
-  -> primary_model_max_tokens:int
+  :  trace_id:string
   -> base_dir:string
   -> session_context * working_context option
 
 (** {1 Compaction} *)
 
-val compaction_policy_of_keeper : keeper_meta -> float * int * int
-
 type compaction_decision = Keeper_compact_policy.compaction_decision =
   | Applied of Compaction_trigger.t
-  | Blocked_below_thresholds
+  | Prepared of Compaction_trigger.t
+  | Rejected of Compaction_trigger.t * Keeper_compact_policy.compaction_rejection
+  | Not_requested
   | Skipped_no_checkpoint
-  | Skipped_cooldown of
-      { hold_s : float
-      ; cooldown_sec : int
-      }
 
 val compaction_decision_to_string : compaction_decision -> string
 val compaction_decision_applied : compaction_decision -> bool
+val compaction_decision_prepared : compaction_decision -> bool
 
 val apply_post_turn_lifecycle_with_resilience_handles
   :  resilience_audit_store:Shared_audit.Store.t option
   -> resilience_strategy_executor:Resilience.Recovery.strategy_executor option
-  -> on_compaction_started:(unit -> unit)
-  -> on_handoff_started:(unit -> unit)
-  -> base_dir:string
   -> meta:keeper_meta
-  -> model:string
-  -> primary_model_max_tokens:int
-  -> current_turn_blocker_info:blocker_info option
   -> checkpoint:Agent_sdk.Checkpoint.t option
   -> post_turn_lifecycle
 
@@ -222,43 +142,27 @@ val dispatch_keeper_phase_event
   -> Keeper_state_machine.event
   -> unit
 
-(** Canonical metric name for the compaction outcome counter.
+type lifecycle_dispatch_error =
+  | Transition_rejected of Keeper_state_machine.transition_error
+  | Compaction_invariant_violation of
+      Keeper_registry_types.compaction_transition_spec_violation
 
-    Labels: [("keeper", <name>); ("outcome", "ok" | "noop")].
-    Exported so tests can pin the name without hard-coding a string
-    literal.  #9988. *)
-val compaction_outcome_metric : string
+val lifecycle_dispatch_error_to_string : lifecycle_dispatch_error -> string
 
-(** [record_compaction_outcome ~keeper_name ~before_tokens ~after_tokens]
-    emits the outcome counter and (for [saved_tokens <= 0]) a warn log,
-    without dispatching an FSM event.  Exposed for unit tests and for
-    callers that need the observability signal before/after a dispatch.  *)
-val record_compaction_outcome
-  :  keeper_name:string
-  -> before_tokens:int
-  -> after_tokens:int
-  -> unit
+val dispatch_keeper_phase_event_result
+  :  config:Workspace.config
+  -> ?origin:Keeper_registry.lifecycle_event_origin
+  -> keeper_name:string
+  -> Keeper_state_machine.event
+  -> (unit, lifecycle_dispatch_error) result
 
-(** [dispatch_compaction_completed ~config ~keeper_name ~before_tokens
-    ~after_tokens] dispatches a [Compaction_completed] phase event and
-    updates observability in one place.
-
-    Emits [compaction_outcome_metric] labelled with [outcome=ok] when
-    [after_tokens < before_tokens] and [outcome=noop] otherwise.  A
-    [noop] outcome also logs a warning — the FSM (#9988) keeps
-    [context_overflow] set in this case, so operators need the signal
-    to escalate profile / alert.
-
-    Two emit paths exist ([keeper_tool_surface] manual compact recovery and
-    [dispatch_post_turn_lifecycle_events] automatic compact); both
-    funnel through this helper to keep observability coherent. *)
+(** Dispatch [Compaction_completed] only after the prepared checkpoint has
+    been durably saved. *)
 val dispatch_compaction_completed
   :  config:Workspace.config
   -> origin:Keeper_registry.lifecycle_event_origin
   -> keeper_name:string
-  -> before_tokens:int
-  -> after_tokens:int
-  -> unit
+  -> (unit, lifecycle_dispatch_error) result
 
 val dispatch_post_turn_lifecycle_events
   :  config:Workspace.config
@@ -266,18 +170,28 @@ val dispatch_post_turn_lifecycle_events
   -> post_turn_lifecycle
   -> unit
 
-val recover_latest_checkpoint_for_overflow_retry
+val recover_latest_checkpoint_for_compaction
   :  base_dir:string
   -> meta:keeper_meta
-  -> model:string
-  -> primary_model_max_tokens:int
-  -> overflow_retry_recovery option
+  -> trigger:Compaction_trigger.t
+  -> projection_request:Keeper_compaction_projection_target.request
+  -> (compaction_recovery, Keeper_post_turn.compaction_recovery_error) result
+
+val prepare_compaction
+  :  base_dir:string
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> trigger:Compaction_trigger.t
+  -> projection_request:Keeper_compaction_projection_target.request
+  -> (Keeper_post_turn.prepared_compaction, Keeper_post_turn.compaction_recovery_error) result
+
+val commit_prepared_compaction
+  :  Keeper_post_turn.prepared_compaction
+  -> (compaction_recovery, Keeper_post_turn.compaction_recovery_error) result
 
 (** {1 Trace and Board Utilities} *)
 
 val generate_trace_id : ?now:float -> unit -> string
 val keeper_board_write_tool_names : string list
-val keeper_write_done : string list -> bool
 val keeper_action_kind_of_tool_names : string list -> string
 
 (** {1 Model and Workspace Utilities} *)
@@ -290,6 +204,23 @@ val resolve_max_context_resolution
   -> max_context_resolution
 
 val resolve_max_context_resolution_of_meta : keeper_meta -> max_context_resolution
+
+val resolve_max_context_resolution_for_runtime_id
+  :  requested_override:int option
+  -> runtime_id:string
+  -> (max_context_resolution, max_context_resolution_error) result
+
+val resolve_max_context_resolution_for_runtime
+  :  requested_override:int option
+  -> Runtime.t
+  -> (max_context_resolution, max_context_resolution_error) result
+(** Resolve against the supplied immutable runtime snapshot. Callers that need
+    another projection of the same provider/model must use this form rather
+    than resolving the runtime id twice across a config refresh. *)
+
+val max_context_resolution_error_to_string
+  :  max_context_resolution_error
+  -> string
 
 val context_budget_source_of_resolution
   :  max_context_resolution
@@ -312,8 +243,7 @@ val exact_direct_mention_present : targets:string list -> string -> bool
 val keeper_constitution : unit -> string
 
 val build_keeper_system_prompt
-  :  goal:string
-  -> instructions:string
+  :  instructions:string
   -> ?persona_extended:string
   -> ?keeper_name:string
   -> ?home_ground:string
@@ -322,10 +252,6 @@ val build_keeper_system_prompt
   -> string
 
 val append_trait_clause : base:string -> clause:string -> string
-
-(** {1 Text Processing} *)
-
-val user_visible_reply_text : ?fallback:string -> string -> string
 
 (** {1 Fragment Detection (used by dashboard)} *)
 

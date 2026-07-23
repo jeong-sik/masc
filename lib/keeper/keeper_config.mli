@@ -17,33 +17,12 @@
     (issue #14624). *)
 val default_runtime_id : unit -> string
 
-(** Minimum context window (tokens) for any keeper turn. *)
-val min_keeper_context_tokens : int
+(** Validate one persisted/requested context override value. This is a
+    structural invariant only: positive integers are accepted verbatim and no
+    provider/model policy is applied here. *)
+val validate_max_context_override_value : int -> (int, string) result
 
-(** Maximum context window (tokens) accepted for [max_context_override].
-    Matches the largest published context window among supported
-    providers (Claude Opus 4.7 / Sonnet 4.6 = 1M).  #9953 SSOT — do not
-    re-hardcode [1_000_000] elsewhere. *)
-val max_keeper_context_tokens : int
-
-(** {2 Alert Preview Truncation Lengths}
-
-    Invariant: [excerpt_min < message_max < reply_max]. *)
-
-val alert_error_detail_max_chars : int
-val alert_excerpt_min_chars : int
-val alert_message_preview_max_chars : int
-val alert_reply_preview_max_chars : int
-
-(** {2 Tool Policy Display Thresholds} *)
-
-val tool_policy_count_warn_threshold : int
-val tool_first_sentence_max_chars : int
 val default_proactive_enabled : bool
-val default_proactive_idle_sec : int
-val default_proactive_cooldown_sec : int
-val approval_queue_stale_max_wait_sec : float
-val default_goal_max_chars : int
 
 (** Maximum bytes of personality text included in the rendered keeper prompt.
     Drives [normalize_prompt_text] when called from prompt rendering.
@@ -80,8 +59,11 @@ val clamp_int : int -> min_v:int -> max_v:int -> int
 
 (** {1 Name Validation} *)
 
-(** Validate a keeper name: non-empty, alphanumeric with dots, dashes, underscores. *)
+(** Validate a keeper name with the shared portable-name grammar. *)
 val validate_name : string -> bool
+
+val invalid_name_error : string -> string
+(** Canonical explanation for a value rejected by {!validate_name}. *)
 
 (** {1 Removed Key Detection} *)
 
@@ -115,73 +97,6 @@ val utf8_repair_string : string -> string
 (** Trim and truncate prompt text to [max_bytes] on a UTF-8 character
     boundary. Caller MUST pass [max_bytes] explicitly so the unit is visible. *)
 val normalize_prompt_text : max_bytes:int -> string -> string
-val normalize_goal_text : ?max_len:int -> string -> string
-
-(** {1 Compaction Configuration} *)
-
-(** HOW a checkpoint is summarized (orthogonal to [profile], which decides
-    WHEN to compact). [Llm] = provider-backed summarizer on the librarian
-    lane (the default; summarizer failure always falls back to the
-    deterministic chain); [Deterministic] = the extractive OAS strategy
-    chain only (opt-out). *)
-type compaction_mode =
-  | Deterministic
-  | Llm
-
-val default_compaction_mode : compaction_mode
-val compaction_mode_to_string : compaction_mode -> string
-
-(** Parse a mode string; unknown → [Error] (never a permissive default). *)
-val compaction_mode_of_string : string -> (compaction_mode, string) result
-
-val keeper_compaction_mode_env_key : string
-
-(** Global default mode from [MASC_KEEPER_COMPACTION_MODE]. Unset →
-    [default_compaction_mode]; set-but-invalid → [invalid_arg] (fail-closed
-    at load), mirroring the MASC_RUNTIME_ATTEMPT_LIVENESS precedent. *)
-val keeper_compaction_mode_default : unit -> compaction_mode
-
-val default_compaction_profile : string
-val canonical_compaction_profile : string -> string option
-val parse_compaction_profile_opt :
-  Yojson.Safe.t -> string -> (string option, string) result
-
-(** Return (ratio, message_gate, token_gate) for a named profile. *)
-val compaction_policy_of_profile : string -> float * int * int
-
-(** Resolve compaction policy from explicit overrides with profile-based fallbacks. *)
-val resolve_compaction_policy :
-  profile_opt:string option ->
-  ratio_opt:float option ->
-  message_opt:int option ->
-  token_opt:int option ->
-  fallback_profile:string ->
-  fallback_ratio:float ->
-  fallback_message:int ->
-  fallback_token:int ->
-  string * float * int * int
-
-val normalize_compaction_ratio_gate : float -> float
-val normalize_compaction_message_gate : int -> int
-val normalize_compaction_token_gate : int -> int
-val normalize_compaction_cooldown_sec : int -> int
-
-(** Default number of recent tool results to keep verbatim during
-    OAS context compaction.  Preserves prior hardcoded [keep_recent:2]
-    behavior in [Keeper_compact_policy]. *)
-val default_keep_recent_tool_results : int
-
-(** Hard upper bound for operator-supplied
-    [keep_recent_tool_results] (typo guard). *)
-val keep_recent_tool_results_max : int
-
-(** Clamp [keep_recent_tool_results] to [[0, keep_recent_tool_results_max]].
-    Out-of-range values fall back to {!default_keep_recent_tool_results}
-    with a [Log.Keeper.warn] including [keeper_name] when supplied. *)
-val normalize_keep_recent_tool_results : ?keeper_name:string -> int -> int
-
-val normalize_proactive_idle_sec : int -> int
-val normalize_proactive_cooldown_sec : int -> int
 
 (** {1 Runtime Parameters}
 
@@ -189,51 +104,29 @@ val normalize_proactive_cooldown_sec : int -> int
     Each parameter is registered with [Runtime_params] and can be
     adjusted via the dashboard at runtime. *)
 
-val keeper_compact_ratio : unit -> float
-val keeper_compact_max_messages : unit -> int
-val keeper_compact_max_tokens : unit -> int
-val keeper_compaction_cooldown_sec : unit -> int
-val keeper_compaction_policy_from_env : unit -> float * int * int
+(** Memory OS recall selection budget (masc#25052 P1). See the .ml for the
+    growth problem this bounds and the default-sizing rationale. *)
+val keeper_memory_os_recall_max_facts : unit -> int
+val keeper_memory_os_recall_max_episodes : unit -> int
+val keeper_memory_os_recall_max_bytes : unit -> int
+(** Observability-only threshold (see .ml); not itself an enforced drop. *)
 
 val keeper_bootstrap_proactive_warmup_sec : unit -> int
 val keeper_bootstrap_stagger_step_sec : unit -> int
-val keeper_bootstrap_retry_max : unit -> int
 val keeper_bootstrap_retry_interval_sec : unit -> int
 
-val keeper_proactive_min_cooldown_sec : unit -> int
-val keeper_proactive_min_interval_sec : unit -> int
-
-val keeper_goal_stagnation_threshold_sec : unit -> int
-(** RFC-0310 §3.3: seconds a live goal may sit untouched before a one-shot
-    stagnation wake (default 3600). Edge-gated on the goal's updated_at, so
-    it is not a blind cadence. *)
-val keeper_proactive_task_cooldown_divisor : unit -> int
-val keeper_proactive_task_min_cooldown_sec : unit -> int
-val keeper_proactive_noop_backoff_max_shift : unit -> int
-val keeper_proactive_idle_decay_max_periods : unit -> int
-
 val keeper_batch_limit : unit -> int
-val keeper_llm_rerank_enabled : unit -> bool
-val keeper_llm_rerank_runtime : unit -> string
-(** Reranker runtime profile. Defaults through [routes.llm_rerank]; env
-    overrides may be either a concrete profile name or a logical route key. *)
 
 val keeper_unified_temperature : unit -> float
 val keeper_unified_max_tokens : unit -> int
-val keeper_tool_search_top_k : unit -> int
 
 (** {2 HITL Context-Summary Worker Policy} *)
 
-val hitl_summary_timeout_sec : unit -> float
-val hitl_summary_chat_message_limit : unit -> int
-val hitl_summary_max_tokens : unit -> int
 val hitl_summary_temperature : unit -> float
-val hitl_summary_concurrency_limit : unit -> int
 
 val keeper_status_fast_default : unit -> bool
 
 val keeper_enable_thinking : unit -> bool
-val keeper_adaptive_thinking_enabled : unit -> bool
 
 (** {1 Runtime Param Handles}
 

@@ -29,11 +29,6 @@ async function refreshServerConfigSurface(): Promise<void> {
   await refreshServerConfig()
 }
 
-async function refreshSurfaceReadinessSurface(): Promise<void> {
-  const { refreshSurfaceReadiness } = await import('./components/surface-readiness-panel')
-  await refreshSurfaceReadiness()
-}
-
 async function refreshActiveKeeperChatSurface(): Promise<void> {
   const { refreshActiveKeeperChatHistory } = await import('./keeper-runtime')
   // Guard-respecting (non-force): a no-op while the open keeper's transcript
@@ -54,7 +49,6 @@ type RefreshTask =
   | 'harness'
   | 'toolQuality'
   | 'inspector'
-  | 'surfaceReadiness'
   | 'operatorSnapshot'
   | 'operatorWorkspaceDigest'
   | 'fusionRuns'
@@ -67,8 +61,7 @@ type RefreshTask =
 //            transport-health / feature-health) share an identical light
 //            fallback plan. Their mounted panels own telemetry polling, so
 //            route visits only need to refresh namespace/mission context.
-//   Outliers — `journey` (execution only) and `cognition` keep dedicated
-//            branches above.
+//   Outliers — `journey` (execution only) keeps a dedicated branch above.
 const HIDDEN_DIAGNOSTIC_FALLBACK_PLAN: readonly RefreshTask[] = ['namespaceTruth', 'missionSnapshot']
 
 export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params'>): RefreshTask[] {
@@ -81,6 +74,8 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       // reconnect: the route refresh runs after a disconnect and recovers the
       // open keeper's history when replayed events fell outside the buffer.
       return ['namespaceTruth', 'execution', 'missionSnapshot', 'activeKeeperChat']
+    case 'registry':
+      return ['namespaceTruth', 'execution', 'missionSnapshot']
     case 'board':
       return ['board']
     case 'fusion':
@@ -99,16 +94,13 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       if (!routeState.params.section || routeState.params.section === 'agents') {
         return ['namespaceTruth', 'execution', 'missionSnapshot']
       }
-      if (routeState.params.section === 'cognition') {
-        return ['namespaceTruth', 'execution', 'missionSnapshot']
-      }
       // fleet-health: view-aware refresh (Phase 1 contract from tab-refresh.test.ts)
       if (routeState.params.section === 'fleet-health') {
         const view = routeState.params.view
         if (view === 'tool-quality') return ['toolQuality']
         if (view === 'comparison') return ['execution', 'toolQuality']
-        // default + event-log + governance: keep the route visit light.
-        // Mounted fleet-health panels own telemetry/tool/governance polling.
+        // default + event-log + Gate: keep the route visit light.
+        // Mounted fleet-health panels own telemetry/tool/Gate polling.
         return ['namespaceTruth']
       }
       // Hidden diagnostic sections fall through here. See the
@@ -117,9 +109,6 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
     case 'command':
       if (routeState.params.view === 'inspector') {
         return ['inspector']
-      }
-      if (routeState.params.view === 'surfaces') {
-        return ['surfaceReadiness']
       }
       return ['namespaceTruth', 'operatorSnapshot', 'operatorWorkspaceDigest']
     case 'workspace': {
@@ -181,7 +170,6 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
     void refreshFeatureHealthSurface()
     void refreshServerConfigSurface()
   },
-  surfaceReadiness: () => { void refreshSurfaceReadinessSurface() },
   operatorSnapshot: () => { void refreshOperatorSnapshot({ force: true }) },
   operatorWorkspaceDigest: () => { void refreshOperatorWorkspaceDigest({ force: true }) },
   fusionRuns: () => { void refreshFusionRuns() },

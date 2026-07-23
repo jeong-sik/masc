@@ -83,7 +83,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
         | Some value when String.trim live = "" -> value
         | _ -> live
       in
-      let prompt_goal = default_prompt_string defaults.goal m.goal in
       let prompt_instructions =
         default_prompt_string defaults.instructions m.instructions
       in
@@ -130,7 +129,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
       in
       let effective_system_prompt =
         Keeper_prompt.build_keeper_system_prompt
-          ~goal:prompt_goal
           ~instructions:prompt_instructions
           ~persona_extended ~keeper_name:m.name
           ~active_goals
@@ -138,8 +136,9 @@ let keeper_config_json (config : Workspace.config) (name : string)
       in
       (* Preview the actual unified prompt the keeper turn uses.
          We build the observation from the current workspace state so the
-         system message and the "Current World State" user message both
-         match what a turn would see right now.
+         effective per-turn system side (identity + "Current World State"
+         dynamic context) and the persisted user message both match what a
+         turn would see right now.
 
          Board events are collected WITHOUT advancing the keeper's board
          cursor: passing [~pending_board_events:None] would route through
@@ -158,12 +157,20 @@ let keeper_config_json (config : Workspace.config) (name : string)
           Keeper_world_observation.observe
             ~pending_board_events:(Some pending_board_events) ~config ~meta:m
         in
-        Keeper_unified_prompt.build_prompt ~meta:m ~base_path:config.base_path
-          ~profile_defaults:defaults ~observation ()
+        let parts =
+          Keeper_unified_prompt.build_prompt ~meta:m ~base_path:config.base_path
+            ~profile_defaults:defaults ~observation ()
+        in
+        (* Match what a turn actually sends: the observation frame rides the
+           per-turn dynamic context (system side), and the persisted user
+           message is the wake marker / utterances only. *)
+        ( parts.Keeper_unified_prompt.system_prompt
+          ^ "\n\n"
+          ^ parts.Keeper_unified_prompt.world_state,
+          parts.Keeper_unified_prompt.user_message )
       in
       let prompt =
         `Assoc [
-          ("goal", `String prompt_goal);
           ("instructions", `String prompt_instructions);
           ( "system_prompt_blocks",
             `Assoc
@@ -199,7 +206,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
           `String (runtime)
         | Error (`Unresolved _) -> `Null
       in
-      let per_provider_timeout = defaults.per_provider_timeout in
       let execution =
         `Assoc [
           ("selected_runtime_id", `String runtime_id);
@@ -211,41 +217,16 @@ let keeper_config_json (config : Workspace.config) (name : string)
           ("active_model", `Null);
           ("active_model_label", `Null);
           ("last_model_used_label", `Null);
-          ( "per_provider_timeout_sec",
-            Json_util.float_opt_to_json per_provider_timeout );
-          ( "per_provider_timeout_mode",
-            `String
-               (match per_provider_timeout with
-                | Some _ -> "override"
-                | None -> "turn_budget_default") );
           ("verify", `Bool false);
-        ]
-      in
-      let compaction =
-        `Assoc [
-          ("profile", `String m.compaction.profile);
-          ("ratio_gate", `Float m.compaction.ratio_gate);
-          ("message_gate", `Int m.compaction.message_gate);
-          ("token_gate", `Int m.compaction.token_gate);
-          ("cooldown_sec", `Int m.compaction.cooldown_sec);
         ]
       in
       let proactive =
         `Assoc [
           ("enabled", `Bool m.proactive.enabled);
-          ("idle_sec", `Int m.proactive.idle_sec);
-          ("cooldown_sec", `Int m.proactive.cooldown_sec);
         ]
       in
       let drift =
         drift_surface_json ~unknown_toml_keys:defaults.unknown_toml_keys
-      in
-      let handoff =
-        `Assoc [
-          ("auto", `Bool m.auto_handoff);
-          ("threshold", `Float m.handoff_threshold);
-          ("cooldown_sec", `Int m.handoff_cooldown_sec);
-        ]
       in
       let metrics =
         `Assoc [
@@ -289,29 +270,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
         Keeper_state_machine_mermaid.phase_to_mermaid
           ~current:(Option.value ~default:Keeper_state_machine.Offline current_phase)
       in
-      let decision_pipeline_diagram =
-        let phase = Option.value ~default:Keeper_state_machine.Offline current_phase in
-        let stats = Thompson_sampling.get_stats m.agent_name in
-        let turn_outcome : [`Ok | `Failed] option =
-          match Keeper_registry.get ~base_path:config.base_path m.name with
-          | Some entry when entry.turn_consecutive_failures > 0 ->
-            Some `Failed
-          | Some _ -> Some `Ok
-          | None -> None
-        in
-        Keeper_decision_audit.decision_pipeline_to_mermaid
-          ?turn_outcome
-          ~phase
-          ~thompson_alpha:stats.alpha
-          ~thompson_beta:stats.beta
-          ()
-      in
-      let tools_access =
-        `Assoc [
-          ("tool_access", Json_util.json_string_list m.tool_access);
-          ("tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist));
-        ]
-      in
       let sandbox_last_error =
         match Keeper_registry.get ~base_path:config.base_path m.name with
         | Some entry -> entry.last_error
@@ -323,14 +281,6 @@ let keeper_config_json (config : Workspace.config) (name : string)
          ("active_goal_ids", active_goal_ids_json);
          ("autoboot_enabled", `Bool m.autoboot_enabled);
          ("max_context_override", Json_util.int_opt_to_json m.max_context_override);
-         ( "limits",
-           `Assoc
-             [
-               ( "min_context_override_tokens",
-                 `Int Keeper_config.min_keeper_context_tokens );
-               ( "max_context_override_tokens",
-                 `Int Keeper_config.max_keeper_context_tokens );
-             ] );
          ("sandbox_profile", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string m.sandbox_profile));
          ("network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string m.network_mode));         ("sandbox_last_error", Json_util.string_opt_to_json sandbox_last_error);
          ("allowed_paths",
@@ -346,15 +296,11 @@ let keeper_config_json (config : Workspace.config) (name : string)
            Json_util.option_to_yojson
              Keeper_types_profile.keeper_toml_config_error_to_json
              profile_config_error );
-         ("decision_pipeline_diagram", `String decision_pipeline_diagram);
          ("prompt", prompt);
          ("execution", execution);
-         ("compaction", compaction);
          ("proactive", proactive);
          ("drift", drift);
          ("auto_execution_session", auto_execution_session_surface_json ());
-         ("handoff", handoff);
-         ("tools", tools_access);
          ("hooks", Keeper_hooks_oas.hook_introspection_json ());
          ("runtime", runtime_surface_json config m);
          ("runtime_trust", runtime_trust);

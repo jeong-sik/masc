@@ -1,15 +1,14 @@
 ---
 status: reference
 last_verified: 2026-04-17
-code_refs:
-  - lib/handover_eio.ml
 ---
 
 # Context Handoff Pattern
 
 **Legacy name**: Cellular Agent Pattern
-**Status**: Implemented
-**Primary modules**: `lib/handover_eio.ml`, `lib/tool_handover.ml`
+**Status**: Retired (2026-07-18) — the `masc_handover_*` tool surface and its
+backing modules (`lib/handover_eio.ml`, `lib/tool_handover.ml`) have been
+removed. This document is kept as a historical design reference.
 
 ## Terminology Note
 
@@ -65,7 +64,6 @@ The record is meant to preserve execution context, not to reproduce the full ori
 | Reason | Description | Example |
 |--------|-------------|---------|
 | `ContextLimit(pct)` | context usage crossed a threshold | `context_limit_85` |
-| `Timeout(secs)` | runtime budget exhausted | `timeout_300s` |
 | `Explicit` | user or agent requested handoff | `explicit` |
 | `FatalError(msg)` | unrecoverable local failure | `error: API rate limit` |
 | `TaskComplete` | work finished and a checkpoint is still useful | `task_complete` |
@@ -155,7 +153,8 @@ Handoffs are stored under:
   pending.json
 ```
 
-This path comes from `lib/handover_eio.ml`.
+This path was previously implemented by `lib/handover_eio.ml` (removed
+2026-07-18 together with the handover tool surface).
 
 ## Design Notes
 

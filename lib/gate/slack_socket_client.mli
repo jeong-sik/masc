@@ -21,6 +21,7 @@ val run :
   app_token:string ->
   trigger_policy:trigger_policy ->
   on_event:(slack_event -> unit) ->
+  on_ambient:(slack_event -> unit) ->
   unit ->
   unit
 (** Connect to Slack Socket Mode and dispatch events that pass
@@ -34,6 +35,10 @@ val run :
       read by [Channel_gate_slack_state] at send time, not here.
     - [on_event] receives [Message_create] / [App_mention] events that pass the
       trigger policy. [Reaction_added] and ignored events do not start a turn.
+    - [on_ambient] receives the record-only lane (RFC-0226 parity): human
+      [Message_create] events that failed the trigger policy and
+      [Reaction_added] events from users other than the bot itself. It must
+      not start a turn.
 
     Internally:
     1. Create {!Slack_gateway_state.t} with [trigger_policy].

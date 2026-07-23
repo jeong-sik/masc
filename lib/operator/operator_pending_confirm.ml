@@ -26,20 +26,6 @@ let normalized_actor ~context_actor = function
       let trimmed = String.trim context_actor in
       if trimmed = "" || String.equal trimmed "unknown" then "unknown" else trimmed
 
-let operator_judge_runtime_json (config : Workspace.config) =
-  let runtime = Dashboard_operator_judge.runtime_status config.base_path in
-  `Assoc
-    [
-      ("enabled", `Bool runtime.enabled);
-      ("judge_online", `Bool runtime.judge_online);
-      ("refreshing", `Bool runtime.refreshing);
-      ("generated_at", Json_util.string_option_to_yojson runtime.generated_at);
-      ("expires_at", Json_util.string_option_to_yojson runtime.expires_at);
-      ("model_used", `Null);
-      ("keeper_name", `String runtime.keeper_name);
-      ("last_error", Json_util.string_option_to_yojson runtime.last_error);
-    ]
-
 type pending_confirm = {
   token : string;
   trace_id : string;
@@ -89,7 +75,7 @@ let target_of_entry (entry : pending_confirm) =
 
 let make_available_action ~action_type ~tool_name ~target_type ~description =
   { action_type; tool_name; target_type; description;
-    confirm_required = Operator_approval.confirm_required action_type }
+    confirm_required = Operator_action_catalog.requires_confirmation action_type }
 
 let preview_of_pending_confirm (entry : pending_confirm) =
   `Assoc
@@ -336,12 +322,7 @@ let available_actions : available_action list =
     make_available_action ~action_type:"task_inject" ~tool_name:"masc_add_task"
       ~target_type:Operator_action_constants.workspace_target_type
       ~description:"Inject a backlog task into the namespace.";
-    make_available_action
-      ~action_type:Operator_action_constants.goal_completion_decision
-      ~tool_name:Operator_action_constants.goal_transition_tool
-      ~target_type:Operator_action_constants.goal_target_type
-      ~description:"Approve or reject a goal completion approval gate.";
-    make_available_action ~action_type:"keeper_message" ~tool_name:"masc_keeper_msg"
+    make_available_action ~action_type:"keeper_message" ~tool_name:"masc_keeper_delegate"
       ~target_type:Operator_action_constants.keeper_target_type
       ~description:"Send a direct operator message to a keeper.";
     make_available_action ~action_type:"keeper_probe" ~tool_name:"masc_keeper_status"

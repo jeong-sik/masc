@@ -14,17 +14,12 @@ val run_model_by_label :
   goal:string ->
   ?system_prompt:string ->
   ?tools:Agent_sdk.Tool.t list ->
-  ?max_idle_turns:int ->
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
-  ?wait_timeout_sec:float ->
   ?accept:(Agent_sdk_response.api_response -> bool) ->
-  ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
-  ?context_reducer:Agent_sdk.Context_reducer.t ->
   ?enable_thinking:bool ->
-  ?compact_ratio:float ->
   ?provider_config_transform:
     (Llm_provider.Provider_config.t ->
     (Llm_provider.Provider_config.t, Agent_sdk.Error.sdk_error) result) ->
@@ -44,15 +39,12 @@ val run_named_with_masc_tools :
   ?keeper_name:string ->
   goal:string ->
   base_path:string ->
-  ?priority:Llm_provider.Request_priority.t ->
   ?system_prompt:string ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
-  ?max_tokens:int ->
   ?accept:(Agent_sdk_response.api_response -> bool) ->
-  ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
   ?raw_trace:Agent_sdk.Raw_trace.t ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
@@ -60,10 +52,6 @@ val run_named_with_masc_tools :
   ?on_resume:(unit -> unit) ->
   ?transport:Masc_grpc_transport.t ->
   ?yield_on_tool:bool ->
-  ?compact_ratio:float ->
-  ?approval:Agent_sdk.Hooks.approval_callback ->
-  ?max_turns:int ->
-  ?max_idle_turns:int ->
   ?provider_config_transform:
     (Llm_provider.Provider_config.t ->
     (Llm_provider.Provider_config.t, Agent_sdk.Error.sdk_error) result) ->
@@ -79,18 +67,14 @@ val run_named_with_masc_tools :
 val run_model_with_masc_tools :
   model_label:string ->
   goal:string ->
-  base_path:string ->
   ?system_prompt:string ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
-  ?wait_timeout_sec:float ->
-  ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
   ?enable_thinking:bool ->
-  ?compact_ratio:float ->
   ?provider_config_transform:
     (Llm_provider.Provider_config.t ->
     (Llm_provider.Provider_config.t, Agent_sdk.Error.sdk_error) result) ->

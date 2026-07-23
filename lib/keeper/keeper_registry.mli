@@ -27,10 +27,6 @@ val validate_turn_phase_transition
   -> unit
 
 
-(** Register a keeper with an already-live fiber. Primarily used by tests and
-    direct fixtures that want a keeper to begin in [Running]. *)
-val register : base_path:string -> string -> keeper_meta -> registry_entry
-
 (** Register a fresh keeper before its first keepalive fiber launch.
     The entry starts in [Offline] and must receive [Fiber_started] when the
     runtime actually launches the fiber. *)
@@ -61,13 +57,7 @@ val register_offline_if_admitted_for_lifecycle :
   keeper_meta ->
   (registry_entry, registration_error) result
 
-(** R-A-6.a — error variant for [register_restarting].
-    [Budget_already_exhausted] is returned (not raised — the API is
-    Result-based) when the caller attempts to revive a keeper whose
-    [restart_budget_remaining] was previously cleared, which would
-    violate TLA+ §S3 BudgetNeverRevives. *)
 type register_restarting_error =
-  | Budget_already_exhausted of { name : string }
   | Restart_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
   | Restart_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Restart_event_queue_unavailable of
@@ -77,12 +67,8 @@ type register_restarting_error =
 
 (** Register a keeper that is about to relaunch after a crash.
     The entry starts in [Restarting] and must receive [Fiber_started] when the
-    replacement fiber launches.
-
-    Refuses to revive a keeper whose [restart_budget_remaining] was
-    previously cleared — preserves the TLA+ §S3 BudgetNeverRevives
-    invariant.  See [docs/tla-audit/ksm-a6-budget-never-revives-2026-05-12.md]
-    for the three revival vectors this guard closes. *)
+    replacement fiber launches. Durable pause or Dead-tombstone admission is
+    checked by the caller before this registration CAS. *)
 val register_restarting :
   base_path:string -> string -> keeper_meta ->
   (registry_entry, register_restarting_error) result
@@ -98,9 +84,6 @@ val prepare_fiber_launch_for_lifecycle :
   Keeper_lifecycle_reservation.token ->
   registry_entry ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
-
-(** Unregister a keeper (removes from registry). *)
-val unregister : base_path:string -> string -> unit
 
 type unregister_exact_result =
   | Exact_unregistered
@@ -147,10 +130,6 @@ val validate_registry_entry :
   string ->
   registry_entry ->
   (unit, registry_entry_validation_error) result
-
-(** Health verdict for a single entry.  Pure: does not read the registry. *)
-val health_of_entry :
-  base_path:string -> string -> registry_entry -> registry_entry_health
 
 (** Like [get] but returns the entry together with its health verdict.
     Returns [Some _] even when the entry is corrupted, so callers can decide
@@ -209,17 +188,8 @@ val update_entry_if_registered :
 (** Update the meta for a registered keeper. No-op if not found. *)
 val update_meta : base_path:string -> string -> keeper_meta -> unit
 
-(** Reload a registered keeper's meta from disk and replace the in-memory
-    registry copy. Returns [Ok None] when the keeper is not registered or has
-    no persisted meta. *)
-val reload_meta_from_disk :
-  base_path:string -> string -> (registry_entry option, string) result
-
 (* Runtime-attempt persistence + enrichment moved to
    Keeper_registry_runtime_attempt (record / enrich_fiber_unresolved_outcome). *)
-
-(** Record a restart. Increments restart_count and updates last_restart_ts. *)
-val record_restart : base_path:string -> string -> unit
 
 (* [record_error] moved to [Keeper_registry_error_recording.record]. *)
 
@@ -233,6 +203,11 @@ val clear_error : base_path:string -> string -> unit
 
 (** Set the structured failure reason for cohort detection. *)
 val set_failure_reason : base_path:string -> string -> failure_reason option -> unit
+
+(** [set_compaction_decision ~base_path name decision] stamps [decision] onto the
+    keeper's [compaction_rt.last_decision] so provider-overflow compaction
+    outcomes are observable in status (surfaced as [last_compaction_decision]). *)
+val set_compaction_decision : base_path:string -> string -> string -> unit
 
 (** Store the OAS Event_bus [correlation_id] from the most recent turn. *)
 val set_last_correlation_id : base_path:string -> string -> string -> unit
@@ -249,11 +224,9 @@ val mark_turn_started : base_path:string -> wake:wake_reason -> string -> unit
 val record_turn_progress :
   base_path:string -> string -> event_kind:string -> unit
 
-(** RFC-0197 (P1-4a): write-through mirror of the turn event bus
-    [pending_tool_count] into the live turn's [active_tool_count]. No-op when no
-    turn is active. Does not touch [last_progress_at]. Read by
-    [Keeper_supervisor.assess_in_turn_progress] to exclude active tool execution
-    from the [Mid_turn_no_progress] window. *)
+(** Write-through observation of the turn event bus [pending_tool_count] in the
+    live turn's [active_tool_count]. No-op when no turn is active. This is
+    telemetry only and has no timeout or lifecycle authority. *)
 val record_turn_tool_inflight : base_path:string -> string -> count:int -> unit
 
 (** Mark the beginning of an SDK turn within an existing keeper turn.
@@ -335,9 +308,6 @@ val set_turn_selected_model :
     from [Prompting + Guard_ok + Runtime_idle]. *)
 val prepare_turn_retry_after_compaction :
   base_path:string -> string -> unit
-
-(** Cross-registry convenience for hooks that only know the keeper name. *)
-val mark_turn_gate_rejected_by_name : string -> unit
 
 (** Mark the end of a keeper turn. Clears [current_turn_observation]
     so the composite observer reverts to idle and stamps
@@ -423,53 +393,20 @@ val set_grpc_close : base_path:string -> string -> (unit -> unit) option -> unit
 (** Check if a keeper is in Running state. *)
 val is_running : base_path:string -> string -> bool
 
-(** Check if a keeper is already live for boot idempotency.
-    Returns [true] when the keeper has a live fiber, is not
-    stop-requested, and its phase is [Running] or [Paused].
-    All other phases (including [Failing] and [Offline]) return [false]
-    so that [/boot] can restart the keeper instead of silently
-    doing nothing (Issue #17218). *)
-val is_boot_already_live : base_path:string -> string -> bool
-
 (** Check if a keeper has ANY registry entry (regardless of state).
     Used by reconcile to skip Crashed/Dead keepers. *)
 val is_registered : base_path:string -> string -> bool
 
-(** Mark a keeper as dead tombstone and record the transition timestamp. *)
+(** Restore an already-authoritative durable Dead tombstone into the in-memory
+    registry. Runtime failures, cancellation, retry exhaustion, and resource
+    observations must never call this function. *)
 val mark_dead : base_path:string -> string -> at:float -> unit
-
-(** Mark only [entry]'s lane dead. The running-count transition is applied
-    once, after the exact-lane CAS succeeds. *)
-val mark_dead_exact : registry_entry -> at:float -> exact_update_result
 
 (** Return the started_at timestamp, or None if not registered. *)
 val started_at : base_path:string -> string -> float option
 
-(** Test-only: override [started_at] for registry fixtures that need to
-    model a long-running fiber without waiting for wall-clock time. *)
-val set_started_at_for_test : base_path:string -> string -> float -> unit
-
 (** Count keepers in Running state. *)
 val count_running : ?base_path:string -> unit -> int
-
-(** Closed reason for a keeper launch/admission denial. *)
-type spawn_slot_denial_reason =
-  | Fd_pressure_active
-  | Fd_admission_blocked
-  | Max_active_keepers of { running_count : int; max_keepers : int }
-
-val spawn_slot_denial_reason_to_label : spawn_slot_denial_reason -> string
-val spawn_slot_denial_reason_to_detail : spawn_slot_denial_reason -> string
-
-(** Check if there are available spawn slots and return the denial reason when blocked. *)
-val spawn_slots_decision : unit -> (unit, spawn_slot_denial_reason) result
-
-(** Compatibility bool wrapper over [spawn_slots_decision]. *)
-val spawn_slots_available : unit -> bool
-
-(** Emit the durable signal for a denied keeper launch/admission. *)
-val record_spawn_slot_denied :
-  keeper_name:string -> surface:string -> spawn_slot_denial_reason -> unit
 
 module For_testing : sig
   (** Test-only bypass: install an entry without validation so tests can seed
@@ -477,15 +414,40 @@ module For_testing : sig
   val unsafe_put_entry :
     base_path:string -> string -> registry_entry -> unit
 
-  val spawn_slots_decision :
-    ?fd_admitted:bool ->
-    unit ->
-    (unit, spawn_slot_denial_reason) result
+  (** Register a keeper with an already-live fiber. Primarily used by tests and
+      direct fixtures that want a keeper to begin in [Running]. *)
+  val register : base_path:string -> string -> keeper_meta -> registry_entry
 
-  val spawn_slots_available :
-    ?fd_admitted:bool ->
-    unit ->
-    bool
+  (** Unregister a keeper (removes from registry). *)
+  val unregister : base_path:string -> string -> unit
+
+  (** Clear the registry. For testing only. *)
+  val clear : unit -> unit
+
+  (** Reload a registered keeper's meta from disk and replace the in-memory
+      registry copy. Returns [Ok None] when the keeper is not registered or has
+      no persisted meta. *)
+  val reload_meta_from_disk :
+    base_path:string -> string -> (registry_entry option, string) result
+
+  (** Record a restart. Increments restart_count and updates last_restart_ts. *)
+  val record_restart : base_path:string -> string -> unit
+
+  (** Test-only: override [started_at] for registry fixtures that need to
+      model a long-running fiber without waiting for wall-clock time. *)
+  val set_started_at_for_test : base_path:string -> string -> float -> unit
+
+  (** Recent crash entries (up to 5) for a keeper. *)
+  val crash_log_of : base_path:string -> string -> (float * string) list
+
+  (** Check if a board-reactive wakeup is allowed (debounce). [dedup_key] is the
+      key under which the wake is deduped — RFC-0239 R4 passes a content
+      fingerprint rather than the raw post_id, so identical re-posts with fresh
+      post_ids collapse. Records timestamp if allowed. Returns true for
+      unregistered keepers. *)
+  val board_wakeup_allowed :
+    base_path:string -> string -> dedup_key:string -> debounce_sec:float -> bool
+
 end
 
 type wakeup_intent =
@@ -495,19 +457,14 @@ type wakeup_intent =
   | Supervisor_resume
   | Hitl_resolution
   | Broadcast_signal
+  | Compaction_signal
+  | Attention_result
 
 type wakeup_outcome =
   | Signaled
   | Deferred_unregistered
   | Deferred_not_running of Keeper_state_machine.phase
   | Deferred_lifecycle of Keeper_lifecycle_admission.autonomous_denial
-
-(** Signal a registered keeper without requiring a Running phase. Lifecycle
-    admission is still mandatory: paused and dead-tombstone lanes are never
-    made runnable by a hint signal. The typed intent is observability data,
-    not a policy bypass. *)
-val wakeup :
-  intent:wakeup_intent -> base_path:string -> string -> wakeup_outcome
 
 val wakeup_running :
   intent:wakeup_intent -> base_path:string -> string -> wakeup_outcome
@@ -516,15 +473,28 @@ val wakeup_running :
     or inactive live hint without treating the already-committed payload as a
     delivery failure. *)
 
-(** Set fiber_wakeup for all running keepers. *)
-val wakeup_all : intent:wakeup_intent -> ?base_path:string -> unit -> unit
+type exact_wakeup_outcome =
+  | Exact_wake_signaled
+  | Exact_wake_missing
+  | Exact_wake_replaced
+  | Exact_wake_not_running of Keeper_state_machine.phase
+  | Exact_wake_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
+  | Exact_wake_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+
+val wakeup_running_exact :
+  intent:wakeup_intent -> registry_entry -> exact_wakeup_outcome
+(** Signal only the Keeper lane captured by [registry_entry]. The current
+    registry entry is resolved by its existing canonical key and compared with
+    the captured entry through [Keeper_lane.Id]; an entry registered later
+    under the same name returns [Exact_wake_replaced] without signalling it.
+    Immutable record updates that preserve the lane id remain the same owner,
+    and lifecycle/phase admission is evaluated from that current record. The
+    ownership check and signal are serialized with lifecycle transactions for
+    this Keeper key; an unowned wake returns [Exact_wake_lifecycle_reserved]. *)
 
 (** Fiber-level health based on Promise resolution state.
     Returns Fiber_unknown if the keeper is not registered. *)
 val fiber_health_of : base_path:string -> string -> fiber_health
-
-(** Recent crash entries (up to 5) for a keeper. *)
-val crash_log_of : base_path:string -> string -> (float * string) list
 
 (** Restore supervisor state on a freshly registered entry (used by restart). *)
 val restore_supervisor_state :
@@ -532,31 +502,11 @@ val restore_supervisor_state :
   restart_count:int -> last_restart_ts:float ->
   crash_log:(float * string) list -> unit
 
-(** Check if a board-reactive wakeup is allowed (debounce). [dedup_key] is the
-    key under which the wake is deduped — RFC-0239 R4 passes a content
-    fingerprint rather than the raw post_id, so identical re-posts with fresh
-    post_ids collapse. Records timestamp if allowed. Returns true for
-    unregistered keepers. *)
-val board_wakeup_allowed :
-  base_path:string -> string -> dedup_key:string -> debounce_sec:float -> bool
-
-(** Clear all board wakeup timestamps for a keeper. No-op if not found. *)
-val clear_board_wakeups : base_path:string -> string -> unit
-
 (** Reset tracking state (agent count + board wakeups) for a keeper. *)
 val cleanup_tracking : base_path:string -> string -> unit
 
 (** Reset tracking only if [entry]'s lane still owns its registry key. *)
 val cleanup_tracking_exact : registry_entry -> exact_update_result
-
-(** Clear the registry. For testing only. *)
-val clear : unit -> unit
-
-(** Get board event cursor timestamp. Returns 0.0 if not found. *)
-val get_board_cursor_ts : base_path:string -> string -> float
-
-(** Update board event cursor timestamp. No-op if not found. *)
-val set_board_cursor_ts : base_path:string -> string -> float -> unit
 
 (** Get board event cursor token. Returns [(0.0, None)] if not found. *)
 val get_board_cursor : base_path:string -> string -> float * string option
@@ -567,7 +517,8 @@ val set_board_cursor :
 
 (** Record a tool call for a keeper. No-op if not found. *)
 val record_tool_use :
-  base_path:string -> string -> tool_name:string -> success:bool -> unit
+  base_path:string -> string -> tool_name:string ->
+  disposition:('completed, 'deferred, 'failed) Tool_result.disposition -> unit
 
 (** Get tool usage sorted by call count descending. *)
 val tool_usage_of : base_path:string -> string ->
@@ -629,15 +580,6 @@ val dispatch_event_with_audit :
   string -> Keeper_state_machine.event ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
-(** Like [dispatch_event], but logs and emits a Otel_metric_store counter on
-    [Error] so silent-failure call sites do not lose the signal.
-    Same return type — callers that need the result can still match. *)
-val dispatch_event_and_log :
-  base_path:string ->
-  ?origin:lifecycle_event_origin ->
-  string -> Keeper_state_machine.event ->
-  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
-
 (** [dispatch_event_unit] wraps [dispatch_event_and_log] and logs a warning
     on [Error] instead of returning the result. Replaces [ignore (...)] call sites
     that previously swallowed transition errors silently. *)
@@ -658,9 +600,6 @@ val dispatch_event_with_audit_and_log :
 
 (** Get the fine-grained phase of a keeper. *)
 val get_phase : base_path:string -> string -> Keeper_state_machine.phase option
-
-(** Get the observable conditions of a keeper. *)
-val get_conditions : base_path:string -> string -> Keeper_state_machine.conditions option
 
 (* Event-queue access (enqueue_event / event_queue_snapshot / dequeue_event /
    drain_board_events) moved to Keeper_registry_event_queue. *)

@@ -217,6 +217,18 @@ export function AnnotationPopover({
       <div style=${{ color: 'var(--color-fg-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
         ${annotation.content}
       </div>
+      <div
+        class="ide-editor-annotation-references"
+        aria-label="Annotation references"
+        style=${{ marginTop: 'var(--sp-2)', display: 'flex', gap: 'var(--sp-1)', flexWrap: 'wrap' }}
+      >
+        ${annotation.references.map((reference, index) => html`
+          <span
+            key=${`${reference.relation}:${reference.reference}:${index}`}
+            class="ide-editor-annotation-reference"
+          >${reference.relation}: ${reference.reference}</span>
+        `)}
+      </div>
       ${routeLinks.length > 0 ? html`
         <div
           class="ide-editor-context-route-links"

@@ -3,9 +3,7 @@
 
 type t =
   | Fiber_start_rejected
-  | Reconcile_gate_rejected
   | Dead_tombstone_submission
-  | Force_watchdog_crash
   | Paused_meta_read
   | Paused_meta_prune_submission
 

@@ -24,9 +24,8 @@ val drain
   -> t
   -> Keeper_turn_runtime_budget.turn_event_bus_summary
 
-val committed_mutating_tools : t -> string list
-
 val integrity_error : t -> Agent_sdk.Error.sdk_error option
+val tool_completed_count : t -> int
 
 val start_background_drain
   :  clock:float Eio.Time.clock_ty Eio.Resource.t

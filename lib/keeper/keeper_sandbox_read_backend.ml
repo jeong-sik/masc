@@ -181,9 +181,9 @@ let run_command_with_status ?turn_sandbox_factory
           Eio_guard.protect
             ~finally:secret_projection.cleanup
             (fun () ->
-               Docker_spawn_throttle.with_slot (fun () ->
+               Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
                  Masc_exec.Exec_gate.run_argv_with_status
-                   ~actor:`System_sandbox
+                   ~actor:(Masc_exec.Agent_id.of_string "system/sandbox")
                    ~raw_source:(String.concat " " argv)
                    ~summary:"keeper docker read sandboxed command"
                    ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
@@ -242,7 +242,7 @@ let read_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path
         (Printf.sprintf
            "docker_cat_failed: path_is_directory: %s (Read requires a file, \
             not a directory; to list a directory use Execute with ls, e.g. \
-            executable='ls' argv=['-la','%s'])"
+            argv=['ls','-la','%s'])"
            host_path
            host_path)
     else

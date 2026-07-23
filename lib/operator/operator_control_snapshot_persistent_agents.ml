@@ -49,6 +49,8 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                  ; "context_tokens", field_or_null "context_tokens"
                  ; "context_max", field_or_null "context_max"
                  ; "context_source", field_or_null "context_source"
+                 ; ( "context_metrics_unavailable"
+                   , field_or_null "context_metrics_unavailable" )
                  ; "last_model_used", field_or_null "last_model_used"
                  ; "active_model", field_or_null "active_model"
                  ; "active_model_label", field_or_null "active_model_label"
@@ -108,7 +110,6 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                     ; "agent_name", `String meta.agent_name
                     ; ( "trace_id"
                       , `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
-                    ; "goal", `String meta.goal
                     ; "status", `String agent_status
                     ; "generation", `Int meta.runtime.generation
                     ; "turn_count", `Int meta.runtime.usage.total_turns

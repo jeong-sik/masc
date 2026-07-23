@@ -92,20 +92,8 @@ function trimmed(value: string | null | undefined): string | null {
   return text ? text : null
 }
 
-const NO_PROGRESS_LOOP_HINT =
-  '반복된 무증거 턴으로 자동 정지된 progress-safety latch입니다. provider 실패가 아니며 Resume이 latch를 해제합니다.'
-const IDLE_LOOP_HINT =
-  '반복 idle 턴으로 자동 정지되었습니다. provider 실패가 아니며 최근 실행 상태 확인 후 재개하세요.'
-
 export function normalizeKeeperBlockerText(value: string | null | undefined): string | null {
-  const text = trimmed(value)
-  if (!text) return null
-  const lower = text.toLowerCase()
-  if (lower.includes('no_progress loop detected') || lower.includes('no-progress loop')) {
-    return NO_PROGRESS_LOOP_HINT
-  }
-  if (lower.includes('idle loop detected')) return IDLE_LOOP_HINT
-  return text
+  return trimmed(value)
 }
 
 export function keeperDisplayModel(
@@ -306,8 +294,6 @@ function keeperLifecycleStatus(phase: Keeper['lifecycle_phase'] | string | null 
       return 'restarting'
     case 'Dead':
       return 'dead'
-    case 'Zombie':
-      return 'zombie'
     default:
       return null
   }
@@ -350,11 +336,7 @@ function transientProviderRuntimeText(value: string | null | undefined): boolean
 export function isKeeperAutoRecoverPause(keeper: Keeper | null | undefined): boolean {
   if (!keeper || !isKeeperPaused(keeper)) return false
   const blockerClass = keeper.runtime_blocker_class
-  if (
-    blockerClass === 'turn_timeout'
-    || blockerClass === 'turn_timeout_after_queue_wait'
-    || blockerClass === 'admission_queue_wait_timeout'
-  ) {
+  if (blockerClass === 'turn_timeout') {
     return true
   }
   if (blockerClass === 'provider_runtime_error') {
@@ -462,45 +444,22 @@ function isHeartbeatAlive(heartbeat: string): boolean {
   return (Date.now() - ts) / 1000 < HEARTBEAT_ALIVE_THRESHOLD_S
 }
 
-function continueGateHint(keeper: Keeper): string {
-  const detail = normalizeKeeperBlockerText(keeper.runtime_blocker_summary)
-  if (detail) return `계속 진행 승인 대기 · ${detail}`
-  if (keeper.runtime_blocker_class === 'ambiguous_post_commit_timeout') {
-    return '계속 진행 승인 대기 · 변경 이후 응답이 끊겨 상태 확인이 필요합니다.'
-  }
-  if (keeper.runtime_blocker_class === 'ambiguous_post_commit_failure') {
-    return '계속 진행 승인 대기 · 변경 이후 실패가 있어 상태 확인이 필요합니다.'
-  }
-  return '계속 진행 승인 대기 · 일부 변경이 반영되었을 수 있어 운영자 확인이 필요합니다.'
-}
-
 const runtimeBlockerLabels = {
-  ambiguous_post_commit_timeout: '커밋 후 응답 없음',
-  ambiguous_post_commit_failure: '커밋 후 실패',
-  admission_queue_wait_timeout: '대기열 진입 만료',
-  turn_timeout_after_queue_wait: '대기 후 턴 만료',
   turn_timeout: '턴 응답 만료',
-  turn_livelock_blocked: '턴 livelock 차단',
-  completion_contract_violation: '완료 계약 위반',
   runtime_exhausted: '런타임 후보 소진',
   provider_runtime_error: '런타임 호출 오류',
-  tool_route_recoverable_failure: '도구 라우팅 복구 가능 실패',
   fiber_unresolved: 'Fiber 미해결',
   stale_turn_timeout: '오래된 턴 만료',
   stale_termination_storm: 'Stale 종료 폭주',
   heartbeat_failures: '하트비트 실패',
   turn_failures: '턴 실패 반복',
   exception: '런타임 예외',
-  stale_fleet_batch: 'Fleet stale 배치',
   awaiting_operator: '운영자 조치 대기',
   awaiting_sandbox_egress: '샌드박스 egress 대기',
   supervisor_paused: 'Supervisor 일시정지',
   synthetic_stall: '합성 상태 정체',
   self_imposed_idle: '자체 대기',
-  no_progress_loop: 'No-progress 루프',
-  sdk_max_turns_exceeded: 'SDK 최대 턴 초과',
-  sdk_token_budget_exceeded: 'SDK 토큰 예산 초과',
-  sdk_cost_budget_exceeded: 'SDK 비용 예산 초과',
+  sdk_context_window_exceeded: 'SDK 컨텍스트 윈도 초과',
   sdk_unrecognized_stop_reason: 'SDK 미식별 정지 사유',
   sdk_idle_detected: 'SDK Idle 감지',
   sdk_guardrail_violation: 'SDK 가드레일 위반',
@@ -517,35 +476,16 @@ export function keeperRuntimeBlockerLabel(
 
 export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): string | null {
   if (!keeper) return null
-  if (keeper.runtime_blocker_continue_gate) return continueGateHint(keeper)
   const blockerClass = keeper.runtime_blocker_class
   const runtimeBlocker = normalizeKeeperBlockerText(keeper.runtime_blocker_summary)
   if (runtimeBlocker && runtimeBlocker !== blockerClass) {
     return runtimeBlocker
   }
-  if (blockerClass === 'ambiguous_post_commit_timeout') {
-    return '최근 변경 이후 응답이 끊겨 상태 확인이 필요합니다.'
-  }
-  if (blockerClass === 'ambiguous_post_commit_failure') {
-    return '최근 변경 이후 실패가 있어 상태 확인이 필요합니다.'
-  }
-  if (blockerClass === 'admission_queue_wait_timeout') {
-    return 'Keeper admission FIFO 대기 시간이 초과되었습니다.'
-  }
-  if (blockerClass === 'turn_timeout_after_queue_wait') {
-    return '대기 후 실행된 턴이 전체 제한 시간을 초과했습니다.'
-  }
   if (blockerClass === 'turn_timeout') {
     return '턴 실행 시간이 제한 시간을 초과했습니다.'
   }
-  if (blockerClass === 'completion_contract_violation') {
-    return '완료 계약 조건을 만족하지 못해 재확인이 필요합니다.'
-  }
   if (blockerClass === 'runtime_exhausted') {
     return '런타임 후보가 모두 소진되어 runtime 상태 확인이 필요합니다.'
-  }
-  if (blockerClass === 'tool_route_recoverable_failure') {
-    return '도구 라우팅이 복구 가능한 실패로 끝나 descriptor, tool surface, runtime lane 확인이 필요합니다.'
   }
   if (blockerClass === 'provider_runtime_error') {
     return '런타임 호출 경계가 keeper 진행 전에 실패했습니다.'
@@ -568,9 +508,6 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   if (blockerClass === 'exception') {
     return 'Keeper 런타임 예외가 기록되어 로그와 최근 turn 상태 확인이 필요합니다.'
   }
-  if (blockerClass === 'stale_fleet_batch') {
-    return '여러 keeper가 같은 watchdog 창에서 stale로 종료되어 supervisor pause/backoff 상태 확인이 필요합니다.'
-  }
   if (blockerClass === 'awaiting_operator') {
     return '진행을 위해 운영자의 승인, 결정, 또는 게이트 해제가 필요합니다.'
   }
@@ -585,9 +522,6 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   }
   if (blockerClass === 'self_imposed_idle') {
     return 'Keeper가 관찰 또는 대기만 계획하고 있어 다음 실행 지시가 필요할 수 있습니다.'
-  }
-  if (blockerClass === 'no_progress_loop') {
-    return NO_PROGRESS_LOOP_HINT
   }
   return null
 }
@@ -637,21 +571,19 @@ export function keeperRuntimeHint(keeper: Keeper | null | undefined): string | n
  *  and summary surface so they agree on precedence.
  *
  *  Precedence: a real message output (recent_output/input_preview) first, then
- *  the most recent proactive turn's preview, then the goal / current-task
+ *  the most recent proactive turn's preview, then the current-task
  *  fallbacks. The proactive preview matters because a proactive-only keeper
  *  never broadcasts — `recent_output_preview` is message-bus derived and stays
  *  empty for it — so its work surfaces solely through `last_proactive_preview`.
  *  Reading only the message fields left every proactive keeper rendering the
  *  bare "최근 작업 요약 없음" placeholder while the live signal sat unread on the
- *  same card (last_proactive_preview populated 13/15 in the fleet, all five
- *  message/goal fields 0/15). Returns null when no signal exists. */
+ *  same card. Returns null when no signal exists. */
 export function keeperWorkPreview(keeper: Keeper | null | undefined): string | null {
   if (!keeper) return null
   return firstNonEmptyString(
     keeper.recent_output_preview,
     keeper.recent_input_preview,
     keeper.last_proactive_preview,
-    keeper.goal,
     keeper.agent?.current_task,
   )
 }

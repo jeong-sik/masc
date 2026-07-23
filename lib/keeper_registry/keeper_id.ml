@@ -1,6 +1,17 @@
 module Keeper_name = struct
   type t = string
-  let is_valid s =
+
+  let of_string s =
+    if Safe_identifier.is_portable_name s
+    then Ok s
+    else Error (Safe_identifier.portable_name_error ~field:"keeper_name")
+  ;;
+
+  let to_string s = s
+  let equal = String.equal
+end
+
+let is_valid_trace_id s =
     let len = String.length s in
     len > 0 && len <= 64 &&
     let rec check i =
@@ -11,14 +22,7 @@ module Keeper_name = struct
         | 'a'..'z' | 'A'..'Z' | '0'..'9' | '-' | '_' -> check (i + 1)
         | _ -> false
     in check 0
-
-  let of_string s =
-    if is_valid s then Ok s
-    else Error (Printf.sprintf "Invalid keeper_name format: '%s'" s)
-
-  let to_string s = s
-  let equal = String.equal
-end
+;;
 
 (* Bounded preview for id validation error messages — these ids
    originate from external requests / config / JSON; full dump risks
@@ -32,7 +36,7 @@ let preview_id s =
 module Trace_id = struct
   type t = string
   let is_valid s =
-    s <> "." && s <> ".." && Keeper_name.is_valid s
+    s <> "." && s <> ".." && is_valid_trace_id s
   let of_string s =
     if is_valid s then Ok s
     else (

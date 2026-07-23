@@ -411,19 +411,7 @@ let json_iso_opt json =
 
 let read_recent_metrics_lines config keeper_name =
   let store = Keeper_types_support.keeper_metrics_store config keeper_name in
-  let dated = Dated_jsonl.read_recent_lines store 8 in
-  if dated <> [] then dated
-  else
-    let metrics_path = Keeper_types_support.keeper_metrics_path config keeper_name in
-    match
-      Keeper_memory.read_file_tail_lines_result metrics_path
-        ~max_bytes:40000 ~max_lines:8
-    with
-    | Ok lines -> lines
-    | Error exn_class ->
-        Keeper_memory.record_memory_recall_read_error
-          ~site:"keeper_status_metrics" metrics_path exn_class;
-        []
+  Dated_jsonl.read_recent_lines store 8
 
 let latest_snapshot_of_lines lines ~parse_snapshot =
   let ordered = List.rev lines in
@@ -509,7 +497,7 @@ let latest_tool_audit_snapshot_from_decisions config keeper_name =
 
 let latest_tool_audit_snapshot_from_metrics config keeper_name =
   let lines = read_recent_metrics_lines config keeper_name in
-  let metrics_path = Keeper_types_support.keeper_metrics_path config keeper_name in
+  let metrics_path = Keeper_types_support.keeper_metrics_dir config keeper_name in
   let report_drop ~reason ~detail =
     report_persistence_read_drop
       ~surface:metrics_tool_audit_persistence_surface

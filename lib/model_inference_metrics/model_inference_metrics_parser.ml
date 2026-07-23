@@ -267,24 +267,9 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
              infer_usage_trust_from_fields
                tfields
                ~usage_reported
-               ~model
                ~input_tokens:input_tokens_raw
                ~output_tokens:output_tokens_raw
            in
-           let usage_untrusted = usage_trust_untrusted usage_trust in
-           let tok_per_sec = if usage_untrusted then None else tok_per_sec_raw in
-           let input_tokens = if usage_untrusted then None else input_tokens_raw in
-           let output_tokens = if usage_untrusted then None else output_tokens_raw in
-           let cache_read_tokens =
-             if usage_untrusted then None else cache_read_tokens_raw
-           in
-           let cache_creation_tokens =
-             if usage_untrusted then None else cache_creation_tokens_raw
-           in
-           let reasoning_tokens =
-             if usage_untrusted then None else reasoning_tokens_raw
-           in
-           let cost_usd = if usage_untrusted then None else cost_usd_raw in
            let telemetry_reported =
              match json_bool_field_opt "telemetry_reported" tfields with
              | Some _ as value -> value
@@ -310,20 +295,20 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
              ; outcome
              ; stop_reason = json_string_field_opt "stop_reason" tfields
              ; turn_lane = json_string_field_opt "turn_lane" tfields
-             ; tok_per_sec
+             ; tok_per_sec = tok_per_sec_raw
              ; provider
              ; prompt_tok_per_sec
              ; hw_decode_tok_per_sec
              ; peak_memory_gb
              ; thinking_enabled
              ; latency_ms
-             ; input_tokens
-             ; output_tokens
-             ; cache_read_tokens
-             ; cache_creation_tokens
-             ; reasoning_tokens
+             ; input_tokens = input_tokens_raw
+             ; output_tokens = output_tokens_raw
+             ; cache_read_tokens = cache_read_tokens_raw
+             ; cache_creation_tokens = cache_creation_tokens_raw
+             ; reasoning_tokens = reasoning_tokens_raw
              ; fallback_applied
-             ; cost_usd
+             ; cost_usd = cost_usd_raw
              ; tool_call_count = outer_tool_call_count
              ; tools_used = outer_tools_used
              ; usage_reported
@@ -331,13 +316,7 @@ let parse_telemetry_entry (json : Yojson.Safe.t) ~since_unix
              ; usage_trust
              ; usage_anomaly_reasons
              ; coverage_reason = json_string_field_opt "coverage_reason" tfields
-             ; coverage_stage =
-                 (if usage_untrusted
-                  then (
-                    match json_string_field_opt "coverage_stage" tfields with
-                    | Some _ as stage -> stage
-                    | None -> Some "keeper")
-                  else json_string_field_opt "coverage_stage" tfields)
+             ; coverage_stage = json_string_field_opt "coverage_stage" tfields
              ; is_error = false
              ; streaming_ttfrc_ms = json_float_field_opt "streaming_ttfrc_ms" tfields
              ; streaming_inter_chunk_count = json_int_field_opt "streaming_inter_chunk_count" tfields
@@ -441,7 +420,6 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
          infer_usage_trust_from_fields
            fields
            ~usage_reported:(Some usage_reported)
-           ~model
            ~input_tokens:input_tokens_raw
            ~output_tokens:output_tokens_raw
        in
@@ -456,7 +434,6 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
          | Usage_missing_reported | Usage_present_reported ->
            base_usage_anomaly_reasons
        in
-       let usage_untrusted = usage_trust_untrusted usage_trust in
        let latency_ms = json_positive_float_field_opt "request_latency_ms" fields in
        let tok_per_sec_raw =
          match json_float_field_opt "tokens_per_second" fields with
@@ -467,17 +444,10 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
               Some (Float.of_int out /. (latency /. 1000.0))
             | _ -> None)
        in
-       let tok_per_sec = if usage_untrusted then None else tok_per_sec_raw in
-       let input_tokens = if usage_untrusted then None else input_tokens_raw in
-       let output_tokens = if usage_untrusted then None else output_tokens_raw in
-       let cache_read_tokens = if usage_untrusted then None else cache_read_tokens_raw in
        let cache_creation_tokens_raw =
          match json_int_field_opt "cache_creation_tokens" fields with
          | Some _ as v -> v
          | None -> json_int_field_opt "cache_creation_input_tokens" fields
-       in
-       let cache_creation_tokens =
-         if usage_untrusted then None else cache_creation_tokens_raw
        in
        let prompt_tok_per_sec =
          match List.assoc_opt "prompt_per_second" fields with
@@ -504,24 +474,20 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
          ; outcome = "success"
          ; stop_reason = None
          ; turn_lane = None
-         ; tok_per_sec
+         ; tok_per_sec = tok_per_sec_raw
          ; provider
          ; prompt_tok_per_sec
          ; hw_decode_tok_per_sec
          ; peak_memory_gb
          ; thinking_enabled = None
          ; latency_ms
-         ; input_tokens
-         ; output_tokens
-         ; cache_read_tokens
-         ; cache_creation_tokens
-         ; reasoning_tokens =
-             (if usage_untrusted
-              then None
-              else json_int_field_opt "reasoning_tokens" fields)
+         ; input_tokens = input_tokens_raw
+         ; output_tokens = output_tokens_raw
+         ; cache_read_tokens = cache_read_tokens_raw
+         ; cache_creation_tokens = cache_creation_tokens_raw
+         ; reasoning_tokens = json_int_field_opt "reasoning_tokens" fields
          ; fallback_applied = false
-         ; cost_usd =
-             (if usage_untrusted then None else json_float_field_opt "cost_usd" fields)
+         ; cost_usd = json_float_field_opt "cost_usd" fields
          ; tool_call_count = 0
          ; tools_used = []
          ; usage_reported = Some usage_reported

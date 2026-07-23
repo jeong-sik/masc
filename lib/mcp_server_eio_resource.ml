@@ -55,7 +55,15 @@ let handle_read_resource_eio state id params =
                 | Ok msg when msg.Masc_domain.seq > since_seq ->
                     msgs := (Masc_domain.message_to_yojson msg) :: !msgs;
                     incr count
-                | Ok _ | Error _ -> ()
+                | Ok _ -> ()
+                | Error detail ->
+                  Log.legacy_traceln
+                    ~level:Log.Warn
+                    ~module_name:"MCP"
+                    (Printf.sprintf
+                       "[WARN] Failed to decode message resource %s: %s"
+                       path
+                       detail)
               end
             ) files;
             `List (List.rev !msgs)

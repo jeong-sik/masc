@@ -75,8 +75,6 @@ type scenario = {
   expected_outcome : string;          (** What should happen (for reporting) *)
   tool_expectations : tool_expectation list;
   graders : grader list;
-  max_turns : int;                    (** Max turns before timeout *)
-  max_cost_usd : float;              (** Advisory cost threshold for this scenario *)
   tags : string list;                 (** Filtering tags: "regression", "smoke", etc. *)
   ownership : ownership;              (** Self_owned feeds the judge under --record-verdicts; default Foreign *)
 }
@@ -409,8 +407,6 @@ let scenario_to_json (s : scenario) : Yojson.Safe.t =
     ("description", `String s.description);
     ("category", `String s.category);
     ("goal", `String s.goal);
-    ("max_turns", `Int s.max_turns);
-    ("max_cost_usd", `Float s.max_cost_usd);
     ("tags", `List (List.map (fun s -> `String s) s.tags));
     ("ownership", `String (ownership_to_string s.ownership));
     ("graders", `Int (List.length s.graders));
@@ -428,17 +424,6 @@ let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
     let str_opt key default =
       match Json_util.assoc_member_opt key json with
       | Some (`String s) -> s
-      | _ -> default
-    in
-    let int_opt key default =
-      match Json_util.assoc_member_opt key json with
-      | Some (`Int i) -> i
-      | _ -> default
-    in
-    let float_opt key default =
-      match Json_util.assoc_member_opt key json with
-      | Some (`Float f) -> f
-      | Some (`Int i) -> float_of_int i
       | _ -> default
     in
     let str_list key =
@@ -563,8 +548,6 @@ let scenario_of_json (json : Yojson.Safe.t) : (scenario, string) result =
       expected_outcome = str_opt "expected_outcome" "";
       tool_expectations;
       graders;
-      max_turns = int_opt "max_turns" 5;
-      max_cost_usd = float_opt "max_cost_usd" 0.10;
       tags = str_list "tags";
       ownership;
     }

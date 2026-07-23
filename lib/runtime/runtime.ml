@@ -155,16 +155,86 @@ let validate_librarian_runtime ~(config_path : string)
               ~runtime_count:(List.length runtimes) id))
 ;;
 
+(* Route ids resolve with lane precedence ([resolve_assignment] prefers a lane
+   over a same-named runtime), so route validation must judge the same target
+   the consumer will actually get: lane first, runtime second. *)
+let find_declared_lane (lanes : Runtime_lane.t list) (id : string) =
+  List.find_opt (fun lane -> String.equal (Runtime_lane.id lane) id) lanes
+;;
+
+(* Every lane candidate must satisfy the route's capability contract: the
+   turn-driver lane walk attempts candidates without re-filtering by
+   capability, so one incapable candidate would silently downgrade the
+   contract mid-failover. [validate_lanes] already guarantees candidate ids
+   resolve; the [None] arm stays total for the error message anyway. *)
+let validate_lane_candidates_capability
+    ~(config_path : string)
+    ~(route_name : string)
+    ~(capability_key : string)
+    ~(runtime_supports : t -> bool)
+    (runtimes : t list)
+    (lane : Runtime_lane.t) : (unit, string) result =
+  let lane_id = Runtime_lane.id lane in
+  let rec check = function
+    | [] -> Ok ()
+    | candidate_id :: rest ->
+      (match
+         List.find_opt (fun (r : t) -> String.equal r.id candidate_id) runtimes
+       with
+       | None ->
+         Error
+           (Printf.sprintf
+              "%s: [runtime].%s = %S lane candidate %S is not a configured \
+               runtime"
+              config_path
+              route_name
+              lane_id
+              candidate_id)
+       | Some runtime ->
+         if runtime_supports runtime
+         then check rest
+         else
+           Error
+             (Printf.sprintf
+                "%s: [runtime].%s = %S lane candidate %S uses model %S, which \
+                 does not declare %s"
+                config_path
+                route_name
+                lane_id
+                candidate_id
+                runtime.model.id
+                capability_key))
+  in
+  check (Runtime_lane.ordered_candidates lane)
+;;
+
 (* [runtime].cross_verifier mirrors [runtime].librarian validation: an unknown
    id is an operator typo rejected at load, not a silent fallback
    (Unknown→Permissive anti-pattern). [None] is the designed "inherit
-   [runtime].default" case. *)
+   [runtime].default" case. A lane id is accepted when every candidate
+   declares JSON mode (#25394). *)
 let validate_cross_verifier_runtime ~(config_path : string)
     ~(dropped_bindings : (string * string) list) (runtimes : t list)
+    (lanes : Runtime_lane.t list)
     (cross_verifier_id : string option) : (unit, string) result =
+  let supports_json (runtime : t) =
+    match runtime.model.capabilities with
+    | Some caps -> caps.supports_response_format_json
+    | None -> false
+  in
   match cross_verifier_id with
   | None -> Ok ()
   | Some id ->
+    (match find_declared_lane lanes id with
+     | Some lane ->
+       validate_lane_candidates_capability
+         ~config_path
+         ~route_name:"cross_verifier"
+         ~capability_key:"supports-response-format-json"
+         ~runtime_supports:supports_json
+         runtimes
+         lane
+     | None ->
     (match List.find_opt (fun (r : t) -> String.equal r.id id) runtimes with
      | None ->
       Error
@@ -175,9 +245,9 @@ let validate_cross_verifier_runtime ~(config_path : string)
            (unresolved_runtime_suffix ~dropped_bindings
               ~runtime_count:(List.length runtimes) id))
      | Some runtime ->
-       (match runtime.model.capabilities with
-        | Some caps when caps.supports_response_format_json -> Ok ()
-        | _ ->
+       if supports_json runtime
+       then Ok ()
+       else
           Error
             (Printf.sprintf
                "%s: [runtime].cross_verifier = %S uses model %S, which does \
@@ -191,13 +261,32 @@ let validate_cross_verifier_runtime ~(config_path : string)
    requests. Unlike the librarian lane, this lane must declare structured output,
    not just JSON mode. [None] remains a migration fallback for existing configs;
    unsupported resolved runtimes are rejected by each caller's OAS schema
-   validation instead of silently dropping the schema. *)
+   validation instead of silently dropping the schema. A [runtime.lanes] id is
+   accepted when every candidate declares structured output (#25394): every
+   consumer routes through [resolve_assignment]-aware paths
+   ([Keeper_turn_driver.run_named] or the compaction candidate expansion). *)
 let validate_structured_judge_runtime ~(config_path : string)
     ~(dropped_bindings : (string * string) list) (runtimes : t list)
+    (lanes : Runtime_lane.t list)
     (structured_judge_id : string option) : (unit, string) result =
+  let supports_structured (runtime : t) =
+    match runtime.model.capabilities with
+    | Some caps -> caps.supports_structured_output
+    | None -> false
+  in
   match structured_judge_id with
   | None -> Ok ()
   | Some id ->
+    (match find_declared_lane lanes id with
+     | Some lane ->
+       validate_lane_candidates_capability
+         ~config_path
+         ~route_name:"structured_judge"
+         ~capability_key:"supports-structured-output"
+         ~runtime_supports:supports_structured
+         runtimes
+         lane
+     | None ->
     (match List.find_opt (fun (r : t) -> String.equal r.id id) runtimes with
      | None ->
        Error
@@ -208,9 +297,9 @@ let validate_structured_judge_runtime ~(config_path : string)
             (unresolved_runtime_suffix ~dropped_bindings
                ~runtime_count:(List.length runtimes) id))
      | Some runtime ->
-       (match runtime.model.capabilities with
-        | Some caps when caps.supports_structured_output -> Ok ()
-        | _ ->
+       if supports_structured runtime
+       then Ok ()
+       else
           Error
             (Printf.sprintf
                "%s: [runtime].structured_judge = %S uses model %S, which does \
@@ -336,7 +425,7 @@ let decide_capability_gate ~(config_path : string) (entries : (string * bool) li
       (Printf.sprintf
          "%s: %d runtime model(s) absent from the OAS capability catalog; they \
           would use provider_default and silently drop thinking/sampling control. \
-          Add them to oas-models.toml (OAS catalog): %s"
+          Add deployment rows to oas-models-overlay.toml or update the OAS embedded catalog: %s"
          config_path
          (List.length unknown)
          (String.concat ", " (List.map fst unknown)))
@@ -401,7 +490,7 @@ let missing_catalog_report_to_string (report : missing_catalog_report) =
   Printf.sprintf
     "%s: %d runtime model(s) absent from the OAS capability catalog; they \
      would use provider_default and silently drop thinking/sampling control. \
-     Add them to oas-models.toml (OAS catalog): %s"
+     Add deployment rows to oas-models-overlay.toml or update the OAS embedded catalog: %s"
     report.config_path
     (List.length report.missing_models)
     (String.concat ", " (List.map missing_catalog_model_label report.missing_models))
@@ -494,7 +583,7 @@ let startup_degradation_to_yojson = function
       ; "dropped_lanes", `List (List.map dropped_lane_to_yojson degradation.dropped_lanes)
       ; ( "next_action"
         , `String
-            "Add the listed provider/model rows to oas-models.toml or remove \
+            "Add deployment rows to oas-models-overlay.toml (or upstream OAS) or remove \
              those runtime.toml bindings; uncatalogued runtimes are disabled \
              for this process." )
       ]
@@ -674,7 +763,7 @@ let missing_reference_error
   Printf.sprintf
     "%s: cannot use degraded runtime boot because catalog-missing runtime ids \
      are referenced by routing config: %s. %s Add catalog rows to \
-     oas-models.toml or remove those routing references; MASC will not erase \
+     oas-models-overlay.toml (or upstream OAS) or remove those routing references; MASC will not erase \
      explicit runtime intent into [runtime].default fallback."
     config_path
     (String.concat "; " references)
@@ -728,39 +817,6 @@ let degrade_loaded_for_missing_catalog
     then Some { route_name = runtime_default_route_name; runtime_id = configured_default.id }
     else None
   in
-  let drop_route route_name = function
-    | None -> None, None
-    | Some runtime_id when is_missing runtime_id -> None, Some { route_name; runtime_id }
-    | Some _ as value -> value, None
-  in
-  let librarian_id, librarian_drop = drop_route "[runtime].librarian" librarian_id in
-  let structured_judge_id, structured_judge_drop =
-    drop_route "[runtime].structured_judge" structured_judge_id
-  in
-  let hitl_summary_id, hitl_summary_drop =
-    drop_route "[runtime].hitl_summary" hitl_summary_id
-  in
-  let cross_verifier_id, cross_verifier_drop =
-    drop_route "[runtime].cross_verifier" cross_verifier_id
-  in
-  let dropped_routes =
-    [ default_drop
-    ; librarian_drop
-    ; structured_judge_drop
-    ; hitl_summary_drop
-    ; cross_verifier_drop
-    ]
-    |> List.filter_map Fun.id
-  in
-  let kept_media_failover, dropped_media_failover =
-    List.fold_right
-      (fun runtime_id (kept, dropped) ->
-         if is_missing runtime_id
-         then kept, runtime_id :: dropped
-         else runtime_id :: kept, dropped)
-      media_failover
-      ([], [])
-  in
   let kept_lanes, dropped_lane_candidates, dropped_lanes =
     List.fold_right
       (fun (lane : Runtime_lane.t) (kept, dropped_candidates, dropped_lanes) ->
@@ -797,6 +853,55 @@ let degrade_loaded_for_missing_catalog
            , dropped_lanes ))
       lanes
       ([], [], [])
+  in
+  (* A route id may name a lane (#25394). A lane-targeted route stays live
+     while any candidate survives (the lane itself degrades), and drops only
+     when the whole lane dropped; a runtime-targeted route drops when that
+     runtime is missing. Mirrors [resolve_assignment]'s lane precedence. *)
+  let is_declared_lane id =
+    List.exists (fun lane -> String.equal (Runtime_lane.id lane) id) lanes
+  in
+  let lane_fully_dropped id =
+    List.exists
+      (fun (entry : dropped_runtime_lane) -> String.equal entry.lane_id id)
+      dropped_lanes
+  in
+  let route_unavailable id =
+    if is_declared_lane id then lane_fully_dropped id else is_missing id
+  in
+  let drop_route route_name = function
+    | None -> None, None
+    | Some runtime_id when route_unavailable runtime_id ->
+      None, Some { route_name; runtime_id }
+    | Some _ as value -> value, None
+  in
+  let librarian_id, librarian_drop = drop_route "[runtime].librarian" librarian_id in
+  let structured_judge_id, structured_judge_drop =
+    drop_route "[runtime].structured_judge" structured_judge_id
+  in
+  let hitl_summary_id, hitl_summary_drop =
+    drop_route "[runtime].hitl_summary" hitl_summary_id
+  in
+  let cross_verifier_id, cross_verifier_drop =
+    drop_route "[runtime].cross_verifier" cross_verifier_id
+  in
+  let dropped_routes =
+    [ default_drop
+    ; librarian_drop
+    ; structured_judge_drop
+    ; hitl_summary_drop
+    ; cross_verifier_drop
+    ]
+    |> List.filter_map Fun.id
+  in
+  let kept_media_failover, dropped_media_failover =
+    List.fold_right
+      (fun runtime_id (kept, dropped) ->
+         if is_missing runtime_id
+         then kept, runtime_id :: dropped
+         else runtime_id :: kept, dropped)
+      media_failover
+      ([], [])
   in
   let has_routing_references =
     (not (List.is_empty dropped_assignments))
@@ -853,15 +958,16 @@ let materialize_config
     ?(validate_max_context = true)
     ~(config_path : string)
     (cfg : config)
-  : ( t list
-      * t
-      * (string * string) list
-      * string option
-      * string option
-      * string option
-      * string option
-      * string list
-      * Runtime_lane.t list
+  : ( (t list
+       * t
+       * (string * string) list
+       * string option
+       * string option
+       * string option
+       * string option
+       * string list
+       * Runtime_lane.t list)
+      * Runtime_schema.exact_output_lane_decl list
     , string )
     result
   =
@@ -894,8 +1000,15 @@ let materialize_config
     validate_librarian_runtime ~config_path ~dropped_bindings runtimes
       cfg.librarian_runtime_id
   in
+  (* Lanes are materialized before the judge/verifier route validations so a
+     route id can name a lane (#25394); candidate resolution is enforced by
+     [validate_lanes] inside [lanes_of_decls]. *)
+  let* lanes =
+    lanes_of_decls ~config_path ~dropped_bindings runtimes cfg.lane_decls
+  in
   let* () =
     validate_structured_judge_runtime ~config_path ~dropped_bindings runtimes
+      lanes
       cfg.structured_judge_runtime_id
   in
   let* () =
@@ -904,6 +1017,7 @@ let materialize_config
   in
   let* () =
     validate_cross_verifier_runtime ~config_path ~dropped_bindings runtimes
+      lanes
       cfg.cross_verifier_runtime_id
   in
   let* () =
@@ -915,27 +1029,25 @@ let materialize_config
     then validate_runtime_max_context ~config_path runtimes
     else Ok ()
   in
-  let* lanes =
-    lanes_of_decls ~config_path ~dropped_bindings runtimes cfg.lane_decls
-  in
   (* The OAS catalog membership gate is intentionally not called here:
      [load_list] stays a routing-validity parser for tests and config probes.
      Startup callers choose fail-closed [init_default_strict] or server-visible
      degraded boot [init_default_degraded_report]. *)
   Ok
-    ( runtimes
-    , rt
-    , assignments
-    , cfg.librarian_runtime_id
-    , cfg.structured_judge_runtime_id
-    , cfg.hitl_summary_runtime_id
-    , cfg.cross_verifier_runtime_id
-    , cfg.media_failover
-    , lanes )
+    ( ( runtimes
+      , rt
+      , assignments
+      , cfg.librarian_runtime_id
+      , cfg.structured_judge_runtime_id
+      , cfg.hitl_summary_runtime_id
+      , cfg.cross_verifier_runtime_id
+      , cfg.media_failover
+      , lanes )
+    , cfg.exact_output_lane_decls )
 ;;
 
 let load_list_internal ~(config_path : string) ~validate_max_context
-  : ( t list
+  : ( (t list
        * t
        * (string * string) list
        * string option
@@ -943,7 +1055,8 @@ let load_list_internal ~(config_path : string) ~validate_max_context
        * string option
        * string option
        * string list
-       * Runtime_lane.t list
+       * Runtime_lane.t list)
+      * Runtime_schema.exact_output_lane_decl list
     , string )
     result
   =
@@ -960,6 +1073,7 @@ let load_list_internal ~(config_path : string) ~validate_max_context
 
 let load_list ~config_path =
   load_list_internal ~config_path ~validate_max_context:true
+  |> Result.map fst
 ;;
 
 (* ---- Lazy default runtime singleton ---- *)
@@ -1027,7 +1141,9 @@ let set_loaded
     }
 
 let init_default ~config_path =
-  let* loaded = load_list ~config_path in
+  let* loaded, _exact_output_lane_decls =
+    load_list_internal ~config_path ~validate_max_context:true
+  in
   set_loaded ~config_path loaded;
   Ok ()
 
@@ -1037,9 +1153,9 @@ let init_default ~config_path =
    the gate that load_list intentionally no longer applies, kept out of load_list
    so unit tests stay catalog-independent. *)
 let init_default_strict_report ~config_path =
-  match load_list ~config_path with
+  match load_list_internal ~config_path ~validate_max_context:true with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok ((runtimes, _, _, _, _, _, _, _, _) as loaded) ->
+  | Ok (((runtimes, _, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
@@ -1053,7 +1169,7 @@ let init_default_strict ~config_path =
 let init_default_degraded_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:false with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok ((runtimes, _, _, _, _, _, _, _, _) as loaded) ->
+  | Ok (((runtimes, _, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | None ->
        (match validate_runtime_max_context ~config_path runtimes with
@@ -1068,7 +1184,10 @@ let init_default_degraded_report ~config_path =
           (match validate_runtime_max_context ~config_path active_runtimes with
            | Error msg -> Error (Runtime_config_error msg)
            | Ok () ->
-             set_loaded ~startup_degradation:degradation ~config_path degraded_loaded;
+             set_loaded
+               ~startup_degradation:degradation
+               ~config_path
+               degraded_loaded;
              Ok (Initialized_degraded degradation))))
 
 let runtime_state () = Atomic.get loaded_state_ref
@@ -1121,9 +1240,9 @@ let librarian_runtime_id () = (runtime_state ()).librarian_runtime_id
    provider-native schema requests. *)
 let structured_judge_runtime_id () = (runtime_state ()).structured_judge_runtime_id
 
-(* [runtime].hitl_summary is the dedicated HITL approval-summary lane,
-   consumed by [Keeper_approval_queue.provider_config_for_summary]. [None]
-   falls through to the structured-judge routing chain. *)
+(* [runtime].hitl_summary is the dedicated HITL approval-summary lane.
+   [None] means that Auto Judge is not configured; callers must not substitute
+   another subsystem's runtime. *)
 let hitl_summary_runtime_id () = (runtime_state ()).hitl_summary_runtime_id
 
 let runtime_id_for_structured_judge () =
@@ -1132,12 +1251,6 @@ let runtime_id_for_structured_judge () =
   | Some id, _ -> id
   | None, Some id -> id
   | None, None -> default_runtime_id_or_fail ()
-;;
-
-let runtime_id_for_hitl_summary () =
-  match (runtime_state ()).hitl_summary_runtime_id with
-  | Some id -> id
-  | None -> runtime_id_for_structured_judge ()
 ;;
 
 (* [runtime].cross_verifier routing for the anti-rationalization evaluator.
@@ -1195,6 +1308,14 @@ let resolve_assignment (assigned_id : string) =
     (match get_runtime_by_id assigned_id with
      | Some runtime -> `Single_runtime runtime
      | None -> `Missing)
+;;
+
+let resolve_max_context_of_runtime_id (id : string)
+  : (int * max_context_source) option
+  =
+  match get_runtime_by_id id with
+  | Some rt -> resolve_max_context_of_runtime rt
+  | None -> None
 ;;
 
 let max_context_of_runtime_id (id : string) : int option =
@@ -1308,51 +1429,6 @@ let config_path () : string option =
       in
       if Sys.file_exists path then Some path else None
   | Invalid_env | Missing -> None
-;;
-
-let pause_threshold () =
-  let runtime_config_path =
-    match (runtime_state ()).config_path with
-    | Some path -> Some path
-    | None -> config_path ()
-  in
-  match runtime_config_path with
-  | None -> Runtime_schema.pause_threshold_default
-  | Some config_path ->
-    (match Runtime_toml.parse_file config_path with
-     | Ok cfg -> cfg.pause_threshold
-     | Error errs ->
-       Log.Runtime.warn
-         "runtime: failed to parse [pause] thresholds from %s (%d error(s)); \
-          using defaults"
-         config_path
-         (List.length errs);
-       Runtime_schema.pause_threshold_default)
-;;
-
-(* RFC-0313 W3. Same lookup shape as [pause_threshold] above. A config file
-   that fails to parse falls back to [pacing_default] (mode = enforce); the
-   fail-closed [pacing.mode] parse already rejected the file at boot via
-   [Runtime_toml.parse_file], so this fallback only covers a file that is
-   unreadable wholesale. *)
-let pacing () =
-  let runtime_config_path =
-    match (runtime_state ()).config_path with
-    | Some path -> Some path
-    | None -> config_path ()
-  in
-  match runtime_config_path with
-  | None -> Runtime_schema.pacing_default
-  | Some config_path ->
-    (match Runtime_toml.parse_file config_path with
-     | Ok cfg -> cfg.pacing
-     | Error errs ->
-       Log.Runtime.warn
-         "runtime: failed to parse [pacing] from %s (%d error(s)); using \
-          defaults"
-         config_path
-         (List.length errs);
-       Runtime_schema.pacing_default)
 ;;
 
 let runtime_config_path_result ?runtime_config_path () =
@@ -1616,24 +1692,38 @@ let validate_runtime_config_text ~config_path content =
         config_path
         (runtime_parse_errors_to_string errs))
   in
-  let* (_
-         : t list
-           * t
-           * (string * string) list
-           * string option
-           * string option
-           * string option
-           * string option
-           * string list
-           * Runtime_lane.t list) =
+  let* _legacy_config, exact_output_lane_decls =
     materialize_config ~config_path cfg
   in
-  Ok ()
+  Ok exact_output_lane_decls
 ;;
 
 let save_config_text ?runtime_config_path content =
   let* path = runtime_config_path_result ?runtime_config_path () in
-  let* () = validate_runtime_config_text ~config_path:path content in
+  let* exact_output_lane_decls = validate_runtime_config_text ~config_path:path content in
+  (* Raw config edits may rewrite [runtime.exact_output_lanes]. Validate the
+     new declarations against the live resolver snapshot and republish so the
+     active exact-output registry tracks the save instead of going stale
+     until the next restart. Republishing precedes the atomic write so an
+     invalid lane set is rejected before it reaches disk; if the write itself
+     fails, the registry still holds a valid lane set and the next successful
+     save or restart reconverges. Without a published registry (pre-bootstrap
+     or non-server contexts) there is no snapshot to validate against —
+     bootstrap publishes from the saved file. *)
+  let* () =
+    match Runtime_exact_output_registry.current () with
+    | Error _ -> Ok ()
+    | Ok _registry ->
+      (match
+         Runtime_exact_output_registry.republish ~lanes:exact_output_lane_decls
+       with
+       | Ok _registry -> Ok ()
+       | Error error ->
+         Error
+           (Printf.sprintf
+              "exact-output lane validation failed: %s"
+              (Runtime_exact_output_registry.error_to_string error)))
+  in
   let* () = Fs_compat.save_file_atomic path content in
   let* () = init_default ~config_path:path in
   Ok ()
@@ -1654,7 +1744,7 @@ let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =
     let* path = runtime_config_path_result ?runtime_config_path () in
     let* content = load_file_result path in
     let next = update_runtime_assignment_text content ~keeper_name ~runtime_id in
-    let* () = validate_runtime_config_text ~config_path:path next in
+    let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
     let* () = Fs_compat.save_file_atomic path next in
     let* () = init_default ~config_path:path in
     Ok ()
@@ -1670,7 +1760,7 @@ let clear_runtime_id_for_keeper ?runtime_config_path ~keeper_name () =
     let* path = runtime_config_path_result ?runtime_config_path () in
     let* content = load_file_result path in
     let next = remove_runtime_assignment_text content ~keeper_name in
-    let* () = validate_runtime_config_text ~config_path:path next in
+    let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
     let* () = Fs_compat.save_file_atomic path next in
     let* () = init_default ~config_path:path in
     Ok ()
@@ -1693,7 +1783,7 @@ let set_runtime_scalar ?runtime_config_path ~key ~runtime_id () =
       let* path = runtime_config_path_result ?runtime_config_path () in
       let* content = load_file_result path in
       let next = update_runtime_scalar_text content ~key ~runtime_id in
-      let* () = validate_runtime_config_text ~config_path:path next in
+      let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
       let* () = Fs_compat.save_file_atomic path next in
       let* () = init_default ~config_path:path in
       Ok ()
@@ -1714,7 +1804,7 @@ let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
     let* path = runtime_config_path_result ?runtime_config_path () in
     let* content = load_file_result path in
     let next = update_runtime_string_array_text content ~key ~values:runtime_ids in
-    let* () = validate_runtime_config_text ~config_path:path next in
+    let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
     let* () = Fs_compat.save_file_atomic path next in
     let* () = init_default ~config_path:path in
     Ok ())

@@ -55,52 +55,15 @@ include module type of Otel_runtime_metric_names
 (** {1 Core counters / gauges} *)
 
 include module type of Otel_core_metric_names
-val metric_pool_idle_total : string
-val metric_pool_inflight_total : string
-val metric_pool_reuse_total : string
-val metric_pool_evict_total : string
-val metric_pool_evict_failure_total : string
-val metric_pool_create_total : string
+
+(* masc_pool_* series are emitted solely by [Otel_runtime_observables]; no
+   store cells are declared here. *)
 
 include module type of Otel_policy_metric_names
 
-(** Total keepers auto-resumed by the self-healing circuit breaker in
-    [Keeper_supervisor.sweep_and_recover] after the per-keeper back-off
-    timer elapsed.  Labeled by [keeper].  A positive rate indicates the
-    system is self-healing from transient provider outages without operator
-    intervention.  A sustained zero rate while [auto_resume_after_sec] is
-    set in meta files indicates a sweep or meta-write regression. *)
-
-(** Total keepers whose auto-resume was blocked in
-    [Keeper_supervisor.sweep_and_recover] because the runtime health probe
-    reported unhealthy (failure ratio >= threshold).  Labeled by [keeper]
-    and [runtime].  A positive rate means the health gate is protecting
-    the fleet from resuming into a still-failing runtime. *)
-
-(** RFC-0020 Rule 2 evidence — incremented every time
-    [run_smart_heartbeat_gate] overrides a [Skip_busy] / [Skip_idle]
-    decision because the Event Layer queue
-    ([Keeper_registry_event_queue.snapshot]) was non-empty. A zero
-    rate against ongoing keeper activity means either the queue
-    write path (PR-C1 [wakeup_keeper ?stimulus]) is not firing or
-    the smart heartbeat is already returning [Emit] on its own —
-    either way operators can distinguish. Labels: [keeper]. *)
-
-(** Positive signal for the #12271 Skip_idle + Woken fix path. Increments
-    each time [run_smart_heartbeat_gate] observes an external [wakeup_keeper]
-    cut a Skip_idle backoff sleep short and the cycle was resumed
-    ([cycle_continues_after_wake] -> [true]). Operator-meaningful pair with
-    [masc_keeper_stale_termination_by_class_total] (class=idle_turn): a
-    healthy fleet should show non-zero rates here proportional to inbound
-    board signals, with the idle_turn kill rate trending toward zero. A
-    zero rate after operator-visible signals suggests either the wakeup
-    never reached the atomic, or a regression silently re-introduced
-    MissedWakeup (KeeperHeartbeat.tla bug action).
-    Labels: [keeper]. *)
-
 (** Total stimuli consumed at turn entry, classified by [stimulus_class].
     Labels: [keeper], [class]
-    (board_signal|bootstrap|no_progress_recovery|unsupported).
+    (board_signal|bootstrap|unsupported).
     Pairs with [masc_keeper_unsupported_stimulus_total] for unsupported-only
     drill-down with payload prefix. *)
 
@@ -108,36 +71,17 @@ include module type of Otel_policy_metric_names
     did not match any known stimulus class. Each increment represents a
     wake -> no_signal gap per #12684. Labels: [keeper]. *)
 
-(** Total times a keeper restart attempt landed at
-    [restart_count = max_restarts - 1], i.e. one attempt away from Dead.
-    Soft pre-warning; labeled by [keeper]. *)
-
 (** Total supervisor restart attempts for crashed keepers. Labels:
     [keeper]. *)
 
 (** Total supervisor restart outcomes. Labels:
     [keeper, outcome]. Outcome is one of [started | meta_unavailable]. *)
 
-(** PR-M (Leak 9): consecutive [provider_timeout] cycle FAILED strikes.
-    Labeled by [keeper] and [outcome]:
-    - [outcome=warn]: strike below [provider_timeout_strike_limit];
-      cycle continues, supervisor not yet involved.
-    - [outcome=promote]: strike at or above limit; [Keeper_fiber_crash]
-      raised so [Keeper_supervisor.sweep_and_recover] respawns the
-      fiber with a fresh context budget. Counter reset on any
-      successful turn. *)
-
-
 val metric_oas_bus_capacity : string
-(** Gauge: per-subscriber [Eio.Stream] capacity chosen at bus creation.
-    Labels: [bus] names the MASC bus ([oas_runtime] | [masc_domain]),
-    [policy] names the [Agent_sdk.Event_bus.backpressure_policy].
-    Published once per bus at [Masc_event_bus_policy.create_bus] so
-    operators can interpret [masc_event_bus_subscriber_depth]
-    as a fraction of capacity. *)
+(** Gauge: total queue capacity for live subscribers grouped by
+    [bus], [purpose], [capacity], and [overflow]. *)
 
 val metric_oas_bridge_unmigrated_payload_kind : string
-val metric_keeper_context_tool_result_compacted : string
 
 (** #9632: subprocess executions that exceeded their configured
     timeout. Labels: [program, timeout_sec]. *)
@@ -166,11 +110,6 @@ val metric_distributed_lock_acquire_failed : string
 (** #9645: distributed lock acquire retry-budget exhaustions.
     Labels: [key, attempts]. *)
 
-(** IDE read routes that resolved to the shared orphan partition instead of
-    [by-url/<canonical-repo>]. Labels: [reason] =
-    [no_canonical_url | unmatched | base_unresolved | legacy_default]. *)
-val metric_ide_orphan_reads : string
-
 (** #10130: boot-time sweep of save_file_atomic orphan temp files.
     Labels: [size_class = empty | with_data]. *)
 val metric_fs_atomic_orphans_cleaned : string
@@ -192,18 +131,13 @@ include module type of Otel_transport_metric_names
 
 (** Counter incremented when an OAS after-turn response is accepted but
     its response model field is empty. This tracks malformed or partial
-    provider response metadata, not keeper tool_access policy decisions. *)
+    provider response metadata. *)
 val metric_after_turn_response_model_empty : string
 
 val metric_after_turn_response_model_alias : string
 val metric_cost_emit_zero_source : string
 val metric_cost_ledger_status : string
 (* metric_keeper_meta_read_failures declared earlier in this interface (line 200) *)
-
-(** RFC-0040: sender-side mention dedup decision counter.
-    Labels: [outcome] with values
-    [skipped|passed|no_target|bypassed]. *)
-val metric_mention_dedup_decisions_total : string
 
 (** #20677: incremental telemetry cache fell back to a full re-parse
     (file shrank or rotated under the boundary).  Labels: [store]. *)

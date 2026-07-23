@@ -13,8 +13,8 @@
     [emit_board_signal], [backend], [sort_posts_in_memory],
     [normalize_author_filter], [agent_matches_author_filter],
     [matching_post_ids_for_comment_author_filter], the
-    [all_sort_orders] convenience list, [is_initialized],
-    [jsonl_forced], [sweep]) are hidden — callers consume the typed
+    [all_sort_orders] convenience list, [is_initialized])
+    are hidden — callers consume the typed
     sort-order helpers, lifecycle entry points, post / comment /
     vote operations, and the JSON projection / hook setters
     only. *)
@@ -131,10 +131,6 @@ val flusher_start_backoff_delay_for_test : attempt:int -> float
 val backend_name : unit -> string
 (** ["jsonl"] when initialised, ["uninitialized"] otherwise. *)
 
-val jsonl_forced : unit -> bool
-(** [true] iff [MASC_BOARD_BACKEND] forces the JSONL backend.
-    Exposed so the dispatch test can pin the env-driven default. *)
-
 (** {1 Posts} *)
 
 val create_post :
@@ -152,29 +148,20 @@ val create_post :
   unit ->
   (Board.post, Board.board_error) Result.t
 
-val create_post_with_outcome :
-  ?after_fresh_persist:(Board.post -> (unit, string) result) ->
-  ?after_rollup_persist:(Board.post -> (unit, string) result) ->
+val create_post_once_by_fusion_run_id :
+  fusion_run_id:string ->
   author:string ->
   content:string ->
-  ?title:string ->
-  ?body:string ->
   post_kind:Board.post_kind ->
   ?meta_json:Yojson.Safe.t ->
-  ?visibility:Board.visibility ->
-  ?ttl_hours:int ->
-  ?hearth:string ->
-  ?thread_id:string ->
-  ?origin:Board.post_origin ->
+  visibility:Board.visibility ->
+  ttl_hours:int ->
+  origin:Board.post_origin ->
   unit ->
-  (Board.create_post_outcome, Board.board_error) Result.t
-(** Same post creation semantics as {!create_post}, but preserves whether the
-    result was a fresh persist, dedup hit, or rollup.  [after_fresh_persist] is
-    invoked only for [Fresh_post] after the post is durable and before board
-    signal/SSE fanout.  [after_rollup_persist] is invoked only for
-    [Rolled_up_post] after the rollup snapshot is durable and before success is
-    returned.  If either hook fails, the mutation is rolled back via the same
-    board store and the error is returned explicitly. *)
+  (Board.create_post_once_result, Board.board_error) Result.t
+(** Emit post-created hooks only for the durable first creation. Exact replays
+    return the existing typed-origin post without a duplicate Board signal;
+    conflicting replays return [Already_exists]. *)
 
 (** Owner-gated in-place edit of an existing post's title/body.  Returns
     [Unauthorized] when [editor] does not own the post, [Post_not_found] for a
@@ -206,6 +193,11 @@ val list_posts :
   unit ->
   Board.post list
 
+val current_post_cursor : unit -> float * string option
+(** Atomic high-water mark for initializing a Board observation cursor. *)
+(** Current Board cursor head without sorting or materializing the full post
+    history. *)
+
 val delete_post : post_id:string -> (unit, Board.board_error) Result.t
 
 val set_thread_id :
@@ -224,9 +216,6 @@ val search :
   query:string ->
   limit:int ->
   Board.post list
-
-val reclassify_posts :
-  ?limit:int -> ?dry_run:bool -> unit -> Board.reclassify_report
 
 val post_to_yojson_with_karma :
   Board.post -> author_karma:int -> Yojson.Safe.t

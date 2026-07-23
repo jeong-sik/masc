@@ -3,6 +3,17 @@ type t = {
   mutable latest_hash : string option;
 }
 
+exception Corrupt_jsonl of {
+  path : string;
+  line_number : int;
+  detail : string;
+}
+
+type verify_report = {
+  entries_checked : int;
+  failure : (int * string) option;
+}
+
 let parse_jsonl_line line =
   try Yojson.Safe.from_string line |> Envelope.of_json with
   | Yojson.Json_error msg -> Error msg
@@ -13,13 +24,16 @@ let read_jsonl_file path =
     ~finally:(fun () -> close_in_noerr ic)
     (fun () ->
       let entries = ref [] in
+      let line_number = ref 0 in
       (try
          while true do
            let line = input_line ic in
+           incr line_number;
            if String.length line > 0 then
              match parse_jsonl_line line with
              | Ok env -> entries := env :: !entries
-             | Error _ -> ()
+             | Error detail ->
+               raise (Corrupt_jsonl { path; line_number = !line_number; detail })
          done
        with End_of_file -> ());
       List.rev !entries)
@@ -131,3 +145,11 @@ let verify_chain entries =
         check (idx + 1) (Some h) rest
   in
   check 0 None entries
+
+let verify t =
+  let entries = read_all_entries t in
+  match verify_chain entries with
+  | Ok () ->
+    { entries_checked = List.length entries; failure = None }
+  | Error (idx, reason) ->
+    { entries_checked = idx; failure = Some (idx, reason) }

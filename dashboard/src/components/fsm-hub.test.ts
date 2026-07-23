@@ -33,7 +33,6 @@ function observation(
     decision: 'undecided',
     runtime: 'idle',
     compaction: 'accumulating',
-    breaker: 'clean',
     ...overrides,
   }
 }
@@ -249,12 +248,6 @@ describe('inferTransitionReason', () => {
   it('attributes KTC idle→executing to runtime call start', () => {
     expect(inferTransitionReason('KTC', 'idle', 'executing'))
       .toBe('턴이 시작되었습니다 — runtime 호출 진행')
-  })
-
-  it('attributes KDP undecided→gate_rejected to gate block', () => {
-    const reason = inferTransitionReason('KDP', 'undecided', 'gate_rejected')
-    expect(reason).not.toBeNull()
-    expect(reason).toMatch(/게이트 차단/)
   })
 
   it('attributes KCL idle→trying to runtime call', () => {
@@ -585,7 +578,7 @@ describe('filterKeeperNames', () => {
     'keeper-critic-agent',
     'keeper-router-agent',
     'keeper-research-agent',
-    'governance-keeper',
+    'gate-keeper',
   ]
 
   it('returns the same reference when query is empty', () => {
@@ -605,12 +598,12 @@ describe('filterKeeperNames', () => {
     const out = filterKeeperNames(fleet, 'keeper-')
     expect(out).toHaveLength(4)
     expect(out).toContain('keeper-planner-agent')
-    expect(out).not.toContain('governance-keeper')
+    expect(out).not.toContain('gate-keeper')
   })
 
   it('matches substring that does not anchor on prefix', () => {
     expect(filterKeeperNames(fleet, 'research')).toEqual(['keeper-research-agent'])
-    expect(filterKeeperNames(fleet, 'governance')).toEqual(['governance-keeper'])
+    expect(filterKeeperNames(fleet, 'gate')).toEqual(['gate-keeper'])
   })
 
   it('returns empty array when nothing matches', () => {

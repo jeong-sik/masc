@@ -6,7 +6,7 @@
     Custom-name convention: [masc.broadcast], [masc.heartbeat],
     [masc.keeper.lifecycle], ...
 
-    Every publish routes to [Masc_event_bus.get ()] so the OAS/MASC
+    Every publish routes to [Event_bus_slots.get_masc ()] so the OAS/MASC
     layer boundary is preserved. OAS's [event_bus.mli:103-107]
     explicitly warns against publishing domain events onto OAS's bus.
 
@@ -20,9 +20,10 @@
    violation where MASC was publishing Custom("masc:...") onto OAS's shared
    bus. *)
 let masc_publish event =
-  match Masc_event_bus.get () with
+  match Event_bus_slots.get_masc () with
   | Some mb -> Agent_sdk_metrics_bridge.publish mb event
-  | None -> ()
+  | None ->
+    Log.Misc.warn "MASC observation event was not published: event bus is not initialized"
 
 (** Publish a broadcast event to the shared Event_bus. *)
 let publish_broadcast ~agent_name ~content =
@@ -82,14 +83,13 @@ let publish_keeper_snapshot ~keeper_name
     Event names are pinned by
     {!Keeper_lifecycle_events.all_event_names}, which covers both the
     custom verbs (\[started\] / \[reconciled\] / \[restarted\] /
-    \[dead_cleaned\] / \[self_preservation\] / \[paused_pruned\]) and
+    \[dead_cleaned\] / \[purged\] / \[admission_denied\]) and
     the phase-derived names (\[stopped\] / \[crashed\] / \[dead\] /
     \[running\]).
 
     Issue #8575: the previous docstring listed only five names, so
-    operators silently missed the cleanup and self-healing events
-    (\[reconciled\] / \[dead_cleaned\] / \[self_preservation\] /
-    \[paused_pruned\] / \[admission_denied\]) — exactly the events that signal supervisor
+    operators silently missed the cleanup and recovery events
+    (\[reconciled\] / \[dead_cleaned\] / \[admission_denied\]) — exactly the events that signal supervisor
     recovery actions where observability matters most. Subscribe to
     {!Keeper_lifecycle_events.all_event_names} to receive the full
     stream; the sync test in [test_types.ml ::
@@ -123,27 +123,6 @@ let publish_keeper_lifecycle
   ] in
   masc_publish
     (Agent_sdk.Event_bus.mk_event (Custom ("masc.keeper.lifecycle", payload)))
-
-(** Publish a structured keeper-Dead event.
-
-    Emitted when [Keeper_supervisor.sweep_and_recover] gives up on a keeper
-    after [restart_count >= max_restarts]. Operators should treat this as
-    actionable: the supervisor will NOT retry the keeper. Independent from
-    the [event="dead"] entry on [masc.keeper.lifecycle] (which is unstructured
-    free-form [detail]) so subscribers can filter on a stable topic and pull
-    the structured fields directly. Topic: [masc.keeper.dead]. *)
-let publish_keeper_dead
-    ~keeper_name ~reason ~restart_count ~last_failure_reason () =
-  let last_failure_json = Json_util.string_opt_to_json last_failure_reason in
-  let payload = `Assoc [
-    ("keeper_name", `String keeper_name);
-    ("reason", `String reason);
-    ("restart_count", `Int restart_count);
-    ("last_failure_reason", last_failure_json);
-    ("timestamp", `Float (Time_compat.now ()));
-  ] in
-  masc_publish
-    (Agent_sdk.Event_bus.mk_event (Custom ("masc.keeper.dead", payload)))
 
 (** {1 Audit Ledger Events} *)
 
@@ -186,7 +165,6 @@ let publish_audit_event ~id ~ts ~actor ~kind ?target ~summary ~severity
 let publish_runtime_execution_built
     ~keeper_name
     ~runtime_id
-    ~max_tokens
     ~max_context
     ~effective_budget
     ~temperature
@@ -194,16 +172,14 @@ let publish_runtime_execution_built
   =
   let payload =
     `Assoc
-      ([ ("keeper_name", `String keeper_name)
-       ; ("runtime_id", `String runtime_id)
-       ]
-       @ Runtime_max_tokens.telemetry_fields max_tokens
-       @ [ ("max_context", `Int max_context)
-         ; ("max_context_resolution", `String (string_of_int effective_budget))
-         ; ("temperature", `Float temperature)
-         ; ("generation", `Int generation)
-         ; ("timestamp", `Float (Time_compat.now ()))
-         ])
+      [ ("keeper_name", `String keeper_name)
+      ; ("runtime_id", `String runtime_id)
+      ; ("max_context", `Int max_context)
+      ; ("max_context_resolution", `String (string_of_int effective_budget))
+      ; ("temperature", `Float temperature)
+      ; ("generation", `Int generation)
+      ; ("timestamp", `Float (Time_compat.now ()))
+      ]
   in
   masc_publish
     (Agent_sdk.Event_bus.mk_event (Custom ("telemetry_event", payload)))

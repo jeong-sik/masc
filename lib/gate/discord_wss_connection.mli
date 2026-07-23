@@ -90,6 +90,13 @@ module For_testing : sig
 
   val close_code_no_status : int
 
+  val client_tls_config : unit -> Tls.Config.client
+  (** The process-wide cached TLS client configuration used by [connect].
+      Read-only (no authenticator override; the "by design" note above
+      stands). Exposed so the reconnect-path cache has a regression test:
+      repeat calls must return the physically same config instead of
+      reloading the system trust store per (re)connect. *)
+
   val make_test_conn : sw:Eio.Switch.t -> conn
   (** A connection with a real session switch + [spawn] / [close] but no socket
       (the wsd is a bare, never-driven endpoint; the event stream stays empty).

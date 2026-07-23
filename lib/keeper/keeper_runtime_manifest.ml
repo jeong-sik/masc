@@ -372,16 +372,21 @@ let decision_public_allowlist =
     ; "event_bus_run_id"; "parent_event_id"; "caused_by"; "logical_seq"
     ; "compaction_source"; "repair_reason"; "matched_started_ts"
     ; "matched_started_status"; "error"; "exception_kind"; "latency_ms"
-    ; "checkpoint_after_present"; "is_last"; "per_provider_timeout_s"
-    ; "attempt_timeout_s"; "attempt_timeout_source"; "attempt_watchdog_source"
+    ; "checkpoint_after_present"; "is_last"
     ; "liveness_mode"; "liveness_budget_source"
     ; "context_compact_started_count"; "context_compacted_count"
     ; "last_compaction"
     ; "routing_action"; "routing_reason"; "degraded_runtime_id"
     ; "runtime_execution_built"
     ; "media_dropped_total"; "media_dropped_counts"
+    ; "payload_role"; "trigger"; "trigger_detail"; "kind"; "limit_tokens"
+    ; "ratio"; "threshold"; "count"
+    ; "source_requeued"; Keeper_compaction_evidence.exact_evidence_key
     ; "clock_refs"
     ]
+
+let compaction_evidence_public_allowlist =
+  StringSet.of_list Keeper_compaction_evidence.wire_field_names
 
 let clock_refs_public_allowlist =
   StringSet.of_list
@@ -390,6 +395,22 @@ let clock_refs_public_allowlist =
     ; "compaction_id"; "compaction_source"; "event_bus_correlation_id"
     ; "event_bus_run_id"; "parent_event_id"; "caused_by"; "logical_seq"
     ]
+
+type decision_projection_scope =
+  | Decision
+  | Clock_refs
+  | Compaction_evidence
+
+let decision_allowlist = function
+  | Decision -> decision_public_allowlist
+  | Clock_refs -> clock_refs_public_allowlist
+  | Compaction_evidence -> compaction_evidence_public_allowlist
+
+let decision_child_scope scope key =
+  if String.equal key "clock_refs" then Clock_refs
+  else if String.equal key Keeper_compaction_evidence.exact_evidence_key
+  then Compaction_evidence
+  else scope
 
 let rec reject_unknown_fields ~allowlist path = function
   | `Assoc fields ->
@@ -422,27 +443,24 @@ let reject_retired_manifest_fields fields =
   | None -> Ok ()
 
 let reject_retired_decision_fields decision =
-  let rec check path = function
+  let rec check scope path = function
     | `Assoc fields ->
-        let allowlist =
-          if String.equal path "" then decision_public_allowlist
-          else if String.equal path "clock_refs" then clock_refs_public_allowlist
-          else decision_public_allowlist
-        in
+        let allowlist = decision_allowlist scope in
         List.find_map
           (fun (key, value) ->
             let full_path = if String.equal path "" then key else path ^ "." ^ key in
-            if StringSet.mem key allowlist then check full_path value
+            if StringSet.mem key allowlist then
+              check (decision_child_scope scope key) full_path value
             else Some full_path)
           fields
     | `List values ->
         values
         |> List.mapi (fun idx value -> idx, value)
         |> List.find_map (fun (idx, value) ->
-          check (Printf.sprintf "%s[%d]" path idx) value)
+          check scope (Printf.sprintf "%s[%d]" path idx) value)
     | _ -> None
   in
-  match check "" decision with
+  match check Decision "" decision with
   | Some path ->
       Error
         (Printf.sprintf
@@ -451,13 +469,9 @@ let reject_retired_decision_fields decision =
   | None -> Ok ()
 
 let rec public_projection_of_decision decision =
-  let rec project path = function
+  let rec project scope path = function
     | `Assoc fields ->
-        let allowlist =
-          if String.equal path "" then decision_public_allowlist
-          else if String.equal path "clock_refs" then clock_refs_public_allowlist
-          else decision_public_allowlist
-        in
+        let allowlist = decision_allowlist scope in
         `Assoc
           (List.filter_map
              (fun (key, value) ->
@@ -465,14 +479,15 @@ let rec public_projection_of_decision decision =
                  Some
                    ( key
                    , project
+                       (decision_child_scope scope key)
                        (if String.equal path "" then key else path ^ "." ^ key)
                        value )
                else None)
              fields)
-    | `List values -> `List (List.map (project path) values)
+    | `List values -> `List (List.map (project scope path) values)
     | other -> other
   in
-  project "" decision
+  project Decision "" decision
 
 let to_json manifest =
   `Assoc
@@ -737,25 +752,8 @@ let append_best_effort ?(site = "runtime_manifest") config manifest =
   match append config manifest with
   | Ok () -> ()
   | Error msg ->
-      Keeper_fd_pressure.note_if_fd_exhaustion
-        ~site:"keeper_runtime_manifest.append_best_effort"
-        msg;
-      Keeper_disk_pressure.note_if_disk_exhaustion
-        ~site:"keeper_runtime_manifest.append_best_effort"
-        msg;
       let masc_root = Workspace.masc_root_dir config in
-      let fd_pressure =
-        Keeper_fd_pressure.active () || Keeper_fd_pressure.is_fd_exhaustion_text msg
-      in
-      (if fd_pressure then
-         Log.Keeper.warn ~keeper_name:manifest.keeper_name
-           "runtime_manifest coverage-gap append skipped during FD pressure \
-            site=%s trace_id=%s event=%s: %s"
-           site manifest.trace_id
-           (event_kind_to_string manifest.event)
-           msg
-       else
-       try
+      (try
          Telemetry_coverage_gap.record
            ~masc_root
            ~source:"runtime_manifest"

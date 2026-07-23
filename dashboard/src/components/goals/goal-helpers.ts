@@ -13,8 +13,6 @@ import type { Goal, Task } from '../../types'
 export type GoalPhaseFilter =
   | 'all'
   | 'executing'
-  | 'awaiting_verification'
-  | 'awaiting_approval'
   | 'blocked'
   | 'paused'
   | 'completed'
@@ -139,8 +137,6 @@ export function priorityStars(n: number): string {
 export function goalPhaseLabel(phase: string): string {
   switch (phase) {
     case 'executing': return '실행 중'
-    case 'awaiting_verification': return 'Goal 검증 대기'
-    case 'awaiting_approval': return '승인 대기'
     case 'blocked': return '차단됨'
     case 'paused': return '일시정지'
     case 'completed': return '완료'
@@ -151,8 +147,6 @@ export function goalPhaseLabel(phase: string): string {
 
 export function goalPhaseStatus(phase: string): string {
   switch (phase) {
-    case 'awaiting_verification': return 'awaiting_verification'
-    case 'awaiting_approval': return 'interrupted'
     case 'completed': return 'completed'
     case 'blocked': return 'error'
     case 'paused': return 'paused'
@@ -182,8 +176,6 @@ export function matchesGoalPhaseFilter(
 export function phaseFilterLabel(value: GoalPhaseFilter): string {
   switch (value) {
     case 'executing': return '실행 중'
-    case 'awaiting_verification': return 'Goal 검증 대기'
-    case 'awaiting_approval': return '승인 대기'
     case 'blocked': return '차단됨'
     case 'paused': return '일시정지'
     case 'completed': return '완료'
@@ -228,7 +220,6 @@ export function countAwaitingVerificationTasks(tasks: readonly StatusBearer[]): 
 }
 
 interface TreeNodeLike {
-  pending_verification_count?: number
   tasks: readonly StatusBearer[]
   children: readonly TreeNodeLike[]
 }
@@ -238,15 +229,6 @@ export function countAwaitingVerificationInTree(nodes: readonly TreeNodeLike[]):
   for (const node of nodes) {
     n += countAwaitingVerificationTasks(node.tasks)
     if (node.children.length > 0) n += countAwaitingVerificationInTree(node.children)
-  }
-  return n
-}
-
-export function countGoalVerificationInTree(nodes: readonly TreeNodeLike[]): number {
-  let n = 0
-  for (const node of nodes) {
-    n += node.pending_verification_count ?? 0
-    if (node.children.length > 0) n += countGoalVerificationInTree(node.children)
   }
   return n
 }

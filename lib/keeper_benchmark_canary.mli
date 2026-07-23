@@ -15,9 +15,6 @@ type manifest = {
   recommendations : recommendation list;
 }
 
-val default_manifest_path : unit -> string
-val enabled : unit -> bool
-
 val build_manifest :
      ?source_summary_path:string
   -> Tool_call_quality_benchmark.benchmark_summary
@@ -25,9 +22,3 @@ val build_manifest :
 
 val recommendation_to_yojson : recommendation -> Yojson.Safe.t
 val manifest_to_yojson : manifest -> Yojson.Safe.t
-
-val load_manifest_from_file : string -> manifest option
-val load_manifest : unit -> manifest option
-val recommended_model_label_for_keeper : keeper_name:string -> string option
-
-val reset_for_testing : unit -> unit

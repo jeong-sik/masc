@@ -1,18 +1,7 @@
 (** Completion-note review and verification-evidence helpers. *)
 
-val can_review_completion :
-  task_opt:Masc_domain.task option -> agent_name:string -> bool
-
 val persisted_completion_contract :
   task_opt:Masc_domain.task option -> string list option
-
-val completion_notes_example : string
-
-val completion_rejection_message : ?allow_force:bool -> string -> string
-
-val placeholder_evidence_refs : string list
-
-val is_placeholder_evidence_ref : string -> bool
 
 val blank_evidence_ref : string -> bool
 (** [true] when the entry trims to the empty string. Shared element-level

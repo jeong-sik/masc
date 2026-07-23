@@ -1,4 +1,4 @@
-(** Voice_bridge — TTS synthesis, MCP voice sessions, conferences. *)
+(** Voice_bridge — TTS synthesis, speech-to-text, local playback. *)
 
 include Voice_bridge_core
 
@@ -6,7 +6,6 @@ open Result.Syntax
 
 let safe_agent_id = Voice_bridge_transport.safe_agent_id
 let make_audio_file = Voice_bridge_transport.make_audio_file
-let read_file = Voice_bridge_transport.read_file
 let run_voice_status = Voice_bridge_transport.run_voice_status
 let speak_via_http_tts_to_file = Voice_bridge_transport.speak_via_http_tts_to_file
 let transcribe_via_http_stt = Voice_bridge_transport.transcribe_via_http_stt
@@ -28,63 +27,78 @@ let audio_payload_fields ~audio_file ~audio_device =
   | _ -> []
 ;;
 
-let available_stt_endpoints () =
-  match load_voice_config () with
-  | Ok config ->
-    config.stt.endpoints |> List.filter (fun (ep : Voice_config.endpoint) -> ep.enabled)
-  | Error _ -> []
+let available_stt_endpoints (config : Voice_config.t) =
+  config.stt.endpoints |> List.filter (fun (ep : Voice_config.endpoint) -> ep.enabled)
 ;;
 
 let transcribe_audio ~audio_file ?language_code () =
-  let model =
-    match load_voice_config () with
-    | Ok config -> config.stt.default_model
-    | Error _ -> "scribe_v2"
-  in
-  let endpoints = available_stt_endpoints () in
-  let rec try_endpoints = function
-    | [] -> Error "no enabled STT endpoints configured"
-    | endpoint :: rest ->
-      (match transcribe_via_http_stt endpoint ~audio_file ~model with
-       | Ok json ->
-         let text =
-           Option.value
-             (Json_util.get_string json "text")
-             ~default:(Yojson.Safe.to_string json)
-         in
-         let lang =
-           match language_code with
-           | Some lc -> lc
-           | None ->
-             (match Json_util.get_string json "language_code" with
-              | Some lc -> lc
-              | None -> "unknown")
-         in
-         Ok
-           (`Assoc
-               [ "status", `String "transcribed"
-               ; "text", `String text
-               ; "language_code", `String lang
-               ; "endpoint_id", `String endpoint.id
-               ])
-       | Error _ when rest <> [] -> try_endpoints rest
-       | Error err -> Error err)
-  in
-  try_endpoints endpoints
+  match Voice_config.load_detailed () with
+  | Error (Voice_config.Invalid msg) ->
+    (* An explicit voice config exists but is broken: surface the
+       load failure instead of substituting a hardcoded model. *)
+    Error (Printf.sprintf "voice config load failed: %s" msg)
+  | Error Voice_config.Not_configured ->
+    (* Voice is not set up in this environment: STT is explicitly
+       disabled, which is not an error of the config itself. *)
+    Error "no enabled STT endpoints configured"
+  | Ok config ->
+    let model = config.stt.default_model in
+    let endpoints = available_stt_endpoints config in
+    let rec try_endpoints attempted = function
+      | [] ->
+        Error
+          (Printf.sprintf
+             "all enabled STT endpoints failed: %s"
+             (String.concat " | " (List.rev attempted)))
+      | endpoint :: rest ->
+        (match transcribe_via_http_stt endpoint ~audio_file ~model with
+         | Ok json ->
+           let text =
+             Option.value
+               (Json_util.get_string json "text")
+               ~default:(Yojson.Safe.to_string json)
+           in
+           let lang =
+             match language_code with
+             | Some lc -> lc
+             | None ->
+               (match Json_util.get_string json "language_code" with
+                | Some lc -> lc
+                | None -> "unknown")
+           in
+           Ok
+             (`Assoc
+                 [ "status", `String "transcribed"
+                 ; "text", `String text
+                 ; "language_code", `String lang
+                 ; "endpoint_id", `String endpoint.id
+                 ])
+         | Error error ->
+           let attempt = Printf.sprintf "%s: %s" endpoint.id error in
+           (if rest <> []
+            then
+              log_error
+                (Printf.sprintf
+                   "STT endpoint %s failed; trying next endpoint: %s"
+                   endpoint.id
+                   error));
+           try_endpoints (attempt :: attempted) rest)
+    in
+    if endpoints = []
+    then Error "no enabled STT endpoints configured"
+    else try_endpoints [] endpoints
 ;;
 
-let available_tts_endpoints ?provider () =
-  match load_voice_config () with
-  | Ok config -> Voice_runtime_overlay.select_endpoints ?provider config.tts.endpoints
-  | Error _ -> []
+let available_tts_endpoints ?provider (config : Voice_config.t) =
+  Voice_runtime_overlay.select_endpoints ?provider config.tts.endpoints
 ;;
 
 (** Synthesize a dashboard-playable MP3 via any HTTP TTS endpoint.
     This is used as a parallel fallback when the active transport is
     [Voice_mcp], which produces audio through a local/MCP path but does not
     write a browser-fetchable file. *)
-let try_http_tts_for_dashboard ~agent_id ~message ~voice ~model ~audio_device () =
-  let endpoints = available_tts_endpoints () in
+let try_http_tts_for_dashboard ~config ~agent_id ~message ~voice ~model ~audio_device () =
+  let endpoints = available_tts_endpoints config in
   let rec try_endpoint = function
     | [] -> None
     | endpoint :: rest ->
@@ -120,85 +134,6 @@ let public_config_json () =
          [ "message", `String message
          ; "config_path", `String (Voice_config.config_path ())
          ])
-;;
-
-let tts_preview_bytes_from_request_json json =
-  let text =
-    match Json_util.get_string json "text" with
-    | Some value when String.trim value <> "" -> String.trim value
-    | _ ->
-      (match Json_util.get_string json "input" with
-       | Some value when String.trim value <> "" -> String.trim value
-       | _ -> raise (Yojson.Json_error "missing or empty text/input field"))
-  in
-  let voice =
-    match Json_util.get_string json "voice" with
-    | Some value when String.trim value <> "" -> String.trim value
-    | _ ->
-      (match Json_util.get_string json "voice_id" with
-       | Some value when String.trim value <> "" -> String.trim value
-       | _ ->
-         (match load_voice_config () with
-          | Ok config -> config.tts.default_voice
-          | Error _ -> "Sarah"))
-  in
-  let model =
-    match Json_util.get_string json "model" with
-    | Some value when String.trim value <> "" -> String.trim value
-    | _ ->
-      (match Json_util.get_string json "voice_model" with
-       | Some value when String.trim value <> "" -> String.trim value
-       | _ ->
-         (match load_voice_config () with
-          | Ok config -> config.tts.default_model
-          | Error _ -> "eleven_multilingual_v2"))
-  in
-  let provider =
-    Json_util.get_string json "provider"
-    |> Option.map String.trim
-    |> function
-    | Some value when value <> "" -> Some value
-    | _ -> None
-  in
-  let endpoints = available_tts_endpoints ?provider () in
-  let rec try_endpoints attempted = function
-    | [] ->
-      let detail =
-        if attempted = []
-        then "no configured TTS endpoint"
-        else String.concat "; " (List.rev attempted)
-      in
-      Error detail
-    | endpoint :: rest ->
-      let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in
-      if not (Voice_runtime_overlay.transport_supports_http_tts adapter)
-      then (
-        let note = Printf.sprintf "%s: preview unsupported for voice_mcp" endpoint.id in
-        try_endpoints (note :: attempted) rest)
-      else (
-        let output_file = Filename.temp_file "masc_voice_preview" ".mp3" in
-        Eio_guard.protect
-          ~finally:(fun () ->
-            try Sys.remove output_file with
-            | Sys_error _ -> ())
-          (fun () ->
-             let* _file_size =
-               speak_via_http_tts_to_file
-                 endpoint
-                 ~agent_id:"preview"
-                 ~message:text
-                 ~voice
-                 ~model
-                 ~output_file
-             in
-             Ok (read_file output_file))
-        |> function
-        | Ok _ as ok -> ok
-        | Error error ->
-          let note = Printf.sprintf "%s: %s" endpoint.id error in
-          try_endpoints (note :: attempted) rest)
-  in
-  try_endpoints [] endpoints
 ;;
 
 (** Clean up old audio files (>24 hours) and enforce a size cap.
@@ -265,41 +200,18 @@ let cleanup_old_audio_files () =
     Types
     ============================================ *)
 
-(** Voice session status *)
-type voice_session_status =
-  { session_id : string
-  ; agent_id : string
-  ; voice : string
-  ; is_active : bool
-  ; turn_count : int
-  ; duration_seconds : float option
-  }
+type agent_speak_completion =
+  | Spoken
+  | Dedup_skipped
 
-(** Conference status *)
-type conference_status =
-  { conference_id : string
-  ; state : string (* idle, active, paused, ended *)
-  ; participants : string list
-  ; current_speaker : string option
-  ; queue_size : int
-  ; turn_count : int
-  }
-
-(** Turn request result *)
-type turn_request_result =
-  { status : string
-  ; agent_id : string
-  ; message_preview : string
-  ; voice : string
-  ; queue_position : int
+type agent_speak_result =
+  { completion : agent_speak_completion
+  ; payload : Yojson.Safe.t
   }
 
 (** ============================================
     HTTP Client with Timeout and Retry (Eio-native)
     ============================================ *)
-
-(** Timeout exception for Eio.Fiber.first pattern *)
-exception Timeout of string
 
 (** Check if an error is retryable (transient)
     Retryable errors: connection failures, timeouts, HTTP 5xx *)
@@ -457,6 +369,7 @@ let attempt_tts_endpoint
       ~voice
       ~model
       ~priority
+      ~config
       ?audio_device
       endpoint
   =
@@ -575,6 +488,7 @@ let attempt_tts_endpoint
       let data =
         match
           try_http_tts_for_dashboard
+            ~config
             ~agent_id
             ~message
             ~voice
@@ -595,144 +509,6 @@ let attempt_tts_endpoint
         | None -> data
       in
       Ok (append_provider_metadata data endpoint))
-;;
-
-(** ============================================
-    Fallback Strategies
-    ============================================ *)
-
-(** Check if Voice MCP server is available (non-blocking, cached)
-    Circuit Breaker pattern - shorter cache on failure for faster recovery *)
-type health_cache = {
-  available : bool option;
-  check_time : float;
-  health_target : string option;
-}
-
-let health_cache : health_cache Atomic.t =
-  Atomic.make { available = None; check_time = 0.0; health_target = None }
-;;
-
-(** Cache duration: 30s on success, 5s on failure (Circuit Breaker) *)
-let cache_duration cache =
-  match cache.available with
-  | Some true -> 30.0 (* Success: cache longer *)
-  | Some false -> 5.0 (* Failure: retry sooner *)
-  | None -> 0.0 (* No cache: check immediately *)
-;;
-
-let session_endpoint_result () =
-  let* config = load_voice_config () in
-  Voice_runtime_overlay.session_endpoint_result config
-;;
-
-let is_voice_server_available ~sw:_ ~clock ~net =
-  match session_endpoint_result () with
-  | Error _ ->
-    Atomic.set health_cache { (Atomic.get health_cache) with available = Some false };
-    false
-  | Ok endpoint ->
-    let health_target =
-      match Voice_runtime_overlay.session_health_url_of_endpoint endpoint with
-      | Ok url -> url
-      | Error _ -> Uri.to_string (voice_health_uri ())
-    in
-    let cache = Atomic.get health_cache in
-    if cache.health_target <> Some health_target
-    then
-      Atomic.set health_cache
-        { available = None; check_time = 0.0; health_target = Some health_target };
-    let now = Time_compat.now () in
-    let cache = Atomic.get health_cache in
-    if now -. cache.check_time < cache_duration cache
-    then
-      (* NDT-OK: [available] is None only before the first probe; defaulting to
-         false means "treat as unavailable" until a probe completes. *)
-      Option.value cache.available ~default:false
-    else (
-      let check () =
-        let uri =
-          match Voice_runtime_overlay.session_health_url_of_endpoint endpoint with
-          | Ok url -> Uri.of_string url
-          | Error _ -> voice_health_uri ()
-        in
-        match
-          Masc_http_client.get_sync ~url:(Uri.to_string uri) ~headers:[] ()
-        with
-        | Ok (code, _) ->
-          let available = code >= 200 && code < 300 in
-          Ok available
-        | Error msg ->
-          (* RFC-0106: re-raise Eio.Cancel.Cancelled when the surrounding
-             fiber was cancelled. Masc_http_client.get_sync's piaf pool
-             catches Cancelled as an Error string; without this check
-             the availability probe would mask cancellation as Ok false. *)
-          Eio.Fiber.check ();
-          Log.Transport.warn "voice server check failed: %s" msg;
-          Ok false
-      in
-      let available =
-        match with_timeout ~clock ~timeout:2.0 check with
-        | Ok available -> available
-        | Error _ -> false
-      in
-      Atomic.set health_cache
-        { (Atomic.get health_cache) with available = Some available; check_time = now };
-      available)
-;;
-
-let call_session_tool ~sw ~clock ~net ~tool_name ~arguments =
-  let* endpoint = session_endpoint_result () in
-  let* json = call_voice_mcp_endpoint ~clock ~net ~endpoint ~tool_name ~arguments in
-  let* data = extract_mcp_result json in
-  Ok (append_provider_metadata data endpoint)
-;;
-
-(** ============================================
-    Voice Session Management (Eio-native)
-    ============================================ *)
-
-(** Start a voice session for an agent *)
-let start_voice_session ~sw ~clock ~net ~agent_id ?session_name () =
-  let voice = get_voice_for_agent agent_id in
-  let args =
-    `Assoc
-      [ "agent_id", `String agent_id
-      ; "voice", `String voice
-      ; "session_name", Json_util.string_opt_to_json session_name
-      ]
-  in
-  let* data =
-    call_session_tool ~sw ~clock ~net ~tool_name:"voice_session_start" ~arguments:args
-  in
-  match data with
-  | `Assoc fields as data ->
-    let session_id =
-      Json_util.get_string data "session_id" |> Option.value ~default:"unknown"
-    in
-    Ok
-      (`Assoc
-          ([ "session_id", `String session_id
-           ; "agent_id", `String agent_id
-           ; "voice", `String voice
-           ; "is_active", `Bool true
-           ; "turn_count", `Int 0
-           ; "duration_seconds", `Null
-           ]
-           @ List.filter
-               (fun (key, _) ->
-                  key = "provider_kind" || key = "endpoint_id" || key = "endpoint_url")
-               fields))
-  | data -> Ok data
-;;
-
-(** End a voice session *)
-let end_voice_session ~sw ~clock ~net ~agent_id =
-  if not (is_voice_server_available ~sw ~clock ~net)
-  then Error "Voice server unavailable"
-  else (
-    let args = `Assoc [ "agent_id", `String agent_id ] in
-    call_session_tool ~sw ~clock ~net ~tool_name:"voice_session_end" ~arguments:args)
 ;;
 
 (** Try HTTP TTS endpoints to synthesize a browser-playable MP3 clip.
@@ -799,7 +575,17 @@ let merge_browser_audio_fields ~audio_file ~file_size ?audio_device json =
     HTTP TTS endpoint is also configured, synthesize a parallel browser
     clip so the dashboard can play the utterance. The MCP server still
     owns local playback; the HTTP clip is dashboard-only. *)
-let agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority = 1) ?audio_device () =
+let agent_speak_json
+      ~sw
+      ~clock
+      ~net
+      ~agent_id
+      ~message
+      ?provider
+      ?(priority = 1)
+      ?audio_device
+      ()
+  =
   if is_dedup_hit ~agent_id ~message
   then (
     log_info
@@ -823,82 +609,123 @@ let agent_speak ~sw ~clock ~net ~agent_id ~message ?provider ?(priority = 1) ?au
       | _ -> None
     in
     cleanup_old_audio_files ();
-    let endpoints = available_tts_endpoints ?provider () in
-    let model =
-      match load_voice_config () with
-      | Ok config -> config.tts.default_model
-      | Error _ -> "eleven_multilingual_v2"
-    in
-    let rec try_endpoints attempted = function
-      | [] ->
-        Error
-          (Printf.sprintf
-             "all configured TTS endpoints failed: %s"
-             (String.concat " | " (List.rev attempted)))
-      | endpoint :: rest ->
-        (match
-           attempt_tts_endpoint
-             ~sw
-             ~clock
-             ~net
-             ~agent_id
-             ~message
-             ~voice
-             ~model
-             ~priority
-             ?audio_device
-             endpoint
-         with
-         | Ok _ as ok -> ok
-         | Error error ->
-           let attempt = Printf.sprintf "%s: %s" endpoint.id error in
-           try_endpoints (attempt :: attempted) rest)
-    in
-    if endpoints = []
-    then Error "no configured TTS endpoint"
-    else
-      match try_endpoints [] endpoints with
-      | Ok result when not (result_has_audio_file result) ->
-        (* The winning endpoint was [Voice_mcp]. Try a dashboard-playable
-           HTTP TTS clip in parallel so the dashboard has audio playback.
-           If no HTTP endpoint is available or all fail, the MCP result
-           still stands and the dashboard simply shows no audio player. *)
-        (match
-           try_http_tts_for_browser_audio
-             ~sw
-             ~clock
-             ~net
-             ~agent_id
-             ~message
-             ~voice
-             ~model
-             ~priority
-             ?audio_device
-             endpoints
-         with
-         | Some (audio_file, file_size) ->
-           log_info
-             (Printf.sprintf
-                "Voice MCP: synthesized parallel browser audio clip for agent=%s file=%s"
-                agent_id
-                audio_file);
-           Ok (merge_browser_audio_fields ~audio_file ~file_size ?audio_device result)
-         | None ->
-           log_info
-             (Printf.sprintf
-                "Voice MCP path used for agent=%s; no browser audio clip available (no HTTP TTS endpoint)."
-                agent_id);
-           Ok result)
-      | other -> other)
+    match Voice_config.load_detailed () with
+    | Error (Voice_config.Invalid msg) ->
+      (* An explicit voice config exists but is broken: surface the
+         load failure instead of substituting a hardcoded model. *)
+      Error (Printf.sprintf "voice config load failed: %s" msg)
+    | Error Voice_config.Not_configured ->
+      (* Voice is not set up in this environment: TTS is explicitly
+         disabled, which is not an error of the config itself. *)
+      Error "no configured TTS endpoint"
+    | Ok config ->
+      let endpoints = available_tts_endpoints ?provider config in
+      let model = config.tts.default_model in
+      let rec try_endpoints attempted = function
+        | [] ->
+          Error
+            (Printf.sprintf
+               "all configured TTS endpoints failed: %s"
+               (String.concat " | " (List.rev attempted)))
+        | endpoint :: rest ->
+          (match
+             attempt_tts_endpoint
+               ~sw
+               ~clock
+               ~net
+               ~agent_id
+               ~message
+               ~voice
+               ~model
+               ~priority
+               ~config
+               ?audio_device
+               endpoint
+           with
+           | Ok _ as ok -> ok
+           | Error error ->
+             let attempt = Printf.sprintf "%s: %s" endpoint.id error in
+             (if rest <> []
+              then
+                log_error
+                  (Printf.sprintf
+                     "TTS endpoint %s failed; trying next endpoint: %s"
+                     endpoint.id
+                     error));
+             try_endpoints (attempt :: attempted) rest)
+      in
+      if endpoints = []
+      then Error "no configured TTS endpoint"
+      else
+        match try_endpoints [] endpoints with
+        | Ok result when not (result_has_audio_file result) ->
+          (* The winning endpoint was [Voice_mcp]. Try a dashboard-playable
+             HTTP TTS clip in parallel so the dashboard has audio playback.
+             If no HTTP endpoint is available or all fail, the MCP result
+             still stands and the dashboard simply shows no audio player. *)
+          (match
+             try_http_tts_for_browser_audio
+               ~sw
+               ~clock
+               ~net
+               ~agent_id
+               ~message
+               ~voice
+               ~model
+               ~priority
+               ?audio_device
+               endpoints
+           with
+           | Some (audio_file, file_size) ->
+             log_info
+               (Printf.sprintf
+                  "Voice MCP: synthesized parallel browser audio clip for agent=%s file=%s"
+                  agent_id
+                  audio_file);
+             Ok (merge_browser_audio_fields ~audio_file ~file_size ?audio_device result)
+           | None ->
+             log_info
+               (Printf.sprintf
+                  "Voice MCP path used for agent=%s; no browser audio clip available (no HTTP TTS endpoint)."
+                  agent_id);
+             Ok result)
+        | other -> other)
 ;;
 
-(** List active voice sessions *)
-let list_voice_sessions ~sw ~clock ~net =
-  if not (is_voice_server_available ~sw ~clock ~net)
-  then Error "Voice server unavailable"
-  else (
-    let args = `Assoc [] in
-    call_session_tool ~sw ~clock ~net ~tool_name:"voice_session_list" ~arguments:args)
+let decode_agent_speak_result payload =
+  match Json_util.get_string payload "status" with
+  | Some "spoken" -> Ok { completion = Spoken; payload }
+  | Some "dedup_skipped" -> Ok { completion = Dedup_skipped; payload }
+  | Some status ->
+    Error (Printf.sprintf "voice speak returned unsupported status=%S" status)
+  | None -> Error "voice speak result is missing required status"
+;;
+
+let agent_speak
+      ~sw
+      ~clock
+      ~net
+      ~agent_id
+      ~message
+      ?provider
+      ?priority
+      ?audio_device
+      ()
+  =
+  match
+    agent_speak_json
+      ~sw
+      ~clock
+      ~net
+      ~agent_id
+      ~message
+      ?provider
+      ?priority
+      ?audio_device
+      ()
+  with
+  | Error _ as error -> error
+  | Ok payload -> decode_agent_speak_result payload
 ;;
 
 (** Get voice configuration for an agent *)
@@ -925,130 +752,6 @@ let get_agent_voice ~agent_id =
           ; ( "available_voices"
             , `List (List.map (fun (_, v) -> `String v) (agent_voices ())) )
           ])
-;;
-
-(** ============================================
-    Conference Management (Eio-native)
-    ============================================ *)
-
-(** Start a multi-agent voice conference *)
-let start_conference ~sw ~clock ~net ~agent_ids ?conference_name () =
-  let agent_voices_list =
-    List.map
-      (fun id ->
-         `Assoc [ "agent_id", `String id; "voice", `String (get_voice_for_agent id) ])
-      agent_ids
-  in
-  let args =
-    `Assoc
-      [ "agent_ids", `List (List.map (fun id -> `String id) agent_ids)
-      ; "agent_voices", `List agent_voices_list
-      ; "conference_name", Json_util.string_opt_to_json conference_name
-      ]
-  in
-  let* data =
-    call_session_tool ~sw ~clock ~net ~tool_name:"conference_start" ~arguments:args
-  in
-  match data with
-  | `Assoc fields as data ->
-    let conference_id =
-      Json_util.get_string data "conference_id"
-      |> Option.value ~default:"unknown"
-    in
-    Ok
-      (`Assoc
-          ([ "conference_id", `String conference_id
-           ; "state", `String "active"
-           ; "participants", `List (List.map (fun id -> `String id) agent_ids)
-           ; "current_speaker", `Null
-           ; "queue_size", `Int 0
-           ; "turn_count", `Int 0
-           ]
-           @ List.filter
-               (fun (key, _) ->
-                  key = "provider_kind" || key = "endpoint_id" || key = "endpoint_url")
-               fields))
-  | data -> Ok data
-;;
-
-(** End a multi-agent voice conference *)
-let end_conference ~sw ~clock ~net ~agent_ids () =
-  if not (is_voice_server_available ~sw ~clock ~net)
-  then Error "Voice server unavailable - cannot end conference"
-  else (
-    let classify_result = function
-      | Ok (`Assoc fields) ->
-        (match List.assoc_opt "status" fields with
-         | Some (`String "ended") -> `Ended
-         | Some (`String _) | Some _ -> `Failed
-         | None -> `Failed)
-      | Ok _ -> `Failed
-      | Error _ -> `Failed
-    in
-    let ended, skipped, failed =
-      List.fold_left
-        (fun (ended, skipped, failed) agent_id ->
-           match classify_result (end_voice_session ~sw ~clock ~net ~agent_id) with
-           | `Ended -> ended + 1, skipped, failed
-           | `Failed -> ended, skipped, failed + 1)
-        (0, 0, 0)
-        agent_ids
-    in
-    Ok
-      (`Assoc
-          [ "ended", `Int ended
-          ; "skipped", `Int skipped
-          ; "failed", `Int failed
-          ; "total", `Int (List.length agent_ids)
-          ]))
-;;
-
-(** Get transcript of voice conversation *)
-let get_transcript ~sw ~clock ~net () =
-  if not (is_voice_server_available ~sw ~clock ~net)
-  then Error "Voice server unavailable"
-  else (
-    let args = `Assoc [] in
-    call_session_tool ~sw ~clock ~net ~tool_name:"get_transcript" ~arguments:args)
-;;
-
-(** ============================================
-    Health Check (Eio-native)
-    ============================================ *)
-
-(** Health check for Voice MCP server *)
-let health_check ~sw:_ ~clock:_ ~net () =
-  let* endpoint = session_endpoint_result () in
-  let uri =
-    match Voice_runtime_overlay.session_health_url_of_endpoint endpoint with
-    | Ok url -> Uri.of_string url
-    | Error _ -> voice_health_uri ()
-  in
-  match
-    Masc_http_client.get_response_sync ~url:(Uri.to_string uri) ~headers:[] ()
-  with
-  | Error msg ->
-    (* RFC-0106: re-raise Eio.Cancel.Cancelled when the health-check
-       fiber was cancelled. Pool.do_request captures Cancelled as an
-       Error string; without this check shutdown is reported as a
-       normal "Not reachable" failure. *)
-    Eio.Fiber.check ();
-    Error (Printf.sprintf "Not reachable: %s" msg)
-  | Ok { Masc_http_client.status; body = body_str; _ } ->
-    if status >= 200 && status < 300
-    then
-      Ok
-        (append_provider_metadata
-           (`Assoc
-               [ "status", `String "healthy"
-               ; "server", `String (Uri.to_string uri)
-               ; ( "response"
-                 , try Yojson.Safe.from_string body_str with
-                   | Yojson.Json_error _ -> `String body_str )
-               ])
-           endpoint)
-    else
-      Error (Printf.sprintf "Unhealthy: HTTP %d" status)
 ;;
 
 (** {1 Microphone record + transcribe} *)

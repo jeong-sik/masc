@@ -33,7 +33,6 @@ function backgroundFixture(): DashboardKeeperBackground {
             enabled: true,
             run_count: 12,
             failure_count: 0,
-            max_failures: 3,
             last_run_at_iso: '2026-07-08T00:10:00Z',
             next_run_at_iso: '2026-07-08T00:10:30Z',
           },
@@ -45,7 +44,6 @@ function backgroundFixture(): DashboardKeeperBackground {
             enabled: false,
             run_count: 4,
             failure_count: 2,
-            max_failures: 2,
             last_run_at_iso: '2026-07-08T00:02:00Z',
             next_run_at_iso: null,
           },
@@ -69,7 +67,6 @@ function backgroundFixture(): DashboardKeeperBackground {
             enabled: true,
             run_count: 0,
             failure_count: 0,
-            max_failures: 5,
             last_run_at_iso: null,
             next_run_at_iso: null,
           },
@@ -116,7 +113,7 @@ describe('KeeperBackgroundPanel', () => {
     // not duplicated as an "every Ns" meta chip.
     expect(container.querySelector('.sch-bg-when')?.textContent).toContain('30s')
     expect(container.textContent).toContain('runs 12')
-    expect(container.textContent).toContain('fail 2/2')
+    expect(container.textContent).toContain('fail 2')
     expect(container.textContent).toContain('enabled')
     expect(container.textContent).toContain('disabled')
     // action_kind and loop restart context are rendered verbatim from the projection.

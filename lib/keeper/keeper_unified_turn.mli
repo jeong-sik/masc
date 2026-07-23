@@ -8,61 +8,25 @@
 
     @since Unified Keeper Loop *)
 
-type provider_timeout_budget =
-  { effective_timeout_sec : float
-  ; adaptive_timeout_sec : float
-  ; keeper_turn_timeout_sec : float
-  ; remaining_turn_budget_sec : float
-  ; estimated_input_tokens : int
-  ; source : string
-  }
-
-val resolve_bounded_provider_timeout_budget_with_turn_budget
-  :  allow_wall_clock_retry_budget:bool
-  -> is_retry:bool
-  -> estimated_input_tokens:int
-  -> remaining_turn_budget_s:float
-  -> provider_timeout_budget
-(** See [Keeper_turn_runtime_budget] for provider timeout planning semantics. *)
-
-val allow_wall_clock_retry_budget_for_attempt
-  :  is_retry:bool
-  -> degraded_rotation_first_attempt:bool
-  -> attempt:int
-  -> attempted_runtimes:string list
-  -> bool
-
-val degraded_retry_slot_phase_budget_sec : float
-val degraded_retry_slot_phase_available : time_spent_in_turn_s:float -> bool
-
-type degraded_retry_budget_decision =
+type degraded_retry_decision =
   | No_degraded_retry
-  | Degraded_retry_slot_phase_exhausted of Keeper_error_classify.degraded_retry
   | Degraded_retry_allowed of Keeper_error_classify.degraded_retry
 
-val next_fail_open_runtime_for_turn_with_budget
+val decide_degraded_retry
   :  base_runtime:string
   -> effective_runtime:string
   -> attempted_runtimes:string list
-  -> estimated_input_tokens:int
-  -> ?time_spent_in_turn_s:float
-  -> remaining_turn_budget_s:float
   -> Agent_sdk.Error.sdk_error
-  -> degraded_retry_budget_decision
+  -> degraded_retry_decision
 
-(** Turn-local overflow hint published by the OAS event bus before a
-    proactive compaction attempt. Exposed for regression tests. *)
-type turn_event_bus_overflow =
-  { estimated_tokens : int
-  ; limit_tokens : int
-  }
-
-type turn_event_bus_compaction =
-  { before_tokens : int
-  ; after_tokens : int
-  ; tokens_freed : int
-  ; phase_hint : string
-  }
+val user_message_with_hitl_resolution :
+  base_path:string ->
+  user_message:string ->
+  Keeper_event_queue.hitl_resolution option ->
+  string
+(** Add the durable HITL resolution output to the model-facing turn input.
+    Reject rationale and edited JSON are always explicit and never imply a
+    one-shot grant; only an approved journal can render exact authorization. *)
 
 (** Summary of event-bus signals observed during a single keeper turn.
     Exposed for regression tests. *)
@@ -72,30 +36,23 @@ type turn_event_bus_summary =
   ; caused_by : string option
   ; event_count : int
   ; payload_kinds : string list
-  ; overflow_imminent : turn_event_bus_overflow option
-  ; context_compact_started_count : int
-  ; context_compacted_count : int
-  ; last_compaction : turn_event_bus_compaction option
   }
 
 (** Fold the drained OAS event-bus events for a single keeper turn into
     the signals MASC currently consumes. *)
 val summarize_turn_event_bus : Agent_sdk.Event_bus.event list -> turn_event_bus_summary
 
-val turn_event_bus_overflow_evidence_detail : turn_event_bus_summary -> string
-(** Compact forensic string for preserving OAS compaction/retry event-bus
-    evidence inside the keeper overflow blocker detail. *)
+val turn_event_bus_evidence_detail : turn_event_bus_summary -> string
+(** Compact forensic string for observed OAS events around a typed overflow. *)
 
 (** Turn-local tool-event pairing state used to detect event-bus integrity
-    failures before side-effect retry logic falls back to unknown input.
-    Exposed for targeted tests. *)
+    failures. Exposed for targeted tests. *)
 type turn_tool_event_tracker
 
 val create_turn_tool_event_tracker : unit -> turn_tool_event_tracker
 
 val record_turn_tool_events
-  :  ?has_mutating_side_effect_with_input:(tool_name:string -> input:Yojson.Safe.t -> bool)
-  -> keeper_name:string
+  :  keeper_name:string
   -> turn_tool_event_tracker
   -> Agent_sdk.Event_bus.event list
   -> turn_tool_event_tracker
@@ -104,34 +61,19 @@ val turn_tool_event_integrity_error
   :  turn_tool_event_tracker
   -> Agent_sdk.Error.sdk_error option
 
-val committed_mutating_tools_from_events : turn_tool_event_tracker -> string list
-
-(** Build the keeper overflow event from either a drained event-bus
-    signal or the structured OAS error fallback. Exposed for tests. *)
+(** Build an overflow event only from typed [Api (ContextOverflow _)].
+    Non-overflow errors return [None]. *)
 val context_overflow_event_of_error
-  :  fallback_tokens:int
-  -> ?turn_event_bus:turn_event_bus_summary
-  -> Agent_sdk.Error.sdk_error
-  -> Keeper_state_machine.event
+  :  Agent_sdk.Error.sdk_error
+  -> Keeper_state_machine.event option
 
-(** Resolve the initial keeper turn context budget from the keeper's routed
-    runtime, so lifecycle context math matches the provider that will receive
-    the first request. Exposed for regression tests. *)
-val resolved_max_context_for_turn : meta:Keeper_meta_contract.keeper_meta -> int
-
-(** Persist paused/resumed state before mutating the live registry/phase.
-    Returns [Error] when disk sync fails so callers can surface the failure
-    instead of silently diverging runtime vs persisted state. *)
-val sync_keeper_paused_state
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> paused:bool
-  -> (Keeper_meta_contract.keeper_meta, string) result
-
-(** Completion-contract failures are persistent keeper/provider contract
-    failures, not transient provider blips. Repeated occurrences should pause
-    the keeper before the generic supervisor crash/restart loop re-enters the
-    same prompt and model family. Exposed for regression tests. *)
+(** Project the initial keeper turn context budget from the routed runtime's
+    prevalidated resolution, so lifecycle context math matches the provider
+    that will receive the first request. Exposed for regression tests. *)
+val resolved_max_context_for_turn
+  :  meta:Keeper_meta_contract.keeper_meta
+  -> Keeper_context_runtime.max_context_resolution
+  -> int
 
 (** Ensure local-provider discovery is refreshed before a turn when the
     selected labels depend on runtime discovery. Exposed for targeted tests. *)
@@ -141,7 +83,7 @@ val ensure_local_discovery_ready
   -> (unit, string) result
 
 (* runtime→Runtime 숙청: phase-buffer liveness probe 기계 재export 제거
-   (Keeper_turn_liveness 에서 적출됨 — 단일 runtime 에서 죽은 코드). *)
+   (단일 runtime 에서 죽은 코드였으므로 제거됨). *)
 
 (** Typed phase-gate output for the first turn pipeline boundary.
     [run_keeper_cycle] converts this record into the manifest
@@ -187,8 +129,7 @@ val next_fail_open_runtime_for_turn
     Exposed so tests can pin the supervisor [fiber_stop] branch without forcing
     a live provider cancellation. *)
 val record_streaming_cancelled_observation
-  :  ?cancel_reason:string
-  -> config:Workspace.config
+  :  config:Workspace.config
   -> run_meta:Keeper_meta_contract.keeper_meta
   -> run_generation:int
   -> runtime_id:string
@@ -196,13 +137,61 @@ val record_streaming_cancelled_observation
   -> unit
   -> unit
 
+type in_lane_compaction =
+  | Compaction_committed
+  | Compaction_attempt_failed of { reason : string }
+(** Typed outcome of the in-lane provider-overflow compaction behind a
+    [Requeue_after_context_compaction] disposition. [Compaction_committed]
+    proves the checkpoint durably shrank before the requeue, so the settlement
+    resets the keeper's compaction-failure streak and the retry reloads real
+    progress. [Compaction_attempt_failed] means the recovery made no durable
+    progress; the settlement advances the streak and escalates once it reaches
+    [Keeper_meta_contract.compaction_retry_escalation_threshold] (RFC-0351 S0,
+    #25461 — without the ceiling this lane requeued forever: 284 of 285
+    rejections in the 2026-07-21 storm carried trigger=provider_overflow and
+    only the operator's keeper_down ended it). *)
+
+type exact_output_terminal_reason = private
+  | Execution_may_have_dispatched
+  | Domain_invalid_output
+(** Closed exact-output reasons that forbid another provider-overflow
+    compaction attempt for the same source. *)
+
 type source_lease_disposition =
   | Follow_failure_route
+  | Follow_failure_route_after_no_compaction of
+      { reason : Keeper_event_queue_state.no_compaction_reason }
+  | Escalate_after_exact_output_terminal of exact_output_terminal_reason
+  | Requeue_after_context_compaction of in_lane_compaction
+  | Requeue_after_transcript_quarantine
   | Acknowledge_after_in_turn_handling
 (** A failed turn normally follows its typed retry/rotate/escalate route.
+    [Follow_failure_route_after_no_compaction] follows the same route but
+    records that the in-lane provider-overflow compaction terminally declined
+    to act ([no_compaction_reason]); the settlement advances the
+    compaction-failure streak and replaces the route with
+    [Escalate Compaction_retry_exhausted] at the threshold, because a turn
+    whose context cannot shrink re-overflows deterministically on every retry.
+    [Escalate_after_exact_output_terminal] consumes the source lease into a
+    typed escalation with no successor, so neither the ordinary retry route nor
+    another compaction dispatch can run after the receipt crossed dispatch or a
+    dispatched response failed the MASC domain contract.
+    [Requeue_after_context_compaction] preserves the exact source stimulus
+    after MASC handled a typed provider overflow in this Keeper lane; the next
+    cycle reloads the durably compacted checkpoint.
+    [Requeue_after_transcript_quarantine] preserves an unprocessed source
+    stimulus after typed transcript admission rejected provider dispatch; an
+    operator or recovery path can repair the checkpoint without losing work.
     [Acknowledge_after_in_turn_handling] consumes only the source stimulus when
     the configured in-turn policy already handled the terminal failure; the
     cycle remains failed for receipts, counters, and heartbeat freshness. *)
+
+val source_lease_disposition_after_no_compaction
+  :  Keeper_event_queue_state.no_compaction_reason
+  -> source_lease_disposition
+(** Compiler-checked partition of no-compaction outcomes. Effect-boundary and
+    domain-invalid outcomes return [Escalate_after_exact_output_terminal]; all
+    other deterministic no-progress outcomes retain the bounded failure route. *)
 
 type turn_failure =
   { error : Agent_sdk.Error.sdk_error
@@ -226,6 +215,8 @@ type turn_success =
 val run_keeper_cycle
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
+  -> publication_recovery_provider:
+       Keeper_publication_recovery_availability.provider
   -> observation:Keeper_world_observation.world_observation
   -> generation:int
   -> wake:Keeper_registry.wake_reason

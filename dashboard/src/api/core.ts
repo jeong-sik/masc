@@ -220,15 +220,12 @@ export function jsonHeaders(): Record<string, string> {
 import {
   DEFAULT_GET_TIMEOUT_MS,
   DEFAULT_POST_TIMEOUT_MS,
-  KEEPER_MESSAGE_TIMEOUT_MS,
-  SOCIAL_SWEEP_TIMEOUT_MS,
 } from '../config/constants'
 
 // Re-export so existing consumers keep working
 export {
   DEFAULT_GET_TIMEOUT_MS,
   DEFAULT_POST_TIMEOUT_MS,
-  KEEPER_LIFECYCLE_TIMEOUT_MS,
   DEFAULT_MCP_TIMEOUT_MS,
   NAMESPACE_TRUTH_GET_TIMEOUT_MS,
 } from '../config/constants'
@@ -333,6 +330,19 @@ export async function fetchWithTimeout(path: string, init: RequestInit, timeoutM
     clearTimeout(timer)
     upstreamSignal?.removeEventListener('abort', abortFromUpstream)
   }
+}
+
+/**
+ * Control-plane operations complete when the server publishes their durable
+ * outcome. A client-side wall-clock deadline can only hide that outcome while
+ * the server continues the operation, so this boundary preserves only an
+ * explicit caller-provided AbortSignal.
+ */
+export function fetchControlPlane(path: string, init: RequestInit): Promise<Response> {
+  return fetch(path, {
+    ...init,
+    cache: init.cache ?? 'no-store',
+  })
 }
 
 export async function fetchJsonWithTimeout(
@@ -765,6 +775,27 @@ export async function post<T>(
   return parseJsonResponse<T>('POST', path, res)
 }
 
+export async function postControlPlane<T>(
+  path: string,
+  body: unknown,
+  extraHeaders?: Record<string, string>,
+  opts: AbortableRequestOptions = {},
+): Promise<T> {
+  const res = await fetchControlPlane(path, {
+    method: 'POST',
+    headers: {
+      ...jsonHeaders(),
+      ...(extraHeaders ?? {}),
+    },
+    body: JSON.stringify(body),
+    signal: opts.signal,
+  })
+  if (!res.ok) {
+    throw await apiRequestErrorFromResponse('POST', path, res)
+  }
+  return parseJsonResponse<T>('POST', path, res)
+}
+
 export async function patch<T>(
   path: string,
   body: unknown,
@@ -826,22 +857,15 @@ export async function put<T>(
 
 // --- Operator ---
 
-const OPERATOR_ACTION_TIMEOUT_MS: Record<string, number> = {
-  keeper_message: KEEPER_MESSAGE_TIMEOUT_MS,
-  keeper_recover: KEEPER_MESSAGE_TIMEOUT_MS,
-  social_sweep: SOCIAL_SWEEP_TIMEOUT_MS,
-}
-
-function operatorActionTimeoutMs(body: OperatorActionRequest): number {
-  return OPERATOR_ACTION_TIMEOUT_MS[body.action_type] ?? DEFAULT_POST_TIMEOUT_MS
-}
-
-export async function runOperatorAction(body: OperatorActionRequest): Promise<OperatorActionResult> {
-  const raw = await post<unknown>(
+export async function runOperatorAction(
+  body: OperatorActionRequest,
+  opts: AbortableRequestOptions = {},
+): Promise<OperatorActionResult> {
+  const raw = await postControlPlane<unknown>(
     '/api/v1/operator/action',
     body,
     authHeaders({ actorName: body.actor }),
-    operatorActionTimeoutMs(body),
+    opts,
   )
   const { parseOperatorActionResult } = await import('./schemas/operator-action')
   return parseOperatorActionResult(raw)
@@ -851,8 +875,9 @@ export async function confirmOperatorAction(
   actor: string,
   confirmToken: string,
   decision: 'confirm' | 'deny' = 'confirm',
+  opts: AbortableRequestOptions = {},
 ): Promise<OperatorActionResult> {
-  const raw = await post<unknown>(
+  const raw = await postControlPlane<unknown>(
     '/api/v1/operator/confirm',
     {
       actor,
@@ -860,6 +885,7 @@ export async function confirmOperatorAction(
       decision,
     },
     authHeaders({ actorName: actor }),
+    opts,
   )
   const { parseOperatorActionResult } = await import('./schemas/operator-action')
   return parseOperatorActionResult(raw)

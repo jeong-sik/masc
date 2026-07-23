@@ -35,7 +35,7 @@ import { isRecord, asNumber, asString } from './components/common/normalize'
 import { toolEntryIdFromCallId } from './tool-call-output-store'
 import { STREAMING_THINKING_PREVIEW_CHARS } from './config/constants'
 import { updatePendingKeeperChatAssistantDraft } from './keeper-chat-pending'
-import { isKeeperChatReceiptId } from './lib/keeper-chat-receipt'
+import { isKeeperChatReceiptId, parseKeeperQueueRevision } from './lib/keeper-chat-receipt'
 
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 export const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'lost', 'cancelled'])
@@ -113,16 +113,6 @@ function flushPendingThinkingDeltas(
     oasBlockIndex: pending.oasBlockIndex,
   })
   persistActiveAssistantDraft(keeperName, assistantEntryId)
-}
-
-function dropPendingThinkingDeltas(keeperName: string, assistantEntryId: string): void {
-  const key = streamEntryKey(keeperName, assistantEntryId)
-  const pending = pendingThinkingDeltas.get(key)
-  if (!pending) return
-  pendingThinkingDeltas.delete(key)
-  if (pending.flushHandle !== null) {
-    cancelStreamFlush(pending.flushHandle)
-  }
 }
 
 function flushAllPendingThinkingDeltas(): void {
@@ -346,7 +336,7 @@ export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult 
   console.debug(`[keeper-stream] aborting stream for ${keeperName}${entryId ? ` (entry=${entryId})` : ''}${requestId ? ` request=${requestId}` : ''}`)
   if (controller) controller.abort()
   if (entryId) {
-    dropPendingThinkingDeltas(keeperName, entryId)
+    flushPendingThinkingDeltas(keeperName, entryId)
     finalizeAssistantEntry(keeperName, entryId, {
       text: KEEPER_MESSAGE_CANCELLED_TEXT,
       rawText: KEEPER_MESSAGE_CANCELLED_TEXT,
@@ -685,9 +675,10 @@ export function applyKeeperStreamEvent(
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const queued = isRecord(event.value) ? event.value : null
         const receiptId = asString(queued?.receipt_id, '').trim()
-        const revision = asNumber(queued?.queue_revision)
+        const revision = parseKeeperQueueRevision(queued?.queue_revision)
         const pendingCount = asNumber(queued?.pending_count)
         const inflightCount = asNumber(queued?.inflight_count)
+        const recoveryRequiredCount = asNumber(queued?.recovery_required_count)
         const shutdownOperationId = (() => {
           const raw = queued?.shutdown_operation_id
           if (raw === null) return null
@@ -697,15 +688,16 @@ export function applyKeeperStreamEvent(
         })()
         if (
           !isKeeperChatReceiptId(receiptId)
-          || typeof revision !== 'number'
-          || !Number.isSafeInteger(revision)
-          || revision < 0
+          || revision === undefined
           || typeof pendingCount !== 'number'
           || !Number.isSafeInteger(pendingCount)
           || pendingCount < 1
           || typeof inflightCount !== 'number'
           || !Number.isSafeInteger(inflightCount)
           || inflightCount < 0
+          || typeof recoveryRequiredCount !== 'number'
+          || !Number.isSafeInteger(recoveryRequiredCount)
+          || recoveryRequiredCount < 0
         ) {
           return 'Keeper queue acceptance is missing its durable receipt metadata.'
         }
@@ -723,6 +715,7 @@ export function applyKeeperStreamEvent(
             queueRevision: revision,
             queuePendingCount: pendingCount,
             queueInflightCount: inflightCount,
+            queueRecoveryRequiredCount: recoveryRequiredCount,
             queueState: 'pending',
           },
           streamContract: keeperClientObservedSseStreamContract('queue_event', 'queue_request_event', {
@@ -877,9 +870,7 @@ export function applyKeeperStreamEvent(
       flushPendingThinkingDeltas(keeperName, assistantEntryId)
       clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
       clearPendingOasTextBlockIndex(keeperName, assistantEntryId)
-      return typeof event.value === 'string'
-        ? event.value
-        : (isRecord(event.value) ? asString(event.value.message) : null) ?? 'Keeper stream failed'
+      return asString(event.message, '').trim() || 'Keeper stream failed'
     default:
       return null
   }

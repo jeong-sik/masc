@@ -17,9 +17,8 @@
 val classify_failure_output : string -> string
 (** Map a raw tool-call failure output (which may carry an
     [error: ] / [tool_error: ] prefix and a JSON envelope) to a
-    canonical reason code. Recognises the
-    ["command_blocked_readonly:<category>"] form and falls back to a
-    normalised free-text classification or to ["parse_error"] /
+    canonical reason code. Falls back to a normalised free-text
+    classification or to ["parse_error"] /
     ["unknown_error"] / ["empty_output"] when nothing matches. *)
 
 val unknown_runtime_profile_bucket : string

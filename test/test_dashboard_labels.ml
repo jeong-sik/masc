@@ -42,19 +42,19 @@ let with_dashboard_label_thresholds ?quiet ?stuck f =
       Option.iter
         (fun _ ->
           Lib.Runtime_params.clear
-            Lib.Governance_registry.dashboard_agent_quiet_threshold_sec)
+            Lib.Runtime_settings.dashboard_agent_quiet_threshold_sec)
         quiet;
       Option.iter
         (fun _ ->
           Lib.Runtime_params.clear
-            Lib.Governance_registry.dashboard_agent_stuck_threshold_sec)
+            Lib.Runtime_settings.dashboard_agent_stuck_threshold_sec)
         stuck)
     (fun () ->
       Option.iter
-        (set_or_fail Lib.Governance_registry.dashboard_agent_quiet_threshold_sec)
+        (set_or_fail Lib.Runtime_settings.dashboard_agent_quiet_threshold_sec)
         quiet;
       Option.iter
-        (set_or_fail Lib.Governance_registry.dashboard_agent_stuck_threshold_sec)
+        (set_or_fail Lib.Runtime_settings.dashboard_agent_stuck_threshold_sec)
         stuck;
       f ())
 

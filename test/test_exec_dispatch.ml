@@ -65,6 +65,32 @@ let () =
   assert (result.status = Unix.WEXITED 0)
 
 let () =
+  let executable = Filename.temp_file "masc-exact-argv0-" ".sh" in
+  Fun.protect
+    ~finally:(fun () -> if Sys.file_exists executable then Unix.unlink executable)
+    (fun () ->
+       let output = open_out executable in
+       Fun.protect
+         ~finally:(fun () -> close_out_noerr output)
+         (fun () -> output_string output "#!/bin/sh\nprintf '%s' exact-argv0\n");
+       Unix.chmod executable 0o700;
+       with_eio @@ fun () ->
+       let open Masc_exec.Shell_ir in
+       let bin = Masc_exec.Exec_program.of_string executable |> Result.get_ok in
+       let ir =
+         { bin
+         ; args = []
+         ; env = []
+         ; cwd = None
+         ; redirects = []
+         ; sandbox = Masc_exec.Sandbox_target.host ()
+         }
+       in
+       let result = Masc_exec.Exec_dispatch.dispatch_simple ir in
+       assert (result.status = Unix.WEXITED 0);
+       assert (String.equal result.stdout "exact-argv0"))
+
+let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
   let bin = Masc_exec.Exec_program.of_string "sh" |> Result.get_ok in
@@ -177,7 +203,7 @@ let () =
   assert (String.trim result.stdout = "y");
   assert (result.status <> Unix.WEXITED 124)
 
-(* --- dispatch_decided forwards pipeline captured output chunks --- *)
+(* --- dispatch forwards pipeline captured output chunks --- *)
 
 let () =
   with_eio @@ fun () ->
@@ -211,16 +237,11 @@ let () =
         sandbox = host_sandbox;
       }
   in
-  let envelope =
-    { Masc_exec.Shell_ir_risk.ir = Pipeline [ sh_stage; cat_stage ]
-    ; risk = Masc_exec.Shell_ir_risk.R0_Read
-    }
-  in
   let chunks = ref [] in
   let result =
-    Masc_exec.Exec_dispatch.dispatch_decided
+    Masc_exec.Exec_dispatch.dispatch
       ~on_output_chunk:(fun chunk -> chunks := chunk :: !chunks)
-      envelope
+      (Pipeline [ sh_stage; cat_stage ])
   in
   assert (result.status = Unix.WEXITED 0);
   assert (result.stdout = "out");
@@ -452,12 +473,9 @@ let () =
       ; sandbox = host_sandbox
       }
   in
-  let envelope =
-    { Masc_exec.Shell_ir_risk.ir = Pipeline [ Pipeline [ echo_stage; cat_stage ]; cat_stage ]
-    ; risk = Masc_exec.Shell_ir_risk.R0_Read }
-  in
   let result =
-    Masc_exec.Exec_dispatch.dispatch_decided envelope
+    Masc_exec.Exec_dispatch.dispatch
+      (Pipeline [ Pipeline [ echo_stage; cat_stage ]; cat_stage ])
   in
   assert (result.status = Unix.WEXITED 1);
   assert (result.stdout = "");
@@ -933,354 +951,31 @@ let () =
   assert (result.stdout = "");
   assert (String.length result.stderr > 0)
 
-(* --- Keeper_tool_execute_shell_ir.dispatch_classified_with_approval --- *)
+(* --- Keeper shell adapter validates and dispatches neutral IR. --- *)
 
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
   let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
   let ir =
-    { bin
-    ; args = [ Lit ("safe", default_meta) ]
-    ; env = []
-    ; cwd = None
-    ; redirects = []
-    ; sandbox = Masc_exec.Sandbox_target.host ()
-    }
-  in
-  let envelope =
-    Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
-  in
-  let agent_id = Masc_exec.Agent_id.of_string "test-keeper" in
-  let approval_config =
-    { Masc_exec.Approval_config.defaults = Masc_exec.Approval_config.permissive_default
-    ; per_agent = []
-    }
-  in
-  match
-    Keeper_tool_execute_shell_ir.dispatch_classified_with_approval
-      ~agent_id
-      ~approval_config
-      ~workdir:"/tmp"
-      ~sandbox:(Masc_exec.Sandbox_target.host ())
-      envelope
-  with
-  | Ok result ->
-    assert (result.status = Unix.WEXITED 0);
-    assert (String.trim result.stdout = "safe")
-  | Error _ -> assert false
-
-let () =
-  with_eio @@ fun () ->
-  let open Masc_exec.Shell_ir in
-  let bin = Masc_exec.Exec_program.of_string "rm" |> Result.get_ok in
-  let ir =
-    { bin
-    ; args = [ Lit ("-rf", default_meta); Lit ("/tmp/__nonexistent_rm_test", default_meta) ]
-    ; env = []
-    ; cwd = None
-    ; redirects = []
-    ; sandbox = Masc_exec.Sandbox_target.host ()
-    }
-  in
-  let envelope =
-    Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
-  in
-  let agent_id = Masc_exec.Agent_id.of_string "test-keeper" in
-  let approval_config =
-    { Masc_exec.Approval_config.defaults = Masc_exec.Approval_config.permissive_default
-    ; per_agent = []
-    }
-  in
-  match
-    Keeper_tool_execute_shell_ir.dispatch_classified_with_approval
-      ~agent_id
-      ~approval_config
-      ~workdir:"/tmp"
-      ~sandbox:(Masc_exec.Sandbox_target.host ())
-      envelope
-  with
-  | Ok _ -> assert false
-  (* rm is Privileged; permissive_default sets privileged_trust = Enforced,
-     so the policy yields Verdict.Ask -> Approval_required deterministically.
-     A flip to Policy_denied (e.g. risk-class regression) must fail the test. *)
-  | Error
-      (Keeper_tool_execute_shell_ir.Approval_required
-         { summary; kind = Keeper_tool_execute_shell_ir.Privileged_program_floor; _ }) ->
-    assert (
-      String.equal
-        summary
-        "command 'rm' requires approval (audited/privileged risk class)")
-  | Error _ -> assert false
-
-let () =
-  with_eio @@ fun () ->
-  let open Masc_exec.Shell_ir in
-  let bin = Masc_exec.Exec_program.of_string "chmod" |> Result.get_ok in
-  let ir =
-    { bin
-    ; args =
-        [ Lit ("600", default_meta)
-        ; Lit ("./__nonexistent_privileged_guard", default_meta)
-        ]
-    ; env = []
-    ; cwd = None
-    ; redirects = []
-    ; sandbox = Masc_exec.Sandbox_target.host ()
-    }
-  in
-  let envelope =
-    Masc_exec.Shell_ir_risk.classify
-      (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
-  in
-  match
-    Keeper_tool_execute_shell_ir.dispatch_classified
-      ~workdir:"/tmp"
-      ~sandbox:(Masc_exec.Sandbox_target.host ())
-      envelope
-  with
-  | Ok _ -> assert false
-  | Error
-      (Keeper_tool_execute_shell_ir.Approval_required { summary = _; bin; kind }) ->
-    assert (String.equal bin "chmod");
-    assert (kind = Keeper_tool_execute_shell_ir.Privileged_program_floor)
-  | Error _ -> assert false
-
-let () =
-  with_eio @@ fun () ->
-  let open Masc_exec.Shell_ir in
-  let bin = Masc_exec.Exec_program.of_string "gh" |> Result.get_ok in
-  let ir =
-    { bin
-    ; args =
-        [ Lit ("repo", default_meta)
-        ; Lit ("create", default_meta)
-        ; Lit ("masc-test/new-repo", default_meta)
-        ; Lit ("--public", default_meta)
-        ]
-    ; env = []
-    ; cwd = None
-    ; redirects = []
-    ; sandbox = Masc_exec.Sandbox_target.host ()
-    }
-  in
-  let envelope =
-    Masc_exec.Shell_ir_risk.classify
-      (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
-  in
-  (* The bare [dispatch_classified] path is the
-     [MASC_SHELL_IR_APPROVAL_GATE_ENABLED]=off route in
-     keeper_tool_execute_runtime.ml. Durable-remote gh mutations must still ask
-     for non-blocking HITL there, not execute. *)
-  match
-    Keeper_tool_execute_shell_ir.dispatch_classified
-      ~workdir:"/tmp"
-      ~sandbox:(Masc_exec.Sandbox_target.host ())
-      envelope
-  with
-  | Ok _ -> assert false
-  | Error
-      (Keeper_tool_execute_shell_ir.Approval_required { summary; bin; kind }) ->
-    assert (String.equal bin "gh");
-    assert (
-      String.equal
-        summary
-        "command 'gh' requires approval — gh repo create: reversible mutation \
-         (audited/privileged risk class)");
-    assert (kind = Keeper_tool_execute_shell_ir.Gh_capability_requires_approval)
-  | Error _ -> assert false
-
-let () =
-  with_eio @@ fun () ->
-  let open Masc_exec.Shell_ir in
-  let bin = Masc_exec.Exec_program.of_string "gh" |> Result.get_ok in
-  let ir =
-    { bin
-    ; args =
-        [ Lit ("repo", default_meta)
-        ; Lit ("create", default_meta)
-        ; Lit ("masc-test/new-repo", default_meta)
-        ]
-    ; env = []
-    ; cwd = None
-    ; redirects = []
-    ; sandbox = Masc_exec.Sandbox_target.host ()
-    }
-  in
-  let envelope =
-    Masc_exec.Shell_ir_risk.classify
-      (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
-  in
-  (* G-10: a repo-create request missing required contract metadata is denied
-     before approval routing, including on the flag-off dispatch path. *)
-  match
-    Keeper_tool_execute_shell_ir.dispatch_classified
-      ~workdir:"/tmp"
-      ~sandbox:(Masc_exec.Sandbox_target.host ())
-      envelope
-  with
-  | Ok _ -> assert false
-  | Error (Keeper_tool_execute_shell_ir.Policy_denied { reason }) ->
-    assert (
-      String.equal
-        reason
-        "policy rule denied: gh_repo_create_contract:missing_visibility")
-  | Error _ -> assert false
-
-let () =
-  with_eio @@ fun () ->
-  let open Masc_exec.Shell_ir in
-  let bin = Masc_exec.Exec_program.of_string "gh" |> Result.get_ok in
-  let ir =
-    { bin
-    ; args =
-        [ Lit ("repo", default_meta)
-        ; Lit ("new", default_meta)
-        ; Lit ("masc-test/new-repo", default_meta)
-        ]
-    ; env = []
-    ; cwd = None
-    ; redirects = []
-    ; sandbox = Masc_exec.Sandbox_target.host ()
-    }
-  in
-  let envelope =
-    Masc_exec.Shell_ir_risk.classify
-      (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
-  in
-  (* G-10 alias: `gh repo new` is an official alias of `gh repo create` and
-     must hit the same contract deny. Before [is_repo_create_action] it fell
-     through [repo_create_tail] to Ask with no metadata, defeating the
-     contract via the alias. *)
-  match
-    Keeper_tool_execute_shell_ir.dispatch_classified
-      ~workdir:"/tmp"
-      ~sandbox:(Masc_exec.Sandbox_target.host ())
-      envelope
-  with
-  | Ok _ -> assert false
-  | Error (Keeper_tool_execute_shell_ir.Policy_denied { reason }) ->
-    assert (
-      String.equal
-        reason
-        "policy rule denied: gh_repo_create_contract:missing_visibility")
-  | Error _ -> assert false
-
-let () =
-  with_eio @@ fun () ->
-  let open Masc_exec.Shell_ir in
-  let bin = Masc_exec.Exec_program.of_string "gh" |> Result.get_ok in
-  let lit s = Lit (s, default_meta) in
-  let quoted s = Lit (s, { default_meta with quoted = true }) in
-  let assert_repo_create_contract_denied label args expected_reason =
-    let ir =
+    Simple
       { bin
-      ; args
+      ; args = [ Lit ("adapter", default_meta) ]
       ; env = []
       ; cwd = None
       ; redirects = []
       ; sandbox = Masc_exec.Sandbox_target.host ()
       }
-    in
-    let envelope =
-      Masc_exec.Shell_ir_risk.classify
-        (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
-    in
-    match
-      Keeper_tool_execute_shell_ir.dispatch_classified
-        ~workdir:"/tmp"
-        ~sandbox:(Masc_exec.Sandbox_target.host ())
-        envelope
-    with
-    | Ok _ -> assert false
-    | Error (Keeper_tool_execute_shell_ir.Policy_denied { reason }) ->
-      assert (String.equal reason expected_reason)
-    | Error _ -> failwith label
   in
-  List.iter
-    (fun (label, args, expected_reason) ->
-       assert_repo_create_contract_denied label args expected_reason)
-    [ ( "repo family uppercase alias"
-      , [ lit "REPO"; lit "new"; lit "masc-test/new-repo" ]
-      , "policy rule denied: gh_repo_create_contract:missing_visibility" )
-    ; ( "quoted alias"
-      , [ lit "repo"; quoted "new"; lit "masc-test/new-repo" ]
-      , "policy rule denied: gh_repo_create_contract:missing_visibility" )
-    ; ( "alias without repo name"
-      , [ lit "repo"; lit "new"; lit "--private" ]
-      , "policy rule denied: gh_repo_create_contract:missing_name,missing_owner" )
-    ]
-
-(* --- Keeper_tool_execute_shell_ir.dispatch_classified: catastrophic floor is
-   flag-independent (RFC-0254 §5.3.1) --- *)
-
-let () =
-  with_eio @@ fun () ->
-  let open Masc_exec.Shell_ir in
-  let bin = Masc_exec.Exec_program.of_string "git" |> Result.get_ok in
-  let ir =
-    { bin
-    ; args = [ Lit ("push", default_meta); Lit ("--force", default_meta) ]
-    ; env = []
-    ; cwd = Some (Masc_exec.Path_scope.classify ~raw:"/tmp" ~cwd:"/tmp")
-    ; redirects = []
-    ; sandbox = Masc_exec.Sandbox_target.host ()
-    }
-  in
-  let envelope =
-    Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
-  in
-  (* The bare [dispatch_classified] path takes no approval_config/agent_id — it is
-     the [MASC_SHELL_IR_APPROVAL_GATE_ENABLED]=off route that
-     [keeper_tool_execute_runtime.ml] falls to when the kill-switch is set.
-     Before §5.3.1 it skipped the catastrophic floor, so [git push --force]
-     (no path argument, so [validate_paths] cannot jail it — §5.4) executed.
-     The floor must now deny it here as [Policy_denied], identically to the
-     _with_approval path, proving the floor is flag-independent.  We set the
-     IR cwd to /tmp so that if the floor were ever skipped, [git push --force]
-     would run in a non-repo directory rather than the test checkout. *)
   match
-    Keeper_tool_execute_shell_ir.dispatch_classified
+    Keeper_tool_execute_shell_ir.dispatch
       ~workdir:"/tmp"
       ~sandbox:(Masc_exec.Sandbox_target.host ())
-      envelope
+      ir
   with
-  | Ok _ -> assert false
-  | Error (Keeper_tool_execute_shell_ir.Policy_denied _) -> ()
-  | Error _ -> assert false
-
-let () =
-  with_eio @@ fun () ->
-  let open Masc_exec.Shell_ir in
-  let bin = Masc_exec.Exec_program.of_string "mkfs" |> Result.get_ok in
-  let ir =
-    { bin
-    ; args = [ Lit ("/dev/sdb1", default_meta) ]
-    ; env = []
-    ; cwd = None
-    ; redirects = []
-    ; sandbox = Masc_exec.Sandbox_target.host ()
-    }
-  in
-  let envelope =
-    Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided (Masc_exec.Shell_ir.Simple ir))
-  in
-  (* A second, distinct floor member (Catastrophic_program) on the bare path.
-     The destructive-git case alone could pass even if a regression narrowed the
-     bare-path capability derivation; denying a catastrophic-by-identity binary
-     too proves the bare [dispatch_classified] runs the whole
-     [catastrophic_floor], not just one arm.  (The third member, redirect
-     write-escape, is covered at the policy layer in test_approval_policy; all
-     three route through the same single [catastrophic_floor] function, so two
-     distinct members exercising the bare path guard the wiring.) *)
-  match
-    Keeper_tool_execute_shell_ir.dispatch_classified
-      ~workdir:"/tmp"
-      ~sandbox:(Masc_exec.Sandbox_target.host ())
-      envelope
-  with
-  | Ok _ -> assert false
-  | Error (Keeper_tool_execute_shell_ir.Policy_denied _) -> ()
+  | Ok result ->
+    assert (result.status = Unix.WEXITED 0);
+    assert (String.trim result.stdout = "adapter")
   | Error _ -> assert false
 
 let () =

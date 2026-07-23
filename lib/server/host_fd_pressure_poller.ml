@@ -4,12 +4,9 @@
    reaches steady state. See RFC-0137 §9.
 
    Design choices worth noting:
-   - The poller does NOT dedup by (level, ts). The downstream
-     [Keeper_fd_pressure.engage_external] uses [cas_monotonic_max]
-     on [cooldown_until]; a stale [ts] yields a smaller [until_ts]
-     and is rejected by the CAS. So even if this poller reads the
-     same line twice, behaviour is correct.
-   - Parse failures and missing files are no-ops, not warnings —
+   - [Keeper_fd_pressure.engage_external] records each exact (level, ts)
+     signal once, so an unchanged state file does not inflate telemetry.
+   - Missing files are normal absence. Parse failures are throttled warnings —
      during normal operation the file is *absent* most of the time. *)
 
 type state_file_source =

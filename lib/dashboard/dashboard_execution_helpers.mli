@@ -14,7 +14,7 @@
     [server_dashboard_http_core] +
     [server_routes_http_routes_workspace]).
 
-    External surface (38 entries — 8 records + 30
+    External surface (36 entries — 7 records + 29
     helpers).
 
     Internal helpers stay private at this boundary
@@ -24,15 +24,12 @@
     [populate_neo4j_identity_cache_locked] internal
     cache state and loader, the every-other-let
     accumulator helpers consumed only inside
-    [tool_audit_snapshot] / [skill_route_summary_of_keeper]
-    /
     [load_persona_profile] / [extract_persona_name] /
     [merge_profiles] / [lookup_neo4j_profile] /
     [is_keeper_offline] / [is_health_at_risk] /
     [is_session_terminal] / [option_or_else] /
     [string_list_json] / [latest_iso_timestamp] /
-    [cap_string_list] / [execution_tool_preview_limit] / [tool_audit_snapshot]
-    / [skill_route_summary_of_keeper] /
+    [cap_string_list] / [execution_tool_preview_limit] /
     [string_list_of_field]). *)
 
 (** {1 Tone} *)
@@ -110,14 +107,6 @@ type continuity_context = {
   json : Yojson.Safe.t;
 }
 
-type tool_audit_snapshot = {
-  latest_tool_names : string list;
-  latest_tool_call_count : int option;
-  latest_action_source : string option;
-  tool_audit_source : string option;
-  tool_audit_at : string option;
-}
-
 (** {1 Agent profile} *)
 
 type agent_profile = {
@@ -163,13 +152,6 @@ val cap_string_list : ?limit:int -> string list -> string list
 
 (** {1 Health predicates} *)
 
-
-(** {1 Tool audit + skill route} *)
-
-val tool_audit_snapshot : string -> tool_audit_snapshot
-(** Returns the most recent tool-audit projection for *)
-
-val skill_route_summary_of_keeper : Yojson.Safe.t -> string option
 
 (** {1 Handoff envelope} *)
 

@@ -98,11 +98,9 @@ between `list_dir` and a writer that uses delete-then-replace.
 
 The `Too many open files in system` shape is `ENFILE` (system-wide
 descriptor table exhausted), not `EMFILE` (per-process). RFC-0097
-introduced container reuse + `Docker_spawn_throttle` to cap concurrent
-external openings; that RFC closed the *production* breach. The 26
-residuals are likely tail events from before/during the merge, or
-legitimate spikes that fall under the bound. They do not represent a
-new root cause.
+introduced container reuse to reduce external openings; current Docker spawn
+tracking is observation-only and does not manufacture a capacity bound. The 26
+residuals are historical evidence, not proof of a present static limit.
 
 ### 1.4 Why the present code is counter-as-fix (anti-pattern §1)
 

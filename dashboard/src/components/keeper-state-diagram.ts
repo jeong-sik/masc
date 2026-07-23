@@ -70,29 +70,6 @@ export function transitionType(selectedEvent: unknown): string {
   return 'event'
 }
 
-export function signalTone(severity: string | null | undefined): string {
-  // Unknown severity → treat as warn (fail-closed). Only an explicit "ok" from
-  // the backend renders as green. See issue #9894 (Unknown → Permissive Default
-  // anti-pattern; CLAUDE.md #2). Backend emits 'ok' | 'warn' | 'bad' today via
-  // lib/keeper/keeper_transition_audit.ml; any new severity must be mapped
-  // here explicitly before it is allowed to show as healthy.
-  switch (severity) {
-    case 'bad':
-      return 'border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--color-status-err)]'
-    case 'warn':
-      return 'border-[var(--warn-24)] bg-[var(--warn-8)] text-[var(--color-status-warn)]'
-    case 'ok':
-      return 'border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]'
-    default:
-      // Client-side observability: record unexpected severities so future
-      // backend additions are noticed before they regress to silent-OK.
-      if (typeof console !== 'undefined' && severity != null && severity !== '') {
-        console.warn('[signalTone] unknown severity; rendering as warn', { severity })
-      }
-      return 'border-[var(--warn-24)] bg-[var(--warn-8)] text-[var(--color-status-warn)]'
-  }
-}
-
 export function badgeTone(ok: boolean): string {
   return ok
     ? 'border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)]'
@@ -213,7 +190,6 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
         <${PhaseBadge}>KDP ${displayState(snapshot.decision.stage)}<//>
         <${PhaseBadge}>KCL ${displayState(snapshot.runtime.state)}<//>
         <${PhaseBadge}>KMC ${displayState(snapshot.compaction.stage)}<//>
-        <${PhaseBadge}>KCB ${displayState(snapshot.circuit_breaker?.state ?? 'clean')}<//>
         ${transitions.length > 0 ? html`
           <${PhaseBadge}>observed ${transitions.length} transitions<//>
         ` : null}
@@ -222,7 +198,7 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
       <div>
         <div class="mb-2 flex flex-wrap items-center justify-between gap-2 v2-monitoring-toolbar">
           <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
-            통합 라이프사이클 (KSM · KTC · KDP · KCL · KMC · KCB)
+            통합 라이프사이클 (KSM · KTC · KDP · KCL · KMC)
           </div>
           <${FilterChips}
             chips=${DIAGRAM_VIEW_CHIPS}
@@ -293,20 +269,10 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
                 <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
                   ${transition.event_type ?? transitionType(transition.selected_event)}
                 </span>
-                ${transition.operator_signal ? html`
-                  <span class=${`rounded-[var(--r-0)] border px-2 py-0.5 text-3xs ${signalTone(transition.operator_signal.severity)}`}>
-                    ${transition.operator_signal.requires_operator_decision ? 'decision required' : transition.operator_signal.class}
-                  </span>
-                ` : null}
+                <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
+                  ${transition.transition_outcome}
+                </span>
               </div>
-              ${transition.operator_signal ? html`
-                <div class="mt-1 text-[var(--color-fg-muted)]">
-                  ${transition.operator_signal.summary}
-                  ${transition.operator_signal.next_human_action
-                    ? html`<span class="text-[var(--color-status-warn)]"> · ${transition.operator_signal.next_human_action}</span>`
-                    : null}
-                </div>
-              ` : null}
             </div>
           `)}
         </div>

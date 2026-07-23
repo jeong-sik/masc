@@ -356,6 +356,34 @@ let initiate state ~clock ~reason ~notify_fn ~drain_check ~exit_fn =
     phase_exit state ~exit_fn
   end
 
+(** {1 Termination classification} *)
+
+let rec is_benign_termination ~benign exn =
+  benign exn
+  ||
+  match exn with
+  | Eio.Exn.Multiple exns ->
+    (* Failing the switch to end shutdown cancels in-flight fibers; Eio combines
+       the switch's own [benign] exception with what those fibers raise into one
+       [Multiple]. A shutdown whose every member is itself benign (recursively)
+       is still a clean shutdown, not a crash. An empty list is not reachable
+       from [Eio.Exn.combine] but is treated as non-benign to avoid asserting
+       cleanliness with no evidence. *)
+    (match exns with
+     | [] -> false
+     | _ :: _ ->
+       List.for_all (fun (member, _bt) -> is_benign_termination ~benign member) exns)
+  | Stdlib.Fun.Finally_raised inner ->
+    (* A cancellable [Fun.protect ~finally] whose finalizer touches a
+       cancellation point during shutdown raises [Cancelled], which OCaml wraps
+       as [Finally_raised]. [Eio.Exn.combine] keeps this wrapper over a bare
+       [Cancelled] (it discards bare [Cancelled] in favour of "something
+       better"), so the observed shutdown [Multiple] carries the wrapper, not a
+       bare [Cancelled]. Unwrap it and classify the finalizer's own exception. *)
+    is_benign_termination ~benign inner
+  | _ -> false
+;;
+
 (** {1 Queries} *)
 
 let current_phase state = state.phase

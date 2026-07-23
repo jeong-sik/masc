@@ -1,5 +1,5 @@
 import type { KeeperDiagnostic, KeeperTrustSummary, Message, MissionSignalTruth, MissionEvidenceSource } from './core'
-import type { PendingConfirmEnvelope, PendingConfirmation, PendingConfirmSummary, OperatorActionDescriptor } from './governance'
+import type { PendingConfirmEnvelope, PendingConfirmation, PendingConfirmSummary, OperatorActionDescriptor } from './gate'
 
 export interface DashboardMissionSummary {
   workspace_health?: string
@@ -285,16 +285,7 @@ export interface DashboardProofWorkerRunEvidence {
   operation_id?: string | null
   trace_ref?: Record<string, unknown> | null
   evidence_session_id?: string | null
-  session_conformance?: Record<string, unknown> | null
-  cdal_run_id?: string | null
-  contract_id?: string | null
   result_status?: string | null
-  proof_present?: boolean | null
-  proof_run_id?: string | null
-  proof_status?: string | null
-  proof_risk_class?: string | null
-  proof_execution_mode?: string | null
-  proof_evidence_count?: number | null
   checkpoint_ref?: string | null
   tool_trace_refs?: string[]
   raw_evidence_refs?: string[]
@@ -360,6 +351,37 @@ export interface OperatorSessionSnapshot {
   recent_events?: Record<string, unknown>[]
 }
 
+export const OPERATOR_CONTEXT_METRICS_STORAGE_READ_FAILURE_REASONS = [
+  'invalid_offset',
+  'not_a_directory',
+  'invalid_layout_entry',
+  'non_regular_file',
+  'io_error',
+] as const
+
+export type OperatorContextMetricsStorageReadFailureReason =
+  typeof OPERATOR_CONTEXT_METRICS_STORAGE_READ_FAILURE_REASONS[number]
+
+export type OperatorContextMetricsUnavailable =
+  | {
+      kind: 'storage_read_failed'
+      reason: OperatorContextMetricsStorageReadFailureReason
+      path: string | null
+      detail: string
+    }
+  | {
+      kind: 'malformed_json'
+      reason: 'malformed_metrics_row'
+      path: string
+      line_number: number | null
+      detail: string
+    }
+  | {
+      kind: 'invalid_payload'
+      reported_kind: string | null
+      reported_reason: string | null
+    }
+
 export interface OperatorKeeperSnapshot {
   name: string
   runtime_class?: 'keeper'
@@ -375,11 +397,11 @@ export interface OperatorKeeperSnapshot {
   last_autonomous_action_at?: string | null
   last_turn_ago_s?: number
   model?: string
-  goal?: string
   turn_count?: number
   context_tokens?: number
   context_max?: number
   context_source?: string
+  context_metrics_unavailable?: OperatorContextMetricsUnavailable
   keepalive_running?: boolean
   autonomous_action_count?: number
   autonomous_turn_count?: number
@@ -419,17 +441,6 @@ export interface OperatorRecommendedAction {
   preview?: unknown
 }
 
-
-export interface OperatorJudgeRuntime {
-  enabled?: boolean
-  judge_online?: boolean
-  refreshing?: boolean
-  generated_at?: string | null
-  expires_at?: string | null
-  model_used?: string | null
-  keeper_name?: string | null
-  last_error?: string | null
-}
 
 export interface OperatorGuidanceSummary {
   summary?: string | null
@@ -483,7 +494,6 @@ export interface OperatorDigest {
   health?: string
   judgment_owner?: string | null
   authoritative_judgment_available?: boolean
-  operator_judge_runtime?: OperatorJudgeRuntime | null
   judgment?: OperatorJudgment | null
   active_guidance_layer?: string | null
   active_summary?: OperatorGuidanceSummary | null
@@ -512,21 +522,16 @@ export interface KeeperRecoverResult {
   up?: unknown
 }
 
-export interface AdmissionQueueSnapshot {
-  throttle_owner: string
-  max_concurrent: number
+export interface InferenceInflightSnapshot {
+  boundary_owner: 'oas_runtime'
   active: number
-  available: number
-  queue_depth: number
 }
 
 export interface OperatorSnapshot {
   root: OperatorNamespaceSnapshot
   sessions: OperatorSessionSnapshot[]
   keepers: OperatorKeeperSnapshot[]
-  admission_queue?: AdmissionQueueSnapshot | null
-  admission_queue_error?: string | null
-  operator_judge_runtime?: OperatorJudgeRuntime | null
+  inference_inflight?: InferenceInflightSnapshot | null
   persistent_agents?: OperatorKeeperSnapshot[]
   recent_messages: Message[]
   pending_confirms: PendingConfirmation[]

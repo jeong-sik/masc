@@ -78,7 +78,7 @@ keeper_call_in_file() {
     }
     print join("", @o);
   ' < "$1")"
-  rg -q '\b(Agent_tool_descriptor|Agent_tool_descriptor_resolution|Agent_tool_dispatch_runtime|Keeper_tool_alias|Keeper_types_profile|Task_keeper_backend)\b|\bKeeper_[A-Za-z_]+\.[a-z]' <<<"$stripped"
+  rg -q '\b(Agent_tool_descriptor|Agent_tool_descriptor_resolution|Agent_tool_dispatch_runtime|Keeper_tool_alias|Keeper_types_profile|Task_keeper_backend)\b|\bKeeper_[A-Za-z_]+\.[a-z]|\b(open|include)[[:space:]]+(Masc\.)?(Agent_tool_descriptor|Agent_tool_descriptor_resolution|Agent_tool_dispatch_runtime|Keeper_[A-Za-z_]+|Task_keeper_backend)\b|\bmodule[[:space:]]+[A-Z][A-Za-z0-9_]*(\x27)?[[:space:]]*=[[:space:]]*(Masc\.)?(Agent_tool_descriptor|Agent_tool_descriptor_resolution|Agent_tool_dispatch_runtime|Keeper_[A-Za-z_]+|Task_keeper_backend)\b' <<<"$stripped"
 }
 
 current_callers() {

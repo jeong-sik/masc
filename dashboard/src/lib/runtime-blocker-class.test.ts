@@ -20,7 +20,7 @@ describe('asKeeperRuntimeBlockerClass', () => {
 
   it('trims surrounding whitespace before membership check — parity with asString/asNullableString', () => {
     expect(asKeeperRuntimeBlockerClass('runtime_exhausted ')).toBe('runtime_exhausted')
-    expect(asKeeperRuntimeBlockerClass('  sdk_max_turns_exceeded\t')).toBe('sdk_max_turns_exceeded')
+    expect(asKeeperRuntimeBlockerClass('  sdk_context_window_exceeded\t')).toBe('sdk_context_window_exceeded')
     expect(asKeeperRuntimeBlockerClass('   ')).toBeNull()
   })
 

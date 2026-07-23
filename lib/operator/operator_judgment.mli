@@ -42,8 +42,7 @@ type record = {
   disagreement_with_truth : bool;
 }
 (** Concrete record because consumers
-    ({!Operator_control_action}, {!Dashboard_operator_judge},
-    {!test_operator_control_judgment}) field-access the record
+    ({!Operator_control_action}, {!test_operator_control_judgment}) field-access the record
     when projecting to JSON or checking specific fields.  All
     19 fields are part of the on-disk JSONL contract — drift
     requires synchronized migration. *)
@@ -98,7 +97,7 @@ val judgments_path : Workspace.config -> string
 val load_all : Workspace.config -> record list
 (** Reads every JSONL entry from the judgments file, parses,
     and returns the records.  Parse failures are logged at
-    [Log.Governance.warn] and skipped — operator alerts on
+    [Log.Gate.warn] and skipped — operator alerts on
     "operator judgment parse:" prefix.  Returns the empty list
     when the file does not exist. *)
 

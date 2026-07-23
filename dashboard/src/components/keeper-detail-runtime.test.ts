@@ -16,25 +16,19 @@ vi.mock('../api/dashboard', async () => {
 })
 
 import type { DashboardRuntimeProviderSnapshot } from '../api/dashboard'
-import type { DashboardMissionKeeperBrief, Keeper, KeeperConfig } from '../types'
+import type { DashboardMissionKeeperBrief, Keeper } from '../types'
 import type { KeeperCompositeSnapshot, KeeperRuntimeTraceResponse } from '../api/keeper'
 import { resetRuntimeCatalog } from '../lib/runtime-catalog-resource'
 import {
-  AllowlistPreview,
-  BudgetSourceBadge,
   RuntimeLensSection,
   RuntimeSignals,
   KeeperSecretProjectionPanel,
-  budgetSourceLabel,
-  budgetSourceTone,
   filterSignalGroups,
   deriveKeeperLiveTruth,
-  resolveAllowlistPreview,
   resolveKeeperCurrentTaskLabel,
 } from './keeper-detail-runtime'
 import {
   resolveKeeperObservedToolAudit,
-  resolveKeeperToolPolicy,
 } from './keeper-detail-source'
 
 beforeEach(() => {
@@ -97,7 +91,7 @@ function runtimeProviderFixture(runtimeId: string): DashboardRuntimeProviderSnap
         auth_kind: 'env:RUNTIME_API_KEY',
         is_non_interactive: true,
         behavior_capabilities: {
-          identity_runtime_mcp_header_keys: ['x-masc-keeper'],
+          supports_inline_tools: true,
         },
       },
       model: {
@@ -123,47 +117,6 @@ function runtimeProviderFixture(runtimeId: string): DashboardRuntimeProviderSnap
     },
   }
 }
-
-describe('resolveKeeperToolPolicy', () => {
-  it('uses keeper config as the authoritative policy source', () => {
-    const keeperConfig = {
-      tools: {
-        tool_access: [],
-        resolved_allowlist: ['mcp__masc__masc_board_post'],
-        tool_denylist: ['mcp__masc__masc_board_delete'],
-        active_masc_tool_count: 1,
-        active_keeper_tool_count: 0,
-        total_active: 1,
-      },
-    } satisfies Pick<KeeperConfig, 'tools'>
-
-    expect(resolveKeeperToolPolicy(keeperConfig, 'loaded')).toEqual({
-      source: 'keeper_config',
-      resolvedAllowlist: ['mcp__masc__masc_board_post'],
-    })
-  })
-
-  it('reports loading instead of inventing defaults before config arrives', () => {
-    expect(resolveKeeperToolPolicy(null, 'loading')).toEqual({
-      source: 'loading',
-      resolvedAllowlist: [],
-    })
-  })
-
-  it('reports none after config load when no policy payload is available', () => {
-    expect(resolveKeeperToolPolicy(null, 'loaded')).toEqual({
-      source: 'none',
-      resolvedAllowlist: [],
-    })
-  })
-
-  it('preserves an explicit config error state', () => {
-    expect(resolveKeeperToolPolicy(null, 'error')).toEqual({
-      source: 'error',
-      resolvedAllowlist: [],
-    })
-  })
-})
 
 describe('resolveKeeperObservedToolAudit', () => {
   it('prefers mission brief audit over dashboard summary fallback', () => {
@@ -310,93 +263,6 @@ describe('resolveKeeperCurrentTaskLabel', () => {
     }
 
     expect(resolveKeeperCurrentTaskLabel(keeper)).toBe('not_collected')
-  })
-})
-
-describe('resolveAllowlistPreview', () => {
-  it('keeps only the requested prefix and reports the remainder', () => {
-    expect(resolveAllowlistPreview(['a', 'b', 'c', 'd'], 2)).toEqual({
-      visibleTools: ['a', 'b'],
-      hiddenCount: 2,
-    })
-  })
-
-  it('clamps zero and negative limits to an empty preview', () => {
-    expect(resolveAllowlistPreview(['a', 'b'], 0)).toEqual({
-      visibleTools: [],
-      hiddenCount: 2,
-    })
-    expect(resolveAllowlistPreview(['a', 'b'], -3)).toEqual({
-      visibleTools: [],
-      hiddenCount: 2,
-    })
-  })
-})
-
-describe('budget source badges', () => {
-  it.each([
-    ['env', 'neutral', 'env'],
-    ['override', 'warn', 'override'],
-    ['override_invalid', 'bad', 'invalid'],
-  ] as const)('maps %s to StatusChip tone %s', (source, tone, label) => {
-    expect(budgetSourceTone(source)).toBe(tone)
-    expect(budgetSourceLabel(source)).toBe(label)
-  })
-
-  it('renders through the shared StatusChip primitive', () => {
-    render(h(BudgetSourceBadge, { source: 'override_invalid' }))
-
-    const chip = screen.getByText('invalid').closest('[data-status-chip]')
-    expect(chip).toHaveAttribute('data-status-chip-tone', 'bad')
-    expect(chip).toHaveAttribute('data-status-chip-uppercase', 'true')
-  })
-})
-
-describe('AllowlistPreview', () => {
-  it('renders the empty fallback when there are no tools', () => {
-    render(h(AllowlistPreview, {
-      tools: [],
-      emptyLabel: 'none',
-      previewLimit: 12,
-    }))
-
-    expect(screen.getByText('none')).toBeInTheDocument()
-    expect(screen.queryByRole('button')).not.toBeInTheDocument()
-  })
-
-  it('does not show a toggle when the tool count is exactly at the preview limit', () => {
-    const tools = Array.from({ length: 12 }, (_, index) => `tool-${index + 1}`)
-    render(h(AllowlistPreview, {
-      tools,
-      emptyLabel: 'none',
-      previewLimit: 12,
-    }))
-
-    expect(screen.getByText('tool-12')).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /허용된 도구/ })).not.toBeInTheDocument()
-  })
-
-  it('collapses long allowlists until explicitly expanded', () => {
-    const tools = Array.from({ length: 15 }, (_, index) => `tool-${index + 1}`)
-    render(h(AllowlistPreview, {
-      tools,
-      emptyLabel: 'none',
-      previewLimit: 12,
-    }))
-
-    expect(screen.getByText('tool-1')).toBeInTheDocument()
-    expect(screen.getByText('tool-12')).toBeInTheDocument()
-    expect(screen.queryByText('tool-13')).not.toBeInTheDocument()
-    const toggle = screen.getByRole('button', { name: '허용된 도구 나머지 3개 보기' })
-    expect(toggle).toHaveAttribute('aria-expanded', 'false')
-    expect(screen.getByText('나머지 3개 보기')).toBeInTheDocument()
-
-    fireEvent.click(toggle)
-
-    expect(screen.getByText('tool-13')).toBeInTheDocument()
-    expect(screen.getByText('tool-15')).toBeInTheDocument()
-    expect(screen.getByText('접기')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '허용된 도구 접기' })).toHaveAttribute('aria-expanded', 'true')
   })
 })
 
@@ -740,7 +606,6 @@ describe('RuntimeLensSection', () => {
       decision: { stage: 'undecided' },
       runtime: { state: 'idle' },
       compaction: { stage: 'accumulating' },
-      circuit_breaker: { state: 'clean' },
       measurement: { captured: false },
       invariants: {
         phase_turn_alignment: true,
@@ -758,18 +623,14 @@ describe('RuntimeLensSection', () => {
           fiber_alive: true,
           heartbeat_healthy: true,
           turn_healthy: true,
-          context_within_budget: true,
           context_handoff_needed: false,
           compaction_active: false,
           handoff_active: false,
           operator_paused: false,
           stop_requested: false,
-          restart_budget_remaining: true,
-          backoff_elapsed: false,
+          dead_tombstone_latched: false,
           drain_complete: false,
           context_overflow: false,
-          compact_retry_exhausted: false,
-          terminal_failure_latched: false,
         },
         determining_condition: 'running_fiber_alive',
         rows: [],
@@ -1100,7 +961,7 @@ describe('RuntimeLensSection', () => {
         ],
         env_count: 1,
         file_count: 1,
-        env_names: ['GH_TOKEN'],
+        env_names: ['SERVICE_TOKEN'],
         file_mounts: [
           {
             host_path: '/mock/workspace/.masc/secrets/sangsu/files/home/keeper/.ssh/id_ed25519',
@@ -1120,7 +981,7 @@ describe('RuntimeLensSection', () => {
     expect(screen.getAllByText('shared').length).toBeGreaterThan(0)
     expect(screen.getAllByText('keeper').length).toBeGreaterThan(0)
     expect(screen.getByText('/mock/workspace/.masc/secrets/base')).toBeInTheDocument()
-    expect(screen.getByText('GH_TOKEN')).toBeInTheDocument()
+    expect(screen.getByText('SERVICE_TOKEN')).toBeInTheDocument()
     expect(screen.getByText('/home/keeper/.ssh/id_ed25519')).toBeInTheDocument()
     expect(screen.queryByText(/ghs_/)).toBeNull()
   })

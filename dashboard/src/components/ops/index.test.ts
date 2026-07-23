@@ -25,6 +25,7 @@ async function loadOps() {
 
   return {
     Ops: mod.Ops,
+    contextMetricsDiagnostics: mod.contextMetricsDiagnostics,
     route: router.route,
     operatorActionLog: operatorStore.operatorActionLog,
     operatorDigestError: operatorStore.operatorDigestError,
@@ -125,7 +126,7 @@ describe('Ops surface', () => {
     expect(container.textContent).toContain('FlowControlPanel')
 
     // Placeholder-heavy review queue surface is gone — Live Judge + Keeper HITL
-    // handling lives on the Governance page.
+    // handling lives on the Gate page.
     expect(container.textContent).not.toContain('review_item')
     expect(container.textContent).not.toContain('큐에서 항목을 고르세요')
     expect(container.textContent).not.toContain('현재 이 항목에 연결된 operator guidance가 없습니다')
@@ -174,6 +175,63 @@ describe('Ops surface', () => {
     await flushUi()
 
     expect(container.querySelector('.v2-command-surface')).not.toBeNull()
+  }, 60000)
+
+  it('surfaces typed context metrics failures instead of rendering missing context as blank', async () => {
+    const {
+      Ops,
+      route,
+      operatorActionLog,
+      operatorDigestError,
+      operatorError,
+      operatorWorkspaceDigest,
+      operatorSnapshot,
+      hydratedWorkflowId,
+    } = await loadOps()
+
+    route.value = { tab: 'command', params: { section: 'operations' }, postId: null } as RouteState
+    hydratedWorkflowId.value = null
+    operatorError.value = null
+    operatorDigestError.value = null
+    operatorWorkspaceDigest.value = null
+    operatorActionLog.value = []
+    operatorSnapshot.value = {
+      root: { paused: false },
+      sessions: [],
+      keepers: [{
+        name: 'sojin',
+        context_metrics_unavailable: {
+          kind: 'storage_read_failed',
+          reason: 'io_error',
+          path: '/tmp/sojin-metrics.jsonl',
+          detail: 'permission denied',
+        },
+      }],
+      persistent_agents: [{
+        name: 'watcher',
+        context_metrics_unavailable: {
+          kind: 'malformed_json',
+          reason: 'malformed_metrics_row',
+          path: '/tmp/watcher-metrics.jsonl',
+          line_number: 7,
+          detail: 'unexpected end of input',
+        },
+      }],
+      recent_messages: [],
+      pending_confirms: [],
+      available_actions: [],
+    } as unknown as OperatorSnapshot
+
+    render(html`<${Ops} />`, container)
+    await flushUi()
+
+    const panel = container.querySelector('[data-testid="ops-context-metrics-unavailable"]')
+    expect(panel?.textContent).toContain('Keeper sojin')
+    expect(panel?.textContent).toContain('io_error')
+    expect(panel?.textContent).toContain('/tmp/sojin-metrics.jsonl')
+    expect(panel?.textContent).toContain('Persistent agent watcher')
+    expect(panel?.textContent).toContain('/tmp/watcher-metrics.jsonl:7')
+    expect(panel?.textContent).toContain('unexpected end of input')
   }, 60000)
 
   it('marks raw ops banner panels and activity rows with v2-command-* classes', async () => {
@@ -332,7 +390,7 @@ describe('Ops surface', () => {
 
     // The placeholder-heavy review queue panel no longer exists, and the
     // review_queue/deferred_queue/review_summary fields were dropped from
-    // OperatorDigest. review items surface via Governance / Live Judge.
+    // OperatorDigest. review items surface via Gate / Live Judge.
     expect(container.textContent).not.toContain('방 제어 상태를 재확인하세요')
     expect(container.textContent).not.toContain('마찰 요인')
     expect(container.textContent).not.toContain('운영 판단')
@@ -420,6 +478,73 @@ describe('Ops surface', () => {
     expect(empty).toBeTruthy()
     expect(empty?.textContent).toContain('No operator activity in the last 3 days')
     expect(empty?.textContent).not.toContain('paused')
+  }, 60000)
+
+  it('collapses a keeper present in both keepers and persistent_agents into one diagnostic (source keeper)', async () => {
+    const { contextMetricsDiagnostics } = await loadOps()
+
+    // persistent_agents is a filtered projection of keepers (same rows emitted by
+    // rows_from_keeper_rows), so an autoboot keeper with a context-metrics failure
+    // shows up in both sections under the SAME name. Pre-fix this returned 2
+    // diagnostics for that one identity (rendered twice: Keeper + Persistent agent).
+    const snapshot = {
+      root: { paused: false },
+      sessions: [],
+      keepers: [{
+        name: 'autoboot-a',
+        context_metrics_unavailable: {
+          kind: 'storage_read_failed',
+          reason: 'io_error',
+          path: '/tmp/autoboot-a-metrics.jsonl',
+          detail: 'permission denied',
+        },
+      }],
+      persistent_agents: [{
+        name: 'autoboot-a',
+        context_metrics_unavailable: {
+          kind: 'storage_read_failed',
+          reason: 'io_error',
+          path: '/tmp/autoboot-a-metrics.jsonl',
+          detail: 'permission denied',
+        },
+      }],
+      recent_messages: [],
+      pending_confirms: [],
+      available_actions: [],
+    } as unknown as OperatorSnapshot
+
+    const diagnostics = contextMetricsDiagnostics(snapshot)
+    const forName = diagnostics.filter(d => d.keeper.name === 'autoboot-a')
+    expect(forName).toHaveLength(1)
+    expect(forName[0]?.source).toBe('keeper')
+  }, 60000)
+
+  it('keeps a persistent-agent-only entity so future drift from the subset invariant still surfaces', async () => {
+    const { contextMetricsDiagnostics } = await loadOps()
+
+    const snapshot = {
+      root: { paused: false },
+      sessions: [],
+      keepers: [],
+      persistent_agents: [{
+        name: 'orphan-agent',
+        context_metrics_unavailable: {
+          kind: 'malformed_json',
+          reason: 'malformed_metrics_row',
+          path: '/tmp/orphan-metrics.jsonl',
+          line_number: 3,
+          detail: 'unexpected end of input',
+        },
+      }],
+      recent_messages: [],
+      pending_confirms: [],
+      available_actions: [],
+    } as unknown as OperatorSnapshot
+
+    const diagnostics = contextMetricsDiagnostics(snapshot)
+    expect(diagnostics).toHaveLength(1)
+    expect(diagnostics[0]?.keeper.name).toBe('orphan-agent')
+    expect(diagnostics[0]?.source).toBe('persistent_agent')
   }, 60000)
 
   it('filters out entries older than 3 days so stale reviews stop showing', async () => {

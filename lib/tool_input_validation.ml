@@ -17,8 +17,10 @@ module Float = Stdlib.Float
 
 (** Tool_input_validation — Pre-dispatch validation via OAS Tool_middleware.
 
-    Delegates to [Agent_sdk.Tool_middleware.make_validation_hook] for type
-    coercion and structured error feedback.
+    Delegates to [Agent_sdk.Tool_middleware.make_validation_hook] for strict
+    schema checking and structured error feedback. OAS 0.212 removed implicit
+    type coercion: a mistyped scalar (e.g. string for integer) is a
+    deterministic Reject carrying the field name, not a silent repair.
 
     @since 2.220.0 — OAS delegation
     @since 2.221.0 — use Tool_middleware.make_validation_hook *)
@@ -46,43 +48,6 @@ let required_names schema =
         | _ -> None)
       items
   | _ -> []
-;;
-
-let has_enum schema =
-  match Json_util.assoc_member_opt "enum" schema with
-  | Some (`List (_ :: _)) -> true
-  | _ -> false
-;;
-
-let optional_enum_fields schema =
-  let required = required_names schema in
-  match Json_util.assoc_member_opt "properties" schema with
-  | Some (`Assoc props) ->
-    List.filter_map
-      (fun (name, prop_schema) ->
-         if (not (List.mem name required)) && has_enum prop_schema
-         then Some name
-         else None)
-      props
-  | _ -> []
-;;
-
-let normalize_blank_optional_enum_args ?schema args =
-  match schema, args with
-  | Some schema, `Assoc fields ->
-    let optional_enums = optional_enum_fields schema in
-    if optional_enums = []
-    then args
-    else
-      `Assoc
-        (List.filter
-           (fun (key, value) ->
-              match value with
-              | `String raw when List.mem key optional_enums && String.trim raw = "" ->
-                false
-              | _ -> true)
-           fields)
-  | _ -> args
 ;;
 
 let schema_property_names schema =
@@ -219,109 +184,7 @@ let schema_shape_json schema =
 
 let schema_has_property_name schema name = List.mem name (schema_property_names schema)
 
-let is_execute_typed_argv_schema schema =
-  schema_has_property_name schema "executable"
-  && schema_has_property_name schema "argv"
-  && schema_has_property_name schema "pipeline"
-;;
-
-let execute_public_tool_name = "Execute"
-
-let is_execute_tool_name name =
-  let name = Tool_name_alias_axis.strip_mcp_masc_prefix name in
-  String.equal name execute_public_tool_name
-  ||
-  match Tool_name_alias_axis.internal_name_of_public execute_public_tool_name with
-  | Some internal_name -> String.equal name internal_name
-  | None -> false
-;;
-
-let normalize_execute_args_envelope ?schema ~name args =
-  match schema, args with
-  | Some schema, `Assoc [ "args", (`Assoc _ as nested) ]
-    when is_execute_tool_name name && is_execute_typed_argv_schema schema -> nested
-  | _ -> args
-;;
-
-let schema_type_includes schema expected =
-  match Json_util.assoc_member_opt "type" schema with
-  | Some (`String actual) -> String.equal actual expected
-  | Some (`List values) ->
-    List.exists
-      (function
-        | `String actual -> String.equal actual expected
-        | _ -> false)
-      values
-  | _ -> false
-;;
-
-let schema_expects_array schema =
-  schema_type_includes schema "array"
-  || Option.is_some (Json_util.assoc_member_opt "items" schema)
-;;
-
-let schema_expects_object schema =
-  schema_type_includes schema "object"
-  || Option.is_some (Json_util.assoc_member_opt "properties" schema)
-  || Option.is_some (Json_util.assoc_member_opt "additionalProperties" schema)
-;;
-
-let schema_accepts_composite_value schema = function
-  | `List _ -> schema_expects_array schema
-  | `Assoc _ -> schema_expects_object schema
-  | _ -> false
-;;
-
-let schema_property_schema schema key =
-  match Json_util.assoc_member_opt "properties" schema with
-  | Some (`Assoc properties) -> List.assoc_opt key properties
-  | _ -> None
-;;
-
-let schema_items_schema schema =
-  Json_util.assoc_member_opt "items" schema
-;;
-
-let rec normalize_schema_json_string_composites ~schema value =
-  match value with
-  | `String raw when schema_expects_array schema || schema_expects_object schema ->
-    (match
-       try Some (Yojson.Safe.from_string raw) with
-       | Yojson.Json_error _ -> None
-     with
-     | Some parsed when schema_accepts_composite_value schema parsed ->
-       normalize_schema_json_string_composites ~schema parsed
-     | _ -> value)
-  | `Assoc fields ->
-    `Assoc
-      (List.map
-         (fun (key, field_value) ->
-            match schema_property_schema schema key with
-            | None -> key, field_value
-            | Some field_schema ->
-              key, normalize_schema_json_string_composites ~schema:field_schema field_value)
-         fields)
-  | `List values ->
-    (match schema_items_schema schema with
-     | None -> value
-     | Some item_schema ->
-       `List
-         (List.map
-            (fun item -> normalize_schema_json_string_composites ~schema:item_schema item)
-            values))
-  | _ -> value
-;;
-
-let prepare_args ?schema ~name args =
-  let args = strip_internal_marker_args args in
-  let args = normalize_execute_args_envelope ?schema ~name args in
-  let args =
-    match schema with
-    | None -> args
-    | Some schema -> normalize_schema_json_string_composites ~schema args
-  in
-  normalize_blank_optional_enum_args ?schema args
-;;
+let prepare_args ?schema:_ ~name:_ args = strip_internal_marker_args args
 
 let schema_has_properties = function
   | `Assoc fields ->
@@ -358,7 +221,7 @@ let schema_has_property schema name = schema_has_property_name schema name
 
 let typed_shell_unsupported_field_hint schema names =
   let has_shell_fields =
-    schema_has_property schema "executable" && schema_has_property schema "argv"
+    schema_has_property schema "argv" && schema_has_property schema "pipeline"
   in
   let has_legacy_shell_string =
     List.exists (fun name -> String.equal name "cmd" || String.equal name "command") names
@@ -366,9 +229,8 @@ let typed_shell_unsupported_field_hint schema names =
   if has_shell_fields && has_legacy_shell_string
   then
     Some
-      "typed shell execution has no cmd/command field; use executable/argv, \
-       e.g. executable=\"git\" argv=[\"status\",\"--short\"]. Do not include the \
-       executable again in argv"
+      "typed shell execution has no cmd/command field; use one non-empty argv \
+       process vector, e.g. argv=[\"git\",\"status\",\"--short\"]"
   else None
 ;;
 
@@ -535,7 +397,7 @@ let reject_validation ~name ~reason ~message =
   emit_validation_telemetry ~tool:name ~result:"fail" ~reason;
   Log.Tool_validation.info "tool_input_validation rejected %s: %s" name message;
   Tool_dispatch.Reject
-    (Error
+    (Tool_result.Failed
        { Tool_result.class_ = Tool_result.Policy_rejection
        ; message
        ; data =
@@ -564,7 +426,7 @@ let validation_exception_action ~name exn : Tool_dispatch.pre_hook_action =
   emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"validation_exception";
   Log.Tool_validation.error "%s" message;
   Tool_dispatch.Reject
-    (Error
+    (Tool_result.Failed
        { Tool_result.class_ = Tool_result.Runtime_failure
        ; message
        ; data =
@@ -660,10 +522,6 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
       let reason = pass_reason ~schema:(Some schema) ~args ~prepared_args in
       emit_validation_telemetry ~tool:name ~result:"pass" ~reason;
       Tool_dispatch.Pass
-    | Agent_sdk.Tool_middleware.Proceed coerced ->
-      emit_validation_telemetry ~tool:name ~result:"pass" ~reason:"coerced";
-      Log.Tool_validation.debug "tool_input_validation coerced args for %s" name;
-      Tool_dispatch.Proceed coerced
     | Agent_sdk.Tool_middleware.Reject { message; _ } ->
       emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"invalid_args";
       Log.Tool_validation.info "tool_input_validation rejected %s: %s" name message;
@@ -671,7 +529,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
          dispatch-level metric label (failure_class) reflects the
          actual category instead of bucketing as "unclassified". *)
       Tool_dispatch.Reject
-        (Error
+        (Tool_result.Failed
            { Tool_result.class_ = Tool_result.Policy_rejection
            ; message
            ; data =

@@ -37,15 +37,27 @@ val of_source :
 
 type surface_presence = { surface : t; alive : bool }
 
+type presence_failure =
+  { connector_id : string
+  ; error : Channel_gate_binding_store.binding_store_error
+  }
+
+type presence_snapshot =
+  { surfaces : surface_presence list
+  ; failures : presence_failure list
+  }
+
 val connected_surfaces_for_keeper :
-  keeper_name:string -> surface_presence list
+  keeper_name:string -> presence_snapshot
 (** Surfaces currently attached to [keeper_name], recomputed from the
     connector registry's binding stores and liveness sources on every
     call — no cached presence state (RFC-0223 §2 principle 6).
 
     The dashboard is always present and alive (the bearer-gated chat
     route always exists; no per-keeper dashboard attachment is
-    tracked). Connector entries come from
+    tracked). A failed binding-store read is retained in [failures] while
+    healthy connector surfaces remain available; it is never projected as an
+    empty binding list. Connector entries come from
     {!Channel_gate_connector.all}, so only connectors registered in
     this process (server startup) are visible. Sorted for stable
     prompt rendering. *)

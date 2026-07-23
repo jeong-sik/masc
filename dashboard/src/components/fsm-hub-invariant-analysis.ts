@@ -90,9 +90,6 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
   if (snapshot.phase === 'draining') {
     return 'lifecycle 가 stopped 로 정착되기 전에 draining 이 완료되어야 함.'
   }
-  if (snapshot.decision.stage === 'gate_rejected') {
-    return 'blocked turn 은 runtime/tool execution 진입 없이 idle 로 finalize 되어야 함.'
-  }
   if (snapshot.runtime.state === 'selecting' || snapshot.runtime.state === 'trying') {
     return 'provider routing 이 반환되면 KCL 이 done 또는 exhausted 로 정착해야 함.'
   }
@@ -147,18 +144,6 @@ export function deriveOperationalInsight(
         `KSM ${snapshot.phase}`,
         `KCL ${snapshot.runtime.state}`,
         snapshot.measurement.captured ? 'measurement captured' : 'measurement missing',
-      ],
-    }
-  }
-  if (snapshot.decision.stage === 'gate_rejected') {
-    return {
-      tone: 'warn',
-      headline: 'Guardrail 가 턴 차단',
-      detail: 'decision pipeline 이 gate_rejected 에 도달 — execution 은 provider work 진입 없이 unwind 되어야 함.',
-      nextStep: nextExpectedStep(snapshot),
-      evidence: [
-        `KDP ${snapshot.decision.stage}`,
-        `KTC ${snapshot.turn_phase}`,
       ],
     }
   }

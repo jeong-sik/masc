@@ -6,6 +6,10 @@
 - Scope: `lib/fusion/` (신규), `lib/runtime/` (config 확장), `.masc/config/runtime.toml` (`[fusion]` 테이블)
 - Boundary: OAS(`~/me/workspace/yousleepwhen/oas`)는 **0줄 변경**. 본 루프는 OAS의 범용 프리미티브만 소비한다.
 - 참조: OpenRouter Fusion API — [plugin](https://openrouter.ai/docs/guides/features/plugins/fusion), [router](https://openrouter.ai/docs/guides/routing/routers/fusion-router)
+- Concurrency update (2026-07-17): the retired
+  `max_concurrent_panels`/`max_concurrent_judges` settings never controlled
+  execution. Configured model identities are the exact Fusion fan-out set;
+  durable host draining is tracked in #25032.
 
 ---
 
@@ -189,7 +193,7 @@ val all : sw:Eio.Switch.t -> ?clock:_ -> ?max_fibers:int
        -> (string * (Types.api_response, Error.sdk_error) Result.t) list
 ```
 - per-agent 에러 격리(한 패널 실패가 나머지 안 죽임), 부모 switch 취소 전파.
-- `Fusion_panel.run`: preset의 모델 목록 → 각 모델별 `Agent.t` 생성(provider config + web 도구 주입 + per-panel tool budget) → `Async_agent.all ~max_fibers:policy.max_concurrent_panels` → 결과를 `panel_outcome list`로 매핑. 각 호출은 `Masc_oas_bridge.run_safe ~caller:"fusion_panel" ~timeout_s`로 감싼다.
+- `Fusion_panel.run`: preset의 모델 목록 → 각 모델별 `Agent.t` 생성(provider config + web 도구 주입 + per-panel tool budget) → configured identity 전체를 `Async_agent.all`로 실행 → 결과를 `panel_outcome list`로 매핑. Fusion은 별도 deadline을 합성하지 않으며 provider/runtime의 typed timeout은 개별 `panel_outcome` 관측으로 보존한다.
 
 ### 7.2 심판 — `Structured.extract`
 
@@ -243,7 +247,6 @@ judge 결론만 키퍼 **메인** conversation에 남긴다. 패널 트랜스크
 [fusion]
 enabled = false                       # opt-in. 기본 OFF (fail-safe)
 default_preset = "budget"
-max_concurrent_panels = 2             # provider max-concurrent 존중 (qwen36=2)
 
 [fusion.gate]
 low_confidence_threshold = 0.55
@@ -255,14 +258,12 @@ panel = ["deepseek.v4-flash", "glm.5-turbo", "ollama.gemma4-26b"]
 judge = "deepseek.v4-flash"
 panel_system_prompt = "..."           # 행동 정의 — 코드 default 없음, 비면 Missing_prompt
 judge_system_prompt = "..."
-panel_timeout_s = 120.0               # 생략 시 default_timeout_s
-judge_timeout_s = 120.0
 max_output_tokens_per_panel = 4096    # 생략 시 Runtime_agent 기본 출력 예산
 judge_max_output_tokens = 4096        # 생략 시 Runtime_agent 기본 출력 예산
 ```
 
 - panel/judge 모델 식별자는 기존 `provider.model` opaque 문자열(runtime.toml bindings와 동일 컨벤션). 미존재 모델 → parse/resolve 에러(fail-fast).
-- 패널 1–8 모델 제한 검증. 알 수 없는 preset/모델은 silent default로 압축하지 않는다(CLAUDE.md §Unknown→Permissive 회피).
+- 패널은 비어 있을 수 없다. 고정 상한은 두지 않으며 알 수 없는 preset/모델은 silent default로 압축하지 않는다(CLAUDE.md §Unknown→Permissive 회피).
 - `max_output_tokens_per_panel`, `judge_max_output_tokens`, `[[...judges]].max_output_tokens`는 optional positive int다. 생략하면 기존 Runtime_agent 기본값을 보존하고, 0 이하 값은 config load에서 fail-fast한다.
 - `Runtime_toml` 파서 확장(또는 별도 `Fusion_config` 파서)로 `[fusion.*]` 로드 → `Fusion_policy.t`.
 
@@ -345,7 +346,8 @@ test/fusion/
 3. **대시보드 meta 뷰어 부재**: v1은 meta_json raw 도달. PostDetail 뷰어는 후속.
 4. **chat lane author 필드**: v1 content-prefix. 구조화 author는 코어 스키마 변경(코덱 마이그레이션 필요) → v2.
 5. **action fusion(v2)**: 패널이 tool-call 제안 → 심판 선택·실행. tool-call consensus + side-effect atomicity 필요. 별도 RFC.
-6. **provider 동시성**: qwen36 max-concurrent=2 등 → `max_concurrent_panels`로 존중, 초과 패널은 queue.
+6. **host draining**: 구성된 모델 identity 전체가 fan-out 집합이다. 숫자 cap을
+   부활시키지 않고 MASC-owned durable drain을 #25032에서 추적한다.
 7. **`run_with_caller` vs `run_safe`**: v1은 string caller `run_safe`. 타입드 `Env_config_oas_bridge.caller` 변형 추가는 후속(해당 모듈 침습).
 
 ---
@@ -358,7 +360,7 @@ test/fusion/
 | string/substring 분류기 | **회피** — judge는 `Structured.extract` 닫힌 타입, surface-string 리스트 없음 |
 | N-of-M 패치 | N/A — 신규 서브시스템, 단일 abstraction |
 | catch-all `_ ->` 추가 | **회피** — 모든 분기 닫힌 합(trigger/decision/failure/deny) |
-| cap/cooldown/dedup/repair | per_hour_budget/cost cap은 *기능적 게이트*(비용 통제)지 증상 억제 아님. backpressure는 `max_concurrent_panels` 명시 |
+| cap/cooldown/dedup/repair | per_hour_budget/cost cap은 *기능적 게이트*(비용 통제)지 증상 억제 아님. host draining은 #25032의 durable queue 계약 |
 | test backdoor | mock provider는 test 디렉토리 한정, prod 경로 비노출 |
 | Unknown→Permissive | **회피** — unknown preset/model = fail-fast 에러, silent default 없음 |
 

@@ -90,8 +90,6 @@ describe('normalizeKeeperConversationDetails', () => {
       latency_ms: 1500,
       cost_usd: 0.05,
       reply: 'Hello',
-      skill_primary: 'router',
-      skill_reason: 'default',
       usage: {
         input_tokens: 100,
         output_tokens: 50,
@@ -107,8 +105,6 @@ describe('normalizeKeeperConversationDetails', () => {
     expect(result!.modelUsed).toBe('gpt-4')
     expect(result!.latencyMs).toBe(1500)
     expect(result!.costUsd).toBe(0.05)
-    expect(result!.skillPrimary).toBe('router')
-    expect(result!.skillReason).toBe('default')
     expect(result!.replyText).toBe('Hello')
     expect(result!.usage).toEqual({
       inputTokens: 100,
@@ -158,8 +154,6 @@ describe('normalizeKeeperConversationDetails', () => {
     expect(result).not.toBeNull()
     expect(result!.traceId).toBeNull()
     expect(result!.modelUsed).toBeNull()
-    expect(result!.skillPrimary).toBeNull()
-    expect(result!.skillReason).toBeNull()
     expect(result!.replyText).toBeNull()
   })
 

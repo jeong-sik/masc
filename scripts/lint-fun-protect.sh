@@ -38,7 +38,6 @@ ALLOWLIST=(
   "lib/workspace/workspace_task_schedule.ml"
   "lib/repo_manager/repo_store.ml"
   "lib/repo_manager/keeper_repo_mapping.ml"
-  "lib/cdal_runtime/autonomy_exec.ml"
   "lib/exec/test/test_exec_gate_runtime.ml"
 )
 

@@ -3,9 +3,9 @@
 # citations that point at OCaml functions whose declarations have
 # drifted relative to the cited line.
 #
-# Background: iter 63 #14919 audit found four citations in
-# KeeperApprovalQueue.tla pointing at lines 751/772/941/970 in
-# lib/keeper/keeper_approval_queue.ml.  The functions still exist —
+# Background: iter 63 #14919 audit found four citations in a now-retired
+# queue model pointing at lines 751/772/941/970 in its OCaml source. The
+# functions still existed at the time —
 # submit_and_await / submit_pending / expire_stale — but at lines
 # 996 / 1089 / 1335 / 1384 (+245 to +413 line drift).  Spec
 # behavioural claims are accurate; only the line pointers are stale.
@@ -49,9 +49,8 @@
 #   - `.ml` only — `.mli` interface files are small and don't grow, so
 #     they're not subject to the growth-driven drift this guard targets,
 #     and Rule 1 already de-prioritises `.mli` (it's only a fallback
-#     there).  Two `.mli:NNN` refs remain (KeeperCompositeLifecycle's
-#     `Keeper_state_machine.mli:139-144`, KeeperDecisionPipeline's
-#     `keeper_registry.mli:49-53`); left for a separate cleanup if wanted.
+#     there).  KeeperDecisionPipeline's `keeper_registry.mli:49-53` remains;
+#     it is left for a separate cleanup if wanted.
 #   - Scoped to keeper-state-machine because the other spec trees
 #     (boundary/, bug-models/, auth/, ...) never adopted N-2.a and still
 #     use the colon form freely; widening would need a baseline file.

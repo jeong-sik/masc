@@ -66,11 +66,11 @@ describe('oasHealthSummary', () => {
 
   it('reflects agent event buffer length', () => {
     const evt = {
-      type: 'action_executed',
+      type: 'trust_updated',
       actor_kind: 'agent',
       agent_name: 'alice',
       timestamp: 1,
-      action: 'ponder',
+      trust_score: 0.5,
     } satisfies OasAgentEvent
     pushOasAgentEvent(evt)
     pushOasAgentEvent({ ...evt, timestamp: 2 })
@@ -80,12 +80,12 @@ describe('oasHealthSummary', () => {
 
   it('dedups identical consecutive agent events', () => {
     const evt = {
-      type: 'action_executed',
+      type: 'trust_updated',
       actor_kind: 'agent',
       agent_name: 'alice',
       timestamp: 1,
       event_key: 'same-event',
-      action: 'ponder',
+      trust_score: 0.5,
     } satisfies OasAgentEvent
     pushOasAgentEvent(evt)
     pushOasAgentEvent(evt)
@@ -94,12 +94,12 @@ describe('oasHealthSummary', () => {
 
   it('keeps distinct events that only share actor and timestamp', () => {
     pushOasAgentEvent({
-      type: 'action_executed',
+      type: 'trust_updated',
       actor_kind: 'agent',
       agent_name: 'alice',
       timestamp: 1,
       event_key: 'action',
-      action: 'ponder',
+      trust_score: 0.5,
     } satisfies OasAgentEvent)
     pushOasAgentEvent({
       type: 'keeper_lifecycle',

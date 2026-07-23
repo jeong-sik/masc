@@ -253,7 +253,24 @@ let test_caps_admit_required_modalities () =
        (caps ~image:true ())
        [ "image"; "audio" ]);
   check bool "empty required is always admitted" true
-    (Runtime_agent.For_testing.caps_admit_required_modalities (caps ()) [])
+    (Runtime_agent.For_testing.caps_admit_required_modalities (caps ()) []);
+  (* text is a modality every runtime carries, and it is the one string in
+     [supported_modalities_of_capabilities] that no content block demands. *)
+  check bool "text is admitted by a text-only runtime" true
+    (Runtime_agent.For_testing.caps_admit_required_modalities (caps ()) [ "text" ]);
+  (* An unrecognised modality reports unsupported, not supported. The producers
+     match exhaustively over content_block, so such a string can only arrive
+     through producer/consumer drift; answering "supported" there would hand a
+     block the runtime cannot process to the provider, while answering
+     "unsupported" routes it into the reroute and degrade paths. *)
+  check bool "unrecognised modality is not admitted" false
+    (Runtime_agent.For_testing.caps_admit_required_modalities
+       (caps ~image:true ~audio:true ())
+       [ "hologram" ]);
+  check bool "unrecognised modality is not masked by a supported sibling" false
+    (Runtime_agent.For_testing.caps_admit_required_modalities
+       (caps ~image:true ())
+       [ "image"; "hologram" ])
 
 (* RFC-0265 follow-up — graceful media degrade. [strip_unsupported_modality_blocks]
    drops the top-level image/audio/document blocks a text-only runtime cannot
@@ -350,7 +367,8 @@ let test_degrade_manifest_public_projection () =
     (match assoc_field "media_dropped_counts" public with
      | Some (`String value) -> Some value
      | _ -> None);
-  check (option string) "payload role remains internal" None
+  check (option string) "payload role is explicit operator evidence"
+    (Some "operator_evidence")
     (match assoc_field "payload_role" public with
      | Some (`String value) -> Some value
      | _ -> None)
@@ -444,67 +462,6 @@ let test_driver_degrade_branch_emits_manifest () =
      && string_contains source "media_degrade_manifest_decision"
      && string_contains source "Keeper_runtime_manifest.Runtime_routed")
 
-let test_reroute_context_window_rebudgets_to_final_runtime () =
-  let rebudget =
-    Masc.Keeper_turn_driver.For_testing
-    .resolve_context_window_tokens_after_runtime_selection
-      ~requested_context_window:(Some 524_288)
-      ~final_runtime_context_window:131_072
-  in
-  let rebudget =
-    match rebudget with
-    | Ok rebudget -> rebudget
-    | Error err ->
-      Alcotest.failf
-        "expected context-window rebudget success, got %s"
-        (Agent_sdk.Error.to_string err)
-  in
-  check (option int) "requested window" (Some 524_288)
-    rebudget.Masc.Keeper_turn_driver.requested_context_window;
-  check int "final runtime window" 131_072
-    rebudget.final_runtime_context_window;
-  check int "resolved window clamps to final runtime" 131_072
-    rebudget.resolved_context_window;
-  check bool "rebudgeted" true rebudget.context_window_rebudgeted
-
-let test_context_window_rebudget_rejects_nonpositive_request () =
-  let assert_invalid value =
-    match
-      Masc.Keeper_turn_driver.For_testing
-      .resolve_context_window_tokens_after_runtime_selection
-        ~requested_context_window:(Some value)
-        ~final_runtime_context_window:131_072
-    with
-    | Ok rebudget ->
-      Alcotest.failf
-        "expected invalid context-window request %d to fail, got resolved=%d"
-        value
-        rebudget.resolved_context_window
-    | Error
-        (Agent_sdk.Error.Config
-           (Agent_sdk.Error.InvalidConfig { field = "context_window_tokens"; detail })) ->
-      check bool
-        ("detail mentions requested_context_window for " ^ string_of_int value)
-        true
-        (string_contains detail "requested_context_window must be positive")
-    | Error err ->
-      Alcotest.failf
-        "expected InvalidConfig for context-window request %d, got %s"
-        value
-        (Agent_sdk.Error.to_string err)
-  in
-  assert_invalid 0;
-  assert_invalid (-1)
-
-let test_driver_reroute_manifest_records_context_window_rebudget () =
-  let source = read_file "lib/keeper/keeper_turn_driver.ml" in
-  check bool "reroute branch emits context-window rebudget manifest" true
-    (string_contains source "modality_rerouted"
-     && string_contains source "requested_context_window"
-     && string_contains source "final_runtime_context_window"
-     && string_contains source "resolved_context_window"
-     && string_contains source "context_window_rebudgeted")
-
 let test_runtime_agent_oas_tool_hook_fails_typed_not_failwith () =
   let source = read_file "lib/runtime/runtime_agent.ml" in
   check bool "legacy failwith hook removed" false
@@ -557,12 +514,6 @@ let () =
             test_media_degrade_preserves_already_canonical_checkpoint
         ; test_case "driver degrade branch emits manifest" `Quick
             test_driver_degrade_branch_emits_manifest
-        ; test_case "reroute context window rebudgets to final runtime" `Quick
-            test_reroute_context_window_rebudgets_to_final_runtime
-        ; test_case "non-positive context window request fails closed" `Quick
-            test_context_window_rebudget_rejects_nonpositive_request
-        ; test_case "driver reroute manifest records context rebudget" `Quick
-            test_driver_reroute_manifest_records_context_window_rebudget
         ; test_case "runtime agent OAS tool hook typed failure" `Quick
             test_runtime_agent_oas_tool_hook_fails_typed_not_failwith
         ] )

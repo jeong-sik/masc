@@ -25,16 +25,8 @@ let init_keeper_tool_registry () =
     (Masc.Unified_tool_registry.register_all ();
      Masc.Unified_tool_registry.enforce_visible_tag_coverage ())
 
-(** Test fixture parser for [keeper_meta] JSON.
-
-    The production parser at [Masc.Keeper_meta_json_parse.meta_of_json] requires
-    explicit [tool_access]. Test fixtures historically built minimal [`Assoc]
-    payloads that omitted it. Rather than thread the field through every
-    fixture, this helper auto-fills a conservative test default when absent,
-    then delegates to the strict production parser.
-
-    Production code MUST NOT use this helper — the strict parser exists to
-    catch missing fields at the boundary. *)
+(** Test fixture parser for [keeper_meta] JSON. It supplies only a trace id
+    when a focused fixture omits one, then delegates to the production parser. *)
 let meta_of_json_fixture (json : Yojson.Safe.t) =
   let augment fields =
     let has key = List.exists (fun (k, _) -> String.equal k key) fields in
@@ -64,24 +56,56 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
       if String.length candidate <= 64 then candidate
       else String.sub candidate 0 64
     in
-    fields
-    |> add_if_missing "trace_id" (`String trace_id)
-    |> add_if_missing "tool_access"
-         (Json_util.json_string_list [])
+    fields |> add_if_missing "trace_id" (`String trace_id)
   in
   let json' =
     match json with
     | `Assoc fields -> `Assoc (augment fields)
     | other -> other
   in
-  Masc.Keeper_meta_json_parse.meta_of_json json'
+  (* Production [meta_of_json] no longer reads TOML-only config keys from JSON
+     (TOML is the SSOT; the runtime JSON carries only runtime state). Focused
+     fixtures still set config inline for convenience, so this test helper
+     re-applies those keys onto the parsed record. This keeps config injection a
+     test-only concern and does not resurrect the production JSON read path. *)
+  match Masc.Keeper_meta_json_parse.meta_of_json json' with
+  | Error _ as e -> e
+  | Ok meta ->
+    let open Masc.Keeper_meta_contract in
+    let bool_opt key = Safe_ops.json_bool_opt key json' in
+    let apply_bool_opt key current =
+      match bool_opt key with Some _ as v -> v | None -> current
+    in
+    let apply_bool key current =
+      match bool_opt key with Some v -> v | None -> current
+    in
+    let apply_string_list key current =
+      match Safe_ops.json_string_list key json' with [] -> current | xs -> xs
+    in
+    Ok
+      { meta with
+        allowed_paths = apply_string_list "allowed_paths" meta.allowed_paths
+      ; mention_targets = apply_string_list "mention_targets" meta.mention_targets
+      ; proactive =
+          (match bool_opt "proactive_enabled" with
+           | Some enabled -> { enabled }
+           | None -> meta.proactive)
+      ; always_allow = apply_bool_opt "always_allow" meta.always_allow
+      ; autoboot_enabled = apply_bool "autoboot_enabled" meta.autoboot_enabled
+      ; telemetry_feedback_enabled =
+          apply_bool_opt "telemetry_feedback_enabled" meta.telemetry_feedback_enabled
+      ; telemetry_feedback_window_hours =
+          (match Safe_ops.json_int_opt "telemetry_feedback_window_hours" json' with
+           | Some _ as v -> v
+           | None -> meta.telemetry_feedback_window_hours)
+      }
 
-(** Walk up the directory tree from [Sys.getcwd()] until
-    [config/tool_policy.toml] is found, then return that directory.
+(** Walk up the directory tree from [Sys.getcwd()] until [dune-project] is
+    found, then return that directory.
     Raises [Failure] with a descriptive message if the marker file
     cannot be found by the time the filesystem root is reached. *)
 let find_project_root () =
-  let marker = "config/tool_policy.toml" in
+  let marker = "dune-project" in
   let start_dir = Sys.getcwd () in
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
   | Some root when Sys.file_exists (Filename.concat root marker) -> root
@@ -235,6 +259,50 @@ let cleanup_test_workspace dir =
       Sys.remove path
   in
   try rm_rf dir with _ -> ()
+
+(** Run a test callback with a fresh, inventoried publication-recovery registry.
+    Existing startup state is rejected instead of duplicating the production
+    reconciliation policy in a test helper; startup reconciliation has its own
+    integration tests. [registry_root] is owned by the caller and must outlive
+    [sw]. *)
+let with_publication_recovery_registry ~sw ~fs ~registry_root f =
+  let registry_root = Eio.Path.(fs / registry_root) in
+  match
+    Fs_compat.Publication_recovery.open_registry ~sw ~fs ~registry_root
+  with
+  | Error error ->
+    failwith
+      ("test publication recovery registry open failed: "
+       ^ Fs_compat.Publication_recovery.registry_error_to_string error)
+  | Ok publication_recovery_registry ->
+    (match
+       Fs_compat.Publication_recovery.discover_owners
+         publication_recovery_registry
+     with
+     | Error error ->
+       failwith
+         ("test publication recovery discovery failed: "
+          ^ Fs_compat.Publication_recovery.discovery_error_to_string
+              error)
+     | Ok [] -> f publication_recovery_registry
+     | Ok rows ->
+       failwith
+         ("fresh test publication recovery registry contains owners: "
+          ^ String.concat
+              "; "
+              (List.map
+                 Fs_compat.Publication_recovery.owner_discovery_row_to_string
+                 rows)))
+;;
+
+let publication_recovery_provider registry =
+  Masc.Keeper_publication_recovery_availability.constant
+    (Masc.Keeper_publication_recovery_availability.Available registry)
+;;
+
+let non_runtime_publication_recovery_provider =
+  Masc.Keeper_publication_recovery_availability.non_runtime_provider
+;;
 
 let rng_initialized = Atomic.make false
 

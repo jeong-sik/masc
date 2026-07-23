@@ -44,13 +44,71 @@ val valid_fs_write_mode_strings : string list
 val handle_read_file :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Workspace.config ->
-  keeper_name:string ->
+  meta:Keeper_meta_contract.keeper_meta ->
   args:Yojson.Safe.t ->
   string
+
+val handle_read_file_with_outcome :
+  turn_sandbox_factory:Keeper_sandbox_factory.t option ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  args:Yojson.Safe.t ->
+  Keeper_tool_execution.t
 
 val handle_file_write :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Workspace.config ->
-  keeper_name:string ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  publication_recovery:
+    Keeper_publication_recovery_availability.turn_context ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
+  ?gate_context:(unit -> Keeper_gate.causal_context) ->
+  ?gate_grant:Keeper_gate.cycle_grant ->
   args:Yojson.Safe.t ->
+  unit ->
   string
+
+val handle_file_write_with_outcome :
+  turn_sandbox_factory:Keeper_sandbox_factory.t option ->
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  publication_recovery:
+    Keeper_publication_recovery_availability.turn_context ->
+  ?continuation_channel:Keeper_continuation_channel.t ->
+  ?gate_context:(unit -> Keeper_gate.causal_context) ->
+  ?gate_grant:Keeper_gate.cycle_grant ->
+  args:Yojson.Safe.t ->
+  unit ->
+  Keeper_tool_execution.t
+(** Local writes acquire the project-root anchor and selected allowed root with
+    [Eio.Path.open_dir] before Gate evaluation, then keep those directory
+    capabilities through Gate evaluation and the selected effect. Atomic
+    replace/patch reads the live publication-recovery provider only after Gate
+    authorization and keeps the resulting lane access through recovery record,
+    temp-file, and rename work. Append and exclusive create are recovery-store
+    independent and therefore never read that provider. No local write is
+    performed through a validated native path string.
+
+    The project root's parent is the operator-owned capability-acquisition
+    boundary. An explicit allowed root outside the project likewise requires
+    an operator-owned parent; Keeper-writable components must begin below the
+    opened root capability. *)
+
+module For_testing : sig
+  type created_directory_fault_stage =
+    | Before_create_directory
+    | Before_inspect_created_directory
+    | Before_apply_directory_permissions
+
+  type created_directory_fault
+
+  val created_directory_fault
+    :  stage:created_directory_fault_stage
+    -> exception_:exn
+    -> created_directory_fault
+
+  val with_created_directory_fault
+    :  created_directory_fault
+    -> (unit -> 'a)
+    -> 'a
+end

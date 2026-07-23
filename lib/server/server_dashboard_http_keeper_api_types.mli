@@ -12,7 +12,6 @@
 val keeper_api_prefix : string
 
 (** Per-route URL suffixes for the keeper API. *)
-val keeper_suffix_tools : string
 val keeper_suffix_config : string
 val keeper_suffix_secrets : string
 val keeper_suffix_boot : string
@@ -22,7 +21,17 @@ val keeper_suffix_clear : string
 val keeper_suffix_checkpoints : string
 val keeper_suffix_runtime_trace : string
 val keeper_suffix_directive : string
+val keeper_suffix_paused_work : string
 val keeper_suffix_catchup_judge : string
+
+val keeper_chat_receipt_state_json :
+  Keeper_chat_queue.receipt_state -> Yojson.Safe.t
+
+val keeper_chat_receipt_json :
+  keeper_name:string ->
+  revision:int64 ->
+  Keeper_chat_queue.receipt_view ->
+  Yojson.Safe.t
 
 (** {1 Dashboard cache keys} *)
 
@@ -51,8 +60,12 @@ val keeper_runtime_trace_cache_key :
 (** Cache key for [/api/v1/keepers/<name>/runtime-trace]. Optional query
     fields are tagged so absent values cannot collide with literal payloads. *)
 
+type keeper_chat_recovery_route =
+  { keeper_name : string
+  ; receipt_id : string
+  }
+
 type keeper_post_route_kind =
-  | Keeper_post_tools
   | Keeper_post_config
   | Keeper_post_secrets
   | Keeper_post_boot
@@ -61,7 +74,9 @@ type keeper_post_route_kind =
   | Keeper_post_clear
   | Keeper_post_checkpoints
   | Keeper_post_directive
+  | Keeper_post_paused_work
   | Keeper_post_catchup_judge
+  | Keeper_post_chat_recovery of keeper_chat_recovery_route
   | Keeper_post_unknown
 (** Sub-route kind for a [POST /api/v1/keepers/<name>/...] path. *)
 
@@ -80,6 +95,9 @@ val is_keeper_checkpoints_get_path : string -> bool
 
 val is_keeper_runtime_trace_get_path : string -> bool
 (** [true] for [GET /api/v1/keepers/<name>/runtime-trace] paths. *)
+
+val is_keeper_paused_work_get_path : string -> bool
+(** [true] for authenticated [GET /api/v1/keepers/<name>/paused-work] paths. *)
 
 (** {1 Trajectory preview helpers} *)
 

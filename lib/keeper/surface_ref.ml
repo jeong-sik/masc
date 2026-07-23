@@ -16,7 +16,6 @@ type t =
       channel_id : string;
       thread_ts : string option;
     }
-  | Github of { repo : string; notification_id : string option }
   | Webhook of { source : string; event_id : string }
   | Agent
   | Gate of { label : string; address : (string * string) list }
@@ -28,7 +27,6 @@ let lane_label = function
   | Dashboard _ -> "dashboard"
   | Discord _ -> "discord"
   | Slack _ -> "slack"
-  | Github _ -> "github"
   | Webhook _ -> "webhook"
   | Agent -> "agent"
   | Gate { label; _ } -> label
@@ -94,10 +92,6 @@ let to_json = function
         ([ ("kind", `String "slack"); ("channel_id", `String channel_id) ]
         @ opt_string_field "team_id" team_id
         @ opt_string_field "thread_ts" thread_ts)
-  | Github { repo; notification_id } ->
-      `Assoc
-        ([ ("kind", `String "github"); ("repo", `String repo) ]
-        @ opt_string_field "notification_id" notification_id)
   | Webhook { source; event_id } ->
       `Assoc
         [
@@ -138,10 +132,6 @@ let of_json json =
              channel_id;
              thread_ts = optional_string "thread_ts" json;
            })
-  | "github" ->
-      let* repo = required_string "repo" json in
-      Ok
-        (Github { repo; notification_id = optional_string "notification_id" json })
   | "webhook" ->
       let* source = required_string "source" json in
       let* event_id = required_string "event_id" json in

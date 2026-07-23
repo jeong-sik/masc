@@ -4,7 +4,7 @@
     bloodflow restoration plan.  The first cut intentionally reads
     only execution-receipts JSONL since that's the path that already
     populates [turn_count] (post-Step 0a it carries the structured
-    [keeper_turn_id] for silent skip / runtime error / livelock
+    [keeper_turn_id] for silent skip and runtime error
     paths too).
 
     Follow-up stacks will widen the source set:

@@ -12,7 +12,6 @@ val ensure_critical_prompt_anchors : string -> string
     unchanged. *)
 
 val build_keeper_system_prompt :
-  goal:string ->
   instructions:string ->
   ?persona_extended:string ->
   ?keeper_name:string ->

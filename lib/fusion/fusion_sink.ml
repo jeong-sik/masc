@@ -248,7 +248,10 @@ let judge_node_meta (o : Fusion_types.judge_outcome) : Yojson.Safe.t =
          ; ("failure_code", `String (Fusion_types.judge_failure_tag failure))
          ; ("input_tokens", `Int usage.Fusion_types.input_tokens)
          ; ("output_tokens", `Int usage.Fusion_types.output_tokens)
-         ; ("elapsed_s", `Float elapsed_s)
+         ; ( "elapsed_s"
+           , match elapsed_s with
+             | Some value -> `Float value
+             | None -> `Null )
          ; ("timed_out", `Bool timed_out)
          ])
 
@@ -282,30 +285,26 @@ let broadcast_run_status ~registry ~run_id =
     Log.Keeper.warn "fusion_run_broadcast run_id=%s failed: %s" run_id
       (Printexc.to_string exn)
 
-(* Fail-closed durable wake. The reply route is the sole in-memory carrier of
-   the originating channel, so it must not be destroyed before the stimulus that
-   carries it is durably persisted. [peek] reads the route WITHOUT removing it;
-   the completion stimulus is committed through the shared fail-closed durable
-   path ([enqueue_durable_result] — the same commit boundary HITL uses for its
-   sole-carrier resolution); only on [Ok] is the route consumed ([take]) and the
-   best-effort wake hint flipped. A failed commit leaves the route intact for a
-   later retry and returns [Error] to the caller instead of swallowing the loss.
+(* Fail-closed durable wake. The originating channel comes from the producer's
+   durable obligation and is copied into the completion stimulus. The stimulus
+   is committed through the shared fail-closed durable path
+   ([enqueue_durable_result] — the same commit boundary HITL uses for its
+   sole-carrier resolution). A failed commit leaves the producer obligation
+   intact for a later replay and returns [Error] instead of swallowing the loss.
    The wake hint (Running-gated) is best-effort AFTER a committed payload — its
    failure is logged, not raised, because the keeper replays the durable
    stimulus on its next admitted turn (mirrors HITL's post-commit signal).
    Eio structural cancellation (Cancelled) is always re-raised. *)
 let wake_keeper_on_fusion_completion
-      ~base_dir ~keeper ~run_id ~ok ~resolved_answer ~board_post_id :
+      ~base_dir ~keeper ~run_id ~channel ~ok ~resolved_answer ~board_post_id :
     (unit, string) result =
-  (* A run started outside a connector conversation has no route; the wake then
-     says so explicitly instead of inventing a destination. *)
-  let channel =
-    match Fusion_wake_route.peek ~run_id with
-    | Some channel -> channel
-    | None -> Keeper_continuation_channel.unrouted "no originating connector"
+  let terminal =
+    if ok
+    then Keeper_event_queue.Fusion_succeeded resolved_answer
+    else Keeper_event_queue.Fusion_failed resolved_answer
   in
   let fusion_completion =
-    Keeper_event_queue.{ run_id; ok; resolved_answer; board_post_id; channel }
+    Keeper_event_queue.{ run_id; terminal; board_post_id; channel }
   in
   let post_id = Keeper_event_queue.fusion_completion_post_id fusion_completion in
   let stimulus : Keeper_event_queue.stimulus =
@@ -324,19 +323,11 @@ let wake_keeper_on_fusion_completion
     | exn -> Error (Printexc.to_string exn)
   with
   | Error reason ->
-    (* Route left intact (peek, not take): the reply channel survives the
-       failed write so a later retry can still deliver it. *)
     Log.Keeper.error ~keeper_name:keeper
       "fusion completion wake durable-commit failed run_id=%s: %s" run_id reason;
     Error reason
   | Ok () ->
-    (* RFC-0266: [take] removes the route now that its channel is durably committed above; the discarded value is exactly that already-committed channel, so this is pure route cleanup, not a dropped contract. *)
-    ignore (Fusion_wake_route.take ~run_id);
     Log.Keeper.info "fusion completion wake: keeper=%s run_id=%s ok=%b" keeper run_id ok;
-    (* Best-effort wake hint: the payload is already durable, so a withheld or
-       failed hint only defers pickup to the keeper's next turn. The typed outcome
-       remains observable; an exception is logged and does not roll back the
-       durable completion. *)
     (try
        match
          Keeper_registry.wakeup_running
@@ -368,8 +359,18 @@ let wake_keeper_on_fusion_completion
          (Printexc.to_string exn));
     Ok ()
 
-let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage :
+let delivery_key_of_run_id run_id =
+  Keeper_chat_delivery_identity.Request_id.of_string run_id
+  |> Result.map (fun request_id ->
+    Keeper_chat_delivery_identity.Async_request request_id)
+  |> Result.map_error (fun detail ->
+    Printf.sprintf "invalid Fusion run delivery identity: %s" detail)
+;;
+
+let emit ~base_dir ~keeper ~run_id ~channel ~question ~panel ~judge ~judges ~judge_usage :
     (unit, string) result =
+  let ( let* ) = Result.bind in
+  let* delivery_key = delivery_key_of_run_id run_id in
   try
     (* 비용 관측(제약 아님) — 패널 N + 심판 1 실측 토큰 합산 (RFC §10). board 증거에만
        남긴다 (cost cap은 v1 제외, 측정값만 — 괴상한 제약 제거 원칙). 실패한 패널/심판은
@@ -451,10 +452,18 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage 
     let origin : Board.post_origin =
       { turn_ref = None; source = Some "fusion"; fusion_run_id = Some run_id }
     in
-    let board_result =
-      Board_dispatch.create_post ~author:keeper ~content:board_headline
-        ~post_kind:Board.System_post ?meta_json ~visibility:Board.Internal
-        ~ttl_hours:board_post_ttl_hours ~origin ()
+    let* board_result =
+      match
+        Board_dispatch.create_post_once_by_fusion_run_id ~fusion_run_id:run_id
+          ~author:keeper ~content:board_headline
+          ~post_kind:Board.System_post ?meta_json ~visibility:Board.Internal
+          ~ttl_hours:board_post_ttl_hours ~origin ()
+      with
+      | Error (Board.Already_exists detail) ->
+        Error (Printf.sprintf "Fusion Board projection identity conflict: %s" detail)
+      | Ok (Board.Post_created post | Board.Post_already_present post) ->
+        Ok (Ok post)
+      | Error error -> Ok (Error error)
     in
     (* 키퍼 메인 흐름 통합 ("결과를 키퍼 흐름에 녹이기", RFC-0252 §8 개정).
        상세 트랜스크립트(패널 답변 N개)는 위 board post 증거로만 남기고, 키퍼 chat
@@ -497,13 +506,14 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage 
          실패를 삼켜 emit이 Ok를 반환했었다(silent drop). [_result] 변형으로 실패를
          surface한다. 성공한 경우에만 broadcast한다. *)
       match
-        Keeper_chat_store.append_assistant_message_result ~base_dir
-          ~keeper_name:keeper ~content ?blocks ()
+        Keeper_chat_store.append_assistant_message_once ~base_dir
+          ~keeper_name:keeper ~delivery_key ~content ?blocks ()
       with
-      | Ok () ->
+      | Ok (Keeper_chat_store.Appended _) ->
         Keeper_chat_broadcast.chat_appended ~keeper_name:keeper
           ~source:"fusion" ~content ();
         Ok ()
+      | Ok (Keeper_chat_store.Already_present _) -> Ok ()
       | Error _ as e -> e
     in
     (* RFC-0266 (개정, board best-effort): completion 여부는 *키퍼가 결론을 받았는가*
@@ -537,7 +547,7 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage 
            Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
              ~ok:true ();
            broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
-           wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:true
+           wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~channel ~ok:true
              ~resolved_answer:j.Fusion_types.resolved_answer ~board_post_id
          | Error e ->
            Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
@@ -545,25 +555,46 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage 
              ~failure_code:(Fusion_types.judge_failure_tag e)
              ~ok:false ();
            broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
-           wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:false
+           wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~channel ~ok:false
              ~resolved_answer:
                (Printf.sprintf "fusion run failed — %s" (render_failure e))
              ~board_post_id
        in
-       (* The conclusion is already durable on the keeper chat lane
-          ([chat_lane_result = Ok] above), so a failed completion wake is
-          degraded delivery of the *reply-channel routing*, not a sink failure.
-          Record it for operators (the wake itself ERROR-logs the reason) but do
-          NOT raise [Sink_failed] — that would double-notify a "(sink failed)"
-          note over a conclusion the keeper already received. *)
+       (* Chat/Board are independently idempotent, but the producer obligation
+          covers the durable continuation wake too. Returning [Error] retains
+          that obligation; a retry converges on the existing chat/Board rows. *)
        (match wake_result with
-        | Ok () -> ()
-        | Error _reason ->
+        | Ok () -> Ok ()
+        | Error reason ->
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string KeepaliveSignalFailures)
             ~labels:[ ("keeper", keeper); ("phase", "fusion_completion_wake") ]
-            ());
-       Ok ())
+            ();
+          Error reason))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)
+
+let emit_failure ~base_dir ~keeper ~run_id ~channel ~failure_code ~detail =
+  let ( let* ) = Result.bind in
+  let* delivery_key = delivery_key_of_run_id run_id in
+  let content =
+    Printf.sprintf "Fusion run `%s` failed (%s): %s" run_id failure_code detail
+  in
+  let* () =
+    match
+      Keeper_chat_store.append_assistant_message_once ~base_dir
+        ~keeper_name:keeper ~delivery_key ~content ()
+    with
+    | Ok (Keeper_chat_store.Appended _) ->
+      Keeper_chat_broadcast.chat_appended ~keeper_name:keeper
+        ~source:"fusion" ~content ();
+      Ok ()
+    | Ok (Keeper_chat_store.Already_present _) -> Ok ()
+    | Error _ as error -> error
+  in
+  Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
+    ~failure:detail ~failure_code ~ok:false ();
+  broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
+  wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~channel ~ok:false
+    ~resolved_answer:content ~board_post_id:""

@@ -53,14 +53,12 @@ let all_provider_native_schema_cases =
   [ "librarian_episode", Keeper_structured_output_schema.librarian_episode_output_schema
   ; "consolidation_plan", Keeper_structured_output_schema.consolidation_plan_output_schema
   ; "memory_bank_summary", Keeper_structured_output_schema.memory_bank_summary_output_schema
+  ; "compaction_plan", Keeper_structured_output_schema.compaction_plan_output_schema
   ; "vision_analyze", Keeper_structured_output_schema.vision_analyze_output_schema
-  ; "operator_judge", Keeper_structured_output_schema.operator_judge_output_schema
-  ; "governance_judge", Keeper_structured_output_schema.governance_judge_output_schema
   ; "fusion_judge", Keeper_structured_output_schema.fusion_judge_output_schema
-  ; "verification_verdict", Keeper_structured_output_schema.verification_verdict_output_schema
   ; "failure_judgment", Keeper_structured_output_schema.failure_judgment_output_schema
-  ; ( "anti_rationalization_verdict"
-    , Keeper_structured_output_schema.anti_rationalization_verdict_output_schema )
+  ; ( "board_attention_judgment_batch"
+    , Keeper_structured_output_schema.board_attention_judgment_batch_output_schema )
   ]
 ;;
 
@@ -69,7 +67,6 @@ let schema_capable_oas_provider_config () =
     ~kind:Llm_provider.Provider_config.OpenAI_compat
     ~model_id:"structured-output-ratchet"
     ~base_url:"https://structured-output.invalid/v1"
-    ~supports_structured_output_override:true
     ~model_capabilities_override:
       Llm_provider.Capabilities.openai_compat_chat_extended_capabilities
     ()
@@ -80,9 +77,10 @@ let prompt_tier_oas_provider_config () =
     ~kind:Llm_provider.Provider_config.OpenAI_compat
     ~model_id:"prompt-tier-ratchet"
     ~base_url:"https://prompt-tier.invalid/v1"
-    ~supports_structured_output_override:false
     ~model_capabilities_override:
-      Llm_provider.Capabilities.openai_compat_chat_extended_capabilities
+      { Llm_provider.Capabilities.openai_compat_chat_extended_capabilities with
+        supports_structured_output = false
+      }
     ()
 ;;
 
@@ -123,100 +121,117 @@ let has_json_schema_response_format schema provider_cfg =
   | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false
 ;;
 
-let test_apply_schema_or_prompt_tier_uses_native_when_supported () =
+let has_no_response_format provider_cfg =
+  match provider_cfg.Llm_provider.Provider_config.response_format with
+  | Agent_sdk.Types.Off ->
+    Option.is_none provider_cfg.Llm_provider.Provider_config.output_schema
+  | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false
+;;
+
+(* A schema-capable provider gets no response format either: capability is not
+   consulted. Without this the helper could silently regrow a native tier for
+   the one provider class that accepts it, which is the split these call sites
+   were changed to remove. *)
+let test_without_response_format_clears_schema_capable_provider () =
+  let base =
+    Keeper_structured_output_schema.apply_to_provider_config
+      Keeper_structured_output_schema.librarian_episode_output_schema
+      (schema_capable_oas_provider_config ())
+  in
+  check bool "schema-capable provider starts with a native schema attached" true
+    (has_json_schema_response_format
+       Keeper_structured_output_schema.librarian_episode_output_schema
+       base);
+  check bool "helper clears it anyway" true
+    (has_no_response_format (Keeper_structured_output_schema.without_response_format base))
+;;
+
+(* The point of the helper is that the request is byte-identical regardless of
+   what the provider advertises, so a capability fact that turns out to be a lie
+   (ollama.com cloud declared json_schema and ignored it — 2026-07-02 probe)
+   cannot change the request that was sent. *)
+let test_without_response_format_is_capability_independent () =
+  let schema_capable =
+    Keeper_structured_output_schema.without_response_format
+      (schema_capable_oas_provider_config ())
+  in
+  let json_object_only =
+    Keeper_structured_output_schema.without_response_format
+      (prompt_tier_oas_provider_config ())
+  in
+  check bool "schema-capable provider asks for no format" true
+    (has_no_response_format schema_capable);
+  check bool "json_object-only provider asks for no format" true
+    (has_no_response_format json_object_only);
+  check bool "both configs pass output-schema validation" true
+    (List.for_all
+       (fun cfg ->
+          match Llm_provider.Provider_config.validate_output_schema_request cfg with
+          | Ok () -> true
+          | Error _ -> false)
+       [ schema_capable; json_object_only ])
+;;
+
+(* #25266: a json_object-only provider (structured_output=false,
+   response_format_json=true — GLM/DeepSeek/Kimi's OpenAI-compat endpoints)
+   must get JsonMode from the three-tier selector, not be dropped to the
+   prompt tier. [prompt_tier_oas_provider_config] is exactly this shape:
+   openai_compat_chat_extended has response_format_json=true, and it disables
+   only structured_output. *)
+let test_json_mode_tier_selects_json_mode_for_json_object_only () =
   let schema = Keeper_structured_output_schema.librarian_episode_output_schema in
-  let base = schema_capable_oas_provider_config () in
+  let base = prompt_tier_oas_provider_config () in
   let configured =
-    Keeper_structured_output_schema.apply_schema_or_prompt_tier
-      ~log_label:"test native"
+    Keeper_structured_output_schema.apply_schema_json_mode_or_prompt_tier
+      ~log_label:"test json_mode"
       schema
       base
   in
-  check bool "native schema is attached" true
-    (has_json_schema_response_format schema configured);
-  check (option bool) "output_schema mirrors native schema" (Some true)
+  check bool "json_object-only provider gets JsonMode" true
+    (match configured.Llm_provider.Provider_config.response_format with
+     | Agent_sdk.Types.JsonMode -> true
+     | Agent_sdk.Types.JsonSchema _ | Agent_sdk.Types.Off -> false);
+  check (option bool) "JsonMode carries no output_schema" None
     (Option.map
        (Yojson.Safe.equal schema)
        configured.Llm_provider.Provider_config.output_schema)
-;;
 
-let test_apply_schema_or_prompt_tier_keeps_prompt_config_when_native_rejected () =
+let test_json_mode_tier_uses_native_schema_when_supported () =
   let schema = Keeper_structured_output_schema.librarian_episode_output_schema in
-  let base = prompt_tier_oas_provider_config () in
-  let native_cfg = Keeper_structured_output_schema.apply_to_provider_config schema base in
-  (match Llm_provider.Provider_config.validate_output_schema_request native_cfg with
-   | Ok () -> fail "prompt-tier provider unexpectedly accepted native schema"
-   | Error _ -> ());
+  let base = schema_capable_oas_provider_config () in
   let configured =
-    Keeper_structured_output_schema.apply_schema_or_prompt_tier
-      ~log_label:"test prompt"
+    Keeper_structured_output_schema.apply_schema_json_mode_or_prompt_tier
+      ~log_label:"test native over json_mode"
       schema
       base
   in
-  check bool "prompt tier has no native schema" false
-    (has_json_schema_response_format schema configured);
-  check (option bool) "prompt tier leaves output_schema empty" None
-    (Option.map
-       (Yojson.Safe.equal schema)
-       configured.Llm_provider.Provider_config.output_schema);
-  check
-    bool
-    "prompt-tier config still validates without native schema"
-    true
-    (match Llm_provider.Provider_config.validate_output_schema_request configured with
-     | Ok () -> true
-     | Error _ -> false)
-;;
+  check bool "schema-capable provider still gets strict json_schema" true
+    (has_json_schema_response_format schema configured)
 
-let operator_recommended_action_schema () =
-  Keeper_structured_output_schema.operator_judge_output_schema
-  |> schema_property "workspace"
-  |> schema_property "recommended_action"
-;;
-
-let governance_recommended_action_schema () =
-  Keeper_structured_output_schema.governance_judge_output_schema
-  |> schema_property "items"
-  |> schema_items
-  |> schema_property "recommended_action"
-;;
-
-let test_operator_judge_schema_uses_action_approval_ssot () =
-  let action_schema =
-    operator_recommended_action_schema () |> schema_property "action_type"
+let test_accepts_schema_or_json_mode_admits_json_object_only () =
+  let schema = Keeper_structured_output_schema.librarian_episode_output_schema in
+  (* json_schema-capable and json_object-only are both eligible; neither is not. *)
+  check bool "json_schema provider is eligible" true
+    (Keeper_structured_output_schema.provider_config_accepts_schema_or_json_mode
+       schema (schema_capable_oas_provider_config ()));
+  check bool "json_object-only provider is eligible" true
+    (Keeper_structured_output_schema.provider_config_accepts_schema_or_json_mode
+       schema (prompt_tier_oas_provider_config ()));
+  let neither =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"neither-ratchet"
+      ~base_url:"https://neither.invalid/v1"
+      ~model_capabilities_override:
+        { Llm_provider.Capabilities.openai_compat_chat_extended_capabilities with
+          supports_structured_output = false
+        ; supports_response_format_json = false
+        }
+      ()
   in
-  check
-    (list string)
-    "operator action enum"
-    (List.sort String.compare Operator_approval.allowed_actions)
-    (enum_strings action_schema);
-  check
-    bool
-    "goal completion decision is schema-admitted"
-    true
-    (List.mem
-       Operator_action_constants.goal_completion_decision
-       (enum_strings action_schema))
-;;
-
-let test_operator_judge_schema_allows_payload_objects () =
-  let payload_schema =
-    operator_recommended_action_schema () |> schema_property "suggested_payload"
-  in
-  check bool "suggested_payload admits object members" true
-    (allows_additional_properties payload_schema)
-;;
-
-let test_governance_judge_schema_uses_resolved_tool_ssot () =
-  let tool_schema =
-    governance_recommended_action_schema () |> schema_property "resolved_tool"
-  in
-  check
-    (list string)
-    "governance resolved_tool enum"
-    (List.sort String.compare Tool_name.Operator_remote_name.all_strings)
-    (enum_strings tool_schema)
-;;
+  check bool "provider with neither capability is rejected" false
+    (Keeper_structured_output_schema.provider_config_accepts_schema_or_json_mode
+       schema neither)
 
 let test_operator_remote_tool_name_ssot_matches_remote_schemas () =
   let schema_names =
@@ -233,15 +248,12 @@ let test_operator_remote_tool_name_ssot_matches_remote_schemas () =
     (list string)
     "operator remote exported names"
     (List.sort String.compare Tool_name.Operator_remote_name.all_strings)
-    (List.sort String.compare Operator_tool.remote_tool_names)
-;;
-
-let test_governance_judge_schema_allows_payload_objects () =
-  let payload_schema =
-    governance_recommended_action_schema () |> schema_property "payload_preview"
-  in
-  check bool "payload_preview admits object members" true
-    (allows_additional_properties payload_schema)
+    (List.sort String.compare Operator_tool.remote_tool_names);
+  check bool "chat recovery cannot bypass operator profile" false
+    (Tool_catalog.allow_direct_call "masc_operator_chat_recovery_resolve")
+  ;
+  check bool "task recovery cannot bypass operator profile" false
+    (Tool_catalog.allow_direct_call "masc_operator_task_recovery_resolve")
 ;;
 
 let test_fusion_judge_schema_uses_parser_wire_contract () =
@@ -287,174 +299,101 @@ let test_fusion_judge_schema_uses_parser_wire_contract () =
   check bool "fusion schema exposes parser wire fields" true true
 ;;
 
-
-let test_verification_verdict_schema_uses_core_ssot () =
-  let schema = Keeper_structured_output_schema.verification_verdict_output_schema in
+let test_compaction_plan_schema_uses_codec_ssot () =
+  let schema = Keeper_structured_output_schema.compaction_plan_output_schema in
   check
     (list string)
-    "verification verdict required fields"
-    [ "evidence"; "reason"; "verdict" ]
+    "compaction plan required fields"
+    [ Keeper_structured_output_schema.compaction_plan_field_decisions ]
     (required_strings schema);
-  check
-    (list string)
-    "verification verdict enum"
-    (List.sort String.compare Verifier_core.valid_verdict_strings)
-    (schema |> schema_property "verdict" |> enum_strings);
-  check bool "verification verdict is closed" false
+  check bool "compaction plan is closed" false
     (allows_additional_properties schema);
-  let evidence_schema =
-    schema |> schema_property "evidence" |> schema_items
+  let decision_schema =
+    schema
+    |> schema_property Keeper_structured_output_schema.compaction_plan_field_decisions
+    |> schema_items
   in
   check
     (list string)
-    "verification evidence required fields"
-    [ "line"; "path"; "quote" ]
-    (required_strings evidence_schema);
-  check bool "verification evidence is closed" false
-    (allows_additional_properties evidence_schema)
-;;
-
-let test_anti_rationalization_verdict_schema_uses_task_ssot () =
-  let schema =
-    Keeper_structured_output_schema.anti_rationalization_verdict_output_schema
-  in
+    "compaction decision required fields"
+    (List.sort
+       String.compare
+       [ Keeper_structured_output_schema.compaction_plan_field_unit_index
+       ; Keeper_structured_output_schema.compaction_plan_field_action
+       ; Keeper_structured_output_schema.compaction_plan_field_summary
+       ])
+    (required_strings decision_schema);
+  check bool "compaction decision is closed" false
+    (allows_additional_properties decision_schema);
   check
     (list string)
-    "anti-rationalization verdict required fields"
-    [ "reason"; "verdict" ]
-    (required_strings schema);
+    "compaction action enum"
+    (List.sort
+       String.compare
+       [ Keeper_structured_output_schema.compaction_plan_action_keep
+       ; Keeper_structured_output_schema.compaction_plan_action_drop
+       ; Keeper_structured_output_schema.compaction_plan_action_summarize
+       ])
+    (decision_schema
+     |> schema_property Keeper_structured_output_schema.compaction_plan_field_action
+     |> enum_strings)
+;;
+
+
+(* The reviewer config must reach json_object-only providers. Counterfactual
+   first: a native schema request on a Glm-kind config is rejected by the OAS
+   contract — that rejection is exactly what left every task nonterminal
+   fleet-wide on a Glm evaluator runtime (2026-07-21). The reviewer transform
+   must therefore request no wire format at all and validate on Glm. *)
+let glm_provider_config () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.Glm
+    ~model_id:"glm-5-turbo"
+    ~base_url:"https://glm.invalid/api/paas/v4"
+    ()
+;;
+
+let test_anti_rationalization_reviewer_config_reaches_glm () =
+  let native =
+    Keeper_structured_output_schema.apply_to_provider_config
+      (`Assoc [ "type", `String "object" ])
+      (glm_provider_config ())
+  in
+  (match Llm_provider.Provider_config.validate_output_schema_request native with
+   | Error _ -> ()
+   | Ok () ->
+     fail
+       "counterfactual: a native json_schema request on a Glm config must be \
+        rejected — if this starts passing, revisit whether the reviewer \
+        surface still needs to avoid wire response formats");
+  let reviewer =
+    Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config
+      (glm_provider_config ())
+  in
   check
-    (list string)
-    "anti-rationalization verdict enum"
-    (List.sort String.compare Task.Anti_rationalization.valid_verdict_strings)
-    (schema |> schema_property "verdict" |> enum_strings);
-  check bool "anti-rationalization verdict is closed" false
-    (allows_additional_properties schema)
+    bool
+    "reviewer config carries no wire response format"
+    true
+    (has_no_response_format reviewer);
+  match Llm_provider.Provider_config.validate_output_schema_request reviewer with
+  | Ok () -> ()
+  | Error msg -> failf "reviewer config must validate on a Glm provider: %s" msg
 ;;
 
-let tool_failure_recovery_response text : Agent_sdk.Types.api_response =
-  { id = "recovery-judge-response"
-  ; model = "structured-judge"
-  ; stop_reason = Agent_sdk.Types.EndTurn
-  ; content = [ Agent_sdk.Types.Text text ]
-  ; usage = None
-  ; telemetry = None
-  }
-;;
-
-let test_tool_failure_recovery_judge_adapter_forwards_typed_request () =
-  Eio_main.run
-  @@ fun _env ->
-  Eio.Switch.run
-  @@ fun sw ->
-  let output_schema =
-    Keeper_structured_output_schema.librarian_episode_output_schema
+let test_anti_rationalization_reviewer_config_strips_preset_schema () =
+  let preset =
+    Keeper_structured_output_schema.apply_to_provider_config
+      (`Assoc [ "type", `String "object" ])
+      (glm_provider_config ())
   in
-  let request : Agent_sdk.Tool_failure_recovery.model_request =
-    { system_prompt = "recovery system"
-    ; user_prompt = {|{"episodes":[]}|}
-    ; output_schema
-    }
+  let reviewer =
+    Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config preset
   in
-  let resolve_calls = ref 0 in
-  let captured = ref None in
-  let resolve_runtime () =
-    incr resolve_calls;
-    "structured-runtime"
-  in
-  let invoke
-        ~sw:_
-        ~runtime_id
-        ~base_path
-        ~keeper_name
-        ~system_prompt
-        ~user_prompt
-        ~provider_config_transform
-    =
-    let configured =
-      match provider_config_transform (schema_capable_oas_provider_config ()) with
-      | Ok configured -> configured
-      | Error error -> fail (Agent_sdk.Error.to_string error)
-    in
-    captured :=
-      Some
-        ( runtime_id
-        , base_path
-        , keeper_name
-        , system_prompt
-        , user_prompt
-        , configured );
-    Ok (tool_failure_recovery_response {|{"action":"defer","reason":"wait"}|})
-  in
-  let result =
-    Keeper_tool_failure_recovery_judge.For_testing.completion
-      ~resolve_runtime
-      ~invoke
-      ~base_path:"/workspace"
-      ~keeper_name:"sangsu"
-      ~sw
-      request
-  in
-  check int "runtime resolved exactly once" 1 !resolve_calls;
-  (match result with
-   | Ok text ->
-     check string "response text returned unchanged"
-       {|{"action":"defer","reason":"wait"}|}
-       text
-   | Error error -> fail (Agent_sdk.Error.to_string error));
-  match !captured with
-  | None -> fail "judge invocation was not captured"
-  | Some
-      ( runtime_id
-      , base_path
-      , keeper_name
-      , system_prompt
-      , user_prompt
-      , configured ) ->
-    check string "runtime catalog selection" "structured-runtime" runtime_id;
-    check string "base path" "/workspace" base_path;
-    check string "keeper identity" "sangsu" keeper_name;
-    check string "system prompt" request.system_prompt system_prompt;
-    check string "user prompt" request.user_prompt user_prompt;
-    check bool "OAS output schema attached" true
-      (has_json_schema_response_format output_schema configured)
-;;
-
-let test_tool_failure_recovery_judge_adapter_preserves_sdk_error () =
-  Eio_main.run
-  @@ fun _env ->
-  Eio.Switch.run
-  @@ fun sw ->
-  let request : Agent_sdk.Tool_failure_recovery.model_request =
-    { system_prompt = "system"
-    ; user_prompt = "user"
-    ; output_schema = `Assoc []
-    }
-  in
-  let invoke
-        ~sw:_
-        ~runtime_id:_
-        ~base_path:_
-        ~keeper_name:_
-        ~system_prompt:_
-        ~user_prompt:_
-        ~provider_config_transform:_
-    =
-    Error (Agent_sdk.Error.Internal "structured judge unavailable")
-  in
-  match
-    Keeper_tool_failure_recovery_judge.For_testing.completion
-      ~resolve_runtime:(fun () -> "structured-runtime")
-      ~invoke
-      ~base_path:"/workspace"
-      ~keeper_name:"sangsu"
-      ~sw
-      request
-  with
-  | Error (Agent_sdk.Error.Internal detail) ->
-    check string "typed SDK error detail" "structured judge unavailable" detail
-  | Error error -> failf "unexpected SDK error: %s" (Agent_sdk.Error.to_string error)
-  | Ok text -> failf "expected SDK error, got %s" text
+  check
+    bool
+    "a pre-set schema on the incoming config is cleared, not inherited"
+    true
+    (has_no_response_format reviewer)
 ;;
 
 let test_failure_judgment_schema_uses_contract_ssot () =
@@ -473,6 +412,32 @@ let test_failure_judgment_schema_uses_contract_ssot () =
     (allows_additional_properties schema)
 ;;
 
+let test_board_attention_batch_schema_uses_contract_ssot () =
+  let schema =
+    Keeper_structured_output_schema.board_attention_judgment_batch_output_schema
+  in
+  check
+    (list string)
+    "Board attention batch required fields"
+    [ "verdicts" ]
+    (required_strings schema);
+  let item = schema |> schema_property "verdicts" |> schema_items in
+  check
+    (list string)
+    "Board attention batch item required fields"
+    [ "candidate_id"; "decision"; "rationale" ]
+    (required_strings item);
+  check
+    (list string)
+    "Board attention batch decision enum"
+    (List.sort String.compare Keeper_board_attention_judgment.decision_tokens)
+    (item |> schema_property "decision" |> enum_strings);
+  check bool "Board attention batch item is closed" false
+    (allows_additional_properties item);
+  check bool "Board attention batch envelope is closed" false
+    (allows_additional_properties schema)
+;;
+
 let () =
   run
     "keeper-structured-output-schema"
@@ -482,45 +447,31 @@ let () =
             `Quick
             test_all_schemas_apply_as_oas_native_json_schema
         ; test_case
-            "schema-or-prompt helper uses native schema when supported"
+            "without_response_format clears a schema-capable provider too"
             `Quick
-            test_apply_schema_or_prompt_tier_uses_native_when_supported
+            test_without_response_format_clears_schema_capable_provider
         ; test_case
-            "schema-or-prompt helper keeps prompt tier when native rejected"
+            "without_response_format is capability-independent"
             `Quick
-            test_apply_schema_or_prompt_tier_keeps_prompt_config_when_native_rejected
-        ] )
-    ; ( "tool failure recovery judge"
-      , [ test_case
-            "forwards typed request through runtime catalog"
-            `Quick
-            test_tool_failure_recovery_judge_adapter_forwards_typed_request
+            test_without_response_format_is_capability_independent
         ; test_case
-            "preserves typed SDK error"
+            "json_mode tier selects JsonMode for json_object-only provider"
             `Quick
-            test_tool_failure_recovery_judge_adapter_preserves_sdk_error
+            test_json_mode_tier_selects_json_mode_for_json_object_only
+        ; test_case
+            "json_mode tier still uses strict schema when supported"
+            `Quick
+            test_json_mode_tier_uses_native_schema_when_supported
+        ; test_case
+            "accepts-schema-or-json-mode admits json_object-only, rejects neither"
+            `Quick
+            test_accepts_schema_or_json_mode_admits_json_object_only
         ] )
     ; ( "dashboard schemas"
       , [ test_case
-            "operator judge schema uses action approval SSOT"
-            `Quick
-            test_operator_judge_schema_uses_action_approval_ssot
-        ; test_case
-            "operator judge schema admits payload objects"
-            `Quick
-            test_operator_judge_schema_allows_payload_objects
-        ; test_case
-            "governance judge schema uses resolved-tool SSOT"
-            `Quick
-            test_governance_judge_schema_uses_resolved_tool_ssot
-        ; test_case
             "operator remote tool-name SSOT matches remote schemas"
             `Quick
             test_operator_remote_tool_name_ssot_matches_remote_schemas
-        ; test_case
-            "governance judge schema admits payload objects"
-            `Quick
-            test_governance_judge_schema_allows_payload_objects
         ] )
     ; ( "fusion schemas"
       , [ test_case
@@ -528,19 +479,29 @@ let () =
             `Quick
             test_fusion_judge_schema_uses_parser_wire_contract
         ] )
+    ; ( "compaction schemas"
+      , [ test_case
+            "compaction plan schema uses codec SSOT"
+            `Quick
+            test_compaction_plan_schema_uses_codec_ssot
+        ] )
     ; ( "verdict schemas"
       , [ test_case
-            "verification verdict schema uses core SSOT"
+            "anti-rationalization reviewer config reaches a Glm provider"
             `Quick
-            test_verification_verdict_schema_uses_core_ssot
+            test_anti_rationalization_reviewer_config_reaches_glm
         ; test_case
-            "anti-rationalization verdict schema uses task SSOT"
+            "anti-rationalization reviewer config strips a pre-set schema"
             `Quick
-            test_anti_rationalization_verdict_schema_uses_task_ssot
+            test_anti_rationalization_reviewer_config_strips_preset_schema
         ; test_case
             "failure judgment schema uses contract SSOT"
             `Quick
             test_failure_judgment_schema_uses_contract_ssot
+        ; test_case
+            "Board attention batch schema uses contract SSOT"
+            `Quick
+            test_board_attention_batch_schema_uses_contract_ssot
         ] )
     ]
 ;;

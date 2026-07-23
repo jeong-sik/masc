@@ -11,8 +11,6 @@
 ;;                              Masc held internally; self-only deps)
 ;;   - tool_token             : opaque dispatch token (stdlib only)
 ;;   - dispatch_outcome       : typed dispatch outcome variant (ppx show/eq)
-;;   - tool_catalog_inference : effect_domain / tool_group inference tables over
-;;                              Tool_name (was a private_module in lib/dune)
 ;;   - tool_catalog           : per-surface membership SSOT (Tool_catalog_surfaces +
 ;;                              Env_config + Masc_domain)
 ;;   - tool_registry          : call-stat counters (Json_util / Eio_guard / Config /

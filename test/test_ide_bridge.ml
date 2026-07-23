@@ -1,53 +1,6 @@
-(** Tests for IDE Bridge — event collection and pull request result parsing. *)
+(** Tests for IDE Bridge event collection. *)
 
 open Alcotest
-
-let test_parse_pull_request_result_direct_json () =
-  match
-    Ide_bridge.parse_pull_request_result_from_output
-      {|{"number":19872,"url":"https://github.com/jeong-sik/masc/pull/19872"}|}
-  with
-  | Some (number, url) ->
-    check int "pr number" 19872 number;
-    check string "pull request url" "https://github.com/jeong-sik/masc/pull/19872" url
-  | None -> fail "expected Some"
-;;
-
-let test_parse_pull_request_result_wrapped_json () =
-  let output =
-    {|{"ok":true,"output":"{\"number\":123,\"url\":\"https://github.com/jeong-sik/masc/pull/123\"}","command_descriptor":{"kind":"gh_pr_create","title":"feat","base":"main","draft":false}}|}
-  in
-  match Ide_bridge.parse_pull_request_result_from_output output with
-  | Some (number, url) ->
-    check int "pr number" 123 number;
-    check string "pull request url" "https://github.com/jeong-sik/masc/pull/123" url
-  | None -> fail "expected Some"
-;;
-
-let test_parse_pull_request_result_prefers_html_url () =
-  match
-    Ide_bridge.parse_pull_request_result_from_output
-      {|{"number":44,"url":"https://api.github.com/repos/owner/repo/pulls/44","html_url":"https://github.com/owner/repo/pull/44"}|}
-  with
-  | Some (number, url) ->
-    check int "pr number" 44 number;
-    check string "pull request url" "https://github.com/owner/repo/pull/44" url
-  | None -> fail "expected Some"
-;;
-
-let test_parse_pull_request_result_ignores_raw_url () =
-  check (option (pair int string)) "raw url ignored"
-    None
-    (Ide_bridge.parse_pull_request_result_from_output
-       "https://github.com/jeong-sik/masc/pull/19872")
-;;
-
-let test_parse_pull_request_result_no_number () =
-  check (option (pair int string)) "no number"
-    None
-    (Ide_bridge.parse_pull_request_result_from_output
-       {|{"url":"https://github.com/owner/repo/pull/123"}|})
-;;
 
 let with_temp_dir f =
   let dir = Filename.temp_file "ide_bridge_test" "" in
@@ -227,19 +180,6 @@ let test_list_events_merges_kinds_newest_first () =
       ~file_path:None
       ~timestamp_ms:1000L
       ();
-    Ide_bridge.ingest_pr_event
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~pr_number:42
-      ~pull_request_url:"https://github.com/owner/repo/pull/42"
-      ~pr_title:"feat"
-      ~pr_state:"open"
-      ~repo:"owner/repo"
-      ~keeper_id:"k1"
-      ~turn_id:"t-pr"
-      ~comment_count:0
-      ~review_status:None
-      ~timestamp_ms:2000L;
     Ide_bridge.ingest_turn_event
       ~base_path:base_dir
       ~partition:Ide_paths.Legacy_default
@@ -251,10 +191,10 @@ let test_list_events_merges_kinds_newest_first () =
       ~stop_reason:None
       ~duration_ms:None
       ~timestamp_ms:3000L;
-    let events = Ide_bridge.list_events ~base_path:base_dir ~limit:3 () in
-    check (list string) "newest-first types" [ "turn"; "pr"; "tool" ]
+    let events = Ide_bridge.list_events ~base_path:base_dir ~limit:2 () in
+    check (list string) "newest-first types" [ "turn"; "tool" ]
       (List.map (json_string "type") events);
-    check (list int64) "newest-first timestamps" [ 3000L; 2000L; 1000L ]
+    check (list int64) "newest-first timestamps" [ 3000L; 1000L ]
       (List.map (json_intlit "timestamp_ms") events))
 ;;
 
@@ -565,199 +505,6 @@ let test_hook_typed_outcome_mapping () =
     let json = Yojson.Safe.from_string line in
     let typed = Yojson.Safe.Util.member "typed_outcome" json |> Yojson.Safe.Util.to_string in
     check string "typed_outcome" "error" typed)
-;;
-
-let test_pr_event_ingest () =
-  with_temp_dir (fun base_dir ->
-    Ide_bridge.ingest_pr_event
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~pr_number:19872
-      ~pull_request_url:"https://github.com/jeong-sik/masc/pull/19872"
-      ~pr_title:"feat(ide): auto-collect tool/turn events"
-      ~pr_state:"open"
-      ~repo:"jeong-sik/masc"
-      ~keeper_id:"keeper-alpha"
-      ~turn_id:"turn-123"
-      ~comment_count:0
-      ~review_status:None
-      ~timestamp_ms:1717400000000L;
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
-    let path = Filename.concat dir "pr_events.jsonl" in
-    check bool "file exists" true (Sys.file_exists path);
-    let ic = open_in path in
-    let line = input_line ic in
-    close_in ic;
-    let json = Yojson.Safe.from_string line in
-    let pr_number = Yojson.Safe.Util.member "pr_number" json |> Yojson.Safe.Util.to_int in
-    let pull_request_url = Yojson.Safe.Util.member "pull_request_url" json |> Yojson.Safe.Util.to_string in
-    check int "pr_number" 19872 pr_number;
-    check string "pull_request_url" "https://github.com/jeong-sik/masc/pull/19872" pull_request_url)
-;;
-
-let test_pr_event_from_hook_uses_structured_descriptor_output () =
-  with_temp_dir (fun base_dir ->
-    let output =
-      {|{"ok":true,"output":"{\"number\":123,\"url\":\"https://github.com/jeong-sik/masc/pull/123\"}","command_descriptor":{"kind":"gh_pr_create","title":"feat","base":"main","draft":true}}|}
-    in
-    Ide_bridge.ingest_pr_event_from_hook
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~keeper_id:"k1"
-      ~turn_id:"t1"
-      ~output_text:output
-      ~tool_name:"execute";
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
-    let path = Filename.concat dir "pr_events.jsonl" in
-    check bool "file exists" true (Sys.file_exists path);
-    let ic = open_in path in
-    let line = input_line ic in
-    close_in ic;
-    let json = Yojson.Safe.from_string line in
-    let pr_number = Yojson.Safe.Util.member "pr_number" json |> Yojson.Safe.Util.to_int in
-    let pr_title = Yojson.Safe.Util.member "pr_title" json |> Yojson.Safe.Util.to_string in
-    check int "pr_number" 123 pr_number;
-    check string "pr_title" "feat" pr_title)
-;;
-
-let test_pr_event_from_hook_uses_descriptor_confirmed_cli_url () =
-  with_temp_dir (fun base_dir ->
-    let output =
-      {|{"ok":true,"output":"https://github.com/jeong-sik/masc/pull/456","command_descriptor":{"kind":"gh_pr_create","title":"feat cli","base":"main","draft":false}}|}
-    in
-    Ide_bridge.ingest_pr_event_from_hook
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~keeper_id:"k1"
-      ~turn_id:"t1"
-      ~output_text:output
-      ~tool_name:"execute";
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
-    let path = Filename.concat dir "pr_events.jsonl" in
-    check bool "file exists" true (Sys.file_exists path);
-    let ic = open_in path in
-    let line = input_line ic in
-    close_in ic;
-    let json = Yojson.Safe.from_string line in
-    let pr_number = Yojson.Safe.Util.member "pr_number" json |> Yojson.Safe.Util.to_int in
-    let pull_request_url =
-      Yojson.Safe.Util.member "pull_request_url" json |> Yojson.Safe.Util.to_string
-    in
-    check int "pr_number" 456 pr_number;
-    check string
-      "pull_request_url"
-      "https://github.com/jeong-sik/masc/pull/456"
-      pull_request_url)
-;;
-
-let test_pr_event_from_hook_uses_descriptor_for_any_tool_name () =
-  with_temp_dir (fun base_dir ->
-    let output =
-      {|{"ok":true,"output":"{\"number\":456,\"url\":\"https://github.com/owner/repo/pull/456\"}","command_descriptor":{"kind":"gh_pr_create","title":"feat descriptor","base":"main","draft":false}}|}
-    in
-    Ide_bridge.ingest_pr_event_from_hook
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~keeper_id:"k1"
-      ~turn_id:"t1"
-      ~output_text:output
-      ~tool_name:"fs_write";
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
-    let path = Filename.concat dir "pr_events.jsonl" in
-    check bool "file exists" true (Sys.file_exists path);
-    let ic = open_in path in
-    let line = input_line ic in
-    close_in ic;
-    let json = Yojson.Safe.from_string line in
-    check int "pr_number" 456
-      (Yojson.Safe.Util.member "pr_number" json |> Yojson.Safe.Util.to_int))
-;;
-
-let test_pr_event_from_hook_ignores_no_url () =
-  with_temp_dir (fun base_dir ->
-    let output = "file written successfully\n" in
-    Ide_bridge.ingest_pr_event_from_hook
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~keeper_id:"k1"
-      ~turn_id:"t1"
-      ~output_text:output
-      ~tool_name:"execute";
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
-    let path = Filename.concat dir "pr_events.jsonl" in
-    check bool "file not created" false (Sys.file_exists path))
-;;
-
-let test_pr_event_from_hook_ignores_raw_url () =
-  with_temp_dir (fun base_dir ->
-    let output = "remote: https://github.com/jeong-sik/masc/pull/123\n" in
-    Ide_bridge.ingest_pr_event_from_hook
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~keeper_id:"k1"
-      ~turn_id:"t1"
-      ~output_text:output
-      ~tool_name:"execute";
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
-    let path = Filename.concat dir "pr_events.jsonl" in
-    check bool "file not created for raw url" false (Sys.file_exists path))
-;;
-
-let test_descriptor_gated_on_success () =
-  with_temp_dir (fun base_dir ->
-    (* Failed gh pr create with command_descriptor in output should NOT produce PR event *)
-    let failed_output = {|{"command_descriptor": {"kind": "gh_pr_create", "title": "feat: test", "base": "main", "draft": true}, "error": "authentication failed"}|} in
-    Ide_bridge.ingest_pr_event_from_descriptor
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~keeper_id:"k1"
-      ~turn_id:"t1"
-      ~output_text:failed_output
-      ~tool_name:"execute"
-      ~success:false;
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
-    let path = Filename.concat dir "pr_events.jsonl" in
-    check bool "file not created on failure" false (Sys.file_exists path))
-;;
-
-let test_legacy_hook_uses_explicit_success_flag () =
-  with_temp_dir (fun base_dir ->
-    let failed_output =
-      {|{"ok":false,"output":"https://github.com/jeong-sik/masc/pull/456","command_descriptor":{"kind":"gh_pr_create","title":"feat failed","base":"main","draft":false},"error":"authentication failed"}|}
-    in
-    Ide_bridge.ingest_pr_event_from_hook
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~keeper_id:"k1"
-      ~turn_id:"t1"
-      ~output_text:failed_output
-      ~tool_name:"execute";
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
-    let path = Filename.concat dir "pr_events.jsonl" in
-    check bool "file not created on failed wrapper result" false (Sys.file_exists path))
-;;
-
-let test_descriptor_ingested_on_success () =
-  with_temp_dir (fun base_dir ->
-    (* Successful gh pr create with command_descriptor should produce PR event *)
-    let success_output = {|{"command_descriptor": {"kind": "gh_pr_create", "title": "feat: test", "base": "main", "draft": true}}|} in
-    Ide_bridge.ingest_pr_event_from_descriptor
-      ~base_path:base_dir
-      ~partition:Ide_paths.Legacy_default
-      ~keeper_id:"k1"
-      ~turn_id:"t1"
-      ~output_text:success_output
-      ~tool_name:"execute"
-      ~success:true;
-    let dir = Ide_paths.partition_store_dir ~base_dir:base_dir Ide_paths.Legacy_default in
-    let path = Filename.concat dir "pr_events.jsonl" in
-    check bool "file created on success" true (Sys.file_exists path);
-    let ic = open_in path in
-    let line = input_line ic in
-    close_in ic;
-    let json = Yojson.Safe.from_string line in
-    let pr_number = Yojson.Safe.Util.member "pr_number" json |> Yojson.Safe.Util.to_int in
-    check int "pr_number is 0 (no URL in output)" 0 pr_number)
 ;;
 
 let test_concurrent_ingest () =
@@ -1117,14 +864,7 @@ let test_partition_legacy_default_isolated_from_by_url () =
 let () =
   run
     "ide_bridge"
-    [ ( "parse_pull_request_result"
-      , [ test_case "direct json" `Quick test_parse_pull_request_result_direct_json
-        ; test_case "wrapped json" `Quick test_parse_pull_request_result_wrapped_json
-        ; test_case "html_url preferred" `Quick test_parse_pull_request_result_prefers_html_url
-        ; test_case "raw url ignored" `Quick test_parse_pull_request_result_ignores_raw_url
-        ; test_case "no number" `Quick test_parse_pull_request_result_no_number
-        ] )
-    ; ( "ingest"
+    [ ( "ingest"
       , [ test_case "tool event" `Quick test_ingest_tool_event
         ; test_case "turn event" `Quick test_ingest_turn_event
         ; test_case "multiple events" `Quick test_ingest_multiple_events
@@ -1183,20 +923,6 @@ let () =
         ; test_case "no file_path (execute)" `Quick test_hook_no_file_path
         ; test_case "summary truncation" `Quick test_hook_summary_truncation
         ; test_case "typed_outcome mapping" `Quick test_hook_typed_outcome_mapping
-        ] )
-    ; ( "pr_event"
-      , [ test_case "pr event ingest" `Quick test_pr_event_ingest
-        ; test_case "from hook uses structured descriptor output" `Quick test_pr_event_from_hook_uses_structured_descriptor_output
-        ; test_case "from hook uses descriptor-confirmed CLI URL" `Quick test_pr_event_from_hook_uses_descriptor_confirmed_cli_url
-        ; test_case
-            "from hook uses descriptor for any tool name"
-            `Quick
-            test_pr_event_from_hook_uses_descriptor_for_any_tool_name
-        ; test_case "from hook ignores no url" `Quick test_pr_event_from_hook_ignores_no_url
-        ; test_case "from hook ignores raw url" `Quick test_pr_event_from_hook_ignores_raw_url
-        ; test_case "descriptor gated on success" `Quick test_descriptor_gated_on_success
-        ; test_case "legacy hook uses explicit success flag" `Quick test_legacy_hook_uses_explicit_success_flag
-        ; test_case "descriptor ingested on success" `Quick test_descriptor_ingested_on_success
         ] )
     ; ( "concurrency"
       , [ test_case "concurrent ingest" `Quick test_concurrent_ingest

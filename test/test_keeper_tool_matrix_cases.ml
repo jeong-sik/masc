@@ -103,7 +103,7 @@ let init_keeper_bridge =
       Masc_test_deps.init_keeper_tool_registry ();
       ignore (Masc.Mcp_server_eio.get_clock_opt ());
       (* Use find_project_root — the test cwd is _build/default/test/ which
-         does not contain config/tool_policy.toml, so Sys.getcwd fails the
+         does not contain dune-project, so Sys.getcwd fails the
          direct shortcut and falls into the exe-relative walk that picks up
          the partial _build/default/config/runtime.json. *)
       let base_path = Masc_test_deps.find_project_root () in
@@ -124,7 +124,9 @@ let init_keeper_bridge =
       Masc.Keeper_tool_shared_runtime.tag_dispatch_fn := Masc.Keeper_tag_dispatch.dispatch;
       KET.inject_masc_schemas Masc.Config.raw_all_tool_schemas)
 
-let make_meta ?(name = "keeper-tool-matrix") () =
+let keeper_matrix_owner = "keeper-tool-matrix"
+
+let make_meta ?(name = keeper_matrix_owner) () =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
@@ -133,7 +135,6 @@ let make_meta ?(name = "keeper-tool-matrix") () =
           ("agent_name", `String name);
           ("trace_id", `String "keeper-tool-matrix-trace");
           ("allowed_paths", `List [ `String "*" ]);
-          ("tool_access", Json_util.json_string_list []);
         ])
   with
   | Ok meta -> meta
@@ -141,9 +142,7 @@ let make_meta ?(name = "keeper-tool-matrix") () =
 
 let all_keeper_tool_schemas_raw () =
   init_keeper_bridge ();
-  (* keeper_allowed_model_tools removed (dead per-keeper allowlist concept);
-     keeper_universe_model_tools is the live universe-filtered equivalent. *)
-  KET.keeper_universe_model_tools (make_meta ())
+  KET.keeper_model_tool_schemas ()
   |> List.sort (fun (left : Masc_domain.tool_schema) right ->
          String.compare left.name right.name)
 
@@ -155,7 +154,18 @@ let all_keeper_tool_names =
   all_keeper_tool_schemas_raw ()
   |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
 
-let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
+let make_fixture
+      sw
+      ~proc_mgr
+      ~fs
+      ~net
+      ~mono_clock
+      clock
+      ~base_path
+      ~(meta : Masc.Keeper_meta_contract.keeper_meta)
+      ~publication_recovery
+      init_mode
+  =
   init_keeper_bridge ();
   let generic =
     Generic.make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode
@@ -164,17 +174,22 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   let ctx =
     Masc.Keeper_context_runtime.create ~eio:false
       ~system_prompt:"keeper tool matrix"
-      ~max_tokens:4000
     |> fun ctx ->
     Masc.Keeper_context_runtime.append ctx
       (Agent_sdk.Types.user_msg "tool matrix memory needle")
   in
   let ctx_snapshot = ctx in
-  let meta = make_meta () in
-  Masc.Keeper_registry.clear ();
-  ignore (Masc.Keeper_registry.register ~base_path meta.name meta);
-  ignore (Masc.Keeper_registry.register ~base_path "tool-matrix" meta);
-  let tools = KTO.make_tools ~config ~meta ~ctx_snapshot () in
+  Masc.Keeper_registry.For_testing.clear ();
+  ignore (Masc.Keeper_registry.For_testing.register ~base_path meta.name meta);
+  ignore (Masc.Keeper_registry.For_testing.register ~base_path "tool-matrix" meta);
+  let tools =
+    KTO.make_tools
+      ~config
+      ~meta
+      ~publication_recovery
+      ~ctx_snapshot
+      ()
+  in
   (match init_mode with
    | Init_joined ->
        (* Bind under both the raw meta name (used by masc_* tools called
@@ -396,7 +411,8 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ("mode", `String "overwrite");
         ]
   | "tool_execute" ->
-      `Assoc [ ("executable", `String "pwd"); ("timeout_sec", `Float 5.0) ]
+      `Assoc
+        [ ("argv", `List [ `String "pwd" ]); ("timeout_sec", `Float 5.0) ]
   | "keeper_voice_speak" ->
       `Assoc [ ("message", `String "tool matrix hello") ]
   | "keeper_voice_listen" ->
@@ -473,10 +489,10 @@ let keeper_expectation_for_name name =
          the sample file is written at base_path. File-not-found in
          tests without a playground file is an acceptable outcome. *)
       Expect_success_or_guard
-        [ "file not found"; "keeper not found in registry"; "path_not_found_under_allowed_roots" ]
+        [ "file not found"; "keeper not found in registry"; "path_outside_sandbox" ]
   | "tool_edit_file" | "tool_search_files" | "tool_write_file" ->
       Expect_success_or_guard
-        [ "keeper not found in registry"; "tool call failed"; "path_not_found_under_allowed_roots" ]
+        [ "keeper not found in registry"; "tool call failed"; "path_outside_sandbox" ]
   | _ -> Expect_success
 
 let extra_guard_fragments_for_name = function
@@ -493,7 +509,7 @@ let extra_guard_fragments_for_name = function
         "\"reason\":\"disabled\"";
       ]
   | "masc_library_promote" -> [ "no candidate matching" ]
-  | "masc_keeper_msg" ->
+  | "masc_keeper_delegate" ->
       [
         "keeper management tool";
         "use MCP client";
@@ -506,8 +522,9 @@ let extra_guard_fragments_for_name = function
         "docker_container_start_failed";
         "no such container";
       ]
-  | "masc_keeper_list" | "masc_keeper_msg_result"
-  | "masc_keeper_msg_cancel" | "masc_keeper_msg_queue" | "masc_keeper_status" ->
+  | "masc_keeper_list" | "masc_keeper_delegate_status"
+  | "masc_keeper_delegate_cancel" | "masc_keeper_delegate_list"
+  | "masc_keeper_status" ->
       [ "keeper management tool"; "use MCP client" ]
   | "masc_keeper_up" -> [ "server_initializing" ]
   | "tool_execute" -> [ "worktree not found" ]
@@ -636,24 +653,52 @@ let run_case sw ~proc_mgr ~fs ~net ~mono_clock clock
         Unix.putenv "HOME" base_path;
         try
           let case = case_for_name schema.Masc_domain.name in
+          let meta = make_meta () in
+          Masc_test_deps.with_publication_recovery_registry
+            ~sw
+            ~fs
+            ~registry_root:base_path
+          @@ fun publication_recovery_registry ->
+          let publication_recovery =
+            Masc.Keeper_publication_recovery_availability.
+              { provider =
+                  Masc_test_deps.publication_recovery_provider
+                    publication_recovery_registry
+              ; keeper_name = meta.name
+              }
+          in
           let fixture =
-            make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path
+            make_fixture
+              sw
+              ~proc_mgr
+              ~fs
+              ~net
+              ~mono_clock
+              clock
+              ~base_path
+              ~meta
+              ~publication_recovery
               case.init_mode
           in
           case.prepare fixture;
           let args = case.arguments fixture schema in
           match find_tool fixture schema.Masc_domain.name with
           | None ->
-              Error
-                (Printf.sprintf "missing keeper Tool.t for %s" schema.Masc_domain.name)
+            Error
+              (Printf.sprintf
+                 "missing keeper Tool.t for %s"
+                 schema.Masc_domain.name)
           | Some tool ->
-              let outcome = Tool.execute tool args in
-              if String.equal schema.Masc_domain.name "masc_heartbeat_start" then
-                Heartbeat.list ()
-                |> List.iter (fun (hb : Heartbeat.t) ->
-                       ignore (Heartbeat.stop hb.id));
-              evaluate_expectation ~name:schema.Masc_domain.name case.expectation
-                outcome
+            let outcome = Tool.execute tool args in
+            if String.equal schema.Masc_domain.name "masc_heartbeat_start"
+            then
+              Heartbeat.list ()
+              |> List.iter (fun (hb : Heartbeat.t) ->
+                   ignore (Heartbeat.stop hb.id));
+            evaluate_expectation
+              ~name:schema.Masc_domain.name
+              case.expectation
+              outcome
         with exn ->
           Error
             (Printf.sprintf "%s raised during keeper case: %s"

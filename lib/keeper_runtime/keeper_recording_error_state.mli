@@ -1,125 +1,20 @@
-(** Dedupe state for [Keeper_registry.record_error] log noise.
+(** Exact-message occurrence state for [Keeper_registry.record_error].
 
-    Background
-    ──────────
-    [Keeper_registry.record_error] previously emitted the raw [err] string
-    at [Log.Error] level on every call. In production system_log
-    inspection (2026-05-16 sample, 299 events/day) the same
-    [(keeper_name, error)] pair fired up to 96 times in a 30-minute
-    slice; the verifier keeper's [sandbox docker exec failed] surface
-    accounted for ~48% of the volume on its own.
+    Free-form diagnostics are never classified here. Typed producers own error
+    categories; this leaf only counts identical [(keeper, error)] pairs for
+    observability. Every occurrence remains logged by the caller. *)
 
-    This is the *MASC/OAS Error-Warn Reduction Goal §P6 noise class*:
-    retry-loop without dedupe. The fix preserves behaviour — no log
-    line is dropped — but only the *first* occurrence of a given
-    [(keeper, error)] fingerprint emits at ERROR. Subsequent
-    occurrences within the process lifetime emit at DEBUG and bump a
-    Otel_metric_store counter so the dashboard still shows the repetition
-    rate.
-
-    Closed sum type, no catch-all. The classifier [classify_error] is
-    bounded; an unrecognised error text falls into the explicit
-    [`Other] constructor (not a silent default — callers can still
-    distinguish "saw something new" from "saw a known bucket").
-
-    Workaround posture
-    ──────────────────
-    This is a *symptom suppression* layer. The root fix is to repair
-    the underlying error source (verifier sandbox docker, stale-turn
-    timeouts, etc.). Once those are addressed,
-    [`First] outcomes alone should drop to baseline. The dedupe layer
-    intentionally records first-emit at ERROR so a *new* category
-    surfacing is not muffled. See [WORKAROUND-CARRYOVER] note in the
-    PR body.
-
-    Threading
-    ─────────
-    Backed by an in-memory [Hashtbl.t] under a [Mutex]. Process
-    lifetime; not persisted. A keeper restart will see the first
-    occurrence emit at ERROR again, which is the desired behaviour
-    (operator-visible "this is still happening after restart").
-*)
-
-(** Closed-enum classification of the raw [err] string passed to
-    [Keeper_registry.record_error]. Used both for the dedupe fingerprint
-    and for Otel_metric_store metric labels.
-
-    Add a new constructor (and a new arm in [classify_error]) when a
-    new error family stabilises in production logs. Do not collapse
-    new error texts into [`Other] — that defeats the per-family
-    visibility this module is designed to give. *)
-type error_kind =
-  | Sandbox_docker (** ["sandbox docker exec failed ..."] family. *)
-  | Stale_turn_timeout (** ["stale_turn_timeout(...)"] supervisor guard. *)
-  | Fiber_unresolved (** ["fiber_unresolved"] marker from turn lifecycle. *)
-  | Provider_timeout
-      (** Provider-timeout family. Legacy ["oas_timeout_budget_loop(...)"] text is
-          normalized here instead of becoming its own root cause. *)
-  | State_machine_guard
-      (** ["state machine guard violation"] / FSM transition rejected. *)
-  | Expected_version_mismatch (** CAS expected_version mismatch. *)
-  | Runtime_resolution_failure (** Runtime tier/strategy resolution failure. *)
-  | Unknown_phase_transition (** FSM unknown phase transition. *)
-  | Auth_token_mismatch (** Auth/token mismatch family. *)
-  | Shutdown_artifact (** Shutdown artifact from supervisor. *)
-  | Other (** Anything not yet promoted to its own arm. *)
-
-(** Stable label used in Otel_metric_store dimensions and log dedupe keys.
-    Round-trips with [error_kind_of_string]. *)
-val error_kind_to_string : error_kind -> string
-
-(** Inverse of [error_kind_to_string]. Returns [None] for unrecognised
-    labels rather than collapsing to [Other], so callers can detect
-    contract drift. *)
-val error_kind_of_string : string -> error_kind option
-
-(** All [error_kind] inhabitants in declaration order. Used by
-    exhaustiveness tests. *)
-val all_error_kinds : error_kind list
-
-(** Classify a raw error string to its [error_kind]. The classifier is
-    substring-based on a closed set of literal prefixes; unmatched
-    inputs map to [Other]. *)
-val classify_error : string -> error_kind
-
-(** Outcome of a [record] call.
-
-    [`First] — this [(keeper, fingerprint)] has not been seen before
-    in this process lifetime. The caller should emit at ERROR (preserve
-    existing behaviour).
-
-    [`Repeated count] — this exact pair has been recorded before;
-    [count] is the total occurrence count *including* this call (>=2).
-    The caller should demote the log line to DEBUG and bump the
-    [recording_error_dedup] counter. *)
 type record_outcome =
   [ `First
   | `Repeated of int
   ]
 
-(** Record an occurrence of [(keeper, error)]. The fingerprint is
-    composed of the keeper name and a digest of the raw error string —
-    so two textually different error strings with the same classifier
-    bucket are still considered distinct (e.g. two different docker
-    exec failures with different stderr).
-
-    Returns [`First] on the first occurrence and [`Repeated n] on
-    subsequent ones. *)
+(** Record an exact [(keeper, error)] occurrence. Different Keepers or
+    different diagnostic strings are independent. *)
 val record : keeper:string -> error:string -> record_outcome
 
-(** [classify_outcome ~keeper ~error] is [record ~keeper ~error]
-    bundled with the [error_kind] classification, for callers that
-    want both in one call. *)
-val classify_outcome
-  :  keeper:string
-  -> error:string
-  -> error_kind * record_outcome
-
-(** Reset internal state. Test-only entry point — do not call from
-    production code. The function is exposed so unit tests can
-    enforce isolation between cases. *)
+(** Reset internal state for isolated tests. *)
 val reset_for_test : unit -> unit
 
-(** Current number of distinct [(keeper, fingerprint)] entries.
-    Diagnostic only; never used for control flow. *)
+(** Number of distinct exact [(keeper, error)] fingerprints. *)
 val cardinality : unit -> int

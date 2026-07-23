@@ -50,42 +50,6 @@ val default_config : config
     {!Router.t} and {!make_request_handler}. *)
 type request_handler = Httpun.Request.t -> Httpun.Reqd.t -> unit
 
-(** {1 Compression (Compact Protocol v4)} *)
-
-(** HTTP compression with optional dictionary-based zstd.
-    Trained dictionary achieves ~70%p better compression than
-    standard zstd on small messages (32-2048 bytes) — see the
-    {!Compress.compress} docstring. *)
-module Compression : sig
-  (** [accepts_zstd request] is [true] when the
-      [Accept-Encoding] header lists [zstd]. *)
-  val accepts_zstd : Httpun.Request.t -> bool
-
-  (** [accepts_zstd_dict request] is [true] when the
-      [Accept-Encoding] header lists [zstd-dict] or
-      [zstd;dict=masc]. *)
-  val accepts_zstd_dict : Httpun.Request.t -> bool
-
-  (** [compress ?level data] returns [(payload, encoding)] —
-      [encoding = None] means data was kept as-is (below
-      compression threshold or no benefit), [Some name]
-      identifies the content-encoding header value to set. *)
-  val compress : ?level:int -> string -> string * string option
-
-  (** [compress_zstd ?level data] is the legacy
-      no-dictionary path.  Returns [(payload, did_compress)] —
-      data shorter than 256 bytes is kept as-is.  Raw zstd
-      compression is delegated to {!Compression_codec}, which owns
-      compression failure diagnostics. *)
-  val compress_zstd : ?level:int -> string -> string * bool
-
-  (** [compress_zstd_result ~original result] adapts the shared codec result to
-      the legacy HTTP zstd response contract. Dictionary-compressed payloads
-      cannot be advertised as plain [zstd], so they return [original, false]. *)
-  val compress_zstd_result :
-    original:string -> Compression_codec.compress_result -> string * bool
-end
-
 (** {1 Response helpers} *)
 
 (** Status / body / streaming response writers over the

@@ -5,14 +5,17 @@
     lists.  Adding / removing values requires synchronized
     updates at the SSOT (which lives in a downstream module
     that cannot be referenced here without re-introducing the
-    cycle).  Three test invariants keep the mirrors aligned:
+    cycle).  A test invariant keeps the mirror aligned:
 
     - [test_types.ml :: dashboard_scope_ssot] —
       {!dashboard_scope_enum_strings} vs
       [Dashboard.valid_scope_strings]
-    - [test_types.ml :: config_category_ssot] —
-      {!config_category_enum_strings} vs
-      [Env_config_snapshot.valid_config_category_strings] *)
+
+    The [masc_config] category enum SSOT lives in
+    [Tool_schemas_specs_types.config_category_enum_strings]
+    (issue #15257); [test/test_tool_descriptors_gen.ml ::
+    config_category_ssot] asserts it matches the producer-side
+    [Env_config_snapshot.valid_config_category_strings]. *)
 
 (** {1 Enum string mirrors (SSOT)} *)
 
@@ -25,20 +28,12 @@ val dashboard_scope_enum_strings : string list
     [Tool_schemas_misc] is upstream of [Dashboard] in the
     dependency graph. *)
 
-val config_category_enum_strings : string list
-(** Mirror of [Env_config_snapshot.valid_config_category_strings]
-    (issue #8493) excluding runtime-owner-specific categories.
-    Hand-mirrored because [Tool_schemas_misc]
-    depends only on [masc_types] — adding [masc_config] as a
-    direct dep would reintroduce the cycle this split avoids.
-    The [config_category_ssot] test keeps this aligned with
-    the producer-side SSOT. *)
-
 (** {1 Tool schema list} *)
 
 type control_operation =
   | Pause
   | Resume
+  | Pause_status
 (** Closed set of operator control tools. *)
 
 val control_operations : control_operation list
@@ -54,11 +49,6 @@ val control_schemas : Masc_domain.tool_schema list
 (** Canonical control schemas used by registration. These schemas are
     intentionally excluded from {!schemas} and the Config front-door inventory. *)
 
-val surface_audit_schema : remote:bool -> Masc_domain.tool_schema
-(** Canonical surface-audit schema shared by the local operator, remote
-    operator, and keeper descriptor projections. The input contract is
-    identical on every surface; only operator guidance differs. *)
-
 val schemas : Masc_domain.tool_schema list
 (** [schemas] is the generated [Masc_domain.tool_schema list] for misc tools.
     Operator controls are intentionally available only through
@@ -69,5 +59,6 @@ val schemas : Masc_domain.tool_schema list
     Public-surface exclusion is enforced downstream by
     {!Tool_catalog.is_public_mcp} / [public_mcp_surface_tools], not by trimming
     the raw inventory. The schema [enum] fields derive from
-    {!dashboard_scope_enum_strings} / {!config_category_enum_strings} so
+    {!dashboard_scope_enum_strings} /
+    [Tool_schemas_specs_types.config_category_enum_strings] so
     adding a value updates the schema automatically. *)

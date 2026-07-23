@@ -81,20 +81,7 @@ write rolls the in-memory mutation and revision back. Corrupt or unreadable
 snapshots remain untouched, make that Keeper queue unavailable, and surface an
 explicit load error. They are never interpreted as an empty queue.
 
-### 3.2 Version-1 migration
-
-Production snapshots existed as `keeper_chat_queue.v1` before this contract.
-Startup therefore performs one explicit migration transaction:
-
-1. strictly decode the v1 shape;
-2. mint one receipt for each legacy inflight/pending payload;
-3. replay legacy inflight payloads ahead of pending payloads; and
-4. atomically replace the file with strict v2.
-
-After that transaction there is no v1 runtime fallback or dual-write path. A
-malformed v1/v2 file is a load error, not a compatibility success.
-
-### 3.3 Restart recovery
+### 3.2 Restart recovery
 
 An `Inflight` snapshot means the previous process did not durably settle the
 lease. Startup atomically moves those receipts back to `Pending`, preserving
@@ -105,7 +92,7 @@ their downstream contracts permit it.
 Reconfiguring BasePath first clears the in-memory registry and then loads the
 new workspace. Receipts from one BasePath must never appear in another.
 
-### 3.4 Mutation surface
+### 3.3 Mutation surface
 
 The public queue API is intentionally narrow:
 

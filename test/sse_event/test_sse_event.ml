@@ -334,30 +334,6 @@ let baseline_context_compacted
     ()
 ;;
 
-let baseline_context_overflow_imminent
-      ~agent_name
-      ~estimated_tokens
-      ~limit_tokens
-      ~ratio
-  =
-  let payload =
-    `Assoc
-      [ "agent_name", `String agent_name
-      ; "estimated_tokens", `Int estimated_tokens
-      ; "limit_tokens", `Int limit_tokens
-      ; "ratio", `Float ratio
-      ]
-  in
-  baseline_wrap_event
-    ~ts:common_ts
-    ~correlation_id:common_corr
-    ~run_id:common_run
-    ~event_type:"context_overflow_imminent"
-    ~payload
-    ~agent_name
-    ()
-;;
-
 let baseline_context_compact_started ~agent_name ~trigger =
   let payload =
     `Assoc
@@ -500,32 +476,6 @@ let test_context_compacted_byte_equal () =
          ~phase:"post_compact")
   in
   Alcotest.(check string) "context_compacted typed == baseline" baseline typed
-;;
-
-let test_context_overflow_imminent_byte_equal () =
-  let baseline =
-    Yojson.Safe.to_string
-      (baseline_context_overflow_imminent
-         ~agent_name:"alpha"
-         ~estimated_tokens:180000
-         ~limit_tokens:200000
-         ~ratio:0.9)
-  in
-  let typed =
-    Yojson.Safe.to_string
-      (Sse_event.context_overflow_imminent
-         ~ts_unix:common_ts
-         ~correlation_id:common_corr
-         ~run_id:common_run
-         ~agent_name:"alpha"
-         ~estimated_tokens:180000
-         ~limit_tokens:200000
-         ~ratio:0.9)
-  in
-  Alcotest.(check string)
-    "context_overflow_imminent typed == baseline"
-    baseline
-    typed
 ;;
 
 let test_context_compact_started_byte_equal () =
@@ -688,21 +638,23 @@ let agent_completed_ok_fields : (string * Yojson.Safe.t) list =
 let agent_completed_error_fields : (string * Yojson.Safe.t) list =
   [ "success", `Bool false
   ; "result", `String "error"
-  ; "error", `String "MaxTurnsExceeded { turns = 20; limit = 20 }"
+  ; "error", `String "HookExecutionFailed { hook_name = post_tool_use }"
   ; "usage_reported", `Bool false
   ]
 ;;
 
-let agent_failed_error : string = "MaxTurnsExceeded { turns = 20; limit = 20 }"
-let agent_failed_error_domain : string = "max_turns"
-let agent_failed_error_code : string = "max_turns_exceeded"
+let agent_failed_error : string =
+  "HookExecutionFailed { hook_name = post_tool_use }"
+
+let agent_failed_error_domain : string = "agent"
+let agent_failed_error_code : string = "hook_execution_failed"
 let agent_failed_error_retryable : bool = false
 
 let agent_failed_error_detail : Yojson.Safe.t =
   `Assoc
-    [ "variant", `String "max_turns_exceeded"
-    ; "turns", `Int 20
-    ; "limit", `Int 20
+    [ "variant", `String "hook_execution_failed"
+    ; "hook_name", `String "post_tool_use"
+    ; "stage", `String "execute"
     ]
 ;;
 
@@ -864,8 +816,6 @@ let () =
             test_handoff_completed_byte_equal
         ; Alcotest.test_case "context_compacted" `Quick
             test_context_compacted_byte_equal
-        ; Alcotest.test_case "context_overflow_imminent" `Quick
-            test_context_overflow_imminent_byte_equal
         ; Alcotest.test_case "context_compact_started" `Quick
             test_context_compact_started_byte_equal
         ; Alcotest.test_case "content_replacement_replaced" `Quick

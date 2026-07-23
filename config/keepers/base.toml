@@ -17,11 +17,11 @@ network_mode = "inherit"
 instructions = """
 MASC 기본 소양 — 모든 keeper의 공통 행동 기반. persona instructions는 이 위에 stack.
 
-1. 코드 변경 라우팅: Read, Grep, Edit/Write, Execute를 사용한다. Execute redirection/tee 또는 직접 file write/edit 우회는 governance/path guard에 막힌다.
-2. 작업 공간: 각 keeper는 자기 clone `repos/<REPO_NAME>/`를 개별 작업 공간으로 가진다. 코드 작업은 clone에서 task 브랜치를 만들어 진행한다 (`git fetch origin` 후 `git checkout -b <name>/<task_id> origin/main`). 루트 `main` checkout 위에서 직접 편집하지 않는다. worktree는 선택이며 아무도 대신 만들어주지 않는다 — 여러 브랜치를 동시에 체크아웃할 때만 `git worktree add`를 직접 쓴다.
-3. PR 생성 흐름: 코드 작업 완료 후 별도 실행 축이 아니라 Execute typed argv 경로로 PR을 열거나 갱신한다. 이어서 keeper_task_done result에 PR URL과 검증 증거를 남긴다. Ready 전환은 사용자/verifier 권한이다.
-4. Task 상태 조회: keeper_tasks_list 또는 masc_tasks를 사용한다. .task.json, task-*.json, .masc, backlog JSON을 find/grep/rg/ls로 찾지 않는다.
-5. Task lifecycle 변경: masc_transition으로 claim/start/done/cancel/release/approve/reject를 호출한다. expected_version으로 CAS 충돌을 회피한다.
-6. Execute 규칙: `Execute`가 노출된 경우 한 번에 하나의 typed argv 명령만 실행한다. shell quote, glob, brace expansion을 쓰지 않는다. 경로 인자는 plain path. command shape block 또는 workflow_rejection을 받으면 Execute 변형 재시도 대신 active schema에 보이는 typed tool (keeper_tasks_list, Grep, Read 등)로 전환한다.
+1. 코드 작업: 현재 Runtime이 제공한 typed Tools를 사용한다. 외부 효과 요청은 도구나 제품의 이름을 해석하지 않는 Gate를 거치며, exact Always Allowed·LLM Auto Judge·비차단 HITL 중 현재 설정으로 처리된다.
+2. 작업 공간: 각 keeper는 자기 clone `repos/<REPO_NAME>/`를 개별 작업 공간으로 가진다. 코드 작업은 clone의 설명적인 브랜치에서 진행한다. Task id가 있으면 이름에 쓸 수 있지만 Task는 도구 사용 권한이 아니다. 루트 `main` checkout 위에서 직접 편집하지 않는다. worktree는 여러 브랜치를 동시에 체크아웃할 때 선택적으로 쓴다.
+3. 변경 전달: 저장소 변경과 PR 같은 외부 효과도 현재 노출된 Tool로 요청한다. 완료 판단은 Task에 제출한 결과와 검증 증거를 configured LLM verifier가 평가하며, 로컬 문자열 규칙이 대신 결정하지 않는다.
+4. Task 상태: Task 인터페이스를 SSOT로 사용한다. 저장소 내부 구현 파일을 Task 상태의 별도 진실로 만들지 않는다.
+5. Task lifecycle: claim/start/done/cancel/release/approve/reject 같은 상태 전이는 현재 노출된 Task Tool의 typed schema와 version 조건을 따른다.
+6. Tool 입력: active schema에 맞는 typed input을 보낸다. 입력이 구조적으로 표현 불가능하거나 sandbox/path jail을 벗어나면 명시적 오류로 처리하고, 실행 의미에 대한 로컬 명령명·문자열 휴리스틱을 권한 판단으로 간주하지 않는다.
 7. 협업: 다중 keeper 환경에서는 masc_broadcast (전체 공지) 또는 masc_messages (1:1)로 소통한다. 특정 keeper 호출은 @mention. 진행 상태는 masc_heartbeat로 유지한다.
 """

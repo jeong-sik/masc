@@ -76,7 +76,7 @@ def output_text:
   elif (.output|type) == "object" and (.output._blob.preview? != null) then .output._blob.preview
   else (.output|tostring) end;
 def combined: output_text + " " + (.action_radius.error // "") + " " + cmd;
-def failed: (.success == false or .semantic_success == false);
+def failed: (.success == false);
 def inferred_shape:
   if (cmd | test("gh pr checks"; "i")) then "repo_cli_pr_checks"
   elif (cmd | test("&&|\\|\\||;|\\n|\\r"; "i")) then "chaining"
@@ -93,14 +93,14 @@ def category:
   elif (combined | test("is a MASC tool, not a shell command|tool_invoked_as_shell_command|repo CLI is NOT available in the keeper sandbox"; "i")) then "wrong_tool_channel"
   elif (combined | test("command.*not.*allowed|not allowlisted|not in allowlist|not permitted by.*allowlist"; "i")) then "command_not_allowed"
   elif (combined | test("pipe_or_redirect|Execute accepts one direct command|tool_execute accepts one direct command|tool_execute_command_shape_blocked|2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|&&|\\|\\|"; "i")) then "shape_block:pipe_or_redirect"
-  elif (combined | test("tool_approval_required|destructive|blocked for all tool_access lists|operator_required|risk threshold"; "i")) then "approval_or_destructive_block"
+  elif (combined | test("tool_approval_required|destructive|operator_required|risk threshold"; "i")) then "approval_or_destructive_block"
   elif (combined | test("sandbox root cannot run repo CLI|multiple sandbox repos|Set cwd explicitly"; "i")) then "cwd_required_multi_repo"
   elif (combined | test("No such file or directory|cannot access|cannot change to|cwd_not_directory|not a git repository|outside allowed directories|Path blocked"; "i")) then "missing_path_or_wrong_cwd"
   elif (combined | test("image_not_found|Unable to find image.*masc-keeper-sandbox|pull access denied for masc-keeper-sandbox"; "i")) then "docker_image_not_found"
   elif (combined | test("timeout|timed out"; "i")) then "timeout"
   elif (combined | test("streak_gate|called [0-9]+ times consecutively|failed 3 times in a row"; "i")) then "repeat_or_streak_gate"
   elif (combined | test("regex parse error|usage_error|ambiguous argument|unknown revision|Wrong arguments or flags|command not found"; "i")) then "command_usage_or_regex_error"
-  elif (combined | test("tool call failed|general_error|exit_code.*1|semantic_status\":\"runtime_error"; "i")) then "command_exit_nonzero"
+  elif (combined | test("tool call failed|general_error|exit_code.*1"; "i")) then "command_exit_nonzero"
   else "other" end;
 fromjson? | select(type == "object") | select((.ts // 0) >= $cutoff)
 | select(.tool == "Execute" or .tool == "tool_execute")
@@ -116,7 +116,7 @@ def output_text:
   elif (.output|type) == "object" and (.output._blob.preview? != null) then .output._blob.preview
   else (.output|tostring) end;
 def combined: output_text + " " + (.action_radius.error // "") + " " + cmd;
-def failed: (.success == false or .semantic_success == false);
+def failed: (.success == false);
 def inferred_shape:
   if (cmd | test("gh pr checks"; "i")) then "repo_cli_pr_checks"
   elif (cmd | test("&&|\\|\\||;|\\n|\\r"; "i")) then "chaining"
@@ -133,14 +133,14 @@ def category:
   elif (combined | test("is a MASC tool, not a shell command|tool_invoked_as_shell_command|repo CLI is NOT available in the keeper sandbox"; "i")) then "wrong_tool_channel"
   elif (combined | test("command.*not.*allowed|not allowlisted|not in allowlist|not permitted by.*allowlist"; "i")) then "command_not_allowed"
   elif (combined | test("pipe_or_redirect|Execute accepts one direct command|tool_execute accepts one direct command|tool_execute_command_shape_blocked|2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|&&|\\|\\|"; "i")) then "shape_block:pipe_or_redirect"
-  elif (combined | test("tool_approval_required|destructive|blocked for all tool_access lists|operator_required|risk threshold"; "i")) then "approval_or_destructive_block"
+  elif (combined | test("tool_approval_required|destructive|operator_required|risk threshold"; "i")) then "approval_or_destructive_block"
   elif (combined | test("sandbox root cannot run repo CLI|multiple sandbox repos|Set cwd explicitly"; "i")) then "cwd_required_multi_repo"
   elif (combined | test("No such file or directory|cannot access|cannot change to|cwd_not_directory|not a git repository|outside allowed directories|Path blocked"; "i")) then "missing_path_or_wrong_cwd"
   elif (combined | test("image_not_found|Unable to find image.*masc-keeper-sandbox|pull access denied for masc-keeper-sandbox"; "i")) then "docker_image_not_found"
   elif (combined | test("timeout|timed out"; "i")) then "timeout"
   elif (combined | test("streak_gate|called [0-9]+ times consecutively|failed 3 times in a row"; "i")) then "repeat_or_streak_gate"
   elif (combined | test("regex parse error|usage_error|ambiguous argument|unknown revision|Wrong arguments or flags|command not found"; "i")) then "command_usage_or_regex_error"
-  elif (combined | test("tool call failed|general_error|exit_code.*1|semantic_status\":\"runtime_error"; "i")) then "command_exit_nonzero"
+  elif (combined | test("tool call failed|general_error|exit_code.*1"; "i")) then "command_exit_nonzero"
   else "other" end;
 fromjson? | select(type == "object") | select((.ts // 0) >= $cutoff)
 | . as $row
@@ -154,13 +154,13 @@ echo "cutoff_unix=${CUTOFF}"
 echo "files=${#FILES[@]}"
 echo
 
-jq -Rr --argjson cutoff "$CUTOFF" "$JQ_FILTER | [.success, .semantic_success] | @tsv" "${FILES[@]}" |
+jq -Rr --argjson cutoff "$CUTOFF" "$JQ_FILTER | [.success] | @tsv" "${FILES[@]}" |
 awk '
   BEGIN { total=0; fail=0; ok=0 }
-  { total++; if ($1 == "false" || $2 == "false") fail++; else ok++ }
+  { total++; if ($1 == "false") fail++; else ok++ }
   END {
     pct = total > 0 ? fail * 100.0 / total : 0
-    printf "total\t%d\nfailed_or_semantic_failed\t%d\nok\t%d\nfailure_pct\t%.2f\n\n", total, fail, ok, pct
+    printf "total\t%d\nfailed\t%d\nok\t%d\nfailure_pct\t%.2f\n\n", total, fail, ok, pct
   }
 '
 

@@ -561,7 +561,7 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
             | Audit_log.CircuitOpen
             | Audit_log.CircuitClose
             | Audit_log.SearchRefinement
-            | Audit_log.GovernanceDecision _
+            | Audit_log.GateDecision _
             | Audit_log.RuntimeConfigWrite
             | Audit_log.Custom _
             | Audit_log.Unknown _ -> ()))

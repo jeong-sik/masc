@@ -1,16 +1,19 @@
 (** Keeper_telemetry_consumer — MASC-side observer for OAS telemetry events.
 
     Subscribes to the OAS event bus via [Agent_sdk_metrics_bridge],
-    filters [Custom("telemetry_event", json)] payloads, persists each
-    event to [{base_path}/data/harness-telemetry/YYYY-MM/DD.jsonl] via
-    {!Dated_jsonl}, and increments an OTel counter for dashboard
-    visibility.
+    filters [Custom("telemetry_event", json)] payloads, and increments
+    an OTel counter for dashboard visibility.
+
+    Payloads are intentionally not persisted here: the same bus is fully
+    persisted by {!Keeper_event_bridge} into [.masc/oas-events/] (the
+    store {!Telemetry_unified} actually reads), so a second write-only
+    copy under [data/harness-telemetry/] was removed (2026-07-20).
 
     MASC deliberately does not deserialize provider/model-bearing OAS
     telemetry; concrete runtime identity belongs to OAS.
 
-    State is purely internal: the subscription handle, the fiber, and the
-    {!Dated_jsonl.t} store are all bound to the caller's [Eio.Switch.t]. *)
+    State is purely internal: the subscription handle and the fiber are
+    bound to the caller's [Eio.Switch.t]. *)
 
 let telemetry_event_counter = "masc_keeper_telemetry_events_consumed_total"
 
@@ -18,19 +21,13 @@ let telemetry_event_counter = "masc_keeper_telemetry_events_consumed_total"
    starves co-located fibers (HTTP handlers, lazy startup tasks). *)
 let drain_interval_s = 0.1
 
-let spawn_subscriber ~sw ~clock ~base_path ~bus =
-  let store =
-    Dated_jsonl.create
-      ~base_dir:(Filename.concat base_path "data/harness-telemetry")
-      ()
-  in
+let spawn_subscriber ~sw ~clock ~bus =
   let sub =
     Agent_sdk_metrics_bridge.subscribe
+      ~capacity:256
+      ~overflow:Agent_sdk.Event_bus.Drop_oldest
       ~purpose:"telemetry_consumer"
-      ~filter:(fun (evt : Agent_sdk.Event_bus.event) ->
-        match evt.payload with
-        | Agent_sdk.Event_bus.Custom ("telemetry_event", _) -> true
-        | _ -> false)
+      ~filter:(Agent_sdk.Event_bus.filter_topic "telemetry_event")
       bus
   in
   Eio.Switch.on_release sw (fun () ->
@@ -42,12 +39,11 @@ let spawn_subscriber ~sw ~clock ~base_path ~bus =
          List.iter
            (fun (evt : Agent_sdk.Event_bus.event) ->
               match evt.payload with
-              | Agent_sdk.Event_bus.Custom ("telemetry_event", json) ->
+              | Agent_sdk.Event_bus.Custom ("telemetry_event", _json) ->
                   Otel_metric_store.inc_counter
                     telemetry_event_counter
                     ~labels:[ "result", "observed" ]
-                    ();
-                  Dated_jsonl.append store json
+                    ()
               | _ -> ())
            events
        with

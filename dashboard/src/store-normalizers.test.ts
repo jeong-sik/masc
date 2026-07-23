@@ -310,6 +310,67 @@ describe('mergeMessages', () => {
 })
 
 describe('normalizeDashboardRuntimeResolution fleet safety', () => {
+  it('projects only the active stream and body timeout fields', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      keeper_runtime: {
+        stream_idle_timeout_sec: { value: 75, source: 'toml' },
+        body_timeout_override_sec: { value: null, source: 'default' },
+      },
+    }))
+
+    expect(result?.keeper_runtime).toEqual({
+      stream_idle_timeout_sec: { value: 75, source: 'toml' },
+      body_timeout_override_sec: { value: null, source: 'default' },
+    })
+  })
+
+  it('projects an unset stream idle timeout as explicitly disabled', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      keeper_runtime: {
+        stream_idle_timeout_sec: { value: null, source: 'default' },
+        body_timeout_override_sec: { value: null, source: 'default' },
+      },
+    }))
+
+    expect(result?.keeper_runtime?.stream_idle_timeout_sec).toEqual({
+      value: null,
+      source: 'default',
+    })
+  })
+
+  it('rejects unknown keeper runtime sources instead of coercing them', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      keeper_runtime: {
+        stream_idle_timeout_sec: { value: null, source: 'compatibility' },
+        body_timeout_override_sec: { value: null, source: 'default' },
+      },
+    }))
+
+    expect(result?.keeper_runtime).toBeNull()
+  })
+
+  it('rejects a missing stream idle value instead of treating it as disabled', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      keeper_runtime: {
+        stream_idle_timeout_sec: { source: 'default' },
+        body_timeout_override_sec: { value: null, source: 'default' },
+      },
+    }))
+
+    expect(result?.keeper_runtime).toBeNull()
+  })
+
+  it('rejects a non-positive stream idle value instead of clamping it', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      keeper_runtime: {
+        stream_idle_timeout_sec: { value: 0, source: 'toml' },
+        body_timeout_override_sec: { value: null, source: 'default' },
+      },
+    }))
+
+    expect(result?.keeper_runtime).toBeNull()
+  })
+
   it('keeps old runtime payloads compatible when fleet safety fields are absent', () => {
     const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw())
 
@@ -322,14 +383,55 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
       fd_accountant: {
         fd_open: 42,
         fd_limit: 1024,
-        pressure_active: false,
+        per_kind: [{ kind: 'provider_http', active_operations: 3 }],
+        resource_errors: [{ kind: 'provider_http', error: 'process_fd_exhausted', count: 2 }],
       },
     }))
 
     expect(result?.fd_accountant).toEqual({
       fd_open: 42,
       fd_limit: 1024,
-      pressure_active: false,
+      per_kind: [{ kind: 'provider_http', active_operations: 3 }],
+      resource_errors: [{ kind: 'provider_http', error: 'process_fd_exhausted', count: 2 }],
+    })
+  })
+
+  it('parses observation-only disk facts without deriving a gate', () => {
+    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
+      disk_observation: {
+        mode: 'observation_only',
+        masc_root: '/tmp/workspace/.masc',
+        storage_space_exhaustion_observations_total: 2,
+        last_storage_space_exhaustion_ts: 1234.5,
+        filesystem: {
+          path: '/tmp/workspace/.masc',
+          filesystem: '/dev/disk3s1',
+          mounted_on: '/System/Volumes/Data',
+          total_bytes: 1000,
+          used_bytes: 400,
+          available_bytes: 600,
+          capacity_percent: 40,
+          available_percent: 60,
+        },
+      },
+    }))
+
+    expect(result?.disk_observation).toEqual({
+      mode: 'observation_only',
+      masc_root: '/tmp/workspace/.masc',
+      storage_space_exhaustion_observations_total: 2,
+      last_storage_space_exhaustion_ts: 1234.5,
+      filesystem: {
+        path: '/tmp/workspace/.masc',
+        filesystem: '/dev/disk3s1',
+        mounted_on: '/System/Volumes/Data',
+        total_bytes: 1000,
+        used_bytes: 400,
+        available_bytes: 600,
+        capacity_percent: 40,
+        available_percent: 60,
+        error: null,
+      },
     })
   })
 
@@ -349,12 +451,8 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         details: [{
           name: 'analyst',
           autoboot_enabled: true,
-          pause_kind: 'auto_recoverable',
-          auto_resume_after_sec: 60,
-          persisted_auto_resume_after_sec: 60,
-          auto_resume_source: 'explicit',
+          pause_kind: 'operator_paused',
           paused_elapsed_sec: 12,
-          auto_resume_remaining_sec: 48,
           last_blocker: {
             klass: 'turn_timeout',
             detail: 'turn exceeded budget',
@@ -365,12 +463,6 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         read_errors: [],
       },
       keeper_fleet_no_fibers: false,
-      keeper_fd_pressure: {
-        status: 'blocked',
-        reason: 'fd_pressure',
-        admission_blocked: true,
-        admission_blocked_keepers: 24,
-      },
       keeper_fleet_safety: {
         status: 'blocked',
         blocker: 'no_running_fibers',
@@ -405,7 +497,7 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         reaction_count: 4,
         cursor_ack_count: 2,
         cursor_swept_stimulus_count: 3,
-        legacy_cursor_swept_stimulus_count: 1,
+        quarantined_row_count: 1,
         pending_stimulus_count: 0,
         read_error_count: 0,
         pending_by_keeper: [],
@@ -421,18 +513,11 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         names: ['analyst', 'base', 'sangsu'],
         details: [{
           name: 'analyst',
-          pause_kind: 'auto_recoverable',
-          auto_resume_source: 'explicit',
+          pause_kind: 'operator_paused',
           last_blocker: {
             klass: 'turn_timeout',
           },
         }],
-      },
-      keeper_fd_pressure: {
-        status: 'blocked',
-        reason: 'fd_pressure',
-        admission_blocked: true,
-        admission_blocked_keepers: 24,
       },
       keeper_fleet_safety: {
         status: 'blocked',
@@ -463,76 +548,9 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         status: 'ok',
         cursor_ack_count: 2,
         cursor_swept_stimulus_count: 3,
-        legacy_cursor_swept_stimulus_count: 1,
+        quarantined_row_count: 1,
         pending_stimulus_count: 0,
         read_error_count: 0,
-      },
-    })
-  })
-
-  it('parses contract proof and task-scope blocker fields', () => {
-    const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
-      cdal: {
-        writer_status: 'proof_store_incomplete',
-        operator_action_required: true,
-        proof_store_path_drift: false,
-        proof_store: {
-          root: '/Users/dancer/me/.oas',
-          proofs_dir: '/Users/dancer/me/.oas/proofs',
-          exists: true,
-          latest_activity_at: '2026-05-21T03:00:00Z',
-          latest_activity_unix: 1779332400,
-          age_seconds: 30,
-          status: 'stale_incomplete_runs',
-          completeness: {
-            scan_limit: 200,
-            run_dir_entries_seen: 200,
-            scan_truncated: false,
-            run_dirs_scanned: 200,
-            completed_run_dirs: 194,
-            incomplete_run_dirs: 6,
-            stale_incomplete_run_dirs: 3,
-            terminal_incomplete_run_dirs: 1,
-            missing_manifest_run_dirs: 6,
-            missing_contract_run_dirs: 6,
-            stale_incomplete_grace_seconds: 300,
-            sample_stale_incomplete_run_ids: ['contract-stale-a'],
-            sample_terminal_incomplete_run_ids: ['contract-abort-a'],
-          },
-        },
-        task_scope: {
-          status: 'partial_task_scope',
-          recent_limit: 500,
-          recent_rows: 500,
-          task_id_rows: 225,
-          missing_task_scope_rows: 275,
-          legacy_unscoped_rows: 270,
-          current_writer_missing_task_scope_rows: 5,
-          missing_task_scope: true,
-          partial_task_scope: true,
-          current_writer_missing_task_scope: true,
-        },
-      },
-    }))
-
-    expect(result?.cdal).toMatchObject({
-      writer_status: 'proof_store_incomplete',
-      operator_action_required: true,
-      proof_store: {
-        status: 'stale_incomplete_runs',
-        completeness: {
-          incomplete_run_dirs: 6,
-          stale_incomplete_run_dirs: 3,
-          terminal_incomplete_run_dirs: 1,
-          sample_stale_incomplete_run_ids: ['contract-stale-a'],
-          sample_terminal_incomplete_run_ids: ['contract-abort-a'],
-        },
-      },
-      task_scope: {
-        status: 'partial_task_scope',
-        legacy_unscoped_rows: 270,
-        current_writer_missing_task_scope_rows: 5,
-        current_writer_missing_task_scope: true,
       },
     })
   })
@@ -544,7 +562,7 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         operator_action_required: true,
         pending_stimulus_count: 2,
         cursor_swept_stimulus_count: 5,
-        legacy_cursor_swept_stimulus_count: 1,
+        quarantined_row_count: 1,
         pending_by_keeper: [{
           keeper_name: 'keeper-a',
           pending_stimulus_count: 2,
@@ -560,7 +578,7 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
         operator_action_required: true,
         pending_stimulus_count: 2,
         cursor_swept_stimulus_count: 5,
-        legacy_cursor_swept_stimulus_count: 1,
+        quarantined_row_count: 1,
         pending_by_keeper: [{
           keeper_name: 'keeper-a',
           pending_stimulus_count: 2,

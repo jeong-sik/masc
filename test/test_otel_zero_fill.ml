@@ -9,6 +9,8 @@
 
 open Alcotest
 
+module Otel_metric_store = Masc.Otel_metric_store
+
 let find_unlabeled name =
   Otel_metric_store_core.snapshot ()
   |> List.find_opt (fun (m : Otel_metric_store_core.metric) ->
@@ -40,6 +42,27 @@ let test_name_module_constant_zero_filled () =
   | Some m ->
     check bool "kind is Counter" true (m.metric_type = Otel_metric_store_core.Counter)
 
+let test_runtime_observation_emitters_are_typed_and_wired () =
+  let eviction_metric = Otel_runtime_metric_names.metric_runtime_metrics_eviction in
+  let eviction_before =
+    Otel_metric_store.metric_value_or_zero eviction_metric ()
+  in
+  Runtime_metrics.on_runtime_metrics_eviction ();
+  check (float 0.0) "eviction increments its declared counter"
+    (eviction_before +. 1.0)
+    (Otel_metric_store.metric_value_or_zero eviction_metric ());
+  let audit_metric = Otel_runtime_metric_names.metric_runtime_audit_failure in
+  let check_stage label stage =
+    let labels = [ "stage", label ] in
+    let before = Otel_metric_store.metric_value_or_zero audit_metric ~labels () in
+    Runtime_metrics.on_runtime_audit_failure ~stage;
+    check (float 0.0) (label ^ " increments its typed counter")
+      (before +. 1.0)
+      (Otel_metric_store.metric_value_or_zero audit_metric ~labels ())
+  in
+  check_stage "store_creation" Runtime_metrics.Store_creation;
+  check_stage "append" Runtime_metrics.Append
+
 let test_keeper_metrics_zero_filled () =
   match find_unlabeled Keeper_metrics.(to_string WriteMetaFailures) with
   | None -> fail "masc_keeper_write_meta_failures_total must be registered at module init"
@@ -52,6 +75,43 @@ let test_chat_transport_metric_zero_filled () =
     fail "masc_keeper_chat_transport_failures_total must be registered at module init"
   | Some m ->
     check (float 0.0) "chat transport failure counter starts at 0" 0.0 m.value
+
+let test_persistence_lane_metrics_have_one_owner () =
+  List.iter
+    (fun metric ->
+       let name = Keeper_metrics.to_string metric in
+       check bool (name ^ " is external") true
+         (Keeper_metrics.collection metric = Keeper_metrics.External_observable);
+       match find_unlabeled name with
+       | None -> ()
+       | Some _ ->
+         failf "%s must not have a duplicate store cell" name)
+    [ Keeper_metrics.PersistenceLaneWaits
+    ; Keeper_metrics.PersistenceLanePending
+    ; Keeper_metrics.PersistenceLaneInFlight
+    ];
+  check bool "duration remains store-owned" true
+    (Keeper_metrics.collection Keeper_metrics.PersistenceLaneDuration
+     = Keeper_metrics.Metric_store)
+
+let test_persistence_lane_duration_buckets_registered () =
+  Otel_metric_store.init ();
+  let metric = Keeper_metrics.(to_string PersistenceLaneDuration) in
+  let bucket le =
+    Otel_metric_store.metric_value_or_zero
+      (metric ^ "_bucket")
+      ~labels:[ "le", le ]
+      ()
+  in
+  let before_01 = bucket "0.1" in
+  let before_05 = bucket "0.5" in
+  let before_inf = bucket "+Inf" in
+  Otel_metric_store.observe_histogram metric 0.25;
+  check (float 0.0) "lower bucket excludes observation" before_01 (bucket "0.1");
+  check (float 0.0) "covering bucket includes observation" (before_05 +. 1.0)
+    (bucket "0.5");
+  check (float 0.0) "+Inf includes observation" (before_inf +. 1.0)
+    (bucket "+Inf")
 
 let test_keeper_metrics_all_complete () =
   (* [Keeper_metrics.all] is generated from the variant declaration, so
@@ -70,9 +130,15 @@ let () =
         ] )
     ; ( "module-init"
       , [ test_case "name module constant" `Quick test_name_module_constant_zero_filled
+        ; test_case "runtime observation emitters" `Quick
+            test_runtime_observation_emitters_are_typed_and_wired
         ; test_case "keeper metrics" `Quick test_keeper_metrics_zero_filled
         ; test_case "chat transport metric" `Quick
             test_chat_transport_metric_zero_filled
+        ; test_case "persistence lane metric owner" `Quick
+            test_persistence_lane_metrics_have_one_owner
+        ; test_case "persistence lane duration buckets" `Quick
+            test_persistence_lane_duration_buckets_registered
         ; test_case "keeper all complete" `Quick test_keeper_metrics_all_complete
         ] )
     ]

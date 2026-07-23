@@ -9,7 +9,6 @@ open Keeper_types_profile
 
 include Keeper_registry_setup
 
-
 let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
   (* RFC-0072 Phase 4b + Phase 5: dispatch via [resolve_turn_phase_transition]
      (PR #14912) instead of the [validate_turn_phase_transition] call.
@@ -99,31 +98,6 @@ let prepare_turn_retry_after_compaction ~base_path name =
         decision_stage = Packed Decision_guard_ok
       ; selected_model = None
       })
-;;
-
-let mark_turn_gate_rejected_by_name name =
-  (* Name-only gate-rejection lookup (legacy server surface does not carry
-     base_path).  The phase transition itself is routed through
-     [set_turn_phase_with] so it shares the resolver / guard / broadcast
-     pathway with [set_turn_phase]. *)
-  let target =
-    StringMap.fold
-      (fun _k v acc ->
-         match acc with
-         | Some _ -> acc
-         | None -> if String.equal v.name name then Some v else None)
-      (Atomic.get registry)
-      None
-  in
-  match target with
-  | None -> ()
-  | Some entry ->
-    set_turn_phase_with
-      ~base_path:entry.base_path
-      name
-      ~event_kind:"gate_rejected"
-      ~target:(Packed Turn_finalizing)
-      ~update_obs:(fun obs -> { obs with decision_stage = Packed Decision_gate_rejected })
 ;;
 
 let mark_turn_finished ~base_path name =
@@ -272,7 +246,7 @@ let is_running ~base_path name =
      answers the operator-facing question "is this keeper currently
      running?" and treats only [Running] as such. The 12 other phases
      (Offline, Failing, Overflowed, Compacting, HandingOff, Draining,
-     Paused, Stopped, Crashed, Restarting, Dead, Zombie) yield [false]
+     Paused, Stopped, Crashed, Restarting, Dead) yield [false]
      here. A future phase variant (e.g. a hypothetical [Migrating] or
      [Healing]) would silently inherit [false] under the previous
      [Some _ -> false] catch-all without a review point on whether
@@ -295,21 +269,10 @@ let is_running ~base_path name =
           | Stopped
           | Crashed
           | Restarting
-          | Dead
-          | Zombie )
+          | Dead )
       ; _
       } -> false
   | None -> false
-;;
-
-let is_boot_already_live ~base_path name =
-  match get ~base_path name with
-  | Some entry
-    when entry.conditions.fiber_alive
-         && not entry.conditions.stop_requested
-         && (entry.phase = Running || entry.phase = Paused) ->
-    true
-  | Some _ | None -> false
 ;;
 
 (** True if the keeper has ANY registry entry (regardless of state).
@@ -394,47 +357,6 @@ let set_started_at_for_test ~base_path name started_at =
       (registry_entry_validation_error_to_string err)
 ;;
 
-type spawn_slot_denial_reason = Spawn_slots.denial_reason =
-  | Fd_pressure_active
-  | Fd_admission_blocked
-  | Max_active_keepers of { running_count : int; max_keepers : int }
-
-let spawn_slot_denial_reason_to_label = Spawn_slots.to_label
-let spawn_slot_denial_reason_to_detail = Spawn_slots.to_detail
-
-let spawn_slots_decision_internal ?fd_admitted () =
-  Spawn_slots.decision
-    ?fd_admitted
-    ~running_count:(Atomic.get running_count_atomic)
-    ()
-;;
-
-let spawn_slots_decision () = spawn_slots_decision_internal ()
-
-let spawn_slots_available () =
-  match spawn_slots_decision () with
-  | Ok () -> true
-  | Error _ -> false
-;;
-
-module For_testing = struct
-  let unsafe_put_entry = unsafe_put_entry
-
-  let spawn_slots_decision ?fd_admitted () =
-    spawn_slots_decision_internal ?fd_admitted ()
-  ;;
-
-  let spawn_slots_available ?fd_admitted () =
-    match spawn_slots_decision ?fd_admitted () with
-    | Ok () -> true
-    | Error _ -> false
-  ;;
-end
-
-let record_spawn_slot_denied ~keeper_name ~surface reason =
-  Spawn_slots.record_denied ~keeper_name ~surface reason
-;;
-
 type wakeup_intent =
   | Reactive_signal
   | Scheduled_signal
@@ -442,6 +364,8 @@ type wakeup_intent =
   | Supervisor_resume
   | Hitl_resolution
   | Broadcast_signal
+  | Compaction_signal
+  | Attention_result
 
 let wakeup_intent_to_wire = function
   | Reactive_signal -> "reactive_signal"
@@ -450,6 +374,8 @@ let wakeup_intent_to_wire = function
   | Supervisor_resume -> "supervisor_resume"
   | Hitl_resolution -> "hitl_resolution"
   | Broadcast_signal -> "broadcast_signal"
+  | Compaction_signal -> "compaction_signal"
+  | Attention_result -> "attention_result"
 ;;
 
 type wakeup_outcome =
@@ -477,7 +403,7 @@ let record_lifecycle_wakeup_denial ~intent (entry : registry_entry) denial =
     reason
 ;;
 
-let wakeup_entry ~intent ~require_running (entry : registry_entry) =
+let wakeup_running_entry ~intent (entry : registry_entry) =
   let lifecycle_state =
     Keeper_lifecycle_admission.state
       ~paused:entry.meta.paused
@@ -488,7 +414,7 @@ let wakeup_entry ~intent ~require_running (entry : registry_entry) =
     record_lifecycle_wakeup_denial ~intent entry denial;
     Deferred_lifecycle denial
   | Keeper_lifecycle_admission.Autonomous_admitted ->
-    if require_running && entry.phase <> Keeper_state_machine.Running
+    if entry.phase <> Keeper_state_machine.Running
     then Deferred_not_running entry.phase
     else (
       (* tla-lint: allow-mutation: lifecycle-admitted fiber hint signal *)
@@ -496,32 +422,42 @@ let wakeup_entry ~intent ~require_running (entry : registry_entry) =
       Signaled)
 ;;
 
-let wakeup ~intent ~base_path name =
-  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-  | None -> Deferred_unregistered
-  | Some entry -> wakeup_entry ~intent ~require_running:true entry
-;;
-
 let wakeup_running ~intent ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | None -> Deferred_unregistered
-  | Some entry -> wakeup_entry ~intent ~require_running:true entry
+  | Some entry -> wakeup_running_entry ~intent entry
 ;;
 
-let wakeup_all ~intent ?base_path () =
-  let base_path = Option.map canonical_base_path_exn base_path in
-  StringMap.iter
-    (fun _k entry ->
-       match base_path with
-       | Some expected when not (String.equal expected entry.base_path) -> ()
-       | _ ->
-         if entry.phase = Running
-         then
-           let (_ : wakeup_outcome) =
-             wakeup_entry ~intent ~require_running:true entry
-           in
-           ())
-    (Atomic.get registry)
+type exact_wakeup_outcome =
+  | Exact_wake_signaled
+  | Exact_wake_missing
+  | Exact_wake_replaced
+  | Exact_wake_not_running of Keeper_state_machine.phase
+  | Exact_wake_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
+  | Exact_wake_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
+
+let wakeup_running_exact ~intent (expected : registry_entry) =
+  let base_path = expected.base_path in
+  let name = expected.name in
+  Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
+    match Keeper_lifecycle_reservation.authorize ~base_path ~keeper_name:name () with
+    | Error owner -> Exact_wake_lifecycle_reserved owner
+    | Ok () ->
+      let key = registry_key ~base_path name in
+      (match StringMap.find_opt key (Atomic.get registry) with
+       | None -> Exact_wake_missing
+       | Some current
+         when not
+                (Keeper_lane.Id.equal
+                   (Keeper_lane.id current.lane)
+                   (Keeper_lane.id expected.lane)) ->
+         Exact_wake_replaced
+       | Some current ->
+         (match wakeup_running_entry ~intent current with
+          | Signaled -> Exact_wake_signaled
+          | Deferred_unregistered -> Exact_wake_missing
+          | Deferred_not_running phase -> Exact_wake_not_running phase
+          | Deferred_lifecycle denial -> Exact_wake_lifecycle_denied denial)))
 ;;
 
 let fiber_health_of ~base_path name =
@@ -529,12 +465,8 @@ let fiber_health_of ~base_path name =
   | None -> Fiber_unknown
   | Some entry ->
     (match entry.phase with
-     | Dead | Zombie -> Fiber_dead
-     | Crashed | Restarting ->
-       let max_restarts =
-         Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
-       in
-       if entry.restart_count >= max_restarts then Fiber_dead else Fiber_zombie
+     | Dead -> Fiber_dead
+     | Crashed | Restarting -> Fiber_zombie
      | Stopped ->
        if lane_has_exited entry then Fiber_unknown else Fiber_alive
      | Offline -> Fiber_unknown
@@ -544,13 +476,7 @@ let fiber_health_of ~base_path name =
         | Some `Stopped ->
           if lane_has_exited entry then Fiber_unknown else Fiber_alive
         | Some (`Crashed _) ->
-          if not (lane_has_exited entry)
-          then Fiber_alive
-          else
-            let max_restarts =
-              Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
-            in
-            if entry.restart_count >= max_restarts then Fiber_dead else Fiber_zombie))
+          if not (lane_has_exited entry) then Fiber_alive else Fiber_zombie))
 ;;
 
 let crash_log_of ~base_path name =
@@ -598,16 +524,6 @@ let board_wakeup_allowed ~base_path name ~dedup_key ~debounce_sec =
        true)
 ;;
 
-let clear_board_wakeups ~base_path name =
-  match update_entry ~base_path name (fun e -> { e with board_wakeups = StringMap.empty }) with
-  | Ok () -> ()
-  | Error err ->
-    Log.Keeper.warn
-      "%s: failed to clear board wakeups: %s"
-      name
-      (registry_entry_validation_error_to_string err)
-;;
-
 let cleanup_tracking ~base_path name =
   let key = registry_key ~base_path name in
   match StringMap.find_opt key (Atomic.get registry) with
@@ -649,28 +565,6 @@ let clear () =
 
 (* -- Board cursor -------------------------------------------------- *)
 
-let get_board_cursor_ts ~base_path name =
-  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-  | Some entry -> entry.board_cursor_ts
-  | None -> 0.0
-;;
-
-let set_board_cursor_ts ~base_path name ts =
-  match
-    update_entry ~base_path name (fun e ->
-      let board_cursor_post_id =
-        if Float.compare ts e.board_cursor_ts = 0 then e.board_cursor_post_id else None
-      in
-      { e with board_cursor_ts = ts; board_cursor_post_id })
-  with
-  | Ok () -> ()
-  | Error err ->
-    Log.Keeper.warn
-      "%s: failed to set board cursor timestamp: %s"
-      name
-      (registry_entry_validation_error_to_string err)
-;;
-
 let get_board_cursor ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | Some entry -> entry.board_cursor_ts, entry.board_cursor_post_id
@@ -695,18 +589,29 @@ let set_board_cursor ~base_path name ts post_id =
 (* Safe without a mutex: updates go through [update_entry]'s CAS loop, so
    keeper-turn OAS callbacks and runtime MCP server callbacks can both
    record usage for the same keeper without clobbering each other. *)
-let record_tool_use ~base_path name ~tool_name ~success =
+let record_tool_use ~base_path name ~tool_name ~disposition =
   match
     update_entry ~base_path name (fun entry ->
       let e =
         match StringMap.find_opt tool_name entry.tool_usage with
         | Some e -> e
-        | None -> { count = 0; successes = 0; failures = 0; last_used_at = 0.0 }
+        | None ->
+          { count = 0; successes = 0; deferred = 0; failures = 0; last_used_at = 0.0 }
       in
       let updated =
         { count = e.count + 1
-        ; successes = (if success then e.successes + 1 else e.successes)
-        ; failures = (if success then e.failures else e.failures + 1)
+        ; successes =
+            (match disposition with
+             | Tool_result.Completed _ -> e.successes + 1
+             | Tool_result.Deferred _ | Tool_result.Failed _ -> e.successes)
+        ; deferred =
+            (match disposition with
+             | Tool_result.Deferred _ -> e.deferred + 1
+             | Tool_result.Completed _ | Tool_result.Failed _ -> e.deferred)
+        ; failures =
+            (match disposition with
+             | Tool_result.Failed _ -> e.failures + 1
+             | Tool_result.Completed _ | Tool_result.Deferred _ -> e.failures)
         ; last_used_at = Time_compat.now ()
         }
       in
@@ -803,10 +708,10 @@ let rec dispatch_event_with_audit_internal
          ; reason = Printf.sprintf "keeper %s not registered" name
          })
   | Some entry
-    when Option.exists
-           (fun lane_id ->
-              not (Keeper_lane.Id.equal lane_id (Keeper_lane.id entry.lane)))
-           expected_lane ->
+    when (match expected_lane with
+          | None -> false
+          | Some lane_id ->
+            not (Keeper_lane.Id.equal lane_id (Keeper_lane.id entry.lane))) ->
     Error
       (Keeper_state_machine.Invalid_transition
          { from_phase = entry.phase
@@ -1305,11 +1210,17 @@ let get_phase ~base_path name =
   | None -> None
 ;;
 
-let get_conditions ~base_path name =
-  match get ~base_path name with
-  | Some entry -> Some entry.conditions
-  | None -> None
-;;
-
 (* Event-queue access (enqueue_event / event_queue_snapshot / dequeue_event /
    drain_board_events) moved to Keeper_registry_event_queue. *)
+
+module For_testing = struct
+  let unsafe_put_entry = unsafe_put_entry
+  let register = register
+  let unregister = unregister
+  let clear = clear
+  let reload_meta_from_disk = reload_meta_from_disk
+  let record_restart = record_restart
+  let set_started_at_for_test = set_started_at_for_test
+  let crash_log_of = crash_log_of
+  let board_wakeup_allowed = board_wakeup_allowed
+end

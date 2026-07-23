@@ -71,12 +71,10 @@ function makeAlertSummary(
     keepers_with_alerts: 0,
     ttl_expired_keepers: 0,
     near_duplicate_keepers: 0,
-    high_event_ratio_keepers: 0,
     provider_slot_busy_keepers: 0,
     thresholds: {
       ttl_expired_on_disk: 0,
       near_duplicate: 0,
-      events_to_facts_ratio: 0,
       provider_slot_busy: 0,
     },
     ...overrides,
@@ -138,35 +136,6 @@ describe('KeeperMemoryHealth', () => {
       expect(container.querySelector('.kmh-row--warn')).toBeNull()
       expect(container.querySelector('.kmh-badge--warn')).toBeNull()
       expect(screen.getByText('3.00')).not.toBeNull()
-    })
-
-    it('flags a ratio row only when the backend emits a ratio alert target', async () => {
-      mockFetch.mockResolvedValue(
-        makeResponse([
-          makeEntry({
-            keeper_id: 'ratio-alert',
-            events_to_facts_ratio: 3,
-            ttl_expired_on_disk: 0,
-            alerts: [{
-              code: 'events_to_facts_ratio_high',
-              severity: 'warn',
-              target: 'events_to_facts_ratio',
-              label: '비율',
-              message: 'Memory OS event bytes are high relative to fact bytes.',
-              value: 3,
-              threshold: 0,
-            }],
-          }),
-        ]),
-      )
-      const { container } = render(html`<${KeeperMemoryHealth} />`)
-      await waitFor(() => expect(screen.getByText('ratio-alert')).not.toBeNull())
-
-      expect(container.querySelector('.kmh-row--warn')).not.toBeNull()
-      const warnBadge = container.querySelector('.kmh-badge--warn')
-      expect(warnBadge).not.toBeNull()
-      expect(warnBadge!.textContent).toBe('3.00')
-      expect(screen.getByText('비율')).not.toBeNull()
     })
 
     it('flags a ttl row when the backend emits a ttl alert', async () => {

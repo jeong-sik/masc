@@ -78,7 +78,7 @@ dune build --root .  # catches compilation errors in tests
 ```ocaml
 | Error e -> Log.BoardLog.warn "notification failed: %s" e
 ```
-SSE/notification 발행, 파일 쓰기, 외부 API 호출, audit/economy 기록.
+SSE/notification 발행, 파일 쓰기, 외부 API 호출, audit 기록.
 
 **로그 선택 (`debug`) — 읽다가 실패:**
 ```ocaml
@@ -95,25 +95,24 @@ List.filter_map (function Ok t -> Some t | Error _ -> None)
 
 **PR 체크:** `rg '\| Error _ -> \(\)' lib/` 로 새 `| Error _ -> ()` 확인.
 
-### 5.1. Naked Callback Invocation (PR #11134, 2026-04-27)
+### 5.1. Naked Callback Invocation
 
-`~on_compaction_started` / `~on_handoff_started` 같은 lifecycle callback closure를 `try/with` 없이 호출하면 callback 내부(예: SSE/metric dispatch) 실패가 caller(KCL/Rollover) 본체를 abort.
+`~on_appended` 같은 callback closure를 `try/with` 없이 호출하면 callback 내부 실패가 caller의 본체까지 전파된다. Callback을 받는 함수가 실패 경계를 소유하고 있다면 cancellation은 다시 올리고 나머지 실패는 그 함수의 typed error로 보존한다.
 
 **❌ DON'T:**
 ```ocaml
-let () = on_compaction_started () in
-proceed_with_compaction ()
+on_appended ();
+Ok ()
 ```
 
 **✅ DO:**
 ```ocaml
-(try on_compaction_started ()
+(try
+   on_appended ();
+   Ok ()
  with
  | Eio.Cancel.Cancelled _ as e -> raise e
- | exn ->
-     Keeper_callback_failure.record ~base_dir ~meta
-       ~callback:"on_compaction_started" exn);
-proceed_with_compaction ()
+ | exn -> Error (Printexc.to_string exn))
 ```
 
 **PR 체크:** `rg -nP '^\s+(let \(\) = )?on_[a-z_]+ \(\)' lib/keeper/` — match 발견 시 try/with wrap 검토.

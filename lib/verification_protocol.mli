@@ -35,9 +35,7 @@ val create_submit_request :
   (unit, string) result
 (** [create_submit_request ~config ~task ~assignee ~verification_id
       ~evidence_refs] persists a board post for the verification
-    request.  The persisted request output includes the latest
-    task-scoped [cdal_verdict] when one exists, or [null] when the
-    ledger has no verdict for the task.  Returns [Error _] when
+    request.  Returns [Error _] when
     board persistence fails or the task does not satisfy the
     contract gap pre-check. *)
 
@@ -59,9 +57,7 @@ val notify_submit_for_verification :
 (** [notify_submit_for_verification ...] emits the
     [masc/verification/requested] SSE event without mutating state.
     Used by callers that have already created the board post via
-    {!create_submit_request} but need a separate SSE broadcast.
-    The board meta and SSE payload mirror the [cdal_verdict] field
-    from the persisted request output. *)
+    {!create_submit_request} but need a separate SSE broadcast. *)
 
 val on_submit_for_verification :
   config:Workspace.config ->

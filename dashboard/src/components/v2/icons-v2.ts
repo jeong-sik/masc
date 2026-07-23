@@ -6,9 +6,26 @@ import type { VNode } from 'preact'
 
 type Icon = VNode
 
-export const ICONS: Readonly<Record<string, Icon>> = {
+export type IconKey =
+  | 'grid'
+  | 'users'
+  | 'layers'
+  | 'board'
+  | 'term'
+  | 'code'
+  | 'plug'
+  | 'gear'
+  | 'shield'
+  | 'target'
+  | 'monitor'
+  | 'logs'
+  | 'fusion'
+  | 'clock'
+
+export const ICONS: Readonly<Record<IconKey, Icon>> = {
   grid: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="7" height="7" rx="1.4" /><rect x="14" y="3" width="7" height="7" rx="1.4" /><rect x="3" y="14" width="7" height="7" rx="1.4" /><rect x="14" y="14" width="7" height="7" rx="1.4" /></svg>`,
   users: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2" /><path d="M3.5 19c0-3 2.6-5 5.5-5s5.5 2 5.5 5" /><path d="M16.5 6.2a3 3 0 0 1 0 5.6" /><path d="M18.5 19c0-2-.8-3.6-2-4.6" /></svg>`,
+  layers: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5z" /><path d="M3 13l9 5 9-5" /><path d="M3 17.5l9 5 9-5" /></svg>`,
   board: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3" y="4" width="5" height="16" rx="1.2" /><rect x="10" y="4" width="5" height="11" rx="1.2" /><rect x="17" y="4" width="4" height="14" rx="1.2" /></svg>`,
   term: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.2" /><path d="M7 9l3 3-3 3" /><path d="M13 15h4" /></svg>`,
   code: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6l-5 6 5 6" /><path d="M16 6l5 6-5 6" /><path d="M13.5 4l-3 16" /></svg>`,

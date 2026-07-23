@@ -9,7 +9,7 @@ val config_cache_ttl_s : float
 val live_cache_ttl_s : float
 val realtime_cache_ttl_s : float
 val feature_health_cache_ttl_s : float
-val board_governance_cache_ttl_s : float
+val dashboard_projection_cache_ttl_s : float
 val shell_warmed : bool Atomic.t
 val _shell_warmed : bool Atomic.t
 val shell_warming : bool Atomic.t

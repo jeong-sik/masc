@@ -27,13 +27,13 @@ let setup () = DA.reset ()
 
 let test_record_then_recent () =
   setup ();
-  DA.record (pass "cdal_verdict");
-  let xs = DA.recent ~gate:"cdal_verdict" () in
+  DA.record (pass "verification");
+  let xs = DA.recent ~gate:"verification" () in
   Alcotest.(check int) "1 event" 1 (List.length xs)
 
 let test_unknown_gate_returns_empty () =
   setup ();
-  DA.record (pass "cdal_verdict");
+  DA.record (pass "verification");
   Alcotest.(check int) "unknown gate" 0
     (List.length (DA.recent ~gate:"nope" ()))
 

@@ -16,7 +16,6 @@ val record_response_content_quality_metric
 
 val classify_usage_trust
   :  ?usage:Agent_sdk.Types.api_usage
-  -> telemetry:Agent_sdk.Types.inference_telemetry option
   -> unit
   -> Keeper_usage_trust.t
 

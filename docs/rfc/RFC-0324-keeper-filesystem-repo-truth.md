@@ -58,7 +58,11 @@ prompt assembly가 "사실"로 주입하는 값이 runtime(filesystem)과 일치
 ## Out of scope
 
 - catalog(`Repo_store`, `repositories.toml`) 자체 폐지 — sandbox provisioning, dashboard repo 목록, repo_sync가 의존. 별도 설계 필요.
-- `lib/repo_manager/` authorization gate(`access_decision`/`is_allowed`)의 provisioning/dashboard 용도 호출은 유지.
+- catalog(`Repo_store`, `repositories.toml`)는 provisioning, dashboard,
+  sync의 discovery/configuration 데이터로 유지하되 Keeper 파일 접근 권한을
+  만들지 않는다. Legacy `access_decision`/`is_allowed` 이름은 catalog
+  registration/integrity query로 한정하거나 제거하며 Execute/path validation
+  경로에서 호출하지 않는다.
 - keeper runtime json의 과거 instructions 갱신 — keeper reload/restart로 자연 반영(별도 hygiene).
 
 ## Verification

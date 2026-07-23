@@ -55,7 +55,6 @@ let test_identity_keys_are_canonical () =
       [ ("name", `String "identity")
       ; ("agent_name", `String "identity")
       ; ("trace_id", `String "trace-identity")
-      ; ("tool_access", `List [])
       ; ("instructions", `String "preserve operator guidance")
       ]);
   let after = counter_total () in
@@ -87,7 +86,7 @@ let test_persisted_multimodal_policy_is_canonical_before_warn () =
     (fun () ->
       Fs_compat.save_file
         path
-        {|{"name":"legacy-mm","agent_name":"legacy-mm","trace_id":"trace-legacy-mm","tool_access":[],"multimodal_policy":"Delegate"}|};
+        {|{"name":"legacy-mm","agent_name":"legacy-mm","trace_id":"trace-legacy-mm","multimodal_policy":"Delegate"}|};
       let before = counter_total () in
       (match Keeper_meta_store.read_meta_file_path path with
        | Ok (Some meta) ->
@@ -108,7 +107,7 @@ let test_persisted_multimodal_policy_is_canonical_before_warn () =
         true
         (top_level_json_key_present path "multimodal_policy"))
 
-let test_config_keys_are_warned_before_parse () =
+let test_removed_goal_is_rejected_before_parse () =
   let path = Filename.temp_file "masc-config-key-keeper-meta-" ".json" in
   Fun.protect
     ~finally:(fun () ->
@@ -116,17 +115,10 @@ let test_config_keys_are_warned_before_parse () =
     (fun () ->
       Fs_compat.save_file
         path
-        {|{"name":"config-key","agent_name":"config-key","trace_id":"trace-config-key","tool_access":[],"goal":"legacy profile goal"}|};
-      let before = counter_total () in
+        {|{"name":"config-key","agent_name":"config-key","trace_id":"trace-config-key","goal":"legacy profile goal"}|};
       (match Keeper_meta_store.read_meta_file_path path with
-       | Ok (Some meta) -> Alcotest.(check string) "keeper name" "config-key" meta.name
-       | Ok None -> Alcotest.fail "expected keeper meta"
-       | Error err -> Alcotest.fail ("read_meta_file_path failed: " ^ err));
-      let after = counter_total () in
-      Alcotest.(check bool)
-        "TOML-owned config keys are warned before parse, not silently dropped"
-        true
-        (after > before))
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "removed goal must fail closed"))
 
 let () =
   Alcotest.run
@@ -149,9 +141,9 @@ let () =
             `Quick
             test_persisted_multimodal_policy_is_canonical_before_warn
         ; Alcotest.test_case
-            "config keys are warned before parse"
+            "removed goal is rejected before parse"
             `Quick
-            test_config_keys_are_warned_before_parse
+            test_removed_goal_is_rejected_before_parse
         ] )
     ]
 ;;

@@ -5,16 +5,12 @@ import { goalTaskSummaryForNode } from './goal-task-summary'
 type GoalCompletionSummaryNode = Pick<
   GoalTreeNode,
   | 'attainment'
-  | 'blocking_reason'
-  | 'blocking_source'
   | 'completion_summary'
   | 'phase'
-  | 'require_completion_approval'
   | 'task_count'
   | 'task_done_count'
   | 'task_summary'
   | 'tasks'
-  | 'verification_summary'
 >
 
 function completionStateForNode(
@@ -27,8 +23,6 @@ function completionStateForNode(
     case 'dropped': return 'dropped'
     case 'blocked': return 'blocked'
     case 'paused': return 'paused'
-    case 'awaiting_verification': return 'awaiting_verification'
-    case 'awaiting_approval': return 'awaiting_approval'
     default:
       if (node.task_count === 0 && pct == null) return 'unmeasured'
       if (taskDone === 0) return 'not_started'
@@ -42,11 +36,6 @@ export function goalCompletionSummaryForNode(node: GoalCompletionSummaryNode): G
   const taskSummary = goalTaskSummaryForNode(node)
   const attainmentPct = node.attainment.attainment_pct
   const pct = attainmentPct ?? taskSummary.completion_pct
-  const openRequest = node.verification_summary.open_request != null
-  const gate =
-    node.phase === 'awaiting_verification' || openRequest ? 'verification'
-    : node.phase === 'awaiting_approval' ? 'approval'
-    : 'none'
   const state = completionStateForNode(node, taskSummary.done, pct)
 
   return {
@@ -62,12 +51,6 @@ export function goalCompletionSummaryForNode(node: GoalCompletionSummaryNode): G
     is_complete: node.phase === 'completed',
     is_terminal: node.phase === 'completed' || node.phase === 'dropped',
     ready_to_request_completion: false,
-    gate,
-    requires_verifier: node.verification_summary.effective_policy != null,
-    requires_completion_approval: node.require_completion_approval,
-    active_verification_request: openRequest,
-    blocking_source: node.blocking_source,
-    blocking_reason: node.blocking_reason,
   }
 }
 
@@ -75,8 +58,6 @@ export function goalCompletionLabel(summary: GoalCompletionSummary): string {
   switch (summary.state) {
     case 'completed': return 'completed'
     case 'ready_for_completion': return 'ready for completion'
-    case 'awaiting_verification': return 'awaiting verification'
-    case 'awaiting_approval': return 'awaiting approval'
     case 'blocked': return 'blocked'
     case 'paused': return 'paused'
     case 'dropped': return 'dropped'
@@ -90,8 +71,6 @@ export function goalCompletionTone(summary: GoalCompletionSummary): 'default' | 
   switch (summary.state) {
     case 'completed': return 'ok'
     case 'ready_for_completion':
-    case 'awaiting_verification':
-    case 'awaiting_approval':
     case 'paused':
     case 'unmeasured':
       return 'warn'
@@ -101,12 +80,4 @@ export function goalCompletionTone(summary: GoalCompletionSummary): 'default' | 
     default:
       return 'default'
   }
-}
-
-export function goalCompletionGateLabel(summary: GoalCompletionSummary): string {
-  if (summary.gate === 'verification') return 'verification gate'
-  if (summary.gate === 'approval') return 'approval gate'
-  if (summary.requires_verifier) return 'verifier policy'
-  if (summary.requires_completion_approval) return 'approval required'
-  return 'direct completion'
 }

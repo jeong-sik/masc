@@ -36,8 +36,8 @@ let docker_command_argv () =
 
 let docker_run_pull_never_args () = [ "--pull"; "never" ]
 
-let docker_image_missing_next_action =
-  "Run scripts/build-keeper-sandbox-image.sh to build the default keeper sandbox image."
+let docker_image_inspect_next_action =
+  "Inspect the configured Docker image and daemon using the exact command output above."
 ;;
 
 let docker_command_cwd () = Config_dir_resolver.current_working_dir ()
@@ -46,15 +46,15 @@ let docker_command_cwd () = Config_dir_resolver.current_working_dir ()
    When set to "api", route through [Sandbox.Docker_api] (UDS HTTP) instead
    of forking a [docker] subprocess; the subprocess path stays as the
    transitional fallback. Default "subprocess" until step 2 lands. *)
-let run_docker_argv_with_status ~summary ~timeout_sec argv =
-  Docker_spawn_throttle.with_slot (fun () ->
+let run_docker_argv_with_status ~summary ?timeout_sec argv =
+  Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:`System_sandbox
+      ~actor:(Masc_exec.Agent_id.of_string "system/sandbox")
       ~raw_source:(String.concat " " argv)
       ~summary
       ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
       ~cwd:(docker_command_cwd ())
-      ~timeout_sec
+      ?timeout_sec
       argv)
 ;;
 
@@ -64,33 +64,18 @@ type classified_error =
   }
 
 let process_status_is_timeout = Keeper_sandbox_runtime_classify.process_status_is_timeout
-let lower_contains = Keeper_sandbox_runtime_classify.lower_contains
-let output_looks_docker_daemon_unavailable =
-  Keeper_sandbox_runtime_classify.output_looks_docker_daemon_unavailable
-let output_looks_image_missing = Keeper_sandbox_runtime_classify.output_looks_image_missing
-let output_looks_timeout = Keeper_sandbox_runtime_classify.output_looks_timeout
-let docker_output_looks_oci_mount_failure =
-  Keeper_sandbox_runtime_classify.docker_output_looks_oci_mount_failure
 let classify_docker_info_failure = Keeper_sandbox_runtime_classify.classify_docker_info_failure
 let classify_docker_run_failure = Keeper_sandbox_runtime_classify.classify_docker_run_failure
 let classify_image_inspect_failure =
   Keeper_sandbox_runtime_classify.classify_image_inspect_failure
-let classify_image_inventory_failure =
-  Keeper_sandbox_runtime_classify.classify_image_inventory_failure
-
-let docker_run_looks_daemon_pressure ~status ~output =
-  match classify_docker_run_failure ~status ~output with
-  | Keeper_sandbox_runtime_classify.Docker_daemon_unavailable -> true
-  | _ -> false
-
-let docker_info_security_options_with_class ~timeout_sec =
+let docker_info_security_options_with_class_optional ?timeout_sec () =
   let argv =
     docker_command_argv () @ [ "info"; "--format"; "{{json .SecurityOptions}}" ]
   in
   let st, out =
     run_docker_argv_with_status
       ~summary:"keeper sandbox docker info"
-      ~timeout_sec
+      ?timeout_sec
       argv
   in
   if st <> Unix.WEXITED 0
@@ -100,7 +85,7 @@ let docker_info_security_options_with_class ~timeout_sec =
           Printf.sprintf
             "docker info failed while validating sandbox runtime: %s"
             (Exec_policy.truncate_for_log out)
-      ; failure_class = classify_docker_info_failure ~status:st ~output:out
+      ; failure_class = classify_docker_info_failure ~status:st
       }
   else (
     try
@@ -126,16 +111,19 @@ let docker_info_security_options_with_class ~timeout_sec =
         })
 ;;
 
-let docker_info_security_options ~timeout_sec =
-  match docker_info_security_options_with_class ~timeout_sec with
+let docker_info_security_options_with_class ~timeout_sec =
+  docker_info_security_options_with_class_optional ~timeout_sec ()
+;;
+
+let docker_info_security_options_optional ?timeout_sec () =
+  match docker_info_security_options_with_class_optional ?timeout_sec () with
   | Ok security_options -> Ok security_options
   | Error classified -> Error classified.message
 ;;
 
-type required_command_check =
-  { command : string
-  ; available : bool
-  }
+let docker_info_security_options ~timeout_sec =
+  docker_info_security_options_optional ~timeout_sec ()
+;;
 
 type docker_preflight =
   { ok : bool
@@ -147,8 +135,6 @@ type docker_preflight =
   ; image_present : bool
   ; image_error : string option
   ; failure_classes : string list
-  ; required_commands : required_command_check list
-  ; missing_commands : string list
   ; next_actions : string list
   }
 
@@ -156,36 +142,6 @@ type docker_preflight =
    Today the SSOT getters return the same hardcoded values; future env
    wiring (per Env_config_sandbox.Preflight doc) tunes these without
    touching this file. *)
-let docker_preflight_min_sec = Env_config_sandbox.Preflight.min_timeout_sec ()
-let docker_preflight_max_sec = Env_config_sandbox.Preflight.max_timeout_sec ()
-
-let docker_preflight_timeout ~timeout_sec =
-  min docker_preflight_max_sec (max docker_preflight_min_sec timeout_sec)
-;;
-
-let required_commands =
-  [ "sh"
-  ; "bash"
-  ; "cat"
-  ; "find"
-  ; "head"
-  ; "tail"
-  ; "wc"
-  ; "git"
-  ; "gh"
-  ; "rg"
-  ; "tree"
-  ; "jq"
-  ; "python3"
-  ; "node"
-  ; "npm"
-  ; "make"
-  ; "opam"
-  ; "dune"
-  ; "ssh"
-  ]
-;;
-
 type cleanup_result =
   { scanned : int
   ; removed : int
@@ -261,9 +217,8 @@ let docker_network_args = function
   | Keeper_types_profile_sandbox.Network_inherit ->
     (* Host network — matches the variant name and the docstring on
          [keeper_types_profile.ml:20-24]. Empty args
-         (docker default) gives bridge mode (NAT, no host egress) which
-         broke `git clone` / `gh push` for keepers running under this
-         profile. See #10431. *)
+         (docker default) gives bridge mode rather than the requested host
+         network namespace. *)
     [ "--network"; "host" ], "inherit"
 ;;
 
@@ -368,7 +323,6 @@ let docker_workspace_state_mounts =
   ; Workspace_state_file, "current_task"
   ; Workspace_state_file, "goals.json"
   ; Workspace_state_file, "goal_events.jsonl"
-  ; Workspace_state_file, "goal_verifications.json"
   ]
 ;;
 

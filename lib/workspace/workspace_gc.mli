@@ -1,12 +1,13 @@
-(** Workspace_gc — heartbeat, zombie cleanup, garbage collection.
+(** Workspace_gc — heartbeat and explicit garbage collection.
 
     Public surface for {!Workspace_gc.ml}.  Extracted from [workspace.ml] for
     modularity (#4638).  See issue #10751 for the broader [workspace/]
     [.mli] coverage push.
 
     Side effects:
-    - All three functions touch [agents_dir config] and the locks
-      under it.  Callers must hold no other workspace lock when invoking.
+    - [heartbeat] touches [agents_dir config].
+    - [gc] touches the explicit retention surfaces documented below.
+      Callers must hold no other workspace lock when invoking either function.
     - Board artifact cleanup is wired via [Workspace_hooks] callbacks at
       startup; this module does not depend on the board layer
       directly. *)
@@ -20,29 +21,13 @@
 val heartbeat :
   Workspace_utils_backend_setup.config -> agent_name:string -> string
 
-type cleanup_zombie_result =
-  | No_agents_dir
-  | No_zombies
-  | Cleaned of { count : int; names : string list; released_tasks : int; skipped : int }
-(** Structured result of zombie cleanup to eliminate string-based parsing at call sites. *)
+(** Run the explicit workspace garbage-collection pass. [days] has no default:
+    the caller owns the retention decision rather than inheriting a fixed
+    runtime heuristic.
 
-(** Sweep [.masc/agents/] and remove agents that have not heartbeated
-    within the threshold.
-
-    [keeper_threshold_sec] applies to keeper agents and defaults to
-    {!Env_config.Zombie.keeper_threshold_seconds}; [agent_threshold_sec]
-    applies to all other agents and defaults to
-    {!Env_config.Zombie.threshold_seconds}. *)
-val cleanup_zombies :
-  ?keeper_threshold_sec:float ->
-  ?agent_threshold_sec:float ->
-  Workspace_utils_backend_setup.config -> cleanup_zombie_result
-
-(** Run the full workspace garbage-collection pass:
     {ol
-    {- {!cleanup_zombies} (default thresholds)}
     {- archive backlog tasks in a terminal state ([Done]/[Cancelled]) older
-       than [days] days (default [days = 7], clamped to at least 1).
+       than [days] days.
        Non-terminal tasks — including [AwaitingVerification] obligations — are
        never archived (RFC-0220: an obligation must stay claimable by a
        verifier)}
@@ -55,4 +40,4 @@ val cleanup_zombies :
     with [version + 1] when anything changes.  Returns a multi-line summary
     string. *)
 val gc :
-  Workspace_utils_backend_setup.config -> ?days:int -> unit -> string
+  Workspace_utils_backend_setup.config -> days:int -> unit -> string

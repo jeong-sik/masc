@@ -6,6 +6,9 @@
 - Parent: RFC-0252 (fusion-panel-judge-deliberation) — §9(preset)를 개정. 위상 선택은 "Fusion as a Tool" 슬라이스 계열(refine/conditional)의 연장.
 - Scope: `lib/fusion_core/` (preset/config/types/policy), `lib/fusion/` (judge/orchestrator), `lib/keeper/keeper_tool_descriptor.ml` (스키마), `config/runtime.toml` (`[fusion.presets.*]`)
 - Boundary: OAS 0줄 변경. sink 계약 무변경. 기존 단일 `judge` 필드 **유지**(파괴 변경 없음). `simple`/`refine`/`conditional` 위상 동작 불변.
+- Concurrency update (2026-07-17): retired `max_concurrent_judges` never
+  controlled execution. Configured judge identities are the exact fan-out set;
+  MASC-owned durable host draining is tracked separately in #25032.
 
 ---
 
@@ -35,7 +38,7 @@ panel → [judge_1, judge_2, ..., judge_N] → meta-judge → sink
 
 ### 2.1 preset 스키마 — 비파괴 추가
 
-기존 단일 `judge`/`judge_system_prompt`/`judge_timeout_s`를 **그대로 둔다**. 이것이 `simple`/`refine`/`conditional`의 심판이자 **JOJ의 meta-judge(reducer)**다. 1차 심판 목록 `judges`를 **선택적으로 추가**한다(기본 `[]`).
+기존 단일 `judge`/`judge_system_prompt`를 **그대로 둔다**. 이것이 `simple`/`refine`/`conditional`의 심판이자 **JOJ의 meta-judge(reducer)**다. 1차 심판 목록 `judges`를 **선택적으로 추가**한다(기본 `[]`).
 
 ```ocaml
 type judge_spec =
@@ -44,7 +47,6 @@ type judge_spec =
   ; system_prompt : string     (* 이 1차 심판의 lens. 필수(코드 default 없음) *)
   ; web_tools : bool
   ; max_tool_calls : int
-  ; timeout_s : float
   }
 
 type preset =
@@ -52,7 +54,6 @@ type preset =
   ; panels : panel_group list
   ; judge : string                  (* (유지) simple/refine/conditional 심판 = JOJ meta-judge *)
   ; judge_system_prompt : string    (* (유지) *)
-  ; judge_timeout_s : float         (* (유지) *)
   ; judges : judge_spec list        (* (신규) JOJ 1차 심판들. default []. *)
   }
 ```
@@ -108,7 +109,8 @@ type preset =
 - judge 수는 group size로 나누어떨어져야 하며, 최소 두 개의 full group을 만들어야 한다.
   예: 9 judges + group size 3 → `3 + 3 + 3` stage meta → final meta. 8 judges + group
   size 3은 ragged라 실행 전 에러로 fail-closed.
-- 1차 judge wave와 stage meta wave는 `max_concurrent_judges` cap을 쓴다. Final meta는 1회 호출이다.
+- 1차 judge wave와 stage meta wave는 구성된 judge/group identity 전체를
+  실행한다. Fusion-local numeric cap은 없으며 Final meta는 1회 호출이다.
 - 각 stage meta 실패는 해당 stage의 첫 성공 1차 종합으로 degrade하고, final meta 실패는 첫 성공
   stage 종합으로 degrade한다. 모든 stage가 실패하면 canonical judge는 Error다.
 
@@ -132,7 +134,7 @@ val run_meta : (* run/run_refine과 동형, ~priors 추가 *) ...
 
 | 건드림 | 안 건드림 |
 |--------|-----------|
-| preset에 `judges` 추가, Validated_preset 검증 | 기존 `judge`/`judge_system_prompt`/`judge_timeout_s` |
+| preset에 `judges` 추가, Validated_preset 검증 | 기존 `judge`/`judge_system_prompt` |
 | `[fusion].staged_judge_group_size` config + staged grouping validation | panel preset grammar |
 | fusion_topology에 `Judge_of_judges`, `Staged_judge_of_judges` | simple/refine/conditional 동작 |
 | Fusion_judge: compose_meta_prompt/run_meta | sink 계약, OAS |

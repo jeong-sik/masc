@@ -57,7 +57,7 @@ export function isKeeperPaused(keeper: KeeperPausedInput): boolean {
 /** Keeper is in a *terminal failure* phase as classified by the
  *  backend's `agent_fsm.ml` (KSM cluster). The three phases here are
  *  distinct from operator-pinned shutdown (`Offline` / `Stopped`) — a
- *  crashed/dead/zombie keeper went down *involuntarily*.
+ *  crashed/dead keeper went down *involuntarily*.
  *
  *  Audit finding A1 (2026-05-19): keeper-reactivity-monitor.ts:227
  *  inlined this 3-literal OR chain on the same line that already
@@ -68,7 +68,6 @@ export function isKeeperPaused(keeper: KeeperPausedInput): boolean {
 const CRASHED_PHASES: ReadonlySet<string> = new Set<string>([
   'Crashed',
   'Dead',
-  'Zombie',
 ])
 
 export function isKeeperCrashed(keeper: Keeper): boolean {
@@ -107,7 +106,7 @@ export interface KeeperOfflineInput {
 }
 
 /** Operator considers the keeper offline / down on any of: terminal
- *  FSM phases (Offline/Stopped/Dead/Crashed/Zombie) or one of the
+ *  FSM phases (Offline/Stopped/Dead/Crashed) or one of the
  *  off-tokens emitted in `keeper.status`. */
 export function isKeeperOffline(keeper: KeeperOfflineInput): boolean {
   const phase = lowerToken(keeper.lifecycle_phase ?? keeper.phase)
@@ -116,7 +115,6 @@ export function isKeeperOffline(keeper: KeeperOfflineInput): boolean {
     || phase === 'stopped'
     || phase === 'dead'
     || phase === 'crashed'
-    || phase === 'zombie'
   ) {
     return true
   }
@@ -138,10 +136,8 @@ export function isKeeperOffline(keeper: KeeperOfflineInput): boolean {
  *  to recover. These three are the classes pre-RFC `canWake` checked
  *  inline in keeper-action-panel.ts; widening this set requires
  *  matching backend wakeup-recovery handling.
- *
- *  Do not include legacy `oas_timeout_budget`: it is a compatibility
- *  surface, not an owner-specific recoverable blocker. Wakeup should be
- *  driven by the owning timeout/admission/capacity cause instead. */
+ *  Runtime execution-limit observations are deliberately absent: they are
+ *  completed turn observations and never recoverable blocker classes. */
 const WAKEUP_RECOVERABLE_BLOCKERS = new Set<string>([
   'runtime_exhausted',
   'turn_timeout',
@@ -178,12 +174,19 @@ export function keeperActionVisibility(keeper: Keeper): KeeperActionVisibility {
   const isPaused = isKeeperPaused(keeper)
   const isOffline = isKeeperOffline(keeper)
   const isRunning = isKeeperRunningExcludingRestarting(keeper)
+  // A paused directive can outlive its process: the persisted `paused` flag
+  // stays set after the keeper fiber dies, but only a live fiber can be
+  // resumed — resume needs a live owner_generation as its fencing token, and
+  // a dead keeper has none. Treat paused-but-not-live as needing boot, so
+  // the boot verb surfaces for a dead paused keeper and resume stays hidden
+  // instead of returning "current owner generation is unavailable".
+  const live = keeper.keepalive_running === true
 
   return {
     canPause:    isRunning && !isPaused,
-    canResume:   isPaused,
+    canResume:   isPaused && live,
     canWake:     keeperCanWakeup(keeper),
-    canBoot:     isOffline,
+    canBoot:     isOffline || (isPaused && !live),
     canShutdown: isRunning || isPaused,
   }
 }

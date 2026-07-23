@@ -14,46 +14,37 @@ val consolidation_plan_output_schema : Yojson.Safe.t
 val memory_bank_summary_output_schema : Yojson.Safe.t
 (** JSON object the memory-bank summary provider must return. *)
 
-(** Wire field names for {!compaction_plan_output_schema}; shared with the
-    W2 compaction-plan parser as the single source of truth. *)
+(** Wire field names and action tokens for {!compaction_plan_output_schema};
+    shared with the compaction-plan codec as the single source of truth. *)
+val compaction_plan_field_decisions : string
+val compaction_plan_field_unit_index : string
+val compaction_plan_field_action : string
 val compaction_plan_field_summary : string
-
-val compaction_plan_field_kept_indices : string
-val compaction_plan_field_summarized_indices : string
-val compaction_plan_field_dropped_indices : string
+val compaction_plan_action_keep : string
+val compaction_plan_action_drop : string
+val compaction_plan_action_summarize : string
 
 val compaction_plan_output_schema : Yojson.Safe.t
-(** JSON object the LLM compaction summarizer must return: a [summary] prose
-    block plus kept / summarized / dropped 0-based message indices. *)
+(** JSON object the LLM compaction summarizer must return: exactly one typed
+    decision for every eligible source unit. *)
 
 val vision_analyze_output_schema : Yojson.Safe.t
 (** JSON object the one-shot vision analyzer provider must return. *)
 
-val operator_judge_output_schema : Yojson.Safe.t
-(** JSON object the dashboard operator judge provider must return. *)
-
-val governance_judge_output_schema : Yojson.Safe.t
-(** JSON object the dashboard governance judge provider must return. *)
-
 val fusion_judge_output_schema : Yojson.Safe.t
 (** JSON object the Fusion judge/refine/meta-judge provider must return. *)
-
-val verification_verdict_output_schema : Yojson.Safe.t
-(** JSON object the verification verdict providers must return. *)
 
 val failure_judgment_output_schema : Yojson.Safe.t
 (** Strict independent Keeper failure-judgment verdict. Decision tokens are
     owned by {!Keeper_failure_judgment_contract}. *)
 
-val anti_rationalization_verdict_output_schema : Yojson.Safe.t
-(** JSON object the task anti-rationalization reviewer provider must return. *)
+val board_attention_judgment_batch_output_schema : Yojson.Safe.t
+(** Strict batch relevance verdict: one [verdicts] array whose items carry the
+    exact candidate identity. Decision tokens are owned by
+    {!Keeper_board_attention_judgment}. *)
 
 val hitl_context_summary_schema : Yojson.Safe.t
 (** JSON object the HITL context-summary worker provider must return. *)
-
-val governance_resolved_tool_tokens : string list
-(** Resolved tool names accepted by the dashboard governance judge. The
-    provider schema and runtime parser both consume this list. *)
 
 val apply_to_provider_config
   :  Yojson.Safe.t
@@ -66,15 +57,37 @@ val apply_hitl_summary_schema_to_config
   -> Llm_provider.Provider_config.t
 (** Set both OAS structured-output fields for {!hitl_context_summary_schema}. *)
 
-val apply_schema_or_prompt_tier
+val without_response_format
+  :  Llm_provider.Provider_config.t
+  -> Llm_provider.Provider_config.t
+(** Clear both OAS structured-output fields: the request states its output
+    contract in its prompt and validates the parse downstream, so it asks the
+    provider for no wire format at all. Use for call sites whose prompt spells
+    out the object shape and whose parser is total — a malformed reply must
+    already become a typed error rather than a bad write. Every provider then
+    takes one identical request path with no capability branch. *)
+
+val anti_rationalization_reviewer_provider_config
+  :  Llm_provider.Provider_config.t
+  -> Llm_provider.Provider_config.t
+(** Provider config for the task anti-rationalization reviewer: clears both
+    OAS structured-output fields. The verdict channel is the
+    [report_review_verdict] tool call (exactly-once, total parser in
+    [Task.Anti_rationalization]); a wire response format constrained only the
+    final assistant text this surface never parses, and its capability branch
+    rejected json_object-only providers, leaving every task nonterminal
+    (2026-07-21 live incident). *)
+
+val apply_schema_json_mode_or_prompt_tier
   :  log_label:string
   -> Yojson.Safe.t
   -> Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
-(** Set [schema] only when the provider accepts native structured output.
-    Otherwise return the original provider config and log the prompt-tier
-    downgrade with the validation detail. Use only for keeper operation paths
-    whose parser remains fail-loud after the provider response. *)
+(** Three-tier response-format selection (#25266): enforce [schema] when the
+    provider supports strict json_schema; else set JSON mode ([JsonMode]) when
+    the provider supports json_object; else prompt only. Use ONLY where the
+    prompt already states the schema and the parser validates the response —
+    the json_object tier drops the strict guarantee. *)
 
 val validate_provider_config
   :  Yojson.Safe.t
@@ -87,3 +100,11 @@ val provider_config_accepts_schema
   -> Llm_provider.Provider_config.t
   -> bool
 (** True when [validate_provider_config] accepts [provider_cfg]. *)
+
+val provider_config_accepts_schema_or_json_mode
+  :  Yojson.Safe.t
+  -> Llm_provider.Provider_config.t
+  -> bool
+(** True when the provider can enforce [schema] (strict) OR honor JSON mode
+    (#25266). Eligibility gate for structured lanes that have a
+    json_object fallback; a provider with neither capability is rejected. *)

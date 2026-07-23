@@ -310,8 +310,7 @@ function mapIdeBridgeEvent(
 
 function bridgeEventTarget(event: IdeBridgeEvent): string {
   if (event.type === 'tool') return `tool:${event.tool_name}`
-  if (event.type === 'turn') return `turn:${event.phase}`
-  return `pr:${event.pr_number}`
+  return `turn:${event.phase}`
 }
 
 function bridgeEventDetail(event: IdeBridgeEvent): string {
@@ -319,12 +318,9 @@ function bridgeEventDetail(event: IdeBridgeEvent): string {
     const outcome = event.typed_outcome || event.outcome
     return `${outcome}: ${event.summary}`
   }
-  if (event.type === 'turn') {
-    return [event.phase, event.model_used, event.stop_reason]
-      .filter((item): item is string => typeof item === 'string' && item.trim() !== '')
-      .join(' · ') || event.phase
-  }
-  return event.pr_title || event.pull_request_url || event.pr_state || `PR ${event.pr_number}`
+  return [event.phase, event.model_used, event.stop_reason]
+    .filter((item): item is string => typeof item === 'string' && item.trim() !== '')
+    .join(' · ') || event.phase
 }
 
 function bridgeEventContext(event: IdeBridgeEvent): RunActivityContext | undefined {
@@ -333,22 +329,8 @@ function bridgeEventContext(event: IdeBridgeEvent): RunActivityContext | undefin
   if (event.type === 'tool') {
     const filePath = event.file_path ? normalizeIdeContextFilePath(event.file_path) : null
     if (filePath) context.file_path = filePath
-    mergeCommandDescriptorContext(context, event.command_descriptor)
-  } else if (event.type === 'pr') {
-    if (event.pr_number > 0) context.pr_id = String(event.pr_number)
   }
   return Object.keys(context).length === 0 ? undefined : context
-}
-
-function mergeCommandDescriptorContext(
-  context: MutableRunActivityContext,
-  descriptor: unknown,
-): void {
-  if (!isRecord(descriptor)) return
-  const prNumber = positiveInteger(descriptor.pr_number)
-  if (prNumber !== undefined) context.pr_id = String(prNumber)
-  const branch = stringValue(descriptor.branch)
-  if (branch) context.git_ref = branch
 }
 
 function contextFromPayloadAndTags(

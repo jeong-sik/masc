@@ -1,9 +1,8 @@
-(** Path_scope — abstract classification of argv path arguments.
+(** Path_scope — abstract classification of explicit filesystem scopes.
 
-    RFC v5 A0: every path that appears in a [Shell_ir.Simple] (cwd,
-    redirect target, or positional argument syntactically resembling a
-    path) is classified at parse time into one of four scopes.  Policy
-    decisions consume the scope, never the raw string. *)
+    A [Shell_ir.Simple] carries typed scopes for [cwd] and redirect targets.
+    Positional argv remains opaque application data and is not classified from
+    token shape or command semantics. *)
 
 type t
 

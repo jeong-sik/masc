@@ -49,7 +49,7 @@ val transition_task_outcome_r :
      (unit, string) result) ->
   ?expected_version:int -> ?notes:string -> ?reason:string ->
   ?handoff_context:Masc_domain.task_handoff_context ->
-  ?authority:Masc_domain.completion_authority ->
+  ?configured_llm_verdict:Masc_domain.configured_llm_completion_verdict ->
   unit -> transition_outcome Masc_domain.masc_result
 
 val transition_task_r :
@@ -69,7 +69,7 @@ val transition_task_r :
      (unit, string) result) ->
   ?expected_version:int -> ?notes:string -> ?reason:string ->
   ?handoff_context:Masc_domain.task_handoff_context ->
-  ?authority:Masc_domain.completion_authority ->
+  ?configured_llm_verdict:Masc_domain.configured_llm_completion_verdict ->
   unit -> string Masc_domain.masc_result
 
 val release_task_r :
@@ -77,61 +77,31 @@ val release_task_r :
   ?expected_version:int ->
   ?handoff_context:Masc_domain.task_handoff_context -> unit -> string Masc_domain.masc_result
 
-val force_release_task_r :
-  config -> agent_name:string -> task_id:string ->
-  ?handoff_context:Masc_domain.task_handoff_context -> unit -> string Masc_domain.masc_result
+(** {1 Explicit operator recovery} *)
 
-val force_done_task_r :
-  config -> agent_name:string -> task_id:string ->
-  notes:string -> unit -> string Masc_domain.masc_result
+type operator_task_recovery_result =
+  { task_id : string
+  ; previous_status : Masc_domain.task_status
+  ; previous_assignee : string
+  ; backlog_version : int
+  ; post_commit_errors : string list
+  }
 
-(** Typed failure surface of {!submit_and_approve_task_r}. Every branch is
-    reported; none is swallowed. *)
-type machine_verify_failure =
-  | Machine_verify_invalid_verifier of string
-      (** [verifier_name] failed [Validation.Agent_id] — rejected before any
-          state mutation *)
-  | Machine_verify_verifier_not_distinct of
-      { agent_name : string
-      ; verifier_name : string
-      }
-      (** verifier and submitter share one identity key — rejected before any
-          state mutation (self-approval would be unrecoverable post-submit) *)
-  | Machine_verify_submit_failed of Masc_domain.masc_error
-      (** submit rejected by the FSM; task state unchanged *)
-  | Machine_verify_approve_failed_compensated of Masc_domain.masc_error
-      (** approve failed; the compensating reject succeeded — task is back to
-          [InProgress { assignee }] *)
-  | Machine_verify_approve_failed_stranded of
-      { approve_error : Masc_domain.masc_error
-      ; reject_error : Masc_domain.masc_error
-      }
-      (** approve and the compensating reject both failed — the task remains
-          [AwaitingVerification] and its Pending verification-store record is
-          deliberately left actionable, so the stranded task surfaces through
-          the pending-verification wake signal and the dashboard verification
-          panel; any other identity can approve/reject it *)
+val recover_owned_task_to_todo_r :
+  config ->
+  operator_actor:string ->
+  task_id:string ->
+  expected_assignee:string ->
+  expected_version:int ->
+  reason:string ->
+  unit ->
+  operator_task_recovery_result Masc_domain.masc_result
+(** Explicit compare-and-set recovery for a task whose owner cannot continue.
+    Only [Claimed] and [InProgress] tasks are eligible. The persisted assignee
+    and backlog version must exactly match the operator's observation.
 
-(** RFC-0323 G-2: complete a task through the verification lane — submit as
-    [agent_name] (the assignee), approve as the distinct machine identity
-    [verifier_name]. Replaces direct [force_done_task_r] completion for
-    deterministic harnesses (RFC-0199 probe).
-
-    Verification-store lifecycle mirrors the tool layer (RFC-0221 hooks):
-    record created with the submit, machine verdict recorded on approve or on
-    the compensating reject; board/SSE notify hooks are not invoked (machine
-    completions do not announce). Hook defaults are no-ops.
-
-    [evidence_refs] is carried as the submit's [handoff_context.evidence_refs]
-    (summary = [notes]) and persisted through approve onto the Done record, so
-    the #23719 strict-contract evidence gate and audit consumers see the
-    machine-verified evidence. Pass the satisfied claim descriptions (probe:
-    [Evidence_claim.to_human_string]); [[]] is only valid for tasks without a
-    strict contract. *)
-val submit_and_approve_task_r :
-  config -> agent_name:string -> verifier_name:string -> task_id:string ->
-  notes:string -> approve_notes:string -> evidence_refs:string list -> unit ->
-  (string, machine_verify_failure) result
+    This function performs no liveness, elapsed-time, name-shape, or status-file
+    inference. Authorization belongs to the operator tool boundary. *)
 
 (** {1 Task cancellation} *)
 
@@ -144,22 +114,19 @@ val link_task_execution_artifacts_r :
   ?session_id:string -> ?operation_id:string ->
   unit -> string Masc_domain.masc_result
 
-(** {1 Re-exported type (backward compatibility)} *)
+(** {1 Re-exported scheduling result} *)
 
 type claim_next_result = Masc_domain.claim_next_result =
   | Claim_next_claimed of {
       task_id : string;
       title : string;
       priority : int;
-      released_task_id : string option;
       message : string;
       scope_widened : bool;
     }
   | Claim_next_no_unclaimed
   | Claim_next_no_eligible of
       { excluded_count : int
-      ; blocked_count : int
-      ; verification_blocked_count : int
       ; scope_excluded_count : int
       ; explicit_excluded_count : int
       ; claim_pool_candidate_count : int

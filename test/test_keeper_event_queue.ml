@@ -1,12 +1,6 @@
 let temp_dir prefix =
   Filename.temp_dir prefix ""
 
-let approved_action : Keeper_event_queue.hitl_approved_action =
-  { keeper_name = "keeper-hitl-test"
-  ; tool_name = "keeper_continue_after_reconcile"
-  ; input_hash = String.make 64 'a'
-  }
-
 let rec rm_rf path =
   if Sys.file_exists path
   then
@@ -119,6 +113,7 @@ let settle_and_project
     | Error error -> Alcotest.fail ("event queue settlement failed: " ^ error)
     | Ok (Masc.Keeper_registry_event_queue.Settled receipt)
     | Ok (Masc.Keeper_registry_event_queue.Already_settled receipt) -> receipt
+    | Ok _ -> Alcotest.fail "event queue settlement follow-up failed"
   in
   match
     Masc.Keeper_registry_event_queue.mark_transition_projected_result
@@ -148,7 +143,43 @@ let () =
   assert (not (is_board_signal Bootstrap));
   assert (String.equal (payload_kind_label (board_payload ())) "board_signal");
   assert (String.equal (payload_kind_label Bootstrap) "bootstrap");
-  assert (String.equal (payload_kind_label No_progress_recovery) "no_progress_recovery");
+
+  let board_attention_payload ?(content = "c") candidate_id =
+    Board_attention
+      { candidate_id
+      ; signal =
+          { kind = Post_created
+          ; author = "a"
+          ; title = "t"
+          ; content
+          ; hearth = None
+          ; updated_at = None
+          }
+      }
+  in
+  assert (is_board_signal (board_attention_payload "candidate-1"));
+  assert (
+    String.equal
+      (payload_kind_label (board_attention_payload "candidate-1"))
+      "board_attention");
+  (match
+     stimulus_of_yojson
+       (stimulus_to_yojson
+          { post_id = "post-attention"
+          ; urgency = Normal
+          ; arrived_at = 4.0
+          ; payload = board_attention_payload "candidate-1"
+          })
+   with
+   | Ok
+       { payload =
+           Board_attention
+             { candidate_id = "candidate-1"; signal = { content = "c"; _ } }
+       ; _
+       } ->
+     ()
+   | Ok _ -> Alcotest.fail "Board_attention round-trip changed opaque identity"
+   | Error detail -> Alcotest.fail ("Board_attention round-trip failed: " ^ detail));
 
   let reaction_payload () =
     Board_signal
@@ -207,8 +238,7 @@ let () =
   let fusion_payload () =
     Fusion_completed
       { run_id = "fus-1"
-      ; ok = true
-      ; resolved_answer = "ok"
+      ; terminal = Fusion_succeeded "ok"
       ; board_post_id = "post-1"
       ; channel = Keeper_continuation_channel.unrouted "test fixture"
       }
@@ -219,30 +249,26 @@ let () =
     String.equal
       (fusion_completion_post_id
          { run_id = "fus-1"
-         ; ok = true
-         ; resolved_answer = "ok"
+         ; terminal = Fusion_succeeded "ok"
          ; board_post_id = "post-1"
          ; channel = Keeper_continuation_channel.unrouted "test fixture"
          })
       "post-1");
-  (* Reply-route parity: the fusion wake serializes its originating channel,
-     and — like the sibling Connector_attention/Hitl_resolved rows — a legacy
-     Fusion_completed row persisted before the channel field existed replays as
-     [Unrouted] rather than failing the snapshot parse (a parse failure recovers
-     to an empty queue, dropping every co-resident stimulus). *)
+  (* Reply-route parity: every continuation-bearing wake serializes its exact
+     originating channel. A missing route is malformed durable state, not an
+     implicit [Unrouted] destination. *)
   (let routed : Keeper_event_queue.fusion_completion =
      { run_id = "fus-routed"
-     ; ok = true
-     ; resolved_answer = "answer"
+     ; terminal = Fusion_succeeded "answer"
      ; board_post_id = "post-9"
      ; channel =
-         Keeper_continuation_channel.Discord
-           { guild_id = None
-           ; channel_id = "chan-42"
-           ; parent_channel_id = None
-           ; thread_id = Some "th-1"
-           ; user_id = "u-7"
-           }
+         (Keeper_continuation_channel.discord
+            ~guild_id:None
+            ~channel_id:"chan-42"
+            ~parent_channel_id:None
+            ~thread_id:(Some "th-1")
+            ~user_id:"u-7"
+          |> Result.get_ok)
      }
    in
    let stim : Keeper_event_queue.stimulus =
@@ -262,8 +288,8 @@ let () =
         | _ -> false)
     | Ok _ -> assert false
     | Error e -> failwith e);
-   let missing_channel_json =
-     match stimulus_to_yojson stim with
+   let without_payload_channel stimulus =
+     match stimulus_to_yojson stimulus with
      | `Assoc fields ->
        `Assoc
          (List.map
@@ -282,26 +308,35 @@ let () =
             fields)
      | other -> other
    in
-   match stimulus_of_yojson missing_channel_json with
-   | Ok { payload = Fusion_completed fc; _ } ->
-     assert (
-       match fc.channel with
-       | Keeper_continuation_channel.Unrouted { reason } ->
-         String.equal reason "legacy: channel not captured"
-       | _ -> false)
-   | Ok _ -> failwith "legacy fusion row must decode as Fusion_completed"
-   | Error e ->
-     failwith
-       (Printf.sprintf
-          "legacy fusion row without a channel key must replay Unrouted, not \
-           fail closed: %s"
-          e));
+   List.iter
+     (fun (label, stimulus) ->
+        match stimulus_of_yojson (without_payload_channel stimulus) with
+        | Error _ -> ()
+        | Ok _ -> failwith (label ^ " without channel must fail explicitly"))
+     [ "fusion completion", stim
+     ; ( "connector attention"
+       , { stim with
+           post_id = "connector-route"
+         ; payload =
+             Connector_attention
+               { event_id = "connector-route"; channel = routed.channel }
+         } )
+     ; ( "HITL resolution"
+       , { stim with
+           post_id = "hitl:approval-route"
+         ; payload =
+             Hitl_resolved
+               { approval_id = "approval-route"
+               ; decision = Hitl_approved
+               ; channel = routed.channel
+               }
+         } )
+     ]);
   assert (
     String.equal
       (fusion_completion_post_id
          { run_id = "fus-2"
-         ; ok = false
-         ; resolved_answer = "sink_failed"
+         ; terminal = Fusion_failed "sink_failed"
          ; board_post_id = ""
          ; channel = Keeper_continuation_channel.unrouted "test fixture"
          })
@@ -338,8 +373,8 @@ let () =
          })
       "bg-run:bg-2");
 
-  (* Scheduled wake is a non-board stimulus with a stable schedule-derived
-     post id and a codec round-trip for restart replay. *)
+  (* Scheduled wake is a non-board stimulus whose enclosing occurrence id and
+     payload both survive restart replay. *)
   let scheduled_wake =
     { schedule_id = "sched-1"
     ; due_at = 200.0
@@ -351,17 +386,17 @@ let () =
   let schedule_payload () = Schedule_due scheduled_wake in
   assert (not (is_board_signal (schedule_payload ())));
   assert (String.equal (payload_kind_label (schedule_payload ())) "schedule_due");
-  assert (String.equal (schedule_due_post_id scheduled_wake) "schedule-due:sched-1");
   (match
      stimulus_of_yojson
        (stimulus_to_yojson
-          { post_id = schedule_due_post_id scheduled_wake
+          { post_id = "schedule-occurrence:codec"
           ; urgency = Immediate
           ; arrived_at = 5.0
           ; payload = Schedule_due scheduled_wake
           })
    with
    | Ok s ->
+     assert (String.equal s.post_id "schedule-occurrence:codec");
      (match s.payload with
       | Schedule_due wake ->
         assert (String.equal wake.schedule_id "sched-1");
@@ -409,7 +444,7 @@ let () =
           { post_id =
               hitl_resolution_post_id
                 { approval_id = "appr-9"
-                ; decision = Hitl_approved approved_action
+                ; decision = Hitl_approved
                 ; channel = Keeper_continuation_channel.unrouted "test"
                 }
           ; urgency = Immediate
@@ -417,18 +452,15 @@ let () =
           ; payload =
               Hitl_resolved
                 { approval_id = "appr-9"
-                ; decision = Hitl_approved approved_action
+                ; decision = Hitl_approved
                 ; channel = Keeper_continuation_channel.unrouted "test"
                 }
           })
    with
    | Ok s ->
      (match s.payload with
-      | Hitl_resolved { approval_id; decision = Hitl_approved action } ->
+      | Hitl_resolved { approval_id; decision = Hitl_approved; _ } ->
         assert (String.equal approval_id "appr-9");
-        assert (String.equal action.keeper_name approved_action.keeper_name);
-        assert (String.equal action.tool_name approved_action.tool_name);
-        assert (String.equal action.input_hash approved_action.input_hash);
         assert (String.equal s.post_id "hitl-approval:appr-9")
       | _ -> Alcotest.fail "Hitl_resolved codec round-trip changed payload shape")
   | Error msg -> Alcotest.fail ("Hitl_resolved stimulus round-trip failed: " ^ msg));
@@ -449,54 +481,8 @@ let () =
   assert (
     not
       (stimulus_identity_equal
-      (hitl_stimulus (Hitl_approved approved_action))
-      (hitl_stimulus Hitl_rejected)));
-
-  (* Goal_verification_failed survives the codec round-trip: the goal-loop wake
-     must remain replayable from the durable per-keeper queue. *)
-  let goal_failure =
-    { goal_id = "goal-1"
-    ; request_id = "gvr-1"
-    ; goal_title = "Ship retry"
-    ; phase = "executing"
-    ; metric = Some "tests"
-    ; target_value = Some "pass"
-    ; rejected_by = "agent-alpha"
-    ; note = Some "receipt did not prove completion"
-    ; evidence_refs = [ "receipt:agent-alpha:turn-7" ]
-    }
-  in
-  assert (
-    String.equal
-      (goal_verification_failure_post_id goal_failure)
-      "goal-verification-failed:goal-1:gvr-1");
-  assert (
-    String.equal
-      (payload_kind_label (Goal_verification_failed goal_failure))
-      "goal_verification_failed");
-  (match
-     stimulus_of_yojson
-       (stimulus_to_yojson
-          { post_id = goal_verification_failure_post_id goal_failure
-          ; urgency = Immediate
-          ; arrived_at = 6.0
-          ; payload = Goal_verification_failed goal_failure
-          })
-   with
-   | Ok s ->
-     (match s.payload with
-      | Goal_verification_failed failure ->
-        assert (String.equal failure.goal_id "goal-1");
-        assert (String.equal failure.request_id "gvr-1");
-        assert (String.equal failure.rejected_by "agent-alpha");
-        assert (failure.metric = Some "tests");
-        assert (failure.target_value = Some "pass");
-        assert (failure.evidence_refs = [ "receipt:agent-alpha:turn-7" ])
-      | _ ->
-        Alcotest.fail
-          "Goal_verification_failed codec round-trip changed payload shape")
-   | Error msg ->
-     Alcotest.fail ("Goal_verification_failed stimulus round-trip failed: " ^ msg));
+      (hitl_stimulus Hitl_approved)
+      (hitl_stimulus (Hitl_rejected "operator declined"))));
 
   (* --- RFC-0315 P3 W0: Goal_assigned --- *)
   let assignment =
@@ -561,71 +547,6 @@ let () =
       ~new_ids:[]
     = []);
 
-  (* --- RFC-0310 §3.3: Goal_stagnation --- *)
-  let stagnation =
-    { gs_goal_id = "goal-9"
-    ; gs_stale_since = "2026-07-08T00:00:00Z"
-    ; gs_goal_title = "Harden wake continuity"
-    }
-  in
-  assert (
-    String.equal
-      (goal_stagnation_post_id stagnation)
-      "goal-stagnation:goal-9:2026-07-08T00:00:00Z");
-  assert (
-    String.equal
-      (payload_kind_label (Goal_stagnation stagnation))
-      "goal_stagnation");
-  (match
-     stimulus_of_yojson
-       (stimulus_to_yojson
-          { post_id = goal_stagnation_post_id stagnation
-          ; urgency = Normal
-          ; arrived_at = 11.0
-          ; payload = Goal_stagnation stagnation
-          })
-   with
-   | Ok s ->
-     (match s.payload with
-      | Goal_stagnation gs ->
-        assert (String.equal gs.gs_goal_id "goal-9");
-        assert (String.equal gs.gs_stale_since "2026-07-08T00:00:00Z");
-        assert (String.equal gs.gs_goal_title "Harden wake continuity")
-      | _ -> Alcotest.fail "Goal_stagnation codec round-trip changed payload shape")
-   | Error msg ->
-     Alcotest.fail ("Goal_stagnation stimulus round-trip failed: " ^ msg));
-  (* Identity strips the display-only title but keeps (goal_id, stale_since):
-     a title edit within the same stale episode dedups... *)
-  let stagnation_stim =
-    { post_id = goal_stagnation_post_id stagnation
-    ; urgency = Normal
-    ; arrived_at = 11.0
-    ; payload = Goal_stagnation stagnation
-    }
-  in
-  let stagnation_retitled =
-    { stagnation_stim with
-      arrived_at = 12.0
-    ; payload =
-        Goal_stagnation { stagnation with gs_goal_title = "Harden wake (v2)" }
-    }
-  in
-  assert (stimulus_identity_equal stagnation_stim stagnation_retitled);
-  (* ...but a goal that was advanced (new updated_at) and went stale again
-     carries a new [gs_stale_since], so it is a DISTINCT episode that fires
-     independently — the edge, not a blind clock. *)
-  let stagnation_next_episode =
-    { stagnation_stim with
-      post_id =
-        goal_stagnation_post_id
-          { stagnation with gs_stale_since = "2026-07-08T04:00:00Z" }
-    ; payload =
-        Goal_stagnation
-          { stagnation with gs_stale_since = "2026-07-08T04:00:00Z" }
-    }
-  in
-  assert (not (stimulus_identity_equal stagnation_stim stagnation_next_episode));
-
   (* --- queue operations preserved --- *)
   let board_stim =
     { post_id = "p1"; urgency = Normal; arrived_at = 0.0; payload = board_payload () }
@@ -637,7 +558,7 @@ let () =
     { bootstrap_stim with arrived_at = 42.0 }
   in
   let ghost_stim =
-    { post_id = "ghost"; urgency = Low; arrived_at = 0.0; payload = No_progress_recovery }
+    { post_id = "ghost"; urgency = Low; arrived_at = 0.0; payload = Bootstrap }
   in
   let q = empty in
   assert (is_empty q);
@@ -704,7 +625,7 @@ let () =
          { post_id = "np1"
          ; urgency = Immediate
          ; arrived_at = 1.5
-         ; payload = No_progress_recovery
+         ; payload = Bootstrap
          }
     in
     enqueue
@@ -715,8 +636,7 @@ let () =
          ; payload =
              Fusion_completed
                { run_id = "fus-3"
-               ; ok = false
-               ; resolved_answer = "denied"
+               ; terminal = Fusion_failed "denied"
                ; board_post_id = ""
                ; channel = Keeper_continuation_channel.unrouted "test fixture"
                }
@@ -757,7 +677,7 @@ let () =
   assert (String.equal third.post_id "np1");
   assert (
     match third.payload with
-    | No_progress_recovery -> true
+    | Bootstrap -> true
     | _ -> false);
   let fourth, restored =
     match dequeue restored with
@@ -767,10 +687,9 @@ let () =
   assert (String.equal fourth.post_id "fp1");
   assert (
     match fourth.payload with
-    | Fusion_completed { run_id; ok; resolved_answer; board_post_id } ->
+    | Fusion_completed { run_id; terminal = Fusion_failed detail; board_post_id; _ } ->
       String.equal run_id "fus-3"
-      && (not ok)
-      && String.equal resolved_answer "denied"
+      && String.equal detail "denied"
       && String.equal board_post_id ""
     | _ -> false);
   let fifth, restored =
@@ -987,10 +906,18 @@ let () =
         Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) ".worktrees"
       in
       Unix.mkdir dot_noise_keeper_dir 0o755;
-      let json =
-        Keeper_event_queue_persistence.fleet_summary_json ~now:30.0 ~base_path
+      let owner_lifecycle ~keeper_name =
+        if String.equal keeper_name pending_keeper
+        then Keeper_event_queue_persistence.Paused_retained
+        else Keeper_event_queue_persistence.Runnable
       in
-      Alcotest.(check string) "summary status" "ok" (string_field "status" json);
+      let json =
+        Keeper_event_queue_persistence.fleet_summary_json
+          ~now:30.0
+          ~base_path
+          ~owner_lifecycle
+      in
+      Alcotest.(check string) "summary status" "degraded" (string_field "status" json);
       Alcotest.(check int)
         "keeper_count excludes snapshotless runtime dirs"
         2
@@ -1002,6 +929,30 @@ let () =
         "oldest_age_seconds"
         25.0
         (float_field "oldest_age_seconds" json);
+      Alcotest.(check int)
+        "runnable backlog count excludes paused owner"
+        1
+        (int_field "runnable_backlog_count" json);
+      Alcotest.(check (float 0.001))
+        "runnable oldest age excludes paused owner"
+        25.0
+        (float_field "runnable_oldest_age_seconds" json);
+      Alcotest.(check int)
+        "paused retained count"
+        2
+        (int_field "paused_retained_count" json);
+      Alcotest.(check int)
+        "paused retained keeper count"
+        1
+        (List.length (list_field "paused_retained_by_keeper" json));
+      Alcotest.(check (float 0.001))
+        "paused retained oldest age"
+        20.0
+        (float_field "paused_retained_oldest_age_seconds" json);
+      Alcotest.(check bool)
+        "paused retained work requires explicit operator action"
+        true
+        (bool_field "operator_action_required" json);
       Alcotest.(check int)
         "pending_by_keeper count"
         1
@@ -1016,10 +967,18 @@ let () =
         "pending keeper pending"
         2
         (int_field "pending_count" pending_summary);
+      Alcotest.(check string)
+        "pending keeper lifecycle"
+        "paused_retained"
+        (string_field "owner_lifecycle" pending_summary);
       Alcotest.(check int)
         "inflight keeper inflight"
         1
         (int_field "inflight_count" inflight_summary);
+      Alcotest.(check string)
+        "inflight keeper lifecycle"
+        "runnable"
+        (string_field "owner_lifecycle" inflight_summary);
       Alcotest.(check (float 0.001))
         "inflight keeper oldest age"
         25.0
@@ -1037,7 +996,11 @@ let () =
         (empty |> fun q -> enqueue q board_stim);
       write_file (snapshot_path ~base_path ~keeper_name) "{not-json";
       let json =
-        Keeper_event_queue_persistence.fleet_summary_json ~now:30.0 ~base_path
+        Keeper_event_queue_persistence.fleet_summary_json
+          ~now:30.0
+          ~base_path
+          ~owner_lifecycle:(fun ~keeper_name:_ ->
+            Keeper_event_queue_persistence.Runnable)
       in
       Alcotest.(check string)
         "corrupt summary status"
@@ -1061,6 +1024,45 @@ let () =
         1
         (List.length (list_field "read_errors" summary)));
 
+  (* --- durable fleet summary: missing lifecycle truth is not runnable. --- *)
+  let base_path = temp_dir "keeper-event-queue-fleet-summary-lifecycle-missing" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-lifecycle-missing-summary-test" in
+      Keeper_event_queue_persistence.persist
+        ~base_path
+        ~keeper_name
+        (empty |> fun q -> enqueue q board_stim);
+      let json =
+        Keeper_event_queue_persistence.fleet_summary_json
+          ~now:30.0
+          ~base_path
+          ~owner_lifecycle:(fun ~keeper_name:_ ->
+            Keeper_event_queue_persistence.Lifecycle_unknown
+              "durable keeper metadata missing")
+      in
+      Alcotest.(check string)
+        "unknown lifecycle summary status"
+        "degraded"
+        (string_field "status" json);
+      Alcotest.(check int)
+        "unknown lifecycle is excluded from runnable backlog"
+        0
+        (int_field "runnable_backlog_count" json);
+      Alcotest.(check int)
+        "unknown lifecycle remains visible"
+        1
+        (int_field "unclassified_count" json);
+      Alcotest.(check bool)
+        "unknown lifecycle counts are incomplete"
+        false
+        (bool_field "counts_complete" json);
+      Alcotest.(check bool)
+        "unknown lifecycle requires operator action"
+        true
+        (bool_field "operator_action_required" json));
+
   let meta_for_keeper keeper_name trace_id =
     match
       Masc.Keeper_meta_json_parse.meta_of_json
@@ -1069,7 +1071,6 @@ let () =
           ; "agent_name", `String keeper_name
           ; "trace_id", `String trace_id
           ; "last_model_used", `String "llama:auto"
-          ; "tool_access", `List []
           ])
     with
     | Ok meta -> meta
@@ -1080,19 +1081,19 @@ let () =
   let base_path = temp_dir "keeper-event-queue-registry" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
       let keeper_name = "keeper-event-queue-registry-test" in
       let meta = meta_for_keeper keeper_name "trace-event-queue-registry-test" in
-      Masc.Keeper_registry.clear ();
-      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      Masc.Keeper_registry.For_testing.clear ();
+      ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
       assert (length (Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name) = 1);
       assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
-      Masc.Keeper_registry.clear ();
-      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      Masc.Keeper_registry.For_testing.clear ();
+      ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
       let restored = Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name in
       assert (length restored = 1);
       (match
@@ -1131,7 +1132,7 @@ let () =
   let base_path = temp_dir "keeper-event-queue-registry-base-alias" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
       let keeper_name = "keeper-event-queue-registry-base-alias-test" in
@@ -1141,10 +1142,10 @@ let () =
         Keeper_event_queue.to_list queue
         |> List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id)
       in
-      Masc.Keeper_registry.clear ();
-      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      Masc.Keeper_registry.For_testing.clear ();
+      ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
       ignore
-        (Masc.Keeper_registry.register
+        (Masc.Keeper_registry.For_testing.register
            ~base_path:base_path_masc
            keeper_name
            meta);
@@ -1194,9 +1195,9 @@ let () =
            ~keeper_name
          |> queue_post_ids);
 
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       ignore
-        (Masc.Keeper_registry.register
+        (Masc.Keeper_registry.For_testing.register
            ~base_path:base_path_masc
            keeper_name
            meta);
@@ -1216,13 +1217,13 @@ let () =
   let base_path = temp_dir "keeper-event-queue-turn-digest" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
       let keeper_name = "keeper-event-queue-turn-digest-test" in
       let meta = meta_for_keeper keeper_name "trace-event-queue-turn-digest-test" in
-      Masc.Keeper_registry.clear ();
-      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      Masc.Keeper_registry.For_testing.clear ();
+      ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
       let digest_now = Unix.gettimeofday () in
       let board_at ~post_id ~urgency arrived_at =
         { post_id; urgency; arrived_at; payload = board_payload () }
@@ -1267,6 +1268,7 @@ let () =
         with
         | Ok (Masc.Keeper_registry_event_queue.Settled receipt)
         | Ok (Masc.Keeper_registry_event_queue.Already_settled receipt) -> receipt
+        | Ok _ -> Alcotest.fail "board digest settlement follow-up failed"
         | Error error -> Alcotest.fail ("board digest settlement failed: " ^ error)
       in
       (match
@@ -1306,12 +1308,12 @@ let () =
   let base_path = temp_dir "keeper-event-queue-unregistered" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
       let keeper_name = "keeper-event-queue-unregistered-test" in
       let meta = meta_for_keeper keeper_name "trace-event-queue-unregistered-test" in
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name bootstrap_stim;
@@ -1322,7 +1324,7 @@ let () =
       assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
       let pending = Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name in
       assert (length pending = 2);
-      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
       let restored = Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name in
       assert (length restored = 2);
       let claim_and_ack expected_post_id =
@@ -1372,6 +1374,7 @@ let () =
             Alcotest.failf
               "late registry registration repeated settlement for %s"
               expected_post_id
+          | Ok _ -> Alcotest.fail "late registration settlement follow-up failed"
           | Error error ->
             Alcotest.failf
               "late registry registration failed to settle %s: %s"
@@ -1403,26 +1406,27 @@ let () =
     let base_path = temp_dir "keeper-event-queue-autonomous-yield" in
     Fun.protect
       ~finally:(fun () ->
-        Masc.Keeper_registry.clear ();
+        Masc.Keeper_registry.For_testing.clear ();
         Masc.Keeper_chat_queue.For_testing.reset ();
         rm_rf base_path)
       (fun () ->
         let keeper_name = "keeper-event-queue-yield-test" in
         let meta = meta_for_keeper keeper_name "trace-event-queue-yield-test" in
-        Masc.Keeper_registry.clear ();
+        Masc.Keeper_registry.For_testing.clear ();
         Masc.Keeper_chat_queue.For_testing.reset ();
         ignore
           (Masc.Keeper_chat_queue.configure_persistence ~base_path
             : Masc.Keeper_chat_queue.configure_report);
-        ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+        ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
         (match
            Masc.Keeper_unified_turn_execution.autonomous_yield_request
              ~base_path
              ~keeper_name
-             ~channel:Masc.Keeper_world_observation.Scheduled_autonomous
          with
-         | None -> ()
-         | Some _ ->
+         | Ok None -> ()
+         | Error error ->
+           Alcotest.failf "empty queue snapshot failed: %s" error
+         | Ok (Some _) ->
            Alcotest.fail "empty work queues must not request an autonomous yield");
         Masc.Keeper_registry_event_queue.enqueue
           ~base_path
@@ -1432,15 +1436,16 @@ let () =
           Masc.Keeper_unified_turn_execution.autonomous_yield_request
             ~base_path
             ~keeper_name
-            ~channel:Masc.Keeper_world_observation.Reactive
         with
-        | Some
-            { Masc.Keeper_agent_run.reason =
-                Masc.Keeper_agent_run.Durable_stimulus_waiting
-            ; boundary = Masc.Keeper_agent_run.Yield_after_current_turn
-            } ->
+        | Ok
+            (Some
+               { Masc.Keeper_agent_run.reason =
+                   Masc.Keeper_agent_run.Durable_stimulus_waiting
+               }) ->
           ()
-        | None | Some _ ->
+        | Error error ->
+          Alcotest.failf "durable queue snapshot failed: %s" error
+        | Ok None | Ok (Some _) ->
           Alcotest.fail "pending durable stimulus must request a typed yield"));
 
   (* --- critical delivery: durable enqueue succeeds before registration and
@@ -1448,12 +1453,12 @@ let () =
   let base_path = temp_dir "keeper-event-queue-durable-unregistered" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
       let keeper_name = "keeper-event-queue-durable-unregistered-test" in
       let meta = meta_for_keeper keeper_name "trace-durable-unregistered-test" in
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       (match
          Masc.Keeper_registry_event_queue.enqueue_durable_result
            ~base_path
@@ -1463,7 +1468,7 @@ let () =
        | Ok () -> ()
        | Error msg -> Alcotest.fail ("durable enqueue failed: " ^ msg));
       assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
-      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
       let _lease, stimulus =
         claim_single
           ~base_path
@@ -1480,8 +1485,8 @@ let () =
     ~finally:(fun () -> rm_rf base_path)
     (fun () ->
       let keeper_name = "keeper-event-queue-durable-decision-conflict-test" in
-      let approved = hitl_stimulus (Hitl_approved approved_action) in
-      let rejected = hitl_stimulus Hitl_rejected in
+      let approved = hitl_stimulus Hitl_approved in
+      let rejected = hitl_stimulus (Hitl_rejected "operator declined") in
       (match
          Masc.Keeper_registry_event_queue.enqueue_durable_result
            ~base_path
@@ -1502,20 +1507,76 @@ let () =
         Keeper_event_queue_persistence.load ~base_path ~keeper_name
         |> Keeper_event_queue.to_list
       with
-      | [ { payload = Hitl_resolved { decision = Hitl_approved _; _ }; _ } ] -> ()
+      | [ { payload = Hitl_resolved { decision = Hitl_approved; _ }; _ } ] -> ()
       | _ -> Alcotest.fail "first committed approval decision was not preserved");
+
+  (* --- judged Board delivery: only the opaque candidate id participates in
+     admission identity. Exact replay is idempotent; the same id carrying a
+     different typed signal is an explicit conflict. --- *)
+  let base_path = temp_dir "keeper-event-queue-board-attention-identity" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-board-attention-identity-test" in
+      let first : Keeper_event_queue.stimulus =
+        { post_id = "post-shared"
+        ; urgency = Normal
+        ; arrived_at = 10.0
+        ; payload = board_attention_payload "candidate-exact"
+        }
+      in
+      let replay = { first with arrived_at = 11.0 } in
+      let conflict =
+        { first with
+          payload = board_attention_payload ~content:"different" "candidate-exact"
+        }
+      in
+      (match
+         Masc.Keeper_registry_event_queue.enqueue_if_missing_durable_result
+           ~base_path
+           ~event_id:"candidate-exact"
+           keeper_name
+           first
+       with
+       | Masc.Keeper_registry_event_queue.Enqueued -> ()
+       | _ -> Alcotest.fail "first exact Board-attention event was not enqueued");
+      (match
+         Masc.Keeper_registry_event_queue.enqueue_if_missing_durable_result
+           ~base_path
+           ~event_id:"candidate-exact"
+           keeper_name
+           replay
+       with
+       | Masc.Keeper_registry_event_queue.Already_present -> ()
+       | _ -> Alcotest.fail "exact Board-attention replay was not idempotent");
+      (match
+         Masc.Keeper_registry_event_queue.enqueue_if_missing_durable_result
+           ~base_path
+           ~event_id:"candidate-exact"
+           keeper_name
+           conflict
+       with
+       | Masc.Keeper_registry_event_queue.Identity_conflict _ -> ()
+       | _ -> Alcotest.fail "same candidate id with different payload did not conflict");
+      match
+        Keeper_event_queue_persistence.load ~base_path ~keeper_name
+        |> Keeper_event_queue.to_list
+      with
+      | [ { payload = Board_attention { signal = { content = "c"; _ }; _ }; _ } ] ->
+        ()
+      | _ -> Alcotest.fail "identity conflict changed the first durable payload");
 
   (* --- critical delivery: a registered but non-running keeper still owns a
      durable lane; only the wake hint is phase-gated. --- *)
   let base_path = temp_dir "keeper-event-queue-durable-offline" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
       let keeper_name = "keeper-event-queue-durable-offline-test" in
       let meta = meta_for_keeper keeper_name "trace-durable-offline-test" in
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       ignore (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
       (match
          Masc.Keeper_registry_event_queue.enqueue_durable_result
@@ -1568,13 +1629,13 @@ let () =
   let base_path = temp_dir "keeper-event-queue-requeue-front" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
       let keeper_name = "keeper-event-queue-requeue-front-test" in
       let meta = meta_for_keeper keeper_name "trace-event-queue-requeue-front-test" in
-      Masc.Keeper_registry.clear ();
-      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      Masc.Keeper_registry.For_testing.clear ();
+      ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name bootstrap_stim;
       let consumed_lease, consumed =
@@ -1607,6 +1668,7 @@ let () =
         | Ok (Masc.Keeper_registry_event_queue.Settled receipt) -> receipt
         | Ok (Masc.Keeper_registry_event_queue.Already_settled _) ->
           Alcotest.fail "first requeue unexpectedly reused a prior receipt"
+        | Ok _ -> Alcotest.fail "first requeue settlement follow-up failed"
         | Error error -> Alcotest.fail ("typed requeue failed: " ^ error)
       in
       assert (length (Keeper_event_queue_persistence.load ~base_path ~keeper_name) = 2);
@@ -1625,6 +1687,7 @@ let () =
        | Ok (Masc.Keeper_registry_event_queue.Already_settled _)
        | Ok (Masc.Keeper_registry_event_queue.Settled _) ->
          Alcotest.fail "repeated requeue changed the durable receipt"
+       | Ok _ -> Alcotest.fail "repeated requeue settlement follow-up failed"
        | Error error -> Alcotest.fail ("idempotent requeue failed: " ^ error));
       assert (length (Keeper_event_queue_persistence.load ~base_path ~keeper_name) = 2);
       (match
@@ -1658,46 +1721,5 @@ let () =
           ~ready:(fun _ -> true)
       in
       assert (String.equal second.post_id "bootstrap"));
-
-  (* RFC-0320 backward compat: pre-W2 persisted stimuli have no [channel] in
-     their payload and must replay as [Unrouted], not fail — a restart
-     replaying a legacy wake queue must not break. Simulate by serializing a W2
-     stimulus then stripping the [channel] field before parsing back. *)
-  (let strip_channel json =
-     match json with
-     | `Assoc top ->
-       `Assoc
-         (List.map
-            (fun (k, v) ->
-              if String.equal k "payload" then
-                ( k
-                , match v with
-                  | `Assoc p ->
-                    `Assoc
-                      (List.filter (fun (pk, _) -> not (String.equal pk "channel")) p)
-                  | other -> other )
-              else (k, v))
-            top)
-     | other -> other
-   in
-   let hitl_stim =
-     { post_id = "p-legacy"
-     ; urgency = Immediate
-     ; arrived_at = 1.0
-     ; payload =
-         Hitl_resolved
-           { approval_id = "a"
-           ; decision = Hitl_approved approved_action
-           ; channel = Keeper_continuation_channel.unrouted "seed"
-           }
-     }
-   in
-   match stimulus_of_yojson (strip_channel (stimulus_to_yojson hitl_stim)) with
-   | Ok s ->
-     (match s.payload with
-      | Hitl_resolved r ->
-        assert (not (Keeper_continuation_channel.is_routable r.channel))
-      | _ -> assert false)
-   | Error _ -> assert false);
 
   print_endline "test_keeper_event_queue: all passed"

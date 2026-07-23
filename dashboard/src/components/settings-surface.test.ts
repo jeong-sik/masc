@@ -271,7 +271,7 @@ function makeRuntimeProviders(
         thinking_support: true,
       }),
     ],
-    assignment_governance: null,
+    assignment_status: null,
     config_path: '/cfg/runtime.toml',
     ...overrides,
   }
@@ -429,7 +429,7 @@ describe('SettingsSurface', () => {
       keeper_runtime: null,
       fleet_safety: null,
       fd_accountant: null,
-      cdal: null,
+      disk_observation: null,
     }
     shellConfigResolution.value = {
       status: 'ready',
@@ -1097,12 +1097,8 @@ describe('SettingsSurface', () => {
               has_capabilities: true,
               behavior_capabilities: {
                 supports_inline_tools: true,
-                requires_per_keeper_bridging_for_bound_actor_tools: true,
-                identity_runtime_mcp_header_keys: ['x-masc-keeper'],
                 argv_prompt_preflight: true,
                 uses_anthropic_caching: true,
-                max_turns_per_attempt: 3,
-                tolerates_bound_actor_fallback: true,
               },
               custom_header_count: 1,
               connect_timeout_s: 120,
@@ -1238,7 +1234,7 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain(
         'controls:tool-choice,required,named,parallel,extended-thinking,reasoning-budget,native-stream,system-prompt,cache,prompt-cache@1024,seed+images,usage,code-exec',
       )
-      expect(cards[0]?.textContent).toContain('behavior:inline-tools,keeper-bridge')
+      expect(cards[0]?.textContent).toContain('behavior:inline-tools,argv-preflight,anthropic-cache')
       expect(container.querySelector('[data-testid="runtime-catalog-default"]')?.textContent).toBe('default')
       expect(
         Array.from(container.querySelectorAll('[data-runtime-section]'))
@@ -1563,7 +1559,7 @@ describe('SettingsSurface', () => {
       ok: true,
       path: MOCK_RUNTIME_PATH,
       file_name: 'runtime.toml',
-      source_text: '[fusion]\nenabled = true\ndefault_preset = "trio"\nmax_concurrent_panels = 2\n\n[fusion.presets.trio]\nmin_answered = 2\n',
+      source_text: '[fusion]\nenabled = true\ndefault_preset = "trio"\n\n[fusion.presets.trio]\nmin_answered = 2\n',
       reloaded: false,
     })
     render(html`<${SettingsSurface} />`, container)

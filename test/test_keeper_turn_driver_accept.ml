@@ -20,9 +20,6 @@ let response ?(content = []) ?(stop_reason = Agent_sdk.Types.EndTurn) () =
 let message ?(role = Agent_sdk.Types.Assistant) content : Agent_sdk.Types.message =
   { role; content; name = None; tool_call_id = None; metadata = [] }
 
-let tool_use ?(input = `Assoc []) name =
-  Agent_sdk.Types.ToolUse { id = "tool-1"; name; input }
-
 let checkpoint_with_messages messages : Agent_sdk.Checkpoint.t =
   {
     Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version;
@@ -41,6 +38,7 @@ let checkpoint_with_messages messages : Agent_sdk.Checkpoint.t =
     top_p = None;
     top_k = None;
     min_p = None;
+    reasoning_effort = None;
     enable_thinking = None;
     preserve_thinking = None;
     response_format = Agent_sdk.Types.Off;
@@ -83,7 +81,6 @@ let accept_no_progress_retry_kind_string err =
   Option.map
     (function
       | `Empty_no_progress -> "empty_no_progress"
-      | `Read_only_no_progress -> "read_only_no_progress"
       | `Thinking_only_no_progress -> "thinking_only_no_progress")
     kind
 
@@ -152,14 +149,11 @@ let with_direct_retry_runtime f =
        | Ok () -> f ()
        | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e)
 
-let direct_no_progress_retry_decision ?time_spent_in_turn_s err =
+let direct_no_progress_retry_decision err =
   Masc.Keeper_turn_runtime_budget.direct_no_progress_retry_decision
     ~base_runtime:"test_provider.test_model"
     ~effective_runtime:"runtime.direct-empty"
     ~attempted_runtimes:[ "runtime.direct-empty" ]
-    ~estimated_input_tokens:1
-    ?time_spent_in_turn_s
-    ~remaining_turn_budget_s:60.0
     err
 
 type direct_retry_observed_attempt =
@@ -203,42 +197,31 @@ let test_accept_keeps_result () =
     Alcotest.failf "accepted response should pass through: %s"
       (Agent_sdk.Error.to_string err)
 
-let test_typed_recovery_control_stops_bypass_response_accept () =
+let test_input_required_bypasses_response_accept () =
   let accept_calls = ref 0 in
   let reject (_ : Agent_sdk.Types.api_response) =
     incr accept_calls;
     false
   in
   let request = input_required_request () in
-  let input_required =
+  let result =
     { (run_result ()) with
       stop_reason = Runtime_agent.InputRequired { turns_used = 2; request }
     }
   in
-  let deferred =
-    { (run_result ()) with
-      stop_reason =
-        Runtime_agent.ToolFailureRecoveryDeferred
-          { turns_used = 2; reason = "wait"; tool_names = [ "Execute" ] }
-    }
-  in
-  List.iter
-    (fun (label, result) ->
-       match
-         Masc.Keeper_turn_driver.For_testing.apply_accept
-           ~runtime_id:"runtime.reasoning-model"
-           ~accept:reject
-           result
-       with
-       | Ok _ -> ()
-       | Error error ->
-         Alcotest.failf
-           "%s control stop rotated through response acceptance: %s"
-           label
-           (Agent_sdk.Error.to_string error))
-    [ "input_required", input_required; "defer", deferred ];
+  (match
+     Masc.Keeper_turn_driver.For_testing.apply_accept
+       ~runtime_id:"runtime.reasoning-model"
+       ~accept:reject
+       result
+   with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.failf
+       "InputRequired rotated through response acceptance: %s"
+       (Agent_sdk.Error.to_string error));
   Alcotest.(check int)
-    "typed control stops never invoke the deliverable accept predicate"
+    "InputRequired never invokes the deliverable accept predicate"
     0
     !accept_calls
 
@@ -324,11 +307,8 @@ let expect_accept_rejected result =
          (Agent_sdk.Error.to_string err))
 
 let accept_rejected_sdk_error
-    ?any_mutating_tool
-    ?(tool_effects_seen = [])
     ?(stop_reason = None)
     ~response_shape
-    ~last_tool_effect
     ~reason
     () =
   Keeper_internal_error.sdk_error_of_masc_internal_error
@@ -338,9 +318,6 @@ let accept_rejected_sdk_error
        ; reason_kind = Some Keeper_internal_error.Accept_no_usable_progress
        ; response_shape
        ; stop_reason
-       ; last_tool_effect
-       ; any_mutating_tool
-       ; tool_effects_seen
        ; reason
        })
 
@@ -374,7 +351,6 @@ let test_accept_rejected_stop_reason_survives_codec () =
     accept_rejected_sdk_error
       ~stop_reason:(Some Agent_sdk.Types.MaxTokens)
       ~response_shape:(Some Keeper_internal_error.Accept_response_empty)
-      ~last_tool_effect:None
       ~reason:"response rejected by accept (runtime=x): shape=empty"
       ()
   in
@@ -430,12 +406,6 @@ let test_reject_reason_describes_thinking_only_response () =
     "no-progress accept rejection is not runtime exhaustion"
     false
     (Masc.Keeper_error_classify.is_runtime_exhausted_error err);
-  Alcotest.(check bool)
-    "thinking-only without read-only tool is not a read-only retry"
-    false
-    (Masc.Keeper_turn_driver.For_testing
-     .accept_no_progress_read_only_should_try_next
-       err);
   Alcotest.(check bool)
     "thinking-only without tool can try next candidate"
     true
@@ -539,527 +509,11 @@ let test_finalization_does_not_surface_hidden_reasoning () =
     false
     (contains ~needle:"provider-private reasoning" reason)
 
-let test_recovery_defer_does_not_synthesize_tool_narration () =
-  let deferred =
-    { (run_result ()) with
-      stop_reason =
-        Runtime_agent.ToolFailureRecoveryDeferred
-          { turns_used = 2
-          ; reason = "wait for repository state"
-          ; tool_names = [ "Execute" ]
-          }
-    }
-  in
-  match
-    Masc.Keeper_agent_run.For_testing.normalize_response_text_for_finalization
-      ~runtime_id:"runtime.reasoning-model"
-      ~initial_messages:[]
-      ~run_result:deferred
-      ~text:""
-      ~tool_names:[ "Execute" ]
-      ()
-  with
-  | Ok text ->
-    Alcotest.(check string)
-      "control checkpoint has no synthetic assistant narration"
-      ""
-      text
-  | Error error ->
-    Alcotest.failf
-      "typed recovery checkpoint should finalize without a chat reply: %s"
-      (Agent_sdk.Error.to_string error)
-
-let test_runtime_error_mapping_preserves_no_progress_accept_rejection () =
-  let result =
-    Masc.Keeper_turn_driver.For_testing.apply_accept
-      ~runtime_id:"runtime.thinking-model"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
-      (run_result
-         ~content:
-           [
-             Agent_sdk.Types.Thinking
-               { signature = None; content = "internal chain" };
-           ]
-         ())
-  in
-  let err, _reason_kind, _reason = expect_accept_rejected result in
-  let mapped =
-    Masc.Keeper_turn_driver.For_testing.sdk_error_of_nonretryable_attempt_error
-      ~runtime_id:"runtime.thinking-model"
-      ~original_error:err
-      (Llm_provider.Http_client.AcceptRejected { reason = "flattened" })
-  in
-  let _mapped_err, mapped_reason_kind, mapped_reason =
-    expect_accept_rejected (Error mapped)
-  in
-  Alcotest.(check bool)
-    "runtime mapper keeps no usable progress kind"
-    true
-    (mapped_reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
-  Alcotest.(check bool)
-    "runtime mapper keeps response-shape diagnostics"
-    true
-    (contains ~needle:"shape=thinking_only" mapped_reason);
-  Alcotest.(check bool)
-    "runtime mapper does not collapse to generic internal"
-    true
-    (Masc.Keeper_error_classify.is_accept_no_usable_progress_error mapped)
-
-let test_last_tool_context_classifies_checkpoint_tool_use () =
-  let read_messages =
-    [
-      message
-        [
-          tool_use
-            ~input:(`Assoc [ ("file_path", `String "dune") ])
-            "Read";
-        ];
-    ]
-  in
-  let write_messages =
-    [
-      message
-        [
-          tool_use
-            ~input:
-              (`Assoc
-                [
-                  ("file_path", `String "tmp.txt");
-                  ("content", `String "hello");
-                ])
-            "Write";
-        ];
-    ]
-  in
-  let read_context =
-    Masc.Keeper_turn_driver.For_testing.last_tool_progress_context_string_of_messages
-      read_messages
-  in
-  let write_context =
-    Masc.Keeper_turn_driver.For_testing.last_tool_progress_context_string_of_messages
-      write_messages
-  in
-  Alcotest.(check (option string))
-    "read-only alias context"
-    (Some
-       "last_tool=Read; last_tool_effect=read_only; any_mutating_tool=false; \
-        tool_effects_seen=read_only")
-    read_context;
-  Alcotest.(check (option string))
-    "mutating alias context"
-    (Some
-       "last_tool=Write; last_tool_effect=mutating; any_mutating_tool=true; \
-        tool_effects_seen=mutating")
-    write_context
-
-let test_last_tool_context_treats_workspace_mutations_as_mutating () =
-  let cases =
-    [
-      ( "keeper_board_post"
-      , `Assoc [ "title", `String "t"; "body", `String "b" ] );
-      "keeper_broadcast", `Assoc [ "message", `String "hello" ];
-      ( "masc_transition"
-      , `Assoc [ "task_id", `String "t1"; "status", `String "done" ] );
-    ]
-  in
-  List.iter
-    (fun (tool_name, input) ->
-       let context =
-         Masc.Keeper_turn_driver.For_testing
-         .last_tool_progress_context_string_of_messages
-           [ message [ tool_use ~input tool_name ] ]
-       in
-       Alcotest.(check (option string))
-         (tool_name ^ " context")
-         (Some
-            (Printf.sprintf
-               "last_tool=%s; last_tool_effect=mutating; any_mutating_tool=true; \
-                tool_effects_seen=mutating"
-               tool_name))
-         context)
-    cases
-
-let test_accept_reason_includes_last_tool_context () =
-  let checkpoint =
-    checkpoint_with_messages
-      [
-        message
-          [
-            tool_use
-              ~input:
-                (`Assoc
-                  [
-                    ("file_path", `String "tmp.txt");
-                    ("content", `String "hello");
-                  ])
-              "Write";
-          ];
-      ]
-  in
-  let result =
-    Masc.Keeper_turn_driver.For_testing.apply_accept
-      ~runtime_id:"runtime.thinking-after-tool"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
-      (run_result
-         ~checkpoint
-         ~content:
-           [
-             Agent_sdk.Types.Thinking
-               { signature = None; content = "internal chain" };
-           ]
-         ())
-  in
-  let err, reason_kind, reason = expect_accept_rejected result in
-  Alcotest.(check bool)
-    "reason kind is no usable progress"
-    true
-    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
-  Alcotest.(check bool)
-    "reason includes last tool name"
-    true
-    (contains ~needle:"last_tool=Write" reason);
-  Alcotest.(check bool)
-    "reason includes last tool effect"
-    true
-    (contains ~needle:"last_tool_effect=mutating" reason);
-  Alcotest.(check bool)
-    "reason includes any mutating summary"
-    true
-    (contains ~needle:"any_mutating_tool=true" reason);
-  Alcotest.(check bool)
-    "reason includes effects seen"
-    true
-    (contains ~needle:"tool_effects_seen=mutating" reason);
-  Alcotest.(check bool)
-    "thinking-only after mutating tool does not try next candidate"
-    false
-    (Masc.Keeper_turn_driver.For_testing
-     .accept_no_progress_read_only_should_try_next
-       err);
-  Alcotest.(check (option string))
-    "thinking-only after mutating tool is not runtime-recoverable"
-    None
-    (Option.map
-       Masc.Keeper_error_classify.degraded_retry_reason_to_string
-       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
-
-let test_thinking_only_after_mutation_then_read_does_not_try_next_candidate () =
-  let checkpoint =
-    checkpoint_with_messages
-      [
-        message
-          [
-            tool_use
-              ~input:
-                (`Assoc
-                  [
-                    ("title", `String "checkpoint");
-                    ("body", `String "keeper posted progress");
-                  ])
-              "keeper_board_post";
-          ];
-        message
-          [ tool_use ~input:(`Assoc [ ("file_path", `String "dune") ]) "Read" ];
-      ]
-  in
-  let result =
-    Masc.Keeper_turn_driver.For_testing.apply_accept
-      ~runtime_id:"runtime.thinking-after-mutation-then-read"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
-      (run_result
-         ~checkpoint
-         ~content:
-           [
-             Agent_sdk.Types.Thinking
-               { signature = None; content = "internal chain" };
-           ]
-         ())
-  in
-  let err, reason_kind, reason = expect_accept_rejected result in
-  Alcotest.(check bool)
-    "reason kind is no usable progress"
-    true
-    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
-  Alcotest.(check bool)
-    "last tool remains visible"
-    true
-    (contains ~needle:"last_tool=Read" reason);
-  Alcotest.(check bool)
-    "last tool remains read-only"
-    true
-    (contains ~needle:"last_tool_effect=read_only" reason);
-  Alcotest.(check bool)
-    "earlier mutation is summarized"
-    true
-    (contains ~needle:"any_mutating_tool=true" reason);
-  Alcotest.(check bool)
-    "effects seen captures both classes"
-    true
-    (contains ~needle:"tool_effects_seen=mutating,read_only" reason);
-  Alcotest.(check bool)
-    "earlier mutation disables read-only retry"
-    false
-    (Masc.Keeper_turn_driver.For_testing
-     .accept_no_progress_read_only_should_try_next
-       err);
-  Alcotest.(check (option string))
-    "earlier mutation is not runtime-recoverable"
-    None
-    (Option.map
-       Masc.Keeper_error_classify.degraded_retry_reason_to_string
-       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
-
-let test_historical_mutation_does_not_block_current_read_only_retry () =
-  let history_messages =
-    [
-      message
-        [
-          tool_use
-            ~input:
-              (`Assoc
-                [
-                  ("title", `String "old checkpoint");
-                  ("body", `String "previous turn posted progress");
-                ])
-            "keeper_board_post";
-        ];
-    ]
-  in
-  let current_attempt_messages =
-    [ message [ tool_use ~input:(`Assoc [ ("file_path", `String "dune") ]) "Read" ] ]
-  in
-  let checkpoint =
-    checkpoint_with_messages (history_messages @ current_attempt_messages)
-  in
-  let result =
-    Masc.Keeper_turn_driver.For_testing.apply_accept
-      ~initial_messages:history_messages
-      ~runtime_id:"runtime.thinking-after-historical-mutation-current-read"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
-      (run_result
-         ~checkpoint
-         ~content:
-           [
-             Agent_sdk.Types.Thinking
-               { signature = None; content = "internal chain" };
-           ]
-         ())
-  in
-  let err, reason_kind, reason = expect_accept_rejected result in
-  Alcotest.(check bool)
-    "reason kind is no usable progress"
-    true
-    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
-  Alcotest.(check bool)
-    "current last tool remains visible"
-    true
-    (contains ~needle:"last_tool=Read" reason);
-  Alcotest.(check bool)
-    "historical mutation is not counted as current attempt mutation"
-    true
-    (contains ~needle:"any_mutating_tool=false" reason);
-  Alcotest.(check bool)
-    "effects seen only includes current attempt read-only tool"
-    true
-    (contains ~needle:"tool_effects_seen=read_only" reason);
-  Alcotest.(check bool)
-    "current read-only no-progress tries next candidate"
-    true
-    (Masc.Keeper_turn_driver.For_testing
-     .accept_no_progress_read_only_should_try_next
-       err);
-  Alcotest.(check bool)
-    "non-last read-only accept rejection advances provider candidate"
-    true
-    (Masc.Keeper_turn_driver.For_testing.accept_rejected_result_should_try_next
-       ~is_last:false
-       err);
-  Alcotest.(check (option string))
-    "current read-only no-progress classified by internal-error SSOT"
-    (Some "read_only_no_progress")
-    (accept_no_progress_retry_kind_string err);
-  Alcotest.(check (option string))
-    "current read-only no-progress is runtime-recoverable"
-    (Some "read_only_no_progress")
-    (Option.map
-       Masc.Keeper_error_classify.degraded_retry_reason_to_string
-       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
-
-let test_thinking_only_after_read_only_webfetch_can_try_next_candidate () =
-  let checkpoint =
-    checkpoint_with_messages
-      [
-        message
-          [
-            tool_use
-              ~input:(`Assoc [ ("url", `String "https://example.com") ])
-              "WebFetch";
-          ];
-      ]
-  in
-  let result =
-    Masc.Keeper_turn_driver.For_testing.apply_accept
-      ~runtime_id:"runtime.thinking-after-webfetch"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
-      (run_result
-         ~checkpoint
-         ~content:
-           [
-             Agent_sdk.Types.Thinking
-               { signature = None; content = "internal chain" };
-           ]
-         ())
-  in
-  let err, reason_kind, reason = expect_accept_rejected result in
-  Alcotest.(check bool)
-    "reason kind is no usable progress"
-    true
-    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
-  Alcotest.(check bool)
-    "reason identifies thinking-only shape"
-    true
-    (contains ~needle:"shape=thinking_only" reason);
-  Alcotest.(check bool)
-    "reason includes read-only tool name"
-    true
-    (contains ~needle:"last_tool=WebFetch" reason);
-  Alcotest.(check bool)
-    "reason includes read-only tool effect"
-    true
-    (contains ~needle:"last_tool_effect=read_only" reason);
-  Alcotest.(check bool)
-    "reason includes no-mutating summary"
-    true
-    (contains ~needle:"any_mutating_tool=false" reason);
-  Alcotest.(check bool)
-    "reason includes read-only effects seen"
-    true
-    (contains ~needle:"tool_effects_seen=read_only" reason);
-  Alcotest.(check bool)
-    "thinking-only after read-only tool tries next candidate"
-    true
-    (Masc.Keeper_turn_driver.For_testing
-     .accept_no_progress_read_only_should_try_next
-       err);
-  Alcotest.(check bool)
-    "non-last read-only WebFetch accept rejection advances provider candidate"
-    true
-    (Masc.Keeper_turn_driver.For_testing.accept_rejected_result_should_try_next
-       ~is_last:false
-       err);
-  Alcotest.(check (option string))
-    "thinking-only after read-only tool is runtime-recoverable"
-    (Some "read_only_no_progress")
-    (Option.map
-       Masc.Keeper_error_classify.degraded_retry_reason_to_string
-       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
-
-let test_thinking_only_after_workspace_mutation_stays_terminal () =
-  let cases =
-    [
-      ( "keeper_board_post"
-      , `Assoc [ "title", `String "t"; "body", `String "b" ] );
-      "keeper_broadcast", `Assoc [ "message", `String "hello" ];
-      ( "masc_transition"
-      , `Assoc [ "task_id", `String "t1"; "status", `String "done" ] );
-    ]
-  in
-  List.iter
-    (fun (tool_name, input) ->
-       let checkpoint =
-         checkpoint_with_messages
-           [ message [ tool_use ~input tool_name ] ]
-       in
-       let result =
-         Masc.Keeper_turn_driver.For_testing.apply_accept
-           ~runtime_id:("runtime.thinking-after-" ^ tool_name)
-           ~accept:Keeper_tool_response.response_has_text_or_tool_progress
-           (run_result
-              ~checkpoint
-              ~content:
-                [
-                  Agent_sdk.Types.Thinking
-                    { signature = None; content = "internal chain" };
-                ]
-              ())
-       in
-       let err, reason_kind, reason = expect_accept_rejected result in
-       Alcotest.(check bool)
-         (tool_name ^ " reason kind")
-         true
-         (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
-       Alcotest.(check bool)
-         (tool_name ^ " reason marks mutation")
-         true
-         (contains ~needle:"last_tool_effect=mutating" reason);
-       Alcotest.(check bool)
-         (tool_name ^ " does not try next candidate")
-         false
-         (Masc.Keeper_turn_driver.For_testing
-          .accept_no_progress_read_only_should_try_next
-            err);
-       Alcotest.(check (option string))
-         (tool_name ^ " is not runtime-recoverable")
-         None
-         (Option.map
-            Masc.Keeper_error_classify.degraded_retry_reason_to_string
-            (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err)))
-    cases
-
-let test_read_only_retry_uses_typed_context_not_reason_tokens () =
-  let typed_err =
-    accept_rejected_sdk_error
-      ~response_shape:(Some Keeper_internal_error.Accept_response_thinking_only)
-      ~last_tool_effect:(Some Keeper_internal_error.Tool_effect_read_only)
-      ~any_mutating_tool:false
-      ~tool_effects_seen:[ Keeper_internal_error.Tool_effect_read_only ]
-      ~reason:"diagnostic wording changed; no legacy retry tokens"
-      ()
-  in
-  Alcotest.(check bool)
-    "typed thinking/read-only context retries despite changed wording"
-    true
-    (Masc.Keeper_turn_driver.For_testing
-     .accept_no_progress_read_only_should_try_next
-       typed_err);
-  Alcotest.(check (option string))
-    "typed thinking/read-only context is runtime-recoverable"
-    (Some "read_only_no_progress")
-    (Option.map
-       Masc.Keeper_error_classify.degraded_retry_reason_to_string
-       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason typed_err));
-  Alcotest.(check (option string))
-    "direct keeper_msg does not rotate read-only no-progress"
-    None
-    (direct_no_progress_retry_reason_string typed_err);
-  let string_only_err =
-    accept_rejected_sdk_error
-      ~response_shape:None
-      ~last_tool_effect:None
-      ~reason:
-        "legacy text only: shape=thinking_only; last_tool_effect=read_only"
-      ()
-  in
-  Alcotest.(check bool)
-    "legacy reason tokens alone do not trigger retry"
-    false
-    (Masc.Keeper_turn_driver.For_testing
-     .accept_no_progress_read_only_should_try_next
-       string_only_err);
-	  Alcotest.(check (option string))
-	    "legacy reason tokens alone are not runtime-recoverable"
-	    None
-	    (Option.map
-	       Masc.Keeper_error_classify.degraded_retry_reason_to_string
-	       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason
-	          string_only_err))
-
-let test_direct_no_progress_retry_uses_shared_budget_decision () =
+let test_direct_no_progress_retry_uses_runtime_decision () =
   with_direct_retry_runtime (fun () ->
     let empty_err =
       accept_rejected_sdk_error
         ~response_shape:(Some Keeper_internal_error.Accept_response_empty)
-        ~last_tool_effect:None
         ~reason:"shape=empty"
         ()
     in
@@ -1070,33 +524,11 @@ let test_direct_no_progress_retry_uses_shared_budget_decision () =
          "empty_no_progress"
          (Masc.Keeper_error_classify.degraded_retry_reason_to_string
             retry.fallback_reason)
-     | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted _ ->
-       Alcotest.fail "fresh direct empty retry should not exhaust slot phase"
      | Masc.Keeper_turn_runtime_budget.No_degraded_retry ->
        Alcotest.fail "fresh direct empty retry should rotate");
-    let exhausted_after =
-      Masc.Keeper_turn_runtime_budget.degraded_retry_slot_phase_budget_sec +. 1.0
-    in
-    (match
-       direct_no_progress_retry_decision
-         ~time_spent_in_turn_s:exhausted_after
-         empty_err
-     with
-     | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted retry
-       ->
-       Alcotest.(check string)
-         "slot-exhausted reason"
-         "empty_no_progress"
-         (Masc.Keeper_error_classify.degraded_retry_reason_to_string
-            retry.fallback_reason)
-     | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed _ ->
-       Alcotest.fail "exhausted direct empty retry should not rotate"
-     | Masc.Keeper_turn_runtime_budget.No_degraded_retry ->
-       Alcotest.fail "exhausted direct empty retry should report slot exhaustion");
     let thinking_only_err =
       accept_rejected_sdk_error
         ~response_shape:(Some Keeper_internal_error.Accept_response_thinking_only)
-        ~last_tool_effect:None
         ~reason:"shape=thinking_only"
         ()
     in
@@ -1107,36 +539,14 @@ let test_direct_no_progress_retry_uses_shared_budget_decision () =
          "thinking_only_no_progress"
          (Masc.Keeper_error_classify.degraded_retry_reason_to_string
             retry.fallback_reason)
-     | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted _ ->
-       Alcotest.fail
-         "fresh direct thinking-only retry should not exhaust slot phase"
      | Masc.Keeper_turn_runtime_budget.No_degraded_retry ->
-       Alcotest.fail "fresh direct thinking-only retry should rotate");
-    let read_only_err =
-      accept_rejected_sdk_error
-        ~response_shape:(Some Keeper_internal_error.Accept_response_thinking_only)
-        ~last_tool_effect:(Some Keeper_internal_error.Tool_effect_read_only)
-        ~any_mutating_tool:false
-        ~tool_effects_seen:[ Keeper_internal_error.Tool_effect_read_only ]
-        ~reason:"shape=thinking_only"
-        ()
-    in
-    Alcotest.(check bool)
-      "direct read-only no-progress remains terminal"
-      true
-      (match direct_no_progress_retry_decision read_only_err with
-       | Masc.Keeper_turn_runtime_budget.No_degraded_retry -> true
-	       | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed _
-	       | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted _ ->
-	         false))
+       Alcotest.fail "fresh direct thinking-only retry should rotate"))
 
 let cascade_decision_to_string
     (decision : Masc.Keeper_unified_turn_cascade_resolution.cascade_decision_kind) =
   match decision with
   | Degraded_retry_allowed -> "degraded_retry_allowed"
-  | Degraded_retry_slot_phase_exhausted -> "degraded_retry_slot_phase_exhausted"
   | No_degraded_retry -> "no_degraded_retry"
-  | Transient_network_retry -> "transient_network_retry"
 
 let prepare_retry_observers () =
   let published = ref [] in
@@ -1291,7 +701,6 @@ let test_plan_degraded_retry_step_covers_direct_outcomes () =
     let empty_err =
       accept_rejected_sdk_error
         ~response_shape:(Some Keeper_internal_error.Accept_response_empty)
-        ~last_tool_effect:None
         ~reason:"shape=empty"
         ()
     in
@@ -1299,14 +708,10 @@ let test_plan_degraded_retry_step_covers_direct_outcomes () =
       match direct_no_progress_retry_decision empty_err with
       | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed retry ->
         retry.next_runtime
-      | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted _ ->
-        Alcotest.fail
-          "fresh direct empty retry should not exhaust slot phase before planning"
       | Masc.Keeper_turn_runtime_budget.No_degraded_retry ->
         Alcotest.fail "fresh direct empty retry should select a fallback runtime"
     in
     let plan
-        ?time_spent_in_turn_s
         ?(allow_retry = fun _ -> true)
         ?(setup_runtime = fun runtime_id -> Ok ("prepared:" ^ runtime_id))
         err =
@@ -1318,9 +723,6 @@ let test_plan_degraded_retry_step_covers_direct_outcomes () =
           ~base_runtime:"test_provider.test_model"
           ~current_runtime_id:"runtime.direct-empty"
           ~attempted_runtimes:[ "runtime.direct-empty" ]
-          ~estimated_input_tokens:1
-          ~time_spent_in_turn_s
-          ~remaining_turn_budget_s:60.0
           ~attempt:1
           ~err
           ~allow_retry
@@ -1419,59 +821,13 @@ let test_plan_degraded_retry_step_covers_direct_outcomes () =
     Alcotest.(check int)
       "setup failure still publishes allowed cascade"
       1
-      (List.length !published);
-    let exhausted_after =
-      Masc.Keeper_turn_runtime_budget.degraded_retry_slot_phase_budget_sec +. 1.0
-    in
-    let step, published, selected, rotated =
-      plan ~time_spent_in_turn_s:exhausted_after empty_err
-    in
-    (match step with
-     | Masc.Keeper_turn_runtime_budget.Degraded_retry_step_slot_phase_exhausted
-         { retry; reason } ->
-       Alcotest.(check string)
-         "slot exhausted runtime"
-         expected_retry_runtime
-         retry.next_runtime;
-       Alcotest.(check string) "slot exhausted reason" "empty_no_progress" reason
-     | _ -> Alcotest.fail "expired slot phase should produce exhausted step");
-    Alcotest.(check (list (pair string string)))
-      "slot exhaustion emits no selected metric"
-      []
-      (List.rev !selected);
-    Alcotest.(check (list (triple string string string)))
-      "slot exhaustion emits no rotation metric"
-      []
-      (List.rev !rotated);
-    (match List.rev !published with
-     | [ (runtime_id, decision, reason, next_runtime, attempt) ] ->
-       Alcotest.(check string)
-         "slot exhausted cascade runtime"
-         "runtime.direct-empty"
-         runtime_id;
-       Alcotest.(check string)
-         "slot exhausted cascade decision"
-         "degraded_retry_slot_phase_exhausted"
-         decision;
-       Alcotest.(check string)
-         "slot exhausted cascade reason"
-         "empty_no_progress"
-         reason;
-       Alcotest.(check (option string))
-         "slot exhausted cascade target"
-         (Some expected_retry_runtime)
-         next_runtime;
-       Alcotest.(check int) "slot exhausted cascade attempt" 1 attempt
-     | rows ->
-       Alcotest.failf "expected one slot-exhausted cascade event, got %d"
-         (List.length rows)))
+      (List.length !published))
 
 let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
   with_direct_retry_runtime (fun () ->
     let empty_err =
       accept_rejected_sdk_error
         ~response_shape:(Some Keeper_internal_error.Accept_response_empty)
-        ~last_tool_effect:None
         ~reason:"shape=empty"
         ()
     in
@@ -1479,9 +835,6 @@ let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
       match direct_no_progress_retry_decision empty_err with
       | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed retry ->
         retry.next_runtime
-      | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted _ ->
-        Alcotest.fail
-          "fresh direct empty retry should not exhaust slot phase before loop"
       | Masc.Keeper_turn_runtime_budget.No_degraded_retry ->
         Alcotest.fail "fresh direct empty retry should select a fallback runtime"
     in
@@ -1490,7 +843,8 @@ let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
       { requested_override = None
       ; primary_budget = 4096
       ; runtime_budget = 4096
-      ; turn_budget = 4096
+      ; runtime_budget_source = Some Runtime.Capability
+      ; requested_context_window = 4096
       ; effective_budget = 4096
       }
     in
@@ -1504,9 +858,8 @@ let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
     let retry_execution runtime_id : Masc.Keeper_turn_runtime_budget.runtime_execution =
       { runtime_id
       ; max_context_resolution = retry_context_resolution
-      ; max_context = retry_context_resolution.turn_budget
+      ; max_context = retry_context_resolution.requested_context_window
       ; temperature = 0.0
-      ; max_tokens = Some 1024
       }
     in
     let result =
@@ -1515,9 +868,6 @@ let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
         ~base_runtime:"test_provider.test_model"
         ~initial_runtime:"runtime.direct-empty"
         ~initial_max_context:1024
-        ~estimated_input_tokens:1
-        ~timeout_sec:60.0
-        ~remaining_turn_budget_s:(fun () -> 60.0)
         ~current_turn_phase_elapsed_ms:(function
           | None -> 7, None
           | Some _ -> 7, Some 0)
@@ -1660,9 +1010,6 @@ let test_direct_retry_loop_publishes_non_retry_terminal_cascade () =
       ~base_runtime:"runtime.initial"
       ~initial_runtime:"runtime.initial"
       ~initial_max_context:2048
-      ~estimated_input_tokens:1
-      ~timeout_sec:60.0
-      ~remaining_turn_budget_s:(fun () -> 60.0)
       ~current_turn_phase_elapsed_ms:(fun _ -> 3, None)
       ~now_s:(fun () -> 10.0)
       ~setup_retry_runtime:(fun _ ->
@@ -1745,9 +1092,11 @@ let test_manual_direct_turn_uses_effective_context_budget () =
     true
     (contains ~needle:"resolution.effective_budget" slice);
   Alcotest.(check bool)
-    "manual direct first attempt does not use raw turn_budget"
+    "manual direct first attempt uses provider-effective context window"
     false
-    (contains ~needle:"resolution.turn_budget\n\t            in" slice)
+    (contains
+       ~needle:"resolution.requested_context_window\n\t            in"
+       slice)
 
 let test_thinking_with_text_is_accepted () =
   let result =
@@ -1870,33 +1219,6 @@ let test_thinking_only_non_end_turn_response_is_rejected () =
     true
     (contains ~needle:"stop_reason=stop_sequence" reason)
 
-(* RFC-0271 §4.1 [Retry_no_thinking] gate truth table: only a thinking-only
-   rejection on a thinking-enabled attempt, once per turn, triggers the cheap
-   thinking-off re-shape before reroute. *)
-let test_should_retry_no_thinking_gate () =
-  let gate = Masc.Keeper_turn_driver_try_runtime.For_testing.should_retry_no_thinking in
-  let check label expected actual = Alcotest.(check bool) label expected actual in
-  check "thinking_only + thinking on + fresh turn -> retry" true
-    (gate ~recovered:false ~enable_thinking:(Some true)
-       ~retry_kind:(Some `Thinking_only_no_progress));
-  check "thinking_only + thinking default(None=on) -> retry" true
-    (gate ~recovered:false ~enable_thinking:None
-       ~retry_kind:(Some `Thinking_only_no_progress));
-  check "thinking_only + already recovered -> no second retry (bounded)" false
-    (gate ~recovered:true ~enable_thinking:(Some true)
-       ~retry_kind:(Some `Thinking_only_no_progress));
-  check "thinking_only + thinking already off -> nothing to re-shape" false
-    (gate ~recovered:false ~enable_thinking:(Some false)
-       ~retry_kind:(Some `Thinking_only_no_progress));
-  check "empty_no_progress -> no retry" false
-    (gate ~recovered:false ~enable_thinking:(Some true)
-       ~retry_kind:(Some `Empty_no_progress));
-  check "read_only_no_progress -> no retry" false
-    (gate ~recovered:false ~enable_thinking:(Some true)
-       ~retry_kind:(Some `Read_only_no_progress));
-  check "no retry kind -> no retry" false
-    (gate ~recovered:false ~enable_thinking:(Some true) ~retry_kind:None)
-
 let test_thinking_only_no_tool_can_try_next_candidate () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
@@ -1923,24 +1245,6 @@ let test_thinking_only_no_tool_can_try_next_candidate () =
     "thinking-only no-tool can try next provider candidate"
     true
     (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next err);
-  Alcotest.(check bool)
-    "non-last thinking-only no-tool advances provider candidate"
-    true
-    (Masc.Keeper_turn_driver.For_testing.accept_rejected_result_should_try_next
-       ~is_last:false
-       err);
-  Alcotest.(check bool)
-    "last thinking-only no-tool stays in same-attempt loop terminal"
-    false
-    (Masc.Keeper_turn_driver.For_testing.accept_rejected_result_should_try_next
-       ~is_last:true
-       err);
-  Alcotest.(check bool)
-    "thinking-only no-tool is not a read-only retry"
-    false
-    (Masc.Keeper_turn_driver.For_testing
-     .accept_no_progress_read_only_should_try_next
-       err);
   Alcotest.(check (option string))
     "thinking-only no-tool classified by internal-error SSOT"
     (Some "thinking_only_no_progress")
@@ -1984,24 +1288,6 @@ let test_empty_non_end_turn_response_is_rejected () =
     "empty no-progress can try next candidate"
     true
     (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next err);
-  Alcotest.(check bool)
-    "non-last empty accept rejection advances provider candidate"
-    true
-    (Masc.Keeper_turn_driver.For_testing.accept_rejected_result_should_try_next
-       ~is_last:false
-       err);
-  Alcotest.(check bool)
-    "last empty accept rejection stays terminal"
-    false
-    (Masc.Keeper_turn_driver.For_testing.accept_rejected_result_should_try_next
-       ~is_last:true
-       err);
-  Alcotest.(check bool)
-    "empty no-progress is not a read-only retry"
-    false
-    (Masc.Keeper_turn_driver.For_testing
-     .accept_no_progress_read_only_should_try_next
-       err);
   Alcotest.(check (option string))
     "empty no-progress classified by internal-error SSOT"
     (Some "empty_no_progress")
@@ -2028,63 +1314,14 @@ let test_empty_non_end_turn_response_is_rejected () =
              (Masc.Keeper_turn_driver.summary_of_masc_internal_error internal_error)))
    | None -> Alcotest.fail "expected typed accept rejection");
   (match Masc.Keeper_status_bridge.blocker_class_of_sdk_error err with
-   | Some Masc.Keeper_meta_contract.Completion_contract_violation -> ()
+   | None -> ()
    | Some other ->
      Alcotest.failf
-       "expected completion_contract_violation blocker, got %s"
-       (Masc.Keeper_meta_contract.blocker_class_to_string other)
-   | None -> Alcotest.fail "expected accept rejection blocker class");
+       "accept rejection must not become a runtime blocker, got %s"
+       (Masc.Keeper_meta_contract.blocker_class_to_string other));
   Alcotest.(check (option string))
     "direct keeper_msg rotates empty no-progress"
     (Some "empty_no_progress")
-    (direct_no_progress_retry_reason_string err)
-
-let test_empty_after_workspace_mutation_stays_terminal () =
-  let checkpoint =
-    checkpoint_with_messages
-      [
-        message
-          [
-            tool_use
-              ~input:(`Assoc [ "title", `String "t"; "body", `String "b" ])
-              "keeper_board_post";
-          ];
-      ]
-  in
-  let result =
-    Masc.Keeper_turn_driver.For_testing.apply_accept
-      ~runtime_id:"runtime.empty-after-mutation"
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
-      (run_result ~checkpoint ())
-  in
-  let err, reason_kind, reason = expect_accept_rejected result in
-  Alcotest.(check bool)
-    "reason kind is no usable progress"
-    true
-    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
-  Alcotest.(check bool)
-    "reason includes mutating tool context"
-    true
-    (contains ~needle:"last_tool_effect=mutating" reason);
-  Alcotest.(check bool)
-    "empty response after mutation does not try next candidate"
-    false
-    (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next err);
-  Alcotest.(check bool)
-    "mutating accept rejection does not advance provider candidate"
-    false
-    (Masc.Keeper_turn_driver.For_testing.accept_rejected_result_should_try_next
-       ~is_last:false
-       err);
-  Alcotest.(check (option string))
-    "empty response after mutation is not runtime-recoverable"
-    None
-    (Option.map
-       Masc.Keeper_error_classify.degraded_retry_reason_to_string
-       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err));
-  Alcotest.(check (option string))
-    "direct keeper_msg does not rotate after mutation"
-    None
     (direct_no_progress_retry_reason_string err)
 
 let test_blank_text_non_end_turn_response_is_rejected () =
@@ -2136,7 +1373,7 @@ let test_custom_accept_reject_preserves_predicate_reason () =
     false
     (Masc.Keeper_error_classify.is_auto_recoverable_turn_error err)
 
-let test_reject_reason_describes_mixed_non_progress_response () =
+let test_media_with_tool_result_is_deliverable () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
       ~runtime_id:"runtime.mixed"
@@ -2161,23 +1398,12 @@ let test_reject_reason_describes_mixed_non_progress_response () =
            ]
          ())
   in
-  let _err, reason_kind, reason = expect_accept_rejected result in
-  Alcotest.(check bool)
-    "reason kind is no usable progress"
-    true
-    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
-  Alcotest.(check bool)
-    "mixed non-progress response is not labeled tool-result-only"
-    true
-    (contains ~needle:"shape=mixed_without_deliverable_content" reason);
-  Alcotest.(check bool)
-    "reason reports tool result count"
-    true
-    (contains ~needle:"tool_result_count=1" reason);
-  Alcotest.(check bool)
-    "reason reports image count"
-    true
-    (contains ~needle:"image_count=1" reason)
+  match result with
+  | Ok _ -> ()
+  | Error err ->
+    Alcotest.failf
+      "multimodal response with an image must remain deliverable: %s"
+      (Agent_sdk.Error.to_string err)
 
 let test_sse_event_progress_kind_classifies_known_deltas () =
   let open Agent_sdk.Types in
@@ -2295,7 +1521,7 @@ let test_registry_progress_on_event_records_only_watchdog_progress () =
     recorded;
   Alcotest.(check int) "downstream still sees every event" 6 downstream_count
 
-let test_carrier_only_stream_does_not_suppress_mid_turn_no_progress () =
+let test_carrier_only_stream_remains_observable_without_lifecycle_gate () =
   let open Agent_sdk.Types in
   let recorded, downstream_count =
     registry_recorded_progress
@@ -2307,88 +1533,21 @@ let test_carrier_only_stream_does_not_suppress_mid_turn_no_progress () =
       ]
   in
   Alcotest.(check (list string))
-    "carrier-only stream does not record watchdog progress"
+    "carrier-only stream does not invent progress"
     []
     recorded;
-  Alcotest.(check int) "diagnostic downstream receives carrier stream" 5 downstream_count;
-  let turn_observation =
-    let open Masc.Keeper_registry_types in
-    ({ turn_id = 1
-     ; started_at = 0.0
-     ; last_progress_at = 0.0
-     ; last_progress_kind = Some "turn_started"
-     ; active_tool_count = 0
-     ; turn_phase = Packed Turn_prompting
-     ; decision_stage = Packed Decision_undecided
-     ; measurement = None
-     ; measurement_bind_count = 0
-     ; selected_model = None
-     ; wake = Proactive_tick
-     }
-      : Masc.Keeper_registry_types.turn_observation)
-  in
-  match
-    Masc.Keeper_supervisor.assess_in_turn_progress
-      ~phase:Keeper_state_machine.Running
-      ~in_turn:(Some turn_observation)
-      ~now:45.0
-      ~progress_timeout:30.0
-  with
-  | Some
-      (Masc.Keeper_registry.Stale_turn_timeout
-         (Masc.Keeper_registry.Mid_turn_no_progress
-            { since_progress_seconds
-            ; progress_timeout_threshold
-            ; last_progress_kind
-            ; _
-            })) ->
-    Alcotest.(check int)
-      "carrier-only stream stays stale"
-      45
-      (int_of_float since_progress_seconds);
-    Alcotest.(check int)
-      "progress timeout threshold preserved"
-      30
-      (int_of_float progress_timeout_threshold);
-    Alcotest.(check (option string))
-      "last watchdog progress remains turn start"
-      (Some "turn_started")
-      last_progress_kind
-  | _ ->
-    Alcotest.fail
-      "carrier-only stream must not suppress Mid_turn_no_progress"
+  Alcotest.(check int) "diagnostic downstream receives carrier stream" 5 downstream_count
 
-let test_per_provider_timeout_not_forwarded_to_oas_hard_deadline () =
-  (* RFC-0129 (§62, 2026-05-17 fleet incident): per_provider_timeout_s must NOT
-     forward to OAS max_execution_time_s. That field is a cumulative wall-clock
-     kill switch that truncates healthy slow streams (307.5s cluster). The
-     attempt deadline stays progress-based, so this helper always returns None. *)
-  Alcotest.(check (option (float 0.0)))
-    "per-provider timeout is not forwarded to OAS max_execution_time_s (RFC-0129)"
-    None
-    (Masc.Keeper_turn_driver.For_testing.max_execution_time_for_attempt
-       ~per_provider_timeout_s:123.0
-       ());
-  Alcotest.(check (option (float 0.0)))
-    "missing timeout stays disabled"
-    None
-    (Masc.Keeper_turn_driver.For_testing.max_execution_time_for_attempt ())
-
-(* KLV-DNS (RFC-keeper-liveness-ssot §6): before this fix, candidate
-   exhaustion always produced a plain [Agent_sdk.Error.Internal <free-text>],
-   so [Keeper_error_classify.is_runtime_exhausted_error] never fired for
-   DNS/network failures and the already-built Turn_consecutive_failures /
-   Auto_resume_with_backoff auto-pause path was unreachable — every DNS
-   outage fell back to the generic crash-restart-then-Dead path instead. *)
+(* Candidate exhaustion must retain its typed runtime-exhausted identity so a
+   DNS/network failure remains observable without relying on free-text error
+   matching. *)
 let test_dns_failure_exhaustion_classifies_as_runtime_exhausted () =
-  let dns_err =
-    Llm_provider.Http_client.NetworkError
-      { message = "getaddrinfo failed"; kind = Llm_provider.Http_client.Dns_failure }
-  in
   let mapped =
-    Masc.Keeper_turn_driver.For_testing.sdk_error_of_exhausted
-      ~runtime_id:"runtime.dns-test"
-      (Some dns_err)
+    Keeper_internal_error.sdk_error_of_masc_internal_error
+      (Keeper_internal_error.Runtime_exhausted
+         { runtime_id = "runtime.dns-test"
+         ; reason = Keeper_internal_error.Dns_failure
+         })
   in
   Alcotest.(check bool)
     "DNS exhaustion is a runtime-exhausted error"
@@ -2396,7 +1555,7 @@ let test_dns_failure_exhaustion_classifies_as_runtime_exhausted () =
     (Masc.Keeper_error_classify.is_runtime_exhausted_error mapped);
   Alcotest.(check bool)
     "DNS exhaustion is not auto-recoverable (counts toward crash threshold, \
-     per record_failure_and_maybe_escalate's counts_toward_crash)"
+     per record_failure_observation's counts_toward_crash)"
     false
     (Masc.Keeper_error_classify.is_auto_recoverable_turn_error mapped);
   match Keeper_internal_error.classify_masc_internal_error mapped with
@@ -2419,9 +1578,11 @@ let test_dns_failure_exhaustion_classifies_as_runtime_exhausted () =
 
 let test_no_candidates_exhaustion_classifies_as_no_providers_available () =
   let mapped =
-    Masc.Keeper_turn_driver.For_testing.sdk_error_of_exhausted
-      ~runtime_id:"runtime.no-candidates"
-      None
+    Keeper_internal_error.sdk_error_of_masc_internal_error
+      (Keeper_internal_error.Runtime_exhausted
+         { runtime_id = "runtime.no-candidates"
+         ; reason = Keeper_internal_error.No_providers_available
+         })
   in
   match Keeper_internal_error.classify_masc_internal_error mapped with
   | Some (Keeper_internal_error.Runtime_exhausted { reason; _ }) ->
@@ -2437,21 +1598,12 @@ let test_no_candidates_exhaustion_classifies_as_no_providers_available () =
       (Agent_sdk.Error.to_string mapped)
 
 let test_capacity_failure_exhaustion_classifies_as_capacity_exhausted () =
-  let capacity_err =
-    Llm_provider.Http_client.ProviderFailure
-      { kind =
-          Llm_provider.Http_client.Capacity_exhausted
-            { scope = Llm_provider.Http_client.Failure_scope_provider
-            ; retry_after = Some 30.0
-            ; model = Some "test-model"
-            }
-      ; message = "capacity exhausted"
-      }
-  in
   let mapped =
-    Masc.Keeper_turn_driver.For_testing.sdk_error_of_exhausted
-      ~runtime_id:"runtime.capacity-test"
-      (Some capacity_err)
+    Keeper_internal_error.sdk_error_of_masc_internal_error
+      (Keeper_internal_error.Runtime_exhausted
+         { runtime_id = "runtime.capacity-test"
+         ; reason = Keeper_internal_error.Capacity_exhausted
+         })
   in
   match Keeper_internal_error.classify_masc_internal_error mapped with
   | Some (Keeper_internal_error.Runtime_exhausted { reason; _ }) ->
@@ -2475,16 +1627,12 @@ let test_capacity_failure_exhaustion_classifies_as_capacity_exhausted () =
       (Agent_sdk.Error.to_string mapped)
 
 let test_session_conflict_exhaustion_preserves_typed_terminal_reason () =
-  let conflict_err =
-    Llm_provider.Http_client.ProviderTerminal
-      { kind = Llm_provider.Http_client.Session_conflict
-      ; message = "provider prose is not a MASC policy input"
-      }
-  in
   let mapped =
-    Masc.Keeper_turn_driver.For_testing.sdk_error_of_exhausted
-      ~runtime_id:"runtime.session-conflict"
-      (Some conflict_err)
+    Keeper_internal_error.sdk_error_of_masc_internal_error
+      (Keeper_internal_error.Runtime_exhausted
+         { runtime_id = "runtime.session-conflict"
+         ; reason = Keeper_internal_error.Session_conflict
+         })
   in
   match Keeper_internal_error.classify_masc_internal_error mapped with
   | Some (Keeper_internal_error.Runtime_exhausted { reason; _ }) ->
@@ -2551,9 +1699,9 @@ let () =
           Alcotest.test_case "accepted response passes through" `Quick
             test_accept_keeps_result;
           Alcotest.test_case
-            "typed recovery control stops bypass response acceptance"
+            "InputRequired bypasses response acceptance"
             `Quick
-            test_typed_recovery_control_stops_bypass_response_accept;
+            test_input_required_bypasses_response_accept;
           Alcotest.test_case
             "replay projection failure preserves provider success"
             `Quick
@@ -2574,48 +1722,10 @@ let () =
             "finalization does not surface hidden reasoning"
             `Quick
             test_finalization_does_not_surface_hidden_reasoning;
-          Alcotest.test_case
-            "recovery defer does not synthesize tool narration"
-            `Quick
-            test_recovery_defer_does_not_synthesize_tool_narration;
-          Alcotest.test_case
-            "runtime mapping preserves no-progress accept rejection"
-            `Quick
-            test_runtime_error_mapping_preserves_no_progress_accept_rejection;
-          Alcotest.test_case "last tool context classifies checkpoint tools" `Quick
-            test_last_tool_context_classifies_checkpoint_tool_use;
-          Alcotest.test_case
-            "last tool context treats workspace mutations as mutating"
-            `Quick
-            test_last_tool_context_treats_workspace_mutations_as_mutating;
-          Alcotest.test_case
-            "accept rejection reason includes last tool context"
-            `Quick
-            test_accept_reason_includes_last_tool_context;
-          Alcotest.test_case
-            "thinking-only after mutation then read does not try next candidate"
-            `Quick
-            test_thinking_only_after_mutation_then_read_does_not_try_next_candidate;
-          Alcotest.test_case
-            "historical mutation does not block current read-only retry"
-            `Quick
-            test_historical_mutation_does_not_block_current_read_only_retry;
-          Alcotest.test_case
-            "thinking-only after read-only WebFetch tries next candidate"
-            `Quick
-            test_thinking_only_after_read_only_webfetch_can_try_next_candidate;
-          Alcotest.test_case
-            "thinking-only after workspace mutation stays terminal"
-            `Quick
-            test_thinking_only_after_workspace_mutation_stays_terminal;
-          Alcotest.test_case
-            "read-only retry uses typed context, not reason tokens"
-            `Quick
-            test_read_only_retry_uses_typed_context_not_reason_tokens;
 	          Alcotest.test_case
-	            "direct no-progress retry uses shared budget decision"
+	            "direct no-progress retry uses runtime decision"
 	            `Quick
-	            test_direct_no_progress_retry_uses_shared_budget_decision;
+	            test_direct_no_progress_retry_uses_runtime_decision;
           Alcotest.test_case
             "degraded retry rejects empty runtime target"
             `Quick
@@ -2653,10 +1763,6 @@ let () =
             `Quick
             test_thinking_only_no_tool_can_try_next_candidate;
           Alcotest.test_case
-            "Retry_no_thinking gate is bounded and thinking-only-scoped (RFC-0271)"
-            `Quick
-            test_should_retry_no_thinking_gate;
-          Alcotest.test_case
             "Accept_rejected threads typed stop_reason (RFC-0271 §4.5)"
             `Quick
             test_accept_rejected_threads_stop_reason;
@@ -2666,16 +1772,12 @@ let () =
             test_accept_rejected_stop_reason_survives_codec;
           Alcotest.test_case "empty non-end-turn response is rejected" `Quick
             test_empty_non_end_turn_response_is_rejected;
-          Alcotest.test_case
-            "empty response after workspace mutation stays terminal"
-            `Quick
-            test_empty_after_workspace_mutation_stays_terminal;
           Alcotest.test_case "blank text non-end-turn response is rejected" `Quick
             test_blank_text_non_end_turn_response_is_rejected;
           Alcotest.test_case "custom predicate rejection stays distinct" `Quick
             test_custom_accept_reject_preserves_predicate_reason;
-          Alcotest.test_case "mixed non-progress rejection is diagnosed" `Quick
-            test_reject_reason_describes_mixed_non_progress_response;
+          Alcotest.test_case "media with tool result is deliverable" `Quick
+            test_media_with_tool_result_is_deliverable;
           Alcotest.test_case "sse progress classifies known deltas" `Quick
             test_sse_event_progress_kind_classifies_known_deltas;
           Alcotest.test_case
@@ -2683,13 +1785,9 @@ let () =
             `Quick
             test_registry_progress_on_event_records_only_watchdog_progress;
           Alcotest.test_case
-            "carrier-only stream still trips mid-turn no-progress"
+            "carrier-only stream remains observable without lifecycle gate"
             `Quick
-            test_carrier_only_stream_does_not_suppress_mid_turn_no_progress;
-          Alcotest.test_case
-            "keeper timeout is not forwarded to OAS hard deadline (RFC-0129)"
-            `Quick
-            test_per_provider_timeout_not_forwarded_to_oas_hard_deadline;
+            test_carrier_only_stream_remains_observable_without_lifecycle_gate;
           Alcotest.test_case
             "DNS failure exhaustion classifies as Runtime_exhausted (KLV-DNS)"
             `Quick

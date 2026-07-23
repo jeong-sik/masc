@@ -98,11 +98,6 @@ let test_transition_actions_cover_tla_next () =
     ~to_state:
       (F.Failed (F.Failure_runtime_unavailable { base = "ollama"; resolved = None }));
   check_action
-    F.LivelockBlocked
-    ~from_state:F.Runtime_routing
-    ~to_state:
-      (F.Failed (F.Failure_turn_livelock_blocked { reason = "cycle_cap" }));
-  check_action
     F.NoToolCapableProvider
     ~from_state:F.Runtime_routing
     ~to_state:
@@ -123,11 +118,6 @@ let test_transition_actions_cover_tla_next () =
   check_action F.ToolReturned ~from_state:F.Awaiting_tool_result ~to_state:F.Streaming;
   check_action F.StreamComplete ~from_state:F.Streaming ~to_state:F.Completing;
   check_action
-    F.ContractViolation
-    ~from_state:F.Streaming
-    ~to_state:
-      (F.Failed (F.Failure_completion_contract_violation { reason_code = "completion_contract" }));
-  check_action
     F.ReceiptLost
     ~from_state:F.Streaming
     ~to_state:
@@ -141,12 +131,7 @@ let test_transition_actions_cover_tla_next () =
     F.ProviderTimeout
     ~from_state:F.Streaming
     ~to_state:(F.Cancelled F.Cancelled_provider_timeout);
-  check_action F.ContractOk ~from_state:F.Completing ~to_state:F.Done;
-  check_action
-    F.ContractViolation
-    ~from_state:F.Completing
-    ~to_state:
-      (F.Failed (F.Failure_completion_contract_violation { reason_code = "passive_only" }));
+  check_action F.FinishTurn ~from_state:F.Completing ~to_state:F.Done;
   check_action
     F.ReceiptLost
     ~from_state:F.Completing
@@ -341,9 +326,11 @@ let test_terminal_stutter_requires_unchanged_stop_context () =
 let test_cancel_reason_labels_documented () =
   let pairs : (F.cancel_reason * string) list =
     [ F.Cancelled_supervisor_stop, "supervisor_stop"
+    ; F.Cancelled_external, "external_cancel"
     ; F.Cancelled_phase_gate_close, "phase_gate_close"
     ; F.Cancelled_provider_timeout, "provider_timeout"
     ; F.Cancelled_fleet_shutdown, "fleet_shutdown"
+    ; F.Cancelled_input_required, "input_required"
     ]
   in
   List.iter
@@ -363,10 +350,7 @@ let test_failure_reason_labels_documented () =
           { runtime_id = "tools"; detail = "no candidate supports tools" }
       , "no_capable_provider" )
     ; F.Failure_provider_error { kind = "k"; detail = "d" }, "provider_error"
-    ; F.Failure_completion_contract_violation { reason_code = "rc" }, "completion_contract_violation"
     ; F.Failure_receipt_lost { primary_error = "e"; fallback_path = None }, "receipt_lost"
-    ; ( F.Failure_turn_livelock_blocked { reason = "stuck_after_sec" }
-      , "turn_livelock_blocked" )
     ; F.Failure_runtime_error "msg", "runtime_error"
     ; ( F.Failure_unexpected_exception { exn = "Boom"; backtrace = None }
       , "unexpected_exception" )

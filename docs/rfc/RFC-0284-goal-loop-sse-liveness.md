@@ -1,7 +1,12 @@
 ---
 rfc: "0284"
 title: "Goal-loop status SSE liveness — server-side change detection extends the goals snapshot"
-status: Draft
+status: Superseded — RFC-0352 Path B (2026-07-21). The goal-loop OODA
+  surface this RFC made live (broadcast module, /goal-loop/status route,
+  goal_loop_status slice bridge, dashboard panel) was retired as a
+  dead-projection: the out-of-process producer was deleted first
+  (#25477), so every consumer read a file nothing writes. Do not
+  re-implement from this document.
 created: 2026-06-23
 updated: 2026-06-23
 author: vincent
@@ -51,12 +56,25 @@ fetch should be push/`useQuery`, not effect-on-mount).
 
 ## §2 Boundary — the worker is out-of-process (Python)
 
-The goal-loop worker is **not** an in-process OCaml fiber. It is a set of Python
-scripts implementing the OODA loop (`scripts/goal_loop_scheduler.py`,
-`scripts/observe_goal_loop_logs.py`, `scripts/orient_goal_loop_logs.py`,
-`scripts/decide_goal_loop_findings.py`, `scripts/verify_goal_loop_logs.py`,
-`scripts/goal_loop_status.py`, `scripts/goal_loop_anti_stagnation.py`). They run
-out-of-band and write `status.json`; the OCaml SSE server only **reads** it.
+The goal-loop worker was **not** an in-process OCaml fiber. It was a set of Python
+scripts implementing the OODA loop, which ran out-of-band and wrote `status.json`;
+the OCaml SSE server only **read** it.
+
+**All of those scripts were deleted on 2026-07-21** (#25477, per RFC-0000:781
+KILL): `goal_loop_scheduler.py`, `observe_goal_loop_logs.py`,
+`orient_goal_loop_logs.py`, `decide_goal_loop_findings.py`,
+`verify_goal_loop_logs.py`, `goal_loop_status.py`,
+`goal_loop_anti_stagnation.py`, `goal_loop_live_replay.py`,
+`validate_goal_loop_act_map.py`, `validate_goal_loop_recovery_slo.py`. Nothing
+writes `status.json` any more, so the broadcast loop below fires only if a
+pre-existing file changes on disk. The fate of the remaining read side
+(`lib/server/server_dashboard_http_goal_loop_broadcast.ml` and the dashboard
+panel) is RFC-0352 Path-decision scope — it was deliberately left in place rather
+than removed alongside the writer.
+
+The boundary argument below is kept because it is the reason the broadcast
+trigger lives on the server, and it still constrains any future re-introduction
+of an out-of-process writer.
 
 Consequence: the worker cannot call the in-process `Sse.broadcast`. The
 status-file is the boundary between the non-deterministic Python OODA worker and

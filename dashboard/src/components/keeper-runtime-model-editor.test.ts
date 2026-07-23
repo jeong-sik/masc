@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { KeeperConfig } from '../types'
-import type { KeeperConfigLoadStatus } from './keeper-detail-source'
+import type { KeeperConfigLoadStatus } from './keeper-config-state'
 
 // Mutable test state, hoisted so the mock factories below can close over it.
 const refs = vi.hoisted(() => ({
@@ -209,12 +209,8 @@ function makeRuntimeProvider(runtimeId: string, providerName: string, modelName:
         has_capabilities: true,
         behavior_capabilities: {
           supports_inline_tools: true,
-          requires_per_keeper_bridging_for_bound_actor_tools: true,
-          identity_runtime_mcp_header_keys: ['x-masc-keeper'],
           argv_prompt_preflight: false,
           uses_anthropic_caching: false,
-          max_turns_per_attempt: null,
-          tolerates_bound_actor_fallback: false,
         },
         custom_header_count: 1,
         connect_timeout_s: 30,
@@ -537,5 +533,75 @@ describe('KeeperRuntimeModelEditor (read-only card)', () => {
 
     expect(container.querySelector('[data-testid="keeper-runtime-assignment-error"]')?.textContent)
       .toContain('runtime resolved unavailable')
+  })
+
+  // Sticky failover observability: a lane-routed keeper's next turn starts
+  // from the lane's remembered last-good candidate, so the operator sees it
+  // (with age) next to the assignment badge.
+  it('shows the sticky lane candidate with age for a lane-routed keeper', async () => {
+    refs.config = makeConfig({ selected_runtime_id: 'a.one' })
+    refs.resolved.mockResolvedValue(makeRuntimeResolved({
+      lanes: [
+        { id: 'lane-x', runtime_ids: ['a.one', 'b.two'], preferred_candidate: 'b.two', preferred_at_ts: Date.now() / 1000 - 720 },
+      ],
+      assignments: [
+        { keeper: 'lane-keeper', assignment_source: 'explicit', resolved: { kind: 'lane', id: 'lane-x' } },
+      ],
+    }))
+    render(
+      html`<${KeeperRuntimeModelEditor} keeperName="lane-keeper" onOpenRuntimeConfig=${vi.fn()} />`,
+      container,
+    )
+    await flush()
+    await flush()
+
+    expect(container.querySelector('[data-testid="keeper-runtime-assignment-source"]')?.textContent?.trim())
+      .toBe('explicit → lane-x')
+    const badge = container.querySelector('[data-testid="keeper-runtime-lane-sticky"]')
+    expect(badge?.getAttribute('data-sticky-candidate')).toBe('b.two')
+    expect(badge?.textContent).toContain('sticky → b.two')
+    expect(badge?.textContent).toContain('12분')
+  })
+
+  it('renders no sticky badge when the lane has no live preference', async () => {
+    refs.config = makeConfig({ selected_runtime_id: 'a.one' })
+    refs.resolved.mockResolvedValue(makeRuntimeResolved({
+      lanes: [
+        { id: 'lane-x', runtime_ids: ['a.one', 'b.two'], preferred_candidate: null, preferred_at_ts: null },
+      ],
+      assignments: [
+        { keeper: 'lane-keeper', assignment_source: 'explicit', resolved: { kind: 'lane', id: 'lane-x' } },
+      ],
+    }))
+    render(
+      html`<${KeeperRuntimeModelEditor} keeperName="lane-keeper" onOpenRuntimeConfig=${vi.fn()} />`,
+      container,
+    )
+    await flush()
+    await flush()
+
+    expect(container.querySelector('[data-testid="keeper-runtime-lane-sticky"]')).toBeNull()
+    expect(container.querySelector('[data-testid="keeper-runtime-assignment-source"]')?.textContent?.trim())
+      .toBe('explicit → lane-x')
+  })
+
+  it('renders no sticky badge for a single_runtime assignment (no lane in play)', async () => {
+    refs.config = makeConfig({ selected_runtime_id: 'a.one' })
+    refs.resolved.mockResolvedValue(makeRuntimeResolved({
+      lanes: [
+        { id: 'lane-x', runtime_ids: ['a.one', 'b.two'], preferred_candidate: 'b.two', preferred_at_ts: Date.now() / 1000 - 60 },
+      ],
+      assignments: [
+        { keeper: 'single-keeper', assignment_source: 'explicit', resolved: { kind: 'single_runtime', id: 'a.one' } },
+      ],
+    }))
+    render(
+      html`<${KeeperRuntimeModelEditor} keeperName="single-keeper" onOpenRuntimeConfig=${vi.fn()} />`,
+      container,
+    )
+    await flush()
+    await flush()
+
+    expect(container.querySelector('[data-testid="keeper-runtime-lane-sticky"]')).toBeNull()
   })
 })

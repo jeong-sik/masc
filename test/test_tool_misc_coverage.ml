@@ -6,7 +6,10 @@ external unsetenv : string -> unit = "masc_test_unsetenv"
 
 let () = Random.self_init ()
 let () = Mirage_crypto_rng_unix.use_default ()
-let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
+let () =
+  Server_startup_state.mark_state_ready
+    ~backend:Server_startup_state.Filesystem_backend
+  |> Result.get_ok
 let () = ignore Dashboard.force_link
 let str_contains s sub =
   let len_s = String.length s in
@@ -202,25 +205,14 @@ let () = test "dispatch_gc" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
-(* Test dispatch gc with default days *)
-let () = test "dispatch_gc_default" (fun () ->
+(* GC has no implicit retention policy. *)
+let () = test "dispatch_gc_requires_days" (fun () ->
   let ctx = make_test_ctx () in
   let args = `Assoc [] in
   match Tool_misc.dispatch ctx ~name:"masc_gc" ~args with
   | Some result ->
-      assert (Tool_result.is_success result);
-      assert (String.length (Tool_result.message result) > 0)
-  | None -> failwith "dispatch returned None"
-)
-
-(* Test dispatch cleanup_zombies *)
-let () = test "dispatch_cleanup_zombies" (fun () ->
-  let ctx = make_test_ctx () in
-  let args = `Assoc [] in
-  match Tool_misc.dispatch ctx ~name:"masc_cleanup_zombies" ~args with
-  | Some result ->
-      assert (Tool_result.is_success result);
-      assert (String.length (Tool_result.message result) > 0)
+      assert (not (Tool_result.is_success result));
+      assert (str_contains (Tool_result.message result) "days is required")
   | None -> failwith "dispatch returned None"
 )
 
@@ -235,50 +227,14 @@ let () = test "dispatch_web_search_requires_query" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
-let () = test "dispatch_web_search_rejects_long_query" (fun () ->
-  let ctx = make_test_ctx () in
-  let query = String.make 501 'a' in
-  let args = `Assoc [ ("query", `String query) ] in
-  match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
-  | Some result ->
-      assert (not (Tool_result.is_success result));
-      assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
-      assert (Tool_result.message result = "query must be at most 500 characters")
-  | None -> failwith "dispatch returned None"
-)
-
-let () = test "dispatch_web_search_rejects_secret_like_query" (fun () ->
-  let ctx = make_test_ctx () in
-  let args = `Assoc [ ("query", `String "Authorization: Bearer secret-token") ] in
-  match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
-  | Some result ->
-      assert (not (Tool_result.is_success result));
-      assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
-      assert
-        (Tool_result.message result
-         = "query looks like it may contain secrets; refine it before using web search")
-  | None -> failwith "dispatch returned None"
-)
-
-let () = test "validate_web_search_allows_task_id_with_sk_substring" (fun () ->
+let () = test "validate_web_search_preserves_opaque_query" (fun () ->
   match
     Tool_misc_web_search.validate_query
-      "task-352 destructive check tools hardcoded"
+      "Authorization: Bearer example-token task-352"
   with
-  | Ok query -> assert (query = "task-352 destructive check tools hardcoded")
+  | Ok query ->
+    assert (query = "Authorization: Bearer example-token task-352")
   | Error message -> failwith message
-)
-
-let () = test "validate_web_search_rejects_sk_prefixed_secret_token" (fun () ->
-  match
-    Tool_misc_web_search.validate_query
-      "investigate leaked key sk-1234567890abcdefghijklmnop"
-  with
-  | Ok _ -> failwith "expected secret-like query to be rejected"
-  | Error message ->
-      assert
-        (message
-         = "query looks like it may contain secrets; refine it before using web search")
 )
 
 let () = test "parse_bing_rss_items" (fun () ->

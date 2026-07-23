@@ -149,6 +149,7 @@ let remember_mcp_profile ?otel_transport_context session_id profile =
 
 let forget_mcp_session session_id =
   record_mcp_server_session_duration session_id;
+  Client_registry_eio.unregister_mcp_session session_id;
   atomic_update protocol_version_by_session (fun map -> SMap.remove session_id map);
   atomic_update mcp_profile_by_session (fun map -> SMap.remove session_id map);
   atomic_update session_last_active_sse (fun map -> SMap.remove session_id map);
@@ -391,22 +392,11 @@ let reap_stale_sessions ~is_active_session =
     ) (Atomic.get protocol_version_by_session) ([], 0)
   in
   if stale <> [] then begin
-    List.iter record_mcp_server_session_duration stale;
-    atomic_update protocol_version_by_session (fun map ->
-      List.fold_left (fun m sid -> SMap.remove sid m) map stale
-    );
-    atomic_update mcp_profile_by_session (fun map ->
-      List.fold_left (fun m sid -> SMap.remove sid m) map stale
-    );
-    atomic_update session_last_active_sse (fun map ->
-      List.fold_left (fun m sid -> SMap.remove sid m) map stale
-    );
-    atomic_update session_started_at (fun map ->
-      List.fold_left (fun m sid -> SMap.remove sid m) map stale
-    );
-    atomic_update session_transport_context (fun map ->
-      List.fold_left (fun m sid -> SMap.remove sid m) map stale
-    )
+    (* Reaping is a transport-driven session termination, so it must pass
+       through the same lifecycle boundary as an explicit MCP DELETE.
+       Removing only the HTTP maps leaks the corresponding client-registry
+       session and resolved identity forever. *)
+    List.iter forget_mcp_session stale
   end;
   if kept_by_grace > 0 then
     Log.Server.info "session grace: %d sessions kept (inactive but within %.0fs grace)"

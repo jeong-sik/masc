@@ -7,7 +7,9 @@
     {!Keeper_dead_revival_transaction}; this module deliberately contains no
     MASC/OAS runtime policy. *)
 
-type purpose = Keeper_registry_types.lifecycle_transaction_purpose = Dead_revival
+type purpose = Keeper_registry_types.lifecycle_transaction_purpose =
+  | Dead_revival
+  | Paused_work_disposition
 
 type token
 
@@ -45,8 +47,9 @@ val owner_id : token -> string
 val expected_generation : token -> int
 val release : token -> release_outcome
 
-(** Serialize one ownership check plus authority mutation for this keeper key.
-    This is a per-keeper mutex, never a fleet-wide lock. *)
+(** Serialize one ownership check plus authority mutation for this keeper key
+    across Eio fibers and non-Eio callers. This is a per-keeper cooperative
+    mutex, never a fleet-wide lock. *)
 val with_key_lock :
   base_path:string ->
   keeper_name:string ->

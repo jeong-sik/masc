@@ -28,26 +28,12 @@ val active_ownership_conflict_for_claim :
 
 (** {1 Task claiming} *)
 
-(** Typed outcome of a successful claim.
-
-    [auto_released_task_ids] is legacy and always empty.
-    Auto-release of previously Claimed tasks was removed in #18839
-    to stop the hot-potato pattern where a keeper churned through
-    [task_claim_next] without finishing. Keepers must now explicitly
-    release tasks via [keeper_task_release] before claiming another.
-    The field is retained for backward compatibility with existing
-    MCP consumers that pattern-match on the record shape. *)
-type claim_outcome = {
-  message : string;
-  auto_released_task_ids : string list;
-}
-
 val claim_task :
   config -> agent_name:string -> task_id:string -> string
 
 val claim_task_r :
   config -> agent_name:string -> task_id:string ->
-  unit -> claim_outcome Masc_domain.masc_result
+  unit -> string Masc_domain.masc_result
 
 (** {1 Release/reclaim helpers} *)
 

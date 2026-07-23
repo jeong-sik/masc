@@ -10,67 +10,26 @@ open Masc_domain
     test here, instead of silently dropping from the JSON Schema. *)
 let dashboard_scope_enum_strings = [ "all"; "current" ]
 
-(** Issue #8493: [masc_config] category filter strings mirror
-    [Env_config_snapshot.valid_config_category_strings]. This library
-    depends only on [masc_types], so it cannot depend on [masc_config]
-    directly without reintroducing the cycle this split avoids. The
-    sync test in [test/test_types.ml :: config_category_ssot] keeps this
-    mirror aligned with the producer-side SSOT. *)
-let config_category_enum_strings =
-  [ "server"
-  ; "auth"
-  ; "transport"
-  ; "storage"
-  ; "runtime"
-  ; "rate_limiting"
-  ; "inference"
-  ; "autonomy"
-  ; "level2"
-  ; "dashboard"
-  ; "economy"
-  ; "governance"
-  ; "channel"
-  ; "process"
-  ; "worker"
-  ; "web_search"
-  ; "session"
-  ]
-;;
-
 type control_operation =
   | Pause
   | Resume
+  | Pause_status
 
-let control_operations = [ Pause; Resume ]
+let control_operations = [ Pause; Resume; Pause_status ]
 
 let control_operation_id = function
   | Pause -> "pause"
   | Resume -> "resume"
+  | Pause_status -> "pause_status"
 ;;
 
 let control_schema = function
   | Pause -> Tool_descriptors_gen.masc_pause_schema
   | Resume -> Tool_descriptors_gen.masc_resume_schema
+  | Pause_status -> Tool_descriptors_gen.masc_pause_status_schema
 ;;
 
 let control_schemas = List.map control_schema control_operations
-
-let surface_audit_schema ~remote =
-  { name = "masc_surface_audit"
-  ; description =
-      (if remote
-       then
-         "Read dashboard surface readiness, exposure policy, and evidence references. Use this before pointing operators to an experimental surface."
-       else
-         "Read dashboard surface readiness, exposure policy, and evidence references. Use this to decide whether a surface belongs in main navigation, Lab, or should stay hidden.")
-  ; input_schema =
-      `Assoc
-        [ "type", `String "object"
-        ; "properties", `Assoc [ "surface_id", `Assoc [ "type", `String "string" ] ]
-        ; "additionalProperties", `Bool false
-        ]
-  }
-;;
 
 (* [schemas] is the generated public misc schema set. Operator control schemas
    use the dedicated typed projection above so they remain registered without

@@ -34,7 +34,6 @@ let post_to_yojson (p : post) : Yojson.Safe.t =
      ; "title", `String p.title
      ; "body", `String p.body
      ; "post_kind", `String (post_kind_to_string p.post_kind)
-     ; "classification_reason", `String (post_classification_reason p)
      ; "content", `String p.content
      ; "visibility", `String (visibility_to_string p.visibility)
      ; "created_at", `Float p.created_at
@@ -54,6 +53,9 @@ let post_to_yojson (p : post) : Yojson.Safe.t =
         | None -> [])
      @ (match p.origin with
         | Some o -> [ "origin", post_origin_to_yojson o ]
+        | None -> [])
+     @ (match post_classification_reason p with
+        | Some reason -> [ "classification_reason", `String reason ]
         | None -> [])
      @
      match p.meta_json with

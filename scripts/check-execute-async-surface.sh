@@ -54,13 +54,13 @@ require_normalized_text \
   "It does not expose \`job_id\`, \`request_id\`, \`poll\`, or \`cancel\` fields." \
   "async lifecycle field exclusion in Execute runbook"
 
-require_text \
+require_normalized_text \
   "lib/tool_surface/tool_shard_types_schemas_execute.ml" \
-  "Accepted fields: executable, argv, pipeline, env, cwd, timeout_sec, stdin, stdout, stderr." \
+  "Accepted fields: argv, pipeline, env, cwd, timeout_sec, stdin, stdout, stderr." \
   "typed Execute accepted-field list"
 require_normalized_text \
   "lib/tool_surface/tool_shard_types_schemas_execute.ml" \
-  "this tool no longer \\ exposes background task lifecycle tools" \
+  "this tool does not expose background task lifecycle tools" \
   "typed Execute background lifecycle exclusion"
 reject_text \
   "lib/tool_surface/tool_shard_types_schemas_execute.ml" \

@@ -23,7 +23,7 @@ let paired_lifecycle_origin origin event =
                "paired lifecycle event requires origin=post_turn_lifecycle%s; got %s"
                (match event with
                 | Keeper_state_machine.Compaction_started
-                | Keeper_state_machine.Compaction_completed _
+                | Keeper_state_machine.Compaction_completed
                 | Keeper_state_machine.Compaction_failed _ -> " or origin=operator_compact"
                 | _ -> "")
                (lifecycle_event_origin_to_string origin)

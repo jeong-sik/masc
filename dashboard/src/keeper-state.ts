@@ -649,6 +649,12 @@ function normalizeBlocks(raw: unknown, role: KeeperConversationRole): ChatBlock[
         const trace = normalizeTraceSteps(item.trace)
         return trace && trace.length > 0 ? { t: 'trace', trace } : null
       }
+      if (t === 'thinking') {
+        const content = typeof item.content === 'string' ? item.content : undefined
+        const redacted = item.redacted === true
+        if (content === undefined) return null
+        return { t: 'thinking', content: redacted ? '' : content, redacted }
+      }
       if (t === 'link') {
         const url = asString(item.url)
         const title = asString(item.title)
@@ -859,14 +865,15 @@ function normalizeHistoryEntry(
   const rawText = asString(raw.content) ?? asString(raw.preview) ?? ''
   const attachments = normalizeAttachments(raw.attachments)
   const audio = normalizeAudioClip(raw.audio) ?? null
-  // Accept attachment-only or audio-only rows: a user may send a file/image
-  // with no text, or the assistant may emit a synthesized voice clip with no
-  // generated text. Without this guard those persisted rows are dropped on
-  // reload even though they are renderable server-side.
-  if (!rawText && !attachments?.length && !audio) return null
+  const serverBlocks = normalizeBlocks(raw.blocks, role)
+  const hasRenderableBlocks = (serverBlocks?.length ?? 0) > 0
+  // Accept attachment-only, audio-only, and validated block-only rows. In
+  // particular, persisted thinking/trace/fusion blocks may intentionally have
+  // no visible `content`; rejecting them here erased completed work on reload.
+  if (!rawText && !attachments?.length && !audio && !hasRenderableBlocks) return null
   const source = normalizeConversationSource(raw.source, role, rawText, previousSource)
   const text = formatKeeperVisibleReply(rawText)
-  if (!text && !attachments?.length && !audio) return null
+  if (!text && !attachments?.length && !audio && !hasRenderableBlocks) return null
   const timestamp = toIsoTimestamp(raw.ts_unix) ?? toIsoTimestamp(raw.timestamp)
   const label = role === 'assistant' && keeperName ? keeperName : roleLabel(role)
   const surface = isRecord(raw.surface) ? (raw.surface as unknown as SurfaceRef) : null
@@ -884,7 +891,6 @@ function normalizeHistoryEntry(
   // semantics and must not inherit the durable-row reassurance.
   const delivery: KeeperConversationDelivery =
     asString(raw.kind) === 'transport_failure' ? 'transport_failure' : 'history'
-  const serverBlocks = normalizeBlocks(raw.blocks, role)
   const blocks = serverBlocks
     ?? ((role === 'assistant' || role === 'system') && text
       ? parseTextToChatBlocks(text)

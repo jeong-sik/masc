@@ -8,7 +8,6 @@
     {!Config_error} on missing/invalid environment variables.
 
     Usage:
-      let threshold = Env_config.Zombie.threshold_seconds
       let lock_timeout = Env_config.Lock.timeout_seconds
 *)
 
@@ -506,8 +505,7 @@ let personas_dir_env_key = "MASC_PERSONAS_DIR"
    identifier strings, not as readers. *)
 
 (** SSOT for the MASC_DATA_DIR env-var name (issue 8352).
-    Overrides [<base_path>/data] as the root for contract verdicts and other
-    runtime data stores. Read by cdal_verdict_gate and cdal_eval_v1. *)
+    Overrides [<base_path>/data] as the root for runtime data stores. *)
 let data_dir_env_key = "MASC_DATA_DIR"
 
 (** Data directory override. *)
@@ -546,7 +544,6 @@ let log_routine_level_env_key = "MASC_LOG_ROUTINE_LEVEL"
 let telemetry_enabled_env_key = "MASC_TELEMETRY_ENABLED"
 (* [parse_warn_env_key] is defined near the top of this module (next to the
    malformed handler that consumes it). *)
-let governance_level_env_key = "MASC_GOVERNANCE_LEVEL"
 
 (** Log level string (e.g. "debug", "info", "warn", "error"). *)
 let log_level_opt () =
@@ -561,20 +558,6 @@ let telemetry_enabled () =
     [MASC_PARSE_WARN]. Default: false (warn + use default). *)
 let parse_warn_enabled () = parse_strict_mode ()
 
-(** Governance level. Set at runtime by server_runtime_bootstrap.
-    Valid: "production", "development", etc. Default: "production". *)
-let governance_level () =
-  get_string ~default:"production" governance_level_env_key
-  |> String.lowercase_ascii
-
-let disable_hitl_env_key = "MASC_DISABLE_HITL"
-
-(** Whether to disable HITL (human-in-the-loop) approval gates. Default: false.
-    @category Security
-    @ops_class operator *)
-let disable_hitl () =
-  get_bool ~default:false disable_hitl_env_key
-
 (** {1 Build Identity} *)
 
 (** Git commit hash override for build identity. *)
@@ -586,10 +569,3 @@ let pubsub_max_messages () =
   get_int ~default:1000 "MASC_PUBSUB_MAX_MESSAGES"
 
 (** {1 Keeper Defaults} *)
-
-(** Default sandbox profile for keepers. Default: "local".
-    Set to "docker" to default all keepers to containerized execution. *)
-let keeper_default_sandbox_profile_raw () =
-  get_string ~default:"local" "MASC_KEEPER_DEFAULT_SANDBOX_PROFILE"
-
-(** {1 Zombie Detection / Cleanup Configuration} *)

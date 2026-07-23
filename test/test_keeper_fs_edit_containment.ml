@@ -48,8 +48,8 @@ let make_meta name =
       [ "name", `String name
       ; "agent_name", `String ("agent-" ^ name)
       ; "trace_id", `String ("trace-" ^ name)
-      ; "goal", `String "write containment test"
       ; "sandbox_profile", `String "docker"
+      ; "always_allow", `Bool true
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -60,31 +60,45 @@ let make_meta name =
 let with_eio_fs f =
   Eio_main.run
   @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run
+  @@ fun sw ->
+  let fs = Eio.Stdenv.fs env in
+  Fs_compat.set_fs fs;
   Process_eio.init
     ~cwd_default:(Eio.Stdenv.cwd env)
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock:(Eio.Stdenv.clock env);
-  f ()
+  f ~fs ~sw ()
 ;;
 
 let setup f =
   with_eio_fs
-  @@ fun () ->
+  @@ fun ~fs ~sw () ->
   let base = temp_dir () in
   ensure_dir (Filename.concat base Common.masc_dirname);
   Fun.protect
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
-       Keeper_registry.clear ();
+       Keeper_registry.For_testing.clear ();
        let config = Workspace.default_config base in
-       let meta = make_meta "tester" in
+       let meta = { (make_meta "tester") with always_allow = Some true } in
        let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
        ensure_dir playground;
        let (_registered : Keeper_registry.registry_entry) =
-         Keeper_registry.register ~base_path:base meta.name meta
+         Keeper_registry.For_testing.register ~base_path:base meta.name meta
        in
-       f ~config ~meta ~playground)
+       Masc_test_deps.with_publication_recovery_registry
+         ~sw
+         ~fs
+         ~registry_root:(Workspace.masc_root_dir config)
+       @@ fun registry ->
+       let publication_recovery =
+         { Masc.Keeper_publication_recovery_availability.provider =
+             Masc_test_deps.publication_recovery_provider registry
+         ; keeper_name = meta.name
+         }
+       in
+       f ~config ~meta ~playground ~publication_recovery)
 ;;
 
 let parse raw = Yojson.Safe.from_string raw
@@ -93,26 +107,9 @@ let parse_ok raw =
   parse raw |> Json.member "ok" |> Json.to_bool_option |> Option.value ~default:false
 ;;
 
-let parse_error raw = parse raw |> Json.member "error" |> Json.to_string_option
-
-let contains_substring ~needle text =
-  let nlen = String.length needle in
-  let tlen = String.length text in
-  let rec loop i =
-    if nlen = 0
-    then true
-    else if i + nlen > tlen
-    then false
-    else if String.sub text i nlen = needle
-    then true
-    else loop (i + 1)
-  in
-  loop 0
-;;
-
-let test_docker_write_blocks_project_root_even_if_allowlisted () =
+let test_docker_write_allows_explicit_root () =
   setup
-  @@ fun ~config ~meta ~playground:_ ->
+  @@ fun ~config ~meta ~playground:_ ~publication_recovery ->
   let meta = { meta with allowed_paths = [ config.base_path ] } in
   Keeper_registry.update_meta ~base_path:config.base_path meta.name meta;
   let path = Filename.concat config.base_path "root-write.txt" in
@@ -120,41 +117,38 @@ let test_docker_write_blocks_project_root_even_if_allowlisted () =
     Keeper_tool_filesystem_runtime.handle_file_write
       ~turn_sandbox_factory:None
       ~config
-      ~keeper_name:meta.name
+      ~meta
+      ~publication_recovery
       ~args:
         (`Assoc
             [ "path", `String path
             ; "mode", `String "overwrite"
             ; "content", `String "must not land"
             ])
+      ()
   in
-  Alcotest.(check bool) "ok=false" false (parse_ok raw);
-  (match parse_error raw with
-   | None -> Alcotest.fail "expected containment error"
-   | Some msg ->
-     Alcotest.(check bool)
-       "error mentions symmetric sandbox guard"
-       true
-       (contains_substring ~needle:"symmetric_sandbox_blocked" msg));
-  Alcotest.(check bool) "root file not created" false (Fs_compat.file_exists path)
+  if not (parse_ok raw) then Alcotest.failf "expected ok response, got: %s" raw;
+  Alcotest.(check string) "content landed" "must not land" (Fs_compat.load_file path)
 ;;
 
 let test_docker_write_allows_playground () =
   setup
-  @@ fun ~config ~meta ~playground ->
+  @@ fun ~config ~meta ~playground ~publication_recovery ->
   let path = Filename.concat playground "mind/allowed.txt" in
   ensure_dir (Filename.dirname path);
   let raw =
     Keeper_tool_filesystem_runtime.handle_file_write
       ~turn_sandbox_factory:None
       ~config
-      ~keeper_name:meta.name
+      ~meta
+      ~publication_recovery
       ~args:
         (`Assoc
             [ "path", `String path
             ; "mode", `String "overwrite"
             ; "content", `String "allowed"
             ])
+      ()
   in
   if not (parse_ok raw) then Alcotest.failf "expected ok response, got: %s" raw;
   Alcotest.(check string) "content landed" "allowed" (Fs_compat.load_file path)
@@ -165,9 +159,9 @@ let () =
     "Keeper_fs_edit_containment"
     [ ( "fs_edit"
       , [ Alcotest.test_case
-            "docker write blocks project root even if allowlisted"
+            "docker write allows explicit root outside playground"
             `Quick
-            test_docker_write_blocks_project_root_even_if_allowlisted
+            test_docker_write_allows_explicit_root
         ; Alcotest.test_case
             "docker write allows playground"
             `Quick

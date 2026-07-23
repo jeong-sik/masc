@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { navigate, route } from '../../router'
 import { requestConfirm } from './confirm-dialog'
-import { runGarbageCollection, cleanupZombies } from '../flow-control/flow-control-state'
+import { runGarbageCollection } from '../flow-control/flow-control-state'
 import { missionSnapshot, missionAgentBriefs, missionKeeperBriefs } from '../../mission-signals'
 import { formatCommandTargetSection, formatCommandTargetSummary } from '../../runtime-counts'
 
@@ -86,15 +86,15 @@ export function CommandPalette({ openOnMount = false }: CommandPaletteProps = {}
         id: 'nav-command',
         title: '운영 화면으로 이동 (Operations)',
         section: 'Navigation',
-        keywords: 'control admin ops governance intervene',
+        keywords: 'control admin ops gate hitl intervene',
         handler: () => navigate('command')
       },
       {
-        id: 'nav-governance',
-        title: '거버넌스로 이동 (Governance)',
+        id: 'nav-gate',
+        title: 'Gate·HITL로 이동',
         section: 'Navigation',
         keywords: 'approval review hitl judge',
-        handler: () => navigate('command', { section: 'operations' })
+        handler: () => navigate('command', { section: 'operations', view: 'gate' })
       },
       {
         id: 'nav-lab',
@@ -133,16 +133,6 @@ export function CommandPalette({ openOnMount = false }: CommandPaletteProps = {}
         handler: async () => {
           const confirmed = await requestConfirm({ title: '유지보수', message: 'GC를 실행합니까?' })
           if (confirmed) void runGarbageCollection()
-        }
-      },
-      {
-        id: 'action-zombie',
-        title: '유지보수: 좀비 에이전트 정리',
-        section: 'System Ops',
-        keywords: 'kill process clear',
-        handler: async () => {
-          const confirmed = await requestConfirm({ title: '유지보수', message: '좀비 에이전트를 정리합니까?', tone: 'danger' })
-          if (confirmed) void cleanupZombies()
         }
       }
     ]

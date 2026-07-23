@@ -205,17 +205,6 @@ let safe_read_backlog (ctx : context) =
     { Masc_domain.tasks = []; last_updated = Masc_domain.now_iso (); version = 1 }
 ;;
 
-let safe_is_zombie_agent ?agent_type ?agent_meta ~agent_name last_seen =
-  try Workspace.is_zombie_agent ?agent_type ?agent_meta ~agent_name last_seen with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    Log.Workspace.warn
-      "is_zombie_agent failed for %s: %s"
-      agent_name
-      (Stdlib.Printexc.to_string exn);
-    false
-;;
-
 let todo_task_has_completed_deliverable_conflict (ctx : context) (task : Masc_domain.task)
   =
   match task.task_status with
@@ -363,26 +352,6 @@ let status_summary_string ~task_list_projection (ctx : context) =
       | Some _ | None -> agent)
     |> List.sort (fun (a : Masc_domain.agent) (b : Masc_domain.agent) ->
       String.compare a.name b.name)
-  in
-  let agents_with_state =
-    List.map
-      (fun (agent : Masc_domain.agent) ->
-         Workspace_query.safe_yield ();
-         let is_zombie =
-             safe_is_zombie_agent
-               ~agent_type:agent.agent_type
-               ?agent_meta:agent.meta
-               ~agent_name:agent.name
-               agent.last_seen
-         in
-         agent, is_zombie)
-      agents
-  in
-  let zombie_count =
-    List.fold_left
-      (fun acc (_, is_zombie) -> if is_zombie then acc + 1 else acc)
-      0
-      agents_with_state
   in
   let ( active_tasks
       , todo_count
@@ -560,16 +529,6 @@ let status_summary_string ~task_list_projection (ctx : context) =
           ]
       else items
     in
-    let items =
-      if zombie_count > 0
-      then
-        items
-        @ [ Printf.sprintf
-              "%d stale agent(s) are still visible in the namespace."
-              zombie_count
-          ]
-      else items
-    in
     if fresh_todo_count > 0 && Stdlib.List.length binding.assigned_task_ids = 0
     then
       items
@@ -586,7 +545,7 @@ let status_summary_string ~task_list_projection (ctx : context) =
     ~credential_blocked
     ~current_task
     ~effective_cluster_name
-    ~agents_with_state
+    ~agents
     ~active_tasks
     ~todo_count
     ~claimed_count
@@ -717,9 +676,7 @@ let dispatch_bindings : (string * dispatch_handler) list =
   [ "masc_heartbeat", handle_heartbeat
   ; "masc_goal_list", Workspace_goals.handle_goal_list
   ; "masc_goal_upsert", Workspace_goals.handle_goal_upsert
-  ; "masc_goal_hygiene_review", Workspace_goals.handle_goal_hygiene_review
   ; "masc_goal_transition", Workspace_goals.handle_goal_transition
-  ; "masc_goal_verify", Workspace_goals.handle_goal_verify
   ; "masc_reset", handle_reset
   ; "masc_check", handle_check
   ]
@@ -768,12 +725,9 @@ let schemas = Tool_schemas_workspace.schemas
 
 let tool_spec_read_only = [ "masc_status"; "masc_check"; "masc_goal_list" ];;
 
-let tool_spec_system_internal = [ "masc_reset" ]
-
 let () =
   List.iter
     (fun (s : Masc_domain.tool_schema) ->
-       let is_system = List.mem s.name tool_spec_system_internal in
        Tool_spec.register
          (Tool_spec.create
             ~name:s.name
@@ -782,9 +736,6 @@ let () =
             ~input_schema:s.input_schema
             ~handler_binding:Tag_dispatch
             ~is_read_only:(List.mem s.name tool_spec_read_only)
-            ~is_idempotent:(List.mem s.name tool_spec_read_only)
-            ~visibility:(if is_system then Tool_catalog.Hidden else Tool_catalog.Default)
-            ~allow_direct_call_when_hidden:is_system
             ()))
     schemas
 ;;

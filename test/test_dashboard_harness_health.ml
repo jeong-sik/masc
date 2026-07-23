@@ -36,16 +36,13 @@ let record_wake_payload ~trace_id =
     ~keeper_name:"keeper-harness"
     ~trace_id
     ~turn_index:7
-    ~model_id:"provider/private-model"
     ~context_window:4096
-    ~approx_body_bytes:100
     ~system_prompt_bytes:10
-    ~tool_defs_bytes:20
-    ~messages_bytes:70
+    ~tool_schema_json_bytes:20
+    ~message_content_bytes:70
     ~message_count:3
     ~role_counts:[ "user", 1; "assistant", 2 ]
     ~tool_count:4
-    ~has_compact_happened:false
 
 let test_wake_payload_store_round_trip () =
   reset_after @@ fun () ->
@@ -59,9 +56,10 @@ let test_wake_payload_store_round_trip () =
     check string "trace" "trace-round-trip" event.trace_id;
     check int "turn index" 7 event.turn_index;
     check int "context window" 4096 event.context_window;
-    check int "approx bytes" 100 event.approx_body_bytes;
-    check int "tool count" 4 event.tool_count;
-    check bool "compact flag" false event.has_compact_happened
+    check int "system prompt bytes" 10 event.system_prompt_bytes;
+    check int "tool schema JSON bytes" 20 event.tool_schema_json_bytes;
+    check int "message content bytes" 70 event.message_content_bytes;
+    check int "tool count" 4 event.tool_count
   | events ->
     failf "expected one wake payload event, got %d" (List.length events)
 
@@ -78,6 +76,54 @@ let test_reset_rebinds_wake_payload_store () =
   | [ event ] -> check string "trace after reset" "trace-second" event.trace_id
   | events -> failf "expected rebound store to contain one event, got %d" (List.length events)
 
+let test_wake_payload_reader_rejects_malformed_exact_records () =
+  reset_after @@ fun () ->
+  with_temp_dir "wake-payload-strict-reader" @@ fun dir ->
+  H.set_wake_payload_store_for_testing ~base_dir:dir;
+  let valid_fields =
+    [ "record_type", `String "wake_payload"
+    ; "timestamp", `Float 1.0
+    ; "keeper_name", `String "keeper-harness"
+    ; "trace_id", `String "trace-strict-reader"
+    ; "turn_index", `Int 7
+    ; "context_window", `Int 4096
+    ; "system_prompt_bytes", `Int 10
+    ; "tool_schema_json_bytes", `Int 20
+    ; "message_content_bytes", `Int 70
+    ; "message_count", `Int 3
+    ; "role_counts", `Assoc [ "user", `Int 1; "assistant", `Int 2 ]
+    ; "tool_count", `Int 4
+    ]
+  in
+  let replace key value fields =
+    (key, value) :: List.remove_assoc key fields
+  in
+  let legacy_fields =
+    valid_fields
+    |> List.remove_assoc "tool_schema_json_bytes"
+    |> List.remove_assoc "message_content_bytes"
+    |> fun fields -> ("tool_defs_bytes", `Int 20) :: ("messages_bytes", `Int 70) :: fields
+  in
+  let malformed_records =
+    [ `Assoc legacy_fields
+    ; `Assoc (replace "system_prompt_bytes" (`String "10") valid_fields)
+    ; `Assoc (replace "tool_count" (`Int (-1)) valid_fields)
+    ; `Assoc (replace "role_counts" (`Assoc [ "user", `Int 1 ]) valid_fields)
+    ; `Assoc
+        (replace
+           "role_counts"
+           (`Assoc [ "user", `String "1" ])
+           valid_fields)
+    ]
+  in
+  List.iter
+    (Dated_jsonl.append (H.get_wake_payload_store ()))
+    malformed_records;
+  check int
+    "legacy, wrong numeric type, and partial role counts are rejected"
+    0
+    (List.length (H.read_wake_payload_events ()))
+
 let test_pre_compact_store_setter_records_event () =
   reset_after @@ fun () ->
   with_temp_dir "pre-compact-store" @@ fun dir ->
@@ -85,21 +131,15 @@ let test_pre_compact_store_setter_records_event () =
   let event =
     H.record_pre_compact
       ~keeper_name:"keeper-harness"
-      ~context_ratio:0.92
+      ~checkpoint_bytes:3456
       ~message_count:12
-      ~token_count:3456
       ~strategies:[ "drop-old"; "summarize" ]
-      ~context_window:8192
-      ~is_local_model:true
       ~trigger:Compaction_trigger.Manual
   in
   check string "keeper" "keeper-harness" event.keeper_name;
-  check (float 0.0001) "ratio" 0.92 event.context_ratio;
+  check int "checkpoint bytes" 3456 event.checkpoint_bytes;
   check int "message count" 12 event.message_count;
-  check int "token count" 3456 event.token_count;
   check (list string) "strategies" [ "drop-old"; "summarize" ] event.strategies;
-  check int "context window" 8192 event.context_window;
-  check bool "local model" true event.is_local_model;
   check string "trigger" "manual" (Compaction_trigger.to_label event.trigger)
 
 let () =
@@ -112,6 +152,8 @@ let () =
           test_case "wake payload round trip" `Quick test_wake_payload_store_round_trip;
           test_case "wake payload reset rebinds store" `Quick
             test_reset_rebinds_wake_payload_store;
+          test_case "malformed exact records are rejected" `Quick
+            test_wake_payload_reader_rejects_malformed_exact_records;
           test_case "pre-compact setter records event" `Quick
             test_pre_compact_store_setter_records_event;
         ] );

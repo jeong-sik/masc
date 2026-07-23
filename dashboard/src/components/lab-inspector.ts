@@ -3,7 +3,6 @@ import { signal } from '@preact/signals'
 import { SectionCard } from './common/card'
 import { FeatureHealth } from './feature-health'
 import { ServerConfig } from './server-config'
-import { ExcusePatterns } from './excuse-patterns'
 import { navigate } from '../router'
 
 type InspectorSection = 'overview' | 'features' | 'config'
@@ -28,7 +27,7 @@ const FOCUS_SURFACES: FocusSurface[] = [
   },
   {
     title: '운영 큐',
-    description: '빠른 개입(QuickIntervene), 흐름 제어, 최근 운영 활동을 한 화면에서 확인합니다. Live Judge·HITL 승인은 거버넌스 페이지에 있습니다.',
+    description: '빠른 개입(QuickIntervene), 흐름 제어, 최근 운영 활동을 한 화면에서 확인합니다. Auto Judge·HITL은 Gate 화면에 있습니다.',
     action: '운영 큐로 이동',
     tab: 'command',
     params: { section: 'operations' },
@@ -128,7 +127,6 @@ export function LabInspector() {
           : html`
               <div class="flex flex-col gap-4">
                 <${ServerConfig} />
-                <${ExcusePatterns} />
               </div>
             `}
     </div>

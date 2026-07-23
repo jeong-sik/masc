@@ -77,6 +77,7 @@ type gateway_effect =
   | Close_wss
   | Send_ack of { envelope_id : string }
   | Emit_event of slack_event
+  | Emit_ambient of slack_event
   | Schedule_backoff of { delay_ms : int }
   | Log of { level : [ `Info | `Warn | `Error ]; message : string }
 
@@ -130,6 +131,12 @@ let passes_policy (cfg : config) = function
   | Ignored_event _ -> false
 ;;
 
+let is_self bot_user_id user_id =
+  match bot_user_id with
+  | Some id -> String.equal id user_id
+  | None -> false
+;;
+
 let ack_effect env =
   match env.envelope_id with Some id -> [ Send_ack { envelope_id = id } ] | None -> []
 ;;
@@ -158,7 +165,22 @@ let rec step t ~now_mono input =
     let emit =
       match event with
       | Some e when passes_policy t.config e -> [ Emit_event e ]
-      | _ -> []
+      (* RFC-0226 parity with the Discord FSM: a policy-failing message from a
+         human is still conversation in a channel the bot sits in — surface it
+         for record-only ambient handling. Bot/app authors are dropped here
+         (loop guard; the gateway keeps its own defense on the turn path). *)
+      | Some (Message_create { bot_id = None; _ } as e) -> [ Emit_ambient e ]
+      (* Reactions are never turn-starters (see [passes_policy]); a human
+         reaction is ambient signal, the bot's own reaction is echo. *)
+      | Some (Reaction_added { user_id; _ } as e)
+        when not (is_self t.config.bot_user_id user_id) ->
+        [ Emit_ambient e ]
+      | Some (Message_create { bot_id = Some _; _ })
+      | Some (Reaction_added _)
+      | Some (App_mention _)
+      | Some (Ignored_event _)
+      | None ->
+        []
     in
     (t, ack @ emit)
   | Connected, Envelope_received ({ kind = Hello_env; envelope_id; _ } as env) ->

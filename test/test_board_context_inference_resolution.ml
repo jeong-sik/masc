@@ -39,7 +39,6 @@ let make_meta name : Keeper_meta_contract.keeper_meta =
           ("name", `String name);
           ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
           ("trace_id", `String ("trace-" ^ name));
-          ("goal", `String "test keeper");
           ("autoboot_enabled", `Bool false);
         ])
   with

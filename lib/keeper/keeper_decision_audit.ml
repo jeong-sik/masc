@@ -3,7 +3,7 @@
     Abstract record prevents trust calculations from consuming
     forensics data. Ring buffer + periodic JSONL flush.
 
-    @since Decision Layer v2 — Phase A2 (#6232) *)
+    @since Decision Audit Phase A2 (#6232) *)
 
 (* tla-lint: file-scope: forensics ring buffer + accumulator. The
    ring's pos/count/unflushed counters are observability bookkeeping
@@ -12,7 +12,7 @@
    prevents trust calculations from consuming forensics data. *)
 
 (* ================================================================ *)
-(* Feature flag                                                     *)
+(* Cached observability configuration                               *)
 (* ================================================================ *)
 
 (* These values are read from tests and module-init code that can run before an
@@ -30,15 +30,6 @@ let resolve_cached cache mu compute =
             Atomic.set cache (Some value);
             value)
 
-let decision_layer_level_cached : int option Atomic.t = Atomic.make None
-let decision_layer_level_mu = Mutex.create ()
-
-let decision_layer_level () =
-  resolve_cached decision_layer_level_cached decision_layer_level_mu
-    (fun () -> Env_config_core.get_int ~default:0 "MASC_DECISION_LAYER_LEVEL")
-
-let audit_enabled () = decision_layer_level () >= 1
-
 (* ================================================================ *)
 (* Types                                                            *)
 (* ================================================================ *)
@@ -48,30 +39,21 @@ type decision_record = {
   keeper_name : string;
   generation : int;
   snapshot : Keeper_measurement.measurement_snapshot option;
-  heartbeat_verdict : Keeper_heartbeat_smart.decision;
   turn_verdict : Keeper_world_observation.turn_verdict;
   wall_clock : float;
   tool_diversity_entropy : float option;
 }
 
 let make ~cycle_id ~keeper_name ~generation ?snapshot
-    ~heartbeat_verdict ~turn_verdict ~wall_clock
+    ~turn_verdict ~wall_clock
     ?tool_diversity_entropy () =
   { cycle_id; keeper_name; generation; snapshot;
-    heartbeat_verdict; turn_verdict; wall_clock;
+    turn_verdict; wall_clock;
     tool_diversity_entropy }
 
 (* ================================================================ *)
 (* Serialization                                                    *)
 (* ================================================================ *)
-
-(* Simplified tags for JSONL audit keys — intentionally differs from
-   Keeper_heartbeat_smart.decision_to_string which uses colon-separated format
-   with timing data ("skip:busy", "skip:idle(next in 3.2s)"). *)
-let heartbeat_verdict_to_string = function
-  | Keeper_heartbeat_smart.Emit -> "emit"
-  | Keeper_heartbeat_smart.Skip_busy -> "skip_busy"
-  | Keeper_heartbeat_smart.Skip_idle _ -> "skip_idle"
 
 let to_json (r : decision_record) : Yojson.Safe.t =
   `Assoc [
@@ -81,7 +63,6 @@ let to_json (r : decision_record) : Yojson.Safe.t =
     "snapshot", (match r.snapshot with
       | Some s -> Keeper_measurement.measurement_snapshot_to_json s
       | None -> `Null);
-    "heartbeat_verdict", `String (heartbeat_verdict_to_string r.heartbeat_verdict);
     "turn_verdict", `String
       (match r.turn_verdict with
        | Keeper_world_observation.Run _ -> "run"
@@ -154,20 +135,17 @@ let () =
 ;;
 
 let append ~keeper_name (rec_ : decision_record) =
-  if not (audit_enabled ()) then ()
-  else begin
-    let ring = get_or_create_ring keeper_name in
-    let cap = Array.length ring.buf in
-    if ring.unflushed >= cap then
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string DecisionAuditRingOverflows)
-        ~labels:[("keeper", keeper_name)]
-        ();
-    ring.buf.(ring.pos mod cap) <- Some rec_;
-    ring.pos <- (ring.pos + 1) mod cap;
-    ring.count <- min (ring.count + 1) cap;
-    ring.unflushed <- min (ring.unflushed + 1) cap
-  end
+  let ring = get_or_create_ring keeper_name in
+  let cap = Array.length ring.buf in
+  if ring.unflushed >= cap then
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string DecisionAuditRingOverflows)
+      ~labels:[("keeper", keeper_name)]
+      ();
+  ring.buf.(ring.pos mod cap) <- Some rec_;
+  ring.pos <- (ring.pos + 1) mod cap;
+  ring.count <- min (ring.count + 1) cap;
+  ring.unflushed <- min (ring.unflushed + 1) cap
 
 let recent ~keeper_name ~limit : decision_record list =
   match Hashtbl.find_opt rings keeper_name with
@@ -189,9 +167,7 @@ let recent ~keeper_name ~limit : decision_record list =
 (* ================================================================ *)
 
 let flush_if_needed ~base_path ~keeper_name =
-  if not (audit_enabled ()) then ()
-  else
-    match Hashtbl.find_opt rings keeper_name with
+  match Hashtbl.find_opt rings keeper_name with
     | None -> ()
     | Some ring ->
       let now = Time_compat.now () in
@@ -237,63 +213,6 @@ let flush_if_needed ~base_path ~keeper_name =
              Log.Keeper.warn "decision_audit flush failed: %s" (Printexc.to_string e));
         ring.last_flush_ts <- now
       end
-
-(* ================================================================ *)
-(* Decision Pipeline Mermaid diagram                               *)
-(* ================================================================ *)
-
-let decision_pipeline_to_mermaid
-    ?(turn_outcome : [`Ok | `Failed] option)
-    ~(phase : Keeper_state_machine.phase)
-    ~(thompson_alpha : float)
-    ~(thompson_beta : float)
-    ()
-    : string =
-  let b = Buffer.create 512 in
-  let p fmt = Printf.bprintf b fmt in
-  let level = decision_layer_level () in
-  let score =
-    if thompson_alpha +. thompson_beta > 0.0
-    then thompson_alpha /. (thompson_alpha +. thompson_beta)
-    else 0.5
-  in
-  p "stateDiagram-v2\n";
-  p "    state Running {\n";
-  p "        [*] --> NormalOps\n";
-  p "    }\n";
-  p "    state Failing {\n";
-  p "        [*] --> RecoveryPending\n";
-  p "        RecoveryPending --> TurnAttempt: recovery floor\n";
-  p "        TurnAttempt --> TurnAttempt: turn fails\n";
-  p "        TurnAttempt --> RecoveryReady: turn succeeds\n";
-  p "    }\n";
-  p "    Running --> Failing: consecutive failures\n";
-  p "    Failing --> Running: heartbeat_ok\n";
-  p "    Running --> Running: shard restored\n";
-  p "\n";
-  p "    classDef active fill:#22c55e,stroke:#16a34a,color:#fff,stroke-width:3px\n";
-  p "    classDef warn fill:#f59e0b,stroke:#d97706,color:#fff,stroke-width:3px\n";
-  p "    classDef off fill:#6b7280,stroke:#4b5563,color:#fff\n";
-  (match phase with
-   | Keeper_state_machine.Running ->
-     p "    class Running active\n"
-   | Keeper_state_machine.Failing ->
-     p "    class Failing warn\n"
-   | _ ->
-     p "    class Running off\n";
-     p "    class Failing off\n");
-  p "\n";
-  let outcome_str = match turn_outcome with
-    | Some `Ok -> "ok"
-    | Some `Failed -> "failed"
-    | None -> "n/a"
-  in
-  p "    note right of Running\n";
-  p "      Thompson: %.2f (α=%.1f β=%.1f)\n" score thompson_alpha thompson_beta;
-  p "      Level: %d\n" level;
-  p "      Turn outcome: %s\n" outcome_str;
-  p "    end note\n";
-  Buffer.contents b
 
 (* ================================================================ *)
 (* Runtime FSM Mermaid diagram                                      *)

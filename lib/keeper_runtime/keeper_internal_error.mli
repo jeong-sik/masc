@@ -23,14 +23,10 @@ val capacity_backpressure_source_of_string :
 
 type capacity_retry_after =
   | Explicit of float
-  | Synthetic_default of float
   | No_retry_hint
 
-(** The failure that armed a provider-health cooldown blocking a turn before
-    dispatch.  Mirrors {!Keeper_binding_health.outcome_kind} across the module
-    boundary; carried on {!Capacity_backpressure} so the pre-dispatch cooldown
-    gate reports the true cause instead of unconditionally claiming provider
-    capacity.  #23438. *)
+(** Legacy diagnostic carried by persisted [Capacity_backpressure] envelopes.
+    It has no retry, admission, or lifecycle authority. *)
 type provider_cooldown_cause =
   | Cooldown_provider_capacity
   | Cooldown_soft_rate_limited
@@ -43,21 +39,13 @@ type provider_cooldown_cause =
 val provider_cooldown_cause_to_string : provider_cooldown_cause -> string
 val provider_cooldown_cause_of_string : string -> provider_cooldown_cause option
 
-(** [true] when waiting out the cooldown cannot resolve the cause (deterministic
-    config/build/credential/quota/structural failure); [false] for transient
-    causes expected to recover (capacity, HTTP 429, HTTP 5xx).  Drives whether a
-    cooldown-block turn error is auto-recoverable or escalates.  #23438. *)
-val provider_cooldown_cause_is_deterministic : provider_cooldown_cause -> bool
-
 type runtime_exhaustion_reason =
   | Connection_refused
   | Dns_failure
   | No_providers_available
   | All_providers_failed
   | Candidates_filtered_after_cycles
-  | Max_turns_exceeded
   | Session_conflict
-  | Structural_attempt_timeout of { detail : string }
   | Capacity_exhausted
   | Other_detail of string
 
@@ -92,12 +80,9 @@ val accept_response_shape_of_string : string -> accept_response_shape option
 val accept_response_shape_of_agent_sdk :
   Agent_sdk.Response_shape.content_shape -> accept_response_shape
 
-type tool_progress_effect =
-  | Tool_effect_read_only
-  | Tool_effect_mutating
-
-val tool_progress_effect_to_string : tool_progress_effect -> string
-val tool_progress_effect_of_string : string -> tool_progress_effect option
+type transcript_quarantine_reason =
+  | Structurally_invalid
+  | Unresolved_tool_results
 
 type masc_internal_error =
   | Runtime_exhausted of {
@@ -110,8 +95,8 @@ type masc_internal_error =
       detail : string;
       retry_after : capacity_retry_after;
       cooldown_cause : provider_cooldown_cause option;
-      (** [Some cause] iff this is a pre-dispatch provider-health cooldown block;
-          [None] for genuine upstream capacity backpressure.  #23438. *)
+      (** Legacy diagnostic only. Current producers use [None]; decoded values
+          never grant retry, admission, or lifecycle authority. *)
     }
   | Resumable_cli_session of {
       runtime_id : string;
@@ -128,34 +113,7 @@ type masc_internal_error =
          from a clean [EndTurn] no-progress terminal. Groundwork slice: threaded
          and serialized, not yet consumed by classification. *)
       stop_reason : Agent_sdk.Types.stop_reason option;
-      last_tool_effect : tool_progress_effect option;
-      any_mutating_tool : bool option;
-      tool_effects_seen : tool_progress_effect list;
       reason : string;
-    }
-  | Admission_queue_timeout of {
-      keeper_name : string;
-      runtime_id : string;
-      wait_sec : float;
-    }
-  | Admission_queue_rejected of {
-      keeper_name : string;
-      reason : string;
-    }
-  | Turn_timeout of { elapsed_sec : float }
-  | Provider_timeout of {
-      budget_sec : float;
-      keeper_turn_timeout_sec : float;
-      estimated_input_tokens : int;
-      source : string;
-      remaining_turn_budget_sec : float option;
-      min_required_sec : float;
-      phase : string;
-    }
-  | Ambiguous_post_commit of {
-      is_timeout : bool;
-      tools : string list;
-      original_error : string;
     }
   | Internal_unhandled_exception of {
       site : string;
@@ -167,6 +125,12 @@ type masc_internal_error =
       exn_repr : string;
     }
   | Internal_contract_rejected of { reason : string }
+  | Incomplete_tool_transcript of {
+      reason : transcript_quarantine_reason;
+      detail : string;
+      tool_use_ids : string list;
+    }
+  | Receipt_persistence_failed of { detail : string }
 
 val masc_internal_error_prefix : string
 
@@ -192,12 +156,9 @@ val runtime_id_of_masc_internal_error : masc_internal_error -> string
 
 val accept_no_progress_retry_kind :
   masc_internal_error ->
-  [ `Empty_no_progress | `Read_only_no_progress | `Thinking_only_no_progress ] option
+  [ `Empty_no_progress | `Thinking_only_no_progress ] option
 
 val accept_rejection_has_no_progress_retry_hint : masc_internal_error -> bool
-
-val accept_rejection_has_read_only_no_progress_retry_hint :
-  masc_internal_error -> bool
 
 val sdk_error_of_masc_internal_error :
   masc_internal_error -> Agent_sdk.Error.sdk_error

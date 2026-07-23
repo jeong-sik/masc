@@ -122,7 +122,7 @@ let behavior_prompt_block name =
         name;
       Printf.sprintf
         "Behavior prompt config drift: missing config/prompts/behavior/%s.md. \
-         Preserve the keeper's configured goal, persona, and runtime policy; \
+         Preserve the keeper's persona and runtime policy; \
          ask the operator to restore the missing behavior prompt file."
         name
 
@@ -137,10 +137,8 @@ let behavior_prompt_block name =
    injecting a stale fact snapshot. *)
 
 let build_keeper_system_prompt
-    ~goal
     ~instructions ?(persona_extended = "") ?(keeper_name = "")
     ?(home_ground = "") ?(active_goals = []) () =
-  let goal = normalize_goal_text goal in
   (* Behavior prompt blocks live under
      [<prompts_dir>/behavior/<name>.md] and are read once per process via
      [Keeper_prompt_external.get]. Missing/unreadable files no longer inject
@@ -162,9 +160,12 @@ let build_keeper_system_prompt
       |> Re.replace_string re_keeper_name_upper ~by:keeper_name
   in
   let persona_block =
-    let s = String_util.escape_xml (String.trim persona_extended) in
-    if s = "" then ""
-    else Printf.sprintf "<persona>\n%s\n</persona>\n\n" s
+    (* Inner bytes are the shared SSOT ([Keeper_persona_block.render]); the
+       trailing blank line is chat-lane layout, frozen to keep historical
+       prompt bytes stable. *)
+    match Keeper_persona_block.render ~persona_extended with
+    | None -> ""
+    | Some block -> block ^ "\n\n"
   in
   let active_goals_block =
     match active_goals with
@@ -207,8 +208,9 @@ let build_keeper_system_prompt
      <repositories>\n\
      The filesystem is the source of truth for your repositories: only \
      checkouts that actually exist under repos/ resolve. Before referencing \
-     a repository, list repos/ (for example: Execute ls repos) and use the \
-     directory names you find. Do not assume a repository exists because it \
+     a repository, inspect the repository directory through a visible \
+     filesystem capability and use the directory names you find. Do not \
+     assume a repository exists because it \
      is registered in a catalog — registration does not imply a checkout in \
      your sandbox.\n\
      </repositories>\n"
@@ -267,11 +269,7 @@ let build_keeper_system_prompt
       repositories_block;
       (* ── Keeper-specific blocks ─────────────────────────────── *)
       persona_block;
-      "<identity>\n\
-       Goal: ";
-      goal;
-      "\n\
-       ";
+      "<identity>";
       custom;
       active_goals_block;
       "</identity>";

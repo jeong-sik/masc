@@ -87,16 +87,10 @@ let load_agents_from_dir config dir ~include_inactive =
              Some agent
          | Ok _ | Error _ -> None)
 
-let agent_type_of_state_agent_name name =
-  if Workspace_resilience.Zombie.is_keeper_name name
-  then "keeper"
-  else (
-    match Nickname.extract_agent_type name with
-    | Some agent_type -> agent_type
-    | None -> name)
+let state_backed_agent_type = "workspace-state"
 
 let state_backed_agent state (name : string) : Masc_domain.agent =
-  let agent_type = agent_type_of_state_agent_name name in
+  let agent_type = state_backed_agent_type in
   let timestamp = state.started_at in
   let meta : Masc_domain.agent_meta =
     { session_id = "workspace-state:" ^ name
@@ -179,44 +173,18 @@ let get_all_agents config =
     let agents_path = agents_dir config in
     load_agents_from_dir config agents_path ~include_inactive:true
 
-(** Audit tasks: find claimed/in_progress tasks whose assignees are not active agents.
-    Matches assignees by exact name or agent-type prefix (e.g. "<prefix>" matches "<prefix>-xxx").
-    Agents with Inactive status are excluded from the active set.
-
-    Staleness uses a keeper-aware threshold: actual keeper agents get the
-    longer keeper grace ([MASC_KEEPER_ZOMBIE_THRESHOLD_SEC], default 3600s) and
-    ordinary agents the default ([MASC_ZOMBIE_THRESHOLD_SEC], default 300s).
-    Keeper status is decided by the shared {!Workspace_resilience.Zombie}
-    file-backed predicate ([agent_type = "keeper"] or keeper-owned [meta])
-    rather than by the keeper-shaped name pattern, so a keeper-shaped
-    non-keeper worker does not inherit the longer grace. A live keeper that has
-    gone quiet between heartbeats (but within its grace) is therefore not
-    classified as inactive, so its own claimed/in-progress task is not
-    mis-reported as an orphan at the source. *)
+(** Audit owned tasks ([Claimed], [InProgress], [AwaitingVerification]) whose
+    exact assignee identity is absent from explicit active workspace/session
+    membership. [last_seen] is retained as observation and never changes task
+    ownership. *)
 let audit_orphan_tasks config : (Masc_domain.task * string) list =
   if not (is_initialized config) then []
   else
-    (* Read agent files from the same path that cleanup_zombies and session binding use *)
-    let agents_path = agents_dir config in
     let active_names =
-      load_agents_from_dir config agents_path ~include_inactive:false
-      |> List.filter (fun (agent : Masc_domain.agent) ->
-          not
-            (Workspace_resilience.Zombie.is_zombie_for_agent
-               ~agent_type:agent.agent_type
-               ?agent_meta:agent.meta
-               ~agent_name:agent.name
-               agent.last_seen))
+      get_active_agents config
       |> List.map (fun (agent : Masc_domain.agent) -> agent.name)
     in
-    let is_active_agent assignee =
-      List.mem assignee active_names
-      || let prefix = assignee ^ "-" in
-         List.exists (fun name ->
-           String.length name > String.length prefix
-           && String.starts_with name ~prefix
-         ) active_names
-    in
+    let is_active_agent assignee = List.mem assignee active_names in
     let backlog = read_backlog config in
     List.filter_map (fun (task : Masc_domain.task) ->
       match task.task_status with

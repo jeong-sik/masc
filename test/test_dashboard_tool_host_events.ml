@@ -97,9 +97,14 @@ let test_record_writes_audit_ring_and_telemetry () =
           check string "failure reason" report.message reason
       | Audit_log.Success -> fail "expected failure outcome");
       let latest =
-        match Log.Ring.recent ~limit:1 () with
-        | row :: _ -> row
-        | [] -> fail "expected ring entry"
+        match
+          Log.Ring.recent ~limit:20 ()
+          |> List.find_opt (fun (row : Log.Ring.entry) ->
+            String.equal (Log.source_to_string row.source) "client_tool_host"
+            && String.equal row.module_name "ToolHost")
+        with
+        | Some row -> row
+        | None -> fail "expected client_tool_host ring entry"
       in
       check string "ring source" "client_tool_host"
         (Log.source_to_string latest.source);

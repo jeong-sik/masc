@@ -12,6 +12,7 @@ type tool_stats = {
   tool_name : string;
   call_count : int;
   success_count : int;
+  deferred_count : int;
   failure_count : int;
   p50_ms : float;
   p95_ms : float;

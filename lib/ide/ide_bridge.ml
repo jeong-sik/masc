@@ -8,25 +8,21 @@ let default_partition = Ide_paths.Legacy_default
 type event_kind =
   | Tool
   | Turn
-  | Pr
 
 let event_kind_to_string = function
   | Tool -> "tool"
   | Turn -> "turn"
-  | Pr -> "pr"
 ;;
 
 let event_kind_of_string = function
   | "tool" -> Some Tool
   | "turn" -> Some Turn
-  | "pr" -> Some Pr
   | _ -> None
 ;;
 
 let event_file_name = function
   | Tool -> "tool_events.jsonl"
   | Turn -> "turn_events.jsonl"
-  | Pr -> "pr_events.jsonl"
 ;;
 
 let cursor_file_name = "cursor_events.jsonl"
@@ -34,7 +30,6 @@ let cursor_file_name = "cursor_events.jsonl"
 let event_kind_of_event = function
   | Tool_event _ -> Tool
   | Turn_event _ -> Turn
-  | Pr_event _ -> Pr
 ;;
 
 (* ── Segment rotation + tail-read (IDE Observation Plane v2 A2/A3) ───────
@@ -414,7 +409,7 @@ let list_events
   let kinds =
     match kind with
     | Some k -> [ k ]
-    | None -> [ Tool; Turn; Pr ]
+    | None -> [ Tool; Turn ]
   in
   let limit = normalize_limit limit in
   let offset = normalize_offset offset in
@@ -446,7 +441,6 @@ let ingest_tool_event
     ~summary
     ~file_path
     ~timestamp_ms
-    ?command_descriptor
     ()
   =
   let truncated_summary =
@@ -463,7 +457,6 @@ let ingest_tool_event
       ; latency_ms
       ; summary = truncated_summary
       ; file_path
-      ; command_descriptor
       ; timestamp_ms
       }
   in
@@ -505,112 +498,6 @@ let ingest_turn_event
   (try append_event ~base_dir:base_path ~partition ~event
    with exn ->
      Printf.eprintf "Ide_bridge.ingest_turn_event error: %s\n%!" (Printexc.to_string exn))
-
-let ingest_pr_event
-    ~base_path
-    ~partition
-    ~pr_number
-    ~pull_request_url
-    ~pr_title
-    ~pr_state
-    ~repo
-    ~keeper_id
-    ~turn_id
-    ~comment_count
-    ~review_status
-    ~timestamp_ms
-  =
-  let event =
-    Pr_event
-      { pr_number
-      ; pull_request_url
-      ; pr_title
-      ; pr_state
-      ; repo
-      ; keeper_id
-      ; turn_id
-      ; comment_count
-      ; review_status
-      ; timestamp_ms
-      }
-  in
-  (try append_event ~base_dir:base_path ~partition ~event
-   with exn ->
-     Printf.eprintf "Ide_bridge.ingest_pr_event error: %s\n%!" (Printexc.to_string exn))
-
-(** Extract command_descriptor from tool result JSON.
-    Returns [Some descriptor] if the result contains a valid descriptor field. *)
-let extract_descriptor_from_output (output_text : string) : Ide_event_types.command_descriptor option =
-  try
-    let json = Yojson.Safe.from_string output_text in
-    match Yojson.Safe.Util.member "command_descriptor" json with
-    | `Assoc _ as descriptor_json ->
-      let kind = Yojson.Safe.Util.member "kind" descriptor_json |> Yojson.Safe.Util.to_string in
-      (match kind with
-       | "gh_pr_create" ->
-         let title = Yojson.Safe.Util.member "title" descriptor_json |> Yojson.Safe.Util.to_string in
-         let base = Yojson.Safe.Util.member "base" descriptor_json |> Yojson.Safe.Util.to_string in
-         let draft = Yojson.Safe.Util.member "draft" descriptor_json |> Yojson.Safe.Util.to_bool in
-         Some (Ide_event_types.Gh_pr_create { title; base; draft })
-       | "gh_pr_search" ->
-         let query = Yojson.Safe.Util.member "query" descriptor_json |> Yojson.Safe.Util.to_string in
-         let state =
-           match Yojson.Safe.Util.member "state" descriptor_json with
-           | `String value -> Some value
-           | `Null -> None
-           | _ -> None
-         in
-         Some (Ide_event_types.Gh_pr_search { query; state })
-       | "gh_pr_merge" ->
-         let pr_number = Yojson.Safe.Util.member "pr_number" descriptor_json |> Yojson.Safe.Util.to_int in
-         let squash = Yojson.Safe.Util.member "squash" descriptor_json |> Yojson.Safe.Util.to_bool in
-         Some (Ide_event_types.Gh_pr_merge { pr_number; squash })
-       | "gh_pr_comment" ->
-         let pr_number = Yojson.Safe.Util.member "pr_number" descriptor_json |> Yojson.Safe.Util.to_int in
-         let body = Yojson.Safe.Util.member "body" descriptor_json |> Yojson.Safe.Util.to_string in
-         Some (Ide_event_types.Gh_pr_comment { pr_number; body })
-       | "gh_pr_close" ->
-         let pr_number = Yojson.Safe.Util.member "pr_number" descriptor_json |> Yojson.Safe.Util.to_int in
-         Some (Ide_event_types.Gh_pr_close { pr_number })
-       | "gh_pr_edit" ->
-         let pr_number = Yojson.Safe.Util.member "pr_number" descriptor_json |> Yojson.Safe.Util.to_int in
-         let title = (match Yojson.Safe.Util.member "title" descriptor_json with
-           | `String s -> Some s
-           | _ -> None) in
-         Some (Ide_event_types.Gh_pr_edit { pr_number; title })
-       | "gh_pr_review" ->
-         let pr_number = Yojson.Safe.Util.member "pr_number" descriptor_json |> Yojson.Safe.Util.to_int in
-         Some (Ide_event_types.Gh_pr_review { pr_number })
-       | "git_push" ->
-         let remote = Yojson.Safe.Util.member "remote" descriptor_json |> Yojson.Safe.Util.to_string in
-         let branch = Yojson.Safe.Util.member "branch" descriptor_json |> Yojson.Safe.Util.to_string in
-         let force = Yojson.Safe.Util.member "force" descriptor_json |> Yojson.Safe.Util.to_bool in
-         Some (Ide_event_types.Git_push { remote; branch; force })
-       | "git_commit" ->
-         let message = Yojson.Safe.Util.member "message" descriptor_json |> Yojson.Safe.Util.to_string in
-         Some (Ide_event_types.Git_commit { message })
-       | "pipe_chain" ->
-         let first_cmd = Yojson.Safe.Util.member "first_cmd" descriptor_json |> Yojson.Safe.Util.to_string in
-         let last_cmd = Yojson.Safe.Util.member "last_cmd" descriptor_json |> Yojson.Safe.Util.to_string in
-         let length = Yojson.Safe.Util.member "length" descriptor_json |> Yojson.Safe.Util.to_int in
-         Some (Ide_event_types.Pipe_chain { first_cmd; last_cmd; length })
-       | "gh_api_pr_create" ->
-         let repo = Yojson.Safe.Util.member "repo" descriptor_json |> Yojson.Safe.Util.to_string in
-         let title = Yojson.Safe.Util.member "title" descriptor_json |> Yojson.Safe.Util.to_string in
-         let base = Yojson.Safe.Util.member "base" descriptor_json |> Yojson.Safe.Util.to_string in
-         Some (Ide_event_types.Gh_api_pr_create { repo; title; base })
-       | "gh_api_pr_merge" ->
-         let repo = Yojson.Safe.Util.member "repo" descriptor_json |> Yojson.Safe.Util.to_string in
-         let pr_number = Yojson.Safe.Util.member "pr_number" descriptor_json |> Yojson.Safe.Util.to_int in
-         Some (Ide_event_types.Gh_api_pr_merge { repo; pr_number })
-       | "gh_api_pr_comment" ->
-         let repo = Yojson.Safe.Util.member "repo" descriptor_json |> Yojson.Safe.Util.to_string in
-         let pr_number = Yojson.Safe.Util.member "pr_number" descriptor_json |> Yojson.Safe.Util.to_int in
-         let body = Yojson.Safe.Util.member "body" descriptor_json |> Yojson.Safe.Util.to_string in
-         Some (Ide_event_types.Gh_api_pr_comment { repo; pr_number; body })
-       | _ -> None)
-    | _ -> None
-  with _ -> None
 
 let cursor_file_path_of_input input =
   Tool_input_path.tool_input_file_path input
@@ -801,7 +688,6 @@ let ingest_tool_event_from_hook
     if String.length output_text > 200 then String.sub output_text 0 200
     else output_text
   in
-  let command_descriptor = extract_descriptor_from_output output_text in
   let timestamp_ms = now_ms () in
   ingest_tool_event
     ~base_path
@@ -814,7 +700,6 @@ let ingest_tool_event_from_hook
     ~latency_ms:(int_of_float duration_ms)
     ~summary
     ~file_path
-    ?command_descriptor
     ~timestamp_ms
     ();
   (* The hook cursor inherits the tool event's resolved partition: same tool
@@ -828,181 +713,6 @@ let ingest_tool_event_from_hook
     ~timestamp_ms
     ~input
 
-let pull_request_result_from_json (json : Yojson.Safe.t) : (int * string) option =
-  let int_opt = function
-    | `Int n -> Some n
-    | `Intlit s | `String s -> int_of_string_opt s
-    | _ -> None
-  in
-  let string_non_empty_opt = function
-    | `String s when String.trim s <> "" -> Some s
-    | _ -> None
-  in
-  let first_string fields =
-    List.find_map (fun field -> Yojson.Safe.Util.member field json |> string_non_empty_opt) fields
-  in
-  match int_opt (Yojson.Safe.Util.member "number" json), first_string [ "html_url"; "url" ] with
-  | Some number, Some url when number > 0 -> Some (number, url)
-  | _ -> None
-
-let parse_pull_request_result_from_output (output : string) : (int * string) option =
-  let rec from_json json =
-    match pull_request_result_from_json json with
-    | Some _ as result -> result
-    | None ->
-      (match Yojson.Safe.Util.member "output" json with
-       | `String nested_output ->
-         (try Yojson.Safe.from_string nested_output |> from_json with
-          | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Failure _ -> None)
-       | _ -> None)
-  in
-  try Yojson.Safe.from_string output |> from_json with
-  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Failure _ -> None
-
-let parse_github_pr_url_candidate raw =
-  let candidate = String.trim raw in
-  let parts = String.split_on_char '/' candidate in
-  match parts with
-  | "https:" :: "" :: "github.com" :: _owner :: _repo :: "pull" :: number :: _ ->
-    Option.bind (int_of_string_opt number) (fun n ->
-      if n > 0 then Some (n, candidate) else None)
-  | _ -> None
-
-let descriptor_confirmed_pr_url_from_output output =
-  let raw_output =
-    try
-      match Yojson.Safe.from_string output |> Yojson.Safe.Util.member "output" with
-      | `String nested -> nested
-      | _ -> output
-    with
-    | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Failure _ -> output
-  in
-  raw_output
-  |> String.split_on_char '\n'
-  |> List.find_map parse_github_pr_url_candidate
-
-let explicit_tool_success_from_output output =
-  try
-    let json = Yojson.Safe.from_string output in
-    let bool_field name =
-      match Yojson.Safe.Util.member name json with
-      | `Bool value -> Some value
-      | _ -> None
-    in
-    match bool_field "ok" with
-    | Some value -> value
-    | None -> Option.value ~default:false (bool_field "success")
-  with
-  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Failure _ -> false
-
-(** Ingest PR event from command_descriptor (deterministic).
-    Reads PR number/URL only from structured result JSON when available.
-    Only proceeds when [success] is [true] — failed tool executions
-    (auth/network/validation errors) must not produce phantom PR events. *)
-let ingest_pr_event_from_descriptor
-    ~base_path
-    ~partition
-    ~keeper_id
-    ~turn_id
-    ~output_text
-    ~tool_name:_
-    ~success
-  =
-  (* Gate: only ingest PR events from successful tool executions.
-     Failed commands (auth/network/validation errors) preserve the
-     command_descriptor in their output, which would otherwise produce
-     phantom PR #0 events. *)
-  if not success then ()
-  else
-    match extract_descriptor_from_output output_text with
-    | Some (Ide_event_types.Gh_pr_create { title; base = _; draft = _ }) ->
-      let pr_number, pull_request_url = match parse_pull_request_result_from_output output_text with
-        | Some (n, url) -> (n, url)
-        | None ->
-          Option.value
-            ~default:(0, "")
-            (descriptor_confirmed_pr_url_from_output output_text)
-      in
-      ingest_pr_event
-        ~base_path ~partition ~pr_number ~pull_request_url ~pr_title:title
-        ~pr_state:"open" ~repo:"" ~keeper_id ~turn_id
-        ~comment_count:0 ~review_status:None
-        ~timestamp_ms:(now_ms ())
-    | Some (Ide_event_types.Gh_pr_merge { pr_number; squash = _ }) ->
-      ingest_pr_event
-        ~base_path ~partition ~pr_number ~pull_request_url:"" ~pr_title:""
-        ~pr_state:"merged" ~repo:"" ~keeper_id ~turn_id
-        ~comment_count:0 ~review_status:None
-        ~timestamp_ms:(now_ms ())
-    | Some (Ide_event_types.Gh_pr_close { pr_number }) ->
-      ingest_pr_event
-        ~base_path ~partition ~pr_number ~pull_request_url:"" ~pr_title:""
-        ~pr_state:"closed" ~repo:"" ~keeper_id ~turn_id
-        ~comment_count:0 ~review_status:None
-        ~timestamp_ms:(now_ms ())
-    | Some (Ide_event_types.Gh_pr_comment { pr_number; body = _ }) ->
-      ingest_pr_event
-        ~base_path ~partition ~pr_number ~pull_request_url:"" ~pr_title:""
-        ~pr_state:"open" ~repo:"" ~keeper_id ~turn_id
-        ~comment_count:1 ~review_status:None
-        ~timestamp_ms:(now_ms ())
-    | Some (Ide_event_types.Gh_pr_edit { pr_number; title = _ }) ->
-      ingest_pr_event
-        ~base_path ~partition ~pr_number ~pull_request_url:"" ~pr_title:""
-        ~pr_state:"open" ~repo:"" ~keeper_id ~turn_id
-        ~comment_count:0 ~review_status:None
-        ~timestamp_ms:(now_ms ())
-    | Some (Ide_event_types.Gh_pr_review { pr_number }) ->
-      ingest_pr_event
-        ~base_path ~partition ~pr_number ~pull_request_url:"" ~pr_title:""
-        ~pr_state:"open" ~repo:"" ~keeper_id ~turn_id
-        ~comment_count:0 ~review_status:None
-        ~timestamp_ms:(now_ms ())
-    | Some (Ide_event_types.Gh_api_pr_create { repo; title; base = _ }) ->
-      let pr_number, pull_request_url = match parse_pull_request_result_from_output output_text with
-        | Some (n, url) -> (n, url)
-        | None -> (0, "")
-      in
-      ingest_pr_event
-        ~base_path ~partition ~pr_number ~pull_request_url ~pr_title:title
-        ~pr_state:"open" ~repo ~keeper_id ~turn_id
-        ~comment_count:0 ~review_status:None
-        ~timestamp_ms:(now_ms ())
-    | Some (Ide_event_types.Gh_api_pr_merge { repo; pr_number }) ->
-      ingest_pr_event
-        ~base_path ~partition ~pr_number ~pull_request_url:"" ~pr_title:""
-        ~pr_state:"merged" ~repo ~keeper_id ~turn_id
-        ~comment_count:0 ~review_status:None
-        ~timestamp_ms:(now_ms ())
-    | Some (Ide_event_types.Gh_api_pr_comment { repo; pr_number; body = _ }) ->
-      ingest_pr_event
-        ~base_path ~partition ~pr_number ~pull_request_url:"" ~pr_title:""
-        ~pr_state:"open" ~repo ~keeper_id ~turn_id
-        ~comment_count:1 ~review_status:None
-        ~timestamp_ms:(now_ms ())
-    | Some (Ide_event_types.Gh_pr_search _ | Ide_event_types.Gh_issue_create _ | Ide_event_types.Gh_issue_close _ | Ide_event_types.Git_push _ | Ide_event_types.Git_commit _ | Ide_event_types.Pipe_chain _ | Ide_event_types.Generic)
-    | None -> ()
-
-(** Ingest PR creation/update events from descriptor-backed tool output.
-    This legacy hook entrypoint intentionally delegates to descriptor-backed
-    ingestion only; raw stdout URL scanning is not a reliable PR signal. *)
-let ingest_pr_event_from_hook
-    ~base_path
-    ~partition
-    ~keeper_id
-    ~turn_id
-    ~output_text
-    ~tool_name
-  =
-  ingest_pr_event_from_descriptor
-    ~base_path
-    ~partition
-    ~keeper_id
-    ~turn_id
-    ~output_text
-    ~tool_name
-    ~success:(explicit_tool_success_from_output output_text)
-
 let observation_snapshot_json ~take =
   let snapshot =
     if take then Agent_observation.take_snapshot ()
@@ -1012,7 +722,7 @@ let observation_snapshot_json ~take =
 ;;
 
 let install_agent_observation_sinks () =
-  (* tool/pr/turn sinks fire on the keeper turn fiber (main Eio domain). Their
+  (* Tool/turn sinks fire on the keeper turn fiber (main Eio domain). Their
      bodies parse tool output (Yojson) and append JSONL — synchronous I/O that
      stalls the fleet under load. Defer that work to the ingestion writer fiber
      via [Ide_ingest_queue.submit]: the hot path only allocates a closure and
@@ -1034,17 +744,6 @@ let install_agent_observation_sinks () =
           ~duration_ms:event.duration_ms
           ~output_text:event.output_text
           ~input:event.input));
-  Agent_observation.register_pr_event_sink
-    (fun (event : Agent_observation.pr_event) ->
-      Ide_ingest_queue.submit (fun () ->
-        ingest_pr_event_from_descriptor
-          ~base_path:event.base_path
-          ~partition:event.partition
-          ~keeper_id:event.keeper_id
-          ~turn_id:event.turn_id
-          ~output_text:event.output_text
-          ~tool_name:event.tool_name
-          ~success:event.success));
   Agent_observation.register_turn_event_sink
     (fun (event : Agent_observation.turn_event) ->
       Ide_ingest_queue.submit (fun () ->
@@ -1089,14 +788,7 @@ let install_agent_observation_sinks () =
            ; content
            ; goal_id
            ; task_id
-           ; board_post_id
-           ; comment_id
-           ; pr_id
-           ; git_ref
-           ; log_id
-           ; session_id
-           ; operation_id
-           ; worker_run_id
+           ; references
            }
           : Agent_observation.annotation_request) ->
       match
@@ -1111,14 +803,7 @@ let install_agent_observation_sinks () =
           ~content
           ?goal_id
           ?task_id
-          ?board_post_id
-          ?comment_id
-          ?pr_id
-          ?git_ref
-          ?log_id
-          ?session_id
-          ?operation_id
-          ?worker_run_id
+          ~references
           ()
       with
       | Error msg -> Error msg

@@ -557,33 +557,6 @@ describe('BoardSurface Component', () => {
     expect(screen.getByText('모더레이션 대기')).toBeInTheDocument()
   })
 
-  it('renders claim evidence state badges on post cards', () => {
-    boardPosts.value = [
-      makePost({
-        id: 'post-needs-evidence',
-        title: 'Evidence state',
-        body: 'content',
-        author: 'ani1999',
-        claim_evidence: {
-          state: 'needs_evidence',
-          label: 'Needs evidence',
-          total_count: 1,
-          allowed_count: 0,
-          rejected_count: 1,
-          artifact_missing_count: 0,
-          artifact_unknown_count: 0,
-          missing_source_snapshot_count: 1,
-          stale_source_snapshot_count: 0,
-          artifact_not_verified_count: 0,
-        },
-      }),
-    ]
-
-    render(h(BoardSurface, null))
-
-    expect(screen.getByLabelText(/Needs evidence/)).toHaveTextContent('Needs evidence')
-  })
-
   it('renders vote-blind post scores as hidden until voting', () => {
     boardPosts.value = [
       makePost({
@@ -601,72 +574,6 @@ describe('BoardSurface Component', () => {
     render(h(BoardSurface, null))
 
     expect(screen.getByLabelText('점수 투표 후 공개')).toHaveTextContent(/투표 후 공개/)
-  })
-
-  it('renders contributor quality badges on post cards', () => {
-    boardPosts.value = [
-      makePost({
-        id: 'post-quality',
-        title: 'Quality signal',
-        body: 'content',
-        author: 'ani1999',
-        contributor_quality: {
-          accountability_score: 0.72,
-          source: 'agent_reputation',
-          board_posts: 1,
-        },
-      }),
-    ]
-
-    render(h(BoardSurface, null))
-
-    expect(screen.getByLabelText(/기여자 품질 72점/)).toHaveTextContent('품질 72')
-  })
-
-  it('hides default contributor quality priors on post cards', () => {
-    boardPosts.value = [
-      makePost({
-        id: 'post-quality-prior',
-        title: 'Quality prior',
-        body: 'content',
-        author: 'ani1999',
-        contributor_quality: {
-          accountability_score: 1,
-          source: 'agent_reputation',
-          board_posts: 0,
-          board_comments: 0,
-          completion_rate: 0,
-          response_rate: 0,
-          autonomy_level: 'standard',
-          thompson_confidence: 0.5,
-          evidence_state: 'default',
-        },
-      }),
-    ]
-
-    render(h(BoardSurface, null))
-
-    expect(screen.queryByText(/품질 100/)).not.toBeInTheDocument()
-  })
-
-  it('renders contributor quality badges even when score is 100 if evidence_state is measured', () => {
-    boardPosts.value = [
-      makePost({
-        id: 'post-quality-100-measured',
-        title: 'Quality measured 100',
-        body: 'content',
-        author: 'ani1999',
-        contributor_quality: {
-          accountability_score: 1,
-          source: 'agent_reputation',
-          evidence_state: 'measured',
-        },
-      }),
-    ]
-
-    render(h(BoardSurface, null))
-
-    expect(screen.getByLabelText(/기여자 품질 100점/)).toHaveTextContent('품질 100')
   })
 
   it('renders sub-board rail and filters posts by sub-board', () => {

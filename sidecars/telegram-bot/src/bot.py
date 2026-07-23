@@ -39,7 +39,7 @@ from .formatters import (
     format_footer_html,
     render_response_text,
 )
-from .gate_client import GateClient
+from .gate_client import GateClient, GateStreamError, GateStreamUnavailable
 
 logging.basicConfig(
     level=logging.INFO,
@@ -255,7 +255,9 @@ class TelegramGateBot:
     ) -> bool:
         """Try streaming response with live message editing.
 
-        Returns True if streaming succeeded, False to fall back to batch.
+        Returns False only when the request was provably not sent and batch
+        fallback is safe. Accepted, rejected, or ambiguous attempts are
+        completed or rendered as explicit failures and return True.
         Telegram rate-limits edit_message to ~30/min per chat, so we
         throttle edits to every ~1 second or 80 characters of new content.
         """
@@ -270,7 +272,6 @@ class TelegramGateBot:
         last_edit_len = 0
         edit_interval = 1.0  # seconds between edits
         char_threshold = 80  # min chars of new content before edit
-        streamed_any = False
 
         try:
             async for delta in self.gate.stream_message(
@@ -281,7 +282,6 @@ class TelegramGateBot:
                 chat_id=chat.id,
             ):
                 accumulated += delta
-                streamed_any = True
                 now = time.monotonic()
                 new_chars = len(accumulated) - last_edit_len
                 if (
@@ -292,30 +292,55 @@ class TelegramGateBot:
                     if display:
                         try:
                             await thinking_msg.edit_text(display)
-                        except Exception:
-                            pass
+                        except Exception as edit_error:
+                            logger.warning(
+                                "Telegram incremental stream edit failed: %s",
+                                edit_error,
+                                exc_info=True,
+                            )
                         last_edit_time = now
                         last_edit_len = len(accumulated)
-        except Exception as e:
-            logger.warning("Stream error: %s", e)
+        except GateStreamUnavailable as error:
+            logger.warning("Stream unavailable before dispatch; using batch: %s", error)
             return False
-
-        if not streamed_any:
-            return False
+        except GateStreamError as error:
+            logger.error("Stream failed without batch resubmission: %s", error)
+            error_text = f"Error: {error}"
+            try:
+                await thinking_msg.edit_text(error_text)
+            except Exception as edit_error:
+                logger.warning(
+                    "Telegram stream error edit failed: %s",
+                    edit_error,
+                    exc_info=True,
+                )
+                await chat.send_message(error_text)
+            self._messages_failed += 1
+            return True
 
         # Final edit with complete text
         final = accumulated.strip()
         if final:
             try:
                 await thinking_msg.edit_text(final)
-            except Exception:
+            except Exception as edit_error:
+                logger.warning(
+                    "Telegram final stream edit failed: %s",
+                    edit_error,
+                    exc_info=True,
+                )
                 await chat.send_message(final)
             self._messages_processed += 1
         else:
             try:
                 await thinking_msg.edit_text("(empty response)")
-            except Exception:
-                pass
+            except Exception as edit_error:
+                logger.warning(
+                    "Telegram empty stream edit failed: %s",
+                    edit_error,
+                    exc_info=True,
+                )
+                await chat.send_message("(empty response)")
             self._messages_processed += 1
 
         return True
@@ -325,8 +350,8 @@ class TelegramGateBot:
     ) -> None:
         """Handle incoming text messages -- route to keeper.
 
-        Tries SSE streaming first for real-time response display.
-        Falls back to batch mode if streaming fails.
+        Tries SSE streaming first for real-time response display. Falls back
+        to batch only when the typed stream outcome proves no request was sent.
         """
         if (
             update.effective_chat is None

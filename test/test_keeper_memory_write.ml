@@ -11,6 +11,12 @@ let make_args ~kind ~title ~content =
     ]
 ;;
 
+let with_days args days =
+  match args with
+  | `Assoc fields -> `Assoc (fields @ [ "valid_for_days", `Int days ])
+  | other -> other
+;;
+
 let error_label = Runtime.memory_write_error_kind_to_string
 
 let assert_invalid ~expected = function
@@ -20,8 +26,9 @@ let assert_invalid ~expected = function
     Alcotest.failf "expected invalid memory write: %s" expected
 ;;
 
-let assert_ok ~kind ~body = function
+let assert_ok ?(valid_for_days = None) ~kind ~body = function
   | Runtime.Memory_write_ok valid ->
+    Alcotest.(check (option int)) "valid_for_days" valid_for_days valid.valid_for_days;
     Alcotest.(check string)
       "kind"
       kind
@@ -54,7 +61,6 @@ let make_meta name =
       (`Assoc
         [ "name", `String name
         ; "trace_id", `String ("trace-" ^ name)
-        ; "goal", `String "memory contract test"
         ])
   with
   | Error error -> Alcotest.fail ("meta fixture failed: " ^ error)
@@ -94,6 +100,28 @@ let only_jsonl_row path =
   | _ -> Alcotest.failf "expected one memory row, got %d" (List.length rows)
 ;;
 
+let count_jsonl_rows path =
+  if not (Sys.file_exists path)
+  then 0
+  else
+    Fs_compat.load_file path
+    |> String.split_on_char '\n'
+    |> List.filter (fun line -> String.trim line <> "")
+    |> List.length
+;;
+
+(* No Unix.unsetenv in the stdlib; restore the prior value, or "true"
+   (the flag's default) when it was unset — behaviourally equivalent for the
+   other tests, which all expect bank writes enabled. *)
+let with_bank_write_disabled f =
+  let key = "MASC_KEEPER_MEMORY_BANK_WRITE" in
+  let prev = Sys.getenv_opt key in
+  Unix.putenv key "false";
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv key (Option.value prev ~default:"true"))
+    f
+;;
+
 let test_validation_taxonomy () =
   Runtime.validate_memory_write_args
     (make_args ~kind:"bogus" ~title:"" ~content:"body")
@@ -111,9 +139,6 @@ let test_validation_taxonomy () =
     (make_args ~kind:" goal " ~title:"" ~content:"body")
   |> assert_invalid ~expected:"invalid_memory_kind";
   Runtime.validate_memory_write_args
-    (make_args ~kind:"long_term" ~title:"" ~content:"body")
-  |> assert_invalid ~expected:"long_term_via_explicit_write_not_yet_supported";
-  Runtime.validate_memory_write_args
     (make_args ~kind:"goal" ~title:"" ~content:"")
   |> assert_invalid ~expected:"content_empty";
   Runtime.validate_memory_write_args
@@ -121,10 +146,50 @@ let test_validation_taxonomy () =
   |> assert_invalid ~expected:"title_too_long";
   Runtime.validate_memory_write_args
     (make_args ~kind:"goal" ~title:"" ~content:"none")
-  |> assert_invalid ~expected:"content_rejected"
+  |> assert_invalid ~expected:"content_rejected";
+  (* RFC-0351 S2: a lifetime is a claim about scope, so both ends are real
+     boundaries and a turn-scoped kind cannot carry one at all. *)
+  Runtime.validate_memory_write_args
+    (with_days (make_args ~kind:"long_term" ~title:"" ~content:"body") 0)
+  |> assert_invalid ~expected:"invalid_valid_for_days";
+  Runtime.validate_memory_write_args
+    (with_days (make_args ~kind:"long_term" ~title:"" ~content:"body") 366)
+  |> assert_invalid ~expected:"invalid_valid_for_days";
+  Runtime.validate_memory_write_args
+    (with_days (make_args ~kind:"goal" ~title:"" ~content:"body") 7)
+  |> assert_invalid ~expected:"valid_for_days_on_turn_scoped_kind";
+  (* A wrong JSON type is not a range violation. Answering it with the range
+     would send the producer looking for a bug it does not have. *)
+  (match
+     Runtime.validate_memory_write_args
+       (`Assoc
+         [ "kind", `String "long_term"
+         ; "title", `String ""
+         ; "content", `String "body"
+         ; "valid_for_days", `String "7"
+         ])
+   with
+   | Runtime.Memory_write_invalid { error_kind; extras } ->
+     Alcotest.(check string)
+       "error kind"
+       "invalid_valid_for_days"
+       (error_label error_kind);
+     Alcotest.(check (option string))
+       "reason names the type, not the range"
+       (Some "not_an_integer")
+       (match List.assoc_opt "reason" extras with
+        | Some (`String r) -> Some r
+        | _ -> None)
+   | Runtime.Memory_write_ok _ -> Alcotest.fail "a string lifetime must be rejected")
 ;;
 
 let test_valid_body_has_no_intermediate_projection () =
+  Runtime.validate_memory_write_args
+    (make_args ~kind:"long_term" ~title:"" ~content:"body")
+  |> assert_ok ~kind:"long_term" ~body:"body";
+  Runtime.validate_memory_write_args
+    (with_days (make_args ~kind:"long_term" ~title:"" ~content:"body") 30)
+  |> assert_ok ~valid_for_days:(Some 30) ~kind:"long_term" ~body:"body";
   Runtime.validate_memory_write_args
     (make_args ~kind:"decision" ~title:"hook" ~content:"body text")
   |> assert_ok ~kind:"decision" ~body:"**hook** body text";
@@ -158,6 +223,116 @@ let test_bank_rejects_nonwritable_kind () =
   with
   | Error Bank.Rejected_explicit_memory_text -> ()
   | _ -> Alcotest.fail "filtered content must return a typed rejection"
+;;
+
+(* RFC-0351 L1 / masc#25517. The loop the model actually depends on: a
+   long-term write must reach the store recall reads back, not the turn-scoped
+   bank that no prompt block renders. The assertion goes through
+   [read_facts_all] — the same reader [Keeper_memory_os_recall] calls — rather
+   than through the rendered block, because routing is what this test is about
+   and rendering is covered in test_keeper_memory_os. *)
+let test_long_term_write_comes_back_through_recall () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "durable-write" in
+  let keepers_dir = Filename.concat base_path "keepers" in
+  Masc.Keeper_memory_os_io.For_testing.with_keepers_dir keepers_dir (fun () ->
+    let response =
+      Runtime.keeper_memory_write_json
+        ~config
+        ~meta
+        ~args:
+          (make_args
+             ~kind:"long_term"
+             ~title:""
+             ~content:"reasoning_content must be replayed unmodified")
+      |> Yojson.Safe.from_string
+    in
+    Alcotest.(check bool)
+      "write succeeds"
+      true
+      (match json_field "ok" response with
+       | `Bool value -> value
+       | _ -> false);
+    Alcotest.(check string)
+      "routed to the durable store"
+      "durable_fact_store"
+      (string_field "store" response);
+    let facts = Masc.Keeper_memory_os_io.read_facts_all ~keeper_id:meta.name in
+    Alcotest.(check int) "one durable claim" 1 (List.length facts);
+    let fact = List.hd facts in
+    Alcotest.(check string)
+      "the claim reaches a later turn"
+      "reasoning_content must be replayed unmodified"
+      fact.Masc.Keeper_memory_os_types.claim;
+    Alcotest.(check int)
+      "provenance carries this turn"
+      7
+      fact.Masc.Keeper_memory_os_types.source.turn;
+    (* The model asserted this itself; it did not carry it out of another
+       tool's result, and the field says where an observation came from. *)
+    Alcotest.(check bool)
+      "no borrowed tool provenance"
+      true
+      (fact.Masc.Keeper_memory_os_types.source.tool_call_id = None);
+    Alcotest.(check bool)
+      "a claim with no declared lifetime stays permanent"
+      true
+      (fact.Masc.Keeper_memory_os_types.valid_until = None))
+;;
+
+(* RFC-0351 S2. Recall has always dropped expired facts; until now nothing
+   could set the boundary, so all 747 facts in the live fleet read as
+   permanent. This pins the whole path: the declared lifetime reaches the
+   store, and the reader recall uses actually drops the claim past it. *)
+let test_declared_lifetime_expires () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "expiring-write" in
+  let keepers_dir = Filename.concat base_path "keepers" in
+  Masc.Keeper_memory_os_io.For_testing.with_keepers_dir keepers_dir (fun () ->
+    let response =
+      Runtime.keeper_memory_write_json
+        ~config
+        ~meta
+        ~args:
+          (with_days
+             (make_args ~kind:"long_term" ~title:"" ~content:"task-2288 is blocked on the git-root gate")
+             7)
+      |> Yojson.Safe.from_string
+    in
+    Alcotest.(check bool)
+      "write succeeds"
+      true
+      (match json_field "ok" response with
+       | `Bool value -> value
+       | _ -> false);
+    let fact = List.hd (Masc.Keeper_memory_os_io.read_facts_all ~keeper_id:meta.name) in
+    let valid_until =
+      match fact.Masc.Keeper_memory_os_types.valid_until with
+      | Some ts -> ts
+      | None -> Alcotest.fail "declared lifetime did not reach the store"
+    in
+    let first_seen = fact.Masc.Keeper_memory_os_types.first_seen in
+    (* 7 days from the write, to the second. *)
+    Alcotest.(check (float 1.0))
+      "boundary is the declared span"
+      (7.0 *. 86_400.)
+      (valid_until -. first_seen);
+    Alcotest.(check bool)
+      "still current inside the window"
+      true
+      (Masc.Keeper_memory_os_types.fact_is_current
+         ~now:(valid_until -. 86_400.)
+         fact);
+    Alcotest.(check bool)
+      "recall drops it past the window"
+      false
+      (Masc.Keeper_memory_os_types.fact_is_current
+         ~now:(valid_until +. 1.0)
+         fact))
 ;;
 
 let test_tool_write_persists_typed_provenance () =
@@ -200,6 +375,39 @@ let test_source_round_trip () =
     (Bank.memory_row_source_of_string wire = source)
 ;;
 
+(* RFC keeper-memory-bank-write-reduction: the MASC_KEEPER_MEMORY_BANK_WRITE
+   kill-switch. When off, a valid explicit note is not persisted and reports
+   [Skipped_bank_writes_disabled]; when on (default), it persists. Counterfactual:
+   without the gate the disabled case would append a row and return [Persisted]. *)
+let test_bank_write_kill_switch () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "bank-write-gate" in
+  let path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
+  let write () =
+    Bank.append_explicit_memory_note
+      config
+      meta
+      ~turn:7
+      ~kind:Bank.Decision
+      ~text:"Release task-1851 due to the HITL approval loop blocking evidence"
+  in
+  with_bank_write_disabled (fun () ->
+    match write () with
+    | Ok Bank.Skipped_bank_writes_disabled -> ()
+    | Ok Bank.Persisted ->
+      Alcotest.fail "kill-switch off must skip the write, not persist"
+    | Error _ -> Alcotest.fail "a valid note under the kill-switch must not error");
+  Alcotest.(check int) "nothing persisted while disabled" 0 (count_jsonl_rows path);
+  (match write () with
+   | Ok Bank.Persisted -> ()
+   | Ok Bank.Skipped_bank_writes_disabled ->
+     Alcotest.fail "with the kill-switch restored (default on) the note must persist"
+   | Error _ -> Alcotest.fail "enabled write must not error");
+  Alcotest.(check int) "one row persisted once re-enabled" 1 (count_jsonl_rows path)
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_write"
@@ -216,10 +424,22 @@ let () =
             `Quick
             test_bank_rejects_nonwritable_kind
         ; Alcotest.test_case
+            "long-term write comes back through recall"
+            `Quick
+            test_long_term_write_comes_back_through_recall
+        ; Alcotest.test_case
+            "declared lifetime reaches the store and expires"
+            `Quick
+            test_declared_lifetime_expires
+        ; Alcotest.test_case
             "tool write stores typed provenance"
             `Quick
             test_tool_write_persists_typed_provenance
         ; Alcotest.test_case "source round trips" `Quick test_source_round_trip
+        ; Alcotest.test_case
+            "bank write kill-switch skips and reports"
+            `Quick
+            test_bank_write_kill_switch
         ] )
     ]
 ;;

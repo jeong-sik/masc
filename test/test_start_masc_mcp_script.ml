@@ -169,7 +169,6 @@ capture="${FAKE_CAPTURE_FILE:?}"
   printf 'MASC_WS_PORT=%%s\n' "${MASC_WS_PORT:-}"
   printf 'MASC_WS_ENABLED=%%s\n' "${MASC_WS_ENABLED:-}"
   printf 'MASC_WEBRTC_ENABLED=%%s\n' "${MASC_WEBRTC_ENABLED:-}"
-  printf 'MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM=%%s\n' "${MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM:-}"
   printf 'ARGS=%%s\n' "$*"
 } >"$capture"
 exit 0
@@ -216,7 +215,7 @@ case "$cmd" in
       echo 1 > "$state"
       echo "Error: Files lib/.masc.objs/native/masc__Keeper_context_core.cmx" >&2
       echo "       and lib/.masc.objs/native/masc__Inference_utils.cmx" >&2
-      echo "       make inconsistent assumptions over implementation Agent_sdk__Context_reducer" >&2
+      echo "       make inconsistent assumptions over implementation Agent_sdk__Streaming" >&2
       exit 1
     fi
     mkdir -p _build/default/bin
@@ -301,7 +300,7 @@ let write_fake_dune_local ~path ~log_file =
        {|
 #!/bin/sh
 set -eu
-printf 'dune-local %%s DUNE_JOBS=%%s DUNE_LOCAL_JOBS=%%s DUNE_CACHE=%%s\n' "$*" "${DUNE_JOBS:-}" "${DUNE_LOCAL_JOBS:-}" "${DUNE_CACHE:-}" >> %s
+printf 'dune-local %%s DUNE_JOBS=%%s DUNE_CACHE=%%s\n' "$*" "${DUNE_JOBS:-}" "${DUNE_CACHE:-}" >> %s
 exec dune "$@"
 |}
        (quote log_file))
@@ -353,32 +352,7 @@ let test_explicit_env_overrides_repo_env_files () =
         (contains_substring captured
            ("MASC_BASE_PATH=" ^ canonical_path dir));
       check bool "explicit config dir preserved" true
-        (contains_substring captured ("MASC_CONFIG_DIR=" ^ Filename.concat dir "config"));
-      check bool "Docker hotspot blocking default is exported as disabled" true
-        (contains_substring captured "MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM=0"))
-
-let test_fd_hotspot_headworkspace_override_is_preserved () =
-  with_temp_dir "start-masc-script" (fun dir ->
-      let script = Filename.concat dir "start-masc.sh" in
-      copy_script (script_path ()) script;
-      make_fake_eio_exe dir;
-      let capture = Filename.concat dir "captured-fd-hotspot.txt" in
-      let code, stdout, stderr =
-        run_script ~cwd:dir script
-          ~env:
-            [
-              ("FAKE_CAPTURE_FILE", capture);
-              ("MASC_BASE_PATH", dir);
-              ("MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM", "1024");
-            ]
-          [ "--http"; "--port"; "9973"; "--base-path"; dir ]
-      in
-      if code <> 0 then
-        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
-          stderr;
-      let captured = read_file capture in
-      check bool "explicit Docker hotspot headroom is preserved" true
-        (contains_substring captured "MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM=1024"))
+        (contains_substring captured ("MASC_CONFIG_DIR=" ^ Filename.concat dir "config")))
 
 let test_realtime_transports_default_to_base_path_config_and_preserve_override ()
     =
@@ -888,12 +862,12 @@ let test_stale_dune_artifacts_are_cleaned_and_retried () =
                "dune-local build bin/main_eio.exe");
           check bool "startup forwards DUNE_JOBS into wrapper under CI" true
             (contains_substring dune_local_calls
-               "DUNE_JOBS=2 DUNE_LOCAL_JOBS=2");
+               "DUNE_JOBS=2");
           check bool "stale cleanup uses dune-local wrapper" true
             (contains_substring dune_local_calls "dune-local clean");
           check bool "original stale artifact error preserved" true
             (contains_substring stderr
-               "make inconsistent assumptions over implementation Agent_sdk__Context_reducer");
+               "make inconsistent assumptions over implementation Agent_sdk__Streaming");
           check bool "retry is explained" true
             (contains_substring stderr
                "Stale Dune artifacts detected while building main_eio.exe");
@@ -944,10 +918,10 @@ let test_dune_cache_temp_error_retries_with_cache_disabled () =
           let dune_local_calls = read_file dune_local_log in
           check bool "initial startup build used cache default" true
             (contains_substring dune_local_calls
-               "dune-local build bin/main_eio.exe DUNE_JOBS=2 DUNE_LOCAL_JOBS=2 DUNE_CACHE=");
+               "dune-local build bin/main_eio.exe DUNE_JOBS=2 DUNE_CACHE=");
           check bool "retry disabled Dune cache" true
             (contains_substring dune_local_calls
-               "dune-local build bin/main_eio.exe DUNE_JOBS=2 DUNE_LOCAL_JOBS=2 DUNE_CACHE=disabled");
+               "dune-local build bin/main_eio.exe DUNE_JOBS=2 DUNE_CACHE=disabled");
           check bool "original cache temp error preserved" true
             (contains_substring stderr
                "rmdir(/Users/test/.cache/dune/db/temp/dune_6eb519_artifacts): Directory not empty");
@@ -1203,8 +1177,6 @@ let () =
         [
           test_case "explicit env overrides repo env files" `Quick
             test_explicit_env_overrides_repo_env_files;
-          test_case "FD hotspot headroom override is preserved" `Quick
-            test_fd_hotspot_headworkspace_override_is_preserved;
           test_case
             "realtime transports default to base path config and preserve override"
             `Quick

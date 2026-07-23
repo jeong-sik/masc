@@ -19,7 +19,7 @@ type task = {
 
 type keeper = {
   k_name : string;
-  k_goal : string;
+  k_active_goal_ids : string list;
   k_generation : int;
   k_active_model : string option;
   k_models : string list;
@@ -30,10 +30,8 @@ type keeper = {
   k_total_cost_usd : float;
   k_last_turn_ts : string;
   k_compaction_count : int;
-  k_compaction_ratio_gate : float;
   k_trigger_mode : string;
   k_context_budget : int;
-  k_handoff_threshold : float;
   k_drift_enabled : bool;
   k_verify : bool;
   k_created_at : string;
@@ -190,7 +188,7 @@ let decode_task json =
     }
 
 let decode_keeper ~filename json =
-  let* k_goal = require_string_field json "goal" in
+  let* k_active_goal_ids = require_string_list json "active_goal_ids" in
   let* k_generation = require_int_field json "generation" in
   let* k_active_model = optional_string json "active_model" in
   let* k_models =
@@ -222,10 +220,8 @@ let decode_keeper ~filename json =
              (Json_util.kind_name other))
   in
   let* k_compaction_count = require_int_field json "compaction_count" in
-  let* k_compaction_ratio_gate = require_float_field json "compaction_ratio_gate" in
   let* k_trigger_mode = require_string_field json "trigger_mode" in
   let* k_context_budget = require_int_field json "context_budget" in
-  let* k_handoff_threshold = require_float_field json "handoff_threshold" in
   let* k_drift_enabled = require_bool_field json "drift_enabled" in
   let* k_verify = require_bool_field json "verify" in
   let* k_created_at = require_string_field json "created_at" in
@@ -240,7 +236,7 @@ let decode_keeper ~filename json =
   Ok
     {
       k_name;
-      k_goal;
+      k_active_goal_ids;
       k_generation;
       k_active_model;
       k_models;
@@ -251,10 +247,8 @@ let decode_keeper ~filename json =
       k_total_cost_usd;
       k_last_turn_ts;
       k_compaction_count;
-      k_compaction_ratio_gate;
       k_trigger_mode;
       k_context_budget;
-      k_handoff_threshold;
       k_drift_enabled;
       k_verify;
       k_created_at;

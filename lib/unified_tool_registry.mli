@@ -1,8 +1,7 @@
 (** Unified Tool Registry Ratchet — P0-1.
 
     Single registration flow that fills dispatch-tag/schema gaps across
-    [Keeper_tool_name], [Config.raw_all_tool_schemas],
-    [Keeper_tool_registry.core_always_tools], and the keeper task runtime.
+    [Keeper_tool_name], [Config.raw_all_tool_schemas], and the keeper task runtime.
 
     The flow is invoked once at startup by the MCP composition root; it is
     idempotent and preserves tags already registered via [Tool_spec]. *)

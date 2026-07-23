@@ -2,9 +2,8 @@
     for cascade (retry/rotation) resolution decisions.
 
     Publishes a [telemetry_event] on the MASC Event_bus each time the
-    keeper retry loop resolves a cascade decision — degraded retry
-    allowed, slot-phase exhausted, no degraded retry, or transient
-    network retry.
+    keeper runtime rotation resolves a cascade decision — degraded retry
+    allowed or no degraded retry.
 
     [keeper_telemetry_consumer] observes [Custom("telemetry_event", _)]
     on the bus and increments
@@ -16,9 +15,7 @@
 
 type cascade_decision_kind =
   | Degraded_retry_allowed
-  | Degraded_retry_slot_phase_exhausted
   | No_degraded_retry
-  | Transient_network_retry
 (** Kind of cascade resolution decision. *)
 
 (** {1 Publishing} *)
@@ -37,6 +34,5 @@ val publish_cascade_resolution :
     [{ keeper_name, runtime_id, decision, reason, next_runtime,
        attempt, error_kind, error_message, timestamp }].
 
-    Call at each cascade resolution point in the retry loop so
-    observability can track provider fallback patterns, slot-phase
-    exhaustion events, and transient retries. *)
+    Call at each cascade resolution point so observability can track provider
+    fallback patterns. *)

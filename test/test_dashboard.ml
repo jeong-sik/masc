@@ -151,7 +151,6 @@ let make_test_meta name =
           ("name", `String name);
           ("agent_name", `String name);
           ("trace_id", `String ("trace-" ^ name));
-          ("tool_access", Json_util.json_string_list []);
         ])
   with
   | Ok meta -> meta
@@ -159,7 +158,7 @@ let make_test_meta name =
 
 let test_keepers_section_empty () =
   let now = Unix.gettimeofday () in
-  Lib.Keeper_registry.clear ();
+  Lib.Keeper_registry.For_testing.clear ();
   let section = Dashboard.keepers_section now in
   Alcotest.(check string) "title" "Keepers" section.title;
   Alcotest.(check string) "empty_msg" "(no keepers registered)" section.empty_msg;
@@ -169,9 +168,9 @@ let test_keepers_section_with_entry () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
-  Lib.Keeper_registry.clear ();
+  Lib.Keeper_registry.For_testing.clear ();
   ignore
-    (Lib.Keeper_registry.register ~base_path:dir "alpha"
+    (Lib.Keeper_registry.For_testing.register ~base_path:dir "alpha"
        (make_test_meta "alpha"));
   let now = Unix.gettimeofday () in
   let section = Dashboard.keepers_section now in
@@ -181,7 +180,7 @@ let test_keepers_section_with_entry () =
   Alcotest.(check bool) "contains keeper name" true (contains line "alpha");
   Alcotest.(check bool) "contains phase" true (contains line "running");
   Alcotest.(check bool) "contains seq" true (contains line "seq=");
-  Lib.Keeper_registry.clear ();
+  Lib.Keeper_registry.For_testing.clear ();
   cleanup_dir dir
 
 let test_generate_full_contains_keepers () =
@@ -204,30 +203,13 @@ let test_generate_compact_contains_keepers () =
   Alcotest.(check bool) "contains KEEPERS line" true (contains output "KEEPERS:");
   cleanup_dir dir
 
-let test_generate_compact_surfaces_board_cap_without_failure () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = test_dir () in
-  let config = Workspace_utils.default_config dir in
-  setup_workspace config;
-  Lib.Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string BoardSignalWakeupCappedTotal)
-    ~labels:[("kind", "task")]
-    ();
-  let output = Dashboard.generate_compact config in
-  Alcotest.(check bool)
-    "contains board cap diagnostic"
-    true
-    (contains output "BOARD-CAPPED:");
-  cleanup_dir dir
-
 let test_keepers_section_dead_phase () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
-  Lib.Keeper_registry.clear ();
+  Lib.Keeper_registry.For_testing.clear ();
   ignore
-    (Lib.Keeper_registry.register ~base_path:dir "delta"
+    (Lib.Keeper_registry.For_testing.register ~base_path:dir "delta"
        (make_test_meta "delta"));
   let now_mark = Unix.gettimeofday () in
   Lib.Keeper_registry.mark_dead ~base_path:dir "delta" ~at:now_mark;
@@ -238,16 +220,16 @@ let test_keepers_section_dead_phase () =
   Alcotest.(check bool) "contains delta" true (contains line "delta");
   Alcotest.(check bool) "contains dead phase" true (contains line "dead");
   Alcotest.(check bool) "contains since= marker" true (contains line "since=");
-  Lib.Keeper_registry.clear ();
+  Lib.Keeper_registry.For_testing.clear ();
   cleanup_dir dir
 
 let test_keepers_section_with_error_truncated () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = test_dir () in
-  Lib.Keeper_registry.clear ();
+  Lib.Keeper_registry.For_testing.clear ();
   ignore
-    (Lib.Keeper_registry.register ~base_path:dir "echo"
+    (Lib.Keeper_registry.For_testing.register ~base_path:dir "echo"
        (make_test_meta "echo"));
   let long_err =
     "this is a long error message that should exceed the default display length of 35 chars and therefore be truncated with an ellipsis"
@@ -262,7 +244,7 @@ let test_keepers_section_with_error_truncated () =
      so the total line cannot contain the full 130-char error verbatim. *)
   Alcotest.(check bool) "long error body is not verbatim"
     false (contains line "ellipsis");
-  Lib.Keeper_registry.clear ();
+  Lib.Keeper_registry.For_testing.clear ();
   cleanup_dir dir
 
 (* ===== Test Suite ===== *)
@@ -293,9 +275,6 @@ let keepers_tests = [
   "keepers section with entry", `Quick, test_keepers_section_with_entry;
   "generate full contains keepers", `Quick, test_generate_full_contains_keepers;
   "generate compact contains keepers", `Quick, test_generate_compact_contains_keepers;
-  ( "generate compact surfaces board cap",
-    `Quick,
-    test_generate_compact_surfaces_board_cap_without_failure );
   "keepers section dead phase", `Quick, test_keepers_section_dead_phase;
   "keepers section with error truncated", `Quick, test_keepers_section_with_error_truncated;
 ]

@@ -123,36 +123,28 @@ harness_seed_server_config() {
     "$config_dir/personas" \
     "$config_dir/prompts"
 
-  if [[ ! -f "$config_dir/tool_policy.toml" ]]; then
-    if [[ -f "$repo_root/config/tool_policy.toml" ]]; then
-      cp "$repo_root/config/tool_policy.toml" "$config_dir/tool_policy.toml"
-    else
-      echo "tool_policy.toml fixture not found under repo root: $repo_root" >&2
-      return 1
-    fi
-  fi
-
   if [[ ! -f "$config_dir/runtime.toml" ]]; then
     cat >"$config_dir/runtime.toml" <<'EOF'
 [runtime]
-default = "transport_harness.smoke"
+default = "deepseek.smoke"
 
-[providers.transport_harness]
+[providers.deepseek]
 display-name = "Transport Harness Smoke"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:9/v1"
 
 [models.smoke]
-# Borrow a real repo catalog id for strict capability lookup. The transport
-# harness never reaches the provider endpoint, but Runtime.init_default_strict
-# must still see model capability metadata instead of falling back to provider
-# defaults.
-api-name = "deepseek-v4-flash"
+# Harness-local opaque runtime alias. The adjacent typed capability block is
+# the sole declaration used when no exact OAS catalog row exists.
+api-name = "transport-harness-smoke"
 max-context = 32768
 tools-support = true
 streaming = true
 
-[transport_harness.smoke]
+[models.smoke.capabilities]
+supports-tool-choice = true
+
+[deepseek.smoke]
 is-default = true
 max-concurrent = 1
 EOF

@@ -53,7 +53,6 @@ val set_turn_context :
   ?sandbox_root:string ->
   ?allowed_paths:string list ->
   ?network_mode:string ->
-  ?approval_mode:string ->
   ?runtime_profile:string ->
   unit ->
   unit
@@ -62,10 +61,10 @@ val set_turn_context :
 
 val get_turn_context :
   cell:turn_ctx_cell ->
-  unit ->string option * string option * bool option * int option * string option * string option * string option * int option * int option * string option * string list option * string option * string option * string option
+  unit ->string option * string option * bool option * int option * string option * string option * string option * int option * int option * string option * string list option * string option * string option
 (** Returns [(lane, tool_choice, thinking_enabled, thinking_budget, trace_id,
     prompt_fingerprint, session_id, turn, keeper_turn_id, task_id, goal_ids,
-    sandbox_profile, network_mode, approval_mode)] for
+    sandbox_profile, network_mode)] for
     the run, or [None] values when no turn context has
     been recorded. *)
 
@@ -146,6 +145,7 @@ val log_call :
   ?prompt_fingerprint:string ->
   ?execution_id:Ids.Execution_id.t ->
   ?tool_use_id:string ->
+  ?planned_index:int ->
   ?trace_id:string ->
   ?session_id:string ->
   ?generation:int ->
@@ -157,7 +157,6 @@ val log_call :
   ?sandbox_root:string ->
   ?allowed_paths:string list ->
   ?network_mode:string ->
-  ?approval_mode:string ->
   ?runtime_profile:string ->
   ?result_bytes:int ->
   ?truncated_to:int ->
@@ -168,14 +167,17 @@ val log_call :
     dispatch boundary; the trajectory row for the same execution carries
     the identical value. [tool_use_id] is the provider call id for the
     same execution (when the dispatch lane has one) — the key that the
-    oas:tool_called/oas:tool_completed event rows also carry.
+    oas:tool_called/oas:tool_completed event rows also carry. Blank and
+    repeated provider ids remain meaningful when scoped by [turn] and
+    [planned_index], so they are persisted unchanged.
     Output is truncated to 4000 bytes. [model] is a compatibility input only;
     non-empty values are redacted to the neutral runtime lane. [runtime_profile]
     is persisted separately as the operator-facing runtime selector. Turn-policy fields ([lane], [tool_choice],
     [thinking_enabled], [thinking_budget]) capture the effective tool
     selection context. [result_bytes] is the original output size before
-    any truncation. [truncated_to] is present when Tool_output_validation
-    truncated the output. Best-effort (failures logged). *)
+    any observation-only log preview truncation. [truncated_to] records the
+    retained preview size when one exists; it never describes mutation of the
+    Tool result delivered to the Keeper. Best-effort (failures logged). *)
 
 val read_recent :
   ?keeper_name:string ->
@@ -184,6 +186,25 @@ val read_recent :
   Yojson.Safe.t list
 (** [read_recent ?keeper_name ?n ()] returns the [n] most recent entries,
     optionally filtered by keeper name. Default [n=100]. *)
+
+val read_over_scan_factor : int
+(** Scan multiplier [read_recent] applies before its keeper filter: it
+    reads [n * read_over_scan_factor] fleet rows to find [n] matching
+    entries. Callers sharing one fleet read ({!read_recent_rows}) size
+    their window with this to reproduce [read_recent]'s coverage. *)
+
+val read_recent_rows : n:int -> unit -> Yojson.Safe.t list
+(** [read_recent_rows ~n ()] returns the [n] most recent fleet-wide rows
+    with no keeper filter. One shared read serves every per-keeper
+    {!filter_rows_for_keeper} derivation, instead of each keeper
+    re-parsing the store. *)
+
+val filter_rows_for_keeper :
+  keeper_name:string -> n:int -> Yojson.Safe.t list -> Yojson.Safe.t list
+(** [filter_rows_for_keeper ~keeper_name ~n rows] is [read_recent]'s
+    keeper filter applied to an already-read row window: rows whose
+    ["keeper"] field equals [keeper_name], order preserved, truncated to
+    the last [n]. *)
 
 val read_window :
   ?keeper_name:string ->

@@ -67,20 +67,12 @@ let test_annotations_use_catalog_capabilities () =
     true
     (bool_annotation "readOnlyHint" "tool_read_file");
   check
-    bool
-    "tool_read_file openWorldHint closed"
-    false
-    (bool_annotation "openWorldHint" "tool_read_file");
-  check
-    bool
-    "shell_exec destructiveHint from catalog capability"
-    true
-    (bool_annotation "destructiveHint" "shell_exec");
-  check
-    bool
-    "shell_exec openWorldHint open"
-    true
-    (bool_annotation "openWorldHint" "shell_exec")
+    (option string)
+    "tool_read_file does not infer idempotentHint from read-only"
+    None
+    (Option.map
+       Yojson.Safe.to_string
+       (annotation_field "idempotentHint" "tool_read_file"))
 ;;
 
 let test_annotations_use_descriptor_public_alias_capabilities () =
@@ -89,11 +81,6 @@ let test_annotations_use_descriptor_public_alias_capabilities () =
     "ReadFile readOnlyHint from descriptor"
     true
     (bool_annotation "readOnlyHint" "Read");
-  check
-    bool
-    "ReadFile openWorldHint closed"
-    false
-    (bool_annotation "openWorldHint" "Read");
   check
     bool
     "SearchFiles readOnlyHint from descriptor"
@@ -108,17 +95,7 @@ let test_annotations_use_descriptor_public_alias_capabilities () =
     bool
     "WriteFile readOnlyHint false from descriptor"
     false
-    (bool_annotation "readOnlyHint" "Write");
-  check
-    bool
-    "WriteFile destructiveHint from canonical internal capability"
-    true
-    (bool_annotation "destructiveHint" "Write");
-  check
-    bool
-    "Execute destructiveHint from canonical internal capability"
-    true
-    (bool_annotation "destructiveHint" "Execute")
+    (bool_annotation "readOnlyHint" "Write")
 ;;
 
 let test_tool_json_projects_descriptor_metadata_for_public_aliases () =
@@ -133,17 +110,7 @@ let test_tool_json_projects_descriptor_metadata_for_public_aliases () =
     "ReadFile canonical descriptor name"
     "tool_read_file"
     (json_string_field "descriptorCanonicalName" read_file);
-  check
-    string
-    "ReadFile effect domain"
-    "read_only"
-    (json_string_field "effectDomain" read_file);
   let write_file = tool_json "Write" in
-  check
-    string
-    "WriteFile effect domain"
-    "playground_write"
-    (json_string_field "effectDomain" write_file);
   check
     string
     "WriteFile descriptor executor"
@@ -188,21 +155,10 @@ let test_descriptor_resolution_capabilities_for_public_aliases () =
     "mcp-prefixed SearchFiles read-only via descriptor resolution"
     true
     (capability_has Tool_capability.Read_only "mcp__masc__Grep");
-  check
-    bool
-    "WriteFile destructive via descriptor resolution"
-    true
-    (capability_has Tool_capability.Destructive "Write");
-  check
-    bool
-    "Execute destructive via descriptor resolution"
-    true
-    (capability_has Tool_capability.Destructive "Execute");
-  check
-    bool
-    "ReadFile not destructive via descriptor resolution"
-    false
-    (capability_has Tool_capability.Destructive "Read")
+  check bool "WriteFile is not read-only" false
+    (capability_has Tool_capability.Read_only "Write");
+  check bool "Execute is not read-only" false
+    (capability_has Tool_capability.Read_only "Execute")
 ;;
 
 let test_default_instructions_pin_start_transition_workflow () =

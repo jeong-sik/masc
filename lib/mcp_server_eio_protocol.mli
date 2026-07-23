@@ -51,7 +51,7 @@
     [handle_dashboard_unsubscribe_eio] /
     [handle_dashboard_ack_eio] /
     [handle_dashboard_ack_notification],
-    [contains_casefold], [tool_call_outcome],
+    [tool_call_outcome],
     [jsonrpc_id_label], [tool_profile_label],
     [mcp_tool_call_log_details],
     [read_line_message], [write_framed_message],
@@ -213,4 +213,3 @@ val register_dashboard_ack :
    unit ->
    (Yojson.Safe.t, string) result) ->
   unit
-

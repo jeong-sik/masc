@@ -30,6 +30,23 @@ let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta)
   scope.task_filter
 ;;
 
+(* A keeper must not treat a task it authored itself as work waiting for it.
+   Without this, a persona whose response to "an unclaimed task exists" is to
+   create a routing/report task produces a closed positive feedback loop: the
+   new task is itself an unclaimed Todo authored by the same keeper, so it
+   re-satisfies the trigger on the next observation. Live evidence: taskmaster
+   authored 367 of the active tasks, 272 of them the same four "Route g0700 #N"
+   templates re-emitted once per iteration (#28..#90), none ever claimed.
+
+   [created_by] carries the keeper handle ([meta.name], e.g. "taskmaster"), not
+   the agent name, so it is compared against [meta.name]. A task with no
+   [created_by] has no known author and is never excluded. *)
+let task_is_self_authored ~(meta : keeper_meta) (task : Masc_domain.task) =
+  match task.created_by with
+  | None -> false
+  | Some author -> String.equal author meta.name
+;;
+
 let actionable_verification_request_ids ~(config : Workspace.config) : string list =
   Verification.list_requests config.Workspace.base_path
   |> List.filter Verification.request_is_actionable
@@ -96,7 +113,11 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
         (List.filter
            (fun task ->
               Workspace_task_schedule.task_is_claim_pool_candidate task
-              && claim_scope_filter task)
+              && claim_scope_filter task
+              (* Self-authored tasks stay in [unclaimed] (the count stays an
+                 honest view of the backlog) but are not offered back to their
+                 author as claimable work — that edge is the feedback loop. *)
+              && not (task_is_self_authored ~meta task))
            unclaimed_tasks)
     in
     let failed =
@@ -196,29 +217,4 @@ let compute_idle_seconds ~(meta : keeper_meta) : int =
   in
   let activity_ts = List.fold_left max created_ts [ meta.runtime.proactive_rt.last_ts ] in
   if activity_ts <= 0.0 then 0 else int_of_float (max 0.0 (now_ts -. activity_ts))
-;;
-
-(** Read context ratio from checkpoint if available. *)
-let read_context_ratio ~(config : Workspace.config) ~(meta : keeper_meta) : float =
-  try
-    let primary_max_context =
-      let resolution =
-        Keeper_context_runtime.resolve_max_context_resolution_of_meta meta
-      in
-      resolution.effective_budget
-    in
-    let base_dir = session_base_dir config in
-    let _session, ctx_opt =
-      load_context_from_checkpoint
-        ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
-        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-        ~primary_model_max_tokens:primary_max_context
-        ~base_dir
-    in
-    match ctx_opt with
-    | Some c -> Keeper_context_runtime.context_ratio c
-    | None -> 0.0
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ -> 0.0
 ;;

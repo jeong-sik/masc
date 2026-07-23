@@ -170,8 +170,8 @@ let count_where items predicate =
 
 (** Collapse multi-line text into a single trimmed line, dropping blank
     rows.  Used by judge modules to normalize LLM output before scoring,
-    so this is the SSOT — Dashboard_governance_judge and
-    Dashboard_operator_judge previously each carried an identical fork. *)
+    so this is the SSOT — retired dashboard judges previously carried
+    identical forks. *)
 let normalize_text raw =
   raw |> String.trim |> String.split_on_char '\n'
   |> List.filter_map String_util.trim_to_option

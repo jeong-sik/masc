@@ -73,8 +73,6 @@ type scenario = {
   expected_outcome : string;
   tool_expectations : tool_expectation list;
   graders : grader list;
-  max_turns : int;
-  max_cost_usd : float;
   tags : string list;
   ownership : ownership;
 }

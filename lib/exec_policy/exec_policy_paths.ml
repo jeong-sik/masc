@@ -55,30 +55,6 @@ let resolve_path ?base_dir path =
 let is_within_dir ~dir path =
   path = dir || String.starts_with ~prefix:(dir ^ "/") path
 
-let substring_index s needle =
-  let s_len = String.length s in
-  let n_len = String.length needle in
-  let rec loop i =
-    if n_len = 0 then Some 0
-    else if i + n_len > s_len then None
-    else if String.sub s i n_len = needle then Some i
-    else loop (i + 1)
-  in
-  loop 0
-
-let git_metadata_exists dir =
-  Sys.file_exists (Filename.concat dir ".git")
-
-let worktree_repo_root_of_workdir workdir =
-  let marker = "/.worktrees/" in
-  let resolved_workdir = resolve_path workdir in
-  match substring_index resolved_workdir marker with
-  | None -> None
-  | Some idx ->
-      let repo_root = String.sub resolved_workdir 0 idx in
-      if repo_root <> "" && git_metadata_exists repo_root then Some repo_root
-      else None
-
 (** Path allowlist. When workdir is set, restrict to workdir + /tmp only.
     When unset, allow /tmp, cwd subtree, and the documented sandbox workspace
     root from [Host_config.sandbox_workspace_root].
@@ -91,60 +67,16 @@ let worktree_repo_root_of_workdir workdir =
     surfaces a documented fallback ([/tmp/masc-fleet]) which is allowed.
     This aligns the Fleet worker with the same SSOT that other keeper
     sandbox surfaces will migrate to in later cleanup PRs. *)
-let keeper_registered_repo_path_allowed ?keeper_id ?base_path path =
-  match (keeper_id, base_path) with
-  | Some keeper_id, Some base_path -> (
-      match Keeper_repo_mapping.repository_resolution_of_path ~base_path ~path with
-      | Keeper_repo_mapping.No_repository
-      | Keeper_repo_mapping.Repository_identity_mismatch _
-      | Keeper_repo_mapping.Repository_store_error _ ->
-          false
-      | Keeper_repo_mapping.Repository
-          { repository_id = _; repo_root = Some repo_root } ->
-          (* RFC-0324 B-2': inside a keeper playground [repos/<segment>] lane
-             the filesystem is the repo truth — the Execute gate asks whether
-             the clone actually exists, not whether its segment is in the
-             repositories.toml catalog (catalog ids and clone directory names
-             have no invariant linking them, so catalog membership blocked
-             real clones; 379 path errors/24h in the 2026-07-08 audit). The
-             playground boundary is unchanged: [repo_root] is a prefix of the
-             already symlink-resolved candidate path, so paths outside the
-             playground never reach this arm. Fail-closed: a missing or
-             unstatable directory rejects. *)
-          (try Sys.is_directory repo_root with Sys_error _ -> false)
-      | Keeper_repo_mapping.Repository { repository_id; repo_root = None } -> (
-          (* Non-playground path that resolved via a catalog repo's
-             local_path prefix — the catalog stays the authority there
-             (RFC-0324 keeps catalog authz for non-playground consumers). *)
-          match
-            Keeper_repo_mapping.validate_access ~keeper_id ~repository_id
-              ~base_path
-          with
-          | Ok () -> true
-          | Error _ -> false))
-  | _ -> false
-
-let validate_path ?keeper_id ?base_path ?workdir path =
+let validate_path ?workdir path =
   let resolved = resolve_path ?base_dir:workdir path in
-  let registered_repo_allowed =
-    keeper_registered_repo_path_allowed ?keeper_id ?base_path resolved
-  in
   match workdir with
   | Some wd ->
       let resolved_wd = resolve_path wd in
-      let within_worktree_repo_root =
-        match worktree_repo_root_of_workdir wd with
-        | None -> false
-        | Some repo_root -> is_within_dir ~dir:(resolve_path repo_root) resolved
-      in
       is_within_dir ~dir:(resolve_path "/tmp") resolved
       || is_within_dir ~dir:resolved_wd resolved
-      || within_worktree_repo_root
-      || registered_repo_allowed
   | None ->
       let cfg = Host_config.host () in
       let cwd = Config_dir_resolver.current_working_dir () in
       is_within_dir ~dir:(resolve_path "/tmp") resolved
       || is_within_dir ~dir:(resolve_path cwd) resolved
       || is_within_dir ~dir:(resolve_path cfg.sandbox_workspace_root) resolved
-      || registered_repo_allowed

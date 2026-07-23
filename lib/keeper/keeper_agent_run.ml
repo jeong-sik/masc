@@ -8,11 +8,9 @@ include Keeper_agent_prompt_metrics
 include Keeper_agent_tool_surface
 include Keeper_agent_result
 include Keeper_agent_error
-include Keeper_agent_checkpoint_hygiene
 module Contract_helpers = Keeper_agent_run_contract_helpers
 module Turn_helpers = Keeper_agent_run_turn_helpers
 
-let per_provider_timeout_for_turn = Turn_helpers.per_provider_timeout_for_turn
 let progress_keeper_tool_names_for_contract =
   Contract_helpers.progress_keeper_tool_names_for_contract
 ;;
@@ -23,23 +21,9 @@ let observation_timestamp_ms () =
   Int64.of_float (Unix.gettimeofday () *. 1000.0)
 ;;
 
-let completion_contract_result_for_progress_evidence =
-  Turn_helpers.completion_contract_result_for_progress_evidence
-
-let keeper_oas_visibility_neutral_guardrails ?guardrails () =
-  let max_tool_calls_per_turn =
-    match guardrails with
-    | Some guardrails -> guardrails.Agent_sdk.Guardrails.max_tool_calls_per_turn
-    | None -> Agent_sdk.Guardrails.default.max_tool_calls_per_turn
-  in
-  { Agent_sdk.Guardrails.tool_filter = Agent_sdk.Guardrails.AllowAll
-  ; max_tool_calls_per_turn
-  }
-;;
-
 let normalize_response_text_for_finalization
       ~runtime_id
-      ~initial_messages
+      ~initial_messages:_
       ~(run_result : Runtime_agent.run_result)
       ~text
       ~tool_names
@@ -53,17 +37,11 @@ let normalize_response_text_for_finalization
     match Keeper_tool_response.normalize_response_text ~text ~tool_names () with
   | Ok response_text -> Ok response_text
   | Error _ ->
-    (* Finalization intentionally exposes the higher-level accept-rejected
-       error with tool context and raw runtime response. The normalizer error
-       only says the response text could not be canonicalized. *)
-    let last_tool_context =
-      Keeper_turn_driver_try_provider.accept_rejection_context_of_run_result
-        ~initial_messages
-        run_result
-    in
+    (* Finalization exposes the typed accept-rejected response itself. Tool
+       execution history stays in the OAS checkpoint; it is not projected into
+       a read/mutating behavioral classification. *)
     Error
       (Keeper_turn_driver_try_provider.accept_rejected_error
-         ~last_tool_context
          ~runtime_id
          ~response:run_result.response)
 ;;
@@ -72,8 +50,7 @@ let normalize_response_text_for_finalization
    Tool_execution / Run_finished records written to a fresh per-turn JSONL
    under [Keeper_types_support.keeper_raw_trace_dir]. Passing the sink into
    [Keeper_turn_driver.run_named] is what populates
-   [run_result.trace_ref]/[run_validation] for the unified-metrics consumers
-   and the progress-evidence gate.
+   [run_result.trace_ref]/[run_validation] for unified observation consumers.
 
    Failure isolation: the trace store is observability state and must never
    gate keeper liveness. A fresh file per turn keeps [Raw_trace.create]
@@ -90,26 +67,14 @@ type autonomous_yield_reason =
   | Chat_waiting
   | Durable_stimulus_waiting
 
-type autonomous_yield_boundary =
-  | Yield_immediately
-  | Yield_after_current_turn
-
 type autonomous_yield_request =
-  { reason : autonomous_yield_reason
-  ; boundary : autonomous_yield_boundary
-  }
+  { reason : autonomous_yield_reason }
 
-let autonomous_yield_allowed_at_turn ~start_turn ~turn request =
-  match request.boundary with
-  | Yield_immediately -> true
-  | Yield_after_current_turn -> turn > start_turn
-;;
-
-let stop_reason_of_autonomous_yield ~turn request =
+let runtime_yield_reason request =
   match request.reason with
-  | Chat_waiting -> Runtime_agent.Yielded_to_chat_waiting { turns_used = turn }
+  | Chat_waiting -> Runtime_agent.Chat_waiting
   | Durable_stimulus_waiting ->
-    Runtime_agent.Yielded_to_durable_stimulus { turns_used = turn }
+    Runtime_agent.Durable_stimulus_waiting
 ;;
 
 let keeper_raw_trace_sink
@@ -167,6 +132,34 @@ let raw_trace_for_dispatch
     None
 ;;
 
+let provider_transcript_admission messages =
+  match Keeper_compaction_unit.validate_provider_transcript messages with
+  | Ok () -> Ok ()
+  | Error transcript_error ->
+    let reason, tool_use_ids =
+      match transcript_error with
+      | Keeper_compaction_unit.Invalid_transcript_structure _ ->
+        Keeper_internal_error.Structurally_invalid, []
+      | Keeper_compaction_unit.Unresolved_tool_results { tool_use_ids } ->
+        Keeper_internal_error.Unresolved_tool_results, tool_use_ids
+    in
+    Error
+      (Keeper_internal_error.sdk_error_of_masc_internal_error
+         (Keeper_internal_error.Incomplete_tool_transcript
+            { reason
+            ; detail =
+                Keeper_compaction_unit.show_provider_transcript_error
+                  transcript_error
+            ; tool_use_ids
+            }))
+;;
+
+let dispatch_after_provider_transcript_admission ~messages ~dispatch =
+  match provider_transcript_admission messages with
+  | Error _ as error -> error
+  | Ok () -> dispatch ()
+;;
+
 module For_testing = struct
   let sse_event_progress_kind = Turn_helpers.sse_event_progress_kind
   let sse_event_watchdog_progress_kind =
@@ -174,14 +167,14 @@ module For_testing = struct
   let registry_progress_on_event = Turn_helpers.registry_progress_on_event
   let progress_keeper_tool_names_for_contract =
     Contract_helpers.progress_keeper_tool_names_for_contract
-  let keeper_oas_visibility_neutral_guardrails =
-    keeper_oas_visibility_neutral_guardrails
   let normalize_response_text_for_finalization =
     normalize_response_text_for_finalization
   let keeper_raw_trace_sink = keeper_raw_trace_sink
   let raw_trace_for_dispatch = raw_trace_for_dispatch
-  let autonomous_yield_allowed_at_turn = autonomous_yield_allowed_at_turn
-  let stop_reason_of_autonomous_yield = stop_reason_of_autonomous_yield
+  let runtime_yield_reason = runtime_yield_reason
+  let provider_transcript_admission = provider_transcript_admission
+  let dispatch_after_provider_transcript_admission =
+    dispatch_after_provider_transcript_admission
 end
 
 (** Run a single keeper turn via OAS Agent.run().
@@ -204,20 +197,17 @@ end
      @param user_message The user's message to the keeper
     @param runtime_id Runtime profile name for model selection
      @param generation Current generation counter
-     @param guardrails Optional OAS guardrails for tool safety gates
     @param temperature Subsystem temperature fallback; a selected runtime model
            declaration takes precedence. When omitted,
            [Keeper_config.keeper_unified_temperature] is the fallback.
-    @param max_tokens Explicit caller output-token override. When omitted, the
-           turn-start profile snapshot may provide the validated keeper OAS
-           override; absent both, no [max_tokens] field is sent. The keeper lane
-           never synthesizes a model-derived value (masc#24067 / oas#2517)
     @param is_retry When [true], replays the current user message into the
            working context without persisting it again, so transient retry
            attempts do not duplicate the user entry in session history *)
 let run_turn
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
+      ~(publication_recovery :
+          Keeper_publication_recovery_availability.turn_context)
       ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
       ~(turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell)
       ~(base_dir : string)
@@ -228,23 +218,13 @@ let run_turn
       ?user_blocks
       ~(runtime_id : string)
       ?world_observation
-      ?(turn_affordances = [])
       ~(generation : int)
-      ~(max_idle_turns : int)
-      (* Required, no default: this value is forwarded to the OAS loop
-         guard, so the caller must select the channel-specific runtime
-         setting explicitly. *)
       ?(history_user_source = "direct_user")
+      ?(user_turn_record = Keeper_run_prompt.Record_user_turn)
       ?(history_assistant_source = "direct_assistant")
-      ?guardrails
       ?temperature
-      ?max_tokens
-      ?oas_timeout_s
-      ?(oas_timeout_is_explicit = true)
       ?on_event
       ?(trajectory_acc : Trajectory.accumulator option)
-      ?(tool_overlay : Agent_sdk.Tool_op.t ref option)
-      ?priority
       ?(degraded_retry_applied = false)
       ?degraded_retry_runtime
       ?fallback_reason
@@ -255,8 +235,9 @@ let run_turn
       ?trace_link
       ?continuation_channel
       ?continuation_delivery_channel
-      ?hitl_approval_grant
+      ?hitl_resolution
       ?autonomous_yield_requested
+      ?on_checkpoint_stage
       ()
   : (run_result, Agent_sdk.Error.sdk_error) result
   =
@@ -360,28 +341,19 @@ let run_turn
       ~meta
       ~profile_defaults
       ~base_dir
-      ~max_context
       ~runtime_id
       ?temperature
-      ?max_tokens
       ?shared_context
       ~generation
       ()
   in
   let meta = ctx.meta in
   let temperature = ctx.temperature in
-  (* The single turn-start snapshot. This exact binding feeds every runtime
-     candidate, OAS provider/lifecycle config, and the Turn_record sampling
-     payload below. OAS owns model-ceiling validation and envelope-specific
-     clamp/fallback policy. *)
-  let max_tokens = ctx.max_tokens in
   let context_injector = ctx.context_injector in
   let shared_context = ctx.shared_context in
   let session = ctx.session in
   let base_system_prompt = ctx.base_system_prompt in
   let resume_oas_checkpoint = ctx.resume_oas_checkpoint in
-  let pre_dispatch_compacted = ctx.pre_dispatch_compacted in
-  let pre_dispatch_checkpoint_error = ctx.pre_dispatch_checkpoint_error in
   let start_turn_count = ctx.start_turn_count in
   let receipt_started_at = ctx.receipt_started_at in
   let config_root = ctx.config_root in
@@ -423,34 +395,10 @@ let run_turn
     ~decision:
       (Keeper_runtime_manifest.with_payload_role ~payload_role:Checkpoint
         (`Assoc
-          [
-            ("loaded_checkpoint_present", `Bool ctx.loaded_checkpoint_present);
-            ("pre_dispatch_compacted", `Bool pre_dispatch_compacted);
-            ( "pre_dispatch_checkpoint_error",
-              match pre_dispatch_checkpoint_error with
-              | None -> `Null
-              | Some err -> `String (Agent_sdk.Error.to_string err) );
-          ]))
+          [ "loaded_checkpoint_present", `Bool ctx.loaded_checkpoint_present ]))
     Keeper_runtime_manifest.Checkpoint_loaded;
-  append_manifest ~site:"context_compacted"
-    ~keeper_turn_id:manifest_keeper_turn_id
-    ?compaction_source:
-      (if pre_dispatch_compacted then Some "pre_dispatch_hygiene" else None)
-    ~status:(if pre_dispatch_compacted then "compacted" else "skipped")
-    ~decision:
-      (Keeper_runtime_manifest.with_payload_role ~payload_role:Model_input
-        (`Assoc
-          [
-            ("pre_dispatch_compacted", `Bool pre_dispatch_compacted);
-            ( "pre_dispatch_checkpoint_error",
-              match pre_dispatch_checkpoint_error with
-              | None -> `Null
-              | Some err -> `String (Agent_sdk.Error.to_string err) );
-            ("checkpoint_path", `String checkpoint_path);
-          ]))
-    Keeper_runtime_manifest.Context_compacted;
   (* Steps 5-6: turn prompt, memory/temporal context, prompt metrics,
-     user message append, token estimation — Keeper_run_prompt. *)
+     and user message append — Keeper_run_prompt. *)
   let prompt_ctx =
     Keeper_run_prompt.build_turn_context
       ~ctx
@@ -459,6 +407,7 @@ let run_turn
       ~config
       ~meta
       ~history_user_source
+      ~user_turn_record
       ~is_retry
       ~start_turn_count
   in
@@ -468,7 +417,12 @@ let run_turn
   let temporal_context = prompt_ctx.Keeper_run_prompt.temporal_context in
   let prompt_metrics = prompt_ctx.Keeper_run_prompt.prompt_metrics in
   let history_messages = prompt_ctx.Keeper_run_prompt.history_messages in
-  let estimated_input_tokens = prompt_ctx.Keeper_run_prompt.estimated_input_tokens in
+  let resume_oas_checkpoint =
+    Option.map
+      (fun (checkpoint : Agent_sdk.Checkpoint.t) ->
+        { checkpoint with messages = history_messages })
+      resume_oas_checkpoint
+  in
   let ctx_work = prompt_ctx.Keeper_run_prompt.ctx_work in
   let history_messages_digest = digest_message_texts_as_joined history_messages in
   let context_digest =
@@ -478,6 +432,8 @@ let run_turn
   in
   append_manifest ~site:"context_injected"
     ~keeper_turn_id:manifest_keeper_turn_id
+    ?checkpoint_path:
+      (if ctx.loaded_checkpoint_present then Some checkpoint_path else None)
     ~decision:
       (Keeper_runtime_manifest.with_payload_role ~payload_role:Model_input
         (`Assoc
@@ -490,7 +446,6 @@ let run_turn
             ("user_message_digest", `String (digest_text user_message));
             ("history_message_count", `Int (List.length history_messages));
             ("history_messages_digest", `String history_messages_digest);
-            ("estimated_input_tokens", `Int estimated_input_tokens);
             ("context_window", `Int max_context);
             ("context_digest", `String context_digest);
           ]))
@@ -500,7 +455,9 @@ let run_turn
     Keeper_run_tools.prepare_agent_setup
       ~config
       ~meta
+      ~publication_recovery
       ?continuation_channel
+      ?hitl_resolution
       ~turn_ctx_cell
       ~ctx_work
       ~session
@@ -510,19 +467,15 @@ let run_turn
       ~dynamic_context
       ~history_messages
       ~prompt_metrics
-      ~estimated_input_tokens
-      ~max_context
       ~shared_context
       ~context_injector
       ~start_turn_count
       ~generation
       ~runtime_id
       ~is_retry
-      ~turn_affordances
       ~config_root
       ~runtime_config_path
       ~trajectory_acc
-      ~tool_overlay
       ~runtime_manifest_context
       ~runtime_manifest_append:
         (fun manifest ->
@@ -542,87 +495,10 @@ let run_turn
     Turn_helpers.run_with_setup_cleanup ~cleanup:cleanup_agent_setup
     @@ fun () ->
     let tools = s.Keeper_run_tools.tools in
-    let tool_context_estimate =
-      s.Keeper_run_tools.tool_context_estimate
-    in
-    let context_window_budget =
-      Keeper_run_prompt.context_window_budget
-        ~estimated_input_tokens:
-          tool_context_estimate.estimated_input_tokens_with_tools
-        ~max_context
-    in
-    (* Pre-dispatch context-window estimate is intentionally observational:
-       the definitive ledger includes [extra_system_context] injected by
-       [before_turn_params] hooks, which has not run yet. If the request is
-       still over budget after hooks, we rely on the OAS/driver's
-       [oas_auto_context_overflow_retry] path to compact and retry rather
-       than hard-failing here and bypassing that recovery path. *)
-    let pre_dispatch_context_window_error =
-      match
-        Keeper_run_prompt.preflight_context_window
-          ~estimated_input_tokens:
-            tool_context_estimate.estimated_input_tokens_with_tools
-          ~max_context
-      with
-      | Ok () -> None
-      | Error err -> Some err
-    in
-    let context_layer policy text =
-      Keeper_run_prompt.estimate_context_layer_policy_budget
-        ~max_context
-        ~policy
-        ~text
-    in
-    let context_layers =
-      [ context_layer
-          Keeper_run_prompt.world_dynamic_context_layer_policy
-          dynamic_context
-      ; context_layer Keeper_run_prompt.memory_context_layer_policy memory_context
-      ; context_layer
-          Keeper_run_prompt.temporal_context_layer_policy
-          temporal_context
-      ; context_layer
-          Keeper_run_prompt.user_message_context_layer_policy
-          user_message
-      ]
-    in
-    append_manifest ~site:"context_preflight"
-      ~keeper_turn_id:manifest_keeper_turn_id
-      ~status:
-        (if Option.is_some pre_dispatch_context_window_error
-         then "over_context_window_observed"
-         else "ok")
-      ~decision:
-        (Keeper_runtime_manifest.with_payload_role ~payload_role:Model_input
-          (`Assoc
-            [
-              ( "prompt_estimated_input_tokens",
-                `Int estimated_input_tokens );
-              ( "tool_count",
-                `Int tool_context_estimate.tool_count );
-              ( "tool_schema_estimated_tokens",
-                `Int tool_context_estimate.tool_schema_tokens );
-              ( "estimated_input_tokens_with_tools",
-                `Int tool_context_estimate.estimated_input_tokens_with_tools );
-              ("context_window", `Int max_context);
-              ( "remaining_context_tokens",
-                `Int context_window_budget.remaining_context_tokens );
-              ( "over_context_tokens",
-                `Int context_window_budget.over_context_tokens );
-              ( "context_usage_ratio",
-                `Float context_window_budget.context_usage_ratio );
-              ( "context_layers",
-                `List
-                  (List.map
-                     Keeper_run_prompt.context_layer_budget_to_json
-                     context_layers) );
-              ( "pre_dispatch_over_context_window",
-                `Bool
-                  (Option.is_some pre_dispatch_context_window_error) );
-            ]))
-      Keeper_runtime_manifest.Context_injected;
     let hooks = s.Keeper_run_tools.hooks in
-    let reducer = s.Keeper_run_tools.reducer in
+    let model_input_projection =
+      s.Keeper_run_tools.model_input_projection
+    in
     let acc = s.Keeper_run_tools.acc in
     let agent_ref : Agent_sdk.Agent.t option ref = ref None in
     let receipt_turn_count_ref = s.Keeper_run_tools.receipt_turn_count_ref in
@@ -634,12 +510,6 @@ let run_turn
     let receipt_response_text_present_ref =
       s.Keeper_run_tools.receipt_response_text_present_ref
     in
-    let keeper_has_owned_active_task () =
-      Option.is_some (owned_active_task_id_for_meta ~config ~meta:acc.meta)
-    in
-    (* A claim tool mutates [acc.meta.current_task_id_id] during this run; contract
-     gating must judge claim-context tools against ownership at turn entry. *)
-    let had_owned_active_task_at_turn_start = keeper_has_owned_active_task () in
     (* 8. Run Agent *)
     let record_turn_progress, yield_on_tool, on_yield, on_resume, on_event =
       Turn_helpers.turn_progress_callbacks
@@ -648,207 +518,148 @@ let run_turn
         ~downstream:on_event
         ~turn_id:manifest_keeper_turn_id
     in
-    let tool_failure_judge =
-      Keeper_tool_failure_recovery_judge.create
-        ~base_path:config.base_path
-        ~keeper_name:meta.name
-    in
-    let priority =
-      Option.value priority ~default:Llm_provider.Request_priority.Proactive
-    in
     ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
     let _keeper_sandbox_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
     let keeper_visible_sandbox_root =
       Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
     in
-    let effective_allowed_paths = Keeper_alerting_path.effective_allowed_paths ~meta in
-    (match
-       Keeper_alerting_path.absolute_allowed_paths_result
-         ~config
-         ~allowed_paths:effective_allowed_paths
-     with
-     | Error e -> Error (Agent_sdk.Error.Internal e)
-     | Ok oas_allowed_paths ->
-       let timeout_s =
-         match oas_timeout_s with
-         | Some value -> value
-         | None -> Keeper_runtime_resolved.oas_call_timeout_sec ()
-       in
-       let per_provider_timeout_s = None in
+    (* Tool/path confinement stays owned by MASC dispatch. Each filesystem and
+       shell operation resolves its concrete target through
+       [Keeper_alerting_path] and [Keeper_sandbox_containment]; OAS receives no
+       ambient path capability. *)
+    (
        (* OAS [stream_idle_timeout_s] bounds inter-line idle on HTTP streams
-       (Anthropic/OpenAI/Gemini/GLM/Ollama). The deadline resets after each
-       successful line, so this is gap detection, not total run cap.
-
-       Default 120 s catches real network/stream hangs while preserving
-       legitimate reasoning pauses + provider keepalives. If the total
-       OAS timeout is shorter, the idle gap is clamped to that total cap
-       so the nested timeout envelope is explicit. *)
+          only when the operator explicitly configures it. The deadline resets
+          after each successful line, so this is gap detection, not a total run
+          cap. [None] is carried unchanged: neither MASC nor OAS may infer a
+          provider/model default. *)
        let stream_idle_timeout_s =
-         Some
-           (Keeper_runtime_resolved.stream_idle_timeout_for_total_timeout
-              ~total_timeout_s:timeout_s)
+         Keeper_runtime_resolved.stream_idle_timeout_sec ()
        in
-       Keeper_agent_run_phase0_telemetry.record_if_enabled
+       Keeper_agent_run_phase0_telemetry.record
          ~meta
          ~turn_system_prompt
          ~tools
          ~history_messages
+         ?user_blocks
          ~user_message
          ~start_turn_count
          ~max_context
-         ~pre_dispatch_compacted;
+         ();
        (* Section 3: Dispatch — call Keeper_turn_driver.run_named / Agent.run. *)
-       let pre_dispatch_error = pre_dispatch_checkpoint_error in
        let turn_result =
-         match pre_dispatch_error with
-         | Some err -> Error err
-         | None ->
-              let keeper_oas_guardrails =
-                keeper_oas_visibility_neutral_guardrails ?guardrails ()
-              in
-              (* Autonomous cooperative yield: OAS checks [exit_condition]
-                 before the first provider dispatch as well as between turns.
-                 A scheduled-idle waiting chat may preempt immediately, but a
-                 reactive chat or durable stimulus may stop this run only after
-                 [turn] advances beyond the checkpoint's [start_turn_count];
-                 otherwise the heartbeat would acknowledge the currently leased
-                 stimulus without the model ever observing it. [observed_request]
-                 bridges OAS's split bool / render callbacks and preserves the
-                 exact typed reason and boundary that made the predicate true,
-                 even if the waiting chat is cancelled before
-                 [exit_condition_result] runs. *)
-              let autonomous_yield_exit_condition,
-                  autonomous_yield_exit_condition_result =
+         let cooperative_yield_probe =
                 match autonomous_yield_requested with
-                | None -> None, None
+                | None -> None
                 | Some requested ->
-                  let observed_request = ref None in
-                  ( Some
-                      (fun (turn : int) ->
+                  Some
+                    (fun (_ : Agent_sdk.Agent.Advanced.tool_boundary) ->
+                       try
                          match requested () with
-                         | Some request
-                           when autonomous_yield_allowed_at_turn
-                                  ~start_turn:start_turn_count
-                                  ~turn
-                                  request ->
-                           observed_request := Some request;
-                           true
-                         | Some _ | None -> false)
-                  , Some
-                      (fun (turn : int) ->
-                         match !observed_request with
-                         | Some request ->
-                           let stop_reason =
-                             stop_reason_of_autonomous_yield ~turn request
-                           in
-                           let notice =
-                             match request.reason with
-                             | Chat_waiting ->
-                               Printf.sprintf
-                                 "[yielded turn slot at turn %d to a waiting \
-                                  chat request; keeper resumes on the next \
-                                  cycle]"
-                                 turn
-                             | Durable_stimulus_waiting ->
-                               Printf.sprintf
-                                 "[yielded autonomous run at turn %d because a \
-                                  durable stimulus is waiting; checkpoint saved \
-                                  and keeper resumes on the next cycle]"
-                                 turn
-                           in
-                           stop_reason, Some notice
-                         | None ->
-                           let message =
-                             "autonomous yield result requested without a \
-                              preceding typed yield decision"
-                           in
-                           Log.Keeper.error ~keeper_name:meta.name "%s" message;
-                           invalid_arg message) )
-              in
-              let call_run_named ?raw_trace ~initial_messages () =
-                (* The keeper turn deadline must own the OAS Agent.run switch.
-                   Stream/body idle budgets catch liveness gaps; this hard
-                   ceiling is the final guard that releases a stuck turn slot. *)
-	                Keeper_turn_driver.run_named
-	                  ~runtime_id:runtime_id_string
-	                  ~base_path:config.base_path
-	                    ~keeper_name:meta.name
-                    ~goal:user_message
-                    ?goal_blocks:user_blocks
-                    ~priority
-                    ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                    ?raw_trace
-                    ~system_prompt:turn_system_prompt
-                    ~tools
-                    ~compact_ratio:meta.compaction.ratio_gate
-                    ~context_window_tokens:max_context
-                    ~oas_auto_context_overflow_retry:true
-                    ~initial_messages
-                    ~hooks
-                    ~context_reducer:reducer
-                   ~runtime_manifest_context
-                   ~runtime_manifest_append:
-                     (fun manifest ->
-                        Keeper_runtime_manifest.append_best_effort
-                          ~site:"runtime_runtime"
-                          config
-                          manifest)
-                      (* No code-level tool-retry budget. Retrying a malformed
-              tool call (e.g. missing required arg) is the keeper's own
-              competence: the SDK delivers the validation error back to the
-              model (pipeline [None] branch) and the agent loop decides whether
-              to re-emit. Runaway is bounded by max_idle_turns + token budget,
-              not a retry count that halts the turn. *)
-                    ~max_idle_turns
-                    ?stream_idle_timeout_s
-                    ~body_timeout_s:timeout_s
-                    ~temperature
-                    ?max_tokens
-                    ~accept:
-                      Keeper_tool_response.response_has_text_or_tool_progress
-                    ~guardrails:keeper_oas_guardrails
-                    ?on_event
-                    ?on_yield
-                    ?on_resume
-                    ~agent_ref
-                    ~allowed_paths:oas_allowed_paths
-                    ~cache_system_prompt:true
-                    ~yield_on_tool
-                    ~tool_failure_judge
-                    ~context_injector
-                    ~context:shared_context
-                    ~approval:
-                      (Governance_pipeline.to_oas_approval_callback
-                         ~config
-                         ~governance_level:(Env_config_core.governance_level ())
-                         ~keeper_name:meta.name
-                         ~meta
-                         ?clock:(Eio_context.get_clock_opt ())
-                         ?continuation_channel
-                         ~lane_policy:Keeper_approval_queue.Nonblocking
-                         ?hitl_approval_grant
-                         ())
-                    ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
-                      (* Mutation-boundary is native to OAS now;
-                         [exit_condition] is re-wired here solely for the typed
-                         autonomous cooperative yield above. Both callbacks are
-                         [None] on the chat lane, so chat runs to natural model
-                         completion unchanged. *)
-                    ?exit_condition:autonomous_yield_exit_condition
-                    ?exit_condition_result:autonomous_yield_exit_condition_result
-                    ?oas_checkpoint:resume_oas_checkpoint
-                    ?event_bus
-                    ?trace_link
-                    ~on_runtime_observation:
-                      (fun observation ->
-                         receipt_runtime_observation_ref := Some observation)
-                    ?per_provider_timeout_s
-                    ()
-              in
-              (* Trace-store failure isolation: [raw_trace_for_dispatch]
+                         | Ok (Some request) ->
+                           Ok (Runtime_agent.Yield (runtime_yield_reason request))
+                         | Ok None -> Ok Runtime_agent.Continue
+                         | Error detail ->
+                           Error
+                             (Agent_sdk.Error.Internal
+                                ("keeper cooperative-yield snapshot failed: "
+                                 ^ detail))
+                       with
+                       | Eio.Cancel.Cancelled _ as exn -> raise exn
+                       | exn ->
+                         Error
+                           (Agent_sdk.Error.Internal
+                              (Printf.sprintf
+                                 "keeper cooperative-yield probe failed: %s"
+                                 (Printexc.to_string exn))))
+         in
+         let checkpoint_sidecar =
+                ctx_work.checkpoint.Agent_sdk.Checkpoint.working_context
+         in
+         let checkpoint_sink (snapshot : Agent_sdk.Agent.checkpoint_snapshot) =
+                Option.iter (fun observe -> observe snapshot.stage) on_checkpoint_stage;
+                (* OAS's per-turn pipeline builds checkpoints with an empty
+                   session_id (the OAS agent carries no session field), so the
+                   sink must stamp the keeper's own session identity before
+                   persisting. [meta.runtime.trace_id] is a validated,
+                   non-empty [Trace_id.t]; without this restamp the checkpoint
+                   transaction rejects an invalid persistence identity. *)
+                let checkpoint =
+                  { snapshot.checkpoint with
+                    session_id =
+                      Keeper_id.Trace_id.to_string meta.runtime.trace_id
+                  ; working_context =
+                      (match checkpoint_sidecar with
+                       | Some _ as sidecar -> sidecar
+                       | None -> snapshot.checkpoint.working_context)
+                  }
+                in
+                match
+                  Keeper_checkpoint_store.save_oas_classified
+                    ~session_dir:session.session_dir
+                    checkpoint
+                with
+                | Ok _ -> Ok ()
+                | Error _ as error -> error
+         in
+         let call_run_named ?raw_trace ~initial_messages () =
+                (* Keeper does not impose a cumulative turn, time, token, or cost
+                   budget. Explicit cancellation and provider/tool progress
+                   boundaries settle the lane, while usage remains observational. *)
+                dispatch_after_provider_transcript_admission
+                  ~messages:initial_messages
+                  ~dispatch:(fun () ->
+                    Keeper_turn_driver.run_named
+                      ~runtime_id:runtime_id_string
+                      ~base_path:config.base_path
+                      ~keeper_name:meta.name
+                      ~goal:user_message
+                      ?goal_blocks:user_blocks
+                      ~session_id:
+                        (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                      ?raw_trace
+                      ~system_prompt:turn_system_prompt
+                      ~tools
+                      ~checkpoint_sink
+                      ~initial_messages
+                      ~model_input_projection
+                      ~hooks
+                      ~runtime_manifest_context
+                      ~runtime_manifest_append:
+                        (fun manifest ->
+                           Keeper_runtime_manifest.append_best_effort
+                             ~site:"runtime_runtime"
+                             config
+                             manifest)
+                      ?stream_idle_timeout_s
+                      ?body_timeout_s:
+                        (Keeper_runtime_resolved.body_timeout_override_sec ())
+                      ~temperature
+                      ~accept:
+                        Keeper_tool_response.response_has_text_or_tool_progress
+                      ?on_event
+                      ?on_yield
+                      ?on_resume
+                      ~agent_ref
+                      ?checkpoint_sidecar
+                      ~cache_system_prompt:true
+                      ~yield_on_tool
+                      ~context_injector
+                      ~context:shared_context
+                      ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
+                      ?cooperative_yield_probe
+                      ?oas_checkpoint:resume_oas_checkpoint
+                      ?event_bus
+                      ?trace_link
+                      ~on_runtime_observation:
+                        (fun observation ->
+                           receipt_runtime_observation_ref := Some observation)
+                      ())
+         in
+         (* Trace-store failure isolation: [raw_trace_for_dispatch]
                  degrades to [None] (turn runs untraced, typed record
                  emitted) — sink trouble never fails the turn pre-dispatch. *)
-              (match
+         (match
                  call_run_named
                    ?raw_trace:(raw_trace_for_dispatch ~config ~meta)
                    ~initial_messages:history_messages
@@ -895,16 +706,15 @@ let run_turn
                      ~history_messages
                      ~actual_input_tokens:(Some usage.input_tokens)
                  in
-                 let completion_contract_status ()
+                 let completion_observation ()
                      : Keeper_execution_receipt.completion_contract_result =
-                   Contract_helpers.observed_completion_contract_status
-                     ~had_owned_active_task_at_turn_start
+                   Contract_helpers.observed_completion_evidence
                      ~actual_keeper_tool_names:progress_keeper_tool_names
                      ~stop_reason:result.stop_reason
                      ~response_text_present:(String.trim text <> "")
                  in
-                 let contract_status = completion_contract_status () in
-                 acc.receipt_completion_contract_result <- contract_status;
+                 let completion_observation = completion_observation () in
+                 acc.receipt_completion_contract_result <- completion_observation;
                  (* Root B (#22710): capture the world-observation actionable
                     signal alongside the contract status so the receipt carries
                     the real "is there anything to do" signal. [operator_disposition]
@@ -933,6 +743,7 @@ let run_turn
                           ~session ~append_manifest ~model
                           ~acc
                           ~actual_keeper_tool_names
+                          ~user_turn_record
                           ~result ~checkpoint_persistence_error
                           ~post_turn_t0 ~runtime_id_string
                           ~history_messages
@@ -940,10 +751,6 @@ let run_turn
                             ctx_work.checkpoint.Agent_sdk.Checkpoint.working_context
                           ~prompt_metrics ~ctx_composition ~usage
                           ~receipt_response_text_present_ref ~history_assistant_source
-                          ~pre_dispatch_compacted:ctx.pre_dispatch_compacted
-                          ~pre_dispatch_compaction_trigger:ctx.pre_dispatch_compaction_trigger
-                          ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
-                          ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
                           ~raw_response_text:response_text
                           ?continuation_delivery_channel
                           ~capture_replay_response:
@@ -955,6 +762,7 @@ let run_turn
                                  capture is best-effort and gated by
                                  MASC_KEEPER_WIRE_CAPTURE. *)
                               Keeper_wire_capture.capture_response
+                                ~base_path:config.base_path
                                 ~masc_root:(Workspace.masc_root_dir config)
                                 ~keeper_name:meta.name
                                 ~turn_id:manifest_keeper_turn_id
@@ -975,10 +783,6 @@ let run_turn
            ~receipt_started_at
            ~runtime_manifest_context
            ~acc
-           ~pre_dispatch_compacted
-           ~pre_dispatch_compaction_trigger:ctx.pre_dispatch_compaction_trigger
-           ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
-           ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
            ~degraded_retry_applied
            ~degraded_retry_runtime
            ~fallback_reason
@@ -1089,7 +893,7 @@ let run_turn
           ~sampling:
             { temperature = Some temperature
             ; top_p = Runtime.top_p_of_runtime_id runtime_id_string
-            ; max_tokens
+            ; max_tokens = None
             ; thinking_budget = tctx.thinking_budget
             ; enable_thinking = tctx.thinking_enabled
             }

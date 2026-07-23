@@ -196,12 +196,7 @@ let affected_resource_ids_for_tool = function
 ;;
 
 let maybe_emit_resource_notifications ~success ~tool_name =
-  if
-    success
-    && not
-         (Keeper_tool_descriptor_resolution.capability_has
-            Tool_capability.Read_only
-            tool_name)
+  if success
   then (
     let affected_ids = affected_resource_ids_for_tool tool_name in
     with_resource_subscription_lock (fun () ->
@@ -627,8 +622,6 @@ let handle_dashboard_ack_notification ?mcp_session_id params =
   `Null
 ;;
 
-let contains_casefold = Mcp_server_eio_call_tool.contains_casefold
-
 let tool_call_outcome (json : Yojson.Safe.t) : Tool_result.tool_call_outcome =
   match json with
   | `Assoc fields ->
@@ -760,13 +753,7 @@ let handle_request
         | Ok req ->
           let id = get_id req in
           let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
-          if not (is_valid_request_id id)
-          then
-            make_error_typed
-              ~id:`Null
-              Mcp_error_code.Invalid_request
-              "Invalid Request: id must be string, number, or null"
-          else if Mcp_transport_protocol.is_notification req
+          if Mcp_transport_protocol.is_notification req
           then (
             match req.method_ with
             | "dashboard/ack" ->
@@ -778,6 +765,12 @@ let handle_request
                 (fun _auth_token ->
                    handle_dashboard_ack_notification ?mcp_session_id req.params)
             | _ -> `Null)
+          else if not (is_valid_request_id id)
+          then
+            make_error_typed
+              ~id:`Null
+              Mcp_error_code.Invalid_request
+              "Invalid Request: MCP id must be a string or integer"
           else (
             try
               match req.method_ with
@@ -1150,6 +1143,7 @@ let run_stdio ~handle_request ~sw ~env state =
   let stdin = Eio.Stdenv.stdin env in
   let stdout = Eio.Stdenv.stdout env in
   let clock = Eio.Stdenv.clock env in
+  let transport_session_id = Mcp_session.generate () in
   Log.Mcp.info "MASC MCP Server (Eio stdio mode)";
   Log.Mcp.info "Default workspace: %s" (Mcp_server.workspace_config state).Workspace.base_path;
   let buf = Eio.Buf_read.of_flow stdin ~max_size:(16 * 1024 * 1024) in
@@ -1219,7 +1213,12 @@ let run_stdio ~handle_request ~sw ~env state =
         | Some "" -> loop (Some mode)
         | Some request_str ->
           let response =
-            handle_request ~clock ~sw ~mcp_session_id:"stdio" state request_str
+            handle_request
+              ~clock
+              ~sw
+              ~mcp_session_id:transport_session_id
+              state
+              request_str
           in
           respond ~mode response;
           loop (Some mode))

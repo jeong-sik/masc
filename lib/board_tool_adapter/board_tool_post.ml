@@ -29,16 +29,6 @@ open Tool_args
 (* RFC-0189 PR-1b.2 — handlers in this module return the typed
    [Tool_result.result] variant directly. *)
 
-let meta_string_field name = function
-  | Some (`Assoc fields) ->
-    (match List.assoc_opt name fields with
-     | Some (`String value) ->
-       let value = String.trim value in
-       if String.equal value "" then None else Some value
-     | _ -> None)
-  | Some _ | None -> None
-;;
-
 let handle_post_create ~tool_name ~start_time args : Tool_result.result =
   let title = get_string_opt args "title" in
   (* Reject empty or whitespace-only titles. *)
@@ -58,30 +48,10 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
     in
     let sources = Board_tool_format.source_entries_arg args in
     let content =
-      let content =
-        match Board_tool_format.detect_truncated_markdown_with_reason raw_content with
-        | Some reason ->
-          let author_label =
-            match get_string_opt args "author" |> Option.map String.trim with
-            | Some a when not (String.equal a "") -> a
-            | _ -> "unknown"
-          in
-          (* #9777: body_len is the model's own output length, not a MASC-imposed
-             limit. The signal name explains
-             which structural pattern triggered the marker. *)
-          Log.BoardLog.warn
-            "board_post: detected truncated markdown (author=%s body_len=%d signal=%s) — \
-             appending 잘림 marker"
-            author_label
-            (String.length raw_content)
-            (Board_tool_format.truncation_signal_to_string reason);
-          raw_content ^ "\n\n_…[잘림 — LLM 출력이 중간에 끊겼습니다]_"
-        | None -> raw_content
-      in
       match sources with
-      | Some entries when not (String.equal (String.trim content) "") ->
-        content ^ Board_tool_format.sources_footer entries
-      | _ -> content
+      | Some entries when not (String.equal (String.trim raw_content) "") ->
+        raw_content ^ Board_tool_format.sources_footer entries
+      | _ -> raw_content
     in
     let body = Option.map (fun _ -> content) body_arg in
     let author = get_string_opt args "author" |> Option.map String.trim in
@@ -107,16 +77,6 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
         ~class_:Tool_result.Workflow_rejection
         ~start_time
         "author is required"
-    else if String.length content > Board.Limits.max_content_length
-    then
-      Tool_result.make_err
-        ~tool_name
-        ~class_:Tool_result.Workflow_rejection
-        ~start_time
-        (Printf.sprintf
-           "Content exceeds max length (%d > %d chars)"
-           (String.length content)
-           Board.Limits.max_content_length)
     else
       match author with
       | None ->
@@ -144,15 +104,7 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
         | Some v -> v
         | None -> Board.Internal
       in
-      let author_raw_agent_name =
-        meta_string_field Board_tool_format.author_raw_agent_name_meta_key meta_json
-      in
-      match
-        Board_tool_handlers.resolve_board_post_kind
-          ~author
-          ?author_raw_agent_name
-          raw_post_kind
-      with
+      match Board_tool_handlers.resolve_board_post_kind raw_post_kind with
       | Error msg ->
         Tool_result.make_err
           ~tool_name
@@ -160,69 +112,25 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
           ~start_time
           msg
       | Ok post_kind ->
-        (match Board_claim_gate.check_post_create ~tool_name ~author ~content ~args with
-         | Error msg ->
-           Tool_result.make_err
-             ~tool_name
-             ~class_:Tool_result.Workflow_rejection
-             ~start_time
-             msg
-         | Ok claim_gate ->
-           let record_for_post (post : Board.post) =
-             Board_claim_gate.record_post_create
-               ~tool_name
-               ~author
-               ~target_post_id:(Board.Post_id.to_string post.id)
-               ~content
-               claim_gate
-           in
-           (match
-              Board_dispatch.create_post_with_outcome
-                ~after_fresh_persist:record_for_post
-                ~after_rollup_persist:record_for_post
-                ~author
-                ~content
-                ?title
-                ?body
-                ~post_kind
-                ?meta_json
-                ~visibility
-                ~ttl_hours
-                ?hearth
-                ?thread_id
-                ()
-            with
-            | Ok outcome ->
-              let post = Board.post_of_create_post_outcome outcome in
-              let evidence_result =
-                match outcome with
-                | Board.Fresh_post _ | Board.Rolled_up_post _ -> Ok ()
-                | Board.Dedup_hit _ -> record_for_post post
-              in
-              (match evidence_result with
-               | Error msg ->
-                 Tool_result.make_err
-                   ~tool_name
-                   ~class_:Tool_result.Workflow_rejection
-                   ~start_time
-                   msg
-               | Ok () ->
+        (match
+           Board_dispatch.create_post
+             ~author
+             ~content
+             ?title
+             ?body
+             ~post_kind
+             ?meta_json
+             ~visibility
+             ~ttl_hours
+             ?hearth
+             ?thread_id
+             ()
+         with
+         | Ok post ->
               let json = Board.post_to_yojson post in
-              (* Use [Tool_result.ok] (not [make_ok ~data:(`String ...)]) so the
-              embedded JSON after the "<label>:\n" prefix is parsed into
-              structured [data] via [structured_payload_of_message]. Passing a
-              raw [`String] double-encodes the JSON: consumers that re-serialize
-              the result (e.g. the dashboard's JSON.stringify) escape the inner
-              newlines back to literal "\n". The prose prefix is dropped once
-              the structure is extracted, matching the board_curation idiom. *)
-              Tool_result.ok
-                ~tool_name
-                ~start_time
-                (Printf.sprintf
-                   "Post created:\n%s"
-                   (Yojson.Safe.pretty_to_string json)))
-            | Error e ->
-              Board_tool_format.error_of_board_error ~tool_name ~start_time e))
+              Tool_result.make_ok ~tool_name ~start_time ~data:json ()
+         | Error e ->
+           Board_tool_format.error_of_board_error ~tool_name ~start_time e)
 ;;
 
 let handle_post_edit ~tool_name ~start_time args : Tool_result.result =
@@ -278,27 +186,12 @@ let handle_post_edit ~tool_name ~start_time args : Tool_result.result =
         ~start_time
         "author is required"
     | Some editor ->
-      if String.length content > Board.Limits.max_content_length
-      then
-        Tool_result.make_err
-          ~tool_name
-          ~class_:Tool_result.Workflow_rejection
-          ~start_time
-          (Printf.sprintf
-             "Content exceeds max length (%d > %d chars)"
-             (String.length content)
-             Board.Limits.max_content_length)
-      else (
-        let new_author = get_string_opt args "new_author" in
-        match Board_dispatch.update_post ~post_id ~editor ~content ?title ?body ?new_author () with
-        | Ok post ->
-          let json = Board.post_to_yojson post in
-          (* Structured result via [Tool_result.ok]; see "Post created" note above. *)
-          Tool_result.ok
-            ~tool_name
-            ~start_time
-            (Printf.sprintf "Post updated:\n%s" (Yojson.Safe.pretty_to_string json))
-        | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e))
+      let new_author = get_string_opt args "new_author" in
+      (match Board_dispatch.update_post ~post_id ~editor ~content ?title ?body ?new_author () with
+       | Ok post ->
+         let json = Board.post_to_yojson post in
+         Tool_result.make_ok ~tool_name ~start_time ~data:json ()
+       | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e))
 ;;
 
 let handle_post_list_uncached ~tool_name ~start_time args : Tool_result.result =
@@ -503,20 +396,15 @@ let handle_post_get ~tool_name ~start_time args : Tool_result.result =
           (String.concat "\n" formatted)
           pagination)
     in
-    let source_snapshot =
-      Board_claim_gate.source_snapshot_of_post post
-      |> Yojson.Safe.pretty_to_string
-    in
     Tool_result.make_ok
       ~tool_name
       ~start_time
       ~data:
         (`String
            (Printf.sprintf
-              "%s%s\n\n**Source snapshot**:\n```json\n%s\n```"
+              "%s%s"
               post_str
-              comments_str
-              source_snapshot))
+              comments_str))
       ()
 ;;
 
@@ -550,16 +438,6 @@ let handle_comment_add ~tool_name ~start_time args : Tool_result.result =
       ~class_:Tool_result.Workflow_rejection
       ~start_time
       "author is required"
-  else if String.length content > Board.Limits.max_content_length
-  then
-    Tool_result.make_err
-      ~tool_name
-      ~class_:Tool_result.Workflow_rejection
-      ~start_time
-      (Printf.sprintf
-         "Content exceeds max length (%d > %d chars)"
-         (String.length content)
-         Board.Limits.max_content_length)
   else
     match author with
     | None ->
@@ -568,15 +446,7 @@ let handle_comment_add ~tool_name ~start_time args : Tool_result.result =
         ~class_:Tool_result.Workflow_rejection
         ~start_time
         "author is required"
-    | Some author -> (
-    match Board_claim_gate.check_comment ~tool_name ~author ~post_id ~content ~args with
-    | Error msg ->
-      Tool_result.make_err
-        ~tool_name
-        ~class_:Tool_result.Workflow_rejection
-        ~start_time
-        msg
-    | Ok () ->
+    | Some author ->
       (match
          Board_dispatch.add_comment
            ~post_id
@@ -588,11 +458,7 @@ let handle_comment_add ~tool_name ~start_time args : Tool_result.result =
        with
        | Ok comment ->
          let json = Board.comment_to_yojson comment in
-         (* Structured result via [Tool_result.ok]; see "Post created" note above. *)
-         Tool_result.ok
-           ~tool_name
-           ~start_time
-           (Printf.sprintf "Comment added:\n%s" (Yojson.Safe.pretty_to_string json))
+         Tool_result.make_ok ~tool_name ~start_time ~data:json ()
        | Error e ->
-         Board_tool_format.error_of_board_error ~tool_name ~start_time e))
+         Board_tool_format.error_of_board_error ~tool_name ~start_time e)
 ;;

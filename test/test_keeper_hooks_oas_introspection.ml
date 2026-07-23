@@ -8,7 +8,7 @@
 
     - lib/keeper/keeper_hooks_oas.ml ([make_hooks]) — the keeper_hooks_oas slots
     - lib/keeper/keeper_run_tools.ml — before_turn_params
-    - lib/keeper/keeper_guards.ml — pre_tool_use
+    - lib/keeper/keeper_hooks_oas.ml — passive pre_tool_use timing
 
     [before_turn_params] is assembled by [Keeper_run_tools_hooks], not
     [make_hooks], so its source/active claim remains a sibling-module contract
@@ -16,7 +16,7 @@
 
 open Alcotest
 
-let json = Masc.Keeper_hooks_oas_introspection.hook_introspection_json ~denied_tools:[] ()
+let json = Masc.Keeper_hooks_oas_introspection.hook_introspection_json ()
 
 let slots_of (j : Yojson.Safe.t) =
   match j with
@@ -42,8 +42,8 @@ let slot_active slot_name =
   | Some active -> active
   | None -> failwith ("introspection slot missing active bool: " ^ slot_name)
 
-(* The 9 slots the introspection claims are wired, and the 3 it claims are
-   not (compaction is handled by keeper_post_turn, not the SDK hooks). *)
+(* The 9 slots the introspection claims are wired. Retired OAS hook slots are
+   absent rather than retained as inactive compatibility surface. *)
 let expected_active =
   [ "before_turn"
   ; "before_turn_params"
@@ -56,34 +56,25 @@ let expected_active =
   ; "on_tool_error"
   ]
 
-let expected_inactive = [ "pre_compact"; "post_compact"; "on_context_compacted" ]
-
 let test_slot_set () =
   let names = List.map fst (slots_of json) |> List.sort compare in
-  let expected = List.sort compare (expected_active @ expected_inactive) in
-  check (list string) "introspection exposes exactly the 12 known hook slots" expected names
+  let expected = List.sort compare expected_active in
+  check (list string) "introspection exposes exactly the 9 current hook slots" expected names
 
 let test_active_split () =
   List.iter
     (fun n -> check (option bool) (n ^ " is active") (Some true) (slot_bool n "active"))
-    expected_active;
-  List.iter
-    (fun n -> check (option bool) (n ^ " is inactive") (Some false) (slot_bool n "active"))
-    expected_inactive
+    expected_active
 
 let test_sources () =
-  (* pre_tool_use and before_turn_params come from sibling modules, not the
-     keeper_hooks_oas record; the rest of the active slots are keeper_hooks_oas. *)
-  check (option string) "pre_tool_use source" (Some "keeper_guards")
+  (* before_turn_params comes from a sibling module; the remaining active
+     slots, including passive pre_tool_use timing, are keeper_hooks_oas. *)
+  check (option string) "pre_tool_use source" (Some "keeper_hooks_oas")
     (slot_string "pre_tool_use" "source");
   check (option string) "before_turn_params source" (Some "keeper_run_tools")
     (slot_string "before_turn_params" "source");
   check (option string) "after_turn source" (Some "keeper_hooks_oas")
-    (slot_string "after_turn" "source");
-  List.iter
-    (fun n ->
-      check (option string) (n ^ " source") (Some "not_registered") (slot_string n "source"))
-    expected_inactive
+    (slot_string "after_turn" "source")
 
 let make_meta_ref (name : string) : Masc.Keeper_meta_contract.keeper_meta ref =
   let json : Yojson.Safe.t =
@@ -92,7 +83,6 @@ let make_meta_ref (name : string) : Masc.Keeper_meta_contract.keeper_meta ref =
         "name", `String name;
         "agent_name", `String name;
         "trace_id", `String "keeper-hooks-introspection-test";
-        "tool_access", Json_util.json_string_list [];
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -120,9 +110,6 @@ let runtime_slots_of (hooks : Agent_sdk.Hooks.hooks) =
     "on_stop", Option.is_some hooks.on_stop;
     "on_error", Option.is_some hooks.on_error;
     "on_tool_error", Option.is_some hooks.on_tool_error;
-    "pre_compact", Option.is_some hooks.pre_compact;
-    "post_compact", Option.is_some hooks.post_compact;
-    "on_context_compacted", Option.is_some hooks.on_context_compacted;
   ]
 
 let test_runtime_active_claims_match_make_hooks () =
@@ -134,37 +121,42 @@ let test_runtime_active_claims_match_make_hooks () =
       active
       (slot_active slot_name))
 
-(* The cost budget is advisory-only: keeper_guards.cost_guard ignores
-   max_cost_usd and always returns Continue. The introspection must therefore
-   report enforced:false in BOTH the "no budget" and "budget set" branches —
-   relabelling it as enforced would be a false claim of a control that does not
-   block anything. *)
-let enforced_of (j : Yojson.Safe.t) =
-  match j with
-  | `Assoc fields -> (
-    match List.assoc_opt "cost_telemetry" fields with
-    | Some (`Assoc ct) -> (
-      match List.assoc_opt "enforced" ct with Some (`Bool b) -> Some b | _ -> None)
-    | _ -> None)
-  | _ -> None
-
-let test_cost_telemetry_never_enforced () =
-  check (option bool) "enforced is false with no budget" (Some false) (enforced_of json);
-  let with_budget =
-    Masc.Keeper_hooks_oas_introspection.hook_introspection_json ~denied_tools:[]
-      ~max_cost_usd:5.0 ()
+let test_pre_tool_use_is_observation_only () =
+  let hooks = make_runtime_hooks () in
+  let event =
+    Agent_sdk.Hooks.PreToolUse
+      { invocation =
+          Agent_sdk.Tool.Invocation.create
+            ~tool_use_id:"toolu_observation_only"
+            ~turn:7
+            ~schedule:
+              { planned_index = 0
+              ; batch_index = 0
+              ; batch_size = 1
+              ; execution_mode = Agent_sdk.Tool.Serial
+              }
+      ; tool_name = "opaque_internal_name"
+      ; input = `Assoc [ "command", `String "opaque external effect" ]
+      ; accumulated_cost_usd = 1234.0
+      }
   in
-  check (option bool) "enforced is false even when a budget is set" (Some false)
-    (enforced_of with_budget)
+  match Agent_sdk.Hooks.invoke_validated hooks.pre_tool_use event with
+  | Agent_sdk.Hooks.Continue -> ()
+  | AdjustParams _ -> fail "pre_tool_use timing hook adjusted parameters"
+  | ElicitInput _ -> fail "pre_tool_use timing hook elicited input"
+  | Nudge _ -> fail "pre_tool_use timing hook returned Nudge"
+  | HookFailed _ -> fail "pre_tool_use timing hook failed"
+  | Block _ -> fail "pre_tool_use timing hook returned Block"
 
 let () =
   Alcotest.run "Keeper_hooks_oas_introspection"
     [ ( "slot contract"
-      , [ test_case "exactly the 12 known slots" `Quick test_slot_set
-        ; test_case "9 active / 3 inactive" `Quick test_active_split
+      , [ test_case "exactly the 9 current slots" `Quick test_slot_set
+        ; test_case "all current slots active" `Quick test_active_split
         ; test_case "slot sources" `Quick test_sources
         ; test_case "make_hooks active claims match runtime record" `Quick
             test_runtime_active_claims_match_make_hooks
-        ; test_case "cost telemetry is never enforced" `Quick test_cost_telemetry_never_enforced
+        ; test_case "pre_tool_use is observation only" `Quick
+            test_pre_tool_use_is_observation_only
         ] )
     ]

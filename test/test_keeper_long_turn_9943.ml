@@ -4,7 +4,7 @@
    compaction step appears to no-op and the turn keeps
    running.  Several adjacent issues report the same
    "long-running turn that nobody noticed" symptom from
-   different angles (#9982 trust pause, #10121 livelock).
+   different angles (#9982 trust pause, #10121 repeated turn attempts).
 
    This test pins the observability surface that surfaces
    such turns directly to Otel_metric_store instead of leaving

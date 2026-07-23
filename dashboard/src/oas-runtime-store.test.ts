@@ -75,13 +75,14 @@ describe('oas-runtime-store', () => {
       },
       {
         source: 'oas_event',
-        type: 'oas:masc:autonomy:agent_selected',
+        type: 'oas:masc:trust_updated',
         ts_unix: 100,
         correlation_id: 'corr-1',
         run_id: 'run-1',
         payload: {
-          agent_name: 'alpha',
-          trigger: 'thompson',
+          agent_a: 'alpha',
+          agent_b: 'beta',
+          trust_score: 0.8,
           timestamp: 100,
         },
       },
@@ -132,13 +133,14 @@ describe('oas-runtime-store', () => {
 
   it('dedupes a live event already present in replayed telemetry', () => {
     const liveEvent = {
-      type: 'oas:masc:autonomy:agent_selected',
+      type: 'oas:masc:trust_updated',
       ts_unix: 123,
       correlation_id: 'corr-live',
       run_id: 'run-live',
       payload: {
-        agent_name: 'beta',
-        trigger: 'thompson',
+        agent_a: 'beta',
+        agent_b: 'gamma',
+        trust_score: 0.8,
         timestamp: 123,
       },
     }
@@ -355,13 +357,14 @@ describe('oas-runtime-store', () => {
       entries: [
         {
           source: 'oas_event',
-          type: 'oas:masc:autonomy:agent_selected',
+          type: 'oas:masc:trust_updated',
           ts_unix: 555,
           correlation_id: 'corr-baseline',
           run_id: 'run-r',
           payload: {
-            agent_name: 'gamma',
-            trigger: 'thompson',
+            agent_a: 'gamma',
+            agent_b: 'delta',
+            trust_score: 0.8,
             timestamp: 555,
           },
         } as TelemetryEntry,
@@ -373,13 +376,14 @@ describe('oas-runtime-store', () => {
     expect(oasHealthSummary.value.totalEvents).toBe(1200)
 
     expect(applyOasRuntimeEvent({
-      type: 'oas:masc:autonomy:agent_selected',
+      type: 'oas:masc:trust_updated',
       ts_unix: 556,
       correlation_id: 'corr-live',
       run_id: 'run-live',
       payload: {
-        agent_name: 'delta',
-        trigger: 'thompson',
+        agent_a: 'delta',
+        agent_b: 'epsilon',
+        trust_score: 0.8,
         timestamp: 556,
       },
     })).toBe(true)

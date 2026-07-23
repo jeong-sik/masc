@@ -537,11 +537,6 @@ describe('PostDetail', () => {
       classification_reason: 'Direct board post without automation provenance.',
       report_count: 1,
       moderation_status: 'approved',
-      contributor_quality: {
-        score: 0.91,
-        band: 'excellent',
-        source: 'agent_reputation',
-      },
       comments: [],
     } as any
 
@@ -551,66 +546,6 @@ describe('PostDetail', () => {
     expect(screen.getByText(/Direct board post without automation provenance/)).toBeInTheDocument()
     expect(screen.getByText('직접')).toBeInTheDocument()
     expect(screen.getByLabelText('게시글 moderation 승인됨 1건')).toHaveTextContent('승인됨 1')
-    expect(screen.getByLabelText('기여자 품질 91점 · 우수')).toHaveTextContent('품질 91')
-  })
-
-  it('renders contributor quality when it is the only detail badge', () => {
-    const post = {
-      id: 'post-quality',
-      author: 'sleepers',
-      title: 'Post',
-      body: 'Body',
-      content: 'Body',
-      created_at: '2026-04-02T00:00:00Z',
-      updated_at: '2026-04-02T00:00:00Z',
-      votes: 0,
-      comment_count: 0,
-      post_kind: 'direct',
-      moderation_status: 'none',
-      contributor_quality: {
-        score: 0.42,
-        band: 'watch',
-        source: 'agent_reputation',
-      },
-      comments: [],
-    } as any
-
-    render(h(PostDetail, { post }))
-
-    expect(screen.getByLabelText('기여자 품질 42점 · 관찰')).toHaveTextContent('품질 42')
-  })
-
-  it('renders claim evidence when it is the only detail badge', () => {
-    const post = {
-      id: 'post-claim-evidence',
-      author: 'sleepers',
-      title: 'Post',
-      body: 'Body',
-      content: 'Body',
-      created_at: '2026-04-02T00:00:00Z',
-      updated_at: '2026-04-02T00:00:00Z',
-      votes: 0,
-      comment_count: 0,
-      post_kind: 'direct',
-      moderation_status: 'none',
-      claim_evidence: {
-        state: 'artifact_missing',
-        label: 'Artifact missing',
-        total_count: 1,
-        allowed_count: 1,
-        rejected_count: 0,
-        artifact_missing_count: 1,
-        artifact_unknown_count: 0,
-        missing_source_snapshot_count: 0,
-        stale_source_snapshot_count: 0,
-        artifact_not_verified_count: 0,
-      },
-      comments: [],
-    } as any
-
-    render(h(PostDetail, { post }))
-
-    expect(screen.getByLabelText(/Artifact missing/)).toHaveTextContent('Artifact missing')
   })
 
   it('marks the current post vote as pressed', async () => {

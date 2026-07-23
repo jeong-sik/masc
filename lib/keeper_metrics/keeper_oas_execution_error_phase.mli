@@ -16,11 +16,10 @@ type t =
   | Turn_start
   | Runtime_exhausted
   | Terminal_non_exhaustion
-  | Recoverable_runtime_transient
   | Cycle_failed
   | Persistent_escalation
   | Resilience_audit_store
-  | Overflow_retry_oas_load
-  | Context_overflow_after_oas_retry
+  | Compaction_checkpoint_load
+  | Provider_context_overflow
 
 val to_label : t -> string

@@ -28,35 +28,26 @@ val externalize_threshold_bytes : unit -> int
 
 val maybe_externalize : ?mime:string -> string -> string
 (** Externalize when over threshold and a blob store is available;
-    pass through otherwise. Best-effort — storage failures fall back to
-    the original [msg]. *)
+    pass through otherwise. Storage failures are logged and fall back to the
+    original [msg], preserving every output byte. *)
 
 (** {1 Result Conversion} *)
 
 val to_oas_typed_result : Tool_result.result -> Agent_sdk.Types.tool_result
-(** Convert a {!Tool_result.result} to OAS [tool_result].
-    Preserves the structured payload, maps [failure_class] to OAS
-    [recoverable]/[error_class], and applies externalization. *)
+(** Convert a {!Tool_result.result} to OAS [tool_result].  [Completed] and
+    [Deferred] project one-way to OAS [Ok]; [Deferred] carries an opaque MASC
+    disposition marker in [_meta].  The adapter never parses that metadata
+    back into MASC semantics.  [Failed] maps its typed [failure_class] directly
+    to OAS [recoverable]/[error_class]. *)
 
 (** {1 Schema Conversion} *)
 
-val param_type_of_string : string -> Agent_sdk.Types.param_type
-(** Map JSON Schema type string to OAS [param_type].
-    Unknown types default to [String]. *)
-
 val params_of_json_schema : Yojson.Safe.t -> Agent_sdk.Types.tool_param list
-(** Extract OAS [tool_param list] from a MASC [input_schema] JSON object.
-    Reads ["properties"] and ["required"] fields. *)
+(** Convert a MASC [input_schema] with the OAS schema-conversion SSOT.
+    Raises [Invalid_argument] when a property type is missing, unsupported, or
+    ambiguous; no local default or union-member selection is applied. *)
 
 (** {1 OAS Tool.t Creation} *)
-
-val oas_descriptor_of_masc_tool : string -> Agent_sdk.Tool.descriptor option
-(** Derive an OAS [Tool.descriptor] from MASC [Tool_catalog] metadata.
-
-    Read-only tools that perform external network I/O (e.g. [masc_web_search],
-    [masc_web_fetch] and their public aliases) are mapped to
-    [Exclusive_external] rather than [Parallel_read] so the OAS runtime does
-    not fire concurrent requests against rate-limited remote APIs. *)
 
 val oas_tool_of_masc :
   ?descriptor:Agent_sdk.Tool.descriptor ->
@@ -71,8 +62,18 @@ val oas_tool_of_masc :
     The handler receives raw JSON args and returns a {!Tool_result.result}.
     Conversion to OAS [tool_result] is applied automatically.
 
-    Pass an explicit [descriptor] to override the default derived from
-    [Tool_catalog] metadata. This is needed for public aliases whose
-    LLM-visible name (e.g. ["WebSearch"]) is not present in the metadata
-    table; the caller can compute the descriptor from the internal name
-    and supply it here. *)
+    An owning adapter may pass an explicit [descriptor]. The generic bridge
+    never infers mutation, permission, or concurrency semantics from a tool
+    name or catalog read-only flag. Without a descriptor OAS uses its ordinary
+    sequential default. *)
+
+val oas_tool_of_masc_with_execution_env :
+  ?descriptor:Agent_sdk.Tool.descriptor ->
+  name:string ->
+  description:string ->
+  input_schema:Yojson.Safe.t ->
+  (Agent_sdk.Tool.Execution_env.t -> Yojson.Safe.t -> Tool_result.result) ->
+  Agent_sdk.Tool.t
+(** Create an OAS [Tool.t] whose handler also receives the exact OAS execution
+    environment. This is for correlation and observability; callers must not
+    treat invocation metadata as authorization. *)

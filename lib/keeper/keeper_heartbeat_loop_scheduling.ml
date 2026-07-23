@@ -1,35 +1,19 @@
 (** Keepalive scheduling decision for the heartbeat loop, extracted from
-    [keeper_heartbeat_loop.ml]. Holds the record type returned by
-    [decide_keepalive_scheduling] and the pure decision function that
-    combines the turn verdict with runtime backpressure admission. *)
+    [keeper_heartbeat_loop.ml]. Runtime/provider observations do not participate
+    in admission here: an eligible Keeper turn reaches the provider boundary,
+    where an unavailable call fails explicitly and runtime fallback can run. *)
 
 open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
-module Observations = Keeper_heartbeat_loop_observations
-
-type runtime_backpressure_decision = Observations.runtime_backpressure_decision =
-  | Runtime_admitted
-  | Runtime_backpressured of {
-      runtime_id : string;
-      reason : string;
-    }
-
 type keepalive_scheduling_decision = {
   turn_decision : Keeper_world_observation.keeper_cycle_decision;
-  requested_should_run_turn : bool;
-  runtime_backpressure : runtime_backpressure_decision;
-  pacing_block : float option;
   should_run_turn : bool;
   verdict_reasons : string list;
   channel : string;
 }
 
 let decide_keepalive_scheduling
-      ?(runtime_id_of_meta = Keeper_meta_contract.runtime_id_of_meta)
-      ?(runtime_resilience_of_name = fun _ -> None)
-      ?(keeper_resilience_of_name = fun _ -> None)
-      ?(pacing_block_of_name = fun (_ : string) -> None)
       ?(reactive_wake = false)
       ?(event_queue_triggers = [])
       ~stop
@@ -43,61 +27,14 @@ let decide_keepalive_scheduling
       ~meta
       obs
   in
-  let requested_should_run_turn =
+  let should_run_turn =
     (not (Atomic.get stop)) && turn_decision.should_run
   in
-  (* RFC-0303 Phase 3: the self-cadence wake-tombstone gate is removed. Phase 2
-     stimulus-gated the autonomous cadence (min_interval is now a rate-limit on
-     opportunity-driven turns, not a standalone trigger), so the tombstone that
-     suppressed blind self-wakes no longer has an input. [should_run_turn] is now
-     gated only by runtime backpressure on [requested_should_run_turn]. *)
-  let runtime_id = runtime_id_of_meta meta in
-  let runtime_backpressure =
-    match keeper_resilience_of_name meta.name with
-    | Some blocker ->
-      Observations.runtime_backpressure_decision
-        ~reason_prefix:"keeper_health"
-        ~runtime_resilience:(Some blocker)
-        ~should_run_turn:requested_should_run_turn
-        ~runtime_id
-    | None ->
-      Observations.runtime_backpressure_decision
-        ~reason_prefix:"runtime_resilience"
-        ~runtime_resilience:(runtime_resilience_of_name runtime_id)
-        ~should_run_turn:requested_should_run_turn
-        ~runtime_id
-  in
-  (* RFC-0313 W3: failure revisit pacing gates when the next turn runs.
-     Consulted only for a turn that would otherwise start — a keeper that is
-     stopped, unrequested, or runtime-backpressured is not additionally
-     stamped as pacing-blocked. *)
-  let pacing_block =
-    match runtime_backpressure with
-    | Runtime_backpressured _ -> None
-    | Runtime_admitted ->
-      if requested_should_run_turn then pacing_block_of_name meta.name else None
-  in
-  let should_run_turn =
-    match runtime_backpressure with
-    | Runtime_admitted -> requested_should_run_turn && Option.is_none pacing_block
-    | Runtime_backpressured _ -> false
-  in
   let verdict_reasons =
-    let base = Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict in
-    let base =
-      match pacing_block with
-      | Some _ -> "pacing_pending" :: base
-      | None -> base
-    in
-    match runtime_backpressure with
-    | Runtime_backpressured _ -> "runtime_backpressure" :: base
-    | Runtime_admitted -> base
+    Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict
   in
   let channel = Keeper_world_observation.channel_to_string turn_decision.channel in
   { turn_decision
-  ; requested_should_run_turn
-  ; runtime_backpressure
-  ; pacing_block
   ; should_run_turn
   ; verdict_reasons
   ; channel

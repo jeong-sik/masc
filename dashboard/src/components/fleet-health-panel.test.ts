@@ -89,8 +89,8 @@ vi.mock('./fleet-telemetry-panel', () => ({
 vi.mock('./tool-quality-panel', () => ({
   ToolQualityPanel: () => html`<div data-testid="tool-quality-panel">ToolQualityPanel</div>`,
 }))
-vi.mock('./governance-monitor', () => ({
-  GovernanceMonitor: () => html`<div data-testid="governance-monitor">GovernanceMonitor</div>`,
+vi.mock('./gate-monitor', () => ({
+  GateMonitor: () => html`<div data-testid="gate-monitor">GateMonitor</div>`,
 }))
 vi.mock('./keeper-reactivity-monitor', () => ({
   KeeperReactivityMonitor: () => html`<div data-testid="keeper-reactivity-monitor">KeeperReactivityMonitor</div>`,
@@ -134,7 +134,7 @@ describe('FleetHealthPanel', () => {
     expect(screen.queryByTestId('telemetry-unified')).toBeNull()
     expect(screen.queryByTestId('tool-quality-panel')).toBeNull()
     expect(screen.queryByTestId('fleet-telemetry-panel')).toBeNull()
-    expect(screen.queryByTestId('governance-monitor')).toBeNull()
+    expect(screen.queryByTestId('gate-monitor')).toBeNull()
   })
 
   it('renders runtime fleet and contract blocker drilldown on the operations board', () => {
@@ -145,7 +145,6 @@ describe('FleetHealthPanel', () => {
         keeper_fibers: 8,
         paused_keepers: 3,
         keeper_fleet_no_fibers: false,
-        keeper_fd_pressure: null,
         keeper_reaction_ledger: null,
         paused_keepers_health: {
           count: 3,
@@ -161,16 +160,9 @@ describe('FleetHealthPanel', () => {
           details: [{
             name: 'analyst',
             autoboot_enabled: true,
-            pause_kind: 'auto_recoverable',
-            auto_resume_after_sec: 60,
-            persisted_auto_resume_after_sec: 60,
-            auto_resume_source: 'explicit',
+            pause_kind: 'operator_paused',
             paused_elapsed_sec: 12,
-            auto_resume_remaining_sec: 48,
-            last_blocker: {
-              klass: 'no_progress_loop',
-              detail: 'no_progress loop detected: streak=10 threshold=10; manual pause applied',
-            },
+            last_blocker: null,
             missing_pause_root_cause: false,
           }],
         },
@@ -178,8 +170,6 @@ describe('FleetHealthPanel', () => {
           status: 'degraded',
           reason: null,
           blocker: 'reaction_capacity_below_target',
-          admission_blocked: null,
-          admission_blocked_keepers: null,
           blocked_keepers: null,
           blocked_count: null,
           running_keeper_fiber_count: 8,
@@ -192,47 +182,6 @@ describe('FleetHealthPanel', () => {
           reaction_capacity_below_target: true,
         },
       },
-      cdal: {
-        writer_status: 'proof_store_incomplete',
-        operator_action_required: true,
-        proof_store_path_drift: false,
-        proof_store: {
-          root: '/Users/dancer/me/.oas',
-          proofs_dir: '/Users/dancer/me/.oas/proofs',
-          exists: true,
-          latest_activity_at: '2026-05-21T03:00:00Z',
-          latest_activity_unix: 1779332400,
-          age_seconds: 30,
-          status: 'stale_incomplete_runs',
-          completeness: {
-            scan_limit: 200,
-            run_dir_entries_seen: 200,
-            scan_truncated: false,
-            run_dirs_scanned: 200,
-            completed_run_dirs: 194,
-            incomplete_run_dirs: 6,
-            stale_incomplete_run_dirs: 3,
-            terminal_incomplete_run_dirs: 1,
-            missing_manifest_run_dirs: 6,
-            missing_contract_run_dirs: 6,
-            stale_incomplete_grace_seconds: 300,
-            sample_stale_incomplete_run_ids: ['contract-stale-a'],
-            sample_terminal_incomplete_run_ids: ['contract-abort-a'],
-          },
-        },
-        task_scope: {
-          status: 'present',
-          recent_limit: 500,
-          recent_rows: 500,
-          task_id_rows: 500,
-          missing_task_scope_rows: 0,
-          legacy_unscoped_rows: 0,
-          current_writer_missing_task_scope_rows: 0,
-          missing_task_scope: false,
-          partial_task_scope: false,
-          current_writer_missing_task_scope: false,
-        },
-      },
     }
 
     render(html`<${FleetHealthPanel} />`)
@@ -243,14 +192,12 @@ describe('FleetHealthPanel', () => {
     expect(screen.getByText('capacity 8/17')).toBeTruthy()
     expect(screen.getByText('exec 13')).toBeTruthy()
     expect(screen.getByText('일시정지 3')).toBeTruthy()
-    expect(screen.getByText('Contract verification proof_store_incomplete')).toBeTruthy()
     expect(screen.getByTestId('runtime-blocker-board')).toBeTruthy()
     expect(screen.getByText('8/17')).toBeTruthy()
     expect(screen.getByText('analyst')).toBeTruthy()
-    expect(screen.getByText(/blocker=no-progress safety pause/)).toBeTruthy()
+    expect(screen.getByText('operator_paused')).toBeTruthy()
+    expect(screen.queryByText(/blocker=/)).toBeNull()
     expect(screen.queryByText(/manual pause applied/)).toBeNull()
-    expect(screen.getAllByText('proof_store_incomplete').length).toBeGreaterThan(0)
-    expect(screen.getByText(/contract-stale-a/)).toBeTruthy()
   })
 
   it('marks the runtime health pill as warn when runtime.status is not ready', () => {
@@ -261,15 +208,12 @@ describe('FleetHealthPanel', () => {
         keeper_fibers: 8,
         paused_keepers: 0,
         keeper_fleet_no_fibers: false,
-        keeper_fd_pressure: null,
         keeper_reaction_ledger: null,
         paused_keepers_health: { count: 0, names: [], running_count: 0, running_names: [], durable_count: 0, durable_names: [], autoboot_enabled_count: 0, autoboot_enabled_names: [], read_error_count: 0, read_errors: [], details: [] },
         keeper_fleet_safety: {
           status: 'ok',
           reason: null,
           blocker: null,
-          admission_blocked: null,
-          admission_blocked_keepers: null,
           blocked_keepers: null,
           blocked_count: null,
           running_keeper_fiber_count: 8,
@@ -282,7 +226,6 @@ describe('FleetHealthPanel', () => {
           reaction_capacity_below_target: false,
         },
       },
-      cdal: { writer_status: 'active', operator_action_required: false, proof_store_path_drift: false },
     }
 
     render(html`<${FleetHealthPanel} />`)
@@ -316,11 +259,11 @@ describe('FleetHealthPanel', () => {
     expect(screen.queryByTestId('telemetry-unified')).toBeNull()
   })
 
-  it('renders GovernanceMonitor for view=governance', () => {
-    setRoute('governance')
+  it('renders GateMonitor for view=gate', () => {
+    setRoute('gate')
     render(html`<${FleetHealthPanel} />`)
 
-    expect(screen.getByTestId('governance-monitor')).toBeTruthy()
+    expect(screen.getByTestId('gate-monitor')).toBeTruthy()
     expect(screen.queryByTestId('telemetry-unified')).toBeNull()
   })
 
@@ -331,7 +274,7 @@ describe('FleetHealthPanel', () => {
     expect(screen.getByText('Evidence Log')).toBeTruthy()
     expect(screen.getByText('Keeper 비교')).toBeTruthy()
     expect(screen.getAllByText('Tool Quality').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Governance').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Gate').length).toBeGreaterThan(0)
     expect(screen.getByText('Attribution')).toBeTruthy()
     expect(screen.getByText('반응성 모니터')).toBeTruthy()
   })
@@ -394,7 +337,7 @@ describe('FleetHealthPanel', () => {
     expect(screen.getByTestId('tool-monitor-default')).toBeTruthy()
     expect(screen.getByText('500 Internal Server Error')).toBeTruthy()
     expect(screen.getAllByText('Tool Quality').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Governance').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Gate').length).toBeGreaterThan(0)
   })
 
   it('keeps lane links visible while the first tool quality fetch is pending', () => {
@@ -405,19 +348,18 @@ describe('FleetHealthPanel', () => {
 
     expect(screen.getByTestId('tool-monitor-default')).toBeTruthy()
     expect(screen.getByText('refreshing')).toBeTruthy()
-    expect(screen.getByText('No tool attention rows.')).toBeTruthy()
+    expect(screen.getByText('No tool observations.')).toBeTruthy()
     expect(screen.getAllByText('Tool Quality').length).toBeGreaterThan(0)
   })
 })
 
 describe('summarizeToolMonitorQuality', () => {
-  it('prioritizes failed and truncated tools for attention rows', () => {
+  it('preserves backend tool observations without local ranking', () => {
     const summary = summarizeToolMonitorQuality(fleetMock.sampleToolQuality)
 
     expect(summary.total).toBe(30)
     expect(summary.failure).toBe(3)
-    expect(summary.attentionToolCount).toBe(2)
-    expect(summary.attentionRows.map(row => row.name)).toEqual([
+    expect(summary.rows.map(row => row.name)).toEqual([
       'masc_board_post',
       'keeper_task_claim',
     ])

@@ -55,7 +55,6 @@ let binding_auth_is_no_auth (binding : Runtime_binding.t) =
   match binding.Runtime_binding.auth with
   | Runtime_binding.No_auth -> true
   | Runtime_binding.Api_key_env _
-  | Runtime_binding.Oauth_cached_login
   | Runtime_binding.Setup_token_env _ -> false
 ;;
 
@@ -67,11 +66,9 @@ let binding_base_url_is_loopback (binding : Runtime_binding.t) =
 ;;
 
 let runtime_kind_of_binding (binding : Runtime_binding.t) =
-  match binding.Runtime_binding.transport with
-  | Runtime_binding.Http | Runtime_binding.Managed ->
-    if binding_auth_is_no_auth binding && binding_base_url_is_loopback binding
-    then "local"
-    else "direct_api"
+  if binding_auth_is_no_auth binding && binding_base_url_is_loopback binding
+  then "local"
+  else "direct_api"
 ;;
 
 let is_binding_local_openai_runtime (binding : Runtime_binding.t) =
@@ -165,16 +162,6 @@ let label_matches_runtime_id ~label ~runtime_id =
   let label_id = normalize_runtime_name_for_bucket label in
   let runtime_id = String.trim runtime_id |> strip_latest_suffix in
   (not (String.equal runtime_id "")) && String.equal label_id runtime_id
-;;
-
-type context_window_hint =
-  { context_window : int
-  ; is_local_model : bool
-  }
-
-let context_window_hint_of_labels labels =
-  let _ = labels in
-  { context_window = 0; is_local_model = false }
 ;;
 
 let provider_name_matches_default_local_openai_runtime provider_name =

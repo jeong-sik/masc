@@ -6,9 +6,7 @@ code_refs:
   - lib/keeper/keeper_memory_bank.ml
   - lib/keeper/keeper_memory_recall.ml
   - lib/keeper/keeper_librarian.ml
-  - lib/context_compact_oas.ml
   - lib/institution_eio.ml
-  - lib/procedural_memory.ml
 ---
 
 # Memory Systems
@@ -60,10 +58,12 @@ OAS reduces active context through its checkpoint/context APIs. MASC may
 request a configured strategy and observe the outcome, but must not rewrite
 the transcript through domain-specific text parsing.
 
-Keeper memory-bank maintenance preserves provenance and reports malformed or
-dropped records. An LLM librarian may classify or summarize candidates when a
-semantic judgment is required; deterministic code may validate schemas,
-enforce storage bounds, and order records by explicit timestamps.
+Keeper memory-bank rewriting is an explicit typed Memory operation. An LLM
+librarian returns the keep, rewrite, or forget decisions; deterministic code
+only validates their schema and provenance and atomically applies that exact
+plan. Storage pressure is observable and may request the operation, but a
+threshold, priority score, or capacity rule cannot decide which memories
+survive.
 
 ## Generation and Handoff
 

@@ -1,54 +1,6 @@
-(** Keeper_memory_os_recall — render bounded advisory context from Memory OS files. *)
+(** Keeper_memory_os_recall — render exact stored Memory OS context. *)
 
 open Keeper_memory_os_types
-
-let default_max_facts = Keeper_memory_os_policy.recall_default_max_facts
-let default_max_episodes = Keeper_memory_os_policy.recall_default_max_episodes
-
-(* RFC-0244 Tier 2: how many shared-semantic facts to append after the keeper's
-   own (private-precedence) facts. Kept small so the communal tier informs
-   without crowding out keeper-local memory. *)
-let default_max_shared_facts = Keeper_memory_os_policy.recall_default_max_shared_facts
-let episode_tail_scan = Keeper_memory_os_policy.recall_episode_tail_scan
-let max_fact_text_len = 260
-let max_episode_text_len = 360
-let max_atom_len = 48
-
-let rec take n xs =
-  if n <= 0
-  then []
-  else (
-    match xs with
-    | [] -> []
-    | x :: rest -> x :: take (n - 1) rest)
-;;
-
-let truncate ~max_len s =
-  if max_len <= 0
-  then ""
-  else if String.length s <= max_len
-  then s
-  else String.sub s 0 (max 0 (max_len - 3)) ^ "..."
-;;
-
-let sanitize_text ~max_len text =
-  match Keeper_run_prompt.safe_memory_fragment text with
-  | None -> ""
-  | Some safe ->
-    safe
-    |> String.split_on_char '\n'
-    |> List.map String.trim
-    |> List.filter (fun line -> line <> "")
-    |> String.concat " "
-    |> truncate ~max_len
-;;
-
-let sanitize_atom text =
-  sanitize_text ~max_len:max_atom_len text
-  |> String.map (function
-    | '\t' | '\r' | '\n' -> ' '
-    | c -> c)
-;;
 
 type unavailable_reason =
   | Read_error
@@ -72,86 +24,29 @@ let episode_is_current ~now (episode : episode) =
   | Some ts -> ts >= now
 ;;
 
-(* Staleness horizon: a fact whose truth anchor is older than this is annotated
-   so the reader re-verifies before asserting it as live. One day mirrors the
-   ephemeral TTL horizon in [Keeper_memory_os_types]. *)
-let staleness_note_seconds = 86_400.0
-
-(* Coarse natural-language age. The prior recall line printed [stale=%.2f] from
-   the [stale_factor] field, but no keeper producer ever writes a non-zero
-   stale_factor (RFC-0244 staleness lives in [last_verified_at] / truth-recency),
-   so it rendered a constant [stale=0.00] that falsely signalled "fresh" on facts
-   of any age. A raw float also fails to trigger an LLM's staleness reasoning the
-   way a worded age does — the reader skips [stale=0.00] but reads "unverified
-   12d". So derive age from the truth anchor and render it in words. *)
-let humanize_age seconds =
-  let seconds = Float.max 0.0 seconds in
-  if seconds >= 86_400.0
-  then Printf.sprintf "%dd" (int_of_float (seconds /. 86_400.0))
-  else if seconds >= 3_600.0
-  then Printf.sprintf "%dh" (int_of_float (seconds /. 3_600.0))
-  else Printf.sprintf "%dm" (int_of_float (seconds /. 60.0))
-;;
-
-(* "" when the fact is recent enough that an age note would be noise (the
-   claude-code memoryAge insight: warn only past a threshold). Otherwise a
-   self-delimited bracket distinguishing never-verified facts (anchored on
-   [first_seen]) from facts confirmed long ago (anchored on [last_verified_at]). *)
-let staleness_marker ~now (fact : fact) =
-  let age = now -. reference_time fact in
-  if age < staleness_note_seconds
-  then ""
-  else (
-    let age_text = humanize_age age in
-    match fact.last_verified_at with
-    | Some _ -> Printf.sprintf " [stale: last verified %s ago — verify]" age_text
-    | None -> Printf.sprintf " [stale: unverified, seen %s ago — verify]" age_text)
-;;
-
-(* RFC-0247 (purge): the recall line carries the fact's *structure* — category
-   (a typed decision), provenance turn, and the worded staleness marker — but no
-   number. The prior line printed [confidence=%.2f score=%.3f]; both were score
-   machinery. The reader (an LLM) judges relevance and freshness from the claim
-   text and the staleness marker, not from a rank the producer can't justify. *)
-let render_fact ~now fact =
+(* Recall carries typed context and the exact claim. It does not synthesize an
+   age bucket or an UNVERIFIED/stale verdict from timestamps. *)
+let render_fact ~now:_ fact =
   let source = fact.source in
   Printf.sprintf
-    "- [category=%s turn=%d]%s %s"
-    (sanitize_atom (category_to_string fact.category))
+    "- [category=%s turn=%d] %s"
+    (category_to_string fact.category)
     source.turn
-    (staleness_marker ~now fact)
-    (sanitize_text ~max_len:max_fact_text_len fact.claim)
-;;
-
-(* RFC-0244 Tier 2: a shared fact is rendered with its provenance (the distinct
-   keepers that corroborated it) so it is never silently merged into the keeper's
-   own knowledge — the reader can see it is cross-keeper consensus. *)
-let render_shared_fact ~now fact =
-  let provenance =
-    match fact.observed_by with
-    | [] -> "shared"
-    | keepers -> "shared via " ^ String.concat "," (List.map sanitize_atom keepers)
-  in
-  Printf.sprintf
-    "- [%s category=%s]%s %s"
-    provenance
-    (sanitize_atom (category_to_string fact.category))
-    (staleness_marker ~now fact)
-    (sanitize_text ~max_len:max_fact_text_len fact.claim)
+    fact.claim
 ;;
 
 let render_episode episode =
   let terminal =
     match episode.terminal_marker with
     | None -> ""
-    | Some marker -> Printf.sprintf " terminal=%s" (sanitize_atom marker)
+    | Some marker -> Printf.sprintf " terminal=%s" marker
   in
   Printf.sprintf
     "- [%s g%04d%s] %s"
-    (sanitize_atom episode.trace_id)
+    episode.trace_id
     episode.generation
     terminal
-    (sanitize_text ~max_len:max_episode_text_len episode.episode_summary)
+    episode.episode_summary
 ;;
 
 let render_prompt_template key variables =
@@ -182,7 +77,36 @@ let render_nonempty_section key variable lines =
   | _ -> render_prompt_template key [ variable, String.concat "\n" lines ]
 ;;
 
-let render_recall_context ~fact_lines ~episode_lines =
+(* RFC-0351 L1: the model cannot manage a store it cannot see. One keeper
+   diagnosed "Memory OS dumps 1500+ episodes per turn" when the store held
+   268-500, stored that misdiagnosis as a fact, and had it re-injected every
+   turn afterwards. The gauge reports what actually reached the model this turn
+   against what is stored; the surrounding wording lives in
+   config/prompts/keeper.memory_os_recall.context.md. Counts and byte totals
+   only — no advice, no threshold, no verdict. *)
+let render_gauge_line
+      ~facts_injected
+      ~facts_stored
+      ~episodes_injected
+      ~episodes_stored
+      ~rendered_bytes
+      ~byte_budget
+  =
+  let budget_part =
+    if byte_budget <= 0
+    then Printf.sprintf "%dB rendered (no byte budget)" rendered_bytes
+    else Printf.sprintf "%dB/%dB rendered" rendered_bytes byte_budget
+  in
+  Printf.sprintf
+    "facts %d/%d injected, episodes %d/%d injected, %s"
+    facts_injected
+    facts_stored
+    episodes_injected
+    episodes_stored
+    budget_part
+;;
+
+let render_recall_context ~gauge_line ~fact_lines ~episode_lines =
   match
     render_nonempty_section
       Keeper_prompt_names.memory_os_recall_facts_section
@@ -201,61 +125,10 @@ let render_recall_context ~fact_lines ~episode_lines =
      | Ok episodes_section ->
        render_prompt_template
          Keeper_prompt_names.memory_os_recall_context
-         [ "facts_section", facts_section; "episodes_section", episodes_section ])
-;;
-
-(* RFC-0239 R2 / RFC-0243 / RFC-0259 §3.7: recall-time dedup keys on the shared
-   [Keeper_memory_os_types.claim_identity] SSOT (was a [normalize_claim] copy;
-   RFC-0243 lifted it so the write-time upsert keys identically, RFC-0259 §3.7
-   re-pointed it at the typed producer-identity key). Since RFC-0243 makes the
-   librarian write path upsert-by-claim, the store no longer accumulates fresh
-   duplicates; this read-time dedup remains as defense-in-depth for legacy rows
-   written before the upsert landed. *)
-let dedup_by_claim facts =
-  let seen = Hashtbl.create 32 in
-  List.filter
-    (fun fact ->
-      let key = claim_identity fact in
-      if Hashtbl.mem seen key then false else (Hashtbl.add seen key (); true))
-    facts
-;;
-
-(* RFC-0247 (purge): the truth anchor used as the structural recall order
-   (most-recently-verified first). It is the type-level {!reference_time} SSOT, so
-   "kept" ([retention_rank]), "ranked" (here), and "marked stale"
-   ([staleness_marker]) all read the same timestamp by construction. *)
-let truth_anchor (fact : fact) = reference_time fact
-
-(* Filter to current, order by structural recency (the truth anchor), dedup, and
-   exclude first-person self-observations. Self-observations ("I am idle",
-   "I am looping") are transient agent-state notes, not verifiable external state
-   or durable knowledge, so they must not leak into the recall context shown to
-   the model. RFC-0285 §3.1 classifies them at the producer boundary; this is the
-   read-side enforcement.
-
-   RFC-0247 replaced the composite [score_fact] order with this single typed
-   timestamp: recall ordering is structural, never a learned number. The prior
-   pipeline also ran spreading-activation reranking ([activate]) and lexical
-   seed-rerank ([seed_tokens]); both added a numeric boost to decide order and
-   were removed in the purge. The association edge store and its spreading-activation
-   organ were removed entirely (RFC-0251); recall depends only on the deterministic
-   timestamp order above. *)
-let facts_recency_ranked ~now facts =
-  facts
-  |> List.filter (fact_is_current ~now)
-  |> List.filter fact_prompt_recallable
-  |> List.filter (fun (fact : fact) ->
-    match fact.claim_kind with
-    | Some Keeper_memory_os_types.Self_observation -> false
-    | _ -> true)
-  |> List.sort (fun a b -> compare (truth_anchor b) (truth_anchor a))
-  |> dedup_by_claim
-;;
-
-let episode_prompt_recallable (episode : episode) =
-  match episode.claims with
-  | [] -> false
-  | claims -> List.exists fact_prompt_recallable claims
+         [ "gauge_line", gauge_line
+         ; "facts_section", facts_section
+         ; "episodes_section", episodes_section
+         ])
 ;;
 
 (* RFC-0264 P2: render_context_exn returns the rendered block alongside the
@@ -271,111 +144,198 @@ type render_result =
   ; failure_reason : unavailable_reason option
   }
 
-let with_fact_store_locks keeper_ids f =
-  let paths =
-    keeper_ids
-    |> List.map (fun keeper_id -> Keeper_memory_os_io.facts_path ~keeper_id)
-    |> List.sort_uniq String.compare
-  in
-  let rec loop = function
-    | [] -> f ()
-    | path :: rest -> File_lock_eio.with_lock path (fun () -> loop rest)
-  in
-  loop paths
+(* masc#25052 P1: selection budget. Before this, every current fact/episode
+   in the store was injected every turn -- no selection contract existed.
+   [select_most_recent ~budget ~key ~recency items] keeps the [budget] most
+   recent items (by [recency], descending) and returns them in their
+   ORIGINAL relative order (a stable filter over [items], not a reordering)
+   alongside the drop count, so turns that fit within budget see byte-for-
+   byte the same order they always did -- only the truncation CASE picks
+   which items survive, never how the survivors are arranged. [key] must be
+   a stable per-item identity (claim_identity for facts, "trace_id:gN" for
+   episodes) so membership after sorting can be checked without relying on
+   structural/physical equality. *)
+let select_most_recent ~budget ~key ~recency items =
+  let n = List.length items in
+  if n <= budget
+  then items, 0
+  else (
+    let kept_keys =
+      items
+      |> List.map (fun item -> item, recency item)
+      |> List.stable_sort (fun (_, a) (_, b) -> Float.compare b a)
+      |> List.filteri (fun i _ -> i < budget)
+      |> List.map (fun (item, _) -> key item)
+      |> Set_util.StringSet.of_list
+    in
+    let selected = List.filter (fun item -> Set_util.StringSet.mem (key item) kept_keys) items in
+    selected, n - budget)
 ;;
 
-let render_context_exn ~keeper_id ~now ~max_facts ~max_episodes () =
-  let max_facts = max 0 max_facts in
-  let max_episodes = max 0 max_episodes in
-  (* RFC-0239 Q4: scan the whole bounded store, not a [fact_recall_window]-sized
-     tail. The store holds up to [fact_store_max] facts between caps, and a fresh
-     cap rewrites it in rank order — so the highest-ranked durable rows sit at
-     the file head while new appends land at the tail. Scanning only
-     [fact_recall_window] tail rows would exclude exactly those head rows in the
-     [fact_recall_window]..[fact_store_max] band; scanning [fact_store_max]
-     covers the entire bounded store so recency ranking selects the globally best
-     facts. RFC-0247: order by the structural truth anchor (most-recently-verified
-     first); the composite score, lexical seed-rerank, and spreading-activation
-     reranking were all removed in the purge. *)
-  let facts, private_keys, shared_facts, n_facts_in_store =
-    let fact_store_ids =
-      if String.equal keeper_id shared_store_id
-      then [ keeper_id ]
-      else [ keeper_id; shared_store_id ]
-    in
-    with_fact_store_locks fact_store_ids (fun () ->
-      let all_facts =
-        Keeper_memory_os_io.read_facts_tail
-          ~keeper_id
-          ~n:Keeper_memory_os_io.fact_store_max
-      in
-      let n_facts_in_store = List.length all_facts in
-      let facts = all_facts |> facts_recency_ranked ~now |> take max_facts in
-      (* RFC-0244 Tier 2: append shared-semantic facts after the keeper's own,
-         with private precedence — a claim already surfaced from this keeper's
-         store is not repeated from the shared store. Both stores are read under
-         their facts locks in deterministic path order, so the private dedup keys
-         and shared slice come from one serialized snapshot boundary. Unlike
-         per-keeper stores, the consolidator rewrites the shared tier directly
-         and does not apply [fact_store_max], so recall must scan every shared
-         fact before ranking and taking the small communal slice. *)
-      let private_keys = List.map (fun f -> claim_identity f) facts in
-      let shared_facts =
-        if String.equal keeper_id shared_store_id
-        then []
-        else
-          Keeper_memory_os_io.read_facts_all ~keeper_id:shared_store_id
-          |> facts_recency_ranked ~now
-          |> List.filter (fun f -> not (List.mem (claim_identity f) private_keys))
-          |> take default_max_shared_facts
-      in
-      facts, private_keys, shared_facts, n_facts_in_store)
+(* RFC-0351 L3: byte budget on the rendered block.
+
+   The count budgets above bound how many items are injected, not how large
+   they render. One keeper sat at 62 facts / 432 episodes -- both under the 500
+   count budgets, so neither truncated -- and still rendered 222,499 bytes,
+   98.5% of that turn's entire extra_system_context. The byte budget existed but
+   was observability-only: it logged "not truncated" and let the block go out in
+   full.
+
+   Same selection shape as [select_most_recent]: keep the most recent items that
+   fit and return them in their ORIGINAL relative order, so a block within
+   budget renders byte-for-byte as before. Arithmetic on lengths only -- no
+   importance score, no content inspection, no threshold on meaning. Pairs carry
+   their pre-rendered line so a line is rendered once. *)
+let select_pairs_within_byte_budget ~budget pairs =
+  let rec take kept used dropped = function
+    | [] -> kept, dropped
+    | ((_, line) as pair) :: older ->
+      let cost = String.length line + 1 (* newline joiner *) in
+      if used + cost > budget
+      then kept, dropped + List.length older + 1
+      else take (pair :: kept) (used + cost) dropped older
   in
-  let episodes =
-    Keeper_memory_os_io.read_episodes_tail
-      ~keeper_id
-      ~n:(max max_episodes episode_tail_scan)
+  (* Walk newest-first so survivors are the most recent; the accumulator
+     rebuilds the original order. *)
+  take [] 0 0 (List.rev pairs)
+;;
+
+let episode_key (e : episode) = Printf.sprintf "%s:g%d" e.trace_id e.generation
+
+let log_truncation ~keeper_id ~kind ~metric ~store_count ~injected_count ~dropped ~budget =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string metric)
+    ~labels:[ "keeper", keeper_id ]
+    ~delta:(Float.of_int dropped)
+    ();
+  Log.Keeper.warn
+    "memory os recall truncated %s keeper=%s: store=%d injected=%d dropped=%d budget=%d"
+    kind
+    keeper_id
+    store_count
+    injected_count
+    dropped
+    budget
+;;
+
+let render_context_exn ~keeper_id ~now () =
+  let all_facts =
+    File_lock_eio.with_lock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
+      Keeper_memory_os_io.read_facts_all ~keeper_id
+      |> List.filter (fact_is_current ~now))
+  in
+  (* Diagnostic: the TOTAL store size, independent of the selection budget
+     below -- this is what tells an operator "the store has grown past what
+     recall injects" rather than silently equalling whatever got selected. *)
+  let n_facts_in_store = List.length all_facts in
+  let all_episodes =
+    Keeper_memory_os_io.read_episodes_all ~keeper_id
     |> List.filter (episode_is_current ~now)
-    |> List.filter episode_prompt_recallable
-    |> take max_episodes
   in
-  let injected_fact_keys =
-    private_keys @ List.map (fun f -> claim_identity f) shared_facts
+  let max_facts = Keeper_config.keeper_memory_os_recall_max_facts () in
+  let max_episodes = Keeper_config.keeper_memory_os_recall_max_episodes () in
+  let facts, facts_dropped =
+    select_most_recent ~budget:max_facts ~key:claim_identity ~recency:reference_time all_facts
   in
-  let injected_episode_keys =
-    List.map
-      (fun (e : episode) -> Printf.sprintf "%s:g%d" e.trace_id e.generation)
-      episodes
+  let episodes, episodes_dropped =
+    select_most_recent
+      ~budget:max_episodes
+      ~key:episode_key
+      ~recency:(fun (e : episode) -> e.created_at)
+      all_episodes
   in
+  if facts_dropped > 0
+  then
+    log_truncation
+      ~keeper_id
+      ~kind:"facts"
+      ~metric:Keeper_metrics.MemoryOsRecallFactsTruncated
+      ~store_count:n_facts_in_store
+      ~injected_count:(List.length facts)
+      ~dropped:facts_dropped
+      ~budget:max_facts;
+  if episodes_dropped > 0
+  then
+    log_truncation
+      ~keeper_id
+      ~kind:"episodes"
+      ~metric:Keeper_metrics.MemoryOsRecallEpisodesTruncated
+      ~store_count:(List.length all_episodes)
+      ~injected_count:(List.length episodes)
+      ~dropped:episodes_dropped
+      ~budget:max_episodes;
+  let max_bytes = Keeper_config.keeper_memory_os_recall_max_bytes () in
+  let fact_lines = List.map (render_fact ~now) facts in
+  let fact_bytes =
+    List.fold_left (fun acc line -> acc + String.length line + 1) 0 fact_lines
+  in
+  (* Facts render an order of magnitude smaller than episodes (14,235B vs
+     208,264B on the measured keeper), so facts keep their place and the
+     remaining budget goes to episodes. *)
+  let episode_pairs, episodes_byte_dropped =
+    let pairs = List.map (fun e -> e, render_episode e) episodes in
+    if max_bytes <= 0
+    then pairs, 0
+    else
+      select_pairs_within_byte_budget ~budget:(max 0 (max_bytes - fact_bytes)) pairs
+  in
+  let episodes = List.map fst episode_pairs in
+  let episode_lines = List.map snd episode_pairs in
+  if episodes_byte_dropped > 0
+  then (
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string MemoryOsRecallBytesOverBudget)
+      ~labels:[ "keeper", keeper_id ]
+      ();
+    log_truncation
+      ~keeper_id
+      ~kind:"episodes over byte budget"
+      ~metric:Keeper_metrics.MemoryOsRecallEpisodesTruncated
+      ~store_count:(List.length all_episodes)
+      ~injected_count:(List.length episodes)
+      ~dropped:episodes_byte_dropped
+      ~budget:max_bytes);
+  let injected_fact_keys = List.map (fun f -> claim_identity f) facts in
+  let injected_episode_keys = List.map episode_key episodes in
+  (* Content bytes, not final block size: the gauge is an input to the render,
+     so the wrapper's own fixed text is not counted. It is what the budget
+     above actually meters. *)
+  let episode_bytes =
+    List.fold_left
+      (fun acc (_, line) -> acc + String.length line + 1)
+      0
+      episode_pairs
+  in
+  let gauge_line =
+    render_gauge_line
+      ~facts_injected:(List.length facts)
+      ~facts_stored:n_facts_in_store
+      ~episodes_injected:(List.length episodes)
+      ~episodes_stored:(List.length all_episodes)
+      ~rendered_bytes:(fact_bytes + episode_bytes)
+      ~byte_budget:max_bytes
+  in
+  (* An empty store still renders the wrapper: the gauge ("facts 0/0
+     injected") and the "anything that should survive belongs in a fact"
+     advisory are exactly what a cold-start keeper needs to begin writing
+     memory. Short-circuiting to an empty block here meant the keepers with
+     nothing stored — the ones the RFC-0351 L1 nudge targets most — never
+     saw the gauge at all. *)
   let block, injected_fact_keys, injected_episode_keys, failure_reason =
-    match facts, shared_facts, episodes with
-    | [], [], [] -> "", [], [], None
-    | _ ->
-      let fact_lines =
-        List.map (render_fact ~now) facts
-        @ List.map (render_shared_fact ~now) shared_facts
-      in
-      let episode_lines = List.map render_episode episodes in
-      (match render_recall_context ~fact_lines ~episode_lines with
-       | Ok context -> context, injected_fact_keys, injected_episode_keys, None
-       | Error msg ->
-         Log.Keeper.warn "memory os recall prompt unavailable keeper=%s: %s" keeper_id msg;
-         ( render_unavailable_context Prompt_render_error
-         , []
-         , []
-         , Some Prompt_render_error ))
+    match render_recall_context ~gauge_line ~fact_lines ~episode_lines with
+    | Ok context -> context, injected_fact_keys, injected_episode_keys, None
+    | Error msg ->
+      Log.Keeper.warn "memory os recall prompt unavailable keeper=%s: %s" keeper_id msg;
+      ( render_unavailable_context Prompt_render_error
+      , []
+      , []
+      , Some Prompt_render_error )
   in
   { block; injected_fact_keys; injected_episode_keys; n_facts_in_store; failure_reason }
 ;;
 
-let render_context
-      ~keeper_id
-      ~now
-      ?(max_facts = default_max_facts)
-      ?(max_episodes = default_max_episodes)
-      ()
-  =
-  try (render_context_exn ~keeper_id ~now ~max_facts ~max_episodes ()).block with
+let render_context ~keeper_id ~now () =
+  try (render_context_exn ~keeper_id ~now ()).block with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Log.Keeper.warn
@@ -401,12 +361,7 @@ let render_if_enabled ~keeper_id ~now ~trace_id ~turn ~masc_root () =
        and never affects the returned block. *)
     let result =
       try
-        render_context_exn
-          ~keeper_id
-          ~now
-          ~max_facts:default_max_facts
-          ~max_episodes:default_max_episodes
-          ()
+        render_context_exn ~keeper_id ~now ()
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->

@@ -12,7 +12,6 @@ open Keeper_types_profile
 type runtime_blocker_surface = {
   blocker_class : string;
   summary : string;
-  continue_gate : bool;
 }
 
 val blocker_class_of_sdk_error :

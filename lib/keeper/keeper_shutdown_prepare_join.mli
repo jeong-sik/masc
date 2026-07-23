@@ -19,8 +19,6 @@ type error =
       ; actual : int
       }
   | Meta_snapshot_read_failed of string
-  | Stale_prune_meta_changed
-  | Stale_prune_lane_not_paused of Keeper_state_machine.phase
   | Task_discovery_failed of string
   | Prepare_persist_failed of Keeper_shutdown_store.error
   | Cancellation_failed of Keeper_shutdown_types.t

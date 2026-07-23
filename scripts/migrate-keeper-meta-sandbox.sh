@@ -7,7 +7,8 @@
 #   absent from the persisted meta JSON. The new strict parser refuses to load
 #   such files. This script walks the on-disk keeper meta directories, fills in
 #   the missing fields from the matching config/keepers/<name>.toml, and writes
-#   .bak alongside the modified file.
+#   backups under .masc/backups/keeper-meta-sandbox/. Runtime-root regular
+#   entries remain owned by the typed Keeper artifact catalog.
 #
 # Scope (filesystem locations searched)
 #   1. <repo>/.masc/keepers/*.json          (worktree-local persistence)
@@ -15,7 +16,7 @@
 #
 # Usage
 #   bash scripts/migrate-keeper-meta-sandbox.sh             # --dry-run (default)
-#   bash scripts/migrate-keeper-meta-sandbox.sh --apply     # write .bak + edit
+#   bash scripts/migrate-keeper-meta-sandbox.sh --apply     # write backup + edit
 #   bash scripts/migrate-keeper-meta-sandbox.sh --apply --quiet
 #   bash scripts/migrate-keeper-meta-sandbox.sh --base-path ~/me --apply
 #
@@ -102,8 +103,13 @@ default_network_for_profile() {
 
 normalize_one() {
   local meta_file="$1"
-  local name
+  local name persisted_name
   name="$(basename "$meta_file" .json)"
+  persisted_name="$(jq -r 'if (.name | type) == "string" then .name else "" end' < "$meta_file" 2>/dev/null || echo "")"
+  if [ "$persisted_name" != "$name" ]; then
+    log "  [skip] $name : JSON does not carry matching Keeper metadata name authority"
+    return 0
+  fi
 
   local has_profile has_network
   has_profile="$(jq -r 'has("sandbox_profile")' < "$meta_file" 2>/dev/null || echo "false")"
@@ -136,7 +142,11 @@ normalize_one() {
     return 0
   fi
 
-  local backup="${meta_file}.bak"
+  local masc_root backup_dir backup
+  masc_root="$(dirname "$(dirname "$meta_file")")"
+  backup_dir="${masc_root}/backups/keeper-meta-sandbox"
+  mkdir -p "$backup_dir"
+  backup="${backup_dir}/$(basename "$meta_file").bak"
   cp -p "$meta_file" "$backup"
 
   local tmp

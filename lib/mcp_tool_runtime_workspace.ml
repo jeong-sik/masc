@@ -29,12 +29,7 @@ open Mcp_tool_runtime_types
    directly, matching the shared MCP runtime alias. *)
 
 let runtime_ok ~tool_name ~start_time body : Tool_result.result =
-  let data =
-    match Tool_result.structured_payload_of_message body with
-    | Some json -> json
-    | None -> `String body
-  in
-  Tool_result.make_ok ~tool_name ~start_time ~data ()
+  Tool_result.ok ~tool_name ~start_time body
 ;;
 
 let runtime_err_runtime ~tool_name ~start_time msg : Tool_result.result =
@@ -93,6 +88,16 @@ let expand_start_path ~config path =
   else Ok path
 ;;
 
+type workspace_setup_error =
+  | Workspace_request_rejected of string
+  | Workspace_runtime_failed of Mcp_server.workspace_switch_error
+
+let activate_workspace state config =
+  match Mcp_server.set_workspace_config state config with
+  | Ok () -> Ok config
+  | Error error -> Error (Workspace_runtime_failed error)
+;;
+
 (** masc_start — compound onboarding (set project root + bind session + optional task) *)
 let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result option =
   let config = ctx.config in
@@ -109,33 +114,48 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
       if Workspace.is_initialized (Mcp_server.workspace_config state) then
         Ok config
       else
-        Error "path is required when no project scope is set. Provide the project directory path."
+        Error
+          (Workspace_request_rejected
+             "path is required when no project scope is set. Provide the project directory path.")
     end else begin
       match expand_start_path ~config path with
-      | Error _ as err -> err
+      | Error error -> Error (Workspace_request_rejected error)
       | Ok expanded ->
         if not (Sys.file_exists expanded && Sys.is_directory expanded) then
-          Error (Printf.sprintf "Directory not found: %s" expanded)
+          Error
+            (Workspace_request_rejected
+               (Printf.sprintf "Directory not found: %s" expanded))
         else begin
           let cfg = Workspace.default_config expanded in
-          if Workspace.is_initialized cfg then begin
-            Mcp_server.set_workspace_config state cfg;
-            Ok cfg
-          end else begin
-            let _msg = Workspace.init cfg ~agent_name:None in
-            Mcp_server.set_workspace_config state cfg;
-            Ok cfg
-          end
+          match Mcp_server.validate_workspace_config state cfg with
+          | Error error -> Error (Workspace_runtime_failed error)
+          | Ok () ->
+            if Workspace.is_initialized cfg then
+              activate_workspace state cfg
+            else begin
+              let _msg = Workspace.init cfg ~agent_name:None in
+              activate_workspace state cfg
+            end
         end
     end
   in
   match workspace_result with
-  | Error e ->
+  | Error (Workspace_request_rejected error) ->
       (* workspace_result Error sources are all caller-input rejections:
          missing [path] argument or non-existent directory. *)
       Some
         (runtime_err_workflow ~tool_name ~start_time
-           (Printf.sprintf "masc_start failed while setting project scope: %s" e))
+           (Printf.sprintf
+              "masc_start failed while setting project scope: %s"
+              error))
+  | Error (Workspace_runtime_failed error) ->
+    Some
+      (runtime_err_runtime
+         ~tool_name
+         ~start_time
+         (Printf.sprintf
+            "masc_start failed while setting project scope: %s"
+            (Mcp_server.workspace_switch_error_to_string error)))
   | Ok active_config ->
     (* Step 2: bind session (idempotent) *)
     let session_binding_result =
@@ -162,12 +182,8 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
                 agent_name
                 masc_add_task_name))
       else begin
-        (* RFC-0034.v2: per-goal cap guard. masc_start does not pass a
-           [goal_id], so the guard is a no-op for orphan tasks. Wired so
-           a future goal-aware variant inherits the cap automatically. *)
         let add_result =
           Workspace_task.add_task
-            ~reject_if:(Workspace_task_capacity.rejection_for_add_task ?goal_id:None)
             active_config ~title:task_title ~priority:3 ~description:""
         in
         (* Extract task ID from result like "Added task-001: title" *)

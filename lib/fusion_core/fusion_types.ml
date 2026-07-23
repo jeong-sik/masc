@@ -110,38 +110,39 @@ let answered_of outcomes =
     outcomes
 
 type skip_reason =
-  | Quorum_not_met of
+  | No_panel_answers of { total : int }
+  | Quorum_shortfall of
       { answered : int
-      ; total : int
       ; required : int
       }
 [@@deriving yojson, show, eq]
 
 let render_skip_reason = function
-  | Quorum_not_met { answered; total; required } ->
-    Printf.sprintf
-      "fusion aborted: %d of %d panels answered, preset requires at least %d"
-      answered
-      total
-      required
+  | No_panel_answers { total } ->
+    Printf.sprintf "fusion aborted: none of %d panels returned an answer" total
+  | Quorum_shortfall { answered; required } ->
+    Printf.sprintf "fusion aborted: panel quorum not met (%d of %d required answers)"
+      answered required
+
+(* judge 실행 전 panel 입력 계약 검사 (런타임 quorum = preset.min_answered).
+   응답 0이면 [No_panel_answers](objective input absence), 0 < 응답 < [min_answered]면
+   [Quorum_shortfall](N-of-M 정책 미달), 응답 >= [min_answered]면 [None] = judge 진행.
+   미달 응답을 judge에 넘기는 silent degrade는 금지다 — quorum은 RFC-0252 §5.1 (a)의
+   meta-degrade(실행 후 첫 성공으로 폭빽)와 다른 축(실행 전 입력 계약)이다.
+   [min_answered] 기본값(1)에서는 "응답 0일 때만 skip"으로 강제 전 동작과 정확히 동일.
+   [Validated_preset]가 1..패널 총합 범위를 증명하므로 여기선 범위 재검증을 하지 않는다.
+   순수 — 테스트 가능. *)
+let judge_skip_reason ~panel ~min_answered : skip_reason option =
+  match answered_of panel with
+  | [] -> Some (No_panel_answers { total = List.length panel })
+  | _ :: _ as answered ->
+    let answered_count = List.length answered in
+    if answered_count < min_answered
+    then Some (Quorum_shortfall { answered = answered_count; required = min_answered })
+    else None
 
 let no_panel_answers_error =
   "all panels failed: no answered panel to synthesize"
-
-(* RFC-0252 left the panel-quorum case unspecified. The judge prompt is built
-   from [answered_of] only, so when fewer than [min_answered] panels [Answered]
-   the judge is handed a thin (or empty) <panel_answers> block and fabricates a
-   synthesis from little/no evidence — the run then surfaces a confident result
-   backed by too few panels (observed: a 0-success panel still produced a fusion
-   result). This pure decision lets the orchestrator skip the judge in that case:
-   [Some reason] => complete with [judge = Error reason]; [None] => quorum met,
-   run the judge. [min_answered] defaults to 1 (>= 1 answer required), so the
-   default behaviour is exactly "skip only when all panels failed". *)
-let judge_skip_reason ~min_answered outcomes =
-  let answered = List.length (answered_of outcomes) in
-  if answered < min_answered
-  then Some (Quorum_not_met { answered; total = List.length outcomes; required = min_answered })
-  else None
 
 type claim =
   { text : string
@@ -220,7 +221,7 @@ type judge_node =
 [@@deriving yojson, show, eq]
 
 (* 심판(judge) 실패의 닫힌 합. {!panel_failure}와 동형이되 심판 도메인 전용 사유
-   ([Empty_result]/[Build_error]/[Parse_error]/[Budget_exceeded])를 추가한다.
+   ([Empty_result]/[Build_error]/[Parse_error])를 추가한다.
    [Fusion_judge] 계열이 {!Agent_sdk.Error}의 [Timeout] variant를 match에서 잡아 typed로
    반환하므로, 호출자는 string substring 분류 없이 exhaustive match로 분류한다
    (CLAUDE.md §string-classifier 안티패턴 회피). [panel_failure]를 공유하지 않는 이유는
@@ -232,16 +233,11 @@ type judge_failure =
   | Empty_result
   | Build_error of string
   | Parse_error of string
-  | Budget_exceeded of string
   | Panels_unavailable of skip_reason
   | Internal_error of string
 [@@deriving yojson, show, eq]
 
 let judge_failure_is_timeout = function Timeout -> true | _ -> false
-
-let judge_failure_is_timeout_or_budget = function
-  | Timeout | Budget_exceeded _ -> true
-  | _ -> false
 
 let judge_failure_text = function
   | Timeout -> "timeout"
@@ -250,7 +246,6 @@ let judge_failure_text = function
   | Empty_result -> "judge: empty result"
   | Build_error detail -> detail
   | Parse_error detail -> detail
-  | Budget_exceeded detail -> detail
   | Panels_unavailable reason -> render_skip_reason reason
   | Internal_error detail -> detail
 
@@ -261,7 +256,6 @@ let judge_failure_tag = function
   | Empty_result -> "empty_result"
   | Build_error _ -> "build_error"
   | Parse_error _ -> "parse_error"
-  | Budget_exceeded _ -> "budget_exceeded"
   | Panels_unavailable _ -> "panels_unavailable"
   | Internal_error _ -> "internal_error"
 
@@ -271,10 +265,10 @@ type judge_error_node =
   ; usage : usage
       (** 실패해도 태운 토큰 — 관측 record가 비용을 버리지 않는다(RFC-0284, 적대 리뷰 #22112 E).
           [panel_error]와 달리 심판 실패는 토큰 소비 후일 수 있어 usage를 동반한다. *)
-  ; elapsed_s : float
-      (** 이 심판 노드가 시작된 시점부터 실패까지 경과한 시간(초). 예산/타임아웃
-          분석에 쓰인다(RFC-0284-FUSION-P0). [timed_out]은 [judge_failure_is_timeout failure]
-          로 파생 가능해 별도 필드에서 제거했다. *)
+  ; elapsed_s : float option
+      (** 이 심판 노드가 시작된 시점부터 실패까지 경과한 시간(초). [None]은
+          clock 미가용으로 관측할 수 없었음을 뜻한다. [timed_out]은
+          [judge_failure_is_timeout failure]로 파생 가능해 별도 필드에서 제거했다. *)
   }
 [@@deriving yojson, show, eq]
 
@@ -283,6 +277,44 @@ type judge_error_node =
 type judge_outcome =
   | Synthesized of judge_node  (** panel [Answered] 대칭. *)
   | Judge_failed of judge_error_node  (** panel [Failed] 대칭. *)
+[@@deriving yojson, show, eq]
+
+let result_to_yojson ok_to_yojson error_to_yojson = function
+  | Ok value -> `List [ `String "Ok"; ok_to_yojson value ]
+  | Error error -> `List [ `String "Error"; error_to_yojson error ]
+;;
+
+let result_of_yojson ok_of_yojson error_of_yojson = function
+  | `List [ `String "Ok"; value ] ->
+    Result.map (fun value -> Ok value) (ok_of_yojson value)
+  | `List [ `String "Error"; error ] ->
+    Result.map (fun error -> Error error) (error_of_yojson error)
+  | json ->
+    Error
+      (Printf.sprintf
+         "Fusion_types.deliberation_evidence.judge: unsupported shape %s"
+         (Yojson.Safe.to_string json))
+;;
+
+let equal_result equal_ok equal_error left right =
+  match left, right with
+  | Ok left, Ok right -> equal_ok left right
+  | Error left, Error right -> equal_error left right
+  | Ok _, Error _ | Error _, Ok _ -> false
+;;
+
+let pp_result pp_ok pp_error formatter = function
+  | Ok value -> Format.fprintf formatter "(Ok %a)" pp_ok value
+  | Error error -> Format.fprintf formatter "(Error %a)" pp_error error
+;;
+
+type deliberation_evidence =
+  { question : string
+  ; panel : panel_outcome list
+  ; judge : (judge_synthesis, judge_failure) result
+  ; judges : judge_outcome list
+  ; judge_usage : usage
+  }
 [@@deriving yojson, show, eq]
 
 type fusion_trigger =

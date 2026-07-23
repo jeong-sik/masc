@@ -60,10 +60,30 @@ type memory_kind =
 val memory_kind_to_wire : memory_kind -> string
 val memory_kind_of_wire : string -> memory_kind option
 val all_memory_kinds : memory_kind list
-val memory_kind_is_writable : memory_kind -> bool
-val writable_memory_kinds : memory_kind list
+
+(** Which store holds an explicitly written memory of a given kind (RFC-0351 L1).
+
+    [Turn_scoped_bank] is the working note bank for the run in progress. It is
+    shown on status and dashboard surfaces and is not read back into any prompt.
+
+    [Durable_fact_store] is the Memory OS fact store that
+    [Keeper_memory_os_recall] renders into later turns. A claim written there is
+    what the keeper actually carries forward. *)
+type memory_write_destination =
+  | Turn_scoped_bank
+  | Durable_fact_store
+
+val memory_write_destination : memory_kind -> memory_write_destination
+(** Total. Every kind has exactly one destination; there is no kind the model
+    may name and no store may accept. *)
+
+val bank_writable_memory_kinds : memory_kind list
+(** Kinds whose destination is [Turn_scoped_bank]. This is a property of the
+    bank, not the tool surface: the memory write tool accepts every kind (see
+    [valid_memory_kind_strings]) and routes on the destination. *)
+
 val valid_memory_kind_strings : string list
-val writable_memory_kind_strings : string list
+val bank_writable_memory_kind_strings : string list
 val memory_horizon_of_kind : memory_kind -> string
 val memory_horizon_of_json_opt : Yojson.Safe.t -> string option
 val priority_for_kind : kind:memory_kind -> int

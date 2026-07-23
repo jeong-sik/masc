@@ -10,13 +10,9 @@ type tried_source =
   | Dispatch_table              (** Tool_dispatch.is_registered *)
   | Public_descriptor           (** Keeper_tool_descriptor.find_public *)
   | Alias_internal              (** Keeper_tool_alias.is_known_internal *)
-  | Registry_internal_candidate (** keeper_internal_candidate_tool_names *)
-  | Registry_core_tools         (** effective_core_tools *)
   | Tool_schema                 (** Tool_shard.all_keeper_tool_schemas + inline schemas *)
   | Descriptor_registry         (** Keeper-tool candidate names projected by
                                     Keeper_tool_descriptor.all_descriptors *)
-  | System_internal             (** Tool_catalog_surfaces.is_system_internal_hidden — system-internal
-                                    tools hidden from keeper surfaces but still real/dispatchable *)
 
 (** Resolution outcome for a tool name. *)
 type resolution =
@@ -69,8 +65,3 @@ val canonical_tool_name : string -> string
     observation boundary. Non-observation call sites should use
     [canonical_tool_name] to avoid double-counting. *)
 val canonical_tool_name_observed : string -> string
-
-(** Return a schema-allowed correction when a tool call uses a keeper-internal
-    implementation name whose public alias is the supported LLM surface. *)
-val public_alias_guidance_for_internal_call
-  :  allowed_tool_names:string list -> string -> string option

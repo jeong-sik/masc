@@ -1,7 +1,7 @@
-(** Workspace GC - Heartbeat, Zombie Cleanup, and Garbage Collection.
+(** Workspace heartbeat and explicit garbage collection.
 
     Extracted from workspace.ml for modularity.
-    Contains: heartbeat, cleanup_zombies, gc. *)
+    Contains: heartbeat and gc. *)
 
 open Masc_domain
 open Workspace_utils
@@ -9,12 +9,6 @@ open Workspace_state
 open Workspace_identity
 open Workspace_backlog
 open Workspace_task_id
-
-(** Structured result of zombie cleanup to eliminate string-based parsing at call sites. *)
-type cleanup_zombie_result =
-  | No_agents_dir
-  | No_zombies
-  | Cleaned of { count : int; names : string list; released_tasks : int; skipped : int }
 
 (* Callback refs and types are now in Workspace_hooks. *)
 
@@ -42,220 +36,16 @@ let heartbeat config ~agent_name =
   end else
     Printf.sprintf "Agent %s not found" agent_name
 
-(** Cleanup zombie agents - removes stale agents.
-    [keeper_threshold_sec] and [agent_threshold_sec] control the inactivity
-    window before an agent is considered a zombie. *)
-let cleanup_zombies
-    ?(keeper_threshold_sec = Env_config.Zombie.keeper_threshold_seconds)
-    ?(agent_threshold_sec = Env_config.Zombie.threshold_seconds)
-    config =
-  ensure_initialized config;
-
-  (* agents_dir under .masc/ *)
-  let agents_path = agents_dir config in
-  let scan_paths =
-    try if Sys.file_exists agents_path then [ agents_path ] else [] with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn when is_fd_pressure_exn exn ->
-      Log.Gc.warn
-        "cleanup_zombies: skipping scan while agent directory is unreadable due to FD pressure: %s"
-        (Printexc.to_string exn);
-      []
-  in
-  if scan_paths = [] then
-    No_agents_dir
-  else begin
-    (* Phase 1: Detect zombie agents (no side effects) *)
-    let zombie_entries = ref [] in (* (name, path) list *)
-    List.iter (fun agents_path ->
-      let names =
-        try Some (Sys.readdir agents_path) with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn when is_fd_pressure_exn exn ->
-          Log.Gc.warn
-            "cleanup_zombies: skipping directory %s while FD pressure is active: %s"
-            agents_path
-            (Printexc.to_string exn);
-          None
-      in
-      match names with
-      | None -> ()
-      | Some names ->
-      names |> Array.iter (fun name ->
-        Workspace_query.safe_yield ();
-        if Filename.check_suffix name ".json" then begin
-          let path = Filename.concat agents_path name in
-          match read_agent_with_repair_result config path with
-          | Ok agent
-            when (not (List.exists (fun (n, _) -> n = agent.name) !zombie_entries)) &&
-                 Workspace_resilience.Zombie.is_zombie_for_agent
-                   ~keeper_threshold_sec
-                   ~agent_threshold_sec
-                   ~agent_type:agent.agent_type
-                   ?agent_meta:agent.meta
-                   ~agent_name:agent.name
-                   agent.last_seen ->
-              zombie_entries := (agent.name, path) :: !zombie_entries
-          | Ok _ -> () (* not a zombie, skip *)
-          | Error (Agent_fd_pressure exn) ->
-              Log.Gc.warn
-                "cleanup_zombies: skipping quarantine for %s because read failed under FD pressure: %s"
-                name
-                (Printexc.to_string exn)
-          | Error (Agent_read_error err) ->
-              (* #7947: previously deleted the file outright, losing
-                 current_task/meta with no postmortem trail.  Quarantine
-                 to path.broken-<unix_ms> so operators can inspect the
-                 parse failure.  The .json suffix guard above already
-                 makes the next scan skip .broken-* siblings. *)
-              let ts_ms =
-                int_of_float (Unix.gettimeofday () *. 1000.0)
-              in
-              let quarantine_path =
-                Printf.sprintf "%s.broken-%d" path ts_ms
-              in
-              Log.Gc.warn
-                "quarantining broken agent file %s: %s -> %s"
-                name err
-                (Filename.basename quarantine_path);
-              (try
-                 (try Sys.rename path quarantine_path
-                  with Sys_error _ ->
-                    (* Non-filesystem backend: fall back to delete so the
-                       scan does not loop forever on an unreadable entry. *)
-                    delete_path config path);
-                 ()
-               with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-                 Log.Gc.warn "failed to quarantine broken agent %s: %s"
-                   path (Printexc.to_string exn))
-        end
-      )
-    ) scan_paths;
-
-    if !zombie_entries = [] then
-      No_zombies
-    else begin
-      (* Phase 2: Transition status to Inactive + stop heartbeats + stop keeper fibers.
-         Note: If later phases fail (task release or file deletion), the agent
-         remains in active_agents with an Inactive file. This is intentional:
-         Inactive+in-list is self-healing (next GC cycle cleans up), whereas
-         Active+dead (the old behavior) is invisible to monitoring. *)
-      List.iter (fun (name, path) ->
-        (try
-          match read_agent_with_repair config path with
-          | Ok agent ->
-              let updated = { agent with status = Inactive; last_seen = now_iso () } in
-              write_json config path (agent_to_yojson updated)
-          | Error err -> Log.Gc.warn "gc status update parse error for %s: %s" name err
-        with Sys_error msg -> Log.Gc.warn "gc status update I/O error for %s: %s" name msg);
-        let _stopped = Heartbeat.stop_by_agent ~agent_name:name in
-        (* Stop keeper fiber via hook to prevent zombie tool calls.
-           Without this, the keeper fiber continues running (fiber_stop stays
-           false) and makes tool calls indefinitely after cleanup. *)
-        (try (Atomic.get Workspace_hooks.stop_keeper_fn) name
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn -> Log.Gc.warn "gc stop_keeper_fn error for %s: %s" name (Printexc.to_string exn));
-        ()
-      ) !zombie_entries;
-
-      (* Phase 3: Release tasks — track failures per agent *)
-      let release_failed_agents = ref [] in
-      let released_tasks = ref [] in
-      let backlog = read_backlog config in
-      List.iter (fun (task : task) ->
-        match task.task_status with
-        | Masc_domain.Claimed { assignee; _ }
-        | Masc_domain.InProgress { assignee; _ }
-          when List.exists (fun (n, _) -> n = assignee) !zombie_entries ->
-            (match (Atomic.get Workspace_hooks.force_release_task_fn) config ~agent_name:"keeper-gc" ~task_id:task.id () with
-             | Ok msg -> released_tasks := (task.id, msg) :: !released_tasks
-             | Error e ->
-                 if not (List.mem assignee !release_failed_agents) then
-                   release_failed_agents := assignee :: !release_failed_agents;
-                 log_event config (`Assoc [
-                   ("type", `String "zombie_runtime_error");
-                   ("task_id", `String task.id);
-                   ("agent", `String assignee);
-                   ("error", `String (Masc_domain.masc_error_to_string e));
-                   ("ts", `String (now_iso ()));
-                 ]))
-        | Masc_domain.Claimed _ | Masc_domain.InProgress _
-        | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> ()
-      ) backlog.tasks;
-
-      (* Phase 4: Delete files — skip agents with release failures *)
-      let successfully_cleaned = ref [] in
-      List.iter (fun (name, path) ->
-        if List.mem name !release_failed_agents then
-          Log.Gc.warn "skipping file removal for %s: task release failed" name
-        else begin
-          match Sys.remove path with
-          | () -> successfully_cleaned := name :: !successfully_cleaned
-          | exception Sys_error msg ->
-              Log.Gc.warn "failed to remove zombie agent file %s: %s" path msg
-        end
-      ) !zombie_entries;
-
-      (* Phase 5: Update state — only remove successfully cleaned agents *)
-      if !successfully_cleaned <> [] then begin
-        let _state = update_state config (fun s ->
-          { s with active_agents =
-              List.filter (fun a -> not (List.mem a !successfully_cleaned)) s.active_agents }
-        ) in
-        log_event config (`Assoc [
-          ("type", `String "zombie_cleanup");
-          ("agents", `List (List.map (fun s -> `String s) !successfully_cleaned));
-          ("released_tasks", `Int (List.length !released_tasks));
-          ("skipped", `Int (List.length !zombie_entries - List.length !successfully_cleaned));
-          ("ts", `String (now_iso ()));
-        ])
-      end;
-
-      let total = List.length !zombie_entries in
-      let cleaned = List.length !successfully_cleaned in
-      let skipped = total - cleaned in
-      Cleaned
-        { count = cleaned
-        ; names = !successfully_cleaned
-        ; released_tasks = List.length !released_tasks
-        ; skipped
-        }
-    end
-  end
-
-(** Garbage collection - cleanup zombies, stale tasks, old messages *)
-let gc config ?(days=7) () =
-  let days = max 1 days in
+(** Explicit age-based garbage collection. The caller must choose the retention
+    horizon; this layer has no default retention policy. Agent lifecycle is not
+    part of GC and remains an explicit operator action. *)
+let gc config ~days () =
+  if days < 1 then invalid_arg "Workspace_gc.gc: days must be >= 1";
   ensure_initialized config;
 
   let results = ref [] in
 
-  (* 1. Cleanup zombies *)
-  let zombie_result = cleanup_zombies config in
-  let zombie_str =
-    match zombie_result with
-    | No_agents_dir -> "No agents directory"
-    | No_zombies -> "No zombie agents found"
-    | Cleaned { count; names; released_tasks; skipped } ->
-      let task_note =
-        if released_tasks = 0 then ""
-        else Printf.sprintf ", released %d orphan task(s)" released_tasks
-      in
-      if skipped > 0 then
-        Printf.sprintf
-          "Cleaned %d/%d zombie(s): %s%s (%d skipped due to errors)"
-          count
-          (count + skipped)
-          (String.concat ", " names)
-          task_note
-          skipped
-      else
-        Printf.sprintf "Cleaned up %d zombie agent(s): %s%s" count (String.concat ", " names) task_note
-  in
-  results := zombie_str :: !results;
-
-  (* 2. Archive terminal tasks (Done/Cancelled) older than N days, and
+  (* 1. Archive terminal tasks (Done/Cancelled) older than N days, and
         self-heal any non-terminal task a prior buggy GC pass stranded in the
         archive.
 
@@ -349,7 +139,7 @@ let gc config ?(days=7) () =
       Printf.sprintf "Restored %d non-terminal task(s) from archive" restore_count
       :: !results;
 
-  (* 3. Cleanup old messages - but preserve messages referencing open tasks *)
+  (* 2. Cleanup old messages - but preserve messages referencing open tasks *)
   let messages_path = messages_dir config in
   let old_msg_count = ref 0 in
   let preserved_count = ref 0 in
@@ -408,7 +198,7 @@ let gc config ?(days=7) () =
   end else
     results := Printf.sprintf "No old messages (threshold: %d days)" days :: !results;
 
-  (* 4. Cleanup backend pubsub - no-op for filesystem backend *)
+  (* 3. Cleanup backend pubsub - no-op for filesystem backend *)
   let pubsub_cleanup_count = ref 0 in
   (match backend_cleanup_pubsub config ~days ~max_messages:10000 with
    | Ok count when count > 0 ->
@@ -418,73 +208,7 @@ let gc config ?(days=7) () =
    | Error e ->
        results := Printf.sprintf "Backend pubsub cleanup failed: %s" (Backend_types.show_error e) :: !results);
 
-  (* 5. Cleanup orphan keeper sidecar files (.metrics.jsonl/.memory.jsonl without .json)
-        and orphan date-split metrics directories (<name>/metrics/ without <name>.json) *)
-  let keeper_orphan_count = ref 0 in
-  let pk_dir = Common.keepers_runtime_dir_of_base ~base_path:config.base_path in
-  if Sys.file_exists pk_dir then begin
-    let entries = Sys.readdir pk_dir |> Array.to_list in
-    (* Active keepers = those with a .json config file *)
-    let active_keepers = List.filter_map (fun name ->
-      if Filename.check_suffix name ".json" && String.length name > 0 && name.[0] <> '_' then
-        Some (Filename.chop_suffix name ".json")
-      else None
-    ) entries in
-    (* Find and remove orphan legacy sidecar files *)
-    List.iter (fun name ->
-      (* Skip global files starting with _ (e.g. _alerts.jsonl) *)
-      if String.length name > 0 && name.[0] <> '_' then begin
-        let is_metrics = Filename.check_suffix name ".metrics.jsonl" in
-        let is_memory = Filename.check_suffix name ".memory.jsonl" in
-        if is_metrics || is_memory then begin
-          let suffix = if is_metrics then ".metrics.jsonl" else ".memory.jsonl" in
-          let base = String.sub name 0 (String.length name - String.length suffix) in
-          if not (List.mem base active_keepers) then begin
-            (try Sys.remove (Filename.concat pk_dir name)
-             with Sys_error _ -> ());
-            incr keeper_orphan_count
-          end
-        end
-      end
-    ) entries;
-    (* Find and remove orphan date-split metrics directories *)
-    let rec rmdir_recursive path =
-      if Sys.file_exists path && Sys.is_directory path then begin
-        Array.iter (fun child ->
-          let child_path = Filename.concat path child in
-          if Sys.is_directory child_path then rmdir_recursive child_path
-          else (try Sys.remove child_path with Sys_error _ -> ())
-        ) (Sys.readdir path);
-        (try Unix.rmdir path with Unix.Unix_error _ -> ())
-      end
-    in
-    List.iter (fun name ->
-      if String.length name > 0 && name.[0] <> '_'
-         && not (Filename.check_suffix name ".json")
-         && not (Filename.check_suffix name ".jsonl") then begin
-        let dir_path = Filename.concat pk_dir name in
-        if Sys.file_exists dir_path && Sys.is_directory dir_path then begin
-          let metrics_dir = Filename.concat dir_path "metrics" in
-          if not (List.mem name active_keepers)
-             && Sys.file_exists metrics_dir && Sys.is_directory metrics_dir then begin
-            rmdir_recursive metrics_dir;
-            (* Remove the keeper dir itself if now empty *)
-            (try
-               if Array.length (Sys.readdir dir_path) = 0 then
-                 Unix.rmdir dir_path
-             with Sys_error _ | Unix.Unix_error _ -> ());
-            incr keeper_orphan_count
-          end
-        end
-      end
-    ) entries
-  end;
-  if !keeper_orphan_count > 0 then
-    results := Printf.sprintf "Removed %d orphan keeper sidecar file(s)" !keeper_orphan_count :: !results
-  else
-    results := "No orphan keeper files" :: !results;
-
-  (* 6. Archive completed/interrupted team sessions older than N days *)
+  (* 4. Archive completed/interrupted team sessions older than N days *)
   let session_archive_count = ref 0 in
   let ts_root = Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path) "team-sessions" in
   if Sys.file_exists ts_root && Sys.is_directory ts_root then begin
@@ -522,7 +246,7 @@ let gc config ?(days=7) () =
   else
     results := "No team sessions to archive" :: !results;
 
-  (* 7. Hard-delete board artifacts (via hooks) *)
+  (* 6. Hard-delete board artifacts (via hooks) *)
   let board_artifact_count = (Atomic.get Workspace_hooks.cleanup_board_artifacts_fn) () in
   if board_artifact_count > 0 then
     results :=
@@ -538,7 +262,6 @@ let gc config ?(days=7) () =
     ("old_messages", `Int !old_msg_count);
     ("preserved", `Int !preserved_count);
     ("pubsub_cleaned", `Int !pubsub_cleanup_count);
-    ("keeper_orphans", `Int !keeper_orphan_count);
     ("sessions_archived", `Int !session_archive_count);
     ("board_artifacts", `Int board_artifact_count);
     ("cp_cleanup", `Null);

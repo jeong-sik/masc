@@ -810,9 +810,10 @@ let render_keeper_list (state : state) =
         else
           Ansi.gray ^ "--" ^ Ansi.reset
         in
-        (* Truncate goal to remaining space *)
-        let goal_width = max 10 (cols - 68) in
-        let goal_trunc = fit_width k.k_goal goal_width in
+        let goal_ids_width = max 10 (cols - 68) in
+        let goal_ids_trunc =
+          fit_width (String.concat "," k.k_active_goal_ids) goal_ids_width
+        in
         let name_col = Printf.sprintf "%-16s" k.k_name in
         let gen_col = Printf.sprintf "%5d" k.k_generation in
         let model_col = Printf.sprintf "%-20s" model_short in
@@ -823,14 +824,14 @@ let render_keeper_list (state : state) =
             ^ " " ^ gen_col
             ^ "  " ^ model_col
             ^ " " ^ proactive_str
-            ^ "  " ^ Ansi.dim ^ goal_trunc ^ Ansi.reset
+            ^ "  " ^ Ansi.dim ^ goal_ids_trunc ^ Ansi.reset
           else
             " "
             ^ "  " ^ name_col
             ^ " " ^ gen_col
             ^ "  " ^ model_col
             ^ " " ^ proactive_str
-            ^ "  " ^ Ansi.dim ^ goal_trunc ^ Ansi.reset
+            ^ "  " ^ Ansi.dim ^ goal_ids_trunc ^ Ansi.reset
         in
         Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
           Ansi.gray Ansi.box_v Ansi.reset
@@ -894,7 +895,8 @@ let render_keeper_detail (state : state) =
 
     (* Goals section *)
     add_section "Goals";
-    add_row "Goal:" (fit_width k.k_goal (inner - 26));
+    add_row "Active Goal IDs:"
+      (fit_width (String.concat ", " k.k_active_goal_ids) (inner - 26));
     add_empty ();
 
     (* Live Context section (Phase 2) *)
@@ -925,9 +927,7 @@ let render_keeper_detail (state : state) =
     add_row "Total Cost:" (Printf.sprintf "$%.4f" k.k_total_cost_usd);
     add_row "Last Turn:" (short_ts k.k_last_turn_ts);
     add_row "Compactions:" (string_of_int k.k_compaction_count);
-    add_row "Compaction Gate:" (Printf.sprintf "%.0f%%" (k.k_compaction_ratio_gate *. 100.0));
     add_row "Context Budget:" (string_of_int k.k_context_budget);
-    add_row "Handoff Threshold:" (Printf.sprintf "%.0f%%" (k.k_handoff_threshold *. 100.0));
     add_empty ();
 
     (* Behavior section *)

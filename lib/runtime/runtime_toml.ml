@@ -221,48 +221,14 @@ let parse_capabilities ~(path : string) (tbl : Otoml.t) : Runtime_schema.capabil
           path
           key
   in
-  let string_list_field key =
-    match Otoml.find_opt tbl Fun.id [ key ] with
-    | None -> []
-    | Some v ->
-      (* RFC-0145 — narrow to the only exception [Otoml.get_array]
-         raises on a wrong-typed value.  Unrelated runtime exceptions
-         propagate. *)
-      (try Otoml.get_array Otoml.get_string v with
-       | Otoml.Type_error _ ->
-         Log.Runtime.warn "runtime_toml: %s.capabilities.%s — expected string array, ignoring"
-             path
-             key;
-         [])
-  in
-  let positive_int_opt_field key =
-    (* Reject non-positive values at parse time: a cap of 0 or -N would
-       clamp every attempt to a meaningless budget downstream. *)
-    match Otoml.find_opt tbl Otoml.get_integer [ key ] with
-    | None -> None
-    | Some n when n > 0 -> Some n
-    | Some n ->
-      Log.Runtime.warn "runtime_toml: %s.capabilities.%s = %d — expected positive integer, ignoring"
-          path
-          key
-          n;
-      None
-  in
   List.iter
     warn_deprecated
     [ "supports-runtime-mcp-tools"
     ; "supports-runtime-tool-events"
-    ; "supports-runtime-mcp-http-headers"
     ];
   { Runtime_schema.supports_inline_tools = b "supports-inline-tools"
-  ; requires_per_keeper_bridging_for_bound_actor_tools =
-      b "requires-per-keeper-bridging-for-bound-actor-tools"
-  ; identity_runtime_mcp_header_keys =
-      string_list_field "identity-runtime-mcp-header-keys"
   ; argv_prompt_preflight = b "argv-prompt-preflight"
   ; uses_anthropic_caching = b "uses-messages-caching"
-  ; max_turns_per_attempt = positive_int_opt_field "max-turns-per-attempt"
-  ; tolerates_bound_actor_fallback = b "tolerates-bound-actor-fallback"
   }
 ;;
 
@@ -960,114 +926,6 @@ let parse_keeper_assignments (toml : Otoml.t)
       ]
 ;;
 
-(* [\[pause\]] section → typed [Runtime_schema.pause_threshold].
-
-   Fails soft: a malformed value (e.g. wrong type) is logged + ignored rather
-   than aborting config load, mirroring the existing [runtime].media_failover
-   pattern above. Missing section / missing keys → [pause_threshold_default],
-   which mirrors the legacy fallback values in [Keeper_behavioral_regime.ml].
-   Operational pause paths consume this through [Runtime.pause_threshold]. *)
-let parse_pause_threshold (toml : Otoml.t) : Runtime_schema.pause_threshold =
-  let read_field ~path ~key ~getter =
-    try
-      Ok (Otoml.find_opt toml getter [ path; key ])
-    with
-    | Otoml.Type_error msg ->
-      Error (Printf.sprintf "[%s].%s: %s" path key msg)
-  in
-  let pick_int ~path ~key ~default =
-    match read_field ~path ~key ~getter:Otoml.get_integer with
-    | Ok (Some v) -> v
-    | Ok None -> default
-    | Error msg ->
-      Log.Runtime.warn
-        "runtime_toml: %s — using default %d" msg default;
-      default
-  in
-  let pick_float ~path ~key ~default =
-    match read_field ~path ~key ~getter:Otoml.get_float with
-    | Ok (Some v) -> v
-    | Ok None -> default
-    | Error msg ->
-      Log.Runtime.warn
-        "runtime_toml: %s — using default %g" msg default;
-      default
-  in
-  let d = Runtime_schema.pause_threshold_default in
-  { turn_fail_streak_threshold =
-      pick_int
-        ~path:"pause" ~key:"turn_fail_streak_threshold"
-        ~default:d.turn_fail_streak_threshold
-  ; recent_restart_window_sec =
-      pick_float
-        ~path:"pause" ~key:"recent_restart_window_sec"
-        ~default:d.recent_restart_window_sec
-  ; recent_restart_count_threshold =
-      pick_int
-        ~path:"pause" ~key:"recent_restart_count_threshold"
-        ~default:d.recent_restart_count_threshold
-  ; tool_failure_count_threshold =
-      pick_int
-        ~path:"pause" ~key:"tool_failure_count_threshold"
-        ~default:d.tool_failure_count_threshold
-  ; tool_failure_ratio_threshold =
-      pick_float
-        ~path:"pause" ~key:"tool_failure_ratio_threshold"
-        ~default:d.tool_failure_ratio_threshold
-  }
-;;
-
-(* [\[pacing\]] section → typed [Runtime_schema.pacing] (RFC-0313 W3).
-
-   Numeric knobs fail soft like [\[pause\]] above (warn + default). [mode]
-   fails closed: an unknown value aborts config load instead of defaulting,
-   because a typo such as "enfoce" silently reverting the W3 behavior flip
-   to shadow is exactly the permissive-default failure the flip removes.
-   Operational callers read this through [Runtime.pacing]. *)
-let parse_pacing (toml : Otoml.t)
-  : (Runtime_schema.pacing, parse_error list) result
-  =
-  let d = Runtime_schema.pacing_default in
-  let read_field ~key ~getter =
-    try Ok (Otoml.find_opt toml getter [ "pacing"; key ]) with
-    | Otoml.Type_error msg -> Error (Printf.sprintf "[pacing].%s: %s" key msg)
-  in
-  let pick_float ~key ~default =
-    match read_field ~key ~getter:Otoml.get_float with
-    | Ok (Some v) -> v
-    | Ok None -> default
-    | Error msg ->
-      Log.Runtime.warn "runtime_toml: %s — using default %g" msg default;
-      default
-  in
-  let mode_result =
-    match read_field ~key:"mode" ~getter:Otoml.get_string with
-    | Ok None -> Ok d.Runtime_schema.pacing_mode
-    | Ok (Some "shadow") -> Ok Runtime_schema.Pacing_shadow
-    | Ok (Some "enforce") -> Ok Runtime_schema.Pacing_enforce
-    | Ok (Some other) ->
-      Error
-        (error
-           "pacing.mode"
-           (Printf.sprintf
-              "unknown pacing mode %S (expected \"shadow\" or \"enforce\")"
-              other))
-    | Error msg -> Error (error "pacing.mode" msg)
-  in
-  match mode_result with
-  | Error _ as e -> e
-  | Ok pacing_mode ->
-    Ok
-      { Runtime_schema.pacing_mode
-      ; pacing_base_sec =
-          pick_float ~key:"base_sec" ~default:d.Runtime_schema.pacing_base_sec
-      ; pacing_multiplier =
-          pick_float ~key:"multiplier" ~default:d.Runtime_schema.pacing_multiplier
-      ; pacing_cap_sec =
-          pick_float ~key:"cap_sec" ~default:d.Runtime_schema.pacing_cap_sec
-      }
-;;
-
 type runtime_section =
   { default_runtime_id : string option
   ; librarian_runtime_id : string option
@@ -1164,6 +1022,9 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
            | "lanes" ->
              (* Parsed by [parse_lanes] after the runtime section is shaped. *)
              section, errs
+           | "exact_output_lanes" ->
+             (* Parsed separately as raw OAS target references. *)
+             section, errs
            | _ when is_toml_table value ->
              (* [runtime.<profile>] tables are reserved for runtime profiles and
                 intentionally ignored by this parser layer. *)
@@ -1176,8 +1037,9 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
                    (Printf.sprintf
                       "unknown [runtime] key %S; expected default, librarian, \
                        structured_judge, hitl_summary, cross_verifier, \
-                       media_failover, [runtime.lanes], [runtime.assignments], \
-                       or a table-valued [runtime.<profile>]"
+                       media_failover, [runtime.lanes], \
+                       [runtime.exact_output_lanes], [runtime.assignments], or a \
+                       table-valued [runtime.<profile>]"
                       key) )
         )
         (empty_runtime_section, [])
@@ -1244,6 +1106,93 @@ let parse_lanes (toml : Otoml.t) : (Runtime_schema.lane_decl list, parse_error l
     Error (error "runtime.lanes" "[runtime.lanes] must be a table of lane tables")
 ;;
 
+let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
+  : (Runtime_schema.exact_output_lane_decl, parse_error list) result
+  =
+  let path = Printf.sprintf "runtime.exact_output_lanes.%s" id in
+  let unknown_key_errors =
+    match tbl with
+    | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+      List.concat_map
+        (fun (key, _) ->
+           if String.equal key "slots"
+           then []
+           else
+             error
+               (path ^ "." ^ key)
+               (Printf.sprintf
+                  "unknown exact-output lane key %S; expected slots"
+                  key))
+        entries
+    | _ -> []
+  in
+  let slots_result =
+    match Otoml.find_opt tbl Fun.id [ "slots" ] with
+    | None -> Error (error (path ^ ".slots") "exact-output lane slots is required")
+    | Some value ->
+      (try Ok (Otoml.get_array Otoml.get_string value) with
+       | Otoml.Type_error msg ->
+         Error
+           (error
+              (path ^ ".slots")
+              (Printf.sprintf
+                 "exact-output lane slots must be an array of opaque strings; got %s"
+                 msg)))
+  in
+  match unknown_key_errors, slots_result with
+  | _ :: _, Error slot_errors -> Error (slot_errors @ unknown_key_errors)
+  | _ :: _, Ok _ -> Error unknown_key_errors
+  | [], (Error _ as error) -> error
+  | [], Ok [] -> Error (error path "exact-output lane must have at least one slot")
+  | [], Ok slot_ids ->
+    let rec validate position seen = function
+      | [] -> Ok { Runtime_schema.id; slot_ids }
+      | slot_id :: rest ->
+        if String.equal (String.trim slot_id) ""
+        then
+          Error
+            (error
+               (path ^ ".slots")
+               (Printf.sprintf "exact-output slot %d must not be blank" position))
+        else if List.exists (String.equal slot_id) seen
+        then
+          Error
+            (error
+               (path ^ ".slots")
+               (Printf.sprintf
+                  "exact-output slot %d duplicates %S"
+                  position
+                  slot_id))
+        else validate (position + 1) (slot_id :: seen) rest
+    in
+    validate 1 [] slot_ids
+;;
+
+let parse_exact_output_lanes (toml : Otoml.t)
+  : (Runtime_schema.exact_output_lane_decl list, parse_error list) result
+  =
+  match Otoml.find_opt toml Fun.id [ "runtime"; "exact_output_lanes" ] with
+  | None -> Ok []
+  | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
+    partition_results
+      (List.map
+         (fun (id, value) ->
+            match value with
+            | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
+              parse_exact_output_lane ~id value
+            | _ ->
+              Error
+                (error
+                   (Printf.sprintf "runtime.exact_output_lanes.%s" id)
+                   "exact-output lane must be a table"))
+         entries)
+  | Some _ ->
+    Error
+      (error
+         "runtime.exact_output_lanes"
+         "[runtime.exact_output_lanes] must be a table of lane tables")
+;;
+
 let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) result =
   let providers_result = parse_providers toml in
   let models_result = parse_models toml in
@@ -1251,7 +1200,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
   let assignments_result = parse_keeper_assignments toml in
   let bindings_result = parse_bindings toml in
   let lanes_result = parse_lanes toml in
-  let pacing_result = parse_pacing toml in
+  let exact_output_lanes_result = parse_exact_output_lanes toml in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let all_errors =
     errs providers_result
@@ -1260,7 +1209,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     @ errs assignments_result
     @ errs bindings_result
     @ errs lanes_result
-    @ errs pacing_result
+    @ errs exact_output_lanes_result
   in
   if all_errors <> []
   then Error all_errors
@@ -1281,10 +1230,11 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     let lane_decls =
       extract_after_all_errors_guard ~label:"lanes" lanes_result
     in
-    let pacing =
-      extract_after_all_errors_guard ~label:"pacing" pacing_result
+    let exact_output_lane_decls =
+      extract_after_all_errors_guard
+        ~label:"exact_output_lanes"
+        exact_output_lanes_result
     in
-    let pause_threshold = parse_pause_threshold toml in
     Ok
       { Runtime_schema.providers
       ; models
@@ -1296,9 +1246,8 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
       ; cross_verifier_runtime_id = runtime_section.cross_verifier_runtime_id
       ; keeper_assignments
       ; media_failover = runtime_section.media_failover
-      ; pause_threshold
-      ; pacing
       ; lane_decls
+      ; exact_output_lane_decls
       })
 ;;
 

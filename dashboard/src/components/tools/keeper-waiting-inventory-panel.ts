@@ -40,6 +40,8 @@ export function stateTone(state: string | null | undefined): StatusChipTone {
 export function sourceTone(source: string | null | undefined): StatusChipTone {
   switch (source) {
     case 'read_error':
+    case 'chat_queue_recovery_required':
+    case 'chat_queue_persistence_blocked':
       return 'bad'
     case 'hitl_pending':
     case 'operator_pending_confirm':

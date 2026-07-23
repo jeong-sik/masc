@@ -23,7 +23,7 @@ echo "1️⃣ Pre-check..."
 BEFORE_TESTS=0
 if [ "$RUN_FULL_TESTS" = "1" ]; then
   BEFORE_TESTS=$(
-    CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
+    CI_TEST_HEARTBEAT_SEC=30 \
       "$REPO_DIR/scripts/ci-run-tests.sh" \
       "$REPO_DIR/scripts/dune-local.sh test" 2>&1 | grep -c "Test Successful" || echo "0"
   )
@@ -46,7 +46,7 @@ FAILED=0
 if [ "$RUN_FULL_TESTS" = "1" ]; then
   echo "3️⃣ Testing full suite..."
   TEST_OUTPUT=$(
-    CI_TEST_TIMEOUT_SEC=1200 CI_TEST_HEARTBEAT_SEC=30 \
+    CI_TEST_HEARTBEAT_SEC=30 \
       "$REPO_DIR/scripts/ci-run-tests.sh" \
       "$REPO_DIR/scripts/dune-local.sh test" 2>&1 || true
   )

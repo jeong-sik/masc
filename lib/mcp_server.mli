@@ -14,8 +14,8 @@
       themed-SVG icon helper.
     - {b Server state} — the runtime record threaded
       through every request handler.  [Eio.Switch.t] and
-      friends are kept optional so the legacy non-Eio path
-      ({!create_state}) still compiles.
+      friends are kept optional for explicit pure test/replay
+      construction through {!For_testing.create_state}.
     - {b SSE broadcast} — atomic callback ref consumed by
       the HTTP / SSE transport.
 
@@ -172,8 +172,25 @@ val schema_markdown : string
 
 (** {1 Server state} *)
 
-type server_state = {
-  workspace_config : Workspace.config Atomic.t;
+type publication_recovery_runtime
+(** Opaque live handle. The handle identity is stable for the process-lifetime
+    workspace while its private state performs one typed initialization
+    transition. Callers can observe it but cannot mutate the cell. *)
+type publication_recovery_runtime_snapshot
+
+type workspace_scope = private
+  { config : Workspace.config
+  ; publication_recovery : publication_recovery_runtime
+  }
+(** One immutable snapshot of the active workspace configuration carrying the
+    same process-lifetime recovery handle. Runtime availability and the
+    registry are one atomic fact inside that handle.
+    {!For_testing.create_state} carries the explicit [Non_runtime] state. *)
+
+type workspace_runtime
+
+type server_state = private {
+  workspace_runtime : workspace_runtime;
   session_registry : Session.registry;
   on_sse_broadcast :
     (Yojson.Safe.t -> unit) option Atomic.t;
@@ -185,23 +202,102 @@ type server_state = {
   net : Eio_context.eio_net option;
 }
 (** Runtime state threaded through every request handler.
-    [workspace_config] is stored in an atomic reference so
-    workspace-switch tools can swap backends without tearing reads
-    in concurrent request/background fibers.  Eio handles are
-    [option] because the legacy non-Eio bootstrap ({!create_state})
-    still needs to construct a state without an active switch. *)
+    The opaque [workspace_runtime] owns the one atomic scope and the
+    process-fixed MASC root, so callers can observe snapshots but cannot
+    mutate the cell directly. Eio handles are [option] because
+    {!For_testing.create_state} supports pure replay and test harnesses without
+    an active switch. *)
+
+val workspace_scope : server_state -> workspace_scope
+(** Current immutable workspace runtime snapshot. *)
 
 val workspace_config : server_state -> Workspace.config
 (** Current workspace configuration. *)
 
-val set_workspace_config : server_state -> Workspace.config -> unit
-(** Atomically replace the active workspace configuration. *)
+val publication_recovery_availability_provider :
+  server_state -> Keeper_publication_recovery_availability.provider
+(** Return a stable live provider that reads the opaque process runtime state
+    immediately before each publication Edit/Write effect. The five runtime
+    states remain distinct; no unavailable state is collapsed to [Non_runtime]. *)
 
-val create_state : base_path:string -> server_state
-(** Legacy bootstrap.  Every Eio handle is [None]; the
-    server runs without proc-mgr / fs / clock / net.
-    Used by tools that need a state-shaped value but no
-    runtime fibers (test fixtures, replay harnesses). *)
+val workspace_scope_publication_recovery_snapshot :
+  workspace_scope -> publication_recovery_runtime_snapshot
+(** Perform no filesystem I/O and O(1) work. The projection reads only the
+    registry's maintained aggregate health state; it never traverses discovery
+    rows or demanded owners. *)
+
+val publication_recovery_snapshot_to_health_yojson :
+  publication_recovery_runtime_snapshot -> Yojson.Safe.t
+(** Public-health projection. It exposes only typed aggregate counts and
+    status categories. A failed discovery, invalid historical owner, or blocked
+    exact owner is [degraded], never a global [blocked] gate. The maintained
+    retryable lane-store failure count also degrades health without traversing
+    owners. Owner identities, filesystem paths, exceptions, backtraces, and
+    nested reconciliation evidence remain internal. *)
+
+type workspace_switch_error =
+  | Workspace_masc_root_mismatch of
+      { runtime_root : string
+      ; requested_root : string
+      }
+
+val workspace_switch_error_to_string : workspace_switch_error -> string
+
+val validate_workspace_config :
+  server_state -> Workspace.config -> (unit, workspace_switch_error) result
+(** Pure process-root validation shared by workspace preparation and
+    {!set_workspace_config}. *)
+
+val set_workspace_config :
+  server_state -> Workspace.config -> (unit, workspace_switch_error) result
+(** Atomically replace only the active workspace projection. The requested
+    {!Workspace.masc_root_dir} must exactly equal the process-fixed runtime
+    root; a mismatch is typed and leaves the previous scope unchanged. This
+    function performs no filesystem I/O. *)
+
+module For_testing : sig
+  type health_count_sum_observation =
+    | Health_count_sum of int
+    | Health_count_negative
+    | Health_count_overflow
+
+  val publication_recovery_health_count_sum
+    :  int list
+    -> health_count_sum_observation
+  (** Deterministic invariant boundary for the aggregate health projection. *)
+
+  val publication_recovery_identity_projection_failure_health
+    :  exn
+    -> Yojson.Safe.t
+  (** Drive the production owner-identity projection settlement through an
+      injected failure and return its public health projection. *)
+
+  val publication_recovery_registry
+    :  server_state
+    -> Fs_compat.Publication_recovery.registry option
+  (** Test-only exact registry access. Production Keeper callers must carry the
+      live provider and may not snapshot the registry. *)
+
+  val create_state : base_path:string -> server_state
+  (** Non-runtime state. Every Eio handle and the publication registry are
+      unavailable through their accessors, and publication recovery is the
+      typed [Non_runtime] state. This constructor is isolated from the
+      production bootstrap surface. *)
+
+  type publication_recovery_runtime_observation =
+    | Runtime_initializing
+    | Runtime_available
+    | Runtime_unavailable
+    | Runtime_initialization_crashed
+    | Runtime_non_runtime
+
+  val publication_recovery_runtime_observation :
+    server_state -> publication_recovery_runtime_observation
+
+  val await_publication_recovery_initialization : server_state -> unit
+  (** Await only the one registry-open settlement. Discovery and exact owner
+      work are deliberately outside this test-only boundary. *)
+end
 
 val create_state_eio :
   sw:Eio.Switch.t ->
@@ -215,7 +311,14 @@ val create_state_eio :
 (** Production bootstrap.  Wires every Eio handle into
     [Some], starts the [Session] actor consumer, starts
     the {!Runtime_observation} actor, and installs the
-    Subscriptions notification harness. *)
+    Subscriptions notification harness. Publication recovery publishes typed
+    [Initializing] state before a single child yields, opens the process-lifetime
+    registry, and performs child-name discovery. Exact owner
+    inspection/reconciliation remains demand-driven by lane opening; startup
+    performs no owner fan-out. The discovery implementation currently uses
+    [Eio.Path.read_dir], whose in-fiber sort is proportional to directory size;
+    this API therefore promises asynchronous state publication, not a bounded
+    scheduler slice for arbitrarily large directories. *)
 
 (** {1 SSE broadcast} *)
 

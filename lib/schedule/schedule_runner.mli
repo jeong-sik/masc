@@ -7,15 +7,13 @@
 
 type signal_kind =
   | Due_candidate
-  | Due_blocked_approval
 
 type wake_signal =
-  { signal_id : string
+  { occurrence_id : Schedule_occurrence_id.t
   ; kind : signal_kind
   ; schedule_id : string
   ; emitted_at : float
   ; due_at : float
-  ; risk_class : Schedule_domain.risk_class
   ; payload_digest : string
   ; payload : Yojson.Safe.t
   }
@@ -34,19 +32,25 @@ and dispatch_status =
   | Dispatch_start_rejected
 
 and dispatch_result =
-  { schedule_id : string
+  { occurrence_id : Schedule_occurrence_id.t
+  ; schedule_id : string
   ; status : dispatch_status
   ; detail : Yojson.Safe.t option
   ; error : string option
   }
+
+type consumer_dispatch_error =
+  | Retryable_dispatch_failure of string
+  | Terminal_dispatch_rejection of string
 
 type consumer =
   { accepts : Schedule_domain.schedule_request -> (unit, string) result
   ; dispatch :
       Workspace_utils.config ->
       now:float ->
+      wake_signal ->
       Schedule_domain.schedule_request ->
-      (Yojson.Safe.t, string) result
+      (Yojson.Safe.t, consumer_dispatch_error) result
   }
 
 type runner_error =
@@ -66,8 +70,9 @@ val wake_signal_to_yojson : wake_signal -> Yojson.Safe.t
 val wake_signal_of_yojson : Yojson.Safe.t -> (wake_signal, string) result
 
 val read_recent_signals :
-  Workspace_utils.config -> int -> wake_signal list
-(** Read at most [n] recent durable wake signals in chronological order. *)
+  Workspace_utils.config -> int -> (wake_signal list, string) result
+(** Read at most [n] recent durable wake signals in chronological order.
+    Malformed persisted rows are returned as an explicit decode error. *)
 
 val tick :
   ?consumer:consumer ->
@@ -75,8 +80,8 @@ val tick :
   now:float ->
   (tick_result, runner_error) result
 (** Refresh due state and append at-most-once generic wake signals for newly
-    observable due work or due approval blockers. Recurring due work is advanced
+    observable due work. Recurring due work is advanced
     after the generic due signal path succeeds when no consumer is installed; a
     consumer dispatch can instead complete/fail the request. Consumer payload
-    rejection is recorded as a failed execution instead of leaving the request
-    due forever. *)
+    rejection is terminal. A typed retryable dispatch failure finishes only its
+    current execution attempt and leaves the schedule [Due] for the next tick. *)

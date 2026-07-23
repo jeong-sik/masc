@@ -22,7 +22,6 @@
 module D = Masc.Keeper_turn_disposition
 module Code = Masc.Keeper_turn_terminal_code
 module Legacy = Masc.Keeper_turn_terminal
-module KTD = Masc.Keeper_turn_driver
 module Registry = Masc.Keeper_registry
 module Unified_types = Masc.Keeper_unified_turn_types
 
@@ -38,7 +37,6 @@ let canonical_app_codes : (string * D.t) list =
   [ "success", D.Success
   ; "external_cancel", D.External_cancel
   ; "turn_wall_clock_timeout", D.Turn_wall_clock_timeout
-  ; "post_commit_ambiguous", D.Post_commit_ambiguous
   ; "provider_error", D.Provider_error (Code.Provider_runtime_error "provider_error")
   ; "unknown_error", D.Unknown { raw_error = "" }
   ]
@@ -57,9 +55,6 @@ let canonical_app_codes : (string * D.t) list =
 let runtime_wire_codes : (string * D.t) list =
   [ "api_error_overloaded", D.Provider_error (Code.Sdk_error "api_error_overloaded")
   ; "api_error_server:502", D.Provider_error (Code.Sdk_error "api_error_server:502")
-  ; ( "agent_error_max_turns_exceeded:turns=10,limit=10"
-    , D.Provider_error (Code.Sdk_error "agent_error_max_turns_exceeded:turns=10,limit=10")
-    )
   ]
 ;;
 
@@ -144,32 +139,6 @@ let round_trippable : (string * D.t) list =
   [ "Success", D.Success
   ; "External_cancel", D.External_cancel
   ; "Turn_wall_clock_timeout", D.Turn_wall_clock_timeout
-  ; "Post_commit_ambiguous", D.Post_commit_ambiguous
-  ; "Completion_contract_unsatisfied", D.Completion_contract_unsatisfied
-  ; "Completion_contract_no_progress", D.Completion_contract_no_progress
-  ; ( "Turn_budget_exhausted/Turns/Oas"
-    , D.Turn_budget_exhausted
-        { detail = Some { dimension = `Turns; source = `Oas_sdk }; used = 10; limit = 10 } )
-  ; ( "Turn_budget_exhausted/WallClock/User"
-    , D.Turn_budget_exhausted
-        { detail = Some { dimension = `Wall_clock_seconds; source = `User_config }
-        ; used = 95
-        ; limit = 90
-        } )
-  ; ( "Turn_budget_exhausted/Idle/Keeper"
-    , D.Turn_budget_exhausted
-        { detail = Some { dimension = `Idle_turns; source = `Keeper_runtime }
-        ; used = 3
-        ; limit = 2
-        } )
-  ; (* Detail-less form: the receipt producer
-       ([Runtime_agent.TurnBudgetExhausted {turns_used; limit}]) carries no
-       dimension/source, so [to_wire] emits "turn_budget_exhausted(<used>/<limit>)"
-       and [of_wire] round-trips it to [detail = None]. This is the form whose
-       drift (#22618 colon producer vs paren consumer) misreported the dashboard
-       budget state. *)
-    ( "Turn_budget_exhausted/detail-less"
-    , D.Turn_budget_exhausted { detail = None; used = 1070; limit = 1070 } )
   ; "Unknown empty", D.Unknown { raw_error = "" }
   ; "Unknown raw", D.Unknown { raw_error = "fresh_unmapped_label" }
   ; (* Runtime wires that Code.of_wire recognises losslessly (no payload
@@ -177,131 +146,9 @@ let round_trippable : (string * D.t) list =
     "Provider_error/Heartbeat", D.Provider_error Code.Heartbeat_failures
   ; "Provider_error/Turn_failures", D.Provider_error Code.Turn_failures
   ; "Provider_error/Storm", D.Provider_error Code.Stale_termination_storm
-  ; "Provider_error/FleetBatch", D.Provider_error Code.Stale_fleet_batch
-  ; "Provider_error/TurnOverflow", D.Provider_error Code.Turn_overflow_pause
-  ; "Provider_error/TurnLivelock", D.Provider_error Code.Turn_livelock_pause
+  ; "Provider_error/TurnOverflow", D.Provider_error Code.Turn_overflow_failure
   ; "Provider_error/Fiber", D.Provider_error Code.Fiber_unresolved
   ]
-;;
-
-(* Documented lossy Turn_budget_exhausted wires — fall back to
-   [Unknown { raw_error = original }] per the parser's fail-closed
-   contract. The original wire is preserved verbatim for diagnostic
-   surfacing so a producer using a stale dimension tag does not silently
-   land in a typed bucket. *)
-let turn_budget_lossy_wires : (string * string) list =
-  [ ( "Turn_budget_exhausted unknown dimension"
-    , "turn_budget_exhausted(galactic:oas_sdk:10/10)" )
-  ; ( "Turn_budget_exhausted unknown source"
-    , "turn_budget_exhausted(turns:galactic:10/10)" )
-  ; ( "Turn_budget_exhausted malformed counts"
-    , "turn_budget_exhausted(turns:oas_sdk:notanumber/10)" )
-  ; ( "Turn_budget_exhausted missing parens"
-    , "turn_budget_exhausted turns:oas_sdk:10/10" )
-  ; ( "Turn_budget_exhausted missing close paren"
-    , "turn_budget_exhausted(turns:oas_sdk:10/10" )
-  ; ( "Turn_budget_exhausted extra count segment"
-    , "turn_budget_exhausted(turns:oas_sdk:10/10/11)" )
-  ; (* Partial tag set (dimension without source) is a mixed form the grammar
-       never produces: dimension/source are all-or-nothing. The 2-segment split
-       matches neither the full-detail [a;b;c] nor the detail-less [a] arm, so it
-       fails closed rather than landing half-tagged. *)
-    ( "Turn_budget_exhausted partial tag (dim, no source)"
-    , "turn_budget_exhausted(turns:10/10)" )
-  ]
-;;
-
-let test_turn_budget_lossy_wires_fail_closed () =
-  List.iter
-    (fun (label, wire) ->
-       match D.of_wire wire with
-       | D.Unknown { raw_error } ->
-         Alcotest.(check string)
-           (label ^ " preserves wire verbatim")
-           wire
-           raw_error
-       | other ->
-         Alcotest.failf "%s expected Unknown, got %a" label D.pp other)
-    turn_budget_lossy_wires
-;;
-
-(* Consumer-side grammar pin: the exact wire strings the dashboard /
-   runtime-trust snapshot feed into [of_wire]. Asserts the parsed fields
-   directly (not just round-trip) so the detail-less producer form and the
-   full-detail form both map to the documented typed value. *)
-let test_of_wire_parses_both_forms () =
-  (match D.of_wire "turn_budget_exhausted(1070/1070)" with
-   | D.Turn_budget_exhausted { detail = None; used; limit } ->
-     Alcotest.(check int) "detail-less used" 1070 used;
-     Alcotest.(check int) "detail-less limit" 1070 limit
-   | other ->
-     Alcotest.failf "detail-less form: expected None/None fields, got %a" D.pp other);
-  match D.of_wire "turn_budget_exhausted(turns:oas_sdk:8/8)" with
-  | D.Turn_budget_exhausted
-      { detail = Some { dimension = `Turns; source = `Oas_sdk }; used; limit } ->
-    Alcotest.(check int) "full-detail used" 8 used;
-    Alcotest.(check int) "full-detail limit" 8 limit
-  | other ->
-    Alcotest.failf "full-detail form: expected Some/Some fields, got %a" D.pp other
-;;
-
-(* [is_turn_budget_exhausted_wire] is the predicate the dashboard /
-   runtime-trust consumers call. It is strict: only the paren grammar of_wire
-   recognises counts as budget-exhausted. The legacy colon form is NOT detected
-   (no migration; colon receipts read as not-budget and self-heal next turn).
-   This pins the removal of the #22549 colon-tolerant fallback. *)
-let test_is_turn_budget_exhausted_wire_strict () =
-  Alcotest.(check bool)
-    "paren detail-less detected"
-    true
-    (D.is_turn_budget_exhausted_wire "turn_budget_exhausted(8/8)");
-  Alcotest.(check bool)
-    "paren full-detail detected"
-    true
-    (D.is_turn_budget_exhausted_wire "turn_budget_exhausted(turns:oas_sdk:8/8)");
-  Alcotest.(check bool)
-    "legacy colon NOT detected (strict single grammar)"
-    false
-    (D.is_turn_budget_exhausted_wire "turn_budget_exhausted:8/8");
-  Alcotest.(check bool)
-    "non-budget wire not detected"
-    false
-    (D.is_turn_budget_exhausted_wire "success")
-;;
-
-let test_completion_contract_severity_is_bad () =
-  Alcotest.(check string)
-    "Completion_contract_unsatisfied severity"
-    "bad"
-    (typed_severity_str (D.severity D.Completion_contract_unsatisfied));
-  Alcotest.(check string)
-    "Completion_contract_no_progress severity"
-    "bad"
-    (typed_severity_str (D.severity D.Completion_contract_no_progress))
-;;
-
-let test_turn_budget_exhausted_severity_is_bad () =
-  Alcotest.(check string)
-    "Turn_budget_exhausted severity"
-    "bad"
-    (typed_severity_str
-       (D.severity
-          (D.Turn_budget_exhausted
-             { detail = Some { dimension = `Turns; source = `Oas_sdk }
-             ; used = 10
-             ; limit = 10
-             })))
-;;
-
-let test_completion_contract_next_action () =
-  Alcotest.(check (option string))
-    "Completion_contract_unsatisfied next_action"
-    (Some "inspect_completion_contract")
-    (D.next_action D.Completion_contract_unsatisfied);
-  Alcotest.(check (option string))
-    "Completion_contract_no_progress next_action"
-    (Some "resume_or_inspect_completion_contract")
-    (D.next_action D.Completion_contract_no_progress)
 ;;
 
 let test_round_trip_recognised () =
@@ -355,18 +202,10 @@ let runtime_codes_to_projection : (string * Code.t * D.t) list =
     , Code.Stale_turn_timeout_no_progress
     , D.Turn_wall_clock_timeout )
   ; "Stale_turn_timeout/noop", Code.Stale_turn_timeout_noop, D.Turn_wall_clock_timeout
-  ; ( "Ambiguous/timeout"
-    , Code.Ambiguous_partial_commit_post_commit_timeout
-    , D.Post_commit_ambiguous )
-  ; ( "Ambiguous/failure"
-    , Code.Ambiguous_partial_commit_post_commit_failure
-    , D.Post_commit_ambiguous )
   ; "Heartbeat", Code.Heartbeat_failures, D.Provider_error Code.Heartbeat_failures
   ; "Turn_failures", Code.Turn_failures, D.Provider_error Code.Turn_failures
   ; "Storm", Code.Stale_termination_storm, D.Provider_error Code.Stale_termination_storm
-  ; "FleetBatch", Code.Stale_fleet_batch, D.Provider_error Code.Stale_fleet_batch
-  ; "TurnOverflow", Code.Turn_overflow_pause, D.Provider_error Code.Turn_overflow_pause
-  ; "TurnLivelock", Code.Turn_livelock_pause, D.Provider_error Code.Turn_livelock_pause
+  ; "TurnOverflow", Code.Turn_overflow_failure, D.Provider_error Code.Turn_overflow_failure
   ; ( "Provider_runtime"
     , Code.Provider_runtime_error "p"
     , D.Provider_error (Code.Provider_runtime_error "p") )
@@ -375,8 +214,8 @@ let runtime_codes_to_projection : (string * Code.t * D.t) list =
     , Code.Exception_unhandled "x"
     , D.Provider_error (Code.Exception_unhandled "x") )
   ; ( "Sdk"
-    , Code.Sdk_error "agent_error_max_turns_exceeded:turns=1,limit=1"
-    , D.Provider_error (Code.Sdk_error "agent_error_max_turns_exceeded:turns=1,limit=1") )
+    , Code.Sdk_error "api_error_server:502"
+    , D.Provider_error (Code.Sdk_error "api_error_server:502") )
   ]
 ;;
 
@@ -386,34 +225,6 @@ let test_projection () =
        let actual = D.of_termination_code code in
        Alcotest.(check bool) (label ^ " projection") true (D.equal expected actual))
     runtime_codes_to_projection
-;;
-
-let test_provider_timeout_terminal_is_provider_error () =
-  let err =
-    KTD.sdk_error_of_masc_internal_error
-      (KTD.Provider_timeout
-         { budget_sec = 555.0
-         ; keeper_turn_timeout_sec = 600.0
-         ; estimated_input_tokens = 4302
-         ; source = "first_attempt_adaptive_timeout"
-         ; remaining_turn_budget_sec = Some 45.0
-         ; min_required_sec = 15.0
-         ; phase = "runtime_attempt_watchdog"
-         })
-  in
-  let terminal =
-    Legacy.of_failure
-      ~raw_error:(Agent_sdk.Error.to_string err)
-      err
-  in
-  Alcotest.(check string)
-    "provider timeout terminal code"
-    "provider_timeout"
-    (Legacy.code terminal);
-  Alcotest.(check string)
-    "provider timeout disposition"
-    "provider_timeout"
-    (D.to_wire terminal.disposition)
 ;;
 
 let check_runtime_failure_reason raw_error expected_code =
@@ -443,27 +254,25 @@ let test_registry_failure_reason_preserves_no_provider_runtime_reason () =
     "runtime_exhausted_no_providers_available"
 ;;
 
-let test_registry_failure_reason_completion_contract_is_typed () =
-  let raw_error = "provider returned empty assistant turn" in
-  let terminal = Legacy.of_disposition D.Completion_contract_no_progress in
-  match Unified_types.registry_failure_reason_of_terminal_reason terminal ~raw_error with
-  | Some (Registry.Completion_contract_violation { detail }) ->
-    Alcotest.(check string) "typed completion-contract detail" raw_error detail
-  | Some other ->
-    Alcotest.failf
-      "expected Completion_contract_violation, got %s"
-      (Registry.failure_reason_to_string other)
-  | None -> Alcotest.fail "expected typed completion-contract failure reason"
+let test_registry_failure_reason_does_not_classify_free_form_detail () =
+  let raw_error =
+    Keeper_internal_error.sdk_error_of_masc_internal_error
+      (Keeper_internal_error.Runtime_exhausted
+         { runtime_id = "runtime.opaque_detail"
+         ; reason =
+             Keeper_internal_error.Other_detail
+               "connection refused; HTTP 429; wall-clock timeout"
+         })
+    |> Agent_sdk.Error.to_string
+  in
+  check_runtime_failure_reason raw_error "runtime_exhausted_provider_failure"
 ;;
 
 let empty_turn_state : Unified_types.turn_state =
   { cycle_completed = false
   ; manifest_seq = 0
-  ; post_commit_failure_reason = None
-  ; paused_meta_override = None
   ; current_turn_blocker_info = None
   ; last_execution = None
-  ; last_provider_timeout_budget = None
   ; degraded_retry_info = None
   ; runtime_rotation_attempts = []
   ; failure_reason = None
@@ -521,44 +330,12 @@ let () =
             "parametrised payloads land in Unknown (asymmetric)"
             `Quick
             test_round_trip_lossy_payloads
-        ; Alcotest.test_case
-            "Turn_budget_exhausted malformed wires fail closed"
-            `Quick
-            test_turn_budget_lossy_wires_fail_closed
-        ; Alcotest.test_case
-            "of_wire parses both detail-less and full-detail forms"
-            `Quick
-            test_of_wire_parses_both_forms
-        ; Alcotest.test_case
-            "is_turn_budget_exhausted_wire is strict paren-only"
-            `Quick
-            test_is_turn_budget_exhausted_wire_strict
-        ] )
-    ; ( "completion-contract typed accessors (RFC-0047 PR-2)"
-      , [ Alcotest.test_case
-            "severity is bad"
-            `Quick
-            test_completion_contract_severity_is_bad
-        ; Alcotest.test_case
-            "next_action dispatches to resume/inspect"
-            `Quick
-            test_completion_contract_next_action
-        ] )
-    ; ( "Turn_budget_exhausted typed accessors"
-      , [ Alcotest.test_case
-            "severity is bad"
-            `Quick
-            test_turn_budget_exhausted_severity_is_bad
         ] )
     ; ( "of_termination_code projection"
       , [ Alcotest.test_case
             "every runtime variant projects deterministically"
             `Quick
             test_projection
-        ; Alcotest.test_case
-            "provider timeout is provider error, not turn wall-clock"
-            `Quick
-            test_provider_timeout_terminal_is_provider_error
         ] )
     ; ( "registry failure reason"
       , [ Alcotest.test_case
@@ -566,9 +343,9 @@ let () =
             `Quick
             test_registry_failure_reason_preserves_no_provider_runtime_reason
         ; Alcotest.test_case
-            "completion contract disposition creates typed failure reason"
+            "free-form runtime detail stays generic"
             `Quick
-            test_registry_failure_reason_completion_contract_is_typed
+            test_registry_failure_reason_does_not_classify_free_form_detail
         ] )
     ; ( "turn finalization"
       , [ Alcotest.test_case

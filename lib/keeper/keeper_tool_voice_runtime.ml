@@ -42,6 +42,12 @@ let command_to_string = function
 let command_of_string (s : string) : voice_command option =
   List.find_opt (fun c -> String.equal (command_to_string c) s) all_commands
 
+type external_effect_authorizer =
+  operation:string ->
+  input:Yojson.Safe.t ->
+  continue:(unit -> Keeper_tool_execution.t) ->
+  Keeper_tool_execution.t
+
 type voice_memory_status =
   { recorded : bool
   ; rows_written : int
@@ -88,9 +94,10 @@ let attach_memory_status json status =
   | `Assoc fields -> `Assoc (fields @ memory_status_fields status)
   | other -> `Assoc (("result", other) :: memory_status_fields status)
 
-let handle_speak
+let handle_speak_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
+      ~(authorize_external_effect : external_effect_authorizer)
       ~(args : Yojson.Safe.t)
   =
   let message = Safe_ops.json_string ~default:"" "message" args |> String.trim in
@@ -110,7 +117,10 @@ let handle_speak
     | _ -> None
   in
   if message = ""
-  then error_json "message is required. Good: message='Hello team.'. Bad: message=''."
+  then
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Workflow_rejection
+      (error_json "message is required. Good: message='Hello team.'. Bad: message=''.")
   else (
     match
       ( Eio_context.get_root_switch_opt ()
@@ -123,26 +133,23 @@ let handle_speak
          status="queued" immediately, so the model never saw playback
          complete and re-spoke the same content every sub-turn
          (2026-06-10 sangsu voice repeat incident). *)
-      (match
-         Voice_bridge.agent_speak
-           ~sw
-           ~clock
-           ~net
-           ~agent_id:meta.name
-           ~message
-           ?provider
-           ~priority
-           ?audio_device
-           ()
-       with
-       | Ok json ->
-         let spoken =
-           match Json_util.get_string json "status" with
-           | Some "spoken" -> true
-           | Some _ | None -> false
-         in
-         if spoken
-         then (
+      authorize_external_effect
+        ~operation:(command_to_string Speak)
+        ~input:args
+        ~continue:(fun () ->
+          match
+            Voice_bridge.agent_speak
+              ~sw
+              ~clock
+              ~net
+              ~agent_id:meta.name
+              ~message
+              ?provider
+              ~priority
+              ?audio_device
+              ()
+          with
+          | Ok { Voice_bridge.completion = Voice_bridge.Spoken; payload = json } ->
            (* RFC-0235 P1 3b: record the utterance to the keeper's chat so a
               connected device can read AND hear it, not just the server's
               speakers. The audio clip carries the token of the synthesized
@@ -204,13 +211,20 @@ let handle_speak
                ~execution:"synchronous"
                ~message
            in
-           Yojson.Safe.to_string (attach_memory_status json memory_status))
-         else Yojson.Safe.to_string json
-       | Error err ->
-         Tool_args.error_response_with
-           [ "agent_id", `String meta.name
-           ; "message", `String err
-           ])
+           Keeper_tool_execution.success
+             (Yojson.Safe.to_string (attach_memory_status json memory_status))
+          | Ok
+              { Voice_bridge.completion = Voice_bridge.Dedup_skipped
+              ; payload = json
+              } ->
+            Keeper_tool_execution.success (Yojson.Safe.to_string json)
+          | Error err ->
+            Keeper_tool_execution.failure
+              ~class_:Tool_result.Runtime_failure
+              (Tool_args.error_response_with
+                 [ "agent_id", `String meta.name
+                 ; "message", `String err
+                 ]))
     | _ ->
       let memory_status =
         record_voice_output
@@ -221,27 +235,39 @@ let handle_speak
           ~execution:"text_fallback"
           ~message
       in
-      Yojson.Safe.to_string
-        (attach_memory_status
-           (keeper_text_fallback_json ~agent_id:meta.name ~message)
-           memory_status))
+      Keeper_tool_execution.success
+        (Yojson.Safe.to_string
+           (attach_memory_status
+              (keeper_text_fallback_json ~agent_id:meta.name ~message)
+              memory_status)))
 
-let handle_listen ~(meta : keeper_meta) ~(args : Yojson.Safe.t) () =
+let handle_listen_with_outcome
+      ~(meta : keeper_meta)
+      ~(authorize_external_effect : external_effect_authorizer)
+      ~(args : Yojson.Safe.t)
+      ()
+  =
   let timeout_sec = Safe_ops.json_float ~default:60.0 "timeout_seconds" args in
   let language_code = Safe_ops.json_string_opt "language_code" args in
-  match
-    Voice_bridge.record_and_transcribe
-      ~agent_id:meta.name
-      ~timeout_sec
-      ?language_code
-      ()
-  with
-  | Ok json -> Yojson.Safe.to_string json
-  | Error err ->
-    Tool_args.error_response_with
-      [ "error", `String err
-      ; "agent_id", `String meta.name
-      ]
+  authorize_external_effect
+    ~operation:(command_to_string Listen)
+    ~input:args
+    ~continue:(fun () ->
+      match
+        Voice_bridge.record_and_transcribe
+          ~agent_id:meta.name
+          ~timeout_sec
+          ?language_code
+          ()
+      with
+      | Ok json -> Keeper_tool_execution.success (Yojson.Safe.to_string json)
+      | Error err ->
+        Keeper_tool_execution.failure
+          ~class_:Tool_result.Runtime_failure
+          (Tool_args.error_response_with
+             [ "error", `String err
+             ; "agent_id", `String meta.name
+             ]))
 
 let append_assoc_fields json fields =
   match json with
@@ -260,23 +286,25 @@ let requested_conversation_mode ~(args : Yojson.Safe.t) =
      | Some endpoint -> Ok (Voice_session_manager.Realtime_bridge { endpoint })
      | None ->
        Error
-         (Tool_args.error_response_with
-            [ "message", `String "voice realtime bridge unavailable"
-            ; "error", `String "voice_realtime_bridge_unavailable"
-            ; "requested_conversation_mode", `String "realtime_bridge"
-            ; "required_env", `String Voice_session_manager.realtime_bridge_env
-            ; "fallback_conversation_mode", `String "turn_based"
-            ; "fallback_tool", `String "keeper_voice_session_start"
-            ]))
+         ( Tool_result.Runtime_failure
+         , Tool_args.error_response_with
+             [ "message", `String "voice realtime bridge unavailable"
+             ; "error", `String "voice_realtime_bridge_unavailable"
+             ; "requested_conversation_mode", `String "realtime_bridge"
+             ; "required_env", `String Voice_session_manager.realtime_bridge_env
+             ; "fallback_conversation_mode", `String "turn_based"
+             ; "fallback_tool", `String "keeper_voice_session_start"
+             ] ))
   | Some mode ->
     Error
-      (Tool_args.error_response_with
-         [ "message", `String "invalid voice conversation_mode"
-         ; "error", `String "invalid_voice_conversation_mode"
-         ; "conversation_mode", `String mode
-         ; ( "accepted_modes"
-           , `List [ `String "turn_based"; `String "realtime_bridge" ] )
-         ])
+      ( Tool_result.Workflow_rejection
+      , Tool_args.error_response_with
+          [ "message", `String "invalid voice conversation_mode"
+          ; "error", `String "invalid_voice_conversation_mode"
+          ; "conversation_mode", `String mode
+          ; ( "accepted_modes"
+            , `List [ `String "turn_based"; `String "realtime_bridge" ] )
+          ] )
 
 let voice_agent_capability_fields ~(meta : keeper_meta) =
   let mgr = Keeper_voice_local.get_session_manager () in
@@ -326,27 +354,31 @@ let voice_agent_capability_fields ~(meta : keeper_meta) =
          is transcribed into text before the normal keeper turn." )
   ]
 
-let handle_agent ~(meta : keeper_meta) =
+let handle_agent_with_outcome ~(meta : keeper_meta) =
   match Voice_bridge.get_agent_voice ~agent_id:meta.name with
   | Ok json ->
-    Yojson.Safe.to_string
-      (append_assoc_fields json (voice_agent_capability_fields ~meta))
+    Keeper_tool_execution.success
+      (Yojson.Safe.to_string
+         (append_assoc_fields json (voice_agent_capability_fields ~meta)))
   | Error err ->
-    Tool_args.error_response_with
-      [ "agent_id", `String meta.name
-      ; "message", `String err
-      ]
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Runtime_failure
+      (Tool_args.error_response_with
+         [ "agent_id", `String meta.name
+         ; "message", `String err
+         ])
 
-let handle_sessions () =
+let handle_sessions_with_outcome () =
   let mgr = Keeper_voice_local.get_session_manager () in
   let sessions = Voice_session_manager.list_sessions mgr in
-  Yojson.Safe.to_string
-    (`Assoc
-        [ "session_count", `Int (List.length sessions)
-        ; "sessions", `List (List.map Voice_session_manager.session_to_json sessions)
-        ])
+  Keeper_tool_execution.success
+    (Yojson.Safe.to_string
+       (`Assoc
+           [ "session_count", `Int (List.length sessions)
+           ; "sessions", `List (List.map Voice_session_manager.session_to_json sessions)
+           ]))
 
-let handle_session_start ~(meta : keeper_meta) ~(args : Yojson.Safe.t) =
+let handle_session_start_with_outcome ~(meta : keeper_meta) ~(args : Yojson.Safe.t) =
   let voice =
     Safe_ops.json_string_opt "voice" args
     |> Option.map String.trim
@@ -355,46 +387,65 @@ let handle_session_start ~(meta : keeper_meta) ~(args : Yojson.Safe.t) =
     | _ -> None
   in
   match requested_conversation_mode ~args with
-  | Error response -> response
+  | Error (class_, response) -> Keeper_tool_execution.failure ~class_ response
   | Ok conversation_mode ->
     let mgr = Keeper_voice_local.get_session_manager () in
     let session =
       Voice_session_manager.start_session mgr ~agent_id:meta.name ?voice
         ~conversation_mode ()
     in
-    Yojson.Safe.to_string (Voice_session_manager.session_to_json session)
+    Keeper_tool_execution.success
+      (Yojson.Safe.to_string (Voice_session_manager.session_to_json session))
 
-let handle_session_end ~(meta : keeper_meta) =
+let handle_session_end_with_outcome ~(meta : keeper_meta) =
   let mgr = Keeper_voice_local.get_session_manager () in
   let ended = Voice_session_manager.end_session mgr ~agent_id:meta.name in
-  Yojson.Safe.to_string
-    (`Assoc
-        [ "status", `String (if ended then "ended" else "no_active_session")
-        ; "agent_id", `String meta.name
-        ])
+  Keeper_tool_execution.success
+    (Yojson.Safe.to_string
+       (`Assoc
+           [ "status", `String (if ended then "ended" else "no_active_session")
+           ; "agent_id", `String meta.name
+           ]))
 
-let handle
+let handle_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
+      ~(authorize_external_effect : external_effect_authorizer)
       ~(command : voice_command)
       ~(args : Yojson.Safe.t)
       ()
   =
   match command with
-  | Speak -> handle_speak ~config ~meta ~args
-  | Listen -> handle_listen ~meta ~args ()
-  | Agent -> handle_agent ~meta
-  | Sessions -> handle_sessions ()
-  | Session_start -> handle_session_start ~meta ~args
-  | Session_end -> handle_session_end ~meta
+  | Speak ->
+    handle_speak_with_outcome ~config ~meta ~authorize_external_effect ~args
+  | Listen -> handle_listen_with_outcome ~meta ~authorize_external_effect ~args ()
+  | Agent -> handle_agent_with_outcome ~meta
+  | Sessions -> handle_sessions_with_outcome ()
+  | Session_start -> handle_session_start_with_outcome ~meta ~args
+  | Session_end -> handle_session_end_with_outcome ~meta
 
-let handle_voice_tool
+let handle_voice_tool_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
+      ~(authorize_external_effect : external_effect_authorizer)
       ~(name : string)
       ~(args : Yojson.Safe.t)
       ()
   =
   match command_of_string name with
-  | Some command -> handle ~config ~meta ~command ~args ()
-  | None -> error_json ~fields:[ "tool", `String name ] "unknown_voice_tool"
+  | Some command ->
+    handle_with_outcome ~config ~meta ~authorize_external_effect ~command ~args ()
+  | None ->
+    Keeper_tool_execution.failure
+      ~class_:Tool_result.Runtime_failure
+      (error_json ~fields:[ "tool", `String name ] "unknown_voice_tool")
+
+let handle_voice_tool ~config ~meta ~authorize_external_effect ~name ~args () =
+  (handle_voice_tool_with_outcome
+     ~config
+     ~meta
+     ~authorize_external_effect
+     ~name
+     ~args
+     ())
+    .raw_output

@@ -60,14 +60,7 @@ let metric_telemetry_observe_failures = Otel_metric_store_core.declare_counter "
    most 19 (3 + 8 + 8). *)
 let metric_workspace_telemetry_drop = Otel_metric_store_core.declare_counter "masc_workspace_telemetry_drop_total"
 
-(* #10094: per-caller counter for [Masc_oas_bridge.run_safe]
-   timeouts.  The [caller] string supplied at the run_safe entry
-   point lets the operator see WHICH caller is timing out at
-   WHICH configured budget without grepping warn-level log
-   lines.  Paired with per-caller env-overridable defaults in
-   [Env_config_oas_bridge] so remaining evaluator/advisory callers
-   expose their own budgets instead of hiding behind one generic OAS
-   timeout class. *)
+(* Per-caller observation of genuine inner OAS timeout exceptions. *)
 include Otel_oas_metric_names
 
 
@@ -78,13 +71,9 @@ include Otel_transport_metric_names
 (* Process-level FD gauges — used in init() and update_fd_gauges. *)
 include Otel_core_metric_names
 
-(* RFC-0107 Phase D.4 — piaf-backed connection pool gauges/counters. *)
-let metric_pool_idle_total = "masc_pool_idle_total"
-let metric_pool_inflight_total = "masc_pool_inflight_total"
-let metric_pool_reuse_total = Otel_metric_store_core.declare_counter "masc_pool_reuse_total"
-let metric_pool_evict_total = Otel_metric_store_core.declare_counter "masc_pool_evict_total"
-let metric_pool_evict_failure_total = Otel_metric_store_core.declare_counter "masc_pool_evict_failure_total"
-let metric_pool_create_total = Otel_metric_store_core.declare_counter "masc_pool_create_total"
+(* masc_pool_* series are emitted solely by [Otel_runtime_observables]
+   (computed at exporter tick from [Pool_metrics.current_snapshot]); no
+   store cells are declared here, so there is no 0-cell duplicate. *)
 
 include Otel_policy_metric_names
 
@@ -96,25 +85,6 @@ include Otel_policy_metric_names
    [orphan_drop_window_sec]. Together they let operators tell a
    harmless single-update race from a stuck orphan fiber emitting 30+
    drops per turn. See masc 2026-05-07 verifier-loop incident. *)
-(* Self-healing circuit breaker: incremented each time [sweep_and_recover]
-   auto-resumes a keeper after its back-off timer has elapsed.  A rate >0
-   means the system is self-healing; a zero rate while keepers accumulate
-   [auto_resume_after_sec] means the sweep is not firing or the meta write
-   is failing. Labels: keeper. *)
-(* Phase-3.5 health-gate block: incremented when the supervisor skips
-   auto-resume because the keeper's runtime is unhealthy (failure ratio
-   >= threshold).  Labels: keeper, runtime.  A positive rate means the
-   health probe is actively protecting the fleet from resuming into a
-   still-failing runtime. *)
-(* Positive signal for the Skip_idle + Woken gate-promotion path added
-   by #12271. Increments every time run_smart_heartbeat_gate observes
-   that an external wakeup_keeper call cut a Skip_idle backoff sleep
-   short and the cycle was resumed (KeeperHeartbeat.tla HeartbeatTick
-   action). A zero rate after operator-visible board signals to a Live
-   keeper means the fix path is not firing — either the wakeup never
-   reached the atomic, or a regression silently re-introduced
-   MissedWakeup. Pair with stale_termination_by_class for full
-   positive/negative coverage. Labels: keeper. *)
 (* Task-138: Minimum proactive cadence — observability gauges for consecutive
    idle turns and last productive turn timestamps. Labels: keeper. *)
 (* PR-M (Leak 9): consecutive [provider_timeout] cycle FAILED strikes
@@ -128,17 +98,9 @@ let metric_oas_bridge_unmigrated_payload_kind =
   Otel_metric_store_core.declare_counter "masc_oas_bridge_unmigrated_payload_kind_total"
 ;;
 
-let metric_keeper_context_tool_result_compacted =
-  Otel_metric_store_core.declare_counter "masc_keeper_context_tool_result_compacted_total"
-;;
-
 let metric_process_timeout = Otel_metric_store_core.declare_counter "masc_process_timeout_total"
 let metric_build_identity_probe_failures = Otel_metric_store_core.declare_counter "masc_build_identity_probe_failures_total"
 let metric_distributed_lock_acquire_failed = Otel_metric_store_core.declare_counter "masc_distributed_lock_acquire_failed_total"
-
-let metric_ide_orphan_reads =
-  Otel_metric_store_core.declare_counter "masc_ide_orphan_reads_total"
-;;
 
 (* #10130: boot-time sweep of [save_file_atomic] orphan temp
    files.  Labels: [size_class = empty | with_data].  The
@@ -155,7 +117,7 @@ include Otel_identity_metric_names
 (* Centralized metric constants for inline string replacement.
    keeper_hooks_oas.ml, keeper_guards.ml, keeper_execution_receipt.ml,
    keeper_tool_execute_runtime.ml, keeper_sandbox_docker.ml,
-   keeper_heartbeat_snapshot.ml, keeper_no_progress_loop_detector.ml,
+   keeper_heartbeat_snapshot.ml,
    keeper_unified_metrics.ml. *)
 (* OAS after-turn response metadata was accepted but omitted its response model
    field. This is provider response-shape telemetry, not keeper policy
@@ -168,11 +130,6 @@ let metric_cost_ledger_status = Otel_metric_store_core.declare_counter "masc_cos
    source of truth). Re-binding here would silently shadow without
    changing behavior because the strings are identical, but it makes
    the constant look like it has two declaration sites. *)
-
-(* RFC-0040: sender-side mention dedup decision counter.  Labels:
-   [outcome] in [skipped|passed|no_target|bypassed].  Wired from
-   [lib/workspace.ml] via [Workspace_hooks.mention_dedup_decision_fn]. *)
-let metric_mention_dedup_decisions_total = Otel_metric_store_core.declare_counter "masc_mention_dedup_decisions_total"
 
 (* #20677 incremental-cache health: a boundary past the file size means the
    file shrank/rotated and the reader re-parses from byte 0 (the expensive

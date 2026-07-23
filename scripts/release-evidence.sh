@@ -34,8 +34,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 [[ -x "$BINARY" ]] || { echo "release-evidence: binary not executable: $BINARY" >&2; exit 1; }
-[[ -f config/tool_policy.toml ]] || { echo "release-evidence: config/tool_policy.toml missing" >&2; exit 1; }
-[[ -f oas-models.toml ]] || { echo "release-evidence: oas-models.toml missing" >&2; exit 1; }
+[[ -f config/oas-models-overlay.toml ]] || { echo "release-evidence: config/oas-models-overlay.toml missing" >&2; exit 1; }
 
 mkdir -p "$(dirname "$OUTFILE")"
 out_dir="$(cd "$(dirname "$OUTFILE")" && pwd)"
@@ -224,7 +223,6 @@ copy_install_smoke() {
   mkdir -p "$prefix_dir" "$base_path/.masc/config"
   cp "$BINARY" "$installed_bin"
   chmod +x "$installed_bin"
-  cp config/tool_policy.toml "$base_path/.masc/config/tool_policy.toml"
   cat >"$base_path/.masc/config/runtime.toml" <<'EOF'
 [runtime]
 # The smoke runtime's model id must be known to the OAS capability catalog, or
@@ -237,9 +235,9 @@ copy_install_smoke() {
 # serves /health. The [models.deepseek-v4-flash] block mirrors
 # config/runtime.toml's shape so the runtime resolves; its model id is what the
 # gate matches against the catalog.
-default = "release_evidence.deepseek-v4-flash"
+default = "ollama_cloud.deepseek-v4-flash"
 
-[providers.release_evidence]
+[providers.ollama_cloud]
 display-name = "Release Evidence Smoke"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:9/v1"
@@ -250,7 +248,7 @@ max-context = 32768
 tools-support = true
 streaming = true
 
-[release_evidence.deepseek-v4-flash]
+[ollama_cloud.deepseek-v4-flash]
 is-default = true
 max-concurrent = 1
 EOF
@@ -292,7 +290,6 @@ env \
   MASC_WS_ENABLED=0 \
   MASC_WEBRTC_ENABLED=0 \
   MASC_KEEPER_BOOTSTRAP_ENABLED=false \
-  OAS_MODEL_CATALOG="$repo_root/oas-models.toml" \
   "$BINARY" --base-path "$base_path" --port "$PORT" >"$server_log" 2>&1 &
 SERVER_PID=$!
 

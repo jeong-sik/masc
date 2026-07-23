@@ -30,34 +30,44 @@ let task_state_hint ~(config : Workspace.config) ~(meta : Keeper_meta_contract.k
 let make_tool_bundle
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
+      ~(publication_recovery :
+          Keeper_publication_recovery_availability.turn_context)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?search_fn
-      ?on_tool_called
       ?clock
       ?continuation_channel
+      ?gate_context
+      ?hitl_resolution
       ()
   : tool_bundle
   =
-  (* Phase B baseline (wise-nibbling-lerdorf plan): timestamp before the
-     bundle assembly work begins; observed at function exit. *)
-  let __t0 = Mtime_clock.now () in
   (* PR-3b (#11611 part 1): replace eager [Keeper_turn_sandbox_runtime]
      instances with a factory.  in_playground/cwd are unknown at
      turn-start, so the factory defers
      [Keeper_sandbox_runner.effective_sandbox_profile] resolution until
      each tool call site that already knows its [cwd]. *)
   let turn_sandbox_factory = Some (Keeper_sandbox_factory.create ~config ~meta ()) in
-  let exec_cache = Some (Masc_exec.Exec_cache.create ()) in
-  (* Build Tool.t for the full universe so BM25 and Tool_op can
-     discover tools beyond the current turn-allowed schema.  Progressive disclosure
-     (AllowList filter in before_turn_hook) controls LLM visibility;
-     execute_keeper_tool_call uses can_execute for the execution gate. *)
-  let universe_names = Keeper_tool_dispatch_runtime.keeper_universe_tool_names meta in
-  (* Every model-visible tool is materialized from one explicit descriptor
-     projection. Shard/injected schemas remain descriptor inputs but cannot
-     create a fallback model tool when descriptor coverage is absent. *)
+  let gate_grant =
+    Option.bind hitl_resolution Keeper_gate.cycle_grant_of_resolution
+  in
+  let gate_context_provider =
+    Option.map
+      (fun context () -> Keeper_gate_causal_context.snapshot context)
+      gate_context
+  in
+  let record_gate_result =
+    Option.map
+      (fun context ~operation ~input result ->
+         Keeper_gate_causal_context.record_tool_result
+           context
+           ~operation
+           ~input
+           result)
+      gate_context
+  in
+  (* Every descriptor-declared model tool is materialized. The turn hook sends
+     this exact list to OAS without per-Keeper or per-turn reduction. *)
   let model_visible_descriptors = Keeper_tool_descriptor.model_visible_descriptors () in
-  let failure_counts = create_failure_counts () in
   (* The handler dispatches with
      [~name:descriptor.internal_name] so all telemetry SSOT remains internal;
      exactly one projected Tool.schema.name is model-visible.
@@ -68,21 +78,22 @@ let make_tool_bundle
       (fun (descriptor : Keeper_tool_descriptor.t) ->
          let internal = descriptor.internal_name in
          Keeper_tool_descriptor.keeper_model_names descriptor
-         |> List.filter (fun model_name -> List.mem model_name universe_names)
          |> List.map (fun model_name ->
              let h =
                Keeper_tools_oas_handler.make_keeper_tool_handler
                  ~name:internal
                  ~input_schema:descriptor.input_schema
                  ~config
-                   ~meta
-                   ~ctx_snapshot
+                 ~meta
+                 ~publication_recovery
+                 ~ctx_snapshot
                    ?turn_sandbox_factory
-                   ~exec_cache
                  ?search_fn
-                 ?on_tool_called
                  ?clock
                  ?continuation_channel
+                 ?gate_context:gate_context_provider
+                 ?gate_grant
+                 ?record_gate_result
                  ~pre_validate_input:(fun input ->
                    match
                      Keeper_tool_descriptor_resolution.validate_public_input_for_tool_call
@@ -93,49 +104,50 @@ let make_tool_bundle
                  | None -> Ok input)
                  ~translate_input:descriptor.translate
                  ~validate_translated_input:descriptor.validate_translated_input
-                 ~failure_counts
                  ()
              in
-             (* The projected model name may differ from the internal route,
-                so derive OAS metadata from the internal handler identity. *)
-             let oas_descriptor = Tool_bridge.oas_descriptor_of_masc_tool internal in
              let description =
                match descriptor.model_description_projection with
                | Keeper_tool_descriptor.Static_description -> descriptor.description
                | Keeper_tool_descriptor.Current_task_state ->
                  descriptor.description ^ "\n\n" ^ task_state_hint ~config ~meta
              in
-             Tool_bridge.oas_tool_of_masc
-               ?descriptor:oas_descriptor
+             Tool_bridge.oas_tool_of_masc_with_execution_env
                ~name:model_name
                ~description
                ~input_schema:descriptor.input_schema
-               (fun input -> h input)))
+               (fun execution_env input ->
+                 h
+                   ?oas_invocation:
+                     (Agent_sdk.Tool.Execution_env.invocation execution_env)
+                   input)))
       model_visible_descriptors
   in
-  let bundle =
-      { tools = descriptor_tools
-      ; cleanup =
-          (fun () ->
-            Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
-      }
-  in
-  Otel_metric_hotpath.observe
-    ~metric:Otel_metric_hotpath.metric_oas_make_tool_bundle_sec
-    ~start:__t0;
-  bundle
+  { tools = descriptor_tools
+  ; cleanup =
+      (fun () ->
+        Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
+  }
 ;;
 
 let make_tools
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
+      ~(publication_recovery :
+          Keeper_publication_recovery_availability.turn_context)
       ~(ctx_snapshot : Keeper_types.working_context)
       ?search_fn
-      ?on_tool_called
       ?clock
       ()
   : Agent_sdk.Tool.t list
   =
-  (make_tool_bundle ~config ~meta ~ctx_snapshot ?search_fn ?on_tool_called ?clock ())
+  (make_tool_bundle
+     ~config
+     ~meta
+     ~publication_recovery
+     ~ctx_snapshot
+     ?search_fn
+     ?clock
+     ())
     .tools
 ;;

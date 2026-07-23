@@ -18,12 +18,12 @@ val session_base_dir_ : Workspace.config -> string
     [Runtime_runtime]. *)
 val ensure_api_keys_for_labels : string list -> (unit, string) result
 
-(** Single-file metrics path kept for fallback reads. *)
-val keeper_metrics_path : Workspace.config -> string -> string
-
 (** Date-split metrics store: [.masc/keepers/<name>/metrics/YYYY-MM/DD.jsonl].
     Cached per keeper name so all callers share the same Eio.Mutex. *)
 val keeper_metrics_store : Workspace.config -> string -> Dated_jsonl.t
+
+(** Canonical base directory of {!keeper_metrics_store}. *)
+val keeper_metrics_dir : Workspace.config -> string -> string
 
 val execution_receipts_dirname : string
 (** Runtime subdirectory under each keeper directory for date-split execution
@@ -88,13 +88,8 @@ val is_prompt_history_source : string -> bool
     channel. *)
 val is_internal_history_source : string -> bool
 
-val keeper_policy_log_path : Workspace.config -> string -> string
 val keeper_decision_log_path : Workspace.config -> string -> string
 val keeper_feedback_log_path : Workspace.config -> string -> string
-val keeper_dataset_export_path : Workspace.config -> string -> string
-val keeper_alerts_path : Workspace.config -> string
-val keeper_alert_retry_path : Workspace.config -> string
-val keeper_alert_deadletter_path : Workspace.config -> string
 
 (** Rotate [path] if it exceeds the configured size threshold.
     Keeps at most [Env_config.KeeperMetrics.max_rotated_files] numbered

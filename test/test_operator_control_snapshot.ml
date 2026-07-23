@@ -111,12 +111,27 @@ let test_align_keeper_runtime_status_promotes_fresh_runtime_signal () =
           [
             ("status", `String "busy");
             ("last_seen_ago_s", `Float 5.0);
-            ("is_zombie", `Bool false);
           ])
       ~keepalive_running:true
   in
   Alcotest.(check string) "fresh runtime signal promotes keeper status" "busy"
     status
+
+let test_align_keeper_runtime_status_ignores_legacy_zombie_flag () =
+  let status =
+    Operator_control_snapshot.align_keeper_runtime_status
+      ~surface_status:"inactive"
+      ~diagnostic:(`Assoc [ ("health_state", `String "offline") ])
+      ~agent_status_json:
+        (`Assoc
+          [
+            ("status", `String "busy");
+            ("last_seen_ago_s", `Float 5.0);
+            ("is_zombie", `Bool true);
+          ])
+      ~keepalive_running:true
+  in
+  Alcotest.(check string) "legacy zombie flag has no authority" "busy" status
 
 let test_align_keeper_runtime_status_preserves_attention_health () =
   let status =
@@ -128,28 +143,10 @@ let test_align_keeper_runtime_status_preserves_attention_health () =
           [
             ("status", `String "active");
             ("last_seen_ago_s", `Float 5.0);
-            ("is_zombie", `Bool false);
           ])
       ~keepalive_running:true
   in
   Alcotest.(check string) "degraded health remains inactive" "inactive" status
-
-let test_align_keeper_runtime_status_ignores_zombie_runtime_signal () =
-  let status =
-    Operator_control_snapshot.align_keeper_runtime_status
-      ~surface_status:"inactive"
-      ~diagnostic:(`Assoc [ ("health_state", `String "offline") ])
-      ~agent_status_json:
-        (`Assoc
-          [
-            ("status", `String "active");
-            ("last_seen_ago_s", `Float 5.0);
-            ("is_zombie", `Bool true);
-          ])
-      ~keepalive_running:true
-  in
-  Alcotest.(check string) "zombie runtime does not override inactive" "inactive"
-    status
 
 let test_align_keeper_runtime_status_tolerates_null_status_json () =
   let status =
@@ -218,6 +215,9 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config);
         }
       in
       let keeper_name = "ctx-truth" in
@@ -227,7 +227,7 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
             (`Assoc
               [
                 ("name", `String keeper_name);
-                ("goal", `String "Prefer metrics context truth");
+                ("instructions", `String "Prefer metrics context truth");
                 ("proactive_enabled", `Bool false);
                 ("autoboot_enabled", `Bool false);
               ])
@@ -335,6 +335,159 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
       Alcotest.(check bool) "nested context payload omitted" true
         (Yojson.Safe.Util.member "context" keeper = `Null))
 
+let context_test_meta ~name ~last_input_tokens =
+  let base =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String name
+          ; "agent_name", `String (name ^ "-agent")
+          ; "trace_id", `String ("trace-" ^ name)
+          ; "runtime_id", `String "primary"
+          ])
+    with
+    | Ok meta -> meta
+    | Error error -> Alcotest.fail error
+  in
+  { base with
+    runtime =
+      { base.runtime with
+        usage = { base.runtime.usage with last_input_tokens }
+      }
+  }
+;;
+
+let init_context_test_runtime () =
+  let root = Masc_test_deps.find_project_root () in
+  let config_path = Filename.concat root "config/runtime.toml" in
+  match Runtime.init_default ~config_path with
+  | Ok () -> ()
+  | Error error -> Alcotest.failf "Runtime.init_default failed: %s" error
+;;
+
+let write_raw_metrics_row config keeper_name row =
+  let store = Keeper_types_support.keeper_metrics_store config keeper_name in
+  Dated_jsonl.append store (`Assoc [ "fixture", `Bool true ]);
+  let only_entry label directory =
+    match Sys.readdir directory |> Array.to_list with
+    | [ entry ] -> Filename.concat directory entry
+    | entries ->
+      Alcotest.failf
+        "expected one %s entry under %s, found %d"
+        label
+        directory
+        (List.length entries)
+  in
+  let month_dir = only_entry "month" (Dated_jsonl.base_dir store) in
+  let path = only_entry "day file" month_dir in
+  Fs_compat.save_file path (row ^ "\n");
+  path
+;;
+
+let test_context_snapshot_missing_metrics_uses_observed_metadata () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+       init_context_test_runtime ();
+       let config = Workspace.default_config base_dir in
+       let meta = context_test_meta ~name:"metrics-missing" ~last_input_tokens:731 in
+       (match
+          Operator_control_context_snapshot.latest_keeper_context_snapshot_from_files
+            config
+            meta.name
+        with
+        | Ok None -> ()
+        | Ok (Some _) -> Alcotest.fail "missing metrics store returned a snapshot"
+        | Error _ -> Alcotest.fail "missing metrics store returned a read failure");
+       let snapshot =
+         Operator_control_context_snapshot.keeper_context_snapshot_of_meta config meta
+       in
+       Alcotest.(check (option int)) "metadata token observation" (Some 731)
+         snapshot.context_tokens;
+       Alcotest.(check (option string)) "explicit metadata source"
+         (Some "fallback_metadata") snapshot.context_source;
+       Alcotest.(check bool) "no metrics failure" true
+         (snapshot.context_metrics_unavailable = None))
+;;
+
+let test_context_snapshot_malformed_metrics_is_unavailable () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+       init_context_test_runtime ();
+       let config = Workspace.default_config base_dir in
+       let meta = context_test_meta ~name:"metrics-malformed" ~last_input_tokens:991 in
+       let path = write_raw_metrics_row config meta.name "{not-json" in
+       (match
+          Operator_control_context_snapshot.latest_keeper_context_snapshot_from_files
+            config
+            meta.name
+        with
+        | Error
+            (Operator_control_context_snapshot.Malformed_metrics_row
+              { path = error_path; line_number = None; _ }) ->
+          Alcotest.(check string) "exact malformed row path" path error_path
+        | Error _ -> Alcotest.fail "unexpected metrics read error"
+        | Ok _ -> Alcotest.fail "malformed metrics row was silently accepted");
+       let snapshot =
+         Operator_control_context_snapshot.keeper_context_snapshot_of_meta config meta
+       in
+       Alcotest.(check (option int)) "no metadata token fallback" None
+         snapshot.context_tokens;
+       Alcotest.(check (option string)) "no fabricated source" None
+         snapshot.context_source;
+       let json =
+         `Assoc
+           (Operator_control_context_snapshot.keeper_context_snapshot_fields snapshot)
+       in
+       let unavailable =
+         Yojson.Safe.Util.member "context_metrics_unavailable" json
+       in
+       Alcotest.(check string) "typed decode failure" "malformed_json"
+         Yojson.Safe.Util.(unavailable |> member "kind" |> to_string);
+       Alcotest.(check string) "decode failure path" path
+         Yojson.Safe.Util.(unavailable |> member "path" |> to_string))
+;;
+
+let test_context_snapshot_storage_failure_is_unavailable () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+       init_context_test_runtime ();
+       let config = Workspace.default_config base_dir in
+       let meta = context_test_meta ~name:"metrics-storage-error" ~last_input_tokens:557 in
+       let metrics_dir = Keeper_types_support.keeper_metrics_dir config meta.name in
+       Fs_compat.mkdir_p (Filename.dirname metrics_dir);
+       Fs_compat.save_file metrics_dir "not a directory";
+       let snapshot =
+         Operator_control_context_snapshot.keeper_context_snapshot_of_meta config meta
+       in
+       Alcotest.(check (option int)) "no metadata token fallback" None
+         snapshot.context_tokens;
+       let json =
+         `Assoc
+           (Operator_control_context_snapshot.keeper_context_snapshot_fields snapshot)
+       in
+       let unavailable =
+         Yojson.Safe.Util.member "context_metrics_unavailable" json
+       in
+       Alcotest.(check string) "typed storage failure" "storage_read_failed"
+         Yojson.Safe.Util.(unavailable |> member "kind" |> to_string);
+       Alcotest.(check string) "exact storage reason" "not_a_directory"
+         Yojson.Safe.Util.(unavailable |> member "reason" |> to_string);
+       Alcotest.(check string) "exact storage path" metrics_dir
+         Yojson.Safe.Util.(unavailable |> member "path" |> to_string))
+;;
+
 let test_keeper_up_clears_dead_tombstone_resume_state () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -343,7 +496,7 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
   let keeper_name = "dead-tombstone-operator-resume" in
   Eio.Switch.on_release sw (fun () ->
     Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
-    Keeper_registry.clear ();
+    Keeper_registry.For_testing.clear ();
     Keeper_runtime.reset_test_state base_dir;
     cleanup_dir base_dir);
   let config = Workspace.default_config base_dir in
@@ -373,6 +526,9 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
       clock = Eio.Stdenv.clock env;
       proc_mgr = Some (Eio.Stdenv.process_mgr env);
       net = None;
+      publication_recovery_provider =
+        Masc_test_deps.publication_recovery_provider
+          (publication_recovery_registry env sw config);
     }
   in
   let read_meta label =
@@ -389,7 +545,6 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
             ("name", `String keeper_name);
             ("agent_name", `String (Keeper_identity.keeper_agent_name keeper_name));
             ("trace_id", `String "trace-dead-tombstone-operator-resume");
-            ("goal", `String "Resume a tombstoned keeper");
             ("runtime_id", `String "runtime.primary");
           ])
     with
@@ -399,7 +554,6 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
         meta with
         paused = true;
         latched_reason = Some Keeper_latched_reason.Dead_tombstone;
-        auto_resume_after_sec = Some 60.0;
         runtime =
           {
             meta.runtime with
@@ -407,7 +561,7 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
               Some
                 (Keeper_meta_contract.blocker_info_of_class
                    ~detail:"stale timeout before operator resume"
-                   Keeper_meta_contract.Turn_timeout);
+                   Keeper_meta_contract.Stale_turn_timeout);
           };
       }
   in
@@ -418,8 +572,6 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
   Alcotest.(check bool) "seed is paused" true persisted_seed.paused;
   Alcotest.(check bool) "seed has terminal latch" true
     (Option.is_some persisted_seed.latched_reason);
-  Alcotest.(check bool) "seed has auto-resume delay" true
-    (Option.is_some persisted_seed.auto_resume_after_sec);
   Alcotest.(check bool) "seed has runtime blocker" true
     (Option.is_some persisted_seed.runtime.last_blocker);
   let dead_entry =
@@ -449,7 +601,7 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
         (`Assoc
           [
             ("name", `String keeper_name);
-            ("goal", `String "Resume tombstoned keeper");
+            ("instructions", `String "Resume tombstoned keeper");
             ("proactive_enabled", `Bool false);
             ("autoboot_enabled", `Bool false);
           ])
@@ -487,8 +639,6 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
   Alcotest.(check bool) "operator resume clears paused" false resumed.paused;
   Alcotest.(check bool) "operator resume clears terminal latch" true
     (Option.is_none resumed.latched_reason);
-  Alcotest.(check bool) "operator resume clears auto-resume delay" true
-    (Option.is_none resumed.auto_resume_after_sec);
   Alcotest.(check bool) "operator resume clears runtime blocker" true
     (Option.is_none resumed.runtime.last_blocker)
 
@@ -602,7 +752,7 @@ let test_lifecycle_owner_gates_meta_and_registry_mutations () =
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Workspace.default_config base_dir in
@@ -614,7 +764,6 @@ let test_lifecycle_owner_gates_meta_and_registry_mutations () =
               [ "name", `String "reserved-dead"
               ; "agent_name", `String (Keeper_identity.keeper_agent_name "reserved-dead")
               ; "trace_id", `String "trace-reserved-dead"
-              ; "goal", `String "Verify lifecycle ownership"
               ; "runtime_id", `String "runtime.primary"
               ])
         with
@@ -713,7 +862,7 @@ let test_dead_revival_launch_failure_rolls_back_both_authorities () =
   Fun.protect
     ~finally:(fun () ->
       Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Workspace.default_config base_dir in
@@ -725,7 +874,6 @@ let test_dead_revival_launch_failure_rolls_back_both_authorities () =
               [ "name", `String keeper_name
               ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
               ; "trace_id", `String "trace-dead-revival-rollback"
-              ; "goal", `String "Rollback a rejected revival"
               ; "runtime_id", `String "runtime.primary"
               ])
         with
@@ -777,6 +925,9 @@ let test_dead_revival_launch_failure_rolls_back_both_authorities () =
         ; clock = Eio.Stdenv.clock env
         ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
         ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config)
         }
       in
       (match Keeper_dead_revival_transaction.revive ctx ~original ~candidate with
@@ -827,7 +978,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
   Fun.protect
     ~finally:(fun () ->
       Keeper_keepalive.stop_keepalive keeper_name;
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -842,7 +993,6 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
                 ("name", `String keeper_name);
                 ("agent_name", `String (Keeper_identity.keeper_agent_name keeper_name));
                 ("trace_id", `String "trace-paused-runtime-trust");
-                ("goal", `String "Expose paused keeper failure in summary");
                 ("runtime_id", `String "runtime.primary");
               ])
         with
@@ -857,8 +1007,9 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
                   Some
                     (Keeper_meta_contract.blocker_info_of_class
                       ~detail:
-                         "Completion contract [tool_contract] violated: no ToolUse block"
-                       Keeper_meta_contract.Completion_contract_violation);
+                         "No configured provider runtime remained available"
+                       (Keeper_meta_contract.Runtime_exhausted
+                          Keeper_meta_contract.No_providers_available));
               };
           }
         | Error err -> Alcotest.fail ("keeper meta fixture failed: " ^ err)
@@ -876,11 +1027,10 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
             ("trace_id", `String "trace-paused-runtime-trust");
             ("turn_count", `Int 12);
             ("outcome", `String "error");
-            ( "terminal_reason_code",
-              `String "completion_contract_violation:tool_contract" );
-            ("operator_disposition", `String "pause_human");
+            ("terminal_reason_code", `String "runtime_exhausted");
+            ("operator_disposition", `String "fail_open_next_runtime");
             ( "operator_disposition_reason",
-              `String "unmapped_runtime_state" );
+              `String "runtime_exhausted" );
             ("tools_used", `List []);
             ( "tool_surface",
               `Assoc
@@ -901,7 +1051,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
                   ("selected_model", `String "kimi-for-coding");
                   ("outcome", `String "completed");
                 ] );
-            ("error", `Assoc [ ("kind", `String "contract") ]);
+            ("error", `Assoc [ ("kind", `String "runtime") ]);
             ("ended_at", `String (Masc_domain.now_iso ()));
           ]);
       Operator_control.invalidate_snapshot_cache ();
@@ -919,7 +1069,7 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
       in
       Alcotest.(check bool) "keeper present" true (keeper <> `Null);
       Alcotest.(check string) "runtime blocker class surfaced"
-        "completion_contract_violation"
+        "runtime_exhausted"
         (keeper |> member "runtime_blocker_class" |> to_string);
       Alcotest.(check bool) "attention surfaced" true
         (keeper |> member "needs_attention" |> to_bool);
@@ -927,10 +1077,10 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
       Alcotest.(check string) "trust disposition blocks" "Blocked"
         (trust |> member "disposition" |> to_string);
       Alcotest.(check string) "operator reason preserved"
-        "unmapped_runtime_state"
+        "runtime_exhausted"
         (trust |> member "operator_disposition_reason" |> to_string);
       Alcotest.(check string) "terminal code preserved"
-        "completion_contract_violation:tool_contract"
+        "runtime_exhausted"
         (trust |> member "latest_terminal_reason" |> member "code"
        |> to_string);
       Operator_control.invalidate_snapshot_cache ();
@@ -964,7 +1114,7 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
   Fun.protect
     ~finally:(fun () ->
       Keeper_keepalive.stop_keepalive keeper_name;
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -978,6 +1128,9 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config);
         }
       in
       let ok, _ =
@@ -986,7 +1139,7 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
             (`Assoc
               [
                 ("name", `String keeper_name);
-                ("goal", `String "Expose keeper attention in digest");
+                ("instructions", `String "Expose keeper attention in digest");
                 ("proactive_enabled", `Bool false);
                 ("autoboot_enabled", `Bool false);
               ])
@@ -1009,8 +1162,9 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
               last_blocker =
                 Some
                   (Keeper_meta_contract.blocker_info_of_class
-                     ~detail:"Completion contract requires a keeper tool call"
-                     Keeper_meta_contract.Completion_contract_violation);
+                     ~detail:"No configured provider runtime remained available"
+                     (Keeper_meta_contract.Runtime_exhausted
+                        Keeper_meta_contract.No_providers_available));
             };
         }
       in
@@ -1045,7 +1199,7 @@ let test_digest_workspace_includes_keeper_runtime_attention () =
       Alcotest.(check string) "keeper attention severity" "bad"
         (keeper_attention |> member "severity" |> to_string);
       Alcotest.(check string) "keeper attention blocker class"
-        "completion_contract_violation"
+        "runtime_exhausted"
         (keeper_attention |> member "evidence" |> member "runtime_blocker"
          |> member "runtime_blocker_class" |> to_string);
       let keeper_probe =
@@ -1069,7 +1223,7 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
   Fun.protect
     ~finally:(fun () ->
       Keeper_keepalive.stop_keepalive keeper_name;
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -1083,6 +1237,9 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config);
         }
       in
       let ok, _ =
@@ -1091,7 +1248,7 @@ let test_lightweight_snapshot_preserves_receipt_latest_causal_event () =
             (`Assoc
               [
                 ("name", `String keeper_name);
-                ("goal", `String "Keep receipt causal signal in summary");
+                ("instructions", `String "Keep receipt causal signal in summary");
                 ("proactive_enabled", `Bool false);
                 ("autoboot_enabled", `Bool false);
               ])
@@ -1183,24 +1340,19 @@ let test_snapshot_has_expected_sections () =
         (Yojson.Safe.Util.member "attention_summary" json <> `Null);
       Alcotest.(check bool) "recommendation summary present" true
         (Yojson.Safe.Util.member "recommendation_summary" json <> `Null);
-      Alcotest.(check bool) "operator judge runtime present" true
-        (Yojson.Safe.Util.member "operator_judge_runtime" json <> `Null);
-      Alcotest.(check bool) "operator judge enabled by default" true
-        Yojson.Safe.Util.
-          (json |> member "operator_judge_runtime" |> member "enabled" |> to_bool);
       Alcotest.(check string) "judgment owner" "fallback_read_model"
         Yojson.Safe.Util.(json |> member "judgment_owner" |> to_string);
       Alcotest.(check bool) "no authoritative judgment" false
         Yojson.Safe.Util.(json |> member "authoritative_judgment_available" |> to_bool);
-      let admission = Yojson.Safe.Util.member "admission_queue" json in
-      Alcotest.(check bool) "admission queue present" true
-        (admission <> `Null);
-      Alcotest.(check bool) "admission throttle is not reported as mode field" true
-        (match Yojson.Safe.Util.member "mode" admission with
-         | `Null -> true
-         | _ -> false);
-      Alcotest.(check string) "admission throttle owner" "oas_runtime"
-        Yojson.Safe.Util.(admission |> member "throttle_owner" |> to_string);
+      let inference = Yojson.Safe.Util.member "inference_inflight" json in
+      Alcotest.(check bool) "inference observation present" true
+        (inference <> `Null);
+      Alcotest.(check string) "inference boundary owner" "oas_runtime"
+        Yojson.Safe.Util.(inference |> member "boundary_owner" |> to_string);
+      Alcotest.(check int) "no inference active" 0
+        Yojson.Safe.Util.(inference |> member "active" |> to_int);
+      Alcotest.(check bool) "no MASC-owned inference capacity" true
+        (Yojson.Safe.Util.member "max_concurrent" inference = `Null);
       Alcotest.(check bool) "recent_actions list present" true
         (match Yojson.Safe.Util.member "recent_actions" json with
         | `List _ -> true
@@ -1340,7 +1492,7 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
       Dashboard_cache.invalidate_all ();
       Eio_guard.disable ();
       Keeper_keepalive.stop_keepalive "lightweight-audit";
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       Keeper_runtime.reset_test_state base_dir;
       cleanup_dir base_dir)
     (fun () ->
@@ -1355,6 +1507,9 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config);
         }
       in
       let keeper_name = "lightweight-audit" in
@@ -1364,7 +1519,7 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
             (`Assoc
               [
                 ("name", `String keeper_name);
-                ("goal", `String "Surface tool audit in lightweight snapshots");
+                ("instructions", `String "Surface tool audit in lightweight snapshots");
                 ("proactive_enabled", `Bool false);
                 ("autoboot_enabled", `Bool false);
               ])
@@ -1466,6 +1621,9 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
           net = None;
+          publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config);
         }
       in
       let keeper_name = "lightweight-recent-tools" in
@@ -1475,7 +1633,7 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
             (`Assoc
               [
                 ("name", `String keeper_name);
-                ("goal", `String "Keep recent tool names distinct from latest");
+                ("instructions", `String "Keep recent tool names distinct from latest");
                 ("proactive_enabled", `Bool false);
                 ("autoboot_enabled", `Bool false);
               ])
@@ -1587,8 +1745,6 @@ let test_digest_workspace_exposes_pending_confirm_attention () =
         Yojson.Safe.Util.(digest |> member "target_type" |> to_string);
       Alcotest.(check string) "health" "warn"
         Yojson.Safe.Util.(digest |> member "health" |> to_string);
-      Alcotest.(check bool) "operator judge runtime present" true
-        (Yojson.Safe.Util.member "operator_judge_runtime" digest <> `Null);
       let attention_items = Yojson.Safe.Util.(digest |> member "attention_items" |> to_list) in
       Alcotest.(check bool) "pending confirm attention present" true
         (List.exists
@@ -1702,6 +1858,39 @@ let () =
             "operator resume clears persisted dead-tombstone state"
             `Quick
             test_keeper_up_clears_dead_tombstone_resume_state;
+        ] );
+      ( "runtime status"
+      , [
+          Alcotest.test_case
+            "fresh runtime signal promotes status"
+            `Quick
+            test_align_keeper_runtime_status_promotes_fresh_runtime_signal;
+          Alcotest.test_case
+            "legacy zombie flag has no authority"
+            `Quick
+            test_align_keeper_runtime_status_ignores_legacy_zombie_flag;
+          Alcotest.test_case
+            "attention health blocks promotion"
+            `Quick
+            test_align_keeper_runtime_status_preserves_attention_health;
+          Alcotest.test_case
+            "null runtime signal preserves surface status"
+            `Quick
+            test_align_keeper_runtime_status_tolerates_null_status_json;
+        ] );
+      ( "context metrics ledger"
+      , [ Alcotest.test_case
+            "missing ledger uses observed metadata"
+            `Quick
+            test_context_snapshot_missing_metrics_uses_observed_metadata
+        ; Alcotest.test_case
+            "malformed row is typed unavailable"
+            `Quick
+            test_context_snapshot_malformed_metrics_is_unavailable
+        ; Alcotest.test_case
+            "storage failure is typed unavailable"
+            `Quick
+            test_context_snapshot_storage_failure_is_unavailable
         ] );
     ]
 ;;

@@ -1,10 +1,15 @@
 ---
 status: reference
-last_verified: 2026-05-15
+last_verified: 2026-07-19
 code_refs:
-  - lib/verifier_oas.ml
-  - lib/keeper/keeper_agent_error.ml
   - lib/worker_oas.ml
+  - lib/keeper/keeper_event_bridge.ml
+  - lib/agent_sdk_response.ml
+  - lib/masc_oas_bridge.ml
+  - lib/oas_compat/oas_compat.ml
+  - lib/keeper/keeper_agent_error.ml
+  - lib/keeper/keeper_compact_policy.ml
+  - lib/keeper/keeper_manual_compaction.ml
 ---
 
 # OAS Integration
@@ -13,7 +18,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | OAS Bridge |
-| Maps to | `lib/oas_*.ml`, `lib/worker_oas.ml`, `lib/verifier_oas.ml`, `lib/runtime_inference.ml`, `lib/context_compact_oas.ml` |
+| Maps to | `lib/worker_oas.ml`, `lib/keeper/keeper_event_bridge.ml`, `lib/agent_sdk_response.ml`, `lib/masc_oas_bridge.ml`, `lib/oas_compat/oas_compat.ml` |
 | Dependencies | 02-types-and-invariants |
 | OAS Version | `agent_sdk` library (OCaml, in-tree dependency) |
 
@@ -51,15 +56,11 @@ MASC 전용 요구가 생기면 MASC adapter/bridge로 먼저 해결하고, OAS 
 ```mermaid
 graph TB
   subgraph "MASC (Consumer)"
-    OW[oas_worker.ml]
     WO[worker_oas.ml]
-    VO[verifier_oas.ml]
-    CC[context_compact_oas.ml]
-    OE[oas_events.ml]
-    OSB[oas_event_bridge.ml]
-    OM[oas_message.ml]
-    OR[oas_response.ml]
-    OMR[oas_model_resolve.ml]
+    KEB[keeper_event_bridge.ml]
+    ASR[agent_sdk_response.ml]
+    MOB[masc_oas_bridge.ml]
+    OC[oas_compat.ml]
     CI[runtime_inference.ml]
     TB[tool_bridge.ml]
   end
@@ -67,7 +68,6 @@ graph TB
     AG[Agent.t / Agent.run]
     BU[Builder]
     PR[Provider]
-    CR[Context_reducer]
     EB[Event_bus]
     GR[Guardrails]
     HK[Hooks]
@@ -75,16 +75,13 @@ graph TB
     CC2[Runtime_config]
     RT[Raw_trace]
   end
-  OW -->|"build + run"| AG
-  OW --> BU
-  OW --> PR
   WO -->|"worker lifecycle"| AG
-  VO -->|"PreToolUse hook"| HK
-  VO -->|"tool filter"| GR
-  CC -->|"strategy mapping"| CR
-  OE -->|"Custom events"| EB
-  OSB -->|"subscribe + relay"| EB
-  OMR -->|"resolve labels"| CC2
+  WO --> BU
+  WO --> PR
+  MOB -->|"run_safe boundary"| AG
+  KEB -->|"subscribe + relay"| EB
+  ASR -->|"read api_response"| AG
+  OC -->|"classify sdk_error"| AG
   CI -->|"read params"| CC2
 ```
 
@@ -99,10 +96,10 @@ graph TB
 | 단일 에이전트 실행 | `Agent.run`, `Builder`, `Hooks`, `Guardrails`, `Checkpoint` | 언제/왜/어떤 agent를 돌릴지 결정 |
 | 멀티에이전트 실행 | `Orchestrator`, `Agent_sdk_swarm.Runner` | workspace, board, workflow, policies |
 | 도구 실행 | `Tool.t`, hook lifecycle, raw trace | tool schema 정의, dispatch, auth |
-| 컨텍스트 축약 | `Context_reducer` | 어떤 전략을 언제 적용할지 결정 |
+| 컨텍스트 축약 | 없음; exact message history를 실행 | Keeper compaction, persisted-history repair, provider-bound artifact projection |
 | 이벤트 전달 | `Event_bus` | 어떤 MASC 사건을 publish할지, SSE/dashboard 연결 |
 | 장기 메모리 | 없음 | `Masc.Memory.t`, keeper memory bank, institution/procedural stores |
-| 조율 상태 | 없음 | workspace, tasks, team sessions, governance |
+| 조율 상태 | 없음 | workspace, tasks, board, keeper Gate |
 
 ---
 
@@ -125,13 +122,14 @@ type config = {
   max_tokens : int;
   temperature : float;
   hooks : Agent_sdk.Hooks.hooks option;
-  context_reducer : Agent_sdk.Context_reducer.t option;
   guardrails : Agent_sdk.Guardrails.t option;
   event_bus : Agent_sdk.Event_bus.t option;
-  checkpoint_dir : string option;
+  checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
   session_id : string option;
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
+  model_input_projection :
+    (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) option;
   raw_trace : Agent_sdk.Raw_trace.t option;
   transport : Masc_grpc_transport.t;
 }
@@ -148,7 +146,7 @@ run(~sw, ~net, ~config, goal) -> run_result
   2. Event_bus에 "build" 이벤트 publish
   3. Builder 패턴으로 Agent.t 구성
   4. Agent.run 또는 Agent.run_stream 호출
-  5. checkpoint 저장 (checkpoint_dir 설정 시)
+  5. OAS turn boundary에서 caller-owned checkpoint_sink 호출
   6. Event_bus에 "completed"/"failed" publish
   7. Agent.close
 ```
@@ -191,9 +189,10 @@ Runtime failsafe fallback (runtime.toml 없을 때):
 
 ### 4.6 Termination Semantics
 
-OAS와 MASC는 "turn"과 "timeout"을 같은 layer에서 쓰지 않는다. OAS
-`Agent.run`의 `MaxTurnsExceeded`는 OAS SDK turn budget이고, keeper
-wall-clock timeout이나 provider timeout과 동일한 개념이 아니다.
+OAS와 MASC는 "turn"과 "timeout"을 같은 layer에서 쓰지 않는다. Keeper
+호출은 OAS의 `max_turns = 0` 및 `max_idle_turns = 0` unbounded sentinel을
+사용한다. SDK가 외부의 명시적 유한 설정에서 execution-limit signal을 반환하더라도
+MASC는 이를 관측할 뿐 Keeper lifecycle 권한으로 사용하지 않는다.
 
 `lib/keeper/keeper_agent_error.ml`의 `sdk_termination_semantics`가 OAS
 error를 keeper receipt로 접기 전 layer-aware 의미를 먼저 고정한다:
@@ -201,17 +200,21 @@ error를 keeper receipt로 접기 전 layer-aware 의미를 먼저 고정한다:
 | OAS / SDK signal | MASC semantic | Receipt outcome |
 |------------------|---------------|-----------------|
 | `Retry.Timeout` | `provider_wall_clock_timeout` | `cancelled` |
-| `MaxTurnsExceeded` | `oas_turn_budget_exhausted` | `cancelled` |
-| `IdleDetected` | `oas_idle_budget_exhausted` | `cancelled` |
+| `MaxTurnsExceeded` | `oas_turn_limit_observed` | `success` observation |
+| `AgentExecutionTimeout` / `AgentExecutionIdleTimeout` | `oas_execution_timeout_observed` | `success` observation |
+| `IdleDetected` | `oas_idle_detected_failure` | `error` |
 | `ExitConditionMet` | `oas_exit_condition_reached` | `cancelled` |
-| `TokenBudgetExceeded` | `oas_token_budget_exhausted` | `error` |
-| `CostBudgetExceeded` | `oas_cost_budget_exhausted` | `error` |
 | other SDK/API failure | `sdk_error_failure` or specific OAS failure semantic | `error` |
+
+Execution-limit observations preserve the complete OAS replay checkpoint but
+create no Keeper blocker, retry, failure streak, or follow-up action. Token and
+cost counters remain telemetry only and do not participate in this terminal
+mapping.
 
 Invariant: new OAS terminal variants must first be assigned a stable
 `sdk_termination_semantics` value, then mapped to keeper receipt outcome.
-Tests in `test/test_keeper_terminal_reason.ml` pin the semantic layer and the
-collapsed receipt outcome separately.
+Tests in `test/test_keeper_sdk_error_typed_bridge.ml` pin the semantic layer and
+the collapsed receipt outcome separately.
 
 ### 4.7 MASC Tool Bridge
 
@@ -239,7 +242,7 @@ MASC Types.tool_schema
 |-----------|---------|
 | `worker_container_meta.effective_model` | `Agent_sdk.Provider.config` model_id |
 | `runtime_backend` | description metadata + spawn/runtime routing |
-| `timeout_seconds` | `max_turns` heuristic |
+| `timeout_seconds` | worker-container lifecycle metadata; OAS `max_turns`와 독립 |
 | fixed `session_min` MCP surface + fixed shell surface | `Tool.t list` |
 | heartbeat | periodic callback |
 | team_session description | `Builder.with_description` metadata |
@@ -327,7 +330,9 @@ val usage_or_zero : api_response -> Agent_sdk.Types.api_usage
 
 ### 7.3 Type Compatibility
 
-MASC와 OAS는 `Agent_sdk.Types.message` 타입을 공유한다. 4개 역할(System, User, Assistant, Tool)과 ToolUse/ToolResult content block이 동일하므로, message 변환이 불필요하다. `context_compact_oas.ml` 주석에서 명시하듯 별도 role conversion이나 extra tagging은 필요하지 않다.
+MASC와 OAS는 `Agent_sdk.Types.message` 타입을 공유한다. 4개 역할(System,
+User, Assistant, Tool)과 ToolUse/ToolResult content block이 동일하므로,
+provider-specific role conversion이나 extra tagging은 필요하지 않다.
 
 ---
 
@@ -380,56 +385,41 @@ SSOT rules:
 
 ---
 
-## 9. Verifier Integration
+## 9. Product Judgment Boundaries
 
-### 9.1 개요
-
-`verifier_oas.ml`은 cheap-model 기반 action verification 엔진이다. OAS Hooks와 Guardrails에 bridge된다.
-
-### 9.2 Verification Flow
+판단이 필요한 MASC 기능은 각 제품 경계가 입력 타입, prompt, structured output
+schema, 결과 소비 방식을 소유한다. OAS는 generic model/agent execution과 typed
+failure만 제공한다.
 
 ```
-PreToolUse event
-  -> should_skip? (read-only 패턴 매칭)
-    -> Yes: Pass (MODEL 호출 없음)
-    -> No: build_prompt -> Keeper_turn_driver.run_named(runtime="verifier")
-      -> parse_verdict (PASS/WARN/FAIL)
+MASC typed request
+  -> owner-specific prompt + schema
+  -> ordinary OAS execution
+  -> typed model output | explicit error
+  -> owner-specific transition, wake, or observation
 ```
 
-Read-only 패턴: read, glob, grep, search, find, list, ls, cat, git status, git log, git diff, status, view, get, fetch, query
+Fusion, Keeper failure judgment, board attention, Task completion review는 서로 다른
+도메인 계약이다. 공통 문자열 verdict, hidden budget, caller registry로 이들을
+하나의 verifier policy에 합치지 않는다.
 
-Budget: max 200 output tokens per verification.
+### 9.1 Keeper and Worker Guardrails
 
-### 9.3 Verdict to Hook Decision
-
-| Verdict | Hook Decision | 동작 |
-|---------|--------------|------|
-| Pass | Continue | 도구 실행 진행 |
-| Warn | Continue | 경고 로그, 실행 진행 |
-| Fail | Skip | 도구 실행 차단 |
-
-### 9.4 Eval_gate -> Guardrails Bridge
-
-`eval_gate_to_oas_guardrails`가 MASC의 `Eval_gate.gate_config`를 OAS `Guardrails.t`로 변환한다:
-
-| MASC Eval_gate 상태 | OAS Guardrails.tool_filter |
-|--------------------|---------------------------|
-| allowlist_enabled + allowed_tools | AllowList |
-| denied_tools only | DenyList |
-| 둘 다 enabled | AllowList (stricter) |
-| 둘 다 없음 | AllowAll |
-
-`max_tool_calls_per_turn`도 함께 매핑된다.
-
-Static pre-filtering은 OAS Guardrails가, stateful per-call checks는 Eval_gate가 담당한다. Defense-in-depth.
+Keeper lane과 MASC worker adapter는 모두
+`Agent_sdk.Guardrails.permissive`를 고정 사용한다. Keeper public API는 OAS
+guardrails를 caller override로 노출하지 않는다. 외부 효과의 권한은 local
+command classifier가 아니라 MASC의 normalized Gate 경계에서 exact Always
+Allowed, LLM Auto Judge, 비차단 HITL 중 하나로 결정된다.
 
 ---
 
 ## 10. Context Compaction
 
-`context_compact_oas.ml`은 MASC 컨텍스트 전략을 OAS `Context_reducer`에 위임한다. 상세는 12-memory-systems.md 6.3절 참조.
-
-핵심: MASC `strategy` variant -> OAS `Context_reducer.strategy` 매핑. MASC-specific 로직(importance scoring, extractive summarizer)은 OAS `Custom` closure로 주입된다.
+Keeper compaction and persisted-history repair are MASC-owned. OAS receives the
+resulting exact message history without an implicit reducer. Provider-bound
+artifact hydration is a caller-owned `model_input_projection`; it changes only
+the request projection, while agent state and checkpoints retain their
+content-addressed markers.
 
 ---
 
@@ -446,7 +436,7 @@ remain MASC-owned under `Masc.Memory.t` and the `Keeper_memory_*` modules.
 | 영역 | 상태 | 설명 |
 |------|------|------|
 | Agent 실행 | Complete | `oas_worker.ml`이 모든 MODEL 호출을 Agent.run으로 라우팅 |
-| Context compaction | Complete | OAS Context_reducer 직접 위임, MASC Custom closure 주입 |
+| Context compaction | Partial | Keeper compaction is MASC-owned and OAS receives exact messages without an implicit reducer; durable owner operation, source CAS, and reinjection proof remain |
 | Event_bus bridge | Complete | OAS native/custom events are relayed to SSE and persisted under `.masc/oas-events/` |
 | Dashboard OAS runtime health | Complete | dashboard health uses `durable replay + live tail`, not live-only counters |
 | Dashboard runtime counts | Complete | dashboard `counts` carries active runtimes and `configured_keepers` carries inventory |
@@ -454,7 +444,7 @@ remain MASC-owned under `Masc.Memory.t` and the `Keeper_memory_*` modules.
 | Memory projection | Removed | MASC memory is not projected into OAS; runtime memory storage remains MASC-owned |
 | Team-session swarm | Partial | OAS Swarm runner 활성, bridge fidelity 불완전 |
 | Runtime config | Complete | runtime_id -> MASC runtime config/profile -> OAS Provider_registry -> Provider_config.t |
-| Verifier | Complete | PreToolUse hook + Guardrails adapter |
+| Verifier | Complete | configured structured-judge call; no local tool/effect classifier |
 | Model resolution | Complete | oas_model_resolve.ml이 Provider_Registry SSOT 사용 |
 | Tool bridge | Complete | MASC tool_schema -> OAS Tool.t 변환 |
 
@@ -479,16 +469,16 @@ Phase ordering follows `docs/design/checkpoint-truth-and-replay-rfc.md`.
 | Phase | Scope | Primary modules | Expected output |
 |------|-------|-----------------|-----------------|
 | A | truth surface cleanup | `keeper_checkpoint_store`, `keeper_agent_run`, `keeper_post_turn` | native OAS checkpoint is documented and treated as runtime truth |
-| B | replay semantics + side-effect boundary | `keeper_agent_run`, `keeper_post_turn`, `agent_tool_command_runtime`, `retired_file_write_tool` | typed replay target facts and mutation-boundary rules |
-| C | wrapper reduction | `keeper_context_runtime`, `keeper_agent_run`, `keeper_post_turn`, `context_compact_oas` | `working_context` dependency inventory and marker-leakage backlog |
+| B | replay semantics + checkpoint boundary | `keeper_agent_run`, `keeper_post_turn`, `agent_tool_command_runtime`, `retired_file_write_tool` | typed replay target facts and checkpoint rules |
+| C | wrapper reduction | `keeper_context_runtime`, `keeper_agent_run`, `keeper_post_turn`, `keeper_compact_policy` | `working_context` dependency inventory and exact checkpoint/reinjection backlog |
 | D | optional delta path | `keeper_checkpoint_store`, `delta-checkpoint-read-path` | delta restore remains subordinate to full checkpoint truth |
 
 ### 12.1.2 Active Tasks
 
 - **A1** native OAS checkpoint truth wording and legacy fallback removal
 - **A2** canonical vs derived continuity read-surface labeling
-- **B1** mutation-boundary typed fact inventory
-- **B2** side-effect class mapping against current write-gate behavior
+- **B1** checkpoint-boundary typed fact inventory
+- **B2** external-effect adapter inventory against the product-neutral Keeper Gate
 - **C1** `working_context` dependency inventory
 - **C2** prose/domain-state separation audit
 - **D1** delta restore remains optimization-only
@@ -499,9 +489,9 @@ Validation steps live in `docs/KEEPER-CONTINUITY-VALIDATION.md`.
 
 | Surface | Classification | Notes |
 |---------|----------------|-------|
-| `oas_worker` / `worker_oas` / `verifier_oas` | Correct | MASC consumes OAS runtime/build/hook contracts without teaching OAS about workspace/task semantics |
-| `context_compact_oas` | Acceptable but lossy | OAS reducer is authoritative, but MASC marker heuristics still influence scoring |
-| keeper context/checkpoint continuity path | Boundary violation | duplicate runtime ownership + raw text continuity markers remain |
+| `oas_worker` / `worker_oas` | Correct | MASC consumes OAS runtime/build/hook contracts without teaching OAS about workspace/task semantics |
+| `keeper_compact_policy` / `keeper_manual_compaction` | Correct owner, incomplete durability | MASC owns configured-LLM planning and checkpoint mutation; durable owner operation, source CAS, and reinjection proof remain |
+| keeper context/checkpoint continuity path | Open | exact checkpoint identity, durable operation references, and restart reconciliation remain incomplete |
 
 ### 12.3 Priority Order
 
@@ -514,11 +504,13 @@ Validation steps live in `docs/KEEPER-CONTINUITY-VALIDATION.md`.
 ## 13. Invariants
 
 1. **의존 방향은 단방향이다**: MASC -> OAS. OAS 코드에 MASC import가 존재하면 설계 위반이다.
-2. **MASC는 OAS Agent.run을 사용한다**: 에이전트 생명주기를 자체 재구현하지 않는다. `Runtime.call` 직접 사용은 금지.
+2. **MASC는 finite OAS Agent.run을 조합한다**: OAS run lifecycle을
+   복제하지 않는다. Keeper lifecycle과 durable product continuation은
+   MASC가 소유한다.
 3. **Message 타입은 공유한다**: `Agent_sdk.Types.message`가 MASC와 OAS 모두의 메시지 타입이다. 변환 레이어 없음.
 4. **Runtime name이 model을 추상화한다**: MASC policy code에 구체적 provider/model 이름이 하드코딩되지 않는다. runtime_id -> runtime.toml runtime config -> Provider_registry 체인.
 5. **Event_bus prefix는 `masc:`이다**: MASC 이벤트는 반드시 이 prefix를 사용한다. SSE bridge가 이 prefix로 필터링한다.
-6. **Verifier는 read-only를 건너뛴다**: read/grep/search/status 류 도구는 MODEL 호출 없이 Pass를 반환한다.
+6. **Verifier는 도구 이름으로 건너뛰지 않는다**: read/grep/search/status 같은 이름이나 로컬 effect label은 MODEL 호출을 생략하거나 Pass를 만들 권한이 없다.
 7. **Checkpoint는 session_id로 네임스페이스된다**: 동일 agent의 다른 세션 checkpoint와 충돌하지 않는다.
 8. **OAS API 확장 제안 전에 adapter를 먼저 시도한다**: MASC-specific 개념을 OAS public contract에 밀어넣지 않는다.
 

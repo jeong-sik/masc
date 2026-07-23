@@ -43,12 +43,12 @@
    17% / 41% split for [claude_code:auto] reported in #9953 is
    directly visible here as three counter rows. *)
 
-(* #10121: keeper turn livelock observer.  Each turn-start
+(* Objective Keeper turn-attempt observations. Each turn start
    bumps [Keeper_metrics.(to_string TurnStarts)]; a re-start of the SAME
    turn id (turn counter did not advance) bumps the dedicated
    [Keeper_metrics.(to_string TurnReattempts)].  Operators alert on
    [rate(masc_keeper_turn_reattempts_total[5m]) > 0] and pick
-   up stuck-turn pairs without grepping log lines.  See also
+   up repeated-turn pairs without grepping log lines. See also
    [Keeper_metrics.(to_string TurnRegressions)] when the FSM moves to a
    strictly LOWER turn id (very unusual; indicative of
    write_meta race losing an in-memory counter increment,
@@ -146,15 +146,8 @@ let metric_keeper_waiting_count = "masc_keeper_waiting_count"
 let metric_keeper_waiting_age_seconds = "masc_keeper_waiting_age_seconds"
 let metric_keeper_waiting_keeper_count = "masc_keeper_waiting_keeper_count"
 
-let metric_schedule_approval_blocked_count =
-  "masc_schedule_approval_blocked_count"
-
-let metric_schedule_approval_wait_seconds =
-  "masc_schedule_approval_wait_seconds"
-
 (* Schedule unsupported payload counter. Labels:
-   - [phase] in {creation, dispatch}
-   - [risk_class] in [Schedule_domain.risk_class_to_string] labels.
+   - [phase] in {creation, dispatch}.
    Raw payload kinds are intentionally not labels; they remain in typed
    errors/projections to avoid unbounded metric cardinality. *)
 let metric_schedule_payload_unsupported_total =
@@ -197,8 +190,6 @@ let metric_file_lock_table_cas_retries =
 let metric_tool_keeper_cache_ttl_parse_failures =
   Otel_metric_store_core.declare_counter "masc_tool_keeper_cache_ttl_parse_failures_total"
 
-let metric_timeout_policy_overshoot = Otel_metric_store_core.declare_counter "masc_timeout_policy_overshoot_total"
-
 (* Keeper compaction (keeper_compact_policy.ml, keeper_tool_surface.ml). *)
 
 (* #9943: per-keeper counter of "compaction triggered but
@@ -210,7 +201,7 @@ let metric_timeout_policy_overshoot = Otel_metric_store_core.declare_counter "ma
    [masc_keeper_compactions_total] hides because that counter
    is incremented on the trigger rather than the savings.  This
    counter labels by [keeper, trigger] so dashboards separate
-   "context_overflow_imminent triggered noop" from "manual
+   "provider_overflow triggered noop" from "manual
    trigger noop" etc. and operators can attribute blame.  Pair
    with [masc_keeper_compaction_saved_tokens_total] (already
    shipping) — that one tracks the bytes saved by the 1.6%
@@ -249,9 +240,8 @@ let metric_timeout_policy_overshoot = Otel_metric_store_core.declare_counter "ma
    The leak lives strictly in the user-visible string; the
    structured side-channel (Eio.traceln + this counter) keeps
    the rejection observable for operators without echoing the
-   roots list back to the LLM.  Labels:
-   - [kind] = "out_of_roots" (path resolved outside allowed)
-              | "not_found_relative" (relative path matched no root) *)
+   roots list back to the LLM.  Label [kind="out_of_roots"] means the
+   symlink-resolved candidate was outside every explicit allowed root. *)
 
 (* Retired RFC-0026 admission-router shadow metric name. Kept only for
    historical Otel_metric_store compatibility; active keeper scheduling uses the
@@ -267,16 +257,6 @@ let metric_write_meta_cas_retry_total = Otel_metric_store_core.declare_counter "
    [Keeper_metrics.(to_string ProactiveOutcome)] classifies every scheduled
    autonomous cycle into tool_called | noop | error, giving a fleet-wide
    health ratio in Grafana. *)
-(* PR-B: keeper turn skipped due to ollama saturation pre-check.
-   Labelled by [keeper] and [runtime]. *)
 let metric_cache_desync_cleared = Otel_metric_store_core.declare_counter "masc_cache_desync_cleared_total"
 let metric_persistence_read_drops = Otel_metric_store_core.declare_counter "masc_persistence_read_drops_total"
 let metric_persistence_utf8_repair = Otel_metric_store_core.declare_counter "masc_persistence_utf8_repair_total"
-let metric_discovery_history_failures = Otel_metric_store_core.declare_counter "masc_discovery_history_failures_total"
-
-(* #18855: per-tool correction_pipeline fix counter.
-   Incremented when the OAS agent_tools module reports that
-   correction_pipeline fixed input fields for a tool.
-   Labels: [tool_name]. *)
-let metric_oas_correction_pipeline_fixes_total =
-  Otel_metric_store_core.declare_counter "masc_oas_correction_pipeline_fixes_total"

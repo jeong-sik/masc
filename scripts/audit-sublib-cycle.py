@@ -91,7 +91,6 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.discovery_cache",
     "masc.local_runtime_pool",
     "masc.worker_execution_backend",
-    "masc.worker_runtime_config",
     "masc.worker_execution_spec",
     # Keeper-owned pure/type leaves extracted from lib/keeper/.
     "masc.keeper_accountability_claim_types",
@@ -104,7 +103,6 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.keeper_binding_health_config",
     "masc.keeper_transition_audit_types",
     "masc.keeper_path_rejection",
-    "masc.keeper_failure_circuit_breaker_types",
     "masc.keeper_approval_queue_rules_types",
     "masc.keeper_toml_parser",
     "masc.keeper_toml_loader",
@@ -113,7 +111,6 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.keeper_id",
     "masc.keeper_terminal_reason",
     "masc.keeper_timing",
-    "masc.keeper_token_count",
     "masc.keeper_sandbox_error",
     "masc.keeper_provider_error_class",
     "masc.keeper_failure_taxonomy",
@@ -128,8 +125,12 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.keeper_usage_trust",
     "masc.keeper_measurement",
     "masc.keeper_prompt_names",
-    "masc.keeper_event_bus",
-    "masc.keeper_failure_policy",
+    # [masc.keeper_event_bus] and [masc.masc_event_bus] were merged into this
+    # single library. The name must be updated here, not just dropped: [check]
+    # silently [continue]s past a leaf that is absent from the dune graph, so a
+    # stale entry does not fail — it makes the RFC-0056 G1 backsliding gate
+    # no-op for that leaf family without any signal.
+    "masc.event_bus_slots",
     "masc.keeper_synthetic_marker",
     "masc.keeper_oas_timeout_message",
     "masc.keeper_tool_response",

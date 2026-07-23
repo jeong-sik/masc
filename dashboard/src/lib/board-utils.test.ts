@@ -5,9 +5,6 @@ import {
   boardPostPermalink,
   boardPostTrackbackMarkdown,
   boardPostXShareUrl,
-  contributorQualityBandLabel,
-  contributorQualityBadgeClass,
-  contributorQualityPercent,
   dedupeLeadingHeading,
   stripInlineMarkdown,
 } from './board-utils'
@@ -114,46 +111,6 @@ describe('board post sharing helpers', () => {
     expect(url.pathname).toBe('/intent/tweet')
     expect(url.searchParams.get('text')).toBe('Share me - MASC Board')
     expect(url.searchParams.get('url')).toBe('http://localhost:5179/dashboard/#board?post=p-1')
-  })
-})
-
-describe('contributor quality helpers', () => {
-  it('uses accountability_score when legacy score is absent and evidence exists', () => {
-    const quality = {
-      source: 'agent_reputation',
-      completion_rate: 0.8,
-      response_rate: 0.6,
-      board_posts: 1,
-      accountability_score: 0.9,
-    }
-
-    expect(contributorQualityPercent(quality)).toBe(90)
-    expect(contributorQualityBandLabel(quality)).toBe('품질')
-    expect(contributorQualityBadgeClass(quality)).toContain('color-bg-muted')
-  })
-
-  it('does not render default reputation priors as a numeric quality score', () => {
-    expect(contributorQualityPercent({
-      source: 'agent_reputation',
-      completion_rate: 0,
-      response_rate: 0,
-      board_posts: 0,
-      board_comments: 0,
-      accountability_score: 1,
-      autonomy_level: 'standard',
-      thompson_confidence: 0.5,
-    })).toBeNull()
-  })
-
-  it('uses backend-supplied quality band without inventing thresholds', () => {
-    const quality = {
-      accountability_score: 0.4,
-      board_comments: 2,
-      band: 'strong' as const,
-    }
-    expect(contributorQualityPercent(quality)).toBe(40)
-    expect(contributorQualityBandLabel(quality)).toBe('강함')
-    expect(contributorQualityBadgeClass(quality)).toContain('ok-10')
   })
 })
 

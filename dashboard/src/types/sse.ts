@@ -44,13 +44,16 @@ export type SSEEventType =
   | 'client_input_approved'
   | 'client_input_rejected'
   | 'client_input_updated'
-  | 'governance_param_changed'
+  | 'runtime_param_changed'
   | 'approval:pending'
   | 'approval:resolved'
+  | 'approval:summary_updated'
+  // Nonhierarchical Gate mode transitions (#24332 governance->gate refactor).
+  // Emitted by server_routes_http_routes_dashboard.ml.
+  | 'gate_mode_changed'
+  // Task claim notifications. Emitted by lib/task/tool_task_handlers.ml.
+  | 'masc/task_claimed'
   // OAS bridge events (relayed from Event_bus via oas_sse_bridge)
-  | 'oas:masc:autonomy:agent_selected'
-  | 'oas:masc:autonomy:agent_decision'
-  | 'oas:masc:autonomy:agent_action_executed'
   | 'oas:masc:keeper:snapshot'
   | 'oas:masc:keeper:lifecycle'
   | 'oas:masc:trust_updated'
@@ -109,7 +112,6 @@ export type AttributionOrigin = 'det' | 'nondet'
 // a client update, but enumerating canonical values gives us autocomplete and
 // catches typos.
 export type AttributionGate =
-  | 'cdal_verdict'
   | 'verification'
   | 'exec_policy'
   | 'accountability'
@@ -193,6 +195,7 @@ export interface SSEEvent {
   // Keeper tool call / tool skip fields
   tool_name?: string
   duration_ms?: number
+  disposition?: 'completed' | 'deferred' | 'failed'
   success?: boolean
   error_text?: string
   tool_args?: unknown
@@ -215,8 +218,16 @@ export interface SSEEvent {
   cost_usd?: number
   tool_calls_made?: number
   total_turns?: number
-  // OAS bridge payload (generic container for Event_bus events)
-  payload?: Record<string, unknown>
+  // OAS bridge payload (generic container for Event_bus events).
+  payload?: Record<string, unknown> | string
+  // Wall-clock time attached to runtime events such as masc/task_claimed.
+  timestamp?: number
+  // gate_mode_changed: nonhierarchical Gate mode transition fields.
+  mode?: string
+  previous_mode?: string | null
+  actor?: string
+  changed_at?: string
+  kind?: string
   // OAS envelope — attached to every oas:* event by oas_sse_bridge since 2.260.0.
   // Used to join events into causal chains in the dashboard journal.
   correlation_id?: string
@@ -315,28 +326,12 @@ export interface RouteState {
   postId: string | null
 }
 
-export type TabId =
-  | 'cockpit'
-  | 'overview'
-  | 'monitoring'
-  | 'keepers'
-  | 'board'
-  | 'schedule'
-  | 'fusion'
-  | 'command'
-  | 'connectors'
-  | 'workspace'
-  | 'lab'
-  | 'code'
-  | 'logs'
-  | 'settings'
-  | 'approvals'
-
-export const VALID_TABS: TabId[] = [
+export const VALID_TABS = [
   'cockpit',
   'overview',
   'monitoring',
   'keepers',
+  'registry',
   'board',
   'schedule',
   'fusion',
@@ -348,4 +343,6 @@ export const VALID_TABS: TabId[] = [
   'logs',
   'settings',
   'approvals',
-]
+] as const
+
+export type TabId = typeof VALID_TABS[number]

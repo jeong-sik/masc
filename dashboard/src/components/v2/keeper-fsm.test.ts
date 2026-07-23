@@ -6,8 +6,7 @@
 // updating `keeper-fsm.ts` will (a) fail `tsc --noEmit` for `Record<KeeperPhase,
 // …>` tables and (b) fail this test which enumerates them at runtime.
 //
-// Why: prototype `data.jsx:36-45` ships 12 phases; the live wire adds `Zombie`
-// as a 13th. Without the closed-sum guard, a wire string like 'constructor'
+// Without the closed-sum guard, a wire string like 'constructor'
 // would slip through `phase in PHASE_TONE` via the JS prototype chain (the
 // very bug the iter-4 SSOT lift closed in fleet-tone.ts). The
 // `isKeeperPhase` registry closes the same hole here.
@@ -36,11 +35,10 @@ const ALL_PHASES: readonly KeeperPhase[] = [
   'Stopped',
   'Crashed',
   'Dead',
-  'Zombie',
 ]
 
 describe('keeper-fsm SSOT closed-sum', () => {
-  it('FSM_STATES matches the prototype 12-phase set (no Zombie)', () => {
+  it('FSM_STATES matches the canonical phase set', () => {
     expect(new Set(FSM_STATES)).toEqual(new Set([
       'Offline', 'Restarting', 'Running', 'Compacting', 'HandingOff',
       'Failing', 'Overflowed', 'Draining', 'Paused', 'Stopped',
@@ -96,7 +94,7 @@ describe('keeper-fsm SSOT closed-sum', () => {
     expect(Array.isArray(actions)).toBe(true)
     // transient / terminal phases expose no actions
     const transientOrTerminal: ReadonlySet<KeeperPhase> = new Set([
-      'Compacting', 'HandingOff', 'Draining', 'Restarting', 'Dead', 'Zombie',
+      'Compacting', 'HandingOff', 'Draining', 'Restarting', 'Dead',
     ])
     if (transientOrTerminal.has(phase)) {
       expect(actions).toHaveLength(0)

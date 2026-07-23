@@ -7,10 +7,31 @@ type 'a context = {
   clock : 'a Eio.Time.clock;
   proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
   net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
+  invocation_ref : Tool_invocation_ref.t option;
+  publication_recovery_provider :
+    Keeper_publication_recovery_availability.provider;
 }
 
-let create ~config ~agent_name ~sw ~clock ~proc_mgr ~net =
-  { config; agent_name; sw; clock; proc_mgr; net }
+let create
+      ?invocation_ref
+      ~config
+      ~agent_name
+      ~sw
+      ~clock
+      ~proc_mgr
+      ~net
+      ~publication_recovery_provider
+      ()
+  =
+  { config
+  ; agent_name
+  ; sw
+  ; clock
+  ; proc_mgr
+  ; net
+  ; invocation_ref
+  ; publication_recovery_provider
+  }
 
 let to_tool_keeper_context (ctx : _ context) : _ Keeper_tool_surface.context =
   {
@@ -20,11 +41,39 @@ let to_tool_keeper_context (ctx : _ context) : _ Keeper_tool_surface.context =
     clock = ctx.clock;
     proc_mgr = ctx.proc_mgr;
     net = ctx.net;
+    publication_recovery_provider = ctx.publication_recovery_provider;
   }
 
 let dispatch ctx ~name ~args =
-  Keeper_tool_surface.dispatch (to_tool_keeper_context ctx) ~name ~args
-
-let dispatch_stream ?on_text_delta ?on_event ctx ~name ~args =
-  Keeper_tool_surface.dispatch_stream ?on_text_delta ?on_event (to_tool_keeper_context ctx) ~name
+  Keeper_tool_surface.dispatch
+    ?invocation_ref:ctx.invocation_ref
+    (to_tool_keeper_context ctx)
+    ~name
     ~args
+
+(* TEL-OK: this only closes over Keeper-owned context; dispatch remains observed downstream. *)
+let delegated_dispatch
+      ?invocation_ref
+      ~config
+      ~agent_name
+      ~sw
+      ~clock
+      ~proc_mgr
+      ~net
+      ~publication_recovery_provider
+      ()
+  =
+  let ctx =
+    create
+      ?invocation_ref
+      ~config
+      ~agent_name
+      ~sw
+      ~clock
+      ~proc_mgr
+      ~net
+      ~publication_recovery_provider
+      ()
+  in
+  fun ~name ~args -> dispatch ctx ~name ~args
+;;

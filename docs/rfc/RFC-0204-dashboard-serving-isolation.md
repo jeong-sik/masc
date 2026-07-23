@@ -22,15 +22,15 @@ related:
 >
 > - **Phase 1 — LANDED** (more robustly than this RFC's literal §8.4 text). The two mutable session fields (`dashboard_authenticated`/`dashboard_agent`) were replaced by a single `dashboard_auth : dashboard_auth_state Atomic.t` (`server_mcp_transport_ws.ml:39-41,82,483`; one `Atomic.set` writer, all readers `Atomic.get` including the SSE-forward gates). The `with_sessions_rw` prescription was deliberately not taken — `Eio.Mutex` is single-domain and gives no cross-domain protection, so `Atomic` is the correct (stronger) lever for the Phase 3 boundary.
 > - **Phase 2 — PARTIAL.** Publisher-offload landed (`dashboard_snapshot.ml:274` offloads compute before the sleep; the §8.2.3 inline-compute defect is fixed). The dedicated dashboard pool (Option A) did **not** land — one shared `Domain_pool.create` (`server_runtime_bootstrap.ml:865`) serves dashboard + keeper compute, so refresh still queues behind keeper jobs. Per §8.4 Option A is necessary-but-insufficient anyway; Phase 3 must not assume a `dashboard_pool` exists.
-> - **Phase 0 — NOT landed.** The board handler (`server_dashboard_http.ml:69`) still uses `submit_io_or_inline` (weight 0.05); board/governance/tool-quality/config are not pre-warmed. Caveat: the §3 "wire `submit_cpu` (weight 1.0) for board" change was separately assessed as a harmful workaround (Eio weight is admission-packing, not priority; 1.0 makes the heavy job monopolise a worker, pushing the other read sites behind it) — measure it under a harness before landing, do not land on faith.
+> - **Phase 0 — NOT landed.** The board handler (`server_dashboard_http.ml:69`) still uses `submit_io_or_inline` (weight 0.05); board/Gate/tool-quality/config are not pre-warmed. Caveat: the §3 "wire `submit_cpu` (weight 1.0) for board" change was separately assessed as a harmful workaround (Eio weight is admission-packing, not priority; 1.0 makes the heavy job monopolise a worker, pushing the other read sites behind it) — measure it under a harness before landing, do not land on faith.
 > - **§9 empirical gate update:** a controlled-load harness (`scripts/harness/perf/scheduler_starvation_gate.sh`) reproduces serving-concurrency RED at negligible host load (48 in-process requests + 1 host hog → `/health` p95 ~80×), answering §9's open "is it just host pileup?" with **no** — the starvation is serving-concurrency-dominant. Two per-request micro-offloads (turn-records parse; json serialize+compress) were harness-falsified, leaving the dedicated serving domain (Phase 3) as the remaining lever.
-> - **Phase 3 feasibility:** hybrid-routing only (not a clean split). The wait-free read path (`/dashboard/shell` → `Dashboard_snapshot.current()` `Atomic.get`) is safe to move, but ~15 keeper-owned `Eio.Mutex`es plus `sessions_mutex` are reachable from serving handlers (SSE keeper_stream, WS subscribe, governance approvals, keeper-mutation REST) and must stay on main. Open blockers before Phase 3: the keeper-burst isolation regression test (§5/§7 merge gate) does not yet exist (authored next), the per-handler audit is not yet exhaustive, and the `sessions_mutex` cross-domain design (the WS upgrade fiber and main-domain MCP dispatch both acquire it) is unresolved.
+> - **Phase 3 feasibility:** hybrid-routing only (not a clean split). The wait-free read path (`/dashboard/shell` → `Dashboard_snapshot.current()` `Atomic.get`) is safe to move, but ~15 keeper-owned `Eio.Mutex`es plus `sessions_mutex` are reachable from serving handlers (SSE keeper_stream, WS subscribe, Gate journal reads, keeper-mutation REST) and must stay on main. Open blockers before Phase 3: the keeper-burst isolation regression test (§5/§7 merge gate) does not yet exist (authored next), the per-handler audit is not yet exhaustive, and the `sessions_mutex` cross-domain design (the WS upgrade fiber and main-domain MCP dispatch both acquire it) is unresolved.
 
 ## 1. Problem
 
 Dashboard HTTP latency is dominated by *waiting*, not handler work.
 
-- Warm-cache handler floors are sub-30ms (config 2ms, governance 3ms, board 13ms, operator 7ms).
+- Warm-cache handler floors are sub-30ms (config 2ms, Gate 3ms, board 13ms, operator 7ms).
 - Yet user-observed latency reaches 8–40s; e.g. `tool-quality` true cost 0.09s but measured up to 24s.
 - Latency tracks host CPU load monotonically (16-core machine): 1-min load 14.5 → parallel-burst wall-clock 2.76s; load 30–78 → multiple 40s timeouts (including the trivially-cached `provider-logs`); load 178 → 11s. `main_eio` sat at 12–27% CPU throughout — starved, not self-saturating.
 
@@ -59,7 +59,7 @@ Distribute the accept loop across domains (`Eio.Domain_manager` + `SO_REUSEPORT`
 
 ### Supporting changes (cheap, measure first — may suffice without a second pool)
 - **Fix the offload weight**: heavy CPU handlers (board 936KB JSON build) should use `submit_cpu` (1.0), not `submit_io` (0.05). Wire the dead `submit_cpu*` or delete it (resolves the undocumented dual-weight ambiguity).
-- **Proactively pre-warm the 8 slow surfaces** (board/governance/goals/tool-quality/shell/config/operator/execution) like execution/operator already are, so on-demand cold compute never blocks a user request (`Dashboard_cache` SWR serves stale instantly once warm).
+- **Proactively pre-warm the 8 slow surfaces** (board/Gate/goals/tool-quality/shell/config/operator/execution) like execution/operator already are, so on-demand cold compute never blocks a user request (`Dashboard_cache` SWR serves stale instantly once warm).
 
 ## 4. Workaround-bar note (CLAUDE.md)
 

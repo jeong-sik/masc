@@ -17,7 +17,9 @@ Status: Active (PR-2 #15810 & PR-3 #15853 merged; PR-4/5/6 pending)
 Author: jeong-sik (vincent)
 Date: 2026-05-17
 Scope: SSE / WS / gRPC / WebRTC session lifecycle uniformity at the transport layer
-Out of scope: timeout layering (covered by `docs/TIMEOUT-MATRIX.md`), Streamable HTTP migration (IMPROVE-02, awaits in-flight #15722/#15725), FD accounting (IMPROVE-03)
+Out of scope: execution-boundary ownership (now covered by
+`docs/KEEPER-FULL-FEATURE-GOAL.md`), Streamable HTTP migration
+(IMPROVE-02, awaits in-flight #15722/#15725), FD accounting (IMPROVE-03)
 Series: **IMPROVE-05** of the masc + oas improvement series. Sibling RFCs: [[RFC-0098]] (typed envelope, IMPROVE-01).
 
 ## 1. Problem
@@ -46,7 +48,10 @@ ALB / Cloudflare-style middleboxes drop idle connections at ~60s. Without a *uni
 
 ## 2. Non-goals
 
-- **Timeout layer redesign.** `docs/TIMEOUT-MATRIX.md` owns the inner Tool / MCP / OAS / Keeper timeout chain. This RFC is about *transport-edge* session lifecycle (open/upgrade/resume/evict/close), not about how long a tool may run.
+- **Execution-boundary redesign.** The current authority is
+  `docs/KEEPER-FULL-FEATURE-GOAL.md`; this RFC is about *transport-edge*
+  session lifecycle (open/upgrade/resume/evict/close), not provider, caller,
+  or tool execution boundaries.
 - **Streamable HTTP migration.** [[RFC-0098]] documents IMPROVE-02 (Streamable HTTP as default) which awaits in-flight PRs #15722/#15725. This RFC operates on the current SSE/WS/gRPC/WebRTC stack regardless of that migration.
 - **FD accounting.** WS-C RFC (IMPROVE-03) handles FD ceiling / pool accounting. This RFC's `Backpressure_shed` close frames will *consume* FD-pressure signals from that RFC once it lands.
 - **Adding a fifth transport.** Coverage of the existing four is the goal.
@@ -140,7 +145,8 @@ New env knobs (single source for all four transports):
 | `MASC_TRANSPORT_RESUME_WINDOW_SEC` | 300 | SSE ring-buffer TTL |
 | `MASC_TRANSPORT_MAX_CLIENTS` | 200 | per-transport cap (each transport interprets) |
 
-`docs/TIMEOUT-MATRIX.md` extended with a new `## Transport edge` section that **points** to this file (no duplication). The 4 knobs above are the *only* keep-alive surface; per-transport hard-coded constants become CI-banned in the transport modules.
+The four knobs above are the transport-session keep-alive surface described by
+this historical RFC. They do not grant Keeper execution authority.
 
 ## 4. Migration plan
 
@@ -197,4 +203,4 @@ PR-2 is **wire-inert** (Event_bus only). PR-3 introduces the first client-visibl
 - [WebSocket Close Codes — RFC 6455 §7.4.2](https://www.rfc-editor.org/rfc/rfc6455#section-7.4.2)
 - [gRPC Status Codes](https://grpc.io/docs/guides/status-codes/)
 - [Server-Sent Events — MDN](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events)
-- `docs/TIMEOUT-MATRIX.md` — inner-layer timeout SSOT (complementary)
+- `docs/KEEPER-FULL-FEATURE-GOAL.md` — current execution-boundary authority

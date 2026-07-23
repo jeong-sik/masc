@@ -1,10 +1,15 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  _testResetSseSchemaDriftLog,
   AttributionSchema,
   parseSSEMessage,
   SSEMessageSchema,
   SSEEventTypeSchema,
 } from './sse'
+
+beforeEach(() => {
+  _testResetSseSchemaDriftLog()
+})
 
 describe('SSEEventTypeSchema', () => {
   it('accepts a known event type', () => {
@@ -19,7 +24,6 @@ describe('SSEEventTypeSchema', () => {
 
   it('accepts current and future oas-prefixed event types', () => {
     expect(SSEEventTypeSchema.parse('oas:agent_failed')).toBe('oas:agent_failed')
-    expect(SSEEventTypeSchema.parse('oas:context_overflow_imminent')).toBe('oas:context_overflow_imminent')
     expect(SSEEventTypeSchema.parse('oas:masc:keeper_gate')).toBe('oas:masc:keeper_gate')
     expect(SSEEventTypeSchema.parse('oas:future:event')).toBe('oas:future:event')
   })
@@ -95,7 +99,7 @@ describe('SSEMessageSchema', () => {
       keeper_name: 'k1',
       tool_name: 'bash',
       duration_ms: 1234,
-      success: true,
+      disposition: 'completed',
       tool_args: { path: '/tmp/a' },
       tool_result: { ok: true },
       tool_args_preview: '{"path":"/tmp/a"}',
@@ -103,6 +107,16 @@ describe('SSEMessageSchema', () => {
       tool_io_redacted: false,
     })
     expect(r.success).toBe(true)
+  })
+
+  it('rejects a keeper_tool_call without canonical disposition', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'keeper_tool_call',
+      tool_name: 'bash',
+      duration_ms: 1234,
+      success: true,
+    })
+    expect(r.success).toBe(false)
   })
 
   it('rejects wrong type on a known field', () => {
@@ -232,6 +246,69 @@ describe('SSEMessageSchema', () => {
   ])('rejects an incomplete Keeper chat-queue invalidation: %o', value => {
     expect(SSEMessageSchema.safeParse(value).success).toBe(false)
   })
+
+  it('accepts a gate_mode_changed event with a null previous_mode', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'gate_mode_changed',
+      mode: 'supervised',
+      previous_mode: null,
+      actor: 'operator',
+      changed_at: '2026-07-15T00:00:00Z',
+    })
+    expect(r.success).toBe(true)
+  })
+
+  it('accepts a gate_mode_changed event with a string previous_mode', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'gate_mode_changed',
+      mode: 'autonomous',
+      previous_mode: 'supervised',
+      actor: 'operator',
+      changed_at: '2026-07-15T00:00:00Z',
+    })
+    expect(r.success).toBe(true)
+  })
+
+  it('rejects a gate_mode_changed event with a non-string mode', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'gate_mode_changed',
+      mode: 1,
+      actor: 'operator',
+      changed_at: '2026-07-15T00:00:00Z',
+    })
+    expect(r.success).toBe(false)
+  })
+
+  it('accepts a masc/task_claimed event', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'masc/task_claimed',
+      task_id: 'task-1',
+      agent_name: 'claude',
+      timestamp: 1_712_000_000,
+    })
+    expect(r.success).toBe(true)
+  })
+
+  it.each([
+    { type: 'masc/task_claimed', agent_name: 'claude' },
+    { type: 'masc/task_claimed', task_id: 'task-1' },
+  ])('rejects a malformed masc/task_claimed event: %o', value => {
+    expect(SSEMessageSchema.safeParse(value).success).toBe(false)
+  })
+
+  it('accepts an approval:summary_updated event with a record payload', () => {
+    const r = SSEMessageSchema.safeParse({
+      type: 'approval:summary_updated',
+      payload: { id: 'req-1', summary_status: 'approved' },
+    })
+    expect(r.success).toBe(true)
+  })
+
+  it('rejects an approval:summary_updated event with a non-object payload', () => {
+    const r = SSEMessageSchema.safeParse({ type: 'approval:summary_updated', payload: 'not an object' })
+    expect(r.success).toBe(false)
+  })
+
 })
 
 describe('parseSSEMessage', () => {
@@ -263,6 +340,50 @@ describe('parseSSEMessage', () => {
     })
     expect(msg).not.toBeNull()
     expect(msg?.type).toBe('fusion_run_status')
+    expect(warnSpy).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
+  })
+
+  it('keeps gate_mode_changed events instead of dropping them as schema drift', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const msg = parseSSEMessage({
+      type: 'gate_mode_changed',
+      mode: 'supervised',
+      previous_mode: null,
+      actor: 'operator',
+      changed_at: '2026-07-15T00:00:00Z',
+    })
+    expect(msg).not.toBeNull()
+    expect(msg?.type).toBe('gate_mode_changed')
+    expect(warnSpy).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
+  })
+
+  it('keeps masc/task_claimed events so the execution panel refresh is not dropped', () => {
+    // Regression: sse-store.ts PREFIX_ROUTES already routes 'masc/task_' to
+    // the execution refresh target; it only ever saw the event if this parse
+    // boundary let it through.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const msg = parseSSEMessage({
+      type: 'masc/task_claimed',
+      task_id: 'task-1',
+      agent_name: 'claude',
+      timestamp: 1_712_000_000,
+    })
+    expect(msg).not.toBeNull()
+    expect(msg?.type).toBe('masc/task_claimed')
+    expect(warnSpy).not.toHaveBeenCalled()
+    warnSpy.mockRestore()
+  })
+
+  it('keeps approval:summary_updated events instead of dropping them as schema drift', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const msg = parseSSEMessage({
+      type: 'approval:summary_updated',
+      payload: { id: 'req-1', summary_status: 'approved' },
+    })
+    expect(msg).not.toBeNull()
+    expect(msg?.type).toBe('approval:summary_updated')
     expect(warnSpy).not.toHaveBeenCalled()
     warnSpy.mockRestore()
   })
@@ -341,6 +462,57 @@ describe('parseSSEMessage', () => {
     expect(parseSSEMessage('just a string')).toBeNull()
     expect(parseSSEMessage(42)).toBeNull()
     expect(parseSSEMessage(null)).toBeNull()
+    warnSpy.mockRestore()
+  })
+})
+
+describe('schema drift log aggregation', () => {
+  // This suite tests the log-surface throttle only. It does not test that
+  // the underlying event is dropped — that is unconditional and is covered
+  // by the SSEMessageSchema rejection tests above.
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('warns immediately on the first drift of a kind', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    parseSSEMessage({ type: 'still_not_a_real_type' })
+    expect(warnSpy).toHaveBeenCalledOnce()
+    warnSpy.mockRestore()
+  })
+
+  it('suppresses repeats of the same kind within the aggregation window', () => {
+    vi.useFakeTimers()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    for (let i = 0; i < 5; i++) {
+      parseSSEMessage({ type: 'flooding_bad_type' })
+    }
+    // First occurrence logs immediately; the other 4 are counted, not logged.
+    expect(warnSpy).toHaveBeenCalledOnce()
+    warnSpy.mockRestore()
+  })
+
+  it('flushes one aggregated summary line when the window closes, only if repeats occurred', () => {
+    vi.useFakeTimers()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    for (let i = 0; i < 3; i++) {
+      parseSSEMessage({ type: 'bursty_bad_type' })
+    }
+    expect(warnSpy).toHaveBeenCalledOnce()
+    vi.advanceTimersByTime(60_000)
+    expect(warnSpy).toHaveBeenCalledTimes(2)
+    expect(warnSpy.mock.calls[1]![0]).toContain('bursty_bad_type')
+    expect(warnSpy.mock.calls[1]![0]).toContain('dropped 3 in 60s')
+    warnSpy.mockRestore()
+  })
+
+  it('does not emit a second line when a kind never repeats', () => {
+    vi.useFakeTimers()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    parseSSEMessage({ type: 'lonely_bad_type' })
+    expect(warnSpy).toHaveBeenCalledOnce()
+    vi.advanceTimersByTime(60_000)
+    expect(warnSpy).toHaveBeenCalledOnce()
     warnSpy.mockRestore()
   })
 })

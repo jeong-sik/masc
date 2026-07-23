@@ -80,7 +80,7 @@ type phase =
   | Stopped       (* Clean exit *)
   | Crashed       (* Unrecoverable error, restart candidate *)
   | Restarting    (* Supervisor backoff wait before re-launch *)
-  | Dead          (* Restart budget exhausted, tombstone *)
+  | Dead          (* Explicit durable tombstone *)
 ```
 
 ### Observable Conditions (Kubernetes Pattern)
@@ -96,7 +96,7 @@ type conditions = {
   handoff_active : bool;
   operator_paused : bool;
   stop_requested : bool;
-  restart_budget_remaining : bool;
+  dead_tombstone_latched : bool;
   backoff_elapsed : bool;
   drain_complete : bool;
 }

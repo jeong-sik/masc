@@ -6,7 +6,6 @@ type t =
   | Claimed_task_nudge
   | Retry_nudge
   | Memory_os_recall
-  | User_model
   | Connected_surface
   | Other of string
 
@@ -19,12 +18,11 @@ let equal a b =
   | Claimed_task_nudge, Claimed_task_nudge
   | Retry_nudge, Retry_nudge
   | Memory_os_recall, Memory_os_recall
-  | User_model, User_model
   | Connected_surface, Connected_surface -> true
   | Other a, Other b -> String.equal a b
   | ( ( Persona | Continuity | Dynamic_context | Temporal_summary
       | Claimed_task_nudge | Retry_nudge | Memory_os_recall
-      | User_model | Connected_surface | Other _ )
+      | Connected_surface | Other _ )
     , _ ) -> false
 
 let to_string = function
@@ -35,7 +33,6 @@ let to_string = function
   | Claimed_task_nudge -> "claimed_task_nudge"
   | Retry_nudge -> "retry_nudge"
   | Memory_os_recall -> "memory_os_recall"
-  | User_model -> "user_model"
   | Connected_surface -> "connected_surface"
   | Other name -> name
 
@@ -47,7 +44,6 @@ let of_string = function
   | "claimed_task_nudge" -> Claimed_task_nudge
   | "retry_nudge" -> Retry_nudge
   | "memory_os_recall" -> Memory_os_recall
-  | "user_model" -> User_model
   | "connected_surface" -> Connected_surface
   | name -> Other name
 
@@ -59,6 +55,5 @@ let all_known =
   ; Claimed_task_nudge
   ; Retry_nudge
   ; Memory_os_recall
-  ; User_model
   ; Connected_surface
   ]

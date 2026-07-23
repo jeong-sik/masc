@@ -1,8 +1,7 @@
-(** Shell_ir_oracle — parser-oracle fact subset for Shell IR hardening.
+(** Shell_ir_oracle — parser-oracle fact subset for Shell IR validation.
 
     This module is intentionally data-only.  A non-production sidecar can
-    emit this JSON shape from a real shell parser, while OCaml owns policy,
-    descriptor parity, risk floors, and receipts. *)
+    emit this JSON shape from a real shell parser. *)
 
 type parse_status =
   | Parsed_ok
@@ -46,12 +45,8 @@ val of_yojson : Yojson.Safe.t -> (t, string) result
 val of_string : string -> (t, string) result
 val feature_names : t -> string list
 
-val descriptor_parity_blockers : t -> string list
-(** Features that a read-only descriptor must not silently ignore.
+val structural_blockers : t -> string list
+(** Features that a structured command descriptor must not silently ignore.
     Non-[Parsed_ok] parser status is also a blocker. *)
 
-val read_only_descriptor_compatible : t -> (unit, string) result
-val syntax_floor : t -> Shell_ir_risk.risk_class
-(** Conservative oracle-derived syntax floor.  This is not final policy:
-    it exists so differential tests can prove parser facts never lower
-    the existing Shell IR decision. *)
+val structurally_compatible : t -> (unit, string) result

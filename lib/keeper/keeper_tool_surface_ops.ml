@@ -24,17 +24,31 @@ type 'a context = 'a Keeper_types_profile.context = {
   clock : 'a Eio.Time.clock;
   proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
   net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
+  publication_recovery_provider :
+    Keeper_publication_recovery_availability.provider;
 }
 type tool_result = Keeper_types_profile.tool_result
 let schemas = Keeper_types_profile.schemas
-type text_cache = {
+
+type handler_error =
+  | Message_error of string
+  | Payload_error of Yojson.Safe.t
+
+let message_error result = Result.map_error (fun error -> Message_error error) result
+
+let tool_result_of_handler_error = function
+  | Message_error message -> tool_result_error message
+  | Payload_error data -> tool_result_error_data data
+;;
+
+type json_cache = {
   key : string option;
-  value : string option;
+  value : Yojson.Safe.t option;
   expires_at : float;
   generation : int;
 }
-let empty_text_cache ~generation = { key = None; value = None; expires_at = 0.0; generation }
-let keeper_list_cache = Atomic.make (empty_text_cache ~generation:0)
+let empty_json_cache ~generation = { key = None; value = None; expires_at = 0.0; generation }
+let keeper_list_cache = Atomic.make (empty_json_cache ~generation:0)
 let cache_ttl_seconds env_var ~default =
   match Sys.getenv_opt env_var with
   | None -> default
@@ -63,11 +77,11 @@ let cache_ttl_seconds env_var ~default =
            default)
 let keeper_list_cache_ttl_s () =
   cache_ttl_seconds "MASC_KEEPER_LIST_CACHE_TTL_S" ~default:2.0
-let invalidate_text_cache cache_ref =
+let invalidate_json_cache cache_ref =
   Lockfree_atomic.update cache_ref (fun current ->
-    empty_text_cache ~generation:(current.generation + 1))
-let invalidate_keeper_list_cache () = invalidate_text_cache keeper_list_cache
-let rec cached_text_by_key cache_ref ~key ~ttl_s compute =
+    empty_json_cache ~generation:(current.generation + 1))
+let invalidate_keeper_list_cache () = invalidate_json_cache keeper_list_cache
+let rec cached_json_by_key cache_ref ~key ~ttl_s compute =
   let now = Time_compat.now () in
   let cache = Atomic.get cache_ref in
   match cache.key, cache.value with
@@ -88,37 +102,42 @@ let rec cached_text_by_key cache_ref ~key ~ttl_s compute =
       else begin
         Otel_metric_store.inc_counter
           Otel_metric_store.metric_tool_keeper_cache_cas_conflicts ();
-        cached_text_by_key cache_ref ~key ~ttl_s compute
+        cached_json_by_key cache_ref ~key ~ttl_s compute
       end
 
 let submit_keeper_msg_with_captured_event_bus
-      ?timeout_sec
-      ~clock
       ~background_sw
       ~base_path
       ~caller
-      ~keeper_name
-      ~(f : ?event_bus:Agent_sdk.Event_bus.t -> Eio.Switch.t -> tool_result)
+      ~request
+      ~(f :
+          ?event_bus:Agent_sdk.Event_bus.t
+          -> Keeper_invocation_contract.request
+          -> Eio.Switch.t
+          -> tool_result)
       () =
-  let event_bus = Keeper_event_bus.get () in
-  Keeper_msg_async.submit
-    ?timeout_sec
-    ~clock
+  let event_bus = Event_bus_slots.get_keeper () in
+  Keeper_invocation_contract.submit
     ~background_sw
     ~base_path
     ~caller
-    ~keeper_name
-    ~f:(fun request_sw -> f ?event_bus request_sw)
+    ~request
+    ~f:(fun request request_sw -> f ?event_bus request request_sw)
     ()
+
+let submit_outcome_with_keeper_json ~request outcome =
+  Keeper_invocation_contract.submission_to_json request outcome
+;;
 
 module For_testing = struct
   let reset_keeper_list_cache () =
-    Atomic.set keeper_list_cache (empty_text_cache ~generation:0)
+    Atomic.set keeper_list_cache (empty_json_cache ~generation:0)
   let invalidate_keeper_list_cache = invalidate_keeper_list_cache
-  let cached_keeper_list_text ~key ~ttl_s compute =
-    cached_text_by_key keeper_list_cache ~key ~ttl_s compute
+  let cached_keeper_list_data ~key ~ttl_s compute =
+    cached_json_by_key keeper_list_cache ~key ~ttl_s compute
   let submit_keeper_msg_with_captured_event_bus =
     submit_keeper_msg_with_captured_event_bus
+  let submit_outcome_with_keeper_json = submit_outcome_with_keeper_json
 end
 let annotate_keeper_json ~runtime_class json =
   match json with
@@ -129,8 +148,6 @@ let attach_assoc_field key value = function
   | `Assoc fields -> `Assoc ((key, value) :: fields)
   | other -> other
 
-let json_of_body body =
-  try Yojson.Safe.from_string body with Yojson.Json_error _ -> `String body
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let maybe_reseed_keeper_identity_config ~(config : Workspace.config) (meta : keeper_meta) =
   let expected_agent_name = Keeper_identity.keeper_agent_name meta.name in
@@ -171,7 +188,6 @@ let maybe_reseed_keeper_identity_config ~(config : Workspace.config) (meta : kee
             "failed to persist reseeded keeper identity for %s: %s"
             meta.name err)
     in
-    Keeper_status_detail.invalidate_status_cache_for updated_meta.name;
     Ok
       ( updated_meta,
         Some
@@ -207,14 +223,21 @@ let prepare_keeper_up_identity ctx args =
         | other -> other
       in
       Ok (prepared_args, identity_reseed)
-let startup_not_ready_error_json elapsed =
-  `Assoc [ ("error", `String "server_initializing"); ("message", `String (Printf.sprintf "MASC server is still starting (%.0fs elapsed). Retry in a few seconds." elapsed)); ("retry_after_ms", `Int 3000) ]
-  |> Yojson.Safe.pretty_to_string
+let startup_not_ready_error_data elapsed =
+  `Assoc
+    [ ("error", `String "server_initializing")
+    ; ( "message"
+      , `String
+          (Printf.sprintf
+             "MASC server is still starting (%.0fs elapsed). Retry in a few seconds."
+             elapsed) )
+    ; ("retry_after_ms", `Int 3000)
+    ]
 let with_keeper_startup_gate f =
   if not Server_startup_state.((!state).state_ready) then begin
     let elapsed = Server_startup_state.elapsed_since_start () in
     Log.Keeper.warn "keeper_up rejected: server not ready (%.1fs since start)" elapsed;
-    tool_result_error (startup_not_ready_error_json elapsed)
+    tool_result_error_data (startup_not_ready_error_data elapsed)
   end else
     f ()
 let execute_keeper_up ctx args : tool_result =
@@ -224,27 +247,21 @@ let execute_keeper_up ctx args : tool_result =
     if not (tool_result_success result) then
       Ok result
     else
-      let body = tool_result_body result in
-      let json = json_of_body body in
+      let json = Tool_result.data result in
       let json =
         match identity_reseed with
         | Some note -> attach_assoc_field "identity_reseed" note json
         | None -> json
       in
       invalidate_keeper_list_cache ();
-      Keeper_status_detail.invalidate_status_cache_for
-        (get_string prepared_args "name" "");
-      Ok
-        (tool_result_ok
-           (Yojson.Safe.pretty_to_string
-              (annotate_keeper_json ~runtime_class:"keeper" json)))
+      Ok (tool_result_ok_data (annotate_keeper_json ~runtime_class:"keeper" json))
   with
   | Ok result -> result
   | Error err -> tool_result_error err
 let keeper_brief_meta_json (meta : keeper_meta) =
   `Assoc
     [
-      ("name", `String meta.name); ("goal", `String meta.goal);
+      ("name", `String meta.name);
       ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
       ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);
     ]
@@ -281,8 +298,6 @@ let keeper_list_error_row_json ~runtime_class config name err =
           ("updated_at", `String meta.updated_at);
           ("autoboot_enabled", `Bool meta.autoboot_enabled);
           ("proactive_enabled", `Bool meta.proactive.enabled);
-          ("proactive_idle_sec", `Int meta.proactive.idle_sec);
-          ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
         ]
     | None ->
         [
@@ -301,50 +316,6 @@ let keeper_list_error_row_json ~runtime_class config name err =
      ]
      @ persisted_fields)
 
-let keeper_list_skill_route_json config (meta : keeper_meta) =
-  let metrics_store = Keeper_types_support.keeper_metrics_store config meta.name in
-  let metrics_path = Keeper_types_support.keeper_metrics_path config meta.name in
-  let lines =
-    let dated = Dated_jsonl.read_recent_lines metrics_store 50 in
-    if Stdlib.List.length dated > 0 then dated
-    else
-      match
-        Keeper_memory.read_file_tail_lines_result metrics_path
-          ~max_bytes:16_000 ~max_lines:50
-      with
-      | Ok lines -> lines
-      | Error exn_class ->
-          Keeper_memory.record_memory_recall_read_error
-            ~site:"keeper_tool_surface_ops_skill_route_metrics" metrics_path exn_class;
-          []
-  in
-  let rec find_latest = function
-    | [] -> `Null
-    | line :: tl -> (
-        try
-          let json = Yojson.Safe.from_string line in
-          match Safe_ops.json_string_opt "skill_primary" json with
-          | Some primary when not (String.equal (String.trim primary) "") ->
-              let secondary =
-                match Json_util.get_array json "skill_secondary" with
-                | Some (`List xs) ->
-                    xs
-                    |> List.filter_map (function
-                         | `String s when not (String.equal (String.trim s) "") -> Some (`String s)
-                         | _ -> None)
-                | _ -> []
-              in
-              `Assoc
-                [
-                  ("primary", `String primary);
-                  ("secondary", `List secondary);
-                  ( "reason",
-                    Json_util.string_opt_to_json (Safe_ops.json_string_opt "skill_reason" json) );
-                ]
-          | _ -> find_latest tl
-        with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> find_latest tl)
-  in
-  find_latest (List.rev lines)
 let keeper_list_row_json ~runtime_class config name =
   match read_effective_meta config name with
   | Error err -> Some (keeper_list_error_row_json ~runtime_class config name err)
@@ -376,20 +347,28 @@ let keeper_list_row_json ~runtime_class config name =
             ("meta", keeper_brief_meta_json meta); ("agent_name", `String meta.agent_name);
             ("status", `String status); ("keepalive_running", `Bool keepalive_running);
             ("autoboot_enabled", `Bool meta.autoboot_enabled); ("proactive_enabled", `Bool meta.proactive.enabled);
-            ("proactive_idle_sec", `Int meta.proactive.idle_sec);
-            ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
-            ("skill_route", keeper_list_skill_route_json config meta);
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));
             ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);
           ]))
-let invalidate_status_cache name =
-  Keeper_status_detail.invalidate_status_cache_for name
 let with_keeper_name args name =
   match args with
   | `Assoc fields ->
       `Assoc (("name", `String name) :: List.remove_assoc "name" fields)
   | other -> other
+
+let with_invocation_request args request =
+  match args with
+  | `Assoc fields ->
+    let fields =
+      fields |> List.remove_assoc "name" |> List.remove_assoc "message"
+    in
+    `Assoc
+      (("name", `String (Keeper_invocation_contract.target_name request))
+       :: ("message", `String (Keeper_invocation_contract.prompt request))
+       :: fields)
+  | other -> other
+;;
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let prepare_passive_keeper_identity_config ~(config : Workspace.config) ~(agent_name : string) args =
   let requested_name =
@@ -425,7 +404,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
   if not Server_startup_state.((!state).state_ready) then begin
     let elapsed = Server_startup_state.elapsed_since_start () in
     Log.Keeper.warn "create_from_persona rejected: server not ready (%.1fs)" elapsed;
-    tool_result_error (startup_not_ready_error_json elapsed)
+    tool_result_error_data (startup_not_ready_error_data elapsed)
   end else
     match
       let* persona, resolved_args =
@@ -435,15 +414,14 @@ let handle_keeper_create_from_persona ctx args : tool_result =
       let dry_run = get_bool args "dry_run" false in
       if dry_run then
         Ok
-          (tool_result_ok
-             (Yojson.Safe.to_string
-                (`Assoc
-                   [
-                     ( "persona",
-                       Keeper_tool_persona_runtime.persona_summary_to_json persona );
-                     ("created", `Bool false);
-                     ("resolved_args", resolved_args);
-                   ])))
+          (tool_result_ok_data
+             (`Assoc
+                [
+                  ( "persona",
+                    Keeper_tool_persona_runtime.persona_summary_to_json persona );
+                  ("created", `Bool false);
+                  ("resolved_args", resolved_args);
+                ]))
       else
         let* _rendered_toml =
           Keeper_tool_persona_runtime.render_keeper_toml_from_resolved_args
@@ -456,14 +434,13 @@ let handle_keeper_create_from_persona ctx args : tool_result =
         if not (tool_result_success result) then
           Ok result
         else
-          let body = tool_result_body result in
           let* durable_config =
             Keeper_tool_persona_runtime.persist_keeper_toml_from_resolved_args
               resolved_args
             |> Result.map_error (fun e ->
                 "keeper created but durable config write failed: " ^ e)
           in
-          let created_json = json_of_body body in
+          let created_json = Tool_result.data result in
           let json =
             `Assoc
               [
@@ -477,8 +454,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
               ]
           in
           invalidate_keeper_list_cache ();
-          invalidate_status_cache (get_string resolved_args "name" "");
-          Ok (tool_result_ok (Yojson.Safe.to_string json))
+          Ok (tool_result_ok_data json)
     with
     | Ok result -> result
     | Error err -> tool_result_error err
@@ -494,11 +470,20 @@ let keeper_up_body
       ~(agent_name : string)
       ~(sw : Eio.Switch.t)
       ~(clock : float Eio.Time.clock_ty Eio.Resource.t)
+      ~(publication_recovery_provider :
+          Keeper_publication_recovery_availability.provider)
       ?proc_mgr
       ?net
       args : tool_result =
   let keeper_ctx : _ Keeper_types_profile.context =
-    { config; agent_name; sw; clock; proc_mgr; net }
+    { config
+    ; agent_name
+    ; sw
+    ; clock
+    ; proc_mgr
+    ; net
+    ; publication_recovery_provider
+    }
   in
   with_keeper_startup_gate (fun () -> execute_keeper_up keeper_ctx args)
 ;;
@@ -517,14 +502,13 @@ let keeper_status_body ~(config : Workspace.config) ~(agent_name : string) args 
     if not (tool_result_success result) then
       Ok result
     else
-      let body = tool_result_body result in
-      let json = json_of_body body in
+      let json = Tool_result.data result in
       let json =
         json
         |> annotate_keeper_json ~runtime_class:"keeper"
         |> attach_identity_reseed ?identity_reseed
       in
-      Ok (tool_result_ok (Yojson.Safe.pretty_to_string json))
+      Ok (tool_result_ok_data json)
   with
   | Ok result -> result
   | Error err -> tool_result_error err
@@ -560,25 +544,16 @@ let resolve_keeper_name_config ~(config : Workspace.config) args =
 let resolve_keeper_name ctx args =
   resolve_keeper_name_config ~config:ctx.config args
 
-let direct_reply_visible_text body =
-  try
-    let json = Yojson.Safe.from_string body in
-    match Keeper_turn_outcome.of_reply_payload (Some json) with
-    | Keeper_turn_outcome.Continuation_checkpoint -> None
-    | Keeper_turn_outcome.No_visible_reply -> None
-    | Keeper_turn_outcome.Visible_reply -> (
-        match Json_util.get_string json "reply" with
-        | None -> None
-        | Some reply ->
-            let visible =
-              reply
-              |> Keeper_skill_routing.strip_skill_route_lines
-              |> String.trim
-            in
-            if visible = "" then None else Some visible)
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | Yojson.Json_error _ -> None
+let direct_reply_visible_text json =
+  match Keeper_turn_outcome.of_reply_payload (Some json) with
+  | Keeper_turn_outcome.Continuation_checkpoint -> None
+  | Keeper_turn_outcome.No_visible_reply -> None
+  | Keeper_turn_outcome.Visible_reply -> (
+      match Json_util.get_string json "reply" with
+      | None -> None
+      | Some reply ->
+          let visible = String.trim reply in
+          if visible = "" then None else Some visible)
 ;;
 
 let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args result =
@@ -589,10 +564,9 @@ let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args re
        turn (parse, don't repair — absent/malformed reads as None). *)
     let turn_ref =
       Keeper_turn_outcome.turn_ref_of_reply_payload
-        (try Some (Yojson.Safe.from_string (tool_result_body result))
-         with Yojson.Json_error _ -> None)
+        (Some (Tool_result.data result))
     in
-    match user_content, direct_reply_visible_text (tool_result_body result) with
+    match user_content, direct_reply_visible_text (Tool_result.data result) with
     | "", _ | _, None -> ()
     | _, Some assistant_content ->
         (* Agent-initiated [masc_keeper_msg] path: only the final tool
@@ -634,195 +608,205 @@ let append_direct_chat_pair_if_reply ~(config : Workspace.config) ~name ~args re
         end)
 ;;
 
-(* RFC-0182 Phase 5 PR-B: ctx-free body for [masc_keeper_msg] descriptor
-   projection.  Constructs a fresh [Keeper_types_profile.context] from the
-   threaded Eio resources and delegates to the existing [Turn.preflight_*]
-   / [Turn.handle_keeper_msg] handlers. *)
-let keeper_msg_body
-      ~(config : Workspace.config)
-      ~(agent_name : string)
-      ~(sw : Eio.Switch.t)
-      ~(clock : float Eio.Time.clock_ty Eio.Resource.t)
-      ?proc_mgr
-      ?net
-      ?continuation_channel
-      args : tool_result =
-  let keeper_ctx : _ Keeper_types_profile.context =
-    { config; agent_name; sw; clock; proc_mgr; net }
-  in
+let submit_keeper_invocation
+      ~submitted_by
+      ~submission_to_json
+      ~submission_error_to_json
+      ~run_turn
+      ctx
+      ~request
+  =
   match
-    let* name = resolve_keeper_name_config ~config args in
-    let resolved_args = with_keeper_name args name in
-    let* () = Turn.preflight_keeper_msg keeper_ctx resolved_args in
-    let* timeout_sec = Turn.keeper_msg_timeout_override resolved_args in
     let* background_sw =
       Keeper_msg_async.server_background_switch ()
       |> Result.map_error (fun error ->
-        Yojson.Safe.to_string (Keeper_msg_async.submit_error_to_json error))
+        Payload_error (submission_error_to_json error))
     in
-    let* request_id =
+    let* submission =
       submit_keeper_msg_with_captured_event_bus
-        ?timeout_sec
-        ~clock
         ~background_sw
-        ~base_path:config.base_path
-        ~caller:agent_name
-        ~keeper_name:name
-        ~f:(fun ?event_bus request_sw ->
-          let worker_ctx = { keeper_ctx with sw = request_sw } in
-          let result =
-            Turn.handle_keeper_msg
-              ?event_bus
-              ?continuation_channel
-              worker_ctx
-              resolved_args
-          in
+        ~base_path:ctx.config.base_path
+        ~caller:submitted_by
+        ~request
+        ~f:(fun ?event_bus request request_sw ->
+          let worker_ctx = { ctx with sw = request_sw } in
+          let result = run_turn ?event_bus request worker_ctx in
           if tool_result_success result
-          then begin
-            append_direct_chat_pair_if_reply
-              ~config
-              ~name
-              ~args:resolved_args
-              result;
-            invalidate_keeper_list_cache ();
-            invalidate_status_cache name
-          end;
+          then invalidate_keeper_list_cache ();
           result)
         ()
       |> Result.map_error (fun error ->
-        Yojson.Safe.to_string (Keeper_msg_async.submit_error_to_json error))
+        Payload_error (submission_error_to_json error))
     in
-    let json =
-      `Assoc
-        [ "request_id", `String request_id
-        ; "keeper_name", `String name
-        ; "status", `String "queued"
-        ; ( "message"
-          , `String
-              "Keeper turn submitted. Poll with keeper_msg_result." )
-        ]
-    in
-    Ok (tool_result_ok (Yojson.Safe.to_string json))
+    Ok
+      (tool_result_ok_data
+         (submission_to_json request submission))
   with
   | Ok result -> result
-  | Error err -> tool_result_error err
+  | Error error -> tool_result_of_handler_error error
 ;;
 
 let handle_keeper_msg ?continuation_channel ~submitted_by ctx args : tool_result =
   match
-    let* name = resolve_keeper_name ctx args in
-    let resolved_args = with_keeper_name args name in
-    let* () = Turn.preflight_keeper_msg ctx resolved_args in
-    let* timeout_sec = Turn.keeper_msg_timeout_override resolved_args in
-    let* background_sw =
-      Keeper_msg_async.server_background_switch ()
-      |> Result.map_error (fun error ->
-        Yojson.Safe.to_string (Keeper_msg_async.submit_error_to_json error))
-    in
-    let* request_id =
-      submit_keeper_msg_with_captured_event_bus
-        ?timeout_sec
-        ~clock:ctx.clock
-        ~background_sw
-        ~base_path:ctx.config.base_path
-        ~caller:submitted_by
-        ~keeper_name:name
-        ~f:(fun ?event_bus request_sw ->
-          let worker_ctx = { ctx with sw = request_sw } in
-          let result =
-            Turn.handle_keeper_msg
-              ?event_bus
-              ?continuation_channel
-              worker_ctx
-              resolved_args
-          in
-          if tool_result_success result
-          then begin
-            append_direct_chat_pair_if_reply
-              ~config:ctx.config
-              ~name
-              ~args:resolved_args
-              result;
-            invalidate_keeper_list_cache ();
-            invalidate_status_cache name
-          end;
-          result)
-        ()
-      |> Result.map_error (fun error ->
-        Yojson.Safe.to_string (Keeper_msg_async.submit_error_to_json error))
-    in
-    let json =
-      `Assoc
-        [ "request_id", `String request_id
-        ; "keeper_name", `String name
-        ; "status", `String "queued"
-        ; ( "message"
-          , `String
-              "Keeper turn submitted. Poll with keeper_msg_result." )
-        ]
-    in
-    Ok (tool_result_ok (Yojson.Safe.to_string json))
+    let* name = message_error (resolve_keeper_name ctx args) in
+    let worker_args = with_keeper_name args name in
+    let* request = message_error (Turn.preflight_keeper_msg ctx worker_args) in
+    Ok
+      (submit_keeper_invocation
+         ~submitted_by
+         ~submission_to_json:Keeper_invocation_contract.submission_to_json
+         ~submission_error_to_json:Keeper_msg_async.submit_error_to_json
+         ~run_turn:(fun ?event_bus request worker_ctx ->
+           let worker_args = with_invocation_request worker_args request in
+           let result =
+             Turn.handle_keeper_msg
+               ?event_bus
+               ?continuation_channel
+               worker_ctx
+               worker_args
+           in
+           append_direct_chat_pair_if_reply
+             ~config:ctx.config ~name ~args:worker_args result;
+           result)
+         ctx ~request)
   with
   | Ok result -> result
-  | Error err -> tool_result_error err
+  | Error error -> tool_result_of_handler_error error
 ;;
-(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let keeper_msg_result_body ~(config : Workspace.config) ~caller args : tool_result =
-  let request_id = get_string args "request_id" "" in
-  if String.equal request_id "" then
-    tool_result_error {|{"error":"request_id is required"}|}
-  else
-    match Keeper_msg_async.poll ~base_path:config.base_path ~caller request_id with
-    | Keeper_msg_async.Absent ->
-      tool_result_error
-        (Printf.sprintf {|{"error":"request_id not found","request_id":"%s"}|} request_id)
-    | Keeper_msg_async.Unreadable reason ->
-      tool_result_error
-        (Yojson.Safe.to_string
-           (`Assoc
-              [ ("error", `String "request_record_unreadable")
-              ; ( "message"
-                , `String
-                    (Printf.sprintf
-                       "request record unreadable: %s — request was accepted but its \
-                        result is lost"
-                       reason) )
-              ; ("request_id", `String request_id)
-              ]))
-    | Keeper_msg_async.Rejected rejection ->
-      tool_result_error
-        (Yojson.Safe.to_string (Keeper_msg_async.access_rejection_to_json rejection))
-    | Keeper_msg_async.Found entry ->
-      tool_result_ok (Yojson.Safe.to_string (Keeper_msg_async.entry_to_json entry))
 
-let handle_keeper_msg_result ctx args : tool_result =
-  keeper_msg_result_body ~config:ctx.config ~caller:ctx.agent_name args
-
-(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
-let keeper_msg_cancel_body ~(config : Workspace.config) ~caller args : tool_result =
-  let request_id = get_string args "request_id" "" in
-  if String.equal request_id "" then
-    tool_result_error {|{"error":"request_id is required"}|}
-  else (
-    let result =
-      Keeper_msg_async.cancel ~base_path:config.base_path ~caller request_id
+let handle_keeper_delegate ~submitted_by ctx args =
+  match
+    let* request =
+      Keeper_invocation_contract.request_of_json args
+      |> Result.map_error Keeper_invocation_contract.request_error_to_string
+      |> message_error
     in
-    let json = Keeper_msg_async.cancel_result_to_json ~request_id result in
-    match result with
-    | Keeper_msg_async.Cancelled_request -> tool_result_ok (Yojson.Safe.to_string json)
-    | Keeper_msg_async.Cancel_not_found
-    | Keeper_msg_async.Cancel_unreadable _
-    | Keeper_msg_async.Cancel_rejected _
-    | Keeper_msg_async.Cancel_already_terminal _
-    | Keeper_msg_async.Cancel_persistence_failed _
-    | Keeper_msg_async.Cancel_worker_signal_failed _ ->
-      tool_result_error (Yojson.Safe.to_string json))
+    let* request = message_error (Turn.preflight_keeper_delegate ctx request) in
+    Ok
+      (submit_keeper_invocation
+         ~submitted_by
+         ~submission_to_json:Keeper_invocation_contract.delegate_submission_to_json
+         ~submission_error_to_json:
+           (Keeper_invocation_contract.delegate_submission_error_to_json request)
+         ~run_turn:(fun ?event_bus request worker_ctx ->
+           Turn.handle_keeper_delegate ?event_bus worker_ctx request)
+         ctx
+         ~request)
+  with
+  | Ok result -> result
+  | Error error -> tool_result_of_handler_error error
+;;
 
-let handle_keeper_msg_cancel ctx args : tool_result =
-  keeper_msg_cancel_body ~config:ctx.config ~caller:ctx.agent_name args
+let run_ref_arg args =
+  match args with
+  | `Assoc [ ("run_ref", value) ] -> Keeper_invocation_contract.run_ref_of_json value
+  | _ ->
+    Error
+      (Keeper_invocation_contract.Invalid_wire_value
+         { field = "delegate_operation"; expected = "object containing only run_ref" })
+;;
 
-let keeper_msg_queue_body ~(config : Workspace.config) ~caller args : tool_result =
-  let keeper_name = get_string_opt args "keeper_name" in
+let run_ref_error error =
+  tool_result_error_data
+    (`Assoc
+       [ "error", `String "invalid_run_ref"
+       ; "message", `String (Keeper_invocation_contract.request_error_to_string error)
+       ])
+;;
+
+let delegate_access_rejection reference rejection =
+  let error, message =
+    match rejection with
+    | Keeper_msg_async.Invalid_base_path { reason } -> "invalid_base_path", reason
+    | Keeper_msg_async.Invalid_caller -> "invalid_caller", "caller identity is invalid"
+    | Keeper_msg_async.Invalid_request_id -> "invalid_run_ref", "run_ref.run_id is invalid"
+    | Keeper_msg_async.Caller_mismatch ->
+      "run_ref_caller_mismatch", "run_ref does not belong to the authenticated caller"
+  in
+  `Assoc
+    [ "error", `String error
+    ; "message", `String message
+    ; "run_ref", Keeper_invocation_contract.run_ref_to_json reference
+    ]
+;;
+
+let keeper_delegate_status_body ~(config : Workspace.config) ~caller args =
+  match run_ref_arg args with
+  | Error error -> run_ref_error error
+  | Ok reference ->
+    let run_id = Keeper_invocation_contract.run_id reference in
+    (match Keeper_msg_async.poll ~base_path:config.base_path ~caller run_id with
+    | Keeper_msg_async.Absent ->
+      tool_result_error_data
+        (`Assoc [ "error", `String "run_not_found"; "run_ref", Keeper_invocation_contract.run_ref_to_json reference ])
+    | Keeper_msg_async.Unreadable reason ->
+      tool_result_error_data
+        (`Assoc
+           [ "error", `String "invocation_record_unreadable"
+           ; "message", `String reason
+           ; "run_ref", Keeper_invocation_contract.run_ref_to_json reference
+           ])
+    | Keeper_msg_async.Rejected rejection ->
+      tool_result_error_data (delegate_access_rejection reference rejection)
+    | Keeper_msg_async.Found entry
+      when not (Keeper_invocation_contract.run_ref_matches_entry reference entry) ->
+      run_ref_error Keeper_invocation_contract.Run_ref_mismatch
+    | Keeper_msg_async.Found entry ->
+      (match Keeper_invocation_contract.delegate_entry_to_json entry with
+       | Ok json -> tool_result_ok_data json
+       | Error error ->
+         run_ref_error error))
+;;
+
+let keeper_delegate_cancel_body ~(config : Workspace.config) ~caller args =
+  match run_ref_arg args with
+  | Error error -> run_ref_error error
+  | Ok reference ->
+    let run_id = Keeper_invocation_contract.run_id reference in
+    (match Keeper_msg_async.poll ~base_path:config.base_path ~caller run_id with
+     | Keeper_msg_async.Found entry
+       when not (Keeper_invocation_contract.run_ref_matches_entry reference entry) ->
+       run_ref_error Keeper_invocation_contract.Run_ref_mismatch
+     | Keeper_msg_async.Found _ ->
+    let result =
+      Keeper_msg_async.cancel ~base_path:config.base_path ~caller run_id
+    in
+    let json = Keeper_invocation_contract.delegate_cancellation_to_json reference result in
+    (match result with
+     | Keeper_msg_async.Cancellation_requested _ ->
+       tool_result_ok_data json
+     | Keeper_msg_async.Cancel_not_found
+     | Keeper_msg_async.Cancel_unreadable _
+     | Keeper_msg_async.Cancel_rejected _
+     | Keeper_msg_async.Cancel_worker_ownership_unknown _
+     | Keeper_msg_async.Cancel_already_terminal _
+     | Keeper_msg_async.Cancel_persistence_failed _
+     | Keeper_msg_async.Cancel_worker_signal_failed _
+     | Keeper_msg_async.Cancel_state_invariant_failed _ ->
+       tool_result_error_data json)
+     | Keeper_msg_async.Absent ->
+       tool_result_error_data (Keeper_invocation_contract.delegate_cancellation_to_json reference Keeper_msg_async.Cancel_not_found)
+     | Keeper_msg_async.Unreadable reason ->
+       tool_result_error_data (Keeper_invocation_contract.delegate_cancellation_to_json reference (Keeper_msg_async.Cancel_unreadable reason))
+     | Keeper_msg_async.Rejected rejection ->
+       tool_result_error_data (delegate_access_rejection reference rejection))
+;;
+
+let keeper_delegate_list_body ~(config : Workspace.config) ~caller args =
+  let target =
+    match args with
+    | `Assoc [] -> Ok None
+    | `Assoc [ ("target", value) ] ->
+      Keeper_invocation_contract.target_of_json value |> Result.map (fun target -> Some target)
+    | _ ->
+      Error
+        (Keeper_invocation_contract.Invalid_wire_value
+           { field = "delegate_list"; expected = "empty object or typed target" })
+  in
+  match target with
+  | Error error -> run_ref_error error
+  | Ok target ->
+  let keeper_name = Option.map Keeper_invocation_contract.target_name_of_target target in
   match
     Keeper_msg_async.list_for_keeper
       ~base_path:config.base_path
@@ -831,25 +815,26 @@ let keeper_msg_queue_body ~(config : Workspace.config) ~caller args : tool_resul
       ()
   with
   | Ok entries ->
-    let json_list = List.map Keeper_msg_async.entry_to_json entries in
-    tool_result_ok (Yojson.Safe.to_string (`List json_list))
+    let rec project = function
+      | [] -> Ok []
+      | entry :: rest ->
+        let* json = Keeper_invocation_contract.delegate_entry_to_json entry in
+        let* rest = project rest in
+        Ok (json :: rest)
+    in
+    (match project entries with
+     | Ok json_list -> tool_result_ok_data (`List json_list)
+     | Error error -> run_ref_error error)
   | Error rejection ->
-    tool_result_error
-      (Yojson.Safe.to_string (Keeper_msg_async.access_rejection_to_json rejection))
+    tool_result_error_data (Keeper_msg_async.access_rejection_to_json rejection)
+;;
 
-let handle_keeper_msg_queue ctx args : tool_result =
-  keeper_msg_queue_body ~config:ctx.config ~caller:ctx.agent_name args
-
-let complete_keeper_msg_stream_result ~name result =
+let complete_keeper_msg_stream_result result =
   if not (tool_result_success result) then result
   else begin
-    let body = tool_result_body result in
     invalidate_keeper_list_cache ();
-    invalidate_status_cache name;
-    let json = json_of_body body in
-    tool_result_ok
-      (Yojson.Safe.pretty_to_string
-         (annotate_keeper_json ~runtime_class:"keeper" json))
+    tool_result_ok_data
+      (annotate_keeper_json ~runtime_class:"keeper" (Tool_result.data result))
   end
 
 let handle_keeper_msg_stream
@@ -867,7 +852,7 @@ let handle_keeper_msg_stream
     (* Stream turns are synchronous today, but still pin the bus visible at the
        public surface boundary so later refactors cannot reintroduce a nested
        fallback lookup in the turn body. *)
-    let event_bus = Keeper_event_bus.get () in
+    let event_bus = Event_bus_slots.get_keeper () in
     let result =
       Turn.handle_keeper_msg
         ?on_text_delta
@@ -879,7 +864,7 @@ let handle_keeper_msg_stream
         ctx
         resolved_args
     in
-    complete_keeper_msg_stream_result ~name result
+    complete_keeper_msg_stream_result result
   in
   match resolve_keeper_name ctx args with
   | Ok name -> run name
@@ -920,7 +905,7 @@ let handle_keeper_msg_stream_if_free
           (fun () -> tool_result_error err)
   | Ok name ->
     let resolved_args = with_keeper_name args name in
-    let event_bus = Keeper_event_bus.get () in
+    let event_bus = Event_bus_slots.get_keeper () in
     (match
        Turn.handle_keeper_msg_if_free
          ?on_text_delta
@@ -932,7 +917,7 @@ let handle_keeper_msg_stream_if_free
      with
      | `Busy rejection -> `Busy rejection
      | `Ran result ->
-       `Ran (complete_keeper_msg_stream_result ~name result))
+       `Ran (complete_keeper_msg_stream_result result))
 (* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
 let resolve_keeper_meta_config ~(config : Workspace.config) args =
   let name = String.trim (get_string args "name" "") in
@@ -947,50 +932,6 @@ let resolve_keeper_meta_config ~(config : Workspace.config) args =
 let resolve_keeper_meta ctx args =
   resolve_keeper_meta_config ~config:ctx.config args
 
-let adversarial_review_body ~(config : Workspace.config) ~(agent_name : string) args : tool_result =
-  ignore config;
-  let diff = get_string args "diff" "" in
-  if String.equal (String.trim diff) ""
-  then tool_result_error {|{"error":"diff is required"}|}
-  else
-    match
-      let inputs =
-        match get_string_opt args "path" with
-        | Some path -> [ Adversarial_eval.Changed_file { path; content = diff } ]
-        | None -> [ Adversarial_eval.Diff diff ]
-      in
-      let* valid_inputs =
-        Adversarial_eval.validate_inputs inputs
-        |> Result.map_error (fun (path, kind) ->
-            let kind_str =
-              match (kind : Adversarial_eval.banned_input_kind) with
-              | Readme -> "readme"
-              | Design_doc -> "design_doc"
-              | State_history -> "state_history"
-              | Task_history -> "task_history"
-              | Governance_history -> "governance_history"
-            in
-            Printf.sprintf {|{"error":"banned input: %s (%s)"}|} path kind_str)
-      in
-      let session_id =
-        Printf.sprintf "%s-%s-%.0f"
-          agent_name
-          "adversarial-review"
-          (Time_compat.now ())
-      in
-      let ctx =
-        Adversarial_eval.create_context ~session_id ~inputs:valid_inputs
-      in
-      let result = Adversarial_eval.evaluate ctx in
-      Ok (tool_result_ok (Yojson.Safe.to_string (Adversarial_eval.result_to_yojson result)))
-    with
-    | Ok result -> result
-    | Error err -> tool_result_error err
-
-let handle_keeper_adversarial_review ctx args : tool_result =
-  adversarial_review_body ~config:ctx.config ~agent_name:ctx.agent_name args
-
 let handle_keeper_down ctx args : tool_result =
   invalidate_keeper_list_cache ();
-  invalidate_status_cache (get_string args "name" "");
   Turn.handle_keeper_down ctx args

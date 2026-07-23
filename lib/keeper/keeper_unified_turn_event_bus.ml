@@ -47,7 +47,7 @@ let create ?event_bus ?(on_pending_count_change = fun _ -> ()) ~keeper_name ~tur
   let event_bus =
     match event_bus with
     | Some _ as bus -> bus
-    | None -> Keeper_event_bus.get ()
+    | None -> Event_bus_slots.get_keeper ()
   in
   let event_bus_subscription =
     match event_bus with
@@ -56,8 +56,10 @@ let create ?event_bus ?(on_pending_count_change = fun _ -> ()) ~keeper_name ~tur
         { event_bus
         ; event_bus_sub =
             Agent_sdk_metrics_bridge.subscribe
-           ~purpose:"keeper_turn"
-           ~filter:(Agent_sdk.Event_bus.filter_agent keeper_name)
+              ~capacity:256
+              ~overflow:Agent_sdk.Event_bus.Drop_oldest
+              ~purpose:"keeper_turn"
+              ~filter:(Agent_sdk.Event_bus.filter_agent keeper_name)
               event_bus
         }
     | None -> No_event_bus
@@ -201,14 +203,24 @@ let drain ?(site = "unspecified") t =
   update ()
 ;;
 
-let committed_mutating_tools t =
-  (Atomic.get t.state).tracker
-  |> Keeper_unified_turn_types.committed_mutating_tools_from_events
+(* Keep the recursion outside the cycle's exception handler. Calling [loop]
+   from inside [try ... with] retains one handler frame per poll and is not a
+   tail call, so a long-lived turn grows without bound until GC dominates the
+   server. The compiler-enforced [@tailcall] annotation prevents this call
+   from moving back under a handler frame. *)
+let rec run_background_drain_loop run_cycle =
+  if run_cycle () then
+    (run_background_drain_loop [@tailcall]) run_cycle
 ;;
 
 let integrity_error t =
   (Atomic.get t.state).tracker
   |> Keeper_unified_turn_types.turn_tool_event_integrity_error
+;;
+
+let tool_completed_count t =
+  (Atomic.get t.state).tracker
+  |> Keeper_unified_turn_types.turn_tool_completed_count
 ;;
 
 let start_background_drain ~clock t =
@@ -218,15 +230,15 @@ let start_background_drain ~clock t =
       Eio.Cancel.sub (fun cc ->
         match Atomic.compare_and_set t.drain_cancel Inactive (Active cc) with
         | true ->
-          let rec loop () =
+          let run_cycle () =
             try
               let _summary = drain ~site:"background_poll" t in
               Eio.Time.sleep clock (Keeper_turn_helpers.turn_event_bus_drain_interval_sec ());
-              loop ()
+              true
             with
             | Eio.Cancel.Cancelled _ ->
               (* [unsubscribe] cancels this background worker as normal teardown. *)
-              ()
+              false
             | exn ->
               Log.Keeper.warn
                 "%s: keeper_turn event-bus drain failed: %s"
@@ -240,10 +252,15 @@ let start_background_drain ~clock t =
                   ; "outcome", "exception"
                   ]
                 ();
-              Eio.Time.sleep clock (Keeper_turn_helpers.turn_event_bus_drain_interval_sec ());
-              loop ()
+              (try
+                 Eio.Time.sleep
+                   clock
+                   (Keeper_turn_helpers.turn_event_bus_drain_interval_sec ());
+                 true
+               with
+               | Eio.Cancel.Cancelled _ -> false)
           in
-          loop ()
+          run_background_drain_loop run_cycle
         | false ->
           (* [unsubscribe] has already closed the bus, or another fiber has
              already claimed the active drainer role. Either way this fiber

@@ -22,15 +22,7 @@ let active_operation ~config keeper_name =
   | Ok operations ->
     let active =
       List.filter
-        (fun operation ->
-           match operation.Keeper_shutdown_types.phase with
-           | Keeper_shutdown_types.Finalized _ -> false
-           | Keeper_shutdown_types.Prepared
-           | Keeper_shutdown_types.Joined_idle
-           | Keeper_shutdown_types.Finalizing_tasks _
-           | Keeper_shutdown_types.Cleanup_ready _
-           | Keeper_shutdown_types.Reconciliation_required _
-           | Keeper_shutdown_types.Blocked _ -> true)
+        Keeper_shutdown_types.requires_admission_fence
         operations
     in
     (match active with
@@ -43,11 +35,7 @@ let handle_keeper_down (ctx : _ context) args : tool_result =
   let requested_name = String.trim (get_string args "name" "") in
   if not (validate_name requested_name)
   then
-    tool_result_error
-      (Printf.sprintf
-         "invalid keeper name %S (must be non-empty and match \
-          [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
-         requested_name)
+    tool_result_error (invalid_name_error requested_name)
   else
     match Keeper_registry.get ~base_path:ctx.config.base_path requested_name with
     | None ->
@@ -63,19 +51,17 @@ let handle_keeper_down (ctx : _ context) args : tool_result =
            "Keeper shutdown operation observed: keeper=%s operation=%s"
            requested_name
            (Keeper_shutdown_types.Operation_id.to_string operation.operation_id);
-         tool_result_ok
-           (Yojson.Safe.to_string (operation_json ~accepted:false operation))
+         tool_result_ok_data (operation_json ~accepted:false operation)
        | Ok None ->
          (match Keeper_meta_store.read_meta_resolved ctx.config requested_name with
           | Error detail -> tool_result_error detail
           | Ok None ->
             Log.Keeper.info "Keeper shutdown found already absent: keeper=%s" requested_name;
-            tool_result_ok
-              (Yojson.Safe.to_string
-                 (`Assoc
-                    [ "name", `String requested_name
-                    ; "already_absent", `Bool true
-                    ]))
+            tool_result_ok_data
+              (`Assoc
+                 [ "name", `String requested_name
+                 ; "already_absent", `Bool true
+                 ])
           | Ok (Some _) ->
             Log.Keeper.error
               "Keeper shutdown refused metadata-only identity: keeper=%s"
@@ -111,8 +97,7 @@ let handle_keeper_down (ctx : _ context) args : tool_result =
            "Keeper shutdown operation accepted: keeper=%s operation=%s"
            requested_name
            (Keeper_shutdown_types.Operation_id.to_string operation.operation_id);
-         tool_result_ok
-           (Yojson.Safe.to_string (operation_json ~accepted:true operation)))
+         tool_result_ok_data (operation_json ~accepted:true operation))
 ;;
 
 module For_testing = struct

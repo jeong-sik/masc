@@ -34,10 +34,6 @@ vi.mock('./components/server-config', () => ({
   refreshServerConfig: vi.fn(),
 }))
 
-vi.mock('./components/surface-readiness-panel', () => ({
-  refreshSurfaceReadiness: vi.fn(),
-}))
-
 vi.mock('./components/observatory/observatory', () => ({
   refreshObservatorySurface: vi.fn(),
 }))
@@ -50,7 +46,6 @@ import { refreshFeatureHealth } from './components/feature-health'
 import { refreshObservatorySurface } from './components/observatory/observatory'
 import { refreshActiveKeeperChatHistory } from './keeper-runtime'
 import { refreshServerConfig } from './components/server-config'
-import { refreshSurfaceReadiness } from './components/surface-readiness-panel'
 import { refreshForRoute, refreshPlanForRoute } from './tab-refresh'
 import { refreshExecution, refreshFusionBoard, refreshFusionRuns, refreshShell } from './store'
 
@@ -71,6 +66,13 @@ describe('refreshPlanForRoute', () => {
       tab: 'keepers',
       params: { keeper: 'sangsu' },
     })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot', 'activeKeeperChat'])
+  })
+
+  it('hydrates the registry roster on direct entry', () => {
+    expect(refreshPlanForRoute({
+      tab: 'registry',
+      params: {},
+    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot'])
   })
 
   it('hydrates the top-level board surface from the board store', () => {
@@ -105,11 +107,6 @@ describe('refreshPlanForRoute', () => {
 
     expect(refreshPlanForRoute({
       tab: 'monitoring',
-      params: { section: 'cognition' },
-    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot'])
-
-    expect(refreshPlanForRoute({
-      tab: 'monitoring',
       params: { section: 'observatory' },
     })).toEqual(['namespaceTruth', 'observatory'])
 
@@ -129,11 +126,6 @@ describe('refreshPlanForRoute', () => {
       tab: 'command',
       params: { section: 'operations' },
     })).toEqual(['namespaceTruth', 'operatorSnapshot', 'operatorWorkspaceDigest'])
-
-    expect(refreshPlanForRoute({
-      tab: 'command',
-      params: { section: 'operations', view: 'surfaces' },
-    })).toEqual(['surfaceReadiness'])
   })
 
   it('refreshes the new workspace and lab sections only where store-backed data is needed', () => {
@@ -193,17 +185,6 @@ describe('refreshPlanForRoute', () => {
     await waitFor(() => {
       expect(refreshFeatureHealth).toHaveBeenCalledTimes(1)
       expect(refreshServerConfig).toHaveBeenCalledTimes(1)
-    })
-  })
-
-  it('refreshes the surface readiness view on route entry', async () => {
-    refreshForRoute({
-      tab: 'command',
-      params: { section: 'operations', view: 'surfaces' },
-    })
-
-    await waitFor(() => {
-      expect(refreshSurfaceReadiness).toHaveBeenCalledTimes(1)
     })
   })
 
@@ -303,7 +284,7 @@ describe('refreshPlanForRoute', () => {
 // -----------------------------------------------------------------------------
 // Fleet Health view-aware refresh — Phase 1 active
 //
-// Fleet Health absorbs telemetry + tool-quality + fleet + governance (monitoring).
+// Fleet Health absorbs telemetry + tool-quality + fleet + Gate monitoring.
 // The refresh pipeline branches on the `view` query param so SSE reconnect
 // (sse-store.ts:232) and manual navigation hydrate the correct data.
 // -----------------------------------------------------------------------------
@@ -322,10 +303,10 @@ describe('refreshPlanForRoute fleet-health view-aware branching', () => {
     })).toEqual(['namespaceTruth'])
   })
 
-  it('view=governance avoids mission and operator-heavy route refreshes', () => {
+  it('view=gate avoids mission and operator-heavy route refreshes', () => {
     expect(refreshPlanForRoute({
       tab: 'monitoring',
-      params: { section: 'fleet-health', view: 'governance' },
+      params: { section: 'fleet-health', view: 'gate' },
     })).toEqual(['namespaceTruth'])
   })
 

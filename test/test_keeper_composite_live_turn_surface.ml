@@ -40,7 +40,7 @@ let make_meta name =
 (* Register a keeper and return the fresh entry after [setup] has run its
    registry mutations, so the observer sees the mutated SSOT. *)
 let observed_json ~base ~name ~setup () =
-  ignore (Keeper_registry.register ~base_path:base name (make_meta name));
+  ignore (Keeper_registry.For_testing.register ~base_path:base name (make_meta name));
   setup ();
   match Keeper_registry.get ~base_path:base name with
   | Some entry -> Observer.snapshot_to_json (Observer.observe entry)
@@ -123,10 +123,10 @@ let test_board_cursor_and_wakeups () =
         Keeper_registry.set_board_cursor ~base_path:base name 1234.5
           (Some "post-42");
         ignore
-          (Keeper_registry.board_wakeup_allowed ~base_path:base name
+          (Keeper_registry.For_testing.board_wakeup_allowed ~base_path:base name
              ~dedup_key:"fingerprint-a" ~debounce_sec:60.0);
         ignore
-          (Keeper_registry.board_wakeup_allowed ~base_path:base name
+          (Keeper_registry.For_testing.board_wakeup_allowed ~base_path:base name
              ~dedup_key:"fingerprint-b" ~debounce_sec:60.0))
       ()
   in
@@ -150,9 +150,7 @@ let test_run_state_in_turn_reports_woken_wake () =
         Keeper_registry.mark_turn_started ~base_path:base
           ~wake:
             (Keeper_registry.Woken
-               [ Keeper_event_queue.Bootstrap
-               ; Keeper_event_queue.No_progress_recovery
-               ])
+               [ Keeper_event_queue.Bootstrap ])
           name)
       ()
   in
@@ -162,7 +160,7 @@ let test_run_state_in_turn_reports_woken_wake () =
   check string "run_state.wake_kind is woken" "woken"
     (J.member "wake_kind" rs |> J.to_string);
   check (list string) "run_state.stimulus_kinds preserves order"
-    [ "bootstrap"; "no_progress_recovery" ]
+    [ "bootstrap" ]
     (J.member "stimulus_kinds" rs |> J.to_list |> List.map J.to_string);
   check bool "run_state.started_at is a float" true
     (match J.member "started_at" rs with `Float _ -> true | _ -> false)
@@ -222,8 +220,8 @@ let test_idle_defaults_are_null_or_zero () =
     (match J.member "live_turn" json with `Null -> true | _ -> false);
   check bool "last_skip null before any skip" true
     (match J.member "last_skip" json with `Null -> true | _ -> false);
-  check bool "livelock null when not in a livelock" true
-    (match J.member "livelock" json with `Null -> true | _ -> false);
+  check bool "turn attempt null before the first turn" true
+    (match J.member "turn_attempt" json with `Null -> true | _ -> false);
   let cursor = J.member "board_cursor" json in
   check (float 1e-6) "board_cursor.ts defaults to 0.0" 0.0
     (J.member "ts" cursor |> J.to_float);

@@ -7,9 +7,7 @@
     Phase 2 lifted spec types into [lib/tool_schemas_specs/] and added
     additional generated tools. Hand-written entries for these tools
     were removed from [Tool_schemas_misc]; generated schemas are the
-    SSOT. The test pins generated vs effective field-for-field.
-
-    Same pattern as RFC-0054 PR-3's [test_shell_ir_typed_walkers_gen]. *)
+    SSOT. The test pins generated vs effective field-for-field. *)
 
 open Masc_domain
 
@@ -71,6 +69,17 @@ let test_masc_config_input_schema_matches () =
     gen.input_schema
 ;;
 
+(* Issue #15257 drift guard: the gen-side SSOT enum must stay identical
+   to the producer-side category list. The gen-vs-hand comparisons above
+   are self-referential (both sides derive from the same SSOT), so they
+   cannot catch drift against the actual config category table. *)
+let test_config_category_ssot () =
+  Alcotest.(check (list string))
+    "SSOT enum matches Env_config_snapshot.valid_config_category_strings"
+    Env_config_snapshot.valid_config_category_strings
+    Tool_schemas_specs_types.config_category_enum_strings
+;;
+
 let test_masc_spawn_is_not_generated () =
   Alcotest.(check bool)
     "masc_spawn absent from generated schemas"
@@ -93,6 +102,9 @@ let test_control_schemas_use_dedicated_typed_projection () =
   in
   let pause = Tool_schemas_misc.control_schema Tool_schemas_misc.Pause in
   let resume = Tool_schemas_misc.control_schema Tool_schemas_misc.Resume in
+  let pause_status =
+    Tool_schemas_misc.control_schema Tool_schemas_misc.Pause_status
+  in
   Alcotest.check
     yojson_testable
     "pause projection keeps generated canonical schema"
@@ -103,9 +115,14 @@ let test_control_schemas_use_dedicated_typed_projection () =
     "resume projection keeps generated canonical schema"
     Tool_descriptors_gen.masc_resume_schema.input_schema
     resume.input_schema;
+  Alcotest.check
+    yojson_testable
+    "pause_status projection keeps generated canonical schema"
+    Tool_descriptors_gen.masc_pause_status_schema.input_schema
+    pause_status.input_schema;
   Alcotest.(check (list string))
     "typed control projection is exhaustive"
-    [ "masc_pause"; "masc_resume" ]
+    [ "masc_pause"; "masc_resume"; "masc_pause_status" ]
     (List.map
        (fun operation ->
           (Tool_schemas_misc.control_schema operation).name)
@@ -120,7 +137,7 @@ let test_control_schemas_use_dedicated_typed_projection () =
          (name ^ " absent from effective public misc schemas")
          false
          (has_schema name Tool_schemas_misc.schemas))
-    [ "masc_pause"; "masc_resume" ];
+    [ "masc_pause"; "masc_resume"; "masc_pause_status" ];
   Alcotest.(check bool)
     "masc_pause has reason property"
     true
@@ -128,7 +145,11 @@ let test_control_schemas_use_dedicated_typed_projection () =
   Alcotest.(check int)
     "masc_resume has no input properties"
     0
-    (List.length (properties resume))
+    (List.length (properties resume));
+  Alcotest.(check int)
+    "masc_pause_status has no input properties"
+    0
+    (List.length (properties pause_status))
 ;;
 
 let test_masc_tool_help_name_matches () =
@@ -289,16 +310,7 @@ let test_web_tools_owned_by_keeper_descriptors () =
     [ "masc_web_search"; "masc_web_fetch" ]
 ;;
 
-(* Behavioral guard for the chain above. raw_all_tool_schemas presence is only
-   useful if it reaches the keeper's always-visible core: effective_core_tools
-   promotes a descriptor's public name (WebSearch) only when its internal name
-   (masc_web_search) is in injected_masc_tool_names (), which is populated from
-   raw_all_tool_schemas at startup (lib/mcp_server_eio.ml). The
-   keeper_only_masc_names trim broke exactly this chain: web backends absent
-   from raw -> never injected -> WebSearch never core -> pruned on every
-   non-web-shaped turn (RFC-0218 §1.1, ~3.5k/day "AllowList pruned WebSearch").
-   This asserts the substrate -> injected -> core chain end to end. *)
-let test_web_backends_reach_core_after_substrate_injection () =
+let test_web_backends_are_in_complete_model_surface () =
   let prior = Masc.Keeper_tool_dispatch_runtime.masc_schemas_snapshot () in
   Fun.protect
     ~finally:(fun () -> Masc.Keeper_tool_dispatch_runtime.set_masc_schemas prior)
@@ -316,13 +328,13 @@ let test_web_backends_reach_core_after_substrate_injection () =
             true
             (List.mem name injected))
         [ "masc_web_search"; "masc_web_fetch" ];
-      let core = Masc.Keeper_tool_dispatch_runtime.effective_core_tools () in
+      let model_names = Masc.Keeper_tool_dispatch_runtime.keeper_model_tool_names () in
       List.iter
         (fun public_name ->
           Alcotest.(check bool)
-            (public_name ^ " promoted to always-visible core")
+            (public_name ^ " present in complete model surface")
             true
-            (List.mem public_name core))
+            (List.mem public_name model_names))
         [ "WebSearch"; "WebFetch" ])
 ;;
 
@@ -348,31 +360,6 @@ let test_masc_tool_stats_input_schema_matches () =
     gen.input_schema
 ;;
 
-let test_masc_cleanup_zombies_name_matches () =
-  let gen = find_by_name "masc_cleanup_zombies" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_cleanup_zombies" Tool_schemas_misc.schemas in
-  Alcotest.(check string) "masc_cleanup_zombies name" hand.name gen.name
-;;
-
-let test_masc_cleanup_zombies_description_matches () =
-  let gen = find_by_name "masc_cleanup_zombies" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_cleanup_zombies" Tool_schemas_misc.schemas in
-  Alcotest.(check string)
-    "masc_cleanup_zombies description"
-    hand.description
-    gen.description
-;;
-
-let test_masc_cleanup_zombies_input_schema_matches () =
-  let gen = find_by_name "masc_cleanup_zombies" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "masc_cleanup_zombies" Tool_schemas_misc.schemas in
-  Alcotest.check
-    yojson_testable
-    "masc_cleanup_zombies input_schema (Yojson.Safe.equal)"
-    hand.input_schema
-    gen.input_schema
-;;
-
 let () =
   Alcotest.run
     "tool_descriptors_gen"
@@ -381,12 +368,15 @@ let () =
         ; Alcotest.test_case "description" `Quick test_masc_config_description_matches
         ; Alcotest.test_case "input_schema" `Quick test_masc_config_input_schema_matches
         ] )
+    ; ( "config category SSOT"
+      , [ Alcotest.test_case "enum matches producer" `Quick test_config_category_ssot ]
+      )
     ; ( "retired tool exclusion"
       , [ Alcotest.test_case "masc_spawn removed" `Quick test_masc_spawn_is_not_generated
         ] )
     ; ( "control schema SSOT"
       , [ Alcotest.test_case
-            "pause and resume use a dedicated typed projection"
+            "control tools use a dedicated typed projection"
             `Quick
             test_control_schemas_use_dedicated_typed_projection
         ] )
@@ -431,9 +421,9 @@ let () =
             `Quick
             test_web_tools_owned_by_keeper_descriptors
         ; Alcotest.test_case
-            "reach always-visible core after substrate injection"
+            "remain in complete model surface after substrate injection"
             `Quick
-            test_web_backends_reach_core_after_substrate_injection
+            test_web_backends_are_in_complete_model_surface
         ] )
     ; ( "masc_tool_stats field-by-field"
       , [ Alcotest.test_case "name" `Quick test_masc_tool_stats_name_matches
@@ -442,17 +432,6 @@ let () =
             "input_schema"
             `Quick
             test_masc_tool_stats_input_schema_matches
-        ] )
-    ; ( "masc_cleanup_zombies field-by-field"
-      , [ Alcotest.test_case "name" `Quick test_masc_cleanup_zombies_name_matches
-        ; Alcotest.test_case
-            "description"
-            `Quick
-            test_masc_cleanup_zombies_description_matches
-        ; Alcotest.test_case
-            "input_schema"
-            `Quick
-            test_masc_cleanup_zombies_input_schema_matches
         ] )
     ]
 ;;

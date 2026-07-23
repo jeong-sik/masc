@@ -245,6 +245,20 @@ module Ring = struct
   let file_current_date : string ref = ref ""
   let file_base_dir : string ref = ref ""
 
+  (* Sink-identity recheck throttle. The dev/ino check in [sink_matches_path]
+     exists to catch external unlink/rename of the live log file — a rare
+     event — but it sits on the emit path, so unthrottled it cost three
+     stat-family syscalls per record (measured as 27% of main-thread samples;
+     issue #25003). Records emitted inside the window after an external
+     unlink land on the unlinked inode and are lost with it; the loss window
+     is bounded by the interval. Date-roll rotation is not throttled. *)
+  let default_sink_identity_recheck_interval_s = 5.0
+
+  let sink_identity_recheck_interval_s : float ref =
+    ref default_sink_identity_recheck_interval_s
+
+  let last_sink_identity_check_at : float ref = ref neg_infinity
+
   let date_string () = format_utc_date_of (Time_compat.now ())
 
   let log_file_path dir date =
@@ -335,8 +349,23 @@ module Ring = struct
       let needs_reopen =
         match !file_channel with
         | Some oc ->
-            today <> !file_current_date
-            || not (sink_matches_path (log_file_path !file_base_dir today) oc)
+            if today <> !file_current_date then true
+            else begin
+              (* [last_sink_identity_check_at] races benignly across threads —
+                 this function already runs outside [sink_mutex]; the worst
+                 case is a duplicate identity check. A backward wall-clock
+                 jump delays the next check by at most the jump size, which
+                 only widens the unlink-detection window. *)
+              let now = Time_compat.now () in
+              if
+                now -. !last_sink_identity_check_at
+                < !sink_identity_recheck_interval_s
+              then false
+              else begin
+                last_sink_identity_check_at := now;
+                not (sink_matches_path (log_file_path !file_base_dir today) oc)
+              end
+            end
         | None -> true
       in
       if needs_reopen then begin
@@ -563,7 +592,11 @@ module Ring = struct
         buf.(idx) <- { e with seq })
       buf_ring
 
-  let init_file_sink dir =
+  let init_file_sink
+      ?(identity_recheck_interval_s = default_sink_identity_recheck_interval_s)
+      dir =
+    sink_identity_recheck_interval_s := identity_recheck_interval_s;
+    last_sink_identity_check_at := neg_infinity;
     close_sink ();
     load_from_file dir;
     let loaded = Atomic.get total in
@@ -958,7 +991,7 @@ module Feed = Make(struct let name = "Feed" end)
 module Telemetry = Make(struct let name = "Telemetry" end)
 module Noosphere = Make(struct let name = "Noosphere" end)
 module CmdPlane = Make(struct let name = "CmdPlane" end)
-module Governance = Make(struct let name = "Governance" end)
+module Gate = Make(struct let name = "Gate" end)
 module Social = Make(struct let name = "Social" end)
 module Transport = Make(struct let name = "Transport" end)
 module Gc = Make(struct let name = "GC" end)
@@ -996,7 +1029,6 @@ module KeeperExec = Make(struct let name = "KeeperExec" end)
 module LocalWorker = Make(struct let name = "LocalWorker" end)
 module Worker = Make(struct let name = "Worker" end)
 module Sse = Make(struct let name = "SSE" end)
-module Verifier = Make(struct let name = "Verifier" end)
 module Planner = Make(struct let name = "Planner" end)
 module Compact = Make(struct let name = "Compact" end)
 module Harness = Make(struct let name = "Harness" end)

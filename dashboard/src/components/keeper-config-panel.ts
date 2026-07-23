@@ -3,20 +3,16 @@
 // Redesigned: clean section headers, consistent row styling, proper form controls.
 
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import {
   fetchDashboardGoalsTree,
-  fetchDashboardTools,
   patchKeeperConfig,
-  setKeeperToolPolicy,
 } from '../api/dashboard'
-import { fetchKeeperComposite, pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
-import { KeeperGithubAppConfigPanel } from './keeper-github-app-config'
-import type { KeeperSecretProjection } from '../api/schemas/keeper-composite'
-import type { DashboardRuntimeProviderSnapshot, DashboardToolInventoryItem, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
+import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
+import type { DashboardRuntimeProviderSnapshot, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
 import type { GoalTreeNode, KeeperConfig, KeeperHookSlot } from '../types'
-import { formatTokens, formatPct, formatCost } from '../lib/format-number'
+import { formatTokens } from '../lib/format-number'
 import { isVerifierRoleKeeper } from '../lib/keeper-utils'
 import { MISSING_DATA_DASH } from '../lib/format-string'
 import type { AsyncState } from '../lib/async-state'
@@ -24,7 +20,6 @@ import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { BTN_FILLED_BASE } from './common/button-filled-base'
 import { ExpandableTextarea } from './common/expandable-textarea'
-import { KeeperToolAccessSummary } from './keeper-tool-access'
 import { createAsyncResource } from '../lib/async-state'
 import {
   findRuntimeCatalogEntry,
@@ -39,6 +34,7 @@ import {
   runtimeCatalogSnapshotFacts,
 } from '../lib/runtime-provider-summary'
 import { refreshKeeperRuntimeStatus } from '../store'
+import { bumpKeeperRuntimeTraceRefresh } from './keeper-runtime-trace-refresh'
 import { navigate } from '../router'
 import { SetupGuideCard } from './setup-guide-card'
 import { SectionHeader } from './common/section-header'
@@ -54,6 +50,11 @@ import {
 } from './keeper-config-state'
 
 async function refreshKeeperSurfacesAfterConfigSave(): Promise<void> {
+  // Re-fetch the right-rail runtime-trace evidence (drift badge) immediately;
+  // refreshKeeperRuntimeStatus below only updates the live-runtime slice, which
+  // does not change on save. Bump unconditionally so a failed status refresh
+  // still updates the assignment badge.
+  bumpKeeperRuntimeTraceRefresh()
   try {
     await refreshKeeperRuntimeStatus({ force: true })
   } catch (err) {
@@ -120,9 +121,7 @@ export type KeeperConfigFieldPath = ConfigFieldPath<KeeperConfig>
 export type KeeperConfigControlEndpoint =
   | '/api/v1/keepers/:name/config'
   | '/api/v1/keepers/:name/directive'
-  | '/api/v1/keepers/:name/tools'
   | '/api/v1/dashboard/goals'
-  | '/api/v1/dashboard/tools'
   | '/api/v1/providers'
 
 export type KeeperConfigBrowserStateKey =
@@ -168,18 +167,12 @@ const goalOptionsState = goalOptionsResource.state
 // Client-only search over the goal catalogue (title/id substring). The catalogue
 // can be large, so the goals tab filters the rendered list without a fetch.
 const goalSearchQuery = signal('')
-// Live tool registry (GET /api/v1/dashboard/tools) — the per-tool policy grid is
-// derived from this, never a hardcoded catalogue, so a tool added to the runtime
-// surfaces here on the next load.
-const toolInventoryResource = createAsyncResource<DashboardToolInventoryItem[]>()
-const toolInventoryState = toolInventoryResource.state
 const editMode = signal(false)
 const saving = signal(false)
 const saveError = signal<string | null>(null)
 
 // Draft values for editable fields (only used in edit mode)
 type EditDraft = {
-  goal: string
   instructions: string
 }
 
@@ -245,7 +238,6 @@ export function filterHookSlots(
 
 function initDraftFromConfig(c: KeeperConfig): EditDraft {
   return {
-    goal: c.prompt.goal,
     instructions: c.prompt.instructions,
   }
 }
@@ -260,7 +252,6 @@ function buildPayload(draft: EditDraft, orig: KeeperConfig): KeeperConfigUpdateP
       payload[key] = draft[key]
     }
   }
-  setIfChanged('goal')
   setIfChanged('instructions')
   return payload
 }
@@ -275,52 +266,41 @@ function formatRelativeTime(date: Date): string {
   return date.toLocaleString('ko-KR')
 }
 
-// Runtime config draft for sandbox/proactive/compaction/handoff inline editing
-export function normalizeMaxContextOverrideDraft(value: number, maxTokens?: number | null): number {
-  if (!Number.isFinite(value)) return 0
-  const normalized = Math.max(0, Math.trunc(value))
-  const max = Number.isFinite(maxTokens) && (maxTokens ?? 0) > 0
-    ? Math.trunc(maxTokens as number)
-    : null
-  return max == null ? normalized : Math.min(max, normalized)
+// Runtime config draft for sandbox/proactive/compaction inline editing
+export type MaxContextOverrideDraftResult =
+  | { ok: true; value: number | null }
+  | { ok: false; error: string }
+
+export function parseMaxContextOverrideDraft(raw: string): MaxContextOverrideDraftResult {
+  if (raw === '0') return { ok: true, value: null }
+  if (!/^[1-9]\d*$/.test(raw)) {
+    return { ok: false, error: '컨텍스트 오버라이드는 양의 정수여야 합니다. 0은 설정을 지웁니다.' }
+  }
+  const value = Number(raw)
+  if (!Number.isSafeInteger(value)) {
+    return { ok: false, error: '컨텍스트 오버라이드는 안전한 정수 범위 안이어야 합니다.' }
+  }
+  return { ok: true, value }
 }
 
 export type RuntimeDraft = {
   runtime_id: string
   autoboot_enabled: boolean
-  max_context_override: number
+  max_context_override: string
   sandbox_profile: SandboxProfile
   active_goal_ids: string[]
   mention_targets_text: string
   network_mode: SandboxNetworkMode
   allowed_paths_text: string
   proactive_enabled: boolean
-  proactive_idle_sec: number
-  proactive_cooldown_sec: number
-  compaction_profile: string
-  compaction_ratio_gate: number
-  compaction_message_gate: number
-  compaction_token_gate: number
-  compaction_cooldown_sec: number
-  auto_handoff: boolean
-  handoff_threshold: number
-  handoff_cooldown_sec: number
 }
 
 const runtimeDraft = signal<RuntimeDraft | null>(null)
 const runtimeSaving = signal(false)
 const runtimeDirectiveSaving = signal<'pause' | 'resume' | 'wakeup' | null>(null)
-// Tool policy is saved via the separate /tools set_policy endpoint (not the
-// /config PATCH), so it has its own draft/saving state. null draft = "show the
-// live policy"; a string = the operator's in-progress edit.
-const toolAccessDraftText = signal<string | null>(null)
-const denylistDraftText = signal<string | null>(null)
-const denylistSaving = signal(false)
-
 function resetKeeperConfigPanelDrafts(): void {
   goalOptionsResource.reset()
   goalSearchQuery.value = ''
-  toolInventoryResource.reset()
   editMode.value = false
   editDraft.value = null
   saveError.value = null
@@ -329,9 +309,6 @@ function resetKeeperConfigPanelDrafts(): void {
   runtimeDraft.value = null
   runtimeSaving.value = false
   runtimeDirectiveSaving.value = null
-  toolAccessDraftText.value = null
-  denylistDraftText.value = null
-  denylistSaving.value = false
   hookFilterQuery.value = ''
   globalArchExpanded.value = false
   kcfTab.value = 'identity'
@@ -375,10 +352,7 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   return {
     runtime_id: c.execution.selected_runtime_id ?? '',
     autoboot_enabled: c.autoboot_enabled,
-    max_context_override: normalizeMaxContextOverrideDraft(
-      c.max_context_override ?? 0,
-      c.limits.max_context_override_tokens,
-    ),
+    max_context_override: String(c.max_context_override ?? 0),
     sandbox_profile: coerceSandboxProfile(c.sandbox_profile),
     active_goal_ids: c.workspace.active_goal_ids.length > 0
       ? c.workspace.active_goal_ids
@@ -387,16 +361,6 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     network_mode: coerceNetworkMode(c.network_mode),
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
     proactive_enabled: c.proactive.enabled,
-    proactive_idle_sec: c.proactive.idle_sec,
-    proactive_cooldown_sec: c.proactive.cooldown_sec,
-    compaction_profile: c.compaction.profile,
-    compaction_ratio_gate: c.compaction.ratio_gate,
-    compaction_message_gate: c.compaction.message_gate,
-    compaction_token_gate: c.compaction.token_gate,
-    compaction_cooldown_sec: c.compaction.cooldown_sec,
-    auto_handoff: c.handoff.auto,
-    handoff_threshold: c.handoff.threshold,
-    handoff_cooldown_sec: c.handoff.cooldown_sec,
   }
 }
 
@@ -424,9 +388,7 @@ function keeperConfigManifestSource(c: KeeperConfig): string {
 
 const KEEPER_CONFIG_API = '/api/v1/keepers/:name/config'
 const KEEPER_DIRECTIVE_API = '/api/v1/keepers/:name/directive'
-const KEEPER_TOOLS_API = '/api/v1/keepers/:name/tools'
 const DASHBOARD_GOALS_API = '/api/v1/dashboard/goals'
-const DASHBOARD_TOOLS_API = '/api/v1/dashboard/tools'
 const RUNTIME_PROVIDERS_API = '/api/v1/providers'
 
 function configField(path: KeeperConfigFieldPath): KeeperConfigControlEvidence {
@@ -558,35 +520,19 @@ export function keeperConfigControlInventory(
             'sources.override_fields',
           ]),
         },
-        {
-          id: 'kcf-identity-tool-access',
-          tab,
-          label: 'Tool access summary',
-          kind: 'live-read',
-          source: `${configApiSource} tools.*`,
-          action: 'read-only tool access summary',
-          contracts: configReadContracts([
-            'tools.tool_access',
-            'tools.resolved_allowlist',
-            'tools.tool_denylist',
-            'tools.active_masc_tool_count',
-            'tools.active_keeper_tool_count',
-            'tools.total_active',
-          ]),
-        },
       ]
     case 'prompt':
       return [
         {
-          id: 'kcf-prompt-goal-instructions',
+          id: 'kcf-prompt-instructions',
           tab,
-          label: 'Goal and instructions',
+          label: 'Keeper instructions',
           kind: 'live-write',
-          source: `${configApiSource} prompt.goal/prompt.instructions + sources.override_fields`,
-          action: 'PATCH /api/v1/keepers/:name/config goal/instructions',
+          source: `${configApiSource} prompt.instructions + sources.override_fields`,
+          action: 'PATCH /api/v1/keepers/:name/config instructions',
           contracts: [
-            ...configReadContracts(['prompt.goal', 'prompt.instructions', 'sources.override_fields']),
-            apiContract('PATCH', KEEPER_CONFIG_API, 'goal/instructions'),
+            ...configReadContracts(['prompt.instructions', 'sources.override_fields']),
+            apiContract('PATCH', KEEPER_CONFIG_API, 'instructions'),
           ],
         },
         {
@@ -638,10 +584,10 @@ export function keeperConfigControlInventory(
           tab,
           'kcf-runtime-context-override',
           'Context override',
-          `${configApiSource} max_context_override + limits.max_context_override_tokens`,
+          `${configApiSource} max_context_override`,
           'PATCH /api/v1/keepers/:name/config max_context_override',
           'max_context_override',
-          ['max_context_override', 'limits.min_context_override_tokens', 'limits.max_context_override_tokens'],
+          ['max_context_override'],
         ),
       ]
     case 'policy':
@@ -658,39 +604,16 @@ export function keeperConfigControlInventory(
         keeperRuntimeControlItem(
           c,
           tab,
-          'kcf-policy-continuity',
-          'Compaction, proactive, handoff',
-          `${configApiSource} compaction.* + proactive.* + handoff.* + autoboot_enabled`,
-          'PATCH /api/v1/keepers/:name/config continuity/autoboot fields',
-          'continuity/autoboot fields',
+          'kcf-policy-proactive',
+          'Proactive and autoboot',
+          `${configApiSource} proactive.* + autoboot_enabled`,
+          'PATCH /api/v1/keepers/:name/config proactive/autoboot fields',
+          'proactive/autoboot fields',
           [
             'autoboot_enabled',
-            'compaction.profile',
-            'compaction.ratio_gate',
-            'compaction.message_gate',
-            'compaction.token_gate',
-            'compaction.cooldown_sec',
             'proactive.enabled',
-            'proactive.idle_sec',
-            'proactive.cooldown_sec',
-            'handoff.auto',
-            'handoff.threshold',
-            'handoff.cooldown_sec',
           ],
         ),
-        {
-          id: 'kcf-policy-tool-policy',
-          tab,
-          label: 'Tool policy',
-          kind: 'live-write',
-          source: `${configApiSource} tools.* + GET /api/v1/dashboard/tools`,
-          action: 'set_policy tool_access/tool_denylist',
-          contracts: [
-            ...configReadContracts(['tools.tool_access', 'tools.tool_denylist', 'tools.resolved_allowlist']),
-            apiContract('GET', DASHBOARD_TOOLS_API),
-            apiContract('POST', KEEPER_TOOLS_API, 'set_policy'),
-          ],
-        },
       ]
     case 'access':
       return [
@@ -771,9 +694,9 @@ export function keeperConfigControlInventory(
           tab,
           label: 'Hook slots',
           kind: 'live-read',
-          source: `${configApiSource} hooks.slots/hooks.deny_list/hooks.cost_budget`,
+          source: `${configApiSource} hooks.scope/hooks.slots`,
           action: 'read-only global runtime architecture projection',
-          contracts: configReadContracts(['hooks.slots', 'hooks.deny_list', 'hooks.cost_budget']),
+          contracts: configReadContracts(['hooks.scope', 'hooks.slots']),
         },
         {
           id: 'kcf-hooks-filter',
@@ -811,7 +734,6 @@ export function keeperConfigControlInventory(
             'runtime.fiber_health',
             'runtime.runtime_blocker_class',
             'runtime.runtime_blocker_summary',
-            'runtime.runtime_blocker_continue_gate',
             'runtime_trust',
           ]),
         },
@@ -855,7 +777,16 @@ export function keeperConfigControlInventory(
   }
 }
 
-export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): KeeperConfigUpdatePayload {
+export type RuntimePayloadBuildResult =
+  | { ok: true; payload: KeeperConfigUpdatePayload }
+  | { ok: false; error: string }
+
+export function buildRuntimePayloadResult(
+  draft: RuntimeDraft,
+  orig: KeeperConfig,
+): RuntimePayloadBuildResult {
+  const maxContextOverride = parseMaxContextOverrideDraft(draft.max_context_override)
+  if (!maxContextOverride.ok) return maxContextOverride
   const payload: KeeperConfigUpdatePayload = {}
   const newPaths = listTextToStrings(draft.allowed_paths_text)
   const newMentionTargets = listTextToStrings(draft.mention_targets_text)
@@ -865,12 +796,8 @@ export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): Ke
     : orig.active_goal_ids
   if (draft.runtime_id.trim() !== (orig.execution.selected_runtime_id ?? '').trim()) payload.runtime_id = draft.runtime_id.trim()
   if (draft.autoboot_enabled !== orig.autoboot_enabled) payload.autoboot_enabled = draft.autoboot_enabled
-  const draftMaxContextOverride = normalizeMaxContextOverrideDraft(
-    draft.max_context_override,
-    orig.limits.max_context_override_tokens,
-  )
-  if (draftMaxContextOverride !== (orig.max_context_override ?? 0)) {
-    payload.max_context_override = draftMaxContextOverride > 0 ? draftMaxContextOverride : null
+  if (maxContextOverride.value !== orig.max_context_override) {
+    payload.max_context_override = maxContextOverride.value
   }
   if (!sameStringArray(draft.active_goal_ids, origActiveGoalIds)) payload.active_goal_ids = draft.active_goal_ids
   if (!sameStringArray(newMentionTargets, orig.workspace.mention_targets)) payload.mention_targets = newMentionTargets
@@ -878,17 +805,13 @@ export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): Ke
   if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
   if (draft.network_mode !== coerceNetworkMode(orig.network_mode)) payload.network_mode = draft.network_mode
   if (draft.proactive_enabled !== orig.proactive.enabled) payload.proactive_enabled = draft.proactive_enabled
-  if (draft.proactive_idle_sec !== orig.proactive.idle_sec) payload.proactive_idle_sec = draft.proactive_idle_sec
-  if (draft.proactive_cooldown_sec !== orig.proactive.cooldown_sec) payload.proactive_cooldown_sec = draft.proactive_cooldown_sec
-  if (draft.compaction_profile !== orig.compaction.profile) payload.compaction_profile = draft.compaction_profile
-  if (draft.compaction_ratio_gate !== orig.compaction.ratio_gate) payload.compaction_ratio_gate = draft.compaction_ratio_gate
-  if (draft.compaction_message_gate !== orig.compaction.message_gate) payload.compaction_message_gate = draft.compaction_message_gate
-  if (draft.compaction_token_gate !== orig.compaction.token_gate) payload.compaction_token_gate = draft.compaction_token_gate
-  if (draft.compaction_cooldown_sec !== orig.compaction.cooldown_sec) payload.compaction_cooldown_sec = draft.compaction_cooldown_sec
-  if (draft.auto_handoff !== orig.handoff.auto) payload.auto_handoff = draft.auto_handoff
-  if (draft.handoff_threshold !== orig.handoff.threshold) payload.handoff_threshold = draft.handoff_threshold
-  if (draft.handoff_cooldown_sec !== orig.handoff.cooldown_sec) payload.handoff_cooldown_sec = draft.handoff_cooldown_sec
-  return payload
+  return { ok: true, payload }
+}
+
+export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): KeeperConfigUpdatePayload {
+  const result = buildRuntimePayloadResult(draft, orig)
+  if (!result.ok) throw new RangeError(result.error)
+  return result.payload
 }
 
 function updateRuntimeDraft(field: keyof RuntimeDraft, value: boolean | number | string) {
@@ -914,27 +837,20 @@ function listTextToStrings(text: string): string[] {
 }
 
 function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<string, boolean> {
-  const payload = buildRuntimePayload(rd, c)
+  const result = buildRuntimePayloadResult(rd, c)
+  const payload = result.ok ? result.payload : {}
   return {
     runtime_id: 'runtime_id' in payload,
     autoboot_enabled: 'autoboot_enabled' in payload,
-    max_context_override: 'max_context_override' in payload,
+    max_context_override: result.ok
+      ? 'max_context_override' in payload
+      : rd.max_context_override !== String(c.max_context_override ?? 0),
     active_goal_ids: 'active_goal_ids' in payload,
     mention_targets: 'mention_targets' in payload,
     allowed_paths: 'allowed_paths' in payload,
     sandbox_profile: 'sandbox_profile' in payload,
     network_mode: 'network_mode' in payload,
     proactive_enabled: 'proactive_enabled' in payload,
-    proactive_idle_sec: 'proactive_idle_sec' in payload,
-    proactive_cooldown_sec: 'proactive_cooldown_sec' in payload,
-    compaction_profile: 'compaction_profile' in payload,
-    compaction_ratio_gate: 'compaction_ratio_gate' in payload,
-    compaction_message_gate: 'compaction_message_gate' in payload,
-    compaction_token_gate: 'compaction_token_gate' in payload,
-    compaction_cooldown_sec: 'compaction_cooldown_sec' in payload,
-    auto_handoff: 'auto_handoff' in payload,
-    handoff_threshold: 'handoff_threshold' in payload,
-    handoff_cooldown_sec: 'handoff_cooldown_sec' in payload,
   }
 }
 
@@ -1041,16 +957,6 @@ async function loadGoalOptions(options?: { force?: boolean }): Promise<void> {
   })
 }
 
-async function loadToolInventory(options?: { force?: boolean }): Promise<void> {
-  const force = options?.force === true
-  if (!force && toolInventoryState.value.status === 'loaded') return
-  if (force) toolInventoryResource.reset()
-  await toolInventoryResource.load(async () => {
-    const response = await fetchDashboardTools()
-    return response.tool_inventory?.tools ?? []
-  })
-}
-
 // Case-insensitive title/id substring filter for the goals catalogue.
 export function filterGoalOptions(
   goals: readonly GoalTreeNode[],
@@ -1139,9 +1045,7 @@ function keeperConfigControlEvidenceLabels(
 function keeperConfigControlEndpointShortLabel(endpoint: KeeperConfigControlEndpoint): string {
   if (endpoint === KEEPER_CONFIG_API) return 'config'
   if (endpoint === KEEPER_DIRECTIVE_API) return 'directive'
-  if (endpoint === KEEPER_TOOLS_API) return 'tools'
   if (endpoint === DASHBOARD_GOALS_API) return 'goals'
-  if (endpoint === DASHBOARD_TOOLS_API) return 'tool catalog'
   return 'providers'
 }
 
@@ -1226,8 +1130,8 @@ function KcfReadonlyText({ label, hint, text }: { label: string; hint?: string; 
 
 // ── prompt assembly trace (조립 추적) ──
 // Keeper-scoped layered lineage built from the keeper's OWN config provenance:
-// system_prompt_blocks (shared base), prompt.goal/instructions (manifest, or a
-// live override when sources.override_fields lists the field), and active_goals.
+// system_prompt_blocks (shared base), prompt.instructions (manifest, or a live
+// override when sources.override_fields lists the field), and active_goals.
 // This is deliberately NOT the workspace-global KeeperPromptAssemblyPanel — that
 // component fetches dashboard-wide prompt-registry overrides (fetchDashboardPrompts)
 // and cannot render one keeper's assembled layers. Read-only; every segment is
@@ -1250,7 +1154,7 @@ const KCF_ASSEMBLY_SRC_META: Readonly<Record<KcfAssemblySource, { lbl: string; c
 }
 
 // Server override_fields are dot-namespaced (keeper_status_bridge.ml
-// live_override_details): 'prompt.goal', 'prompt.instructions', etc. A field is
+// live_override_details): 'prompt.instructions', etc. A field is
 // marked as winning over the manifest only when its exact key is present.
 export function buildKcfAssemblySegments(c: KeeperConfig): KcfAssemblySegment[] {
   const overrideFields = new Set(c.sources.override_fields)
@@ -1285,7 +1189,6 @@ export function buildKcfAssemblySegments(c: KeeperConfig): KcfAssemblySegment[] 
       win: overridden,
     })
   }
-  pushPromptField('prompt.goal', '목표 (objective)', c.prompt.goal)
   pushPromptField('prompt.instructions', '지시사항 (instructions)', c.prompt.instructions)
   const goals = c.workspace.active_goals
   if (goals.length > 0) {
@@ -1377,38 +1280,6 @@ function SetToggle({ on, onChange, ariaLabel }: { on: boolean; onChange: (v: boo
   `
 }
 
-// Segmented selector for a bounded numeric value. To avoid silently dropping a
-// value that is not one of the presets, the current value is folded into the
-// option list (sorted) so it stays visible and selectable.
-function SetSeg({
-  value,
-  options,
-  onChange,
-  ariaLabel,
-}: {
-  value: number
-  options: readonly number[]
-  onChange: (v: number) => void
-  ariaLabel: string
-}) {
-  const opts = options.includes(value)
-    ? options
-    : [...options, value].sort((a, b) => a - b)
-  return html`
-    <div class="set-seg" role="radiogroup" aria-label=${ariaLabel}>
-      ${opts.map((o) => html`
-        <button
-          type="button"
-          key=${o}
-          class=${`set-seg-b ${o === value ? 'on' : ''}`}
-          aria-pressed=${o === value ? 'true' : 'false'}
-          onClick=${() => onChange(o)}
-        >${o}</button>
-      `)}
-    </div>
-  `
-}
-
 function ConfigRow({ label, value }: { label: string; value: string }) {
   return html`
     <div class="flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2 v2-monitoring-row">
@@ -1425,21 +1296,6 @@ function BoolRow({ label, value }: { label: string; value: boolean }) {
       <${BoolBadge} value=${value} />
     </div>
   `
-}
-
-function formatSeconds(value: number): string {
-  if (!Number.isFinite(value)) return MISSING_DATA_DASH
-  return value >= 60 ? `${(value / 60).toFixed(1)}m` : `${value.toFixed(value % 1 === 0 ? 0 : 1)}s`
-}
-
-function perProviderTimeoutLabel(execution: KeeperConfig['execution']): string {
-  if (
-    execution.per_provider_timeout_mode === 'override'
-    && typeof execution.per_provider_timeout_sec === 'number'
-  ) {
-    return formatSeconds(execution.per_provider_timeout_sec)
-  }
-  return 'turn budget default'
 }
 
 function MajorSectionHeader({ title }: { title: string }) {
@@ -1476,14 +1332,6 @@ function BoolBadge({ value }: { value: boolean }) {
   return value
     ? html`<span class="text-2xs font-bold px-2 py-0.5 rounded-[var(--r-1)] bg-ok/10 text-ok border border-ok/20 shadow-1 shadow-ok/5">ON</span>`
     : html`<span class="text-2xs font-bold px-2 py-0.5 rounded-[var(--r-1)] bg-[var(--color-bg-elevated)] text-text-dim border border-[var(--color-border-default)] shadow-1">OFF</span>`
-}
-
-function formatHookDestructiveTools(value: string[] | string): string {
-  if (Array.isArray(value)) {
-    return value.length > 0 ? value.join(', ') : MISSING_DATA_DASH
-  }
-  const text = value.trim()
-  return text !== '' ? text : MISSING_DATA_DASH
 }
 
 function ModelList({ models }: { models: string[] }) {
@@ -1544,33 +1392,30 @@ function PromptBlock({
   `
 }
 
-// ── Inline editing components for runtime config ────────
-
-function InlineNumberRow({ label, value, onChange, min, max, step, suffix, dirty = false }: {
-  label: string; value: number; onChange: (v: number) => void;
-  min?: number; max?: number; step?: number; suffix?: string; dirty?: boolean
+function InlineContextOverrideRow({ value, onChange, error, dirty = false }: {
+  value: string
+  onChange: (value: string) => void
+  error: string | null
+  dirty?: boolean
 }) {
-  const [invalid, setInvalid] = useState(false)
   return html`
-    <div class="kcf-inline-row flex items-center justify-between py-2.5 px-4 rounded-[var(--r-1)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)] border-card-border/50' : 'border-card-border/50'} bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-[var(--shadow-1)] mb-2 v2-monitoring-row">
-      <span class="text-sm font-medium text-text-muted">${label}${dirty ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</span>
-      <div class="kcf-inline-control flex items-center gap-2">
-        <input type="number"
-          aria-label=${label}
-          class="w-24 text-right bg-card/60 text-text-strong text-sm font-semibold border ${invalid ? 'border-[var(--color-status-err)]' : 'border-card-border'} rounded-[var(--r-1)] py-1.5 px-2 focus:outline-none focus:border-accent-fg/50 transition-colors"
-          value=${value}
-          min=${min}
-          max=${max}
-          step=${step}
-          onInput=${(e: Event) => {
-            const input = e.target as HTMLInputElement
-            const v = parseFloat(input.value)
-            setInvalid(!input.checkValidity())
-            if (!isNaN(v)) onChange(v)
-          }}
-        />
-        ${suffix ? html`<span class="text-xs text-text-dim w-5">${suffix}</span>` : null}
+    <div class="kcf-inline-row py-2.5 px-4 rounded-[var(--r-1)] border ${dirty ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} ${error ? 'border-[var(--color-status-err)]' : 'border-card-border/50'} bg-card/20 mb-2 v2-monitoring-row">
+      <div class="flex items-center justify-between">
+        <span class="text-sm font-medium text-text-muted">컨텍스트 오버라이드${dirty ? html`<span class="ml-2 text-2xs text-[var(--color-accent-fg)] font-semibold">●</span>` : null}</span>
+        <div class="kcf-inline-control flex items-center gap-2">
+          <input
+            type="text"
+            inputMode="numeric"
+            aria-label="컨텍스트 오버라이드"
+            aria-invalid=${error ? 'true' : 'false'}
+            class="w-24 text-right bg-card/60 text-text-strong text-sm font-semibold border ${error ? 'border-[var(--color-status-err)]' : 'border-card-border'} rounded-[var(--r-1)] py-1.5 px-2"
+            value=${value}
+            onInput=${(event: Event) => onChange((event.target as HTMLInputElement).value)}
+          />
+          <span class="text-xs text-text-dim w-5">tok</span>
+        </div>
       </div>
+      ${error ? html`<div class="mt-1 text-2xs text-[var(--color-status-err)]" role="alert">${error}</div>` : html`<div class="mt-1 text-2xs text-text-dim">양의 정수만 허용됩니다. 0은 오버라이드를 지웁니다.</div>`}
     </div>
   `
 }
@@ -1605,7 +1450,7 @@ export function InlineSelectRow({
 
 // ── Edit field components ────────────────────────────────
 
-function updateDraft(field: keyof EditDraft, value: string | boolean | number) {
+function updateDraft(field: keyof EditDraft, value: string) {
   const d = editDraft.value
   if (!d) return
   editDraft.value = { ...d, [field]: value }
@@ -1702,32 +1547,12 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
   useEffect(() => retainKeeperConfigPanelSubscriptions(), [])
 
-  // GitHub App credentials live in the keeper secret projection, which the
-  // config payload does not carry. Fetch it once per keeper (same source the
-  // monitoring detail reads via composite.secret_projection) so the access-tab
-  // panel can detect existing config; mutations return the fresh projection and
-  // update this state without a refetch.
-  const [secretProjection, setSecretProjection] = useState<KeeperSecretProjection | null>(null)
-  useEffect(() => {
-    const controller = new AbortController()
-    fetchKeeperComposite(keeperName, { signal: controller.signal })
-      .then((snapshot) => setSecretProjection(snapshot.secret_projection ?? null))
-      .catch(() => {
-        // A failed/aborted secret fetch leaves the panel in its empty-projection
-        // state (save still works); it must not break the rest of the config UI.
-      })
-    return () => controller.abort()
-  }, [keeperName])
-
   // Trigger load on first render or name change
   if (configKeeperName.value !== keeperName || state.status === 'idle') {
     void loadKeeperConfig(keeperName)
   }
   if (goalOptionsState.value.status === 'idle') {
     void loadGoalOptions()
-  }
-  if (toolInventoryState.value.status === 'idle') {
-    void loadToolInventory()
   }
   if (runtimeCatalogState.value.status === 'idle') {
     loadRuntimeCatalog()
@@ -1779,9 +1604,15 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   }
   const rd = runtimeDraft.value
   const dirtyFlags = rd ? computeRuntimeDirtyFlags(rd, c) : {}
-
-  const runtimeHasChanges = runtimeCanEdit && rd ? Object.keys(buildRuntimePayload(rd, c)).length > 0 : false
-  const maxContextOverrideTokens = c.limits.max_context_override_tokens ?? undefined
+  const runtimePayloadResult = rd ? buildRuntimePayloadResult(rd, c) : null
+  const runtimeValidationError = runtimePayloadResult && !runtimePayloadResult.ok
+    ? runtimePayloadResult.error
+    : null
+  const runtimeHasChanges = runtimeCanEdit && rd && runtimePayloadResult
+    ? runtimePayloadResult.ok
+      ? Object.keys(runtimePayloadResult.payload).length > 0
+      : dirtyFlags.max_context_override === true
+    : false
   const runtimeOptions = rd
     ? dedupeStrings([
         rd.runtime_id,
@@ -1807,7 +1638,12 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
   async function saveRuntimeConfig() {
     if (!rd || !runtimeCanEdit) return
-    const payload = buildRuntimePayload(rd, c)
+    const result = buildRuntimePayloadResult(rd, c)
+    if (!result.ok) {
+      showToast(result.error, 'error')
+      return
+    }
+    const payload = result.payload
     if (Object.keys(payload).length === 0) return
     runtimeSaving.value = true
     try {
@@ -1830,7 +1666,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         action === 'pause'
           ? await pauseKeeper(keeperName)
           : action === 'resume'
-            ? await resumeKeeper(keeperName)
+            ? await resumeKeeper(keeperName, c.metrics.generation)
             : await wakeKeeper(keeperName)
       if (!result.ok) {
         throw new Error(result.error || `${action} directive failed`)
@@ -1849,34 +1685,6 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
   function resetRuntimeDraft() {
     runtimeDraft.value = initRuntimeDraftFromConfig(c)
-  }
-
-  // Parse tool policy textareas into deduped, trimmed tool-name lists.
-  function parseToolPolicyListDraft(text: string): string[] {
-    return [...new Set(text.split('\n').map((s) => s.trim()).filter(Boolean))]
-  }
-
-  async function saveToolPolicy() {
-    const accessText = toolAccessDraftText.value ?? c.tools.tool_access.join('\n')
-    const denyText = denylistDraftText.value ?? c.tools.tool_denylist.join('\n')
-    const toolAccess = parseToolPolicyListDraft(accessText)
-    const deny = parseToolPolicyListDraft(denyText)
-    denylistSaving.value = true
-    try {
-      const updated = await setKeeperToolPolicy(keeperName, {
-        tool_access: toolAccess,
-        deny,
-      })
-      applyKeeperConfigUpdate(keeperName, updated)
-      void refreshKeeperSurfacesAfterConfigSave()
-      toolAccessDraftText.value = null
-      denylistDraftText.value = null
-      showToast('도구 정책 저장 완료', 'success')
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : '저장 실패', 'error')
-    } finally {
-      denylistSaving.value = false
-    }
   }
 
   function enterEditMode() {
@@ -1951,14 +1759,11 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   // --- Prompt section (editable) ---
   const promptSection = isEditing ? html`
     <${MajorSectionHeader} title="프롬프트 (편집)" />
-    <${EditTextarea} field="goal" label="목표" rows=${8} />
     <${EditTextarea} field="instructions" label="지시사항" rows=${10} />
   ` : html`
     <${MajorSectionHeader} title="프롬프트" />
-    <${SectionHeader} size="xs" class="mb-0.5">목표</${SectionHeader}>
-    <${LongText} text=${c.prompt.goal} />
     ${c.prompt.instructions ? html`
-      <${SectionHeader} size="xs" class="mt-2 mb-0.5">지시사항</${SectionHeader}>
+      <${SectionHeader} size="xs" class="mb-0.5">지시사항</${SectionHeader}>
       <${LongText} text=${c.prompt.instructions} />
     ` : null}
     <${SectionHeader} size="xs" class="mt-3 mb-0.5" right=${html`
@@ -1971,7 +1776,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       >설정 › 프롬프트 열기 →</button>
     `}>시스템 프롬프트</${SectionHeader}>
     <div class="text-3xs text-text-dim mb-2">
-      헌법·세계관·능력 블록은 <span class="font-mono">전역 프롬프트</span>입니다 (read-only) — 편집은 설정 › 프롬프트. 아래 목표·지시사항만 이 keeper 고유값입니다.
+      헌법·세계관·능력 블록은 <span class="font-mono">전역 프롬프트</span>입니다 (read-only) — 편집은 설정 › 프롬프트. 아래 지시사항은 이 keeper 고유값이며 목표 연결은 배정 목표 탭에서 관리합니다.
     </div>
     <div class="flex gap-2 mb-2 v2-monitoring-toolbar">
       <button
@@ -2016,10 +1821,8 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     : []
 
   // ── Tab content (the live fields, regrouped under the 8 prototype tabs) ──
-  // identity ◈ — access-summary facts + source provenance + verifier role
+  // identity ◈ — source provenance + verifier role
   const identityTab = html`
-    <${KeeperToolAccessSummary} config=${c} />
-
     <${KcfSec} title="편집 가능 범위" desc="여기서 저장되는 값은 keeper 프롬프트, live override 계층, runtime.toml의 [runtime.assignments]입니다.">
       <${KcfFacts} rows=${[
         ['기본 소스', c.sources.default_source_kind],
@@ -2090,15 +1893,15 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       `
       : null}
 
-    <${KcfSec} title="실행" desc="런타임 후보·타임아웃은 읽기 전용입니다. fallback 은 마지막 runtime 을 제외한 항목에 순서대로 적용됩니다.">
+    <${KcfSec} title="실행" desc="런타임 후보는 읽기 전용입니다. fallback 은 마지막 runtime 을 제외한 항목에 순서대로 적용됩니다.">
       <${KcfFacts} rows=${[
         ['활성 런타임', c.execution.active_model ? 'runtime' : null],
-        ['runtime timeout', perProviderTimeoutLabel(c.execution), true],
       ]} />
       ${rd && runtimeCanEdit ? html`
-        <${InlineNumberRow} label="컨텍스트 오버라이드" value=${rd.max_context_override}
-          onChange=${(v: number) => updateRuntimeDraft('max_context_override', normalizeMaxContextOverrideDraft(v, c.limits.max_context_override_tokens))}
-          min=${0} max=${maxContextOverrideTokens} step=${1000} suffix="tok"
+        <${InlineContextOverrideRow}
+          value=${rd.max_context_override}
+          onChange=${(value: string) => updateRuntimeDraft('max_context_override', value)}
+          error=${runtimeValidationError}
           dirty=${dirtyFlags.max_context_override} />
       ` : html`
         <${ConfigRow} label="컨텍스트 오버라이드" value=${c.max_context_override != null ? formatTokens(c.max_context_override) : MISSING_DATA_DASH} />
@@ -2110,45 +1913,11 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     </${KcfSec}>
   `
 
-  // policy ⚖ — verify gate + compaction + proactive + handoff + tool policy
+  // policy ⚖ — verify gate + proactive + tool policy
   const policyTab = html`
     ${runtimeWriteUnsupportedNotice}
     <${MajorSectionHeader} title="검증" />
     <${BoolRow} label="검증" value=${c.execution.verify} />
-
-    <${SectionHeader} title="컴팩션" />
-    ${rd && runtimeCanEdit ? html`
-      <${InlineSelectRow}
-        label="compaction_profile"
-        value=${rd.compaction_profile}
-        options=${['aggressive', 'balanced', 'conservative', 'custom'] as const}
-        onChange=${(value: string) => updateRuntimeDraft('compaction_profile', value)}
-        dirty=${dirtyFlags.compaction_profile}
-      />
-      <${SetRow} label="비율 게이트" hint="컨텍스트 사용률 %" dirty=${dirtyFlags.compaction_ratio_gate}>
-        <${SetSeg} ariaLabel="비율 게이트" value=${Math.round(rd.compaction_ratio_gate * 100)}
-          options=${[75, 80, 85, 90]}
-          onChange=${(v: number) => updateRuntimeDraft('compaction_ratio_gate', v / 100)} />
-      </${SetRow}>
-      <${InlineNumberRow} label="메시지 게이트" value=${rd.compaction_message_gate}
-        onChange=${(v: number) => updateRuntimeDraft('compaction_message_gate', v)}
-        min=${0} max=${500} step=${5}
-        dirty=${dirtyFlags.compaction_message_gate} />
-      <${InlineNumberRow} label="토큰 게이트" value=${rd.compaction_token_gate}
-        onChange=${(v: number) => updateRuntimeDraft('compaction_token_gate', v)}
-        min=${0} max=${maxContextOverrideTokens} step=${1000} suffix="tok"
-        dirty=${dirtyFlags.compaction_token_gate} />
-      <${InlineNumberRow} label="쿨다운 (초)" value=${rd.compaction_cooldown_sec}
-        onChange=${(v: number) => updateRuntimeDraft('compaction_cooldown_sec', v)}
-        min=${0} max=${3600} step=${30} suffix="s"
-        dirty=${dirtyFlags.compaction_cooldown_sec} />
-    ` : html`
-      <${ConfigRow} label="프로필" value=${c.compaction.profile || MISSING_DATA_DASH} />
-      <${ConfigRow} label="비율 게이트" value=${formatPct(c.compaction.ratio_gate)} />
-      <${ConfigRow} label="메시지 게이트" value=${String(c.compaction.message_gate)} />
-      <${ConfigRow} label="토큰 게이트" value=${formatTokens(c.compaction.token_gate)} />
-      <${ConfigRow} label="쿨다운" value=${c.compaction.cooldown_sec + 's'} />
-    `}
 
     <${SectionHeader} title="프로액티브" />
     ${rd && runtimeCanEdit ? html`
@@ -2160,148 +1929,11 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         <${SetToggle} ariaLabel="프로액티브 활성" on=${rd.proactive_enabled}
           onChange=${(v: boolean) => updateRuntimeDraft('proactive_enabled', v)} />
       </${SetRow}>
-      <${InlineNumberRow} label="유휴 트리거 (초)" value=${rd.proactive_idle_sec}
-        onChange=${(v: number) => updateRuntimeDraft('proactive_idle_sec', v)}
-        min=${10} max=${3600} step=${10} suffix="s"
-        dirty=${dirtyFlags.proactive_idle_sec} />
-      <${InlineNumberRow} label="쿨다운 (초)" value=${rd.proactive_cooldown_sec}
-        onChange=${(v: number) => updateRuntimeDraft('proactive_cooldown_sec', v)}
-        min=${10} max=${3600} step=${10} suffix="s"
-        dirty=${dirtyFlags.proactive_cooldown_sec} />
     ` : html`
       <${BoolRow} label="자동 부팅" value=${c.autoboot_enabled} />
       <${BoolRow} label="활성" value=${c.proactive.enabled} />
-      <${ConfigRow} label="유휴 트리거" value=${c.proactive.idle_sec + 's'} />
-      <${ConfigRow} label="쿨다운" value=${c.proactive.cooldown_sec + 's'} />
     `}
 
-    <${SectionHeader} title="핸드오프" />
-    ${rd && runtimeCanEdit ? html`
-      <${SetRow} label="자동" hint="컨텍스트 임계 도달 시 자동 인계" dirty=${dirtyFlags.auto_handoff}>
-        <${SetToggle} ariaLabel="자동 핸드오프" on=${rd.auto_handoff}
-          onChange=${(v: boolean) => updateRuntimeDraft('auto_handoff', v)} />
-      </${SetRow}>
-      <${SetRow} label="임계값" hint="컨텍스트 %" dirty=${dirtyFlags.handoff_threshold}>
-        <${SetSeg} ariaLabel="핸드오프 임계값" value=${Math.round(rd.handoff_threshold * 100)}
-          options=${[80, 85, 90, 95]}
-          onChange=${(v: number) => updateRuntimeDraft('handoff_threshold', v / 100)} />
-      </${SetRow}>
-      <${InlineNumberRow} label="쿨다운 (초)" value=${rd.handoff_cooldown_sec}
-        onChange=${(v: number) => updateRuntimeDraft('handoff_cooldown_sec', v)}
-        min=${0} max=${3600} step=${30} suffix="s"
-        dirty=${dirtyFlags.handoff_cooldown_sec} />
-    ` : html`
-      <${BoolRow} label="자동" value=${c.handoff.auto} />
-      <${ConfigRow} label="임계값" value=${formatPct(c.handoff.threshold)} />
-      <${ConfigRow} label="쿨다운" value=${c.handoff.cooldown_sec + 's'} />
-    `}
-
-    ${(() => {
-      const accessText = toolAccessDraftText.value ?? c.tools.tool_access.join('\n')
-      const denyText = denylistDraftText.value ?? c.tools.tool_denylist.join('\n')
-      const accessDeduped = parseToolPolicyListDraft(accessText)
-      const denyDeduped = parseToolPolicyListDraft(denyText)
-      const changed =
-        JSON.stringify(accessDeduped) !== JSON.stringify(c.tools.tool_access)
-        || JSON.stringify(denyDeduped) !== JSON.stringify(c.tools.tool_denylist)
-      // Per-tool grid edits the SAME tool_access draft the textarea below shows —
-      // one draft, two views. Toggling only rewrites tool_access membership; the
-      // server (set_policy) still validates every name (RFC-0273 fail-closed) and
-      // the denylist keeps its own control, so no execution-gating claim is implied.
-      //
-      // Empty tool_access is NOT "every tool off": keeper_tool_policy.ml expands an
-      // empty allowlist to the full candidate universe (runtime gates on
-      // candidate-minus-denylist). So in that mode the grid shows every tool as ON
-      // and read-only — an enabled toggle would silently narrow [] (all candidates)
-      // to a single explicit candidate. The operator opts into an explicit allowlist
-      // via the textarea below, at which point the grid becomes interactive.
-      const allCandidatesMode = accessDeduped.length === 0
-      const accessSet = new Set(accessDeduped)
-      const toggleToolAccess = (name: string) => {
-        if (allCandidatesMode) return
-        const next = new Set(accessDeduped)
-        if (next.has(name)) next.delete(name)
-        else next.add(name)
-        toolAccessDraftText.value = [...next].join('\n')
-      }
-      const toolState = toolInventoryState.value
-      return html`
-        <${SectionHeader} title="도구 정책" />
-        <p class="text-3xs text-text-muted mb-2 px-1 leading-relaxed">
-          저장 시 set_policy 로 tool_access 와 tool_denylist 를 함께 적용합니다. tool_access 는 후보 프로필이고 실행 차단은 denylist가 담당합니다.
-        </p>
-        ${toolState.status === 'loading' ? html`
-          <div class="text-2xs text-[var(--color-fg-muted)] mb-2 px-1" role="status">도구 목록 로딩 중...</div>
-        ` : toolState.status === 'error' ? html`
-          <div class="text-2xs text-[var(--color-status-err)] mb-2 px-1">도구 목록 로드 실패: ${toolState.message}</div>
-        ` : toolState.status === 'loaded' && toolState.data.length > 0 ? html`
-          ${allCandidatesMode ? html`
-            <div class="text-2xs text-[var(--color-fg-muted)] mb-2 px-1" role="note" data-testid="tool-all-candidates-note">
-              빈 tool_access — 전체 후보 도구 허용 (실행 차단은 denylist). 개별 도구를 제한하려면 아래 tool_access 목록에 이름을 입력해 명시적 허용목록으로 전환하세요.
-            </div>
-          ` : null}
-          <div class="kcf-tools mb-3" role="group" aria-label="tool_access 후보 도구">
-            ${toolState.data.map((tool) => {
-              const on = allCandidatesMode || accessSet.has(tool.name)
-              return html`
-                <div key=${tool.name} class=${`kcf-tool ${on ? 'on' : ''}`}>
-                  <button
-                    type="button"
-                    class="kcf-tool-toggle"
-                    role="switch"
-                    aria-checked=${on ? 'true' : 'false'}
-                    aria-disabled=${allCandidatesMode ? 'true' : 'false'}
-                    disabled=${allCandidatesMode}
-                    aria-label=${`${tool.name} ${on ? '켜짐' : '꺼짐'}`}
-                    onClick=${() => { toggleToolAccess(tool.name) }}
-                  >${on ? '✓' : ''}</button>
-                  <span class="kcf-tool-id mono">${tool.name}</span>
-                  <span class="kcf-tool-risk" title="tool_inventory.category">${tool.category}</span>
-                  <span class="kcf-tool-desc">${tool.description}</span>
-                </div>
-              `
-            })}
-          </div>
-        ` : null}
-        <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${changed ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-sm text-[var(--color-fg-secondary)]">tool_access</span>
-            <span class="text-xs text-[var(--color-fg-muted)]">${accessDeduped.length}개</span>
-          </div>
-          <textarea aria-label="tool_access" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y mb-3"
-            rows=${3}
-            value=${accessText}
-            placeholder="예: tool_read_file"
-            onInput=${(e: Event) => { toolAccessDraftText.value = (e.target as HTMLTextAreaElement).value }}
-          ></textarea>
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-sm text-[var(--color-fg-secondary)]">tool_denylist</span>
-            <span class="text-xs text-[var(--color-fg-muted)]">${denyDeduped.length}개</span>
-          </div>
-          <textarea aria-label="tool_denylist" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y"
-            rows=${4}
-            value=${denyText}
-            placeholder="예: Execute"
-            onInput=${(e: Event) => { denylistDraftText.value = (e.target as HTMLTextAreaElement).value }}
-          ></textarea>
-          <div class="flex items-center gap-2 mt-2">
-            <span class="text-3xs text-text-muted">${accessDeduped.length} access · ${denyDeduped.length} deny</span>
-            <div class="flex-1"></div>
-            <button type="button"
-              class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] text-xs"
-              onClick=${saveToolPolicy}
-              disabled=${denylistSaving.value || !changed}
-            >${denylistSaving.value ? '저장 중...' : '정책 저장'}</button>
-            <button type="button"
-              class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)] text-xs"
-              title="초기화: 편집한 도구 정책을 서버 값으로 되돌립니다"
-              onClick=${() => { toolAccessDraftText.value = null; denylistDraftText.value = null }}
-              disabled=${denylistSaving.value || !changed}
-            >초기화하기</button>
-          </div>
-        </div>
-      `
-    })()}
   `
 
   // access ⚿ — sandbox / network / allowed_paths + mention targets + bound namespaces
@@ -2395,16 +2027,6 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       <${ModelList} models=${c.workspace.bound_workspace_ids} />
     </div>
 
-    ${'' /* GitHub App per-keeper credentials — surfaced here in 설정 → 권한·샌드박스
-       alongside the monitoring detail's 진단/운영 copy, because credentials are a
-       settings concept and this is where operators look for them. Both call sites
-       render the same KeeperGithubAppConfigPanel against secret_projection. */}
-    <${MajorSectionHeader} title="GitHub App 자격증명" />
-    <${KeeperGithubAppConfigPanel}
-      keeperName=${keeperName}
-      projection=${secretProjection}
-      onProjectionChange=${setSecretProjection}
-    />
   `
 
   // goals ◎ — assigned goal-store bindings (active_goal_ids picker)
@@ -2530,9 +2152,8 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
           `}
         <div style="margin-top:14px;">
           <${KcfFacts} rows=${[
-            ['거부 목록 수', String(c.hooks.deny_list.length), true],
-            ['파괴 검사 도구', formatHookDestructiveTools(c.hooks.destructive_check_tools), true],
-            ['비용 예산 (텔레메트리·미강제)', c.hooks.cost_budget.active ? formatCost(c.hooks.cost_budget.max_cost_usd ?? 0) : '미설정'],
+            ['적용 범위', c.hooks.scope ?? MISSING_DATA_DASH, true],
+            ['활성 슬롯 수', String(allEntries.filter(([, slot]) => slot.active).length), true],
           ]} />
         </div>
       ` : null}
@@ -2663,7 +2284,9 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
           <span class="kcf-foot-note mono">${activeTabLabel} · ${keeperName}</span>
           <div class="kcf-foot-spacer"></div>
           ${runtimeHasChanges ? html`
-            <span class="text-xs font-semibold text-accent-fg mr-1">변경된 런타임 설정</span>
+            <span class="text-xs font-semibold ${runtimeValidationError ? 'text-[var(--color-status-err)]' : 'text-accent-fg'} mr-1">
+              ${runtimeValidationError ?? '변경된 런타임 설정'}
+            </span>
             <button type="button"
               class="kcf-btn ghost v2-monitoring-action"
               title="초기화: 변경한 런타임 설정 draft 를 서버 값으로 되돌립니다"
@@ -2672,7 +2295,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
             <button type="button"
               class="kcf-btn save v2-monitoring-action"
               onClick=${saveRuntimeConfig}
-              disabled=${runtimeSaving.value}
+              disabled=${runtimeSaving.value || runtimeValidationError !== null}
             >${runtimeSaving.value ? '저장 중...' : '런타임 설정 저장'}</button>
           ` : null}
           ${onClose ? html`

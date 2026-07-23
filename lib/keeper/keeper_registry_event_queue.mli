@@ -11,22 +11,87 @@ type lease = Keeper_event_queue_persistence.lease
 type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
   | Cycle_busy
   | Turn_not_scheduled
-  | Retry_after_pacing
   | Rotate_now
   | Cancelled
   | Cycle_crashed
   | Registration_recovery
+  | Retry_after_observed
+  | Context_compaction_retry
+  | Transcript_quarantine_retry
+  | Approval_grant_unconsumed
+  | Approval_grant_state_unavailable
 
 type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
   | Failure_judgment_requested
   | Failure_judgment_boundary_failed of { detail : string }
-  | Failure_judgment_operator_required of
+  | Failure_judgment_external_input_requested of
       { judge_runtime_id : string
       ; rationale : string
       }
+  | Compaction_execution_may_have_dispatched
+  | Compaction_domain_invalid_output
+  | Compaction_retry_exhausted of
+      { attempts : int
+      ; detail : string
+      }
+  | Compaction_floor_exceeded of
+      { attempts : int
+      ; detail : string
+      }
+  | Transcript_quarantine_retry_exhausted of
+      { attempts : int
+      ; detail : string
+      }
+
+type no_compaction_reason = Keeper_event_queue_persistence.no_compaction_reason =
+  | No_eligible_history
+  | Invalid_structural_source
+  | Structurally_unchanged
+  | Checkpoint_not_reduced
+  | Execution_may_have_dispatched
+  | Domain_invalid_output
+
+type no_compaction = Keeper_event_queue_persistence.no_compaction =
+  { source : Keeper_checkpoint_ref.t
+  ; reason : no_compaction_reason
+  }
+
+type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellation =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; reason : string
+  }
+
+type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; from_keeper : string
+  ; to_keeper : string
+  }
+
+type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_receipt =
+  | Fusion_terminal of Keeper_event_queue.fusion_completion
+  | Background_job_terminal of Keeper_event_queue.bg_job_completion
+  | Hitl_terminal of Keeper_event_queue.hitl_resolution
+
+type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_terminal =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; source_receipt : source_terminal_receipt
+  }
 
 type settlement = Keeper_event_queue_persistence.settlement =
   | Ack
+  | No_compaction of no_compaction
+  | Cancel_accepted of accepted_cancellation
+  | Transfer_accepted of accepted_transfer
+  | Settle_from_source_terminal of accepted_source_terminal
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -39,6 +104,11 @@ type outbox_entry = Keeper_event_queue_persistence.outbox_entry
 type settle_result = Keeper_event_queue_persistence.settle_result =
   | Settled of transition_receipt
   | Already_settled of transition_receipt
+  | Committed_followup_failed of
+      { receipt : transition_receipt
+      ; stage : [ `Checkpoint | `Wal_compaction | `Projection ]
+      ; detail : string
+      }
 
 val lease_stimuli : lease -> Keeper_event_queue.stimulus list
 val lease_kind : lease -> Keeper_event_queue_persistence.lease_kind
@@ -70,6 +140,45 @@ val settle_result :
   settlement:settlement ->
   (settle_result, string) result
 
+val cancel_accepted_result :
+  base_path:string ->
+  string ->
+  current_owner_generation:int ->
+  settled_at:float ->
+  lease:lease ->
+  cancellation:accepted_cancellation ->
+  (settle_result, string) result
+(** Commit an owner-fenced accepted cancellation and publish the resulting
+    pending projection to the exact live registry lane after durable commit. *)
+
+val cancel_pending_accepted_result :
+  base_path:string ->
+  string ->
+  current_owner_generation:int ->
+  settled_at:float ->
+  cancellation:accepted_cancellation ->
+  (settle_result, string) result
+(** Commit an exact pending accepted cancellation and publish the post-commit
+    pending projection when the owner currently has a live registry lane. *)
+
+val transfer_pending_accepted_result :
+  base_path:string ->
+  string ->
+  current_owner_generation:int ->
+  settled_at:float ->
+  transfer:accepted_transfer ->
+  (settle_result, string) result
+(** Commit an exact pending accepted transfer settlement and publish the
+    post-commit source pending projection when the owner is registered. *)
+
+val settle_pending_from_source_terminal_result :
+  base_path:string ->
+  string ->
+  current_owner_generation:int ->
+  settled_at:float ->
+  source_terminal:accepted_source_terminal ->
+  (settle_result, string) result
+
 (** Enqueue a stimulus on the keeper's event queue. When the keeper is not
     registered yet, persist the stimulus to the durable snapshot so later
     registration can replay it instead of dropping the wake at the
@@ -87,6 +196,49 @@ val enqueue_durable_result :
     external decision and the caller must not acknowledge delivery on a failed
     write. An existing identical [post_id] is idempotent; the same [post_id]
     with a different typed payload is an explicit conflict. *)
+
+type enqueue_if_missing_durable_result =
+  | Enqueued
+  | Already_present
+  | Identity_conflict of string
+  | Storage_error of string
+
+val enqueue_if_missing_durable_result :
+  base_path:string
+  -> event_id:string
+  -> string
+  -> Keeper_event_queue.stimulus
+  -> enqueue_if_missing_durable_result
+(** Durably enqueue a judged Board-attention event by its opaque producer
+    identity. [event_id] must byte-equal the [candidate_id] carried by the
+    typed [Board_attention] payload. No post id, content, or other derived
+    field participates in identity. *)
+
+type enqueue_stimulus_durable_result =
+  | Stimulus_enqueued
+  | Stimulus_already_present
+  | Stimulus_storage_error of string
+
+val enqueue_stimulus_durable_result :
+  base_path:string
+  -> string
+  -> Keeper_event_queue.stimulus
+  -> enqueue_stimulus_durable_result
+(** Durably enqueue an already-typed deterministic stimulus only when its
+    {!Keeper_event_queue.stimulus_identity_equal} identity is absent from
+    pending, active leases, and the transition outbox. This explicit-result
+    path is for structurally addressed signals whose delivery must commit
+    before a wake hint. Board-attention judgments use the stricter
+    opaque-event-id API above. *)
+
+val project_accepted_transfer_durable_result :
+  base_path:string
+  -> string
+  -> transfer:accepted_transfer
+  -> enqueue_stimulus_durable_result
+(** Strict target transfer projection. The exact source and operation identity
+    are durably accounted in the target queue state before the pending
+    projection becomes visible. Accounting survives consumption. *)
 
 val enqueue_hitl_resolution_durable_result :
   base_path:string

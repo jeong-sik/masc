@@ -1,24 +1,16 @@
 {
-  "schema": "shell-ir-consumption/v1",
-  "generated_at_unix": 1780723663,
-  "g1_parse_string_caller_files_nontest": 3,
-  "g1_parse_string_total_refs_nontest": 3,
-  "g2_classifier_string_sig": 0,
-  "g2_classifier_ir_sig": 2,
-  "g3_dispatcher_adopting_keeper_files": 2,
-  "g4_risk_in_simple": 0,
-  "g4_phantom_envelope": 18,
-  "g4_dispatch_decided_consumers": 5,
-  "g5_validate_paths_callers_nontest": 5,
-  "g6_tla_spec_exists": 1,
-  "g7_shell_word_values_refs": 0,
-  "g7_bash_words_stages_refs": 0,
-  "g7_parallel_parser_total": 0,
-  "g8_gadt_constructors": 110,
-  "g8_risk_of_typed_arms": 110,
-  "g8_generic_arms": 1,
-  "info_ir_constructors_nontest": 68,
-  "allowed_exceptions": {
-    "g1_parse_string": ["lib/exec/command_gate/shell_command_gate.ml","lib/exec_policy/exec_policy.ml","lib/exec_policy/exec_policy_command_syntax.ml","lib/exec_policy/exec_policy_log_sanitize.ml"]
-  }
+  "schema": "shell-ir-structural-boundary/v2",
+  "generated_at_unix": 1783857600,
+  "parse_string_caller_files_nontest": 3,
+  "parse_string_total_refs_nontest": 3,
+  "dispatcher_adopting_keeper_files": 2,
+  "path_validation_surfaces_nontest": 4,
+  "tla_spec_exists": 1,
+  "parallel_parser_refs": 0,
+  "retired_authority_refs": 0,
+  "allowed_parse_string_files": [
+    "lib/exec/command_gate/shell_command_gate.ml",
+    "lib/exec_policy/exec_policy.ml",
+    "lib/exec_policy/exec_policy_command_syntax.ml"
+  ]
 }

@@ -39,7 +39,6 @@
 type reject_reason =
   | Pipes_not_allowed of { stages : int }
   | Redirect_disallowed_in_caller of { stage : int }
-  | Path_outside_policy of { stage : int; raw_path : string; diagnostic : string }
 
 (** Parser failure modes that prevent any IR being formed. *)
 type parse_reason =
@@ -60,10 +59,7 @@ type too_complex_reason =
   | Unsupported_construct of Masc_exec.Parsed.reason_too_complex
 
 (** Reusable parse context. [stages] is the ordered Simple list as
-    parsed; [stage_bins] is the binary name of each stage in order;
-    [direct_dune_seen] is true when any stage directly runs [dune]
-    or wraps it through known transparent command runners such as
-    [env] or [opam exec].
+    parsed; [stage_bins] is the binary name of each stage in order.
     Invariants:
 
     - [stages <> []] always — empty input yields {!Cannot_parse},
@@ -76,12 +72,11 @@ type parsed_context = {
   ast : Masc_exec.Shell_ir.t;
   stages : Masc_exec.Shell_ir.simple list;
   stage_bins : string list;
-  direct_dune_seen : bool;
 }
 
 (** Phase 1 verdict surface — four arms matching the Plan's typed
     output. [Allow] carries the [parsed_context] callers reuse for
-    telemetry / dispatch / path classification. *)
+    telemetry and dispatch. *)
 type verdict =
   | Allow of parsed_context
   | Reject of {
@@ -101,15 +96,6 @@ type syntax_policy = {
   allow_pipes : bool;
 }
 
-(** Path policy applied to literal path arguments and file redirect
-    targets of every stage.
-    Phase 1 intentionally keeps the policy minimal — only an opt-in
-    classifier callback is consulted, so the facade itself does no
-    [Path_scope] decision-making and instead defers to the caller. *)
-type path_policy = {
-  classify : (raw_path:string -> [ `Allow | `Deny of string ]) option;
-}
-
 (** Sandbox context. Phase 1 uses this purely for evidence (echoed
     back through every stage's
     [Masc_exec.Shell_ir.simple.sandbox] field). Native dispatch
@@ -118,17 +104,6 @@ type sandbox_context = {
   target : Masc_exec.Sandbox_target.t;
 }
 
-val allow_all_paths : path_policy
-(** A path policy that approves every literal — useful when the
-    caller has its own validator and only wants the Shell IR parse +
-    syntax check. *)
-
-val forbid_masc_internal_state_paths : path_policy
-(** Path policy that rejects probes against [.masc/] internal state
-    (backlog.json, goal-loop, traces, keepalives).  Diagnostic contains
-    [task_state_file_probe_blocked] so the deterministic retry classifier
-    recognises the rejection. *)
-
 val host_sandbox : sandbox_context
 (** Convenience: the default {!Masc_exec.Sandbox_target.host}
     sandbox. *)
@@ -136,19 +111,17 @@ val host_sandbox : sandbox_context
 val gate_typed
   :  ir:Masc_exec.Shell_ir.t
   -> syntax_policy:syntax_policy
-  -> path_policy:path_policy
   -> sandbox:sandbox_context
   -> unit
   -> verdict
 (** Policy-aware typed entrypoint for callers that already have a
     {!Masc_exec.Shell_ir.t}. This bypasses raw Bash parsing but shares
-    the same syntax, path-policy, sandbox, and nested
+    the same syntax, sandbox, and nested
     pipeline handling as the legacy [gate] entrypoint. *)
 
 val gate_raw
   :  text:string
   -> syntax_policy:syntax_policy
-  -> path_policy:path_policy
   -> sandbox:sandbox_context
   -> unit
   -> verdict

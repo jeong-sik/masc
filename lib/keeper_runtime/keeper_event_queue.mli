@@ -13,11 +13,8 @@
     start via [Keeper_registry_event_queue.claim_board_result] (a CAS loop
     over [drain_board_all], RFC-0334 W2) and falls back to one typed non-board
     lease when that batch is empty — either path pins the
-    [Conservation] invariant. [run_smart_heartbeat_gate] then snapshots
-    the queue and forces [Emit] when it is non-empty (pinning
-    [QueueNeverStarvedBySkip] — the queue is read before any [Skip]
-    takes effect, though that read currently lives in the gate rather
-    than inside [Keeper_heartbeat_smart.should_emit] itself). *)
+    [Conservation] invariant. The per-Keeper wakeup atomic cuts the configured
+    heartbeat sleep, and no policy layer may suppress the following cycle. *)
 
 type urgency =
   | Immediate  (** operator commands and other latency-critical signals *)
@@ -25,7 +22,8 @@ type urgency =
   | Low        (** background polling, telemetry-driven nudges *)
 
 type post_id = string
-(** Identifier used by [dedup_by_post_id] to collapse repeat events.
+(** Producer-supplied identity component used by
+    {!stimulus_identity_equal}.
 
     The runtime uses the originating board post id, the mention
     target id, or the operator directive token. The queue does
@@ -66,8 +64,11 @@ type board_stimulus = {
 
 type stimulus_payload =
   | Board_signal of board_stimulus
+  | Board_attention of board_attention
+      (** A Board signal admitted by the configured relevance judge. The
+          opaque [candidate_id] is the producer-owned durable event identity;
+          queue deduplication never derives it from post text or metadata. *)
   | Bootstrap
-  | No_progress_recovery
   | Fusion_completed of fusion_completion
   | Bg_completed of bg_job_completion
   | Schedule_due of scheduled_wake
@@ -87,18 +88,14 @@ type stimulus_payload =
           unrelated stimulus, no-progress recovery, or the 30-minute approval
           janitor. Blocking approvals resume their resolver directly and do not
           emit this duplicate wake. Mirrors [Fusion_completed]/[Bg_completed]. *)
-  | Goal_verification_failed of goal_verification_failure
-      (** A goal completion verification was rejected for a goal assigned to
-          this keeper. Wakes the keeper lane so it resumes work on the goal
-          after the goal phase returns to [executing], instead of waiting for
-          unrelated board/task activity. *)
   | Failure_judgment of failure_judgment
       (** RFC-0313 deterministic failure class was rejected/blocked and should
           produce an LLM-boundary verdict prompt on the keeper lane. *)
+  | Manual_compaction_requested
+      (** Operator-requested MASC compaction. The tool only enqueues this
+          stimulus; the owning Keeper consumes it under its turn slot. *)
   | Goal_assigned of goal_assignment
       (** A goal was newly added to this keeper's [active_goal_ids]. *)
-  | Goal_stagnation of goal_stagnation
-      (** A live goal has been stale longer than the configured threshold. *)
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
@@ -107,17 +104,27 @@ type stimulus_payload =
     [masc_fusion] deliberation finishes so the result arrives as actionable
     turn input rather than being discovered passively. *)
 
+and board_attention = {
+  candidate_id : string;
+  signal : board_stimulus;
+}
+
 and fusion_completion = {
   run_id : string;
-  ok : bool;
-  resolved_answer : string;
+  terminal : fusion_terminal;
   board_post_id : string;
   channel : Keeper_continuation_channel.t;
 }
-(** RFC-0266 payload for [Fusion_completed]: [ok] distinguishes a synthesized
-    judge result from denied/sink_failed/aborted; [resolved_answer] carries the
-    answer (or a failure label when [ok = false]); [board_post_id] correlates to
-    the sink's board evidence post ("" when none was created). *)
+
+and fusion_terminal =
+  | Fusion_succeeded of string
+  | Fusion_failed of string
+  | Fusion_cancelled
+(** Typed terminal receipt for [Fusion_completed]. Structural cancellation is
+    distinct from an ordinary deliberation failure, so consumers never infer
+    it from an error string. The string payloads are the synthesized answer or
+    explicit failure detail. [board_post_id] correlates to the sink's board
+    evidence post ("" when none was created). *)
 
 and bg_job_completion = {
   bg_run_id : string;
@@ -139,30 +146,21 @@ and bg_job_outcome =
   | Bg_ok of string  (** result payload *)
   | Bg_failed of string  (** failure label *)
 
-and hitl_approved_action = {
-  keeper_name : string;
-  tool_name : string;
-  input_hash : string;
-}
-(** Exact action identity authorized by an operator. [input_hash] is the
-    canonical full-input fingerprint produced by [Keeper_approval_queue]; it
-    is not an action-name heuristic or a persistent approval rule. *)
-
 and hitl_resolution_decision =
-  | Hitl_approved of hitl_approved_action
-  | Hitl_rejected
-  | Hitl_edited
+  | Hitl_approved
+  | Hitl_rejected of string
+  | Hitl_edited of Yojson.Safe.t
 
 and hitl_resolution = {
   approval_id : string;
   decision : hitl_resolution_decision;
   channel : Keeper_continuation_channel.t;
 }
-(** Payload for [Hitl_resolved]: [approval_id] correlates to the resolved
-    pending-approval queue entry. An approved decision carries the exact action
-    identity authorized by the operator; rejected and edited decisions carry no
-    grant. The action is consumed at most once in the independent Keeper cycle
-    opened by this durable wake. *)
+(** Payload for [Hitl_resolved]: [approval_id] is the correlation identity.
+    The durable Gate journal remains the SSOT for an approved exact request.
+    Rejection rationale and edited input are resolution output, not
+    authorization state, and travel durably in the event so the wake is
+    actionable. Only [Hitl_approved] can produce a one-shot grant. *)
 
 and connector_attention = {
   event_id : string;
@@ -184,21 +182,6 @@ and scheduled_wake = {
     preserves a stable audit correlation to the schedule payload without
     duplicating its raw JSON envelope in the keeper queue. *)
 
-and goal_verification_failure = {
-  goal_id : string;
-  request_id : string;
-  goal_title : string;
-  phase : string;
-  metric : string option;
-  target_value : string option;
-  rejected_by : string;
-  note : string option;
-  evidence_refs : string list;
-}
-(** Payload for [Goal_verification_failed]. The queue stores the durable
-    verification result summary needed by the next keeper prompt; [phase] is
-    display-only and produced by the goal phase SSOT at enqueue time. *)
-
 and failure_judgment = {
   fj_runtime_id : string;
   fj_judgment : Keeper_runtime_failure_route.judgment_class;
@@ -218,38 +201,26 @@ and goal_assignment = {
 }
 (** Payload for [Goal_assigned]. *)
 
-and goal_stagnation = {
-  gs_goal_id : string;
-  gs_stale_since : string;
-  gs_goal_title : string;
-}
-(** Payload for [Goal_stagnation]. *)
 
 val fusion_completion_post_id : fusion_completion -> post_id
-(** Dedup/correlation id for [Fusion_completed]. Uses [board_post_id] when the
-    sink created a board evidence post, otherwise falls back to
-    ["fusion-run:<run_id>"]. *)
+(** Canonical dedup/correlation id for [Fusion_completed], always
+    ["fusion-run:<run_id>"]. Board projection availability is not event
+    identity. *)
 
 val bg_job_completion_post_id : bg_job_completion -> post_id
 (** RFC-0290 dedup/correlation id for [Bg_completed]. Uses [bg_board_post_id]
     when the producer set it, otherwise falls back to ["bg-run:<run_id>"]. *)
-
-val schedule_due_post_id : scheduled_wake -> post_id
-(** Dedup/correlation id for [Schedule_due]: ["schedule-due:<schedule_id>"]. *)
 
 val hitl_resolution_post_id : hitl_resolution -> post_id
 (** Dedup/correlation id for [Hitl_resolved]: ["hitl-approval:<approval_id>"].
     De-dups repeat resolve wakes for the same approval within the dedup
     window. *)
 
-val goal_verification_failure_post_id : goal_verification_failure -> post_id
-(** Dedup/correlation id for [Goal_verification_failed]. *)
-
 val failure_judgment_post_id : failure_judgment -> post_id
 
-val goal_assignment_post_id : goal_assignment -> post_id
+val manual_compaction_post_id : post_id
 
-val goal_stagnation_post_id : goal_stagnation -> post_id
+val goal_assignment_post_id : goal_assignment -> post_id
 
 val hitl_resolution_decision_to_string : hitl_resolution_decision -> string
 (** Stable wire/log label for a HITL resolution wake decision. *)
@@ -279,7 +250,12 @@ val enqueue : t -> stimulus -> t
 val stimulus_identity_equal : stimulus -> stimulus -> bool
 (** [true] when two stimuli describe the same durable event. The comparison
     intentionally ignores [arrived_at], so restart/bootstrap re-enqueues do
-    not create an unbounded backlog of otherwise identical stimuli. *)
+    not create an unbounded backlog of otherwise identical stimuli. For a
+    [Fusion_completed] event, [channel] is also excluded: the first committed
+    row owns recipient authority, and a replay sources the channel from the
+    durable delivery obligation, so an [Unrouted] first commit followed by a
+    recovered-channel replay must not conflict. Result, run, and Board
+    evidence must still match exactly. *)
 
 val to_list : t -> stimulus list
 (** Return the FIFO contents. *)
@@ -310,11 +286,6 @@ val remove_by_post_id_pair : post_id -> t -> t -> stimulus list * t * t
 (** Remove matching stimuli from two queues and return the de-duplicated
     removed stimuli plus both remaining queues. *)
 
-val dedup_by_post_id : ?window_seconds:float -> t -> t
-(** Drops later duplicates of the same [post_id] when their
-    [arrived_at] differs by less than [window_seconds] (default
-    [60.0]). FIFO order of survivors is preserved. *)
-
 val sort_by_urgency : t -> t
 (** Stable sort: [Immediate] < [Normal] < [Low]. Two stimuli of the
     same urgency keep insertion order, so urgency reordering does
@@ -324,8 +295,7 @@ val summary : t -> string
 (** Short human-readable description for log lines. *)
 
 val payload_kind_label : stimulus_payload -> string
-(** Stable short label for logs/metrics: ["board_signal"], ["bootstrap"],
-    ["no_progress_recovery"], ["fusion_completed"], or ["bg_completed"]. *)
+(** Stable short label for logs/metrics. *)
 
 val urgency_to_string : urgency -> string
 val urgency_of_string : string -> (urgency, string) result

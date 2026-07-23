@@ -48,8 +48,6 @@ let action_radius_json_for_call =
   Keeper_tool_call_log_context.action_radius_json_for_call
 ;;
 
-let parse_tool_output_json_sanitized =
-  Keeper_tool_call_log_route_evidence.parse_tool_output_json_sanitized
 ;;
 
 let route_evidence_json_of_tool_io ~tool_name ~input ~output_text =
@@ -342,7 +340,7 @@ let start_flush_fiber ~sw ~clock =
     consumers are updated in the same change to accept either shape. *)
 let blob_aware_output_json (output : string) : Yojson.Safe.t =
   match Tool_output.decode_from_oas output with
-  | Tool_output.Stored { sha256; bytes; preview; mime } ->
+  | Tool_output.Decoded { sha256; bytes; preview; mime } ->
     `Assoc
       [ ( "_blob"
         , `Assoc
@@ -352,41 +350,7 @@ let blob_aware_output_json (output : string) : Yojson.Safe.t =
             ; "preview", `String preview
             ] )
       ]
-  | Tool_output.Inline _ -> `String output
-;;
-
-let semantic_outcome_of_output ~success output =
-  let semantic_status_outcome = function
-    | "ok" -> Some (true, "success")
-    | "no_match" -> Some (true, "no_match")
-    | "partial" -> Some (false, "partial")
-    | "blocked" -> Some (false, "blocked")
-    | "timeout" -> Some (false, "timeout")
-    | "runtime_error" -> Some (false, "runtime_error")
-    | _ -> None
-  in
-  match parse_tool_output_json_sanitized output with
-  | Ok json ->
-    let ok_field = Safe_ops.json_bool_opt "ok" json in
-    let error_field = Safe_ops.json_string_opt "error" json |> Option.map String.trim in
-    let semantic_status =
-      Safe_ops.json_string_opt "semantic_status" json
-      |> Option.map String.trim
-    in
-    (match error_field with
-     | Some "tool_not_allowed" -> false, "policy_denied"
-     | _ ->
-       (match Option.bind semantic_status semantic_status_outcome with
-        | Some outcome -> outcome
-        | None ->
-          (match error_field with
-           | Some error when error <> "" -> false, "structured_error"
-           | _ ->
-             (match ok_field with
-              | Some false -> false, "structured_error"
-              | Some true -> true, "success"
-              | None -> if success then true, "success" else false, "tool_failure"))))
-  | Error _ -> if success then true, "success" else false, "tool_failure"
+  | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> `String output
 ;;
 
 let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
@@ -418,6 +382,7 @@ let log_call
       ?prompt_fingerprint
       ?execution_id
       ?tool_use_id
+      ?planned_index
       ?trace_id
       ?session_id
       ?generation
@@ -429,16 +394,12 @@ let log_call
       ?sandbox_root
       ?allowed_paths
       ?network_mode
-      ?approval_mode
       ?runtime_profile
       ?result_bytes
       ?truncated_to
       ()
   =
-  if Observability_redact.is_denied_tool ~tool_name
-  then ()
-  else (
-    match !store_ref with
+  match !store_ref with
     | None -> record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id ()
     | Some store ->
       (* RFC-0225 §3.3: no ambient turn-context fallback. Both production
@@ -508,8 +469,13 @@ let log_call
          carry, joining this store to oas:tool_called/oas:tool_completed. *)
       let tool_use_id_field =
         match tool_use_id with
-        | Some value when value <> "" -> [ "tool_use_id", `String value ]
-        | Some _ | None -> []
+        | Some value -> [ "tool_use_id", `String value ]
+        | None -> []
+      in
+      let planned_index_field =
+        match planned_index with
+        | Some value -> [ "planned_index", `Int value ]
+        | None -> []
       in
       let session_id_field =
         match session_id with
@@ -552,19 +518,11 @@ let log_call
         | Some value -> [ "network_mode", `String value ]
         | None -> []
       in
-      let approval_mode_field =
-        match approval_mode with
-        | Some value -> [ "approval_mode", `String value ]
-        | None -> []
-      in
       let safe_input = input_to_json (Observability_redact.redact_json_value input) in
       let safe_output =
         Observability_redact.redact_preview ~max_len:max_output_len output_text
       in
       let output_json = blob_aware_output_json safe_output in
-      let semantic_success, semantic_outcome =
-        semantic_outcome_of_output ~success safe_output
-      in
       let runtime_contract =
         Keeper_runtime_contract.runtime_observability_contract_json_from_fields
           ~keeper_name
@@ -579,7 +537,6 @@ let log_call
           ?sandbox_root
           ?allowed_paths
           ?network_mode
-          ?approval_mode
           ?runtime_profile
           ()
       in
@@ -609,8 +566,6 @@ let log_call
            ; "input", safe_input
            ; "output", output_json
            ; "success", `Bool success
-           ; "semantic_success", `Bool semantic_success
-           ; "semantic_outcome", `String semantic_outcome
            ; "duration_ms", `Float duration_ms
            ; "runtime_contract", runtime_contract
            ; "action_radius", action_radius
@@ -625,6 +580,7 @@ let log_call
            @ prompt_fingerprint_field
            @ execution_id_field
            @ tool_use_id_field
+           @ planned_index_field
            @ trace_id_field
            @ session_id_field
            @ generation_field
@@ -634,7 +590,6 @@ let log_call
            @ goal_ids_field
            @ sandbox_profile_field
            @ network_mode_field
-           @ approval_mode_field
            @ result_bytes_field
            @ truncated_to_field)
       in
@@ -643,45 +598,70 @@ let log_call
          captures) that would corrupt the JSONL file and cause downstream
          readers — including the dashboard — to silently skip entire rows. *)
       let safe_json = Inference_utils.sanitize_json_utf8 json in
-      append_or_enqueue { store; keeper_name; tool_name; trace_id; json = safe_json })
+      append_or_enqueue { store; keeper_name; tool_name; trace_id; json = safe_json }
+;;
+
+(* Scan multiplier applied before the keeper filter: [read_recent] reads
+   [n * read_over_scan_factor] fleet rows to find [n] matching entries.
+   Named (rather than a literal 5) so callers sharing one fleet read can
+   size their window to reproduce [read_recent]'s coverage exactly. *)
+let read_over_scan_factor = 5
+
+let keeper_matches name json =
+  match Safe_ops.json_string_opt "keeper" json with
+  | Some k -> String.equal k name
+  | None -> false
+;;
+
+(* Single-pass ring buffer: keep the last [n] rows satisfying [keep],
+   preserving row order. *)
+let ring_keep_last ~n ~keep rows : Yojson.Safe.t list =
+  if n <= 0
+  then []
+  else (
+    let buf = Array.make n (`Null : Yojson.Safe.t) in
+    let pos = ref 0 in
+    let total = ref 0 in
+    List.iter
+      (fun json ->
+         if keep json
+         then (
+           buf.(!pos mod n) <- json;
+           incr pos;
+           incr total))
+      rows;
+    let count = min !total n in
+    if count = 0
+    then []
+    else (
+      let start = if !total <= n then 0 else !pos mod n in
+      List.init count (fun i -> buf.((start + i) mod n))))
+;;
+
+let read_recent_rows ~n () : Yojson.Safe.t list =
+  if n <= 0
+  then []
+  else (
+    match !store_ref with
+    | None -> []
+    | Some store -> Dated_jsonl.read_recent store n)
+;;
+
+let filter_rows_for_keeper ~keeper_name ~n rows : Yojson.Safe.t list =
+  ring_keep_last ~n ~keep:(keeper_matches keeper_name) rows
 ;;
 
 let read_recent ?keeper_name ?(n = 100) () : Yojson.Safe.t list =
   if n <= 0
   then []
   else (
-    match !store_ref with
-    | None -> []
-    | Some store ->
-      let keeper_matches name json =
-        match Safe_ops.json_string_opt "keeper" json with
-        | Some k -> String.equal k name
-        | None -> false
-      in
-      (* Single-pass: read from store, filter, and collect last n in one traversal *)
-      let raw = Dated_jsonl.read_recent store (n * 5) in
-      let buf = Array.make n (`Null : Yojson.Safe.t) in
-      let pos = ref 0 in
-      let total = ref 0 in
-      List.iter
-        (fun json ->
-           let dominated =
-             match keeper_name with
-             | None -> true
-             | Some name -> keeper_matches name json
-           in
-           if dominated
-           then (
-             buf.(!pos mod n) <- json;
-             incr pos;
-             incr total))
-        raw;
-      let count = min !total n in
-      if count = 0
-      then []
-      else (
-        let start = if !total <= n then 0 else !pos mod n in
-        List.init count (fun i -> buf.((start + i) mod n))))
+    let raw = read_recent_rows ~n:(n * read_over_scan_factor) () in
+    let keep =
+      match keeper_name with
+      | None -> fun (_ : Yojson.Safe.t) -> true
+      | Some name -> keeper_matches name
+    in
+    ring_keep_last ~n ~keep raw)
 ;;
 
 let iso_date_of_unix ts =

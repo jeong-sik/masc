@@ -29,6 +29,26 @@ val stale_lock_seconds : float
 
 exception Flock_timeout of { caller : string; path : string; attempts : int }
 
+type durable_lock_phase =
+  | Open_lock_file
+  | Acquire_process_lock
+  | Release_process_lock
+
+type unix_failure =
+  { error : Unix.error
+  ; operation : string
+  ; argument : string
+  }
+
+type durable_lock_error =
+  { lock_path : string
+  ; phase : durable_lock_phase
+  ; cause : unix_failure
+  ; cleanup_failure : unix_failure option
+  }
+
+val durable_lock_error_to_string : durable_lock_error -> string
+
 (** Non-blocking [F_TLOCK] with retry. On success returns the open
     file descriptor holding the lock. On timeout closes the fd and
     raises {!Flock_timeout}. [clock] is accepted but ignored in this
@@ -86,6 +106,14 @@ val with_lock :
   string ->
   (unit -> 'a) ->
   'a
+
+(** Cross-context/process transaction lock on the explicit [lock_path]. Eio
+    admission is cooperatively cancellable and unbounded; cancellation is
+    masked only after the OS lock is held, through body execution and release.
+    The parent directory must exist. I/O failures are typed and body exceptions
+    survive cleanup errors. *)
+val with_durable_lock :
+  lock_path:string -> (unit -> 'a) -> ('a, durable_lock_error) result
 
 (** {1 Observability hook} *)
 

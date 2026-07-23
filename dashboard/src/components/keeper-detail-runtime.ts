@@ -23,7 +23,6 @@ import {
   type KeeperSecretScope,
 } from '../api/dashboard-keeper-secrets'
 import { ActionButton } from './common/button'
-import { CollapsibleSection } from './common/collapsible'
 import { DistributionBars, type DistributionItem } from './common/distribution-bars'
 import { TextArea, TextInput } from './common/input'
 import { TimeAgo } from './common/time-ago'
@@ -47,7 +46,6 @@ import { serverStatus, shellRuntimeResolution } from '../store'
 import { operatorSnapshot } from '../operator-store'
 import type { KeeperDetailEvidenceState } from './keeper-detail-hooks'
 import {
-  allowlistEmptyState,
   auditMetadataState,
   linkedRuntimeState,
   observedToolsEmptyState,
@@ -57,13 +55,7 @@ import {
 import {
   resolveKeeperMissionBrief,
   resolveKeeperObservedToolAudit,
-  resolveKeeperToolPolicy,
 } from './keeper-detail-source'
-import {
-  loadKeeperConfig,
-  peekKeeperConfigLoadStatus,
-  peekLoadedKeeperConfig,
-} from './keeper-config-panel'
 import {
   findRuntimeCatalogEntry,
   loadRuntimeCatalog,
@@ -77,7 +69,6 @@ import {
   runtimeCatalogSnapshotFacts,
 } from '../lib/runtime-provider-summary'
 
-const DEFAULT_ALLOWLIST_PREVIEW_LIMIT = 12
 
 // ── Utility functions ────────────────────────────────────
 
@@ -418,7 +409,7 @@ export function KeeperSecretProjectionPanel({
 }: KeeperSecretProjectionPanelProps) {
   const [localProjection, setLocalProjection] = useState<KeeperSecretProjection | null>(projection ?? null)
   const [envScope, setEnvScope] = useState<KeeperSecretScope>('keeper')
-  const [envName, setEnvName] = useState('GH_TOKEN')
+  const [envName, setEnvName] = useState('')
   const [secretValue, setSecretValue] = useState('')
   const [fileScope, setFileScope] = useState<KeeperSecretScope>('keeper')
   const [filePath, setFilePath] = useState('/home/keeper/.ssh/id_ed25519')
@@ -792,71 +783,6 @@ function ToolChip({ name }: { name: string }) {
   `
 }
 
-export function resolveAllowlistPreview(
-  tools: string[],
-  previewLimit = DEFAULT_ALLOWLIST_PREVIEW_LIMIT,
-): { visibleTools: string[]; hiddenCount: number } {
-  const normalizedLimit = Math.max(0, previewLimit)
-  const visibleTools = tools.slice(0, normalizedLimit)
-  return {
-    visibleTools,
-    hiddenCount: Math.max(0, tools.length - visibleTools.length),
-  }
-}
-
-export function AllowlistPreview({
-  tools,
-  emptyLabel,
-  previewLimit = DEFAULT_ALLOWLIST_PREVIEW_LIMIT,
-}: {
-  tools: string[]
-  emptyLabel: string
-  previewLimit?: number
-}) {
-  const [expanded, setExpanded] = useState(false)
-  const firstTool = tools[0] ?? null
-  const lastTool = tools.length > 0 ? tools[tools.length - 1] : null
-
-  useEffect(() => {
-    setExpanded(false)
-  }, [tools.length, firstTool, lastTool, previewLimit])
-
-  if (tools.length === 0) {
-    return html`<span class="text-2xs text-[var(--color-fg-muted)] italic">${emptyLabel}</span>`
-  }
-
-  const { visibleTools, hiddenCount } = expanded
-    ? { visibleTools: tools, hiddenCount: 0 }
-    : resolveAllowlistPreview(tools, previewLimit)
-
-  return html`
-    <div class="flex flex-col gap-2">
-      <div class="flex flex-wrap gap-1.5">
-        ${visibleTools.map(tool => html`<${ToolChip} name=${tool} />`)}
-        ${!expanded && hiddenCount > 0
-          ? html`
-              <span class="inline-flex items-center py-0.5 px-2 rounded-[var(--r-0)] text-3xs font-medium border border-dashed border-[var(--color-border-default)] text-[var(--color-fg-muted)]">
-                +${hiddenCount}
-              </span>
-            `
-          : null}
-      </div>
-      ${tools.length > previewLimit
-        ? html`
-            <button type="button"
-              class="self-start text-3xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] cursor-pointer transition-colors"
-              aria-expanded=${expanded}
-              aria-label=${expanded ? '허용된 도구 접기' : `허용된 도구 나머지 ${hiddenCount}개 보기`}
-              onClick=${() => setExpanded(value => !value)}
-            >
-              ${expanded ? '접기' : `나머지 ${hiddenCount}개 보기`}
-            </button>
-          `
-        : null}
-    </div>
-  `
-}
-
 // ── Tool list section ────────────────────────────────────
 
 function ToolSection({ title, description, tools, fallback }: { title: string; description?: string; tools: string[]; fallback: string }) {
@@ -870,182 +796,6 @@ function ToolSection({ title, description, tools, fallback }: { title: string; d
           : html`<span class="text-2xs text-[var(--color-fg-muted)] italic">${fallback}</span>`}
       </div>
     </div>
-  `
-}
-
-// ── Turn Budget ──────────────────────────────────────────
-
-function hasTurnBudgetDivergence(keeper: Keeper): boolean {
-  const b = keeper.turn_budget
-  if (!b) return false
-  return (
-    b.reactive.source === 'override' ||
-    b.reactive.source === 'override_invalid' ||
-    b.scheduled_autonomous.source === 'override' ||
-    b.scheduled_autonomous.source === 'override_invalid'
-  )
-}
-
-export type BudgetSource = 'override' | 'env' | 'override_invalid'
-
-interface BudgetSlot {
-  value: number
-  source: BudgetSource
-  env_default: number
-  env_var: string
-  raw_override: number | null
-}
-
-export function budgetSourceTone(source: BudgetSource): StatusChipTone {
-  switch (source) {
-    case 'override_invalid':
-      return 'bad'
-    case 'override':
-      return 'warn'
-    case 'env':
-    default:
-      return 'neutral'
-  }
-}
-
-export function budgetSourceLabel(source: BudgetSource): string {
-  switch (source) {
-    case 'override_invalid':
-      return 'invalid'
-    case 'override':
-      return 'override'
-    case 'env':
-    default:
-      return 'env'
-  }
-}
-
-export function BudgetSourceBadge({ source, children }: { source: BudgetSource; children?: unknown }) {
-  const weight = source === 'env' ? 'font-medium' : 'font-semibold'
-  return html`<${StatusChip} tone=${budgetSourceTone(source)} uppercase=${true} class=${weight}>${children ?? budgetSourceLabel(source)}</${StatusChip}>`
-}
-
-function buildBudgetTooltip(slot: BudgetSlot, manifest: string | null, clamp: { min: number; max: number }): string {
-  const lines: string[] = []
-  if (slot.source === 'override') {
-    lines.push(`Source: TOML override`)
-    if (manifest) lines.push(`File:   ${manifest}`)
-    lines.push(`Value:  ${slot.value}  (env default was ${slot.env_default})`)
-  } else if (slot.source === 'override_invalid') {
-    lines.push(`Source: env default (override REJECTED)`)
-    if (manifest) lines.push(`File:   ${manifest}`)
-    if (slot.raw_override != null) {
-      lines.push(`Raw:    ${slot.raw_override}  — out of range [${clamp.min}, ${clamp.max}]`)
-    }
-    lines.push(`Value:  ${slot.value}  (fell back to env default)`)
-  } else {
-    lines.push(`Source: env default`)
-    lines.push(`Env:    ${slot.env_var} = ${slot.value}`)
-    lines.push(`Note:   no override in TOML`)
-  }
-  lines.push(`Range:  [${clamp.min}, ${clamp.max}]`)
-  return lines.join('\n')
-}
-
-function BudgetRow({ label, slot, manifest, clamp }: {
-  label: string
-  slot: BudgetSlot
-  manifest: string | null
-  clamp: { min: number; max: number }
-}) {
-  const isOverride = slot.source === 'override'
-  const isInvalid = slot.source === 'override_invalid'
-  const delta = slot.value - slot.env_default
-  const deltaText = delta === 0
-    ? null
-    : delta > 0
-      ? `+${delta} (env 기준)`
-      : `${delta} (env 기준)`
-
-  let valueClass: string
-  if (isInvalid) {
-    valueClass = 'text-[var(--bad-light)] underline decoration-wavy decoration-red-400 underline-offset-4 cursor-help'
-  } else if (isOverride) {
-    valueClass = 'text-[var(--color-fg-secondary)] underline decoration-dotted decoration-amber-300/60 underline-offset-4 cursor-help'
-  } else {
-    valueClass = 'text-[var(--color-fg-muted)] cursor-help'
-  }
-
-  return html`
-    <div class="flex items-center justify-between py-2 px-3 rounded-[var(--r-1)] bg-[var(--color-bg-surface)]">
-      <span class="text-xs text-[var(--color-fg-muted)]">${label}</span>
-      <div class="flex items-center gap-2">
-        ${isOverride && deltaText
-          ? html`<span class="text-3xs text-[var(--color-fg-muted)] tabular-nums">${deltaText}</span>`
-          : null}
-        <span
-          class="text-xs font-medium tabular-nums ${valueClass}"
-          title=${buildBudgetTooltip(slot, manifest, clamp)}
-        >${slot.value}</span>
-        <${BudgetSourceBadge} source=${slot.source} />
-      </div>
-    </div>
-  `
-}
-
-function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
-  const budget = keeper.turn_budget
-  if (!budget) {
-    return html`
-      <div class="text-2xs text-[var(--color-fg-muted)] italic">
-        턴 예산 정보를 아직 수신하지 못했습니다. 서버 재시작 후 확인해주세요.
-      </div>
-    `
-  }
-
-  const hasOverride =
-    budget.reactive.source === 'override' ||
-    budget.scheduled_autonomous.source === 'override'
-  const hasInvalid =
-    budget.reactive.source === 'override_invalid' ||
-    budget.scheduled_autonomous.source === 'override_invalid'
-  const clamp = { min: budget.clamp_min, max: budget.clamp_max }
-
-  return html`
-    <div class="flex flex-col gap-1.5">
-      <div class="flex items-center gap-2 mb-1">
-        <${SectionHeader} size="xs">턴 예산 (OAS 호출당)</${SectionHeader}>
-        ${hasInvalid
-          ? html`<${StatusChip} tone="bad" uppercase=${true} class="font-semibold">invalid override</${StatusChip}>`
-          : hasOverride
-            ? html`<${StatusChip} tone="warn" uppercase=${true} class="font-semibold">override</${StatusChip}>`
-            : html`<${StatusChip} tone="ok" uppercase=${true} class="font-medium">inherited</${StatusChip}>`}
-      </div>
-      <${BudgetRow}
-        label="반응형"
-        slot=${budget.reactive}
-        manifest=${budget.manifest_path}
-        clamp=${clamp}
-      />
-      <${BudgetRow}
-        label="예약 자율"
-        slot=${budget.scheduled_autonomous}
-        manifest=${budget.manifest_path}
-        clamp=${clamp}
-      />
-      <span class="text-2xs text-[var(--color-fg-muted)] leading-snug mt-1">
-        반응형 = 보드/멘션 반응 턴 예산, 예약 자율 = 자율 주기 턴 예산.
-        값에 마우스를 올리면 설정 출처와 기본값 비교를 확인할 수 있습니다.
-      </span>
-    </div>
-  `
-}
-
-export function TurnBudgetSection({ keeper }: { keeper: Keeper }) {
-  const diverges = hasTurnBudgetDivergence(keeper)
-  return html`
-    <${CollapsibleSection}
-      title=${html`터 예산 ${diverges ? html`<span class="text-3xs text-[var(--color-status-warn)] font-normal normal-case tracking-normal">(재정의됨)</span>` : null}`}
-      open=${diverges}
-      dotClass=${diverges ? 'bg-[var(--warn-10)]' : 'bg-[var(--accent-50)]'}
-    >
-      <${TurnBudgetPanel} keeper=${keeper} />
-    <//>
   `
 }
 
@@ -1738,17 +1488,9 @@ export function RuntimeLensSection({
 // ── Neighborhood & Tool Audit ────────────────────────────
 
 export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
-  useEffect(() => {
-    void loadKeeperConfig(keeper.name)
-  }, [keeper.name])
-
-  const keeperConfig = peekLoadedKeeperConfig(keeper.name)
-  const configLoadStatus = peekKeeperConfigLoadStatus(keeper.name)
   const namespaceStatus = operatorSnapshot.value?.root ?? {}
   const missionBrief = resolveKeeperMissionBrief(keeper)
-  const toolPolicy = resolveKeeperToolPolicy(keeperConfig, configLoadStatus)
   const observedAudit = resolveKeeperObservedToolAudit(keeper, missionBrief)
-  const allowedTools = toolPolicy.resolvedAllowlist
   const observedTools = observedAudit.latestToolNames
   const toolCallCount = observedAudit.latestToolCallCount
   const auditSource = observedAudit.toolAuditSource
@@ -1758,27 +1500,10 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const project = namespaceStatus.project ?? serverStatus.value?.project ?? 'N/A'
   const clusterRaw = namespaceStatus.cluster ?? serverStatus.value?.cluster ?? null
   const clusterVisible = clusterRaw && clusterRaw !== 'unknown' && clusterRaw !== 'default' && clusterRaw !== 'N/A'
-  const allowlistFallback = toolAuditStateLabel(allowlistEmptyState(keeper))
   const observedFallback = toolAuditStateLabel(observedToolsEmptyState(keeper, auditSource))
   const metadataFallback = toolAuditStateLabel(auditMetadataState(keeper, auditSource))
-  const runtimeState = linkedRuntimeState(keeper)
   const currentTaskLabel = resolveKeeperCurrentTaskLabel(keeper)
-  const skillRouteLabel =
-    keeper.skill_primary
-    ?? (runtimeState === 'offline' ? 'offline' : 'not_collected')
-  const policyLoading = toolPolicy.source === 'loading'
-  const policyError = toolPolicy.source === 'error'
-  const policyLoaded = toolPolicy.source === 'keeper_config'
-  const unavailablePolicyLabel = policyError ? 'config_error' : 'config_unavailable'
-  const allowedToolCountLabel =
-    allowedTools.length > 0
-      ? String(allowedTools.length)
-      : policyLoading
-        ? 'loading'
-        : policyLoaded
-          ? allowlistFallback
-          : unavailablePolicyLabel
-  const openToolsQuery = allowedTools[0] ?? observedTools[0] ?? null
+  const openToolsQuery = observedTools[0] ?? null
 
   return html`
     <div class="flex flex-col gap-1.5">
@@ -1786,10 +1511,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       <${SignalRow} label="프로젝트" value=${project} />
       ${clusterVisible ? html`<${SignalRow} label="클러스터" value=${clusterRaw} />` : null}
       <${SignalRow} label="현재 태스크" value=${currentTaskLabel} />
-      <${SignalRow} label="스킬 경로" value=${skillRouteLabel} />
       <${SignalRow} label="컨텍스트 출처" value=${keeper.context_source ?? keeper.context?.source ?? '-'} />
-      <${SignalRow} label="허용 도구 수" value=${allowedToolCountLabel} />
-
       <div class="flex justify-end mt-1">
         <${ActionButton}
           variant="ghost"
@@ -1801,25 +1523,6 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
           도구 패널 열기
         <//>
       </div>
-
-      <div class="flex items-center justify-between mt-3">
-        <${SectionHeader} size="xs">허용된 도구</${SectionHeader}>
-        <span class="text-3xs text-[var(--color-fg-muted)]">${policyLoading ? '로딩 중' : policyError ? '설정 오류' : 'read-only'}</span>
-      </div>
-
-      <span class="text-2xs text-[var(--color-fg-muted)] leading-snug">
-        ${policyLoading
-          ? '허용 도구 목록을 불러오는 중입니다.'
-          : policyLoaded
-            ? '이 키퍼가 현재 사용할 수 있는 도구 목록입니다.'
-            : policyError
-              ? '허용 도구 목록 로드에 실패했습니다.'
-              : '허용 도구 목록을 아직 확인할 수 없습니다.'}
-      </span>
-      <${AllowlistPreview}
-        tools=${allowedTools}
-        emptyLabel=${policyLoading ? 'loading' : policyLoaded ? allowlistFallback : unavailablePolicyLabel}
-      />
 
       <${ToolSection}
         title="관측된 도구"

@@ -1,22 +1,22 @@
 // MASC Dashboard — Operations Panel (Phase 5+6+7)
-// FilterChips toggle for ops/governance/surfaces/inspector sub-views.
+// FilterChips toggle for ops/Gate/inspector sub-views.
 
 import { html } from 'htm/preact'
 import { FilterChips } from './common/filter-chips'
 import { SurfaceHeader } from './common/surface-header'
 import { Ops } from './ops'
-import { Governance } from './governance'
+import { ApprovalsSurface } from './approvals/approvals-surface'
 import { LabInspector } from './lab-inspector'
 import { replaceRoute, route } from '../router'
 
-type OpsView = 'default' | 'ops' | 'governance' | 'inspector'
+type OpsView = 'default' | 'ops' | 'gate' | 'inspector'
 
-const VALID_VIEWS: OpsView[] = ['default', 'ops', 'governance', 'inspector']
+const VALID_VIEWS: OpsView[] = ['default', 'ops', 'gate', 'inspector']
 
 const VIEW_CHIPS: { key: OpsView; label: string }[] = [
   { key: 'default', label: 'All' },
   { key: 'ops', label: 'Intervene' },
-  { key: 'governance', label: 'Approvals' },
+  { key: 'gate', label: 'Gate / HITL' },
   { key: 'inspector', label: 'Inspector' },
 ]
 
@@ -51,14 +51,14 @@ export function OperationsPanel() {
       />
       ${view === 'ops'
         ? html`<${Ops} />`
-      : view === 'governance'
-        ? html`<${Governance} />`
+      : view === 'gate'
+        ? html`<${ApprovalsSurface} />`
       : view === 'inspector'
         ? html`<${LabInspector} />`
       : html`
             <${Ops} />
             <div class="mt-4">
-              <${Governance} />
+              <${ApprovalsSurface} />
             </div>
           `}
     </div>

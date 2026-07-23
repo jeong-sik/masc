@@ -6,7 +6,7 @@ vi.mock('./core', () => ({
   get: getMock,
 }))
 
-import { fetchDashboardGoalsTree } from './dashboard-goals'
+import { fetchDashboardGoalDetail, fetchDashboardGoalsTree } from './dashboard-goals'
 
 function validNode(id: string, title: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -14,7 +14,6 @@ function validNode(id: string, title: string, overrides: Record<string, unknown>
     title,
     status: 'active',
     phase: 'executing',
-    health: 'on_track',
     priority: 1,
     tasks: [],
     children: [],
@@ -42,17 +41,10 @@ function emptySummary() {
   return {
     total_goals: 0,
     active_goals: 0,
-    on_track_goals: 0,
-    done_goals: 0,
-    paused_goals: 0,
-    at_risk_goals: 0,
-    blocked_goals: 0,
+    phase_counts: {},
     total_tasks: 0,
     done_tasks: 0,
     pending_approvals: 0,
-    infra_risk_count: 0,
-    overall_convergence: 0,
-    overall_convergence_pct: 0,
   }
 }
 
@@ -157,5 +149,42 @@ describe('fetchDashboardGoalsTree decoding', () => {
 
     expect(result.tree[0]!.attainment.metric_evaluation).toBe('unevaluated')
     expect(result.tree[0]!.attainment.note).toBe('Attainment projection missing from payload.')
+  })
+
+  it('preserves an explicit runtime snapshot failure in Goal detail', async () => {
+    getMock.mockResolvedValue({
+      goal: validNode('goal-runtime', 'Runtime goal'),
+      linked_tasks: [],
+      linked_keepers: [
+        {
+          name: 'keeper-a',
+          agent_name: 'agent-a',
+          current_task_id: null,
+          active_goal_ids: ['goal-runtime'],
+          sandbox_profile: 'workspace',
+          network_mode: 'enabled',
+          runtime_id: 'runtime-a',
+          runtime_outcome: null,
+          latest_execution_outcome: null,
+          latest_execution_at: null,
+          latest_receipt: null,
+          runtime_trust: {
+            snapshot_status: 'unavailable',
+            snapshot_error: 'snapshot read failed',
+          },
+          latest_causal_event: null,
+        },
+      ],
+      approvals: [],
+      execution_receipts: [],
+      timeline: [],
+    })
+
+    const result = await fetchDashboardGoalDetail('goal-runtime')
+
+    expect(result.linked_keepers[0]?.runtime_trust).toMatchObject({
+      snapshot_status: 'unavailable',
+      snapshot_error: 'snapshot read failed',
+    })
   })
 })

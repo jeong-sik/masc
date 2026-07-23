@@ -416,12 +416,6 @@ let dashboard_slice_for_sse_type = function
       Some "transport"
   | "keeper_composite_changed" ->
       Some "composite"
-  (* RFC-0284: bridge the goal-loop status push into the existing "goals"
-     slice so its live delta reaches dashboard subscribers without adding a
-     new WS slice. Emitted by
-     [Server_dashboard_http_goal_loop_broadcast.broadcast_goal_loop_status]. *)
-  | "goal_loop_status" ->
-      Some "goals"
   | _ -> None
 
 let dashboard_session_result session =
@@ -1062,6 +1056,7 @@ let cleanup_session session_id =
   let detached = detach_session_for_close session_id in
   update_ws_session_count_metric ();
   Sse.unsubscribe_external session_id;
+  Client_registry_eio.unregister_mcp_session session_id;
   match detached with
   | None -> ()
   | Some session ->

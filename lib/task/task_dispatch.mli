@@ -93,7 +93,7 @@ val list_tasks :
 (* [validate_transition] / [update_status] were retired by RFC-0323 G-7:
    a direct status writer with its own 2-state terminal check bypassed the
    workspace FSM ([Workspace.transition_task_r]) — including the RFC-0308
-   done guard and the #23719 evidence gate — and had zero production
+   done lifecycle guard — and had zero production
    callers. Status changes go through the FSM; there is no side door. *)
 
 val delete_task :

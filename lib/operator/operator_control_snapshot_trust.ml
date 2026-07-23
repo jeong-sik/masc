@@ -70,63 +70,15 @@ let project_compact_runtime_trust runtime_trust =
     ]
 ;;
 
-let degraded_keeper_runtime_identity_fields (meta : Keeper_meta_contract.keeper_meta) =
-  let runtime_id = non_empty_trimmed_string_opt (Keeper_meta_contract.runtime_id_of_meta meta) in
-  let runtime_json = Json_util.string_opt_to_json runtime_id in
-  [ "runtime_id", runtime_json
-  ; "runtime_canonical", runtime_json
-  ; "selected_runtime_canonical", runtime_json
-  ; "primary_model", `Null
-  ; "active_model", `Null
-  ; "active_model_label", `Null
-  ; "last_model_used_label", `Null
-  ]
-;;
-
 let compact_keeper_runtime_trust_json
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
   =
   let runtime_trust =
-    if Keeper_fd_pressure.active ()
-    then Keeper_fd_pressure.degraded_trust_json ()
-    else
-      Dashboard_cache.get_or_compute
-        (compact_runtime_trust_cache_key ~config ~meta)
-        ~ttl:compact_runtime_trust_cache_ttl_sec
-        (fun () -> Keeper_runtime_trust_snapshot.summary_json ~config ~meta)
+    Dashboard_cache.get_or_compute
+      (compact_runtime_trust_cache_key ~config ~meta)
+      ~ttl:compact_runtime_trust_cache_ttl_sec
+      (fun () -> Keeper_runtime_trust_snapshot.summary_json ~config ~meta)
   in
   project_compact_runtime_trust runtime_trust
-;;
-
-let degraded_keeper_snapshot_row (meta : Keeper_meta_contract.keeper_meta) =
-  let runtime_trust = Keeper_fd_pressure.degraded_trust_json () in
-  let fd_fields = Keeper_fd_pressure.projection_fields () in
-  `Assoc
-    ([ "runtime_class", `String "keeper"
-     ; "pipeline_stage", `String "degraded"
-     ; "phase", `String "degraded"
-     ; "name", `String meta.name
-     ; "agent_name", `String meta.agent_name
-     ; ( "trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
-     ; "goal", `String meta.goal
-     ; "status", `String "degraded"
-     ; "agent", `Null
-     ; "generation", `Int meta.runtime.generation
-     ; "turn_count", `Int meta.runtime.usage.total_turns
-     ; "paused", `Bool meta.paused
-     ; "keepalive_running", `Bool false
-     ; "last_model_used", `Null
-     ; "next_model_hint", `Null
-     ; ( "active_goal_ids"
-       , `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids) )
-     ; "recent_activity", `List []
-     ; "runtime_trust", runtime_trust
-     ; "trust", runtime_trust
-     ; "diagnostic", Keeper_fd_pressure.degraded_projection_json ()
-     ; "updated_at", `String meta.updated_at
-     ; "created_at", `String meta.created_at
-     ]
-     @ degraded_keeper_runtime_identity_fields meta
-     @ fd_fields)
 ;;

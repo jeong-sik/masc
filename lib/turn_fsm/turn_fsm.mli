@@ -11,6 +11,9 @@
 type cancel_reason =
   | Cancelled_supervisor_stop
       (** Operator/supervisor requested keeper shutdown. *)
+  | Cancelled_external
+      (** Parent fiber or enclosing switch cancelled the turn without a
+          Keeper supervisor stop signal. *)
   | Cancelled_phase_gate_close
       (** Phase transition closed an in-flight turn. *)
   | Cancelled_provider_timeout
@@ -31,24 +34,17 @@ type failure_reason =
       detail : string;
     }
   | Failure_provider_error of { kind : string; detail : string }
-  | Failure_completion_contract_violation of { reason_code : string }
   | Failure_receipt_lost of {
       primary_error : string;
       fallback_path : string option;
     }
-  | Failure_turn_livelock_blocked of { reason : string }
-      (** Pre-dispatch livelock guard ([Keeper_turn_livelock])
-          rejected this turn because the keeper is stuck in a
-          loop on the same task.  Distinct from [runtime_error]
-          so metric queries can chart livelock incidence on its own. *)
   | Failure_runtime_error of string
   | Failure_unexpected_exception of {
       exn : string;
       backtrace : string option;
     }
 
-(** Turn FSM states.  Mirrors the lanes in
-    [docs/keeper-turn-lifecycle.md]. *)
+(** Turn FSM states.  See [docs/spec/04-turn-lifecycle.md]. *)
 type _ turn_state =
   | Idle : [`Idle] turn_state [@tla.idle]
   | Phase_gating : [`Phase_gating] turn_state [@tla.active]
@@ -81,10 +77,8 @@ type transition_action =
   | StreamYieldsTool
   | ToolReturned
   | StreamComplete
-  | ContractOk
-  | ContractViolation
+  | FinishTurn
   | ReceiptLost
-  | LivelockBlocked
   | NoToolCapableProvider
   | ProviderError
   | GenericFail

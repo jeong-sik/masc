@@ -1,8 +1,8 @@
-(** Unit tests for the [Overflowed] phase + auto-compact recovery flow.
+(** Unit tests for the [Overflowed] phase and explicit compaction lifecycle.
 
     Scenarios mirror the five cases in the MASC-1 plan:
     1. Happy path — Running → Overflowed → Compacting → Running
-    2. Compact failed → retry latch promotes the next overflow to Paused
+    2. Compact failed → executable again for durable Lane retry
     3. Operator clear — Overflowed → Running without passing Compacting
     4. Two consecutive overflows in one fiber lifecycle
     5. Heartbeat failure while Overflowed is preserved through recovery *)
@@ -17,14 +17,97 @@ let running_conds : SM.conditions =
     fiber_alive = true;
     heartbeat_healthy = true;
     turn_healthy = true;
-    restart_budget_remaining = true;
+    dead_tombstone_latched = false;
   }
 
-let overflow_event ?(tokens = 205_000) ?(limit = Some 200_000) () =
-  SM.Context_overflow_detected
-    { source = `Prompt_rejected;
-      token_count = tokens;
-      limit_tokens = limit }
+let overflow_event ?(limit = Some 200_000) () =
+  SM.Context_overflow_detected { limit_tokens = limit }
+
+let test_provider_overflow_trigger_roundtrip () =
+  let trigger = Compaction_trigger.Provider_overflow { limit_tokens = Some 200_000 } in
+  check string "typed trigger label" "provider_overflow" (Compaction_trigger.to_label trigger);
+  List.iter
+    (fun expected ->
+       match
+         Compaction_trigger.of_detail_json (Compaction_trigger.to_detail_json expected)
+       with
+       | Ok actual when actual = expected -> ()
+       | Ok _ | Error _ -> fail "typed compaction trigger did not round-trip")
+    [ trigger
+    ; Compaction_trigger.Provider_overflow { limit_tokens = None }
+    ; Compaction_trigger.Manual
+    ]
+;;
+
+let test_retired_trigger_kinds_are_rejected () =
+  let decode kind =
+    Compaction_trigger.of_detail_json (`Assoc [ "kind", `String kind ])
+  in
+  List.iter
+    (fun kind ->
+       match decode kind with
+       | Error (Compaction_trigger.Unknown_kind actual)
+         when String.equal actual kind -> ()
+       | Ok _ | Error _ -> failf "retired trigger %s was not explicitly rejected" kind)
+    [ "ratio"; "messages"; "tokens" ];
+  match
+    Compaction_trigger.of_detail_json
+      (`Assoc [ "kind", `String "provider_overflow" ])
+  with
+  | Error Compaction_trigger.Missing_provider_limit -> ()
+  | Ok _ | Error _ -> fail "provider overflow without limit_tokens was admitted"
+;;
+
+let test_malformed_trigger_details_are_typed_errors () =
+  let check_error message expected json =
+    match Compaction_trigger.of_detail_json json with
+    | Error actual when actual = expected -> ()
+    | Ok _ | Error _ -> fail message
+  in
+  check_error
+    "non-object trigger detail was admitted"
+    Compaction_trigger.Expected_object
+    (`String "manual");
+  check_error
+    "missing trigger kind was admitted"
+    Compaction_trigger.Missing_kind
+    (`Assoc []);
+  check_error
+    "unknown manual field was admitted"
+    (Compaction_trigger.Unknown_field "limit_tokens")
+    (`Assoc [ "kind", `String "manual"; "limit_tokens", `Null ]);
+  check_error
+    "unknown provider field was admitted"
+    (Compaction_trigger.Unknown_field "extra")
+    (`Assoc
+      [ "kind", `String "provider_overflow"
+      ; "limit_tokens", `Int 200_000
+      ; "extra", `Null
+      ]);
+  check_error
+    "duplicate trigger kind was admitted"
+    (Compaction_trigger.Duplicate_field "kind")
+    (`Assoc [ "kind", `String "manual"; "kind", `String "manual" ]);
+  check_error
+    "duplicate provider limit was admitted"
+    (Compaction_trigger.Duplicate_field "limit_tokens")
+    (`Assoc
+      [ "kind", `String "provider_overflow"
+      ; "limit_tokens", `Int 200_000
+      ; "limit_tokens", `Int 200_000
+      ]);
+  check_error
+    "non-string trigger kind was admitted"
+    Compaction_trigger.Invalid_kind
+    (`Assoc [ "kind", `Int 1 ]);
+  List.iter
+    (fun limit ->
+       check_error
+         "invalid provider limit was admitted"
+         Compaction_trigger.Invalid_provider_limit
+         (`Assoc [ "kind", `String "provider_overflow"; "limit_tokens", limit ]))
+    [ `Int 0; `Int (-1); `String "200000" ]
+;;
 
 let apply_ok phase conds ev =
   match SM.apply_event ~current_phase:phase ~conditions:conds ~event:ev
@@ -49,56 +132,46 @@ let test_happy_path () =
   check_phase SM.Overflowed tr1.new_phase "overflow → Overflowed";
   check bool "context_overflow latched" true
     tr1.updated_conditions.context_overflow;
-  (* Entry action requests compaction *)
+  (* Durable Lane work is not synthesized as an FSM entry effect. *)
   let has_start_compaction =
     List.exists (function SM.Start_compaction -> true | _ -> false)
       tr1.entry_actions
   in
-  check bool "entry action includes Start_compaction" true has_start_compaction;
-  (* Auto-compact fires → Compacting *)
+  check bool "Overflowed does not synthesize compaction work" false has_start_compaction;
+  (* The Lane executor explicitly starts compaction. *)
   let tr2 =
-    apply_ok SM.Overflowed tr1.updated_conditions SM.Auto_compact_triggered
+    apply_ok SM.Overflowed tr1.updated_conditions SM.Compaction_started
   in
-  check_phase SM.Compacting tr2.new_phase "auto-compact → Compacting";
+  check_phase SM.Compacting tr2.new_phase "compaction start → Compacting";
   (* Compaction completes → Running (context_overflow cleared) *)
   let tr3 =
     apply_ok SM.Compacting tr2.updated_conditions
-      (SM.Compaction_completed { before_tokens = 205_000; after_tokens = 80_000 })
+      SM.Compaction_completed
   in
   check_phase SM.Running tr3.new_phase "compaction done → Running";
   check bool "context_overflow cleared" false
-    tr3.updated_conditions.context_overflow;
-  check bool "compact_retry_exhausted cleared" false
-    tr3.updated_conditions.compact_retry_exhausted
+    tr3.updated_conditions.context_overflow
 
-(* ── Scenario 2: compact failure → retry latch → Paused ───── *)
+(* ── Scenario 2: compact failure remains recoverable ──────── *)
 
-let test_compact_failure_latches_paused () =
+let test_compact_failure_releases_lane () =
   (* Running → overflow → Overflowed *)
   let tr1 = apply_ok SM.Running running_conds (overflow_event ()) in
-  (* Auto-compact triggered → Compacting *)
+  (* The Lane executor explicitly starts compaction. *)
   let tr2 =
-    apply_ok SM.Overflowed tr1.updated_conditions SM.Auto_compact_triggered
+    apply_ok SM.Overflowed tr1.updated_conditions SM.Compaction_started
   in
-  (* Compaction fails — compaction_active cleared but context_overflow keeps *)
+  (* Compaction fails — durable queue settlement owns the exact retry. *)
   let tr3 =
     apply_ok SM.Compacting tr2.updated_conditions
       (SM.Compaction_failed { reason = "oas_error" })
   in
-  check_phase SM.Overflowed tr3.new_phase
-    "compact failed, context still overflowed → Overflowed again";
-  check bool "context_overflow still set" true
+  check_phase SM.Running tr3.new_phase
+    "compact failed, buffer latch released → Running";
+  check bool "context_overflow latch released" false
     tr3.updated_conditions.context_overflow;
-  (* Caller (keeper_unified_turn retry loop) declares retry exhausted by
-     overriding the conditions before issuing the next overflow event.
-     We simulate that by flipping the latch manually. *)
-  let exhausted_conds =
-    { tr3.updated_conditions with compact_retry_exhausted = true }
-  in
-  (* Next DerivePhase must map this to Paused even though the overflow is
-     still active — this is what breaks the Overflowed ↔ Compacting loop. *)
-  check_phase SM.Paused (SM.derive_phase exhausted_conds)
-    "retry exhausted + context_overflow → Paused"
+  check bool "failure does not synthesize operator pause" false
+    tr3.updated_conditions.operator_paused
 
 (* ── Scenario 3: operator clear bypasses Compacting ───────── *)
 
@@ -114,8 +187,6 @@ let test_operator_clear_returns_to_running () =
     "operator clear drops context → Running";
   check bool "context_overflow cleared" false
     tr2.updated_conditions.context_overflow;
-  check bool "compact_retry_exhausted cleared" false
-    tr2.updated_conditions.compact_retry_exhausted;
   check bool "compaction_active not touched" false
     tr2.updated_conditions.compaction_active
 
@@ -125,100 +196,20 @@ let test_two_consecutive_overflows () =
   (* Run one full overflow/compact/running cycle. *)
   let tr1 = apply_ok SM.Running running_conds (overflow_event ()) in
   let tr2 =
-    apply_ok SM.Overflowed tr1.updated_conditions SM.Auto_compact_triggered
+    apply_ok SM.Overflowed tr1.updated_conditions SM.Compaction_started
   in
   let tr3 =
     apply_ok SM.Compacting tr2.updated_conditions
-      (SM.Compaction_completed { before_tokens = 210_000; after_tokens = 90_000 })
+      SM.Compaction_completed
   in
   check_phase SM.Running tr3.new_phase "cycle 1 back to Running";
-  (* Second overflow should be handled cleanly — retry latch is reset by the
-     successful Compaction_completed in cycle 1. *)
+  (* Second overflow should be handled cleanly after the successful cycle. *)
   let tr4 = apply_ok SM.Running tr3.updated_conditions (overflow_event ()) in
   check_phase SM.Overflowed tr4.new_phase "cycle 2 → Overflowed";
-  check bool "retry latch still clear after successful cycle" false
-    tr4.updated_conditions.compact_retry_exhausted;
   let tr5 =
-    apply_ok SM.Overflowed tr4.updated_conditions SM.Auto_compact_triggered
+    apply_ok SM.Overflowed tr4.updated_conditions SM.Compaction_started
   in
-  check_phase SM.Compacting tr5.new_phase "cycle 2 auto-compact → Compacting"
-
-(* ── Scenario 4b: noop compaction (#9988) ──────────────────── *)
-
-(* Prior handler dropped the [before_tokens, after_tokens] payload and
-   cleared [context_overflow] on every [Compaction_completed].  In
-   production 98.4% of completion events carried [before = after] (pure-
-   text turns with nothing for reducers to strip), so the FSM re-entered
-   Running, the next turn re-measured, and re-fired
-   [Context_overflow_detected].  Result: 45–71 overflow events/day with
-   zero observable reduction (#9935).  The noop path now has to leave
-   the flag set. *)
-let test_noop_compaction_keeps_overflow () =
-  let tr1 = apply_ok SM.Running running_conds (overflow_event ()) in
-  let tr2 =
-    apply_ok SM.Overflowed tr1.updated_conditions SM.Auto_compact_triggered
-  in
-  let tr3 =
-    apply_ok SM.Compacting tr2.updated_conditions
-      (SM.Compaction_completed
-         { before_tokens = 200_000; after_tokens = 200_000 })
-  in
-  check bool "noop compaction does NOT clear context_overflow"
-    true tr3.updated_conditions.context_overflow;
-  check bool "noop compaction does NOT reset compact_retry_exhausted"
-    tr2.updated_conditions.compact_retry_exhausted
-    tr3.updated_conditions.compact_retry_exhausted;
-  check bool "noop still exits Compacting (compaction_active=false)"
-    false tr3.updated_conditions.compaction_active;
-  check_phase SM.Overflowed tr3.new_phase
-    "post-noop phase remains Overflowed, not Running"
-
-(* [after > before] (reducer added a wrapper, retry grew the payload,
-   etc.) is also degenerate — must not clear. *)
-let test_negative_savings_keeps_overflow () =
-  let tr1 = apply_ok SM.Running running_conds (overflow_event ()) in
-  let tr2 =
-    apply_ok SM.Overflowed tr1.updated_conditions SM.Auto_compact_triggered
-  in
-  let tr3 =
-    apply_ok SM.Compacting tr2.updated_conditions
-      (SM.Compaction_completed
-         { before_tokens = 200_000; after_tokens = 210_000 })
-  in
-  check bool "negative-savings compaction does NOT clear overflow"
-    true tr3.updated_conditions.context_overflow
-
-(* Noop → real savings: first keeps overflow, next cycle with real
-   reduction clears it.  Confirms the new branch is additive, not
-   blocking recovery. *)
-let test_noop_then_real_savings_clears () =
-  let tr1 = apply_ok SM.Running running_conds (overflow_event ()) in
-  let tr2 =
-    apply_ok SM.Overflowed tr1.updated_conditions SM.Auto_compact_triggered
-  in
-  let tr3 =
-    apply_ok SM.Compacting tr2.updated_conditions
-      (SM.Compaction_completed
-         { before_tokens = 180_000; after_tokens = 180_000 })
-  in
-  check bool "after noop, overflow still set"
-    true tr3.updated_conditions.context_overflow;
-  let tr4 =
-    apply_ok tr3.new_phase tr3.updated_conditions (overflow_event ())
-  in
-  let tr5 =
-    apply_ok tr4.new_phase tr4.updated_conditions SM.Auto_compact_triggered
-  in
-  let tr6 =
-    apply_ok SM.Compacting tr5.updated_conditions
-      (SM.Compaction_completed
-         { before_tokens = 180_000; after_tokens = 60_000 })
-  in
-  check_phase SM.Running tr6.new_phase "real savings → Running";
-  check bool "real savings clear context_overflow"
-    false tr6.updated_conditions.context_overflow;
-  check bool "real savings clear compact_retry_exhausted"
-    false tr6.updated_conditions.compact_retry_exhausted
+  check_phase SM.Compacting tr5.new_phase "cycle 2 compaction → Compacting"
 
 (* ── Scenario 5: heartbeat failure during Overflowed ──────── *)
 
@@ -230,7 +221,7 @@ let test_heartbeat_failure_preserved_through_overflow () =
   check_phase SM.Overflowed tr1.new_phase "overflow → Overflowed";
   let tr2 =
     apply_ok SM.Overflowed tr1.updated_conditions
-      (SM.Heartbeat_failed { consecutive = 1; max_allowed = 5 })
+      (SM.Heartbeat_failed { consecutive = 1 })
   in
   (* Phase stays Overflowed because context_overflow still wins in the
      priority ladder, but heartbeat_healthy is now false. *)
@@ -238,59 +229,37 @@ let test_heartbeat_failure_preserved_through_overflow () =
     "Overflowed outranks heartbeat failure";
   check bool "heartbeat unhealthy latched" false
     tr2.updated_conditions.heartbeat_healthy;
-  (* Auto-compact finishes → overflow cleared.  Heartbeat failure now
+  (* Compaction finishes → overflow cleared. Heartbeat failure now
      surfaces as Failing.  This confirms no event is swallowed. *)
   let tr3 =
-    apply_ok SM.Overflowed tr2.updated_conditions SM.Auto_compact_triggered
+    apply_ok SM.Overflowed tr2.updated_conditions SM.Compaction_started
   in
   check_phase SM.Compacting tr3.new_phase "compact starts";
   let tr4 =
     apply_ok SM.Compacting tr3.updated_conditions
-      (SM.Compaction_completed { before_tokens = 205_000; after_tokens = 70_000 })
+      SM.Compaction_completed
   in
   (* context_overflow cleared, heartbeat_healthy=false remains → Failing *)
   check_phase SM.Failing tr4.new_phase
     "post-compact, heartbeat failure surfaces as Failing"
 
-(* ── Scenario 6 (#9988): noop compaction must not clear overflow ──── *)
-
-let test_noop_compaction_keeps_overflow () =
-  (* Overflow detected, auto-compact runs, but reducers did not shrink
-     the context (e.g. pure-text history). before == after ⇒ the FSM
-     must NOT clear [context_overflow], otherwise the next turn will
-     re-trip the same overflow loop (#9935/#9943). *)
-  let tr1 = apply_ok SM.Running running_conds (overflow_event ()) in
-  let tr2 =
-    apply_ok SM.Overflowed tr1.updated_conditions SM.Auto_compact_triggered
-  in
-  let tr3 =
-    apply_ok SM.Compacting tr2.updated_conditions
-      (SM.Compaction_completed { before_tokens = 180_000; after_tokens = 180_000 })
-  in
-  check bool "noop compaction keeps context_overflow set" true
-    tr3.updated_conditions.context_overflow;
-  check bool "compaction_active cleared" false
-    tr3.updated_conditions.compaction_active
-
 let () =
   run "keeper_overflow_recovery" [
     "overflow-lifecycle",
-    [ test_case "happy path" `Quick test_happy_path;
-      test_case "compact failure latches Paused" `Quick
-        test_compact_failure_latches_paused;
+    [ test_case "provider overflow trigger codec" `Quick
+        test_provider_overflow_trigger_roundtrip;
+      test_case "retired trigger kinds rejected" `Quick
+        test_retired_trigger_kinds_are_rejected;
+      test_case "malformed trigger details are typed errors" `Quick
+        test_malformed_trigger_details_are_typed_errors;
+      test_case "happy path" `Quick test_happy_path;
+      test_case "compact failure releases Lane" `Quick
+        test_compact_failure_releases_lane;
       test_case "operator clear returns to Running" `Quick
         test_operator_clear_returns_to_running;
       test_case "two consecutive overflows" `Quick
         test_two_consecutive_overflows;
-      test_case "noop compaction keeps overflow (#9988)" `Quick
-        test_noop_compaction_keeps_overflow;
-      test_case "negative-savings keeps overflow (#9988)" `Quick
-        test_negative_savings_keeps_overflow;
-      test_case "noop then real savings clears (#9988)" `Quick
-        test_noop_then_real_savings_clears;
       test_case "heartbeat failure preserved through overflow" `Quick
         test_heartbeat_failure_preserved_through_overflow;
-      test_case "noop compaction keeps overflow (#9988)" `Quick
-        test_noop_compaction_keeps_overflow;
     ]
   ]

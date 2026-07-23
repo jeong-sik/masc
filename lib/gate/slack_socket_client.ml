@@ -138,7 +138,8 @@ let fetch_wss_url ?clock ?(timeout_sec = 10.0) ~app_token () =
 let ack_payload envelope_id =
   Yojson.Safe.to_string (`Assoc [ ("envelope_id", `String envelope_id) ])
 
-let run ~sw ~env ~bot_user_id ~app_token ~trigger_policy ~on_event () =
+let run ~sw ~env ~bot_user_id ~app_token ~trigger_policy ~on_event ~on_ambient
+    () =
   if String.equal app_token "" then
     (* No-op: a server without Slack configured must be unaffected. *)
     Log.Slack.info "slack socket mode disabled (empty app token)"
@@ -254,13 +255,14 @@ let run ~sw ~env ~bot_user_id ~app_token ~trigger_policy ~on_event () =
         | Some conn ->
           Discord_wss_connection.send_text conn (ack_payload envelope_id))
       | Slack_gateway_state.Emit_event ev -> on_event ev
+      | Slack_gateway_state.Emit_ambient ev -> on_ambient ev
       | Slack_gateway_state.Schedule_backoff { delay_ms } ->
         Eio.Fiber.fork ~sw (fun () ->
             (* ±25% jitter, same shape as Discord_gateway_client. The FSM's
                delay_ms stays deterministic for testability; jitter belongs
                in the I/O layer per RFC-0203 to prevent thundering herd. *)
             let jitter_factor =
-              let raw = Mirage_crypto_rng.generate 1 in
+              let raw = Crypto_rng.generate 1 in
               let byte = Char.code raw.[0] in
               0.75 +. (0.5 *. (float_of_int byte /. 255.0))
             in

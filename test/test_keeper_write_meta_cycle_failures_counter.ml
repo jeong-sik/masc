@@ -13,7 +13,10 @@
 open Alcotest
 open Masc
 
-let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
+let () =
+  Server_startup_state.mark_state_ready
+    ~backend:Server_startup_state.Filesystem_backend
+  |> Result.get_ok
 
 let ensure_fs env =
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env)
@@ -54,7 +57,6 @@ let make_meta ~name =
           ("name", `String name);
           ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
           ("trace_id", `String ("trace-" ^ name));
-          ("goal", `String "test keeper");
           ("autoboot_enabled", `Bool false);
         ])
   with

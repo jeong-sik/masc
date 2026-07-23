@@ -18,18 +18,6 @@ open Masc
 module J = Yojson.Safe.Util
 module KMC = Keeper_meta_contract
 
-(* Test hermeticity: runtime capability checks resolve through the OAS
-   [Model_catalog], which is loaded once (memoized via Atomic) from the
-   [OAS_MODEL_CATALOG] env var. Production seeds this in
-   server_runtime_bootstrap. Set at module top so it precedes the first
-   [global ()] access regardless of test ordering, and only when unset so an
-   external/CI value is honored. *)
-let () =
-  match Sys.getenv_opt "OAS_MODEL_CATALOG" with
-  | Some _ -> ()
-  | None ->
-    Unix.putenv "OAS_MODEL_CATALOG" (Masc_test_deps.source_path "oas-models.toml")
-
 (* ---- temp config-dir + keeper TOML fixtures
    (helper shape mirrors test_keeper_runtime_denylist.ml) ---- *)
 
@@ -80,11 +68,17 @@ let fixture_int_field fields key =
   | Some value -> value
   | None -> Alcotest.failf "fixture field %S is not an int" key
 
+let restore_model_catalog = function
+  | Some catalog -> Llm_provider.Model_catalog.set_global catalog
+  | None -> Llm_provider.Model_catalog.clear_global ()
+;;
+
 let with_model_catalog_content content f =
   let path = Filename.temp_file "runtime-thinking-oas-models" ".toml" in
+  let previous = Llm_provider.Model_catalog.global () in
   Fun.protect
     ~finally:(fun () ->
-      Llm_provider.Model_catalog.clear_global ();
+      restore_model_catalog previous;
       try Sys.remove path with
       | _ -> ())
     (fun () ->
@@ -132,7 +126,6 @@ let make_meta name : KMC.keeper_meta =
     `Assoc
       [ "name", `String name
       ; "trace_id", `String ("test-trace-" ^ name)
-      ; "goal", `String "test goal"
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
@@ -179,6 +172,12 @@ max-context = 64000
 tools-support = true
 streaming = true
 
+[models.small]
+api-name = "small"
+max-context = 32000
+tools-support = true
+streaming = true
+
 [models.gpt.capabilities]
 max-output-tokens = 32000
 supports-tool-choice = true
@@ -206,6 +205,9 @@ max-concurrent = 4
 
 [openai.gpt]
 is-default = true
+max-concurrent = 1
+
+[openai.small]
 max-concurrent = 1
 |}
 ;;
@@ -314,6 +316,23 @@ supports_tools = true
 supports_response_format_json = true
 supports_structured_output = true
 supports_native_streaming = true
+
+[[models]]
+id_prefix = "openai_compat/small"
+base = "openai_chat"
+max_context_tokens = 32000
+supports_tools = true
+supports_native_streaming = true
+
+[[providers]]
+id = "kimi"
+kind = "kimi"
+identity_kinds = ["kimi", "openai_compat"]
+base_url = "https://api.kimi.com/coding"
+request_path = "/v1/messages"
+api_key_env = "KIMI_API_KEY"
+capabilities_base = "kimi"
+identity_hosts = ["api.kimi.com"]
 |}
 ;;
 
@@ -397,10 +416,10 @@ let test_runtime_assignment_writer_updates_runtime_toml () =
       (KMC.runtime_id_of_meta (make_meta "routingtest")))
 ;;
 
-let test_runtime_inventory_surfaces_assignment_governance () =
+let test_runtime_inventory_surfaces_assignment_status () =
   with_runtime_initialized (fun () ->
     let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
-    let governance = J.member "assignment_governance" json in
+    let assignment_status = J.member "assignment_status" json in
     let providers = json |> J.member "providers" |> J.to_list in
     let provider_by_runtime_id runtime_id =
       List.find
@@ -414,33 +433,33 @@ let test_runtime_inventory_surfaces_assignment_governance () =
     let gpt = provider_by_runtime_id "openai.gpt" in
     Alcotest.(check string)
       "schema"
-      "masc.runtime_assignment_governance.v1"
-      (governance |> J.member "schema" |> J.to_string);
+      "masc.runtime_assignment_status.v1"
+      (assignment_status |> J.member "schema" |> J.to_string);
     Alcotest.(check string)
       "status"
       "degraded"
-      (governance |> J.member "status" |> J.to_string);
+      (assignment_status |> J.member "status" |> J.to_string);
     Alcotest.(check int)
       "assignment count"
       2
-      (governance |> J.member "assignment_count" |> J.to_int);
+      (assignment_status |> J.member "assignment_count" |> J.to_int);
     Alcotest.(check int)
       "assigned runtime count"
       1
-      (governance |> J.member "assigned_runtime_count" |> J.to_int);
+      (assignment_status |> J.member "assigned_runtime_count" |> J.to_int);
     Alcotest.(check int)
       "default assignment count"
       0
-      (governance |> J.member "default_assignment_count" |> J.to_int);
+      (assignment_status |> J.member "default_assignment_count" |> J.to_int);
     Alcotest.(check bool)
       "operator action required"
       true
-      (governance |> J.member "operator_action_required" |> J.to_bool);
+      (assignment_status |> J.member "operator_action_required" |> J.to_bool);
     Alcotest.(check bool)
       "single runtime warning"
       true
       (string_contains
-         (Yojson.Safe.to_string governance)
+         (Yojson.Safe.to_string assignment_status)
          "single_runtime_assignment_pin");
     Alcotest.(check (float 0.0001))
       "model temperature override"
@@ -911,6 +930,16 @@ let test_context_budget_uses_selected_runtime () =
         ~requested_override:None
         [ "openai.gpt" ]
     in
+    let small_budget =
+      Keeper_context_runtime.resolve_max_context_resolution
+        ~requested_override:None
+        [ "openai.small" ]
+    in
+    let oversized_override =
+      Keeper_context_runtime.resolve_max_context_resolution
+        ~requested_override:(Some 128_001)
+        [ "openai.small" ]
+    in
     Alcotest.(check int)
       "default runtime budget"
       128000
@@ -918,7 +947,41 @@ let test_context_budget_uses_selected_runtime () =
     Alcotest.(check int)
       "selected runtime budget"
       64000
-      selected_budget.Keeper_context_runtime.effective_budget)
+      selected_budget.Keeper_context_runtime.effective_budget;
+    Alcotest.(check int)
+      "provider capacity below 64k is not enlarged"
+      32000
+      small_budget.Keeper_context_runtime.effective_budget;
+    Alcotest.(check int)
+      "override cannot enlarge provider capacity"
+      32000
+      oversized_override.Keeper_context_runtime.effective_budget)
+;;
+
+let test_strict_context_budget_rejects_unavailable_and_invalid_override () =
+  with_runtime_initialized (fun () ->
+    (match
+       Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+         ~requested_override:None
+         ~runtime_id:"missing.runtime"
+     with
+     | Error
+         (Keeper_context_runtime.Runtime_context_window_unavailable
+            { runtime_id }) ->
+       Alcotest.(check string)
+         "typed error retains the exact unresolved runtime id"
+         "missing.runtime"
+         runtime_id
+     | Error _ -> Alcotest.fail "unexpected strict context resolution error"
+     | Ok _ -> Alcotest.fail "unknown runtime must not receive a default capacity");
+    match
+      Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+        ~requested_override:(Some 0)
+        ~runtime_id:"openai.gpt"
+    with
+    | Error (Keeper_context_runtime.Invalid_requested_context_override 0) -> ()
+    | Error _ -> Alcotest.fail "unexpected invalid override error"
+    | Ok _ -> Alcotest.fail "non-positive override must not be silently ignored")
 ;;
 
 let test_context_budget_source_is_shared_ssot () =
@@ -944,12 +1007,53 @@ let test_context_budget_source_is_shared_ssot () =
       (source (Some 1_000_000)))
 ;;
 
-(* Production path: [resolve_max_context_resolution_of_meta] must budget against
-   the keeper's routed runtime (openai.gpt = 64000), NOT [runtime].default
-   (runpod_mtp.qwen = 128000).  Without prepending [runtime_id_of_meta], the
-   projection labels (global, runtime-id-agnostic) would size against the
-   default and admit oversized prompts for a per-keeper routed runtime. *)
-let test_of_meta_budgets_against_routed_runtime () =
+(* The runtime budget's own provenance must survive to the status surface.
+   Collapsing it rendered a runtime.toml [model.max-context] override as
+   budget_source=runtime_provider_cap under the provider_context_window JSON
+   key, which disguised the #25463 live config drift (deepseek-v4-flash
+   262144 vs catalog 1048576) as a provider fact. The fixture's [openai.gpt]
+   declares max-context in runtime.toml, so its budget is an override. *)
+let test_runtime_budget_source_survives_to_status_json () =
+  with_runtime_initialized (fun () ->
+    match
+      Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+        ~requested_override:None
+        ~runtime_id:"openai.gpt"
+    with
+    | Error error ->
+      Alcotest.failf
+        "openai.gpt must resolve: %s"
+        (Keeper_context_runtime.max_context_resolution_error_to_string error)
+    | Ok resolution ->
+      (match resolution.Keeper_context_runtime.runtime_budget_source with
+       | Some Runtime.Override -> ()
+       | Some other ->
+         Alcotest.failf
+           "expected the runtime.toml override source, got %s"
+           (Runtime.max_context_source_to_string other)
+       | None -> Alcotest.fail "runtime budget source dropped on the strict path");
+      let json =
+        Keeper_context_runtime.context_budget_json_of_resolution
+          ~runtime_id:"openai.gpt"
+          resolution
+      in
+      (match json with
+       | `Assoc fields ->
+         (match List.assoc_opt "runtime_budget_source" fields with
+          | Some (`String "override") -> ()
+          | Some other ->
+            Alcotest.failf
+              "runtime_budget_source rendered %s"
+              (Yojson.Safe.to_string other)
+          | None -> Alcotest.fail "runtime_budget_source missing from budget JSON")
+       | _ -> Alcotest.fail "context budget JSON must be an object"))
+;;
+
+(* Remaining projection path: [resolve_max_context_resolution_of_meta] must
+   prefer the keeper's routed runtime (openai.gpt = 64000), NOT
+   [runtime].default (runpod_mtp.qwen = 128000). Actual turn admission is
+   exercised separately through the strict runtime-ID resolver. *)
+let test_of_meta_projection_budgets_against_routed_runtime () =
   with_runtime_initialized (fun () ->
     (* [budgettest] is assigned [openai.gpt] in [[runtime.assignments]]. *)
     let res =
@@ -962,15 +1066,26 @@ let test_of_meta_budgets_against_routed_runtime () =
       res.Keeper_context_runtime.effective_budget)
 ;;
 
-let test_turn_budget_uses_routed_runtime () =
+let test_turn_context_window_uses_routed_runtime () =
   with_runtime_initialized (fun () ->
     (* [budgettest] is assigned [openai.gpt] in [[runtime.assignments]]. *)
     let budget =
-      Keeper_turn_runtime_budget.resolved_max_context_for_turn
-        ~meta:(make_meta "budgettest")
+      let meta = make_meta "budgettest" in
+      let resolution =
+        match
+          Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+            ~requested_override:meta.max_context_override
+            ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
+        with
+        | Ok resolution -> resolution
+        | Error error ->
+          Alcotest.fail
+            (Keeper_context_runtime.max_context_resolution_error_to_string error)
+      in
+      Keeper_turn_runtime_budget.resolved_max_context_for_turn ~meta resolution
     in
     Alcotest.(check int)
-      "turn budget uses routed runtime, not runtime-id-agnostic labels"
+      "turn context window uses routed runtime, not runtime-id-agnostic labels"
       64000
       budget)
 ;;
@@ -1074,7 +1189,8 @@ max-concurrent = 1
 let runtime_thinking_model_catalog =
   {|
 [[models]]
-id_prefix = "openai_compat/qwen36-35b-a3b-mtp"
+id_prefix = "qwen36-35b-a3b-mtp"
+provider_name = "ollama_cloud"
 base = "openai_chat"
 max_context_tokens = 131072
 max_output_tokens = 65536
@@ -1111,7 +1227,8 @@ supports_computer_use = true
 supports_code_execution = true
 
 [[models]]
-id_prefix = "openai_compat/reasoning-small-out"
+id_prefix = "reasoning-small-out"
+provider_name = "ollama_cloud"
 base = "openai_chat"
 max_context_tokens = 131072
 max_output_tokens = 4096
@@ -1121,7 +1238,8 @@ supports_extended_thinking = true
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "openai_compat/reasoning-big-out"
+id_prefix = "reasoning-big-out"
+provider_name = "ollama_cloud"
 base = "openai_chat"
 max_context_tokens = 1000000
 max_output_tokens = 200000
@@ -1527,37 +1645,6 @@ let test_seed_of_thinking_support_gate_contract () =
     (Runtime_inference.seed_of_thinking_support None).Runtime_inference.thinking_enabled
 ;;
 
-let test_resolve_turn_max_tokens_precedence () =
-  let profile_defaults =
-    { Keeper_types_profile.empty_keeper_profile_defaults with
-      oas_env =
-        [ Keeper_types_profile.keeper_unified_max_tokens_oas_env_key, "4096" ]
-    }
-  in
-  Alcotest.(check (option int))
-    "profile supplies turn-start output-token intent"
-    (Some 4096)
-    (Keeper_run_context.resolve_turn_max_tokens
-       ~keeper_name:"max-token-snapshot"
-       ~profile_defaults
-       ());
-  Alcotest.(check (option int))
-    "explicit caller value wins over profile"
-    (Some 2048)
-    (Keeper_run_context.resolve_turn_max_tokens
-       ~keeper_name:"max-token-snapshot"
-       ~profile_defaults
-       ~max_tokens:2048
-       ());
-  Alcotest.(check (option int))
-    "absence remains None"
-    None
-    (Keeper_run_context.resolve_turn_max_tokens
-       ~keeper_name:"max-token-snapshot"
-       ~profile_defaults:Keeper_types_profile.empty_keeper_profile_defaults
-       ())
-;;
-
 let test_max_output_tokens_accessor_projects_catalog () =
   with_runtime_thinking (fun () ->
     Alcotest.(check (option int))
@@ -1773,6 +1860,9 @@ let test_assignment_typo_keeps_not_found () =
 ;;
 
 let () =
+  (match Llm_provider.Model_catalog.load_default () with
+   | Error msg -> Alcotest.failf "packaged OAS models.toml should load: %s" msg
+   | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
   Alcotest.run
     "runtime_per_keeper_routing"
     [ ( "runtime-assignment routing"
@@ -1789,9 +1879,9 @@ let () =
             `Quick
             test_runtime_assignment_writer_updates_runtime_toml
         ; Alcotest.test_case
-            "dashboard runtime inventory exposes assignment governance"
+            "dashboard runtime inventory exposes assignment status"
             `Quick
-            test_runtime_inventory_surfaces_assignment_governance
+            test_runtime_inventory_surfaces_assignment_status
         ; Alcotest.test_case
             "unknown assignment is rejected before runtime.toml write"
             `Quick
@@ -1863,13 +1953,21 @@ let () =
             `Quick
             test_context_budget_source_is_shared_ssot
         ; Alcotest.test_case
-            "of_meta budgets against the routed runtime (production path)"
+            "runtime budget source survives to status JSON"
             `Quick
-            test_of_meta_budgets_against_routed_runtime
+            test_runtime_budget_source_survives_to_status_json
         ; Alcotest.test_case
-            "turn budget uses the routed runtime"
+            "strict context budget rejects unavailable capacity and invalid override"
             `Quick
-            test_turn_budget_uses_routed_runtime
+            test_strict_context_budget_rejects_unavailable_and_invalid_override
+        ; Alcotest.test_case
+            "of_meta projection prefers the routed runtime"
+            `Quick
+            test_of_meta_projection_budgets_against_routed_runtime
+        ; Alcotest.test_case
+            "turn context window uses the routed runtime"
+            `Quick
+            test_turn_context_window_uses_routed_runtime
         ] )
     ; ( "per-model thinking gate"
       , [ Alcotest.test_case
@@ -1919,10 +2017,6 @@ let () =
         ] )
     ; ( "runtime token capacity projection"
       , [ Alcotest.test_case
-            "turn-start max_tokens precedence"
-            `Quick
-            test_resolve_turn_max_tokens_precedence
-        ; Alcotest.test_case
             "max_output_tokens_of_runtime_id projects catalog ceiling"
             `Quick
             test_max_output_tokens_accessor_projects_catalog

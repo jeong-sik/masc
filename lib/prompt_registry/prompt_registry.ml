@@ -11,26 +11,25 @@
     - Usage metrics tracking (count, avg score, last used)
     - Version support for A/B testing and rollbacks
 
+    Prompts enter the registry from markdown files, not from code: point
+    [set_markdown_dir] at the directory and call [load_prompts_from_directory],
+    which parses each [*.md] frontmatter and registers it. The in-code
+    registration API ([register] / [get] / [render] and the rest of the mutable
+    entry surface) was removed once nothing called it; do not reintroduce it to
+    add a prompt — add the markdown file instead.
+
     Usage:
     {[
-      (* Register a prompt *)
-      let entry = {
-        id = "code-review-v2";
-        template = "Review this code: {{source_code}}";
-        version = "2.0";
-        variables = ["source_code"];
-        metrics = None;
-        created_at = Unix.gettimeofday ();
-        deprecated = false;
-      } in
-      Prompt_registry.register entry;
+      Prompt_registry.set_markdown_dir "prompts";
+      Prompt_registry.load_prompts_from_directory "prompts";
 
-      (* Look up by ID *)
-      let prompt = Prompt_registry.get ~id:"code-review-v2" () in
+      (* Effective text for a key, override > file > default *)
+      let prompt = Prompt_registry.get_prompt "code-review-v2" in
 
-      (* Render with variables *)
-      let rendered = Prompt_registry.render ~id:"code-review-v2"
-        ~vars:[("source_code", "let x = 1")] () in
+      (* Every source's contribution, side by side *)
+      let resolution = Prompt_registry.resolve_prompt "code-review-v2" in
+      ignore prompt;
+      ignore resolution
     ]}
 *)
 
@@ -170,58 +169,36 @@ let markdown_dir = store.markdown_dir
 (** Make a storage key from id and version *)
 let make_key ~id ~version = Printf.sprintf "%s@%s" id version
 
-(** Initialize the registry with optional file persistence *)
-let init ?persist_dir () =
-  with_override_mutation_lock (fun () ->
-      let loaded =
-        match persist_dir with
-        | Some dir when Sys.file_exists dir && Sys.is_directory dir ->
-            Sys.readdir dir
-            |> Array.fold_left
-                 (fun entries file ->
-                   if not (Filename.check_suffix file ".json") then entries
-                   else
-                     let path = Filename.concat dir file in
-                     try
-                       let content =
-                         In_channel.with_open_text path In_channel.input_all
-                       in
-                       let json = Yojson.Safe.from_string content in
-                       match prompt_entry_of_yojson json with
-                       | Ok entry -> entry :: entries
-                       | Error message ->
-                           Log.Misc.error "Failed to parse %s: %s" file message;
-                           entries
-                     with
-                     | Eio.Cancel.Cancelled _ as error -> raise error
-                     | exn ->
-                         Log.Misc.error "Failed to parse %s: %s" file
-                           (Printexc.to_string exn);
-                         entries)
-                 []
-        | None | Some _ -> []
-      in
-      with_mutex (fun () ->
-          prompts_dir := persist_dir;
-          List.iter
-            (fun entry ->
-              let key = make_key ~id:entry.id ~version:entry.version in
-              Hashtbl.replace registry key entry;
-              let versions =
-                match Hashtbl.find_opt version_index entry.id with
-                | Some versions ->
-                    if List.mem entry.version versions then versions
-                    else entry.version :: versions
-                | None -> [ entry.version ]
-              in
-              Hashtbl.replace version_index entry.id versions)
-            loaded))
-
 let set_markdown_dir dir =
   with_override_mutation_lock (fun () ->
       with_mutex (fun () -> markdown_dir := Some dir))
 
-let get_markdown_dir () = !markdown_dir
+(* Dune-context fallback for the markdown dir (quick-suite unmasking
+   #24377, 'Prompt ... is missing' class). Production always pins the dir
+   through [Prompt_defaults.bootstrap_runtime], and an explicit
+   [set_markdown_dir] always wins. Test executables, however, run inside
+   dune's sandbox where the cwd has no [config/prompts]; every executable
+   that forgot the per-test pin resolved prompts to "missing" only in CI.
+   DUNE_SOURCEROOT is set by dune for every build/exec/runtest and absent
+   in production processes, so this is a deterministic, environment-scoped
+   branch — not a permissive default: outside dune the behaviour is
+   byte-identical to before (None). Tests that need true prompt absence
+   pin an explicit empty dir (see [with_task_create_prompt_missing] in
+   test_keeper_prompt_external.ml), which this never overrides. *)
+let dune_sourceroot_markdown_dir =
+  lazy
+    (match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | None -> None
+    | Some root ->
+        let dir = Filename.concat (Filename.concat root "config") "prompts" in
+        if Sys.file_exists dir && Sys.is_directory dir then Some dir else None)
+
+let effective_markdown_dir () =
+  match !markdown_dir with
+  | Some _ as pinned -> pinned
+  | None -> Lazy.force dune_sourceroot_markdown_dir
+
+let get_markdown_dir () = effective_markdown_dir ()
 
 let is_valid_prompt_key key =
   key <> ""
@@ -234,7 +211,9 @@ let is_valid_prompt_key key =
 let prompt_markdown_path key =
   if not (is_valid_prompt_key key) then None
   else
-    Option.map (fun dir -> Filename.concat dir (key ^ ".md")) !markdown_dir
+    Option.map
+      (fun dir -> Filename.concat dir (key ^ ".md"))
+      (effective_markdown_dir ())
 
 (** Read a markdown file, stripping YAML frontmatter if present.
     Returns only the body after the closing [---] delimiter. *)
@@ -248,188 +227,8 @@ let read_file_if_exists path =
 
 (** Register a prompt entry in the registry.
     Automatically extracts variables if not provided. *)
-let register (entry : prompt_entry) : unit =
-  with_override_mutation_lock (fun () ->
-   with_mutex (fun () ->
-    (* Auto-extract variables if empty *)
-    let entry =
-      if entry.variables = [] then
-        { entry with variables = extract_variables entry.template }
-      else entry
-    in
-    let key = make_key ~id:entry.id ~version:entry.version in
-    Hashtbl.replace registry key entry;
-
-    (* Update version index *)
-    let versions = match Hashtbl.find_opt version_index entry.id with
-      | Some vs -> if List.mem entry.version vs then vs else entry.version :: vs
-      | None -> [entry.version]
-    in
-    Hashtbl.replace version_index entry.id versions;
-
-    (* Persist to file if enabled *)
-    match !prompts_dir with
-    | Some dir ->
-        Fs_compat.mkdir_p dir;
-        let filename = Printf.sprintf "%s_%s.json" entry.id entry.version in
-        let path = Filename.concat dir filename in
-        let json = prompt_entry_to_yojson entry in
-        Out_channel.with_open_text path (fun oc ->
-          Out_channel.output_string oc (Yojson.Safe.pretty_to_string json)
-        )
-    | None -> ()
-  ))
-
-(** Get a prompt entry by ID and optional version.
-    If version is not specified, returns the latest non-deprecated version. *)
-let get ~id ?version () : prompt_entry option =
-  with_mutex (fun () ->
-    match version with
-    | Some v ->
-        let key = make_key ~id ~version:v in
-        Hashtbl.find_opt registry key
-    | None ->
-        (* Find latest non-deprecated version *)
-        match Hashtbl.find_opt version_index id with
-        | None -> None
-        | Some versions ->
-            (* Sort versions descending and find first non-deprecated *)
-            let sorted = List.sort (fun a b -> String.compare b a) versions in
-            List.find_map (fun v ->
-              let key = make_key ~id ~version:v in
-              match Hashtbl.find_opt registry key with
-              | Some entry when not entry.deprecated -> Some entry
-              | _ -> None
-            ) sorted
-  )
-
-(** Get all versions of a prompt by ID *)
-let get_versions ~id () : prompt_entry list =
-  with_mutex (fun () ->
-    match Hashtbl.find_opt version_index id with
-    | None -> []
-    | Some versions ->
-        List.filter_map (fun v ->
-          let key = make_key ~id ~version:v in
-          Hashtbl.find_opt registry key
-        ) versions
-  )
-
-(** List all registered prompt entries *)
-let list_all () : prompt_entry list =
-  with_mutex (fun () ->
-    Hashtbl.fold (fun _ entry acc -> entry :: acc) registry []
-  )
-
-(** List all prompt IDs (unique, without versions) *)
-let list_ids () : string list =
-  with_mutex (fun () ->
-    Hashtbl.fold (fun id _ acc -> id :: acc) version_index []
-  )
-
-(** Check if a prompt exists *)
-let exists ~id ?version () : bool =
-  with_mutex (fun () ->
-    match version with
-    | Some v ->
-        let key = make_key ~id ~version:v in
-        Hashtbl.mem registry key
-    | None ->
-        Hashtbl.mem version_index id
-  )
-
-(** Unregister a prompt entry *)
-let unregister ~id ?version () : bool =
-  with_override_mutation_lock (fun () ->
-   with_mutex (fun () ->
-    match version with
-    | Some v ->
-        let key = make_key ~id ~version:v in
-        if Hashtbl.mem registry key then begin
-          Hashtbl.remove registry key;
-          (* Update version index *)
-          (match Hashtbl.find_opt version_index id with
-           | Some vs ->
-               let new_vs = List.filter (fun ver -> ver <> v) vs in
-               if new_vs = [] then Hashtbl.remove version_index id
-               else Hashtbl.replace version_index id new_vs
-           | None -> ());
-          (* Remove file if persistence enabled *)
-          (match !prompts_dir with
-           | Some dir ->
-               let filename = Printf.sprintf "%s_%s.json" id v in
-               let path = Filename.concat dir filename in
-               if Sys.file_exists path then Sys.remove path
-           | None -> ());
-          true
-        end else false
-    | None ->
-        (* Remove all versions *)
-        match Hashtbl.find_opt version_index id with
-        | None -> false
-        | Some versions ->
-            List.iter (fun v ->
-              let key = make_key ~id ~version:v in
-              Hashtbl.remove registry key;
-              (match !prompts_dir with
-               | Some dir ->
-                   let filename = Printf.sprintf "%s_%s.json" id v in
-                   let path = Filename.concat dir filename in
-                   if Sys.file_exists path then Sys.remove path
-               | None -> ())
-            ) versions;
-            Hashtbl.remove version_index id;
-            true
-  ))
-
-(** Mark a prompt as deprecated *)
-let deprecate ~id ~version () : bool =
-  with_mutex (fun () ->
-    let key = make_key ~id ~version in
-    match Hashtbl.find_opt registry key with
-    | Some entry ->
-        let updated = { entry with deprecated = true } in
-        Hashtbl.replace registry key updated;
-        true
-    | None -> false
-  )
-
-(** {1 Metrics} *)
-
-(** Update usage metrics after a prompt is used *)
-let update_metrics ~id ~version ~score () : unit =
-  with_mutex (fun () ->
-    let key = make_key ~id ~version in
-    match Hashtbl.find_opt registry key with
-    | Some entry ->
-        let now = Unix.gettimeofday () in
-        let new_metrics = match entry.metrics with
-          | None ->
-              { usage_count = 1; avg_score = score; last_used = now }
-          | Some m ->
-              let new_count = m.usage_count + 1 in
-              let new_avg = (m.avg_score *. float_of_int m.usage_count +. score)
-                            /. float_of_int new_count in
-              { usage_count = new_count; avg_score = new_avg; last_used = now }
-        in
-        let updated = { entry with metrics = Some new_metrics } in
-        Hashtbl.replace registry key updated;
-        (* Persist updated metrics if enabled *)
-        (match !prompts_dir with
-         | Some dir ->
-             let filename = Printf.sprintf "%s_%s.json" id version in
-             let path = Filename.concat dir filename in
-             let json = prompt_entry_to_yojson updated in
-             Out_channel.with_open_text path (fun oc ->
-               Out_channel.output_string oc (Yojson.Safe.pretty_to_string json)
-             )
-         | None -> ())
-    | None -> ()
-  )
-
 (** {1 Template Rendering} *)
 
-(** Render a prompt template with the given variables *)
 let render_template ?template_variables ~template ~vars () : (string, string) result =
   try
     let vars = List.map (fun (name, value) -> (String.trim name, value)) vars in
@@ -461,57 +260,8 @@ let render_template ?template_variables ~template ~vars () : (string, string) re
   with e ->
     Error (Printf.sprintf "Render error: %s" (Printexc.to_string e))
 
-(** Render a registered prompt by ID with the given variables *)
-let render ~id ?version ~vars () : (string, string) result =
-  match get ~id ?version () with
-  | None -> Error (Printf.sprintf "Prompt '%s' not found" id)
-  | Some entry ->
-      render_template
-        ~template_variables:entry.variables
-        ~template:entry.template ~vars ()
-
-(** {1 Statistics} *)
-
-(** Get registry statistics *)
-let stats () : registry_stats =
-  with_mutex (fun () ->
-    let all_entries = Hashtbl.fold (fun _ entry acc -> entry :: acc) registry [] in
-    let total = List.length all_entries in
-    let active = List_util.count_if (fun e -> not e.deprecated) all_entries in
-    let deprecated = total - active in
-
-    let most_used =
-      List.fold_left (fun acc entry ->
-        match entry.metrics with
-        | None -> acc
-        | Some m ->
-            match acc with
-            | None -> Some (entry.id, m.usage_count)
-            | Some (_, count) when m.usage_count > count -> Some (entry.id, m.usage_count)
-            | _ -> acc
-      ) None all_entries
-      |> Option.map fst
-    in
-
-    let total_usage =
-      List.fold_left (fun acc entry ->
-        match entry.metrics with
-        | None -> acc
-        | Some m -> acc + m.usage_count
-      ) 0 all_entries
-    in
-    let avg_usage = if total > 0 then float_of_int total_usage /. float_of_int total else 0.0 in
-
-    { total_prompts = total;
-      active_prompts = active;
-      deprecated_prompts = deprecated;
-      most_used;
-      avg_usage }
-  )
-
 (** {1 Utility Functions} *)
 
-(** Clear all registered prompts *)
 let clear () : unit =
   with_override_mutation_lock (fun () ->
    with_mutex (fun () ->
@@ -532,42 +282,6 @@ let clear () : unit =
         ) files
     | None | Some _ -> ()
   ))
-
-(** Count of registered prompts (all versions) *)
-let count () : int =
-  with_mutex (fun () -> Hashtbl.length registry)
-
-(** Count of unique prompt IDs *)
-let count_unique () : int =
-  with_mutex (fun () -> Hashtbl.length version_index)
-
-(** Export registry to JSON *)
-let to_json () : Yojson.Safe.t =
-  with_mutex (fun () ->
-    let entries = Hashtbl.fold (fun _ entry acc ->
-      prompt_entry_to_yojson entry :: acc
-    ) registry [] in
-    `List entries
-  )
-
-(** Import registry from JSON *)
-let of_json (json : Yojson.Safe.t) : (int, string) result =
-  try
-    let entries = match json with
-      | `List items -> items
-      | _ -> raise (Yojson.Safe.Util.Type_error ("expected list", json))
-    in
-    let count = ref 0 in
-    List.iter (fun entry_json ->
-      match prompt_entry_of_yojson entry_json with
-      | Ok entry ->
-          register entry;
-          incr count
-      | Error e -> Log.Misc.debug "prompt entry parse skipped: %s" e
-    ) entries;
-    Ok !count
-  with e ->
-    Error (Printexc.to_string e)
 
 (** {1 Simple Override API for Hardcoded Prompts} *)
 
@@ -693,27 +407,6 @@ let register_prompt_unlocked ~key ~description ?(category = "general")
           template_variables = List.sort_uniq String.compare template_variables;
         })
 
-let register_prompt ~key ~description ?(category = "general")
-    ?(required_file = false) ?(template_variables = []) () =
-  with_override_mutation_lock (fun () ->
-      register_prompt_unlocked ~key ~description ~category ~required_file
-        ~template_variables ())
-
-(** Auto-discover and register prompts from markdown files with frontmatter.
-    Scans [dir] for [*.md] files. Files with YAML frontmatter get metadata
-    from frontmatter; files without frontmatter are skipped (require explicit
-    registration via [register_prompt]).
-
-    Frontmatter format:
-    {[
-      ---
-      description: keeper continuity rules
-      category: keeper
-      template_variables: [keeper_name, goal, triggers]
-      ---
-    ]}
-
-    The key is derived from the filename: [keeper.constitution.md] -> [keeper.constitution]. *)
 let load_prompts_from_directory dir =
   with_override_mutation_lock (fun () ->
       if Sys.file_exists dir && Sys.is_directory dir then begin
@@ -755,38 +448,6 @@ let load_prompts_from_directory dir =
 
 (** Register a hardcoded prompt with its default value.
     This also registers it in the versioned template system as a fallback. *)
-let register_default ~key ~default ~description ?(category="general") () =
-  with_override_mutation_lock (fun () ->
-   with_mutex (fun () ->
-    Hashtbl.replace meta_tbl key
-      {
-        description;
-        category;
-        required_file = false;
-        template_variables = [];
-      };
-    let entry = {
-      id = key;
-      template = default;
-      version = "default";
-      variables = [];
-      metrics = None;
-      created_at = Unix.gettimeofday ();
-      deprecated = false;
-    } in
-    let storage_key = make_key ~id:key ~version:"default" in
-    Hashtbl.replace registry storage_key entry;
-    let versions = match Hashtbl.find_opt version_index key with
-      | Some vs -> if List.mem "default" vs then vs else "default" :: vs
-      | None -> ["default"]
-    in
-      Hashtbl.replace version_index key versions
-  ))
-
-(** Resolve a prompt with file I/O performed outside the mutex.
-    Reads the markdown file first, then acquires the mutex for
-    hashtbl lookups only. Prevents Eio.Mutex contention when
-    file I/O blocks a fiber (#3335). *)
 let resolve_prompt key =
   let file_path = prompt_markdown_path key in
   let file_value = Option.bind file_path read_file_if_exists in

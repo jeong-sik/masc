@@ -33,7 +33,6 @@ let all_variants =
   ; S.Discord
       { guild_id = None; channel_id = "c2"; parent_channel_id = None; thread_id = None }
   ; S.Slack { team_id = Some "T1"; channel_id = "C9"; thread_ts = None }
-  ; S.Github { repo = "jeong-sik/masc"; notification_id = Some "n1" }
   ; S.Webhook { source = "ci"; event_id = "evt-7" }
   ; S.Agent
   ; S.Gate { label = "discord"; address = [ ("workspace_id", "w1") ] }

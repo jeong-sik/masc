@@ -112,30 +112,29 @@ val answered_of : panel_outcome list -> panel_answer list
 
 (** 심판을 실행하지 않는 typed 사유. *)
 type skip_reason =
-  | Quorum_not_met of
-      { answered : int
-      ; total : int
-      ; required : int
+  | No_panel_answers of { total : int }
+  | Quorum_shortfall of
+      { answered : int  (** 실제로 응답한 패널 수 *)
+      ; required : int  (** preset.min_answered 요구치 *)
       }
+      (** 응답은 있으나 런타임 quorum(min_answered) 미달 — N-of-M 정책.
+          전멸([No_panel_answers])과 구분되는 사유다. *)
 [@@deriving yojson, show, eq]
 
 val render_skip_reason : skip_reason -> string
 (** Operator/log boundary renderer for {!skip_reason}. *)
 
+(** judge 실행 전 panel 입력 계약 검사 (런타임 quorum = preset.min_answered).
+    응답 0이면 [Some (No_panel_answers _)], 0 < 응답 < [min_answered]면
+    [Some (Quorum_shortfall _)], 응답 >= [min_answered]면 [None] = judge 진행.
+    [min_answered] 기본값(1)에서는 "응답 0일 때만 skip"으로 강제 전 동작과 동일.
+    순수 — 테스트 가능. *)
+val judge_skip_reason :
+  panel:panel_outcome list -> min_answered:int -> skip_reason option
+
 val no_panel_answers_error : string
-[@@deprecated
-  "Use render_skip_reason (Quorum_not_met { answered = 0; total = 0; required = 1 })"]
 (** Legacy canonical string for callers that still need the pre-quorum
     all-panel-failed message. New code should use {!skip_reason}. *)
-
-val judge_skip_reason : min_answered:int -> panel_outcome list -> skip_reason option
-(** [Some reason] when fewer than [min_answered] panel members [Answered].
-    The orchestrator renders the typed reason at the [judge = Error] boundary
-    and skips the judge instead of running it on a thin/empty
-    [<panel_answers>] block. [None] when the quorum is met.
-    [min_answered] defaults to 1 at the config layer, so the default behaviour
-    is "skip only when all panels failed" (RFC-0252 left panel-quorum
-    unspecified). *)
 
 (** {1 심판 구조화 출력}
 
@@ -220,11 +219,9 @@ type judge_role =
 [@@deriving yojson, show, eq]
 
 (** 심판(judge) 한 명이 실패하는 방식. {!panel_failure}와 동형인 닫힌 합이되, 심판
-    도메인에만 존재하는 사유([Empty_result]/[Build_error]/[Parse_error]/[Budget_exceeded])
+    도메인에만 존재하는 사유([Empty_result]/[Build_error]/[Parse_error])
     를 추가로 담는다. [panel_failure]를 literal하게 공유하지 않는 이유: 판(panel) 전용인
-    [Invalid_max_output_tokens]가 심판에서 dead variant가 되고, wave-budget SKIP을
-    [Provider_error "...skipped..."] 문자열에 숨기면 orchestrator의 fallback 분류가
-    substring match로 잔존하기 때문이다(CLAUDE.md §string-classifier 안티패턴).
+    [Invalid_max_output_tokens]가 심판에서 dead variant가 되기 때문이다.
 
     근원에서 typed로 propagate한다: [Fusion_judge.run] 계열이 {!Agent_sdk.Error}의
     [Timeout] variant를 match에서 잡아 [Timeout]으로, provider/transport 에러를
@@ -237,7 +234,6 @@ type judge_failure =
   | Empty_result  (** Async_agent.all 이 빈 결과를 반환 *)
   | Build_error of string  (** Fusion_oas.build_agent 실패 *)
   | Parse_error of string  (** Fusion_judge_parse.of_string 파싱 실패 *)
-  | Budget_exceeded of string  (** wave budget 초과로 심판 실행 전 SKIP *)
   | Panels_unavailable of skip_reason
       (** 패널 정족수 미달로 심판이 실행조차 되지 않음. 2026-07-01 사고에서 이
           사유가 [Internal_error] 문자열로 압축돼 모든 keeper-가시 표면이 패널
@@ -250,11 +246,6 @@ type judge_failure =
 (** [Timeout] 변형인가. {!judge_error_node}의 [timed_out] 파생처럼, 분류는 variant 자체로
     충분하므로 별도 bool 필드를 두지 않는다. *)
 val judge_failure_is_timeout : judge_failure -> bool
-
-(** [Timeout] 또는 [Budget_exceeded] 인가. orchestrator의 fallback-judge 트리거 조건:
-    1차 심판 전원이 타임아웃/예산-skip이면 fallback을 시도한다. exhaustive match로
-    string classifier([is_timeout_or_budget_error])를 대체한다. *)
-val judge_failure_is_timeout_or_budget : judge_failure -> bool
 
 (** sink/로그용 사람-가독 문자열. {!Fusion_oas.panel_failure_text}와 대칭. *)
 val judge_failure_text : judge_failure -> string
@@ -277,8 +268,9 @@ type judge_error_node =
   ; failure : judge_failure
   ; usage : usage
       (** 실패해도 태운 토큰 — 관측 record가 비용을 버리지 않는다(RFC-0284, 적대 리뷰 #22112 E). *)
-  ; elapsed_s : float
-      (** Wave start부터 실패까지 경과한 시간(초). 타임아웃/예산 원인 분석용. *)
+  ; elapsed_s : float option
+      (** Wave start부터 실패까지 경과한 시간(초). [None]은 clock 미가용으로
+          관측할 수 없었음을 뜻한다. *)
   }
 [@@deriving yojson, show, eq]
 
@@ -286,6 +278,18 @@ type judge_error_node =
 type judge_outcome =
   | Synthesized of judge_node
   | Judge_failed of judge_error_node
+[@@deriving yojson, show, eq]
+
+(** One completed panel+judge computation before any Board/chat/wake
+    projection. This is the typed payload stored in the common async request's
+    canonical terminal record; projection failures are outside this record. *)
+type deliberation_evidence =
+  { question : string
+  ; panel : panel_outcome list
+  ; judge : (judge_synthesis, judge_failure) result
+  ; judges : judge_outcome list
+  ; judge_usage : usage
+  }
 [@@deriving yojson, show, eq]
 
 (** {1 트리거} *)

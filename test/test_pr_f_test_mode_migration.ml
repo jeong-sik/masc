@@ -11,8 +11,8 @@ open Alcotest
     cannot call [Host_config] without inverting the dune
     dependency graph; their migration is deferred to a separate RFC
     (Host_config extraction to a shared lower-level library).  The 6th
-    site ([cdal/adversarial_eval]) is a *file-classification*
-    pattern unrelated to current-binary test-mode and is excluded
+    site (the since-removed CDAL evaluator) was a *file-classification*
+    pattern unrelated to current-binary test-mode and was excluded
     from PR-F scope by design.
 
     The pins guard against:

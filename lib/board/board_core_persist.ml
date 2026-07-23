@@ -46,6 +46,7 @@ let create_store () =
   ; last_sweep = Time_compat.now ()
   ; mutex = Eio.Mutex.create ()
   ; persist_mutex = Eio.Mutex.create ()
+  ; origin_create_mutex = Eio.Mutex.create ()
   ; karma_cache = None
   ; sorted_posts_cache = None
   ; comments_by_post = Hashtbl.create 1024
@@ -96,11 +97,6 @@ let unindex_post_origin store (post : post) =
      | Some run_id -> Hashtbl.remove store.posts_by_run_id run_id
      | None -> ())
 ;;
-
-(** {1 Comment Rate Limiting}  Per-author sliding-window tracker extracted to [Board_comment_rate_limit] (godfile decomp). Module-level Hashtbl avoids changing the store type; all access is inside the ... *)
-let check_comment_rate_limit = Board_comment_rate_limit.check
-let record_comment_timestamp = Board_comment_rate_limit.record
-let reset_comment_rate_tracker = Board_comment_rate_limit.reset
 
 (** Remove [value] from the string list stored at [key] in [tbl]. Removes the key entirely when the list becomes empty. *)
 let remove_from_list_index tbl key value =
@@ -225,43 +221,6 @@ let sweep store =
           | None -> ());
          Hashtbl.remove store.comments cid)
       expired_comments;
-    let cap_evicted = ref 0 in
-    if Limits.author_post_cap > 0
-    then (
-      let author_posts = Hashtbl.create 64 in
-      Hashtbl.iter
-        (fun _ (post : post) ->
-           let key = Agent_id.to_string post.author in
-           let existing = Hashtbl.find_opt author_posts key |> Option.value ~default:[] in
-           Hashtbl.replace author_posts key (post :: existing))
-        store.posts;
-      Hashtbl.iter
-        (fun _author posts ->
-           if List.length posts > Limits.author_post_cap
-           then (
-             let sorted =
-               List.sort
-                 (fun (a : post) (b : post) ->
-                    Stdlib.Float.compare a.created_at b.created_at)
-                 posts
-             in
-             let excess = List.length sorted - Limits.author_post_cap in
-             let rec take_first n = function
-               | _ when n <= 0 -> []
-               | [] -> []
-               | x :: xs -> x :: take_first (n - 1) xs
-             in
-             let to_evict = take_first excess sorted in
-             List.iter
-               (fun (post : post) ->
-                  let id = Post_id.to_string post.id in
-                  unindex_post_origin store post;
-                  Hashtbl.remove store.posts id;
-                  Hashtbl.remove store.comments_by_post id;
-                  Stdlib.decr store.post_count;
-                  Stdlib.incr cap_evicted)
-               to_evict))
-        author_posts);
     (* Reclaim reactions and votes whose target post/comment no longer exists.
        [sweep] removes posts/comments but historically left [store.reactions] and
        [store.vote_log] resident: those two tables were pruned only by the
@@ -306,9 +265,7 @@ let sweep store =
         "sweep reclaimed %d orphaned reactions, %d orphaned votes"
         removed_reactions
         removed_votes;
-    let window = Stdlib.Float.of_int Limits.comment_rate_window_sec in
-    Board_comment_rate_limit.sweep_stale ~now ~window;
-    if !removed_posts > 0 || !cap_evicted > 0 then invalidate_post_caches store;
+    if !removed_posts > 0 then invalidate_post_caches store;
     if !removed_comments > 0 then invalidate_comment_caches store;
     store.last_sweep <- now;
     !removed_posts, !removed_comments)
@@ -596,18 +553,7 @@ let validate_sub_board_post_policy_unlocked store ~author_id ~hearth =
 ;;
 
 (** {1 Post Operations} *)
-type create_post_outcome =
-  | Fresh_post of post
-  | Dedup_hit of post
-  | Rolled_up_post of post
-let post_of_create_post_outcome = function
-  | Fresh_post post | Dedup_hit post | Rolled_up_post post -> post
-;;
-let status_rollup_task_id = Board_core_status_rollup.status_rollup_task_id
-let is_status_rollup_candidate = Board_core_status_rollup.is_status_rollup_candidate
-let find_status_rollup_target_unlocked = Board_core_status_rollup.find_status_rollup_target_unlocked
-let create_post_with_outcome
-      ?after_rollup_persist
+let create_post
       store
       ~author
       ~content
@@ -621,23 +567,21 @@ let create_post_with_outcome
   ?thread_id
   ?origin
   ()
-  : (create_post_outcome, board_error) Result.t
+  : (post, board_error) Result.t
   =
   maybe_sweep store;
   match Agent_id.of_string author with
   | Error e -> Error e
   | Ok author_id ->
-    let ttl =
-      match post_kind with
-      | Automation_post | System_post ->
-        let forced = Limits.automation_ttl_hours in
-        if ttl_hours = 0 then forced else min ttl_hours forced
-      | Human_post -> if ttl_hours = 0 then 0 else min ttl_hours Limits.max_ttl_hours
-    in
+    if ttl_hours < 0
+    then Error (Validation_error "ttl_hours must be non-negative")
+    else
     let hearth = Option.map (fun h -> String.lowercase_ascii (String.trim h)) hearth in
     let expires_at =
       let now = Time_compat.now () in
-      if ttl = 0 then 0.0 else now +. (Stdlib.Float.of_int ttl *. Masc_time_constants.hour)
+      if ttl_hours = 0
+      then 0.0
+      else now +. (Stdlib.Float.of_int ttl_hours *. Masc_time_constants.hour)
     in
     match
       normalize_post_payload ~content ?title ?body ~post_kind ?meta_json ()
@@ -650,66 +594,16 @@ let create_post_with_outcome
                 (Yojson.Safe.to_string payload)))
     | Ok (normalized_title, normalized_body, normalized_kind, normalized_meta)
       ->
-    if String.length normalized_body > Limits.max_content_length
-    then
-      Error
-        (Validation_error
-           (Printf.sprintf
-              "Content too long: %d > %d"
-              (String.length normalized_body)
-              Limits.max_content_length))
-    else if String.length normalized_body = 0
+    if String.length normalized_body = 0
     then Error (Validation_error "Content cannot be empty")
     else (
       let board_result =
         with_lock store (fun () ->
-(* Content dedup: reject identical (author, hearth, thread, body) within a short window.
-   Agent automation can emit the same board post repeatedly under retry; the dedup key
-   includes hearth/thread so unrelated posts from the same author still pass. *)
-          let author_str = Agent_id.to_string author_id in
-          let hearth_part = Option.value ~default:"" hearth in
-          let thread_part = Option.value ~default:"" thread_id in
-          let dedup_key =
-            String.concat "\x00"
-              [ author_str; hearth_part; thread_part; normalized_body ]
-          in
-          let dedup_match =
-            Hashtbl.fold
-              (fun _ (p : post) acc ->
-                 let p_key =
-                   String.concat "\x00"
-                     [ Agent_id.to_string p.author
-                     ; Option.value ~default:"" p.hearth
-                     ; Option.value ~default:"" p.thread_id
-                     ; p.body
-                     ]
-                 in
-                 if String.equal p_key dedup_key then Some p else acc)
-              store.posts None
-          in
-          match dedup_match with
-          | Some existing ->
-            Log.BoardLog.info
-              "dedup: skipping duplicate post author=%s body_len=%d \
-               existing_id=%s"
-              author_str (String.length normalized_body)
-              (Post_id.to_string existing.id);
-            Ok (`Dedup_hit existing)
-          | None ->
-            (match validate_sub_board_post_policy_unlocked store
-                     ~author_id ~hearth
-             with
+          match validate_sub_board_post_policy_unlocked store ~author_id ~hearth with
             | Error e -> Error e
             | Ok () ->
               let now = Time_compat.now () in
-              let create_fresh () =
-                if !(store.post_count) >= Limits.max_posts
-                then
-                  Error
-                    (Capacity_exceeded
-                       { current = !(store.post_count); max = Limits.max_posts })
-                else
-                  let post =
+              let post =
                     { id = Post_id.generate ()
                     ; author = author_id
                     ; title = normalized_title
@@ -734,112 +628,138 @@ let create_post_with_outcome
                   index_post_origin store post;
                   Stdlib.incr store.post_count;
                   invalidate_post_caches store;
-                  Ok (`Fresh post)
-              in
-              let rollup_task_id =
-                if
-                  is_status_rollup_candidate
-                    ~post_kind:normalized_kind
-                    ~title:normalized_title
-                    ~body:normalized_body
-                    ~meta_json:normalized_meta
-                then
-                  status_rollup_task_id
-                    ~title:normalized_title
-                    ~body:normalized_body
-                    ~meta_json:normalized_meta
-                else None
-              in
-              (match rollup_task_id with
-               | Some task_id ->
-                 (match
-                    find_status_rollup_target_unlocked
-                      store
-                      ~author_id
-                      ~hearth
-                      ~visibility
-                      ~task_id
-                      ~now
-                  with
-                  | Some existing ->
-                    let updated =
-                      { existing with
-                        title = normalized_title
-                      ; body = normalized_body
-                      ; content = normalized_body
-                      ; post_kind = normalized_kind
-                      ; meta_json = normalized_meta
-                      ; updated_at = now
-                      ; expires_at
-                      }
-                    in
-                    let existing_id = Post_id.to_string existing.id in
-                    Hashtbl.replace store.posts existing_id updated;
-                    mark_dirty_post store existing_id;
-                    invalidate_post_caches store;
-                    Log.BoardLog.info
-                      "status-rollup: updated automation progress post \
-                       author=%s task_id=%s existing_id=%s body_len=%d"
-                      author_str
-                      task_id
-                      existing_id
-                      (String.length normalized_body);
-                    Ok (`Rolled_up (existing, updated, posts_jsonl_unlocked store))
-                  | None -> create_fresh ())
-               | None -> create_fresh ())))
+              Ok post)
       in
       match board_result with
-      | Ok (`Fresh post) ->
+      | Ok post ->
         (match with_persist_lock store (fun () -> append_post post) with
-         | Ok () ->
-           (match
-              Board_effect_hooks.earn
-                ~base_path:(board_base_path ())
-                ~agent_name:author
-                ~kind:Board_post
-                ~reason:"board post"
-                ()
-            with
-            | Ok () -> ()
-            | Error msg -> Log.BoardLog.warn "economy earn (post): %s" msg);
-           Ok (Fresh_post post)
+         | Ok () -> Ok post
          | Error e ->
            rollback_fresh_post store post;
            Error e)
-      | Ok (`Rolled_up (previous, post, posts_jsonl)) ->
-        (match with_persist_lock store (fun () -> save_posts_jsonl_result posts_jsonl) with
-         | Error persist_error ->
-           let message =
-             "status-rollup persist failed: " ^ Board_types.show_board_error persist_error
-           in
-           (match rollback_rolled_up_post store ~previous ~rolled_up:post with
-            | Ok () -> Error persist_error
-            | Error rollback ->
-              Error
-                (Validation_error (message ^ "; rollback failed: " ^ rollback)))
-         | Ok () ->
-           (match after_rollup_persist with
-            | None -> Ok (Rolled_up_post post)
-            | Some hook ->
-              (match hook post with
-               | Ok () -> Ok (Rolled_up_post post)
-               | Error msg ->
-                 let message = "status-rollup post-persist hook failed: " ^ msg in
-                 (match rollback_rolled_up_post store ~previous ~rolled_up:post with
-                  | Ok () -> Error (Validation_error message)
-                  | Error rollback ->
-                    Error
-                      (Validation_error
-                         (message ^ "; rollback failed: " ^ rollback))))))
-      | Ok (`Dedup_hit existing) -> Ok (Dedup_hit existing)
       | Error _ as e -> e)
 ;;
 
-(* Owner-gated in-place edit of an existing post's title/body. Mirrors the
-   status-rollup update path (find -> [{ existing with ... }] -> [Hashtbl.replace]
-   -> [mark_dirty_post] -> snapshot save) but is initiated by an explicit edit
-   request rather than a same-key automation re-post. The edited content is
-   normalized exactly like [create_post_with_outcome], with the existing
+type create_post_once_result =
+  | Post_created of post
+  | Post_already_present of post
+
+let create_post_once_by_fusion_run_id
+      store
+      ~fusion_run_id
+      ~author
+      ~content
+      ~post_kind
+      ?meta_json
+      ~visibility
+      ~ttl_hours
+      ~origin
+      ()
+  =
+  let option_equal equal left right =
+    match left, right with
+    | None, None -> true
+    | Some left, Some right -> equal left right
+    | None, Some _ | Some _, None -> false
+  in
+  let origin_equal left right =
+    option_equal Ids.Turn_ref.equal left.turn_ref right.turn_ref
+    && option_equal String.equal left.source right.source
+    && option_equal String.equal left.fusion_run_id right.fusion_run_id
+  in
+  let post_kind_equal left right =
+    match left, right with
+    | Human_post, Human_post
+    | Automation_post, Automation_post
+    | System_post, System_post -> true
+    | Human_post, (Automation_post | System_post)
+    | Automation_post, (Human_post | System_post)
+    | System_post, (Human_post | Automation_post) -> false
+  in
+  let visibility_equal left right =
+    match left, right with
+    | Public, Public
+    | Unlisted, Unlisted
+    | Internal, Internal
+    | Direct, Direct -> true
+    | Public, (Unlisted | Internal | Direct)
+    | Unlisted, (Public | Internal | Direct)
+    | Internal, (Public | Unlisted | Direct)
+    | Direct, (Public | Unlisted | Internal) -> false
+  in
+  if String.equal fusion_run_id ""
+  then Error (Validation_error "fusion_run_id must not be empty")
+  else if ttl_hours < 0
+  then Error (Validation_error "ttl_hours must be non-negative")
+  else
+    match origin.fusion_run_id with
+    | Some origin_run_id when String.equal origin_run_id fusion_run_id ->
+      (match
+         Agent_id.of_string author,
+         normalize_post_payload ~content ~post_kind ?meta_json ()
+       with
+       | Error error, _ -> Error error
+       | _, Error (Meta_not_assoc payload) ->
+         Error
+           (Validation_error
+              (Printf.sprintf
+                 "Malformed meta_json: expected JSON object, got %s"
+                 (Yojson.Safe.to_string payload)))
+       | Ok author_id, Ok (title, body, post_kind, meta_json) ->
+         if String.equal body ""
+         then Error (Validation_error "Content cannot be empty")
+         else
+           Eio.Mutex.use_rw ~protect:true store.origin_create_mutex (fun () ->
+             maybe_sweep store;
+             let existing_post =
+               with_lock store (fun () ->
+                 match Hashtbl.find_opt store.posts_by_run_id fusion_run_id with
+                 | None -> None
+                 | Some post_id -> Hashtbl.find_opt store.posts post_id)
+             in
+             match existing_post with
+             | Some post ->
+               let exact_replay =
+                 String.equal (Agent_id.to_string post.author) (Agent_id.to_string author_id)
+                 && String.equal post.title title
+                 && String.equal post.body body
+                 && String.equal post.content body
+                 && post_kind_equal post.post_kind post_kind
+                 && option_equal Yojson.Safe.equal post.meta_json meta_json
+                 && visibility_equal post.visibility visibility
+                 && option_equal origin_equal post.origin (Some origin)
+                 (* [hearth]/[thread_id] are excluded: this creation path never
+                    sets them, so a post-*creation* hearth binding is out-of-band
+                    metadata and must not turn a legitimate replay into an
+                    [Already_exists] conflict. *)
+               in
+               if exact_replay
+               then Ok (Post_already_present post)
+               else
+                 Error
+                   (Already_exists
+                      (Printf.sprintf
+                         "conflicting Fusion Board projection for run_id=%S"
+                         fusion_run_id))
+             | None ->
+               create_post store ~author ~content ~post_kind ?meta_json
+                 ~visibility ~ttl_hours ~origin ()
+               |> Result.map (fun post -> Post_created post)))
+    | Some origin_run_id ->
+      Error
+        (Validation_error
+           (Printf.sprintf
+              "fusion_run_id mismatch: argument=%S origin=%S"
+              fusion_run_id
+              origin_run_id))
+    | None ->
+      Error
+        (Validation_error
+           "create_post_once_by_fusion_run_id requires typed fusion origin")
+;;
+
+(* Owner-gated in-place edit of an existing post's title/body. The edited content is
+   normalized exactly like [create_post], with the existing
    metadata passed through [normalize_meta_json] so an edit cannot silently
    lose it. [post_kind]/[visibility]/[hearth]/[thread_id]/[origin] are
    preserved. Author mismatch returns [Unauthorized] (no silent ignore).
@@ -910,15 +830,7 @@ let update_post_with_outcome
                         "Malformed meta_json: expected JSON object, got %s"
                         (Yojson.Safe.to_string payload)))
             | Ok (normalized_title, normalized_body, _kind, normalized_meta) ->
-              if String.length normalized_body > Limits.max_content_length
-              then
-                Error
-                  (Validation_error
-                     (Printf.sprintf
-                        "Content too long: %d > %d"
-                        (String.length normalized_body)
-                        Limits.max_content_length))
-              else if String.length normalized_body = 0
+              if String.length normalized_body = 0
               then Error (Validation_error "Content cannot be empty")
               else (
                 let now = Time_compat.now () in
@@ -942,38 +854,4 @@ let update_post_with_outcome
     | Ok (updated, posts_jsonl) ->
       with_persist_lock store (fun () -> save_posts_jsonl posts_jsonl);
       Ok updated
-;;
-let create_post
-      store
-      ~author
-      ~content
-      ?title
-      ?body
-      ~post_kind
-      ?meta_json
-      ?visibility
-      ?ttl_hours
-      ?hearth
-      ?thread_id
-      ?origin
-      ()
-  =
-  match
-    create_post_with_outcome
-      store
-      ~author
-      ~content
-      ?title
-      ?body
-      ~post_kind
-      ?meta_json
-      ?visibility
-      ?ttl_hours
-      ?hearth
-      ?thread_id
-      ?origin
-      ()
-  with
-  | Ok outcome -> Ok (post_of_create_post_outcome outcome)
-  | Error _ as err -> err
 ;;

@@ -97,12 +97,8 @@ function providerPayload(overrides: Record<string, unknown> = {}) {
             connect_timeout_s: 30,
             behavior_capabilities: {
               supports_inline_tools: true,
-              requires_per_keeper_bridging_for_bound_actor_tools: false,
               argv_prompt_preflight: false,
               uses_anthropic_caching: false,
-              max_turns_per_attempt: 8,
-              tolerates_bound_actor_fallback: true,
-              identity_runtime_mcp_header_keys: [],
             },
           },
           model: {
@@ -336,11 +332,11 @@ describe('RuntimeHealthSnapshot', () => {
     expect(container.textContent).toContain('500 Internal Server Error: Eio mutex poisoned')
   })
 
-  it('surfaces runtime assignment governance warnings on the first screen', async () => {
+  it('surfaces runtime assignment status warnings on the first screen', async () => {
     apiMocks.fetchRuntimeProviders.mockResolvedValueOnce({
       ...providerPayload(),
-      assignment_governance: {
-        schema: 'masc.runtime_assignment_governance.v1',
+      assignment_status: {
+        schema: 'masc.runtime_assignment_status.v1',
         source: 'runtime.toml',
         status: 'degraded',
         degraded: true,
@@ -363,15 +359,15 @@ describe('RuntimeHealthSnapshot', () => {
 
     render(h(RuntimeHealthSnapshot, {}), container)
     await waitFor(
-      () => container.textContent?.includes('runtime assignment governance') ?? false,
-      'assignment governance warning',
+      () => container.textContent?.includes('runtime assignment status') ?? false,
+      'assignment status warning',
     )
 
     expect(container.textContent).toContain('runtime assignment review')
     expect(container.textContent).toContain('2 explicit')
     expect(container.textContent).toContain('assigned runtimes: openai.gpt')
     expect(container.textContent).toContain('single_runtime_assignment_pin')
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('runtime assignment governance')
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('runtime assignment status')
   })
 
   it('surfaces startup catalog degradation on the first screen', async () => {
@@ -408,7 +404,7 @@ describe('RuntimeHealthSnapshot', () => {
         dropped_media_failover: [],
         dropped_lane_candidates: [],
         dropped_lanes: [],
-        next_action: 'Add the listed provider/model rows to oas-models.toml.',
+        next_action: 'Add deployment rows to oas-models-overlay.toml (or upstream OAS).',
       },
     })
     const { RuntimeHealthSnapshot } = await import('./runtime-health-snapshot')
@@ -425,7 +421,7 @@ describe('RuntimeHealthSnapshot', () => {
     expect(container.textContent).toContain('effective default: glm-coding.glm-5-turbo')
     expect(container.textContent).toContain('disabled runtimes: mimo.mimo-v2.5-pro, mimo.mimo-v2.5')
     expect(container.textContent).toContain('missing catalog: mimo.mimo-v2.5-pro, mimo.mimo-v2.5')
-    expect(container.textContent).toContain('next: Add the listed provider/model rows to oas-models.toml.')
+    expect(container.textContent).toContain('next: Add deployment rows to oas-models-overlay.toml (or upstream OAS).')
   })
 
   it('uses force=1 when the operator clicks Live probe', async () => {

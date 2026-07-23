@@ -51,7 +51,8 @@ val judge_node_meta : Fusion_types.judge_outcome -> Yojson.Safe.t
 
     chat store append 실패는 [Error msg]로 반환한다. board post 생성 실패는 결론
     전달을 실패로 되돌리지 않는다: 경고를 남기고 [board_post_id = ""]로
-    completion/wake를 진행한 뒤 [Ok ()]를 반환한다.
+    completion/wake를 진행한다. chat/board가 성공해도 durable wake commit이 실패하면
+    [Error]를 반환해 producer obligation이 재시도를 보존한다.
     [chat_appended] SSE broadcast는 {!Keeper_chat_broadcast} 정책을 따른다:
     non-cancel 예외는 counter+warn으로 흡수하는 best-effort 알림이며, chat/board
     영속 성공을 실패로 되돌리지 않는다. [Eio.Cancel.Cancelled]는 재전파한다. *)
@@ -59,6 +60,7 @@ val emit
   :  base_dir:string
   -> keeper:string
   -> run_id:string
+  -> channel:Keeper_continuation_channel.t
   -> question:string
   -> panel:Fusion_types.panel_outcome list
   -> judge:(Fusion_types.judge_synthesis, Fusion_types.judge_failure) result
@@ -73,23 +75,32 @@ val emit
     aborted 실패 라벨을 [resolved_answer]에 싣고, board post가 없으면 [board_post_id = ""].
 
     [emit]은 chat lane append 성공 경로에서 이를 호출한다(board post가 없으면
-    [board_post_id = ""]). 실패 경로는 fusion_tool의 append_chat_failure가
-    호출한다(completion 타입당 단일 wake로 중복 방지).
+    [board_post_id = ""]). lifecycle 실패는 [emit_failure]가 같은 계약으로 투영한다.
 
-    Fail-closed durable delivery: 원 채널을 나르는 route는 in-memory 유일 carrier
-    이므로, 먼저 [Fusion_wake_route.peek]로 route를 소비하지 않고 읽어 stimulus를
-    만들고 공유 fail-closed 경로([enqueue_durable_result])로 durable 커밋한 뒤에만
-    route를 [take]하고 Running 키퍼에 best-effort wake hint를 flip한다. durable 커밋
-    실패 시 route를 남겨 재시도를 보존하고 [Error]를 반환한다(silent drop 아님).
+    Fail-closed durable delivery: 원 채널은 producer의 durable obligation에서
+    명시적으로 전달된다. 공유 fail-closed 경로([enqueue_durable_result])가 exact
+    recipient를 durable 커밋하고, 실패하면 [Error]를 반환해 obligation을 유지한다.
     커밋 성공 후의 wake hint 실패는 로깅만 한다(키퍼가 durable stimulus를 다음 턴에
     replay). [Eio.Cancel.Cancelled]는 항상 재전파. *)
 val wake_keeper_on_fusion_completion :
      base_dir:string
   -> keeper:string
   -> run_id:string
+  -> channel:Keeper_continuation_channel.t
   -> ok:bool
   -> resolved_answer:string
   -> board_post_id:string
+  -> (unit, string) result
+
+(** Idempotently project a terminal Fusion lifecycle failure to the Keeper chat
+    lane and its exact continuation channel. *)
+val emit_failure :
+     base_dir:string
+  -> keeper:string
+  -> run_id:string
+  -> channel:Keeper_continuation_channel.t
+  -> failure_code:string
+  -> detail:string
   -> (unit, string) result
 
 (** RFC-0266 §7 Phase 4: broadcast a [fusion_run_status] SSE event carrying the

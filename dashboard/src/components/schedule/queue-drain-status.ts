@@ -30,7 +30,8 @@ export type QueueDrainState =
   | 'drained' // left the queue AND the keeper reacted — healthy completion
   | 'missed' // left the queue with no keeper reaction — dispatched then lost
   | 'read_error' // queue snapshot unreadable — drain state indeterminate (I/O)
-  | 'indeterminate' // receipt / stimulus cannot be correlated (legacy record)
+  | 'evidence_invalid' // the exact occurrence row is quarantined
+  | 'indeterminate' // receipt / stimulus / ledger completeness cannot be correlated
 
 export interface QueueDrainStatus {
   readonly state: QueueDrainState
@@ -71,12 +72,17 @@ const PRESENTATION: Readonly<Record<QueueDrainState, Omit<QueueDrainStatus, 'sta
   read_error: {
     label: '읽기 오류',
     tone: 'warn',
-    title: '큐 스냅샷 읽기 실패 — 드레인 상태 확인 불가',
+    title: '큐 스냅샷 또는 reaction ledger 읽기 실패 — 드레인 상태 확인 불가',
+  },
+  evidence_invalid: {
+    label: '증거 격리',
+    tone: 'warn',
+    title: '해당 occurrence의 reaction ledger 행이 격리되어 정확한 드레인 판정 불가',
   },
   indeterminate: {
     label: '확인 불가',
     tone: 'neutral',
-    title: '영수증 / stimulus_id 부재로 큐-반응 상관 불가 (레거시 기록)',
+    title: '영수증, stimulus_id, 또는 ledger completeness 부재로 큐-반응 상관 불가',
   },
 }
 
@@ -97,7 +103,10 @@ function stateOf(request: DashboardScheduledAutomationRequest): QueueDrainState 
       const reaction = request.keeper_reaction_evidence?.projection_status
       if (reaction != null && REACTED.has(reaction)) return 'drained'
       if (reaction === 'not_found') return 'missed'
-      // missing_stimulus_id / unrecognized / absent — cannot conclude "lost".
+      if (reaction === 'read_error') return 'read_error'
+      if (reaction === 'quarantined') return 'evidence_invalid'
+      // quarantine / missing identity / unrecognized / absent:
+      // exact negative evidence is unavailable, so this can never be a miss.
       return 'indeterminate'
     }
     default:
@@ -118,13 +127,14 @@ export function queueDrainStatusOf(
 }
 
 // States surfaced as a chip on the calendar rows. 'drained' and 'indeterminate'
-// are intentionally omitted: a healthy completion and a legacy-correlation gap
+// are intentionally omitted: a healthy completion and an uncorrelatable record
 // are not actionable, and a chip on every recurring row would be noise.
 const CALENDAR_VISIBLE: ReadonlySet<QueueDrainState> = new Set<QueueDrainState>([
   'pending',
   'inflight',
   'missed',
   'read_error',
+  'evidence_invalid',
 ])
 
 export function isCalendarVisible(status: QueueDrainStatus): boolean {

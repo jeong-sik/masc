@@ -17,7 +17,7 @@ type task = {
 
 type keeper = {
   k_name : string;
-  k_goal : string;
+  k_active_goal_ids : string list;
   k_generation : int;
   k_active_model : string option;
   k_models : string list;
@@ -28,10 +28,8 @@ type keeper = {
   k_total_cost_usd : float;
   k_last_turn_ts : string;
   k_compaction_count : int;
-  k_compaction_ratio_gate : float;
   k_trigger_mode : string;
   k_context_budget : int;
-  k_handoff_threshold : float;
   k_drift_enabled : bool;
   k_verify : bool;
   k_created_at : string;

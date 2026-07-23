@@ -189,6 +189,16 @@ let start_flusher_actor ~sw store =
 let ensure_flusher_actor store =
   match Eio_context.get_switch_opt () with
   | None -> ()
+  | Some _ when not (Eio_context.root_switch_on_current_domain ()) ->
+      (* The flusher forks a daemon on the server root switch (get_switch_opt's
+         atomic fallback outside a turn). Eio.Fiber.fork_daemon ~sw is only legal
+         on the switch's owning (main) domain, but ensure_flusher_actor is
+         reachable from Domain_pool worker domains (board/dashboard projections).
+         Defer on a non-owning domain: the flusher is a single CAS-guarded daemon
+         started on the main domain at boot (mcp_server init_jsonl), so skipping
+         here starts nothing twice and loses nothing. Mirrors the
+         Keeper_board_attention_candidate.start_async guard (#25015). *)
+      ()
   | Some sw ->
       let rec loop attempts_left =
         let current = Atomic.get backend_state in
@@ -284,11 +294,6 @@ let reset_for_test () =
   Atomic.set board_signal_hook None;
   Atomic.set board_sse_hook None
 
-let jsonl_forced () =
-  match Env_config.Board.backend_opt () with
-  | Some Env_config.Board.Jsonl -> true
-  | Some (Env_config.Board.Pg | Env_config.Board.Unknown_backend _) | None -> false
-
 let backend () =
   match Atomic.get backend_state with
   | Active (Jsonl store as backend, _) ->
@@ -365,51 +370,44 @@ let emit_post_created (post : Board.post) =
          content = post.content; post_kind = post.post_kind;
          hearth = post.hearth })
 
-let create_post_with_outcome ?after_fresh_persist ?after_rollup_persist ~author
-    ~content ?title ?body ~post_kind ?meta_json ?(visibility = Board.Internal)
-    ?(ttl_hours = Board.Limits.default_ttl_hours) ?hearth ?thread_id ?origin () =
-  match backend () with
-  | Jsonl store ->
-      (match
-         Board.create_post_with_outcome ?after_rollup_persist store ~author
-           ~content ?title ?body ~post_kind ?meta_json ~visibility ~ttl_hours
-           ?hearth ?thread_id ?origin ()
-       with
-      | Ok (Board.Fresh_post post) ->
-          (match after_fresh_persist with
-           | None ->
-               emit_post_created post;
-               Ok (Board.Fresh_post post)
-           | Some hook ->
-               (match hook post with
-                | Ok () ->
-                    emit_post_created post;
-                    Ok (Board.Fresh_post post)
-                | Error msg ->
-                    let post_id = Board.Post_id.to_string post.id in
-                    let rollback_error =
-                      match Board.delete_post store ~post_id with
-                      | Ok () -> None
-                      | Error e -> Some (Board.show_board_error e)
-                    in
-                    let message =
-                      match rollback_error with
-                      | None -> msg
-                      | Some rollback -> msg ^ "; rollback failed: " ^ rollback
-                    in
-                    Error (Board.Validation_error message)))
-      | Ok (Board.Dedup_hit post) -> Ok (Board.Dedup_hit post)
-      | Ok (Board.Rolled_up_post post) -> Ok (Board.Rolled_up_post post)
-      | Error _ as err -> err)
-
 let create_post ~author ~content ?title ?body ~post_kind ?meta_json
     ?visibility ?ttl_hours ?hearth ?thread_id ?origin () =
-  match
-    create_post_with_outcome ~author ~content ?title ?body ~post_kind
-      ?meta_json ?visibility ?ttl_hours ?hearth ?thread_id ?origin ()
-  with
-  | Ok outcome -> Ok (Board.post_of_create_post_outcome outcome)
-  | Error _ as err -> err
+  match backend () with
+  | Jsonl store ->
+    (match
+       Board.create_post
+         store
+         ~author
+         ~content
+         ?title
+         ?body
+         ~post_kind
+         ?meta_json
+         ?visibility
+         ?ttl_hours
+         ?hearth
+         ?thread_id
+         ?origin
+         ()
+     with
+     | Ok post ->
+       emit_post_created post;
+       Ok post
+     | Error _ as error -> error)
+
+let create_post_once_by_fusion_run_id ~fusion_run_id ~author ~content ~post_kind
+    ?meta_json ~visibility ~ttl_hours ~origin () =
+  match backend () with
+  | Jsonl store ->
+    (match
+       Board.create_post_once_by_fusion_run_id store ~fusion_run_id ~author
+         ~content ~post_kind ?meta_json ~visibility ~ttl_hours ~origin ()
+     with
+     | Ok (Board.Post_created post as outcome) ->
+       emit_post_created post;
+       Ok outcome
+     | Ok (Board.Post_already_present _ as outcome) -> Ok outcome
+     | Error _ as error -> error)
 
 let update_post ~post_id ~editor ~content ?title ?body ?new_author () =
   match backend () with
@@ -460,9 +458,7 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?exclude_autho
         | Hot -> false
         | Trending | Recent | Updated | Discussed -> true
       in
-      let fetch_limit =
-        if needs_full_scan then Board.Limits.max_posts else max limit 500
-      in
+      let fetch_limit = if needs_full_scan then Stdlib.max_int else max limit 500 in
       let posts =
         if needs_full_scan then
           Board.search_posts store ~predicate:(fun _ -> true) ~limit:fetch_limit
@@ -505,6 +501,10 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?exclude_autho
       in
       Board.take limit filtered
 
+let current_post_cursor () =
+  match backend () with
+  | Jsonl store -> Board.current_post_cursor store
+
 let get_comments ~post_id =
   match backend () with
   | Jsonl store -> Board.get_comments store ~post_id
@@ -518,10 +518,10 @@ let add_comment ~post_id ~author ~content ?parent_id
   match backend () with
   | Jsonl store ->
       (match
-         Board.add_comment_with_status store ~post_id ~author ~content ?parent_id
+         Board.add_comment store ~post_id ~author ~content ?parent_id
            ~ttl_hours ()
        with
-      | Ok (comment, `Fresh) ->
+      | Ok comment ->
           let cid = Board.Comment_id.to_string comment.id in
           let auth = Board.Agent_id.to_string comment.author in
           (match Board.get_post store ~post_id with
@@ -542,7 +542,6 @@ let add_comment ~post_id ~author ~content ?parent_id
           emit_board_sse_event
             (Comment_added { post_id; comment_id = cid; author = auth });
           Ok comment
-      | Ok (comment, `Dedup) -> Ok comment
       | Error _ as err -> err)
 
 let current_vote_for_post ~voter ~post_id =
@@ -717,10 +716,6 @@ let flush () =
   | Active (Jsonl store, _) -> Board.flush_dirty store
   | Uninitialized -> ()
 
-let sweep () =
-  match backend () with
-  | Jsonl store -> Board.sweep store
-
 let get_all_karma () =
   match backend () with
   | Jsonl store -> Board.get_all_karma store
@@ -746,10 +741,6 @@ let get_karma_ledger ?agent ?(limit = max_int) () =
 
 let post_to_yojson_with_karma (p : Board.post) ~author_karma =
   Board.post_to_yojson_with_karma p ~author_karma
-
-let reclassify_posts ?(limit = 5200) ?(dry_run = true) () =
-  match backend () with
-  | Jsonl store -> Board.reclassify_posts store ~limit ~dry_run ()
 
 let backend_name () =
   match Atomic.get backend_state with

@@ -309,6 +309,39 @@ let json_int_field key = function
   | _ -> None
 ;;
 
+let annotation_post_allowed_fields =
+  [ "file_path"
+  ; "line_start"
+  ; "line_end"
+  ; "keeper_id"
+  ; "kind"
+  ; "content"
+  ; "goal_id"
+  ; "task_id"
+  ; "references"
+  ]
+;;
+
+let validate_annotation_post_fields = function
+  | `Assoc fields ->
+    (match
+       List.find_opt
+         (fun (key, _) -> not (List.mem key annotation_post_allowed_fields))
+         fields
+     with
+     | Some (key, _) -> Error (Printf.sprintf "Unknown annotation field: %s" key)
+     | None ->
+       let rec find_duplicate seen = function
+         | [] -> None
+         | (key, _) :: rest ->
+           if List.mem key seen then Some key else find_duplicate (key :: seen) rest
+       in
+       (match find_duplicate [] fields with
+        | Some key -> Error (Printf.sprintf "Duplicate annotation field: %s" key)
+        | None -> Ok ()))
+  | _ -> Error "Annotation request must be an object"
+;;
+
 let cursor_focus_mode_field = function
   | `Assoc fields ->
     (match List.assoc_opt "focus_mode" fields with
@@ -482,21 +515,34 @@ let runtime_id_and_branch state =
 let build_presence_snapshot state =
   let base = base_path_of_state state in
   let runtime_id, branch = runtime_id_and_branch state in
+  let config = Mcp_server.workspace_config state in
   let entries =
-    let agents = Client_registry_eio.list_active ~within_seconds:300.0 () in
-    List.map
-      (fun (a : Client_identity.t) ->
-         `Assoc
-           [ "keeper_id", `String a.Client_identity.agent_name
-           ; "workspace_label", `String (Filename.basename base)
-           ; "branch", `String branch
-           ; "role", `String "keeper"
-           ; "status", `String "active"
-           ; ( "last_seen_ms"
-             , `Intlit (Printf.sprintf "%.0f" (a.Client_identity.registered_at *. 1000.0))
-             )
-           ])
-      agents
+    Workspace.get_active_agents config
+    |> List.filter_map (fun (agent : Masc_domain.agent) ->
+         let keeper_name =
+           Option.bind agent.meta (fun meta -> meta.Masc_domain.keeper_name)
+         in
+         let presence_status =
+           match agent.status with
+           | Masc_domain.Active | Masc_domain.Busy -> Some "active"
+           | Masc_domain.Listening -> Some "idle"
+           | Masc_domain.Inactive -> None
+         in
+         match keeper_name, presence_status with
+         | None, _ | _, None -> None
+         | Some keeper_id, Some status ->
+           let last_seen_ms =
+             Server_presence.last_seen_ms ~context:"IDE presence" agent
+           in
+           Some
+             (`Assoc
+               [ "keeper_id", `String keeper_id
+               ; "workspace_label", `String (Filename.basename base)
+               ; "branch", `String branch
+               ; "role", `String "keeper"
+               ; "status", `String status
+               ; "last_seen_ms", `Intlit (Int64.to_string last_seen_ms)
+               ]))
   in
   `Assoc
     [ "runtime_id", `String runtime_id
@@ -542,14 +588,15 @@ let add_routes router =
   |> Http.Router.get "/api/v1/agents" (fun request reqd ->
     with_public_read
       (fun state _req reqd ->
-         let agents = Client_registry_eio.list_active ~within_seconds:300.0 () in
+         let config = Mcp_server.workspace_config state in
+         let agents = Workspace.get_active_agents config in
          let entries =
            List.map
-             (fun (a : Client_identity.t) ->
+             (fun (agent : Masc_domain.agent) ->
                 `Assoc
-                  [ "name", `String a.Client_identity.agent_name
-                  ; "status", `String "active"
-                  ; "current_task", `Null
+                  [ "name", `String agent.name
+                  ; "status", `String (Masc_domain.agent_status_to_string agent.status)
+                  ; "current_task", Json_util.string_opt_to_json agent.current_task
                   ; "model", `Null
                   ])
              agents
@@ -677,15 +724,23 @@ let add_routes router =
                (json_error msg)
                reqd
            | Ok json ->
-             let find_string key = json_string_field key json in
-             let find_int key = json_int_field key json in
-             match
-               ( find_string "file_path"
-               , find_int "line_start"
-               , find_int "line_end"
-               , find_string "content" )
-             with
-             | Some file_path, Some line_start, Some line_end, Some content ->
+             (match validate_annotation_post_fields json with
+              | Error msg ->
+                Http.Response.json_value
+                  ~status:`Bad_request
+                  ~request
+                  (json_error ~code:"invalid_annotation_request" msg)
+                  reqd
+              | Ok () ->
+                let find_string key = json_string_field key json in
+                let find_int key = json_int_field key json in
+                match
+                  ( find_string "file_path"
+                  , find_int "line_start"
+                  , find_int "line_end"
+                  , find_string "content" )
+                with
+                | Some file_path, Some line_start, Some line_end, Some content ->
                (* task-1736 B3: keeper_id is bound to the authenticated
                   identity. A body-supplied keeper_id is rejected outright;
                   the token is the only source of identity. *)
@@ -719,60 +774,57 @@ let add_routes router =
                    | Ok kind ->
                      let goal_id = find_string "goal_id" in
                      let task_id = find_string "task_id" in
-                     let board_post_id = find_string "board_post_id" in
-                     let comment_id = find_string "comment_id" in
-                     let pr_id = find_string "pr_id" in
-                     let git_ref = find_string "git_ref" in
-                     let log_id = find_string "log_id" in
-                     let session_id = find_string "session_id" in
-                     let operation_id = find_string "operation_id" in
-                     let worker_run_id = find_string "worker_run_id" in
+                     let references_json = Yojson.Safe.Util.member "references" json in
                      (match
-                        resolve_partition_for_annotation_post ~state ~uri ~file_path
+                        Ide_annotation_types.annotation_references_of_json references_json
                       with
-                      | Error err ->
-                        respond_ide_error ~status:`Bad_request ~request err reqd
-                      | Ok partition ->
+                      | Error msg ->
+                        Http.Response.json_value
+                          ~status:`Bad_request
+                          ~request
+                          (json_error ~code:"invalid_references" msg)
+                          reqd
+                      | Ok references ->
                         (match
-                           Ide_annotations.create
-                             ~base_dir:base
-                             ~partition
-                             ~keeper_id
-                             ~file_path
-                             ~line_start
-                             ~line_end
-                             ~kind
-                             ~content
-                             ?goal_id
-                             ?task_id
-                             ?board_post_id
-                             ?comment_id
-                             ?pr_id
-                             ?git_ref
-                             ?log_id
-                             ?session_id
-                             ?operation_id
-                             ?worker_run_id
-                             ()
+                           resolve_partition_for_annotation_post ~state ~uri ~file_path
                          with
-                         | Ok annotation ->
-                           Http.Response.json_value
-                             ~status:`Created
-                             ~request
-                             (json_ok (Ide_annotation_types.annotation_to_json annotation))
-                             reqd
-                         | Error msg ->
-                           Http.Response.json_value
-                             ~status:`Bad_request
-                             ~request
-                             (json_error ~code:"observation_write_failed" msg)
-                             reqd))))
-             | _ ->
-               Http.Response.json_value
-                 ~status:`Bad_request
-                 ~request
-                 (json_error "Missing required fields")
-                 reqd))
+                         | Error err ->
+                           respond_ide_error ~status:`Bad_request ~request err reqd
+                         | Ok partition ->
+                           (match
+                              Ide_annotations.create
+                                ~base_dir:base
+                                ~partition
+                                ~keeper_id
+                                ~file_path
+                                ~line_start
+                                ~line_end
+                                ~kind
+                                ~content
+                                ?goal_id
+                                ?task_id
+                                ~references
+                                ()
+                            with
+                            | Ok annotation ->
+                              Http.Response.json_value
+                                ~status:`Created
+                                ~request
+                                (json_ok
+                                   (Ide_annotation_types.annotation_to_json annotation))
+                                reqd
+                            | Error msg ->
+                              Http.Response.json_value
+                                ~status:`Bad_request
+                                ~request
+                                (json_error ~code:"observation_write_failed" msg)
+                                reqd)))))
+                | _ ->
+                  Http.Response.json_value
+                    ~status:`Bad_request
+                    ~request
+                    (json_error "Missing required fields")
+                    reqd)))
       request
       reqd)
   |> Http.Router.prefix_delete "/api/v1/ide/annotations/" (fun request reqd ->

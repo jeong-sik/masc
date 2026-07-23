@@ -4,20 +4,6 @@ module Http = Http_server_eio
 
 include module type of Server_dashboard_http_keeper_api_types
 
-val dedupe_tool_names : string list -> string list
-
-(** [unknown_added_tool_names ~candidate_names ~existing ~requested] returns the
-    names in [requested] that are newly added (not in [existing]) and not in
-    [candidate_names] (the keeper tool candidate universe). A non-empty result
-    is the set a [set_policy] write rejects (RFC-0273 §3.1) instead of silently
-    persisting unknown tool names. Delta-only: pre-existing names are
-    grandfathered so legacy keepers stay editable. *)
-val unknown_added_tool_names :
-  candidate_names:string list ->
-  existing:string list ->
-  requested:string list ->
-  string list
-
 val json_list_length : Yojson.Safe.t -> int
 val trajectory_line_ts : Trajectory.trajectory_line -> float
 val dedupe_thinking_lines :
@@ -30,7 +16,6 @@ val merge_keeper_trace_lines :
   Trajectory.trajectory_line list ->
   Trajectory.trajectory_line list
 
-val keeper_tools_response_json : Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
 val error_json : ?ok:bool -> string -> Yojson.Safe.t
 val respond_error :
   ?status:Httpun.Status.t ->
@@ -40,11 +25,18 @@ val respond_error :
   string ->
   unit
 
-val handle_keeper_tools_post :
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-
 val handle_keeper_catchup_judge_post :
   Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+
+val handle_keeper_chat_recovery_post :
+  Mcp_server.server_state ->
+  string ->
+  Httpun.Request.t ->
+  Httpun.Reqd.t ->
+  keeper_name:string ->
+  raw_receipt_id:string ->
+  string ->
+  unit
 
 val stat_json_of_path : string -> Yojson.Safe.t
 val oas_checkpoint_summary_json :
@@ -76,6 +68,16 @@ val refresh_keeper_execution_surfaces :
   config:Workspace_utils.config -> name:String.t -> string -> unit
 val invalidate_keeper_execution_surfaces :
   config:Workspace_utils.config -> unit -> unit
+
+(** [context_shrink_of_patch ~meta fields] is [Some (previous_display, new_value)]
+    when the config patch reduces the keeper's context window below its current
+    setting (introduces a cap where there was none, or lowers an existing cap),
+    else [None]. Used by {!handle_keeper_config_post} to require an explicit
+    [confirm_context_shrink] acknowledgement before applying a shrink. *)
+val context_shrink_of_patch :
+  meta:Keeper_meta_contract.keeper_meta ->
+  (string * Yojson.Safe.t) list ->
+  (string * int) option
 
 val handle_keeper_config_post :
   sw:Eio.Switch.t ->
@@ -111,6 +113,8 @@ val handle_keeper_directive_post :
   Httpun.Reqd.t ->
   string ->
   unit
+(** A resume body requires [owner_generation] and a stable
+    [operator_operation_id]; raw action-only resume is rejected. *)
 
 val handle_keeper_bulk_directive_post :
   sw:Eio.Switch.t ->
@@ -121,3 +125,13 @@ val handle_keeper_bulk_directive_post :
   Httpun.Reqd.t ->
   string ->
   unit
+(** Pause/wakeup accept a [names] list. Resume accepts a [targets] list whose
+    entries carry [name], [owner_generation], and [operator_operation_id]. *)
+
+module For_testing : sig
+  val parse_resume_request :
+    Yojson.Safe.t -> (int * string, string) result
+
+  val parse_bulk_resume_requests :
+    Yojson.Safe.t -> ((string * int * string) list, string) result
+end

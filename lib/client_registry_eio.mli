@@ -32,8 +32,6 @@ val reset_for_testing : unit -> unit
 (** {1 Identity Resolution} *)
 
 val get_or_create_identity : ?mcp_session_id:string -> Yojson.Safe.t -> Client_identity.t
-val get_by_name : string -> Client_identity.t option
-val get_by_session : string -> Client_identity.t option
 
 (** {1 Resolved Agent Name Cache}
 
@@ -57,23 +55,14 @@ val set_resolved_name : string -> string -> is_ephemeral:bool -> unit
 
 (** {1 Statistics} *)
 
-val active_count : ?within_seconds:float -> unit -> int
 val total_count : unit -> int
-val list_active : ?within_seconds:float -> unit -> Client_identity.t list
 
 (** {1 Cleanup} *)
 
-val clear_session_caches : unit -> unit
-val cleanup_stale_sessions : unit -> int
-val unregister : string -> unit
+val clear_all : unit -> unit
+(** Atomically clears registered identities and all MCP-session mappings.
+    Intended for process shutdown; individual sessions must use
+    {!unregister_mcp_session}. *)
 
-(** {1 Background Maintenance} *)
-
-(** Start a periodic cleanup fiber.  Call once at server startup within an
-    active Eio switch.  [interval] defaults to 300 seconds. *)
-val start_cleanup_loop :
-  sw:Eio.Switch.t ->
-  clock:_ Eio.Time.clock ->
-  ?interval:float ->
-  unit -> unit
-
+val unregister_mcp_session : string -> unit
+(** Ends the registration owned by an MCP transport session. *)

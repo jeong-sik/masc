@@ -17,8 +17,7 @@
 #   - error_result_silence: any `| Error _ -> (Ok|None|[]|true|false|())`.
 #     Superset including the strict one.
 #   - exception_catchall_swallow: `try … with _ -> …`. Absorbs every
-#     exception including Eio.Cancel.Cancelled (KeeperOASAdvanced.tla
-#     CancelledAbsorbed model).
+#     exception including Eio.Cancel.Cancelled.
 #
 # Descriptive metric (printed only):
 #   - variant_catchall_default: line-leading `| _ -> (None|[]|""|false
@@ -50,13 +49,10 @@ for tool in rg python3 awk; do
   }
 done
 
-# Scope: lib/ OCaml sources, excluding the cdal sub-library
-# (RFC-0056 isolation — boundary policed elsewhere) and any test
-# directories nested under lib/.
+# Scope: lib/ OCaml sources, excluding any test directories nested under lib/.
 RG_SCOPE=(
   --type ocaml
   --glob 'lib/**/*.ml'
-  --glob '!lib/cdal/**'
   --glob '!lib/**/test/**'
 )
 

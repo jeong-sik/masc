@@ -2,10 +2,63 @@
 
 ## Unreleased
 
+### Changed
+- Bumped the OAS Agent SDK pin to `ca7a02b7` (oas#2766). Supports non-standard stop_reason provider dialects (e.g. `context_length_exceeded`, `max_context_length`) and preserves empty completion stop_reason in GLM parser to prevent orphan retries on context overflow.
+- Bumped the OAS Agent SDK pin to `c1eaa88b` (oas#2764). Allows empty delta `id` and `name` strings as `Ok None` in the SSE stream parser to prevent stream failure crashes on GLM-5-Turbo and OpenAI-compatible backends emitting empty initial delta fragments.
+
+
+## [0.21.2] - 2026-07-20
+
+### Changed
+- Bumped the OAS Agent SDK pin from `v0.217.1` to `v0.217.3` (`cbc5168e`). Absorbs 0.217.2 (`reasoning_replay_dropped` logs at Info, oas#2721) and 0.217.3: the Ollama native tool-loop replay/correlation now flows through an immutable occurrence-scoped projection that rejects legacy User-role ToolResult and uncorrelated tool messages typed on Gemini/Ollama-native instead of silently repairing them (oas#2710, supersedes oas#2711), and durable `Error_occurred` error_domain is classified from the error rather than hardcoded `"Api"` (oas#2717). Public Agent SDK surface fingerprint unchanged (only the pin sha/version move). Live checkpoint audit 2026-07-20: 24/24 primary checkpoints carry zero legacy shapes, so the oas#2710 hard-cut is inert on the current fleet.
+
+## [0.21.1] - 2026-07-20
+
+### Changed
+- Re-cut of the 0.21.0 release line: the `v0.21.0` tag points at a commit whose generated `masc.opam` still carried version 0.20.1, so its own version-truth gate (and the tag-triggered release workflow) fail on it. 0.21.1 is the first version-truth-clean release commit; `v0.21.0` remains an unpublished historical tag. Also aligns the previously ungated `masc.opam.locked` version field (was 0.19.54) and the ROADMAP/PRODUCT-OPERATING-PLAN/SPEC-INDEX version headers.
+
+## [0.21.0] - 2026-07-20
+
+### Changed
+- Bumped the OAS Agent SDK pin from `v0.216.5` to `v0.217.1` (`8147cfc7` chain). Absorbs the 0.217.0 breaking change — streaming rejects malformed tool-call batches whole-batch (oas#2702) — plus resume totality over crash-reachable journal states (oas#2713/oas#2715), overflow wire finish_reason decoding (oas#2703), finite retry_after parsing (oas#2708), admission-warning URL sanitisation (oas#2706), Kimi native token-count admission (oas#2705), admission-SSOT projected input (oas#2707), exact provider turn identity (oas#2709), and typed rejection of unencodable explicit thinking (oas#2716).
+- Runtime prep for oas#2716: the deployment `oas-models-overlay.toml` now declares `thinking_control_format = "none"` + `supports_reasoning = true` for the OpenAI-compatible `ollama_cloud` rows (`kimi-k2.6`, `minimax-m3`, `deepseek-v4-pro`), so `enable_thinking=true` keeper turns admit as declared-inherent reasoning instead of failing with `Enable_not_encodable` on the /v1 wire (2026-07-20 flip-risk audit).
+
+### Fixed
+- Keeper streaming responses now resolve a fail-safe inter-line idle timeout floor of 600 s (10 min) when neither `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC` nor `runtime.toml`'s `turn.stream_idle_timeout_sec` is set. Previously the resolved value was `None` and OAS applied no inter-line idle bound, so a hung provider stream (bytes stop arriving mid-response) froze the keeper chat lane until an external restart (#25128, measured 30+ min). An explicit env/toml value still overrides the floor verbatim; the boot log now states the effective idle timeout and its source (env/toml vs floor). Implements RFC-0345 Option A.
+- CI now rejects mangled-module access to the three wrapped OAS libraries linked by MASC and treats scanner errors as failures; the unused advisory `Llm_provider` text scans, retired/test source trees, comment/allow-marker bypasses, and nonblocking `|| true` invocation were removed from the guard.
+- The Ops surface now preserves and displays the operator snapshot's typed context-metrics storage and malformed-row failures per Keeper instead of presenting unavailable context as an unexplained blank value. Invalid diagnostic wire payloads remain explicitly visible as contract failures.
+- The process supervisor now records the real server exit code: `|| true` before `exit_code=$?` reported every exit — including SIGSEGV (139) and SIGTERM (143) — as `code=0`; exits above 128 additionally decode the signal name. Takeover kills now leave a JSON breadcrumb next to the pid lock, the victim's SIGTERM path logs the attribution (or its absence: external sender), and the next boot reports a breadcrumb after a SIGKILL escalation.
+- Keeper context-metrics projection now reads its JSONL ledger through `Dated_jsonl.read_recent_result` and exposes typed storage or malformed-row unavailability instead of silently falling back to metadata. `Operator_control_context_snapshot.latest_keeper_context_snapshot_from_files` now returns a `result`; there is no compatibility wrapper for the former `option` signature.
+
 ### Removed
+- Removed the zero-consumer Keeper compaction policy authoring record: profile aliases, hardcoded threshold tables, ratio/message/token Runtime params and env knobs, keeper-up/schema/meta fields, status/config projections, and dashboard controls. Retired inputs and persisted fields now fail explicitly; the typed compaction runtime, owner-lane execution, provider-overflow recovery, and durable observations remain unchanged.
+- Removed dead compaction ratio/message/token gates from Keeper status, metrics, TUI, dashboard config, and PATCH surfaces, including the unused `context_within_budget` FSM condition and inferred dashboard threshold marker. Observable compaction transitions now name the typed `Compaction_started` event; no UI fallback manufactures a gate.
+- Removed the superseded `Runtime_agent.media_reroute_candidates` helper (the live reroute path builds candidates inline) and narrowed `Keeper_runtime`'s interface by dropping five internal-only exported vals (`supervisor_sweeps`, `supervisor_sweeps_mu`, `with_sweeps_ro`, `with_sweeps_rw`, `existing_keepalive_bootstrap_done`). No replacement: zero external consumers.
+- Removed the public MASC JSON Schema classifiers `Tool_bridge.param_type_of_string` and `Sdk_tool_contract.param_type_of_schema_opt`, plus the zero-consumer `Sdk_tool_contract.tool_params_of_input_schema`. Consumers must use the OAS-owned `Agent_sdk.Mcp.json_schema_to_params`; missing, unsupported, or ambiguous property types now fail at that boundary instead of defaulting to `String`. No compatibility alias remains.
+- Removed the unreferenced synchronous `Dashboard_snapshot.current_or_bootstrap` full-bootstrap path. Dashboard requests continue to use the live immutable snapshot or their existing projection-specific cold fallback; no compatibility path remains.
+- Removed the dead board-backend env chain (`MASC_BOARD_BACKEND`, `Board.backend`, test-only `Board_dispatch.jsonl_forced`), the reader-less `Discovery_history` store and its `masc_discovery_history_failures` metric, the caller-less bench-canary reader (`MASC_KEEPER_BENCH_CANARY_*`), and `Local_runtime_pool.select_runtime_from`. No replacement: none of these had a production consumer.
+- Removed the never-read `Exec_cache` plumbing from `masc.masc_exec`, the `masc.worker_runtime_config` library, and the three `MASC_WORKER_RUNTIME_*` env knobs (backend/docker-image/host-MCP-URL) whose only reader was that library — the knobs no longer appear in the operator snapshot or the tunables catalog. No replacement: nothing dispatched on them.
+- Removed the dead external-MCP voice session/conference cluster (~380 lines: session/conference lifecycle, health cache, `call_session_tool`, unraised `Timeout`) from `voice_bridge`; superseded by the local `Voice_session_manager`. The live local voice API is unchanged.
+- Removed the retired `Autonomous_bridge`/`Autonomous_state` modules (~540 lines) whose keeper wire-in was already deleted by #24765, plus a foreign `session_tracker` QA test targeting a PostgreSQL module that never existed in this repo. `Autonomous_phase` stays live via the autonomous routes. No replacement: the surfaces had no production consumers.
+- Removed 12 dead root modules with zero production consumers (`evidence_ref`, `exec_shell_adapter`, `retrieval_projection`, `masc_error_recovery`, `state_product`, `prompt_composer`, `team_context`, `tool_name_alias_axis`, `attribution_tagged`, `timeout_policy`, `runtime_deadline`, `runtime_provider_credentials`) — a 2,527-line public typed API cut across `masc`/`masc.runtime`/`masc.masc_core`. No replacement: every surface was self-consuming (tests only).
+- Removed automatic config-root, cwd-parent, executable-parent, and `MASC_MODEL_CATALOG` full-catalog discovery. OAS's embedded catalog is now the only base; `oas-models-overlay.toml` carries deployment-local rows, while `OAS_MODEL_CATALOG` remains an explicit operator override.
+- Removed the per-turn prefix/string heuristic that rewrote unknown-looking
+  prompt tokens. Keeper prompt prose now describes behaviour, while the active
+  typed tool schema is the sole authority for tool names and availability.
+- Removed the generic Governance pipeline, risk taxonomy, unconditional deny/operator floors, command/tool-name authorization heuristics, global resource admission blockers, and failure-derived Keeper pauses. External effects now converge on exact Always Allowed, configured LLM Auto Judge, or nonblocking HITL; objective typed input/path/sandbox invariants remain at execution boundaries.
+- Removed product-specific credential/JWT wiring and direct continuation-delivery bypasses from the Keeper runtime. Connectors and credentials remain outside the product-neutral Gate boundary.
+- Removed the no-op Keeper cost guard and arbitrary per-Keeper waiting cap. Cost, token, turn, FD, disk, provider health, and queue depth remain observable without becoming authorization or fleet-wide stop conditions.
 - Removed the unused permissive `Activity_feed` JSON decoder surface; the live activity API remains encode-only and its filesystem aggregation, ordering, limit, and agent-filter contracts now have dedicated regression coverage (#23960).
 
 ### Fixed
+- Keeper lifecycle reservations now use cooperative cross-context locking, so
+  TOML reconciliation can suspend during durable persistence without a second
+  Eio fiber re-locking the same OS-thread mutex.
+- Long-lived Keeper turn event-bus polling now uses a real tail-recursive loop;
+  polling no longer retains one exception-handler frame per cycle until CPU and
+  memory are consumed by stack scanning and GC.
+- Auto Judge requests now persist the exact outer-turn causal context without interpreting it, and durable retryable judgments resume on an accepted provider attempt rather than waiting for a server restart.
+- Keeper Gate state now has a BasePath-derived `.masc/gate/` owner. A corrupt optional Always Allowed rule store degrades only exact-rule lookup, while Chat persistence/read failures remain local to Chat and no longer close unrelated Keeper lanes.
 - Prompt overrides now persist in a schema-versioned envelope bound to the SHA256 revision of each prompt body and template-variable contract. Legacy or malformed files and contract-drifted entries fail closed with observable fallback, writes use atomic replacement, and dashboard set/clear mutations commit to memory only after persistence succeeds.
 
 ## [0.20.1] - 2026-07-10
@@ -79,9 +132,6 @@
   release line.
 - Align version truth across `dune-project`, `ROADMAP.md`,
   `docs/PRODUCT-OPERATING-PLAN.md`, and `docs/spec/SPEC-INDEX.md`.
-- HITL governance: enforce hard-forbidden tool gate unconditionally before
-  `disable_hitl`, rejecting Critical/blocker tools in development mode and
-  queueing hard-forbidden approvals for human review.
 - Bump OAS agent_sdk pin to v0.208.12 (`2f3d6846`), carrying the
   default-unbounded agent turn budget release so MASC keeper/OAS runs no longer
   inherit the older finite default turn cap.
@@ -93,13 +143,6 @@
   stale inline-test fix from OAS #2265.
 
 ### Fixed
-- Close unerasable optional arguments in `Governance_pipeline` public API
-  (`decide`, `make_pre_hook`, `install`) to restore call-site compatibility.
-- Export `Keeper_meta_contract` alias and use Masc-qualified keeper profile
-  types in governance pipeline tests.
-- Align development-mode governance tests with the hard-forbidden
-  critical-tool behavior and exhaustively handle `Tool_dispatch.Proceed` in
-  hook assertions.
 - Resolve runtime capability validation and default preserve-thinking decisions
   through OAS provider-qualified provider/model capabilities instead of bare
   model ids, so overlapping ids such as Ollama Cloud Kimi do not need
@@ -226,16 +269,6 @@
 ## [0.19.45] - 2026-06-17
 
 ### Changed
-- `shell-ir`: graduated the capability-based Shell IR approval gate to
-  default-on (RFC-0254). `MASC_SHELL_IR_APPROVAL_GATE_ENABLED` now defaults to
-  `true` (was `false`) and is `Active` (was `Experimental`); the env var is kept
-  as a kill-switch (set `=false` to disable without a rebuild). The autonomous
-  keeper lane allows the toolchain with telemetry and denies a trust-independent
-  catastrophic floor (destructive git, redirect write-escape, `mkfs`). Gate
-  decisions are observable in `.masc/logs/system_log_*.jsonl`
-  (`shell_ir policy_denied` / `shell_ir dispatch`).
-
-
 ## [0.19.44] - 2026-06-14
 
 ### Changed

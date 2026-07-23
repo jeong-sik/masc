@@ -13,7 +13,7 @@
   masc
   masc.dashboard
   masc.fd_accountant
-  masc.masc_event_bus
+  masc.event_bus_slots
   ;; RFC-0056 #20086 extracted Dashboard_tla_specs out of the masc mega-lib into
   ;; masc.dashboard_tla_specs; server_routes_http_routes_verification consumes it
   ;; directly (specs_json / tlc_results_json) and dune does not re-export through
@@ -22,6 +22,10 @@
   ;; #20929: server bootstrap converges <base>/.masc/config/prompts onto the
   ;; binary-embedded config/ tree so merged prompt edits ship on restart.
   masc.embedded_config
+  ;; server_dashboard_http_keeper_api reads the manifest decision payload
+  ;; through Keeper_compaction_evidence.exact_evidence_key; dune does not
+  ;; re-export it through the masc dep, so masc_server lists it explicitly.
+  masc.keeper_compaction_evidence
   ;; RFC-0266 Phase 4: GET /api/v1/dashboard/fusion-runs names
   ;; Fusion_run_registry directly; dune does not re-export it through the masc
   ;; dep, so masc_server lists masc.fusion_core explicitly.
@@ -82,6 +86,7 @@
   masc.keeper_metrics
   masc.keeper_types
   masc.keeper_runtime
+  masc.keeper_chat_delivery_identity
   masc.keeper_failure_taxonomy
   masc.keeper_toml
   masc.runtime_provider_labels
@@ -91,15 +96,12 @@
   masc.auth
   masc.json_field
   masc.types_boundary
-  masc.cdal_runtime
-  masc.cdal
   masc.trajectory
   masc.keeper_tooling
   masc.host_config
   masc.briefing_compactors
   masc.dashboard_eval_feed
   masc.sse_event
-  masc.chronicle_event
   masc.tool_call_quality_benchmark
   masc.telemetry_coverage_gap
   masc.telemetry_unified
@@ -148,7 +150,6 @@
   masc_workspace
   masc_goal
   masc_turn
-  masc_economy
   masc.masc_tool_dispatch
   masc_thompson
   masc.config

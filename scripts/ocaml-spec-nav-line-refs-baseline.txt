@@ -5,7 +5,6 @@
 # STATUS: empty.  iter 72 R-1.a (#14944) introduced the validator with
 # seven grandfathered `[symbol] (~line N)` citations whose line numbers
 # had drifted +29 .. +424; their fix-PRs merged:
-#   keeper_failure_circuit_breaker.ml  — iter 70 #14939 (predates this file)
 #   keeper_approval_queue.ml ×3        — iter 71 N-2.e #14943
 #   keeper_execution_receipt.ml:append — iter 73 N-2.g #14946
 #   keeper_memory_policy.ml ×3         — iter 73 N-2.f #14946

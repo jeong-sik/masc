@@ -172,6 +172,7 @@ let test_discord_queue_projection_matches_gateway_context () =
       source =
         Chat_queue.Discord
           { channel_id = "discord-channel-1"; user_id = "discord-user-9" };
+      user_row_origin = Masc.Keeper_chat_store.Already_persisted_upstream;
     }
   in
   let projection = Boot.queued_chat_projection queued in
@@ -197,6 +198,7 @@ let test_slack_queue_projection_matches_gateway_context () =
           ; team_id = Some "T-SLACK"
           ; thread_ts = Some "171.001"
           }
+    ; user_row_origin = Masc.Keeper_chat_store.Already_persisted_upstream
     }
   in
   let projection = Boot.queued_chat_projection queued in

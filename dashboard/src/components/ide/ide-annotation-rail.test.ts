@@ -31,21 +31,20 @@ describe('IdeAnnotationRail', () => {
         content: 'Move compact outside the round lock.',
         goal_id: 'goal-1',
         task_id: 'task-1',
-        board_post_id: null,
-        comment_id: null,
-        pr_id: '7741',
-        git_ref: 'main',
-        log_id: null,
-        session_id: null,
-        operation_id: null,
-        worker_run_id: null,
+        references: [
+          { relation: 'evidence', reference: 'urn:review:7741' },
+          { relation: 'source', reference: 'opaque-main' },
+        ],
         created_at_ms: 1,
         updated_at_ms: 2,
       }],
     }), container)
 
     expect(container.textContent).toContain('Move compact outside the round lock.')
-    expect(container.textContent).toContain('CTX 6')
+    expect(container.textContent).toContain('evidence: urn:review:7741')
+    expect(container.textContent).toContain('source: opaque-main')
+    expect(container.textContent).toContain('CTX 4')
+    expect(container.querySelectorAll('[data-testid="ide-annotation-reference"]')).toHaveLength(2)
 
     fireEvent.click(container.querySelector<HTMLButtonElement>('.ide-annotation-rail-card-main')!)
     expect(ideContextFocus.value).toMatchObject({

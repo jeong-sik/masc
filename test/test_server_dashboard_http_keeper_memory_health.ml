@@ -18,7 +18,6 @@ let fresh_dir prefix = Filename.temp_dir prefix ""
 let fact ?(valid_until = None) ~now claim =
   { Types.claim
   ; Types.category = Types.Fact
-  ; Types.external_ref = None
   ; Types.claim_kind = None
   ; Types.source = { Types.trace_id = "health-test"; Types.turn = 1; Types.tool_call_id = None }
   ; Types.observed_by = []
@@ -193,7 +192,7 @@ let test_reports_per_keeper_metric_values () =
     (float_field "generated_at" json >= 0.0)
 ;;
 
-let test_dry_run_gc_reports_expired_and_duplicates () =
+let test_health_reports_expiry_and_exact_duplicate_identity () =
   Eio_main.run
   @@ fun _env ->
   let now = test_now in
@@ -203,7 +202,7 @@ let test_dry_run_gc_reports_expired_and_duplicates () =
     ~keepers_dir
     ~keeper_id:"gc"
     [ fact ~now "shared claim row"
-    ; fact ~now "shared claim row" (* duplicate normalized claim -> 1 dedup *)
+    ; fact ~now "shared claim row" (* exact same observation identity *)
     ; fact ~now ~valid_until:(Some (now -. 1.0)) "expired horizon row" (* past TTL *)
     ; fact ~now "live durable row"
     ];
@@ -353,7 +352,7 @@ let () =
         ; Alcotest.test_case
             "dry-run gc reports expired and duplicate rows"
             `Quick
-            test_dry_run_gc_reports_expired_and_duplicates
+            test_health_reports_expiry_and_exact_duplicate_identity
         ; Alcotest.test_case
             "reports provider slot busy metric as alert"
             `Quick

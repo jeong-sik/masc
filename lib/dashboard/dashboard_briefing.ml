@@ -330,6 +330,9 @@ let build_projection ?actor ~config ~sw ~clock
       clock;
       proc_mgr;
       net = None;
+      (* Briefing projections call only snapshot/digest reads; no Keeper lane
+         action is reachable through this context. *)
+      delegated_dispatch = None;
       mcp_session_id = None;
     }
   in

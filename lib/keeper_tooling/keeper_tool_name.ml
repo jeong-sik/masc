@@ -35,7 +35,7 @@ type t =
   | Library_search
   | Memory_search
   | Memory_write
-  | Keeper_msg
+  | Keeper_delegate
   | Search_files
   | Surface_read
   | Surface_post
@@ -50,6 +50,7 @@ type t =
   | Tools_list
   | Persona_create
   | Persona_update
+  | Persona_delete
   | Voice_agent
   | Voice_listen
   | Voice_session_end
@@ -85,7 +86,7 @@ let all : t list =
   ; Library_search
   ; Memory_search
   ; Memory_write
-  ; Keeper_msg
+  ; Keeper_delegate
   ; Search_files
   ; Surface_read
   ; Surface_post
@@ -100,6 +101,7 @@ let all : t list =
   ; Tools_list
   ; Persona_create
   ; Persona_update
+  ; Persona_delete
   ; Voice_agent
   ; Voice_listen
   ; Voice_session_end
@@ -137,7 +139,7 @@ let to_string = function
   | Library_search -> "keeper_library_search"
   | Memory_search -> "keeper_memory_search"
   | Memory_write -> "keeper_memory_write"
-  | Keeper_msg -> "masc_keeper_msg"
+  | Keeper_delegate -> "masc_keeper_delegate"
   | Search_files -> "tool_search_files"
   | Surface_read -> "keeper_surface_read"
   | Surface_post -> "keeper_surface_post"
@@ -152,6 +154,7 @@ let to_string = function
   | Tools_list -> "keeper_tools_list"
   | Persona_create -> "masc_persona_create"
   | Persona_update -> "masc_persona_update"
+  | Persona_delete -> "masc_persona_delete"
   | Voice_agent -> "keeper_voice_agent"
   | Voice_listen -> "keeper_voice_listen"
   | Voice_session_end -> "keeper_voice_session_end"
@@ -188,7 +191,7 @@ let of_string = function
   | "keeper_library_search" -> Some Library_search
   | "keeper_memory_search" -> Some Memory_search
   | "keeper_memory_write" -> Some Memory_write
-  | "masc_keeper_msg" -> Some Keeper_msg
+  | "masc_keeper_delegate" -> Some Keeper_delegate
   | "tool_search_files" -> Some Search_files
   | "keeper_surface_read" -> Some Surface_read
   | "keeper_surface_post" -> Some Surface_post
@@ -226,13 +229,13 @@ let public_mcp_non_descriptor_names =
      the surface entries without this allowlist edit while main was red. *)
   ; "masc_persona_create"
   ; "masc_persona_update"
+  ; "masc_persona_delete"
   ]
 ;;
 
 type board_projection =
   | Keeper_wrapper of t
   | Direct_masc
-  | External_only
 
 let board_projection_of_masc_board_name = function
   | Tool_name.Board_name.Board_comment -> Keeper_wrapper Board_comment
@@ -253,9 +256,9 @@ let board_projection_of_masc_board_name = function
   | Tool_name.Board_name.Board_hearths
   | Tool_name.Board_name.Board_post_update
   | Tool_name.Board_name.Board_profile
-  | Tool_name.Board_name.Board_reaction -> Direct_masc
+  | Tool_name.Board_name.Board_reaction
   | Tool_name.Board_name.Board_cleanup
-  | Tool_name.Board_name.Board_delete -> External_only
+  | Tool_name.Board_name.Board_delete -> Direct_masc
 ;;
 
 let masc_board_name_of_keeper_tool keeper_tool =
@@ -263,7 +266,7 @@ let masc_board_name_of_keeper_tool keeper_tool =
   |> List.find_map (fun board_name ->
     match board_projection_of_masc_board_name board_name with
     | Keeper_wrapper projected when projected = keeper_tool -> Some board_name
-    | Keeper_wrapper _ | Direct_masc | External_only -> None)
+    | Keeper_wrapper _ | Direct_masc -> None)
 ;;
 
 let is_keeper_board_tool tool =
@@ -276,26 +279,8 @@ let masc_board_name_of_keeper_name name =
   | None -> None
 ;;
 
-let is_board_surface_name name =
-  match of_string name with
-  | Some tool -> is_keeper_board_tool tool
-  | None -> Option.is_some (Tool_name.Board_name.of_string name)
-;;
-
 let strip_mcp_masc_prefix name =
   if String.starts_with ~prefix:"mcp__masc__" name
   then String.sub name 11 (String.length name - 11)
   else name
-;;
-
-let is_board_write_name = Tool_name.Board_name.is_resource_write
-
-let is_board_write_surface_name name =
-  let name = strip_mcp_masc_prefix name in
-  match masc_board_name_of_keeper_name name with
-  | Some board_name -> is_board_write_name board_name
-  | None ->
-    (match Tool_name.Board_name.of_string name with
-     | Some board_name -> is_board_write_name board_name
-     | None -> false)
 ;;

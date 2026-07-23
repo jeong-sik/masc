@@ -3,10 +3,6 @@
     Extracted from Server_runtime_bootstrap to isolate the large
     subsystem-spawning functions into a focused module. *)
 
-let install_tooling ~governance_level (state : Mcp_server.server_state) =
-  Governance_pipeline.install ~config:(Mcp_server.workspace_config state) ~governance_level ()
-;;
-
 (* Stable djb2-style hash for the autoboot warmup jitter.
 
    Post-#13119 follow-up: the previous implementation used native
@@ -53,8 +49,7 @@ let keeper_agent_status_of_phase = function
   | Keeper_state_machine.Offline
   | Keeper_state_machine.Stopped
   | Keeper_state_machine.Crashed
-  | Keeper_state_machine.Dead
-  | Keeper_state_machine.Zombie -> Masc_domain.Inactive
+  | Keeper_state_machine.Dead -> Masc_domain.Inactive
 ;;
 
 let keeper_registry_agent ~now (entry : Keeper_registry.registry_entry) : Masc_domain.agent =
@@ -170,7 +165,7 @@ let discord_channel_label = "discord"
 
 let queued_chat_projection (queued_message : Keeper_chat_queue.queued_message) =
   match queued_message.source with
-  | Keeper_chat_queue.Dashboard ->
+  | Keeper_chat_queue.Dashboard _ ->
     {
       payload_channel = "";
       payload_channel_user_id = "";
@@ -214,7 +209,6 @@ let payload_of_queued_message ~keeper_name
   let projection = queued_chat_projection queued_message in
   { Server_routes_http_keeper_stream.name = keeper_name
   ; message = queued_message.content
-  ; timeout_sec = None
   ; turn_instructions = None
   ; surface_context = None
   ; channel = projection.payload_channel
@@ -224,18 +218,6 @@ let payload_of_queued_message ~keeper_name
   ; user_blocks = queued_message.user_blocks
   ; attachments = queued_message.attachments
   }
-
-let connector_user_line_recorded_upstream_of_source
-    (source : Keeper_chat_queue.message_source) =
-  (* RFC-connector-deferred-reply-via-chat-queue §3.4: connector sources (Discord/Slack) had their user
-     line recorded at the gate inbound boundary before the message was
-     enqueued, so the turn records the assistant reply only and does not
-     re-write the user line. Dashboard ownership is resolved later from exact
-     direct-request handoff journals, allowing legacy receipts to append their
-     missing user row without duplicating current receipts. *)
-  match source with
-  | Keeper_chat_queue.Discord _ | Keeper_chat_queue.Slack _ -> true
-  | Keeper_chat_queue.Dashboard -> false
 
 let trimmed_env_opt name =
   match Sys.getenv_opt name with
@@ -250,7 +232,7 @@ let broadcast_mention_wakeup_action = function
   | Some target when String.trim target <> "" -> `Wake_keeper target
   | Some _ | None -> `Suppress_no_target
 
-module For_testing = struct
+module Projection_for_testing = struct
   type queued_chat_projection = {
     payload_channel : string;
     payload_channel_user_id : string;
@@ -283,7 +265,707 @@ let filteri_with_fair_yield =
   Server_bootstrap_loops_fiber.filteri_with_fair_yield
 let iteri_with_fair_yield = Server_bootstrap_loops_fiber.iteri_with_fair_yield
 
-let start_keeper_loops
+type keeper_persistence_report =
+  { shutdown : Keeper_shutdown_runtime.restored_inventory
+  ; queue : Keeper_chat_queue.configure_report
+  ; requests : Keeper_msg_async.recovery_report
+  ; fusion_delivery :
+      ( Fusion_delivery_projector.recovery_report
+      , Fusion_delivery_obligation.error )
+        result
+  }
+
+type keeper_persistence_failure_phase =
+  | Resolving_base_path
+  | Restoring_shutdown
+  | Configuring_queue
+  | Recovering_requests
+  | Starting_keeper_loops
+
+type keeper_persistence_raised_cause =
+  { exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
+type keeper_persistence_failure_cause =
+  | Base_path_identity_unavailable_cause of keeper_persistence_raised_cause
+  | Noncanonical_config_cause of
+      { configured_base_path : string
+      ; canonical_base_path : string
+      ; configured_backend_base_path : string
+      ; expected_backend_base_path : string
+      }
+  | Shutdown_inventory_unavailable_cause of Keeper_shutdown_store.error
+  | Shutdown_admission_unavailable_cause of string
+  | Unexpected_exception_cause of keeper_persistence_raised_cause
+  | Lifecycle_invariant_cause of string
+
+type keeper_persistence_failure =
+  { phase : keeper_persistence_failure_phase
+  ; base_path : string
+  ; cause : keeper_persistence_failure_cause
+  }
+
+type keeper_persistence_prepare_error =
+  | Shutdown_inventory_unavailable of Keeper_shutdown_store.error
+  | Shutdown_admission_unavailable of string
+  | Preparation_base_path_identity_unavailable of keeper_persistence_failure
+  | Preparation_config_not_canonical of keeper_persistence_failure
+  | Preparation_in_progress
+  | Preparation_awaiting_claim
+  | Preparation_already_claimed
+  | Preparation_failed_previously of keeper_persistence_failure
+  | Preparation_ownership_lost
+
+type keeper_persistence_base_path =
+  { requested : string
+  ; canonical : string
+  ; backend_base_path : string
+  }
+
+type prepared_keeper_persistence =
+  { base_path : keeper_persistence_base_path
+  ; config : Workspace.config
+  ; report : keeper_persistence_report
+  }
+
+type claimed_keeper_persistence =
+  { claimed_base_path : keeper_persistence_base_path
+  ; claimed_config : Workspace.config
+  ; claimed_report : keeper_persistence_report
+  }
+
+type keeper_persistence_claim_error =
+  | Claim_base_path_mismatch
+  | Claim_base_path_identity_unavailable of keeper_persistence_failure
+  | Claim_superseded
+  | Claim_already_claimed
+  | Claim_failed_previously of keeper_persistence_failure
+
+type keeper_persistence_start_error =
+  | Start_base_path_mismatch of
+      { claimed_base_path : string
+      ; state_base_path : string
+      }
+  | Start_base_path_identity_unavailable of keeper_persistence_failure
+  | Start_superseded
+  | Start_in_progress
+  | Start_already_started
+  | Start_execution_failed of keeper_persistence_failure
+  | Start_failed_previously of keeper_persistence_failure
+
+exception Keeper_persistence_start_failed of keeper_persistence_start_error
+
+type failed_lifecycle =
+  { failure : keeper_persistence_failure
+  ; prepared : prepared_keeper_persistence option
+  ; claimed : claimed_keeper_persistence option
+  }
+
+type preparation_lifecycle =
+  | Idle
+  | Preparing of unit ref
+  | Ready of prepared_keeper_persistence
+  | Claimed of prepared_keeper_persistence * claimed_keeper_persistence
+  | Starting of prepared_keeper_persistence * claimed_keeper_persistence
+  | Started of prepared_keeper_persistence * claimed_keeper_persistence
+  | Failed of failed_lifecycle
+
+let persistence_lifecycle = Atomic.make Idle
+
+module Keeper_name_set = Set.Make (String)
+
+let preparation_stage_started () = Mtime_clock.now ()
+
+let preparation_stage_elapsed_seconds started =
+  Mtime.Span.to_float_ns (Mtime.span started (Mtime_clock.now ())) /. 1e9
+;;
+
+let observe_preparation_stage ~stage ~started ~examined ~failures =
+  let elapsed_seconds = preparation_stage_elapsed_seconds started in
+  let labels = [ "stage", stage ] in
+  Otel_metric_store.observe_histogram
+    Keeper_metrics.(to_string PersistencePreparationStageDuration)
+    ~labels
+    elapsed_seconds;
+  Otel_metric_store.observe_histogram
+    Keeper_metrics.(to_string PersistencePreparationExamined)
+    ~labels
+    (Float.of_int examined);
+  Log.Server.info
+    "keeper_persistence_prepare: stage=%s elapsed_seconds=%.6f examined=%d failures=%d"
+    stage
+    elapsed_seconds
+    examined
+    failures
+;;
+
+let keeper_persistence_failure_phase_to_string = function
+  | Resolving_base_path -> "resolving_base_path"
+  | Restoring_shutdown -> "restoring_shutdown"
+  | Configuring_queue -> "configuring_queue"
+  | Recovering_requests -> "recovering_requests"
+  | Starting_keeper_loops -> "starting_keeper_loops"
+;;
+
+let keeper_persistence_raised_cause_to_string { exception_; backtrace } =
+  let exception_text = Printexc.to_string exception_ in
+  let backtrace_text = Printexc.raw_backtrace_to_string backtrace in
+  if String.equal backtrace_text ""
+  then exception_text
+  else exception_text ^ "\n" ^ backtrace_text
+;;
+
+let keeper_persistence_failure_cause_to_string = function
+  | Base_path_identity_unavailable_cause cause
+  | Unexpected_exception_cause cause ->
+    keeper_persistence_raised_cause_to_string cause
+  | Noncanonical_config_cause
+      { configured_base_path
+      ; canonical_base_path
+      ; configured_backend_base_path
+      ; expected_backend_base_path
+      } ->
+    Printf.sprintf
+      "noncanonical workspace config base_path=%S canonical=%S backend_base_path=%S expected_backend_base_path=%S"
+      configured_base_path
+      canonical_base_path
+      configured_backend_base_path
+      expected_backend_base_path
+  | Shutdown_inventory_unavailable_cause error ->
+    Keeper_shutdown_store.error_to_string error
+  | Shutdown_admission_unavailable_cause detail -> detail
+  | Lifecycle_invariant_cause detail -> detail
+;;
+
+let keeper_persistence_failure_to_string failure =
+  Printf.sprintf
+    "keeper persistence failed phase=%s base_path=%S detail=%s"
+    (keeper_persistence_failure_phase_to_string failure.phase)
+    failure.base_path
+    (keeper_persistence_failure_cause_to_string failure.cause)
+;;
+
+let keeper_persistence_prepare_error_to_string = function
+  | Shutdown_inventory_unavailable error ->
+    "shutdown inventory unavailable: " ^ Keeper_shutdown_store.error_to_string error
+  | Shutdown_admission_unavailable detail ->
+    "shutdown admission restore unavailable: " ^ detail
+  | Preparation_base_path_identity_unavailable failure ->
+    keeper_persistence_failure_to_string failure
+  | Preparation_config_not_canonical failure ->
+    keeper_persistence_failure_to_string failure
+  | Preparation_in_progress ->
+    "keeper persistence preparation is already in progress"
+  | Preparation_awaiting_claim ->
+    "keeper persistence preparation is ready and awaiting its owning claim"
+  | Preparation_already_claimed ->
+    "keeper persistence ownership was already claimed for this process"
+  | Preparation_failed_previously failure ->
+    "keeper persistence lifecycle already failed in this process: "
+    ^ keeper_persistence_failure_to_string failure
+  | Preparation_ownership_lost ->
+    "keeper persistence preparation lost its lifecycle ownership"
+;;
+
+let failure_cause_of_prepare_error = function
+  | Shutdown_inventory_unavailable error ->
+    Shutdown_inventory_unavailable_cause error
+  | Shutdown_admission_unavailable detail ->
+    Shutdown_admission_unavailable_cause detail
+  | Preparation_base_path_identity_unavailable failure
+  | Preparation_config_not_canonical failure ->
+    failure.cause
+  | ( Preparation_in_progress
+    | Preparation_awaiting_claim
+    | Preparation_already_claimed
+    | Preparation_failed_previously _
+    | Preparation_ownership_lost ) as error ->
+    Lifecycle_invariant_cause
+      (keeper_persistence_prepare_error_to_string error)
+;;
+
+let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
+  let base_path = config.Workspace.base_path in
+  set_phase Restoring_shutdown;
+  let shutdown_started = preparation_stage_started () in
+  let shutdown_inventory =
+    match Keeper_shutdown_store.scan_inventory ~config with
+    | Error error -> Error (Shutdown_inventory_unavailable error)
+    | Ok entries ->
+      (match Keeper_shutdown_runtime.restore_inventory_admission ~config entries with
+       | Ok restored -> Ok restored
+       | Error detail -> Error (Shutdown_admission_unavailable detail))
+  in
+  (match shutdown_inventory with
+   | Ok restored ->
+     observe_preparation_stage
+       ~stage:"shutdown"
+       ~started:shutdown_started
+       ~examined:
+         (List.length restored.operations
+          + List.length restored.retired_terminal_records
+          + List.length restored.corrupt_records)
+       ~failures:(List.length restored.corrupt_records)
+   | Error _ ->
+     observe_preparation_stage
+       ~stage:"shutdown"
+       ~started:shutdown_started
+       ~examined:0
+       ~failures:1);
+  match shutdown_inventory with
+  | Error _ as error -> error
+  | Ok shutdown ->
+  set_phase Configuring_queue;
+  let queue_started = preparation_stage_started () in
+  let queue_recovery = Keeper_chat_queue.configure_persistence ~base_path in
+  observe_preparation_stage
+    ~stage:"queue"
+    ~started:queue_started
+    ~examined:
+      (queue_recovery.restored_keeper_count
+       + List.length queue_recovery.load_errors)
+    ~failures:(List.length queue_recovery.load_errors);
+  List.iter
+    (fun (keeper_name, (error : Keeper_chat_queue.snapshot_load_error)) ->
+       let keeper_label =
+         match keeper_name with
+         | Some keeper_name -> keeper_name
+         | None -> "<registry>"
+       in
+       Log.Keeper.error
+         "keeper_chat_queue: snapshot unavailable keeper=%s kind=%s error=%s"
+         keeper_label
+         (Keeper_chat_queue.snapshot_load_error_kind_to_string error.kind)
+         error.message)
+    queue_recovery.load_errors;
+  if
+    queue_recovery.restored_keeper_count > 0
+    || queue_recovery.recovery_required_receipt_count > 0
+    || queue_recovery.load_errors <> []
+  then
+    Log.Keeper.warn
+      "keeper_chat_queue: recovery restored_keepers=%d recovery_required_receipts=%d failures=%d"
+      queue_recovery.restored_keeper_count
+      queue_recovery.recovery_required_receipt_count
+      (List.length queue_recovery.load_errors);
+  (* Request status is recovered only after queue receipts converge: a poller
+     must never observe a final Lost status while its durable terminal row is
+     still absent. Direct transcript checkpoints are exact request-local state,
+     never a global startup scan. [server_runtime_bootstrap] calls this entire
+     boundary before publishing [server_state], so no poll/cancel route can
+     race a disk-only transition. *)
+  set_phase Recovering_requests;
+  let request_started = preparation_stage_started () in
+  let keeper_msg_recovery =
+    Keeper_msg_async.recover_lost_disk_records ~base_path ()
+  in
+  observe_preparation_stage
+    ~stage:"request"
+    ~started:request_started
+    ~examined:
+      (keeper_msg_recovery.lost
+       + keeper_msg_recovery.finalized
+       + keeper_msg_recovery.cleaned
+       + keeper_msg_recovery.staging_files_inspected
+       + keeper_msg_recovery.unreadable
+       + keeper_msg_recovery.failed)
+    ~failures:
+      (keeper_msg_recovery.unreadable
+       + keeper_msg_recovery.failed
+       + List.length keeper_msg_recovery.store_errors);
+  if
+    keeper_msg_recovery.lost > 0
+    || keeper_msg_recovery.finalized > 0
+    || keeper_msg_recovery.cleaned > 0
+    || keeper_msg_recovery.staging_files_inspected > 0
+    || keeper_msg_recovery.unreadable > 0
+    || keeper_msg_recovery.failed > 0
+  then
+    Log.Keeper.warn
+      "keeper_msg_async: recovery lost=%d finalized=%d cleaned=%d staging_files_inspected=%d staging_files_deleted=%d staging_files_preserved=%d unreadable=%d failed=%d"
+      keeper_msg_recovery.lost
+      keeper_msg_recovery.finalized
+      keeper_msg_recovery.cleaned
+      keeper_msg_recovery.staging_files_inspected
+      keeper_msg_recovery.staging_files_deleted
+      keeper_msg_recovery.staging_files_preserved
+      keeper_msg_recovery.unreadable
+      keeper_msg_recovery.failed;
+  let fusion_delivery_recovery =
+    Fusion_delivery_projector.recover_startup ~base_path
+  in
+  (match fusion_delivery_recovery with
+   | Error error ->
+     Log.Keeper.error
+       "fusion_delivery: startup inventory unavailable error=%s"
+       (Fusion_delivery_obligation.error_to_string error)
+   | Ok report ->
+     if
+       report.staging_cleanup.inspected > 0
+       || report.staging_cleanup.failures <> []
+     then
+       Log.Keeper.warn
+         "fusion_delivery: startup staging inspected=%d deleted=%d preserved=%d failures=%d"
+         report.staging_cleanup.inspected
+         report.staging_cleanup.deleted
+         report.staging_cleanup.preserved
+         (List.length report.staging_cleanup.failures);
+     List.iter
+       (fun (error : Fusion_delivery_projector.recovery_record_error) ->
+          Log.Keeper.error
+            "fusion_delivery: startup projection retained request_id=%s error=%s"
+            (* DET-OK: log placeholder for malformed records; never feeds a branch. *)
+            (Option.value error.request_id ~default:"<malformed-record>")
+            error.detail)
+       report.record_errors;
+     if report.projected > 0 || report.pending > 0
+     then
+       Log.Keeper.warn
+         "fusion_delivery: startup recovery examined=%d projected=%d pending=%d"
+         report.examined report.projected report.pending);
+  let prepared =
+    { base_path = base_path_identity
+    ; config
+    ; report =
+        { shutdown
+        ; queue = queue_recovery
+        ; requests = keeper_msg_recovery
+        ; fusion_delivery = fusion_delivery_recovery
+        }
+    }
+  in
+  Ok prepared
+;;
+
+let rec acquire_preparation_ownership preparing =
+  let current = Atomic.get persistence_lifecycle in
+  match current with
+  | Idle ->
+    if Atomic.compare_and_set persistence_lifecycle current preparing
+    then Ok ()
+    else acquire_preparation_ownership preparing
+  | Ready _ -> Error Preparation_awaiting_claim
+  | Preparing _ -> Error Preparation_in_progress
+  | Claimed _ | Starting _ | Started _ -> Error Preparation_already_claimed
+  | Failed failed -> Error (Preparation_failed_previously failed.failure)
+;;
+
+let persistence_failure ~phase ~base_path ~cause = { phase; base_path; cause }
+
+let raised_cause exception_ backtrace = { exception_; backtrace }
+
+let failed_lifecycle ?prepared ?claimed failure =
+  Failed { failure; prepared; claimed }
+;;
+
+let log_lifecycle_transition_loss ~from_phase ~failure =
+  Log.Server.error
+    "keeper persistence lifecycle lost terminal transition from=%s failure=%s"
+    from_phase
+    (keeper_persistence_failure_to_string failure)
+;;
+
+let prepare_keeper_persistence ?requested_base_path ~config () =
+  let preparing = Preparing (ref ()) in
+  match acquire_preparation_ownership preparing with
+  | Error _ as error -> error
+  | Ok () ->
+    let config_base_path = config.Workspace.base_path in
+    let requested_base_path =
+      (* DET-OK: omission selects the explicit typed-config BasePath; no
+         ambient path or guessed owner enters this branch. *)
+      Option.value requested_base_path ~default:config_base_path
+    in
+    let phase = ref Resolving_base_path in
+    let outcome =
+      match
+        let canonical_result =
+          match Fs_compat.realpath config_base_path with
+          | canonical -> Ok canonical
+          | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+          | exception ((Unix.Unix_error _ | Sys_error _) as exception_) ->
+            Error
+              (raised_cause exception_ (Printexc.get_raw_backtrace ()))
+        in
+        match canonical_result with
+        | Error raised ->
+          let failure =
+            persistence_failure
+              ~phase:Resolving_base_path
+              ~base_path:config_base_path
+              ~cause:(Base_path_identity_unavailable_cause raised)
+          in
+          Error (Preparation_base_path_identity_unavailable failure)
+        | Ok canonical_base_path ->
+          let base_path_identity =
+            let expected_backend_base_path =
+            (Workspace.backend_config_for canonical_base_path)
+              .Backend_types.base_path
+            in
+            { requested = requested_base_path
+            ; canonical = canonical_base_path
+            ; backend_base_path = expected_backend_base_path
+            }
+          in
+          let expected_backend_base_path = base_path_identity.backend_base_path in
+          let configured_backend_base_path =
+            config.backend_config.Backend_types.base_path
+          in
+          if
+            not (String.equal config_base_path canonical_base_path)
+            || not
+                 (String.equal
+                    configured_backend_base_path
+                    expected_backend_base_path)
+          then
+            let failure =
+              persistence_failure
+                ~phase:Resolving_base_path
+                ~base_path:config_base_path
+                ~cause:
+                  (Noncanonical_config_cause
+                     { configured_base_path = config_base_path
+                     ; canonical_base_path
+                     ; configured_backend_base_path
+                     ; expected_backend_base_path
+                     })
+            in
+            Error (Preparation_config_not_canonical failure)
+          else
+            prepare_keeper_persistence_owned
+              ~base_path_identity
+              ~set_phase:(fun next_phase -> phase := next_phase)
+              ~config
+      with
+      | outcome -> outcome
+      | exception exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        let failure =
+          persistence_failure
+            ~phase:!phase
+            ~base_path:requested_base_path
+            ~cause:
+              (Unexpected_exception_cause (raised_cause exn backtrace))
+        in
+        if
+          not
+            (Atomic.compare_and_set
+               persistence_lifecycle
+               preparing
+               (failed_lifecycle failure))
+        then log_lifecycle_transition_loss ~from_phase:"preparing" ~failure;
+        Printexc.raise_with_backtrace exn backtrace
+    in
+    (match outcome with
+     | Ok prepared ->
+       if Atomic.compare_and_set persistence_lifecycle preparing (Ready prepared)
+       then Ok prepared
+       else Error Preparation_ownership_lost
+     | Error error ->
+       let failure =
+         match error with
+         | Preparation_base_path_identity_unavailable failure
+         | Preparation_config_not_canonical failure -> failure
+         | _ ->
+           persistence_failure
+             ~phase:!phase
+             ~base_path:requested_base_path
+             ~cause:(failure_cause_of_prepare_error error)
+       in
+       if
+         Atomic.compare_and_set
+           persistence_lifecycle
+           preparing
+           (failed_lifecycle failure)
+       then Error error
+       else Error Preparation_ownership_lost)
+;;
+
+let keeper_persistence_report prepared = prepared.report
+
+type base_path_validation_error =
+  | Base_path_mismatch of { observed_canonical : string }
+  | Base_path_identity_unavailable of keeper_persistence_failure
+
+let validate_config_base_path ~phase base_path config =
+  let state_base_path = config.Workspace.base_path in
+  let state_backend_base_path =
+    config.backend_config.Backend_types.base_path
+  in
+  match Fs_compat.realpath state_base_path with
+  | observed_canonical ->
+    if
+      String.equal state_base_path base_path.canonical
+      && String.equal observed_canonical base_path.canonical
+      && String.equal state_backend_base_path base_path.backend_base_path
+    then Ok ()
+    else Error (Base_path_mismatch { observed_canonical })
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+  | exception ((Unix.Unix_error _ | Sys_error _) as cause) ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Error
+      (Base_path_identity_unavailable
+         (persistence_failure
+            ~phase
+            ~base_path:state_base_path
+            ~cause:
+              (Base_path_identity_unavailable_cause
+                 (raised_cause cause backtrace))))
+;;
+
+let rec claim_prepared_keeper_persistence ~config prepared =
+  let current = Atomic.get persistence_lifecycle in
+  match current with
+  | Ready latest when latest == prepared ->
+    (match
+       validate_config_base_path
+         ~phase:Resolving_base_path
+         prepared.base_path
+         config
+     with
+     | Error (Base_path_mismatch _) -> Error Claim_base_path_mismatch
+     | Error (Base_path_identity_unavailable failure) ->
+       Error (Claim_base_path_identity_unavailable failure)
+     | Ok () ->
+      let claimed =
+        { claimed_base_path = prepared.base_path
+        ; claimed_config = prepared.config
+        ; claimed_report = prepared.report
+        }
+      in
+      if
+        Atomic.compare_and_set
+          persistence_lifecycle
+          current
+          (Claimed (prepared, claimed))
+      then Ok claimed
+      else claim_prepared_keeper_persistence ~config prepared)
+  | Claimed (latest, _) when latest == prepared -> Error Claim_already_claimed
+  | Starting (latest, _) when latest == prepared -> Error Claim_already_claimed
+  | Started (latest, _) when latest == prepared -> Error Claim_already_claimed
+  | Failed { prepared = Some latest; failure; _ } when latest == prepared ->
+    Error (Claim_failed_previously failure)
+  | Idle
+  | Preparing _
+  | Ready _
+  | Claimed _
+  | Starting _
+  | Started _
+  | Failed _ ->
+    Error Claim_superseded
+;;
+
+let keeper_persistence_claim_error_to_string = function
+  | Claim_base_path_mismatch ->
+    "prepared persistence BasePath does not match server state"
+  | Claim_base_path_identity_unavailable failure ->
+    "server state BasePath identity is unavailable during persistence claim: "
+    ^ keeper_persistence_failure_to_string failure
+  | Claim_superseded -> "prepared persistence token is stale"
+  | Claim_already_claimed -> "prepared persistence token was already claimed"
+  | Claim_failed_previously failure ->
+    "prepared persistence token claim already failed: "
+    ^ keeper_persistence_failure_to_string failure
+;;
+
+type keeper_loops_start_ownership =
+  { starting : preparation_lifecycle
+  ; prepared : prepared_keeper_persistence
+  ; claimed : claimed_keeper_persistence
+  }
+
+let rec acquire_keeper_loops_start ~config claimed =
+  let current = Atomic.get persistence_lifecycle in
+  match current with
+  | Claimed (prepared, latest) when latest == claimed ->
+    (match
+       validate_config_base_path
+         ~phase:Starting_keeper_loops
+         claimed.claimed_base_path
+         config
+     with
+     | Error (Base_path_mismatch _) ->
+       Error
+         (Start_base_path_mismatch
+            { claimed_base_path = claimed.claimed_base_path.canonical
+            ; state_base_path = config.Workspace.base_path
+            })
+     | Error (Base_path_identity_unavailable failure) ->
+       Error (Start_base_path_identity_unavailable failure)
+     | Ok () ->
+      let starting = Starting (prepared, claimed) in
+      if Atomic.compare_and_set persistence_lifecycle current starting
+      then Ok { starting; prepared; claimed }
+      else acquire_keeper_loops_start ~config claimed)
+  | Starting (_, latest) when latest == claimed -> Error Start_in_progress
+  | Started (_, latest) when latest == claimed -> Error Start_already_started
+  | Failed { claimed = Some latest; failure; _ } when latest == claimed ->
+    Error (Start_failed_previously failure)
+  | Idle
+  | Preparing _
+  | Ready _
+  | Claimed _
+  | Starting _
+  | Started _
+  | Failed _ ->
+    Error Start_superseded
+;;
+
+let finish_keeper_loops_start ownership =
+  if
+    Atomic.compare_and_set
+      persistence_lifecycle
+      ownership.starting
+      (Started (ownership.prepared, ownership.claimed))
+  then Ok ()
+  else
+    match Atomic.get persistence_lifecycle with
+    | Started (_, latest) when latest == ownership.claimed ->
+      Error Start_already_started
+    | Failed { claimed = Some latest; failure; _ }
+      when latest == ownership.claimed ->
+      Error (Start_failed_previously failure)
+    | Idle
+    | Preparing _
+    | Ready _
+    | Claimed _
+    | Starting _
+    | Started _
+    | Failed _ ->
+      Error Start_superseded
+;;
+
+let keeper_persistence_start_error_to_string = function
+  | Start_base_path_mismatch { claimed_base_path; state_base_path } ->
+    Printf.sprintf
+      "claimed persistence BasePath %S does not match server state BasePath %S"
+      claimed_base_path
+      state_base_path
+  | Start_base_path_identity_unavailable failure ->
+    "server state BasePath identity is unavailable during Keeper-loop start: "
+    ^ keeper_persistence_failure_to_string failure
+  | Start_superseded -> "claimed persistence token is stale"
+  | Start_in_progress -> "claimed persistence token is already starting Keeper loops"
+  | Start_already_started -> "claimed persistence token already started Keeper loops"
+  | Start_execution_failed failure ->
+    "claimed persistence token failed while starting Keeper loops: "
+    ^ keeper_persistence_failure_to_string failure
+  | Start_failed_previously failure ->
+    "claimed persistence token start already failed: "
+    ^ keeper_persistence_failure_to_string failure
+;;
+
+let () =
+  Printexc.register_printer (function
+    | Keeper_persistence_start_failed error ->
+      Some (keeper_persistence_start_error_to_string error)
+    | _ -> None)
+;;
+
+let start_keeper_loops_owned
+      ~claimed_persistence
+      ~workspace_scope
       ~sw
       ~clock
       ~net
@@ -292,48 +974,10 @@ let start_keeper_loops
       (state : Mcp_server.server_state)
   =
   Progress.set_sse_callback Sse.broadcast;
-  (* Wire stop_keeper hook so zombie GC can terminate keeper fibers *)
-  Atomic.set Workspace_hooks.stop_keeper_fn Keeper_keepalive.stop_keepalive;
   Atomic.set Workspace_hooks.runtime_agents_fn keeper_registry_runtime_agents;
-  let base_path = (Mcp_server.workspace_config state).base_path in
-  let delivery_recovery =
-    Keeper_chat_delivery_journal.recover_all
-      ~base_path
-      ~now:(Time_compat.now ())
-  in
-  List.iter
-    (fun (failure : Keeper_chat_delivery_journal.recovery_failure) ->
-       Log.Keeper.error
-         "keeper_chat_delivery_journal: recovery failed keeper=%s delivery_ref=%s error=%s"
-         failure.keeper_name
-         failure.delivery_ref
-         (Keeper_chat_delivery_journal.error_to_string failure.error))
-    delivery_recovery.failures;
-  if delivery_recovery.recovered > 0 || delivery_recovery.failures <> []
-  then
-    Log.Keeper.warn
-      "keeper_chat_delivery_journal: recovery completed recovered=%d already_final=%d failures=%d"
-      delivery_recovery.recovered
-      delivery_recovery.already_final
-      (List.length delivery_recovery.failures);
-  (* Request status is recovered only after transcript journals converge: a
-     poller must never observe a final Lost status while its durable terminal
-     row is still absent. *)
-  let recovered_keeper_msg_requests =
-    Keeper_msg_async.recover_lost_disk_records ~base_path
-  in
-  if recovered_keeper_msg_requests > 0
-  then
-    Log.Keeper.warn
-      "keeper_msg_async: recovered %d disk-only non-terminal request record(s) as lost"
-      recovered_keeper_msg_requests;
-  (* Shared Agent_sdk Event_bus used as the runtime transport between subsystems.
-     Configuration is sourced from [Masc_event_bus_policy.oas_runtime] so the
-     buffer-size/policy choice is auditable in source rather than implicit in
-     OAS defaults, and the chosen capacity is published through OTel. *)
-  let event_bus =
-    Masc_event_bus_policy.create_bus Masc_event_bus_policy.oas_runtime
-  in
+  (* Bus creation carries no queue policy. Each subscriber owns its bounded,
+     non-blocking queue contract. *)
+  let event_bus = Agent_sdk.Event_bus.create () in
   (* Eio fiber isolation: each subsystem runs in its own fiber.
      If one crashes, others keep running — Eio's structured concurrency.
      Subsystem_health tracks liveness at module level (no init timing dependency). *)
@@ -346,8 +990,10 @@ let start_keeper_loops
         Log.Server.error "subsystem %s crashed: %s" name (Printexc.to_string exn))
       f
   in
-  let shutdown_inventory_p, shutdown_inventory_r = Eio.Promise.create () in
-  let config = Mcp_server.workspace_config state in
+  let config = workspace_scope.Mcp_server.config in
+  (* [claimed_persistence] can only be constructed by the typed one-shot claim
+     boundary before readiness publication. No late exception can turn an
+     already-visible HTTP state into a degraded bootstrap. *)
   (* Completion recovery can publish [Dead_cleaned] and invoke
      [Tombstone_reaped]. Install the production hook before any durable
      receipt is replayed. *)
@@ -362,8 +1008,9 @@ let start_keeper_loops
        fail-out tasks that exceed it via [Server_startup_state.fail_lazy_task].
        Without a hard ceiling, a single hung task (e.g. [restore_sessions]
        hanging 17 min, #10843) blocks keeper boot indefinitely; the 240s
-       startup watchdog does NOT cover this case because [activate_lazy]
-       sets state_ready=true before the lazy fibers finish. *)
+       startup watchdog still observes the blocking phase because
+       [prepare_lazy_tasks] records the pending inventory without publishing
+       readiness. *)
     let started_at = Hashtbl.create 16 in
     let hung_threshold_sec = 60.0 in
     let boot_guard_sec =
@@ -469,35 +1116,20 @@ let start_keeper_loops
      boundary. Dashboard SSE consumers see both channels as one stream
      — the relay translates masc.* →
      masc:* on the wire for backward compatibility. *)
-  let masc_event_bus =
-    Masc_event_bus_policy.create_bus Masc_event_bus_policy.masc_domain
-  in
-  Masc_event_bus.set masc_event_bus;
+  let masc_event_bus = Agent_sdk.Event_bus.create () in
+  Event_bus_slots.set_masc masc_event_bus;
   (* Event_bus → SSE bridge: relay both OAS and MASC buses to dashboard *)
   Keeper_event_bridge.start ~sw ~clock ~config:(Mcp_server.workspace_config state) ~bus:event_bus;
   Keeper_event_bridge.start ~sw ~clock ~config:(Mcp_server.workspace_config state) ~bus:masc_event_bus;
-  (* Compaction audit: subscribe to ContextCompactStarted/ContextCompacted and
-     persist paired rows to [base_path/data/harness-compact/YYYY-MM/DD.jsonl]
-     with rolling 14-day retention (override via
-     MASC_COMPACTION_AUDIT_RETENTION_DAYS). Independent from the SSE bridge —
-     each subscriber gets its own bounded stream. *)
-  Keeper_compact_audit.spawn_subscriber
-    ~sw
-    ~clock
-    ~base_path:(Env_config.base_path ())
-    ~retention_days:14
-    event_bus;
   (* Telemetry feedback loop: observe OAS per-turn signals without
      deserializing provider/model-bearing payloads. *)
-  Keeper_telemetry_consumer.spawn_subscriber
-    ~sw ~clock ~base_path:(Env_config.base_path ()) ~bus:event_bus;
+  Keeper_telemetry_consumer.spawn_subscriber ~sw ~clock ~bus:event_bus;
   let keeper_lifecycle_sub =
     Agent_sdk_metrics_bridge.subscribe
+      ~capacity:256
+      ~overflow:Agent_sdk.Event_bus.Drop_oldest
       ~purpose:"lifecycle_listener"
-      ~filter:(fun (evt : Agent_sdk.Event_bus.event) ->
-        match evt.payload with
-        | Agent_sdk.Event_bus.Custom ("masc.keeper.lifecycle", _) -> true
-        | _ -> false)
+      ~filter:(Agent_sdk.Event_bus.filter_topic "masc.keeper.lifecycle")
       masc_event_bus
   in
   Eio.Switch.on_release sw (fun () ->
@@ -507,20 +1139,17 @@ let start_keeper_loops
      boot-time [Dead_cleaned] publish can return successfully while every
      process-local sink is still absent. *)
   fork_subsystem "keeper_shutdown_recovery" (fun () ->
-    let inventory =
-      match Keeper_shutdown_store.scan_inventory ~config with
-      | Error error -> Error (Keeper_shutdown_store.error_to_string error)
-      | Ok entries ->
-        Keeper_shutdown_runtime.restore_inventory_admission ~config entries
-    in
-    Eio.Promise.resolve shutdown_inventory_r inventory;
-    match inventory with
-    | Error detail ->
-      Log.Keeper.error "shutdown recovery inventory failed: %s" detail;
-      failwith detail
-    | Ok restored ->
+    let restored = claimed_persistence.claimed_report.shutdown in
       List.iter
-        (fun corrupt ->
+        (fun terminal ->
+           Log.Keeper.info
+             "retired terminal shutdown operation recognized without an admission fence: keeper=%s operation=%s path=%s"
+             terminal.Keeper_shutdown_store.keeper_name
+             (Keeper_shutdown_types.Operation_id.to_string terminal.operation_id)
+             terminal.path)
+        restored.retired_terminal_records;
+      List.iter
+        (fun (corrupt : Keeper_shutdown_store.corrupt_record) ->
            Log.Keeper.error
              "corrupt shutdown operation retained under an exact Keeper admission fence: keeper=%s operation=%s path=%s error=%s"
              corrupt.Keeper_shutdown_store.keeper_name
@@ -531,8 +1160,15 @@ let start_keeper_loops
       Eio.Switch.run (fun recovery_sw ->
         List.iter
           (fun operation ->
-             Eio.Fiber.fork ~sw:recovery_sw (fun () ->
-               try
+             fork_logged_fiber
+               ~sw:recovery_sw
+               ~on_error:(fun exn ->
+                 Log.Keeper.error
+                   "shutdown recovery crashed keeper=%s operation=%s error=%s"
+                   operation.Keeper_shutdown_types.keeper_name
+                   (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
+                   (Printexc.to_string exn))
+               (fun () ->
                  match Keeper_shutdown_runtime.recover_operation ~config operation with
                  | Ok recovered ->
                    Log.Keeper.info
@@ -544,32 +1180,8 @@ let start_keeper_loops
                      "shutdown recovery failed keeper=%s operation=%s error=%s"
                      operation.Keeper_shutdown_types.keeper_name
                      (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
-                     detail
-               with
-               | Eio.Cancel.Cancelled _ as exn -> raise exn
-               | exn ->
-                 Log.Keeper.error
-                   "shutdown recovery crashed keeper=%s operation=%s error=%s"
-                   operation.Keeper_shutdown_types.keeper_name
-                   (Keeper_shutdown_types.Operation_id.to_string operation.operation_id)
-                   (Printexc.to_string exn)))
+                     detail))
           restored.operations));
-  (* Spawn the OAS bus depth sampler so warnings surface on stdout
-     even when no external telemetry backend is attached.
-
-     [MASC_OAS_BUS_WARN_DEPTH] lets operators raise the threshold without
-     a rebuild — fleet-wide keeper load legitimately pushes depth past
-     the 200 default at peak (issue #8517). Invalid values fall back to
-     the compile-time default. *)
-  let warn_threshold =
-    match Sys.getenv_opt "MASC_OAS_BUS_WARN_DEPTH" with
-    | Some v ->
-      (match int_of_string_opt (String.trim v) with
-       | Some n when n > 0 -> n
-       | _ -> 200)
-    | None -> 200
-  in
-  Agent_sdk_metrics_bridge.start_sampler ~sw ~clock ~warn_threshold ();
   fork_logged_fiber
     ~sw
     ~on_error:(log_dashboard_fiber_crash "keeper lifecycle listener")
@@ -753,159 +1365,15 @@ let start_keeper_loops
      Log.Server.error
        "subsystem orchestrator failed to start: %s"
        (Printexc.to_string exn));
-  (* Build read-only tool surface shared by both judges. *)
-  let judge_tool_names =
-    [ "masc_status"
-    ; Tool_name.Task_name.to_string Tool_name.Task_name.Tasks
-    ; Tool_name.Board_name.to_string Tool_name.Board_name.Board_list
-    ]
-  in
-  let judge_masc_tools =
-    match Keeper_tool_surfaces.local_worker_tool_schemas ~names:judge_tool_names () with
-    | Ok schemas -> schemas
-    | Error e ->
-      Log.Server.warn "judge tool schema resolution failed: %s" e;
-      []
-  in
-  let make_judge_dispatch ~actor ~(name : string) ~(args : Yojson.Safe.t) : Tool_result.result =
-    let start_time = Time_compat.now () in
-    let config = (Mcp_server.workspace_config state) in
-    let agent_name = actor in
-    let ctx_workspace : Tool_workspace.context = { config; agent_name } in
-    let ctx_task : Task.Tool.context = { config; agent_name; sw = Some sw } in
-    (* ctx_agent removed with the masc_agents judge dispatch case (2026-06-09). *)
-    match name with
-    | "masc_status" ->
-      (match Tool_workspace.dispatch ctx_workspace ~name ~args with
-       | Some result -> result
-       | None ->
-         (* RFC-0189: [Tool_*.dispatch] returning [None] when the
-            name is hard-coded here is a server-side invariant
-            violation (registry says the name routes here).
-            [Runtime_failure] — not caller-actionable. *)
-         Tool_result.error
-           ~failure_class:(Some Tool_result.Runtime_failure)
-           ~tool_name:name ~start_time "masc_status: dispatch failed")
-    | "masc_tasks" ->
-      (match Task.Tool.dispatch ctx_task ~name ~args with
-       | Some result -> result
-       | None ->
-         Tool_result.error
-           ~failure_class:(Some Tool_result.Runtime_failure)
-           ~tool_name:name ~start_time "masc_tasks: dispatch failed")
-    | "masc_board_list" ->
-      Board_tool.handle_tool name args
-    | _ ->
-      (* RFC-0189: judge dispatch caller (governance / operator
-         judge runner) requested a tool outside the allow-list.
-         Caller-misuse = [Workflow_rejection]. *)
-      Tool_result.error
-        ~failure_class:(Some Tool_result.Workflow_rejection)
-        ~tool_name:name
-        ~start_time
-        (Printf.sprintf "judge: tool '%s' not allowed" name)
-  in
-  (* governance_judge subsystem removed (2026-06-09): its only factual input
-     was [Workspace.get_agents_status], which read the disk-backed
-     [.masc/agents/] registry whose producer ([Workspace_eio.register_agent])
-     had zero call sites. items/activity were already hardcoded []. So the
-     judge ran ~100 empty LLM cycles/day producing 0 judgments for ~12 days.
-     Removing the daemon rather than leaving a permanently-empty input. *)
-  let operator_judge_dispatch = make_judge_dispatch ~actor:"operator-judge" in
-  fork_subsystem "operator_judge" (fun () ->
-    let operator_judge_ctx : _ Operator_control.context =
-      { config = (Mcp_server.workspace_config state)
-      ; agent_name = "operator-judge"
-      ; sw
-      ; clock
-      ; proc_mgr = Some proc_mgr
-      ; net = state.net
-      ; mcp_session_id = None
-      }
-    in
-    Dashboard_operator_judge.start
-      ~sw
-      ~clock
-      ~net
-      ~config:(Mcp_server.workspace_config state)
-      ~masc_tools:judge_masc_tools
-      ~dispatch:operator_judge_dispatch
-      ~build_facts:(fun () ->
-        Operator_control.snapshot_json
-          ~actor:"operator-judge"
-          ~view:"summary"
-          ~include_messages:false
-          ~include_keepers:true
-          operator_judge_ctx)
-      ());
-  fork_subsystem "interaction_judge" (fun () ->
-    let interaction_judge_ctx : _ Operator_control.context =
-      { config = (Mcp_server.workspace_config state)
-      ; agent_name = "interaction-judge"
-      ; sw
-      ; clock
-      ; proc_mgr = Some proc_mgr
-      ; net = state.net
-      ; mcp_session_id = None
-      }
-    in
-    Dashboard_interaction_judge.start
-      ~sw
-      ~clock
-      ~base_path:(Mcp_server.workspace_config state).workspace_path
-      ~build_facts:(fun () ->
-        Operator_control.snapshot_json
-          ~actor:"interaction-judge"
-          ~view:"summary"
-          ~include_messages:false
-          ~include_keepers:true
-          interaction_judge_ctx));
   fork_subsystem "session_cleanup" (fun () ->
     Session.start_mcp_session_cleanup_loop ~sw ~clock ());
   (* No verification_timeout fork: RFC-0220 §11 PR-3 deleted the sweep —
      the wall-clock deadline rescue was removed in §5 and the fork had been
      spinning on a no-op since PR-1. *)
-  (* HITL approval queue death-spiral fix.
-     [Keeper_approval_queue.expire_stale] has been a complete
-     implementation (queue removal, audit event, promise [Reject]
-     resolution, on_resolution callback) with a unit test since
-     introduction, but was never invoked by any production caller.
-     Result: a blocking HITL approval enqueued by a keeper turn would block
-     [keeper_cycle_decision] forever via the
-     [has_blocking_pending_for_keeper → Skip Approval_pending] branch in
-     [keeper_world_observation.ml:928].  At the 300s stale-watchdog
-     threshold the supervisor would respawn the fiber, the same
-     approval entry would still be in the queue, and the cycle
-     would repeat indefinitely.  Pair with #10962
-     ([last_skip_observation] surface) so operators can see
-     [last_skip=[approval_pending]] alongside the kill warn line.
-     [max_wait_s] is a code constant (policy, not calibration);
-     [interval_seconds] remains an ops knob for cadence tuning. *)
-  fork_subsystem "approval_janitor" (fun () ->
-    if not (Env_config_runtime.Approval_janitor.enabled ())
-    then
-      Log.Server.info "approval_janitor: disabled via MASC_APPROVAL_JANITOR_ENABLED=false"
-    else (
-      let interval = Env_config_runtime.Approval_janitor.interval_seconds in
-      (* 30 minutes — long enough that humans actually have time to
-         respond on dashboard / Slack / etc., short enough that the
-         keeper isn't trapped on the death-spiral kill loop after the
-         operator forgets a request.  Code constant: changes need code
-         review (policy), not a runtime knob. *)
-      let max_wait_s = 1800.0 in
-      let rec loop () =
-        Eio.Time.sleep clock interval;
-        (try Keeper_approval_queue.expire_stale ~max_wait_s with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-           Log.Server.warn "approval_janitor: sweep failed: %s" (Printexc.to_string exn));
-        loop ()
-      in
-      loop ()));
   (* Auto-boot keepers from keeper meta and start keepalive loops.
-     Retries unbooted keepers up to [max_retries] times so transient
-     failures (model resolution, discovery timing) don't permanently
-     block keeper startup.  See #5717. *)
+     Each unbooted keeper retries in its own fiber until it registers, so
+     transient model/discovery failures neither abandon that lane nor block
+     supervisor startup or sibling lanes. See #5717. *)
   fork_subsystem "keeper_autoboot" (fun () ->
     if not Env_config.KeeperBootstrap.enabled
     then Log.Keeper.info "autoboot: disabled via MASC_KEEPER_BOOTSTRAP_ENABLED=false"
@@ -914,14 +1382,11 @@ let start_keeper_loops
       Log.Keeper.info "autoboot: lazy startup complete; keeper bootstrap will start last";
       (* Brief delay so other subsystems (SSE, board, orchestrator) settle first. *)
       Eio.Time.sleep clock Env_config_keeper.KeeperBootstrap.post_startup_settle_sec;
-      let config = Mcp_server.workspace_config state in
       let masc_root = Workspace.masc_root_dir config in
       let keeper_dir = Keeper_fs.keeper_dir config in
-      let shutdown_inventory = Eio.Promise.await shutdown_inventory_p in
-      let shutdown_blocked_names_result =
-        match shutdown_inventory with
-        | Error detail -> Error detail
-        | Ok restored -> Ok restored.Keeper_shutdown_runtime.blocked_keeper_names
+      let shutdown_blocked_names =
+        claimed_persistence.claimed_report.shutdown.blocked_keeper_names
+        |> Keeper_name_set.of_list
       in
       let all_names = Keeper_meta_store.keeper_names config in
       let all_count = List.length all_names in
@@ -931,18 +1396,30 @@ let start_keeper_loops
         masc_root
         keeper_dir
         all_count;
-      let names =
-        match shutdown_blocked_names_result with
-        | Error detail ->
-          Log.Keeper.error
-            "autoboot blocked because shutdown inventory is uncertain: %s"
-            detail;
-          []
-        | Ok shutdown_blocked_names ->
-          Keeper_runtime.bootable_keeper_names config
-          |> List.filter (fun name -> not (List.mem name shutdown_blocked_names))
+      let bootable_names = Keeper_runtime.bootable_keeper_names config in
+      (* A keeper filtered out here is config-bootable but its admission is
+         still owned by a durable shutdown operation from the boot scan.
+         Stamp it into the excluded list instead of dropping it silently —
+         the 2026-07-21 wedge left rondo absent from both the boot set and
+         the excluded list, so the outage was invisible in the autoboot
+         report. Boot recovery settles recoverable operations in this same
+         bootstrap, after which the supervisor's periodic pass registers the
+         keeper; this snapshot stays honest about what autoboot itself saw. *)
+      let names, shutdown_fenced_exclusions =
+        List.partition_map
+          (fun name ->
+             if Keeper_name_set.mem name shutdown_blocked_names
+             then
+               Either.Right
+                 Keeper_runtime.
+                   { keeper_name = name; reason = Shutdown_admission_fence }
+             else Either.Left name)
+          bootable_names
       in
-      let exclusions = Keeper_runtime.autoboot_excluded_keeper_reasons config in
+      let exclusions =
+        Keeper_runtime.autoboot_excluded_keeper_reasons config
+        @ shutdown_fenced_exclusions
+      in
       let keeper_boot_ctx : _ Keeper_types_profile.context =
         { config
         ; agent_name = "keeper-autoboot"
@@ -950,6 +1427,8 @@ let start_keeper_loops
         ; clock
         ; proc_mgr = Some proc_mgr
         ; net = state.net
+        ; publication_recovery_provider =
+            Mcp_server.publication_recovery_availability_provider state
         }
       in
       Log.Keeper.info "autoboot: %d keeper(s) to boot" (List.length names);
@@ -1007,6 +1486,8 @@ let start_keeper_loops
                 ; clock
                 ; proc_mgr = Some proc_mgr
                 ; net = state.net
+                ; publication_recovery_provider =
+                    Mcp_server.publication_recovery_availability_provider state
                 }
               in
               let launch_outcome =
@@ -1065,49 +1546,45 @@ let start_keeper_loops
       (* Retry loop for keepers that failed initial boot *)
       if booted_count < total
       then (
-        let max_retries = Keeper_config.keeper_bootstrap_retry_max () in
         let retry_interval_s =
           Float.of_int (Keeper_config.keeper_bootstrap_retry_interval_sec ())
         in
-        let rec retry_loop round =
-          if round > max_retries
-          then
-            Log.Keeper.warn
-              "autoboot: gave up after %d retries; %d/%d keepers remain unbooted"
-              max_retries
-              (total
-               - List_util.count_if
-                   (fun name ->
-                      Keeper_registry.is_running ~base_path:config.base_path name)
-                   names)
-              total
-          else (
-            Eio.Time.sleep clock retry_interval_s;
-            let unbooted =
-              List.filter
-                (fun name ->
-                   not (Keeper_registry.is_running ~base_path:config.base_path name))
-                names
-            in
-            if unbooted = []
-            then
-              Log.Keeper.info
-                "autoboot: all %d keepers running after %d retry round(s)"
-                total
-                round
-            else (
-              Log.Keeper.info
-                "autoboot: retry round %d/%d — %d unbooted: [%s]"
-                round
-                max_retries
-                (List.length unbooted)
-                (String.concat ", " unbooted);
-              iteri_with_fair_yield
-                (fun idx name -> ignore (try_boot_one idx name))
-                unbooted;
-              retry_loop (round + 1)))
+        let unbooted =
+          List.filter (fun name -> not (List.mem name booted)) names
         in
-        retry_loop 1);
+        List.iteri
+          (fun idx name ->
+             fork_logged_fiber
+               ~sw
+               ~on_error:(fun exn ->
+                 Log.Keeper.error
+                   "autoboot retry crashed keeper=%s error=%s"
+                   name
+                   (Printexc.to_string exn))
+               (fun () ->
+               let rec retry_loop round =
+                 if Keeper_registry.is_registered ~base_path:config.base_path name
+                 then
+                   Log.Keeper.info
+                     "autoboot: %s registered after %d retry round(s)"
+                     name
+                     (round - 1)
+                 else (
+                   Eio.Time.sleep clock retry_interval_s;
+                   Log.Keeper.info
+                     "autoboot: retry round %d for unbooted keeper %s"
+                     round
+                     name;
+                   if try_boot_one ~log_prefix:"autoboot-retry" idx name
+                   then
+                     Log.Keeper.info
+                       "autoboot: %s registered on retry round %d"
+                       name
+                       round
+                   else retry_loop (round + 1))
+               in
+               retry_loop 1))
+          unbooted);
       (* #10125: start the supervisor sweep here, after autoboot
          completes.  Without this call the sweep would only fire
          on the first [masc_keeper_msg] tool dispatch (the single
@@ -1127,30 +1604,43 @@ let start_keeper_loops
       | exn ->
         Log.Keeper.error
           "autoboot: supervisor sweep failed to start: %s"
-          (Printexc.to_string exn)));
-      (* Start queue consumer fiber for async queue drain.
-         handle_turn wires process_single_turn for actual turn execution. *)
-      (try
-         let base_path = (Mcp_server.workspace_config state).base_path in
-         Keeper_chat_queue.set_transition_observer
-           (Some
-              (fun ~keeper_name ~revision ->
-                 Keeper_chat_broadcast.queue_changed ~keeper_name
-                   ~revision ()));
-         let queue_report = Keeper_chat_queue.configure_persistence ~base_path in
-         List.iter
-           (fun (keeper_name, (error : Keeper_chat_queue.snapshot_load_error)) ->
-              let keeper_label =
-                match keeper_name with
-                | Some keeper_name -> keeper_name
-                | None -> "<registry>"
-              in
-              Log.Keeper.error
-                "keeper_chat_queue: snapshot unavailable keeper=%s: %s"
-                keeper_label
-                error.Keeper_chat_queue.message)
-           queue_report.load_errors;
-         Keeper_chat_consumer.start ~sw ~clock
+          (Printexc.to_string exn))));
+  (* Queue acceptance and draining are runtime persistence concerns, not an
+     autoboot policy. The blocking control loop is the supervised subsystem
+     body, so a loop exception cannot fail the server root through an
+     unobserved child fiber. *)
+  let consumer_started, consumer_started_resolver = Eio.Promise.create () in
+  fork_subsystem "keeper_chat_consumer" (fun () ->
+    let base_path = config.base_path in
+    let setup =
+      try
+        (* A durable queue mutation both refreshes the dashboard (SSE) and must
+           wake this consumer: [notify_transition] is a non-blocking Wake_inbox
+           post, so a message enqueued after boot is actually leased and
+           delivered instead of sitting queued until the next unrelated wake. *)
+        Keeper_chat_queue.set_transition_observer
+          (Some
+             (fun ~keeper_name ~revision ->
+                Keeper_chat_broadcast.queue_changed ~keeper_name ~revision ();
+                Keeper_chat_consumer.notify_transition ~keeper_name));
+        (* A freed turn slot (turn released / shutdown rolled back) makes the
+           lane dispatchable again; wake the consumer so any receipt that was
+           deferred while the lane was busy is re-examined. The admission
+           observer is non-blocking and its failures cannot alter admission. *)
+        Keeper_turn_admission.set_slot_transition_observer
+          (Some
+             (fun ~base_path:_ ~keeper_name ~transition:_ ->
+                Keeper_chat_consumer.notify_transition ~keeper_name));
+        Ok ()
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error exn
+    in
+    Eio.Promise.resolve consumer_started_resolver setup;
+    (match setup with
+     | Ok () -> ()
+     | Error exn -> raise exn);
+    Keeper_chat_consumer.run ~sw ~clock
            ~base_path
            ~handle_turn:(fun ~sw ~keeper_name ~delivery_key ~queued_message ->
              let open Server_routes_http_keeper_stream in
@@ -1210,7 +1700,7 @@ let start_keeper_loops
                               label )))
              in
              (match queued_message.source with
-              | Keeper_chat_queue.Dashboard ->
+              | Keeper_chat_queue.Dashboard _ ->
                   Log.Keeper.info
                     "keeper_chat_consumer: processing dashboard queue \
                      message for keeper=%s"
@@ -1296,22 +1786,18 @@ let start_keeper_loops
                           Slack delivery skipped for keeper=%s \
                           (queued reply will not be delivered)"
                          keeper_name));
-             let connector_user_line_recorded_upstream =
-               connector_user_line_recorded_upstream_of_source queued_message.source
-             in
              (* Derive the typed reply-continuation channel from the queued
                 message source so [process_single_turn] can route the
                 assistant reply to the originating connector (Discord/Slack)
-                or dashboard thread. [dashboard_thread_id] is the same
-                [thread_id] the turn itself uses. *)
+                or exact dashboard thread. *)
              let continuation_channel =
                Keeper_chat_queue.continuation_channel_of_message_source
-                 ~dashboard_thread_id:thread_id
                  queued_message.source
              in
              let turn_outcome =
                match
-                 process_single_turn ~connector_user_line_recorded_upstream
+                 process_single_turn
+                   ~user_row_origin:queued_message.user_row_origin
                    ~queued_turn:true
                    ~delivery_key:(Some delivery_key)
                    ~state ~clock ~auth_token:None
@@ -1355,7 +1841,6 @@ let start_keeper_loops
                  let kind =
                    match kind with
                    | Turn_failed -> Keeper_chat_queue.Turn_failed
-                   | Turn_timed_out -> Keeper_chat_queue.Timed_out
                    | Turn_cancelled -> Keeper_chat_queue.Cancelled
                    | No_visible_reply
                    | Continuation_checkpoint_without_reply ->
@@ -1374,13 +1859,10 @@ let start_keeper_loops
                    ; detail =
                        "queued turn returned no terminal outcome (invariant violation)"
                    ; outcome_ref = None
-                   })
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-           Log.Keeper.warn
-             "keeper_chat_consumer: failed to start: %s"
-             (Printexc.to_string exn)));
+                   }));
+  (match Eio.Promise.await consumer_started with
+   | Ok () -> ()
+   | Error exn -> raise exn);
   (* Discord presence bridge — syncs keeper liveness to bot status. *)
   fork_subsystem "discord_presence" (fun () ->
     Discord_presence_bridge.start
@@ -1388,6 +1870,89 @@ let start_keeper_loops
   (* Phase 5: unified startup subsystem summary *)
   Log.Startup.info "subsystems: keeper loops started"
 ;;
+
+let start_keeper_loops
+      ~claimed_persistence
+      ~sw
+      ~clock
+      ~net
+      ~domain_mgr
+      ~proc_mgr
+      (state : Mcp_server.server_state)
+  =
+  let workspace_scope = Mcp_server.workspace_scope state in
+  let state_config = workspace_scope.config in
+  (* Claim has already committed admission. Mask cancellation only across the
+     second BasePath validation and [Claimed -> Starting] CAS so a cancelled
+     startup cannot strand a claimed token. The long-running startup body is
+     deliberately outside protection and terminalizes cancellation below. *)
+  match
+    Eio.Cancel.protect (fun () ->
+      acquire_keeper_loops_start ~config:state_config claimed_persistence)
+  with
+  | Error error -> raise (Keeper_persistence_start_failed error)
+  | Ok ownership ->
+    let outcome =
+      match
+        start_keeper_loops_owned
+          ~claimed_persistence
+          ~workspace_scope
+          ~sw
+          ~clock
+          ~net
+          ~domain_mgr
+          ~proc_mgr
+          state
+      with
+      | () -> Ok ()
+      | exception exn -> Error (exn, Printexc.get_raw_backtrace ())
+    in
+    (match outcome with
+     | Ok () ->
+       (match finish_keeper_loops_start ownership with
+        | Ok () -> ()
+        | Error error -> raise (Keeper_persistence_start_failed error))
+     | Error (exn, backtrace) ->
+       let failure =
+         persistence_failure
+           ~phase:Starting_keeper_loops
+           ~base_path:claimed_persistence.claimed_base_path.canonical
+           ~cause:
+             (Unexpected_exception_cause (raised_cause exn backtrace))
+       in
+       if
+         not
+           (Atomic.compare_and_set
+              persistence_lifecycle
+              ownership.starting
+              (failed_lifecycle
+                 ~prepared:ownership.prepared
+                 ~claimed:ownership.claimed
+                 failure))
+       then log_lifecycle_transition_loss ~from_phase:"starting" ~failure;
+       (match exn with
+        | Eio.Cancel.Cancelled _ -> Printexc.raise_with_backtrace exn backtrace
+        | _ ->
+          Printexc.raise_with_backtrace
+            (Keeper_persistence_start_failed
+               (Start_execution_failed failure))
+            backtrace))
+;;
+
+module For_testing = struct
+  include Projection_for_testing
+
+  type nonrec keeper_loops_start_ownership = keeper_loops_start_ownership
+
+  let reset_keeper_persistence_lifecycle () = Atomic.set persistence_lifecycle Idle
+
+  let prepared_base_paths prepared =
+    prepared.base_path.requested, prepared.base_path.canonical
+  ;;
+
+  let begin_keeper_loops_start = acquire_keeper_loops_start
+  let finish_keeper_loops_start = finish_keeper_loops_start
+end
 
 
 (* Background maintenance loops

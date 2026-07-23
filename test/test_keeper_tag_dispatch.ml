@@ -1,7 +1,7 @@
-(** Regression tests for Keeper_tag_dispatch — Mod_control gate.
+(** Regression tests for Keeper_tag_dispatch — Mod_control routing.
 
-    Verifies that masc_pause_status (read-only) is allowed while
-    lifecycle-mutating tools (masc_pause, masc_resume) are blocked. *)
+    Verifies that control tools route through the same typed dispatcher in
+    Keeper context. *)
 
 open Alcotest
 open Masc
@@ -63,27 +63,21 @@ let test_pause_status_allowed () =
     | None ->
         fail "masc_pause_status returned None (tool not recognized)")
 
-(* masc_pause mutates lifecycle — should be blocked. *)
-let test_pause_blocked () =
+let test_pause_allowed () =
   with_workspace (fun config ->
     match dispatch config "masc_pause" with
-    | Some tr when not (Tool_result.is_success tr) ->
-        check bool "error mentions blocked" true
-          (contains_substring (Tool_result.message tr) "blocked")
-    | Some _tr ->
-        fail "masc_pause should be blocked in keeper context"
+    | Some tr when Tool_result.is_success tr -> ()
+    | Some tr ->
+        failf "masc_pause should succeed: %s" (Tool_result.message tr)
     | None ->
         fail "masc_pause returned None")
 
-(* masc_resume mutates lifecycle — should be blocked. *)
-let test_resume_blocked () =
+let test_resume_allowed () =
   with_workspace (fun config ->
     match dispatch config "masc_resume" with
-    | Some tr when not (Tool_result.is_success tr) ->
-        check bool "error mentions blocked" true
-          (contains_substring (Tool_result.message tr) "blocked")
-    | Some _tr ->
-        fail "masc_resume should be blocked in keeper context"
+    | Some tr when Tool_result.is_success tr -> ()
+    | Some tr ->
+        failf "masc_resume should succeed: %s" (Tool_result.message tr)
     | None ->
         fail "masc_resume returned None")
 
@@ -100,10 +94,10 @@ let test_other_inline_blocked () =
 
 let () =
   Alcotest.run "Keeper_tag_dispatch" [
-    "Mod_control gate", [
+    "Mod_control routing", [
       test_case "masc_pause_status allowed" `Quick test_pause_status_allowed;
-      test_case "masc_pause blocked" `Quick test_pause_blocked;
-      test_case "masc_resume blocked" `Quick test_resume_blocked;
+      test_case "masc_pause allowed" `Quick test_pause_allowed;
+      test_case "masc_resume allowed" `Quick test_resume_allowed;
     ];
     "Mod_inline gate", [
       test_case "inline tools blocked" `Quick test_other_inline_blocked;

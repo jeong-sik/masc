@@ -1,8 +1,8 @@
 (** Mcp_server_eio_call_tool — Tool call handler and result envelope
 
     Extracted from mcp_server_eio.ml.
-    Handles tools/call JSON-RPC method: read-only retry, result
-    envelope, telemetry, and audit logging. Per-tool timeout was
+    Handles tools/call JSON-RPC method: single dispatch, result envelope,
+    telemetry, and audit logging. Per-tool timeout was
     removed (2026-06-08 fleet-wide cleanup); the tool itself is
     responsible for any hang protection. *)
 
@@ -18,58 +18,30 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
    [Mcp_server_eio_helpers.mcp_exn_level_and_tag]. *)
 let log_mcp_exn = Mcp_server_eio_helpers.log_mcp_exn
 
-(* Substring containment, ASCII case-insensitive.  Delegates to
-   [String_util.contains_substring_ci] (which scans byte-wise without
-   allocating) and preserves the local "empty needle matches all"
-   semantic with an explicit guard. *)
-let contains_casefold haystack needle =
-  String.length needle = 0
-  || String_util.contains_substring_ci haystack needle
+let status_of_result : Tool_result.result -> string = function
+  | Tool_result.Completed _ -> "ok"
+  | (Tool_result.Deferred _ as result) -> Tool_result.string_of_disposition result
+  | Tool_result.Failed _ -> "error"
+;;
 
-let parse_status_from_message ~success ~message =
-  if not success then
-    if
-      contains_casefold message "input required"
-      || contains_casefold message "ask agent"
-      || contains_casefold message "ask agent question"
-    then
-      ("ask_agent_question", Some "ask_agent_question")
-    else if
-      contains_casefold message "auth required"
-      || contains_casefold message "authentication required"
-      || contains_casefold message "unauthorized"
-    then
-      ("ask_for_auth", Some "ask_for_auth")
-    else
-      ("error", None)
-  else
-    ("ok", None)
-
-let quality_issue severity code message attempts =
-  `Assoc [
-    ("severity", `String severity);
-    ("code", `String code);
-    ("message", `String message);
-    ("retry_attempts", `Int attempts);
-  ]
-
-let quality_from_result ~success ~message ~attempts =
-  if success then
-    `Assoc [
-      ("passed", `Bool true);
-      ("issues", `List []);
-    ]
-  else
-    let issue =
-      if contains_casefold message "timeout" || contains_casefold message "timed out" then
-        quality_issue "error" "tool_timeout" message attempts
-      else
-        quality_issue "error" "tool_failure" message attempts
-    in
-    `Assoc [
-      ("passed", `Bool false);
-      ("issues", `List [issue]);
-    ]
+let structured_content_of_result : Tool_result.result -> Yojson.Safe.t option =
+  function
+  | Tool_result.Completed { data = (`Assoc _ as data); _ }
+  | Tool_result.Deferred { data = (`Assoc _ as data); _ }
+  | Tool_result.Failed { data = (`Assoc _ as data); _ } -> Some data
+  | Tool_result.Completed
+      { data = (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
+      ; _
+      }
+  | Tool_result.Deferred
+      { data = (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
+      ; _
+      }
+  | Tool_result.Failed
+      { data = (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
+      ; _
+      } -> None
+;;
 
 let activity_preview_string value =
   value
@@ -173,12 +145,39 @@ let record_mcp_server_operation_duration_sample ~tool_name ~success ~duration_se
 let record_mcp_server_operation_duration result ~duration_ms =
   record_mcp_server_operation_duration_sample
     ~tool_name:(Tool_result.tool_name result)
-    ~success:(Tool_result.is_success result)
+    ~success:(not (Tool_result.is_failed result))
     ~duration_seconds:(float_of_int duration_ms /. 1000.0)
+;;
+
+(** MCP tools/call [arguments] is optional (spec: "arguments?: object").
+    Absence therefore means an empty object. An explicitly supplied [`Null]
+    is not absence and must remain [`Null] so OAS strict validation rejects it
+    instead of silently repairing an invalid wire value. *)
+let arguments_of_params = function
+  | `Assoc fields ->
+    (match List.assoc_opt "arguments" fields with
+     | None -> `Assoc []
+     | Some value -> value)
+  | _ -> `Null
+;;
+
+let failure_observation ~duration_ms
+    : Tool_result.result -> (Tool_result.tool_failure_class * string) option
+  = function
+  | Tool_result.Failed { class_; message; _ } ->
+    let truncated =
+      let error_preview_max = 200 in
+      String_util.utf8_safe ~max_bytes:(error_preview_max + 3) ~suffix:"..." message
+      |> String_util.to_string
+    in
+    Some (class_, Printf.sprintf "duration_ms=%d|detail=%s" duration_ms truncated)
+  | Tool_result.Completed _ | Tool_result.Deferred _ -> None
 ;;
 
 module For_testing = struct
   let activity_tool_called_payload = activity_tool_called_payload
+  let arguments_of_params = arguments_of_params
+  let failure_observation = failure_observation
   let record_mcp_server_operation_duration = record_mcp_server_operation_duration
   let record_mcp_server_operation_duration_sample =
     record_mcp_server_operation_duration_sample
@@ -205,7 +204,6 @@ type keeper_runtime_mcp_log_context = {
   sandbox_root : string option;
   allowed_paths : string list option;
   network_mode : string option;
-  approval_mode : string option;
   runtime_profile : string option;
 }
 
@@ -255,7 +253,6 @@ let runtime_mcp_keeper_log_context_of_entry
       Some (Keeper_alerting_path.effective_allowed_paths ~meta:entry.meta);
     network_mode =
       Some (Keeper_types_profile_sandbox.network_mode_to_string entry.meta.network_mode);
-    approval_mode = None;
     runtime_profile =
       (try Some (Keeper_meta_contract.runtime_id_of_meta entry.meta)
        with Failure _ -> None);
@@ -271,7 +268,7 @@ let runtime_mcp_keeper_tool_call_sse_payload
     ~(keeper_name : string)
     ~(tool_name : string)
     ~(duration_ms : int)
-    ~(success : bool)
+    ~(disposition : ('completed, 'deferred, 'failed) Tool_result.disposition)
     ~(arguments : Yojson.Safe.t)
     ~(message : string) : Yojson.Safe.t =
   let base_fields =
@@ -280,13 +277,15 @@ let runtime_mcp_keeper_tool_call_sse_payload
       ("name", `String keeper_name);
       ("tool_name", `String tool_name);
       ("duration_ms", `Int duration_ms);
-      ("success", `Bool success);
+      ("disposition", `String (Tool_result.string_of_disposition disposition));
       ("ts_unix", `Float (Time_compat.now ()));
     ]
   in
   let error_fields =
-    if success then []
-    else [ ("error_text", `String (runtime_mcp_keeper_error_preview message)) ]
+    match disposition with
+    | Tool_result.Completed _ | Tool_result.Deferred _ -> []
+    | Tool_result.Failed _ ->
+      [ ("error_text", `String (runtime_mcp_keeper_error_preview message)) ]
   in
   let io_fields =
     Keeper_tools_oas_handler_telemetry.tool_io_preview_fields
@@ -366,7 +365,6 @@ let record_runtime_mcp_keeper_trajectory
       ?sandbox_root:ctx.sandbox_root
       ?allowed_paths:ctx.allowed_paths
       ?network_mode:ctx.network_mode
-      ?approval_mode:ctx.approval_mode
       ?runtime_profile:ctx.runtime_profile
       ()
   in
@@ -422,7 +420,7 @@ let record_runtime_mcp_keeper_tool_trace
     ~(tool_name : string)
     ~(arguments : Yojson.Safe.t)
     ~(message : string)
-    ~(success : bool)
+    ~(disposition : ('completed, 'deferred, 'failed) Tool_result.disposition)
     ~(duration_ms : int) : unit =
   let ctx =
     runtime_mcp_keeper_log_context_of_entry
@@ -433,6 +431,11 @@ let record_runtime_mcp_keeper_tool_trace
   (* RFC-0233 PR-1: one mint per execution at this dispatch boundary;
      the tool_calls row and the trajectory row below share the value. *)
   let execution_id = Ids.Execution_id.generate () in
+  let success =
+    match disposition with
+    | Tool_result.Completed _ | Tool_result.Deferred _ -> true
+    | Tool_result.Failed _ -> false
+  in
   Keeper_tool_call_log.log_call
     ~keeper_name:ctx.keeper_name
     ~tool_name
@@ -453,10 +456,9 @@ let record_runtime_mcp_keeper_tool_trace
     ?goal_ids:ctx.goal_ids
     ?sandbox_profile:ctx.sandbox_profile
     ?sandbox_root:ctx.sandbox_root
-    ?allowed_paths:ctx.allowed_paths
-    ?network_mode:ctx.network_mode
-    ?approval_mode:ctx.approval_mode
-    ?runtime_profile:ctx.runtime_profile
+      ?allowed_paths:ctx.allowed_paths
+      ?network_mode:ctx.network_mode
+      ?runtime_profile:ctx.runtime_profile
     ~result_bytes:(String.length message)
     ();
   record_runtime_mcp_keeper_trajectory
@@ -473,45 +475,14 @@ let record_runtime_mcp_keeper_tool_trace
        ~keeper_name:ctx.keeper_name
        ~tool_name
        ~duration_ms
-       ~success
+       ~disposition
        ~arguments
        ~message)
-
-let read_only_retry_limit () =
-  Env_config.Tools.readonly_retry_limit
-
-let read_only_retry_wait ~attempt =
-  let attempt = float_of_int attempt in
-  min 1.5 (0.2 *. attempt)
-
-let call_tool_with_readonly_retry
-    ~clock
-    ~run_tool
-    ~is_read_only
-    () =
-  let max_attempts = read_only_retry_limit () in
-  let rec loop attempt =
-    let result = run_tool () in
-    let success = Tool_result.is_success result in
-    if
-      success
-      || attempt >= max_attempts
-      || not is_read_only
-      || (match Tool_result.failure_class result with
-          | Some cls -> not (Tool_result.is_retryable cls)
-          | None -> false)
-    then
-      (result, attempt)
-    else (
-      Eio.Time.sleep clock (read_only_retry_wait ~attempt);
-      loop (attempt + 1))
-  in
-  loop 1
 
 (** Resolve managed agent tool call to canonical operation *)
 let resolve_managed_agent_call ?mcp_session_id params =
   let requested_name = Json_util.get_string params "name" |> Option.value ~default:"" in
-  let arguments = Yojson.Safe.Util.member "arguments" params in
+  let arguments = arguments_of_params params in
   let identity =
     Client_registry_eio.get_or_create_identity ?mcp_session_id arguments
   in
@@ -523,7 +494,34 @@ let resolve_managed_agent_call ?mcp_session_id params =
 let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     ~broadcast_tools_list_changed ~sw ~clock ?(profile = Full) ?mcp_session_id
     ?auth_token ?(internal_keeper_runtime = false) state id params =
+  (* The active workspace is an admission fact for this call.  In particular,
+     [masc_start] may publish a new current scope while executing, but the
+     initiating call and every post-execution observation remain attributed to
+     this source scope. *)
+  let workspace_scope : Mcp_server.workspace_scope =
+    Mcp_server.workspace_scope state
+  in
+  let config = workspace_scope.config in
   let make_response = Mcp_transport_protocol.make_response in
+  let request_id =
+    match Mcp_transport_protocol.request_id_of_yojson id with
+    | Ok request_id -> request_id
+    | Error error ->
+      invalid_arg
+        ("handle_call_tool_eio admitted an invalid MCP request id: "
+         ^ Mcp_transport_protocol.request_id_error_to_string error)
+  in
+  let invocation_ref =
+    match mcp_session_id with
+    | None -> None
+    | Some session_id ->
+      (match Tool_invocation_ref.external_mcp ~request_id ~session_id with
+       | Ok invocation_ref -> Some invocation_ref
+       | Error error ->
+         invalid_arg
+           ("handle_call_tool_eio admitted an invalid MCP invocation scope: "
+            ^ Tool_invocation_ref.error_to_string error))
+  in
   let (name, arguments) =
     match profile with
     | Managed_agent -> (
@@ -534,33 +532,25 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
               (Invalid_argument
                  ("managed agent tool translation failed: " ^ msg)))
     | Full | Operator_remote ->
-        (Json_util.get_string params "name" |> Option.value ~default:"", Yojson.Safe.Util.member "arguments" params)
+        (* DET-OK: pre-existing empty-name default fails typed downstream; arguments_of_params maps MCP-optional absence to a typed empty object. *)
+        (Json_util.get_string params "name" |> Option.value ~default:"", arguments_of_params params)
   in
-  let is_read_only =
-    Keeper_tool_descriptor_resolution.capability_has Tool_capability.Read_only name
-  in
-
   (* Measure execution time for telemetry *)
   let start_time = Eio.Time.now clock in
   let execute () =
     try
-      Tool_resource_gate.with_permit
+      execute_tool_eio
+        ~sw
         ~clock
-        ~tool_name:name
+        ~workspace_scope
+        ?profile:(Some profile)
+        ?mcp_session_id
+        ?invocation_ref
+        ?auth_token
+        ?internal_keeper_runtime:(Some internal_keeper_runtime)
+        state
+        ~name
         ~arguments
-        ~is_read_only
-        ~start_time
-        (fun () ->
-          execute_tool_eio
-            ~sw
-            ~clock
-            ?profile:(Some profile)
-            ?mcp_session_id
-            ?auth_token
-            ?internal_keeper_runtime:(Some internal_keeper_runtime)
-            state
-            ~name
-            ~arguments)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | Workspace.Not_initialized ->
@@ -587,29 +577,17 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
            ~tool_name:name ~start_time
            (Printf.sprintf "Internal error: %s" err_detail))
   in
-  let (result, attempts) =
-    if is_read_only then
-      call_tool_with_readonly_retry
-        ~clock
-        ~run_tool:execute
-        ~is_read_only
-        ()
-    else
-      (execute (), 1)
-  in
-  let success = Tool_result.is_success result
+  let result = execute () in
+  let attempts = 1 in
+  let success = not (Tool_result.is_failed result)
   and message = Tool_result.message result
   in
   let end_time = Eio.Time.now clock in
   let duration_ms = int_of_float ((end_time -. start_time) *. 1000.0) in
-  let jsonrpc_id_str =
-    match id with
-    | `String s -> s
-    | `Int i -> string_of_int i
-    | `Intlit s -> s
-    | `Float f -> Printf.sprintf "%0.0f" f
-    | _ -> "unknown"
+  let request_id_json =
+    Mcp_transport_protocol.request_id_to_yojson request_id
   in
+  let request_id_trace_fallback = Yojson.Safe.to_string request_id_json in
   let mcp_session_detail = Json_util.string_opt_to_json mcp_session_id in
 
   (* Resolve caller identity for telemetry.  HTTP auth injects [_agent_name];
@@ -633,25 +611,17 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   in
   let telemetry_operation_id = Json_util.get_string_nonempty arguments "operation_id" in
   let telemetry_worker_run_id = Json_util.get_string_nonempty arguments "worker_run_id" in
+  let failure_observation = failure_observation ~duration_ms result in
   let error_detail =
-    if success then None
-    else
-      let truncated =
-        let error_preview_max = 200 in
-        String_util.utf8_safe ~max_bytes:(error_preview_max + 3) ~suffix:"..." message |> String_util.to_string
-      in
-      Some (Printf.sprintf "duration_ms=%d|detail=%s" duration_ms truncated)
+    Option.map (fun (_failure_class, detail) -> detail) failure_observation
   in
   let otel_trace_id = Otel_spans.current_trace_id () in
-  Audit_log.log_tool_call (Mcp_server.workspace_config state)
+  Audit_log.log_tool_call config
     ~agent_id:agent_name ~tool_name:name ~success ~error_msg:error_detail
     ?trace_id:otel_trace_id ();
-  if not success then (
-    let failure_class =
-      match Tool_result.failure_class result with
-      | Some cls -> cls
-      | None -> Tool_result.Runtime_failure
-    in
+  (match failure_observation with
+   | None -> ()
+   | Some (failure_class, error_detail) ->
     Log.Mcp.emit (Tool_result.log_level_of_failure_class failure_class)
       ~details:
         (`Assoc
@@ -661,24 +631,29 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
               `String (Tool_result.tool_failure_class_to_string failure_class) );
             ("tool_name", `String name);
             ("phase", `String "failure");
-            ("request_id", `String jsonrpc_id_str);
+            ("request_id", request_id_json);
             ("session_id", mcp_session_detail);
             ("outcome", `String "error");
             ("agent_name", `String agent_name);
             ("duration_ms", `Int duration_ms);
             ("attempts", `Int attempts);
-            ("error_detail", `String (Option.value ~default:"" error_detail));
+            ("error_detail", `String error_detail);
           ])
       (Printf.sprintf "tool call failed: %s — %s" name
-         (Option.value ~default:"(no detail)" error_detail)));
+         error_detail));
 
-  (* Classify call source: Keeper_internal if the resolved agent_name matches
-     a registered keeper (keeper-internal dispatch via cli_agent runtime),
-     otherwise External_mcp (true external MCP client).  Sound partial:
-     missing identity falls through to External_mcp.  Issue #8915. *)
+  (* Classify call source: Keeper_internal only when the resolved agent_name
+     matches a keeper in the admission workspace.  A process-global lookup
+     could select an identically named keeper from the newly current scope
+     after [masc_start], tearing tool-usage persistence from this call's
+     observation generation.  Missing identity falls through to External_mcp.
+     Issue #8915. *)
   let keeper_entry =
     if String.length agent_name = 0 then None
-    else Keeper_registry_lookup.find_by_agent_name agent_name
+    else
+      Keeper_registry.all ~base_path:config.base_path ()
+      |> List.find_opt (fun (entry : Keeper_registry.registry_entry) ->
+        String.equal entry.meta.agent_name agent_name)
   in
   let source : Tool_registry.call_source =
     match keeper_entry with
@@ -688,7 +663,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   (match keeper_entry with
    | Some entry ->
        Keeper_registry.record_tool_use
-         ~base_path:entry.base_path entry.name ~tool_name:name ~success;
+         ~base_path:entry.base_path entry.name ~tool_name:name ~disposition:result;
        Keeper_registry_tool_usage_persistence.mark_dirty ~base_path:entry.base_path entry.name
    | None -> ());
 
@@ -698,19 +673,19 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
      here so [track_tool_called] can fan out a paired
      [Error_occurred] event for the previously-dead ADT variant. *)
   let telemetry_error_kind =
-    if not success then
-      Some (Telemetry_eio.error_kind_of_string "tool_failure")
-    else None
+    match failure_observation with
+    | Some _ -> Some (Telemetry_eio.error_kind_of_string "tool_failure")
+    | None -> None
   in
   let telemetry_failure_class =
-    if success then None else Tool_result.failure_class result
+    Option.map (fun (failure_class, _detail) -> failure_class) failure_observation
   in
   (* Track tool call in telemetry (controlled by MASC_TELEMETRY_ENABLED) *)
   let telemetry_enabled = Env_config_core.telemetry_enabled () in
   if telemetry_enabled then
     (match state.Mcp_server.fs with
      | Some fs ->
-         (try Telemetry_eio.track_tool_called ~fs (Mcp_server.workspace_config state)
+         (try Telemetry_eio.track_tool_called ~fs config
                 ~tool_name:name ~agent_id:agent_name ~success ~duration_ms
                 ~source:(Tool_registry.string_of_source source)
                 ?session_id:telemetry_session_id
@@ -768,7 +743,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
 
   (* Track in-memory call counter for all declared tool names (including hidden). *)
   Tool_registry.record_call_if_known ~source ?assignment_id:called_assignment_id_opt
-    ~tool_name:name ~success ~duration_ms ();
+    ~tool_name:name ~disposition:result ~duration_ms ();
 
   let activity_payload =
     let tool_args_preview =
@@ -787,7 +762,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   (* Emit activity graph event for tool call — enables real-time dashboard tracking *)
   (try
     (* fire-and-forget: activity graph emission must not change the tool-call result. *)
-    ignore (Activity_graph.emit (Mcp_server.workspace_config state)
+    ignore (Activity_graph.emit config
       ~actor:(Activity_graph.entity ~kind:"agent" agent_name)
       ~subject:(Activity_graph.entity ~kind:"tool" name)
       ~kind:
@@ -802,16 +777,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   let trace_id =
     match otel_trace_id with
     | Some tid -> tid
-    | None -> jsonrpc_id_str
-  in
-  (* Append recovery hint on failure *)
-  let message =
-    if success then message
-    else
-      let hint = Masc_error_recovery.recovery_hint message in
-      match hint with
-      | None -> message
-      | Some h -> message ^ "\n\nRecovery: " ^ h
+    | None -> request_id_trace_fallback
   in
   (match keeper_entry with
    | Some entry ->
@@ -822,22 +788,18 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
             ~tool_name:name
             ~arguments
             ~message
-            ~success
+            ~disposition:result
             ~duration_ms
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           log_mcp_exn ~label:"runtime MCP keeper tool trace failed" exn)
    | None -> ());
-  let (status, required_follow_up) = parse_status_from_message ~success ~message in
-  let quality = quality_from_result ~success ~message ~attempts in
+  let status = status_of_result result in
   let envelope =
     `Assoc [
       ("kind", `String "tool_call");
       ("summary", `String message);
       ("status", `String status);
       ("tool", `String name);
-      ("required_follow_up", Json_util.string_opt_to_json required_follow_up);
-      ("trace_id", `String trace_id);
-      ("quality", quality);
     ]
   in
   let content_items =
@@ -849,7 +811,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
         ]
     ]
   in
-  let structured_content = Tool_result.structured_payload_of_message message in
+  let structured_content = structured_content_of_result result in
   let meta_fields =
     [
       ("trace_id", `String trace_id);
@@ -859,6 +821,12 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       ("attempts", `Int attempts);
       ("timestamp", `String (Masc_domain.now_iso ()));
     ]
+    @
+    match Tool_result.failure_class result with
+    | Some failure_class ->
+      [ ( "failure_class"
+        , `String (Tool_result.tool_failure_class_to_string failure_class) ) ]
+    | None -> []
   in
   let result_fields =
     [
@@ -889,7 +857,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
           ("event_family", `String "tool_call");
           ("tool_name", `String name);
           ("phase", `String "result");
-          ("request_id", `String jsonrpc_id_str);
+          ("request_id", request_id_json);
           ("session_id", mcp_session_detail);
           ("agent_name", `String agent_name);
           ("outcome", `String (Tool_result.string_of_tool_call_outcome outcome));

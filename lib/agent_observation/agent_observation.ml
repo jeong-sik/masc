@@ -13,7 +13,7 @@ type codebase_partition =
           the write-path [unregistered_repo] producer is the live instance. *)
   | Legacy_default
       (** Neither [canonical_url] nor [repo_id] was supplied, or the record
-          carries no [partition] field at all (tool/turn/pr_event,
+          carries no [partition] field at all (tool/turn,
           annotation_request). Structural ceiling, NOT a soft fallback.
           v2 §7 "(3) default 미갱신". *)
 
@@ -28,16 +28,6 @@ type tool_event =
   ; duration_ms : float
   ; output_text : string
   ; input : Yojson.Safe.t
-  }
-
-type pr_event =
-  { base_path : string
-  ; partition : codebase_partition
-  ; keeper_id : string
-  ; turn_id : string
-  ; output_text : string
-  ; tool_name : string
-  ; success : bool
   }
 
 type turn_event =
@@ -190,6 +180,68 @@ let annotation_kind_of_string = function
   | _ -> None
 ;;
 
+type annotation_reference =
+  { relation : string
+  ; reference : string
+  }
+
+let annotation_reference_to_json reference =
+  `Assoc
+    [ "relation", `String reference.relation
+    ; "reference", `String reference.reference
+    ]
+;;
+
+let annotation_references_to_json references =
+  `List (List.map annotation_reference_to_json references)
+;;
+
+let annotation_references_of_json = function
+  | `Null -> Ok []
+  | `List items ->
+    let parse_one index = function
+      | `Assoc fields ->
+        let field_values key =
+          List.filter_map
+            (fun (candidate, value) -> if String.equal key candidate then Some value else None)
+            fields
+        in
+        (match
+           List.find_opt
+             (fun (key, _) ->
+                not (String.equal key "relation" || String.equal key "reference"))
+             fields
+         with
+         | Some (key, _) ->
+           Error (Printf.sprintf "references[%d] has unknown field: %s" index key)
+         | None ->
+           match field_values "relation", field_values "reference" with
+         | [ `String relation ], [ `String reference ]
+           when String.trim relation <> "" && String.trim reference <> "" ->
+           Ok { relation; reference }
+         | [ `String _ ], [ `String _ ] ->
+           Error
+             (Printf.sprintf
+                "references[%d] relation and reference must be non-empty strings"
+                index)
+         | _ ->
+           Error
+             (Printf.sprintf
+                "references[%d] requires string relation and reference fields"
+                index))
+      | _ -> Error (Printf.sprintf "references[%d] must be an object" index)
+    in
+    let rec loop index acc = function
+      | [] -> Ok (List.rev acc)
+      | item :: rest ->
+        (match parse_one index item with
+         | Ok reference -> loop (index + 1) (reference :: acc) rest
+         | Error _ as error -> error)
+    in
+    loop 0 [] items
+  | _ -> Error "references must be an array"
+;;
+
 type annotation_request =
   { base_path : string
   ; partition : codebase_partition
@@ -201,14 +253,7 @@ type annotation_request =
   ; content : string
   ; goal_id : string option
   ; task_id : string option
-  ; board_post_id : string option
-  ; comment_id : string option
-  ; pr_id : string option
-  ; git_ref : string option
-  ; log_id : string option
-  ; session_id : string option
-  ; operation_id : string option
-  ; worker_run_id : string option
+  ; references : annotation_reference list
   }
 
 type annotation_result =
@@ -219,7 +264,6 @@ type annotation_result =
   }
 
 type tool_event_sink = tool_event -> unit
-type pr_event_sink = pr_event -> unit
 type turn_event_sink = turn_event -> unit
 type write_region_error =
   | Write_region_sink_not_installed
@@ -234,19 +278,16 @@ type write_region_sink = write_region_event -> (unit, write_region_error) result
 type annotation_sink = annotation_request -> (annotation_result, string) result
 
 let noop_tool_event_sink (_ : tool_event) = ()
-let noop_pr_event_sink (_ : pr_event) = ()
 let noop_turn_event_sink (_ : turn_event) = ()
 let noop_write_region_sink (_ : write_region_event) = Error Write_region_sink_not_installed
 let noop_annotation_sink (_ : annotation_request) = Error "annotation sink is not installed"
 
 let tool_event_sink = Atomic.make noop_tool_event_sink
-let pr_event_sink = Atomic.make noop_pr_event_sink
 let turn_event_sink = Atomic.make noop_turn_event_sink
 let write_region_sink = Atomic.make noop_write_region_sink
 let annotation_sink = Atomic.make noop_annotation_sink
 
 let register_tool_event_sink sink = Atomic.set tool_event_sink sink
-let register_pr_event_sink sink = Atomic.set pr_event_sink sink
 let register_turn_event_sink sink = Atomic.set turn_event_sink sink
 let register_write_region_sink sink = Atomic.set write_region_sink sink
 let register_annotation_sink sink = Atomic.set annotation_sink sink
@@ -255,7 +296,6 @@ let register_annotation_sink sink = Atomic.set annotation_sink sink
 
 type snapshot =
   { tool_events : tool_event list
-  ; pr_events : pr_event list
   ; turn_events : turn_event list
   ; write_regions : write_region_event list
   ; annotations : annotation_request list
@@ -263,7 +303,6 @@ type snapshot =
 
 let empty_snapshot =
   { tool_events = []
-  ; pr_events = []
   ; turn_events = []
   ; write_regions = []
   ; annotations = []
@@ -280,7 +319,6 @@ let rec update_snapshot f =
 
 let reverse_snapshot snap =
   { tool_events = List.rev snap.tool_events
-  ; pr_events = List.rev snap.pr_events
   ; turn_events = List.rev snap.turn_events
   ; write_regions = List.rev snap.write_regions
   ; annotations = List.rev snap.annotations
@@ -304,16 +342,6 @@ let tool_event_to_json (e : tool_event) =
     ; ("turn_id", `String e.turn_id)
     ; ("outcome", `String e.outcome)
     ; ("duration_ms", `Float e.duration_ms)
-    ]
-;;
-
-let pr_event_to_json (e : pr_event) =
-  `Assoc
-    [ ("base_path", `String e.base_path)
-    ; ("partition", partition_to_json e.partition)
-    ; ("keeper_id", `String e.keeper_id)
-    ; ("tool_name", `String e.tool_name)
-    ; ("success", `Bool e.success)
     ]
 ;;
 
@@ -347,20 +375,19 @@ let annotation_to_json (a : annotation_request) =
     ; ("kind", `String (annotation_kind_to_string a.kind))
     ; ("content", `String a.content)
     ; ("partition", partition_to_json a.partition)
+    ; ("references", annotation_references_to_json a.references)
     ]
 ;;
 
 let snapshot_to_json (snap : snapshot) =
   `Assoc
     [ ("tool_events", `List (List.map tool_event_to_json snap.tool_events))
-    ; ("pr_events", `List (List.map pr_event_to_json snap.pr_events))
     ; ("turn_events", `List (List.map turn_event_to_json snap.turn_events))
     ; ("write_regions", `List (List.map write_region_to_json snap.write_regions))
     ; ("annotations", `List (List.map annotation_to_json snap.annotations))
     ; ( "summary"
       , `Assoc
           [ ("tool_event_count", `Int (List.length snap.tool_events))
-          ; ("pr_event_count", `Int (List.length snap.pr_events))
           ; ("turn_event_count", `Int (List.length snap.turn_events))
           ; ("write_region_count", `Int (List.length snap.write_regions))
           ; ("annotation_count", `Int (List.length snap.annotations))
@@ -375,11 +402,6 @@ let peek_snapshot () = Atomic.get current_snapshot |> reverse_snapshot
 let emit_tool_event event =
   update_snapshot (fun snap -> { snap with tool_events = event :: snap.tool_events });
   Atomic.get tool_event_sink event
-;;
-
-let emit_pr_event event =
-  update_snapshot (fun snap -> { snap with pr_events = event :: snap.pr_events });
-  Atomic.get pr_event_sink event
 ;;
 
 let emit_turn_event event =
@@ -399,7 +421,6 @@ let emit_annotation_request request =
 
 let reset_for_testing () =
   Atomic.set tool_event_sink noop_tool_event_sink;
-  Atomic.set pr_event_sink noop_pr_event_sink;
   Atomic.set turn_event_sink noop_turn_event_sink;
   Atomic.set write_region_sink noop_write_region_sink;
   Atomic.set annotation_sink noop_annotation_sink;

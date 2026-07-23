@@ -25,7 +25,6 @@
 \*   spec value           | OCaml constructor                          | source
 \*   ---------------------+--------------------------------------------+-------
 \*   "idle"               | Keeper_turn_fsm.Idle                       | keeper_turn_fsm.mli
-\*   "phase_gating"       | Keeper_turn_fsm.Phase_gating               |
 \*   "runtime_routing"    | Keeper_turn_fsm.Runtime_routing            |
 \*   "awaiting_provider"  | Keeper_turn_fsm.Awaiting_provider          |
 \*   "streaming"          | Keeper_turn_fsm.Streaming                  |
@@ -35,20 +34,16 @@
 \*   "failed"             | Keeper_turn_fsm.Failed _                   |
 \*   "cancelled"          | Keeper_turn_fsm.Cancelled _                |
 \*
-\*   "receipt_unset"      | (no record_pre_dispatch_terminal_observation yet)
-\*   "receipt_skipped"    | record_pre_dispatch_terminal_observation outcome=skipped
+\*   "receipt_unset"      | no terminal receipt yet
 \*   "receipt_done"       | append_receipt outcome=done
 \*   "receipt_failed"     | append_receipt outcome=failed
 \*   "receipt_cancelled"  | append_receipt outcome=cancelled
 \*
-\*   stop_signaled        | supervisor stop / fleet shutdown / phase
-\*                          gate close — any externally observable
-\*                          cooperative-cancel request.
+\*   stop_signaled        | explicit operator or process shutdown request.
 \*
 \* Out-of-scope:
 \*   - failure_reason / cancel_reason carriers (the OCaml record fields
 \*     don't change the FSM shape, only the label).
-\*   - phase gate runtime selection internals (covered by KeeperTurnCycle).
 \*   - tool dispatch graph below the turn-facing projection.
 
 EXTENDS TLC
@@ -56,13 +51,12 @@ EXTENDS TLC
 VARIABLES
     turn_state,        \* one of TurnStateSet
     receipt_outcome,   \* one of ReceiptOutcomeSet
-    stop_signaled      \* BOOLEAN — supervisor / fleet shutdown raised
+    stop_signaled      \* BOOLEAN — explicit stop request raised
 
 vars == << turn_state, receipt_outcome, stop_signaled >>
 
 TurnStateSet ==
     { "idle",
-      "phase_gating",
       "runtime_routing",
       "awaiting_provider",
       "streaming",
@@ -74,8 +68,7 @@ TurnStateSet ==
 
 \* Active (non-terminal) states from which cancellation is observable.
 ActiveStateSet ==
-    { "phase_gating",
-      "runtime_routing",
+    { "runtime_routing",
       "awaiting_provider",
       "streaming",
       "awaiting_tool",
@@ -85,7 +78,6 @@ TerminalStateSet == { "done", "failed", "cancelled" }
 
 ReceiptOutcomeSet ==
     { "receipt_unset",
-      "receipt_skipped",
       "receipt_done",
       "receipt_failed",
       "receipt_cancelled" }
@@ -104,30 +96,10 @@ Init ==
 \* Forward transitions (the "happy path" + structured failures)
 \* ─────────────────────────────────────────────────────────────────────
 
-\* run_keeper_cycle entry → phase gate evaluation. Stop signal must not
+\* run_keeper_cycle entry → runtime routing. Stop signal must not
 \* already be raised — once a stop is in flight, no new turn starts.
 StartTurn ==
     /\ turn_state = "idle"
-    /\ ~stop_signaled
-    /\ turn_state' = "phase_gating"
-    /\ UNCHANGED << receipt_outcome, stop_signaled >>
-
-\* Phase gate skip — pre-dispatch terminal observation, outcome = skipped.
-\* Maps to keeper_unified_turn.ml:99-126 (non-executable phase early exit;
-\* PR #11154 wired keeper_turn_id; action label added to emit_transition).
-PhaseGateSkip ==
-    /\ turn_state = "phase_gating"
-    /\ ~stop_signaled
-    /\ turn_state' = "done"
-    /\ receipt_outcome' = "receipt_skipped"
-    /\ UNCHANGED stop_signaled
-
-\* Phase gate allows turn → runtime routing.
-\* Forward edges only fire when no stop signal is in flight; once stop
-\* is raised, HonorStopSignal is the only legal transition out of an
-\* active state.
-PhaseGateOk ==
-    /\ turn_state = "phase_gating"
     /\ ~stop_signaled
     /\ turn_state' = "runtime_routing"
     /\ UNCHANGED << receipt_outcome, stop_signaled >>
@@ -185,21 +157,13 @@ StreamComplete ==
     /\ turn_state' = "completing"
     /\ UNCHANGED << receipt_outcome, stop_signaled >>
 
-\* Contract validation passes → terminal Done.
-ContractOk ==
+\* Completion bookkeeping closes the turn. Completion evidence is recorded
+\* independently and cannot redirect the lifecycle to Failed.
+FinishTurn ==
     /\ turn_state = "completing"
     /\ ~stop_signaled
     /\ turn_state' = "done"
     /\ receipt_outcome' = "receipt_done"
-    /\ UNCHANGED stop_signaled
-
-\* Contract violation (passive_only / needs_execution_progress).
-\* Receipt outcome = failed (failure_reason = Tool_contract_violation).
-ContractViolation ==
-    /\ turn_state = "completing"
-    /\ ~stop_signaled
-    /\ turn_state' = "failed"
-    /\ receipt_outcome' = "receipt_failed"
     /\ UNCHANGED stop_signaled
 
 \* Receipt I/O failure during a happy-path completion. Models
@@ -212,7 +176,7 @@ ReceiptLost ==
     /\ receipt_outcome' = "receipt_failed"
     /\ UNCHANGED stop_signaled
 
-\* Supervisor / fleet shutdown / phase gate close raises the stop signal
+\* An explicit operator or process shutdown raises the stop signal
 \* asynchronously. Modelled separately from the actual cancellation step
 \* so the invariant can observe the "signal raised but not yet honored"
 \* window.
@@ -264,8 +228,6 @@ TerminalStutter ==
 
 Next ==
     \/ StartTurn
-    \/ PhaseGateSkip
-    \/ PhaseGateOk
     \/ RuntimeRouted
     \/ RuntimeUnavailable
     \/ ProviderResponded
@@ -273,8 +235,7 @@ Next ==
     \/ StreamYieldsTool
     \/ ToolReturned
     \/ StreamComplete
-    \/ ContractOk
-    \/ ContractViolation
+    \/ FinishTurn
     \/ ReceiptLost
     \/ SupervisorRequestsStop
     \/ HonorStopSignal
@@ -294,12 +255,11 @@ Fairness ==
     \* to be *continuously* enabled. SF requires it to fire if it is
     \* *infinitely often* enabled, which the cycle satisfies.
     /\ WF_vars(StartTurn)
-    /\ WF_vars(PhaseGateOk \/ PhaseGateSkip)
     /\ WF_vars(RuntimeRouted \/ RuntimeUnavailable)
     /\ WF_vars(ProviderResponded \/ ProviderTimeout)
     /\ SF_vars(StreamComplete)
     /\ WF_vars(ToolReturned)
-    /\ WF_vars(ContractOk \/ ContractViolation \/ ReceiptLost)
+    /\ WF_vars(FinishTurn \/ ReceiptLost)
     /\ WF_vars(HonorStopSignal)
 
 Spec      == Init /\ [][Next]_vars      /\ Fairness
@@ -319,8 +279,7 @@ EveryTurnHasTerminalReceipt ==
 \* the model wrote something; Failed means structured failure; Cancelled
 \* means cooperative-cancel was respected.
 ReceiptMatchesState ==
-    /\ (turn_state = "done" =>
-            receipt_outcome \in {"receipt_done", "receipt_skipped"})
+    /\ (turn_state = "done"      => receipt_outcome = "receipt_done")
     /\ (turn_state = "failed"    => receipt_outcome = "receipt_failed")
     /\ (turn_state = "cancelled" => receipt_outcome = "receipt_cancelled")
 

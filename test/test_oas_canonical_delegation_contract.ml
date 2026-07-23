@@ -4,10 +4,8 @@
     instead of hand-rolling them:
     - [keeper_event_bridge_error_json]: [total_tokens]
     - [context_compact_oas]: [role_to_string]
-    - [sdk_tool_contract]: [param_type_of_string] (strict [None] on unknown)
     - [keeper_run_tools_setup]: [params_to_input_schema]
-    - [keeper_context_tool_message_pairs] and peer consumers:
-      [Canonical_tool.tool_call_of_block]
+    - keeper prompt/telemetry consumers: [Canonical_tool.tool_call_of_block]
 
     These tests pin the exact OAS outputs MASC now emits on the wire (provider
     request tool schema, dashboard role labels, usage JSON). They are a boundary
@@ -38,17 +36,6 @@ let test_role_to_string () =
   check string "assistant" "assistant"
     (Agent_sdk.Types.role_to_string Agent_sdk.Types.Assistant);
   check string "tool" "tool" (Agent_sdk.Types.role_to_string Agent_sdk.Types.Tool)
-
-(* sdk_tool_contract.ml:253 — strict [None] on unknown (#8832 drift WARN driver). *)
-let test_param_type_of_string_strict_option () =
-  let opt s = Agent_sdk.Types.param_type_of_string s |> Result.to_option in
-  check bool "string" true (opt "string" = Some Agent_sdk.Types.String);
-  check bool "integer" true (opt "integer" = Some Agent_sdk.Types.Integer);
-  check bool "number" true (opt "number" = Some Agent_sdk.Types.Number);
-  check bool "boolean" true (opt "boolean" = Some Agent_sdk.Types.Boolean);
-  check bool "array" true (opt "array" = Some Agent_sdk.Types.Array);
-  check bool "object" true (opt "object" = Some Agent_sdk.Types.Object);
-  check bool "unknown -> None (strict, #8832)" true (opt "definitely-not-a-type" = None)
 
 (* keeper_run_tools_setup.ml:168 — input schema shape equals the prior hand-built JSON:
    ordered properties, {type; description} per param, required = required names. *)
@@ -85,7 +72,6 @@ let test_tool_call_of_block_shape () =
 let suite =
   [ test_case "total_tokens billable" `Quick test_total_tokens
   ; test_case "role_to_string variants" `Quick test_role_to_string
-  ; test_case "param_type_of_string strict option" `Quick test_param_type_of_string_strict_option
   ; test_case "params_to_input_schema shape" `Quick test_params_to_input_schema_shape
   ; test_case "tool_call_of_block shape" `Quick test_tool_call_of_block_shape
   ]

@@ -66,6 +66,17 @@ let seed_legacy_keeper_post () =
   Board_dispatch.init_jsonl ();
   post_id
 
+let keeper_meta name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+        [ "name", `String name
+        ; "trace_id", `String ("test-trace-" ^ name)
+        ])
+  with
+  | Ok meta -> meta
+  | Error error -> Alcotest.failf "keeper meta fixture invalid: %s" error
+
 (** {1 Backend Selection} *)
 
 let test_default_backend () =
@@ -473,6 +484,148 @@ let test_list_posts_with_sort () =
   let all_same = List.for_all (fun c -> c = List.hd counts) counts in
   Alcotest.(check bool) "all sort orders return same count" true all_same
 
+let board_observation_meta name =
+  match
+    Keeper_meta_json_parse.meta_of_json
+      (`Assoc
+        [ "name", `String name
+        ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
+        ; "trace_id", `String ("trace-" ^ name)
+        ; "sandbox_profile", `String "local"
+        ; "network_mode", `String "inherit"
+        ])
+  with
+  | Ok meta -> meta
+  | Error message -> Alcotest.failf "board observation meta failed: %s" message
+
+let test_first_board_observation_starts_at_current_head () =
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  let keeper_name = "cursor-bootstrap" in
+  let meta = board_observation_meta keeper_name in
+  ignore (Keeper_registry.For_testing.register ~base_path keeper_name meta);
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)
+    (fun () ->
+       let old_post =
+         match
+           Board_dispatch.create_post
+             ~author:"external-author"
+             ~content:("@" ^ keeper_name ^ " historical post must not replay")
+             ~post_kind:Board.Human_post
+             ()
+         with
+         | Ok post -> post
+         | Error error -> Alcotest.fail (Board.show_board_error error)
+       in
+       let events, new_count, mention_count =
+         Keeper_world_observation.collect_board_events ~base_path ~meta
+       in
+       Alcotest.(check int)
+         "historical events are not replayed"
+         0
+         (List.length events);
+       Alcotest.(check int) "historical post is not counted as new" 0 new_count;
+       Alcotest.(check int) "historical mention is not counted" 0 mention_count;
+       let cursor_ts, cursor_post_id =
+         Keeper_registry.get_board_cursor ~base_path keeper_name
+       in
+       Alcotest.(check (float 0.0))
+         "cursor starts at exact current Board head"
+         old_post.updated_at
+         cursor_ts;
+       Alcotest.(check (option string))
+         "cursor records current head post id"
+         (Some (Board.Post_id.to_string old_post.id))
+         cursor_post_id;
+       Unix.sleepf 0.01;
+       let new_post =
+         match
+           Board_dispatch.create_post
+             ~author:"external-author"
+             ~content:("@" ^ keeper_name ^ " new post must be observed")
+             ~post_kind:Board.Human_post
+             ()
+         with
+         | Ok post -> post
+         | Error error -> Alcotest.fail (Board.show_board_error error)
+       in
+       let events, new_count, mention_count =
+         Keeper_world_observation.collect_board_events ~base_path ~meta
+       in
+       Alcotest.(check int) "new event is observed once" 1 (List.length events);
+       Alcotest.(check int) "new post count" 1 new_count;
+       Alcotest.(check int) "new mention count" 1 mention_count;
+       match events with
+       | [ event ] ->
+         Alcotest.(check string)
+           "new event id"
+           (Board.Post_id.to_string new_post.id)
+           event.Keeper_world_observation.post_id
+       | _ -> Alcotest.fail "expected exactly one new Board event")
+
+let test_dashboard_projection_does_not_produce_attention_candidate () =
+  let base_path = Sys.getenv "MASC_BASE_PATH" in
+  let keeper_name = "projection-read-only" in
+  let meta = board_observation_meta keeper_name in
+  let entry = Keeper_registry.For_testing.register ~base_path keeper_name meta in
+  Fun.protect
+    ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)
+    (fun () ->
+       ignore
+         (Keeper_world_observation.collect_board_events ~base_path ~meta
+           : Keeper_world_observation.pending_board_event list * int * int);
+       Unix.sleepf 0.01;
+       (match
+          Board_dispatch.create_post
+            ~author:"external-author"
+            ~content:"ambient post requiring the structured attention judge"
+            ~post_kind:Board.Human_post
+            ()
+        with
+        | Ok _ -> ()
+        | Error error -> Alcotest.fail (Board.show_board_error error));
+       ignore
+         (Keeper_world_observation.collect_board_events_without_advancing_cursor
+            ~base_path
+            ~meta
+           : Keeper_world_observation.pending_board_event list * int * int);
+       (match
+          Keeper_board_attention_candidate.load_candidates
+            ~base_path
+            ~keeper_name
+        with
+        | Ok [] -> ()
+        | Ok candidates ->
+          Alcotest.failf
+            "read-only projection persisted %d attention candidates"
+            (List.length candidates)
+        | Error detail ->
+          Alcotest.failf "candidate projection read failed: %s" detail);
+       Alcotest.(check bool)
+         "read-only projection did not wake the Keeper"
+         false
+         (Atomic.get entry.fiber_wakeup);
+       ignore
+         (Keeper_world_observation.collect_board_events ~base_path ~meta
+           : Keeper_world_observation.pending_board_event list * int * int);
+       (match
+          Keeper_board_attention_candidate.load_candidates
+            ~base_path
+            ~keeper_name
+        with
+        | Ok [ { status = Keeper_board_attention_candidate.Pending _; _ } ] -> ()
+        | Ok candidates ->
+          Alcotest.failf
+            "live owner collection persisted %d candidates instead of one Pending"
+            (List.length candidates)
+        | Error detail ->
+          Alcotest.failf "owner candidate read failed: %s" detail);
+       Alcotest.(check bool)
+         "live owner collection woke the Keeper"
+         true
+         (Atomic.get entry.fiber_wakeup))
+;;
+
 let test_recent_sort_bypasses_hot_cutoff () =
   let create_post_exn ~author ~content =
     match
@@ -616,24 +769,12 @@ let test_author_filter_treats_wildcards_literally () =
   Alcotest.(check int) "percent does not match all authors" 0
     (List.length filtered)
 
-let test_reclassify_posts_dry_run_and_apply () =
+let test_legacy_post_without_kind_is_rejected () =
   let post_id = seed_legacy_keeper_post () in
-  let dry_run = Board_dispatch.reclassify_posts ~dry_run:true () in
-  Alcotest.(check int) "dry run changed" 1 dry_run.changed;
-  (match Board_dispatch.get_post ~post_id with
-   | Error e -> Alcotest.fail (Board.show_board_error e)
-   | Ok fetched ->
-       Alcotest.(check string) "legacy row resolves as automation" "automation"
-         (Board.post_kind_to_string fetched.post_kind));
-  let applied = Board_dispatch.reclassify_posts ~dry_run:false () in
-  Alcotest.(check int) "apply changed" 1 applied.changed;
-  Board_dispatch.reset_for_test ();
-  Board_dispatch.init_jsonl ();
   match Board_dispatch.get_post ~post_id with
+  | Error (Board.Post_not_found _) -> ()
   | Error e -> Alcotest.fail (Board.show_board_error e)
-  | Ok fetched ->
-      Alcotest.(check string) "persisted as automation" "automation"
-        (Board.post_kind_to_string fetched.post_kind)
+  | Ok _ -> Alcotest.fail "legacy post without post_kind must not be classified"
 
 (** {1 Comment Operations} *)
 
@@ -1464,31 +1605,6 @@ let test_invalid_author () =
   | Ok _ -> Alcotest.fail "Expected validation error for empty author"
   | Error _ -> ()
 
-(** {1 MASC_BOARD_BACKEND env var} *)
-
-let test_jsonl_forced_default () =
-  (try Unix.putenv "MASC_BOARD_BACKEND" "" with _ -> ());
-  Alcotest.(check bool) "empty env not forced"
-    false (Board_dispatch.jsonl_forced ())
-
-let test_jsonl_forced_explicit () =
-  Unix.putenv "MASC_BOARD_BACKEND" "jsonl";
-  Alcotest.(check bool) "jsonl is forced"
-    true (Board_dispatch.jsonl_forced ());
-  Unix.putenv "MASC_BOARD_BACKEND" ""
-
-let test_jsonl_forced_pg () =
-  Unix.putenv "MASC_BOARD_BACKEND" "pg";
-  Alcotest.(check bool) "pg is not forced"
-    false (Board_dispatch.jsonl_forced ());
-  Unix.putenv "MASC_BOARD_BACKEND" ""
-
-let test_jsonl_forced_case_insensitive () =
-  Unix.putenv "MASC_BOARD_BACKEND" "JSONL";
-  Alcotest.(check bool) "JSONL uppercase is forced"
-    true (Board_dispatch.jsonl_forced ());
-  Unix.putenv "MASC_BOARD_BACKEND" ""
-
 (** {1 SubBoard CRUD} *)
 
 let test_sub_board_create_and_get () =
@@ -1850,6 +1966,14 @@ let () =
       Alcotest.test_case "negative list limit" `Quick
         (with_eio test_list_posts_negative_limit_returns_empty);
       Alcotest.test_case "sort orders" `Quick (with_eio test_list_posts_with_sort);
+      Alcotest.test_case
+        "first observation starts at current head"
+        `Quick
+        (with_eio test_first_board_observation_starts_at_current_head);
+      Alcotest.test_case
+        "dashboard projection does not produce attention candidate"
+        `Quick
+        (with_eio test_dashboard_projection_does_not_produce_attention_candidate);
       Alcotest.test_case "recent bypasses hot cutoff" `Quick
         (with_eio test_recent_sort_bypasses_hot_cutoff);
       Alcotest.test_case "filters" `Quick (with_eio test_list_posts_with_filters);
@@ -1857,8 +1981,8 @@ let () =
         (with_eio test_list_posts_matches_comment_author);
       Alcotest.test_case "literal wildcard filter" `Quick
         (with_eio test_author_filter_treats_wildcards_literally);
-      Alcotest.test_case "reclassify dry-run and apply" `Quick
-        (with_eio test_reclassify_posts_dry_run_and_apply);
+      Alcotest.test_case "legacy post without kind is rejected" `Quick
+        (with_eio test_legacy_post_without_kind_is_rejected);
     ];
     "comments", [
       Alcotest.test_case "add and get" `Quick (with_eio test_add_and_get_comments);
@@ -1920,12 +2044,6 @@ let () =
     "validation", [
       Alcotest.test_case "empty content" `Quick (with_eio test_empty_content);
       Alcotest.test_case "invalid author" `Quick (with_eio test_invalid_author);
-    ];
-    "env_control", [
-      Alcotest.test_case "default not forced" `Quick (with_eio test_jsonl_forced_default);
-      Alcotest.test_case "jsonl forced" `Quick (with_eio test_jsonl_forced_explicit);
-      Alcotest.test_case "pg not forced" `Quick (with_eio test_jsonl_forced_pg);
-      Alcotest.test_case "case insensitive" `Quick (with_eio test_jsonl_forced_case_insensitive);
     ];
     "sub_boards", [
       Alcotest.test_case "create and get" `Quick (with_eio test_sub_board_create_and_get);

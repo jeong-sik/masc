@@ -5,9 +5,8 @@
     {!Runtime_transport}, and
     {!Runtime_oas_checkpoint}.  External callers reach
     the run/config entry points via [Runtime_agent.X];
-    provider transport internals (CLI / MCP wire formats,
-    runtime policy projections, and transport-local
-    diagnostics) are owned by {!Runtime_transport}.
+    provider transport internals and transport-local diagnostics are owned by
+    {!Runtime_transport}.
 
     All model-selection and runtime logic lives in
     {!Runtime_observation} and {!Keeper_turn_driver}.
@@ -15,112 +14,77 @@
     Internal helpers stay private at this boundary
     ([invalid_runtime_config],
     [provider_supports_inline_tools],
-    [provider_supports_runtime_mcp_lane],
-    [dedupe_preserve_order],
-    [public_mcp_tool_names_of_oas_tools],
-    [public_mcp_tool_requires_bound_actor],
-    [public_mcp_tools_of_oas_tools],
-    [tool_names_are_public_mcp],
-    [persist_checkpoint], [build_checkpoint],
+    [build_checkpoint],
     [partial_response_of_stop]). *)
 
 (** {1 Stop reason} *)
 
 type stop_reason = Runtime_agent_context.stop_reason =
   | Completed
-  | TurnBudgetExhausted of { turns_used : int; limit : int }
-  | MutationBoundaryReached of {
-      turns_used : int;
-      tool_name : string option;
-    }
   | Yielded_to_chat_waiting of { turns_used : int }
   | Yielded_to_durable_stimulus of { turns_used : int }
   | InputRequired of {
       turns_used : int;
       request : Agent_sdk.Error.input_required;
     }
-  | ToolFailureRecoveryDeferred of {
-      turns_used : int;
-      reason : string;
-      tool_names : string list;
-    }
+
+type cooperative_yield_reason =
+  | Chat_waiting
+  | Durable_stimulus_waiting
+
+type cooperative_yield_decision =
+  | Continue
+  | Yield of cooperative_yield_reason
+
+type cooperative_yield_probe =
+  Agent_sdk.Agent.Advanced.tool_boundary ->
+  (cooperative_yield_decision, Agent_sdk.Error.sdk_error) result
 (** Why this single OAS call yielded control. [Completed] is the
-    model's success path; [TurnBudgetExhausted] means the per-call
-    turn budget checkpoint was reached. It is not a completed
-    deliverable; callers must classify it from typed stop reason plus
-    durable-progress evidence before deciding whether to continue from
-    the persisted checkpoint. [MutationBoundaryReached] fires when the
-    keeper hit a mutation tool while in read-only mode (the [tool_name]
-    surfaces which tool triggered the gate). [Yielded_to_chat_waiting]
-    fires when an autonomous-lane run stopped at a turn boundary to hand
-    the keeper's turn slot to a parked dashboard/connector chat request.
+    model's success path. [Yielded_to_chat_waiting] fires when an
+    autonomous-lane run stopped at a turn boundary to hand the keeper's
+    turn slot to a parked dashboard/connector chat request.
     [Yielded_to_durable_stimulus] fires after at least one provider turn when
     another durable event is waiting behind the event currently leased by the
     cycle. [InputRequired] means OAS returned a typed elicitation request whose
-    question and checkpoint must be surfaced without provider fallback.
-    [ToolFailureRecoveryDeferred] means the typed OAS recovery judge
-    returned control to the host without another main-provider call; its
-    [reason] is observation-only and must never drive scheduling. These typed
-    non-completion stops persist checkpoints rather than claiming a completed
-    deliverable: [InputRequired] resumes from later host input, while the yield
-    and defer variants resume through later host-owned activity boundaries. *)
+    question and checkpoint must be surfaced without provider fallback. These
+    typed non-completion stops persist checkpoints rather than claiming a
+    completed deliverable: [InputRequired] resumes from later host input, while
+    yield variants resume through later host-owned activity boundaries. *)
 
 (** {1 Config} *)
 
 type config = Runtime_agent_context.config = {
   name : string;
   provider_cfg : Llm_provider.Provider_config.t;
-  provider : Agent_sdk.Provider.config;
   model_id : string;
-  priority : Llm_provider.Request_priority.t option;
   system_prompt : string;
   tools : Agent_sdk.Tool.t list;
-  runtime_mcp_policy :
-    Llm_provider.Llm_transport.runtime_mcp_policy option;
-  max_turns : int;
-  max_idle_turns : int;
   stream_idle_timeout_s : float option;
-  max_execution_time_s : float option;
   body_timeout_s : float option;
   max_tokens : int option;
-  temperature : float;
+  temperature : float option;
   hooks : Agent_sdk.Hooks.hooks option;
-  context_reducer : Agent_sdk.Context_reducer.t option;
-  guardrails : Agent_sdk.Guardrails.t option;
   event_bus : Agent_sdk.Event_bus.t option;
-  checkpoint_dir : string option;
   session_id : string option;
   description : string option;
   initial_messages : Agent_sdk.Types.message list;
+  model_input_projection
+      : (Agent_sdk.Types.message list -> Agent_sdk.Types.message list) option;
   raw_trace : Agent_sdk.Raw_trace.t option;
   trace_link : (string * string) option;
   enable_thinking : bool option;
   preserve_thinking : bool option;
   transport : Masc_grpc_transport.t;
-  allowed_paths : string list;
   checkpoint_sidecar : Yojson.Safe.t option;
   cache_system_prompt : bool;
   yield_on_tool : bool;
-  tool_failure_judge : Agent_sdk.Tool_failure_recovery.judge option;
-  compact_ratio : float option;
-  context_window_tokens : int option;
-  oas_auto_context_overflow_retry : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
-  approval : Agent_sdk.Hooks.approval_callback option;
-  exit_condition : (int -> bool) option;
-  exit_condition_result : (int -> stop_reason * string option) option;
-  summarizer : (Agent_sdk.Types.message list -> string) option;
-  execution_idle_timeout_s : float option;
   thinking_budget : int option;
   top_p : float option;
   top_k : int option;
   min_p : float option;
   on_run_complete : (bool -> unit) option;
-  disclosure_level : Agent_sdk.Tool.disclosure_level option;
-  disclosure_resolver
-      : (Agent_sdk.Types.tool_result list -> Agent_sdk.Tool.disclosure_level option) option;
-  tool_selector : Agent_sdk.Tool_selector.strategy option;
   checkpoint_sink : Agent_sdk.Agent.checkpoint_sink option;
 }
 
@@ -177,46 +141,6 @@ val provider_caps_of_config :
   Llm_provider.Provider_config.t ->
   Llm_provider.Capabilities.capabilities
 val provider_label : Llm_provider.Provider_config.t -> string
-(** {1 Runtime-MCP policy} *)
-
-val runtime_mcp_tool_requires_bound_actor : string -> bool
-val runtime_mcp_policy_with_masc_agent_name :
-  ?include_internal_token:bool ->
-  agent_name:string ->
-  Llm_provider.Llm_transport.runtime_mcp_policy ->
-  Llm_provider.Llm_transport.runtime_mcp_policy
-val codex_cli_can_auth_keeper_bound_runtime_mcp :
-  base_path:string ->
-  agent_name:string ->
-  Llm_provider.Llm_transport.runtime_mcp_policy ->
-  bool
-val runtime_mcp_policy_for_provider :
-  base_path:string ->
-  provider_cfg:Llm_provider.Provider_config.t ->
-  agent_name:string ->
-  Llm_provider.Llm_transport.runtime_mcp_policy option ->
-  Llm_provider.Llm_transport.runtime_mcp_policy option
-val public_mcp_runtime_policy_of_tool_names :
-  base_path:string ->
-  ?agent_name:string ->
-  string list ->
-  Llm_provider.Llm_transport.runtime_mcp_policy option
-val runtime_mcp_policy_of_tool_names :
-  base_path:string ->
-  ?agent_name:string ->
-  ?allow_agent_internal:bool ->
-  string list ->
-  Llm_provider.Llm_transport.runtime_mcp_policy option
-val resolve_tool_lane_for_oas_tools :
-  base_path:string ->
-  ?agent_name:string ->
-  provider_cfg:Llm_provider.Provider_config.t ->
-  tools:Agent_sdk.Tool.t list ->
-  unit ->
-  ( Agent_sdk.Tool.t list
-    * Llm_provider.Llm_transport.runtime_mcp_policy option,
-    Agent_sdk.Error.sdk_error )
-  result
 
 val runtime_observation_for_terminal_config :
   total_duration_ms:float ->
@@ -258,35 +182,11 @@ val input_capabilities_of_runtime :
     with the model's declared media capabilities (the MASC SSOT). Used to score the
     assigned runtime and reroute candidates. *)
 
-val media_reroute_candidates :
-  exclude:string -> (string * Llm_provider.Capabilities.capabilities) list
-(** Ordered [(runtime_id, input_caps)] reroute candidates: [\[runtime\].media_failover]
-    order first, then remaining configured runtimes in declaration order, excluding
-    [exclude]. Reads the runtime cache; deterministic (no provider liveness). *)
-
 val caps_admit_required_modalities :
   Llm_provider.Capabilities.capabilities -> string list -> bool
 (** Shared RFC-0265 modality-admission predicate. Callers that need to preselect
     media-capable runtimes must use this instead of re-deriving checks from
     individual capability booleans. *)
-
-val first_media_capable_runtime : modality:string -> string option
-(** Runtime id of the first configured runtime that admits [modality] (e.g.
-    ["image"]) as input, in [media_reroute_candidates] order (media_failover then
-    declaration). [None] when none qualifies. Uses the same admit predicate as the
-    RFC-0265 reroute, so the pick matches the dispatch capability gate. *)
-
-val decide_modality_reroute_for_runtime :
-  assigned:Runtime.t ->
-  ?checkpoint_messages:Agent_sdk.Types.message list ->
-  ?initial_messages:Agent_sdk.Types.message list ->
-  Agent_sdk.Types.content_block list ->
-  reroute_decision
-(** Keeper-dispatch convenience: gather candidates from the runtime cache and
-    decide a reroute for [assigned] given the active run view: prior
-    [initial_messages], checkpoint resume messages, plus the current turn's
-    content blocks. Composes [input_capabilities_of_runtime] /
-    [media_reroute_candidates] / [decide_modality_reroute]. *)
 
 val decide_modality_reroute_for_runtime_candidates :
   assigned:Runtime.t ->
@@ -325,12 +225,7 @@ val media_degrade_note :
     was dropped rather than vanishing. [None] when nothing was dropped. *)
 
 module For_testing : sig
-  val request_runtime_fields_on_base_config :
-    base:Llm_provider.Provider_config.t ->
-    Llm_provider.Provider_config.t ->
-    Llm_provider.Provider_config.t
-
-  val provider_http_slot_transport :
+  val provider_http_observation_transport :
     Llm_provider.Llm_transport.t -> Llm_provider.Llm_transport.t
 
   val runtime_id_of_config : config -> string
@@ -408,6 +303,12 @@ module For_testing : sig
     Runtime_schema.model_capabilities ->
     Llm_provider.Capabilities.capabilities
 
+  val select_agent_result :
+    checkpoint:'checkpoint option ->
+    resume:('checkpoint -> 'result) ->
+    build:(unit -> 'result) ->
+    'result
+
   val runtime_observation_for_completed_config :
     total_duration_ms:float -> config -> Runtime_observation.runtime_observation
 
@@ -434,9 +335,6 @@ val publish_lifecycle :
   ?attrs:(string * Yojson.Safe.t) list ->
   unit ->
   unit
-val enrich_idle_detail :
-  string -> Agent_sdk.Types.message list -> string
-
 (** {1 Build / resume / run} *)
 
 val build :
@@ -445,8 +343,7 @@ val build :
   config:config ->
   (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result
 (** Builds an [Agent_sdk.Agent.t] from a {!config} ready for a
-    fresh run over the HTTP provider transport; threads
-    [config.approval] into the OAS builder when present. *)
+    fresh run over the HTTP provider transport. *)
 
 val resume_from_checkpoint :
   sw:Eio.Switch.t ->
@@ -467,6 +364,7 @@ val run :
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
   ?agent_ref:Agent_sdk.Agent.t option ref ->
+  ?cooperative_yield_probe:cooperative_yield_probe ->
   string ->
   (run_result, Agent_sdk.Error.sdk_error) result
 (** Runs an OAS agent against [goal].  When
@@ -484,6 +382,7 @@ val run_blocks :
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
   ?agent_ref:Agent_sdk.Agent.t option ref ->
+  ?cooperative_yield_probe:cooperative_yield_probe ->
   ?goal_detail:string ->
   Agent_sdk.Types.content_block list ->
   (run_result, Agent_sdk.Error.sdk_error) result
@@ -494,7 +393,6 @@ val run_blocks :
 val run_with_masc_tools :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  base_path:string ->
   config:config ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
@@ -503,10 +401,8 @@ val run_with_masc_tools :
   ?on_resume:(unit -> unit) ->
   string ->
   (run_result, Agent_sdk.Error.sdk_error) result
-(** Variant of {!run} that wires MASC public-MCP tools
-    into the agent through [dispatch].  Used by the
-    keeper-runtime path that needs to expose MCP-style
-    tools to the model alongside OAS tools. *)
+(** Variant of {!run} that projects the supplied MASC schemas into exact inline
+    [Agent_sdk.Tool.t] values through [dispatch]. *)
 
 val set_oas_tool_of_masc_hook :
   (name:string ->

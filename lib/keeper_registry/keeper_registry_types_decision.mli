@@ -3,19 +3,16 @@
 type decision_stage =
   | Decision_undecided [@tla.idle]
   | Decision_guard_ok [@tla.active]
-  | Decision_gate_rejected [@tla.terminal]
   | Decision_tool_policy_selected [@tla.active]
 [@@deriving tla]
 
 type decision_undecided
 type decision_guard_ok
-type decision_gate_rejected
 type decision_tool_policy_selected
 
 type 'a decision_stage_witness =
   | Decision_undecided : decision_undecided decision_stage_witness
   | Decision_guard_ok : decision_guard_ok decision_stage_witness
-  | Decision_gate_rejected : decision_gate_rejected decision_stage_witness
   | Decision_tool_policy_selected : decision_tool_policy_selected decision_stage_witness
 
 type packed_decision_stage = Packed : 'a decision_stage_witness -> packed_decision_stage
@@ -25,7 +22,6 @@ val stage_to_witness : decision_stage -> packed_decision_stage
 
 type decision_stage_active =
   | Decision_active_guard_ok
-  | Decision_active_gate_rejected
   | Decision_active_tool_policy_selected
 
 val decision_stage_active_to_packed
@@ -37,19 +33,12 @@ val packed_decision_stage_label : packed_decision_stage -> string
 module Decision_transition : sig
   type ('from, 'to_) t =
     | Undecided_to_guard_ok : (decision_undecided, decision_guard_ok) t
-    | Undecided_to_gate_rejected : (decision_undecided, decision_gate_rejected) t
     | Undecided_to_tool_policy_selected :
         (decision_undecided, decision_tool_policy_selected) t
-    | Guard_ok_to_gate_rejected : (decision_guard_ok, decision_gate_rejected) t
     | Guard_ok_to_tool_policy_selected :
         (decision_guard_ok, decision_tool_policy_selected) t
-    | Gate_rejected_to_guard_ok : (decision_gate_rejected, decision_guard_ok) t
-    | Gate_rejected_to_tool_policy_selected :
-        (decision_gate_rejected, decision_tool_policy_selected) t
     | Tool_policy_selected_to_guard_ok :
         (decision_tool_policy_selected, decision_guard_ok) t
-    | Tool_policy_selected_to_gate_rejected :
-        (decision_tool_policy_selected, decision_gate_rejected) t
 
   val to_tag : ('from, 'to_) t -> string
 end

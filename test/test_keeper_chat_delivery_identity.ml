@@ -1,6 +1,6 @@
 open Alcotest
 
-module Identity = Masc.Keeper_chat_delivery_identity
+module Identity = Keeper_chat_delivery_identity
 
 let expect_ok = function
   | Ok value -> value
@@ -47,6 +47,26 @@ let test_queue_requires_nonempty_receipts () =
   in
   check bool "queue identity roundtrips" true
     (Identity.delivery_key_equal key decoded)
+;;
+
+let test_async_roundtrip () =
+  let request_id =
+    Identity.Request_id.of_string "fus-async-test" |> expect_ok
+  in
+  let key = Identity.Async_request request_id in
+  let decoded =
+    Identity.delivery_key_to_yojson key
+    |> Identity.delivery_key_of_yojson
+    |> expect_ok
+  in
+  check bool "async identity roundtrips" true
+    (Identity.delivery_key_equal key decoded);
+  check bool "async namespace differs from direct" false
+    (Identity.delivery_key_equal key (Identity.Direct_request request_id));
+  check bool "async filename namespace is stable" true
+    (String.equal
+       (Identity.delivery_key_file_stem key)
+       (Identity.delivery_key_file_stem decoded))
 ;;
 
 let test_transcript_slot_roundtrip () =
@@ -109,6 +129,10 @@ let () =
     "keeper chat delivery identity"
     [ ( "identity"
       , [ test_case "direct roundtrip" `Quick test_direct_roundtrip
+        ; test_case
+            "async request roundtrip"
+            `Quick
+            test_async_roundtrip
         ; test_case
             "queue identity is nonempty"
             `Quick

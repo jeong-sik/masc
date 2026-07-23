@@ -31,23 +31,23 @@ module Float = Stdlib.Float
 *)
 
 (* ===== Runtime-tunable parameters =====
-   Values come from Runtime_params via Governance_registry. Call these
-   as thunks to pick up governance overrides without restart. *)
+   Values come from Runtime_params via Runtime_settings. Call these
+   as thunks to pick up runtime updates without restart. *)
 
 (** Maximum path length before truncation. *)
-let max_path_length () = Runtime_params.get Governance_registry.dashboard_max_path_length
+let max_path_length () = Runtime_params.get Runtime_settings.dashboard_max_path_length
 
 (** Maximum message content length before truncation. *)
-let max_message_length () = Runtime_params.get Governance_registry.dashboard_max_message_length
+let max_message_length () = Runtime_params.get Runtime_settings.dashboard_max_message_length
 
 (** Maximum pending tasks to show. *)
-let max_pending_tasks () = Runtime_params.get Governance_registry.dashboard_max_pending_tasks
+let max_pending_tasks () = Runtime_params.get Runtime_settings.dashboard_max_pending_tasks
 
 (** Maximum recent messages to show. *)
-let max_recent_messages () = Runtime_params.get Governance_registry.dashboard_max_recent_messages
+let max_recent_messages () = Runtime_params.get Runtime_settings.dashboard_max_recent_messages
 
 (** Minimum section border length. *)
-let min_border_length () = Runtime_params.get Governance_registry.dashboard_min_border_length
+let min_border_length () = Runtime_params.get Runtime_settings.dashboard_min_border_length
 
 (* ===== Masc_domain ===== *)
 
@@ -212,11 +212,6 @@ let count_locks_for_workspace (config : Workspace_utils.config) =
   let locks_dir = Filename.concat (Workspace.masc_dir config) "locks" in
   count_locks_for_dir config locks_dir
 
-let tempo_section (config : Workspace_utils.config) : section =
-  let state = Tempo.get_tempo config in
-  let content = [Tempo.format_state state] in
-  { title = "Tempo"; content; empty_msg = "" }
-
 let active_workspace_id = "workspace"
 
 let workspace_snapshot (config : Workspace_utils.config) =
@@ -227,34 +222,6 @@ let workspace_snapshot (config : Workspace_utils.config) =
     messages = Workspace.get_messages_raw config ~since_seq:0 ~limit:(max_recent_messages ());
     locks = count_locks_for_workspace config;
   }
-
-let workspace_overview_section (snapshots : workspace_snapshot list) : section =
-  let content =
-    List.map (fun snapshot ->
-      let (active, pending) = split_tasks snapshot.tasks in
-      Printf.sprintf "%s: %d agents | %d active | %d pending | %d locks"
-        snapshot.workspace_id
-        (List.length snapshot.agents)
-        (List.length active)
-        (List.length pending)
-        snapshot.locks
-    ) snapshots
-  in
-  { title = "Workspace"; content; empty_msg = "(no workspace data)" }
-
-let workspace_section now (snapshot : workspace_snapshot) : section =
-  let (active, pending) = split_tasks snapshot.tasks in
-  let content =
-    [Printf.sprintf "Summary: %d agents | %d active | %d pending | %d locks"
-       (List.length snapshot.agents)
-       (List.length active)
-       (List.length pending)
-       snapshot.locks]
-    @ add_group "Agents" (agent_lines now snapshot.agents) "(no agents)"
-    @ add_group "Tasks" (task_lines snapshot.tasks) "(no tasks)"
-    @ add_group "Recent Messages" (message_lines snapshot.messages) "(no messages)"
-  in
-  { title = Printf.sprintf "Workspace: %s" snapshot.workspace_id; content; empty_msg = "" }
 
 let agents_section now (agents : Masc_domain.agent list) : section =
   let content = agent_lines now agents in
@@ -268,37 +235,6 @@ let messages_section (messages : Masc_domain.message list) : section =
   let content = message_lines messages in
   { title = "Recent Messages"; content; empty_msg = "(no messages)" }
 
-let locks_section locks : section =
-  let content = [Printf.sprintf "%d" locks] in
-  { title = "Locks"; content; empty_msg = "0" }
-
-let count_locks (config : Workspace_utils.config) : int =
-  count_locks_for_workspace config
-
-(* Agent workflow summaries: recent activity per active agent *)
-let agent_workflow_section now (_config : Workspace_utils.config) (agents : Masc_domain.agent list) : section =
-  let content =
-    agents
-    |> List.filter (fun (a : Masc_domain.agent) ->
-           match a.status with Masc_domain.Active | Masc_domain.Busy -> true | Masc_domain.Listening | Masc_domain.Inactive -> false)
-    |> List.map (fun (agent : Masc_domain.agent) ->
-           let status_icon =
-             match agent.status with
-             | Masc_domain.Active -> "[active]"
-             | Masc_domain.Busy -> "[busy]"
-             | Masc_domain.Listening | Masc_domain.Inactive -> "[idle]"
-           in
-           let task_info =
-             match agent.current_task with
-             | Some t -> Printf.sprintf " task=%s" (truncate_message t)
-             | None -> ""
-           in
-           let elapsed = format_elapsed now agent.last_seen agent.last_seen in
-           Printf.sprintf "%s %s %s%s" agent.name status_icon elapsed task_info)
-  in
-  { title = "Agent Workflows"; content; empty_msg = "(no active agents)" }
-
-(** Operator-friendly agents section grouped by Working / Stuck / Idle *)
 let agents_grouped_section now (agents : Masc_domain.agent list) : section =
   let format_agent (agent : Masc_domain.agent) =
     let status_label =
@@ -532,11 +468,6 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
       let write_meta_failures =
         Otel_metric_store.metric_total Keeper_metrics.(to_string WriteMetaFailures) |> int_of_float
       in
-      let board_capped =
-        Otel_metric_store.metric_total
-          Keeper_metrics.(to_string BoardSignalWakeupCappedTotal)
-        |> int_of_float
-      in
       let tool_failures =
         (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolSelectionFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string TaskLoadFailures) |> int_of_float)
@@ -545,7 +476,6 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string PersonaDriftMissing) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string WorkspaceInitFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string PresenceSyncFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string SelfPreservationUniversal) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string CycleExceptions) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string SnapshotWriteFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string SseBroadcastFailures) |> int_of_float)
@@ -557,7 +487,6 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string SupervisorSweepFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string TomlReconcileSweepFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolUsageFlushFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnLivelockBlocks) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnTimeoutCommitted) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnErrorAfterTools) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnCleanupFailures) |> int_of_float)
@@ -568,23 +497,17 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string CheckpointFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string MemoryWriteFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string WriteMetaCycleFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string AlertPersistFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string MetricsSseFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string DispatchEventFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string SessionCleanupFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string ChatStoreFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string ObservationQueryFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string StaleTerminationThresholdBreached) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string StaleTerminationBatch) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string StaleBroadcastEmitFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolUseFailure) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string ConfigEnvParseFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnGateRejectedTerminal) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string ReceiptUnmappedDisposition) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string PostTurnWireinFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string MetaReadFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string ApprovalQueueFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string GuardsFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string ProfileLoadFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string CompactAuditFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string FsFailures) |> int_of_float)
@@ -595,35 +518,26 @@ let generate_compact ?(scope = All) (config : Workspace_utils.config) : string =
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolsOasFailures) |> int_of_float)
         + (Otel_metric_store.metric_total Keeper_metrics.(to_string TurnUpUpdateFailures) |> int_of_float)
 + (Otel_metric_store.metric_total Keeper_metrics.(to_string ExecutionReceiptFailures) |> int_of_float)
-+ (Otel_metric_store.metric_total Keeper_metrics.(to_string LlmBridgeFailures) |> int_of_float)
 + (Otel_metric_store.metric_total Keeper_metrics.(to_string ToolExecuteFailures) |> int_of_float)
       + (Otel_metric_store.metric_total Keeper_metrics.(to_string RolloverFailures) |> int_of_float)
-        + (Otel_metric_store.metric_total Keeper_metrics.(to_string RecurringFailures) |> int_of_float)
       in
       let tool_suffix =
         if tool_failures > 0
         then Printf.sprintf " | TOOL-ERR: %d" tool_failures
         else ""
       in
-      let board_suffix =
-        if board_capped > 0
-        then Printf.sprintf " | BOARD-CAPPED: %d" board_capped
-        else ""
-      in
       Printf.sprintf
         "KEEPERS: %d running / %d dead / %d other | GUARD: %d | \
-         META-WRITE-ERR: %d%s%s"
+         META-WRITE-ERR: %d%s"
         k_running
         k_dead
         k_other
         guard_violations
         write_meta_failures
-        tool_suffix
-        board_suffix;
+        tool_suffix;
     ]
 
 let () =
-  Keeper_tool_in_process_runtime.register_dashboard_surface_readiness Dashboard_surface_readiness.json;
   Tool_misc.register_dashboard_handler (fun ~tool_name:tool_name_arg ~start_time ctx args ->
     let open Tool_result in
     let compact =

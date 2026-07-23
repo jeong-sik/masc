@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MASC Supervised Runtime LKG Operation Matrix</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0a0f18; --panel:#111a27; --line:#2b3b50; --text:#e9f0f8; --muted:#9fb0c2; --good:#57d39b; --warn:#ffc857; --bad:#ff6b6b; --accent:#70a5ff; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:15px/1.55 ui-sans-serif,system-ui,-apple-system,sans-serif; }
+    main { max-width:1320px; margin:auto; padding:36px 24px 80px; }
+    h1 { font-size:32px; margin:0 0 8px; }
+    h2 { margin:34px 0 12px; font-size:21px; }
+    h3 { margin:0 0 8px; font-size:16px; }
+    p { margin:8px 0; }
+    code { color:#cfe0ff; background:#182438; padding:2px 5px; border-radius:4px; }
+    .muted { color:var(--muted); }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:12px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:16px; }
+    .metric { font-size:26px; font-weight:750; }
+    .good { color:var(--good); } .warn { color:var(--warn); } .bad { color:var(--bad); } .accent { color:var(--accent); }
+    table { width:100%; border-collapse:collapse; background:var(--panel); }
+    th,td { border:1px solid var(--line); padding:10px; text-align:left; vertical-align:top; }
+    th { background:#172335; color:#dce8f7; }
+    .flow { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+    .node { border:1px solid var(--line); background:var(--panel); padding:10px 13px; border-radius:8px; }
+    .arrow { color:var(--accent); font-weight:800; }
+    ul,ol { margin:7px 0 0 20px; padding:0; }
+    .gate { border-left:4px solid var(--warn); }
+    .fail { border-left:4px solid var(--bad); }
+    .pass { border-left:4px solid var(--good); }
+  </style>
+</head>
+<body>
+<main>
+  <h1>MASC Supervised Runtime LKG Operation Matrix</h1>
+  <p class="muted">Issue #25133 · 2026-07-18 · AFK control-plane availability slice · no prose matching, no stale-binary trust</p>
+
+  <section class="grid">
+    <article class="card fail"><h3>AS-IS availability</h3><div class="metric bad">0 listener</div><p>8935 connection refused while the supervisor process remained alive.</p></article>
+    <article class="card fail"><h3>AS-IS amplification</h3><div class="metric bad">1–37 sec</div><p>Every child exited and was retried after a fixed five-second cooldown.</p></article>
+    <article class="card pass"><h3>TO-BE startup failure</h3><div class="metric good">1 attempt</div><p>No candidate or no PID-bound health proof means a terminal, operator-visible startup state.</p></article>
+    <article class="card pass"><h3>TO-BE fallback authority</h3><div class="metric good">SHA-256</div><p>Only an exact health-promoted artifact may bypass a failed rebuild.</p></article>
+  </section>
+
+  <h2>1. 제품 약속과 판정 기준</h2>
+  <table>
+    <thead><tr><th>고객 약속</th><th>Hard gate</th><th>현재</th><th>이 PR 이후</th></tr></thead>
+    <tbody>
+      <tr><td>운영자가 AFK여도 supervisor가 실제 서비스를 유지한다.</td><td>supervisor alive가 아니라 HTTP listener와 health proof가 존재</td><td class="bad">실패</td><td class="warn">build-contention 경로 개선, 장시간 soak 필요</td></tr>
+      <tr><td>개발 빌드가 production-like runtime을 임의로 교체하지 않는다.</td><td>실행 artifact hash가 이전 health proof와 exact match</td><td class="bad">mtime 기반 stale 판정뿐</td><td class="good">typed descriptor + SHA-256</td></tr>
+      <tr><td>복구 불가능한 startup failure를 무한 증폭하지 않는다.</td><td>candidate 미발행 시 동일 child 재실행 0회</td><td class="bad">무한 반복</td><td class="good">terminal exit, 원래 exit code 보존</td></tr>
+      <tr><td>새 코드가 실패해도 검증되지 않은 stale binary를 몰래 실행하지 않는다.</td><td>descriptor schema/path/mode/bind-host/port/hash 전부 검증</td><td class="warn">수동 opt-in stale 실행 가능</td><td class="good">supervised fallback은 exact LKG만</td></tr>
+    </tbody>
+  </table>
+
+  <h2>2. AS-IS → TO-BE 코드 Matrix</h2>
+  <table>
+    <thead><tr><th>축</th><th>AS-IS</th><th>TO-BE</th><th>결정 권한</th></tr></thead>
+    <tbody>
+      <tr><td>빌드 실패</td><td><code>build_dune_target_with_lock</code>가 typed 75를 1로 소실</td><td>원래 status를 보존</td><td><code>dune-local.sh</code> exit taxonomy</td></tr>
+      <tr><td>실행 후보</td><td>선택된 path만 stderr에 출력</td><td>exec 직전 schema v2 descriptor를 atomic publish</td><td><code>start-masc.sh</code></td></tr>
+      <tr><td>정상성</td><td>child가 떠 있거나 포트가 열리면 암묵적 성공</td><td>listener PID = supervised child PID AND descriptor bind-host의 <code>/health</code> success</td><td>process supervisor</td></tr>
+      <tr><td>PID 소유권</td><td><code>exec server | tee</code>에서 wrapper/listener PID 분리</td><td>process substitution으로 tee하되 server가 supervisor child PID를 그대로 승계</td><td><code>start-masc.sh</code></td></tr>
+      <tr><td>proof 권한</td><td>명시 계약 없음</td><td>child fork 이후 supervisor가 256-bit nonce를 생성하고 schema/PID/hash/nonce를 atomic write</td><td>process supervisor</td></tr>
+      <tr><td>LKG 승격</td><td>없음</td><td>candidate bytes를 다시 hash하고 <code>_build</code> 밖 durable store로 atomic promote</td><td>process supervisor</td></tr>
+      <tr><td>fallback</td><td>환경변수로 알려지지 않은 stale executable 허용 가능</td><td>schema와 SHA가 일치하는 health-promoted artifact만 선택</td><td>artifact contract SSOT</td></tr>
+      <tr><td>retry</td><td>모든 child exit를 동일하게 무한 반복</td><td>exact <code>masc.runtime_health_proof.v2</code>의 PID/hash/nonce가 일치하지 않으면 terminal; 검증된 runtime exit만 restart 대상</td><td>process supervisor FSM</td></tr>
+    </tbody>
+  </table>
+
+  <h2>3. 메커니즘과 순서</h2>
+  <div class="flow">
+    <span class="node">Fork child + private nonce</span><span class="arrow">→</span>
+    <span class="node">Build/Select executable</span><span class="arrow">→</span>
+    <span class="node">Hash exact bytes</span><span class="arrow">→</span>
+    <span class="node">Publish candidate.v2</span><span class="arrow">→</span>
+    <span class="node">exec child</span><span class="arrow">→</span>
+    <span class="node">PID-bound listener proof</span><span class="arrow">→</span>
+    <span class="node">bind-host HTTP health</span><span class="arrow">→</span>
+    <span class="node">Durable LKG + nonce proof</span>
+  </div>
+  <p>Correctness는 polling 횟수나 대기 시간으로 결정하지 않는다. probe cadence는 관찰 지연만 바꾸며, 승격 조건은 PID·health·hash의 논리곱이다. timeout이 지나면 성공으로 간주하는 경로는 없다.</p>
+
+  <h2>4. Descriptor v2 불변식</h2>
+  <table>
+    <thead><tr><th>필드</th><th>허용값</th><th>거부 조건</th></tr></thead>
+    <tbody>
+      <tr><td>schema</td><td><code>masc.runtime_artifact.v2</code></td><td>다른 버전, 추가 line, 누락 line</td></tr>
+      <tr><td>mode</td><td><code>http</code></td><td>unknown/stdio/free-form</td></tr>
+      <tr><td>path</td><td>absolute executable path</td><td>relative path, CR/LF, missing, non-executable</td></tr>
+      <tr><td>sha256</td><td>64 lowercase hex</td><td>길이/문자 불일치 또는 실제 bytes mismatch</td></tr>
+      <tr><td>bind_host</td><td>HTTP listener의 명시 host</td><td>빈 값, 공백, URL delimiter, CR/LF</td></tr>
+      <tr><td>port</td><td>1..65535 integer</td><td>문자열, 범위 밖 값</td></tr>
+    </tbody>
+  </table>
+
+  <h2>5. Crash/Failure Matrix</h2>
+  <table>
+    <thead><tr><th>사건</th><th>관측 상태</th><th>행동</th><th>금지 행동</th></tr></thead>
+    <tbody>
+      <tr><td>bare Dune으로 build status 75</td><td>valid LKG 있음</td><td>LKG hash 재검증 후 실행</td><td>error text parsing, 임의 stale path</td></tr>
+      <tr><td>bare Dune으로 build status 75</td><td>LKG 없음/불일치</td><td>candidate 미발행, terminal 75</td><td>5초마다 dashboard/build 재실행</td></tr>
+      <tr><td>compile failure</td><td>valid LKG 있음</td><td>기존 건강 artifact로 가용성 유지, 오류 노출</td><td>새 실패 artifact 승격</td></tr>
+      <tr><td>다른 프로세스가 같은 포트 health 응답</td><td>listener PID ≠ child PID</td><td>승격하지 않음</td><td>HTTP 200만으로 LKG 인정</td></tr>
+      <tr><td>health 직전 executable 교체</td><td>candidate hash ≠ 현재 bytes</td><td>승격 거부 및 ERROR</td><td>path identity를 byte identity로 간주</td></tr>
+      <tr><td><code>MASC_LOG_FILE</code> 활성화</td><td>tee가 별도 process지만 server PID는 child PID 유지</td><td>동일 PID listener만 승격</td><td>pipeline wrapper PID를 server로 오인</td></tr>
+      <tr><td><code>dune clean</code> 후 build 실패</td><td>LKG bytes는 descriptor 인접 durable store에 존재</td><td>hash 검증 후 복구</td><td><code>_build</code> 내부 LKG 삭제</td></tr>
+      <tr><td>LAN/IPv6 bind host</td><td>descriptor bind-host와 port</td><td>해당 host의 health를 검증</td><td>127.0.0.1 고정 probe</td></tr>
+      <tr><td>candidate가 exec 전에 실패</td><td>descriptor 있음, health proof 없음</td><td>terminal state</td><td>candidate 존재만으로 무한 restart</td></tr>
+      <tr><td>health proof write 중 monitor 종료/child 위조</td><td>proof schema/PID/hash/nonce/EOF 중 하나라도 불일치</td><td>terminal state</td><td>예측 가능한 파일 내용으로 restart 권한 부여</td></tr>
+      <tr><td>health-promoted runtime이 이후 crash</td><td>candidate 발행됨</td><td>기존 continuous restart 책임 유지</td><td>startup failure로 오분류</td></tr>
+    </tbody>
+  </table>
+
+  <h2>6. 정량 Goal / Evidence Matrix</h2>
+  <table>
+    <thead><tr><th>Metric</th><th>Before</th><th>PR gate</th><th>Release gate</th><th>증거</th></tr></thead>
+    <tbody>
+      <tr><td>build-contention startup attempts</td><td>관찰 구간에서 반복, 1–37초 uptime</td><td>valid LKG 없음: exactly 1</td><td>24h duplicate attempt = 0</td><td>supervisor integration test + logs</td></tr>
+      <tr><td>LKG false promotion</td><td>기능 없음</td><td>PID/hash/nonce mismatch cases = 0 promotion</td><td>chaos 1,000회 false promotion = 0</td><td>contract tests + chaos harness</td></tr>
+      <tr><td>LKG clean survival</td><td>기능 없음</td><td><code>_build</code> 삭제 후 verify 성공</td><td>24h clean/rebuild fault cycle loss = 0</td><td>contract test + fault injection</td></tr>
+      <tr><td>contention recovery availability</td><td>8935 down</td><td>valid LKG fixture executes</td><td>listener recovery p95 ≤ 2s after prior process exit</td><td>local fault injection</td></tr>
+      <tr><td>unknown stale artifact execution</td><td>manual opt-in 가능</td><td>hash mismatch execution = 0</td><td>24h execution = 0</td><td>negative integration test + audit log</td></tr>
+      <tr><td>mixed workload terminal receipt</td><td>미증명</td><td>이 PR 범위 밖</td><td>10 Keeper × 8h ≥ 99%</td><td>keeper mixed-workload harness</td></tr>
+    </tbody>
+  </table>
+
+  <h2>7. Rollout 순서</h2>
+  <ol>
+    <li>focused shell integration suite와 changed-file format/lint를 통과한다.</li>
+    <li>빈 runtime root에서 최초 정상 boot 후 LKG descriptor 생성 여부를 확인한다.</li>
+    <li>실행 중 bare Dune을 시작하고 runtime을 종료해 exact LKG 복구를 fault-inject한다.</li>
+    <li>LKG bytes를 변조하고 동일 실험에서 terminal fail-closed를 확인한다.</li>
+    <li>24시간 canary 후 startup attempts, listener downtime, false promotion을 집계한다.</li>
+    <li>그 뒤에만 10 Keeper × 8시간 mixed-workload product gate에 포함한다.</li>
+  </ol>
+
+  <h2>8. Merge 판정</h2>
+  <div class="grid">
+    <article class="card gate"><h3>Merge 가능</h3><p>focused suite green, full CI green, exact failure injection green, review thread 0.</p></article>
+    <article class="card fail"><h3>Merge 금지</h3><p>hash 대신 mtime만 사용, PID 검증 제거, error prose 분기, LKG mismatch에서 stale 실행, candidate 없는 무한 retry.</p></article>
+    <article class="card gate"><h3>제품 1.0</h3><p>이 PR 하나로 Go가 아니다. 10 Keeper × 8h receipt/duplicate/latency와 OAS #2667 계약은 별도 hard gate다.</p></article>
+  </div>
+</main>
+</body>
+</html>

@@ -66,10 +66,10 @@ let bridge_failure_of_error (error : Agent_sdk.Error.sdk_error) : Fusion_types.p
   | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> Fusion_types.Timeout
   | _ -> Fusion_types.Bridge_error (Agent_sdk.Error.to_string error)
 
-let run ~sw ~net ~max_fibers ~outer_timeout_s ~groups ~prompt ()
+let run ~sw ~net ~groups ~prompt ()
   : Fusion_types.panel_outcome list
   =
-  (* 1. 각 그룹의 모델을 그 그룹 설정(system_prompt/tools/max_tool_calls/timeout)으로
+  (* 1. 각 그룹의 모델을 그 그룹 설정(system_prompt/tools/timeout)으로
         에이전트 빌드. 빌드 실패는 격리. 그룹순 × 그룹내 모델순으로 평탄화 —
         순서 보존(단일 그룹이면 원 모델 순서 = 오늘과 동일). *)
   let built, build_failures =
@@ -83,7 +83,6 @@ let run ~sw ~net ~max_fibers ~outer_timeout_s ~groups ~prompt ()
             let panelist = Fusion_policy.panelist_id ~label:g.label ~model in
             match
               Fusion_oas.build_agent ~sw ~net ~system_prompt:g.system_prompt ~tools
-                ~max_tool_calls:g.max_tool_calls ~timeout_s:g.timeout_s
                 ?max_tokens:g.max_output_tokens
                 ~name:panelist model
             with
@@ -97,17 +96,17 @@ let run ~sw ~net ~max_fibers ~outer_timeout_s ~groups ~prompt ()
   let built = List.rev built in
   let build_failures = List.rev build_failures in
   (* 2. 모든 그룹을 하나의 Async_agent.all에 union으로 던진다 — 이종 설정은 이미 각
-        agent에 baked되어 있으므로 단일 fan-out으로 충분. 외곽 run_safe는 그룹 timeout
-        중 max로 전체 멈춤을 막는 상한.
+        agent에 baked되어 있으므로 단일 fan-out으로 충분. [run_safe]는 예외/취소
+        관측 경계이며, timeout은 각 agent의 OAS Provider transport가 소유한다.
         [Async_agent.all]은 [Eio.Fiber.List.map] 기반이라 결과를 입력 순서대로 돌려준다.
         그래서 반환 name(=카드명=정체성)에 의존하지 않고 [built]와 위치로 짝지어
         (panelist, model) 둘 다 확보한다 — provider 에러 attribution에 정체성이 아닌
         raw model을 쓰기 위함 (RFC-0278). *)
   let answered =
     match
-      Masc_oas_bridge.run_safe ~caller:"fusion_panel" ~timeout_s:outer_timeout_s (fun () ->
+      Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Fusion_panel (fun () ->
         Ok
-          (Agent_sdk.Async_agent.all ~sw ~max_fibers
+          (Agent_sdk.Async_agent.all ~sw
              (List.map (fun (agent, _panelist, _model) -> (agent, prompt)) built)))
     with
     | Ok run_results ->

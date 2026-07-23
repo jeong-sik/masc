@@ -13,24 +13,14 @@ type tree_node = {
   goal : Goal_store.goal;
   children : tree_node list;
   tasks : (Masc_domain.task * string) list;
-  convergence : float;
-  health : string;
-  badges : string list;
   last_activity_at : string;
-  stagnation_seconds : int;
+  stagnation_seconds : int option;
   linked_keeper_names : string list;
   pending_approval_count : int;
-  infra_risk_count : int;
   linkage_source : string;
-  linkage_warning_count : int;
-  status_reason : string;
-  blocking_source : string;
-  blocking_reason : string;
   latest_keeper_ref : string option;
   latest_turn_ref : int option;
-  stalled_since : string option;
   activity_observation : string;
-  stagnation_status : string;
 }
 
 type goal_detail_keeper = {
@@ -45,9 +35,7 @@ type attainment_unit =
   | Unknown
 
 (* Whether a goal's declared metric has actually been evaluated (task-1743).
-   The convergence evaluator that would turn [goal.metric] into an observed
-   value (Convergence.check_convergence) has no caller, so a metric is only
-   ever declared, never measured. Attainment percentages are derived from
+   A metric is only declared, never measured. Attainment percentages are derived from
    linked task completion, not from the metric, so this typed field keeps
    the two apart: it lets the IDE goal panel show "metric unevaluated"
    instead of presenting task progress as a metric result, and distinguishes
@@ -118,11 +106,6 @@ let receipt_error_message json =
   | Some (`Assoc _ as error) -> Json_util.get_string error "message"
   | _ -> None
 
-let receipt_sandbox_kind json =
-  match Json_util.assoc_member_opt "sandbox" json with
-  | Some sandbox -> Json_util.get_string sandbox "kind"
-  | None -> None
-
 let receipt_runtime_id json =
   match Json_util.assoc_member_opt "runtime" json with
   | Some runtime -> Json_util.get_string runtime "name"
@@ -132,12 +115,6 @@ let receipt_runtime_outcome json =
   match Json_util.assoc_member_opt "runtime" json with
   | Some runtime -> Json_util.get_string runtime "outcome"
   | None -> None
-
-let receipt_runtime_fallback_applied json =
-  (match Json_util.assoc_member_opt "runtime" json with
-  | Some runtime -> Json_util.get_bool runtime "fallback_applied"
-  | None -> None)
-  |> Option.value ~default:false
 
 let receipt_outcome json =
   Json_util.get_string json "outcome"
@@ -150,24 +127,6 @@ let receipt_ended_at json =
 
 let receipt_turn_count json =
   Json_util.get_int json "turn_count"
-
-let trust_disposition json =
-  Json_util.get_string json "disposition"
-
-let trust_disposition_reason json =
-  Json_util.get_string json "disposition_reason"
-
-let trust_attention_reason json =
-  Json_util.get_string json "attention_reason"
-
-let trust_needs_attention json =
-  Json_util.get_bool json "needs_attention"
-  |> Option.value ~default:false
-
-let trust_snapshot_unavailable json =
-  String.equal
-    (Json_util.get_string_with_default json ~key:"disposition_reason" ~default:"")
-    "runtime_trust_snapshot_unavailable"
 
 let trust_turn_id json =
   Json_util.get_int json "turn_id"
@@ -185,36 +144,10 @@ let trust_latest_event_ts_unix json =
   Option.bind (trust_latest_event json) (fun event ->
       Json_util.get_float event "ts_unix" )
 
-let trust_sandbox_risk json =
-  String.equal
-    (Json_util.get_string_with_default json ~key:"disposition_reason" ~default:"")
-    "sandbox_violation"
-
-let trust_runtime_risk json =
-  String.equal
-    (Json_util.get_string_with_default json ~key:"disposition_reason" ~default:"")
-    "runtime_exhausted"
-
 let receipt_has_error json =
   match receipt_error_kind json with
   | Some _ -> true
-  | None ->
-      (match receipt_outcome json with
-       | Some "completed" | Some "success" | Some "not_observed" | None -> false
-       | Some _ -> false)
-
-let receipt_has_sandbox_risk json =
-  match receipt_sandbox_kind json with
-  | Some "local" -> false
-  | Some "docker" -> false
-  | Some _ | None -> false
-
-let receipt_has_runtime_risk json =
-  receipt_runtime_fallback_applied json
-  ||
-  match receipt_runtime_outcome json with
-  | Some "passed_to_next_model" -> true
-  | _ -> false
+  | None -> false
 
 let iso_max left right =
   if String.compare left right >= 0 then left else right
@@ -224,16 +157,3 @@ let latest_iso ?fallback values =
   | [] -> fallback
   | first :: rest ->
       Some (List.fold_left iso_max first rest)
-
-(* RFC-0294: stagnation threshold was per-horizon (Short 6h / Mid 1d / Long 3d).
-   With the workspace-goal horizon removed it collapses to a single policy
-   constant — the former Mid bucket (1 day) — chosen to preserve the median of
-   the old table. *)
-let stagnation_threshold_seconds = Masc_time_constants.day_int
-
-let human_duration seconds =
-  if seconds < Masc_time_constants.hour_int
-  then Printf.sprintf "%dm" (seconds / 60)
-  else if seconds < Masc_time_constants.day_int
-  then Printf.sprintf "%dh" (seconds / Masc_time_constants.hour_int)
-  else Printf.sprintf "%dd" (seconds / Masc_time_constants.day_int)

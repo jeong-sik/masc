@@ -45,9 +45,8 @@ let make_goal id title =
   {
     Goal_store.id; title;
     metric = None; target_value = None; due_date = None;
-    priority = 3; status = Active; phase = Goal_phase.Executing;
-    verifier_policy = None; require_completion_approval = false;
-    active_verification_request_id = None; parent_goal_id = None;
+    priority = 3; phase = Goal_phase.Executing;
+    parent_goal_id = None;
     last_review_note = None; last_review_at = None;
     created_at = ts; updated_at = ts;
   }
@@ -159,19 +158,22 @@ let test_delete_goal_wraps_prune_failure_after_goal_delete () =
     false
     (List.exists (fun goal -> String.equal goal.Goal_store.id "g-1") goals)
 
-let test_legacy_status_defaults_phase () =
+let test_status_field_accepted_and_ignored () =
   with_workspace @@ fun config ->
-  let legacy_goal ~id ~title ~status =
+  (* Transition-window contract (RFC-0352 slice 1): rows written before the
+     status duplicate was removed still carry a "status" member; the decoder
+     accepts and ignores it, and the serializer never writes it back. *)
+  let row ~id ~phase ~status =
     `Assoc
       [
         ("id", `String id);
-        ("horizon", `String "short");
-        ("title", `String title);
+        ("title", `String ("Goal " ^ id));
         ("metric", `Null);
         ("target_value", `Null);
         ("due_date", `Null);
         ("priority", `Int 3);
         ("status", `String status);
+        ("phase", `String phase);
         ("parent_goal_id", `Null);
         ("last_review_note", `Null);
         ("last_review_at", `Null);
@@ -187,38 +189,65 @@ let test_legacy_status_defaults_phase () =
         ( "goals",
           `List
             [
-              legacy_goal ~id:"legacy-active" ~title:"Legacy Active" ~status:"active";
-              legacy_goal ~id:"legacy-paused" ~title:"Legacy Paused" ~status:"paused";
-              legacy_goal ~id:"legacy-done" ~title:"Legacy Done" ~status:"done";
-              legacy_goal ~id:"legacy-dropped" ~title:"Legacy Dropped" ~status:"dropped";
+              row ~id:"dual-active" ~phase:"executing" ~status:"active";
+              (* A contradictory status must not influence the decoded phase. *)
+              row ~id:"dual-conflict" ~phase:"paused" ~status:"done";
             ] );
       ]);
   let state = Goal_store.read_state config in
+  check int "both rows decode" 2 (List.length state.goals);
   let by_id id =
     List.find_opt
       (fun (goal : Goal_store.goal) -> String.equal goal.id id)
       state.goals
   in
-  let check_legacy id expected_phase expected_status =
-    match by_id id with
-    | None -> fail ("missing legacy goal " ^ id)
-    | Some goal ->
-        check string (id ^ " phase") expected_phase
-          (Goal_phase.to_string goal.phase);
-        check string (id ^ " status") expected_status
-          (match goal.status with
-          | Active -> "active"
-          | Paused -> "paused"
-          | Done -> "done"
-          | Dropped -> "dropped")
-  in
-  check int "legacy goal count" 4 (List.length state.goals);
-  check_legacy "legacy-active" "executing" "active";
-  check_legacy "legacy-paused" "paused" "paused";
-  check_legacy "legacy-done" "completed" "done";
-  check_legacy "legacy-dropped" "dropped" "dropped"
+  (match by_id "dual-conflict" with
+  | None -> fail "missing dual-conflict"
+  | Some goal ->
+      check string "phase wins over stale status" "paused"
+        (Goal_phase.to_string goal.phase);
+      (match Goal_store.goal_to_yojson goal with
+      | `Assoc fields ->
+          check bool "serializer omits status" false
+            (List.mem_assoc "status" fields)
+      | _ -> fail "goal_to_yojson: expected object"))
 
-let test_blocked_phase_projects_legacy_status () =
+let test_phaseless_row_no_longer_decodes () =
+  with_workspace @@ fun config ->
+  (* Counterfactual for the removed status->phase inference: a status-only
+     row is now a decode error, and read_state falls back to the
+     pre-existing corrupt-store policy (recovery mirror, else empty +
+     warn) instead of silently defaulting the phase.  The live store was
+     measured at zero such rows before this landed. *)
+  Workspace.write_json config (Goal_store.goals_path config)
+    (`Assoc
+      [
+        ("version", `Int 1);
+        ("updated_at", `String (iso_now ()));
+        ( "goals",
+          `List
+            [
+              `Assoc
+                [
+                  ("id", `String "legacy-only");
+                  ("title", `String "Status-only row");
+                  ("metric", `Null);
+                  ("target_value", `Null);
+                  ("due_date", `Null);
+                  ("priority", `Int 3);
+                  ("status", `String "paused");
+                  ("parent_goal_id", `Null);
+                  ("last_review_note", `Null);
+                  ("last_review_at", `Null);
+                  ("created_at", `String (iso_now ()));
+                  ("updated_at", `String (iso_now ()));
+                ];
+            ] );
+      ]);
+  let state = Goal_store.read_state config in
+  check int "phase-less store rejected as corrupt" 0 (List.length state.goals)
+
+let test_blocked_phase_serializes_without_status () =
   with_workspace @@ fun config ->
   let goal, _kind =
     match Goal_store.upsert_goal config ~title:"Blocked goal"
@@ -228,8 +257,10 @@ let test_blocked_phase_projects_legacy_status () =
     | Error msg -> fail msg
   in
   check string "blocked phase stored" "blocked" (Goal_phase.to_string goal.phase);
-  check string "blocked phase projects to paused status" "paused"
-    (match goal.status with Paused -> "paused" | _ -> "other")
+  match Goal_store.goal_to_yojson goal with
+  | `Assoc fields ->
+      check bool "no status field persisted" false (List.mem_assoc "status" fields)
+  | _ -> fail "goal_to_yojson: expected object"
 
 let test_list_goals_filters_by_phase () =
   with_workspace @@ fun config ->
@@ -239,15 +270,15 @@ let test_list_goals_filters_by_phase () =
     | Error msg -> fail msg
   in
   make "Executing goal" Goal_phase.Executing;
-  make "Approval goal" Goal_phase.Awaiting_approval;
+  make "Completed goal" Goal_phase.Completed;
   make "Blocked goal" Goal_phase.Blocked;
   let goals =
-    Goal_store.list_goals config ~phase:Goal_phase.Awaiting_approval ()
+    Goal_store.list_goals config ~phase:Goal_phase.Completed ()
   in
-  check int "one goal in awaiting approval" 1 (List.length goals);
+  check int "one completed goal" 1 (List.length goals);
   match goals with
   | [ goal ] ->
-      check string "filtered phase preserved" "awaiting_approval"
+      check string "filtered phase preserved" "completed"
         (Goal_phase.to_string goal.phase)
   | _ -> fail "expected one filtered goal"
 
@@ -321,10 +352,12 @@ let () =
             test_delete_goal_prunes_goal_task_links;
           test_case "prune failure reports partial delete" `Quick
             test_delete_goal_wraps_prune_failure_after_goal_delete;
-          test_case "legacy status defaults phase" `Quick
-            test_legacy_status_defaults_phase;
-          test_case "blocked phase projects legacy status" `Quick
-            test_blocked_phase_projects_legacy_status;
+          test_case "status field accepted and ignored" `Quick
+            test_status_field_accepted_and_ignored;
+          test_case "phase-less row no longer decodes" `Quick
+            test_phaseless_row_no_longer_decodes;
+          test_case "blocked phase serializes without status" `Quick
+            test_blocked_phase_serializes_without_status;
           test_case "list_goals filters by phase" `Quick
             test_list_goals_filters_by_phase;
           test_case "missing update: no bump" `Quick

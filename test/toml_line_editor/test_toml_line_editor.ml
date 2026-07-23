@@ -7,8 +7,6 @@ let fixture =
   {|# top-of-file note
 [fusion]
 enabled = true
-# concurrency knob doc, must survive edits
-max_concurrent_panels = 2
 
 # panel roster doc line 1
 # panel roster doc line 2
@@ -19,7 +17,7 @@ panel = [
 ]
 # judge doc comment
 judge = "old-judge"
-judge_timeout_s = 300.0
+judge_max_output_tokens = 4096
 |}
 
 let comment_lines content =
@@ -47,7 +45,7 @@ let test_scalar_edit_preserves_comments () =
   Alcotest.(check bool) "old judge value gone" false
     (has_line out {|judge = "old-judge"|});
   Alcotest.(check bool) "unrelated scalar untouched" true
-    (has_line out "judge_timeout_s = 300.0");
+    (has_line out "judge_max_output_tokens = 4096");
   Alcotest.(check bool) "multi-line array untouched" true
     (has_line out {|  "provider.a",|})
 
@@ -60,7 +58,7 @@ let test_scalar_remove () =
   Alcotest.(check bool) "judge key removed" false
     (has_line out {|judge = "old-judge"|});
   Alcotest.(check bool) "sibling scalar retained" true
-    (has_line out "judge_timeout_s = 300.0")
+    (has_line out "judge_max_output_tokens = 4096")
 
 let test_multiline_array_edit_preserves_comments () =
   let out =
@@ -79,15 +77,15 @@ let test_multiline_array_edit_preserves_comments () =
   Alcotest.(check bool) "sibling scalar untouched" true
     (has_line out {|judge = "old-judge"|})
 
-(* The scalar editor must target the right table: [max_concurrent_panels] exists
-   in [fusion] and must not be touched when editing [fusion.presets.trio]. *)
+(* The scalar editor must target the right table: [enabled] exists in [fusion]
+   and must not be touched when editing [fusion.presets.trio]. *)
 let test_scalar_edit_is_table_scoped () =
   let out =
     Toml_line_editor.edit_table_scalar fixture ~path:"fusion.presets.trio"
       ~key:"judge" ~value:(Some "new-judge")
   in
   Alcotest.(check bool) "[fusion] scalar untouched" true
-    (has_line out "max_concurrent_panels = 2")
+    (has_line out "enabled = true")
 
 let () =
   Alcotest.run "toml_line_editor"

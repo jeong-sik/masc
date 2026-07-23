@@ -86,17 +86,19 @@ describe('navigate', () => {
     expect(route.value.params.surface).toBeUndefined()
   })
 
-  it('redirects governance to operations on the command surface (Phase 1)', () => {
-    navigate('command', { section: 'governance' })
+  it('redirects the Gate section to the Gate operations view', () => {
+    navigate('command', { section: 'gate' })
     expect(route.value.tab).toBe('command')
     expect(route.value.params.section).toBe('operations')
+    expect(route.value.params.view).toBe('gate')
   })
 
-  it('redirects governance deep links to operations on the command surface', () => {
-    window.location.hash = '#command/governance'
+  it('redirects Gate deep links to the Gate operations view', () => {
+    window.location.hash = '#command/gate'
     window.dispatchEvent(new HashChangeEvent('hashchange'))
     expect(route.value.tab).toBe('command')
     expect(route.value.params.section).toBe('operations')
+    expect(route.value.params.view).toBe('gate')
   })
 
   it('falls back invalid activity section to default agents section', () => {
@@ -126,11 +128,11 @@ describe('navigate', () => {
     expect(route.value.params.view).toBeUndefined()
   })
 
-  it('redirects retired goal-loop links into planning goal-loop view', () => {
+  it('drops retired goal-loop deep links to the default monitoring mapping', () => {
+    // RFC-0352: the goal-loop OODA surface is retired; its deep-link entry is
+    // gone, so the generic monitoring fallback applies and no view is forced.
     navigate('monitoring', { section: 'goal-loop', goal: 'goal-1' })
-    expect(route.value.tab).toBe('workspace')
-    expect(route.value.params.section).toBe('planning')
-    expect(route.value.params.view).toBe('goal-loop')
+    expect(route.value.params.view).not.toBe('goal-loop')
     expect(route.value.params.goal).toBe('goal-1')
   })
 

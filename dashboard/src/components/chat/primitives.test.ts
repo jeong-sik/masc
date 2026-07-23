@@ -149,7 +149,7 @@ describe('ChatTranscript', () => {
   })
 
   it('renders failure rows as a typed card with collapsed diagnostic detail', async () => {
-    const text = 'Keeper request failed: Internal error: [masc_oas_error] {"kind":"accept_rejected","scope":"ollama_cloud.deepseek-v4-flash","reason_kind":"no_usable_progress","last_tool_effect":"mutating"}'
+    const text = 'Keeper request failed: Internal error: [masc_oas_error] {"kind":"accept_rejected","scope":"ollama_cloud.deepseek-v4-flash","reason_kind":"no_usable_progress"}'
     render(
       html`<${ChatTranscript}
         entries=${[
@@ -722,6 +722,55 @@ describe('ChatTranscript', () => {
 
     expect(onClick).toHaveBeenCalledTimes(1)
     expect(onClick.mock.calls[0]?.[0].id).toBe('a1')
+  })
+
+  it('renders only exact single-receipt recovery decisions', async () => {
+    const onRecoveryRequeue = vi.fn().mockResolvedValue(undefined)
+    const onRecoveryCancel = vi.fn().mockResolvedValue(undefined)
+    const prompt = vi.spyOn(window, 'prompt').mockReturnValue('operator verified no delivery')
+    const target = entry({
+      id: 'recovery-receipt',
+      role: 'assistant',
+      source: 'direct_assistant',
+      label: 'sangsu',
+      text: 'queued',
+      delivery: 'queued',
+      details: {
+        queueReceiptId: 'chatq_00000000-0000-4000-8000-000000000001',
+        queueRevision: '8',
+        queueState: 'recovery_required',
+      },
+    })
+
+    render(
+      html`<${ChatTranscript}
+        entries=${[target]}
+        emptyText="empty"
+        variant="messenger"
+        action=${{ onRecoveryRequeue, onRecoveryCancel }}
+      />`,
+      container,
+    )
+
+    const requeue = container.querySelector(
+      '[data-chat-queue-recovery-action="requeue_unconfirmed"]',
+    ) as HTMLButtonElement
+    const cancel = container.querySelector(
+      '[data-chat-queue-recovery-action="cancel_unconfirmed"]',
+    ) as HTMLButtonElement
+    expect(requeue).not.toBeNull()
+    expect(cancel).not.toBeNull()
+
+    fireEvent.click(requeue)
+    await waitFor(() => expect(onRecoveryRequeue).toHaveBeenCalledWith(target))
+    fireEvent.click(cancel)
+    await waitFor(() => {
+      expect(onRecoveryCancel).toHaveBeenCalledWith(
+        target,
+        'operator verified no delivery',
+      )
+    })
+    expect(prompt).toHaveBeenCalledTimes(1)
   })
 
   it('copies the message text from an assistant message copy button', () => {
@@ -1714,6 +1763,24 @@ describe('Keeper v2 chat blocks', () => {
     expect(trace?.textContent).toContain('args')
     expect(trace?.textContent).toContain('"path"')
     expect(trace?.textContent).toContain('result')
+  })
+
+  it('renders an explicit placeholder for a redacted persisted thinking block', () => {
+    renderBlocks([{ t: 'thinking', content: '', redacted: true }])
+
+    const thinking = container.querySelector('[data-chat-block="thinking"]')
+    expect(thinking).not.toBeNull()
+    expect(thinking?.getAttribute('data-chat-thinking-redacted')).toBe('true')
+    expect(thinking?.textContent).toContain('provider 서명')
+  })
+
+  it('renders persisted non-redacted thinking content', () => {
+    renderBlocks([{ t: 'thinking', content: 'checking state', redacted: false }])
+
+    const thinking = container.querySelector('[data-chat-block="thinking"]')
+    expect(thinking).not.toBeNull()
+    expect(thinking?.getAttribute('data-chat-thinking-redacted')).toBe('false')
+    expect(thinking?.textContent).toContain('checking state')
   })
 
   it('renders a link unfurl card with extracted hostname', () => {
@@ -2760,7 +2827,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
 
   it('surfaces real failure status and result inside the card when expanded', async () => {
     recordToolCallOutputs([
-      toolCallOutput({ tool_use_id: 't1', success: false, semantic_success: false, output: 'BOOM' }),
+      toolCallOutput({ tool_use_id: 't1', success: false, output: 'BOOM' }),
     ])
     render(
       html`<${ChatTranscript}
@@ -3505,6 +3572,22 @@ describe('ChatMessageBubble — rich markdown rendering of assistant prose', () 
     ])
     expect(container.querySelector('[data-chat-block="voice"]')).not.toBeNull()
     expect(container.querySelector('[data-chat-block="code"]')).toBeNull()
+  })
+
+  it('does not replace persisted thinking with a markdown reparse', async () => {
+    renderEntries([
+      entry({
+        id: 'a-thinking',
+        role: 'assistant',
+        source: 'direct_assistant',
+        text: 'secondary prose with ```code``` inline',
+        blocks: [{ t: 'thinking', content: 'checked source state', redacted: false }],
+      }),
+    ])
+
+    await flushUi()
+    expect(container.querySelector('[data-chat-block="thinking"]')?.textContent).toContain('checked source state')
+    expect(container.textContent).toContain('secondary prose')
   })
 })
 

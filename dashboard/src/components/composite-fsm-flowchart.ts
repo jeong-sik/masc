@@ -1,16 +1,12 @@
 /**
- * CompositeFsmFlowchart (LT-16e + LT-16-KCB Phase 3)
+ * CompositeFsmFlowchart (LT-16e)
  *
- * Static Mermaid rendering of the 6 orthogonal keeper FSM axes from
+ * Static Mermaid rendering of the 5 orthogonal keeper FSM axes from
  * KeeperCompositeLifecycle.tla, side by side. Each subgraph is one
  * region (Harel parallel region); the subgraphs do not share edges
  * because the axes are orthogonal by design — the invariants that
  * tie them together live in the matrix's top strip (LT-16b) and in
  * the masc_keeper_invariant_violations_total counter (LT-13).
- *
- * Design: docs/observability/composite-fsm-matrix-design.md (LT-12)
- * covers the "순서도까지 맵핑" ("map the flowcharts") portion of the
- * user's brief — this panel is the flowchart companion to the matrix.
  *
  * The transitions below are hand-extracted from
  * COMPOSITE_FSM_TLA_SPEC_PATHS.
@@ -29,15 +25,13 @@ export const COMPOSITE_FSM_TLA_SPEC_PATHS = [
   'specs/keeper-state-machine/KeeperStateMachine.tla',
   'specs/keeper-state-machine/KeeperTurnCycle.tla',
   'specs/keeper-state-machine/KeeperDecisionPipeline.tla',
-  'specs/keeper-state-machine/KeeperCompactionLifecycle.tla',
-  'specs/keeper-state-machine/KeeperCircuitBreaker.tla',
 ] as const
 
 // Every node ID carries an axis prefix so Mermaid's global-id rule
 // does not collapse e.g. two "idle" nodes (KTC and KCL both have one).
 // Labels displayed to the operator stay bare for readability.
 const MERMAID_COMPOSITE: string = `flowchart TB
-  %% ─ KSM (Lifecycle, 13 states) ──────────────────────────
+  %% ─ KSM (Lifecycle) ─────────────────────────────────────
   subgraph KSM ["라이프사이클 · KSM"]
     direction LR
     ksm_offline["Offline"] --> ksm_running["Running"]
@@ -57,11 +51,6 @@ const MERMAID_COMPOSITE: string = `flowchart TB
     ksm_crashed --> ksm_restarting["Restarting"]
     ksm_restarting --> ksm_running
     ksm_restarting --> ksm_dead
-    %% Zombie is reached via TerminalFailureDetected from any non-terminal
-    %% phase (derive_phase ELSE-IF branch on terminal_failure_latched=TRUE).
-    %% Failing is the most common upstream phase; the dashed edge marks
-    %% the trigger as a guarded condition rather than a direct transition.
-    ksm_failing -.-> ksm_zombie["Zombie"]
   end
 
   %% ─ KTC (Turn cycle, 5 states) ──────────────────────────
@@ -75,11 +64,10 @@ const MERMAID_COMPOSITE: string = `flowchart TB
     ktc_finalizing --> ktc_idle
   end
 
-  %% ─ KDP (Decision pipeline, 4 states) ───────────────────
+  %% ─ KDP (Decision pipeline, 3 states) ───────────────────
   subgraph KDP ["결정 · KDP"]
     direction LR
     kdp_undecided["undecided"] --> kdp_guard_ok["guard_ok"]
-    kdp_undecided --> kdp_gate_rejected["gate_rejected"]
     kdp_guard_ok --> kdp_tool_policy["tool_policy_selected"]
   end
 
@@ -101,21 +89,6 @@ const MERMAID_COMPOSITE: string = `flowchart TB
     kmc_done --> kmc_accumulating
   end
 
-  %% ─ KCB (Circuit breaker, 3 observable states) ──────────
-  %% Tripped is deliberately absent — see display_state.mli: the
-  %% mutator resets consecutive_count on trip, so no snapshot taken
-  %% between tool calls can observe Tripped. The dashed arrow is a
-  %% reminder that the unobservable transition exists inside the
-  %% counter's read-modify-write, not that it's a state we render.
-  subgraph KCB ["Circuit breaker · KCB"]
-    direction LR
-    kcb_clean["clean"] --> kcb_warning["warning"]
-    kcb_warning --> kcb_clean
-    kcb_warning -.-> kcb_cooling["cooling"]
-    kcb_cooling --> kcb_warning
-    kcb_cooling --> kcb_clean
-  end
-
   %% Mermaid classDef parser does not support CSS var() — values must be
   %% literal CSS color tokens. Hex literals below mirror the design-system
   %% tokens 1:1 (--rose-light=#fb7185, --ok-fg=#8ebc8e, --amber-bright=#f59e0b).
@@ -125,11 +98,10 @@ const MERMAID_COMPOSITE: string = `flowchart TB
   classDef motion   fill:#1a1305,stroke:#a16207,color:#f59e0b
   classDef error    fill:#1e0a0a,stroke:#b91c1c,color:#fb7185
 
-  class ksm_stopped,ksm_dead,ksm_zombie terminal
-  class ksm_running,ksm_paused,ktc_idle,kcl_idle,kmc_accumulating,kcb_clean stable
-  class ksm_compacting,ksm_handingoff,ksm_overflowed,ksm_draining,ksm_restarting,ktc_prompting,ktc_executing,ktc_compacting,ktc_finalizing,kcl_selecting,kcl_trying,kmc_compacting,kcb_warning motion
-  class ksm_failing,ksm_crashed,kdp_gate_rejected,kcl_exhausted error
-  class kcb_cooling motion
+  class ksm_stopped,ksm_dead terminal
+  class ksm_running,ksm_paused,ktc_idle,kcl_idle,kmc_accumulating stable
+  class ksm_compacting,ksm_handingoff,ksm_overflowed,ksm_draining,ksm_restarting,ktc_prompting,ktc_executing,ktc_compacting,ktc_finalizing,kcl_selecting,kcl_trying,kmc_compacting motion
+  class ksm_failing,ksm_crashed,kcl_exhausted error
 `
 
 /**

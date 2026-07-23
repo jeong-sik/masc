@@ -92,25 +92,18 @@ let test_agent_identity ~uuid ~session_key : Masc.Client_identity.t =
     metadata = [];
   }
 
-let make_keeper_meta ?agent_name ?tool_access name =
+let make_keeper_meta ?agent_name name =
   let agent_name =
     Option.value agent_name
       ~default:(Keeper_identity.keeper_agent_name name)
   in
-  let tool_access_fields =
-    match tool_access with
-    | Some access -> [ ("tool_access", access) ]
-    | None -> []
-  in
   let json =
     `Assoc
-      ([
+      [
          ("name", `String name);
          ("agent_name", `String agent_name);
          ("trace_id", `String ("trace-test-" ^ name));
-         ("goal", `String "test goal");
        ]
-       @ tool_access_fields)
   in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
@@ -342,7 +335,7 @@ let resource_mime_type_exn response =
 
 let test_create_state () =
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   Alcotest.(check string) "base_path preserved"
     base_path (Mcp_server.workspace_config state).base_path;
   cleanup_dir base_path
@@ -350,7 +343,7 @@ let test_create_state () =
 let test_type_compatibility () =
   (* Verify Mcp_server_eio.server_state is same type as Mcp_server.server_state *)
   let base_path = temp_dir () in
-  let state : Mcp_eio.server_state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state : Mcp_eio.server_state = Mcp_eio.For_testing.create_state ~base_path () in
   let state2 : Mcp.server_state = state in  (* Type unification at compile time *)
   (* Verify the unified type preserves field access *)
   Alcotest.(check string) "base_path via unified type" base_path (Mcp_server.workspace_config state2).base_path;
@@ -508,7 +501,7 @@ let test_handle_request_initialize () =
   Eio.Switch.run @@ fun sw ->
 
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
 
   let request = Yojson.Safe.to_string (`Assoc [
     ("jsonrpc", `String "2.0");
@@ -552,7 +545,7 @@ let test_handle_request_initialize_rejects_unsupported_protocol_version () =
   Eio.Switch.run @@ fun sw ->
 
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
 
   let request = Yojson.Safe.to_string (`Assoc [
     ("jsonrpc", `String "2.0");
@@ -581,7 +574,7 @@ let test_handle_request_server_discover_2026 () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -640,7 +633,7 @@ let test_handle_request_tools_list () =
   Eio.Switch.run @@ fun sw ->
 
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let first_page = tools_list_response ~clock ~sw state in
 
   let tools = tools_list_all ~clock ~sw state in
@@ -724,7 +717,7 @@ let test_handle_request_initialize_operator_profile () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request = Yojson.Safe.to_string (`Assoc [
     ("jsonrpc", `String "2.0");
     ("id", `Int 11);
@@ -751,7 +744,9 @@ let test_handle_request_initialize_operator_profile () =
               | _ -> ""
             in
             Alcotest.(check bool) "mentions operator profile" true
-              (contains_substring instructions "four control-plane tools");
+              (contains_substring instructions "six operator tools");
+            Alcotest.(check bool) "does not mention surface audit" false
+              (contains_substring instructions "surface audit");
             Alcotest.(check bool) "mentions confirm workflow" true
               (contains_substring instructions "confirm_required=true")
         | _ -> Alcotest.fail "result not an object")
@@ -764,7 +759,7 @@ let test_handle_request_tools_list_operator_profile () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request = Yojson.Safe.to_string (`Assoc [
     ("jsonrpc", `String "2.0");
     ("id", `Int 12);
@@ -790,10 +785,11 @@ let test_handle_request_tools_list_operator_profile () =
                  Alcotest.(check (list string)) "operator-only tools"
                    [
                      "masc_operator_action";
+                     "masc_operator_chat_recovery_resolve";
                      "masc_operator_confirm";
                      "masc_operator_digest";
                      "masc_operator_snapshot";
-                     "masc_surface_audit";
+                     "masc_operator_task_recovery_resolve";
                    ]
                    names;
                  let find_tool name =
@@ -837,17 +833,14 @@ let test_handle_request_tools_list_operator_profile () =
                    (action_tool |> Yojson.Safe.Util.member "annotations"
                     |> Yojson.Safe.Util.member "readOnlyHint"
                     |> Yojson.Safe.Util.to_bool);
-                 (* #7480 Step 1: read-only tools advertise
-                    openWorldHint=false so MCP clients know they do not
-                    reach outside MASC's own state. *)
-                 Alcotest.(check bool) "snapshot openWorld=false" false
+                 (* Subjective open-world/destructive hints are omitted; the
+                    profile exposes only objective typed metadata. *)
+                 Alcotest.(check bool) "snapshot omits openWorld hint" true
                    (snapshot_tool |> Yojson.Safe.Util.member "annotations"
-                    |> Yojson.Safe.Util.member "openWorldHint"
-                    |> Yojson.Safe.Util.to_bool);
-                 Alcotest.(check bool) "digest openWorld=false" false
+                    |> Yojson.Safe.Util.member "openWorldHint" = `Null);
+                 Alcotest.(check bool) "digest omits openWorld hint" true
                    (digest_tool |> Yojson.Safe.Util.member "annotations"
-                    |> Yojson.Safe.Util.member "openWorldHint"
-                    |> Yojson.Safe.Util.to_bool)
+                    |> Yojson.Safe.Util.member "openWorldHint" = `Null)
              | _ -> Alcotest.fail "tools not a list")
         | _ -> Alcotest.fail "result not an object")
    | _ -> Alcotest.fail "response not an object");
@@ -859,7 +852,7 @@ let test_handle_request_initialize_managed_profile () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request = Yojson.Safe.to_string (`Assoc [
     ("jsonrpc", `String "2.0");
     ("id", `Int 111);
@@ -899,7 +892,7 @@ let test_handle_request_tools_list_managed_profile () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request = Yojson.Safe.to_string (`Assoc [
     ("jsonrpc", `String "2.0");
     ("id", `Int 112);
@@ -957,10 +950,12 @@ let test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias ()
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let sid = "mcp-managed-alias-claim" in
   let init_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+    Mcp_eio.execute_tool_eio ~sw ~clock
+      ~workspace_scope:(Mcp_server.workspace_scope state)
+      ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
   (* masc_init and setup join are not under test here; initialise the workspace
@@ -1025,7 +1020,7 @@ let test_handle_request_tools_call_missing_params_records_duration () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let sid = "mcp-missing-params-duration" in
   let request =
     Yojson.Safe.to_string
@@ -1077,7 +1072,7 @@ let test_handle_request_tools_call_managed_translation_error_records_duration ()
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let sid = "mcp-managed-translation-duration" in
   let request =
     Yojson.Safe.to_string
@@ -1135,11 +1130,13 @@ let test_handle_request_tools_call_transition_claim_guidance () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   Masc.Auth.disable_auth base_path;
   let sid = "mcp-transition-claim-guidance" in
   let init_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+    Mcp_eio.execute_tool_eio ~sw ~clock
+      ~workspace_scope:(Mcp_server.workspace_scope state)
+      ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
   (* masc_init and setup join are not under test here; initialise the workspace
@@ -1184,7 +1181,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
     (List.mem "masc_plan_set_task" steps);
   cleanup_dir base_path
 
-let test_handle_request_tools_call_transition_done_guidance () =
+let test_handle_request_tools_call_transition_done_requires_llm_verdict () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
@@ -1192,11 +1189,13 @@ let test_handle_request_tools_call_transition_done_guidance () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   Masc.Auth.disable_auth base_path;
   let sid = "mcp-transition-done-guidance" in
   let init_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+    Mcp_eio.execute_tool_eio ~sw ~clock
+      ~workspace_scope:(Mcp_server.workspace_scope state)
+      ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
   (* masc_init and setup join are not under test here; initialise the workspace
@@ -1210,7 +1209,9 @@ let test_handle_request_tools_call_transition_done_guidance () =
     (Masc.Workspace.add_task (Mcp_server.workspace_config state) ~title:"transition-done"
        ~priority:2 ~description:"");
   let claim_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+    Mcp_eio.execute_tool_eio ~sw ~clock
+      ~workspace_scope:(Mcp_server.workspace_scope state)
+      ~mcp_session_id:sid state
       ~name:"masc_transition"
       ~arguments:
         (`Assoc
@@ -1249,30 +1250,25 @@ let test_handle_request_tools_call_transition_done_guidance () =
     Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:sid state request
   in
   let envelope = result_envelope_exn response in
-  Alcotest.(check string) "done result status" "ok"
+  Alcotest.(check string) "done result status" "error"
     (match List.assoc_opt "status" envelope with
      | Some (`String status) -> status
      | _ -> Alcotest.fail "status missing");
-  Alcotest.(check bool) "done result summary" true
-    (match List.assoc_opt "summary" envelope with
-     | Some (`String summary) ->
-       contains_substring summary "claimed" && contains_substring summary "done"
-     | _ -> false);
-  let steps = workflow_next_step_names response in
+  Alcotest.(check bool) "done rejection is an MCP tool error" true
+    (match List.assoc_opt "isError" (result_fields_exn response) with
+     | Some (`Bool value) -> value
+     | _ -> Alcotest.fail "missing isError");
   let task =
     Masc.Workspace.get_tasks_raw (Mcp_server.workspace_config state)
     |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id "task-001")
   in
   (match task with
-   | Some { task_status = Masc_domain.Done _; _ } -> ()
-   | Some { task_status; _ } ->
-       Alcotest.failf "task-001 should be done, got %s"
-         (Masc_domain.task_status_to_string task_status)
+   | Some { task_status = Masc_domain.Claimed _; _ } -> ()
+   | Some _ -> Alcotest.fail "task-001 must remain claimed without an LLM verdict"
    | None -> Alcotest.fail "task-001 missing");
-  Alcotest.(check (option string)) "done clears current_task" None
+  Alcotest.(check (option string)) "rejected done keeps current_task"
+    (Some "task-001")
     (Masc.Task.Planning_eio.get_current_task (Mcp_server.workspace_config state));
-  Alcotest.(check bool) "done guidance omits plan_set_task" false
-    (List.mem "masc_plan_set_task" steps);
   cleanup_dir base_path
 
 let test_handle_request_tools_call_transition_claim_requires_action () =
@@ -1283,11 +1279,13 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   Masc.Auth.disable_auth base_path;
   let sid = "mcp-deprecated-claim-alias" in
   let init_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
+    Mcp_eio.execute_tool_eio ~sw ~clock
+      ~workspace_scope:(Mcp_server.workspace_scope state)
+      ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
   (* masc_init and setup join are not under test here; initialise the workspace
@@ -1335,7 +1333,7 @@ let test_handle_request_tools_call_operator_profile_rejects_non_operator () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request = Yojson.Safe.to_string (`Assoc [
     ("jsonrpc", `String "2.0");
     ("id", `Int 13);
@@ -1367,7 +1365,7 @@ let test_handle_request_tools_list_rejects_nonstandard_names_filter () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request = Yojson.Safe.to_string (`Assoc [
     ("jsonrpc", `String "2.0");
     ("id", `Int 120);
@@ -1399,7 +1397,7 @@ let test_handle_request_tools_list_with_placeholder_flag () =
     Eio.Switch.run @@ fun sw ->
 
     let base_path = temp_dir () in
-    let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+    let state = Mcp_eio.For_testing.create_state ~base_path () in
     let tools = tools_list_all ~clock ~sw state in
     let names =
       tools
@@ -1422,7 +1420,7 @@ let test_handle_request_tools_list_include_hidden_metadata () =
   Eio.Switch.run @@ fun sw ->
 
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let tools = tools_list_all ~clock ~sw state in
   let status_tool = find_tool_exn tools "masc_status" in
   Alcotest.(check bool) "standard tools expose title" true
@@ -1453,7 +1451,7 @@ let _test_handle_request_tools_list_hides_internal_tool_by_default () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let tools = tools_list_all ~clock ~sw state in
   Alcotest.(check bool) "internal tool hidden from public surface" false
     (List.exists
@@ -1472,7 +1470,7 @@ let test_handle_request_tools_list_include_usage_metadata () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request = Yojson.Safe.to_string (`Assoc [
     ("jsonrpc", `String "2.0");
     ("id", `Int 121);
@@ -1497,8 +1495,6 @@ let test_handle_request_tools_list_include_usage_metadata () =
        (match first_tool with `Assoc fields -> fields | _ -> []));
   cleanup_dir base_path
 
-(* Governance status tool is no longer dispatched *)
-
 let test_execute_tool_explicit_agent_name_not_overridden () =
   let base_path = temp_dir () in
   let config = Masc.Workspace.default_config base_path in
@@ -1512,6 +1508,7 @@ let test_execute_tool_explicit_agent_name_not_overridden () =
       ~tool_name:"masc_bind" ~arguments ~identity
       ~cached_resolved_agent:(Some ("cached-stale-nickname", false))
       ~auth_token:None ~internal_keeper_runtime:false
+      ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
       ~workspace_initialized:(fun () -> false)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
@@ -1552,6 +1549,7 @@ let test_execute_tool_domain_agent_name_does_not_reuse_joined_nickname () =
       ~arguments:(`Assoc [ ("agent_name", `String "alpha-agent") ])
       ~identity ~cached_resolved_agent:None
       ~auth_token:None ~internal_keeper_runtime:false
+      ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
       ~workspace_initialized:(fun () -> true)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
@@ -1572,7 +1570,7 @@ let test_execute_tool_generated_agent_name_uses_token_identity () =
   Eio.Switch.run @@ fun sw ->
 
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
     match Masc.Auth.create_token base_path ~agent_name:"stable-admin" ~role:Masc_domain.Admin with
@@ -1581,7 +1579,9 @@ let test_execute_tool_generated_agent_name_uses_token_identity () =
   in
 
   let status_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~auth_token:raw_token state
+    Mcp_eio.execute_tool_eio ~sw ~clock
+      ~workspace_scope:(Mcp_server.workspace_scope state)
+      ~auth_token:raw_token state
       ~name:"masc_auth_status"
       ~arguments:(`Assoc [("agent_name", `String "dashboard-eager-manta")])
   in
@@ -1650,7 +1650,7 @@ let test_execute_tool_explicit_generated_alias_claim_next_not_rewritten_by_token
   Eio.Switch.run @@ fun sw ->
 
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
   ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
@@ -1663,7 +1663,9 @@ let test_execute_tool_explicit_generated_alias_claim_next_not_rewritten_by_token
     (Masc.Workspace.add_task (Mcp_server.workspace_config state) ~title:"explicit-alias-claim-next"
        ~priority:2 ~description:"");
   let result =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~auth_token:raw_token state
+    Mcp_eio.execute_tool_eio ~sw ~clock
+      ~workspace_scope:(Mcp_server.workspace_scope state)
+      ~auth_token:raw_token state
       ~name:"keeper_task_claim"
       ~arguments:(`Assoc [ ("agent_name", `String "dashboard-eager-manta") ])
   in
@@ -1681,7 +1683,7 @@ let test_execute_tool_explicit_generated_alias_transition_not_rewritten_by_token
   Eio.Switch.run @@ fun sw ->
 
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
   ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
@@ -1694,7 +1696,9 @@ let test_execute_tool_explicit_generated_alias_transition_not_rewritten_by_token
     (Masc.Workspace.add_task (Mcp_server.workspace_config state) ~title:"explicit-alias-transition"
        ~priority:2 ~description:"");
   let result =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~auth_token:raw_token state
+    Mcp_eio.execute_tool_eio ~sw ~clock
+      ~workspace_scope:(Mcp_server.workspace_scope state)
+      ~auth_token:raw_token state
       ~name:"masc_transition"
       ~arguments:
         (`Assoc
@@ -1719,7 +1723,7 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_rejected_without_mut
   Eio.Switch.run @@ fun sw ->
 
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
   ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
@@ -1731,7 +1735,9 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_rejected_without_mut
     (Masc.Workspace.add_task (Mcp_server.workspace_config state) ~title:"hyphenated-generated-alias-claim-next"
        ~priority:2 ~description:"");
   let result =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:"sid-hyphenated-generated-alias"
+    Mcp_eio.execute_tool_eio ~sw ~clock
+      ~workspace_scope:(Mcp_server.workspace_scope state)
+      ~mcp_session_id:"sid-hyphenated-generated-alias"
       ~auth_token:raw_token state
       ~name:"keeper_task_claim"
       ~arguments:(`Assoc [ ("agent_name", `String "qa-king-warm-heron") ])
@@ -1756,7 +1762,7 @@ let test_execute_tool_claim_next_requires_auth_before_mutation () =
   Eio.Switch.run @@ fun sw ->
 
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
   ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   ignore (Masc.Workspace.bind_session (Mcp_server.workspace_config state) ~agent_name:"uncredentialed-agent" ~capabilities:[] ());
@@ -1764,7 +1770,9 @@ let test_execute_tool_claim_next_requires_auth_before_mutation () =
     (Masc.Workspace.add_task (Mcp_server.workspace_config state) ~title:"claim-next-auth-preflight"
        ~priority:2 ~description:"");
   let result =
-    Mcp_eio.execute_tool_eio ~sw ~clock state
+    Mcp_eio.execute_tool_eio ~sw ~clock
+      ~workspace_scope:(Mcp_server.workspace_scope state)
+      state
       ~name:"keeper_task_claim"
       ~arguments:(`Assoc [ ("agent_name", `String "uncredentialed-agent") ])
   in
@@ -1784,7 +1792,7 @@ let test_execute_tool_transition_requires_auth_before_mutation () =
   Eio.Switch.run @@ fun sw ->
 
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
   ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   ignore (Masc.Workspace.bind_session (Mcp_server.workspace_config state) ~agent_name:"uncredentialed-agent" ~capabilities:[] ());
@@ -1792,7 +1800,9 @@ let test_execute_tool_transition_requires_auth_before_mutation () =
     (Masc.Workspace.add_task (Mcp_server.workspace_config state) ~title:"transition-auth-preflight"
        ~priority:2 ~description:"");
   let result =
-    Mcp_eio.execute_tool_eio ~sw ~clock state
+    Mcp_eio.execute_tool_eio ~sw ~clock
+      ~workspace_scope:(Mcp_server.workspace_scope state)
+      state
       ~name:"masc_transition"
       ~arguments:
         (`Assoc
@@ -1818,7 +1828,7 @@ let test_execute_tool_add_task_with_admin_token_without_join () =
   Eio.Switch.run @@ fun sw ->
 
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
   ignore (Masc.Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
   let raw_token =
@@ -1827,7 +1837,9 @@ let test_execute_tool_add_task_with_admin_token_without_join () =
     | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e)
   in
   let result =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~auth_token:raw_token state
+    Mcp_eio.execute_tool_eio ~sw ~clock
+      ~workspace_scope:(Mcp_server.workspace_scope state)
+      ~auth_token:raw_token state
       ~name:"masc_add_task"
       ~arguments:
         (`Assoc
@@ -1867,6 +1879,7 @@ let test_execute_tool_http_auth_token_overrides_stale_argument_token () =
       ~identity ~cached_resolved_agent:None
       ~auth_token:(Some "http-auth-token")
       ~internal_keeper_runtime:false
+      ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
       ~workspace_initialized:(fun () -> true)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
@@ -1890,6 +1903,7 @@ let test_execute_tool_legacy_argument_token_ignored_without_http_auth () =
       ~arguments:(`Assoc [ ("token", `String "legacy-argument-token") ])
       ~identity ~cached_resolved_agent:None
       ~auth_token:None ~internal_keeper_runtime:false
+      ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
       ~workspace_initialized:(fun () -> true)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
@@ -1913,6 +1927,7 @@ let test_execute_tool_without_mcp_session_uses_generated_identity () =
       ~arguments:(`Assoc [ ("message", `String "generated identity check") ])
       ~identity ~cached_resolved_agent:None
       ~auth_token:None ~internal_keeper_runtime:false
+      ~direct_call_authority:Masc.Mcp_server_eio_caller_identity.Catalog_policy
       ~workspace_initialized:(fun () -> true)
       ~log_mcp_exn:(fun ~label:_ _ -> ())
   in
@@ -1923,8 +1938,6 @@ let test_execute_tool_without_mcp_session_uses_generated_identity () =
 
   cleanup_dir base_path
 
-(* Legacy governance convo tools are stubs; workspace-scoped test removed *)
-
 let test_handle_request_invalid_json () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1932,7 +1945,7 @@ let test_handle_request_invalid_json () =
   Eio.Switch.run @@ fun sw ->
 
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
 
   let response = Mcp_eio.handle_request ~clock ~sw state "not valid json {{{" in
 
@@ -1955,7 +1968,7 @@ let test_handle_request_tools_call_board_post_structured_content () =
   Eio_context.set_switch sw;
 
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
   let request = Yojson.Safe.to_string (`Assoc [
     ("jsonrpc", `String "2.0");
@@ -1991,7 +2004,7 @@ let test_handle_request_tools_call_logs_structured_mcp_details () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
-      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let state = Mcp_eio.For_testing.create_state ~base_path () in
       ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
       let request =
         Yojson.Safe.to_string
@@ -2055,18 +2068,21 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  Keeper_registry.clear ();
+  Keeper_registry.For_testing.clear ();
   Fun.protect
     ~finally:(fun () ->
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       cleanup_dir base_path)
     (fun () ->
       let keeper_name = "sangsu" in
       let keeper_agent_name = Keeper_identity.keeper_agent_name keeper_name in
+      let keeper_meta =
+        make_keeper_meta ~agent_name:keeper_agent_name keeper_name
+      in
       ignore
-        (Keeper_registry.register ~base_path keeper_name
-           (make_keeper_meta ~agent_name:keeper_agent_name keeper_name));
-      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+        (Keeper_registry.For_testing.register ~base_path keeper_name
+           keeper_meta);
+      let state = Mcp_eio.For_testing.create_state ~base_path () in
       ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
       let request =
         Yojson.Safe.to_string
@@ -2091,6 +2107,7 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
       | Some entry ->
           Alcotest.(check int) "tool count" 1 entry.count;
           Alcotest.(check int) "tool successes" 1 entry.successes;
+          Alcotest.(check int) "tool deferred" 0 entry.deferred;
           Alcotest.(check int) "tool failures" 0 entry.failures;
           Masc.Keeper_registry_tool_usage_persistence.flush ~base_path keeper_name;
           let persisted =
@@ -2098,8 +2115,43 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
               (Filename.concat base_path ".masc/keepers/tool_usage/sangsu.json")
           in
           let open Yojson.Safe.Util in
+          Alcotest.(check int) "persisted schema version" 2
+            (persisted |> member "schema_version" |> to_int);
           Alcotest.(check string) "persisted tool name" "masc_status"
-            (persisted |> member "tools" |> index 0 |> member "tool" |> to_string)
+            (persisted |> member "tools" |> index 0 |> member "tool" |> to_string);
+          Alcotest.(check int) "persisted deferred count" 0
+            (persisted |> member "tools" |> index 0 |> member "deferred" |> to_int);
+          Keeper_registry.For_testing.unregister ~base_path keeper_name;
+          ignore (Keeper_registry.For_testing.register ~base_path keeper_name keeper_meta);
+          Masc.Keeper_registry_tool_usage_persistence.restore ~base_path keeper_name;
+          let restored =
+            List.assoc_opt
+              "masc_status"
+              (Keeper_registry.tool_usage_of ~base_path keeper_name)
+          in
+          Alcotest.(check (option int))
+            "current schema restores exact count"
+            (Some 1)
+            (Option.map (fun restored -> restored.Keeper_types.count) restored);
+          let persisted_path =
+            Filename.concat base_path ".masc/keepers/tool_usage/sangsu.json"
+          in
+          Fs_compat.save_file
+            persisted_path
+            (Yojson.Safe.to_string
+               (`Assoc
+                 [ "keeper", `String keeper_name
+                 ; "tools", `List []
+                 ])
+             ^ "\n");
+          Keeper_registry.For_testing.unregister ~base_path keeper_name;
+          ignore (Keeper_registry.For_testing.register ~base_path keeper_name keeper_meta);
+          Masc.Keeper_registry_tool_usage_persistence.restore ~base_path keeper_name;
+          Alcotest.(check (list string))
+            "legacy schema is rejected without migration"
+            []
+            (Keeper_registry.tool_usage_of ~base_path keeper_name
+             |> List.map fst)
       | None -> Alcotest.fail "expected keeper tool usage for masc_status")
 
 let test_handle_request_tools_call_blocks_keeper_internal_tool () =
@@ -2109,7 +2161,7 @@ let test_handle_request_tools_call_blocks_keeper_internal_tool () =
   Eio.Switch.run @@ fun sw ->
 
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request = Yojson.Safe.to_string (`Assoc [
     ("jsonrpc", `String "2.0");
     ("id", `Int 118);
@@ -2163,7 +2215,7 @@ let test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
-      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let state = Mcp_eio.For_testing.create_state ~base_path () in
       let token = Masc.Auth.ensure_internal_keeper_token base_path in
       let request = Yojson.Safe.to_string (`Assoc [
         ("jsonrpc", `String "2.0");
@@ -2180,14 +2232,14 @@ let test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal
          tools/list: the Agent_internal surface was removed and
          include_agent_internal adds no schema (see
          mcp_server_eio_tool_profile.ml), so the Full-profile is_public_mcp
-         filter still drops them. Pin that tool_execute and masc_session stay
-         hidden even when the flag is set. A prior half-finished refactor left a
+         filter still drops them. Pin that tool_execute and masc_session remain
+         outside external MCP discovery even when the flag is set. A prior half-finished refactor left a
          contradictory "tool_execute listed = true" assertion here against the
          identical [List.mem] expression; it could never co-pass with the
          hidden check below and is removed. *)
-      Alcotest.(check bool) "retired tool_execute hidden" false
+      Alcotest.(check bool) "retired tool_execute not externally discovered" false
         (List.mem "tool_execute" names);
-      Alcotest.(check bool) "system internal still hidden" false
+      Alcotest.(check bool) "masc_session not externally discovered" false
         (List.mem "masc_session" names))
 
 let test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execute
@@ -2199,20 +2251,16 @@ let test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execu
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       cleanup_dir base_path)
     (fun () ->
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       let keeper_name = "sangsu" in
       let keeper_agent_name = Keeper_identity.keeper_agent_name keeper_name in
-      let tool_access =
-        `List [ `String "tool_execute"; `String "keeper_time_now" ]
-      in
       ignore
-        (Keeper_registry.register ~base_path keeper_name
-           (make_keeper_meta ~agent_name:keeper_agent_name ~tool_access
-              keeper_name));
-      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+        (Keeper_registry.For_testing.register ~base_path keeper_name
+           (make_keeper_meta ~agent_name:keeper_agent_name keeper_name));
+      let state = Mcp_eio.For_testing.create_state ~base_path () in
       let token = Masc.Auth.ensure_internal_keeper_token base_path in
       let request = Yojson.Safe.to_string (`Assoc [
         ("jsonrpc", `String "2.0");
@@ -2224,8 +2272,7 @@ let test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execu
             `Assoc
               [
                 ("_agent_name", `String keeper_agent_name);
-                ("executable", `String "pwd");
-                ("argv", `List []);
+                ("argv", `List [ `String "pwd" ]);
               ] );
         ]);
       ]) in
@@ -2251,36 +2298,13 @@ let test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execu
       Alcotest.(check bool) "mentions registry inconsistency" true
         (contains_substring msg "registry inconsistency"))
 
-let test_internal_keeper_runtime_cleanup_preserves_primary_exception () =
-  let module T = Masc.Mcp_server_eio_execute.For_testing in
-  let cleanup_called = ref false in
-  let cleanup ~during_exception () =
-    T.cleanup_internal_keeper_runtime_resource ~during_exception
-      ~label:"test sandbox" (fun () ->
-        cleanup_called := true;
-        failwith "cleanup failed")
-  in
-  let observed =
-    try
-      ignore
-        (T.run_with_cleanup_preserving_primary ~cleanup (fun () ->
-             failwith "tool failed"));
-      None
-    with
-    | Failure message -> Some message
-    | exn -> Some (Printexc.to_string exn)
-  in
-  Alcotest.(check (option string)) "primary tool exception surfaces"
-    (Some "tool failed") observed;
-  Alcotest.(check bool) "cleanup ran on exception path" true !cleanup_called
-
 let test_handle_request_batch_rejected () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request =
     Yojson.Safe.to_string
       (`List
@@ -2306,7 +2330,7 @@ let test_handle_request_jsonrpc_response_returns_null () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -2327,7 +2351,7 @@ let test_handle_request_method_not_found () =
   Eio.Switch.run @@ fun sw ->
 
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
 
   let request = Yojson.Safe.to_string (`Assoc [
     ("jsonrpc", `String "2.0");
@@ -2356,7 +2380,7 @@ let test_handle_request_tools_list_rejects_empty_cursor () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -2380,7 +2404,7 @@ let test_handle_request_tools_list_rejects_tier_field () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -2403,7 +2427,7 @@ let test_handle_request_resources_list_rejects_unknown_field () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -2426,7 +2450,7 @@ let test_handle_request_resources_templates_rejects_invalid_cursor () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -2454,7 +2478,7 @@ let test_handle_request_prompts_list_rejects_invalid_cursor () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -2482,7 +2506,7 @@ let test_handle_request_prompts_list_non_empty () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -2515,7 +2539,7 @@ let test_handle_request_prompts_list_cursor () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let cursor = Base64.encode_string "prompts:1" in
   let request =
     Yojson.Safe.to_string
@@ -2548,7 +2572,7 @@ let test_handle_request_prompts_get_tool_help () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -2600,7 +2624,7 @@ let test_handle_request_resources_list_includes_tool_help () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let resources = resources_list_all ~clock ~sw state [] in
   let tool_help_index_present =
     List.exists
@@ -2618,7 +2642,7 @@ let test_handle_request_resources_list_paginates () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -2654,7 +2678,7 @@ let test_handle_request_tools_list_paginates () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let first_page = tools_list_response ~clock ~sw state in
   let first_tools = tools_from_response first_page in
   let cursor =
@@ -2703,7 +2727,7 @@ let test_handle_request_tool_help_resource_read () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -2739,7 +2763,7 @@ let test_handle_request_resources_read_matrix () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:(Some "fixture-root"));
   let ensure_dir path =
     if not (Sys.file_exists path) then Unix.mkdir path 0o755
@@ -2828,7 +2852,7 @@ let test_handle_request_resources_subscribe_requires_session () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -2853,7 +2877,7 @@ let test_handle_request_dashboard_ping_requires_session () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -2877,7 +2901,7 @@ let test_handle_request_dashboard_ping_reports_unknown_ws_session () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -2908,7 +2932,7 @@ let test_handle_request_resources_subscribe_roundtrip () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+  let state = Mcp_eio.For_testing.create_state ~base_path () in
   let subscribe_request =
     Yojson.Safe.to_string
       (`Assoc
@@ -3034,8 +3058,8 @@ let eio_tests = [
     test_handle_request_tools_call_managed_translation_error_records_duration;
   "handle tools/call transition claim guidance", `Quick,
     test_handle_request_tools_call_transition_claim_guidance;
-  "handle tools/call transition done guidance", `Quick,
-    test_handle_request_tools_call_transition_done_guidance;
+  "handle tools/call transition done requires LLM verdict", `Quick,
+    test_handle_request_tools_call_transition_done_requires_llm_verdict;
   "handle tools/call transition claim requires action", `Quick,
     test_handle_request_tools_call_transition_claim_requires_action;
   (* cache get structured content test removed: cache tools retired (#3640) *)
@@ -3051,12 +3075,9 @@ let eio_tests = [
     test_handle_request_tools_list_internal_keeper_runtime_hides_keeper_internal_tools;
   "handle tools/call internal keeper runtime rejects retired execute", `Quick,
     test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execute;
-  "internal keeper runtime cleanup preserves primary exception", `Quick,
-    test_internal_keeper_runtime_cleanup_preserves_primary_exception;
   "handle invalid json", `Quick, test_handle_request_invalid_json;
   "handle method not found", `Quick, test_handle_request_method_not_found;
   (* TRPG tool tests removed — modules archived *)
-  (* Governance status tool test removed *)
   (* execution_session_step direct call test removed — team session cleanup *)
   "explicit agent_name not overridden", `Quick, test_execute_tool_explicit_agent_name_not_overridden;
   "tool-domain agent_name does not reuse bound nickname", `Quick,
@@ -3083,7 +3104,6 @@ let eio_tests = [
     test_execute_tool_legacy_argument_token_ignored_without_http_auth;
   "without mcp session uses generated identity", `Quick,
     test_execute_tool_without_mcp_session_uses_generated_identity;
-  (* Legacy governance convo workspace test removed *)
 ]
 
 let () =

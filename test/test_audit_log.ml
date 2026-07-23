@@ -23,7 +23,7 @@ let assoc_key_count key = function
       List.length (List.filter (fun (field, _) -> String.equal field key) fields)
   | _ -> 0
 
-let test_system_internal_details_deduplicate_canonical_keys () =
+let test_non_public_details_deduplicate_canonical_keys () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
@@ -31,7 +31,7 @@ let test_system_internal_details_deduplicate_canonical_keys () =
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
       let config = Workspace.default_config base_dir in
-      Audit_log.log_system_internal_tool_call config ~agent_id:"codex"
+      Audit_log.log_non_public_tool_call config ~agent_id:"codex"
         ~tool_name:"masc_status" ~success:true ~error_msg:None
         ~details:
           (`Assoc
@@ -46,7 +46,7 @@ let test_system_internal_details_deduplicate_canonical_keys () =
         | [ entry ] -> entry
         | _ -> fail "expected one audit entry"
       in
-      check string "canonical surface wins" "system_internal"
+      check string "canonical surface wins" "non_public"
         Yojson.Safe.Util.(entry.details |> member "surface" |> to_string);
       check string "canonical tool name wins" "masc_status"
         Yojson.Safe.Util.(entry.details |> member "tool_name" |> to_string);
@@ -121,12 +121,12 @@ let test_codec_roundtrip_parametric_actions () =
     (Audit_log.ToolCall "masc_status") "tool_call:masc_status";
   action_roundtrip "ToolCall:colon-in-name"
     (Audit_log.ToolCall "provider:model") "tool_call:provider:model";
-  action_roundtrip "GovernanceDecision:allow"
-    (Audit_log.GovernanceDecision Audit_log.Governance_allow)
-    "governance_decision:allow";
-  action_roundtrip "GovernanceDecision:deny"
-    (Audit_log.GovernanceDecision Audit_log.Governance_deny)
-    "governance_decision:deny";
+  action_roundtrip "GateDecision:allow"
+    (Audit_log.GateDecision Audit_log.Gate_allow)
+    "gate_decision:allow";
+  action_roundtrip "GateDecision:deny"
+    (Audit_log.GateDecision Audit_log.Gate_deny)
+    "gate_decision:deny";
   action_roundtrip "Custom"
     (Audit_log.Custom "my_event") "custom:my_event";
   action_roundtrip "Custom:colon-in-name"
@@ -279,8 +279,8 @@ let () =
     [
       ( "audit_log",
         [
-          test_case "system_internal details deduplicate canonical keys" `Quick
-            test_system_internal_details_deduplicate_canonical_keys;
+          test_case "non-public details deduplicate canonical keys" `Quick
+            test_non_public_details_deduplicate_canonical_keys;
           test_case "audit event severity filters before paging" `Quick
             test_audit_events_filter_severity_before_paging;
         ] );

@@ -19,18 +19,33 @@
     [?sw] / [?clock] / [?proc_mgr] / [?net] / [?mcp_session_id] for
     Eio-bound tools (masc_keeper_msg, masc_keeper_up,
     masc_keeper_sandbox_status, masc_keeper_create_from_persona).
-    Existing registrations accept and ignore them.  The trailing
+    [publication_recovery_provider] is a read-only projection of the runtime's
+    live publication-recovery SSOT. Nested Keeper turns re-read it rather than
+    inheriting the caller turn's capability snapshot. Existing registrations
+    accept and ignore the optional Eio resources. The trailing
     [unit] argument is required so the OCaml compiler can determine
     when the optional defaults apply. *)
+
+type external_effect_authorizer =
+  operation:string ->
+  input:Yojson.Safe.t ->
+  continue:(unit -> Tool_result.result option) ->
+  Tool_result.result option
+(** Caller-owned boundary injected into concrete effect handlers. A handler
+    that performs an external effect invokes this callback with its exact
+    operation and complete input; read-only handlers do not invoke it. *)
 
 val dispatch
   : (config:Workspace.config
      -> agent_name:string
+     -> publication_recovery_provider:
+          Keeper_publication_recovery_availability.provider
      -> ?sw:Eio.Switch.t
      -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
      -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
      -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
      -> ?mcp_session_id:string
+     -> ?authorize_external_effect:external_effect_authorizer
      -> name:string
      -> args:Yojson.Safe.t
      -> unit

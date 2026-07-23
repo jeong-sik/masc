@@ -1,333 +1,558 @@
-(** LLM-backed keeper context compaction (RFC-0313-adjacent W2).
-    See keeper_compaction_llm_summarizer.mli. Structure mirrors
-    Keeper_memory_llm_summary: opt-in gate + fiber-local Eio capture +
-    schema-capable provider filter + timeout + fail-closed [None]. *)
+(** LLM-backed keeper context compaction over the OAS exact-output surface.
+    See keeper_compaction_llm_summarizer.mli. MASC owns the domain plan while
+    OAS owns frozen target admission, dispatch, and receipt provenance. *)
 
 module Schema = Keeper_structured_output_schema
+module Exact_output = Agent_sdk.Exact_output
 module Int_set = Set.Make (Int)
+module Int_map = Map.Make (Int)
+module String_set = Set.Make (String)
 
-(* Bound the summary output. Larger than the memory-bank 512 because a
-   compaction summary stands in for many messages, but still capped so the
-   emergency path (a near-full context) cannot request an unbounded reply. *)
-let summary_max_tokens = 1024
+type eligible_source =
+  { source_index : int
+  ; message : Agent_sdk.Types.message
+  ; text_blocks : string list
+  }
 
-(* Bound the serialized working set handed to the model. A compaction fires
-   near the context limit, so the notes text must itself be bounded well below
-   the window; the model classifies by index, so truncation loses tail detail
-   but never the index mapping (the tail simply lands in [kept]). *)
-let max_notes_bytes = 24_000
+type action =
+  | Keep
+  | Drop
+  | Summarize of string
+
+type decision =
+  { source : eligible_source
+  ; action : action
+  }
 
 type compaction_plan =
-  { summary : string
-  ; kept : int list
-  ; summarized : int list
-  ; dropped : int list
+  { decisions : decision list
+  ; source_units : Keeper_compaction_unit.closed_unit list
   }
 
-type summarizer = messages:Agent_sdk.Types.message list -> compaction_plan option
-
-type complete_fn =
-  sw:Eio.Switch.t ->
-  net:Eio_context.eio_net ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  config:Llm_provider.Provider_config.t ->
-  messages:Agent_sdk.Types.message list ->
-  unit ->
-  (Agent_sdk.Types.api_response, Llm_provider.Http_client.http_error) result
-
-let default_complete ~sw ~net ?clock ~config ~messages () =
-  Llm_provider.Complete.complete ~sw ~net ?clock ~config ~messages ()
-
-let is_direct_completion_provider (provider_cfg : Llm_provider.Provider_config.t) : bool =
-  match provider_cfg.kind with
-  | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | Glm | DashScope -> true
-
-let provider_for_plan ~runtime_id (provider_cfg : Llm_provider.Provider_config.t) =
-  let max_tokens =
-    match provider_cfg.max_tokens with
-    | Some n when n > 0 -> Some (min n summary_max_tokens)
-    | _ -> Some summary_max_tokens
-  in
-  let temperature =
-    Runtime_inference.resolve_temperature
-      ~runtime_id
-      ~fallback:(fun () -> Runtime_provider_defaults.deterministic_temperature)
-  in
-  { provider_cfg with
-    max_tokens
-  ; temperature = Some temperature
-  ; tool_choice = None
-  ; disable_parallel_tool_use = true
+type exact_execution_evidence =
+  { selected_target_ref : string
+  ; target_identity_fingerprint : string
+  ; catalog_generation_fingerprint : string
+  ; catalog_evidence_sha256 : string
+  ; plan_fingerprint : string
+  ; receipt_plan_fingerprint : string
+  ; receipt_request_body_sha256 : string
   }
-  (* Full module path (not the [Schema] alias): the structured-output
-     coverage test resolves callees literally via Ast_grep.count_calls, so
-     this call must read [Keeper_structured_output_schema.apply_to_provider_config]
-     in source — same pattern as the other registry entries. *)
-  |> Keeper_structured_output_schema.apply_to_provider_config
-       Schema.compaction_plan_output_schema
 
-let plan_schema_supported provider_cfg =
-  Schema.provider_config_accepts_schema Schema.compaction_plan_output_schema provider_cfg
+type completed_plan =
+  { plan : compaction_plan
+  ; exact_execution_evidence : exact_execution_evidence
+  }
+
+type summarization_failure =
+  | Exact_target_selection_failed
+  | Exact_admission_failed
+  | Exact_execution_context_unavailable
+  | Exact_execution_failed_before_dispatch
+  | Exact_execution_failed_after_dispatch
+  | Invalid_plan
+
+type summarizer =
+  units:Keeper_compaction_unit.closed_unit list ->
+  (completed_plan, summarization_failure) result
 
 let message role text : Agent_sdk.Types.message = Agent_sdk.Types.text_message role text
 
-(* One indexed line per message: "[i] role: <text>". The model must classify
-   every [i] into exactly one of kept/summarized/dropped. *)
-let indexed_messages_text (messages : Agent_sdk.Types.message list) =
-  messages
-  |> List.mapi (fun idx (m : Agent_sdk.Types.message) ->
-    let role =
-      match m.role with
-      | Agent_sdk.Types.System -> "system"
-      | Agent_sdk.Types.User -> "user"
-      | Agent_sdk.Types.Assistant -> "assistant"
-      | Agent_sdk.Types.Tool -> "tool"
-    in
-    let text = Agent_sdk.Types.text_of_message m |> String.trim in
-    Printf.sprintf "[%d] %s: %s" idx role text)
-  |> String.concat "\n"
-  |> String_util.utf8_safe ~max_bytes:max_notes_bytes ~suffix:"..."
-  |> String_util.to_string
+let messages_of_unit = function
+  | Keeper_compaction_unit.Ordinary_message message -> [ message ]
+  | Keeper_compaction_unit.Closed_tool_cycle messages -> messages
 
-let messages_for_plan ~(messages : Agent_sdk.Types.message list) =
-  let count = List.length messages in
+let text_blocks blocks =
+  List.fold_right
+    (fun block texts ->
+      match block, texts with
+      | Agent_sdk.Types.Text text, Some texts -> Some (text :: texts)
+      | ( Agent_sdk.Types.Thinking _
+        | Agent_sdk.Types.ReasoningDetails _
+        | Agent_sdk.Types.RedactedThinking _
+        | Agent_sdk.Types.ToolUse _
+        | Agent_sdk.Types.ToolResult _
+        | Agent_sdk.Types.Image _
+        | Agent_sdk.Types.Document _
+        | Agent_sdk.Types.Audio _ )
+        , _ ->
+        None
+      | _, None -> None)
+    blocks
+    (Some [])
+
+let eligible_source source_index = function
+  | Keeper_compaction_unit.Ordinary_message
+      ({ role = Agent_sdk.Types.Assistant
+       ; content
+       ; name = None
+       ; tool_call_id = None
+       ; metadata = []
+       } as message) ->
+    (match text_blocks content with
+     | Some (_ :: _ as text_blocks)
+       when List.exists (fun text -> String.trim text <> "") text_blocks ->
+       Some { source_index; message; text_blocks }
+     | Some [] | Some (_ :: _) | None -> None)
+  | Keeper_compaction_unit.Ordinary_message _
+  | Keeper_compaction_unit.Closed_tool_cycle _ ->
+    None
+
+let eligible_sources units =
+  units
+  |> List.mapi eligible_source
+  |> List.filter_map Fun.id
+
+let has_eligible_units units = eligible_sources units <> []
+
+let eligible_units_json sources =
+  `List
+    (List.map
+       (fun source ->
+         `Assoc
+           [ Schema.compaction_plan_field_unit_index, `Int source.source_index
+           ; "role", `String (Agent_sdk.Types.role_to_string source.message.role)
+           ; "text_blocks", `List (List.map (fun text -> `String text) source.text_blocks)
+           ])
+       sources)
+
+let messages_for_plan ~units =
+  let sources = eligible_sources units in
   let system =
-    "You compact a keeper's working context. Classify EVERY message, by its \
-     0-based index, into exactly one of: kept (verbatim, still load-bearing), \
-     summarized (folded into the summary), or dropped (low value, discard). \
-     Every index in range must appear in exactly one list; do not invent \
-     indices. Prefer keeping recent messages and any with concrete code paths, \
-     commands, decisions, or unresolved blockers. Write one durable [summary] \
-     prose block that stands in for the summarized messages. Do not invent \
-     facts. Do not include markdown fences."
+    "You compact only the explicitly supplied eligible Assistant text units. \
+     Return exactly one decision for every supplied unit_index and do not \
+     invent indices. keep preserves the source verbatim. summarize replaces \
+     that unit in place with its faithful summary. drop is valid only when the \
+     unit contributes no state, decision, evidence, constraint, unresolved \
+     work, or outcome. For keep and drop, summary must be null. For summarize, \
+     summary must be a non-empty string. Do not infer recency policy, merge \
+     units, relocate facts, invent facts, or include markdown fences. Respond \
+     with a single JSON object and no other text."
   in
   let user =
     Printf.sprintf
-      "message_count: %d\nmessages:\n%s\n\nReturn a JSON object with fields \
-       summary, kept_indices, summarized_indices, dropped_indices covering \
-       every index in [0, %d) exactly once."
-      count
-      (indexed_messages_text messages)
-      count
+      "eligible_units=%s\nReturn {\"%s\":[{\"%s\":integer,\"%s\":\
+       \"%s|%s|%s\",\"%s\":string|null}]} with exactly one decision per \
+       supplied unit_index."
+      (eligible_units_json sources |> Yojson.Safe.to_string)
+      Schema.compaction_plan_field_decisions
+      Schema.compaction_plan_field_unit_index
+      Schema.compaction_plan_field_action
+      Schema.compaction_plan_action_keep
+      Schema.compaction_plan_action_drop
+      Schema.compaction_plan_action_summarize
+      Schema.compaction_plan_field_summary
   in
   [ message Agent_sdk.Types.System system; message Agent_sdk.Types.User user ]
 
-(* -- structured plan parsing + validation (Parse, don't validate) -- *)
-
-let int_list_field key = function
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`List items) ->
-       List.fold_right
-         (fun item acc ->
-           match acc, item with
-           | Ok xs, `Int n -> Ok (n :: xs)
-           | Ok _, _ -> Error (Printf.sprintf "%s must contain only integers" key)
-           | Error _, _ -> acc)
-         items
-         (Ok [])
-     | Some _ -> Error (Printf.sprintf "%s must be an array" key)
-     | None -> Error (Printf.sprintf "missing %s" key))
-  | _ -> Error "plan must be a JSON object"
-
-let string_field key = function
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some (`String s) -> Ok s
-     | Some _ -> Error (Printf.sprintf "%s must be a string" key)
-     | None -> Error (Printf.sprintf "missing %s" key))
-  | _ -> Error "plan must be a JSON object"
-
 let ( let* ) = Result.bind
 
-(* The three index lists must together partition [0, message_count) exactly:
-   every index in range, no out-of-range, no negatives, no duplicates across
-   the union. A violation yields [Error] (caller falls back to deterministic),
-   not a silent repair — an LLM that miscounts must not drop real messages. *)
-let validate_partition ~message_count ~kept ~summarized ~dropped =
-  let all = kept @ summarized @ dropped in
-  let seen = Array.make message_count false in
-  let rec check = function
-    | [] -> Ok ()
-    | idx :: rest ->
-      if idx < 0 || idx >= message_count then
-        Error (Printf.sprintf "index %d out of range [0, %d)" idx message_count)
-      else if seen.(idx) then Error (Printf.sprintf "index %d appears more than once" idx)
-      else begin
-        seen.(idx) <- true;
-        check rest
-      end
+let object_fields ~context ~expected = function
+  | `Assoc fields ->
+    let expected = String_set.of_list expected in
+    let rec check seen = function
+      | [] ->
+        let missing = String_set.diff expected seen |> String_set.elements in
+        if missing = []
+        then Ok fields
+        else Error (Printf.sprintf "%s missing fields: %s" context (String.concat "," missing))
+      | (key, _) :: rest ->
+        if not (String_set.mem key expected)
+        then Error (Printf.sprintf "%s has unknown field %s" context key)
+        else if String_set.mem key seen
+        then Error (Printf.sprintf "%s has duplicate field %s" context key)
+        else check (String_set.add key seen) rest
+    in
+    check String_set.empty fields
+  | _ -> Error (context ^ " must be a JSON object")
+
+let required_field key fields =
+  match List.assoc_opt key fields with
+  | Some value -> Ok value
+  | None -> Error ("missing field " ^ key)
+
+let int_value ~field = function
+  | `Int value -> Ok value
+  | _ -> Error (field ^ " must be an integer")
+
+let string_value ~field = function
+  | `String value -> Ok value
+  | _ -> Error (field ^ " must be a string")
+
+let summary_value ~field = function
+  | `Null -> Ok None
+  | `String value -> Ok (Some value)
+  | _ -> Error (field ^ " must be a string or null")
+
+let parse_action ~action_token ~summary =
+  if String.equal action_token Schema.compaction_plan_action_keep
+  then
+    (match summary with
+     | None -> Ok Keep
+     | Some _ -> Error "keep decision summary must be null")
+  else if String.equal action_token Schema.compaction_plan_action_drop
+  then
+    (match summary with
+     | None -> Ok Drop
+     | Some _ -> Error "drop decision summary must be null")
+  else if String.equal action_token Schema.compaction_plan_action_summarize
+  then
+    (match summary with
+     | Some summary when String.trim summary <> "" -> Ok (Summarize summary)
+     | Some _ -> Error "summarize decision summary must be non-empty"
+     | None -> Error "summarize decision summary must be a string")
+  else Error ("unknown compaction action " ^ action_token)
+
+let decision_of_json sources_by_index json =
+  let expected_fields =
+    [ Schema.compaction_plan_field_unit_index
+    ; Schema.compaction_plan_field_action
+    ; Schema.compaction_plan_field_summary
+    ]
   in
-  let* () = check all in
-  let missing = ref [] in
-  Array.iteri (fun idx covered -> if not covered then missing := idx :: !missing) seen;
-  match !missing with
-  | [] -> Ok ()
-  | xs ->
-    Error
-      (Printf.sprintf
-         "indices not covered: %s"
-         (String.concat "," (List.rev_map string_of_int xs)))
+  let* fields = object_fields ~context:"decision" ~expected:expected_fields json in
+  let* index_json = required_field Schema.compaction_plan_field_unit_index fields in
+  let* source_index =
+    int_value ~field:Schema.compaction_plan_field_unit_index index_json
+  in
+  let* source =
+    match Int_map.find_opt source_index sources_by_index with
+    | Some source -> Ok source
+    | None -> Error (Printf.sprintf "unit_index %d is not eligible" source_index)
+  in
+  let* action_json = required_field Schema.compaction_plan_field_action fields in
+  let* action_token =
+    string_value ~field:Schema.compaction_plan_field_action action_json
+  in
+  let* summary_json = required_field Schema.compaction_plan_field_summary fields in
+  let* summary = summary_value ~field:Schema.compaction_plan_field_summary summary_json in
+  let* action = parse_action ~action_token ~summary in
+  Ok { source; action }
 
-let validate_non_empty_output ~message_count ~kept ~summarized =
-  if message_count > 0 && kept = [] && summarized = [] then
-    Error "plan would produce empty compaction output"
-  else Ok ()
+let decisions_value json =
+  let expected = [ Schema.compaction_plan_field_decisions ] in
+  let* fields = object_fields ~context:"plan" ~expected json in
+  let* decisions = required_field Schema.compaction_plan_field_decisions fields in
+  match decisions with
+  | `List decisions -> Ok decisions
+  | _ -> Error (Schema.compaction_plan_field_decisions ^ " must be an array")
 
-let plan_of_json ~message_count json =
-  let* summary = string_field Schema.compaction_plan_field_summary json in
-  let summary = String.trim summary in
-  let* kept = int_list_field Schema.compaction_plan_field_kept_indices json in
-  let* summarized = int_list_field Schema.compaction_plan_field_summarized_indices json in
-  let* dropped = int_list_field Schema.compaction_plan_field_dropped_indices json in
-  (* The summary stands in for the [summarized] messages; it is consumed by
-     [apply] only when [summarized] is non-empty. Requiring it non-empty
-     unconditionally would reject a legitimate "keep everything, nothing to
-     summarize" plan (summary="") and spuriously fall back to the
-     deterministic chain. So the summary must be non-empty iff it will be
-     used. *)
+let parse_decisions ~sources decisions_json =
+  let sources_by_index =
+    List.fold_left
+      (fun sources source -> Int_map.add source.source_index source sources)
+      Int_map.empty
+      sources
+  in
+  let rec parse seen decisions = function
+    | [] -> Ok (List.rev decisions, seen)
+    | json :: rest ->
+      let* decision = decision_of_json sources_by_index json in
+      let source_index = decision.source.source_index in
+      if Int_set.mem source_index seen
+      then Error (Printf.sprintf "unit_index %d appears more than once" source_index)
+      else parse (Int_set.add source_index seen) (decision :: decisions) rest
+  in
+  parse Int_set.empty [] decisions_json
+
+let plan_of_json ~units json =
+  let sources = eligible_sources units in
+  if sources = []
+  then Error "source contains no eligible compaction units"
+  else
+  let expected_indices =
+    List.fold_left
+      (fun indices source -> Int_set.add source.source_index indices)
+      Int_set.empty
+      sources
+  in
+  let* decisions_json = decisions_value json in
+  let* decisions, seen = parse_decisions ~sources decisions_json in
+  let missing = Int_set.diff expected_indices seen |> Int_set.elements in
   let* () =
-    if summarized <> [] && summary = ""
-    then Error "summary must be non-empty when summarized indices are present"
-    else Ok ()
+    if missing = []
+    then Ok ()
+    else
+      Error
+        (Printf.sprintf
+           "eligible unit indices not covered: %s"
+           (String.concat "," (List.map string_of_int missing)))
   in
-  let* () = validate_partition ~message_count ~kept ~summarized ~dropped in
-  let* () = validate_non_empty_output ~message_count ~kept ~summarized in
-  Ok { summary; kept; summarized; dropped }
-
-(* Marker prefix so the folded summary is recognizable in the transcript and
-   by downstream tooling, matching the memory-bank [MEMORY_SUMMARY] convention. *)
-let summary_marker = "[COMPACTION_SUMMARY]"
-
-let apply (plan : compaction_plan) ~(messages : Agent_sdk.Types.message list) =
-  let summarized = List.fold_left (fun s i -> Int_set.add i s) Int_set.empty plan.summarized in
-  let dropped = List.fold_left (fun s i -> Int_set.add i s) Int_set.empty plan.dropped in
-  let first_summarized =
-    List.fold_left min max_int plan.summarized
+  let* () =
+    if List.exists
+         (fun decision ->
+           match decision.action with
+           | Drop | Summarize _ -> true
+           | Keep -> false)
+         decisions
+    then Ok ()
+    else Error "plan keeps every eligible unit without changing any"
   in
-  let summary_msg =
-    message Agent_sdk.Types.Assistant (summary_marker ^ " " ^ plan.summary)
+  let* () =
+    if List.exists
+         (fun decision ->
+           match decision.action with
+           | Keep | Summarize _ -> true
+           | Drop -> false)
+         decisions
+    then Ok ()
+    else Error "plan would remove every eligible unit"
   in
-  messages
-  |> List.mapi (fun idx m -> idx, m)
-  |> List.filter_map (fun (idx, m) ->
-    if Int_set.mem idx dropped then None
-    else if Int_set.mem idx summarized then
-      (* Emit the single summary message at the position of the first
-         summarized index; the rest of the summarized indices collapse away. *)
-      if idx = first_summarized then Some summary_msg else None
-    else Some m)
+  let decisions =
+    List.sort
+      (fun left right -> Int.compare left.source.source_index right.source.source_index)
+      decisions
+  in
+  Ok { decisions; source_units = units }
 
-let plan_of_response ~message_count response =
-  match
-    Agent_sdk_response.structured_json_of_response
-      ~schema_name:"keeper_compaction_plan"
-      response
-  with
-  | Ok json -> plan_of_json ~message_count json
-  | Error detail -> Error ("invalid structured response: " ^ detail)
+let apply (plan : compaction_plan) =
+  let decisions =
+    List.fold_left
+      (fun decisions decision ->
+        Int_map.add decision.source.source_index decision decisions)
+      Int_map.empty
+      plan.decisions
+  in
+  plan.source_units
+  |> List.mapi (fun idx unit_ -> idx, unit_)
+  |> List.concat_map (fun (idx, unit_) ->
+    match Int_map.find_opt idx decisions with
+    | None | Some { action = Keep; _ } -> messages_of_unit unit_
+    | Some { action = Drop; _ } -> []
+    | Some { source; action = Summarize summary } ->
+      [ { source.message with
+          content = [ Agent_sdk.Types.Text summary ]
+        }
+      ])
 
-type 'a timeout_result =
-  | Completed of 'a
-  | Timed_out
-  | Clock_unavailable
+let indices_for_action predicate plan =
+  plan.decisions
+  |> List.filter_map (fun decision ->
+    if predicate decision.action then Some decision.source.source_index else None)
 
-let with_timeout ?clock ~timeout_sec f =
-  match clock with
-  | None -> Clock_unavailable
-  | Some clock ->
-    (try Completed (Eio.Time.with_timeout_exn clock timeout_sec f) with
-     | Eio.Time.Timeout -> Timed_out)
+let summarized_indices = indices_for_action (function Summarize _ -> true | Keep | Drop -> false)
+let dropped_indices = indices_for_action (function Drop -> true | Keep | Summarize _ -> false)
+let has_changes plan = summarized_indices plan <> [] || dropped_indices plan <> []
 
-let run_plan
-    ?(complete : complete_fn = default_complete)
-    ?clock
-    ?(timeout_sec = Env_config_governance.Inference.timeout_seconds)
-    ~(keeper_name : string)
-    ~(runtime_id : string)
-    ~sw
-    ~net
-    ~(provider_cfg : Llm_provider.Provider_config.t)
-    ~(messages : Agent_sdk.Types.message list)
-    () : compaction_plan option =
-  let message_count = List.length messages in
-  let provider_cfg = provider_for_plan ~runtime_id provider_cfg in
-  let request = messages_for_plan ~messages in
-  match
-    with_timeout ?clock ~timeout_sec (fun () ->
-      complete ~sw ~net ?clock ~config:provider_cfg ~messages:request ())
-  with
-  | Timed_out ->
-    Log.Keeper.warn ~keeper_name
-      "compaction LLM plan timed out runtime=%s timeout_sec=%.1f"
-      runtime_id timeout_sec;
-    None
-  | Clock_unavailable ->
-    Log.Keeper.warn ~keeper_name
-      "compaction LLM plan clock unavailable runtime=%s — refusing provider \
-       call without enforcing timeout"
-      runtime_id;
-    None
-  | Completed (Error err) ->
-    Log.Keeper.warn ~keeper_name
-      "compaction LLM plan failed runtime=%s: %s"
-      runtime_id (Provider_http_error.to_message err);
-    None
-  | Completed (Ok response) ->
-    (match plan_of_response ~message_count response with
-     | Ok plan -> Some plan
-     | Error detail ->
-       Log.Keeper.warn ~keeper_name
-         "compaction LLM plan rejected runtime=%s: %s"
-         runtime_id detail;
-       None)
+let exact_output_requirement =
+  Exact_output.make_output_requirement
+    ~schema:Schema.compaction_plan_output_schema
+    ~minimum_guarantee:Exact_output.Json_syntax
+;;
 
-let make ?complete ?timeout_sec ~(runtime_id : string) ~(keeper_name : string) ()
-  : summarizer option
-  =
-  (* Gating lives in the caller's [meta.compaction.mode] (Llm vs
-     Deterministic). The memory-bank MASC_KEEPER_MEMORY_LLM_SUMMARY flag is a
-     different subsystem's opt-in and must not silence compaction (38-bug
-     campaign #3: the double gate kept the LLM path permanently dead). *)
+type admitted_slot =
+  { slot_id : string
+  ; ready_plan : Exact_output.ready_plan
+  ; receipt : Exact_output.receipt
+  }
+
+type prepared_lane =
+  { units : Keeper_compaction_unit.closed_unit list
+  ; admitted_slots : admitted_slot list
+  }
+
+type attempt_observation =
+  { slot_id : string
+  ; phase : Exact_output.effect_phase
+  ; dispatch_count : int
+  ; catalog_generation_fingerprint : string
+  }
+
+let exact_execution_evidence ready_plan (success : Exact_output.success) =
+  let provenance = success.provenance in
+  let identity = provenance.target_identity in
+  let receipt = success.receipt in
+  { selected_target_ref =
+      identity
+      |> Exact_output.target_identity_ref
+      |> Exact_output.target_ref_id
+  ; target_identity_fingerprint =
+      Exact_output.target_identity_fingerprint identity
+  ; catalog_generation_fingerprint =
+      Exact_output.catalog_generation_fingerprint provenance.catalog_generation
+  ; catalog_evidence_sha256 =
+      Exact_output.catalog_evidence_sha256 provenance.catalog_evidence
+  ; plan_fingerprint = Exact_output.plan_fingerprint ready_plan
+  ; receipt_plan_fingerprint = Exact_output.receipt_plan_fingerprint receipt
+  ; receipt_request_body_sha256 =
+      Exact_output.receipt_request_body_sha256 receipt
+  }
+;;
+
+let admit_all ~keeper_name selected_slots ~messages =
+  let rec loop admitted = function
+    | [] -> List.rev admitted
+    | (slot : Runtime_exact_output_registry.selected_slot) :: rest ->
+      (match
+         Exact_output.admit
+           ~target:slot.target
+           ~messages
+           exact_output_requirement
+       with
+       | Ok ready_plan ->
+         let receipt = Exact_output.attempt_receipt ready_plan in
+         loop ({ slot_id = slot.slot_id; ready_plan; receipt } :: admitted) rest
+       | Error _ ->
+         Log.Keeper.warn
+           ~keeper_name
+           "compaction exact slot rejected before dispatch slot=%s"
+           slot.slot_id;
+         loop admitted rest)
+  in
+  loop [] selected_slots
+;;
+
+let prepare_lane ~keeper_name ~registry ~lane_id ~units =
+  if not (has_eligible_units units)
+  then Error Invalid_plan
+  else
+    let registry_generation = Runtime_exact_output_registry.generation registry in
+    match Runtime_exact_output_registry.lane_slots registry ~lane_id with
+    | Error error ->
+      Log.Keeper.warn
+        ~keeper_name
+        "compaction exact lane lookup rejected generation=%Ld: %s"
+        registry_generation
+        (Runtime_exact_output_registry.error_to_string error);
+      Error Exact_target_selection_failed
+    | Ok slot_ids ->
+      let selected_slots_result =
+        Runtime_exact_output_registry.resolve_slots registry slot_ids
+        |> List.fold_left
+             (fun selected_slots_result outcome ->
+                match selected_slots_result, outcome with
+                | (Error _ as error), _ -> error
+                | Ok selected_slots, Ok selected -> Ok (selected :: selected_slots)
+                | Ok _, Error error ->
+                  Log.Keeper.warn
+                    ~keeper_name
+                    "compaction exact registry readiness violated generation=%Ld: %s"
+                    registry_generation
+                    (Runtime_exact_output_registry.error_to_string error);
+                  Error Exact_target_selection_failed)
+             (Ok [])
+      in
+      (match selected_slots_result with
+       | Error _ as error -> error
+       | Ok selected_slots ->
+         let selected_slots = List.rev selected_slots in
+         if selected_slots = []
+         then Error Exact_target_selection_failed
+         else
+           let messages = messages_for_plan ~units in
+           (* Every candidate is admitted against the same immutable registry before
+              the first network effect. Each admitted plan's real receipt is retained
+              before execution enters a cancellation scope. *)
+           let admitted_slots = admit_all ~keeper_name selected_slots ~messages in
+           if admitted_slots = []
+           then Error Exact_admission_failed
+           else Ok { units; admitted_slots })
+;;
+
+let execute_prepared_lane ~keeper_name ~net ?clock prepared_lane =
+  let rec execute = function
+    | [] -> Error Exact_execution_failed_before_dispatch
+    | { slot_id; ready_plan; receipt } :: rest ->
+      (match Exact_output.execute_once ~net ?clock ready_plan with
+       | Error _
+         when Exact_output.receipt_phase receipt = Exact_output.Before_dispatch
+              && Exact_output.receipt_dispatch_count receipt = 0 ->
+         Log.Keeper.warn
+           ~keeper_name
+           "compaction exact slot failed before dispatch slot=%s"
+           slot_id;
+         execute rest
+       | Error _ -> Error Exact_execution_failed_after_dispatch
+       | Ok success ->
+         (match plan_of_json ~units:prepared_lane.units success.output with
+          | Error detail ->
+            Log.Keeper.warn
+              ~keeper_name
+              "compaction exact output violated domain plan slot=%s: %s"
+              slot_id
+              detail;
+            Error Invalid_plan
+          | Ok plan ->
+            Ok
+              { plan
+              ; exact_execution_evidence = exact_execution_evidence ready_plan success
+              }))
+  in
+  execute prepared_lane.admitted_slots
+;;
+
+let run_exact ~keeper_name ~sw:_ ~net ~clock ~units =
+  if not (has_eligible_units units)
+  then Error Invalid_plan
+  else
+    match Runtime_exact_output_registry.current () with
+    | Error _ -> Error Exact_target_selection_failed
+    | Ok registry ->
+      let* prepared_lane =
+        prepare_lane
+          ~keeper_name
+          ~registry
+          ~lane_id:"compaction_exact"
+          ~units
+      in
+      execute_prepared_lane ~keeper_name ~net ?clock prepared_lane
+;;
+
+let make_resolved ~(keeper_name : string) () : summarizer option =
   match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
   | Some sw, Some net ->
     let clock = Eio_context.get_clock_opt () in
-    let provider_runtime_id =
-      Keeper_memory_runtime_resolution.runtime_id_for_librarian ~runtime_id
-    in
-    (match
-       Keeper_memory_runtime_resolution.provider_for_runtime
-         ~runtime_id:provider_runtime_id
-     with
-     | Error err ->
-       Log.Keeper.warn ~keeper_name
-         "compaction LLM summarizer provider resolution failed runtime=%s: %s"
-         provider_runtime_id err;
-       None
-     | Ok provider ->
-       let providers =
-         [ provider ]
-         |> List.filter is_direct_completion_provider
-         |> List.filter plan_schema_supported
-       in
-       (match providers with
-        | [] ->
-          Log.Keeper.warn ~keeper_name
-            "compaction LLM summarizer has no schema-capable direct completion \
-             provider runtime=%s"
-            provider_runtime_id;
-          None
-        | provider_cfg :: _ ->
-          Some
-            (fun ~messages ->
-              run_plan ?complete ?clock ?timeout_sec ~keeper_name
-                ~runtime_id:provider_runtime_id ~sw ~net ~provider_cfg ~messages ())))
-  | _ ->
-    Log.Keeper.warn ~keeper_name
-      "compaction LLM summarizer skipped: Eio context unavailable runtime=%s"
-      runtime_id;
-    None
+    Some (fun ~units -> run_exact ~keeper_name ~sw ~net ~clock ~units)
+  | _ -> None
+;;
+
+let make ~keeper_name () = make_resolved ~keeper_name ()
+
+let completed_plan completed = completed.plan
+let completed_exact_execution_evidence completed = completed.exact_execution_evidence
+let exact_execution_evidence_selected_target_ref evidence = evidence.selected_target_ref
+
+let exact_execution_evidence_target_identity_fingerprint evidence =
+  evidence.target_identity_fingerprint
+;;
+
+let exact_execution_evidence_catalog_generation_fingerprint
+      (evidence : exact_execution_evidence) =
+  evidence.catalog_generation_fingerprint
+;;
+
+let exact_execution_evidence_catalog_evidence_sha256 evidence =
+  evidence.catalog_evidence_sha256
+;;
+
+let exact_execution_evidence_plan_fingerprint evidence = evidence.plan_fingerprint
+
+let exact_execution_evidence_receipt_plan_fingerprint evidence =
+  evidence.receipt_plan_fingerprint
+;;
+
+let exact_execution_evidence_receipt_request_body_sha256 evidence =
+  evidence.receipt_request_body_sha256
+;;
 
 module For_testing = struct
-  let provider_for_plan = provider_for_plan
+  let messages_for_plan = messages_for_plan
+
+  let admitted_slot_ids prepared_lane =
+    List.map (fun (slot : admitted_slot) -> slot.slot_id) prepared_lane.admitted_slots
+  ;;
+
+  let attempt_observations prepared_lane =
+    List.map
+      (fun (slot : admitted_slot) ->
+        { slot_id = slot.slot_id
+        ; phase = Exact_output.receipt_phase slot.receipt
+        ; dispatch_count = Exact_output.receipt_dispatch_count slot.receipt
+        ; catalog_generation_fingerprint =
+            slot.receipt
+            |> Exact_output.receipt_catalog_generation
+            |> Exact_output.catalog_generation_fingerprint
+        })
+      prepared_lane.admitted_slots
+  ;;
 end

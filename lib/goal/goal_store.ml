@@ -1,27 +1,11 @@
 (* Goal store — shared planning goals with a dedicated lifecycle phase.
-   Legacy [status] remains persisted for compatibility, but it is derived
-   from [phase] on write and inferred on read for old rows. *)
+   [phase] is the only persisted lifecycle representation (RFC-0352 slice 1).
+   The legacy [status] duplicate was removed after a live-store measurement
+   found zero rows without a [phase] field; during the transition window the
+   decoder still accepts and ignores an incoming "status" field, and the
+   full-file save converges the store to phase-only on first write. *)
 
 let ( let* ) = Result.bind
-
-type goal_status =
-  | Active
-  | Paused
-  | Done
-  | Dropped
-
-let goal_status_to_yojson = function
-  | Active -> `String "active"
-  | Paused -> `String "paused"
-  | Done -> `String "done"
-  | Dropped -> `String "dropped"
-
-let goal_status_of_yojson = function
-  | `String "active" -> Ok Active
-  | `String "paused" -> Ok Paused
-  | `String "done" -> Ok Done
-  | `String "dropped" -> Ok Dropped
-  | j -> Error ("goal_status_of_yojson: " ^ Yojson.Safe.to_string j)
 
 (* RFC-0294: the workspace-goal [horizon] (short/mid/long) and its dead
    refresh/snapshot scheduler ([refresh_mode], [snapshot_mode], and their
@@ -39,11 +23,7 @@ type goal = {
   target_value : string option;
   due_date : string option;
   priority : int;
-  status : goal_status;
   phase : Goal_phase.t;
-  verifier_policy : Goal_verification.goal_verifier_policy option;
-  require_completion_approval : bool;
-  active_verification_request_id : string option;
   parent_goal_id : string option;
   last_review_note : string option;
   last_review_at : string option;
@@ -74,14 +54,7 @@ and goal_to_yojson (goal : goal) =
       ("target_value", Json_util.string_opt_to_json goal.target_value);
       ("due_date", Json_util.string_opt_to_json goal.due_date);
       ("priority", `Int goal.priority);
-      ("status", goal_status_to_yojson goal.status);
       ("phase", Goal_phase.to_yojson goal.phase);
-      ( "verifier_policy",
-        match goal.verifier_policy with
-        | Some policy -> Goal_verification.goal_verifier_policy_to_yojson policy
-        | None -> `Null );
-      ("require_completion_approval", `Bool goal.require_completion_approval);
-      ("active_verification_request_id", Json_util.string_opt_to_json goal.active_verification_request_id);
       ("parent_goal_id", Json_util.string_opt_to_json goal.parent_goal_id);
       ("last_review_note", Json_util.string_opt_to_json goal.last_review_note);
       ("last_review_at", Json_util.string_opt_to_json goal.last_review_at);
@@ -110,34 +83,54 @@ and state_of_yojson = function
       Error ("state_of_yojson: " ^ Yojson.Safe.to_string json)
 
 and goal_of_yojson = function
-  | `Assoc _ as json ->
+  | `Assoc fields as json ->
+      let accepted_fields =
+        [ "id"
+        ; "title"
+        ; "metric"
+        ; "target_value"
+        ; "due_date"
+        ; "priority"
+        ; "status" (* accepted and ignored during the phase-only transition:
+                        rows written before RFC-0352 slice 1 still carry the
+                        derived duplicate until the first full-file save *)
+        ; "phase"
+        ; "parent_goal_id"
+        ; "last_review_note"
+        ; "last_review_at"
+        ; "created_at"
+        ; "updated_at"
+        ]
+      in
+      let unknown_field =
+        List.find_map
+          (fun (field, _) ->
+            if List.mem field accepted_fields then None else Some field)
+          fields
+      in
       let id_opt = Json_util.assoc_member_opt "id" json in
       let title_opt = Json_util.assoc_member_opt "title" json in
-      (match id_opt, title_opt with
-      | Some (`String id), Some (`String title) ->
-          let legacy_status =
-            match Json_util.assoc_member_opt "status" json with
-            | None | Some `Null -> Ok Active
-            | Some status_json -> goal_status_of_yojson status_json
-          in
+      (match unknown_field, id_opt, title_opt with
+      | Some field, _, _ ->
+          Error
+            (Printf.sprintf
+               "goal_of_yojson: unknown Goal field %S is not accepted"
+               field)
+      | None, Some (`String id), Some (`String title) ->
           let phase =
-            (* Legacy rows (written before the phase field existed) carry only
-               [status]; the read path must map it the same way the update
-               path does (see the status→phase mapping near [set_status]).
-               #23710 dropped this mapping to an unconditional Active default
-               and #23845 sealed the compile without restoring it — a paused
-               legacy goal then decoded as Executing (main red #23901). *)
+            (* Phase is required. The status->phase read inference for
+               pre-phase rows was removed in RFC-0352 slice 1 after a live
+               measurement found zero phase-less rows; a row without [phase]
+               is now a decode error rather than a silent Active default
+               (the silent default already caused main red #23901 once). *)
             match Json_util.assoc_member_opt "phase" json with
-            | None | Some `Null -> Result.map phase_of_goal_status legacy_status
+            | None | Some `Null ->
+                Error
+                  (Printf.sprintf
+                     "goal_of_yojson: goal %S has no phase field (legacy \
+                      status-only rows no longer decode; RFC-0352 slice 1)"
+                     id)
             | Some phase_json -> Goal_phase.of_yojson phase_json
-          in
-          let verifier_policy =
-            match Json_util.assoc_member_opt "verifier_policy" json with
-            | None | Some `Null -> Ok None
-            | Some policy_json ->
-                Result.map
-                  Option.some
-                  (Goal_verification.goal_verifier_policy_of_yojson policy_json)
           in
           let created_at =
             match Json_util.assoc_member_opt "created_at" json with
@@ -149,17 +142,10 @@ and goal_of_yojson = function
             | Some (`String value) -> Ok value
             | _ -> Error "goal_of_yojson: updated_at missing"
           in
-          (match
-             legacy_status, phase, verifier_policy, created_at, updated_at
-           with
-           | ( Ok _legacy_status
-             , Ok phase
-             , Ok verifier_policy
-             , Ok created_at
-             , Ok updated_at ) ->
+          (match phase, created_at, updated_at with
+           | Ok phase, Ok created_at, Ok updated_at ->
              Ok
-               (normalize_goal
-                  {
+               {
                     id;
                     title;
                     metric = Json_util.get_string json "metric";
@@ -169,65 +155,19 @@ and goal_of_yojson = function
                       (match Json_util.assoc_member_opt "priority" json with
                       | Some (`Int value) -> clamp_priority value
                       | _ -> 3);
-                    status = goal_status_of_phase phase;
                     phase;
-                    verifier_policy;
-                    require_completion_approval =
-                      (match Json_util.assoc_member_opt "require_completion_approval" json with
-                      | Some (`Bool value) -> value
-                      | _ -> false);
-                    active_verification_request_id =
-                      Json_util.get_string json "active_verification_request_id";
                     parent_goal_id = Json_util.get_string json "parent_goal_id";
                     last_review_note = Json_util.get_string json "last_review_note";
                     last_review_at = Json_util.get_string json "last_review_at";
                     created_at;
                     updated_at;
-                  })
-           | Error msg, _, _, _, _ -> Error msg
-           | _, Error msg, _, _, _ -> Error msg
-           | _, _, Error msg, _, _ -> Error msg
-           | _, _, _, Error msg, _ -> Error msg
-           | _, _, _, _, Error msg -> Error msg)
-      | _ -> Error "goal_of_yojson: invalid goal")
+                  }
+           | Error msg, _, _ -> Error msg
+           | _, Error msg, _ -> Error msg
+           | _, _, Error msg -> Error msg)
+      | None, _, _ -> Error "goal_of_yojson: invalid goal")
   | other_json ->
       Error ("goal_of_yojson: " ^ Yojson.Safe.to_string other_json)
-
-and normalize_goal (goal : goal) =
-  {
-    goal with
-    status = goal_status_of_phase goal.phase;
-    active_verification_request_id =
-      (* Enumerate every [Goal_phase.t] variant so the compiler flags any
-         new phase added here. Only [Awaiting_verification] keeps an
-         active verification request_id; all other phases clear it as part
-         of [normalize_goal]. A future phase added to [Goal_phase.t] (e.g.
-         a hypothetical [Awaiting_review]) that should also retain the
-         request_id would silently inherit "clear" under the previous
-         [_, _ -> None] catch-all. *)
-      (match goal.phase, goal.active_verification_request_id with
-      | Goal_phase.Awaiting_verification, request_id -> request_id
-      | ( Goal_phase.Executing | Goal_phase.Awaiting_approval
-        | Goal_phase.Blocked | Goal_phase.Paused
-        | Goal_phase.Completed | Goal_phase.Dropped ), _ -> None);
-  }
-
-and goal_status_of_phase = function
-  | Goal_phase.Executing
-  | Goal_phase.Awaiting_verification
-  | Goal_phase.Awaiting_approval ->
-      Active
-  | Goal_phase.Paused
-  | Goal_phase.Blocked ->
-      Paused
-  | Goal_phase.Completed -> Done
-  | Goal_phase.Dropped -> Dropped
-
-and phase_of_goal_status = function
-  | Active -> Goal_phase.Executing
-  | Paused -> Goal_phase.Paused
-  | Done -> Goal_phase.Completed
-  | Dropped -> Goal_phase.Dropped
 
 type rollup = {
   active_count : int;
@@ -241,16 +181,6 @@ type upsert_kind = [ `created | `updated ]
 
 let normalize_lower s =
   String.trim s |> String.lowercase_ascii
-
-let parse_goal_status = function
-  | Some s -> (
-      match normalize_lower s with
-      | "active" -> Some Active
-      | "paused" -> Some Paused
-      | "done" -> Some Done
-      | "dropped" -> Some Dropped
-      | _ -> None)
-  | None -> None
 
 let parse_goal_phase = function
   | Some s -> Goal_phase.parse s
@@ -275,7 +205,7 @@ let read_state config =
     match Workspace_utils.read_json_result config path with
     | Ok json ->
         (match state_of_yojson json with
-         | Ok state -> { state with goals = List.map normalize_goal state.goals }
+         | Ok state -> state
          | Error primary_msg ->
              let recovery = goals_recovery_path config in
              if Workspace_utils.path_exists config recovery then
@@ -286,7 +216,7 @@ let read_state config =
                         Log.Misc.warn
                           "goal_store: primary goals.json corrupt (%s), recovered from %s"
                           primary_msg recovery;
-                        { state with goals = List.map normalize_goal state.goals }
+                        state
                     | Error recovery_msg ->
                         Log.Misc.error
                           "goal_store: both primary and recovery goals.json corrupt (primary: %s, recovery: %s)"
@@ -312,7 +242,7 @@ let read_state config =
                    Log.Misc.warn
                      "goal_store: primary goals.json unreadable (%s), recovered from %s"
                      primary_msg recovery;
-                   { state with goals = List.map normalize_goal state.goals }
+                   state
                | Error recovery_msg ->
                    Log.Misc.error
                      "goal_store: primary unreadable (%s), recovery corrupt (%s)"
@@ -384,7 +314,7 @@ let update_goal config ~goal_id f =
       | None -> Error "goal not found"
       | Some goal ->
           let now = Masc_domain.now_iso () in
-          let updated_goal = normalize_goal (f { goal with updated_at = now }) in
+          let updated_goal = f { goal with updated_at = now } in
           let next_state =
             {
               version = state.version + 1;
@@ -462,13 +392,9 @@ let sort_goals goals =
         String.compare right.updated_at left.updated_at)
     goals
 
-let list_goals config ?status ?phase () =
+let list_goals config ?phase () =
   read_state config
   |> fun state -> state.goals
-  |> List.filter (fun goal ->
-         match status with
-         | None -> true
-         | Some status -> goal.status = status)
   |> List.filter (fun goal ->
          match phase with
          | None -> true
@@ -506,24 +432,15 @@ let validate_parent_goal_id goals ~goal_id ~parent_goal_id =
         Ok ()
 
 let upsert_goal config ?id ?title ?metric ?target_value ?due_date
-    ?priority ?status ?phase ?parent_goal_id ?verifier_policy
-    ?require_completion_approval () =
+    ?priority ?phase ?parent_goal_id () =
   let is_new_goal = id = None in
   if is_new_goal && (title = None || title = Some "") then
     Error "title required for new goal"
   else
-    let resolved_phase =
-      match phase, status with
-      | Some phase, Some status when phase <> phase_of_goal_status status ->
-          Error "phase and legacy status disagree"
-      | Some phase, _ -> Ok phase
-      | None, Some status -> Ok (phase_of_goal_status status)
-      | None, None -> Ok Goal_phase.Executing
-    in
-    match resolved_phase with
-    | Error msg -> Error msg
-    | Ok default_phase ->
-        let now = Masc_domain.now_iso () in
+    (* DET-OK: typed optional API param (not parsed input) — a new goal
+       without an explicit phase starts Executing, same as the removed match. *)
+    let default_phase = Option.value phase ~default:Goal_phase.Executing in
+    let now = Masc_domain.now_iso () in
         let resolved_id = Option.value id ~default:(gen_goal_id ()) in
         (* Validate parent_goal_id before acquiring the write lock *)
         let parent_validation =
@@ -558,14 +475,10 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
           update_state config (fun state ->
               match find_goal state.goals resolved_id with
               | Some existing ->
-                  let next_phase =
-                    match phase, status with
-                    | Some phase, _ -> phase
-                    | None, Some legacy_status -> phase_of_goal_status legacy_status
-                    | None, None -> existing.phase
-                  in
+                  (* DET-OK: typed optional param — omitted phase preserves
+                     the stored phase (same arm the removed match had). *)
+                  let next_phase = Option.value phase ~default:existing.phase in
                   let next_goal =
-                    normalize_goal
                       {
                         existing with
                         title = Option.value title ~default:existing.title;
@@ -581,18 +494,7 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                         priority =
                           clamp_priority
                             (Option.value priority ~default:existing.priority);
-                        status = goal_status_of_phase next_phase;
                         phase = next_phase;
-                        verifier_policy =
-                          (match verifier_policy with
-                          | Some _ -> verifier_policy
-                          | None -> existing.verifier_policy);
-                        require_completion_approval =
-                          (match require_completion_approval with
-                          | Some value -> value
-                          | None -> existing.require_completion_approval);
-                        active_verification_request_id =
-                          existing.active_verification_request_id;
                         parent_goal_id =
                           (match parent_goal_id with
                           | Some _ -> parent_goal_id
@@ -607,7 +509,6 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                   }
               | None ->
                   let new_goal =
-                    normalize_goal
                       {
                         id = resolved_id;
                         title = Option.value title ~default:"Untitled goal";
@@ -615,12 +516,7 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                         target_value;
                         due_date;
                         priority = clamp_priority (Option.value priority ~default:3);
-                        status = goal_status_of_phase default_phase;
                         phase = default_phase;
-                        verifier_policy;
-                        require_completion_approval =
-                          Option.value require_completion_approval ~default:false;
-                        active_verification_request_id = None;
                         parent_goal_id;
                         last_review_note = None;
                         last_review_at = None;
@@ -649,10 +545,14 @@ let compute_rollup goals =
     List_util.count_if predicate goals
   in
   {
-    active_count = count (fun goal -> goal.status = Active);
-    paused_count = count (fun goal -> goal.status = Paused);
-    done_count = count (fun goal -> goal.status = Done);
-    dropped_count = count (fun goal -> goal.status = Dropped);
+    active_count = count (fun goal -> goal.phase = Goal_phase.Executing);
+    paused_count =
+      count (fun goal ->
+          match goal.phase with
+          | Goal_phase.Paused | Goal_phase.Blocked -> true
+          | _ -> false);
+    done_count = count (fun goal -> goal.phase = Goal_phase.Completed);
+    dropped_count = count (fun goal -> goal.phase = Goal_phase.Dropped);
   }
 
 (* RFC-0294: the horizon-driven refresh/snapshot scheduler ([snapshot],
@@ -661,4 +561,4 @@ let compute_rollup goals =
    cohort selector keyed on the now-deleted [horizon]. *)
 
 let active_goals config =
-  list_goals config ~status:Active ()
+  list_goals config ~phase:Goal_phase.Executing ()

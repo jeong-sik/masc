@@ -87,7 +87,7 @@ export interface KeeperRuntimeCountRow {
   keepalive_running?: boolean | null
 }
 
-const TERMINAL_KEEPER_RUNTIME_TOKENS = new Set(['paused', 'stopped', 'dead', 'zombie', 'crashed'])
+const TERMINAL_KEEPER_RUNTIME_TOKENS = new Set(['paused', 'stopped', 'dead', 'crashed'])
 const OFFLINE_KEEPER_RUNTIME_TOKENS = new Set(['offline', 'inactive'])
 const RUNNING_KEEPER_RUNTIME_TOKENS = new Set(['active', 'busy', 'listening', 'idle', 'running'])
 

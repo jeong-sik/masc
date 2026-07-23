@@ -12,9 +12,7 @@ known_unchecked_specs() {
 # into scripts/tla-check.sh yet.
 specs/keeper-state-machine/KeeperRuntimeAttemptFSM.tla
 specs/keeper-state-machine/KeeperRuntimeRouting.tla
-specs/keeper-state-machine/KeeperPostTurnOrchestration.tla
-specs/keeper-state-machine/KeeperRolloverDecision.tla
-specs/boundary/ContinuationGated.tla
+specs/boundary/ContinuationCorrelation.tla
 EOF
 }
 

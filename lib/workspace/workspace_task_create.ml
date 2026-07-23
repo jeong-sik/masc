@@ -1,4 +1,4 @@
-(** Workspace_task_create — Dedup logic, add_task, batch_add_tasks.
+(** Workspace_task_create — add_task, batch_add_tasks.
 
     Extracted from Workspace_task to separate task creation from classification,
     claiming, and transitions.  All bindings are re-exported by [Workspace_task]
@@ -13,38 +13,6 @@ include Workspace_broadcast
 open Workspace_backlog
 open Workspace_task_id
 
-(** Normalize title for deduplication: lowercase, keep only alphanumeric+space.
-    Deterministic string transform — no LLM involved. *)
-let normalize_title_for_dedup (title : string) : string =
-  let buf = Buffer.create (String.length title) in
-  String.iter
-    (fun c ->
-       let lc = Char.lowercase_ascii c in
-       if (lc >= 'a' && lc <= 'z') || (lc >= '0' && lc <= '9') || lc = ' '
-       then Buffer.add_char buf lc)
-    title;
-  Buffer.contents buf |> String.trim
-;;
-
-(** Check if a task with a similar title already exists in the backlog.
-    Returns [Some existing_task_id] if a duplicate is found, [None] otherwise.
-    Uses normalized title comparison — deterministic, no fuzzy matching. *)
-let find_duplicate_task (backlog : backlog) ~(title : string)
-  : string option
-  =
-  let norm = normalize_title_for_dedup title in
-  if norm = ""
-  then None
-  else
-    List.find_opt
-      (fun (t : task) ->
-         let t_norm = normalize_title_for_dedup t.title in
-         t_norm = norm
-         && not (Masc_domain.task_status_is_terminal t.task_status))
-      backlog.tasks
-    |> Option.map (fun (t : task) -> t.id)
-;;
-
 type add_task_success =
   { task_id : string
   ; summary : string
@@ -56,8 +24,6 @@ type add_task_success =
 
 type add_task_error =
   | Backlog_read_failed of string
-  | Rejected of string
-  | Duplicate of { title : string; existing_id : string }
   | Goal_link_write_failed of string
   | Backlog_write_failed of string
   | Unexpected_error of string
@@ -78,12 +44,6 @@ type batch_add_tasks_error =
 
 let add_task_error_to_string = function
   | Backlog_read_failed msg -> Printf.sprintf "Error: %s" msg
-  | Rejected msg -> Printf.sprintf "Error: %s" msg
-  | Duplicate { title; existing_id } ->
-    Printf.sprintf
-      "Duplicate rejected: '%s' matches existing %s. Use that task instead."
-      title
-      existing_id
   | Goal_link_write_failed msg ->
     Printf.sprintf "Error linking task to goal: %s" msg
   | Backlog_write_failed msg -> Printf.sprintf "Error writing backlog: %s" msg
@@ -138,14 +98,14 @@ let rollback_goal_links config task_goal_ids =
 ;;
 
 (** Add task — file-locked to prevent task ID collision under concurrency.
-    Rejects tasks with duplicate titles (exact match after normalization)
-    to prevent the same work from being created multiple times. *)
+    A title is display content, not task identity or admission authority, so
+    equal titles receive distinct task IDs. A workflow that needs semantic
+    duplicate judgment performs that explicit LLM decision before submission. *)
 let add_task_with_result
       ?contract
       ?goal_id
       ?created_by
       ?predecessor_task_id
-      ?reject_if
       config
       ~title
       ~priority
@@ -161,12 +121,6 @@ let add_task_with_result
       match read_backlog_r config with
       | Error msg -> Error (Backlog_read_failed msg)
       | Ok backlog ->
-        (match reject_if with
-         | Some reject_if -> reject_if backlog
-         | None -> None)
-        |> (function
-          | Some msg -> Error (Rejected msg)
-          | None ->
         (* RFC-0323 W2: a re-run link must point at an existing, terminal task.
            Validated inside the lock against the same backlog snapshot the new
            task is appended to, so the check cannot race a concurrent write. *)
@@ -190,12 +144,9 @@ let add_task_with_result
          with
          | Error e -> Error e
          | Ok () ->
-        (* Dedup guard: reject if an active task with the same normalized title exists *)
-        (match find_duplicate_task backlog ~title with
-         | Some existing_id ->
-           Error (Duplicate { title; existing_id })
-         | None ->
-           let task_id = Printf.sprintf "task-%03d" (next_task_number config backlog) in
+           let task_id =
+             Printf.sprintf "task-%03d" (next_task_number config backlog)
+           in
            let contract =
              Some
                (Workspace_task_classify.ensure_task_contract_for_verification
@@ -252,7 +203,7 @@ let add_task_with_result
                        (append_goal_link_rollback_failures
                           msg
                           (rollback_goal_links config [ task_id, goal_id ])))
-              | Ok () ->
+              | Ok _ ->
                   let created_by_json = Json_util.string_opt_to_json created_by in
                   Workspace_task_classify.emit_task_activity
                     config
@@ -282,20 +233,19 @@ let add_task_with_result
                       ~content:(Printf.sprintf "New quest: %s" title)
                   in
                   let summary = Printf.sprintf "Added %s: %s" task_id title in
-                  Ok { task_id; summary; title; priority; description; goal_id }))))))
+                  Ok { task_id; summary; title; priority; description; goal_id }))))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Unexpected_error (Printexc.to_string e))
 ;;
 
-let add_task ?contract ?goal_id ?created_by ?reject_if config ~title ~priority
+let add_task ?contract ?goal_id ?created_by config ~title ~priority
     ~description =
   match
     add_task_with_result
       ?contract
       ?goal_id
       ?created_by
-      ?reject_if
       config
       ~title
       ~priority
@@ -389,7 +339,7 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
                            (List.map
                               (fun ((task : Masc_domain.task), goal_id) -> task.id, goal_id)
                               added_tasks_with_goal_ids))))
-            | Ok () ->
+            | Ok _ ->
                 List.iter
                   (fun ((task : Masc_domain.task), goal_id) ->
                      let created_by_json = Json_util.string_opt_to_json task.created_by in

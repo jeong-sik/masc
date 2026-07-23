@@ -33,12 +33,6 @@ type meta_disposition =
   | Retain_dead_tombstone
   | Remove_meta
 
-type stale_paused_context =
-  { meta_version : int
-  ; last_updated : string
-  ; latched_reason : Keeper_latched_reason.t option
-  }
-
 type dashboard_purge_context =
   { requested_name : string
   ; agent_name : string
@@ -49,22 +43,18 @@ type cleanup_reason =
   | Operator_stop_retain_meta
   | Operator_stop_remove_meta
   | Dead_tombstone_cleanup
-  | Stale_paused_prune of stale_paused_context
   | Dashboard_keeper_purge of dashboard_purge_context
 
 type completion_action =
   | Dead_tombstone_reaped
-  | Paused_meta_pruned
   | Dashboard_keeper_purged
 
 type dashboard_purge_artifact =
-  | Keeper_metrics_artifact
+  | Keeper_metrics_store_artifact
   | Keeper_memory_bank_artifact
   | Keeper_generation_index_artifact
-  | Keeper_policy_log_artifact
   | Keeper_decision_log_artifact
   | Keeper_feedback_log_artifact
-  | Keeper_dataset_export_artifact
   | Keeper_runtime_directory_artifact
   | Keeper_configuration_artifact
   | Agent_artifact_bundle of string list
@@ -149,6 +139,9 @@ type finalization_evidence =
   ; completion : completion_receipt
   }
 
+type supersession =
+  | Operator_metadata_update of { actor : string }
+
 type phase =
   | Prepared
   | Joined_idle
@@ -157,6 +150,7 @@ type phase =
   | Reconciliation_required of active_turn
   | Finalized of finalization_evidence
   | Blocked of failure
+  | Superseded of supersession
 
 type t =
   { schema_version : int
@@ -192,8 +186,23 @@ type invariant_error =
       }
   | Required_accumulator_not_dropped
   | Finalized_completion_mismatch of cleanup_reason * completion_receipt
+  | Superseded_cleanup_reason_mismatch of cleanup_reason
 
-let schema_version = 5
+let schema_version = 6
+
+let requires_admission_fence operation =
+  match operation.phase with
+  | Finalized { completion = Completion_pending _; _ } -> true
+  | Finalized
+      { completion = (Completion_not_requested | Completion_delivered _); _ }
+  | Superseded _ -> false
+  | Prepared
+  | Joined_idle
+  | Finalizing_tasks _
+  | Cleanup_ready _
+  | Reconciliation_required _
+  | Blocked _ -> true
+;;
 
 let meta_disposition_to_string = function
   | Retain_operator_pause -> "retain_operator_pause"
@@ -212,7 +221,6 @@ let cleanup_reason_label = function
   | Operator_stop_retain_meta -> "operator_stop_retain_meta"
   | Operator_stop_remove_meta -> "operator_stop_remove_meta"
   | Dead_tombstone_cleanup -> "dead_tombstone_cleanup"
-  | Stale_paused_prune _ -> "stale_paused_prune"
   | Dashboard_keeper_purge _ -> "dashboard_keeper_purge"
 ;;
 
@@ -220,19 +228,16 @@ let meta_disposition_of_cleanup_reason = function
   | Operator_stop_retain_meta -> Retain_operator_pause
   | Dead_tombstone_cleanup -> Retain_dead_tombstone
   | Operator_stop_remove_meta
-  | Stale_paused_prune _
   | Dashboard_keeper_purge _ -> Remove_meta
 ;;
 
 let completion_action_to_string = function
   | Dead_tombstone_reaped -> "dead_tombstone_reaped"
-  | Paused_meta_pruned -> "paused_meta_pruned"
   | Dashboard_keeper_purged -> "dashboard_keeper_purged"
 ;;
 
 let completion_action_of_string = function
   | "dead_tombstone_reaped" -> Ok Dead_tombstone_reaped
-  | "paused_meta_pruned" -> Ok Paused_meta_pruned
   | "dashboard_keeper_purged" -> Ok Dashboard_keeper_purged
   | value -> Error (Printf.sprintf "unknown Keeper shutdown completion action: %S" value)
 ;;
@@ -240,19 +245,13 @@ let completion_action_of_string = function
 let completion_action_equal left right =
   match left, right with
   | Dead_tombstone_reaped, Dead_tombstone_reaped
-  | Paused_meta_pruned, Paused_meta_pruned
   | Dashboard_keeper_purged, Dashboard_keeper_purged -> true
-  | Dead_tombstone_reaped, Paused_meta_pruned
   | Dead_tombstone_reaped, Dashboard_keeper_purged
-  | Paused_meta_pruned, Dead_tombstone_reaped
-  | Paused_meta_pruned, Dashboard_keeper_purged
-  | Dashboard_keeper_purged, Dead_tombstone_reaped
-  | Dashboard_keeper_purged, Paused_meta_pruned -> false
+  | Dashboard_keeper_purged, Dead_tombstone_reaped -> false
 ;;
 
 let completion_action_of_cleanup_reason = function
   | Dead_tombstone_cleanup -> Some Dead_tombstone_reaped
-  | Stale_paused_prune _ -> Some Paused_meta_pruned
   | Dashboard_keeper_purge _ -> Some Dashboard_keeper_purged
   | Operator_stop_retain_meta
   | Operator_stop_remove_meta -> None
@@ -290,6 +289,10 @@ let invariant_error_to_string = function
       "shutdown finalized completion mismatch: cleanup_reason=%s, completion=%s"
       (cleanup_reason_label cleanup_reason)
       (completion_receipt_kind completion)
+  | Superseded_cleanup_reason_mismatch cleanup_reason ->
+    Printf.sprintf
+      "shutdown supersession requires operator_stop_retain_meta, actual=%s"
+      (cleanup_reason_label cleanup_reason)
 ;;
 
 let validate operation =
@@ -331,7 +334,7 @@ let validate operation =
         let accumulator_drop_required =
           match operation.lane_ownership, operation.cleanup_intent.reason with
           | Dormant_meta, _
-          | Registered_lane _, (Stale_paused_prune _ | Dashboard_keeper_purge _) ->
+          | Registered_lane _, Dashboard_keeper_purge _ ->
             true
           | Registered_lane _,
             ( Operator_stop_retain_meta
@@ -353,6 +356,13 @@ let validate operation =
            Error
              (Finalized_completion_mismatch
                 (operation.cleanup_intent.reason, completion)))
+    | Superseded (Operator_metadata_update _) ->
+      (match operation.cleanup_intent.reason with
+       | Operator_stop_retain_meta -> Ok ()
+       | ( Operator_stop_remove_meta
+         | Dead_tombstone_cleanup
+         | Dashboard_keeper_purge _ ) as cleanup_reason ->
+         Error (Superseded_cleanup_reason_mismatch cleanup_reason))
     | Prepared
     | Joined_idle
     | Finalizing_tasks _
@@ -393,15 +403,6 @@ let turn_disposition_equal left right =
   | Inflight_effect_unknown _, No_inflight_turn -> false
 ;;
 
-let stale_paused_context_equal
-    (left : stale_paused_context)
-    (right : stale_paused_context)
-  =
-  Int.equal left.meta_version right.meta_version
-  && String.equal left.last_updated right.last_updated
-  && option_equal Keeper_latched_reason.equal left.latched_reason right.latched_reason
-;;
-
 let dashboard_purge_context_equal
     (left : dashboard_purge_context)
     (right : dashboard_purge_context)
@@ -416,35 +417,24 @@ let cleanup_reason_equal left right =
   | Operator_stop_retain_meta, Operator_stop_retain_meta
   | Operator_stop_remove_meta, Operator_stop_remove_meta
   | Dead_tombstone_cleanup, Dead_tombstone_cleanup -> true
-  | Stale_paused_prune left, Stale_paused_prune right ->
-    stale_paused_context_equal left right
   | Dashboard_keeper_purge left, Dashboard_keeper_purge right ->
     dashboard_purge_context_equal left right
   | Operator_stop_retain_meta,
     ( Operator_stop_remove_meta
     | Dead_tombstone_cleanup
-    | Stale_paused_prune _
     | Dashboard_keeper_purge _ )
   | Operator_stop_remove_meta,
     ( Operator_stop_retain_meta
     | Dead_tombstone_cleanup
-    | Stale_paused_prune _
     | Dashboard_keeper_purge _ )
   | Dead_tombstone_cleanup,
     ( Operator_stop_retain_meta
     | Operator_stop_remove_meta
-    | Stale_paused_prune _
-    | Dashboard_keeper_purge _ )
-  | Stale_paused_prune _,
-    ( Operator_stop_retain_meta
-    | Operator_stop_remove_meta
-    | Dead_tombstone_cleanup
     | Dashboard_keeper_purge _ )
   | Dashboard_keeper_purge _,
     ( Operator_stop_retain_meta
     | Operator_stop_remove_meta
-    | Dead_tombstone_cleanup
-    | Stale_paused_prune _ ) ->
+    | Dead_tombstone_cleanup ) ->
     false
 ;;
 
@@ -454,13 +444,11 @@ let dashboard_purge_artifact_plan ~keeper_name context =
     |> List.filter_map String_util.trim_to_option
     |> List.sort_uniq String.compare
   in
-  [ Keeper_metrics_artifact
+  [ Keeper_metrics_store_artifact
   ; Keeper_memory_bank_artifact
   ; Keeper_generation_index_artifact
-  ; Keeper_policy_log_artifact
   ; Keeper_decision_log_artifact
   ; Keeper_feedback_log_artifact
-  ; Keeper_dataset_export_artifact
   ; Keeper_runtime_directory_artifact
   ; Keeper_configuration_artifact
   ; Agent_artifact_bundle agent_aliases

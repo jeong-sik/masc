@@ -56,7 +56,6 @@ import { operatorSnapshot, operatorWorkspaceDigest } from './operator-signals'
 import { compositeTick, hydrateFleetCompositeSnapshot } from './composite-signals'
 import { isRecord } from './lib/type-guards'
 import { hydrateGoalTreeSnapshot } from './goal-tree-state'
-import { hydrateGoalLoopSnapshot } from './goal-loop-state'
 import { showToast } from './components/common/toast'
 import type { ErrorCode } from './types/error'
 import { parseOasPayloadOrNull } from './schemas/sse-event-payload'
@@ -78,9 +77,9 @@ import {
 
 // --- Refresh function registration (avoids circular imports) ---
 
-let _refreshGovernanceFn: ((opts?: { force?: boolean }) => void) | null = null
-export function registerGovernanceRefresh(fn: (opts?: { force?: boolean }) => void): void {
-  _refreshGovernanceFn = fn
+let _refreshGateFn: ((opts?: { force?: boolean }) => void) | null = null
+export function registerGateRefresh(fn: (opts?: { force?: boolean }) => void): void {
+  _refreshGateFn = fn
 }
 
 let _refreshOperatorFn: (() => void) | null = null
@@ -378,8 +377,8 @@ function handleKeeperLifecycle(event: { type: string; name?: string }): void {
   }
 }
 
-function handleGovernance(opts?: { force?: boolean }): void {
-  _refreshGovernanceFn?.(opts)
+function handleGate(opts?: { force?: boolean }): void {
+  _refreshGateFn?.(opts)
 }
 
 async function refreshActiveRoute(): Promise<void> {
@@ -423,10 +422,10 @@ async function hydrateAfterReconnect(): Promise<void> {
   }
   requestNamespaceTruthNow()
   // Recover approval-queue state that may have changed while disconnected: the
-  // always-visible nav-rail approvals badge reads governanceData regardless of
+  // always-visible nav-rail approvals badge reads gateData regardless of
   // the active surface, so an approval that arrived (or resolved) during the
-  // gap must be re-fetched on reconnect, not only on the governance surface.
-  handleGovernance()
+  // gap must be re-fetched on reconnect, not only on the Gate surface.
+  handleGate()
   // Recover keeper_chat_appended events that fell outside the server replay
   // buffer while disconnected. The live stream cannot re-deliver them, so the
   // open conversation panel must re-fetch its transcript. Route and periodic
@@ -568,7 +567,7 @@ export function routeServerPushEvent(event: SSEEvent): void {
 
   if (
     event.type.startsWith('decision_')
-    || event.type === 'governance_param_changed'
+    || event.type === 'runtime_param_changed'
     || approvalRefreshEvent
   ) {
     if (route.value.tab === 'command') {
@@ -576,9 +575,9 @@ export function routeServerPushEvent(event: SSEEvent): void {
         void refreshActiveRoute()
       })
     }
-    if (_refreshGovernanceFn) {
+    if (_refreshGateFn) {
       const opts = approvalRefreshEvent ? { force: true } : undefined
-      scheduleRefresh('governance', () => void handleGovernance(opts))
+      scheduleRefresh('gate', () => void handleGate(opts))
     }
   }
 }
@@ -705,12 +704,6 @@ export function hydrateDashboardSlice(slice: string, payload: unknown, eventType
     case 'transport_health_snapshot':
       hydrateServerPushEvent({ type: eventType, payload } as SSEEvent)
       return
-    case 'goal_loop_status':
-      // RFC-0284: live goal-loop delta bridged onto the "goals" slice. The
-      // payload is the goal-loop status itself (not a {planning,tree,loop}
-      // snapshot), so hydrate it directly rather than falling to case 'goals'.
-      hydrateGoalLoopSnapshot(payload)
-      return
   }
   if (eventType) {
     routeServerPushEvent({
@@ -754,11 +747,6 @@ export function hydrateDashboardSlice(slice: string, payload: unknown, eventType
       }
       if (record.tree) {
         hydrateGoalTreeSnapshot(record.tree)
-      }
-      if (record.loop) {
-        // RFC-0284: the goals snapshot carries the goal-loop status so the
-        // initial WS snapshot paints the panel without a separate fetch.
-        hydrateGoalLoopSnapshot(record.loop)
       }
       return
     }

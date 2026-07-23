@@ -1,12 +1,10 @@
 (** Typed projection and registry for schedule payload envelopes.
 
     The schedule domain keeps payloads opaque. This module is the boundary that
-    names the payload kinds MASC can understand, validates side-effecting
-    creation requests, and returns typed views for production dispatch. *)
+    names the payload kinds MASC can understand, validates their objective
+    schemas, and returns typed views for production dispatch. *)
 
-type known_kind =
-  | Board_post
-  | Keeper_wake
+type known_kind = Keeper_wake
 
 type support_status =
   | Supported
@@ -16,7 +14,7 @@ type support_status =
 type creation_rejection =
   | Creation_invalid_payload of string
   | Creation_invalid_supported_payload of known_kind * string
-  | Creation_unsupported_side_effecting_kind of string
+  | Creation_unsupported_kind of string
 
 type dispatch_rejection =
   | Dispatch_invalid_payload of string
@@ -49,23 +47,12 @@ val support_summary_yojson : support_summary -> Yojson.Safe.t
 val support_summary_to_yojson : Schedule_domain.schedule_request list -> Yojson.Safe.t
 val kind_of_json_result : Yojson.Safe.t -> (string, string) result
 
-(** [intrinsic_risk_class_of_payload payload] is the risk_class the payload's
-    kind mandates, when the kind (not the caller) determines it. [masc.keeper_wake]
-    is always [Reminder_only]; other/unknown kinds return [None] (caller-specified).
-    Used at the creation boundary to clamp a caller-supplied risk_class that would
-    otherwise force a self-wake into a human-grant deadlock. *)
-val intrinsic_risk_class_of_payload
-  :  Yojson.Safe.t
-  -> Schedule_domain.risk_class option
-
 val validate_request_payload_for_creation_detailed
   :  payload:Yojson.Safe.t
-  -> risk_class:Schedule_domain.risk_class
   -> (unit, creation_rejection) result
 
 val validate_request_payload_for_creation
   :  payload:Yojson.Safe.t
-  -> risk_class:Schedule_domain.risk_class
   -> (unit, string) result
 
 val dispatch_view_detailed
@@ -95,9 +82,5 @@ val target_summary_result
 
 val target_summary : Schedule_domain.schedule_request -> string option * string option
 
-val view_kind : payload_view -> string
-val view_schema_version : payload_view -> int
 val body_required_string : payload_view -> string -> (string, string) result
 val body_optional_string : payload_view -> string -> (string option, string) result
-val body_optional_int : payload_view -> string -> (int option, string) result
-val body_optional_assoc : payload_view -> string -> (Yojson.Safe.t option, string) result

@@ -20,9 +20,8 @@ val capacity_backpressure_of_http_error :
 
 (** Build a capacity-backpressure internal error from a pending
     backpressure triple [(source, detail, retry_after)].  The retry-after
-    component carries its provenance ([Explicit] / [Synthetic_default] /
-    [No_retry_hint]) so a synthetic default is never read as an explicit
-    hint. *)
+    component is either the provider-supplied [Explicit] value or
+    [No_retry_hint]. No delay is synthesized. *)
 val capacity_backpressure_of_pending :
   runtime_id:string ->
   (Keeper_internal_error.capacity_backpressure_source * string
@@ -31,5 +30,5 @@ val capacity_backpressure_of_pending :
 
 (* [capacity_backpressure_of_sdk_error] was removed (#23438): a dead substring
    classifier that laundered opaque [Internal] errors into the auto-recoverable
-   capacity-backpressure class.  The typed [cooldown_cause] on the pre-dispatch
-   cooldown gate replaces it. *)
+   capacity-backpressure class. Legacy decoded [cooldown_cause] values are
+   diagnostic-only. *)

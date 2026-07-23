@@ -9,6 +9,7 @@
  (libraries
   masc
   masc.auth
+  masc.crypto_rng
   masc.dashboard
   masc.operator
   masc.server
@@ -43,7 +44,6 @@
   fmt
   yojson
   str
-  mirage-crypto-rng.unix
   cohttp
   cohttp-eio
   masc.prompt_registry
@@ -58,13 +58,14 @@
  (package masc)
  (libraries
   masc
+  masc.crypto_rng
   masc.server
   masc.config
+  masc.host_config
   masc_core
   cmdliner
   eio
   eio_main
-  mirage-crypto-rng.unix
   dune-build-info
   masc_types
   fs_compat
@@ -110,7 +111,6 @@
   str
   eio_main
   eio
-  mirage-crypto-rng.unix
   httpun
   cohttp
   cohttp-eio
@@ -118,15 +118,6 @@
   masc.mcp_transport_protocol
   agent_sdk
   agent_sdk.llm_provider))
-
-;; RFC-0264 P3 local substrate: recall ledger ⨝ execution receipts, no network.
-
-(executable
- (name masc_recall_outcome_eval)
- (modules masc_recall_outcome_eval)
- (public_name masc-recall-outcome-eval)
- (package masc)
- (libraries masc masc.config masc.config_dir_resolver masc_core unix yojson))
 
 (executable
  (name public_tool_manifest)
@@ -154,60 +145,16 @@
  (package masc)
  (libraries masc masc_core masc.config_dir_resolver unix eio eio_main))
 
-;; Completion-trust audit CLI (RFC-0262 §9): fold .masc/events/ transition log
-;; for foreign-task completions. Pure auditor only — no masc runtime link.
+;; Offline deterministic checkpoint purge CLI (RFC-0351 S1): duplicate
+;; collapse, unsigned reasoning strip, tool-result content clear. Dry-run by
+;; default; --apply backs up then saves through the locked validated store.
 
 (executable
- (name masc_completion_trust_audit)
- (modules masc_completion_trust_audit)
- (public_name masc-completion-trust-audit)
+ (name masc_checkpoint_purge)
+ (modules masc_checkpoint_purge)
+ (public_name masc-checkpoint-purge)
  (package masc)
- (libraries unix yojson masc.completion_trust_audit masc.config_dir_resolver))
-
-;; RFC-0262 §9 PR-C: live-LLM behavioural eval for completion-trust.
-;; Drives a real keeper through the masc runtime, so it links the same
-;; live-LLM bootstrap as fusion_run (Eio + runtime init + provider path).
-
-(executable
- (name masc_completion_trust_eval)
- (modules masc_completion_trust_eval)
- (public_name masc-completion-trust-eval)
- (package masc)
- (libraries
-  masc
-  masc.runtime
-  masc.config_dir_resolver
-  masc.masc_types
-  masc.tool_types
-  masc.trajectory
-  masc.runtime_model
-  masc_core
-  unix
-  yojson
-  fmt
-  eio
-  eio_main
-  time_compat
-  masc_eio_context
-  mirage-crypto-rng.unix
-  httpun
-  cohttp
-  cohttp-eio
-  masc.prompt_registry
-  masc.mcp_transport_protocol
-  agent_sdk
-  agent_sdk.llm_provider))
-
-;; RFC-0232 P4: offline mention backfill for keeper chat lanes.
-;; Stamps the [mentions] field onto pre-P4 user rows; run with the
-;; server stopped.
-
-(executable
- (name keeper_chat_backfill_mentions)
- (modules keeper_chat_backfill_mentions)
- (public_name masc-keeper-chat-backfill-mentions)
- (package masc)
- (libraries masc))
+ (libraries masc masc_core masc.config_dir_resolver agent_sdk unix))
 
 ;; Read-only keeper feature proof CLI: renders the same JSON as
 ;; /api/v1/dashboard/keeper-feature-proof without starting a server.
@@ -218,13 +165,6 @@
  (public_name masc-keeper-feature-proof)
  (package masc)
  (libraries masc masc.dashboard masc_core fs_compat unix yojson eio eio_main))
-
-;; TLA+ trace converter: JSONL -> TraceData.tla
-
-(executable
- (name trace_to_tla)
- (modules trace_to_tla)
- (libraries yojson))
 
 ;; Per-turn timeline tool: masc-trace <base-path> <keeper> <turn_id>
 ;; Reads execution-receipts JSONL and prints rows matching the turn_id.
@@ -275,7 +215,6 @@
   str
   eio_main
   eio
-  mirage-crypto-rng.unix
   httpun
   cohttp
   cohttp-eio
@@ -291,6 +230,7 @@
  (package masc)
  (libraries
   masc
+  masc.crypto_rng
   masc.dashboard
   masc.server
   masc.worker_execution_spec
@@ -309,7 +249,6 @@
   masc_eio_context
   fmt
   str
-  mirage-crypto-rng.unix
   httpun
   cohttp
   cohttp-eio
@@ -317,34 +256,6 @@
   masc.mcp_transport_protocol
   agent_sdk
   agent_sdk.llm_provider))
-
-; RFC-0054 POC — kept as historical regression marker. Same generator
-; logic as bin/gen_shell_ir_walkers.ml below, but on a synthetic
-; 3-constructor GADT. test/poc_shell_ir/ proves the codegen approach
-; works on the same 4-parameter shape that broke under ppxlib in
-; PR-1 / PR-1b.
-
-(executable
- (name poc_shell_ir_gen)
- (modules poc_shell_ir_gen))
-
-;; Offline Shell IR pipeline probe — read-only. Feeds a command string through
-;; parse / command-gate / capabilities / approval verdict / path-jail and prints
-;; each layer's outcome. Dev/test tool: run via `dune exec bin/masc_shell_ir_probe.exe`.
-
-(executable
- (name masc_shell_ir_probe)
- (modules masc_shell_ir_probe)
- (libraries masc.masc_exec masc.exec_policy masc.masc_exec_command_gate))
-
-; RFC-0054 PR-3 — production codegen for lib/exec/shell_ir_typed.ml.
-; Hardcoded 9-constructor spec mirrors shell_ir_typed.{ml,mli} order.
-; Stdlib-only — no ppxlib, no AST manipulation. Output goes through
-; lib/exec/dune (rule ...) to shell_ir_typed_walkers_gen.ml.
-
-(executable
- (name gen_shell_ir_walkers)
- (modules gen_shell_ir_walkers))
 
 ; RFC-0057 Phase 2 — tool descriptor codegen for lib/tool_schemas/.
 ; Depends on tool_schemas_specs (types-only sibling library) to share
@@ -354,7 +265,7 @@
 (executable
  (name gen_tool_descriptors)
  (modules gen_tool_descriptors)
- (libraries tool_schemas_specs yojson))
+ (libraries masc.tool_schemas_specs yojson))
 
 ;; RFC-0252 standalone fusion harness: on-demand panel+judge deliberation vs
 ;; single-model baseline, side by side. Makes live LLM calls (NOT a test —
@@ -368,6 +279,7 @@
  (package masc)
  (libraries
   masc
+  masc.crypto_rng
   masc.fusion_core
   masc.runtime
   masc.config_dir_resolver
@@ -380,7 +292,6 @@
   eio_main
   time_compat
   masc_eio_context
-  mirage-crypto-rng.unix
   httpun
   cohttp
   cohttp-eio

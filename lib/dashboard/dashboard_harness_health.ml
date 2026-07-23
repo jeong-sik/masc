@@ -23,49 +23,33 @@ type harness_verdict_item =
 type pre_compact_event =
   { timestamp : float
   ; keeper_name : string
-  ; context_ratio : float
+  ; checkpoint_bytes : int
   ; message_count : int
-  ; token_count : int
   ; strategies : string list
-  ; context_window : int
-  ; is_local_model : bool
   ; trigger : Compaction_trigger.t
   }
 
 (** Wake-time payload observation.
 
     Captured once per keeper turn, just before [Keeper_turn_driver.run_named] fires.
-    Phase 0 baseline for the tiered-hydration redesign (Option C).
-
-    [approx_body_bytes] is a MASC-side estimate (sum of content text,
-    tool definition JSON, system prompt, plus the pending user turn).
-    It is NOT the exact HTTP body wire size — provider layers add JSON
-    structural overhead (role keys, content block wrappers, array
-    brackets, escaping). Expect the real body to be ~1.3–1.5× this
-    estimate depending on tool-call density. Use [approx_body_bytes]
-    for trend detection, not for absolute thresholds.
+    Component byte fields are exact measurements of the canonical values MASC
+    owns; they do not claim to represent a provider-specific HTTP request body.
 
     [message_count] and [role_counts] include the synthesized user turn
     that OAS will append from [~goal], matching the wire-level message
-    list the LLM will receive.
-
-    [has_compact_happened] marks whether MASC applied a pre-dispatch context
-    compaction before handing the resumed checkpoint to OAS. *)
+    list the LLM will receive. *)
 type wake_payload_event =
   { timestamp : float
   ; keeper_name : string
   ; trace_id : string
   ; turn_index : int
-  ; model_id : string
   ; context_window : int
-  ; approx_body_bytes : int
   ; system_prompt_bytes : int
-  ; tool_defs_bytes : int
-  ; messages_bytes : int
+  ; tool_schema_json_bytes : int
+  ; message_content_bytes : int
   ; message_count : int
   ; role_counts : (string * int) list
   ; tool_count : int
-  ; has_compact_happened : bool
   }
 
 type handoff_event =
@@ -85,17 +69,11 @@ let max_signal_scan = 500
 let runtime_stale_after_s = 30. *. 60.
 let evaluator_stale_after_s = 12. *. Masc_time_constants.hour
 
-(** Runtime health warning thresholds. Distinct from compaction thresholds.
-    Values sourced from [Env_config_keeper.DashboardHealth]. *)
-let runtime_warning_ctx_ratio =
-  Env_config_keeper.DashboardHealth.runtime_warning_ctx_ratio
-;;
-
 let pre_compact_store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
 let pre_compact_store_mu = Eio.Mutex.create ()
 
-(** Store for wake-time payload observations. Populated lazily on first
-    [record_wake_payload] call when [MASC_PAYLOAD_TELEMETRY] is enabled. *)
+(** Store for wake-time payload observations. Populated lazily on the first
+    [record_wake_payload] call. *)
 let wake_payload_store_ref : Dated_jsonl.t option Atomic.t = Atomic.make None
 let wake_payload_store_mu = Eio.Mutex.create ()
 
@@ -241,12 +219,9 @@ let pre_compact_record_json (event : pre_compact_event) =
     [ "record_type", `String "pre_compact"
     ; "timestamp", `Float event.timestamp
     ; "keeper_name", `String event.keeper_name
-    ; "context_ratio", `Float event.context_ratio
+    ; "checkpoint_bytes", `Int event.checkpoint_bytes
     ; "message_count", `Int event.message_count
-    ; "token_count", `Int event.token_count
     ; "strategies", `List (List.map (fun value -> `String value) event.strategies)
-    ; "context_window", `Int event.context_window
-    ; "is_local_model", `Bool event.is_local_model
     ; "trigger", `String (Compaction_trigger.to_label event.trigger)
     ; "trigger_detail", Compaction_trigger.to_detail_json event.trigger
     ]
@@ -256,83 +231,159 @@ let pre_compact_event_json (event : pre_compact_event) =
   `Assoc
     [ "timestamp", `Float event.timestamp
     ; "keeper_name", `String event.keeper_name
-    ; "context_ratio", `Float event.context_ratio
+    ; "checkpoint_bytes", `Int event.checkpoint_bytes
     ; "message_count", `Int event.message_count
-    ; "token_count", `Int event.token_count
     ; "strategies", `List (List.map (fun value -> `String value) event.strategies)
-    ; "context_window", `Int event.context_window
-    ; "is_local_model", `Bool event.is_local_model
     ; "trigger", `String (Compaction_trigger.to_label event.trigger)
     ; "trigger_detail", Compaction_trigger.to_detail_json event.trigger
     ]
 ;;
 
 let pre_compact_event_of_json json =
-  let record_type = string_field json "record_type" in
-  if record_type <> "" && not (String.equal record_type "pre_compact")
-  then None
-  else
-    Some
-      { timestamp = Safe_ops.json_float ~default:0.0 "timestamp" json
-      ; keeper_name = string_field json "keeper_name"
-      ; context_ratio = Safe_ops.json_float ~default:0.0 "context_ratio" json
-      ; message_count = Safe_ops.json_int ~default:0 "message_count" json
-      ; token_count = Safe_ops.json_int ~default:0 "token_count" json
-      ; strategies = Safe_ops.json_string_list "strategies" json
-      ; context_window =
-          Safe_ops.json_int
-            ~default:Runtime_constants.fallback_context_window
-            "context_window"
-            json
-      ; is_local_model = Safe_ops.json_bool ~default:false "is_local_model" json
-      ; trigger =
-          (match
-             List.assoc_opt
-               "trigger_detail"
-               (match json with
-                | `Assoc kv -> kv
-                | _ -> [])
-           with
-           | Some detail ->
-             (match Compaction_trigger.of_detail_json detail with
-              | Some t -> t
-              | None -> Compaction_trigger.Manual)
-           | None -> Compaction_trigger.Manual)
-      }
+  let reject reason =
+    Log.Harness.warn "[pre_compact] rejected persisted row: %s" reason;
+    None
+  in
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "record_type" fields with
+     | None -> reject "missing record_type"
+     | Some (`String "pre_compact") ->
+       (match List.assoc_opt "trigger_detail" fields with
+        | None -> reject "missing trigger_detail"
+        | Some detail ->
+          (match Compaction_trigger.of_detail_json detail with
+           | Ok trigger ->
+             Some
+               { timestamp = Safe_ops.json_float ~default:0.0 "timestamp" json
+               ; keeper_name = string_field json "keeper_name"
+               ; checkpoint_bytes = Safe_ops.json_int ~default:0 "checkpoint_bytes" json
+               ; message_count = Safe_ops.json_int ~default:0 "message_count" json
+               ; strategies = Safe_ops.json_string_list "strategies" json
+               ; trigger
+               }
+           | Error error ->
+             reject
+               (Printf.sprintf
+                  "invalid trigger_detail: %s"
+                  (Compaction_trigger.decode_error_to_string error))))
+     | Some (`String record_type) ->
+       reject (Printf.sprintf "unexpected record_type %S" record_type)
+     | Some _ -> reject "record_type must be a string")
+  | _ -> reject "expected an object"
 ;;
 
 let role_counts_to_json (counts : (string * int) list) : Yojson.Safe.t =
   `Assoc (List.map (fun (role, n) -> role, `Int n) counts)
 ;;
 
-let role_counts_of_json json : (string * int) list =
-  Safe_ops.json_assoc "role_counts" json
-  |> List.filter_map (fun (role, value) ->
-    match value with
-    | `Int n -> Some (role, n)
-    | `Intlit s -> Option.map (fun n -> role, n) (int_of_string_opt s)
-    | _ -> None)
+let ( let* ) result f = Result.bind result f
+
+let required_member fields key =
+  match List.assoc_opt key fields with
+  | Some value -> Ok value
+  | None -> Error (Printf.sprintf "missing required field %S" key)
 ;;
 
-let public_runtime_model_id = "runtime"
+let required_string fields key =
+  let* value = required_member fields key in
+  match value with
+  | `String value -> Ok value
+  | _ -> Error (Printf.sprintf "field %S must be a string" key)
+;;
+
+let required_non_empty_string fields key =
+  let* value = required_string fields key in
+  if String.equal value ""
+  then Error (Printf.sprintf "field %S must be non-empty" key)
+  else Ok value
+;;
+
+let int_json ~field = function
+  | `Int value -> Ok value
+  | `Intlit raw ->
+    (match int_of_string_opt raw with
+     | Some value -> Ok value
+     | None -> Error (Printf.sprintf "field %S has an invalid integer" field))
+  | _ -> Error (Printf.sprintf "field %S must be an integer" field)
+;;
+
+let required_int fields key =
+  let* value = required_member fields key in
+  int_json ~field:key value
+;;
+
+let required_nonnegative_int fields key =
+  let* value = required_int fields key in
+  if value < 0
+  then Error (Printf.sprintf "field %S must be non-negative" key)
+  else Ok value
+;;
+
+let required_positive_int fields key =
+  let* value = required_int fields key in
+  if value <= 0
+  then Error (Printf.sprintf "field %S must be positive" key)
+  else Ok value
+;;
+
+let required_float fields key =
+  let* value = required_member fields key in
+  let* value =
+    match value with
+    | `Float value -> Ok value
+    | `Int value -> Ok (Float.of_int value)
+    | `Intlit raw ->
+      (match float_of_string_opt raw with
+       | Some value -> Ok value
+       | None -> Error (Printf.sprintf "field %S has an invalid number" key))
+    | _ -> Error (Printf.sprintf "field %S must be a number" key)
+  in
+  if Float.is_finite value
+  then Ok value
+  else Error (Printf.sprintf "field %S must be finite" key)
+;;
+
+let required_bool fields key =
+  let* value = required_member fields key in
+  match value with
+  | `Bool value -> Ok value
+  | _ -> Error (Printf.sprintf "field %S must be a boolean" key)
+;;
+
+let required_role_counts fields =
+  let* value = required_member fields "role_counts" in
+  match value with
+  | `Assoc counts ->
+    List.fold_left
+      (fun result (role, value) ->
+         let* counts = result in
+         let* count = int_json ~field:("role_counts." ^ role) value in
+         if count < 0
+         then Error (Printf.sprintf "field %S must be non-negative" ("role_counts." ^ role))
+         else Ok ((role, count) :: counts))
+      (Ok [])
+      counts
+    |> Result.map List.rev
+  | _ -> Error "field \"role_counts\" must be an object of integer counts"
+;;
+
+let wake_payload_record_type = "wake_payload"
 
 let wake_payload_record_json (event : wake_payload_event) =
   `Assoc
-    [ "record_type", `String "wake_payload"
+    [ "record_type", `String wake_payload_record_type
     ; "timestamp", `Float event.timestamp
     ; "keeper_name", `String event.keeper_name
     ; "trace_id", `String event.trace_id
     ; "turn_index", `Int event.turn_index
-    ; "model_id", `String public_runtime_model_id
     ; "context_window", `Int event.context_window
-    ; "approx_body_bytes", `Int event.approx_body_bytes
     ; "system_prompt_bytes", `Int event.system_prompt_bytes
-    ; "tool_defs_bytes", `Int event.tool_defs_bytes
-    ; "messages_bytes", `Int event.messages_bytes
+    ; "tool_schema_json_bytes", `Int event.tool_schema_json_bytes
+    ; "message_content_bytes", `Int event.message_content_bytes
     ; "message_count", `Int event.message_count
     ; "role_counts", role_counts_to_json event.role_counts
     ; "tool_count", `Int event.tool_count
-    ; "has_compact_happened", `Bool event.has_compact_happened
     ]
 ;;
 
@@ -342,45 +393,77 @@ let wake_payload_event_json (event : wake_payload_event) =
     ; "keeper_name", `String event.keeper_name
     ; "trace_id", `String event.trace_id
     ; "turn_index", `Int event.turn_index
-    ; "model_id", `String public_runtime_model_id
     ; "context_window", `Int event.context_window
-    ; "approx_body_bytes", `Int event.approx_body_bytes
     ; "system_prompt_bytes", `Int event.system_prompt_bytes
-    ; "tool_defs_bytes", `Int event.tool_defs_bytes
-    ; "messages_bytes", `Int event.messages_bytes
+    ; "tool_schema_json_bytes", `Int event.tool_schema_json_bytes
+    ; "message_content_bytes", `Int event.message_content_bytes
     ; "message_count", `Int event.message_count
     ; "role_counts", role_counts_to_json event.role_counts
     ; "tool_count", `Int event.tool_count
-    ; "has_compact_happened", `Bool event.has_compact_happened
     ]
 ;;
 
 let wake_payload_event_of_json json =
-  let record_type = string_field json "record_type" in
-  if record_type <> "" && not (String.equal record_type "wake_payload")
-  then None
-  else
-    Some
-      { timestamp = Safe_ops.json_float ~default:0.0 "timestamp" json
-      ; keeper_name = string_field json "keeper_name"
-      ; trace_id = string_field json "trace_id"
-      ; turn_index = Safe_ops.json_int ~default:0 "turn_index" json
-      ; model_id = public_runtime_model_id
-      ; context_window =
-          Safe_ops.json_int
-            ~default:Runtime_constants.fallback_context_window
-            "context_window"
-            json
-      ; approx_body_bytes = Safe_ops.json_int ~default:0 "approx_body_bytes" json
-      ; system_prompt_bytes = Safe_ops.json_int ~default:0 "system_prompt_bytes" json
-      ; tool_defs_bytes = Safe_ops.json_int ~default:0 "tool_defs_bytes" json
-      ; messages_bytes = Safe_ops.json_int ~default:0 "messages_bytes" json
-      ; message_count = Safe_ops.json_int ~default:0 "message_count" json
-      ; role_counts = role_counts_of_json json
-      ; tool_count = Safe_ops.json_int ~default:0 "tool_count" json
-      ; has_compact_happened =
-          Safe_ops.json_bool ~default:false "has_compact_happened" json
-      }
+  match json with
+  | `Assoc fields ->
+    let* record_type = required_string fields "record_type" in
+    if not (String.equal record_type wake_payload_record_type)
+    then Error (Printf.sprintf "unexpected record_type %S" record_type)
+    else
+      let* timestamp = required_float fields "timestamp" in
+      let* keeper_name = required_non_empty_string fields "keeper_name" in
+      let* trace_id = required_non_empty_string fields "trace_id" in
+      let* turn_index = required_nonnegative_int fields "turn_index" in
+      let* context_window = required_positive_int fields "context_window" in
+      let* system_prompt_bytes = required_nonnegative_int fields "system_prompt_bytes" in
+      let* tool_schema_json_bytes =
+        required_nonnegative_int fields "tool_schema_json_bytes"
+      in
+      let* message_content_bytes =
+        required_nonnegative_int fields "message_content_bytes"
+      in
+      let* message_count = required_positive_int fields "message_count" in
+      let* role_counts = required_role_counts fields in
+      let* () =
+        let role_count_sum =
+          List.fold_left (fun sum (_, count) -> sum + count) 0 role_counts
+        in
+        if role_count_sum = message_count
+        then Ok ()
+        else
+          Error
+            (Printf.sprintf
+               "role_counts sum %d does not equal message_count %d"
+               role_count_sum
+               message_count)
+      in
+      let* tool_count = required_nonnegative_int fields "tool_count" in
+      Ok
+        { timestamp
+        ; keeper_name
+        ; trace_id
+        ; turn_index
+        ; context_window
+        ; system_prompt_bytes
+        ; tool_schema_json_bytes
+        ; message_content_bytes
+        ; message_count
+        ; role_counts
+        ; tool_count
+        }
+  | _ -> Error "wake-payload record must be a JSON object"
+;;
+
+let wake_payload_record_identity json =
+  match json with
+  | `Assoc fields ->
+    let string_or_missing key =
+      match List.assoc_opt key fields with
+      | Some (`String value) -> value
+      | _ -> "<missing>"
+    in
+    string_or_missing "keeper_name", string_or_missing "trace_id"
+  | _ -> "<missing>", "<missing>"
 ;;
 
 let read_recent_verdicts ?since ?until ?(limit = max_recent_verdicts) ()
@@ -443,7 +526,18 @@ let read_pre_compact_events ?since ?until () =
 let read_wake_payload_events ?since ?until () =
   let records = read_store_records (get_wake_payload_store ()) ?since ?until () in
   let events : wake_payload_event list =
-    records |> List.filter_map wake_payload_event_of_json
+    records
+    |> List.filter_map (fun json ->
+      match wake_payload_event_of_json json with
+      | Ok event -> Some event
+      | Error detail ->
+        let keeper_name, trace_id = wake_payload_record_identity json in
+        Log.Harness.warn
+          "[wake_payload] rejected persisted record keeper=%s trace=%s: %s"
+          keeper_name
+          trace_id
+          detail;
+        None)
   in
   List.sort
     (fun (left : wake_payload_event) (right : wake_payload_event) ->
@@ -535,14 +629,7 @@ let pre_compact_status (latest_event : pre_compact_event option) =
   | None -> Idle
   | Some event ->
     if is_stale ~threshold_s:runtime_stale_after_s event.timestamp
-    then
-      Stale
-      (* Boundary: use ratio-based check only. Raw token_count is an OAS
-         infrastructure concern — MASC operates on abstract ratio (0.0–1.0).
-         The context_ratio threshold already accounts for model-specific
-         context windows, making absolute token thresholds redundant. *)
-    else if event.context_ratio >= runtime_warning_ctx_ratio
-    then Warning
+    then Stale
     else Healthy
 ;;
 
@@ -592,7 +679,9 @@ let latest_by_timestamp timestamp_of items =
 ;;
 
 let pre_compact_timestamp (event : pre_compact_event) = event.timestamp
-let pre_compact_ratio (event : pre_compact_event) = event.context_ratio
+let pre_compact_checkpoint_bytes (event : pre_compact_event) =
+  event.checkpoint_bytes
+;;
 let handoff_timestamp (event : handoff_event) = event.timestamp
 let handoff_generation (event : handoff_event) = event.next_generation
 
@@ -644,8 +733,9 @@ let overview_json
     ; "cross_model_rate", `Float cross_model_rate
     ; "cross_model_match_count", `Int cross_model_match
     ; "verdicts_with_generator_runtime", `Int verdicts_with_generator
-    ; ( "latest_pre_compact_ratio"
-      , Json_util.float_opt_to_json (Option.map pre_compact_ratio latest_pre_compact) )
+    ; ( "latest_pre_compact_checkpoint_bytes"
+      , Json_util.int_opt_to_json
+          (Option.map pre_compact_checkpoint_bytes latest_pre_compact) )
     ; ( "latest_handoff_generation"
       , Json_util.int_opt_to_json (Option.bind latest_handoff handoff_generation) )
     ]
@@ -654,23 +744,17 @@ let overview_json
 let record_pre_compact_at
       ~timestamp
       ~keeper_name
-      ~context_ratio
+      ~checkpoint_bytes
       ~message_count
-      ~token_count
       ~strategies
-      ~context_window
-      ~is_local_model
       ~trigger
   =
   let event =
     { timestamp
     ; keeper_name
-    ; context_ratio
+    ; checkpoint_bytes
     ; message_count
-    ; token_count
     ; strategies
-    ; context_window
-    ; is_local_model
     ; trigger
     }
   in
@@ -684,23 +768,17 @@ let record_pre_compact_at
 
 let record_pre_compact
       ~keeper_name
-      ~context_ratio
+      ~checkpoint_bytes
       ~message_count
-      ~token_count
       ~strategies
-      ~context_window
-      ~is_local_model
       ~trigger
   =
   record_pre_compact_at
     ~timestamp:(Time_compat.now ())
     ~keeper_name
-    ~context_ratio
+    ~checkpoint_bytes
     ~message_count
-    ~token_count
     ~strategies
-    ~context_window
-    ~is_local_model
     ~trigger
 ;;
 
@@ -709,35 +787,26 @@ let record_wake_payload_at
       ~keeper_name
       ~trace_id
       ~turn_index
-      ~model_id
       ~context_window
-      ~approx_body_bytes
       ~system_prompt_bytes
-      ~tool_defs_bytes
-      ~messages_bytes
+      ~tool_schema_json_bytes
+      ~message_content_bytes
       ~message_count
       ~role_counts
       ~tool_count
-      ~has_compact_happened
   =
-  let model_id = public_runtime_model_id in
-  (* Project World Building: Broadcast live Yjs telemetry *)
-  Dashboard_yjs.broadcast_keeper_telemetry ~keeper_name ~trace_id ~turn_index ~model_id;
   let event =
     { timestamp
     ; keeper_name
     ; trace_id
     ; turn_index
-    ; model_id
     ; context_window
-    ; approx_body_bytes
     ; system_prompt_bytes
-    ; tool_defs_bytes
-    ; messages_bytes
+    ; tool_schema_json_bytes
+    ; message_content_bytes
     ; message_count
     ; role_counts
     ; tool_count
-    ; has_compact_happened
     }
   in
   append_store_json_fail_open
@@ -752,32 +821,26 @@ let record_wake_payload
       ~keeper_name
       ~trace_id
       ~turn_index
-      ~model_id
       ~context_window
-      ~approx_body_bytes
       ~system_prompt_bytes
-      ~tool_defs_bytes
-      ~messages_bytes
+      ~tool_schema_json_bytes
+      ~message_content_bytes
       ~message_count
       ~role_counts
       ~tool_count
-      ~has_compact_happened
   =
   record_wake_payload_at
     ~timestamp:(Time_compat.now ())
     ~keeper_name
     ~trace_id
     ~turn_index
-    ~model_id
     ~context_window
-    ~approx_body_bytes
     ~system_prompt_bytes
-    ~tool_defs_bytes
-    ~messages_bytes
+    ~tool_schema_json_bytes
+    ~message_content_bytes
     ~message_count
     ~role_counts
     ~tool_count
-    ~has_compact_happened
 ;;
 
 let recent_verdicts_json ?since ?until () =
@@ -895,22 +958,24 @@ let json ~(config : Workspace.config) ?since ?until () =
 ;;
 
 let () =
-  Keeper_keepalive_signal.register_record_wake_payload (fun ~keeper_name ~trace_id ~turn_index ~model_id ~context_window ~approx_body_bytes ~system_prompt_bytes ~tool_defs_bytes ~messages_bytes ~message_count ~role_counts ~tool_count ~has_compact_happened ->
-    ignore (record_wake_payload ~keeper_name ~trace_id ~turn_index ~model_id ~context_window ~approx_body_bytes ~system_prompt_bytes ~tool_defs_bytes ~messages_bytes ~message_count ~role_counts ~tool_count ~has_compact_happened)
+  Keeper_keepalive_signal.register_record_wake_payload (fun ~keeper_name ~trace_id ~turn_index ~context_window ~system_prompt_bytes ~tool_schema_json_bytes ~message_content_bytes ~message_count ~role_counts ~tool_count ->
+    let (_recorded : wake_payload_event) =
+      record_wake_payload ~keeper_name ~trace_id ~turn_index ~context_window
+        ~system_prompt_bytes ~tool_schema_json_bytes ~message_content_bytes
+        ~message_count ~role_counts ~tool_count
+    in
+    ()
   );
 
-  Keeper_compact_policy.register_record_pre_compact (fun ~keeper_name ~context_ratio ~message_count ~token_count ~strategies ~context_window ~is_local_model ~trigger ->
-    let event = record_pre_compact ~keeper_name ~context_ratio ~message_count ~token_count ~strategies ~context_window ~is_local_model ~trigger in
+  Keeper_compact_policy.register_record_pre_compact (fun ~keeper_name ~checkpoint_bytes ~message_count ~strategies ~trigger ->
+    let event = record_pre_compact ~keeper_name ~checkpoint_bytes ~message_count ~strategies ~trigger in
     let mapped_event : Keeper_compact_policy.pre_compact_event =
       {
         timestamp = event.timestamp;
         keeper_name = event.keeper_name;
-        context_ratio = event.context_ratio;
+        checkpoint_bytes = event.checkpoint_bytes;
         message_count = event.message_count;
-        token_count = event.token_count;
         strategies = event.strategies;
-        context_window = event.context_window;
-        is_local_model = event.is_local_model;
         trigger = event.trigger;
       }
     in

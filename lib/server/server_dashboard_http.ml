@@ -7,7 +7,9 @@ include Server_dashboard_http_namespace_truth
 open Masc_domain
 open Server_utils
 
-let board_governance_cache_ttl_s = Server_dashboard_http_core_cache.board_governance_cache_ttl_s
+let dashboard_projection_cache_ttl_s =
+  Server_dashboard_http_core_cache.dashboard_projection_cache_ttl_s
+;;
 
 (* Repository observation snapshot handler *)
 let handle_repository_observation_snapshot ~sw:_ ~clock request reqd =
@@ -90,7 +92,7 @@ let dashboard_board_json
       (Option.value ~default:"-" voter)
       blind_votes
   in
-  Dashboard_cache.get_or_compute cache_key ~ttl:board_governance_cache_ttl_s (fun () ->
+  Dashboard_cache.get_or_compute cache_key ~ttl:dashboard_projection_cache_ttl_s (fun () ->
     (* /api/v1/dashboard/board was measured at 30-44s on hot keeper
        fleets.  The compute below scans the post store, fetches the
        karma map, and per-post enriches with vote + contributor
@@ -125,7 +127,6 @@ let dashboard_board_json
       let total_json : Yojson.Safe.t = if has_more then `Null else `Int fetched_len in
       let paged = posts |> drop offset |> take limit in
       let contributor_quality_for = board_contributor_quality_lookup ?config () in
-      let claim_evidence_for = board_claim_evidence_lookup () in
       let posts_json =
         List.map
           (fun (post : Board.post) ->
@@ -133,12 +134,10 @@ let dashboard_board_json
              let post_id = Board.Post_id.to_string post.id in
              let current_vote = board_current_vote_for_post ~voter ~post_id in
              let contributor_quality = contributor_quality_for author in
-             let claim_evidence = claim_evidence_for post_id in
              board_post_dashboard_json
                ~blind_votes
                ?current_vote
                ?contributor_quality
-               ?claim_evidence
                ~author_karma:(get_karma author)
                post)
           paged
@@ -195,22 +194,7 @@ let dashboard_memory_http_json ?config request : Yojson.Safe.t =
 
 include Server_dashboard_http_memory_subsystems
 
-(* /api/v1/dashboard/governance ran [Dashboard_governance.dashboard_json]
-   inline on the Eio main domain.  That compute calls
-   [Dashboard_governance_judge.fresh_judgments_json], which iterates the
-   per-judge log files via [Fs_compat.load_file] — a synchronous disk
-   read on every request.
-
-   Same fix pattern as PR #18991 / #18993 / #18994 / #19007 / #19015 /
-   #19023: wrap in [Dashboard_cache.get_or_compute] for
-   stale-while-revalidate and push the compute through
-   [Domain_pool_ref.submit_io_or_inline] so the main HTTP domain keeps
-   serving other fibers during refresh.
-
-   Cache key includes [base_path] + the [limit]/[offset] knobs the
-   query exposes; [status_filter] is always [None] today, so it is
-   not part of the key. *)
-let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
+let dashboard_gate_http_json request ~base_path : Yojson.Safe.t =
   let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
   let offset =
     int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000
@@ -218,23 +202,23 @@ let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
   let status_filter = None in
   let force = bool_query_param request "force" ~default:false in
   let cache_key =
-    Printf.sprintf "governance:%s;%d;%d" base_path limit offset
+    Printf.sprintf "gate:%s;%d;%d" base_path limit offset
   in
   let compute () =
     Domain_pool_ref.submit_io_or_inline (fun () ->
-      Dashboard_governance.dashboard_json ~base_path ~limit ~offset ~status_filter)
+      Dashboard_gate.dashboard_json ~base_path ~limit ~offset ~status_filter)
   in
   if force then Dashboard_cache.invalidate cache_key;
-  Dashboard_cache.get_or_compute cache_key ~ttl:board_governance_cache_ttl_s compute
+  Dashboard_cache.get_or_compute cache_key ~ttl:dashboard_projection_cache_ttl_s compute
 ;;
 
 (** Read the optional [?window=<minutes>] query param.
     Defaults to 60 minutes; clamped to [5..1440]. *)
-let dashboard_governance_tool_events_http_json request : Yojson.Safe.t =
+let dashboard_gate_tool_events_http_json request : Yojson.Safe.t =
   let window =
     int_query_param request "window" ~default:60 |> clamp ~min_v:5 ~max_v:1440
   in
-  Dashboard_governance_metrics.governance_tool_events_json ~window_minutes:window ()
+  Dashboard_gate_metrics.gate_tool_events_json ~window_minutes:window ()
 ;;
 
 (* /api/v1/dashboard/proof was measured at 28-60s (timeout) under
@@ -275,9 +259,6 @@ let dashboard_proof_compute ~config ~limit ~recent () : Yojson.Safe.t =
       proof_source ~id:"execution_trust"
         ~label:"Execution trust provenance"
         ~route:"/api/v1/dashboard/execution-trust";
-      proof_source ~id:"surface_readiness"
-        ~label:"Dashboard surface readiness refs"
-        ~route:"/api/v1/dashboard/surface-readiness";
     ]
   in
   let by_status =
@@ -328,7 +309,7 @@ let dashboard_proof_http_json ~config request : Yojson.Safe.t =
   let key =
     Printf.sprintf "dashboard.proof:%s;%d;%d" config.Workspace.base_path limit recent
   in
-  Dashboard_cache.get_or_compute key ~ttl:board_governance_cache_ttl_s (fun () ->
+  Dashboard_cache.get_or_compute key ~ttl:dashboard_projection_cache_ttl_s (fun () ->
     Domain_pool_ref.submit_io_or_inline (fun () ->
       dashboard_proof_compute ~config ~limit ~recent ()))
 ;;
@@ -355,9 +336,9 @@ let approval_resolve_decision_name = function
   | Approval_resolve_reject _ -> approval_resolve_reject_name
 ;;
 
-let approval_resolve_decision_to_hook = function
-  | Approval_resolve_approve -> Agent_sdk.Hooks.Approve
-  | Approval_resolve_reject reason -> Agent_sdk.Hooks.Reject reason
+let approval_resolve_decision_to_queue_decision = function
+  | Approval_resolve_approve -> Keeper_approval_queue.Decision.Approve
+  | Approval_resolve_reject reason -> Keeper_approval_queue.Decision.Reject reason
 ;;
 
 let approval_resolve_decision_of_json args =
@@ -382,7 +363,7 @@ let approval_resolve_http_error_to_string = function
   | Unavailable err -> Keeper_approval_queue.resolve_error_to_string err
 ;;
 
-let dashboard_governance_approval_resolve_http_json ~base_path ~(args : Yojson.Safe.t)
+let dashboard_gate_resolve_http_json ~base_path ~created_by ~(args : Yojson.Safe.t)
   : (Yojson.Safe.t, approval_resolve_http_error) result
   =
   match Safe_ops.json_string_opt "id" args with
@@ -391,6 +372,7 @@ let dashboard_governance_approval_resolve_http_json ~base_path ~(args : Yojson.S
     let remember_rule =
       Safe_ops.json_bool_opt "remember_rule" args |> Option.value ~default:false
     in
+    let rule_expires_at = Safe_ops.json_float_opt "rule_expires_at" args in
     (* RFC-0305: a missing [decision] field must not default to approve — this
        resolves a pending HITL approval, so an omitted/malformed decision is a
        bad request, not a silent grant. Mirrors the [id]-required check above. *)
@@ -401,14 +383,15 @@ let dashboard_governance_approval_resolve_http_json ~base_path ~(args : Yojson.S
      | Error _ as err -> err
      | Ok decision ->
        let decision_name = approval_resolve_decision_name decision in
-       let decision = approval_resolve_decision_to_hook decision in
+       let decision = approval_resolve_decision_to_queue_decision decision in
        (match
           Keeper_approval_queue.resolve_with_policy
+            ~base_path
             ~id
             ~decision
-            ~base_path
             ~remember_rule
-            ~created_by:"dashboard"
+            ?rule_expires_at
+            ~created_by
             ()
         with
         | Ok result ->
@@ -424,13 +407,24 @@ let dashboard_governance_approval_resolve_http_json ~base_path ~(args : Yojson.S
                 ])
         | Error (Keeper_approval_queue.Delivery_failed _ as err) ->
           Error (Unavailable err)
+        | Error (Keeper_approval_queue.Persistence_failed _ as err) ->
+          Error (Unavailable err)
         | Error
             (( Keeper_approval_queue.Not_found _
              | Keeper_approval_queue.Already_resolved _ ) as err) ->
           Error (Gone err)))
 ;;
 
-let dashboard_governance_approval_rule_delete_http_json ~base_path ~(args : Yojson.Safe.t)
+let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe.t) =
+  match Safe_ops.json_string_opt "id" args with
+  | None -> Error "id is required"
+  | Some id ->
+    (match Keeper_gate.retry_failed_auto_judge ~base_path ~requested_by id with
+     | Error _ as error -> error
+     | Ok () -> Ok (`Assoc [ "ok", `Bool true; "id", `String id ]))
+;;
+
+let dashboard_gate_rule_delete_http_json ~base_path ~(args : Yojson.Safe.t)
   : (Yojson.Safe.t, string) result
   =
   match Safe_ops.json_string_opt "id" args with
@@ -443,19 +437,8 @@ let dashboard_governance_approval_rule_delete_http_json ~base_path ~(args : Yojs
            ~event_type:"rule_deleted"
            deleted;
          Ok (`Assoc [ "ok", `Bool true; "id", `String deleted.id ])
-       | Error message -> Error message)
-;;
-
-let dashboard_schedule_resolve_http_json
-      ~config
-      ~operator_name
-      ~(args : Yojson.Safe.t)
-  : (Yojson.Safe.t, string) result
-  =
-  Server_dashboard_http_schedule_actions.resolve_http_json
-    ~config
-    ~operator_name
-    ~args
+       | Error error ->
+         Error (Keeper_approval_queue.rule_store_error_to_string error))
 ;;
 
 let dashboard_schedule_prune_http_json
@@ -516,74 +499,66 @@ let dashboard_verification_resolve_http_json
     | other ->
       Error (Printf.sprintf "decision must be 'approve' or 'reject' (got %s)" other)
   in
-  let prepare_verification_verdict ~task:_ ~verifier ~verification_id:state_vid ~decision =
-    if state_vid <> verification_id
-    then
+  let* task =
+    Workspace.get_tasks_raw config
+    |> List.find_opt (fun (task : Masc_domain.task) -> String.equal task.id task_id)
+    |> function
+    | None -> Error (Printf.sprintf "task %s not found" task_id)
+    | Some task -> Ok task
+  in
+  let* () =
+    match task.task_status with
+    | Masc_domain.AwaitingVerification { verification_id = state_id; _ }
+      when String.equal state_id verification_id -> Ok ()
+    | Masc_domain.AwaitingVerification { verification_id = state_id; _ } ->
       Error
         (Printf.sprintf
            "verification_id mismatch for task %s: request=%s state=%s"
            task_id
            verification_id
-           state_vid)
-    else (
-      match decision with
-      | `Approve notes ->
-        Verification_protocol.record_approve_verification
-          ~config
-          ~task_id
-          ~verifier
-          ~verification_id:state_vid
-          ~notes
-      | `Reject reason ->
-        Verification_protocol.record_reject_verification
-          ~config
-          ~task_id
-          ~verifier
-          ~verification_id:state_vid
-          ~reason)
+           state_id)
+    | status ->
+      Error
+        (Printf.sprintf
+           "task %s is %s, not awaiting verification"
+           task_id
+           (Masc_domain.task_status_to_string status))
   in
-  let fsm_result =
-    Workspace.transition_task_r
-      config
-      ~agent_name:verifier
-      ~task_id
-      ~action
-      ~prepare_verification_verdict
-      ~notes:reason
-      ~reason
-      ()
+  let handoff_context =
+    match task.handoff_context with
+    | Some handoff -> Masc_domain.task_handoff_context_to_yojson handoff
+    | None ->
+      `Assoc
+        [ "summary", `String reason
+        ; "evidence_refs", `List []
+        ]
   in
-  match fsm_result with
-  | Error err -> Error (Masc_domain.masc_error_to_string err)
-  | Ok _ ->
-    (match action with
-     | Masc_domain.Approve_verification ->
-       Verification_protocol.notify_approve_verification
-         ~task_id
-         ~verifier
-         ~verification_id
-         ~notes:reason
-     | Masc_domain.Reject_verification ->
-       Verification_protocol.notify_reject_verification
-         ~task_id
-         ~verifier
-         ~verification_id
-         ~reason
-     | Masc_domain.Claim
-     | Masc_domain.Start
-     | Masc_domain.Done_action
-     | Masc_domain.Cancel
-     | Masc_domain.Release
-     | Masc_domain.Submit_for_verification
-     -> ());
+  let transition_args =
+    `Assoc
+      [ "task_id", `String task_id
+      ; "action", `String (Masc_domain.task_action_to_string action)
+      ; "notes", `String reason
+      ; "reason", `String reason
+      ; "handoff_context", handoff_context
+      ]
+  in
+  let task_context : Task.Tool.context =
+    { config; agent_name = verifier; sw = None }
+  in
+  match Task.Tool.dispatch task_context ~name:"masc_transition" ~args:transition_args with
+  | None -> Error "Task transition handler is unavailable"
+  | Some result when not (Tool_result.is_success result) ->
+    Error (Tool_result.message result)
+  | Some result ->
     Ok
       (`Assoc
-          [ "ok", `Bool true
-          ; "task_id", `String task_id
-          ; "verification_id", `String verification_id
-          ; "decision", `String decision_name
-          ; "verifier", `String verifier
-          ])
+         [ "ok", `Bool true
+         ; "task_id", `String task_id
+         ; "verification_id", `String verification_id
+         ; "decision", `String decision_name
+         ; "verifier", `String verifier
+         ; "result", Tool_result.data result
+         ])
 ;;
 
 let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
@@ -625,14 +600,9 @@ let dashboard_goals_tree_http_json ~(config : Workspace.config) : Yojson.Safe.t 
 ;;
 
 let dashboard_goals_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
-  (* RFC-0284: carry the goal-loop OODA status alongside planning/tree so the
-     WS "goals" slice's initial snapshot (and the /goals HTTP pull) paint the
-     goal-loop panel without a separate fetch. Live updates arrive via the
-     [goal_loop_status] delta (Server_dashboard_http_goal_loop_broadcast). *)
   `Assoc
     [ "planning", dashboard_planning_http_json ~config
     ; "tree", dashboard_goals_tree_http_json ~config
-    ; "loop", Dashboard_goal_loop.status_json ~base_path:config.base_path ()
     ]
 
 let dashboard_ide_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
@@ -670,16 +640,28 @@ let dashboard_ide_snapshot_json ~(config : Workspace.config) : Yojson.Safe.t =
   in
   let active_keepers =
     try
-      List.map
-        (fun (a : Client_identity.t) ->
-           `Assoc
-             [ "keeper_id", `String a.Client_identity.agent_name
-             ; "last_seen_ms", `Intlit (Printf.sprintf "%.0f" (a.Client_identity.registered_at *. 1000.0))
-             ])
-        (Client_registry_eio.list_active ~within_seconds:300.0 ())
+      Workspace.get_active_agents config
+      |> List.filter_map (fun (agent : Masc_domain.agent) ->
+           match Option.bind agent.meta (fun meta -> meta.Masc_domain.keeper_name) with
+           | None -> None
+           | Some keeper_name ->
+             let last_seen_ms =
+               Server_presence.last_seen_ms
+                 ~context:"dashboard IDE presence"
+                 agent
+             in
+             Some
+               (`Assoc
+                 [ "keeper_id", `String keeper_name
+                 ; "last_seen_ms", `Intlit (Int64.to_string last_seen_ms)
+                 ]))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | _exn -> []
+    | exn ->
+      Log.Server.warn
+        "client registry active projection failed: %s"
+        (Printexc.to_string exn);
+      []
   in
   let events_count = List.length events in
   let cursors_count = List.length cursors in
@@ -731,42 +713,72 @@ let dashboard_goal_detail_http_json ~(config : Workspace.config) ~goal_id : Yojs
     `Assoc [ "ok", `Bool false; "error", `String message; "goal_id", `String goal_id ]
 ;;
 
-let operator_action_http_json ~state ~sw ~clock request ~args =
-  let actor =
-    Server_auth.dashboard_actor_for_request
-      ~base_path:(Mcp_server.workspace_config state).base_path
-      request
-  in
-  let ctx : _ Operator_control.context =
-    { config = (Mcp_server.workspace_config state)
-    ; agent_name = Option.value ~default:"dashboard" actor
-    ; sw
-    ; clock
-    ; proc_mgr = state.Mcp_server.proc_mgr
-    ; net = state.Mcp_server.net
-    ; mcp_session_id = None
-    }
-  in
-  Operator_control.action_json ?actor_hint:actor ctx args
+let explicit_operator_actor ~authorized_actor request =
+  match
+    Server_auth.auth_token_from_request request,
+    Server_auth.request_actor_hint request
+  with
+  | None, None -> Error "operator request actor is required"
+  | None, Some _
+  | Some _, None
+  | Some _, Some _ -> Ok authorized_actor
 ;;
 
-let operator_confirm_http_json ~state ~sw ~clock request ~args =
-  let actor =
-    Server_auth.dashboard_actor_for_request
-      ~base_path:(Mcp_server.workspace_config state).base_path
-      request
-  in
-  let ctx : _ Operator_control.context =
-    { config = (Mcp_server.workspace_config state)
-    ; agent_name = Option.value ~default:"dashboard" actor
-    ; sw
-    ; clock
-    ; proc_mgr = state.Mcp_server.proc_mgr
-    ; net = state.Mcp_server.net
-    ; mcp_session_id = None
-    }
-  in
-  Operator_control.confirm_json ?actor_hint:actor ctx args
+let operator_control_context ~state ~sw ~clock ~config ~agent_name
+    : _ Operator_control.context
+  =
+  { config
+  ; agent_name
+  ; sw
+  ; clock
+  ; proc_mgr = state.Mcp_server.proc_mgr
+  ; net = state.Mcp_server.net
+  ; delegated_dispatch =
+      Some
+        (Keeper_tool_boundary.delegated_dispatch
+           ~config
+           ~agent_name
+           ~sw
+           ~clock
+           ~proc_mgr:state.Mcp_server.proc_mgr
+           ~net:state.Mcp_server.net
+           ~publication_recovery_provider:
+             (Mcp_server.publication_recovery_availability_provider state)
+           ())
+  ; mcp_session_id = None
+  }
+;;
+
+let operator_action_http_json ~state ~sw ~clock ~authorized_actor request ~args =
+  let workspace_scope = Mcp_server.workspace_scope state in
+  match explicit_operator_actor ~authorized_actor request with
+  | Error _ as error -> error
+  | Ok actor ->
+    let ctx =
+      operator_control_context
+        ~state
+        ~sw
+        ~clock
+        ~config:workspace_scope.config
+        ~agent_name:actor
+    in
+    Operator_control.action_json ~actor_hint:actor ctx args
+;;
+
+let operator_confirm_http_json ~state ~sw ~clock ~authorized_actor request ~args =
+  let workspace_scope = Mcp_server.workspace_scope state in
+  match explicit_operator_actor ~authorized_actor request with
+  | Error _ as error -> error
+  | Ok actor ->
+    let ctx =
+      operator_control_context
+        ~state
+        ~sw
+        ~clock
+        ~config:workspace_scope.config
+        ~agent_name:actor
+    in
+    Operator_control.confirm_json ~actor_hint:actor ctx args
 ;;
 
 let operator_error_json message =
@@ -852,10 +864,6 @@ let dashboard_bootstrap_http_json
       Server_dashboard_snapshot_select.select_project_snapshot_json
         ~state ~sw ~clock request)
   in
-  let goal_loop_status =
-    slice "goal_loop_status" (fun () ->
-      Dashboard_goal_loop.status_json ~base_path:(Mcp_server.workspace_config state).base_path ())
-  in
   `Assoc
     [ "served_at", `String (Masc_domain.now_iso ())
     ; "milestone", `Int 1
@@ -863,6 +871,5 @@ let dashboard_bootstrap_http_json
     ; execution
     ; planning
     ; namespace_truth
-    ; goal_loop_status
     ]
 ;;

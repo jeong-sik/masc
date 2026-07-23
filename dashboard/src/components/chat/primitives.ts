@@ -11,7 +11,7 @@ import { UNREAD_DIVIDER_LABEL, unreadDividerAnchorKey } from './unread-divider'
 import { showToast } from '../common/toast'
 import { copyToClipboard } from '../common/copyable-code'
 import { ExternalLink, Mic, Square } from 'lucide-preact'
-import { prettyJsonDeep } from '../tool-call-shared'
+import { prettyJson } from '../tool-call-shared'
 import { useVoiceInput } from './voice-input'
 
 const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
@@ -262,23 +262,6 @@ function surfaceLink(surface?: SurfaceRef | null): ChatMetaInfo | null {
         }
       }
       break
-    case 'github':
-      if (surface.repo) {
-        const path = surface.notification_id ? `/notifications/${surface.notification_id}` : ''
-        const title = compactKeyValues([
-          ['surface', 'github'],
-          ['repo', surface.repo],
-          ['notification_id', surface.notification_id],
-        ])
-        return {
-          url: `https://github.com/${surface.repo}${path}`,
-          label: `GitHub: ${surface.repo}`,
-          icon: '🐙',
-          title,
-          tone: 'accent',
-        }
-      }
-      break
     case 'dashboard':
       return {
         url: '#',
@@ -389,9 +372,11 @@ function ChatMetaChip({ info, compact }: { info: ChatMetaInfo | null; compact: b
 type ChatTranscriptVariant = 'default' | 'messenger'
 type ChatTranscriptSize = 'default' | 'primary'
 type ChatTranscriptAction = {
-  label: string
+  label?: string
   title?: string
-  onClick: (entry: KeeperConversationEntry) => void
+  onClick?: (entry: KeeperConversationEntry) => void
+  onRecoveryRequeue?: (entry: KeeperConversationEntry) => Promise<void>
+  onRecoveryCancel?: (entry: KeeperConversationEntry, detail: string) => Promise<void>
 }
 
 export const THINKING_TRACE_PREVIEW_CHARS = 2400
@@ -455,7 +440,11 @@ function showDeliveryBadge(entry: KeeperConversationEntry, variant: ChatTranscri
   return entry.delivery !== 'history' && entry.delivery !== 'delivered'
 }
 
-function QueueReceiptBadge({ entry }: { entry: KeeperConversationEntry }) {
+function QueueReceiptBadge({ entry, action }: {
+  entry: KeeperConversationEntry
+  action?: ChatTranscriptAction
+}) {
+  const [recoveryPending, setRecoveryPending] = useState<'requeue' | 'cancel' | null>(null)
   const receiptId = entry.details?.queueReceiptId?.trim()
   const shutdownOperationId = entry.details?.queueShutdownOperationId?.trim()
   const queueState = entry.details?.queueState
@@ -464,6 +453,7 @@ function QueueReceiptBadge({ entry }: { entry: KeeperConversationEntry }) {
     switch (queueState) {
       case 'pending': return '서버 대기'
       case 'inflight': return 'Keeper 처리 중'
+      case 'recovery_required': return '복구 확인 필요'
       case 'delivered': return '처리 완료'
       case 'failed': return '처리 실패'
       default: return '상태 확인 필요'
@@ -475,15 +465,64 @@ function QueueReceiptBadge({ entry }: { entry: KeeperConversationEntry }) {
     label,
     shutdownOperationId ? `shutdown operation ${shutdownOperationId}` : null,
   ].filter((value): value is string => value !== null).join(' · ')
+  const runRecovery = async (
+    kind: 'requeue' | 'cancel',
+    operation: () => Promise<void>,
+  ) => {
+    setRecoveryPending(kind)
+    try {
+      await operation()
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), 'error')
+    } finally {
+      setRecoveryPending(null)
+    }
+  }
+  const cancelRecovery = () => {
+    if (!action?.onRecoveryCancel) return
+    const detail = window.prompt('미확인 배송을 취소하는 이유를 입력하세요.')
+    if (detail === null) return
+    if (!detail || detail !== detail.trim()) {
+      showToast('취소 이유는 공백 없이 정확히 입력해야 합니다.', 'error')
+      return
+    }
+    void runRecovery('cancel', () => action.onRecoveryCancel!(entry, detail))
+  }
   return html`
-    <span
-      class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)]"
-      title=${title}
-      data-chat-queue-state-badge=${queueState}
-      data-chat-queue-receipt=${receiptId}
-      data-chat-queue-shutdown-operation-id=${shutdownOperationId ?? undefined}
-    >
-      ${label}${shutdownLabel}
+    <span class="inline-flex flex-wrap items-center gap-1.5">
+      <span
+        class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-fg-secondary)]"
+        title=${title}
+        data-chat-queue-state-badge=${queueState}
+        data-chat-queue-receipt=${receiptId}
+        data-chat-queue-shutdown-operation-id=${shutdownOperationId ?? undefined}
+      >
+        ${label}${shutdownLabel}
+      </span>
+      ${queueState === 'recovery_required' && action?.onRecoveryRequeue
+        ? html`
+            <button
+              type="button"
+              disabled=${recoveryPending !== null}
+              class="rounded-[var(--r-0)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-0.5 text-2xs font-semibold text-[var(--warn-bright)] disabled:opacity-50"
+              data-chat-queue-recovery-action="requeue_unconfirmed"
+              onClick=${() => {
+                void runRecovery('requeue', () => action.onRecoveryRequeue!(entry))
+              }}
+            >${recoveryPending === 'requeue' ? '반영 중...' : '미확인 배송 재큐잉'}</button>
+          `
+        : null}
+      ${queueState === 'recovery_required' && action?.onRecoveryCancel
+        ? html`
+            <button
+              type="button"
+              disabled=${recoveryPending !== null}
+              class="rounded-[var(--r-0)] border border-[var(--danger-20)] bg-[var(--danger-10)] px-2 py-0.5 text-2xs font-semibold text-[var(--color-status-err)] disabled:opacity-50"
+              data-chat-queue-recovery-action="cancel_unconfirmed"
+              onClick=${cancelRecovery}
+            >${recoveryPending === 'cancel' ? '반영 중...' : '미확인 배송 취소'}</button>
+          `
+        : null}
     </span>
   `
 }
@@ -626,9 +665,12 @@ function overviewRows(details: KeeperConversationDetails): Array<{ label: string
     details.queueShutdownOperationId ? { label: '종료 작업 ID', value: details.queueShutdownOperationId } : null,
     details.queueState ? { label: '큐 상태', value: details.queueState } : null,
     details.queueFailureKind ? { label: '큐 실패', value: details.queueFailureKind } : null,
-    typeof details.queueRevision === 'number' ? { label: '큐 revision', value: `${details.queueRevision}` } : null,
+    typeof details.queueRevision === 'string' ? { label: '큐 revision', value: details.queueRevision } : null,
     typeof details.queuePendingCount === 'number' ? { label: '접수 시 pending', value: `${details.queuePendingCount}` } : null,
     typeof details.queueInflightCount === 'number' ? { label: '접수 시 inflight', value: `${details.queueInflightCount}` } : null,
+    typeof details.queueRecoveryRequiredCount === 'number'
+      ? { label: '접수 시 recovery required', value: `${details.queueRecoveryRequiredCount}` }
+      : null,
     typeof details.generation === 'number' ? { label: '세대', value: `${details.generation}` } : null,
   ].filter((row): row is { label: string; value: string } => Boolean(row))
 }
@@ -2085,6 +2127,29 @@ function ChatFusionCard({ boardPostId, runId, fallbackText }: { boardPostId: str
   `
 }
 
+function ChatPersistedThinkingBlock({ content, redacted }: { content: string; redacted: boolean }) {
+  if (!redacted) {
+    return html`
+      <div class="chat-block-trace" data-chat-block="thinking" data-chat-thinking-redacted="false">
+        <${ChatTraceStep} step=${{ kind: 'think', text: content }} />
+      </div>
+    `
+  }
+  return html`
+    <div class="chat-block-trace" data-chat-block="thinking" data-chat-thinking-redacted="true">
+      <div class="chat-block-tstep think">
+        <span class="chat-block-tnode"></span>
+        <div class="min-w-0 flex-1">
+          <div class="chat-block-tstep-row">
+            <span class="chat-block-tstep-kind">Thinking</span>
+          </div>
+          <div class="chat-block-tstep-text">Thinking 본문은 provider 서명으로만 제공되어 표시할 수 없습니다.</div>
+        </div>
+      </div>
+    </div>
+  `
+}
+
 function ChatBlock({ block, fallbackText }: { block: ChatBlock; fallbackText?: string }) {
   switch (block.t) {
     case 'p': return html`<${ChatTextBlock} html=${block.html} />`
@@ -2104,6 +2169,7 @@ function ChatBlock({ block, fallbackText }: { block: ChatBlock; fallbackText?: s
     case 'svg': return html`<${ChatSvgBlock} svg=${block.svg} cap=${block.cap} />`
     case 'mermaid': return html`<${ChatMermaidBlock} source=${block.source} caption=${block.caption} />`
     case 'trace': return html`<${ChatTraceBlock} trace=${block.trace} />`
+    case 'thinking': return html`<${ChatPersistedThinkingBlock} content=${block.content} redacted=${block.redacted} />`
     case 'link': return html`<${ChatLinkBlock} url=${block.url} title=${block.title} desc=${block.desc} meta=${block.meta} fav=${block.fav} kind=${block.kind} />`
     case 'broadcast': return html`<${ChatBroadcastBlock} scope=${block.scope} via=${block.via} note=${block.note} recipients=${block.recipients} />`
     case 'fusion': return html`<${ChatFusionCard} boardPostId=${block.board_post_id} runId=${block.run_id} fallbackText=${fallbackText} />`
@@ -2376,9 +2442,10 @@ function AudioPlayer({ clip }: { clip: KeeperConversationAudioClip }) {
 
 // Block types that parseMarkdownToBlocks cannot reproduce from message text:
 // synthesized voice clips, attachments, fusion deliberation cards, artifacts,
-// broadcasts, traces, shell transcripts. When an assistant/system message
+// broadcasts, traces, and shell transcripts. When an assistant/system message
 // carries one of these the server blocks are rendered as-is; otherwise the
-// prose is re-parsed richly. (Complement of the markdown-derived block set:
+// prose is re-parsed richly. (Complement of the
+// markdown-derived block set:
 // p/h4/ul/callout/table/code/mermaid/image/svg/link.)
 const CARD_BLOCK_TYPES: ReadonlySet<ChatBlock['t']> = new Set([
   'voice',
@@ -2481,10 +2548,16 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
     })()
     return () => { active = false }
   }, [shouldParseRichBlocks, entry.text])
-  const effectiveBlocks = isFailureMessage ? [] : (parsedBlocks ?? entry.blocks ?? [])
+  const persistedThinkingBlocks = (entry.blocks ?? [])
+    .filter((block): block is Extract<ChatBlock, { t: 'thinking' }> => block.t === 'thinking')
+  const renderedServerBlocks = parsedBlocks !== null
+    ? [...persistedThinkingBlocks, ...parsedBlocks]
+    : (entry.blocks ?? [])
+  const effectiveBlocks = isFailureMessage ? [] : renderedServerBlocks
   const hasEffectiveBlocks = effectiveBlocks.length > 0
+  const hasNonThinkingBlocks = effectiveBlocks.some(block => block.t !== 'thinking')
   const collapseThreshold = 1200
-  const isCollapsible = !hasEffectiveBlocks && messageLength > collapseThreshold
+  const isCollapsible = !hasNonThinkingBlocks && messageLength > collapseThreshold
   const tone = bubbleTone(entry)
   const isMessenger = variant === 'messenger'
   const detailItems = detailSummary(entry.details)
@@ -2549,6 +2622,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
       data-chat-queue-revision=${entry.details?.queueRevision ?? undefined}
       data-chat-queue-pending-count=${entry.details?.queuePendingCount ?? undefined}
       data-chat-queue-inflight-count=${entry.details?.queueInflightCount ?? undefined}
+      data-chat-queue-recovery-required-count=${entry.details?.queueRecoveryRequiredCount ?? undefined}
       data-chat-attachment-count=${attachments.length}
       data-chat-server-attach-block-count=${attachBlocks.length}
       data-chat-multimodal-sources=${multimodalSources.length > 0 ? multimodalSources.join(',') : undefined}
@@ -2586,7 +2660,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                           </span>
                         `
                       : null}
-                    <${QueueReceiptBadge} entry=${entry} />
+                    <${QueueReceiptBadge} entry=${entry} action=${action} />
                     <${StreamContractBadge} badge=${streamContractBadge} compact=${true} />
                     <${ChatMetaChip} info=${surfaceInfo} compact=${true} />
                     <${ChatMetaChip} info=${speakerInfo} compact=${true} />
@@ -2610,7 +2684,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                           </span>
                         `
                       : null}
-                    <${QueueReceiptBadge} entry=${entry} />
+                    <${QueueReceiptBadge} entry=${entry} action=${action} />
                     ${timestamp
                       ? html`
                           <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] px-2.5 py-1 text-2xs font-medium tabular-nums text-[var(--color-fg-secondary)]">
@@ -2629,14 +2703,14 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                 `}
           </div>
         </div>
-        ${action
+        ${action?.label && action.onClick
           ? html`
               <button
                 type="button"
                 class=${`border border-[var(--accent-20)] bg-[var(--accent-10)] text-xs font-semibold text-[var(--color-accent-fg)] transition-colors hover:bg-[var(--accent-20)] ${CHAT_FOCUS_RING} ${
                   isMessenger ? 'rounded-[var(--r-1)] px-2.5 py-1' : 'rounded-[var(--r-0)] px-3 py-1'
                 }`}
-                onClick=${() => action.onClick(entry)}
+                onClick=${() => action.onClick!(entry)}
                 title=${action.title ?? action.label}
                 data-testid="chat-message-action"
               >
@@ -2694,7 +2768,17 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                   diagnostic=${entry.error?.trim() ? entry.error : messageText}
                 />`
               : hasEffectiveBlocks
-              ? html`<${ChatBlocks} blocks=${effectiveBlocks} fallbackText=${entry.text} />`
+              ? html`
+                  <${ChatBlocks} blocks=${effectiveBlocks} fallbackText=${entry.text} />
+                  ${hasRealText && !hasNonThinkingBlocks
+                    ? html`
+                        <div
+                          class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
+                          dangerouslySetInnerHTML=${renderPlainLinkedHtml(messageText)}
+                        />
+                      `
+                    : null}
+                `
               : traceOwnsIntermediateText
               ? null
               : html`
@@ -2751,17 +2835,6 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                     </div>
                   `
                 : null}
-              ${entry.details.skillPrimary
-                ? html`
-                    <div class="chat-detail-callout rounded-[var(--r-1)] border border-[var(--ok-border)] px-3 py-3">
-                      <div class="text-2xs font-bold uppercase tracking-2 text-[var(--ok-fg)]">스킬 경로</div>
-                      <div class="mt-1 text-sm font-bold text-[var(--ok-fg)]">${entry.details.skillPrimary}</div>
-                      ${entry.details.skillReason
-                        ? html`<div class="mt-1 text-sm leading-loose text-[var(--ok-fg)]">${entry.details.skillReason}</div>`
-                        : null}
-                    </div>
-                  `
-                : null}
               ${entry.details.rawPayload
                 ? html`
                     <div class="flex flex-col gap-2">
@@ -2790,10 +2863,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
 function prettyJsonish(text: string): string {
   const trimmed = text.trimStart()
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    // prettyJsonDeep recursively un-nests double-encoded JSON in string values
-    // so legacy "<label>\n{json}" tool rows render structurally instead of
-    // showing literal "\n". Returns null when not valid JSON.
-    const pretty = prettyJsonDeep(text)
+    const pretty = prettyJson(text)
     if (pretty !== null) return pretty
     // not valid JSON — show as-is
   }
@@ -3030,7 +3100,7 @@ function ToolTraceStep({
   if (unlinkedTraceTool) {
     status = 'unlinked'
   } else if (output !== null) {
-    status = output.success === false || output.semantic_success === false ? 'bad' : 'ok'
+    status = output.success === false ? 'bad' : 'ok'
   } else if (traceStep?.status === 'err') {
     status = 'bad'
   } else if (traceStep?.status === 'ok') {
@@ -3290,7 +3360,7 @@ function ToolTraceCard({
   const progressN = traceSteps.filter((step) => step.kind === 'progress').length
   const failN = orderedToolSteps.filter(
     (s) =>
-      (s.output !== null && (s.output.success === false || s.output.semantic_success === false))
+      (s.output !== null && s.output.success === false)
       || (s.kind === 'tool' && s.step.status === 'err'),
   ).length
   // Surface unjoined outputs as "missing" only once the turn and output
@@ -3731,7 +3801,7 @@ export function ChatTranscript({
         .map((entry) => {
           const output = lookupToolCallOutput(entry.id)
           return output
-            ? `${entry.id}:${output.success}:${output.semantic_success ?? ''}:${output.duration_ms}:${toolOutputDisplay(output.output)?.text.length ?? 0}`
+            ? `${entry.id}:${output.success}:${output.duration_ms}:${toolOutputDisplay(output.output)?.text.length ?? 0}`
             : `${entry.id}:pending:${coverageSig}`
         })
         .join('|')

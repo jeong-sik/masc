@@ -71,18 +71,25 @@ val task_action_to_string : task_action -> string
 val all_task_actions : task_action list
 val valid_task_action_strings : string list
 
-(** RFC-0262: who authorizes a transition that would otherwise require the
-    task's assignee. Replaces the anonymous [~force:bool] (RFC-0262 §3.1). *)
-type completion_authority =
-  | Assignee
-  | Operator
-  | System
-[@@deriving show]
+(** Request-local result of the configured LLM task-completion evaluator.
+    Local code may inspect this closed sum but must not infer the decision from
+    evidence strings or actor relationships. *)
+type configured_llm_completion_decision =
+  | Completion_pass
+  | Completion_reject of string
+  | Completion_verdict_unavailable of string
+[@@deriving show, yojson]
 
-val completion_authority_to_string : completion_authority -> string
-(** Stable lowercase wire label ([assignee] / [operator] / [system]) for
-    transition-log serialization. Distinct from {!show_completion_authority},
-    whose output is a [@@deriving] detail not safe to persist. *)
+(** Provenance carried with every semantic completion decision. [runtime_id]
+    identifies the configured evaluator, [rationale] preserves its explanation,
+    and [evaluated_at] records when the request-local verdict was produced. *)
+type configured_llm_completion_verdict =
+  { decision : configured_llm_completion_decision
+  ; runtime_id : string
+  ; rationale : string option
+  ; evaluated_at : string
+  }
+[@@deriving show, yojson]
 
 (* RFC-0220: verification sub-state folded into [task_status] (was a separate
    request_status store) so the illegal Todo+Pending pair is unrepresentable. *)
@@ -141,15 +148,6 @@ type task_contract =
   ; required_evidence : string list [@default []]
   ; inspect_gate_evidence : string list [@default []]
   ; verify_gate_evidence : string list [@default []]
-  ; evidence_claims : Evidence_claim.t list [@default []]
-        (* RFC-0199 Phase B: typed deterministic completion criteria the
-           harness can check without verifier judgment. Declared by the task
-           author (masc_add_task contract arg), evaluated by
-           Deterministic_evidence_evaluator. Re-introduced with producer +
-           consumer wired (unlike the fan-in-0 required_evidence_typed removed
-           2026-06-03); legacy required_evidence strings are NOT auto-parsed
-           into claims (that would be a substring classifier). *)
-  ; stale_claim_timeout_sec : int [@default 0]
   ; links : task_execution_links
         [@default { operation_id = None; session_id = None }]
   }
@@ -331,15 +329,12 @@ type claim_next_result =
       { task_id : string
       ; title : string
       ; priority : int
-      ; released_task_id : string option
       ; message : string
       ; scope_widened : bool
       }
   | Claim_next_no_unclaimed
   | Claim_next_no_eligible of
       { excluded_count : int
-      ; blocked_count : int
-      ; verification_blocked_count : int
       ; scope_excluded_count : int
       ; explicit_excluded_count : int
       ; claim_pool_candidate_count : int

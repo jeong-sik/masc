@@ -13,7 +13,7 @@ let message role content =
 
 let checkpoint ?(working_context = Some (`Assoc [])) messages =
   Agent_sdk.Checkpoint.
-    { version = 4
+    { version = checkpoint_version
     ; session_id = "old-session"
     ; agent_name = "test-agent"
     ; model = "test-model"
@@ -29,6 +29,7 @@ let checkpoint ?(working_context = Some (`Assoc [])) messages =
     ; top_p = None
     ; top_k = None
     ; min_p = None
+    ; reasoning_effort = None
     ; enable_thinking = None
     ; preserve_thinking = None
     ; response_format = Agent_sdk.Types.Off
@@ -112,7 +113,7 @@ let test_patch_last_assistant_preserves_typed_reasoning () =
     (has_content (function Thinking _ -> true | _ -> false) patched.messages)
 ;;
 
-let test_attention_prunes_current_turn_suffix () =
+let test_contract_observation_preserves_current_turn_suffix () =
   let open Agent_sdk.Types in
   let history =
     [ message User [ Text "old user" ]; message Assistant [ Text "old answer" ] ]
@@ -133,27 +134,29 @@ let test_attention_prunes_current_turn_suffix () =
     ; message Assistant [ Text "" ]
     ]
   in
-  let pre_turn_working_context = Some (`Assoc [ "pre_turn", `Bool true ]) in
   let patched, reason =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:history
-      ~pre_turn_working_context
-      ~completion_contract_result:Receipt.Contract_violated
+      ~pre_turn_working_context:(Some (`Assoc [ "pre_turn", `Bool true ]))
+      ~completion_contract_result:Receipt.Completion_no_visible_output
       ~session_id:"new-session"
-      ~response_text:"suppressed"
+      ~response_text:"visible result"
       (checkpoint (history @ current_turn))
     |> expect_ok
   in
-  Alcotest.(check int) "only prior history remains" 2
+  Alcotest.(check int) "current typed replay remains" 6
     (List.length patched.messages);
-  Alcotest.(check bool) "pre-turn working context restored" true
-    (patched.working_context = pre_turn_working_context);
-  Alcotest.(check (option string)) "typed prune reason"
-    (Some "completion_contract_requires_attention")
+  Alcotest.(check (option string)) "visible assistant text retained"
+    (Some "visible result")
+    (text_of_last_assistant patched.messages);
+  Alcotest.(check bool) "canonical replay clears working context" true
+    (patched.working_context = None);
+  Alcotest.(check (option string)) "canonical replay reason"
+    (Some "canonical_success_replay")
     (prune_reason_to_string reason)
 ;;
 
-let test_attention_rejects_mismatched_history_prefix () =
+let test_contract_observation_rejects_mismatched_history_prefix () =
   let open Agent_sdk.Types in
   let expected_history =
     [ message User [ Text "expected" ]; message Assistant [ Text "old answer" ] ]
@@ -165,7 +168,7 @@ let test_attention_rejects_mismatched_history_prefix () =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:expected_history
       ~pre_turn_working_context:None
-      ~completion_contract_result:Receipt.Contract_violated
+      ~completion_contract_result:Receipt.Completion_no_visible_output
       ~session_id:"new-session"
       ~response_text:"suppressed"
       (checkpoint (actual_history @ [ message Assistant [ Text "" ] ]))
@@ -206,7 +209,7 @@ let test_success_preserves_typed_replay_suffix () =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:history
       ~pre_turn_working_context:None
-      ~completion_contract_result:Receipt.Contract_satisfied_execution
+      ~completion_contract_result:Receipt.Completion_tool_execution_observed
       ~session_id:"new-session"
       ~response_text:"visible answer"
       (checkpoint (history @ current_turn))
@@ -238,7 +241,7 @@ let test_success_appends_missing_final_assistant () =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:history
       ~pre_turn_working_context:None
-      ~completion_contract_result:Receipt.Contract_satisfied_execution
+      ~completion_contract_result:Receipt.Completion_tool_execution_observed
       ~session_id:"new-session"
       ~response_text:"visible answer"
       (checkpoint (history @ [ message User [ Text "current user" ] ]))
@@ -259,7 +262,7 @@ let test_empty_success_drops_current_turn_replay () =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:history
       ~pre_turn_working_context:(Some (`Assoc [ "pre_turn", `Bool true ]))
-      ~completion_contract_result:Receipt.Contract_satisfied_execution
+      ~completion_contract_result:Receipt.Completion_tool_execution_observed
       ~session_id:"new-session"
       ~response_text:""
       (checkpoint (history @ [ message User [ Text "current user" ] ]))
@@ -274,84 +277,10 @@ let test_empty_success_drops_current_turn_replay () =
     (prune_reason_to_string reason)
 ;;
 
-let test_recovery_defer_preserves_typed_receipt_suffix () =
+let test_input_required_preserves_exact_tool_failure_suffix () =
   let open Agent_sdk.Types in
   let history =
     [ message User [ Text "old user" ]; message Assistant [ Text "old answer" ] ]
-  in
-  let receipt_metadata =
-    [ "oas.tool_failure_recovery.v1", `Assoc [ "version", `Int 1 ] ]
-  in
-  let result_message =
-    { (message Tool
-         [ ToolResult
-             { tool_use_id = "tool-1"
-             ; content = "working directory is required"
-             ; outcome =
-                 Tool_failed
-                   { failure_kind = Validation_error
-                   ; error_class = Some Deterministic
-                   }
-             ; json = None
-             ; content_blocks = None
-             }
-         ]) with
-      metadata = receipt_metadata
-    }
-  in
-  let current_turn =
-    [ message User [ Text "current user" ]
-    ; message Assistant
-        [ ToolUse
-            { id = "tool-1"
-            ; name = "Execute"
-            ; input = `Assoc [ "cmd", `String "gh pr list" ]
-            }
-        ]
-    ; result_message
-    ]
-  in
-  let patched, reason =
-    Finalize.checkpoint_for_replay_persistence
-      ~history_messages:history
-      ~pre_turn_working_context:None
-      ~completion_contract_result:Receipt.Contract_passive_only
-      ~session_id:"new-session"
-      ~response_text:""
-      ~stop_reason:
-        (Runtime_agent.ToolFailureRecoveryDeferred
-           { turns_used = 2
-           ; reason = "wait for repository state"
-           ; tool_names = [ "Execute" ]
-           })
-      (checkpoint (history @ current_turn))
-    |> expect_ok
-  in
-  Alcotest.(check string) "session unified" "new-session" patched.session_id;
-  Alcotest.(check int) "full recovery suffix retained" 5
-    (List.length patched.messages);
-  Alcotest.(check bool) "receipt metadata retained" true
-    (List.exists
-       (fun (message : Agent_sdk.Types.message) ->
-          message.metadata = receipt_metadata)
-       patched.messages);
-  Alcotest.(check (option string)) "no prune reason" None
-    (prune_reason_to_string reason)
-;;
-
-let test_recovery_ask_user_preserves_exact_typed_receipt_suffix () =
-  let open Agent_sdk.Types in
-  let history =
-    [ message User [ Text "old user" ]; message Assistant [ Text "old answer" ] ]
-  in
-  let receipt_metadata =
-    [ ( "oas.tool_failure_recovery.v1"
-      , `Assoc
-          [ "version", `Int 1
-          ; "decision", `String "ask_user"
-          ; "question", `String "Which repository should I inspect?"
-          ] )
-    ]
   in
   let current_turn =
     [ message User [ Text "inspect the source" ]
@@ -362,21 +291,19 @@ let test_recovery_ask_user_preserves_exact_typed_receipt_suffix () =
             ; input = `Assoc [ "cmd", `String "gh pr list" ]
             }
         ]
-    ; { (message Tool
-           [ ToolResult
-               { tool_use_id = "tool-ask-1"
-               ; content = "working directory is required"
-               ; outcome =
-                   Tool_failed
-                     { failure_kind = Validation_error
-                     ; error_class = Some Deterministic
-                     }
-               ; json = None
-               ; content_blocks = None
-               }
-           ]) with
-        metadata = receipt_metadata
-      }
+    ; message Tool
+        [ ToolResult
+            { tool_use_id = "tool-ask-1"
+            ; content = "working directory is required"
+            ; outcome =
+                Tool_failed
+                  { failure_kind = Validation_error
+                  ; error_class = Some Deterministic
+                  }
+            ; json = None
+            ; content_blocks = None
+            }
+        ]
     ]
   in
   let request = input_required_request () in
@@ -384,7 +311,7 @@ let test_recovery_ask_user_preserves_exact_typed_receipt_suffix () =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:history
       ~pre_turn_working_context:None
-      ~completion_contract_result:Receipt.Contract_passive_only
+      ~completion_contract_result:Receipt.Completion_observation_unknown
       ~session_id:"new-session"
       ~response_text:request.question
       ~stop_reason:(Runtime_agent.InputRequired { turns_used = 2; request })
@@ -393,7 +320,7 @@ let test_recovery_ask_user_preserves_exact_typed_receipt_suffix () =
   in
   Alcotest.(check string) "session unified" "new-session" patched.session_id;
   Alcotest.(check bool)
-    "Ask_user replay suffix is structurally unchanged"
+    "InputRequired replay suffix is structurally unchanged"
     true
     (patched.messages = history @ current_turn);
   Alcotest.(check (option string)) "no prune reason" None
@@ -429,14 +356,13 @@ let test_media_degraded_projection_persists_canonical_checkpoint () =
     Finalize.checkpoint_for_replay_persistence
       ~history_messages:canonical_history
       ~pre_turn_working_context:None
-      ~completion_contract_result:Receipt.Contract_satisfied_execution
+      ~completion_contract_result:Receipt.Completion_tool_execution_observed
       ~session_id:"media-projection-session"
       ~response_text:"completed"
       restored_checkpoint
     |> expect_ok
   in
   with_temp_dir (fun session_dir ->
-    Masc.Keeper_checkpoint_store.For_testing.reset_stale_write_guard ();
     (match
        Masc.Keeper_checkpoint_store.save_oas_classified
          ~session_dir
@@ -459,6 +385,119 @@ let test_media_degraded_projection_persists_canonical_checkpoint () =
         (persisted.messages = canonical_history @ [ current_assistant ]))
 ;;
 
+(* RFC-0351 S1 / #25462: a completed bare-wake turn must not persist the
+   autonomous wake marker the OAS run received as its goal — that was the
+   last accumulation path after #25515 (343 byte-identical markers measured
+   in one checkpoint). The typed [Skip_uninformative_wake] record gates the
+   drop; an identical-looking user message under [Record_user_turn] must
+   survive. *)
+let wake_marker_text = Masc.Keeper_unified_prompt.autonomous_wake_marker
+
+let wake_persistence ~user_turn_record ~response_text messages =
+  Finalize.checkpoint_for_replay_persistence
+    ~history_messages:
+      Agent_sdk.Types.
+        [ { role = User
+          ; content = [ Text "seed" ]
+          ; name = None
+          ; tool_call_id = None
+          ; metadata = []
+          }
+        ]
+    ~pre_turn_working_context:None
+    ~completion_contract_result:Receipt.Completion_no_visible_output
+    ~session_id:"new-session"
+    ~response_text
+    ~user_turn_record
+    (checkpoint messages)
+;;
+
+let history_seed = [ message Agent_sdk.Types.User [ Agent_sdk.Types.Text "seed" ] ]
+
+let test_skipped_wake_marker_is_not_persisted () =
+  let open Agent_sdk.Types in
+  let suffix =
+    [ message User [ Text wake_marker_text ]
+    ; message Assistant [ Text "observed, nothing to do" ]
+    ]
+  in
+  let patched, _ =
+    wake_persistence
+      ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
+      ~response_text:"observed, nothing to do"
+      (history_seed @ suffix)
+    |> expect_ok
+  in
+  Alcotest.(check int)
+    "marker dropped, assistant reply retained"
+    2
+    (List.length patched.messages);
+  Alcotest.(check bool)
+    "no message carries the wake marker"
+    false
+    (List.exists
+       (fun (m : message) -> m.content = [ Text wake_marker_text ])
+       patched.messages)
+;;
+
+let test_recorded_turn_keeps_identical_marker_text () =
+  let open Agent_sdk.Types in
+  let suffix =
+    [ message User [ Text wake_marker_text ]
+    ; message Assistant [ Text "reply" ]
+    ]
+  in
+  let patched, _ =
+    wake_persistence
+      ~user_turn_record:Masc.Keeper_run_prompt.Record_user_turn
+      ~response_text:"reply"
+      (history_seed @ suffix)
+    |> expect_ok
+  in
+  Alcotest.(check int)
+    "recorded turn persists the user message even with marker text"
+    3
+    (List.length patched.messages)
+;;
+
+let test_skipped_wake_leaves_non_marker_suffix_untouched () =
+  let open Agent_sdk.Types in
+  let suffix =
+    [ message User [ Text "an actual user question" ]
+    ; message Assistant [ Text "reply" ]
+    ]
+  in
+  let patched, _ =
+    wake_persistence
+      ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
+      ~response_text:"reply"
+      (history_seed @ suffix)
+    |> expect_ok
+  in
+  Alcotest.(check int)
+    "a non-marker leading user message survives the skip record"
+    3
+    (List.length patched.messages)
+;;
+
+let test_skipped_wake_blank_response_still_drops_whole_suffix () =
+  let open Agent_sdk.Types in
+  let suffix =
+    [ message User [ Text wake_marker_text ]; message Assistant [ Text "" ] ]
+  in
+  let patched, _ =
+    wake_persistence
+      ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
+      ~response_text:""
+      (history_seed @ suffix)
+    |> expect_ok
+  in
+  Alcotest.(check int)
+    "blank canonicalization keeps only the pre-turn history"
+    1
+    (List.length patched.messages)
+;;
+
 let () =
   Alcotest.run
     "keeper replay checkpoint"
@@ -468,13 +507,13 @@ let () =
             `Quick
             test_patch_last_assistant_preserves_typed_reasoning
         ; Alcotest.test_case
-            "attention prunes current turn"
+            "contract observation preserves current turn"
             `Quick
-            test_attention_prunes_current_turn_suffix
+            test_contract_observation_preserves_current_turn_suffix
         ; Alcotest.test_case
-            "attention rejects prefix mismatch"
+            "contract observation rejects prefix mismatch"
             `Quick
-            test_attention_rejects_mismatched_history_prefix
+            test_contract_observation_rejects_mismatched_history_prefix
         ; Alcotest.test_case
             "success preserves typed replay"
             `Quick
@@ -488,17 +527,29 @@ let () =
             `Quick
             test_empty_success_drops_current_turn_replay
         ; Alcotest.test_case
-            "recovery defer preserves typed receipt suffix"
+            "InputRequired preserves exact tool-failure suffix"
             `Quick
-            test_recovery_defer_preserves_typed_receipt_suffix
-        ; Alcotest.test_case
-            "recovery Ask_user preserves exact typed receipt suffix"
-            `Quick
-            test_recovery_ask_user_preserves_exact_typed_receipt_suffix
+            test_input_required_preserves_exact_tool_failure_suffix
         ; Alcotest.test_case
             "media-degraded projection persists canonical checkpoint"
             `Quick
             test_media_degraded_projection_persists_canonical_checkpoint
+        ; Alcotest.test_case
+            "skipped wake marker is not persisted"
+            `Quick
+            test_skipped_wake_marker_is_not_persisted
+        ; Alcotest.test_case
+            "recorded turn keeps identical marker text"
+            `Quick
+            test_recorded_turn_keeps_identical_marker_text
+        ; Alcotest.test_case
+            "skipped wake leaves non-marker suffix untouched"
+            `Quick
+            test_skipped_wake_leaves_non_marker_suffix_untouched
+        ; Alcotest.test_case
+            "skipped wake blank response still drops whole suffix"
+            `Quick
+            test_skipped_wake_blank_response_still_drops_whole_suffix
         ] )
     ]
 ;;

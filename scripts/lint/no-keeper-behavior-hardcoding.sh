@@ -10,10 +10,8 @@ fi
 
 targets=(
   "lib/keeper"
+  "lib/task"
   "lib/workspace"
-  "lib/tool_task.ml"
-  "lib/tool_task_payloads.ml"
-  "lib/tool_task_handlers.ml"
 )
 
 patterns=(

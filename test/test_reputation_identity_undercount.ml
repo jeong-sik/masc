@@ -38,11 +38,20 @@ let with_workspace ?(agent_name = "keeper-repkeeper-agent") f =
       ignore (Workspace.init config ~agent_name:(Some agent_name));
       f config)
 
+let configured_llm_completion_pass : Masc_domain.configured_llm_completion_verdict =
+  { decision = Masc_domain.Completion_pass
+  ; runtime_id = "reputation-identity-test-reviewer"
+  ; rationale = None
+  ; evaluated_at = "2026-07-13T00:00:00Z"
+  }
+
 let claim_and_complete config ~agent_name ~task_id =
   ignore (Workspace.claim_task config ~agent_name ~task_id);
   match
     Workspace.transition_task_r config ~agent_name ~task_id
-      ~action:Masc_domain.Done_action ()
+      ~action:Masc_domain.Done_action
+      ~configured_llm_verdict:configured_llm_completion_pass
+      ()
   with
   | Ok _ -> ()
   | Error err ->

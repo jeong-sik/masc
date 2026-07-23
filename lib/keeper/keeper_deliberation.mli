@@ -1,5 +1,5 @@
-(** Keeper_deliberation — typed action space, deliberation triggers,
-    world observation builder, triage logic, and MODEL-driven deliberation.
+(** Keeper_deliberation — typed action space, world observation, and
+    MODEL-driven deliberation.
 
     @since 2.90.0 *)
 
@@ -62,7 +62,6 @@ type world_observation = {
   keeper_fiber_count_changed: bool;
   active_goal_count: int;
   idle_seconds: int;
-  idle_gate: int;
   board_new_post_count: int;
   board_mention_count: int;
 }
@@ -111,8 +110,9 @@ type triage_result =
 
 val triage_result_to_json : triage_result -> Yojson.Safe.t
 
-(** Evaluate a world observation and return triggers that warrant deliberation.
-    Pure heuristic — no MODEL calls, no I/O. *)
+(** Project objective typed signal labels for the model prompt. Always returns
+    [Triggered _], including [Triggered []], so local code never gates the
+    configured model call. *)
 val triage : world_observation -> triage_result
 
 (** {1 Deliberation meta (tracking fields for keeper_meta)} *)
@@ -134,16 +134,6 @@ val deliberation_meta_of_json : Yojson.Safe.t -> deliberation_meta
 val deterministic_baseline_action : world_observation -> deliberation_action
 
 (** {1 Phase 2: Deliberation Evaluation} *)
-
-(** Current daily budget from keeper runtime config
-    ([MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD], default: 0.10). *)
-val daily_budget_usd : unit -> float
-
-(** Advisory cost telemetry for deliberation.
-
-    Always returns [true]; daily cost thresholds must not gate deliberation. *)
-val deliberation_budget_check :
-  daily_budget_usd:float -> cost_today_usd:float -> bool
 
 (** Build a prompt for the MODEL to decide the keeper's next action.
     Describes the keeper's identity, current state, detected triggers,

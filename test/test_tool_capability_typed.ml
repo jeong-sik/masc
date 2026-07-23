@@ -3,8 +3,8 @@ open Alcotest
 (** RFC-0084 PR-4 — [Tool_capability] typed sum + Set tests.
 
     Verifies:
-    - All 4 [kind] variants round-trip through [to_string] / [of_string]
-    - [all_kinds] enumerates exactly 4 variants
+    - Every [kind] variant round-trips through [to_string] / [of_string]
+    - [all_kinds] enumerates exactly 3 variants
     - [Set.diff] semantics for [check]
     - [has] reads [Tool_catalog] metadata
     - [granted] of an unknown tool returns the empty set
@@ -24,8 +24,8 @@ let test_round_trip_all_kinds () =
 
 let test_all_kinds_cardinality () =
   (check int)
-    "Tool_capability.all_kinds enumerates 4 variants"
-    4
+    "Tool_capability.all_kinds enumerates 3 variants"
+    3
     (List.length Tool_capability.all_kinds)
 ;;
 
@@ -51,7 +51,6 @@ let test_has_catalog_metadata () =
     { Tool_catalog.default_metadata with
       readonly = Some true;
       mcp_context_required = Some true;
-      destructive = Some true;
       idempotent = Some true;
     };
   List.iter
@@ -63,9 +62,27 @@ let test_has_catalog_metadata () =
     Tool_capability.all_kinds
 ;;
 
-let test_has_catalog_inferred_capabilities () =
+let test_read_only_does_not_imply_idempotent () =
+  let name = "__cap_read_only_not_idempotent" in
+  Tool_catalog.register_metadata
+    name
+    { Tool_catalog.default_metadata with
+      readonly = Some true
+    ; idempotent = None
+    };
   (check bool)
-    "effect_domain=Read_only grants Read_only"
+    "explicit read-only metadata grants Read_only"
+    true
+    (Tool_capability.has Read_only name);
+  (check bool)
+    "absent idempotent metadata does not grant Idempotent"
+    false
+    (Tool_capability.has Idempotent name)
+;;
+
+let test_has_catalog_capabilities () =
+  (check bool)
+    "explicit read-only metadata grants Read_only"
     true
     (Tool_capability.has Read_only "tool_read_file");
   (check bool)
@@ -73,13 +90,9 @@ let test_has_catalog_inferred_capabilities () =
     true
     (Tool_capability.has Read_only "tool_search_files");
   (check bool)
-    "static inline metadata grants Mcp_context_required"
+    "explicit inline metadata grants Mcp_context_required"
     true
-    (Tool_capability.has Mcp_context_required "masc_messages");
-  (check bool)
-    "static destructive metadata grants Destructive"
-    true
-    (Tool_capability.has Destructive "shell_exec")
+    (Tool_capability.has Mcp_context_required "masc_messages")
 ;;
 
 let test_granted_unknown_tool_is_empty () =
@@ -140,7 +153,11 @@ let () =
         ; test_case "of-string-unknown-returns-none" `Quick test_of_string_unknown_returns_none
         ; test_case "has-unknown-tool-returns-false" `Quick test_has_unknown_tool_returns_false
         ; test_case "has-catalog-metadata" `Quick test_has_catalog_metadata
-        ; test_case "has-catalog-inferred-capabilities" `Quick test_has_catalog_inferred_capabilities
+        ; test_case
+            "read-only-does-not-imply-idempotent"
+            `Quick
+            test_read_only_does_not_imply_idempotent
+        ; test_case "has-catalog-capabilities" `Quick test_has_catalog_capabilities
         ; test_case "granted-unknown-tool-is-empty" `Quick test_granted_unknown_tool_is_empty
         ; test_case "check-empty-required-is-ok" `Quick test_check_empty_required_is_ok
         ; test_case "check-missing-capability-returns-error" `Quick test_check_missing_capability_returns_error

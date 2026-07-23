@@ -25,7 +25,6 @@
 # state machine / keepalive / workspace_gc bodies. Non-blocking baseline,
 # spec text needs re-anchoring (issue: TBD).
 #
-# Pruned 2026-04-20: KeeperPhaseRace was repurposed in #9080 (no longer
-# references state_machine.ml:311 or keepalive.ml:1566). KeeperTaskInterlock
-# anchors were re-anchored in #9086/#9090 (workspace_gc.ml:39 → :128 onward).
-# Removing the now-stale entries restores the self-verify ledger to honest.
+# Pruned 2026-04-20 after the referenced state-machine and task-interlock
+# models changed. Removing the stale entries restores the self-verify ledger
+# to honest.

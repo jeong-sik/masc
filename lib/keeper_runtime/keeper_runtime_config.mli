@@ -1,7 +1,7 @@
 (** Keeper_runtime_config — load startup runtime env seeding from
     [<resolved config root>/runtime.toml].
 
-    Per-base-path config for keeper turn budgets, semaphore timeouts, WebSearch
+    Per-base-path config for transport liveness, capacity, WebSearch
     provider selection, and other startup-scoped runtime parameters that
     previously lived only in environment variables. Closes the architectural gap
     where tools/personas/runtime are per-base-path but selected runtime tuning
@@ -70,14 +70,8 @@ val resolve_overrides :
       sleep_chunk_sec             = 1.5
       board_wakeup_max            = 4
 
-      [proactive]
-      min_interval_sec            = 900
-
       [turn]
-      stream_idle_timeout_sec   = 120
-      execution_idle_timeout_sec = 300
-      llm_rerank                  = true
-
+      # stream_idle_timeout_sec is intentionally omitted (disabled).
       [web_search]
       searxng_url                 = "http://localhost:8888"
       provider                    = "auto"

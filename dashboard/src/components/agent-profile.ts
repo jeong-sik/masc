@@ -22,7 +22,6 @@ import { autonomyHint } from './keeper-detail-ctx-utils'
 import { AgentAvatar } from './overview/agent-avatar'
 import {
   agents,
-  executionContinuityBriefs,
   executionWorkerSupportBriefs,
   tasks,
 } from '../store'
@@ -44,7 +43,6 @@ import { trimText } from '../lib/truncate'
 import { keeperActivityDisplay } from '../lib/keeper-runtime-display'
 import type {
   Agent,
-  DashboardExecutionContinuityBrief,
   DashboardMissionAgentBrief,
   Keeper,
   Task,
@@ -110,12 +108,6 @@ function missionBrief(name: string): DashboardMissionAgentBrief | null {
   const mission = missionSnapshot.value
   if (!mission) return null
   return mission.agent_briefs.find(b => b.agent_name === name) ?? null
-}
-
-function continuityBrief(name: string): DashboardExecutionContinuityBrief | null {
-  return executionContinuityBriefs.value.find(
-    b => b.agent_name === name || b.name === name,
-  ) ?? null
 }
 
 function workerBrief(name: string) {
@@ -205,7 +197,6 @@ function CharacterPlate({ name }: { name: string }) {
   const agent = findAgent(name)
   const keeper = findKeeper(name)
   const brief = missionBrief(name)
-  const contBrief = continuityBrief(name)
   const worker = workerBrief(name)
 
   const displayName = brief?.display_name ?? keeper?.name ?? name
@@ -225,7 +216,6 @@ function CharacterPlate({ name }: { name: string }) {
   const generation = keeper?.generation
   const keeperIdent = keeperIdentityHint(keeper?.name, keeper?.agent_name)
   const signalTruth = brief?.signal_truth
-  const skillRouteSummary = trimText(contBrief?.skill_route_summary, 160) ?? null
   const isKeeper = keeper != null
   const workerState = worker?.state
   const workerFocus = worker?.focus
@@ -294,11 +284,10 @@ function CharacterPlate({ name }: { name: string }) {
           </div>
         ` : null}
 
-        ${keeperIdent || skillRouteSummary || brief?.related_session_id ? html`
+        ${keeperIdent || brief?.related_session_id ? html`
           <div class="flex gap-3 flex-wrap text-sm text-[var(--color-fg-muted)]">
             ${keeperIdent ? html`<span>${keeperIdent}</span>` : null}
             ${brief?.related_session_id ? html`<span>세션 ${brief.related_session_id}</span>` : null}
-            ${skillRouteSummary ? html`<span>${skillRouteSummary}</span>` : null}
           </div>
         ` : null}
       </div>

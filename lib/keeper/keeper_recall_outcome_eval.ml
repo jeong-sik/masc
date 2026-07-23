@@ -3,6 +3,7 @@
 
 module String_map = Map.Make (String)
 module String_set = Set.Make (String)
+module Ledger = Keeper_recall_injection_ledger
 
 type recall_record =
   { keeper_id : string
@@ -210,36 +211,32 @@ let parse_json_line ~path ~line_no line =
     Error (Printf.sprintf "%s:%d: malformed JSONL row: %s" path line_no msg)
 ;;
 
-let parse_recall_json = function
-  | `Assoc _ as json ->
-    (match
-       ( Json_util.get_string_nonempty json "keeper_id"
-       , Json_util.get_string_nonempty json "trace_id"
-       , Json_util.get_int json "turn" )
-     with
-     | Some keeper_id, Some trace_id, Some turn ->
-       let injected_fact_keys = Json_util.get_string_list json "injected_fact_keys" in
-       let injected_episode_keys =
-         Json_util.get_string_list json "injected_episode_keys"
-       in
-       Some
-         { keeper_id
-         ; trace_id
-         ; turn
-         ; injected_fact_keys
-         ; injected_fact_key_count =
-             Option.value
-               (Json_util.get_int json "injected_fact_key_count")
-               ~default:(List.length injected_fact_keys)
-         ; injected_episode_key_count =
-             Option.value
-               (Json_util.get_int json "injected_episode_key_count")
-               ~default:(List.length injected_episode_keys)
-         ; failure_reason = Json_util.get_string_nonempty json "failure_reason"
-         ; ts = Json_util.get_float json "ts"
-         }
-     | _ -> None)
-  | _ -> None
+(* RFC-0264 P3 / masc#25052: decode via the ledger's shared decoder (SSOT for
+   field names) instead of re-spelling "keeper_id"/"trace_id"/... here. The
+   ledger now writes v2 delta rows ([Ledger.payload = Delta]) instead of a
+   full key list per turn, so a single decoded [Ledger.record] no longer
+   carries the actual injected set on its own -- [evaluate] below replays
+   [Ledger.materialize] over the *entire* recall_dir tree (already scanned in
+   chronological order by [find_jsonl]) to reconstruct it, which is exact here
+   because the scan is unbounded (unlike the dashboard's bounded recent-lines
+   sample).
+
+   The previous "injected_fact_key_count" / "injected_episode_key_count"
+   override fields are retired: no writer ever produced them (only hand-built
+   test fixtures did), and every real row's injected count is the length of
+   its own key list. *)
+let parse_recall_ledger_json json = Result.to_option (Ledger.record_of_json_result json)
+
+let recall_record_of_materialized (m : Ledger.materialized) : recall_record =
+  { keeper_id = m.record.keeper_id
+  ; trace_id = m.record.trace_id
+  ; turn = m.record.turn
+  ; injected_fact_keys = m.fact_keys
+  ; injected_fact_key_count = List.length m.fact_keys
+  ; injected_episode_key_count = List.length m.episode_keys
+  ; failure_reason = m.record.failure_reason
+  ; ts = m.record.ts
+  }
 ;;
 
 let parse_ended_at json =
@@ -551,7 +548,13 @@ let fact_key_summaries recall_records traces =
 let evaluate ~masc_root =
   let recall_dir = Keeper_recall_injection_ledger.base_dir ~masc_root in
   let receipts_dir = Filename.concat masc_root Common.keepers_runtime_dirname in
-  let recall_records, recall_stats = load_records recall_dir parse_recall_json in
+  let ledger_records, recall_stats = load_records recall_dir parse_recall_ledger_json in
+  (* [find_jsonl]/[load_records] already walk month/day files in ascending
+     (chronological) order and preserve line order within a file, satisfying
+     [Ledger.materialize]'s ordering precondition without an extra sort. *)
+  let recall_records =
+    ledger_records |> Ledger.materialize |> List.map recall_record_of_materialized
+  in
   let receipts, receipt_stats =
     let files, scan_stats = find_receipt_jsonl receipts_dir in
     let records, load_stats = load_records_from_files files parse_receipt_json in

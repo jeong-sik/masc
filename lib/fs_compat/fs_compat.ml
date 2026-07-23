@@ -13,6 +13,10 @@
     @since 2026-02 - Keeper Emergent Identity v2.0
 *)
 
+open Fs_compat_internal
+
+module Atomic_orphan_size_class = Atomic_orphan_size_class
+
 (** Global fs — WORM Atomic (write-once at startup, read from any domain).
     Using Atomic.t is required for OCaml 5 multi-domain safety:
     Executor_pool workers run on a separate domain and read this value. *)
@@ -30,6 +34,16 @@ let get_fs_opt () = Atomic.get global_fs
 
 (** Check if Eio fs is available *)
 let has_fs () = Option.is_some (Atomic.get global_fs)
+
+type execution_context =
+  | Eio_fiber
+  | Non_eio
+
+let execution_context () =
+  match Eio.Fiber.is_cancelled () with
+  | true | false -> Eio_fiber
+  | exception Effect.Unhandled _ -> Non_eio
+;;
 
 (** Normalize [Eio.Io] to [Sys_error] so callers only need one catch.
     Eio operations raise [Eio.Io _] on permission errors, missing files, etc.
@@ -241,10 +255,282 @@ let save_file_atomic path content =
   Atomic_write.save_file_atomic ~save_file path content
 ;;
 
-let is_atomic_orphan_name = Atomic_write.is_atomic_orphan_name
+let open_atomic_temp_file ~temp_dir () =
+  Atomic_write.open_atomic_temp_file ~temp_dir ()
+;;
 
-let cleanup_atomic_orphans ~base_path ?recovered_subdir () =
-  Atomic_write.cleanup_atomic_orphans ~mkdir_p_unix ~base_path ?recovered_subdir ()
+let is_capability_leaf = Capability_leaf.is_valid
+
+type atomic_replace_recovery_target = Atomic_write.atomic_replace_recovery_target
+
+type atomic_replace_recovery_target_error =
+  Atomic_write.atomic_replace_recovery_target_error
+
+module Publication_recovery = struct
+  include Publication_recovery_access
+
+  type lane_open_error_category =
+    | Invalid_owner_category
+    | Reconciliation_blocked_category
+    | Store_failed_category
+
+  let lane_open_error_category = function
+    | Invalid_owner _ -> Invalid_owner_category
+    | Reconciliation_blocked _ -> Reconciliation_blocked_category
+    | Store_failed _ -> Store_failed_category
+  ;;
+end
+
+let atomic_replace_recovery_target = Atomic_write.atomic_replace_recovery_target
+
+let atomic_replace_recovery_target_error_to_string =
+  Atomic_write.atomic_replace_recovery_target_error_to_string
+;;
+
+type capability_write_operation = Atomic_write.capability_write_operation =
+  | Atomic_replace_operation
+  | Create_exclusive_operation
+
+type capability_write_stage = Atomic_write.capability_write_stage =
+  | Validate_leaf
+  | Acquire_mutation_lease
+  | Acquire_publication_lease
+  | Inspect_target_entry
+  | Verify_target_binding
+  | Prepare_recovery_obligation
+  | Create_staging_directory
+  | Inspect_staging_directory
+  | Acquire_staging_directory
+  | Apply_staging_directory_permissions
+  | Verify_staging_directory_identity
+  | Preserve_unbound_recovery_obligation
+  | Bind_recovery_obligation
+  | Create_staging_entry
+  | Create_target_entry
+  | Inspect_open_resource
+  | Write_payload
+  | Apply_permissions
+  | Sync_payload
+  | Close_payload
+  | Verify_entry_identity
+  | Publish_replace
+  | Sync_staging_directory
+  | Sync_parent
+  | Remove_staging_directory
+  | Close_staging_directory
+  | Discharge_prepared_recovery_obligation
+  | Discharge_bound_recovery_obligation
+  | Cleanup_close
+  | Cleanup_verify_identity
+  | Cleanup_unlink
+  | Cleanup_sync_staging_directory
+  | Cleanup_verify_staging_directory_identity
+  | Cleanup_remove_staging_directory
+  | Cleanup_close_staging_directory
+  | Cleanup_sync_parent
+
+type capability_write_target_effect = Atomic_write.capability_write_target_effect =
+  | Target_unchanged
+  | Target_created
+  | Target_created_incomplete
+  | Target_replaced
+  | Target_state_unknown
+
+type capability_write_operation_failure =
+  Atomic_write.capability_write_operation_failure =
+  { exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
+type capability_write_payload_failure = Atomic_write.capability_write_payload_failure =
+  { exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  ; bytes_written : int
+  }
+
+type capability_write_cause = Atomic_write.capability_write_cause =
+  | Invalid_leaf of string
+  | Invalid_recovery_target of atomic_replace_recovery_target_error
+  | Mutation_contended
+  | Posix_descriptor_unavailable
+  | Unexpected_resource_kind of Eio.File.Stat.kind
+  | Resource_identity_unavailable
+  | Resource_identity_changed
+  | Payload_write_failed of capability_write_payload_failure
+  | Operation_failed of capability_write_operation_failure
+
+type capability_write_failure = Atomic_write.capability_write_failure =
+  { stage : capability_write_stage
+  ; cause : capability_write_cause
+  }
+
+type capability_recovery_phase = Atomic_write.capability_recovery_phase =
+  | Recovery_validate_owner
+  | Recovery_open_registry
+  | Recovery_open_store
+  | Recovery_prepare
+  | Recovery_preserve_unbound
+  | Recovery_bind
+  | Recovery_discharge_prepared
+  | Recovery_discharge_bound
+
+type capability_recovery_removal_transition =
+  Atomic_write.capability_recovery_removal_transition =
+  | Recovery_discharge_active
+  | Recovery_discharge_owned
+  | Recovery_active_to_owned
+  | Recovery_active_to_forensic
+  | Recovery_owned_to_forensic
+
+type capability_recovery_effect = Atomic_write.capability_recovery_effect =
+  | Recovery_no_record_change
+  | Recovery_layout_may_be_incomplete
+  | Recovery_layout_ready
+  | Recovery_active_record_state_unknown
+  | Recovery_active_record_durable
+  | Recovery_active_record_discharged
+  | Recovery_owned_record_state_unknown_with_active
+  | Recovery_owned_record_durable_with_active
+  | Recovery_owned_record_durable
+  | Recovery_owned_record_discharged
+  | Recovery_forensic_record_state_unknown_with_source
+  | Recovery_forensic_record_durable_with_source
+  | Recovery_forensic_record_durable
+  | Recovery_source_removal_durability_unknown of
+      capability_recovery_removal_transition
+
+type capability_recovery_failure = Atomic_write.capability_recovery_failure
+
+let capability_recovery_phase_to_string =
+  Atomic_write.capability_recovery_phase_to_string
+;;
+
+let capability_recovery_effect_to_string =
+  Atomic_write.capability_recovery_effect_to_string
+;;
+
+let capability_recovery_failure_phase =
+  Atomic_write.capability_recovery_failure_phase
+;;
+
+let capability_recovery_failure_effect =
+  Atomic_write.capability_recovery_failure_effect
+;;
+
+let capability_recovery_failure_to_string =
+  Atomic_write.capability_recovery_failure_to_string
+;;
+
+type capability_recovery_access_failure =
+  Atomic_write.capability_recovery_access_failure =
+  | Recovery_access_not_available
+
+type capability_write_primary_failure =
+  Atomic_write.capability_write_primary_failure =
+  | Write_primary_failure of capability_write_failure
+  | Recovery_primary_failure of capability_recovery_failure
+  | Recovery_access_primary_failure of capability_recovery_access_failure
+
+type capability_write_cleanup_failure =
+  Atomic_write.capability_write_cleanup_failure =
+  | Write_cleanup_failure of capability_write_failure
+  | Recovery_cleanup_failure of capability_recovery_failure
+
+type capability_write_error = Atomic_write.capability_write_error =
+  { operation : capability_write_operation
+  ; target_effect : capability_write_target_effect
+  ; primary_failure : capability_write_primary_failure
+  ; cleanup_failures : capability_write_cleanup_failure list
+  }
+
+type capability_directory_sync_error = Atomic_write.capability_directory_sync_error =
+  { failure : capability_write_failure
+  ; cleanup_failures : capability_write_failure list
+  }
+
+type capability_write_cancellation = Atomic_write.capability_write_cancellation =
+  { operation : capability_write_operation
+  ; target_effect : capability_write_target_effect
+  ; interrupted_primary_failure : capability_write_primary_failure option
+  ; interrupted_recovery : capability_recovery_failure option
+  ; cleanup_failures : capability_write_cleanup_failure list
+  }
+
+exception Capability_write_cancelled = Atomic_write.Capability_write_cancelled
+
+let replace_capability_file = Atomic_write.replace_capability_file
+
+let create_capability_file_exclusive =
+  Atomic_write.create_capability_file_exclusive
+;;
+
+let capability_write_error_to_string = Atomic_write.capability_write_error_to_string
+
+let capability_write_operation_to_string =
+  Atomic_write.capability_write_operation_to_string
+;;
+
+let capability_write_stage_to_string = Atomic_write.capability_write_stage_to_string
+
+let capability_write_target_effect_to_string =
+  Atomic_write.capability_write_target_effect_to_string
+;;
+
+let capability_write_cause_to_string = Atomic_write.capability_write_cause_to_string
+let capability_write_failure_to_string = Atomic_write.capability_write_failure_to_string
+let sync_directory_capability = Atomic_write.sync_directory_capability
+
+let capability_directory_sync_error_to_string =
+  Atomic_write.capability_directory_sync_error_to_string
+;;
+
+let is_atomic_orphan_name = Atomic_write.is_atomic_orphan_name
+type atomic_orphan_cleanup_scope = Atomic_write.atomic_orphan_cleanup_scope =
+  | Directory_only
+  | Directory_and_immediate_subdirectories
+
+type atomic_orphan_cleanup_operation = Atomic_write.atomic_orphan_cleanup_operation =
+  | Inspect_cleanup_root
+  | Read_cleanup_directory
+  | Inspect_orphan
+  | Create_recovery_directory
+  | Sync_recovery_parent
+  | Link_preserved_orphan
+  | Verify_preserved_orphan
+  | Sync_preserved_orphan
+  | Sync_recovery_directory
+  | Delete_empty_orphan
+  | Delete_preserved_source
+  | Sync_source_directory
+  | Close_cleanup_descriptor
+
+type atomic_orphan_cleanup_cause = Atomic_write.atomic_orphan_cleanup_cause =
+  | Unix_failure of Unix.error * string * string
+  | Sys_failure of string
+  | Unexpected_file_kind of Unix.file_kind
+  | Outside_ownership_root of { ownership_root : string }
+  | Identity_changed
+  | Other_failure of exn
+
+type atomic_orphan_cleanup_failure = Atomic_write.atomic_orphan_cleanup_failure =
+  { operation : atomic_orphan_cleanup_operation
+  ; path : string
+  ; cause : atomic_orphan_cleanup_cause
+  }
+
+type atomic_orphan_cleanup_report = Atomic_write.atomic_orphan_cleanup_report =
+  { inspected : int
+  ; deleted : int
+  ; preserved : int
+  ; failures : atomic_orphan_cleanup_failure list
+  }
+
+let atomic_orphan_cleanup_failure_to_string =
+  Atomic_write.atomic_orphan_cleanup_failure_to_string
+;;
+
+let cleanup_atomic_orphans ~ownership_root ~base_path ~scope () =
+  Atomic_write.cleanup_atomic_orphans ~ownership_root ~base_path ~scope ()
 ;;
 
 (** Append string to file.
@@ -272,6 +558,320 @@ let file_exists (path : string) : bool =
          true
        with
        | Eio.Io _ -> false)
+;;
+
+type path_kind =
+  | Missing
+  | Directory
+  | Other
+
+type exact_path_kind =
+  | Exact_missing
+  | Exact_kind of Unix.file_kind
+  | Exact_unknown
+
+let exact_path_kind ?(follow = true) (path : string) : exact_path_kind =
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () ->
+      try
+        let stats = if follow then Unix.stat path else Unix.lstat path in
+        Exact_kind stats.Unix.st_kind
+      with
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> Exact_missing)
+    (fun fs ->
+       match Eio.Path.kind ~follow Eio.Path.(fs / path) with
+       | `Not_found -> Exact_missing
+       | `Directory -> Exact_kind Unix.S_DIR
+       | `Fifo -> Exact_kind Unix.S_FIFO
+       | `Character_special -> Exact_kind Unix.S_CHR
+       | `Block_device -> Exact_kind Unix.S_BLK
+       | `Regular_file -> Exact_kind Unix.S_REG
+       | `Symbolic_link -> Exact_kind Unix.S_LNK
+       | `Socket -> Exact_kind Unix.S_SOCK
+       | `Unknown -> Exact_unknown)
+;;
+
+let path_kind ?(follow = true) (path : string) : path_kind =
+  match exact_path_kind ~follow path with
+  | Exact_missing -> Missing
+  | Exact_kind Unix.S_DIR -> Directory
+  | Exact_kind
+      (Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
+      | Unix.S_SOCK)
+  | Exact_unknown -> Other
+;;
+
+type owned_directory_chain_rejection = Owned_directory_chain.rejection =
+  | Owned_path_outside_root of
+      { ownership_root : string
+      ; path : string
+      }
+  | Owned_path_non_directory of
+      { path : string
+      ; kind : Unix.file_kind
+      }
+
+type owned_directory_chain_observation = Owned_directory_chain.observation =
+  | Owned_directory_missing
+  | Owned_directory of Unix.stats
+
+let inspect_owned_directory_chain = Owned_directory_chain.inspect
+let owned_directory_paths = Owned_directory_chain.paths
+
+let owned_directory_chain_rejection_to_string =
+  Owned_directory_chain.rejection_to_string
+;;
+
+type owned_regular_file_read_operation =
+  | Inspect_parent
+  | Inspect_path
+  | Open_path
+  | Inspect_descriptor
+  | Read_contents
+  | Close_descriptor
+
+type owned_regular_file_read_failure =
+  | Ownership_boundary_rejected of
+      { path : string
+      ; rejection : owned_directory_chain_rejection
+      }
+  | Path_is_not_regular_file of
+      { path : string
+      ; kind : Unix.file_kind
+      }
+  | Filesystem_identity_changed of { path : string }
+  | Owned_file_operation_failed of
+      { path : string
+      ; operation : owned_regular_file_read_operation
+      ; cause : exn
+      }
+
+type owned_regular_file_read_error =
+  { failure : owned_regular_file_read_failure
+  ; close_failure : exn option
+  }
+
+let owned_regular_file_read_operation_to_string = function
+  | Inspect_parent -> "inspect_parent"
+  | Inspect_path -> "inspect_path"
+  | Open_path -> "open_path"
+  | Inspect_descriptor -> "inspect_descriptor"
+  | Read_contents -> "read_contents"
+  | Close_descriptor -> "close_descriptor"
+;;
+
+let file_kind_to_string = function
+  | Unix.S_REG -> "regular_file"
+  | Unix.S_DIR -> "directory"
+  | Unix.S_CHR -> "character_device"
+  | Unix.S_BLK -> "block_device"
+  | Unix.S_LNK -> "symbolic_link"
+  | Unix.S_FIFO -> "fifo"
+  | Unix.S_SOCK -> "socket"
+;;
+
+let owned_regular_file_read_failure_to_string = function
+  | Ownership_boundary_rejected { path; rejection } ->
+    Printf.sprintf
+      "owned file boundary rejected path=%s reason=%s"
+      path
+      (owned_directory_chain_rejection_to_string rejection)
+  | Path_is_not_regular_file { path; kind } ->
+    Printf.sprintf
+      "owned file path is not a regular file path=%s kind=%s"
+      path
+      (file_kind_to_string kind)
+  | Filesystem_identity_changed { path } ->
+    Printf.sprintf "owned file identity changed during read path=%s" path
+  | Owned_file_operation_failed { path; operation; cause } ->
+    Printf.sprintf
+      "owned file operation failed path=%s operation=%s reason=%s"
+      path
+      (owned_regular_file_read_operation_to_string operation)
+      (Printexc.to_string cause)
+;;
+
+let owned_regular_file_read_error_to_string { failure; close_failure } =
+  let primary = owned_regular_file_read_failure_to_string failure in
+  match close_failure with
+  | None -> primary
+  | Some cause ->
+    Printf.sprintf
+      "%s; descriptor close also failed: %s"
+      primary
+      (Printexc.to_string cause)
+;;
+
+let same_file_identity (left : Unix.stats) (right : Unix.stats) =
+  left.st_dev = right.st_dev && left.st_ino = right.st_ino
+;;
+
+let same_file_snapshot (left : Unix.stats) (right : Unix.stats) =
+  same_file_identity left right
+  && left.st_kind = right.st_kind
+  && left.st_size = right.st_size
+  && left.st_mtime = right.st_mtime
+  && left.st_ctime = right.st_ctime
+;;
+
+let owned_file_error failure = Error { failure; close_failure = None }
+
+let owned_file_operation_error ~path operation cause =
+  owned_file_error (Owned_file_operation_failed { path; operation; cause })
+;;
+
+let reraise_current exn =
+  Printexc.raise_with_backtrace exn (Printexc.get_raw_backtrace ())
+;;
+
+let read_exact_file_descriptor ~path fd length =
+  try
+    let bytes = Bytes.create length in
+    let rec read offset =
+      if offset = length
+      then Ok (Bytes.unsafe_to_string bytes)
+      else
+        match Unix.read fd bytes offset (length - offset) with
+        | 0 -> owned_file_error (Filesystem_identity_changed { path })
+        | count -> read (offset + count)
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> read offset
+    in
+    read 0
+  with
+  | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
+  | cause -> owned_file_operation_error ~path Read_contents cause
+;;
+
+let load_owned_regular_file_blocking ~ownership_root path =
+  let parent = Filename.dirname path in
+  let inspect_parent () =
+    try
+      match inspect_owned_directory_chain ~ownership_root parent with
+      | Ok observation -> Ok observation
+      | Error rejection ->
+        owned_file_error (Ownership_boundary_rejected { path; rejection })
+    with
+    | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
+    | cause -> owned_file_operation_error ~path Inspect_parent cause
+  in
+  let inspect_current parent_before descriptor =
+    match inspect_parent () with
+    | Error _ as error -> error
+    | Ok Owned_directory_missing -> Ok false
+    | Ok (Owned_directory parent_now) ->
+      if not (same_file_identity parent_before parent_now)
+      then Ok false
+      else
+        (try
+           let current = Unix.lstat path in
+           Ok
+             (current.st_kind = Unix.S_REG
+              && same_file_identity descriptor current)
+         with
+         | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+         | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
+         | cause -> owned_file_operation_error ~path Inspect_path cause)
+  in
+  match inspect_parent () with
+  | Error _ as error -> error
+  | Ok Owned_directory_missing -> Ok None
+  | Ok (Owned_directory parent_before) ->
+    let before_open =
+      try Ok (Some (Unix.lstat path)) with
+      | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+      | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
+      | cause -> owned_file_operation_error ~path Inspect_path cause
+    in
+    (match before_open with
+     | Error _ as error -> error
+     | Ok None -> Ok None
+     | Ok (Some stat) when stat.st_kind <> Unix.S_REG ->
+       owned_file_error (Path_is_not_regular_file { path; kind = stat.st_kind })
+     | Ok (Some before_open) ->
+       let opened =
+         try
+           Ok
+             (Unix.openfile
+                path
+                [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ]
+                0)
+         with
+         | Eio.Cancel.Cancelled _ as cancellation -> reraise_current cancellation
+         | cause -> owned_file_operation_error ~path Open_path cause
+       in
+       (match opened with
+        | Error _ as error -> error
+        | Ok fd ->
+          let result =
+            match Unix.fstat fd with
+            | exception cause ->
+              owned_file_operation_error ~path Inspect_descriptor cause
+            | descriptor
+              when descriptor.st_kind <> Unix.S_REG
+                   || not (same_file_identity before_open descriptor) ->
+              owned_file_error (Filesystem_identity_changed { path })
+            | descriptor ->
+              (match inspect_current parent_before descriptor with
+               | Error _ as error -> error
+               | Ok false ->
+                 owned_file_error (Filesystem_identity_changed { path })
+               | Ok true ->
+                 (match read_exact_file_descriptor ~path fd descriptor.st_size with
+                  | Error _ as error -> error
+                  | Ok content ->
+                    (match Unix.fstat fd with
+                     | after_read when same_file_snapshot descriptor after_read ->
+                       (match inspect_current parent_before descriptor with
+                        | Error _ as error -> error
+                        | Ok true -> Ok (Some content)
+                        | Ok false ->
+                          owned_file_error
+                            (Filesystem_identity_changed { path }))
+                     | _ ->
+                       owned_file_error (Filesystem_identity_changed { path })
+                     | exception cause ->
+                       owned_file_operation_error
+                         ~path
+                         Inspect_descriptor
+                         cause)))
+          in
+          let close_result =
+            try Unix.close fd; Ok () with
+            | Eio.Cancel.Cancelled _ as cancellation ->
+              reraise_current cancellation
+            | cause -> Error cause
+          in
+          (match close_result, result with
+           | Ok (), result -> result
+           | Error cause, Ok _ ->
+             owned_file_operation_error ~path Close_descriptor cause
+           | Error cause, Error error ->
+             Error { error with close_failure = Some cause })))
+;;
+
+let load_owned_regular_file ~ownership_root path =
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () -> load_owned_regular_file_blocking ~ownership_root path)
+    (fun _fs ->
+       let result =
+         Eio_unix.run_in_systhread (fun () ->
+           load_owned_regular_file_blocking ~ownership_root path)
+       in
+       Eio.Fiber.check ();
+       result)
+;;
+
+let read_dir (path : string) : string list =
+  with_fs_or_fallback
+    ~path
+    ~fallback:(fun () ->
+      Stdlib.Sys.readdir path
+      |> Array.to_list
+      |> List.sort String.compare)
+    (fun fs ->
+       Eio.Path.read_dir Eio.Path.(fs / path) |> List.sort String.compare)
 ;;
 
 (** Load entire file contents as string, or [None] when the file is
@@ -732,23 +1332,19 @@ let unix_failure ~operation error function_name argument =
   Unix_error { operation; error; function_name; argument }
 ;;
 
-let rec write_fd_all ~write fd bytes offset remaining =
-  if remaining = 0
-  then Ok ()
-  else
-    match write fd bytes offset remaining with
-    | 0 -> Error No_write_progress
-    | written -> write_fd_all ~write fd bytes (offset + written) (remaining - written)
-    | exception Unix.Unix_error (Unix.EINTR, _, _) ->
-      write_fd_all ~write fd bytes offset remaining
-    | exception Unix.Unix_error (error, function_name, argument) ->
-      Error (unix_failure ~operation:Write error function_name argument)
-;;
-
 let rec run_unix_io ~operation f =
   match f () with
   | () -> Ok ()
   | exception Unix.Unix_error (Unix.EINTR, _, _) -> run_unix_io ~operation f
+  | exception Unix.Unix_error (error, function_name, argument) ->
+    Error (unix_failure ~operation error function_name argument)
+;;
+
+let rec run_unix_value ~operation f =
+  match f () with
+  | value -> Ok value
+  | exception Unix.Unix_error (Unix.EINTR, _, _) ->
+    run_unix_value ~operation f
   | exception Unix.Unix_error (error, function_name, argument) ->
     Error (unix_failure ~operation error function_name argument)
 ;;
@@ -770,8 +1366,20 @@ let rollback_durable_append ~io ~fd ~original_length =
 let append_fd_durable ~io ~fd ~original_length suffix =
   let bytes = Bytes.of_string suffix in
   let append_result =
-    match write_fd_all ~write:io.write fd bytes 0 (Bytes.length bytes) with
-    | Error _ as error -> error
+    match
+      Fd_write_all.run
+        ~length:(Bytes.length bytes)
+        ~write:(fun ~offset ~length -> io.write fd bytes offset length)
+    with
+    | Error (Fd_write_all.No_progress _) -> Error No_write_progress
+    | Error
+        (Fd_write_all.Unix_error
+          { bytes_written = _; error; function_name; argument }) ->
+      Error (unix_failure ~operation:Write error function_name argument)
+    | Error
+        (Fd_write_all.Operation_failed
+          { bytes_written = _; exception_; backtrace }) ->
+      Printexc.raise_with_backtrace exception_ backtrace
     | Ok () -> run_unix_io ~operation:Append_fsync (fun () -> io.fsync fd)
   in
   match append_result with
@@ -800,12 +1408,433 @@ let rec lock_whole_file fd =
   | exception Unix.Unix_error (Unix.EINTR, _, _) -> lock_whole_file fd
 ;;
 
-let run_blocking_durable_append ~path f =
-  with_fs_or_fallback
-    ~path
-    ~fallback:f
-    (fun _fs ->
-       Eio_unix.run_in_systhread ~label:"fs-compat-durable-append" f)
+let rec lock_whole_file_shared fd =
+  match Unix.lockf fd Unix.F_RLOCK 0 with
+  | () -> ()
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> lock_whole_file_shared fd
+;;
+
+type capability_append_operation_failure =
+  { exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
+type capability_append_failure =
+  | Capability_append_posix_descriptor_unavailable
+  | Capability_append_mutation_contended
+  | Capability_append_operation_failed of capability_append_operation_failure
+
+type capability_append_target_binding =
+  | Capability_append_target_not_checked
+  | Capability_append_target_verified
+  | Capability_append_target_changed
+  | Capability_append_target_check_failed of capability_append_operation_failure
+
+type capability_append_outcome =
+  { requested_bytes : int
+  ; bytes_written : int
+  ; write_failure : capability_append_failure option
+  ; sync_failure : capability_append_operation_failure option
+  ; target_binding : capability_append_target_binding
+  }
+
+type capability_append_open_error =
+  | Capability_append_open_invalid_leaf of string
+  | Capability_append_open_missing
+  | Capability_append_open_failed of capability_append_operation_failure
+
+type capability_append_file =
+  { parent : Eio.Fs.dir_ty Eio.Path.t
+  ; leaf : Capability_leaf.t
+  ; resource : Eio.File.rw_ty Eio.Resource.t
+  ; stat : Eio.File.Stat.t
+  }
+
+let capability_append_failure_to_string = function
+  | Capability_append_posix_descriptor_unavailable ->
+    "POSIX descriptor unavailable"
+  | Capability_append_mutation_contended ->
+    "append target identity is busy in another cooperative writer"
+  | Capability_append_operation_failed { exception_; _ } ->
+    Printexc.to_string exception_
+;;
+
+let capability_append_open_error_to_string = function
+  | Capability_append_open_invalid_leaf leaf ->
+    Printf.sprintf "invalid capability leaf %S" leaf
+  | Capability_append_open_missing -> "capability append target is missing"
+  | Capability_append_open_failed { exception_; _ } ->
+    Printexc.to_string exception_
+;;
+
+let capability_append_operation_failure exception_ backtrace =
+  { exception_; backtrace }
+;;
+
+let open_capability_append_file ~sw ~parent ~leaf =
+  match Capability_leaf.of_string leaf with
+  | None -> Error (Capability_append_open_invalid_leaf leaf)
+  | Some leaf ->
+    let leaf_name = Capability_leaf.to_string leaf in
+    (try
+       let resource =
+         Eio.Path.open_out
+           ~sw
+           ~append:true
+           ~create:`Never
+           Eio.Path.(parent / leaf_name)
+       in
+       let stat = Eio.File.stat resource in
+       Ok { parent; leaf; resource; stat }
+     with
+     | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+     | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
+       Error Capability_append_open_missing
+     | exception_ ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       Error
+         (Capability_append_open_failed
+            (capability_append_operation_failure exception_ backtrace)))
+;;
+
+let capability_append_file_stat file = file.stat
+
+let capability_append_outcome
+      ~requested_bytes
+      ?(bytes_written = 0)
+      ?write_failure
+      ?sync_failure
+      ?(target_binding = Capability_append_target_not_checked)
+      ()
+  =
+  { requested_bytes
+  ; bytes_written
+  ; write_failure
+  ; sync_failure
+  ; target_binding
+  }
+;;
+
+type capability_append_io_for_testing =
+  { write_substring : Unix.file_descr -> string -> int -> int -> int
+  ; fsync : Unix.file_descr -> unit
+  }
+
+let append_fd_observed ~io ~fd content =
+  let requested_bytes = String.length content in
+  let bytes_written, write_failure =
+    match
+      Fd_write_all.run
+        ~length:requested_bytes
+        ~write:(fun ~offset ~length ->
+          io.write_substring fd content offset length)
+    with
+    | Ok () -> requested_bytes, None
+    | Error (Fd_write_all.No_progress { bytes_written }) ->
+      ( bytes_written
+      , Some
+          (Capability_append_operation_failed
+             (capability_append_operation_failure
+                (Unix.Unix_error
+                   (Unix.EIO, "write", "regular file accepted zero bytes"))
+                (Printexc.get_callstack 0))) )
+    | Error
+        (Fd_write_all.Unix_error
+          { bytes_written; error; function_name; argument }) ->
+      ( bytes_written
+      , Some
+          (Capability_append_operation_failed
+             (capability_append_operation_failure
+                (Unix.Unix_error (error, function_name, argument))
+                (Printexc.get_callstack 0))) )
+    | Error
+        (Fd_write_all.Operation_failed
+          { bytes_written; exception_; backtrace }) ->
+      ( bytes_written
+      , Some
+          (Capability_append_operation_failed
+             (capability_append_operation_failure exception_ backtrace)) )
+  in
+  let sync_failure =
+    if bytes_written > 0 || Option.is_none write_failure
+    then
+      let rec sync () =
+        try
+          io.fsync fd;
+          None
+        with
+        | Unix.Unix_error (Unix.EINTR, _, _) -> sync ()
+        | exception_ ->
+          let backtrace = Printexc.get_raw_backtrace () in
+          Some (capability_append_operation_failure exception_ backtrace)
+      in
+      sync ()
+    else None
+  in
+  capability_append_outcome
+    ~requested_bytes
+    ~bytes_written
+    ?write_failure
+    ?sync_failure
+    ()
+;;
+
+let capability_append_unix_io =
+  { write_substring = Unix.write_substring; fsync = Unix.fsync }
+;;
+
+type append_target_observation =
+  | Append_target_verified
+  | Append_target_changed
+  | Append_target_check_failed of capability_append_operation_failure
+
+let append_target_binding ~parent ~leaf opened =
+  try
+    let lexical = Eio.Path.stat ~follow:false Eio.Path.(parent / leaf) in
+    if
+      opened.Eio.File.Stat.kind = `Regular_file
+      && lexical.kind = `Regular_file
+      && Int64.equal opened.dev lexical.dev
+      && Int64.equal opened.ino lexical.ino
+    then Append_target_verified
+    else Append_target_changed
+  with
+  | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+  | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> Append_target_changed
+  | exception_ ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Append_target_check_failed
+      (capability_append_operation_failure exception_ backtrace)
+;;
+
+let capability_append_target_binding_of_observation = function
+  | Append_target_verified -> Capability_append_target_verified
+  | Append_target_changed -> Capability_append_target_changed
+  | Append_target_check_failed failure ->
+    Capability_append_target_check_failed failure
+;;
+
+let append_capability_observed_with ~after_write file content =
+  let { parent; leaf; resource; stat = opened_stat } = file in
+  let requested_bytes = String.length content in
+  let leaf_name = Capability_leaf.to_string leaf in
+  if requested_bytes = 0
+  then capability_append_outcome ~requested_bytes ()
+  else
+    let parent_stat =
+      try Ok (Eio.Path.stat ~follow:true parent) with
+      | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+      | exception_ ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        Error (capability_append_operation_failure exception_ backtrace)
+    in
+    match parent_stat with
+    | Error failure ->
+      capability_append_outcome
+        ~requested_bytes
+        ~write_failure:(Capability_append_operation_failed failure)
+        ~target_binding:(Capability_append_target_check_failed failure)
+        ()
+    | Ok parent_stat when parent_stat.kind <> `Directory ->
+      let exception_ =
+        Invalid_argument "append parent capability is not a directory"
+      in
+      let failure =
+        capability_append_operation_failure
+          exception_
+          (Printexc.get_callstack 0)
+      in
+      capability_append_outcome
+        ~requested_bytes
+        ~write_failure:(Capability_append_operation_failed failure)
+        ~target_binding:(Capability_append_target_check_failed failure)
+        ()
+    | Ok parent_stat ->
+      (match
+         Capability_mutation_lease.try_acquire
+           (Capability_mutation_lease.Existing_target
+              { target_dev = opened_stat.dev
+              ; target_ino = opened_stat.ino
+              ; parent_dev = parent_stat.dev
+              ; parent_ino = parent_stat.ino
+              })
+       with
+       | None ->
+         capability_append_outcome
+           ~requested_bytes
+           ~write_failure:Capability_append_mutation_contended
+           ()
+       | Some mutation_lease ->
+         Fun.protect
+           ~finally:(fun () ->
+             Capability_mutation_lease.release mutation_lease)
+         @@ fun () ->
+         (match append_target_binding ~parent ~leaf:leaf_name opened_stat with
+          | (Append_target_changed | Append_target_check_failed _) as observation ->
+            let target_binding =
+              capability_append_target_binding_of_observation observation
+            in
+            capability_append_outcome ~requested_bytes ~target_binding ()
+          | Append_target_verified ->
+            let outcome =
+              match Eio_unix.Resource.fd_opt resource with
+              | None ->
+                capability_append_outcome
+                  ~requested_bytes
+                  ~write_failure:Capability_append_posix_descriptor_unavailable
+                  ~target_binding:Capability_append_target_verified
+                  ()
+              | Some fd ->
+                (try
+                   Eio_unix.run_in_systhread
+                     ~label:"fs-compat-open-file-append"
+                     (fun () ->
+                        Eio_unix.Fd.use_exn
+                          "fs-compat-open-file-append"
+                          fd
+                          (fun unix_fd ->
+                             append_fd_observed
+                               ~io:capability_append_unix_io
+                               ~fd:unix_fd
+                               content))
+                 with
+                 | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+                 | exception_ ->
+                   let backtrace = Printexc.get_raw_backtrace () in
+                   capability_append_outcome
+                     ~requested_bytes
+                     ~write_failure:
+                       (Capability_append_operation_failed
+                          (capability_append_operation_failure
+                             exception_
+                             backtrace))
+                     ~target_binding:Capability_append_target_verified
+                     ())
+            in
+            after_write ();
+            let target_binding =
+              append_target_binding ~parent ~leaf:leaf_name opened_stat
+              |> capability_append_target_binding_of_observation
+            in
+            { outcome with target_binding }))
+;;
+
+let append_capability_observed file content =
+  append_capability_observed_with ~after_write:(fun () -> ()) file content
+;;
+
+module Capability_append_for_testing = struct
+  let append_capability_observed = append_capability_observed_with
+  let append_fd_observed = append_fd_observed
+end
+
+let run_blocking_private_file_transaction ~label ~path:_ f =
+  match execution_context () with
+  | Non_eio -> f ()
+  | Eio_fiber -> Eio_unix.run_in_systhread ~label f
+;;
+
+module Private_jsonl_slice = struct
+  type t =
+    { bytes : string
+    ; end_offset : int
+    }
+
+  type error =
+    | Negative_offset of int
+    | Missing_file_after_offset of int
+    | Offset_beyond_end of
+        { offset : int
+        ; end_offset : int
+        }
+    | Offset_not_at_row_boundary of int
+    | Incomplete_tail of int
+    | Io_failed of exn
+
+  let error_to_string = function
+    | Negative_offset offset -> Printf.sprintf "negative JSONL cursor: %d" offset
+    | Missing_file_after_offset offset ->
+      Printf.sprintf "JSONL store is missing after cursor %d" offset
+    | Offset_beyond_end { offset; end_offset } ->
+      Printf.sprintf "JSONL cursor %d is beyond end %d" offset end_offset
+    | Offset_not_at_row_boundary offset ->
+      Printf.sprintf "JSONL cursor %d is not a row boundary" offset
+    | Incomplete_tail end_offset ->
+      Printf.sprintf "JSONL store has an incomplete tail at end %d" end_offset
+    | Io_failed exn -> Printexc.to_string exn
+  ;;
+end
+
+let read_private_jsonl_slice_locked_result path ~from =
+  let open Private_jsonl_slice in
+  if from < 0
+  then Error (Negative_offset from)
+  else
+    try
+      test_exec_home_guard ~op:"read_private_jsonl_slice_locked" path;
+      let path_mu = get_append_path_mutex path in
+      run_blocking_private_file_transaction
+        ~label:"fs-compat-private-jsonl-read"
+        ~path
+        (fun () ->
+           Stdlib.Mutex.protect path_mu (fun () ->
+             match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
+             | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+               if from = 0
+               then Ok { bytes = ""; end_offset = 0 }
+               else Error (Missing_file_after_offset from)
+             | fd ->
+               Fun.protect
+                 ~finally:(fun () -> Unix.close fd)
+                 (fun () ->
+                    lock_whole_file_shared fd;
+                    let end_offset = Unix.lseek fd 0 Unix.SEEK_END in
+                    if from > end_offset
+                    then Error (Offset_beyond_end { offset = from; end_offset })
+                    else (
+                      let byte_at offset =
+                        (* See Unix.lseek: only the file-position side effect is required. *)
+                        ignore (Unix.lseek fd offset Unix.SEEK_SET : int);
+                        let byte = Bytes.create 1 in
+                        let rec read () =
+                          match Unix.read fd byte 0 1 with
+                          | 1 -> Bytes.get byte 0
+                          | 0 -> raise End_of_file
+                          | count ->
+                            invalid_arg
+                              (Printf.sprintf
+                                 "single-byte JSONL read returned %d bytes"
+                                 count)
+                          | exception Unix.Unix_error (Unix.EINTR, _, _) -> read ()
+                        in
+                        read ()
+                      in
+                      if from > 0 && not (Char.equal (byte_at (from - 1)) '\n')
+                      then Error (Offset_not_at_row_boundary from)
+                      else if
+                        end_offset > 0
+                        && not (Char.equal (byte_at (end_offset - 1)) '\n')
+                      then Error (Incomplete_tail end_offset)
+                      else (
+                        let length = end_offset - from in
+                        (* See Unix.lseek: only the file-position side effect is required. *)
+                        ignore (Unix.lseek fd from Unix.SEEK_SET : int);
+                        let bytes = Bytes.create length in
+                        let rec read_all offset =
+                          if offset = length
+                          then ()
+                          else
+                            match Unix.read fd bytes offset (length - offset) with
+                            | 0 -> raise End_of_file
+                            | count -> read_all (offset + count)
+                            | exception Unix.Unix_error (Unix.EINTR, _, _) ->
+                              read_all offset
+                        in
+                        read_all 0;
+                        Ok { bytes = Bytes.unsafe_to_string bytes; end_offset })))))
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Io_failed exn)
 ;;
 
 let update_private_file_durable_locked_result path decide =
@@ -813,7 +1842,10 @@ let update_private_file_durable_locked_result path decide =
   let dir = Filename.dirname path in
   mkdir_p_memoized dir;
   let path_mu = get_append_path_mutex path in
-  run_blocking_durable_append ~path (fun () ->
+  run_blocking_private_file_transaction
+    ~label:"fs-compat-durable-update"
+    ~path
+    (fun () ->
     Stdlib.Mutex.protect path_mu (fun () ->
       let fd =
         Unix.openfile path
@@ -845,9 +1877,34 @@ let update_private_file_durable_locked_result path decide =
               |> Result.map (fun () -> result))))
 ;;
 
+let rewrite_private_file_durable_locked_result path decide =
+  test_exec_home_guard ~op:"rewrite_private_file_durable_locked" path;
+  let dir = Filename.dirname path in
+  mkdir_p_memoized dir;
+  let path_mu = get_append_path_mutex path in
+  run_blocking_private_file_transaction
+    ~label:"fs-compat-durable-rewrite"
+    ~path
+    (fun () ->
+    Stdlib.Mutex.protect path_mu (fun () ->
+      let existing = Option.value (load_file_opt path) ~default:"" in
+      let content, result = decide existing in
+      match content with
+      | None -> Ok result
+      | Some content ->
+        (match save_file_atomic path content with
+         | Ok () -> Ok result
+         | Error message -> Error message)))
+;;
+
 type private_jsonl_append_error =
   | Incomplete_jsonl_tail
   | Invalid_jsonl_suffix
+  | Negative_expected_end_offset of int
+  | End_offset_mismatch of
+      { expected : int
+      ; actual : int
+      }
   | Durable_jsonl_append_failed of durable_append_error
 
 let private_jsonl_append_error_to_string = function
@@ -855,61 +1912,114 @@ let private_jsonl_append_error_to_string = function
     "existing JSONL file ends with an incomplete row"
   | Invalid_jsonl_suffix ->
     "JSONL append suffix must be non-empty and newline-terminated"
+  | Negative_expected_end_offset offset ->
+    Printf.sprintf "expected JSONL end offset must be non-negative: %d" offset
+  | End_offset_mismatch { expected; actual } ->
+    Printf.sprintf
+      "JSONL end offset mismatch: expected %d, observed %d"
+      expected
+      actual
   | Durable_jsonl_append_failed error -> durable_append_error_to_string error
 ;;
 
-let append_private_jsonl_durable_locked_result path suffix =
+let append_private_jsonl_durable_locked_with_expected_end_offset_result
+      path
+      ~expected_end_offset
+      suffix
+  =
   if String.equal suffix ""
      || not (Char.equal suffix.[String.length suffix - 1] '\n')
   then Error Invalid_jsonl_suffix
-  else (
-    test_exec_home_guard ~op:"append_private_jsonl_durable_locked" path;
-    let dir = Filename.dirname path in
-    mkdir_p_memoized dir;
-    let path_mu = get_append_path_mutex path in
-    run_blocking_durable_append ~path (fun () ->
-      Stdlib.Mutex.protect path_mu (fun () ->
-        let fd =
-          Unix.openfile path
-            [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_APPEND; Unix.O_CLOEXEC ]
-            0o600
-        in
-        Fun.protect
-          ~finally:(fun () -> Unix.close fd)
-          (fun () ->
-             Unix.fchmod fd 0o600;
-             fsync_parent_directory dir;
-             (* See Unix.lseek: only the file-position side effect is required. *)
-             ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
-             lock_whole_file fd;
-             let original_length = Unix.lseek fd 0 Unix.SEEK_END in
-             let tail_is_complete =
-               if original_length = 0
-               then true
-               else (
-                 (* See Unix.lseek: only the file-position side effect is required. *)
-                 ignore (Unix.lseek fd (original_length - 1) Unix.SEEK_SET : int);
-                 let byte = Bytes.create 1 in
-                 let rec read_tail () =
-                   match Unix.read fd byte 0 1 with
-                   | 1 -> Char.equal (Bytes.get byte 0) '\n'
-                   | 0 -> false
-                   | _ -> false
-                   | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_tail ()
-                 in
-                 read_tail ())
+  else
+    match expected_end_offset with
+    | Some offset when offset < 0 -> Error (Negative_expected_end_offset offset)
+    | _ ->
+      run_blocking_private_file_transaction
+        ~label:"fs-compat-durable-append"
+        ~path
+        (fun () ->
+           test_exec_home_guard ~op:"append_private_jsonl_durable_locked" path;
+           let dir = Filename.dirname path in
+           Mkdir_memo.mkdir_p_memoized
+             ~mkdir_p:(fun dir ->
+               test_exec_home_guard ~op:"mkdir_p" dir;
+               mkdir_p_unix dir)
+             dir;
+           let path_mu = get_append_path_mutex path in
+           Stdlib.Mutex.protect path_mu (fun () ->
+             let fd =
+               Unix.openfile path
+                 [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_APPEND; Unix.O_CLOEXEC ]
+                 0o600
              in
-             if not tail_is_complete
-             then Error Incomplete_jsonl_tail
-             else (
-               (* See Unix.lseek: only the file-position side effect is required. *)
-               ignore (Unix.lseek fd 0 Unix.SEEK_END : int);
-               append_fd_durable
-                 ~io:durable_append_unix_io
-                 ~fd
-                 ~original_length
-                 suffix
-               |> Result.map_error (fun error -> Durable_jsonl_append_failed error))))))
+             Fun.protect
+               ~finally:(fun () -> Unix.close fd)
+               (fun () ->
+                  Unix.fchmod fd 0o600;
+                  fsync_parent_directory dir;
+                  (* See Unix.lseek: only the file-position side effect is required. *)
+                  ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+                  lock_whole_file fd;
+                  let original_length = Unix.lseek fd 0 Unix.SEEK_END in
+                  match expected_end_offset with
+                  | Some expected when expected <> original_length ->
+                    Error
+                      (End_offset_mismatch
+                         { expected; actual = original_length })
+                  | _ ->
+                    let tail_is_complete =
+                      if original_length = 0
+                      then true
+                      else (
+                        (* See Unix.lseek: only the file-position side effect is required. *)
+                        ignore (Unix.lseek fd (original_length - 1) Unix.SEEK_SET : int);
+                        let byte = Bytes.create 1 in
+                        let rec read_tail () =
+                          match Unix.read fd byte 0 1 with
+                          | 1 -> Char.equal (Bytes.get byte 0) '\n'
+                          | 0 -> false
+                          | _ -> false
+                          | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_tail ()
+                        in
+                        read_tail ())
+                    in
+                    if not tail_is_complete
+                    then Error Incomplete_jsonl_tail
+                    else (
+                      (* See Unix.lseek: only the file-position side effect is required. *)
+                      ignore (Unix.lseek fd 0 Unix.SEEK_END : int);
+                      append_fd_durable
+                        ~io:durable_append_unix_io
+                        ~fd
+                        ~original_length
+                        suffix
+                      |> Result.map_error (fun error ->
+                        Durable_jsonl_append_failed error)
+                      |> Result.map (fun () ->
+                        original_length + String.length suffix)))))
+;;
+
+let append_private_jsonl_durable_locked_with_end_offset_result path suffix =
+  append_private_jsonl_durable_locked_with_expected_end_offset_result
+    path
+    ~expected_end_offset:None
+    suffix
+;;
+
+let append_private_jsonl_durable_locked_at_end_offset_result
+      path
+      ~expected_end_offset
+      suffix
+  =
+  append_private_jsonl_durable_locked_with_expected_end_offset_result
+    path
+    ~expected_end_offset:(Some expected_end_offset)
+    suffix
+;;
+
+let append_private_jsonl_durable_locked_result path suffix =
+  append_private_jsonl_durable_locked_with_end_offset_result path suffix
+  |> Result.map ignore
 ;;
 
 let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =

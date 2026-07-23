@@ -56,6 +56,11 @@ let test_backend_resolve () =
   check (of_pp S.Backend.pp_phase) "filesystem" Filesystem
     (match r with Applied p -> p | Ignored _ -> fail "ignored")
 
+let test_backend_resolve_memory () =
+  let r = S.Backend.apply_event ~current:Uninitialized Resolve_memory in
+  check (of_pp S.Backend.pp_phase) "memory" Memory
+    (match r with Applied p -> p | Ignored _ -> fail "ignored")
+
 let test_backend_degrade () =
   let r = S.Backend.apply_event ~current:Filesystem (Degrade "conn_reset") in
   check (of_pp S.Backend.pp_phase) "degraded" Degraded
@@ -333,6 +338,7 @@ let () =
        ]);
       ("backend",
        [ test_case "resolve_fs" `Quick test_backend_resolve;
+         test_case "resolve_memory" `Quick test_backend_resolve_memory;
          test_case "degrade" `Quick test_backend_degrade;
          test_case "recover" `Quick test_backend_recover;
        ]);

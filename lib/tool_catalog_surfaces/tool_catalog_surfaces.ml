@@ -30,8 +30,7 @@ module Float = Stdlib.Float
 (* Workspace mutation classification                                *)
 (* ================================================================ *)
 
-(** Tools that mutate the workspace filesystem. Canonical list shared by
-    cdal_contract_bridge.ml and contract_risk.ml. *)
+(** Tools that mutate the workspace filesystem. *)
 let workspace_mutating_tool_names =
   [ "tool_edit_file"; "tool_write_file"; "create_text_file"; "edit_text_file"; "file_write" ]
 ;;
@@ -42,10 +41,6 @@ let schedule_request_surface_tools =
   ; "masc_schedule_get"
   ; "masc_schedule_cancel"
   ]
-;;
-
-let schedule_operator_decision_tools =
-  [ "masc_schedule_approve"; "masc_schedule_reject" ]
 ;;
 
 let public_schedule_surface_tools = schedule_request_surface_tools
@@ -81,7 +76,6 @@ let public_mcp_surface_tools =
     "masc_goal_list"
   ; "masc_goal_upsert"
   ; "masc_goal_transition"
-  ; "masc_goal_verify"
   ; "masc_plan_init"
   ; "masc_plan_get"
   ; "masc_plan_set_task"
@@ -94,10 +88,18 @@ let public_mcp_surface_tools =
   ; "masc_keeper_waiting_inventory"
   ; "masc_keeper_up"
   ; "masc_keeper_down"
+  ; (* Compaction is the operator's escape hatch for a keeper whose context has
+       outgrown its provider window. It was reachable only from the keeper tool
+       surface, so an operator observing the overflow could not act on it from
+       the MCP front door. [masc_keeper_clear] stays off this surface on
+       purpose: it wipes transcript messages, which is a different decision
+       from asking a keeper to compact. *)
+    "masc_keeper_compact"
   ; (* Persona authoring is operator-visible. *)
     "masc_persona_list"
   ; "masc_persona_create"
   ; "masc_persona_update"
+  ; "masc_persona_delete"
   ; (* Board. [masc_board_reaction] is intentionally public: it is the
        operator/client counterpart to existing board comment/vote actions. *)
     "masc_board_post"
@@ -135,7 +137,6 @@ let spawned_agent_surface_tools =
   ; "masc_goal_list"
   ; "masc_goal_upsert"
   ; "masc_goal_transition"
-  ; "masc_goal_verify"
   ; "masc_board_list"
   ; "masc_board_post"
   ; "masc_board_comment"
@@ -173,7 +174,6 @@ let local_worker_surface_tools =
   ; "masc_goal_list"
   ; "masc_goal_upsert"
   ; "masc_goal_transition"
-  ; "masc_goal_verify"
   ; "masc_board_post"
   ; "masc_board_list"
   ; "masc_board_post_get"
@@ -207,80 +207,7 @@ let session_min_surface_tools =
   ; "masc_goal_list"
   ; "masc_goal_upsert"
   ; "masc_goal_transition"
-  ; "masc_goal_verify"
   ; "masc_broadcast"
   ; "masc_heartbeat"
-  ]
-;;
-
-(* System-internal tools: hidden from the public Full profile, callable
-   directly (allow_direct_call_when_hidden), and scoped for tool-usage logging.
-   This is a flat visibility list, not an actor surface — consumers project it
-   via [is_system_internal_hidden].  Formerly the [System_internal] surface
-   variant; de-variant-ized in the surface-cut refactor. *)
-let system_internal_hidden =
-  [ (* MCP protocol internals *)
-    "masc_session"
-  ; (* Session lifecycle — auto-called *)
-    "masc_reset"
-  ; (* Maintenance *)
-    "masc_cleanup_zombies"
-  ; "masc_gc"
-  ; (* Agent evaluation — system loop *)
-    "masc_agent_fitness"
-  ; (* Internal monitoring *)
-    "masc_tool_stats"
-  ; "masc_surface_audit"
-  ; (* Phase 2 addition *)
-    "masc_get_metrics"
-  ; (* Library tools *)
-    "masc_library_add"
-  ; "masc_library_list"
-  ; "masc_library_promote"
-  ; "masc_library_read"
-  ; "masc_library_search"
-  ]
-;;
-
-let system_internal_hidden_set =
-  let tbl = Hashtbl.create (List.length system_internal_hidden) in
-  List.iter (fun name -> Hashtbl.replace tbl name ()) system_internal_hidden;
-  tbl
-;;
-
-let is_system_internal_hidden name = Hashtbl.mem system_internal_hidden_set name
-
-(* ================================================================ *)
-(* Role catalogs — curated subsets for agent role assignment.        *)
-(* These are NOT surfaces; they define what a role *should* see.    *)
-(* Consumers must filter them against the tools actually surfaced   *)
-(* before exposing them to agents.                                 *)
-(* ================================================================ *)
-
-let workspace_role_tools : string list =
-  [ "masc_status"
-  ; "masc_tasks"
-  ; "masc_add_task"
-  ; "masc_broadcast"
-  ; "masc_heartbeat"
-  ; "masc_messages"
-  ; "masc_board_list"
-  ; "masc_board_post"
-  ; "masc_board_comment"
-  ; "masc_board_vote"
-  ; "masc_board_post_get"
-  ; "masc_board_sub_board_list"
-  ; "masc_board_sub_board_get"
-  ; "masc_transition"
-  ]
-;;
-
-let execution_role_tools : string list =
-  [ "masc_heartbeat"
-  ; "masc_transition"
-  ; "masc_broadcast"
-  ; "masc_run_init"
-  ; "masc_run_get"
-  ; "masc_tool_help"
   ]
 ;;

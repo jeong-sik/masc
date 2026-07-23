@@ -44,10 +44,8 @@ let handle_broadcast ~tool_name ~start_time (ctx : context) : tool_result option
   let trimmed = String.trim message in
   if String.equal trimmed "" then
     (* RFC-0189: caller-input violation (empty broadcast message).
-       Explicit [Workflow_rejection] avoids the auto-classify path's
-       Runtime_failure default. PR-2 compatible — only the
-       [?failure_class] optional argument is added, [error] signature
-       preserved. *)
+       The producer supplies [Workflow_rejection] explicitly; message text
+       never participates in classification. *)
     Some (Tool_result.error
             ~failure_class:(Some Tool_result.Workflow_rejection)
             ~tool_name ~start_time

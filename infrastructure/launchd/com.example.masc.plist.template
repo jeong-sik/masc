@@ -62,10 +62,6 @@
         <string>true</string>
         <key>MASC_ORCHESTRATOR_ENABLED</key>
         <string>0</string>
-        <key>MASC_ZOMBIE_THRESHOLD_SEC</key>
-        <string>180</string>
-        <key>MASC_ZOMBIE_CLEANUP_INTERVAL_SEC</key>
-        <string>30</string>
         <key>SSL_CERT_FILE</key>
         <string>/opt/homebrew/etc/ca-certificates/cert.pem</string>
         <key>SSL_CERT_DIR</key>

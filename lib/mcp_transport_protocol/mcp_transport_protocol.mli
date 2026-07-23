@@ -18,6 +18,29 @@ type jsonrpc_request = {
 (** JSON-RPC 2.0 request. [id = None] denotes a notification. The
     [method_] OCaml field maps to the JSON ["method"] key. *)
 
+type request_id
+(** Exact MCP request identity. Integer ids retain their canonical JSON
+    lexeme so callers never round-trip through a binary float. *)
+
+type request_id_error =
+  | Null_request_id
+  | Non_lossless_number
+  | Invalid_integer_lexeme of string
+  | Invalid_request_id_kind
+
+val request_id_of_yojson :
+  Yojson.Safe.t -> (request_id, request_id_error) result
+(** Parses the MCP request-id contract: string or integer only. [`Float _]
+    is rejected even when mathematically integral because Yojson has already
+    discarded the producer's exact decimal lexeme. *)
+
+val request_id_to_yojson : request_id -> Yojson.Safe.t
+(** Lossless wire projection of a typed request id. *)
+
+val request_id_equal : request_id -> request_id -> bool
+
+val request_id_error_to_string : request_id_error -> string
+
 val has_field : string -> Yojson.Safe.t -> bool
 (** [has_field key json] is [true] when [json] is an [`Assoc] containing [key]. *)
 
@@ -39,8 +62,8 @@ val get_id : jsonrpc_request -> Yojson.Safe.t
 (** Returns the request id, defaulting to [`Null] for notifications. *)
 
 val is_valid_request_id : Yojson.Safe.t -> bool
-(** Per the JSON-RPC 2.0 spec, valid ids are [`Null], [`String _],
-    [`Int _], [`Intlit _], or [`Float _]. *)
+(** MCP requests admit string or integer ids. Null and floating-point ids are
+    rejected, as required by the MCP request contract. *)
 
 val validate_initialize_params : Yojson.Safe.t option -> (unit, string) result
 (** Checks that [params] for the MCP [initialize] method contain

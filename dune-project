@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.20.1)
+(version 0.21.2)
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
@@ -55,12 +55,11 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Pinned to OAS v0.209.1 (tag v0.209.1, #2510). The patch repairs the
-  ;; oas#2499 library build while preserving the catalog-driven capability,
-  ;; The exact release pin carries the typed tool-failure recovery boundary;
+  ;; The exact OAS release pin carries typed recovery, response-shape, and
+  ;; ordered multimodal delivery contracts;
   ;; its SHA and rationale live in scripts/oas-agent-sdk-pin.sh (SSOT).
   ;; See check-oas-pin.sh.
-  (agent_sdk (>= 0.211.8))
+  (agent_sdk (>= 0.220.5))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))
@@ -107,8 +106,7 @@
   ; RFC-0004 Phase A0.1 typed SSE event library (lib/sse_event/).
   ; atdgen runs at build-time (codegen for sse_event.atd →
   ; sse_event_{t,j}.{ml,mli}); atdgen-runtime is linked into the
-  ; generated _j module.  Promoted from sse_event_poc :with-test
-  ; gating once the typed lib became production-required (PR-1).
+  ; generated _j module.  The typed SSE library is production-required.
   (atdgen (and :build (>= 4.2.0)))
   (atdgen-runtime (>= 4.2.0))
   ; RFC-0004 Phase A0.2 PR-2: atdts generates TypeScript decoders

@@ -1,3 +1,0 @@
-(test
- (name test_sse_event_poc)
- (libraries sse_event_poc alcotest yojson))

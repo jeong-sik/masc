@@ -22,13 +22,11 @@ let all_turn_phases : Keeper_registry.packed_turn_phase list =
 type decision_stage = Keeper_registry.decision_stage =
   | Decision_undecided
   | Decision_guard_ok
-  | Decision_gate_rejected
   | Decision_tool_policy_selected
 
 let all_decision_stages : Keeper_registry.packed_decision_stage list =
   [ Keeper_registry.Packed Decision_undecided
   ; Keeper_registry.Packed Decision_guard_ok
-  ; Keeper_registry.Packed Decision_gate_rejected
   ; Keeper_registry.Packed Decision_tool_policy_selected
   ]
 
@@ -54,7 +52,6 @@ type tla_action =
   | Action_select_tool_policy
   | Action_start_runtime_selection
   | Action_select_runtime
-  | Action_gate_rejected
   | Action_runtime_done
   | Action_runtime_exhausted
   | Action_finish_turn
@@ -68,7 +65,7 @@ type tla_action =
 let all_tla_actions =
   [
     Action_start_turn; Action_measurement_broadcast; Action_decide_guard; Action_select_tool_policy;
-    Action_start_runtime_selection; Action_select_runtime; Action_gate_rejected; Action_runtime_done;
+    Action_start_runtime_selection; Action_select_runtime; Action_runtime_done;
     Action_runtime_exhausted; Action_finish_turn; Action_start_compaction; Action_finish_compaction;
     Action_enter_failing; Action_clear_failing; Action_enter_overflowed; Action_overflowed_auto_compact;
   ]
@@ -130,10 +127,10 @@ type run_state =
     }
   | Suspended of Keeper_state_machine.phase
 
-type livelock = {
-  ll_turn_id : int;
-  ll_attempts : int;
-  ll_first_started_at : float;
+type turn_attempt = {
+  ta_turn_id : int;
+  ta_attempts : int;
+  ta_first_started_at : float;
 }
 
 type board_cursor = {
@@ -157,7 +154,6 @@ type snapshot = {
   kdp_decision : Keeper_registry.packed_decision_stage;
   kcl_runtime_state : runtime_state;
   kmc_compaction : Keeper_registry.packed_compaction_stage;
-  kcb_state : Keeper_failure_circuit_breaker.display_state;
   shared_measurement : Keeper_state_machine.context_actions option;
   invariants : invariants_check;
   conditions : Keeper_state_machine.conditions;
@@ -166,7 +162,7 @@ type snapshot = {
   run_state : run_state;
   last_outcome : last_outcome option;
   last_skip : last_skip option;
-  livelock : livelock option;
+  turn_attempt : turn_attempt option;
   board_cursor : board_cursor;
   board_wakeups : int;
   fiber_stop_flag : bool;
@@ -232,13 +228,11 @@ let decision_stage_to_string (s : Keeper_registry.packed_decision_stage) =
   match s with
   | Keeper_registry.Packed Decision_undecided -> "undecided"
   | Keeper_registry.Packed Decision_guard_ok -> "guard_ok"
-  | Keeper_registry.Packed Decision_gate_rejected -> "gate_rejected"
   | Keeper_registry.Packed Decision_tool_policy_selected -> "tool_policy_selected"
 
 let decision_stage_of_string = function
   | "undecided" -> Some Decision_undecided
   | "guard_ok" -> Some Decision_guard_ok
-  | "gate_rejected" -> Some Decision_gate_rejected
   | "tool_policy_selected" -> Some Decision_tool_policy_selected
   | _ -> None
 
@@ -268,7 +262,6 @@ let tla_action_to_string = function
   | Action_select_tool_policy -> "SelectToolPolicy"
   | Action_start_runtime_selection -> "StartRuntimeSelection"
   | Action_select_runtime -> "SelectRuntime"
-  | Action_gate_rejected -> "GateRejected"
   | Action_runtime_done -> "RuntimeDone"
   | Action_runtime_exhausted -> "RuntimeExhausted"
   | Action_finish_turn -> "FinishTurn"
@@ -286,7 +279,6 @@ let tla_action_of_string = function
   | "SelectToolPolicy" -> Some Action_select_tool_policy
   | "StartRuntimeSelection" -> Some Action_start_runtime_selection
   | "SelectRuntime" -> Some Action_select_runtime
-  | "GateRejected" -> Some Action_gate_rejected
   | "RuntimeDone" -> Some Action_runtime_done
   | "RuntimeExhausted" -> Some Action_runtime_exhausted
   | "FinishTurn" -> Some Action_finish_turn
@@ -315,8 +307,8 @@ let invariant_key_of_string = function
 
 (* Derivation from registry entry *)
 
-(* Exhaustive on [Keeper_state_machine.phase]: maps the raw 13-state
-   keeper phase (post-Zombie #14707) to the turn phase projection when
+(* Exhaustive on [Keeper_state_machine.phase]: maps the raw Keeper phase
+   to the turn phase projection when
    no live turn observation exists.  Spelling each branch out turns a
    future phase
    addition into a compile error. *)
@@ -338,8 +330,7 @@ let live_turn_phase (entry : Keeper_registry.registry_entry) =
        | Keeper_state_machine.Stopped
        | Keeper_state_machine.Crashed
        | Keeper_state_machine.Restarting
-       | Keeper_state_machine.Dead
-       | Keeper_state_machine.Zombie ->
+       | Keeper_state_machine.Dead ->
            Keeper_registry.Packed Turn_idle)
 
 let live_decision_stage (entry : Keeper_registry.registry_entry) =
@@ -396,8 +387,7 @@ let run_state_of_entry (entry : Keeper_registry.registry_entry) ~last_skip
   | Keeper_state_machine.Stopped
   | Keeper_state_machine.Crashed
   | Keeper_state_machine.Restarting
-  | Keeper_state_machine.Dead
-  | Keeper_state_machine.Zombie ->
+  | Keeper_state_machine.Dead ->
     Suspended entry.phase
 
 (* [wake_kind] + [stimulus_kinds] pair shared by [run_state_to_json]'s
@@ -584,10 +574,6 @@ let observe
       ~measurement_captured
   in
   bump_invariant_violations ~keeper_name:entry.name invariants;
-  let kcb_state =
-    Keeper_failure_circuit_breaker.display_state_of
-      ~keeper_name:entry.name
-  in
   let last_skip =
     match entry.last_skip_observation with
     | Some (ts, reasons) -> Some { ls_ts = ts; ls_reasons = reasons }
@@ -603,7 +589,6 @@ let observe
     kdp_decision = decision_stage;
     kcl_runtime_state = runtime_state;
     kmc_compaction = compaction_stage;
-    kcb_state;
     shared_measurement = measurement;
     invariants;
     conditions = entry.conditions;
@@ -635,14 +620,14 @@ let observe
          }
        | None -> None);
     last_skip;
-    livelock =
-      (match Atomic.get entry.livelock_state with
-       | Some ll ->
+    turn_attempt =
+      (match Atomic.get entry.turn_attempt_state with
+       | Some attempt ->
          Some
            {
-             ll_turn_id = ll.turn_id;
-             ll_attempts = ll.attempts;
-             ll_first_started_at = ll.first_started_at;
+             ta_turn_id = attempt.turn_id;
+             ta_attempts = attempt.attempts;
+             ta_first_started_at = attempt.first_started_at;
            }
        | None -> None);
     board_cursor =
@@ -703,30 +688,27 @@ let phase_condition_rows (c : Keeper_state_machine.conditions) : phase_condition
     { key; label; priority; value; phase }
   in
   [
-    row "stopped_clean_drain" "Stopped: clean drain complete" 1
+    row "dead_tombstone" "Dead: durable tombstone" 1
+      c.dead_tombstone_latched
+      Keeper_state_machine.Dead;
+    row "stopped_clean_drain" "Stopped: clean drain complete" 2
       (c.stop_requested && c.drain_complete
        && not c.compaction_active && not c.handoff_active)
       Keeper_state_machine.Stopped;
-    row "offline_launch_pending" "Offline: launch pending without fiber" 2
+    row "offline_launch_pending" "Offline: launch pending without fiber" 3
       (c.launch_pending && not c.fiber_alive)
       Keeper_state_machine.Offline;
-    row "zombie_terminal_failure" "Zombie: terminal failure latched" 3
-      c.terminal_failure_latched
-      Keeper_state_machine.Zombie;
-    row "dead_no_fiber_no_budget" "Dead: fiber down and restart budget exhausted" 4
-      ((not c.fiber_alive) && not c.restart_budget_remaining)
-      Keeper_state_machine.Dead;
-    row "restarting_backoff_elapsed" "Restarting: fiber down with elapsed backoff" 5
-      ((not c.fiber_alive) && c.restart_budget_remaining && c.backoff_elapsed)
+    row "restarting_requested" "Restarting: supervisor requested restart" 5
+      ((not c.fiber_alive) && c.restart_requested)
       Keeper_state_machine.Restarting;
-    row "crashed_restart_budget" "Crashed: fiber down with restart budget" 6
-      ((not c.fiber_alive) && c.restart_budget_remaining)
+    row "crashed_fiber_down" "Crashed: fiber down" 6
+      (not c.fiber_alive)
       Keeper_state_machine.Crashed;
     row "draining_stop_requested" "Draining: stop requested" 7
       c.stop_requested
       Keeper_state_machine.Draining;
-    row "paused_operator_or_retry_exhausted" "Paused: operator pause or compact retry exhausted" 8
-      (c.operator_paused || (c.context_overflow && c.compact_retry_exhausted))
+    row "paused_operator" "Paused: explicit operator pause" 8
+      c.operator_paused
       Keeper_state_machine.Paused;
     row "handing_off_active" "HandingOff: handoff active" 9
       c.handoff_active
@@ -798,12 +780,6 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     "compaction", `Assoc [
       "stage", `String (compaction_stage_to_string s.kmc_compaction);
     ];
-    "circuit_breaker", `Assoc [
-      "state",
-      `String
-        (Keeper_failure_circuit_breaker.display_state_to_string
-           s.kcb_state);
-    ];
     "measurement", (match s.shared_measurement with
       | Some m -> `Assoc [
           "captured", `Bool true;
@@ -848,11 +824,11 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
           "reasons", `List (List.map (fun r -> `String r) ls.ls_reasons);
         ]
       | None -> `Null);
-    "livelock", (match s.livelock with
-      | Some ll -> `Assoc [
-          "turn_id", `Int ll.ll_turn_id;
-          "attempts", `Int ll.ll_attempts;
-          "first_started_at", `Float ll.ll_first_started_at;
+    "turn_attempt", (match s.turn_attempt with
+      | Some attempt -> `Assoc [
+          "turn_id", `Int attempt.ta_turn_id;
+          "attempts", `Int attempt.ta_attempts;
+          "first_started_at", `Float attempt.ta_first_started_at;
         ]
       | None -> `Null);
     "board_cursor", `Assoc [

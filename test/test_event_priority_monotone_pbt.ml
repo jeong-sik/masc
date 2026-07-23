@@ -4,7 +4,7 @@
     over the full cross-product of {bind_count, has_measurement, has_pending}
     to verify the invariant holds for exactly the expected states.
 
-    @see KeeperCompositeLifecycle.tla I4 EventPriorityMonotone *)
+    The predicate is diagnostic only and carries no lifecycle authority. *)
 
 module Obs = Masc.Keeper_composite_observer
 

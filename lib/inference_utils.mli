@@ -11,9 +11,6 @@ val int_of_env_default : string -> default:int -> min_v:int -> max_v:int -> int
 (** Compute total tokens from OAS api_usage. *)
 val total_tokens : Agent_sdk.Types.api_usage -> int
 
-(** CJK-aware token estimate delegated to OAS Context_reducer. *)
-val estimate_tokens : string -> int
-
 (** Zero usage marker. *)
 val zero_usage : Agent_sdk.Types.api_usage
 

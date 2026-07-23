@@ -182,39 +182,13 @@ type operation_policy =
   { visibility : Tool_catalog.visibility
   ; readonly : bool
   ; idempotent : bool
-  ; destructive : bool
   }
 
 let operation_policy board_name =
   let readonly = not (Tool_name.Board_name.is_resource_write board_name) in
-  let destructive =
-    match board_name with
-    | Tool_name.Board_name.Board_delete
-    | Tool_name.Board_name.Board_cleanup -> true
-    | Tool_name.Board_name.Board_comment
-    | Tool_name.Board_name.Board_comment_vote
-    | Tool_name.Board_name.Board_curation_read
-    | Tool_name.Board_name.Board_curation_submit
-    | Tool_name.Board_name.Board_hearths
-    | Tool_name.Board_name.Board_list
-    | Tool_name.Board_name.Board_post
-    | Tool_name.Board_name.Board_post_get
-    | Tool_name.Board_name.Board_post_update
-    | Tool_name.Board_name.Board_profile
-    | Tool_name.Board_name.Board_reaction
-    | Tool_name.Board_name.Board_search
-    | Tool_name.Board_name.Board_stats
-    | Tool_name.Board_name.Board_sub_board_create
-    | Tool_name.Board_name.Board_sub_board_delete
-    | Tool_name.Board_name.Board_sub_board_get
-    | Tool_name.Board_name.Board_sub_board_list
-    | Tool_name.Board_name.Board_sub_board_update
-    | Tool_name.Board_name.Board_vote -> false
-  in
   { visibility = Tool_catalog.Default
   ; readonly
-  ; idempotent = readonly
-  ; destructive
+  ; idempotent = false
   }
 ;;
 

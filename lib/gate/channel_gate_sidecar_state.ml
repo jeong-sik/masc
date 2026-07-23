@@ -64,10 +64,8 @@ module Make (Config : Config) = struct
       ~guild_id_field:Store.Include_empty
 
   let read_json_file_opt = Store.read_json_file_opt
-  let read_bindings () = Store.read_bindings binding_store
+  let read_bindings_result () = Store.read_bindings_result binding_store
   let binding_json = Store.binding_json
-  let save_bindings bindings = Store.save_bindings binding_store bindings
-  let append_audit_event event = Store.append_audit_event binding_store event
   let read_recent_audit ~limit = Store.read_recent_audit binding_store ~limit
 
   let string_member json key =
@@ -99,13 +97,7 @@ module Make (Config : Config) = struct
      cached presence state. *)
 
   let bound_channels ~keeper_name =
-    let normalized = String.trim keeper_name in
-    if String.equal normalized "" then []
-    else
-      read_bindings ()
-      |> List.filter_map (fun (b : binding) ->
-             if String.equal b.keeper_name normalized then Some b.channel_id
-             else None)
+    Store.bound_channels_result binding_store ~keeper_name
 
   let connected () =
     (* Same liveness reading as [status_json]: the sidecar heartbeats
@@ -121,9 +113,15 @@ module Make (Config : Config) = struct
     let live_status = read_json_file_opt status_path in
     let binding_store_path = binding_store_read_path () in
     let audit_path = binding_audit_read_path () in
-    let configured_bindings = read_bindings () in
+    let configured_bindings_result = read_bindings_result () in
+    let configured_bindings, binding_store_error =
+      match configured_bindings_result with
+      | Ok bindings -> bindings, ""
+      | Error error -> [], Store.binding_store_error_to_string error
+    in
+    let binding_store_read_ok = Result.is_ok configured_bindings_result in
     let recent_audit = read_recent_audit ~limit:audit_limit in
-    let available = Option.is_some live_status in
+    let available = Option.is_some live_status && binding_store_read_ok in
     let updated_at =
       match live_status with
       | Some json -> string_member json "updated_at"
@@ -132,10 +130,14 @@ module Make (Config : Config) = struct
     let stale = if not available then true else stale_of_updated_at updated_at in
     let connected =
       match live_status with
-      | Some json -> bool_member json "connected" && not stale
+      | Some json ->
+        binding_store_read_ok && bool_member json "connected" && not stale
       | None -> false
     in
-    let error = if available then "" else "connector status file not found" in
+    let error =
+      if not binding_store_read_ok then binding_store_error
+      else if available then "" else "connector status file not found"
+    in
     let status_field key f default =
       match live_status with
       | Some json -> f json key
@@ -152,6 +154,8 @@ module Make (Config : Config) = struct
         ("error", `String error);
         ("status_path", `String status_path);
         ("binding_store_path", `String binding_store_path);
+        ("binding_store_read_ok", `Bool binding_store_read_ok);
+        ("binding_store_error", `String binding_store_error);
         ("audit_path", `String audit_path);
         ("updated_at", `String updated_at);
         ("last_message_at", `String (status_field "last_message_at" string_member ""));
@@ -268,6 +272,8 @@ module Make (Config : Config) = struct
         ("error", `String (string_member status "error"));
         ("status_path", `String (string_member status "status_path"));
         ("binding_store_path", `String (string_member status "binding_store_path"));
+        ("binding_store_read_ok", status |> U.member "binding_store_read_ok");
+        ("binding_store_error", status |> U.member "binding_store_error");
         ("audit_path", `String (string_member status "audit_path"));
         ("updated_at", `String (string_member status "updated_at"));
         ("last_message_at", `String (string_member status "last_message_at"));
@@ -300,38 +306,35 @@ module Make (Config : Config) = struct
             ] );
       ]
 
-  let rollback_bindings original_bindings =
-    try save_bindings original_bindings with
-    | Sys_error _ -> ()
-
   let bind ~channel_id ~keeper_name ~actor_name =
     let channel_id = String.trim channel_id in
     let keeper_name = String.trim keeper_name in
     if channel_id = "" then Error "channel_id is required"
     else if keeper_name = "" then Error "keeper_name is required"
     else
-      let original_bindings = read_bindings () in
-      let previous_keeper =
-        original_bindings
-        |> List.find_map (fun (binding : binding) ->
-               if String.equal binding.channel_id channel_id then
-                 Some binding.keeper_name
-               else None)
-        |> Option.value ~default:""
-      in
-      let updated_bindings =
-        ({ channel_id; keeper_name } : binding)
-        :: List.filter
-             (fun (binding : binding) ->
-               not (String.equal binding.channel_id channel_id))
-             original_bindings
-        |> List.sort (fun (a : binding) (b : binding) ->
-               String.compare a.channel_id b.channel_id)
-      in
-      try
-        save_bindings updated_bindings;
-        append_audit_event
-          Store.{
+      Store.mutate_bindings binding_store ~decide:(fun original_bindings ->
+        let previous_keeper =
+          match
+            List.find_map
+              (fun (binding : binding) ->
+                if String.equal binding.channel_id channel_id then
+                  Some binding.keeper_name
+                else None)
+              original_bindings
+          with
+          | Some name -> name
+          | None -> ""
+        in
+        let updated_bindings =
+          ({ channel_id; keeper_name } : binding)
+          :: List.filter
+               (fun (binding : binding) ->
+                 not (String.equal binding.channel_id channel_id))
+               original_bindings
+          |> List.sort (fun (a : binding) (b : binding) ->
+                 String.compare a.channel_id b.channel_id)
+        in
+        let event = Store.{
             timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
             action = "bind";
             guild_id = None;
@@ -340,35 +343,31 @@ module Make (Config : Config) = struct
             actor_id = actor_name;
             actor_name;
             previous_keeper;
-          };
-        Ok (status_json ())
-      with
-      | Sys_error msg ->
-          rollback_bindings original_bindings;
-          Error msg
+          }
+        in
+        Ok (updated_bindings, event, ()))
+      |> Result.map_error Store.mutation_error_to_string
+      |> Result.map (fun () -> status_json ())
 
   let unbind ~channel_id ~actor_name =
     let channel_id = String.trim channel_id in
     if channel_id = "" then Error "channel_id is required"
     else
-      let original_bindings = read_bindings () in
-      match
-        List.find_opt
-          (fun (binding : binding) -> String.equal binding.channel_id channel_id)
-          original_bindings
-      with
-      | None -> Error "binding not found"
-      | Some previous ->
+      Store.mutate_bindings binding_store ~decide:(fun original_bindings ->
+        match
+          List.find_opt
+            (fun (binding : binding) -> String.equal binding.channel_id channel_id)
+            original_bindings
+        with
+        | None -> Error "binding not found"
+        | Some previous ->
           let updated_bindings =
             List.filter
               (fun (binding : binding) ->
                 not (String.equal binding.channel_id channel_id))
               original_bindings
           in
-          try
-            save_bindings updated_bindings;
-            append_audit_event
-              Store.{
+          let event = Store.{
                 timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
                 action = "unbind";
                 guild_id = None;
@@ -377,10 +376,9 @@ module Make (Config : Config) = struct
                 actor_id = actor_name;
                 actor_name;
                 previous_keeper = previous.keeper_name;
-              };
-            Ok (status_json ())
-          with
-          | Sys_error msg ->
-              rollback_bindings original_bindings;
-              Error msg
+              }
+          in
+          Ok (updated_bindings, event, ()))
+      |> Result.map_error Store.mutation_error_to_string
+      |> Result.map (fun () -> status_json ())
 end

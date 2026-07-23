@@ -19,3 +19,13 @@ val ensure_dashboard_dev_token : string -> (string, string) result
     string, generating + persisting one to {!dashboard_dev_token_path}
     on first call. [Error msg] when the auth dir is unwritable. Exposed
     so the dashboard-keeper-routes test can drive the boot path directly. *)
+
+module For_testing : sig
+  type gate_mode_recovery =
+    | Recovery_completed of Keeper_gate.operator_recovery_report
+    | Recovery_failed of string
+    | Recovery_not_requested
+
+  val gate_mode_change_json :
+    Keeper_gate_mode.change -> gate_mode_recovery -> Yojson.Safe.t
+end

@@ -16,7 +16,7 @@
 | 축 | masc | OAS | 평가 |
 |----|----------|-----|------|
 | `.mli` 커버리지 | 1005/1033 (97%, 2026-05-12) | 216/218 (99%) | Tier 1-A 사실상 완료 |
-| `Obj.magic` (실사용) | 0건 (2026-05-12; `lib/cdal/adversarial_eval.ml` 의 1건은 금지패턴 문자열 리터럴) | 0건 | 깨끗함 |
+| `Obj.magic` (실사용) | 0건 (2026-05-12; 당시 유일한 히트였던 CDAL 평가기 내 금지패턴 문자열 리터럴은 모듈 제거로 소멸) | 0건 | 깨끗함 |
 | `Stdlib.Mutex` 생성 | `Stdlib.Mutex.create` 39 호출 / `module Mutex = Stdlib.Mutex` 105 파일 (2026-05-12) — 다수는 의도된 컨벤션 (짧은 critical section, Eio 의존 회피 주석 명시) | 2군데 | 무분별 신규 추가만 경계 |
 | `Eio.Mutex` 사용 | `Eio.Mutex.create` 113 호출 / `Eio.Mutex` 등장 142 파일 (2026-05-12) | 19군데 (호출/등장 횟수) | 과잉 여부 재평가 필요 — masc 열은 `Stdlib.Mutex` 행과 같은 단위 (호출 수 / 파일 수), OAS 열은 등장 횟수 |
 | 와일드카드 `_` (Top 파일) | (2026-04, 재측정 필요) keeper_status_detail: 35, verification: 28 | runtime_server: 25 | RFC-0071 §3.4 (warning 4 활성화) 이 진행 중 — §2-B/§3 참조 |

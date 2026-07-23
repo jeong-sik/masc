@@ -24,10 +24,10 @@ let project_root_from_executable () =
 let config_root_from_ancestor start_dir =
   let rec walk_up dir =
     let config_root = Filename.concat dir "config" in
-    let tool_policy =
-      Filename.concat config_root Config_dir_resolver.tool_policy_toml_filename
+    let runtime_config =
+      Filename.concat config_root Config_dir_resolver.runtime_toml_filename
     in
-    if Sys.file_exists tool_policy
+    if Sys.file_exists runtime_config
     then Some config_root
     else (
       let parent = Filename.dirname dir in
@@ -59,7 +59,7 @@ let copy_file_if_missing ~src ~dst =
     Fs_compat.save_file dst (Fs_compat.load_file src))
 ;;
 
-let oas_models_toml_filename = "oas-models.toml"
+let oas_models_overlay_toml_filename = "oas-models-overlay.toml"
 
 let existing_file path =
   try Sys.file_exists path && not (Sys.is_directory path) with
@@ -127,9 +127,9 @@ let copy_missing_prompt_seed ~src_config_root ~dst_config_root =
   else 0
 ;;
 
-let copy_missing_model_catalog_seed ~src_config_root ~dst_config_root =
-  let src = Filename.concat (Filename.dirname src_config_root) oas_models_toml_filename in
-  let dst = Filename.concat dst_config_root oas_models_toml_filename in
+let copy_missing_model_catalog_overlay_seed ~src_config_root ~dst_config_root =
+  let src = Filename.concat src_config_root oas_models_overlay_toml_filename in
+  let dst = Filename.concat dst_config_root oas_models_overlay_toml_filename in
   if existing_file src && not (Sys.file_exists dst)
   then (
     copy_file_if_missing ~src ~dst;
@@ -137,7 +137,7 @@ let copy_missing_model_catalog_seed ~src_config_root ~dst_config_root =
   else if existing_file src && existing_directory dst
   then (
     Log.Server.warn
-      "config bootstrap: refusing to replace directory with model catalog file (%s -> %s)"
+      "config bootstrap: refusing to replace directory with model catalog overlay file (%s -> %s)"
       src
       dst;
     0)
@@ -165,13 +165,11 @@ let copy_missing_config_root_seed ~src ~dst =
   |> Array.iter (fun name ->
     if
       String.equal name "keepers"
-      || String.equal name Config_dir_resolver.tool_policy_toml_filename
     then ()
     else
       copy_missing_tree
         ~src:(Filename.concat src name)
         ~dst:(Filename.concat dst name));
-  ignore (copy_missing_model_catalog_seed ~src_config_root:src ~dst_config_root:dst);
   Fs_compat.mkdir_p (Filename.concat dst "keepers")
 ;;
 
@@ -191,24 +189,24 @@ let bootstrap_base_path_config_root ~base_path =
       if Sys.is_directory config_root
       then (
         ensure_config_root_scaffold config_root;
-        let backfilled_prompts, backfilled_model_catalog =
+        let backfilled_prompts, backfilled_model_catalog_overlay =
           match versioned_config_root_candidates () |> List.find_opt Sys.file_exists with
           | Some source ->
             ( copy_missing_prompt_seed
                 ~src_config_root:source
                 ~dst_config_root:config_root
-            , copy_missing_model_catalog_seed
+            , copy_missing_model_catalog_overlay_seed
                 ~src_config_root:source
                 ~dst_config_root:config_root
             )
           | None -> 0, 0
         in
-        if backfilled_prompts + backfilled_model_catalog > 0
+        if backfilled_prompts + backfilled_model_catalog_overlay > 0
         then (
           Log.Server.info
-            "backfilled %d missing prompt seed file(s) and %d model catalog seed file(s) into existing base-path config root: %s"
+            "backfilled %d missing prompt seed file(s) and %d model catalog overlay seed file(s) into existing base-path config root: %s"
             backfilled_prompts
-            backfilled_model_catalog
+            backfilled_model_catalog_overlay
             config_root;
           Config_dir_resolver.reset ())
         else

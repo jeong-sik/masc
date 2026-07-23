@@ -74,11 +74,40 @@ val reset : ?backend_mode:string -> unit -> unit
 
 val mark_blocking : backend_mode:string -> unit
 
-val mark_state_ready : backend_mode:string -> unit
+type ready_backend =
+  | Memory_backend
+  | Filesystem_backend
 
-(** Transition to [Lazy] with [tasks] pending (or directly to
-    [Ready] when [tasks = []]). *)
-val activate_lazy : backend_mode:string -> tasks:string list -> unit
+val ready_backend_to_string : ready_backend -> string
+
+type state_ready_transition_stage =
+  | Boot_completion
+  | Backend_resolution
+  | Readiness_publication
+
+type state_ready_error =
+  | State_ready_transition_rejected of
+      { stage : state_ready_transition_stage
+      ; reason : string
+      }
+
+val state_ready_error_to_string : state_ready_error -> string
+
+(** Complete the lifecycle, resolve the exact initialized backend, and publish
+    readiness as one validated state update. No partial transition is stored
+    when any product invariant rejects the publication. *)
+val mark_state_ready : backend:ready_backend -> (unit, state_ready_error) result
+
+(** Record the lazy-task inventory while startup is still blocking. This does
+    not publish readiness or transition the server lifecycle to [Serving]. It
+    lets Keeper autoboot observe the complete lazy-task barrier before the
+    queue consumer ACK permits readiness publication. *)
+type lazy_prepare_error =
+  | Lazy_state_transition_rejected of string
+
+val lazy_prepare_error_to_string : lazy_prepare_error -> string
+
+val prepare_lazy_tasks : tasks:string list -> (unit, lazy_prepare_error) result
 
 (** Remove [task] from pending. When the list empties, transition
     to [Ready] (unless already [Degraded], which is preserved). *)

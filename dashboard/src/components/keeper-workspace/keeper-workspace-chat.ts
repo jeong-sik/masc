@@ -19,7 +19,7 @@ import type { VNode } from 'preact'
 import type { Keeper, KeeperConversationEntry } from '../../types'
 import { KeeperConversationPanel } from '../keeper-shared'
 import { navigate } from '../../router'
-import { governanceData } from '../governance-signals'
+import { gateData } from '../gate-signals'
 import type { ChatComposerCommand } from '../chat/primitives'
 import { keeperMobilePane } from '../keeper-detail-state'
 import { keeperThreads } from '../../keeper-state'
@@ -88,7 +88,9 @@ function lifecycleCommands(keeper: Keeper): WorkspaceCommand[] {
       title: copy.title,
       icon: copy.icon,
       danger: copy.danger,
-      onClick: () => runKeeperAction(keeper.name, key),
+      onClick: () => key === 'resume'
+        ? runKeeperAction(keeper.name, key, keeper.generation)
+        : runKeeperAction(keeper.name, key),
     }
   })
 }
@@ -483,13 +485,13 @@ function TurnInspectorDrawer({
 // RFC keeper-conversation-hitl-flow §4.1-A: the compact header badge is
 // read-only and links to Approvals, which remains the single approve/reject
 // act-point with the complete risk and input evidence.
-// Pending approval queue scoped to this keeper. Reads governance
+// Pending approval queue scoped to this keeper. Reads Gate
 // approval_queue (the HITL SSOT) directly instead of keeper.trust.
 // approval_state, which is a separate payload field and diverges from the
 // queue — when it is empty while approval_queue has items, the cue stayed
 // blank and the operator saw no HITL signal inside the chat surface.
 function keeperPendingApprovals(keeperName: string) {
-  const queue = governanceData.value?.approval_queue ?? []
+  const queue = gateData.value?.approval_queue ?? []
   return queue.filter((a) => a.keeper_name === keeperName)
 }
 

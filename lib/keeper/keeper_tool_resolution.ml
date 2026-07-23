@@ -16,17 +16,9 @@ type tried_source =
   | Dispatch_table              (** S1: Tool_dispatch.is_registered *)
   | Public_descriptor           (** S3: Keeper_tool_descriptor.find_public *)
   | Alias_internal              (** S4: Keeper_tool_alias.is_known_internal *)
-  | Registry_internal_candidate (** S5: Keeper_tool_registry.keeper_internal_candidate_tool_names *)
-  | Registry_core_tools         (** S6: Keeper_tool_registry.effective_core_tools *)
   | Tool_schema                 (** S7: policy tool-schema inventory name extraction *)
   | Descriptor_registry         (** S7.5: registered names projected by
                                     Keeper_tool_descriptor.all_descriptors *)
-  | System_internal             (** S8: Tool_catalog_surfaces.is_system_internal_hidden —
-                                    system-internal tools (masc_gc, masc_reset,
-                                    masc_cleanup_zombies, …) dispatched via tool_misc and
-                                    hidden from keeper surfaces. Real tools, not
-                                    stale/hallucinated tokens, so the prompt-token integrity
-                                    scanner must not flag or strip them. *)
 
 type resolution =
   | Resolved of { canonical : string ; via : tried_source }
@@ -45,11 +37,8 @@ let string_of_tried_source = function
   | Dispatch_table -> "dispatch_table"
   | Public_descriptor -> "public_descriptor"
   | Alias_internal -> "alias_internal"
-  | Registry_internal_candidate -> "registry_internal_candidate"
-  | Registry_core_tools -> "registry_core_tools"
   | Tool_schema -> "tool_schema"
   | Descriptor_registry -> "descriptor_registry"
-  | System_internal -> "system_internal"
 
 let string_of_tried sources =
   String.concat ", " (List.map string_of_tried_source sources)
@@ -73,11 +62,6 @@ let resolve name =
       if Keeper_tool_alias.is_known_internal normalized then
         Resolved { canonical = normalized; via = Alias_internal }
       else if
-        List.mem normalized Keeper_tool_registry.keeper_internal_candidate_tool_names
-      then Resolved { canonical = normalized; via = Registry_internal_candidate }
-      else if List.mem normalized (Keeper_tool_registry.effective_core_tools ()) then
-        Resolved { canonical = normalized; via = Registry_core_tools }
-      else if
         List.mem normalized (tool_schema_names policy_tool_schemas)
       then Resolved { canonical = normalized; via = Tool_schema }
       else if
@@ -87,20 +71,9 @@ let resolve name =
           (Keeper_tool_descriptor.all_descriptors ())
       then
         (* This resolver validates names embedded in prompt/continuity text; it
-           does not grant Keeper execution. Registered dispatch-only names must
-           therefore remain valid without entering the candidate projection. *)
+           does not grant Keeper execution. Exact transport aliases therefore
+           remain valid without becoming duplicate model tools. *)
         Resolved { canonical = normalized; via = Descriptor_registry }
-      else if Tool_catalog_surfaces.is_system_internal_hidden normalized then
-        (* System-internal tools (masc_gc, masc_reset, masc_cleanup_zombies, …)
-           are dispatched directly via tool_misc and hidden from keeper surfaces,
-           so they appear in no keeper-facing registry above. They are real
-           tools, not stale/hallucinated names, so the prompt-token integrity
-           scanner must treat them as valid (otherwise it strips them from
-           continuity prose and emits a per-render WARN — observed as ~33/day of
-           false "stripped masc token masc_gc" for keeper taskmaster). resolve is
-           a validity gate whose only callers are that scanner/sanitizer, so this
-           does not widen keeper tool admission. *)
-        Resolved { canonical = normalized; via = System_internal }
       else
         (* The per-actor surface coverage gate (RFC-0084 §1.3) was removed in
            the surface-cut refactor: the [surface] type and its lists are
@@ -113,11 +86,8 @@ let resolve name =
               [ Dispatch_table
               ; Public_descriptor
               ; Alias_internal
-              ; Registry_internal_candidate
-              ; Registry_core_tools
               ; Tool_schema
               ; Descriptor_registry
-              ; System_internal
               ]
           }
 
@@ -135,10 +105,6 @@ let all_admitting_sources name =
     sources := Public_descriptor :: !sources;
   if Keeper_tool_alias.is_known_internal normalized then
     sources := Alias_internal :: !sources;
-  if List.mem normalized (Keeper_tool_registry.keeper_internal_candidate_tool_names) then
-    sources := Registry_internal_candidate :: !sources;
-  if List.mem normalized (Keeper_tool_registry.effective_core_tools ()) then
-    sources := Registry_core_tools :: !sources;
   if List.mem normalized (tool_schema_names policy_tool_schemas) then
     sources := Tool_schema :: !sources;
   if
@@ -147,8 +113,6 @@ let all_admitting_sources name =
         List.mem normalized (Keeper_tool_descriptor.registered_names d))
       (Keeper_tool_descriptor.all_descriptors ())
   then sources := Descriptor_registry :: !sources;
-  if Tool_catalog_surfaces.is_system_internal_hidden normalized then
-    sources := System_internal :: !sources;
   (* The per-actor surface admit sources (RFC-0084 §1.3) were removed in the
      surface-cut refactor — the [surface] type is deleted. *)
   List.rev !sources
@@ -194,49 +158,4 @@ let canonical_tool_name_observed name =
   | Miss ->
     Keeper_tool_alias.record_route_outcome ~tool:name ~routed_to:"none" ~result:"miss";
     name
-;;
-
-let public_aliases_for_internal_name internal_name =
-  Keeper_tool_descriptor_resolution.public_names_for_internal internal_name
-;;
-
-let public_alias_guidance_for_internal_call
-      ~(allowed_tool_names : string list)
-      (tool_name : string)
-  : string option
-  =
-  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
-  match Keeper_tool_descriptor.find_public stripped with
-  | Some _ -> None
-  | None ->
-    let canonical = canonical_tool_name stripped in
-    (match public_aliases_for_internal_name canonical with
-     | [] -> None
-     | aliases ->
-       let allowed_aliases =
-         List.filter (fun alias -> List.mem alias allowed_tool_names) aliases
-       in
-       let alias_words =
-         match allowed_aliases with
-         | [] -> aliases
-         | _ -> allowed_aliases
-       in
-       let alias_text = String.concat " or " alias_words in
-       let correction =
-         match allowed_aliases with
-         | _ :: _ -> Printf.sprintf "Use %s instead." alias_text
-         | [] ->
-           Printf.sprintf
-             "No public alias for it is allowed in this turn; do not invent \
-              internal tool names. Wait for an allowed tool or report the blocker. \
-              Public alias%s: %s."
-             (if List.length aliases = 1 then "" else "es")
-             alias_text
-       in
-       Some
-         (Printf.sprintf
-            "%s is an internal keeper implementation tool name, not a \
-             schema-allowed tool. %s"
-            stripped
-            correction))
 ;;

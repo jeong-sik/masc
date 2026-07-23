@@ -1,8 +1,7 @@
 (** P0 keeper registry hardening tests.
 
-    Verify typed validation errors on put/update, health-aware get, and the
-    tool-dispatch fallback path that uses the original meta when the registry
-    entry is corrupted. *)
+    Verify typed validation errors on put/update, health-aware get, and exact
+    turn-resource identity across same-name registry entry replacement. *)
 
 open Alcotest
 
@@ -10,12 +9,13 @@ module KR = Masc.Keeper_registry
 module KET = Masc.Keeper_tool_dispatch_runtime
 module KLH = Masc.Keeper_lifecycle_hooks
 module Keeper_lifecycle_admission = Masc.Keeper_lifecycle_admission
+module Reservation = Masc.Keeper_lifecycle_reservation
 module KSM = Keeper_state_machine
 module Lane = Masc.Keeper_lane
 
 let base_path = "/tmp/test_keeper_registry_hardening"
 
-let make_meta ?(tool_access = []) name =
+let make_meta name =
   match
     Masc_test_deps.meta_of_json_fixture
       (`Assoc
@@ -23,9 +23,7 @@ let make_meta ?(tool_access = []) name =
           ("name", `String name);
           ("agent_name", `String ("agent-" ^ name));
           ("trace_id", `String ("trace-" ^ name));
-          ("goal", `String "test keeper");
           ("allowed_paths", `List [ `String "*" ]);
-          ("tool_access", Json_util.json_string_list tool_access);
           ("autoboot_enabled", `Bool false);
         ])
   with
@@ -35,13 +33,13 @@ let make_meta ?(tool_access = []) name =
 
 let register name =
   let meta = make_meta name in
-  KR.register ~base_path meta.name meta
+  KR.For_testing.register ~base_path meta.name meta
 ;;
 
 let health_to_string = KR.registry_entry_validation_error_to_string
 
 let test_put_entry_rejects_meta_name_mismatch () =
-  KR.clear ();
+  KR.For_testing.clear ();
   let entry = register "alice" in
   let corrupted = { entry with meta = { entry.meta with name = "bob" } } in
   match KR.put_entry ~base_path "alice" corrupted with
@@ -53,7 +51,7 @@ let test_put_entry_rejects_meta_name_mismatch () =
 ;;
 
 let test_update_entry_rejects_corrupted_result () =
-  KR.clear ();
+  KR.For_testing.clear ();
   let entry = register "alice" in
   let original_base_path = entry.base_path in
   (match
@@ -68,7 +66,7 @@ let test_update_entry_rejects_corrupted_result () =
 ;;
 
 let test_unregister_exact_preserves_replacement_lane () =
-  KR.clear ();
+  KR.For_testing.clear ();
   let old_entry = register "alice" in
   let replacement = register "alice" in
   (match KR.unregister_exact old_entry with
@@ -90,7 +88,7 @@ let test_unregister_exact_preserves_replacement_lane () =
 ;;
 
 let test_unregister_exact_accepts_same_lane_record_update () =
-  KR.clear ();
+  KR.For_testing.clear ();
   let observed = register "alice" in
   (match
      KR.update_entry ~base_path "alice" (fun entry ->
@@ -107,7 +105,7 @@ let test_unregister_exact_accepts_same_lane_record_update () =
 ;;
 
 let test_update_entry_exact_preserves_replacement_lane () =
-  KR.clear ();
+  KR.For_testing.clear ();
   let old_entry = register "alice" in
   let replacement = register "alice" in
   (match
@@ -127,7 +125,7 @@ let test_update_entry_exact_preserves_replacement_lane () =
 ;;
 
 let test_dispatch_event_exact_preserves_replacement_lane () =
-  KR.clear ();
+  KR.For_testing.clear ();
   let old_meta = make_meta "alice" in
   let old_entry = KR.register_offline ~base_path old_meta.name old_meta in
   let replacement = KR.register_offline ~base_path old_meta.name old_meta in
@@ -181,7 +179,7 @@ let test_lane_fork_rejects_cancelling_switch () =
 ;;
 
 let test_dispatch_write_failure_skips_phase_side_effects () =
-  KR.clear ();
+  KR.For_testing.clear ();
   KLH.reset_for_testing ();
   Fun.protect
     ~finally:(fun () -> KLH.reset_for_testing ())
@@ -202,7 +200,7 @@ let test_dispatch_write_failure_skips_phase_side_effects () =
 ;;
 
 let test_get_filters_corrupted_entry () =
-  KR.clear ();
+  KR.For_testing.clear ();
   let entry = register "alice" in
   let corrupted =
     { entry with
@@ -225,7 +223,7 @@ let test_get_filters_corrupted_entry () =
 ;;
 
 let test_wakeup_running_reports_typed_outcome () =
-  KR.clear ();
+  KR.For_testing.clear ();
   (match
      KR.wakeup_running ~intent:KR.Hitl_resolution ~base_path "missing"
    with
@@ -254,17 +252,191 @@ let test_wakeup_running_reports_typed_outcome () =
      fail "offline keeper did not return Deferred_not_running")
 ;;
 
-let test_wakeup_denies_dead_tombstone_without_signaling () =
-  KR.clear ();
+let test_wakeup_running_exact_preserves_owner_lane () =
+  KR.For_testing.clear ();
+  let captured = register "exact-owner" in
+  let peer = register "exact-peer" in
+  Atomic.set captured.fiber_wakeup false;
+  Atomic.set peer.fiber_wakeup false;
+  (match KR.wakeup_running_exact ~intent:KR.Reactive_signal captured with
+   | KR.Exact_wake_signaled -> ()
+   | KR.Exact_wake_missing
+   | KR.Exact_wake_replaced
+   | KR.Exact_wake_not_running _
+   | KR.Exact_wake_lifecycle_denied _
+   | KR.Exact_wake_lifecycle_reserved _ ->
+     fail "current exact owner was not signaled");
+  check bool "current exact owner is signaled" true (Atomic.get captured.fiber_wakeup);
+  check bool "peer remains untouched" false (Atomic.get peer.fiber_wakeup);
+  Atomic.set captured.fiber_wakeup false;
+  (match
+     KR.update_entry ~base_path "exact-owner" (fun entry ->
+       { entry with last_error = Some "immutable record update" })
+   with
+   | Ok () -> ()
+   | Error error -> fail (KR.registry_entry_validation_error_to_string error));
+  (match KR.wakeup_running_exact ~intent:KR.Reactive_signal captured with
+   | KR.Exact_wake_signaled -> ()
+   | KR.Exact_wake_missing
+   | KR.Exact_wake_replaced
+   | KR.Exact_wake_not_running _
+   | KR.Exact_wake_lifecycle_denied _
+   | KR.Exact_wake_lifecycle_reserved _ ->
+     fail "same-lane immutable update changed exact ownership");
+  check bool "same lane record update remains signalable" true
+    (Atomic.get captured.fiber_wakeup);
+  Atomic.set captured.fiber_wakeup false;
+  let replacement = register "exact-owner" in
+  Atomic.set replacement.fiber_wakeup false;
+  Atomic.set peer.fiber_wakeup false;
+  (match KR.wakeup_running_exact ~intent:KR.Reactive_signal captured with
+   | KR.Exact_wake_replaced -> ()
+   | KR.Exact_wake_signaled
+   | KR.Exact_wake_missing
+   | KR.Exact_wake_not_running _
+   | KR.Exact_wake_lifecycle_denied _
+   | KR.Exact_wake_lifecycle_reserved _ ->
+     fail "stale exact owner did not report replacement");
+  check bool "replaced captured lane is not signaled" false
+    (Atomic.get captured.fiber_wakeup);
+  check bool "replacement lane is not signaled" false
+    (Atomic.get replacement.fiber_wakeup);
+  check bool "peer remains untouched after replacement" false
+    (Atomic.get peer.fiber_wakeup)
+;;
+
+let test_wakeup_running_exact_reports_deferred_outcomes () =
+  KR.For_testing.clear ();
+  let removed = register "exact-missing" in
+  KR.For_testing.clear ();
+  (match KR.wakeup_running_exact ~intent:KR.Reactive_signal removed with
+   | KR.Exact_wake_missing -> ()
+   | KR.Exact_wake_signaled
+   | KR.Exact_wake_replaced
+   | KR.Exact_wake_not_running _
+   | KR.Exact_wake_lifecycle_denied _
+   | KR.Exact_wake_lifecycle_reserved _ ->
+     fail "removed exact owner did not report missing");
+  let offline_meta = make_meta "exact-offline" in
+  let offline = KR.register_offline ~base_path offline_meta.name offline_meta in
+  (match KR.wakeup_running_exact ~intent:KR.Reactive_signal offline with
+   | KR.Exact_wake_not_running phase ->
+     check string "exact deferred phase" "offline" (KSM.phase_to_string phase)
+   | KR.Exact_wake_signaled
+   | KR.Exact_wake_missing
+   | KR.Exact_wake_replaced
+   | KR.Exact_wake_lifecycle_denied _
+   | KR.Exact_wake_lifecycle_reserved _ ->
+     fail "offline exact owner did not report phase");
+  let paused_meta = { (make_meta "exact-paused") with paused = true } in
+  let paused = KR.For_testing.register ~base_path paused_meta.name paused_meta in
+  (match KR.wakeup_running_exact ~intent:KR.Reactive_signal paused with
+   | KR.Exact_wake_lifecycle_denied
+       (Keeper_lifecycle_admission.Autonomous_paused _) -> ()
+   | KR.Exact_wake_signaled
+   | KR.Exact_wake_missing
+   | KR.Exact_wake_replaced
+   | KR.Exact_wake_not_running _
+   | KR.Exact_wake_lifecycle_denied
+       Keeper_lifecycle_admission.Autonomous_dead_tombstone
+   | KR.Exact_wake_lifecycle_reserved _ ->
+     fail "paused exact owner did not report lifecycle denial")
+;;
+
+let test_wakeup_running_exact_respects_lifecycle_owner_and_replacement () =
+  KR.For_testing.clear ();
+  let captured = register "exact-reserved" in
+  Atomic.set captured.fiber_wakeup false;
+  let token =
+    match
+      Reservation.acquire
+        ~base_path
+        ~keeper_name:captured.name
+        ~expected_generation:captured.meta.runtime.generation
+        ~purpose:Reservation.Dead_revival
+    with
+    | Ok token -> token
+    | Error _ -> fail "exact wake test could not acquire lifecycle ownership"
+  in
+  let replacement =
+    Fun.protect
+      ~finally:(fun () -> ignore (Reservation.release token : Reservation.release_outcome))
+      (fun () ->
+         (match KR.wakeup_running_exact ~intent:KR.Supervisor_resume captured with
+          | KR.Exact_wake_lifecycle_reserved owner ->
+            check string "reservation owner is reported"
+              (Reservation.owner_id token)
+              owner.owner_id
+          | KR.Exact_wake_signaled
+          | KR.Exact_wake_missing
+          | KR.Exact_wake_replaced
+          | KR.Exact_wake_not_running _
+          | KR.Exact_wake_lifecycle_denied _ ->
+            fail "unowned exact wake crossed lifecycle ownership");
+         check bool "reserved captured lane is not signaled" false
+           (Atomic.get captured.fiber_wakeup);
+         let replacement_meta = make_meta captured.name in
+         let replacement =
+           match
+             KR.register_offline_if_admitted_for_lifecycle
+               token
+               ~base_path
+               captured.name
+               replacement_meta
+           with
+           | Ok replacement -> replacement
+           | Error _ -> fail "lifecycle owner could not install replacement lane"
+         in
+         Atomic.set replacement.fiber_wakeup false;
+         (match KR.wakeup_running_exact ~intent:KR.Supervisor_resume captured with
+          | KR.Exact_wake_lifecycle_reserved _ -> ()
+          | KR.Exact_wake_signaled
+          | KR.Exact_wake_missing
+          | KR.Exact_wake_replaced
+          | KR.Exact_wake_not_running _
+          | KR.Exact_wake_lifecycle_denied _ ->
+            fail "exact wake observed an in-transaction replacement");
+         check bool "in-transaction replacement is not signaled" false
+           (Atomic.get replacement.fiber_wakeup);
+         replacement)
+  in
+  Atomic.set replacement.fiber_wakeup false;
+  (match KR.wakeup_running_exact ~intent:KR.Supervisor_resume captured with
+   | KR.Exact_wake_replaced -> ()
+   | KR.Exact_wake_signaled
+   | KR.Exact_wake_missing
+   | KR.Exact_wake_not_running _
+   | KR.Exact_wake_lifecycle_denied _
+   | KR.Exact_wake_lifecycle_reserved _ ->
+     fail "post-transaction stale wake did not report replacement");
+  check bool "stale lane stays unsignaled after replacement" false
+    (Atomic.get captured.fiber_wakeup);
+  check bool "replacement lane stays unsignaled" false
+    (Atomic.get replacement.fiber_wakeup)
+;;
+
+let test_wakeup_denies_paused_and_dead_without_signaling () =
+  KR.For_testing.clear ();
+  let paused_meta = { (make_meta "paused-wakeup") with paused = true } in
+  let paused_entry = KR.For_testing.register ~base_path paused_meta.name paused_meta in
+  Atomic.set paused_entry.fiber_wakeup false;
+  (match KR.wakeup_running ~intent:KR.Scheduled_signal ~base_path paused_meta.name with
+   | KR.Deferred_lifecycle (Keeper_lifecycle_admission.Autonomous_paused _) -> ()
+   | KR.Signaled
+   | KR.Deferred_unregistered
+   | KR.Deferred_not_running _
+   | KR.Deferred_lifecycle Keeper_lifecycle_admission.Autonomous_dead_tombstone ->
+     fail "paused wake was not lifecycle-deferred");
+  check bool "paused wake flag remains false" false (Atomic.get paused_entry.fiber_wakeup);
   let meta =
     { (make_meta "dead-wakeup") with
       paused = true
     ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
     }
   in
-  let entry = KR.register ~base_path meta.name meta in
+  let entry = KR.For_testing.register ~base_path meta.name meta in
   Atomic.set entry.fiber_wakeup false;
-  (match KR.wakeup ~intent:KR.Scheduled_signal ~base_path meta.name with
+  (match KR.wakeup_running ~intent:KR.Scheduled_signal ~base_path meta.name with
    | KR.Deferred_lifecycle
        Keeper_lifecycle_admission.Autonomous_dead_tombstone -> ()
    | KR.Signaled
@@ -293,7 +465,84 @@ let cleanup_dir path =
         Unix.rmdir target)
       else Unix.unlink target
   in
-  try rm path with _ -> ()
+  match rm path with
+  | () -> ()
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+;;
+
+let test_reactive_wakeup_defers_offline_lane_after_queue_commit () =
+  let dir = temp_dir "registry_reactive_offline_wakeup" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.For_testing.clear ();
+      cleanup_dir dir)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       KR.For_testing.clear ();
+       let meta = make_meta "reactive-offline" in
+       let entry = KR.register_offline ~base_path:dir meta.name meta in
+       let stimulus : Keeper_event_queue.stimulus =
+         { post_id = "reactive-offline-stimulus"
+         ; urgency = Keeper_event_queue.Normal
+         ; arrived_at = 1.0
+         ; payload = Keeper_event_queue.Bootstrap
+         }
+       in
+       Atomic.set entry.fiber_wakeup false;
+       Masc.Keeper_keepalive_signal.wakeup_keeper
+         ~base_path:dir
+         ~stimulus
+         meta.name;
+       check bool "offline reactive wake flag remains clear" false
+         (Atomic.get entry.fiber_wakeup);
+       match
+         Masc.Keeper_registry_event_queue.snapshot ~base_path:dir meta.name
+         |> Keeper_event_queue.to_list
+       with
+       | [ { post_id; payload = Keeper_event_queue.Bootstrap; _ } ] ->
+         check string "reactive stimulus remains queued" stimulus.post_id post_id
+       | _ -> fail "reactive stimulus was not retained in the offline lane")
+;;
+
+let test_goal_assignment_defers_offline_lane_after_queue_commit () =
+  let dir = temp_dir "registry_goal_offline_wakeup" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.For_testing.clear ();
+      cleanup_dir dir)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       KR.For_testing.clear ();
+       let config = Masc.Workspace.default_config dir in
+       let meta = make_meta "goal-offline" in
+       let entry =
+         KR.register_offline ~base_path:config.base_path meta.name meta
+       in
+       Atomic.set entry.fiber_wakeup false;
+       let added =
+         Masc.Keeper_goal_assignment_wake.enqueue_goal_assigned_wakes
+           ~config
+           ~keeper_name:meta.name
+           ~assigned_by:"test"
+           ~old_ids:[]
+           ~new_ids:[ "goal-offline-1" ]
+           ()
+       in
+       check (list string) "new goal is reported" [ "goal-offline-1" ] added;
+       check bool "offline goal wake flag remains clear" false
+         (Atomic.get entry.fiber_wakeup);
+       match
+         Masc.Keeper_registry_event_queue.snapshot
+           ~base_path:config.base_path
+           meta.name
+         |> Keeper_event_queue.to_list
+       with
+       | [ { payload = Keeper_event_queue.Goal_assigned assignment; _ } ] ->
+         check string "queued goal id" "goal-offline-1" assignment.ga_goal_id;
+         check string "queued assignment actor" "test" assignment.ga_assigned_by
+       | _ -> fail "goal assignment was not retained in the offline lane")
 ;;
 
 let contains_substring text needle =
@@ -306,49 +555,102 @@ let contains_substring text needle =
   needle_len = 0 || loop 0
 ;;
 
-let test_tool_dispatch_fallback_uses_original_meta () =
-  let dir = temp_dir "registry_fallback" in
+let test_tool_dispatch_preserves_exact_meta_after_replacement () =
+  let dir = temp_dir "registry_exact_turn_meta" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
        Eio_main.run @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Masc.Workspace.default_config dir in
-       let meta = make_meta "fallback-keeper" in
+       let meta =
+         { (make_meta "fallback-keeper") with
+           allowed_paths = [ config.base_path ]
+         }
+       in
+       let evidence = "exact-turn-meta-evidence" in
+       let evidence_path = Filename.concat config.base_path "exact-meta.txt" in
+       Out_channel.with_open_bin evidence_path (fun channel ->
+         Out_channel.output_string channel evidence);
        let ctx_work =
          Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
-           ~max_tokens:4000
        in
-       ignore (KR.register ~base_path:config.base_path meta.name meta);
+       let _original_entry =
+         KR.For_testing.register ~base_path:config.base_path meta.name meta
+       in
        Fun.protect
-         ~finally:(fun () -> KR.unregister ~base_path:config.base_path meta.name)
+         ~finally:(fun () -> KR.For_testing.unregister ~base_path:config.base_path meta.name)
          (fun () ->
+            let provider_reads = Atomic.make 0 in
+            let provider () =
+              Atomic.incr provider_reads;
+              Masc.Keeper_publication_recovery_availability.Non_runtime
+            in
+            let exact_resources =
+              match
+                Masc.Keeper_publication_recovery_scope.resolve_turn_resources
+                  ~provider
+                  ~base_path:config.base_path
+                  ~keeper_name:meta.name
+              with
+              | Ok resources -> resources
+              | Error failure ->
+                fail
+                  (Masc.Keeper_publication_recovery_scope.failure_to_string
+                     failure)
+            in
+            let replacement_meta =
+              { meta with
+                allowed_paths = [ Filename.concat config.base_path "other" ]
+              }
+            in
+            let replacement =
+              KR.For_testing.register
+                ~base_path:config.base_path
+                replacement_meta.name
+                replacement_meta
+            in
             (match KR.get_with_health ~base_path:config.base_path meta.name with
-             | None -> fail "registered entry not found"
-             | Some (entry, _) ->
-               let corrupted_meta =
-                 { entry.meta with
-                   name = "wrong-name"
-                 ; tool_denylist = [ "Read" ]
-                 }
-               in
-               let corrupted = { entry with meta = corrupted_meta } in
-               KR.For_testing.unsafe_put_entry ~base_path:config.base_path meta.name corrupted);
+             | Some (current, KR.Healthy) ->
+               check bool "healthy replacement installed" true (current == replacement)
+             | Some (_, health) ->
+               fail
+                 ("replacement is unhealthy: "
+                  ^ KR.registry_entry_validation_error_to_string health)
+             | None -> fail "replacement entry not found");
             let result =
               KET.execute_keeper_tool_call_with_outcome
                 ~config
-                ~meta
+                ~meta:exact_resources.entry.meta
+                ~publication_recovery:exact_resources.publication_recovery
                 ~ctx_work
-                ~exec_cache:None
                 ~name:"Read"
-                ~input:(`Assoc [ ("file_path", `String "config/tool_policy.toml") ])
+                ~input:(`Assoc [ ("file_path", `String evidence_path) ])
                 ()
             in
+            (match result.disposition with
+             | Tool_result.Completed () -> ()
+             | Tool_result.Deferred () ->
+               failf
+                 "exact admitted meta dispatch was unexpectedly deferred: %s"
+                 result.raw_output
+             | Tool_result.Failed failure_class ->
+               failf
+                 "exact admitted meta dispatch failed (%s): %s"
+                 (Tool_result.tool_failure_class_to_string failure_class)
+                 result.raw_output);
+            let content =
+              Yojson.Safe.from_string result.raw_output
+              |> Yojson.Safe.Util.member "content"
+              |> Yojson.Safe.Util.to_string
+            in
             check
-              bool
-              "fallback used original meta (Read not denied by corrupted registry entry)"
-              false
-              (contains_substring result.raw_output "\"error\":\"tool_not_allowed\"")))
+              string
+              "dispatch uses exact admitted meta, not same-name replacement meta"
+              evidence
+              content;
+            check int "read path never reads recovery provider" 0
+              (Atomic.get provider_reads)))
 ;;
 
 let () =
@@ -395,19 +697,41 @@ let () =
         ] )
     ; ( "get_with_health"
       , [ test_case "get filters corrupted entry" `Quick test_get_filters_corrupted_entry ] )
-    ; ( "wakeup_running"
+    ; ( "wakeup"
       , [ test_case
             "reports signaled and deferred outcomes"
             `Quick
             test_wakeup_running_reports_typed_outcome
         ; test_case
-            "dead tombstone never receives runnable signal"
+            "paused and dead keepers never receive runnable signal"
             `Quick
-            test_wakeup_denies_dead_tombstone_without_signaling
+            test_wakeup_denies_paused_and_dead_without_signaling
+        ; test_case
+            "exact wake signals only the captured owner lane"
+            `Quick
+            test_wakeup_running_exact_preserves_owner_lane
+        ; test_case
+            "exact wake reports missing, phase, and lifecycle outcomes"
+            `Quick
+            test_wakeup_running_exact_reports_deferred_outcomes
+        ; test_case
+            "exact wake serializes lifecycle ownership and replacement"
+            `Quick
+            test_wakeup_running_exact_respects_lifecycle_owner_and_replacement
         ] )
-    ; ( "tool_dispatch_fallback"
-      , [ test_case "uses original meta on corrupted registry entry" `Quick
-            test_tool_dispatch_fallback_uses_original_meta
+    ; ( "wakeup_callers"
+      , [ test_case
+            "reactive stimulus persists while offline wake is deferred"
+            `Quick
+            test_reactive_wakeup_defers_offline_lane_after_queue_commit
+        ; test_case
+            "goal assignment persists while offline wake is deferred"
+            `Quick
+            test_goal_assignment_defers_offline_lane_after_queue_commit
+        ] )
+    ; ( "tool_dispatch_exact_resources"
+      , [ test_case "preserves exact meta after healthy entry replacement" `Quick
+            test_tool_dispatch_preserves_exact_meta_after_replacement
         ] )
     ]
 ;;

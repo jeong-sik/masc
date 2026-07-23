@@ -1,7 +1,7 @@
 # Grounding notes — jeong-sik/masc@main (2026-06)
 
 ## Cockpit (components/cockpit/cockpit.ts)
-- Title: "MASC Cockpit" / h1 "Command Map". Layout: left aside = WorldVisualizer (black bg), main = scrollable command map.
+- Title: "MASC Cockpit" / h1 "Command Map". Layout: scrollable command map.
 - 5 planes (PLANE_ORDER): work, comms, observe, cognition, ide
   - Work: "Goals, tasks, and accountability routes" (icon git-branch)
   - Comms: "Board, message, and composer routes" (message-square)

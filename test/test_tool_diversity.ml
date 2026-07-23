@@ -30,8 +30,10 @@ let test_normalized_uniform () =
 
 let test_stats_of_registry () =
   let entries : (string * Keeper_types.tool_call_entry) list = [
-    ("tool_a", { count = 50; successes = 45; failures = 5; last_used_at = 0.0 });
-    ("tool_b", { count = 10; successes = 10; failures = 0; last_used_at = 0.0 });
+    ( "tool_a"
+    , { count = 50; successes = 45; deferred = 0; failures = 5; last_used_at = 0.0 } );
+    ( "tool_b"
+    , { count = 10; successes = 10; deferred = 0; failures = 0; last_used_at = 0.0 } );
   ] in
   let stats = Masc.Keeper_tool_diversity.stats_of_registry_entries entries in
   check int "two stats" 2 (List.length stats);
@@ -47,8 +49,6 @@ let test_underused_tool_metrics_record_aggregate_count () =
       {
         Masc.Keeper_tool_diversity.name = "keeper_board_post";
         count = 100;
-        successes = 100;
-        failures = 0;
       };
     ]
   in

@@ -27,13 +27,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   let tracker = Progress.start_tracking ~task_id ~total_steps:6 () in
   Progress.Tracker.step tracker ~message:"Resolving keeper configuration" ();
   let now_ts = Time_compat.now () in
-  let goal =
-    match p.goal_opt with
-    | Some goal -> normalize_goal_text goal
-    | None ->
-        p.profile_defaults.goal |> Option.value ~default:""
-        |> normalize_goal_text
-  in
   let autoboot_enabled =
     Dashboard_utils.first_some p.autoboot_enabled_opt p.profile_defaults.autoboot_enabled
     |> Option.value ~default:true
@@ -84,11 +77,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       ~fallback_targets:p.profile_defaults.mention_targets
       ~name:p.name
   in
-  if goal = "" then begin
-    Log.Keeper.warn "create_keeper failed: goal is required (name=%s)" p.name;
-    tool_result_error "goal is required when creating a keeper"
-  end
-  else match active_goal_ids_error with
+  match active_goal_ids_error with
   | Some msg -> tool_result_error msg
   | None ->
     match
@@ -103,121 +92,14 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           p.name err;
         tool_result_error err
     | Ok () ->
-        match
-          Keeper_sandbox_runtime.ensure_keeper_startup_preflight
-            ~timeout_sec:(Env_config_sandbox.Preflight.max_timeout_sec ())
-            ~sandbox_profile
-        with
-        | Error err ->
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string LifecycleDispatchRejections)
-              ~labels:[("keeper", p.name); ("event", "create_sandbox_preflight")]
-              ();
-            Log.Keeper.warn "create_keeper failed sandbox preflight for %s: %s"
-              p.name err;
-            tool_result_error err
-        | Ok () ->
-            let max_active_keepers =
-              Keeper_runtime_resolved.bootstrap_max_active_keepers ()
-            in
-            let active_keepers = Keeper_registry.count_running () in
-            if max_active_keepers > 0 && active_keepers >= max_active_keepers then begin
-              Otel_metric_store.inc_counter
-                Keeper_metrics.(to_string LifecycleDispatchRejections)
-                ~labels:[("keeper", p.name); ("event", "create_max_active_reached")]
-                ();
-              Log.Keeper.warn
-                "create_keeper failed: max active keepers reached (%d/%d) for name=%s"
-                active_keepers max_active_keepers p.name;
-              tool_result_error
-                (Printf.sprintf
-                   "keeper max active reached (%d/%d). Stop/remove a keeper or set MASC_KEEPER_MAX_ACTIVE_KEEPERS."
-                   active_keepers
-                   max_active_keepers)
-            end
-            else
-              let proactive_enabled =
+            let proactive_enabled =
                 Option.value
                   ~default:
                     (Option.value ~default:default_proactive_enabled
                        p.profile_defaults.proactive_enabled)
                   p.proactive_enabled_opt
-              in
-              let proactive_idle_sec =
-                Option.value
-                  ~default:
-                    (Option.value ~default:default_proactive_idle_sec
-                       p.profile_defaults.proactive_idle_sec)
-                  p.proactive_idle_sec_opt
-                |> normalize_proactive_idle_sec
-              in
-              let proactive_cooldown_sec =
-                Option.value
-                  ~default:
-                    (Option.value ~default:default_proactive_cooldown_sec
-                       p.profile_defaults.proactive_cooldown_sec)
-                  p.proactive_cooldown_sec_opt
-                |> normalize_proactive_cooldown_sec
-              in
-              let auto_handoff = Option.value ~default:true p.auto_handoff_opt in
-              let handoff_threshold =
-                match p.handoff_threshold_opt with
-                | Some threshold -> threshold
-                | None ->
-                    Runtime_params.get Governance_registry.keeper_handoff_threshold
-              in
-              let handoff_cooldown_sec =
-                match p.handoff_cooldown_sec_opt with
-                | Some cooldown_sec -> cooldown_sec
-                | None ->
-                    Runtime_params.get Governance_registry.keeper_handoff_cooldown_sec
-              in
-              let tool_access =
-                match p.tool_access_opt with
-                | Some access -> access
-                | None ->
-                    (match p.profile_defaults.tool_access with
-                     | Some tools -> normalize_tool_names tools
-                     | None -> [])
-              in
-              let tool_denylist =
-                resolve_tool_name_list
-                  ~preferred:p.tool_denylist_opt
-                  ~fallback:p.profile_defaults.tool_denylist
-              in
+            in
               let instructions = Option.value ~default:"" p.instructions_opt in
-              let (env_ratio_gate, env_message_gate, env_token_gate) =
-                keeper_compaction_policy_from_env ()
-              in
-              let compaction_cooldown_sec =
-                Option.value
-                  ~default:(keeper_compaction_cooldown_sec ())
-                  p.compaction_cooldown_sec_opt
-                |> normalize_compaction_cooldown_sec
-              in
-              let
-                ( compaction_profile,
-                  compaction_ratio_gate,
-                  compaction_message_gate,
-                  compaction_token_gate )
-                =
-                resolve_compaction_policy
-                  ~profile_opt:p.compaction_profile_opt
-                  ~ratio_opt:p.compaction_ratio_gate_opt
-                  ~message_opt:p.compaction_message_gate_opt
-                  ~token_opt:p.compaction_token_gate_opt
-                  ~fallback_profile:default_compaction_profile
-                  ~fallback_ratio:env_ratio_gate
-                  ~fallback_message:env_message_gate
-                  ~fallback_token:env_token_gate
-              in
-              let primary_max_context =
-                match p.max_context_override_opt with
-                | Some v -> v
-                (* Boundary: Keeper consumes an opaque context budget, not a
-                   provider/model identity. *)
-                | None -> Runtime.default_max_context ()
-              in
               Progress.Tracker.step tracker ~message:"Initializing session directory" ();
               let trace_id = generate_trace_id () in
               match Keeper_id.Trace_id.of_string trace_id with
@@ -294,7 +176,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         in
         let system_prompt =
           build_keeper_system_prompt
-            ~goal
             ~instructions
             ~persona_extended
             ~keeper_name:p.name
@@ -303,7 +184,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       in
       let ctx0 =
         Keeper_context_runtime.create ~eio:true ~system_prompt
-          ~max_tokens:primary_max_context
       in
       (* next_generation keys the per-(keeper, trace) counter by the trace_id
          string; episodes live under that same string dir (ensure_dir/of
@@ -311,48 +191,26 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
          [trace_id_t]. Reuse the reservation for metadata and checkpoint
          creation so they cannot diverge. *)
       let generation =
-        Keeper_memory_os_io.next_generation ~keeper_id:p.name ~trace_id
+        Keeper_memory_os_io.next_generation_for_base_path
+          ~base_path:ctx.config.base_path
+          ~keeper_id:p.name
+          ~trace_id
       in
       let meta = {
         id = None;
         name = p.name;
         agent_name = Keeper_identity.keeper_agent_name p.name;
         persona = Some persona_extended;
-        goal;
         instructions;
         sandbox_profile;
         sandbox_image = None;
         network_mode;
         multimodal_policy;
         allowed_paths;
-        tool_access;
-        tool_denylist;
         mention_targets;
         proactive = {
           enabled = proactive_enabled;
-          idle_sec = proactive_idle_sec;
-          cooldown_sec = proactive_cooldown_sec;
         };
-        compaction = {
-          profile = compaction_profile;
-          mode = Keeper_config.keeper_compaction_mode_default ();
-          ratio_gate = compaction_ratio_gate;
-          message_gate = compaction_message_gate;
-          token_gate = compaction_token_gate;
-          cooldown_sec = compaction_cooldown_sec;
-          (* Honour [Keeper_context_core.default_max_checkpoint_messages]
-             instead of the 80 literal that used to ship here.  The
-             literal shadowed the declared default (120) for 13/15
-             keepers.  Per-keeper overrides set by the operator via the
-             keeper JSON still win.  See #7859. *)
-          max_checkpoint_messages =
-            Keeper_context_core.default_max_checkpoint_messages;
-          keep_recent_tool_results =
-            Keeper_config.default_keep_recent_tool_results;
-        };
-        auto_handoff;
-        handoff_threshold;
-        handoff_cooldown_sec;
         created_at = now_iso ();
         updated_at = now_iso ();
         max_context_override = p.max_context_override_opt;
@@ -360,12 +218,11 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           active_goal_ids;
         paused = false;
         latched_reason = None;
-        auto_resume_after_sec = None;
         autoboot_enabled;
         current_task_id = None;
         telemetry_feedback_enabled = p.profile_defaults.telemetry_feedback_enabled;
         telemetry_feedback_window_hours = p.profile_defaults.telemetry_feedback_window_hours;
-        always_approve = p.profile_defaults.always_approve;
+        always_allow = p.profile_defaults.always_allow;
         runtime = {
           usage = {
             total_turns = 0;
@@ -386,6 +243,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_after_tokens = 0;
             last_check_ts = now_ts;
             last_decision = compaction_runtime_decision_of_string "initialized";
+            consecutive_failures = 0;
           };
           proactive_rt = {
             count_total = 0;
@@ -409,7 +267,8 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           board_reactive_turn_count = 0;
           mention_reactive_turn_count = 0;
           noop_turn_count = 0;
-          last_seen_message_seq = 0;
+          message_scope_ack_id = None;
+          transcript_quarantine_consecutive_retries = 0;
 	          last_blocker = None;
 	          last_runtime_attempt = None;
 	          last_turn_tool_calls = [];
@@ -422,30 +281,38 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       let init_save_result =
         try
           Keeper_context_runtime.save_oas_checkpoint
-            ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
             ~multimodal_policy:meta.multimodal_policy
             ~keeper_name:meta.name
             ~session
             ~agent_name:meta.agent_name
             ~ctx:ctx0
             ~generation
+          |> Result.map_error (fun error -> `Write_error error)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
             log_keeper_exn ~label:"save_oas_checkpoint (init) exception" exn;
-            Error (Printexc.to_string exn)
+            Error (`Unexpected_exception (Printexc.to_string exn))
       in
       match init_save_result with
-      | Error e ->
+      | Error error ->
+        let detail =
+          match error with
+          | `Write_error error ->
+            Keeper_context_core.checkpoint_write_error_to_string
+              ~persistence_error_to_string:Fun.id
+              error
+          | `Unexpected_exception detail -> detail
+        in
         Otel_metric_store.inc_counter
           Keeper_metrics.(to_string CheckpointFailures)
           ~labels:[("keeper", p.name); ("site", Keeper_checkpoint_failure_operation.(to_label Create_initial_save))]
           ();
         Log.Keeper.error
           "create_keeper failed: initial checkpoint save error for name=%s: %s"
-          p.name e;
+          p.name detail;
         Progress.stop_tracking task_id;
-        tool_result_error (Printf.sprintf "initial checkpoint save failed: %s" e)
+        tool_result_error (Printf.sprintf "initial checkpoint save failed: %s" detail)
       | Ok _ ->
       let runtime_assignment_result =
         match p.runtime_id_opt with
@@ -483,13 +350,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
         Log.Keeper.info "create_keeper: starting keepalive for name=%s" p.name;
         let launch_outcome = start_keepalive ctx meta in
-        (* Apply per-persona shard configuration if present *)
-        (match p.profile_defaults.shards with
-         | Some (_ :: _ as shard_names) ->
-             Log.Keeper.debug "create_keeper: applying shard config for name=%s shards=%d"
-               p.name (List.length shard_names);
-             Tool_shard.set_agent_shards p.name shard_names
-         | Some [] | None -> ());
         (match launch_outcome with
          | Keepalive_started _ ->
         Progress.Tracker.complete tracker ~message:"Keeper created" ();
@@ -499,30 +359,15 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("agent_name", `String meta.agent_name);
           ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
           ("generation", `Int meta.runtime.generation);
-          ("goal", `String meta.goal);
           ("instructions", `String meta.instructions);
-          ("tool_access", Json_util.json_string_list meta.tool_access);
-          ("tool_denylist",
-            `List (List.map (fun value -> `String value) meta.tool_denylist));
           ("proactive_enabled", `Bool meta.proactive.enabled);
-          ("proactive_idle_sec", `Int meta.proactive.idle_sec);
-          ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
-          ("compaction_profile", `String meta.compaction.profile);
-          ("compaction_mode",
-            `String (Keeper_config.compaction_mode_to_string meta.compaction.mode));
-          ("compaction_ratio_gate", `Float meta.compaction.ratio_gate);
-          ("compaction_message_gate", `Int meta.compaction.message_gate);
-          ("compaction_token_gate", `Int meta.compaction.token_gate);
           ("max_context_override", Json_util.int_opt_to_json meta.max_context_override);
-          ("auto_handoff", `Bool meta.auto_handoff);
-          ("handoff_threshold", `Float meta.handoff_threshold);
           ("oas_env", `Assoc (List.map (fun (k, v) -> (k, `String v)) meta.oas_env));
         ] in
-        tool_result_ok (Yojson.Safe.to_string json)
+        tool_result_ok_data json
          | ( Keepalive_already_registered _
            | Keepalive_lifecycle_denied _
            | Keepalive_identity_unrepairable
-           | Keepalive_spawn_slot_denied _
            | Keepalive_registration_rejected _
            | Keepalive_fiber_start_rejected _
            | Keepalive_lane_ownership_lost

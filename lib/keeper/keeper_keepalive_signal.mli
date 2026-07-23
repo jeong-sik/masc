@@ -14,32 +14,26 @@ val record_wake_payload :
   keeper_name:string ->
   trace_id:string ->
   turn_index:int ->
-  model_id:string ->
   context_window:int ->
-  approx_body_bytes:int ->
   system_prompt_bytes:int ->
-  tool_defs_bytes:int ->
-  messages_bytes:int ->
+  tool_schema_json_bytes:int ->
+  message_content_bytes:int ->
   message_count:int ->
   role_counts:(string * int) list ->
   tool_count:int ->
-  has_compact_happened:bool ->
   unit
 
 val register_record_wake_payload :
   (keeper_name:string ->
    trace_id:string ->
    turn_index:int ->
-   model_id:string ->
    context_window:int ->
-   approx_body_bytes:int ->
    system_prompt_bytes:int ->
-   tool_defs_bytes:int ->
-   messages_bytes:int ->
+   tool_schema_json_bytes:int ->
+   message_content_bytes:int ->
    message_count:int ->
    role_counts:(string * int) list ->
    tool_count:int ->
-   has_compact_happened:bool ->
    unit) ->
   unit
 
@@ -99,13 +93,8 @@ val post_submit_task : meta:keeper_meta -> task_id:Keeper_id.Task_id.t -> unit
 val post_heartbeat_tick : wakeup:bool Atomic.t -> unit
 
 (** Outcome of an [interruptible_sleep] call. Mirrors the three terminal
-    branches of the polling loop, so callers can react to "woken by an
-    external signal" distinctly from "slept the full duration".
-
-    Closing the [Skip_idle] half of the [MissedWakeup] gap (see
-    [specs/keeper-state-machine/KeeperHeartbeat.tla]) requires
-    discriminating [`Woken`] from [`Timeout`] at the call site — sibling
-    fix #10078 covered [Skip_busy] without exposing this distinction. *)
+    branches of the polling loop, so callers can distinguish an exact Keeper
+    wake from the configured heartbeat cadence. *)
 type sleep_outcome =
   | Stopped   (** [stop] atomic was observed [true] before the duration
                   elapsed. *)
@@ -124,74 +113,16 @@ val interruptible_sleep :
 
     When [?stimulus] is given, the stimulus is durably appended to the keeper's
     Event Layer queue ([Keeper_registry_event_queue.enqueue]) independently of
-    lifecycle phase. Only the wake hint is restricted to [Running]. If no live
-    registry entry exists, callers must supply [base_path] so the payload can
-    be persisted for replay. Callers that only need to break the keeper out of
-    [interruptible_sleep] may omit the stimulus. See RFC-0020 §3 (data channel
-    vs hint signal). *)
+    lifecycle phase. The wake hint is sent only to a lifecycle-admitted Running
+    Keeper; inactive, paused, and dead-tombstone lanes retain the durable event
+    without a false delivery claim. If no live registry entry exists, callers
+    must supply [base_path] so the payload can be persisted for replay. Callers
+    that only need to break the keeper out of [interruptible_sleep] may omit the
+    stimulus. See RFC-0020 §3 (data channel vs hint signal). *)
 val wakeup_keeper :
   ?base_path:string ->
   ?stimulus:Keeper_event_queue.stimulus ->
   string -> unit
-
-(** Wake up all running keepers. [None] preserves legacy global wakeup. *)
-val wakeup_all_keepers : ?base_path:string -> unit -> unit
-
-(** Board-reactive debounce interval (seconds), from runtime config. *)
-val board_reactive_debounce_sec : float
-
-(** Connector-reactive (ambient connector message) debounce interval, seconds.
-    RFC-connector-ambient-attention-wake P4. *)
-val connector_reactive_debounce_sec : float
-
-val connector_reactive_wakeup_allowed :
-  base_path:string -> keeper_name:string -> channel_id:string -> bool
-(** Whether an ambient connector message on [channel_id] may wake [keeper_name]
-    now. Reuses the board-reactive primitive: the RFC-0246 tombstone gate (a
-    latched no-progress keeper is not re-woken) plus a per-channel debounce
-    ({!connector_reactive_debounce_sec}). Returns [false] within the debounce
-    window so a chatty channel wakes the keeper at most once per window; the
-    keeper then sees every accumulated message in its chat history. Records the
-    wakeup timestamp as a side effect when it returns [true]. *)
-
-val board_reactive_wakeup_max : int
-
-(** [board_wakeup_dedup_key] is the content fingerprint a board wakeup is
-    deduped under (RFC-0239 R4): normalized (author,title,content), or the
-    [post_id] when title+content are empty. Exposed for testing. *)
-val board_wakeup_dedup_key :
-  post_id:string -> author:string -> title:string -> content:string -> string
-
-(** Check if a board-reactive wakeup is allowed for [keeper_name] given the
-    incoming [signal]. Debounced on the signal's content fingerprint
-    (RFC-0239 R4), not its post_id, so identical re-posts collapse. *)
-val board_reactive_wakeup_allowed :
-  base_path:string
-  -> keeper_name:string
-  -> signal:Board_dispatch.board_signal
-  -> bool
-
-(** True when a paused keeper may be resumed by board-reactive wakeup.
-    Operator-owned pauses have [auto_resume_after_sec = None] and are not
-    resumed implicitly by board posts or comments. *)
-val paused_meta_allows_board_auto_resume : keeper_meta -> bool
-
-(** Select which keepers wake for a board signal (RFC-0020). Explicit
-    mentions short-circuit and wake unconditionally; thread-reply/reaction
-    followups compete for [?total_limit] immediate-wake slots in candidate
-    order. [None] reasons receive nothing (no deterministic address).
-    Semantic relatedness is not a deterministic board wake reason; it belongs
-    behind an LLM/Judge attention boundary.
-
-    RFC-0334 W1: returns [(selected, deferred)] — the wake budget bounds
-    wakes, not delivery. [deferred] carries every addressed followup beyond
-    the budget (cap overflow, or all followups when an explicit mention
-    short-circuits); the caller appends the stimulus to their mailboxes. *)
-val select_board_wakeup_candidates :
-  ?total_limit:int ->
-  ('a * Keeper_world_observation_board_signal.wake_reason option) list ->
-  ('a * Keeper_world_observation_board_signal.wake_reason) list
-  * ('a * Keeper_world_observation_board_signal.wake_reason) list
 
 val wakeup_relevant_keeper_for_board_signal :
   config:Workspace.config -> Board_dispatch.board_signal -> unit
@@ -202,7 +133,6 @@ type stage_timing = {
   snapshot_ms : float;
   board_ms : float;
   turn_ms : float;
-  recurring_ms : float;
 }
 
 val stage_timing_ring_size : unit -> int

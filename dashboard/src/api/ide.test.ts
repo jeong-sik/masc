@@ -40,6 +40,7 @@ const annotation = {
   content: 'Review this line',
   goal_id: null,
   task_id: null,
+  references: [],
   created_at_ms: 1,
   updated_at_ms: 1,
 }
@@ -121,8 +122,40 @@ describe('ide API', () => {
     )
   })
 
-  it('createIdeAnnotation relies on token identity and appends workspace params', async () => {
-    stubFetch({ ok: true, data: annotation })
+  it('fetchIdeAnnotations preserves opaque references without interpreting their relation', async () => {
+    const references = [
+      { relation: 'evidence', reference: 'urn:example:42' },
+      { relation: 'source', reference: 'opaque-value' },
+    ]
+    stubFetch({ ok: true, data: [{ ...annotation, references }] })
+
+    await expect(fetchIdeAnnotations()).resolves.toEqual([{ ...annotation, references }])
+  })
+
+  it.each([
+    null,
+    [{ relation: '', reference: 'opaque-value' }],
+    [{ relation: 'evidence', reference: '' }],
+    [{ relation: 'evidence', reference: 'opaque-value', extra: true }],
+  ])('fetchIdeAnnotations rejects malformed opaque references: %j', async references => {
+    stubFetch({ ok: true, data: [{ ...annotation, references }] })
+
+    await expect(fetchIdeAnnotations()).rejects.toThrow(
+      'fetchIdeAnnotations returned malformed row at index 0',
+    )
+  })
+
+  it('fetchIdeAnnotations rejects unknown annotation fields', async () => {
+    stubFetch({ ok: true, data: [{ ...annotation, legacy_route: 'opaque-value' }] })
+
+    await expect(fetchIdeAnnotations()).rejects.toThrow(
+      'fetchIdeAnnotations returned malformed row at index 0',
+    )
+  })
+
+  it('createIdeAnnotation relies on token identity and forwards opaque references', async () => {
+    const references = [{ relation: 'evidence', reference: 'urn:example:42' }]
+    stubFetch({ ok: true, data: { ...annotation, references } })
 
     await createIdeAnnotation({
       file_path: 'lib/a.ml',
@@ -130,6 +163,7 @@ describe('ide API', () => {
       line_end: 1,
       kind: 'Comment',
       content: 'Review this line',
+      references,
     }, { keeper: 'sangsu', repoId: 'masc' })
 
     const url = String(mockFetch.mock.calls[0]![0])
@@ -139,6 +173,7 @@ describe('ide API', () => {
     expect(url).toContain('keeper=sangsu')
     expect(url).toContain('repo_id=masc')
     expect(body).not.toHaveProperty('keeper_id')
+    expect(body.references).toEqual(references)
   })
 
   it('createIdeAnnotation rejects failed envelopes instead of returning null', async () => {
@@ -263,7 +298,6 @@ describe('ide API', () => {
           latency_ms: 50,
           summary: 'ran command',
           file_path: 'lib/a.ml',
-          command_descriptor: null,
           timestamp_ms: '1717400000000',
         }],
       },

@@ -243,7 +243,7 @@ export function filterGoalRelations(
     const goal = resolve(id)
     if (!goal) return false
     if (goal.title.toLowerCase().includes(needle)) return true
-    if (goal.status.toLowerCase().includes(needle)) return true
+    if (goal.phase.toLowerCase().includes(needle)) return true
     if (goal.metric && goal.metric.toLowerCase().includes(needle)) return true
     return false
   })

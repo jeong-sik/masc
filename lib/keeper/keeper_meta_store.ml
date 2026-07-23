@@ -42,25 +42,8 @@ let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string)
          Error e))
 ;;
 
-(** Sidecar stem suffixes (without the trailing .json).
-    A file like [sangsu.dataset.json] has stem [sangsu.dataset]; stripping
-    [.json] and checking [String.ends_with ~suffix] on this stem filters
-    sidecars while allowing keeper names that contain dots (e.g.
-    [dot.name.json]). When adding a new sidecar kind, add its dot-prefixed
-    suffix here. *)
-let keeper_sidecar_stem_suffixes = [ ".dataset" ]
-
 let is_keeper_meta_file f =
-  if not (Filename.check_suffix f ".json")
-  then false
-  else (
-    let stem = Filename.chop_suffix f ".json" in
-    stem <> ""
-    && not
-         (List.exists
-            (fun suf ->
-               String.length stem > String.length suf && String.ends_with ~suffix:suf stem)
-            keeper_sidecar_stem_suffixes))
+  Option.is_some (Keeper_runtime_root_entry.metadata_keeper_name f)
 ;;
 
 let persisted_keeper_names_result config =
@@ -75,8 +58,7 @@ let persisted_keeper_names_result config =
   | Ok files ->
     Ok
       (files
-       |> List.filter is_keeper_meta_file
-       |> List.map Filename.remove_extension
+       |> List.filter_map Keeper_runtime_root_entry.metadata_keeper_name
        |> List.filter validate_name
        |> List.sort String.compare)
 ;;
@@ -106,7 +88,8 @@ let keeper_names config =
      JSON files are scoped to the server's base_path, so test isolation works.
      Overlay keepers (from .masc/config/keepers/*.toml) are materialized to
      JSON at boot by load_or_materialize_boot_meta, so they appear here too.
-     Sidecar files (.dataset) are filtered by is_keeper_meta_file. *)
+     Every canonical root [.json] is metadata authority; retired dataset
+     exports no longer compete for the same basename. *)
   match keeper_names_result config with
   | Ok names -> names
   | Error msg ->
@@ -163,26 +146,6 @@ let keepalive_keeper_names config =
         ();
       Log.Keeper.warn
         "keepalive_keeper_names: meta read failed for %s, dropping from keepalive set: %s"
-        name
-        msg;
-      None)
-;;
-
-let paused_reconcile_keeper_names config =
-  configured_keeper_names config
-  |> List.filter_map (fun name ->
-    match read_meta_file_path (keeper_meta_path config name) with
-    | Ok (Some meta) when meta.paused && effective_autoboot_enabled config name meta ->
-      Some meta.name
-    | Ok (Some _)
-    | Ok None -> None
-    | Error msg ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string MetaReadFailures)
-        ~labels:[("keeper", name); ("site", "paused_reconcile_read")]
-        ();
-      Log.Keeper.warn
-        "paused_reconcile_keeper_names: meta read failed for %s, dropping from paused reconcile set: %s"
         name
         msg;
       None)
@@ -331,6 +294,10 @@ type write_meta_error =
   | Lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
   | Read_failed of string
   | Persist_failed of string
+  | Invariant_violation of
+      { keeper_name : string
+      ; detail : string
+      }
 
 let write_meta_error_to_string = function
   | Version_conflict { keeper_name; expected; actual } ->
@@ -339,6 +306,8 @@ let write_meta_error_to_string = function
       keeper_name
       expected
       actual
+  | Invariant_violation { keeper_name; detail } ->
+    Printf.sprintf "meta invariant violation for %s: %s" keeper_name detail
   | Lifecycle_reserved owner ->
     Printf.sprintf
       "keeper lifecycle transaction reserved metadata mutation: %s"
@@ -352,6 +321,15 @@ let write_meta_error_to_string = function
    never overwrite the disk snapshot. *)
 let write_meta_typed ?lifecycle_token config (m : Keeper_meta_contract.keeper_meta) =
   let path = keeper_meta_path config m.name in
+  (* Write-boundary invariant (fail-closed): never persist [paused=false] with
+     a terminal [Dead_tombstone] latch. That split is un-recoverable (lifecycle
+     admission denies by the latch alone) and is only produced by a writer that
+     cleared [paused] without clearing the latch. Rejecting here — rather than
+     silently repairing — forces resume writers through [mark_resumed] / dead
+     revival, keeping the illegal state unrepresentable on disk. *)
+  match Keeper_meta_contract.dead_tombstone_pause_violation m with
+  | Some detail -> Error (Invariant_violation { keeper_name = m.name; detail })
+  | None ->
   Keeper_lifecycle_reservation.with_key_lock
     ~base_path:config.Workspace.base_path
     ~keeper_name:m.name
@@ -421,11 +399,10 @@ let is_version_conflict_error msg =
 
 (* Keys deliberately deleted from persisted keeper meta. Dropping is
    destructive, so membership is EXPLICIT — a key is listed only after
-   BOTH codec sides stopped knowing it. Deriving this set instead
-   (canonical/config complement) was refuted twice: [compaction_mode]
-   (keeper_meta_json_parse.ml, fail-closed persisted override) and
-   [keeper_name] (keeper_identity.ml, wins over [name]) are
-   parser-consumed yet in neither derived list, and a derived drop
+   BOTH codec sides stopped knowing it. Deriving this set instead was
+   refuted by [keeper_name] (keeper_identity.ml, wins over [name]),
+   which is parser-consumed yet absent from the canonical serializer;
+   a derived drop
    would silently destroy them. Forgetting to extend THIS list is
    fail-safe: the file merely keeps triggering the unknown-keys
    warning until the key is added here. *)
@@ -502,7 +479,7 @@ let write_meta_with_merge_internal
     match write_meta_typed ?lifecycle_token config caller with
     | Ok () -> Ok ()
     | Error error when n >= max_retries -> Error (write_meta_error_to_string error)
-    | Error ((Lifecycle_reserved _ | Read_failed _ | Persist_failed _) as error) ->
+    | Error ((Lifecycle_reserved _ | Read_failed _ | Persist_failed _ | Invariant_violation _) as error) ->
       Error (write_meta_error_to_string error)
     | Error (Version_conflict _) ->
       (match read_meta_file_path path with
@@ -539,6 +516,124 @@ let write_meta_with_merge_for_lifecycle token ?max_retries ~merge config m =
     ~merge
     config
     m
+;;
+
+(* Durable write-through of [compaction_rt.last_decision].
+
+   The status/dashboard read paths (read_meta_resolved / keepers_dashboard_json)
+   surface [last_compaction_decision] from the on-disk meta, not from the
+   in-memory registry. The reactive provider-overflow failure path stamps the
+   decision onto the registry entry (in-memory) and the turn-failure path had
+   already flushed [updated_meta] — derived from the pre-overflow meta, without
+   this decision — to disk before recovery ran. Persisting here is the only path
+   that makes the reactive overflow reason durable, so it is both readable by
+   status and preserved across a restart.
+
+   Read the current on-disk meta (already carrying the just-written turn-failure
+   metrics), stamp only [last_decision], and write back with a field-level merge
+   so a concurrent heartbeat/turn CAS race re-applies the stamp instead of
+   dropping it. [`No_durable_meta] is a distinct, non-fatal outcome (keeper meta
+   never persisted) rather than a swallowed error. *)
+let persist_compaction_decision config ~keeper_name ~decision
+  : ([ `Persisted | `No_durable_meta ], string) result
+  =
+  let stamp (m : Keeper_meta_contract.keeper_meta) =
+    Keeper_meta_contract.map_compaction_rt
+      (fun rt ->
+        { rt with last_decision = decision })
+      m
+  in
+  match read_meta config keeper_name with
+  | Error msg -> Error msg
+  | Ok None -> Ok `No_durable_meta
+  | Ok (Some disk_meta) ->
+    write_meta_with_merge
+      ~merge:(fun ~latest ~caller:_ -> stamp latest)
+      config
+      (stamp disk_meta)
+    |> Result.map (fun () -> `Persisted)
+;;
+
+(* RFC-0351 S0 / #25461, #25538: advance the streak that the heartbeat
+   settlement reads to choose requeue-vs-escalate.  Same read/stamp/merge
+   shape as [persist_compaction_decision] so a concurrent CAS re-applies the
+   stamp instead of dropping it.
+
+   Reset semantics (#25538): the streak counts consecutive provider-overflow
+   episodes, and only a turn that completes without overflow — or an
+   operator-committed manual compaction — resets it.  An in-lane (reactive)
+   commit advances the streak instead of resetting it: a committed plan that
+   saves 920B of a checkpoint (0.07%, live measurement) used to reset the
+   counter on every loop iteration, so an incompressible floor never reached
+   the ceiling.
+
+   [`Committed]/[`Overflow_episode_committed] also advance [count].  That
+   field had no writer: it was serialized to meta and rendered by the
+   dashboard while nothing incremented it, so a keeper whose compaction
+   pipeline was committing normally still reported compaction_count=0 — one
+   keeper carried 88 committed [context_compacted] runtime-manifest records
+   against a meta reading 0. *)
+let persist_compaction_outcome config ~keeper_name ~outcome
+  : ([ `Persisted | `No_durable_meta ], string) result
+  =
+  let stamp (m : Keeper_meta_contract.keeper_meta) =
+    Keeper_meta_contract.map_compaction_rt
+      (fun rt ->
+        match outcome with
+        | `Committed -> { rt with count = rt.count + 1; consecutive_failures = 0 }
+        | `Overflow_episode_committed ->
+          { rt with
+            count = rt.count + 1
+          ; consecutive_failures = rt.consecutive_failures + 1
+          }
+        | `Failed -> { rt with consecutive_failures = rt.consecutive_failures + 1 }
+        | `Recovered -> { rt with consecutive_failures = 0 })
+      m
+  in
+  match read_meta config keeper_name with
+  | Error msg -> Error msg
+  | Ok None -> Ok `No_durable_meta
+  | Ok (Some disk_meta) ->
+    write_meta_with_merge
+      ~merge:(fun ~latest ~caller:_ -> stamp latest)
+      config
+      (stamp disk_meta)
+    |> Result.map (fun () -> `Persisted)
+;;
+
+(* #25296: advance the transcript-quarantine retry streak on
+   [agent_runtime_state.transcript_quarantine_consecutive_retries] using the
+   same read/stamp/merge shape as {!persist_compaction_outcome}.
+
+   [`Retried] increments the streak each time a failed turn settles as
+   [Requeue Transcript_quarantine_retry] — including the escalated terminal
+   attempt, so an operator inspecting the meta sees the streak at the
+   ceiling. [`Recovered] resets it on a completed turn: any successful turn
+   proves the keeper is no longer pinned to the poisoned transcript. *)
+let persist_transcript_quarantine_outcome config ~keeper_name ~outcome
+  : ([ `Persisted | `No_durable_meta ], string) result
+  =
+  let stamp (m : Keeper_meta_contract.keeper_meta) =
+    let rt = m.runtime in
+    { m with
+      runtime =
+        { rt with
+          transcript_quarantine_consecutive_retries =
+            (match outcome with
+             | `Retried -> rt.transcript_quarantine_consecutive_retries + 1
+             | `Recovered -> 0)
+        }
+    }
+  in
+  match read_meta config keeper_name with
+  | Error msg -> Error msg
+  | Ok None -> Ok `No_durable_meta
+  | Ok (Some disk_meta) ->
+    write_meta_with_merge
+      ~merge:(fun ~latest ~caller:_ -> stamp latest)
+      config
+      (stamp disk_meta)
+    |> Result.map (fun () -> `Persisted)
 ;;
 
 type identity_update_error =

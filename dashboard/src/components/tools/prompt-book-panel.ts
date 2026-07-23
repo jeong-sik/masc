@@ -1,6 +1,6 @@
 // MASC v2 — Prompt library (paper-styled, read-only). Every registered prompt
 // grouped into families, marking which families feed the keeper turn vs. which
-// are separate subsystems (judge / librarian / governance / verification /
+// are separate subsystems (judge / librarian / analysis / verification /
 // orchestrator). This is a curated catalog: the family split and the
 // "keeper 턴" flag are client curation over the live prompt list, NOT a runtime
 // assembly record.
@@ -69,11 +69,11 @@ const FAMILY_DEFS: readonly FamilyDef[] = [
   },
   {
     id: 'deliberation',
-    family: 'Governance · Deliberation',
+    family: 'Analysis · Deliberation',
     feedsTurn: false,
     order: 6,
     note: '숙의·드라이런 — 다중 keeper 합의',
-    match: h => h.includes('governance') || h.includes('deliberation'),
+    match: h => h.includes('analysis.dry_run') || h.includes('deliberation'),
   },
   {
     id: 'tool_contract',

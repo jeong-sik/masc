@@ -235,7 +235,6 @@ type transfer_projection_result =
   | Transfer_already_projected
 
 let schema = "keeper.event_queue.state.v5"
-let predecessor_schema = "keeper.event_queue.state.v4"
 
 let empty =
   { revision = 0L
@@ -1722,7 +1721,7 @@ let finalize_exact_source_disposition
   | Some { status = Dispatch_uncertain; _ } ->
     Error "dispatch-uncertain exact execution has no source disposition"
   | Some { status = Terminal_quarantined _; _ } ->
-    Error "legacy cause-only exact quarantine has no source disposition"
+    Error "source-less terminal quarantine has no source disposition"
   | None ->
     (match find_prior_receipt lease.lease_id state with
      | Some ({ settlement = Settle_exact disposition; _ } as receipt)
@@ -3310,21 +3309,13 @@ let of_yojson json =
   let context = "keeper event queue state" in
   let* fields = assoc_fields ~context json in
   let* schema_value = string_field ~context "schema" fields in
-  if
-    not
-      (String.equal schema_value schema
-       || String.equal schema_value predecessor_schema)
-  then Error (Printf.sprintf "unsupported keeper event queue state schema: %s" schema_value)
+  if not (String.equal schema_value schema)
+  then
+    Error
+      (Printf.sprintf
+         "unsupported keeper event queue state schema (reset required): %s"
+         schema_value)
   else
-    let is_current = String.equal schema_value schema in
-    let has_exact_execution_bindings =
-      List.mem_assoc "exact_execution_bindings" fields
-    in
-    let* () =
-      if is_current && not has_exact_execution_bindings
-      then Error "v5 keeper event queue state requires exact_execution_bindings"
-      else Ok ()
-    in
     let expected_fields =
       [ "schema"
       ; "revision"
@@ -3333,9 +3324,9 @@ let of_yojson json =
       ; "leases"
       ; "last_settlement"
       ; "transition_outbox"
+      ; "accepted_transfer_projections"
+      ; "exact_execution_bindings"
       ]
-      @ [ "accepted_transfer_projections" ]
-      @ (if has_exact_execution_bindings then [ "exact_execution_bindings" ] else [])
     in
     let* () = exact_fields ~context ~expected:expected_fields fields in
     let* revision = int64_field ~context "revision" fields in
@@ -3359,50 +3350,31 @@ let of_yojson json =
         accepted_transfer_projection_of_yojson
         fields
     in
+    let* bindings_json =
+      match List.assoc_opt "exact_execution_bindings" fields with
+      | Some (`List bindings) -> Ok bindings
+      | Some _ ->
+        Error "keeper event queue state exact_execution_bindings must be a list"
+      | None ->
+        Error "keeper event queue state missing exact_execution_bindings"
+    in
     let* () =
-      if has_exact_execution_bindings || leases = []
-      then Ok ()
-      else
-        Error
-          "legacy keeper event queue state with active leases cannot be upgraded without exact execution bindings"
+      if
+        List.exists
+          (function
+            | `Assoc fields -> not (List.mem_assoc "disposition" fields)
+            | _ -> true)
+          bindings_json
+      then Error "v5 exact execution binding requires disposition evidence field"
+      else Ok ()
     in
-    let* exact_execution_bindings =
-      if has_exact_execution_bindings
-      then
-        let* bindings_json =
-          match List.assoc_opt "exact_execution_bindings" fields with
-          | Some (`List bindings) -> Ok bindings
-          | Some _ ->
-            Error "keeper event queue state exact_execution_bindings must be a list"
-          | None ->
-            Error "keeper event queue state missing exact_execution_bindings"
-        in
-        let* () =
-          if
-            is_current
-            && List.exists
-                 (function
-                   | `Assoc fields -> not (List.mem_assoc "disposition" fields)
-                   | _ -> true)
-                 bindings_json
-          then Error "v5 exact execution binding requires disposition evidence field"
-          else Ok ()
-        in
-        let rec decode acc = function
-          | [] -> Ok (List.rev acc)
-          | binding_json :: rest ->
-            let* binding = exact_execution_binding_of_yojson binding_json in
-            decode (binding :: acc) rest
-        in
-        decode [] bindings_json
-      else
-        match leases with
-        | [] -> Ok []
-        | _ :: _ ->
-          Error
-            "legacy keeper event queue state has active leases without exact \
-             execution bindings; refusing replay-unsafe promotion"
+    let rec decode_bindings acc = function
+      | [] -> Ok (List.rev acc)
+      | binding_json :: rest ->
+        let* binding = exact_execution_binding_of_yojson binding_json in
+        decode_bindings (binding :: acc) rest
     in
+    let* exact_execution_bindings = decode_bindings [] bindings_json in
     validate_state
       { revision
       ; next_lease_sequence

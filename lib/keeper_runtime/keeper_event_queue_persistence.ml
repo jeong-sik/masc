@@ -1431,7 +1431,7 @@ let prepare_registration_after_exact_recovery_result
             | Some lease, Some { status = Terminal_quarantined _; _ } ->
               Error
                 (Printf.sprintf
-                   "v4 cause-only exact quarantine has no source disposition: %s"
+                   "source-less terminal quarantine has no source disposition: %s"
                    lease.lease_id)
             | Some lease, Some { status = Disposition_prepared disposition; _ } ->
               (match disposition.outcome with

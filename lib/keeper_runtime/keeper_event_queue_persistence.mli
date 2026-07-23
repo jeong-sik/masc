@@ -2,9 +2,10 @@
 
     [event-queue.json] keeps the v5 envelope containing pending stimuli, active
     typed leases, exact-execution dispatch fences, the monotonic lease
-    sequence, transition outbox, and durable accepted-transfer target accounting. Strict v4 is the only supported
-    predecessor. [event-queue-inflight.json] is rejected explicitly rather
-    than migrated or treated as a second authority. *)
+    sequence, transition outbox, and durable accepted-transfer target
+    accounting. Only the current schema is accepted; stale or unknown state
+    fails closed and requires reset. [event-queue-inflight.json] is rejected
+    explicitly rather than migrated or treated as a second authority. *)
 
 type lease_kind = Keeper_event_queue_state.lease_kind =
   | Single
@@ -258,10 +259,11 @@ val load_snapshot_pair_with_errors :
 
 val load_state_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
-(** Strict state read used by tests and operator projection. A malformed v4
-    envelope or v4-plus-legacy residue is an [Error], never an empty queue.
-    Committed WAL rows are replayed idempotently, checkpointed, and then
-    compacted to the exact empty suffix before the state is returned. *)
+(** Strict state read used by tests and operator projection. A malformed
+    current envelope or stale/unknown schema is an [Error], never an empty
+    queue. Committed current-schema WAL rows are replayed idempotently,
+    checkpointed, and then compacted to the exact empty suffix before the state
+    is returned. *)
 
 val claim_when_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
@@ -450,7 +452,7 @@ val prepare_registration_after_exact_recovery_result :
   (Keeper_event_queue.t, string) result
 (** Under one owner durable lock, replay the settlement WAL, finalize a
     validated terminal v5 exact disposition, then and only then apply ordinary
-    registration recovery. Dispatch-uncertain bindings and v4 cause-only
+    registration recovery. Dispatch-uncertain bindings and source-less terminal
     quarantines remain fail-closed. *)
 
 val mark_transition_projected_result :

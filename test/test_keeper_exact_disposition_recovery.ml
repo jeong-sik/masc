@@ -290,50 +290,6 @@ let test_retry_adopts_stored_prepared_at () =
     retried.prepared_at
 ;;
 
-let legacy_v4_json = function
-  | `Assoc state_fields ->
-    let bindings =
-      match List.assoc "exact_execution_bindings" state_fields with
-      | `List rows ->
-        `List
-          (List.map
-             (function
-               | `Assoc fields ->
-                 `Assoc (List.remove_assoc "disposition" fields)
-               | row -> row)
-             rows)
-      | value -> value
-    in
-    `Assoc
-      (state_fields
-       |> replace_assoc "schema" (`String "keeper.event_queue.state.v4")
-       |> replace_assoc "exact_execution_bindings" bindings)
-  | json -> json
-;;
-
-let test_v4_cause_only_remains_fail_closed () =
-  let state, lease = bound_state () in
-  let terminal = exact_terminal State.Domain_invalid_output in
-  let quarantined =
-    State.quarantine_exact_execution
-      ~lease
-      ~terminal
-      state
-    |> require_ok
-  in
-  let migrated =
-    State.of_yojson (legacy_v4_json (State.to_yojson quarantined))
-    |> require_ok
-  in
-  (match State.exact_execution_binding migrated with
-   | Some { status = State.Terminal_quarantined State.Domain_invalid_output; _ } ->
-     ()
-   | _ -> Alcotest.fail "v4 cause-only binding was synthesized");
-  (match State.recover_leases ~settled_at:5.0 migrated with
-   | Error _ -> ()
-   | Ok _ -> Alcotest.fail "generic registration recovered a cause-only exact lease")
-;;
-
 let () =
   Alcotest.run
     "keeper exact disposition recovery"
@@ -354,10 +310,6 @@ let () =
             "retry adopts stored prepared_at"
             `Quick
             test_retry_adopts_stored_prepared_at
-        ; Alcotest.test_case
-            "v4 cause-only remains fail-closed"
-            `Quick
-            test_v4_cause_only_remains_fail_closed
         ] )
     ]
 ;;

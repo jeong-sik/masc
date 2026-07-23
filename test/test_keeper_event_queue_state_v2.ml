@@ -2747,7 +2747,7 @@ let test_context_compaction_retry_is_durable_and_lane_local () =
 ;;
 
 let test_unsupported_snapshots_fail_closed () =
-  with_temp_dir "keeper-event-queue-v3-hardcut" (fun base_path ->
+  with_temp_dir "keeper-event-queue-schema-hardcut" (fun base_path ->
     let keeper_name = "hardcut_keeper" in
     let dir = keeper_dir ~base_path ~keeper_name in
     let primary = Filename.concat dir "event-queue.json" in
@@ -2781,59 +2781,6 @@ let test_current_state_codec_reads_its_own_output () =
     "current state round-trips"
     true
     (Yojson.Safe.equal encoded (State.to_yojson decoded))
-;;
-
-let test_v3_snapshot_upgrades_only_without_active_lease () =
-  with_temp_dir "keeper-event-queue-v3-upgrade" (fun base_path ->
-    let keeper_name = "v3_upgrade_keeper" in
-    let path = Filename.concat (keeper_dir ~base_path ~keeper_name) "event-queue.json" in
-    let v3_of_state state =
-      match State.to_yojson state with
-      | `Assoc fields ->
-        `Assoc
-          (("schema", `String "keeper.event_queue.state.v3")
-           :: List.filter
-                (fun (name, _) ->
-                   not
-                     (String.equal name "schema"
-                      || String.equal name "accepted_transfer_projections"
-                      || String.equal name "exact_execution_bindings"))
-                fields)
-      | _ -> Alcotest.fail "current event queue state codec is not an object"
-    in
-    let v3 = v3_of_state State.empty in
-    Fs_compat.mkdir_p (Filename.dirname path);
-    Fs_compat.save_file_atomic path (Yojson.Safe.to_string v3)
-    |> require_ok "write strict v3 predecessor";
-    let upgraded =
-      Persistence.load_state_result ~base_path ~keeper_name
-      |> require_ok "load strict v3 predecessor"
-    in
-    Alcotest.(check int)
-      "v3 starts with no target transfer accounting"
-      0
-      (List.length (State.accepted_transfer_projections upgraded));
-    Persistence.update_result ~base_path ~keeper_name (fun pending ->
-      Queue.enqueue pending (stimulus "upgrade" 1.0))
-    |> require_ok "mutate upgraded queue";
-    let persisted =
-      Safe_ops.read_json_file_safe path |> require_ok "read upgraded queue"
-    in
-    let open Yojson.Safe.Util in
-    Alcotest.(check string)
-      "next durable write uses v4"
-      "keeper.event_queue.state.v4"
-      (persisted |> member "schema" |> to_string);
-    let claimed, lease =
-      State.with_pending (queue [ stimulus "possibly-dispatched" 2.0 ]) State.empty
-      |> claim_head
-    in
-    ignore (require_some "legacy active lease" lease : State.lease);
-    match State.of_yojson (v3_of_state claimed) with
-    | Error _ -> ()
-    | Ok _ ->
-      Alcotest.fail
-        "legacy active lease was promoted without exact execution bindings")
 ;;
 
 let test_transition_outbox_projects_with_stable_identity () =
@@ -3148,10 +3095,6 @@ let () =
             "unsupported snapshots fail closed"
             `Quick
             test_unsupported_snapshots_fail_closed
-        ; Alcotest.test_case
-            "v3 upgrades only without an active lease"
-            `Quick
-            test_v3_snapshot_upgrades_only_without_active_lease
         ; Alcotest.test_case
             "transition outbox projection"
             `Quick

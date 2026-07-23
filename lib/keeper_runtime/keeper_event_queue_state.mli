@@ -75,8 +75,9 @@ type exact_source_disposition =
 type exact_execution_lease_status =
   | Dispatch_uncertain
   | Terminal_quarantined of exact_execution_terminal_cause
-      (** v4 cause-only migration state. It has no source authority and can
-          never be finalized or registration-requeued. *)
+      (** Current-schema terminal quarantine before a source disposition is
+          prepared. It has no source authority and can never be finalized or
+          registration-requeued. *)
   | Disposition_prepared of exact_source_disposition
 
 type exact_execution_binding =
@@ -344,7 +345,7 @@ val prepare_exact_source_disposition :
   prepared_at:float ->
   t ->
   (t * exact_source_disposition, string) result
-(** Atomically replace a matching dispatch fence or matching v4 cause-only
+(** Atomically replace a matching dispatch fence or source-less terminal
     quarantine with one immutable terminal source disposition, after matching
     the opaque producer proof against the durable binding. Repeating the same
     stable proof adopts the first durable preparation timestamp. *)
@@ -501,5 +502,5 @@ val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 
 val schema : string
-(** ["keeper.event_queue.state.v5"]. Strict v4 snapshots are read as the sole
-    supported predecessor and upgraded on their next durable mutation. *)
+(** ["keeper.event_queue.state.v5"]. Only this current schema is accepted.
+    Stale or unknown persisted state fails closed and requires a runtime reset. *)

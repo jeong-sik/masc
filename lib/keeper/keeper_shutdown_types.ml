@@ -141,6 +141,10 @@ type finalization_evidence =
 
 type supersession =
   | Operator_metadata_update of { actor : string }
+  | Operator_reconciliation_accepted of
+      { actor : string
+      ; unreconciled_turn : active_turn
+      }
 
 type phase =
   | Prepared
@@ -188,7 +192,7 @@ type invariant_error =
   | Finalized_completion_mismatch of cleanup_reason * completion_receipt
   | Superseded_cleanup_reason_mismatch of cleanup_reason
 
-let schema_version = 6
+let schema_version = 7
 
 let requires_admission_fence operation =
   match operation.phase with
@@ -356,7 +360,7 @@ let validate operation =
            Error
              (Finalized_completion_mismatch
                 (operation.cleanup_intent.reason, completion)))
-    | Superseded (Operator_metadata_update _) ->
+    | Superseded (Operator_metadata_update _ | Operator_reconciliation_accepted _) ->
       (match operation.cleanup_intent.reason with
        | Operator_stop_retain_meta -> Ok ()
        | ( Operator_stop_remove_meta

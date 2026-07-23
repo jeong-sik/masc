@@ -66,8 +66,8 @@ let manifest_json
     Boundary_redaction.to_string Boundary_redaction.runtime_model_label
   in
   let child_trace_id = Keeper_id.Trace_id.to_string child.runtime.trace_id in
-  let parent_generation = parent.runtime.generation in
-  let child_generation = child.runtime.generation in
+  let parent_generation = parent.runtime.nonce in
+  let child_generation = child.runtime.nonce in
   let inheritance_delta = inheritance_delta_json ~parent ~child in
   `Assoc
     [
@@ -110,8 +110,8 @@ let index_entry_json
     Boundary_redaction.to_string Boundary_redaction.runtime_model_label
   in
   let child_trace_id = Keeper_id.Trace_id.to_string child.runtime.trace_id in
-  let parent_generation = parent.runtime.generation in
-  let child_generation = child.runtime.generation in
+  let parent_generation = parent.runtime.nonce in
+  let child_generation = child.runtime.nonce in
   let inherited_fields, changed_fields, dropped_fields =
     classify_identity_fields
       ~previous:(identity_pairs parent)
@@ -251,13 +251,13 @@ let surface_json (config : Workspace.config) (meta : keeper_meta) ~recent_limit 
   in
   `Assoc
     [
-      ("current_generation", `Int meta.runtime.generation);
+      ("current_generation", `Int meta.runtime.nonce);
       ("current_trace_id", `String trace_id);
       ( "generation_id",
         `String
           (generation_id
              ~keeper_name:meta.name
-             ~generation:meta.runtime.generation
+             ~generation:meta.runtime.nonce
              ~trace_id) );
       ("trace_history_count", `Int (List.length meta.runtime.trace_history));
       ("manifest_path", `String manifest_path);

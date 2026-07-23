@@ -89,18 +89,18 @@ type no_compaction =
 type accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
 (** Exact operator authority for terminally cancelling one accepted event.
-    [source_revision] and [owner_generation] fence the observed paused owner;
+    [source_revision] and [owner_nonce] fence the observed paused owner;
     [operator_operation_id] makes replay/conflict explicit. *)
 
 type accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
@@ -120,7 +120,7 @@ type source_terminal_receipt =
 type accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
@@ -227,7 +227,7 @@ val settle :
     provider turn failed. Non-finite settlement times are rejected. *)
 
 val cancel_accepted :
-  current_owner_generation:int ->
+  current_owner_nonce:int ->
   settled_at:float ->
   lease:lease ->
   cancellation:accepted_cancellation ->
@@ -240,7 +240,7 @@ val cancel_accepted :
     idempotent; a different operation is a conflict. *)
 
 val cancel_pending_accepted :
-  current_owner_generation:int ->
+  current_owner_nonce:int ->
   settled_at:float ->
   cancellation:accepted_cancellation ->
   t ->
@@ -251,7 +251,7 @@ val cancel_pending_accepted :
     through a source-bearing WAL outbox entry by persistence. *)
 
 val transfer_pending_accepted :
-  current_owner_generation:int ->
+  current_owner_nonce:int ->
   settled_at:float ->
   transfer:accepted_transfer ->
   t ->
@@ -262,7 +262,7 @@ val transfer_pending_accepted :
     authority until the target projection completes. *)
 
 val settle_pending_from_source_terminal :
-  current_owner_generation:int ->
+  current_owner_nonce:int ->
   settled_at:float ->
   source_terminal:accepted_source_terminal ->
   t ->

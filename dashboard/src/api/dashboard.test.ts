@@ -19,6 +19,7 @@ import {
   fetchDashboardBriefing,
   fetchDashboardTools,
   parseDashboardKeeperWaitingSource,
+  fetchDashboardFullHealth,
   fetchKeeperToolCalls,
   fetchKeeperToolStats,
   fetchKeeperCompactionSnapshots,
@@ -981,6 +982,57 @@ describe('fetchDashboardTools', () => {
     expect(tools[0]).not.toHaveProperty('tier')
   })
 
+  it('normalizes drifted scheduled automation projection fields', async () => {
+    const rawResponse = {
+      tool_inventory: { tools: [] },
+      tool_usage: {
+        total_calls: 0,
+        distinct_tools_called: 0,
+        top_20: [],
+        never_called_count: 0,
+        dispatch_v2_enabled: false,
+        registered_count: 1,
+      },
+      scheduled_automation: {
+        schema: 'masc.dashboard.scheduled_automation.v1',
+        source: 'schedule_store',
+        generated_at: '2026-06-21T00:00:00Z',
+        request_count: null,
+        request_limit: null,
+        truncated: null,
+        counts: null,
+        fsm: null,
+        signals: null,
+        requests: null,
+      },
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardTools()
+
+    expect(result.scheduled_automation).toBeDefined()
+    expect(result.scheduled_automation?.counts).toEqual({})
+    expect(result.scheduled_automation?.signals).toEqual([])
+    expect(result.scheduled_automation?.requests).toEqual([])
+    expect(result.scheduled_automation?.warnings).toEqual([])
+    expect(result.scheduled_automation?.fsm).toEqual({
+      state: 'unknown',
+      active_count: 0,
+      terminal_count: 0,
+      next_due_at: null,
+    })
+    expect(result.scheduled_automation?.request_count).toBe(0)
+    expect(result.scheduled_automation?.request_limit).toBe(0)
+    expect(result.scheduled_automation?.truncated).toBe(false)
+  })
+
   it('handles missing tool_inventory gracefully', async () => {
     const rawResponse = {
       tool_inventory: {},
@@ -1046,6 +1098,95 @@ describe('fetchDashboardTools', () => {
       stale_reason: 'tool_usage_append_failed',
       error: 'synthetic append failure',
     })
+  })
+})
+
+describe('fetchDashboardFullHealth', () => {
+  it('uses the full health path', async () => {
+    const rawResponse = {
+      health_detail: 'full',
+      schedule_runner: {
+        schema: 'masc.schedule.runner_status.v1',
+        status: 'ok',
+        tick_in_flight: true,
+        tick_count: 10,
+        success_count: 8,
+        failure_count: 1,
+        crash_count: 0,
+        last_tick_started_at: 1_700_000_000,
+        last_tick_finished_at: 1_700_000_100,
+        last_success_at: 1_700_000_100,
+        last_error_at: null,
+        last_error: null,
+        last_duration_sec: 0.15,
+        stale_after_sec: 60,
+        last_tick_age_sec: 12.5,
+        last_success_age_sec: 12.5,
+        last_error_age_sec: null,
+      },
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardFullHealth()
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/health?full=1')
+    expect(result.health_detail).toBe('full')
+    expect(result.schedule_runner).toMatchObject({
+      schema: 'masc.schedule.runner_status.v1',
+      status: 'ok',
+      tick_in_flight: true,
+      tick_count: 10,
+      success_count: 8,
+      failure_count: 1,
+      crash_count: 0,
+      last_duration_sec: 0.15,
+      stale_after_sec: 60,
+      last_tick_age_sec: 12.5,
+      last_error_age_sec: null,
+    })
+  })
+
+  it('normalizes invalid schedule_runner values safely', async () => {
+    const rawResponse = {
+      health_detail: 'full',
+      schedule_runner: {
+        status: 'degraded',
+        tick_in_flight: 'yes',
+        tick_count: 'not-a-number',
+        success_count: 5,
+      },
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardFullHealth()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(result.health_detail).toBe('full')
+    expect(result.schedule_runner).toMatchObject({
+      status: 'degraded',
+      tick_in_flight: false,
+      tick_count: 0,
+      success_count: 5,
+      failure_count: 0,
+      crash_count: 0,
+      last_error: null,
+      last_error_age_sec: null,
+    })
+    expect(result.schedule_runner?.last_duration_sec).toBe(null)
   })
 })
 

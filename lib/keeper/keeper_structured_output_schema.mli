@@ -108,3 +108,30 @@ val provider_config_accepts_schema_or_json_mode
 (** True when the provider can enforce [schema] (strict) OR honor JSON mode
     (#25266). Eligibility gate for structured lanes that have a
     json_object fallback; a provider with neither capability is rejected. *)
+
+val for_deterministic_subcall
+  :  max_tokens:int option
+  -> Llm_provider.Provider_config.t
+  -> Llm_provider.Provider_config.t
+(** Provider shape shared by MASC's deterministic LLM subcalls (librarian
+    extraction, memory-OS consolidation): no tool choice, no parallel tool
+    use, and thinking fully suppressed.
+
+    Thinking suppression is the load-bearing part. Reasoning-capable
+    providers otherwise spend the whole output budget on thinking and return
+    an empty visible text; consolidation observed 256 consecutive empty
+    responses that way on 2026-07-20, and the tuning removed them.
+
+    Each call site previously spelled the same six fields by hand, with the
+    second site's comment reading "Mirror the librarian tuning" — the
+    N-of-M shape RFC-0000 §9 rejects. Deriving from here means a new
+    subcall inherits the shape instead of re-deriving it, and dropping the
+    suppression becomes a visible override rather than an omission.
+
+    [max_tokens] is passed through because the budget is genuinely
+    site-specific (a consolidation plan over hundreds of rows needs more
+    room than a per-turn summary); everything else is not.
+
+    This does NOT apply the response-format/schema tier — sites differ there
+    and compose {!without_response_format} or
+    {!apply_schema_json_mode_or_prompt_tier} themselves. *)

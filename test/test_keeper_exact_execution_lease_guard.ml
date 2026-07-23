@@ -253,6 +253,105 @@ let test_restart_recovery_never_requeues_bound_lease () =
   | Error detail -> Alcotest.failf "matching receipt replay failed: %s" detail
 ;;
 
+let test_failure_judgment_settles_exact_execution_atomically () =
+  with_temp_dir "masc-exact-failure-judgment" @@ fun base_path ->
+  let keeper_name = "exact_failure_judgment" in
+  let slot_id = "slot-failure-judgment" in
+  let call_id = "call-failure-judgment" in
+  let plan_fingerprint = "plan-failure-judgment" in
+  let request_body_sha256 = String.make 64 '1' in
+  let lease = claim_manual_lease ~base_path ~keeper_name in
+  bind_exact_execution
+    ~base_path
+    ~keeper_name
+    ~lease
+    ~slot_id
+    ~call_id
+    ~plan_fingerprint
+    ~request_body_sha256;
+  let judgment : Q.failure_judgment =
+    { fj_runtime_id = "runtime-failure-judgment"
+    ; fj_judgment = Keeper_runtime_failure_route.Contract_violation
+    ; fj_provenance = Keeper_runtime_failure_route.Oas_agent_error
+    ; fj_detail = "post-compaction contract failure"
+    }
+  in
+  let successor : Q.stimulus =
+    { post_id = Q.failure_judgment_post_id judgment
+    ; urgency = Q.Immediate
+    ; arrived_at = 3.0
+    ; payload = Q.Failure_judgment judgment
+    }
+  in
+  let settlement : P.settlement =
+    P.Escalate
+      { reason = P.Failure_judgment_requested
+      ; successor = Some successor
+      }
+  in
+  let check_settled_state label =
+    (match P.exact_execution_binding_result ~base_path ~keeper_name with
+     | Ok None -> ()
+     | Ok (Some _) -> Alcotest.failf "%s retained the exact execution binding" label
+     | Error detail -> Alcotest.failf "%s binding load failed: %s" label detail);
+    (match P.active_lease_result ~base_path ~keeper_name with
+     | Ok None -> ()
+     | Ok (Some _) -> Alcotest.failf "%s retained the source lease" label
+     | Error detail -> Alcotest.failf "%s active lease load failed: %s" label detail);
+    match P.load_pending_result ~base_path ~keeper_name with
+    | Ok pending ->
+      (match Q.to_list pending with
+       | [ { post_id; payload = Q.Failure_judgment actual; _ } ] ->
+         Alcotest.(check string)
+           (label ^ " enqueued the expected successor")
+           successor.post_id
+           post_id;
+         Alcotest.(check string)
+           (label ^ " retained the judgment runtime")
+           judgment.fj_runtime_id
+           actual.fj_runtime_id
+       | _ ->
+         Alcotest.failf
+           "%s did not leave exactly one typed failure-judgment successor"
+           label)
+    | Error detail -> Alcotest.failf "%s pending load failed: %s" label detail
+  in
+  (match
+     P.settle_exact_execution_result
+       ~base_path
+       ~keeper_name
+       ~settled_at:3.0
+       ~lease
+       ~slot_id
+       ~call_id
+       ~plan_fingerprint
+       ~request_body_sha256
+       ~settlement
+       ()
+   with
+   | Ok (P.Settled _) -> ()
+   | Ok _ -> Alcotest.fail "failure judgment did not commit as the first settlement"
+   | Error detail -> Alcotest.failf "failure judgment settlement failed: %s" detail);
+  check_settled_state "first settlement";
+  (match
+     P.settle_exact_execution_result
+       ~base_path
+       ~keeper_name
+       ~settled_at:4.0
+       ~lease
+       ~slot_id
+       ~call_id
+       ~plan_fingerprint
+       ~request_body_sha256
+       ~settlement
+       ()
+   with
+   | Ok (P.Already_settled _) -> ()
+   | Ok _ -> Alcotest.fail "failure judgment receipt replay was not idempotent"
+   | Error detail -> Alcotest.failf "failure judgment receipt replay failed: %s" detail);
+  check_settled_state "receipt replay"
+;;
+
 let test_cancellation_surfaces_only_after_terminal_settlement () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -348,6 +447,10 @@ let () =
             "settlement persistence failure remains quarantined across registration"
             `Quick
             test_restart_recovery_never_requeues_bound_lease
+        ; Alcotest.test_case
+            "failure judgment settles exact execution atomically"
+            `Quick
+            test_failure_judgment_settles_exact_execution_atomically
         ] )
     ; ( "cancellation"
       , [ Alcotest.test_case

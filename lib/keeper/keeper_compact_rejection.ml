@@ -72,9 +72,6 @@ let summarization_rejection = function
   | Keeper_compaction_llm_summarizer.Exact_execution_cancelled_after_dispatch observation ->
     Exact_execution_terminal
       (exact_terminal_of_observation Execution_cancelled_after_dispatch observation)
-  | Keeper_compaction_llm_summarizer.Exact_terminal_persistence_failed observation ->
-    Exact_execution_terminal
-      (exact_terminal_of_observation Terminal_persistence_failed observation)
   | Keeper_compaction_llm_summarizer.Exact_execution_provenance_mismatch observation ->
     Exact_execution_terminal
       (exact_terminal_of_observation Execution_provenance_mismatch observation)
@@ -83,4 +80,3 @@ let summarization_rejection = function
     Exact_execution_terminal
       (exact_terminal_of_observation Domain_invalid_output observation)
 ;;
-

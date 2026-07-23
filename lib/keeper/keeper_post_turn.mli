@@ -101,7 +101,8 @@ type prepared_compaction
     source CAS, not the turn slot, is the interleaving guard. The token is
     opaque and owns the exact Keeper identity and commit policy captured at
     preparation; callers cannot construct it or combine a plan with another
-    Keeper's metadata. *)
+    Keeper's metadata. It also owns the real post-dispatch observation and
+    durable terminalizer used by every uncommitted terminal path. *)
 
 (** Phase 1: load the durable source and run the policy + LLM planner.
     Admission-free by contract; the caller must not hold the keeper's turn
@@ -123,7 +124,8 @@ val commit_prepared_compaction :
 
 (** Terminal source-bound disposition for a prepared exact-output result that
     cannot enter its commit admission. The provider execution has completed,
-    so the owning stimulus must never be requeued into another exact call. *)
+    so the owning stimulus must never be requeued into another exact call.
+    The exact attempt is durably quarantined before this function returns. *)
 val no_compaction_of_uncommitted_prepared :
   ?cause:Keeper_event_queue_state.exact_execution_terminal_cause ->
   prepared_compaction ->

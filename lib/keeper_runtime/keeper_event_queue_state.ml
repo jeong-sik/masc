@@ -1119,6 +1119,16 @@ let validate_bound_settlement binding settlement =
   | Dispatch_uncertain,
     Escalate { reason = Compaction_floor_exceeded _; successor = None } ->
     Ok ()
+  | Dispatch_uncertain,
+    Escalate
+      { reason = Failure_judgment_requested
+      ; successor =
+          Some
+            { Keeper_event_queue.payload = Keeper_event_queue.Failure_judgment _
+            ; _
+            }
+      } ->
+    Ok ()
   | Dispatch_uncertain, No_compaction { reason = Exact_execution_terminal terminal; _ }
     when terminal_matches terminal -> Ok ()
   | Dispatch_uncertain,

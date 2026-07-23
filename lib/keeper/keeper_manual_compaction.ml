@@ -196,55 +196,12 @@ let prepare_with ~prepare_compaction ~config ~meta =
       ~projection_request )
 ;;
 
-let prepare ~config ~meta =
-  prepare_with
-    ~prepare_compaction:(fun ~base_dir ~meta ~trigger ~projection_request ->
-      Keeper_context_runtime.prepare_compaction
-        ~base_dir
-        ~meta
-        ~trigger
-        ~projection_request
-        ())
-    ~config
-    ~meta
-;;
-
 let no_compaction_after_prepared_cancellation prepared =
   Eio.Cancel.protect (fun () ->
     No_compaction
       (Keeper_post_turn.no_compaction_of_uncommitted_prepared
          ~cause:Keeper_event_queue_state.Execution_cancelled_after_dispatch
          prepared))
-;;
-
-let run ~(config : Workspace.config) ~(meta : keeper_meta) =
-  (* Planning is outside the lifecycle. Only the deterministic lifecycle and
-     source-CAS commit may set [compaction_active], and they close in this
-     single synchronous section. *)
-  let base_dir, preparation = prepare ~config ~meta in
-  match preparation with
-  | Ok prepared ->
-    (try
-       match run_start_lifecycle ~config ~meta with
-       | Error _ ->
-         Ok
-           (No_compaction
-              (Keeper_post_turn.no_compaction_of_uncommitted_prepared
-                 ~cause:
-                   Keeper_event_queue_state.Lifecycle_transition_failed_after_dispatch
-                 prepared))
-       | Ok () -> finish_preparation ~config ~base_dir ~meta preparation
-     with
-     | Eio.Cancel.Cancelled _ ->
-       Ok (no_compaction_after_prepared_cancellation prepared))
-  | Error (Keeper_post_turn.No_compaction no_compaction) ->
-    (match run_start_lifecycle ~config ~meta with
-     | Error _ -> Ok (No_compaction no_compaction)
-     | Ok () -> finish_preparation ~config ~base_dir ~meta preparation)
-  | (Error _ as failed_preparation) ->
-    (match run_start_lifecycle ~config ~meta with
-     | Error failure -> Error failure
-     | Ok () -> finish_preparation ~config ~base_dir ~meta failed_preparation)
 ;;
 
 let observe_manifest ~keeper_name = function

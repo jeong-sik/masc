@@ -927,7 +927,7 @@ let test_missing_dispatch_guard_prevents_post () =
   Alcotest.(check int) "missing guard prevents POST" 0 (F.post_count server)
 ;;
 
-let test_quarantine_persistence_failure_is_typed_terminal () =
+let test_quarantine_persistence_failure_preserves_original_cause () =
   run_eio
   @@ fun ~sw ~net ~clock ->
   let server = F.start_server ~sw ~net ~clock F.Abort_after_request in
@@ -939,10 +939,14 @@ let test_quarantine_persistence_failure_is_typed_terminal () =
   in
   let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
   let prepared = prepare_exn ~keeper_name:"keeper-quarantine-persistence-failure" ~registry in
+  let quarantine_calls = ref [] in
   let guard : C.exact_execution_guard =
     { before_dispatch = (fun _ -> Ok ())
     ; release_before_dispatch = (fun _ -> Alcotest.fail "release must not run")
-    ; quarantine = (fun _ _ -> Error "injected terminal persistence failure")
+    ; quarantine =
+        (fun cause observation ->
+           quarantine_calls := (cause, observation) :: !quarantine_calls;
+           Error "injected terminal persistence failure")
     }
   in
   (match
@@ -953,10 +957,14 @@ let test_quarantine_persistence_failure_is_typed_terminal () =
        ~exact_execution_guard:guard
        prepared
    with
-   | Error (C.Exact_terminal_persistence_failed observation) ->
-     Alcotest.(check string) "terminal persistence slot" slot_id observation.slot_id
+   | Error (C.Exact_execution_failed_after_dispatch observation) ->
+     Alcotest.(check string) "original failure slot" slot_id observation.slot_id
    | Error _ -> Alcotest.fail "quarantine failure returned the wrong typed terminal"
    | Ok _ -> Alcotest.fail "quarantine persistence failure unexpectedly succeeded");
+  (match !quarantine_calls with
+   | [ Keeper_event_queue_state.Execution_failed_after_dispatch, observation ] ->
+     Alcotest.(check string) "quarantine retained slot" slot_id observation.slot_id
+   | _ -> Alcotest.fail "quarantine did not receive the original terminal cause once");
   Alcotest.(check int) "terminal persistence failure never retries" 1 (F.post_count server)
 ;;
 
@@ -1083,9 +1091,9 @@ let () =
             `Quick
             test_missing_dispatch_guard_prevents_post
         ; Alcotest.test_case
-            "quarantine persistence failure is typed terminal"
+            "quarantine persistence failure preserves original cause"
             `Quick
-            test_quarantine_persistence_failure_is_typed_terminal
+            test_quarantine_persistence_failure_preserves_original_cause
         ; Alcotest.test_case
             "heartbeat durable bind precedes POST"
             `Quick

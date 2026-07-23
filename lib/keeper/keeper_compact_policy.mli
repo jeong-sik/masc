@@ -42,6 +42,8 @@ type compaction_preparation =
   { context : Keeper_context_core.working_context
   ; decision : compaction_decision
   ; evidence : Keeper_compaction_evidence.t option
+  ; post_success_terminalizer :
+      Keeper_compaction_llm_summarizer.post_success_terminalizer option
   }
 
 (** Apply a caller-owned request. Only a valid configured-LLM plan that
@@ -59,8 +61,7 @@ module For_testing : sig
   val compact_for_request_typed_with_accounting
     :  plan_for_units:
          (units:Keeper_compaction_unit.closed_unit list ->
-          ( Keeper_compaction_llm_summarizer.compaction_plan
-            * Keeper_compaction_llm_summarizer.exact_execution_evidence
+          ( Keeper_compaction_llm_summarizer.completed_plan
           , Keeper_compaction_llm_summarizer.summarization_failure )
             result)
     -> summarized_message_count_override:int

@@ -520,17 +520,20 @@ type prepared_compaction =
   ; projection_target : Keeper_compaction_projection_target.t
   ; context : Keeper_context_core.working_context
   ; evidence : Keeper_compaction_evidence.t
+  ; post_success_terminalizer :
+      Keeper_compaction_llm_summarizer.post_success_terminalizer
   }
 
 let no_compaction_of_uncommitted_prepared
       ?(cause = Keeper_event_queue_state.Commit_admission_unavailable)
       prepared
   =
-  let evidence = prepared.evidence in
   { source = prepared.source_ref
   ; reason =
       Exact_execution_terminal
-        { cause; slot_id = evidence.slot_id; call_id = evidence.call_id }
+        (Keeper_compaction_llm_summarizer.terminalize_post_success
+           prepared.post_success_terminalizer
+           cause)
   }
 ;;
 
@@ -593,8 +596,13 @@ let prepare_compaction_admitted
         ~trigger
         ctx
     in
-    (match preparation.decision, preparation.evidence with
-     | Keeper_compact_policy.Prepared _, None ->
+    (match
+       preparation.decision,
+       preparation.evidence,
+       preparation.post_success_terminalizer
+     with
+     | Keeper_compact_policy.Prepared _, None, _
+     | Keeper_compact_policy.Prepared _, _, None ->
        (* Prepared-without-evidence is a planner invariant violation (a bug),
           not a deterministic no-op: it must surface as a visible failure,
           never settle as a durable terminal no-compaction. *)
@@ -602,7 +610,9 @@ let prepare_compaction_admitted
          (Checkpoint_candidate_failed
             "compaction preparation completed without structural evidence \
              (planner invariant violation)")
-     | Keeper_compact_policy.Prepared prepared_trigger, Some evidence ->
+     | Keeper_compact_policy.Prepared prepared_trigger,
+       Some evidence,
+       Some post_success_terminalizer ->
        Ok
          { session
          ; source_ref
@@ -612,14 +622,15 @@ let prepare_compaction_admitted
          ; projection_target
          ; context = preparation.context
          ; evidence
+         ; post_success_terminalizer
          }
-     | Keeper_compact_policy.Rejected (_, reason), _ ->
+     | Keeper_compact_policy.Rejected (_, reason), _, _ ->
        (match terminal_reason_of_rejection reason with
         | Some reason -> Error (No_compaction { source = source_ref; reason })
         | None -> Error (Compaction_rejected reason))
      | (Keeper_compact_policy.Applied _
        | Keeper_compact_policy.Not_requested
-       | Keeper_compact_policy.Skipped_no_checkpoint) as decision, _ ->
+       | Keeper_compact_policy.Skipped_no_checkpoint) as decision, _, _ ->
        (* Reaching recovery with a non-preparation decision is an invariant
           violation: surface it as a visible failure with the decision
           detail, never as a hidden terminal no-compaction. *)
@@ -694,6 +705,7 @@ let commit_prepared_compaction (prepared : prepared_compaction)
       ; projection_target
       ; context
       ; evidence
+      ; post_success_terminalizer = _
       } =
     prepared
   in

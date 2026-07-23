@@ -40,11 +40,6 @@ type exact_execution_evidence =
   ; receipt_request_body_sha256 : string
   }
 
-type completed_plan =
-  { plan : compaction_plan
-  ; exact_execution_evidence : exact_execution_evidence
-  }
-
 type attempt_observation =
   { slot_id : string
   ; call_id : string
@@ -64,6 +59,18 @@ type exact_execution_guard =
       (unit, string) result
   }
 
+type post_success_terminalizer =
+  { keeper_name : string
+  ; exact_execution_guard : exact_execution_guard
+  ; attempt_observation : attempt_observation
+  }
+
+type completed_plan =
+  { plan : compaction_plan
+  ; exact_execution_evidence : exact_execution_evidence
+  ; post_success_terminalizer : post_success_terminalizer
+  }
+
 type summarization_failure =
   | Exact_lane_unconfigured
   | Exact_target_selection_failed
@@ -74,7 +81,6 @@ type summarization_failure =
   | Exact_execution_failed_after_dispatch of attempt_observation
   | Exact_attempt_already_started of attempt_observation
   | Exact_execution_cancelled_after_dispatch of attempt_observation
-  | Exact_terminal_persistence_failed of attempt_observation
   | Exact_execution_provenance_mismatch of attempt_observation
   | Invalid_plan
   | Invalid_plan_after_dispatch of attempt_observation
@@ -448,15 +454,34 @@ let terminal_failure_after_quarantine
       ~failure
       observation
   =
-  match
+  ignore
+    (quarantine_exact_execution
+       ~keeper_name
+       ~exact_execution_guard
+       ~cause
+       observation
+     : (unit, string) result);
+  Error failure
+;;
+
+let terminalize_post_success
+      { keeper_name; exact_execution_guard; attempt_observation }
+      cause
+  =
+  Eio.Cancel.protect
+  @@ fun () ->
+  ignore
     quarantine_exact_execution
       ~keeper_name
-      ~exact_execution_guard
+      ~exact_execution_guard:(Some exact_execution_guard)
       ~cause
-      observation
-  with
-  | Ok () -> Error failure
-  | Error _ -> Error (Exact_terminal_persistence_failed observation)
+      attempt_observation
+    : (unit, string) result;
+  Keeper_event_queue_state.
+    { cause
+    ; slot_id = attempt_observation.slot_id
+    ; call_id = attempt_observation.call_id
+    }
 ;;
 
 let exact_execution_evidence ~slot_id ready_plan (success : Exact_output.success) =
@@ -635,11 +660,19 @@ let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepar
                  ~failure:(Invalid_plan_after_dispatch observation)
                  observation
              | Ok plan ->
-               Ok
-                 { plan
-                 ; exact_execution_evidence =
-                     exact_execution_evidence ~slot_id ready_plan success
-                 })
+               (match exact_execution_guard with
+                | None -> Error Exact_execution_failed_before_dispatch
+                | Some exact_execution_guard ->
+                  Ok
+                    { plan
+                    ; exact_execution_evidence =
+                        exact_execution_evidence ~slot_id ready_plan success
+                    ; post_success_terminalizer =
+                        { keeper_name
+                        ; exact_execution_guard
+                        ; attempt_observation = observation
+                        }
+                    }))
       in
       let initial_observation = observe_attempt slot in
       (match exact_execution_guard with
@@ -717,6 +750,12 @@ let make ?exact_execution_guard ~keeper_name () =
 
 let completed_plan completed = completed.plan
 let completed_exact_execution_evidence completed = completed.exact_execution_evidence
+let completed_post_success_terminalizer completed = completed.post_success_terminalizer
+
+let completed_attempt_observation completed =
+  completed.post_success_terminalizer.attempt_observation
+;;
+
 let exact_execution_evidence_slot_id (evidence : exact_execution_evidence) = evidence.slot_id
 let exact_execution_evidence_call_id (evidence : exact_execution_evidence) = evidence.call_id
 

@@ -8,6 +8,8 @@ type exact_execution_evidence
 
 type completed_plan
 
+type post_success_terminalizer
+
 type prepared_lane
 
 type attempt_observation =
@@ -41,7 +43,6 @@ type summarization_failure =
   | Exact_execution_failed_after_dispatch of attempt_observation
   | Exact_attempt_already_started of attempt_observation
   | Exact_execution_cancelled_after_dispatch of attempt_observation
-  | Exact_terminal_persistence_failed of attempt_observation
   | Exact_execution_provenance_mismatch of attempt_observation
   | Invalid_plan
   | Invalid_plan_after_dispatch of attempt_observation
@@ -92,6 +93,17 @@ val plan_of_json
 
 val completed_plan : completed_plan -> compaction_plan
 val completed_exact_execution_evidence : completed_plan -> exact_execution_evidence
+val completed_attempt_observation : completed_plan -> attempt_observation
+val completed_post_success_terminalizer : completed_plan -> post_success_terminalizer
+
+val terminalize_post_success
+  :  post_success_terminalizer
+  -> Keeper_event_queue_state.exact_execution_terminal_cause
+  -> Keeper_event_queue_state.exact_execution_terminal
+(** Durably quarantine the real retained attempt observation before returning
+    its source-bound terminal identity. Persistence errors are logged but never
+    replace the original domain cause. *)
+
 val exact_execution_evidence_slot_id : exact_execution_evidence -> string
 val exact_execution_evidence_call_id : exact_execution_evidence -> string
 val exact_execution_evidence_target_identity_fingerprint : exact_execution_evidence -> string

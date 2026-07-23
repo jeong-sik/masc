@@ -1034,19 +1034,24 @@ let test_invalid_structural_evidence_after_dispatch_is_terminal () =
       let context =
         make_checkpoint () |> Masc.Keeper_context_core.context_of_oas_checkpoint
       in
+      let quarantine_calls = ref [] in
+      let exact_execution_guard : Summarizer.exact_execution_guard =
+        { Exact_fixture.permissive_exact_execution_guard with
+          quarantine =
+            (fun cause observation ->
+               quarantine_calls := (cause, observation) :: !quarantine_calls;
+               Ok ())
+        }
+      in
       let plan_for_units ~units =
         match
           Summarizer.make
-            ~exact_execution_guard:Exact_fixture.permissive_exact_execution_guard
+            ~exact_execution_guard
             ~keeper_name:meta.name
             ()
         with
         | None -> Error Summarizer.Exact_execution_context_unavailable
-        | Some summarize ->
-          summarize ~units
-          |> Result.map (fun completed ->
-            ( Summarizer.completed_plan completed
-            , Summarizer.completed_exact_execution_evidence completed ))
+        | Some summarize -> summarize ~units
       in
       let preparation =
         Compact_policy.For_testing.compact_for_request_typed_with_accounting
@@ -1058,21 +1063,96 @@ let test_invalid_structural_evidence_after_dispatch_is_terminal () =
       in
       check int "invalid evidence follows exactly one POST" 1
         (Exact_fixture.post_count server);
-      match preparation.decision with
-      | Compact_policy.Rejected
-          ( Manual
-          , Invalid_structural_evidence
-              ( Keeper_compaction_evidence.Invalid_field
-                  (Keeper_compaction_evidence.Summarized_message_count, Negative_integer)
-              , { cause = Keeper_event_queue_state.Invalid_structural_evidence
-                ; slot_id
-                ; call_id
-                } ) ) ->
-        check bool "invalid evidence terminal retains slot" true
-          (String.trim slot_id <> "");
-        check bool "invalid evidence terminal retains call" true
-          (String.trim call_id <> "")
-      | _ -> fail "post-dispatch invalid evidence was not a typed terminal")
+      (match preparation.decision with
+       | Compact_policy.Rejected
+           ( Manual
+           , Invalid_structural_evidence
+               ( Keeper_compaction_evidence.Invalid_field
+                   (Keeper_compaction_evidence.Summarized_message_count, Negative_integer)
+               , { cause = Keeper_event_queue_state.Invalid_structural_evidence
+                 ; slot_id
+                 ; call_id
+                 } ) ) ->
+         check bool "invalid evidence terminal retains slot" true
+           (String.trim slot_id <> "");
+         check bool "invalid evidence terminal retains call" true
+           (String.trim call_id <> "")
+       | _ -> fail "post-dispatch invalid evidence was not a typed terminal");
+      match !quarantine_calls with
+      | [ Keeper_event_queue_state.Invalid_structural_evidence, observation ] ->
+        check bool "invalid evidence quarantine retains slot" true
+          (String.trim observation.slot_id <> "");
+        check bool "invalid evidence quarantine retains call" true
+          (String.trim observation.call_id <> "")
+      | _ -> fail "invalid evidence terminal was not quarantined exactly once")
+;;
+
+let test_post_dispatch_non_reducing_output_is_quarantined () =
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  with_eio_context env sw @@ fun () ->
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+      init_runtime_fixture ();
+      let run_case ~name response =
+        let server =
+          Exact_fixture.start_server
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~clock:(Eio.Stdenv.clock env)
+            (Exact_fixture.Reply response)
+        in
+        publish_exact_fixture ~source:name server;
+        let quarantine_calls = ref [] in
+        let exact_execution_guard : Summarizer.exact_execution_guard =
+          { Exact_fixture.permissive_exact_execution_guard with
+            quarantine =
+              (fun cause observation ->
+                 quarantine_calls := (cause, observation) :: !quarantine_calls;
+                 Ok ())
+          }
+        in
+        let preparation =
+          Compact_policy.compact_for_request_typed
+            ~exact_execution_guard
+            ~meta:(make_meta ~name ())
+            ~trigger:Compaction_trigger.Manual
+            (make_checkpoint ()
+             |> Masc.Keeper_context_core.context_of_oas_checkpoint)
+        in
+        check int (name ^ " performs one POST") 1 (Exact_fixture.post_count server);
+        (match preparation.decision with
+         | Compact_policy.Rejected
+             ( Manual
+             , Exact_execution_terminal
+                 { cause = Keeper_event_queue_state.Domain_invalid_output
+                 ; slot_id
+                 ; call_id
+                 } ) ->
+           check bool (name ^ " terminal retains slot") true
+             (String.trim slot_id <> "");
+           check bool (name ^ " terminal retains call") true
+             (String.trim call_id <> "")
+         | _ -> fail (name ^ " was not a domain-invalid exact terminal"));
+        match !quarantine_calls with
+        | [ Keeper_event_queue_state.Domain_invalid_output, observation ] ->
+          check bool (name ^ " quarantine retains slot") true
+            (String.trim observation.slot_id <> "");
+          check bool (name ^ " quarantine retains call") true
+            (String.trim observation.call_id <> "")
+        | _ -> fail (name ^ " was not quarantined exactly once")
+      in
+      run_case
+        ~name:"unchanged-plan"
+        (exact_response
+           [ compaction_decision 1 Schema.compaction_plan_action_keep ]);
+      run_case
+        ~name:"larger-checkpoint"
+        (summarize_response (String.make 20_000 'x')))
 ;;
 
 (* RFC-0351 S0 / #25461: once the persisted failure streak suspends
@@ -1182,6 +1262,8 @@ let () =
         `Quick test_prepare_commit_source_cas;
       test_case "invalid structural evidence is post-dispatch terminal"
         `Quick test_invalid_structural_evidence_after_dispatch_is_terminal;
+      test_case "non-reducing output is quarantined"
+        `Quick test_post_dispatch_non_reducing_output_is_quarantined;
       test_case "suspended streak refuses reactive prepare"
         `Quick test_suspended_streak_refuses_reactive_prepare;
       test_case "missing exact lane is source-bound no-compaction"

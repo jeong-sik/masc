@@ -28,10 +28,6 @@ type failure =
   | Recovery of
       Keeper_post_turn.compaction_recovery_error
       * (unit, Keeper_context_runtime.lifecycle_dispatch_error) result
-val run
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> (operation_outcome, failure) result
 
 val run_admitted
   :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard

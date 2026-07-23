@@ -409,6 +409,10 @@ let () =
     "Exact_output_catalog_precedence"
     [ ( "bootstrap",
         [ Alcotest.test_case
+            "offline saves converge cache without publishing registry"
+            `Quick
+            test_offline_runtime_save_converges_by_write_stage
+        ; Alcotest.test_case
             "full replacement suppresses overlay and embedded targets"
             `Quick
             (test_full_replacement_precedence

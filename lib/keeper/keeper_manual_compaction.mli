@@ -46,8 +46,11 @@ val run_admitted
     start + source-CAS commit + completion/failure. The lane stays runnable
     while the LLM works; a failed final admission cannot strand
     [compaction_active], and interleaved checkpoint changes fail the exact
-    source CAS. This is the single sanctioned caller of that admission
-    variant. *)
+    source CAS. A rejected completion after the checkpoint commit dispatches
+    an explicit lifecycle failure cleanup before reporting the checkpoint as
+    applied; if that cleanup is also rejected, the typed failure reports
+    [checkpoint_applied = true]. This is the single sanctioned caller of that
+    admission variant. *)
 
 val failure_to_string : failure -> string
 val observe_manifest : keeper_name:string -> (unit, string) result -> unit

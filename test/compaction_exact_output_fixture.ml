@@ -5,9 +5,9 @@ module EO = Agent_sdk.Exact_output
 let permissive_exact_execution_guard :
   Keeper_compaction_llm_summarizer.exact_execution_guard
   =
-  { before_dispatch = (fun _ -> Ok ())
-  ; release_before_dispatch = (fun _ -> Ok ())
-  ; quarantine = (fun _ _ -> Ok ())
+  { before_dispatch = (fun _ -> Ok Keeper_compaction_llm_summarizer.Durable)
+  ; release_before_dispatch = (fun _ -> Ok Keeper_compaction_llm_summarizer.Durable)
+  ; quarantine = (fun _ _ -> Ok Keeper_compaction_llm_summarizer.Durable)
   }
 ;;
 

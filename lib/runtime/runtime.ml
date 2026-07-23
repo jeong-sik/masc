@@ -1700,7 +1700,10 @@ let with_runtime_config_write_lock f =
   Fun.protect ~finally:(fun () -> Mutex.unlock runtime_config_write_mutex) f
 ;;
 
-let runtime_config_atomic_failure ~replacement_visible failure =
+let runtime_config_atomic_failure
+    ~replacement_visible
+    (failure : Fs_compat.atomic_replace_failure)
+  =
   match failure.Fs_compat.exception_ with
   | Eio.Cancel.Cancelled _ ->
     Printexc.raise_with_backtrace failure.exception_ failure.backtrace
@@ -1746,14 +1749,14 @@ let commit_runtime_config_text
   with
   | Error Runtime_exact_output_registry.Registry_not_published ->
     (match replace_file path content with
-     | Ok () -> Ok ()
-     | Error failure ->
-       runtime_config_atomic_failure
-         ~replacement_visible:
-           (match failure.stage with
-            | Fs_compat.Before_rename -> false
-            | Fs_compat.After_rename -> true)
-         failure)
+     | Ok () ->
+       set_loaded ~config_path:path loaded;
+       Ok ()
+     | Error ({ stage = Fs_compat.Before_rename; _ } as failure) ->
+       runtime_config_atomic_failure ~replacement_visible:false failure
+     | Error ({ stage = Fs_compat.After_rename; _ } as failure) ->
+       set_loaded ~config_path:path loaded;
+       runtime_config_atomic_failure ~replacement_visible:true failure)
   | Error error ->
     Error
       ("exact-output registry replacement rejected: "

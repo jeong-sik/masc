@@ -76,10 +76,25 @@ let claim_manual_lease ~base_path ~keeper_name =
   | Error detail -> Alcotest.failf "manual lease claim failed: %s" detail
 ;;
 
+let persisted_checkpoint_source_exn trace_id =
+  match Keeper_id.Trace_id.of_string trace_id with
+  | Error detail -> Alcotest.failf "checkpoint source trace id failed: %s" detail
+  | Ok trace_id ->
+    (match
+       Masc.Keeper_checkpoint_ref.of_persisted
+         ~trace_id
+         ~generation:1
+         ~turn_count:1
+         ~sha256:(String.make 64 'a')
+     with
+     | Ok source -> source
+     | Error _ -> Alcotest.fail "persisted checkpoint source ref failed")
+;;
+
 let permissive_exact_execution_guard : C.exact_execution_guard =
-  { before_dispatch = (fun _ -> Ok ())
-  ; release_before_dispatch = (fun _ -> Ok ())
-  ; quarantine = (fun _ _ -> Ok ())
+  { before_dispatch = (fun _ -> Ok C.Durable)
+  ; release_before_dispatch = (fun _ -> Ok C.Durable)
+  ; quarantine = (fun _ _ -> Ok C.Durable)
   }
 ;;
 
@@ -551,6 +566,64 @@ let test_before_dispatch_zero_advances_exactly_once () =
   Alcotest.(check int) "no POST after successor success" 0 (F.post_count third)
 ;;
 
+let test_visible_release_uncertainty_is_source_bound_terminal () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  let first = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let second = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let first_slot = "visible-release-original" in
+  let second_slot = "visible-release-forbidden-successor" in
+  let snapshot =
+    F.resolver_snapshot
+      ~connect_timeouts:[ first_slot, 1.0 ]
+      ~source:"masc visible release terminal"
+      [ { id = first_slot; base_url = first.base_url }
+      ; { id = second_slot; base_url = second.base_url }
+      ]
+  in
+  let registry = publish_exn ~slot_ids:[ first_slot; second_slot ] snapshot in
+  let prepared = prepare_exn ~keeper_name:"keeper-visible-release" ~registry in
+  let release_calls = ref [] in
+  let guard : C.exact_execution_guard =
+    { before_dispatch = (fun _ -> Ok C.Durable)
+    ; release_before_dispatch =
+        (fun observation ->
+           release_calls := observation :: !release_calls;
+           Ok (C.Visible_durability_unknown "injected release after-rename failure"))
+    ; quarantine = (fun _ _ -> Alcotest.fail "quarantine must not run")
+    }
+  in
+  let terminal : P.exact_execution_terminal =
+    match
+      execute_prepared_lane
+        ~keeper_name:"keeper-visible-release"
+        ~net
+        ~clock
+        ~exact_execution_guard:guard
+        prepared
+    with
+    | Error (C.Exact_execution_terminal terminal) -> terminal
+    | Error _ -> Alcotest.fail "visible release returned the wrong typed failure"
+    | Ok _ -> Alcotest.fail "visible release uncertainty incorrectly failed over"
+  in
+  let original = observation_exn prepared first_slot in
+  Alcotest.(check bool)
+    "visible release uses persistence terminal cause"
+    true
+    (terminal.cause = Keeper_event_queue_state.Terminal_persistence_failed);
+  Alcotest.(check string) "visible release retains slot" original.slot_id terminal.slot_id;
+  Alcotest.(check string) "visible release retains call" original.call_id terminal.call_id;
+  (match !release_calls with
+   | [ released ] ->
+     Alcotest.(check string) "release called for original slot" first_slot released.slot_id
+   | _ -> Alcotest.fail "visible release was not called exactly once");
+  Alcotest.(check int) "visible release original has no POST" 0 (F.post_count first);
+  Alcotest.(check int)
+    "visible release never dispatches successor"
+    0
+    (F.post_count second)
+;;
+
 let test_post_dispatch_failure_is_terminal () =
   run_eio
   @@ fun ~sw ~net ~clock ->
@@ -870,7 +943,7 @@ let test_prepared_lane_concurrency_is_affine () =
     (F.post_count server)
 ;;
 
-let test_dispatch_guard_failure_prevents_post () =
+let test_before_rename_binding_failure_prevents_post () =
   run_eio
   @@ fun ~sw ~net ~clock ->
   let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
@@ -883,7 +956,7 @@ let test_dispatch_guard_failure_prevents_post () =
   let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
   let prepared = prepare_exn ~keeper_name:"keeper-durable-guard-failure" ~registry in
   let guard : C.exact_execution_guard =
-    { before_dispatch = (fun _ -> Error "injected durable binding failure")
+    { before_dispatch = (fun _ -> Error "injected before-rename binding failure")
     ; release_before_dispatch = (fun _ -> Alcotest.fail "release must not run")
     ; quarantine = (fun _ _ -> Alcotest.fail "quarantine must not run")
     }
@@ -899,7 +972,7 @@ let test_dispatch_guard_failure_prevents_post () =
    | Error C.Exact_execution_failed_before_dispatch -> ()
    | Error _ -> Alcotest.fail "guard failure returned the wrong typed failure"
    | Ok _ -> Alcotest.fail "guard failure must prevent exact-output execution");
-  Alcotest.(check int) "binding failure prevents POST" 0 (F.post_count server)
+  Alcotest.(check int) "before-rename binding failure prevents POST" 0 (F.post_count server)
 ;;
 
 let test_missing_dispatch_guard_prevents_post () =
@@ -941,7 +1014,7 @@ let test_quarantine_persistence_failure_preserves_original_cause () =
   let prepared = prepare_exn ~keeper_name:"keeper-quarantine-persistence-failure" ~registry in
   let quarantine_calls = ref [] in
   let guard : C.exact_execution_guard =
-    { before_dispatch = (fun _ -> Ok ())
+    { before_dispatch = (fun _ -> Ok C.Durable)
     ; release_before_dispatch = (fun _ -> Alcotest.fail "release must not run")
     ; quarantine =
         (fun cause observation ->
@@ -1032,6 +1105,218 @@ let test_heartbeat_guard_binds_before_post () =
   Alcotest.(check int) "heartbeat guarded request posts once" 1 (F.post_count server)
 ;;
 
+let test_visible_unknown_binding_prevents_post_and_settles () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  with_temp_dir "masc-visible-unknown-binding" @@ fun base_path ->
+  let keeper_name = "keeper-visible-unknown-binding" in
+  let lease = claim_manual_lease ~base_path ~keeper_name in
+  let slot_id = "visible-unknown-binding" in
+  let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc visible unknown binding"
+      [ { id = slot_id; base_url = server.base_url } ]
+  in
+  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
+  let prepared = prepare_exn ~keeper_name ~registry in
+  let observation = observation_exn prepared slot_id in
+  let durable_guard =
+    Keeper_heartbeat_loop.For_testing.exact_execution_guard
+      ~base_path
+      ~keeper_name
+      ~lease
+  in
+  let guard : C.exact_execution_guard =
+    { durable_guard with
+      before_dispatch =
+        (fun observation ->
+           match durable_guard.before_dispatch observation with
+           | Ok C.Durable ->
+             Ok (C.Visible_durability_unknown "injected bind after-rename failure")
+           | Ok (C.Visible_durability_unknown _ as outcome) -> Ok outcome
+           | Error _ as error -> error)
+    }
+  in
+  let terminal : P.exact_execution_terminal =
+    match
+      execute_prepared_lane
+        ~keeper_name
+        ~net
+        ~clock
+        ~exact_execution_guard:guard
+        prepared
+    with
+    | Error (C.Exact_execution_terminal terminal) -> terminal
+    | Error _ -> Alcotest.fail "visible bind outcome returned the wrong typed terminal"
+    | Ok _ -> Alcotest.fail "visible bind outcome must prevent exact-output execution"
+  in
+  Alcotest.(check bool)
+    "visible bind outcome uses persistence terminal cause"
+    true
+    (terminal.cause = Keeper_event_queue_state.Terminal_persistence_failed);
+  Alcotest.(check int) "visible bind outcome prevents POST" 0 (F.post_count server);
+  (match P.exact_execution_binding_result ~base_path ~keeper_name with
+   | Ok
+       (Some
+         { status = P.Dispatch_uncertain
+         ; slot_id = persisted_slot_id
+         ; call_id = persisted_call_id
+         ; plan_fingerprint
+         ; request_body_sha256
+         ; _
+         }) ->
+     Alcotest.(check string)
+       "visible bind retains slot identity"
+       observation.slot_id
+       persisted_slot_id;
+     Alcotest.(check string)
+       "visible bind retains call identity"
+       observation.call_id
+       persisted_call_id;
+     Alcotest.(check string)
+       "visible bind retains plan identity"
+       observation.receipt_plan_fingerprint
+       plan_fingerprint;
+     Alcotest.(check string)
+       "visible bind retains request identity"
+       observation.receipt_request_body_sha256
+       request_body_sha256
+   | Ok (Some _) -> Alcotest.fail "visible bind retained the wrong status"
+   | Ok None -> Alcotest.fail "visible bind was relabelled as unbound"
+   | Error detail -> Alcotest.failf "visible bind reload failed: %s" detail);
+  let settlement : P.settlement =
+    P.No_compaction
+      { source = persisted_checkpoint_source_exn "trace-visible-unknown-binding"
+      ; reason = P.Exact_execution_terminal terminal
+      }
+  in
+  (match
+     P.settle_exact_execution_result
+       ~base_path
+       ~keeper_name
+       ~settled_at:4.0
+       ~lease
+       ~slot_id:observation.slot_id
+       ~call_id:observation.call_id
+       ~plan_fingerprint:observation.receipt_plan_fingerprint
+       ~request_body_sha256:observation.receipt_request_body_sha256
+       ~settlement
+       ()
+   with
+   | Ok (P.Settled _) -> ()
+   | Ok _ -> Alcotest.fail "visible bind settlement was not fresh"
+   | Error detail -> Alcotest.failf "visible bind settlement failed: %s" detail);
+  match P.exact_execution_binding_result ~base_path ~keeper_name with
+  | Ok None -> ()
+  | Ok (Some _) -> Alcotest.fail "visible bind settlement retained the binding"
+  | Error detail -> Alcotest.failf "visible bind settlement reload failed: %s" detail
+;;
+
+let test_visible_unknown_quarantine_preserves_cause_and_settles () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  with_temp_dir "masc-visible-unknown-quarantine" @@ fun base_path ->
+  let keeper_name = "keeper-visible-unknown-quarantine" in
+  let lease = claim_manual_lease ~base_path ~keeper_name in
+  let slot_id = "visible-unknown-quarantine" in
+  let server = F.start_server ~sw ~net ~clock (F.Reply domain_invalid_response) in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc visible unknown quarantine"
+      [ { id = slot_id; base_url = server.base_url } ]
+  in
+  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
+  let prepared = prepare_exn ~keeper_name ~registry in
+  let durable_guard =
+    Keeper_heartbeat_loop.For_testing.exact_execution_guard
+      ~base_path
+      ~keeper_name
+      ~lease
+  in
+  let guard : C.exact_execution_guard =
+    { durable_guard with
+      quarantine =
+        (fun cause observation ->
+           match durable_guard.quarantine cause observation with
+           | Ok C.Durable ->
+             Ok (C.Visible_durability_unknown "injected quarantine after-rename failure")
+           | Ok (C.Visible_durability_unknown _ as outcome) -> Ok outcome
+           | Error _ as error -> error)
+    }
+  in
+  let observation : C.attempt_observation =
+    match
+      execute_prepared_lane
+        ~keeper_name
+        ~net
+        ~clock
+        ~exact_execution_guard:guard
+        prepared
+    with
+    | Error (C.Invalid_plan_after_dispatch observation) -> observation
+    | Error _ -> Alcotest.fail "visible quarantine returned the wrong typed failure"
+    | Ok _ -> Alcotest.fail "domain-invalid output unexpectedly succeeded"
+  in
+  let terminal : P.exact_execution_terminal =
+    { cause = Keeper_event_queue_state.Domain_invalid_output
+    ; slot_id = observation.slot_id
+    ; call_id = observation.call_id
+    }
+  in
+  Alcotest.(check int) "visible quarantine follows one POST" 1 (F.post_count server);
+  (match P.exact_execution_binding_result ~base_path ~keeper_name with
+   | Ok
+       (Some
+         { status = P.Terminal_quarantined persisted_cause
+         ; slot_id = persisted_slot_id
+         ; call_id = persisted_call_id
+         ; _
+         }) ->
+     Alcotest.(check bool)
+       "visible quarantine preserves canonical cause"
+       true
+       (persisted_cause = terminal.cause);
+     Alcotest.(check string)
+       "visible quarantine preserves canonical slot"
+       terminal.slot_id
+       persisted_slot_id;
+     Alcotest.(check string)
+       "visible quarantine preserves canonical call"
+       terminal.call_id
+       persisted_call_id
+   | Ok (Some _) -> Alcotest.fail "visible quarantine retained the wrong status"
+   | Ok None -> Alcotest.fail "visible quarantine was relabelled as unbound"
+   | Error detail -> Alcotest.failf "visible quarantine reload failed: %s" detail);
+  let settlement : P.settlement =
+    P.No_compaction
+      { source = persisted_checkpoint_source_exn "trace-visible-unknown-quarantine"
+      ; reason = P.Exact_execution_terminal terminal
+      }
+  in
+  (match
+     P.settle_exact_execution_result
+       ~base_path
+       ~keeper_name
+       ~settled_at:5.0
+       ~lease
+       ~slot_id:observation.slot_id
+       ~call_id:observation.call_id
+       ~plan_fingerprint:observation.receipt_plan_fingerprint
+       ~request_body_sha256:observation.receipt_request_body_sha256
+       ~settlement
+       ()
+   with
+   | Ok (P.Settled _) -> ()
+   | Ok _ -> Alcotest.fail "visible quarantine settlement was not fresh"
+   | Error detail -> Alcotest.failf "visible quarantine settlement failed: %s" detail);
+  match P.exact_execution_binding_result ~base_path ~keeper_name with
+  | Ok None -> ()
+  | Ok (Some _) -> Alcotest.fail "visible quarantine settlement retained the binding"
+  | Error detail ->
+    Alcotest.failf "visible quarantine settlement reload failed: %s" detail
+;;
+
 let test_post_success_terminalization_is_affine () =
   run_eio
   @@ fun ~sw ~net ~clock ->
@@ -1112,7 +1397,7 @@ let test_post_success_terminalization_is_affine () =
     | Error detail -> Alcotest.failf "terminal source trace id failed: %s" detail
     | Ok trace_id ->
       (match
-         Keeper_checkpoint_ref.of_persisted
+         Masc.Keeper_checkpoint_ref.of_persisted
            ~trace_id
            ~generation:1
            ~turn_count:1
@@ -1316,6 +1601,10 @@ let () =
             `Quick
             test_before_dispatch_zero_advances_exactly_once
         ; Alcotest.test_case
+            "visible release uncertainty is source-bound terminal"
+            `Quick
+            test_visible_release_uncertainty_is_source_bound_terminal
+        ; Alcotest.test_case
             "post-dispatch failure is terminal"
             `Quick
             test_post_dispatch_failure_is_terminal
@@ -1330,7 +1619,7 @@ let () =
         ; Alcotest.test_case
             "durable dispatch guard failure prevents POST"
             `Quick
-            test_dispatch_guard_failure_prevents_post
+            test_before_rename_binding_failure_prevents_post
         ; Alcotest.test_case
             "missing dispatch guard prevents POST"
             `Quick
@@ -1343,6 +1632,14 @@ let () =
             "heartbeat durable bind precedes POST"
             `Quick
             test_heartbeat_guard_binds_before_post
+        ; Alcotest.test_case
+            "visible binding uncertainty prevents POST and settles"
+            `Quick
+            test_visible_unknown_binding_prevents_post_and_settles
+        ; Alcotest.test_case
+            "visible quarantine uncertainty preserves cause and settles"
+            `Quick
+            test_visible_unknown_quarantine_preserves_cause_and_settles
         ; Alcotest.test_case
             "post-success terminalization is affine"
             `Quick

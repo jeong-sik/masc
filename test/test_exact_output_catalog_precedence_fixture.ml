@@ -321,6 +321,83 @@ let test_closed_registry_transaction () =
 
 exception Injected_parent_sync_failure
 
+let test_offline_runtime_save_converges_by_write_stage () =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+       with_temp_dir "exact-output-offline-runtime-save" @@ fun root ->
+       let path = Filename.concat root "runtime.toml" in
+       let config_a =
+         transaction_runtime_toml
+           ~runtime_name:"replacement"
+           ~lane_id:"offline-a"
+       in
+       let config_b =
+         transaction_runtime_toml
+           ~runtime_name:"alternate"
+           ~lane_id:"offline-b"
+       in
+       require_registry_unpublished "offline baseline";
+       (match Runtime.save_config_text ~runtime_config_path:path config_a with
+        | Ok () -> ()
+        | Error error -> Alcotest.failf "offline durable save failed: %s" error);
+       Alcotest.(check string)
+         "offline durable file converges to A"
+         config_a
+         (Fs_compat.load_file path);
+       Alcotest.(check string)
+         "offline durable cache converges to A"
+         "replacement_provider.replacement"
+         (Runtime.get_default_runtime_id ());
+       require_registry_unpublished "offline durable save";
+       let parent_sync_observed_unpublished = ref false in
+       (match
+          Runtime.For_testing.save_config_text_with_sync_parent
+            ~runtime_config_path:path
+            ~sync_parent:(fun _ ->
+              parent_sync_observed_unpublished
+              := (match Registry.current () with
+                  | Error Registry.Registry_not_published -> true
+                  | Error _ | Ok _ -> false);
+              raise Injected_parent_sync_failure)
+            config_b
+        with
+        | Error error ->
+          Alcotest.(check bool)
+            "offline after-rename reports durability uncertainty"
+            true
+            (String.starts_with
+               ~prefix:
+                 "runtime config replacement is visible, but parent-directory \
+                  durability is unconfirmed"
+               error)
+        | Ok () -> Alcotest.fail "offline injected parent sync returned success");
+       Alcotest.(check bool)
+         "offline parent sync observes unpublished registry"
+         true
+         !parent_sync_observed_unpublished;
+       Alcotest.(check string)
+         "offline after-rename file converges to B"
+         config_b
+         (Fs_compat.load_file path);
+       Alcotest.(check string)
+         "offline after-rename cache converges to B"
+         "replacement_provider.alternate"
+         (Runtime.get_default_runtime_id ());
+       require_registry_unpublished "offline after-rename save";
+       let failed_path = Filename.concat root "before-rename-directory" in
+       Unix.mkdir failed_path 0o755;
+       (match Runtime.save_config_text ~runtime_config_path:failed_path config_a with
+        | Error _ -> ()
+        | Ok () -> Alcotest.fail "offline before-rename failure returned success");
+       Alcotest.(check string)
+         "offline before-rename preserves cache B"
+         "replacement_provider.alternate"
+         (Runtime.get_default_runtime_id ());
+       require_registry_unpublished "offline before-rename failure")
+;;
+
 let test_runtime_after_rename_converges_state () =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect

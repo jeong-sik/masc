@@ -137,10 +137,29 @@ let run_commit ~config ~base_dir ~meta prepared =
      | Error error ->
        Log.Keeper.error
          ~keeper_name:meta.name
-         "manual compaction completion lifecycle dispatch failed after durable commit; request remains applied: %s"
+         "manual compaction completion lifecycle dispatch failed after durable commit; closing the lifecycle with an explicit failure: %s"
          (Keeper_context_runtime.lifecycle_dispatch_error_to_string error);
        Keeper_unified_metrics.broadcast_compaction ~name:meta.name recovery;
-       Ok (Compacted { recovery; manifest })
+       let failure_dispatch =
+         dispatch_failed
+           ~config
+           ~meta
+           "compaction_completed_rejected_after_checkpoint"
+       in
+       (match failure_dispatch with
+        | Ok () ->
+          Log.Keeper.warn
+            ~keeper_name:meta.name
+            "manual compaction checkpoint remains applied after completion rejection; failure cleanup released the compaction lifecycle";
+          Ok (Compacted { recovery; manifest })
+        | Error _ ->
+          Error
+            (Lifecycle_with_failure_dispatch
+               { stage = Compaction_completed
+               ; checkpoint_applied = true
+               ; error
+               ; failure_dispatch
+               }))
      | Ok () ->
        Keeper_unified_metrics.broadcast_compaction
          ~name:meta.name

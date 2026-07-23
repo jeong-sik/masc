@@ -37,6 +37,10 @@ module Make (Publish : sig
     ; status : exact_execution_lease_status
     }
 
+  type exact_write_outcome = Keeper_event_queue_persistence.exact_write_outcome =
+    | Durable
+    | Visible_durability_unknown of string
+
   val bind_exact_execution_result :
     base_path:string ->
     string ->
@@ -45,7 +49,7 @@ module Make (Publish : sig
     call_id:string ->
     plan_fingerprint:string ->
     request_body_sha256:string ->
-    (unit, string) result
+    (exact_write_outcome, string) result
 
   val release_exact_execution_before_dispatch_result :
     base_path:string ->
@@ -55,7 +59,7 @@ module Make (Publish : sig
     call_id:string ->
     plan_fingerprint:string ->
     request_body_sha256:string ->
-    (unit, string) result
+    (exact_write_outcome, string) result
 
   val quarantine_exact_execution_result :
     base_path:string ->
@@ -64,7 +68,7 @@ module Make (Publish : sig
     terminal:exact_execution_terminal ->
     plan_fingerprint:string ->
     request_body_sha256:string ->
-    (unit, string) result
+    (exact_write_outcome, string) result
 
   val active_lease_result :
     base_path:string ->

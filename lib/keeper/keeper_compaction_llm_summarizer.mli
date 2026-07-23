@@ -22,16 +22,25 @@ type attempt_observation =
   ; receipt_request_body_sha256 : string
   }
 
+type exact_write_outcome = Keeper_event_queue_persistence.exact_write_outcome =
+  | Durable
+  | Visible_durability_unknown of string
+
 type exact_execution_guard =
-  { before_dispatch : attempt_observation -> (unit, string) result
-  ; release_before_dispatch : attempt_observation -> (unit, string) result
+  { before_dispatch : attempt_observation -> (exact_write_outcome, string) result
+  ; release_before_dispatch : attempt_observation -> (exact_write_outcome, string) result
   ; quarantine :
       Keeper_event_queue_state.exact_execution_terminal_cause ->
       attempt_observation ->
-      (unit, string) result
+      (exact_write_outcome, string) result
   }
-(** Explicit lease-scoped durable dispatch authority. [before_dispatch] must
-    commit before returning [Ok]; none of these callbacks may perform POST. *)
+(** Explicit lease-scoped exact-execution persistence authority.
+    [before_dispatch] must return [Durable] before POST; visible uncertainty
+    returns a source-bound terminal without POST. [release_before_dispatch]
+    permits the next slot only after [Durable]; visible removal returns a
+    terminal for the original slot/call and does not fail over. A visible
+    [quarantine] preserves the original post-dispatch terminal cause for
+    source-bound settlement. None of these callbacks performs POST. *)
 
 type summarization_failure =
   | Exact_lane_unconfigured
@@ -40,6 +49,7 @@ type summarization_failure =
   | Exact_attempt_start_failed of string
   | Exact_execution_context_unavailable
   | Exact_execution_failed_before_dispatch
+  | Exact_execution_terminal of Keeper_event_queue_state.exact_execution_terminal
   | Exact_execution_failed_after_dispatch of attempt_observation
   | Exact_attempt_already_started of attempt_observation
   | Exact_execution_cancelled_after_dispatch of attempt_observation

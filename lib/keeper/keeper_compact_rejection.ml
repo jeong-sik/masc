@@ -63,6 +63,8 @@ let summarization_rejection = function
     Exact_execution_context_unavailable
   | Keeper_compaction_llm_summarizer.Exact_execution_failed_before_dispatch ->
     Exact_execution_failed_before_dispatch
+  | Keeper_compaction_llm_summarizer.Exact_execution_terminal terminal ->
+    Exact_execution_terminal terminal
   | Keeper_compaction_llm_summarizer.Exact_execution_failed_after_dispatch observation ->
     Exact_execution_terminal
       (exact_terminal_of_observation Execution_failed_after_dispatch observation)

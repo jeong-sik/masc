@@ -55,6 +55,10 @@ type exact_execution_binding = Keeper_event_queue_persistence.exact_execution_bi
   ; status : exact_execution_lease_status
   }
 
+type exact_write_outcome = Keeper_event_queue_persistence.exact_write_outcome =
+  | Durable
+  | Visible_durability_unknown of string
+
 type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
   | Failure_judgment_requested
   | Failure_judgment_boundary_failed of { detail : string }
@@ -197,7 +201,7 @@ val bind_exact_execution_result :
   call_id:string ->
   plan_fingerprint:string ->
   request_body_sha256:string ->
-  (unit, string) result
+  (exact_write_outcome, string) result
 
 val release_exact_execution_before_dispatch_result :
   base_path:string ->
@@ -207,7 +211,7 @@ val release_exact_execution_before_dispatch_result :
   call_id:string ->
   plan_fingerprint:string ->
   request_body_sha256:string ->
-  (unit, string) result
+  (exact_write_outcome, string) result
 
 val quarantine_exact_execution_result :
   base_path:string ->
@@ -216,7 +220,7 @@ val quarantine_exact_execution_result :
   terminal:exact_execution_terminal ->
   plan_fingerprint:string ->
   request_body_sha256:string ->
-  (unit, string) result
+  (exact_write_outcome, string) result
 
 val cancel_accepted_result :
   base_path:string ->

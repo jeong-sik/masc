@@ -76,7 +76,9 @@ let test_before_dispatch_release_allows_registration_requeue () =
        ~request_body_sha256
        ()
    with
-   | Ok () -> ()
+   | Ok P.Durable -> ()
+   | Ok (P.Visible_durability_unknown detail) ->
+     Alcotest.failf "before-dispatch release durability unknown: %s" detail
    | Error detail -> Alcotest.failf "before-dispatch release failed: %s" detail);
   (match P.exact_execution_binding_result ~base_path ~keeper_name with
    | Ok None -> ()
@@ -139,9 +141,13 @@ let test_conflicting_concurrent_bind_has_single_winner () =
   in
   let winner_call, winner_plan, winner_request =
     match result_a, result_b with
-    | Ok (), Error _ -> call_a, plan_a, request_a
-    | Error _, Ok () -> call_b, plan_b, request_b
-    | Ok (), Ok () -> Alcotest.fail "conflicting exact binds both succeeded"
+    | Ok P.Durable, Error _ -> call_a, plan_a, request_a
+    | Error _, Ok P.Durable -> call_b, plan_b, request_b
+    | Ok P.Durable, Ok P.Durable ->
+      Alcotest.fail "conflicting exact binds both succeeded"
+    | Ok (P.Visible_durability_unknown detail), _
+    | _, Ok (P.Visible_durability_unknown detail) ->
+      Alcotest.failf "concurrent exact bind durability unknown: %s" detail
     | Error first, Error second ->
       Alcotest.failf "conflicting exact binds both failed: %s / %s" first second
   in

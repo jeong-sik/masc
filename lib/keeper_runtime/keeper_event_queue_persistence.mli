@@ -58,6 +58,10 @@ type exact_execution_binding = Keeper_event_queue_state.exact_execution_binding 
   ; status : exact_execution_lease_status
   }
 
+type exact_write_outcome =
+  | Durable
+  | Visible_durability_unknown of string
+
 type escalation_reason = Keeper_event_queue_state.escalation_reason =
   | Failure_judgment_requested
   | Failure_judgment_boundary_failed of { detail : string }
@@ -268,9 +272,12 @@ val bind_exact_execution_result :
   plan_fingerprint:string ->
   request_body_sha256:string ->
   unit ->
-  (unit, string) result
-(** Durably bind the affine call identity before dispatch. An [Error] means the
-    provider call must not start. *)
+  (exact_write_outcome, string) result
+(** Bind the affine call identity before dispatch. Only [Ok Durable] permits
+    the provider call to start. [Ok (Visible_durability_unknown _)] means the
+    replacement is visible but its parent-directory durability is unknown; the
+    exact identity must be settled terminally without POST or failover. An
+    [Error] means the replacement was not visible. *)
 
 val release_exact_execution_before_dispatch_result :
   base_path:string ->
@@ -281,7 +288,12 @@ val release_exact_execution_before_dispatch_result :
   plan_fingerprint:string ->
   request_body_sha256:string ->
   unit ->
-  (unit, string) result
+  (exact_write_outcome, string) result
+(** Remove a bound identity only while it is still pre-dispatch. [Durable]
+    permits fallback to another slot. [Visible_durability_unknown _] means the
+    removal is visible but its directory durability is unknown; the caller
+    must return a source-bound terminal for the original identity and must not
+    fail over. [Error] means the removal was not visible. *)
 
 val quarantine_exact_execution_result :
   base_path:string ->
@@ -291,7 +303,10 @@ val quarantine_exact_execution_result :
   plan_fingerprint:string ->
   request_body_sha256:string ->
   unit ->
-  (unit, string) result
+  (exact_write_outcome, string) result
+(** Persist the canonical post-dispatch terminal cause. A visible replacement
+    with unknown directory durability keeps that original cause and remains
+    eligible for matching source-bound settlement. *)
 
 val settle_exact_execution_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->

@@ -53,6 +53,10 @@ type exact_execution_binding = State.exact_execution_binding =
   ; status : exact_execution_lease_status
   }
 
+type exact_write_outcome =
+  | Durable
+  | Visible_durability_unknown of string
+
 type escalation_reason = State.escalation_reason =
   | Failure_judgment_requested
   | Failure_judgment_boundary_failed of { detail : string }
@@ -222,6 +226,31 @@ let save_json_atomic_with ~strict_parent_sync path json =
 let save_json_atomic = save_json_atomic_with ~strict_parent_sync:false
 let save_json_atomic_strict = save_json_atomic_with ~strict_parent_sync:true
 
+let save_json_atomic_strict_staged path json =
+  match
+    try Ok (Fs_compat.mkdir_p (Filename.dirname path)) with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
+  with
+  | Error _ as error -> error
+  | Ok () ->
+    let content =
+      json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string
+    in
+    (match Fs_compat.save_file_atomic_strict_staged path content with
+     | Ok () -> Ok Durable
+     | Error (failure : Fs_compat.atomic_replace_failure) ->
+       let detail = Fs_compat.atomic_replace_failure_to_string failure in
+       (match failure.stage with
+        | Fs_compat.Before_rename ->
+          (match failure.exception_ with
+           | Eio.Cancel.Cancelled _ ->
+             Printexc.raise_with_backtrace failure.exception_ failure.backtrace
+           | _ -> Error detail)
+        | Fs_compat.After_rename ->
+          Ok (Visible_durability_unknown detail)))
+;;
+
 let save_state_unlocked_with ~strict_parent_sync owner state =
   let keeper_name = keeper_name_of_owner owner in
   let path = snapshot_path_of_owner owner in
@@ -239,6 +268,20 @@ let save_state_unlocked_with ~strict_parent_sync owner state =
 
 let save_state_unlocked = save_state_unlocked_with ~strict_parent_sync:false
 let save_state_unlocked_strict = save_state_unlocked_with ~strict_parent_sync:true
+
+let save_state_unlocked_strict_staged owner state =
+  let keeper_name = keeper_name_of_owner owner in
+  let path = snapshot_path_of_owner owner in
+  match save_json_atomic_strict_staged path (State.to_yojson state) with
+  | Ok outcome -> Ok outcome
+  | Error message ->
+    Error
+      (Printf.sprintf
+         "failed to persist keeper=%s path=%s: %s"
+         keeper_name
+         path
+         message)
+;;
 
 type snapshot_read_error_kind =
   | Invalid_path
@@ -697,6 +740,44 @@ let commit_transform
             (Printexc.to_string exn)))
 ;;
 
+let commit_exact_transform_unlocked owner ~after_commit transform =
+  match load_state_unlocked owner with
+  | Error _ as error -> error
+  | Ok current ->
+    (match transform current with
+     | Error _ as error -> error
+     | Ok (next, value) ->
+       let next =
+         if next == current then Ok next else bump_revision next
+       in
+       (match next with
+        | Error _ as error -> error
+        | Ok next ->
+          (match save_state_unlocked_strict_staged owner next with
+           | Error _ as error -> error
+           | Ok outcome ->
+             after_commit (State.pending next);
+             Ok (value, outcome))))
+;;
+
+let commit_exact_transform ~base_path ~keeper_name ~after_commit transform =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         commit_exact_transform_unlocked owner ~after_commit transform)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue exact transaction raised keeper=%s path=%s: %s"
+            (keeper_name_of_owner owner)
+            (snapshot_path_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
 let update_checked_result ?(after_commit = fun () -> ()) ~base_path ~keeper_name f =
   commit_transform
     ~base_path
@@ -812,8 +893,7 @@ let bind_exact_execution_result
       ~request_body_sha256
       ()
   =
-  commit_transform
-    ~strict_snapshot_durability:true
+  commit_exact_transform
     ~base_path
     ~keeper_name
     ~after_commit:(fun _ -> ())
@@ -826,6 +906,7 @@ let bind_exact_execution_result
          ~request_body_sha256
          state
        |> Result.map (fun next -> next, ()))
+  |> Result.map snd
 ;;
 
 let release_exact_execution_before_dispatch_result
@@ -838,8 +919,7 @@ let release_exact_execution_before_dispatch_result
       ~request_body_sha256
       ()
   =
-  commit_transform
-    ~strict_snapshot_durability:true
+  commit_exact_transform
     ~base_path
     ~keeper_name
     ~after_commit:(fun _ -> ())
@@ -852,6 +932,7 @@ let release_exact_execution_before_dispatch_result
          ~request_body_sha256
          state
        |> Result.map (fun next -> next, ()))
+  |> Result.map snd
 ;;
 
 let quarantine_exact_execution_result
@@ -863,8 +944,7 @@ let quarantine_exact_execution_result
       ~request_body_sha256
       ()
   =
-  commit_transform
-    ~strict_snapshot_durability:true
+  commit_exact_transform
     ~base_path
     ~keeper_name
     ~after_commit:(fun _ -> ())
@@ -876,6 +956,7 @@ let quarantine_exact_execution_result
          ~request_body_sha256
          state
        |> Result.map (fun next -> next, ()))
+  |> Result.map snd
 ;;
 
 let commit_settlement_transition_unlocked owner ~after_commit transition current =

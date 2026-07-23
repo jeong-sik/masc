@@ -385,7 +385,9 @@ val save_config_text :
     Once rename is visible, the prepared immutable registry and runtime cache
     are synchronously converged even when parent-directory fsync fails; that
     durability-uncertain case returns [Error] and is safe to retry. A fully
-    durable replacement returns [Ok ()]. *)
+    durable replacement returns [Ok ()]. Before exact-output registry bootstrap,
+    the same write-stage rules apply to the runtime cache while the registry
+    remains unpublished. *)
 
 val set_runtime_id_for_keeper :
   ?runtime_config_path:string ->

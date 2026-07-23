@@ -35,6 +35,10 @@ struct
     ; request_body_sha256 : string
     ; status : exact_execution_lease_status
     }
+
+  type exact_write_outcome = Keeper_event_queue_persistence.exact_write_outcome =
+    | Durable
+    | Visible_durability_unknown of string
   
   let bind_exact_execution_result
         ~base_path

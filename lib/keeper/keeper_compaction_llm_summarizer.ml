@@ -50,13 +50,17 @@ type attempt_observation =
   ; receipt_request_body_sha256 : string
   }
 
+type exact_write_outcome = Keeper_event_queue_persistence.exact_write_outcome =
+  | Durable
+  | Visible_durability_unknown of string
+
 type exact_execution_guard =
-  { before_dispatch : attempt_observation -> (unit, string) result
-  ; release_before_dispatch : attempt_observation -> (unit, string) result
+  { before_dispatch : attempt_observation -> (exact_write_outcome, string) result
+  ; release_before_dispatch : attempt_observation -> (exact_write_outcome, string) result
   ; quarantine :
       Keeper_event_queue_state.exact_execution_terminal_cause ->
       attempt_observation ->
-      (unit, string) result
+      (exact_write_outcome, string) result
   }
 
 type post_success_terminalizer =
@@ -81,6 +85,7 @@ type summarization_failure =
   | Exact_attempt_start_failed of string
   | Exact_execution_context_unavailable
   | Exact_execution_failed_before_dispatch
+  | Exact_execution_terminal of Keeper_event_queue_state.exact_execution_terminal
   | Exact_execution_failed_after_dispatch of attempt_observation
   | Exact_attempt_already_started of attempt_observation
   | Exact_execution_cancelled_after_dispatch of attempt_observation
@@ -414,16 +419,37 @@ let is_before_dispatch_zero observation =
   && observation.dispatch_count = 0
 ;;
 
+let terminal_of_observation cause (observation : attempt_observation) =
+  Keeper_event_queue_state.
+    { cause; slot_id = observation.slot_id; call_id = observation.call_id }
+;;
+
+type exact_execution_release_result =
+  | Release_durable
+  | Release_failed
+  | Release_visible_terminal of Keeper_event_queue_state.exact_execution_terminal
+
 let release_exact_execution_before_dispatch
       ~keeper_name
       ~exact_execution_guard
       observation
   =
   match exact_execution_guard with
-  | None -> false
+  | None -> Release_failed
   | Some guard ->
     (match guard.release_before_dispatch observation with
-     | Ok () -> true
+     | Ok Durable -> Release_durable
+     | Ok (Visible_durability_unknown detail) ->
+       Log.Keeper.error
+         ~keeper_name
+         "compaction exact pre-dispatch fence release is visible but durability is unknown slot=%s call_id=%s: %s"
+         observation.slot_id
+         observation.call_id
+         detail;
+       Release_visible_terminal
+         (terminal_of_observation
+            Keeper_event_queue_state.Terminal_persistence_failed
+            observation)
      | Error detail ->
        Log.Keeper.error
          ~keeper_name
@@ -431,7 +457,7 @@ let release_exact_execution_before_dispatch
          observation.slot_id
          observation.call_id
          detail;
-       false)
+       Release_failed)
 ;;
 
 let quarantine_exact_execution ~keeper_name ~exact_execution_guard ~cause observation =
@@ -439,7 +465,15 @@ let quarantine_exact_execution ~keeper_name ~exact_execution_guard ~cause observ
   | None -> Error "exact execution guard is unavailable"
   | Some guard ->
     (match guard.quarantine cause observation with
-     | Ok () -> Ok ()
+     | Ok Durable -> Ok Durable
+     | Ok (Visible_durability_unknown detail as outcome) ->
+       Log.Keeper.warn
+         ~keeper_name
+         "compaction exact terminal quarantine is visible but durability is unknown slot=%s call_id=%s: %s"
+         observation.slot_id
+         observation.call_id
+         detail;
+       Ok outcome
      | Error detail ->
        Log.Keeper.error
          ~keeper_name
@@ -463,11 +497,15 @@ let terminal_failure_after_quarantine
        ~exact_execution_guard
        ~cause
        observation
-     : (unit, string) result);
+     : (exact_write_outcome, string) result);
   Error failure
 ;;
 
-let log_terminal_quarantine_failure terminalizer terminal detail =
+let log_terminal_quarantine_failure
+      terminalizer
+      (terminal : Keeper_event_queue_state.exact_execution_terminal)
+      detail
+  =
   try
     Log.Keeper.warn
       ~keeper_name:terminalizer.keeper_name
@@ -513,7 +551,15 @@ let terminalize_post_success terminalizer cause =
               ~cause:terminal.cause
               terminalizer.attempt_observation
           with
-          | Ok () -> None
+          | Ok Durable -> None
+          | Ok (Visible_durability_unknown detail) ->
+            Log.Keeper.warn
+              ~keeper_name:terminalizer.keeper_name
+              "post-success exact-execution quarantine is visible but durability is unknown slot_id=%s call_id=%s: %s"
+              terminal.slot_id
+              terminal.call_id
+              detail;
+            None
           | Error detail -> Some detail
         with
         | exn -> Some ("raised " ^ Printexc.to_string exn)
@@ -656,13 +702,16 @@ let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepar
               "compaction exact slot failed before dispatch slot=%s call_id=%s"
               slot_id
               observation.call_id;
-            if
+            match
               release_exact_execution_before_dispatch
                 ~keeper_name
                 ~exact_execution_guard
                 observation
-            then execute rest
-            else Error Exact_execution_failed_before_dispatch)
+            with
+            | Release_durable -> execute rest
+            | Release_visible_terminal terminal ->
+              Error (Exact_execution_terminal terminal)
+            | Release_failed -> Error Exact_execution_failed_before_dispatch)
           else (
             terminal_failure_after_quarantine
               ~keeper_name
@@ -733,7 +782,19 @@ let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepar
               initial_observation.call_id
               detail;
             Error Exact_execution_failed_before_dispatch
-          | Ok () ->
+          | Ok (Visible_durability_unknown detail) ->
+            Log.Keeper.error
+              ~keeper_name
+              "compaction exact pre-dispatch binding is visible but durability is unknown; refusing POST and terminally settling the source slot=%s call_id=%s: %s"
+              slot_id
+              initial_observation.call_id
+              detail;
+            Error
+              (Exact_execution_terminal
+                 (terminal_of_observation
+                    Keeper_event_queue_state.Terminal_persistence_failed
+                    initial_observation))
+          | Ok Durable ->
             (try handle_result (Exact_output.execute_once ~net ?clock attempt) with
              | Eio.Cancel.Cancelled _ as cancellation ->
                Eio.Cancel.protect
@@ -741,12 +802,18 @@ let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepar
                let observation = observe_attempt slot in
                if is_before_dispatch_zero observation
                then (
-                 ignore
-                   (release_exact_execution_before_dispatch
-                      ~keeper_name
-                      ~exact_execution_guard
-                      observation);
-                 raise cancellation)
+                 match
+                   release_exact_execution_before_dispatch
+                     ~keeper_name
+                     ~exact_execution_guard
+                     observation
+                 with
+                 | Release_visible_terminal terminal ->
+                   (* The binding removal is already visible. Consume
+                      cancellation only here so the original identity remains
+                      available for source-bound terminal settlement. *)
+                   Error (Exact_execution_terminal terminal)
+                 | Release_durable | Release_failed -> raise cancellation)
                else (
                  Log.Keeper.warn
                    ~keeper_name

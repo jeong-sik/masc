@@ -7,6 +7,7 @@ import { DialogOverlay } from './common/dialog'
 import { TextArea } from './common/input'
 import { Checkbox } from './common/checkbox'
 import { isOfflineStatus } from '../lib/keeper-classifiers'
+import { keeperActionVisibility } from '../lib/keeper-predicates'
 
 export function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Keeper; effectiveStatus: string }) {
   // SSOT: `isOfflineStatus` from keeper-classifiers.ts (includes crashed,
@@ -15,11 +16,19 @@ export function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Ke
   // SSOT predicate covers the full display-status union.
   const isOffline = isOfflineStatus(effectiveStatus)
   const isRunning = ['active', 'running', 'idle', 'busy', 'listening', 'working'].includes(effectiveStatus)
+  const visibility = keeperActionVisibility(keeper)
 
   // Both buttons route through runKeeperAction: same toast copy, same
   // post-action refresh (refreshKeeperRuntimeStatus), and the shutdown
   // confirm gate lives there — this surface previously duplicated all three.
-  if (isOffline) return html`
+  if (visibility.canResume) return html`
+    <button type="button"
+      class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)] hover:bg-[var(--ok-soft)] transition-colors v2-monitoring-action"
+      title=${KEEPER_ACTION_LABELS.resume.title}
+      onClick=${() => { void runKeeperAction(keeper.name, 'resume', keeper.generation) }}
+    >${KEEPER_ACTION_LABELS.resume.verb}</button>`
+
+  if (isOffline && visibility.canBoot) return html`
     <button type="button"
       class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)] hover:bg-[var(--ok-soft)] transition-colors v2-monitoring-action"
       title=${KEEPER_ACTION_LABELS.boot.title}

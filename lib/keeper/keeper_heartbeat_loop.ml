@@ -606,6 +606,7 @@ let exact_terminal_source = function
 
 let settle_claimed_lease
       ?(exact_execution = false)
+      ?(after_exact_disposition_prepare = fun () -> ())
       ~base_path
       ~keeper_name
       ~settled_at
@@ -680,6 +681,7 @@ let settle_claimed_lease
                 ("exact source disposition became visible with unconfirmed sync; restart reconciliation required: "
                  ^ detail)
             | Ok (disposition, Keeper_registry_event_queue.Fsync_completed) ->
+              after_exact_disposition_prepare ();
               Keeper_registry_event_queue.finalize_exact_source_disposition_result
                 ~base_path
                 keeper_name
@@ -863,6 +865,26 @@ module For_testing = struct
 
   let exact_execution_guard = exact_execution_guard
   let commit_transcript_corruption = commit_transcript_corruption
+
+  let settle_claimed_lease_exact
+        ~after_exact_disposition_prepare
+        ~base_path
+        ~keeper_name
+        ~settled_at
+        ~lease
+        ~settlement
+        ()
+    =
+    settle_claimed_lease
+      ~exact_execution:true
+      ~after_exact_disposition_prepare
+      ~base_path
+      ~keeper_name
+      ~settled_at
+      ~lease
+      ~settlement
+      ()
+  ;;
 
   let check_cancellation_after_exact_terminal_settlement =
     check_cancellation_after_exact_terminal_settlement

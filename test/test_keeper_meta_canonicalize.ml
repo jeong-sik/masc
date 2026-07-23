@@ -76,6 +76,7 @@ let inject_keys ?(extra = []) config name =
          @ [
              ("last_continuity_update_ts", `Float 1780000000.0);
              ("continuity_summary", `String "legacy continuity prose");
+             ("transcript_quarantine_consecutive_retries", `Int 3);
            ]
          @ extra)
     in
@@ -197,13 +198,18 @@ let test_unknown_keys_pure_function () =
   check (list string) "all-canonical object has no unknown keys" []
     (Keeper_meta_json.unknown_keeper_meta_keys canonical_only);
   check (list string) "retired keys are reported in order"
-    [ "last_continuity_update_ts"; "continuity_summary" ]
+    [
+      "last_continuity_update_ts";
+      "continuity_summary";
+      "transcript_quarantine_consecutive_retries";
+    ]
     (Keeper_meta_json.unknown_keeper_meta_keys
        (`Assoc
          [
            ("name", `String "x");
            ("last_continuity_update_ts", `Float 0.0);
            ("continuity_summary", `String "y");
+           ("transcript_quarantine_consecutive_retries", `Int 3);
          ]));
   check (list string) "non-object JSON has no unknown keys" []
     (Keeper_meta_json.unknown_keeper_meta_keys (`String "not an object"))

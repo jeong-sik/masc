@@ -723,15 +723,17 @@ let test_transcript_corruption_pause_precedes_settlement () =
        false)
 ;;
 
-let test_transcript_corruption_pause_failure_preserves_lease () =
+let assert_transcript_corruption_pause_failure_preserves_lease ~persist_pause =
   with_lane ~registered:false ~paused:false ~generation:24
     (fun config keeper_name request ->
        let stop = Atomic.make false in
+       let settlement_called = ref false in
        let result =
          Heartbeat_testing.commit_transcript_corruption
            ~stop
-           ~persist_pause:(fun () -> Error "injected pause CAS failure")
+           ~persist_pause
            ~settle:(fun () ->
+             settlement_called := true;
              Registry_queue.settle_result
                ~base_path:config.Workspace.base_path
                keeper_name
@@ -751,6 +753,10 @@ let test_transcript_corruption_pause_failure_preserves_lease () =
          "corrupted fiber remains stopped"
          true
          (Atomic.get stop);
+       Alcotest.(check bool)
+         "pause failure never enters terminal settlement"
+         false
+         !settlement_called;
        Alcotest.(check bool)
          "pause CAS failure is typed"
          true
@@ -780,6 +786,16 @@ let test_transcript_corruption_pause_failure_preserves_lease () =
          "pause CAS failure creates no terminal outbox receipt"
          0
          (List.length (State.transition_outbox state)))
+;;
+
+let test_transcript_corruption_pause_failure_preserves_lease () =
+  assert_transcript_corruption_pause_failure_preserves_lease
+    ~persist_pause:(fun () -> Error "injected pause CAS failure")
+;;
+
+let test_transcript_corruption_pause_exception_preserves_lease () =
+  assert_transcript_corruption_pause_failure_preserves_lease
+    ~persist_pause:(fun () -> failwith "injected pause persistence exception")
 ;;
 
 let test_unleased_transcript_corruption_only_persists_pause () =
@@ -863,6 +879,10 @@ let () =
             "transcript pause failure preserves lease"
             `Quick
             test_transcript_corruption_pause_failure_preserves_lease
+        ; Alcotest.test_case
+            "transcript pause exception preserves lease"
+            `Quick
+            test_transcript_corruption_pause_exception_preserves_lease
         ; Alcotest.test_case
             "unleased transcript only persists pause"
             `Quick

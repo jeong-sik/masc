@@ -71,6 +71,8 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       , match rt.message_scope_ack_id with
         | Some id -> `String id
         | None -> `Null )
+    ; ( "transcript_quarantine_consecutive_retries"
+      , `Int rt.transcript_quarantine_consecutive_retries )
     ; ( "last_blocker"
       , match rt.last_blocker with
         | Some info -> blocker_info_to_json info

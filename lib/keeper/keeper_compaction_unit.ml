@@ -60,6 +60,11 @@ type partition =
   ; protected_suffix : T.message list
   }
 
+type provider_transcript_error =
+  | Invalid_transcript_structure of structural_error
+  | Unresolved_tool_results of { tool_use_ids : string list }
+[@@deriving show]
+
 type open_cycle =
   { expected : Id_set.t
   ; pending : Id_set.t
@@ -255,3 +260,40 @@ let partition ?(quarantine = false) messages =
   loop 0 [] Id_set.empty Id_set.empty None messages
 
 let validate messages = Result.map (fun _partition -> ()) (partition messages)
+
+let unresolved_tool_use_ids protected_suffix =
+  let requested_rev, completed =
+    List.fold_left
+      (fun (requested_rev, completed) (message : T.message) ->
+         List.fold_left
+           (fun (requested_rev, completed) -> function
+              | T.ToolUse { id; _ } -> id :: requested_rev, completed
+              | T.ToolResult { tool_use_id; _ } ->
+                requested_rev, Id_set.add tool_use_id completed
+              | T.Text _
+              | T.Thinking _
+              | T.ReasoningDetails _
+              | T.RedactedThinking _
+              | T.Image _
+              | T.Document _
+              | T.Audio _ ->
+                requested_rev, completed)
+           (requested_rev, completed)
+           message.content)
+      ([], Id_set.empty)
+      protected_suffix
+  in
+  requested_rev
+  |> List.rev
+  |> List.filter (fun tool_use_id -> not (Id_set.mem tool_use_id completed))
+;;
+
+let validate_provider_transcript messages =
+  match partition messages with
+  | Error error -> Error (Invalid_transcript_structure error)
+  | Ok { protected_suffix = []; _ } -> Ok ()
+  | Ok { protected_suffix; _ } ->
+    Error
+      (Unresolved_tool_results
+         { tool_use_ids = unresolved_tool_use_ids protected_suffix })
+;;

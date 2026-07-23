@@ -601,6 +601,41 @@ let persist_compaction_outcome config ~keeper_name ~outcome
     |> Result.map (fun () -> `Persisted)
 ;;
 
+(* #25296: advance the transcript-quarantine retry streak on
+   [agent_runtime_state.transcript_quarantine_consecutive_retries] using the
+   same read/stamp/merge shape as {!persist_compaction_outcome}.
+
+   [`Retried] increments the streak each time a failed turn settles as
+   [Requeue Transcript_quarantine_retry] — including the escalated terminal
+   attempt, so an operator inspecting the meta sees the streak at the
+   ceiling. [`Recovered] resets it on a completed turn: any successful turn
+   proves the keeper is no longer pinned to the poisoned transcript. *)
+let persist_transcript_quarantine_outcome config ~keeper_name ~outcome
+  : ([ `Persisted | `No_durable_meta ], string) result
+  =
+  let stamp (m : Keeper_meta_contract.keeper_meta) =
+    let rt = m.runtime in
+    { m with
+      runtime =
+        { rt with
+          transcript_quarantine_consecutive_retries =
+            (match outcome with
+             | `Retried -> rt.transcript_quarantine_consecutive_retries + 1
+             | `Recovered -> 0)
+        }
+    }
+  in
+  match read_meta config keeper_name with
+  | Error msg -> Error msg
+  | Ok None -> Ok `No_durable_meta
+  | Ok (Some disk_meta) ->
+    write_meta_with_merge
+      ~merge:(fun ~latest ~caller:_ -> stamp latest)
+      config
+      (stamp disk_meta)
+    |> Result.map (fun () -> `Persisted)
+;;
+
 type identity_update_error =
   | Identity_missing
   | Identity_changed

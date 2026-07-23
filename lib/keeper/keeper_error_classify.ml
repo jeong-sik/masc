@@ -53,6 +53,7 @@ let is_transient_internal_runner_error (err : Agent_sdk.Error.sdk_error) : bool 
       | Keeper_turn_driver.Accept_rejected _
       | Keeper_turn_driver.Internal_bridge_exception _
       | Keeper_turn_driver.Internal_contract_rejected _
+      | Keeper_turn_driver.Incomplete_tool_transcript _
       | Keeper_turn_driver.Receipt_persistence_failed _ )
   | None -> false
 
@@ -285,6 +286,7 @@ let is_auto_recoverable_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
   | Some (Keeper_turn_driver.Internal_contract_rejected _)
+  | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
   | Some (Keeper_turn_driver.Receipt_persistence_failed _)
   | None ->
       false
@@ -299,6 +301,7 @@ let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
   | Some (Keeper_turn_driver.Internal_contract_rejected _)
+  | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
   | Some (Keeper_turn_driver.Receipt_persistence_failed _)
   | None ->
       false
@@ -324,6 +327,7 @@ let is_accept_no_usable_progress_error (err : Agent_sdk.Error.sdk_error) : bool 
       | Keeper_turn_driver.Internal_unhandled_exception _
       | Keeper_turn_driver.Internal_bridge_exception _
       | Keeper_turn_driver.Internal_contract_rejected _
+      | Keeper_turn_driver.Incomplete_tool_transcript _
       | Keeper_turn_driver.Receipt_persistence_failed _ )
   | None ->
     false
@@ -451,6 +455,7 @@ let degraded_retry_after_recoverable_error
     | Some (Keeper_turn_driver.Internal_unhandled_exception _)
     | Some (Keeper_turn_driver.Internal_bridge_exception _)
     | Some (Keeper_turn_driver.Internal_contract_rejected _)
+    | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
     | Some (Keeper_turn_driver.Receipt_persistence_failed _)
     | None ->
         None
@@ -489,6 +494,7 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some (Keeper_turn_driver.Internal_unhandled_exception _)
     | Some (Keeper_turn_driver.Internal_bridge_exception _)
     | Some (Keeper_turn_driver.Internal_contract_rejected _)
+    | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
     | Some (Keeper_turn_driver.Receipt_persistence_failed _) ->
         None
     | None ->
@@ -807,6 +813,7 @@ let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
   | Some (Keeper_turn_driver.Internal_contract_rejected _)
+  | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
   | Some (Keeper_turn_driver.Receipt_persistence_failed _)
   | None ->
     false
@@ -857,5 +864,6 @@ let is_runtime_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
   | Some (Keeper_turn_driver.Internal_contract_rejected _)
+  | Some (Keeper_turn_driver.Incomplete_tool_transcript _)
   | Some (Keeper_turn_driver.Receipt_persistence_failed _) -> false
   | None -> false

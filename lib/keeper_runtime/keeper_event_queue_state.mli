@@ -19,6 +19,7 @@ type requeue_reason =
   | Registration_recovery
   | Retry_after_observed
   | Context_compaction_retry
+  | Transcript_quarantine_retry
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
 
@@ -55,6 +56,16 @@ type escalation_reason =
           window (an incompressible floor).  Distinct from
           [Compaction_retry_exhausted] so "compaction keeps failing" and
           "compaction succeeds but cannot help" stay operator-distinguishable. *)
+  | Transcript_quarantine_retry_exhausted of
+      { attempts : int
+      ; detail : string
+      }
+      (** #25296: settled instead of [Requeue Transcript_quarantine_retry]
+          once consecutive transcript-quarantine settlements reach the
+          escalation threshold.  The poisoned checkpoint is preserved
+          unmodified by design, so every re-lease rejects the same transcript
+          again — without this ceiling the source stimulus loops through the
+          full turn pipeline on every heartbeat. *)
 
 type no_compaction_reason =
   | No_eligible_history
@@ -207,9 +218,10 @@ val settle :
     same semantic settlement returns [Already_settled]; a different settlement
     for an already-settled lease is an explicit conflict.
 
-    [Retry_after_observed] and [Context_compaction_retry] retain the exact
-    leased stimuli at the pending FIFO tail so unrelated work in the same lane
-    can proceed before another provider attempt. [No_compaction] is accepted
+    [Retry_after_observed], [Context_compaction_retry], and
+    [Transcript_quarantine_retry] retain the exact leased stimuli at the
+    pending FIFO tail so unrelated work in the same lane can proceed before
+    another provider attempt. [No_compaction] is accepted
     only for a lease containing exactly one typed
     [Manual_compaction_requested] stimulus; it cannot retire product work whose
     provider turn failed. Non-finite settlement times are rejected. *)

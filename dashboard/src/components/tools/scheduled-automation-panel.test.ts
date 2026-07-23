@@ -874,6 +874,28 @@ describe('ScheduledAutomationPanel', () => {
     }
   })
 
+  it('renders projection warnings in diagnostics and v2 surfaces', () => {
+    const auto = payloadSupportAutomation()
+    auto.warnings = ['projection drift: unknown counts shape', 'projection drift: missing signal array']
+
+    render(html`<${ScheduledAutomationPanel} automation=${auto} />`, container)
+
+    const diagnosticWarnings = container.querySelector('[data-schedule-projection-warnings="present"]')
+    expect(diagnosticWarnings).not.toBeNull()
+    expect(diagnosticWarnings?.textContent).toContain('scheduled automation projection warnings')
+    expect(diagnosticWarnings?.textContent).toContain('projection drift: unknown counts shape')
+    expect(diagnosticWarnings?.textContent).toContain('projection drift: missing signal array')
+
+    render(null, container)
+    render(html`<${ScheduledAutomationPanel} automation=${auto} variant="v2" />`, container)
+
+    const v2Warnings = container.querySelector('[data-schedule-projection-warnings="present"]')
+    expect(v2Warnings).not.toBeNull()
+    expect(v2Warnings?.textContent).toContain('scheduled automation projection warnings')
+    expect(v2Warnings?.textContent).toContain('projection drift: unknown counts shape')
+    expect(v2Warnings?.textContent).toContain('projection drift: missing signal array')
+  })
+
   it('keeps unsupported durable wake signals hidden when the request row is absent', () => {
     const auto = automation([
       request({

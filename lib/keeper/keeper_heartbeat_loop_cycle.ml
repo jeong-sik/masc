@@ -242,7 +242,7 @@ let run_keeper_cycle_admitted
              ~meta:meta_after_triage
              ~publication_recovery_provider:ctx.publication_recovery_provider
              ~observation
-             ~generation:meta_after_triage.runtime.generation
+             ~generation:meta_after_triage.runtime.nonce
              ~wake
              ~channel:turn_decision.channel
              ?hitl_resolution

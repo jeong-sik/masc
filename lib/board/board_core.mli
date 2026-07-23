@@ -264,6 +264,24 @@ val create_post_once_by_fusion_run_id
 (** Exact typed-origin create. Replays return the existing normalized post;
     conflicting payloads return [Already_exists]. *)
 
+val create_post_with_audience
+  :  store
+  -> author:string
+  -> content:string
+  -> ?title:string
+  -> ?body:string
+  -> post_kind:post_kind
+  -> ?meta_json:Yojson.Safe.t
+  -> ?visibility:visibility
+  -> ?ttl_hours:int
+  -> ?hearth:string
+  -> ?thread_id:string
+  -> ?origin:post_origin
+  -> unit
+  -> (post_creation, board_error) Result.t
+(** Create a post only after its routing audience has been validated, and
+    return the exact audience admitted with the write. *)
+
 val get_post : store -> post_id:string -> (post, board_error) Result.t
 
 (** RFC-0233 §7: look up a post by the originating turn's join key
@@ -329,6 +347,18 @@ val add_comment
   -> ?ttl_hours:int
   -> unit
   -> (comment, board_error) Result.t
+
+val add_comment_with_audience
+  :  store
+  -> post_id:string
+  -> author:string
+  -> content:string
+  -> ?parent_id:string
+  -> ?ttl_hours:int
+  -> unit
+  -> (comment_creation, board_error) Result.t
+(** Validate and freeze comment routing before the Board mutation, returning
+    the same audience with the committed comment. *)
 
 (** Returns the comments for [post_id] sorted by
     [created_at] ascending. *)

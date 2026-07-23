@@ -55,7 +55,7 @@ let with_source_terminal_lane f =
                   { operator_actor =
                       Keeper_latched_reason.operator_actor_grpc_directive
                   })
-         ; runtime = { meta.runtime with generation = 51 }
+         ; runtime = { meta.runtime with nonce = 51 }
          }
        in
        Keeper_meta_store.write_meta config meta |> require_ok "persist Keeper metadata";
@@ -87,7 +87,7 @@ let with_source_terminal_lane f =
        let request : Transaction.request =
          { source
          ; source_revision
-         ; owner_generation = meta.runtime.generation
+         ; owner_nonce = meta.runtime.nonce
          ; source_receipt = State.Hitl_terminal resolution
          ; operator_operation_id = "operator-source-terminal-1"
          ; settled_at = 2.0
@@ -139,7 +139,7 @@ let test_exact_terminal_receipt_settles_once () =
      | _ -> Alcotest.fail "source-terminal settlement outbox is not exact");
     let replacement =
       let resumed = Keeper_meta_contract.mark_resumed meta in
-      { resumed with runtime = { resumed.runtime with generation = 52 } }
+      { resumed with runtime = { resumed.runtime with nonce = 52 } }
     in
     Keeper_meta_store.write_meta config replacement
     |> require_ok "persist replacement owner after settlement";

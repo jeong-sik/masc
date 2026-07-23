@@ -1,7 +1,7 @@
 type request =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; source_receipt : Keeper_event_queue_state.source_terminal_receipt
   ; operator_operation_id : string
   ; settled_at : float
@@ -18,7 +18,7 @@ type failure =
   | Durable_meta_missing
   | Durable_owner_not_paused
   | Durable_owner_dead_tombstone
-  | Durable_owner_generation_changed of
+  | Durable_owner_nonce_changed of
       { expected : int
       ; actual : int
       }
@@ -74,7 +74,7 @@ let failure_to_string = function
     "Settle_from_source_terminal requires a paused Keeper"
   | Durable_owner_dead_tombstone ->
     "Settle_from_source_terminal cannot use a Dead tombstone"
-  | Durable_owner_generation_changed { expected; actual } ->
+  | Durable_owner_nonce_changed { expected; actual } ->
     Printf.sprintf
       "Settle_from_source_terminal generation changed: expected %d, actual %d"
       expected
@@ -102,7 +102,7 @@ let error_to_string error =
 ;;
 
 let validate_request request =
-  if request.owner_generation < 0
+  if request.owner_nonce < 0
   then Error "owner generation must not be negative"
   else if Int64.compare request.source_revision 0L < 0
   then Error "source revision must not be negative"
@@ -138,12 +138,12 @@ let validate_paused_owner request (meta : Keeper_meta_contract.keeper_meta) =
   | Keeper_lifecycle_admission.Dead_tombstone ->
     Error Durable_owner_dead_tombstone
   | Keeper_lifecycle_admission.Paused _ ->
-    if Int.equal meta.runtime.generation request.owner_generation
+    if Int.equal meta.runtime.nonce request.owner_nonce
     then Ok meta
     else
       Error
-        (Durable_owner_generation_changed
-           { expected = request.owner_generation; actual = meta.runtime.generation })
+        (Durable_owner_nonce_changed
+           { expected = request.owner_nonce; actual = meta.runtime.nonce })
 ;;
 
 let validate_source_queue config ~keeper_name request =
@@ -187,7 +187,7 @@ let receipt_matches_request ~keeper_name request receipt =
   | Error _ -> false
   | Ok operation ->
     String.equal receipt.keeper_name keeper_name
-    && Int.equal receipt.expected_generation request.owner_generation
+    && Int.equal receipt.expected_generation request.owner_nonce
     && String.equal receipt.operator_operation_id request.operator_operation_id
     && operation.source = request.source
     && Int64.equal operation.source_revision request.source_revision
@@ -209,7 +209,7 @@ let create_receipt config ~keeper_name request =
   Ok
     ({ keeper_name
      ; expected_trace_id = meta.runtime.trace_id
-     ; expected_generation = request.owner_generation
+     ; expected_generation = request.owner_nonce
      ; operator_operation_id = request.operator_operation_id
      ; requested_at = Time_compat.now ()
      ; operation =
@@ -224,7 +224,7 @@ let project_receipt config receipt =
   let source_terminal : Keeper_registry_event_queue.accepted_source_terminal =
     { source = operation.source
     ; source_revision = operation.source_revision
-    ; owner_generation = receipt.Keeper_paused_work_disposition_receipt.expected_generation
+    ; owner_nonce = receipt.Keeper_paused_work_disposition_receipt.expected_generation
     ; operator_operation_id = receipt.operator_operation_id
     ; source_receipt = operation.source_receipt
     }
@@ -247,12 +247,12 @@ let project_receipt config receipt =
   | None ->
     let* current = read_meta config receipt.keeper_name in
     let* () =
-      if not (Int.equal current.runtime.generation receipt.expected_generation)
+      if not (Int.equal current.runtime.nonce receipt.expected_generation)
       then
         Error
-          (Durable_owner_generation_changed
+          (Durable_owner_nonce_changed
              { expected = receipt.expected_generation
-             ; actual = current.runtime.generation
+             ; actual = current.runtime.nonce
              })
       else if not (Keeper_id.Trace_id.equal current.runtime.trace_id receipt.expected_trace_id)
       then Error Durable_owner_identity_changed
@@ -261,7 +261,7 @@ let project_receipt config receipt =
     Keeper_registry_event_queue.settle_pending_from_source_terminal_result
       ~base_path
       receipt.keeper_name
-      ~current_owner_generation:current.runtime.generation
+      ~current_owner_nonce:current.runtime.nonce
       ~settled_at:operation.settled_at
       ~source_terminal
     |> Result.map_error (fun detail -> Committed_settlement_failed detail)
@@ -314,7 +314,7 @@ let settle_pending config ~keeper_name request =
        Keeper_lifecycle_reservation.acquire
          ~base_path:config.Workspace.base_path
          ~keeper_name
-         ~expected_generation:request.owner_generation
+         ~expected_generation:request.owner_nonce
          ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
      with
      | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->

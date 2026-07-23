@@ -199,7 +199,6 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
          failures do not persist in the runtime JSON and mislead the
          dashboard into showing BLOCKED status. *)
       last_blocker = None;
-      last_turn_tool_calls = [];
     };
   } in
   record_keeper_total_cost_usd

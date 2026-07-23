@@ -608,7 +608,7 @@ let compact_memory_bank_if_needed
             ~keeper_name:meta.name
             ~outcome:"generated"
             generated_consolidated;
-        let current_generation = meta.runtime.generation in
+        let current_generation = meta.runtime.nonce in
         let by_recency =
           List.sort
             (fun (a : keeper_memory_row_raw) (b : keeper_memory_row_raw) ->
@@ -819,7 +819,7 @@ let append_explicit_memory_note
              ; "name", `String meta.name
              ; ( "trace_id"
                , `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
-             ; "generation", `Int meta.runtime.generation
+             ; "generation", `Int meta.runtime.nonce
              ; "turn", `Int turn
              ; "kind", `String kind_wire
              ; "horizon", `String horizon
@@ -906,7 +906,7 @@ let append_memory_notes_from_tool_results
                  ; ("name", `String meta.name)
                  ; ( "trace_id",
                      `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
-                 ; ("generation", `Int meta.runtime.generation)
+                 ; ("generation", `Int meta.runtime.nonce)
                  ; ("turn", `Int turn)
                  ; ("kind", `String (memory_kind_to_wire Long_term))
                  ; ("horizon", `String (memory_horizon_of_kind Long_term))
@@ -956,7 +956,7 @@ let append_voice_output
       ; "ts_unix", `Float now_ts
       ; "name", `String meta.name
       ; "trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-      ; "generation", `Int meta.runtime.generation
+      ; "generation", `Int meta.runtime.nonce
       ; "turn", `Int turn
       ; "kind", `String (memory_kind_to_wire kind)
       ; "horizon", `String (memory_horizon_of_kind kind)

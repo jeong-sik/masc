@@ -8,42 +8,53 @@ type t =
   | Discoverable
 
 type classification_error =
-  | Unsupported_broadcast of string list
-  | Direct_without_targets of string
-  | Broadcast_on_direct of string
+  | Invalid_board_audience of Board.board_error
+  | Invalid_board_target of string
 
 type route =
   | Deliver of Board_signal.wake_reason
   | Judge_discoverable
   | Ignore
 
+let keeper_targets_of_board targets =
+  List.fold_left
+    (fun result target ->
+      match result with
+      | Error _ as error -> error
+      | Ok targets ->
+        let raw = Board.Agent_id.to_string target in
+        (match Keeper_identity.Keeper_id.of_string raw with
+         | Some target -> Ok (target :: targets)
+         | None -> Error (Invalid_board_target raw)))
+    (Ok [])
+    targets
+  |> Result.map (List.sort_uniq Keeper_identity.Keeper_id.compare)
+;;
+
+let of_board_audience = function
+  | Board.Targets targets ->
+    keeper_targets_of_board targets |> Result.map (fun targets -> Targets targets)
+  | Board.Broadcast -> Ok Broadcast
+  | Board.Thread_participants -> Ok Thread_participants
+  | Board.Discoverable -> Ok Discoverable
+;;
+
 let classify ~visibility signal =
-  match
-    Keeper_lane_mentions.explicit_address_of_content
-      (Board_signal.address_text signal)
-  with
-  | Keeper_lane_mentions.Broadcast_all ->
-    (* [Direct] means "mentioned agents only" (Board_types.visibility), so a
-       fleet-wide [@@all] contradicts the visibility the author chose.  Fail
-       closed instead of promoting the signal to a fleet Broadcast: the
-       write boundary (#25379) rejects such posts, and routing must not
-       re-admit what the boundary refuses. *)
-    (match visibility with
-     | Board.Direct -> Error (Broadcast_on_direct signal.post_id)
-     | Board.Public | Board.Unlisted | Board.Internal -> Ok Broadcast)
-  | Keeper_lane_mentions.Targets targets -> Ok (Targets targets)
-  | Keeper_lane_mentions.Unsupported_broadcast selectors ->
-    Error (Unsupported_broadcast selectors)
-  | Keeper_lane_mentions.No_explicit_address ->
-    (match signal.Board_dispatch.kind, visibility with
-     | Board_dispatch.Board_post_created, Board.Direct ->
-       Error (Direct_without_targets signal.post_id)
-     | Board_dispatch.Board_post_created,
-       (Board.Public | Board.Unlisted | Board.Internal) -> Ok Discoverable
-     | ( Board_dispatch.Board_comment_added
-       | Board_dispatch.Board_reaction_changed _ ),
-       (Board.Public | Board.Unlisted | Board.Internal | Board.Direct) ->
-       Ok Thread_participants)
+  let board_audience =
+    match signal.Board_dispatch.kind with
+    | Board_dispatch.Board_post_created ->
+      Board.audience_for_post
+        ~visibility
+        ~title:signal.title
+        ~content:signal.content
+    | Board_dispatch.Board_comment_added ->
+      Board.audience_for_comment ~content:signal.content
+    | Board_dispatch.Board_reaction_changed _ ->
+      Ok Board.audience_for_reaction
+  in
+  match board_audience with
+  | Error error -> Error (Invalid_board_audience error)
+  | Ok audience -> of_board_audience audience
 ;;
 
 let keeper_target_ids (meta : Keeper_meta_contract.keeper_meta) =
@@ -80,14 +91,7 @@ let label = function
 ;;
 
 let classification_error_to_string = function
-  | Unsupported_broadcast selectors ->
-    Printf.sprintf
-      "unsupported Keeper Board broadcast selector(s): %s"
-      (String.concat ", " (List.map (Printf.sprintf "@@%s") selectors))
-  | Direct_without_targets post_id ->
-    Printf.sprintf "Direct Board post %s has no explicit Keeper targets" post_id
-  | Broadcast_on_direct post_id ->
-    Printf.sprintf
-      "Direct Board post %s cannot address the fleet with @@all"
-      post_id
+  | Invalid_board_audience error -> Board.show_board_error error
+  | Invalid_board_target target ->
+    Printf.sprintf "Board audience target cannot identify a Keeper lane: %s" target
 ;;

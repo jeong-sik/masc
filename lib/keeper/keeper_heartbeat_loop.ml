@@ -1146,7 +1146,7 @@ let run_keepalive_unified_turn
                 meta_after_triage.name
                 (Int64.of_float (audit_wall_clock *. 1000.0)))
            ~keeper_name:meta_after_triage.name
-           ~generation:meta_after_triage.runtime.generation
+           ~generation:meta_after_triage.runtime.nonce
            ~turn_verdict:turn_decision.verdict
            ~wall_clock:audit_wall_clock
            ?tool_diversity_entropy

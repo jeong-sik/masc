@@ -1364,6 +1364,77 @@ let test_prompt_feedback_redacts_provider_model_identity () =
   check bool "does not expose provider" false (contains_substring text "openrouter");
   check bool "does not expose raw model" false (contains_substring text "secret-model")
 
+let test_prompt_feedback_is_cost_independent () =
+  let render total_cost_usd =
+    let stats =
+      { (zero_model_stats "runtime:test" ~provider:None ~entry_count:1) with
+        total_cost_usd
+      }
+    in
+    M.render_keeper_prompt_feedback
+      { window_minutes = 30
+      ; bucket_minutes = 0
+      ; models = [ stats ]
+      ; total_entries = 1
+      ; total_error_entries = 0
+      ; latency_buckets = []
+      }
+  in
+  let baseline = render None in
+  List.iter
+    (fun total_cost_usd ->
+       check string "cost does not alter planning feedback" baseline
+         (render total_cost_usd))
+    [ Some 0.0; Some 1234.5678 ];
+  List.iter
+    (fun forbidden ->
+       check bool ("planning feedback excludes " ^ forbidden) false
+         (contains_substring baseline forbidden))
+    [ "cost="; "cost_usd"; "$" ]
+
+let test_usage_signal_uses_tokens_not_cost () =
+  let entry : Model_inference_metrics_entry.raw_entry =
+    { model = "runtime"
+    ; provider = None
+    ; ts_unix = 0.0
+    ; outcome = "success"
+    ; stop_reason = None
+    ; turn_lane = None
+    ; tok_per_sec = None
+    ; prompt_tok_per_sec = None
+    ; hw_decode_tok_per_sec = None
+    ; peak_memory_gb = None
+    ; thinking_enabled = None
+    ; latency_ms = None
+    ; input_tokens = None
+    ; output_tokens = None
+    ; cache_read_tokens = None
+    ; cache_creation_tokens = None
+    ; reasoning_tokens = None
+    ; fallback_applied = false
+    ; cost_usd = Some 12.34
+    ; tool_call_count = 0
+    ; tools_used = []
+    ; usage_reported = None
+    ; telemetry_reported = None
+    ; usage_trust = None
+    ; usage_anomaly_reasons = []
+    ; coverage_reason = None
+    ; coverage_stage = None
+    ; is_error = false
+    ; streaming_ttfrc_ms = None
+    ; streaming_inter_chunk_count = None
+    ; streaming_inter_chunk_avg_ms = None
+    }
+  in
+  check bool "billing alone is not usage evidence" false
+    (Model_inference_metrics_reader.usage_signal_present entry);
+  let cache_creation_only =
+    { entry with cost_usd = None; cache_creation_tokens = Some 1 }
+  in
+  check bool "cache creation is usage evidence" true
+    (Model_inference_metrics_reader.usage_signal_present cache_creation_only)
+
 (* ── Runner ──────────────────────────────────────── *)
 
 let () =
@@ -1433,5 +1504,11 @@ let () =
         test_prompt_feedback_empty_aggregate;
       test_case "redacts provider and model identity" `Quick
         test_prompt_feedback_redacts_provider_model_identity;
+    ];
+    "pricing_firewall", [
+      test_case "prompt feedback is cost independent" `Quick
+        test_prompt_feedback_is_cost_independent;
+      test_case "usage signal uses tokens, not cost" `Quick
+        test_usage_signal_uses_tokens_not_cost;
     ];
   ]

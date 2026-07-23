@@ -1,5 +1,5 @@
 type request =
-  { owner_generation : int
+  { owner_nonce : int
   ; operator_operation_id : string
   }
 
@@ -17,7 +17,7 @@ type failure =
   | Receipt_write_failed of string
   | Durable_meta_read_failed of string
   | Durable_meta_missing
-  | Durable_owner_generation_changed of
+  | Durable_owner_nonce_changed of
       { expected : int
       ; actual : int
       }
@@ -25,7 +25,7 @@ type failure =
   | Durable_owner_not_paused
   | Durable_owner_dead_tombstone
   | Registry_owner_missing
-  | Registry_owner_generation_changed of
+  | Registry_owner_nonce_changed of
       { expected : int
       ; actual : int
       }
@@ -80,7 +80,7 @@ let failure_to_string = function
   | Receipt_write_failed detail -> "Resume_owner receipt write failed: " ^ detail
   | Durable_meta_read_failed detail -> "Resume_owner durable meta read failed: " ^ detail
   | Durable_meta_missing -> "Resume_owner durable Keeper metadata is missing"
-  | Durable_owner_generation_changed { expected; actual } ->
+  | Durable_owner_nonce_changed { expected; actual } ->
     Printf.sprintf
       "Resume_owner durable generation changed: expected %d, actual %d"
       expected
@@ -90,7 +90,7 @@ let failure_to_string = function
   | Durable_owner_dead_tombstone ->
     "Resume_owner cannot revive a Dead tombstone; use the dead-revival transaction"
   | Registry_owner_missing -> "Resume_owner requires the exact registered Keeper lane"
-  | Registry_owner_generation_changed { expected; actual } ->
+  | Registry_owner_nonce_changed { expected; actual } ->
     Printf.sprintf
       "Resume_owner registry generation changed: expected %d, actual %d"
       expected
@@ -123,7 +123,7 @@ let error_to_string error =
 ;;
 
 let validate_request request =
-  if request.owner_generation < 0
+  if request.owner_nonce < 0
   then Error "owner generation must not be negative"
   else if String.equal (String.trim request.operator_operation_id) ""
   then Error "operator operation ID must not be empty"
@@ -132,7 +132,7 @@ let validate_request request =
 
 let receipt_matches_request ~keeper_name request receipt =
   String.equal receipt.Keeper_paused_work_disposition_receipt.keeper_name keeper_name
-  && Int.equal receipt.expected_generation request.owner_generation
+  && Int.equal receipt.expected_generation request.owner_nonce
   && String.equal receipt.operator_operation_id request.operator_operation_id
   && receipt.operation = Keeper_paused_work_disposition_receipt.Resume_owner
 ;;
@@ -144,11 +144,11 @@ let read_meta config keeper_name =
 
 let validate_identity (receipt : Keeper_paused_work_disposition_receipt.t)
       (meta : Keeper_meta_contract.keeper_meta) =
-  if not (Int.equal meta.runtime.generation receipt.expected_generation)
+  if not (Int.equal meta.runtime.nonce receipt.expected_generation)
   then
     Error
-      (Durable_owner_generation_changed
-         { expected = receipt.expected_generation; actual = meta.runtime.generation })
+      (Durable_owner_nonce_changed
+         { expected = receipt.expected_generation; actual = meta.runtime.nonce })
   else if not (Keeper_id.Trace_id.equal meta.runtime.trace_id receipt.expected_trace_id)
   then Error Durable_owner_identity_changed
   else Ok ()
@@ -174,11 +174,11 @@ let registered_owner_opt config receipt =
       receipt.Keeper_paused_work_disposition_receipt.keeper_name
   with
   | None -> Ok None
-  | Some entry when entry.meta.runtime.generation <> receipt.expected_generation ->
+  | Some entry when entry.meta.runtime.nonce <> receipt.expected_generation ->
     Error
-      (Registry_owner_generation_changed
+      (Registry_owner_nonce_changed
          { expected = receipt.expected_generation
-         ; actual = entry.meta.runtime.generation
+         ; actual = entry.meta.runtime.nonce
          })
   | Some entry
     when not
@@ -285,7 +285,7 @@ let create_receipt config ~keeper_name request =
   let receipt : Keeper_paused_work_disposition_receipt.t =
     { keeper_name
     ; expected_trace_id = current.runtime.trace_id
-    ; expected_generation = request.owner_generation
+    ; expected_generation = request.owner_nonce
     ; operator_operation_id = request.operator_operation_id
     ; requested_at = Time_compat.now ()
     ; operation = Keeper_paused_work_disposition_receipt.Resume_owner
@@ -344,7 +344,7 @@ let resume config ~keeper_name request =
        Keeper_lifecycle_reservation.acquire
          ~base_path:config.Workspace.base_path
          ~keeper_name
-         ~expected_generation:request.owner_generation
+         ~expected_generation:request.owner_nonce
          ~purpose:Keeper_lifecycle_reservation.Paused_work_disposition
      with
      | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->

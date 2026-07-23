@@ -22,3 +22,14 @@
 include module type of struct
   include Board_votes
 end
+
+val audience_for_post
+  :  visibility:visibility
+  -> title:string
+  -> content:string
+  -> (audience, board_error) result
+
+val audience_for_comment : content:string -> (audience, board_error) result
+val audience_for_reaction : audience
+val audience_label : audience -> string
+val direct_targets_of_text : string -> Agent_id.t list

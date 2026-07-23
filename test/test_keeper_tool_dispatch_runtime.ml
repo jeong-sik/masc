@@ -383,9 +383,6 @@ let test_keeper_tools_list_json_uses_typed_groups () =
      | _ -> fail "discovery_fields missing internal_name");
   check bool "discovery_fields leaves active_names to shared runtime" true
     (Option.is_none (List.assoc_opt "active_names" execute_fields));
-  check string "discovery_json wraps discovery_fields"
-    (Yojson.Safe.to_string (`Assoc execute_fields))
-    (Yojson.Safe.to_string (KTD.discovery_json execute_descriptor));
   let execute = find_descriptor "tool_execute" in
   check string "Execute public alias" "Execute"
     (string_member "public_name" execute);
@@ -468,7 +465,7 @@ let test_keeper_tools_list_json_uses_typed_groups () =
   in
   let malformed_shape =
     Yojson.Safe.Util.(
-      KTD.discovery_json malformed_execute |> member "schema_shape")
+      `Assoc (KTD.discovery_fields malformed_execute) |> member "schema_shape")
   in
   check bool "malformed schema surfaces property error" true
     (list_member_contains
@@ -509,7 +506,8 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     }
   in
   let one_of_shape =
-    Yojson.Safe.Util.(KTD.discovery_json one_of_execute |> member "schema_shape")
+    Yojson.Safe.Util.(
+      `Assoc (KTD.discovery_fields one_of_execute) |> member "schema_shape")
   in
   let one_of_required =
     Yojson.Safe.Util.(member "one_of_required" one_of_shape |> to_list)
@@ -524,10 +522,11 @@ let test_keeper_tools_list_json_uses_typed_groups () =
    | _ -> fail "expected exactly two oneOf required branches");
   let empty_shape =
     Yojson.Safe.Util.(
-      KTD.discovery_json
-        { (descriptor_for_internal "tool_execute") with
-          KTD.input_schema = `Assoc []
-        }
+      `Assoc
+        (KTD.discovery_fields
+           { (descriptor_for_internal "tool_execute") with
+             KTD.input_schema = `Assoc []
+           })
       |> member "schema_shape")
   in
   check int "empty schema has no properties" 0

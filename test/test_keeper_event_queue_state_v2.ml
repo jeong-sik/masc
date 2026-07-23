@@ -12,6 +12,15 @@ let require_some label = function
   | None -> Alcotest.failf "%s: expected Some" label
 ;;
 
+(* Test-local shim for the excised [Keeper_approval_queue.resolve] wrapper:
+   reproduces its unit projection over [resolve_with_policy] so these
+   assertions keep exercising the production resolution path. *)
+let aq_resolve ~base_path ~id ~decision =
+  match Masc.Keeper_approval_queue.resolve_with_policy ~base_path ~id ~decision () with
+  | Ok _ -> Ok ()
+  | Error _ as error -> error
+;;
+
 let stimulus ?(payload = Queue.Bootstrap) post_id arrived_at : Queue.stimulus =
   { post_id; urgency = Queue.Normal; arrived_at; payload }
 ;;
@@ -447,12 +456,12 @@ let test_no_compaction_decode_rejects_mismatched_stimulus () =
       "decode accepted a No_compaction receipt paired with a non-manual stimulus"
 ;;
 
-let accepted_cancellation ~source ~source_revision ~owner_generation operation_id
+let accepted_cancellation ~source ~source_revision ~owner_nonce operation_id
     : State.accepted_cancellation
   =
   { source
   ; source_revision
-  ; owner_generation
+  ; owner_nonce
   ; operator_operation_id = operation_id
   ; reason = "operator cancelled retained work"
   }
@@ -478,7 +487,7 @@ let test_accepted_cancellation_is_exact_owner_fenced_terminal () =
     accepted_cancellation
       ~source:accepted
       ~source_revision:7L
-      ~owner_generation:4
+      ~owner_nonce:4
       "op-1"
   in
   (match
@@ -494,7 +503,7 @@ let test_accepted_cancellation_is_exact_owner_fenced_terminal () =
   let changed_cancellation = { cancellation with source = changed_source } in
   (match
      State.cancel_accepted
-       ~current_owner_generation:4
+       ~current_owner_nonce:4
        ~settled_at:4.0
        ~lease
        ~cancellation:changed_cancellation
@@ -504,7 +513,7 @@ let test_accepted_cancellation_is_exact_owner_fenced_terminal () =
    | Ok _ -> Alcotest.fail "accepted cancellation ignored a changed source snapshot");
   let settled, result =
     State.cancel_accepted
-      ~current_owner_generation:4
+      ~current_owner_nonce:4
       ~settled_at:4.0
       ~lease
       ~cancellation
@@ -547,7 +556,7 @@ let test_accepted_cancellation_is_exact_owner_fenced_terminal () =
     (State.transition_receipt_equal receipt decoded);
   (match
      State.cancel_accepted
-       ~current_owner_generation:99
+       ~current_owner_nonce:99
        ~settled_at:5.0
        ~lease
        ~cancellation
@@ -572,9 +581,9 @@ let test_accepted_cancellation_rejects_stale_fences () =
     |> require_ok "claim stale-fence fixture"
   in
   let lease = require_some "stale-fence lease" lease in
-  let cancel cancellation current_owner_generation =
+  let cancel cancellation current_owner_nonce =
     State.cancel_accepted
-      ~current_owner_generation
+      ~current_owner_nonce
       ~settled_at:4.0
       ~lease
       ~cancellation
@@ -585,7 +594,7 @@ let test_accepted_cancellation_rejects_stale_fences () =
        (accepted_cancellation
           ~source:accepted
           ~source_revision:7L
-          ~owner_generation:4
+          ~owner_nonce:4
           "op-1")
        5
    with
@@ -596,7 +605,7 @@ let test_accepted_cancellation_rejects_stale_fences () =
        (accepted_cancellation
           ~source:accepted
           ~source_revision:6L
-          ~owner_generation:4
+          ~owner_nonce:4
           "op-1")
        4
    with
@@ -621,12 +630,12 @@ let test_pending_accepted_cancellation_is_exact_and_source_bound () =
     accepted_cancellation
       ~source:target
       ~source_revision:9L
-      ~owner_generation:6
+      ~owner_nonce:6
       "pending-operation-1"
   in
   let cancelled, result =
     State.cancel_pending_accepted
-      ~current_owner_generation:6
+      ~current_owner_nonce:6
       ~settled_at:4.0
       ~cancellation
       state
@@ -661,7 +670,7 @@ let test_pending_accepted_cancellation_is_exact_and_source_bound () =
    | _ -> Alcotest.fail "pending cancellation did not create one outbox entry");
   (match
      State.cancel_pending_accepted
-       ~current_owner_generation:99
+       ~current_owner_nonce:99
        ~settled_at:5.0
        ~cancellation
        cancelled
@@ -680,7 +689,7 @@ let test_pending_accepted_cancellation_is_exact_and_source_bound () =
   in
   (match
      State.cancel_pending_accepted
-       ~current_owner_generation:6
+       ~current_owner_nonce:6
        ~settled_at:5.0
        ~cancellation:changed_source
        cancelled
@@ -1982,7 +1991,7 @@ let test_approved_wake_settles_on_delivery_not_consumption () =
         (Masc.Keeper_approval_queue.storage_error_to_string error)
   in
   (match
-     Masc.Keeper_approval_queue.resolve
+     aq_resolve
        ~base_path
        ~id:approval_id
        ~decision:Masc.Keeper_approval_queue.Decision.Approve
@@ -2194,7 +2203,7 @@ let test_accepted_cancellation_persistence_is_atomic_and_idempotent () =
            | [ source ] -> source
            | _ -> Alcotest.fail "cancellation lease did not retain one source")
       ; source_revision
-      ; owner_generation = 7
+      ; owner_nonce = 7
       ; operator_operation_id = "cancel-operation-1"
       ; reason = "operator rejected paused work"
       }
@@ -2203,7 +2212,7 @@ let test_accepted_cancellation_persistence_is_atomic_and_idempotent () =
       Persistence.cancel_accepted_result
         ~base_path
         ~keeper_name
-        ~current_owner_generation:7
+        ~current_owner_nonce:7
         ~settled_at:3.0
         ~lease
         ~cancellation
@@ -2260,7 +2269,7 @@ let test_accepted_cancellation_persistence_is_atomic_and_idempotent () =
        Persistence.cancel_accepted_result
          ~base_path
          ~keeper_name:stale_keeper
-         ~current_owner_generation:7
+         ~current_owner_nonce:7
          ~settled_at:6.0
          ~lease:stale_lease
          ~cancellation:stale_cancellation
@@ -2294,7 +2303,7 @@ let test_pending_cancellation_wal_replays_before_removal () =
     let cancellation : Persistence.accepted_cancellation =
       { source = target
       ; source_revision
-      ; owner_generation = 17
+      ; owner_nonce = 17
       ; operator_operation_id = "pending-cancel-operation"
       ; reason = "operator cancelled exact pending work"
       }
@@ -2310,7 +2319,7 @@ let test_pending_cancellation_wal_replays_before_removal () =
            Persistence.cancel_pending_accepted_result
              ~base_path
              ~keeper_name
-             ~current_owner_generation:17
+             ~current_owner_nonce:17
              ~settled_at:3.0
              ~cancellation
              ())
@@ -2351,7 +2360,7 @@ let test_pending_cancellation_wal_replays_before_removal () =
       Persistence.cancel_pending_accepted_result
         ~base_path
         ~keeper_name
-        ~current_owner_generation:999
+        ~current_owner_nonce:999
         ~settled_at:4.0
         ~cancellation
         ()

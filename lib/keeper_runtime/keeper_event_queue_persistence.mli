@@ -103,7 +103,7 @@ type no_compaction = Keeper_event_queue_state.no_compaction =
 type accepted_cancellation = Keeper_event_queue_state.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
@@ -111,7 +111,7 @@ type accepted_cancellation = Keeper_event_queue_state.accepted_cancellation =
 type accepted_transfer = Keeper_event_queue_state.accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
@@ -125,7 +125,7 @@ type source_terminal_receipt = Keeper_event_queue_state.source_terminal_receipt 
 type accepted_source_terminal = Keeper_event_queue_state.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
@@ -326,7 +326,7 @@ val cancel_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  current_owner_generation:int ->
+  current_owner_nonce:int ->
   settled_at:float ->
   lease:lease ->
   cancellation:accepted_cancellation ->
@@ -341,7 +341,7 @@ val cancel_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  current_owner_generation:int ->
+  current_owner_nonce:int ->
   settled_at:float ->
   cancellation:accepted_cancellation ->
   unit ->
@@ -354,7 +354,7 @@ val transfer_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  current_owner_generation:int ->
+  current_owner_nonce:int ->
   settled_at:float ->
   transfer:accepted_transfer ->
   unit ->
@@ -366,7 +366,7 @@ val settle_pending_from_source_terminal_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  current_owner_generation:int ->
+  current_owner_nonce:int ->
   settled_at:float ->
   source_terminal:accepted_source_terminal ->
   unit ->

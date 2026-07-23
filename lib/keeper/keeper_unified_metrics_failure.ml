@@ -125,6 +125,5 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
                           ~detail klass)
               | None -> None)
          | None -> None);
-      last_turn_tool_calls = [];
     };
   }

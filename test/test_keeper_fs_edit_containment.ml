@@ -11,6 +11,37 @@ module Keeper_registry = Masc.Keeper_registry
 module Keeper_sandbox = Masc.Keeper_sandbox
 module Keeper_types = Keeper_types
 
+(* The bare string-returning wrapper handle_file_write (formerly exported
+   from [Keeper_tool_filesystem_runtime]) was retired: it had zero
+   production callers
+   ([keeper_tool_runtime.ml] calls [handle_file_write_with_outcome]
+   directly). This test-local shim reproduces its [.raw_output] projection
+   so the assertions below keep exercising the real production entry
+   point. *)
+let handle_file_write
+      ~turn_sandbox_factory
+      ~config
+      ~meta
+      ~publication_recovery
+      ?continuation_channel
+      ?gate_context
+      ?gate_grant
+      ~args
+      ()
+  =
+  (Keeper_tool_filesystem_runtime.handle_file_write_with_outcome
+     ~turn_sandbox_factory
+     ~config
+     ~meta
+     ~publication_recovery
+     ?continuation_channel
+     ?gate_context
+     ?gate_grant
+     ~args
+     ())
+    .raw_output
+;;
+
 let temp_dir () =
   let d = Filename.temp_file "tool_edit_file_containment_" "" in
   Unix.unlink d;
@@ -114,7 +145,7 @@ let test_docker_write_allows_explicit_root () =
   Keeper_registry.update_meta ~base_path:config.base_path meta.name meta;
   let path = Filename.concat config.base_path "root-write.txt" in
   let raw =
-    Keeper_tool_filesystem_runtime.handle_file_write
+    handle_file_write
       ~turn_sandbox_factory:None
       ~config
       ~meta
@@ -137,7 +168,7 @@ let test_docker_write_allows_playground () =
   let path = Filename.concat playground "mind/allowed.txt" in
   ensure_dir (Filename.dirname path);
   let raw =
-    Keeper_tool_filesystem_runtime.handle_file_write
+    handle_file_write
       ~turn_sandbox_factory:None
       ~config
       ~meta

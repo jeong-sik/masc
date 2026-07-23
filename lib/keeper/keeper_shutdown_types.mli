@@ -124,6 +124,21 @@ type finalization_evidence =
 
 type supersession =
   | Operator_metadata_update of { actor : string }
+  | Operator_reconciliation_accepted of
+      { actor : string
+      ; unreconciled_turn : active_turn
+      }
+      (** The operator released a [Reconciliation_required] admission fence,
+          taking responsibility for the possibility that [unreconciled_turn]'s
+          external effects were already applied.
+
+          Distinct from {!Operator_metadata_update} on purpose. Superseding a
+          [Blocked] operation carries no effect-duplication risk — the work
+          failed. Superseding a [Reconciliation_required] one does: the turn
+          was in flight when the process ended without a lane receipt, so its
+          tool calls may or may not have landed. The durable record must say
+          which of the two an operator signed off on, and the prior phase is
+          overwritten by [Superseded], so the turn is carried here. *)
 
 type phase =
   | Prepared

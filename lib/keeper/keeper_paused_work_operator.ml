@@ -235,11 +235,11 @@ let error_class = function
       { cause =
           ( Resume.Reservation_conflict _
           | Resume.Receipt_conflict _
-          | Resume.Durable_owner_generation_changed _
+          | Resume.Durable_owner_nonce_changed _
           | Resume.Durable_owner_identity_changed
           | Resume.Durable_owner_not_paused
           | Resume.Durable_owner_dead_tombstone
-          | Resume.Registry_owner_generation_changed _
+          | Resume.Registry_owner_nonce_changed _
           | Resume.Registry_owner_identity_changed
           | Resume.Registry_owner_not_paused _ )
       ; _
@@ -250,9 +250,9 @@ let error_class = function
         { cause =
             ( Cancellation.Durable_owner_not_paused
             | Cancellation.Durable_owner_dead_tombstone
-            | Cancellation.Durable_owner_generation_changed _
+            | Cancellation.Durable_owner_nonce_changed _
             | Cancellation.Registry_owner_not_paused _
-            | Cancellation.Registry_owner_generation_changed _
+            | Cancellation.Registry_owner_nonce_changed _
             | Cancellation.Lease_source_invalid )
         ; _
         })
@@ -262,10 +262,10 @@ let error_class = function
           | Transfer.Receipt_conflict _
           | Transfer.Source_owner_not_paused
           | Transfer.Source_owner_dead_tombstone
-          | Transfer.Source_owner_generation_changed _
+          | Transfer.Source_owner_nonce_changed _
           | Transfer.Source_owner_identity_changed
           | Transfer.Target_owner_not_active
-          | Transfer.Target_owner_generation_changed _
+          | Transfer.Target_owner_nonce_changed _
           | Transfer.Continuation_binding_mismatch
           | Transfer.Source_queue_validation_failed _ )
       ; _
@@ -276,7 +276,7 @@ let error_class = function
           | Source_terminal.Receipt_conflict _
           | Source_terminal.Durable_owner_not_paused
           | Source_terminal.Durable_owner_dead_tombstone
-          | Source_terminal.Durable_owner_generation_changed _
+          | Source_terminal.Durable_owner_nonce_changed _
           | Source_terminal.Durable_owner_identity_changed
           | Source_terminal.Source_queue_validation_failed _ )
       ; _
@@ -363,7 +363,7 @@ let inventory_json config ~keeper_name =
       ; ( "owner"
         , `Assoc
             [ "trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-            ; "generation", `Int meta.runtime.generation
+            ; "generation", `Int meta.runtime.nonce
             ; "meta_version", `Int meta.meta_version
             ; "paused", `Bool meta.paused
             ; ( "pause_kind"

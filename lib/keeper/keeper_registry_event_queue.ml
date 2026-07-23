@@ -73,7 +73,7 @@ type no_compaction = Keeper_event_queue_persistence.no_compaction =
 type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
@@ -81,7 +81,7 @@ type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellatio
 type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
@@ -95,7 +95,7 @@ type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_re
 type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
@@ -415,7 +415,7 @@ let settle_result ~base_path name ~settled_at ~lease ~settlement =
 let cancel_accepted_result
       ~base_path
       name
-      ~current_owner_generation
+      ~current_owner_nonce
       ~settled_at
       ~lease
       ~cancellation
@@ -423,7 +423,7 @@ let cancel_accepted_result
   Keeper_event_queue_persistence.cancel_accepted_result
     ~base_path
     ~keeper_name:name
-    ~current_owner_generation
+    ~current_owner_nonce
     ~settled_at
     ~lease
     ~cancellation
@@ -434,14 +434,14 @@ let cancel_accepted_result
 let cancel_pending_accepted_result
       ~base_path
       name
-      ~current_owner_generation
+      ~current_owner_nonce
       ~settled_at
       ~cancellation
   =
   Keeper_event_queue_persistence.cancel_pending_accepted_result
     ~base_path
     ~keeper_name:name
-    ~current_owner_generation
+    ~current_owner_nonce
     ~settled_at
     ~cancellation
     ~after_commit:(publish_pending ~base_path name)
@@ -451,14 +451,14 @@ let cancel_pending_accepted_result
 let transfer_pending_accepted_result
       ~base_path
       name
-      ~current_owner_generation
+      ~current_owner_nonce
       ~settled_at
       ~transfer
   =
   Keeper_event_queue_persistence.transfer_pending_accepted_result
     ~base_path
     ~keeper_name:name
-    ~current_owner_generation
+    ~current_owner_nonce
     ~settled_at
     ~transfer
     ~after_commit:(publish_pending ~base_path name)
@@ -468,14 +468,14 @@ let transfer_pending_accepted_result
 let settle_pending_from_source_terminal_result
       ~base_path
       name
-      ~current_owner_generation
+      ~current_owner_nonce
       ~settled_at
       ~source_terminal
   =
   Keeper_event_queue_persistence.settle_pending_from_source_terminal_result
     ~base_path
     ~keeper_name:name
-    ~current_owner_generation
+    ~current_owner_nonce
     ~settled_at
     ~source_terminal
     ~after_commit:(publish_pending ~base_path name)

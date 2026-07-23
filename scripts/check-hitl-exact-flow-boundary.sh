@@ -129,6 +129,14 @@ check_boundary() {
     "$WORKER" \
     "worker must not reconstruct a candidate loop from legacy one-shot APIs"
   forbid_pattern \
+    'Exact_output\.(receipt_phase|receipt_dispatch_count)|exact_execution_failed_before_dispatch' \
+    "$WORKER" \
+    "MASC must not interpret OAS receipt phase/count or restore phase-derived outcomes"
+  forbid_pattern \
+    'fail_summary_exact_attempt_before_dispatch' \
+    "$ROOT/lib" \
+    "the retired exact failure-to-retry queue transition must not return"
+  forbid_pattern \
     'Pricing|pricing|price|Limit|limit' \
     "$WORKER" \
     "pricing and limit observations are not HITL execution policy"

@@ -302,19 +302,6 @@ let quarantine_exact identity cause =
     ~cause
 ;;
 
-let fail_exact_before_dispatch identity ~reason ~retryable =
-  AQ.fail_summary_exact_attempt_before_dispatch
-    ~id:identity.approval_id_arg
-    ~input_hash:identity.input_hash_arg
-    ~sequence:identity.sequence_arg
-    ~slot_id:identity.slot_id_arg
-    ~call_id:identity.call_id_arg
-    ~plan_fingerprint:identity.plan_fingerprint_arg
-    ~request_body_sha256:identity.request_body_sha256_arg
-    ~reason
-    ~retryable
-;;
-
 let check_exact_update label expected = function
   | Ok { AQ.changed; write_outcome = AQ.Fsync_completed } ->
     Alcotest.(check bool) label expected changed
@@ -1989,41 +1976,6 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
        terminalize_released
          "release-flow-execution-failed"
          AQ.Exact_flow_execution_failed;
-       let fail_id, fail_identity = prepare "fail" in
-       check_exact_update
-         "bind failure fixture"
-         true
-         (run_exact_transition AQ.bind_summary_exact_attempt fail_identity);
-       check_visible_update
-         "visible predispatch failure"
-         true
-         (AQ.For_testing.fail_summary_exact_attempt_before_dispatch_with_writer
-            ~save_file_atomic_strict_staged:visible_after_rename_writer
-            ~id:fail_identity.approval_id_arg
-            ~input_hash:fail_identity.input_hash_arg
-            ~sequence:fail_identity.sequence_arg
-            ~slot_id:fail_identity.slot_id_arg
-            ~call_id:fail_identity.call_id_arg
-            ~plan_fingerprint:fail_identity.plan_fingerprint_arg
-            ~request_body_sha256:fail_identity.request_body_sha256_arg
-            ~reason:"no usable exact slot"
-            ~retryable:false);
-       (match pending_entry_exn fail_id with
-        | { exact_attempt =
-              AQ.Exact_bound { status = AQ.Exact_released_before_dispatch; _ }
-          ; summary_status = AQ.Summary_failed _
-          ; _
-          } ->
-          ()
-        | _ -> Alcotest.fail "visible failure did not converge memory");
-       check_exact_update
-         "idempotent failure confirms durability"
-         false
-         (fail_exact_before_dispatch
-            fail_identity
-            ~reason:"no usable exact slot"
-            ~retryable:false);
-       let quarantine_id, quarantine_identity = prepare "quarantine" in
        check_exact_update
          "bind quarantine fixture"
          true

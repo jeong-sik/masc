@@ -572,9 +572,9 @@ let test_visible_completion_blocks_gate_delivery () =
         | _ -> fail "restart skipped the oldest finalization barrier"))
 ;;
 
-let test_postdispatch_failure_never_fails_over () =
+let test_flow_execution_failure_quarantines_and_blocks_owner () =
   run_eio @@ fun ~sw ~net ~clock ->
-  with_temp_dir "hitl-postdispatch" @@ fun base_path ->
+  with_temp_dir "hitl-flow-failure" @@ fun base_path ->
   Fun.protect
     ~finally:Q.For_testing.reset_runtime_state
     (fun () ->
@@ -582,40 +582,64 @@ let test_postdispatch_failure_never_fails_over () =
        Prompt_registry.set_markdown_dir
          (Masc_test_deps.source_path "config/prompts");
        let failed = F.start_server ~sw ~net ~clock F.Abort_after_request in
-       let successor =
-         F.start_server
-           ~sw
-           ~net
-           ~clock
-           (F.Reply (F.openai_response (judgment_json "approve")))
-       in
        let fixtures : F.target_fixture list =
-         [ { id = "hitl-postdispatch-failed"; base_url = failed.base_url }
-         ; { id = "hitl-postdispatch-successor"; base_url = successor.base_url }
-         ]
+         [ { id = "hitl-flow-failed"; base_url = failed.base_url } ]
        in
        publish_lane
-         [ "hitl-postdispatch-failed"; "hitl-postdispatch-successor" ]
-         (F.resolver_snapshot ~source:"hitl-postdispatch" fixtures);
-       let entry = pending_entry ~base_path () in
+         [ "hitl-flow-failed" ]
+         (F.resolver_snapshot ~source:"hitl-flow-failure" fixtures);
+       select_auto_judge_mode base_path;
+       let entry = pending_entry ~input_tag:"failed" ~base_path () in
+       let successor = pending_entry ~input_tag:"successor" ~base_path () in
        Worker.For_testing.execute_prepared_flow
          ~net
          ~clock
-         ~on_summary:(fun _ -> fail "post-dispatch failure delivered a summary")
+         ~on_summary:(fun _ -> fail "flow execution failure delivered a summary")
          (prepare_exn entry);
        check int "failed candidate dispatched once" 1 (F.post_count failed);
-       check int "post-dispatch failure forbids failover" 0 (F.post_count successor);
-       match Q.get_pending_entry ~id:entry.id with
+       (match Q.get_pending_entry ~id:entry.id with
+        | Some
+            { input_hash
+            ; sequence
+            ; exact_attempt =
+                Q.Exact_bound
+                  { slot_id
+                  ; call_id
+                  ; plan_fingerprint
+                  ; request_body_sha256
+                  ; status = Q.Exact_quarantined Q.Exact_flow_execution_failed
+                  ; _
+                  }
+            ; _
+            } ->
+          check string "quarantine input identity" entry.input_hash input_hash;
+          check int "quarantine sequence identity" entry.sequence sequence;
+          check string "quarantine opaque slot identity" "hitl-flow-failed" slot_id;
+          check bool "quarantine call identity" true (String.length call_id > 0);
+          check bool
+            "quarantine plan identity"
+            true
+            (String.length plan_fingerprint > 0);
+          check bool
+            "quarantine request identity"
+            true
+            (String.length request_body_sha256 > 0)
+        | _ -> fail "flow execution failure was not terminally quarantined");
+       let blocked = Gate.resume_persisted_auto_judges ~base_path in
+       check
+         (list string)
+         "quarantined owner starts no successor worker"
+         []
+         blocked.started_ids;
+       check int "quarantined owner dispatches no successor" 1 (F.post_count failed);
+       match Q.get_pending_entry ~id:successor.id with
        | Some
-           { exact_attempt =
-               Q.Exact_bound
-                 { status = Q.Exact_quarantined Q.Exact_flow_execution_failed
-                 ; _
-                 }
+           { exact_attempt = Q.Exact_unbound
+           ; summary_status = Q.Summary_pending
            ; _
            } ->
          ()
-       | _ -> fail "post-dispatch failure was not terminally quarantined")
+       | _ -> fail "quarantined owner did not preserve its unbound successor")
 ;;
 
 let test_cancellation_after_dispatch_is_terminal () =
@@ -883,9 +907,9 @@ let () =
             `Quick
             test_visible_completion_blocks_gate_delivery
         ; test_case
-            "post-dispatch failure never fails over"
+            "flow execution failure quarantines and blocks owner"
             `Quick
-            test_postdispatch_failure_never_fails_over
+            test_flow_execution_failure_quarantines_and_blocks_owner
         ; test_case
             "post-dispatch cancellation is terminal"
             `Quick

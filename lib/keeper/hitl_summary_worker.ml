@@ -473,47 +473,6 @@ let settle_current_or_signal (entry : pending_approval) ~reason ~cause =
       detail
 ;;
 
-let fail_final_before_dispatch (entry : pending_approval) candidate reason =
-  let identity = exact_identity_of_candidate candidate in
-  match
-    with_exact_identity
-      entry
-      identity
-      (fun
-        ~id
-        ~input_hash
-        ~sequence
-        ~slot_id
-        ~call_id
-        ~plan_fingerprint
-        ~request_body_sha256
-      ->
-        Keeper_approval_queue.fail_summary_exact_attempt_before_dispatch
-          ~id
-          ~input_hash
-          ~sequence
-          ~slot_id
-          ~call_id
-          ~plan_fingerprint
-          ~request_body_sha256
-          ~reason
-          ~retryable:false)
-  with
-  | Ok { write_outcome = Fsync_completed; _ } -> ()
-  | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
-    signal_terminalization_persistence_failure
-      entry
-      "final pre-dispatch failure persistence"
-      detail
-  | Error error ->
-    signal_terminalization_persistence_failure
-      entry
-      "final pre-dispatch failure persistence"
-      (Keeper_approval_queue.exact_attempt_error_to_string error)
-;;
-
-(* ── OAS evidence verification ──────────────────── *)
-
 let same_catalog_generation left right =
   String.equal
     (Exact_output.catalog_generation_fingerprint left)
@@ -658,22 +617,8 @@ let handle_flow_error (prepared : prepared_flow) = function
       ~cause:Exact_terminal_persistence_failure;
     ignore failed
   | Exact_output.Flow_exact_execution_failed { candidate; _ } ->
-    let receipt = candidate.receipt in
-    if
-      Exact_output.receipt_phase receipt = Exact_output.Before_dispatch
-      && Exact_output.receipt_dispatch_count receipt = 0
-    then (
-      record_outcome "exact_execution_failed_before_dispatch";
-      fail_final_before_dispatch
-        prepared.entry
-        candidate
-        "HITL exact-output flow exhausted before dispatch")
-    else (
-      record_outcome "exact_execution_failed_after_dispatch";
-      quarantine_candidate
-        prepared.entry
-        candidate
-        Exact_flow_execution_failed)
+    record_outcome "exact_execution_failed";
+    quarantine_candidate prepared.entry candidate Exact_flow_execution_failed
 ;;
 
 let execute_prepared_flow_with_queue_writers

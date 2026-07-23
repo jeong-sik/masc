@@ -247,19 +247,6 @@ module For_testing : sig
     request_body_sha256:string ->
     (exact_attempt_transition, exact_attempt_error) result
 
-  val fail_summary_exact_attempt_before_dispatch_with_writer :
-    save_file_atomic_strict_staged:strict_snapshot_writer ->
-    id:string ->
-    input_hash:string ->
-    sequence:int ->
-    slot_id:string ->
-    call_id:string ->
-    plan_fingerprint:string ->
-    request_body_sha256:string ->
-    reason:string ->
-    retryable:bool ->
-    (exact_attempt_transition, exact_attempt_error) result
-
   val quarantine_summary_exact_attempt_with_writer :
     save_file_atomic_strict_staged:strict_snapshot_writer ->
     id:string ->
@@ -378,23 +365,6 @@ val release_summary_exact_attempt_before_dispatch :
     may be terminalized only with [Exact_terminal_persistence_failure],
     [Exact_cancellation], or [Exact_flow_execution_failed]. The same release is
     idempotently strict-rewritten. *)
-
-val fail_summary_exact_attempt_before_dispatch :
-  id:string ->
-  input_hash:string ->
-  sequence:int ->
-  slot_id:string ->
-  call_id:string ->
-  plan_fingerprint:string ->
-  request_body_sha256:string ->
-  reason:string ->
-  retryable:bool ->
-  (exact_attempt_transition, exact_attempt_error) result
-
-(** Atomically release the matching binding and record the final summary
-    failure only after OAS proves the attempt stayed before dispatch.
-    [retryable] is observation only; execution requires an explicit operator
-    restart. Replaying the same identity and failure strictly rewrites it. *)
 
 val quarantine_summary_exact_attempt :
   id:string ->

@@ -2012,98 +2012,6 @@ let release_summary_exact_attempt_before_dispatch =
     ~save_file_atomic_strict_staged:Fs_compat.save_file_atomic_strict_staged
 ;;
 
-let fail_summary_exact_attempt_before_dispatch_with
-      ~save_file_atomic_strict_staged
-      ~id
-      ~input_hash
-      ~sequence
-      ~slot_id
-      ~call_id
-      ~plan_fingerprint
-      ~request_body_sha256
-      ~reason
-      ~retryable
-  =
-  let result =
-    match
-      validate_exact_attempt_candidate
-        ~id
-        ~input_hash
-        ~sequence
-        ~slot_id
-        ~call_id
-        ~plan_fingerprint
-        ~request_body_sha256
-    with
-    | Error _ as error -> error
-    | Ok candidate ->
-      with_pending_store_lock (fun () ->
-        let map = Atomic.get pending in
-        match exact_attempt_entry_unlocked map candidate with
-        | Error _ as error -> error
-        | Ok entry ->
-          (match entry.exact_attempt with
-           | Exact_unbound ->
-             Error
-               (Exact_attempt_rejected
-                  (Exact_attempt_unbound_state entry.id))
-           | Exact_bound existing
-             when not (exact_attempt_identity_matches existing candidate) ->
-             Error
-               (Exact_attempt_rejected
-                  (Exact_attempt_identity_conflict existing))
-           | Exact_bound existing ->
-             (match existing.status, entry.summary_status with
-              | Exact_dispatch_uncertain, Summary_pending ->
-                let released =
-                  exact_attempt_binding_with_status
-                    existing
-                    Exact_released_before_dispatch
-                in
-                persist_exact_attempt_entry_unlocked
-                    ~save_file_atomic_strict_staged
-                    ~changed:true
-                    ~map
-                    ~entry
-                    { entry with
-                    summary_status = Summary_failed { reason; retryable }
-                  ; exact_attempt = Exact_bound released
-                  }
-              | ( Exact_released_before_dispatch
-                , Summary_failed
-                    { reason = durable_reason
-                    ; retryable = durable_retryable
-                    } )
-                  when String.equal durable_reason reason
-                       && Bool.equal durable_retryable retryable ->
-                  persist_exact_attempt_entry_unlocked
-                    ~save_file_atomic_strict_staged
-                    ~changed:false
-                    ~map
-                    ~entry
-                    entry
-                | Exact_dispatch_uncertain, _ ->
-                Error
-                  (Exact_attempt_rejected
-                     (Exact_attempt_summary_not_pending entry.id))
-              | ( Exact_released_before_dispatch
-                | Exact_released_recovery_required
-                | Exact_quarantined _
-                | Exact_restart_quarantined
-                | Exact_completed ),
-                _ ->
-                Error
-                  (Exact_attempt_rejected
-                     (Exact_attempt_status_conflict existing)))))
-  in
-  publish_exact_attempt_transition ~id result
-;;
-
-let fail_summary_exact_attempt_before_dispatch =
-  fail_summary_exact_attempt_before_dispatch_with
-    ~save_file_atomic_strict_staged:Fs_compat.save_file_atomic_strict_staged
-;;
-
 let quarantine_summary_exact_attempt_with
       ~save_file_atomic_strict_staged
       ~id
@@ -3133,10 +3041,6 @@ module For_testing = struct
 
   let release_summary_exact_attempt_before_dispatch_with_writer =
     release_summary_exact_attempt_before_dispatch_with
-  ;;
-
-  let fail_summary_exact_attempt_before_dispatch_with_writer =
-    fail_summary_exact_attempt_before_dispatch_with
   ;;
 
   let quarantine_summary_exact_attempt_with_writer =

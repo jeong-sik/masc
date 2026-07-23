@@ -92,10 +92,10 @@ val decide :
     identity and summary; only [Keeper_approval_queue.Fsync_completed] permits
     Gate finalization. Visible unconfirmed or failed rewrites leave the approval
     pending and record a recovery failure. Dispatch-uncertain, released,
-    quarantined, and legacy execution-uncertain entries never enter restart
-    recovery. Failed judgments are never retried merely because a process
-    restarted. Every recovery candidate id has an explicit started, finalized,
-    skipped, or failed outcome. *)
+    released-recovery-required, restart-quarantined, and quarantined entries
+    never enter automatic restart recovery. Failed judgments are never retried
+    merely because a process restarted. Every recovery candidate id has an
+    explicit started, finalized, skipped, or failed outcome. *)
 val resume_persisted_auto_judges :
   base_path:string -> auto_judge_resume_report
 
@@ -112,10 +112,11 @@ type operator_recovery_report =
   ; queued : int
   }
 
-(** Reopen unbound failed request-local judgments after an explicit operator
+(** Reopen recoverable request-local judgments after an explicit operator
     selection of Auto Judge, then activate one FIFO drain for each Keeper owner
-    with eligible unbound work in the workspace. Exact-bound and legacy
-    execution-uncertain entries remain operator-visible but are never queued. *)
+    with eligible unbound work in the workspace. Restart-classified released
+    work is first durably reset to unbound; every other exact-bound entry
+    remains operator-visible but is never queued. *)
 val request_operator_auto_judge_recovery :
   base_path:string -> (operator_recovery_report, string) result
 

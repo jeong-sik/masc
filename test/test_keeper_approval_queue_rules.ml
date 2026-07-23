@@ -511,6 +511,25 @@ let test_gate_auto_judge_worker_eligibility_ssot () =
                model_run_id = identity.call_id
              }))
   in
+let with_exact_status (entry : AQ.pending_approval) status =
+    match entry.exact_attempt with
+    | AQ.Exact_bound binding ->
+      { entry with
+        exact_attempt =
+          AQ.Exact_bound
+            (AQ.exact_attempt_binding_with_status binding status)
+      }
+    | AQ.Exact_unbound ->
+      fail "bound exact eligibility fixture became unbound"
+  in
+  let released_recovery_required =
+    with_exact_status
+      released_before_dispatch
+      AQ.Exact_released_recovery_required
+  in
+  let restart_quarantined =
+    with_exact_status dispatch_uncertain AQ.Exact_restart_quarantined
+  in
   let check_ready label expected entry =
     check bool label expected (Gate.For_testing.auto_judge_entry_ready entry)
   in
@@ -522,7 +541,15 @@ let test_gate_auto_judge_worker_eligibility_ssot () =
     "released-before-dispatch binding is not worker-ready"
     false
     released_before_dispatch;
+  check_ready
+    "released recovery-required binding is operator-only"
+    false
+    released_recovery_required;
   check_ready "quarantined binding is not worker-ready" false quarantined;
+  check_ready
+    "restart-quarantined binding is terminal"
+    false
+    restart_quarantined;
   check_ready "completed binding is finalize-only" false completed;
   (match quarantined.exact_attempt with
    | AQ.Exact_bound { status = AQ.Exact_quarantined AQ.Exact_flow_execution_failed; _ } ->
@@ -544,7 +571,13 @@ let test_gate_auto_judge_worker_eligibility_ssot () =
        :: pending
        :: available
        :: other_owner
-       :: [ dispatch_uncertain; released_before_dispatch; quarantined; completed ])
+       :: [ dispatch_uncertain
+          ; released_before_dispatch
+          ; released_recovery_required
+          ; quarantined
+          ; restart_quarantined
+          ; completed
+          ])
   in
   check int "operator recovery queues only two worker-ready entries" 2 (List.length ready);
   check (list string) "operator recovery predicate preserves owner FIFO"

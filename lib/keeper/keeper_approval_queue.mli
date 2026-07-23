@@ -408,11 +408,12 @@ val quarantine_summary_exact_attempt :
   (exact_attempt_transition, exact_attempt_error) result
 
 (** Terminally quarantine a matching exact binding with one closed typed cause.
-    A dispatch-uncertain binding accepts any current exact cause. A released
+    A dispatch-uncertain binding accepts any public exact cause. A released
     binding accepts only [Exact_terminal_persistence_failure],
     [Exact_cancellation], or [Exact_flow_execution_failed]. The same identity
     and cause is idempotently strict-rewritten. It can never return to the
-    legacy summary mutation path. *)
+    summary mutation path. Restart-only states are not values of
+    [exact_attempt_quarantine_cause] and cannot enter this surface. *)
 
 val complete_summary_exact_attempt :
   id:string ->
@@ -447,14 +448,19 @@ val mark_summary_failed :
 
 (** Durably transition any [Summary_failed] state back to the in-flight marker.
     Only explicit operator action calls this CAS, so the diagnostic [retryable]
-    classification never controls work. There is no timer or retry count. *)
+    classification never controls work. A restart-classified
+    [Exact_released_recovery_required] with [Summary_pending] is also reset to
+    [Exact_unbound] without changing its pending summary marker. A live
+    [Exact_released_before_dispatch] with [Summary_pending] is never accepted.
+    There is no timer or retry count. *)
 val restart_failed_summary : id:string -> (bool, summary_transition_error) result
 
 (** Explicit operator recovery: transition every failed summary for this
     workspace in one durable transaction. Non-exact failures return to
     [Summary_not_requested]. Released exact failures return to [Summary_pending]
-    with [Exact_unbound], so only this operator action permits a new exact
-    attempt. Returns the reopened approval ids. *)
+    with [Exact_unbound]. Restart-classified released pending work also returns
+    to [Exact_unbound] while remaining [Summary_pending], so only this operator
+    action permits a new exact attempt. Returns the reopened approval ids. *)
 val restart_failed_summaries :
   base_path:string -> (string list, summary_transition_error) result
 

@@ -1729,11 +1729,13 @@ let runtime_config_write_outcome
   | Ok () ->
     on_replacement_visible ();
     Runtime_exact_output_registry.Committed `Durable
-  | Error ({ stage = Fs_compat.Before_rename; _ } as failure) ->
-    Runtime_exact_output_registry.Not_committed failure
-  | Error ({ stage = Fs_compat.After_rename; _ } as failure) ->
-    on_replacement_visible ();
-    Runtime_exact_output_registry.Committed (`Durability_unconfirmed failure)
+  | Error (failure : Fs_compat.atomic_replace_failure) ->
+    (match failure.stage with
+     | Fs_compat.Before_rename ->
+       Runtime_exact_output_registry.Not_committed failure
+     | Fs_compat.After_rename ->
+       on_replacement_visible ();
+       Runtime_exact_output_registry.Committed (`Durability_unconfirmed failure))
 ;;
 
 let commit_runtime_config_text
@@ -1752,11 +1754,13 @@ let commit_runtime_config_text
      | Ok () ->
        set_loaded ~config_path:path loaded;
        Ok ()
-     | Error ({ stage = Fs_compat.Before_rename; _ } as failure) ->
-       runtime_config_atomic_failure ~replacement_visible:false failure
-     | Error ({ stage = Fs_compat.After_rename; _ } as failure) ->
-       set_loaded ~config_path:path loaded;
-       runtime_config_atomic_failure ~replacement_visible:true failure)
+     | Error (failure : Fs_compat.atomic_replace_failure) ->
+       (match failure.stage with
+        | Fs_compat.Before_rename ->
+          runtime_config_atomic_failure ~replacement_visible:false failure
+        | Fs_compat.After_rename ->
+          set_loaded ~config_path:path loaded;
+          runtime_config_atomic_failure ~replacement_visible:true failure))
   | Error error ->
     Error
       ("exact-output registry replacement rejected: "

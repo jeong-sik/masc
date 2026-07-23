@@ -164,11 +164,12 @@ let terminal_effect_boundary_decision = function
   | Keeper_tools_oas.Terminal_effect_open -> Ok Runtime_agent.Continue
   | Keeper_tools_oas.Terminal_effect_completed ->
     Ok (Runtime_agent.Yield Runtime_agent.Terminal_tool_completed)
-  | Keeper_tools_oas.Terminal_effect_failed { failure_class; diagnostic } ->
+  | Keeper_tools_oas.Terminal_effect_failed
+      { failure_class; effect_disposition; diagnostic } ->
     Error
       (Keeper_internal_error.sdk_error_of_masc_internal_error
          (Keeper_internal_error.Terminal_effect_failed
-            { failure_class; diagnostic }))
+            { failure_class; effect_disposition; diagnostic }))
 ;;
 
 module For_testing = struct

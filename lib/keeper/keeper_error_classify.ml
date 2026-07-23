@@ -54,19 +54,9 @@ let is_transient_internal_runner_error (err : Agent_sdk.Error.sdk_error) : bool 
       | Keeper_turn_driver.Internal_bridge_exception _
       | Keeper_turn_driver.Internal_contract_rejected _
       | Keeper_turn_driver.Incomplete_tool_transcript _
-      | Keeper_turn_driver.Terminal_effect_failed
-          { failure_class =
-              ( Tool_result.Policy_rejection
-              | Tool_result.Runtime_failure
-              | Tool_result.Workflow_rejection )
-          ; _
-          }
+      | Keeper_turn_driver.Terminal_effect_failed _
       | Keeper_turn_driver.Receipt_persistence_failed _ )
   | None -> false
-  | Some
-      (Keeper_turn_driver.Terminal_effect_failed
-         { failure_class = Tool_result.Transient_error; _ }) ->
-    true
 
 (** Classify an [sdk_error] into a static [error_classification] variant.
     Replaces the individual heuristic predicate functions with a single

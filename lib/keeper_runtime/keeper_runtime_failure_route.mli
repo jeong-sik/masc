@@ -34,8 +34,6 @@ type retry_class =
   | Server_error  (** typed server failure / provider unavailable *)
   | Network_transient  (** transport-level network failure *)
   | Provider_timeout  (** provider or transport deadline expiry *)
-  | Terminal_effect_transient
-      (** a terminal surface effect reported a typed retryable failure *)
 
 val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
 (** True only for the typed [PaymentRequired] and provider [HardQuota]
@@ -67,6 +65,7 @@ type judgment_class =
   | Provider_integration
       (** provider response unparseable / unknown variant / provider-terminal
           / sub-500 unclassified server errors *)
+  | Terminal_effect_transient_failure
   | Terminal_effect_policy_rejection
   | Terminal_effect_runtime_failure
   | Terminal_effect_workflow_rejection

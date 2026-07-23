@@ -1,5 +1,10 @@
 (** Core execution body for keeper tool OAS handler. *)
 
+type execution_result =
+  { tool_result : Tool_result.result
+  ; failure_effect_disposition : Tool_result.failure_effect_disposition option
+  }
+
 (** Execute a keeper tool call with full observability: telemetry,
     failure observation and exception handling. Called from
     [Keeper_tools_oas_handler] after input validation.
@@ -26,4 +31,4 @@ val execute_with_observers
   -> ?oas_invocation:Agent_sdk.Tool.Invocation.t
   -> input:Yojson.Safe.t
   -> unit
-  -> Tool_result.result
+  -> execution_result

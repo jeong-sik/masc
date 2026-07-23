@@ -20,6 +20,17 @@ type tool_failure_class =
   | Runtime_failure (** Internal error/bug — non-retryable *)
   | Workflow_rejection (** Business rule violation — non-retryable *)
 
+type failure_effect_disposition =
+  | Proven_pre_effect
+      (** The producer proves that the requested effect did not begin. *)
+  | Proven_post_effect
+      (** The producer proves that the requested effect committed before failure. *)
+  | Effect_outcome_unknown
+      (** The producer cannot prove whether the requested effect committed. *)
+
+val failure_effect_disposition_to_string : failure_effect_disposition -> string
+val failure_effect_disposition_of_string : string -> failure_effect_disposition option
+
 val tool_failure_class_to_yojson : tool_failure_class -> Yojson.Safe.t
 val tool_failure_class_of_yojson :
   Yojson.Safe.t -> (tool_failure_class, string) result

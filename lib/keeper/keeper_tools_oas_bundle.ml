@@ -82,8 +82,9 @@ let make_tool_bundle
   let model_visible_descriptors = Keeper_tool_descriptor.model_visible_descriptors () in
   (* The bundle lives for exactly one Agent run. Its typed terminal-effect
      state is request-scoped and observed by the OAS tool-boundary probe only
-     after the whole tool batch and checkpoint sink have completed. Failure is
-     sticky: a later completion cannot erase a failed delivery. *)
+     after the whole tool batch and checkpoint sink have completed. The first
+     terminal transition wins: neither completion nor failure can overwrite
+     an earlier terminal result. *)
   let terminal_effect_state = Atomic.make Terminal_effect_open in
   let mark_terminal_effect_completed () =
     ignore
@@ -93,7 +94,11 @@ let make_tool_bundle
          Terminal_effect_completed)
   in
   let mark_terminal_effect_failed failure =
-    Atomic.set terminal_effect_state (Terminal_effect_failed failure)
+    ignore
+      (Atomic.compare_and_set
+         terminal_effect_state
+         Terminal_effect_open
+         (Terminal_effect_failed failure))
   in
   (* The handler dispatches with
      [~name:descriptor.internal_name] so all telemetry SSOT remains internal;

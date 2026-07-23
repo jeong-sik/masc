@@ -278,6 +278,7 @@ type masc_internal_error =
     }
   | Terminal_effect_failed of {
       failure_class : Tool_result.tool_failure_class;
+      effect_disposition : Tool_result.failure_effect_disposition;
       diagnostic : string;
     }
   | Receipt_persistence_failed of {
@@ -460,11 +461,15 @@ let masc_internal_error_to_json = function
         ("detail", `String detail);
         ("tool_use_ids", `List (List.map (fun id -> `String id) tool_use_ids));
       ]
-  | Terminal_effect_failed { failure_class; diagnostic } ->
+  | Terminal_effect_failed { failure_class; effect_disposition; diagnostic } ->
     `Assoc
       [
         ("kind", `String "terminal_effect_failed");
         ("failure_class", `String (Tool_result.tool_failure_class_to_string failure_class));
+        ( "effect_disposition"
+        , `String
+            (Tool_result.failure_effect_disposition_to_string effect_disposition)
+        );
         ("diagnostic", `String diagnostic);
       ]
   | Receipt_persistence_failed { detail } ->
@@ -831,17 +836,23 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
           | _ -> None)
       | Some (`String "terminal_effect_failed")
         when exact_fields
-               [ "kind"; "failure_class"; "diagnostic" ]
+               [ "kind"; "failure_class"; "effect_disposition"; "diagnostic" ]
                fields -> (
           match
             string_opt_of_assoc "failure_class" json,
+            string_opt_of_assoc "effect_disposition" json,
             string_opt_of_assoc "diagnostic" json
           with
-          | Some failure_class, Some diagnostic ->
-            Option.map
-              (fun failure_class ->
-                 Terminal_effect_failed { failure_class; diagnostic })
-              (Tool_result.tool_failure_class_of_string failure_class)
+          | Some failure_class, Some effect_disposition, Some diagnostic ->
+            (match
+               Tool_result.tool_failure_class_of_string failure_class,
+               Tool_result.failure_effect_disposition_of_string effect_disposition
+             with
+             | Some failure_class, Some effect_disposition ->
+               Some
+                 (Terminal_effect_failed
+                    { failure_class; effect_disposition; diagnostic })
+             | _ -> None)
           | _ -> None)
       | Some (`String "receipt_persistence_failed") -> (
           match string_opt_of_assoc "detail" json with

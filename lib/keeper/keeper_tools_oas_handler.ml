@@ -37,18 +37,30 @@ let make_keeper_tool_handler
       record_gate_result;
     result
   in
-  let observe_terminal_execution_result (result : Tool_result.result) =
+  let observe_terminal_execution_result
+        ~failure_effect_disposition
+        (result : Tool_result.result)
+    =
     (match result with
      | Tool_result.Completed _ ->
        Option.iter (fun completed -> completed ()) on_completed
      | Tool_result.Failed { class_; message; _ } ->
-       Option.iter
-         (fun failed ->
-            failed
-              { Keeper_tools_oas.failure_class = class_
-              ; diagnostic = message
-              })
-         on_failed
+       let effect_disposition =
+         Option.value
+           ~default:Tool_result.Effect_outcome_unknown
+           failure_effect_disposition
+       in
+       (match effect_disposition with
+        | Tool_result.Proven_pre_effect -> ()
+        | Tool_result.Proven_post_effect | Tool_result.Effect_outcome_unknown ->
+          Option.iter
+            (fun failed ->
+               failed
+                 { Keeper_tools_oas.failure_class = class_
+                 ; effect_disposition
+                 ; diagnostic = message
+                 })
+            on_failed)
      | Tool_result.Deferred _ -> ());
     result
   in
@@ -136,7 +148,7 @@ let make_keeper_tool_handler
               | Ok proc_mgr -> Some proc_mgr
               | Error _ -> None
             in
-            let result =
+            let execution =
               Keeper_tools_oas_handler_exec.execute_with_observers
                 ~name
                 ~config
@@ -155,10 +167,12 @@ let make_keeper_tool_handler
                 ?oas_invocation
                 ~input
                 ()
-              |> record_result ~input
-              |> observe_terminal_execution_result
             in
-            result
+            execution.tool_result
+            |> record_result ~input
+            |> observe_terminal_execution_result
+                 ~failure_effect_disposition:
+                   execution.failure_effect_disposition
           in
           run_with_current_eio_context ?clock:current_clock ())
 ;;

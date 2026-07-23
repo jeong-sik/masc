@@ -2705,10 +2705,13 @@ let test_invalid_surface_post_input_stays_correction_capable () =
        (match
           Agent_sdk.Tool.execute
             surface_post
-            (`Assoc [ "surface", `String "dashboard" ])
+            (`Assoc
+               [ "surface", `String "dashboard"
+               ; "content", `String ""
+               ])
         with
         | Error _ -> ()
-        | Ok _ -> fail "invalid terminal input unexpectedly succeeded");
+        | Ok _ -> fail "handler-level invalid terminal input unexpectedly succeeded");
        (match bundle.terminal_effect_state () with
         | Masc.Keeper_tools_oas.Terminal_effect_open -> ()
         | Masc.Keeper_tools_oas.Terminal_effect_completed ->
@@ -2726,12 +2729,37 @@ let test_invalid_surface_post_input_stays_correction_capable () =
         | Ok _ -> ()
         | Error error ->
           failf "corrected terminal input failed: %s" error.Agent_sdk.Types.message);
+       (match bundle.terminal_effect_state () with
+        | Masc.Keeper_tools_oas.Terminal_effect_completed -> ()
+        | Masc.Keeper_tools_oas.Terminal_effect_open ->
+          fail "corrected terminal input left the terminal effect open"
+        | Masc.Keeper_tools_oas.Terminal_effect_failed _ ->
+          fail "corrected terminal input failed the terminal effect");
+       let chat_path =
+         Filename.concat
+           (Filename.concat
+              (Common.masc_dir_from_base_path ~base_path:config.base_path)
+              "keeper_chat")
+           (meta.name ^ ".jsonl")
+       in
+       Unix.unlink chat_path;
+       Unix.mkdir chat_path 0o755;
+       (match
+          Agent_sdk.Tool.execute
+            surface_post
+            (`Assoc
+               [ "surface", `String "dashboard"
+               ; "content", `String "later terminal failure"
+               ])
+        with
+        | Error _ -> ()
+        | Ok _ -> fail "forced later terminal failure unexpectedly succeeded");
        match bundle.terminal_effect_state () with
        | Masc.Keeper_tools_oas.Terminal_effect_completed -> ()
        | Masc.Keeper_tools_oas.Terminal_effect_open ->
-         fail "corrected terminal input left the terminal effect open"
+         fail "later failure reopened the completed terminal effect"
        | Masc.Keeper_tools_oas.Terminal_effect_failed _ ->
-         fail "corrected terminal input failed the terminal effect")
+         fail "later failure overwrote the completed terminal effect")
 ;;
 
 let with_openai_tool_call_server ~tool_name ~tool_input f =
@@ -2892,6 +2920,11 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                  true
                  (failure.failure_class = Tool_result.Runtime_failure);
                check bool
+                 "terminal failure retains unknown effect outcome"
+                 true
+                 (failure.effect_disposition
+                  = Tool_result.Effect_outcome_unknown);
+               check bool
                  "terminal failure retains the exact full chat target"
                  true
                  (contains_substring failure.diagnostic chat_path)
@@ -2899,6 +2932,39 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                fail "failed surface delivery left the terminal effect open"
              | Masc.Keeper_tools_oas.Terminal_effect_completed ->
                fail "failed surface delivery set terminal completion");
+            let first_terminal_failure =
+              match terminal_state with
+              | Masc.Keeper_tools_oas.Terminal_effect_failed failure -> failure
+              | Masc.Keeper_tools_oas.Terminal_effect_open
+              | Masc.Keeper_tools_oas.Terminal_effect_completed ->
+                fail "failed surface delivery lost its terminal failure"
+            in
+            Unix.rmdir chat_path;
+            (match
+               Agent_sdk.Tool.execute
+                 surface_post
+                 (`Assoc
+                    [ "surface", `String "dashboard"
+                    ; "content", `String "later successful delivery"
+                    ])
+             with
+             | Ok _ -> ()
+             | Error error ->
+               failf
+                 "later successful terminal call failed: %s"
+                 error.Agent_sdk.Types.message);
+            (match bundle.terminal_effect_state () with
+             | Masc.Keeper_tools_oas.Terminal_effect_failed failure ->
+               check bool
+                 "first terminal failure is not overwritten"
+                 true
+                 (failure = first_terminal_failure)
+             | Masc.Keeper_tools_oas.Terminal_effect_open ->
+               fail "later success reopened the failed terminal effect"
+             | Masc.Keeper_tools_oas.Terminal_effect_completed ->
+               fail "later success overwrote the failed terminal effect");
+            Unix.unlink chat_path;
+            Unix.mkdir chat_path 0o755;
             let runtime_bundle =
               Masc.Keeper_tools_oas_bundle.make_tool_bundle
                 ~config
@@ -2955,7 +3021,10 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
              with
              | Some
                  (Keeper_internal_error.Terminal_effect_failed
-                    { failure_class = Tool_result.Runtime_failure; diagnostic }) ->
+                    { failure_class = Tool_result.Runtime_failure
+                    ; effect_disposition = Tool_result.Effect_outcome_unknown
+                    ; diagnostic
+                    }) ->
                check bool
                  "Runtime_agent error retains the exact full chat target"
                  true
@@ -2971,6 +3040,11 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                  "runtime terminal state retains Runtime_failure"
                  true
                  (failure.failure_class = Tool_result.Runtime_failure);
+               check bool
+                 "runtime terminal state retains unknown effect outcome"
+                 true
+                 (failure.effect_disposition
+                  = Tool_result.Effect_outcome_unknown);
                check bool
                  "runtime terminal state retains the exact full chat target"
                  true
@@ -3002,6 +3076,29 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
                  } ->
                ()
              | _ -> fail "typed terminal failure did not reach its exact route");
+            let transient_terminal_error =
+              Keeper_internal_error.sdk_error_of_masc_internal_error
+                (Keeper_internal_error.Terminal_effect_failed
+                   { failure_class = Tool_result.Transient_error
+                   ; effect_disposition = Tool_result.Effect_outcome_unknown
+                   ; diagnostic = "unknown transient terminal effect"
+                   })
+            in
+            (match
+               Keeper_runtime_failure_route.route_of_error
+                 ~boundary:Keeper_runtime_failure_route.Oas_execution
+                 transient_terminal_error
+             with
+             | Keeper_runtime_failure_route.Escalate_judgment
+                 { judgment =
+                     Keeper_runtime_failure_route.Terminal_effect_transient_failure
+                 ; provenance = Keeper_runtime_failure_route.Masc_internal_error
+                 ; _
+                 } ->
+               ()
+             | Keeper_runtime_failure_route.Retry_after_observed _ ->
+               fail "unknown transient terminal effect was requeued"
+             | _ -> fail "unknown transient terminal effect lost its exact route");
             let failure : Masc.Keeper_unified_turn.turn_failure =
               { error = runtime_error
               ; runtime_id = "surface-post-failure-runtime"

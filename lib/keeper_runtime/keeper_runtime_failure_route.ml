@@ -7,7 +7,6 @@ type retry_class =
   | Server_error
   | Network_transient
   | Provider_timeout
-  | Terminal_effect_transient
 
 type rotate_class =
   | Auth_failed
@@ -25,6 +24,7 @@ type judgment_class =
   | Protocol_error
   | Config_mismatch
   | Provider_integration
+  | Terminal_effect_transient_failure
   | Terminal_effect_policy_rejection
   | Terminal_effect_runtime_failure
   | Terminal_effect_workflow_rejection
@@ -122,12 +122,20 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
     judge Internal_opaque
   | Keeper_internal_error.Incomplete_tool_transcript _ ->
     judge Contract_violation
-  | Keeper_internal_error.Terminal_effect_failed { failure_class; _ } ->
-    (match failure_class with
-     | Tool_result.Transient_error -> observe_retry Terminal_effect_transient
-     | Tool_result.Policy_rejection -> judge Terminal_effect_policy_rejection
-     | Tool_result.Runtime_failure -> judge Terminal_effect_runtime_failure
-     | Tool_result.Workflow_rejection -> judge Terminal_effect_workflow_rejection)
+  | Keeper_internal_error.Terminal_effect_failed
+      { failure_class; effect_disposition; _ } ->
+    (match effect_disposition with
+     | Tool_result.Proven_pre_effect ->
+       (* A proven pre-effect rejection must remain correction-capable inside
+          the provider turn and must never reach this terminal boundary. *)
+       judge Contract_violation
+     | Tool_result.Proven_post_effect | Tool_result.Effect_outcome_unknown ->
+       (match failure_class with
+        | Tool_result.Transient_error -> judge Terminal_effect_transient_failure
+        | Tool_result.Policy_rejection -> judge Terminal_effect_policy_rejection
+        | Tool_result.Runtime_failure -> judge Terminal_effect_runtime_failure
+        | Tool_result.Workflow_rejection ->
+          judge Terminal_effect_workflow_rejection))
   | Keeper_internal_error.Internal_unhandled_exception _
   | Keeper_internal_error.Internal_bridge_exception _ ->
     judge Internal_opaque
@@ -249,7 +257,6 @@ let retry_class_label = function
   | Server_error -> "server_error"
   | Network_transient -> "network_transient"
   | Provider_timeout -> "provider_timeout"
-  | Terminal_effect_transient -> "terminal_effect_transient"
 
 let retry_class_of_label = function
   | "rate_limited" -> Some Rate_limited
@@ -258,7 +265,6 @@ let retry_class_of_label = function
   | "server_error" -> Some Server_error
   | "network_transient" -> Some Network_transient
   | "provider_timeout" -> Some Provider_timeout
-  | "terminal_effect_transient" -> Some Terminal_effect_transient
   | _ -> None
 
 let rotate_class_label = function
@@ -287,6 +293,7 @@ let judgment_class_label = function
   | Protocol_error -> "protocol_error"
   | Config_mismatch -> "config_mismatch"
   | Provider_integration -> "provider_integration"
+  | Terminal_effect_transient_failure -> "terminal_effect_transient_failure"
   | Terminal_effect_policy_rejection -> "terminal_effect_policy_rejection"
   | Terminal_effect_runtime_failure -> "terminal_effect_runtime_failure"
   | Terminal_effect_workflow_rejection -> "terminal_effect_workflow_rejection"
@@ -420,6 +427,8 @@ let judgment_class_of_label = function
   | "protocol_error" -> Some Protocol_error
   | "config_mismatch" -> Some Config_mismatch
   | "provider_integration" -> Some Provider_integration
+  | "terminal_effect_transient_failure" ->
+    Some Terminal_effect_transient_failure
   | "terminal_effect_policy_rejection" ->
     Some Terminal_effect_policy_rejection
   | "terminal_effect_runtime_failure" ->

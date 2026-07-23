@@ -13,7 +13,7 @@ implementation_prs: []
 
 # RFC: OAuth Addon Plugin — Keeper별 / MASC 전체 외부 서비스 Credential
 
-Status: Draft · rev 4 (OAuth addon plugin) · 2026-07-22 · HEAD `70ae17bdda`
+Status: Draft · rev 4 (OAuth addon plugin) · 2026-07-22 · PR #25576
 
 **결정 요청**: D2(`RFC-0000-MASTER-ROADMAP` §11)의 *"plain-text credential 입력을 GitHub App
 device flow로 대체"* — **OAuth addon plugin**으로 일반화. GitHub가 첫 구현체, Figma 등 다른 OAuth

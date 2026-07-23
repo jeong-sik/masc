@@ -23,11 +23,45 @@ module RC = Runtime_candidate
 module SdkE = Agent_sdk.Error
 module Retry = Agent_sdk.Retry
 module Http = Llm_provider.Http_client
+module Tool_contract = Agent_sdk.Tool_contract
 
 let typed_wire t = Code.to_wire t
 let unknown_invalid_request message =
   Retry.InvalidRequest
     { message; reason = Retry.Unknown_invalid_request }
+
+let terminal_invocation tool_use_id =
+  Tool_contract.Invocation.create
+    ~tool_use_id
+    ~turn:7
+    ~schedule:
+      { planned_index = 2
+      ; batch_index = 0
+      ; batch_size = 1
+      ; execution_mode = Tool_contract.Serial
+      }
+    ~completion:
+      (Tool_contract.Terminal_after_success Tool_contract.Effect_outcome_unknown)
+;;
+
+let terminal_effect_agent_error =
+  SdkE.TerminalToolEffectFailed
+    { tool_use_id = "tool-terminal"
+    ; effect_disposition = SdkE.proven_post_terminal_effect
+    ; detail = "terminal effect failed"
+    }
+;;
+
+let terminal_durability_agent_error =
+  SdkE.TerminalToolDurabilityFailed
+    { invocation = terminal_invocation "tool-durable"
+    ; effect_disposition = SdkE.unknown_terminal_effect
+    ; detail = "receipt persistence failed"
+    }
+;;
+
+let terminal_effect_sdk_error = SdkE.Agent terminal_effect_agent_error
+let terminal_durability_sdk_error = SdkE.Agent terminal_durability_agent_error
 
 let api_cases : (string * SdkE.api_error * string) list =
   [ ( "RateLimited"
@@ -77,6 +111,14 @@ let sdk_cases : (string * SdkE.sdk_error * string) list =
            ; detail = "hook failed"
            })
     , "agent_error_hook_execution_failed:hook=post_tool_use,stage=execute" )
+  ; ( "Agent/TerminalToolEffectFailed"
+    , terminal_effect_sdk_error
+    , "agent_error_terminal_tool_effect_failed:tool_use_id=tool-terminal,effect_disposition=proven_post_effect"
+    )
+  ; ( "Agent/TerminalToolDurabilityFailed"
+    , terminal_durability_sdk_error
+    , "agent_error_terminal_tool_durability_failed:tool_use_id=tool-durable,effect_disposition=effect_outcome_unknown"
+    )
   ; ( "Agent/UnrecognizedStopReason"
     , SdkE.Agent (SdkE.UnrecognizedStopReason { reason = "abrupt" })
     , "agent_error_unrecognized_stop_reason:abrupt" )
@@ -118,6 +160,23 @@ let test_sdk_typed_wire () =
        let actual = typed_wire (AE.terminal_reason_code_of_sdk_error_typed err) in
        Alcotest.(check string) ("sdk/" ^ label) expected actual)
     sdk_cases
+;;
+
+let test_terminal_tool_error_semantics () =
+  List.iter
+    (fun (label, error) ->
+       Alcotest.(check string)
+         (label ^ " termination")
+         "sdk_error_failure"
+         (AE.sdk_termination_semantics error
+          |> AE.sdk_termination_semantics_to_string);
+       Alcotest.(check bool)
+         (label ^ " is not input required")
+         false
+         (EC.is_input_required_error error))
+    [ "effect", terminal_effect_sdk_error
+    ; "durability", terminal_durability_sdk_error
+    ]
 ;;
 
 let check_parse_split label err ~provider ~model_ ~server =
@@ -448,6 +507,14 @@ let test_static_error_classification_preserves_retry_semantics () =
     "legacy internal runner tls text is not parsed"
     EC.Unclassified
     (runtime_runner_legacy_tls_text_error ());
+  check_classification
+    "terminal tool effect failure is not retryable"
+    EC.Non_transient
+    terminal_effect_sdk_error;
+  check_classification
+    "terminal tool durability failure is not retryable"
+    EC.Non_transient
+    terminal_durability_sdk_error;
   check_classification
     "api overloaded"
     EC.Transient_capacity
@@ -822,6 +889,10 @@ let () =
             "all sdk_error cases produce expected wire"
             `Quick
             test_sdk_typed_wire
+        ; Alcotest.test_case
+            "terminal tool errors preserve typed conservative semantics"
+            `Quick
+            test_terminal_tool_error_semantics
         ] )
     ; ( "server parse rejection split"
       , [ Alcotest.test_case

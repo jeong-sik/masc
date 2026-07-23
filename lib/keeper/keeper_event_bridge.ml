@@ -168,9 +168,9 @@ let wrap_event
     point of this function's shape — do not remove it without also
     removing the catch-all. *)
 let invocation_payload_fields invocation =
-  let tool_use_id = Agent_sdk.Tool.Invocation.tool_use_id invocation in
-  [ "turn", `Int (Agent_sdk.Tool.Invocation.turn invocation)
-  ; "planned_index", `Int (Agent_sdk.Tool.Invocation.planned_index invocation)
+  let tool_use_id = Agent_sdk.Tool_contract.Invocation.tool_use_id invocation in
+  [ "turn", `Int (Agent_sdk.Tool_contract.Invocation.turn invocation)
+  ; "planned_index", `Int (Agent_sdk.Tool_contract.Invocation.planned_index invocation)
   ]
   @ (if tool_use_id = "" then [] else [ "tool_use_id", `String tool_use_id ])
 ;;
@@ -242,7 +242,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
        tool_use_id ↔ execution_id pair before OAS published this event,
        so the lookup is deterministic. A miss means the execution did not
        go through a keeper hook (worker/eval lanes), not a failure. *)
-    let tool_use_id = Agent_sdk.Tool.Invocation.tool_use_id invocation in
+    let tool_use_id = Agent_sdk.Tool_contract.Invocation.tool_use_id invocation in
     let execution_id_fields =
       match
         if tool_use_id = "" then None

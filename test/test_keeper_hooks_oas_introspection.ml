@@ -126,14 +126,15 @@ let test_pre_tool_use_is_observation_only () =
   let event =
     Agent_sdk.Hooks.PreToolUse
       { invocation =
-          Agent_sdk.Tool.Invocation.create
+          Agent_sdk.Tool_contract.Invocation.create
             ~tool_use_id:"toolu_observation_only"
             ~turn:7
+            ~completion:Agent_sdk.Tool_contract.Continue_after_success
             ~schedule:
               { planned_index = 0
               ; batch_index = 0
               ; batch_size = 1
-              ; execution_mode = Agent_sdk.Tool.Serial
+              ; execution_mode = Agent_sdk.Tool_contract.Serial
               }
       ; tool_name = "opaque_internal_name"
       ; input = `Assoc [ "command", `String "opaque external effect" ]

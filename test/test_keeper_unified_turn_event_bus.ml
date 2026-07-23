@@ -24,14 +24,15 @@ let dummy_event payload =
 ;;
 
 let invocation name =
-  Agent_sdk.Tool.Invocation.create
+  Agent_sdk.Tool_contract.Invocation.create
     ~tool_use_id:name
     ~turn:0
+    ~completion:Agent_sdk.Tool_contract.Continue_after_success
     ~schedule:
       { planned_index = 0
       ; batch_index = 0
       ; batch_size = 1
-      ; execution_mode = Agent_sdk.Tool.Serial
+      ; execution_mode = Agent_sdk.Tool_contract.Serial
       }
 ;;
 

@@ -29,7 +29,7 @@ let make_keeper_tool_handler
       ?(translate_input = fun j -> j)
       ?(validate_translated_input = true)
       ()
-  : ?oas_invocation:Agent_sdk.Tool.Invocation.t -> Yojson.Safe.t -> Tool_result.result
+  : ?oas_invocation:Agent_sdk.Tool_contract.Invocation.t -> Yojson.Safe.t -> Tool_result.result
   =
   let record_result ~input result =
     Option.iter

@@ -98,7 +98,11 @@ let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
   | Agent_sdk.Error.Api (InvalidRequest _ | ServerError _ | AuthError _
     | AuthorizationError _
     | NotFound _ | PaymentRequired _ | ContextOverflow _) -> Non_transient
-  | Agent_sdk.Error.Agent (HookExecutionFailed _) -> Non_transient
+  | Agent_sdk.Error.Agent
+      ( HookExecutionFailed _
+      | TerminalToolEffectFailed _
+      | TerminalToolDurabilityFailed _ ) ->
+    Non_transient
   | Agent_sdk.Error.Agent
       ( UnrecognizedStopReason _
       | GuardrailViolation _
@@ -875,6 +879,8 @@ let is_input_required_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Agent (Agent_sdk.Error.InputRequired _) -> true
   | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
   | Agent_sdk.Error.Agent (HookExecutionFailed _)
+  | Agent_sdk.Error.Agent (TerminalToolEffectFailed _)
+  | Agent_sdk.Error.Agent (TerminalToolDurabilityFailed _)
   | Agent_sdk.Error.Agent (GuardrailViolation _)
   | Agent_sdk.Error.Agent (TripwireViolation _) -> false
   | Agent_sdk.Error.Api _

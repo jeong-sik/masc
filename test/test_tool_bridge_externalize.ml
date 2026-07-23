@@ -218,14 +218,15 @@ let test_execution_env_preserves_exact_invocation () =
          tool_ok ~tool_name:"occurrence_probe" "ok")
   in
   let invocation =
-    Agent_sdk.Tool.Invocation.create
+    Agent_sdk.Tool_contract.Invocation.create
       ~tool_use_id:""
       ~turn:7
+      ~completion:Agent_sdk.Tool_contract.Continue_after_success
       ~schedule:
         { planned_index = 2
         ; batch_index = 0
         ; batch_size = 1
-        ; execution_mode = Agent_sdk.Tool.Serial
+        ; execution_mode = Agent_sdk.Tool_contract.Serial
         }
   in
   (match Agent_sdk.Tool.execute ~invocation tool (`Assoc []) with
@@ -237,12 +238,12 @@ let test_execution_env_preserves_exact_invocation () =
     Alcotest.(check string)
       "blank provider id preserved"
       ""
-      (Agent_sdk.Tool.Invocation.tool_use_id seen);
-    Alcotest.(check int) "turn preserved" 7 (Agent_sdk.Tool.Invocation.turn seen);
+      (Agent_sdk.Tool_contract.Invocation.tool_use_id seen);
+    Alcotest.(check int) "turn preserved" 7 (Agent_sdk.Tool_contract.Invocation.turn seen);
     Alcotest.(check int)
       "planned index preserved"
       2
-      (Agent_sdk.Tool.Invocation.planned_index seen)
+      (Agent_sdk.Tool_contract.Invocation.planned_index seen)
 
 (* --- Marker encoding round-trip via the bridge --- *)
 

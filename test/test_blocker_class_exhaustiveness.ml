@@ -95,6 +95,21 @@ module KSB = Masc.Keeper_status_bridge_blocker
 module KTD = Masc.Keeper_turn_driver
 module Reg = Masc.Keeper_registry
 
+let terminal_invocation tool_use_id =
+  Agent_sdk.Tool_contract.Invocation.create
+    ~tool_use_id
+    ~turn:3
+    ~schedule:
+      { planned_index = 1
+      ; batch_index = 0
+      ; batch_size = 1
+      ; execution_mode = Agent_sdk.Tool_contract.Serial
+      }
+    ~completion:
+      (Agent_sdk.Tool_contract.Terminal_after_success
+         Agent_sdk.Tool_contract.Effect_outcome_unknown)
+;;
+
 (** Every [Agent_sdk.Error.Agent _] sub-variant must have an explicit blocker
     decision through the two-layer pipeline in [blocker_class_of_sdk_error]:
     1. [classify_masc_internal_error] — for runtime-layer structured errors
@@ -116,6 +131,20 @@ let all_sdk_agent_variants : (string * SdkE.sdk_error) list =
            ; tool_use_id = Some "tool-1"
            ; detail = "hook failed"
            }) )
+  ; ( "TerminalToolEffectFailed"
+    , SdkE.Agent
+        (SdkE.TerminalToolEffectFailed
+           { tool_use_id = "tool-terminal"
+           ; effect_disposition = SdkE.proven_post_terminal_effect
+           ; detail = "terminal effect failed"
+           }) )
+  ; ( "TerminalToolDurabilityFailed"
+    , SdkE.Agent
+        (SdkE.TerminalToolDurabilityFailed
+           { invocation = terminal_invocation "tool-durable"
+           ; effect_disposition = SdkE.unknown_terminal_effect
+           ; detail = "receipt persistence failed"
+           }) )
   ; ( "GuardrailViolation"
     , SdkE.Agent (SdkE.GuardrailViolation { validator = "content_filter"; reason = "toxic" }) )
   ; ( "TripwireViolation"
@@ -134,7 +163,10 @@ let all_sdk_agent_variants : (string * SdkE.sdk_error) list =
 ;;
 
 let agent_variants_with_no_runtime_blocker =
-  [ "HookExecutionFailed" ]
+  [ "HookExecutionFailed"
+  ; "TerminalToolEffectFailed"
+  ; "TerminalToolDurabilityFailed"
+  ]
 
 let test_all_agent_variants_classified_intentionally () =
   List.iter
@@ -162,7 +194,7 @@ let test_all_agent_variants_classified_intentionally () =
 (** Pin the Agent sub-variant count so additions are visible in diffs.
     When the SDK adds a new [Agent] sub-variant, bump this number and add it
     to [all_sdk_agent_variants]. *)
-let expected_agent_variant_count = 5
+let expected_agent_variant_count = 7
 
 let test_agent_variant_count_pin () =
   let count = List.length all_sdk_agent_variants in

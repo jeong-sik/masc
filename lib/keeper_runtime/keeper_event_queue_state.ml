@@ -3335,7 +3335,7 @@ let of_yojson json =
       ; "transition_outbox"
       ]
       @ [ "accepted_transfer_projections" ]
-      @ if has_exact_execution_bindings then [ "exact_execution_bindings" ] else []
+      @ (if has_exact_execution_bindings then [ "exact_execution_bindings" ] else [])
     in
     let* () = exact_fields ~context ~expected:expected_fields fields in
     let* revision = int64_field ~context "revision" fields in

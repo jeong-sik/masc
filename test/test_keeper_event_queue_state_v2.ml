@@ -2771,7 +2771,16 @@ let test_unsupported_snapshots_fail_closed () =
     write_queue primary (queue [ stimulus "old-schema" 3.0 ]);
     (match Persistence.load_state_result ~base_path ~keeper_name with
      | Error _ -> ()
-     | Ok _ -> Alcotest.fail "old primary schema was migrated"))
+    | Ok _ -> Alcotest.fail "old primary schema was migrated"))
+;;
+
+let test_current_state_codec_reads_its_own_output () =
+  let encoded = State.to_yojson State.empty in
+  let decoded = State.of_yojson encoded |> require_ok "decode current state writer output" in
+  Alcotest.(check bool)
+    "current state round-trips"
+    true
+    (Yojson.Safe.equal encoded (State.to_yojson decoded))
 ;;
 
 let test_v3_snapshot_upgrades_only_without_active_lease () =
@@ -3105,6 +3114,10 @@ let () =
             "unconsumed approval yields FIFO"
             `Quick
             test_unconsumed_approval_requeues_behind_other_work
+        ; Alcotest.test_case
+            "current state codec reads its own output"
+            `Quick
+            test_current_state_codec_reads_its_own_output
         ] )
     ; ( "persistence"
       , [ Alcotest.test_case

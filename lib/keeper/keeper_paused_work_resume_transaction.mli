@@ -26,6 +26,7 @@ type failure =
   | Durable_owner_identity_changed
   | Durable_owner_not_paused
   | Durable_owner_dead_tombstone
+  | Durable_owner_transcript_reset_required
   | Registry_owner_missing
   | Registry_owner_nonce_changed of
       { expected : int

@@ -64,6 +64,11 @@ type t =
           [String.starts_with ~prefix:"provider_error_"]. Config/auth-like
           provider codes still land in [Config_or_auth] because that bucket
           is ranked earlier. Payload is the original string. *)
+  | Transcript_corruption of string
+  (** Exact canonical wire
+      {!Keeper_internal_error.incomplete_tool_transcript_kind}. Provider
+      dispatch did not occur; automatic retry is forbidden until an operator
+      resets the corrupted checkpoint. *)
   | Internal_error of string
   (** Exact wire ["internal_error"]. Payload is the original
           string, carried only for [to_wire] round-trip fidelity. *)

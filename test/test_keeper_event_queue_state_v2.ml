@@ -1190,7 +1190,6 @@ let test_failed_cycle_route_mapping () =
      Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:2.0
        ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
        retry_failure
    with
    | Masc.Keeper_registry_event_queue.Requeue
@@ -1209,7 +1208,6 @@ let test_failed_cycle_route_mapping () =
      Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:3.0
        ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
        judgment_failure
    with
    | Masc.Keeper_registry_event_queue.Escalate
@@ -1231,7 +1229,6 @@ let test_failed_cycle_route_mapping () =
      Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:6.0
        ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
        handled_failure
    with
    | Masc.Keeper_registry_event_queue.Ack -> ()
@@ -1247,7 +1244,6 @@ let test_failed_cycle_route_mapping () =
      Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:7.0
        ~compaction_consecutive_failures:0
-       ~transcript_quarantine_consecutive_retries:0
        compacted_failure
    with
    | Masc.Keeper_registry_event_queue.Requeue
@@ -1257,20 +1253,27 @@ let test_failed_cycle_route_mapping () =
   let quarantined_failure =
     { judgment_failure with
       source_lease_disposition =
-        Masc.Keeper_unified_turn.Requeue_after_transcript_quarantine
+        Masc.Keeper_unified_turn.Pause_after_transcript_corruption
+          { detail = "fixture transcript corruption" }
     }
   in
   match
     Masc.Keeper_heartbeat_loop.settlement_of_failure
       ~settled_at:8.0
       ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
       quarantined_failure
   with
-  | Masc.Keeper_registry_event_queue.Requeue
-      Masc.Keeper_registry_event_queue.Transcript_quarantine_retry ->
-    ()
-  | _ -> Alcotest.fail "unprocessed source stimulus was acknowledged after quarantine"
+  | Masc.Keeper_registry_event_queue.Escalate
+      { reason =
+          Masc.Keeper_registry_event_queue.Transcript_corruption_requires_reset
+            { detail }
+      ; successor = None
+      } ->
+    Alcotest.(check string)
+      "terminal corruption detail"
+      "fixture transcript corruption"
+      detail
+  | _ -> Alcotest.fail "transcript corruption did not require operator reset"
 ;;
 
 let cycle_meta () =
@@ -1316,7 +1319,6 @@ let test_manual_no_compaction_is_terminal_but_overflow_escalates () =
        ~settled_at:2.0
        ~stop_requested:false
        ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
        ~lease
        (Some
           (Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_not_applied
@@ -1335,7 +1337,6 @@ let test_manual_no_compaction_is_terminal_but_overflow_escalates () =
     Masc.Keeper_heartbeat_loop.settlement_of_failure
       ~settled_at:3.0
       ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
       overflow_failure
   with
   | Masc.Keeper_registry_event_queue.Escalate
@@ -1361,7 +1362,6 @@ let test_applied_compaction_settles_followup_atomically () =
       ~settled_at:8.0
       ~stop_requested:false
       ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
       ~lease
       (Some
          (Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_applied
@@ -1420,7 +1420,6 @@ let test_compaction_retry_escalates_after_threshold () =
       ~settled_at:2.0
       ~stop_requested:false
       ~compaction_consecutive_failures:streak
-      ~transcript_quarantine_consecutive_retries:0
       ~lease
       (Some failed)
   in
@@ -1466,7 +1465,6 @@ let test_in_lane_compaction_streak_bounds_retries () =
     Masc.Keeper_heartbeat_loop.settlement_of_failure
       ~settled_at:4.0
       ~compaction_consecutive_failures:streak
-      ~transcript_quarantine_consecutive_retries:0
       (failure disposition)
   in
   let attempt_failed =
@@ -1552,7 +1550,6 @@ let test_in_lane_compaction_streak_bounds_retries () =
     Masc.Keeper_heartbeat_loop.settlement_of_failure
       ~settled_at:5.0
       ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
       { (turn_failure route) with
         source_lease_disposition =
           Masc.Keeper_unified_turn.source_lease_disposition_after_no_compaction
@@ -1773,13 +1770,7 @@ let test_compaction_outcome_mapping_covers_in_lane_dispositions () =
   check "no outcome leaves the streak untouched" "none" None
 ;;
 
-(* #25296: a transcript-quarantine disposition requeues while the streak is
-   under the ceiling and settles terminally at it. The poisoned checkpoint is
-   preserved unmodified by design, so every re-lease rejects the same
-   transcript again — without the ceiling the same stimulus re-enters the full
-   turn pipeline on every heartbeat cycle, because [Requeue] is not an ack
-   (2026-07-21 lesson: every exempt retry class needs its own accounting). *)
-let test_transcript_quarantine_retry_escalates_after_threshold () =
+let test_transcript_corruption_requires_reset_immediately () =
   let judgment_route =
     Keeper_runtime_failure_route.Escalate_judgment
       { judgment = Keeper_runtime_failure_route.Contract_violation
@@ -1790,86 +1781,29 @@ let test_transcript_quarantine_retry_escalates_after_threshold () =
   let quarantined_failure =
     { (turn_failure judgment_route) with
       source_lease_disposition =
-        Masc.Keeper_unified_turn.Requeue_after_transcript_quarantine
+        Masc.Keeper_unified_turn.Pause_after_transcript_corruption
+          { detail = "overlapping tool cycle" }
     }
   in
-  let settlement ~streak =
+  match
     Masc.Keeper_heartbeat_loop.settlement_of_failure
       ~settled_at:5.0
       ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:streak
       quarantined_failure
-  in
-  let expect_requeue ~streak label =
-    match settlement ~streak with
-    | Masc.Keeper_registry_event_queue.Requeue
-        Masc.Keeper_registry_event_queue.Transcript_quarantine_retry ->
-      ()
-    | _ -> Alcotest.fail label
-  in
-  expect_requeue ~streak:0 "first transcript quarantine did not requeue";
-  expect_requeue ~streak:1 "second transcript quarantine did not requeue";
-  match settlement ~streak:2 with
+  with
   | Masc.Keeper_registry_event_queue.Escalate
       { reason =
-          Masc.Keeper_registry_event_queue.Transcript_quarantine_retry_exhausted
-            { attempts; _ }
+          Masc.Keeper_registry_event_queue.Transcript_corruption_requires_reset
+            { detail }
       ; successor = None
       } ->
-    Alcotest.(check int) "escalation reports the attempt count" 3 attempts
+    Alcotest.(check string)
+      "first rejection preserves typed detail"
+      "overlapping tool cycle"
+      detail
   | _ ->
     Alcotest.fail
-      "third consecutive transcript quarantine requeued instead of escalating"
-;;
-
-(* #25296: the settlement decides from the streak; this mapping is what
-   advances and resets it. A quarantine disposition must count, a completed
-   turn must reset, and outcomes with no quarantine involvement must leave the
-   streak untouched. *)
-let test_transcript_quarantine_outcome_mapping () =
-  let meta = cycle_meta () in
-  let judgment_route =
-    Keeper_runtime_failure_route.Escalate_judgment
-      { judgment = Keeper_runtime_failure_route.Contract_violation
-      ; provenance = Keeper_runtime_failure_route.Oas_agent_error
-      ; detail = "typed transcript quarantine"
-      }
-  in
-  let failed disposition =
-    Some
-      (Masc.Keeper_heartbeat_loop_cycle.Failed
-         { meta
-         ; failure =
-             { (turn_failure judgment_route) with
-               source_lease_disposition = disposition
-             }
-         })
-  in
-  let check label expected outcome =
-    let actual =
-      match
-        Masc.Keeper_heartbeat_loop.transcript_quarantine_outcome_of_cycle_outcome
-          outcome
-      with
-      | Some `Retried -> "retried"
-      | Some `Recovered -> "recovered"
-      | None -> "none"
-    in
-    Alcotest.(check string) label expected actual
-  in
-  check
-    "a quarantine disposition advances the streak"
-    "retried"
-    (failed Masc.Keeper_unified_turn.Requeue_after_transcript_quarantine);
-  check
-    "a generic turn failure leaves the streak untouched"
-    "none"
-    (failed Masc.Keeper_unified_turn.Follow_failure_route);
-  check
-    "a completed turn resets the streak"
-    "recovered"
-    (Some (Masc.Keeper_heartbeat_loop_cycle.Completed meta));
-  check "no outcome leaves the streak untouched" "none" None
+      "first transcript corruption did not settle terminally without successor"
 ;;
 
 let test_cancelled_and_skipped_cycles_requeue () =
@@ -1881,7 +1815,6 @@ let test_cancelled_and_skipped_cycles_requeue () =
       ~settled_at:2.0
       ~stop_requested:false
       ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
       ~lease
       (Some outcome)
   in
@@ -2032,7 +1965,6 @@ let test_approved_wake_settles_on_delivery_not_consumption () =
       ~settled_at:4.0
       ~stop_requested:false
       ~compaction_consecutive_failures:0
-      ~transcript_quarantine_consecutive_retries:0
       ~lease
       outcome
   in
@@ -2882,13 +2814,9 @@ let () =
             `Quick
             test_compaction_outcome_mapping_covers_in_lane_dispositions
         ; Alcotest.test_case
-            "transcript quarantine retry escalates after threshold"
+            "transcript corruption requires immediate reset"
             `Quick
-            test_transcript_quarantine_retry_escalates_after_threshold
-        ; Alcotest.test_case
-            "transcript quarantine outcome mapping"
-            `Quick
-            test_transcript_quarantine_outcome_mapping
+            test_transcript_corruption_requires_reset_immediately
         ; Alcotest.test_case
             "approved wake settles on delivery not consumption"
             `Quick

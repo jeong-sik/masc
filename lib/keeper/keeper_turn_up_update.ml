@@ -42,7 +42,11 @@ let revival_decision ~(latched_reason : Keeper_latched_reason.t option)
   let dead_revival_requested =
     match latched_reason with
     | Some Keeper_latched_reason.Dead_tombstone -> true
-    | Some (Keeper_latched_reason.Operator_paused _) | None -> false
+    | Some
+        ( Keeper_latched_reason.Operator_paused _
+        | Keeper_latched_reason.Transcript_corruption_reset_required )
+    | None ->
+      false
   in
   {
     dead_revival_requested;

@@ -7,6 +7,7 @@ let reasons =
   ; ( "keeper_down operator pause"
     , R.Operator_paused { operator_actor = R.operator_actor_keeper_down } )
   ; "dead tombstone", R.Dead_tombstone
+  ; "transcript corruption reset required", R.Transcript_corruption_reset_required
   ]
 ;;
 

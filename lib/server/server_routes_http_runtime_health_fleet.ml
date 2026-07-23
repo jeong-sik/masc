@@ -169,7 +169,10 @@ let keeper_event_queue_health_json () =
       | Ok (Some meta) ->
         (match pause_kind meta with
          | Active -> Keeper_event_queue_persistence.Runnable
-         | Operator_paused | Unclassified_paused | Dead_tombstone ->
+         | Operator_paused
+         | Unclassified_paused
+         | Dead_tombstone
+         | Transcript_corruption_reset_required ->
            Keeper_event_queue_persistence.Paused_retained)
       | Ok None ->
         Keeper_event_queue_persistence.Lifecycle_unknown "durable keeper metadata missing"

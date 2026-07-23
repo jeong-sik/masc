@@ -1,12 +1,14 @@
 (** Typed SSOT for a durable Keeper lifecycle latch.
 
-    Failure observations never inhabit this type. A persisted retired failure
-    latch is rejected explicitly and is surfaced by the metadata reader as an
-    unclassified paused state until an operator resumes it. *)
+    Ordinary failure observations never inhabit this type. Structural
+    transcript corruption is a reset-required lifecycle latch because replaying
+    the same checkpoint is unsafe. Retired or unknown latches are rejected
+    explicitly. *)
 
 type t =
   | Operator_paused of { operator_actor : operator_actor }
   | Dead_tombstone
+  | Transcript_corruption_reset_required
 
 and operator_actor =
   | Grpc_directive

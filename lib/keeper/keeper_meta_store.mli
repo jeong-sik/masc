@@ -272,17 +272,11 @@ val persist_compaction_outcome :
     failing compaction (RFC-0351 S0, #25461); [count] had no writer before this
     despite being serialized and rendered. *)
 
-val persist_transcript_quarantine_outcome :
+val persist_transcript_corruption_pause :
   Workspace.config ->
   keeper_name:string ->
-  outcome:[ `Retried | `Recovered ] ->
   ([ `Persisted | `No_durable_meta ], string) result
-(** Advance the transcript-quarantine retry streak on
-    [agent_runtime_state.transcript_quarantine_consecutive_retries] using the
-    same read/stamp/merge shape as {!persist_compaction_outcome}.
-
-    [`Retried] increments the streak — including the escalated terminal
-    attempt, so the persisted meta shows the streak at the ceiling.
-    [`Recovered] (a completed turn) resets it; callers skip the write when the
-    streak is already 0.  The streak is what the heartbeat settlement reads to
-    escalate instead of requeuing a poisoned transcript quarantine (#25296). *)
+(** CAS-merge the existing fail-closed pause surface after structural
+    transcript corruption. A dead tombstone remains stronger and every other
+    live/pause state becomes typed reset-required state. No decoder, migration,
+    or automatic retry state is created. *)

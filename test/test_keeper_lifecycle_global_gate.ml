@@ -255,7 +255,8 @@ let test_active_admission () =
     (match Admission.admit_manual_one_shot state with
      | Admission.Manual_admitted_active -> true
      | Admission.Manual_admitted_paused_recovery _
-     | Admission.Manual_denied_dead_tombstone -> false);
+     | Admission.Manual_denied_dead_tombstone
+     | Admission.Manual_denied_transcript_reset_required -> false);
   check bool "autonomous admitted" true
     (match Admission.admit_autonomous state with
      | Admission.Autonomous_admitted -> true
@@ -278,7 +279,8 @@ let test_classified_pause_admission () =
        Keeper_latched_reason.equal reason operator_pause
      | Admission.Manual_admitted_active
      | Admission.Manual_admitted_paused_recovery Admission.Unclassified
-     | Admission.Manual_denied_dead_tombstone -> false);
+     | Admission.Manual_denied_dead_tombstone
+     | Admission.Manual_denied_transcript_reset_required -> false);
   check bool "autonomous execution is denied" true
     (match Admission.admit_autonomous state with
      | Admission.Autonomous_denied
@@ -321,7 +323,8 @@ let test_dead_tombstone_dominates_stale_paused_bit () =
     (match Admission.admit_manual_one_shot state with
      | Admission.Manual_denied_dead_tombstone -> true
      | Admission.Manual_admitted_active
-     | Admission.Manual_admitted_paused_recovery _ -> false);
+     | Admission.Manual_admitted_paused_recovery _
+     | Admission.Manual_denied_transcript_reset_required -> false);
   check bool "autonomous execution denied as terminal" true
     (match Admission.admit_autonomous state with
      | Admission.Autonomous_denied Admission.Autonomous_dead_tombstone -> true
@@ -352,6 +355,43 @@ let test_readiness_projects_dead_tombstone () =
     (Readiness.autonomous_check_value activation)
 ;;
 
+let test_transcript_corruption_requires_reset () =
+  without_overrides @@ fun () ->
+  let reason = Keeper_latched_reason.Transcript_corruption_reset_required in
+  let state =
+    lifecycle_state ~paused:false ~latched_reason:(Some reason)
+  in
+  check bool "reset-required latch dominates stale pause bit" true
+    (match state with
+     | Admission.Paused (Admission.Classified actual) ->
+       Keeper_latched_reason.equal actual reason
+     | Admission.Active
+     | Admission.Paused Admission.Unclassified
+     | Admission.Dead_tombstone ->
+       false);
+  check bool "generic manual resume is denied" true
+    (match Admission.admit_manual_one_shot state with
+     | Admission.Manual_denied_transcript_reset_required -> true
+     | Admission.Manual_admitted_active
+     | Admission.Manual_admitted_paused_recovery _
+     | Admission.Manual_denied_dead_tombstone ->
+       false);
+  let meta =
+    { (ready_meta ()) with paused = false; latched_reason = Some reason }
+  in
+  let readiness = Readiness.of_meta meta in
+  check bool "reset-required Keeper is not ready" false
+    readiness.autonomous_activation.ok;
+  check bool "health projects reset-required identity" true
+    (match Readiness.pause_kind meta with
+     | Readiness.Transcript_corruption_reset_required -> true
+     | Readiness.Active
+     | Readiness.Operator_paused
+     | Readiness.Unclassified_paused
+     | Readiness.Dead_tombstone ->
+       false)
+;;
+
 let test_health_projection_uses_typed_lifecycle () =
   let dead_meta =
     { (ready_meta ()) with
@@ -367,13 +407,15 @@ let test_health_projection_uses_typed_lifecycle () =
      | Readiness.Dead_tombstone -> true
      | Readiness.Active
      | Readiness.Operator_paused
-     | Readiness.Unclassified_paused -> false);
+     | Readiness.Unclassified_paused
+     | Readiness.Transcript_corruption_reset_required -> false);
   check bool "health does not mislabel missing reason as operator pause" true
     (match Readiness.pause_kind unclassified_meta with
      | Readiness.Unclassified_paused -> true
      | Readiness.Active
      | Readiness.Operator_paused
-     | Readiness.Dead_tombstone -> false)
+     | Readiness.Dead_tombstone
+     | Readiness.Transcript_corruption_reset_required -> false)
 ;;
 
 let () = init_runtime_default_for_tests ()
@@ -406,6 +448,8 @@ let () =
             test_dead_tombstone_dominates_stale_paused_bit
         ; test_case "readiness projects dead tombstone" `Quick
             test_readiness_projects_dead_tombstone
+        ; test_case "transcript corruption requires reset" `Quick
+            test_transcript_corruption_requires_reset
         ; test_case "health projects typed lifecycle" `Quick
             test_health_projection_uses_typed_lifecycle
         ] )

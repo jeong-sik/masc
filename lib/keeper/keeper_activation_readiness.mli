@@ -16,6 +16,7 @@ type pause_kind =
   | Operator_paused
   | Unclassified_paused
   | Dead_tombstone
+  | Transcript_corruption_reset_required
 
 val pause_kind : Keeper_meta_contract.keeper_meta -> pause_kind
 val pause_kind_to_wire : pause_kind -> string

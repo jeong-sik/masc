@@ -213,8 +213,8 @@ val handle_masc_schedule_with_outcome
 
 (** RFC-0252 — [handle_masc_fusion_with_outcome] is the in-process handler for the
     [masc_fusion] out-of-band panel+judge deliberation tool.  It loads the
-    [fusion] policy from runtime.toml, mints a fresh run_id, and delegates the
-    gate -> fiber fork -> orchestrator logic to {!Fusion_tool.handle}.
+    [fusion] policy from runtime.toml and delegates durable async submission to
+    {!Fusion_tool.handle}. The common async lifecycle mints the run id.
 
     Resolves the server ROOT switch + net from {!Eio_context} (the
     deliberation must outlive the keeper turn, so the turn-scoped switch is

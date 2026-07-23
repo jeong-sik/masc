@@ -257,7 +257,13 @@ jobs:
           # Over-triggering on dune-excluded dirs (archive/, dashboard_bonsai/
           # per the root dune (dirs ...) stanza) is harmless: the Build job
           # runs but dune build skips those dirs.
-          if has_match '^(bin/|lib/|test/|proto/|config/|tools/tlc_test_gen/|dune-project$|dune-workspace$|.*\.opam$|.*\.ml$|.*\.mli$|.*\.mll$|.*\.mly$|.*\.c$|.*\.h$|(.*/)?dune$|scripts/ci-run-tests\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/install\.sh$|scripts/harness/contract/|scripts/harness/transport/|scripts/harness/lib/server_bootstrap\.sh$)'; then
+          # scripts/harness/ stays a prefix match (not suffix): the Build and
+          # Test job executes scripts/harness/contract/run_all.sh, which boots
+          # the python contract verifier (openai_verifier_provider.py), so any
+          # harness file — including non-.sh/.json ones and future extensions —
+          # must force build=true. ci_core is intentionally NOT OR-ed here:
+          # the ci_core block below already forces build=true.
+          if has_match '^(bin/|lib/|test/|proto/|config/|tools/|scripts/harness/|dune-project$|dune-workspace$|.*\.opam$|.*\.ml$|.*\.mli$|.*\.mll$|.*\.mly$|.*\.c$|.*\.h$|.*\.json$|.*\.sh$|(.*/)?dune$)'; then
             build=true
           fi
 
@@ -313,7 +319,7 @@ jobs:
             shell_ir=true
           fi
 
-          if has_match '^(lib/keeper/|scripts/keeper-cwd-leak-gate\.sh$|\.github/workflows/ci\.yml$)'; then
+          if has_match '^(lib/keeper/|scripts/keeper-cwd-leak-gate\.sh$|scripts/turn-path-provider-agnostic-gate\.sh$|\.github/workflows/ci\.yml$)'; then
             keeper_cwd=true
           fi
 
@@ -1071,6 +1077,15 @@ jobs:
       - name: Run keeper cwd leak gate
         if: needs.changes.outputs.keeper_cwd == 'true'
         run: scripts/keeper-cwd-leak-gate.sh
+
+      # Self-test first: a gate that cannot fail would pass silently forever.
+      - name: Run turn-path provider-agnostic gate self-test
+        if: needs.changes.outputs.keeper_cwd == 'true'
+        run: scripts/turn-path-provider-agnostic-gate.sh --self-test
+
+      - name: Run turn-path provider-agnostic gate
+        if: needs.changes.outputs.keeper_cwd == 'true'
+        run: scripts/turn-path-provider-agnostic-gate.sh
 
   shell-ir-ratchet:
     name: Shell IR Consumption Ratchet

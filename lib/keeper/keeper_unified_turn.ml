@@ -23,12 +23,30 @@ type in_lane_compaction =
   | Compaction_committed
   | Compaction_attempt_failed of { reason : string }
 
+type exact_output_terminal_reason =
+  | Execution_may_have_dispatched
+  | Domain_invalid_output
+
 type source_lease_disposition =
   | Follow_failure_route
   | Follow_failure_route_after_no_compaction of
       { reason : Keeper_event_queue_state.no_compaction_reason }
+  | Escalate_after_exact_output_terminal of exact_output_terminal_reason
   | Requeue_after_context_compaction of in_lane_compaction
+  | Requeue_after_transcript_quarantine
   | Acknowledge_after_in_turn_handling
+
+let source_lease_disposition_after_no_compaction = function
+  | Keeper_event_queue_state.Execution_may_have_dispatched ->
+    Escalate_after_exact_output_terminal Execution_may_have_dispatched
+  | Keeper_event_queue_state.Domain_invalid_output ->
+    Escalate_after_exact_output_terminal Domain_invalid_output
+  | ( Keeper_event_queue_state.No_eligible_history
+    | Keeper_event_queue_state.Invalid_structural_source
+    | Keeper_event_queue_state.Structurally_unchanged
+    | Keeper_event_queue_state.Checkpoint_not_reduced ) as reason ->
+    Follow_failure_route_after_no_compaction { reason }
+;;
 
 type turn_failure =
   { error : Agent_sdk.Error.sdk_error
@@ -36,6 +54,22 @@ type turn_failure =
   ; route : Keeper_runtime_failure_route.route
   ; source_lease_disposition : source_lease_disposition
   }
+
+let is_incomplete_tool_transcript_error error =
+  match Keeper_internal_error.classify_masc_internal_error error with
+  | Some (Keeper_internal_error.Incomplete_tool_transcript _) -> true
+  | Some
+      ( Keeper_internal_error.Runtime_exhausted _
+      | Keeper_internal_error.Capacity_backpressure _
+      | Keeper_internal_error.Resumable_cli_session _
+      | Keeper_internal_error.Accept_rejected _
+      | Keeper_internal_error.Internal_unhandled_exception _
+      | Keeper_internal_error.Internal_bridge_exception _
+      | Keeper_internal_error.Internal_contract_rejected _
+      | Keeper_internal_error.Receipt_persistence_failed _ )
+  | None ->
+    false
+;;
 
 type turn_success =
   | Turn_completed of keeper_meta
@@ -297,7 +331,6 @@ let append_provider_overflow_manifest
         ~turn_state
         ~site:"provider_overflow_compaction"
         ~status
-        ~runtime_id:evidence.selected_runtime_id
         ~compaction_source:"provider_overflow"
         ~checkpoint_path
         ~decision:
@@ -319,20 +352,18 @@ let append_provider_overflow_manifest
   | Not_provider_overflow -> Follow_failure_route, turn_state
   | Provider_overflow_no_compaction no_compaction ->
     Log.Keeper.info
-      "provider overflow compaction made no progress; preserving the source failure route trace_id=%s generation=%d turn_count=%d reason=%s"
+      "provider overflow compaction reached a typed no-compaction terminal trace_id=%s generation=%d turn_count=%d reason=%s"
       (Keeper_id.Trace_id.to_string no_compaction.source.trace_id)
       no_compaction.source.generation
       no_compaction.source.turn_count
       (Keeper_event_queue_state.no_compaction_reason_label no_compaction.reason);
     (* [No_compaction] is terminal evidence for an explicit manual-compaction
        operation, not successful handling of the product event whose provider
-       turn overflowed. Preserve the typed context-overflow route so the
-       owning source lease is escalated instead of silently consumed — but
-       carry the terminal reason so the settlement can advance the
-       compaction-failure streak: a context that cannot shrink re-overflows
-       deterministically, so unbounded route retries burn one summarizer LLM
-       call per cycle (RFC-0351 S0, #25461). *)
-    Follow_failure_route_after_no_compaction { reason = no_compaction.reason },
+       turn overflowed. Deterministic no-progress reasons preserve the bounded
+       failure route. Effect-boundary and domain-invalid reasons instead become
+       an immediate typed escalation: replaying the source could issue a second
+       exact-output request after dispatch. *)
+    source_lease_disposition_after_no_compaction no_compaction.reason,
     turn_state
   | Provider_overflow_applied recovery ->
     let turn_state =
@@ -971,6 +1002,10 @@ let run_keeper_cycle
                       | _ -> ());
                   let is_server_parse_rejection = EC.is_server_rejected_parse_error err in
                   let is_auto_recoverable = EC.is_auto_recoverable_turn_error err in
+                  let counts_toward_crash =
+                    Keeper_unified_turn_failure.account_failure_counting
+                      ~keeper_name:meta.name ~is_auto_recoverable err
+                  in
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string Turns)
                     ~labels:[ "keeper", meta.name; "outcome", "failure" ]
@@ -1024,8 +1059,10 @@ let run_keeper_cycle
                      + String.length world_state
                      + String.length user_message)
                     latency_ms
-                    (if is_server_parse_rejection
-                     then " (server parse rejection, auto-recoverable)"
+                    (if is_server_parse_rejection && counts_toward_crash
+                     then " (server parse rejection, counts toward crash threshold)"
+                     else if is_server_parse_rejection
+                     then " (server parse rejection, auto-recoverable: crash counting skipped)"
                      else if is_transient
                      then " (transient, cooldown preserved)"
                      else if EC.should_warn_keeper_cycle_failed err
@@ -1121,34 +1158,40 @@ dominant source of the observed CAS race exhaustion after
                      same durable event-queue transaction. *)
                   let failure_route =
                     Keeper_runtime_failure_route.route_of_error
-                      ~boundary:Keeper_runtime_failure_route.Oas_execution
-                      err
-                  in
-                  let overflow_recovery =
-                    (* The checkpoint helper reports [Ok] only after the
-                       compacted checkpoint is durably saved. The heartbeat
-                       settles the owning lease after this cycle returns, so
-                       no source stimulus is acknowledged ahead of it. *)
-                    recover_provider_context_overflow_in_lane
-                      ~config
-                      ~base_dir
-                      ~meta
-                      ~projection_request:
-                        (Keeper_compaction_projection_target.request
-                           ~assignment_id:final_execution.runtime_id
-                           ~resolve_context_window:(fun _ ->
-                             Keeper_compaction_projection_target.Resolved_context_window
-                               final_execution.max_context_resolution.effective_budget))
+                      ~boundary:
+                        (if is_incomplete_tool_transcript_error err
+                         then Keeper_runtime_failure_route.Masc_execution
+                         else Keeper_runtime_failure_route.Oas_execution)
                       err
                   in
                   let source_lease_disposition, turn_state =
-                    append_provider_overflow_manifest
-                      ~config
-                      ~runtime_manifest_context
-                      ~turn_start
-                      ~turn_state
-                      ~base_dir
-                      overflow_recovery
+                    if is_incomplete_tool_transcript_error err
+                    then Requeue_after_transcript_quarantine, turn_state
+                    else (
+                      (* The checkpoint helper reports [Ok] only after the
+                         compacted checkpoint is durably saved. The heartbeat
+                         settles the owning lease after this cycle returns, so
+                         no source stimulus is acknowledged ahead of it. *)
+                      let overflow_recovery =
+                        recover_provider_context_overflow_in_lane
+                          ~config
+                          ~base_dir
+                          ~meta
+                          ~projection_request:
+                            (Keeper_compaction_projection_target.request
+                               ~assignment_id:final_execution.runtime_id
+                               ~resolve_context_window:(fun _ ->
+                                 Keeper_compaction_projection_target.Resolved_context_window
+                                   final_execution.max_context_resolution.effective_budget))
+                          err
+                      in
+                      append_provider_overflow_manifest
+                        ~config
+                        ~runtime_manifest_context
+                        ~turn_start
+                        ~turn_state
+                        ~base_dir
+                        overflow_recovery)
                   in
                   exact_failure_execution :=
                     Some
@@ -1168,7 +1211,7 @@ dominant source of the observed CAS race exhaustion after
                   Keeper_unified_turn_failure.record_failure_observation
                     ~config
                     ~meta
-                    ~is_auto_recoverable
+                    ~counts_toward_crash
                     ~err
                     ~error_text:e_str;
                   (* RFC-0221 §3.4: emit turn_completed telemetry on all exit paths

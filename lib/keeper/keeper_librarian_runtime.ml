@@ -531,13 +531,7 @@ let run_best_effort ?complete ~runtime_id ~keeper_id (inp : Keeper_librarian.inp
              "memory os librarian skipped runtime=%s: %s"
              runtime_id
              err
-         | Ok provider_cfg ->
-           if not (Keeper_memory_llm_summary.is_direct_completion_provider provider_cfg)
-           then
-             Log.Keeper.warn ~keeper_name:keeper_id
-               "memory os librarian skipped runtime=%s: provider does not support direct completion"
-               runtime_id
-           else (
+         | Ok provider_cfg -> (
              let clock = Eio_context.get_clock_opt () in
              match clock with
              | None ->

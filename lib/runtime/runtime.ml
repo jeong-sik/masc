@@ -958,15 +958,16 @@ let materialize_config
     ?(validate_max_context = true)
     ~(config_path : string)
     (cfg : config)
-  : ( t list
-      * t
-      * (string * string) list
-      * string option
-      * string option
-      * string option
-      * string option
-      * string list
-      * Runtime_lane.t list
+  : ( (t list
+       * t
+       * (string * string) list
+       * string option
+       * string option
+       * string option
+       * string option
+       * string list
+       * Runtime_lane.t list)
+      * Runtime_schema.exact_output_lane_decl list
     , string )
     result
   =
@@ -1033,19 +1034,20 @@ let materialize_config
      Startup callers choose fail-closed [init_default_strict] or server-visible
      degraded boot [init_default_degraded_report]. *)
   Ok
-    ( runtimes
-    , rt
-    , assignments
-    , cfg.librarian_runtime_id
-    , cfg.structured_judge_runtime_id
-    , cfg.hitl_summary_runtime_id
-    , cfg.cross_verifier_runtime_id
-    , cfg.media_failover
-    , lanes )
+    ( ( runtimes
+      , rt
+      , assignments
+      , cfg.librarian_runtime_id
+      , cfg.structured_judge_runtime_id
+      , cfg.hitl_summary_runtime_id
+      , cfg.cross_verifier_runtime_id
+      , cfg.media_failover
+      , lanes )
+    , cfg.exact_output_lane_decls )
 ;;
 
 let load_list_internal ~(config_path : string) ~validate_max_context
-  : ( t list
+  : ( (t list
        * t
        * (string * string) list
        * string option
@@ -1053,7 +1055,8 @@ let load_list_internal ~(config_path : string) ~validate_max_context
        * string option
        * string option
        * string list
-       * Runtime_lane.t list
+       * Runtime_lane.t list)
+      * Runtime_schema.exact_output_lane_decl list
     , string )
     result
   =
@@ -1070,6 +1073,7 @@ let load_list_internal ~(config_path : string) ~validate_max_context
 
 let load_list ~config_path =
   load_list_internal ~config_path ~validate_max_context:true
+  |> Result.map fst
 ;;
 
 (* ---- Lazy default runtime singleton ---- *)
@@ -1137,7 +1141,9 @@ let set_loaded
     }
 
 let init_default ~config_path =
-  let* loaded = load_list ~config_path in
+  let* loaded, _exact_output_lane_decls =
+    load_list_internal ~config_path ~validate_max_context:true
+  in
   set_loaded ~config_path loaded;
   Ok ()
 
@@ -1147,9 +1153,9 @@ let init_default ~config_path =
    the gate that load_list intentionally no longer applies, kept out of load_list
    so unit tests stay catalog-independent. *)
 let init_default_strict_report ~config_path =
-  match load_list ~config_path with
+  match load_list_internal ~config_path ~validate_max_context:true with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok ((runtimes, _, _, _, _, _, _, _, _) as loaded) ->
+  | Ok (((runtimes, _, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
@@ -1163,7 +1169,7 @@ let init_default_strict ~config_path =
 let init_default_degraded_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:false with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok ((runtimes, _, _, _, _, _, _, _, _) as loaded) ->
+  | Ok (((runtimes, _, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | None ->
        (match validate_runtime_max_context ~config_path runtimes with
@@ -1178,7 +1184,10 @@ let init_default_degraded_report ~config_path =
           (match validate_runtime_max_context ~config_path active_runtimes with
            | Error msg -> Error (Runtime_config_error msg)
            | Ok () ->
-             set_loaded ~startup_degradation:degradation ~config_path degraded_loaded;
+             set_loaded
+               ~startup_degradation:degradation
+               ~config_path
+               degraded_loaded;
              Ok (Initialized_degraded degradation))))
 
 let runtime_state () = Atomic.get loaded_state_ref
@@ -1683,24 +1692,38 @@ let validate_runtime_config_text ~config_path content =
         config_path
         (runtime_parse_errors_to_string errs))
   in
-  let* (_
-         : t list
-           * t
-           * (string * string) list
-           * string option
-           * string option
-           * string option
-           * string option
-           * string list
-           * Runtime_lane.t list) =
+  let* _legacy_config, exact_output_lane_decls =
     materialize_config ~config_path cfg
   in
-  Ok ()
+  Ok exact_output_lane_decls
 ;;
 
 let save_config_text ?runtime_config_path content =
   let* path = runtime_config_path_result ?runtime_config_path () in
-  let* () = validate_runtime_config_text ~config_path:path content in
+  let* exact_output_lane_decls = validate_runtime_config_text ~config_path:path content in
+  (* Raw config edits may rewrite [runtime.exact_output_lanes]. Validate the
+     new declarations against the live resolver snapshot and republish so the
+     active exact-output registry tracks the save instead of going stale
+     until the next restart. Republishing precedes the atomic write so an
+     invalid lane set is rejected before it reaches disk; if the write itself
+     fails, the registry still holds a valid lane set and the next successful
+     save or restart reconverges. Without a published registry (pre-bootstrap
+     or non-server contexts) there is no snapshot to validate against —
+     bootstrap publishes from the saved file. *)
+  let* () =
+    match Runtime_exact_output_registry.current () with
+    | Error _ -> Ok ()
+    | Ok _registry ->
+      (match
+         Runtime_exact_output_registry.republish ~lanes:exact_output_lane_decls
+       with
+       | Ok _registry -> Ok ()
+       | Error error ->
+         Error
+           (Printf.sprintf
+              "exact-output lane validation failed: %s"
+              (Runtime_exact_output_registry.error_to_string error)))
+  in
   let* () = Fs_compat.save_file_atomic path content in
   let* () = init_default ~config_path:path in
   Ok ()
@@ -1721,7 +1744,7 @@ let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =
     let* path = runtime_config_path_result ?runtime_config_path () in
     let* content = load_file_result path in
     let next = update_runtime_assignment_text content ~keeper_name ~runtime_id in
-    let* () = validate_runtime_config_text ~config_path:path next in
+    let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
     let* () = Fs_compat.save_file_atomic path next in
     let* () = init_default ~config_path:path in
     Ok ()
@@ -1737,7 +1760,7 @@ let clear_runtime_id_for_keeper ?runtime_config_path ~keeper_name () =
     let* path = runtime_config_path_result ?runtime_config_path () in
     let* content = load_file_result path in
     let next = remove_runtime_assignment_text content ~keeper_name in
-    let* () = validate_runtime_config_text ~config_path:path next in
+    let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
     let* () = Fs_compat.save_file_atomic path next in
     let* () = init_default ~config_path:path in
     Ok ()
@@ -1760,7 +1783,7 @@ let set_runtime_scalar ?runtime_config_path ~key ~runtime_id () =
       let* path = runtime_config_path_result ?runtime_config_path () in
       let* content = load_file_result path in
       let next = update_runtime_scalar_text content ~key ~runtime_id in
-      let* () = validate_runtime_config_text ~config_path:path next in
+      let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
       let* () = Fs_compat.save_file_atomic path next in
       let* () = init_default ~config_path:path in
       Ok ()
@@ -1781,7 +1804,7 @@ let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
     let* path = runtime_config_path_result ?runtime_config_path () in
     let* content = load_file_result path in
     let next = update_runtime_string_array_text content ~key ~values:runtime_ids in
-    let* () = validate_runtime_config_text ~config_path:path next in
+    let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
     let* () = Fs_compat.save_file_atomic path next in
     let* () = init_default ~config_path:path in
     Ok ())

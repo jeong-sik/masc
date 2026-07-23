@@ -32,10 +32,6 @@ val wakeup_keeper :
   ?stimulus:Keeper_event_queue.stimulus ->
   string -> unit
 
-(** Wake up all running keepers. Used for @@all broadcast mentions
-    or system-wide events. *)
-val wakeup_all_keepers : ?base_path:string -> unit -> unit
-
 val not_in_registry_warn_cooldown_s : float
 val not_in_registry_warn_max_entries : int
 

@@ -12,6 +12,7 @@ type requeue_reason =
   | Registration_recovery
   | Retry_after_observed
   | Context_compaction_retry
+  | Transcript_quarantine_retry
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
     (* The two approval arms are no longer produced: the approval-wake
@@ -27,6 +28,8 @@ type escalation_reason =
       { judge_runtime_id : string
       ; rationale : string
       }
+  | Compaction_execution_may_have_dispatched
+  | Compaction_domain_invalid_output
   | Compaction_retry_exhausted of
       { attempts : int
       ; detail : string
@@ -49,12 +52,26 @@ type escalation_reason =
        the checkpoint, reset the streak forever). Distinct from
        [Compaction_retry_exhausted] so the operator can tell "compaction keeps
        failing" from "compaction succeeds but cannot help". *)
+  | Transcript_quarantine_retry_exhausted of
+      { attempts : int
+      ; detail : string
+      }
+    (* #25296: a quarantined poisoned checkpoint is preserved unmodified by
+       design, so every re-lease reloads the same incomplete transcript and
+       the admission rejects it again — an unbounded
+       [Requeue Transcript_quarantine_retry] loop. After
+       [transcript_quarantine_retry_escalation_threshold] consecutive
+       quarantine settlements the settlement escalates instead, surfacing the
+       suspended lane to the operator rather than re-firing the full turn
+       pipeline on every heartbeat. *)
 
 type no_compaction_reason =
   | No_eligible_history
   | Invalid_structural_source
   | Structurally_unchanged
   | Checkpoint_not_reduced
+  | Execution_may_have_dispatched
+  | Domain_invalid_output
 
 type no_compaction =
   { source : Keeper_checkpoint_ref.t
@@ -95,8 +112,11 @@ let escalation_reason_requests_external_input = function
   | Failure_judgment_external_input_requested _ -> true
   | Failure_judgment_requested
   | Failure_judgment_boundary_failed _
+  | Compaction_execution_may_have_dispatched
+  | Compaction_domain_invalid_output
   | Compaction_retry_exhausted _
-  | Compaction_floor_exceeded _ -> false
+  | Compaction_floor_exceeded _
+  | Transcript_quarantine_retry_exhausted _ -> false
 ;;
 
 type settlement =
@@ -375,6 +395,7 @@ let requeue_reason_label = function
   | Registration_recovery -> "registration_recovery"
   | Retry_after_observed -> "retry_after_observed"
   | Context_compaction_retry -> "context_compaction_retry"
+  | Transcript_quarantine_retry -> "transcript_quarantine_retry"
   | Approval_grant_unconsumed -> "approval_grant_unconsumed"
   | Approval_grant_state_unavailable -> "approval_grant_state_unavailable"
 ;;
@@ -388,6 +409,7 @@ let requeue_reason_of_label = function
   | "registration_recovery" -> Ok Registration_recovery
   | "retry_after_observed" -> Ok Retry_after_observed
   | "context_compaction_retry" -> Ok Context_compaction_retry
+  | "transcript_quarantine_retry" -> Ok Transcript_quarantine_retry
   | "approval_grant_unconsumed" -> Ok Approval_grant_unconsumed
   | "approval_grant_state_unavailable" -> Ok Approval_grant_state_unavailable
   | label -> Error (Printf.sprintf "unknown event queue requeue reason: %s" label)
@@ -400,8 +422,13 @@ let escalation_reason_label = function
   | Failure_judgment_boundary_failed _ -> "failure_judgment_boundary_failed"
   | Failure_judgment_external_input_requested _ ->
     "failure_judgment_external_input_requested"
+  | Compaction_execution_may_have_dispatched ->
+    "compaction_execution_may_have_dispatched"
+  | Compaction_domain_invalid_output -> "compaction_domain_invalid_output"
   | Compaction_retry_exhausted _ -> "compaction_retry_exhausted"
   | Compaction_floor_exceeded _ -> "compaction_floor_exceeded"
+  | Transcript_quarantine_retry_exhausted _ ->
+    "transcript_quarantine_retry_exhausted"
 ;;
 
 let escalation_reason_detail_to_yojson = function
@@ -413,9 +440,13 @@ let escalation_reason_detail_to_yojson = function
       [ "judge_runtime_id", `String judge_runtime_id
       ; "rationale", `String rationale
       ]
+  | Compaction_execution_may_have_dispatched
+  | Compaction_domain_invalid_output -> `Null
   | Compaction_retry_exhausted { attempts; detail } ->
     `Assoc [ "attempts", `Int attempts; "detail", `String detail ]
   | Compaction_floor_exceeded { attempts; detail } ->
+    `Assoc [ "attempts", `Int attempts; "detail", `String detail ]
+  | Transcript_quarantine_retry_exhausted { attempts; detail } ->
     `Assoc [ "attempts", `Int attempts; "detail", `String detail ]
 ;;
 
@@ -447,6 +478,10 @@ let exact_reason_fields ~context expected fields =
 let escalation_reason_of_wire ~label ~detail_json =
   match label, detail_json with
   | "failure_judgment_requested", `Null -> Ok Failure_judgment_requested
+  | "compaction_execution_may_have_dispatched", `Null ->
+    Ok Compaction_execution_may_have_dispatched
+  | "compaction_domain_invalid_output", `Null ->
+    Ok Compaction_domain_invalid_output
   | "failure_judgment_boundary_failed", `Assoc fields ->
     let* () =
       exact_reason_fields
@@ -505,6 +540,30 @@ let escalation_reason_of_wire ~label ~detail_json =
         fields
     in
     Ok (Compaction_floor_exceeded { attempts; detail })
+  | "transcript_quarantine_retry_exhausted", `Assoc fields ->
+    let* () =
+      exact_reason_fields
+        ~context:"transcript_quarantine_retry_exhausted"
+        [ "attempts"; "detail" ]
+        fields
+    in
+    let* attempts =
+      match List.assoc_opt "attempts" fields with
+      | Some (`Int value) when value > 0 -> Ok value
+      | Some (`Int _) ->
+        Error "transcript_quarantine_retry_exhausted.attempts must be positive"
+      | Some _ ->
+        Error "transcript_quarantine_retry_exhausted.attempts must be an int"
+      | None ->
+        Error "transcript_quarantine_retry_exhausted.attempts is required"
+    in
+    let* detail =
+      required_nonempty_reason_string
+        ~context:"transcript_quarantine_retry_exhausted"
+        "detail"
+        fields
+    in
+    Ok (Transcript_quarantine_retry_exhausted { attempts; detail })
   | "failure_judgment_external_input_requested", `Assoc fields ->
     let* () =
       exact_reason_fields
@@ -526,6 +585,9 @@ let escalation_reason_of_wire ~label ~detail_json =
     in
     Ok (Failure_judgment_external_input_requested { judge_runtime_id; rationale })
   | "failure_judgment_requested", _ ->
+    Error (Printf.sprintf "%s reason_detail must be null" label)
+  | ( "compaction_execution_may_have_dispatched"
+    | "compaction_domain_invalid_output" ), _ ->
     Error (Printf.sprintf "%s reason_detail must be null" label)
   | ( "failure_judgment_boundary_failed"
     | "failure_judgment_external_input_requested" ), _ ->
@@ -715,6 +777,26 @@ let validate_settlement = function
   | Escalate { reason = Compaction_floor_exceeded _; successor = None } -> Ok ()
   | Escalate { reason = Compaction_floor_exceeded _; successor = Some _ } ->
     Error "compaction floor exhaustion must not enqueue a successor"
+  | Escalate
+      { reason =
+          ( Compaction_execution_may_have_dispatched
+          | Compaction_domain_invalid_output )
+      ; successor = None
+      } ->
+    Ok ()
+  | Escalate
+      { reason =
+          ( Compaction_execution_may_have_dispatched
+          | Compaction_domain_invalid_output )
+      ; successor = Some _
+      } ->
+    Error "terminal exact-output compaction must not enqueue a successor"
+  | Escalate { reason = Transcript_quarantine_retry_exhausted _; successor = None }
+    ->
+    Ok ()
+  | Escalate
+      { reason = Transcript_quarantine_retry_exhausted _; successor = Some _ } ->
+    Error "transcript quarantine retry exhaustion must not enqueue a successor"
 ;;
 
 (* Pure receipt-vs-stimuli invariant. Kept in ONE place so the live settle
@@ -828,11 +910,12 @@ let settle_committed ~settled_at ~lease ~settlement state =
       | Requeue
           ( Retry_after_observed
           | Context_compaction_retry
+          | Transcript_quarantine_retry
           | Approval_grant_unconsumed
           | Approval_grant_state_unavailable ) ->
-        (* Retryable provider work, a completed context-compaction handoff,
-           and a durable one-shot grant retain the exact leased stimuli
-           without monopolizing the FIFO front. *)
+        (* Retryable provider work, context repair handoffs, and a durable
+           one-shot grant retain the exact leased stimuli without monopolizing
+           the FIFO front. *)
         append_missing committed.stimuli state.pending
       | Requeue _ -> prepend_missing committed.stimuli state.pending
       | Escalate { successor = None; _ } -> state.pending
@@ -1543,6 +1626,8 @@ let no_compaction_reason_label = function
   | Invalid_structural_source -> "invalid_structural_source"
   | Structurally_unchanged -> "structurally_unchanged"
   | Checkpoint_not_reduced -> "checkpoint_not_reduced"
+  | Execution_may_have_dispatched -> "execution_may_have_dispatched"
+  | Domain_invalid_output -> "domain_invalid_output"
 ;;
 
 let no_compaction_reason_of_label = function
@@ -1550,6 +1635,8 @@ let no_compaction_reason_of_label = function
   | "invalid_structural_source" -> Ok Invalid_structural_source
   | "structurally_unchanged" -> Ok Structurally_unchanged
   | "checkpoint_not_reduced" -> Ok Checkpoint_not_reduced
+  | "execution_may_have_dispatched" -> Ok Execution_may_have_dispatched
+  | "domain_invalid_output" -> Ok Domain_invalid_output
   | reason -> Error (Printf.sprintf "unknown no-compaction reason: %s" reason)
 ;;
 

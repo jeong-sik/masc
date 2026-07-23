@@ -83,6 +83,12 @@ val compaction_retry_suspended : compaction_runtime -> bool
     retrying compaction for this keeper and each further stimulus escalates
     after a single bounded attempt, pending operator inspection. *)
 
+val transcript_quarantine_retry_escalation_threshold : int
+(** #25296: consecutive transcript-quarantine requeues tolerated before the
+    settlement escalates ([Transcript_quarantine_retry_exhausted]) instead of
+    retrying.  Single definition shared by the heartbeat settlement and
+    tests. *)
+
 type proactive_runtime = {
   count_total : int;
   last_ts : float;
@@ -259,6 +265,11 @@ type agent_runtime_state = {
   message_scope_ack_id : string option;
   (** Stable chat-row id of the newest message-scope row injected into a
       completed Keeper turn. *)
+  transcript_quarantine_consecutive_retries : int;
+  (** #25296: consecutive transcript-quarantine requeue settlements for this
+      keeper.  Reset to 0 on a completed turn; the heartbeat settlement
+      escalates instead of requeuing once it reaches
+      {!transcript_quarantine_retry_escalation_threshold}. *)
 }
 
 (** {1 Keeper meta record} *)

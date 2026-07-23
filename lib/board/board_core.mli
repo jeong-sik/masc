@@ -245,6 +245,25 @@ val create_post
   -> unit
   -> (post, board_error) Result.t
 
+type create_post_once_result =
+  | Post_created of post
+  | Post_already_present of post
+
+val create_post_once_by_fusion_run_id
+  :  store
+  -> fusion_run_id:string
+  -> author:string
+  -> content:string
+  -> post_kind:post_kind
+  -> ?meta_json:Yojson.Safe.t
+  -> visibility:visibility
+  -> ttl_hours:int
+  -> origin:post_origin
+  -> unit
+  -> (create_post_once_result, board_error) Result.t
+(** Exact typed-origin create. Replays return the existing normalized post;
+    conflicting payloads return [Already_exists]. *)
+
 val get_post : store -> post_id:string -> (post, board_error) Result.t
 
 (** RFC-0233 §7: look up a post by the originating turn's join key

@@ -213,6 +213,7 @@ let classify_masc_internal_error = function
       | Keeper_internal_error.Internal_unhandled_exception _
       | Keeper_internal_error.Internal_bridge_exception _
       | Keeper_internal_error.Internal_contract_rejected _
+      | Keeper_internal_error.Incomplete_tool_transcript _
       | Keeper_internal_error.Receipt_persistence_failed _ )
   | None ->
     Not_provider_runtime_failure

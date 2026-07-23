@@ -107,6 +107,7 @@ export type {
   BulkKeeperDirectiveAction,
   BulkKeeperDirectiveResult,
   BulkKeeperDirectiveResponse,
+  BulkKeeperResumeTarget,
 } from './keeper-lifecycle'
 export {
   bootKeeper,

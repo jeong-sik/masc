@@ -14,8 +14,6 @@
           mirrors [Keeper_tool_memory_runtime.valid_memory_search_source_strings] (#8484)
       - [memory_kind_enum_strings]
           mirrors [Keeper_memory_policy.valid_memory_kind_strings] (#8527)
-      - [writable_memory_kind_enum_strings]
-          mirrors [Keeper_memory_policy.writable_memory_kind_strings]
       - [fs_write_mode_enum_strings]
           mirrors [Keeper_tool_filesystem_runtime.valid_fs_write_mode_strings] (#8490)
       - [vote_direction_enum_strings]
@@ -38,10 +36,6 @@ let memory_kind_enum_strings =
   ; "open_question"
   ; "long_term"
   ]
-;;
-
-let writable_memory_kind_enum_strings =
-  [ "decision"; "goal"; "progress"; "open_question" ]
 ;;
 
 let fs_write_mode_enum_strings = [ "overwrite"; "append"; "patch" ]

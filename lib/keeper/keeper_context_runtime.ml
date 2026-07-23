@@ -100,6 +100,13 @@ type max_context_resolution = {
   requested_override : int option;
   primary_budget : int;
   runtime_budget : int;
+  (* Where [runtime_budget] came from: the OAS capability catalog, a
+     runtime.toml override, or that override clamped by the capability.
+     [None] only on the legacy ordered-label path when no label resolved and
+     the precomputed default budget filled in. Dropping this rendered a
+     runtime.toml override as "runtime_provider_cap" in keeper status JSON,
+     disguising the #25463 config drift as a provider fact. *)
+  runtime_budget_source : Runtime.max_context_source option;
   requested_context_window : int;
   effective_budget : int;
 }
@@ -144,10 +151,22 @@ let context_budget_json_of_resolution
     |> context_budget_source_of_resolution
     |> context_budget_source_to_string
   in
+  (* [budget_source] states which side won (runtime budget vs keeper-meta
+     requested override); [runtime_budget_source] states where the runtime
+     budget itself came from. Without the second field a runtime.toml
+     override rendered as budget_source=runtime_provider_cap under the JSON
+     key provider_context_window, which disguised the #25463 262144 config
+     drift as a provider fact for weeks. *)
+  let runtime_budget_source =
+    match resolution.runtime_budget_source with
+    | Some source -> Runtime.max_context_source_to_string source
+    | None -> "default_fallback"
+  in
   `Assoc
     [ ("runtime_id", `String runtime_id)
     ; ("provider_context_window", `Int resolution.primary_budget)
     ; ("budget_source", `String context_budget_source)
+    ; ("runtime_budget_source", `String runtime_budget_source)
     ; ("requested_override", Json_util.int_opt_to_json resolution.requested_override)
     ; ("primary_budget", `Int resolution.primary_budget)
     ; ("runtime_budget", `Int resolution.runtime_budget)
@@ -316,16 +335,19 @@ let effective_model_labels_for_turn (m : keeper_meta) : string list =
 let resolve_max_context_resolution ~requested_override (labels : string list)
     : max_context_resolution =
   let default_budget = Runtime.default_max_context () in
-  let runtime_budget =
-    labels
-    |> List.find_map (fun label ->
-           String.trim label
-           |> Runtime.max_context_of_runtime_id)
+  let runtime_budget, runtime_budget_source =
+    match
+      labels
+      |> List.find_map (fun label ->
+             String.trim label
+             |> Runtime.resolve_max_context_of_runtime_id)
+    with
+    | Some (budget, source) -> budget, Some source
     (* Labels are an ordered runtime-budget preference list. If none resolve,
        the precomputed default runtime budget preserves config-less tests.
        DET-OK: dispatch still fail-fast validates the selected runtime id before
        provider execution. *)
-    |> Option.value ~default:default_budget
+    | None -> default_budget, None
   in
   (* RFC-0207: budget against the same per-keeper runtime id that dispatch uses. *)
   let primary_budget = runtime_budget in
@@ -338,6 +360,7 @@ let resolve_max_context_resolution ~requested_override (labels : string list)
   { requested_override
   ; primary_budget
   ; runtime_budget
+  ; runtime_budget_source
   ; requested_context_window
   ; effective_budget
   }
@@ -353,7 +376,7 @@ let resolve_max_context_resolution_for_runtime
     (match Runtime.resolve_max_context_of_runtime runtime with
      | None ->
        Error (Runtime_context_window_unavailable { runtime_id = runtime.id })
-     | Some (runtime_budget, _) ->
+     | Some (runtime_budget, runtime_budget_source) ->
        let requested_context_window =
          match requested_override with
          | None -> runtime_budget
@@ -364,6 +387,7 @@ let resolve_max_context_resolution_for_runtime
          { requested_override
          ; primary_budget = runtime_budget
          ; runtime_budget
+         ; runtime_budget_source = Some runtime_budget_source
          ; requested_context_window
          ; effective_budget
          })

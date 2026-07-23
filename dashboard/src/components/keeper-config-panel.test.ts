@@ -1053,7 +1053,7 @@ describe('KeeperConfigPanel', () => {
     await flush()
     await flush()
 
-    expect(mocks.resumeKeeper).toHaveBeenCalledWith('keeper-sangsu')
+    expect(mocks.resumeKeeper).toHaveBeenCalledWith('keeper-sangsu', 3)
     expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(2)
     expect(container.textContent).toContain('running')
     expect(container.textContent).toContain('alive')

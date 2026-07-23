@@ -244,7 +244,33 @@ let test_user_message_of_network_errors () =
   Alcotest.(check string)
     "non-network errors preserve SDK message"
     (Agent_sdk.Error.to_string guardrail)
-    (AE.user_message_of_sdk_error guardrail)
+    (AE.user_message_of_sdk_error guardrail);
+  (* The raw overflow diagnostic must not reach chat verbatim (2026-07-21:
+     "Context overflow: empty completion (stop_reason=…)" was stored in
+     dashboard chat four times). Only the typed Api arm exists — the
+     Provider path collapses overflow into InvalidRequest (RFC-0353). *)
+  let overflow =
+    SdkE.Api
+      (Agent_sdk.Retry.ContextOverflow
+         { message =
+             "Context overflow: empty completion \
+              (stop_reason=model_context_window_exceeded): provider returned \
+              an empty assistant turn (no thinking, text, or tool calls)"
+         ; limit = Some 262144
+         })
+  in
+  Alcotest.(check string)
+    "context overflow renders the user condition, not the raw diagnostic"
+    "This conversation no longer fits the model's context window (model \
+     window ~262144 tokens). The message was not processed; a shorter \
+     message may fit."
+    (AE.user_message_of_sdk_error overflow);
+  Alcotest.(check bool)
+    "context overflow hides the raw stop_reason payload"
+    false
+    (String_util.contains_substring_ci
+       (AE.user_message_of_sdk_error overflow)
+       "stop_reason")
 ;;
 
 let test_user_message_of_masc_accept_rejected () =

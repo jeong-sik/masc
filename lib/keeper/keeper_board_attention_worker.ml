@@ -242,6 +242,13 @@ let completed_in_order ~base_path ~keeper_name =
        completed)
 ;;
 
+let replay_completed_owner_wake ~base_path ~keeper_name ~wake_owner =
+  let* completed = completed_in_order ~base_path ~keeper_name in
+  match completed with
+  | [] -> Ok None
+  | _ :: _ -> Ok (Some (wake_owner ~base_path ~keeper_name))
+;;
+
 let settle_one_completed ~base_path ~keeper_name =
   let* completed = completed_in_order ~base_path ~keeper_name in
   match completed with
@@ -312,6 +319,48 @@ let observe_error ~base_path ~keeper_name detail =
   Log.Keeper.error "Board attention worker deferred keeper=%s: %s" keeper_name detail
 ;;
 
+let rec drain_available ~yield ~now ~worker_epoch ~base_path ~keeper_name ~judge =
+  match Partition.release_due_provider_retries ~now:(now ()) ~base_path ~keeper_name with
+  | Error detail -> Error detail
+  | Ok released ->
+    if released > 0
+    then
+      Log.Keeper.info
+        "Board attention Provider-authored retry deadline released keeper=%s count=%d"
+        keeper_name
+        released;
+    (match process_next ~now ~worker_epoch ~base_path ~keeper_name ~judge with
+     | Ok Idle -> Ok ()
+     | Ok (Judgment_completed _ | Candidate_already_consumed _) ->
+       yield ();
+       drain_available ~yield ~now ~worker_epoch ~base_path ~keeper_name ~judge
+     | Ok (Judgment_deferred { candidate_id; failure }) ->
+       Log.Keeper.info
+         "Board attention judgment durably deferred keeper=%s candidate=%s requirement=%s"
+         keeper_name
+         candidate_id
+         (Failure.retry_requirement_label failure.requirement);
+       yield ();
+       drain_available ~yield ~now ~worker_epoch ~base_path ~keeper_name ~judge
+     | Ok (Partition_blocked { candidate_id; reason }) ->
+       let reason_label =
+         match reason with
+         | Partition.Candidate_membership_conflict _ ->
+           "candidate_membership_conflict"
+         | Partition.Durable_partition_invariant _ -> "durable_partition_invariant"
+         | Partition.Judgment_blocked blocked ->
+           Failure.blocked_kind_label blocked.kind
+       in
+       Log.Keeper.warn
+         "Board attention judgment durably blocked keeper=%s candidate=%s reason=%s"
+         keeper_name
+         candidate_id
+         reason_label;
+       yield ();
+       drain_available ~yield ~now ~worker_epoch ~base_path ~keeper_name ~judge
+     | Error detail -> Error detail)
+;;
+
 let run
       ~sw
       ~(clock : [> float Eio.Time.clock_ty ] Eio.Resource.t)
@@ -328,7 +377,18 @@ let run
       then (
         try
           match Partition.recover_for_process_start ~base_path ~keeper_name with
-          | Ok _ -> true
+          | Ok _ ->
+            (match
+               replay_completed_owner_wake
+                 ~base_path
+                 ~keeper_name
+                 ~wake_owner:owner_wake
+             with
+             | Ok _ -> true
+             | Error detail ->
+               release_process_recovery ~base_path ~keeper_name;
+               observe_error ~base_path ~keeper_name detail;
+               false)
           | Error detail ->
             release_process_recovery ~base_path ~keeper_name;
             observe_error ~base_path ~keeper_name detail;
@@ -367,60 +427,18 @@ let run
           | `Wake Wake.Wake -> drain ())
     and drain () =
       match
-        Partition.release_due_provider_retries
-          ~now:(Time_compat.now ())
+        drain_available
+          ~yield:Eio.Fiber.yield
+          ~now:Time_compat.now
+          ~worker_epoch
           ~base_path
           ~keeper_name
+          ~judge:(Candidate.judge_singleton ~sw ~net ~base_path)
       with
+      | Ok () -> await ()
       | Error detail ->
         observe_error ~base_path ~keeper_name detail;
-        await_wake ()
-      | Ok released ->
-        if released > 0
-        then
-          Log.Keeper.info
-            "Board attention Provider-authored retry deadline released keeper=%s count=%d"
-            keeper_name
-            released;
-        (match
-           process_next
-             ~now:Time_compat.now
-             ~worker_epoch
-             ~base_path
-             ~keeper_name
-             ~judge:(Candidate.judge_singleton ~sw ~net ~base_path)
-         with
-         | Ok Idle -> await ()
-         | Ok (Judgment_completed _ | Candidate_already_consumed _) ->
-           Eio.Fiber.yield ();
-           drain ()
-         | Ok (Judgment_deferred { candidate_id; failure }) ->
-           Log.Keeper.info
-             "Board attention judgment durably deferred keeper=%s candidate=%s requirement=%s"
-             keeper_name
-             candidate_id
-             (Failure.retry_requirement_label failure.requirement);
-           await ()
-         | Ok (Partition_blocked { candidate_id; reason }) ->
-           let reason_label =
-             match reason with
-             | Partition.Candidate_membership_conflict _ ->
-               "candidate_membership_conflict"
-             | Partition.Durable_partition_invariant _ ->
-               "durable_partition_invariant"
-             | Partition.Judgment_blocked blocked ->
-               Failure.blocked_kind_label blocked.kind
-           in
-           Log.Keeper.warn
-             "Board attention judgment durably blocked keeper=%s candidate=%s reason=%s"
-             keeper_name
-             candidate_id
-             reason_label;
-           Eio.Fiber.yield ();
-           drain ()
-         | Error detail ->
-           observe_error ~base_path ~keeper_name detail;
-           await ())
+        await ()
     in
     let rec supervise action =
       try action () with
@@ -437,5 +455,7 @@ let run
 
 module For_testing = struct
   let process_next = process_next
+  let drain_available = drain_available
+  let replay_completed_owner_wake = replay_completed_owner_wake
 end
 ;;

@@ -4,9 +4,6 @@ val summary_max_tokens : int
 
 type complete_fn = Keeper_provider_subcall.complete_fn
 
-val is_direct_completion_provider :
-  Llm_provider.Provider_config.t -> bool
-
 val provider_for_summary :
   Llm_provider.Provider_config.t ->
   Llm_provider.Provider_config.t

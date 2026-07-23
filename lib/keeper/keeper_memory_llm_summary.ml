@@ -46,11 +46,6 @@ let runtime_lane_label =
 
 type complete_fn = Keeper_provider_subcall.complete_fn
 
-let is_direct_completion_provider
-    (provider_cfg : Llm_provider.Provider_config.t) : bool =
-  match provider_cfg.kind with
-  | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | Glm | DashScope -> true
-
 let provider_for_summary (provider_cfg : Llm_provider.Provider_config.t) =
   let max_tokens =
     match provider_cfg.max_tokens with
@@ -271,11 +266,7 @@ let make
                provider_runtime_id err;
              None
          | Ok provider ->
-             let providers =
-               [ provider ]
-               |> List.filter is_direct_completion_provider
-               |> List.filter summary_schema_supported
-             in
+             let providers = [ provider ] |> List.filter summary_schema_supported in
              if providers = [] then begin
                Log.Keeper.warn ~keeper_name:keeper_name
                  "memory LLM summary has no schema-capable direct completion providers runtime=%s"

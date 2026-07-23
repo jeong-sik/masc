@@ -35,15 +35,32 @@ describe('bulkKeeperDirective', () => {
     }
     stubFetch(expected)
 
-    const res = await bulkKeeperDirective(['rondo', 'qa-king'], 'resume')
+    const res = await bulkKeeperDirective(
+      [
+        { name: 'rondo', ownerGeneration: 3, operatorOperationId: 'resume-rondo-1' },
+        { name: 'qa-king', ownerGeneration: 5, operatorOperationId: 'resume-qa-1' },
+      ],
+      'resume',
+    )
 
     const call = mockFetch.mock.calls[0]!
     const init = call[1] as RequestInit
     expect(call[0]).toBe('/api/v1/keepers_bulk/directive')
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({
-      names: ['rondo', 'qa-king'],
       action: 'resume',
+      targets: [
+        {
+          name: 'rondo',
+          owner_generation: 3,
+          operator_operation_id: 'resume-rondo-1',
+        },
+        {
+          name: 'qa-king',
+          owner_generation: 5,
+          operator_operation_id: 'resume-qa-1',
+        },
+      ],
     })
     expect(res).toEqual(expected)
   })
@@ -60,7 +77,13 @@ describe('bulkKeeperDirective', () => {
       ],
     })
 
-    const res = await bulkKeeperDirective(['rondo', 'ghost'], 'resume')
+    const res = await bulkKeeperDirective(
+      [
+        { name: 'rondo', ownerGeneration: 3, operatorOperationId: 'resume-rondo-2' },
+        { name: 'ghost', ownerGeneration: 0, operatorOperationId: 'resume-ghost-1' },
+      ],
+      'resume',
+    )
 
     expect(res.ok).toBe(true)
     expect(res.succeeded).toBe(1)

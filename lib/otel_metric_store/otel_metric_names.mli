@@ -203,12 +203,14 @@ val metric_tool_keeper_cache_ttl_parse_failures : string
 val metric_write_meta_cas_retry_total : string
 
 (** Total board signals that did not produce a wake decision for a
-    running keeper. Increments per (keeper, kind) when
-    [Keeper_world_observation.board_signal_wake_reason] returns
-    [None] — no explicit_mention, scope feed disabled, and no
-    external reply after a self-comment. Discoverability for the
-    REPO_WAKE_UP audit finding: keepers with narrow mention targets
-    can silently drop board posts. Labels: keeper, kind=post_created|comment_added. *)
+    running keeper ([masc_keeper_board_signal_no_wake_total]).
+    Increments per (keeper, kind, audience) when typed-audience routing
+    ([Keeper_board_audience.route_for_keeper]) returns [Ignore], or
+    [Judge_discoverable] — the latter issues no wake and records a board
+    attention candidate instead, so the [audience] label distinguishes
+    the two. Discoverability for the REPO_WAKE_UP audit finding:
+    keepers with narrow mention targets can silently drop board posts.
+    Labels: keeper, kind=post_created|comment_added, audience. *)
 
 val metric_cache_desync_cleared : string
 

@@ -5,6 +5,14 @@
 // the waiting rows behind it. State strings and rows render exactly as the
 // server sent them — no client-side judgement — and a keeper absent from
 // the inventory renders an explicit data gap instead of a guessed "idle".
+//
+// Counts are the one place that rule cuts the other way. `waiting_count` and
+// `sources` are both folds over a list the server already capped
+// (`server_keeper_waiting_inventory.ml:529` takes 64 external-attention rows,
+// then `:870`/`:877` measure what survived), so rendering either as a bare
+// integer states a total the server never computed. When the server sets
+// `waiting_count_truncated` the same numbers are lower bounds and must render
+// as such.
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
@@ -65,6 +73,29 @@ function LaneGap({ children }: { children: VNode | string }): VNode {
   `
 }
 
+/** A count the server folded over a possibly-capped row list. `truncated`
+ *  carries the server's own `waiting_count_truncated` / `truncated_sources`
+ *  verdict, so a capped count never renders as an exact total. */
+function boundedCount(value: number, truncated: boolean): string {
+  return truncated ? `≥${value}` : `${value}`
+}
+
+/** Per-source counts, each marked with the server's own per-source truncation
+ *  verdict. Sorted by count so the source driving the lane reads first. */
+function sourceBreakdown(entry: DashboardKeeperWaitingKeeper): string[] {
+  const truncated = entry.truncated_sources ?? {}
+  return Object.entries(entry.sources ?? {})
+    .sort(([, a], [, b]) => b - a)
+    .map(([source, count]) => `${enumLabel(source)} ${boundedCount(count, truncated[source] === true)}`)
+}
+
+/** Sources the server reported as capped, for the attribution line. */
+function truncatedSourceLabels(entry: DashboardKeeperWaitingKeeper): string[] {
+  return Object.entries(entry.truncated_sources ?? {})
+    .filter(([, isTruncated]) => isTruncated)
+    .map(([source]) => enumLabel(source))
+}
+
 function LaneWaitingRow({ row }: { row: DashboardKeeperWaitingRow }): VNode {
   return html`
     <div class="grid gap-0.5 border-t border-[var(--color-border-subtle)] py-1.5 first:border-t-0">
@@ -104,11 +135,17 @@ export function KeeperLaneStrip({
   const entry = inventoryEntry(inventory, keeper)
   const rows = (entry?.waiting_on ?? []).slice(0, LANE_ROW_LIMIT)
   const waitingCount = entry?.waiting_count ?? 0
+  const countTruncated = entry?.waiting_count_truncated === true
+  const truncatedSources = entry ? truncatedSourceLabels(entry) : []
+  const breakdown = entry ? sourceBreakdown(entry) : []
+  const rowLimit = inventory?.external_attention_row_limit
   return html`
     <div class="ctx-sec" data-testid="keeper-lane-section">
       <h4 style=${{ display: 'flex', alignItems: 'center', gap: '7px' }}>
         레인
-        ${waitingCount > 0 ? html`<${CountBadge}>${waitingCount}<//>` : null}
+        ${waitingCount > 0
+          ? html`<${CountBadge}>${boundedCount(waitingCount, countTruncated)}<//>`
+          : null}
       </h4>
       ${entry
         ? html`
@@ -126,10 +163,22 @@ export function KeeperLaneStrip({
                         <${LaneWaitingRow} key=${`${row.source}:${row.waiting_on}:${index}`} row=${row} />
                       `)}
                       ${waitingCount > rows.length
-                        ? html`<div class="pt-1 text-2xs text-[var(--color-fg-muted)]">+${waitingCount - rows.length} more</div>`
+                        ? html`<div class="pt-1 text-2xs text-[var(--color-fg-muted)]" data-testid="keeper-lane-more">
+                            +${waitingCount - rows.length} more${countTruncated ? ` of at least ${waitingCount}` : ''}
+                          </div>`
                         : null}
                     </div>
                   `
+                : null}
+              ${countTruncated
+                ? html`<div class="text-2xs text-[var(--color-fg-muted)]" data-testid="keeper-lane-truncation">
+                    서버 상한${rowLimit != null ? ` ${rowLimit}` : ''}에서 잘림${truncatedSources.length > 0 ? ` — ${truncatedSources.join(', ')}` : ''}. 실제 대기 건수는 더 많습니다.
+                  </div>`
+                : null}
+              ${breakdown.length > 0
+                ? html`<div class="font-mono text-2xs text-[var(--color-fg-muted)]" data-testid="keeper-lane-sources">
+                    ${breakdown.join(' · ')}
+                  </div>`
                 : null}
               ${inventory?.generated_at
                 ? html`<div class="text-2xs text-[var(--color-fg-muted)]">기준 ${formatDateTimeKo(inventory.generated_at)}${autoRefreshMs ? html` · ${formatAutoRefreshLabel(autoRefreshMs)}` : null}</div>`

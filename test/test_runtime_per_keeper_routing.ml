@@ -1007,6 +1007,48 @@ let test_context_budget_source_is_shared_ssot () =
       (source (Some 1_000_000)))
 ;;
 
+(* The runtime budget's own provenance must survive to the status surface.
+   Collapsing it rendered a runtime.toml [model.max-context] override as
+   budget_source=runtime_provider_cap under the provider_context_window JSON
+   key, which disguised the #25463 live config drift (deepseek-v4-flash
+   262144 vs catalog 1048576) as a provider fact. The fixture's [openai.gpt]
+   declares max-context in runtime.toml, so its budget is an override. *)
+let test_runtime_budget_source_survives_to_status_json () =
+  with_runtime_initialized (fun () ->
+    match
+      Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+        ~requested_override:None
+        ~runtime_id:"openai.gpt"
+    with
+    | Error error ->
+      Alcotest.failf
+        "openai.gpt must resolve: %s"
+        (Keeper_context_runtime.max_context_resolution_error_to_string error)
+    | Ok resolution ->
+      (match resolution.Keeper_context_runtime.runtime_budget_source with
+       | Some Runtime.Override -> ()
+       | Some other ->
+         Alcotest.failf
+           "expected the runtime.toml override source, got %s"
+           (Runtime.max_context_source_to_string other)
+       | None -> Alcotest.fail "runtime budget source dropped on the strict path");
+      let json =
+        Keeper_context_runtime.context_budget_json_of_resolution
+          ~runtime_id:"openai.gpt"
+          resolution
+      in
+      (match json with
+       | `Assoc fields ->
+         (match List.assoc_opt "runtime_budget_source" fields with
+          | Some (`String "override") -> ()
+          | Some other ->
+            Alcotest.failf
+              "runtime_budget_source rendered %s"
+              (Yojson.Safe.to_string other)
+          | None -> Alcotest.fail "runtime_budget_source missing from budget JSON")
+       | _ -> Alcotest.fail "context budget JSON must be an object"))
+;;
+
 (* Remaining projection path: [resolve_max_context_resolution_of_meta] must
    prefer the keeper's routed runtime (openai.gpt = 64000), NOT
    [runtime].default (runpod_mtp.qwen = 128000). Actual turn admission is
@@ -1910,6 +1952,10 @@ let () =
             "context budget source uses shared SSOT"
             `Quick
             test_context_budget_source_is_shared_ssot
+        ; Alcotest.test_case
+            "runtime budget source survives to status JSON"
+            `Quick
+            test_runtime_budget_source_survives_to_status_json
         ; Alcotest.test_case
             "strict context budget rejects unavailable capacity and invalid override"
             `Quick

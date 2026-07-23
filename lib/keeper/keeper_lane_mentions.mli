@@ -21,6 +21,22 @@ val mention_ids_of_content : string -> Keeper_identity.Keeper_id.t list
 (** Every ["@name"] token of the content, edge-trimmed, minted to a
     canonical id, deduplicated.  [[]] when the line mentions nobody. *)
 
+type explicit_address =
+  | No_explicit_address
+  | Targets of Keeper_identity.Keeper_id.t list
+  | Broadcast_all
+  | Unsupported_broadcast of string list
+(** Closed write-boundary interpretation of address tokens. [@@all] is the
+    only Keeper-wide broadcast selector. Other [@@name] forms belong to the
+    generic workspace agent-type router, whose type catalog is not a Keeper
+    routing authority; they are retained as an explicit error instead of
+    being downgraded to ambient content. *)
+
+val explicit_address_of_content : string -> explicit_address
+(** Parse the exact whitespace-token contract once. Broadcast takes
+    precedence over direct targets, matching the existing workspace mention
+    grammar. Unsupported broadcast selectors fail closed at the caller. *)
+
 val target_ids_of : string list -> Keeper_identity.Keeper_id.t list
 (** Mint a keeper's mention-target names (e.g.
     [message_feed_targets meta]) into comparable ids. *)

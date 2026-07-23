@@ -542,7 +542,14 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
                    try
                      let j = Yojson.Safe.from_string line in
                      let role = Safe_ops.json_string ~default:"unknown" "role" j in
-                     let content = Safe_ops.json_string ~default:"" "content" j in
+                     (* History rows persist text as typed [content_blocks];
+                        the flat "content" key is the pre-migration shape.
+                        Reading only the flat key rendered every current
+                        direct_user/direct_assistant row as "" in status
+                        output. Same N-of-M reader class already fixed in
+                        server_dashboard_http_keeper_api_types — use the same
+                        SSOT extractor. *)
+                     let content = Keeper_context_core.text_of_history_jsonl_json j in
                      let source = Safe_ops.json_string ~default:"unknown" "source" j in
                      let ts_unix =
                        let ts0 = Safe_ops.json_float ~default:0.0 "ts_unix" j in

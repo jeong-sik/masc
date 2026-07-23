@@ -362,6 +362,279 @@ let exact_rule_lookup_failure_count () =
     ()
 ;;
 
+let eligibility_summary : AQ.hitl_context_summary =
+  { summary_version = 2
+  ; generated_at = 1.0
+  ; model_run_id = "gate-eligibility-judge"
+  ; context_summary = "The exact request is supported by the visible context."
+  ; key_questions = []
+  ; judgment = AQ.Approve
+  ; rationale = "The request is safe to finalize."
+  }
+;;
+
+let eligibility_entry
+      ?(keeper_name = "keeper")
+      ?(audit_base_path = "/workspace")
+      ~id
+      ~sequence
+      ~summary_status
+      ~exact_attempt
+      ()
+  : AQ.pending_approval
+  =
+  { id
+  ; keeper_name
+  ; tool_name = "external-effect"
+  ; input_hash = "exact-input-hash-" ^ id
+  ; input = `Assoc [ "request", `String id ]
+  ; sequence
+  ; requested_at = Float.of_int sequence
+  ; turn_id = None
+  ; request_context = None
+  ; task_id = None
+  ; goal_id = None
+  ; goal_ids = []
+  ; continuation_channel = Keeper_continuation_channel.unrouted "eligibility test"
+  ; audit_base_path
+  ; summary_status
+  ; exact_attempt
+  }
+;;
+
+type eligibility_exact_identity =
+  { slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  }
+
+let approval_entry_exn id =
+  match AQ.get_pending_entry ~id with
+  | Some entry -> entry
+  | None -> fail ("pending approval not found: " ^ id)
+;;
+
+let submit_eligibility_entry ~base_path ~keeper_name label =
+  match
+    AQ.submit_pending
+      ~keeper_name
+      ~tool_name:"external-effect"
+      ~input:(`Assoc [ "request", `String label ])
+      ~base_path
+      ()
+  with
+  | Ok id -> approval_entry_exn id
+  | Error error -> fail (AQ.storage_error_to_string error)
+;;
+
+let summary_update_exn label = function
+  | Ok true -> ()
+  | Ok false -> fail (label ^ " did not update the pending approval")
+  | Error error -> fail (AQ.summary_transition_error_to_string error)
+;;
+
+let exact_update_exn label = function
+  | Ok true -> ()
+  | Ok false -> fail (label ^ " did not update the exact attempt")
+  | Error error -> fail (AQ.exact_attempt_error_to_string error)
+;;
+
+let exact_identity label =
+  { slot_id = "exact-slot-" ^ label
+  ; call_id = "exact-call-" ^ label
+  ; plan_fingerprint = String.make 64 'b'
+  ; request_body_sha256 = String.make 64 'c'
+  }
+;;
+
+let bind_exact_entry (entry : AQ.pending_approval) identity =
+  exact_update_exn
+    "bind exact attempt"
+    (AQ.bind_summary_exact_attempt
+       ~id:entry.id
+       ~input_hash:entry.input_hash
+       ~sequence:entry.sequence
+       ~slot_id:identity.slot_id
+       ~call_id:identity.call_id
+       ~plan_fingerprint:identity.plan_fingerprint
+       ~request_body_sha256:identity.request_body_sha256);
+  approval_entry_exn entry.id
+;;
+
+let test_gate_auto_judge_worker_eligibility_ssot () =
+  with_gate_fixture @@ fun base_path ->
+  let keeper_name = "eligibility-owner" in
+  let not_requested =
+    submit_eligibility_entry ~base_path ~keeper_name "not-requested-unbound"
+  in
+  let pending =
+    submit_eligibility_entry ~base_path ~keeper_name "pending-unbound"
+  in
+  summary_update_exn "mark resumable summary pending" (AQ.mark_summary_pending ~id:pending.id);
+  let pending = approval_entry_exn pending.id in
+  let available =
+    submit_eligibility_entry ~base_path ~keeper_name "available-unbound"
+  in
+  summary_update_exn "mark available summary pending" (AQ.mark_summary_pending ~id:available.id);
+  summary_update_exn
+    "attach available summary"
+    (AQ.attach_summary ~id:available.id eligibility_summary);
+  let available = approval_entry_exn available.id in
+  let make_bound label after_bind =
+    let entry = submit_eligibility_entry ~base_path ~keeper_name label in
+    summary_update_exn
+      ("mark " ^ label ^ " summary pending")
+      (AQ.mark_summary_pending ~id:entry.id);
+    let entry = approval_entry_exn entry.id in
+    let identity = exact_identity label in
+    let entry = bind_exact_entry entry identity in
+    after_bind entry identity;
+    approval_entry_exn entry.id
+  in
+  let dispatch_uncertain = make_bound "dispatch-uncertain" (fun _ _ -> ()) in
+  let released_before_dispatch =
+    make_bound "released-before-dispatch" (fun entry identity ->
+      exact_update_exn
+        "release exact attempt before dispatch"
+        (AQ.release_summary_exact_attempt_before_dispatch
+           ~id:entry.id
+           ~input_hash:entry.input_hash
+           ~sequence:entry.sequence
+           ~slot_id:identity.slot_id
+           ~call_id:identity.call_id
+           ~plan_fingerprint:identity.plan_fingerprint
+           ~request_body_sha256:identity.request_body_sha256))
+  in
+  let quarantined =
+    make_bound "quarantined" (fun entry identity ->
+      exact_update_exn
+        "quarantine exact attempt"
+        (AQ.quarantine_summary_exact_attempt
+           ~id:entry.id
+           ~input_hash:entry.input_hash
+           ~sequence:entry.sequence
+           ~slot_id:identity.slot_id
+           ~call_id:identity.call_id
+           ~plan_fingerprint:identity.plan_fingerprint
+           ~request_body_sha256:identity.request_body_sha256
+           ~cause:AQ.Exact_post_dispatch_failure))
+  in
+  let completed =
+    make_bound "completed" (fun entry identity ->
+      exact_update_exn
+        "complete exact attempt"
+        (AQ.complete_summary_exact_attempt
+           ~id:entry.id
+           ~input_hash:entry.input_hash
+           ~sequence:entry.sequence
+           ~slot_id:identity.slot_id
+           ~call_id:identity.call_id
+           ~plan_fingerprint:identity.plan_fingerprint
+           ~request_body_sha256:identity.request_body_sha256
+           ~summary:eligibility_summary))
+  in
+  let legacy_source =
+    submit_eligibility_entry ~base_path ~keeper_name "legacy-uncertain"
+  in
+  let legacy =
+    { legacy_source with exact_attempt = AQ.Legacy_execution_uncertain }
+  in
+  let check_ready label expected entry =
+    check bool label expected (Gate.For_testing.auto_judge_entry_ready entry)
+  in
+  check_ready "new unbound judgment is startable" true not_requested;
+  check_ready "pending unbound judgment is resumable" true pending;
+  check_ready "available judgment does not start a provider worker" false available;
+  check_ready "legacy execution uncertainty is not worker-ready" false legacy;
+  check_ready "dispatch-uncertain binding is not worker-ready" false dispatch_uncertain;
+  check_ready
+    "released-before-dispatch binding is not worker-ready"
+    false
+    released_before_dispatch;
+  check_ready "quarantined binding is not worker-ready" false quarantined;
+  check_ready "completed binding is finalize-only" false completed;
+  (match quarantined.exact_attempt with
+   | AQ.Exact_bound { status = AQ.Exact_quarantined AQ.Exact_post_dispatch_failure; _ } ->
+     ()
+   | AQ.Exact_unbound
+   | AQ.Legacy_execution_uncertain
+   | AQ.Exact_bound _ ->
+     fail "typed quarantine cause was not persisted");
+  (match completed.exact_attempt, completed.summary_status with
+   | AQ.Exact_bound { status = AQ.Exact_completed; _ }, AQ.Summary_available _ -> ()
+   | _ -> fail "exact completion did not atomically persist its available summary");
+  let other_owner =
+    submit_eligibility_entry ~base_path ~keeper_name:"other-keeper" "other-owner"
+  in
+  let ready =
+    Gate.For_testing.ready_auto_judges_for_owner
+      ~base_path
+      ~keeper_name:"keeper"
+      (not_requested
+       :: pending
+       :: available
+       :: legacy
+       :: other_owner
+       :: [ dispatch_uncertain; released_before_dispatch; quarantined; completed ])
+  in
+  check int "operator recovery queues only two worker-ready entries" 2 (List.length ready);
+  check (list string) "operator recovery predicate preserves owner FIFO"
+    [ pending.id; not_requested.id ]
+    (List.map (fun (entry : AQ.pending_approval) -> entry.id) ready)
+;;
+
+let test_available_judgments_finalize_without_worker () =
+  with_gate_fixture @@ fun base_path ->
+  let keeper_name = "available-finalize" in
+  let unbound = submit_eligibility_entry ~base_path ~keeper_name "unbound" in
+  summary_update_exn "mark unbound summary pending" (AQ.mark_summary_pending ~id:unbound.id);
+  summary_update_exn
+    "attach unbound decisive summary"
+    (AQ.attach_summary ~id:unbound.id eligibility_summary);
+  let completed = submit_eligibility_entry ~base_path ~keeper_name "completed" in
+  summary_update_exn
+    "mark completed summary pending"
+    (AQ.mark_summary_pending ~id:completed.id);
+  let completed = approval_entry_exn completed.id in
+  let identity = exact_identity "restart-completed" in
+  let completed = bind_exact_entry completed identity in
+  exact_update_exn
+    "complete restart-finalizable exact attempt"
+    (AQ.complete_summary_exact_attempt
+       ~id:completed.id
+       ~input_hash:completed.input_hash
+       ~sequence:completed.sequence
+       ~slot_id:identity.slot_id
+       ~call_id:identity.call_id
+       ~plan_fingerprint:identity.plan_fingerprint
+       ~request_body_sha256:identity.request_body_sha256
+       ~summary:eligibility_summary);
+  AQ.For_testing.reset_runtime_state ();
+  (match AQ.install_persistence ~base_path with
+   | Ok _ -> ()
+   | Error error -> fail (AQ.install_error_to_string error));
+  let completed = approval_entry_exn completed.id in
+  (match completed.exact_attempt, completed.summary_status with
+   | AQ.Exact_bound { status = AQ.Exact_completed; _ }, AQ.Summary_available _ -> ()
+   | _ -> fail "completed available judgment did not survive restart");
+  check bool "completed available judgment is finalize-only" false
+    (Gate.For_testing.auto_judge_entry_ready completed);
+  let report = Gate.resume_persisted_auto_judges ~base_path in
+  let expected_ids = List.sort String.compare [ unbound.id; completed.id ] in
+  check int "two available judgments considered" 2 report.requested;
+  check (list string) "available judgments finalized" expected_ids
+    (List.sort String.compare report.finalized_ids);
+  check (list string) "available judgments start no provider worker" [] report.started_ids;
+  check (list string) "available judgments are not skipped" [] report.skipped_ids;
+  check int "available judgments have no recovery failure" 0 (List.length report.failures);
+  List.iter
+    (fun id ->
+       check bool ("finalized judgment leaves no pending approval: " ^ id) true
+         (Option.is_none (AQ.get_pending_entry ~id)))
+    expected_ids
+;;
+
 (** A broken optional exact-rule projection must not replace the configured
     Manual, Auto Judge, or invalid-mode decision path. *)
 let test_manual_mode_continues_when_rule_store_is_unavailable () =
@@ -516,7 +789,17 @@ let test_workspace_always_allow_does_not_depend_on_rule_store () =
 let () =
   run
     "Keeper_approval_queue_rules"
-    [ ( "exact rules"
+    [ ( "Gate eligibility"
+      , [ test_case
+            "Auto Judge worker eligibility is status-exact"
+            `Quick
+            test_gate_auto_judge_worker_eligibility_ssot
+        ; test_case
+            "available judgments finalize without worker"
+            `Quick
+            test_available_judgments_finalize_without_worker
+        ] )
+    ; ( "exact rules"
       , [ test_case
             "matches only complete exact request"
             `Quick

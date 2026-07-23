@@ -23,6 +23,37 @@ and summary_status =
   | Summary_available of hitl_context_summary
   | Summary_failed of { reason : string; retryable : bool }
 
+type exact_attempt_quarantine_cause =
+  | Exact_post_dispatch_failure
+  | Exact_cancellation
+  | Exact_attempt_replay
+  | Exact_domain_invalid_output
+  | Exact_provenance_mismatch
+  | Exact_terminal_persistence_failure
+  | Exact_restart_uncertainty
+
+type exact_attempt_status =
+  | Exact_dispatch_uncertain
+  | Exact_released_before_dispatch
+  | Exact_quarantined of exact_attempt_quarantine_cause
+  | Exact_completed
+
+type exact_attempt_binding =
+  { approval_id : string
+  ; input_hash : string
+  ; sequence : int
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  ; status : exact_attempt_status
+  }
+
+type exact_attempt_state =
+  | Exact_unbound
+  | Exact_bound of exact_attempt_binding
+  | Legacy_execution_uncertain
+
 type pending_approval =
   { id : string
   ; keeper_name : string
@@ -39,6 +70,7 @@ type pending_approval =
   ; continuation_channel : Keeper_continuation_channel.t
   ; audit_base_path : string
   ; summary_status : summary_status
+  ; exact_attempt : exact_attempt_state
   }
 
 module Decision = struct
@@ -186,6 +218,51 @@ let summary_status_to_yojson = function
       ]
 ;;
 
+let exact_attempt_status_to_string = function
+  | Exact_dispatch_uncertain -> "dispatch_uncertain"
+  | Exact_released_before_dispatch -> "released_before_dispatch"
+  | Exact_quarantined _ -> "quarantined"
+  | Exact_completed -> "completed"
+;;
+
+let exact_attempt_quarantine_cause_to_string = function
+  | Exact_post_dispatch_failure -> "post_dispatch_failure"
+  | Exact_cancellation -> "cancellation"
+  | Exact_attempt_replay -> "attempt_replay"
+  | Exact_domain_invalid_output -> "domain_invalid_output"
+  | Exact_provenance_mismatch -> "provenance_mismatch"
+  | Exact_terminal_persistence_failure -> "terminal_persistence_failure"
+  | Exact_restart_uncertainty -> "restart_uncertainty"
+;;
+
+let exact_attempt_state_to_yojson = function
+  | Exact_unbound -> `Assoc [ "state", `String "unbound" ]
+  | Legacy_execution_uncertain ->
+    `Assoc [ "state", `String "legacy_execution_uncertain" ]
+  | Exact_bound binding ->
+    let quarantine_cause =
+      match binding.status with
+      | Exact_quarantined cause ->
+        `String (exact_attempt_quarantine_cause_to_string cause)
+      | Exact_dispatch_uncertain
+      | Exact_released_before_dispatch
+      | Exact_completed ->
+        `Null
+    in
+    `Assoc
+      [ "state", `String "bound"
+      ; "approval_id", `String binding.approval_id
+      ; "input_hash", `String binding.input_hash
+      ; "sequence", `Int binding.sequence
+      ; "slot_id", `String binding.slot_id
+      ; "call_id", `String binding.call_id
+      ; "plan_fingerprint", `String binding.plan_fingerprint
+      ; "request_body_sha256", `String binding.request_body_sha256
+      ; "status", `String (exact_attempt_status_to_string binding.status)
+      ; "quarantine_cause", quarantine_cause
+      ]
+;;
+
 let reject_unknown_fields ~surface ~allowed fields =
   let rec duplicate seen = function
     | [] -> None
@@ -238,6 +315,125 @@ let required_string_list ~surface field fields =
     parse 0 [] values
   | Some _ -> Error (Printf.sprintf "%s.%s must be an array" surface field)
   | None -> Error (Printf.sprintf "%s.%s is required" surface field)
+;;
+
+let exact_attempt_quarantine_cause_of_string = function
+  | "post_dispatch_failure" -> Ok Exact_post_dispatch_failure
+  | "cancellation" -> Ok Exact_cancellation
+  | "attempt_replay" -> Ok Exact_attempt_replay
+  | "domain_invalid_output" -> Ok Exact_domain_invalid_output
+  | "provenance_mismatch" -> Ok Exact_provenance_mismatch
+  | "terminal_persistence_failure" -> Ok Exact_terminal_persistence_failure
+  | "restart_uncertainty" -> Ok Exact_restart_uncertainty
+  | cause ->
+    Error
+      (Printf.sprintf
+         "exact_attempt.quarantine_cause %S is unknown"
+         cause)
+;;
+
+let is_lowercase_sha256 value =
+  let rec loop index =
+    if index = String.length value
+    then true
+    else
+      match value.[index] with
+      | '0' .. '9'
+      | 'a' .. 'f' ->
+        loop (index + 1)
+      | _ -> false
+  in
+  String.length value = 64 && loop 0
+;;
+
+let exact_attempt_state_of_yojson_with_error json =
+  match json with
+  | `Assoc fields ->
+    let ( let* ) = Result.bind in
+    let surface = "exact_attempt" in
+    let* state = required_string ~surface "state" fields in
+    (match state with
+     | "unbound" ->
+       let* () = reject_unknown_fields ~surface ~allowed:[ "state" ] fields in
+       Ok Exact_unbound
+     | "legacy_execution_uncertain" ->
+       let* () = reject_unknown_fields ~surface ~allowed:[ "state" ] fields in
+       Ok Legacy_execution_uncertain
+     | "bound" ->
+       let* () =
+         reject_unknown_fields
+           ~surface
+           ~allowed:
+             [ "state"
+             ; "approval_id"
+             ; "input_hash"
+             ; "sequence"
+             ; "slot_id"
+             ; "call_id"
+             ; "plan_fingerprint"
+             ; "request_body_sha256"
+             ; "status"
+             ; "quarantine_cause"
+             ]
+           fields
+       in
+       let* approval_id = required_string ~surface "approval_id" fields in
+       let* input_hash = required_string ~surface "input_hash" fields in
+       let* sequence = required_positive_int ~surface "sequence" fields in
+       let* slot_id = required_string ~surface "slot_id" fields in
+       let* call_id = required_string ~surface "call_id" fields in
+       let* plan_fingerprint = required_string ~surface "plan_fingerprint" fields in
+       let* request_body_sha256 =
+         required_string ~surface "request_body_sha256" fields
+       in
+       let* () =
+         if is_lowercase_sha256 request_body_sha256
+         then Ok ()
+         else
+           Error
+             "exact_attempt.request_body_sha256 must be exactly 64 lowercase hexadecimal characters"
+       in
+       let* status_raw = required_string ~surface "status" fields in
+       let* quarantine_cause =
+         match List.assoc_opt "quarantine_cause" fields with
+         | Some value -> Ok value
+         | None -> Error "exact_attempt.quarantine_cause is required"
+       in
+       let* status =
+         match status_raw, quarantine_cause with
+         | "dispatch_uncertain", `Null -> Ok Exact_dispatch_uncertain
+         | "released_before_dispatch", `Null ->
+           Ok Exact_released_before_dispatch
+         | "completed", `Null -> Ok Exact_completed
+         | "quarantined", `String cause ->
+           let* cause = exact_attempt_quarantine_cause_of_string cause in
+           Ok (Exact_quarantined cause)
+         | "quarantined", _ ->
+           Error
+             "exact_attempt.quarantined requires a typed quarantine_cause"
+         | ( "dispatch_uncertain"
+           | "released_before_dispatch"
+           | "completed" ),
+           _ ->
+           Error
+             "non-quarantined exact_attempt status requires null quarantine_cause"
+         | status, _ ->
+           Error (Printf.sprintf "exact_attempt.status %S is unknown" status)
+       in
+       Ok
+         (Exact_bound
+            { approval_id
+            ; input_hash
+            ; sequence
+            ; slot_id
+            ; call_id
+            ; plan_fingerprint
+            ; request_body_sha256
+            ; status
+            })
+     | state ->
+       Error (Printf.sprintf "%s.state %S is unknown" surface state))
+  | _ -> Error "exact_attempt must be a JSON object"
 ;;
 
 let hitl_context_summary_of_yojson_with_error json =

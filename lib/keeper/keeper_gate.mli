@@ -86,10 +86,13 @@ val decide :
 
 (** Recover durable Auto Judge work for exactly one workspace. Each exact
     [(base_path, keeper_name)] owner activates at most its oldest pending
-    judgment; completion drains only that owner's FIFO. Decisive persisted
-    output is finalized without creating a worker. Failed judgments are never
-    retried merely because a process restarted. Every recovery candidate id
-    has an explicit started, finalized, skipped, or failed outcome. *)
+    unbound judgment; completion drains only that owner's FIFO. Decisive
+    persisted unbound output and atomically completed exact output are finalized
+    without creating a worker. Dispatch-uncertain, released, quarantined, and
+    legacy execution-uncertain entries never enter restart recovery. Failed
+    judgments are never retried merely because a process restarted. Every
+    recovery candidate id has an explicit started, finalized, skipped, or failed
+    outcome. *)
 val resume_persisted_auto_judges :
   base_path:string -> auto_judge_resume_report
 
@@ -106,9 +109,10 @@ type operator_recovery_report =
   ; queued : int
   }
 
-(** Reopen failed request-local judgments after an explicit operator selection
-    of Auto Judge, then activate one FIFO drain for each Keeper owner with
-    unresolved work in the workspace. *)
+(** Reopen unbound failed request-local judgments after an explicit operator
+    selection of Auto Judge, then activate one FIFO drain for each Keeper owner
+    with eligible unbound work in the workspace. Exact-bound and legacy
+    execution-uncertain entries remain operator-visible but are never queued. *)
 val request_operator_auto_judge_recovery :
   base_path:string -> (operator_recovery_report, string) result
 
@@ -118,6 +122,9 @@ val unavailable_reason_to_string : unavailable_reason -> string
 val decision_to_yojson : decision -> Yojson.Safe.t
 
 module For_testing : sig
+  val auto_judge_entry_ready :
+    Keeper_approval_queue.pending_approval -> bool
+
   val ready_auto_judges_for_owner :
     base_path:string ->
     keeper_name:string ->

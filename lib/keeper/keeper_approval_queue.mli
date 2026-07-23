@@ -11,6 +11,33 @@ type storage_error =
   ; reason : string
   }
 
+type summary_transition_rejection =
+  | Summary_exact_attempt_bound of exact_attempt_binding
+  | Summary_legacy_execution_uncertain of string
+
+type summary_transition_error =
+  | Summary_transition_storage_error of storage_error
+  | Summary_transition_rejected of summary_transition_rejection
+
+type exact_attempt_rejection =
+  | Exact_attempt_not_found of string
+  | Exact_attempt_key_mismatch of
+      { approval_id : string
+      ; input_hash : string
+      ; sequence : int
+      }
+  | Exact_attempt_invalid_identity of string
+  | Exact_attempt_summary_not_pending of string
+  | Exact_attempt_unbound_state of string
+  | Exact_attempt_legacy_execution_uncertain of string
+  | Exact_attempt_identity_conflict of exact_attempt_binding
+  | Exact_attempt_status_conflict of exact_attempt_binding
+  | Exact_attempt_content_conflict of string
+
+type exact_attempt_error =
+  | Exact_attempt_storage_error of storage_error
+  | Exact_attempt_rejected of exact_attempt_rejection
+
 type approved_resolution_request =
   { keeper_name : string
   ; tool_name : string
@@ -51,6 +78,8 @@ type install_report =
 type install_error = Install_storage_failed of storage_error
 
 val storage_error_to_string : storage_error -> string
+val summary_transition_error_to_string : summary_transition_error -> string
+val exact_attempt_error_to_string : exact_attempt_error -> string
 val grant_error_to_string : grant_error -> string
 val install_error_to_string : install_error -> string
 
@@ -237,27 +266,89 @@ val list_pending_entries : unit -> pending_approval list
 val get_pending_json : id:string -> Yojson.Safe.t option
 val get_pending_entry : id:string -> pending_approval option
 
-val mark_summary_pending : id:string -> (bool, storage_error) result
+val bind_summary_exact_attempt :
+  id:string ->
+  input_hash:string ->
+  sequence:int ->
+  slot_id:string ->
+  call_id:string ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  (bool, exact_attempt_error) result
+
+(** Durably bind one exact OAS attempt before provider dispatch. Repeating the
+    active identity is idempotent. A released attempt may be replaced only by a
+    new identity; every active, quarantined, or completed conflict fails closed. *)
+
+val release_summary_exact_attempt_before_dispatch :
+  id:string ->
+  input_hash:string ->
+  sequence:int ->
+  slot_id:string ->
+  call_id:string ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  (bool, exact_attempt_error) result
+
+(** Mark the matching binding released only after OAS proves the attempt stayed
+    before dispatch. The same release is idempotent. *)
+
+val quarantine_summary_exact_attempt :
+  id:string ->
+  input_hash:string ->
+  sequence:int ->
+  slot_id:string ->
+  call_id:string ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  cause:exact_attempt_quarantine_cause ->
+  (bool, exact_attempt_error) result
+
+(** Terminally quarantine a matching dispatch-uncertain binding with one closed
+    typed cause. The same identity and cause is idempotent. It can never return
+    to the legacy summary mutation path. *)
+
+val complete_summary_exact_attempt :
+  id:string ->
+  input_hash:string ->
+  sequence:int ->
+  slot_id:string ->
+  call_id:string ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  summary:hitl_context_summary ->
+  (bool, exact_attempt_error) result
+
+(** Commit validated MASC summary content and the exact binding's completed
+    status in one durable snapshot transaction. Identical completion is
+    idempotent; different content for the same attempt is a conflict. *)
+
+val mark_summary_pending : id:string -> (bool, summary_transition_error) result
 (** Atomically transition [Summary_not_requested] to [Summary_pending]. Returns
-    [false] for a missing entry or any already-started/terminal summary state,
-    so a Gate can prevent duplicate judge workers. *)
+      [false] for a missing entry or any already-started/terminal summary state,
+      so a Gate can prevent duplicate judge workers. A bound or quarantined
+      exact attempt is rejected explicitly. *)
 
 val attach_summary :
-  id:string -> hitl_context_summary -> (bool, storage_error) result
+  id:string -> hitl_context_summary -> (bool, summary_transition_error) result
 
 val mark_summary_failed :
-  id:string -> reason:string -> retryable:bool -> (bool, storage_error) result
+  id:string ->
+  reason:string ->
+  retryable:bool ->
+  (bool, summary_transition_error) result
 
 (** Durably transition any [Summary_failed] state back to the in-flight marker.
     Only explicit operator action calls this CAS, so the diagnostic [retryable]
     classification never controls work. There is no timer or retry count. *)
-val restart_failed_summary : id:string -> (bool, storage_error) result
+val restart_failed_summary : id:string -> (bool, summary_transition_error) result
 
 (** Explicit operator recovery: transition every failed summary for this
     workspace back to [Summary_not_requested] in one durable transaction.
     This includes failures previously classified terminal; only an operator
     action may reopen those entries. Returns the reopened approval ids. *)
-val restart_failed_summaries : base_path:string -> (string list, storage_error) result
+val restart_failed_summaries :
+  base_path:string -> (string list, summary_transition_error) result
 
 val pending_count : unit -> int
 val pending_count_for_keeper : keeper_name:string -> int

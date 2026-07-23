@@ -23,6 +23,7 @@ let make_keeper_tool_handler
       ?gate_context
       ?gate_grant
       ?record_gate_result
+      ?on_completed
       ?(pre_validate_input = fun input -> Ok input)
       ?(translate_input = fun j -> j)
       ?(validate_translated_input = true)
@@ -117,25 +118,32 @@ let make_keeper_tool_handler
               | Ok proc_mgr -> Some proc_mgr
               | Error _ -> None
             in
-            Keeper_tools_oas_handler_exec.execute_with_observers
-              ~name
-              ~config
-              ~meta
-              ~publication_recovery
-              ~ctx_snapshot
-              ?turn_sandbox_factory
-              ?search_fn
-              ?sw
-              ?clock
-              ?proc_mgr
-              ?net
-              ?continuation_channel
-              ?gate_context
-              ?gate_grant
-              ?oas_invocation
-              ~input
-              ()
-            |> record_result ~input
+            let result =
+              Keeper_tools_oas_handler_exec.execute_with_observers
+                ~name
+                ~config
+                ~meta
+                ~publication_recovery
+                ~ctx_snapshot
+                ?turn_sandbox_factory
+                ?search_fn
+                ?sw
+                ?clock
+                ?proc_mgr
+                ?net
+                ?continuation_channel
+                ?gate_context
+                ?gate_grant
+                ?oas_invocation
+                ~input
+                ()
+              |> record_result ~input
+            in
+            (match result with
+             | Tool_result.Completed _ ->
+               Option.iter (fun completed -> completed ()) on_completed
+             | Tool_result.Deferred _ | Tool_result.Failed _ -> ());
+            result
           in
           run_with_current_eio_context ?clock:current_clock ())
 ;;

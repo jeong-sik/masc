@@ -29,3 +29,7 @@ val make_tools
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> unit
   -> Agent_sdk.Tool.t list
+
+module For_testing : sig
+  val is_terminal_effect_handler : Keeper_tool_descriptor.runtime_handler -> bool
+end

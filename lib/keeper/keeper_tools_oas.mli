@@ -14,6 +14,7 @@
 type tool_bundle =
   { tools : Agent_sdk.Tool.t list
   ; cleanup : unit -> unit
+  ; terminal_effect_completed : unit -> bool
   }
 
 (** Per-keeper tool usage view from [Keeper_registry]. *)

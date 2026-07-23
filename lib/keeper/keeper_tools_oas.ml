@@ -12,6 +12,7 @@
 type tool_bundle =
   { tools : Agent_sdk.Tool.t list
   ; cleanup : unit -> unit
+  ; terminal_effect_completed : unit -> bool
   }
 
 (** Tool usage now lives in Keeper_registry (per-entry tool_usage Hashtbl).

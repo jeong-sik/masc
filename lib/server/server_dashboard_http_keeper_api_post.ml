@@ -1021,6 +1021,7 @@ let resume_error_status (error : Keeper_paused_work_resume_transaction.error) =
   | Durable_owner_identity_changed
   | Durable_owner_not_paused
   | Durable_owner_dead_tombstone
+  | Durable_owner_transcript_reset_required
   | Registry_owner_nonce_changed _
   | Registry_owner_identity_changed
   | Registry_owner_not_paused _ -> `Conflict

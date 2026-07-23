@@ -353,8 +353,19 @@ let () =
     let paused = read_meta_exn config meta.name in
     check "transcript corruption pauses durable keeper" paused.paused;
     check
-      "transcript corruption uses existing unclassified pause surface"
-      (Option.is_none paused.latched_reason))
+      "transcript corruption persists typed reset-required latch"
+      (match paused.latched_reason with
+       | Some Keeper_latched_reason.Transcript_corruption_reset_required -> true
+       | Some
+           ( Keeper_latched_reason.Operator_paused _
+           | Keeper_latched_reason.Dead_tombstone )
+       | None ->
+         false);
+    let generic_resume = Keeper_meta_contract.mark_resumed paused in
+    check
+      "generic resume cannot clear transcript reset-required latch"
+      (generic_resume.paused
+       && generic_resume.latched_reason = paused.latched_reason))
 ;;
 
 let () =

@@ -740,8 +740,43 @@ let check_cancellation_after_exact_terminal_settlement settlement =
   if settlement_is_exact_output_cancellation settlement then Eio.Fiber.check ()
 ;;
 
+type transcript_corruption_commit =
+  | Transcript_pause_persisted
+  | Transcript_pause_and_settlement_persisted
+  | Transcript_pause_persistence_failed of string
+  | Transcript_pause_settlement_failed of string
+
+let commit_transcript_corruption ~stop ~persist_pause ?settle () =
+  Atomic.set stop true;
+  Eio.Cancel.protect (fun () ->
+    let guarded_call ~site call =
+      try call () with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printf.sprintf "%s raised: %s" site (Printexc.to_string exn))
+    in
+    match guarded_call ~site:"transcript corruption pause CAS" persist_pause with
+    | Error detail -> Transcript_pause_persistence_failed detail
+    | Ok `No_durable_meta ->
+      Transcript_pause_persistence_failed
+        "transcript corruption pause has no durable Keeper metadata"
+    | Ok `Persisted ->
+      (match settle with
+       | None -> Transcript_pause_persisted
+       | Some settle ->
+         (match guarded_call ~site:"transcript corruption settlement" settle with
+          | Ok () -> Transcript_pause_and_settlement_persisted
+          | Error detail -> Transcript_pause_settlement_failed detail)))
+;;
+
 module For_testing = struct
+  type nonrec transcript_corruption_commit = transcript_corruption_commit =
+    | Transcript_pause_persisted
+    | Transcript_pause_and_settlement_persisted
+    | Transcript_pause_persistence_failed of string
+    | Transcript_pause_settlement_failed of string
+
   let exact_execution_guard = exact_execution_guard
+  let commit_transcript_corruption = commit_transcript_corruption
 
   let check_cancellation_after_exact_terminal_settlement =
     check_cancellation_after_exact_terminal_settlement
@@ -790,6 +825,7 @@ let run_keepalive_unified_turn
     let cycle_outcome_ref = ref None in
     let lease_settled = ref false in
     let settlement_failed = ref false in
+    let transcript_corruption_detected = ref false in
     let record_settlement_failure message =
       settlement_failed := true;
       match !cycle_outcome_ref with
@@ -1185,48 +1221,83 @@ let run_keepalive_unified_turn
           Cycle.meta cycle_outcome)
         else meta_after_triage
       in
-      let meta_after_cycle =
+      let transcript_corruption_commit =
         match !cycle_outcome_ref with
         | Some (Cycle.Failed { failure; _ }) ->
           (match failure.Keeper_unified_turn.source_lease_disposition with
            | Keeper_unified_turn.Pause_after_transcript_corruption _ ->
-             (* Set the in-process stop before storage I/O so an unexpected
-                persistence exception still cannot spin this corrupted
-                checkpoint in the current process. The CAS writer below owns
-                the restart-safe pause boundary. *)
-             Atomic.set stop true;
-             (match
-                Keeper_meta_store.persist_transcript_corruption_pause
-                  ctx.config
-                  ~keeper_name:meta_after_triage.name
-              with
-              | Ok `Persisted -> ()
-              | Ok `No_durable_meta ->
-                let message =
-                  "transcript corruption pause has no durable keeper metadata"
-                in
-                Log.Keeper.error
-                  ~keeper_name:meta_after_triage.name
-                  "%s"
-                  message;
-                record_settlement_failure message
-              | Error message ->
+             transcript_corruption_detected := true;
+             let settle =
+               match !claimed_lease with
+               | None -> None
+               | Some lease ->
+                 Some
+                   (fun () ->
+                      let settled_at = Time_compat.now () in
+                      let settlement =
+                        settlement_of_failure
+                          ~settled_at
+                          ~compaction_consecutive_failures:
+                            meta_after_triage.runtime.compaction_rt.consecutive_failures
+                          failure
+                      in
+                      match
+                        settle_claimed_lease
+                          ~exact_execution:true
+                          ~base_path:ctx.config.base_path
+                          ~keeper_name:meta_after_triage.name
+                          ~settled_at
+                          ~lease
+                          ~settlement
+                          ()
+                      with
+                      | Error detail -> Error detail
+                      | Ok
+                          ( Keeper_registry_event_queue.Settled _
+                          | Keeper_registry_event_queue.Already_settled _ ) ->
+                        lease_settled := true;
+                        project_transition_outbox
+                          ~base_path:ctx.config.base_path
+                          ~keeper_name:meta_after_triage.name
+                      | Ok
+                          (Keeper_registry_event_queue.Committed_followup_failed
+                            { detail; _ }) ->
+                        lease_settled := true;
+                        Error detail)
+             in
+             let committed =
+               commit_transcript_corruption
+                 ~stop
+                 ~persist_pause:(fun () ->
+                   Keeper_meta_store.persist_transcript_corruption_pause
+                     ctx.config
+                     ~keeper_name:meta_after_triage.name)
+                 ?settle
+                 ()
+             in
+             (match committed with
+              | Transcript_pause_persisted
+              | Transcript_pause_and_settlement_persisted ->
+                ()
+              | Transcript_pause_persistence_failed message ->
                 Log.Keeper.error
                   ~keeper_name:meta_after_triage.name
                   "transcript corruption pause persistence failed: %s"
                   message;
+                record_settlement_failure message
+              | Transcript_pause_settlement_failed message ->
+                Log.Keeper.error
+                  ~keeper_name:meta_after_triage.name
+                  "transcript corruption terminal settlement failed: %s"
+                  message;
                 record_settlement_failure message);
-             { meta_after_cycle with
-               paused = true
-             ; latched_reason = None
-             ; updated_at = Keeper_meta_contract.now_iso ()
-             }
+             Some committed
            | Keeper_unified_turn.Follow_failure_route
            | Keeper_unified_turn.Follow_failure_route_after_no_compaction _
            | Keeper_unified_turn.Requeue_after_context_compaction _
            | Keeper_unified_turn.Escalate_after_exact_output_terminal _
            | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
-             meta_after_cycle)
+             None)
         | Some
             ( Cycle.Completed _
             | Cycle.Cancelled _
@@ -1237,12 +1308,21 @@ let run_keepalive_unified_turn
             | Cycle.Manual_compaction_failed _
             | Cycle.Manual_compaction_not_applied _ )
         | None ->
-          meta_after_cycle
+          None
+      in
+      let meta_after_cycle =
+        match transcript_corruption_commit with
+        | None -> meta_after_cycle
+        | Some _ ->
+          Keeper_meta_contract.mark_transcript_corruption_reset_required
+            meta_after_cycle
       in
       (* Queue ownership follows the typed cycle outcome.  Pending removal,
          lease removal, an optional judgment successor, and the transition
          outbox receipt commit in one event-queue.json rename. *)
-      (match !claimed_lease with
+      (if Option.is_none transcript_corruption_commit
+       then
+         match !claimed_lease with
        | None ->
          (match !cycle_outcome_ref with
           | Some (Cycle.Failed { failure; _ }) ->
@@ -1394,15 +1474,19 @@ let run_keepalive_unified_turn
     with
     | Eio.Cancel.Cancelled _ as e ->
       let backtrace = Printexc.get_raw_backtrace () in
-      if not (settle_exact_terminal_after_cancellation ())
+      if
+        (not !transcript_corruption_detected)
+        && not (settle_exact_terminal_after_cancellation ())
       then requeue_unsettled Keeper_registry_event_queue.Cancelled;
       Printexc.raise_with_backtrace e backtrace
     | Keeper_registry.Keeper_fiber_crash as e ->
       let backtrace = Printexc.get_raw_backtrace () in
-      requeue_unsettled Keeper_registry_event_queue.Cycle_crashed;
+      if not !transcript_corruption_detected
+      then requeue_unsettled Keeper_registry_event_queue.Cycle_crashed;
       Printexc.raise_with_backtrace e backtrace
     | exn ->
-      requeue_unsettled Keeper_registry_event_queue.Cycle_crashed;
+      if not !transcript_corruption_detected
+      then requeue_unsettled Keeper_registry_event_queue.Cycle_crashed;
       (* T6 audit: keep the fiber alive, but surface the crash as a
          turn failure so the caller does not dispatch
          [Turn_succeeded] for a cycle that never completed. *)

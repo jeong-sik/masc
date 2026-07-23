@@ -123,23 +123,35 @@ let persist_directive_meta_update
 ;;
 
 let directive_paused_meta (meta : keeper_meta) paused =
-  {
-    meta with
-    paused;
-    (* A gRPC pause directive is an operator/control-plane pause; record it
-       so the status bridge can name it. Resume/wakeup (paused=false) clears
-       the reason together with the pause bit. Observability only — the
-       pause/resume decision is carried by [paused] as before. *)
-    latched_reason =
-      (if paused
-       then
-         Some
-           (Keeper_latched_reason.Operator_paused
-              { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive })
-       else None);
-    runtime = { meta.runtime with last_blocker = None };
-    updated_at = now_iso ();
-  }
+  if paused
+  then
+    { meta with
+      paused = true
+    ; latched_reason =
+        Some
+          (Keeper_latched_reason.Operator_paused
+             { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive })
+    ; runtime = { meta.runtime with last_blocker = None }
+    ; updated_at = now_iso ()
+    }
+  else
+    { (Keeper_meta_contract.mark_resumed meta) with updated_at = now_iso () }
+;;
+
+let transcript_corruption_reset_required (meta : keeper_meta) =
+  match
+    Keeper_lifecycle_admission.state
+      ~paused:meta.paused
+      ~latched_reason:meta.latched_reason
+  with
+  | Keeper_lifecycle_admission.Paused
+      (Keeper_lifecycle_admission.Classified
+        Keeper_latched_reason.Transcript_corruption_reset_required) ->
+    true
+  | Keeper_lifecycle_admission.Active
+  | Keeper_lifecycle_admission.Paused _
+  | Keeper_lifecycle_admission.Dead_tombstone ->
+    false
 ;;
 
 (* Unknown-keeper directives can repeat while boot/crash truth is still
@@ -269,39 +281,51 @@ let set_keeper_paused_state ~agent_name paused =
         ();
       log_directive_agent_not_in_registry ~agent_name ~action)
     (fun entry ->
-       let previous_failure_reason = entry.last_failure_reason in
-       let updated_meta = directive_paused_meta entry.meta paused in
-       (match persist_directive_meta_update entry ~updated_meta with
-        | Error err ->
-          Keeper_registry.set_failure_reason
-            ~base_path:entry.base_path
-            entry.name
-            previous_failure_reason;
+       if (not paused) && transcript_corruption_reset_required entry.meta
+       then (
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string DirectiveFailures)
             ~labels:
-              [ "keeper", entry.name; "site", "pause_resume_persist" ]
+              [ "keeper", entry.name; "site", "resume_reset_required" ]
             ();
           Log.Keeper.error
-            "directive %s: meta persist failed for %s: %s"
-            (if paused then "pause" else "resume")
-            entry.name
-            err
-        | Ok () ->
-          Keeper_registry.dispatch_event_unit
-            ~base_path:entry.base_path
-            entry.name
-            (if paused
-             then Keeper_state_machine.Operator_pause
-             else Keeper_state_machine.Operator_resume);
-          if not paused
-          then (
-            (* tla-lint: allow-mutation: fiber signal — Atomic flag wakes the keeper from Eio.Promise.await *)
-            Atomic.set entry.fiber_wakeup true;
-            (* Cycle 43: KeeperHeartbeat.tla WakeupSignal post-condition.
-               The [@@fsm_guard] PPX routes the assertion through
-               [wrap_unit ~stage:"guard"] automatically. *)
-            post_wakeup_signal ~wakeup:entry.fiber_wakeup)))
+            "directive resume denied for %s: transcript corruption requires \
+             checkpoint reset"
+            entry.name)
+       else (
+         let previous_failure_reason = entry.last_failure_reason in
+         let updated_meta = directive_paused_meta entry.meta paused in
+         match persist_directive_meta_update entry ~updated_meta with
+         | Error err ->
+           Keeper_registry.set_failure_reason
+             ~base_path:entry.base_path
+             entry.name
+             previous_failure_reason;
+           Otel_metric_store.inc_counter
+             Keeper_metrics.(to_string DirectiveFailures)
+             ~labels:
+               [ "keeper", entry.name; "site", "pause_resume_persist" ]
+             ();
+           Log.Keeper.error
+             "directive %s: meta persist failed for %s: %s"
+             (if paused then "pause" else "resume")
+             entry.name
+             err
+         | Ok () ->
+           Keeper_registry.dispatch_event_unit
+             ~base_path:entry.base_path
+             entry.name
+             (if paused
+              then Keeper_state_machine.Operator_pause
+              else Keeper_state_machine.Operator_resume);
+           if not paused
+           then (
+             (* tla-lint: allow-mutation: fiber signal — Atomic flag wakes the keeper from Eio.Promise.await *)
+             Atomic.set entry.fiber_wakeup true;
+             (* Cycle 43: KeeperHeartbeat.tla WakeupSignal post-condition.
+                The [@@fsm_guard] PPX routes the assertion through
+                [wrap_unit ~stage:"guard"] automatically. *)
+             post_wakeup_signal ~wakeup:entry.fiber_wakeup)))
 ;;
 
 let wakeup_keeper_by_agent_name ~agent_name =

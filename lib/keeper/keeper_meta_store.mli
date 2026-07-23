@@ -277,5 +277,6 @@ val persist_transcript_corruption_pause :
   keeper_name:string ->
   ([ `Persisted | `No_durable_meta ], string) result
 (** CAS-merge the existing fail-closed pause surface after structural
-    transcript corruption. Concurrent operator/dead-tombstone latches win;
-    no automatic retry counter or migration state is created. *)
+    transcript corruption. A dead tombstone remains stronger and every other
+    live/pause state becomes typed reset-required state. No decoder, migration,
+    or automatic retry state is created. *)

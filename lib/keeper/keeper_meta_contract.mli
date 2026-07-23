@@ -299,18 +299,18 @@ type keeper_meta = {
   meta_version : int;
 }
 
-(** Sanctioned unpause transform: sets [paused = false] while clearing the
-    typed latch ([Dead_tombstone] included) and [runtime.last_blocker], so a
-    resumed keeper can never retain a terminal latch. Callers set [updated_at]
-    themselves. Dead-tombstone revival still runs the crash-recoverable
-    transaction at its call site; this only normalizes the meta fields. *)
+(** Stamp the current Keeper state as structurally corrupted and requiring
+    checkpoint reset. This is current-state persistence, not a migration. *)
+val mark_transcript_corruption_reset_required : keeper_meta -> keeper_meta
+
+(** Sanctioned generic unpause transform. Clears ordinary/operator/dead
+    latches with the pause bit and [runtime.last_blocker]. A
+    [Transcript_corruption_reset_required] latch is returned unchanged, so
+    generic resume cannot replay a poisoned checkpoint. *)
 val mark_resumed : keeper_meta -> keeper_meta
 
-(** [dead_tombstone_pause_violation m] is [Some detail] when [m] has
-    [paused = false] together with a [Dead_tombstone] latch — the
-    un-recoverable, out-of-invariant state. Used by the meta store to reject
-    such writes at the boundary. [None] when the meta is consistent. *)
-val dead_tombstone_pause_violation : keeper_meta -> string option
+(** Reject [paused = false] paired with a terminal or reset-required latch. *)
+val terminal_latch_pause_violation : keeper_meta -> string option
 
 (** Overlay TOML/persona defaults onto persisted runtime meta for
     status-facing reads. Persisted runtime JSON intentionally omits

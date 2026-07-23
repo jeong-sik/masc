@@ -252,6 +252,20 @@ val run_heartbeat_loop :
   wakeup:bool Atomic.t -> unit
 
 module For_testing : sig
+  type transcript_corruption_commit =
+    | Transcript_pause_persisted
+    | Transcript_pause_and_settlement_persisted
+    | Transcript_pause_persistence_failed of string
+    | Transcript_pause_settlement_failed of string
+
+  val commit_transcript_corruption :
+    stop:bool Atomic.t ->
+    persist_pause:
+      (unit -> ([ `Persisted | `No_durable_meta ], string) result) ->
+    ?settle:(unit -> (unit, string) result) ->
+    unit ->
+    transcript_corruption_commit
+
   val exact_execution_guard :
     base_path:string ->
     keeper_name:string ->

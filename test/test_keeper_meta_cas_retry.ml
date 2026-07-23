@@ -382,7 +382,7 @@ let test_mark_resumed_clears_dead_tombstone_and_persists () =
         updated_at = Keeper_meta_contract.now_iso () }
     in
     check (option string) "mark_resumed leaves no invariant violation"
-      None (Keeper_meta_contract.dead_tombstone_pause_violation resumed);
+      None (Keeper_meta_contract.terminal_latch_pause_violation resumed);
     (match Keeper_meta_store.write_meta config resumed with
      | Ok () -> () | Error e -> fail ("resumed write should succeed: " ^ e));
     let after = match Keeper_meta_store.read_meta config "resume-dead" with
@@ -402,11 +402,11 @@ let test_dead_tombstone_pause_violation_classifies () =
       latched_reason = Some Keeper_latched_reason.Dead_tombstone } in
   let unpaused_none = { base with paused = false; latched_reason = None } in
   check bool "paused+dead is valid (no violation)" true
-    (Option.is_none (Keeper_meta_contract.dead_tombstone_pause_violation paused_dead));
+    (Option.is_none (Keeper_meta_contract.terminal_latch_pause_violation paused_dead));
   check bool "unpaused+dead is a violation" true
-    (Option.is_some (Keeper_meta_contract.dead_tombstone_pause_violation unpaused_dead));
+    (Option.is_some (Keeper_meta_contract.terminal_latch_pause_violation unpaused_dead));
   check bool "unpaused+no-latch is valid" true
-    (Option.is_none (Keeper_meta_contract.dead_tombstone_pause_violation unpaused_none))
+    (Option.is_none (Keeper_meta_contract.terminal_latch_pause_violation unpaused_none))
 
 (* PR #24351 review (P1): [Keeper_turn_up_update.revival_decision] is the
    extracted decision that used to be inlined in [update_keeper]. Before

@@ -322,12 +322,8 @@ let write_meta_error_to_string = function
 let write_meta_typed ?lifecycle_token config (m : Keeper_meta_contract.keeper_meta) =
   let path = keeper_meta_path config m.name in
   (* Write-boundary invariant (fail-closed): never persist [paused=false] with
-     a terminal [Dead_tombstone] latch. That split is un-recoverable (lifecycle
-     admission denies by the latch alone) and is only produced by a writer that
-     cleared [paused] without clearing the latch. Rejecting here — rather than
-     silently repairing — forces resume writers through [mark_resumed] / dead
-     revival, keeping the illegal state unrepresentable on disk. *)
-  match Keeper_meta_contract.dead_tombstone_pause_violation m with
+     a terminal or reset-required latch. *)
+  match Keeper_meta_contract.terminal_latch_pause_violation m with
   | Some detail -> Error (Invariant_violation { keeper_name = m.name; detail })
   | None ->
   Keeper_lifecycle_reservation.with_key_lock
@@ -607,9 +603,9 @@ let persist_compaction_outcome config ~keeper_name ~outcome
 ;;
 
 (* Structural transcript corruption is deterministic current-state damage, not
-   a retry class. Persist the existing fail-closed pause surface before the
-   owning lease is terminally settled. The merge preserves any stronger pause
-   or dead-tombstone latch won by a concurrent operator/lifecycle writer. *)
+   a retry class. Persist the typed reset-required latch before the owning
+   lease is terminally settled. A concurrent dead tombstone remains stronger;
+   an ordinary operator/unclassified pause is upgraded to reset-required. *)
 let persist_transcript_corruption_pause config ~keeper_name
   : ([ `Persisted | `No_durable_meta ], string) result
   =
@@ -619,15 +615,10 @@ let persist_transcript_corruption_pause config ~keeper_name
         ~paused:m.paused
         ~latched_reason:m.latched_reason
     with
-    | Keeper_lifecycle_admission.Active ->
-      { m with
-        paused = true
-      ; latched_reason = None
-      ; updated_at = Keeper_meta_contract.now_iso ()
-      }
-    | Keeper_lifecycle_admission.Paused _
-    | Keeper_lifecycle_admission.Dead_tombstone ->
-      m
+    | Keeper_lifecycle_admission.Dead_tombstone -> m
+    | Keeper_lifecycle_admission.Active
+    | Keeper_lifecycle_admission.Paused _ ->
+      Keeper_meta_contract.mark_transcript_corruption_reset_required m
   in
   match read_meta config keeper_name with
   | Error msg -> Error msg

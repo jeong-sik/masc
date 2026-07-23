@@ -36,7 +36,7 @@ type revival_decision = {
     [Dead_tombstone] with [paused = true], but a resume writer that clears
     [paused] without clearing the latch can strand a keeper at
     [paused = false] + [Dead_tombstone] (see
-    [Keeper_meta_contract.dead_tombstone_pause_violation]). Lifecycle
+    [Keeper_meta_contract.terminal_latch_pause_violation]). Lifecycle
     admission denies by the latch regardless of [paused], so a stranded
     keeper needs a revival path that does not require [paused = true].
 

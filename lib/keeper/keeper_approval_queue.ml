@@ -2073,6 +2073,15 @@ let fail_summary_exact_attempt_before_dispatch =
     ~save_file_atomic_strict_staged:Fs_compat.save_file_atomic_strict_staged
 ;;
 
+let exact_attempt_quarantine_cause_is_public = function
+  | Exact_restart_uncertainty -> false
+  | Exact_flow_execution_failed
+  | Exact_cancellation
+  | Exact_attempt_replay
+  | Exact_domain_invalid_output
+  | Exact_terminal_persistence_failure -> true
+;;
+
 let quarantine_summary_exact_attempt_with
       ~save_file_atomic_strict_staged
       ~id
@@ -2113,7 +2122,12 @@ let quarantine_summary_exact_attempt_with
                (Exact_attempt_rejected
                   (Exact_attempt_identity_conflict existing))
            | Exact_bound existing ->
-             (match existing.status with
+             if not (exact_attempt_quarantine_cause_is_public cause) then
+               Error
+                 (Exact_attempt_rejected
+                    (Exact_attempt_status_conflict existing))
+             else
+               (match existing.status with
               | Exact_dispatch_uncertain ->
                 let quarantined =
                   exact_attempt_binding_with_status

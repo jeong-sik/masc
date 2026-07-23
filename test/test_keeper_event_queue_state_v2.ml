@@ -2370,6 +2370,36 @@ let test_pending_cancellation_wal_replays_before_removal () =
     | Error detail -> Alcotest.failf "committed pending cancellation did not replay: %s" detail)
 ;;
 
+let test_incompatible_settlement_wal_requires_reset_without_rewrite () =
+  with_temp_dir "keeper-event-queue-incompatible-settlement-wal-hardcut" (fun base_path ->
+    let keeper_name = "incompatible_wal_hardcut_owner" in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending (stimulus "incompatible-wal-source" 1.0))
+    |> require_ok "seed current primary for incompatible WAL hard cut";
+    let wal_path =
+      Filename.concat
+        (keeper_dir ~base_path ~keeper_name)
+        "event-queue-settlements.jsonl"
+    in
+    let incompatible_wal_bytes = "{}\n" in
+    Fs_compat.save_file_atomic wal_path incompatible_wal_bytes
+    |> require_ok "write incompatible WAL";
+    (match Persistence.load_state_result ~base_path ~keeper_name with
+     | Error message ->
+       Alcotest.(check string)
+         "incompatible WAL requires an explicit reset"
+         (Printf.sprintf
+            "settlement WAL at %s is incompatible (reset required): settlement WAL row \
+             fields are not exact"
+            wal_path)
+         message
+     | Ok _ -> Alcotest.fail "incompatible settlement WAL was replayed");
+    Alcotest.(check string)
+      "hard cut does not rewrite incompatible WAL"
+      incompatible_wal_bytes
+      (Fs_compat.load_file wal_path))
+;;
+
 let test_context_compaction_retry_is_durable_and_lane_local () =
   with_temp_dir "keeper-event-queue-v2-retry-tail" (fun base_path ->
     let keeper_name = "retry_tail_keeper" in
@@ -2530,7 +2560,14 @@ let test_unsupported_snapshots_fail_closed () =
     write_queue primary (queue [ stimulus "old-schema" 3.0 ]);
     let unsupported_bytes = Fs_compat.load_file primary in
     (match Persistence.load_state_result ~base_path ~keeper_name with
-     | Error _ -> ()
+     | Error message ->
+       Alcotest.(check string)
+         "incompatible snapshot requires an explicit reset"
+         (Printf.sprintf
+            "event queue snapshot at %s is incompatible (reset required): snapshot missing \
+             required field schema"
+            primary)
+         message
      | Ok _ -> Alcotest.fail "old primary schema was migrated");
     Alcotest.(check string)
       "hard cut does not rewrite unsupported state"
@@ -2876,6 +2913,10 @@ let () =
             "pending cancellation WAL replays before removal"
             `Quick
             test_pending_cancellation_wal_replays_before_removal
+        ; Alcotest.test_case
+            "incompatible settlement WAL requires reset without rewrite"
+            `Quick
+            test_incompatible_settlement_wal_requires_reset_without_rewrite
         ; Alcotest.test_case
             "unsupported snapshots fail closed"
             `Quick

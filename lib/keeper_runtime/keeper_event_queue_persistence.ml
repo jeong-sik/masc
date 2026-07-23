@@ -299,14 +299,25 @@ let snapshot_read_error_kind_to_string = function
   | Parse_failed -> "parse_failed"
 ;;
 
+let reset_required_message ~path ~surface detail =
+  Printf.sprintf "%s at %s is incompatible (reset required): %s" surface path detail
+;;
+
 let read_json_if_present path =
   try
     if Sys.file_exists path
     then
-      (match Safe_ops.read_json_file_safe path with
-       | Ok json -> Ok (Some json)
+      (match Safe_ops.read_file_safe path with
        | Error message ->
-         Error (Printf.sprintf "failed to read %s: %s" path message))
+         Error (Printf.sprintf "failed to read %s: %s" path message)
+       | Ok bytes ->
+         (try Ok (Some (Yojson.Safe.from_string bytes)) with
+          | Yojson.Json_error detail ->
+            Error
+              (reset_required_message
+                 ~path
+                 ~surface:"event queue snapshot"
+                 ("invalid JSON: " ^ detail))))
     else Ok None
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -334,11 +345,21 @@ let read_primary_unlocked owner =
   | Ok None -> Ok Primary_missing
   | Ok (Some json) ->
     (match schema_field json with
-     | Error message -> Error (Printf.sprintf "%s: %s" path message)
+     | Error message ->
+       Error
+         (reset_required_message
+            ~path
+            ~surface:"event queue snapshot"
+            message)
      | Ok _ ->
        (match State.of_yojson json with
         | Ok state -> Ok (Primary_current state)
-        | Error message -> Error (Printf.sprintf "%s: %s" path message)))
+        | Error message ->
+          Error
+            (reset_required_message
+               ~path
+               ~surface:"event queue snapshot"
+               message)))
 ;;
 
 let reject_unsupported_inflight owner =
@@ -376,21 +397,27 @@ let settlement_wal_entry_to_line owner entry =
 
 let settlement_wal_entry_of_json owner = function
   | `Assoc fields ->
-    (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
-     | [ ("base_path", `String base_path)
-       ; ("keeper_name", `String keeper_name)
-       ; ("outbox_entry", entry)
-       ; ("schema", `String schema)
-       ] ->
-       if not (String.equal schema "masc.keeper_event_queue.settlement.v2")
-       then Error (Printf.sprintf "unsupported settlement WAL schema: %s" schema)
-       else if
-         not
-           (String.equal base_path (Owner_lock.base_path owner)
-            && String.equal keeper_name (keeper_name_of_owner owner))
-       then Error "settlement WAL row owner does not match its Keeper lane"
-       else State.outbox_entry_of_yojson entry
-     | _ -> Error "settlement WAL row fields are not exact")
+    (match List.assoc_opt "schema" fields with
+     | Some (`String schema)
+       when not (String.equal schema "masc.keeper_event_queue.settlement.v2") ->
+       Error
+         (Printf.sprintf
+            "unsupported settlement WAL schema (reset required): %s"
+            schema)
+     | _ ->
+       (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
+        | [ ("base_path", `String base_path)
+          ; ("keeper_name", `String keeper_name)
+          ; ("outbox_entry", entry)
+          ; ("schema", `String "masc.keeper_event_queue.settlement.v2")
+          ] ->
+          if
+            not
+              (String.equal base_path (Owner_lock.base_path owner)
+               && String.equal keeper_name (keeper_name_of_owner owner))
+          then Error "settlement WAL row owner does not match its Keeper lane"
+          else State.outbox_entry_of_yojson entry
+        | _ -> Error "settlement WAL row fields are not exact"))
   | _ -> Error "settlement WAL row must be a JSON object"
 ;;
 
@@ -421,10 +448,14 @@ let replay_settlement_wal_unlocked owner state =
     match slice.Fs_compat.Private_jsonl_slice.bytes with
     | "" -> Ok state
     | bytes ->
-      (match replay_settlement_wal_bytes owner state bytes with
-       | Error detail ->
-         Error (Printf.sprintf "failed to replay %s: %s" path detail)
-       | Ok replayed ->
+       (match replay_settlement_wal_bytes owner state bytes with
+        | Error detail ->
+          Error
+            (reset_required_message
+               ~path
+               ~surface:"settlement WAL"
+               detail)
+        | Ok replayed ->
          (match bump_revision replayed with
           | Error _ as error -> error
           | Ok replayed ->

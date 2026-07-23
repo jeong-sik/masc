@@ -18,7 +18,7 @@ open Keeper_memory_bank
 
 (* schema_version and the kind -> horizon mapping are fixed by
    keeper_memory_policy: schema 2, kind "progress" -> horizon "short_term". *)
-let progress_row ?(generation = 1) ~trace_id ~text : string =
+let progress_row ?(generation = 1) ~trace_id ~text () : string =
   `Assoc
     [ ("schema_version", `Int 2)
     ; ("kind", `String "progress")
@@ -47,7 +47,7 @@ let recurring_text =
 let input_rows () =
   [ "trace-a"; "trace-b"; "trace-c"; "trace-d" ]
   |> List.map (fun trace_id ->
-         parse_or_fail (progress_row ~trace_id ~text:recurring_text))
+         parse_or_fail (progress_row ~trace_id ~text:recurring_text ()))
 
 let same_trace_rows () =
   [ 2, "zeta checkpoint complete"
@@ -56,7 +56,7 @@ let same_trace_rows () =
   ]
   |> List.map (fun (generation, text) ->
          parse_or_fail
-           (progress_row ~generation ~trace_id:"trace-same" ~text))
+           (progress_row ~generation ~trace_id:"trace-same" ~text ()))
 
 let only_progress_consolidation rows =
   let consolidated, _dropped = consolidate_memory_notes rows in

@@ -28,6 +28,9 @@ let prune_flat_jsonl_older_than ~days dir =
   then 0
   else
     let cutoff =
+      (* NDT-OK: the wall clock is the explicit retention boundary for
+         mtime-based pruning; cleanup is idempotent maintenance and never
+         feeds deterministic replay logic. *)
       Unix.gettimeofday () -. (float_of_int days *. Masc_time_constants.day)
     in
     Array.fold_left

@@ -225,9 +225,27 @@ let parse_source_terminal = function
   | _ -> Error "settle_from_source_terminal request fields are not exact"
 ;;
 
+(* Wire-compat (#25599): pre-rename clients send the fencing counter as
+   ["owner_generation"]. During the deprecation window both keys are accepted;
+   the new ["owner_nonce"] key wins when a request carries both. Normalising to
+   the new key keeps the exact-field parsers below as the single authority on
+   request shape. *)
+let normalize_legacy_owner_generation_key fields =
+  if List.mem_assoc "owner_nonce" fields
+  then
+    List.filter
+      (fun (name, _) -> not (String.equal name "owner_generation"))
+      fields
+  else
+    List.map
+      (fun (name, value) ->
+        if String.equal name "owner_generation" then "owner_nonce", value else name, value)
+      fields
+;;
+
 let of_yojson = function
   | `Assoc fields ->
-    let fields = sorted fields in
+    let fields = sorted (normalize_legacy_owner_generation_key fields) in
     (match List.assoc_opt "operation" fields, List.assoc_opt "source_state" fields with
      | Some (`String "resume_owner"), _ -> parse_resume fields
      | Some (`String "cancel_accepted"), Some (`String "pending") ->

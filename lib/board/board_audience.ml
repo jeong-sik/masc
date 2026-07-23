@@ -1,31 +1,11 @@
 include Board_types
 
-let trim_token_edges value =
-  let is_word = function
-    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '@' | '_' | '-' -> true
-    | _ -> false
-  in
-  let length = String.length value in
-  let first = ref 0 in
-  let last = ref (length - 1) in
-  while !first < length && not (is_word value.[!first]) do
-    incr first
-  done;
-  while !last >= !first && not (is_word value.[!last]) do
-    decr last
-  done;
-  if !last < !first then "" else String.sub value !first (!last - !first + 1)
-;;
-
-let normalized_tokens content =
-  content
-  |> String.map (function
-    | '\t' | '\n' | '\r' -> ' '
-    | character -> character)
-  |> String.split_on_char ' '
-  |> List.map trim_token_edges
-  |> List.filter (fun token -> not (String.equal token ""))
-;;
+(* The tokenization grammar (edge trimming, whitespace splitting, [@@]
+   selectors, [@] target candidates) is shared with the Keeper write
+   boundary through [Board_addressing] (issue #25601).  This module owns
+   only the Board identity policy: candidates are validated through
+   [Agent_id.of_string], which is case-sensitive, and invalid candidates
+   fail closed as [Malformed_targets]. *)
 
 type explicit_address =
   | No_explicit_address
@@ -39,43 +19,30 @@ let compare_agent_id left right =
 ;;
 
 let explicit_address_of_text content =
-  let tokens = normalized_tokens content in
-  let selectors =
-    tokens
-    |> List.filter_map (fun token ->
-      if String.length token >= 2 && String.starts_with ~prefix:"@@" token
-      then
-        Some
-          (String.sub token 2 (String.length token - 2)
-           |> String.lowercase_ascii)
-      else None)
-    |> List.sort_uniq String.compare
-  in
-  if selectors <> [] && List.for_all (String.equal "all") selectors
-  then Broadcast_all
-  else if selectors <> []
-  then Unsupported_broadcast selectors
-  else (
+  match Board_addressing.parse content with
+  | Board_addressing.Broadcast_all -> Broadcast_all
+  | Board_addressing.Unsupported_broadcast selectors ->
+    Unsupported_broadcast selectors
+  | Board_addressing.No_explicit_address -> No_explicit_address
+  | Board_addressing.Raw_targets candidates ->
     let targets, malformed =
       List.fold_left
-        (fun (targets, malformed) token ->
-          if Char.equal token.[0] '@'
-             && not (String.starts_with ~prefix:"@@" token)
-          then
-            let candidate = String.sub token 1 (String.length token - 1) in
-            match Agent_id.of_string candidate with
-            | Ok target -> target :: targets, malformed
-            | Error _ -> targets, token :: malformed
-          else targets, malformed)
+        (fun (targets, malformed) candidate ->
+          match Agent_id.of_string candidate with
+          | Ok target -> target :: targets, malformed
+          | Error _ ->
+            (* Report the original [@]-prefixed token so the error message
+               shows what the author typed. *)
+            targets, (Board_addressing.target_prefix ^ candidate) :: malformed)
         ([], [])
-        tokens
+        candidates
     in
-    match List.sort_uniq String.compare malformed with
-    | _ :: _ as malformed -> Malformed_targets malformed
-    | [] ->
-      (match List.sort_uniq compare_agent_id targets with
-       | [] -> No_explicit_address
-       | _ :: _ as targets -> Explicit_targets targets))
+    (match List.sort_uniq String.compare malformed with
+     | _ :: _ as malformed -> Malformed_targets malformed
+     | [] ->
+       (match List.sort_uniq compare_agent_id targets with
+        | [] -> No_explicit_address
+        | _ :: _ as targets -> Explicit_targets targets))
 ;;
 
 let direct_targets_of_text content =

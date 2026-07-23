@@ -39,6 +39,9 @@
   masc_random_id
   masc.config
   masc.masc_board
+  ;; Shared @-mention addressing grammar (issue #25601) — also used by the
+  ;; Keeper write boundary via the masc umbrella.
+  masc.board_addressing
   masc_types
   masc_core
   masc_log

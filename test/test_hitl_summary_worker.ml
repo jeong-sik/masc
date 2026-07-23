@@ -78,6 +78,7 @@ let sample_entry : Q.pending_approval =
   ; continuation_channel = Keeper_continuation_channel.unrouted "test"
   ; audit_base_path = Filename.get_temp_dir_name ()
   ; summary_status = Q.Summary_not_requested
+  ; exact_attempt = Q.Exact_unbound
   }
 ;;
 

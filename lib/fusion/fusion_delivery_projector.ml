@@ -28,6 +28,26 @@ let projection_error_to_string = function
   | Projection_failed detail -> "Fusion terminal projection failed: " ^ detail
 ;;
 
+(** Sink failure codes are derived from the typed error — never the other way
+    around. Only errors that are actually delivered through
+    [Fusion_sink.emit_failure] have a code; anything else is a programmer
+    error, so it fails fast instead of silently inventing a string. *)
+let projection_error_failure_code = function
+  | Evidence_unavailable -> "evidence_unavailable"
+  | ( Invalid_request_id _
+    | Obligation_unavailable _
+    | Identity_mismatch _
+    | Non_durable_settlement
+    | Ambiguous_settlement
+    | Nonterminal_status _
+    | Evidence_invalid _
+    | Projection_failed _
+    | Obligation_removal_failed _ ) as error ->
+    invalid_arg
+      ("projection error is not delivered as a sink failure: "
+       ^ projection_error_to_string error)
+;;
+
 let ( let* ) = Result.bind
 
 let request_id_of_entry (entry : Keeper_msg_async.entry) =
@@ -118,10 +138,11 @@ let project_entry ~base_path (entry : Keeper_msg_async.entry) =
          Remediate by delivering a typed failure through the same fail-closed
          sink and then clearing the obligation (a failed failure-projection
          still retains it). *)
+      let error = Evidence_unavailable in
       Fusion_sink.emit_failure ~base_dir:base_path ~keeper:payload.keeper_name
         ~run_id:entry.request_id ~channel:payload.channel
-        ~failure_code:"evidence_unavailable"
-        ~detail:"computation completed successfully without deliberation evidence"
+        ~failure_code:(projection_error_failure_code error)
+        ~detail:(projection_error_to_string error)
       |> Result.map_error (fun detail -> Projection_failed detail)
     | status ->
       (match failure_of_status status with

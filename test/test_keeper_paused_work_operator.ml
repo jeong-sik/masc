@@ -168,6 +168,59 @@ let test_strict_request_codec () =
    | Ok _ -> Alcotest.fail "source-terminal request accepted a mismatched receipt")
 ;;
 
+(* Regression (#25599): pre-rename clients send the fencing counter as
+   ["owner_generation"]. During the deprecation window the operator request
+   codec accepts the legacy key; the new ["owner_nonce"] key wins when a
+   request carries both. *)
+let test_legacy_owner_generation_key_is_accepted () =
+  let legacy_resume =
+    common
+      "resume_owner"
+      [ "owner_generation", `Int 7
+      ; "operator_operation_id", `String "operator-resume-legacy"
+      ]
+  in
+  (match Operator.request_of_yojson legacy_resume with
+   | Ok
+       (Operator.Resume_owner
+         { owner_nonce = 7; operator_operation_id = "operator-resume-legacy" }) ->
+     ()
+   | Ok _ -> Alcotest.fail "legacy resume request decoded to the wrong operation"
+   | Error detail -> Alcotest.fail detail);
+  let both_keys =
+    common
+      "resume_owner"
+      [ "owner_generation", `Int 99
+      ; "owner_nonce", `Int 7
+      ; "operator_operation_id", `String "operator-resume-both"
+      ]
+  in
+  (match Operator.request_of_yojson both_keys with
+   | Ok
+       (Operator.Resume_owner
+         { owner_nonce = 7; operator_operation_id = "operator-resume-both" }) ->
+     ()
+   | Ok _ -> Alcotest.fail "both-keys resume request decoded to the wrong operation"
+   | Error detail -> Alcotest.fail detail);
+  let legacy_cancel =
+    common
+      "cancel_accepted"
+      [ "source_state", `String "pending"
+      ; "source", Queue.stimulus_to_yojson board_source
+      ; "source_revision", int64_json 11L
+      ; "owner_generation", `Int 7
+      ; "operator_operation_id", `String "operator-cancel-legacy"
+      ; "reason", `String "operator rejected retained work"
+      ; "settled_at", `Float 3.0
+      ]
+  in
+  match Operator.request_of_yojson legacy_cancel with
+  | Ok (Operator.Cancel_pending request) ->
+    Alcotest.(check int) "legacy cancel nonce" 7 request.owner_nonce
+  | Ok _ -> Alcotest.fail "legacy cancellation decoded to the wrong operation"
+  | Error detail -> Alcotest.fail detail
+;;
+
 let test_inventory_exposes_exact_durable_fences () =
   let base_path = Filename.temp_dir "keeper-paused-work-operator" "" in
   Fun.protect
@@ -268,7 +321,12 @@ let () =
   Alcotest.run
     "keeper paused-work operator"
     [ ( "codec"
-      , [ Alcotest.test_case "strict four-way request codec" `Quick test_strict_request_codec ] )
+      , [ Alcotest.test_case "strict four-way request codec" `Quick test_strict_request_codec
+        ; Alcotest.test_case
+            "legacy owner_generation key is accepted"
+            `Quick
+            test_legacy_owner_generation_key_is_accepted
+        ] )
     ; ( "inventory"
       , [ Alcotest.test_case
             "durable exact identity and revision"

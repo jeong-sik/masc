@@ -19,6 +19,26 @@ let prune_children_dirs ~prune_dir root =
       0
       (Sys.readdir root)
 
+(* Keeper-scoped dated-JSONL stores pruned by BOTH the startup pass and the
+   24h periodic pass. SSOT: both loops fold this exact list via
+   [prune_keeper_scoped_stores] — never reintroduce an inline store list in
+   either caller (the periodic pass once pruned only execution-receipts,
+   letting metrics/crash-events accumulate until restart). *)
+let keeper_scoped_dated_stores = [ "metrics"; "crash-events"; "execution-receipts" ]
+
+(* Fold [prune_dir] over every keeper-scoped dated store
+   ([keepers/<name>/<store>] for each store in [keeper_scoped_dated_stores]).
+   Built on [prune_children_dirs], so a missing keepers root counts 0 and
+   stray files under it are skipped. *)
+let prune_keeper_scoped_stores ~prune_dir ~masc_root =
+  prune_children_dirs
+    ~prune_dir:(fun keeper_dir ->
+      List.fold_left
+        (fun acc store -> acc + prune_dir (Filename.concat keeper_dir store))
+        0
+        keeper_scoped_dated_stores)
+    (Filename.concat masc_root "keepers")
+
 (* Trajectory stores are flat [<trace_id>.jsonl] files under
    [trajectories/<keeper>/] — no [YYYY-MM] month dirs — so
    [Dated_jsonl.prune] is a provable no-op on them.  Prune by file mtime
@@ -85,21 +105,14 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
        + prune_recall_injections ()
        + prune_dir (Filename.concat masc "voice_sessions")
        (* trajectories: flat <trace_id>.jsonl under trajectories/<keeper>/ —
-          Dated_jsonl.prune is a no-op there, prune by mtime keeper-scoped.
-          Top-level masc/"execution-receipts" has no writer (canonical layout
-          is keepers/<name>/execution-receipts), so it is not pruned here. *)
+          Dated_jsonl.prune is a no-op there, prune by mtime keeper-scoped. *)
        + prune_children_dirs
            ~prune_dir:(prune_flat_jsonl_older_than ~days)
            (Filename.concat masc "trajectories")
-       + (let keepers = Filename.concat masc "keepers" in
-          if not (Sys.file_exists keepers) then 0
-          else
-            Array.fold_left (fun acc name ->
-              acc
-              + prune_dir (Filename.concat (Filename.concat keepers name) "metrics")
-              + prune_dir (Filename.concat (Filename.concat keepers name) "crash-events")
-              + prune_dir (Filename.concat (Filename.concat keepers name) "execution-receipts")
-            ) 0 (Sys.readdir keepers))
+       (* Top-level masc/"execution-receipts" has no writer (canonical layout
+          is keepers/<name>/<store>), so keeper-scoped stores are pruned via
+          the SSOT fold shared with the 24h periodic pass. *)
+       + prune_keeper_scoped_stores ~prune_dir ~masc_root:masc
        + prune_children_dirs ~prune_dir (Filename.concat masc "resilience_audit")
      in
      if total > 0 then

@@ -463,6 +463,12 @@ let wakeup_relevant_keeper_for_board_signal
   | Ok post ->
   match Keeper_board_audience.classify ~visibility:post.visibility signal with
   | Error error ->
+    (* Fail closed: a classification error (unsupported [@@] selector,
+       mixed direct+broadcast address, or a Direct post without targets)
+       drops the ENTIRE signal.  There is no partial routing to the
+       otherwise-valid [@keeper] targets of a mixed address — accepting
+       them would silently reinterpret an ambiguous address.  The drop is
+       observable via the metric and warning below. *)
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string KeepaliveSignalFailures)
       ~labels:[ ("keeper", "routing"); ("phase", "board_audience_classify") ]

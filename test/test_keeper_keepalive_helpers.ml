@@ -377,6 +377,20 @@ let test_closed_board_audience_routes_only_its_authority () =
   check bool "Direct without targets fails closed" true
     (match KBA.classify ~visibility:Board.Direct discoverable with
      | Error (KBA.Direct_without_targets "post-audience") -> true
+     | Error _ | Ok _ -> false);
+  let mixed = audience_signal ~author:"external-author" "@alpha @@analyst inspect" in
+  check bool "mixed direct target and unsupported selector fails closed" true
+    (match KBA.classify ~visibility:Board.Internal mixed with
+     | Error (KBA.Unsupported_broadcast [ "analyst" ]) -> true
+     | Error _ | Ok _ -> false);
+  let direct_broadcast = audience_signal ~author:"external-author" "@@all inspect" in
+  check bool "@@all on a Direct post fails closed" true
+    (match KBA.classify ~visibility:Board.Direct direct_broadcast with
+     | Error (KBA.Broadcast_on_direct "post-audience") -> true
+     | Error _ | Ok _ -> false);
+  check bool "@@all on a non-Direct post still broadcasts" true
+    (match KBA.classify ~visibility:Board.Internal direct_broadcast with
+     | Ok KBA.Broadcast -> true
      | Error _ | Ok _ -> false)
 
 let persist_and_register_board_lane config meta =
@@ -467,6 +481,42 @@ let test_exact_mentions_deliver_and_wake_each_lane_independently () =
                 (Atomic.get entry.fiber_wakeup)
             | None -> fail (keeper_name ^ " registry entry missing"))
          [ "alpha"; "beta" ])
+;;
+
+let test_mixed_address_signal_is_dropped_at_routing () =
+  Eio_main.run @@ fun _env ->
+  with_temp_workspace @@ fun config ->
+  Fun.protect
+    ~finally:Keeper_registry.For_testing.clear
+    (fun () ->
+       (* Policy pin (P2-1): a signal mixing a valid [@keeper] target with an
+          unsupported [@@] selector is dropped whole at routing — the valid
+          target is NOT partially routed. *)
+       let alpha = make_board_resume_meta "alpha" in
+       let beta = make_board_resume_meta "beta" in
+       persist_and_register_board_lane config alpha;
+       persist_and_register_board_lane config beta;
+       let signal : Board_dispatch.board_signal =
+         { kind = Board_dispatch.Board_post_created
+         ; post_id = "post-mixed-address"
+         ; author = "external-author"
+         ; title = "mixed address"
+         ; content = "@alpha @@analyst inspect"
+         ; hearth = None
+         ; updated_at = Some 125.0
+         }
+         |> persist_board_signal
+       in
+       KKS.wakeup_relevant_keeper_for_board_signal ~config signal;
+       check int "mixed-address target durable queue" 0
+         (board_queue_length config "alpha");
+       check int "mixed-address non-target durable queue" 0
+         (board_queue_length config "beta");
+       match Keeper_registry.get ~base_path:config.base_path "alpha" with
+       | Some entry ->
+         check bool "mixed-address target not woken" false
+           (Atomic.get entry.fiber_wakeup)
+       | None -> fail "alpha registry entry missing")
 ;;
 
 let test_paused_exact_mention_is_durable_without_wake () =
@@ -611,6 +661,8 @@ let () =
             test_closed_board_audience_routes_only_its_authority
         ; test_case "exact mentions deliver and wake every lane" `Quick
             test_exact_mentions_deliver_and_wake_each_lane_independently
+        ; test_case "mixed address signal is dropped at routing" `Quick
+            test_mixed_address_signal_is_dropped_at_routing
         ; test_case "paused exact mention is durable without wake" `Quick
             test_paused_exact_mention_is_durable_without_wake
         ; test_case "Restarting exact mention is durable with deferred wake" `Quick

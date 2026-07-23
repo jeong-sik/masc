@@ -10,6 +10,7 @@ type t =
 type classification_error =
   | Unsupported_broadcast of string list
   | Direct_without_targets of string
+  | Broadcast_on_direct of string
 
 type route =
   | Deliver of Board_signal.wake_reason
@@ -21,7 +22,15 @@ let classify ~visibility signal =
     Keeper_lane_mentions.explicit_address_of_content
       (Board_signal.address_text signal)
   with
-  | Keeper_lane_mentions.Broadcast_all -> Ok Broadcast
+  | Keeper_lane_mentions.Broadcast_all ->
+    (* [Direct] means "mentioned agents only" (Board_types.visibility), so a
+       fleet-wide [@@all] contradicts the visibility the author chose.  Fail
+       closed instead of promoting the signal to a fleet Broadcast: the
+       write boundary (#25379) rejects such posts, and routing must not
+       re-admit what the boundary refuses. *)
+    (match visibility with
+     | Board.Direct -> Error (Broadcast_on_direct signal.post_id)
+     | Board.Public | Board.Unlisted | Board.Internal -> Ok Broadcast)
   | Keeper_lane_mentions.Targets targets -> Ok (Targets targets)
   | Keeper_lane_mentions.Unsupported_broadcast selectors ->
     Error (Unsupported_broadcast selectors)
@@ -77,4 +86,8 @@ let classification_error_to_string = function
       (String.concat ", " (List.map (Printf.sprintf "@@%s") selectors))
   | Direct_without_targets post_id ->
     Printf.sprintf "Direct Board post %s has no explicit Keeper targets" post_id
+  | Broadcast_on_direct post_id ->
+    Printf.sprintf
+      "Direct Board post %s cannot address the fleet with @@all"
+      post_id
 ;;

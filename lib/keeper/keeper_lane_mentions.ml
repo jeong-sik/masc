@@ -50,6 +50,13 @@ type explicit_address =
 
 let explicit_address_of_content content =
   let tokens = normalized_tokens content in
+  (* Broadcast selectors win over direct targets: a line that mixes valid
+     [@keeper] targets with any [@@] selector is treated as a broadcast
+     address, never as a partial direct address.  When the selector is not
+     [@@all] the result is [Unsupported_broadcast] and the caller fails
+     closed, dropping the whole signal — the otherwise-valid direct targets
+     are deliberately NOT routed, because partially routing an ambiguous
+     address would silently reinterpret the author's intent. *)
   let broadcast_selectors =
     tokens
     |> List.filter_map (fun token ->

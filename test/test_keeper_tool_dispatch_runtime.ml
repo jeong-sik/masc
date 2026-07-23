@@ -80,7 +80,13 @@ let make_meta ?(name = "keeper-exec-tools") () =
 let make_ctx () =
   Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
 
-let with_exec_fixture ?(process = false) ?(always_allow = false) name fn =
+let with_exec_fixture
+      ?(process = false)
+      ?(always_allow = false)
+      ?(bind_eio_context = false)
+      name
+      fn
+  =
   let dir = temp_dir name in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -117,11 +123,22 @@ let with_exec_fixture ?(process = false) ?(always_allow = false) name fn =
                  ; keeper_name = meta.name
                  }
                in
-               fn
-                 ~config
-                 ~meta
-                 ~publication_recovery
-                 ~ctx_work:(make_ctx ()))))
+               let run () =
+                 fn
+                   ~config
+                   ~meta
+                   ~publication_recovery
+                   ~ctx_work:(make_ctx ())
+               in
+               if bind_eio_context
+               then
+                 Eio_context.with_test_env
+                   ~net:(Eio.Stdenv.net env)
+                   ~clock:(Eio.Stdenv.clock env)
+                   ~mono_clock:(Eio.Stdenv.mono_clock env)
+                   ~sw
+                   run
+               else run ())))
 
 let contains_substring text needle =
   let text_len = String.length text in
@@ -2667,6 +2684,7 @@ let test_model_visible_tools_do_not_infer_oas_descriptors () =
 
 let test_surface_post_append_failure_does_not_complete_terminal_effect () =
   with_exec_fixture
+    ~bind_eio_context:true
     "surface_post_append_failure"
     (fun ~config ~meta ~publication_recovery ~ctx_work ->
        let chat_path =
@@ -2769,16 +2787,153 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
               false
               (Masc.Keeper_error_classify.is_auto_recoverable_turn_error
                  boundary_error);
-            let failure : Masc.Keeper_unified_turn.turn_failure =
-              { error = boundary_error
-              ; runtime_id = "opaque-runtime"
-              ; route =
-                  Masc.Keeper_runtime_failure_route.route_of_error
-                    ~boundary:Masc.Keeper_runtime_failure_route.Oas_execution
-                    boundary_error
-              ; source_lease_disposition =
-                  Masc.Keeper_unified_turn.Follow_failure_route
+            let runtime_bundle =
+              Masc.Keeper_tools_oas_bundle.make_tool_bundle
+                ~config
+                ~meta
+                ~publication_recovery
+                ~ctx_snapshot:ctx_work
+                ()
+            in
+            let runtime_surface_post =
+              match find_tool_by_name runtime_bundle.tools "keeper_surface_post" with
+              | Some tool -> tool
+              | None -> fail "runtime keeper_surface_post missing from tool bundle"
+            in
+            let provider_call_count = ref 0 in
+            let provider_response : Agent_sdk.Types.api_response =
+              { id = "surface-post-failure-tool-use"
+              ; model = "surface-post-failure-model"
+              ; stop_reason = Agent_sdk.Types.StopToolUse
+              ; content =
+                  [ Agent_sdk.Types.ToolUse
+                      { id = "surface-post-failure-call"
+                      ; name = "keeper_surface_post"
+                      ; input =
+                          `Assoc
+                            [ "surface", `String "dashboard"
+                            ; "content", `String "must remain undelivered"
+                            ]
+                      }
+                  ]
+              ; usage = None
+              ; telemetry = None
               }
+            in
+            let transport : Llm_provider.Llm_transport.t =
+              { complete_sync =
+                  (fun _request ->
+                     incr provider_call_count;
+                     if !provider_call_count <> 1
+                     then fail "terminal failure re-entered the provider";
+                     { Llm_provider.Llm_transport.response = Ok provider_response
+                     ; latency_ms = Some 0
+                     })
+              ; complete_stream =
+                  (fun ?on_telemetry:_ ~on_event:_ _request ->
+                     fail "unexpected streaming provider call")
+              }
+            in
+            let mock_provider : Agent_sdk.Provider.config =
+              { provider =
+                  Agent_sdk.Provider.Local { base_url = "http://mock.invalid" }
+              ; model_id = "surface-post-failure-model"
+              ; api_key_env = ""
+              }
+            in
+            let options =
+              { Agent_sdk.Agent.default_options with
+                provider = Some mock_provider
+              ; transport = Some transport
+              }
+            in
+            let agent =
+              Agent_sdk.Agent.create
+                ~net:
+                  (match Eio_context.get_net_opt () with
+                   | Some net -> net
+                   | None -> fail "test Eio net missing")
+                ~config:
+                  { (Agent_sdk.Types.default_config
+                       ~model:"surface-post-failure-model") with
+                    name = "surface-post-failure-agent"
+                  }
+                ~tools:[ runtime_surface_post ]
+                ~options
+                ()
+            in
+            let probe_error = ref None in
+            let yield_decision = ref None in
+            let advanced_result =
+              Agent_sdk.Agent.Advanced.run_blocks
+                ~sw:
+                  (match Eio_context.get_switch_opt () with
+                   | Some sw -> sw
+                   | None -> fail "test Eio switch missing")
+                ~api_strategy:Agent_sdk.Agent.Sync
+                ~on_tool_boundary:
+                  (Runtime_agent.For_testing.cooperative_boundary_callback
+                     ~probe_error
+                     ~yield_decision
+                     (fun _boundary ->
+                        Masc.Keeper_agent_run.For_testing
+                        .terminal_effect_boundary_decision
+                          (runtime_bundle.terminal_effect_state ())))
+                agent
+                [ Agent_sdk.Types.Text "deliver the dashboard reply" ]
+            in
+            let runtime_result =
+              Runtime_agent.For_testing.prefer_cooperative_probe_error
+                !probe_error
+                advanced_result
+            in
+            let runtime_error =
+              match runtime_result with
+              | Error (Agent_sdk.Error.Internal diagnostic as error) ->
+                check bool
+                  "Runtime_agent error retains the exact full chat target"
+                  true
+                  (contains_substring diagnostic chat_path);
+                error
+              | Error _ -> fail "Runtime_agent changed the terminal failure class"
+              | Ok (Agent_sdk.Agent.Advanced.Completed _) ->
+                fail "terminal failure reached ordinary provider completion"
+              | Ok (Agent_sdk.Agent.Advanced.Yielded _) ->
+                fail "Runtime_agent did not project the boundary failure"
+            in
+            check int
+              "terminal failure makes exactly one provider call"
+              1
+              !provider_call_count;
+            check bool
+              "terminal failure does not become a successful yield"
+              true
+              (Option.is_none !yield_decision);
+            (match runtime_bundle.terminal_effect_state () with
+             | Masc.Keeper_tools_oas.Terminal_effect_failed failure ->
+               check bool
+                 "runtime terminal state retains Runtime_failure"
+                 true
+                 (failure.failure_class = Tool_result.Runtime_failure);
+               check bool
+                 "runtime terminal state retains the exact full chat target"
+                 true
+                 (contains_substring failure.diagnostic chat_path)
+             | Masc.Keeper_tools_oas.Terminal_effect_open ->
+               fail "runtime terminal failure was not recorded"
+             | Masc.Keeper_tools_oas.Terminal_effect_completed ->
+               fail "runtime terminal failure became completion");
+            check int
+              "runtime failure emits no keeper chat broadcast"
+              0
+              !chat_broadcast_count;
+            let failure =
+              Masc.Keeper_unified_turn.For_testing.turn_failure_of_error
+                ~runtime_id:"opaque-runtime"
+                ~fallback_boundary:
+                  Masc.Keeper_runtime_failure_route.Oas_execution
+                ~exact_failure_execution:None
+                runtime_error
             in
             let settlement =
               Masc.Keeper_heartbeat_loop.settlement_of_failure

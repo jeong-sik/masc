@@ -582,7 +582,7 @@ let run_turn
                            Error
                              (Agent_sdk.Error.Internal
                                 ("keeper cooperative-yield snapshot failed: "
-                                 ^ detail))))
+                                 ^ detail)))))
                 with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn
                 | exn ->

@@ -37,7 +37,7 @@ let make_keeper_tool_handler
       record_gate_result;
     result
   in
-  let observe_terminal_result result =
+  let observe_terminal_result (result : Tool_result.result) =
     (match result with
      | Tool_result.Completed _ ->
        Option.iter (fun completed -> completed ()) on_completed

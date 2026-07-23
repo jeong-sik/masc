@@ -781,6 +781,28 @@ let stop_reason_of_cooperative_yield ~turns_used = function
   | Terminal_tool_completed -> Completed
 ;;
 
+let cooperative_boundary_callback
+      ~probe_error
+      ~yield_decision
+      (probe : cooperative_yield_probe)
+      (boundary : Agent_sdk.Agent.Advanced.tool_boundary)
+  =
+  match probe boundary with
+  | Ok Continue -> Agent_sdk.Agent.Advanced.Continue
+  | Ok (Yield reason) ->
+    yield_decision := Some reason;
+    Agent_sdk.Agent.Advanced.Yield
+  | Error error ->
+    probe_error := Some error;
+    Agent_sdk.Agent.Advanced.Yield
+;;
+
+let prefer_cooperative_probe_error probe_error advanced_result =
+  match probe_error with
+  | Some error -> Error error
+  | None -> advanced_result
+;;
+
 module For_testing = struct
   let provider_http_observation_transport = provider_http_observation_transport
   let runtime_id_of_config = runtime_id_of_config
@@ -810,6 +832,8 @@ module For_testing = struct
     apply_runtime_model_input_capabilities
   let select_agent_result = select_agent_result
   let stop_reason_of_cooperative_yield = stop_reason_of_cooperative_yield
+  let cooperative_boundary_callback = cooperative_boundary_callback
+  let prefer_cooperative_probe_error = prefer_cooperative_probe_error
 end
 
 (* ================================================================ *)
@@ -1126,18 +1150,7 @@ let run_blocks
           "masc.runtime_id", `String config.name;
         ]
         (fun _trace_id ->
-          let boundary_probe =
-            match cooperative_yield_probe with
-            | None -> None
-            | Some probe ->
-              Some
-                (fun (boundary : Agent_sdk.Agent.Advanced.tool_boundary) ->
-                   Result.map
-                     (function
-                       | Continue -> None
-                       | Yield reason -> Some reason)
-                     (probe boundary))
-          in
+          let boundary_probe = cooperative_yield_probe in
           match boundary_probe with
             | None ->
               (match on_event with
@@ -1162,17 +1175,8 @@ let run_blocks
             | Some probe ->
               let probe_error = ref None in
               let yield_decision = ref None in
-              let on_tool_boundary
-                    (boundary : Agent_sdk.Agent.Advanced.tool_boundary)
-                =
-                match probe boundary with
-                | Ok None -> Agent_sdk.Agent.Advanced.Continue
-                | Ok (Some decision) ->
-                  yield_decision := Some decision;
-                  Agent_sdk.Agent.Advanced.Yield
-                | Error error ->
-                  probe_error := Some error;
-                  Agent_sdk.Agent.Advanced.Yield
+              let on_tool_boundary =
+                cooperative_boundary_callback ~probe_error ~yield_decision probe
               in
               let api_strategy =
                 match on_event with
@@ -1198,12 +1202,13 @@ let run_blocks
                   agent
                   goal_blocks
               in
-              (match !probe_error, advanced_result with
-               | Some error, _ -> Error error
-               | None, Error e -> Error e
-               | None, Ok (Agent_sdk.Agent.Advanced.Completed response) ->
+              (match
+                 prefer_cooperative_probe_error !probe_error advanced_result
+               with
+               | Error e -> Error e
+               | Ok (Agent_sdk.Agent.Advanced.Completed response) ->
                  Ok (`Completed response)
-               | None, Ok (Agent_sdk.Agent.Advanced.Yielded yielded) ->
+               | Ok (Agent_sdk.Agent.Advanced.Yielded yielded) ->
                  (match !yield_decision, !boundary_response with
                   | Some decision, Some response ->
                     Ok (`Yielded (decision, yielded, response))

@@ -234,6 +234,18 @@ module For_testing : sig
   val stop_reason_of_cooperative_yield :
     turns_used:int -> cooperative_yield_reason -> stop_reason
 
+  val cooperative_boundary_callback
+    :  probe_error:Agent_sdk.Error.sdk_error option ref
+    -> yield_decision:cooperative_yield_reason option ref
+    -> cooperative_yield_probe
+    -> Agent_sdk.Agent.Advanced.tool_boundary
+    -> Agent_sdk.Agent.Advanced.boundary_decision
+
+  val prefer_cooperative_probe_error
+    :  Agent_sdk.Error.sdk_error option
+    -> ('a, Agent_sdk.Error.sdk_error) result
+    -> ('a, Agent_sdk.Error.sdk_error) result
+
   (* RFC-OAS-026 §4.6 fail-fast (pure decision; raises [Failure] when an idle
      deadline is configured but no clock resolves). *)
   val decide_clock_for_idle :

@@ -661,6 +661,44 @@ let exact_terminal_source = function
     None
 ;;
 
+let exact_semantic_and_action = function
+  | Keeper_registry_event_queue.Ack ->
+    Some
+      ( Keeper_registry_event_queue.Exact_ack
+      , Keeper_registry_event_queue.Consume_source )
+  | Keeper_registry_event_queue.No_compaction _ ->
+    Some
+      ( Keeper_registry_event_queue.Exact_no_compaction
+      , Keeper_registry_event_queue.Consume_source )
+  | Keeper_registry_event_queue.Requeue _ ->
+    Some
+      ( Keeper_registry_event_queue.Exact_requeue
+      , Keeper_registry_event_queue.Resume_source )
+  | Keeper_registry_event_queue.Escalate { successor = None; _ } ->
+    Some
+      ( Keeper_registry_event_queue.Exact_escalate
+      , Keeper_registry_event_queue.Consume_source )
+  | Keeper_registry_event_queue.Escalate { successor = Some successor; _ } ->
+    Some
+      ( Keeper_registry_event_queue.Exact_escalate
+      , Keeper_registry_event_queue.Replace_with_successor successor )
+  | Keeper_registry_event_queue.Cancel_accepted _
+  | Keeper_registry_event_queue.Transfer_accepted _
+  | Keeper_registry_event_queue.Settle_from_source_terminal _
+  | Keeper_registry_event_queue.Settle_exact _ ->
+    None
+;;
+
+let exact_disposition_matches_settlement
+    (disposition : Keeper_registry_event_queue.exact_source_disposition)
+    settlement =
+  match exact_semantic_and_action settlement with
+  | None -> false
+  | Some (semantic, action) ->
+    disposition.semantic = semantic
+    && disposition.action = action
+;;
+
 let settle_claimed_lease
       ?(exact_execution = false)
       ~base_path
@@ -690,42 +728,81 @@ let settle_claimed_lease
           ~lease
           ~settlement
       | Ok (Some binding) ->
-        (match exact_terminal_source settlement with
-         | None ->
-           Keeper_registry_event_queue.settle_exact_execution_result
-             ~base_path
-             keeper_name
-             ~settled_at
-             ~lease
-             ~binding
-             ~settlement
-         | Some (source, terminal) ->
-           (match
-              Keeper_registry_event_queue.prepare_exact_source_disposition_result
-                ~base_path
-                keeper_name
-                ~lease
-                ~binding
-                ~source
-                ~outcome:(Keeper_registry_event_queue.Terminal terminal.cause)
-                ~action:Keeper_registry_event_queue.Consume_source
-                ~prepared_at:settled_at
-            with
-            | Error _ as error -> error
-            | Ok
-                ( _
-                , Keeper_registry_event_queue.Visible_sync_unconfirmed detail )
-              ->
-              Error
-                ("exact source disposition became visible with unconfirmed sync; restart reconciliation required: "
-                 ^ detail)
-            | Ok (disposition, Keeper_registry_event_queue.Fsync_completed) ->
-              Keeper_registry_event_queue.finalize_exact_source_disposition_result
+        (match binding.status with
+         | Keeper_registry_event_queue.Disposition_prepared disposition
+         | Keeper_registry_event_queue.Checkpoint_commit_observed disposition ->
+           if exact_disposition_matches_settlement disposition settlement
+           then
+             Keeper_registry_event_queue.finalize_exact_source_disposition_result
+               ~base_path
+               keeper_name
+               ~settled_at
+               ~lease
+               ~disposition_id:disposition.disposition_id
+           else
+             Error
+               "prepared exact disposition conflicts with the computed source settlement"
+         | Keeper_registry_event_queue.Checkpoint_commit_intent _ ->
+           Error
+             "exact checkpoint commit is not durably observed; refusing source settlement"
+         | Keeper_registry_event_queue.Dispatch_uncertain
+         | Keeper_registry_event_queue.Terminal_quarantined _ ->
+           (match exact_terminal_source settlement with
+            | None ->
+              Keeper_registry_event_queue.settle_exact_execution_result
                 ~base_path
                 keeper_name
                 ~settled_at
                 ~lease
-                ~disposition_id:disposition.disposition_id))
+                ~binding
+                ~settlement
+            | Some (source, terminal) ->
+              let semantic =
+                match settlement with
+                | Keeper_registry_event_queue.No_compaction _ ->
+                  Keeper_registry_event_queue.Exact_no_compaction
+                | Keeper_registry_event_queue.Escalate _ ->
+                  Keeper_registry_event_queue.Exact_escalate
+                | Keeper_registry_event_queue.Ack
+                | Keeper_registry_event_queue.Cancel_accepted _
+                | Keeper_registry_event_queue.Transfer_accepted _
+                | Keeper_registry_event_queue.Settle_from_source_terminal _
+                | Keeper_registry_event_queue.Settle_exact _
+                | Keeper_registry_event_queue.Requeue _ ->
+                  assert false
+              in
+              (match
+                 Keeper_registry_event_queue
+                 .prepare_exact_source_disposition_result
+                   ~base_path
+                   keeper_name
+                   ~lease
+                   ~binding
+                   ~source
+                   ~outcome:
+                     (Keeper_registry_event_queue.Terminal terminal.cause)
+                   ~semantic
+                   ~action:Keeper_registry_event_queue.Consume_source
+                   ~prepared_at:settled_at
+               with
+               | Error _ as error -> error
+               | Ok
+                   ( _
+                   , Keeper_registry_event_queue.Visible_sync_unconfirmed
+                       detail ) ->
+                 Error
+                   ("exact source disposition became visible with unconfirmed sync; restart reconciliation required: "
+                    ^ detail)
+               | Ok
+                   ( disposition
+                   , Keeper_registry_event_queue.Fsync_completed ) ->
+                 Keeper_registry_event_queue
+                 .finalize_exact_source_disposition_result
+                   ~base_path
+                   keeper_name
+                   ~settled_at
+                   ~lease
+                   ~disposition_id:disposition.disposition_id)))
 ;;
 
 let exact_execution_guard ~base_path ~keeper_name ~lease =

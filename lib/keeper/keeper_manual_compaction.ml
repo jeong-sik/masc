@@ -317,6 +317,8 @@ let run_admitted ?exact_execution_guard ~config ~meta () =
     ~prepare_compaction:(fun ~base_dir ~meta ~trigger ~projection_request ->
       Keeper_context_runtime.prepare_compaction
         ?exact_execution_guard
+        ?base_path:
+          (Option.map (fun _ -> config.base_path) exact_execution_guard)
         ~base_dir
         ~meta
         ~trigger

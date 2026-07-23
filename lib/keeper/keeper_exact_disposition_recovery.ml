@@ -26,7 +26,7 @@ let current_checkpoint_ref ~base_path ~trace_id =
 let prepare_registration_result
       ~base_path
       ~keeper_name
-      ~trace_id
+      ~trace_id:_
       ~settled_at
   =
   let* binding =
@@ -34,7 +34,7 @@ let prepare_registration_result
       ~base_path
       ~keeper_name
   in
-  let* current_checkpoint_ref =
+  let current_checkpoint_ref =
     match binding with
     | Some
         { status =
@@ -42,7 +42,8 @@ let prepare_registration_result
             | Keeper_event_queue_persistence.Checkpoint_commit_observed _ )
         ; _
         } ->
-      current_checkpoint_ref ~base_path ~trace_id |> Result.map Option.some
+      Some (fun disposition_trace_id ->
+          current_checkpoint_ref ~base_path ~trace_id:disposition_trace_id)
     | None
     | Some
         { status =
@@ -51,7 +52,7 @@ let prepare_registration_result
             | Keeper_event_queue_persistence.Disposition_prepared _ )
         ; _
         } ->
-      Ok None
+      None
   in
   Keeper_event_queue_persistence.prepare_registration_after_exact_recovery_result
     ~base_path

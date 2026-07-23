@@ -2,7 +2,7 @@
 
     [event-queue.json] keeps the v5 envelope containing pending stimuli, active
     typed leases, exact-execution dispatch fences, the monotonic lease
-    sequence, transition outbox, and durable accepted-transfer target accounting. Strict v3 is the only supported
+    sequence, transition outbox, and durable accepted-transfer target accounting. Strict v4 is the only supported
     predecessor. [event-queue-inflight.json] is rejected explicitly rather
     than migrated or treated as a second authority. *)
 
@@ -49,6 +49,12 @@ type exact_source_action = Keeper_event_queue_state.exact_source_action =
   | Resume_source
   | Replace_with_successor of Keeper_event_queue.stimulus
 
+type exact_settlement_semantic = Keeper_event_queue_state.exact_settlement_semantic =
+  | Exact_ack
+  | Exact_no_compaction
+  | Exact_requeue
+  | Exact_escalate
+
 type exact_source_outcome = Keeper_event_queue_state.exact_source_outcome =
   | Terminal of exact_execution_terminal_cause
   | Checkpoint_committed of
@@ -64,6 +70,7 @@ type exact_source_disposition = Keeper_event_queue_state.exact_source_dispositio
   ; request_body_sha256 : string
   ; outcome : exact_source_outcome
   ; action : exact_source_action
+  ; semantic : exact_settlement_semantic
   ; prepared_at : float
   }
 
@@ -350,6 +357,7 @@ val prepare_exact_source_disposition_result :
   source:Keeper_checkpoint_ref.t ->
   outcome:exact_source_outcome ->
   action:exact_source_action ->
+  semantic:exact_settlement_semantic ->
   prepared_at:float ->
   unit ->
   (exact_source_disposition * exact_write_outcome, string) result
@@ -455,15 +463,17 @@ val prepare_registration_after_exact_recovery_result :
   base_path:string ->
   keeper_name:string ->
   settled_at:float ->
-  current_checkpoint_ref:Keeper_checkpoint_ref.t option ->
+  current_checkpoint_ref:
+    (Keeper_id.Trace_id.t -> (Keeper_checkpoint_ref.t, string) result) option ->
   unit ->
   (Keeper_event_queue.t, string) result
 (** Under one owner durable lock, replay the settlement WAL, reconcile and
     finalize a validated v5 exact disposition, then and only then apply
     ordinary registration recovery. A checkpoint intent finalizes only when
-    the caller-observed current ref equals its intended ref. An unchanged
-    source, foreign ref, missing observation, dispatch-uncertain binding, or
-    v4 cause-only quarantine remains fail-closed. *)
+    the current-ref callback, invoked with the durable source trace while the
+    queue owner lock is held, equals its intended ref. An unchanged source,
+    foreign ref, missing observation, dispatch-uncertain binding, or v4
+    cause-only quarantine remains fail-closed. *)
 
 val mark_transition_projected_result :
   base_path:string ->

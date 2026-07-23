@@ -51,6 +51,12 @@ type exact_source_action =
   | Resume_source
   | Replace_with_successor of Keeper_event_queue.stimulus
 
+type exact_settlement_semantic =
+  | Exact_ack
+  | Exact_no_compaction
+  | Exact_requeue
+  | Exact_escalate
+
 type exact_source_outcome =
   | Terminal of exact_execution_terminal_cause
   | Checkpoint_committed of
@@ -66,10 +72,12 @@ type exact_source_disposition =
   ; request_body_sha256 : string
   ; outcome : exact_source_outcome
   ; action : exact_source_action
+  ; semantic : exact_settlement_semantic
   ; prepared_at : float
   }
 (** Immutable source disposition for one exact call. The ID is the SHA-256 of
-    every field in this record except the ID itself. *)
+    its stable proof, outcome, semantic, and action fields. [prepared_at] is
+    observational metadata and is deliberately excluded from identity. *)
 
 type exact_execution_lease_status =
   | Dispatch_uncertain
@@ -344,6 +352,7 @@ val prepare_exact_source_disposition :
   source:Keeper_checkpoint_ref.t ->
   outcome:exact_source_outcome ->
   action:exact_source_action ->
+  semantic:exact_settlement_semantic ->
   prepared_at:float ->
   slot_id:string ->
   call_id:string ->

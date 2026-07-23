@@ -46,6 +46,12 @@ type exact_source_action =
   | Resume_source
   | Replace_with_successor of Keeper_event_queue.stimulus
 
+type exact_settlement_semantic =
+  | Exact_ack
+  | Exact_no_compaction
+  | Exact_requeue
+  | Exact_escalate
+
 type exact_source_outcome =
   | Terminal of exact_execution_terminal_cause
   | Checkpoint_committed of
@@ -61,6 +67,7 @@ type exact_source_disposition =
   ; request_body_sha256 : string
   ; outcome : exact_source_outcome
   ; action : exact_source_action
+  ; semantic : exact_settlement_semantic
   ; prepared_at : float
   }
 
@@ -962,6 +969,13 @@ let exact_source_action_identity = function
        |> Yojson.Safe.to_string)
 ;;
 
+let exact_settlement_semantic_label = function
+  | Exact_ack -> "ack"
+  | Exact_no_compaction -> "no_compaction"
+  | Exact_requeue -> "requeue"
+  | Exact_escalate -> "escalate"
+;;
+
 let exact_source_disposition_id_of_fields
       ~source
       ~slot_id
@@ -970,7 +984,8 @@ let exact_source_disposition_id_of_fields
       ~request_body_sha256
       ~outcome
       ~action
-      ~prepared_at
+      ~semantic
+      ~prepared_at:_
   =
   String.concat
     "\000"
@@ -982,7 +997,7 @@ let exact_source_disposition_id_of_fields
     ; request_body_sha256
     ; exact_source_outcome_identity outcome
     ; exact_source_action_identity action
-    ; Printf.sprintf "%.17g" prepared_at
+    ; exact_settlement_semantic_label semantic
     ]
   |> Digestif.SHA256.digest_string
   |> Digestif.SHA256.to_hex
@@ -1000,6 +1015,7 @@ let validate_exact_source_disposition
       ~request_body_sha256:disposition.request_body_sha256
       ~outcome:disposition.outcome
       ~action:disposition.action
+      ~semantic:disposition.semantic
       ~prepared_at:disposition.prepared_at
   in
   if String.trim disposition.slot_id = ""
@@ -1496,6 +1512,7 @@ let prepare_exact_source_disposition
       ~source
       ~outcome
       ~action
+      ~semantic
       ~prepared_at
       ~slot_id
       ~call_id
@@ -1543,6 +1560,7 @@ let prepare_exact_source_disposition
         ~request_body_sha256
         ~outcome
         ~action
+        ~semantic
         ~prepared_at
     in
     let disposition =
@@ -1554,6 +1572,7 @@ let prepare_exact_source_disposition
       ; request_body_sha256
       ; outcome
       ; action
+      ; semantic
       ; prepared_at
       }
     in
@@ -1593,7 +1612,7 @@ let prepare_exact_source_disposition
      | Disposition_prepared existing
      | Checkpoint_commit_intent existing
      | Checkpoint_commit_observed existing ->
-       if existing = disposition
+       if String.equal existing.disposition_id disposition.disposition_id
        then Ok (state, existing)
        else
          Error
@@ -2646,6 +2665,8 @@ let exact_source_disposition_to_yojson disposition =
     ; "intended_ref", intended_ref
     ; "action_kind", `String action_kind
     ; "successor", successor
+    ; ( "settlement_semantic"
+      , `String (exact_settlement_semantic_label disposition.semantic) )
     ; "prepared_at_unix", `Float disposition.prepared_at
     ]
 ;;
@@ -2668,6 +2689,7 @@ let exact_source_disposition_of_yojson json =
         ; "intended_ref"
         ; "action_kind"
         ; "successor"
+        ; "settlement_semantic"
         ; "prepared_at_unix"
         ]
       fields
@@ -2713,6 +2735,21 @@ let exact_source_disposition_of_yojson json =
     | unknown, _ ->
       Error (Printf.sprintf "unknown exact source disposition action: %s" unknown)
   in
+  let* semantic_label =
+    string_field ~context "settlement_semantic" fields
+  in
+  let* semantic =
+    match semantic_label with
+    | "ack" -> Ok Exact_ack
+    | "no_compaction" -> Ok Exact_no_compaction
+    | "requeue" -> Ok Exact_requeue
+    | "escalate" -> Ok Exact_escalate
+    | unknown ->
+      Error
+        (Printf.sprintf
+           "unknown exact source disposition settlement semantic: %s"
+           unknown)
+  in
   let* prepared_at = float_field ~context "prepared_at_unix" fields in
   let disposition =
     { disposition_id
@@ -2723,6 +2760,7 @@ let exact_source_disposition_of_yojson json =
     ; request_body_sha256
     ; outcome
     ; action
+    ; semantic
     ; prepared_at
     }
   in

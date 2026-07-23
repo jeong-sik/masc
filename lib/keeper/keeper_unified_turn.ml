@@ -250,6 +250,8 @@ let recover_provider_context_overflow_in_lane
              match
                recover_latest_checkpoint_for_compaction
                  ?exact_execution_guard
+                 ?base_path:
+                   (Option.map (fun _ -> config.base_path) exact_execution_guard)
                  ~base_dir
                  ~meta
                  ~trigger

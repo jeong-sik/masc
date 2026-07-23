@@ -27,6 +27,13 @@ struct
     | Resume_source
     | Replace_with_successor of Keeper_event_queue.stimulus
 
+  type exact_settlement_semantic =
+    Keeper_event_queue_persistence.exact_settlement_semantic =
+    | Exact_ack
+    | Exact_no_compaction
+    | Exact_requeue
+    | Exact_escalate
+
   type exact_source_outcome = Keeper_event_queue_persistence.exact_source_outcome =
     | Terminal of exact_execution_terminal_cause
     | Checkpoint_committed of
@@ -124,6 +131,7 @@ struct
         ~source
         ~outcome
         ~action
+        ~semantic
         ~prepared_at
     =
     Keeper_event_queue_persistence.prepare_exact_source_disposition_result
@@ -134,7 +142,24 @@ struct
       ~source
       ~outcome
       ~action
+      ~semantic
       ~prepared_at
+      ()
+  ;;
+
+  let observe_exact_checkpoint_commit_result
+        ~base_path
+        name
+        ~lease
+        ~disposition_id
+        ~current_ref
+    =
+    Keeper_event_queue_persistence.observe_exact_checkpoint_commit_result
+      ~base_path
+      ~keeper_name:name
+      ~lease
+      ~disposition_id
+      ~current_ref
       ()
   ;;
 

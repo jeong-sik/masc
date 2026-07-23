@@ -27,6 +27,13 @@ module Make (Publish : sig
     | Resume_source
     | Replace_with_successor of Keeper_event_queue.stimulus
 
+  type exact_settlement_semantic =
+    Keeper_event_queue_persistence.exact_settlement_semantic =
+    | Exact_ack
+    | Exact_no_compaction
+    | Exact_requeue
+    | Exact_escalate
+
   type exact_source_outcome = Keeper_event_queue_persistence.exact_source_outcome =
     | Terminal of exact_execution_terminal_cause
     | Checkpoint_committed of
@@ -94,6 +101,7 @@ module Make (Publish : sig
     source:Keeper_checkpoint_ref.t ->
     outcome:exact_source_outcome ->
     action:exact_source_action ->
+    semantic:exact_settlement_semantic ->
     prepared_at:float ->
     (exact_source_disposition * exact_write_outcome, string) result
 
@@ -104,6 +112,14 @@ module Make (Publish : sig
     lease:Keeper_event_queue_persistence.lease ->
     disposition_id:string ->
     (Keeper_event_queue_persistence.settle_result, string) result
+
+  val observe_exact_checkpoint_commit_result :
+    base_path:string ->
+    string ->
+    lease:Keeper_event_queue_persistence.lease ->
+    disposition_id:string ->
+    current_ref:Keeper_checkpoint_ref.t ->
+    (exact_write_outcome, string) result
 
   val active_lease_result :
     base_path:string ->

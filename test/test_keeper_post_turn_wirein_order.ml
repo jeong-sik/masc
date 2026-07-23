@@ -740,6 +740,7 @@ let test_manual_compaction_serializes_owner_lane () =
        | Registry_queue.Cancel_accepted _
        | Registry_queue.Transfer_accepted _
        | Registry_queue.Settle_from_source_terminal _
+       | Registry_queue.Settle_exact _
        | Registry_queue.Escalate _ ->
          fail "post-dispatch final admission lost source-bound terminal evidence");
       Registry_queue.settle_result

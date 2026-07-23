@@ -301,12 +301,15 @@ let reaction_kind_of_settlement = function
   | Keeper_event_queue_state.Cancel_accepted _ -> Event_queue_cancelled
   | Keeper_event_queue_state.Transfer_accepted _ -> Event_queue_ack
   | Keeper_event_queue_state.Settle_from_source_terminal _ -> Event_queue_ack
-  | Keeper_event_queue_state.Settle_exact { action = Consume_source; _ } ->
+  | Keeper_event_queue_state.Settle_exact { semantic = Exact_ack; _ } ->
     Event_queue_ack
-  | Keeper_event_queue_state.Settle_exact { action = Resume_source; _ } ->
+  | Keeper_event_queue_state.Settle_exact
+      { semantic = Exact_no_compaction; _ } ->
+    Event_queue_no_compaction
+  | Keeper_event_queue_state.Settle_exact { semantic = Exact_requeue; _ } ->
     Event_queue_requeued
   | Keeper_event_queue_state.Settle_exact
-      { action = Replace_with_successor _; _ } ->
+      { semantic = Exact_escalate; _ } ->
     Event_queue_escalated
   | Keeper_event_queue_state.Requeue _ -> Event_queue_requeued
   | Keeper_event_queue_state.Escalate _ -> Event_queue_escalated
@@ -683,18 +686,22 @@ let reaction_kind_matches_settlement reaction_kind settlement =
   | Event_queue_ack, Keeper_event_queue_state.Transfer_accepted _ -> true
   | Event_queue_ack, Keeper_event_queue_state.Settle_from_source_terminal _ -> true
   | Event_queue_ack,
-    Keeper_event_queue_state.Settle_exact { action = Consume_source; _ } ->
+    Keeper_event_queue_state.Settle_exact { semantic = Exact_ack; _ } ->
     true
   | Event_queue_no_compaction, Keeper_event_queue_state.No_compaction _ -> true
+  | Event_queue_no_compaction,
+    Keeper_event_queue_state.Settle_exact
+      { semantic = Exact_no_compaction; _ } ->
+    true
   | Event_queue_cancelled, Keeper_event_queue_state.Cancel_accepted _ -> true
   | Event_queue_requeued, Keeper_event_queue_state.Requeue _ -> true
   | Event_queue_requeued,
-    Keeper_event_queue_state.Settle_exact { action = Resume_source; _ } ->
+    Keeper_event_queue_state.Settle_exact { semantic = Exact_requeue; _ } ->
     true
   | Event_queue_escalated, Keeper_event_queue_state.Escalate _ -> true
   | Event_queue_escalated,
     Keeper_event_queue_state.Settle_exact
-      { action = Replace_with_successor _; _ } ->
+      { semantic = Exact_escalate; _ } ->
     true
   | Turn_started, _
   | Cursor_ack, _

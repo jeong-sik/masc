@@ -44,6 +44,12 @@ type exact_source_action = State.exact_source_action =
   | Resume_source
   | Replace_with_successor of Keeper_event_queue.stimulus
 
+type exact_settlement_semantic = State.exact_settlement_semantic =
+  | Exact_ack
+  | Exact_no_compaction
+  | Exact_requeue
+  | Exact_escalate
+
 type exact_source_outcome = State.exact_source_outcome =
   | Terminal of exact_execution_terminal_cause
   | Checkpoint_committed of
@@ -59,6 +65,7 @@ type exact_source_disposition = State.exact_source_disposition =
   ; request_body_sha256 : string
   ; outcome : exact_source_outcome
   ; action : exact_source_action
+  ; semantic : exact_settlement_semantic
   ; prepared_at : float
   }
 
@@ -1015,6 +1022,7 @@ let prepare_exact_source_disposition_result
       ~source
       ~outcome
       ~action
+      ~semantic
       ~prepared_at
       ()
   =
@@ -1028,6 +1036,7 @@ let prepare_exact_source_disposition_result
          ~source
          ~outcome
          ~action
+         ~semantic
          ~prepared_at
          ~slot_id:binding.slot_id
          ~call_id:binding.call_id
@@ -1477,46 +1486,52 @@ let prepare_registration_after_exact_recovery_result
                  Error "checkpoint commit intent carries a terminal disposition"
                | Checkpoint_committed _, None ->
                  Error "exact checkpoint commit intent requires a current checkpoint observation"
-               | Checkpoint_committed { intended_ref }, Some current_ref ->
-                 if Keeper_checkpoint_ref.equal current_ref disposition.source
-                 then
-                   Error
-                     "exact checkpoint commit is still at its source; no durable candidate artifact is available for retry"
-                 else if not (Keeper_checkpoint_ref.equal current_ref intended_ref)
-                 then Error "exact checkpoint commit conflicts with a foreign checkpoint"
-                 else
-                   (match
-                      State.observe_exact_checkpoint_commit
-                        ~lease
-                        ~disposition_id:disposition.disposition_id
-                        ~current_ref
-                        state
-                    with
-                    | Error _ as error -> error
-                    | Ok observed ->
-                      (match bump_revision observed with
+               | Checkpoint_committed { intended_ref }, Some read_current_ref ->
+                 (match read_current_ref disposition.source.trace_id with
+                  | Error _ as error -> error
+                  | Ok current_ref ->
+                    if Keeper_checkpoint_ref.equal current_ref disposition.source
+                    then
+                      Error
+                        "exact checkpoint commit is still at its source; no durable candidate artifact is available for retry"
+                    else if not (Keeper_checkpoint_ref.equal current_ref intended_ref)
+                    then Error "exact checkpoint commit conflicts with a foreign checkpoint"
+                    else
+                      (match
+                         State.observe_exact_checkpoint_commit
+                           ~lease
+                           ~disposition_id:disposition.disposition_id
+                           ~current_ref
+                           state
+                       with
                        | Error _ as error -> error
                        | Ok observed ->
-                         (match save_state_unlocked_strict_staged owner observed with
+                         (match bump_revision observed with
                           | Error _ as error -> error
-                          | Ok (Visible_sync_unconfirmed detail) ->
-                            Error
-                              ("exact checkpoint observation became visible with unconfirmed sync; refusing finalization: "
-                               ^ detail)
-                          | Ok Fsync_completed ->
-                            finish_exact lease disposition observed)))
+                          | Ok observed ->
+                            (match save_state_unlocked_strict_staged owner observed with
+                             | Error _ as error -> error
+                             | Ok (Visible_sync_unconfirmed detail) ->
+                               Error
+                                 ("exact checkpoint observation became visible with unconfirmed sync; refusing finalization: "
+                                  ^ detail)
+                             | Ok Fsync_completed ->
+                               finish_exact lease disposition observed))))
             | Some lease, Some { status = Checkpoint_commit_observed disposition; _ } ->
               (match disposition.outcome, current_checkpoint_ref with
                | Terminal _, _ ->
                  Error "checkpoint commit observation carries a terminal disposition"
                | Checkpoint_committed _, None ->
                  Error "observed exact checkpoint disposition requires current checkpoint reconciliation"
-               | Checkpoint_committed { intended_ref }, Some current_ref ->
-                 if Keeper_checkpoint_ref.equal current_ref intended_ref
-                 then finish_exact lease disposition state
-                 else if Keeper_checkpoint_ref.equal current_ref disposition.source
-                 then Error "observed exact checkpoint disposition regressed to its source"
-                 else Error "observed exact checkpoint disposition conflicts with a foreign checkpoint")))
+               | Checkpoint_committed { intended_ref }, Some read_current_ref ->
+                 (match read_current_ref disposition.source.trace_id with
+                  | Error _ as error -> error
+                  | Ok current_ref ->
+                    if Keeper_checkpoint_ref.equal current_ref intended_ref
+                    then finish_exact lease disposition state
+                    else if Keeper_checkpoint_ref.equal current_ref disposition.source
+                    then Error "observed exact checkpoint disposition regressed to its source"
+                    else Error "observed exact checkpoint disposition conflicts with a foreign checkpoint"))))
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->

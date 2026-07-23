@@ -40,7 +40,7 @@ let make_meta name =
 (* Register a keeper and return the fresh entry after [setup] has run its
    registry mutations, so the observer sees the mutated SSOT. *)
 let observed_json ~base ~name ~setup () =
-  ignore (Keeper_registry.register ~base_path:base name (make_meta name));
+  ignore (Keeper_registry.For_testing.register ~base_path:base name (make_meta name));
   setup ();
   match Keeper_registry.get ~base_path:base name with
   | Some entry -> Observer.snapshot_to_json (Observer.observe entry)
@@ -123,10 +123,10 @@ let test_board_cursor_and_wakeups () =
         Keeper_registry.set_board_cursor ~base_path:base name 1234.5
           (Some "post-42");
         ignore
-          (Keeper_registry.board_wakeup_allowed ~base_path:base name
+          (Keeper_registry.For_testing.board_wakeup_allowed ~base_path:base name
              ~dedup_key:"fingerprint-a" ~debounce_sec:60.0);
         ignore
-          (Keeper_registry.board_wakeup_allowed ~base_path:base name
+          (Keeper_registry.For_testing.board_wakeup_allowed ~base_path:base name
              ~dedup_key:"fingerprint-b" ~debounce_sec:60.0))
       ()
   in

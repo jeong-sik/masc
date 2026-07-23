@@ -200,6 +200,10 @@ type t =
     검증된 preset을 돌려주므로 호출처는 invariant를 재검증할 필요가 없다 (RFC-0280). *)
 val find_preset : t -> string -> Validated_preset.t option
 
+(** Structural admission for a top-level Fusion submission before its
+    canonical async request id exists. This is the SSOT used by {!decide}. *)
+val decide_top_level : policy:t -> preset:string -> (unit, Fusion_types.deny_reason) result
+
 (** 결정론적 게이트 (순수, side-effect 없음).
 
     판정 순서 (RFC-0252 §6) — 구조/자원 안전만 본다:

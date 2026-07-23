@@ -2068,10 +2068,10 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
   let clock = Eio.Stdenv.clock env in
   Eio.Switch.run @@ fun sw ->
   let base_path = temp_dir () in
-  Keeper_registry.clear ();
+  Keeper_registry.For_testing.clear ();
   Fun.protect
     ~finally:(fun () ->
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       cleanup_dir base_path)
     (fun () ->
       let keeper_name = "sangsu" in
@@ -2080,7 +2080,7 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
         make_keeper_meta ~agent_name:keeper_agent_name keeper_name
       in
       ignore
-        (Keeper_registry.register ~base_path keeper_name
+        (Keeper_registry.For_testing.register ~base_path keeper_name
            keeper_meta);
       let state = Mcp_eio.For_testing.create_state ~base_path () in
       ignore (Masc.Workspace.init (Mcp_server.workspace_config state) ~agent_name:None);
@@ -2121,8 +2121,8 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
             (persisted |> member "tools" |> index 0 |> member "tool" |> to_string);
           Alcotest.(check int) "persisted deferred count" 0
             (persisted |> member "tools" |> index 0 |> member "deferred" |> to_int);
-          Keeper_registry.unregister ~base_path keeper_name;
-          ignore (Keeper_registry.register ~base_path keeper_name keeper_meta);
+          Keeper_registry.For_testing.unregister ~base_path keeper_name;
+          ignore (Keeper_registry.For_testing.register ~base_path keeper_name keeper_meta);
           Masc.Keeper_registry_tool_usage_persistence.restore ~base_path keeper_name;
           let restored =
             List.assoc_opt
@@ -2144,8 +2144,8 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
                  ; "tools", `List []
                  ])
              ^ "\n");
-          Keeper_registry.unregister ~base_path keeper_name;
-          ignore (Keeper_registry.register ~base_path keeper_name keeper_meta);
+          Keeper_registry.For_testing.unregister ~base_path keeper_name;
+          ignore (Keeper_registry.For_testing.register ~base_path keeper_name keeper_meta);
           Masc.Keeper_registry_tool_usage_persistence.restore ~base_path keeper_name;
           Alcotest.(check (list string))
             "legacy schema is rejected without migration"
@@ -2251,14 +2251,14 @@ let test_handle_request_tools_call_internal_keeper_runtime_rejects_retired_execu
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       cleanup_dir base_path)
     (fun () ->
-      Keeper_registry.clear ();
+      Keeper_registry.For_testing.clear ();
       let keeper_name = "sangsu" in
       let keeper_agent_name = Keeper_identity.keeper_agent_name keeper_name in
       ignore
-        (Keeper_registry.register ~base_path keeper_name
+        (Keeper_registry.For_testing.register ~base_path keeper_name
            (make_keeper_meta ~agent_name:keeper_agent_name keeper_name));
       let state = Mcp_eio.For_testing.create_state ~base_path () in
       let token = Masc.Auth.ensure_internal_keeper_token base_path in

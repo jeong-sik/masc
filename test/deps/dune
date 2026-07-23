@@ -93,7 +93,7 @@
   (re_export masc.keeper_types)
   (re_export masc.keeper_types_profile_sandbox)
   (re_export masc.keeper_usage_trust)
-  (re_export masc.keeper_event_bus)
+  (re_export masc.event_bus_slots)
   (re_export masc.keeper_toml)
   ;; Model inference metrics + runtime provider label leaves.
   (re_export masc.runtime_provider_labels)
@@ -119,7 +119,6 @@
   (re_export masc.operator)
   (re_export masc.server)
   (re_export masc.runtime)
-  (re_export masc.masc_event_bus)
   (re_export masc.provider_tool_support)
   (re_export masc.pool_metrics)
   (re_export masc.auth)
@@ -127,6 +126,7 @@
   (re_export masc.response)
   (re_export masc.shared_audit)
   (re_export masc.tool_schemas)
+  (re_export masc.tool_schemas_specs)
   (re_export masc.tool_catalog_surfaces)
   (re_export masc.config_dir_resolver)
   ;; RFC-0163 Phase D1 — Runtime_name leaf extracted to lib/runtime_id/.
@@ -149,9 +149,6 @@
   ;; Pure Turn FSM extracted to lib/turn_fsm/ (masc_turn). Re-export so test
   ;; code using bare Turn_fsm.X resolves after the FSM carve.
   (re_export masc_turn)
-  ;; Agent token-ledger extracted to lib/agent_economy/ (masc_economy).
-  ;; Re-export so test code using bare Economy.X resolves after the carve.
-  (re_export masc_economy)
   ;; Tool dispatch substrate extracted to lib/tool/ (masc_tool_dispatch, PR-S3).
   ;; Re-export so test code using bare Tool_dispatch.X / Tool_catalog.X /
   ;; Tool_registry.X / Tool_name.X / Tool_token.X / Dispatch_outcome.X resolves

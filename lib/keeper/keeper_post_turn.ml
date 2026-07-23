@@ -58,6 +58,7 @@ type compaction_recovery = {
   trigger : Compaction_trigger.t;
   evidence : Keeper_compaction_evidence.t;
   turn_generation : int;
+  projection_target : Keeper_compaction_projection_target.committed;
 }
 
 type no_compaction = Keeper_event_queue_state.no_compaction =
@@ -71,6 +72,7 @@ type compaction_recovery_error =
   | Checkpoint_candidate_failed of string
   | Compaction_rejected of Keeper_compact_policy.compaction_rejection
   | No_compaction of no_compaction
+  | Retry_suspended of { consecutive_failures : int }
 
 let compaction_recovery_error_to_tag = function
   | Checkpoint_ref_load_failed Keeper_checkpoint_store.Ref_not_found ->
@@ -97,6 +99,7 @@ let compaction_recovery_error_to_tag = function
     Keeper_compact_policy.compaction_rejection_to_tag reason
   | No_compaction { reason; _ } ->
     "no_compaction:" ^ Keeper_event_queue_state.no_compaction_reason_label reason
+  | Retry_suspended _ -> "retry_suspended"
 
 let checkpoint_load_error_detail = function
   | Keeper_checkpoint_store.Not_found -> "checkpoint not found"
@@ -188,6 +191,12 @@ let compaction_recovery_error_to_string = function
       source.turn_count
       source.sha256
       (Keeper_event_queue_state.no_compaction_reason_label reason)
+  | Retry_suspended { consecutive_failures } ->
+    Printf.sprintf
+      "compaction retry suspended after %d consecutive failures; reactive \
+       prepare refused before the summarizer call — an operator-committed \
+       manual compaction resets the streak and lifts the suspension"
+      consecutive_failures
 
 (* ── Tier A6: resilience post-turn wire-in (Cycle 23) ──────────────
    Feature-flag-gated layer that runs before tool emission and
@@ -494,11 +503,14 @@ let terminal_reason_of_rejection = function
   | Invalid_structure _ -> Some Invalid_structural_source
   | Structurally_unchanged -> Some Structurally_unchanged
   | Checkpoint_not_reduced -> Some Checkpoint_not_reduced
-  | Invalid_compaction_plan
+  | Invalid_compaction_plan -> Some Domain_invalid_output
+  | Exact_execution_failed_after_dispatch ->
+    Some Execution_may_have_dispatched
   | Invalid_structural_evidence _
-  | Runtime_identity_unavailable
-  | Summarizer_unavailable
-  | Plan_provider_unavailable -> None
+  | Exact_target_selection_failed
+  | Exact_admission_failed
+  | Exact_execution_context_unavailable
+  | Exact_execution_failed_before_dispatch -> None
 ;;
 
 type prepared_compaction =
@@ -507,16 +519,29 @@ type prepared_compaction =
   ; retry_meta : keeper_meta
   ; turn_generation : int
   ; prepared_trigger : Compaction_trigger.t
+  ; projection_target : Keeper_compaction_projection_target.t
   ; context : Keeper_context_core.working_context
   ; evidence : Keeper_compaction_evidence.t
   }
 
-let prepare_compaction ~base_dir ~(meta : keeper_meta) ~(trigger : Compaction_trigger.t)
+let no_compaction_of_uncommitted_prepared prepared =
+  { source = prepared.source_ref; reason = Execution_may_have_dispatched }
+;;
+
+let prepare_compaction_admitted
+      ~compact_for_request
+      ~base_dir
+      ~(meta : keeper_meta)
+      ~(trigger : Compaction_trigger.t)
+      ~projection_request
   : (prepared_compaction, compaction_recovery_error) result =
   (* Load the durable source and run the policy + LLM planner.  This phase
      is deliberately admission-free: the keeper's turn slot is not held
      while the provider call runs.  Correctness after an interleaved state
      change is enforced by the source CAS at commit, not by the slot. *)
+  let projection_target =
+    Keeper_compaction_projection_target.capture projection_request
+  in
   let session =
     create_session
       ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
@@ -556,8 +581,8 @@ let prepare_compaction ~base_dir ~(meta : keeper_meta) ~(trigger : Compaction_tr
       if turn_generation = meta.runtime.generation then meta
       else map_runtime (fun rt -> { rt with generation = turn_generation }) meta
     in
-    let preparation =
-      Keeper_compact_policy.compact_for_request_typed
+    let preparation : Keeper_compact_policy.compaction_preparation =
+      compact_for_request
         ~meta:retry_meta
         ~trigger
         ctx
@@ -578,6 +603,7 @@ let prepare_compaction ~base_dir ~(meta : keeper_meta) ~(trigger : Compaction_tr
          ; retry_meta
          ; turn_generation
          ; prepared_trigger
+         ; projection_target
          ; context = preparation.context
          ; evidence
          }
@@ -598,6 +624,45 @@ let prepare_compaction ~base_dir ~(meta : keeper_meta) ~(trigger : Compaction_tr
                (Keeper_compact_policy.compaction_decision_to_string decision))))
 ;;
 
+(* RFC-0351 S0 / #25461: reactive admission gate in front of the prepare
+   phase. Once the persisted failure streak reaches the escalation threshold
+   the settlement already refuses to retry, but each *new* stimulus still paid
+   one full prepare — checkpoint load plus a summarizer LLM call — before its
+   escalation settled. Refusing the reactive trigger here, before any I/O,
+   drops that residual burn to zero. The manual trigger passes through on
+   purpose: an operator-committed compaction is the recovery lever — its
+   commit resets the streak and lifts the suspension. *)
+let prepare_compaction_with
+      ~compact_for_request
+      ~base_dir
+      ~(meta : keeper_meta)
+      ~(trigger : Compaction_trigger.t)
+      ~projection_request
+  : (prepared_compaction, compaction_recovery_error) result =
+  let suspended =
+    Keeper_meta_contract.compaction_retry_suspended meta.runtime.compaction_rt
+  in
+  match trigger with
+  | Compaction_trigger.Provider_overflow _ when suspended ->
+    Error
+      (Retry_suspended
+         { consecutive_failures =
+             meta.runtime.compaction_rt.consecutive_failures
+         })
+  | Compaction_trigger.Provider_overflow _ | Compaction_trigger.Manual ->
+    prepare_compaction_admitted
+      ~compact_for_request
+      ~base_dir
+      ~meta
+      ~trigger
+      ~projection_request
+;;
+
+let prepare_compaction =
+  prepare_compaction_with
+    ~compact_for_request:Keeper_compact_policy.compact_for_request_typed
+;;
+
 let commit_prepared_compaction (prepared : prepared_compaction)
   : (compaction_recovery, compaction_recovery_error) result =
   (* Source-CAS commit.  The caller decides which admission (if any) guards
@@ -608,6 +673,7 @@ let commit_prepared_compaction (prepared : prepared_compaction)
       ; retry_meta
       ; turn_generation
       ; prepared_trigger
+      ; projection_target
       ; context
       ; evidence
       } =
@@ -626,7 +692,6 @@ let commit_prepared_compaction (prepared : prepared_compaction)
              ~ctx:context
              ~generation:turn_generation
              ~expected_source_ref:source_ref
-           |> Result.map fst
            |> Result.map_error (function
              | Tool_history_invalid _ ->
                No_compaction
@@ -635,7 +700,7 @@ let commit_prepared_compaction (prepared : prepared_compaction)
                  }
              | Persistence_error error -> Checkpoint_cas_failed error))
      with
-     | Ok (saved_checkpoint, trigger) ->
+     | Ok ((saved_checkpoint, installed_ref), trigger) ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string Compactions)
          ~labels:[ "keeper", retry_meta.name ]
@@ -645,6 +710,10 @@ let commit_prepared_compaction (prepared : prepared_compaction)
          ; trigger
          ; evidence
          ; turn_generation
+         ; projection_target =
+             Keeper_compaction_projection_target.bind_committed_checkpoint
+               installed_ref
+               projection_target
          }
      | Error
          (Checkpoint_cas_failed (Keeper_checkpoint_store.Source_changed actual) as error) ->
@@ -677,8 +746,9 @@ let recover_latest_checkpoint_for_compaction
     ~(base_dir : string)
     ~(meta : keeper_meta)
     ~(trigger : Compaction_trigger.t)
+    ~projection_request
   : (compaction_recovery, compaction_recovery_error) result =
-  match prepare_compaction ~base_dir ~meta ~trigger with
+  match prepare_compaction ~base_dir ~meta ~trigger ~projection_request with
   | Error _ as error -> error
   | Ok prepared -> commit_prepared_compaction prepared
 ;;

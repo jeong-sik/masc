@@ -354,6 +354,53 @@ let test_world_state_never_in_persisted_user_message () =
   check bool "persisted user message carries no board observation" false
     (contains_sub "### Board Activity" user_message)
 
+(* RFC-0351 section 5 / #25462: splitting the frame out of the user message
+   (above) left the marker itself still being recorded once per wake, so the
+   duplication moved from bytes to message count — one keeper accumulated 359
+   copies of the same 147B constant, part of a 25.7% exact-dup transcript
+   share. A bare wake now skips the transcript entirely; only a turn carrying a
+   HITL resolution is recorded. *)
+let test_bare_autonomous_wake_is_not_recorded () =
+  check bool "bare autonomous wake skips the transcript" true
+    (Masc.Keeper_run_prompt.user_turn_record_of_hitl_resolution None
+     = Masc.Keeper_run_prompt.Skip_uninformative_wake);
+  check bool "a turn carrying a HITL resolution is recorded" true
+    (Masc.Keeper_run_prompt.user_turn_record_of_hitl_resolution (Some ())
+     = Masc.Keeper_run_prompt.Record_user_turn)
+
+(* The transcript fix above stopped the wake marker from accumulating, but the
+   librarian reads the checkpoint window on a turn cadence, so an idle stretch
+   kept extracting and kept storing the idleness. Live: 8 of one keeper's 10
+   most recent claims were "Agent idle across N consecutive autonomous wake
+   cycles", recalled at 66KB against 3.8KB of world state reporting 122
+   claimable tasks on the same prompt. Only the bare-wake-and-no-tool pair is
+   inert; the other three carry something a later turn can use. *)
+let test_inert_turn_skips_librarian_extraction () =
+  let decide ~user_turn_record ~tool_calls_made =
+    Masc.Keeper_run_prompt.memory_extraction_record_of_turn
+      ~user_turn_record ~tool_calls_made
+  in
+  check bool "bare wake with no tool call is inert" true
+    (decide
+       ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
+       ~tool_calls_made:false
+     = Masc.Keeper_run_prompt.Skip_inert_turn);
+  check bool "bare wake that ran a tool still extracts" true
+    (decide
+       ~user_turn_record:Masc.Keeper_run_prompt.Skip_uninformative_wake
+       ~tool_calls_made:true
+     = Masc.Keeper_run_prompt.Extract_turn);
+  check bool "operator/HITL input extracts even with no tool call" true
+    (decide
+       ~user_turn_record:Masc.Keeper_run_prompt.Record_user_turn
+       ~tool_calls_made:false
+     = Masc.Keeper_run_prompt.Extract_turn);
+  check bool "operator/HITL input with a tool call extracts" true
+    (decide
+       ~user_turn_record:Masc.Keeper_run_prompt.Record_user_turn
+       ~tool_calls_made:true
+     = Masc.Keeper_run_prompt.Extract_turn)
+
 let () =
   run "keeper_unified_verification_surface"
     [
@@ -400,5 +447,11 @@ let () =
           test_case
             "invariant: world-state frame never enters the persisted user message"
             `Quick test_world_state_never_in_persisted_user_message;
+          test_case
+            "invariant: a bare autonomous wake is not recorded in the transcript"
+            `Quick test_bare_autonomous_wake_is_not_recorded;
+          test_case
+            "invariant: an inert turn does not feed the librarian"
+            `Quick test_inert_turn_skips_librarian_extraction;
         ] );
     ]

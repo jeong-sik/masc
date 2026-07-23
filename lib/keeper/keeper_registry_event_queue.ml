@@ -18,6 +18,7 @@ type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
   | Registration_recovery
   | Retry_after_observed
   | Context_compaction_retry
+  | Transcript_quarantine_retry
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
 
@@ -28,12 +29,28 @@ type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
       { judge_runtime_id : string
       ; rationale : string
       }
+  | Compaction_execution_may_have_dispatched
+  | Compaction_domain_invalid_output
+  | Compaction_retry_exhausted of
+      { attempts : int
+      ; detail : string
+      }
+  | Compaction_floor_exceeded of
+      { attempts : int
+      ; detail : string
+      }
+  | Transcript_quarantine_retry_exhausted of
+      { attempts : int
+      ; detail : string
+      }
 
 type no_compaction_reason = Keeper_event_queue_persistence.no_compaction_reason =
   | No_eligible_history
   | Invalid_structural_source
   | Structurally_unchanged
   | Checkpoint_not_reduced
+  | Execution_may_have_dispatched
+  | Domain_invalid_output
 
 type no_compaction = Keeper_event_queue_persistence.no_compaction =
   { source : Keeper_checkpoint_ref.t
@@ -41,16 +58,41 @@ type no_compaction = Keeper_event_queue_persistence.no_compaction =
   }
 
 type accepted_cancellation = Keeper_event_queue_persistence.accepted_cancellation =
-  { source_revision : int64
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
   ; owner_generation : int
   ; operator_operation_id : string
   ; reason : string
+  }
+
+type accepted_transfer = Keeper_event_queue_persistence.accepted_transfer =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; from_keeper : string
+  ; to_keeper : string
+  }
+
+type source_terminal_receipt = Keeper_event_queue_persistence.source_terminal_receipt =
+  | Fusion_terminal of Keeper_event_queue.fusion_completion
+  | Background_job_terminal of Keeper_event_queue.bg_job_completion
+  | Hitl_terminal of Keeper_event_queue.hitl_resolution
+
+type accepted_source_terminal = Keeper_event_queue_persistence.accepted_source_terminal =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; owner_generation : int
+  ; operator_operation_id : string
+  ; source_receipt : source_terminal_receipt
   }
 
 type settlement = Keeper_event_queue_persistence.settlement =
   | Ack
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
+  | Transfer_accepted of accepted_transfer
+  | Settle_from_source_terminal of accepted_source_terminal
   | Requeue of requeue_reason
   | Escalate of
       { reason : escalation_reason
@@ -290,6 +332,20 @@ let enqueue_stimulus_durable_result ~base_path name stimulus =
   | Error detail -> Stimulus_storage_error detail
 ;;
 
+let project_accepted_transfer_durable_result ~base_path name ~transfer =
+  match
+    Keeper_event_queue_persistence.project_accepted_transfer_result
+      ~base_path
+      ~keeper_name:name
+      ~after_commit:(publish_pending ~base_path name)
+      ~transfer
+  with
+  | Ok Keeper_event_queue_persistence.Transfer_projected -> Stimulus_enqueued
+  | Ok Keeper_event_queue_persistence.Transfer_already_projected ->
+    Stimulus_already_present
+  | Error detail -> Stimulus_storage_error detail
+;;
+
 let enqueue_hitl_resolution_durable_result
     ~base_path
     ~keeper_name
@@ -367,6 +423,76 @@ let settle_result ~base_path name ~settled_at ~lease ~settlement =
     ~settled_at
     ~lease
     ~settlement
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+;;
+
+let cancel_accepted_result
+      ~base_path
+      name
+      ~current_owner_generation
+      ~settled_at
+      ~lease
+      ~cancellation
+  =
+  Keeper_event_queue_persistence.cancel_accepted_result
+    ~base_path
+    ~keeper_name:name
+    ~current_owner_generation
+    ~settled_at
+    ~lease
+    ~cancellation
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+;;
+
+let cancel_pending_accepted_result
+      ~base_path
+      name
+      ~current_owner_generation
+      ~settled_at
+      ~cancellation
+  =
+  Keeper_event_queue_persistence.cancel_pending_accepted_result
+    ~base_path
+    ~keeper_name:name
+    ~current_owner_generation
+    ~settled_at
+    ~cancellation
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+;;
+
+let transfer_pending_accepted_result
+      ~base_path
+      name
+      ~current_owner_generation
+      ~settled_at
+      ~transfer
+  =
+  Keeper_event_queue_persistence.transfer_pending_accepted_result
+    ~base_path
+    ~keeper_name:name
+    ~current_owner_generation
+    ~settled_at
+    ~transfer
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+;;
+
+let settle_pending_from_source_terminal_result
+      ~base_path
+      name
+      ~current_owner_generation
+      ~settled_at
+      ~source_terminal
+  =
+  Keeper_event_queue_persistence.settle_pending_from_source_terminal_result
+    ~base_path
+    ~keeper_name:name
+    ~current_owner_generation
+    ~settled_at
+    ~source_terminal
     ~after_commit:(publish_pending ~base_path name)
     ()
 ;;

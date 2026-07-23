@@ -9,7 +9,7 @@
 
 type t
 
-type invalid_sha256 =
+type invalid_sha256 = Tool_output.invalid_sha256 =
   | Invalid_sha256_length of { actual : int }
   | Invalid_sha256_character of { index : int; found : char }
 

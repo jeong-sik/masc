@@ -924,6 +924,14 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ( "last_compaction_decision",
                 Keeper_meta_contract.compaction_decision_json_or_null
                   m.runtime.compaction_rt.last_decision );
+              ( "compaction_consecutive_failures",
+                `Int m.runtime.compaction_rt.consecutive_failures );
+              (* RFC-0351 S0 / #25461: operator-visible marker that the
+                 settlement stopped retrying compaction for this keeper. *)
+              ( "compaction_retry_suspended",
+                `Bool
+                  (Keeper_meta_contract.compaction_retry_suspended
+                     m.runtime.compaction_rt) );
               ("autoboot_enabled", `Bool m.autoboot_enabled);
               ("proactive_enabled", `Bool m.proactive.enabled);
               ("proactive_count_total", `Int m.runtime.proactive_rt.count_total);

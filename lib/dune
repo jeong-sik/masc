@@ -101,7 +101,7 @@
   masc.keeper_types
   masc.keeper_types_profile_sandbox
   masc.keeper_usage_trust
-  masc.keeper_event_bus
+  masc.event_bus_slots
   masc.keeper_compaction_evidence
   masc.keeper_chat_delivery_identity
   ;; Runtime_provider_labels extracted to lib/runtime_provider_labels/.
@@ -111,7 +111,6 @@
   ;; Runtime/OAS provider projection + model-label parsing boundary.
   masc.runtime_model
   masc.runtime
-  masc.masc_event_bus
   masc.provider_tool_support
   masc.auth
   masc.fd_accountant
@@ -272,7 +271,6 @@
   ;; Pure Turn FSM (extracted sub-library — states + transition matrix, Keeper-free)
   masc_turn
   ;; Agent token-ledger domain (extracted leaf — earn/spend/balance, Board-callable)
-  masc_economy
   ;; Tool dispatch substrate. The compiler enforces Tool⊥Keeper/Runtime/Goal/Task/Board
   ;; via masc_tool_dispatch's neutral-only (libraries).
   masc.masc_tool_dispatch

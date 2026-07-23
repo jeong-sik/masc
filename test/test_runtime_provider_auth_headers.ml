@@ -777,6 +777,7 @@ let test_runtime_adapter_keeps_auth_out_of_headers () =
     ; keeper_assignments = []
     ; media_failover = []
     ; lane_decls = []
+    ; exact_output_lane_decls = []
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -812,6 +813,7 @@ let test_runtime_adapter_filters_toml_auth_headers () =
     ; keeper_assignments = []
     ; media_failover = []
     ; lane_decls = []
+    ; exact_output_lane_decls = []
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -848,6 +850,7 @@ let provider_cfg () =
     ; keeper_assignments = []
     ; media_failover = []
     ; lane_decls = []
+    ; exact_output_lane_decls = []
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -991,6 +994,7 @@ let runtime_or_fail ?(provider = runpod_provider) () =
     ; keeper_assignments = []
     ; media_failover = []
     ; lane_decls = []
+    ; exact_output_lane_decls = []
     }
   in
   match Runtime.of_binding cfg runpod_binding with
@@ -1030,7 +1034,7 @@ let assert_dashboard_runtime_probe_reachable runtime =
            , [ "content-type", "application/json" ]
            , {|{"data":[{"id":"qwen"}]}|} ))
       (fun () ->
-         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_for_tests
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
            ~default_id:"runpod_mtp.qwen" [ runtime ])
   in
   let reachable_provider = first_provider_probe reachable_json in
@@ -1059,7 +1063,7 @@ let assert_dashboard_runtime_probe_missing_auth runtime =
       ~finally:(fun () ->
         Server_dashboard_http_runtime_info.clear_dashboard_runtime_provider_http_get_for_tests ())
       (fun () ->
-         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_for_tests
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
            ~default_id:"runpod_mtp.qwen" [ runtime ])
   in
   let provider = first_provider_probe json in
@@ -1088,7 +1092,7 @@ let assert_dashboard_runtime_probe_redacts_url_credentials () =
     with_dashboard_probe_http_get
       (fun ~url:_ ~headers:_ ~timeout_sec:_ -> Ok (200, [], {|{"data":[]}|}))
       (fun () ->
-         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_for_tests
+         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_of_runtimes
            ~default_id:"runpod_mtp.qwen" [ runtime ])
   in
   let provider = first_provider_probe json in
@@ -1396,6 +1400,145 @@ let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
         Eio.Switch.on_release sw (fun () ->
           Agent_sdk.Agent.close agent)))
 
+let fresh_loopback_port () =
+  let socket = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
+  Unix.setsockopt socket Unix.SO_REUSEADDR true;
+  Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0));
+  let port =
+    match Unix.getsockname socket with
+    | Unix.ADDR_INET (_, port) -> port
+    | _ -> fail "loopback socket did not expose a TCP port"
+  in
+  Unix.close socket;
+  port
+
+let with_native_count_server f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let port = fresh_loopback_port () in
+  let paths = ref [] in
+  let handler _conn request body =
+    let _body = Eio.Buf_read.(of_flow ~max_size:max_int body |> take_all) in
+    let path = Cohttp.Request.uri request |> Uri.path in
+    paths := path :: !paths;
+    if String.equal path "/v1/messages/count_tokens"
+    then Cohttp_eio.Server.respond_string ~status:`OK ~body:{|{"input_tokens":500}|} ()
+    else
+      Cohttp_eio.Server.respond_string
+        ~status:`Internal_server_error
+        ~body:{|{"error":"completion must not be dispatched"}|}
+        ()
+  in
+  let socket =
+    Eio.Net.listen
+      net
+      ~sw
+      ~backlog:4
+      ~reuse_addr:true
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, port))
+  in
+  let server = Cohttp_eio.Server.make ~callback:handler () in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
+  let base_url = Printf.sprintf "http://127.0.0.1:%d" port in
+  let result = f ~sw ~net ~base_url in
+  result, List.rev !paths
+
+let context_fit_provider_config base_url =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.Anthropic
+    ~model_id:"context-fit-fixture"
+    ~base_url
+    ~api_key:"test-key"
+    ~headers:[ "Content-Type", "application/json"; "anthropic-version", "2023-06-01" ]
+    ~request_path:"/v1/messages"
+    ~max_tokens:64
+    ~max_context:512
+    ~temperature:0.2
+    ()
+
+let context_fit_runtime_config base_url =
+  Runtime_agent.default_config
+    ~name:"context-fit-fixture"
+    ~provider_cfg:(context_fit_provider_config base_url)
+    ~system_prompt:"Count the exact provider request before dispatch."
+    ~tools:[]
+
+let context_fit_checkpoint () =
+  { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version
+  ; session_id = "context-fit-session"
+  ; agent_name = "context-fit-fixture"
+  ; model = "context-fit-fixture"
+  ; system_prompt = Some "stale"
+  ; messages = []
+  ; usage = Agent_sdk.Types.empty_usage
+  ; turn_count = 3
+  ; created_at = 0.0
+  ; tools = []
+  ; tool_choice = None
+  ; disable_parallel_tool_use = false
+  ; temperature = None
+  ; top_p = None
+  ; top_k = None
+  ; min_p = None
+  ; reasoning_effort = None
+  ; enable_thinking = None
+  ; preserve_thinking = None
+  ; response_format = Agent_sdk.Types.Off
+  ; thinking_budget = None
+  ; cache_system_prompt = false
+  ; context = Agent_sdk.Context.create_sync ()
+  ; mcp_sessions = []
+  ; working_context = None
+  }
+
+let check_context_fit_overflow = function
+  | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.ContextOverflow { limit = Some 512; _ })) ->
+    ()
+  | Error error -> fail (Agent_sdk.Error.to_string error)
+  | Ok _ -> fail "overflowed request must not reach completion dispatch"
+
+let test_runtime_agent_fresh_build_enforces_native_context_fit () =
+  let (), paths =
+    with_native_count_server
+    @@ fun ~sw ~net ~base_url ->
+    let config = context_fit_runtime_config base_url in
+    let agent =
+      match Runtime_agent.build ~sw ~net ~config with
+      | Ok agent -> agent
+      | Error error -> fail (Agent_sdk.Error.to_string error)
+    in
+    Fun.protect
+      ~finally:(fun () -> Agent_sdk.Agent.close agent)
+      (fun () -> Agent_sdk.Agent.run ~sw agent "overflow" |> check_context_fit_overflow)
+  in
+  check (list string) "fresh request paths" [ "/v1/messages/count_tokens" ] paths
+
+let test_runtime_agent_resume_enforces_native_context_fit () =
+  let (), paths =
+    with_native_count_server
+    @@ fun ~sw ~net ~base_url ->
+    let config = context_fit_runtime_config base_url in
+    let agent =
+      match
+        Runtime_agent.resume_from_checkpoint
+          ~sw
+          ~net
+          ~config
+          ~checkpoint:(context_fit_checkpoint ())
+      with
+      | Ok agent -> agent
+      | Error error -> fail (Agent_sdk.Error.to_string error)
+    in
+    Fun.protect
+      ~finally:(fun () -> Agent_sdk.Agent.close agent)
+      (fun () -> Agent_sdk.Agent.run ~sw agent "overflow" |> check_context_fit_overflow)
+  in
+  check (list string) "resumed request paths" [ "/v1/messages/count_tokens" ] paths
+
 (* RFC-OAS-026 §4.6: a configured stream-idle deadline with no resolvable clock
    must fail loudly rather than silently disarm the only I2-legitimate
    streaming timeout. *)
@@ -1612,6 +1755,14 @@ let () =
             "runtime agent context leaves tool_choice unset with tools"
             `Quick
             test_runtime_agent_context_leaves_tool_choice_unset_with_tools
+        ; test_case
+            "runtime fresh build enforces native context fit"
+            `Quick
+            test_runtime_agent_fresh_build_enforces_native_context_fit
+        ; test_case
+            "runtime resume enforces native context fit"
+            `Quick
+            test_runtime_agent_resume_enforces_native_context_fit
         ; test_case
             "dashboard runtime provider reachability contracts"
             `Quick

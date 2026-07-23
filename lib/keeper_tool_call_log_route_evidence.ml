@@ -43,8 +43,8 @@ let route_safe_path_string _path = "[REDACTED]"
 
 let route_text_for_evidence output_text =
   match Tool_output.decode_from_oas output_text with
-  | Tool_output.Stored { preview; _ } -> preview
-  | Tool_output.Inline value -> value
+  | Tool_output.Decoded { preview; _ } -> preview
+  | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> output_text
 ;;
 
 let parse_tool_output_json_sanitized text =

@@ -74,6 +74,35 @@ let list_fact_store_keeper_ids () =
   list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir:(keepers_dir ())
 ;;
 
+(* Read-only existence check — unlike [episodes_dir_for_keepers_dir] it never
+   creates the directory. *)
+let has_episode_store_for_keepers_dir ~keepers_dir ~keeper_id =
+  let dir = Filename.concat keepers_dir (Filename.concat keeper_id "episodes") in
+  Sys.file_exists dir && Sys.is_directory dir
+;;
+
+(* Keeper ids with an on-disk episode store ([<id>/episodes/]), for the episode
+   retention sweep. A keeper whose extracted episodes all carried zero claims
+   has no [*.facts.jsonl] but still accumulates episode files, so the sweep
+   cannot enumerate from fact stores alone. The reserved shared id is excluded;
+   sorted for deterministic sweep order. *)
+let list_episode_store_keeper_ids_for_keepers_dir ~keepers_dir =
+  let dir = keepers_dir in
+  if not (Sys.file_exists dir && Sys.is_directory dir)
+  then []
+  else
+    Sys.readdir dir
+    |> Array.to_list
+    |> List.filter (fun name ->
+      (not (String.equal name shared_store_id))
+      && has_episode_store_for_keepers_dir ~keepers_dir ~keeper_id:name)
+    |> List.sort String.compare
+;;
+
+let list_episode_store_keeper_ids () =
+  list_episode_store_keeper_ids_for_keepers_dir ~keepers_dir:(keepers_dir ())
+;;
+
 let list_fact_store_keeper_ids_for_base_path ~base_path =
   list_fact_store_keeper_ids_for_keepers_dir
     ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path)
@@ -111,8 +140,12 @@ let events_path ~keeper_id =
   events_path_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
 ;;
 
+let episode_bundle_lock_path_for_keepers_dir ~keepers_dir ~keeper_id =
+  Filename.concat keepers_dir (keeper_id ^ ".episode-bundle")
+;;
+
 let episode_bundle_lock_path ~keeper_id =
-  Filename.concat (keepers_dir ()) (keeper_id ^ ".episode-bundle")
+  episode_bundle_lock_path_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
 ;;
 
 let with_episode_bundle_lock ?clock ~keeper_id f =
@@ -640,6 +673,58 @@ let read_episode_file path =
        let len = in_channel_length ic in
        let buf = really_input_string ic len in
        parse_json_line episode_of_json buf)
+;;
+
+(* Strict counterpart of [read_episode_file]: a malformed episode file is an
+   [Error], not a silently dropped [None] — a destructive sweep must classify
+   the whole store before deleting anything (same preserve-over-delete rule as
+   [read_facts_all_strict]). *)
+let parse_episode_file_strict ~path buf =
+  try
+    match episode_of_json (Yojson.Safe.from_string buf) with
+    | Some episode -> Ok (path, episode)
+    | None -> Error (Printf.sprintf "%s: invalid episode JSON shape" path)
+  with
+  | Yojson.Json_error message ->
+    Error (Printf.sprintf "%s: invalid episode JSON: %s" path message)
+;;
+
+let read_episode_file_strict path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+       let len = in_channel_length ic in
+       let buf = really_input_string ic len in
+       parse_episode_file_strict ~path buf)
+;;
+
+(* Every [<keeper_id>/episodes/*.json] file as [(path, episode)] in filename
+   order. Never creates the directory: a keeper with no episode store is
+   [Ok []], not a side effect. *)
+let read_episode_files_all_strict_for_keepers_dir ~keepers_dir ~keeper_id =
+  let dir = Filename.concat keepers_dir (Filename.concat keeper_id "episodes") in
+  if not (Sys.file_exists dir && Sys.is_directory dir)
+  then Ok []
+  else (
+    let paths =
+      Sys.readdir dir
+      |> Array.to_list
+      |> List.filter (fun name -> Filename.check_suffix name ".json")
+      |> List.sort String.compare
+      |> List.map (fun name -> Filename.concat dir name)
+    in
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | path :: rest ->
+        let* parsed = read_episode_file_strict path in
+        loop (parsed :: acc) rest
+    in
+    loop [] paths)
+;;
+
+let read_episode_files_all_strict ~keeper_id =
+  read_episode_files_all_strict_for_keepers_dir ~keepers_dir:(keepers_dir ()) ~keeper_id
 ;;
 
 let compare_episode_recency a b =

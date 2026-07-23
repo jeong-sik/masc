@@ -484,10 +484,10 @@ let test_acked_occurrence_recovery_does_not_enqueue_or_wake_again () =
   let keeper_name = "schedule-keeper" in
   let base_path = config.Workspace_utils.base_path in
   let entry =
-    Keeper_registry.register ~base_path keeper_name (keeper_meta_for_name keeper_name)
+    Keeper_registry.For_testing.register ~base_path keeper_name (keeper_meta_for_name keeper_name)
   in
   Fun.protect
-    ~finally:(fun () -> Keeper_registry.unregister ~base_path keeper_name)
+    ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)
     (fun () ->
       let request = create_keeper_wake_schedule config in
       let signal =
@@ -568,10 +568,10 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_or_wake_again () =
   let keeper_name = "schedule-keeper" in
   let base_path = config.Workspace_utils.base_path in
   let entry =
-    Keeper_registry.register ~base_path keeper_name (keeper_meta_for_name keeper_name)
+    Keeper_registry.For_testing.register ~base_path keeper_name (keeper_meta_for_name keeper_name)
   in
   Fun.protect
-    ~finally:(fun () -> Keeper_registry.unregister ~base_path keeper_name)
+    ~finally:(fun () -> Keeper_registry.For_testing.unregister ~base_path keeper_name)
     (fun () ->
       let request = create_keeper_wake_schedule config in
       let signal =
@@ -616,7 +616,11 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_or_wake_again () =
       in
       let generation = entry.meta.runtime.generation in
       let cancellation : Keeper_event_queue_state.accepted_cancellation =
-        { source_revision = Keeper_event_queue_state.revision claimed_state
+        { source =
+            (match Keeper_registry_event_queue.lease_stimuli lease with
+             | [ source ] -> source
+             | _ -> fail "schedule cancellation lease did not retain one source")
+        ; source_revision = Keeper_event_queue_state.revision claimed_state
         ; owner_generation = generation
         ; operator_operation_id = "cancel-schedule-occurrence"
         ; reason = "operator cancelled retained schedule work"
@@ -805,11 +809,11 @@ let test_keeper_wake_dashboard_tracks_runtime_inflight_lease () =
   let keeper_name = "schedule-keeper" in
   let meta = keeper_meta_for_name keeper_name in
   let (_entry : Keeper_registry.registry_entry) =
-    Keeper_registry.register ~base_path:config.Workspace_utils.base_path keeper_name meta
+    Keeper_registry.For_testing.register ~base_path:config.Workspace_utils.base_path keeper_name meta
   in
   Fun.protect
     ~finally:(fun () ->
-      Keeper_registry.unregister ~base_path:config.Workspace_utils.base_path keeper_name)
+      Keeper_registry.For_testing.unregister ~base_path:config.Workspace_utils.base_path keeper_name)
     (fun () ->
       let request = create_keeper_wake_schedule config in
       let result = tick_ok config ~now:201.0 in

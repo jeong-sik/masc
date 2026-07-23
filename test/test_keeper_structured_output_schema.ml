@@ -59,8 +59,6 @@ let all_provider_native_schema_cases =
   ; "failure_judgment", Keeper_structured_output_schema.failure_judgment_output_schema
   ; ( "board_attention_judgment_batch"
     , Keeper_structured_output_schema.board_attention_judgment_batch_output_schema )
-  ; ( "anti_rationalization_verdict"
-    , Keeper_structured_output_schema.anti_rationalization_verdict_output_schema )
   ]
 ;;
 
@@ -123,49 +121,55 @@ let has_json_schema_response_format schema provider_cfg =
   | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false
 ;;
 
-let test_apply_schema_or_prompt_tier_uses_native_when_supported () =
-  let schema = Keeper_structured_output_schema.librarian_episode_output_schema in
-  let base = schema_capable_oas_provider_config () in
-  let configured =
-    Keeper_structured_output_schema.apply_schema_or_prompt_tier
-      ~log_label:"test native"
-      schema
-      base
-  in
-  check bool "native schema is attached" true
-    (has_json_schema_response_format schema configured);
-  check (option bool) "output_schema mirrors native schema" (Some true)
-    (Option.map
-       (Yojson.Safe.equal schema)
-       configured.Llm_provider.Provider_config.output_schema)
+let has_no_response_format provider_cfg =
+  match provider_cfg.Llm_provider.Provider_config.response_format with
+  | Agent_sdk.Types.Off ->
+    Option.is_none provider_cfg.Llm_provider.Provider_config.output_schema
+  | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false
 ;;
 
-let test_apply_schema_or_prompt_tier_keeps_prompt_config_when_native_rejected () =
-  let schema = Keeper_structured_output_schema.librarian_episode_output_schema in
-  let base = prompt_tier_oas_provider_config () in
-  let native_cfg = Keeper_structured_output_schema.apply_to_provider_config schema base in
-  (match Llm_provider.Provider_config.validate_output_schema_request native_cfg with
-   | Ok () -> fail "prompt-tier provider unexpectedly accepted native schema"
-   | Error _ -> ());
-  let configured =
-    Keeper_structured_output_schema.apply_schema_or_prompt_tier
-      ~log_label:"test prompt"
-      schema
-      base
+(* A schema-capable provider gets no response format either: capability is not
+   consulted. Without this the helper could silently regrow a native tier for
+   the one provider class that accepts it, which is the split these call sites
+   were changed to remove. *)
+let test_without_response_format_clears_schema_capable_provider () =
+  let base =
+    Keeper_structured_output_schema.apply_to_provider_config
+      Keeper_structured_output_schema.librarian_episode_output_schema
+      (schema_capable_oas_provider_config ())
   in
-  check bool "prompt tier has no native schema" false
-    (has_json_schema_response_format schema configured);
-  check (option bool) "prompt tier leaves output_schema empty" None
-    (Option.map
-       (Yojson.Safe.equal schema)
-       configured.Llm_provider.Provider_config.output_schema);
-  check
-    bool
-    "prompt-tier config still validates without native schema"
-    true
-    (match Llm_provider.Provider_config.validate_output_schema_request configured with
-     | Ok () -> true
-     | Error _ -> false)
+  check bool "schema-capable provider starts with a native schema attached" true
+    (has_json_schema_response_format
+       Keeper_structured_output_schema.librarian_episode_output_schema
+       base);
+  check bool "helper clears it anyway" true
+    (has_no_response_format (Keeper_structured_output_schema.without_response_format base))
+;;
+
+(* The point of the helper is that the request is byte-identical regardless of
+   what the provider advertises, so a capability fact that turns out to be a lie
+   (ollama.com cloud declared json_schema and ignored it — 2026-07-02 probe)
+   cannot change the request that was sent. *)
+let test_without_response_format_is_capability_independent () =
+  let schema_capable =
+    Keeper_structured_output_schema.without_response_format
+      (schema_capable_oas_provider_config ())
+  in
+  let json_object_only =
+    Keeper_structured_output_schema.without_response_format
+      (prompt_tier_oas_provider_config ())
+  in
+  check bool "schema-capable provider asks for no format" true
+    (has_no_response_format schema_capable);
+  check bool "json_object-only provider asks for no format" true
+    (has_no_response_format json_object_only);
+  check bool "both configs pass output-schema validation" true
+    (List.for_all
+       (fun cfg ->
+          match Llm_provider.Provider_config.validate_output_schema_request cfg with
+          | Ok () -> true
+          | Error _ -> false)
+       [ schema_capable; json_object_only ])
 ;;
 
 (* #25266: a json_object-only provider (structured_output=false,
@@ -336,22 +340,60 @@ let test_compaction_plan_schema_uses_codec_ssot () =
 ;;
 
 
-let test_anti_rationalization_verdict_schema_uses_task_ssot () =
-  let schema =
-    Keeper_structured_output_schema.anti_rationalization_verdict_output_schema
+(* The reviewer config must reach json_object-only providers. Counterfactual
+   first: a native schema request on a Glm-kind config is rejected by the OAS
+   contract — that rejection is exactly what left every task nonterminal
+   fleet-wide on a Glm evaluator runtime (2026-07-21). The reviewer transform
+   must therefore request no wire format at all and validate on Glm. *)
+let glm_provider_config () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.Glm
+    ~model_id:"glm-5-turbo"
+    ~base_url:"https://glm.invalid/api/paas/v4"
+    ()
+;;
+
+let test_anti_rationalization_reviewer_config_reaches_glm () =
+  let native =
+    Keeper_structured_output_schema.apply_to_provider_config
+      (`Assoc [ "type", `String "object" ])
+      (glm_provider_config ())
+  in
+  (match Llm_provider.Provider_config.validate_output_schema_request native with
+   | Error _ -> ()
+   | Ok () ->
+     fail
+       "counterfactual: a native json_schema request on a Glm config must be \
+        rejected — if this starts passing, revisit whether the reviewer \
+        surface still needs to avoid wire response formats");
+  let reviewer =
+    Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config
+      (glm_provider_config ())
   in
   check
-    (list string)
-    "anti-rationalization verdict required fields"
-    [ "reason"; "verdict" ]
-    (required_strings schema);
+    bool
+    "reviewer config carries no wire response format"
+    true
+    (has_no_response_format reviewer);
+  match Llm_provider.Provider_config.validate_output_schema_request reviewer with
+  | Ok () -> ()
+  | Error msg -> failf "reviewer config must validate on a Glm provider: %s" msg
+;;
+
+let test_anti_rationalization_reviewer_config_strips_preset_schema () =
+  let preset =
+    Keeper_structured_output_schema.apply_to_provider_config
+      (`Assoc [ "type", `String "object" ])
+      (glm_provider_config ())
+  in
+  let reviewer =
+    Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config preset
+  in
   check
-    (list string)
-    "anti-rationalization verdict enum"
-    (List.sort String.compare Task.Anti_rationalization.valid_verdict_strings)
-    (schema |> schema_property "verdict" |> enum_strings);
-  check bool "anti-rationalization verdict is closed" false
-    (allows_additional_properties schema)
+    bool
+    "a pre-set schema on the incoming config is cleared, not inherited"
+    true
+    (has_no_response_format reviewer)
 ;;
 
 let test_failure_judgment_schema_uses_contract_ssot () =
@@ -405,13 +447,13 @@ let () =
             `Quick
             test_all_schemas_apply_as_oas_native_json_schema
         ; test_case
-            "schema-or-prompt helper uses native schema when supported"
+            "without_response_format clears a schema-capable provider too"
             `Quick
-            test_apply_schema_or_prompt_tier_uses_native_when_supported
+            test_without_response_format_clears_schema_capable_provider
         ; test_case
-            "schema-or-prompt helper keeps prompt tier when native rejected"
+            "without_response_format is capability-independent"
             `Quick
-            test_apply_schema_or_prompt_tier_keeps_prompt_config_when_native_rejected
+            test_without_response_format_is_capability_independent
         ; test_case
             "json_mode tier selects JsonMode for json_object-only provider"
             `Quick
@@ -445,9 +487,13 @@ let () =
         ] )
     ; ( "verdict schemas"
       , [ test_case
-            "anti-rationalization verdict schema uses task SSOT"
+            "anti-rationalization reviewer config reaches a Glm provider"
             `Quick
-            test_anti_rationalization_verdict_schema_uses_task_ssot
+            test_anti_rationalization_reviewer_config_reaches_glm
+        ; test_case
+            "anti-rationalization reviewer config strips a pre-set schema"
+            `Quick
+            test_anti_rationalization_reviewer_config_strips_preset_schema
         ; test_case
             "failure judgment schema uses contract SSOT"
             `Quick

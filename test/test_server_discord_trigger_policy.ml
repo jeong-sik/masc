@@ -258,6 +258,7 @@ let test_durable_accept_precedes_delivery_handoff () =
              ; thread_id }
        ; conversation_id
        ; external_message_id
+       ; workspace_id
        } ->
      check string "Discord delivery channel" "C123" channel_id;
      check string "Discord delivery actor" "U123" user_id;
@@ -268,7 +269,9 @@ let test_durable_accept_precedes_delivery_handoff () =
      check (option string) "Discord conversation identity"
        (Some "discord:G123:channel:C123") conversation_id;
      check (option string) "Discord external event identity"
-       (Some "discord-exact-123") external_message_id
+       (Some "discord-exact-123") external_message_id;
+     check (option string) "Discord delivery workspace identity"
+       (Some "G123") workspace_id
    | Some _ -> fail "Discord leaf emitted another connector projection"
    | None -> fail "Discord leaf did not emit a delivery projection");
   let failure = Eio.Promise.await observed in

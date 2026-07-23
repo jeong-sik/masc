@@ -149,11 +149,14 @@ let truncate ?(max_len = default_max_len) (s : string) : string =
 let redact_preview ?(max_len = default_max_len) (s : string) : string =
   if Tool_output.is_marker s then
     match Tool_output.decode_from_oas s with
-    | Tool_output.Stored { sha256; bytes; preview; mime } ->
-        let preview = preview |> truncate ~max_len |> redact_patterns in
+    | Tool_output.Decoded artifact_ref ->
+        let preview =
+          artifact_ref.Tool_output.preview |> truncate ~max_len
+          |> redact_patterns
+        in
         Tool_output.encode_for_oas
-          (Tool_output.Stored { sha256; bytes; preview; mime })
-    | Tool_output.Inline _ ->
+          (Tool_output.Stored (Tool_output.with_preview artifact_ref preview))
+    | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
         s |> truncate ~max_len |> redact_patterns
   else s |> truncate ~max_len |> redact_patterns
 

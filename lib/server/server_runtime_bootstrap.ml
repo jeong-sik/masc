@@ -5,6 +5,7 @@ open Server_routes_http
 module Mcp_server = Mcp_server
 module Mcp_eio = Mcp_server_eio
 module Config_root_bootstrap = Server_runtime_config_root_bootstrap
+module Exact_output = Agent_sdk.Exact_output
 
 let config_bootstrap_mode = Config_root_bootstrap.config_bootstrap_mode
 let bootstrap_base_path_config_root = Config_root_bootstrap.bootstrap_base_path_config_root
@@ -111,6 +112,310 @@ let configure_oas_model_catalog_overlay
        raise
          (Env_config_core.Config_error
             (Printf.sprintf "catalog overlay %s: %s" path detail)))
+
+let exact_output_catalog_source_to_string = function
+  | Exact_output.Embedded_catalog -> "embedded"
+  | Exact_output.Overlay_catalog -> "overlay"
+;;
+
+let exact_output_collision_to_string = function
+  | Exact_output.Duplicate_provider_identity -> "duplicate provider identity"
+  | Exact_output.Duplicate_model_identity -> "duplicate model identity"
+  | Exact_output.Duplicate_target_identity -> "duplicate target identity"
+  | Exact_output.Provider_alias_shadow -> "provider alias shadow"
+  | Exact_output.Target_identity_shadow -> "target identity shadow"
+  | Exact_output.Model_identity_shadow -> "model identity shadow"
+;;
+
+let exact_output_binding_component_to_string = function
+  | Exact_output.Target_provider -> "provider"
+  | Exact_output.Target_model -> "model"
+;;
+
+let exact_output_endpoint_error_to_string = function
+  | Exact_output.Malformed_base_url -> "malformed base URL"
+  | Exact_output.Base_url_userinfo_not_allowed -> "base URL userinfo is not allowed"
+  | Exact_output.Base_url_query_not_allowed -> "base URL query is not allowed"
+  | Exact_output.Base_url_fragment_not_allowed -> "base URL fragment is not allowed"
+  | Exact_output.Invalid_request_path -> "invalid request path"
+  | Exact_output.Unsupported_gemini_request_path ->
+    "Gemini exact targets require the generated endpoint surface"
+  | Exact_output.Invalid_gemini_model_path -> "invalid Gemini model path"
+;;
+
+let exact_output_snapshot_error_to_string = function
+  | Exact_output.Catalog_parse_failed { source; detail } ->
+    Printf.sprintf
+      "%s catalog parse failed: %s"
+      (exact_output_catalog_source_to_string source)
+      detail
+  | Exact_output.Target_catalog_invalid { source; detail } ->
+    Printf.sprintf
+      "%s target catalog is invalid: %s"
+      (exact_output_catalog_source_to_string source)
+      detail
+  | Exact_output.Catalog_collision collision ->
+    exact_output_collision_to_string collision
+  | Exact_output.Target_binding_missing { target_ref; component } ->
+    Printf.sprintf
+      "target %S is missing its %s binding"
+      (Exact_output.target_ref_id target_ref)
+      (exact_output_binding_component_to_string component)
+  | Exact_output.Target_endpoint_invalid { target_ref; cause } ->
+    Printf.sprintf
+      "target %S endpoint is invalid: %s"
+      (Exact_output.target_ref_id target_ref)
+      (exact_output_endpoint_error_to_string cause)
+  | Exact_output.Environment_read_failed { environment_variable } ->
+    Printf.sprintf "failed to read environment variable %s" environment_variable
+  | Exact_output.Target_credential_invalid
+      { target_ref; environment_variable } ->
+    Printf.sprintf
+      "target %S has an invalid credential in environment variable %s"
+      (Exact_output.target_ref_id target_ref)
+      environment_variable
+;;
+
+let read_exact_output_overlay path =
+  try Ok (In_channel.with_open_bin path In_channel.input_all) with
+  | Sys_error detail -> Error detail
+;;
+
+let load_exact_output_lane_declarations () =
+  match Runtime.config_path () with
+  | None ->
+    raise
+      (Env_config_core.Config_error
+         "exact-output registry: runtime.toml path is unavailable")
+  | Some config_path ->
+    (match Runtime_toml.parse_file config_path with
+     | Ok (config : Runtime_schema.config) -> config.exact_output_lane_decls
+     | Error errors ->
+       raise
+         (Env_config_core.Config_error
+            (Printf.sprintf
+               "exact-output registry: runtime config parse failed (%s): %d error(s)"
+               config_path
+               (List.length errors))))
+;;
+
+(* The compaction summarizer resolves this lane by name; it must exist in
+   every published registry for manual/provider-overflow compaction to run. *)
+let compaction_exact_lane_id = "compaction_exact"
+
+(* Upgraded workspaces keep their operator-owned runtime.toml
+   ([Config_root_bootstrap] preserves existing roots), which predates
+   [runtime.exact_output_lanes]. Without a backfill the bootstrap would
+   publish a valid registry with zero lanes and every compaction would fail at
+   execution with [Exact_target_selection_failed]. The seed declaration comes
+   from the binary-embedded seed config so repo config and backfill share one
+   source; operator declarations always win. *)
+let seed_exact_output_lane_declarations () =
+  match Embedded_config.read "runtime.toml" with
+  | None ->
+    Log.Misc.warn
+      "exact_output: embedded seed runtime.toml is unavailable; cannot backfill the %S lane"
+      compaction_exact_lane_id;
+    []
+  | Some contents ->
+    (match Runtime_toml.parse_string contents with
+     | Ok (config : Runtime_schema.config) -> config.exact_output_lane_decls
+     | Error errors ->
+       Log.Misc.warn
+         "exact_output: embedded seed runtime.toml parse failed (%d error(s)); cannot backfill the %S lane"
+         (List.length errors)
+         compaction_exact_lane_id;
+       [])
+
+let backfill_required_exact_output_lanes ~seed_lanes lanes =
+  let has_compaction_exact (lane : Runtime_schema.exact_output_lane_decl) =
+    String.equal lane.id compaction_exact_lane_id
+  in
+  if List.exists has_compaction_exact lanes
+  then lanes, false
+  else
+    match List.find_opt has_compaction_exact seed_lanes with
+    | None -> lanes, false
+    | Some seed_lane -> lanes @ [ seed_lane ], true
+;;
+
+(* Row identity for catalog table arrays, mirroring [Model_catalog] merge
+   keys: [[providers]]/[[targets]] rows key on [id], [[models]] rows key on
+   [id_prefix] + [provider_name]. *)
+let catalog_row_key = function
+  | Otoml.TomlTable entries ->
+    (match List.assoc_opt "id" entries with
+     | Some (Otoml.TomlString id) -> Some ("row", id)
+     | _ ->
+       (match
+          List.assoc_opt "id_prefix" entries, List.assoc_opt "provider_name" entries
+        with
+        | Some (Otoml.TomlString id_prefix), Some (Otoml.TomlString provider_name) ->
+          Some ("model", provider_name ^ "/" ^ id_prefix)
+        | _ -> None))
+  | _ -> None
+;;
+
+let rec merge_catalog_toml_values ~base ~overlay =
+  match base, overlay with
+  | Otoml.TomlTable base_entries, Otoml.TomlTable overlay_entries ->
+    let kept_base =
+      List.filter
+        (fun (key, _) -> not (List.mem_assoc key overlay_entries))
+        base_entries
+    in
+    let merged_overlay =
+      List.map
+        (fun (key, overlay_value) ->
+           let value =
+             match List.assoc_opt key base_entries with
+             | Some base_value ->
+               merge_catalog_toml_values ~base:base_value ~overlay:overlay_value
+             | None -> overlay_value
+           in
+           key, value)
+        overlay_entries
+    in
+    Otoml.TomlTable (kept_base @ merged_overlay)
+  | Otoml.TomlTableArray base_items, Otoml.TomlTableArray overlay_items ->
+    let overlay_keys = List.filter_map catalog_row_key overlay_items in
+    let kept_base =
+      List.filter
+        (fun item ->
+           match catalog_row_key item with
+           | Some key -> not (List.mem key overlay_keys)
+           | None -> true)
+        base_items
+    in
+    Otoml.TomlTableArray (kept_base @ overlay_items)
+  | _, overlay -> overlay
+;;
+
+let merge_catalog_overlay_toml ~base_contents ~overlay_contents =
+  match
+    ( Otoml.Parser.from_string_result base_contents
+    , Otoml.Parser.from_string_result overlay_contents )
+  with
+  | Error detail, _ -> Error (Printf.sprintf "base catalog: %s" detail)
+  | _, Error detail -> Error (Printf.sprintf "overlay catalog: %s" detail)
+  | Ok base, Ok overlay ->
+    Ok (Otoml.Printer.to_string (merge_catalog_toml_values ~base ~overlay))
+;;
+
+(* The exact-output resolver must route against the same catalog the runtime
+   path uses. [Exact_output.load_resolver_snapshot] only accepts
+   embedded-plus-overlay, so an operator-supplied [OAS_MODEL_CATALOG] full
+   replacement is folded into the resolver's overlay document *ahead* of the
+   config-root overlay: table rows the overlay re-declares replace the
+   replacement's rows, everything else unions. The resolver still unions the
+   result onto the OAS embedded catalog (the OAS API exposes no full-base
+   replacement), which is a superset of the runtime catalog — every target and
+   credential declaration from the replacement is visible to exact-output
+   resolution. *)
+let exact_output_resolver_overlay ?config_root ?(env = Sys.getenv_opt) () =
+  let overlay_path = resolve_oas_model_catalog_overlay_path ?config_root () in
+  let full_catalog_path = nonempty_env env oas_model_catalog_env_var_name in
+  let read_contents label path =
+    match read_exact_output_overlay path with
+    | Ok contents -> contents
+    | Error detail ->
+      raise
+        (Env_config_core.Config_error
+           (Printf.sprintf "exact-output %s %s: %s" label path detail))
+  in
+  match full_catalog_path, overlay_path with
+  | None, None -> None, " from OAS embedded catalog"
+  | Some full_path, None ->
+    ( Some
+        ({ source = full_path; contents = read_contents "full catalog" full_path }
+         : Exact_output.catalog_overlay)
+    , " from OAS_MODEL_CATALOG full catalog " ^ full_path )
+  | None, Some path ->
+    ( Some { source = path; contents = read_contents "catalog overlay" path }
+    , " with deployment overlay " ^ path )
+  | Some full_path, Some path ->
+    let contents =
+      match
+        merge_catalog_overlay_toml
+          ~base_contents:(read_contents "full catalog" full_path)
+          ~overlay_contents:(read_contents "catalog overlay" path)
+      with
+      | Ok contents -> contents
+      | Error detail ->
+        raise
+          (Env_config_core.Config_error
+             (Printf.sprintf "exact-output catalog merge: %s" detail))
+    in
+    ( Some { source = full_path ^ " + " ^ path; contents }
+    , Printf.sprintf
+        " from OAS_MODEL_CATALOG full catalog %s merged with deployment overlay %s"
+        full_path
+        path )
+;;
+
+let configure_exact_output_registry ?config_root ?(env = Sys.getenv_opt) () =
+  let overlay, overlay_description =
+    exact_output_resolver_overlay ?config_root ~env ()
+  in
+  let io : Exact_output.resolver_io =
+    { getenv =
+        (fun name ->
+          try Ok (Sys.getenv_opt name) with
+          | Sys_error _ | Invalid_argument _ -> Error ())
+    }
+  in
+  match Exact_output.load_resolver_snapshot ~io ?overlay () with
+  | Error error ->
+    raise
+      (Env_config_core.Config_error
+         ("exact-output resolver snapshot: "
+          ^ exact_output_snapshot_error_to_string error))
+  | Ok resolver_snapshot ->
+    let operator_lanes = load_exact_output_lane_declarations () in
+    let lanes, backfilled =
+      backfill_required_exact_output_lanes
+        ~seed_lanes:(seed_exact_output_lane_declarations ())
+        operator_lanes
+    in
+    (match Runtime_exact_output_registry.publish ~lanes resolver_snapshot with
+     | Ok registry ->
+       Log.Misc.info
+         "exact_output: immutable resolver-and-lane registry generation %Ld published%s%s"
+         (Runtime_exact_output_registry.generation registry)
+         (if backfilled
+          then Printf.sprintf " (backfilled seed lane %S)" compaction_exact_lane_id
+          else "")
+         overlay_description
+     | Error error ->
+       (* A backfilled seed lane must never abort startup: legacy config roots
+          may predate the deployment overlay that declares the seed target.
+          Degrade to the operator-declared lanes — compaction then fails at
+          execution with an actionable lane-missing error instead of blocking
+          the whole server boot. Errors in operator-declared lanes stay
+          fatal. *)
+       if backfilled
+       then
+         (match
+            Runtime_exact_output_registry.publish ~lanes:operator_lanes resolver_snapshot
+          with
+          | Ok registry ->
+            Log.Misc.warn
+              "exact_output: seed lane %S failed validation (%s); published operator lanes only, generation %Ld%s"
+              compaction_exact_lane_id
+              (Runtime_exact_output_registry.error_to_string error)
+              (Runtime_exact_output_registry.generation registry)
+              overlay_description
+          | Error operator_error ->
+            raise
+              (Env_config_core.Config_error
+                 ("exact-output resolver-and-lane registry: "
+                  ^ Runtime_exact_output_registry.error_to_string operator_error)))
+       else
+         raise
+           (Env_config_core.Config_error
+              ("exact-output resolver-and-lane registry: "
+               ^ Runtime_exact_output_registry.error_to_string error)))
+;;
 
 (* GC tuning for long-running server with bursty allocation.
 
@@ -258,6 +563,7 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   warn_ignored_config_root_full_catalogs ~config_root ();
   let (_ : string option) = configure_oas_model_catalog_env () in
   let (_ : string option) = configure_oas_model_catalog_overlay ~config_root () in
+  configure_exact_output_registry ~config_root ();
   (* Apply keeper runtime overrides from the resolved config root's
      runtime.toml. Must run before any module that reads
      [Env_config_keeper.KeeperKeepalive] env vars at init time. Existing
@@ -272,17 +578,37 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
        raise (Env_config_core.Config_error msg));
   Keeper_runtime_resolved.init ();
   (* Boot-time observability: emit the resolved runtime knobs once, right after
-     they freeze. The opt-in timeouts (stream_idle_timeout_sec and the
-     body-timeout override) are None when unset; without this line a knob that
-     is CONFIGURED in runtime.toml but did not reach Keeper_runtime_resolved is
-     indistinguishable at runtime from an unset one — the exact ambiguity that
-     blocked diagnosing #25128 (idle timeout configured at 120s yet never
-     observed to fire). No existing surface exposes the resolved value. *)
+     they freeze. Without this line a knob that is CONFIGURED in runtime.toml but
+     did not reach Keeper_runtime_resolved is indistinguishable at runtime from an
+     unset one — the exact ambiguity that blocked diagnosing #25128 (idle timeout
+     configured yet never observed to fire). The body-timeout override is None
+     when unset; stream_idle_timeout_sec now resolves to the RFC-0345 fail-safe
+     floor when unset (stated on the dedicated line below). No existing surface
+     exposes the resolved value. *)
   Log.Runtime.info
     ~category:Log.Boundary
     "resolved runtime config: %s"
     (Yojson.Safe.to_string
        (Keeper_runtime_resolved.to_yojson (Keeper_runtime_resolved.current ())));
+  (* RFC-0345 (#25128): state the effective streaming idle timeout and whether it
+     came from an operator value (env/toml) or the fail-safe floor, so operators
+     can see the floor is active and raise it if their provider legitimately
+     idles longer. The resolver always yields [Some] after the floor; the [None]
+     arm is retained as total handling and reports the pre-floor freeze-risk
+     posture should the floor ever be removed. *)
+  Keeper_runtime_resolved.(
+    let idle = (current ()).stream_idle_timeout_sec in
+    match idle.value with
+    | Some seconds ->
+      Log.Runtime.info
+        ~category:Log.Boundary
+        "keeper stream idle timeout resolved: %.1fs (source: %s)"
+        seconds
+        (source_to_string idle.source)
+    | None ->
+      Log.Runtime.info
+        ~category:Log.Boundary
+        "keeper stream idle timeout resolved: disabled (no inter-line idle bound)");
   Keeper_task_owner_backend.install_hooks ();
   let state =
     Mcp_eio.create_state_eio ~sw ~proc_mgr ~fs ~clock
@@ -1368,11 +1694,6 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       Server_dashboard_http.start_mission_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_operator_snapshot_refresh_loop ~state ~sw ~clock;
       Server_dashboard_http.start_operator_digest_refresh_loop ~state ~sw ~clock;
-      (* RFC-0284: push goal-loop OODA status over SSE on change so the panel
-         stops polling. The worker is out-of-process (Python), so the trigger
-         is this server-side tick reading the cached status.json. *)
-      Server_dashboard_http_goal_loop_broadcast.start_goal_loop_refresh_loop
-        ~state ~sw ~clock;
       (* Pre-warm shell cache in a separate fiber so it cannot block
          lazy startup tasks or later keeper loop startup
          (#keeper-bootstrap-stuck). *)

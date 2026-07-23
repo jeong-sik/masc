@@ -33,13 +33,13 @@ let make_meta name =
 
 let register name =
   let meta = make_meta name in
-  KR.register ~base_path meta.name meta
+  KR.For_testing.register ~base_path meta.name meta
 ;;
 
 let health_to_string = KR.registry_entry_validation_error_to_string
 
 let test_put_entry_rejects_meta_name_mismatch () =
-  KR.clear ();
+  KR.For_testing.clear ();
   let entry = register "alice" in
   let corrupted = { entry with meta = { entry.meta with name = "bob" } } in
   match KR.put_entry ~base_path "alice" corrupted with
@@ -51,7 +51,7 @@ let test_put_entry_rejects_meta_name_mismatch () =
 ;;
 
 let test_update_entry_rejects_corrupted_result () =
-  KR.clear ();
+  KR.For_testing.clear ();
   let entry = register "alice" in
   let original_base_path = entry.base_path in
   (match
@@ -66,7 +66,7 @@ let test_update_entry_rejects_corrupted_result () =
 ;;
 
 let test_unregister_exact_preserves_replacement_lane () =
-  KR.clear ();
+  KR.For_testing.clear ();
   let old_entry = register "alice" in
   let replacement = register "alice" in
   (match KR.unregister_exact old_entry with
@@ -88,7 +88,7 @@ let test_unregister_exact_preserves_replacement_lane () =
 ;;
 
 let test_unregister_exact_accepts_same_lane_record_update () =
-  KR.clear ();
+  KR.For_testing.clear ();
   let observed = register "alice" in
   (match
      KR.update_entry ~base_path "alice" (fun entry ->
@@ -105,7 +105,7 @@ let test_unregister_exact_accepts_same_lane_record_update () =
 ;;
 
 let test_update_entry_exact_preserves_replacement_lane () =
-  KR.clear ();
+  KR.For_testing.clear ();
   let old_entry = register "alice" in
   let replacement = register "alice" in
   (match
@@ -125,7 +125,7 @@ let test_update_entry_exact_preserves_replacement_lane () =
 ;;
 
 let test_dispatch_event_exact_preserves_replacement_lane () =
-  KR.clear ();
+  KR.For_testing.clear ();
   let old_meta = make_meta "alice" in
   let old_entry = KR.register_offline ~base_path old_meta.name old_meta in
   let replacement = KR.register_offline ~base_path old_meta.name old_meta in
@@ -179,7 +179,7 @@ let test_lane_fork_rejects_cancelling_switch () =
 ;;
 
 let test_dispatch_write_failure_skips_phase_side_effects () =
-  KR.clear ();
+  KR.For_testing.clear ();
   KLH.reset_for_testing ();
   Fun.protect
     ~finally:(fun () -> KLH.reset_for_testing ())
@@ -200,7 +200,7 @@ let test_dispatch_write_failure_skips_phase_side_effects () =
 ;;
 
 let test_get_filters_corrupted_entry () =
-  KR.clear ();
+  KR.For_testing.clear ();
   let entry = register "alice" in
   let corrupted =
     { entry with
@@ -223,7 +223,7 @@ let test_get_filters_corrupted_entry () =
 ;;
 
 let test_wakeup_running_reports_typed_outcome () =
-  KR.clear ();
+  KR.For_testing.clear ();
   (match
      KR.wakeup_running ~intent:KR.Hitl_resolution ~base_path "missing"
    with
@@ -253,7 +253,7 @@ let test_wakeup_running_reports_typed_outcome () =
 ;;
 
 let test_wakeup_running_exact_preserves_owner_lane () =
-  KR.clear ();
+  KR.For_testing.clear ();
   let captured = register "exact-owner" in
   let peer = register "exact-peer" in
   Atomic.set captured.fiber_wakeup false;
@@ -306,9 +306,9 @@ let test_wakeup_running_exact_preserves_owner_lane () =
 ;;
 
 let test_wakeup_running_exact_reports_deferred_outcomes () =
-  KR.clear ();
+  KR.For_testing.clear ();
   let removed = register "exact-missing" in
-  KR.clear ();
+  KR.For_testing.clear ();
   (match KR.wakeup_running_exact ~intent:KR.Reactive_signal removed with
    | KR.Exact_wake_missing -> ()
    | KR.Exact_wake_signaled
@@ -329,7 +329,7 @@ let test_wakeup_running_exact_reports_deferred_outcomes () =
    | KR.Exact_wake_lifecycle_reserved _ ->
      fail "offline exact owner did not report phase");
   let paused_meta = { (make_meta "exact-paused") with paused = true } in
-  let paused = KR.register ~base_path paused_meta.name paused_meta in
+  let paused = KR.For_testing.register ~base_path paused_meta.name paused_meta in
   (match KR.wakeup_running_exact ~intent:KR.Reactive_signal paused with
    | KR.Exact_wake_lifecycle_denied
        (Keeper_lifecycle_admission.Autonomous_paused _) -> ()
@@ -344,7 +344,7 @@ let test_wakeup_running_exact_reports_deferred_outcomes () =
 ;;
 
 let test_wakeup_running_exact_respects_lifecycle_owner_and_replacement () =
-  KR.clear ();
+  KR.For_testing.clear ();
   let captured = register "exact-reserved" in
   Atomic.set captured.fiber_wakeup false;
   let token =
@@ -416,9 +416,9 @@ let test_wakeup_running_exact_respects_lifecycle_owner_and_replacement () =
 ;;
 
 let test_wakeup_denies_paused_and_dead_without_signaling () =
-  KR.clear ();
+  KR.For_testing.clear ();
   let paused_meta = { (make_meta "paused-wakeup") with paused = true } in
-  let paused_entry = KR.register ~base_path paused_meta.name paused_meta in
+  let paused_entry = KR.For_testing.register ~base_path paused_meta.name paused_meta in
   Atomic.set paused_entry.fiber_wakeup false;
   (match KR.wakeup_running ~intent:KR.Scheduled_signal ~base_path paused_meta.name with
    | KR.Deferred_lifecycle (Keeper_lifecycle_admission.Autonomous_paused _) -> ()
@@ -434,7 +434,7 @@ let test_wakeup_denies_paused_and_dead_without_signaling () =
     ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
     }
   in
-  let entry = KR.register ~base_path meta.name meta in
+  let entry = KR.For_testing.register ~base_path meta.name meta in
   Atomic.set entry.fiber_wakeup false;
   (match KR.wakeup_running ~intent:KR.Scheduled_signal ~base_path meta.name with
    | KR.Deferred_lifecycle
@@ -474,12 +474,12 @@ let test_reactive_wakeup_defers_offline_lane_after_queue_commit () =
   let dir = temp_dir "registry_reactive_offline_wakeup" in
   Fun.protect
     ~finally:(fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       cleanup_dir dir)
     (fun () ->
        Eio_main.run @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       KR.clear ();
+       KR.For_testing.clear ();
        let meta = make_meta "reactive-offline" in
        let entry = KR.register_offline ~base_path:dir meta.name meta in
        let stimulus : Keeper_event_queue.stimulus =
@@ -509,12 +509,12 @@ let test_goal_assignment_defers_offline_lane_after_queue_commit () =
   let dir = temp_dir "registry_goal_offline_wakeup" in
   Fun.protect
     ~finally:(fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       cleanup_dir dir)
     (fun () ->
        Eio_main.run @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       KR.clear ();
+       KR.For_testing.clear ();
        let config = Masc.Workspace.default_config dir in
        let meta = make_meta "goal-offline" in
        let entry =
@@ -576,10 +576,10 @@ let test_tool_dispatch_preserves_exact_meta_after_replacement () =
          Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
        in
        let _original_entry =
-         KR.register ~base_path:config.base_path meta.name meta
+         KR.For_testing.register ~base_path:config.base_path meta.name meta
        in
        Fun.protect
-         ~finally:(fun () -> KR.unregister ~base_path:config.base_path meta.name)
+         ~finally:(fun () -> KR.For_testing.unregister ~base_path:config.base_path meta.name)
          (fun () ->
             let provider_reads = Atomic.make 0 in
             let provider () =
@@ -605,7 +605,7 @@ let test_tool_dispatch_preserves_exact_meta_after_replacement () =
               }
             in
             let replacement =
-              KR.register
+              KR.For_testing.register
                 ~base_path:config.base_path
                 replacement_meta.name
                 replacement_meta

@@ -239,11 +239,12 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const handleDirective = async (action: 'pause' | 'resume' | 'wakeup') => {
     directiveLoading.value = true
     try {
-      const fn =
-        action === 'pause' ? pauseKeeper
-          : action === 'resume' ? resumeKeeper
-          : wakeKeeper
-      const res = await fn(keeper.name)
+      const res =
+        action === 'pause'
+          ? await pauseKeeper(keeper.name)
+          : action === 'resume'
+            ? await resumeKeeper(keeper.name, keeper.generation)
+            : await wakeKeeper(keeper.name)
       if (res.ok) {
         const msg =
           action === 'pause' ? `${keeper.name} 일시정지됨`

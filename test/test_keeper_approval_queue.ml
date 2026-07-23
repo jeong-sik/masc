@@ -649,7 +649,8 @@ let test_resolution_is_durable_and_origin_scoped () =
               ~input
               ()
           with
-          | Ok matched -> Option.is_some matched
+          | Ok (AQ.Rule_match_active _) -> true
+          | Ok (AQ.Rule_match_expired _ | AQ.Rule_match_absent) -> false
           | Error error -> Alcotest.fail (AQ.rule_store_error_to_string error));
        (match
           AQ.consume_approved_resolution
@@ -676,6 +677,62 @@ let test_resolution_is_durable_and_origin_scoped () =
           Alcotest.fail "exact request did not consume its grant"
         | Error error -> Alcotest.fail (AQ.grant_error_to_string error));
        drop_resolution ~base_path ~keeper_name resolution)
+;;
+
+let test_remembered_rule_carries_requested_expiry () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-expiry-origin" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       ignore (install_exn ~base_path);
+       let input = `Assoc [ "target", `String "document" ] in
+       let id = submit ~base_path ~keeper_name ~input in
+       let expires_at = Unix.gettimeofday () +. 600.0 in
+       let result =
+         AQ.resolve_with_policy
+           ~base_path
+           ~id
+           ~decision:AQ.Decision.Approve
+           ~remember_rule:true
+           ~rule_expires_at:expires_at
+           ~created_by:"operator"
+           ()
+       in
+       (match result with
+        | Error error -> Alcotest.fail (AQ.resolve_error_to_string error)
+        | Ok { remembered_rule = None } ->
+          Alcotest.fail "approved remember_rule resolution must persist a rule"
+        | Ok { remembered_rule = Some rule } ->
+          Alcotest.(check (option (float 0.0)))
+            "rule carries requested expiry"
+            (Some expires_at)
+            rule.expires_at);
+       (* A same-request replay stays idempotent only when the expiry matches. *)
+       (match
+          AQ.resolve_with_policy
+            ~base_path
+            ~id
+            ~decision:AQ.Decision.Approve
+            ~remember_rule:true
+            ~rule_expires_at:expires_at
+            ~created_by:"operator"
+            ()
+        with
+        | Ok _ -> ()
+        | Error error ->
+          Alcotest.fail
+            ("identical expiry re-resolution must be idempotent: "
+             ^ AQ.resolve_error_to_string error));
+       match AQ.list_rules ~base_path () with
+       | Error error -> Alcotest.fail (AQ.rule_store_error_to_string error)
+       | Ok [ rule ] ->
+         Alcotest.(check (option (float 0.0)))
+           "persisted rule carries requested expiry"
+           (Some expires_at)
+           rule.expires_at
+       | Ok rules ->
+         Alcotest.failf "one remembered rule expected, got %d" (List.length rules))
 ;;
 
 let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
@@ -734,6 +791,8 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
             ~base_path
             ~settled_at:3.0
             ~stop_requested:false
+            ~compaction_consecutive_failures:0
+      ~transcript_quarantine_consecutive_retries:0
             ~lease
             None
         with
@@ -807,6 +866,8 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
             ~base_path
             ~settled_at:4.0
             ~stop_requested:false
+            ~compaction_consecutive_failures:0
+      ~transcript_quarantine_consecutive_retries:0
             ~lease
             None
         with
@@ -1797,6 +1858,10 @@ let () =
             "resolution wakes only origin"
             `Quick
             test_resolution_is_durable_and_origin_scoped
+        ; Alcotest.test_case
+            "remembered rule carries requested expiry"
+            `Quick
+            test_remembered_rule_carries_requested_expiry
         ; Alcotest.test_case
             "cycle grant binds origin and is consumed once"
             `Quick

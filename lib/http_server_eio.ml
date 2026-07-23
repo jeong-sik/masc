@@ -31,54 +31,6 @@ type request_handler =
   Httpun.Reqd.t ->
   unit
 
-(** Compact Protocol v4: HTTP Compression with Dictionary Support
-
-    For small messages (32-2048 bytes), trained dictionary compression
-    achieves +70%p better compression than standard zstd.
-
-    Multi-format dictionary trained on:
-    - MASC broadcasts, task updates, lock events
-    - MCP JSON-RPC (tools/call, results, errors)
-    - HTTP API responses (status, data, error)
-    - Slack-style messages
-*)
-module Compression = struct
-  (** Check if client accepts zstd encoding *)
-  let accepts_zstd (request : Httpun.Request.t) : bool =
-    Http_response_payload.accepts_zstd_header
-      (Httpun.Headers.get request.headers "accept-encoding")
-
-  (** Check if client accepts dictionary-enhanced zstd *)
-  let accepts_zstd_dict (request : Httpun.Request.t) : bool =
-    Http_response_payload.accepts_zstd_dict_header
-      (Httpun.Headers.get request.headers "accept-encoding")
-
-  (** Compress with dictionary if beneficial
-      @return (compressed_data, encoding_name option) *)
-  let compress ?(level = 3) (data : string) : string * string option =
-    match Compression_codec.compress ~level data with
-    | Compression_codec.Unchanged payload -> (payload, None)
-    | Compression_codec.Compressed { payload; encoding } ->
-        (payload, Some (Compression_codec.content_encoding encoding))
-
-  let compress_zstd_result ~original result =
-    Compression_codec.legacy_standard_result ~original result
-
-  (** Legacy: Standard zstd without dictionary.
-
-      The [bool] returned here tracks whether the caller should emit a
-      [Content-Encoding: zstd] header. It may be [false] either because the
-      payload was unchanged, because compression failed and returned
-      [Unchanged], or because a dictionary-compressed result cannot be served
-      through this legacy standard-zstd path. *)
-  let compress_zstd ?(level = 3) (data : string) : string * bool =
-    if String.length data < Compression_codec.legacy_min_size
-    then data, false
-    else
-      Compression_codec.compress ~level data
-      |> Compression_codec.legacy_standard_result ~original:data
-end
-
 (** Late-response failure classifier (#13059).
 
     [Failure] string-literal patterns are fragile (warning 52) — the

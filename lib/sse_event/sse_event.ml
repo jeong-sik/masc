@@ -335,39 +335,6 @@ let context_compacted
     payload_json
 ;;
 
-(** Emit a [context_overflow_imminent] envelope.  Otel_metric_store gauge +
-    tracker side effects stay in the runtime arm. *)
-let context_overflow_imminent
-      ~(ts_unix : float)
-      ~(correlation_id : string)
-      ~(run_id : string)
-      ~(agent_name : string)
-      ~(estimated_tokens : int)
-      ~(limit_tokens : int)
-      ~(ratio : float)
-  : Yojson.Safe.t
-  =
-  let payload_json =
-    let p : Sse_event_t.context_overflow_imminent_payload =
-      { agent_name; estimated_tokens; limit_tokens; ratio }
-    in
-    Yojson.Safe.from_string
-      (Sse_event_j.string_of_context_overflow_imminent_payload p)
-  in
-  wrap_envelope
-    { event_type = "context_overflow_imminent"
-    ; ts_unix
-    ; correlation_id
-    ; run_id
-    ; caused_by = None
-    ; agent_name = Some agent_name
-    ; task_id = None
-    ; turn = None
-    ; tool_name = None
-    }
-    payload_json
-;;
-
 (** Emit a [context_compact_started] envelope. *)
 let context_compact_started
       ~(ts_unix : float)

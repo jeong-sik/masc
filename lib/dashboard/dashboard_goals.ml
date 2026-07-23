@@ -134,8 +134,6 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> []) node =
     [
       ("id", `String goal.id);
       ("title", `String goal.title);
-      ("status", Goal_store.goal_status_to_yojson goal.status);
-      ("status_color", `String (goal_status_color goal.status));
       ("phase", Goal_phase.to_yojson goal.phase);
       ("phase_color", `String (goal_phase_color goal.phase));
       ("goal_fsm", goal_fsm_to_json goal node);
@@ -265,7 +263,8 @@ let dashboard_goals_tree_json ~(config : Workspace.config) : Yojson.Safe.t =
   in
   let active_goal_count =
     goals
-    |> List.filter (fun (goal : Goal_store.goal) -> goal.status = Goal_store.Active)
+    |> List.filter (fun (goal : Goal_store.goal) ->
+           goal.phase = Goal_phase.Executing)
     |> List.length
   in
   let pending_approval_total =

@@ -1207,7 +1207,8 @@ let test_cancelled_transition_is_projected_as_typed_history () =
     | None -> fail "cancellation stimulus was not claimed"
   in
   let cancellation : Keeper_event_queue_state.accepted_cancellation =
-    { source_revision = Keeper_event_queue_state.revision claimed
+    { source = stimulus
+    ; source_revision = Keeper_event_queue_state.revision claimed
     ; owner_generation = 7
     ; operator_operation_id = "operator-cancel-1"
     ; reason = "operator rejected paused work"

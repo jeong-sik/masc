@@ -125,7 +125,12 @@ DEFAULT_LEAVES: tuple[str, ...] = (
     "masc.keeper_usage_trust",
     "masc.keeper_measurement",
     "masc.keeper_prompt_names",
-    "masc.keeper_event_bus",
+    # [masc.keeper_event_bus] and [masc.masc_event_bus] were merged into this
+    # single library. The name must be updated here, not just dropped: [check]
+    # silently [continue]s past a leaf that is absent from the dune graph, so a
+    # stale entry does not fail — it makes the RFC-0056 G1 backsliding gate
+    # no-op for that leaf family without any signal.
+    "masc.event_bus_slots",
     "masc.keeper_synthetic_marker",
     "masc.keeper_oas_timeout_message",
     "masc.keeper_tool_response",

@@ -80,9 +80,6 @@ let supervise_keepalive
     if Keeper_registry.is_registered ~base_path:ctx.config.base_path meta.name
     then ()
     else
-    let () =
-      Startup_helpers.log_persona_drift_if_missing ~base_path:ctx.config.base_path meta
-    in
     (* Register in Keeper_registry — single source of truth. *)
     match
       Keeper_registry.register_offline_if_admitted
@@ -90,13 +87,18 @@ let supervise_keepalive
         meta.name
         meta
     with
+     (* Warn, not info: a keeper that cannot launch is a degraded state the
+        operator must be able to see in WARN/ERROR filters. The 2026-07-20/21
+        wedge produced 500+ of these lines, all invisible at INFO (#25491). A
+        single WARN during a normally draining shutdown is expected and
+        cheap; sustained repetition is the incident signal. *)
      | Error (Keeper_registry.Registration_shutdown_reserved operation_id) ->
-       Log.Keeper.info
+       Log.Keeper.warn
          "supervisor launch skipped %s because shutdown operation %s owns admission"
          meta.name
          (Keeper_shutdown_types.Operation_id.to_string operation_id)
      | Error (Keeper_registry.Registration_lifecycle_reserved owner) ->
-       Log.Keeper.info
+       Log.Keeper.warn
          "supervisor launch skipped %s because lifecycle transaction owns admission: %s"
          meta.name
          (Keeper_lifecycle_reservation.snapshot_to_string owner)
@@ -111,6 +113,18 @@ let supervise_keepalive
          keeper_name
          detail
      | Ok reg ->
+    (* Persona drift is a property of a keeper that is actually joining the
+       fleet, so it is reported only once registration has committed. Reporting
+       it before [register_offline_if_admitted] meant every rejected
+       registration attempt also emitted a drift warning: when a shutdown
+       operation owns admission the supervisor retries roughly every 30s
+       forever, so a single blocked keeper produced ~120 drift warnings per
+       hour whose remediation ("add persona profile") cannot unblock it. The
+       drift condition itself is unchanged and still surfaces on the
+       registration that succeeds. *)
+    let () =
+      Startup_helpers.log_persona_drift_if_missing ~base_path:ctx.config.base_path meta
+    in
     (* Workspace initialization *)
     (try
        if not (Workspace_utils.is_initialized ctx.config)

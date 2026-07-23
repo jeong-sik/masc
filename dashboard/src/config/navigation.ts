@@ -57,7 +57,6 @@ type SurfaceSectionId =
   | 'transport-health' // Hidden support route for transport diagnostics; linked from Runtime.
   | 'feature-health' // Hidden support route for feature flag diagnostics; linked from Runtime.
   | 'journey' // Hidden execution-flow drill-down.
-  | 'cognition' // Hidden keeper cognition drill-down.
   // command
   | 'operations'     // Phase 1+6: absorbs intervene + Gate + inspector (Phase 7: connectors split out)
   // connectors (Phase 7: top-level surface — sidecar-driven channel bridges)
@@ -371,13 +370,6 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       params: { section: 'journey' },
       hidden: true,
     },
-    {
-      id: 'cognition',
-      label: 'Keeper Cognition',
-      description: 'Keeper cognition and memory drill-down.',
-      params: { section: 'cognition' },
-      hidden: true,
-    },
   ],
   keepers: [],
   board: [],
@@ -429,7 +421,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'planning',
       label: 'Plans & Goals',
-      description: 'Goal loop, goal tree, and task kanban.',
+      description: 'Goal tree and task kanban.',
       params: { section: 'planning' },
     },
     {
@@ -539,6 +531,10 @@ type TabSectionKey = `${TabId}:${string}`
 export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
   // RFC-MASC-006 Phase 0: sessions stub removed
   'monitoring:sessions': { section: 'agents' },
+  // Keeper status SSOT pass (#25578): the hidden cognition lens section was
+  // removed; stale bookmarks redirect (with telemetry) instead of silently
+  // falling back to the default section.
+  'monitoring:cognition': { section: 'agents' },
 
   // Dashboard consolidation Phase 1: monitoring surface
   'monitoring:telemetry':    { section: 'fleet-health', view: 'event-log' },

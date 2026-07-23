@@ -74,6 +74,8 @@ type t =
   | CrashPersistenceFailures
   | GenerationLineageFailures
   | KeepaliveSignalFailures
+  | BoardSignalRoutedTotal
+  | BoardSignalDeliveryTotal
   | BoardSignalNoWakeTotal
   | BoardSignalAttentionCandidateTotal
   | MetaJsonFailures
@@ -101,7 +103,6 @@ type t =
   | OasTimeoutClassifications
   | NoToolProvider
   | ProactiveOutcome
-  | OllamaSaturationSkip
   | TaskLoadFailures
   | ToolSelectionFailures
   | ReconcileFailures
@@ -191,10 +192,13 @@ type t =
   | MemoryRecallReadErrors
   | MemoryOsRecallUnavailable
   | MemoryOsReobserveEchoSuppressed
+  | MemoryOsExplicitFactWrite
+  | MemoryOsInertTurnExtractionSkipped
   | MemoryOsRecallFactsTruncated
   | MemoryOsRecallEpisodesTruncated
   | MemoryOsRecallBytesOverBudget
   | MemoryOsEpisodeRetentionPruned
+  | MemoryOsConsolidationGroupRejected
   | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze
   | VisionCandidateAttempts
@@ -290,6 +294,8 @@ let to_string = function
   | CrashPersistenceFailures -> "masc_keeper_crash_persistence_failures_total"
   | GenerationLineageFailures -> "masc_keeper_generation_lineage_failures_total"
   | KeepaliveSignalFailures -> "masc_keeper_keepalive_signal_failures_total"
+  | BoardSignalRoutedTotal -> "masc_keeper_board_signal_routed_total"
+  | BoardSignalDeliveryTotal -> "masc_keeper_board_signal_delivery_total"
   | BoardSignalNoWakeTotal -> "masc_keeper_board_signal_no_wake_total"
   | BoardSignalAttentionCandidateTotal ->
     "masc_keeper_board_signal_attention_candidate_total"
@@ -319,7 +325,6 @@ let to_string = function
   | OasTimeoutClassifications -> "masc_keeper_oas_timeout_classifications_total"
   | NoToolProvider -> "masc_keeper_no_tool_provider_total"
   | ProactiveOutcome -> "masc_keeper_proactive_outcome_total"
-  | OllamaSaturationSkip -> "masc_keeper_ollama_saturation_skip_total"
   | TaskLoadFailures -> "masc_keeper_task_load_failures_total"
   | ToolSelectionFailures -> "masc_keeper_tool_selection_failures_total"
   | ReconcileFailures -> "masc_keeper_reconcile_failures_total"
@@ -415,6 +420,10 @@ let to_string = function
       "masc_keeper_memory_os_recall_unavailable_total"
   | MemoryOsReobserveEchoSuppressed ->
       "masc_keeper_memory_os_reobserve_echo_suppressed_total"
+  | MemoryOsExplicitFactWrite ->
+      "masc_keeper_memory_os_explicit_fact_write_total"
+  | MemoryOsInertTurnExtractionSkipped ->
+      "masc_keeper_memory_os_inert_turn_extraction_skipped_total"
   | MemoryOsRecallFactsTruncated ->
       "masc_keeper_memory_os_recall_facts_truncated_total"
   | MemoryOsRecallEpisodesTruncated ->
@@ -423,6 +432,8 @@ let to_string = function
       "masc_keeper_memory_os_recall_bytes_over_budget_total"
   | MemoryOsEpisodeRetentionPruned ->
       "masc_keeper_memory_os_episode_retention_pruned_total"
+  | MemoryOsConsolidationGroupRejected ->
+      "masc_keeper_memory_os_consolidation_group_rejected_total"
   | RuntimeHttpProbeJsonParseFailures ->
       "masc_runtime_http_probe_json_parse_failures_total"
   | VisionAnalyze -> "masc_keeper_vision_analyze_total"

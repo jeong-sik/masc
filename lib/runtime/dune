@@ -27,7 +27,7 @@
   masc.masc_tool_dispatch
   masc.config
   masc.config_dir_resolver
-  masc.masc_event_bus
+  masc.event_bus_slots
   masc.provider_tool_support
   masc.keeper_runtime
   masc.auth

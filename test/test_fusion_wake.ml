@@ -97,6 +97,7 @@ let restore_env name = function
    [Fs_compat.set_fs] wrapper test_board_dispatch.ml's [with_eio] uses. *)
 let with_isolated_eio_base_path prefix f =
   let base_dir = temp_base_path prefix in
+  Unix.mkdir base_dir 0o700;
   let old_base = Sys.getenv_opt "MASC_BASE_PATH" in
   let old_base_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
   let old_registry = Fusion_run_registry.global () in
@@ -496,6 +497,16 @@ let test_missing_board_post_id_fallback () =
   check string "synthetic fallback post id" "fusion-run:fus-9" ev.post_id
 ;;
 
+let discord_channel =
+  Keeper_continuation_channel.discord
+    ~guild_id:(Some "g-1")
+    ~channel_id:"chan-9"
+    ~parent_channel_id:None
+    ~thread_id:None
+    ~user_id:"user-3"
+  |> Result.get_ok
+;;
+
 let test_emit_success_projects_board_chat_and_registry () =
   with_isolated_base_path "fusion-success-sink" (fun base_dir ->
     let keeper = "fusion-keeper" in
@@ -521,7 +532,7 @@ let test_emit_success_projects_board_chat_and_registry () =
     Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id ~keeper
       ~preset:"unit-test" ~started_at:2.0;
     let result =
-      Fusion_sink.emit ~base_dir ~keeper ~run_id ~question ~panel
+      Fusion_sink.emit ~base_dir ~keeper ~run_id ~channel:discord_channel ~question ~panel
         ~judge:(Ok synthesis) ~judges ~judge_usage
     in
     check bool "emit succeeds" true (Result.is_ok result);
@@ -614,7 +625,7 @@ let test_emit_success_projects_board_chat_and_registry () =
        check string "chat fusion block run id" run_id block_run_id
      | None -> fail "chat lane should carry a Fusion block for the board evidence");
     let replay =
-      Fusion_sink.emit ~base_dir ~keeper ~run_id ~question ~panel
+      Fusion_sink.emit ~base_dir ~keeper ~run_id ~channel:discord_channel ~question ~panel
         ~judge:(Ok synthesis) ~judges ~judge_usage
     in
     check bool "same completion replay succeeds" true (Result.is_ok replay);
@@ -641,7 +652,7 @@ let test_emit_success_projects_board_chat_and_registry () =
             ~base_path:base_dir
             ~keeper_name:keeper));
     let conflicting_replay =
-      Fusion_sink.emit ~base_dir ~keeper ~run_id
+      Fusion_sink.emit ~base_dir ~keeper ~run_id ~channel:discord_channel
         ~question:(question ^ " changed") ~panel ~judge:(Ok synthesis) ~judges
         ~judge_usage
     in
@@ -674,119 +685,16 @@ let test_emit_success_projects_board_chat_and_registry () =
     | None -> fail "fusion run should remain visible")
 ;;
 
-(* Fusion_wake_route contract: the reply route registered at masc_fusion call
-   time is consumed exactly once by the completion wake. Pure map semantics
-   plus the registration edge inside [handle_with_runner]. *)
-let discord_channel =
-  Keeper_continuation_channel.discord
-    ~guild_id:(Some "g-1")
-    ~channel_id:"chan-9"
-    ~parent_channel_id:None
-    ~thread_id:None
-    ~user_id:"user-3"
-  |> Result.get_ok
-;;
-
-let test_wake_route_register_take_discard () =
-  let base_path = Filename.get_temp_dir_name () in
-  let keeper = "fusion-route-keeper" in
-  let run_id = Printf.sprintf "fus-route-%d" (Random.bits ()) in
-  Fusion_wake_route.register ~base_path ~keeper ~run_id (Some discord_channel);
-  (match Fusion_wake_route.take ~keeper ~run_id with
-   | Some
-       { Fusion_wake_route.channel =
-           Some (Keeper_continuation_channel.Discord { channel_id = "chan-9"; _ })
-       ; _
-       } ->
-     ()
-   | Some { channel = Some other; _ } ->
-     fail
-       (Printf.sprintf "unexpected route: %s"
-          (Keeper_continuation_channel.describe other))
-   | Some { channel = None; _ } -> fail "registered route lost its channel"
-   | None -> fail "registered route must be takeable");
-  check bool "take removes the route" true
-    (Fusion_wake_route.take ~keeper ~run_id = None);
-  (* Unrouted is never stored: the wake-side default already says so. *)
-  Fusion_wake_route.register ~base_path ~keeper ~run_id
-    (Some (Keeper_continuation_channel.unrouted "not a connector turn"));
-  check bool "unrouted is not registered" true
-    (Fusion_wake_route.take ~keeper ~run_id = None);
-  Fusion_wake_route.register ~base_path ~keeper ~run_id (Some discord_channel);
-  Fusion_wake_route.discard ~keeper ~run_id;
-  check bool "discard drops the route" true
-    (Fusion_wake_route.take ~keeper ~run_id = None)
-;;
-
-(* P1-A: [peek] reads the route without consuming it, so the completion wake can
-   build+commit the stimulus before the destructive [take]. *)
-let test_wake_route_peek_is_non_destructive () =
-  let base_path = Filename.get_temp_dir_name () in
-  let keeper = "fusion-peek-keeper" in
-  let run_id = Printf.sprintf "fus-peek-%d" (Random.bits ()) in
-  Fusion_wake_route.register ~base_path ~keeper ~run_id (Some discord_channel);
-  let is_chan9 = function
-    | Some
-        { Fusion_wake_route.channel =
-            Some (Keeper_continuation_channel.Discord { channel_id = "chan-9"; _ })
-        ; _
-        } ->
-      true
-    | _ -> false
-  in
-  check bool "peek returns the registered route" true
-    (is_chan9 (Fusion_wake_route.peek ~keeper ~run_id));
-  check bool "peek is non-destructive (second peek still sees it)" true
-    (is_chan9 (Fusion_wake_route.peek ~keeper ~run_id));
-  check bool "take still consumes after peeks" true
-    (is_chan9 (Fusion_wake_route.take ~keeper ~run_id));
-  check bool "route gone after take" true
-    (Fusion_wake_route.peek ~keeper ~run_id = None)
-;;
-
-let test_wake_route_isolates_keeper_run_identity () =
-  let base_path = Filename.get_temp_dir_name () in
-  let run_id = Printf.sprintf "fus-shared-%d" (Random.bits ()) in
-  let other_channel =
-    Keeper_continuation_channel.discord
-      ~guild_id:(Some "g-1")
-      ~channel_id:"chan-10"
-      ~parent_channel_id:None
-      ~thread_id:None
-      ~user_id:"user-4"
-    |> Result.get_ok
-  in
-  Fusion_wake_route.register ~base_path ~keeper:"keeper-a" ~run_id
-    (Some discord_channel);
-  Fusion_wake_route.register ~base_path ~keeper:"keeper-b" ~run_id
-    (Some other_channel);
-  ignore (Fusion_wake_route.take ~keeper:"keeper-a" ~run_id);
-  match Fusion_wake_route.peek ~keeper:"keeper-b" ~run_id with
-  | Some
-      { Fusion_wake_route.channel =
-          Some (Keeper_continuation_channel.Discord { channel_id = "chan-10"; _ })
-      ; _
-      } ->
-    Fusion_wake_route.discard ~keeper:"keeper-b" ~run_id
-  | _ -> fail "one Keeper consuming a shared run_id removed its peer route"
-;;
-
-(* P1-A: the completion wake commits the channel-carrying stimulus through the
-   fail-closed durable path BEFORE consuming the route, so the durable snapshot
-   holds the real Discord route and the in-memory route is consumed only after a
-   successful commit. *)
-let test_wake_durable_commit_carries_channel_and_consumes_route () =
+let test_wake_durable_commit_carries_channel () =
   with_isolated_base_path "fusion-wake-durable" (fun base_dir ->
     let keeper = Printf.sprintf "fusion-wake-%d" (Random.bits ()) in
     let run_id = Printf.sprintf "fus-wake-%d" (Random.bits ()) in
-    Fusion_wake_route.register ~base_path:base_dir ~keeper ~run_id (Some discord_channel);
     let result =
-      Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:true
+      Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
+        ~channel:discord_channel ~ok:true
         ~resolved_answer:"WAKE-DURABLE-ANSWER" ~board_post_id:"post-wake-1"
     in
     check bool "wake commits durably" true (Result.is_ok result);
-    check bool "route consumed only after the durable commit" true
-      (Fusion_wake_route.peek ~keeper ~run_id = None);
     (match
        Keeper_event_queue_persistence.load ~base_path:base_dir ~keeper_name:keeper
        |> Keeper_event_queue.dequeue
@@ -803,10 +711,10 @@ let test_wake_durable_commit_carries_channel_and_consumes_route () =
      | None -> fail "completion stimulus must be durably persisted with its channel");
     let replay =
       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
-        ~ok:true ~resolved_answer:"WAKE-DURABLE-ANSWER"
+        ~channel:discord_channel ~ok:true ~resolved_answer:"WAKE-DURABLE-ANSWER"
         ~board_post_id:"post-wake-1"
     in
-    check bool "route-less replay accepts the committed recipient" true
+    check bool "exact-recipient replay accepts the committed recipient" true
       (Result.is_ok replay);
     match
       Keeper_event_queue_persistence.load ~base_path:base_dir ~keeper_name:keeper
@@ -815,7 +723,7 @@ let test_wake_durable_commit_carries_channel_and_consumes_route () =
     | Some
         ( { payload = Keeper_event_queue.Fusion_completed fc; _ }
         , remaining ) ->
-      check int "route-less replay keeps one durable completion" 0
+      check int "exact-recipient replay keeps one durable completion" 0
         (Keeper_event_queue.length remaining);
       (match fc.channel with
        | Keeper_continuation_channel.Discord { channel_id = "chan-9"; _ } -> ()
@@ -828,11 +736,7 @@ let test_wake_durable_commit_carries_channel_and_consumes_route () =
     | None -> fail "durable completion disappeared after replay")
 ;;
 
-(* P1-A fail-closed: when the durable commit fails (here a conflicting durable
-   row already occupies the post_id), the wake returns [Error] AND leaves the
-   route intact — the sole in-memory carrier of the reply channel is not
-   destroyed on a failed write, so a retry can still deliver it. *)
-let test_wake_fail_closed_preserves_route () =
+let test_wake_fail_closed_rejects_conflicting_delivery () =
   with_isolated_base_path "fusion-wake-failclosed" (fun base_dir ->
     let keeper = Printf.sprintf "fusion-wake-fc-%d" (Random.bits ()) in
     let run_id = Printf.sprintf "fus-wake-fc-%d" (Random.bits ()) in
@@ -853,79 +757,169 @@ let test_wake_fail_closed_preserves_route () =
      with
      | Ok () -> ()
      | Error e -> fail (Printf.sprintf "seeding the conflicting durable row should commit: %s" e));
-    Fusion_wake_route.register ~base_path:base_dir ~keeper ~run_id (Some discord_channel);
     let result =
-      Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:true
+      Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
+        ~channel:discord_channel ~ok:true
         ~resolved_answer:"REAL-ANSWER" ~board_post_id
     in
-    check bool "conflicting durable commit fails the wake" true (Result.is_error result);
-    match Fusion_wake_route.peek ~keeper ~run_id with
-    | Some
-        { Fusion_wake_route.channel =
-            Some (Keeper_continuation_channel.Discord { channel_id = "chan-9"; _ })
-        ; _
-        } ->
-      ()
-    | _ -> fail "route must survive a failed durable commit (peek, not take)")
+    check bool "conflicting durable commit fails the wake" true (Result.is_error result))
 ;;
 
-let test_completion_wake_does_not_signal_replacement_lane () =
-  with_isolated_base_path "fusion-wake-exact-owner" (fun base_dir ->
-    Keeper_registry.clear ();
+(* New-architecture successor of the deleted Fusion_wake_route isolation
+   guard: recipient identity is carried by the keeper-scoped durable queue and
+   the explicit obligation channel, so two Keepers sharing a [run_id] keep
+   isolated completions with their own channels. *)
+let test_wake_isolates_keeper_run_identity () =
+  with_isolated_base_path "fusion-wake-isolation" (fun base_dir ->
+    let run_id = Printf.sprintf "fus-iso-%d" (Random.bits ()) in
+    let keeper_a = Printf.sprintf "fusion-iso-a-%d" (Random.bits ()) in
+    let keeper_b = Printf.sprintf "fusion-iso-b-%d" (Random.bits ()) in
+    let channel_b =
+      Keeper_continuation_channel.discord
+        ~guild_id:(Some "g-2")
+        ~channel_id:"chan-b"
+        ~parent_channel_id:None
+        ~thread_id:None
+        ~user_id:"user-7"
+      |> Result.get_ok
+    in
+    (match
+       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper:keeper_a
+         ~run_id ~channel:discord_channel ~ok:true
+         ~resolved_answer:"ANSWER-A" ~board_post_id:"post-iso-a"
+     with
+     | Ok () -> ()
+     | Error e -> fail (Printf.sprintf "keeper-a wake must commit: %s" e));
+    (match
+       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper:keeper_b
+         ~run_id ~channel:channel_b ~ok:true
+         ~resolved_answer:"ANSWER-B" ~board_post_id:"post-iso-b"
+     with
+     | Ok () -> ()
+     | Error e -> fail (Printf.sprintf "keeper-b wake must commit: %s" e));
+    let completion_of keeper_name =
+      match
+        Keeper_event_queue_persistence.load ~base_path:base_dir ~keeper_name
+        |> Keeper_event_queue.dequeue
+      with
+      | Some ({ payload = Keeper_event_queue.Fusion_completed fc; _ }, rest) ->
+        check int "one durable completion per keeper" 0
+          (Keeper_event_queue.length rest);
+        fc
+      | Some _ -> fail "unexpected durable stimulus kind"
+      | None -> fail "completion stimulus must be durably persisted"
+    in
+    let fc_a = completion_of keeper_a in
+    let fc_b = completion_of keeper_b in
+    check string "keeper-a run id" run_id fc_a.run_id;
+    check string "keeper-b run id" run_id fc_b.run_id;
+    (match fc_a.channel with
+     | Keeper_continuation_channel.Discord { channel_id = "chan-9"; _ } -> ()
+     | other ->
+       fail
+         (Printf.sprintf "keeper-a channel crossed keepers: %s"
+            (Keeper_continuation_channel.describe other)));
+    match fc_b.channel with
+    | Keeper_continuation_channel.Discord { channel_id = "chan-b"; _ } -> ()
+    | other ->
+      fail
+        (Printf.sprintf "keeper-b channel crossed keepers: %s"
+           (Keeper_continuation_channel.describe other)))
+;;
+
+(* New-architecture successor of the deleted exact-owner guard: no in-memory
+   lane capture exists anymore, so a stale lane handle can never be signaled.
+   The durable commit is lane-independent — it must succeed and keep the
+   obligation-carried channel even when the live lane was replaced.  The wake
+   hint itself is name-scoped by design: the durable queue belongs to the
+   Keeper name, so the currently registered lane legitimately owns pending
+   completions of that Keeper. *)
+let test_completion_wake_commits_durably_across_lane_replacement () =
+  with_isolated_base_path "fusion-wake-lane-replacement" (fun base_dir ->
+    Keeper_registry.For_testing.clear ();
     Fun.protect
-      ~finally:Keeper_registry.clear
+      ~finally:Keeper_registry.For_testing.clear
       (fun () ->
-         let keeper = Printf.sprintf "fusion-exact-%d" (Random.bits ()) in
-         let run_id = Printf.sprintf "fus-exact-%d" (Random.bits ()) in
+         let keeper = Printf.sprintf "fusion-replaced-%d" (Random.bits ()) in
+         let run_id = Printf.sprintf "fus-replaced-%d" (Random.bits ()) in
          let meta = make_meta ~name:keeper () in
-         let captured = Keeper_registry.register ~base_path:base_dir keeper meta in
-         Atomic.set captured.fiber_wakeup false;
-         Fusion_wake_route.register ~base_path:base_dir ~keeper ~run_id None;
-         let replacement = Keeper_registry.register ~base_path:base_dir keeper meta in
-         Atomic.set replacement.fiber_wakeup false;
-         let result =
-           Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:true
-             ~resolved_answer:"EXACT-OWNER-ANSWER" ~board_post_id:"post-exact-owner"
+         let captured =
+           Keeper_registry.For_testing.register ~base_path:base_dir keeper meta
          in
-         check bool "completion commits despite replaced live owner" true
+         Atomic.set captured.fiber_wakeup false;
+         let _replacement =
+           Keeper_registry.For_testing.register ~base_path:base_dir keeper meta
+         in
+         let result =
+           Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
+             ~channel:discord_channel ~ok:true
+             ~resolved_answer:"REPLACED-LANE-ANSWER" ~board_post_id:"post-replaced"
+         in
+         check bool "completion commits despite replaced live lane" true
            (Result.is_ok result);
-         check bool "captured stale lane is not signaled" false
+         check bool "stale lane handle is never signaled" false
            (Atomic.get captured.fiber_wakeup);
-         check bool "replacement lane is not signaled" false
-           (Atomic.get replacement.fiber_wakeup)))
+         match
+           Keeper_event_queue_persistence.load ~base_path:base_dir
+             ~keeper_name:keeper
+           |> Keeper_event_queue.dequeue
+         with
+         | Some ({ payload = Keeper_event_queue.Fusion_completed fc; _ }, _) ->
+           check string "durable completion run id" run_id fc.run_id;
+           (match fc.channel with
+            | Keeper_continuation_channel.Discord { channel_id = "chan-9"; _ } ->
+              ()
+            | other ->
+              fail
+                (Printf.sprintf "durable channel must be the obligation channel, got %s"
+                   (Keeper_continuation_channel.describe other)))
+         | Some _ -> fail "unexpected durable stimulus kind"
+         | None -> fail "completion stimulus must persist across lane replacement"))
 ;;
 
+(* New-architecture successor of the Board-recovery identity guard: the Board
+   projection is fail-closed via [create_post_once_by_fusion_run_id], so a
+   replay always observes the same canonical [board_post_id] and is idempotent;
+   a replay carrying a *different* Board identity for the same run is an
+   identity conflict that fails closed and leaves the committed row intact. *)
 let test_wake_board_recovery_keeps_canonical_identity () =
   with_isolated_base_path "fusion-wake-board-recovery" (fun base_dir ->
     let keeper = Printf.sprintf "fusion-board-recovery-%d" (Random.bits ()) in
     let run_id = Printf.sprintf "fus-board-recovery-%d" (Random.bits ()) in
-    Fusion_wake_route.register ~base_path:base_dir ~keeper ~run_id (Some discord_channel);
     let first =
       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
-        ~ok:true ~resolved_answer:"RECOVERED-ANSWER" ~board_post_id:""
+        ~channel:discord_channel ~ok:true ~resolved_answer:"RECOVERED-ANSWER"
+        ~board_post_id:"post-canonical"
     in
-    check bool "completion without Board evidence commits" true (Result.is_ok first);
+    check bool "completion commits with Board evidence" true (Result.is_ok first);
     let replay =
       Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
-        ~ok:true ~resolved_answer:"RECOVERED-ANSWER"
-        ~board_post_id:"post-created-on-retry"
+        ~channel:discord_channel ~ok:true ~resolved_answer:"RECOVERED-ANSWER"
+        ~board_post_id:"post-canonical"
     in
-    check bool "Board recovery replay is idempotent" true (Result.is_ok replay);
+    check bool "canonical replay is idempotent" true (Result.is_ok replay);
+    let conflicting =
+      Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id
+        ~channel:discord_channel ~ok:true ~resolved_answer:"RECOVERED-ANSWER"
+        ~board_post_id:"post-divergent"
+    in
+    check bool "divergent Board identity fails closed" true
+      (Result.is_error conflicting);
     match
       Keeper_event_queue_persistence.load ~base_path:base_dir ~keeper_name:keeper
       |> Keeper_event_queue.to_list
     with
     | [ { post_id; payload = Keeper_event_queue.Fusion_completed completion; _ } ] ->
       check string "canonical durable identity" ("fusion-run:" ^ run_id) post_id;
-      check string "first committed Board projection remains authoritative" ""
-        completion.board_post_id;
+      check string "first committed Board projection remains authoritative"
+        "post-canonical" completion.board_post_id;
       (match completion.channel with
        | Keeper_continuation_channel.Discord { channel_id = "chan-9"; _ } -> ()
        | other ->
          fail
-           (Printf.sprintf "first committed route changed: %s"
+           (Printf.sprintf "first committed channel changed: %s"
               (Keeper_continuation_channel.describe other)))
-    | _ -> fail "Board recovery replay created more than one durable completion")
+    | _ -> fail "Board identity replay created more than one durable completion")
 ;;
 
 let test_completion_stimulus_persists_without_live_registry () =
@@ -952,7 +946,6 @@ let test_completion_stimulus_persists_without_live_registry () =
 let test_tool_handle_async_success_projects_running_then_completed () =
   with_isolated_eio_base_path "fusion-tool-async-success" (fun env sw base_dir ->
     let keeper = "fusion-tool-keeper" in
-    let run_id = Printf.sprintf "fus-tool-success-%d" (Random.bits ()) in
     let question = "Which async fusion path should ship?" in
     let resolved_answer = "Ship the async handler path with typed sink evidence." in
     let panel_usage = { Fusion_types.input_tokens = 23; output_tokens = 29 } in
@@ -972,24 +965,23 @@ let test_tool_handle_async_success_projects_running_then_completed () =
       ]
     in
     let release_promise, resolve_release = Eio.Promise.create () in
-    let completed_promise, resolve_completed = Eio.Promise.create () in
-    let run_orchestrator ~sw:_ ~net:_ ~base_dir ~policy:_ ~topology:_ ~request () =
+    let computed_promise, resolve_computed = Eio.Promise.create () in
+    let compute ~sw:_ ~net:_ ~policy:_ ~topology:_ ~request:_ () =
       Eio.Promise.await release_promise;
-      let outcome =
-        match
-          Fusion_sink.emit ~base_dir ~keeper:request.Fusion_types.keeper
-            ~run_id:request.Fusion_types.run_id ~question:request.Fusion_types.prompt
-            ~panel ~judge:(Ok synthesis) ~judges ~judge_usage
-        with
-        | Ok () -> Fusion_orchestrator.Completed { panel; judge = Ok synthesis }
-        | Error msg -> Fusion_orchestrator.Sink_failed msg
+      let evidence : Fusion_types.deliberation_evidence =
+        { question
+        ; panel
+        ; judge = Ok synthesis
+        ; judges
+        ; judge_usage
+        }
       in
-      Eio.Promise.resolve resolve_completed outcome;
-      outcome
+      Eio.Promise.resolve resolve_computed ();
+      Fusion_orchestrator.Computed evidence
     in
     let response =
-      Fusion_tool.For_test.handle_with_runner ~run_orchestrator ~sw
-        ~net:(Eio.Stdenv.net env) ~base_dir ~keeper ~now_unix:4.0 ~run_id
+      Fusion_tool.For_test.handle_with_compute ~compute ~sw
+        ~net:(Eio.Stdenv.net env) ~base_dir ~keeper ~now_unix:4.0
         ~policy:(fusion_tool_policy ())
         ~args:(`Assoc [ ("prompt", `String question) ])
         ()
@@ -1001,8 +993,7 @@ let test_tool_handle_async_success_projects_running_then_completed () =
       (bool_field "fusion_tool.response" response_fields "ok");
     check string "handle response status" "fusion_started"
       (string_field "fusion_tool.response" response_fields "status");
-    check string "handle response run_id" run_id
-      (string_field "fusion_tool.response" response_fields "run_id");
+    let run_id = string_field "fusion_tool.response" response_fields "run_id" in
     check bool "delivery tells keeper not to poll" true
       (contains
          ~needle:"No need to poll masc_fusion_status"
@@ -1015,18 +1006,16 @@ let test_tool_handle_async_success_projects_running_then_completed () =
        fail "fusion run should still be Running before the background runner is released"
      | None -> fail "fusion run should be registered as Running before completion");
     Eio.Promise.resolve resolve_release ();
-    (match
-       Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 2.0 (fun () ->
-         Eio.Promise.await completed_promise)
-     with
-     | Fusion_orchestrator.Completed { panel = observed_panel; judge = Ok observed_judge } ->
-       check int "completed panel count" 1 (List.length observed_panel);
-       check string "completed resolved answer" resolved_answer observed_judge.resolved_answer
-     | Fusion_orchestrator.Completed { judge = Error _; _ } ->
-       fail "background runner should complete with a synthesized judge"
-     | Fusion_orchestrator.Denied _ -> fail "background runner should not deny"
-     | Fusion_orchestrator.Sink_failed msg ->
-       fail (Printf.sprintf "background runner sink failed: %s" msg));
+    Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 2.0 (fun () ->
+      Eio.Promise.await computed_promise;
+      let rec await_projection () =
+        match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
+        | Some { Fusion_run_registry.status = Completed _; _ } -> ()
+        | Some { Fusion_run_registry.status = Running; _ } | None ->
+          Eio.Fiber.yield ();
+          await_projection ()
+      in
+      await_projection ());
     let post =
       match Board.find_post_by_run_id (Board.global ()) ~run_id with
       | Some post -> post
@@ -1078,51 +1067,6 @@ let test_tool_handle_async_success_projects_running_then_completed () =
       fail "fusion run should not remain Running after background success"
     | None -> fail "fusion run should remain visible after background success")
 ;;
-let test_emit_board_failure_is_best_effort () =
-  with_isolated_base_path "fusion-board-best-effort" (fun base_dir ->
-    let keeper = "bad/keeper" in
-    let run_id = Printf.sprintf "fus-board-fail-%d" (Random.bits ()) in
-    let resolved_answer = "BOARD-BEST-EFFORT-ANSWER" in
-    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id ~keeper
-      ~preset:"unit-test" ~started_at:1.0;
-    let result =
-      Fusion_sink.emit ~base_dir ~keeper ~run_id ~question:"q" ~panel:[]
-        ~judge:(Ok (judge_synthesis resolved_answer)) ~judges:[]
-        ~judge_usage:Fusion_types.zero_usage
-    in
-    check bool "board failure does not fail emit" true (Result.is_ok result);
-    (match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
-     | Some run ->
-       (match run.Fusion_run_registry.status with
-        | Fusion_run_registry.Completed { ok = true; _ } -> ()
-        | Fusion_run_registry.Completed { ok = false; _ } ->
-          fail "fusion run should complete with ok=true"
-        | Fusion_run_registry.Running -> fail "fusion run should not remain running")
-     | None -> fail "fusion run should remain visible");
-    let messages = Keeper_chat_store.load ~base_dir ~keeper_name:keeper in
-    (* Keeper_chat_store.encode_line auto-derives blocks from message content
-       for assistant rows when the caller passes [blocks:None] (RFC-0235 P3),
-       so [m.blocks] is not [None] here — the check is that no *Fusion* card
-       (which would point at the board post that failed to be created) is
-       among whatever blocks got auto-derived. *)
-    let answer_without_card =
-      List.exists
-        (fun (m : Keeper_chat_store.chat_message) ->
-           contains ~needle:resolved_answer m.content
-           &&
-           match m.blocks with
-           | None -> true
-           | Some blocks ->
-             not
-               (List.exists
-                  (function
-                    | Keeper_chat_blocks.Fusion _ -> true
-                    | _ -> false)
-                  blocks))
-        messages
-    in
-    check bool "chat lane receives answer without fusion card block" true answer_without_card)
-;;
 
 let () =
   run
@@ -1150,29 +1094,21 @@ let () =
             `Quick
             test_emit_success_projects_board_chat_and_registry
         ; test_case
-            "wake route: register/take/discard, unrouted never stored"
+            "wake durably commits the explicit continuation channel"
             `Quick
-            test_wake_route_register_take_discard
+            test_wake_durable_commit_carries_channel
         ; test_case
-            "wake route: peek is non-destructive"
+            "wake fail-closed: conflicting durable delivery is rejected"
             `Quick
-            test_wake_route_peek_is_non_destructive
+            test_wake_fail_closed_rejects_conflicting_delivery
         ; test_case
-            "wake route: keeper/run identity isolates equal run ids"
+            "wake isolates (keeper, run_id) recipient identity"
             `Quick
-            test_wake_route_isolates_keeper_run_identity
+            test_wake_isolates_keeper_run_identity
         ; test_case
-            "wake durably commits the channel and consumes the route on Ok"
+            "completion wake commits durably across lane replacement"
             `Quick
-            test_wake_durable_commit_carries_channel_and_consumes_route
-        ; test_case
-            "wake fail-closed: a failed durable commit preserves the route"
-            `Quick
-            test_wake_fail_closed_preserves_route
-        ; test_case
-            "completion wake never signals a replacement Keeper lane"
-            `Quick
-            test_completion_wake_does_not_signal_replacement_lane
+            test_completion_wake_commits_durably_across_lane_replacement
         ; test_case
             "Board recovery replay keeps canonical wake identity"
             `Quick
@@ -1185,10 +1121,6 @@ let () =
             "tool handle returns Running then async success projects evidence"
             `Quick
             test_tool_handle_async_success_projects_running_then_completed
-        ; test_case
-            "emit treats board post failure as best-effort"
-            `Quick
-            test_emit_board_failure_is_best_effort
         ; test_case
             "background completion is actionable (non-empty, carries output)"
             `Quick

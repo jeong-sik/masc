@@ -27,6 +27,7 @@
  (flags
   (:standard -w +4))
  (libraries
+  masc.tool_schemas_specs
   masc_types
   masc_core
   masc.task_handlers

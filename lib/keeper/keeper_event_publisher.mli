@@ -7,7 +7,7 @@
     [masc.broadcast], [masc.heartbeat], [masc.keeper.lifecycle],
     ...
 
-    Every publish routes to {!Masc_event_bus.get} so the OAS/MASC
+    Every publish routes to {!Event_bus_slots.get_masc} so the OAS/MASC
     layer boundary is preserved.  OAS's [event_bus.mli:103-107]
     explicitly warns against publishing domain events onto OAS's bus.
 

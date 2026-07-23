@@ -88,7 +88,7 @@ let setup ~keeper_name ~sandbox f =
   with_eio_fs @@ fun () ->
   let base, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  Keeper_registry.clear ();
+  Keeper_registry.For_testing.clear ();
   let meta = make_meta ~name:keeper_name ~sandbox in
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
@@ -403,7 +403,7 @@ let test_readonly_execute_omitted_cwd_does_not_create_playground () =
   with_eio_fs @@ fun () ->
   let base, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
-  Keeper_registry.clear ();
+  Keeper_registry.For_testing.clear ();
   let meta = make_meta ~name:"readonly-executor" ~sandbox:Keeper_types_profile_sandbox.Docker in
   let playground = Keeper_sandbox_repo_path.playground_root_no_create ~config ~meta in
   Alcotest.(check bool) "playground starts absent" false (Sys.file_exists playground);

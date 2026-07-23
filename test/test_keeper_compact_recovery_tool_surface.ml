@@ -35,7 +35,7 @@ let test_missing_checkpoint_still_queues_owner_lane_stimulus () =
   let keeper_name = "compact-missing-checkpoint" in
   Fun.protect
     ~finally:(fun () ->
-      Keeper_registry.unregister ~base_path keeper_name;
+      Keeper_registry.For_testing.unregister ~base_path keeper_name;
       Masc_test_deps.cleanup_test_workspace base_path)
     (fun () ->
       let config = Workspace.default_config base_path in
@@ -50,7 +50,7 @@ let test_missing_checkpoint_still_queues_owner_lane_stimulus () =
        | Error detail -> failf "keeper meta write failed: %s" detail);
       let persisted_meta = persisted_meta_exn config keeper_name in
       ignore
-        (Keeper_registry.register
+        (Keeper_registry.For_testing.register
            ~base_path:config.base_path
            keeper_name
            persisted_meta);

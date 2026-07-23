@@ -141,7 +141,7 @@ MDAL 개념 폐기 (REMOVED).
 
 ### 11-Board (100% IMPL)
 
-핵심 기능 전부 IMPL: Parse-Don't-Validate ID, filesystem/JSONL backend, 5 sort algorithms, Thompson Sampling 9 call sites, write-time SSE events, Karma/Flair.
+핵심 기능 전부 IMPL: Parse-Don't-Validate ID, filesystem/JSONL backend, 5 sort algorithms, Thompson prior bookkeeping (vote/quality feedback; selection engine removed 2026-07-21), write-time SSE events, Karma/Flair.
 Board Listener 제거됨 (filesystem-first에서 Board_dispatch가 SSE 직접 발사).
 
 ### 12-Memory Systems (100% IMPL)

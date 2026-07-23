@@ -6,6 +6,7 @@ type connector_delivery =
   ; surface : Surface_ref.t
   ; conversation_id : string option
   ; external_message_id : string option
+  ; workspace_id : string option
   }
 
 (* ── Keeper response parsing ─────────────────────────────────── *)
@@ -391,6 +392,36 @@ let reconcile_delivery_metadata key expected metadata =
     Error (Printf.sprintf "connector metadata contains duplicate %s fields" key)
 ;;
 
+(* The untyped gate-message [channel_workspace_id] string and the typed
+   [delivery.workspace_id] describe the same workspace at two layers; the
+   stringly layer encodes absence as "". Any disagreement between them is a
+   wiring defect, so intake fails closed instead of silently picking one —
+   the same discipline as {!reconcile_delivery_metadata}. *)
+let reconcile_gate_workspace_id ~channel_workspace_id ~workspace_id =
+  match non_empty_opt channel_workspace_id, workspace_id with
+  | None, None -> Ok ()
+  | Some gate, Some typed when String.equal gate typed -> Ok ()
+  | Some gate, Some typed ->
+    Error
+      (Printf.sprintf
+         "connector gate workspace_id conflicts with typed delivery \
+          (gate=%S delivery=%S)"
+         gate
+         typed)
+  | Some gate, None ->
+    Error
+      (Printf.sprintf
+         "connector gate supplied workspace_id %S but the typed delivery \
+          omitted it"
+         gate)
+  | None, Some typed ->
+    Error
+      (Printf.sprintf
+         "connector typed delivery supplied workspace_id %S but the gate \
+          context omitted it"
+         typed)
+;;
+
 let delivery_key_of_receipt receipt_id =
   match Keeper_chat_delivery_identity.Receipt_ids.of_list [ receipt_id ] with
   | Ok receipt_ids ->
@@ -458,7 +489,6 @@ let terminal_connector_reply ~redact_text ~channel ~channel_user_id
 let accept_connector ~delivery ~clock ~config ~channel ~channel_user_id
     ~channel_user_name ~channel_workspace_id ~keeper_name ~idempotency_key
     ~metadata ~content =
-  ignore channel_workspace_id;
   let keeper_name = String.trim keeper_name in
   let redaction =
     Keeper_secret_redaction.snapshot
@@ -468,16 +498,27 @@ let accept_connector ~delivery ~clock ~config ~channel ~channel_user_id
   let redact_text = Keeper_secret_redaction.redact_text redaction in
   let conversation_id = delivery.conversation_id in
   let external_message_id = delivery.external_message_id in
+  let workspace_id = delivery.workspace_id in
   let metadata =
     match
       reconcile_delivery_metadata "conversation_id" conversation_id metadata
     with
     | Error _ as error -> error
     | Ok metadata ->
-      reconcile_delivery_metadata
-        "external_message_id"
-        external_message_id
-        metadata
+      (match
+         reconcile_delivery_metadata
+           "external_message_id"
+           external_message_id
+           metadata
+       with
+       | Error _ as error -> error
+       | Ok metadata ->
+         reconcile_delivery_metadata "workspace_id" workspace_id metadata)
+  in
+  let metadata =
+    match reconcile_gate_workspace_id ~channel_workspace_id ~workspace_id with
+    | Error _ as error -> error
+    | Ok () -> metadata
   in
   match metadata with
   | Error detail -> Gate_protocol.Keeper_error_result (redact_text detail)
@@ -504,7 +545,7 @@ let accept_connector ~delivery ~clock ~config ~channel ~channel_user_id
              Keeper_chat_store.append_user_message_once
                ~base_dir:config.Workspace.base_path ~keeper_name ~delivery_key
                ~content:(String.trim content) ~surface ?conversation_id
-               ?external_message_id
+               ?external_message_id ?workspace_id
                ~speaker:
                  { Keeper_chat_store.speaker_id = opt channel_user_id
                  ; speaker_name = opt channel_user_name

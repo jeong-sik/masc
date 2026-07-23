@@ -77,8 +77,13 @@ type autoboot_exclusion_reason =
   | Paused
   | Declarative_autoboot_disabled
   | Autoboot_disabled
+  | Shutdown_admission_fence
 (** Closed reason why a configured keeper is intentionally absent from
-    {!bootable_keeper_names}. *)
+    {!bootable_keeper_names}. [Shutdown_admission_fence] is not derivable
+    from keeper config: the autoboot caller holds the boot-scan shutdown
+    inventory and stamps it for keepers whose admission a durable shutdown
+    operation still owns — previously those keepers were silently dropped
+    from both the boot set and the excluded list. *)
 
 val autoboot_exclusion_reason_to_string : autoboot_exclusion_reason -> string
 (** Stable JSON/log label for {!autoboot_exclusion_reason}. *)

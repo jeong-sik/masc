@@ -85,14 +85,6 @@ type publication_recovery_reconciliation_row_kind =
   | Publication_recovery_owner_store_unavailable
   | Publication_recovery_owner_inventory_unavailable
 
-val publication_recovery_reconciliation_report_owner
-  :  publication_recovery_reconciliation_report
-  -> string
-
-val publication_recovery_reconciliation_report_is_ready
-  :  publication_recovery_reconciliation_report
-  -> bool
-
 (** Typed, order-preserving projection of report rows for callers that need to
     branch without parsing diagnostics. Corrupt raw payloads remain only in the
     forensic-file SSOT; reports retain their byte count and SHA-256 identity.
@@ -105,12 +97,6 @@ val publication_recovery_reconciliation_report_row_kinds
 val publication_recovery_reconciliation_report_to_string
   :  publication_recovery_reconciliation_report
   -> string
-
-(** Constructor-directed structured report projection. Callers can observe row
-    identity and nested evidence without parsing diagnostic strings. *)
-val publication_recovery_reconciliation_report_to_yojson
-  :  publication_recovery_reconciliation_report
-  -> Yojson.Safe.t
 
 (** Build the immutable recovery locator projection used by
     [replace_capability_file]. The allowed-root identity is caller-certified;

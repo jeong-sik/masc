@@ -47,7 +47,7 @@ let create ?event_bus ?(on_pending_count_change = fun _ -> ()) ~keeper_name ~tur
   let event_bus =
     match event_bus with
     | Some _ as bus -> bus
-    | None -> Keeper_event_bus.get ()
+    | None -> Event_bus_slots.get_keeper ()
   in
   let event_bus_subscription =
     match event_bus with

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Changed
+- Bumped the OAS Agent SDK pin to `ca7a02b7` (oas#2766). Supports non-standard stop_reason provider dialects (e.g. `context_length_exceeded`, `max_context_length`) and preserves empty completion stop_reason in GLM parser to prevent orphan retries on context overflow.
+- Bumped the OAS Agent SDK pin to `c1eaa88b` (oas#2764). Allows empty delta `id` and `name` strings as `Ok None` in the SSE stream parser to prevent stream failure crashes on GLM-5-Turbo and OpenAI-compatible backends emitting empty initial delta fragments.
+
+
 ## [0.21.2] - 2026-07-20
 
 ### Changed
@@ -19,6 +24,7 @@
 - Runtime prep for oas#2716: the deployment `oas-models-overlay.toml` now declares `thinking_control_format = "none"` + `supports_reasoning = true` for the OpenAI-compatible `ollama_cloud` rows (`kimi-k2.6`, `minimax-m3`, `deepseek-v4-pro`), so `enable_thinking=true` keeper turns admit as declared-inherent reasoning instead of failing with `Enable_not_encodable` on the /v1 wire (2026-07-20 flip-risk audit).
 
 ### Fixed
+- Keeper streaming responses now resolve a fail-safe inter-line idle timeout floor of 600 s (10 min) when neither `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC` nor `runtime.toml`'s `turn.stream_idle_timeout_sec` is set. Previously the resolved value was `None` and OAS applied no inter-line idle bound, so a hung provider stream (bytes stop arriving mid-response) froze the keeper chat lane until an external restart (#25128, measured 30+ min). An explicit env/toml value still overrides the floor verbatim; the boot log now states the effective idle timeout and its source (env/toml vs floor). Implements RFC-0345 Option A.
 - CI now rejects mangled-module access to the three wrapped OAS libraries linked by MASC and treats scanner errors as failures; the unused advisory `Llm_provider` text scans, retired/test source trees, comment/allow-marker bypasses, and nonblocking `|| true` invocation were removed from the guard.
 - The Ops surface now preserves and displays the operator snapshot's typed context-metrics storage and malformed-row failures per Keeper instead of presenting unavailable context as an unexplained blank value. Invalid diagnostic wire payloads remain explicitly visible as contract failures.
 - The process supervisor now records the real server exit code: `|| true` before `exit_code=$?` reported every exit — including SIGSEGV (139) and SIGTERM (143) — as `code=0`; exits above 128 additionally decode the signal name. Takeover kills now leave a JSON breadcrumb next to the pid lock, the victim's SIGTERM path logs the attribution (or its absence: external sender), and the next boot reports a breadcrumb after a SIGKILL escalation.

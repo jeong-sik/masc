@@ -54,6 +54,7 @@ let librarian_claim_schema =
     ; Keeper_librarian.wire_field_source_tool_call_id, nullable_string_schema
     ; Keeper_librarian.wire_field_claim_id, nullable_string_schema
     ; Keeper_librarian.wire_field_claim_kind, nullable_enum_schema librarian_claim_kind_tokens
+    ; Keeper_librarian.wire_field_valid_for_days, nullable_integer_schema
     ]
   in
   object_schema ~required:(List.map fst fields) fields
@@ -160,15 +161,6 @@ let board_attention_judgment_batch_output_schema =
   let fields =
     [ "verdicts"
     , array_schema (object_schema ~required:(List.map fst item_fields) item_fields)
-    ]
-  in
-  object_schema ~required:(List.map fst fields) fields
-;;
-
-let anti_rationalization_verdict_output_schema =
-  let fields =
-    [ "verdict", enum_schema Task.Anti_rationalization.valid_verdict_strings
-    ; "reason", nullable_string_schema
     ]
   in
   object_schema ~required:(List.map fst fields) fields
@@ -282,17 +274,45 @@ let apply_hitl_summary_schema_to_config config =
   apply_to_provider_config hitl_context_summary_schema config
 ;;
 
-let apply_schema_or_prompt_tier ~log_label schema provider_cfg =
-  let native_cfg = apply_to_provider_config schema provider_cfg in
-  match Llm_provider.Provider_config.validate_output_schema_request native_cfg with
-  | Ok () -> native_cfg
-  | Error detail ->
-    Log.Keeper.info
-      "%s: prompt tier (native schema unavailable: %s)"
-      log_label
-      detail;
-    provider_cfg
+(* Ask the provider for no wire response format. The call sites that use this
+   state their output contract in the prompt and re-validate it in a total
+   parser, so a native schema added no guarantee the parser did not already
+   provide. What it did add was a capability branch:
+   [validate_output_schema_request] rejects json_schema on every
+   json_object-only endpoint (GLM/DeepSeek/Kimi), so those lanes fell back to
+   the same prompt path anyway while logging one INFO line per keeper per tick.
+
+   Two failure modes traced to that branch are closed by not taking it. The
+   librarian schema marks every claim field [required] with nullable types, so
+   a schema-conforming provider emits ["claim_id": null] — which
+   [Keeper_librarian.optional_string_field_strict] rejects, dropping the whole
+   episode, while the prompt tells the model to omit the key instead. And the
+   json_object tier only 400s because a response_format was set at all.
+
+   Note the parse path never read a provider-side structured field:
+   [Agent_sdk_response.structured_json_of_response] extracts JSON from the
+   response's visible text, so native and prompt tiers converge on the same
+   parser byte for byte. *)
+let without_response_format (provider_cfg : Llm_provider.Provider_config.t) =
+  { provider_cfg with
+    response_format = Agent_sdk.Types.Off
+  ; output_schema = None
+  }
 ;;
+
+(* The anti-rationalization reviewer's verdict channel is the
+   [report_review_verdict] tool call: exactly-once dispatch enforced in
+   [Workspace_metric_hooks], args re-validated by the total parser
+   [Task.Anti_rationalization.parse_review_verdict_from_json]. A wire
+   response format constrains only the final assistant text, which this
+   surface never parses — while its capability branch rejected every
+   json_object-only provider (Glm/DeepSeek/Kimi) as
+   [InvalidConfig "task.anti_rationalization.output_schema"], so the gate
+   never ran and every task stayed nonterminal fleet-wide (live incident
+   2026-07-21). Converges with the fusion-judge / failure-judge /
+   consolidation / board-attention / librarian surfaces above: no wire
+   response format; the tool schema carries the verdict enum SSOT. *)
+let anti_rationalization_reviewer_provider_config = without_response_format
 
 (* Capability-aware three-tier response-format selection for a request whose
    prompt already states the exact output shape (#25266). Tier 1: a provider

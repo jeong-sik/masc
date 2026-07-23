@@ -349,6 +349,170 @@ let test_model_catalog_configuration_delegates_to_agent_sdk_ambient () =
   in
   Alcotest.(check bool) "no explicit path resolution" true (Option.is_none result)
 
+let exact_output_lane id slot_ids : Runtime_schema.exact_output_lane_decl =
+  { id; slot_ids }
+;;
+
+let test_exact_output_backfill_adds_seed_lane_for_legacy_config () =
+  let seed_lanes =
+    [ exact_output_lane "compaction_exact" [ "deepseek.deepseek-v4-pro" ] ]
+  in
+  let lanes, backfilled =
+    Server_runtime_bootstrap.backfill_required_exact_output_lanes ~seed_lanes []
+  in
+  Alcotest.(check bool) "backfill reported" true backfilled;
+  match lanes with
+  | [ lane ] ->
+    Alcotest.(check string) "seed lane id" "compaction_exact" lane.id;
+    Alcotest.(check (list string))
+      "seed lane slots"
+      [ "deepseek.deepseek-v4-pro" ]
+      lane.slot_ids
+  | _ -> Alcotest.fail "expected exactly the backfilled seed lane"
+
+let test_exact_output_backfill_keeps_operator_declaration () =
+  let operator_lane = exact_output_lane "compaction_exact" [ "operator.target-a" ] in
+  let seed_lanes =
+    [ exact_output_lane "compaction_exact" [ "deepseek.deepseek-v4-pro" ] ]
+  in
+  let lanes, backfilled =
+    Server_runtime_bootstrap.backfill_required_exact_output_lanes
+      ~seed_lanes
+      [ operator_lane ]
+  in
+  Alcotest.(check bool) "no backfill" false backfilled;
+  match lanes with
+  | [ lane ] ->
+    Alcotest.(check (list string))
+      "operator slots win"
+      [ "operator.target-a" ]
+      lane.slot_ids
+  | _ -> Alcotest.fail "expected the operator lane only"
+
+let test_exact_output_catalog_merge_unions_and_overlay_wins () =
+  let base =
+    "[[providers]]\n\
+     id = \"deepseek\"\n\
+     base_url = \"https://base.example\"\n\
+     \n\
+     [[targets]]\n\
+     id = \"deepseek.deepseek-v4-pro\"\n\
+     provider_ref = \"deepseek\"\n\
+     model_id = \"deepseek-v4-pro\"\n"
+  in
+  let overlay =
+    "[[providers]]\n\
+     id = \"deepseek\"\n\
+     base_url = \"https://overlay.example\"\n\
+     \n\
+     [[targets]]\n\
+     id = \"deployment.extra-target\"\n\
+     provider_ref = \"deepseek\"\n\
+     model_id = \"extra-model\"\n"
+  in
+  match
+    Server_runtime_bootstrap.merge_catalog_overlay_toml
+      ~base_contents:base
+      ~overlay_contents:overlay
+  with
+  | Error detail -> Alcotest.failf "catalog merge failed: %s" detail
+  | Ok merged ->
+    Alcotest.(check bool)
+      "overlay row replaces same-id base row"
+      true
+      (contains_substring merged "https://overlay.example");
+    Alcotest.(check bool)
+      "superseded base row is gone"
+      false
+      (contains_substring merged "https://base.example");
+    Alcotest.(check bool)
+      "base-only target is retained"
+      true
+      (contains_substring merged "deepseek.deepseek-v4-pro");
+    Alcotest.(check bool)
+      "overlay-only target is added"
+      true
+      (contains_substring merged "deployment.extra-target")
+
+let test_exact_output_resolver_overlay_honors_oas_model_catalog () =
+  with_temp_dir "exact-output-full-catalog" (fun dir ->
+    let config_root = Filename.concat dir "config" in
+    mkdir_p config_root;
+    let full_catalog = Filename.concat dir "full-catalog.toml" in
+    write_file full_catalog "[[providers]]\nid = \"replacement-provider\"\n";
+    write_file
+      (Filename.concat config_root "oas-models-overlay.toml")
+      "[[targets]]\n\
+       id = \"deployment.target\"\n\
+       provider_ref = \"replacement-provider\"\n\
+       model_id = \"replacement-model\"\n";
+    let overlay, _description =
+      Server_runtime_bootstrap.exact_output_resolver_overlay
+        ~config_root
+        ~env:(function
+          | "OAS_MODEL_CATALOG" -> Some full_catalog
+          | _ -> None)
+        ()
+    in
+    match overlay with
+    | None -> Alcotest.fail "expected a resolver overlay for OAS_MODEL_CATALOG"
+    | Some (overlay : Agent_sdk.Exact_output.catalog_overlay) ->
+      Alcotest.(check bool)
+        "full replacement rows feed the resolver"
+        true
+        (contains_substring overlay.contents "replacement-provider");
+      Alcotest.(check bool)
+        "deployment overlay still applies on top"
+        true
+        (contains_substring overlay.contents "deployment.target"))
+
+let test_exact_output_resolver_overlay_full_catalog_only () =
+  with_temp_dir "exact-output-full-catalog-only" (fun dir ->
+    let config_root = Filename.concat dir "config" in
+    mkdir_p config_root;
+    let full_catalog = Filename.concat dir "full-catalog.toml" in
+    write_file full_catalog "[[providers]]\nid = \"replacement-provider\"\n";
+    let overlay, _description =
+      Server_runtime_bootstrap.exact_output_resolver_overlay
+        ~config_root
+        ~env:(function
+          | "OAS_MODEL_CATALOG" -> Some full_catalog
+          | _ -> None)
+        ()
+    in
+    match overlay with
+    | None -> Alcotest.fail "expected a resolver overlay for OAS_MODEL_CATALOG"
+    | Some (overlay : Agent_sdk.Exact_output.catalog_overlay) ->
+      Alcotest.(check bool)
+        "full replacement rows feed the resolver"
+        true
+        (contains_substring overlay.contents "replacement-provider"))
+
+let test_exact_output_resolver_overlay_defaults_to_config_root_overlay () =
+  with_temp_dir "exact-output-overlay-only" (fun dir ->
+    let config_root = Filename.concat dir "config" in
+    mkdir_p config_root;
+    write_file
+      (Filename.concat config_root "oas-models-overlay.toml")
+      "[[targets]]\n\
+       id = \"deployment.target\"\n\
+       provider_ref = \"deepseek\"\n\
+       model_id = \"deepseek-v4-pro\"\n";
+    let overlay, _description =
+      Server_runtime_bootstrap.exact_output_resolver_overlay
+        ~config_root
+        ~env:(fun _ -> None)
+        ()
+    in
+    match overlay with
+    | None -> Alcotest.fail "expected the config-root overlay"
+    | Some (overlay : Agent_sdk.Exact_output.catalog_overlay) ->
+      Alcotest.(check bool)
+        "config-root overlay feeds the resolver"
+        true
+        (contains_substring overlay.contents "deployment.target"))
+
+
 let write_config_root_keeper_toml config_root name =
   write_file
     (Filename.concat (Filename.concat config_root "keepers") (name ^ ".toml"))
@@ -1217,14 +1381,14 @@ let with_running_keeper_metas config metas f =
   let base_path = config.Workspace.base_path in
   List.iter
     (fun (meta : Keeper_meta_contract.keeper_meta) ->
-      Keeper_registry.unregister ~base_path meta.name;
-      ignore (Keeper_registry.register ~base_path meta.name meta))
+      Keeper_registry.For_testing.unregister ~base_path meta.name;
+      ignore (Keeper_registry.For_testing.register ~base_path meta.name meta))
     metas;
   Fun.protect
     ~finally:(fun () ->
       List.iter
         (fun (meta : Keeper_meta_contract.keeper_meta) ->
-          Keeper_registry.unregister ~base_path meta.name)
+          Keeper_registry.For_testing.unregister ~base_path meta.name)
         metas)
     f
 
@@ -1276,8 +1440,8 @@ let terminate_keeper_fiber config (meta : Keeper_meta_contract.keeper_meta) =
 let mark_keeper_dead_with_registry_cause config
     (meta : Keeper_meta_contract.keeper_meta) =
   let base_path = config.Workspace.base_path in
-  Keeper_registry.record_restart ~base_path meta.name;
-  Keeper_registry.record_restart ~base_path meta.name;
+  Keeper_registry.For_testing.record_restart ~base_path meta.name;
+  Keeper_registry.For_testing.record_restart ~base_path meta.name;
   Keeper_registry.set_failure_reason ~base_path meta.name
     (Some
        (Keeper_registry.Provider_runtime_error
@@ -3022,7 +3186,7 @@ let test_health_json_uses_crash_log_when_restore_clears_failure_reason () =
             restored.name
             ~restart_count:10
             ~last_restart_ts:1234.0
-            ~crash_log:(Keeper_registry.crash_log_of ~base_path restored.name);
+            ~crash_log:(Keeper_registry.For_testing.crash_log_of ~base_path restored.name);
           (match Keeper_registry.get ~base_path restored.name with
            | Some entry ->
              Alcotest.(check bool) "restore cleared typed failure reason" true
@@ -4649,6 +4813,30 @@ let () =
             "model catalog configuration delegates to agent_sdk ambient catalog"
             `Quick
             test_model_catalog_configuration_delegates_to_agent_sdk_ambient;
+          Alcotest.test_case
+            "exact-output backfill adds seed lane for legacy config"
+            `Quick
+            test_exact_output_backfill_adds_seed_lane_for_legacy_config;
+          Alcotest.test_case
+            "exact-output backfill keeps operator declaration"
+            `Quick
+            test_exact_output_backfill_keeps_operator_declaration;
+          Alcotest.test_case
+            "exact-output catalog merge unions and overlay wins"
+            `Quick
+            test_exact_output_catalog_merge_unions_and_overlay_wins;
+          Alcotest.test_case
+            "exact-output resolver honors OAS_MODEL_CATALOG"
+            `Quick
+            test_exact_output_resolver_overlay_honors_oas_model_catalog;
+          Alcotest.test_case
+            "exact-output resolver uses full catalog without overlay"
+            `Quick
+            test_exact_output_resolver_overlay_full_catalog_only;
+          Alcotest.test_case
+            "exact-output resolver defaults to config-root overlay"
+            `Quick
+            test_exact_output_resolver_overlay_defaults_to_config_root_overlay;
           Alcotest.test_case
             "bootstrap base-path config copies shared seed only"
             `Quick

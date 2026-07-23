@@ -30,6 +30,8 @@ include
       Keeper_internal_error.accept_response_shape
      and type provider_cooldown_cause =
       Keeper_internal_error.provider_cooldown_cause
+     and type transcript_quarantine_reason =
+      Keeper_internal_error.transcript_quarantine_reason
      and type masc_internal_error = Keeper_internal_error.masc_internal_error
 
 (** {1 Turn pipeline records} *)
@@ -180,6 +182,7 @@ module For_testing : sig
       (runtime_id:string -> attempt:int -> Agent_sdk.Error.sdk_error -> bool) ->
     ?allow_accept_no_progress_retry:
       (runtime_id:string -> attempt:int -> Agent_sdk.Error.sdk_error -> bool) ->
+    ?lane_id:string ->
     runtime_id:string ->
     runtime_id_of:('candidate -> string) ->
     emit_runtime_manifest:

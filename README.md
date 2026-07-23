@@ -1,7 +1,7 @@
 # MASC
 
 [![OCaml](https://img.shields.io/badge/OCaml-%3E%3D%205.4-orange.svg)](https://ocaml.org/)
-[![agent_sdk](https://img.shields.io/badge/agent__sdk-%3E%3D%200.217.3-blue.svg)](https://github.com/jeong-sik/oas)
+[![agent_sdk](https://img.shields.io/badge/agent__sdk-%3E%3D%200.220.5-blue.svg)](https://github.com/jeong-sik/oas)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 [한국어 버전](README.ko.md)
@@ -77,7 +77,7 @@ Legend — ✅ working now · 🟡 partially working · ❌ not working. Status 
 - **Multi-Runtime** — A single line in `runtime.toml` under `runtime.assignments`, `keeper = provider.model`, sends every turn for that Keeper to the chosen provider.
 - **Provider Failover** — Ordered automatic failover on provider failure is not implemented. When a provider fails, you must manually edit default/assignment and restart the server.
 - **Fusion + JoJ** — When a Keeper calls `masc_fusion`, panel models answer the same question independently and a judge synthesizes consensus, contradictions, and blind spots. *Limit*: The Judge-of-Judges (JoJ) phase has code and call paths, but the live config lacks a first-order `judges` panel, so JoJ calls **fail-closed with an error**. The result registry is in-memory and is lost on restart.
-- **Goal + Task** — Goals and tasks are created via MCP tools, transitioned through states, and active goals are injected into the Keeper system prompt. *Limit*: the goal-loop scheduler does not drive Keeper turns (it is observational). Turns are driven by channels/events.
+- **Goal + Task** — Goals and tasks are created via MCP tools, transitioned through states, and active goals are injected into the Keeper system prompt. Turns are driven by channels/events. (The goal-loop OODA machinery was fully retired on 2026-07-21 — RFC-0352 Path B: the Goal entity, MCP tools, and task linkage stay; the scheduler scripts, server broadcast, and dashboard panel are gone.)
 - **OpenTelemetry** — The OTLP HTTP exporter and GenAI semconv spans/metrics work. *Limit*: many signals and instrumentation gaps are not yet collected. For example, low-level Keeper turn events, internal fusion metrics, and per-provider latency breakdowns are only partially covered.
 - **CODE / IDE (observational, not working)** — The aim is an observational IDE where humans issue commands rather than editing code directly. The LSP proxy, annotation overlay, and dashboard CODE shell are implemented, but **the observational command-only flow is not validated, so CODE is not usable in practice.**
 
@@ -394,7 +394,7 @@ The table below lists concrete remaining tasks derived from the current limits d
 | 1 | **Keepers / Fleet** | Remove the dead `[autonomous] concurrency` key from deployed `runtime.toml` files and keep fleet documentation aligned with the no-global-cap runtime contract. | 🟡→✅ |
 | 2 | **Provider Failover** | Implement provider-health based **ordered automatic failover**. When a provider fails, automatically route a Keeper's turn to the next candidate provider and log/metric recovery. | ❌→✅ |
 | 3 | **Fusion + JoJ** | Add a first-order judge panel config for the Judge-of-Judges (JoJ) phase in `runtime.toml`, and persist the fusion result registry to disk. | 🟡→✅ |
-| 4 | **Goal + Task** | Let the goal-loop scheduler drive Keeper turns in addition to channel events, e.g. auto-wake on goal state change, deadline proximity, or blocked task detection. | 🟡→✅ |
+| 4 | **Goal + Task** | (superseded) The goal-loop OODA machinery is fully retired (2026-07-21, RFC-0352 Path B). Goal-driven wake, if ever wanted, must be a new typed-Scheduler design — not a revival of this row. | RFC-0352 |
 | 5 | **TUI** | Make `masc-tui` usable in practice. The binary exists but is currently unusable due to CJK/emoji layout, streaming progress, and rich-block rendering gaps. | ❌→🟡/✅ |
 | 6 | **IDE** | Make the observational IDE usable in practice. The LSP proxy, annotation overlay, and dashboard IDE shell exist, but the command-only flow is not validated and the IDE is currently unusable. | ❌→🟡/✅ |
 | 7 | **Multi-Channel** | Add **sidecars** for Slack, Telegram, and other channels outside Discord, and extend the gate message schema per channel. | 🟡→✅ |

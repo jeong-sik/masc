@@ -262,7 +262,6 @@ export interface DashboardBootstrapResponse {
   planning?: DashboardBootstrapSlice<DashboardPlanningResponse>
   namespace_truth?: DashboardBootstrapSlice<DashboardNamespaceTruthResponse>
   goals?: DashboardBootstrapSlice<DashboardGoalsTreeResponse>
-  goal_loop_status?: DashboardBootstrapSlice<Record<string, unknown>>
 }
 
 export interface DashboardNamespaceTruthFocus {
@@ -734,8 +733,6 @@ export interface GoalKeeperTrustSummary {
 }
 
 export interface GoalTreeStatusProjection {
-  status: string
-  status_color: string
   phase: string
   phase_color: string
   goal_fsm: GoalFsmProjection

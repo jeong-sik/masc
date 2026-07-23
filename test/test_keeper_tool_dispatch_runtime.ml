@@ -99,10 +99,10 @@ let with_exec_fixture ?(process = false) ?(always_allow = false) name fn =
         let meta = { (make_meta ()) with allowed_paths = [ config.base_path ] } in
         if always_allow then { meta with always_allow = Some true } else meta
       in
-      ignore (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
+      ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path meta.name meta);
       Fun.protect
         ~finally:(fun () ->
-          Masc.Keeper_registry.unregister ~base_path:config.base_path meta.name)
+          Masc.Keeper_registry.For_testing.unregister ~base_path:config.base_path meta.name)
         (fun () ->
           Masc_test_deps.with_publication_recovery_registry
             ~sw
@@ -2318,7 +2318,7 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
       Eio_context.with_turn_switch turn_sw @@ fun () ->
       let config = Workspace.default_config dir in
       let meta = make_meta () in
-      ignore (Masc.Keeper_registry.register ~base_path:config.base_path meta.name meta);
+      ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path meta.name meta);
       Masc_test_deps.with_publication_recovery_registry
         ~sw:root_sw
         ~fs:(Eio.Stdenv.fs env)
@@ -2342,7 +2342,7 @@ let test_oas_handler_threads_eio_context_to_keeper_dispatch () =
       Fun.protect
         ~finally:(fun () ->
           Masc.Keeper_dispatch_ref.dispatch := previous_dispatch;
-          Masc.Keeper_registry.unregister ~base_path:config.base_path meta.name)
+          Masc.Keeper_registry.For_testing.unregister ~base_path:config.base_path meta.name)
         (fun () ->
           Masc.Keeper_dispatch_ref.dispatch :=
             (fun ~config:_ ~agent_name:_

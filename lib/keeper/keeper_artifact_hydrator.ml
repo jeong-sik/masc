@@ -37,7 +37,7 @@ let hydrate_block ~store ~remaining
       if !remaining = 0 then block
       else
         (match Tool_output.decode_from_oas result.Canonical_tool.content with
-         | Tool_output.Stored { sha256; _ } ->
+         | Tool_output.Decoded { sha256; _ } ->
              (match try_hydrate ~store ~sha256 with
               | Some bytes ->
                   decr remaining;
@@ -49,7 +49,13 @@ let hydrate_block ~store ~remaining
                     ; content_blocks = result.Canonical_tool.content_blocks
                     }
               | None -> block)
-         | Tool_output.Inline _ -> block)
+         | Tool_output.Not_marker -> block
+         | Tool_output.Invalid_marker { detail } ->
+             (* A marker-shaped payload that fails validation stays as-is and
+                is visible; it must not be silently hydrated or dropped. *)
+             Log.Misc.warn
+               "keeper artifact hydration kept invalid blob marker: %s" detail;
+             block)
   | _ -> block
 
 let hydrate_messages ~store ~keep_recent

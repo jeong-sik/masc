@@ -83,6 +83,10 @@ type max_context_resolution =
   { requested_override : int option
   ; primary_budget : int
   ; runtime_budget : int
+  ; runtime_budget_source : Runtime.max_context_source option
+    (** Where [runtime_budget] came from (capability catalog, runtime.toml
+        override, or override clamped by capability). [None] only when the
+        legacy ordered-label path fell back to the precomputed default. *)
   ; requested_context_window : int
   ; effective_budget : int
   }
@@ -101,6 +105,7 @@ type compaction_recovery =
   ; trigger : Compaction_trigger.t
   ; evidence : Keeper_compaction_evidence.t
   ; turn_generation : int
+  ; projection_target : Keeper_compaction_projection_target.committed
   }
 
 (** {1 Checkpoint Loading} *)
@@ -169,12 +174,14 @@ val recover_latest_checkpoint_for_compaction
   :  base_dir:string
   -> meta:keeper_meta
   -> trigger:Compaction_trigger.t
+  -> projection_request:Keeper_compaction_projection_target.request
   -> (compaction_recovery, Keeper_post_turn.compaction_recovery_error) result
 
 val prepare_compaction
   :  base_dir:string
   -> meta:Keeper_meta_contract.keeper_meta
   -> trigger:Compaction_trigger.t
+  -> projection_request:Keeper_compaction_projection_target.request
   -> (Keeper_post_turn.prepared_compaction, Keeper_post_turn.compaction_recovery_error) result
 
 val commit_prepared_compaction
@@ -202,6 +209,14 @@ val resolve_max_context_resolution_for_runtime_id
   :  requested_override:int option
   -> runtime_id:string
   -> (max_context_resolution, max_context_resolution_error) result
+
+val resolve_max_context_resolution_for_runtime
+  :  requested_override:int option
+  -> Runtime.t
+  -> (max_context_resolution, max_context_resolution_error) result
+(** Resolve against the supplied immutable runtime snapshot. Callers that need
+    another projection of the same provider/model must use this form rather
+    than resolving the runtime id twice across a config refresh. *)
 
 val max_context_resolution_error_to_string
   :  max_context_resolution_error

@@ -21,7 +21,7 @@ val publish_lifecycle :
   unit ->
   unit
 (** Publish a [Custom "masc.oas_worker.<event>"] event on the
-    process-wide [Masc_event_bus]. Missing bootstrap state is surfaced by a
+    process-wide [Event_bus_slots] masc slot. Missing bootstrap state is surfaced by a
     one-shot warning instead of silently dropping every lifecycle event.
 
     Optional [error] / [session_id] / [status] fields are

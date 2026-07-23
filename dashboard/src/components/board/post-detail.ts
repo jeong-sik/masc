@@ -16,6 +16,7 @@ import { route } from '../../router'
 import { votePost, voteComment } from '../../api/board'
 import { ModerationBadge } from './moderation-badge'
 import { ReactionBar } from './reaction-bar'
+import { PostAttachments } from './post-attachments'
 import { PostShareActions } from './post-share-actions'
 import { FusionBoardEvidence } from './fusion-evidence'
 import {
@@ -584,6 +585,10 @@ export function PostDetail({ post }: { post: BoardPost }) {
           <div class="text-sm text-[var(--color-fg-primary)] leading-loose">
             <${RichContent} text=${post.body} previewLimit=${4} />
           </div>
+
+          ${post.attachments
+            ? html`<${PostAttachments} attachments=${post.attachments} />`
+            : null}
 
           <${FusionBoardEvidence} post=${post} />
 

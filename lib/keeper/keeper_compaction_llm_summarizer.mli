@@ -1,99 +1,92 @@
-(** LLM-backed Keeper context compaction. The exact caller-supplied Runtime
-    produces a structured {!compaction_plan}; unavailable providers and invalid
-    plans fail explicitly as [None]. *)
+(** MASC-owned compaction planning over the provider-neutral OAS exact-output
+    surface. Target selection, admission, wire serialization, credentials, and
+    dispatch receipts remain OAS-owned. *)
 
-(** A validated immutable plan bound to the exact source units from which it
-    was parsed. Protected units cannot be named by a provider decision, and a
-    plan cannot be applied to a different source. *)
 type compaction_plan
 
+type exact_execution_evidence
+
+type completed_plan
+
+type prepared_lane
+
+type attempt_observation =
+  { slot_id : string
+  ; phase : Agent_sdk.Exact_output.effect_phase
+  ; dispatch_count : int
+  ; catalog_generation_fingerprint : string
+  }
+
 type summarization_failure =
-  | Provider_unavailable
+  | Exact_target_selection_failed
+  | Exact_admission_failed
+  | Exact_execution_context_unavailable
+  | Exact_execution_failed_before_dispatch
+  | Exact_execution_failed_after_dispatch
   | Invalid_plan
 
-(** A provider/transport failure remains retryable; a response that reached
-    the exact source but violated the closed plan contract is a typed terminal
-    for that source. *)
 type summarizer =
   units:Keeper_compaction_unit.closed_unit list ->
-  (compaction_plan, summarization_failure) result
+  (completed_plan, summarization_failure) result
 
-(** The low-level provider completion the summarizer drives. Defaulted to
-    {!Llm_provider.Complete.complete}; overridable in tests. *)
-type complete_fn = Keeper_provider_subcall.complete_fn
+(** Pure lane lookup, selection, and admission against exactly one
+    caller-supplied immutable registry. Every candidate is considered in
+    declaration order, all admitted plans and their real receipts are retained
+    before any network effect, and the returned lane is abstract so callers
+    cannot replace ready plans. *)
+val prepare_lane
+  :  keeper_name:string
+  -> registry:Runtime_exact_output_registry.t
+  -> lane_id:string
+  -> units:Keeper_compaction_unit.closed_unit list
+  -> (prepared_lane, summarization_failure) result
 
-(** [make ~runtime_ids ~keeper_name ()] resolves each id in [runtime_ids],
-    most-preferred first, exactly as a single {!candidate_runtime_ids_for_assignment}
-    would: a Runtime contributes its exact provider config, a Lane tries its
-    configured Runtime candidates in declared order. Every eligible candidate
-    across every seed id is tried, seed order first and then per-seed lane
-    order, with candidates that resolve to the same Runtime id collapsed to
-    their first (highest-priority) occurrence. Missing, ineligible, and failed
-    candidates are logged with their Runtime id. No default Runtime is
-    substituted. [complete] overrides the Provider boundary in tests.
+(** Execute each admitted ready plan at most once. Only a real receipt at
+    [Before_dispatch] with dispatch count zero advances to the next slot.
+    Cancellation is not caught, and a dispatched failure or MASC-invalid domain
+    plan is terminal. *)
+val execute_prepared_lane
+  :  keeper_name:string
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> ?clock:_ Eio.Time.clock
+  -> prepared_lane
+  -> (completed_plan, summarization_failure) result
 
-    The compaction owner imposes no wall-clock deadline. Cancellation belongs
-    to the owning Keeper lane or to the Provider transport boundary. *)
-val make
-  :  ?complete:complete_fn
-  -> runtime_ids:string list
-  -> keeper_name:string
-  -> unit
-  -> summarizer option
+(** Resolve [compaction_exact] from one published immutable registry, admit all
+    resolved slots for valid JSON syntax before dispatch, then execute each
+    admitted plan at most once. OAS guarantees JSON syntax; [plan_of_json]
+    enforces the MASC-owned compaction schema and domain rules. Invalid domain
+    output is terminal and never advances to another slot. Only a receipt still
+    at [Before_dispatch] with dispatch count zero permits advancing. *)
+val make : keeper_name:string -> unit -> summarizer option
 
-(** Whether [units] contains at least one structurally eligible ordinary
-    Assistant text message. System, User, Tool, metadata-bearing, non-text,
-    closed-tool-cycle, and open-suffix units are never eligible. *)
 val has_eligible_units : Keeper_compaction_unit.closed_unit list -> bool
 
-(** Parse and validate a raw structured response against the exact [units] and
-    bind the non-empty [runtime_id] that produced it. Every eligible source
-    index must appear exactly once; every other index is rejected. Unknown
-    fields, duplicate fields, invalid action/summary pairs, all-kept no-ops,
-    and output-erasing plans fail explicitly. *)
 val plan_of_json
-  :  runtime_id:string
-  -> units:Keeper_compaction_unit.closed_unit list
+  :  units:Keeper_compaction_unit.closed_unit list
   -> Yojson.Safe.t
   -> (compaction_plan, string) result
 
+val completed_plan : completed_plan -> compaction_plan
+val completed_exact_execution_evidence : completed_plan -> exact_execution_evidence
+val exact_execution_evidence_selected_target_ref : exact_execution_evidence -> string
+val exact_execution_evidence_target_identity_fingerprint : exact_execution_evidence -> string
+val exact_execution_evidence_catalog_generation_fingerprint : exact_execution_evidence -> string
+val exact_execution_evidence_catalog_evidence_sha256 : exact_execution_evidence -> string
+val exact_execution_evidence_plan_fingerprint : exact_execution_evidence -> string
+val exact_execution_evidence_receipt_plan_fingerprint : exact_execution_evidence -> string
+val exact_execution_evidence_receipt_request_body_sha256 : exact_execution_evidence -> string
 val apply : compaction_plan -> Agent_sdk.Types.message list
-val selected_runtime_id : compaction_plan -> string
 val summarized_indices : compaction_plan -> int list
 val dropped_indices : compaction_plan -> int list
 val has_changes : compaction_plan -> bool
 
 module For_testing : sig
-  val with_make_override
-    :  (runtime_ids:string list -> keeper_name:string -> unit -> summarizer option)
-    -> (unit -> 'a)
-    -> 'a
-
-  (** Apply the compaction request policy while preserving the input provider
-      config's exact temperature, including omission. *)
-  val provider_for_plan
-    :  Llm_provider.Provider_config.t
-    -> Llm_provider.Provider_config.t
-
-  (** Eligible Runtime ids for a single Runtime/Lane assignment, in exact
-      declaration order. Provider configs are intentionally not exposed. *)
-  val candidate_runtime_ids_for_assignment
-    :  keeper_name:string
-    -> runtime_id:string
-    -> string list option
-  (** Exact provider request constructed from eligible units. Exposed only to
-      prove that protected source content never crosses the provider boundary. *)
   val messages_for_plan
     :  units:Keeper_compaction_unit.closed_unit list
     -> Agent_sdk.Types.message list
 
-  (** Eligible Runtime ids across a priority-ordered list of seed
-      Runtime/Lane assignments, in exact seed-then-declaration order, with
-      cross-seed duplicates collapsed to their first occurrence. Unlike
-      {!candidate_runtime_ids_for_assignment}, this never returns [None]: a
-      seed that fails to resolve simply contributes no candidates. *)
-  val candidate_runtime_ids_for_assignments
-    :  keeper_name:string
-    -> runtime_ids:string list
-    -> string list
+  val admitted_slot_ids : prepared_lane -> string list
+
+  val attempt_observations : prepared_lane -> attempt_observation list
 end

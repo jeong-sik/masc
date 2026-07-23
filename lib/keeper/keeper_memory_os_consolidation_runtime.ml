@@ -39,6 +39,7 @@ type outcome =
       { before : int
       ; after : int
       }
+  | Plan_rejected_total_deletion of { before : int }
 
 (* Serialize only the final snapshot validation + rewrite against the per-keeper
    facts file. The provider call runs without this lock, then the locked rewrite
@@ -54,52 +55,48 @@ let with_facts_lock ?clock ~keeper_id f =
     f
 ;;
 
+(* The consolidation request carries no wire [response_format]: the prompt
+   states the output contract (config/prompts/keeper.librarian.memory_consolidation.md
+   spells out the object, its fields, and the empty-plan reply) and
+   [Consolidation.plan_of_json] is total, so a malformed reply becomes
+   [Unparseable] / [Invalid_structured_response] instead of a bad write. A
+   schema on top of that added no guarantee the parser did not already provide,
+   only a capability branch: [validate_output_schema_request] rejects
+   json_schema on every json_object-only endpoint, and the parse path never
+   read a provider-side field anyway — [structured_json_of_response] extracts
+   JSON from the response's visible text. *)
 let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
   let max_tokens =
     match provider_cfg.max_tokens with
     | Some n when n > 0 -> Some n
     | Some _ | None -> Some consolidation_max_tokens
   in
-  let tuned_cfg =
-    { provider_cfg with
-      Llm_provider.Provider_config.max_tokens
-    ; tool_choice = None
-    ; disable_parallel_tool_use = true
-      (* Mirror the librarian tuning: reasoning-capable providers (GLM live)
-         otherwise spend the whole output budget on thinking and return an
-         empty visible text — observed live on 2026-07-20 as 256 consecutive
-         [Empty_response] outcomes while only trivial 2-fact stores
-         consolidated. *)
-    ; enable_thinking = Some false
-    ; preserve_thinking = Some false
-    ; thinking_budget = None
-    ; clear_thinking = Some true
-    }
-  in
-  Keeper_structured_output_schema.apply_schema_json_mode_or_prompt_tier
-    ~log_label:"memory os consolidation output contract"
-    Keeper_structured_output_schema.consolidation_plan_output_schema
-    tuned_cfg
+  { provider_cfg with
+    Llm_provider.Provider_config.max_tokens
+  ; tool_choice = None
+  ; disable_parallel_tool_use = true
+    (* Mirror the librarian tuning: reasoning-capable providers (GLM live)
+       otherwise spend the whole output budget on thinking and return an
+       empty visible text — observed live on 2026-07-20 as 256 consecutive
+       [Empty_response] outcomes while only trivial 2-fact stores
+       consolidated. *)
+  ; enable_thinking = Some false
+  ; preserve_thinking = Some false
+  ; thinking_budget = None
+  ; clear_thinking = Some true
+  }
+  |> Keeper_structured_output_schema.without_response_format
 ;;
 
 module For_testing = struct
   let provider_for_consolidation = provider_for_consolidation
 end
 
-let validate_provider_for_consolidation provider_cfg =
-  Llm_provider.Provider_config.validate_output_schema_request provider_cfg
-;;
-
-(* The output-contract tier is a function of the provider capabilities and the
-   plan schema only — never of the keeper — so it is resolved once per
-   consolidation tick, not once per keeper. Re-resolving per keeper duplicated
-   the decision and emitted one identical contract log line per keeper per
-   tick. *)
-let resolve_provider_for_consolidation provider_cfg =
-  let tiered = provider_for_consolidation provider_cfg in
-  match validate_provider_for_consolidation tiered with
-  | Ok () -> Ok tiered
-  | Error msg -> Error msg
+(* Request tuning is a function of the provider config alone — never of the
+   keeper — so it is resolved once per consolidation tick, not once per keeper.
+   No Result: with no schema requested there is nothing left that can reject
+   the config. *)
+let resolve_provider_for_consolidation = provider_for_consolidation
 ;;
 
 let messages_for_consolidation facts =
@@ -188,9 +185,52 @@ let consolidate_keeper
               | Error detail -> invalid_structured_response_detail detail
               | Ok (`Assoc _ as json) ->
                 let plan = Consolidation.plan_of_json json in
-                let survivors = Consolidation.apply_plan ~now ~facts plan in
+                let survivors, stats = Consolidation.apply_plan ~now ~facts plan in
+                (* Only the gate mismatches mean the judge and the apply gate
+                   disagreed — with the gate fields rendered into the prompt
+                   that should be rare, so it is loud. The sum deliberately
+                   excludes [rejected_too_few_members]; see
+                   [Consolidation.gate_rejection_count]. *)
+                let gate_rejected_groups =
+                  Consolidation.gate_rejection_count stats
+                in
+                if gate_rejected_groups > 0
+                then (
+                  Log.Keeper.warn
+                    "memory_os_keeper_consolidation rejected %d group(s) at the merge gate keeper=%s: kind_mismatch=%d valid_until_mismatch=%d (merged=%d dropped=%d too_few_members=%d)"
+                    gate_rejected_groups
+                    keeper_id
+                    stats.rejected_kind_mismatch
+                    stats.rejected_valid_until_mismatch
+                    stats.merged_groups
+                    stats.dropped
+                    stats.rejected_too_few_members;
+                  Otel_metric_store.inc_counter
+                    Keeper_metrics.(to_string MemoryOsConsolidationGroupRejected)
+                    ~labels:[ "keeper", keeper_id ]
+                    ())
+                else if stats.rejected_too_few_members > 0
+                then
+                  Log.Keeper.info
+                    "memory_os_keeper_consolidation skipped %d group(s) below two free members keeper=%s (merged=%d dropped=%d)"
+                    stats.rejected_too_few_members
+                    keeper_id
+                    stats.merged_groups
+                    stats.dropped;
                 let after = List.length survivors in
-                if dry_run
+                (* [before > 0] is guaranteed by the [Skipped_too_few] guard above,
+                   so [after = 0] here means the plan asked to erase the store. A
+                   plan that keeps nothing is treated as a malformed response, not
+                   as judgement: the store is the keeper's only durable memory and
+                   [rewrite_facts_atomically] renames over the sole copy, so the
+                   rows are unrecoverable. A truncated response that loses its
+                   [groups] array while retaining [drop_indices] produces exactly
+                   this shape. Only total erasure is refused — a large deletion
+                   over a mostly redundant store is a legitimate outcome, so no
+                   ratio or floor is imposed on [after > 0]. *)
+                if after = 0
+                then Plan_rejected_total_deletion { before }
+                else if dry_run
                 then Consolidated { before; after }
                 else
                   rewrite_if_snapshot_current

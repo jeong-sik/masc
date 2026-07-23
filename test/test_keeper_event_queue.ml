@@ -906,10 +906,18 @@ let () =
         Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) ".worktrees"
       in
       Unix.mkdir dot_noise_keeper_dir 0o755;
-      let json =
-        Keeper_event_queue_persistence.fleet_summary_json ~now:30.0 ~base_path
+      let owner_lifecycle ~keeper_name =
+        if String.equal keeper_name pending_keeper
+        then Keeper_event_queue_persistence.Paused_retained
+        else Keeper_event_queue_persistence.Runnable
       in
-      Alcotest.(check string) "summary status" "ok" (string_field "status" json);
+      let json =
+        Keeper_event_queue_persistence.fleet_summary_json
+          ~now:30.0
+          ~base_path
+          ~owner_lifecycle
+      in
+      Alcotest.(check string) "summary status" "degraded" (string_field "status" json);
       Alcotest.(check int)
         "keeper_count excludes snapshotless runtime dirs"
         2
@@ -921,6 +929,30 @@ let () =
         "oldest_age_seconds"
         25.0
         (float_field "oldest_age_seconds" json);
+      Alcotest.(check int)
+        "runnable backlog count excludes paused owner"
+        1
+        (int_field "runnable_backlog_count" json);
+      Alcotest.(check (float 0.001))
+        "runnable oldest age excludes paused owner"
+        25.0
+        (float_field "runnable_oldest_age_seconds" json);
+      Alcotest.(check int)
+        "paused retained count"
+        2
+        (int_field "paused_retained_count" json);
+      Alcotest.(check int)
+        "paused retained keeper count"
+        1
+        (List.length (list_field "paused_retained_by_keeper" json));
+      Alcotest.(check (float 0.001))
+        "paused retained oldest age"
+        20.0
+        (float_field "paused_retained_oldest_age_seconds" json);
+      Alcotest.(check bool)
+        "paused retained work requires explicit operator action"
+        true
+        (bool_field "operator_action_required" json);
       Alcotest.(check int)
         "pending_by_keeper count"
         1
@@ -935,10 +967,18 @@ let () =
         "pending keeper pending"
         2
         (int_field "pending_count" pending_summary);
+      Alcotest.(check string)
+        "pending keeper lifecycle"
+        "paused_retained"
+        (string_field "owner_lifecycle" pending_summary);
       Alcotest.(check int)
         "inflight keeper inflight"
         1
         (int_field "inflight_count" inflight_summary);
+      Alcotest.(check string)
+        "inflight keeper lifecycle"
+        "runnable"
+        (string_field "owner_lifecycle" inflight_summary);
       Alcotest.(check (float 0.001))
         "inflight keeper oldest age"
         25.0
@@ -956,7 +996,11 @@ let () =
         (empty |> fun q -> enqueue q board_stim);
       write_file (snapshot_path ~base_path ~keeper_name) "{not-json";
       let json =
-        Keeper_event_queue_persistence.fleet_summary_json ~now:30.0 ~base_path
+        Keeper_event_queue_persistence.fleet_summary_json
+          ~now:30.0
+          ~base_path
+          ~owner_lifecycle:(fun ~keeper_name:_ ->
+            Keeper_event_queue_persistence.Runnable)
       in
       Alcotest.(check string)
         "corrupt summary status"
@@ -980,6 +1024,45 @@ let () =
         1
         (List.length (list_field "read_errors" summary)));
 
+  (* --- durable fleet summary: missing lifecycle truth is not runnable. --- *)
+  let base_path = temp_dir "keeper-event-queue-fleet-summary-lifecycle-missing" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-lifecycle-missing-summary-test" in
+      Keeper_event_queue_persistence.persist
+        ~base_path
+        ~keeper_name
+        (empty |> fun q -> enqueue q board_stim);
+      let json =
+        Keeper_event_queue_persistence.fleet_summary_json
+          ~now:30.0
+          ~base_path
+          ~owner_lifecycle:(fun ~keeper_name:_ ->
+            Keeper_event_queue_persistence.Lifecycle_unknown
+              "durable keeper metadata missing")
+      in
+      Alcotest.(check string)
+        "unknown lifecycle summary status"
+        "degraded"
+        (string_field "status" json);
+      Alcotest.(check int)
+        "unknown lifecycle is excluded from runnable backlog"
+        0
+        (int_field "runnable_backlog_count" json);
+      Alcotest.(check int)
+        "unknown lifecycle remains visible"
+        1
+        (int_field "unclassified_count" json);
+      Alcotest.(check bool)
+        "unknown lifecycle counts are incomplete"
+        false
+        (bool_field "counts_complete" json);
+      Alcotest.(check bool)
+        "unknown lifecycle requires operator action"
+        true
+        (bool_field "operator_action_required" json));
+
   let meta_for_keeper keeper_name trace_id =
     match
       Masc.Keeper_meta_json_parse.meta_of_json
@@ -998,19 +1081,19 @@ let () =
   let base_path = temp_dir "keeper-event-queue-registry" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
       let keeper_name = "keeper-event-queue-registry-test" in
       let meta = meta_for_keeper keeper_name "trace-event-queue-registry-test" in
-      Masc.Keeper_registry.clear ();
-      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      Masc.Keeper_registry.For_testing.clear ();
+      ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
       assert (length (Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name) = 1);
       assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
-      Masc.Keeper_registry.clear ();
-      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      Masc.Keeper_registry.For_testing.clear ();
+      ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
       let restored = Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name in
       assert (length restored = 1);
       (match
@@ -1049,7 +1132,7 @@ let () =
   let base_path = temp_dir "keeper-event-queue-registry-base-alias" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
       let keeper_name = "keeper-event-queue-registry-base-alias-test" in
@@ -1059,10 +1142,10 @@ let () =
         Keeper_event_queue.to_list queue
         |> List.map (fun (stimulus : Keeper_event_queue.stimulus) -> stimulus.post_id)
       in
-      Masc.Keeper_registry.clear ();
-      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      Masc.Keeper_registry.For_testing.clear ();
+      ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
       ignore
-        (Masc.Keeper_registry.register
+        (Masc.Keeper_registry.For_testing.register
            ~base_path:base_path_masc
            keeper_name
            meta);
@@ -1112,9 +1195,9 @@ let () =
            ~keeper_name
          |> queue_post_ids);
 
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       ignore
-        (Masc.Keeper_registry.register
+        (Masc.Keeper_registry.For_testing.register
            ~base_path:base_path_masc
            keeper_name
            meta);
@@ -1134,13 +1217,13 @@ let () =
   let base_path = temp_dir "keeper-event-queue-turn-digest" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
       let keeper_name = "keeper-event-queue-turn-digest-test" in
       let meta = meta_for_keeper keeper_name "trace-event-queue-turn-digest-test" in
-      Masc.Keeper_registry.clear ();
-      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      Masc.Keeper_registry.For_testing.clear ();
+      ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
       let digest_now = Unix.gettimeofday () in
       let board_at ~post_id ~urgency arrived_at =
         { post_id; urgency; arrived_at; payload = board_payload () }
@@ -1225,12 +1308,12 @@ let () =
   let base_path = temp_dir "keeper-event-queue-unregistered" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
       let keeper_name = "keeper-event-queue-unregistered-test" in
       let meta = meta_for_keeper keeper_name "trace-event-queue-unregistered-test" in
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name bootstrap_stim;
@@ -1241,7 +1324,7 @@ let () =
       assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
       let pending = Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name in
       assert (length pending = 2);
-      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
       let restored = Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name in
       assert (length restored = 2);
       let claim_and_ack expected_post_id =
@@ -1323,18 +1406,18 @@ let () =
     let base_path = temp_dir "keeper-event-queue-autonomous-yield" in
     Fun.protect
       ~finally:(fun () ->
-        Masc.Keeper_registry.clear ();
+        Masc.Keeper_registry.For_testing.clear ();
         Masc.Keeper_chat_queue.For_testing.reset ();
         rm_rf base_path)
       (fun () ->
         let keeper_name = "keeper-event-queue-yield-test" in
         let meta = meta_for_keeper keeper_name "trace-event-queue-yield-test" in
-        Masc.Keeper_registry.clear ();
+        Masc.Keeper_registry.For_testing.clear ();
         Masc.Keeper_chat_queue.For_testing.reset ();
         ignore
           (Masc.Keeper_chat_queue.configure_persistence ~base_path
             : Masc.Keeper_chat_queue.configure_report);
-        ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+        ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
         (match
            Masc.Keeper_unified_turn_execution.autonomous_yield_request
              ~base_path
@@ -1370,12 +1453,12 @@ let () =
   let base_path = temp_dir "keeper-event-queue-durable-unregistered" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
       let keeper_name = "keeper-event-queue-durable-unregistered-test" in
       let meta = meta_for_keeper keeper_name "trace-durable-unregistered-test" in
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       (match
          Masc.Keeper_registry_event_queue.enqueue_durable_result
            ~base_path
@@ -1385,7 +1468,7 @@ let () =
        | Ok () -> ()
        | Error msg -> Alcotest.fail ("durable enqueue failed: " ^ msg));
       assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
-      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
       let _lease, stimulus =
         claim_single
           ~base_path
@@ -1488,12 +1571,12 @@ let () =
   let base_path = temp_dir "keeper-event-queue-durable-offline" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
       let keeper_name = "keeper-event-queue-durable-offline-test" in
       let meta = meta_for_keeper keeper_name "trace-durable-offline-test" in
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       ignore (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
       (match
          Masc.Keeper_registry_event_queue.enqueue_durable_result
@@ -1546,13 +1629,13 @@ let () =
   let base_path = temp_dir "keeper-event-queue-requeue-front" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_registry.clear ();
+      Masc.Keeper_registry.For_testing.clear ();
       rm_rf base_path)
     (fun () ->
       let keeper_name = "keeper-event-queue-requeue-front-test" in
       let meta = meta_for_keeper keeper_name "trace-event-queue-requeue-front-test" in
-      Masc.Keeper_registry.clear ();
-      ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
+      Masc.Keeper_registry.For_testing.clear ();
+      ignore (Masc.Keeper_registry.For_testing.register ~base_path keeper_name meta);
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name bootstrap_stim;
       let consumed_lease, consumed =

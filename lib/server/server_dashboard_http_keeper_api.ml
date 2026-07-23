@@ -5,6 +5,10 @@
 
 include Server_dashboard_http_keeper_api_post
 
+let handle_keeper_paused_work_post =
+  Server_dashboard_http_keeper_paused_work.handle_post
+;;
+
 let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 let freshness_slo_s = Server_dashboard_http_core_cache.freshness_slo_s
 
@@ -1359,6 +1363,8 @@ let handle_keeper_get_subroutes state req request reqd =
         match st with `OK -> `OK | `Not_found -> `Not_found
       in
       Http.Response.json_value ~status ~compress:true ~request:req json reqd
+  else if ends_with keeper_suffix_paused_work then
+    Server_dashboard_http_keeper_paused_work.handle_get state req reqd
   else if ends_with keeper_suffix_runtime_trace then
     let name = extract_name keeper_suffix_runtime_trace in
     if String.length name = 0 then

@@ -421,104 +421,7 @@ let test_response_content_headers_preserve_all_segments () =
     (Httpun.Headers.get headers "content-encoding")
 ;;
 
-(* ===== Unit Tests for Compression (Compact Protocol v4) ===== *)
-
-let test_compression_skip_small () =
-  let small_data = "Hello, World!" in
-  (* 13 bytes, below 256 threshold *)
-  let result, compressed = Compression.compress_zstd small_data in
-  Alcotest.(check bool) "small data not compressed" false compressed;
-  Alcotest.(check string) "data unchanged" small_data result
-;;
-
-let test_compression_large_data () =
-  let large_data = String.make 1000 'x' in
-  (* 1000 bytes of 'x' - highly compressible *)
-  let result, compressed = Compression.compress_zstd large_data in
-  Alcotest.(check bool) "large data compressed" true compressed;
-  Alcotest.(check bool)
-    "result smaller"
-    true
-    (String.length result < String.length large_data)
-;;
-
-let test_compression_roundtrip () =
-  (* Use highly repetitive data that will definitely compress *)
-  let original = String.make 500 'A' ^ String.make 500 'B' ^ String.make 500 'C' in
-  let compressed_data, did_compress = Compression.compress_zstd original in
-  Alcotest.(check bool) "data should compress" true did_compress;
-  let decompressed = Zstd.decompress (String.length original) compressed_data in
-  Alcotest.(check string) "roundtrip preserves data" original decompressed
-;;
-
-let test_accepts_zstd_positive () =
-  let headers = Httpun.Headers.of_list [ "accept-encoding", "gzip, deflate, zstd" ] in
-  let request = Httpun.Request.create ~headers `GET "/" in
-  Alcotest.(check bool) "accepts zstd" true (Compression.accepts_zstd request)
-;;
-
-let test_accepts_zstd_only_zstd () =
-  let headers = Httpun.Headers.of_list [ "accept-encoding", "zstd" ] in
-  let request = Httpun.Request.create ~headers `GET "/" in
-  Alcotest.(check bool) "accepts zstd only" true (Compression.accepts_zstd request)
-;;
-
-let test_accepts_zstd_negative () =
-  let headers = Httpun.Headers.of_list [ "accept-encoding", "gzip, deflate, br" ] in
-  let request = Httpun.Request.create ~headers `GET "/" in
-  Alcotest.(check bool) "no zstd" false (Compression.accepts_zstd request)
-;;
-
-let test_accepts_zstd_rejects_q_zero () =
-  let headers =
-    Httpun.Headers.of_list [ "accept-encoding", "gzip, zstd;q=0, br" ]
-  in
-  let request = Httpun.Request.create ~headers `GET "/" in
-  Alcotest.(check bool) "zstd q=0 rejected" false (Compression.accepts_zstd request)
-;;
-
-let test_accepts_zstd_dict_positive () =
-  let headers =
-    Httpun.Headers.of_list [ "accept-encoding", "gzip, zstd; dict=masc" ]
-  in
-  let request = Httpun.Request.create ~headers `GET "/" in
-  Alcotest.(check bool)
-    "zstd dictionary accepted"
-    true
-    (Compression.accepts_zstd_dict request)
-;;
-
-let test_accepts_zstd_dict_rejects_q_zero () =
-  let headers =
-    Httpun.Headers.of_list [ "accept-encoding", "zstd; dict=masc; q=0" ]
-  in
-  let request = Httpun.Request.create ~headers `GET "/" in
-  Alcotest.(check bool)
-    "zstd dictionary q=0 rejected"
-    false
-    (Compression.accepts_zstd_dict request)
-;;
-
-let test_accepts_zstd_no_header () =
-  let request = Httpun.Request.create `GET "/" in
-  Alcotest.(check bool) "no header" false (Compression.accepts_zstd request)
-;;
-
 (* ===== Test Suites ===== *)
-
-let compression_tests =
-  [ "skip small data", `Quick, test_compression_skip_small
-  ; "compress large data", `Quick, test_compression_large_data
-  ; "roundtrip", `Quick, test_compression_roundtrip
-  ; "accepts zstd (positive)", `Quick, test_accepts_zstd_positive
-  ; "accepts zstd (only)", `Quick, test_accepts_zstd_only_zstd
-  ; "accepts zstd (negative)", `Quick, test_accepts_zstd_negative
-  ; "accepts zstd rejects q=0", `Quick, test_accepts_zstd_rejects_q_zero
-  ; "accepts zstd-dict positive", `Quick, test_accepts_zstd_dict_positive
-  ; "accepts zstd-dict rejects q=0", `Quick, test_accepts_zstd_dict_rejects_q_zero
-  ; "accepts zstd (no header)", `Quick, test_accepts_zstd_no_header
-  ]
-;;
 
 let router_tests =
   [ "empty router", `Quick, test_router_empty
@@ -719,9 +622,7 @@ let () =
   Eio_guard.enable ();
   Alcotest.run
     "Http_server_eio"
-    [ "compression", compression_tests
-    ; (* Compact Protocol v4 *)
-      "router", router_tests
+    [ "router", router_tests
     ; "config", config_tests
     ; "request", request_tests
     ; "response", response_tests

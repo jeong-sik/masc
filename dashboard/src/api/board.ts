@@ -6,6 +6,7 @@ import type {
   BoardActorIdentity, BoardPost, BoardPostOrigin, BoardComment, BoardReactionSummary,
   BoardReactionState, BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
   BoardVoteDirection, BoardModerationStatus, BoardContributorQuality,
+  BoardAttachmentDecode, BoardAttachmentKind,
   BoardCurationSnapshot, BoardKarmaLedger, BoardKarmaLedgerEvent, BoardKarmaTotal,
   KeeperApprovalQueueItem,
   GateJudgment, HitlContextSummary, HitlSummaryStatus,
@@ -199,6 +200,58 @@ function normalizeBoardMeta(raw: unknown): BoardPost['meta'] {
   return Object.keys(next).length > 0 ? next : null
 }
 
+// RFC-0000 §3.1: `meta.attachments` carries Board_attachment_meta entries.
+// Decode mirrors the OCaml contract (id/kind/origin_url/origin_size_bytes/
+// created_at required, width/height nullable). Entries that fail the contract
+// are kept as `{ ok: false }` — the surface renders an explicit failure card,
+// never a silent skip. A present-but-non-array carrier is itself one invalid
+// entry, matching Board_render's Invalid_attachment block on the OCaml side.
+const BOARD_ATTACHMENT_KINDS: ReadonlySet<string> = new Set([
+  'image',
+  'video',
+  'youtube',
+  'external_link',
+])
+
+function normalizeBoardAttachment(raw: unknown): BoardAttachmentDecode {
+  if (!isRecord(raw)) return { ok: false, raw }
+  const id = asString(raw.id, '').trim()
+  const kindRaw = asString(raw.kind, '').trim()
+  const originUrl = asString(raw.origin_url, '').trim()
+  const originSizeBytes = asNumber(raw.origin_size_bytes)
+  const createdAt = asNumber(raw.created_at)
+  if (
+    !id
+    || !BOARD_ATTACHMENT_KINDS.has(kindRaw)
+    || !originUrl
+    || originSizeBytes === undefined
+    || createdAt === undefined
+  ) {
+    return { ok: false, raw }
+  }
+  return {
+    ok: true,
+    attachment: {
+      id,
+      kind: kindRaw as BoardAttachmentKind,
+      origin_url: originUrl,
+      origin_name: asString(raw.origin_name, ''),
+      origin_size_bytes: originSizeBytes,
+      mime_type: asString(raw.mime_type, ''),
+      width: asNumber(raw.width) ?? null,
+      height: asNumber(raw.height) ?? null,
+      created_at: createdAt,
+    },
+  }
+}
+
+export function normalizeBoardAttachments(raw: unknown): BoardAttachmentDecode[] | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (!Array.isArray(raw)) return [{ ok: false, raw }]
+  const entries = raw.map(normalizeBoardAttachment)
+  return entries.length > 0 ? entries : undefined
+}
+
 function normalizeBoardActorIdentity(
   raw: unknown,
   fallbackRaw: string,
@@ -333,6 +386,8 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
         .filter((row): row is BoardReactionSummary => row !== null)
     : undefined
   const supportedReactionEmojis = normalizeSupportedReactionEmojis(raw.supported_reaction_emojis)
+  const meta = normalizeBoardMeta(raw.meta)
+  const attachments = normalizeBoardAttachments(meta?.attachments)
 
   return {
     id,
@@ -349,7 +404,8 @@ function normalizeBoardPost(raw: unknown): BoardPost | null {
     title,
     body,
     content,
-    meta: normalizeBoardMeta(raw.meta),
+    meta,
+    ...(attachments !== undefined ? { attachments } : {}),
     tags,
     votes,
     vote_balance: score,

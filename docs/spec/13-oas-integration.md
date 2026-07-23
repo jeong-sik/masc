@@ -1,8 +1,12 @@
 ---
 status: reference
-last_verified: 2026-07-17
+last_verified: 2026-07-19
 code_refs:
   - lib/worker_oas.ml
+  - lib/keeper/keeper_event_bridge.ml
+  - lib/agent_sdk_response.ml
+  - lib/masc_oas_bridge.ml
+  - lib/oas_compat/oas_compat.ml
   - lib/keeper/keeper_agent_error.ml
   - lib/keeper/keeper_compact_policy.ml
   - lib/keeper/keeper_manual_compaction.ml
@@ -14,7 +18,7 @@ code_refs:
 |------|-----|
 | Status | Draft |
 | Team | OAS Bridge |
-| Maps to | `lib/oas_*.ml`, `lib/worker_oas.ml`, `lib/runtime_inference.ml`, `lib/keeper/keeper_compact_policy.ml` |
+| Maps to | `lib/worker_oas.ml`, `lib/keeper/keeper_event_bridge.ml`, `lib/agent_sdk_response.ml`, `lib/masc_oas_bridge.ml`, `lib/oas_compat/oas_compat.ml` |
 | Dependencies | 02-types-and-invariants |
 | OAS Version | `agent_sdk` library (OCaml, in-tree dependency) |
 
@@ -52,13 +56,11 @@ MASC 전용 요구가 생기면 MASC adapter/bridge로 먼저 해결하고, OAS 
 ```mermaid
 graph TB
   subgraph "MASC (Consumer)"
-    OW[oas_worker.ml]
     WO[worker_oas.ml]
-    OE[oas_events.ml]
-    OSB[oas_event_bridge.ml]
-    OM[oas_message.ml]
-    OR[oas_response.ml]
-    OMR[oas_model_resolve.ml]
+    KEB[keeper_event_bridge.ml]
+    ASR[agent_sdk_response.ml]
+    MOB[masc_oas_bridge.ml]
+    OC[oas_compat.ml]
     CI[runtime_inference.ml]
     TB[tool_bridge.ml]
   end
@@ -73,13 +75,13 @@ graph TB
     CC2[Runtime_config]
     RT[Raw_trace]
   end
-  OW -->|"build + run"| AG
-  OW --> BU
-  OW --> PR
   WO -->|"worker lifecycle"| AG
-  OE -->|"Custom events"| EB
-  OSB -->|"subscribe + relay"| EB
-  OMR -->|"resolve labels"| CC2
+  WO --> BU
+  WO --> PR
+  MOB -->|"run_safe boundary"| AG
+  KEB -->|"subscribe + relay"| EB
+  ASR -->|"read api_response"| AG
+  OC -->|"classify sdk_error"| AG
   CI -->|"read params"| CC2
 ```
 

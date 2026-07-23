@@ -167,6 +167,16 @@ module Oas_sse : sig
   val drain_interval_sec : float
 end
 
+(** {1 Lane failover} *)
+
+module Lane : sig
+  val preference_ttl_s : unit -> float
+  (** Sticky lane-candidate preference TTL in seconds
+      ([MASC_LANE_PREFERENCE_TTL_S], default [3600.0]).  Re-read per call so
+      tests and operators can flip it without a restart; [0] disables
+      stickiness. *)
+end
+
 (** {1 Dashboard signal thresholds + render budgets} *)
 
 module Dashboard : sig

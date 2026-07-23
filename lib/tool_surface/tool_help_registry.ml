@@ -45,18 +45,6 @@ let normalize_spaces text =
   |> List.filter (fun chunk -> not (String.equal chunk ""))
   |> String.concat " "
 
-let trim_terminal_punctuation text =
-  let rec loop value =
-    let len = String.length value in
-    if len = 0 then
-      value
-    else
-      match value.[len - 1] with
-      | '.' | ';' | ':' | ',' -> loop (String.sub value 0 (len - 1))
-      | _ -> value
-  in
-  loop (String.trim text)
-
 let first_sentence text =
   let text = normalize_spaces text in
   let len = String.length text in
@@ -141,9 +129,6 @@ let constraints_from_meta (meta : Tool_catalog.metadata) =
   in
   visibility_note @ implementation_note
 
-let constraints_from_metadata name =
-  constraints_from_meta (Tool_catalog.metadata name)
-
 let manual_help_entry name =
   match name with
   | "keeper_tool_search" ->
@@ -211,14 +196,14 @@ let manual_help_entry name =
           name;
           short_description = "Persist a structured keeper memory entry.";
           when_to_use =
-            "Use when an explicit decision, open question, goal, or progress note should be searchable on later turns.";
+            "Use when something from this turn must outlive it: long_term for a claim later turns should read back, the other kinds for working notes searchable within the run.";
           key_constraints =
             [
-              "kind must be one of the callable keeper memory kinds.";
+              "kind selects the store: long_term is durable, the rest are turn-scoped.";
               "Do not use for transient scratch notes.";
             ];
           details_markdown =
-            "Writes a bounded structured memory note. The long_term kind is reserved for tool-result emission and is not accepted here.";
+            "Writes a bounded structured memory note. long_term lands in the Memory OS fact store that recall renders into later turns; goal/progress/decision/open_question land in the turn-scoped memory bank.";
           doc_refs = [];
           prompt_hints = [];
           examples =
@@ -286,9 +271,6 @@ let derived_short_description_with_meta (_meta : Tool_catalog.metadata) name ori
   else
     cleaned ^ "."
 
-let derived_short_description name original =
-  derived_short_description_with_meta (Tool_catalog.metadata name) name original
-
 let derived_details_with_meta (meta : Tool_catalog.metadata) original =
   let base = normalize_spaces original in
   let extra_constraints = constraints_from_meta meta in
@@ -301,9 +283,6 @@ let derived_details_with_meta (meta : Tool_catalog.metadata) original =
         "Constraints:\n"
         ^ String.concat "\n" (List.map (fun item -> "- " ^ item) extra_constraints);
       ]
-
-let derived_details name original =
-  derived_details_with_meta (Tool_catalog.metadata name) original
 
 let entry_of_schema (schema : Masc_domain.tool_schema) : help_entry =
   match manual_help_entry schema.name with
@@ -458,13 +437,6 @@ let entry_markdown (entry : help_entry) =
     (header @ when_lines @ constraint_lines @ detail_lines
    @ doc_lines @ prompt_lines @ example_lines @ alternative_lines
    @ workflow_lines)
-
-let index_json (schemas : Masc_domain.tool_schema list) =
-  `Assoc
-    [
-      ("count", `Int (List.length schemas));
-      ("tools", `List (List.map (fun schema -> entry_json (entry_of_schema schema)) schemas));
-    ]
 
 let index_markdown (schemas : Masc_domain.tool_schema list) =
   let rows =

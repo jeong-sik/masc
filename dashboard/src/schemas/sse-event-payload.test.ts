@@ -14,7 +14,6 @@ import {
   writeContentReplacementReplacedPayload,
   writeContextCompactStartedPayload,
   writeContextCompactedPayload,
-  writeContextOverflowImminentPayload,
   writeHandoffCompletedPayload,
   writeHandoffRequestedPayload,
   writeSlotSchedulerObservedPayload,
@@ -80,15 +79,6 @@ const ALL_PAYLOAD_CASES: TypedOasPayload[] = [
     },
   },
   {
-    kind: 'context_overflow_imminent',
-    payload: {
-      agent_name: 'a',
-      estimated_tokens: 9000,
-      limit_tokens: 10000,
-      ratio: 0.9,
-    },
-  },
-  {
     kind: 'context_compact_started',
     payload: { agent_name: 'a', trigger: 'threshold' },
   },
@@ -141,8 +131,6 @@ function serializePayload(payload: TypedOasPayload): Record<string, unknown> {
       return writeHandoffCompletedPayload(payload.payload)
     case 'context_compacted':
       return writeContextCompactedPayload(payload.payload)
-    case 'context_overflow_imminent':
-      return writeContextOverflowImminentPayload(payload.payload)
     case 'context_compact_started':
       return writeContextCompactStartedPayload(payload.payload)
     case 'content_replacement_replaced':
@@ -349,20 +337,6 @@ describe('parseOasPayload', () => {
     expect(data.payload.after_tokens).toBe(800)
     expect(data.payload.phase).toBe('summarize')
     expect('runtime' in data.payload).toBe(false)
-  })
-
-  it('parses oas:context_overflow_imminent payload', () => {
-    const result = parseOasPayload('oas:context_overflow_imminent', {
-      agent_name: 'alpha',
-      estimated_tokens: 9000,
-      limit_tokens: 10000,
-      ratio: 0.9,
-    })
-    expect(result.success).toBe(true)
-    if (!result.success) return
-    expect(result.data.kind).toBe('context_overflow_imminent')
-    if (result.data.kind !== 'context_overflow_imminent') return
-    expect(result.data.payload.ratio).toBe(0.9)
   })
 
   it('parses oas:context_compact_started payload', () => {

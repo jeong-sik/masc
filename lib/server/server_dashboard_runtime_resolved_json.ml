@@ -39,9 +39,16 @@ let runtime_resolution_json (rt : Runtime.t) : Yojson.Safe.t =
 ;;
 
 let lane_json (lane : Runtime_lane.t) : Yojson.Safe.t =
+  (* Sticky failover preference (Runtime_lane_preference) is read-only
+     operator observability: which candidate the lane will try first next. *)
+  let preferred =
+    Runtime_lane_preference.preferred_of_lane ~lane_id:(Runtime_lane.id lane)
+  in
   `Assoc
     [ "id", `String (Runtime_lane.id lane)
     ; "runtime_ids", Json_util.json_string_list (Runtime_lane.ordered_candidates lane)
+    ; "preferred_candidate", string_opt_json (Option.map fst preferred)
+    ; "preferred_at_ts", Json_util.float_opt_to_json (Option.map snd preferred)
     ]
 ;;
 

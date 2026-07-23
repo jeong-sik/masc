@@ -303,7 +303,6 @@ function goalFixture(partial: Partial<Goal> = {}): Goal {
     metric: 'green CI',
     target_value: '100%',
     priority: 1,
-    status: 'active',
     phase: 'executing',
     created_at: '2026-05-13T00:00:00Z',
     updated_at: '2026-05-13T00:00:00Z',

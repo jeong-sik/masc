@@ -44,11 +44,57 @@ let no_compaction ~turn_count reason : State.no_compaction =
   { source = checkpoint_source ~turn_count; reason }
 ;;
 
-let test_stochastic_reasons_have_no_terminal_codec () =
-  (* Stochastic planner failures (invalid plan, malformed evidence) and
-     planner invariant violations are retryable/escalated outcomes — they
-     must not be expressible as a durable terminal no-compaction reason,
-     or a flaky LLM could permanently retire a compaction operation. *)
+let test_exact_output_terminal_reasons_round_trip () =
+  List.iter
+    (fun (reason, label) ->
+       Alcotest.(check string)
+         "terminal reason label"
+         label
+         (State.no_compaction_reason_label reason);
+       (match State.no_compaction_reason_of_label label with
+        | Ok restored ->
+          Alcotest.(check bool) "terminal reason typed round-trip" true
+            (restored = reason)
+        | Error detail -> Alcotest.failf "terminal reason decode failed: %s" detail);
+       let settlement =
+         State.No_compaction (no_compaction ~turn_count:7 reason)
+       in
+       let claimed, lease =
+         State.with_pending
+           (queue
+              [ stimulus
+                  ~payload:Queue.Manual_compaction_requested
+                  Queue.manual_compaction_post_id
+                  1.0
+              ])
+           State.empty
+         |> claim_head
+       in
+       let lease = require_some "exact-output terminal lease" lease in
+       let _, result =
+         State.settle ~settled_at:11.0 ~lease ~settlement claimed
+         |> require_ok "settle exact-output terminal"
+       in
+       let receipt =
+         match result with
+         | State.Settled receipt -> receipt
+         | State.Already_settled _ ->
+           Alcotest.fail "exact-output terminal was already settled"
+       in
+       let restored =
+         State.transition_receipt_to_yojson receipt
+         |> State.transition_receipt_of_yojson
+         |> require_ok "exact-output terminal receipt round-trip"
+       in
+       Alcotest.(check bool)
+         "terminal settlement survives public receipt codec"
+         true
+         (State.transition_receipt_equal receipt restored))
+    [ State.Execution_may_have_dispatched, "execution_may_have_dispatched"
+    ; State.Domain_invalid_output, "domain_invalid_output"
+    ];
+  (* Malformed structural evidence and planner invariant violations remain
+     retryable/escalated and cannot be encoded as terminal no-compaction. *)
   List.iter
     (fun label ->
        match State.no_compaction_reason_of_label label with
@@ -225,10 +271,11 @@ let test_no_compaction_decode_rejects_mismatched_stimulus () =
       "decode accepted a No_compaction receipt paired with a non-manual stimulus"
 ;;
 
-let accepted_cancellation ~source_revision ~owner_generation operation_id
+let accepted_cancellation ~source ~source_revision ~owner_generation operation_id
     : State.accepted_cancellation
   =
-  { source_revision
+  { source
+  ; source_revision
   ; owner_generation
   ; operator_operation_id = operation_id
   ; reason = "operator cancelled retained work"
@@ -251,7 +298,13 @@ let test_accepted_cancellation_is_exact_owner_fenced_terminal () =
     |> require_ok "claim exact accepted event"
   in
   let lease = require_some "accepted event lease" lease in
-  let cancellation = accepted_cancellation ~source_revision:7L ~owner_generation:4 "op-1" in
+  let cancellation =
+    accepted_cancellation
+      ~source:accepted
+      ~source_revision:7L
+      ~owner_generation:4
+      "op-1"
+  in
   (match
      State.settle
        ~settled_at:4.0
@@ -261,6 +314,18 @@ let test_accepted_cancellation_is_exact_owner_fenced_terminal () =
    with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "generic settlement bypassed the owner fence");
+  let changed_source = { accepted with arrived_at = 1.5 } in
+  let changed_cancellation = { cancellation with source = changed_source } in
+  (match
+     State.cancel_accepted
+       ~current_owner_generation:4
+       ~settled_at:4.0
+       ~lease
+       ~cancellation:changed_cancellation
+       claimed
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "accepted cancellation ignored a changed source snapshot");
   let settled, result =
     State.cancel_accepted
       ~current_owner_generation:4
@@ -339,16 +404,113 @@ let test_accepted_cancellation_rejects_stale_fences () =
       ~cancellation
       claimed
   in
-  (match cancel (accepted_cancellation ~source_revision:7L ~owner_generation:4 "op-1") 5 with
+  (match
+     cancel
+       (accepted_cancellation
+          ~source:accepted
+          ~source_revision:7L
+          ~owner_generation:4
+          "op-1")
+       5
+   with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "stale owner generation cancelled accepted work");
-  (match cancel (accepted_cancellation ~source_revision:6L ~owner_generation:4 "op-1") 4 with
+  (match
+     cancel
+       (accepted_cancellation
+          ~source:accepted
+          ~source_revision:6L
+          ~owner_generation:4
+          "op-1")
+       4
+   with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "stale queue revision cancelled accepted work");
   Alcotest.(check int)
     "rejected cancellation keeps the exact lease active"
     1
     (List.length (State.leases claimed))
+;;
+
+let test_pending_accepted_cancellation_is_exact_and_source_bound () =
+  let peer_before = stimulus "peer-before" 1.0 in
+  let target = stimulus "pending-target" 2.0 in
+  let peer_after = stimulus "peer-after" 3.0 in
+  let state =
+    State.empty
+    |> State.with_pending (queue [ peer_before; target; peer_after ])
+    |> State.with_revision 9L
+  in
+  let cancellation =
+    accepted_cancellation
+      ~source:target
+      ~source_revision:9L
+      ~owner_generation:6
+      "pending-operation-1"
+  in
+  let cancelled, result =
+    State.cancel_pending_accepted
+      ~current_owner_generation:6
+      ~settled_at:4.0
+      ~cancellation
+      state
+    |> require_ok "cancel exact pending source"
+  in
+  let receipt =
+    match result with
+    | State.Settled receipt -> receipt
+    | State.Already_settled _ -> Alcotest.fail "first pending cancellation replayed"
+  in
+  Alcotest.(check (list string))
+    "pending cancellation preserves peer FIFO"
+    [ "peer-before"; "peer-after" ]
+    (post_ids (State.pending cancelled));
+  Alcotest.(check int) "synthetic lease is terminal" 0 (List.length (State.leases cancelled));
+  Alcotest.(check int64)
+    "synthetic lease consumes one stable sequence"
+    2L
+    (State.next_lease_sequence cancelled);
+  (match State.transition_outbox cancelled with
+   | [ entry ] ->
+     Alcotest.(check bool)
+       "outbox carries the exact pending source"
+       true
+       (entry.stimuli = [ target ]);
+     Alcotest.(check bool)
+       "receipt is source-bound"
+       true
+       (match entry.receipt.settlement with
+        | State.Cancel_accepted accepted -> accepted.source = target
+        | _ -> false)
+   | _ -> Alcotest.fail "pending cancellation did not create one outbox entry");
+  (match
+     State.cancel_pending_accepted
+       ~current_owner_generation:99
+       ~settled_at:5.0
+       ~cancellation
+       cancelled
+   with
+   | Ok (_, State.Already_settled replayed) ->
+     Alcotest.(check bool)
+       "committed pending cancellation replays before current fences"
+       true
+       (State.transition_receipt_equal receipt replayed)
+   | Ok (_, State.Settled _) -> Alcotest.fail "pending replay committed twice"
+   | Error detail -> Alcotest.fail detail);
+  let changed_source =
+    { cancellation with
+      source = peer_before
+    }
+  in
+  (match
+     State.cancel_pending_accepted
+       ~current_owner_generation:6
+       ~settled_at:5.0
+       ~cancellation:changed_source
+       cancelled
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "operation ID replay accepted a different source")
 ;;
 
 let test_claim_codec_ack_idempotency () =
@@ -842,6 +1004,8 @@ let test_failed_cycle_route_mapping () =
   (match
      Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:2.0
+       ~compaction_consecutive_failures:0
+      ~transcript_quarantine_consecutive_retries:0
        retry_failure
    with
    | Masc.Keeper_registry_event_queue.Requeue
@@ -859,6 +1023,8 @@ let test_failed_cycle_route_mapping () =
   (match
      Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:3.0
+       ~compaction_consecutive_failures:0
+      ~transcript_quarantine_consecutive_retries:0
        judgment_failure
    with
    | Masc.Keeper_registry_event_queue.Escalate
@@ -879,6 +1045,8 @@ let test_failed_cycle_route_mapping () =
   (match
      Masc.Keeper_heartbeat_loop.settlement_of_failure
        ~settled_at:6.0
+       ~compaction_consecutive_failures:0
+      ~transcript_quarantine_consecutive_retries:0
        handled_failure
    with
    | Masc.Keeper_registry_event_queue.Ack -> ()
@@ -887,17 +1055,37 @@ let test_failed_cycle_route_mapping () =
     { judgment_failure with
       source_lease_disposition =
         Masc.Keeper_unified_turn.Requeue_after_context_compaction
+          Masc.Keeper_unified_turn.Compaction_committed
+    }
+  in
+  (match
+     Masc.Keeper_heartbeat_loop.settlement_of_failure
+       ~settled_at:7.0
+       ~compaction_consecutive_failures:0
+       ~transcript_quarantine_consecutive_retries:0
+       compacted_failure
+   with
+   | Masc.Keeper_registry_event_queue.Requeue
+       Masc.Keeper_registry_event_queue.Context_compaction_retry ->
+     ()
+   | _ -> Alcotest.fail "context-compacted source stimulus was acknowledged");
+  let quarantined_failure =
+    { judgment_failure with
+      source_lease_disposition =
+        Masc.Keeper_unified_turn.Requeue_after_transcript_quarantine
     }
   in
   match
     Masc.Keeper_heartbeat_loop.settlement_of_failure
-      ~settled_at:7.0
-      compacted_failure
+      ~settled_at:8.0
+      ~compaction_consecutive_failures:0
+      ~transcript_quarantine_consecutive_retries:0
+      quarantined_failure
   with
   | Masc.Keeper_registry_event_queue.Requeue
-      Masc.Keeper_registry_event_queue.Context_compaction_retry ->
+      Masc.Keeper_registry_event_queue.Transcript_quarantine_retry ->
     ()
-  | _ -> Alcotest.fail "context-compacted source stimulus was acknowledged"
+  | _ -> Alcotest.fail "unprocessed source stimulus was acknowledged after quarantine"
 ;;
 
 let cycle_meta () =
@@ -942,6 +1130,8 @@ let test_manual_no_compaction_is_terminal_but_overflow_escalates () =
        ~base_path:"/tmp/no-compaction-manual"
        ~settled_at:2.0
        ~stop_requested:false
+       ~compaction_consecutive_failures:0
+      ~transcript_quarantine_consecutive_retries:0
        ~lease
        (Some
           (Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_not_applied
@@ -959,6 +1149,8 @@ let test_manual_no_compaction_is_terminal_but_overflow_escalates () =
   match
     Masc.Keeper_heartbeat_loop.settlement_of_failure
       ~settled_at:3.0
+      ~compaction_consecutive_failures:0
+      ~transcript_quarantine_consecutive_retries:0
       overflow_failure
   with
   | Masc.Keeper_registry_event_queue.Escalate
@@ -983,6 +1175,8 @@ let test_applied_compaction_settles_followup_atomically () =
       ~base_path:(Sys.getcwd ())
       ~settled_at:8.0
       ~stop_requested:false
+      ~compaction_consecutive_failures:0
+      ~transcript_quarantine_consecutive_retries:0
       ~lease
       (Some
          (Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_applied
@@ -1018,6 +1212,418 @@ let test_applied_compaction_settles_followup_atomically () =
   | _ -> Alcotest.fail "follow-up retry replayed an already-applied compaction"
 ;;
 
+(* RFC-0351 S0 / #25461: a manual-compaction failure requeues while the streak
+   is under the ceiling and settles terminally at it. Without the ceiling the
+   stimulus re-enters on every heartbeat cycle, because [Requeue] is not an ack
+   (measured: 102 failures / 104 compaction LLM calls in 74 minutes). *)
+let test_compaction_retry_escalates_after_threshold () =
+  let lease = lease_for (stimulus "compaction-retry" 1.0) in
+  let meta = cycle_meta () in
+  let failed =
+    Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_failed
+      { meta
+      ; failure =
+          Masc.Keeper_manual_compaction.Recovery
+            ( Masc.Keeper_post_turn.Checkpoint_candidate_failed
+                "test-induced candidate failure"
+            , Ok () )
+      }
+  in
+  let settlement ~streak =
+    Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
+      ~base_path:"/tmp/compaction-retry-ceiling"
+      ~settled_at:2.0
+      ~stop_requested:false
+      ~compaction_consecutive_failures:streak
+      ~transcript_quarantine_consecutive_retries:0
+      ~lease
+      (Some failed)
+  in
+  let expect_requeue ~streak label =
+    match settlement ~streak with
+    | Masc.Keeper_registry_event_queue.Requeue
+        Masc.Keeper_registry_event_queue.Context_compaction_retry ->
+      ()
+    | _ -> Alcotest.fail label
+  in
+  expect_requeue ~streak:0 "first compaction failure did not requeue";
+  expect_requeue ~streak:1 "second compaction failure did not requeue";
+  match settlement ~streak:2 with
+  | Masc.Keeper_registry_event_queue.Escalate
+      { reason =
+          Masc.Keeper_registry_event_queue.Compaction_retry_exhausted
+            { attempts; _ }
+      ; successor = None
+      } ->
+    Alcotest.(check int) "escalation reports the attempt count" 3 attempts
+  | _ ->
+    Alcotest.fail
+      "third consecutive compaction failure requeued instead of escalating"
+;;
+
+(* RFC-0351 S0 / #25461: the in-lane provider-overflow recovery joins the same
+   ceiling. In the 2026-07-21 storm 284 of 285 rejections carried
+   trigger=provider_overflow and escalation never fired, because this lane
+   requeued unconditionally; the storm ran ~10h and ended only when the
+   operator issued keeper_down. *)
+let test_in_lane_compaction_streak_bounds_retries () =
+  let judgment_route =
+    Keeper_runtime_failure_route.Escalate_judgment
+      { judgment = Keeper_runtime_failure_route.Context_overflow
+      ; provenance = Keeper_runtime_failure_route.Oas_api_error
+      ; detail = "typed provider context overflow"
+      }
+  in
+  let failure disposition =
+    { (turn_failure judgment_route) with source_lease_disposition = disposition }
+  in
+  let settlement ~streak disposition =
+    Masc.Keeper_heartbeat_loop.settlement_of_failure
+      ~settled_at:4.0
+      ~compaction_consecutive_failures:streak
+      ~transcript_quarantine_consecutive_retries:0
+      (failure disposition)
+  in
+  let attempt_failed =
+    Masc.Keeper_unified_turn.Requeue_after_context_compaction
+      (Masc.Keeper_unified_turn.Compaction_attempt_failed
+         { reason = "test-induced recovery failure" })
+  in
+  let committed =
+    Masc.Keeper_unified_turn.Requeue_after_context_compaction
+      Masc.Keeper_unified_turn.Compaction_committed
+  in
+  let terminal_no_compaction =
+    Masc.Keeper_unified_turn.source_lease_disposition_after_no_compaction
+      State.Checkpoint_not_reduced
+  in
+  let expect_compaction_requeue label = function
+    | Masc.Keeper_registry_event_queue.Requeue
+        Masc.Keeper_registry_event_queue.Context_compaction_retry ->
+      ()
+    | _ -> Alcotest.fail label
+  in
+  let expect_exhausted ~attempts label = function
+    | Masc.Keeper_registry_event_queue.Escalate
+        { reason =
+            Masc.Keeper_registry_event_queue.Compaction_retry_exhausted
+              { attempts = reported; _ }
+        ; successor = None
+        } ->
+      Alcotest.(check int) (label ^ ": attempt count") attempts reported
+    | _ -> Alcotest.fail label
+  in
+  expect_compaction_requeue
+    "first in-lane recovery failure did not requeue"
+    (settlement ~streak:0 attempt_failed);
+  expect_compaction_requeue
+    "second in-lane recovery failure did not requeue"
+    (settlement ~streak:1 attempt_failed);
+  expect_exhausted
+    ~attempts:3
+    "third in-lane recovery failure requeued instead of escalating"
+    (settlement ~streak:2 attempt_failed);
+  (* Below the ceiling a committed compaction requeues: the retry reloads a
+     durably smaller checkpoint. *)
+  expect_compaction_requeue
+    "committed in-lane compaction below the ceiling did not requeue"
+    (settlement ~streak:0 committed);
+  expect_compaction_requeue
+    "second committed episode below the ceiling did not requeue"
+    (settlement ~streak:1 committed);
+  (* #25538: at the ceiling a commit proves the floor — the savings keep
+     committing yet the context re-overflows every episode, so the settlement
+     escalates with the commit-distinguishing reason instead of looping. *)
+  (match settlement ~streak:2 committed with
+   | Masc.Keeper_registry_event_queue.Escalate
+       { reason =
+           Masc.Keeper_registry_event_queue.Compaction_floor_exceeded
+             { attempts; _ }
+       ; successor = None
+       } ->
+     Alcotest.(check int) "floor escalation reports the attempt count" 3 attempts
+   | _ ->
+     Alcotest.fail
+       "committed episode at the ceiling requeued instead of escalating as \
+        a floor");
+  (* A terminal no-compaction below the ceiling keeps today's route (the
+     judgment successor); at the ceiling the settlement replaces the route,
+     because a context that cannot shrink re-overflows deterministically. *)
+  (match settlement ~streak:0 terminal_no_compaction with
+   | Masc.Keeper_registry_event_queue.Escalate
+       { reason = Masc.Keeper_registry_event_queue.Failure_judgment_requested
+       ; successor = Some { Queue.payload = Queue.Failure_judgment _; _ }
+       } ->
+     ()
+   | _ ->
+     Alcotest.fail
+       "terminal no-compaction below the ceiling lost its typed failure route");
+  expect_exhausted
+    ~attempts:3
+    "terminal no-compaction at the ceiling followed the route instead of \
+     escalating"
+    (settlement ~streak:2 terminal_no_compaction);
+  let terminal_settlement route reason =
+    Masc.Keeper_heartbeat_loop.settlement_of_failure
+      ~settled_at:5.0
+      ~compaction_consecutive_failures:0
+      ~transcript_quarantine_consecutive_retries:0
+      { (turn_failure route) with
+        source_lease_disposition =
+          Masc.Keeper_unified_turn.source_lease_disposition_after_no_compaction
+            reason
+      }
+  in
+  let dispatch_terminal =
+    terminal_settlement
+      (Keeper_runtime_failure_route.Retry_after_observed
+         { retry_class = Keeper_runtime_failure_route.Rate_limited
+         ; retry_after = None
+         })
+      State.Execution_may_have_dispatched
+  in
+  (match dispatch_terminal with
+   | Masc.Keeper_registry_event_queue.Escalate
+       { reason =
+           Masc.Keeper_registry_event_queue.Compaction_execution_may_have_dispatched
+       ; successor = None
+       } ->
+     ()
+   | _ ->
+     Alcotest.fail
+       "post-dispatch compaction terminal entered the ordinary retry route");
+  let domain_terminal =
+    terminal_settlement
+      (Keeper_runtime_failure_route.Rotate_now
+         { rotate = Keeper_runtime_failure_route.Auth_failed })
+      State.Domain_invalid_output
+  in
+  (match domain_terminal with
+   | Masc.Keeper_registry_event_queue.Escalate
+       { reason = Masc.Keeper_registry_event_queue.Compaction_domain_invalid_output
+       ; successor = None
+       } ->
+     ()
+   | _ ->
+     Alcotest.fail
+       "domain-invalid compaction terminal entered the ordinary rotation route");
+  let check_durable_terminal label expected_reason settlement =
+    let state = State.with_pending (queue [ stimulus label 6.0 ]) State.empty in
+    let state, lease = claim_head state in
+    let lease = require_some (label ^ " lease") lease in
+    let state, _ =
+      State.settle ~settled_at:7.0 ~lease ~settlement state
+      |> require_ok (label ^ " settlement")
+    in
+    let json = State.to_yojson state in
+    ignore (State.of_yojson json |> require_ok (label ^ " codec round-trip") : State.t);
+    let open Yojson.Safe.Util in
+    let reason =
+      json
+      |> member "transition_outbox"
+      |> to_list
+      |> List.hd
+      |> member "receipt"
+      |> member "settlement"
+      |> member "reason"
+      |> to_string
+    in
+    Alcotest.(check string) (label ^ " durable reason") expected_reason reason
+  in
+  check_durable_terminal
+    "post-dispatch-terminal"
+    "compaction_execution_may_have_dispatched"
+    dispatch_terminal;
+  check_durable_terminal
+    "domain-invalid-terminal"
+    "compaction_domain_invalid_output"
+    domain_terminal
+;;
+
+(* RFC-0351 S0 / #25461: the settlement decides from the streak; this mapping
+   is what advances it. In-lane dispositions must join the manual lane's
+   counter, and outcomes with no compaction involvement must leave it
+   untouched. *)
+let test_compaction_outcome_mapping_covers_in_lane_dispositions () =
+  let meta = cycle_meta () in
+  let judgment_route =
+    Keeper_runtime_failure_route.Escalate_judgment
+      { judgment = Keeper_runtime_failure_route.Context_overflow
+      ; provenance = Keeper_runtime_failure_route.Oas_api_error
+      ; detail = "typed provider context overflow"
+      }
+  in
+  let failed disposition =
+    Some
+      (Masc.Keeper_heartbeat_loop_cycle.Failed
+         { meta
+         ; failure =
+             { (turn_failure judgment_route) with
+               source_lease_disposition = disposition
+             }
+         })
+  in
+  let check label expected outcome =
+    let actual =
+      match Masc.Keeper_heartbeat_loop.compaction_outcome_of_cycle_outcome outcome with
+      | Some `Committed -> "committed"
+      | Some `Overflow_episode_committed -> "overflow_episode_committed"
+      | Some `Failed -> "failed"
+      | Some `Recovered -> "recovered"
+      | None -> "none"
+    in
+    Alcotest.(check string) label expected actual
+  in
+  (* #25538: an in-lane commit is one provider-overflow episode — it advances
+     the streak instead of resetting it, so an incompressible floor whose
+     commits keep "succeeding" still reaches the ceiling. The old
+     reset-on-commit expectation was the blind spot (measured: a committed
+     920B/0.07% plan reset the streak forever). *)
+  check
+    "in-lane committed compaction counts the overflow episode"
+    "overflow_episode_committed"
+    (failed
+       (Masc.Keeper_unified_turn.Requeue_after_context_compaction
+          Masc.Keeper_unified_turn.Compaction_committed));
+  check
+    "in-lane failed recovery advances the streak"
+    "failed"
+    (failed
+       (Masc.Keeper_unified_turn.Requeue_after_context_compaction
+          (Masc.Keeper_unified_turn.Compaction_attempt_failed
+             { reason = "test-induced recovery failure" })));
+  check
+    "in-lane terminal no-compaction advances the streak"
+    "failed"
+    (failed
+       (Masc.Keeper_unified_turn.source_lease_disposition_after_no_compaction
+          State.Checkpoint_not_reduced));
+  check
+    "post-dispatch terminal records failure without retry"
+    "failed"
+    (failed
+       (Masc.Keeper_unified_turn.source_lease_disposition_after_no_compaction
+          State.Execution_may_have_dispatched));
+  check
+    "domain-invalid terminal records failure without retry"
+    "failed"
+    (failed
+       (Masc.Keeper_unified_turn.source_lease_disposition_after_no_compaction
+          State.Domain_invalid_output));
+  check
+    "a generic turn failure leaves the streak untouched"
+    "none"
+    (failed Masc.Keeper_unified_turn.Follow_failure_route);
+  check
+    "an in-turn handled failure leaves the streak untouched"
+    "none"
+    (failed Masc.Keeper_unified_turn.Acknowledge_after_in_turn_handling);
+  check
+    "a completed overflow-free turn resets the streak"
+    "recovered"
+    (Some (Masc.Keeper_heartbeat_loop_cycle.Completed meta));
+  check "no outcome leaves the streak untouched" "none" None
+;;
+
+(* #25296: a transcript-quarantine disposition requeues while the streak is
+   under the ceiling and settles terminally at it. The poisoned checkpoint is
+   preserved unmodified by design, so every re-lease rejects the same
+   transcript again — without the ceiling the same stimulus re-enters the full
+   turn pipeline on every heartbeat cycle, because [Requeue] is not an ack
+   (2026-07-21 lesson: every exempt retry class needs its own accounting). *)
+let test_transcript_quarantine_retry_escalates_after_threshold () =
+  let judgment_route =
+    Keeper_runtime_failure_route.Escalate_judgment
+      { judgment = Keeper_runtime_failure_route.Contract_violation
+      ; provenance = Keeper_runtime_failure_route.Oas_agent_error
+      ; detail = "typed transcript quarantine"
+      }
+  in
+  let quarantined_failure =
+    { (turn_failure judgment_route) with
+      source_lease_disposition =
+        Masc.Keeper_unified_turn.Requeue_after_transcript_quarantine
+    }
+  in
+  let settlement ~streak =
+    Masc.Keeper_heartbeat_loop.settlement_of_failure
+      ~settled_at:5.0
+      ~compaction_consecutive_failures:0
+      ~transcript_quarantine_consecutive_retries:streak
+      quarantined_failure
+  in
+  let expect_requeue ~streak label =
+    match settlement ~streak with
+    | Masc.Keeper_registry_event_queue.Requeue
+        Masc.Keeper_registry_event_queue.Transcript_quarantine_retry ->
+      ()
+    | _ -> Alcotest.fail label
+  in
+  expect_requeue ~streak:0 "first transcript quarantine did not requeue";
+  expect_requeue ~streak:1 "second transcript quarantine did not requeue";
+  match settlement ~streak:2 with
+  | Masc.Keeper_registry_event_queue.Escalate
+      { reason =
+          Masc.Keeper_registry_event_queue.Transcript_quarantine_retry_exhausted
+            { attempts; _ }
+      ; successor = None
+      } ->
+    Alcotest.(check int) "escalation reports the attempt count" 3 attempts
+  | _ ->
+    Alcotest.fail
+      "third consecutive transcript quarantine requeued instead of escalating"
+;;
+
+(* #25296: the settlement decides from the streak; this mapping is what
+   advances and resets it. A quarantine disposition must count, a completed
+   turn must reset, and outcomes with no quarantine involvement must leave the
+   streak untouched. *)
+let test_transcript_quarantine_outcome_mapping () =
+  let meta = cycle_meta () in
+  let judgment_route =
+    Keeper_runtime_failure_route.Escalate_judgment
+      { judgment = Keeper_runtime_failure_route.Contract_violation
+      ; provenance = Keeper_runtime_failure_route.Oas_agent_error
+      ; detail = "typed transcript quarantine"
+      }
+  in
+  let failed disposition =
+    Some
+      (Masc.Keeper_heartbeat_loop_cycle.Failed
+         { meta
+         ; failure =
+             { (turn_failure judgment_route) with
+               source_lease_disposition = disposition
+             }
+         })
+  in
+  let check label expected outcome =
+    let actual =
+      match
+        Masc.Keeper_heartbeat_loop.transcript_quarantine_outcome_of_cycle_outcome
+          outcome
+      with
+      | Some `Retried -> "retried"
+      | Some `Recovered -> "recovered"
+      | None -> "none"
+    in
+    Alcotest.(check string) label expected actual
+  in
+  check
+    "a quarantine disposition advances the streak"
+    "retried"
+    (failed Masc.Keeper_unified_turn.Requeue_after_transcript_quarantine);
+  check
+    "a generic turn failure leaves the streak untouched"
+    "none"
+    (failed Masc.Keeper_unified_turn.Follow_failure_route);
+  check
+    "a completed turn resets the streak"
+    "recovered"
+    (Some (Masc.Keeper_heartbeat_loop_cycle.Completed meta));
+  check "no outcome leaves the streak untouched" "none" None
+;;
+
 let test_cancelled_and_skipped_cycles_requeue () =
   let lease = lease_for (stimulus "phase-gated" 1.0) in
   let meta = cycle_meta () in
@@ -1026,6 +1632,8 @@ let test_cancelled_and_skipped_cycles_requeue () =
       ~base_path:"/tmp/non-approval-cycle"
       ~settled_at:2.0
       ~stop_requested:false
+      ~compaction_consecutive_failures:0
+      ~transcript_quarantine_consecutive_retries:0
       ~lease
       (Some outcome)
   in
@@ -1108,6 +1716,127 @@ let with_temp_dir prefix f =
   let path = Filename.temp_dir prefix "" in
   Fun.protect ~finally:(fun () -> remove_tree path) (fun () -> f path)
 ;;
+
+(* RFC-0351 S0 / #25539: the approval wake's job is delivery, not
+   consumption. A completed turn settles as Ack even while the grant is
+   durably unconsumed (8,349 requeue receipts measured across 8 keepers;
+   one idealist grant spun 657 times) — and the grant-store-unavailable
+   path, the second unbounded loop, also follows the completed turn. A
+   turn that did not complete keeps its ordinary typed settlement, so
+   delivery is still retried. *)
+let test_approved_wake_settles_on_delivery_not_consumption () =
+  with_temp_dir "approval-delivery-ack" @@ fun base_path ->
+  ignore (Masc.Keeper_approval_queue.install_persistence ~base_path);
+  let approval_id =
+    match
+      Masc.Keeper_approval_queue.submit_pending
+        ~keeper_name:"queue-outcome"
+        ~tool_name:"external-effect"
+        ~input:(`Assoc [ "op", `String "delivery-ack-test" ])
+        ~base_path
+        ()
+    with
+    | Ok id -> id
+    | Error error ->
+      Alcotest.failf
+        "approval fixture submit: %s"
+        (Masc.Keeper_approval_queue.storage_error_to_string error)
+  in
+  (match
+     Masc.Keeper_approval_queue.resolve
+       ~base_path
+       ~id:approval_id
+       ~decision:Masc.Keeper_approval_queue.Decision.Approve
+   with
+   | Ok () -> ()
+   | Error error ->
+     Alcotest.failf
+       "approval fixture resolve: %s"
+       (Masc.Keeper_approval_queue.resolve_error_to_string error));
+  (match
+     Masc.Keeper_approval_queue.approved_resolution_state
+       ~base_path
+       ~id:approval_id
+   with
+   | Ok Masc.Keeper_approval_queue.Resolution_unconsumed -> ()
+   | Ok Masc.Keeper_approval_queue.Resolution_consumed ->
+     Alcotest.fail "fixture grant is unexpectedly consumed"
+   | Error error ->
+     Alcotest.failf
+       "fixture grant state: %s"
+       (Masc.Keeper_approval_queue.grant_error_to_string error));
+  let resolution : Queue.hitl_resolution =
+    { approval_id
+    ; decision = Queue.Hitl_approved
+    ; channel = Keeper_continuation_channel.unrouted "delivery ack test"
+    }
+  in
+  let lease =
+    lease_for
+      (stimulus
+         ~payload:(Queue.Hitl_resolved resolution)
+         (Queue.hitl_resolution_post_id resolution)
+         1.0)
+  in
+  let settlement ~base_path outcome =
+    Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
+      ~base_path
+      ~settled_at:4.0
+      ~stop_requested:false
+      ~compaction_consecutive_failures:0
+      ~transcript_quarantine_consecutive_retries:0
+      ~lease
+      outcome
+  in
+  let meta = cycle_meta () in
+  (match
+     settlement ~base_path (Some (Masc.Keeper_heartbeat_loop_cycle.Completed meta))
+   with
+   | Masc.Keeper_registry_event_queue.Ack -> ()
+   | _ ->
+     Alcotest.fail
+       "completed turn with an unconsumed grant did not settle as Ack");
+  (* Grant survives the Ack: the operator's authorization is not consumed
+     by settlement and remains durably spendable. *)
+  (match
+     Masc.Keeper_approval_queue.approved_resolution_state
+       ~base_path
+       ~id:approval_id
+   with
+   | Ok Masc.Keeper_approval_queue.Resolution_unconsumed -> ()
+   | Ok Masc.Keeper_approval_queue.Resolution_consumed ->
+     Alcotest.fail "settlement consumed the grant"
+   | Error error ->
+     Alcotest.failf
+       "grant state after ack: %s"
+       (Masc.Keeper_approval_queue.grant_error_to_string error));
+  (* The second unbounded loop: a completed turn whose grant store cannot
+     be read must also follow the completed turn instead of requeuing. *)
+  (match
+     settlement
+       ~base_path:(Filename.concat base_path "missing-grant-store")
+       (Some (Masc.Keeper_heartbeat_loop_cycle.Completed meta))
+   with
+   | Masc.Keeper_registry_event_queue.Ack -> ()
+   | _ ->
+     Alcotest.fail
+       "grant-store-unavailable completed turn did not settle as Ack");
+  (* An undelivered wake keeps re-entering: a busy cycle still requeues. *)
+  match
+    settlement
+      ~base_path
+      (Some
+         (Masc.Keeper_heartbeat_loop_cycle.Busy
+            { meta
+            ; block = Masc.Keeper_turn_admission.Turn_busy None
+            }))
+  with
+  | Masc.Keeper_registry_event_queue.Requeue
+      Masc.Keeper_registry_event_queue.Cycle_busy ->
+    ()
+  | _ -> Alcotest.fail "busy cycle released the undelivered approval wake"
+;;
+
 
 let keeper_dir ~base_path ~keeper_name =
   Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name
@@ -1197,6 +1926,259 @@ let test_settlement_wal_commit_replay_and_owner_fence () =
     match Persistence.load_state_result ~base_path ~keeper_name:peer with
     | Error _ -> ()
     | Ok _ -> Alcotest.fail "another Keeper owner's WAL receipt was replayed")
+;;
+
+let test_accepted_cancellation_persistence_is_atomic_and_idempotent () =
+  with_temp_dir "keeper-event-queue-accepted-cancellation" (fun base_path ->
+    let keeper_name = "cancel_owner" in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending (stimulus "cancel-source" 1.0))
+    |> require_ok "seed cancellation owner";
+    let lease =
+      Persistence.claim_when_result
+        ~base_path
+        ~keeper_name
+        ~claimed_at:2.0
+        ~ready:(fun _ -> true)
+        ()
+      |> require_ok "claim cancellation source"
+      |> require_some "cancellation lease"
+    in
+    let source_revision =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load cancellation revision"
+      |> State.revision
+    in
+    let cancellation : Persistence.accepted_cancellation =
+      { source =
+          (match Persistence.lease_stimuli lease with
+           | [ source ] -> source
+           | _ -> Alcotest.fail "cancellation lease did not retain one source")
+      ; source_revision
+      ; owner_generation = 7
+      ; operator_operation_id = "cancel-operation-1"
+      ; reason = "operator rejected paused work"
+      }
+    in
+    let cancel () =
+      Persistence.cancel_accepted_result
+        ~base_path
+        ~keeper_name
+        ~current_owner_generation:7
+        ~settled_at:3.0
+        ~lease
+        ~cancellation
+        ()
+      |> require_ok "commit accepted cancellation"
+    in
+    let receipt =
+      match cancel () with
+      | Persistence.Settled receipt -> receipt
+      | Persistence.Already_settled _ ->
+        Alcotest.fail "first accepted cancellation was already settled"
+      | Persistence.Committed_followup_failed { receipt; _ } -> receipt
+    in
+    (match cancel () with
+     | Persistence.Already_settled replayed ->
+       Alcotest.(check bool)
+         "same operation replays the canonical receipt"
+         true
+         (State.transition_receipt_equal receipt replayed)
+     | Persistence.Settled _ | Persistence.Committed_followup_failed _ ->
+       Alcotest.fail "accepted cancellation retry committed twice");
+    let settled =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load cancelled owner"
+    in
+    Alcotest.(check int) "cancelled lease removed" 0 (List.length (State.leases settled));
+    Alcotest.(check int)
+      "cancelled source retained for projection"
+      1
+      (List.length (State.transition_outbox settled));
+    let stale_keeper = "stale_cancel_owner" in
+    Persistence.update_result ~base_path ~keeper_name:stale_keeper (fun pending ->
+      Queue.enqueue pending (stimulus "stale-cancel-source" 4.0))
+    |> require_ok "seed stale cancellation owner";
+    let stale_lease =
+      Persistence.claim_when_result
+        ~base_path
+        ~keeper_name:stale_keeper
+        ~claimed_at:5.0
+        ~ready:(fun _ -> true)
+        ()
+      |> require_ok "claim stale cancellation source"
+      |> require_some "stale cancellation lease"
+    in
+    let stale_revision =
+      Persistence.load_state_result ~base_path ~keeper_name:stale_keeper
+      |> require_ok "load stale cancellation revision"
+      |> State.revision
+    in
+    let stale_cancellation : Persistence.accepted_cancellation =
+      { cancellation with source_revision = Int64.pred stale_revision }
+    in
+    (match
+       Persistence.cancel_accepted_result
+         ~base_path
+         ~keeper_name:stale_keeper
+         ~current_owner_generation:7
+         ~settled_at:6.0
+         ~lease:stale_lease
+         ~cancellation:stale_cancellation
+         ()
+     with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "stale queue revision committed cancellation");
+    let unchanged =
+      Persistence.load_state_result ~base_path ~keeper_name:stale_keeper
+      |> require_ok "load rejected stale cancellation"
+    in
+    Alcotest.(check int)
+      "stale rejection retains active lease"
+      1
+      (List.length (State.leases unchanged)))
+;;
+
+let test_pending_cancellation_wal_replays_before_removal () =
+  with_temp_dir "keeper-event-queue-pending-cancellation-wal" (fun base_path ->
+    let keeper_name = "pending_cancel_owner" in
+    let target = stimulus "pending-cancel-target" 1.0 in
+    let peer = stimulus "pending-cancel-peer" 2.0 in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      List.fold_left Queue.enqueue pending [ target; peer ])
+    |> require_ok "seed pending cancellation owner";
+    let source_revision =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load pending cancellation revision"
+      |> State.revision
+    in
+    let cancellation : Persistence.accepted_cancellation =
+      { source = target
+      ; source_revision
+      ; owner_generation = 17
+      ; operator_operation_id = "pending-cancel-operation"
+      ; reason = "operator cancelled exact pending work"
+      }
+    in
+    let owner_dir = keeper_dir ~base_path ~keeper_name in
+    let wal_path = Filename.concat owner_dir "event-queue-settlements.jsonl" in
+    Fs_compat.save_file_atomic wal_path "" |> require_ok "create pending cancellation WAL";
+    Unix.chmod owner_dir 0o500;
+    let committed =
+      Fun.protect
+        ~finally:(fun () -> Unix.chmod owner_dir 0o700)
+        (fun () ->
+           Persistence.cancel_pending_accepted_result
+             ~base_path
+             ~keeper_name
+             ~current_owner_generation:17
+             ~settled_at:3.0
+             ~cancellation
+             ())
+      |> require_ok "commit pending cancellation with blocked checkpoint"
+    in
+    (match committed with
+     | Persistence.Committed_followup_failed { stage = `Checkpoint; _ } -> ()
+     | Persistence.Settled _ | Persistence.Already_settled _
+     | Persistence.Committed_followup_failed _ ->
+       Alcotest.fail "blocked checkpoint did not preserve committed WAL outcome");
+    let wal_json =
+      Fs_compat.load_file wal_path
+      |> String.trim
+      |> Yojson.Safe.from_string
+    in
+    Alcotest.(check string)
+      "source-bearing WAL schema"
+      "masc.keeper_event_queue.settlement.v2"
+      Yojson.Safe.Util.(wal_json |> member "schema" |> to_string);
+    let replayed =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "replay pending cancellation WAL"
+    in
+    Alcotest.(check (list string))
+      "WAL replay removes only the exact pending source"
+      [ "pending-cancel-peer" ]
+      (post_ids (State.pending replayed));
+    Alcotest.(check int) "WAL replay leaves no synthetic lease" 0 (List.length (State.leases replayed));
+    (match State.transition_outbox replayed with
+     | [ entry ] ->
+       Alcotest.(check bool) "WAL replay retains exact source" true (entry.stimuli = [ target ])
+     | _ -> Alcotest.fail "WAL replay did not restore one outbox entry");
+    Alcotest.(check string)
+      "checkpointed source-bearing WAL is compacted"
+      ""
+      (Fs_compat.load_file wal_path);
+    match
+      Persistence.cancel_pending_accepted_result
+        ~base_path
+        ~keeper_name
+        ~current_owner_generation:999
+        ~settled_at:4.0
+        ~cancellation
+        ()
+    with
+    | Ok (Persistence.Already_settled _) -> ()
+    | Ok _ -> Alcotest.fail "pending cancellation retry committed twice"
+    | Error detail -> Alcotest.failf "committed pending cancellation did not replay: %s" detail)
+;;
+
+let test_legacy_settlement_wal_v1_remains_replayable () =
+  with_temp_dir "keeper-event-queue-legacy-settlement-wal" (fun base_path ->
+    let keeper_name = "legacy_wal_owner" in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending (stimulus "legacy-wal-source" 1.0))
+    |> require_ok "seed legacy WAL owner";
+    let lease =
+      Persistence.claim_when_result
+        ~base_path
+        ~keeper_name
+        ~claimed_at:2.0
+        ~ready:(fun _ -> true)
+        ()
+      |> require_ok "claim legacy WAL source"
+      |> require_some "legacy WAL lease"
+    in
+    let claimed =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load legacy WAL pre-settlement state"
+    in
+    let receipt =
+      match
+        State.settle ~settled_at:3.0 ~lease ~settlement:State.Ack claimed
+        |> require_ok "construct legacy WAL receipt"
+      with
+      | _, State.Settled receipt -> receipt
+      | _, State.Already_settled _ -> Alcotest.fail "legacy WAL fixture replayed early"
+    in
+    let wal_path =
+      Filename.concat
+        (keeper_dir ~base_path ~keeper_name)
+        "event-queue-settlements.jsonl"
+    in
+    let row =
+      `Assoc
+        [ "schema", `String "masc.keeper_event_queue.settlement.v1"
+        ; "base_path", `String (Unix.realpath base_path)
+        ; "keeper_name", `String keeper_name
+        ; "receipt", State.transition_receipt_to_yojson receipt
+        ]
+      |> Yojson.Safe.to_string
+      |> fun row -> row ^ "\n"
+    in
+    Fs_compat.save_file_atomic wal_path row |> require_ok "write legacy WAL row";
+    let replayed =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "replay legacy WAL row"
+    in
+    Alcotest.(check int) "legacy WAL settles active lease" 0 (List.length (State.leases replayed));
+    Alcotest.(check int)
+      "legacy WAL recreates transition outbox"
+      1
+      (List.length (State.transition_outbox replayed));
+    Alcotest.(check string)
+      "legacy WAL is compacted after checkpoint"
+      ""
+      (Fs_compat.load_file wal_path))
 ;;
 
 let test_context_compaction_retry_is_durable_and_lane_local () =
@@ -1360,6 +2342,47 @@ let test_unsupported_snapshots_fail_closed () =
     (match Persistence.load_state_result ~base_path ~keeper_name with
      | Error _ -> ()
      | Ok _ -> Alcotest.fail "old primary schema was migrated"))
+;;
+
+let test_v3_snapshot_upgrades_with_empty_transfer_projection_ledger () =
+  with_temp_dir "keeper-event-queue-v3-upgrade" (fun base_path ->
+    let keeper_name = "v3_upgrade_keeper" in
+    let path = Filename.concat (keeper_dir ~base_path ~keeper_name) "event-queue.json" in
+    let v3 =
+      match State.to_yojson State.empty with
+      | `Assoc fields ->
+        `Assoc
+          (("schema", `String "keeper.event_queue.state.v3")
+           :: List.filter
+                (fun (name, _) ->
+                   not
+                     (String.equal name "schema"
+                      || String.equal name "accepted_transfer_projections"))
+                fields)
+      | _ -> Alcotest.fail "current event queue state codec is not an object"
+    in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    Fs_compat.save_file_atomic path (Yojson.Safe.to_string v3)
+    |> require_ok "write strict v3 predecessor";
+    let upgraded =
+      Persistence.load_state_result ~base_path ~keeper_name
+      |> require_ok "load strict v3 predecessor"
+    in
+    Alcotest.(check int)
+      "v3 starts with no target transfer accounting"
+      0
+      (List.length (State.accepted_transfer_projections upgraded));
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending (stimulus "upgrade" 1.0))
+    |> require_ok "mutate upgraded queue";
+    let persisted =
+      Safe_ops.read_json_file_safe path |> require_ok "read upgraded queue"
+    in
+    let open Yojson.Safe.Util in
+    Alcotest.(check string)
+      "next durable write uses v4"
+      "keeper.event_queue.state.v4"
+      (persisted |> member "schema" |> to_string))
 ;;
 
 let test_transition_outbox_projects_with_stable_identity () =
@@ -1575,6 +2598,10 @@ let () =
             `Quick
             test_accepted_cancellation_rejects_stale_fences
         ; Alcotest.test_case
+            "pending accepted cancellation is exact and source-bound"
+            `Quick
+            test_pending_accepted_cancellation_is_exact_and_source_bound
+        ; Alcotest.test_case
             "claim earliest ready without reordering"
             `Quick
             test_claim_leases_earliest_ready_without_reordering_skipped_work
@@ -1593,13 +2620,37 @@ let () =
             `Quick
             test_manual_no_compaction_is_terminal_but_overflow_escalates
         ; Alcotest.test_case
-            "stochastic reasons have no terminal codec"
+            "exact-output terminal reasons round-trip"
             `Quick
-            test_stochastic_reasons_have_no_terminal_codec
+            test_exact_output_terminal_reasons_round_trip
         ; Alcotest.test_case
             "cancelled and skipped cycles requeue"
             `Quick
             test_cancelled_and_skipped_cycles_requeue
+        ; Alcotest.test_case
+            "compaction retry escalates after threshold"
+            `Quick
+            test_compaction_retry_escalates_after_threshold
+        ; Alcotest.test_case
+            "in-lane compaction streak bounds retries"
+            `Quick
+            test_in_lane_compaction_streak_bounds_retries
+        ; Alcotest.test_case
+            "compaction outcome mapping covers in-lane dispositions"
+            `Quick
+            test_compaction_outcome_mapping_covers_in_lane_dispositions
+        ; Alcotest.test_case
+            "transcript quarantine retry escalates after threshold"
+            `Quick
+            test_transcript_quarantine_retry_escalates_after_threshold
+        ; Alcotest.test_case
+            "transcript quarantine outcome mapping"
+            `Quick
+            test_transcript_quarantine_outcome_mapping
+        ; Alcotest.test_case
+            "approved wake settles on delivery not consumption"
+            `Quick
+            test_approved_wake_settles_on_delivery_not_consumption
         ; Alcotest.test_case
             "unconsumed approval yields FIFO"
             `Quick
@@ -1615,9 +2666,25 @@ let () =
             `Quick
             test_settlement_wal_commit_replay_and_owner_fence
         ; Alcotest.test_case
+            "accepted cancellation persistence is atomic and idempotent"
+            `Quick
+            test_accepted_cancellation_persistence_is_atomic_and_idempotent
+        ; Alcotest.test_case
+            "pending cancellation WAL replays before removal"
+            `Quick
+            test_pending_cancellation_wal_replays_before_removal
+        ; Alcotest.test_case
+            "legacy settlement WAL v1 remains replayable"
+            `Quick
+            test_legacy_settlement_wal_v1_remains_replayable
+        ; Alcotest.test_case
             "unsupported snapshots fail closed"
             `Quick
             test_unsupported_snapshots_fail_closed
+        ; Alcotest.test_case
+            "v3 upgrades with empty transfer projection ledger"
+            `Quick
+            test_v3_snapshot_upgrades_with_empty_transfer_projection_ledger
         ; Alcotest.test_case
             "transition outbox projection"
             `Quick

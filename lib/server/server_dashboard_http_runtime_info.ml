@@ -1146,10 +1146,6 @@ let dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes =
     ]
 ;;
 
-let dashboard_runtime_probe_payload_json_for_tests ?default_id runtimes =
-  dashboard_runtime_probe_payload_json_of_runtimes ?default_id runtimes
-;;
-
 let run_dashboard_runtime_probe () =
   match Atomic.get dashboard_runtime_probe_runner_hook with
   | Some hook -> hook ()
@@ -1452,6 +1448,7 @@ let preserve_thinking_control_format_wire
   = function
   | No_preserve_thinking_control -> "none"
   | Thinking_object_keep_all -> "thinking-object-keep-all"
+  | Thinking_object_clear_thinking -> "thinking-object-clear-thinking"
   | Chat_template_kwargs_preserve_thinking -> "chat-template-kwargs-preserve-thinking"
   | Top_level_preserve_thinking -> "top-level-preserve-thinking"
   | Always_preserved_thinking -> "always-preserved-thinking"
@@ -1543,8 +1540,6 @@ let runtime_request_config_json (rt : Runtime.t) =
     ; ( "resolved_reasoning_effort"
       , Json_util.string_opt_to_json
           (Option.map Llm_provider.Reasoning_effort.to_string cfg.reasoning_effort) )
-    ; "glm_clear_thinking", `Bool (Llm_provider.Provider_config.glm_clear_thinking cfg)
-    ; "glm_replay_reasoning", `Bool (Llm_provider.Provider_config.glm_should_replay_reasoning cfg)
     ; "tool_stream", `Bool cfg.tool_stream
     ; "tool_choice", tool_choice_json cfg.tool_choice
     ; "disable_parallel_tool_use", `Bool cfg.disable_parallel_tool_use

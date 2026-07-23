@@ -328,9 +328,9 @@ let base_observation : WO.world_observation =
     exception carries no payload (RFC-0002).
     Verifies: state = Crashed, failure_reason stored, done_p resolved. *)
 let test_crash_heartbeat_failure () =
-  R.clear ();
+  R.For_testing.clear ();
   let meta = make_meta "hb-crash" in
-  let reg = R.register ~base_path:bp "hb-crash" meta in
+  let reg = R.For_testing.register ~base_path:bp "hb-crash" meta in
   (* Simulate what launch_supervised_fiber does on Keeper_fiber_crash *)
   let reason = R.Heartbeat_consecutive_failures 5 in
   let reason_str = R.failure_reason_to_string reason in
@@ -360,9 +360,9 @@ let test_crash_heartbeat_failure () =
 
 (** Simulate the generic exception catch branch (lines 67-77). *)
 let test_crash_generic_exception () =
-  R.clear ();
+  R.For_testing.clear ();
   let meta = make_meta "exn-crash" in
-  let reg = R.register ~base_path:bp "exn-crash" meta in
+  let reg = R.For_testing.register ~base_path:bp "exn-crash" meta in
   let exn_str = "Sys_error(disk full)" in
   let fr = R.Exception exn_str in
   let reason_str = R.failure_reason_to_string fr in
@@ -383,9 +383,9 @@ let test_crash_generic_exception () =
 
 (** Simulate the fiber_unresolved fallback (finally block, lines 78-94). *)
 let test_crash_fiber_unresolved () =
-  R.clear ();
+  R.For_testing.clear ();
   let meta = make_meta "unresolved" in
-  let reg = R.register ~base_path:bp "unresolved" meta in
+  let reg = R.For_testing.register ~base_path:bp "unresolved" meta in
   (* Simulate: fiber exits without resolving done_r → finally fires.
      Issue #18901: Unexpected cause (not shutdown) — represents the
      genuine missed-resolution bug path the supervisor must restart. *)
@@ -413,9 +413,9 @@ let test_crash_fiber_unresolved () =
     Verifies: Dead is terminal, is_registered=true, Dead→Running blocked,
     only unregister can remove a Dead entry. *)
 let test_dead_tombstone_full_lifecycle () =
-  R.clear ();
+  R.For_testing.clear ();
   let meta = make_meta "mortal" in
-  let reg = R.register ~base_path:bp "mortal" meta in
+  let reg = R.For_testing.register ~base_path:bp "mortal" meta in
   check string "initially running" "running"
     (KSM.phase_to_string (Option.get (R.get ~base_path:bp "mortal")).phase);
   (* Crash *)
@@ -442,7 +442,7 @@ let test_dead_tombstone_full_lifecycle () =
        (KSM.phase_to_string e.phase)
    | None -> fail "expected mortal");
   (* Only unregister removes Dead entry *)
-  R.unregister ~base_path:bp "mortal";
+  R.For_testing.unregister ~base_path:bp "mortal";
   check bool "gone after unregister" false
     (R.is_registered ~base_path:bp "mortal")
 
@@ -455,9 +455,9 @@ let test_dead_tombstone_full_lifecycle () =
     Stopped with a resolved terminal and joined lane = reconcile-eligible.
     Stopped with an unjoined lane = sweep will handle. *)
 let test_reconcile_predicate_sweep_owned () =
-  R.clear ();
+  R.For_testing.clear ();
   (* Running = sweep-owned *)
-  let _e = R.register ~base_path:bp "r1" (make_meta "r1") in
+  let _e = R.For_testing.register ~base_path:bp "r1" (make_meta "r1") in
   (match R.get ~base_path:bp "r1" with
    | Some e ->
      check string "running" "running" (KSM.phase_to_string e.phase);
@@ -480,8 +480,8 @@ let test_reconcile_predicate_sweep_owned () =
    | None -> fail "expected r1")
 
 let test_reconcile_predicate_stopped_resolved () =
-  R.clear ();
-  let reg = R.register ~base_path:bp "s1" (make_meta "s1") in
+  R.For_testing.clear ();
+  let reg = R.For_testing.register ~base_path:bp "s1" (make_meta "s1") in
   ignore (R.dispatch_event ~base_path:bp "s1" KSM.Stop_requested);
   ignore (R.dispatch_event ~base_path:bp "s1" KSM.Drain_complete);
   resolve_done_for_test reg `Stopped;
@@ -503,8 +503,8 @@ let test_reconcile_predicate_stopped_resolved () =
    | None -> fail "expected s1")
 
 let test_reconcile_predicate_stopped_unresolved () =
-  R.clear ();
-  let _reg = R.register ~base_path:bp "s2" (make_meta "s2") in
+  R.For_testing.clear ();
+  let _reg = R.For_testing.register ~base_path:bp "s2" (make_meta "s2") in
   ignore (R.dispatch_event ~base_path:bp "s2" KSM.Stop_requested);
   ignore (R.dispatch_event ~base_path:bp "s2" KSM.Drain_complete);
   (* Stopped + unresolved done_p = sweep will handle *)
@@ -530,15 +530,15 @@ let test_reconcile_predicate_stopped_unresolved () =
 (** Simulate crash → re-register → restore_supervisor_state.
     Verifies restart_count and crash_log survive across re-registration. *)
 let test_restart_state_preservation () =
-  R.clear ();
+  R.For_testing.clear ();
   let meta = make_meta "restartable" in
-  let reg1 = R.register ~base_path:bp "restartable" meta in
+  let reg1 = R.For_testing.register ~base_path:bp "restartable" meta in
   resolve_done_for_test reg1 (`Crashed "first crash");
   ignore (R.dispatch_event ~base_path:bp "restartable"
     (KSM.Fiber_terminated { outcome = "first crash"; provider_id = None; http_status = None }));
   R.record_crash ~base_path:bp "restartable" 100.0 "first crash";
   (* Simulate sweep restart: re-register then restore state *)
-  let _reg2 = R.register ~base_path:bp "restartable" meta in
+  let _reg2 = R.For_testing.register ~base_path:bp "restartable" meta in
   R.restore_supervisor_state ~base_path:bp "restartable"
     ~restart_count:1 ~last_restart_ts:200.0
     ~crash_log:[(100.0, "first crash")];
@@ -562,9 +562,9 @@ let test_restart_state_preservation () =
 (** Simulate the turn failure crash path: supervisor catch sets
     Turn_consecutive_failures as failure_reason, state = Crashed. *)
 let test_crash_turn_failures () =
-  R.clear ();
+  R.For_testing.clear ();
   let meta = make_meta "turn-crash" in
-  let reg = R.register ~base_path:bp "turn-crash" meta in
+  let reg = R.For_testing.register ~base_path:bp "turn-crash" meta in
   let reason = R.Turn_consecutive_failures 10 in
   let reason_str = R.failure_reason_to_string reason in
   R.set_failure_reason ~base_path:bp "turn-crash" (Some reason);
@@ -597,11 +597,11 @@ let test_fresh_presence_preserves_turn_failures () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun sw ->
-  R.clear ();
+  R.For_testing.clear ();
   let base_path = temp_dir "fresh-presence-turn-failure" in
   Fun.protect
     ~finally:(fun () ->
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_path)
     (fun () ->
       let config = Masc.Workspace.default_config base_path in
@@ -618,7 +618,7 @@ let test_fresh_presence_preserves_turn_failures () =
         }
       in
       let meta = make_meta "fresh-presence-turn-failure" in
-      ignore (R.register ~base_path:config.base_path meta.name meta);
+      ignore (R.For_testing.register ~base_path:config.base_path meta.name meta);
       R.increment_turn_failures ~base_path:config.base_path meta.name;
       ignore
         (R.dispatch_event
@@ -652,16 +652,16 @@ let test_fresh_presence_preserves_turn_failures () =
 let test_crashed_cycle_records_turn_failure () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  R.clear ();
+  R.For_testing.clear ();
   let base_path = temp_dir "crashed-cycle-turn-failure" in
   Fun.protect
     ~finally:(fun () ->
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_path)
     (fun () ->
       let config = Masc.Workspace.default_config base_path in
       let meta = make_meta "crashed-cycle" in
-      ignore (R.register ~base_path:config.base_path meta.name meta);
+      ignore (R.For_testing.register ~base_path:config.base_path meta.name meta);
       check int "no failures before crash" 0
         (R.get_turn_failures ~base_path:config.base_path meta.name);
       KHL.record_crashed_cycle_failure
@@ -695,7 +695,7 @@ let test_crashed_cycle_records_turn_failure () =
 let test_direct_start_keepalive_resolves_done_on_stop () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  R.clear ();
+  R.For_testing.clear ();
   let base_dir = temp_dir "direct-keepalive" in
   let keeper_name = "direct-lifecycle" in
   Fun.protect
@@ -2011,7 +2011,7 @@ let test_dashboard_purge_resolution_is_fail_closed () =
   Fun.protect
     ~finally:(fun () ->
       Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -2127,7 +2127,7 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
     ~finally:(fun () ->
       Masc.Keeper_chat_queue.For_testing.reset ();
       Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -2139,7 +2139,7 @@ let test_keeper_shutdown_prepare_joins_idle_lane () =
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error detail -> fail detail);
-      let entry = R.register ~base_path:config.base_path name meta in
+      let entry = R.For_testing.register ~base_path:config.base_path name meta in
       let never_p, _never_r = Eio.Promise.create () in
       (match
          Lane.fork
@@ -2211,7 +2211,7 @@ let test_keeper_shutdown_prepare_joins_not_started_lane () =
     ~finally:(fun () ->
       Masc.Keeper_chat_queue.For_testing.reset ();
       Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -2223,7 +2223,7 @@ let test_keeper_shutdown_prepare_joins_not_started_lane () =
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error detail -> fail detail);
-      let entry = R.register ~base_path:config.base_path name meta in
+      let entry = R.For_testing.register ~base_path:config.base_path name meta in
       let operation =
         match
           Shutdown_prepare_join.run
@@ -2263,7 +2263,7 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
     ~finally:(fun () ->
       Masc.Keeper_chat_queue.For_testing.reset ();
       Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -2275,7 +2275,7 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error detail -> fail detail);
-      let entry = R.register ~base_path:config.base_path name meta in
+      let entry = R.For_testing.register ~base_path:config.base_path name meta in
       let probe_operation_id = Shutdown_types.Operation_id.generate () in
       let records_dir =
         match Shutdown_store.path ~config ~keeper_name:name probe_operation_id with
@@ -2328,7 +2328,7 @@ let test_keeper_shutdown_finalizes_idle_operation () =
       Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
       Masc.Keeper_chat_queue.For_testing.reset ();
       Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -2435,7 +2435,7 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
       ~purpose:"dead-tombstone-completion-test"
       completion_bus
   in
-  Masc_event_bus.set completion_bus;
+  Event_bus_slots.set_masc completion_bus;
   Fun.protect
     ~finally:(fun () ->
       Masc.Agent_sdk_metrics_bridge.unsubscribe completion_bus completion_subscription;
@@ -2444,7 +2444,7 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
       Lifecycle_hooks.reset_for_testing ();
       Subprocess_registry.reset_for_testing ();
       Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -2460,7 +2460,7 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error detail -> fail detail);
-      let entry = R.register ~base_path:config.base_path meta.name meta in
+      let entry = R.For_testing.register ~base_path:config.base_path meta.name meta in
       let hook_deliveries = ref 0 in
       Subprocess_registry.register_default_cleanup_hook ();
       Lifecycle_hooks.register (fun ~keeper_id event ->
@@ -2689,14 +2689,14 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
       ~purpose:"dashboard-purge-completion-test"
       completion_bus
   in
-  Masc_event_bus.set completion_bus;
+  Event_bus_slots.set_masc completion_bus;
   Fun.protect
     ~finally:(fun () ->
       Masc.Agent_sdk_metrics_bridge.unsubscribe completion_bus completion_subscription;
       Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
       Shutdown_finalize.For_testing.reset_completion_handler ();
       Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -2943,7 +2943,7 @@ let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
   Fun.protect
     ~finally:(fun () ->
       Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -3009,7 +3009,7 @@ let test_keeper_shutdown_recovers_committed_task_receipt () =
     ~finally:(fun () ->
       Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
       Masc.Keeper_turn_admission.For_testing.reset ();
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -3113,12 +3113,12 @@ let test_keeper_shutdown_recovers_committed_task_receipt () =
 let test_start_keepalive_denies_dead_tombstone_before_registration () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  R.clear ();
+  R.For_testing.clear ();
   let base_dir = temp_dir "dead-tombstone-keepalive-admission" in
   let keeper_name = "dead-tombstone-admission" in
   Fun.protect
     ~finally:(fun () ->
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
@@ -3152,19 +3152,19 @@ let test_start_keepalive_denies_dead_tombstone_before_registration () =
 let test_start_keepalive_preserves_unresolved_failing_entry () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  R.clear ();
+  R.For_testing.clear ();
   let base_dir = temp_dir "direct-keepalive-live-failing" in
   let keeper_name = "live-failing-entry" in
   Fun.protect
     ~finally:(fun () ->
       Masc.Keeper_keepalive.stop_keepalive keeper_name;
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
       ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
       let meta = make_meta keeper_name in
-      let original = R.register ~base_path:config.base_path keeper_name meta in
+      let original = R.For_testing.register ~base_path:config.base_path keeper_name meta in
       ignore
         (R.dispatch_event
            ~base_path:config.base_path
@@ -3200,19 +3200,19 @@ let test_start_keepalive_preserves_unresolved_failing_entry () =
 let test_start_keepalive_reclaims_finished_failing_entry () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  R.clear ();
+  R.For_testing.clear ();
   let base_dir = temp_dir "direct-keepalive-stale-failing" in
   let keeper_name = "stale-failing-entry" in
   Fun.protect
     ~finally:(fun () ->
       Masc.Keeper_keepalive.stop_keepalive keeper_name;
-      R.clear ();
+      R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
       ignore (Masc.Workspace.init config ~agent_name:(Some "tester"));
       let meta = make_meta keeper_name in
-      let original = R.register ~base_path:config.base_path keeper_name meta in
+      let original = R.For_testing.register ~base_path:config.base_path keeper_name meta in
       ignore
         (R.dispatch_event
            ~base_path:config.base_path
@@ -3248,9 +3248,9 @@ let test_start_keepalive_reclaims_finished_failing_entry () =
         Masc.Keeper_keepalive.stop_keepalive keeper_name)
 
 let test_stop_keepalive_only_requests_lane_stop () =
-  R.clear ();
+  R.For_testing.clear ();
   let keeper_name = "manual-stop-entry" in
-  let reg = R.register ~base_path:bp keeper_name (make_meta keeper_name) in
+  let reg = R.For_testing.register ~base_path:bp keeper_name (make_meta keeper_name) in
   Masc.Keeper_keepalive.stop_keepalive keeper_name;
   match R.get ~base_path:bp keeper_name with
   | None -> fail "expected manual-stop-entry in registry"
@@ -3271,9 +3271,9 @@ let test_stop_keepalive_only_requests_lane_stop () =
       (not (R.lane_has_exited entry))
 
 let test_stop_keepalive_preserves_existing_crash_outcome () =
-  R.clear ();
+  R.For_testing.clear ();
   let keeper_name = "crashed-before-stop" in
-  let reg = R.register ~base_path:bp keeper_name (make_meta keeper_name) in
+  let reg = R.For_testing.register ~base_path:bp keeper_name (make_meta keeper_name) in
   let reason = "already crashed" in
   ignore (R.dispatch_event ~base_path:bp keeper_name
     (KSM.Fiber_terminated { outcome = "already crashed"; provider_id = None; http_status = None }));
@@ -3292,9 +3292,9 @@ let test_stop_keepalive_preserves_existing_crash_outcome () =
      | None -> fail "expected crash promise to remain resolved")
 
 let test_resolve_done_reports_prior_outcome () =
-  R.clear ();
+  R.For_testing.clear ();
   let keeper_name = "double-resolve-contract" in
-  let reg = R.register ~base_path:bp keeper_name (make_meta keeper_name) in
+  let reg = R.For_testing.register ~base_path:bp keeper_name (make_meta keeper_name) in
   (match R.resolve_done reg ~source:"test_first" (`Crashed "first") with
    | R.Done_resolved { source } -> check string "first source" "test_first" source
    | R.Done_already_resolved _ -> fail "first resolve should succeed");
@@ -3361,13 +3361,13 @@ let test_pipeline_stage_detail_distinguishes_offline_projection () =
     a non-None mapping. This tests the production boundary:
     get_phase feeds into pipeline_stage_of_phase. *)
 let test_pipeline_stage_unregistered_is_offline () =
-  R.clear ();
+  R.For_testing.clear ();
   (* Unregistered: get_phase must return None *)
   check bool "unregistered → no phase"
     true (Option.is_none (R.get_phase ~base_path:bp "ghost"));
   (* Registered: get_phase returns real phase, of_phase gives deterministic stage *)
   let meta = make_meta "alive" in
-  let _reg = R.register ~base_path:bp "alive" meta in
+  let _reg = R.For_testing.register ~base_path:bp "alive" meta in
   (match R.get_phase ~base_path:bp "alive" with
    | Some phase ->
      let stage = ES.pipeline_stage_of_phase phase in

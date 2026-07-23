@@ -633,18 +633,7 @@ let create_post
       match board_result with
       | Ok post ->
         (match with_persist_lock store (fun () -> append_post post) with
-         | Ok () ->
-           (match
-              Board_effect_hooks.earn
-                ~base_path:(board_base_path ())
-                ~agent_name:author
-                ~kind:Board_post
-                ~reason:"board post"
-                ()
-            with
-            | Ok () -> ()
-            | Error msg -> Log.BoardLog.warn "economy earn (post): %s" msg);
-           Ok post
+         | Ok () -> Ok post
          | Error e ->
            rollback_fresh_post store post;
            Error e)
@@ -738,9 +727,11 @@ let create_post_once_by_fusion_run_id
                  && post_kind_equal post.post_kind post_kind
                  && option_equal Yojson.Safe.equal post.meta_json meta_json
                  && visibility_equal post.visibility visibility
-                 && Option.is_none post.hearth
-                 && Option.is_none post.thread_id
                  && option_equal origin_equal post.origin (Some origin)
+                 (* [hearth]/[thread_id] are excluded: this creation path never
+                    sets them, so a post-*creation* hearth binding is out-of-band
+                    metadata and must not turn a legitimate replay into an
+                    [Already_exists] conflict. *)
                in
                if exact_replay
                then Ok (Post_already_present post)

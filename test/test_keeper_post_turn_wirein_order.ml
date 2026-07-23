@@ -9,6 +9,97 @@ module Cycle = Masc.Keeper_heartbeat_loop_cycle
 module Queue = Keeper_event_queue
 module Registry_queue = Masc.Keeper_registry_event_queue
 module WO = Masc.Keeper_world_observation
+module Projection_target = Masc.Keeper_compaction_projection_target
+module Exact_fixture = Compaction_exact_output_fixture
+module Schema = Masc.Keeper_structured_output_schema
+
+let compaction_decision ?summary unit_index action =
+  `Assoc
+    [ Schema.compaction_plan_field_unit_index, `Int unit_index
+    ; Schema.compaction_plan_field_action, `String action
+    ; ( Schema.compaction_plan_field_summary
+      , Option.fold ~none:`Null ~some:(fun value -> `String value) summary )
+    ]
+;;
+
+let exact_response decisions =
+  Exact_fixture.openai_response
+    (`Assoc [ Schema.compaction_plan_field_decisions, `List decisions ])
+;;
+
+let summarize_response summary =
+  exact_response
+    [ compaction_decision
+        ~summary
+        1
+        Schema.compaction_plan_action_summarize
+    ]
+;;
+
+let init_runtime_fixture () =
+  let runtime_path =
+    Filename.concat (Masc_test_deps.find_project_root ()) "config/runtime.toml"
+  in
+  match Runtime.init_default ~config_path:runtime_path with
+  | Ok () -> ()
+  | Error detail -> failf "runtime fixture initialization failed: %s" detail
+;;
+
+let publish_exact_fixture ?connect_timeout_s ~source
+    (server : Exact_fixture.test_server) =
+  Exact_fixture.publish_runtime_lane
+    ?connect_timeout_s
+    ~source
+    ~base_url:server.Exact_fixture.base_url
+    ()
+  |> ignore
+;;
+
+let with_eio_context env sw f =
+  Eio_context.with_test_env
+    ~net:(Eio.Stdenv.net env)
+    ~clock:(Eio.Stdenv.clock env)
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
+    ~sw
+    f
+;;
+
+let rec find_eligible_units_payload = function
+  | `String value when String.starts_with ~prefix:"eligible_units=" value ->
+    Some value
+  | `Assoc fields ->
+    List.find_map (fun (_, value) -> find_eligible_units_payload value) fields
+  | `List values -> List.find_map find_eligible_units_payload values
+  | _ -> None
+;;
+
+let eligible_units_of_only_request server =
+  let request_body =
+    match Exact_fixture.request_bodies server with
+    | [ request_body ] -> request_body
+    | requests ->
+      failf "expected one exact-output request, got %d" (List.length requests)
+  in
+  let payload =
+    match
+      request_body
+      |> Yojson.Safe.from_string
+      |> find_eligible_units_payload
+    with
+    | Some payload -> payload
+    | None -> fail "exact-output request omitted eligible_units"
+  in
+  let prefix = "eligible_units=" in
+  let payload_end =
+    String.index_opt payload '\n'
+    |> Option.value ~default:(String.length payload)
+  in
+  payload
+  |> fun payload ->
+  String.sub payload (String.length prefix) (payload_end - String.length prefix)
+  |> Yojson.Safe.from_string
+  |> Yojson.Safe.Util.to_list
+;;
 
 let test_compaction_rejection_tag_is_stable () =
   let error =
@@ -25,6 +116,24 @@ let test_compaction_rejection_tag_is_stable () =
     "compaction rejected: invalid_structural_evidence:no_messages_compacted"
     (Post_turn.compaction_recovery_error_to_string error)
 
+let test_empty_projection_target_is_typed () =
+  let resolver_called = ref false in
+  let evidence =
+    Projection_target.request
+      ~assignment_id:""
+      ~resolve_context_window:(fun _ ->
+        resolver_called := true;
+        Projection_target.Resolved_context_window 1)
+    |> Projection_target.capture
+    |> Projection_target.captured_evidence
+  in
+  check bool "empty assignment skips runtime resolution" false !resolver_called;
+  match evidence with
+  | Projection_target.Unavailable Projection_target.Empty_assignment -> ()
+  | Projection_target.Exact _ | Projection_target.Unavailable _ ->
+    fail "empty assignment was not retained as typed unavailable evidence"
+;;
+
 let make_meta
       ?(name = "post-turn-no-auto-compact")
       ?(trace_id = "trace-post-turn-no-auto-compact")
@@ -40,6 +149,25 @@ let make_meta
   with
   | Ok meta -> meta
   | Error detail -> failf "keeper meta fixture failed: %s" detail
+
+let projection_request_of_meta
+      (meta : Masc.Keeper_meta_contract.keeper_meta)
+  =
+  Projection_target.request
+    ~assignment_id:(Masc.Keeper_meta_contract.runtime_id_of_meta meta)
+    ~resolve_context_window:(fun runtime ->
+      match
+        Masc.Keeper_context_runtime.resolve_max_context_resolution_for_runtime
+          ~requested_override:meta.max_context_override
+          runtime
+      with
+      | Ok resolution ->
+        Projection_target.Resolved_context_window resolution.effective_budget
+      | Error (Invalid_requested_context_override value) ->
+        Projection_target.Invalid_context_window value
+      | Error (Runtime_context_window_unavailable _) ->
+        Projection_target.Context_window_not_resolved)
+;;
 
 let make_checkpoint () =
   Agent_sdk.Checkpoint.
@@ -108,52 +236,6 @@ let test_regular_post_turn_does_not_auto_compact () =
     check bool "checkpoint messages retained exactly" true
       (retained.messages = checkpoint.messages)
 
-let test_invalid_plan_is_distinct_from_provider_unavailable () =
-  (* This test asserts the typed distinction between a provider transport
-     failure ([Plan_provider_unavailable]) and a closed-plan-contract violation
-     ([Invalid_compaction_plan]). Both terminals live *after* the runtime-id
-     gate in [Keeper_compact_policy.requested_messages]: with an uninitialized
-     global Runtime, [compaction_runtime_ids] is [[]] and the decision short-
-     circuits to [Runtime_identity_unavailable] before the summarizer override
-     is ever consulted, so both branches under test would be dead. Building the
-     working context also drives [Context.set_scoped], which requires an Eio
-     fiber. So this test must run inside [Eio_main.run] with the same Runtime
-     fixture the sibling [test_manual_compaction_serializes_owner_lane] uses. *)
-  Eio_main.run @@ fun env ->
-  Masc_test_deps.init_eio_clock env;
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let runtime_snapshot = Runtime.For_testing.snapshot () in
-  Fun.protect
-    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
-    (fun () ->
-      let runtime_path =
-        Filename.concat (Masc_test_deps.find_project_root ()) "config/runtime.toml"
-      in
-      (match Runtime.init_default ~config_path:runtime_path with
-       | Ok () -> ()
-       | Error detail -> failf "runtime fixture initialization failed: %s" detail);
-      let meta = make_meta () in
-      let context =
-        Masc.Keeper_context_core.context_of_oas_checkpoint (make_checkpoint ())
-      in
-      let decision failure =
-        Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
-          (fun ~runtime_ids:_ ~keeper_name:_ () ->
-             Some (fun ~units:_ -> Error failure))
-          (fun () ->
-             Compact_policy.compact_for_request_typed
-               ~meta
-               ~trigger:Compaction_trigger.Manual
-               context)
-        |> fun preparation -> preparation.Compact_policy.decision
-      in
-      (match decision Masc.Keeper_compaction_llm_summarizer.Invalid_plan with
-       | Compact_policy.Rejected (Manual, Invalid_compaction_plan) -> ()
-       | _ -> fail "invalid provider plan was not a typed source terminal");
-      match decision Masc.Keeper_compaction_llm_summarizer.Provider_unavailable with
-      | Compact_policy.Rejected (Manual, Plan_provider_unavailable) -> ()
-      | _ -> fail "provider failure was collapsed into an invalid plan")
-
 let only_compaction_manifest config (meta : Masc.Keeper_meta_contract.keeper_meta) =
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   Masc.Keeper_runtime_manifest.path_for_trace
@@ -180,6 +262,7 @@ let test_manual_compaction_serializes_owner_lane () =
   Masc_test_deps.init_eio_clock env;
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun sw ->
+  with_eio_context env sw @@ fun () ->
   let base_path = Masc_test_deps.setup_test_workspace () in
   let meta = make_meta ~name:"compaction-owner" ~trace_id:"trace-compaction-owner" () in
   let peer = make_meta ~name:"compaction-peer" ~trace_id:"trace-compaction-peer" () in
@@ -188,21 +271,27 @@ let test_manual_compaction_serializes_owner_lane () =
     ~finally:(fun () ->
       Runtime.For_testing.restore runtime_snapshot;
       Admission.For_testing.reset ();
-      Masc.Keeper_registry.unregister ~base_path meta.name;
-      Masc.Keeper_registry.unregister ~base_path peer.name;
+      Masc.Keeper_registry.For_testing.unregister ~base_path meta.name;
+      Masc.Keeper_registry.For_testing.unregister ~base_path peer.name;
       Masc_test_deps.cleanup_test_workspace base_path)
     (fun () ->
       let config = Masc.Workspace.default_config base_path in
       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-      let runtime_path =
-        Filename.concat (Masc_test_deps.find_project_root ()) "config/runtime.toml"
+      init_runtime_fixture ();
+      let exact_server =
+        Exact_fixture.start_server
+          ~sw
+          ~net:(Eio.Stdenv.net env)
+          ~clock:(Eio.Stdenv.clock env)
+          (Exact_fixture.Reply
+             (summarize_response "owner-lane compacted context"))
       in
-      (match Runtime.init_default ~config_path:runtime_path with
-       | Ok () -> ()
-       | Error detail -> failf "runtime fixture initialization failed: %s" detail);
+      publish_exact_fixture
+        ~source:"post-turn owner-lane compaction"
+        exact_server;
       Result.get_ok (Masc.Keeper_meta_store.write_meta config meta);
-      let owner_entry = Masc.Keeper_registry.register ~base_path meta.name meta in
-      let peer_entry = Masc.Keeper_registry.register ~base_path peer.name peer in
+      let owner_entry = Masc.Keeper_registry.For_testing.register ~base_path meta.name meta in
+      let peer_entry = Masc.Keeper_registry.For_testing.register ~base_path peer.name peer in
       Atomic.set owner_entry.fiber_wakeup false;
       Atomic.set peer_entry.fiber_wakeup false;
       let checkpoint =
@@ -339,15 +428,28 @@ let test_manual_compaction_serializes_owner_lane () =
           ~manual_compaction_requested:true
           ()
       in
-      let busy_outcome =
-        Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
-          (fun ~runtime_ids:_ ~keeper_name:_ () ->
-             fail "busy admission spent a compaction provider call")
-          run_cycle
-      in
+      let busy_outcome = run_cycle () in
       (match busy_outcome with
        | Cycle.Busy _ -> ()
        | _ -> fail "manual compaction crossed an active owner turn slot");
+      (match
+         Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
+           ~base_path
+           ~settled_at:(Time_compat.now ())
+           ~stop_requested:false
+           ~compaction_consecutive_failures:
+             meta.runtime.compaction_rt.consecutive_failures
+           ~transcript_quarantine_consecutive_retries:
+             meta.runtime.transcript_quarantine_consecutive_retries
+           ~lease
+           (Some busy_outcome)
+       with
+       | Registry_queue.Requeue Registry_queue.Cycle_busy -> ()
+       | _ -> fail "effect-free preflight Busy did not remain safely requeueable");
+      check int
+        "busy owner lane performs no exact dispatch"
+        0
+        (Exact_fixture.post_count exact_server);
       (match Admission.run_if_free ~base_path ~keeper_name:peer.name (fun () -> ()) with
        | `Ran () -> ()
        | `Busy _ -> fail "owner turn blocked an independent peer lane");
@@ -362,41 +464,19 @@ let test_manual_compaction_serializes_owner_lane () =
        | `Ran () -> ()
        | `Rejected _ -> fail "simulated owner turn was rejected");
       Atomic.set owner_entry.fiber_stop true;
-      let outcome =
-        Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
-          (fun ~runtime_ids:_ ~keeper_name:_ () ->
-             Some (fun ~units ->
-               check int "only closed units reach LLM" 4 (List.length units);
-               check bool "parallel cycle is one decision unit" true
-                 (match List.nth units 3 with
-                  | Masc.Keeper_compaction_unit.Closed_tool_cycle messages ->
-                    messages = closed_cycle
-                  | Ordinary_message _ -> false);
-               Masc.Keeper_compaction_llm_summarizer.plan_of_json
-                 ~runtime_id:"test.compaction"
-                 ~units
-                 (`Assoc
-                   [ ( Masc.Keeper_structured_output_schema.compaction_plan_field_decisions
-                     , `List
-                         [ `Assoc
-                             [ ( Masc.Keeper_structured_output_schema.compaction_plan_field_unit_index
-                               , `Int 1 )
-                             ; ( Masc.Keeper_structured_output_schema.compaction_plan_field_action
-                               , `String
-                                   Masc.Keeper_structured_output_schema.compaction_plan_action_summarize
-                               )
-                             ; ( Masc.Keeper_structured_output_schema.compaction_plan_field_summary
-                               , `String "owner-lane compacted context" )
-                             ]
-                         ] )
-                   ])
-               |> Result.map_error (fun _ ->
-                 Masc.Keeper_compaction_llm_summarizer.Invalid_plan)))
-          run_cycle
-      in
+      let outcome = run_cycle () in
       (match outcome with
        | Cycle.Manual_compaction_applied _ -> ()
        | _ -> fail "owner-lane cycle did not apply manual compaction");
+      check int
+        "manual compaction crosses the real exact-output dispatch once"
+        1
+        (Exact_fixture.post_count exact_server);
+      let eligible_units = eligible_units_of_only_request exact_server in
+      check int "only one closed eligible unit reaches the LLM" 1
+        (List.length eligible_units);
+      check int "eligible Assistant unit keeps its source index" 1
+        Yojson.Safe.Util.(List.hd eligible_units |> member "unit_index" |> to_int);
       let compacted =
         Result.get_ok
           (Masc.Keeper_checkpoint_store.load_oas
@@ -438,46 +518,38 @@ let test_manual_compaction_serializes_owner_lane () =
             ]
         }
       in
-      let stale_plan_result =
-        Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
-          (fun ~runtime_ids:_ ~keeper_name:_ () ->
-             Some (fun ~units ->
-               (match
-                  Masc.Keeper_checkpoint_store.save_oas_classified
-                    ~session_dir:session.session_dir
-                    concurrent_checkpoint
-                with
-                | Ok (Masc.Keeper_checkpoint_store.Saved _) -> ()
-                | Ok (Stale_noop _) ->
-                  fail "concurrent equal-turn checkpoint save was stale"
-                | Error detail ->
-                  failf "concurrent checkpoint save failed: %s" detail);
-               Masc.Keeper_compaction_llm_summarizer.plan_of_json
-                 ~runtime_id:"test.compaction"
-                 ~units
-                 (`Assoc
-                   [ ( Masc.Keeper_structured_output_schema.compaction_plan_field_decisions
-                     , `List
-                         [ `Assoc
-                             [ ( Masc.Keeper_structured_output_schema.compaction_plan_field_unit_index
-                               , `Int 1 )
-                             ; ( Masc.Keeper_structured_output_schema.compaction_plan_field_action
-                               , `String
-                                   Masc.Keeper_structured_output_schema.compaction_plan_action_summarize
-                               )
-                             ; ( Masc.Keeper_structured_output_schema.compaction_plan_field_summary
-                               , `String "stale plan must not commit" )
-                             ]
-                         ] )
-                   ])
-               |> Result.map_error (fun _ ->
-                 Masc.Keeper_compaction_llm_summarizer.Invalid_plan)))
-          (fun () ->
-             Post_turn.recover_latest_checkpoint_for_compaction
-               ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
-               ~meta
-               ~trigger:Compaction_trigger.Manual)
+      let stale_server =
+        Exact_fixture.start_server
+          ~on_request_before_reply:(fun () ->
+            match
+              Masc.Keeper_checkpoint_store.save_oas_classified
+                ~session_dir:session.session_dir
+                concurrent_checkpoint
+            with
+            | Ok (Masc.Keeper_checkpoint_store.Saved _) -> ()
+            | Ok (Stale_noop _) ->
+              fail "concurrent equal-turn checkpoint save was stale"
+            | Error detail ->
+              failf "concurrent checkpoint save failed: %s" detail)
+          ~sw
+          ~net:(Eio.Stdenv.net env)
+          ~clock:(Eio.Stdenv.clock env)
+          (Exact_fixture.Reply (summarize_response "stale plan must not commit"))
       in
+      publish_exact_fixture
+        ~source:"post-turn stale-source CAS"
+        stale_server;
+      let stale_plan_result =
+        Post_turn.recover_latest_checkpoint_for_compaction
+          ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+          ~meta
+          ~trigger:Compaction_trigger.Manual
+          ~projection_request:(projection_request_of_meta meta)
+      in
+      check int
+        "stale-source plan performs one real exact dispatch"
+        1
+        (Exact_fixture.post_count stale_server);
       (match stale_plan_result with
        | Error
            (Post_turn.Checkpoint_cas_failed
@@ -523,47 +595,52 @@ let test_manual_compaction_serializes_owner_lane () =
       let commit_block_held, commit_block_held_u = Eio.Promise.create () in
       let commit_block_release, commit_block_release_u = Eio.Promise.create () in
       let commit_block_finished, commit_block_finished_u = Eio.Promise.create () in
-      let busy_after_prepare =
-        Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
-          (fun ~runtime_ids:_ ~keeper_name:_ () ->
-             Some (fun ~units ->
-               Eio.Fiber.fork ~sw (fun () ->
-                 let result =
-                   Admission.run_serialized
-                     ~base_path
-                     ~keeper_name:meta.name
-                     (fun () ->
-                       Eio.Promise.resolve commit_block_held_u ();
-                       Eio.Promise.await commit_block_release)
-                 in
-                 Eio.Promise.resolve commit_block_finished_u result);
-               Eio.Promise.await commit_block_held;
-               Masc.Keeper_compaction_llm_summarizer.plan_of_json
-                 ~runtime_id:"test.compaction"
-                 ~units
-                 (`Assoc
-                   [ ( Masc.Keeper_structured_output_schema.compaction_plan_field_decisions
-                     , `List
-                         [ `Assoc
-                             [ ( Masc.Keeper_structured_output_schema.compaction_plan_field_unit_index
-                               , `Int 1 )
-                             ; ( Masc.Keeper_structured_output_schema.compaction_plan_field_action
-                               , `String
-                                   Masc.Keeper_structured_output_schema.compaction_plan_action_summarize
-                               )
-                             ; ( Masc.Keeper_structured_output_schema.compaction_plan_field_summary
-                               , `String "prepared while another turn acquires the slot" )
-                             ]
-                         ] )
-                   ])
-               |> Result.map_error (fun _ ->
-                 Masc.Keeper_compaction_llm_summarizer.Invalid_plan)))
-          (fun () -> Masc.Keeper_manual_compaction.run_admitted ~config ~meta)
+      let race_server =
+        Exact_fixture.start_server
+          ~on_request_before_reply:(fun () ->
+            Eio.Fiber.fork ~sw (fun () ->
+              let result =
+                Admission.run_serialized
+                  ~base_path
+                  ~keeper_name:meta.name
+                  (fun () ->
+                    Eio.Promise.resolve commit_block_held_u ();
+                    Eio.Promise.await commit_block_release)
+              in
+              Eio.Promise.resolve commit_block_finished_u result);
+            Eio.Promise.await commit_block_held)
+          ~sw
+          ~net:(Eio.Stdenv.net env)
+          ~clock:(Eio.Stdenv.clock env)
+          (Exact_fixture.Reply
+             (summarize_response
+                "prepared while another turn acquires the slot"))
       in
-      (match busy_after_prepare with
-       | `Busy _ -> ()
-       | `Applied _ | `No_compaction _ | `Compaction_failed _ ->
-         fail "compaction commit crossed a turn admitted during preparation");
+      publish_exact_fixture
+        ~source:"post-turn planning-admission race"
+        race_server;
+      let busy_after_prepare =
+        Masc.Keeper_manual_compaction.run_admitted
+          ~config
+          ~meta
+      in
+      check int
+        "planning-admission race performs one exact dispatch"
+        1
+        (Exact_fixture.post_count race_server);
+      let no_compaction =
+        match busy_after_prepare with
+        | `No_compaction
+            ({ reason =
+                 Keeper_event_queue_state.Execution_may_have_dispatched
+             ; _
+             } as no_compaction) ->
+          no_compaction
+        | `Busy _ ->
+          fail "post-dispatch final admission collapsed to replayable Busy"
+        | `Applied _ | `No_compaction _ | `Compaction_failed _ ->
+          fail "post-dispatch final admission lost its typed terminal receipt fence"
+      in
       (match Masc.Keeper_registry.get ~base_path meta.name with
        | Some entry ->
          check bool
@@ -575,36 +652,86 @@ let test_manual_compaction_serializes_owner_lane () =
       (match Eio.Promise.await commit_block_finished with
        | `Ran () -> ()
        | `Rejected _ -> fail "race fixture owner turn was rejected");
+      let settlement =
+        Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
+          ~base_path
+          ~settled_at:(Time_compat.now ())
+          ~stop_requested:false
+          ~compaction_consecutive_failures:
+            meta.runtime.compaction_rt.consecutive_failures
+          ~transcript_quarantine_consecutive_retries:
+            meta.runtime.transcript_quarantine_consecutive_retries
+          ~lease
+          (Some
+             (Cycle.Manual_compaction_not_applied
+                { meta; no_compaction }))
+      in
+      (match settlement with
+       | Registry_queue.No_compaction
+           { reason =
+               Keeper_event_queue_state.Execution_may_have_dispatched
+           ; _
+           } ->
+         ()
+       | Registry_queue.Requeue _ ->
+         fail "post-dispatch final admission remained replayable"
+       | _ ->
+         fail "post-dispatch final admission lost source-bound terminal evidence");
       Registry_queue.settle_result
         ~base_path
         meta.name
         ~settled_at:(Time_compat.now ())
         ~lease
-        ~settlement:Ack
+        ~settlement
       |> Result.get_ok
-      |> ignore)
+      |> ignore;
+      let next_intake =
+        Masc.Keeper_heartbeat_loop.heartbeat_event_intake
+          ~ctx
+          ~meta_after_triage:meta
+          ~pending_board_events:[]
+      in
+      (match next_intake.claimed_lease, next_intake.consumed_stimuli with
+       | None, [] -> ()
+       | _ -> fail "terminal post-dispatch compaction stimulus re-entered the lane");
+      check int
+        "terminal post-dispatch settlement never repeats exact dispatch"
+        1
+        (Exact_fixture.post_count race_server))
 ;;
 
 let test_malformed_structure_preserves_checkpoint () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  with_eio_context env sw @@ fun () ->
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+  init_runtime_fixture ();
+  let exact_server =
+    Exact_fixture.start_server
+      ~sw
+      ~net:(Eio.Stdenv.net env)
+      ~clock:(Eio.Stdenv.clock env)
+      (Exact_fixture.Reply (summarize_response "must remain unreachable"))
+  in
+  publish_exact_fixture ~source:"post-turn malformed structure" exact_server;
   let meta = make_meta ~name:"malformed-compaction" () in
   let orphan = block_message User [ tool_result "orphan" ] in
   let checkpoint = { (make_checkpoint ()) with messages = [ orphan ] } in
   let context =
     Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint in
-  let make_called = Atomic.make false in
   let preparation =
-    Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
-      (fun ~runtime_ids:_ ~keeper_name:_ () ->
-         Atomic.set make_called true;
-         None)
-      (fun () ->
-         Compact_policy.compact_for_request_typed
-           ~meta
-           ~trigger:Compaction_trigger.Manual
-           context)
+    Compact_policy.compact_for_request_typed
+      ~meta
+      ~trigger:Compaction_trigger.Manual
+      context
   in
-  check bool "malformed input never reaches LLM" false (Atomic.get make_called);
+  check int "malformed input never reaches exact dispatch" 0
+    (Exact_fixture.post_count exact_server);
   check bool "original message remains exact" true
     (Masc.Keeper_context_core.messages_of_context preparation.context = [ orphan ]);
   match preparation.decision with
@@ -614,9 +741,10 @@ let test_malformed_structure_preserves_checkpoint () =
           (Masc.Keeper_compaction_unit.Orphan_tool_result
             { message_index = 0; tool_use_id = "orphan" }) ) ->
     ()
-  | _ -> fail "malformed compaction was not rejected with typed structure"
+  | _ -> fail "malformed compaction was not rejected with typed structure")
 ;;
 
+let test_prepare_commit_source_cas () =
   (* The prepare/commit split exists so the provider call can run outside
      the keeper admission; the source CAS — not the slot — is the
      interleaving guard.  Pin both halves: a prepared plan commits, and
@@ -624,6 +752,8 @@ let test_malformed_structure_preserves_checkpoint () =
   Eio_main.run @@ fun env ->
   Masc_test_deps.init_eio_clock env;
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  with_eio_context env sw @@ fun () ->
   let base_path = Masc_test_deps.setup_test_workspace () in
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
@@ -634,12 +764,7 @@ let test_malformed_structure_preserves_checkpoint () =
        let meta = make_meta () in
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       let runtime_path =
-         Filename.concat (Masc_test_deps.find_project_root ()) "config/runtime.toml"
-       in
-       (match Runtime.init_default ~config_path:runtime_path with
-        | Ok () -> ()
-        | Error detail -> failf "runtime fixture initialization failed: %s" detail);
+       init_runtime_fixture ();
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
        let checkpoint = make_checkpoint () in
@@ -665,62 +790,134 @@ let test_malformed_structure_preserves_checkpoint () =
             (Masc.Keeper_context_core.checkpoint_write_error_to_string
                ~persistence_error_to_string:(fun detail -> detail)
                detail));
-  let plan_for ~units =
-    match
-      Masc.Keeper_compaction_llm_summarizer.plan_of_json
-        ~runtime_id:"test.compaction"
-        ~units
-        (`Assoc
-           [ ( Masc.Keeper_structured_output_schema.compaction_plan_field_decisions
-             , `List
-                 [ `Assoc
-                     [ ( Masc.Keeper_structured_output_schema.compaction_plan_field_unit_index
-                       , `Int 1 )
-                     ; ( Masc.Keeper_structured_output_schema.compaction_plan_field_action
-                       , `String
-                           Masc.Keeper_structured_output_schema.compaction_plan_action_summarize
-                       )
-                     ; ( Masc.Keeper_structured_output_schema.compaction_plan_field_summary
-                       , `String "shorter" )
-                     ]
-                 ] )
-           ])
-    with
-    | Ok plan -> Ok plan
-    | Error _ -> Error Masc.Keeper_compaction_llm_summarizer.Invalid_plan
+  let exact_server =
+    Exact_fixture.start_server
+      ~sw
+      ~net:(Eio.Stdenv.net env)
+      ~clock:(Eio.Stdenv.clock env)
+      (Exact_fixture.Reply (summarize_response "shorter"))
   in
-  Masc.Keeper_compaction_llm_summarizer.For_testing.with_make_override
-    (fun ~runtime_ids:_ ~keeper_name:_ () -> Some (fun ~units -> plan_for ~units))
-    (fun () ->
-       match
-         Post_turn.prepare_compaction
-           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
-           ~meta
-           ~trigger:Compaction_trigger.Manual
-       with
-       | Error error ->
-         failf
-           "prepare failed: %s"
-           (Post_turn.compaction_recovery_error_to_string error)
-       | Ok prepared ->
-         (match Post_turn.commit_prepared_compaction prepared with
-          | Ok _ -> ()
-          | Error error ->
-            failf
-              "commit of a fresh prepared plan failed: %s"
-              (Post_turn.compaction_recovery_error_to_string error));
-         (* The first commit advanced the durable source; the same
-            prepared value is now stale and must be CAS-rejected. *)
-         match Post_turn.commit_prepared_compaction prepared with
-         | Error
-             (Post_turn.Checkpoint_cas_failed
-                (Masc.Keeper_checkpoint_store.Source_changed _)) ->
-           ()
-         | Error error ->
-           failf
-             "stale prepared value failed with the wrong error: %s"
-             (Post_turn.compaction_recovery_error_to_string error)
-         | Ok _ -> fail "stale prepared value committed past the source CAS"))
+  publish_exact_fixture ~source:"post-turn prepared source CAS" exact_server;
+  match
+    Post_turn.prepare_compaction
+      ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+      ~meta
+      ~trigger:Compaction_trigger.Manual
+      ~projection_request:(projection_request_of_meta meta)
+  with
+  | Error error ->
+    failf
+      "prepare failed: %s"
+      (Post_turn.compaction_recovery_error_to_string error)
+  | Ok prepared ->
+    check int
+      "prepare performs one real exact dispatch"
+      1
+      (Exact_fixture.post_count exact_server);
+    (match Post_turn.commit_prepared_compaction prepared with
+     | Ok _ -> ()
+     | Error error ->
+       failf
+         "commit of a fresh prepared plan failed: %s"
+         (Post_turn.compaction_recovery_error_to_string error));
+    (* The first commit advanced the durable source; the same
+       prepared value is now stale and must be CAS-rejected. *)
+    (match Post_turn.commit_prepared_compaction prepared with
+     | Error
+         (Post_turn.Checkpoint_cas_failed
+            (Masc.Keeper_checkpoint_store.Source_changed _)) ->
+       ()
+     | Error error ->
+       failf
+         "stale prepared value failed with the wrong error: %s"
+         (Post_turn.compaction_recovery_error_to_string error)
+     | Ok _ -> fail "stale prepared value committed past the source CAS"))
+;;
+
+(* RFC-0351 S0 / #25461: once the persisted failure streak suspends
+   compaction retries, a reactive prepare must be refused before any
+   checkpoint I/O — each new stimulus used to pay one full prepare
+   (checkpoint load + summarizer LLM call) before its escalation settled.
+   The fixture base_dir holds no checkpoint, so any prepare that passes the
+   gate deterministically fails with [Checkpoint_ref_load_failed Ref_not_found];
+   returning [Retry_suspended] instead proves the refusal fired first. *)
+let test_suspended_streak_refuses_reactive_prepare () =
+  Eio_main.run @@ fun _env ->
+  let meta_with_streak streak =
+    match
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String "prepare-admission"
+          ; "trace_id", `String "trace-prepare-admission"
+          ; "compaction_consecutive_failures", `Int streak
+          ])
+    with
+    | Ok meta -> meta
+    | Error detail -> failf "prepare-admission meta fixture: %s" detail
+  in
+  let base_dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-prepare-admission-%d" (Unix.getpid ()))
+  in
+  let projection_request =
+    Projection_target.request
+      ~assignment_id:""
+      ~resolve_context_window:(fun _ ->
+        Projection_target.Resolved_context_window 1)
+  in
+  let prepare ~streak ~trigger =
+    Post_turn.prepare_compaction
+      ~base_dir
+      ~meta:(meta_with_streak streak)
+      ~trigger
+      ~projection_request
+  in
+  let suspended = meta_with_streak 3 in
+  check bool
+    "fixture streak reaches the suspension threshold"
+    true
+    (Masc.Keeper_meta_contract.compaction_retry_suspended
+       suspended.runtime.compaction_rt);
+  (match
+     prepare
+       ~streak:3
+       ~trigger:(Compaction_trigger.Provider_overflow { limit_tokens = None })
+   with
+   | Error (Post_turn.Retry_suspended { consecutive_failures }) ->
+     check int "refusal reports the persisted streak" 3 consecutive_failures
+   | Error error ->
+     failf
+       "suspended reactive prepare reached I/O instead of the admission gate: \
+        %s"
+       (Post_turn.compaction_recovery_error_to_string error)
+   | Ok _ -> fail "suspended reactive prepare produced a prepared compaction");
+  (match prepare ~streak:3 ~trigger:Compaction_trigger.Manual with
+   | Error
+       (Post_turn.Checkpoint_ref_load_failed Masc.Keeper_checkpoint_store.Ref_not_found)
+     ->
+     (* Reached the checkpoint load: the operator lever bypasses the gate. *)
+     ()
+   | Error error ->
+     failf
+       "suspended manual prepare did not reach the checkpoint load: %s"
+       (Post_turn.compaction_recovery_error_to_string error)
+   | Ok _ -> fail "manual prepare on an empty store produced a compaction");
+  match
+    prepare
+      ~streak:2
+      ~trigger:(Compaction_trigger.Provider_overflow { limit_tokens = None })
+  with
+  | Error
+      (Post_turn.Checkpoint_ref_load_failed Masc.Keeper_checkpoint_store.Ref_not_found)
+    ->
+    (* Below the threshold the reactive path is admitted unchanged. *)
+    ()
+  | Error error ->
+    failf
+      "below-threshold reactive prepare did not reach the checkpoint load: %s"
+      (Post_turn.compaction_recovery_error_to_string error)
+  | Ok _ -> fail "reactive prepare on an empty store produced a compaction"
 ;;
 
 let () =
@@ -728,13 +925,17 @@ let () =
     "durable compaction", [
       test_case "compaction rejection tag is stable"
         `Quick test_compaction_rejection_tag_is_stable;
+      test_case "empty projection target is typed"
+        `Quick test_empty_projection_target_is_typed;
       test_case "regular post-turn does not auto-compact"
         `Quick test_regular_post_turn_does_not_auto_compact;
-      test_case "invalid plan is distinct from provider unavailability"
-        `Quick test_invalid_plan_is_distinct_from_provider_unavailable;
       test_case "manual compaction serializes the owner lane"
         `Quick test_manual_compaction_serializes_owner_lane;
       test_case "malformed structure preserves checkpoint"
         `Quick test_malformed_structure_preserves_checkpoint;
+      test_case "prepare/commit source CAS"
+        `Quick test_prepare_commit_source_cas;
+      test_case "suspended streak refuses reactive prepare"
+        `Quick test_suspended_streak_refuses_reactive_prepare;
     ];
   ]

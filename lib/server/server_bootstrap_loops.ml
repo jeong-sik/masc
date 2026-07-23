@@ -269,6 +269,10 @@ type keeper_persistence_report =
   { shutdown : Keeper_shutdown_runtime.restored_inventory
   ; queue : Keeper_chat_queue.configure_report
   ; requests : Keeper_msg_async.recovery_report
+  ; fusion_delivery :
+      ( Fusion_delivery_projector.recovery_report
+      , Fusion_delivery_obligation.error )
+        result
   }
 
 type keeper_persistence_failure_phase =
@@ -588,6 +592,38 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
       keeper_msg_recovery.staging_files_preserved
       keeper_msg_recovery.unreadable
       keeper_msg_recovery.failed;
+  let fusion_delivery_recovery =
+    Fusion_delivery_projector.recover_startup ~base_path
+  in
+  (match fusion_delivery_recovery with
+   | Error error ->
+     Log.Keeper.error
+       "fusion_delivery: startup inventory unavailable error=%s"
+       (Fusion_delivery_obligation.error_to_string error)
+   | Ok report ->
+     if
+       report.staging_cleanup.inspected > 0
+       || report.staging_cleanup.failures <> []
+     then
+       Log.Keeper.warn
+         "fusion_delivery: startup staging inspected=%d deleted=%d preserved=%d failures=%d"
+         report.staging_cleanup.inspected
+         report.staging_cleanup.deleted
+         report.staging_cleanup.preserved
+         (List.length report.staging_cleanup.failures);
+     List.iter
+       (fun (error : Fusion_delivery_projector.recovery_record_error) ->
+          Log.Keeper.error
+            "fusion_delivery: startup projection retained request_id=%s error=%s"
+            (* DET-OK: log placeholder for malformed records; never feeds a branch. *)
+            (Option.value error.request_id ~default:"<malformed-record>")
+            error.detail)
+       report.record_errors;
+     if report.projected > 0 || report.pending > 0
+     then
+       Log.Keeper.warn
+         "fusion_delivery: startup recovery examined=%d projected=%d pending=%d"
+         report.examined report.projected report.pending);
   let prepared =
     { base_path = base_path_identity
     ; config
@@ -595,6 +631,7 @@ let prepare_keeper_persistence_owned ~base_path_identity ~set_phase ~config =
         { shutdown
         ; queue = queue_recovery
         ; requests = keeper_msg_recovery
+        ; fusion_delivery = fusion_delivery_recovery
         }
     }
   in
@@ -1080,7 +1117,7 @@ let start_keeper_loops_owned
      — the relay translates masc.* →
      masc:* on the wire for backward compatibility. *)
   let masc_event_bus = Agent_sdk.Event_bus.create () in
-  Masc_event_bus.set masc_event_bus;
+  Event_bus_slots.set_masc masc_event_bus;
   (* Event_bus → SSE bridge: relay both OAS and MASC buses to dashboard *)
   Keeper_event_bridge.start ~sw ~clock ~config:(Mcp_server.workspace_config state) ~bus:event_bus;
   Keeper_event_bridge.start ~sw ~clock ~config:(Mcp_server.workspace_config state) ~bus:masc_event_bus;
@@ -1359,12 +1396,30 @@ let start_keeper_loops_owned
         masc_root
         keeper_dir
         all_count;
-      let names =
-        Keeper_runtime.bootable_keeper_names config
-        |> List.filter (fun name ->
-          not (Keeper_name_set.mem name shutdown_blocked_names))
+      let bootable_names = Keeper_runtime.bootable_keeper_names config in
+      (* A keeper filtered out here is config-bootable but its admission is
+         still owned by a durable shutdown operation from the boot scan.
+         Stamp it into the excluded list instead of dropping it silently —
+         the 2026-07-21 wedge left rondo absent from both the boot set and
+         the excluded list, so the outage was invisible in the autoboot
+         report. Boot recovery settles recoverable operations in this same
+         bootstrap, after which the supervisor's periodic pass registers the
+         keeper; this snapshot stays honest about what autoboot itself saw. *)
+      let names, shutdown_fenced_exclusions =
+        List.partition_map
+          (fun name ->
+             if Keeper_name_set.mem name shutdown_blocked_names
+             then
+               Either.Right
+                 Keeper_runtime.
+                   { keeper_name = name; reason = Shutdown_admission_fence }
+             else Either.Left name)
+          bootable_names
       in
-      let exclusions = Keeper_runtime.autoboot_excluded_keeper_reasons config in
+      let exclusions =
+        Keeper_runtime.autoboot_excluded_keeper_reasons config
+        @ shutdown_fenced_exclusions
+      in
       let keeper_boot_ctx : _ Keeper_types_profile.context =
         { config
         ; agent_name = "keeper-autoboot"

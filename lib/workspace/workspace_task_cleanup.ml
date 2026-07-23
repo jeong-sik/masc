@@ -3,15 +3,7 @@ open Masc_domain
 open Workspace_utils
 open Workspace_state
 
-let run_done_hooks config ~agent_name ~task_id =
-  (try
-     (Atomic.get Workspace_hooks.agent_economy_earn_fn)
-       ~base_path:config.base_path ~agent_name
-       ~reason:(Printf.sprintf "completed %s" task_id)
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-     Log.TaskState.error "transition economy done hook: %s" (Printexc.to_string exn));
+let run_done_hooks config ~agent_name =
   (try
      let active = (read_state config).active_agents in
      (Atomic.get Workspace_hooks.relation_on_task_done_fn)

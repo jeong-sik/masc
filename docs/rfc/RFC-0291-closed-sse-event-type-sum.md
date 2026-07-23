@@ -15,7 +15,7 @@ implementation_prs: []
 
 Status: Draft · The SSE wire `type` discriminator is stringly-typed across ~34
 backend emit sites. The frontend parity gate only inventories exact-match
-routes, so slice-bridged events (e.g. `goal_loop_status`) are protected only by
+routes, so slice-bridged events (e.g. `goal_loop_status`, retired 2026-07-21 with the goal-loop surface — RFC-0352) are protected only by
 hand-written drift-guard tests. This RFC closes the discriminator into an OCaml
 sum with a typed broadcast builder and a raw-string ban-lint, so the compiler —
 not a parallel test — enforces that every emitted event-type is declared and FE
@@ -91,7 +91,7 @@ A full inventory of the ~34 broadcast sites (5-lens grounding, 2026-06-23) finds
 ### §3.1 Fixed-literal `type`-keyed events (closeable) — ~30
 Plain literals set at a single (or few) site(s). Examples: `project_snapshot`,
 `namespace_truth_snapshot`, `operator_snapshot`, `operator_digest`,
-`execution_snapshot`, `transport_health_snapshot`, `goal_loop_status`,
+`execution_snapshot`, `transport_health_snapshot`, ~~`goal_loop_status`~~ (retired 2026-07-21, RFC-0352),
 `keeper_chat_appended`, `keeper_composite_changed`, `keeper_phase_changed`,
 `keeper_heartbeat`, `keeper_compaction`, `keeper_handoff`, `keeper_tool_skipped`,
 `keeper_turn_complete`, `keeper_tool_call`, `approval:pending`,

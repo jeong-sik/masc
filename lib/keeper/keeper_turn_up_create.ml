@@ -243,6 +243,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_after_tokens = 0;
             last_check_ts = now_ts;
             last_decision = compaction_runtime_decision_of_string "initialized";
+            consecutive_failures = 0;
           };
           proactive_rt = {
             count_total = 0;
@@ -267,6 +268,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           mention_reactive_turn_count = 0;
           noop_turn_count = 0;
           message_scope_ack_id = None;
+          transcript_quarantine_consecutive_retries = 0;
 	          last_blocker = None;
 	          last_runtime_attempt = None;
 	          last_turn_tool_calls = [];

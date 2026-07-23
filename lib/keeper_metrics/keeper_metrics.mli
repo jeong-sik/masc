@@ -65,6 +65,8 @@ type t =
   | CrashPersistenceFailures
   | GenerationLineageFailures
   | KeepaliveSignalFailures
+  | BoardSignalRoutedTotal
+  | BoardSignalDeliveryTotal
   | BoardSignalNoWakeTotal
   | BoardSignalAttentionCandidateTotal
   | MetaJsonFailures
@@ -92,7 +94,6 @@ type t =
   | OasTimeoutClassifications
   | NoToolProvider
   | ProactiveOutcome
-  | OllamaSaturationSkip
   | TaskLoadFailures
   | ToolSelectionFailures
   | ReconcileFailures
@@ -182,10 +183,13 @@ type t =
   | MemoryRecallReadErrors
   | MemoryOsRecallUnavailable
   | MemoryOsReobserveEchoSuppressed
+  | MemoryOsExplicitFactWrite
+  | MemoryOsInertTurnExtractionSkipped
   | MemoryOsRecallFactsTruncated
   | MemoryOsRecallEpisodesTruncated
   | MemoryOsRecallBytesOverBudget
   | MemoryOsEpisodeRetentionPruned
+  | MemoryOsConsolidationGroupRejected
   | RuntimeHttpProbeJsonParseFailures
   | VisionAnalyze
   | VisionCandidateAttempts

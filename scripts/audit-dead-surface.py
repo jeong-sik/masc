@@ -20,10 +20,61 @@ workflow is:
     3. if the implementation is now unreachable inside its own `.ml`, the
        compiler reports it (warning 32) and the implementation goes too
 
+Step 3 needs warning 32 forced on -- the root `dune` sets `-warn-error +8`, so
+it is off by default (see #25455). Give it its own build directory:
+
+    OCAMLPARAM='_,w=+32' DUNE_BUILD_DIR=/tmp/masc-w32 dune build @check
+
+Sharing `_build` with an ordinary build silently defeats this. Dune does not
+track `OCAMLPARAM` as a dependency, so after a normal build has populated the
+cache the warning-32 run considers every target up to date, compiles nothing,
+and exits 0 with no warnings -- a green that looks like a verified slice and
+proves nothing. Confirmed by appending a comment to `lib/runtime/runtime.ml`,
+which brought `unused value validate_runtime_model_capabilities` straight back
+(`touch` does not: dune digests contents, not mtimes).
+
 Matching is on token boundaries, not substrings: `cached_entry_count` is not
 considered referenced by a call to `reset_cached_entry_count`. Conversely the
 `.inc` and dune stanza files are scanned, so a test module registered only
 from `test/stanzas/*.inc` is correctly seen as live.
+
+WHAT THIS TOOL CANNOT DECIDE
+
+Unreachable is not the same as removable, and the difference is a judgement no
+scan makes for you. Categories found so far, each from an actual candidate:
+
+  Spec bridges. `keeper_composite_observer` exports `all_tla_actions`,
+  `tla_action_of_string` and siblings backing
+  `specs/keeper-state-machine/KeeperCompositeLifecycle.tla`; `recovery` exports
+  `all_error_mode_tla_symbols`. Nothing in OCaml or `scripts/` reads them. If
+  they exist so a conformance test can enumerate the symbol set, deleting them
+  removes the seam rather than dead weight -- ask whoever owns the spec.
+
+  Alternative entry points onto a live path. `Audit_log` exported six wrappers
+  over `log_action` and a second route into `Dated_jsonl.prune`. "Nothing calls
+  the audit logger" reads like an incident; it was not one, because the live
+  paths build the same variants directly and prune on a timer. Establish which
+  path actually runs before concluding either way.
+
+  Enumeration completeness. `tool_schema_dsl` exports one constructor per JSON
+  Schema type; `boolean_prop` and `string_array_prop` have no callers, but they
+  are two fifths of a five-value DSL that covers string/integer/boolean/array/
+  object. Removing them leaves the enumeration with holes and the next caller
+  writing a raw `` `Assoc `` instead.
+
+  Documented entry points. `keeper_event_queue_persistence.mli:98` tells the
+  reader to `use {!load_pending_result} in production control flow`. Nothing
+  calls it yet; the doc says it is the intended route. `--exports` reports
+  these separately via `odoc_referenced`.
+
+  Callback registration. `dashboard.ml:604` wires `generate` into the
+  `masc_dashboard` MCP tool through `Tool_misc.register_dashboard_handler`, so
+  a grep for `Dashboard.generate` finds only tests and the module looks
+  abandoned when it is not. This one is not detected -- check for a
+  `register_*` seam before concluding a subsystem is unreachable.
+
+Density does not separate these: `tool_schema_dsl` is 40% dead by count, the
+same range as genuinely abandoned modules. Read the surface.
 
 Usage:
     python3 scripts/audit-dead-surface.py --modules
@@ -69,6 +120,11 @@ class DeadExport(TypedDict):
     name: str
     module: str
     mli: str
+    # Facades republishing this module's whole signature; empty when none do.
+    reexported_by: list[str]
+    # An odoc `{!name}` link elsewhere in the same .mli names this value as an
+    # intended entry point, so it is documented rather than forgotten.
+    odoc_referenced: bool
 
 
 def is_skipped(rel: Path) -> bool:
@@ -184,6 +240,7 @@ def find_dead_exports(root: Path, min_name_len: int) -> list[DeadExport]:
         for token in set(TOKEN_RE.findall(text)) & wanted:
             seen[token].add(path)
 
+    republished = reexporting_modules(root)
     dead: list[DeadExport] = []
     for name, declared in owners.items():
         if len(declared) > 1:
@@ -194,8 +251,75 @@ def find_dead_exports(root: Path, min_name_len: int) -> list[DeadExport]:
         pair = {mli, mli.with_suffix(".ml")}
         if seen.get(name, set()) - pair:
             continue
-        dead.append({"name": name, "module": module, "mli": str(mli.relative_to(root))})
+        # An odoc cross-reference from a sibling declaration's doc block --
+        # `use {!load_pending_result} in production control flow` -- documents
+        # the value as the intended entry point. No call site exists yet, but
+        # the pointer is a contract someone wrote on purpose, so deleting it
+        # silently breaks the doc it is named from.
+        documented = bool(re.search(r"\{!" + re.escape(name) + r"\}", read_text(mli)))
+        dead.append({
+            "name": name,
+            "module": module,
+            "mli": str(mli.relative_to(root)),
+            "reexported_by": sorted(republished.get(module, [])),
+            "odoc_referenced": documented,
+        })
     return sorted(dead, key=lambda d: (d["module"], d["name"]))
+
+
+def reexporting_modules(root: Path) -> dict[str, list[str]]:
+    """Module -> the modules that republish its whole signature.
+
+    Three shapes republish a module wholesale without ever naming the values
+    they carry, so a token scan cannot see them:
+
+        include module type of Foo          (in a .mli)
+        module Bar = Foo                    (in a .mli -- a signature alias)
+        include Foo                         (in a .ml, when the .mli also
+                                             republishes the signature)
+
+    Adversarial review of an earlier run of this audit found every one of its
+    28 false positives here: values with no call site anywhere, still exposed
+    through a facade's published signature. Deleting one of those means editing
+    the facade too, which makes it a different change from deleting a value
+    nothing can reach.
+    """
+    by_source: dict[str, list[str]] = defaultdict(list)
+    # `\s` spans newlines, so the multi-line `include module type of struct
+    # include X end` form (51 occurrences in this tree) matches as written.
+    #
+    # A `module X = Y` alias only republishes a signature when it is in a
+    # `.mli`; in a `.ml` it is a local shorthand and republishes nothing.
+    # Matching it everywhere flagged 702 aliases instead of the 55 real ones --
+    # `bin/main_eio.ml:35`'s `module Types = Masc_domain` claimed to be a facade
+    # over Masc_domain. `include X`, by contrast, is a `.ml` construct: it
+    # republishes when the module's own `.mli` also exposes the signature.
+    patterns = (
+        (re.compile(r"include\s+module\s+type\s+of\s+(?:struct\s+include\s+)?([A-Z][A-Za-z0-9_]*)"),
+         (".ml", ".mli")),
+        (re.compile(r"^\s*module\s+[A-Z][A-Za-z0-9_]*\s*=\s*([A-Z][A-Za-z0-9_]*)\s*$", re.M),
+         (".mli",)),
+        (re.compile(r"^\s*include\s+([A-Z][A-Za-z0-9_]*)\s*$", re.M),
+         (".ml",)),
+    )
+    for base in SOURCE_ROOTS:
+        directory = root / base
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.rglob("*.ml*")):
+            if path.suffix not in (".ml", ".mli") or is_skipped(path.relative_to(root)):
+                continue
+            text = read_text(path)
+            facade = path.stem
+            for pattern, suffixes in patterns:
+                if path.suffix not in suffixes:
+                    continue
+                for match in pattern.finditer(text):
+                    source = match.group(1)
+                    source_module = source[0].lower() + source[1:]
+                    if source_module != facade and facade not in by_source[source_module]:
+                        by_source[source_module].append(facade)
+    return dict(by_source)
 
 
 def find_orphan_stanzas(root: Path) -> list[str]:
@@ -258,6 +382,52 @@ def run_self_test() -> int:
         if "used_entry_helper" in dead_exports:
             failures.append("token reference from a test not counted")
 
+        # A value republished through a facade's signature must be flagged as
+        # such: nothing calls it, but deleting it means editing the facade.
+        (root / "lib" / "leaf_surface.mli").write_text("val republished_helper : unit -> int\n")
+        (root / "lib" / "leaf_surface.ml").write_text("let republished_helper () = 0\n")
+        (root / "lib" / "facade_surface.ml").write_text("include Leaf_surface\n")
+        (root / "lib" / "facade_surface.mli").write_text(
+            "include module type of Leaf_surface\n"
+        )
+        # A plain leaf with no facade over it must come back with an empty
+        # `reexported_by`, or the two groups stop meaning anything.
+        (root / "lib" / "plain_surface.mli").write_text("val unfacaded_helper : unit -> int\n")
+        (root / "lib" / "plain_surface.ml").write_text("let unfacaded_helper () = 0\n")
+
+        # The multi-line `include module type of struct include X end` form,
+        # 51 occurrences in this tree, must match as well as the one-line form.
+        (root / "lib" / "wrapped_surface.mli").write_text("val wrapped_helper : unit -> int\n")
+        (root / "lib" / "wrapped_surface.ml").write_text("let wrapped_helper () = 0\n")
+        (root / "lib" / "multiline_facade.ml").write_text("include Wrapped_surface\n")
+        (root / "lib" / "multiline_facade.mli").write_text(
+            "include module type of struct\n  include Wrapped_surface\nend\n"
+        )
+
+        # A `module X = Y` alias in a .ml is a local shorthand, not a facade.
+        (root / "lib" / "aliasing_consumer.ml").write_text(
+            "module Alias = Plain_surface\nlet _ = 0\n"
+        )
+
+        entries = {d["name"]: d for d in find_dead_exports(root, DEFAULT_MIN_NAME_LEN)}
+        republished = entries.get("republished_helper")
+        if republished is None:
+            failures.append("value behind a facade not reported at all")
+        elif not republished.get("reexported_by"):
+            failures.append("facade re-export not recorded on the finding")
+
+        plain = entries.get("unfacaded_helper")
+        if plain is None:
+            failures.append("plain dead export not reported")
+        elif plain.get("reexported_by"):
+            failures.append("a .ml module alias was mistaken for a facade")
+
+        wrapped = entries.get("wrapped_helper")
+        if wrapped is None:
+            failures.append("value behind a multi-line facade not reported")
+        elif not wrapped.get("reexported_by"):
+            failures.append("multi-line include module type of not matched")
+
     for failure in failures:
         print(f"self-test FAIL: {failure}", file=sys.stderr)
     if failures:
@@ -304,10 +474,19 @@ def main(argv: list[str]) -> int:
         for entry in dead_exports:
             per_module[entry["module"]] += 1
         payload["dead_exports"] = dead_exports
+        behind_facade = [d for d in dead_exports if d.get("reexported_by")]
+        documented = [d for d in dead_exports
+                      if d.get("odoc_referenced") and not d.get("reexported_by")]
         if not args.json:
             print(f"dead exports: {len(dead_exports)} "
                   f"across {len(per_module)} modules "
                   f"(names >= {args.min_name_len} chars)")
+            print(f"  directly removable: "
+                  f"{len(dead_exports) - len(behind_facade) - len(documented)}")
+            print(f"  behind a facade re-export (needs the facade edited too): "
+                  f"{len(behind_facade)}")
+            print(f"  named by an odoc link as an intended entry point: "
+                  f"{len(documented)}")
             for module, count in sorted(per_module.items(), key=lambda kv: (-kv[1], kv[0]))[:40]:
                 print(f"  {count:4d}  {module}")
     if args.stanzas:

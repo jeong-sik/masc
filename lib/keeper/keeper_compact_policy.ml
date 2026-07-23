@@ -66,9 +66,11 @@ let register_record_pre_compact
 ;;
 
 type compaction_rejection =
-  | Runtime_identity_unavailable
-  | Summarizer_unavailable
-  | Plan_provider_unavailable
+  | Exact_target_selection_failed
+  | Exact_admission_failed
+  | Exact_execution_context_unavailable
+  | Exact_execution_failed_before_dispatch
+  | Exact_execution_failed_after_dispatch
   | Invalid_compaction_plan
   | Invalid_structure of Keeper_compaction_unit.structural_error
   | No_eligible_history
@@ -77,9 +79,11 @@ type compaction_rejection =
   | Invalid_structural_evidence of Keeper_compaction_evidence.decode_error
 
 let compaction_rejection_to_tag = function
-  | Runtime_identity_unavailable -> "runtime_identity_unavailable"
-  | Summarizer_unavailable -> "summarizer_unavailable"
-  | Plan_provider_unavailable -> "plan_provider_unavailable"
+  | Exact_target_selection_failed -> "exact_target_selection_failed"
+  | Exact_admission_failed -> "exact_admission_failed"
+  | Exact_execution_context_unavailable -> "exact_execution_context_unavailable"
+  | Exact_execution_failed_before_dispatch -> "exact_execution_failed_before_dispatch"
+  | Exact_execution_failed_after_dispatch -> "exact_execution_failed_after_dispatch"
   | Invalid_compaction_plan -> "invalid_compaction_plan"
   | Invalid_structure error ->
     "invalid_structure:" ^ Keeper_compaction_unit.show_structural_error error
@@ -186,74 +190,11 @@ let record_pre_compact
 
 type requested_compaction =
   { messages : Agent_sdk.Types.message list
-  ; selected_runtime_id : string
+  ; exact_execution_evidence :
+      Keeper_compaction_llm_summarizer.exact_execution_evidence
   ; summarized_message_count : int
   ; dropped_message_count : int
   }
-
-type compaction_runtime_source =
-  | Structured_judge
-  | Keeper_chat
-
-let compaction_runtime_source_to_label = function
-  | Structured_judge -> "structured_judge"
-  | Keeper_chat -> "keeper_chat"
-
-(* Exact non-blank runtime id from a lazily-invoked source. Whitespace is used
-   only to reject a blank value; the configured identity is never normalized.
-   Legacy [Failure] results remain unavailable, but are never silent. [f] must
-   be a thunk because OCaml evaluates ordinary arguments before the call. *)
-let runtime_id_opt ~keeper_name ~source (f : unit -> string) =
-  match f () with
-  | runtime_id ->
-    if String.trim runtime_id = ""
-    then (
-      Log.Keeper.warn ~keeper_name
-        "compaction runtime source is blank source=%s"
-        (compaction_runtime_source_to_label source);
-      None)
-    else Some runtime_id
-  | exception Failure detail ->
-    Log.Keeper.warn ~keeper_name
-      "compaction runtime source unavailable source=%s: %s"
-      (compaction_runtime_source_to_label source)
-      detail;
-    None
-;;
-
-(* The structured-judge lane is schema-capable by construction (RFC-0307):
-   every consumer that needs provider-native structured output (board
-   attention judgment, failure judgment, HITL summary) routes there instead of
-   inheriting a keeper's own chat assignment. Compaction used to be the one
-   exception, sourcing its runtime solely from the keeper's chat assignment
-   ([Keeper_meta_contract.runtime_id_of_meta]) — which, for most of the fleet,
-   resolves to [runtime].default. That default is picked for chat throughput,
-   not schema support, so schema-ineligible chat models (e.g.
-   deepseek-v4-flash) left compaction permanently rejecting with
-   [Summarizer_unavailable]: those keepers could never compact, so their
-   history only grew until every turn hit a provider ContextOverflow (#25051).
-
-   Trying the structured-judge id first fixes that without weakening the
-   fail-closed schema check in
-   [Keeper_compaction_llm_summarizer.eligible_candidate]: it is just a
-   higher-priority *candidate*, still filtered for schema support like any
-   other. The keeper's own chat runtime stays as a later candidate — sound
-   only because that per-candidate schema filter still applies to it, so an
-   already-eligible chat model (or an operator-configured compaction lane) is
-   never displaced. *)
-let compaction_runtime_ids (meta : keeper_meta) =
-  List.filter_map
-    Fun.id
-    [ runtime_id_opt
-        ~keeper_name:meta.name
-        ~source:Structured_judge
-        Runtime.runtime_id_for_structured_judge
-    ; runtime_id_opt
-        ~keeper_name:meta.name
-        ~source:Keeper_chat
-        (fun () -> Keeper_meta_contract.runtime_id_of_meta meta)
-    ]
-;;
 
 let unit_message_count = function
   | Keeper_compaction_unit.Ordinary_message _ -> 1
@@ -267,49 +208,114 @@ let selected_message_count units selected =
     0
     selected
 ;;
-let requested_messages (meta : keeper_meta) messages =
+let summarization_rejection = function
+  | Keeper_compaction_llm_summarizer.Exact_target_selection_failed ->
+    Exact_target_selection_failed
+  | Keeper_compaction_llm_summarizer.Exact_admission_failed -> Exact_admission_failed
+  | Keeper_compaction_llm_summarizer.Exact_execution_context_unavailable ->
+    Exact_execution_context_unavailable
+  | Keeper_compaction_llm_summarizer.Exact_execution_failed_before_dispatch ->
+    Exact_execution_failed_before_dispatch
+  | Keeper_compaction_llm_summarizer.Exact_execution_failed_after_dispatch ->
+    Exact_execution_failed_after_dispatch
+  | Keeper_compaction_llm_summarizer.Invalid_plan -> Invalid_compaction_plan
+;;
+
+let requested_messages_with_plan
+      ~(plan_for_units :
+         units:Keeper_compaction_unit.closed_unit list ->
+         ( Keeper_compaction_llm_summarizer.compaction_plan
+           * Keeper_compaction_llm_summarizer.exact_execution_evidence
+         , Keeper_compaction_llm_summarizer.summarization_failure )
+           result)
+      messages
+  =
   match Keeper_compaction_unit.partition ~quarantine:true messages with
   | Error error -> Error (Invalid_structure error)
   | Ok { closed_prefix = []; _ } -> Error No_eligible_history
   | Ok { closed_prefix = units; protected_suffix } ->
+    (* Persistence-gate precondition, checked BEFORE the summarizer runs.
+
+       [partition ~quarantine:true] tolerates a structural break by freezing
+       the valid prefix and moving the break plus its successors into
+       [protected_suffix]. The persist boundary does not tolerate it: a
+       checkpoint must preserve every message exactly, so it runs
+       [Keeper_compaction_unit.validate] with quarantine off
+       (keeper_context_core.ml:71 -> Tool_history_invalid ->
+       Invalid_structural_source). Because quarantine PRESERVES the break in
+       [protected_suffix], that break is carried into the compacted checkpoint
+       and rejected there — after the summarizer call has already been paid
+       for. [validate messages] failing therefore implies the compacted result
+       fails too, so rejecting here refuses no compaction that could have
+       persisted.
+
+       The observable outcome is deliberately NOT identical to the late
+       failure, and the difference is the point:
+
+       - Late: [commit_prepared_compaction] returns [Error], which
+         [Keeper_manual_compaction.run_commit] folds into its catch-all
+         [Error (Recovery _)] -> [Manual_compaction_failed] -> [Requeue
+         Context_compaction_retry]. That settlement is not an ack
+         (keeper_heartbeat_loop.ml), so the same doomed request is re-driven
+         every cycle — one summarizer call each time. This is the live
+         livelock: 102 failures and 104 compaction LLM calls in the 74 minutes
+         after the #25413 build went live.
+       - Early: the typed [No_compaction] arm of
+         [Keeper_manual_compaction.finish_preparation] acks and settles
+         terminally, with a ledger row and a [compaction_rejected] log line.
+
+       Terminating is correct here because [validate] rejection is monotone
+       under append: appending messages never repairs an existing structural
+       break, so retrying the identical source cannot succeed.
+
+       Because this gate precedes summarizer selection, a keeper with BOTH a
+       broken history and an unavailable summarizer now reports
+       [Invalid_structure] (terminal) rather than [Summarizer_unavailable]
+       (retryable). That ordering is intended: the structural break is the
+       condition that no retry can clear.
+
+       Scope: this stops the retry loop and its cost. It does not make a
+       structurally broken history compactable — the break has to be prevented
+       at the write boundary that admitted a tool_use with no matching
+       tool_result (#25443). *)
+    (match Keeper_compaction_unit.validate messages with
+     | Error error -> Error (Invalid_structure error)
+     | Ok () ->
     if not (Keeper_compaction_llm_summarizer.has_eligible_units units)
     then Error No_eligible_history
     else
-      (match compaction_runtime_ids meta with
-       | [] -> Error Runtime_identity_unavailable
-       | runtime_ids ->
-         (match
-            Keeper_compaction_llm_summarizer.make
-              ~runtime_ids
-              ~keeper_name:meta.name
-              ()
-          with
-          | None -> Error Summarizer_unavailable
-          | Some summarize ->
-            (match summarize ~units with
-             | Error Keeper_compaction_llm_summarizer.Provider_unavailable ->
-               Error Plan_provider_unavailable
-             | Error Keeper_compaction_llm_summarizer.Invalid_plan ->
-               Error Invalid_compaction_plan
-             | Ok plan ->
-               if not (Keeper_compaction_llm_summarizer.has_changes plan)
-               then Error Structurally_unchanged
-               else
-                 Ok
-                   { messages =
-                       Keeper_compaction_llm_summarizer.apply plan
-                       @ protected_suffix
-                   ; selected_runtime_id =
-                       Keeper_compaction_llm_summarizer.selected_runtime_id plan
-                   ; summarized_message_count =
-                       selected_message_count
-                         units
-                         (Keeper_compaction_llm_summarizer.summarized_indices plan)
-                   ; dropped_message_count =
-                       selected_message_count
-                         units
-                         (Keeper_compaction_llm_summarizer.dropped_indices plan)
-                   })))
+      (match plan_for_units ~units with
+       | Error failure -> Error (summarization_rejection failure)
+       | Ok (plan, exact_execution_evidence) ->
+            if not (Keeper_compaction_llm_summarizer.has_changes plan)
+            then Error Structurally_unchanged
+            else
+              Ok
+                { messages =
+                    Keeper_compaction_llm_summarizer.apply plan @ protected_suffix
+                ; exact_execution_evidence
+                ; summarized_message_count =
+                    selected_message_count
+                      units
+                      (Keeper_compaction_llm_summarizer.summarized_indices plan)
+                ; dropped_message_count =
+                    selected_message_count
+                      units
+                      (Keeper_compaction_llm_summarizer.dropped_indices plan)
+                }))
+;;
+
+let requested_messages (meta : keeper_meta) messages =
+  requested_messages_with_plan
+    ~plan_for_units:(fun ~units ->
+      match Keeper_compaction_llm_summarizer.make ~keeper_name:meta.name () with
+      | None -> Error Keeper_compaction_llm_summarizer.Exact_execution_context_unavailable
+      | Some summarize ->
+        summarize ~units
+        |> Result.map (fun completed ->
+          ( Keeper_compaction_llm_summarizer.completed_plan completed
+          , Keeper_compaction_llm_summarizer.completed_exact_execution_evidence completed )))
+    messages
 ;;
 
 let tool_block_counts messages =
@@ -358,7 +364,8 @@ let log_rejection ~meta ~trigger ~reason ~checkpoint_bytes ~message_count =
        reason_label)
 ;;
 
-let compact_for_request_typed
+let compact_for_request_typed_with
+      ~requested_messages
       ~(meta : keeper_meta)
       ~(trigger : Compaction_trigger.t)
       (ctx : working_context)
@@ -372,7 +379,7 @@ let compact_for_request_typed
     ~message_count:before_messages
     ~strategies:strategy_names
     ~trigger;
-  match requested_messages meta (messages_of_context ctx) with
+  match requested_messages (messages_of_context ctx) with
   | Error reason ->
     log_rejection
       ~meta
@@ -411,8 +418,22 @@ let compact_for_request_typed
         tool_block_counts (messages_of_context compacted_ctx)
       in
       match
+        let exact = requested.exact_execution_evidence in
         Keeper_compaction_evidence.create
-          ~selected_runtime_id:requested.selected_runtime_id
+          ~selected_target_ref:
+            (Keeper_compaction_llm_summarizer.exact_execution_evidence_selected_target_ref exact)
+          ~target_identity_fingerprint:
+            (Keeper_compaction_llm_summarizer.exact_execution_evidence_target_identity_fingerprint exact)
+          ~catalog_generation_fingerprint:
+            (Keeper_compaction_llm_summarizer.exact_execution_evidence_catalog_generation_fingerprint exact)
+          ~catalog_evidence_sha256:
+            (Keeper_compaction_llm_summarizer.exact_execution_evidence_catalog_evidence_sha256 exact)
+          ~plan_fingerprint:
+            (Keeper_compaction_llm_summarizer.exact_execution_evidence_plan_fingerprint exact)
+          ~receipt_plan_fingerprint:
+            (Keeper_compaction_llm_summarizer.exact_execution_evidence_receipt_plan_fingerprint exact)
+          ~receipt_request_body_sha256:
+            (Keeper_compaction_llm_summarizer.exact_execution_evidence_receipt_request_body_sha256 exact)
           ~before_checkpoint_bytes:before_bytes
           ~after_checkpoint_bytes:after_bytes
           ~before_message_count:before_messages
@@ -450,6 +471,10 @@ let compact_for_request_typed
         })
 ;;
 
-module For_testing = struct
-  let compaction_runtime_ids = compaction_runtime_ids
-end
+let compact_for_request_typed ~meta ~trigger ctx =
+  compact_for_request_typed_with
+    ~requested_messages:(requested_messages meta)
+    ~meta
+    ~trigger
+    ctx
+;;

@@ -11,6 +11,10 @@ type keeper_persistence_report =
   { shutdown : Keeper_shutdown_runtime.restored_inventory
   ; queue : Keeper_chat_queue.configure_report
   ; requests : Keeper_msg_async.recovery_report
+  ; fusion_delivery :
+      ( Fusion_delivery_projector.recovery_report
+      , Fusion_delivery_obligation.error )
+        result
   }
 
 type keeper_persistence_failure_phase =

@@ -641,14 +641,6 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
        ) request reqd)
-  |> Http.Router.get "/api/v1/dashboard/goal-loop/status" (fun request reqd ->
-       with_public_read (fun state req reqd ->
-         let json =
-           Dashboard_goal_loop.status_json
-             ~base_path:(Mcp_server.workspace_config state).base_path ()
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
-       ) request reqd)
   (* RFC-0266 §7 Phase 4: read-only snapshot of the in-memory fusion run registry
      (in-progress + recently completed). The fusion panel fetches this on load and
      re-fetches on the [fusion_run_status] SSE event. Registry reads are O(runs)
@@ -1700,7 +1692,10 @@ let add_routes ~sw ~clock router =
 
   (* Keeper GET sub-routes: /config, /chat/history, /trajectory *)
   |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
-       if Keeper_api.is_keeper_checkpoints_get_path (Http.Request.path request) then
+       if
+         Keeper_api.is_keeper_checkpoints_get_path (Http.Request.path request)
+         || Keeper_api.is_keeper_paused_work_get_path (Http.Request.path request)
+       then
          with_token_permission_auth ~permission:Masc_domain.CanAdmin
            (fun state _agent_name req reqd ->
              Keeper_api.handle_keeper_get_subroutes state req request reqd
@@ -1784,6 +1779,13 @@ let add_routes ~sw ~clock router =
                Http.Request.read_body_async reqd (fun body_str ->
                  Keeper_api.handle_keeper_directive_post
                    ~sw ~clock state agent_name req reqd body_str
+               )
+             ) request reqd
+       | Keeper_api.Keeper_post_paused_work ->
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
+             (fun state _agent_name req reqd ->
+               Http.Request.read_body_async reqd (fun body_str ->
+                 Keeper_api.handle_keeper_paused_work_post state req reqd body_str
                )
              ) request reqd
        | Keeper_api.Keeper_post_catchup_judge ->

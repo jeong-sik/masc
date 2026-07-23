@@ -35,7 +35,6 @@ type failure_kind =
   | Delivery_failed
   | Cancelled
   | Internal_error
-  | Recovery_interrupted
 
 type failure = {
   completed_at : float;
@@ -513,8 +512,6 @@ let commit_failure_for_testing : commit_failure option Atomic.t = Atomic.make No
 let transaction_observer_for_testing :
     (transaction_stage -> unit) option Atomic.t =
   Atomic.make None
-let before_entry_lock_observer_for_testing : (string -> unit) option Atomic.t =
-  Atomic.make None
 let inventory_classified_observer_for_testing : (unit -> unit) option Atomic.t =
   Atomic.make None
 let transition_observer : transition_observer option Atomic.t = Atomic.make None
@@ -855,7 +852,6 @@ let failure_kind_to_string = function
   | Delivery_failed -> "delivery_failed"
   | Cancelled -> "cancelled"
   | Internal_error -> "internal_error"
-  | Recovery_interrupted -> "recovery_interrupted"
 
 let failure_kind_of_string = function
   | "turn_failed" -> Ok Turn_failed
@@ -865,7 +861,6 @@ let failure_kind_of_string = function
   | "delivery_failed" -> Ok Delivery_failed
   | "cancelled" -> Ok Cancelled
   | "internal_error" -> Ok Internal_error
-  | "recovery_interrupted" -> Ok Recovery_interrupted
   | value -> Error (Printf.sprintf "unknown chat queue failure kind: %s" value)
 
 let completion_fields (completion : completion) =
@@ -2178,8 +2173,6 @@ let get_or_create_entry keeper_name =
    the lock normally, and re-raise outside. Any other exception still
    poisons — protected state may genuinely be torn there. *)
 let with_entry_lock keeper_name entry f =
-  Option.iter (fun observer -> observer keeper_name)
-    (Atomic.get before_entry_lock_observer_for_testing);
   let outcome =
     Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
       match f () with
@@ -2806,26 +2799,6 @@ let nack ~keeper_name ~lease_id =
        notify_indeterminate ~keeper_name (Error error);
        `Error error
      | `Unknown_lease -> `Unknown_lease)
-
-let pending_count ~keeper_name =
-  match mutation_context ~keeper_name ~create:false with
-  | Error _ as error -> error
-  | Ok (_, _, None) -> Ok 0
-  | Ok (_, _, Some entry) ->
-    with_entry_lock keeper_name entry (fun () ->
-        match first_blocking_error entry with
-        | Some error -> Error (Snapshot_unavailable error)
-        | None -> Ok entry.pending_count)
-
-let inflight_count ~keeper_name =
-  match mutation_context ~keeper_name ~create:false with
-  | Error _ as error -> error
-  | Ok (_, _, None) -> Ok 0
-  | Ok (_, _, Some entry) ->
-    with_entry_lock keeper_name entry (fun () ->
-        match first_blocking_error entry with
-        | Some error -> Error (Snapshot_unavailable error)
-        | None -> Ok (if Option.is_some entry.inflight then 1 else 0))
 
 let has_active_receipts ~keeper_name =
   match mutation_context ~keeper_name ~create:false with
@@ -3895,7 +3868,6 @@ module For_testing = struct
     Atomic.set transaction_failures_for_testing [];
     Atomic.set commit_failure_for_testing None;
     Atomic.set transaction_observer_for_testing None;
-    Atomic.set before_entry_lock_observer_for_testing None;
     Atomic.set inventory_classified_observer_for_testing None;
     Atomic.set persistence_configuration Unconfigured;
     Atomic.set global_load_errors [];
@@ -3911,13 +3883,9 @@ module For_testing = struct
   let set_transaction_stage_observer observer =
     Atomic.set transaction_observer_for_testing observer
 
-  let set_before_entry_lock_observer observer =
-    Atomic.set before_entry_lock_observer_for_testing observer
-
   let set_inventory_classified_observer observer =
     Atomic.set inventory_classified_observer_for_testing observer
 
-  let failure_kind_of_string = failure_kind_of_string
   let finalize_statement = sqlite_finalize
   let snapshot_path = snapshot_path
 

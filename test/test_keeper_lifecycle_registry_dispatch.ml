@@ -159,15 +159,15 @@ let test_registry_rejects_meta_name_mismatch_update () =
   let base_dir = temp_dir "keeper_lifecycle_registry_meta_mismatch" in
   Fun.protect
     ~finally:(fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-registry-meta-mismatch" () in
-      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      ignore (KR.For_testing.register ~base_path:config.base_path meta.name meta);
       let bad_meta = { meta with name = "wrong-keeper-name" } in
       KR.update_meta ~base_path:config.base_path meta.name bad_meta;
       match KR.get ~base_path:config.base_path meta.name with
@@ -179,18 +179,18 @@ let test_registry_canonicalizes_mismatched_meta_on_register () =
   let base_dir = temp_dir "keeper_lifecycle_registry_register_repair" in
   Fun.protect
     ~finally:(fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let registry_name = "keeper-registry-register-repair" in
       let bad_meta =
         { (make_keeper_meta ~name:"wrong-register-name" ()) with agent_name = "" }
       in
-      ignore (KR.register ~base_path:config.base_path registry_name bad_meta);
+      ignore (KR.For_testing.register ~base_path:config.base_path registry_name bad_meta);
       match KR.get ~base_path:config.base_path registry_name with
       | Some entry ->
           check string "registry repairs meta name" registry_name entry.meta.name;
@@ -203,12 +203,12 @@ let test_registry_reload_meta_from_disk_repairs_stale_meta () =
   let base_dir = temp_dir "keeper_lifecycle_registry_meta_reload" in
   Fun.protect
     ~finally:(fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let name = "keeper-registry-meta-reload" in
       write_keeper_toml
@@ -220,9 +220,9 @@ let test_registry_reload_meta_from_disk_repairs_stale_meta () =
         ];
       let persisted_meta = make_keeper_meta ~name () in
       let stale_meta = { persisted_meta with instructions = "stale instructions" } in
-      ignore (KR.register ~base_path:config.base_path name stale_meta);
+      ignore (KR.For_testing.register ~base_path:config.base_path name stale_meta);
       write_keeper_meta_json_for_name config name persisted_meta;
-      match KR.reload_meta_from_disk ~base_path:config.base_path name with
+      match KR.For_testing.reload_meta_from_disk ~base_path:config.base_path name with
       | Ok (Some entry) ->
           check string "reload applies base-path TOML instructions" "fresh instructions"
             entry.meta.instructions
@@ -236,10 +236,10 @@ let test_dispatch_keeper_phase_event_uses_workspace_base_path () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-phase-regression" () in
-      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      ignore (KR.For_testing.register ~base_path:config.base_path meta.name meta);
       KEC.dispatch_keeper_phase_event
         ~config
         ~origin:KR.Post_turn_lifecycle
@@ -258,10 +258,10 @@ let test_dispatch_compaction_completed_uses_workspace_base_path () =
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-outcome-regression" () in
-      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      ignore (KR.For_testing.register ~base_path:config.base_path meta.name meta);
       KEC.dispatch_keeper_phase_event
         ~config
         ~origin:KR.Post_turn_lifecycle
@@ -282,15 +282,15 @@ let test_compaction_runs_from_failing_health_lane () =
   let base_dir = temp_dir "keeper_lifecycle_registry_failing_compaction" in
   Fun.protect
     ~finally:(fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-failing-compaction" () in
-      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      ignore (KR.For_testing.register ~base_path:config.base_path meta.name meta);
       KEC.dispatch_keeper_phase_event
         ~config
         ~keeper_name:meta.name
@@ -325,15 +325,15 @@ let test_compaction_completion_without_started_is_nonfatal () =
   let base_dir = temp_dir "keeper_lifecycle_registry_missing_start" in
   Fun.protect
     ~finally:(fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-missing-compaction-start" () in
-      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      ignore (KR.For_testing.register ~base_path:config.base_path meta.name meta);
       let labels =
         [ ("keeper", meta.name); ("event", "compaction_completed") ]
       in
@@ -365,15 +365,15 @@ let test_compaction_restarts_after_done_stage () =
   let base_dir = temp_dir "keeper_lifecycle_registry_repeat_compaction" in
   Fun.protect
     ~finally:(fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-repeat-compaction" () in
-      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      ignore (KR.For_testing.register ~base_path:config.base_path meta.name meta);
       let run_compaction label =
         KEC.dispatch_keeper_phase_event
           ~config
@@ -403,15 +403,15 @@ let test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event () =
   let base_dir = temp_dir "keeper_lifecycle_registry_origin_guard" in
   Fun.protect
     ~finally:(fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let meta = make_keeper_meta ~name:"keeper-origin-guard" () in
-      ignore (KR.register ~base_path:config.base_path meta.name meta);
+      ignore (KR.For_testing.register ~base_path:config.base_path meta.name meta);
       let labels =
         [ ("keeper", meta.name); ("event", "compaction_started") ]
       in
@@ -501,7 +501,7 @@ let test_manual_compaction_preserves_failed_failure_dispatch () =
     KMC.failure_to_string
       (KMC.Recovery
          ( Masc.Keeper_post_turn.Compaction_rejected
-             Masc.Keeper_compact_policy.Summarizer_unavailable
+             Masc.Keeper_compact_policy.Exact_execution_context_unavailable
          , Error failure_dispatch ))
   in
   check bool "recovery failure dispatch rejection is rendered" true
@@ -511,13 +511,13 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
   let base_dir = temp_dir "keeper_lifecycle_keepalive_rejection" in
   Fun.protect
     ~finally:(fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
       Eio_main.run @@ fun env ->
       Eio.Switch.run @@ fun sw ->
       Fs_compat.set_fs (Eio.Stdenv.fs env);
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let ctx : _ Keeper_types_profile.context =
         {
@@ -558,14 +558,14 @@ let test_publication_recovery_turn_resolution_is_filesystem_idle () =
   let base_dir = temp_dir "keeper_publication_recovery_scope" in
   Fun.protect
     ~finally:(fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let keeper_name = "publication-scope-exact-lane" in
       let meta = make_keeper_meta ~name:keeper_name () in
-      let entry = KR.register ~base_path:config.base_path keeper_name meta in
+      let entry = KR.For_testing.register ~base_path:config.base_path keeper_name meta in
       let provider_reads = Atomic.make 0 in
       let provider () =
         Atomic.incr provider_reads;
@@ -596,10 +596,10 @@ let test_publication_recovery_scope_preserves_typed_lookup_failures () =
   let base_dir = temp_dir "keeper_publication_recovery_failures" in
   Fun.protect
     ~finally:(fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
-      KR.clear ();
+      KR.For_testing.clear ();
       let config = Masc.Workspace.default_config base_dir in
       let keeper_name = "publication-scope-failures" in
       let provider =
@@ -627,7 +627,7 @@ let test_publication_recovery_scope_preserves_typed_lookup_failures () =
            ~base_path:config.base_path
            ~keeper_name);
       let entry =
-        KR.register
+        KR.For_testing.register
           ~base_path:config.base_path
           keeper_name
           (make_keeper_meta ~name:keeper_name ())

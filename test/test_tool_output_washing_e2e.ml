@@ -87,11 +87,13 @@ let test_full_flow_externalize_hydrate_serve () =
 
       (* Step 4: Marker round-trips through Tool_output.decode. *)
       (match O.decode_from_oas marker with
-       | O.Stored { sha256 = decoded_sha; bytes; preview = _; mime } ->
+       | O.Decoded { sha256 = decoded_sha; bytes; preview = _; mime } ->
            Alcotest.(check string) "decoded sha matches" sha256 decoded_sha;
            Alcotest.(check int) "decoded bytes" (String.length payload) bytes;
            Alcotest.(check string) "decoded mime" "text/plain" mime
-       | O.Inline _ -> Alcotest.fail "decode lost the Stored variant");
+       | O.Not_marker -> Alcotest.fail "decode lost the marker"
+       | O.Invalid_marker { detail } ->
+           Alcotest.failf "decode reported Invalid_marker: %s" detail);
 
       (* Step 5: Build a message list with the marker as a ToolResult.
          The hydrator should re-inflate it because keep_recent >= 1. *)

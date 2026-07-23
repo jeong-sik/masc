@@ -116,9 +116,42 @@ let test_removed_goal_is_rejected_before_parse () =
       Fs_compat.save_file
         path
         {|{"name":"config-key","agent_name":"config-key","trace_id":"trace-config-key","goal":"legacy profile goal"}|};
+      let bytes_before = Fs_compat.load_file path in
       (match Keeper_meta_store.read_meta_file_path path with
-       | Error _ -> ()
-       | Ok _ -> Alcotest.fail "removed goal must fail closed"))
+       | Error err ->
+         Alcotest.(check bool)
+           "error gives exact reset remediation"
+           true
+           (String_util.contains_substring err "runtime reset required");
+         Alcotest.(check bool)
+           "error identifies the unknown goal key"
+           true
+           (String_util.contains_substring err "goal")
+       | Ok _ -> Alcotest.fail "removed goal must fail closed");
+      Alcotest.(check string)
+        "rejected metadata remains byte-for-byte unchanged"
+        bytes_before
+        (Fs_compat.load_file path))
+
+let test_unknown_keys_pure_contract () =
+  Alcotest.(check (list string))
+    "canonical object has no unknown keys"
+    []
+    (Keeper_meta_json.unknown_keeper_meta_keys (canonical_only_meta_json ()));
+  Alcotest.(check (list string))
+    "unknown keys preserve first-seen order"
+    [ "goal"; "future_runtime_field" ]
+    (Keeper_meta_json.unknown_keeper_meta_keys
+       (`Assoc
+         [ ("name", `String "x")
+         ; ("goal", `String "removed")
+         ; ("future_runtime_field", `Bool true)
+         ; ("goal", `String "duplicate")
+         ]));
+  Alcotest.(check (list string))
+    "non-object JSON has no top-level unknown keys"
+    []
+    (Keeper_meta_json.unknown_keeper_meta_keys (`List []))
 
 let () =
   Alcotest.run
@@ -144,6 +177,10 @@ let () =
             "removed goal is rejected before parse"
             `Quick
             test_removed_goal_is_rejected_before_parse
+        ; Alcotest.test_case
+            "unknown key classifier preserves pure contract"
+            `Quick
+            test_unknown_keys_pure_contract
         ] )
     ]
 ;;

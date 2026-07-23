@@ -608,10 +608,12 @@ let cursor_result ~ledger_path result =
 ;;
 
 let invalidate_cached entry observed =
+  (* fire-and-forget: false means a concurrent writer won; the loser simply keeps no stale cache *)
   ignore (Atomic.compare_and_set entry.cached observed None : bool)
 ;;
 
 let publish_cached entry observed view =
+  (* fire-and-forget: false means a concurrent writer won; readers fall back to recomputing *)
   ignore (Atomic.compare_and_set entry.cached observed (Some view) : bool)
 ;;
 

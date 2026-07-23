@@ -2231,6 +2231,7 @@ let private_jsonl_read_stable_lock_state path fd =
     else
       (match private_jsonl_capture Read_stable_lock_state (fun () ->
          let bytes = Bytes.create observed_length in
+         (* fire-and-forget: seek target is fixed at 0; a failed lseek surfaces as a short/garbage read below *)
          ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
          let rec read_all offset =
            if offset = observed_length
@@ -2267,6 +2268,7 @@ let private_jsonl_initialize_stable_lock ~io ~dir fd =
   in
   let* () =
     private_jsonl_capture Write_stable_lock_state (fun () ->
+      (* fire-and-forget: seek target is fixed at 0; a failed lseek surfaces as a short write below *)
       ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
       private_jsonl_write_substring_all
         fd

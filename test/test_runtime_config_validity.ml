@@ -695,6 +695,42 @@ let test_deployment_oas_model_catalog_modality_priorities_resolve () =
               (caps.modality_priority = expected)))
     rows
 
+let test_exact_output_lane_config_is_ordered_and_rejects_duplicates () =
+  let valid =
+    "[runtime.exact_output_lanes.compaction_exact]\nslots = [\"slot-b\", \"slot-a\"]\n"
+  in
+  (match Runtime_toml.parse_string valid with
+   | Error _ -> fail "valid exact-output lane must parse"
+   | Ok config ->
+     (match config.Runtime_schema.exact_output_lane_decls with
+      | [ lane ] ->
+        check (list string) "declaration order is preserved"
+          [ "slot-b"; "slot-a" ] lane.slot_ids
+      | _ -> fail "exactly one exact-output lane must parse"));
+  let duplicate =
+    "[runtime.exact_output_lanes.compaction_exact]\nslots = [\"slot-a\", \"slot-a\"]\n"
+  in
+  match Runtime_toml.parse_string duplicate with
+  | Error _ -> ()
+  | Ok _ -> fail "duplicate exact-output slots must fail config parsing"
+
+let test_exact_output_lane_rejects_unknown_key () =
+  let config =
+    "[runtime.exact_output_lanes.compaction_exact]\n\
+     slots = [\"slot-a\"]\n\
+     slost = [\"slot-b\"]\n"
+  in
+  match Runtime_toml.parse_string config with
+  | Error errors ->
+    check bool "unknown exact-output lane key is named" true
+      (List.exists
+         (fun (error : Runtime_toml.parse_error) ->
+            String.equal
+              error.path
+              "runtime.exact_output_lanes.compaction_exact.slost")
+         errors)
+  | Ok _ -> fail "unknown exact-output lane key must fail config parsing"
+
 let test_repo_runtime_toml_loads () =
   with_deployment_oas_model_catalog @@ fun _catalog ->
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
@@ -718,6 +754,22 @@ let test_repo_runtime_toml_loads () =
       "structured judge runtime"
       (Some "ollama_cloud_native.minimax-m3-native-structured")
       structured_judge;
+    (match Runtime_toml.parse_file path with
+     | Error _ -> fail "repo runtime.toml exact-output lanes must parse"
+     | Ok config ->
+       (match
+          List.find_opt
+            (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+               String.equal lane.id "compaction_exact")
+            config.exact_output_lane_decls
+        with
+        | None -> fail "repo runtime.toml must declare compaction_exact"
+        | Some lane ->
+          check
+            (list string)
+            "compaction_exact preserves opaque declaration order"
+            [ "deepseek.deepseek-v4-pro" ]
+            lane.slot_ids));
     check (option (float 0.0)) "Ollama Cloud connect timeout override"
       (Some 600.0)
       default.provider_config.connect_timeout_s;
@@ -2513,6 +2565,10 @@ let () =
           test_case
             "deployment OAS catalog modality priority strings resolve"
             `Quick test_deployment_oas_model_catalog_modality_priorities_resolve;
+          test_case "exact-output lane config is ordered and rejects duplicates" `Quick
+            test_exact_output_lane_config_is_ordered_and_rejects_duplicates;
+          test_case "exact-output lane rejects unknown keys" `Quick
+            test_exact_output_lane_rejects_unknown_key;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
           test_case

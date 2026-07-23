@@ -27,6 +27,8 @@ type escalation_reason =
       { judge_runtime_id : string
       ; rationale : string
       }
+  | Compaction_execution_may_have_dispatched
+  | Compaction_domain_invalid_output
   | Compaction_retry_exhausted of
       { attempts : int
       ; detail : string
@@ -55,6 +57,8 @@ type no_compaction_reason =
   | Invalid_structural_source
   | Structurally_unchanged
   | Checkpoint_not_reduced
+  | Execution_may_have_dispatched
+  | Domain_invalid_output
 
 type no_compaction =
   { source : Keeper_checkpoint_ref.t
@@ -95,6 +99,8 @@ let escalation_reason_requests_external_input = function
   | Failure_judgment_external_input_requested _ -> true
   | Failure_judgment_requested
   | Failure_judgment_boundary_failed _
+  | Compaction_execution_may_have_dispatched
+  | Compaction_domain_invalid_output
   | Compaction_retry_exhausted _
   | Compaction_floor_exceeded _ -> false
 ;;
@@ -400,6 +406,9 @@ let escalation_reason_label = function
   | Failure_judgment_boundary_failed _ -> "failure_judgment_boundary_failed"
   | Failure_judgment_external_input_requested _ ->
     "failure_judgment_external_input_requested"
+  | Compaction_execution_may_have_dispatched ->
+    "compaction_execution_may_have_dispatched"
+  | Compaction_domain_invalid_output -> "compaction_domain_invalid_output"
   | Compaction_retry_exhausted _ -> "compaction_retry_exhausted"
   | Compaction_floor_exceeded _ -> "compaction_floor_exceeded"
 ;;
@@ -413,6 +422,8 @@ let escalation_reason_detail_to_yojson = function
       [ "judge_runtime_id", `String judge_runtime_id
       ; "rationale", `String rationale
       ]
+  | Compaction_execution_may_have_dispatched
+  | Compaction_domain_invalid_output -> `Null
   | Compaction_retry_exhausted { attempts; detail } ->
     `Assoc [ "attempts", `Int attempts; "detail", `String detail ]
   | Compaction_floor_exceeded { attempts; detail } ->
@@ -447,6 +458,10 @@ let exact_reason_fields ~context expected fields =
 let escalation_reason_of_wire ~label ~detail_json =
   match label, detail_json with
   | "failure_judgment_requested", `Null -> Ok Failure_judgment_requested
+  | "compaction_execution_may_have_dispatched", `Null ->
+    Ok Compaction_execution_may_have_dispatched
+  | "compaction_domain_invalid_output", `Null ->
+    Ok Compaction_domain_invalid_output
   | "failure_judgment_boundary_failed", `Assoc fields ->
     let* () =
       exact_reason_fields
@@ -526,6 +541,9 @@ let escalation_reason_of_wire ~label ~detail_json =
     in
     Ok (Failure_judgment_external_input_requested { judge_runtime_id; rationale })
   | "failure_judgment_requested", _ ->
+    Error (Printf.sprintf "%s reason_detail must be null" label)
+  | ( "compaction_execution_may_have_dispatched"
+    | "compaction_domain_invalid_output" ), _ ->
     Error (Printf.sprintf "%s reason_detail must be null" label)
   | ( "failure_judgment_boundary_failed"
     | "failure_judgment_external_input_requested" ), _ ->
@@ -715,6 +733,20 @@ let validate_settlement = function
   | Escalate { reason = Compaction_floor_exceeded _; successor = None } -> Ok ()
   | Escalate { reason = Compaction_floor_exceeded _; successor = Some _ } ->
     Error "compaction floor exhaustion must not enqueue a successor"
+  | Escalate
+      { reason =
+          ( Compaction_execution_may_have_dispatched
+          | Compaction_domain_invalid_output )
+      ; successor = None
+      } ->
+    Ok ()
+  | Escalate
+      { reason =
+          ( Compaction_execution_may_have_dispatched
+          | Compaction_domain_invalid_output )
+      ; successor = Some _
+      } ->
+    Error "terminal exact-output compaction must not enqueue a successor"
 ;;
 
 (* Pure receipt-vs-stimuli invariant. Kept in ONE place so the live settle
@@ -1543,6 +1575,8 @@ let no_compaction_reason_label = function
   | Invalid_structural_source -> "invalid_structural_source"
   | Structurally_unchanged -> "structurally_unchanged"
   | Checkpoint_not_reduced -> "checkpoint_not_reduced"
+  | Execution_may_have_dispatched -> "execution_may_have_dispatched"
+  | Domain_invalid_output -> "domain_invalid_output"
 ;;
 
 let no_compaction_reason_of_label = function
@@ -1550,6 +1584,8 @@ let no_compaction_reason_of_label = function
   | "invalid_structural_source" -> Ok Invalid_structural_source
   | "structurally_unchanged" -> Ok Structurally_unchanged
   | "checkpoint_not_reduced" -> Ok Checkpoint_not_reduced
+  | "execution_may_have_dispatched" -> Ok Execution_may_have_dispatched
+  | "domain_invalid_output" -> Ok Domain_invalid_output
   | reason -> Error (Printf.sprintf "unknown no-compaction reason: %s" reason)
 ;;
 

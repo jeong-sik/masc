@@ -1,5 +1,11 @@
 type t =
-  { selected_runtime_id : string
+  { selected_target_ref : string
+  ; target_identity_fingerprint : string
+  ; catalog_generation_fingerprint : string
+  ; catalog_evidence_sha256 : string
+  ; plan_fingerprint : string
+  ; receipt_plan_fingerprint : string
+  ; receipt_request_body_sha256 : string
   ; before_checkpoint_bytes : int
   ; after_checkpoint_bytes : int
   ; before_message_count : int
@@ -13,6 +19,13 @@ type t =
   }
 
 type field =
+  | Selected_target_ref
+  | Target_identity_fingerprint
+  | Catalog_generation_fingerprint
+  | Catalog_evidence_sha256
+  | Plan_fingerprint
+  | Receipt_plan_fingerprint
+  | Receipt_request_body_sha256
   | Before_checkpoint_bytes
   | After_checkpoint_bytes
   | Before_message_count
@@ -27,7 +40,9 @@ type field =
 type field_error =
   | Missing
   | Duplicate
+  | Expected_string
   | Expected_integer
+  | Blank_string
   | Negative_integer
 
 type measure =
@@ -40,7 +55,10 @@ type decode_error =
   | Expected_object
   | Unknown_field of string
   | Invalid_field of field * field_error
-  | Empty_selected_runtime_id
+  | Plan_fingerprint_mismatch of
+      { plan_fingerprint : string
+      ; receipt_plan_fingerprint : string
+      }
   | Invalid_transition of measure * int * int
   | Invalid_message_accounting of
       { before_message_count : int
@@ -51,6 +69,13 @@ type decode_error =
   | No_messages_compacted
 
 let field_name = function
+  | Selected_target_ref -> "selected_target_ref"
+  | Target_identity_fingerprint -> "target_identity_fingerprint"
+  | Catalog_generation_fingerprint -> "catalog_generation_fingerprint"
+  | Catalog_evidence_sha256 -> "catalog_evidence_sha256"
+  | Plan_fingerprint -> "plan_fingerprint"
+  | Receipt_plan_fingerprint -> "receipt_plan_fingerprint"
+  | Receipt_request_body_sha256 -> "receipt_request_body_sha256"
   | Before_checkpoint_bytes -> "before_checkpoint_bytes"
   | After_checkpoint_bytes -> "after_checkpoint_bytes"
   | Before_message_count -> "before_message_count"
@@ -63,7 +88,18 @@ let field_name = function
   | After_tool_result_count -> "after_tool_result_count"
 ;;
 
-let all_fields =
+let exact_fields =
+  [ Selected_target_ref
+  ; Target_identity_fingerprint
+  ; Catalog_generation_fingerprint
+  ; Catalog_evidence_sha256
+  ; Plan_fingerprint
+  ; Receipt_plan_fingerprint
+  ; Receipt_request_body_sha256
+  ]
+;;
+
+let integer_fields =
   [ Before_checkpoint_bytes
   ; After_checkpoint_bytes
   ; Before_message_count
@@ -77,17 +113,18 @@ let all_fields =
   ]
 ;;
 
-let wire_field_names = List.map field_name all_fields
+let wire_field_names = List.map field_name (exact_fields @ integer_fields)
 let exact_evidence_key = "exact_evidence"
 
-let known_field name =
-  List.exists (fun field -> String.equal name (field_name field)) all_fields
+let known_field name = List.exists (String.equal name) wire_field_names
 ;;
 
 let field_error_to_string = function
   | Missing -> "missing"
   | Duplicate -> "duplicate"
+  | Expected_string -> "expected_string"
   | Expected_integer -> "expected_integer"
+  | Blank_string -> "blank_string"
   | Negative_integer -> "negative_integer"
 ;;
 
@@ -106,7 +143,12 @@ let decode_error_to_string = function
       "invalid_field:%s:%s"
       (field_name field)
       (field_error_to_string error)
-  | Empty_selected_runtime_id -> "empty_selected_runtime_id"
+  | Plan_fingerprint_mismatch
+      { plan_fingerprint; receipt_plan_fingerprint } ->
+    Printf.sprintf
+      "plan_fingerprint_mismatch:plan=%s:receipt=%s"
+      plan_fingerprint
+      receipt_plan_fingerprint
   | Invalid_transition (measure, before, after) ->
     Printf.sprintf
       "invalid_transition:%s:%d:%d"
@@ -141,6 +183,20 @@ let message_accounting_is_exact
   && after_message_count = before_message_count - dropped_message_count
 ;;
 
+let decode_nonblank_string fields field =
+  match
+    List.filter
+      (fun (name, _) -> String.equal name (field_name field))
+      fields
+  with
+  | [] -> Error (Invalid_field (field, Missing))
+  | [ _, `String value ] when String.trim value = "" ->
+    Error (Invalid_field (field, Blank_string))
+  | [ _, `String value ] -> Ok value
+  | [ _ ] -> Error (Invalid_field (field, Expected_string))
+  | _ -> Error (Invalid_field (field, Duplicate))
+;;
+
 let decode_nonnegative_integer fields field =
   match
     List.filter
@@ -155,7 +211,13 @@ let decode_nonnegative_integer fields field =
 ;;
 
 let create
-      ~selected_runtime_id
+      ~selected_target_ref
+      ~target_identity_fingerprint
+      ~catalog_generation_fingerprint
+      ~catalog_evidence_sha256
+      ~plan_fingerprint
+      ~receipt_plan_fingerprint
+      ~receipt_request_body_sha256
       ~before_checkpoint_bytes
       ~after_checkpoint_bytes
       ~before_message_count
@@ -183,11 +245,26 @@ let create
   match List.find_opt (fun (_, value) -> value < 0) values with
   | Some (field, _) -> Error (Invalid_field (field, Negative_integer))
   | None ->
-    (match String.trim selected_runtime_id with
-     | "" ->
-       Error Empty_selected_runtime_id
-     | _ ->
-       if after_checkpoint_bytes >= before_checkpoint_bytes
+    (match
+       List.find_opt
+         (fun (_, value) -> String.trim value = "")
+         [ Selected_target_ref, selected_target_ref
+         ; Target_identity_fingerprint, target_identity_fingerprint
+         ; Catalog_generation_fingerprint, catalog_generation_fingerprint
+         ; Catalog_evidence_sha256, catalog_evidence_sha256
+         ; Plan_fingerprint, plan_fingerprint
+         ; Receipt_plan_fingerprint, receipt_plan_fingerprint
+         ; Receipt_request_body_sha256, receipt_request_body_sha256
+         ]
+     with
+     | Some (field, _) -> Error (Invalid_field (field, Blank_string))
+     | None ->
+       if not (String.equal plan_fingerprint receipt_plan_fingerprint)
+       then
+         Error
+           (Plan_fingerprint_mismatch
+              { plan_fingerprint; receipt_plan_fingerprint })
+       else if after_checkpoint_bytes >= before_checkpoint_bytes
        then
          Error
            (Invalid_transition
@@ -226,7 +303,13 @@ let create
               })
        else
          Ok
-           { selected_runtime_id
+           { selected_target_ref
+           ; target_identity_fingerprint
+           ; catalog_generation_fingerprint
+           ; catalog_evidence_sha256
+           ; plan_fingerprint
+           ; receipt_plan_fingerprint
+           ; receipt_request_body_sha256
            ; before_checkpoint_bytes
            ; after_checkpoint_bytes
            ; before_message_count
@@ -240,7 +323,7 @@ let create
            })
 ;;
 
-let of_json ~selected_runtime_id = function
+let of_json = function
   | `Assoc fields ->
     let* () =
       match
@@ -251,7 +334,15 @@ let of_json ~selected_runtime_id = function
       | None -> Ok ()
       | Some (name, _) -> Error (Unknown_field name)
     in
+    let string = decode_nonblank_string fields in
     let integer = decode_nonnegative_integer fields in
+    let* selected_target_ref = string Selected_target_ref in
+    let* target_identity_fingerprint = string Target_identity_fingerprint in
+    let* catalog_generation_fingerprint = string Catalog_generation_fingerprint in
+    let* catalog_evidence_sha256 = string Catalog_evidence_sha256 in
+    let* plan_fingerprint = string Plan_fingerprint in
+    let* receipt_plan_fingerprint = string Receipt_plan_fingerprint in
+    let* receipt_request_body_sha256 = string Receipt_request_body_sha256 in
     let* before_checkpoint_bytes = integer Before_checkpoint_bytes in
     let* after_checkpoint_bytes = integer After_checkpoint_bytes in
     let* before_message_count = integer Before_message_count in
@@ -263,7 +354,13 @@ let of_json ~selected_runtime_id = function
     let* before_tool_result_count = integer Before_tool_result_count in
     let* after_tool_result_count = integer After_tool_result_count in
     create
-      ~selected_runtime_id
+      ~selected_target_ref
+      ~target_identity_fingerprint
+      ~catalog_generation_fingerprint
+      ~catalog_evidence_sha256
+      ~plan_fingerprint
+      ~receipt_plan_fingerprint
+      ~receipt_request_body_sha256
       ~before_checkpoint_bytes
       ~after_checkpoint_bytes
       ~before_message_count
@@ -279,7 +376,14 @@ let of_json ~selected_runtime_id = function
 
 let to_json evidence =
   `Assoc
-    [ "before_checkpoint_bytes", `Int evidence.before_checkpoint_bytes
+    [ "selected_target_ref", `String evidence.selected_target_ref
+    ; "target_identity_fingerprint", `String evidence.target_identity_fingerprint
+    ; "catalog_generation_fingerprint", `String evidence.catalog_generation_fingerprint
+    ; "catalog_evidence_sha256", `String evidence.catalog_evidence_sha256
+    ; "plan_fingerprint", `String evidence.plan_fingerprint
+    ; "receipt_plan_fingerprint", `String evidence.receipt_plan_fingerprint
+    ; "receipt_request_body_sha256", `String evidence.receipt_request_body_sha256
+    ; "before_checkpoint_bytes", `Int evidence.before_checkpoint_bytes
     ; "after_checkpoint_bytes", `Int evidence.after_checkpoint_bytes
     ; "before_message_count", `Int evidence.before_message_count
     ; "after_message_count", `Int evidence.after_message_count

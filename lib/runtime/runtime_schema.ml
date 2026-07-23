@@ -223,6 +223,12 @@ type lane_decl =
   }
 [@@deriving show, eq]
 
+type exact_output_lane_decl =
+  { id : string
+  ; slot_ids : string list
+  }
+[@@deriving show, eq]
+
 (** {1 Top-level config}
 
     Routes/aliases/profiles/system_targets/strategy from the deleted
@@ -278,6 +284,10 @@ type config =
     (** [\[runtime.lanes.<id>\]] — ordered failover candidate lists.
         Declarations are resolved against materialized runtimes at load time;
         an unknown candidate id is rejected like [\[runtime\].default]. *)
+  ; exact_output_lane_decls : exact_output_lane_decl list
+    (** Raw ordered OAS target references from
+        [\[runtime.exact_output_lanes.<id>\]]. MASC does not interpret them as
+        provider/model runtime bindings. *)
   }
 [@@deriving show, eq]
 

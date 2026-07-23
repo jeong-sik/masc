@@ -1,6 +1,12 @@
 let evidence : Keeper_compaction_evidence.t =
   Keeper_compaction_evidence.create
-    ~selected_runtime_id:"compact-runtime"
+~target_identity_fingerprint:"target-identity"
+~catalog_generation_fingerprint:"catalog-generation"
+~catalog_evidence_sha256:"catalog-evidence"
+~plan_fingerprint:"plan-fingerprint"
+~receipt_plan_fingerprint:"plan-fingerprint"
+~receipt_request_body_sha256:"request-body"
+    ~selected_target_ref:"compact-runtime"
     ~before_checkpoint_bytes:4096
     ~after_checkpoint_bytes:1024
     ~before_message_count:12
@@ -46,7 +52,14 @@ let remove name json =
 let test_projection_and_roundtrip () =
   let expected =
     `Assoc
-      [ "before_checkpoint_bytes", `Int 4096
+      [ "selected_target_ref", `String "compact-runtime"
+      ; "target_identity_fingerprint", `String "target-identity"
+      ; "catalog_generation_fingerprint", `String "catalog-generation"
+      ; "catalog_evidence_sha256", `String "catalog-evidence"
+      ; "plan_fingerprint", `String "plan-fingerprint"
+      ; "receipt_plan_fingerprint", `String "plan-fingerprint"
+      ; "receipt_request_body_sha256", `String "request-body"
+      ; "before_checkpoint_bytes", `Int 4096
       ; "after_checkpoint_bytes", `Int 1024
       ; "before_message_count", `Int 12
       ; "after_message_count", `Int 11
@@ -64,43 +77,16 @@ let test_projection_and_roundtrip () =
     expected
     canonical;
   match
-    Keeper_compaction_evidence.of_json
-      ~selected_runtime_id:evidence.selected_runtime_id
-      canonical
+    Keeper_compaction_evidence.of_json canonical
   with
   | Ok restored -> Alcotest.(check bool) "exact restore" true (restored = evidence)
   | Error _ -> Alcotest.fail "canonical evidence must decode"
 ;;
 
-let test_runtime_identity_is_not_normalized () =
-  let exact_runtime_id = "  exact.runtime  " in
-  match
-    Keeper_compaction_evidence.create
-      ~selected_runtime_id:exact_runtime_id
-      ~before_checkpoint_bytes:8
-      ~after_checkpoint_bytes:4
-      ~before_message_count:2
-      ~after_message_count:1
-      ~summarized_message_count:0
-      ~dropped_message_count:1
-      ~before_tool_use_count:0
-      ~after_tool_use_count:0
-      ~before_tool_result_count:0
-      ~after_tool_result_count:0
-  with
-  | Error error ->
-    Alcotest.failf
-      "exact runtime identity rejected: %s"
-      (Keeper_compaction_evidence.decode_error_to_string error)
-  | Ok evidence ->
-    Alcotest.(check string) "runtime identity remains exact" exact_runtime_id
-      evidence.selected_runtime_id
-;;
-
 let test_rejections () =
   let open Keeper_compaction_evidence in
-  let check label runtime_id expected json =
-    match of_json ~selected_runtime_id:runtime_id json with
+  let check label expected json =
+    match Keeper_compaction_evidence.of_json json with
     | Error actual -> Alcotest.(check bool) label true (actual = expected)
     | Ok _ -> Alcotest.failf "%s: invalid evidence decoded" label
   in
@@ -117,56 +103,62 @@ let test_rejections () =
   in
   let inexact_after = replace "after_message_count" (`Int 10) canonical in
   List.iter
-    (fun (label, runtime_id, expected, json) ->
-       check label runtime_id expected json)
+    (fun (label, expected, json) -> check label expected json)
     [ ( "negative"
-      , evidence.selected_runtime_id
       , Invalid_field (Before_message_count, Negative_integer)
       , replace "before_message_count" (`Int (-1)) canonical )
     ; ( "not reduced"
-      , evidence.selected_runtime_id
       , Invalid_transition (Checkpoint_bytes, 4096, 4096)
       , replace "after_checkpoint_bytes" (`Int 4096) canonical )
-    ; "no messages", evidence.selected_runtime_id, No_messages_compacted, no_messages
-    ; "blank runtime", "   ", Empty_selected_runtime_id, canonical
+    ; "no messages", No_messages_compacted, no_messages
+    ; ( "missing exact field"
+      , Invalid_field (Target_identity_fingerprint, Missing)
+      , remove "target_identity_fingerprint" canonical )
+    ; ( "duplicate exact field"
+      , Invalid_field (Catalog_generation_fingerprint, Duplicate)
+      , `Assoc
+          (("catalog_generation_fingerprint", `String "catalog-generation")
+           :: fields canonical) )
+    ; ( "wrong-type exact field"
+      , Invalid_field (Catalog_evidence_sha256, Expected_string)
+      , replace "catalog_evidence_sha256" (`Int 42) canonical )
+    ; ( "blank exact field"
+      , Invalid_field (Selected_target_ref, Blank_string)
+      , replace "selected_target_ref" (`String "   ") canonical )
+    ; ( "tampered plan fingerprint"
+      , Plan_fingerprint_mismatch
+          { plan_fingerprint = "plan-fingerprint"
+          ; receipt_plan_fingerprint = "tampered-plan"
+          }
+      , replace "receipt_plan_fingerprint" (`String "tampered-plan") canonical )
     ; ( "duplicate"
-      , evidence.selected_runtime_id
       , Invalid_field (After_message_count, Duplicate)
       , duplicate )
     ; ( "unknown field"
-      , evidence.selected_runtime_id
       , Unknown_field "retired_counter"
       , `Assoc (("retired_counter", `Int 1) :: fields canonical) )
     ; ( "missing field"
-      , evidence.selected_runtime_id
       , Invalid_field (Before_tool_use_count, Missing)
       , remove "before_tool_use_count" canonical )
     ; ( "non-integer field"
-      , evidence.selected_runtime_id
       , Invalid_field (Before_tool_result_count, Expected_integer)
       , replace "before_tool_result_count" (`String "3") canonical )
     ; ( "message count increase"
-      , evidence.selected_runtime_id
       , Invalid_transition (Messages, 12, 13)
       , replace "after_message_count" (`Int 13) canonical )
     ; ( "tool use count increase"
-      , evidence.selected_runtime_id
       , Invalid_transition (Tool_uses, 3, 4)
       , replace "after_tool_use_count" (`Int 4) canonical )
     ; ( "tool use count decrease"
-      , evidence.selected_runtime_id
       , Invalid_transition (Tool_uses, 3, 2)
       , replace "after_tool_use_count" (`Int 2) canonical )
     ; ( "tool result count increase"
-      , evidence.selected_runtime_id
       , Invalid_transition (Tool_results, 3, 4)
       , replace "after_tool_result_count" (`Int 4) canonical )
     ; ( "tool result count decrease"
-      , evidence.selected_runtime_id
       , Invalid_transition (Tool_results, 3, 2)
       , replace "after_tool_result_count" (`Int 2) canonical )
     ; ( "impossible message accounting"
-      , evidence.selected_runtime_id
       , Invalid_message_accounting
           { before_message_count = 12
           ; after_message_count = 11
@@ -175,7 +167,6 @@ let test_rejections () =
           }
       , impossible_accounting )
     ; ( "inexact after count"
-      , evidence.selected_runtime_id
       , Invalid_message_accounting
           { before_message_count = 12
           ; after_message_count = 10
@@ -193,9 +184,7 @@ let test_legacy_pair_repair_field_is_rejected () =
       (("pair_repair_dropped_message_count", `Int 0) :: fields canonical)
   in
   match
-    of_json
-      ~selected_runtime_id:evidence.selected_runtime_id
-      legacy
+    of_json legacy
   with
   | Error (Unknown_field "pair_repair_dropped_message_count") -> ()
   | Error error ->
@@ -218,8 +207,6 @@ let () =
             `Quick
             test_projection_and_roundtrip
         ; Alcotest.test_case "closed rejections" `Quick test_rejections
-        ; Alcotest.test_case "runtime identity is not normalized" `Quick
-            test_runtime_identity_is_not_normalized
         ; Alcotest.test_case
             "legacy pair-repair field rejected"
             `Quick

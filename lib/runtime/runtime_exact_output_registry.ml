@@ -1,0 +1,261 @@
+module Exact_output = Agent_sdk.Exact_output
+module String_set = Set.Make (String)
+
+type t =
+  { resolver_snapshot : Exact_output.resolver_snapshot
+  ; exact_output_lanes : Runtime_schema.exact_output_lane_decl list
+  ; generation : int64
+  }
+
+type error =
+  | Registry_not_published
+  | Blank_lane_id of { position : int }
+  | Duplicate_lane_id of
+      { position : int
+      ; lane_id : string
+      }
+  | Empty_lane of { lane_id : string }
+  | Blank_lane_slot of
+      { lane_id : string
+      ; position : int
+      }
+  | Duplicate_lane_slot of
+      { lane_id : string
+      ; position : int
+      ; slot_id : string
+      }
+  | Invalid_lane_slot of
+      { lane_id : string
+      ; position : int
+      ; slot_id : string
+      ; cause : Exact_output.target_ref_error
+      }
+  | Unresolved_lane_slot of
+      { lane_id : string
+      ; position : int
+      ; slot_id : string
+      ; cause : Exact_output.target_selection_error
+      }
+  | Exact_output_lane_missing of string
+  | Blank_slot_id of { position : int }
+  | Duplicate_slot_id of
+      { position : int
+      ; slot_id : string
+      }
+  | Invalid_slot_id of
+      { position : int
+      ; slot_id : string
+      ; cause : Exact_output.target_ref_error
+      }
+  | Slot_target_unavailable of
+      { position : int
+      ; slot_id : string
+      ; cause : Exact_output.target_selection_error
+      }
+
+type selected_slot =
+  { slot_id : string
+  ; target : Exact_output.selected_target
+  }
+
+let published : t option Atomic.t = Atomic.make None
+
+let ( let* ) = Result.bind
+
+let validate_lane_slots resolver_snapshot
+    (lane : Runtime_schema.exact_output_lane_decl) =
+  let rec loop position seen = function
+    | [] -> Ok ()
+    | slot_id :: rest ->
+      if String.equal (String.trim slot_id) ""
+      then Error (Blank_lane_slot { lane_id = lane.id; position })
+      else if String_set.mem slot_id seen
+      then Error (Duplicate_lane_slot { lane_id = lane.id; position; slot_id })
+      else (
+        match Exact_output.target_ref slot_id with
+        | Error cause ->
+          Error (Invalid_lane_slot { lane_id = lane.id; position; slot_id; cause })
+        | Ok target_ref ->
+          (match Exact_output.resolve_target resolver_snapshot target_ref with
+           | Error (Exact_output.Missing_target_credential _) ->
+             (* Credential admission is deliberately deferred to execution:
+                environment credentials are deployment state, not lane config.
+                A slot whose target credential is absent at publish time stays
+                published so optional lanes (e.g. the seed [compaction_exact]
+                lane on installs without DEEPSEEK_API_KEY) never abort server
+                startup; [resolve_slots] re-admits the credential per
+                execution and fails the slot there instead. Config-level
+                errors (unknown targets) remain fatal at publish. *)
+             loop (position + 1) (String_set.add slot_id seen) rest
+           | Error cause ->
+             Error
+               (Unresolved_lane_slot
+                  { lane_id = lane.id; position; slot_id; cause })
+           | Ok _ -> loop (position + 1) (String_set.add slot_id seen) rest))
+  in
+  match lane.slot_ids with
+  | [] -> Error (Empty_lane { lane_id = lane.id })
+  | slot_ids -> loop 1 String_set.empty slot_ids
+;;
+
+let validate_lanes resolver_snapshot lanes =
+  let rec loop position seen = function
+    | [] -> Ok ()
+    | (lane : Runtime_schema.exact_output_lane_decl) :: rest ->
+      if String.equal (String.trim lane.id) ""
+      then Error (Blank_lane_id { position })
+      else if String_set.mem lane.id seen
+      then Error (Duplicate_lane_id { position; lane_id = lane.id })
+      else
+        let* () = validate_lane_slots resolver_snapshot lane in
+        loop (position + 1) (String_set.add lane.id seen) rest
+  in
+  loop 1 String_set.empty lanes
+;;
+
+let publish ~lanes resolver_snapshot =
+  let* () = validate_lanes resolver_snapshot lanes in
+  let rec loop () =
+    let previous = Atomic.get published in
+    let generation =
+      match previous with
+      | None -> 1L
+      | Some registry ->
+        if Int64.equal registry.generation Int64.max_int
+        then invalid_arg "Runtime_exact_output_registry.publish: generation exhausted"
+        else Int64.succ registry.generation
+    in
+    let registry = { resolver_snapshot; exact_output_lanes = lanes; generation } in
+    if Atomic.compare_and_set published previous (Some registry)
+    then Ok registry
+    else loop ()
+  in
+  loop ()
+;;
+
+let current () =
+  match Atomic.get published with
+  | Some registry -> Ok registry
+  | None -> Error Registry_not_published
+;;
+
+let republish ~lanes =
+  match Atomic.get published with
+  | None -> Error Registry_not_published
+  | Some registry -> publish ~lanes registry.resolver_snapshot
+;;
+
+let generation registry = registry.generation
+
+let lane_slots registry ~lane_id =
+  match
+    List.find_opt
+      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         String.equal lane.id lane_id)
+      registry.exact_output_lanes
+  with
+  | None -> Error (Exact_output_lane_missing lane_id)
+  | Some lane -> Ok lane.slot_ids
+;;
+
+let resolve_slots registry slot_ids =
+  let rec loop position seen outcomes = function
+    | [] -> List.rev outcomes
+    | slot_id :: rest ->
+      let outcome =
+        if String.equal (String.trim slot_id) ""
+        then Error (Blank_slot_id { position })
+        else if String_set.mem slot_id seen
+        then Error (Duplicate_slot_id { position; slot_id })
+        else (
+          match Exact_output.target_ref slot_id with
+          | Error cause -> Error (Invalid_slot_id { position; slot_id; cause })
+          | Ok target_ref ->
+            (match Exact_output.resolve_target registry.resolver_snapshot target_ref with
+             | Error cause ->
+               Error (Slot_target_unavailable { position; slot_id; cause })
+             | Ok target -> Ok { slot_id; target }))
+      in
+      let seen =
+        if String.equal (String.trim slot_id) ""
+        then seen
+        else String_set.add slot_id seen
+      in
+      loop (position + 1) seen (outcome :: outcomes) rest
+  in
+  loop 1 String_set.empty [] slot_ids
+;;
+
+let error_to_string = function
+  | Registry_not_published -> "exact-output registry has not been published"
+  | Blank_lane_id { position } ->
+    Printf.sprintf "exact-output lane %d has a blank id" position
+  | Duplicate_lane_id { position; lane_id } ->
+    Printf.sprintf "exact-output lane %d duplicates lane id %S" position lane_id
+  | Empty_lane { lane_id } ->
+    Printf.sprintf "exact-output lane %S has no slots" lane_id
+  | Blank_lane_slot { lane_id; position } ->
+    Printf.sprintf "exact-output lane %S slot %d is blank" lane_id position
+  | Duplicate_lane_slot { lane_id; position; slot_id } ->
+    Printf.sprintf
+      "exact-output lane %S slot %d duplicates target ref %S"
+      lane_id
+      position
+      slot_id
+  | Invalid_lane_slot { lane_id; position; slot_id; cause } ->
+    let detail =
+      match cause with
+      | Exact_output.Empty_target_ref -> "empty target ref"
+      | Exact_output.Invalid_target_ref -> "invalid target ref"
+    in
+    Printf.sprintf
+      "exact-output lane %S slot %d (%S): %s"
+      lane_id
+      position
+      slot_id
+      detail
+  | Unresolved_lane_slot { lane_id; position; slot_id; cause } ->
+    let detail =
+      match cause with
+      | Exact_output.Unknown_target target_ref ->
+        Printf.sprintf "unknown target %S" target_ref
+      | Exact_output.Missing_target_credential
+          { target_ref; environment_variable } ->
+        Printf.sprintf
+          "target %S requires environment variable %s"
+          target_ref
+          environment_variable
+    in
+    Printf.sprintf
+      "exact-output lane %S slot %d (%S): %s"
+      lane_id
+      position
+      slot_id
+      detail
+  | Exact_output_lane_missing lane_id ->
+    Printf.sprintf "exact-output lane %S is not published" lane_id
+  | Blank_slot_id { position } ->
+    Printf.sprintf "exact-output slot %d is blank" position
+  | Duplicate_slot_id { position; slot_id } ->
+    Printf.sprintf "exact-output slot %d duplicates target ref %S" position slot_id
+  | Invalid_slot_id { position; slot_id; cause } ->
+    let detail =
+      match cause with
+      | Exact_output.Empty_target_ref -> "empty target ref"
+      | Exact_output.Invalid_target_ref -> "invalid target ref"
+    in
+    Printf.sprintf "exact-output slot %d (%S): %s" position slot_id detail
+  | Slot_target_unavailable { position; slot_id; cause } ->
+    let detail =
+      match cause with
+      | Exact_output.Unknown_target target_ref ->
+        Printf.sprintf "unknown target %S" target_ref
+      | Exact_output.Missing_target_credential
+          { target_ref; environment_variable } ->
+        Printf.sprintf
+          "target %S requires environment variable %s"
+          target_ref
+          environment_variable
+    in
+    Printf.sprintf "exact-output slot %d (%S): %s" position slot_id detail
+;;

@@ -967,6 +967,7 @@ let resume_from_checkpoint
         (Agent_sdk.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
            ~tools:config.tools ?context:config.context
            ~provider_config:config.provider_cfg
+           ~context_fit_admission:prepared_resume.context_fit_admission
            ~options ~config:prepared_resume.agent_config
            ?checkpoint_sink:config.checkpoint_sink
            ()))

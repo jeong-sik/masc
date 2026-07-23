@@ -30,6 +30,8 @@ type escalation_reason = Keeper_event_queue_state.escalation_reason =
       { judge_runtime_id : string
       ; rationale : string
       }
+  | Compaction_execution_may_have_dispatched
+  | Compaction_domain_invalid_output
   | Compaction_retry_exhausted of
       { attempts : int
       ; detail : string
@@ -44,6 +46,8 @@ type no_compaction_reason = Keeper_event_queue_state.no_compaction_reason =
   | Invalid_structural_source
   | Structurally_unchanged
   | Checkpoint_not_reduced
+  | Execution_may_have_dispatched
+  | Domain_invalid_output
 
 type no_compaction = Keeper_event_queue_state.no_compaction =
   { source : Keeper_checkpoint_ref.t

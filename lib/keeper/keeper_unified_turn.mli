@@ -151,10 +151,17 @@ type in_lane_compaction =
     rejections in the 2026-07-21 storm carried trigger=provider_overflow and
     only the operator's keeper_down ended it). *)
 
+type exact_output_terminal_reason = private
+  | Execution_may_have_dispatched
+  | Domain_invalid_output
+(** Closed exact-output reasons that forbid another provider-overflow
+    compaction attempt for the same source. *)
+
 type source_lease_disposition =
   | Follow_failure_route
   | Follow_failure_route_after_no_compaction of
       { reason : Keeper_event_queue_state.no_compaction_reason }
+  | Escalate_after_exact_output_terminal of exact_output_terminal_reason
   | Requeue_after_context_compaction of in_lane_compaction
   | Acknowledge_after_in_turn_handling
 (** A failed turn normally follows its typed retry/rotate/escalate route.
@@ -164,12 +171,23 @@ type source_lease_disposition =
     compaction-failure streak and replaces the route with
     [Escalate Compaction_retry_exhausted] at the threshold, because a turn
     whose context cannot shrink re-overflows deterministically on every retry.
+    [Escalate_after_exact_output_terminal] consumes the source lease into a
+    typed escalation with no successor, so neither the ordinary retry route nor
+    another compaction dispatch can run after the receipt crossed dispatch or a
+    dispatched response failed the MASC domain contract.
     [Requeue_after_context_compaction] preserves the exact source stimulus
     after MASC handled a typed provider overflow in this Keeper lane; the next
     cycle reloads the durably compacted checkpoint.
     [Acknowledge_after_in_turn_handling] consumes only the source stimulus when
     the configured in-turn policy already handled the terminal failure; the
     cycle remains failed for receipts, counters, and heartbeat freshness. *)
+
+val source_lease_disposition_after_no_compaction
+  :  Keeper_event_queue_state.no_compaction_reason
+  -> source_lease_disposition
+(** Compiler-checked partition of no-compaction outcomes. Effect-boundary and
+    domain-invalid outcomes return [Escalate_after_exact_output_terminal]; all
+    other deterministic no-progress outcomes retain the bounded failure route. *)
 
 type turn_failure =
   { error : Agent_sdk.Error.sdk_error

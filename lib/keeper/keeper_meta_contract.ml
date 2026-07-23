@@ -350,11 +350,6 @@ type usage_metrics =
   ; last_latency_ms : int
   }
 
-type tool_call_summary =
-  { tool_name : string
-  ; outcome : string
-  }
-
 type agent_runtime_state =
   { usage : usage_metrics
   ; compaction_rt : compaction_runtime
@@ -373,7 +368,6 @@ type agent_runtime_state =
   ; noop_turn_count : int
   ; last_blocker : blocker_info option
   ; last_runtime_attempt : runtime_attempt_record option
-  ; last_turn_tool_calls : tool_call_summary list
   ; message_scope_ack_id : string option
     (** Stable chat-row id of the newest message-scope row actually injected
         into a completed Keeper turn. Rows after this id remain pending. *)

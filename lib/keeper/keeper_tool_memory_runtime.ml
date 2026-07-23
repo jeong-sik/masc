@@ -551,12 +551,6 @@ let keeper_context_status_json
          ]
          @ Keeper_sandbox.context_status_fields sandbox
          @ [ "sandbox_live", sandbox_live
-           ; ( "recent_tool_calls"
-             , `List
-                 (List.map
-                    (fun (s : tool_call_summary) ->
-                       `Assoc [ ("tool", `String s.tool_name); ("outcome", `String s.outcome) ])
-                    meta.runtime.last_turn_tool_calls) )
            ; "memory_tier_summary", `Assoc memory_tier_summary
            ; ( "memory_tier_error_class"
              , Json_util.string_opt_to_json memory_tier_error_class )

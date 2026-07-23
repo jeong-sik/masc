@@ -14,7 +14,6 @@ let target_keys =
   [ "trace_history"
   ; "instructions"
   ; "last_runtime_attempt"
-  ; "last_turn_tool_calls"
   ; "current_task_id"
   ; "keeper_id"
   ; "oas_env"

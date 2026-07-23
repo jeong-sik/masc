@@ -81,12 +81,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       , match rt.last_runtime_attempt with
         | Some record -> runtime_attempt_record_to_json record
         | None -> `Null )
-    ; ( "last_turn_tool_calls"
-      , `List
-          (List.map
-             (fun (s : Keeper_meta_contract.tool_call_summary) ->
-                `Assoc [ ("tool_name", `String s.tool_name); ("outcome", `String s.outcome) ])
-             rt.last_turn_tool_calls) )
     ; "paused", `Bool m.paused
     ; ( "latched_reason"
       , match m.latched_reason with

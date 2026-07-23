@@ -271,7 +271,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           transcript_quarantine_consecutive_retries = 0;
 	          last_blocker = None;
 	          last_runtime_attempt = None;
-	          last_turn_tool_calls = [];
 	        };
       keeper_id = Some (Keeper_id.Uid.generate ());
       oas_env = p.profile_defaults.oas_env;

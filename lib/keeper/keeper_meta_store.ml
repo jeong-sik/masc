@@ -410,6 +410,11 @@ let retired_keeper_meta_key_names =
   [ (* #23929 continuity purge left these behind in .masc/keepers/ *)
     "last_continuity_update_ts"
   ; "continuity_summary"
+    (* Dropped with [tool_call_summary]: both codec sides stopped knowing it in
+       the same change, and all 16 live keeper metas carry the key, so without
+       this entry every read of every existing file would warn and increment
+       MetaJsonFailures(site=unknown_keys) indefinitely. *)
+  ; "last_turn_tool_calls"
   ]
 ;;
 

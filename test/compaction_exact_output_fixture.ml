@@ -106,16 +106,25 @@ let target_fixture_toml ?connect_timeout_s ~api_key_env index fixture =
     timeout
 ;;
 
-let resolver_snapshot ?(connect_timeouts = []) ?(api_key_env = "") ~source fixtures =
+let resolver_snapshot
+      ?(connect_timeouts = [])
+      ?(api_key_env = "")
+      ?(api_key_envs = [])
+      ~source
+      fixtures
+  =
   let timeout_for id = List.assoc_opt id connect_timeouts in
-  let overlay : EO.catalog_overlay =
+  let api_key_env_for id =
+    List.assoc_opt id api_key_envs |> Option.value ~default:api_key_env
+  in
+  let overlay : EO.catalog_document =
     { source
     ; contents =
         fixtures
         |> List.mapi (fun index fixture ->
-          target_fixture_toml
-            ?connect_timeout_s:(timeout_for fixture.id)
-            ~api_key_env
+            target_fixture_toml
+              ?connect_timeout_s:(timeout_for fixture.id)
+              ~api_key_env:(api_key_env_for fixture.id)
             index
             fixture)
         |> String.concat "\n"

@@ -12,19 +12,27 @@ type prepared_lane
 
 type attempt_observation =
   { slot_id : string
+  ; call_id : string
   ; phase : Agent_sdk.Exact_output.effect_phase
   ; dispatch_count : int
   ; catalog_generation_fingerprint : string
+  ; receipt_plan_fingerprint : string
+  ; receipt_request_body_sha256 : string
   }
 
 type summarization_failure =
   | Exact_lane_unconfigured
   | Exact_target_selection_failed
   | Exact_admission_failed
+  | Exact_attempt_start_failed of string
   | Exact_execution_context_unavailable
   | Exact_execution_failed_before_dispatch
-  | Exact_execution_failed_after_dispatch
+  | Exact_execution_failed_after_dispatch of attempt_observation
+  | Exact_attempt_already_started of attempt_observation
+  | Exact_execution_cancelled_after_dispatch of attempt_observation
+  | Exact_execution_provenance_mismatch of attempt_observation
   | Invalid_plan
+  | Invalid_plan_after_dispatch of attempt_observation
 
 type summarizer =
   units:Keeper_compaction_unit.closed_unit list ->
@@ -42,10 +50,11 @@ val prepare_lane
   -> units:Keeper_compaction_unit.closed_unit list
   -> (prepared_lane, summarization_failure) result
 
-(** Execute each admitted ready plan at most once. Only a real receipt at
+(** Execute each retained OAS attempt at most once. Only a real receipt at
     [Before_dispatch] with dispatch count zero advances to the next slot.
-    Cancellation is not caught, and a dispatched failure or MASC-invalid domain
-    plan is terminal. *)
+    Pre-dispatch cancellation is re-raised. Post-dispatch cancellation,
+    duplicate execution, provenance mismatch, dispatched failure, and a
+    MASC-invalid domain plan are typed terminal outcomes and never fail over. *)
 val execute_prepared_lane
   :  keeper_name:string
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -70,7 +79,8 @@ val plan_of_json
 
 val completed_plan : completed_plan -> compaction_plan
 val completed_exact_execution_evidence : completed_plan -> exact_execution_evidence
-val exact_execution_evidence_selected_target_ref : exact_execution_evidence -> string
+val exact_execution_evidence_slot_id : exact_execution_evidence -> string
+val exact_execution_evidence_call_id : exact_execution_evidence -> string
 val exact_execution_evidence_target_identity_fingerprint : exact_execution_evidence -> string
 val exact_execution_evidence_catalog_generation_fingerprint : exact_execution_evidence -> string
 val exact_execution_evidence_catalog_evidence_sha256 : exact_execution_evidence -> string

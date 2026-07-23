@@ -375,8 +375,9 @@ val release_summary_exact_attempt_before_dispatch :
 (** Mark the matching binding released only after OAS proves the attempt stayed
     before dispatch. Only [Fsync_completed] permits failover. A visible
     unconfirmed release retains the original identity, forbids a successor, and
-    may be terminalized only with [Exact_terminal_persistence_failure]. The same
-    release is idempotently strict-rewritten. *)
+    may be terminalized only with [Exact_terminal_persistence_failure],
+    [Exact_cancellation], or [Exact_flow_execution_failed]. The same release is
+    idempotently strict-rewritten. *)
 
 val fail_summary_exact_attempt_before_dispatch :
   id:string ->

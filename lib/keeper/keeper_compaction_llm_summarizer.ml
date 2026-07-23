@@ -1,9 +1,9 @@
-(** LLM-backed keeper context compaction (RFC-0313-adjacent W2).
-    See keeper_compaction_llm_summarizer.mli. Structure mirrors
-    Keeper_memory_llm_summary: opt-in gate + fiber-local Eio capture +
-    schema-capable provider filter + fail-closed [None]. *)
+(** LLM-backed keeper context compaction over the OAS exact-output surface.
+    See keeper_compaction_llm_summarizer.mli. MASC owns the domain plan while
+    OAS owns frozen target admission, dispatch, and receipt provenance. *)
 
 module Schema = Keeper_structured_output_schema
+module Exact_output = Agent_sdk.Exact_output
 module Int_set = Set.Make (Int)
 module Int_map = Map.Make (Int)
 module String_set = Set.Make (String)
@@ -26,40 +26,35 @@ type decision =
 
 type compaction_plan =
   { decisions : decision list
-  ; selected_runtime_id : string
   ; source_units : Keeper_compaction_unit.closed_unit list
   }
 
+type exact_execution_evidence =
+  { selected_target_ref : string
+  ; target_identity_fingerprint : string
+  ; catalog_generation_fingerprint : string
+  ; catalog_evidence_sha256 : string
+  ; plan_fingerprint : string
+  ; receipt_plan_fingerprint : string
+  ; receipt_request_body_sha256 : string
+  }
+
+type completed_plan =
+  { plan : compaction_plan
+  ; exact_execution_evidence : exact_execution_evidence
+  }
+
 type summarization_failure =
-  | Provider_unavailable
+  | Exact_target_selection_failed
+  | Exact_admission_failed
+  | Exact_execution_context_unavailable
+  | Exact_execution_failed_before_dispatch
+  | Exact_execution_failed_after_dispatch
   | Invalid_plan
 
 type summarizer =
   units:Keeper_compaction_unit.closed_unit list ->
-  (compaction_plan, summarization_failure) result
-
-type complete_fn = Keeper_provider_subcall.complete_fn
-
-let provider_for_plan (provider_cfg : Llm_provider.Provider_config.t) =
-  { provider_cfg with
-    tool_choice = None
-  ; disable_parallel_tool_use = true
-  }
-  (* Three-tier (#25266): json_schema when the provider enforces it, else JSON
-     mode for json_object-only providers (GLM/DeepSeek/Kimi), else prompt only.
-     The plan prompt already states the exact decisions schema and
-     [plan_of_response] validates every decision, so the json_object tier is
-     safe here — it lifts the minimax-native SPOF. Full module path (not the
-     [Schema] alias): the structured-output coverage test resolves callees
-     literally via Ast_grep.count_calls. *)
-  |> Keeper_structured_output_schema.apply_schema_json_mode_or_prompt_tier
-       ~log_label:"compaction summarizer"
-       Schema.compaction_plan_output_schema
-
-let plan_schema_supported provider_cfg =
-  Schema.provider_config_accepts_schema_or_json_mode
-    Schema.compaction_plan_output_schema
-    provider_cfg
+  (completed_plan, summarization_failure) result
 
 let message role text : Agent_sdk.Types.message = Agent_sdk.Types.text_message role text
 
@@ -260,11 +255,9 @@ let parse_decisions ~sources decisions_json =
   in
   parse Int_set.empty [] decisions_json
 
-let plan_of_json ~runtime_id ~units json =
+let plan_of_json ~units json =
   let sources = eligible_sources units in
-  if String.trim runtime_id = ""
-  then Error "selected runtime id must be non-empty"
-  else if sources = []
+  if sources = []
   then Error "source contains no eligible compaction units"
   else
   let expected_indices =
@@ -310,7 +303,7 @@ let plan_of_json ~runtime_id ~units json =
       (fun left right -> Int.compare left.source.source_index right.source.source_index)
       decisions
   in
-  Ok { decisions; selected_runtime_id = runtime_id; source_units = units }
+  Ok { decisions; source_units = units }
 
 let apply (plan : compaction_plan) =
   let decisions =
@@ -332,8 +325,6 @@ let apply (plan : compaction_plan) =
         }
       ])
 
-let selected_runtime_id plan = plan.selected_runtime_id
-
 let indices_for_action predicate plan =
   plan.decisions
   |> List.filter_map (fun decision ->
@@ -343,218 +334,225 @@ let summarized_indices = indices_for_action (function Summarize _ -> true | Keep
 let dropped_indices = indices_for_action (function Drop -> true | Keep | Summarize _ -> false)
 let has_changes plan = summarized_indices plan <> [] || dropped_indices plan <> []
 
-let plan_of_response ~runtime_id ~units response =
-  match
-    Agent_sdk_response.structured_json_of_response
-      ~schema_name:"keeper_compaction_plan"
-      response
-  with
-  | Ok json -> plan_of_json ~runtime_id ~units json
-  | Error detail -> Error ("invalid structured response: " ^ detail)
+let exact_output_requirement =
+  Exact_output.make_output_requirement
+    ~schema:Schema.compaction_plan_output_schema
+    ~minimum_guarantee:Exact_output.Json_syntax
+;;
 
-let run_plan
-    ?complete
-    ?clock
-    ~(keeper_name : string)
-    ~(runtime_id : string)
-    ~sw
-    ~net
-    ~(provider_cfg : Llm_provider.Provider_config.t)
-    ~units
-    () : (compaction_plan, summarization_failure) result =
+type admitted_slot =
+  { slot_id : string
+  ; ready_plan : Exact_output.ready_plan
+  ; receipt : Exact_output.receipt
+  }
+
+type prepared_lane =
+  { units : Keeper_compaction_unit.closed_unit list
+  ; admitted_slots : admitted_slot list
+  }
+
+type attempt_observation =
+  { slot_id : string
+  ; phase : Exact_output.effect_phase
+  ; dispatch_count : int
+  ; catalog_generation_fingerprint : string
+  }
+
+let exact_execution_evidence ready_plan (success : Exact_output.success) =
+  let provenance = success.provenance in
+  let identity = provenance.target_identity in
+  let receipt = success.receipt in
+  { selected_target_ref =
+      identity
+      |> Exact_output.target_identity_ref
+      |> Exact_output.target_ref_id
+  ; target_identity_fingerprint =
+      Exact_output.target_identity_fingerprint identity
+  ; catalog_generation_fingerprint =
+      Exact_output.catalog_generation_fingerprint provenance.catalog_generation
+  ; catalog_evidence_sha256 =
+      Exact_output.catalog_evidence_sha256 provenance.catalog_evidence
+  ; plan_fingerprint = Exact_output.plan_fingerprint ready_plan
+  ; receipt_plan_fingerprint = Exact_output.receipt_plan_fingerprint receipt
+  ; receipt_request_body_sha256 =
+      Exact_output.receipt_request_body_sha256 receipt
+  }
+;;
+
+let admit_all ~keeper_name selected_slots ~messages =
+  let rec loop admitted = function
+    | [] -> List.rev admitted
+    | (slot : Runtime_exact_output_registry.selected_slot) :: rest ->
+      (match
+         Exact_output.admit
+           ~target:slot.target
+           ~messages
+           exact_output_requirement
+       with
+       | Ok ready_plan ->
+         let receipt = Exact_output.attempt_receipt ready_plan in
+         loop ({ slot_id = slot.slot_id; ready_plan; receipt } :: admitted) rest
+       | Error _ ->
+         Log.Keeper.warn
+           ~keeper_name
+           "compaction exact slot rejected before dispatch slot=%s"
+           slot.slot_id;
+         loop admitted rest)
+  in
+  loop [] selected_slots
+;;
+
+let prepare_lane ~keeper_name ~registry ~lane_id ~units =
   if not (has_eligible_units units)
   then Error Invalid_plan
   else
-    let provider_cfg = provider_for_plan provider_cfg in
-    let request = messages_for_plan ~units in
-    match
-      Keeper_provider_subcall.complete ?override:complete ~sw ~net ?clock
-        ~config:provider_cfg ~messages:request ()
-    with
-    | Error err ->
-      Log.Keeper.warn ~keeper_name
-        "compaction LLM plan failed runtime=%s: %s"
-        runtime_id (Provider_http_error.to_message err);
-      Error Provider_unavailable
-    | Ok response ->
-      (match plan_of_response ~runtime_id ~units response with
-       | Ok plan -> Ok plan
-       | Error detail ->
-         Log.Keeper.warn ~keeper_name
-           "compaction LLM plan rejected runtime=%s: %s"
-           runtime_id detail;
-         Error Invalid_plan)
+    let registry_generation = Runtime_exact_output_registry.generation registry in
+    match Runtime_exact_output_registry.lane_slots registry ~lane_id with
+    | Error error ->
+      Log.Keeper.warn
+        ~keeper_name
+        "compaction exact lane lookup rejected generation=%Ld: %s"
+        registry_generation
+        (Runtime_exact_output_registry.error_to_string error);
+      Error Exact_target_selection_failed
+    | Ok slot_ids ->
+      let selected_slots_result =
+        Runtime_exact_output_registry.resolve_slots registry slot_ids
+        |> List.fold_left
+             (fun selected_slots_result outcome ->
+                match selected_slots_result, outcome with
+                | (Error _ as error), _ -> error
+                | Ok selected_slots, Ok selected -> Ok (selected :: selected_slots)
+                | Ok _, Error error ->
+                  Log.Keeper.warn
+                    ~keeper_name
+                    "compaction exact registry readiness violated generation=%Ld: %s"
+                    registry_generation
+                    (Runtime_exact_output_registry.error_to_string error);
+                  Error Exact_target_selection_failed)
+             (Ok [])
+      in
+      (match selected_slots_result with
+       | Error _ as error -> error
+       | Ok selected_slots ->
+         let selected_slots = List.rev selected_slots in
+         if selected_slots = []
+         then Error Exact_target_selection_failed
+         else
+           let messages = messages_for_plan ~units in
+           (* Every candidate is admitted against the same immutable registry before
+              the first network effect. Each admitted plan's real receipt is retained
+              before execution enters a cancellation scope. *)
+           let admitted_slots = admit_all ~keeper_name selected_slots ~messages in
+           if admitted_slots = []
+           then Error Exact_admission_failed
+           else Ok { units; admitted_slots })
+;;
 
-type candidate =
-  { runtime_id : string
-  ; lane_id : string option
-  ; provider_cfg : Llm_provider.Provider_config.t
-  }
-
-let eligible_candidate ~keeper_name ~lane_id (runtime : Runtime.t) =
-  let runtime_id = runtime.Runtime.id in
-  let provider_cfg = runtime.Runtime.provider_config in
-  (* #25266: a provider is eligible when it can enforce the schema (strict
-     json_schema) OR at least honor JSON mode (json_object). This admits the
-     json_object-only endpoints (GLM/DeepSeek/Kimi) that the strict-schema
-     gate used to drop, which had left the single json_schema-native endpoint
-     (minimax) as a SPOF — nearly every cloud model supports json_object, so
-     compaction now works across them. A provider that supports NEITHER is
-     still filtered: without any format guarantee, a prompt-only attempt would
-     just churn the parser. [provider_for_plan] then selects the strongest
-     available tier for the accepted provider. *)
-  if not (plan_schema_supported provider_cfg)
-  then (
-    Log.Keeper.warn ~keeper_name
-      "compaction LLM candidate skipped runtime=%s: provider supports neither \
-       the compaction plan schema nor json mode"
-      runtime_id;
-    None)
-  else Some { runtime_id; lane_id; provider_cfg }
-
-let candidates_for_assignment ~keeper_name assignment_id =
-  let rec resolve_lane ~lane_id acc = function
-    | [] -> Some (List.rev acc)
-    | runtime_id :: rest ->
-      (match Runtime.get_runtime_by_id runtime_id with
-       | None ->
-         Log.Keeper.warn ~keeper_name
-           "compaction LLM lane candidate disappeared runtime=%s assignment=%s"
-           runtime_id assignment_id;
-         None
-       | Some runtime ->
-         let acc =
-           match eligible_candidate ~keeper_name ~lane_id:(Some lane_id) runtime with
-           | None -> acc
-           | Some candidate -> candidate :: acc
-         in
-         resolve_lane ~lane_id acc rest)
+let execute_prepared_lane ~keeper_name ~net ?clock prepared_lane =
+  let rec execute = function
+    | [] -> Error Exact_execution_failed_before_dispatch
+    | { slot_id; ready_plan; receipt } :: rest ->
+      (match Exact_output.execute_once ~net ?clock ready_plan with
+       | Error _
+         when Exact_output.receipt_phase receipt = Exact_output.Before_dispatch
+              && Exact_output.receipt_dispatch_count receipt = 0 ->
+         Log.Keeper.warn
+           ~keeper_name
+           "compaction exact slot failed before dispatch slot=%s"
+           slot_id;
+         execute rest
+       | Error _ -> Error Exact_execution_failed_after_dispatch
+       | Ok success ->
+         (match plan_of_json ~units:prepared_lane.units success.output with
+          | Error detail ->
+            Log.Keeper.warn
+              ~keeper_name
+              "compaction exact output violated domain plan slot=%s: %s"
+              slot_id
+              detail;
+            Error Invalid_plan
+          | Ok plan ->
+            Ok
+              { plan
+              ; exact_execution_evidence = exact_execution_evidence ready_plan success
+              }))
   in
-  match Runtime.resolve_assignment assignment_id with
-  | `Missing ->
-    Log.Keeper.warn ~keeper_name
-      "compaction LLM assignment resolution failed runtime=%s: not configured"
-      assignment_id;
-    None
-  | `Single_runtime runtime ->
-    Some (Option.to_list (eligible_candidate ~keeper_name ~lane_id:None runtime))
-  | `Lane lane ->
-    (* Sticky failover: start from the last-good lane candidate when one is
-       remembered, keeping the declared order for the rest. *)
-    let lane_id = Runtime_lane.id lane in
-    resolve_lane ~lane_id []
-      (Runtime_lane_preference.prefer_order ~lane_id
-         (Runtime_lane.ordered_candidates lane))
+  execute prepared_lane.admitted_slots
+;;
 
-(* Collapse duplicate runtime ids while keeping the first (highest-priority)
-   occurrence, so a seed assignment that resolves to the same runtime as a
-   later seed is only ever tried once. *)
-let dedup_candidates candidates =
-  let rec loop seen unique_rev = function
-    | [] -> List.rev unique_rev
-    | candidate :: rest ->
-      if String_set.mem candidate.runtime_id seen
-      then loop seen unique_rev rest
-      else
-        loop
-          (String_set.add candidate.runtime_id seen)
-          (candidate :: unique_rev)
-          rest
-  in
-  loop String_set.empty [] candidates
+let run_exact ~keeper_name ~sw:_ ~net ~clock ~units =
+  if not (has_eligible_units units)
+  then Error Invalid_plan
+  else
+    match Runtime_exact_output_registry.current () with
+    | Error _ -> Error Exact_target_selection_failed
+    | Ok registry ->
+      let* prepared_lane =
+        prepare_lane
+          ~keeper_name
+          ~registry
+          ~lane_id:"compaction_exact"
+          ~units
+      in
+      execute_prepared_lane ~keeper_name ~net ?clock prepared_lane
+;;
 
-(* [assignment_ids] is a priority-ordered list of seed ids (each independently
-   a Runtime or a Runtime Lane, per {!candidates_for_assignment}). Every
-   eligible candidate from every seed is tried, seed order first and then
-   per-seed lane order, with cross-seed duplicates collapsed. A seed that
-   fails to resolve (Missing, or a Lane candidate that disappeared)
-   contributes no candidates rather than aborting the other seeds — the
-   overall chain is empty only when every seed is empty. *)
-let candidates_for_assignments ~keeper_name assignment_ids =
-  assignment_ids
-  |> List.concat_map (fun assignment_id ->
-    match candidates_for_assignment ~keeper_name assignment_id with
-    | None -> []
-    | Some candidates -> candidates)
-  |> dedup_candidates
+let make_resolved ~(keeper_name : string) () : summarizer option =
+  match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
+  | Some sw, Some net ->
+    let clock = Eio_context.get_clock_opt () in
+    Some (fun ~units -> run_exact ~keeper_name ~sw ~net ~clock ~units)
+  | _ -> None
+;;
 
-type make_fn = runtime_ids:string list -> keeper_name:string -> unit -> summarizer option
-let make_override : make_fn option Atomic.t = Atomic.make None
+let make ~keeper_name () = make_resolved ~keeper_name ()
 
-let make_resolved ?complete ~(runtime_ids : string list) ~(keeper_name : string) ()
-  : summarizer option
-  =
-  let assignments_label = String.concat "," runtime_ids in
-  match candidates_for_assignments ~keeper_name runtime_ids with
-  | [] ->
-    Log.Keeper.warn ~keeper_name
-      "compaction LLM summarizer has no eligible candidate assignments=%s"
-      assignments_label;
-    None
-  | candidates ->
-    (match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
-     | Some sw, Some net ->
-       let clock = Eio_context.get_clock_opt () in
-       Some
-         (fun ~units ->
-           let rec attempt saw_provider_failure = function
-             | [] ->
-               Log.Keeper.warn ~keeper_name
-                 "compaction LLM candidate chain exhausted assignments=%s"
-                 assignments_label;
-               if saw_provider_failure
-               then Error Provider_unavailable
-               else Error Invalid_plan
-             | candidate :: rest ->
-               (match
-                  run_plan ?complete ?clock ~keeper_name
-                    ~runtime_id:candidate.runtime_id ~sw ~net
-                    ~provider_cfg:candidate.provider_cfg ~units ()
-                with
-                | Ok _ as plan ->
-                  (* Sticky failover: remember the winning candidate for the
-                     lane it came from, if any. *)
-                  (match candidate.lane_id with
-                   | Some lane_id ->
-                     Runtime_lane_preference.note_success ~lane_id
-                       ~candidate:candidate.runtime_id
-                   | None -> ());
-                  Log.Keeper.info ~keeper_name
-                    "compaction LLM candidate succeeded assignments=%s runtime=%s"
-                    assignments_label candidate.runtime_id;
-                  plan
-                | Error Provider_unavailable -> attempt true rest
-                | Error Invalid_plan -> attempt saw_provider_failure rest)
-           in
-           attempt false candidates)
-     | _ ->
-       List.iter
-         (fun candidate ->
-           Log.Keeper.warn ~keeper_name
-             "compaction LLM candidate skipped runtime=%s assignments=%s: Eio \
-              context unavailable"
-             candidate.runtime_id assignments_label)
-       candidates;
-       None)
+let completed_plan completed = completed.plan
+let completed_exact_execution_evidence completed = completed.exact_execution_evidence
+let exact_execution_evidence_selected_target_ref evidence = evidence.selected_target_ref
 
-let make ?complete ~runtime_ids ~keeper_name () =
-  match Atomic.get make_override with
-  | Some override -> override ~runtime_ids ~keeper_name ()
-  | None -> make_resolved ?complete ~runtime_ids ~keeper_name ()
+let exact_execution_evidence_target_identity_fingerprint evidence =
+  evidence.target_identity_fingerprint
+;;
+
+let exact_execution_evidence_catalog_generation_fingerprint
+      (evidence : exact_execution_evidence) =
+  evidence.catalog_generation_fingerprint
+;;
+
+let exact_execution_evidence_catalog_evidence_sha256 evidence =
+  evidence.catalog_evidence_sha256
+;;
+
+let exact_execution_evidence_plan_fingerprint evidence = evidence.plan_fingerprint
+
+let exact_execution_evidence_receipt_plan_fingerprint evidence =
+  evidence.receipt_plan_fingerprint
+;;
+
+let exact_execution_evidence_receipt_request_body_sha256 evidence =
+  evidence.receipt_request_body_sha256
+;;
 
 module For_testing = struct
-  let with_make_override override f =
-    let previous = Atomic.exchange make_override (Some override) in
-    Fun.protect ~finally:(fun () -> Atomic.set make_override previous) f
-
-  let provider_for_plan = provider_for_plan
-
-  let candidate_runtime_ids_for_assignment ~keeper_name ~runtime_id =
-    candidates_for_assignment ~keeper_name runtime_id
-    |> Option.map (List.map (fun candidate -> candidate.runtime_id))
   let messages_for_plan = messages_for_plan
 
-  let candidate_runtime_ids_for_assignments ~keeper_name ~runtime_ids =
-    candidates_for_assignments ~keeper_name runtime_ids
-    |> List.map (fun candidate -> candidate.runtime_id)
+  let admitted_slot_ids prepared_lane =
+    List.map (fun (slot : admitted_slot) -> slot.slot_id) prepared_lane.admitted_slots
+  ;;
+
+  let attempt_observations prepared_lane =
+    List.map
+      (fun (slot : admitted_slot) ->
+        { slot_id = slot.slot_id
+        ; phase = Exact_output.receipt_phase slot.receipt
+        ; dispatch_count = Exact_output.receipt_dispatch_count slot.receipt
+        ; catalog_generation_fingerprint =
+            slot.receipt
+            |> Exact_output.receipt_catalog_generation
+            |> Exact_output.catalog_generation_fingerprint
+        })
+      prepared_lane.admitted_slots
+  ;;
 end

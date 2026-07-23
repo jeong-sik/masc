@@ -75,7 +75,6 @@ let exact_attempt_binding_with_status binding status = { binding with status }
 type exact_attempt_state =
   | Exact_unbound
   | Exact_bound of exact_attempt_binding
-  | Legacy_execution_uncertain
 
 type pending_approval =
   { id : string
@@ -260,8 +259,6 @@ let exact_attempt_quarantine_cause_to_string = function
 
 let exact_attempt_state_to_yojson = function
   | Exact_unbound -> `Assoc [ "state", `String "unbound" ]
-  | Legacy_execution_uncertain ->
-    `Assoc [ "state", `String "legacy_execution_uncertain" ]
   | Exact_bound binding ->
     let quarantine_cause =
       match binding.status with
@@ -379,9 +376,6 @@ let exact_attempt_state_of_yojson_with_error json =
      | "unbound" ->
        let* () = reject_unknown_fields ~surface ~allowed:[ "state" ] fields in
        Ok Exact_unbound
-     | "legacy_execution_uncertain" ->
-       let* () = reject_unknown_fields ~surface ~allowed:[ "state" ] fields in
-       Ok Legacy_execution_uncertain
      | "bound" ->
        let* () =
          reject_unknown_fields

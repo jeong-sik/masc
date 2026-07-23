@@ -9,7 +9,6 @@ type storage_error =
 
 type summary_transition_rejection =
   | Summary_exact_attempt_bound of exact_attempt_binding
-  | Summary_legacy_execution_uncertain of string
 
 type summary_transition_error =
   | Summary_transition_storage_error of storage_error
@@ -25,7 +24,6 @@ type exact_attempt_rejection =
   | Exact_attempt_invalid_identity of string
   | Exact_attempt_summary_not_pending of string
   | Exact_attempt_unbound_state of string
-  | Exact_attempt_legacy_execution_uncertain of string
   | Exact_attempt_identity_conflict of exact_attempt_binding
   | Exact_attempt_status_conflict of exact_attempt_binding
   | Exact_attempt_provenance_mismatch of
@@ -131,10 +129,6 @@ let summary_transition_error_to_string = function
   | Summary_transition_rejected (Summary_exact_attempt_bound binding) ->
     "legacy summary transition rejected for exact attempt: "
     ^ exact_attempt_binding_to_string binding
-  | Summary_transition_rejected (Summary_legacy_execution_uncertain approval_id) ->
-    Printf.sprintf
-      "legacy summary transition rejected for execution-uncertain approval %s"
-      approval_id
 ;;
 
 let exact_attempt_error_to_string = function
@@ -154,10 +148,6 @@ let exact_attempt_error_to_string = function
     Printf.sprintf "exact attempt approval %s summary is not pending" approval_id
   | Exact_attempt_rejected (Exact_attempt_unbound_state approval_id) ->
     Printf.sprintf "exact attempt approval %s has no bound identity" approval_id
-  | Exact_attempt_rejected (Exact_attempt_legacy_execution_uncertain approval_id) ->
-    Printf.sprintf
-      "exact attempt approval %s is quarantined as legacy execution-uncertain"
-      approval_id
   | Exact_attempt_rejected (Exact_attempt_identity_conflict binding) ->
     "exact attempt identity conflicts with durable binding: "
     ^ exact_attempt_binding_to_string binding
@@ -200,8 +190,7 @@ let install_error_to_string = function
   | Install_storage_failed error -> storage_error_to_string error
 ;;
 
-let legacy_pending_store_version = 3
-let pending_store_version = 4
+let pending_store_version = 5
 let pending_store_surface = "keeper_gate_pending"
 let pending_store_mutex = Cross_context_mutex.create ()
 let deliveries : persisted_delivery SMap.t Atomic.t = Atomic.make SMap.empty
@@ -553,9 +542,6 @@ let validate_entry_exact_attempt
   =
   match exact_attempt, summary_status with
   | Exact_unbound, _ -> Ok ()
-  | Legacy_execution_uncertain, Summary_pending -> Ok ()
-  | Legacy_execution_uncertain, _ ->
-    Error "legacy execution-uncertain quarantine requires a pending summary"
   | Exact_bound binding, _
     when not
            (String.equal binding.approval_id id
@@ -579,7 +565,7 @@ let validate_entry_exact_attempt
     Error "non-completed exact attempt requires a pending summary"
 ;;
 
-let pending_entry_of_yojson ~base_path ~snapshot_version json =
+let pending_entry_of_yojson ~base_path json =
   match json with
   | `Assoc fields ->
     let ( let* ) = Result.bind in
@@ -587,28 +573,25 @@ let pending_entry_of_yojson ~base_path ~snapshot_version json =
     let* () =
       reject_unknown_fields
         ~surface
-          ~allowed:
-            ([ "id"
-             ; "keeper_name"
-             ; "tool_name"
-             ; "input_hash"
-             ; "input"
-             ; "sequence"
-             ; "requested_at"
-             ; "turn_id"
-             ; "request_context"
-             ; "request_context_version"
-             ; "task_id"
-             ; "goal_id"
-             ; "goal_ids"
-             ; "continuation_channel"
-             ; "summary_status"
-             ]
-             @
-             if snapshot_version = pending_store_version
-             then [ "exact_attempt" ]
-             else [])
-          fields
+        ~allowed:
+          [ "id"
+          ; "keeper_name"
+          ; "tool_name"
+          ; "input_hash"
+          ; "input"
+          ; "sequence"
+          ; "requested_at"
+          ; "turn_id"
+          ; "request_context"
+          ; "request_context_version"
+          ; "task_id"
+          ; "goal_id"
+          ; "goal_ids"
+          ; "continuation_channel"
+          ; "summary_status"
+          ; "exact_attempt"
+          ]
+        fields
     in
     let* id = required_string ~surface "id" fields in
     let* keeper_name = required_string ~surface "keeper_name" fields in
@@ -634,10 +617,7 @@ let pending_entry_of_yojson ~base_path ~snapshot_version json =
         when Int.equal version exact_request_context_version ->
         Ok (Some context)
       | Some _, (None | Some `Null) ->
-        (* Pre-version records contain the retired projection format. It is
-           intentionally not inspected or migrated: there is no exact causal
-           evidence to recover from a digest projection. *)
-        Ok None
+        Error (surface ^ ".request_context requires request_context_version")
       | (None | Some `Null), Some (`Int version) ->
         Error
           (Printf.sprintf
@@ -663,18 +643,8 @@ let pending_entry_of_yojson ~base_path ~snapshot_version json =
     let* continuation_channel = Keeper_continuation_channel.of_yojson continuation_json in
       let* summary_json = required_member ~surface "summary_status" fields in
       let* summary_status = summary_status_of_yojson_with_error summary_json in
-      let* exact_attempt =
-        if snapshot_version = legacy_pending_store_version
-        then
-          Ok
-            (match summary_status with
-             | Summary_pending -> Legacy_execution_uncertain
-             | Summary_not_requested | Summary_available _ | Summary_failed _ ->
-               Exact_unbound)
-        else
-          let* exact_attempt_json = required_member ~surface "exact_attempt" fields in
-          exact_attempt_state_of_yojson_with_error exact_attempt_json
-      in
+      let* exact_attempt_json = required_member ~surface "exact_attempt" fields in
+      let* exact_attempt = exact_attempt_state_of_yojson_with_error exact_attempt_json in
       let* () =
         validate_entry_exact_attempt
           ~id
@@ -740,7 +710,7 @@ let approval_decision_of_yojson json =
   | _ -> Error "gate_pending.decision must be a JSON object"
 ;;
 
-let persisted_delivery_of_yojson ~base_path ~snapshot_version json =
+let persisted_delivery_of_yojson ~base_path json =
   match json with
   | `Assoc fields ->
     let ( let* ) = Result.bind in
@@ -760,9 +730,7 @@ let persisted_delivery_of_yojson ~base_path ~snapshot_version json =
         fields
     in
     let* entry_json = required_member ~surface "entry" fields in
-      let* entry =
-        pending_entry_of_yojson ~base_path ~snapshot_version entry_json
-      in
+    let* entry = pending_entry_of_yojson ~base_path entry_json in
     let* decision_json = required_member ~surface "decision" fields in
     let* decision = approval_decision_of_yojson decision_json in
     let* source_raw = required_string ~surface "source" fields in
@@ -873,30 +841,33 @@ let snapshot_of_yojson ~base_path json =
         ~allowed:[ "version"; "next_sequence"; "pending"; "deliveries" ]
         fields
     in
-      let* snapshot_version =
+    let* () =
         match List.assoc_opt "version" fields with
-        | Some (`Int version)
-          when version = legacy_pending_store_version
-               || version = pending_store_version ->
-          Ok version
+        | Some (`Int version) when version = pending_store_version -> Ok ()
         | Some (`Int version) ->
-          Error (Printf.sprintf "%s.version %d is unsupported" surface version)
+          Error
+            (Printf.sprintf
+               "%s.version %d is unsupported (current %d); reset runtime state \
+                before restarting MASC"
+               surface
+               version
+               pending_store_version)
       | Some _ -> Error (surface ^ ".version must be an integer")
       | None -> Error (surface ^ ".version is required")
     in
     let* next_sequence = required_positive_int ~surface "next_sequence" fields in
     let* pending_json = required_member ~surface "pending" fields in
-      let* pending_entries =
-        parse_list
-          ~surface:"gate_pending.pending"
-          (pending_entry_of_yojson ~base_path ~snapshot_version)
-          pending_json
-    in
     let* delivery_json = required_member ~surface "deliveries" fields in
+    let* pending_entries =
+      parse_list
+        ~surface:"gate_pending.pending"
+        (pending_entry_of_yojson ~base_path)
+        pending_json
+    in
     let* delivery_entries =
       parse_list
           ~surface:"gate_pending.deliveries"
-          (persisted_delivery_of_yojson ~base_path ~snapshot_version)
+          (persisted_delivery_of_yojson ~base_path)
           delivery_json
     in
     let* pending_map =
@@ -919,16 +890,8 @@ let snapshot_of_yojson ~base_path json =
     let* () =
       validate_snapshot_sequences ~next_sequence pending_entries delivery_entries
     in
-      Ok (snapshot_version, pending_map, delivery_map, next_sequence)
+    Ok (pending_map, delivery_map, next_sequence)
   | _ -> Error "gate_pending snapshot must be a JSON object"
-;;
-
-let snapshot_version_of_yojson = function
-  | `Assoc fields -> (
-    match List.assoc_opt "version" fields with
-    | Some (`Int version) -> Some version
-    | Some _ | None -> None)
-  | _ -> None
 ;;
 
 let quarantine_restarted_entry (entry : pending_approval) =
@@ -943,7 +906,6 @@ let quarantine_restarted_entry (entry : pending_approval) =
       }
     , true )
   | Exact_unbound
-  | Legacy_execution_uncertain
   | Exact_bound
       { status =
           ( Exact_released_before_dispatch
@@ -973,48 +935,6 @@ let quarantine_restarted_deliveries map =
     (false, SMap.empty)
 ;;
 
-let quarantine_path ~path ~version =
-  let base = Printf.sprintf "%s.v%d.quarantine" path version in
-  let rec find_free k =
-    let candidate =
-      if k = 0 then base else Printf.sprintf "%s.%d" base k
-    in
-    if Sys.file_exists candidate then find_free (k + 1) else candidate
-  in
-  find_free 0
-;;
-
-(* An unsupported snapshot version is a generational boundary, not
-   corruption: the durable file is preserved verbatim at a visible
-   quarantine path and the store starts a fresh generation. Only a rename
-   failure keeps the old fail-closed behavior — starting fresh while the
-   old file is still in place would let the next [put] overwrite the very
-   evidence the quarantine exists to preserve. *)
-let quarantine_snapshot_unlocked ~path ~version =
-  let target = quarantine_path ~path ~version in
-  try
-    Sys.rename path target;
-    Log.Server.error
-      "gate_pending snapshot version %d is unsupported (current %d); \
-       quarantined to %s and starting a fresh store generation"
-      version pending_store_version target;
-    Ok (SMap.empty, SMap.empty, first_sequence)
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    let reason =
-      Printf.sprintf
-        "gate_pending snapshot version %d is unsupported and quarantine \
-         rename to %s failed: %s"
-        version target (Printexc.to_string exn)
-    in
-    report_pending_read_drop
-      ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
-      ~path
-      ~detail:reason;
-    Error { path; reason }
-;;
-
 let load_snapshot_unlocked ~base_path =
   let path = pending_store_path ~base_path in
   try
@@ -1029,60 +949,36 @@ let load_snapshot_unlocked ~base_path =
           ~detail:reason;
         Error { path; reason }
       | Ok json ->
-        (match snapshot_version_of_yojson json with
-           | Some version
-             when version <> legacy_pending_store_version
-                  && version <> pending_store_version ->
-             quarantine_snapshot_unlocked ~path ~version
-           | Some _ | None ->
-             (match snapshot_of_yojson ~base_path json with
-              | Ok
-                  ( snapshot_version
-                  , loaded_pending
-                  , loaded_deliveries
-                  , loaded_next_sequence ) ->
-                let pending_changed, loaded_pending =
-                  quarantine_restarted_pending loaded_pending
-                in
-                let deliveries_changed, loaded_deliveries =
-                  quarantine_restarted_deliveries loaded_deliveries
-                in
-                if
-                  snapshot_version = legacy_pending_store_version
-                  || pending_changed
-                  || deliveries_changed
-                then
-                  (match
-                     save_snapshot_file_unlocked
-                       ~base_path
-                       ~next_sequence:loaded_next_sequence
-                       ~pending_map:loaded_pending
-                       ~delivery_map:loaded_deliveries
-                   with
-                   | Error _ as error -> error
-                   | Ok () ->
-                     Log.Server.warn
-                       "gate_pending migrated workspace=%s version=%d->%d \
-                        restart_quarantine=%b"
-                       base_path
-                       snapshot_version
-                       pending_store_version
-                       (pending_changed || deliveries_changed);
-                     Ok
-                       ( loaded_pending
-                       , loaded_deliveries
-                       , loaded_next_sequence ))
-                else
-                  Ok
-                    ( loaded_pending
-                    , loaded_deliveries
-                    , loaded_next_sequence )
-              | Error reason ->
-              report_pending_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-                ~path
-                ~detail:reason;
-              Error { path; reason })))
+        (match snapshot_of_yojson ~base_path json with
+         | Ok (loaded_pending, loaded_deliveries, loaded_next_sequence) ->
+           let pending_changed, loaded_pending =
+             quarantine_restarted_pending loaded_pending
+           in
+           let deliveries_changed, loaded_deliveries =
+             quarantine_restarted_deliveries loaded_deliveries
+           in
+           if pending_changed || deliveries_changed
+           then
+             (match
+                save_snapshot_file_unlocked
+                  ~base_path
+                  ~next_sequence:loaded_next_sequence
+                  ~pending_map:loaded_pending
+                  ~delivery_map:loaded_deliveries
+              with
+              | Error _ as error -> error
+              | Ok () ->
+                Log.Server.warn
+                  "gate_pending restart quarantine workspace=%s"
+                  base_path;
+                Ok (loaded_pending, loaded_deliveries, loaded_next_sequence))
+           else Ok (loaded_pending, loaded_deliveries, loaded_next_sequence)
+         | Error reason ->
+           report_pending_read_drop
+             ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+             ~path
+             ~detail:reason;
+           Error { path; reason }))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -1780,8 +1676,6 @@ let summary_transition_rejection (entry : pending_approval) =
   match entry.exact_attempt with
   | Exact_unbound -> None
   | Exact_bound binding -> Some (Summary_exact_attempt_bound binding)
-  | Legacy_execution_uncertain ->
-    Some (Summary_legacy_execution_uncertain entry.id)
 ;;
 
 let persist_pending_entry_unlocked ~map ~(entry : pending_approval) updated_entry =
@@ -1977,10 +1871,6 @@ let bind_summary_exact_attempt_with
                    ~map
                    ~entry
                    { entry with exact_attempt = Exact_bound candidate }
-              | Legacy_execution_uncertain ->
-                Error
-                  (Exact_attempt_rejected
-                     (Exact_attempt_legacy_execution_uncertain entry.id))
                 | Exact_bound existing
                   when exact_attempt_identity_matches existing candidate ->
                   (match existing.status with
@@ -2051,10 +1941,6 @@ let release_summary_exact_attempt_before_dispatch_with
              Error
                (Exact_attempt_rejected
                   (Exact_attempt_unbound_state entry.id))
-           | Legacy_execution_uncertain ->
-             Error
-               (Exact_attempt_rejected
-                  (Exact_attempt_legacy_execution_uncertain entry.id))
            | Exact_bound existing
              when not (exact_attempt_identity_matches existing candidate) ->
              Error
@@ -2130,10 +2016,6 @@ let fail_summary_exact_attempt_before_dispatch_with
              Error
                (Exact_attempt_rejected
                   (Exact_attempt_unbound_state entry.id))
-           | Legacy_execution_uncertain ->
-             Error
-               (Exact_attempt_rejected
-                  (Exact_attempt_legacy_execution_uncertain entry.id))
            | Exact_bound existing
              when not (exact_attempt_identity_matches existing candidate) ->
              Error
@@ -2223,10 +2105,6 @@ let quarantine_summary_exact_attempt_with
              Error
                (Exact_attempt_rejected
                   (Exact_attempt_unbound_state entry.id))
-           | Legacy_execution_uncertain ->
-             Error
-               (Exact_attempt_rejected
-                  (Exact_attempt_legacy_execution_uncertain entry.id))
            | Exact_bound existing
              when not (exact_attempt_identity_matches existing candidate) ->
              Error
@@ -2316,10 +2194,6 @@ let complete_summary_exact_attempt_with
              Error
                (Exact_attempt_rejected
                   (Exact_attempt_unbound_state entry.id))
-           | Legacy_execution_uncertain ->
-             Error
-               (Exact_attempt_rejected
-                  (Exact_attempt_legacy_execution_uncertain entry.id))
            | Exact_bound existing
              when not (exact_attempt_identity_matches existing candidate) ->
              Error

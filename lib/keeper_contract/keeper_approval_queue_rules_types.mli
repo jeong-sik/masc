@@ -67,7 +67,6 @@ val exact_attempt_binding_with_status :
 type exact_attempt_state =
   | Exact_unbound
   | Exact_bound of exact_attempt_binding
-  | Legacy_execution_uncertain
 
 (** A pending request never owns or suspends a Keeper lane. [sequence] is the
     durable queue-issued order identity; [requested_at] is observation only. *)

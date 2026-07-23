@@ -8,6 +8,10 @@ type t = private
   { raw_output : string
   ; data : Yojson.Safe.t option
   ; metadata : Yojson.Safe.t option
+  ; failure_effect_disposition : Tool_result.failure_effect_disposition
+      (** Meaningful only for [Failed]. Generic producers default to
+          [Effect_outcome_unknown]; terminal-effect producers must state the
+          strongest phase they can prove. *)
   ; disposition :
       (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition
   }
@@ -24,12 +28,14 @@ val deferred_data : ?metadata:Yojson.Safe.t -> Yojson.Safe.t -> t
 
 val failure
   :  ?class_:Tool_result.tool_failure_class
+  -> ?effect_disposition:Tool_result.failure_effect_disposition
   -> string
   -> t
 
 (** Typed failure with a separate opaque human-readable [message]. *)
 val failure_data
   :  class_:Tool_result.tool_failure_class
+  -> ?effect_disposition:Tool_result.failure_effect_disposition
   -> message:string
   -> Yojson.Safe.t
   -> t

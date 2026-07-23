@@ -180,6 +180,7 @@ let with_external_gate_execution
   | Error (Gate_unavailable blocked) ->
     Keeper_tool_execution.failure
       ~class_:blocked.failure_class
+      ~effect_disposition:Tool_result.Proven_pre_effect
       blocked.payload
 ;;
 
@@ -388,8 +389,12 @@ let handle_surface_post_with_outcome
       ()
   =
   let succeed payload = Keeper_tool_execution.success payload in
-  let fail ?(class_ = Tool_result.Workflow_rejection) payload =
-    Keeper_tool_execution.failure ~class_ payload
+  let fail
+        ?(class_ = Tool_result.Workflow_rejection)
+        ~effect_disposition
+        payload
+    =
+    Keeper_tool_execution.failure ~class_ ~effect_disposition payload
   in
   let surface = String.trim (Safe_ops.json_string ~default:"" "surface" args) in
   let content = Safe_ops.json_string ~default:"" "content" args in
@@ -406,10 +411,12 @@ let handle_surface_post_with_outcome
   in
   if surface = "" then
     fail
+      ~effect_disposition:Tool_result.Proven_pre_effect
       (Keeper_surface_post.error_json
          "surface is required. Good: surface='dashboard'.")
   else if String.trim content = "" then
     fail
+      ~effect_disposition:Tool_result.Proven_pre_effect
       (Keeper_surface_post.error_json "content is required and must be non-empty.")
   else
     match
@@ -418,6 +425,7 @@ let handle_surface_post_with_outcome
     | Error detail ->
       fail
         ~class_:Tool_result.Runtime_failure
+        ~effect_disposition:Tool_result.Proven_pre_effect
         (Keeper_surface_post.error_json
            (Channel_gate_discord_state.binding_lookup_error_to_string detail))
     | Ok bound_discord_channels ->
@@ -425,6 +433,7 @@ let handle_surface_post_with_outcome
        | Error detail ->
          fail
            ~class_:Tool_result.Runtime_failure
+           ~effect_disposition:Tool_result.Proven_pre_effect
            (Keeper_surface_post.error_json
               (Channel_gate_binding_store.binding_store_error_to_string detail))
        | Ok bound_slack_channels ->
@@ -432,19 +441,30 @@ let handle_surface_post_with_outcome
          Keeper_surface_post.resolve_target ~surface ~channel_id
            ~bound_slack_channels ~bound_discord_channels ()
        with
-      | Error message -> fail (Keeper_surface_post.error_json message)
+      | Error message ->
+        fail
+          ~effect_disposition:Tool_result.Proven_pre_effect
+          (Keeper_surface_post.error_json message)
       | Ok Keeper_surface_post.To_dashboard ->
-        Keeper_chat_store.append_assistant_message
-          ~base_dir:config.Workspace.base_path
-          ~keeper_name:meta.name
-          ~content:safe_content
-          ~surface:(Surface_ref.Dashboard { session_id = None })
-          ();
-        Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
-          ~source:"dashboard"
-          ~content:safe_content
-          ();
-        succeed (Keeper_surface_post.ok_json ~surface ())
+        (match
+           Keeper_chat_store.append_assistant_message_result
+             ~base_dir:config.Workspace.base_path
+             ~keeper_name:meta.name
+             ~content:safe_content
+             ~surface:(Surface_ref.Dashboard { session_id = None })
+             ()
+         with
+         | Error detail ->
+           fail
+             ~class_:Tool_result.Runtime_failure
+             ~effect_disposition:Tool_result.Effect_outcome_unknown
+             (Keeper_surface_post.error_json detail)
+         | Ok () ->
+           Keeper_chat_broadcast.chat_appended ~keeper_name:meta.name
+             ~source:"dashboard"
+             ~content:safe_content
+             ();
+           succeed (Keeper_surface_post.ok_json ~surface ()))
     | Ok (Keeper_surface_post.To_discord { channel_id }) ->
       let input =
         connector_post_gate_input
@@ -465,6 +485,7 @@ let handle_surface_post_with_outcome
        | Error send_error ->
          fail
            ~class_:Tool_result.Runtime_failure
+           ~effect_disposition:Tool_result.Effect_outcome_unknown
            (Keeper_surface_post.error_json
               (Format.asprintf
                  "discord send failed: %a"
@@ -518,6 +539,7 @@ let handle_surface_post_with_outcome
          | None ->
            fail
              ~class_:Tool_result.Runtime_failure
+             ~effect_disposition:Tool_result.Proven_pre_effect
              (Keeper_surface_post.error_json "SLACK_BOT_TOKEN is unset or empty")
          | Some token ->
            (match
@@ -531,6 +553,7 @@ let handle_surface_post_with_outcome
             | Error err ->
               fail
                 ~class_:Tool_result.Runtime_failure
+                ~effect_disposition:Tool_result.Effect_outcome_unknown
                 (Keeper_surface_post.error_json
                    (Format.asprintf
                       "slack send failed: %a"

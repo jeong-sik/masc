@@ -65,6 +65,10 @@ type judgment_class =
   | Provider_integration
       (** provider response unparseable / unknown variant / provider-terminal
           / sub-500 unclassified server errors *)
+  | Terminal_effect_transient_failure
+  | Terminal_effect_policy_rejection
+  | Terminal_effect_runtime_failure
+  | Terminal_effect_workflow_rejection
   | Internal_opaque
       (** unhandled internal exceptions, serialization/io/orchestration/agent
           family errors; judgment is the fail-open route that keeps the
@@ -114,7 +118,9 @@ val route_of_error : boundary:error_boundary -> Agent_sdk.Error.sdk_error -> rou
 (** Total over every [sdk_error] class. The caller supplies the actual execution
     boundary so constructors shared by MASC and OAS are never used as provenance
     inference. MASC-internal typed envelopes are decoded only at
-    [Masc_execution]. No arm returns "no route". *)
+    [Masc_execution], except [Terminal_effect_failed]: that MASC-owned effect
+    crosses the live OAS tool boundary and is therefore decoded at either
+    boundary. No arm returns "no route". *)
 
 val retry_after_of_route : route -> float option
 (** [Some hint] only for [Retry_after_observed] carrying a provider hint. *)

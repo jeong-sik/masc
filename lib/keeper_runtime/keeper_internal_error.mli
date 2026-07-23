@@ -133,6 +133,11 @@ type masc_internal_error =
       detail : string;
       tool_use_ids : string list;
     }
+  | Terminal_effect_failed of {
+      failure_class : Tool_result.tool_failure_class;
+      effect_disposition : Tool_result.failure_effect_disposition;
+      diagnostic : string;
+    }
   | Receipt_persistence_failed of { detail : string }
 
 val masc_internal_error_prefix : string

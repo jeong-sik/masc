@@ -3,6 +3,11 @@
 open Keeper_tools_oas
 open Keeper_tools_oas_handler_telemetry
 
+type execution_result =
+  { tool_result : Tool_result.result
+  ; failure_effect_disposition : Tool_result.failure_effect_disposition option
+  }
+
 let producer_payload ~raw = function
   | Some data -> data
   | None -> `String raw
@@ -28,7 +33,7 @@ let execute_with_observers
       ?oas_invocation
       ~(input : Yojson.Safe.t)
       ()
-  : Tool_result.result
+  : execution_result
   =
   let t0 = Time_compat.now () in
   let invocation_fields = oas_invocation_fields oas_invocation in
@@ -125,7 +130,9 @@ let execute_with_observers
         ~keeper_name:meta.name
         ~original_bytes:(String.length projected_error)
         ();
-      dispatch_result
+      { tool_result = dispatch_result
+      ; failure_effect_disposition = Some result.failure_effect_disposition
+      }
     | Tool_result.Completed () ->
       Option.iter
         (Keeper_tool_emission_hook.capture_typed_result_for_keeper
@@ -185,7 +192,7 @@ let execute_with_observers
         ~keeper_name:meta.name
         ~original_bytes:original_len
         ();
-      observed_result
+      { tool_result = observed_result; failure_effect_disposition = None }
     | Tool_result.Deferred () ->
       Option.iter
         (Keeper_tool_emission_hook.capture_typed_result_for_keeper
@@ -241,7 +248,7 @@ let execute_with_observers
         ~keeper_name:meta.name
         ~original_bytes:(String.length projected_result)
         ();
-      observed_result
+      { tool_result = observed_result; failure_effect_disposition = None }
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -306,5 +313,7 @@ let execute_with_observers
       ~keeper_name:meta.name
       ~original_bytes:(String.length projected_error)
       ();
-    exception_result
+    { tool_result = exception_result
+    ; failure_effect_disposition = Some Tool_result.Effect_outcome_unknown
+    }
 ;;

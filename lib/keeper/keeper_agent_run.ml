@@ -160,6 +160,18 @@ let dispatch_after_provider_transcript_admission ~messages ~dispatch =
   | Ok () -> dispatch ()
 ;;
 
+let terminal_effect_boundary_decision = function
+  | Keeper_tools_oas.Terminal_effect_open -> Ok Runtime_agent.Continue
+  | Keeper_tools_oas.Terminal_effect_completed ->
+    Ok (Runtime_agent.Yield Runtime_agent.Terminal_tool_completed)
+  | Keeper_tools_oas.Terminal_effect_failed
+      { failure_class; effect_disposition; diagnostic } ->
+    Error
+      (Keeper_internal_error.sdk_error_of_masc_internal_error
+         (Keeper_internal_error.Terminal_effect_failed
+            { failure_class; effect_disposition; diagnostic }))
+;;
+
 module For_testing = struct
   let sse_event_progress_kind = Turn_helpers.sse_event_progress_kind
   let sse_event_watchdog_progress_kind =
@@ -552,25 +564,28 @@ let run_turn
            Some
              (fun (_ : Agent_sdk.Agent.Advanced.tool_boundary) ->
                 try
-                  (* [terminal_effect_completed] is set only by a successful
-                     descriptor-typed terminal effect. OAS invokes this probe
-                     after tool results and the checkpoint have persisted, so
-                     settlement cannot race ahead of the reply effect. *)
-                  if s.terminal_effect_completed ()
-                  then Ok (Runtime_agent.Yield Runtime_agent.Terminal_tool_completed)
-                  else
-                    match autonomous_yield_requested with
-                    | None -> Ok Runtime_agent.Continue
-                    | Some requested ->
-                      (match requested () with
-                       | Ok (Some request) ->
-                         Ok (Runtime_agent.Yield (runtime_yield_reason request))
-                       | Ok None -> Ok Runtime_agent.Continue
-                       | Error detail ->
-                         Error
-                           (Agent_sdk.Error.Internal
-                              ("keeper cooperative-yield snapshot failed: "
-                               ^ detail)))
+                  (* OAS invokes this probe after tool results and the
+                     checkpoint have persisted. A descriptor-typed terminal
+                     effect therefore either completes the turn or fails it;
+                     neither state can re-enter the provider loop. *)
+                  (match
+                     terminal_effect_boundary_decision (s.terminal_effect_state ())
+                   with
+                   | Error _ as error -> error
+                   | Ok (Runtime_agent.Yield _ as decision) -> Ok decision
+                   | Ok Runtime_agent.Continue ->
+                     (match autonomous_yield_requested with
+                      | None -> Ok Runtime_agent.Continue
+                      | Some requested ->
+                        (match requested () with
+                         | Ok (Some request) ->
+                           Ok (Runtime_agent.Yield (runtime_yield_reason request))
+                         | Ok None -> Ok Runtime_agent.Continue
+                         | Error detail ->
+                           Error
+                             (Agent_sdk.Error.Internal
+                                ("keeper cooperative-yield snapshot failed: "
+                                 ^ detail)))))
                 with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn
                 | exn ->

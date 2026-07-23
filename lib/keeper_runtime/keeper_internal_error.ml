@@ -276,6 +276,11 @@ type masc_internal_error =
       detail : string;
       tool_use_ids : string list;
     }
+  | Terminal_effect_failed of {
+      failure_class : Tool_result.tool_failure_class;
+      effect_disposition : Tool_result.failure_effect_disposition;
+      diagnostic : string;
+    }
   | Receipt_persistence_failed of {
       detail : string;
     }
@@ -456,6 +461,17 @@ let masc_internal_error_to_json = function
         ("detail", `String detail);
         ("tool_use_ids", `List (List.map (fun id -> `String id) tool_use_ids));
       ]
+  | Terminal_effect_failed { failure_class; effect_disposition; diagnostic } ->
+    `Assoc
+      [
+        ("kind", `String "terminal_effect_failed");
+        ("failure_class", `String (Tool_result.tool_failure_class_to_string failure_class));
+        ( "effect_disposition"
+        , `String
+            (Tool_result.failure_effect_disposition_to_string effect_disposition)
+        );
+        ("diagnostic", `String diagnostic);
+      ]
   | Receipt_persistence_failed { detail } ->
     `Assoc
       [
@@ -580,6 +596,7 @@ let summary_of_masc_internal_error = function
   | Internal_bridge_exception _
   | Internal_contract_rejected _
   | Incomplete_tool_transcript _
+  | Terminal_effect_failed _
   | Receipt_persistence_failed _ -> None
 
 let kind_of_masc_internal_error = function
@@ -591,6 +608,7 @@ let kind_of_masc_internal_error = function
   | Internal_bridge_exception _ -> "internal_bridge_exception"
   | Internal_contract_rejected _ -> "internal_contract_rejected"
   | Incomplete_tool_transcript _ -> incomplete_tool_transcript_kind
+  | Terminal_effect_failed _ -> "terminal_effect_failed"
   | Receipt_persistence_failed _ -> "receipt_persistence_failed"
 
 let runtime_id_of_masc_internal_error = function
@@ -606,6 +624,7 @@ let runtime_id_of_masc_internal_error = function
   | Internal_bridge_exception _
   | Internal_contract_rejected _
   | Incomplete_tool_transcript _
+  | Terminal_effect_failed _
   | Receipt_persistence_failed _ -> "unknown"
 
 let accept_no_progress_retry_kind = function
@@ -637,6 +656,7 @@ let accept_no_progress_retry_kind = function
   | Internal_bridge_exception _
   | Internal_contract_rejected _
   | Incomplete_tool_transcript _
+  | Terminal_effect_failed _
   | Receipt_persistence_failed _ ->
     None
 
@@ -813,6 +833,26 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                     ; tool_use_ids = string_list_of_assoc "tool_use_ids" json
                     })
              | None -> None)
+          | _ -> None)
+      | Some (`String "terminal_effect_failed")
+        when exact_fields
+               [ "kind"; "failure_class"; "effect_disposition"; "diagnostic" ]
+               fields -> (
+          match
+            string_opt_of_assoc "failure_class" json,
+            string_opt_of_assoc "effect_disposition" json,
+            string_opt_of_assoc "diagnostic" json
+          with
+          | Some failure_class, Some effect_disposition, Some diagnostic ->
+            (match
+               Tool_result.tool_failure_class_of_string failure_class,
+               Tool_result.failure_effect_disposition_of_string effect_disposition
+             with
+             | Some failure_class, Some effect_disposition ->
+               Some
+                 (Terminal_effect_failed
+                    { failure_class; effect_disposition; diagnostic })
+             | _ -> None)
           | _ -> None)
       | Some (`String "receipt_persistence_failed") -> (
           match string_opt_of_assoc "detail" json with

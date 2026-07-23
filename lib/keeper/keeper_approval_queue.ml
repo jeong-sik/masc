@@ -39,6 +39,15 @@ type exact_attempt_error =
   | Exact_attempt_storage_error of storage_error
   | Exact_attempt_rejected of exact_attempt_rejection
 
+type exact_write_outcome =
+  | Durable
+  | Visible_durability_unknown of string
+
+type exact_attempt_transition =
+  { changed : bool
+  ; write_outcome : exact_write_outcome
+  }
+
 type approved_resolution_request =
   { keeper_name : string
   ; tool_name : string
@@ -332,7 +341,37 @@ let save_snapshot_file_unlocked
        | Error reason -> Error { path; reason })
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error { path; reason = Printexc.to_string exn }
+  | exn -> Error { path; reason = Printexc.to_string exn }
+;;
+
+let save_snapshot_file_strict_staged_unlocked
+      ~save_file_atomic_strict_staged
+      ~base_path
+      ~next_sequence
+      ~pending_map
+      ~delivery_map
+  =
+  let path = pending_store_path ~base_path in
+  try
+    Fs_compat.mkdir_p (Filename.dirname path);
+    let body =
+      snapshot_to_yojson ~base_path ~next_sequence ~pending_map ~delivery_map
+      |> Yojson.Safe.pretty_to_string
+    in
+    match save_file_atomic_strict_staged path body with
+    | Ok () -> Ok Durable
+    | Error (failure : Fs_compat.atomic_replace_failure) ->
+      let reason = Fs_compat.atomic_replace_failure_to_string failure in
+      (match failure.stage with
+       | Fs_compat.Before_rename ->
+         (match failure.exception_ with
+          | Eio.Cancel.Cancelled _ ->
+            Printexc.raise_with_backtrace failure.exception_ failure.backtrace
+          | _ -> Error { path; reason })
+       | Fs_compat.After_rename -> Ok (Visible_durability_unknown reason))
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error { path; reason = Printexc.to_string exn }
 ;;
 
 let persist_snapshot_with_sequence_unlocked
@@ -369,6 +408,30 @@ let persist_snapshot_unlocked ~base_path ~pending_map ~delivery_map =
   match next_sequence_lifecycle ~base_path with
   | Ready next_sequence ->
     persist_snapshot_with_sequence_unlocked
+      ~base_path
+      ~next_sequence
+      ~pending_map
+      ~delivery_map
+  | Uninstalled ->
+    Error
+      { path = pending_store_path ~base_path
+      ; reason =
+          "gate_pending store is not installed; install_persistence must \
+           complete before publishing"
+      }
+  | Unavailable error -> Error error
+;;
+
+let persist_snapshot_exact_unlocked
+      ~save_file_atomic_strict_staged
+      ~base_path
+      ~pending_map
+      ~delivery_map
+  =
+  match next_sequence_lifecycle ~base_path with
+  | Ready next_sequence ->
+    save_snapshot_file_strict_staged_unlocked
+      ~save_file_atomic_strict_staged
       ~base_path
       ~next_sequence
       ~pending_map
@@ -1771,10 +1834,10 @@ let publish_summary_transition ~id = function
 ;;
 
 let publish_exact_attempt_transition ~id = function
-  | Ok true ->
+  | Ok ({ changed = true; _ } as transition) ->
     publish_summary_update ~id;
-    Ok true
-  | Ok false -> Ok false
+    Ok transition
+  | Ok transition -> Ok transition
   | Error error -> Error error
 ;;
 
@@ -1843,12 +1906,29 @@ let exact_attempt_entry_unlocked map candidate =
   | Some entry -> Ok entry
 ;;
 
-let persist_exact_attempt_entry_unlocked ~map ~entry updated_entry =
-  persist_pending_entry_unlocked ~map ~entry updated_entry
-  |> Result.map_error (fun error -> Exact_attempt_storage_error error)
+let persist_exact_attempt_entry_unlocked
+      ~save_file_atomic_strict_staged
+      ~changed
+      ~map
+      ~(entry : pending_approval)
+      updated_entry
+  =
+  let updated = SMap.add entry.id updated_entry map in
+  match
+    persist_snapshot_exact_unlocked
+      ~save_file_atomic_strict_staged
+      ~base_path:entry.audit_base_path
+      ~pending_map:updated
+      ~delivery_map:(Atomic.get deliveries)
+  with
+  | Error error -> Error (Exact_attempt_storage_error error)
+  | Ok write_outcome ->
+    Atomic.set pending updated;
+    Ok { changed; write_outcome }
 ;;
 
-let bind_summary_exact_attempt
+let bind_summary_exact_attempt_with
+      ~save_file_atomic_strict_staged
       ~id
       ~input_hash
       ~sequence
@@ -1884,31 +1964,41 @@ let bind_summary_exact_attempt
                   (Exact_attempt_summary_not_pending entry.id))
            | Summary_pending ->
              (match entry.exact_attempt with
-              | Exact_unbound ->
-                persist_exact_attempt_entry_unlocked
-                  ~map
-                  ~entry
-                  { entry with exact_attempt = Exact_bound candidate }
+               | Exact_unbound ->
+                 persist_exact_attempt_entry_unlocked
+                   ~save_file_atomic_strict_staged
+                   ~changed:true
+                   ~map
+                   ~entry
+                   { entry with exact_attempt = Exact_bound candidate }
               | Legacy_execution_uncertain ->
                 Error
                   (Exact_attempt_rejected
                      (Exact_attempt_legacy_execution_uncertain entry.id))
-              | Exact_bound existing
-                when exact_attempt_identity_matches existing candidate ->
-                (match existing.status with
-                 | Exact_dispatch_uncertain -> Ok false
-                 | Exact_released_before_dispatch
-                 | Exact_quarantined _
-                 | Exact_completed ->
+                | Exact_bound existing
+                  when exact_attempt_identity_matches existing candidate ->
+                  (match existing.status with
+                   | Exact_dispatch_uncertain ->
+                     persist_exact_attempt_entry_unlocked
+                       ~save_file_atomic_strict_staged
+                       ~changed:false
+                       ~map
+                       ~entry
+                       entry
+                   | Exact_released_before_dispatch
+                   | Exact_quarantined _
+                   | Exact_completed ->
                    Error
                      (Exact_attempt_rejected
                         (Exact_attempt_status_conflict existing)))
-              | Exact_bound
-                  ({ status = Exact_released_before_dispatch; _ } as _existing) ->
-                persist_exact_attempt_entry_unlocked
-                  ~map
-                  ~entry
-                  { entry with exact_attempt = Exact_bound candidate }
+                | Exact_bound
+                    ({ status = Exact_released_before_dispatch; _ } as _existing) ->
+                  persist_exact_attempt_entry_unlocked
+                    ~save_file_atomic_strict_staged
+                    ~changed:true
+                    ~map
+                    ~entry
+                    { entry with exact_attempt = Exact_bound candidate }
               | Exact_bound existing ->
                 Error
                   (Exact_attempt_rejected
@@ -1917,7 +2007,13 @@ let bind_summary_exact_attempt
   publish_exact_attempt_transition ~id result
 ;;
 
-let release_summary_exact_attempt_before_dispatch
+let bind_summary_exact_attempt =
+  bind_summary_exact_attempt_with
+    ~save_file_atomic_strict_staged:Fs_compat.save_file_atomic_strict_staged
+;;
+
+let release_summary_exact_attempt_before_dispatch_with
+      ~save_file_atomic_strict_staged
       ~id
       ~input_hash
       ~sequence
@@ -1963,14 +2059,22 @@ let release_summary_exact_attempt_before_dispatch
               | Exact_dispatch_uncertain ->
                 let released =
                   { existing with status = Exact_released_before_dispatch }
-                in
-                persist_exact_attempt_entry_unlocked
-                  ~map
-                  ~entry
-                  { entry with exact_attempt = Exact_bound released }
-              | Exact_released_before_dispatch -> Ok false
-              | Exact_quarantined _
-              | Exact_completed ->
+                  in
+                  persist_exact_attempt_entry_unlocked
+                    ~save_file_atomic_strict_staged
+                    ~changed:true
+                    ~map
+                    ~entry
+                    { entry with exact_attempt = Exact_bound released }
+                | Exact_released_before_dispatch ->
+                  persist_exact_attempt_entry_unlocked
+                    ~save_file_atomic_strict_staged
+                    ~changed:false
+                    ~map
+                    ~entry
+                    entry
+                | Exact_quarantined _
+                | Exact_completed ->
                 Error
                   (Exact_attempt_rejected
                      (Exact_attempt_status_conflict existing)))))
@@ -1978,7 +2082,13 @@ let release_summary_exact_attempt_before_dispatch
   publish_exact_attempt_transition ~id result
 ;;
 
-let fail_summary_exact_attempt_before_dispatch
+let release_summary_exact_attempt_before_dispatch =
+  release_summary_exact_attempt_before_dispatch_with
+    ~save_file_atomic_strict_staged:Fs_compat.save_file_atomic_strict_staged
+;;
+
+let fail_summary_exact_attempt_before_dispatch_with
+      ~save_file_atomic_strict_staged
       ~id
       ~input_hash
       ~sequence
@@ -2026,11 +2136,13 @@ let fail_summary_exact_attempt_before_dispatch
               | Exact_dispatch_uncertain, Summary_pending ->
                 let released =
                   { existing with status = Exact_released_before_dispatch }
-                in
-                persist_exact_attempt_entry_unlocked
-                  ~map
-                  ~entry
-                  { entry with
+                  in
+                  persist_exact_attempt_entry_unlocked
+                    ~save_file_atomic_strict_staged
+                    ~changed:true
+                    ~map
+                    ~entry
+                    { entry with
                     summary_status = Summary_failed { reason; retryable }
                   ; exact_attempt = Exact_bound released
                   }
@@ -2039,10 +2151,15 @@ let fail_summary_exact_attempt_before_dispatch
                     { reason = durable_reason
                     ; retryable = durable_retryable
                     } )
-                when String.equal durable_reason reason
-                     && Bool.equal durable_retryable retryable ->
-                Ok false
-              | Exact_dispatch_uncertain, _ ->
+                  when String.equal durable_reason reason
+                       && Bool.equal durable_retryable retryable ->
+                  persist_exact_attempt_entry_unlocked
+                    ~save_file_atomic_strict_staged
+                    ~changed:false
+                    ~map
+                    ~entry
+                    entry
+                | Exact_dispatch_uncertain, _ ->
                 Error
                   (Exact_attempt_rejected
                      (Exact_attempt_summary_not_pending entry.id))
@@ -2057,7 +2174,13 @@ let fail_summary_exact_attempt_before_dispatch
   publish_exact_attempt_transition ~id result
 ;;
 
-let quarantine_summary_exact_attempt
+let fail_summary_exact_attempt_before_dispatch =
+  fail_summary_exact_attempt_before_dispatch_with
+    ~save_file_atomic_strict_staged:Fs_compat.save_file_atomic_strict_staged
+;;
+
+let quarantine_summary_exact_attempt_with
+      ~save_file_atomic_strict_staged
       ~id
       ~input_hash
       ~sequence
@@ -2104,17 +2227,35 @@ let quarantine_summary_exact_attempt
               | Exact_dispatch_uncertain ->
                 let quarantined =
                   { existing with status = Exact_quarantined cause }
-                in
-                persist_exact_attempt_entry_unlocked
-                  ~map
-                  ~entry
-                  { entry with exact_attempt = Exact_bound quarantined }
-              | Exact_quarantined durable_cause
-                when durable_cause = cause ->
-                Ok false
-              | Exact_quarantined _
-              | Exact_released_before_dispatch
-              | Exact_completed ->
+                  in
+                  persist_exact_attempt_entry_unlocked
+                    ~save_file_atomic_strict_staged
+                    ~changed:true
+                    ~map
+                    ~entry
+                    { entry with exact_attempt = Exact_bound quarantined }
+                | Exact_quarantined durable_cause
+                  when durable_cause = cause ->
+                  persist_exact_attempt_entry_unlocked
+                    ~save_file_atomic_strict_staged
+                    ~changed:false
+                    ~map
+                    ~entry
+                    entry
+                | Exact_released_before_dispatch
+                  when cause = Exact_terminal_persistence_failure ->
+                  let quarantined =
+                    { existing with status = Exact_quarantined cause }
+                  in
+                  persist_exact_attempt_entry_unlocked
+                    ~save_file_atomic_strict_staged
+                    ~changed:true
+                    ~map
+                    ~entry
+                    { entry with exact_attempt = Exact_bound quarantined }
+                | Exact_quarantined _
+                | Exact_released_before_dispatch
+                | Exact_completed ->
                 Error
                   (Exact_attempt_rejected
                      (Exact_attempt_status_conflict existing)))))
@@ -2122,7 +2263,13 @@ let quarantine_summary_exact_attempt
   publish_exact_attempt_transition ~id result
 ;;
 
-let complete_summary_exact_attempt
+let quarantine_summary_exact_attempt =
+  quarantine_summary_exact_attempt_with
+    ~save_file_atomic_strict_staged:Fs_compat.save_file_atomic_strict_staged
+;;
+
+let complete_summary_exact_attempt_with
+      ~save_file_atomic_strict_staged
       ~id
       ~input_hash
       ~sequence
@@ -2176,11 +2323,13 @@ let complete_summary_exact_attempt
            | Exact_bound existing ->
              (match existing.status, entry.summary_status with
               | Exact_dispatch_uncertain, Summary_pending ->
-                let completed = { existing with status = Exact_completed } in
-                persist_exact_attempt_entry_unlocked
-                  ~map
-                  ~entry
-                  { entry with
+                  let completed = { existing with status = Exact_completed } in
+                  persist_exact_attempt_entry_unlocked
+                    ~save_file_atomic_strict_staged
+                    ~changed:true
+                    ~map
+                    ~entry
+                    { entry with
                     summary_status = Summary_available summary
                   ; exact_attempt = Exact_bound completed
                   }
@@ -2188,10 +2337,16 @@ let complete_summary_exact_attempt
                 if
                   Yojson.Safe.equal
                     (hitl_context_summary_to_yojson durable_summary)
-                    (hitl_context_summary_to_yojson summary)
-                then Ok false
-                else
-                  Error
+                      (hitl_context_summary_to_yojson summary)
+                  then
+                    persist_exact_attempt_entry_unlocked
+                      ~save_file_atomic_strict_staged
+                      ~changed:false
+                      ~map
+                      ~entry
+                      entry
+                  else
+                    Error
                     (Exact_attempt_rejected
                        (Exact_attempt_content_conflict entry.id))
               | ( Exact_released_before_dispatch
@@ -2207,6 +2362,11 @@ let complete_summary_exact_attempt
                      (Exact_attempt_summary_not_pending entry.id)))))
   in
   publish_exact_attempt_transition ~id result
+;;
+
+let complete_summary_exact_attempt =
+  complete_summary_exact_attempt_with
+    ~save_file_atomic_strict_staged:Fs_compat.save_file_atomic_strict_staged
 ;;
 
 let mark_summary_pending ~id =
@@ -3003,6 +3163,24 @@ module For_testing = struct
 
   let pending_store_path = pending_store_path
   let always_allowed_store_path ~base_path = rules_path ~base_path ()
+
+  let bind_summary_exact_attempt_with_writer = bind_summary_exact_attempt_with
+
+  let release_summary_exact_attempt_before_dispatch_with_writer =
+    release_summary_exact_attempt_before_dispatch_with
+  ;;
+
+  let fail_summary_exact_attempt_before_dispatch_with_writer =
+    fail_summary_exact_attempt_before_dispatch_with
+  ;;
+
+  let quarantine_summary_exact_attempt_with_writer =
+    quarantine_summary_exact_attempt_with
+  ;;
+
+  let complete_summary_exact_attempt_with_writer =
+    complete_summary_exact_attempt_with
+  ;;
 end
 
 let resolve_with_policy

@@ -43,6 +43,15 @@ type exact_attempt_error =
   | Exact_attempt_storage_error of storage_error
   | Exact_attempt_rejected of exact_attempt_rejection
 
+type exact_write_outcome =
+  | Durable
+  | Visible_durability_unknown of string
+
+type exact_attempt_transition =
+  { changed : bool
+  ; write_outcome : exact_write_outcome
+  }
+
 type approved_resolution_request =
   { keeper_name : string
   ; tool_name : string
@@ -195,6 +204,9 @@ val list_recent_resolved_json :
   base_path:string -> ?n:int -> unit -> Yojson.Safe.t list
 
 module For_testing : sig
+  type strict_snapshot_writer =
+    string -> string -> (unit, Fs_compat.atomic_replace_failure) result
+
   val reset_audit_store : unit -> unit
   val reset_runtime_state : unit -> unit
   val with_pending_store_lock : (unit -> 'a) -> 'a
@@ -204,6 +216,65 @@ module For_testing : sig
     (install_report, install_error) result
   val pending_store_path : base_path:string -> string
   val always_allowed_store_path : base_path:string -> string
+
+  val bind_summary_exact_attempt_with_writer :
+    save_file_atomic_strict_staged:strict_snapshot_writer ->
+    id:string ->
+    input_hash:string ->
+    sequence:int ->
+    slot_id:string ->
+    call_id:string ->
+    plan_fingerprint:string ->
+    request_body_sha256:string ->
+    (exact_attempt_transition, exact_attempt_error) result
+
+  val release_summary_exact_attempt_before_dispatch_with_writer :
+    save_file_atomic_strict_staged:strict_snapshot_writer ->
+    id:string ->
+    input_hash:string ->
+    sequence:int ->
+    slot_id:string ->
+    call_id:string ->
+    plan_fingerprint:string ->
+    request_body_sha256:string ->
+    (exact_attempt_transition, exact_attempt_error) result
+
+  val fail_summary_exact_attempt_before_dispatch_with_writer :
+    save_file_atomic_strict_staged:strict_snapshot_writer ->
+    id:string ->
+    input_hash:string ->
+    sequence:int ->
+    slot_id:string ->
+    call_id:string ->
+    plan_fingerprint:string ->
+    request_body_sha256:string ->
+    reason:string ->
+    retryable:bool ->
+    (exact_attempt_transition, exact_attempt_error) result
+
+  val quarantine_summary_exact_attempt_with_writer :
+    save_file_atomic_strict_staged:strict_snapshot_writer ->
+    id:string ->
+    input_hash:string ->
+    sequence:int ->
+    slot_id:string ->
+    call_id:string ->
+    plan_fingerprint:string ->
+    request_body_sha256:string ->
+    cause:exact_attempt_quarantine_cause ->
+    (exact_attempt_transition, exact_attempt_error) result
+
+  val complete_summary_exact_attempt_with_writer :
+    save_file_atomic_strict_staged:strict_snapshot_writer ->
+    id:string ->
+    input_hash:string ->
+    sequence:int ->
+    slot_id:string ->
+    call_id:string ->
+    plan_fingerprint:string ->
+    request_body_sha256:string ->
+    summary:hitl_context_summary ->
+    (exact_attempt_transition, exact_attempt_error) result
 end
 
 (** {1 Nonblocking submission and explicit resolution} *)
@@ -274,7 +345,7 @@ val bind_summary_exact_attempt :
   call_id:string ->
   plan_fingerprint:string ->
   request_body_sha256:string ->
-  (bool, exact_attempt_error) result
+  (exact_attempt_transition, exact_attempt_error) result
 
 (** Durably bind one exact OAS attempt before provider dispatch. Repeating the
     active identity is idempotent. A released attempt may be replaced only by a
@@ -288,7 +359,7 @@ val release_summary_exact_attempt_before_dispatch :
   call_id:string ->
   plan_fingerprint:string ->
   request_body_sha256:string ->
-  (bool, exact_attempt_error) result
+  (exact_attempt_transition, exact_attempt_error) result
 
 (** Mark the matching binding released only after OAS proves the attempt stayed
     before dispatch. The same release is idempotent. *)
@@ -303,7 +374,7 @@ val fail_summary_exact_attempt_before_dispatch :
   request_body_sha256:string ->
   reason:string ->
   retryable:bool ->
-  (bool, exact_attempt_error) result
+  (exact_attempt_transition, exact_attempt_error) result
 
 (** Atomically release the matching binding and record the final summary
     failure only after OAS proves the attempt stayed before dispatch.
@@ -319,7 +390,7 @@ val quarantine_summary_exact_attempt :
   plan_fingerprint:string ->
   request_body_sha256:string ->
   cause:exact_attempt_quarantine_cause ->
-  (bool, exact_attempt_error) result
+  (exact_attempt_transition, exact_attempt_error) result
 
 (** Terminally quarantine a matching dispatch-uncertain binding with one closed
     typed cause. The same identity and cause is idempotent. It can never return
@@ -334,7 +405,7 @@ val complete_summary_exact_attempt :
   plan_fingerprint:string ->
   request_body_sha256:string ->
   summary:hitl_context_summary ->
-  (bool, exact_attempt_error) result
+  (exact_attempt_transition, exact_attempt_error) result
 
 (** Commit validated MASC summary content and the exact binding's completed
     status in one durable snapshot transaction. Identical completion is

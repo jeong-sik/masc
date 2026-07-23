@@ -406,8 +406,11 @@ let summary_update_exn label = function
 ;;
 
 let exact_update_exn label = function
-  | Ok true -> ()
-  | Ok false -> fail (label ^ " did not update the exact attempt")
+  | Ok { AQ.changed = true; write_outcome = AQ.Durable } -> ()
+  | Ok { changed = false; write_outcome = AQ.Durable } ->
+    fail (label ^ " did not update the exact attempt")
+  | Ok { write_outcome = AQ.Visible_durability_unknown detail; _ } ->
+    fail (label ^ " returned visible durability uncertainty: " ^ detail)
   | Error error -> fail (AQ.exact_attempt_error_to_string error)
 ;;
 

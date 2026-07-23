@@ -203,16 +203,17 @@ let test_grpc_pause_directive_records_reason () =
         | None -> fail "expected registered keeper after pause directive");
        Keeper_keepalive.process_directive
          ~agent_name:keeper_name
-         Keeper_directive.Resume;
-       match Keeper_registry.get ~base_path:config.base_path keeper_name with
-       | Some entry ->
-         check bool "resume directive resumes keeper" false entry.meta.paused;
-         check
-           (option string)
-           "resume clears the latched reason together with the pause bit"
-           None
-           (latched_reason_wire entry.meta)
-       | None -> fail "expected registered keeper after resume directive")
+         Keeper_directive.Wakeup;
+       (match Keeper_registry.get ~base_path:config.base_path keeper_name with
+        | Some entry ->
+          check bool "wakeup does not resume paused keeper" true entry.meta.paused;
+          check
+            (option string)
+            "wakeup preserves the operator pause receipt boundary"
+            (Some wire_grpc_directive)
+            (latched_reason_wire entry.meta)
+        | None -> fail "expected registered keeper after wakeup directive");
+       ())
 
 (* ── Site 2: keeper_down retain (remove_meta=false) ─────────── *)
 

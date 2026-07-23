@@ -56,7 +56,7 @@ describe('presenceConfig', () => {
     expect(presenceConfig('idle').colorClass).toContain('var(--color-status-warn)')
     expect(presenceConfig('paused').label).toBe('일시정지')
     expect(presenceConfig('paused').pulse).toBe(false)
-    expect(presenceConfig('offline').label).toBe('오프라인')
+    expect(presenceConfig('offline').label).toBe('중지')
   })
 })
 
@@ -77,7 +77,7 @@ describe('summarizeAgentPresence', () => {
     expect(summarizeAgentPresence(null, null, 'sm')).toEqual({
       rawStatus: '',
       state: 'offline',
-      label: '오프라인',
+      label: '중지',
       pulse: false,
       size: 'sm',
       detail: '',

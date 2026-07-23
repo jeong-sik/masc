@@ -567,6 +567,46 @@ let keeper_context_status_json
 
 let keeper_memory_write_max_title_chars = 120
 
+(* An explicit lifetime is a claim about scope, so it has to be a real
+   boundary: a claim that expires today or a decade out is a producer mistake,
+   not a lifetime. Rejecting both ends keeps [valid_until] meaningful rather
+   than becoming a second way to say "forever". Bound and day arithmetic are
+   the shared producer SSOT in [Keeper_memory_os_types] (the librarian
+   extraction path declares lifetimes through the same contract). *)
+let keeper_memory_write_min_valid_days = 1
+let keeper_memory_write_max_valid_days = Keeper_memory_os_types.max_valid_for_days
+
+(* [Safe_ops.json_int] cannot tell "absent" from "0", and 0 days is exactly
+   the mistake this field must reject, so the member is read raw. A wrong JSON
+   type is its own producer error and keeps its own arm: collapsing it into a
+   number would answer a type mistake with a range complaint the caller already
+   satisfied. *)
+type valid_for_days_arg =
+  | Lifetime_absent
+  | Lifetime_days of int
+  | Lifetime_not_an_integer of string (* the JSON type actually supplied *)
+
+let json_type_name : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "intlit"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+;;
+
+let parse_valid_for_days (args : Yojson.Safe.t) : valid_for_days_arg =
+  match args with
+  | `Assoc fields ->
+    (match List.assoc_opt "valid_for_days" fields with
+     | None | Some `Null -> Lifetime_absent
+     | Some (`Int n) -> Lifetime_days n
+     | Some other -> Lifetime_not_an_integer (json_type_name other))
+  | _ -> Lifetime_absent
+;;
+
 (** Pure validation result for a [keeper_memory_write] call. Splitting
     this from the persistence step lets tests pin the error_kind
     taxonomy without constructing a [Workspace.config]. *)
@@ -575,7 +615,8 @@ type memory_write_error_kind =
   | Title_too_long
   | Content_empty
   | Content_rejected
-  | Long_term_via_explicit_write_not_yet_supported
+  | Invalid_valid_for_days
+  | Valid_for_days_on_turn_scoped_kind
   | Persistence_failed
   | No_memory_write_error
 
@@ -584,8 +625,8 @@ let memory_write_error_kind_to_string = function
   | Title_too_long -> "title_too_long"
   | Content_empty -> "content_empty"
   | Content_rejected -> "content_rejected"
-  | Long_term_via_explicit_write_not_yet_supported ->
-    "long_term_via_explicit_write_not_yet_supported"
+  | Invalid_valid_for_days -> "invalid_valid_for_days"
+  | Valid_for_days_on_turn_scoped_kind -> "valid_for_days_on_turn_scoped_kind"
   | Persistence_failed -> "persistence_failed"
   | No_memory_write_error -> ""
 ;;
@@ -594,16 +635,66 @@ type memory_write_validation =
   | Memory_write_ok of
       { kind : Keeper_memory_policy.memory_kind
       ; body : string
+      ; valid_for_days : int option
+        (** Producer-declared lifetime (RFC-0351 S2). [None] means the claim
+            carries no expiry, which is what every stored fact says today
+            because nothing has ever been able to say otherwise. *)
       }
   | Memory_write_invalid of
       { error_kind : memory_write_error_kind
       ; extras : (string * Yojson.Safe.t) list
       }
 
+(* Each way a lifetime can be wrong gets its own answer. A producer that sent
+   the wrong JSON type has not violated the range, and telling it the range is
+   1-365 sends it looking for a bug it does not have. *)
+let check_lifetime ~kind lifetime : (int option, memory_write_validation) result =
+  let out_of_range d =
+    d < keeper_memory_write_min_valid_days || d > keeper_memory_write_max_valid_days
+  in
+  let durable =
+    match Keeper_memory_policy.memory_write_destination kind with
+    | Keeper_memory_policy.Durable_fact_store -> true
+    | Keeper_memory_policy.Turn_scoped_bank -> false
+  in
+  match lifetime with
+  | Lifetime_absent -> Ok None
+  | Lifetime_not_an_integer provided_type ->
+    Error
+      (Memory_write_invalid
+         { error_kind = Invalid_valid_for_days
+         ; extras =
+             [ "reason", `String "not_an_integer"
+             ; "provided_type", `String provided_type
+             ]
+         })
+  | Lifetime_days d when out_of_range d ->
+    Error
+      (Memory_write_invalid
+         { error_kind = Invalid_valid_for_days
+         ; extras =
+             [ "reason", `String "out_of_range"
+             ; "provided_days", `Int d
+             ; "min_days", `Int keeper_memory_write_min_valid_days
+             ; "max_days", `Int keeper_memory_write_max_valid_days
+             ]
+         })
+  | Lifetime_days _ when not durable ->
+    (* A turn-scoped note already dies with the run. Silently accepting a
+       lifetime for it would report a boundary the store does not keep. *)
+    Error
+      (Memory_write_invalid
+         { error_kind = Valid_for_days_on_turn_scoped_kind
+         ; extras = [ "kind", `String (Keeper_memory_policy.memory_kind_to_wire kind) ]
+         })
+  | Lifetime_days d -> Ok (Some d)
+;;
+
 let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation =
   let kind_wire = Safe_ops.json_string ~default:"" "kind" args in
   let title = Safe_ops.json_string ~default:"" "title" args |> String.trim in
   let content = Safe_ops.json_string ~default:"" "content" args |> String.trim in
+  let lifetime = parse_valid_for_days args in
   match Keeper_memory_policy.memory_kind_of_wire kind_wire with
   | None ->
     Memory_write_invalid
@@ -614,7 +705,7 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
             , `List
                 (List.map
                    (fun k -> `String k)
-                   Keeper_memory_policy.writable_memory_kind_strings) )
+                   Keeper_memory_policy.valid_memory_kind_strings) )
           ]
       }
   | Some kind ->
@@ -629,17 +720,85 @@ let validate_memory_write_args (args : Yojson.Safe.t) : memory_write_validation 
         }
     else if content = ""
     then Memory_write_invalid { error_kind = Content_empty; extras = [] }
-    else if not (Keeper_memory_policy.memory_kind_is_writable kind)
-    then
-      Memory_write_invalid
-        { error_kind = Long_term_via_explicit_write_not_yet_supported; extras = [] }
-    else
-      let body =
-        if title = "" then content else Printf.sprintf "**%s** %s" title content
-      in
-      if Keeper_memory_bank.is_meaningful_memory_text body
-      then Memory_write_ok { kind; body }
-      else Memory_write_invalid { error_kind = Content_rejected; extras = [] }
+    else (
+      match check_lifetime ~kind lifetime with
+      | Error invalid -> invalid
+      | Ok valid_for_days ->
+        let body =
+          if title = "" then content else Printf.sprintf "**%s** %s" title content
+        in
+        if Keeper_memory_bank.is_meaningful_memory_text body
+        then Memory_write_ok { kind; body; valid_for_days }
+        else Memory_write_invalid { error_kind = Content_rejected; extras = [] })
+;;
+
+(* RFC-0351 L1. [Long_term] is the one kind a later turn reads back, so an
+   explicit long-term write goes to the Memory OS fact store rather than the
+   turn-scoped bank, which no prompt block reads (masc#25517).
+
+   Provenance is this turn and [tool_call_id] is [None]: the claim is the
+   model's own assertion, not an observation carried out of some other tool's
+   result, and that field records where an observation came from.
+
+   The fold is the librarian's (RFC-0285 §8), unchanged: a claim whose identity
+   was just recall-injected is the model restating what it read, and must not
+   advance the truth anchor recall's recency ranking reads. Writing through the
+   same rule is the point — an explicit write is not a way around it. *)
+let append_durable_fact
+      ~(meta : keeper_meta)
+      ~(body : string)
+      ~(valid_for_days : int option)
+  : Keeper_memory_os_io.fact_merge_stats
+  =
+  let keeper_id = meta.name in
+  let now = Time_compat.now () in
+  let fact : Keeper_memory_os_types.fact =
+    { claim = body
+    ; category = Keeper_memory_os_types.Fact
+    ; claim_kind = Some Keeper_memory_os_types.Durable_knowledge
+    ; source =
+        { trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id
+        ; turn = meta.runtime.usage.total_turns
+        ; tool_call_id = None
+        }
+    ; observed_by = []
+    ; first_seen = now
+    ; valid_until =
+        (* RFC-0351 S2. Recall has always dropped expired facts
+           ([Keeper_memory_os_types.fact_is_current]), but no producer could
+           ever set the boundary, so every stored fact reads as permanent —
+           747 of 747 across the live fleet. This is the first writer. The
+           lifetime is the producer's own claim about scope, not a rule
+           inferred from the text. *)
+        Option.map (Keeper_memory_os_types.valid_until_of_days ~now) valid_for_days
+    ; last_verified_at = None
+    ; schema_version = Keeper_memory_os_types.schema_version
+    ; claim_id = None
+    }
+  in
+  let merge ~existing ~incoming =
+    let provenance =
+      let key = Keeper_memory_os_types.claim_identity incoming in
+      if Keeper_recall_injection_window.recently_injected ~keeper_id ~key
+      then (
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string MemoryOsReobserveEchoSuppressed)
+          ~labels:[ "keeper", keeper_id ]
+          ();
+        Keeper_memory_os_policy.Recalled_echo)
+      else Keeper_memory_os_policy.Independent_observation
+    in
+    Keeper_memory_os_policy.reobserve_fact ~now ~provenance ~existing ~incoming
+  in
+  let stats =
+    File_lock_eio.with_lock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
+      Keeper_memory_os_io.merge_facts ~keeper_id ~merge ~incoming:[ fact ])
+  in
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string MemoryOsExplicitFactWrite)
+    ~labels:[ "keeper", keeper_id ]
+    ();
+  stats
 ;;
 
 let keeper_memory_write_with_outcome
@@ -661,50 +820,83 @@ let keeper_memory_write_with_outcome
   match validate_memory_write_args args with
   | Memory_write_invalid { error_kind; extras } ->
     respond ~ok:false ~error_kind extras
-  | Memory_write_ok { kind; body } ->
-    (match
-       Keeper_memory_bank.append_explicit_memory_note
-         config
-         meta
-         ~turn:meta.runtime.usage.total_turns
-         ~kind
-         ~text:body
-     with
-     | Error (Keeper_memory_bank.Explicit_memory_kind_not_writable provided_kind) ->
-      respond
-        ~ok:false
-        ~error_kind:Long_term_via_explicit_write_not_yet_supported
-        [ ( "provided_kind"
-          , `String (Keeper_memory_policy.memory_kind_to_wire provided_kind) ) ]
-     | Error Keeper_memory_bank.Rejected_explicit_memory_text ->
-       respond ~ok:false ~error_kind:Content_rejected []
-     | Error (Keeper_memory_bank.Explicit_memory_write_failed detail) ->
-       respond
-         ~ok:false
-         ~error_kind:Persistence_failed
-         [ "detail", `String detail ]
-     | Ok Keeper_memory_bank.Persisted ->
-      let kind_wire = Keeper_memory_policy.memory_kind_to_wire kind in
-      respond
-        ~ok:true
-        ~error_kind:No_memory_write_error
-        [ "rows_written", `Int 1
-        ; "outcome", `String "persisted"
-        ; "kinds_written", `List [ `String kind_wire ]
-        ; "kind", `String kind_wire
-        ]
-     | Ok Keeper_memory_bank.Skipped_bank_writes_disabled ->
-      (* The memory-bank write kill-switch is off. Report accurately (0 rows,
-         not saved) rather than presenting the note as persisted — the caller
-         must not treat a skipped write as saved (spec/12 §Write Contract). *)
-      let kind_wire = Keeper_memory_policy.memory_kind_to_wire kind in
-      respond
-        ~ok:true
-        ~error_kind:No_memory_write_error
-        [ "rows_written", `Int 0
-        ; "outcome", `String "skipped_bank_writes_disabled"
-        ; "kind", `String kind_wire
-        ])
+  | Memory_write_ok { kind; body; valid_for_days } ->
+    let kind_wire = Keeper_memory_policy.memory_kind_to_wire kind in
+    (match Keeper_memory_policy.memory_write_destination kind with
+     | Keeper_memory_policy.Durable_fact_store ->
+       (match append_durable_fact ~meta ~body ~valid_for_days with
+        | stats ->
+          let merged = stats.Keeper_memory_os_io.merged in
+          respond
+            ~ok:true
+            ~error_kind:No_memory_write_error
+            [ "rows_written", `Int 1
+            ; ( "outcome"
+              , `String (if merged > 0 then "merged_into_existing_claim" else "persisted")
+              )
+            ; "kinds_written", `List [ `String kind_wire ]
+            ; "kind", `String kind_wire
+            ; "store", `String "durable_fact_store"
+            ]
+        | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+        | exception exn ->
+          (* The store is the only place a long-term claim survives, so a
+             failed write is reported as failed. Presenting it as saved would
+             lose the claim silently. *)
+          let detail = Printexc.to_string exn in
+          Log.Keeper.warn
+            "explicit durable fact write failed keeper=%s: %s"
+            meta.name
+            detail;
+          respond ~ok:false ~error_kind:Persistence_failed [ "detail", `String detail ])
+     | Keeper_memory_policy.Turn_scoped_bank ->
+       (match
+          Keeper_memory_bank.append_explicit_memory_note
+            config
+            meta
+            ~turn:meta.runtime.usage.total_turns
+            ~kind
+            ~text:body
+        with
+        | Error (Keeper_memory_bank.Explicit_memory_kind_not_writable provided_kind) ->
+          (* Unreachable through this tool: the routing above sends every
+             durable kind to the fact store, so the bank only ever sees kinds
+             it accepts. Kept because the bank guards its own invariant. *)
+          respond
+            ~ok:false
+            ~error_kind:Persistence_failed
+            [ ( "detail"
+              , `String
+                  (Printf.sprintf
+                     "memory bank refused kind %s"
+                     (Keeper_memory_policy.memory_kind_to_wire provided_kind)) )
+            ]
+        | Error Keeper_memory_bank.Rejected_explicit_memory_text ->
+          respond ~ok:false ~error_kind:Content_rejected []
+        | Error (Keeper_memory_bank.Explicit_memory_write_failed detail) ->
+          respond ~ok:false ~error_kind:Persistence_failed [ "detail", `String detail ]
+        | Ok Keeper_memory_bank.Persisted ->
+          respond
+            ~ok:true
+            ~error_kind:No_memory_write_error
+            [ "rows_written", `Int 1
+            ; "outcome", `String "persisted"
+            ; "kinds_written", `List [ `String kind_wire ]
+            ; "kind", `String kind_wire
+            ; "store", `String "turn_scoped_bank"
+            ]
+        | Ok Keeper_memory_bank.Skipped_bank_writes_disabled ->
+          (* The memory-bank write kill-switch is off. Report accurately (0 rows,
+             not saved) rather than presenting the note as persisted — the caller
+             must not treat a skipped write as saved (spec/12 §Write Contract). *)
+          respond
+            ~ok:true
+            ~error_kind:No_memory_write_error
+            [ "rows_written", `Int 0
+            ; "outcome", `String "skipped_bank_writes_disabled"
+            ; "kind", `String kind_wire
+            ; "store", `String "turn_scoped_bank"
+            ]))
 ;;
 
 let keeper_memory_write_json ~config ~meta ~args =

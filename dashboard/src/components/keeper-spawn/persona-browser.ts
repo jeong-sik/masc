@@ -100,13 +100,10 @@ function PersonaCard({ persona }: { persona: PersonaSummary }) {
 export function PersonaBrowser() {
   useEffect(() => { if (personas.value.length === 0 && !personasLoading.value) void loadPersonas() }, [])
   const spawnAccess = dashboardAuthAccess(shellAuthSummary.value, 'worker')
-  if (personasLoading.value) return html`<p class="text-xs text-[var(--color-fg-muted)] py-4 v2-monitoring-panel" role="status">페르소나 로딩 중...</p>`
-  if (personasError.value) return html`
-    <div class="py-4 v2-monitoring-panel">
-      <p class="text-xs text-[var(--color-status-err)] mb-2">${personasError.value}</p>
-      <${ActionButton} variant="ghost" size="sm" onClick=${() => void loadPersonas()}>재시도<//>
-    </div>`
-  if (personas.value.length === 0) return html`<p class="text-xs text-[var(--color-fg-muted)] py-4 v2-monitoring-panel">등록된 페르소나가 없습니다.</p>`
+  // The create/edit path (+ 새 페르소나, PersonaForm, search) must stay
+  // reachable in EVERY list state. It previously sat behind early returns
+  // for loading / error / empty, so a failed or empty persona list removed
+  // the only UI that could create the first persona.
   const visible = filterPersonas(personas.value, searchQuery.value)
   return html`
     <div class="v2-monitoring-surface">
@@ -137,13 +134,23 @@ export function PersonaBrowser() {
             : `${personas.value.length}개`}
         </span>
       </div>
-      ${visible.length === 0
-        ? html`<p class="text-xs text-[var(--color-fg-muted)] py-4 v2-monitoring-row">검색 조건에 맞는 페르소나가 없습니다.</p>`
-        : html`
-          <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3 v2-monitoring-row">
-            ${visible.map(p => html`<${PersonaCard} key=${p.persona_name} persona=${p} />`)}
-          </div>
-        `}
+      ${personasLoading.value
+        ? html`<p class="text-xs text-[var(--color-fg-muted)] py-4 v2-monitoring-panel" role="status">페르소나 로딩 중...</p>`
+        : personasError.value
+          ? html`
+            <div class="py-4 v2-monitoring-panel">
+              <p class="text-xs text-[var(--color-status-err)] mb-2">${personasError.value}</p>
+              <${ActionButton} variant="ghost" size="sm" onClick=${() => void loadPersonas()}>재시도<//>
+            </div>`
+          : personas.value.length === 0
+            ? html`<p class="text-xs text-[var(--color-fg-muted)] py-4 v2-monitoring-panel">등록된 페르소나가 없습니다.</p>`
+            : visible.length === 0
+              ? html`<p class="text-xs text-[var(--color-fg-muted)] py-4 v2-monitoring-row">검색 조건에 맞는 페르소나가 없습니다.</p>`
+              : html`
+                <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3 v2-monitoring-row">
+                  ${visible.map(p => html`<${PersonaCard} key=${p.persona_name} persona=${p} />`)}
+                </div>
+              `}
       ${spawnResult.value ? html`
         <${SurfaceCard} class="mt-3" variant="compact">
           <pre class="text-2xs font-mono overflow-x-auto max-h-50 overflow-y-auto

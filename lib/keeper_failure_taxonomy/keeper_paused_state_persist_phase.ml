@@ -1,10 +1,8 @@
 type t =
-  | Boot_resume_persist
-  | Boot_resume_check
+  | Lifecycle_pause_persist
   | Directive
 
 let to_label = function
-  | Boot_resume_persist -> "boot_resume_persist"
-  | Boot_resume_check -> "boot_resume_check"
+  | Lifecycle_pause_persist -> "lifecycle_pause_persist"
   | Directive -> "directive"
 ;;

@@ -152,7 +152,6 @@ module HeartbeatAck = struct
   let directive_of_wire raw =
     match raw with
     | "pause" -> Ok Keeper_directive.Pause
-    | "resume" -> Ok Keeper_directive.Resume
     | "wakeup" -> Ok Keeper_directive.Wakeup
     | _ ->
       (match String.index_opt raw ':' with
@@ -177,7 +176,6 @@ module HeartbeatAck = struct
 
   let directive_to_wire = function
     | Keeper_directive.Pause -> "pause"
-    | Keeper_directive.Resume -> "resume"
     | Keeper_directive.Wakeup -> "wakeup"
     | Keeper_directive.Assign_task task_id ->
       "claim:" ^ Keeper_id.Task_id.to_string task_id

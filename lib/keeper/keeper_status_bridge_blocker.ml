@@ -44,6 +44,7 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | Some (Keeper_turn_driver.Internal_unhandled_exception _) -> None
   | Some (Keeper_turn_driver.Internal_bridge_exception _) -> None
   | Some (Keeper_turn_driver.Internal_contract_rejected _) -> None
+  | Some (Keeper_turn_driver.Incomplete_tool_transcript _) -> None
   | Some (Keeper_turn_driver.Receipt_persistence_failed _) -> None
   | None ->
     (match err with
@@ -104,6 +105,7 @@ let runtime_blocker_surface_of_masc_internal_error = function
   | Keeper_turn_driver.Internal_unhandled_exception _
   | Keeper_turn_driver.Internal_bridge_exception _
   | Keeper_turn_driver.Internal_contract_rejected _
+  | Keeper_turn_driver.Incomplete_tool_transcript _
   | Keeper_turn_driver.Receipt_persistence_failed _ ->
     None
 

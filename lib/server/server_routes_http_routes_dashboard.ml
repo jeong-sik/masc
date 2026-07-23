@@ -1692,7 +1692,10 @@ let add_routes ~sw ~clock router =
 
   (* Keeper GET sub-routes: /config, /chat/history, /trajectory *)
   |> Http.Router.prefix_get "/api/v1/keepers/" (fun request reqd ->
-       if Keeper_api.is_keeper_checkpoints_get_path (Http.Request.path request) then
+       if
+         Keeper_api.is_keeper_checkpoints_get_path (Http.Request.path request)
+         || Keeper_api.is_keeper_paused_work_get_path (Http.Request.path request)
+       then
          with_token_permission_auth ~permission:Masc_domain.CanAdmin
            (fun state _agent_name req reqd ->
              Keeper_api.handle_keeper_get_subroutes state req request reqd
@@ -1776,6 +1779,13 @@ let add_routes ~sw ~clock router =
                Http.Request.read_body_async reqd (fun body_str ->
                  Keeper_api.handle_keeper_directive_post
                    ~sw ~clock state agent_name req reqd body_str
+               )
+             ) request reqd
+       | Keeper_api.Keeper_post_paused_work ->
+           with_token_permission_auth ~permission:Masc_domain.CanAdmin
+             (fun state _agent_name req reqd ->
+               Http.Request.read_body_async reqd (fun body_str ->
+                 Keeper_api.handle_keeper_paused_work_post state req reqd body_str
                )
              ) request reqd
        | Keeper_api.Keeper_post_catchup_judge ->

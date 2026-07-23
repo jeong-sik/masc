@@ -545,7 +545,14 @@ function OwnedTasksSection({ keeper }: { keeper: Keeper }): VNode {
 
 function toMemoryKeeper(k: Keeper): MemoryKeeper {
   const bucket = keeperBucket(k)
-  const status = bucket === 'running' ? 'run' : bucket === 'paused' ? 'pause' : 'off'
+  // stuck keepers still hold a live fiber — keep them on the 'run' glyph
+  // (the 3-value MemoryKeeper vocabulary has no attention state).
+  const status =
+    bucket === 'running' || bucket === 'stuck'
+      ? 'run'
+      : bucket === 'paused'
+        ? 'pause'
+        : 'off'
   return {
     id: k.name,
     ctx: contextRatio(k) ?? 0,

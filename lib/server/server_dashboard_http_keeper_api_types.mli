@@ -21,6 +21,7 @@ val keeper_suffix_clear : string
 val keeper_suffix_checkpoints : string
 val keeper_suffix_runtime_trace : string
 val keeper_suffix_directive : string
+val keeper_suffix_paused_work : string
 val keeper_suffix_catchup_judge : string
 
 val keeper_chat_receipt_state_json :
@@ -73,6 +74,7 @@ type keeper_post_route_kind =
   | Keeper_post_clear
   | Keeper_post_checkpoints
   | Keeper_post_directive
+  | Keeper_post_paused_work
   | Keeper_post_catchup_judge
   | Keeper_post_chat_recovery of keeper_chat_recovery_route
   | Keeper_post_unknown
@@ -93,6 +95,9 @@ val is_keeper_checkpoints_get_path : string -> bool
 
 val is_keeper_runtime_trace_get_path : string -> bool
 (** [true] for [GET /api/v1/keepers/<name>/runtime-trace] paths. *)
+
+val is_keeper_paused_work_get_path : string -> bool
+(** [true] for authenticated [GET /api/v1/keepers/<name>/paused-work] paths. *)
 
 (** {1 Trajectory preview helpers} *)
 

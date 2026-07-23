@@ -271,11 +271,16 @@ let fusion_terminal_equal left right =
 let fusion_completion_identity_equal left right =
   String.equal left.run_id right.run_id
   && fusion_terminal_equal left.terminal right.terminal
-  (* The first durably committed row owns optional Board evidence and recipient
-     authority. A retry may observe a recovered Board sink or a consumed
-     in-memory route; neither changes the Fusion result identity.
-     [enqueue_external_decision] retains the existing row, so excluding these
-     projections never overwrites their first committed values. *)
+  && String.equal left.board_post_id right.board_post_id
+  (* The first durably committed row owns recipient authority. The channel is
+     recipient metadata, not result identity: a replay sources it from the
+     durable delivery obligation, but a first commit can legitimately carry
+     [Unrouted] (obligation unavailable at projection time) while a later
+     startup recovery replays the same result with the recovered channel.
+     Treating [channel] as event identity would turn that exact result replay
+     into a false conflict. [enqueue_external_decision] retains the existing
+     row, so excluding the channel here never overwrites the authoritative
+     recipient. *)
 
 let stimulus_identity_equal a b =
   String.equal a.post_id b.post_id

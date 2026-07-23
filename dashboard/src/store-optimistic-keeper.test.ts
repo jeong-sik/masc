@@ -60,12 +60,11 @@ describe('applyOptimisticKeeperDirective', () => {
     expect(keepers.value[0]).toEqual(original)
   })
 
-  it('wakeup behaves like resume (paused → running) for the optimistic patch', () => {
+  it('wakeup never clears an operator pause in the optimistic patch', () => {
     keepers.value = [baseKeeper({ name: 'rondo', paused: true, phase: 'Paused' })]
     applyOptimisticKeeperDirective('rondo', 'wakeup')
-    expect(keepers.value[0]!.paused).toBe(false)
-    expect(keepers.value[0]!.phase).toBe('Running')
-    expect(keepers.value[0]!.lifecycle_phase).toBe('Running')
+    expect(keepers.value[0]!.paused).toBe(true)
+    expect(keepers.value[0]!.phase).toBe('Paused')
   })
 
   it('patches lifecycle_phase so the roster status dot tone flips immediately', () => {

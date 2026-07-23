@@ -116,6 +116,8 @@ let route_of_masc_internal ~err (internal : Keeper_internal_error.masc_internal_
   | Keeper_internal_error.Internal_contract_rejected _
   | Keeper_internal_error.Receipt_persistence_failed _ ->
     judge Internal_opaque
+  | Keeper_internal_error.Incomplete_tool_transcript _ ->
+    judge Contract_violation
   | Keeper_internal_error.Internal_unhandled_exception _
   | Keeper_internal_error.Internal_bridge_exception _ ->
     judge Internal_opaque

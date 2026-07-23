@@ -27,12 +27,16 @@ function selectedKeeperMatches(keeperName: string): boolean {
 }
 
 function baseAgentDirectoryRoute(): { tab: TabId; params: Record<string, string> } {
-  if (route.value.tab === 'keepers') {
+  // 'registry' joins 'keepers' here because both host a keeper roster that
+  // drills into the detail page. Without it the drill-down returns the operator
+  // to Monitoring, i.e. leaves the route they opened the keeper from.
+  if (route.value.tab === 'keepers' || route.value.tab === 'registry') {
+    const tab = route.value.tab
     const next: Record<string, string> = { ...route.value.params }
     delete next.agent
     delete next.keeper
     delete next.section
-    return { tab: 'keepers', params: next }
+    return { tab, params: next }
   }
   if (route.value.tab === 'monitoring' && route.value.params.section === 'agents') {
     const next: Record<string, string> = { ...route.value.params, section: 'agents' }

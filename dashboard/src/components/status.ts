@@ -13,7 +13,6 @@ export type StatusSection =
   | 'observatory' | 'journey' | 'agents' | 'runtime'
   | 'fleet-health' | 'transport-health'
   | 'feature-health'
-  | 'cognition'
 
 function monitorSectionItem(section: string | undefined) {
   if (!section) return undefined
@@ -51,9 +50,6 @@ const LazyFeatureHealth = lazy(async () => ({
 const LazyObservatory = lazy(async () => ({
   default: (await import('./observatory/observatory')).Observatory,
 }))
-const LazyCognitionPlane = lazy(async () => ({
-  default: (await import('./cognition-plane')).CognitionPlane,
-}))
 const LazyJourneyPanel = lazy(async () => ({
   default: (await import('./journey-panel')).JourneyPanel,
 }))
@@ -80,8 +76,6 @@ function renderSection(section: StatusSection) {
       return html`<${LazyTransportHealthPanel} />`
     case 'feature-health':
       return html`<${LazyFeatureHealth} />`
-    case 'cognition':
-      return html`<${LazyCognitionPlane} />`
     case 'agents':
       return html`<${LazyAgentsUnified} />`
   }

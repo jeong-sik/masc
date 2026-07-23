@@ -299,6 +299,8 @@ let reaction_kind_of_settlement = function
   | Keeper_event_queue_state.Ack -> Event_queue_ack
   | Keeper_event_queue_state.No_compaction _ -> Event_queue_no_compaction
   | Keeper_event_queue_state.Cancel_accepted _ -> Event_queue_cancelled
+  | Keeper_event_queue_state.Transfer_accepted _ -> Event_queue_ack
+  | Keeper_event_queue_state.Settle_from_source_terminal _ -> Event_queue_ack
   | Keeper_event_queue_state.Requeue _ -> Event_queue_requeued
   | Keeper_event_queue_state.Escalate _ -> Event_queue_escalated
 ;;
@@ -671,6 +673,8 @@ let require_finite_float ~missing ~non_finite field json =
 let reaction_kind_matches_settlement reaction_kind settlement =
   match reaction_kind, settlement with
   | Event_queue_ack, Keeper_event_queue_state.Ack -> true
+  | Event_queue_ack, Keeper_event_queue_state.Transfer_accepted _ -> true
+  | Event_queue_ack, Keeper_event_queue_state.Settle_from_source_terminal _ -> true
   | Event_queue_no_compaction, Keeper_event_queue_state.No_compaction _ -> true
   | Event_queue_cancelled, Keeper_event_queue_state.Cancel_accepted _ -> true
   | Event_queue_requeued, Keeper_event_queue_state.Requeue _ -> true
@@ -685,22 +689,30 @@ let reaction_kind_matches_settlement reaction_kind settlement =
   | Event_queue_no_compaction,
     ( Keeper_event_queue_state.Ack
     | Keeper_event_queue_state.Cancel_accepted _
+    | Keeper_event_queue_state.Transfer_accepted _
+    | Keeper_event_queue_state.Settle_from_source_terminal _
     | Keeper_event_queue_state.Requeue _
     | Keeper_event_queue_state.Escalate _ )
   | Event_queue_cancelled,
     ( Keeper_event_queue_state.Ack
     | Keeper_event_queue_state.No_compaction _
+    | Keeper_event_queue_state.Transfer_accepted _
+    | Keeper_event_queue_state.Settle_from_source_terminal _
     | Keeper_event_queue_state.Requeue _
     | Keeper_event_queue_state.Escalate _ )
   | Event_queue_requeued,
     ( Keeper_event_queue_state.Ack
     | Keeper_event_queue_state.No_compaction _
     | Keeper_event_queue_state.Cancel_accepted _
+    | Keeper_event_queue_state.Transfer_accepted _
+    | Keeper_event_queue_state.Settle_from_source_terminal _
     | Keeper_event_queue_state.Escalate _ )
   | Event_queue_escalated,
     ( Keeper_event_queue_state.Ack
     | Keeper_event_queue_state.No_compaction _
     | Keeper_event_queue_state.Cancel_accepted _
+    | Keeper_event_queue_state.Transfer_accepted _
+    | Keeper_event_queue_state.Settle_from_source_terminal _
     | Keeper_event_queue_state.Requeue _ ) -> false
 ;;
 
@@ -1411,6 +1423,8 @@ let summarize_rows ~keeper_name ~limit rows =
        | Keeper_event_queue_state.Ack
        | Keeper_event_queue_state.No_compaction _
        | Keeper_event_queue_state.Cancel_accepted _
+       | Keeper_event_queue_state.Transfer_accepted _
+       | Keeper_event_queue_state.Settle_from_source_terminal _
        | Keeper_event_queue_state.Requeue _ -> ())
     | Cursor_ack, None -> incr cursor_ack_count
     | Turn_started, Some _

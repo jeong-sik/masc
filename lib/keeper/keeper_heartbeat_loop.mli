@@ -122,23 +122,88 @@ val record_crashed_cycle_failure :
 
 val settlement_of_failure :
   settled_at:float ->
+  compaction_consecutive_failures:int ->
+  transcript_quarantine_consecutive_retries:int ->
   Keeper_unified_turn.turn_failure ->
   Keeper_registry_event_queue.settlement
 (** Pure queue disposition for a failed cycle. Retry/rotation requeue and a
     deterministic failure creates one judgment successor. This mapping is
     identical when the source lease carried an earlier judgment: the failed
     action's new typed route remains authoritative rather than being collapsed
-    into a generic judgment failure. *)
+    into a generic judgment failure.
+
+    [compaction_consecutive_failures] is the keeper's persisted failure streak
+    from [keeper_meta.runtime.compaction_rt]. When the disposition carries an
+    in-lane provider-overflow compaction outcome that made no durable progress
+    ([Compaction_attempt_failed] or a terminal no-compaction), the settlement
+    escalates as [Compaction_retry_exhausted] once this failure would reach
+    [Keeper_meta_contract.compaction_retry_escalation_threshold] — without the
+    ceiling this lane requeues forever, one summarizer LLM call per heartbeat
+    cycle (RFC-0351 S0, #25461; 2026-07-21 storm: 284 provider-overflow
+    rejections over ~10h, ended only by operator keeper_down). A
+    [Compaction_committed] disposition always requeues: the retry reloads a
+    durably smaller checkpoint. [Escalate_after_exact_output_terminal] ignores
+    the ordinary route and immediately settles as a typed escalation with no
+    successor.
+
+    [transcript_quarantine_consecutive_retries] is the keeper's persisted
+    quarantine streak from
+    [keeper_meta.runtime.transcript_quarantine_consecutive_retries]. A
+    [Requeue_after_transcript_quarantine] disposition requeues below
+    [Keeper_meta_contract.transcript_quarantine_retry_escalation_threshold]
+    and escalates as [Transcript_quarantine_retry_exhausted] at it — the
+    poisoned checkpoint is preserved unmodified by design, so without the
+    ceiling the same stimulus loops through the full turn pipeline on every
+    heartbeat (#25296). *)
+
+val compaction_outcome_of_cycle_outcome :
+  Keeper_heartbeat_loop_cycle.cycle_outcome option ->
+  [ `Committed | `Overflow_episode_committed | `Failed | `Recovered ] option
+(** Pure mapping from a settled cycle outcome to the compaction-streak stamp
+    ([Keeper_meta_store.persist_compaction_outcome]). Manual-lane
+    applied/failed outcomes and in-lane provider-overflow dispositions join
+    the same per-keeper streak. The streak counts consecutive
+    provider-overflow episodes (#25538): an in-lane commit maps to
+    [`Overflow_episode_committed] (advances the streak — committed savings
+    under an incompressible floor must still reach the ceiling), a completed
+    overflow-free turn maps to [`Recovered] (resets it), and only the
+    operator's manual commit maps to [`Committed] (count + reset).
+    Outcomes with no compaction involvement return [None]. *)
+
+val transcript_quarantine_outcome_of_cycle_outcome :
+  Keeper_heartbeat_loop_cycle.cycle_outcome option ->
+  [ `Retried | `Recovered ] option
+(** Pure mapping from a settled cycle outcome to the transcript-quarantine
+    streak stamp
+    ({!Keeper_meta_store.persist_transcript_quarantine_outcome}). A failed
+    turn with a [Requeue_after_transcript_quarantine] disposition maps to
+    [`Retried] (advances the streak — the settlement reads it to escalate
+    instead of requeuing at
+    [Keeper_meta_contract.transcript_quarantine_retry_escalation_threshold]);
+    a completed turn maps to [`Recovered] (resets it — the keeper is no
+    longer pinned to the poisoned transcript). Outcomes with no quarantine
+    involvement return [None] (#25296). *)
 
 val settlement_of_cycle_outcome :
   base_path:string ->
   settled_at:float ->
   stop_requested:bool ->
+  compaction_consecutive_failures:int ->
+  transcript_quarantine_consecutive_retries:int ->
   lease:Keeper_registry_event_queue.lease ->
   Keeper_heartbeat_loop_cycle.cycle_outcome option ->
   Keeper_registry_event_queue.settlement
 (** Pure lease settlement boundary. Completed work acknowledges; typed
-    cancellation and non-executable-phase skips requeue. *)
+    cancellation and non-executable-phase skips requeue.
+
+    [compaction_consecutive_failures] is the keeper's current failure streak
+    from [keeper_meta.runtime.compaction_rt]. A manual-compaction failure — or
+    a failed cycle whose disposition carries a no-progress in-lane compaction
+    outcome (via {!settlement_of_failure}) — settles as
+    [Escalate Compaction_retry_exhausted] once this failure would reach
+    [Keeper_meta_contract.compaction_retry_escalation_threshold], and retries
+    below it — a requeue is not an ack, so without the ceiling the same
+    stimulus re-enters every cycle (RFC-0351 S0, #25461). *)
 
 val project_transition_outbox :
   base_path:string -> keeper_name:string -> (unit, string) result

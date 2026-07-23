@@ -709,7 +709,7 @@ let test_visible_uncertainty_withholds_production_drain () =
            (match
               Gate.For_testing.spawn_auto_judge_entry_with_worker
                 ~spawn_worker:
-                  (fun ~sw ~entry ~on_summary ~on_finish ->
+            (fun ~sw ~entry ~on_summary ~on_finish () ->
                      Worker.For_testing.spawn_with_writers
                        ~complete_writer:visible_writer
                        ~sw

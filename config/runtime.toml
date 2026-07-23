@@ -975,13 +975,6 @@ candidates = [
   "deepseek.deepseek-v4-pro",
 ]
 
-# Gate Auto Judge routes only by opaque OAS target identity. OAS freezes and
-# admits the complete ordered candidate flow before MASC permits dispatch.
-[runtime.exact_output_lanes.hitl_auto_judge]
-slots = [
-  "deepseek.deepseek-v4-pro",
-]
-
 # ── Keeper assignments ──────────────────────────────────────────────
 # Keepers are assigned to a model by provider.model key. Unassigned
 # keepers fall back to [runtime].default. Per-keeper overrides in the

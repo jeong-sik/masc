@@ -176,15 +176,10 @@ let int_field = function
 let prompt_lane_line (index : int) (stats : model_stats) =
   let lane = public_runtime_lane_label stats.model_id in
   let error_rate = pct stats.error_count stats.entry_count in
-  let cost =
-    match stats.total_cost_usd with
-    | None -> "unknown"
-    | Some value -> Printf.sprintf "$%.4f" value
-  in
   Printf.sprintf
     "- lane %d %s: turns=%d success=%d errors=%d error_rate=%.1f%% \
      p95_latency_ms=%s avg_tok_per_sec=%s input_tokens=%s output_tokens=%s \
-     cost=%s coverage=%s"
+     coverage=%s"
     index
     lane
     stats.entry_count
@@ -195,7 +190,6 @@ let prompt_lane_line (index : int) (stats : model_stats) =
     (float_field stats.avg_tok_per_sec)
     (int_field stats.total_input_tokens)
     (int_field stats.total_output_tokens)
-    cost
     stats.coverage_status
 ;;
 

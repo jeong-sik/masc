@@ -843,6 +843,7 @@ let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
       { requested_override = None
       ; primary_budget = 4096
       ; runtime_budget = 4096
+      ; runtime_budget_source = Some Runtime.Capability
       ; requested_context_window = 4096
       ; effective_budget = 4096
       }

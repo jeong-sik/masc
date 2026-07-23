@@ -415,6 +415,32 @@ export function derivePreferredPhase(
   return toKeeperPhase(keeper.phase)
 }
 
+// Canonical Korean status vocabulary (dashboard-ssot unification).
+//
+// Five parallel label tables (monitoring band, keeper-workspace roster
+// groups, registry groups, fleet-tone phase labels, agent presence) used
+// to render the same keeper with different words (가동중 vs 실행 중,
+// 주의 필요 vs 차단 · 확인 필요, 오프라인 vs 중지 · 미기동). All of them
+// now source their top-level label from this table, keyed on the typed
+// `KeeperOperationalState['kind']` so a new kind forces the compiler to
+// flag every consumer. Fine-grained detail axes (압축 중, 인계 중, …)
+// stay in `lib/fleet-tone.ts` — this table is the coarse 4-state verdict
+// only.
+export const KEEPER_STATUS_LABEL_KO: Readonly<
+  Record<KeeperOperationalState['kind'], string>
+> = Object.freeze({
+  running: '실행 중',
+  paused: '일시정지',
+  stuck: '확인 필요',
+  offline: '중지',
+})
+
+/** The monitoring band layer has one extra state the typed operational
+ *  sum does not: `transient` (compacting / handoff / draining / restart
+ *  mid-transition). Exported here so the band chip, roster group header,
+ *  and health pill cannot spell it three ways. */
+export const KEEPER_TRANSIENT_LABEL_KO = '전이 중'
+
 function deriveKeeperOperationalPhase(
   keeper: Keeper,
   composite: KeeperCompositeSnapshot | null,

@@ -31,6 +31,7 @@ Additional rules:
 5. open_items and constraints are episode-level summary arrays, separate from a claim's category. A claim already categorized as constraint does not need to be repeated in the constraints array.
 6. claim_id (optional): a short lowercase kebab-case slug identifying the CONCLUSION, not the wording — derive it deterministically from the subject and the asserted state (e.g. "pr-21249-verification-complete", "pr-123-open", "pr-123-merged"). Re-stating the same conclusion later MUST reuse the same slug; a changed conclusion (e.g. open -> merged) MUST use a new slug. Omit it if you cannot form a stable slug.
 7. claim_kind (optional): tag the claim's epistemic nature, orthogonal to category. Use "self_observation" for transient first-person agent state — you are idle, looping, blocked, or a tool is timing out (true now, false next turn). Use "external_state" for a claim about the world/PR/issue that is verifiable elsewhere. Use "durable_knowledge" for a timeless rule or lesson. A "lesson" category can still be a self_observation. Omit it when unclear — an omitted tag is treated as durable. Do NOT tag transient self-state as durable knowledge; that is the echo this field exists to stop.
+8. valid_for_days (optional integer, 1-365): YOUR judgment of how many days this claim stays worth re-reading — after that the store forgets it. A claim you labeled "ephemeral" or tagged "self_observation" MUST carry a small value (1-3: it is true today, not next week). Short-lived external_state (an open PR, a pending deploy) usually deserves 7-30. Omit it ONLY for genuinely durable knowledge — an omitted lifetime means the store keeps the claim forever, so leaving it off a transient claim immortalizes noise.
 
 Output schema:
 {
@@ -42,7 +43,8 @@ Output schema:
       "source_turn": 12,
       "source_tool_call_id": "call_abc",
       "claim_id": "pr-123-open",
-      "claim_kind": "self_observation|external_state|durable_knowledge"
+      "claim_kind": "self_observation|external_state|durable_knowledge",
+      "valid_for_days": 7
     }
   ],
   "open_items": ["Tasks or questions left unresolved."],

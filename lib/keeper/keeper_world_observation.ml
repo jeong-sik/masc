@@ -148,6 +148,7 @@ type keeper_cycle_decision =
   }
 
 module Board_signal = Keeper_world_observation_board_signal
+module Board_audience = Keeper_board_audience
 
 type board_signal_match = Board_signal.match_result =
   { explicit_mention : bool
@@ -166,7 +167,6 @@ let count_running_keeper_fibers = Inputs.count_running_keeper_fibers
 let compute_idle_seconds = Inputs.compute_idle_seconds
 let board_signal_match = Board_signal.match_signal
 let check_self_comment_status = Board_signal.check_self_comment_status
-let board_signal_wake_reason = Board_signal.wake_reason
 let compare_board_cursor_token = Board_signal.compare_cursor_token
 let board_cursor_token_of_post = Board_signal.cursor_token_of_post
 let list_board_posts_after_cursor = Board_signal.list_posts_after_cursor
@@ -864,59 +864,94 @@ let collect_board_events_with_cursor_policy
              }
            in
            let matched = board_signal_match ~meta ~signal in
-           if not matched.explicit_mention
-           then
-             (* Only the live Keeper collector owns durable candidate
-                production. Dashboard prompt preview uses
-                [advance_cursor:false] and must remain a read-only projection:
-                observing the page cannot schedule a model judgment or wake a
-                Keeper lane. *)
-             if not advance_cursor
-             then consume_posts (Some next_cursor) acc rest
-             else (
-               match
-                 Keeper_board_attention_candidate.of_board_signal
-                   ~meta
-                   ~recorded_at:(Time_compat.now ())
-                   signal
-               with
+           (match Board_audience.classify ~visibility:p.visibility signal with
+            | Error error ->
+              Otel_metric_store.inc_counter
+                Keeper_metrics.(to_string ObservationQueryFailures)
+                ~labels:
+                  [ ( "operation"
+                    , Runtime_observation_query_operation.(to_label Board_events) )
+                  ]
+                ();
+              Log.Keeper.warn
+                "board replay audience rejected: keeper=%s post=%s error=%s"
+                meta.name
+                post_id
+                (Board_audience.classification_error_to_string error);
+              consume_posts (Some next_cursor) acc rest
+            | Ok audience ->
+              (match Board_audience.route_for_keeper ~audience ~meta ~signal with
                | Board_signal.Unavailable unavailable ->
-                 (match log_and_count_unavailable ~context:"candidate" unavailable with
-                  | Board_signal.Permanent -> consume_posts (Some next_cursor) acc rest
-                  | Board_signal.Transient -> List.rev acc, last_cursor)
-               | Board_signal.Available candidate ->
                  (match
-                    Keeper_board_attention_candidate.record_and_wake
-                      ~base_path
-                      candidate
+                    log_and_count_unavailable ~context:"audience" unavailable
                   with
-                  | Ok _ -> ()
-                  | Error detail ->
-                    raise
-                      (Keeper_board_attention_candidate.Candidate_unavailable
-                         detail));
-                 consume_posts (Some next_cursor) acc rest)
-           else
-             consume_posts
-               
-               (Some next_cursor)
-               ({ event_kind = Board_post_created
-                ; post_id
-                ; author = Board.Agent_id.to_string p.author
-                ; title = p.title
-                ; preview = short_preview ~max_len:80 p.content
-                ; hearth = p.hearth
-                ; post_kind = p.post_kind
-                ; updated_at = p.updated_at
-                ; explicit_mention = matched.explicit_mention
-                ; matched_targets = matched.matched_targets
-                ; self_commented = false
-                ; new_external_since = 0
-                ; latest_external_author = None
-                ; latest_external_preview = None
-                }
-                :: acc)
-               rest
+                  | Board_signal.Permanent ->
+                    consume_posts (Some next_cursor) acc rest
+                  | Board_signal.Transient -> List.rev acc, last_cursor)
+               | Board_signal.Available Board_audience.Ignore ->
+                 consume_posts (Some next_cursor) acc rest
+               | Board_signal.Available Board_audience.Judge_discoverable ->
+                 (* Only the live Keeper collector owns durable candidate
+                    production. Dashboard prompt preview uses
+                    [advance_cursor:false] and must remain a read-only projection:
+                    observing the page cannot schedule a model judgment or wake a
+                    Keeper lane. *)
+                 if not advance_cursor
+                 then consume_posts (Some next_cursor) acc rest
+                 else (
+                   match
+                     Keeper_board_attention_candidate.of_board_signal
+                       ~meta
+                       ~recorded_at:(Time_compat.now ())
+                       signal
+                   with
+                   | Board_signal.Unavailable unavailable ->
+                     (match
+                        log_and_count_unavailable ~context:"candidate" unavailable
+                      with
+                      | Board_signal.Permanent ->
+                        consume_posts (Some next_cursor) acc rest
+                      | Board_signal.Transient -> List.rev acc, last_cursor)
+                   | Board_signal.Available candidate ->
+                     (match
+                        Keeper_board_attention_candidate.record_and_wake
+                          ~base_path
+                          candidate
+                      with
+                      | Ok _ -> ()
+                      | Error detail ->
+                        raise
+                          (Keeper_board_attention_candidate.Candidate_unavailable
+                             detail));
+                     consume_posts (Some next_cursor) acc rest)
+               | Board_signal.Available (Board_audience.Deliver _) ->
+                 (* [explicit_mention] mirrors mention parsing only:
+                    Broadcast-routed deliveries (e.g. [@@all]) record
+                    [false] because a broadcast has no per-keeper mention
+                    target. The event's presence in this Deliver branch
+                    already marks it as addressed; downstream
+                    ([Keeper_unified_prompt.format_board_event_text])
+                    uses the field solely to render a "[mentions ...]"
+                    note. *)
+                 consume_posts
+                   (Some next_cursor)
+                   ({ event_kind = Board_post_created
+                    ; post_id
+                    ; author = Board.Agent_id.to_string p.author
+                    ; title = p.title
+                    ; preview = short_preview ~max_len:80 p.content
+                    ; hearth = p.hearth
+                    ; post_kind = p.post_kind
+                    ; updated_at = p.updated_at
+                    ; explicit_mention = matched.explicit_mention
+                    ; matched_targets = matched.matched_targets
+                    ; self_commented = false
+                    ; new_external_since = 0
+                    ; latest_external_author = None
+                    ; latest_external_preview = None
+                    }
+                    :: acc)
+                   rest))
          | Board_signal.Available (`New_external (count, ext_author, ext_preview)) ->
            (
              let signal : Board_dispatch.board_signal =

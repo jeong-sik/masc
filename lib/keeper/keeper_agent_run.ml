@@ -132,6 +132,34 @@ let raw_trace_for_dispatch
     None
 ;;
 
+let provider_transcript_admission messages =
+  match Keeper_compaction_unit.validate_provider_transcript messages with
+  | Ok () -> Ok ()
+  | Error transcript_error ->
+    let reason, tool_use_ids =
+      match transcript_error with
+      | Keeper_compaction_unit.Invalid_transcript_structure _ ->
+        Keeper_internal_error.Structurally_invalid, []
+      | Keeper_compaction_unit.Unresolved_tool_results { tool_use_ids } ->
+        Keeper_internal_error.Unresolved_tool_results, tool_use_ids
+    in
+    Error
+      (Keeper_internal_error.sdk_error_of_masc_internal_error
+         (Keeper_internal_error.Incomplete_tool_transcript
+            { reason
+            ; detail =
+                Keeper_compaction_unit.show_provider_transcript_error
+                  transcript_error
+            ; tool_use_ids
+            }))
+;;
+
+let dispatch_after_provider_transcript_admission ~messages ~dispatch =
+  match provider_transcript_admission messages with
+  | Error _ as error -> error
+  | Ok () -> dispatch ()
+;;
+
 module For_testing = struct
   let sse_event_progress_kind = Turn_helpers.sse_event_progress_kind
   let sse_event_watchdog_progress_kind =
@@ -144,6 +172,9 @@ module For_testing = struct
   let keeper_raw_trace_sink = keeper_raw_trace_sink
   let raw_trace_for_dispatch = raw_trace_for_dispatch
   let runtime_yield_reason = runtime_yield_reason
+  let provider_transcript_admission = provider_transcript_admission
+  let dispatch_after_provider_transcript_admission =
+    dispatch_after_provider_transcript_admission
 end
 
 (** Run a single keeper turn via OAS Agent.run().
@@ -575,51 +606,55 @@ let run_turn
                 (* Keeper does not impose a cumulative turn, time, token, or cost
                    budget. Explicit cancellation and provider/tool progress
                    boundaries settle the lane, while usage remains observational. *)
-                Keeper_turn_driver.run_named
-                  ~runtime_id:runtime_id_string
-                  ~base_path:config.base_path
-                  ~keeper_name:meta.name
-                    ~goal:user_message
-                    ?goal_blocks:user_blocks
-                    ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                    ?raw_trace
-                    ~system_prompt:turn_system_prompt
-                    ~tools
-                    ~checkpoint_sink
-                    ~initial_messages
-                    ~model_input_projection
-                    ~hooks
-                    ~runtime_manifest_context
-                    ~runtime_manifest_append:
-                      (fun manifest ->
-                         Keeper_runtime_manifest.append_best_effort
-                           ~site:"runtime_runtime"
-                           config
-                           manifest)
-                    ?stream_idle_timeout_s
-                    ?body_timeout_s:
-                      (Keeper_runtime_resolved.body_timeout_override_sec ())
-                    ~temperature
-                    ~accept:
-                      Keeper_tool_response.response_has_text_or_tool_progress
-                    ?on_event
-                    ?on_yield
-                    ?on_resume
-                    ~agent_ref
-                    ?checkpoint_sidecar
-                    ~cache_system_prompt:true
-                    ~yield_on_tool
-                    ~context_injector
-                    ~context:shared_context
-                    ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
-                    ?cooperative_yield_probe
-                    ?oas_checkpoint:resume_oas_checkpoint
-                    ?event_bus
-                    ?trace_link
-                    ~on_runtime_observation:
-                      (fun observation ->
-                         receipt_runtime_observation_ref := Some observation)
-                    ()
+                dispatch_after_provider_transcript_admission
+                  ~messages:initial_messages
+                  ~dispatch:(fun () ->
+                    Keeper_turn_driver.run_named
+                      ~runtime_id:runtime_id_string
+                      ~base_path:config.base_path
+                      ~keeper_name:meta.name
+                      ~goal:user_message
+                      ?goal_blocks:user_blocks
+                      ~session_id:
+                        (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                      ?raw_trace
+                      ~system_prompt:turn_system_prompt
+                      ~tools
+                      ~checkpoint_sink
+                      ~initial_messages
+                      ~model_input_projection
+                      ~hooks
+                      ~runtime_manifest_context
+                      ~runtime_manifest_append:
+                        (fun manifest ->
+                           Keeper_runtime_manifest.append_best_effort
+                             ~site:"runtime_runtime"
+                             config
+                             manifest)
+                      ?stream_idle_timeout_s
+                      ?body_timeout_s:
+                        (Keeper_runtime_resolved.body_timeout_override_sec ())
+                      ~temperature
+                      ~accept:
+                        Keeper_tool_response.response_has_text_or_tool_progress
+                      ?on_event
+                      ?on_yield
+                      ?on_resume
+                      ~agent_ref
+                      ?checkpoint_sidecar
+                      ~cache_system_prompt:true
+                      ~yield_on_tool
+                      ~context_injector
+                      ~context:shared_context
+                      ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
+                      ?cooperative_yield_probe
+                      ?oas_checkpoint:resume_oas_checkpoint
+                      ?event_bus
+                      ?trace_link
+                      ~on_runtime_observation:
+                        (fun observation ->
+                           receipt_runtime_observation_ref := Some observation)
+                      ())
          in
          (* Trace-store failure isolation: [raw_trace_for_dispatch]
                  degrades to [None] (turn runs untraced, typed record

@@ -48,6 +48,36 @@ let test_parser_goldens () =
      token and never reaches "sangsu"; same as the legacy tokenizer. *)
   check ids "possessive stays distinct" [ "sangsu's" ] (parse "@sangsu's note")
 
+let test_explicit_address_is_closed () =
+  let check_address label expected content =
+    let actual =
+      match Lane.explicit_address_of_content content with
+      | Lane.No_explicit_address -> "none"
+      | Lane.Broadcast_all -> "broadcast"
+      | Lane.Targets targets ->
+        "targets:" ^ String.concat "," (List.map Kid.to_string targets)
+      | Lane.Unsupported_broadcast selectors ->
+        "unsupported:" ^ String.concat "," selectors
+    in
+    check string label expected actual
+  in
+  check_address "unaddressed" "none" "plain Board update";
+  check_address "targets" "targets:alpha,beta" "@beta and @alpha";
+  check_address "exact broadcast" "broadcast" "release note @@all";
+  check_address
+    "generic agent-type broadcast is not Keeper authority"
+    "unsupported:analyst"
+    "release note @@analyst";
+  check_address "empty broadcast selector fails closed" "unsupported:" "release @@";
+  check_address
+    "mixed valid and unsupported broadcast fails closed"
+    "unsupported:all,analyst"
+    "@@all @@analyst";
+  check_address
+    "broadcast precedence"
+    "broadcast"
+    "@@all and @alpha"
+
 (* ── 2. Legacy decision equivalence ── *)
 
 (* Verbatim replica of the deleted read-time tokenizer + decision. *)
@@ -267,7 +297,11 @@ let () =
   Random.self_init ();
   run "keeper_lane_mentions"
     [
-      ("parser", [ test_case "goldens" `Quick test_parser_goldens ]);
+      ( "parser",
+        [ test_case "goldens" `Quick test_parser_goldens;
+          test_case "closed explicit address" `Quick
+            test_explicit_address_is_closed;
+        ] );
       ( "legacy_equivalence",
         [ test_case "corpus matrix" `Quick test_legacy_equivalence ] );
       ( "store_roundtrip",

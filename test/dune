@@ -234,6 +234,7 @@
   test_tool_token
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
+  test_keeper_invalid_request_auto_recover
   test_keeper_surface_post
   test_keeper_person_notes
   test_keeper_person_note_set_handler
@@ -279,7 +280,6 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_oas_boundary
-  test_inference_drop_orphan_tool_calls
   test_task_completion_claim
   test_ocaml_north_star_task_lifecycle
   test_tool_blob_store
@@ -548,6 +548,7 @@
   test_tool_token
   test_keeper_unified_claim_progress
   test_keeper_unified_context_overflow
+  test_keeper_invalid_request_auto_recover
   test_keeper_surface_post
   test_keeper_person_notes
   test_keeper_person_note_set_handler
@@ -593,7 +594,6 @@
   test_keeper_path_ssot
   test_tool_input_validation
   test_tool_schema_oas_boundary
-  test_inference_drop_orphan_tool_calls
   ; test_contract_risk removed (team session cleanup)
   ; test_contract_composer removed (team session cleanup)
   test_task_completion_claim
@@ -668,6 +668,12 @@
  (libraries alcotest masc_test_deps masc.keeper_checkpoint_ref))
 
 (test
+ (name test_keeper_checkpoint_purge)
+ (modules test_keeper_checkpoint_purge)
+ (libraries alcotest masc_test_deps))
+
+
+(test
  (name test_keeper_paused_work_cancellation_transaction)
  (modules test_keeper_paused_work_cancellation_transaction)
  (libraries alcotest masc_test_deps eio_main))
@@ -717,6 +723,14 @@
  (deps ../config/oas-models-overlay.toml ../config/runtime.toml)
  (libraries masc_test_deps))
 
+; Exact-output registry: credential admission deferred to execution, and
+; runtime.toml saves re-validate + republish lane declarations.
+
+(test
+ (name test_runtime_exact_output_registry)
+ (modules test_runtime_exact_output_registry)
+ (libraries alcotest masc_test_deps))
+
 (test
  (name test_keeper_keepalive_launch_order_ast)
  (modules test_keeper_keepalive_launch_order_ast)
@@ -757,7 +771,7 @@
 (test
  (name test_fusion_delivery_obligation)
  (modules test_fusion_delivery_obligation)
- (libraries alcotest masc_test_deps masc masc.fusion_core masc.keeper_runtime))
+ (libraries alcotest masc_test_deps masc.fusion_core))
 
 ; Board-unavailable-result: keeper_world_observation_board_signal's
 ; Board_unavailable exception -> (_, board_unavailable) result conversion.
@@ -1268,6 +1282,27 @@
  (name test_cancel_safe)
  (modules test_cancel_safe)
  (libraries alcotest masc_cancel_safe eio eio_main))
+
+; Real local exact-output fixture shared only by compaction tests.
+(library
+ (name compaction_exact_output_fixture)
+ (wrapped false)
+ (modules compaction_exact_output_fixture)
+ (libraries masc_test_deps unix))
+
+; Composition proof for the provider-neutral compaction exact-output lane.
+(test
+ (name test_compaction_exact_output_conformance)
+ (modules test_compaction_exact_output_conformance)
+ (libraries alcotest compaction_exact_output_fixture masc_test_deps eio_main unix))
+
+; Production entrypoint coverage for an intentionally absent Eio clock. This
+; must remain a separate process because Eio_context clock installation is
+; process-global and cannot be masked by the existing scoped test helper.
+(test
+ (name test_compaction_exact_output_entrypoint_clockless)
+ (modules test_compaction_exact_output_entrypoint_clockless)
+ (libraries alcotest compaction_exact_output_fixture masc_test_deps eio_main unix))
 
 ; Warn-log dedup table stays bounded under distinct token-hash-prefix churn.
 
@@ -2468,6 +2503,11 @@
 (test
  (name test_keeper_visible_path_projection)
  (modules test_keeper_visible_path_projection)
+ (libraries masc_test_deps))
+
+(test
+ (name test_keeper_tool_read_window)
+ (modules test_keeper_tool_read_window)
  (libraries masc_test_deps))
 
 ; Event-bus concurrency regression tests (S1–S3).

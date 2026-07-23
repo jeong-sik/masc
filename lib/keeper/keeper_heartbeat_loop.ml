@@ -264,33 +264,138 @@ let failure_judgment_successor
   }
 ;;
 
-let settlement_of_failure ~settled_at failure =
+let settlement_of_failure
+      ~settled_at
+      ~compaction_consecutive_failures
+      ~transcript_quarantine_consecutive_retries
+      failure
+  =
+  let follow_route () =
+    match failure.Keeper_unified_turn.route with
+    | Keeper_runtime_failure_route.Retry_after_observed _ ->
+      Keeper_registry_event_queue.Requeue
+        Keeper_registry_event_queue.Retry_after_observed
+    | Keeper_runtime_failure_route.Rotate_now _ ->
+      Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Rotate_now
+    | Keeper_runtime_failure_route.Escalate_judgment
+        { judgment; provenance; detail } ->
+      Keeper_registry_event_queue.Escalate
+        { reason = Keeper_registry_event_queue.Failure_judgment_requested
+        ; successor =
+            Some
+              (failure_judgment_successor
+                 ~arrived_at:settled_at
+                 failure
+                 judgment
+                 provenance
+                 detail)
+        }
+  in
+  (* RFC-0351 S0 / #25461: this failure is the
+     [compaction_consecutive_failures + 1]-th compaction failure in a row when
+     the disposition carries an in-lane compaction outcome; the counter itself
+     is advanced by [compaction_outcome_of_cycle_outcome] on
+     [keeper_meta.runtime.compaction_rt] after the settlement is decided. *)
+  let attempts = compaction_consecutive_failures + 1 in
+  let escalate_exhausted detail =
+    Keeper_registry_event_queue.Escalate
+      { reason =
+          Keeper_registry_event_queue.Compaction_retry_exhausted
+            { attempts; detail }
+      ; successor = None
+      }
+  in
   match failure.Keeper_unified_turn.source_lease_disposition with
   | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
     Keeper_registry_event_queue.Ack
-  | Keeper_unified_turn.Requeue_after_context_compaction ->
-    Keeper_registry_event_queue.Requeue
-      Keeper_registry_event_queue.Context_compaction_retry
-  | Keeper_unified_turn.Follow_failure_route ->
-    (match failure.Keeper_unified_turn.route with
-     | Keeper_runtime_failure_route.Retry_after_observed _ ->
-       Keeper_registry_event_queue.Requeue
-         Keeper_registry_event_queue.Retry_after_observed
-     | Keeper_runtime_failure_route.Rotate_now _ ->
-       Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Rotate_now
-     | Keeper_runtime_failure_route.Escalate_judgment
-         { judgment; provenance; detail } ->
-       Keeper_registry_event_queue.Escalate
-         { reason = Keeper_registry_event_queue.Failure_judgment_requested
-         ; successor =
-             Some
-               (failure_judgment_successor
-                  ~arrived_at:settled_at
-                  failure
-                  judgment
-                  provenance
-                  detail)
-         })
+  | Keeper_unified_turn.Escalate_after_exact_output_terminal
+      Keeper_unified_turn.Execution_may_have_dispatched ->
+    Keeper_registry_event_queue.Escalate
+      { reason = Keeper_registry_event_queue.Compaction_execution_may_have_dispatched
+      ; successor = None
+      }
+  | Keeper_unified_turn.Escalate_after_exact_output_terminal
+      Keeper_unified_turn.Domain_invalid_output ->
+    Keeper_registry_event_queue.Escalate
+      { reason = Keeper_registry_event_queue.Compaction_domain_invalid_output
+      ; successor = None
+      }
+  | Keeper_unified_turn.Requeue_after_context_compaction
+      Keeper_unified_turn.Compaction_committed ->
+    (* RFC-0351 S0 / #25538: a committed in-lane compaction is normally
+       progress — but the streak now counts overflow episodes and only an
+       overflow-free turn resets it, so reaching the ceiling *through
+       commits* proves the committed savings cannot bring the context under
+       the provider window (incompressible floor; measured: an LLM plan
+       committing 920B, 0.07%, looped forever under the old
+       reset-on-commit semantics). *)
+    if attempts >= Keeper_meta_contract.compaction_retry_escalation_threshold
+    then
+      Keeper_registry_event_queue.Escalate
+        { reason =
+            Keeper_registry_event_queue.Compaction_floor_exceeded
+              { attempts
+              ; detail =
+                  "compactions keep committing but the context re-overflows \
+                   on consecutive attempts; the committed savings cannot \
+                   bring the context under the provider window — retry \
+                   suspended pending operator inspection"
+              }
+        ; successor = None
+        }
+    else
+      Keeper_registry_event_queue.Requeue
+        Keeper_registry_event_queue.Context_compaction_retry
+  | Keeper_unified_turn.Requeue_after_context_compaction
+      (Keeper_unified_turn.Compaction_attempt_failed _) ->
+    if attempts >= Keeper_meta_contract.compaction_retry_escalation_threshold
+    then
+      escalate_exhausted
+        "in-lane provider-overflow compaction failed on consecutive attempts; \
+         retry suspended pending operator inspection"
+    else
+      Keeper_registry_event_queue.Requeue
+        Keeper_registry_event_queue.Context_compaction_retry
+  | Keeper_unified_turn.Requeue_after_transcript_quarantine ->
+    (* #25296: the poisoned checkpoint is preserved unmodified by design, so
+       every re-lease reloads the same incomplete transcript and the admission
+       rejects it again — an unbounded requeue would re-fire the full turn
+       pipeline on every heartbeat. This failure is the
+       [transcript_quarantine_consecutive_retries + 1]-th quarantine in a row;
+       the counter itself is advanced by
+       [transcript_quarantine_outcome_of_cycle_outcome] on
+       [keeper_meta.runtime] after the settlement is decided. Same ceiling
+       shape as the compaction streak (2026-07-21 lesson: every exempt class
+       needs its own accounting). *)
+    let quarantine_attempts = transcript_quarantine_consecutive_retries + 1 in
+    if
+      quarantine_attempts
+      >= Keeper_meta_contract.transcript_quarantine_retry_escalation_threshold
+    then
+      Keeper_registry_event_queue.Escalate
+        { reason =
+            Keeper_registry_event_queue.Transcript_quarantine_retry_exhausted
+              { attempts = quarantine_attempts
+              ; detail =
+                  "transcript quarantine rejected the same preserved checkpoint \
+                   on consecutive attempts; retry suspended pending operator \
+                   inspection (recover or compact the checkpoint to clear)"
+              }
+        ; successor = None
+        }
+    else
+      Keeper_registry_event_queue.Requeue
+        Keeper_registry_event_queue.Transcript_quarantine_retry
+  | Keeper_unified_turn.Follow_failure_route_after_no_compaction { reason } ->
+    if attempts >= Keeper_meta_contract.compaction_retry_escalation_threshold
+    then
+      escalate_exhausted
+        (Printf.sprintf
+           "in-lane provider-overflow compaction terminally declined (%s) on \
+            consecutive attempts; retry suspended pending operator inspection"
+           (Keeper_event_queue_state.no_compaction_reason_label reason))
+    else follow_route ()
+  | Keeper_unified_turn.Follow_failure_route -> follow_route ()
 ;;
 
 let single_approved_resolution lease =
@@ -303,45 +408,71 @@ let single_approved_resolution lease =
   | [] | [ _ ] | _ :: _ :: _ -> None
 ;;
 
-(* RFC-0351 S0 / #25461: consecutive manual-compaction failures tolerated before
-   the settlement escalates instead of requeuing. A requeue is not an ack, so
+(* RFC-0351 S0 / #25461: consecutive compaction failures tolerated before the
+   settlement escalates instead of requeuing. A requeue is not an ack, so
    without a ceiling the same stimulus re-enters on every heartbeat cycle —
    measured at 102 failures / 104 compaction LLM calls in 74 minutes after the
-   #25413 build went live. Three attempts keeps a transient CAS/source race
-   recoverable while bounding a structurally-stuck compaction. *)
-let compaction_retry_escalation_threshold = 3
+   #25413 build went live. The constant lives in [Keeper_meta_contract] next to
+   the [consecutive_failures] field it interprets, shared with the
+   status/dashboard projections. *)
+let compaction_retry_escalation_threshold =
+  Keeper_meta_contract.compaction_retry_escalation_threshold
 
 let settlement_of_cycle_outcome
       ~base_path
       ~settled_at
       ~stop_requested
       ~compaction_consecutive_failures
+      ~transcript_quarantine_consecutive_retries
       ~lease
       outcome
   =
-  match single_approved_resolution lease with
-  | Some resolution ->
+  match single_approved_resolution lease, outcome with
+  | Some resolution, Some (Cycle.Completed _) ->
+    (* RFC-0351 S0 / #25539: the approval wake's job is DELIVERY, not
+       consumption. The old settlement requeued a completed turn whenever the
+       grant was still unconsumed — but whether the model spends the grant is
+       its own (non-deterministic) decision, so keepers that kept doing other
+       work re-fired on every heartbeat cycle: 8,349 requeue receipts across
+       8 keepers over ~42h, one idealist grant alone spinning 657 times. A
+       completed turn settles as Ack regardless of grant state. This does not
+       lose the operator's authorization: the grant remains durably spendable
+       in the approval store ([approved_resolution_state] observes it) and
+       visible on the resolved surface; a later matching attempt still
+       consumes it. *)
     (match
        Keeper_approval_queue.approved_resolution_state
          ~base_path
          ~id:resolution.approval_id
      with
-     | Ok Keeper_approval_queue.Resolution_consumed ->
-       (* The durable authorization was spent before the external effect. The
-          wake has completed its only job even if the later tool/cycle result
-          failed; replay must never recreate the grant. *)
-       Keeper_registry_event_queue.Ack
+     | Ok Keeper_approval_queue.Resolution_consumed -> ()
      | Ok Keeper_approval_queue.Resolution_unconsumed ->
-       Keeper_registry_event_queue.Requeue
-         Keeper_registry_event_queue.Approval_grant_unconsumed
+       Log.Keeper.warn
+         "approval grant delivered but not consumed this turn approval=%s \
+          keeper turn completed; grant remains durably spendable"
+         resolution.approval_id
      | Error error ->
        Log.Keeper.error
-         "approval resolution state unavailable approval=%s: %s"
+         "approval resolution state unavailable approval=%s: %s (grant \
+          remains durable; settlement follows the completed turn)"
          resolution.approval_id
-         (Keeper_approval_queue.grant_error_to_string error);
-       Keeper_registry_event_queue.Requeue
-         Keeper_registry_event_queue.Approval_grant_state_unavailable)
-  | None ->
+         (Keeper_approval_queue.grant_error_to_string error));
+    Keeper_registry_event_queue.Ack
+  | ( Some _
+    , ( Some
+          ( Cycle.Cancelled _
+          | Cycle.Skipped _
+          | Cycle.Busy _
+          | Cycle.Failed _
+          | Cycle.Judgment_settled _
+          | Cycle.Manual_compaction_applied _
+          | Cycle.Manual_compaction_failed _
+          | Cycle.Manual_compaction_not_applied _ )
+      | None ) )
+  (* A turn that did not complete has not delivered the wake; fall through to
+     the ordinary outcome settlement below (busy/cancelled/failed requeue
+     along their usual typed routes and the stimulus re-enters). *)
+  | None, _ ->
     (match outcome with
   | Some (Cycle.Manual_compaction_applied _ as applied) ->
     (match Cycle.manual_compaction_followup_failure applied with
@@ -374,7 +505,11 @@ let settlement_of_cycle_outcome
   | Some (Cycle.Busy _) ->
     Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Cycle_busy
   | Some (Cycle.Failed { failure; _ }) ->
-    settlement_of_failure ~settled_at failure
+    settlement_of_failure
+      ~settled_at
+      ~compaction_consecutive_failures
+      ~transcript_quarantine_consecutive_retries
+      failure
   | Some (Cycle.Judgment_settled { outcome; _ }) ->
     (match outcome with
      | Cycle.Judgment_boundary_failed { detail } ->
@@ -420,6 +555,78 @@ let settlement_of_cycle_outcome
       Keeper_registry_event_queue.Requeue
         Keeper_registry_event_queue.Turn_not_scheduled
     )
+;;
+
+(* RFC-0351 S0 / #25461: pure mapping from a settled cycle outcome to the
+   compaction-streak stamp on [keeper_meta.runtime.compaction_rt]. The manual
+   lane counts [Manual_compaction_applied]/[Manual_compaction_failed]; the
+   in-lane provider-overflow recovery joins the same streak through the
+   failure's disposition so the settlement can bound its retries too. A
+   terminal in-lane no-compaction counts as a failure — unlike the manual
+   lane, where the terminal reason acks and consumes the compaction stimulus,
+   the in-lane source lease carries a product event that requeues, so the same
+   terminal reason re-fires on every retry. Dispositions with no in-lane
+   compaction involvement leave the streak untouched: a generic turn failure
+   proves nothing about compaction progress in either direction. *)
+let compaction_outcome_of_cycle_outcome = function
+  | Some (Cycle.Manual_compaction_applied _) -> Some `Committed
+  | Some (Cycle.Manual_compaction_failed _) -> Some `Failed
+  | Some (Cycle.Failed { failure; _ }) ->
+    (match failure.Keeper_unified_turn.source_lease_disposition with
+     | Keeper_unified_turn.Requeue_after_context_compaction
+         Keeper_unified_turn.Compaction_committed ->
+       (* #25538: an in-lane commit is still one provider-overflow episode.
+          Advancing (not resetting) the streak is what lets an
+          incompressible floor reach the ceiling; only an overflow-free
+          completed turn — or the operator's manual commit — resets. *)
+       Some `Overflow_episode_committed
+     | Keeper_unified_turn.Requeue_after_context_compaction
+         (Keeper_unified_turn.Compaction_attempt_failed _)
+     | Keeper_unified_turn.Follow_failure_route_after_no_compaction _ ->
+       Some `Failed
+     | Keeper_unified_turn.Escalate_after_exact_output_terminal _ -> Some `Failed
+     | Keeper_unified_turn.Follow_failure_route
+     | Keeper_unified_turn.Acknowledge_after_in_turn_handling
+     | Keeper_unified_turn.Requeue_after_transcript_quarantine -> None)
+  | Some (Cycle.Completed _) -> Some `Recovered
+  | Some
+      ( Cycle.Cancelled _
+      | Cycle.Skipped _
+      | Cycle.Busy _
+      | Cycle.Judgment_settled _
+      | Cycle.Manual_compaction_not_applied _ )
+  | None -> None
+;;
+
+(* #25296: pure mapping from a settled cycle outcome to the
+   transcript-quarantine streak stamp on
+   [keeper_meta.runtime.transcript_quarantine_consecutive_retries]. A failed
+   turn whose disposition is [Requeue_after_transcript_quarantine] advances
+   the streak — the settlement above reads it to escalate instead of
+   requeuing once it reaches
+   [Keeper_meta_contract.transcript_quarantine_retry_escalation_threshold].
+   Any completed turn resets: the keeper is no longer pinned to the poisoned
+   transcript. Other outcomes prove nothing about quarantine progress in
+   either direction. *)
+let transcript_quarantine_outcome_of_cycle_outcome = function
+  | Some (Cycle.Failed { failure; _ }) ->
+    (match failure.Keeper_unified_turn.source_lease_disposition with
+     | Keeper_unified_turn.Requeue_after_transcript_quarantine -> Some `Retried
+     | Keeper_unified_turn.Follow_failure_route
+     | Keeper_unified_turn.Follow_failure_route_after_no_compaction _
+     | Keeper_unified_turn.Requeue_after_context_compaction _
+     | Keeper_unified_turn.Escalate_after_exact_output_terminal _
+     | Keeper_unified_turn.Acknowledge_after_in_turn_handling -> None)
+  | Some (Cycle.Completed _) -> Some `Recovered
+  | Some
+      ( Cycle.Cancelled _
+      | Cycle.Skipped _
+      | Cycle.Busy _
+      | Cycle.Judgment_settled _
+      | Cycle.Manual_compaction_applied _
+      | Cycle.Manual_compaction_failed _
+      | Cycle.Manual_compaction_not_applied _ )
+  | None -> None
 ;;
 
 let project_transition_outbox ~base_path ~keeper_name =
@@ -841,9 +1048,21 @@ let run_keepalive_unified_turn
          (match !cycle_outcome_ref with
           | Some (Cycle.Failed { failure; _ }) ->
             (match failure.Keeper_unified_turn.source_lease_disposition with
-             | Keeper_unified_turn.Requeue_after_context_compaction
-             | Keeper_unified_turn.Acknowledge_after_in_turn_handling -> ()
-             | Keeper_unified_turn.Follow_failure_route ->
+             | Keeper_unified_turn.Requeue_after_context_compaction _
+             | Keeper_unified_turn.Escalate_after_exact_output_terminal _
+             | Keeper_unified_turn.Requeue_after_transcript_quarantine
+             | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
+               (* Intentionally a no-op, consistent with the context-compaction
+                  arm above: these dispositions only requeue/acknowledge the
+                  *owning lease's* stimuli, and an unleased cycle owns no lease
+                  — there is no durable stimulus to requeue and none was
+                  consumed (a lease is claimed before any stimulus is
+                  processed, so [claimed_lease = None] means the turn ran
+                  without queue work). Dropping the requeue intent here cannot
+                  lose source work. *)
+               ()
+             | Keeper_unified_turn.Follow_failure_route
+             | Keeper_unified_turn.Follow_failure_route_after_no_compaction _ ->
                (match failure.Keeper_unified_turn.route with
                 | Keeper_runtime_failure_route.Escalate_judgment
                     { judgment; provenance; detail } ->
@@ -899,6 +1118,9 @@ let run_keepalive_unified_turn
              ~stop_requested:(Atomic.get stop)
              ~compaction_consecutive_failures:
                meta_after_triage.runtime.compaction_rt.consecutive_failures
+             ~transcript_quarantine_consecutive_retries:
+               meta_after_triage.runtime
+                 .transcript_quarantine_consecutive_retries
              ~lease
              !cycle_outcome_ref
          in
@@ -907,21 +1129,16 @@ let run_keepalive_unified_turn
             requeue-vs-escalate from the streak *before* this failure, and this
             stamp records the failure for the next cycle. *)
          (let compaction_outcome =
-            match !cycle_outcome_ref with
-            | Some (Cycle.Manual_compaction_applied _) -> Some `Committed
-            | Some (Cycle.Manual_compaction_failed _) -> Some `Failed
-            | Some
-                ( Cycle.Completed _
-                | Cycle.Cancelled _
-                | Cycle.Skipped _
-                | Cycle.Busy _
-                | Cycle.Failed _
-                | Cycle.Judgment_settled _
-                | Cycle.Manual_compaction_not_applied _ )
-            | None -> None
+            compaction_outcome_of_cycle_outcome !cycle_outcome_ref
           in
           match compaction_outcome with
           | None -> ()
+          | Some `Recovered
+            when meta_after_triage.runtime.compaction_rt.consecutive_failures
+                 = 0 ->
+            (* Streak already clear: skip the read-modify-write that every
+               healthy completed turn would otherwise pay. *)
+            ()
           | Some outcome ->
             (match
                Keeper_meta_store.persist_compaction_outcome
@@ -933,6 +1150,33 @@ let run_keepalive_unified_turn
              | Error message ->
                Log.Keeper.warn
                  "compaction outcome counter not persisted keeper=%s: %s"
+                 meta_after_triage.name
+                 message));
+         (* #25296: advance the transcript-quarantine streak the settlement
+            above just read — same ordering rule as the compaction streak. *)
+         (let quarantine_outcome =
+            transcript_quarantine_outcome_of_cycle_outcome !cycle_outcome_ref
+          in
+          match quarantine_outcome with
+          | None -> ()
+          | Some `Recovered
+            when meta_after_triage.runtime
+                   .transcript_quarantine_consecutive_retries
+                 = 0 ->
+            (* Streak already clear: skip the read-modify-write that every
+               healthy completed turn would otherwise pay. *)
+            ()
+          | Some outcome ->
+            (match
+               Keeper_meta_store.persist_transcript_quarantine_outcome
+                 ctx.config
+                 ~keeper_name:meta_after_triage.name
+                 ~outcome
+             with
+             | Ok (`Persisted | `No_durable_meta) -> ()
+             | Error message ->
+               Log.Keeper.warn
+                 "transcript quarantine outcome counter not persisted keeper=%s: %s"
                  meta_after_triage.name
                  message));
          (match

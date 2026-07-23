@@ -54,6 +54,7 @@ let librarian_claim_schema =
     ; Keeper_librarian.wire_field_source_tool_call_id, nullable_string_schema
     ; Keeper_librarian.wire_field_claim_id, nullable_string_schema
     ; Keeper_librarian.wire_field_claim_kind, nullable_enum_schema librarian_claim_kind_tokens
+    ; Keeper_librarian.wire_field_valid_for_days, nullable_integer_schema
     ]
   in
   object_schema ~required:(List.map fst fields) fields

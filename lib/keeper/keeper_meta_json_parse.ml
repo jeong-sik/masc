@@ -344,6 +344,11 @@ let parse_keeper_state
       ; mention_reactive_turn_count
       ; noop_turn_count
       ; message_scope_ack_id
+      ; transcript_quarantine_consecutive_retries =
+          Safe_ops.json_int
+            ~default:0
+            "transcript_quarantine_consecutive_retries"
+            json
 	      ; last_blocker
 	      ; last_runtime_attempt
 	      ; last_turn_tool_calls

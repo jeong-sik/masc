@@ -254,13 +254,35 @@ val persist_compaction_decision :
 val persist_compaction_outcome :
   Workspace.config ->
   keeper_name:string ->
-  outcome:[ `Committed | `Failed ] ->
+  outcome:
+    [ `Committed | `Overflow_episode_committed | `Failed | `Recovered ] ->
   ([ `Persisted | `No_durable_meta ], string) result
 (** Advance the compaction outcome counters on [compaction_rt] using the same
     read/stamp/merge shape as {!persist_compaction_decision}.
+
+    [`Overflow_episode_committed] (an in-lane reactive commit) increments
+    [count] AND the streak — committed savings under an incompressible floor
+    must still count toward the ceiling (#25538). [`Recovered] (a turn
+    completed without provider overflow) resets the streak; callers skip the
+    write when the streak is already 0.
 
     [`Committed] increments [count] and resets [consecutive_failures] to 0;
     [`Failed] increments [consecutive_failures]. The streak is what
     {!settlement_of_cycle_outcome} reads to escalate instead of requeuing a
     failing compaction (RFC-0351 S0, #25461); [count] had no writer before this
     despite being serialized and rendered. *)
+
+val persist_transcript_quarantine_outcome :
+  Workspace.config ->
+  keeper_name:string ->
+  outcome:[ `Retried | `Recovered ] ->
+  ([ `Persisted | `No_durable_meta ], string) result
+(** Advance the transcript-quarantine retry streak on
+    [agent_runtime_state.transcript_quarantine_consecutive_retries] using the
+    same read/stamp/merge shape as {!persist_compaction_outcome}.
+
+    [`Retried] increments the streak — including the escalated terminal
+    attempt, so the persisted meta shows the streak at the ceiling.
+    [`Recovered] (a completed turn) resets it; callers skip the write when the
+    streak is already 0.  The streak is what the heartbeat settlement reads to
+    escalate instead of requeuing a poisoned transcript quarantine (#25296). *)

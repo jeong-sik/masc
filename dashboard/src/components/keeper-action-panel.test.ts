@@ -30,6 +30,9 @@ function makeKeeper(overrides: Partial<Keeper>): Keeper {
     status: 'active',
     phase: 'Running',
     paused: false,
+    // A keeper with its fiber alive is the normal case; tests that exercise
+    // the dead-paused boot path override this to false explicitly.
+    keepalive_running: true,
     ...overrides,
   } as unknown as Keeper
 }
@@ -96,6 +99,27 @@ describe('keeperActionVisibility', () => {
       const v = keeperActionVisibility(k)
       expect(v.canResume).toBe(true)
       expect(v.canWake).toBe(false)
+    })
+  })
+
+  describe('paused keeper whose fiber died (keepalive_running=false)', () => {
+    it('exposes boot instead of resume — resume needs a live owner_generation', () => {
+      const k = makeKeeper({ status: 'active', phase: 'Paused', paused: true, keepalive_running: false })
+      const v = keeperActionVisibility(k)
+      expect(v.canResume).toBe(false)
+      expect(v.canBoot).toBe(true)
+      expect(v.canPause).toBe(false)
+      expect(v.canShutdown).toBe(true)
+    })
+
+    it('still exposes boot when phase is null but the paused flag lingers', () => {
+      // Reproduces the live incident: paused directive persisted after the
+      // process died, phase never repopulated — resume errored with
+      // "current owner generation is unavailable" while boot stayed hidden.
+      const k = makeKeeper({ status: 'active', phase: null, paused: true, keepalive_running: false })
+      const v = keeperActionVisibility(k)
+      expect(v.canResume).toBe(false)
+      expect(v.canBoot).toBe(true)
     })
   })
 

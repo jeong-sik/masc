@@ -6,6 +6,10 @@ import {
   deriveKeeperRuntimeProjection,
   type KeeperRuntimeProjection,
 } from './keeper-runtime-projection'
+import {
+  KEEPER_STATUS_LABEL_KO,
+  KEEPER_TRANSIENT_LABEL_KO,
+} from './keeper-operational-state'
 
 export type RuntimeBand = 'active' | 'attention' | 'paused' | 'offline' | 'transient'
 
@@ -113,27 +117,27 @@ const STAGE_PHASE_EQUIVALENTS: Record<string, string> = {
 const BAND_META: Record<RuntimeBand, RuntimeBandMeta> = {
   active: {
     key: 'active',
-    label: '가동중',
+    label: KEEPER_STATUS_LABEL_KO.running,
     description: '운영자가 보기엔 현재 개입 없이 흐름을 지켜봐도 되는 상태입니다.',
   },
   attention: {
     key: 'attention',
-    label: '주의 필요',
+    label: KEEPER_STATUS_LABEL_KO.stuck,
     description: '응답 지연, 오류, 복구, 승계 등으로 상태 확인이 필요합니다.',
   },
   paused: {
     key: 'paused',
-    label: '일시정지',
+    label: KEEPER_STATUS_LABEL_KO.paused,
     description: '실행은 멈춰 있지만 재개 대상으로 남아 있는 상태입니다.',
   },
   offline: {
     key: 'offline',
-    label: '오프라인',
+    label: KEEPER_STATUS_LABEL_KO.offline,
     description: '프로세스나 하트비트를 확인하지 못해 기동이 필요한 상태입니다.',
   },
   transient: {
     key: 'transient',
-    label: '전이',
+    label: KEEPER_TRANSIENT_LABEL_KO,
     description: '컨텍스트 압축, 승계, 종료, 재시작 등 단계 전이 중이라 결과 확인 전 입니다.',
   },
 }
@@ -327,7 +331,7 @@ function agentBand(status: string | undefined | null): RuntimeBand {
   // (`dashboard_mission_agents.ml:207` `| None -> "unknown"`,
   // `dashboard_execution_builders.ml:209` `~default:"unknown"`), so the
   // previous `'active'` fallback silently absorbed operator-relevant
-  // ambiguity into a "running" badge. `'attention'` ("주의 필요 — 응답
+  // ambiguity into a "running" badge. `'attention'` ("확인 필요 — 응답
   // 지연, 오류, 복구, 승계 등으로 상태 확인이 필요합니다") preserves
   // that signal. Software-development.md §"Unknown → Permissive
   // Default" anti-pattern: unknown input must surface as a distinct

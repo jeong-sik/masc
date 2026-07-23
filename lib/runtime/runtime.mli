@@ -287,6 +287,14 @@ val max_context_of_runtime : t -> int
     context cannot be resolved at load time (no silent default —
     RFC-0206 §2.1). *)
 
+val resolve_max_context_of_runtime_id : string -> (int * max_context_source) option
+(** {!resolve_max_context_of_runtime} looked up by runtime id: the effective
+    input context window together with the source that produced it, or [None]
+    when the id is not configured. Budget surfaces must carry the source —
+    dropping it rendered a runtime.toml override as ["runtime_provider_cap"]
+    in keeper status JSON, which disguised the #25463 config drift as a
+    provider fact. *)
+
 val max_context_of_runtime_id : string -> int option
 (** Effective input context window for the materialized runtime [id], or [None]
     when the id is not configured.  Budgeting callers use this to size a

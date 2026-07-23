@@ -10,7 +10,9 @@ import {
   keeperDisplayRuntime,
   keeperDisplayStatus,
 } from '../../lib/keeper-runtime-display'
-import { isKeeperOffline, isKeeperPaused } from '../../lib/keeper-predicates'
+import {
+  deriveKeeperOperationalState,
+} from '../../lib/keeper-operational-state'
 import {
   PHASE_LABEL_KO,
   PHASE_TONE,
@@ -19,13 +21,24 @@ import {
 } from '../../lib/fleet-tone'
 import type { Keeper } from '../../types'
 
-/** Coarse lifecycle bucket used both for the dot tone and roster grouping. */
-export type KeeperBucket = 'running' | 'paused' | 'offline'
+/** Coarse lifecycle bucket used both for the dot tone and roster grouping.
+ *  Derived from the typed `KeeperOperationalState` SSOT so the roster groups
+ *  match the canonical 4-state vocabulary: running / paused / stuck
+ *  (확인 필요) / offline (중지).
+ *
+ *  Callers that can reach the fleet composite map MUST pass the keeper's
+ *  snapshot through: derive promotes a `synthetic_stall` blocker to stuck
+ *  only when the composite attention axis confirms it (`blocked === true`),
+ *  so a composite-less call would group that keeper under running while
+ *  registry/monitoring show `확인 필요` — the exact split this module
+ *  exists to prevent. */
+export type KeeperBucket = 'running' | 'paused' | 'stuck' | 'offline'
 
-export function keeperBucket(keeper: Keeper): KeeperBucket {
-  if (isKeeperPaused(keeper)) return 'paused'
-  if (isKeeperOffline(keeper)) return 'offline'
-  return 'running'
+export function keeperBucket(
+  keeper: Keeper,
+  composite: Parameters<typeof deriveKeeperOperationalState>[0]['composite'] = null,
+): KeeperBucket {
+  return deriveKeeperOperationalState({ keeper, composite }).kind
 }
 
 const DOT_CLASS: Readonly<Record<FleetTone, string>> = {
@@ -121,11 +134,12 @@ export function keeperPhaseLabel(keeper: Keeper): string {
  *  tone mapping, so adding a new phase forces the compiler to flag a
  *  missing entry there.
  *
- *  Distinct from keeperBucket, which only groups running/paused/offline
- *  for the roster: a Failing or Overflowed keeper is neither offline nor
- *  paused, so the bucket classifies it as "running" and it would render a
- *  green dot while actually degraded. PHASE_TONE handles this — Failing /
- *  Overflowed both map to `bad`. */
+ *  Distinct from keeperBucket, which groups into the 4 coarse buckets
+ *  (running/paused/stuck/offline) for the roster: a Failing or Overflowed
+ *  keeper is neither offline nor paused, so the bucket classifies it as
+ *  "stuck" only when a blocker class is recorded — without one it lands in
+ *  "running" and would render a green dot while actually degraded.
+ *  PHASE_TONE handles this — Failing / Overflowed both map to `bad`. */
 export function keeperStatusTone(keeper: Keeper): FleetTone {
   return PHASE_TONE[phaseTokenFromKeeper(keeper)]
 }

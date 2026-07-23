@@ -501,7 +501,7 @@ let test_manual_compaction_preserves_failed_failure_dispatch () =
     KMC.failure_to_string
       (KMC.Recovery
          ( Masc.Keeper_post_turn.Compaction_rejected
-             Masc.Keeper_compact_policy.Summarizer_unavailable
+             Masc.Keeper_compact_policy.Exact_execution_context_unavailable
          , Error failure_dispatch ))
   in
   check bool "recovery failure dispatch rejection is rendered" true

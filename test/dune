@@ -1286,7 +1286,13 @@
 (test
  (name test_compaction_exact_output_conformance)
  (modules test_compaction_exact_output_conformance)
- (libraries alcotest compaction_exact_output_fixture masc_test_deps eio_main unix))
+ (libraries
+  alcotest
+  compaction_exact_output_fixture
+  masc_test_deps
+  masc.keeper_checkpoint_ref
+  eio_main
+  unix))
 
 ; Durable pre-dispatch fence and restart/cancellation fail-closed proof.
 (test

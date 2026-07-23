@@ -86,10 +86,16 @@ val decide :
 
 (** Recover durable Auto Judge work for exactly one workspace. Each exact
     [(base_path, keeper_name)] owner activates at most its oldest pending
-    judgment; completion drains only that owner's FIFO. Decisive persisted
-    output is finalized without creating a worker. Failed judgments are never
-    retried merely because a process restarted. Every recovery candidate id
-    has an explicit started, finalized, skipped, or failed outcome. *)
+    unbound judgment; completion drains only that owner's FIFO. Decisive
+    persisted unbound output retains its legacy direct-finalization behavior.
+    Completed exact output is first idempotently strict-rewritten with the same
+    identity and summary; only [Keeper_approval_queue.Fsync_completed] permits
+    Gate finalization. Visible unconfirmed or failed rewrites leave the approval
+    pending and record a recovery failure. Dispatch-uncertain, released,
+    quarantined, and legacy execution-uncertain entries never enter restart
+    recovery. Failed judgments are never retried merely because a process
+    restarted. Every recovery candidate id has an explicit started, finalized,
+    skipped, or failed outcome. *)
 val resume_persisted_auto_judges :
   base_path:string -> auto_judge_resume_report
 
@@ -106,9 +112,10 @@ type operator_recovery_report =
   ; queued : int
   }
 
-(** Reopen failed request-local judgments after an explicit operator selection
-    of Auto Judge, then activate one FIFO drain for each Keeper owner with
-    unresolved work in the workspace. *)
+(** Reopen unbound failed request-local judgments after an explicit operator
+    selection of Auto Judge, then activate one FIFO drain for each Keeper owner
+    with eligible unbound work in the workspace. Exact-bound and legacy
+    execution-uncertain entries remain operator-visible but are never queued. *)
 val request_operator_auto_judge_recovery :
   base_path:string -> (operator_recovery_report, string) result
 
@@ -118,6 +125,22 @@ val unavailable_reason_to_string : unavailable_reason -> string
 val decision_to_yojson : decision -> Yojson.Safe.t
 
 module For_testing : sig
+  type exact_completion =
+    id:string ->
+    input_hash:string ->
+    sequence:int ->
+    slot_id:string ->
+    call_id:string ->
+    plan_fingerprint:string ->
+    request_body_sha256:string ->
+    summary:Keeper_approval_queue.hitl_context_summary ->
+    ( Keeper_approval_queue.exact_attempt_transition
+    , Keeper_approval_queue.exact_attempt_error )
+      result
+
+  val auto_judge_entry_ready :
+    Keeper_approval_queue.pending_approval -> bool
+
   val ready_auto_judges_for_owner :
     base_path:string ->
     keeper_name:string ->
@@ -126,4 +149,9 @@ module For_testing : sig
 
   val claim_auto_judge : Keeper_approval_queue.pending_approval -> bool
   val release_auto_judge : Keeper_approval_queue.pending_approval -> unit
+
+  val resume_persisted_auto_judges_with_exact_completion :
+    complete_summary_exact_attempt:exact_completion ->
+    base_path:string ->
+    auto_judge_resume_report
 end

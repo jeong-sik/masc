@@ -236,7 +236,186 @@ let test_dedup_never_merges_distinct_origins () =
 
 let check_update label expected = function
   | Ok actual -> Alcotest.(check bool) label expected actual
-  | Error error -> Alcotest.fail (AQ.storage_error_to_string error)
+  | Error error -> Alcotest.fail (AQ.summary_transition_error_to_string error)
+;;
+
+type exact_identity =
+  { approval_id_arg : string
+  ; input_hash_arg : string
+  ; sequence_arg : int
+  ; slot_id_arg : string
+  ; call_id_arg : string
+  ; plan_fingerprint_arg : string
+  ; request_body_sha256_arg : string
+  }
+
+let exact_identity
+      ?(slot_id = "slot-exact")
+      ?(call_id = "call-exact")
+      ?(plan_fingerprint = "plan-exact")
+      ?(request_body_sha256 = String.make 64 'a')
+      id
+  =
+  let entry = pending_entry_exn id in
+  { approval_id_arg = entry.id
+  ; input_hash_arg = entry.input_hash
+  ; sequence_arg = entry.sequence
+  ; slot_id_arg = slot_id
+  ; call_id_arg = call_id
+  ; plan_fingerprint_arg = plan_fingerprint
+  ; request_body_sha256_arg = request_body_sha256
+  }
+;;
+
+let run_exact_transition transition identity =
+  transition
+    ~id:identity.approval_id_arg
+    ~input_hash:identity.input_hash_arg
+    ~sequence:identity.sequence_arg
+    ~slot_id:identity.slot_id_arg
+    ~call_id:identity.call_id_arg
+    ~plan_fingerprint:identity.plan_fingerprint_arg
+    ~request_body_sha256:identity.request_body_sha256_arg
+;;
+
+let complete_exact identity summary =
+  AQ.complete_summary_exact_attempt
+    ~id:identity.approval_id_arg
+    ~input_hash:identity.input_hash_arg
+    ~sequence:identity.sequence_arg
+    ~slot_id:identity.slot_id_arg
+    ~call_id:identity.call_id_arg
+    ~plan_fingerprint:identity.plan_fingerprint_arg
+    ~request_body_sha256:identity.request_body_sha256_arg
+    ~summary
+;;
+
+let quarantine_exact identity cause =
+  AQ.quarantine_summary_exact_attempt
+    ~id:identity.approval_id_arg
+    ~input_hash:identity.input_hash_arg
+    ~sequence:identity.sequence_arg
+    ~slot_id:identity.slot_id_arg
+    ~call_id:identity.call_id_arg
+    ~plan_fingerprint:identity.plan_fingerprint_arg
+    ~request_body_sha256:identity.request_body_sha256_arg
+    ~cause
+;;
+
+let fail_exact_before_dispatch identity ~reason ~retryable =
+  AQ.fail_summary_exact_attempt_before_dispatch
+    ~id:identity.approval_id_arg
+    ~input_hash:identity.input_hash_arg
+    ~sequence:identity.sequence_arg
+    ~slot_id:identity.slot_id_arg
+    ~call_id:identity.call_id_arg
+    ~plan_fingerprint:identity.plan_fingerprint_arg
+    ~request_body_sha256:identity.request_body_sha256_arg
+    ~reason
+    ~retryable
+;;
+
+let check_exact_update label expected = function
+  | Ok { AQ.changed; write_outcome = AQ.Fsync_completed } ->
+    Alcotest.(check bool) label expected changed
+  | Ok { write_outcome = AQ.Visible_sync_unconfirmed detail; _ } ->
+    Alcotest.failf "%s returned visible durability uncertainty: %s" label detail
+  | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+;;
+
+let run_exact_transition_with_writer transition ~writer identity =
+  transition
+    ~save_file_atomic_strict_staged:writer
+    ~id:identity.approval_id_arg
+    ~input_hash:identity.input_hash_arg
+    ~sequence:identity.sequence_arg
+    ~slot_id:identity.slot_id_arg
+    ~call_id:identity.call_id_arg
+    ~plan_fingerprint:identity.plan_fingerprint_arg
+    ~request_body_sha256:identity.request_body_sha256_arg
+;;
+
+let visible_after_rename_writer_with exception_ path body =
+  match Fs_compat.save_file_atomic path body with
+  | Error reason -> Alcotest.failf "visible writer could not replace %s: %s" path reason
+  | Ok () ->
+    Error
+      { Fs_compat.path
+      ; stage = Fs_compat.After_rename
+      ; exception_
+      ; backtrace = Printexc.get_raw_backtrace ()
+      }
+;;
+
+let visible_after_rename_writer =
+  visible_after_rename_writer_with (Failure "injected parent sync failure")
+;;
+
+let visible_after_rename_cancellation_writer =
+  visible_after_rename_writer_with
+    (Eio.Cancel.Cancelled (Failure "injected cancellation after rename"))
+;;
+
+let before_rename_writer path _body =
+  Error
+    { Fs_compat.path
+    ; stage = Fs_compat.Before_rename
+    ; exception_ = Failure "injected pre-rename failure"
+    ; backtrace = Printexc.get_raw_backtrace ()
+    }
+;;
+
+let before_rename_cancellation_writer ~payload ~backtrace path _body =
+  Error
+    { Fs_compat.path
+    ; stage = Fs_compat.Before_rename
+    ; exception_ = Eio.Cancel.Cancelled payload
+    ; backtrace
+    }
+;;
+
+let check_visible_update label expected = function
+  | Ok
+      { AQ.changed
+      ; write_outcome = AQ.Visible_sync_unconfirmed detail
+      } ->
+    Alcotest.(check bool) (label ^ " changed") expected changed;
+    Alcotest.(check bool) (label ^ " detail") true (String.trim detail <> "")
+  | Ok { write_outcome = AQ.Fsync_completed; _ } ->
+    Alcotest.failf "%s unexpectedly reported durable" label
+  | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+;;
+
+let expect_summary_rejection label expected = function
+  | Error
+      (AQ.Summary_transition_rejected
+        (AQ.Summary_exact_attempt_bound _))
+    when expected = `Bound ->
+    ()
+  | Error
+      (AQ.Summary_transition_rejected
+        (AQ.Summary_legacy_execution_uncertain _))
+    when expected = `Legacy ->
+    ()
+  | Error error ->
+    Alcotest.failf
+      "%s returned the wrong rejection: %s"
+      label
+      (AQ.summary_transition_error_to_string error)
+  | Ok _ -> Alcotest.failf "%s accepted an execution-uncertain entry" label
+;;
+
+let exact_summary ?(context_summary = "Exact attempt summary") model_run_id :
+    AQ.hitl_context_summary
+  =
+  { summary_version = 2
+  ; generated_at = Unix.gettimeofday ()
+  ; model_run_id
+  ; context_summary
+  ; key_questions = []
+  ; judgment = AQ.Approve
+  ; rationale = "The exact durable attempt supports this judgment."
+  }
 ;;
 
 let read_pending_snapshot ~base_path =
@@ -892,6 +1071,1036 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
        drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
+let test_v4_exact_binding_codec_validates_entry_identity () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let id =
+         submit
+           ~base_path
+           ~keeper_name:"queue-v4-exact-codec"
+           ~input:(`Assoc [ "request", `String "codec" ])
+       in
+       check_update "mark exact codec pending" true (AQ.mark_summary_pending ~id);
+       let identity = exact_identity id in
+       let invalid_hashes =
+         [ "malformed", String.make 63 'a' ^ "g"
+         ; "uppercase", String.make 64 'A'
+         ; "non-64", String.make 63 'a'
+         ]
+       in
+       List.iter
+         (fun (label, request_body_sha256_arg) ->
+            let invalid = { identity with request_body_sha256_arg } in
+            match run_exact_transition AQ.bind_summary_exact_attempt invalid with
+            | Error
+                (AQ.Exact_attempt_rejected
+                  (AQ.Exact_attempt_invalid_identity "request_body_sha256")) ->
+              ()
+            | Error error ->
+              Alcotest.failf
+                "%s runtime hash returned the wrong error: %s"
+                label
+                (AQ.exact_attempt_error_to_string error)
+            | Ok _ ->
+              Alcotest.failf "%s runtime hash was accepted" label)
+         invalid_hashes;
+       check_exact_update
+         "bind valid v4 identity"
+         true
+         (run_exact_transition AQ.bind_summary_exact_attempt identity);
+       let snapshot = read_pending_snapshot ~base_path in
+       let open Yojson.Safe.Util in
+       Alcotest.(check int) "v4 snapshot" 4 (snapshot |> member "version" |> to_int);
+       let exact_json =
+         snapshot
+         |> member "pending"
+         |> to_list
+         |> List.hd
+         |> member "exact_attempt"
+       in
+       (match AQ.exact_attempt_state_of_yojson_with_error exact_json with
+        | Ok (AQ.Exact_bound binding) ->
+          Alcotest.(check string)
+            "codec approval identity"
+            identity.approval_id_arg
+            binding.approval_id;
+          Alcotest.(check string)
+            "codec input identity"
+            identity.input_hash_arg
+            binding.input_hash;
+          Alcotest.(check int)
+            "codec sequence identity"
+            identity.sequence_arg
+            binding.sequence
+        | Ok _ -> Alcotest.fail "v4 bound exact attempt decoded as another state"
+        | Error reason -> Alcotest.fail reason);
+       let replace_field field value = function
+         | `Assoc fields ->
+           `Assoc ((field, value) :: List.remove_assoc field fields)
+         | _ -> Alcotest.fail "exact attempt object expected"
+       in
+       (match
+          AQ.exact_attempt_state_of_yojson_with_error
+            (replace_field "call_id" (`String " ") exact_json)
+        with
+        | Error _ -> ()
+        | Ok _ -> Alcotest.fail "blank exact call identity decoded");
+       List.iter
+         (fun (label, hash) ->
+            match
+              AQ.exact_attempt_state_of_yojson_with_error
+                (replace_field
+                   "request_body_sha256"
+                   (`String hash)
+                   exact_json)
+            with
+            | Error _ -> ()
+            | Ok _ -> Alcotest.failf "%s codec hash was accepted" label)
+         invalid_hashes;
+       let mutate_snapshot field value =
+         match snapshot with
+         | `Assoc snapshot_fields ->
+           let pending =
+             match List.assoc_opt "pending" snapshot_fields with
+             | Some (`List entries) ->
+               `List
+                 (List.map
+                    (function
+                      | `Assoc entry_fields ->
+                        let exact_attempt =
+                          List.assoc "exact_attempt" entry_fields
+                          |> replace_field field value
+                        in
+                        `Assoc
+                          (("exact_attempt", exact_attempt)
+                           :: List.remove_assoc "exact_attempt" entry_fields)
+                      | _ -> Alcotest.fail "pending entry object expected")
+                    entries)
+             | _ -> Alcotest.fail "pending list expected"
+           in
+           `Assoc
+             (("pending", pending)
+              :: List.remove_assoc "pending" snapshot_fields)
+         | _ -> Alcotest.fail "snapshot object expected"
+       in
+       List.iter
+         (fun (field, value) ->
+            AQ.For_testing.reset_runtime_state ();
+            write_pending_snapshot ~base_path (mutate_snapshot field value);
+            match AQ.install_persistence ~base_path with
+            | Error _ -> ()
+            | Ok _ ->
+              Alcotest.failf
+                "v4 binding with mismatched %s installed"
+                field)
+         [ "approval_id", `String "different-approval"
+         ; "input_hash", `String "different-input-hash"
+         ; "sequence", `Int (identity.sequence_arg + 1)
+         ])
+;;
+
+let test_exact_attempt_binding_release_and_conflicts () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let id =
+         submit
+           ~base_path
+           ~keeper_name:"queue-exact-binding"
+           ~input:(`Assoc [ "request", `String "bind" ])
+       in
+       check_update "mark exact binding pending" true (AQ.mark_summary_pending ~id);
+       let first = exact_identity id in
+       check_exact_update
+         "first exact bind"
+         true
+         (run_exact_transition AQ.bind_summary_exact_attempt first);
+       check_exact_update
+         "same exact bind is idempotent"
+         false
+         (run_exact_transition AQ.bind_summary_exact_attempt first);
+       let conflicting = { first with call_id_arg = "call-conflicting" } in
+       (match run_exact_transition AQ.bind_summary_exact_attempt conflicting with
+        | Error
+            (AQ.Exact_attempt_rejected
+              (AQ.Exact_attempt_identity_conflict _)) ->
+          ()
+        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+        | Ok _ -> Alcotest.fail "conflicting active exact identity was accepted");
+       check_exact_update
+         "release before dispatch"
+         true
+         (run_exact_transition
+            AQ.release_summary_exact_attempt_before_dispatch
+            first);
+       check_exact_update
+         "same release is idempotent"
+         false
+         (run_exact_transition
+            AQ.release_summary_exact_attempt_before_dispatch
+            first);
+       (match run_exact_transition AQ.bind_summary_exact_attempt first with
+        | Error
+            (AQ.Exact_attempt_rejected
+              (AQ.Exact_attempt_status_conflict _)) ->
+          ()
+        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+        | Ok _ -> Alcotest.fail "released identity rebound as a new attempt");
+       let replacement =
+         { first with
+           slot_id_arg = "slot-replacement"
+         ; call_id_arg = "call-replacement"
+         ; plan_fingerprint_arg = "plan-replacement"
+         ; request_body_sha256_arg = String.make 64 'b'
+         }
+       in
+       check_exact_update
+         "new identity replaces released attempt"
+         true
+         (run_exact_transition AQ.bind_summary_exact_attempt replacement);
+       let summary = exact_summary "bound-summary-rejection" in
+       expect_summary_rejection
+         "bound attach"
+         `Bound
+         (AQ.attach_summary ~id summary);
+       expect_summary_rejection
+         "bound fail"
+         `Bound
+         (AQ.mark_summary_failed
+            ~id
+            ~reason:"must remain exact"
+            ~retryable:true);
+       expect_summary_rejection
+         "bound restart"
+         `Bound
+         (AQ.restart_failed_summary ~id);
+       let quarantine_cause = AQ.Exact_post_dispatch_failure in
+       check_exact_update
+         "quarantine replacement"
+         true
+         (quarantine_exact replacement quarantine_cause);
+       (match pending_entry_exn id with
+        | { exact_attempt =
+              AQ.Exact_bound
+                { status =
+                    AQ.Exact_quarantined
+                      AQ.Exact_post_dispatch_failure
+                ; _
+                }
+          ; _
+          } ->
+          ()
+        | _ -> Alcotest.fail "quarantine cause was not durably typed");
+       check_exact_update
+         "same quarantine cause is idempotent"
+         false
+         (quarantine_exact replacement quarantine_cause);
+       (match quarantine_exact replacement AQ.Exact_cancellation with
+        | Error
+            (AQ.Exact_attempt_rejected
+              (AQ.Exact_attempt_status_conflict _)) ->
+          ()
+        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+        | Ok _ -> Alcotest.fail "different quarantine cause was accepted");
+       (match
+          run_exact_transition
+            AQ.release_summary_exact_attempt_before_dispatch
+            replacement
+        with
+        | Error
+            (AQ.Exact_attempt_rejected
+              (AQ.Exact_attempt_status_conflict _)) ->
+          ()
+        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+        | Ok _ -> Alcotest.fail "quarantined exact attempt was released"))
+;;
+
+let test_exact_attempt_final_predispatch_failure_requires_operator_restart () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let id =
+         submit
+           ~base_path
+           ~keeper_name:"queue-exact-predispatch-failure"
+           ~input:(`Assoc [ "request", `String "fail-before-dispatch" ])
+       in
+       check_update
+         "mark exact predispatch failure pending"
+         true
+         (AQ.mark_summary_pending ~id);
+       let identity = exact_identity id in
+       check_exact_update
+         "bind exact predispatch failure"
+         true
+         (run_exact_transition AQ.bind_summary_exact_attempt identity);
+       List.iter
+         (fun (field, wrong_identity) ->
+            (match
+               fail_exact_before_dispatch
+                 wrong_identity
+                 ~reason:"before dispatch"
+                 ~retryable:true
+             with
+             | Error
+                 (AQ.Exact_attempt_rejected
+                   (AQ.Exact_attempt_identity_conflict _)) ->
+               ()
+             | Error error ->
+               Alcotest.failf
+                 "%s mismatch returned %s"
+                 field
+                 (AQ.exact_attempt_error_to_string error)
+             | Ok _ ->
+               Alcotest.failf "%s mismatch changed failure state" field);
+            match pending_entry_exn id with
+            | { summary_status = AQ.Summary_pending
+              ; exact_attempt =
+                  AQ.Exact_bound { status = AQ.Exact_dispatch_uncertain; _ }
+              ; _
+              } ->
+              ()
+            | _ ->
+              Alcotest.failf "%s mismatch mutated the durable entry" field)
+         [ "slot_id", { identity with slot_id_arg = "wrong-slot-id" }
+         ; "call_id", { identity with call_id_arg = "wrong-call-id" }
+         ; ( "plan_fingerprint"
+           , { identity with plan_fingerprint_arg = "wrong-plan-fingerprint" } )
+         ; ( "request_body_sha256"
+           , { identity with request_body_sha256_arg = String.make 64 'c' } )
+         ];
+       check_exact_update
+         "final before-dispatch failure"
+         true
+         (fail_exact_before_dispatch
+            identity
+            ~reason:"all exact slots failed before dispatch"
+            ~retryable:true);
+       (match pending_entry_exn id with
+        | { summary_status =
+              AQ.Summary_failed
+                { reason = "all exact slots failed before dispatch"
+                ; retryable = true
+                }
+          ; exact_attempt =
+              AQ.Exact_bound
+                { status = AQ.Exact_released_before_dispatch; _ }
+          ; _
+          } ->
+          ()
+        | _ ->
+          Alcotest.fail
+            "before-dispatch release and summary failure were not atomic");
+       check_exact_update
+         "same before-dispatch failure is idempotent"
+         false
+         (fail_exact_before_dispatch
+            identity
+            ~reason:"all exact slots failed before dispatch"
+            ~retryable:true);
+       let expect_failure_replay_conflict label result =
+         match result with
+         | Error
+             (AQ.Exact_attempt_rejected
+               (AQ.Exact_attempt_status_conflict _)) ->
+           ()
+         | Error error ->
+           Alcotest.failf
+             "%s returned %s"
+             label
+             (AQ.exact_attempt_error_to_string error)
+         | Ok _ -> Alcotest.failf "%s replaced the first durable failure" label
+       in
+       expect_failure_replay_conflict
+         "changed failure reason"
+         (fail_exact_before_dispatch
+            identity
+            ~reason:"different failure reason"
+            ~retryable:true);
+       expect_failure_replay_conflict
+         "changed retryable observation"
+         (fail_exact_before_dispatch
+            identity
+            ~reason:"all exact slots failed before dispatch"
+            ~retryable:false);
+       (match pending_entry_exn id with
+        | { summary_status =
+              AQ.Summary_failed
+                { reason = "all exact slots failed before dispatch"
+                ; retryable = true
+                }
+          ; exact_attempt =
+              AQ.Exact_bound
+                { status = AQ.Exact_released_before_dispatch; _ }
+          ; _
+          } ->
+          ()
+        | _ -> Alcotest.fail "conflicting replay replaced the first failure");
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       (match pending_entry_exn id with
+        | { summary_status =
+              AQ.Summary_failed
+                { reason = "all exact slots failed before dispatch"
+                ; retryable = true
+                }
+          ; exact_attempt =
+              AQ.Exact_bound
+                { status = AQ.Exact_released_before_dispatch; _ }
+          ; _
+          } ->
+          ()
+        | _ ->
+          Alcotest.fail
+            "released exact failure did not survive codec round-trip");
+       check_update
+         "single operator restart"
+         true
+         (AQ.restart_failed_summary ~id);
+       (match pending_entry_exn id with
+        | { summary_status = AQ.Summary_pending
+          ; exact_attempt = AQ.Exact_unbound
+          ; _
+          } ->
+          ()
+        | _ ->
+          Alcotest.fail
+            "single operator restart did not clear the released binding");
+       let second_identity =
+         exact_identity
+           ~slot_id:"slot-restarted"
+           ~call_id:"call-restarted"
+           ~plan_fingerprint:"plan-restarted"
+           ~request_body_sha256:(String.make 64 'b')
+           id
+       in
+       check_exact_update
+         "bind restarted exact attempt"
+         true
+         (run_exact_transition AQ.bind_summary_exact_attempt second_identity);
+       check_exact_update
+         "fail restarted attempt before dispatch"
+         true
+         (fail_exact_before_dispatch
+            second_identity
+            ~reason:"restarted slot unavailable"
+            ~retryable:false);
+       (match AQ.restart_failed_summaries ~base_path with
+        | Ok restarted_ids ->
+          Alcotest.(check (list string))
+            "bulk operator restart includes exact failure"
+            [ id ]
+            restarted_ids
+        | Error error ->
+          Alcotest.fail (AQ.summary_transition_error_to_string error));
+       match pending_entry_exn id with
+       | { summary_status = AQ.Summary_pending
+         ; exact_attempt = AQ.Exact_unbound
+         ; _
+         } ->
+         ()
+       | _ ->
+         Alcotest.fail
+           "bulk operator restart did not clear the released binding")
+;;
+
+let test_dispatch_uncertain_restart_is_durably_quarantined () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let id =
+         submit
+           ~base_path
+           ~keeper_name:"queue-exact-restart"
+           ~input:(`Assoc [ "request", `String "restart" ])
+       in
+       check_update "mark exact restart pending" true (AQ.mark_summary_pending ~id);
+       let identity = exact_identity id in
+       check_exact_update
+         "bind dispatch-uncertain attempt"
+         true
+         (run_exact_transition AQ.bind_summary_exact_attempt identity);
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       (match pending_entry_exn id with
+        | { exact_attempt =
+              AQ.Exact_bound
+                { status =
+                    AQ.Exact_quarantined
+                      AQ.Exact_restart_uncertainty
+                ; slot_id
+                ; call_id
+                ; _
+                }
+          ; _
+          } ->
+          Alcotest.(check string)
+            "restart keeps slot identity"
+            identity.slot_id_arg
+            slot_id;
+          Alcotest.(check string)
+            "restart keeps call identity"
+            identity.call_id_arg
+            call_id
+        | _ -> Alcotest.fail "dispatch-uncertain restart was not quarantined");
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "restart quarantine is persisted"
+         "quarantined"
+         (read_pending_snapshot ~base_path
+          |> member "pending"
+          |> to_list
+          |> List.hd
+          |> member "exact_attempt"
+          |> member "status"
+          |> to_string);
+       Alcotest.(check string)
+         "restart quarantine cause is persisted"
+         "restart_uncertainty"
+         (read_pending_snapshot ~base_path
+          |> member "pending"
+          |> to_list
+          |> List.hd
+          |> member "exact_attempt"
+          |> member "quarantine_cause"
+          |> to_string);
+       (match
+          run_exact_transition
+            AQ.release_summary_exact_attempt_before_dispatch
+            identity
+        with
+        | Error
+            (AQ.Exact_attempt_rejected
+              (AQ.Exact_attempt_status_conflict _)) ->
+          ()
+        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+        | Ok _ -> Alcotest.fail "restart-quarantined attempt was released"))
+;;
+
+let test_exact_attempt_completion_is_atomic () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let id =
+         submit
+           ~base_path
+           ~keeper_name:"queue-exact-completion"
+           ~input:(`Assoc [ "request", `String "complete" ])
+       in
+       check_update "mark exact completion pending" true (AQ.mark_summary_pending ~id);
+       let identity = exact_identity id in
+       check_exact_update
+         "bind completion attempt"
+         true
+         (run_exact_transition AQ.bind_summary_exact_attempt identity);
+       let mismatched_summary = exact_summary "different-call-id" in
+       (match complete_exact identity mismatched_summary with
+        | Error
+            (AQ.Exact_attempt_rejected
+              (AQ.Exact_attempt_provenance_mismatch
+                { approval_id; expected_call_id; actual_model_run_id })) ->
+          Alcotest.(check string) "provenance approval" id approval_id;
+          Alcotest.(check string)
+            "provenance expected call"
+            identity.call_id_arg
+            expected_call_id;
+          Alcotest.(check string)
+            "provenance actual model run"
+            mismatched_summary.model_run_id
+            actual_model_run_id
+        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+        | Ok _ -> Alcotest.fail "mismatched completion provenance was accepted");
+       (match pending_entry_exn id with
+        | { summary_status = AQ.Summary_pending
+          ; exact_attempt =
+              AQ.Exact_bound { status = AQ.Exact_dispatch_uncertain; _ }
+          ; _
+          } ->
+          ()
+        | _ -> Alcotest.fail "provenance rejection mutated the exact attempt");
+       let summary = exact_summary identity.call_id_arg in
+       check_exact_update
+         "complete exact attempt"
+         true
+         (complete_exact identity summary);
+       (match pending_entry_exn id with
+        | { summary_status = AQ.Summary_available durable_summary
+          ; exact_attempt =
+              AQ.Exact_bound { status = AQ.Exact_completed; _ }
+          ; _
+          } ->
+          Alcotest.(check string)
+            "summary and completion share one entry"
+            summary.model_run_id
+            durable_summary.model_run_id
+        | _ -> Alcotest.fail "exact completion did not atomically store both fields");
+       let open Yojson.Safe.Util in
+       let persisted_entry =
+         read_pending_snapshot ~base_path
+         |> member "pending"
+         |> to_list
+         |> List.hd
+       in
+       Alcotest.(check string)
+         "durable exact status"
+         "completed"
+         (persisted_entry
+          |> member "exact_attempt"
+          |> member "status"
+          |> to_string);
+       Alcotest.(check string)
+         "durable summary from the same snapshot"
+         summary.model_run_id
+         (persisted_entry
+          |> member "summary_status"
+          |> member "summary"
+          |> member "model_run_id"
+          |> to_string);
+       check_exact_update
+         "same completion is idempotent"
+         false
+         (complete_exact identity summary);
+       let conflicting =
+         { summary with context_summary = "Conflicting exact summary" }
+       in
+       (match complete_exact identity conflicting with
+        | Error
+            (AQ.Exact_attempt_rejected
+              (AQ.Exact_attempt_content_conflict actual)) ->
+          Alcotest.(check string) "content conflict identity" id actual
+        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+        | Ok _ -> Alcotest.fail "conflicting exact completion was accepted"))
+;;
+
+let test_exact_attempt_bind_storage_failure_is_not_success () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let id =
+         submit
+           ~base_path
+           ~keeper_name:"queue-exact-bind-storage-failure"
+           ~input:(`Assoc [ "request", `String "bind" ])
+       in
+       check_update "mark storage failure pending" true (AQ.mark_summary_pending ~id);
+       let identity = exact_identity id in
+       let store_path = AQ.For_testing.pending_store_path ~base_path in
+       Sys.remove store_path;
+       Unix.mkdir store_path 0o755;
+       (match run_exact_transition AQ.bind_summary_exact_attempt identity with
+        | Error (AQ.Exact_attempt_storage_error _) -> ()
+        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+        | Ok _ -> Alcotest.fail "failed exact binding persistence reported success");
+       match pending_entry_exn id with
+       | { exact_attempt = AQ.Exact_unbound; _ } -> ()
+       | _ -> Alcotest.fail "failed exact binding persistence mutated memory")
+;;
+
+let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let prepare label =
+         let id =
+           submit
+             ~base_path
+             ~keeper_name:("queue-exact-staged-" ^ label)
+             ~input:(`Assoc [ "request", `String label ])
+         in
+         check_update
+           ("mark " ^ label ^ " pending")
+           true
+           (AQ.mark_summary_pending ~id);
+         id, exact_identity id
+       in
+       let assert_status label id expected =
+         match pending_entry_exn id with
+         | { exact_attempt = AQ.Exact_bound { status; _ }; _ } ->
+           Alcotest.(check string)
+             label
+             expected
+             (AQ.exact_attempt_status_to_string status)
+         | _ -> Alcotest.failf "%s did not retain an exact binding" label
+       in
+       let bind_id, bind_identity = prepare "bind" in
+       check_visible_update
+         "visible bind"
+         true
+         (run_exact_transition_with_writer
+            AQ.For_testing.bind_summary_exact_attempt_with_writer
+            ~writer:visible_after_rename_writer
+            bind_identity);
+       assert_status "visible bind memory" bind_id "dispatch_uncertain";
+       check_exact_update
+         "idempotent bind confirms durability"
+         false
+         (run_exact_transition AQ.bind_summary_exact_attempt bind_identity);
+       let before_id, before_identity = prepare "before-rename" in
+       (match
+          run_exact_transition_with_writer
+            AQ.For_testing.bind_summary_exact_attempt_with_writer
+            ~writer:before_rename_writer
+            before_identity
+        with
+        | Error (AQ.Exact_attempt_storage_error _) -> ()
+        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+        | Ok _ -> Alcotest.fail "pre-rename binding failure reported success");
+         (match pending_entry_exn before_id with
+          | { exact_attempt = AQ.Exact_unbound; _ } -> ()
+          | _ -> Alcotest.fail "pre-rename failure mutated exact binding memory");
+         let cancel_before_id, cancel_before_identity =
+           prepare "cancel-before-rename"
+         in
+         let cancellation_payload =
+           Failure ("injected cancellation before rename: " ^ cancel_before_id)
+         in
+         let cancellation_backtrace = Printexc.get_callstack 32 in
+         (match
+            run_exact_transition_with_writer
+              AQ.For_testing.bind_summary_exact_attempt_with_writer
+              ~writer:
+                (before_rename_cancellation_writer
+                   ~payload:cancellation_payload
+                   ~backtrace:cancellation_backtrace)
+              cancel_before_identity
+          with
+          | exception Eio.Cancel.Cancelled observed_payload ->
+            let observed_backtrace = Printexc.get_raw_backtrace () in
+            Alcotest.(check bool)
+              "pre-rename cancellation payload preserved"
+              true
+              (observed_payload == cancellation_payload);
+            Alcotest.(check string)
+              "pre-rename cancellation backtrace preserved"
+              (Printexc.raw_backtrace_to_string cancellation_backtrace)
+              (Printexc.raw_backtrace_to_string observed_backtrace)
+          | Error error ->
+            Alcotest.failf
+              "pre-rename cancellation became an exact error: %s"
+              (AQ.exact_attempt_error_to_string error)
+          | Ok _ ->
+            Alcotest.fail "pre-rename cancellation reported a write outcome");
+         (match pending_entry_exn cancel_before_id with
+          | { exact_attempt = AQ.Exact_unbound; _ } -> ()
+          | _ -> Alcotest.fail "pre-rename cancellation mutated exact memory");
+         let cancel_after_id, cancel_after_identity =
+           prepare "cancel-after-rename"
+         in
+         check_visible_update
+           "post-rename cancellation is visible"
+           true
+           (run_exact_transition_with_writer
+              AQ.For_testing.bind_summary_exact_attempt_with_writer
+              ~writer:visible_after_rename_cancellation_writer
+              cancel_after_identity);
+         assert_status
+           "post-rename cancellation converges memory"
+           cancel_after_id
+           "dispatch_uncertain";
+       let release_id, release_identity = prepare "release" in
+       check_exact_update
+         "bind release fixture"
+         true
+         (run_exact_transition AQ.bind_summary_exact_attempt release_identity);
+       check_visible_update
+         "visible release"
+         true
+         (run_exact_transition_with_writer
+            AQ.For_testing.release_summary_exact_attempt_before_dispatch_with_writer
+            ~writer:visible_after_rename_writer
+            release_identity);
+       assert_status
+         "visible release memory"
+         release_id
+         "released_before_dispatch";
+       check_exact_update
+         "idempotent release confirms durability"
+         false
+         (run_exact_transition
+            AQ.release_summary_exact_attempt_before_dispatch
+            release_identity);
+       (match
+          quarantine_exact release_identity AQ.Exact_post_dispatch_failure
+        with
+        | Error
+            (AQ.Exact_attempt_rejected
+              (AQ.Exact_attempt_status_conflict _)) ->
+          ()
+        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+        | Ok _ ->
+          Alcotest.fail
+            "released binding accepted an untyped terminalization cause");
+       check_exact_update
+         "typed release uncertainty terminalization"
+         true
+         (quarantine_exact
+            release_identity
+            AQ.Exact_terminal_persistence_failure);
+       assert_status "release terminal memory" release_id "quarantined";
+       let fail_id, fail_identity = prepare "fail" in
+       check_exact_update
+         "bind failure fixture"
+         true
+         (run_exact_transition AQ.bind_summary_exact_attempt fail_identity);
+       check_visible_update
+         "visible predispatch failure"
+         true
+         (AQ.For_testing.fail_summary_exact_attempt_before_dispatch_with_writer
+            ~save_file_atomic_strict_staged:visible_after_rename_writer
+            ~id:fail_identity.approval_id_arg
+            ~input_hash:fail_identity.input_hash_arg
+            ~sequence:fail_identity.sequence_arg
+            ~slot_id:fail_identity.slot_id_arg
+            ~call_id:fail_identity.call_id_arg
+            ~plan_fingerprint:fail_identity.plan_fingerprint_arg
+            ~request_body_sha256:fail_identity.request_body_sha256_arg
+            ~reason:"no usable exact slot"
+            ~retryable:false);
+       (match pending_entry_exn fail_id with
+        | { exact_attempt =
+              AQ.Exact_bound { status = AQ.Exact_released_before_dispatch; _ }
+          ; summary_status = AQ.Summary_failed _
+          ; _
+          } ->
+          ()
+        | _ -> Alcotest.fail "visible failure did not converge memory");
+       check_exact_update
+         "idempotent failure confirms durability"
+         false
+         (fail_exact_before_dispatch
+            fail_identity
+            ~reason:"no usable exact slot"
+            ~retryable:false);
+       let quarantine_id, quarantine_identity = prepare "quarantine" in
+       check_exact_update
+         "bind quarantine fixture"
+         true
+         (run_exact_transition AQ.bind_summary_exact_attempt quarantine_identity);
+       check_visible_update
+         "visible quarantine"
+         true
+         (AQ.For_testing.quarantine_summary_exact_attempt_with_writer
+            ~save_file_atomic_strict_staged:visible_after_rename_writer
+            ~id:quarantine_identity.approval_id_arg
+            ~input_hash:quarantine_identity.input_hash_arg
+            ~sequence:quarantine_identity.sequence_arg
+            ~slot_id:quarantine_identity.slot_id_arg
+            ~call_id:quarantine_identity.call_id_arg
+            ~plan_fingerprint:quarantine_identity.plan_fingerprint_arg
+            ~request_body_sha256:quarantine_identity.request_body_sha256_arg
+            ~cause:AQ.Exact_post_dispatch_failure);
+       assert_status
+         "visible quarantine memory"
+         quarantine_id
+         "quarantined";
+       check_exact_update
+         "idempotent quarantine confirms durability"
+         false
+         (quarantine_exact
+            quarantine_identity
+            AQ.Exact_post_dispatch_failure);
+       let complete_id, complete_identity = prepare "complete" in
+       check_exact_update
+         "bind completion fixture"
+         true
+         (run_exact_transition AQ.bind_summary_exact_attempt complete_identity);
+       let summary = exact_summary complete_identity.call_id_arg in
+       check_visible_update
+         "visible completion"
+         true
+         (AQ.For_testing.complete_summary_exact_attempt_with_writer
+            ~save_file_atomic_strict_staged:visible_after_rename_writer
+            ~id:complete_identity.approval_id_arg
+            ~input_hash:complete_identity.input_hash_arg
+            ~sequence:complete_identity.sequence_arg
+            ~slot_id:complete_identity.slot_id_arg
+            ~call_id:complete_identity.call_id_arg
+            ~plan_fingerprint:complete_identity.plan_fingerprint_arg
+            ~request_body_sha256:complete_identity.request_body_sha256_arg
+            ~summary);
+       assert_status "visible completion memory" complete_id "completed";
+       check_exact_update
+         "idempotent completion confirms durability"
+         false
+         (complete_exact complete_identity summary))
+;;
+
+let test_exact_completed_restart_requires_fsync_confirmation () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-exact-restart-fsync" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let id =
+         submit
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "request", `String "restart-fsync" ])
+       in
+       check_update "mark exact restart pending" true (AQ.mark_summary_pending ~id);
+       let identity = exact_identity id in
+       check_exact_update
+         "bind exact restart identity"
+         true
+         (run_exact_transition AQ.bind_summary_exact_attempt identity);
+       let summary = exact_summary identity.call_id_arg in
+       check_exact_update
+         "complete exact restart summary"
+         true
+         (complete_exact identity summary);
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let observed_calls = ref 0 in
+       let injected_completion write_outcome
+             ~id:actual_id
+             ~input_hash
+             ~sequence
+             ~slot_id
+             ~call_id
+             ~plan_fingerprint
+             ~request_body_sha256
+             ~summary:(actual_summary : AQ.hitl_context_summary)
+         =
+         incr observed_calls;
+         Alcotest.(check string) "recovery approval identity" id actual_id;
+         Alcotest.(check string)
+           "recovery input identity"
+           identity.input_hash_arg
+           input_hash;
+         Alcotest.(check int)
+           "recovery sequence identity"
+           identity.sequence_arg
+           sequence;
+         Alcotest.(check string)
+           "recovery slot identity"
+           identity.slot_id_arg
+           slot_id;
+         Alcotest.(check string)
+           "recovery call identity"
+           identity.call_id_arg
+           call_id;
+         Alcotest.(check string)
+           "recovery plan identity"
+           identity.plan_fingerprint_arg
+           plan_fingerprint;
+         Alcotest.(check string)
+           "recovery body identity"
+           identity.request_body_sha256_arg
+           request_body_sha256;
+         Alcotest.(check string)
+           "recovery summary identity"
+           summary.model_run_id
+           actual_summary.model_run_id;
+         Ok { AQ.changed = false; write_outcome }
+       in
+       let visible_report =
+         Gate.For_testing.resume_persisted_auto_judges_with_exact_completion
+           ~complete_summary_exact_attempt:
+             (injected_completion
+                (AQ.Visible_sync_unconfirmed
+                   "injected recovery parent sync failure"))
+           ~base_path
+       in
+       Alcotest.(check int) "visible recovery candidate" 1 visible_report.requested;
+       Alcotest.(check int)
+         "visible recovery finalizes zero"
+         0
+         (List.length visible_report.finalized_ids);
+       Alcotest.(check int)
+         "visible recovery records failure"
+         1
+         (List.length visible_report.failures);
+       Alcotest.(check bool) "visible recovery keeps pending" true
+         (Option.is_some (AQ.get_pending_entry ~id));
+       let error_report =
+         Gate.For_testing.resume_persisted_auto_judges_with_exact_completion
+           ~complete_summary_exact_attempt:
+             (fun
+               ~id:_
+               ~input_hash:_
+               ~sequence:_
+               ~slot_id:_
+               ~call_id:_
+               ~plan_fingerprint:_
+               ~request_body_sha256:_
+               ~summary:_ ->
+              Error
+                (AQ.Exact_attempt_storage_error
+                   { path = "injected"; reason = "before rename" }))
+           ~base_path
+       in
+       Alcotest.(check int)
+         "error recovery finalizes zero"
+         0
+         (List.length error_report.finalized_ids);
+       Alcotest.(check int)
+         "error recovery records failure"
+         1
+         (List.length error_report.failures);
+       Alcotest.(check bool) "error recovery keeps pending" true
+         (Option.is_some (AQ.get_pending_entry ~id));
+       let durable_report = Gate.resume_persisted_auto_judges ~base_path in
+       Alcotest.(check (list string))
+         "fsync-confirmed recovery finalizes once"
+         [ id ]
+         durable_report.finalized_ids;
+       Alcotest.(check int)
+         "fsync-confirmed recovery has no failure"
+         0
+         (List.length durable_report.failures);
+       Alcotest.(check int)
+         "injected exact identity confirmations"
+         1
+         !observed_calls;
+       Alcotest.(check bool) "durable recovery removes pending" true
+         (Option.is_none (AQ.get_pending_entry ~id));
+       let resolution =
+         durable_resolution_opt ~base_path ~keeper_name ~approval_id:id
+         |> require_some "fsync-confirmed recovery did not finalize"
+       in
+       drop_resolution ~base_path ~keeper_name resolution)
+;;
+
 let test_summary_updates_never_resolve_pending_request () =
   let base_path = temp_dir () in
   let keeper_name = "queue-summary-advisory" in
@@ -928,7 +2137,8 @@ let test_summary_updates_never_resolve_pending_request () =
           | Ok () ->
             (match AQ.attach_summary ~id summary with
              | Ok updated -> not updated
-             | Error error -> Alcotest.fail (AQ.storage_error_to_string error))))
+             | Error error ->
+               Alcotest.fail (AQ.summary_transition_error_to_string error))))
 ;;
 
 let test_all_summary_failures_accept_explicit_restart () =
@@ -1022,7 +2232,8 @@ let test_operator_recovery_reopens_all_failed_summaries () =
        let reopened =
          match AQ.restart_failed_summaries ~base_path with
          | Ok ids -> List.sort String.compare ids
-         | Error error -> Alcotest.fail (AQ.storage_error_to_string error)
+         | Error error ->
+           Alcotest.fail (AQ.summary_transition_error_to_string error)
        in
        Alcotest.(check (list string))
          "explicit operator action reopens both classes"
@@ -1277,9 +2488,9 @@ let test_decisive_summary_finalizes_after_restart () =
        drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
-let test_inflight_auto_judge_preserves_durable_restart_marker () =
+let test_v3_inflight_auto_judge_becomes_legacy_quarantine () =
   let base_path = temp_dir () in
-  let keeper_name = "queue-restart-restore" in
+  let keeper_name = "queue-v3-legacy-quarantine" in
   Fun.protect
     ~finally:(fun () ->
       AQ.For_testing.reset_runtime_state ();
@@ -1291,10 +2502,35 @@ let test_inflight_auto_judge_preserves_durable_restart_marker () =
          submit
            ~base_path
            ~keeper_name
-           ~input:(`Assoc [ "target", `String "restart" ])
+           ~input:(`Assoc [ "target", `String "legacy-restart" ])
        in
-       check_update "judge marked in flight" true (AQ.mark_summary_pending ~id);
+       check_update "legacy judge marked in flight" true (AQ.mark_summary_pending ~id);
+       let v4_snapshot = read_pending_snapshot ~base_path in
+       let v3_snapshot =
+         match v4_snapshot with
+         | `Assoc fields ->
+           let pending =
+             match List.assoc_opt "pending" fields with
+             | Some (`List entries) ->
+               `List
+                 (List.map
+                    (function
+                      | `Assoc entry_fields ->
+                        `Assoc (List.remove_assoc "exact_attempt" entry_fields)
+                      | _ -> Alcotest.fail "legacy pending entry object expected")
+                    entries)
+             | _ -> Alcotest.fail "legacy pending list expected"
+           in
+           `Assoc
+             (("version", `Int 3)
+              :: ("pending", pending)
+              :: (fields
+                  |> List.remove_assoc "version"
+                  |> List.remove_assoc "pending"))
+         | _ -> Alcotest.fail "legacy snapshot object expected"
+       in
        AQ.For_testing.reset_runtime_state ();
+       write_pending_snapshot ~base_path v3_snapshot;
        Alcotest.(check int) "process state cleared" 0 (List.length (AQ.list_pending_entries ()));
        let report = install_exn ~base_path in
        Alcotest.(check int) "one pending restored" 1 report.loaded_pending;
@@ -1305,24 +2541,57 @@ let test_inflight_auto_judge_preserves_durable_restart_marker () =
          (List.length report.delivery_replay_failures);
        (match AQ.get_pending_entry ~id with
         | None -> Alcotest.fail "same approval id was not restored"
-        | Some entry ->
-          Alcotest.(check bool)
-            "in-flight state remains the durable restart marker"
-            true
-            (entry.summary_status = AQ.Summary_pending));
+        | Some
+            { summary_status = AQ.Summary_pending
+            ; exact_attempt = AQ.Legacy_execution_uncertain
+            ; _
+            } ->
+          ()
+        | Some _ ->
+          Alcotest.fail "v3 in-flight summary was not visibly quarantined");
        let open Yojson.Safe.Util in
        let persisted = read_pending_snapshot ~base_path in
-       let persisted_status =
-         persisted
-         |> member "pending"
-         |> to_list
-         |> List.hd
-         |> member "summary_status"
-       in
-       Alcotest.(check bool)
-         "restart marker remains persisted"
-         true
-         (Yojson.Safe.equal persisted_status (`String "pending"));
+       Alcotest.(check int) "legacy snapshot migrated to v4" 4
+         (persisted |> member "version" |> to_int);
+       Alcotest.(check string)
+         "legacy execution uncertainty is durable"
+         "legacy_execution_uncertain"
+         (persisted
+          |> member "pending"
+          |> to_list
+          |> List.hd
+          |> member "exact_attempt"
+          |> member "state"
+          |> to_string);
+       let summary = exact_summary "legacy-rejected-summary" in
+       expect_summary_rejection
+         "legacy attach"
+         `Legacy
+         (AQ.attach_summary ~id summary);
+       expect_summary_rejection
+         "legacy fail"
+         `Legacy
+         (AQ.mark_summary_failed
+            ~id
+            ~reason:"legacy execution uncertain"
+            ~retryable:true);
+       expect_summary_rejection
+         "legacy restart"
+         `Legacy
+         (AQ.restart_failed_summary ~id);
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let identity = exact_identity id in
+       (match pending_entry_exn id with
+        | { exact_attempt = AQ.Legacy_execution_uncertain; _ } -> ()
+        | _ -> Alcotest.fail "second restart changed legacy quarantine to unbound");
+       (match run_exact_transition AQ.bind_summary_exact_attempt identity with
+        | Error
+            (AQ.Exact_attempt_rejected
+              (AQ.Exact_attempt_legacy_execution_uncertain actual)) ->
+          Alcotest.(check string) "legacy bind rejection identity" id actual
+        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+        | Ok _ -> Alcotest.fail "legacy execution uncertainty rebound");
        reject_and_cleanup ~base_path id;
        (match durable_resolution_opt ~base_path ~keeper_name ~approval_id:id with
         | Some resolution -> drop_resolution ~base_path ~keeper_name resolution
@@ -1880,6 +3149,34 @@ let () =
             `Quick
             test_summary_updates_never_resolve_pending_request
         ; Alcotest.test_case
+            "v4 exact binding codec validates entry identity"
+            `Quick
+            test_v4_exact_binding_codec_validates_entry_identity
+        ; Alcotest.test_case
+            "exact binding release and conflicts"
+            `Quick
+            test_exact_attempt_binding_release_and_conflicts
+        ; Alcotest.test_case
+            "final predispatch failure requires operator restart"
+            `Quick
+            test_exact_attempt_final_predispatch_failure_requires_operator_restart
+        ; Alcotest.test_case
+            "dispatch-uncertain restart is quarantined"
+            `Quick
+            test_dispatch_uncertain_restart_is_durably_quarantined
+        ; Alcotest.test_case
+            "exact completion is atomic"
+            `Quick
+            test_exact_attempt_completion_is_atomic
+          ; Alcotest.test_case
+              "exact bind storage failure is not success"
+              `Quick
+              test_exact_attempt_bind_storage_failure_is_not_success
+          ; Alcotest.test_case
+              "exact staged durability converges and rewrites"
+              `Quick
+              test_exact_attempt_staged_durability_and_idempotent_rewrite
+          ; Alcotest.test_case
             "all summary failures accept explicit operator restart"
             `Quick
             test_all_summary_failures_accept_explicit_restart
@@ -1899,14 +3196,18 @@ let () =
             "operator recovery reopens terminal failures"
             `Quick
             test_operator_recovery_reopens_all_failed_summaries
+          ; Alcotest.test_case
+              "decisive summary finalizes after restart"
+              `Quick
+              test_decisive_summary_finalizes_after_restart
+          ; Alcotest.test_case
+              "exact restart finalization requires fsync"
+              `Quick
+              test_exact_completed_restart_requires_fsync_confirmation
         ; Alcotest.test_case
-            "decisive summary finalizes after restart"
+            "v3 in-flight judge becomes legacy quarantine"
             `Quick
-            test_decisive_summary_finalizes_after_restart
-        ; Alcotest.test_case
-            "interrupted judge keeps restart marker"
-            `Quick
-            test_inflight_auto_judge_preserves_durable_restart_marker
+            test_v3_inflight_auto_judge_becomes_legacy_quarantine
         ; Alcotest.test_case
             "malformed snapshot is explicit"
             `Quick

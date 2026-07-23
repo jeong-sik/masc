@@ -7,6 +7,48 @@ type storage_error =
   ; reason : string
   }
 
+type summary_transition_rejection =
+  | Summary_exact_attempt_bound of exact_attempt_binding
+  | Summary_legacy_execution_uncertain of string
+
+type summary_transition_error =
+  | Summary_transition_storage_error of storage_error
+  | Summary_transition_rejected of summary_transition_rejection
+
+type exact_attempt_rejection =
+  | Exact_attempt_not_found of string
+  | Exact_attempt_key_mismatch of
+      { approval_id : string
+      ; input_hash : string
+      ; sequence : int
+      }
+  | Exact_attempt_invalid_identity of string
+  | Exact_attempt_summary_not_pending of string
+  | Exact_attempt_unbound_state of string
+  | Exact_attempt_legacy_execution_uncertain of string
+  | Exact_attempt_identity_conflict of exact_attempt_binding
+  | Exact_attempt_status_conflict of exact_attempt_binding
+  | Exact_attempt_provenance_mismatch of
+      { approval_id : string
+      ; expected_call_id : string
+      ; actual_model_run_id : string
+      }
+  | Exact_attempt_content_conflict of string
+
+type exact_attempt_error =
+  | Exact_attempt_storage_error of storage_error
+  | Exact_attempt_rejected of exact_attempt_rejection
+
+type exact_write_outcome =
+  Keeper_event_queue_persistence.exact_write_outcome =
+  | Fsync_completed
+  | Visible_sync_unconfirmed of string
+
+type exact_attempt_transition =
+  { changed : bool
+  ; write_outcome : exact_write_outcome
+  }
+
 type approved_resolution_request =
   { keeper_name : string
   ; tool_name : string
@@ -60,6 +102,83 @@ let storage_error_to_string error =
   Printf.sprintf "%s: %s" error.path error.reason
 ;;
 
+let exact_attempt_binding_to_string binding =
+  let status =
+    match binding.status with
+    | Exact_quarantined cause ->
+      Printf.sprintf
+        "quarantined:%s"
+        (exact_attempt_quarantine_cause_to_string cause)
+    | Exact_dispatch_uncertain
+    | Exact_released_before_dispatch
+    | Exact_completed ->
+      exact_attempt_status_to_string binding.status
+  in
+  Printf.sprintf
+    "approval=%s input_hash=%s sequence=%d slot=%s call=%s plan=%s request=%s status=%s"
+    binding.approval_id
+    binding.input_hash
+    binding.sequence
+    binding.slot_id
+    binding.call_id
+    binding.plan_fingerprint
+    binding.request_body_sha256
+    status
+;;
+
+let summary_transition_error_to_string = function
+  | Summary_transition_storage_error error -> storage_error_to_string error
+  | Summary_transition_rejected (Summary_exact_attempt_bound binding) ->
+    "legacy summary transition rejected for exact attempt: "
+    ^ exact_attempt_binding_to_string binding
+  | Summary_transition_rejected (Summary_legacy_execution_uncertain approval_id) ->
+    Printf.sprintf
+      "legacy summary transition rejected for execution-uncertain approval %s"
+      approval_id
+;;
+
+let exact_attempt_error_to_string = function
+  | Exact_attempt_storage_error error -> storage_error_to_string error
+  | Exact_attempt_rejected (Exact_attempt_not_found approval_id) ->
+    Printf.sprintf "exact attempt approval %s was not found" approval_id
+  | Exact_attempt_rejected
+      (Exact_attempt_key_mismatch { approval_id; input_hash; sequence }) ->
+    Printf.sprintf
+      "exact attempt key mismatch approval=%s input_hash=%s sequence=%d"
+      approval_id
+      input_hash
+      sequence
+  | Exact_attempt_rejected (Exact_attempt_invalid_identity field) ->
+    Printf.sprintf "exact attempt identity field %s is invalid" field
+  | Exact_attempt_rejected (Exact_attempt_summary_not_pending approval_id) ->
+    Printf.sprintf "exact attempt approval %s summary is not pending" approval_id
+  | Exact_attempt_rejected (Exact_attempt_unbound_state approval_id) ->
+    Printf.sprintf "exact attempt approval %s has no bound identity" approval_id
+  | Exact_attempt_rejected (Exact_attempt_legacy_execution_uncertain approval_id) ->
+    Printf.sprintf
+      "exact attempt approval %s is quarantined as legacy execution-uncertain"
+      approval_id
+  | Exact_attempt_rejected (Exact_attempt_identity_conflict binding) ->
+    "exact attempt identity conflicts with durable binding: "
+    ^ exact_attempt_binding_to_string binding
+  | Exact_attempt_rejected (Exact_attempt_status_conflict binding) ->
+    "exact attempt status rejects this transition: "
+    ^ exact_attempt_binding_to_string binding
+  | Exact_attempt_rejected
+      (Exact_attempt_provenance_mismatch
+        { approval_id; expected_call_id; actual_model_run_id }) ->
+    Printf.sprintf
+      "exact attempt approval %s summary provenance mismatch: expected call_id=%s, \
+       actual model_run_id=%s"
+      approval_id
+      expected_call_id
+      actual_model_run_id
+  | Exact_attempt_rejected (Exact_attempt_content_conflict approval_id) ->
+    Printf.sprintf
+      "exact attempt approval %s already completed with different content"
+      approval_id
+;;
+
 let grant_error_to_string = function
   | Grant_store_unavailable error -> storage_error_to_string error
   | Grant_workspace_mismatch
@@ -81,7 +200,8 @@ let install_error_to_string = function
   | Install_storage_failed error -> storage_error_to_string error
 ;;
 
-let pending_store_version = 3
+let legacy_pending_store_version = 3
+let pending_store_version = 4
 let pending_store_surface = "keeper_gate_pending"
 let pending_store_mutex = Cross_context_mutex.create ()
 let deliveries : persisted_delivery SMap.t Atomic.t = Atomic.make SMap.empty
@@ -155,9 +275,10 @@ let pending_entry_to_yojson (entry : pending_approval) =
     ; "task_id", Json_util.string_opt_to_json entry.task_id
     ; "goal_id", Json_util.string_opt_to_json entry.goal_id
     ; "goal_ids", Json_util.json_string_list entry.goal_ids
-    ; "continuation_channel", Keeper_continuation_channel.to_yojson entry.continuation_channel
-    ; "summary_status", summary_status_to_yojson entry.summary_status
-    ]
+      ; "continuation_channel", Keeper_continuation_channel.to_yojson entry.continuation_channel
+      ; "summary_status", summary_status_to_yojson entry.summary_status
+      ; "exact_attempt", exact_attempt_state_to_yojson entry.exact_attempt
+      ]
 ;;
 
 let approval_decision_to_yojson = function
@@ -203,28 +324,73 @@ let snapshot_to_yojson ~base_path ~next_sequence ~pending_map ~delivery_map =
     ]
 ;;
 
-let persist_snapshot_with_sequence_unlocked
+let save_snapshot_file_unlocked
+      ~base_path
+      ~next_sequence
+      ~pending_map
+      ~delivery_map
+    =
+    let path = pending_store_path ~base_path in
+    try
+      Fs_compat.mkdir_p (Filename.dirname path);
+      let body =
+        snapshot_to_yojson ~base_path ~next_sequence ~pending_map ~delivery_map
+        |> Yojson.Safe.pretty_to_string
+      in
+      (match Fs_compat.save_file_atomic path body with
+       | Ok () -> Ok ()
+       | Error reason -> Error { path; reason })
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error { path; reason = Printexc.to_string exn }
+;;
+
+let save_snapshot_file_strict_staged_unlocked
+      ~save_file_atomic_strict_staged
       ~base_path
       ~next_sequence
       ~pending_map
       ~delivery_map
   =
   let path = pending_store_path ~base_path in
+  try
+    Fs_compat.mkdir_p (Filename.dirname path);
+    let body =
+      snapshot_to_yojson ~base_path ~next_sequence ~pending_map ~delivery_map
+      |> Yojson.Safe.pretty_to_string
+    in
+    match save_file_atomic_strict_staged path body with
+    | Ok () -> Ok Fsync_completed
+    | Error (failure : Fs_compat.atomic_replace_failure) ->
+      let reason = Fs_compat.atomic_replace_failure_to_string failure in
+      (match failure.stage with
+       | Fs_compat.Before_rename ->
+         (match failure.exception_ with
+          | Eio.Cancel.Cancelled _ ->
+            Printexc.raise_with_backtrace failure.exception_ failure.backtrace
+          | _ -> Error { path; reason })
+       | Fs_compat.After_rename -> Ok (Visible_sync_unconfirmed reason))
+  with
+  | Eio.Cancel.Cancelled _ as exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Printexc.raise_with_backtrace exn backtrace
+  | exn -> Error { path; reason = Printexc.to_string exn }
+;;
+
+let persist_snapshot_with_sequence_unlocked
+      ~base_path
+      ~next_sequence
+      ~pending_map
+      ~delivery_map
+  =
   match SMap.find_opt base_path (Atomic.get unavailable_stores) with
   | Some error -> Error error
   | None ->
-    (try
-       Fs_compat.mkdir_p (Filename.dirname path);
-       let body =
-         snapshot_to_yojson ~base_path ~next_sequence ~pending_map ~delivery_map
-         |> Yojson.Safe.pretty_to_string
-       in
-       (match Fs_compat.save_file_atomic path body with
-        | Ok () -> Ok ()
-        | Error reason -> Error { path; reason })
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn -> Error { path; reason = Printexc.to_string exn })
+    save_snapshot_file_unlocked
+      ~base_path
+      ~next_sequence
+      ~pending_map
+      ~delivery_map
 ;;
 
 type store_lifecycle =
@@ -245,6 +411,30 @@ let persist_snapshot_unlocked ~base_path ~pending_map ~delivery_map =
   match next_sequence_lifecycle ~base_path with
   | Ready next_sequence ->
     persist_snapshot_with_sequence_unlocked
+      ~base_path
+      ~next_sequence
+      ~pending_map
+      ~delivery_map
+  | Uninstalled ->
+    Error
+      { path = pending_store_path ~base_path
+      ; reason =
+          "gate_pending store is not installed; install_persistence must \
+           complete before publishing"
+      }
+  | Unavailable error -> Error error
+;;
+
+let persist_snapshot_exact_unlocked
+      ~save_file_atomic_strict_staged
+      ~base_path
+      ~pending_map
+      ~delivery_map
+  =
+  match next_sequence_lifecycle ~base_path with
+  | Ready next_sequence ->
+    save_snapshot_file_strict_staged_unlocked
+      ~save_file_atomic_strict_staged
       ~base_path
       ~next_sequence
       ~pending_map
@@ -341,7 +531,55 @@ let required_string_list ~surface field fields =
   | None -> Error (Printf.sprintf "%s.%s is required" surface field)
 ;;
 
-let pending_entry_of_yojson ~base_path json =
+let exact_attempt_identity_matches
+      (left : exact_attempt_binding)
+      (right : exact_attempt_binding)
+  =
+  String.equal left.approval_id right.approval_id
+  && String.equal left.input_hash right.input_hash
+  && Int.equal left.sequence right.sequence
+  && String.equal left.slot_id right.slot_id
+  && String.equal left.call_id right.call_id
+  && String.equal left.plan_fingerprint right.plan_fingerprint
+  && String.equal left.request_body_sha256 right.request_body_sha256
+;;
+
+let validate_entry_exact_attempt
+      ~id
+      ~input_hash
+      ~sequence
+      ~summary_status
+      exact_attempt
+  =
+  match exact_attempt, summary_status with
+  | Exact_unbound, _ -> Ok ()
+  | Legacy_execution_uncertain, Summary_pending -> Ok ()
+  | Legacy_execution_uncertain, _ ->
+    Error "legacy execution-uncertain quarantine requires a pending summary"
+  | Exact_bound binding, _
+    when not
+           (String.equal binding.approval_id id
+            && String.equal binding.input_hash input_hash
+            && Int.equal binding.sequence sequence) ->
+    Error "exact attempt binding key does not match its approval entry"
+  | Exact_bound { status = Exact_completed; _ }, Summary_available _ -> Ok ()
+  | Exact_bound
+      { status =
+          (Exact_dispatch_uncertain | Exact_quarantined _)
+      ; _
+      },
+    Summary_pending ->
+    Ok ()
+  | Exact_bound { status = Exact_released_before_dispatch; _ },
+    (Summary_pending | Summary_failed _) ->
+    Ok ()
+  | Exact_bound { status = Exact_completed; _ }, _ ->
+    Error "completed exact attempt requires an available summary"
+  | Exact_bound _, _ ->
+    Error "non-completed exact attempt requires a pending summary"
+;;
+
+let pending_entry_of_yojson ~base_path ~snapshot_version json =
   match json with
   | `Assoc fields ->
     let ( let* ) = Result.bind in
@@ -349,24 +587,28 @@ let pending_entry_of_yojson ~base_path json =
     let* () =
       reject_unknown_fields
         ~surface
-        ~allowed:
-          [ "id"
-          ; "keeper_name"
-          ; "tool_name"
-          ; "input_hash"
-          ; "input"
-          ; "sequence"
-          ; "requested_at"
-          ; "turn_id"
-          ; "request_context"
-          ; "request_context_version"
-          ; "task_id"
-          ; "goal_id"
-          ; "goal_ids"
-          ; "continuation_channel"
-          ; "summary_status"
-          ]
-        fields
+          ~allowed:
+            ([ "id"
+             ; "keeper_name"
+             ; "tool_name"
+             ; "input_hash"
+             ; "input"
+             ; "sequence"
+             ; "requested_at"
+             ; "turn_id"
+             ; "request_context"
+             ; "request_context_version"
+             ; "task_id"
+             ; "goal_id"
+             ; "goal_ids"
+             ; "continuation_channel"
+             ; "summary_status"
+             ]
+             @
+             if snapshot_version = pending_store_version
+             then [ "exact_attempt" ]
+             else [])
+          fields
     in
     let* id = required_string ~surface "id" fields in
     let* keeper_name = required_string ~surface "keeper_name" fields in
@@ -419,10 +661,30 @@ let pending_entry_of_yojson ~base_path json =
     let* goal_ids = required_string_list ~surface "goal_ids" fields in
     let* continuation_json = required_member ~surface "continuation_channel" fields in
     let* continuation_channel = Keeper_continuation_channel.of_yojson continuation_json in
-    let* summary_json = required_member ~surface "summary_status" fields in
-    let* summary_status = summary_status_of_yojson_with_error summary_json in
-    Ok
-      { id
+      let* summary_json = required_member ~surface "summary_status" fields in
+      let* summary_status = summary_status_of_yojson_with_error summary_json in
+      let* exact_attempt =
+        if snapshot_version = legacy_pending_store_version
+        then
+          Ok
+            (match summary_status with
+             | Summary_pending -> Legacy_execution_uncertain
+             | Summary_not_requested | Summary_available _ | Summary_failed _ ->
+               Exact_unbound)
+        else
+          let* exact_attempt_json = required_member ~surface "exact_attempt" fields in
+          exact_attempt_state_of_yojson_with_error exact_attempt_json
+      in
+      let* () =
+        validate_entry_exact_attempt
+          ~id
+          ~input_hash
+          ~sequence
+          ~summary_status
+          exact_attempt
+      in
+      Ok
+        { id
       ; keeper_name
       ; tool_name
       ; input_hash
@@ -435,9 +697,10 @@ let pending_entry_of_yojson ~base_path json =
       ; goal_id
       ; goal_ids
       ; continuation_channel
-      ; audit_base_path = base_path
-      ; summary_status
-      }
+        ; audit_base_path = base_path
+        ; summary_status
+        ; exact_attempt
+        }
   | _ -> Error "gate_pending.entry must be a JSON object"
 ;;
 
@@ -477,7 +740,7 @@ let approval_decision_of_yojson json =
   | _ -> Error "gate_pending.decision must be a JSON object"
 ;;
 
-let persisted_delivery_of_yojson ~base_path json =
+let persisted_delivery_of_yojson ~base_path ~snapshot_version json =
   match json with
   | `Assoc fields ->
     let ( let* ) = Result.bind in
@@ -497,7 +760,9 @@ let persisted_delivery_of_yojson ~base_path json =
         fields
     in
     let* entry_json = required_member ~surface "entry" fields in
-    let* entry = pending_entry_of_yojson ~base_path entry_json in
+      let* entry =
+        pending_entry_of_yojson ~base_path ~snapshot_version entry_json
+      in
     let* decision_json = required_member ~surface "decision" fields in
     let* decision = approval_decision_of_yojson decision_json in
     let* source_raw = required_string ~surface "source" fields in
@@ -608,25 +873,31 @@ let snapshot_of_yojson ~base_path json =
         ~allowed:[ "version"; "next_sequence"; "pending"; "deliveries" ]
         fields
     in
-    let* () =
-      match List.assoc_opt "version" fields with
-      | Some (`Int version) when version = pending_store_version -> Ok ()
-      | Some (`Int version) ->
-        Error (Printf.sprintf "%s.version %d is unsupported" surface version)
+      let* snapshot_version =
+        match List.assoc_opt "version" fields with
+        | Some (`Int version)
+          when version = legacy_pending_store_version
+               || version = pending_store_version ->
+          Ok version
+        | Some (`Int version) ->
+          Error (Printf.sprintf "%s.version %d is unsupported" surface version)
       | Some _ -> Error (surface ^ ".version must be an integer")
       | None -> Error (surface ^ ".version is required")
     in
     let* next_sequence = required_positive_int ~surface "next_sequence" fields in
     let* pending_json = required_member ~surface "pending" fields in
-    let* pending_entries =
-      parse_list ~surface:"gate_pending.pending" (pending_entry_of_yojson ~base_path) pending_json
+      let* pending_entries =
+        parse_list
+          ~surface:"gate_pending.pending"
+          (pending_entry_of_yojson ~base_path ~snapshot_version)
+          pending_json
     in
     let* delivery_json = required_member ~surface "deliveries" fields in
     let* delivery_entries =
       parse_list
-        ~surface:"gate_pending.deliveries"
-        (persisted_delivery_of_yojson ~base_path)
-        delivery_json
+          ~surface:"gate_pending.deliveries"
+          (persisted_delivery_of_yojson ~base_path ~snapshot_version)
+          delivery_json
     in
     let* pending_map =
       map_of_unique_entries
@@ -648,7 +919,7 @@ let snapshot_of_yojson ~base_path json =
     let* () =
       validate_snapshot_sequences ~next_sequence pending_entries delivery_entries
     in
-    Ok (pending_map, delivery_map, next_sequence)
+      Ok (snapshot_version, pending_map, delivery_map, next_sequence)
   | _ -> Error "gate_pending snapshot must be a JSON object"
 ;;
 
@@ -658,6 +929,48 @@ let snapshot_version_of_yojson = function
     | Some (`Int version) -> Some version
     | Some _ | None -> None)
   | _ -> None
+;;
+
+let quarantine_restarted_entry (entry : pending_approval) =
+  match entry.exact_attempt with
+  | Exact_bound ({ status = Exact_dispatch_uncertain; _ } as binding) ->
+    ( { entry with
+        exact_attempt =
+          Exact_bound
+            (exact_attempt_binding_with_status
+               binding
+               (Exact_quarantined Exact_restart_uncertainty))
+      }
+    , true )
+  | Exact_unbound
+  | Legacy_execution_uncertain
+  | Exact_bound
+      { status =
+          ( Exact_released_before_dispatch
+          | Exact_quarantined _
+          | Exact_completed )
+      ; _
+      } ->
+    entry, false
+;;
+
+let quarantine_restarted_pending map =
+  SMap.fold
+    (fun id entry (changed, quarantined) ->
+       let entry, entry_changed = quarantine_restarted_entry entry in
+       changed || entry_changed, SMap.add id entry quarantined)
+    map
+    (false, SMap.empty)
+;;
+
+let quarantine_restarted_deliveries map =
+  SMap.fold
+    (fun id delivery (changed, quarantined) ->
+       let entry, entry_changed = quarantine_restarted_entry delivery.entry in
+       ( changed || entry_changed
+       , SMap.add id { delivery with entry } quarantined ))
+    map
+    (false, SMap.empty)
 ;;
 
 let quarantine_path ~path ~version =
@@ -717,12 +1030,54 @@ let load_snapshot_unlocked ~base_path =
         Error { path; reason }
       | Ok json ->
         (match snapshot_version_of_yojson json with
-         | Some version when version <> pending_store_version ->
-           quarantine_snapshot_unlocked ~path ~version
-         | Some _ | None ->
-           (match snapshot_of_yojson ~base_path json with
-            | Ok snapshot -> Ok snapshot
-            | Error reason ->
+           | Some version
+             when version <> legacy_pending_store_version
+                  && version <> pending_store_version ->
+             quarantine_snapshot_unlocked ~path ~version
+           | Some _ | None ->
+             (match snapshot_of_yojson ~base_path json with
+              | Ok
+                  ( snapshot_version
+                  , loaded_pending
+                  , loaded_deliveries
+                  , loaded_next_sequence ) ->
+                let pending_changed, loaded_pending =
+                  quarantine_restarted_pending loaded_pending
+                in
+                let deliveries_changed, loaded_deliveries =
+                  quarantine_restarted_deliveries loaded_deliveries
+                in
+                if
+                  snapshot_version = legacy_pending_store_version
+                  || pending_changed
+                  || deliveries_changed
+                then
+                  (match
+                     save_snapshot_file_unlocked
+                       ~base_path
+                       ~next_sequence:loaded_next_sequence
+                       ~pending_map:loaded_pending
+                       ~delivery_map:loaded_deliveries
+                   with
+                   | Error _ as error -> error
+                   | Ok () ->
+                     Log.Server.warn
+                       "gate_pending migrated workspace=%s version=%d->%d \
+                        restart_quarantine=%b"
+                       base_path
+                       snapshot_version
+                       pending_store_version
+                       (pending_changed || deliveries_changed);
+                     Ok
+                       ( loaded_pending
+                       , loaded_deliveries
+                       , loaded_next_sequence ))
+                else
+                  Ok
+                    ( loaded_pending
+                    , loaded_deliveries
+                    , loaded_next_sequence )
+              | Error reason ->
               report_pending_read_drop
                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
                 ~path
@@ -1278,10 +1633,11 @@ let create_entry
   ; task_id
   ; goal_id
   ; goal_ids
-  ; continuation_channel
-  ; audit_base_path
-  ; summary_status = Summary_not_requested
-  }
+    ; continuation_channel
+    ; audit_base_path
+    ; summary_status = Summary_not_requested
+    ; exact_attempt = Exact_unbound
+    }
 ;;
 
 let pending_entry_json_fields
@@ -1307,7 +1663,9 @@ let pending_entry_json_fields
      else [])
     (* The [include_input] conditional stays parenthesized so the trailing
        canonical [summary_status] field is present in every wire shape. *)
-  @ [ "summary_status", summary_status_to_yojson entry.summary_status ]
+    @ [ "summary_status", summary_status_to_yojson entry.summary_status
+      ; "exact_attempt", exact_attempt_state_to_yojson entry.exact_attempt
+      ]
 ;;
 
 let broadcast_pending entry =
@@ -1374,9 +1732,10 @@ let record_summary_updated ~now (entry : pending_approval) =
          `Assoc
            ([ "ts", `Float event_ts
             ; "event", `String approval_audit_summary_event
-            ; "id", `String entry.id
-            ; "summary_status", summary_status_to_yojson entry.summary_status
-            ]
+             ; "id", `String entry.id
+             ; "summary_status", summary_status_to_yojson entry.summary_status
+             ; "exact_attempt", exact_attempt_state_to_yojson entry.exact_attempt
+             ]
             @ summary_audit_extras entry)
        in
        Cross_context_mutex.with_durable_lock audit_io_mutex (fun () ->
@@ -1417,31 +1776,52 @@ let record_summary_updated ~now (entry : pending_approval) =
 (** Read a pending entry by id. Returns [None] if already resolved. *)
 let get_pending_entry ~id : pending_approval option = SMap.find_opt id (Atomic.get pending)
 
-(** Complete an in-flight judge exactly once. A result cannot skip the
-    [Summary_pending] state or overwrite a terminal summary. *)
+let summary_transition_rejection (entry : pending_approval) =
+  match entry.exact_attempt with
+  | Exact_unbound -> None
+  | Exact_bound binding -> Some (Summary_exact_attempt_bound binding)
+  | Legacy_execution_uncertain ->
+    Some (Summary_legacy_execution_uncertain entry.id)
+;;
+
+let persist_pending_entry_unlocked ~map ~(entry : pending_approval) updated_entry =
+  let updated = SMap.add entry.id updated_entry map in
+  match
+    persist_snapshot_unlocked
+      ~base_path:entry.audit_base_path
+      ~pending_map:updated
+      ~delivery_map:(Atomic.get deliveries)
+  with
+  | Error _ as error -> error
+  | Ok () ->
+    Atomic.set pending updated;
+    Ok true
+;;
+
+(** Complete an unbound legacy judge exactly once. Exact attempts must use
+    [complete_summary_exact_attempt], which commits content and identity
+    together. *)
 let complete_summary ~id summary_status =
   with_pending_store_lock (fun () ->
     let map = Atomic.get pending in
     match SMap.find_opt id map with
     | None -> Ok false
-    | Some ({ summary_status = Summary_pending; _ } as entry) ->
-      let updated = SMap.add id { entry with summary_status } map in
-      (match
-         persist_snapshot_unlocked
-           ~base_path:entry.audit_base_path
-           ~pending_map:updated
-           ~delivery_map:(Atomic.get deliveries)
-       with
-       | Error _ as error -> error
-       | Ok () ->
-         Atomic.set pending updated;
-         Ok true)
-    | Some
-        { summary_status =
-            (Summary_not_requested | Summary_available _ | Summary_failed _)
-        ; _
-        } ->
-      Ok false)
+    | Some entry ->
+      (match summary_transition_rejection entry with
+       | Some rejection -> Error (Summary_transition_rejected rejection)
+       | None ->
+         (match entry.summary_status with
+          | Summary_pending ->
+            persist_pending_entry_unlocked
+              ~map
+              ~entry
+              { entry with summary_status }
+            |> Result.map_error (fun error ->
+              Summary_transition_storage_error error)
+          | Summary_not_requested
+          | Summary_available _
+          | Summary_failed _ ->
+            Ok false)))
 ;;
 
 let publish_summary_update ~id =
@@ -1459,30 +1839,574 @@ let publish_summary_transition ~id = function
   | Error error -> Error error
 ;;
 
+let publish_exact_attempt_transition ~id = function
+  | Ok ({ changed = true; _ } as transition) ->
+    publish_summary_update ~id;
+    Ok transition
+  | Ok transition -> Ok transition
+  | Error error -> Error error
+;;
+
+let validate_exact_attempt_candidate
+      ~id
+      ~input_hash
+      ~sequence
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+  =
+  let invalid field value =
+    if String.trim value = ""
+    then Error (Exact_attempt_rejected (Exact_attempt_invalid_identity field))
+    else Ok ()
+  in
+  let ( let* ) = Result.bind in
+  let* () = invalid "approval_id" id in
+  let* () = invalid "input_hash" input_hash in
+  let* () =
+    if sequence > 0
+    then Ok ()
+    else Error (Exact_attempt_rejected (Exact_attempt_invalid_identity "sequence"))
+  in
+  let* () = invalid "slot_id" slot_id in
+  let* () = invalid "call_id" call_id in
+  let* () = invalid "plan_fingerprint" plan_fingerprint in
+  let* () =
+    if is_lowercase_sha256 request_body_sha256
+    then Ok ()
+    else
+      Error
+        (Exact_attempt_rejected
+           (Exact_attempt_invalid_identity "request_body_sha256"))
+  in
+  Ok
+    (make_exact_attempt_binding
+       ~approval_id:id
+       ~input_hash
+       ~sequence
+       ~slot_id
+       ~call_id
+       ~plan_fingerprint
+       ~request_body_sha256
+       ())
+;;
+
+let exact_attempt_entry_unlocked map (candidate : exact_attempt_binding) =
+  match SMap.find_opt candidate.approval_id map with
+  | None ->
+    Error
+      (Exact_attempt_rejected
+         (Exact_attempt_not_found candidate.approval_id))
+  | Some entry
+    when not
+           (String.equal entry.input_hash candidate.input_hash
+            && Int.equal entry.sequence candidate.sequence) ->
+    Error
+      (Exact_attempt_rejected
+         (Exact_attempt_key_mismatch
+            { approval_id = candidate.approval_id
+            ; input_hash = candidate.input_hash
+            ; sequence = candidate.sequence
+            }))
+  | Some entry -> Ok entry
+;;
+
+let persist_exact_attempt_entry_unlocked
+      ~save_file_atomic_strict_staged
+      ~changed
+      ~map
+      ~(entry : pending_approval)
+      updated_entry
+  =
+  let updated = SMap.add entry.id updated_entry map in
+  match
+    persist_snapshot_exact_unlocked
+      ~save_file_atomic_strict_staged
+      ~base_path:entry.audit_base_path
+      ~pending_map:updated
+      ~delivery_map:(Atomic.get deliveries)
+  with
+  | Error error -> Error (Exact_attempt_storage_error error)
+  | Ok write_outcome ->
+    Atomic.set pending updated;
+    Ok { changed; write_outcome }
+;;
+
+let bind_summary_exact_attempt_with
+      ~save_file_atomic_strict_staged
+      ~id
+      ~input_hash
+      ~sequence
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+  =
+  let result =
+    match
+      validate_exact_attempt_candidate
+        ~id
+        ~input_hash
+        ~sequence
+        ~slot_id
+        ~call_id
+        ~plan_fingerprint
+        ~request_body_sha256
+    with
+    | Error _ as error -> error
+    | Ok candidate ->
+      with_pending_store_lock (fun () ->
+        let map = Atomic.get pending in
+        match exact_attempt_entry_unlocked map candidate with
+        | Error _ as error -> error
+        | Ok entry ->
+          (match entry.summary_status with
+           | Summary_not_requested
+           | Summary_available _
+           | Summary_failed _ ->
+             Error
+               (Exact_attempt_rejected
+                  (Exact_attempt_summary_not_pending entry.id))
+           | Summary_pending ->
+             (match entry.exact_attempt with
+               | Exact_unbound ->
+                 persist_exact_attempt_entry_unlocked
+                   ~save_file_atomic_strict_staged
+                   ~changed:true
+                   ~map
+                   ~entry
+                   { entry with exact_attempt = Exact_bound candidate }
+              | Legacy_execution_uncertain ->
+                Error
+                  (Exact_attempt_rejected
+                     (Exact_attempt_legacy_execution_uncertain entry.id))
+                | Exact_bound existing
+                  when exact_attempt_identity_matches existing candidate ->
+                  (match existing.status with
+                   | Exact_dispatch_uncertain ->
+                     persist_exact_attempt_entry_unlocked
+                       ~save_file_atomic_strict_staged
+                       ~changed:false
+                       ~map
+                       ~entry
+                       entry
+                   | Exact_released_before_dispatch
+                   | Exact_quarantined _
+                   | Exact_completed ->
+                   Error
+                     (Exact_attempt_rejected
+                        (Exact_attempt_status_conflict existing)))
+                | Exact_bound
+                    ({ status = Exact_released_before_dispatch; _ } as _existing) ->
+                  persist_exact_attempt_entry_unlocked
+                    ~save_file_atomic_strict_staged
+                    ~changed:true
+                    ~map
+                    ~entry
+                    { entry with exact_attempt = Exact_bound candidate }
+              | Exact_bound existing ->
+                Error
+                  (Exact_attempt_rejected
+                     (Exact_attempt_identity_conflict existing)))))
+  in
+  publish_exact_attempt_transition ~id result
+;;
+
+let bind_summary_exact_attempt =
+  bind_summary_exact_attempt_with
+    ~save_file_atomic_strict_staged:Fs_compat.save_file_atomic_strict_staged
+;;
+
+let release_summary_exact_attempt_before_dispatch_with
+      ~save_file_atomic_strict_staged
+      ~id
+      ~input_hash
+      ~sequence
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+  =
+  let result =
+    match
+      validate_exact_attempt_candidate
+        ~id
+        ~input_hash
+        ~sequence
+        ~slot_id
+        ~call_id
+        ~plan_fingerprint
+        ~request_body_sha256
+    with
+    | Error _ as error -> error
+    | Ok candidate ->
+      with_pending_store_lock (fun () ->
+        let map = Atomic.get pending in
+        match exact_attempt_entry_unlocked map candidate with
+        | Error _ as error -> error
+        | Ok entry ->
+          (match entry.exact_attempt with
+           | Exact_unbound ->
+             Error
+               (Exact_attempt_rejected
+                  (Exact_attempt_unbound_state entry.id))
+           | Legacy_execution_uncertain ->
+             Error
+               (Exact_attempt_rejected
+                  (Exact_attempt_legacy_execution_uncertain entry.id))
+           | Exact_bound existing
+             when not (exact_attempt_identity_matches existing candidate) ->
+             Error
+               (Exact_attempt_rejected
+                  (Exact_attempt_identity_conflict existing))
+           | Exact_bound existing ->
+             (match existing.status with
+              | Exact_dispatch_uncertain ->
+                let released =
+                  exact_attempt_binding_with_status
+                    existing
+                    Exact_released_before_dispatch
+                in
+                persist_exact_attempt_entry_unlocked
+                    ~save_file_atomic_strict_staged
+                    ~changed:true
+                    ~map
+                    ~entry
+                    { entry with exact_attempt = Exact_bound released }
+                | Exact_released_before_dispatch ->
+                  persist_exact_attempt_entry_unlocked
+                    ~save_file_atomic_strict_staged
+                    ~changed:false
+                    ~map
+                    ~entry
+                    entry
+                | Exact_quarantined _
+                | Exact_completed ->
+                Error
+                  (Exact_attempt_rejected
+                     (Exact_attempt_status_conflict existing)))))
+  in
+  publish_exact_attempt_transition ~id result
+;;
+
+let release_summary_exact_attempt_before_dispatch =
+  release_summary_exact_attempt_before_dispatch_with
+    ~save_file_atomic_strict_staged:Fs_compat.save_file_atomic_strict_staged
+;;
+
+let fail_summary_exact_attempt_before_dispatch_with
+      ~save_file_atomic_strict_staged
+      ~id
+      ~input_hash
+      ~sequence
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+      ~reason
+      ~retryable
+  =
+  let result =
+    match
+      validate_exact_attempt_candidate
+        ~id
+        ~input_hash
+        ~sequence
+        ~slot_id
+        ~call_id
+        ~plan_fingerprint
+        ~request_body_sha256
+    with
+    | Error _ as error -> error
+    | Ok candidate ->
+      with_pending_store_lock (fun () ->
+        let map = Atomic.get pending in
+        match exact_attempt_entry_unlocked map candidate with
+        | Error _ as error -> error
+        | Ok entry ->
+          (match entry.exact_attempt with
+           | Exact_unbound ->
+             Error
+               (Exact_attempt_rejected
+                  (Exact_attempt_unbound_state entry.id))
+           | Legacy_execution_uncertain ->
+             Error
+               (Exact_attempt_rejected
+                  (Exact_attempt_legacy_execution_uncertain entry.id))
+           | Exact_bound existing
+             when not (exact_attempt_identity_matches existing candidate) ->
+             Error
+               (Exact_attempt_rejected
+                  (Exact_attempt_identity_conflict existing))
+           | Exact_bound existing ->
+             (match existing.status, entry.summary_status with
+              | Exact_dispatch_uncertain, Summary_pending ->
+                let released =
+                  exact_attempt_binding_with_status
+                    existing
+                    Exact_released_before_dispatch
+                in
+                persist_exact_attempt_entry_unlocked
+                    ~save_file_atomic_strict_staged
+                    ~changed:true
+                    ~map
+                    ~entry
+                    { entry with
+                    summary_status = Summary_failed { reason; retryable }
+                  ; exact_attempt = Exact_bound released
+                  }
+              | ( Exact_released_before_dispatch
+                , Summary_failed
+                    { reason = durable_reason
+                    ; retryable = durable_retryable
+                    } )
+                  when String.equal durable_reason reason
+                       && Bool.equal durable_retryable retryable ->
+                  persist_exact_attempt_entry_unlocked
+                    ~save_file_atomic_strict_staged
+                    ~changed:false
+                    ~map
+                    ~entry
+                    entry
+                | Exact_dispatch_uncertain, _ ->
+                Error
+                  (Exact_attempt_rejected
+                     (Exact_attempt_summary_not_pending entry.id))
+              | ( Exact_released_before_dispatch
+                | Exact_quarantined _
+                | Exact_completed ),
+                _ ->
+                Error
+                  (Exact_attempt_rejected
+                     (Exact_attempt_status_conflict existing)))))
+  in
+  publish_exact_attempt_transition ~id result
+;;
+
+let fail_summary_exact_attempt_before_dispatch =
+  fail_summary_exact_attempt_before_dispatch_with
+    ~save_file_atomic_strict_staged:Fs_compat.save_file_atomic_strict_staged
+;;
+
+let quarantine_summary_exact_attempt_with
+      ~save_file_atomic_strict_staged
+      ~id
+      ~input_hash
+      ~sequence
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+      ~cause
+  =
+  let result =
+    match
+      validate_exact_attempt_candidate
+        ~id
+        ~input_hash
+        ~sequence
+        ~slot_id
+        ~call_id
+        ~plan_fingerprint
+        ~request_body_sha256
+    with
+    | Error _ as error -> error
+    | Ok candidate ->
+      with_pending_store_lock (fun () ->
+        let map = Atomic.get pending in
+        match exact_attempt_entry_unlocked map candidate with
+        | Error _ as error -> error
+        | Ok entry ->
+          (match entry.exact_attempt with
+           | Exact_unbound ->
+             Error
+               (Exact_attempt_rejected
+                  (Exact_attempt_unbound_state entry.id))
+           | Legacy_execution_uncertain ->
+             Error
+               (Exact_attempt_rejected
+                  (Exact_attempt_legacy_execution_uncertain entry.id))
+           | Exact_bound existing
+             when not (exact_attempt_identity_matches existing candidate) ->
+             Error
+               (Exact_attempt_rejected
+                  (Exact_attempt_identity_conflict existing))
+           | Exact_bound existing ->
+             (match existing.status with
+              | Exact_dispatch_uncertain ->
+                let quarantined =
+                  exact_attempt_binding_with_status
+                    existing
+                    (Exact_quarantined cause)
+                in
+                persist_exact_attempt_entry_unlocked
+                    ~save_file_atomic_strict_staged
+                    ~changed:true
+                    ~map
+                    ~entry
+                    { entry with exact_attempt = Exact_bound quarantined }
+                | Exact_quarantined durable_cause
+                  when durable_cause = cause ->
+                  persist_exact_attempt_entry_unlocked
+                    ~save_file_atomic_strict_staged
+                    ~changed:false
+                    ~map
+                    ~entry
+                    entry
+                | Exact_released_before_dispatch
+                  when cause = Exact_terminal_persistence_failure ->
+                  let quarantined =
+                    exact_attempt_binding_with_status
+                      existing
+                      (Exact_quarantined cause)
+                  in
+                  persist_exact_attempt_entry_unlocked
+                    ~save_file_atomic_strict_staged
+                    ~changed:true
+                    ~map
+                    ~entry
+                    { entry with exact_attempt = Exact_bound quarantined }
+                | Exact_quarantined _
+                | Exact_released_before_dispatch
+                | Exact_completed ->
+                Error
+                  (Exact_attempt_rejected
+                     (Exact_attempt_status_conflict existing)))))
+  in
+  publish_exact_attempt_transition ~id result
+;;
+
+let quarantine_summary_exact_attempt =
+  quarantine_summary_exact_attempt_with
+    ~save_file_atomic_strict_staged:Fs_compat.save_file_atomic_strict_staged
+;;
+
+let complete_summary_exact_attempt_with
+      ~save_file_atomic_strict_staged
+      ~id
+      ~input_hash
+      ~sequence
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+      ~summary
+  =
+  let result =
+    match
+      validate_exact_attempt_candidate
+        ~id
+        ~input_hash
+        ~sequence
+        ~slot_id
+        ~call_id
+        ~plan_fingerprint
+        ~request_body_sha256
+    with
+    | Error _ as error -> error
+    | Ok candidate ->
+      with_pending_store_lock (fun () ->
+        let map = Atomic.get pending in
+        match exact_attempt_entry_unlocked map candidate with
+        | Error _ as error -> error
+        | Ok entry ->
+          (match entry.exact_attempt with
+           | Exact_unbound ->
+             Error
+               (Exact_attempt_rejected
+                  (Exact_attempt_unbound_state entry.id))
+           | Legacy_execution_uncertain ->
+             Error
+               (Exact_attempt_rejected
+                  (Exact_attempt_legacy_execution_uncertain entry.id))
+           | Exact_bound existing
+             when not (exact_attempt_identity_matches existing candidate) ->
+             Error
+               (Exact_attempt_rejected
+                  (Exact_attempt_identity_conflict existing))
+           | Exact_bound existing
+             when not (String.equal summary.model_run_id existing.call_id) ->
+             Error
+               (Exact_attempt_rejected
+                  (Exact_attempt_provenance_mismatch
+                     { approval_id = entry.id
+                     ; expected_call_id = existing.call_id
+                     ; actual_model_run_id = summary.model_run_id
+                     }))
+           | Exact_bound existing ->
+             (match existing.status, entry.summary_status with
+              | Exact_dispatch_uncertain, Summary_pending ->
+                  let completed =
+                    exact_attempt_binding_with_status existing Exact_completed
+                  in
+                  persist_exact_attempt_entry_unlocked
+                    ~save_file_atomic_strict_staged
+                    ~changed:true
+                    ~map
+                    ~entry
+                    { entry with
+                    summary_status = Summary_available summary
+                  ; exact_attempt = Exact_bound completed
+                  }
+              | Exact_completed, Summary_available durable_summary ->
+                if
+                  Yojson.Safe.equal
+                    (hitl_context_summary_to_yojson durable_summary)
+                      (hitl_context_summary_to_yojson summary)
+                  then
+                    persist_exact_attempt_entry_unlocked
+                      ~save_file_atomic_strict_staged
+                      ~changed:false
+                      ~map
+                      ~entry
+                      entry
+                  else
+                    Error
+                    (Exact_attempt_rejected
+                       (Exact_attempt_content_conflict entry.id))
+              | ( Exact_released_before_dispatch
+                | Exact_quarantined _
+                | Exact_completed ),
+                _ ->
+                Error
+                  (Exact_attempt_rejected
+                     (Exact_attempt_status_conflict existing))
+              | Exact_dispatch_uncertain, _ ->
+                Error
+                  (Exact_attempt_rejected
+                     (Exact_attempt_summary_not_pending entry.id)))))
+  in
+  publish_exact_attempt_transition ~id result
+;;
+
+let complete_summary_exact_attempt =
+  complete_summary_exact_attempt_with
+    ~save_file_atomic_strict_staged:Fs_compat.save_file_atomic_strict_staged
+;;
+
 let mark_summary_pending ~id =
   let result =
     with_pending_store_lock (fun () ->
-    let map = Atomic.get pending in
-    match SMap.find_opt id map with
-    | None -> Ok false
-    | Some ({ summary_status = Summary_not_requested; _ } as entry) ->
-      let updated = SMap.add id { entry with summary_status = Summary_pending } map in
-      (match
-         persist_snapshot_unlocked
-           ~base_path:entry.audit_base_path
-           ~pending_map:updated
-           ~delivery_map:(Atomic.get deliveries)
-       with
-       | Error _ as error -> error
-       | Ok () ->
-         Atomic.set pending updated;
-         Ok true)
-    | Some
-        { summary_status =
-            (Summary_pending | Summary_available _ | Summary_failed _)
-        ; _
-        } ->
-      Ok false)
+      let map = Atomic.get pending in
+      match SMap.find_opt id map with
+      | None -> Ok false
+      | Some entry ->
+        (match summary_transition_rejection entry with
+         | Some rejection -> Error (Summary_transition_rejected rejection)
+         | None ->
+           (match entry.summary_status with
+            | Summary_not_requested ->
+              persist_pending_entry_unlocked
+                ~map
+                ~entry
+                { entry with summary_status = Summary_pending }
+              |> Result.map_error (fun error ->
+                Summary_transition_storage_error error)
+            | Summary_pending
+            | Summary_available _
+            | Summary_failed _ ->
+              Ok false)))
   in
   publish_summary_transition ~id result
 ;;
@@ -1502,27 +2426,38 @@ let restart_failed_summary ~id =
     with_pending_store_lock (fun () ->
       let map = Atomic.get pending in
       match SMap.find_opt id map with
-      | Some ({ summary_status = Summary_failed _; _ } as entry) ->
-        let updated = SMap.add id { entry with summary_status = Summary_pending } map in
-        (match
-           persist_snapshot_unlocked
-             ~base_path:entry.audit_base_path
-             ~pending_map:updated
-             ~delivery_map:(Atomic.get deliveries)
-         with
-         | Error _ as error -> error
-         | Ok () ->
-           Atomic.set pending updated;
-           Ok true)
-      | None
-      | Some
-          { summary_status =
-              ( Summary_not_requested
+        | None -> Ok false
+        | Some
+            ({ summary_status = Summary_failed _
+             ; exact_attempt =
+                 Exact_bound { status = Exact_released_before_dispatch; _ }
+             ; _
+             } as entry) ->
+          persist_pending_entry_unlocked
+            ~map
+            ~entry
+            { entry with
+              summary_status = Summary_pending
+            ; exact_attempt = Exact_unbound
+            }
+          |> Result.map_error (fun error ->
+            Summary_transition_storage_error error)
+        | Some entry ->
+          (match summary_transition_rejection entry with
+           | Some rejection -> Error (Summary_transition_rejected rejection)
+           | None ->
+             (match entry.summary_status with
+              | Summary_failed _ ->
+                persist_pending_entry_unlocked
+                  ~map
+                  ~entry
+                  { entry with summary_status = Summary_pending }
+                |> Result.map_error (fun error ->
+                  Summary_transition_storage_error error)
+              | Summary_not_requested
               | Summary_pending
-              | Summary_available _ )
-          ; _
-          } ->
-        Ok false)
+              | Summary_available _ ->
+                Ok false)))
   in
   publish_summary_transition ~id updated
 ;;
@@ -1531,31 +2466,58 @@ let restart_failed_summaries ~base_path =
   let updated =
     with_pending_store_lock (fun () ->
       let map = Atomic.get pending in
-      let reopened_ids, reopened =
-        SMap.fold
-          (fun id (entry : pending_approval) (ids, acc) ->
-             match entry.summary_status with
-             | Summary_failed _ when String.equal entry.audit_base_path base_path ->
-               ( id :: ids
-               , SMap.add id { entry with summary_status = Summary_not_requested } acc )
-             | Summary_not_requested
-             | Summary_pending
-             | Summary_available _
-             | Summary_failed _ ->
-               ids, acc)
-          map
-          ([], map)
-      in
-      match reopened_ids with
-      | [] -> Ok []
-      | _ :: _ ->
-        (match
-           persist_snapshot_unlocked
+        let reopened_ids, reopened, rejected =
+          SMap.fold
+            (fun id (entry : pending_approval) (ids, acc, rejected) ->
+               if
+                 String.equal entry.audit_base_path base_path
+                 &&
+                 match entry.summary_status with
+                 | Summary_failed _ -> true
+                 | Summary_not_requested
+                 | Summary_pending
+                 | Summary_available _ ->
+                   false
+               then
+                 (match entry.exact_attempt with
+                  | Exact_bound
+                      { status = Exact_released_before_dispatch; _ } ->
+                    ( id :: ids
+                    , SMap.add
+                        id
+                        { entry with
+                          summary_status = Summary_pending
+                        ; exact_attempt = Exact_unbound
+                        }
+                        acc
+                    , rejected )
+                  | _ ->
+                    (match summary_transition_rejection entry with
+                     | Some rejection -> ids, acc, Some rejection
+                     | None ->
+                       ( id :: ids
+                       , SMap.add
+                           id
+                           { entry with summary_status = Summary_not_requested }
+                           acc
+                       , rejected )))
+               else ids, acc, rejected)
+            map
+            ([], map, None)
+        in
+        match rejected, reopened_ids with
+        | Some rejection, _ ->
+          Error (Summary_transition_rejected rejection)
+        | None, [] -> Ok []
+        | None, _ :: _ ->
+          (match
+             persist_snapshot_unlocked
              ~base_path
              ~pending_map:reopened
              ~delivery_map:(Atomic.get deliveries)
          with
-         | Error _ as error -> error
+         | Error error ->
+           Error (Summary_transition_storage_error error)
          | Ok () ->
            Atomic.set pending reopened;
            Ok (List.rev reopened_ids)))
@@ -1856,7 +2818,7 @@ let submit_pending
                ~pending_map:updated
                ~delivery_map:(Atomic.get deliveries)
            with
-           | Error _ as error -> error
+           | Error error -> Error error
            | Ok () ->
              Atomic.set pending updated;
              Atomic.set
@@ -2195,6 +3157,9 @@ let install_persistence ~base_path =
 ;;
 
 module For_testing = struct
+  type strict_snapshot_writer =
+    string -> string -> (unit, Fs_compat.atomic_replace_failure) result
+
   let reset_audit_store () =
     Stdlib.Mutex.protect audit_stores_mu (fun () -> Hashtbl.clear audit_stores);
     Stdlib.Mutex.protect recent_audit_cache_mu (fun () ->
@@ -2217,6 +3182,24 @@ module For_testing = struct
 
   let pending_store_path = pending_store_path
   let always_allowed_store_path ~base_path = rules_path ~base_path ()
+
+  let bind_summary_exact_attempt_with_writer = bind_summary_exact_attempt_with
+
+  let release_summary_exact_attempt_before_dispatch_with_writer =
+    release_summary_exact_attempt_before_dispatch_with
+  ;;
+
+  let fail_summary_exact_attempt_before_dispatch_with_writer =
+    fail_summary_exact_attempt_before_dispatch_with
+  ;;
+
+  let quarantine_summary_exact_attempt_with_writer =
+    quarantine_summary_exact_attempt_with
+  ;;
+
+  let complete_summary_exact_attempt_with_writer =
+    complete_summary_exact_attempt_with
+  ;;
 end
 
 let resolve_with_policy

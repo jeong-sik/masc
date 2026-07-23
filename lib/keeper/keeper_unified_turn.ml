@@ -62,6 +62,26 @@ type turn_failure =
   ; source_lease_disposition : source_lease_disposition
   }
 
+let turn_failure_of_error
+      ~runtime_id
+      ~fallback_boundary
+      ~exact_failure_execution
+      error
+  =
+  match exact_failure_execution with
+  | Some (runtime_id, route, source_lease_disposition) ->
+    { error; runtime_id; route; source_lease_disposition }
+  | None ->
+    { error
+    ; runtime_id
+    ; route =
+        Keeper_runtime_failure_route.route_of_error
+          ~boundary:fallback_boundary
+          error
+    ; source_lease_disposition = Follow_failure_route
+    }
+;;
+
 let transcript_corruption error =
   match Keeper_internal_error.classify_masc_internal_error error with
   | Some (Keeper_internal_error.Incomplete_tool_transcript { detail; _ }) ->
@@ -74,6 +94,7 @@ let transcript_corruption error =
       | Keeper_internal_error.Internal_unhandled_exception _
       | Keeper_internal_error.Internal_bridge_exception _
       | Keeper_internal_error.Internal_contract_rejected _
+      | Keeper_internal_error.Terminal_effect_failed _
       | Keeper_internal_error.Receipt_persistence_failed _ )
   | None ->
     None
@@ -1302,18 +1323,11 @@ dominant source of the observed CAS race exhaustion after
       ~registry_base_path
   in
   let failure_of_error error =
-    match !exact_failure_execution with
-    | Some (runtime_id, route, source_lease_disposition) ->
-      { error; runtime_id; route; source_lease_disposition }
-    | None ->
-      { error
-      ; runtime_id = Keeper_meta_contract.runtime_id_of_meta meta
-      ; route =
-          Keeper_runtime_failure_route.route_of_error
-            ~boundary:Keeper_runtime_failure_route.Masc_execution
-            error
-      ; source_lease_disposition = Follow_failure_route
-      }
+    turn_failure_of_error
+      ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta)
+      ~fallback_boundary:Keeper_runtime_failure_route.Masc_execution
+      ~exact_failure_execution:!exact_failure_execution
+      error
   in
   match phase_gate_outcome with
   | Keeper_unified_turn_phase_gate.Phase_gate_cancelled meta ->

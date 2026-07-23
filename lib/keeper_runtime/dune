@@ -34,6 +34,7 @@
   masc.keeper_registry
   masc.keeper_checkpoint_ref
   masc.keeper_toml
+  masc.tool_types
   masc.config_dir_resolver
   masc.fs_compat
   masc.bounded_event_dedupe

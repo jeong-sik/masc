@@ -89,7 +89,7 @@ let prepare_agent_setup
   let
     { Keeper_tools_oas.tools = keeper_tools
     ; cleanup = keeper_tools_cleanup
-    ; terminal_effect_completed
+    ; terminal_effect_state
     }
     =
     Keeper_tools_oas_bundle.make_tool_bundle
@@ -254,7 +254,7 @@ let prepare_agent_setup
     ; record_tool_assignment
     ; config
     ; keeper_tools_cleanup
-    ; terminal_effect_completed
+    ; terminal_effect_state
     ; manifest_keeper_turn_id
     ; meta
     ; turn_ctx_cell

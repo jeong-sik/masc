@@ -24,6 +24,7 @@ let make_keeper_tool_handler
       ?gate_grant
       ?record_gate_result
       ?on_completed
+      ?on_failed
       ?(pre_validate_input = fun input -> Ok input)
       ?(translate_input = fun j -> j)
       ?(validate_translated_input = true)
@@ -34,6 +35,33 @@ let make_keeper_tool_handler
     Option.iter
       (fun record -> record ~operation:name ~input result)
       record_gate_result;
+    result
+  in
+  let observe_terminal_execution_result
+        ~failure_effect_disposition
+        (result : Tool_result.result)
+    =
+    (match result with
+     | Tool_result.Completed _ ->
+       Option.iter (fun completed -> completed ()) on_completed
+     | Tool_result.Failed { class_; message; _ } ->
+       let effect_disposition =
+         Option.value
+           ~default:Tool_result.Effect_outcome_unknown
+           failure_effect_disposition
+       in
+       (match effect_disposition with
+        | Tool_result.Proven_pre_effect -> ()
+        | Tool_result.Proven_post_effect | Tool_result.Effect_outcome_unknown ->
+          Option.iter
+            (fun failed ->
+               failed
+                 { Keeper_tools_oas.failure_class = class_
+                 ; effect_disposition
+                 ; diagnostic = message
+                 })
+            on_failed)
+     | Tool_result.Deferred _ -> ());
     result
   in
   fun ?oas_invocation raw_input ->
@@ -91,6 +119,8 @@ let make_keeper_tool_handler
             ; "error", `String error_text
             ]
              @ invocation_fields));
+      (* Input rejection is proven pre-effect. Keep it in dispatch telemetry,
+         but do not poison the request-scoped terminal-effect state. *)
       validation_result |> record_result ~input
     in
     match pre_validate_input raw_input with
@@ -118,7 +148,7 @@ let make_keeper_tool_handler
               | Ok proc_mgr -> Some proc_mgr
               | Error _ -> None
             in
-            let result =
+            let execution =
               Keeper_tools_oas_handler_exec.execute_with_observers
                 ~name
                 ~config
@@ -137,13 +167,12 @@ let make_keeper_tool_handler
                 ?oas_invocation
                 ~input
                 ()
-              |> record_result ~input
             in
-            (match result with
-             | Tool_result.Completed _ ->
-               Option.iter (fun completed -> completed ()) on_completed
-             | Tool_result.Deferred _ | Tool_result.Failed _ -> ());
-            result
+            execution.tool_result
+            |> record_result ~input
+            |> observe_terminal_execution_result
+                 ~failure_effect_disposition:
+                   execution.failure_effect_disposition
           in
           run_with_current_eio_context ?clock:current_clock ())
 ;;

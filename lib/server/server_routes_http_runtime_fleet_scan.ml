@@ -40,6 +40,7 @@ type pause_kind = Keeper_activation_readiness.pause_kind =
   | Operator_paused
   | Unclassified_paused
   | Dead_tombstone
+  | Transcript_corruption_reset_required
 
 let pause_kind = Keeper_activation_readiness.pause_kind
 let pause_kind_to_wire = Keeper_activation_readiness.pause_kind_to_wire

@@ -1028,10 +1028,17 @@ let load_list_internal ~(config_path : string) ~validate_max_context
   let* cfg =
     Runtime_toml.parse_file config_path
     |> Result.map_error (fun errs ->
+      let detail =
+        errs
+        |> List.map (fun (e : Runtime_toml.parse_error) ->
+          Printf.sprintf "  - %s: %s" e.path e.message)
+        |> String.concat "\n"
+      in
       Printf.sprintf
-        "runtime config parse failed (%s): %d error(s)"
+        "runtime config parse failed (%s): %d error(s):\n%s"
         config_path
-        (List.length errs))
+        (List.length errs)
+        detail)
   in
   materialize_config ~validate_max_context ~config_path cfg
 ;;

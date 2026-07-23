@@ -1317,6 +1317,59 @@ describe('keeper lifecycle', () => {
     })
   })
 
+  it('boots after a durable resume commit cannot project to an offline lane', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          ok: false,
+          action: 'resume',
+          name: 'offline-janitor',
+          committed: true,
+          projection: 'committed_followup_failed',
+        }), {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, action: 'boot', name: 'offline-janitor' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await resumeKeeper('offline-janitor', 7, {
+      operatorOperationId: 'dashboard-resume-offline-1',
+    })
+
+    expect(result).toMatchObject({ ok: true, action: 'boot', committed: true })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/v1/keepers/offline-janitor/directive')
+    expect(fetchMock.mock.calls[1]![0]).toBe('/api/v1/keepers/offline-janitor/boot')
+  })
+
+  it('does not boot when Resume_owner was not durably committed', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: false,
+        action: 'resume',
+        name: 'stale-janitor',
+        committed: false,
+        error: 'owner generation changed',
+      }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await resumeKeeper('stale-janitor', 7)
+
+    expect(result).toMatchObject({ ok: false, committed: false })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('reuses the same resume operation ID after an ambiguous failed response', async () => {
     vi.stubGlobal('crypto', { randomUUID: vi.fn(() => 'stable-resume-uuid') })
     const fetchMock = vi.fn()

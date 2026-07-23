@@ -314,7 +314,11 @@ export async function resumeKeeper(
     `Failed to resume ${name}`,
     opts,
   )
-  if (result.ok) clearCommittedResumeIntent(name, intent)
+  if (result.ok || result.committed === true) clearCommittedResumeIntent(name, intent)
+  if (!result.ok && result.committed === true) {
+    const boot = await bootKeeper(name, opts)
+    return { ...boot, committed: true }
+  }
   return result
 }
 

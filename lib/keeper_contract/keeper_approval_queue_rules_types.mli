@@ -25,11 +25,10 @@ and summary_status =
   | Summary_failed of { reason : string; retryable : bool }
 
 type exact_attempt_quarantine_cause =
-  | Exact_post_dispatch_failure
+  | Exact_flow_execution_failed
   | Exact_cancellation
   | Exact_attempt_replay
   | Exact_domain_invalid_output
-  | Exact_provenance_mismatch
   | Exact_terminal_persistence_failure
   | Exact_restart_uncertainty
 

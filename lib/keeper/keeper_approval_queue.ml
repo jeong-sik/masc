@@ -190,7 +190,7 @@ let install_error_to_string = function
   | Install_storage_failed error -> storage_error_to_string error
 ;;
 
-let pending_store_version = 5
+let pending_store_version = 6
 let pending_store_surface = "keeper_gate_pending"
 let pending_store_mutex = Cross_context_mutex.create ()
 let deliveries : persisted_delivery SMap.t Atomic.t = Atomic.make SMap.empty
@@ -896,7 +896,11 @@ let snapshot_of_yojson ~base_path json =
 
 let quarantine_restarted_entry (entry : pending_approval) =
   match entry.exact_attempt with
-  | Exact_bound ({ status = Exact_dispatch_uncertain; _ } as binding) ->
+  | Exact_bound
+      ( { status =
+            (Exact_dispatch_uncertain | Exact_released_before_dispatch)
+        ; _
+        } as binding ) ->
     ( { entry with
         exact_attempt =
           Exact_bound
@@ -908,9 +912,7 @@ let quarantine_restarted_entry (entry : pending_approval) =
   | Exact_unbound
   | Exact_bound
       { status =
-          ( Exact_released_before_dispatch
-          | Exact_quarantined _
-          | Exact_completed )
+          (Exact_quarantined _ | Exact_completed)
       ; _
       } ->
     entry, false
@@ -2133,7 +2135,9 @@ let quarantine_summary_exact_attempt_with
                     ~entry
                     entry
                 | Exact_released_before_dispatch
-                  when cause = Exact_terminal_persistence_failure ->
+                  when cause = Exact_terminal_persistence_failure
+                       || cause = Exact_cancellation
+                       || cause = Exact_flow_execution_failed ->
                   let quarantined =
                     exact_attempt_binding_with_status
                       existing

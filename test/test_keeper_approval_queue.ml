@@ -1062,7 +1062,7 @@ let test_exact_binding_codec_validates_entry_identity () =
          (run_exact_transition AQ.bind_summary_exact_attempt identity);
        let snapshot = read_pending_snapshot ~base_path in
        let open Yojson.Safe.Util in
-       Alcotest.(check int) "v5 snapshot" 5 (snapshot |> member "version" |> to_int);
+       Alcotest.(check int) "v6 snapshot" 6 (snapshot |> member "version" |> to_int);
        let exact_json =
          snapshot
          |> member "pending"
@@ -1091,6 +1091,53 @@ let test_exact_binding_codec_validates_entry_identity () =
            `Assoc ((field, value) :: List.remove_assoc field fields)
          | _ -> Alcotest.fail "exact attempt object expected"
        in
+       check_exact_update
+         "quarantine exact codec fixture"
+         true
+         (quarantine_exact identity AQ.Exact_flow_execution_failed);
+       let quarantined_exact_json =
+         read_pending_snapshot ~base_path
+         |> member "pending"
+         |> to_list
+         |> List.hd
+         |> member "exact_attempt"
+       in
+       Alcotest.(check string)
+         "flow execution failure is encoded"
+         "flow_execution_failed"
+         (quarantined_exact_json
+          |> member "quarantine_cause"
+          |> to_string);
+       (match
+          AQ.exact_attempt_state_of_yojson_with_error quarantined_exact_json
+        with
+        | Ok
+            (AQ.Exact_bound
+              { status =
+                  AQ.Exact_quarantined
+                    AQ.Exact_flow_execution_failed
+              ; _
+              }) ->
+          ()
+        | Ok _ ->
+          Alcotest.fail
+            "flow execution failure decoded as another exact state"
+        | Error reason -> Alcotest.fail reason);
+       List.iter
+         (fun removed_cause ->
+            match
+              AQ.exact_attempt_state_of_yojson_with_error
+                (replace_field
+                   "quarantine_cause"
+                   (`String removed_cause)
+                   quarantined_exact_json)
+            with
+            | Error _ -> ()
+            | Ok _ ->
+              Alcotest.failf
+                "removed quarantine cause %s was decoded"
+                removed_cause)
+         [ "post_dispatch_failure"; "provenance_mismatch" ];
        (match
           AQ.exact_attempt_state_of_yojson_with_error
             (replace_field "call_id" (`String " ") exact_json)
@@ -1228,7 +1275,7 @@ let test_exact_attempt_binding_release_and_conflicts () =
        expect_summary_rejection
          "bound restart"
          (AQ.restart_failed_summary ~id);
-       let quarantine_cause = AQ.Exact_post_dispatch_failure in
+       let quarantine_cause = AQ.Exact_flow_execution_failed in
        check_exact_update
          "quarantine replacement"
          true
@@ -1238,7 +1285,7 @@ let test_exact_attempt_binding_release_and_conflicts () =
               AQ.Exact_bound
                 { status =
                     AQ.Exact_quarantined
-                      AQ.Exact_post_dispatch_failure
+                      AQ.Exact_flow_execution_failed
                 ; _
                 }
           ; _
@@ -1541,6 +1588,83 @@ let test_dispatch_uncertain_restart_is_durably_quarantined () =
         | Ok _ -> Alcotest.fail "restart-quarantined attempt was released"))
 ;;
 
+let test_released_before_dispatch_restart_is_durably_quarantined () =
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let id =
+         submit
+           ~base_path
+           ~keeper_name:"queue-exact-released-restart"
+           ~input:(`Assoc [ "request", `String "released-restart" ])
+       in
+       check_update
+         "mark released restart pending"
+         true
+         (AQ.mark_summary_pending ~id);
+       let identity = exact_identity id in
+       check_exact_update
+         "bind released restart attempt"
+         true
+         (run_exact_transition
+            AQ.bind_summary_exact_attempt
+            identity);
+       check_exact_update
+         "release restart attempt"
+         true
+         (run_exact_transition
+            AQ.release_summary_exact_attempt_before_dispatch
+            identity);
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       (match pending_entry_exn id with
+        | { exact_attempt =
+              AQ.Exact_bound
+                { status =
+                    AQ.Exact_quarantined
+                      AQ.Exact_restart_uncertainty
+                ; slot_id
+                ; call_id
+                ; _
+                }
+          ; _
+          } ->
+          Alcotest.(check string)
+            "released restart keeps slot identity"
+            identity.slot_id_arg
+            slot_id;
+          Alcotest.(check string)
+            "released restart keeps call identity"
+            identity.call_id_arg
+            call_id
+        | _ ->
+          Alcotest.fail
+            "released-before-dispatch restart was not quarantined");
+       let open Yojson.Safe.Util in
+       let exact_attempt =
+         read_pending_snapshot ~base_path
+         |> member "pending"
+         |> to_list
+         |> List.hd
+         |> member "exact_attempt"
+       in
+       Alcotest.(check string)
+         "released restart quarantine is persisted"
+         "quarantined"
+         (exact_attempt |> member "status" |> to_string);
+       Alcotest.(check string)
+         "released restart cause is persisted"
+         "restart_uncertainty"
+         (exact_attempt
+          |> member "quarantine_cause"
+          |> to_string))
+;;
+
 let test_exact_attempt_completion_is_atomic () =
   let base_path = temp_dir () in
   Fun.protect
@@ -1798,17 +1922,27 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
          (run_exact_transition
             AQ.release_summary_exact_attempt_before_dispatch
             release_identity);
-       (match
-          quarantine_exact release_identity AQ.Exact_post_dispatch_failure
-        with
-        | Error
-            (AQ.Exact_attempt_rejected
-              (AQ.Exact_attempt_status_conflict _)) ->
-          ()
-        | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
-        | Ok _ ->
-          Alcotest.fail
-            "released binding accepted an untyped terminalization cause");
+       List.iter
+         (fun (label, cause) ->
+            match quarantine_exact release_identity cause with
+            | Error
+                (AQ.Exact_attempt_rejected
+                  (AQ.Exact_attempt_status_conflict _)) ->
+              ()
+            | Error error ->
+              Alcotest.fail
+                (AQ.exact_attempt_error_to_string error)
+            | Ok _ ->
+              Alcotest.failf
+                "released binding accepted %s"
+                label)
+         [ "domain-invalid output", AQ.Exact_domain_invalid_output
+         ; "attempt replay", AQ.Exact_attempt_replay
+         ];
+       assert_status
+         "rejected causes preserve release"
+         release_id
+         "released_before_dispatch";
        check_exact_update
          "typed release uncertainty terminalization"
          true
@@ -1816,6 +1950,42 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
             release_identity
             AQ.Exact_terminal_persistence_failure);
        assert_status "release terminal memory" release_id "quarantined";
+       let terminalize_released label cause =
+         let id, identity = prepare label in
+         check_exact_update
+           ("bind " ^ label)
+           true
+           (run_exact_transition
+              AQ.bind_summary_exact_attempt
+              identity);
+         check_exact_update
+           ("release " ^ label)
+           true
+           (run_exact_transition
+              AQ.release_summary_exact_attempt_before_dispatch
+              identity);
+         check_exact_update
+           ("quarantine " ^ label)
+           true
+           (quarantine_exact identity cause);
+         match pending_entry_exn id with
+         | { exact_attempt =
+               AQ.Exact_bound
+                 { status = AQ.Exact_quarantined actual; _ }
+           ; _
+           } when actual = cause ->
+           ()
+         | _ ->
+           Alcotest.failf
+             "%s did not retain its exact quarantine cause"
+             label
+       in
+       terminalize_released
+         "release-cancellation"
+         AQ.Exact_cancellation;
+       terminalize_released
+         "release-flow-execution-failed"
+         AQ.Exact_flow_execution_failed;
        let fail_id, fail_identity = prepare "fail" in
        check_exact_update
          "bind failure fixture"
@@ -1867,7 +2037,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
             ~call_id:quarantine_identity.call_id_arg
             ~plan_fingerprint:quarantine_identity.plan_fingerprint_arg
             ~request_body_sha256:quarantine_identity.request_body_sha256_arg
-            ~cause:AQ.Exact_post_dispatch_failure);
+            ~cause:AQ.Exact_flow_execution_failed);
        assert_status
          "visible quarantine memory"
          quarantine_id
@@ -1877,7 +2047,7 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
          false
          (quarantine_exact
             quarantine_identity
-            AQ.Exact_post_dispatch_failure);
+            AQ.Exact_flow_execution_failed);
        let complete_id, complete_identity = prepare "complete" in
        check_exact_update
          "bind completion fixture"
@@ -2442,7 +2612,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 5
+            [ "version", `Int 6
             ; "next_sequence", `Int 1
             ; "pending", `List [ `String "malformed-entry" ]
             ; "deliveries", `List []
@@ -2473,7 +2643,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 5
+               [ "version", `Int 6
                ; "next_sequence", `Int 1
                ; "pending", `List [ `String "malformed-entry" ]
                ; "deliveries", `List []
@@ -2507,7 +2677,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
         | Error
             (AQ.Install_storage_failed
               { reason =
-                  "gate_pending.version 2 is unsupported (current 5); reset \
+                  "gate_pending.version 2 is unsupported (current 6); reset \
                    runtime state before restarting MASC"
               ; _
               }) ->
@@ -2948,7 +3118,7 @@ let () =
             `Quick
             test_summary_updates_never_resolve_pending_request
         ; Alcotest.test_case
-            "exact binding codec validates entry identity"
+            "exact binding codec validates identity and current causes"
             `Quick
             test_exact_binding_codec_validates_entry_identity
         ; Alcotest.test_case
@@ -2963,6 +3133,10 @@ let () =
             "dispatch-uncertain restart is quarantined"
             `Quick
             test_dispatch_uncertain_restart_is_durably_quarantined
+        ; Alcotest.test_case
+            "released-before-dispatch restart is quarantined"
+            `Quick
+            test_released_before_dispatch_restart_is_durably_quarantined
         ; Alcotest.test_case
             "exact completion is atomic"
             `Quick

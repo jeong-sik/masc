@@ -24,11 +24,10 @@ and summary_status =
   | Summary_failed of { reason : string; retryable : bool }
 
 type exact_attempt_quarantine_cause =
-  | Exact_post_dispatch_failure
+  | Exact_flow_execution_failed
   | Exact_cancellation
   | Exact_attempt_replay
   | Exact_domain_invalid_output
-  | Exact_provenance_mismatch
   | Exact_terminal_persistence_failure
   | Exact_restart_uncertainty
 
@@ -248,11 +247,10 @@ let exact_attempt_status_to_string = function
 ;;
 
 let exact_attempt_quarantine_cause_to_string = function
-  | Exact_post_dispatch_failure -> "post_dispatch_failure"
+  | Exact_flow_execution_failed -> "flow_execution_failed"
   | Exact_cancellation -> "cancellation"
   | Exact_attempt_replay -> "attempt_replay"
   | Exact_domain_invalid_output -> "domain_invalid_output"
-  | Exact_provenance_mismatch -> "provenance_mismatch"
   | Exact_terminal_persistence_failure -> "terminal_persistence_failure"
   | Exact_restart_uncertainty -> "restart_uncertainty"
 ;;
@@ -338,11 +336,10 @@ let required_string_list ~surface field fields =
 ;;
 
 let exact_attempt_quarantine_cause_of_string = function
-  | "post_dispatch_failure" -> Ok Exact_post_dispatch_failure
+  | "flow_execution_failed" -> Ok Exact_flow_execution_failed
   | "cancellation" -> Ok Exact_cancellation
   | "attempt_replay" -> Ok Exact_attempt_replay
   | "domain_invalid_output" -> Ok Exact_domain_invalid_output
-  | "provenance_mismatch" -> Ok Exact_provenance_mismatch
   | "terminal_persistence_failure" -> Ok Exact_terminal_persistence_failure
   | "restart_uncertainty" -> Ok Exact_restart_uncertainty
   | cause ->

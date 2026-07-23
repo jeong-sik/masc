@@ -721,15 +721,7 @@
  (name test_runtime_config_validity)
  (modules test_runtime_config_validity)
  (deps ../config/oas-models-overlay.toml ../config/runtime.toml)
- (libraries masc_test_deps))
-
-; Exact-output registry: credential admission deferred to execution, and
-; runtime.toml saves re-validate + republish lane declarations.
-
-(test
- (name test_runtime_exact_output_registry)
- (modules test_runtime_exact_output_registry)
- (libraries alcotest masc_test_deps))
+ (libraries masc_test_deps compaction_exact_output_fixture))
 
 (test
  (name test_keeper_keepalive_launch_order_ast)
@@ -1295,6 +1287,13 @@
  (name test_compaction_exact_output_conformance)
  (modules test_compaction_exact_output_conformance)
  (libraries alcotest compaction_exact_output_fixture masc_test_deps eio_main unix))
+
+; Process-isolated proof that exact-output bootstrap honors full catalog
+; replacement precedence over deployment overlays and OAS embedded targets.
+(test
+ (name test_exact_output_catalog_precedence)
+ (modules test_exact_output_catalog_precedence)
+ (libraries alcotest masc_server masc_test_deps eio_main unix))
 
 ; Production entrypoint coverage for an intentionally absent Eio clock. This
 ; must remain a separate process because Eio_context clock installation is

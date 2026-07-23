@@ -67,7 +67,7 @@ let start_server ?on_request_before_reply ~sw ~net ~clock behavior =
   }
 ;;
 
-let target_fixture_toml ?connect_timeout_s index fixture =
+let target_fixture_toml ?connect_timeout_s ~api_key_env index fixture =
   let provider_id = Printf.sprintf "masc-exact-fixture-provider-%d" index in
   let model_id = Printf.sprintf "masc-exact-fixture-model-%d" index in
   let timeout =
@@ -82,7 +82,7 @@ let target_fixture_toml ?connect_timeout_s index fixture =
      kind = \"openai_compat\"\n\
      base_url = %S\n\
      request_path = \"/v1/chat/completions\"\n\
-     api_key_env = \"\"\n\n\
+     api_key_env = %S\n\n\
      [[models]]\n\
      id_prefix = %S\n\
      provider_name = %S\n\
@@ -97,6 +97,7 @@ let target_fixture_toml ?connect_timeout_s index fixture =
      %s"
     provider_id
     fixture.base_url
+    api_key_env
     model_id
     provider_id
     fixture.id
@@ -105,19 +106,37 @@ let target_fixture_toml ?connect_timeout_s index fixture =
     timeout
 ;;
 
-let resolver_snapshot ?(connect_timeouts = []) ~source fixtures =
+let resolver_snapshot
+      ?(connect_timeouts = [])
+      ?(api_key_env = "")
+      ?(api_key_envs = [])
+      ~source
+      fixtures
+  =
   let timeout_for id = List.assoc_opt id connect_timeouts in
-  let overlay : EO.catalog_overlay =
+  let api_key_env_for id =
+    List.assoc_opt id api_key_envs |> Option.value ~default:api_key_env
+  in
+  let overlay : EO.catalog_document =
     { source
     ; contents =
         fixtures
         |> List.mapi (fun index fixture ->
-          target_fixture_toml ?connect_timeout_s:(timeout_for fixture.id) index fixture)
+            target_fixture_toml
+              ?connect_timeout_s:(timeout_for fixture.id)
+              ~api_key_env:(api_key_env_for fixture.id)
+            index
+            fixture)
         |> String.concat "\n"
     }
   in
   let io : EO.resolver_io = { getenv = (fun _ -> Ok None) } in
-  match EO.load_resolver_snapshot ~io ~overlay () with
+  match
+    EO.load_resolver_snapshot
+      ~io
+      ~catalog:(EO.Embedded_with_overlay overlay)
+      ()
+  with
   | Ok snapshot -> snapshot
   | Error _ -> Alcotest.fail "exact-output resolver fixture did not load"
 ;;
@@ -135,34 +154,13 @@ let publish_registry ~lane_id ~slot_ids resolver_snapshot =
   | Error error ->
     Alcotest.failf
       "exact-output registry fixture did not publish: %s"
-      (Runtime_exact_output_registry.error_to_string error)
-;;
-
-let runtime_exact_output_lanes () =
-  let runtime_path =
-    Filename.concat (Masc_test_deps.find_project_root ()) "config/runtime.toml"
-  in
-  match Runtime_toml.parse_file runtime_path with
-  | Ok (config : Runtime_schema.config) -> config.exact_output_lane_decls
-  | Error errors ->
-    Alcotest.failf
-      "exact-output runtime fixture did not parse: %d error(s)"
-      (List.length errors)
+      (Runtime_exact_output_registry.publication_error_to_string error)
 ;;
 
 let publish_runtime_lane ?connect_timeout_s ~source ~base_url () =
-  let lanes = runtime_exact_output_lanes () in
-  let slot_ids =
-    match
-      List.find_opt
-        (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-           String.equal lane.id "compaction_exact")
-        lanes
-    with
-    | Some { slot_ids = _ :: _ as slot_ids; _ } -> slot_ids
-    | Some { slot_ids = []; _ } ->
-      Alcotest.fail "compaction_exact fixture lane is empty"
-    | None -> Alcotest.fail "compaction_exact fixture lane is missing"
+  let slot_ids = [ "compaction-exact-fixture" ] in
+  let lanes : Runtime_schema.exact_output_lane_decl list =
+    [ { id = "compaction_exact"; slot_ids } ]
   in
   let fixtures = List.map (fun id -> { id; base_url }) slot_ids in
   let connect_timeouts =
@@ -177,7 +175,7 @@ let publish_runtime_lane ?connect_timeout_s ~source ~base_url () =
    | Error error ->
      Alcotest.failf
        "exact-output runtime fixture did not publish: %s"
-       (Runtime_exact_output_registry.error_to_string error));
+       (Runtime_exact_output_registry.publication_error_to_string error));
   slot_ids
 ;;
 

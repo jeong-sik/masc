@@ -304,15 +304,17 @@ let settlement_of_failure ~settled_at ~compaction_consecutive_failures failure =
   | Keeper_unified_turn.Acknowledge_after_in_turn_handling ->
     Keeper_registry_event_queue.Ack
   | Keeper_unified_turn.Escalate_after_exact_output_terminal
-      Keeper_unified_turn.Execution_may_have_dispatched ->
+      (Keeper_unified_turn.Exact_lane_unconfigured { source }) ->
     Keeper_registry_event_queue.Escalate
-      { reason = Keeper_registry_event_queue.Compaction_execution_may_have_dispatched
+      { reason = Keeper_registry_event_queue.Compaction_exact_lane_unconfigured { source }
       ; successor = None
       }
   | Keeper_unified_turn.Escalate_after_exact_output_terminal
-      Keeper_unified_turn.Domain_invalid_output ->
+      (Keeper_unified_turn.Exact_execution_terminal { source; terminal }) ->
     Keeper_registry_event_queue.Escalate
-      { reason = Keeper_registry_event_queue.Compaction_domain_invalid_output
+      { reason =
+          Keeper_registry_event_queue.Compaction_exact_output_terminal
+            { source; terminal }
       ; successor = None
       }
   | Keeper_unified_turn.Requeue_after_context_compaction
@@ -590,6 +592,24 @@ let settlement_is_ack = function
     false
 ;;
 
+let settlement_is_exact_output_terminal = function
+  | Keeper_registry_event_queue.No_compaction
+      { reason = Keeper_event_queue_state.Exact_execution_terminal _; _ }
+  | Keeper_registry_event_queue.Escalate
+      { reason = Keeper_registry_event_queue.Compaction_exact_output_terminal _
+      ; successor = None
+      } ->
+    true
+  | Keeper_registry_event_queue.Ack
+  | Keeper_registry_event_queue.No_compaction _
+  | Keeper_registry_event_queue.Cancel_accepted _
+  | Keeper_registry_event_queue.Transfer_accepted _
+  | Keeper_registry_event_queue.Settle_from_source_terminal _
+  | Keeper_registry_event_queue.Requeue _
+  | Keeper_registry_event_queue.Escalate _ ->
+    false
+;;
+
 (* Pure: post-turn status event derived from the registry turn-failure
    counter. Extracted from the loop body so the crashed-cycle ->
    [Turn_failed] mapping is unit-testable. *)
@@ -682,6 +702,50 @@ let run_keepalive_unified_turn
              "registry: failed to requeue unsettled lease keeper=%s: %s"
              meta_after_triage.name
              message)
+    in
+    let settle_exact_terminal_after_cancellation () =
+      match !claimed_lease, !cycle_outcome_ref with
+      | Some lease, Some outcome when not !lease_settled ->
+        let settled_at = Time_compat.now () in
+        let settlement =
+          settlement_of_cycle_outcome
+            ~base_path:ctx.config.base_path
+            ~settled_at
+            ~stop_requested:(Atomic.get stop)
+            ~compaction_consecutive_failures:
+              meta_after_triage.runtime.compaction_rt.consecutive_failures
+            ~lease
+            (Some outcome)
+        in
+        if not (settlement_is_exact_output_terminal settlement)
+        then false
+        else (
+          Eio.Cancel.protect (fun () ->
+            match
+              settle_claimed_lease
+                ~base_path:ctx.config.base_path
+                ~keeper_name:meta_after_triage.name
+                ~settled_at
+                ~lease
+                ~settlement
+            with
+            | Ok
+                ( Keeper_registry_event_queue.Settled _
+                | Keeper_registry_event_queue.Already_settled _ ) ->
+              lease_settled := true;
+              (match
+                 project_transition_outbox
+                   ~base_path:ctx.config.base_path
+                   ~keeper_name:meta_after_triage.name
+               with
+               | Ok () -> ()
+               | Error message -> record_settlement_failure message)
+            | Ok (Keeper_registry_event_queue.Committed_followup_failed { detail; _ }) ->
+              lease_settled := true;
+              record_settlement_failure detail
+            | Error message -> record_settlement_failure message);
+          true)
+      | None, _ | Some _, None | Some _, Some _ -> false
     in
     try
       (match
@@ -1109,7 +1173,8 @@ let run_keepalive_unified_turn
     with
     | Eio.Cancel.Cancelled _ as e ->
       let backtrace = Printexc.get_raw_backtrace () in
-      requeue_unsettled Keeper_registry_event_queue.Cancelled;
+      if not (settle_exact_terminal_after_cancellation ())
+      then requeue_unsettled Keeper_registry_event_queue.Cancelled;
       Printexc.raise_with_backtrace e backtrace
     | Keeper_registry.Keeper_fiber_crash as e ->
       let backtrace = Printexc.get_raw_backtrace () in

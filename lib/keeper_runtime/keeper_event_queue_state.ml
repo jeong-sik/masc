@@ -20,6 +20,25 @@ type requeue_reason =
        keeper-conversation-hitl-flow). Kept for decoding persisted
        receipts/WAL rows written before the amendment. *)
 
+type exact_execution_terminal_cause =
+  | Execution_failed_after_dispatch
+  | Attempt_already_started
+  | Execution_cancelled_after_dispatch
+  | Execution_provenance_mismatch
+  | Domain_invalid_output
+  | Invalid_structural_evidence
+  | Invalid_structural_source_after_dispatch
+  | Commit_admission_unavailable
+  | Lifecycle_transition_failed_after_dispatch
+  | Checkpoint_source_changed
+  | Checkpoint_persistence_failed
+
+type exact_execution_terminal =
+  { cause : exact_execution_terminal_cause
+  ; slot_id : string
+  ; call_id : string
+  }
+
 type escalation_reason =
   | Failure_judgment_requested
   | Failure_judgment_boundary_failed of { detail : string }
@@ -27,8 +46,11 @@ type escalation_reason =
       { judge_runtime_id : string
       ; rationale : string
       }
-  | Compaction_execution_may_have_dispatched
-  | Compaction_domain_invalid_output
+  | Compaction_exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
+  | Compaction_exact_output_terminal of
+      { source : Keeper_checkpoint_ref.t
+      ; terminal : exact_execution_terminal
+      }
   | Compaction_retry_exhausted of
       { attempts : int
       ; detail : string
@@ -57,8 +79,8 @@ type no_compaction_reason =
   | Invalid_structural_source
   | Structurally_unchanged
   | Checkpoint_not_reduced
-  | Execution_may_have_dispatched
-  | Domain_invalid_output
+  | Exact_lane_unconfigured
+  | Exact_execution_terminal of exact_execution_terminal
 
 type no_compaction =
   { source : Keeper_checkpoint_ref.t
@@ -99,8 +121,8 @@ let escalation_reason_requests_external_input = function
   | Failure_judgment_external_input_requested _ -> true
   | Failure_judgment_requested
   | Failure_judgment_boundary_failed _
-  | Compaction_execution_may_have_dispatched
-  | Compaction_domain_invalid_output
+  | Compaction_exact_lane_unconfigured _
+  | Compaction_exact_output_terminal _
   | Compaction_retry_exhausted _
   | Compaction_floor_exceeded _ -> false
 ;;
@@ -401,14 +423,78 @@ let requeue_reason_of_label = function
 
 let ( let* ) = Result.bind
 
+let exact_execution_terminal_cause_label = function
+  | Execution_failed_after_dispatch -> "execution_failed_after_dispatch"
+  | Attempt_already_started -> "attempt_already_started"
+  | Execution_cancelled_after_dispatch -> "execution_cancelled_after_dispatch"
+  | Execution_provenance_mismatch -> "execution_provenance_mismatch"
+  | Domain_invalid_output -> "domain_invalid_output"
+  | Invalid_structural_evidence -> "invalid_structural_evidence"
+  | Invalid_structural_source_after_dispatch ->
+    "invalid_structural_source_after_dispatch"
+  | Commit_admission_unavailable -> "commit_admission_unavailable"
+  | Lifecycle_transition_failed_after_dispatch ->
+    "lifecycle_transition_failed_after_dispatch"
+  | Checkpoint_source_changed -> "checkpoint_source_changed"
+  | Checkpoint_persistence_failed -> "checkpoint_persistence_failed"
+;;
+
+let exact_execution_terminal_cause_of_label = function
+  | "execution_failed_after_dispatch" -> Ok Execution_failed_after_dispatch
+  | "attempt_already_started" -> Ok Attempt_already_started
+  | "execution_cancelled_after_dispatch" ->
+    Ok Execution_cancelled_after_dispatch
+  | "execution_provenance_mismatch" -> Ok Execution_provenance_mismatch
+  | "domain_invalid_output" -> Ok Domain_invalid_output
+  | "invalid_structural_evidence" -> Ok Invalid_structural_evidence
+  | "invalid_structural_source_after_dispatch" ->
+    Ok Invalid_structural_source_after_dispatch
+  | "commit_admission_unavailable" -> Ok Commit_admission_unavailable
+  | "lifecycle_transition_failed_after_dispatch" ->
+    Ok Lifecycle_transition_failed_after_dispatch
+  | "checkpoint_source_changed" -> Ok Checkpoint_source_changed
+  | "checkpoint_persistence_failed" -> Ok Checkpoint_persistence_failed
+  | label -> Error (Printf.sprintf "unknown exact execution terminal cause: %s" label)
+;;
+
+let validate_exact_execution_terminal terminal =
+  let validate_identity field value =
+    let trimmed = String.trim value in
+    if String.equal trimmed ""
+    then Error (Printf.sprintf "exact execution terminal %s must not be blank" field)
+    else if not (String.equal trimmed value)
+    then Error (Printf.sprintf "exact execution terminal %s must be canonical" field)
+    else Ok ()
+  in
+  let* () = validate_identity "slot_id" terminal.slot_id in
+  validate_identity "call_id" terminal.call_id
+;;
+
+let exact_execution_terminal_to_string terminal =
+  Printf.sprintf
+    "%s:slot_id=%s:call_id=%s"
+    (exact_execution_terminal_cause_label terminal.cause)
+    terminal.slot_id
+    terminal.call_id
+;;
+
+let checkpoint_source_reason_detail_to_yojson (source : Keeper_checkpoint_ref.t) =
+  `Assoc
+    [ "trace_id", `String (Keeper_id.Trace_id.to_string source.trace_id)
+    ; "generation", `Int source.generation
+    ; "turn_count", `Int source.turn_count
+    ; "sha256", `String source.sha256
+    ]
+;;
+
 let escalation_reason_label = function
   | Failure_judgment_requested -> "failure_judgment_requested"
   | Failure_judgment_boundary_failed _ -> "failure_judgment_boundary_failed"
   | Failure_judgment_external_input_requested _ ->
     "failure_judgment_external_input_requested"
-  | Compaction_execution_may_have_dispatched ->
-    "compaction_execution_may_have_dispatched"
-  | Compaction_domain_invalid_output -> "compaction_domain_invalid_output"
+  | Compaction_exact_lane_unconfigured _ ->
+    "compaction_exact_lane_unconfigured"
+  | Compaction_exact_output_terminal _ -> "compaction_exact_output_terminal"
   | Compaction_retry_exhausted _ -> "compaction_retry_exhausted"
   | Compaction_floor_exceeded _ -> "compaction_floor_exceeded"
 ;;
@@ -422,8 +508,15 @@ let escalation_reason_detail_to_yojson = function
       [ "judge_runtime_id", `String judge_runtime_id
       ; "rationale", `String rationale
       ]
-  | Compaction_execution_may_have_dispatched
-  | Compaction_domain_invalid_output -> `Null
+  | Compaction_exact_lane_unconfigured { source } ->
+    checkpoint_source_reason_detail_to_yojson source
+  | Compaction_exact_output_terminal { source; terminal } ->
+    `Assoc
+      [ "source", checkpoint_source_reason_detail_to_yojson source
+      ; "cause", `String (exact_execution_terminal_cause_label terminal.cause)
+      ; "slot_id", `String terminal.slot_id
+      ; "call_id", `String terminal.call_id
+      ]
   | Compaction_retry_exhausted { attempts; detail } ->
     `Assoc [ "attempts", `Int attempts; "detail", `String detail ]
   | Compaction_floor_exceeded { attempts; detail } ->
@@ -455,13 +548,78 @@ let exact_reason_fields ~context expected fields =
          (String.concat "," actual))
 ;;
 
+let required_reason_int ~context name fields =
+  match List.assoc_opt name fields with
+  | Some (`Int value) -> Ok value
+  | Some _ -> Error (Printf.sprintf "%s.%s must be an int" context name)
+  | None -> Error (Printf.sprintf "%s.%s is required" context name)
+;;
+
+let checkpoint_source_of_reason_fields ~context fields =
+  let* () =
+    exact_reason_fields
+      ~context
+      [ "trace_id"; "generation"; "turn_count"; "sha256" ]
+      fields
+  in
+  let* trace_id_value = required_nonempty_reason_string ~context "trace_id" fields in
+  let* trace_id =
+    Keeper_id.Trace_id.of_string trace_id_value
+    |> Result.map_error (fun detail -> Printf.sprintf "%s.trace_id: %s" context detail)
+  in
+  let* generation = required_reason_int ~context "generation" fields in
+  let* turn_count = required_reason_int ~context "turn_count" fields in
+  let* sha256 = required_nonempty_reason_string ~context "sha256" fields in
+  Keeper_checkpoint_ref.of_persisted ~trace_id ~generation ~turn_count ~sha256
+  |> Result.map_error (function
+    | Keeper_checkpoint_ref.Negative_generation value ->
+      Printf.sprintf "%s.generation must not be negative: %d" context value
+    | Negative_turn_count value ->
+      Printf.sprintf "%s.turn_count must not be negative: %d" context value
+    | Invalid_sha256 value ->
+      Printf.sprintf "%s.sha256 is invalid: %s" context value)
+;;
+
 let escalation_reason_of_wire ~label ~detail_json =
   match label, detail_json with
   | "failure_judgment_requested", `Null -> Ok Failure_judgment_requested
-  | "compaction_execution_may_have_dispatched", `Null ->
-    Ok Compaction_execution_may_have_dispatched
-  | "compaction_domain_invalid_output", `Null ->
-    Ok Compaction_domain_invalid_output
+  | "compaction_exact_output_terminal", `Assoc fields ->
+    let context = "compaction_exact_output_terminal" in
+    let* () =
+      exact_reason_fields
+        ~context
+        [ "source"; "cause"; "slot_id"; "call_id" ]
+        fields
+    in
+    let* source_json =
+      match List.assoc_opt "source" fields with
+      | Some value -> Ok value
+      | None -> Error (context ^ ".source is required")
+    in
+    let* source_fields =
+      match source_json with
+      | `Assoc fields -> Ok fields
+      | _ -> Error (context ^ ".source must be an object")
+    in
+    let* source =
+      checkpoint_source_of_reason_fields
+        ~context:(context ^ ".source")
+        source_fields
+    in
+    let* cause_label = required_nonempty_reason_string ~context "cause" fields in
+    let* cause = exact_execution_terminal_cause_of_label cause_label in
+    let* slot_id = required_nonempty_reason_string ~context "slot_id" fields in
+    let* call_id = required_nonempty_reason_string ~context "call_id" fields in
+    let terminal = { cause; slot_id; call_id } in
+    let* () = validate_exact_execution_terminal terminal in
+    Ok (Compaction_exact_output_terminal { source; terminal })
+  | "compaction_exact_lane_unconfigured", `Assoc fields ->
+    let* source =
+      checkpoint_source_of_reason_fields
+        ~context:"compaction_exact_lane_unconfigured"
+        fields
+    in
+    Ok (Compaction_exact_lane_unconfigured { source })
   | "failure_judgment_boundary_failed", `Assoc fields ->
     let* () =
       exact_reason_fields
@@ -542,11 +700,11 @@ let escalation_reason_of_wire ~label ~detail_json =
     Ok (Failure_judgment_external_input_requested { judge_runtime_id; rationale })
   | "failure_judgment_requested", _ ->
     Error (Printf.sprintf "%s reason_detail must be null" label)
-  | ( "compaction_execution_may_have_dispatched"
-    | "compaction_domain_invalid_output" ), _ ->
-    Error (Printf.sprintf "%s reason_detail must be null" label)
+  | "compaction_exact_output_terminal", _ ->
+    Error (Printf.sprintf "%s reason_detail must be an object" label)
   | ( "failure_judgment_boundary_failed"
-    | "failure_judgment_external_input_requested" ), _ ->
+    | "failure_judgment_external_input_requested"
+    | "compaction_exact_lane_unconfigured" ), _ ->
     Error (Printf.sprintf "%s reason_detail must be an object" label)
   | unknown, _ ->
     Error (Printf.sprintf "unknown event queue escalation reason: %s" unknown)
@@ -679,7 +837,19 @@ let validate_accepted_source_terminal source_terminal =
 ;;
 
 let validate_settlement = function
-  | Ack | No_compaction _ | Requeue _ -> Ok ()
+  | Ack | Requeue _ -> Ok ()
+  | No_compaction { reason = Exact_execution_terminal terminal; _ } ->
+    validate_exact_execution_terminal terminal
+  | No_compaction
+      { reason =
+          ( No_eligible_history
+          | Invalid_structural_source
+          | Structurally_unchanged
+          | Checkpoint_not_reduced
+          | Exact_lane_unconfigured )
+      ; _
+      } ->
+    Ok ()
   | Cancel_accepted cancellation -> validate_accepted_cancellation cancellation
   | Transfer_accepted transfer -> validate_accepted_transfer transfer
   | Settle_from_source_terminal source_terminal ->
@@ -735,17 +905,25 @@ let validate_settlement = function
     Error "compaction floor exhaustion must not enqueue a successor"
   | Escalate
       { reason =
-          ( Compaction_execution_may_have_dispatched
-          | Compaction_domain_invalid_output )
+          ( Compaction_exact_lane_unconfigured _
+          )
       ; successor = None
       } ->
     Ok ()
   | Escalate
+      { reason = Compaction_exact_output_terminal { terminal; _ }
+      ; successor = None
+      } ->
+    validate_exact_execution_terminal terminal
+  | Escalate
       { reason =
-          ( Compaction_execution_may_have_dispatched
-          | Compaction_domain_invalid_output )
+          ( Compaction_exact_lane_unconfigured _
+          )
       ; successor = Some _
       } ->
+    Error "terminal exact-output compaction must not enqueue a successor"
+  | Escalate
+      { reason = Compaction_exact_output_terminal _; successor = Some _ } ->
     Error "terminal exact-output compaction must not enqueue a successor"
 ;;
 
@@ -1575,8 +1753,14 @@ let no_compaction_reason_label = function
   | Invalid_structural_source -> "invalid_structural_source"
   | Structurally_unchanged -> "structurally_unchanged"
   | Checkpoint_not_reduced -> "checkpoint_not_reduced"
-  | Execution_may_have_dispatched -> "execution_may_have_dispatched"
-  | Domain_invalid_output -> "domain_invalid_output"
+  | Exact_lane_unconfigured -> "exact_lane_unconfigured"
+  | Exact_execution_terminal terminal ->
+    exact_execution_terminal_cause_label terminal.cause
+;;
+
+let no_compaction_reason_to_string = function
+  | Exact_execution_terminal terminal -> exact_execution_terminal_to_string terminal
+  | reason -> no_compaction_reason_label reason
 ;;
 
 let no_compaction_reason_of_label = function
@@ -1584,9 +1768,38 @@ let no_compaction_reason_of_label = function
   | "invalid_structural_source" -> Ok Invalid_structural_source
   | "structurally_unchanged" -> Ok Structurally_unchanged
   | "checkpoint_not_reduced" -> Ok Checkpoint_not_reduced
-  | "execution_may_have_dispatched" -> Ok Execution_may_have_dispatched
-  | "domain_invalid_output" -> Ok Domain_invalid_output
-  | reason -> Error (Printf.sprintf "unknown no-compaction reason: %s" reason)
+  | "exact_lane_unconfigured" -> Ok Exact_lane_unconfigured
+  | reason ->
+    (match exact_execution_terminal_cause_of_label reason with
+     | Ok _ ->
+       Error
+         (Printf.sprintf
+            "no-compaction reason %s requires exact execution provenance"
+            reason)
+     | Error _ -> Error (Printf.sprintf "unknown no-compaction reason: %s" reason))
+;;
+
+let exact_execution_terminal_to_yojson terminal =
+  `Assoc
+    [ "cause", `String (exact_execution_terminal_cause_label terminal.cause)
+    ; "slot_id", `String terminal.slot_id
+    ; "call_id", `String terminal.call_id
+    ]
+;;
+
+let exact_execution_terminal_of_yojson json =
+  let context = "exact execution terminal" in
+  let* fields = assoc_fields ~context json in
+  let* () =
+    exact_fields ~context ~expected:[ "cause"; "slot_id"; "call_id" ] fields
+  in
+  let* cause_label = string_field ~context "cause" fields in
+  let* cause = exact_execution_terminal_cause_of_label cause_label in
+  let* slot_id = string_field ~context "slot_id" fields in
+  let* call_id = string_field ~context "call_id" fields in
+  let terminal = { cause; slot_id; call_id } in
+  let* () = validate_exact_execution_terminal terminal in
+  Ok terminal
 ;;
 
 let checkpoint_source_to_yojson (source : Keeper_checkpoint_ref.t) =
@@ -1625,11 +1838,24 @@ let checkpoint_source_of_yojson json =
 let settlement_to_yojson = function
   | Ack -> `Assoc [ "kind", `String "ack" ]
   | No_compaction { source; reason } ->
-    `Assoc
+    let fields =
       [ "kind", `String "no_compaction"
       ; "reason", `String (no_compaction_reason_label reason)
       ; "source", checkpoint_source_to_yojson source
       ]
+    in
+    let fields =
+      match reason with
+      | Exact_execution_terminal terminal ->
+        fields @ [ "exact_execution", exact_execution_terminal_to_yojson terminal ]
+      | No_eligible_history
+      | Invalid_structural_source
+      | Structurally_unchanged
+      | Checkpoint_not_reduced
+      | Exact_lane_unconfigured ->
+        fields
+    in
+    `Assoc fields
   | Cancel_accepted cancellation ->
     `Assoc
       [ "kind", `String "cancel_accepted"
@@ -1690,14 +1916,33 @@ let settlement_of_yojson json =
     let* () = exact_fields ~context ~expected:[ "kind" ] fields in
     Ok Ack
   | "no_compaction" ->
-    let* () =
-      exact_fields ~context ~expected:[ "kind"; "reason"; "source" ] fields
-    in
     let* reason_label = string_field ~context "reason" fields in
-    let* reason = no_compaction_reason_of_label reason_label in
     let* source_json = required_field ~context "source" fields in
     let* source = checkpoint_source_of_yojson source_json in
-    Ok (No_compaction { source; reason })
+    (match exact_execution_terminal_cause_of_label reason_label with
+     | Ok expected_cause ->
+       let* () =
+         exact_fields
+           ~context
+           ~expected:[ "kind"; "reason"; "source"; "exact_execution" ]
+           fields
+       in
+       let* terminal_json = required_field ~context "exact_execution" fields in
+       let* terminal = exact_execution_terminal_of_yojson terminal_json in
+       let* () =
+         if terminal.cause = expected_cause
+         then Ok ()
+         else Error "no-compaction reason does not match exact execution cause"
+       in
+       Ok
+         (No_compaction
+            { source; reason = Exact_execution_terminal terminal })
+     | Error _ ->
+       let* () =
+         exact_fields ~context ~expected:[ "kind"; "reason"; "source" ] fields
+       in
+       let* reason = no_compaction_reason_of_label reason_label in
+       Ok (No_compaction { source; reason }))
   | "cancel_accepted" ->
     let* () =
       exact_fields

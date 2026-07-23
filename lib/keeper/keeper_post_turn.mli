@@ -123,7 +123,9 @@ val commit_prepared_compaction :
     cannot enter its commit admission. The provider execution has completed,
     so the owning stimulus must never be requeued into another exact call. *)
 val no_compaction_of_uncommitted_prepared :
-  prepared_compaction -> no_compaction
+  ?cause:Keeper_event_queue_state.exact_execution_terminal_cause ->
+  prepared_compaction ->
+  no_compaction
 
 (** Reload the canonical OAS checkpoint and apply an explicit typed
     compaction request. Returns success only after a structurally changed

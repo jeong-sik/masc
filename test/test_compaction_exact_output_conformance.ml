@@ -7,6 +7,7 @@
 open Masc
 module C = Keeper_compaction_llm_summarizer
 module EO = Agent_sdk.Exact_output
+module Registry = Runtime_exact_output_registry
 module S = Keeper_structured_output_schema
 module T = Agent_sdk.Types
 module U = Keeper_compaction_unit
@@ -110,6 +111,18 @@ let check_observation
       observation
   =
   Alcotest.(check bool)
+    (label ^ " call id retained")
+    true
+    (String.trim observation.C.call_id <> "");
+  Alcotest.(check bool)
+    (label ^ " receipt plan fingerprint retained")
+    true
+    (String.trim observation.receipt_plan_fingerprint <> "");
+  Alcotest.(check bool)
+    (label ^ " receipt request hash retained")
+    true
+    (String.trim observation.receipt_request_body_sha256 <> "");
+  Alcotest.(check bool)
     (label ^ " phase")
     true
     (observation.C.phase = phase);
@@ -126,10 +139,189 @@ let check_observation
     catalog_generation_fingerprint
 ;;
 
+let test_missing_compaction_lane_is_explicit_degraded_state () =
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc missing compaction lane"
+      [ { id = "configured-slot"; base_url = "http://127.0.0.1:9" } ]
+  in
+  let registry =
+    match Runtime_exact_output_registry.publish ~lanes:[] snapshot with
+    | Ok registry -> registry
+    | Error error ->
+      Alcotest.failf
+        "empty exact-output registry must publish: %s"
+        (Runtime_exact_output_registry.publication_error_to_string error)
+  in
+  match
+    C.prepare_lane
+      ~keeper_name:"keeper-missing-compaction-lane"
+      ~registry
+      ~lane_id:"compaction_exact"
+      ~units
+  with
+  | Error C.Exact_lane_unconfigured -> ()
+  | Error _ -> Alcotest.fail "missing compaction lane returned the wrong typed failure"
+  | Ok _ -> Alcotest.fail "missing compaction lane must not be synthesized"
+;;
+
+let test_missing_credential_is_deferred_past_registry_admission () =
+  let slot_id = "credential-gated-slot" in
+  let snapshot =
+    F.resolver_snapshot
+      ~api_key_env:"MASC_TEST_EXACT_OUTPUT_MISSING_CREDENTIAL"
+      ~source:"masc credential-free admission"
+      [ { id = slot_id; base_url = "http://127.0.0.1:9" } ]
+  in
+  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
+  (match Registry.resolve_lane registry ~lane_id:conformance_lane_id with
+   | Error
+       (Registry.No_usable_lane_slots
+          { unavailable_slots =
+              [ { cause = EO.Missing_target_credential { environment_variable; _ }
+                ; _
+                }
+              ]
+          ; _
+          }) ->
+     Alcotest.(check string)
+       "missing credential cause remains typed"
+       "MASC_TEST_EXACT_OUTPUT_MISSING_CREDENTIAL"
+       environment_variable
+   | Ok _ -> Alcotest.fail "missing credential must fail target selection"
+   | Error _ ->
+     Alcotest.fail "missing credential returned the wrong lane-resolution failure");
+  match
+    C.prepare_lane
+      ~keeper_name:"keeper-missing-credential"
+      ~registry
+      ~lane_id:conformance_lane_id
+      ~units
+  with
+  | Error C.Exact_target_selection_failed -> ()
+  | Error _ -> Alcotest.fail "missing credential returned the wrong typed failure"
+  | Ok _ -> Alcotest.fail "missing credential must not produce a ready plan"
+;;
+
+let test_unknown_target_is_rejected_by_registry_publication () =
+  let unknown_target = "unknown-exact-target" in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc unknown-target admission"
+      [ { id = "configured-target"; base_url = "http://127.0.0.1:9" } ]
+  in
+  let lanes : Runtime_schema.exact_output_lane_decl list =
+    [ { id = conformance_lane_id; slot_ids = [ unknown_target ] } ]
+  in
+  match Registry.publish ~lanes snapshot with
+  | Error (Registry.Unknown_lane_slot { target_ref; _ }) ->
+    Alcotest.(check string) "unknown target identity" unknown_target target_ref
+  | Error _ -> Alcotest.fail "unknown target returned the wrong publication failure"
+  | Ok _ -> Alcotest.fail "unknown target must not publish in the MASC registry"
+;;
+
 let check_failure label expected = function
   | Error actual when actual = expected -> ()
   | Ok _ -> Alcotest.failf "%s unexpectedly succeeded" label
   | Error _ -> Alcotest.failf "%s returned the wrong failure class" label
+;;
+
+let test_unavailable_slots_are_skipped_in_both_orders () =
+  let check unavailable_first =
+    run_eio
+    @@ fun ~sw ~net ~clock ->
+    let usable = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+    let unavailable_id =
+      if unavailable_first then "unavailable-first" else "unavailable-last"
+    in
+    let usable_id = if unavailable_first then "usable-last" else "usable-first" in
+    let fixtures : F.target_fixture list =
+      [ { id = unavailable_id; base_url = "http://127.0.0.1:9" }
+      ; { id = usable_id; base_url = usable.base_url }
+      ]
+    in
+    let snapshot =
+      F.resolver_snapshot
+        ~api_key_envs:
+          [ unavailable_id, "MASC_TEST_EXACT_OUTPUT_UNAVAILABLE_MIXED" ]
+        ~source:"masc mixed availability"
+        fixtures
+    in
+    let slot_ids =
+      if unavailable_first
+      then [ unavailable_id; usable_id ]
+      else [ usable_id; unavailable_id ]
+    in
+    let registry = publish_exn ~slot_ids snapshot in
+    let expected_unavailable_position = if unavailable_first then 1 else 2 in
+    (match Registry.resolve_lane registry ~lane_id:conformance_lane_id with
+     | Ok
+         { selected_slots = [ selected ]
+         ; unavailable_slots = [ unavailable ]
+         } ->
+       Alcotest.(check string) "usable slot retained" usable_id selected.slot_id;
+       Alcotest.(check string)
+         "unavailable slot retained as diagnostics"
+         unavailable_id
+         unavailable.slot_id;
+       Alcotest.(check int)
+         "unavailable declaration position"
+         expected_unavailable_position
+         unavailable.position
+     | Ok _ -> Alcotest.fail "mixed lane returned the wrong partition"
+     | Error _ -> Alcotest.fail "mixed lane must retain its usable slot");
+    let prepared = prepare_exn ~keeper_name:"keeper-mixed" ~registry in
+    Alcotest.(check (list string))
+      "only usable slot is prepared"
+      [ usable_id ]
+      (C.For_testing.admitted_slot_ids prepared);
+    ignore
+      (C.execute_prepared_lane
+         ~keeper_name:"keeper-mixed"
+         ~net
+         ~clock
+         prepared
+       |> completed_exn
+        : C.completed_plan);
+    Alcotest.(check int) "usable slot dispatched once" 1 (F.post_count usable)
+  in
+  check true;
+  check false
+;;
+
+let test_all_unavailable_slots_are_typed () =
+  let first_id = "all-unavailable-first" in
+  let second_id = "all-unavailable-second" in
+  let snapshot =
+    F.resolver_snapshot
+      ~api_key_envs:
+        [ first_id, "MASC_TEST_EXACT_OUTPUT_MISSING_FIRST"
+        ; second_id, "MASC_TEST_EXACT_OUTPUT_MISSING_SECOND"
+        ]
+      ~source:"masc all unavailable"
+      [ { id = first_id; base_url = "http://127.0.0.1:9" }
+      ; { id = second_id; base_url = "http://127.0.0.1:9" }
+      ]
+  in
+  let registry = publish_exn ~slot_ids:[ first_id; second_id ] snapshot in
+  (match Registry.resolve_lane registry ~lane_id:conformance_lane_id with
+   | Error
+       (Registry.No_usable_lane_slots
+          { unavailable_slots = [ first; second ]; _ }) ->
+     Alcotest.(check string) "first unavailable slot" first_id first.slot_id;
+     Alcotest.(check string) "second unavailable slot" second_id second.slot_id
+   | Error _ -> Alcotest.fail "all-unavailable lane returned the wrong typed error"
+   | Ok _ -> Alcotest.fail "all-unavailable lane must not resolve");
+  match
+    C.prepare_lane
+      ~keeper_name:"keeper-all-unavailable"
+      ~registry
+      ~lane_id:conformance_lane_id
+      ~units
+  with
+  | Error C.Exact_target_selection_failed -> ()
+  | Error _ -> Alcotest.fail "all-unavailable preparation returned the wrong error"
+  | Ok _ -> Alcotest.fail "all-unavailable preparation must fail"
 ;;
 
 let test_preparation_is_ordered_effect_free_and_single_generation () =
@@ -156,6 +348,16 @@ let test_preparation_is_ordered_effect_free_and_single_generation () =
     (C.For_testing.admitted_slot_ids prepared);
   Alcotest.(check int) "first target has no preparation effect" 0 (F.post_count first);
   Alcotest.(check int) "second target has no preparation effect" 0 (F.post_count second);
+  let first_observations = C.For_testing.attempt_observations prepared in
+  let second_observations = C.For_testing.attempt_observations prepared in
+  List.iter2
+    (fun first second ->
+       Alcotest.(check string)
+         "preparation retains one stable call id per slot"
+         first.C.call_id
+         second.C.call_id)
+    first_observations
+    second_observations;
   List.iter
     (fun slot_id ->
       check_observation
@@ -301,8 +503,18 @@ let test_post_dispatch_failure_is_terminal () =
       ~keeper_name:"keeper-post-dispatch"
       ~registry
   in
-  C.execute_prepared_lane ~keeper_name:"keeper-post-dispatch" ~net prepared
-  |> check_failure "post-dispatch failure" C.Exact_execution_failed_after_dispatch;
+  (match C.execute_prepared_lane ~keeper_name:"keeper-post-dispatch" ~net prepared with
+   | Error (C.Exact_execution_failed_after_dispatch observation) ->
+     Alcotest.(check string)
+       "post-dispatch failure retains slot"
+       "post-dispatch"
+       observation.slot_id;
+     Alcotest.(check bool)
+       "post-dispatch failure retains call id"
+       true
+       (String.trim observation.call_id <> "")
+   | Error _ -> Alcotest.fail "post-dispatch failure returned the wrong class"
+   | Ok _ -> Alcotest.fail "post-dispatch failure unexpectedly succeeded");
   check_observation
     ~label:"post-dispatch failure"
     ~phase:EO.Dispatch_started
@@ -339,8 +551,18 @@ let test_domain_invalid_json_is_terminal () =
       ~keeper_name:"keeper-domain-invalid"
       ~registry
   in
-  C.execute_prepared_lane ~keeper_name:"keeper-domain-invalid" ~net prepared
-  |> check_failure "domain-invalid output" C.Invalid_plan;
+  (match C.execute_prepared_lane ~keeper_name:"keeper-domain-invalid" ~net prepared with
+   | Error (C.Invalid_plan_after_dispatch observation) ->
+     Alcotest.(check string)
+       "domain-invalid output retains slot"
+       "domain-invalid"
+       observation.slot_id;
+     Alcotest.(check bool)
+       "domain-invalid output retains call id"
+       true
+       (String.trim observation.call_id <> "")
+   | Error _ -> Alcotest.fail "domain-invalid output returned the wrong class"
+   | Ok _ -> Alcotest.fail "domain-invalid output unexpectedly succeeded");
   check_observation
     ~label:"domain-invalid response"
     ~phase:EO.Terminal
@@ -355,7 +577,7 @@ let test_domain_invalid_json_is_terminal () =
   Alcotest.(check int) "domain invalidity does not fail over" 0 (F.post_count second)
 ;;
 
-let test_timeout_cancellation_escapes_without_failover () =
+let test_post_dispatch_cancellation_is_typed_terminal () =
   run_eio
   @@ fun ~sw ~net ~clock ->
   let hold_response, _resolve_hold_response = Eio.Promise.create () in
@@ -396,27 +618,40 @@ let test_timeout_cancellation_escapes_without_failover () =
           ~clock
           prepared))
   in
-  let cancellation_propagated =
+  let retained_call_id =
+    (observation_exn prepared "cancelled-dispatch").call_id
+  in
+  let cancellation_result =
     try
       Eio.Time.with_timeout_exn clock 1.0 (fun () ->
         let context = Eio.Promise.await cancel_context in
         F.await_first_request first;
         Eio.Cancel.cancel context Cancel_after_request_arrived;
-        try
-          ignore
-            (Eio.Promise.await_exn execution
-              : (C.completed_plan, C.summarization_failure) result);
-          false
-        with
-        | Eio.Cancel.Cancelled Cancel_after_request_arrived -> true)
+        Eio.Promise.await_exn execution)
     with
     | Eio.Time.Timeout ->
       Alcotest.fail "request-arrival cancellation watchdog expired"
   in
-  Alcotest.(check bool)
-    "caller cancellation escapes compaction"
-    true
-    cancellation_propagated;
+  (match cancellation_result with
+   | Error (C.Exact_execution_cancelled_after_dispatch terminal) ->
+     Alcotest.(check string)
+       "terminal cancellation retains slot"
+       "cancelled-dispatch"
+       terminal.slot_id;
+     Alcotest.(check string)
+       "terminal cancellation retains OAS call id"
+       retained_call_id
+       terminal.call_id;
+     Alcotest.(check bool)
+       "terminal cancellation records dispatched phase"
+       true
+       (terminal.phase = EO.Dispatch_started);
+     Alcotest.(check int)
+       "terminal cancellation records one dispatch"
+       1
+       terminal.dispatch_count
+   | Error _ -> Alcotest.fail "post-dispatch cancellation returned the wrong error"
+   | Ok _ -> Alcotest.fail "post-dispatch cancellation unexpectedly succeeded");
   check_observation
     ~label:"cancelled real receipt"
     ~phase:EO.Dispatch_started
@@ -451,6 +686,12 @@ let test_keeper_preparations_do_not_share_attempt_state () =
       ~keeper_name:"keeper-b"
       ~registry
   in
+  let keeper_a_observation = observation_exn keeper_a "keeper-private-ready" in
+  let keeper_b_observation = observation_exn keeper_b "keeper-private-ready" in
+  Alcotest.(check bool)
+    "independent preparations own distinct OAS call ids"
+    true
+    (not (String.equal keeper_a_observation.call_id keeper_b_observation.call_id));
   let result_a, result_b =
     Eio.Fiber.pair
       (fun () ->
@@ -476,11 +717,98 @@ let test_keeper_preparations_do_not_share_attempt_state () =
     (F.post_count server)
 ;;
 
+let test_prepared_lane_replay_is_terminal_without_second_post () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let slot_id = "single-use-replay" in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc affine replay"
+      [ { id = slot_id; base_url = server.base_url } ]
+  in
+  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
+  let prepared = prepare_exn ~keeper_name:"keeper-affine-replay" ~registry in
+  let retained_call_id = (observation_exn prepared slot_id).call_id in
+  ignore
+    (C.execute_prepared_lane
+       ~keeper_name:"keeper-affine-replay"
+       ~net
+       ~clock
+       prepared
+     |> completed_exn
+      : C.completed_plan);
+  (match
+     C.execute_prepared_lane
+       ~keeper_name:"keeper-affine-replay"
+       ~net
+       ~clock
+       prepared
+   with
+   | Error (C.Exact_attempt_already_started observation) ->
+     Alcotest.(check string)
+       "replay reports retained call id"
+       retained_call_id
+       observation.call_id
+   | Error _ -> Alcotest.fail "replay returned the wrong typed terminal error"
+   | Ok _ -> Alcotest.fail "same prepared lane replay unexpectedly succeeded");
+  Alcotest.(check int) "replay cannot issue a second POST" 1 (F.post_count server)
+;;
+
+let test_prepared_lane_concurrency_is_affine () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  let server =
+    F.start_server ~sw ~net ~clock (F.Delay_then_reply (0.05, valid_response))
+  in
+  let slot_id = "single-use-concurrent" in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc affine concurrency"
+      [ { id = slot_id; base_url = server.base_url } ]
+  in
+  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
+  let prepared = prepare_exn ~keeper_name:"keeper-affine-concurrent" ~registry in
+  let retained_call_id = (observation_exn prepared slot_id).call_id in
+  let first, second =
+    Eio.Fiber.pair
+      (fun () ->
+         C.execute_prepared_lane
+           ~keeper_name:"keeper-affine-concurrent-a"
+           ~net
+           ~clock
+           prepared)
+      (fun () ->
+         C.execute_prepared_lane
+           ~keeper_name:"keeper-affine-concurrent-b"
+           ~net
+           ~clock
+           prepared)
+  in
+  (match first, second with
+   | Ok _, Error (C.Exact_attempt_already_started observation)
+   | Error (C.Exact_attempt_already_started observation), Ok _ ->
+     Alcotest.(check string)
+       "concurrent rejection reports retained call id"
+       retained_call_id
+       observation.call_id
+   | _ ->
+     Alcotest.fail "concurrent execution must yield one success and one affine rejection");
+  Alcotest.(check int)
+    "concurrent reuse cannot issue a second POST"
+    1
+    (F.post_count server)
+;;
+
 let () =
   Alcotest.run
     "compaction exact-output conformance"
     [ ( "preparation"
       , [ Alcotest.test_case
+            "missing compaction lane is explicit degraded state"
+            `Quick
+            test_missing_compaction_lane_is_explicit_degraded_state
+        ; Alcotest.test_case
             "ordered, effect-free, and one catalog generation"
             `Quick
             test_preparation_is_ordered_effect_free_and_single_generation
@@ -488,6 +816,22 @@ let () =
             "published snapshot replacement cannot mix"
             `Quick
             test_published_snapshot_replacement_cannot_mix_prepared_lane
+        ; Alcotest.test_case
+            "missing credential is deferred past registry admission"
+            `Quick
+            test_missing_credential_is_deferred_past_registry_admission
+        ; Alcotest.test_case
+            "mixed unavailable slots are skipped in both orders"
+            `Quick
+            test_unavailable_slots_are_skipped_in_both_orders
+        ; Alcotest.test_case
+            "all unavailable slots return a typed error"
+            `Quick
+            test_all_unavailable_slots_are_typed
+        ; Alcotest.test_case
+            "unknown target is rejected by registry publication"
+            `Quick
+            test_unknown_target_is_rejected_by_registry_publication
         ] )
     ; ( "effect boundary"
       , [ Alcotest.test_case
@@ -503,15 +847,23 @@ let () =
             `Quick
             test_domain_invalid_json_is_terminal
         ; Alcotest.test_case
-            "timeout cancellation escapes without failover"
+            "post-dispatch cancellation is typed and terminal"
             `Quick
-            test_timeout_cancellation_escapes_without_failover
+            test_post_dispatch_cancellation_is_typed_terminal
         ] )
     ; ( "Keeper isolation"
       , [ Alcotest.test_case
             "prepared attempts are not shared"
             `Quick
             test_keeper_preparations_do_not_share_attempt_state
+        ; Alcotest.test_case
+            "prepared lane replay is affine"
+            `Quick
+            test_prepared_lane_replay_is_terminal_without_second_post
+        ; Alcotest.test_case
+            "prepared lane concurrency is affine"
+            `Quick
+            test_prepared_lane_concurrency_is_affine
         ] )
     ]
 ;;

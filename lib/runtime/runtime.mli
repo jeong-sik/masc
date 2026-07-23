@@ -370,8 +370,12 @@ val load_config_text :
 
 val save_config_text :
   ?runtime_config_path:string -> string -> (unit, string) result
-(** Validate and atomically persist raw runtime.toml source text, then refresh
-    the in-process runtime cache. *)
+(** Validate raw runtime.toml and prepare its exact-output replacement without
+    changing or credential-resolving the active frozen registry. The writer
+    then reserves that exact base, durably commits the file, publishes the
+    prepared registry, and finally refreshes the in-process runtime cache.
+    Failed validation, reservation, or file persistence leaves the published
+    registry and runtime cache unchanged. *)
 
 val set_runtime_id_for_keeper :
   ?runtime_config_path:string ->

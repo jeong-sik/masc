@@ -22,6 +22,28 @@ type requeue_reason =
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
 
+type exact_execution_terminal_cause =
+  | Execution_failed_after_dispatch
+  | Attempt_already_started
+  | Execution_cancelled_after_dispatch
+  | Execution_provenance_mismatch
+  | Domain_invalid_output
+  | Invalid_structural_evidence
+  | Invalid_structural_source_after_dispatch
+  | Commit_admission_unavailable
+  | Lifecycle_transition_failed_after_dispatch
+  | Checkpoint_source_changed
+  | Checkpoint_persistence_failed
+
+type exact_execution_terminal =
+  { cause : exact_execution_terminal_cause
+  ; slot_id : string
+  ; call_id : string
+  }
+(** One OAS-owned affine call that crossed, or can no longer safely be assumed
+    not to have crossed, the dispatch boundary. Both identities are mandatory
+    and survive the queue receipt/WAL codec. *)
+
 type escalation_reason =
   | Failure_judgment_requested
   | Failure_judgment_boundary_failed of { detail : string }
@@ -29,13 +51,18 @@ type escalation_reason =
       { judge_runtime_id : string
       ; rationale : string
       }
-  | Compaction_execution_may_have_dispatched
-      (** Exact-output dispatch may have crossed the external-effect boundary.
-          The source is escalated immediately without any retry successor. *)
-  | Compaction_domain_invalid_output
-      (** A dispatched exact-output response violated the MASC-owned domain
-          contract. The source is escalated immediately without failover or
-          retry. *)
+  | Compaction_exact_lane_unconfigured of
+      { source : Keeper_checkpoint_ref.t
+      }
+      (** The exact-output compaction lane is absent. The durable checkpoint
+          source is retained and the event escalates without a retry successor. *)
+  | Compaction_exact_output_terminal of
+      { source : Keeper_checkpoint_ref.t
+      ; terminal : exact_execution_terminal
+      }
+      (** A source-bound exact-output call is terminal. The checkpoint source,
+          slot, call ID, and categorical cause are durably retained; no retry
+          successor is legal. *)
   | Compaction_retry_exhausted of
       { attempts : int
       ; detail : string
@@ -61,14 +88,13 @@ type no_compaction_reason =
   | Invalid_structural_source
   | Structurally_unchanged
   | Checkpoint_not_reduced
-  | Execution_may_have_dispatched
-      (** Exact-output execution crossed the safe pre-dispatch boundary. The
-          provider may already have received the request, so automatic retry
-          could duplicate an outward effect. *)
-  | Domain_invalid_output
-      (** The provider returned JSON after dispatch, but it violated the
-          MASC-owned compaction domain contract. A different slot must not be
-          tried automatically for the same source. *)
+  | Exact_lane_unconfigured
+      (** The configured runtime has no exact-output lane for compaction. This
+          is an operator-actionable precondition failure tied to the durable
+          checkpoint source, not a stochastic provider failure. *)
+  | Exact_execution_terminal of exact_execution_terminal
+      (** Exact-output execution is affine and terminal. The typed cause plus
+          OAS slot/call identity forbids a second attempt for this source. *)
 
 type no_compaction =
   { source : Keeper_checkpoint_ref.t
@@ -116,6 +142,12 @@ type accepted_source_terminal =
 
 val no_compaction_reason_label : no_compaction_reason -> string
 val no_compaction_reason_of_label : string -> (no_compaction_reason, string) result
+val no_compaction_reason_to_string : no_compaction_reason -> string
+val exact_execution_terminal_cause_label : exact_execution_terminal_cause -> string
+val exact_execution_terminal_cause_of_label
+  :  string
+  -> (exact_execution_terminal_cause, string) result
+val exact_execution_terminal_to_string : exact_execution_terminal -> string
 
 val escalation_reason_requests_external_input : escalation_reason -> bool
 (** [true] only when the LLM judgment explicitly reports that the Keeper must

@@ -12,6 +12,11 @@ module WO = Masc.Keeper_world_observation
 module Projection_target = Masc.Keeper_compaction_projection_target
 module Exact_fixture = Compaction_exact_output_fixture
 module Schema = Masc.Keeper_structured_output_schema
+module Summarizer = Masc.Keeper_compaction_llm_summarizer
+
+let exact_terminal ?(slot_id = "compaction-slot") ?(call_id = "call-compaction") cause =
+  Keeper_event_queue_state.{ cause; slot_id; call_id }
+;;
 
 let compaction_decision ?summary unit_index action =
   `Assoc
@@ -105,7 +110,8 @@ let test_compaction_rejection_tag_is_stable () =
   let error =
     Post_turn.Compaction_rejected
       (Compact_policy.Invalid_structural_evidence
-         Keeper_compaction_evidence.No_messages_compacted)
+         ( Keeper_compaction_evidence.No_messages_compacted
+         , exact_terminal Keeper_event_queue_state.Invalid_structural_evidence ))
   in
   check string
     "categorical tag excludes evidence detail"
@@ -114,7 +120,10 @@ let test_compaction_rejection_tag_is_stable () =
   check string
     "diagnostic detail remains observable"
     "compaction rejected: invalid_structural_evidence:no_messages_compacted"
-    (Post_turn.compaction_recovery_error_to_string error)
+    (Post_turn.compaction_recovery_error_to_string error
+     |> fun value ->
+     String.sub value 0
+       (String.length "compaction rejected: invalid_structural_evidence:no_messages_compacted"))
 
 let test_empty_projection_target_is_typed () =
   let resolver_called = ref false in
@@ -507,6 +516,10 @@ let test_manual_compaction_serializes_owner_lane () =
         Yojson.Safe.Util.(evidence |> member "summarized_message_count" |> to_int);
       check int "manifest retains closed and open ToolUse blocks" 3
         Yojson.Safe.Util.(evidence |> member "after_tool_use_count" |> to_int);
+      check bool "manifest retains nonblank OAS call id" true
+        Yojson.Safe.Util.(evidence |> member "call_id" |> to_string |> String.trim |> fun value -> value <> "");
+      check bool "manifest retains nonblank exact slot id" true
+        Yojson.Safe.Util.(evidence |> member "slot_id" |> to_string |> String.trim |> fun value -> value <> "");
       let concurrent_checkpoint =
         { compacted with
           messages =
@@ -550,9 +563,17 @@ let test_manual_compaction_serializes_owner_lane () =
         (Exact_fixture.post_count stale_server);
       (match stale_plan_result with
        | Error
-           (Post_turn.Checkpoint_cas_failed
-              (Masc.Keeper_checkpoint_store.Source_changed _)) ->
-         ()
+           (Post_turn.No_compaction
+              { reason =
+                  Keeper_event_queue_state.Exact_execution_terminal
+                    { cause = Keeper_event_queue_state.Checkpoint_source_changed
+                    ; slot_id
+                    ; call_id
+                    }
+              ; _
+              }) ->
+         check bool "stale terminal retains slot id" true (String.trim slot_id <> "");
+         check bool "stale terminal retains call id" true (String.trim call_id <> "")
        | Error error ->
          failf
            "stale plan returned wrong error: %s"
@@ -630,9 +651,15 @@ let test_manual_compaction_serializes_owner_lane () =
         match busy_after_prepare with
         | `No_compaction
             ({ reason =
-                 Keeper_event_queue_state.Execution_may_have_dispatched
+                 Keeper_event_queue_state.Exact_execution_terminal
+                   { cause = Keeper_event_queue_state.Commit_admission_unavailable
+                   ; slot_id
+                   ; call_id
+                   }
              ; _
              } as no_compaction) ->
+          check bool "busy terminal retains slot id" true (String.trim slot_id <> "");
+          check bool "busy terminal retains call id" true (String.trim call_id <> "");
           no_compaction
         | `Busy _ ->
           fail "post-dispatch final admission collapsed to replayable Busy"
@@ -665,13 +692,20 @@ let test_manual_compaction_serializes_owner_lane () =
       (match settlement with
        | Registry_queue.No_compaction
            { reason =
-               Keeper_event_queue_state.Execution_may_have_dispatched
+               Keeper_event_queue_state.Exact_execution_terminal
+                 { cause = Keeper_event_queue_state.Commit_admission_unavailable
+                 ; _
+                 }
            ; _
            } ->
          ()
        | Registry_queue.Requeue _ ->
          fail "post-dispatch final admission remained replayable"
-       | _ ->
+       | Registry_queue.Ack
+       | Registry_queue.Cancel_accepted _
+       | Registry_queue.Transfer_accepted _
+       | Registry_queue.Settle_from_source_terminal _
+       | Registry_queue.Escalate _ ->
          fail "post-dispatch final admission lost source-bound terminal evidence");
       Registry_queue.settle_result
         ~base_path
@@ -694,6 +728,107 @@ let test_manual_compaction_serializes_owner_lane () =
         "terminal post-dispatch settlement never repeats exact dispatch"
         1
         (Exact_fixture.post_count race_server))
+;;
+
+let test_missing_exact_lane_is_source_bound_no_compaction () =
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  with_eio_context env sw @@ fun () ->
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+       let meta = make_meta () in
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       init_runtime_fixture ();
+       let checkpoint = make_checkpoint () in
+       let session =
+         Masc.Keeper_context_core.create_session
+           ~session_id:checkpoint.session_id
+           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+       in
+       let context = Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint in
+       let expected_source =
+         match
+          Masc.Keeper_context_core.save_oas_checkpoint_classified
+            ~multimodal_policy:meta.multimodal_policy
+            ~keeper_name:meta.name
+            ~session
+            ~agent_name:meta.agent_name
+            ~ctx:context
+            ~generation:1
+        with
+        | Ok _ ->
+          (match
+             Masc.Keeper_checkpoint_store.load_oas_with_ref
+               ~session_dir:session.session_dir
+               ~session_id:checkpoint.session_id
+           with
+           | Ok (_, source) -> source
+           | Error error ->
+             failf
+               "missing-lane checkpoint source fixture failed: %s"
+               (Post_turn.compaction_recovery_error_to_string
+                  (Post_turn.Checkpoint_ref_load_failed error)))
+        | Error detail ->
+          failf
+            "missing-lane checkpoint fixture failed: %s"
+            (Masc.Keeper_context_core.checkpoint_write_error_to_string
+               ~persistence_error_to_string:(fun detail -> detail)
+               detail)
+       in
+       let resolver_snapshot =
+         Exact_fixture.resolver_snapshot
+           ~source:"post-turn missing exact lane"
+           [ ({ id = "unused-exact-target"; base_url = "http://127.0.0.1:9" }
+              : Exact_fixture.target_fixture)
+           ]
+       in
+       (match Runtime_exact_output_registry.publish ~lanes:[] resolver_snapshot with
+        | Ok _ -> ()
+        | Error error ->
+          failf
+            "empty exact lane registry fixture failed: %s"
+            (Runtime_exact_output_registry.publication_error_to_string error));
+       match
+         Post_turn.prepare_compaction
+           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+           ~meta
+           ~trigger:Compaction_trigger.Manual
+           ~projection_request:(projection_request_of_meta meta)
+       with
+       | Error
+           (Post_turn.No_compaction
+              { source
+              ; reason = Keeper_event_queue_state.Exact_lane_unconfigured
+              }) ->
+         check string
+           "terminal evidence retains checkpoint trace"
+           (Keeper_id.Trace_id.to_string expected_source.trace_id)
+           (Keeper_id.Trace_id.to_string source.trace_id);
+         check int
+           "terminal evidence retains checkpoint turn"
+           expected_source.turn_count
+           source.turn_count;
+         check int
+           "terminal evidence retains checkpoint generation"
+           expected_source.generation
+           source.generation;
+         check string
+           "terminal evidence retains checkpoint digest"
+           expected_source.sha256
+           source.sha256
+       | Error error ->
+         failf
+           "missing exact lane returned a retryable error: %s"
+           (Post_turn.compaction_recovery_error_to_string error)
+       | Ok _ -> fail "missing exact lane unexpectedly prepared compaction")
 ;;
 
 let test_malformed_structure_preserves_checkpoint () =
@@ -820,14 +955,81 @@ let test_prepare_commit_source_cas () =
        prepared value is now stale and must be CAS-rejected. *)
     (match Post_turn.commit_prepared_compaction prepared with
      | Error
-         (Post_turn.Checkpoint_cas_failed
-            (Masc.Keeper_checkpoint_store.Source_changed _)) ->
-       ()
+         (Post_turn.No_compaction
+            { reason =
+                Keeper_event_queue_state.Exact_execution_terminal
+                  { cause = Keeper_event_queue_state.Checkpoint_source_changed
+                  ; slot_id
+                  ; call_id
+                  }
+            ; _
+            }) ->
+       check bool "stale prepared terminal retains slot" true (String.trim slot_id <> "");
+       check bool "stale prepared terminal retains call" true (String.trim call_id <> "")
      | Error error ->
        failf
          "stale prepared value failed with the wrong error: %s"
          (Post_turn.compaction_recovery_error_to_string error)
      | Ok _ -> fail "stale prepared value committed past the source CAS"))
+;;
+
+let test_invalid_structural_evidence_after_dispatch_is_terminal () =
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  with_eio_context env sw @@ fun () ->
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+      init_runtime_fixture ();
+      let server =
+        Exact_fixture.start_server
+          ~sw
+          ~net:(Eio.Stdenv.net env)
+          ~clock:(Eio.Stdenv.clock env)
+          (Exact_fixture.Reply (summarize_response "short"))
+      in
+      publish_exact_fixture ~source:"invalid structural evidence" server;
+      let meta = make_meta ~name:"invalid-evidence-terminal" () in
+      let context =
+        make_checkpoint () |> Masc.Keeper_context_core.context_of_oas_checkpoint
+      in
+      let plan_for_units ~units =
+        match Summarizer.make ~keeper_name:meta.name () with
+        | None -> Error Summarizer.Exact_execution_context_unavailable
+        | Some summarize ->
+          summarize ~units
+          |> Result.map (fun completed ->
+            ( Summarizer.completed_plan completed
+            , Summarizer.completed_exact_execution_evidence completed ))
+      in
+      let preparation =
+        Compact_policy.For_testing.compact_for_request_typed_with_accounting
+          ~plan_for_units
+          ~summarized_message_count_override:(-1)
+          ~meta
+          ~trigger:Compaction_trigger.Manual
+          context
+      in
+      check int "invalid evidence follows exactly one POST" 1
+        (Exact_fixture.post_count server);
+      match preparation.decision with
+      | Compact_policy.Rejected
+          ( Manual
+          , Invalid_structural_evidence
+              ( Keeper_compaction_evidence.Invalid_field
+                  (Keeper_compaction_evidence.Summarized_message_count, Negative_integer)
+              , { cause = Keeper_event_queue_state.Invalid_structural_evidence
+                ; slot_id
+                ; call_id
+                } ) ) ->
+        check bool "invalid evidence terminal retains slot" true
+          (String.trim slot_id <> "");
+        check bool "invalid evidence terminal retains call" true
+          (String.trim call_id <> "")
+      | _ -> fail "post-dispatch invalid evidence was not a typed terminal")
 ;;
 
 (* RFC-0351 S0 / #25461: once the persisted failure streak suspends
@@ -931,7 +1133,11 @@ let () =
         `Quick test_malformed_structure_preserves_checkpoint;
       test_case "prepare/commit source CAS"
         `Quick test_prepare_commit_source_cas;
+      test_case "invalid structural evidence is post-dispatch terminal"
+        `Quick test_invalid_structural_evidence_after_dispatch_is_terminal;
       test_case "suspended streak refuses reactive prepare"
         `Quick test_suspended_streak_refuses_reactive_prepare;
+      test_case "missing exact lane is source-bound no-compaction"
+        `Quick test_missing_exact_lane_is_source_bound_no_compaction;
     ];
   ]

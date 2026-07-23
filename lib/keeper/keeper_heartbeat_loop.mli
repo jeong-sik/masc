@@ -140,8 +140,9 @@ val settlement_of_failure :
     ceiling this lane requeues forever, one summarizer LLM call per heartbeat
     cycle (RFC-0351 S0, #25461; 2026-07-21 storm: 284 provider-overflow
     rejections over ~10h, ended only by operator keeper_down). A
-    [Compaction_committed] disposition always requeues: the retry reloads a
-    durably smaller checkpoint. [Escalate_after_exact_output_terminal] ignores
+    [Compaction_committed] disposition requeues below the threshold so the retry
+    reloads a durably smaller checkpoint; at the threshold it escalates as
+    [Compaction_floor_exceeded]. [Escalate_after_exact_output_terminal] ignores
     the ordinary route and immediately settles as a typed escalation with no
     successor. *)
 

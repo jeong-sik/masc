@@ -1683,7 +1683,7 @@ let runtime_parse_errors_to_string errs =
   |> String.concat "; "
 ;;
 
-let validate_runtime_config_text ~config_path content =
+let materialize_runtime_config_text ~config_path content =
   let* cfg =
     Runtime_toml.parse_string content
     |> Result.map_error (fun errs ->
@@ -1692,44 +1692,83 @@ let validate_runtime_config_text ~config_path content =
         config_path
         (runtime_parse_errors_to_string errs))
   in
-  let* _legacy_config, exact_output_lane_decls =
-    materialize_config ~config_path cfg
-  in
-  Ok exact_output_lane_decls
+  materialize_config ~config_path cfg
 ;;
 
-let save_config_text ?runtime_config_path content =
-  let* path = runtime_config_path_result ?runtime_config_path () in
-  let* exact_output_lane_decls = validate_runtime_config_text ~config_path:path content in
-  (* Raw config edits may rewrite [runtime.exact_output_lanes]. Validate the
-     new declarations against the live resolver snapshot and republish so the
-     active exact-output registry tracks the save instead of going stale
-     until the next restart. Republishing precedes the atomic write so an
-     invalid lane set is rejected before it reaches disk; if the write itself
-     fails, the registry still holds a valid lane set and the next successful
-     save or restart reconverges. Without a published registry (pre-bootstrap
-     or non-server contexts) there is no snapshot to validate against —
-     bootstrap publishes from the saved file. *)
-  let* () =
-    match Runtime_exact_output_registry.current () with
-    | Error _ -> Ok ()
-    | Ok _registry ->
-      (match
-         Runtime_exact_output_registry.republish ~lanes:exact_output_lane_decls
-       with
-       | Ok _registry -> Ok ()
-       | Error error ->
-         Error
-           (Printf.sprintf
-              "exact-output lane validation failed: %s"
-              (Runtime_exact_output_registry.error_to_string error)))
-  in
-  let* () = Fs_compat.save_file_atomic path content in
-  let* () = init_default ~config_path:path in
+let validate_runtime_config_text ~config_path content =
+  let* _loaded = materialize_runtime_config_text ~config_path content in
   Ok ()
 ;;
 
+let runtime_config_write_mutex = Mutex.create ()
+
+let with_runtime_config_write_lock f =
+  Mutex.lock runtime_config_write_mutex;
+  Fun.protect ~finally:(fun () -> Mutex.unlock runtime_config_write_mutex) f
+;;
+
+let abort_exact_output_replacement reservation =
+  Runtime_exact_output_registry.abort_replacement reservation
+  |> Result.map_error (fun error ->
+    "exact-output registry reservation abort failed: "
+    ^ Runtime_exact_output_registry.reservation_error_to_string error)
+;;
+
+let commit_runtime_config_text ~path content =
+  let* loaded, exact_output_lanes =
+    materialize_runtime_config_text ~config_path:path content
+  in
+  let* prepared_replacement =
+    Runtime_exact_output_registry.prepare_replacement ~lanes:exact_output_lanes
+    |> Result.map_error (fun error ->
+      "exact-output registry replacement rejected: "
+      ^ Runtime_exact_output_registry.publication_error_to_string error)
+  in
+  let* reservation =
+    Runtime_exact_output_registry.reserve_replacement prepared_replacement
+    |> Result.map_error (fun error ->
+      "exact-output registry replacement reservation rejected: "
+      ^ Runtime_exact_output_registry.publication_error_to_string error)
+  in
+  match Fs_compat.save_file_atomic path content with
+  | Ok () ->
+    (match Runtime_exact_output_registry.finish_replacement reservation with
+     | Ok () ->
+       set_loaded ~config_path:path loaded;
+       Ok ()
+     | Error error ->
+       failwith
+         ("invariant violation: runtime config file committed but the \
+           exact-output registry reservation was inactive; restart is required: "
+          ^ Runtime_exact_output_registry.reservation_error_to_string error))
+  | Error detail ->
+    (match abort_exact_output_replacement reservation with
+     | Ok () -> Error detail
+     | Error abort_detail -> Error (detail ^ "; " ^ abort_detail))
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    (match abort_exact_output_replacement reservation with
+     | Ok () -> Printexc.raise_with_backtrace exn backtrace
+     | Error abort_detail ->
+       Printexc.raise_with_backtrace
+         (Failure
+            (Printf.sprintf
+               "runtime config commit raised %s; %s"
+               (Printexc.to_string exn)
+               abort_detail))
+         backtrace)
+;;
+
+let save_config_text ?runtime_config_path content =
+  with_runtime_config_write_lock
+  @@ fun () ->
+  let* path = runtime_config_path_result ?runtime_config_path () in
+  commit_runtime_config_text ~path content
+;;
+
 let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =
+  with_runtime_config_write_lock
+  @@ fun () ->
   let keeper_name = String.trim keeper_name in
   let runtime_id = String.trim runtime_id in
   if String.equal keeper_name ""
@@ -1744,13 +1783,12 @@ let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =
     let* path = runtime_config_path_result ?runtime_config_path () in
     let* content = load_file_result path in
     let next = update_runtime_assignment_text content ~keeper_name ~runtime_id in
-    let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
-    let* () = Fs_compat.save_file_atomic path next in
-    let* () = init_default ~config_path:path in
-    Ok ()
+    commit_runtime_config_text ~path next
 ;;
 
 let clear_runtime_id_for_keeper ?runtime_config_path ~keeper_name () =
+  with_runtime_config_write_lock
+  @@ fun () ->
   let keeper_name = String.trim keeper_name in
   if String.equal keeper_name ""
   then Error "keeper_name must not be empty"
@@ -1760,13 +1798,12 @@ let clear_runtime_id_for_keeper ?runtime_config_path ~keeper_name () =
     let* path = runtime_config_path_result ?runtime_config_path () in
     let* content = load_file_result path in
     let next = remove_runtime_assignment_text content ~keeper_name in
-    let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
-    let* () = Fs_compat.save_file_atomic path next in
-    let* () = init_default ~config_path:path in
-    Ok ()
+    commit_runtime_config_text ~path next
 ;;
 
 let set_runtime_scalar ?runtime_config_path ~key ~runtime_id () =
+  with_runtime_config_write_lock
+  @@ fun () ->
   let key = String.trim key in
   let runtime_id = Option.map String.trim runtime_id in
   if String.equal key ""
@@ -1783,13 +1820,12 @@ let set_runtime_scalar ?runtime_config_path ~key ~runtime_id () =
       let* path = runtime_config_path_result ?runtime_config_path () in
       let* content = load_file_result path in
       let next = update_runtime_scalar_text content ~key ~runtime_id in
-      let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
-      let* () = Fs_compat.save_file_atomic path next in
-      let* () = init_default ~config_path:path in
-      Ok ()
+      commit_runtime_config_text ~path next
 ;;
 
 let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
+  with_runtime_config_write_lock
+  @@ fun () ->
   let key = String.trim key in
   let runtime_ids = List.map String.trim runtime_ids in
   if String.equal key ""
@@ -1804,10 +1840,7 @@ let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
     let* path = runtime_config_path_result ?runtime_config_path () in
     let* content = load_file_result path in
     let next = update_runtime_string_array_text content ~key ~values:runtime_ids in
-    let* _exact_output_lane_decls = validate_runtime_config_text ~config_path:path next in
-    let* () = Fs_compat.save_file_atomic path next in
-    let* () = init_default ~config_path:path in
-    Ok ())
+    commit_runtime_config_text ~path next)
 ;;
 
 let set_runtime_default ?runtime_config_path ~runtime_id () =

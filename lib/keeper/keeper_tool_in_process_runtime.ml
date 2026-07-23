@@ -180,6 +180,7 @@ let with_external_gate_execution
   | Error (Gate_unavailable blocked) ->
     Keeper_tool_execution.failure
       ~class_:blocked.failure_class
+      ~effect_disposition:Tool_result.Proven_pre_effect
       blocked.payload
 ;;
 

@@ -2755,11 +2755,11 @@ let test_invalid_surface_post_input_stays_correction_capable () =
         | Error _ -> ()
         | Ok _ -> fail "forced later terminal failure unexpectedly succeeded");
        match bundle.terminal_effect_state () with
-       | Masc.Keeper_tools_oas.Terminal_effect_completed -> ()
+       | Masc.Keeper_tools_oas.Terminal_effect_failed _ -> ()
        | Masc.Keeper_tools_oas.Terminal_effect_open ->
          fail "later failure reopened the completed terminal effect"
-       | Masc.Keeper_tools_oas.Terminal_effect_failed _ ->
-         fail "later failure overwrote the completed terminal effect")
+       | Masc.Keeper_tools_oas.Terminal_effect_completed ->
+         fail "later failure was hidden by the completed terminal effect")
 ;;
 
 let with_openai_tool_call_server ~tool_name ~tool_input f =
@@ -3115,7 +3115,7 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
             with
             | Masc.Keeper_registry_event_queue.Ack ->
               fail "failed terminal delivery produced a source success Ack"
-            | _ -> ())
+            | _ -> ()))
 ;;
 
 let () =

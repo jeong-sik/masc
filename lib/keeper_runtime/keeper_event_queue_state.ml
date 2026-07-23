@@ -481,7 +481,7 @@ let exact_execution_terminal_cause_of_label = function
   | label -> Error (Printf.sprintf "unknown exact execution terminal cause: %s" label)
 ;;
 
-let validate_exact_execution_terminal terminal =
+let validate_exact_execution_terminal (terminal : exact_execution_terminal) =
   let validate_identity field value =
     let trimmed = String.trim value in
     if String.equal trimmed ""

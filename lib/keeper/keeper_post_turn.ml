@@ -664,10 +664,21 @@ let prepare_compaction_with
       ~projection_request
 ;;
 
-let prepare_compaction ?exact_execution_guard () =
+let prepare_compaction
+      ?exact_execution_guard
+      ~base_dir
+      ~meta
+      ~trigger
+      ~projection_request
+      ()
+  =
   prepare_compaction_with
     ~compact_for_request:
       (Keeper_compact_policy.compact_for_request_typed ?exact_execution_guard)
+    ~base_dir
+    ~meta
+    ~trigger
+    ~projection_request
 ;;
 
 let commit_prepared_compaction (prepared : prepared_compaction)

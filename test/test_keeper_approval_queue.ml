@@ -2527,7 +2527,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
                [ "version", `Int 2
                ; "pending", `List []
                ; "deliveries", `List []
-               ]))
+               ])))
 ;;
 
 let test_unreadable_json_snapshot_is_not_quarantined () =

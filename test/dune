@@ -1306,7 +1306,7 @@
 (test
  (name test_keeper_exact_disposition_recovery)
  (modules test_keeper_exact_disposition_recovery)
- (libraries alcotest masc masc_test_deps masc.keeper_checkpoint_ref))
+ (libraries alcotest masc masc_test_deps masc.keeper_checkpoint_ref unix))
 
 ; Process-isolated proof that exact-output bootstrap honors full catalog
 ; replacement precedence over deployment overlays and OAS embedded targets.

@@ -2,7 +2,7 @@
 
     [event-queue.json] keeps the v5 envelope containing pending stimuli, active
     typed leases, exact-execution dispatch fences, the monotonic lease
-    sequence, transition outbox, and durable accepted-transfer target accounting. Strict v3 is the only supported
+    sequence, transition outbox, and durable accepted-transfer target accounting. Strict v4 is the only supported
     predecessor. [event-queue-inflight.json] is rejected explicitly rather
     than migrated or treated as a second authority. *)
 
@@ -260,8 +260,8 @@ val load_snapshot_pair_with_errors :
 
 val load_state_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue_state.t, string) result
-(** Strict state read used by tests and operator projection. A malformed v3
-    envelope or v3-plus-legacy residue is an [Error], never an empty queue.
+(** Strict state read used by tests and operator projection. A malformed v4
+    envelope or v4-plus-legacy residue is an [Error], never an empty queue.
     Committed WAL rows are replayed idempotently, checkpointed, and then
     compacted to the exact empty suffix before the state is returned. *)
 
@@ -367,7 +367,7 @@ val finalize_exact_source_disposition_result :
   unit ->
   (settle_result, string) result
 
-val settle_exact_execution_result :
+val settle_bound_exact_nonterminal_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
@@ -380,6 +380,9 @@ val settle_exact_execution_result :
   settlement:settlement ->
   unit ->
   (settle_result, string) result
+(** Commit only the identity-bound nonterminal Ack/retry/floor/failure-judgment
+    cases. Exact terminal outcomes require durable source preparation and
+    [finalize_exact_source_disposition_result]. *)
 
 val cancel_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
@@ -511,7 +514,7 @@ val persist_snapshot :
 val record_inflight :
   base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
 (** Legacy source/test adapter. Writes a typed [Legacy_inflight] lease into the
-    v4 envelope; it never creates [event-queue-inflight.json]. *)
+    v5 envelope; it never creates [event-queue-inflight.json]. *)
 
 val ack_inflight :
   base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit

@@ -1234,26 +1234,11 @@ let binding_identity_equal
   && String.equal binding.request_body_sha256 request_body_sha256
 ;;
 
-let validate_bound_settlement binding settlement =
-  let terminal_matches ?cause (terminal : exact_execution_terminal) =
-    binding_call_identity_equal binding ~slot_id:terminal.slot_id ~call_id:terminal.call_id
-    &&
-    match cause with
-    | None -> true
-    | Some cause -> cause = terminal.cause
-  in
-  match binding.status, settlement with
-  | Disposition_prepared disposition, Settle_exact requested
-    when disposition = requested -> Ok ()
-  | Disposition_prepared _, Settle_exact _ ->
-    Error "exact source disposition proof conflicts with its durable binding"
-  | Dispatch_uncertain, Ack -> Ok ()
-  | Dispatch_uncertain, Requeue Context_compaction_retry -> Ok ()
-  | Dispatch_uncertain,
-    Escalate { reason = Compaction_floor_exceeded _; successor = None } ->
-    Ok ()
-  | Dispatch_uncertain,
-    Escalate
+let identity_bound_nonterminal_settlement = function
+  | Ack -> true
+  | Requeue Context_compaction_retry -> true
+  | Escalate { reason = Compaction_floor_exceeded _; successor = None } -> true
+  | Escalate
       { reason = Failure_judgment_requested
       ; successor =
           Some
@@ -1261,29 +1246,35 @@ let validate_bound_settlement binding settlement =
             ; _
             }
       } ->
-    Ok ()
-  | Dispatch_uncertain, No_compaction { reason = Exact_execution_terminal terminal; _ }
-    when terminal_matches terminal -> Ok ()
-  | Dispatch_uncertain,
-    Escalate
-      { reason = Compaction_exact_output_terminal { terminal; _ }; successor = None }
-    when terminal_matches terminal -> Ok ()
-  | Terminal_quarantined cause, No_compaction { reason = Exact_execution_terminal terminal; _ }
-    when terminal_matches ~cause terminal -> Ok ()
-  | Terminal_quarantined cause,
-    Escalate
-      { reason = Compaction_exact_output_terminal { terminal; _ }; successor = None }
-    when terminal_matches ~cause terminal -> Ok ()
+    true
+  | No_compaction _
+  | Cancel_accepted _
+  | Transfer_accepted _
+  | Settle_from_source_terminal _
+  | Settle_exact _
+  | Requeue _
+  | Escalate _ ->
+    false
+;;
+
+let validate_bound_settlement binding settlement =
+  match binding.status, settlement with
+  | Disposition_prepared disposition, Settle_exact requested
+    when disposition = requested -> Ok ()
+  | Disposition_prepared _, Settle_exact _ ->
+    Error "exact source disposition proof conflicts with its durable binding"
+  | Dispatch_uncertain, settlement
+    when identity_bound_nonterminal_settlement settlement -> Ok ()
   | Dispatch_uncertain, _ ->
     Error
       (Printf.sprintf
-         "exact execution lease %s call %s requires an identity-bound terminal or ack settlement"
+         "exact execution lease %s call %s requires an identity-bound nonterminal settlement or a prepared full source disposition"
          binding.lease_id
          binding.call_id)
   | Terminal_quarantined _, _ ->
     Error
       (Printf.sprintf
-         "quarantined exact execution lease %s call %s requires its matching terminal settlement"
+         "quarantined exact execution lease %s call %s requires a prepared full source disposition"
          binding.lease_id
          binding.call_id)
   | Disposition_prepared _, _ ->
@@ -1666,7 +1657,7 @@ let settle ~settled_at ~lease ~settlement state =
        settle_committed ~settled_at ~lease ~settlement state)
 ;;
 
-let settle_exact_execution
+let settle_bound_exact_nonterminal
       ~settled_at
       ~lease
       ~slot_id
@@ -1676,6 +1667,11 @@ let settle_exact_execution
       ~settlement
       state
   =
+  let* () =
+    if identity_bound_nonterminal_settlement settlement
+    then Ok ()
+    else Error "bound exact terminal settlement requires a prepared full source disposition"
+  in
   let* () =
     validate_binding_arguments
       ~lease
@@ -2060,14 +2056,10 @@ let replay_transition_receipt receipt state =
     let* state, result =
       match receipt.settlement with
       | Settle_exact disposition ->
-        settle_exact_execution
+        finalize_exact_source_disposition
           ~settled_at:receipt.settled_at
           ~lease
-          ~slot_id:disposition.slot_id
-          ~call_id:disposition.call_id
-          ~plan_fingerprint:disposition.plan_fingerprint
-          ~request_body_sha256:disposition.request_body_sha256
-          ~settlement:receipt.settlement
+          ~disposition_id:disposition.disposition_id
           state
       | Ack
       | No_compaction _

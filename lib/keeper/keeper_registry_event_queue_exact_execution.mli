@@ -124,7 +124,7 @@ module Make (Publish : sig
   val mark_transition_projected_result :
     base_path:string -> string -> transition_id:string -> (unit, string) result
 
-  val settle_exact_execution_result :
+  val settle_bound_exact_nonterminal_result :
     base_path:string ->
     string ->
     settled_at:float ->

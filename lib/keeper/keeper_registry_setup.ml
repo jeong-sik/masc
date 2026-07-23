@@ -476,7 +476,6 @@ let register_with_state_result
     Keeper_exact_disposition_recovery.prepare_registration_result
       ~base_path
       ~keeper_name:name
-      ~trace_id:meta.runtime.trace_id
       ~settled_at:(Time_compat.now ())
   with
   | Error detail -> Error (Registration_event_queue_unavailable { keeper_name = name; detail })
@@ -691,7 +690,6 @@ let register_restarting ~base_path name meta
     Keeper_exact_disposition_recovery.prepare_registration_result
       ~base_path
       ~keeper_name:name
-      ~trace_id:meta.runtime.trace_id
       ~settled_at:(Time_compat.now ())
   with
   | Error detail -> Error (Restart_event_queue_unavailable { keeper_name = name; detail })

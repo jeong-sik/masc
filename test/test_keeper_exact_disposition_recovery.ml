@@ -1,8 +1,33 @@
 module State = Keeper_event_queue_state
+module Persistence = Keeper_event_queue_persistence
+module Queue = Keeper_event_queue
 
 let require_ok = function
   | Ok value -> value
   | Error detail -> Alcotest.fail detail
+;;
+
+let rec rm_rf path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path)
+    else Unix.unlink path
+;;
+
+let with_temp_dir prefix f =
+  let path = Filename.temp_file prefix "" in
+  Sys.remove path;
+  Unix.mkdir path 0o700;
+  Fun.protect ~finally:(fun () -> rm_rf path) (fun () -> f path)
+;;
+
+let require_fsync = function
+  | Persistence.Fsync_completed -> ()
+  | Persistence.Visible_sync_unconfirmed detail ->
+    Alcotest.failf "durability unknown: %s" detail
 ;;
 
 let checkpoint_ref ~sha =
@@ -78,31 +103,87 @@ let prepare_terminal ?(prepared_at = 3.0) state lease =
   |> require_ok
 ;;
 
-let test_terminal_wal_replay_retains_full_proof () =
-  let state, lease = bound_state () in
-  let prepared, disposition = prepare_terminal state lease in
-  let finalized, result =
-    State.finalize_exact_source_disposition
-      ~settled_at:4.0
+let test_terminal_persistence_recovery_retains_full_proof () =
+  with_temp_dir "masc-exact-disposition-recovery" @@ fun base_path ->
+  let keeper_name = "exact_disposition_recovery" in
+  (match
+     Persistence.update_checked_result
+       ~base_path
+       ~keeper_name
+       (fun pending -> Ok (Queue.enqueue pending (stimulus "persisted-exact" 1.0)))
+   with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "source persist failed: %s" detail);
+  let lease =
+    match
+      Persistence.claim_when_result
+        ~base_path
+        ~keeper_name
+        ~claimed_at:2.0
+        ~ready:(fun _ -> true)
+        ()
+    with
+    | Ok (Some lease) -> lease
+    | Ok None -> Alcotest.fail "persisted source was not claimed"
+    | Error detail -> Alcotest.failf "persisted claim failed: %s" detail
+  in
+  Persistence.bind_exact_execution_result
+    ~base_path
+    ~keeper_name
+    ~lease
+    ~slot_id:"slot-a"
+    ~call_id:"call-a"
+    ~plan_fingerprint:"plan-a"
+    ~request_body_sha256:(String.make 64 'a')
+    ()
+  |> require_ok
+  |> require_fsync;
+  let binding =
+    match Persistence.exact_execution_binding_result ~base_path ~keeper_name with
+    | Ok (Some binding) -> binding
+    | Ok None -> Alcotest.fail "persisted binding disappeared"
+    | Error detail -> Alcotest.failf "persisted binding load failed: %s" detail
+  in
+  let disposition, durability =
+    Persistence.prepare_exact_source_disposition_result
+      ~base_path
+      ~keeper_name
       ~lease
-      ~disposition_id:disposition.disposition_id
-      prepared
+      ~binding
+      ~source:source_ref
+      ~outcome:(Persistence.Terminal Persistence.Domain_invalid_output)
+      ~action:Persistence.Consume_source
+      ~semantic:Persistence.Exact_no_compaction
+      ~prepared_at:3.0
+      ()
     |> require_ok
   in
-  let receipt =
-    match result with
-    | State.Settled receipt -> receipt
-    | Already_settled _ -> Alcotest.fail "first finalization was replayed"
+  require_fsync durability;
+  let pending =
+    Persistence.prepare_registration_after_exact_recovery_result
+      ~base_path
+      ~keeper_name
+      ~settled_at:4.0
+      ()
+    |> require_ok
+  in
+  Alcotest.(check bool) "recovery consumed source" true (Queue.is_empty pending);
+  let recovered =
+    Persistence.load_state_result ~base_path ~keeper_name |> require_ok
+  in
+  Alcotest.(check int)
+    "recovery consumed lease"
+    0
+    (List.length (State.leases recovered));
+  let entry =
+    match State.transition_outbox recovered with
+    | [ entry ] -> entry
+    | [] | _ :: _ :: _ -> Alcotest.fail "durable exact outbox is not singular"
   in
   Alcotest.(check string)
     "deterministic exact transition"
     (lease.lease_id ^ ":settle_exact:" ^ disposition.disposition_id)
-    receipt.transition_id;
-  let entry =
-    match State.transition_outbox finalized with
-    | [ entry ] -> entry
-    | [] | _ :: _ :: _ -> Alcotest.fail "exact settlement outbox is not singular"
-  in
+    entry.receipt.transition_id;
   (match entry.receipt.settlement with
    | State.Settle_exact proof ->
      Alcotest.(check string)
@@ -113,26 +194,19 @@ let test_terminal_wal_replay_retains_full_proof () =
        "plan proof retained"
        disposition.plan_fingerprint
        proof.plan_fingerprint
-   | _ -> Alcotest.fail "WAL did not carry Settle_exact");
-  let replayed =
-    State.replay_transition_outbox_entry entry prepared |> require_ok
-  in
-  Alcotest.(check int) "replay consumed lease" 0 (List.length (State.leases replayed));
-  let _, replay_result =
-    State.finalize_exact_source_disposition
-      ~settled_at:4.0
-      ~lease
-      ~disposition_id:disposition.disposition_id
-      finalized
+   | _ -> Alcotest.fail "durable WAL receipt did not carry Settle_exact");
+  let replay_pending =
+    Persistence.prepare_registration_after_exact_recovery_result
+      ~base_path
+      ~keeper_name
+      ~settled_at:5.0
+      ()
     |> require_ok
   in
-  (match replay_result with
-   | State.Already_settled replayed_receipt ->
-     Alcotest.(check string)
-       "same receipt"
-       receipt.transition_id
-       replayed_receipt.transition_id
-   | Settled _ -> Alcotest.fail "repeated finalization was applied twice")
+  Alcotest.(check bool)
+    "restart replay remains consumed"
+    true
+    (Queue.is_empty replay_pending)
 ;;
 
 let replace_assoc key value fields =
@@ -267,9 +341,9 @@ let () =
     "keeper exact disposition recovery"
     [ ( "recovery"
       , [ Alcotest.test_case
-            "terminal WAL replay retains full proof"
+            "terminal persistence recovery retains full proof"
             `Quick
-            test_terminal_wal_replay_retains_full_proof
+            test_terminal_persistence_recovery_retains_full_proof
         ; Alcotest.test_case
             "wrong full proof is rejected"
             `Quick

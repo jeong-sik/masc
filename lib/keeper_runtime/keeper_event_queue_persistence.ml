@@ -1157,7 +1157,7 @@ let settle_result
             (Printexc.to_string exn)))
 ;;
 
-let settle_exact_execution_result
+let settle_bound_exact_nonterminal_result
       ?(after_commit = fun _ -> ())
       ~base_path
       ~keeper_name
@@ -1181,7 +1181,7 @@ let settle_exact_execution_result
            commit_settlement_transition_unlocked
              owner
              ~after_commit
-             (State.settle_exact_execution
+             (State.settle_bound_exact_nonterminal
                 ~settled_at
                 ~lease
                 ~slot_id
@@ -1196,7 +1196,7 @@ let settle_exact_execution_result
      | exn ->
        Error
          (Printf.sprintf
-            "exact execution settlement raised keeper=%s: %s"
+            "bound exact nonterminal settlement raised keeper=%s: %s"
             (keeper_name_of_owner owner)
             (Printexc.to_string exn)))
 ;;

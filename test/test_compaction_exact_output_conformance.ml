@@ -91,6 +91,48 @@ let persisted_checkpoint_source_exn trace_id =
      | Error _ -> Alcotest.fail "persisted checkpoint source ref failed")
 ;;
 
+let settle_terminal_disposition_result
+      ~base_path
+      ~keeper_name
+      ~lease
+      ~source
+      ~(terminal : P.exact_execution_terminal)
+      ~settled_at
+  =
+  let binding =
+    match P.exact_execution_binding_result ~base_path ~keeper_name with
+    | Ok (Some binding) -> binding
+    | Ok None -> Alcotest.fail "terminal disposition has no durable exact binding"
+    | Error detail -> Alcotest.failf "exact binding load failed: %s" detail
+  in
+  let disposition =
+    match
+      P.prepare_exact_source_disposition_result
+        ~base_path
+        ~keeper_name
+        ~lease
+        ~binding
+        ~source
+        ~outcome:(P.Terminal terminal.cause)
+        ~action:P.Consume_source
+        ~semantic:P.Exact_no_compaction
+        ~prepared_at:settled_at
+        ()
+    with
+    | Error detail -> Alcotest.failf "terminal disposition preparation failed: %s" detail
+    | Ok (_, P.Visible_sync_unconfirmed detail) ->
+      Alcotest.failf "terminal disposition preparation durability unknown: %s" detail
+    | Ok (disposition, P.Fsync_completed) -> disposition
+  in
+  P.finalize_exact_source_disposition_result
+    ~base_path
+    ~keeper_name
+    ~settled_at
+    ~lease
+    ~disposition_id:disposition.disposition_id
+    ()
+;;
+
 let permissive_exact_execution_guard : C.exact_execution_guard =
   { before_dispatch = (fun _ -> Ok C.Fsync_completed)
   ; release_before_dispatch = (fun _ -> Ok C.Fsync_completed)
@@ -1185,24 +1227,14 @@ let test_visible_unknown_binding_prevents_post_and_settles () =
    | Ok (Some _) -> Alcotest.fail "visible bind retained the wrong status"
    | Ok None -> Alcotest.fail "visible bind was relabelled as unbound"
    | Error detail -> Alcotest.failf "visible bind reload failed: %s" detail);
-  let settlement : P.settlement =
-    P.No_compaction
-      { source = persisted_checkpoint_source_exn "trace-visible-unknown-binding"
-      ; reason = P.Exact_execution_terminal terminal
-      }
-  in
   (match
-     P.settle_exact_execution_result
+     settle_terminal_disposition_result
        ~base_path
        ~keeper_name
-       ~settled_at:4.0
        ~lease
-       ~slot_id:observation.slot_id
-       ~call_id:observation.call_id
-       ~plan_fingerprint:observation.receipt_plan_fingerprint
-       ~request_body_sha256:observation.receipt_request_body_sha256
-       ~settlement
-       ()
+       ~source:(persisted_checkpoint_source_exn "trace-visible-unknown-binding")
+       ~terminal
+       ~settled_at:4.0
    with
    | Ok (P.Settled _) -> ()
    | Ok _ -> Alcotest.fail "visible bind settlement was not fresh"
@@ -1288,24 +1320,14 @@ let test_visible_unknown_quarantine_preserves_cause_and_settles () =
    | Ok (Some _) -> Alcotest.fail "visible quarantine retained the wrong status"
    | Ok None -> Alcotest.fail "visible quarantine was relabelled as unbound"
    | Error detail -> Alcotest.failf "visible quarantine reload failed: %s" detail);
-  let settlement : P.settlement =
-    P.No_compaction
-      { source = persisted_checkpoint_source_exn "trace-visible-unknown-quarantine"
-      ; reason = P.Exact_execution_terminal terminal
-      }
-  in
   (match
-     P.settle_exact_execution_result
+     settle_terminal_disposition_result
        ~base_path
        ~keeper_name
-       ~settled_at:5.0
        ~lease
-       ~slot_id:observation.slot_id
-       ~call_id:observation.call_id
-       ~plan_fingerprint:observation.receipt_plan_fingerprint
-       ~request_body_sha256:observation.receipt_request_body_sha256
-       ~settlement
-       ()
+       ~source:(persisted_checkpoint_source_exn "trace-visible-unknown-quarantine")
+       ~terminal
+       ~settled_at:5.0
    with
    | Ok (P.Settled _) -> ()
    | Ok _ -> Alcotest.fail "visible quarantine settlement was not fresh"
@@ -1361,7 +1383,6 @@ let test_post_success_terminalization_is_affine () =
       prepared
     |> completed_exn
   in
-  let observation = C.completed_attempt_observation completed in
   let terminalizer = C.completed_post_success_terminalizer completed in
   let first_result, resolve_first_result = Eio.Promise.create () in
   let second_started, resolve_second_started = Eio.Promise.create () in
@@ -1406,24 +1427,14 @@ let test_post_success_terminalization_is_affine () =
        | Ok source -> source
        | Error _ -> Alcotest.fail "terminal source checkpoint ref failed")
   in
-  let settlement : P.settlement =
-    P.No_compaction
-      { source
-      ; reason = P.Exact_execution_terminal second
-      }
-  in
   match
-    P.settle_exact_execution_result
+    settle_terminal_disposition_result
       ~base_path
       ~keeper_name
-      ~settled_at:4.0
       ~lease
-      ~slot_id:observation.slot_id
-      ~call_id:observation.call_id
-      ~plan_fingerprint:observation.receipt_plan_fingerprint
-      ~request_body_sha256:observation.receipt_request_body_sha256
-      ~settlement
-      ()
+      ~source
+      ~terminal:second
+      ~settled_at:4.0
   with
   | Ok (P.Settled receipt) ->
     (match P.exact_execution_binding_result ~base_path ~keeper_name with
@@ -1451,12 +1462,20 @@ let test_post_success_terminalization_is_affine () =
          true
          (receipt = durable_receipt);
        (match durable_receipt.settlement with
-        | P.No_compaction
-            { reason = P.Exact_execution_terminal durable_terminal; _ } ->
+        | P.Settle_exact
+            { outcome = P.Terminal cause
+            ; semantic = P.Exact_no_compaction
+            ; action = P.Consume_source
+            ; slot_id
+            ; call_id
+            ; _
+            } ->
           Alcotest.(check bool)
             "durable terminal retains canonical cause and identity"
             true
-            (durable_terminal = first)
+            (cause = first.cause
+             && String.equal slot_id first.slot_id
+             && String.equal call_id first.call_id)
         | _ -> Alcotest.fail "durable receipt lost canonical exact terminal")
      | _ -> Alcotest.fail "canonical terminal state has no exact durable receipt")
   | Ok (P.Already_settled _) ->

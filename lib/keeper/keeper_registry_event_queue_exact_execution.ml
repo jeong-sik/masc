@@ -187,7 +187,7 @@ struct
       ~transition_id
   ;;
   
-  let settle_exact_execution_result
+  let settle_bound_exact_nonterminal_result
         ~base_path
         name
         ~settled_at
@@ -195,7 +195,7 @@ struct
         ~binding
         ~settlement
     =
-    Keeper_event_queue_persistence.settle_exact_execution_result
+    Keeper_event_queue_persistence.settle_bound_exact_nonterminal_result
       ~base_path
       ~keeper_name:name
       ~settled_at

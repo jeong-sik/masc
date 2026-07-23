@@ -202,7 +202,7 @@ val settle_result :
   settlement:settlement ->
   (settle_result, string) result
 
-val settle_exact_execution_result :
+val settle_bound_exact_nonterminal_result :
   base_path:string ->
   string ->
   settled_at:float ->

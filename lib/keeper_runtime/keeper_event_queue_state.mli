@@ -368,7 +368,7 @@ val finalize_exact_source_disposition :
     Its source action is applied exactly once by the canonical receipt
     transition. *)
 
-val settle_exact_execution :
+val settle_bound_exact_nonterminal :
   settled_at:float ->
   lease:lease ->
   slot_id:string ->
@@ -378,8 +378,10 @@ val settle_exact_execution :
   settlement:settlement ->
   t ->
   (t * settle_result, string) result
-(** Finalize a bound lease through its exact OAS identity. Generic {!settle}
-    rejects bound leases. *)
+(** Settle only the identity-bound nonterminal Ack/retry/floor/failure-judgment
+    cases. Exact terminal outcomes require
+    {!prepare_exact_source_disposition} followed by
+    {!finalize_exact_source_disposition}. *)
 
 val cancel_accepted :
   current_owner_nonce:int ->

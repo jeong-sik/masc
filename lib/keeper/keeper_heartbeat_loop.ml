@@ -683,16 +683,20 @@ let settle_claimed_lease
       match Keeper_registry_event_queue.exact_execution_binding_result ~base_path keeper_name with
       | Error _ as error -> error
       | Ok None ->
-        Keeper_registry_event_queue.settle_result
-          ~base_path
-          keeper_name
-          ~settled_at
-          ~lease
-          ~settlement
+        (match exact_terminal_source settlement with
+         | Some _ ->
+           Error "exact terminal settlement has no durable exact execution binding"
+         | None ->
+           Keeper_registry_event_queue.settle_result
+             ~base_path
+             keeper_name
+             ~settled_at
+             ~lease
+             ~settlement)
       | Ok (Some binding) ->
         (match exact_terminal_source settlement with
          | None ->
-           Keeper_registry_event_queue.settle_exact_execution_result
+           Keeper_registry_event_queue.settle_bound_exact_nonterminal_result
              ~base_path
              keeper_name
              ~settled_at
@@ -834,8 +838,6 @@ let settlement_is_exact_output_terminal = function
   | Keeper_registry_event_queue.Settle_exact
       { outcome = Keeper_registry_event_queue.Terminal _; _ } ->
     true
-  | Keeper_registry_event_queue.Settle_exact
-      { outcome = Keeper_registry_event_queue.Checkpoint_committed _; _ }
   | Keeper_registry_event_queue.Requeue _
   | Keeper_registry_event_queue.Escalate _ ->
     false

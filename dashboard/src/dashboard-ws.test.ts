@@ -242,7 +242,6 @@ describe('dashboardSlicesForRoute', () => {
       { tab: 'monitoring', params: { section: 'agents' } },
       { tab: 'keepers', params: { keeper: 'sangsu' } },
       { tab: 'registry', params: {} },
-      { tab: 'monitoring', params: { section: 'cognition' } },
       { tab: 'monitoring', params: { section: 'fleet-health', view: 'comparison' } },
       { tab: 'command', params: {} },
     ] as const
@@ -267,8 +266,6 @@ describe('dashboardSlicesForRoute', () => {
     expect(dashboardSlicesForRoute({ tab: 'workspace', params: { section: 'planning' } }))
       .toContain('execution')
     expect(dashboardSlicesForRoute({ tab: 'monitoring', params: { section: 'observatory' } }))
-      .toContain('execution')
-    expect(dashboardSlicesForRoute({ tab: 'monitoring', params: { section: 'cognition' } }))
       .toContain('execution')
     expect(dashboardSlicesForRoute({
       tab: 'monitoring',
@@ -309,8 +306,6 @@ describe('dashboardSlicesForRoute', () => {
         'shell',
         'transport',
       ])
-    expect(dashboardSlicesForRoute({ tab: 'monitoring', params: { section: 'cognition' } }))
-      .toContain('composite')
   })
 
   it('subscribes operator only for the active command surface', () => {

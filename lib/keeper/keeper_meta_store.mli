@@ -21,8 +21,8 @@ val register_runtime_meta_write_sync :
 val version_conflict_re : Re.re
 
 (** Read a keeper meta JSON file at [path]. Returns [Ok None] when
-    the file does not exist; warns on unknown keys; scrubs deprecated
-    persisted fields before parsing. *)
+    the file does not exist. Unknown top-level keys are rejected with a
+    reset-required error; the persisted file is never rewritten. *)
 val read_meta_file_path :
   string -> (Keeper_meta_contract.keeper_meta option, string) result
 
@@ -189,27 +189,6 @@ val remove_meta_if_exact_identity :
 
 (** [true] iff [msg] matches [version_conflict_re]. *)
 val is_version_conflict_error : string -> bool
-
-(** Strip retired top-level keys from persisted keeper meta files —
-    fields left behind by schema removals (e.g. the #23929 continuity
-    purge left [last_continuity_update_ts]/[continuity_summary] in
-    [.masc/keepers/], re-warning on every read until the next save;
-    dormant keepers never save). Deletion is destructive, so the drop
-    set is an explicit in-code list ([retired_keeper_meta_key_names]),
-    not a set derived from the codec: parser-consumed keys the
-    serializer never emits ([autoboot_enabled], [keeper_name], ...)
-    must survive, and deriving the complement was
-    twice shown to misclassify them. Forgetting to extend the list is
-    fail-safe — the unknown-keys warning keeps firing until the key is
-    added. Retired keys are filtered out of the raw JSON in place
-    ([Keeper_fs.save_json_atomic]); no re-serialization, no
-    [meta_version] bump, every surviving field keeps its exact on-disk
-    value. Unreadable or parser-rejected files are logged and preserved
-    untouched. Call once at boot BEFORE keeper loops start; the write is
-    not CAS-guarded, so the only writers that can race it are external
-    request-driven mutations inside the per-file read/save span during
-    boot — a CAS-guarded loser self-heals on its retry path. *)
-val migrate_retired_keeper_meta_keys : Workspace.config -> unit
 
 (** Retry [write_meta] on CAS version conflicts using caller-declared
     field ownership via [merge]. Use [Keeper_meta_merge.caller_wins]

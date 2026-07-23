@@ -41,20 +41,17 @@ type exact_execution_terminal =
   { cause : exact_execution_terminal_cause
   ; slot_id : string
   ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
   }
 (** One OAS-owned affine call that crossed, or can no longer safely be assumed
-    not to have crossed, the dispatch boundary. Both identities are mandatory
-    and survive the queue receipt/WAL codec. *)
+    not to have crossed, the dispatch boundary. The complete producer proof is
+    mandatory and survives the queue receipt/WAL codec. *)
 
-type exact_source_action =
-  | Consume_source
-  | Resume_source
-  | Replace_with_successor of Keeper_event_queue.stimulus
+type exact_source_action = Consume_source
 
 type exact_settlement_semantic =
-  | Exact_ack
   | Exact_no_compaction
-  | Exact_requeue
   | Exact_escalate
 
 type exact_source_outcome = Terminal of exact_execution_terminal_cause
@@ -334,8 +331,6 @@ val release_exact_execution_before_dispatch :
 val quarantine_exact_execution :
   lease:lease ->
   terminal:exact_execution_terminal ->
-  plan_fingerprint:string ->
-  request_body_sha256:string ->
   t ->
   (t, string) result
 (** Advance a matching dispatch-uncertain binding to a typed terminal
@@ -344,19 +339,15 @@ val quarantine_exact_execution :
 val prepare_exact_source_disposition :
   lease:lease ->
   source:Keeper_checkpoint_ref.t ->
-  outcome:exact_source_outcome ->
-  action:exact_source_action ->
+  terminal:exact_execution_terminal ->
   semantic:exact_settlement_semantic ->
   prepared_at:float ->
-  slot_id:string ->
-  call_id:string ->
-  plan_fingerprint:string ->
-  request_body_sha256:string ->
   t ->
   (t * exact_source_disposition, string) result
 (** Atomically replace a matching dispatch fence or matching v4 cause-only
-    quarantine with one immutable terminal source disposition. Repeating the
-    same stable proof adopts the first durable preparation timestamp. *)
+    quarantine with one immutable terminal source disposition, after matching
+    the opaque producer proof against the durable binding. Repeating the same
+    stable proof adopts the first durable preparation timestamp. *)
 
 val finalize_exact_source_disposition :
   settled_at:float ->

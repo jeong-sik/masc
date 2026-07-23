@@ -42,17 +42,15 @@ type exact_execution_terminal = Keeper_event_queue_state.exact_execution_termina
   { cause : exact_execution_terminal_cause
   ; slot_id : string
   ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
   }
 
 type exact_source_action = Keeper_event_queue_state.exact_source_action =
   | Consume_source
-  | Resume_source
-  | Replace_with_successor of Keeper_event_queue.stimulus
 
 type exact_settlement_semantic = Keeper_event_queue_state.exact_settlement_semantic =
-  | Exact_ack
   | Exact_no_compaction
-  | Exact_requeue
   | Exact_escalate
 
 type exact_source_outcome = Keeper_event_queue_state.exact_source_outcome =
@@ -336,8 +334,6 @@ val quarantine_exact_execution_result :
   keeper_name:string ->
   lease:lease ->
   terminal:exact_execution_terminal ->
-  plan_fingerprint:string ->
-  request_body_sha256:string ->
   unit ->
   (exact_write_outcome, string) result
 (** Persist the canonical post-dispatch terminal cause. A visible replacement
@@ -348,10 +344,8 @@ val prepare_exact_source_disposition_result :
   base_path:string ->
   keeper_name:string ->
   lease:lease ->
-  binding:exact_execution_binding ->
   source:Keeper_checkpoint_ref.t ->
-  outcome:exact_source_outcome ->
-  action:exact_source_action ->
+  terminal:exact_execution_terminal ->
   semantic:exact_settlement_semantic ->
   prepared_at:float ->
   unit ->

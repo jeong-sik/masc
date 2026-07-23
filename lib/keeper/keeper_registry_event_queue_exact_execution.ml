@@ -20,18 +20,16 @@ struct
     { cause : exact_execution_terminal_cause
     ; slot_id : string
     ; call_id : string
+    ; plan_fingerprint : string
+    ; request_body_sha256 : string
     }
 
   type exact_source_action = Keeper_event_queue_persistence.exact_source_action =
     | Consume_source
-    | Resume_source
-    | Replace_with_successor of Keeper_event_queue.stimulus
 
   type exact_settlement_semantic =
     Keeper_event_queue_persistence.exact_settlement_semantic =
-    | Exact_ack
     | Exact_no_compaction
-    | Exact_requeue
     | Exact_escalate
 
   type exact_source_outcome = Keeper_event_queue_persistence.exact_source_outcome =
@@ -105,16 +103,12 @@ struct
         name
         ~lease
         ~terminal
-        ~plan_fingerprint
-        ~request_body_sha256
     =
     Keeper_event_queue_persistence.quarantine_exact_execution_result
       ~base_path
       ~keeper_name:name
       ~lease
       ~terminal
-      ~plan_fingerprint
-      ~request_body_sha256
       ()
   ;;
 
@@ -122,10 +116,8 @@ struct
         ~base_path
         name
         ~lease
-        ~binding
         ~source
-        ~outcome
-        ~action
+        ~terminal
         ~semantic
         ~prepared_at
     =
@@ -133,10 +125,8 @@ struct
       ~base_path
       ~keeper_name:name
       ~lease
-      ~binding
       ~source
-      ~outcome
-      ~action
+      ~terminal
       ~semantic
       ~prepared_at
       ()

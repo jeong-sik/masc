@@ -65,7 +65,6 @@ let test_before_dispatch_release_allows_registration_requeue () =
     ~call_id
     ~plan_fingerprint
     ~request_body_sha256;
-  let binding = exact_binding_exn ~base_path ~keeper_name in
   (match
      P.release_exact_execution_before_dispatch_result
        ~base_path
@@ -86,17 +85,20 @@ let test_before_dispatch_release_allows_registration_requeue () =
    | Ok (Some _) -> Alcotest.fail "before-dispatch release retained the binding"
    | Error detail -> Alcotest.failf "released binding load failed: %s" detail);
   let terminal : P.exact_execution_terminal =
-    { cause = P.Execution_failed_after_dispatch; slot_id; call_id }
+    { cause = P.Execution_failed_after_dispatch
+    ; slot_id
+    ; call_id
+    ; plan_fingerprint
+    ; request_body_sha256
+    }
   in
   (match
      P.prepare_exact_source_disposition_result
        ~base_path
        ~keeper_name
        ~lease
-       ~binding
        ~source:(source_ref ())
-       ~outcome:(P.Terminal terminal.cause)
-       ~action:P.Consume_source
+       ~terminal
        ~semantic:P.Exact_no_compaction
        ~prepared_at:3.0
        ()

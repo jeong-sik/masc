@@ -39,17 +39,14 @@ type exact_execution_terminal =
   { cause : exact_execution_terminal_cause
   ; slot_id : string
   ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
   }
 
-type exact_source_action =
-  | Consume_source
-  | Resume_source
-  | Replace_with_successor of Keeper_event_queue.stimulus
+type exact_source_action = Consume_source
 
 type exact_settlement_semantic =
-  | Exact_ack
   | Exact_no_compaction
-  | Exact_requeue
   | Exact_escalate
 
 type exact_source_outcome = Terminal of exact_execution_terminal_cause
@@ -535,15 +532,19 @@ let validate_exact_execution_terminal (terminal : exact_execution_terminal) =
     else Ok ()
   in
   let* () = validate_identity "slot_id" terminal.slot_id in
-  validate_identity "call_id" terminal.call_id
+  let* () = validate_identity "call_id" terminal.call_id in
+  let* () = validate_identity "plan_fingerprint" terminal.plan_fingerprint in
+  validate_identity "request_body_sha256" terminal.request_body_sha256
 ;;
 
 let exact_execution_terminal_to_string terminal =
   Printf.sprintf
-    "%s:slot_id=%s:call_id=%s"
+    "%s:slot_id=%s:call_id=%s:plan_fingerprint=%s:request_body_sha256=%s"
     (exact_execution_terminal_cause_label terminal.cause)
     terminal.slot_id
     terminal.call_id
+    terminal.plan_fingerprint
+    terminal.request_body_sha256
 ;;
 
 let checkpoint_source_reason_detail_to_yojson (source : Keeper_checkpoint_ref.t) =
@@ -586,6 +587,8 @@ let escalation_reason_detail_to_yojson = function
       ; "cause", `String (exact_execution_terminal_cause_label terminal.cause)
       ; "slot_id", `String terminal.slot_id
       ; "call_id", `String terminal.call_id
+      ; "plan_fingerprint", `String terminal.plan_fingerprint
+      ; "request_body_sha256", `String terminal.request_body_sha256
       ]
   | Compaction_retry_exhausted { attempts; detail } ->
     `Assoc [ "attempts", `Int attempts; "detail", `String detail ]
@@ -660,7 +663,13 @@ let escalation_reason_of_wire ~label ~detail_json =
     let* () =
       exact_reason_fields
         ~context
-        [ "source"; "cause"; "slot_id"; "call_id" ]
+        [ "source"
+        ; "cause"
+        ; "slot_id"
+        ; "call_id"
+        ; "plan_fingerprint"
+        ; "request_body_sha256"
+        ]
         fields
     in
     let* source_json =
@@ -682,7 +691,15 @@ let escalation_reason_of_wire ~label ~detail_json =
     let* cause = exact_execution_terminal_cause_of_label cause_label in
     let* slot_id = required_nonempty_reason_string ~context "slot_id" fields in
     let* call_id = required_nonempty_reason_string ~context "call_id" fields in
-    let terminal = { cause; slot_id; call_id } in
+    let* plan_fingerprint =
+      required_nonempty_reason_string ~context "plan_fingerprint" fields
+    in
+    let* request_body_sha256 =
+      required_nonempty_reason_string ~context "request_body_sha256" fields
+    in
+    let terminal =
+      { cause; slot_id; call_id; plan_fingerprint; request_body_sha256 }
+    in
     let* () = validate_exact_execution_terminal terminal in
     Ok (Compaction_exact_output_terminal { source; terminal })
   | "compaction_exact_lane_unconfigured", `Assoc fields ->
@@ -952,19 +969,10 @@ let exact_source_outcome_identity = function
     "terminal\000" ^ exact_execution_terminal_cause_label cause
 ;;
 
-let exact_source_action_identity = function
-  | Consume_source -> "consume_source"
-  | Resume_source -> "resume_source"
-  | Replace_with_successor successor ->
-    "replace_with_successor\000"
-    ^ (Keeper_event_queue.stimulus_to_yojson successor
-       |> Yojson.Safe.to_string)
-;;
+let exact_source_action_identity Consume_source = "consume_source"
 
 let exact_settlement_semantic_label = function
-  | Exact_ack -> "ack"
   | Exact_no_compaction -> "no_compaction"
-  | Exact_requeue -> "requeue"
   | Exact_escalate -> "escalate"
 ;;
 
@@ -998,6 +1006,17 @@ let exact_source_disposition_id_of_fields
 let validate_exact_source_disposition
       (disposition : exact_source_disposition)
   =
+  let terminal =
+    match disposition.outcome with
+    | Terminal cause ->
+      { cause
+      ; slot_id = disposition.slot_id
+      ; call_id = disposition.call_id
+      ; plan_fingerprint = disposition.plan_fingerprint
+      ; request_body_sha256 = disposition.request_body_sha256
+      }
+  in
+  let* () = validate_exact_execution_terminal terminal in
   let expected_id =
     exact_source_disposition_id_of_fields
       ~source:disposition.source
@@ -1010,26 +1029,14 @@ let validate_exact_source_disposition
       ~semantic:disposition.semantic
       ~prepared_at:disposition.prepared_at
   in
-  if String.trim disposition.slot_id = ""
-  then Error "exact source disposition slot id must not be empty"
-  else if String.trim disposition.call_id = ""
-  then Error "exact source disposition call id must not be empty"
-  else if String.trim disposition.plan_fingerprint = ""
-  then Error "exact source disposition plan fingerprint must not be empty"
-  else if String.trim disposition.request_body_sha256 = ""
-  then Error "exact source disposition request body sha256 must not be empty"
-  else if not (Float.is_finite disposition.prepared_at)
+  if not (Float.is_finite disposition.prepared_at)
   then Error "exact source disposition preparation time must be finite"
   else if not (String.equal disposition.disposition_id expected_id)
   then Error "exact source disposition id does not match its immutable fields"
   else
-    match disposition.outcome, disposition.semantic, disposition.action with
-    | Terminal _, Exact_no_compaction, Consume_source
-    | Terminal _, Exact_escalate, Consume_source ->
+    match disposition.semantic, disposition.action with
+    | (Exact_no_compaction | Exact_escalate), Consume_source ->
       Ok ()
-    | Terminal _, _, _ ->
-      Error
-        "terminal exact disposition semantic and source action are incoherent"
 ;;
 
 let validate_settlement = function
@@ -1423,8 +1430,6 @@ let release_exact_execution_before_dispatch
 let quarantine_exact_execution
       ~(lease : lease)
       ~(terminal : exact_execution_terminal)
-      ~plan_fingerprint
-      ~request_body_sha256
       state
   =
   let* () =
@@ -1432,8 +1437,8 @@ let quarantine_exact_execution
       ~lease
       ~slot_id:terminal.slot_id
       ~call_id:terminal.call_id
-      ~plan_fingerprint
-      ~request_body_sha256
+      ~plan_fingerprint:terminal.plan_fingerprint
+      ~request_body_sha256:terminal.request_body_sha256
   in
   let* () = validate_exact_execution_terminal terminal in
   match binding_for_lease lease state with
@@ -1444,8 +1449,8 @@ let quarantine_exact_execution
               binding
               ~slot_id:terminal.slot_id
               ~call_id:terminal.call_id
-              ~plan_fingerprint
-              ~request_body_sha256) ->
+              ~plan_fingerprint:terminal.plan_fingerprint
+              ~request_body_sha256:terminal.request_body_sha256) ->
     Error (Printf.sprintf "exact execution binding identity conflict: %s" lease.lease_id)
   | Some ({ status = Dispatch_uncertain; _ } as binding) ->
     Ok
@@ -1467,16 +1472,18 @@ let quarantine_exact_execution
 let prepare_exact_source_disposition
       ~(lease : lease)
       ~source
-      ~outcome
-      ~action
+      ~(terminal : exact_execution_terminal)
       ~semantic
       ~prepared_at
-      ~slot_id
-      ~call_id
-      ~plan_fingerprint
-      ~request_body_sha256
       state
   =
+  let slot_id = terminal.slot_id in
+  let call_id = terminal.call_id in
+  let plan_fingerprint = terminal.plan_fingerprint in
+  let request_body_sha256 = terminal.request_body_sha256 in
+  let outcome = Terminal terminal.cause in
+  let action = Consume_source in
+  let* () = validate_exact_execution_terminal terminal in
   let* () =
     validate_binding_arguments
       ~lease
@@ -1601,10 +1608,6 @@ let settle_committed ~settled_at ~lease ~settlement state =
       | Ack | No_compaction _ | Cancel_accepted _ | Transfer_accepted _
       | Settle_from_source_terminal _ -> state.pending
       | Settle_exact { action = Consume_source; _ } -> state.pending
-      | Settle_exact { action = Resume_source; _ } ->
-        append_missing committed.stimuli state.pending
-      | Settle_exact { action = Replace_with_successor successor; _ } ->
-        enqueue_if_missing state.pending successor
       | Requeue
           ( Retry_after_observed
           | Context_compaction_retry
@@ -2494,6 +2497,8 @@ let exact_execution_terminal_to_yojson terminal =
     [ "cause", `String (exact_execution_terminal_cause_label terminal.cause)
     ; "slot_id", `String terminal.slot_id
     ; "call_id", `String terminal.call_id
+    ; "plan_fingerprint", `String terminal.plan_fingerprint
+    ; "request_body_sha256", `String terminal.request_body_sha256
     ]
 ;;
 
@@ -2501,13 +2506,28 @@ let exact_execution_terminal_of_yojson json =
   let context = "exact execution terminal" in
   let* fields = assoc_fields ~context json in
   let* () =
-    exact_fields ~context ~expected:[ "cause"; "slot_id"; "call_id" ] fields
+    exact_fields
+      ~context
+      ~expected:
+        [ "cause"
+        ; "slot_id"
+        ; "call_id"
+        ; "plan_fingerprint"
+        ; "request_body_sha256"
+        ]
+      fields
   in
   let* cause_label = string_field ~context "cause" fields in
   let* cause = exact_execution_terminal_cause_of_label cause_label in
   let* slot_id = string_field ~context "slot_id" fields in
   let* call_id = string_field ~context "call_id" fields in
-  let terminal = { cause; slot_id; call_id } in
+  let* plan_fingerprint = string_field ~context "plan_fingerprint" fields in
+  let* request_body_sha256 =
+    string_field ~context "request_body_sha256" fields
+  in
+  let terminal =
+    { cause; slot_id; call_id; plan_fingerprint; request_body_sha256 }
+  in
   let* () = validate_exact_execution_terminal terminal in
   Ok terminal
 ;;
@@ -2551,12 +2571,9 @@ let exact_source_disposition_to_yojson disposition =
     | Terminal cause ->
       `String (exact_execution_terminal_cause_label cause)
   in
-  let action_kind, successor =
+  let action_kind =
     match disposition.action with
-    | Consume_source -> "consume_source", `Null
-    | Resume_source -> "resume_source", `Null
-    | Replace_with_successor successor ->
-      "replace_with_successor", Keeper_event_queue.stimulus_to_yojson successor
+    | Consume_source -> "consume_source"
   in
   `Assoc
     [ "disposition_id", `String disposition.disposition_id
@@ -2567,7 +2584,7 @@ let exact_source_disposition_to_yojson disposition =
     ; "request_body_sha256", `String disposition.request_body_sha256
     ; "terminal_cause", terminal_cause
     ; "action_kind", `String action_kind
-    ; "successor", successor
+    ; "successor", `Null
     ; ( "settlement_semantic"
       , `String (exact_settlement_semantic_label disposition.semantic) )
     ; "prepared_at_unix", `Float disposition.prepared_at
@@ -2615,14 +2632,8 @@ let exact_source_disposition_of_yojson json =
   let* action =
     match action_kind, successor_json with
     | "consume_source", `Null -> Ok Consume_source
-    | "resume_source", `Null -> Ok Resume_source
-    | "replace_with_successor", (`Assoc _ as successor_json) ->
-      let* successor = Keeper_event_queue.stimulus_of_yojson successor_json in
-      Ok (Replace_with_successor successor)
-    | "consume_source", _ | "resume_source", _ ->
+    | "consume_source", _ ->
       Error "exact source disposition action must not carry a successor"
-    | "replace_with_successor", _ ->
-      Error "replacement exact source disposition requires a successor"
     | unknown, _ ->
       Error (Printf.sprintf "unknown exact source disposition action: %s" unknown)
   in
@@ -2631,9 +2642,7 @@ let exact_source_disposition_of_yojson json =
   in
   let* semantic =
     match semantic_label with
-    | "ack" -> Ok Exact_ack
     | "no_compaction" -> Ok Exact_no_compaction
-    | "requeue" -> Ok Exact_requeue
     | "escalate" -> Ok Exact_escalate
     | unknown ->
       Error

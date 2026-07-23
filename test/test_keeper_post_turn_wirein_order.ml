@@ -15,7 +15,13 @@ module Schema = Masc.Keeper_structured_output_schema
 module Summarizer = Masc.Keeper_compaction_llm_summarizer
 
 let exact_terminal ?(slot_id = "compaction-slot") ?(call_id = "call-compaction") cause =
-  Keeper_event_queue_state.{ cause; slot_id; call_id }
+  Keeper_event_queue_state.
+    { cause
+    ; slot_id
+    ; call_id
+    ; plan_fingerprint = "compaction-plan"
+    ; request_body_sha256 = String.make 64 'c'
+    }
 ;;
 
 let compaction_decision ?summary unit_index action =

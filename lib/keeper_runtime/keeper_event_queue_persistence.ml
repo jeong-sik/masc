@@ -37,17 +37,14 @@ type exact_execution_terminal = State.exact_execution_terminal =
   { cause : exact_execution_terminal_cause
   ; slot_id : string
   ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
   }
 
-type exact_source_action = State.exact_source_action =
-  | Consume_source
-  | Resume_source
-  | Replace_with_successor of Keeper_event_queue.stimulus
+type exact_source_action = State.exact_source_action = Consume_source
 
 type exact_settlement_semantic = State.exact_settlement_semantic =
-  | Exact_ack
   | Exact_no_compaction
-  | Exact_requeue
   | Exact_escalate
 
 type exact_source_outcome = State.exact_source_outcome =
@@ -990,8 +987,6 @@ let quarantine_exact_execution_result
       ~keeper_name
       ~lease
       ~terminal
-      ~plan_fingerprint
-      ~request_body_sha256
       ()
   =
   commit_exact_transform
@@ -1002,8 +997,6 @@ let quarantine_exact_execution_result
        State.quarantine_exact_execution
          ~lease
          ~terminal
-         ~plan_fingerprint
-         ~request_body_sha256
          state
        |> Result.map (fun next -> next, ()))
   |> Result.map snd
@@ -1013,10 +1006,8 @@ let prepare_exact_source_disposition_result
       ~base_path
       ~keeper_name
       ~lease
-      ~(binding : exact_execution_binding)
       ~source
-      ~outcome
-      ~action
+      ~terminal
       ~semantic
       ~prepared_at
       ()
@@ -1029,14 +1020,9 @@ let prepare_exact_source_disposition_result
        State.prepare_exact_source_disposition
          ~lease
          ~source
-         ~outcome
-         ~action
+         ~terminal
          ~semantic
          ~prepared_at
-         ~slot_id:binding.slot_id
-         ~call_id:binding.call_id
-         ~plan_fingerprint:binding.plan_fingerprint
-         ~request_body_sha256:binding.request_body_sha256
          state
        |> Result.map (fun (next, disposition) -> next, disposition))
 ;;

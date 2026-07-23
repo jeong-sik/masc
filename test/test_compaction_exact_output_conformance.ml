@@ -99,22 +99,14 @@ let settle_terminal_disposition_result
       ~(terminal : P.exact_execution_terminal)
       ~settled_at
   =
-  let binding =
-    match P.exact_execution_binding_result ~base_path ~keeper_name with
-    | Ok (Some binding) -> binding
-    | Ok None -> Alcotest.fail "terminal disposition has no durable exact binding"
-    | Error detail -> Alcotest.failf "exact binding load failed: %s" detail
-  in
   let disposition =
     match
       P.prepare_exact_source_disposition_result
         ~base_path
         ~keeper_name
         ~lease
-        ~binding
         ~source
-        ~outcome:(P.Terminal terminal.cause)
-        ~action:P.Consume_source
+        ~terminal
         ~semantic:P.Exact_no_compaction
         ~prepared_at:settled_at
         ()

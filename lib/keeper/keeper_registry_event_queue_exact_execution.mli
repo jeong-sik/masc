@@ -20,18 +20,16 @@ module Make (Publish : sig
     { cause : exact_execution_terminal_cause
     ; slot_id : string
     ; call_id : string
+    ; plan_fingerprint : string
+    ; request_body_sha256 : string
     }
 
   type exact_source_action = Keeper_event_queue_persistence.exact_source_action =
     | Consume_source
-    | Resume_source
-    | Replace_with_successor of Keeper_event_queue.stimulus
 
   type exact_settlement_semantic =
     Keeper_event_queue_persistence.exact_settlement_semantic =
-    | Exact_ack
     | Exact_no_compaction
-    | Exact_requeue
     | Exact_escalate
 
   type exact_source_outcome = Keeper_event_queue_persistence.exact_source_outcome =
@@ -84,18 +82,14 @@ module Make (Publish : sig
     string ->
     lease:Keeper_event_queue_persistence.lease ->
     terminal:exact_execution_terminal ->
-    plan_fingerprint:string ->
-    request_body_sha256:string ->
     (exact_write_outcome, string) result
 
   val prepare_exact_source_disposition_result :
     base_path:string ->
     string ->
     lease:Keeper_event_queue_persistence.lease ->
-    binding:exact_execution_binding ->
     source:Keeper_checkpoint_ref.t ->
-    outcome:exact_source_outcome ->
-    action:exact_source_action ->
+    terminal:exact_execution_terminal ->
     semantic:exact_settlement_semantic ->
     prepared_at:float ->
     (exact_source_disposition * exact_write_outcome, string) result

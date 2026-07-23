@@ -723,10 +723,8 @@ let settle_claimed_lease
                 ~base_path
                 keeper_name
                 ~lease
-                ~binding
                 ~source
-                ~outcome:(Keeper_registry_event_queue.Terminal terminal.cause)
-                ~action:Keeper_registry_event_queue.Consume_source
+                ~terminal
                 ~semantic
                 ~prepared_at:settled_at
             with
@@ -787,15 +785,18 @@ let exact_execution_guard ~base_path ~keeper_name ~lease =
       binding_arguments observation
     in
     let terminal : Keeper_registry_event_queue.exact_execution_terminal =
-      { cause; slot_id; call_id }
+      { cause
+      ; slot_id
+      ; call_id
+      ; plan_fingerprint
+      ; request_body_sha256
+      }
     in
     Keeper_registry_event_queue.quarantine_exact_execution_result
       ~base_path
       keeper_name
       ~lease
       ~terminal
-      ~plan_fingerprint
-      ~request_body_sha256
   in
   Keeper_compaction_llm_summarizer.
     { before_dispatch; release_before_dispatch; quarantine }
@@ -807,16 +808,7 @@ let settlement_is_ack = function
   | Keeper_registry_event_queue.Cancel_accepted _
   | Keeper_registry_event_queue.Transfer_accepted _ -> true
   | Keeper_registry_event_queue.Settle_from_source_terminal _ -> true
-  | Keeper_registry_event_queue.Settle_exact
-      { action = Keeper_registry_event_queue.Consume_source; _ } ->
-    true
-  | Keeper_registry_event_queue.Settle_exact
-      { action =
-          ( Keeper_registry_event_queue.Resume_source
-          | Keeper_registry_event_queue.Replace_with_successor _ )
-      ; _
-      } ->
-    false
+  | Keeper_registry_event_queue.Settle_exact _ -> true
   | Keeper_registry_event_queue.Requeue _
   | Keeper_registry_event_queue.Escalate _ ->
     false

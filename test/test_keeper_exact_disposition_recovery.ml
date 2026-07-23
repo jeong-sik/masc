@@ -87,18 +87,24 @@ let bound_state ?post_id () =
   state, lease
 ;;
 
+let exact_terminal
+      ?(slot_id = "slot-a")
+      ?(call_id = "call-a")
+      ?(plan_fingerprint = "plan-a")
+      ?(request_body_sha256 = String.make 64 'a')
+      cause
+  : State.exact_execution_terminal
+  =
+  { cause; slot_id; call_id; plan_fingerprint; request_body_sha256 }
+;;
+
 let prepare_terminal ?(prepared_at = 3.0) state lease =
   State.prepare_exact_source_disposition
     ~lease
     ~source:source_ref
-    ~outcome:(State.Terminal State.Domain_invalid_output)
+    ~terminal:(exact_terminal State.Domain_invalid_output)
     ~semantic:State.Exact_no_compaction
-    ~action:State.Consume_source
     ~prepared_at
-    ~slot_id:"slot-a"
-    ~call_id:"call-a"
-    ~plan_fingerprint:"plan-a"
-    ~request_body_sha256:(String.make 64 'a')
     state
   |> require_ok
 ;;
@@ -138,21 +144,14 @@ let test_terminal_persistence_recovery_retains_full_proof () =
     ()
   |> require_ok
   |> require_fsync;
-  let binding =
-    match Persistence.exact_execution_binding_result ~base_path ~keeper_name with
-    | Ok (Some binding) -> binding
-    | Ok None -> Alcotest.fail "persisted binding disappeared"
-    | Error detail -> Alcotest.failf "persisted binding load failed: %s" detail
-  in
+  let terminal = exact_terminal State.Domain_invalid_output in
   let disposition, durability =
     Persistence.prepare_exact_source_disposition_result
       ~base_path
       ~keeper_name
       ~lease
-      ~binding
       ~source:source_ref
-      ~outcome:(Persistence.Terminal Persistence.Domain_invalid_output)
-      ~action:Persistence.Consume_source
+      ~terminal
       ~semantic:Persistence.Exact_no_compaction
       ~prepared_at:3.0
       ()
@@ -247,28 +246,34 @@ let test_wrong_full_proof_is_rejected () =
   | Ok _ -> Alcotest.fail "changed request proof retained the disposition id"
 ;;
 
-let test_incoherent_semantic_action_is_rejected () =
-  let state, lease = bound_state ~post_id:"bad-coherence" () in
-  let rejects semantic action =
+let test_producer_proof_mismatches_are_rejected () =
+  let state, lease = bound_state ~post_id:"bad-proof" () in
+  let canonical = exact_terminal State.Domain_invalid_output in
+  let rejects label terminal =
     match
       State.prepare_exact_source_disposition
         ~lease
         ~source:source_ref
-        ~outcome:(State.Terminal State.Domain_invalid_output)
-        ~semantic
-        ~action
+        ~terminal
+        ~semantic:State.Exact_no_compaction
         ~prepared_at:6.0
-        ~slot_id:"slot-a"
-        ~call_id:"call-a"
-        ~plan_fingerprint:"plan-a"
-        ~request_body_sha256:(String.make 64 'a')
         state
     with
     | Error _ -> ()
-    | Ok _ -> Alcotest.fail "incoherent terminal disposition was accepted"
+    | Ok _ -> Alcotest.failf "%s producer proof mismatch was accepted" label
   in
-  rejects State.Exact_ack State.Resume_source;
-  rejects State.Exact_requeue State.Consume_source
+  rejects "slot_id" { canonical with slot_id = "slot-b" };
+  rejects "call_id" { canonical with call_id = "call-b" };
+  rejects
+    "plan_fingerprint"
+    { canonical with plan_fingerprint = "plan-b" };
+  rejects
+    "request_body_sha256"
+    { canonical with request_body_sha256 = String.make 64 'b' };
+  match State.exact_execution_binding state with
+  | Some { status = State.Dispatch_uncertain; _ } -> ()
+  | Some _ -> Alcotest.fail "proof mismatch changed the durable binding"
+  | None -> Alcotest.fail "proof mismatch removed the durable binding"
 ;;
 
 let test_retry_adopts_stored_prepared_at () =
@@ -308,18 +313,11 @@ let legacy_v4_json = function
 
 let test_v4_cause_only_remains_fail_closed () =
   let state, lease = bound_state () in
-  let terminal : State.exact_execution_terminal =
-    { cause = State.Domain_invalid_output
-    ; slot_id = "slot-a"
-    ; call_id = "call-a"
-    }
-  in
+  let terminal = exact_terminal State.Domain_invalid_output in
   let quarantined =
     State.quarantine_exact_execution
       ~lease
       ~terminal
-      ~plan_fingerprint:"plan-a"
-      ~request_body_sha256:(String.make 64 'a')
       state
     |> require_ok
   in
@@ -349,9 +347,9 @@ let () =
             `Quick
             test_wrong_full_proof_is_rejected
         ; Alcotest.test_case
-            "incoherent semantic and action are rejected"
+            "producer proof mismatches are rejected"
             `Quick
-            test_incoherent_semantic_action_is_rejected
+            test_producer_proof_mismatches_are_rejected
         ; Alcotest.test_case
             "retry adopts stored prepared_at"
             `Quick

@@ -69,13 +69,6 @@ let claim_manual_lease ~base_path ~keeper_name =
   | Error detail -> Alcotest.failf "manual lease claim failed: %s" detail
 ;;
 
-let exact_binding_exn ~base_path ~keeper_name =
-  match P.exact_execution_binding_result ~base_path ~keeper_name with
-  | Ok (Some binding) -> binding
-  | Ok None -> Alcotest.fail "durable exact execution binding disappeared"
-  | Error detail -> Alcotest.failf "binding load failed: %s" detail
-;;
-
 let require_fsync label = function
   | P.Fsync_completed -> ()
   | P.Visible_sync_unconfirmed detail ->
@@ -107,15 +100,15 @@ let bind_and_quarantine
    | Ok (P.Visible_sync_unconfirmed detail) ->
      Alcotest.failf "exact execution bind durability unknown: %s" detail
    | Error detail -> Alcotest.failf "exact execution bind failed: %s" detail);
-  let terminal : P.exact_execution_terminal = { cause; slot_id; call_id } in
+  let terminal : P.exact_execution_terminal =
+    { cause; slot_id; call_id; plan_fingerprint; request_body_sha256 }
+  in
   (match
      P.quarantine_exact_execution_result
        ~base_path
        ~keeper_name
        ~lease
        ~terminal
-       ~plan_fingerprint
-       ~request_body_sha256
        ()
    with
    | Ok P.Fsync_completed -> ()
@@ -132,16 +125,13 @@ let prepare_terminal_disposition
       ~terminal
       ~prepared_at
   =
-  let binding = exact_binding_exn ~base_path ~keeper_name in
   match
     P.prepare_exact_source_disposition_result
       ~base_path
       ~keeper_name
       ~lease
-      ~binding
       ~source:(source_ref ())
-      ~outcome:(P.Terminal terminal.cause)
-      ~action:P.Consume_source
+      ~terminal
       ~semantic:P.Exact_no_compaction
       ~prepared_at
       ()

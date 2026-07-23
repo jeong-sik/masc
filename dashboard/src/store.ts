@@ -143,8 +143,9 @@ function patchForDirective(action: OptimisticKeeperDirective): Partial<Keeper> {
     case 'pause':
       return { paused: true, phase: 'Paused', lifecycle_phase: 'Paused', pipeline_stage: 'paused', status: 'paused' }
     case 'resume':
-    case 'wakeup':
       return { paused: false, phase: 'Running', lifecycle_phase: 'Running', pipeline_stage: 'idle', status: 'idle' }
+    case 'wakeup':
+      return {}
   }
 }
 

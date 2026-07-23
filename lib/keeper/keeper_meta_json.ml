@@ -43,6 +43,8 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "last_compaction_ts", `Float rt.compaction_rt.last_ts
     ; "last_compaction_before_tokens", `Int rt.compaction_rt.last_before_tokens
     ; "last_compaction_after_tokens", `Int rt.compaction_rt.last_after_tokens
+    ; ( "compaction_consecutive_failures"
+      , `Int rt.compaction_rt.consecutive_failures )
     ; "proactive_count_total", `Int rt.proactive_rt.count_total
     ; "last_proactive_ts", `Float rt.proactive_rt.last_ts
     ; "proactive_visible_count_total", `Int rt.proactive_rt.visible_count_total
@@ -69,6 +71,8 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       , match rt.message_scope_ack_id with
         | Some id -> `String id
         | None -> `Null )
+    ; ( "transcript_quarantine_consecutive_retries"
+      , `Int rt.transcript_quarantine_consecutive_retries )
     ; ( "last_blocker"
       , match rt.last_blocker with
         | Some info -> blocker_info_to_json info

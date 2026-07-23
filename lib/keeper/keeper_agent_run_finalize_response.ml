@@ -49,10 +49,32 @@ let emit_wire_capture_response_suppressed_metrics ~keeper_name reasons =
     reasons
 ;;
 
+(* RFC-0351 S1 / #25462: a [Skip_uninformative_wake] turn records nothing in
+   the MASC-side stores (#25515), but the OAS run still receives the wake
+   marker as its goal and appends it to the transcript as a user message —
+   so every completed bare wake persisted one more byte-identical marker
+   into the checkpoint (343 measured in one keeper before the offline
+   purge). The typed turn record gates the drop; the exact sentinel
+   equality is a defence against the record ever being paired with a
+   different user message, not a classifier. *)
+let drop_leading_wake_marker ~user_turn_record current_suffix =
+  match user_turn_record, current_suffix with
+  | ( Keeper_run_prompt.Skip_uninformative_wake
+    , ({ Agent_sdk.Types.role = Agent_sdk.Types.User
+       ; content = [ Agent_sdk.Types.Text text ]
+       ; _
+       }
+       :: rest) )
+    when String.equal text Keeper_unified_prompt.autonomous_wake_marker -> rest
+  | (Keeper_run_prompt.Skip_uninformative_wake | Keeper_run_prompt.Record_user_turn), _
+    -> current_suffix
+;;
+
 let canonical_success_replay_checkpoint
       ~(history_messages : Agent_sdk.Types.message list)
       ~(session_id : string)
       ~(response_text : string)
+      ~(user_turn_record : Keeper_run_prompt.user_turn_record)
       (checkpoint : Agent_sdk.Checkpoint.t)
   =
   match
@@ -62,6 +84,9 @@ let canonical_success_replay_checkpoint
   with
   | Ok current_suffix ->
     let dropped_current_turn_replay = current_suffix <> [] in
+    let current_suffix =
+      drop_leading_wake_marker ~user_turn_record current_suffix
+    in
     let checkpoint =
       if String.trim response_text = ""
       then
@@ -71,15 +96,16 @@ let canonical_success_replay_checkpoint
         ; working_context = None
         }
       else
+        let base_messages = history_messages @ current_suffix in
         let messages =
           if
             List.exists
               (fun (msg : Agent_sdk.Types.message) ->
                  msg.role = Agent_sdk.Types.Assistant)
               current_suffix
-          then checkpoint.Agent_sdk.Checkpoint.messages
+          then base_messages
           else
-            checkpoint.Agent_sdk.Checkpoint.messages
+            base_messages
             @
             [ Agent_sdk.Types.make_message
                 ~role:Agent_sdk.Types.Assistant
@@ -130,6 +156,7 @@ let checkpoint_for_replay_persistence
       ~(session_id : string)
       ~(response_text : string)
       ?(stop_reason = Runtime_agent.Completed)
+      ?(user_turn_record = Keeper_run_prompt.Record_user_turn)
       (checkpoint : Agent_sdk.Checkpoint.t)
   =
   match stop_reason with
@@ -166,6 +193,7 @@ let checkpoint_for_replay_persistence
       ~history_messages
       ~session_id
       ~response_text
+      ~user_turn_record
       checkpoint
 ;;
 
@@ -197,6 +225,7 @@ let finalize
     ~model
     ~(acc : Keeper_run_tools.hook_accumulator)
     ~actual_keeper_tool_names
+    ~(user_turn_record : Keeper_run_prompt.user_turn_record)
     ~(result : Runtime_agent.run_result)
     ~checkpoint_persistence_error
     ~post_turn_t0
@@ -267,6 +296,7 @@ let finalize
             (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           ~response_text
           ~stop_reason:result.stop_reason
+          ~user_turn_record
           checkpoint
       in
       (match checkpoint_for_save_result with
@@ -366,6 +396,10 @@ let finalize
       ~response_text
       ~actual_tools:actual_keeper_tool_names
       ~librarian_messages
+      ~memory_extraction_record:
+        (Keeper_run_prompt.memory_extraction_record_of_turn
+           ~user_turn_record
+           ~tool_calls_made:(actual_keeper_tool_names <> []))
       ~post_turn_t0
       ~runtime_id:runtime_id_string
       ~inference_telemetry:result.response.telemetry

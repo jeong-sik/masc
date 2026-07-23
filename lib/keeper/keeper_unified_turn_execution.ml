@@ -189,6 +189,14 @@ let run (ctx : ctx)
                  ~world_observation:observation
                  ~generation:run_generation
                  ~history_user_source:"world_state_prompt"
+                 (* RFC-0351 section 5 / #25462: on this lane the user turn is
+                    the wake marker constant unless a HITL resolution was
+                    appended to it. A bare marker carries nothing forward — the
+                    observation frame rides dynamic_context — so recording it
+                    only accumulates byte-identical duplicates. *)
+                 ~user_turn_record:
+                   (Keeper_run_prompt.user_turn_record_of_hitl_resolution
+                      hitl_resolution)
                  ~history_assistant_source:"internal_assistant"
                  ~degraded_retry_applied:
                    (Option.is_some turn_state.degraded_retry_info)

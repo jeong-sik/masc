@@ -1,6 +1,31 @@
 (** Durable typed intent receipts for explicit paused-work disposition. *)
 
-type operation = Resume_owner
+type continuation_binding =
+  | Routed of Keeper_continuation_channel.t
+  | No_channel
+
+type transfer_owner =
+  { from_keeper : string
+  ; to_keeper : string
+  ; target_trace_id : Keeper_id.Trace_id.t
+  ; target_generation : int
+  ; source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; settled_at : float
+  ; continuation_binding : continuation_binding
+  }
+
+type source_terminal_operation =
+  { source : Keeper_event_queue.stimulus
+  ; source_revision : int64
+  ; settled_at : float
+  ; source_receipt : Keeper_event_queue_state.source_terminal_receipt
+  }
+
+type operation =
+  | Resume_owner
+  | Transfer_owner of transfer_owner
+  | Settle_from_source_terminal of source_terminal_operation
 
 type t =
   { keeper_name : string
@@ -18,6 +43,22 @@ type save_result =
 type keeper_lock
 
 val equal : t -> t -> bool
+
+val continuation_binding_of_source :
+  Keeper_event_queue.stimulus -> continuation_binding
+(** Extract the exact routed channel carried by channel-bearing source kinds;
+    all other typed stimuli use [No_channel]. *)
+
+val continuation_binding_to_yojson : continuation_binding -> Yojson.Safe.t
+val continuation_binding_of_yojson : Yojson.Safe.t -> (continuation_binding, string) result
+
+val source_terminal_receipt_kind :
+  Keeper_event_queue_state.source_terminal_receipt -> string
+
+val to_yojson : t -> Yojson.Safe.t
+val of_yojson : Yojson.Safe.t -> (t, string) result
+(** Strict public codec used by authenticated operator surfaces and harnesses.
+    It is the same codec used for the durable receipt file. *)
 
 val load :
   Workspace.config ->

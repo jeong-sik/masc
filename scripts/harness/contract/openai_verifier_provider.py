@@ -2,8 +2,13 @@
 """Deterministic OpenAI chat-completions contract provider.
 
 The contract harness exercises the production task-completion boundary.  This
-provider accepts only the request shape that boundary promises: a native JSON
-schema request plus the ``report_review_verdict`` tool.  It returns one real
+provider accepts only the request shape that boundary promises: the
+``report_review_verdict`` tool declaration and **no wire response_format** —
+the verdict contract is the exactly-once tool call, not the final message
+shape.  A request that sets any response_format is rejected: the old native
+json_schema request killed the gate on every json_object-only provider
+(Glm/DeepSeek/Kimi), leaving all tasks nonterminal fleet-wide (2026-07-21),
+so its reappearance here is a regression.  The provider returns one real
 OpenAI-compatible tool call, requires the matching tool result on the next
 request, and then ends the model turn.
 
@@ -104,19 +109,8 @@ class ContractHandler(BaseHTTPRequestHandler):
         return False
 
     @staticmethod
-    def _native_schema_requested(request: JsonObject) -> bool:
-        response_format = object_field(request.get("response_format"))
-        json_schema = (
-            object_field(response_format.get("json_schema"))
-            if response_format is not None
-            else None
-        )
-        return (
-            response_format is not None
-            and response_format.get("type") == "json_schema"
-            and json_schema is not None
-            and object_field(json_schema.get("schema")) is not None
-        )
+    def _wire_response_format_present(request: JsonObject) -> bool:
+        return request.get("response_format") is not None
 
     @staticmethod
     def _model_name(request: JsonObject) -> str:
@@ -163,8 +157,13 @@ class ContractHandler(BaseHTTPRequestHandler):
                 request_id, "contract verifier requires non-streaming chat completions"
             )
             return
-        if not self._native_schema_requested(request):
-            self._reject(request_id, "response_format.type=json_schema is required")
+        if self._wire_response_format_present(request):
+            self._reject(
+                request_id,
+                "the task-completion boundary must not set a wire "
+                "response_format; the report_review_verdict tool call is the "
+                "verdict contract",
+            )
             return
         if not self._has_verdict_tool(request):
             self._reject(request_id, f"{VERDICT_TOOL} tool declaration is required")

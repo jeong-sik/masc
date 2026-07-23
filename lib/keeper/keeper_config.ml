@@ -71,19 +71,27 @@ let keeper_memory_os_recall_max_episodes_rp =
 let keeper_memory_os_recall_max_episodes () : int =
   Runtime_params.get keeper_memory_os_recall_max_episodes_rp
 
-(* Observability-only for now: logged and counted
-   (MemoryOsRecallBytesOverBudget) when the rendered block exceeds this, but
-   not itself used to drop additional facts/episodes -- max_facts/
-   max_episodes above are the enforced boundary. A byte-accurate secondary
-   truncation is a reasonable follow-up once real overage data exists;
-   scope-cut here rather than adding untested incremental-trim logic. 0
-   disables the check (unbounded). *)
+(* RFC-0351 L3: enforced, no longer observability-only. This was a threshold
+   that logged "not truncated" and let the block go out in full, deferring a
+   byte-accurate trim until real overage data existed. That data exists: one
+   keeper rendered 222,499 bytes of recall -- 98.5% of its entire
+   extra_system_context for the turn -- while sitting under both count budgets
+   (62 facts / 432 episodes against 500/500), so neither count budget fired.
+
+   Enforcement drops the oldest episodes until the rendered block fits, keeping
+   survivors in their original order (see [select_pairs_within_byte_budget]).
+   Facts are never dropped by this budget; they render an order of magnitude
+   smaller than episodes.
+
+   The 64 KiB default is roughly a tenth of a 200k-token context window once
+   rendered, and takes the measured keeper from 222,499 B to under 65,536 B.
+   0 disables enforcement (unbounded), matching the previous behaviour. *)
 let keeper_memory_os_recall_max_bytes_rp =
   _rp_int ~key:"keeper.memory_os.recall.max_bytes"
     ~default:(fun () -> int_of_env_default "MASC_KEEPER_MEMORY_OS_RECALL_MAX_BYTES"
-                          ~default:2_000_000 ~min_v:0 ~max_v:50_000_000)
+                          ~default:65_536 ~min_v:0 ~max_v:50_000_000)
     ~min_v:0 ~max_v:50_000_000
-    ~description:"Rendered recall block byte threshold to log/count as over-budget (0 = disabled)" ()
+    ~description:"Rendered recall block byte budget; oldest episodes are dropped to fit (0 = unbounded)" ()
 let keeper_memory_os_recall_max_bytes () : int =
   Runtime_params.get keeper_memory_os_recall_max_bytes_rp
 let keeper_bootstrap_proactive_warmup_sec_rp =

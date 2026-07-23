@@ -792,7 +792,13 @@ let append_explicit_memory_note
     : (memory_write_outcome, explicit_memory_write_error) result
   =
   let text = String.trim text in
-  if not (memory_kind_is_writable kind)
+  (* The bank holds turn-scoped working notes. A durable kind belongs to the
+     Memory OS fact store (RFC-0351 L1) and callers route on
+     [memory_write_destination]; this guard keeps the bank's own invariant so a
+     future caller cannot land a durable claim in a store no prompt reads. *)
+  if (match memory_write_destination kind with
+      | Turn_scoped_bank -> false
+      | Durable_fact_store -> true)
   then Error (Explicit_memory_kind_not_writable kind)
   else if not (is_meaningful_memory_text text)
   then Error Rejected_explicit_memory_text

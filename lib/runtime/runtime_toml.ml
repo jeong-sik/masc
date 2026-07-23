@@ -1022,6 +1022,9 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
            | "lanes" ->
              (* Parsed by [parse_lanes] after the runtime section is shaped. *)
              section, errs
+           | "exact_output_lanes" ->
+             (* Parsed separately as raw OAS target references. *)
+             section, errs
            | _ when is_toml_table value ->
              (* [runtime.<profile>] tables are reserved for runtime profiles and
                 intentionally ignored by this parser layer. *)
@@ -1034,8 +1037,9 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
                    (Printf.sprintf
                       "unknown [runtime] key %S; expected default, librarian, \
                        structured_judge, hitl_summary, cross_verifier, \
-                       media_failover, [runtime.lanes], [runtime.assignments], \
-                       or a table-valued [runtime.<profile>]"
+                       media_failover, [runtime.lanes], \
+                       [runtime.exact_output_lanes], [runtime.assignments], or a \
+                       table-valued [runtime.<profile>]"
                       key) )
         )
         (empty_runtime_section, [])
@@ -1102,6 +1106,93 @@ let parse_lanes (toml : Otoml.t) : (Runtime_schema.lane_decl list, parse_error l
     Error (error "runtime.lanes" "[runtime.lanes] must be a table of lane tables")
 ;;
 
+let parse_exact_output_lane ~(id : string) (tbl : Otoml.t)
+  : (Runtime_schema.exact_output_lane_decl, parse_error list) result
+  =
+  let path = Printf.sprintf "runtime.exact_output_lanes.%s" id in
+  let unknown_key_errors =
+    match tbl with
+    | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+      List.concat_map
+        (fun (key, _) ->
+           if String.equal key "slots"
+           then []
+           else
+             error
+               (path ^ "." ^ key)
+               (Printf.sprintf
+                  "unknown exact-output lane key %S; expected slots"
+                  key))
+        entries
+    | _ -> []
+  in
+  let slots_result =
+    match Otoml.find_opt tbl Fun.id [ "slots" ] with
+    | None -> Error (error (path ^ ".slots") "exact-output lane slots is required")
+    | Some value ->
+      (try Ok (Otoml.get_array Otoml.get_string value) with
+       | Otoml.Type_error msg ->
+         Error
+           (error
+              (path ^ ".slots")
+              (Printf.sprintf
+                 "exact-output lane slots must be an array of opaque strings; got %s"
+                 msg)))
+  in
+  match unknown_key_errors, slots_result with
+  | _ :: _, Error slot_errors -> Error (slot_errors @ unknown_key_errors)
+  | _ :: _, Ok _ -> Error unknown_key_errors
+  | [], (Error _ as error) -> error
+  | [], Ok [] -> Error (error path "exact-output lane must have at least one slot")
+  | [], Ok slot_ids ->
+    let rec validate position seen = function
+      | [] -> Ok { Runtime_schema.id; slot_ids }
+      | slot_id :: rest ->
+        if String.equal (String.trim slot_id) ""
+        then
+          Error
+            (error
+               (path ^ ".slots")
+               (Printf.sprintf "exact-output slot %d must not be blank" position))
+        else if List.exists (String.equal slot_id) seen
+        then
+          Error
+            (error
+               (path ^ ".slots")
+               (Printf.sprintf
+                  "exact-output slot %d duplicates %S"
+                  position
+                  slot_id))
+        else validate (position + 1) (slot_id :: seen) rest
+    in
+    validate 1 [] slot_ids
+;;
+
+let parse_exact_output_lanes (toml : Otoml.t)
+  : (Runtime_schema.exact_output_lane_decl list, parse_error list) result
+  =
+  match Otoml.find_opt toml Fun.id [ "runtime"; "exact_output_lanes" ] with
+  | None -> Ok []
+  | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
+    partition_results
+      (List.map
+         (fun (id, value) ->
+            match value with
+            | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->
+              parse_exact_output_lane ~id value
+            | _ ->
+              Error
+                (error
+                   (Printf.sprintf "runtime.exact_output_lanes.%s" id)
+                   "exact-output lane must be a table"))
+         entries)
+  | Some _ ->
+    Error
+      (error
+         "runtime.exact_output_lanes"
+         "[runtime.exact_output_lanes] must be a table of lane tables")
+;;
+
 let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) result =
   let providers_result = parse_providers toml in
   let models_result = parse_models toml in
@@ -1109,6 +1200,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
   let assignments_result = parse_keeper_assignments toml in
   let bindings_result = parse_bindings toml in
   let lanes_result = parse_lanes toml in
+  let exact_output_lanes_result = parse_exact_output_lanes toml in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let all_errors =
     errs providers_result
@@ -1117,6 +1209,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     @ errs assignments_result
     @ errs bindings_result
     @ errs lanes_result
+    @ errs exact_output_lanes_result
   in
   if all_errors <> []
   then Error all_errors
@@ -1137,6 +1230,11 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     let lane_decls =
       extract_after_all_errors_guard ~label:"lanes" lanes_result
     in
+    let exact_output_lane_decls =
+      extract_after_all_errors_guard
+        ~label:"exact_output_lanes"
+        exact_output_lanes_result
+    in
     Ok
       { Runtime_schema.providers
       ; models
@@ -1149,6 +1247,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
       ; keeper_assignments
       ; media_failover = runtime_section.media_failover
       ; lane_decls
+      ; exact_output_lane_decls
       })
 ;;
 

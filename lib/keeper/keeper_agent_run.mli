@@ -78,6 +78,15 @@ module For_testing : sig
     :  autonomous_yield_request
     -> Runtime_agent.cooperative_yield_reason
 
+  val provider_transcript_admission
+    :  Agent_sdk.Types.message list
+    -> (unit, Agent_sdk.Error.sdk_error) result
+
+  val dispatch_after_provider_transcript_admission
+    :  messages:Agent_sdk.Types.message list
+    -> dispatch:(unit -> ('a, Agent_sdk.Error.sdk_error) result)
+    -> ('a, Agent_sdk.Error.sdk_error) result
+
 end
 
 (** {1 Turn execution} *)
@@ -125,6 +134,7 @@ val run_turn
   -> ?world_observation:Keeper_world_observation.world_observation
   -> generation:int
   -> ?history_user_source:string
+  -> ?user_turn_record:Keeper_run_prompt.user_turn_record
   -> ?history_assistant_source:string
   -> ?temperature:float
   -> ?on_event:(Agent_sdk.Types.sse_event -> unit)

@@ -103,14 +103,33 @@ let memory_kind_of_wire = function
 
 let all_memory_kinds = [ Decision; Goal; Progress; Open_question; Long_term ]
 
-let memory_kind_is_writable = function
-  | Long_term -> false
-  | Goal | Progress | Decision | Open_question -> true
+type memory_write_destination =
+  | Turn_scoped_bank
+  | Durable_fact_store
+
+(* RFC-0351 L1. A kind does not say whether it can be written, it says which
+   store holds it. The four turn-scoped kinds are working notes for the run in
+   progress; [Long_term] is the durable claim recall reads back on later turns.
+   Total and exhaustive: a new kind is a compile error here, so no kind reaches
+   a store by default. *)
+let memory_write_destination = function
+  | Goal | Progress | Decision | Open_question -> Turn_scoped_bank
+  | Long_term -> Durable_fact_store
 ;;
 
-let writable_memory_kinds = List.filter memory_kind_is_writable all_memory_kinds
+let bank_writable_memory_kinds =
+  List.filter
+    (fun kind ->
+      match memory_write_destination kind with
+      | Turn_scoped_bank -> true
+      | Durable_fact_store -> false)
+    all_memory_kinds
+;;
+
 let valid_memory_kind_strings = List.map memory_kind_to_wire all_memory_kinds
-let writable_memory_kind_strings = List.map memory_kind_to_wire writable_memory_kinds
+
+let bank_writable_memory_kind_strings =
+  List.map memory_kind_to_wire bank_writable_memory_kinds
 
 let memory_horizon_of_kind = function
   | Open_question | Progress -> short_term_horizon

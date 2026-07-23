@@ -261,7 +261,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context)
             let old_crash_log = old_entry.crash_log in
          (match Keeper_registry.register_restarting ~base_path old_entry.name meta with
           | Error (Keeper_registry.Restart_shutdown_reserved operation_id) ->
-            Log.Keeper.info
+            Log.Keeper.warn
               "%s: restart skipped because shutdown operation %s owns admission"
               old_entry.name
               (Keeper_shutdown_types.Operation_id.to_string operation_id);

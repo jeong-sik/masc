@@ -906,10 +906,18 @@ let () =
         Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) ".worktrees"
       in
       Unix.mkdir dot_noise_keeper_dir 0o755;
-      let json =
-        Keeper_event_queue_persistence.fleet_summary_json ~now:30.0 ~base_path
+      let owner_lifecycle ~keeper_name =
+        if String.equal keeper_name pending_keeper
+        then Keeper_event_queue_persistence.Paused_retained
+        else Keeper_event_queue_persistence.Runnable
       in
-      Alcotest.(check string) "summary status" "ok" (string_field "status" json);
+      let json =
+        Keeper_event_queue_persistence.fleet_summary_json
+          ~now:30.0
+          ~base_path
+          ~owner_lifecycle
+      in
+      Alcotest.(check string) "summary status" "degraded" (string_field "status" json);
       Alcotest.(check int)
         "keeper_count excludes snapshotless runtime dirs"
         2
@@ -921,6 +929,30 @@ let () =
         "oldest_age_seconds"
         25.0
         (float_field "oldest_age_seconds" json);
+      Alcotest.(check int)
+        "runnable backlog count excludes paused owner"
+        1
+        (int_field "runnable_backlog_count" json);
+      Alcotest.(check (float 0.001))
+        "runnable oldest age excludes paused owner"
+        25.0
+        (float_field "runnable_oldest_age_seconds" json);
+      Alcotest.(check int)
+        "paused retained count"
+        2
+        (int_field "paused_retained_count" json);
+      Alcotest.(check int)
+        "paused retained keeper count"
+        1
+        (List.length (list_field "paused_retained_by_keeper" json));
+      Alcotest.(check (float 0.001))
+        "paused retained oldest age"
+        20.0
+        (float_field "paused_retained_oldest_age_seconds" json);
+      Alcotest.(check bool)
+        "paused retained work requires explicit operator action"
+        true
+        (bool_field "operator_action_required" json);
       Alcotest.(check int)
         "pending_by_keeper count"
         1
@@ -935,10 +967,18 @@ let () =
         "pending keeper pending"
         2
         (int_field "pending_count" pending_summary);
+      Alcotest.(check string)
+        "pending keeper lifecycle"
+        "paused_retained"
+        (string_field "owner_lifecycle" pending_summary);
       Alcotest.(check int)
         "inflight keeper inflight"
         1
         (int_field "inflight_count" inflight_summary);
+      Alcotest.(check string)
+        "inflight keeper lifecycle"
+        "runnable"
+        (string_field "owner_lifecycle" inflight_summary);
       Alcotest.(check (float 0.001))
         "inflight keeper oldest age"
         25.0
@@ -956,7 +996,11 @@ let () =
         (empty |> fun q -> enqueue q board_stim);
       write_file (snapshot_path ~base_path ~keeper_name) "{not-json";
       let json =
-        Keeper_event_queue_persistence.fleet_summary_json ~now:30.0 ~base_path
+        Keeper_event_queue_persistence.fleet_summary_json
+          ~now:30.0
+          ~base_path
+          ~owner_lifecycle:(fun ~keeper_name:_ ->
+            Keeper_event_queue_persistence.Runnable)
       in
       Alcotest.(check string)
         "corrupt summary status"
@@ -979,6 +1023,45 @@ let () =
         "corrupt keeper read errors"
         1
         (List.length (list_field "read_errors" summary)));
+
+  (* --- durable fleet summary: missing lifecycle truth is not runnable. --- *)
+  let base_path = temp_dir "keeper-event-queue-fleet-summary-lifecycle-missing" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-lifecycle-missing-summary-test" in
+      Keeper_event_queue_persistence.persist
+        ~base_path
+        ~keeper_name
+        (empty |> fun q -> enqueue q board_stim);
+      let json =
+        Keeper_event_queue_persistence.fleet_summary_json
+          ~now:30.0
+          ~base_path
+          ~owner_lifecycle:(fun ~keeper_name:_ ->
+            Keeper_event_queue_persistence.Lifecycle_unknown
+              "durable keeper metadata missing")
+      in
+      Alcotest.(check string)
+        "unknown lifecycle summary status"
+        "degraded"
+        (string_field "status" json);
+      Alcotest.(check int)
+        "unknown lifecycle is excluded from runnable backlog"
+        0
+        (int_field "runnable_backlog_count" json);
+      Alcotest.(check int)
+        "unknown lifecycle remains visible"
+        1
+        (int_field "unclassified_count" json);
+      Alcotest.(check bool)
+        "unknown lifecycle counts are incomplete"
+        false
+        (bool_field "counts_complete" json);
+      Alcotest.(check bool)
+        "unknown lifecycle requires operator action"
+        true
+        (bool_field "operator_action_required" json));
 
   let meta_for_keeper keeper_name trace_id =
     match

@@ -1,7 +1,8 @@
 import { html } from 'htm/preact'
-import { useEffect, useMemo } from 'preact/hooks'
+import { useMemo } from 'preact/hooks'
 
 import type { Keeper } from '../../types'
+import { route } from '../../router'
 import {
   buildCompositeByKeeperKey,
   fleetCompositeSnapshot,
@@ -9,16 +10,14 @@ import {
 import { compositeSnapshotForKeeper } from '../../lib/keeper-composite-lookup'
 import {
   deriveKeeperOperationalState,
+  KEEPER_STATUS_LABEL_KO,
   type KeeperOperationalState,
 } from '../../lib/keeper-operational-state'
 import { keeperDisplayRuntime } from '../../lib/keeper-runtime-display'
-import type { AsyncState } from '../../lib/async-state'
-import type { PersonaSummary } from '../../api/schemas/persona'
 import { keepers } from '../../store'
-import {
-  loadPersonas,
-  personasResource,
-} from '../keeper-spawn/keeper-spawn-state'
+import { KeeperDetailPage } from '../keeper-detail-page'
+import { openKeeperDetail } from '../keeper-detail-state'
+import { PersonaBrowser } from '../keeper-spawn/persona-browser'
 import { KeeperBadge } from '../keeper-badge'
 import { Dot, Pill, type DotState, type PillTone } from '../v2/primitives-v2'
 
@@ -36,11 +35,14 @@ interface RegistryKeeperGroup {
   readonly tone: PillTone
 }
 
+// Group labels come from the canonical KEEPER_STATUS_LABEL_KO SSOT so the
+// registry groups read identically to the monitoring band chip and the
+// keeper-workspace roster groups.
 const KEEPER_GROUPS: Readonly<Record<RegistryKeeperGroupId, RegistryKeeperGroup>> = {
-  running: { id: 'running', label: '실행 중', dot: 'ok', tone: 'ok' },
-  stuck: { id: 'stuck', label: '차단 · 확인 필요', dot: 'bad', tone: 'bad' },
-  paused: { id: 'paused', label: '일시정지', dot: 'warn', tone: 'warn' },
-  offline: { id: 'offline', label: '중지 · 미기동', dot: 'idle', tone: 'neutral' },
+  running: { id: 'running', label: KEEPER_STATUS_LABEL_KO.running, dot: 'ok', tone: 'ok' },
+  stuck: { id: 'stuck', label: KEEPER_STATUS_LABEL_KO.stuck, dot: 'bad', tone: 'bad' },
+  paused: { id: 'paused', label: KEEPER_STATUS_LABEL_KO.paused, dot: 'warn', tone: 'warn' },
+  offline: { id: 'offline', label: KEEPER_STATUS_LABEL_KO.offline, dot: 'idle', tone: 'neutral' },
 }
 
 export function keeperGroup(
@@ -78,52 +80,34 @@ function configuredOnly(state: KeeperOperationalState): boolean {
   return state.kind === 'offline' && state.cause === 'unbooted'
 }
 
-function PersonaLayer({ state }: { state: AsyncState<readonly PersonaSummary[]> }) {
-  if (state.status === 'idle' || state.status === 'loading') {
-    return html`
-      <div class="reg-layer reg-personas">
-        <h3 style="margin:0 0 8px;">Persona <${Pill} tone="info">…<//></h3>
-        <p style="opacity:.6;">불러오는 중…</p>
-      </div>
-    `
-  }
-
-  if (state.status === 'error') {
-    return html`
-      <div class="reg-layer reg-personas">
-        <h3 style="margin:0 0 8px;">Persona <${Pill} tone="bad">오류<//></h3>
-        <p class="reg-error" style="color:var(--color-status-err);">persona 목록 로드 실패: ${state.message}</p>
-      </div>
-    `
-  }
-
+/**
+ * Persona layer. Create/edit/delete and keeper spawn all live in
+ * [PersonaBrowser], which owns its own load, permission gating, and confirm
+ * dialogs. Registry mounts it rather than re-listing personas read-only: two
+ * surfaces for the same records is what split persona writes away from this
+ * route in the first place.
+ */
+function PersonaLayer() {
   return html`
     <div class="reg-layer reg-personas">
-      <h3 style="margin:0 0 8px;">Persona <${Pill} tone="info">${state.data.length}<//></h3>
-      ${state.data.length === 0
-        ? html`<p style="opacity:.6;">등록된 persona가 없습니다.</p>`
-        : html`
-            <ul style="list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px;">
-              ${state.data.map(persona => html`
-                <li key=${persona.persona_name} class="reg-persona-card"
-                    style="border:1px solid var(--color-border-default);border-radius:8px;padding:8px 12px;">
-                  <strong>${persona.display_name}</strong>
-                  ${persona.trait ? html`<span style="opacity:.7;"> · ${persona.trait}</span>` : null}
-                  ${persona.has_keeper_defaults ? html` <${Pill} tone="neutral">keeper defaults<//>` : null}
-                </li>
-              `)}
-            </ul>
-          `}
+      <h2 style="margin:0 0 8px;">Persona</h2>
+      <p style="margin:0 0 12px;opacity:.7;font-size:12px;">
+        페르소나를 만들고 편집합니다. <strong>키퍼 시작</strong>은 그 페르소나의 기본 지시사항으로
+        키퍼를 생성하고 곧바로 부팅합니다 — 설정만 해두는 경로는 아직 없습니다.
+        목표는 생성 후 키퍼 상세에서 연결합니다.
+      </p>
+      <${PersonaBrowser} />
     </div>
   `
 }
 
 export function RegistrySurface() {
-  useEffect(() => {
-    void loadPersonas()
-  }, [])
+  // Keeper update/delete are not reimplemented here. The row opens the existing
+  // keeper detail route, which already hosts the config panel (write) and the
+  // purge flow (delete). `baseAgentDirectoryRoute` keeps 'registry' as the
+  // return tab, so the drill-down does not bounce the operator to Monitoring.
+  const keeperParam = route.value.params.keeper as string | undefined
 
-  const personaState = personasResource.state.value
   const roster = keepers.value
   const fleetSnapshot = fleetCompositeSnapshot.value
   const compositeByKeeperKey = useMemo(
@@ -135,12 +119,25 @@ export function RegistrySurface() {
     [roster, compositeByKeeperKey],
   )
 
+  if (keeperParam) {
+    return html`<${KeeperDetailPage} />`
+  }
+
   return html`
     <section class="reg-surface" style="padding:16px;display:flex;flex-direction:column;gap:20px;">
-      <${PersonaLayer} state=${personaState} />
+      <${PersonaLayer} />
 
-      <div class="reg-layer reg-keepers">
-        <h3 style="margin:0 0 8px;">Keeper <${Pill} tone="info">${roster.length}<//></h3>
+      <!-- Persona-centric registry: persona CRUD is the primary surface;
+           keeper instances are a collapsed, de-emphasized listing below.
+           The <details> toggle keeps groupRegistryKeepers + the
+           #registry?keeper=<name> deep link behavior intact. -->
+      <details class="reg-layer reg-keepers">
+        <summary style="cursor:pointer;list-style:none;">
+          <h3 style="margin:0;display:inline-flex;align-items:center;gap:6px;">
+            Keeper 인스턴스 <${Pill} tone="info">${roster.length}<//>
+          </h3>
+        </summary>
+        <div style="margin-top:12px;">
         ${Object.values(KEEPER_GROUPS).map(group => html`
           <div key=${group.id} class="reg-kgroup" style="margin-bottom:12px;">
             <h4 style="margin:0 0 6px;display:flex;align-items:center;gap:6px;">
@@ -154,13 +151,22 @@ export function RegistrySurface() {
                     ${grouped[group.id].map(row => {
                       const runtime = runtimeLabel(row.keeper)
                       return html`
-                        <li key=${row.keeper.name} class="reg-keeper-row"
-                            style="display:flex;align-items:center;gap:8px;">
-                          <${KeeperBadge} id=${row.keeper.name} variant="full" size="sm" />
-                          <span style="opacity:.7;font-size:12px;">
-                            ${runtime ?? '런타임 없음'}
-                          </span>
-                          ${configuredOnly(row.state) ? html`<${Pill} tone="neutral">configured<//>` : null}
+                        <li key=${row.keeper.name} class="reg-keeper-row">
+                          <button
+                            type="button"
+                            class="reg-keeper-open"
+                            data-testid="registry-keeper-open"
+                            title="${row.keeper.name} 상세 · 설정 편집 · 삭제"
+                            onClick=${() => openKeeperDetail(row.keeper)}
+                            style="display:flex;align-items:center;gap:8px;width:100%;padding:4px;
+                                   background:none;border:0;cursor:pointer;text-align:left;color:inherit;"
+                          >
+                            <${KeeperBadge} id=${row.keeper.name} variant="full" size="sm" />
+                            <span style="opacity:.7;font-size:12px;">
+                              ${runtime ?? '런타임 없음'}
+                            </span>
+                            ${configuredOnly(row.state) ? html`<${Pill} tone="neutral">configured<//>` : null}
+                          </button>
                         </li>
                       `
                     })}
@@ -168,7 +174,8 @@ export function RegistrySurface() {
                 `}
           </div>
         `)}
-      </div>
+        </div>
+      </details>
     </section>
   `
 }

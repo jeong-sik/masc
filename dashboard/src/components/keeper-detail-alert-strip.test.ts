@@ -14,6 +14,9 @@ function keeper(overrides: Partial<Keeper> = {}): Keeper {
   return {
     name: 'quiet-keeper',
     status: 'active',
+    // Live fiber is the normal case; tests that exercise the dead-paused
+    // boot path override this to false explicitly.
+    keepalive_running: true,
     ...overrides,
   }
 }

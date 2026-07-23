@@ -158,7 +158,7 @@ val create_post_once_by_fusion_run_id :
   ttl_hours:int ->
   origin:Board.post_origin ->
   unit ->
-  (Board_core_persist.create_post_once_result, Board.board_error) Result.t
+  (Board.create_post_once_result, Board.board_error) Result.t
 (** Emit post-created hooks only for the durable first creation. Exact replays
     return the existing typed-origin post without a duplicate Board signal;
     conflicting replays return [Already_exists]. *)

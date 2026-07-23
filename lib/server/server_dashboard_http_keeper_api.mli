@@ -23,6 +23,7 @@ val keeper_suffix_clear : string
 val keeper_suffix_checkpoints : string
 val keeper_suffix_runtime_trace : string
 val keeper_suffix_directive : string
+val keeper_suffix_paused_work : string
 
 (** {1 Trajectory merge}
 
@@ -192,28 +193,38 @@ val handle_keeper_lifecycle_post :
   action:String.t ->
   Mcp_server.server_state ->
   string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Generic handler for boot / shutdown / reset / clear posts; the
-    [action] parameter selects the keeper FSM event. *)
+(** Generic handler for boot / shutdown / reset / clear posts. Boot does not
+    resume an ordinary paused owner; callers must commit [Resume_owner] through
+    the directive endpoint. Dead-tombstone revival remains separate. *)
 
 val handle_keeper_directive_post :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->
   Mcp_server.server_state ->
   string -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
-(** Handle [POST /directive] (operator directive injection). *)
+(** Handle [POST /directive] (operator directive injection). A resume body
+    must carry [owner_generation] and a stable [operator_operation_id], and is
+    committed through the typed paused-work disposition transaction. *)
+
+val handle_keeper_paused_work_post :
+  Mcp_server.server_state ->
+  Httpun.Request.t ->
+  Httpun.Reqd.t ->
+  string ->
+  unit
+(** Handle authenticated [POST /paused-work] for exact Resume, Transfer,
+    Cancel, or source-terminal disposition. *)
 
 val handle_keeper_bulk_directive_post :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->
   Mcp_server.server_state ->
   string -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
-(** Handle [POST /api/v1/keepers_bulk/directive]. Body:
-    [{"names": [...], "action": "pause"|"resume"|"wakeup"}]. Runs the
-    same per-keeper meta read / persist / dispatch path as
-    [handle_keeper_directive_post], but issues a single cache invalidate
-    for the whole batch. Trades per-keeper observability granularity for
-    bulk performance: a fleet-wide resume is 1 round-trip + 1 rebuild
-    instead of N + N. *)
+(** Handle [POST /api/v1/keepers_bulk/directive]. Pause and wakeup use
+    [{"names": [...]}]. Resume uses exact per-owner
+    [{"targets": [{"name", "owner_generation", "operator_operation_id"}, ...]}]
+    fences and commits each target through the typed paused-work disposition
+    transaction. Cache invalidation runs once for the whole batch. *)
 
 val handle_keeper_get_subroutes :
   Mcp_server.server_state ->

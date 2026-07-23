@@ -56,6 +56,8 @@ struct
       ()
   ;;
   
+  (* TEL-OK: this facade only forwards the durable transition; the persistence
+     SSOT owns its transition telemetry. *)
   let release_exact_execution_before_dispatch_result
         ~base_path
         name

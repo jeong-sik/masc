@@ -400,10 +400,7 @@ let settlement_wal_entry_of_json owner = function
     (match List.assoc_opt "schema" fields with
      | Some (`String schema)
        when not (String.equal schema "masc.keeper_event_queue.settlement.v2") ->
-       Error
-         (Printf.sprintf
-            "unsupported settlement WAL schema (reset required): %s"
-            schema)
+       Error (Printf.sprintf "unsupported settlement WAL schema: %s" schema)
      | _ ->
        (match List.sort (fun (left, _) (right, _) -> String.compare left right) fields with
         | [ ("base_path", `String base_path)

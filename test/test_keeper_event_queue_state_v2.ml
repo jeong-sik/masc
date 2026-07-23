@@ -2381,7 +2381,12 @@ let test_incompatible_settlement_wal_requires_reset_without_rewrite () =
         (keeper_dir ~base_path ~keeper_name)
         "event-queue-settlements.jsonl"
     in
-    let incompatible_wal_bytes = "{}\n" in
+    let incompatible_wal_schema = "masc.keeper_event_queue.settlement.incompatible" in
+    let incompatible_wal_bytes =
+      `Assoc [ "schema", `String incompatible_wal_schema ]
+      |> Yojson.Safe.to_string
+      |> fun row -> row ^ "\n"
+    in
     Fs_compat.save_file_atomic wal_path incompatible_wal_bytes
     |> require_ok "write incompatible WAL";
     (match Persistence.load_state_result ~base_path ~keeper_name with
@@ -2389,9 +2394,10 @@ let test_incompatible_settlement_wal_requires_reset_without_rewrite () =
        Alcotest.(check string)
          "incompatible WAL requires an explicit reset"
          (Printf.sprintf
-            "settlement WAL at %s is incompatible (reset required): settlement WAL row \
-             fields are not exact"
-            wal_path)
+            "settlement WAL at %s is incompatible (reset required): unsupported settlement \
+             WAL schema: %s"
+            wal_path
+            incompatible_wal_schema)
          message
      | Ok _ -> Alcotest.fail "incompatible settlement WAL was replayed");
     Alcotest.(check string)

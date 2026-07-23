@@ -187,7 +187,6 @@ type config =
         [supports-structured-output]. [None] lets callers use their documented
         migration fallback; schema requests still fail loudly if the resolved
         runtime cannot satisfy them. *)
-  ; hitl_summary_runtime_id : string option
     (** [\[runtime\].hitl_summary] — runtime id for HITL approval context
         summaries. When set, it must resolve to a configured runtime. The HITL
         worker decides native structured vs plain JSON mode at call time, so

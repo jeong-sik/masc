@@ -1,44 +1,28 @@
-(** A provider config paired with the exact runtime id selected for judgment. *)
-type summary_provider = private
-  { runtime_id : string
-  ; provider_config : Llm_provider.Provider_config.t
-  }
-
-val provider_config_for_summary : unit -> summary_provider option
+val lane_id : string
+(** Stable OAS exact-output lane used by automatic HITL judgment. *)
 
 (** Verify that the registry-owned Gate judgment prompt is renderable and that
-    the exact [runtime].hitl_summary runtime is configured and loaded. *)
+    the published immutable exact-output registry resolves at least one usable
+    [hitl_auto_judge] slot. *)
 val readiness : unit -> (unit, string) result
 
-(** Spawn an asynchronous HITL context-summary worker for [runtime_id].
-    The worker is fire-and-forget: it calls [on_summary] only for a validated
-    LLM judgment and [on_failure] for every unavailable, timeout, transport, or
-    parse failure. The caller is responsible for writing the result back to the
-    approval entry (e.g. via [Keeper_approval_queue.attach_summary]). This
-    keeps the worker decoupled from the queue and avoids a module cycle.
-    [on_finish] runs exactly once even when the fiber is cancelled. A persisted
-    request without its exact outer-turn context fails before provider
-    selection and is reported as non-retryable. *)
+(** Prepare every usable lane candidate before launching the fiber, durably bind
+    each immutable attempt before its sole OAS POST, and call [on_summary] only
+    after provenance/domain validation and an fsync-confirmed completion.
+    [on_finish] always releases the owner claim; [continue_owner] is true only
+    when it is safe to drain the next owner-FIFO entry. *)
 val spawn
   :  sw:Eio.Switch.t
-  -> runtime_id:string
-  -> ?provider_config:Llm_provider.Provider_config.t
   -> entry:Keeper_approval_queue.pending_approval
   -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
   -> on_failure:(reason:string -> retryable:bool -> unit)
-  -> on_finish:(unit -> unit)
+  -> on_finish:(continue_owner:bool -> unit)
   -> unit
   -> unit
 
 module For_testing : sig
+  val lane_id : string
   val system_prompt : unit -> (string, string) result
-
-  (** How the judge is asked to return the summary. [Native_structured] uses
-      provider-native json_schema; [Plain_json_text] is the degradation path for
-      endpoints OAS cannot serve native structured output for. *)
-  type summary_mode =
-    | Native_structured
-    | Plain_json_text
 
   type context_bundle_error = Exact_request_context_unavailable
 
@@ -48,48 +32,44 @@ module For_testing : sig
 
   val context_bundle_error_to_string : context_bundle_error -> string
 
+  val messages_for_summary
+    :  system_prompt:string
+    -> context_bundle:Yojson.Safe.t
+    -> Agent_sdk.Types.message list
+
   val parse_summary
     :  generated_at:float
     -> model_run_id:string
     -> Yojson.Safe.t
     -> (Keeper_approval_queue.hitl_context_summary, string) result
 
-  val summary_of_response
-    :  generated_at:float
-    -> mode:summary_mode
-    -> Agent_sdk.Types.api_response
-    -> (Keeper_approval_queue.hitl_context_summary, string) result
+  type attempt_observation =
+    { slot_id : string
+    ; call_id : string
+    ; phase : Agent_sdk.Exact_output.effect_phase
+    ; dispatch_count : int
+    ; plan_fingerprint : string
+    ; request_body_sha256 : string
+    ; catalog_generation_fingerprint : string
+    ; catalog_evidence_sha256 : string
+    ; target_identity_fingerprint : string
+    }
 
-  (** Returns the clamped config plus the chosen output mode: [Native_structured]
-      when {!Llm_provider.Provider_config.validate_output_schema_request} accepts
-      a json_schema request for this endpoint, else [Plain_json_text]. The
-      runtime.toml temperature for [runtime_id] overrides the subsystem fallback. *)
-  val provider_config_for_summary
-    :  runtime_id:string
-    -> Llm_provider.Provider_config.t
-    -> Llm_provider.Provider_config.t * summary_mode
+  type prepared_lane
 
-  (** Strict complete-object parsing from model text (plain capability path). *)
-  val extract_json_object : string -> (Yojson.Safe.t, string) result
+  type preparation_error =
+    | Context_unavailable of context_bundle_error
+    | Prompt_unavailable of string
+    | Lane_unavailable of string
+    | Admission_rejected of string
 
-  (** Metric outcomes emitted when the LLM call fails after [summary_mode] has
-      been selected. Plain-mode failures include [degraded_plain_json] before
-      the terminal failure outcome so degradation is observable even without a
-      model response. *)
-  val summary_llm_error_outcomes
-    :  mode:summary_mode
-    -> Agent_sdk.Error.sdk_error
-    -> string list
+  val prepare_lane
+    :  registry:Runtime_exact_output_registry.t
+    -> entry:Keeper_approval_queue.pending_approval
+    -> (prepared_lane, preparation_error) result
 
-  val summary_llm_error_retryable : Agent_sdk.Error.sdk_error -> bool
-
-  val sdk_error_of_http_error
-    : Llm_provider.Http_client.http_error -> Agent_sdk.Error.sdk_error
-
-  val body_timeout_clock
-    : unit -> float Eio.Time.clock_ty Eio.Resource.t option
-  (** Resolve the server root clock only when the non-streaming body timeout is
-      explicitly configured. [None] leaves the body-read deadline disabled. *)
-
+  val preparation_error_to_string : preparation_error -> string
+  val observations : prepared_lane -> attempt_observation list
+  val is_before_dispatch_zero : Agent_sdk.Exact_output.receipt -> bool
   val summary_version : int
 end

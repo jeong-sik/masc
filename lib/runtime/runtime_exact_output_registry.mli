@@ -1,5 +1,8 @@
 (** Immutable OAS exact-output publication for MASC runtime routing. *)
 
+val hitl_auto_judge_lane_id : string
+(** Stable routing identity for the durable HITL automatic-judgment lane. *)
+
 type t
 type publication_error =
   | Registry_not_published

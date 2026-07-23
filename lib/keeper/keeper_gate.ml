@@ -405,26 +405,13 @@ let rec spawn_claimed_auto_judge_entry
   =
   let approval_id = entry.id in
   let on_summary summary =
-    match Keeper_approval_queue.attach_summary ~id:approval_id summary with
-    | Ok true ->
-      (match resolve_judgment entry ~approval_id summary with
-       | Ok (Judgment_finalized | Judgment_skipped) -> ()
-       | Error reason ->
-         log_auto_resolution_error
-           ~keeper_name:entry.keeper_name
-           ~approval_id
-           reason)
-    | Ok false ->
-      log_summary_transition_miss
+    match resolve_judgment entry ~approval_id summary with
+    | Ok (Judgment_finalized | Judgment_skipped) -> ()
+    | Error reason ->
+      log_auto_resolution_error
         ~keeper_name:entry.keeper_name
         ~approval_id
-        ~operation:"attach"
-    | Error error ->
-      log_summary_state_error
-        ~keeper_name:entry.keeper_name
-        ~approval_id
-        ~operation:"attach"
-        error
+        reason
   in
   let on_failure ~reason ~retryable =
     match
@@ -453,35 +440,24 @@ let rec spawn_claimed_auto_judge_entry
          on_failure ~reason ~retryable;
          Error reason)
   in
-  let provider_selection =
-    try
-      Ok (Hitl_summary_worker.provider_config_for_summary ())
-    with
-    | Eio.Cancel.Cancelled _ as exn ->
-      release_auto_judge entry;
-      raise exn
-    | exn ->
-      Error
-        ("Auto Judge provider selection failed: " ^ Printexc.to_string exn)
-  in
-  match Eio_context.get_root_switch_opt (), provider_selection with
-  | Some sw, Ok (Some selected) ->
+  match Eio_context.get_root_switch_opt () with
+  | Some sw ->
     (try
        Hitl_summary_worker.spawn
          ~sw
-         ~runtime_id:selected.runtime_id
          ~entry
-         ~provider_config:selected.provider_config
          ~on_summary
          ~on_failure
-         ~on_finish:(fun () ->
+         ~on_finish:(fun ~continue_owner ->
            release_auto_judge entry;
-           ignore
-             (drain_auto_judge_owner
-                ~exclude_id:entry.id
-                ~base_path:entry.audit_base_path
-                ~keeper_name:entry.keeper_name
-                ()))
+           if continue_owner
+           then
+             ignore
+               (drain_auto_judge_owner
+                  ~exclude_id:entry.id
+                  ~base_path:entry.audit_base_path
+                  ~keeper_name:entry.keeper_name
+                  ()))
          ();
        Ok Started
      with
@@ -493,16 +469,10 @@ let rec spawn_claimed_auto_judge_entry
          "Auto Judge worker start failed: " ^ Printexc.to_string exn
        in
        fail_before_worker ~reason ~retryable:true)
-  | None, _ ->
+  | None ->
     fail_before_worker
       ~reason:"Auto Judge unavailable: server root switch is not installed"
       ~retryable:true
-  | Some _, Ok None ->
-    fail_before_worker
-      ~reason:
-        "Auto Judge unavailable: explicit [runtime].hitl_summary provider is not loaded"
-      ~retryable:true
-  | Some _, Error reason -> fail_before_worker ~reason ~retryable:true
 
 and spawn_auto_judge_entry (entry : Keeper_approval_queue.pending_approval) =
   if claim_auto_judge entry

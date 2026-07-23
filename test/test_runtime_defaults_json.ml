@@ -23,7 +23,6 @@ let test_build_resolved_serializes_defaults_and_routing () =
         ]
     ; librarian_runtime_id = Some "openai.gpt-4o"
     ; structured_judge_runtime_id = Some "openai.gpt-4o"
-    ; hitl_summary_runtime_id = Some "anthropic.sonnet"
     ; cross_verifier_runtime_id = None
     ; media_failover = [ "openai.gpt-4o" ]
     ; config_path = Some "/cfg/runtime.toml"
@@ -54,8 +53,7 @@ let test_build_resolved_serializes_defaults_and_routing () =
     (member "librarian_runtime_id" routing |> Yojson.Safe.Util.to_string);
   Alcotest.(check string) "structured judge routing" "openai.gpt-4o"
     (member "structured_judge_runtime_id" routing |> Yojson.Safe.Util.to_string);
-  Alcotest.(check string) "hitl summary routing" "anthropic.sonnet"
-    (member "hitl_summary_runtime_id" routing |> Yojson.Safe.Util.to_string)
+  ()
 
 let test_build_uninitialized_emits_null_not_fabricated_default () =
   (* No fabrication: an unresolved runtime config surfaces null/empty, never a
@@ -67,7 +65,6 @@ let test_build_uninitialized_emits_null_not_fabricated_default () =
     ; runtimes = []
     ; librarian_runtime_id = None
     ; structured_judge_runtime_id = None
-    ; hitl_summary_runtime_id = None
     ; cross_verifier_runtime_id = None
     ; media_failover = []
     ; config_path = None
@@ -84,9 +81,7 @@ let test_build_uninitialized_emits_null_not_fabricated_default () =
   Alcotest.(check bool) "cross_verifier null" true
     (member "cross_verifier_runtime_id" routing = `Null);
   Alcotest.(check bool) "structured_judge null" true
-    (member "structured_judge_runtime_id" routing = `Null);
-  Alcotest.(check bool) "hitl_summary null" true
-    (member "hitl_summary_runtime_id" routing = `Null)
+    (member "structured_judge_runtime_id" routing = `Null)
 
 let () =
   Alcotest.run "runtime_defaults_json"

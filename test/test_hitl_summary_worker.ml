@@ -3,46 +3,10 @@ open Alcotest
 module Q = Masc.Keeper_approval_queue
 module Worker = Masc.Hitl_summary_worker
 module Schema = Masc.Keeper_structured_output_schema
-module Runtime_resolved = Masc.Keeper_runtime_resolved
+module Fixture = Compaction_exact_output_fixture
+module Exact_output = Agent_sdk.Exact_output
 
 let yojson = testable Yojson.Safe.pretty_print Yojson.Safe.equal
-
-let exact_runtime_id = "local.auto_judge"
-
-let runtime_toml ~hitl_summary =
-  "[providers.local]\n\
-   display-name = \"Local\"\n\
-   protocol = \"ollama-http\"\n\
-   endpoint = \"http://localhost:11434\"\n\
-   \n\
-   [models.auto_judge]\n\
-   api-name = \"auto-judge\"\n\
-   max-context = 4096\n\
-   \n\
-   [models.auto_judge.capabilities]\n\
-   supports-structured-output = true\n\
-   \n\
-   [local.auto_judge]\n\
-   \n\
-   [runtime]\n\
-   default = \"local.auto_judge\"\n\
-   structured_judge = \"local.auto_judge\"\n"
-  ^ if hitl_summary then "hitl_summary = \"local.auto_judge\"\n" else ""
-;;
-
-let with_runtime_config content f =
-  let path = Filename.temp_file "hitl-summary-runtime" ".toml" in
-  let snapshot = Runtime.For_testing.snapshot () in
-  Fun.protect
-    ~finally:(fun () ->
-      Runtime.For_testing.restore snapshot;
-      try Sys.remove path with
-      | Sys_error _ -> ())
-    (fun () ->
-       match Runtime.save_config_text ~runtime_config_path:path content with
-       | Error detail -> failf "runtime config should load: %s" detail
-       | Ok () -> f ())
-;;
 
 let sample_entry : Q.pending_approval =
   { id = "approval-1"
@@ -98,13 +62,14 @@ let test_parse_typed_judgments () =
          match
            Worker.For_testing.parse_summary
              ~generated_at:1780587600.0
-             ~model_run_id:"run"
+             ~model_run_id:"exact-call-id"
              (judgment_json wire)
          with
          | Ok summary -> summary
          | Error reason -> fail reason
        in
-       check bool wire true (summary.judgment = expected))
+       check bool wire true (summary.judgment = expected);
+       check string "model_run_id is the exact call id" "exact-call-id" summary.model_run_id)
     [ "approve", Q.Approve; "deny", Q.Deny; "require_human", Q.Require_human ]
 ;;
 
@@ -174,12 +139,12 @@ let test_context_bundle_contains_exact_input_without_derived_classification () =
   check yojson "no derived level" `Null (bundle |> member "level")
 ;;
 
-let test_missing_request_context_is_terminal_before_provider () =
+let test_missing_request_context_is_terminal_before_admission () =
   match
     Worker.For_testing.build_context_bundle
       ~entry:{ sample_entry with request_context = None }
   with
-  | Ok _ -> fail "missing exact request context produced a provider payload"
+  | Ok _ -> fail "missing exact request context produced an OAS payload"
   | Error Worker.For_testing.Exact_request_context_unavailable ->
     check string
       "failure is stable and explicit"
@@ -188,58 +153,80 @@ let test_missing_request_context_is_terminal_before_provider () =
          Worker.For_testing.Exact_request_context_unavailable)
 ;;
 
-let test_plain_json_requires_exact_object () =
-  let expected = judgment_json "require_human" in
-  match Worker.For_testing.extract_json_object (Yojson.Safe.to_string expected) with
-  | Error reason -> fail reason
-  | Ok actual ->
-    check yojson "exact object" expected actual;
-    check bool "fenced JSON rejected" true
-      (Result.is_error
-         (Worker.For_testing.extract_json_object
-            ("```json\n" ^ Yojson.Safe.to_string expected ^ "\n```")))
-;;
-
-let test_typed_llm_retryability () =
-  check bool "context overflow is terminal for the exact request" false
-    (Worker.For_testing.summary_llm_error_retryable
-       (Agent_sdk.Error.Api
-          (ContextOverflow { message = "too large"; limit = Some 131072 })));
-  check bool "network failure remains retryable" true
-    (Worker.For_testing.summary_llm_error_retryable
-       (Agent_sdk.Error.Api
-          (NetworkError
-             { message = "refused"
-             ; kind = Llm_provider.Http_client.Connection_refused
-             })))
-;;
-
-let test_http_error_mapping_preserves_typed_domain () =
-  check bool "transport timeout stays typed" true
-    (match
-       Worker.For_testing.sdk_error_of_http_error
-         (Llm_provider.Http_client.TimeoutError
-            { message = "deadline"; phase = Non_streaming_body })
-     with
-     | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> true
-     | _ -> false);
-  check bool "network failure stays typed" true
-    (match
-       Worker.For_testing.sdk_error_of_http_error
-         (Llm_provider.Http_client.NetworkError
-            { message = "refused"; kind = Connection_refused })
-     with
-     | Agent_sdk.Error.Api (NetworkError _) -> true
-     | _ -> false)
-;;
-
 let test_gate_judgment_prompt_comes_from_registry () =
   Prompt_registry.set_markdown_dir
     (Masc_test_deps.source_path "config/prompts");
   match Worker.For_testing.system_prompt () with
   | Error detail -> fail ("Gate judgment prompt unavailable: " ^ detail)
-  | Ok prompt ->
-    check bool "prompt is non-empty" true (String.trim prompt <> "")
+  | Ok prompt -> check bool "prompt is non-empty" true (String.trim prompt <> "")
+;;
+
+let exact_registry () =
+  let slot_ids = [ "hitl-slot-a"; "hitl-slot-b" ] in
+  let fixtures : Fixture.target_fixture list =
+    List.map
+      (fun id -> { Fixture.id = id; base_url = "http://127.0.0.1:1" })
+      slot_ids
+  in
+  let snapshot =
+    Fixture.resolver_snapshot ~source:"hitl-worker-exact-fixture" fixtures
+  in
+  Fixture.publish_registry
+    ~lane_id:Worker.For_testing.lane_id
+    ~slot_ids
+    snapshot
+;;
+
+let test_prepares_every_candidate_before_network () =
+  Prompt_registry.set_markdown_dir
+    (Masc_test_deps.source_path "config/prompts");
+  let registry = exact_registry () in
+  let prepared =
+    match Worker.For_testing.prepare_lane ~registry ~entry:sample_entry with
+    | Ok prepared -> prepared
+    | Error error -> fail (Worker.For_testing.preparation_error_to_string error)
+  in
+  let observations = Worker.For_testing.observations prepared in
+  check
+    (list string)
+    "lane order is preserved"
+    [ "hitl-slot-a"; "hitl-slot-b" ]
+    (List.map (fun observation -> observation.Worker.For_testing.slot_id) observations);
+  List.iter
+    (fun observation ->
+       check bool "attempt is not dispatched" true
+         (match observation.Worker.For_testing.phase with
+          | Exact_output.Not_started -> true
+          | Exact_output.Before_dispatch
+          | Exact_output.Dispatch_started
+          | Exact_output.Response_received
+          | Exact_output.Terminal -> false);
+       check int "dispatch count" 0 observation.dispatch_count)
+    observations;
+  check int "every attempt has a unique call id" (List.length observations)
+    (observations
+     |> List.map (fun observation -> observation.call_id)
+     |> List.sort_uniq String.compare
+     |> List.length);
+  check int "one frozen catalog generation" 1
+    (observations
+     |> List.map (fun observation -> observation.catalog_generation_fingerprint)
+     |> List.sort_uniq String.compare
+     |> List.length);
+  check int "one frozen catalog evidence document" 1
+    (observations
+     |> List.map (fun observation -> observation.catalog_evidence_sha256)
+     |> List.sort_uniq String.compare
+     |> List.length)
+;;
+
+let test_readiness_resolves_exact_lane () =
+  Prompt_registry.set_markdown_dir
+    (Masc_test_deps.source_path "config/prompts");
+  ignore (exact_registry () : Masc.Runtime_exact_output_registry.t);
+  match Worker.readiness () with
+  | Ok () -> ()
+  | Error detail -> fail detail
 ;;
 
 let test_readiness_fails_when_gate_prompt_is_missing () =
@@ -260,91 +247,13 @@ let test_readiness_fails_when_gate_prompt_is_missing () =
        | Ok () -> fail "missing Gate prompt reported ready"
        | Error detail ->
          check bool "missing prompt is explicit" true
-           (Astring.String.is_infix ~affix:"keeper.gate_judgment" detail);
-          let open Yojson.Safe.Util in
-          let status = Masc.Keeper_gate_mode.status_json ~base_path:empty_dir in
-          check string "dashboard status is unavailable" "unavailable"
-            (status |> member "state" |> to_string);
-          check bool "dashboard status carries readiness error" true
-            (status |> member "read_error" |> to_string |> String.trim <> ""))
-;;
-
-let with_body_timeout_env value f =
-  let name = "MASC_KEEPER_BODY_TIMEOUT_SEC" in
-  let previous = Sys.getenv_opt name in
-  Unix.putenv name value;
-  Runtime_resolved.reset_for_tests ();
-  Fun.protect
-    ~finally:(fun () ->
-      (match previous with
-       | Some previous -> Unix.putenv name previous
-       | None -> Unix.unsetenv name);
-      Runtime_resolved.reset_for_tests ())
-    f
-;;
-
-let with_root_eio_context f =
-  Eio_main.run @@ fun env ->
-  let net = Eio.Stdenv.net env in
-  let clock = Eio.Stdenv.clock env in
-  let mono_clock = Eio.Stdenv.mono_clock env in
-  Eio.Switch.run @@ fun sw ->
-  Eio_context.with_test_env ~net ~clock ~mono_clock ~sw (fun () -> f clock)
-;;
-
-let test_unset_body_timeout_does_not_forward_root_clock () =
-  with_root_eio_context @@ fun _root_clock ->
-  with_body_timeout_env "" @@ fun () ->
-  check
-    bool
-    "unset body timeout keeps provider clock absent"
-    true
-    (Option.is_none (Worker.For_testing.body_timeout_clock ()))
-;;
-
-let test_explicit_body_timeout_forwards_root_clock () =
-  with_root_eio_context @@ fun root_clock ->
-  with_body_timeout_env "30" @@ fun () ->
-  match Worker.For_testing.body_timeout_clock () with
-  | Some actual ->
-    check bool "explicit body timeout uses the exact root clock" true (actual == root_clock)
-  | None -> fail "explicit body timeout dropped the root clock"
-;;
-
-let test_readiness_requires_explicit_dedicated_runtime () =
-  Prompt_registry.set_markdown_dir
-    (Masc_test_deps.source_path "config/prompts");
-  with_runtime_config (runtime_toml ~hitl_summary:false) @@ fun () ->
-  check (option string) "dedicated runtime is absent" None
-    (Runtime.hitl_summary_runtime_id ());
-  check bool "structured judge is not reused" true
-    (Option.is_none (Worker.provider_config_for_summary ()));
-  match Worker.readiness () with
-  | Ok () -> fail "Auto Judge reported ready without [runtime].hitl_summary"
-  | Error detail ->
-    check string
-      "missing dedicated runtime is explicit"
-      "Auto Judge requires an explicit [runtime].hitl_summary runtime"
-      detail
-;;
-
-let test_readiness_selects_exact_dedicated_runtime () =
-  Prompt_registry.set_markdown_dir
-    (Masc_test_deps.source_path "config/prompts");
-  with_runtime_config (runtime_toml ~hitl_summary:true) @@ fun () ->
-  (match Worker.readiness () with
-   | Ok () -> ()
-   | Error detail -> fail detail);
-  match Worker.provider_config_for_summary () with
-  | None -> fail "configured Auto Judge runtime did not resolve"
-  | Some selected ->
-    check string "exact dedicated runtime selected" exact_runtime_id selected.runtime_id
+           (Astring.String.is_infix ~affix:"keeper.gate_judgment" detail))
 ;;
 
 let () =
   run
     "Hitl_summary_worker"
-    [ ( "typed judgment"
+    [ ( "exact judgment"
       , [ test_case "parse variants" `Quick test_parse_typed_judgments
         ; test_case "invalid judgment fails loud" `Quick test_invalid_judgment_fails_loud
         ; test_case
@@ -360,45 +269,25 @@ let () =
             `Quick
             test_context_bundle_contains_exact_input_without_derived_classification
         ; test_case
-            "missing request context is terminal before provider"
+            "missing request context stops before admission"
             `Quick
-            test_missing_request_context_is_terminal_before_provider
-        ; test_case
-            "plain JSON requires exact object"
-            `Quick
-            test_plain_json_requires_exact_object
-        ; test_case
-            "LLM retryability uses typed SDK domain"
-            `Quick
-            test_typed_llm_retryability
-        ; test_case
-            "HTTP errors preserve typed SDK domains"
-            `Quick
-            test_http_error_mapping_preserves_typed_domain
+            test_missing_request_context_is_terminal_before_admission
         ; test_case
             "Gate judgment prompt is registry-owned"
             `Quick
             test_gate_judgment_prompt_comes_from_registry
         ; test_case
-            "Gate judgment readiness fails when missing"
+            "all lane candidates are prepared before network"
+            `Quick
+            test_prepares_every_candidate_before_network
+        ; test_case
+            "readiness resolves exact lane"
+            `Quick
+            test_readiness_resolves_exact_lane
+        ; test_case
+            "readiness fails when prompt is missing"
             `Quick
             test_readiness_fails_when_gate_prompt_is_missing
-        ; test_case
-            "unset body timeout does not forward root clock"
-            `Quick
-            test_unset_body_timeout_does_not_forward_root_clock
-        ; test_case
-            "explicit body timeout forwards root clock"
-            `Quick
-            test_explicit_body_timeout_forwards_root_clock
-        ; test_case
-            "readiness requires dedicated runtime"
-            `Quick
-            test_readiness_requires_explicit_dedicated_runtime
-        ; test_case
-            "readiness selects exact dedicated runtime"
-            `Quick
-            test_readiness_selects_exact_dedicated_runtime
         ] )
     ]
 ;;

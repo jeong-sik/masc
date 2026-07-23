@@ -618,7 +618,6 @@ let test_repo_runtime_bindings_resolve_through_oas_provider_config () =
       , _assignments
       , _librarian
       , _structured_judge
-      , _hitl_summary
       , _cross_verifier
       , _media_failover , _lanes ) ->
     check bool "at least one runtime binding" true (List.length runtimes > 0);
@@ -743,7 +742,6 @@ let test_repo_runtime_toml_loads () =
       , assignments
       , _librarian
       , structured_judge
-      , _hitl_summary
       , _cross_verifier
       , _media_failover , _lanes ) ->
     check bool "at least one runtime" true (List.length runtimes > 0);
@@ -1783,7 +1781,6 @@ let test_runtime_toml_max_concurrent_flows_to_provider_config () =
         , _assignments
         , _librarian
         , _structured_judge
-        , _hitl_summary
         , _cross_verifier
         , _media_failover
         , _lanes ) ->
@@ -1854,7 +1851,6 @@ let test_librarian_runtime_routing () =
         , _assignments
         , librarian
         , _structured_judge
-        , _hitl_summary
         , _cross_verifier
         , _media_failover , _lanes ) ->
       check (option string) "librarian runtime id" (Some "local.libr") librarian);
@@ -1867,7 +1863,6 @@ let test_librarian_runtime_routing () =
         , _
         , librarian
         , _structured_judge
-        , _hitl_summary
         , _cross_verifier
         , _media_failover
         , _lanes ) ->
@@ -1885,7 +1880,6 @@ let test_librarian_runtime_routing () =
         , _assignments
         , _librarian
         , _structured_judge
-        , _hitl_summary
         , cross_verifier
         , _media_failover , _lanes ) ->
       check (option string) "cross_verifier runtime id" (Some "local.libr")
@@ -1899,7 +1893,6 @@ let test_librarian_runtime_routing () =
         , _
         , _
         , _structured_judge
-        , _hitl_summary
         , cross_verifier
         , _media_failover
         , _lanes ) ->
@@ -1946,7 +1939,7 @@ let test_structured_judge_runtime_routing () =
   with_temp_runtime_toml (base ^ "structured_judge = \"local.judge\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "structured_judge routing should load: %s" msg
-    | Ok (_, _, _, _, structured_judge, _hitl_summary, _, _, _) ->
+    | Ok (_, _, _, _, structured_judge, _, _, _) ->
       check
         (option string)
         "structured_judge runtime id"
@@ -1955,7 +1948,7 @@ let test_structured_judge_runtime_routing () =
   with_temp_runtime_toml base (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "absent structured_judge should load: %s" msg
-    | Ok (_, _, _, _, structured_judge, _hitl_summary, _, _, _) ->
+    | Ok (_, _, _, _, structured_judge, _, _, _) ->
       check (option string) "structured_judge unset is None" None structured_judge);
   with_temp_runtime_toml (base ^ "structured_judge = \"local.nope\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
@@ -2086,7 +2079,7 @@ let test_structured_judge_lane_target () =
   with_temp_runtime_toml capable_lane (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "lane-targeted structured_judge should load: %s" msg
-    | Ok (_, _, _, _, structured_judge, _, _, _, lanes) ->
+    | Ok (_, _, _, _, structured_judge, _, _, lanes) ->
       check
         (option string)
         "structured_judge keeps the lane id"
@@ -2154,7 +2147,7 @@ let test_cross_verifier_lane_target () =
   with_temp_runtime_toml json_capable_lane (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "lane-targeted cross_verifier should load: %s" msg
-    | Ok (_, _, _, _, _, _, cross_verifier, _, _) ->
+    | Ok (_, _, _, _, _, cross_verifier, _, _) ->
       check
         (option string)
         "cross_verifier keeps the lane id"
@@ -2182,86 +2175,6 @@ let test_cross_verifier_lane_target () =
       check bool "error names the missing capability" true
         (String_util.contains_substring msg "supports-response-format-json"))
 
-let test_hitl_summary_runtime_routing () =
-  let base =
-    "[providers.local]\n\
-     display-name = \"Local\"\n\
-     protocol = \"ollama-http\"\n\
-     endpoint = \"http://localhost:11434\"\n\
-     \n\
-     [models.chat]\n\
-     api-name = \"chat\"\n\
-     max-context = 1024\n\
-     \n\
-     [models.summary]\n\
-     api-name = \"summary\"\n\
-     max-context = 1024\n\
-     \n\
-     [local.chat]\n\
-     \n\
-     [local.summary]\n\
-     \n\
-     [runtime]\n\
-     default = \"local.chat\"\n"
-  in
-  with_temp_runtime_toml (base ^ "hitl_summary = \"local.summary\"\n") (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg -> failf "hitl_summary routing should load: %s" msg
-    | Ok (_, _, _, _, _structured_judge, hitl_summary, _, _, _) ->
-      check
-        (option string)
-        "hitl_summary runtime id"
-        (Some "local.summary")
-        hitl_summary);
-  with_temp_runtime_toml base (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Error msg -> failf "absent hitl_summary should load: %s" msg
-    | Ok (_, _, _, _, _structured_judge, hitl_summary, _, _, _) ->
-      check (option string) "hitl_summary unset is None" None hitl_summary);
-  with_temp_runtime_toml (base ^ "hitl_summary = \"local.nope\"\n") (fun path ->
-    match Runtime.load_list ~config_path:path with
-    | Ok _ -> failf "unknown [runtime].hitl_summary id must be rejected"
-    | Error _ -> ());
-  let explicit_hitl_summary = base ^ "hitl_summary = \"local.summary\"\n" in
-  with_temp_runtime_toml explicit_hitl_summary (fun path ->
-    match Runtime.save_config_text ~runtime_config_path:path explicit_hitl_summary with
-    | Error msg -> failf "save_config_text should load hitl_summary: %s" msg
-    | Ok () ->
-      check
-        (option string)
-        "saved hitl_summary runtime id"
-        (Some "local.summary")
-        (Runtime.hitl_summary_runtime_id ()));
-  with_temp_runtime_toml base (fun path ->
-    match
-      Runtime.set_runtime_hitl_summary
-        ~runtime_config_path:path
-        ~runtime_id:(Some "local.summary")
-        ()
-    with
-    | Error msg -> failf "set_runtime_hitl_summary should validate: %s" msg
-    | Ok () ->
-      check
-        (option string)
-        "writer saved hitl_summary runtime id"
-        (Some "local.summary")
-        (Runtime.hitl_summary_runtime_id ());
-      check bool "runtime.toml hitl_summary persisted" true
-        (String_util.contains_substring
-           (Fs_compat.load_file path)
-           "hitl_summary = \"local.summary\""));
-  with_temp_runtime_toml (base ^ "hitl_summary = \"local.summary\"\n") (fun path ->
-    match
-      Runtime.set_runtime_hitl_summary ~runtime_config_path:path ~runtime_id:None ()
-    with
-    | Error msg -> failf "clear hitl_summary should validate: %s" msg
-    | Ok () ->
-      check (option string) "writer cleared hitl_summary" None
-        (Runtime.hitl_summary_runtime_id ());
-      check bool "runtime.toml hitl_summary removed" false
-        (String_util.contains_substring
-           (Fs_compat.load_file path)
-           "hitl_summary"))
 
 let test_save_config_text_refreshes_cross_verifier_runtime () =
   with_fake_runtime_model_catalog @@ fun () ->
@@ -2708,9 +2621,6 @@ let () =
           test_case
             "[runtime].cross_verifier accepts JSON-capable lanes"
             `Quick test_cross_verifier_lane_target;
-          test_case
-            "[runtime].hitl_summary resolves, refreshes, and rejects unknown ids"
-            `Quick test_hitl_summary_runtime_routing;
           test_case
             "save_config_text validates and refreshes cross_verifier runtime"
             `Quick test_save_config_text_refreshes_cross_verifier_runtime;

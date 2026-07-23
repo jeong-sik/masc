@@ -178,6 +178,50 @@ let read_exact_output_overlay path =
   | Sys_error detail -> Error detail
 ;;
 
+let embedded_hitl_auto_judge_lane () =
+  let lane_id = Runtime_exact_output_registry.hitl_auto_judge_lane_id in
+  let embedded_runtime =
+    match Embedded_config.read "runtime.toml" with
+    | Some contents -> contents
+    | None ->
+      raise
+        (Env_config_core.Config_error
+           "exact-output registry: embedded runtime.toml is missing")
+  in
+  let config =
+    match Runtime_toml.parse_string embedded_runtime with
+    | Ok config -> config
+    | Error errors ->
+      raise
+        (Env_config_core.Config_error
+           (Printf.sprintf
+              "exact-output registry: embedded runtime.toml has %d parse error(s)"
+              (List.length errors)))
+  in
+  match
+    List.find_opt
+      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         String.equal lane.id lane_id)
+      config.exact_output_lane_decls
+  with
+  | Some lane -> lane
+  | None ->
+    raise
+      (Env_config_core.Config_error
+         "exact-output registry: embedded runtime.toml lacks the required HITL lane")
+;;
+
+let backfill_hitl_auto_judge_lane lanes =
+  let lane_id = Runtime_exact_output_registry.hitl_auto_judge_lane_id in
+  if
+    List.exists
+      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         String.equal lane.id lane_id)
+      lanes
+  then lanes
+  else lanes @ [ embedded_hitl_auto_judge_lane () ]
+;;
+
 let load_exact_output_lane_declarations () =
   match Runtime.config_path () with
   | None ->
@@ -186,7 +230,8 @@ let load_exact_output_lane_declarations () =
          "exact-output registry: runtime.toml path is unavailable")
   | Some config_path ->
     (match Runtime_toml.parse_file config_path with
-     | Ok (config : Runtime_schema.config) -> config.exact_output_lane_decls
+     | Ok (config : Runtime_schema.config) ->
+       backfill_hitl_auto_judge_lane config.exact_output_lane_decls
      | Error errors ->
        raise
          (Env_config_core.Config_error

@@ -19,7 +19,6 @@ type resolved =
   ; runtimes : runtime_entry list
   ; librarian_runtime_id : string option
   ; structured_judge_runtime_id : string option
-  ; hitl_summary_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; config_path : string option

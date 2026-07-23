@@ -253,7 +253,6 @@ type config =
         judges. When set, it must resolve to a model declaring
         [supports-structured-output]. [None] lets callers use their documented
         migration fallback, but no caller may silently discard a schema request. *)
-  ; hitl_summary_runtime_id : string option
     (** [\[runtime\].hitl_summary] — runtime id for HITL approval context
         summaries. When set, it must resolve to a configured runtime. The HITL
         worker decides native structured vs plain JSON mode at call time, so

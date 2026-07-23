@@ -106,19 +106,17 @@ val load_list :
        * string option
        * string option
        * string option
-       * string option
        * string list
        * Runtime_lane.t list
      , string )
      result
 (** [load_list ~config_path] parses runtime.toml into [(runtimes, default,
     keeper_assignments, librarian_runtime_id, structured_judge_runtime_id,
-    hitl_summary_runtime_id, cross_verifier_runtime_id, media_failover, lanes)].
+    cross_verifier_runtime_id, media_failover, lanes)].
     Fails ([Error]) if
     [\[runtime\].default] is missing / unresolved, if any
     [\[runtime.assignments\]] target does not resolve to a configured runtime, if
     [\[runtime\].librarian] / [\[runtime\].structured_judge] /
-    [\[runtime\].hitl_summary] /
     [\[runtime\].cross_verifier] is set to an unresolved id, if any
     [\[runtime\].media_failover] entry does not resolve, or if any
     [\[runtime.lanes.<id>\]] candidate does not resolve (mirrors default
@@ -218,11 +216,6 @@ val structured_judge_runtime_id : unit -> string option
     structured-output judge calls, or [None] when unset. Validated at load so a
     [Some] resolves to a configured runtime whose model declares
     [supports-structured-output]. *)
-
-val hitl_summary_runtime_id : unit -> string option
-(** [\[runtime\].hitl_summary] runtime id for HITL approval context summaries,
-    or [None] when unset. Validated at load so a [Some] resolves to a configured
-    runtime. Auto Judge does not inherit another subsystem's runtime. *)
 
 val runtime_id_for_structured_judge : unit -> string
 (** Resolved runtime id for configured structured-output judgment calls.
@@ -423,12 +416,6 @@ val set_runtime_structured_judge :
 (** Persist or clear [\[runtime\]].structured_judge through the runtime.toml
     SSOT writer, validate the resulting config, atomically write it, and refresh
     the in-process runtime cache. *)
-
-val set_runtime_hitl_summary :
-  ?runtime_config_path:string -> runtime_id:string option -> unit -> (unit, string) result
-(** Persist or clear [\[runtime\]].hitl_summary through the runtime.toml SSOT
-    writer, validate the resulting config, atomically write it, and refresh the
-    in-process runtime cache. *)
 
 val set_runtime_cross_verifier :
   ?runtime_config_path:string -> runtime_id:string option -> unit -> (unit, string) result

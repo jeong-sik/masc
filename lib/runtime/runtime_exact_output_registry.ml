@@ -2,6 +2,8 @@ module Exact_output = Agent_sdk.Exact_output
 module String_set = Set.Make (String)
 module String_map = Map.Make (String)
 
+let hitl_auto_judge_lane_id = "hitl_auto_judge"
+
 type admitted_slot =
   { slot_id : string
   ; admitted_target : Exact_output.admitted_target

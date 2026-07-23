@@ -10,6 +10,7 @@ import {
   KEEPER_STATUS_LABEL_KO,
   KEEPER_TRANSIENT_LABEL_KO,
 } from './keeper-operational-state'
+import { PHASE_LABEL_KO } from './fleet-tone'
 
 export type RuntimeBand = 'active' | 'attention' | 'paused' | 'offline' | 'transient'
 
@@ -55,26 +56,32 @@ const OFFLINE_STAGE_META: StageMeta = {
   description: '활동 정보를 확인하지 못했습니다.',
 }
 
+// Phase labels come from the fleet-tone PHASE_LABEL_KO SSOT (keyed on the
+// lowercase KeeperPhaseToken; the PascalCase KeeperPhase keys below map
+// 1:1 onto those tokens). Keys with no KeeperPhaseToken counterpart
+// ('Offline'/'offline' — the token union has no 'offline' arm — and the
+// non-phase lifecycle buckets active/busy/listening/idle) keep their
+// local literals.
 const PHASE_LABELS: Record<string, PhaseMeta> = {
   Offline: { key: 'Offline', label: '오프라인', description: '런타임이 올라오지 않았거나 연결 정보가 없습니다.' },
-  Running: { key: 'Running', label: '실행중', description: 'keeper_state_machine 기준으로 정상 실행 상태입니다.' },
-  Failing: { key: 'Failing', label: '오류중', description: '최근 실행에서 오류를 감지했습니다.' },
-  Overflowed: { key: 'Overflowed', label: '컨텍스트초과', description: '프롬프트가 runtime 컨텍스트 한도를 넘겨 자동 복구가 필요합니다.' },
-  Compacting: { key: 'Compacting', label: '압축중', description: '컨텍스트를 정리하는 중입니다.' },
-  HandingOff: { key: 'HandingOff', label: '승계중', description: '새 세대로 넘기는 중입니다.' },
-  Draining: { key: 'Draining', label: '종료중', description: '현재 작업을 마무리하는 중입니다.' },
-  Paused: { key: 'Paused', label: '일시정지', description: 'keeper가 재개 대기 상태로 멈춰 있습니다.' },
-  Stopped: { key: 'Stopped', label: '정지', description: '정상 정지된 런타임입니다.' },
-  Crashed: { key: 'Crashed', label: '비정상종료', description: 'fiber가 비정상적으로 종료되었습니다.' },
-  Restarting: { key: 'Restarting', label: '재시작중', description: '복구를 시도하고 있습니다.' },
-  Dead: { key: 'Dead', label: '종료', description: '명시적인 tombstone으로 종료된 상태입니다.' },
+  Running: { key: 'Running', label: PHASE_LABEL_KO.running, description: 'keeper_state_machine 기준으로 정상 실행 상태입니다.' },
+  Failing: { key: 'Failing', label: PHASE_LABEL_KO.failing, description: '최근 실행에서 오류를 감지했습니다.' },
+  Overflowed: { key: 'Overflowed', label: PHASE_LABEL_KO.overflowed, description: '프롬프트가 runtime 컨텍스트 한도를 넘겨 자동 복구가 필요합니다.' },
+  Compacting: { key: 'Compacting', label: PHASE_LABEL_KO.compacting, description: '컨텍스트를 정리하는 중입니다.' },
+  HandingOff: { key: 'HandingOff', label: PHASE_LABEL_KO.handoff, description: '새 세대로 넘기는 중입니다.' },
+  Draining: { key: 'Draining', label: PHASE_LABEL_KO.draining, description: '현재 작업을 마무리하는 중입니다.' },
+  Paused: { key: 'Paused', label: PHASE_LABEL_KO.paused, description: 'keeper가 재개 대기 상태로 멈춰 있습니다.' },
+  Stopped: { key: 'Stopped', label: PHASE_LABEL_KO.stopped, description: '정상 정지된 런타임입니다.' },
+  Crashed: { key: 'Crashed', label: PHASE_LABEL_KO.crashed, description: 'fiber가 비정상적으로 종료되었습니다.' },
+  Restarting: { key: 'Restarting', label: PHASE_LABEL_KO.restarting, description: '복구를 시도하고 있습니다.' },
+  Dead: { key: 'Dead', label: PHASE_LABEL_KO.dead, description: '명시적인 tombstone으로 종료된 상태입니다.' },
   active: { key: 'active', label: '실행중', description: '프로세스는 살아 있지만 state projection이 부족합니다.' },
   busy: { key: 'busy', label: '작업중', description: '프로세스는 살아 있고 현재 작업을 수행 중입니다.' },
   listening: { key: 'listening', label: '대기중', description: '프로세스는 살아 있고 입력을 기다리고 있습니다.' },
   idle: { key: 'idle', label: '대기', description: '프로세스는 살아 있지만 현재 턴 작업은 없습니다.' },
-  paused: { key: 'paused', label: '일시정지', description: 'keeper가 재개 대기 상태로 멈춰 있습니다.' },
-  stopped: { key: 'stopped', label: '정지', description: '이전에 실행되었지만 현재는 정지 상태입니다.' },
-  unbooted: { key: 'unbooted', label: '미기동', description: '등록만 되어 있고 아직 부팅되지 않았습니다.' },
+  paused: { key: 'paused', label: PHASE_LABEL_KO.paused, description: 'keeper가 재개 대기 상태로 멈춰 있습니다.' },
+  stopped: { key: 'stopped', label: PHASE_LABEL_KO.stopped, description: '이전에 실행되었지만 현재는 정지 상태입니다.' },
+  unbooted: { key: 'unbooted', label: PHASE_LABEL_KO.unbooted, description: '등록만 되어 있고 아직 부팅되지 않았습니다.' },
   offline: { key: 'offline', label: '오프라인', description: '런타임 연결을 확인하지 못했습니다.' },
   unknown: UNKNOWN_PHASE_META,
 }

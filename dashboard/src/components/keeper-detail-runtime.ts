@@ -6,6 +6,7 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { Save, Trash2 } from 'lucide-preact'
 import { formatPct1 } from '../lib/format-number'
+import { MISSING_DATA_DASH } from '../lib/format-string'
 import {
   compactToken,
   deriveKeeperRuntimeProjection,
@@ -1497,7 +1498,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   const auditAt = observedAudit.toolAuditAt
   const namespaceName =
     namespaceStatus.project ?? serverStatus.value?.project ?? 'default'
-  const project = namespaceStatus.project ?? serverStatus.value?.project ?? 'N/A'
+  const project = namespaceStatus.project ?? serverStatus.value?.project ?? MISSING_DATA_DASH
   const clusterRaw = namespaceStatus.cluster ?? serverStatus.value?.cluster ?? null
   const clusterVisible = clusterRaw && clusterRaw !== 'unknown' && clusterRaw !== 'default' && clusterRaw !== 'N/A'
   const observedFallback = toolAuditStateLabel(observedToolsEmptyState(keeper, auditSource))

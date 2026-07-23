@@ -74,14 +74,14 @@ describe('getPhaseStyle', () => {
 
   it('returns correct style for Running (ok group)', () => {
     const s = getPhaseStyle('Running')
-    expect(s.label).toBe('실행중')
+    expect(s.label).toBe('실행 중')
     expect(s.color).toBe('var(--color-status-ok)')
     expect(s.bg).toBe('var(--ok-10)')
   })
 
   it('returns correct style for Crashed (error group)', () => {
     const s = getPhaseStyle('Crashed')
-    expect(s.label).toBe('비정상종료')
+    expect(s.label).toBe('비정상 종료')
     expect(s.color).toBe('var(--bad-light)')
     expect(s.bg).toBe('var(--bad-10)')
   })

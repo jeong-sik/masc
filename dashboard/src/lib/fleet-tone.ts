@@ -12,6 +12,8 @@
 // fleet.css already shipped 'busy'. Lifting the SSOT here makes that
 // checked-in convention win.
 
+import { UNKNOWN_STATUS_LABEL } from './format-string'
+
 /** 5-tone health vocabulary shared across the Fleet surfaces. */
 export type FleetTone = 'ok' | 'warn' | 'bad' | 'busy' | 'idle'
 
@@ -116,7 +118,7 @@ export const PHASE_LABEL_KO: Readonly<Record<KeeperPhaseToken, string>> =
       unbooted: '미기동',
       crashed: '비정상 종료',
       dead: '종료됨',
-      unknown: '알 수 없음',
+      unknown: UNKNOWN_STATUS_LABEL,
     }) as Record<KeeperPhaseToken, string>,
   )
 

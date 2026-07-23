@@ -2,6 +2,7 @@ import type {
   KeeperCompositeSnapshot,
   KeeperCompositeInvariants,
 } from '../api/schemas/keeper-composite'
+import { PHASE_LABEL_KO } from '../lib/fleet-tone'
 
 export type CompositeObservation = {
   ts: number
@@ -156,7 +157,15 @@ export const LANE_LABELS: Record<LaneKey, string> = {
 }
 
 /** Korean display names for raw FSM state values.
-    Replaces English internals in PipelineStep and Swimlane. */
+    Replaces English internals in PipelineStep and Swimlane.
+
+    KSM lifecycle keys (and the shared `compacting` token) source their
+    labels from the fleet-tone PHASE_LABEL_KO SSOT — the PascalCase
+    KeeperPhase spellings and the snake_case wire spellings map 1:1 onto
+    the lowercase KeeperPhaseToken keys. `offline`/`Offline` have no
+    KeeperPhaseToken counterpart (the token union has no 'offline' arm),
+    so they keep the local '오프라인' literal. Non-KSM lane keys (KTC /
+    KDP / KCL / KMC) are different axes and keep their own labels. */
 export const STATE_DISPLAY_NAMES: Record<string, string> = {
   // KTC (unique keys — shared keys like idle/exhausted moved below)
   prompting: '프롬프트 구성',
@@ -173,33 +182,33 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   trying: '시도 중',
   done: '완료',
   exhausted: '소진',
-  compacting: '압축 중',
+  compacting: PHASE_LABEL_KO.compacting,
   // KMC
   accumulating: '수집 중',
   // KSM
-  running: '가동 중',
-  failing: '오류 발생',
-  overflowed: '컨텍스트 초과',
-  handing_off: '인수인계',
-  draining: '종료 준비',
+  running: PHASE_LABEL_KO.running,
+  failing: PHASE_LABEL_KO.failing,
+  overflowed: PHASE_LABEL_KO.overflowed,
+  handing_off: PHASE_LABEL_KO.handoff,
+  draining: PHASE_LABEL_KO.draining,
   offline: '오프라인',
-  paused: '일시정지',
-  stopped: '정지',
-  crashed: '비정상 종료',
-  restarting: '재시작 중',
-  dead: '종료됨',
-  Running: '가동 중',
-  Overflowed: '컨텍스트 초과',
-  Compacting: '압축 중',
-  HandingOff: '인수인계',
-  Failing: '오류 발생',
-  Crashed: '비정상 종료',
+  paused: PHASE_LABEL_KO.paused,
+  stopped: PHASE_LABEL_KO.stopped,
+  crashed: PHASE_LABEL_KO.crashed,
+  restarting: PHASE_LABEL_KO.restarting,
+  dead: PHASE_LABEL_KO.dead,
+  Running: PHASE_LABEL_KO.running,
+  Overflowed: PHASE_LABEL_KO.overflowed,
+  Compacting: PHASE_LABEL_KO.compacting,
+  HandingOff: PHASE_LABEL_KO.handoff,
+  Failing: PHASE_LABEL_KO.failing,
+  Crashed: PHASE_LABEL_KO.crashed,
   Offline: '오프라인',
-  Paused: '일시정지',
-  Stopped: '정지',
-  Draining: '종료 준비',
-  Restarting: '재시작 중',
-  Dead: '종료됨',
+  Paused: PHASE_LABEL_KO.paused,
+  Stopped: PHASE_LABEL_KO.stopped,
+  Draining: PHASE_LABEL_KO.draining,
+  Restarting: PHASE_LABEL_KO.restarting,
+  Dead: PHASE_LABEL_KO.dead,
 }
 
 /** Resolve display name: Korean label for UI, raw value preserved in tooltips. */

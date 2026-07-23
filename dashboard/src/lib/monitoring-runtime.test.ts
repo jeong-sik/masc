@@ -35,7 +35,7 @@ describe('runtimeBandMeta', () => {
     const meta = runtimeBandMeta('attention')
     expect(meta.key).toBe('attention')
     // Canonical KEEPER_STATUS_LABEL_KO.stuck.
-    expect(meta.label).toBe('확인 필요')
+    expect(meta.label).toBe('조치 필요')
   })
 
   it('returns paused meta', () => {

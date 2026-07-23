@@ -1,4 +1,5 @@
 import type { TraceSummary, UnifiedTraceEvent } from './session-trace-state'
+import { formatMsCompact } from '../../lib/format-number'
 
 export type ProcessCriticSeverity = 'action' | 'warning' | 'notice'
 
@@ -148,7 +149,7 @@ function findRepeatedToolCluster(events: readonly UnifiedTraceEvent[]): ToolRunC
     cluster.count += 1
     if (isShort) cluster.shortCount += 1
     if (cluster.samples.length < 4) {
-      cluster.samples.push(duration != null ? `${name} ${formatDuration(duration)}` : name)
+      cluster.samples.push(duration != null ? `${name} ${formatMsCompact(duration)}` : name)
     }
     clusters.set(key, cluster)
   }
@@ -180,11 +181,6 @@ function dedupeFindings(findings: ProcessCriticFinding[]): ProcessCriticFinding[
     deduped.push(finding)
   }
   return deduped
-}
-
-function formatDuration(ms: number): string {
-  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`
-  return `${Math.round(ms)}ms`
 }
 
 function formatAge(ms: number): string {

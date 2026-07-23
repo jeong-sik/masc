@@ -74,10 +74,16 @@ interface TraceSourceBadgeInfo {
   tone: TraceSourceBadgeTone
 }
 
+// Tool 상태 문구 SSOT — TRACE_TOOL_STATUS_UI(TraceToolStatus)와
+// TOOL_STATUS_TITLE(ToolTraceDisplayStatus)이 같은 UI 문구를 참조한다.
+const TOOL_STATUS_TITLE_PENDING = '출력 대기 중'
+const TOOL_STATUS_TITLE_OK = '성공'
+const TOOL_STATUS_TITLE_BAD = '실패'
+
 const TRACE_TOOL_STATUS_UI: Record<TraceToolStatus, { className: 'ok' | 'bad' | 'pending'; title: string }> = {
-  pending: { className: 'pending', title: '출력 대기 중' },
-  ok: { className: 'ok', title: '성공' },
-  err: { className: 'bad', title: '실패' },
+  pending: { className: 'pending', title: TOOL_STATUS_TITLE_PENDING },
+  ok: { className: 'ok', title: TOOL_STATUS_TITLE_OK },
+  err: { className: 'bad', title: TOOL_STATUS_TITLE_BAD },
 }
 
 export const CHAT_SUGGESTIONS_LABEL = '추천 후속 질문'
@@ -3012,13 +3018,13 @@ type ToolTraceDisplayStatus = 'pending' | 'missing' | 'coverage-gap' | 'hydratio
 type ToolOutputCoverageState = 'not-hydrated' | 'hydrating' | 'hydration-failed' | 'covered' | 'coverage-gap' | 'not-applicable'
 
 const TOOL_STATUS_TITLE: Record<ToolTraceDisplayStatus, string> = {
-  pending: '출력 대기 중',
+  pending: TOOL_STATUS_TITLE_PENDING,
   missing: '결과 누락 — 턴이 끝났는데 출력이 도착하지 않음',
   'coverage-gap': '출력 tail 범위 밖 — 결과 누락 여부를 확정할 수 없음',
   'hydration-failed': '출력 hydration 실패 — 결과 누락 여부를 확정할 수 없음',
   unlinked: '도구 호출 ID 없음 — 출력 조인 불가',
-  ok: '성공',
-  bad: '실패',
+  ok: TOOL_STATUS_TITLE_OK,
+  bad: TOOL_STATUS_TITLE_BAD,
 }
 
 // A tool call's output is legitimately "pending" while its turn is still

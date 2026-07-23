@@ -117,6 +117,7 @@ interface DeriveKeeperRuntimeProjectionInput {
 // 5-minute threshold for the operator-facing monitoring band. This is longer
 // than transport heartbeat checks so short SSE reconnects do not become keeper
 // attention events.
+// NOTE: HEARTBEAT_STALE_MS(120s)와 다른 5분 윈도우 — 의도 차이인지 확인 필요 (SSOT 감사 2026-07)
 export const KEEPER_RUNTIME_HEARTBEAT_STALE_MS = 5 * 60 * 1000
 export const KEEPER_RUNTIME_CONTEXT_ATTENTION_RATIO = 0.95
 

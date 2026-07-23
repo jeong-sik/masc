@@ -290,11 +290,11 @@ describe('Work', () => {
       const todoCol = screen.getByTestId('kanban-col-todo')
       const claimedCol = screen.getByTestId('kanban-col-claimed')
       expect(todoCol.querySelector('.wk-kcol-dot.todo')).toBeTruthy()
-      expect(todoCol.querySelector('.wk-kcol-title')?.textContent).toBe('백로그')
+      expect(todoCol.querySelector('.wk-kcol-title')?.textContent).toBe('예정')
       expect(todoCol.querySelector('.wk-kcol-n')?.textContent).toBe('1')
       expect(todoCol.textContent).not.toContain('TASK')
       expect(claimedCol.querySelector('.wk-kcol-dot.claimed')).toBeTruthy()
-      expect(claimedCol.querySelector('.wk-kcol-title')?.textContent).toBe('클레임')
+      expect(claimedCol.querySelector('.wk-kcol-title')?.textContent).toBe('점유됨')
       expect(claimedCol.querySelector('.wk-kcol-n')?.textContent).toBe('1')
       expect(claimedCol.textContent).not.toContain('TASK')
 
@@ -590,7 +590,7 @@ describe('Work', () => {
       render(html`<${Work} />`)
 
       const cards = screen.getAllByTestId('goal-card')
-      expect(cards[0]?.textContent).toContain('진행 중')
+      expect(cards[0]?.textContent).toContain('실행 중')
       expect(cards[1]?.textContent).toContain('완료')
     })
 
@@ -1370,8 +1370,8 @@ describe('Work', () => {
         expect(screen.getByTestId('kpi-wip')).toHaveTextContent('0')
         expect(screen.getByTestId('kpi-backlog')).toHaveTextContent('0')
         const goalCard = screen.getByTestId('goal-card')
-        expect(within(goalCard).getByText('차단')).toBeTruthy()
-        expect(within(goalCard).getByText('상태 미확인')).toBeTruthy()
+        expect(within(goalCard).getByText('차단됨')).toBeTruthy()
+        expect(within(goalCard).getByText('확인 필요')).toBeTruthy()
         expect(goalCard.textContent).toContain('unknown status: weird_status')
       })
 

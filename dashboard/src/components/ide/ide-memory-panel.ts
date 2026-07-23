@@ -4,6 +4,7 @@ import { MemoryLens } from '../memory/memory-lens'
 import type { MemoryLensProps } from '../memory/memory-lens'
 import { appendIdeScopeParams, type IdeScope } from '../../api/ide'
 import { extractApiError, get } from '../../api/core'
+import { formatTimeAgo } from '../../lib/format-time'
 
 interface MemoryEntry {
   readonly id: string
@@ -46,18 +47,6 @@ const KIND_COLORS: Record<string, string> = {
   Decision: 'var(--tone-ok, #10b981)',
   Question: 'var(--tone-warn, #f59e0b)',
   Bookmark: 'var(--tone-brass, #d97706)',
-}
-
-function formatTimestamp(ms: number): string {
-  const date = new Date(ms)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffMin = Math.floor(diffMs / 60_000)
-  if (diffMin < 1) return 'just now'
-  if (diffMin < 60) return `${diffMin}m ago`
-  const diffHr = Math.floor(diffMin / 60)
-  if (diffHr < 24) return `${diffHr}h ago`
-  return date.toLocaleDateString()
 }
 
 function memorySourceLabel(sourceKind?: string): string {
@@ -238,7 +227,7 @@ export function IdeMemoryPanel({ keeperName, scope, repoId, canonicalUrl }: IdeM
                           ${memorySourceLabel(entry.source_kind ?? sourceKind)}
                         </span>
                         <span class="ide-memory-panel__time">
-                          ${formatTimestamp(entry.created_at_ms)}
+                          ${formatTimeAgo(entry.created_at_ms)}
                         </span>
                       </div>
                       <div class="ide-memory-panel__content">

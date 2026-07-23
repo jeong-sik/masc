@@ -21,19 +21,19 @@ describe('formatPct', () => {
   })
 
   it('returns fallback for null', () => {
-    expect(formatPct(null)).toBe('-')
+    expect(formatPct(null)).toBe('--')
   })
 
   it('returns fallback for undefined', () => {
-    expect(formatPct(undefined)).toBe('-')
+    expect(formatPct(undefined)).toBe('--')
   })
 
   it('returns fallback for NaN', () => {
-    expect(formatPct(NaN)).toBe('-')
+    expect(formatPct(NaN)).toBe('--')
   })
 
   it('returns fallback for Infinity', () => {
-    expect(formatPct(Infinity)).toBe('-')
+    expect(formatPct(Infinity)).toBe('--')
   })
 
   it('uses custom fallback', () => {
@@ -60,19 +60,19 @@ describe('formatPct1', () => {
   })
 
   it('returns fallback for null', () => {
-    expect(formatPct1(null)).toBe('-')
+    expect(formatPct1(null)).toBe('--')
   })
 
   it('returns fallback for undefined', () => {
-    expect(formatPct1(undefined)).toBe('-')
+    expect(formatPct1(undefined)).toBe('--')
   })
 
   it('returns fallback for NaN', () => {
-    expect(formatPct1(NaN)).toBe('-')
+    expect(formatPct1(NaN)).toBe('--')
   })
 
   it('returns fallback for Infinity', () => {
-    expect(formatPct1(Infinity)).toBe('-')
+    expect(formatPct1(Infinity)).toBe('--')
   })
 
   it('uses custom fallback', () => {

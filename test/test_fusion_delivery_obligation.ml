@@ -358,6 +358,24 @@ let test_startup_recovery_remediates_missing_evidence () =
         | None -> fail "startup remediation did not durably queue a failure")))
 ;;
 
+let test_evidence_unavailable_typed_failure_code () =
+  (* The sink failure code is derived from the typed variant — the live path
+     must never bypass it with a raw string. *)
+  check string "failure code derives from typed variant" "evidence_unavailable"
+    (Fusion_delivery_projector.projection_error_failure_code
+       Fusion_delivery_projector.Evidence_unavailable);
+  check string "detail derives from typed variant"
+    "Fusion computation completed successfully without deliberation evidence"
+    (Fusion_delivery_projector.projection_error_to_string
+       Fusion_delivery_projector.Evidence_unavailable);
+  match
+    Fusion_delivery_projector.projection_error_failure_code
+      (Fusion_delivery_projector.Projection_failed "boom")
+  with
+  | _ -> fail "non-sink projection error must not have a failure code"
+  | exception Invalid_argument _ -> ()
+;;
+
 let () =
   run
     "fusion delivery obligation"
@@ -370,6 +388,8 @@ let () =
             test_startup_recovery_projects_canonical_terminal
         ; test_case "startup recovery remediates missing evidence" `Quick
             test_startup_recovery_remediates_missing_evidence
+        ; test_case "evidence_unavailable failure code is typed" `Quick
+            test_evidence_unavailable_typed_failure_code
         ; test_case "startup cleanup observes atomic orphans" `Quick
             test_startup_cleanup_observes_atomic_orphans
         ] )

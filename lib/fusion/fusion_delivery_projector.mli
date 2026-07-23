@@ -15,6 +15,11 @@ type projection_error =
 
 val projection_error_to_string : projection_error -> string
 
+val projection_error_failure_code : projection_error -> string
+(** Sink failure code derived from the typed error. Only errors delivered
+    through [Fusion_sink.emit_failure] have a code (currently
+    [Evidence_unavailable]); any other error raises [Invalid_argument]. *)
+
 val on_worker_settled :
   base_path:string -> Keeper_msg_async.worker_settlement -> unit
 (** Project an exact durable settlement. Any ambiguity or delivery failure is

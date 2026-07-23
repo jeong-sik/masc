@@ -3157,6 +3157,9 @@ let install_persistence ~base_path =
 ;;
 
 module For_testing = struct
+  type strict_snapshot_writer =
+    string -> string -> (unit, Fs_compat.atomic_replace_failure) result
+
   let reset_audit_store () =
     Stdlib.Mutex.protect audit_stores_mu (fun () -> Hashtbl.clear audit_stores);
     Stdlib.Mutex.protect recent_audit_cache_mu (fun () ->

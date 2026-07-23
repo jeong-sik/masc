@@ -684,7 +684,7 @@ let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepar
   execute prepared_lane.admitted_slots
 ;;
 
-let run_exact ?exact_execution_guard ~keeper_name ~sw:_ ~net ~clock ~units =
+let run_exact ?exact_execution_guard ~keeper_name ~sw:_ ~net ~clock ~units () =
   if not (has_eligible_units units)
   then Error Invalid_plan
   else
@@ -707,7 +707,7 @@ let make_resolved ?exact_execution_guard ~(keeper_name : string) () : summarizer
     let clock = Eio_context.get_clock_opt () in
     Some
       (fun ~units ->
-         run_exact ?exact_execution_guard ~keeper_name ~sw ~net ~clock ~units)
+         run_exact ?exact_execution_guard ~keeper_name ~sw ~net ~clock ~units ())
   | _ -> None
 ;;
 
@@ -717,8 +717,8 @@ let make ?exact_execution_guard ~keeper_name () =
 
 let completed_plan completed = completed.plan
 let completed_exact_execution_evidence completed = completed.exact_execution_evidence
-let exact_execution_evidence_slot_id evidence = evidence.slot_id
-let exact_execution_evidence_call_id evidence = evidence.call_id
+let exact_execution_evidence_slot_id (evidence : exact_execution_evidence) = evidence.slot_id
+let exact_execution_evidence_call_id (evidence : exact_execution_evidence) = evidence.call_id
 
 let exact_execution_evidence_target_identity_fingerprint evidence =
   evidence.target_identity_fingerprint

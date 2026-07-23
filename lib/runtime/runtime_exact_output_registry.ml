@@ -181,7 +181,7 @@ let admitted_by_id admitted_lanes =
   List.fold_left
     (fun by_id lane ->
        List.fold_left
-         (fun by_id slot ->
+         (fun by_id (slot : admitted_slot) ->
             String_map.add slot.slot_id slot.admitted_target by_id)
          by_id
          lane.slots)

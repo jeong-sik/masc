@@ -239,14 +239,15 @@ let configure_exact_output_registry ?config_root () =
          "exact_output: immutable resolver-and-lane registry generation %Ld published%s"
          (Runtime_exact_output_registry.generation registry)
          catalog_description;
-       (match Runtime_exact_output_registry.lane_slots registry ~lane_id:"compaction_exact" with
-        | Ok _ -> ()
-        | Error
-            (Runtime_exact_output_registry.Exact_lane_unconfigured
-               { lane_id = missing_lane_id }) ->
-          Log.Server.warn
-            "exact_output: compaction is degraded until [runtime.exact_output_lanes.%s] is configured with OAS target refs"
-            missing_lane_id))
+       if
+         not
+           (List.exists
+              (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+                 String.equal lane.id "compaction_exact")
+              lanes)
+       then
+         Log.Server.warn
+           "exact_output: compaction is degraded until [runtime.exact_output_lanes.compaction_exact] is configured with OAS target refs")
 ;;
 
 (* GC tuning for long-running server with bursty allocation.

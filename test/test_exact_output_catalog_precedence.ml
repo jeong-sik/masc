@@ -64,7 +64,13 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
          ~net
          ~proc_mgr
          ~fs
-         ())
+         ());
+    (match Runtime.init_default ~config_path:runtime_path with
+     | Ok () -> ()
+     | Error detail -> Alcotest.failf "runtime initialization failed: %s" detail);
+    Server_runtime_bootstrap.For_testing.configure_exact_output_registry
+      ~config_root
+      ()
   in
   let require_bootstrap_rejected label target_id =
     write_file runtime_path (runtime_toml target_id);
@@ -444,7 +450,13 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
          ~net
          ~proc_mgr
          ~fs
-         ())
+         ());
+    (match Runtime.init_default ~config_path:runtime_path with
+     | Ok () -> ()
+     | Error detail -> Alcotest.failf "runtime initialization failed: %s" detail);
+    Server_runtime_bootstrap.For_testing.configure_exact_output_registry
+      ~config_root
+      ()
   in
   write_file runtime_path (runtime_toml replacement_target);
   create_server_state ();

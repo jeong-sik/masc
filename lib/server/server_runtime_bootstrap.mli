@@ -77,6 +77,10 @@ val create_server_state :
     [Masc_http_client.Pool] can lazy-init with the full
     {!Eio_unix.Stdenv.base}.  RFC-0107 Phase D.2c. *)
 
+module For_testing : sig
+  val configure_exact_output_registry : ?config_root:string -> unit -> unit
+end
+
 val runtime_path_diagnostics :
   ?input_base_path:string ->
   Mcp_server.server_state ->

@@ -292,6 +292,10 @@ let configure_exact_output_registry ?config_root () =
            "exact_output: librarian is degraded until [runtime.exact_output_lanes.librarian_exact] is configured with OAS target refs")
 ;;
 
+module For_testing = struct
+  let configure_exact_output_registry = configure_exact_output_registry
+end
+
 (* GC tuning for long-running server with bursty allocation.
 
    Dashboard refresh loops create 2GB+ transient allocations per cycle.
@@ -438,7 +442,6 @@ let create_server_state ~sw ~base_path ?input_base_path ~clock ~mono_clock ~net
   warn_ignored_config_root_full_catalogs ~config_root ();
   let (_ : string option) = configure_oas_model_catalog_env () in
   let (_ : string option) = configure_oas_model_catalog_overlay ~config_root () in
-  configure_exact_output_registry ~config_root ();
   (* Apply keeper runtime overrides from the resolved config root's
      runtime.toml. Must run before any module that reads
      [Env_config_keeper.KeeperKeepalive] env vars at init time. Existing
@@ -799,26 +802,31 @@ let initialize_owner_state_blocking
       ~env
       ()
   in
-  (match Runtime.config_path () with
-   | None ->
-     raise (Owner_initialization_failed Runtime_config_path_unavailable)
-   | Some config_path ->
-     (match Runtime.init_default_degraded_report ~config_path with
-      | Ok Runtime.Initialized ->
-        Log.Server.info
-          "Runtime default initialized: %s"
-          (Runtime.get_default_runtime_id ())
-      | Ok (Runtime.Initialized_degraded degradation) ->
-        Log.Server.warn
-          "Runtime default initialized in degraded catalog mode: %s"
-          (Runtime.startup_degradation_to_string degradation);
-        Log.Server.warn
-          "Runtime degraded effective default: %s"
-          (Runtime.get_default_runtime_id ())
-      | Error error ->
-        raise
-          (Owner_initialization_failed
-             (Runtime_default_initialization_failed error))));
+  let runtime_config_path =
+    match Runtime.config_path () with
+    | None ->
+      raise (Owner_initialization_failed Runtime_config_path_unavailable)
+    | Some config_path -> config_path
+  in
+  (match Runtime.init_default_degraded_report ~config_path:runtime_config_path with
+   | Ok Runtime.Initialized ->
+     Log.Server.info
+       "Runtime default initialized: %s"
+       (Runtime.get_default_runtime_id ())
+   | Ok (Runtime.Initialized_degraded degradation) ->
+     Log.Server.warn
+       "Runtime default initialized in degraded catalog mode: %s"
+       (Runtime.startup_degradation_to_string degradation);
+     Log.Server.warn
+       "Runtime degraded effective default: %s"
+       (Runtime.get_default_runtime_id ())
+   | Error error ->
+     raise
+       (Owner_initialization_failed
+          (Runtime_default_initialization_failed error)));
+  configure_exact_output_registry
+    ~config_root:(Filename.dirname runtime_config_path)
+    ();
   let t1 = Eio.Time.now clock in
   Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
   bootstrap_server_state_blocking state;

@@ -176,6 +176,90 @@ let test_save_file_atomic_strict_rejects_unsupported_payload_sync () =
   check string "target remains old" "old" (Fs_compat.load_file target)
 ;;
 
+let test_save_file_atomic_strict_payload_sync_cancellation () =
+  Fs_compat.clear_fs ();
+  with_tmp_dir
+  @@ fun base ->
+  let target = Filename.concat base "out.json" in
+  let parent_sync_called = ref false in
+  let cancellation = Eio.Cancel.Cancelled Exit in
+  let cancellation_backtrace = Printexc.get_callstack 32 in
+  Fs_compat.save_file target "old";
+  (match
+     Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+       ~sync_file:(fun _ ->
+         Printexc.raise_with_backtrace cancellation cancellation_backtrace)
+       ~sync_parent:(fun _ -> parent_sync_called := true)
+       target
+       "new"
+   with
+   | Error ({ stage = Fs_compat.Before_rename; _ } as failure) ->
+     check bool "original cancellation preserved" true
+       (failure.exception_ == cancellation);
+     check string "original cancellation backtrace preserved"
+       (Printexc.raw_backtrace_to_string cancellation_backtrace)
+       (Printexc.raw_backtrace_to_string failure.backtrace)
+   | Error failure ->
+     failf
+       "payload sync cancellation reported after rename: %s"
+       (Fs_compat.atomic_replace_failure_to_string failure)
+   | Ok () -> fail "payload sync cancellation was accepted");
+  check bool "parent sync not reached" false !parent_sync_called;
+  check string "target remains old" "old" (Fs_compat.load_file target);
+  let leftover_tmps =
+    Sys.readdir base
+    |> Array.to_list
+    |> List.filter Fs_compat.is_atomic_orphan_name
+  in
+  check (list string) "payload cancellation leaves no atomic temp" [] leftover_tmps
+;;
+
+let check_save_file_atomic_strict_parent_sync_failure
+      ~label
+      ~exception_
+  =
+  Fs_compat.clear_fs ();
+  with_tmp_dir
+  @@ fun base ->
+  let target = Filename.concat base "out.json" in
+  let injected_backtrace = Printexc.get_callstack 32 in
+  Fs_compat.save_file target "old";
+  (match
+     Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
+       ~sync_file:(fun _ -> ())
+       ~sync_parent:(fun _ ->
+         Printexc.raise_with_backtrace exception_ injected_backtrace)
+       target
+       "new"
+   with
+   | Error ({ stage = Fs_compat.After_rename; _ } as failure) ->
+     check bool (label ^ " preserves original exception") true
+       (failure.exception_ == exception_);
+     check string (label ^ " preserves original backtrace")
+       (Printexc.raw_backtrace_to_string injected_backtrace)
+       (Printexc.raw_backtrace_to_string failure.backtrace)
+   | Error failure ->
+     failf
+       "%s reported before rename: %s"
+       label
+       (Fs_compat.atomic_replace_failure_to_string failure)
+   | Ok () -> failf "%s was accepted" label);
+  check string (label ^ " leaves new target visible") "new"
+    (Fs_compat.load_file target)
+;;
+
+let test_save_file_atomic_strict_parent_sync_error () =
+  check_save_file_atomic_strict_parent_sync_failure
+    ~label:"parent sync error"
+    ~exception_:(Unix.Unix_error (Unix.EIO, "fsync", "parent"))
+;;
+
+let test_save_file_atomic_strict_parent_sync_cancellation () =
+  check_save_file_atomic_strict_parent_sync_failure
+    ~label:"parent sync cancellation"
+    ~exception_:(Eio.Cancel.Cancelled Exit)
+;;
+
 let test_read_dir_and_path_kind_use_typed_inventory ~fs () =
   with_tmp_dir
   @@ fun base ->
@@ -479,6 +563,18 @@ let () =
             "strict payload unsupported is before rename"
             `Quick
             test_save_file_atomic_strict_rejects_unsupported_payload_sync
+        ; test_case
+            "strict payload cancellation is before rename"
+            `Quick
+            test_save_file_atomic_strict_payload_sync_cancellation
+        ; test_case
+            "strict parent sync error is after rename"
+            `Quick
+            test_save_file_atomic_strict_parent_sync_error
+        ; test_case
+            "strict parent sync cancellation is after rename"
+            `Quick
+            test_save_file_atomic_strict_parent_sync_cancellation
         ; test_case
             "temp writer uses canonical shared shape"
             `Quick

@@ -1999,7 +1999,7 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
              ~call_id
              ~plan_fingerprint
              ~request_body_sha256
-             ~summary:actual_summary
+             ~summary:(actual_summary : AQ.hitl_context_summary)
          =
          incr observed_calls;
          Alcotest.(check string) "recovery approval identity" id actual_id;

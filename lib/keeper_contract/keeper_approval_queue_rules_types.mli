@@ -50,6 +50,20 @@ type exact_attempt_binding = private
   ; status : exact_attempt_status
   }
 
+val make_exact_attempt_binding :
+  approval_id:string ->
+  input_hash:string ->
+  sequence:int ->
+  slot_id:string ->
+  call_id:string ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  unit ->
+  exact_attempt_binding
+
+val exact_attempt_binding_with_status :
+  exact_attempt_binding -> exact_attempt_status -> exact_attempt_binding
+
 type exact_attempt_state =
   | Exact_unbound
   | Exact_bound of exact_attempt_binding

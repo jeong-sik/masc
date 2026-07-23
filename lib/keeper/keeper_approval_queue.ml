@@ -937,9 +937,9 @@ let quarantine_restarted_entry (entry : pending_approval) =
     ( { entry with
         exact_attempt =
           Exact_bound
-            { binding with
-              status = Exact_quarantined Exact_restart_uncertainty
-            }
+            (exact_attempt_binding_with_status
+               binding
+               (Exact_quarantined Exact_restart_uncertainty))
       }
     , true )
   | Exact_unbound
@@ -1881,15 +1881,15 @@ let validate_exact_attempt_candidate
            (Exact_attempt_invalid_identity "request_body_sha256"))
   in
   Ok
-    { approval_id = id
-    ; input_hash
-    ; sequence
-    ; slot_id
-    ; call_id
-    ; plan_fingerprint
-    ; request_body_sha256
-    ; status = Exact_dispatch_uncertain
-    }
+    (make_exact_attempt_binding
+       ~approval_id:id
+       ~input_hash
+       ~sequence
+       ~slot_id
+       ~call_id
+       ~plan_fingerprint
+       ~request_body_sha256
+       ())
 ;;
 
 let exact_attempt_entry_unlocked map candidate =
@@ -2064,9 +2064,11 @@ let release_summary_exact_attempt_before_dispatch_with
              (match existing.status with
               | Exact_dispatch_uncertain ->
                 let released =
-                  { existing with status = Exact_released_before_dispatch }
-                  in
-                  persist_exact_attempt_entry_unlocked
+                  exact_attempt_binding_with_status
+                    existing
+                    Exact_released_before_dispatch
+                in
+                persist_exact_attempt_entry_unlocked
                     ~save_file_atomic_strict_staged
                     ~changed:true
                     ~map
@@ -2141,9 +2143,11 @@ let fail_summary_exact_attempt_before_dispatch_with
              (match existing.status, entry.summary_status with
               | Exact_dispatch_uncertain, Summary_pending ->
                 let released =
-                  { existing with status = Exact_released_before_dispatch }
-                  in
-                  persist_exact_attempt_entry_unlocked
+                  exact_attempt_binding_with_status
+                    existing
+                    Exact_released_before_dispatch
+                in
+                persist_exact_attempt_entry_unlocked
                     ~save_file_atomic_strict_staged
                     ~changed:true
                     ~map
@@ -2232,9 +2236,11 @@ let quarantine_summary_exact_attempt_with
              (match existing.status with
               | Exact_dispatch_uncertain ->
                 let quarantined =
-                  { existing with status = Exact_quarantined cause }
-                  in
-                  persist_exact_attempt_entry_unlocked
+                  exact_attempt_binding_with_status
+                    existing
+                    (Exact_quarantined cause)
+                in
+                persist_exact_attempt_entry_unlocked
                     ~save_file_atomic_strict_staged
                     ~changed:true
                     ~map
@@ -2251,7 +2257,9 @@ let quarantine_summary_exact_attempt_with
                 | Exact_released_before_dispatch
                   when cause = Exact_terminal_persistence_failure ->
                   let quarantined =
-                    { existing with status = Exact_quarantined cause }
+                    exact_attempt_binding_with_status
+                      existing
+                      (Exact_quarantined cause)
                   in
                   persist_exact_attempt_entry_unlocked
                     ~save_file_atomic_strict_staged
@@ -2329,7 +2337,9 @@ let complete_summary_exact_attempt_with
            | Exact_bound existing ->
              (match existing.status, entry.summary_status with
               | Exact_dispatch_uncertain, Summary_pending ->
-                  let completed = { existing with status = Exact_completed } in
+                  let completed =
+                    exact_attempt_binding_with_status existing Exact_completed
+                  in
                   persist_exact_attempt_entry_unlocked
                     ~save_file_atomic_strict_staged
                     ~changed:true

@@ -49,6 +49,29 @@ type exact_attempt_binding =
   ; status : exact_attempt_status
   }
 
+let make_exact_attempt_binding
+      ~approval_id
+      ~input_hash
+      ~sequence
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+      ()
+  =
+  { approval_id
+  ; input_hash
+  ; sequence
+  ; slot_id
+  ; call_id
+  ; plan_fingerprint
+  ; request_body_sha256
+  ; status = Exact_dispatch_uncertain
+  }
+;;
+
+let exact_attempt_binding_with_status binding status = { binding with status }
+
 type exact_attempt_state =
   | Exact_unbound
   | Exact_bound of exact_attempt_binding

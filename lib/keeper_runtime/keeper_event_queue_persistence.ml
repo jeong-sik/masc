@@ -14,7 +14,6 @@ type requeue_reason = State.requeue_reason =
   | Registration_recovery
   | Retry_after_observed
   | Context_compaction_retry
-  | Transcript_quarantine_retry
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
 
@@ -76,10 +75,7 @@ type escalation_reason = State.escalation_reason =
       { attempts : int
       ; detail : string
       }
-  | Transcript_quarantine_retry_exhausted of
-      { attempts : int
-      ; detail : string
-      }
+  | Transcript_corruption_requires_reset of { detail : string }
 
 type no_compaction_reason = State.no_compaction_reason =
   | No_eligible_history

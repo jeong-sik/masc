@@ -606,29 +606,28 @@ let persist_compaction_outcome config ~keeper_name ~outcome
     |> Result.map (fun () -> `Persisted)
 ;;
 
-(* #25296: advance the transcript-quarantine retry streak on
-   [agent_runtime_state.transcript_quarantine_consecutive_retries] using the
-   same read/stamp/merge shape as {!persist_compaction_outcome}.
-
-   [`Retried] increments the streak each time a failed turn settles as
-   [Requeue Transcript_quarantine_retry] — including the escalated terminal
-   attempt, so an operator inspecting the meta sees the streak at the
-   ceiling. [`Recovered] resets it on a completed turn: any successful turn
-   proves the keeper is no longer pinned to the poisoned transcript. *)
-let persist_transcript_quarantine_outcome config ~keeper_name ~outcome
+(* Structural transcript corruption is deterministic current-state damage, not
+   a retry class. Persist the existing fail-closed pause surface before the
+   owning lease is terminally settled. The merge preserves any stronger pause
+   or dead-tombstone latch won by a concurrent operator/lifecycle writer. *)
+let persist_transcript_corruption_pause config ~keeper_name
   : ([ `Persisted | `No_durable_meta ], string) result
   =
   let stamp (m : Keeper_meta_contract.keeper_meta) =
-    let rt = m.runtime in
-    { m with
-      runtime =
-        { rt with
-          transcript_quarantine_consecutive_retries =
-            (match outcome with
-             | `Retried -> rt.transcript_quarantine_consecutive_retries + 1
-             | `Recovered -> 0)
-        }
-    }
+    match
+      Keeper_lifecycle_admission.state
+        ~paused:m.paused
+        ~latched_reason:m.latched_reason
+    with
+    | Keeper_lifecycle_admission.Active ->
+      { m with
+        paused = true
+      ; latched_reason = None
+      ; updated_at = Keeper_meta_contract.now_iso ()
+      }
+    | Keeper_lifecycle_admission.Paused _
+    | Keeper_lifecycle_admission.Dead_tombstone ->
+      m
   in
   match read_meta config keeper_name with
   | Error msg -> Error msg

@@ -28,6 +28,7 @@ type t =
   | Capacity_backpressure of string
   | Config_or_auth of string
   | Provider_runtime_failure of string
+  | Transcript_corruption of string
   | Internal_error of string
   | Pre_dispatch_success of string
   | Unknown of string
@@ -64,6 +65,9 @@ let of_wire wire =
     || String.equal wire "provider_error"
     || String.starts_with ~prefix:"provider_error_" wire
   then Provider_runtime_failure wire
+  else if
+    String.equal wire Keeper_internal_error.incomplete_tool_transcript_kind
+  then Transcript_corruption wire
   else if String.equal wire "internal_error"
   then Internal_error wire
   else if String.equal wire "pre_dispatch_success"
@@ -80,6 +84,7 @@ let to_wire = function
   | Capacity_backpressure wire -> wire
   | Config_or_auth wire -> wire
   | Provider_runtime_failure wire -> wire
+  | Transcript_corruption wire -> wire
   | Internal_error wire -> wire
   | Pre_dispatch_success wire -> wire
   | Unknown wire -> wire
@@ -107,6 +112,7 @@ let is_transient_provider_runtime_failure = function
   | Runtime_exhausted _
   | Capacity_backpressure _
   | Config_or_auth _
+  | Transcript_corruption _
   | Internal_error _
   | Pre_dispatch_success _
   | Unknown _ -> false

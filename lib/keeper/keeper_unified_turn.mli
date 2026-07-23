@@ -166,7 +166,7 @@ type source_lease_disposition =
       { reason : Keeper_event_queue_state.no_compaction_reason }
   | Escalate_after_exact_output_terminal of exact_output_terminal_reason
   | Requeue_after_context_compaction of in_lane_compaction
-  | Requeue_after_transcript_quarantine
+  | Pause_after_transcript_corruption of { detail : string }
   | Acknowledge_after_in_turn_handling
 (** A failed turn normally follows its typed retry/rotate/escalate route.
     [Follow_failure_route_after_no_compaction] follows the same route but
@@ -183,9 +183,10 @@ type source_lease_disposition =
     [Requeue_after_context_compaction] preserves the exact source stimulus
     after MASC handled a typed provider overflow in this Keeper lane; the next
     cycle reloads the durably compacted checkpoint.
-    [Requeue_after_transcript_quarantine] preserves an unprocessed source
-    stimulus after typed transcript admission rejected provider dispatch; an
-    operator or recovery path can repair the checkpoint without losing work.
+    [Pause_after_transcript_corruption] is terminal for automatic execution:
+    typed transcript admission rejected before provider dispatch, so the
+    heartbeat durably pauses the Keeper and consumes any owning lease into an
+    operator-reset-required escalation with no retry successor.
     [Acknowledge_after_in_turn_handling] consumes only the source stimulus when
     the configured in-turn policy already handled the terminal failure; the
     cycle remains failed for receipts, counters, and heartbeat freshness. *)

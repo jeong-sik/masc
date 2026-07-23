@@ -73,6 +73,7 @@ let roundtrip_corpus =
   [ (* exact-match buckets *)
     "runtime_exhausted"
   ; Keeper_internal_error.capacity_backpressure_kind
+  ; Keeper_internal_error.incomplete_tool_transcript_kind
   ; "internal_error"
   ; "pre_dispatch_success"
   ; "provider_error"
@@ -159,6 +160,9 @@ let frozen_operator_disposition (receipt : R.t)
   else if
     String.equal terminal_reason Keeper_internal_error.capacity_backpressure_kind
   then R.Disp_fail_open_next_runtime, R.Reason_capacity_backpressure
+  else if
+    String.equal terminal_reason Keeper_internal_error.incomplete_tool_transcript_kind
+  then R.Disp_operator_reset_required, R.Reason_transcript_corruption
   else if preflight_config_failure
   then R.Disp_fail_open_next_runtime, R.Reason_preflight_config_error
   else if
@@ -279,6 +283,20 @@ let () =
   check
     "canonical typed config wire keeps its explicit route"
     (canonical = (R.Disp_fail_open_next_runtime, R.Reason_preflight_config_error))
+  ;
+  let transcript_corruption =
+    R.operator_disposition
+      { base_receipt with
+        terminal_reason_code = Keeper_internal_error.incomplete_tool_transcript_kind
+      }
+  in
+  check
+    "transcript corruption requires operator reset"
+    (transcript_corruption
+     = (R.Disp_operator_reset_required, R.Reason_transcript_corruption));
+  check
+    "transcript corruption emits operator broadcast"
+    (R.needs_operator_broadcast (fst transcript_corruption))
 ;;
 
 let () =
@@ -307,6 +325,36 @@ let () =
   check
     "runtime completion ignores missing visible-output observation"
     (disposition = R.Disp_pass)
+;;
+
+let () =
+  with_temp_dir "transcript-corruption-pause" (fun base_path ->
+    let config = Workspace.default_config base_path in
+    ignore (Workspace.init config ~agent_name:(Some "operator"));
+    let meta =
+      meta_fixture_exn
+        (`Assoc
+          [ "name", `String "corrupted-transcript"
+          ; "agent_name", `String "agent-corrupted-transcript"
+          ; "trace_id", `String "trace-corrupted-transcript"
+          ])
+    in
+    write_meta_exn config meta;
+    (match
+       KMS.persist_transcript_corruption_pause
+         config
+         ~keeper_name:meta.name
+     with
+     | Ok `Persisted -> ()
+     | Ok `No_durable_meta ->
+       check "transcript corruption pause found durable meta" false
+     | Error error ->
+       check ("transcript corruption pause persisted: " ^ error) false);
+    let paused = read_meta_exn config meta.name in
+    check "transcript corruption pauses durable keeper" paused.paused;
+    check
+      "transcript corruption uses existing unclassified pause surface"
+      (Option.is_none paused.latched_reason))
 ;;
 
 let () =
@@ -375,6 +423,7 @@ let operator_disposition_kinds =
   ; R.Disp_pass_next_model
   ; R.Disp_user_cancelled
   ; R.Disp_skipped
+  ; R.Disp_operator_reset_required
   ; R.Disp_unknown
   ]
 ;;

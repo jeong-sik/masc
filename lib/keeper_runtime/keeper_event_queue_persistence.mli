@@ -1,8 +1,8 @@
 (** Durable per-Keeper Event Layer state.
 
     [event-queue.json] keeps the v4 envelope containing pending stimuli, active
-    typed leases, the monotonic lease sequence, transition outbox, and durable
-    accepted-transfer target accounting. Strict v3 is the only supported
+    typed leases, exact-execution dispatch fences, the monotonic lease
+    sequence, transition outbox, and durable accepted-transfer target accounting. Strict v3 is the only supported
     predecessor. [event-queue-inflight.json] is rejected explicitly rather
     than migrated or treated as a second authority. *)
 
@@ -20,8 +20,52 @@ type requeue_reason = Keeper_event_queue_state.requeue_reason =
   | Registration_recovery
   | Retry_after_observed
   | Context_compaction_retry
+  | Transcript_quarantine_retry
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
+
+type exact_execution_terminal_cause = Keeper_event_queue_state.exact_execution_terminal_cause =
+  | Execution_failed_after_dispatch
+  | Attempt_already_started
+  | Execution_cancelled_after_dispatch
+  | Execution_provenance_mismatch
+  | Domain_invalid_output
+  | Invalid_structural_evidence
+  | Invalid_structural_source_after_dispatch
+  | Commit_admission_unavailable
+  | Lifecycle_transition_failed_after_dispatch
+  | Checkpoint_source_changed
+  | Checkpoint_persistence_failed
+  | Terminal_persistence_failed
+
+type exact_execution_terminal = Keeper_event_queue_state.exact_execution_terminal =
+  { cause : exact_execution_terminal_cause
+  ; slot_id : string
+  ; call_id : string
+  }
+
+type exact_execution_lease_status = Keeper_event_queue_state.exact_execution_lease_status =
+  | Dispatch_uncertain
+  | Terminal_quarantined of exact_execution_terminal_cause
+
+type exact_execution_binding = Keeper_event_queue_state.exact_execution_binding =
+  { lease_id : string
+  ; lease_sequence : int64
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  ; status : exact_execution_lease_status
+  }
+
+type exact_write_outcome =
+  | Fsync_completed
+  | Visible_sync_unconfirmed of string
+(** [Fsync_completed] means the payload and parent-directory [Unix.fsync]
+    calls both returned successfully. It is the process-restart dispatch
+    fence, not a hardware/power-loss persistence or Darwin [F_FULLFSYNC]
+    guarantee. [Visible_sync_unconfirmed _] means rename is visible but the
+    parent sync did not complete. *)
 
 type escalation_reason = Keeper_event_queue_state.escalation_reason =
   | Failure_judgment_requested
@@ -30,13 +74,20 @@ type escalation_reason = Keeper_event_queue_state.escalation_reason =
       { judge_runtime_id : string
       ; rationale : string
       }
-  | Compaction_execution_may_have_dispatched
-  | Compaction_domain_invalid_output
+  | Compaction_exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
+  | Compaction_exact_output_terminal of
+      { source : Keeper_checkpoint_ref.t
+      ; terminal : exact_execution_terminal
+      }
   | Compaction_retry_exhausted of
       { attempts : int
       ; detail : string
       }
   | Compaction_floor_exceeded of
+      { attempts : int
+      ; detail : string
+      }
+  | Transcript_quarantine_retry_exhausted of
       { attempts : int
       ; detail : string
       }
@@ -46,8 +97,8 @@ type no_compaction_reason = Keeper_event_queue_state.no_compaction_reason =
   | Invalid_structural_source
   | Structurally_unchanged
   | Checkpoint_not_reduced
-  | Execution_may_have_dispatched
-  | Domain_invalid_output
+  | Exact_lane_unconfigured
+  | Exact_execution_terminal of exact_execution_terminal
 
 type no_compaction = Keeper_event_queue_state.no_compaction =
   { source : Keeper_checkpoint_ref.t
@@ -57,7 +108,7 @@ type no_compaction = Keeper_event_queue_state.no_compaction =
 type accepted_cancellation = Keeper_event_queue_state.accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
@@ -65,7 +116,7 @@ type accepted_cancellation = Keeper_event_queue_state.accepted_cancellation =
 type accepted_transfer = Keeper_event_queue_state.accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
@@ -79,7 +130,7 @@ type source_terminal_receipt = Keeper_event_queue_state.source_terminal_receipt 
 type accepted_source_terminal = Keeper_event_queue_state.accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
@@ -123,6 +174,9 @@ val transition_outbox_result :
   base_path:string -> keeper_name:string -> (outbox_entry list, string) result
 (** Read the single pending projection entry for this Keeper lane.  The state
     machine blocks new claims until this list is drained. *)
+
+val exact_execution_binding_result :
+  base_path:string -> keeper_name:string -> (exact_execution_binding option, string) result
 
 val load : base_path:string -> keeper_name:string -> Keeper_event_queue.t
 (** Compatibility replay projection: pending followed by active lease stimuli.
@@ -214,11 +268,72 @@ val settle_result :
     WAL-compaction or pending-projection failure is returned as a committed
     outcome, never relabelled as an uncommitted error. *)
 
+val bind_exact_execution_result :
+  base_path:string ->
+  keeper_name:string ->
+  lease:lease ->
+  slot_id:string ->
+  call_id:string ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  unit ->
+  (exact_write_outcome, string) result
+(** Bind the affine call identity before dispatch. Only [Ok Fsync_completed]
+    permits the provider call to start. [Ok (Visible_sync_unconfirmed _)]
+    means the replacement is visible but its parent-directory sync is
+    unconfirmed; the
+    exact identity must be settled terminally without POST or failover. An
+    [Error] means the replacement was not visible. *)
+
+val release_exact_execution_before_dispatch_result :
+  base_path:string ->
+  keeper_name:string ->
+  lease:lease ->
+  slot_id:string ->
+  call_id:string ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  unit ->
+  (exact_write_outcome, string) result
+(** Remove a bound identity only while it is still pre-dispatch.
+    [Fsync_completed] permits fallback to another slot.
+    [Visible_sync_unconfirmed _] means the removal is visible but its
+    directory sync is unconfirmed; the caller
+    must return a source-bound terminal for the original identity and must not
+    fail over. [Error] means the removal was not visible. *)
+
+val quarantine_exact_execution_result :
+  base_path:string ->
+  keeper_name:string ->
+  lease:lease ->
+  terminal:exact_execution_terminal ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  unit ->
+  (exact_write_outcome, string) result
+(** Persist the canonical post-dispatch terminal cause. A visible replacement
+    with unconfirmed directory sync keeps that original cause and remains
+    eligible for matching source-bound settlement. *)
+
+val settle_exact_execution_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  settled_at:float ->
+  lease:lease ->
+  slot_id:string ->
+  call_id:string ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  settlement:settlement ->
+  unit ->
+  (settle_result, string) result
+
 val cancel_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  current_owner_generation:int ->
+  current_owner_nonce:int ->
   settled_at:float ->
   lease:lease ->
   cancellation:accepted_cancellation ->
@@ -233,7 +348,7 @@ val cancel_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  current_owner_generation:int ->
+  current_owner_nonce:int ->
   settled_at:float ->
   cancellation:accepted_cancellation ->
   unit ->
@@ -246,7 +361,7 @@ val transfer_pending_accepted_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  current_owner_generation:int ->
+  current_owner_nonce:int ->
   settled_at:float ->
   transfer:accepted_transfer ->
   unit ->
@@ -258,7 +373,7 @@ val settle_pending_from_source_terminal_result :
   ?after_commit:(Keeper_event_queue.t -> unit) ->
   base_path:string ->
   keeper_name:string ->
-  current_owner_generation:int ->
+  current_owner_nonce:int ->
   settled_at:float ->
   source_terminal:accepted_source_terminal ->
   unit ->

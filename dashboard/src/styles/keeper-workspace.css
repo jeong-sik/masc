@@ -304,6 +304,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   background: var(--color-fg-muted);
 }
 .kw-roster-group.run .rg-dot { background: var(--color-status-ok); }
+.kw-roster-group.attn .rg-dot { background: var(--color-status-err); }
 .kw-roster-group.pause .rg-dot { background: var(--color-status-warn); }
 .kw-roster-group.off .rg-dot { background: var(--color-fg-muted); }
 /* Per-group keeper count, right-aligned — mirrors the design roster's rg-n. */

@@ -19,8 +19,48 @@ type requeue_reason =
   | Registration_recovery
   | Retry_after_observed
   | Context_compaction_retry
+  | Transcript_quarantine_retry
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
+
+type exact_execution_terminal_cause =
+  | Execution_failed_after_dispatch
+  | Attempt_already_started
+  | Execution_cancelled_after_dispatch
+  | Execution_provenance_mismatch
+  | Domain_invalid_output
+  | Invalid_structural_evidence
+  | Invalid_structural_source_after_dispatch
+  | Commit_admission_unavailable
+  | Lifecycle_transition_failed_after_dispatch
+  | Checkpoint_source_changed
+  | Checkpoint_persistence_failed
+  | Terminal_persistence_failed
+
+type exact_execution_terminal =
+  { cause : exact_execution_terminal_cause
+  ; slot_id : string
+  ; call_id : string
+  }
+(** One OAS-owned affine call that crossed, or can no longer safely be assumed
+    not to have crossed, the dispatch boundary. Both identities are mandatory
+    and survive the queue receipt/WAL codec. *)
+
+type exact_execution_lease_status =
+  | Dispatch_uncertain
+  | Terminal_quarantined of exact_execution_terminal_cause
+
+type exact_execution_binding =
+  { lease_id : string
+  ; lease_sequence : int64
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  ; status : exact_execution_lease_status
+  }
+(** Durable pre-dispatch fence for one OAS exact-output attempt. A bound lease
+    cannot pass through generic settlement or registration recovery. *)
 
 type escalation_reason =
   | Failure_judgment_requested
@@ -29,13 +69,18 @@ type escalation_reason =
       { judge_runtime_id : string
       ; rationale : string
       }
-  | Compaction_execution_may_have_dispatched
-      (** Exact-output dispatch may have crossed the external-effect boundary.
-          The source is escalated immediately without any retry successor. *)
-  | Compaction_domain_invalid_output
-      (** A dispatched exact-output response violated the MASC-owned domain
-          contract. The source is escalated immediately without failover or
-          retry. *)
+  | Compaction_exact_lane_unconfigured of
+      { source : Keeper_checkpoint_ref.t
+      }
+      (** The exact-output compaction lane is absent. The durable checkpoint
+          source is retained and the event escalates without a retry successor. *)
+  | Compaction_exact_output_terminal of
+      { source : Keeper_checkpoint_ref.t
+      ; terminal : exact_execution_terminal
+      }
+      (** A source-bound exact-output call is terminal. The checkpoint source,
+          slot, call ID, and categorical cause are durably retained; no retry
+          successor is legal. *)
   | Compaction_retry_exhausted of
       { attempts : int
       ; detail : string
@@ -55,20 +100,29 @@ type escalation_reason =
           window (an incompressible floor).  Distinct from
           [Compaction_retry_exhausted] so "compaction keeps failing" and
           "compaction succeeds but cannot help" stay operator-distinguishable. *)
+  | Transcript_quarantine_retry_exhausted of
+      { attempts : int
+      ; detail : string
+      }
+      (** #25296: settled instead of [Requeue Transcript_quarantine_retry]
+          once consecutive transcript-quarantine settlements reach the
+          escalation threshold.  The poisoned checkpoint is preserved
+          unmodified by design, so every re-lease rejects the same transcript
+          again — without this ceiling the source stimulus loops through the
+          full turn pipeline on every heartbeat. *)
 
 type no_compaction_reason =
   | No_eligible_history
   | Invalid_structural_source
   | Structurally_unchanged
   | Checkpoint_not_reduced
-  | Execution_may_have_dispatched
-      (** Exact-output execution crossed the safe pre-dispatch boundary. The
-          provider may already have received the request, so automatic retry
-          could duplicate an outward effect. *)
-  | Domain_invalid_output
-      (** The provider returned JSON after dispatch, but it violated the
-          MASC-owned compaction domain contract. A different slot must not be
-          tried automatically for the same source. *)
+  | Exact_lane_unconfigured
+      (** The configured runtime has no exact-output lane for compaction. This
+          is an operator-actionable precondition failure tied to the durable
+          checkpoint source, not a stochastic provider failure. *)
+  | Exact_execution_terminal of exact_execution_terminal
+      (** Exact-output execution is affine and terminal. The typed cause plus
+          OAS slot/call identity forbids a second attempt for this source. *)
 
 type no_compaction =
   { source : Keeper_checkpoint_ref.t
@@ -78,18 +132,18 @@ type no_compaction =
 type accepted_cancellation =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; reason : string
   }
 (** Exact operator authority for terminally cancelling one accepted event.
-    [source_revision] and [owner_generation] fence the observed paused owner;
+    [source_revision] and [owner_nonce] fence the observed paused owner;
     [operator_operation_id] makes replay/conflict explicit. *)
 
 type accepted_transfer =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; from_keeper : string
   ; to_keeper : string
@@ -109,13 +163,19 @@ type source_terminal_receipt =
 type accepted_source_terminal =
   { source : Keeper_event_queue.stimulus
   ; source_revision : int64
-  ; owner_generation : int
+  ; owner_nonce : int
   ; operator_operation_id : string
   ; source_receipt : source_terminal_receipt
   }
 
 val no_compaction_reason_label : no_compaction_reason -> string
 val no_compaction_reason_of_label : string -> (no_compaction_reason, string) result
+val no_compaction_reason_to_string : no_compaction_reason -> string
+val exact_execution_terminal_cause_label : exact_execution_terminal_cause -> string
+val exact_execution_terminal_cause_of_label
+  :  string
+  -> (exact_execution_terminal_cause, string) result
+val exact_execution_terminal_to_string : exact_execution_terminal -> string
 
 val escalation_reason_requests_external_input : escalation_reason -> bool
 (** [true] only when the LLM judgment explicitly reports that the Keeper must
@@ -207,15 +267,62 @@ val settle :
     same semantic settlement returns [Already_settled]; a different settlement
     for an already-settled lease is an explicit conflict.
 
-    [Retry_after_observed] and [Context_compaction_retry] retain the exact
-    leased stimuli at the pending FIFO tail so unrelated work in the same lane
-    can proceed before another provider attempt. [No_compaction] is accepted
+    [Retry_after_observed], [Context_compaction_retry], and
+    [Transcript_quarantine_retry] retain the exact leased stimuli at the
+    pending FIFO tail so unrelated work in the same lane can proceed before
+    another provider attempt. [No_compaction] is accepted
     only for a lease containing exactly one typed
     [Manual_compaction_requested] stimulus; it cannot retire product work whose
     provider turn failed. Non-finite settlement times are rejected. *)
 
+val exact_execution_binding : t -> exact_execution_binding option
+
+val bind_exact_execution :
+  lease:lease ->
+  slot_id:string ->
+  call_id:string ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  t ->
+  (t, string) result
+(** Bind one exact-output identity before provider dispatch. Repeating the same
+    binding is idempotent; every conflicting identity fails closed. *)
+
+val release_exact_execution_before_dispatch :
+  lease:lease ->
+  slot_id:string ->
+  call_id:string ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  t ->
+  (t, string) result
+(** Remove a dispatch-uncertain binding only after OAS proves zero dispatches. *)
+
+val quarantine_exact_execution :
+  lease:lease ->
+  terminal:exact_execution_terminal ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  t ->
+  (t, string) result
+(** Advance a matching dispatch-uncertain binding to a typed terminal
+    quarantine without releasing the lease for replay. *)
+
+val settle_exact_execution :
+  settled_at:float ->
+  lease:lease ->
+  slot_id:string ->
+  call_id:string ->
+  plan_fingerprint:string ->
+  request_body_sha256:string ->
+  settlement:settlement ->
+  t ->
+  (t * settle_result, string) result
+(** Finalize a bound lease through its exact OAS identity. Generic {!settle}
+    rejects bound leases. *)
+
 val cancel_accepted :
-  current_owner_generation:int ->
+  current_owner_nonce:int ->
   settled_at:float ->
   lease:lease ->
   cancellation:accepted_cancellation ->
@@ -228,7 +335,7 @@ val cancel_accepted :
     idempotent; a different operation is a conflict. *)
 
 val cancel_pending_accepted :
-  current_owner_generation:int ->
+  current_owner_nonce:int ->
   settled_at:float ->
   cancellation:accepted_cancellation ->
   t ->
@@ -239,7 +346,7 @@ val cancel_pending_accepted :
     through a source-bearing WAL outbox entry by persistence. *)
 
 val transfer_pending_accepted :
-  current_owner_generation:int ->
+  current_owner_nonce:int ->
   settled_at:float ->
   transfer:accepted_transfer ->
   t ->
@@ -250,7 +357,7 @@ val transfer_pending_accepted :
     authority until the target projection completes. *)
 
 val settle_pending_from_source_terminal :
-  current_owner_generation:int ->
+  current_owner_nonce:int ->
   settled_at:float ->
   source_terminal:accepted_source_terminal ->
   t ->
@@ -304,8 +411,9 @@ val replay_transition_receipt : transition_receipt -> t -> (t, string) result
     lease is an explicit conflict. *)
 
 val recover_leases : settled_at:float -> t -> (t, string) result
-(** Requeue every active lease with [Registration_recovery], preserving claim
-    and stimulus order and emitting stable transition receipts. *)
+(** Requeue ordinary active leases with [Registration_recovery]. Any durable
+    exact-execution binding makes recovery fail closed instead of replaying a
+    provider call. *)
 
 val active_lease : t -> lease option
 (** Oldest unsettled lease, if any.  A restarted lane resumes this lease before

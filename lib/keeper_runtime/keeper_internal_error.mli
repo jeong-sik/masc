@@ -80,6 +80,10 @@ val accept_response_shape_of_string : string -> accept_response_shape option
 val accept_response_shape_of_agent_sdk :
   Agent_sdk.Response_shape.content_shape -> accept_response_shape
 
+type transcript_quarantine_reason =
+  | Structurally_invalid
+  | Unresolved_tool_results
+
 type masc_internal_error =
   | Runtime_exhausted of {
       runtime_id : string;
@@ -121,6 +125,11 @@ type masc_internal_error =
       exn_repr : string;
     }
   | Internal_contract_rejected of { reason : string }
+  | Incomplete_tool_transcript of {
+      reason : transcript_quarantine_reason;
+      detail : string;
+      tool_use_ids : string list;
+    }
   | Receipt_persistence_failed of { detail : string }
 
 val masc_internal_error_prefix : string

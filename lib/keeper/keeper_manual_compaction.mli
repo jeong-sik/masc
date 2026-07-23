@@ -28,14 +28,12 @@ type failure =
   | Recovery of
       Keeper_post_turn.compaction_recovery_error
       * (unit, Keeper_context_runtime.lifecycle_dispatch_error) result
-val run
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> (operation_outcome, failure) result
 
 val run_admitted
-  :  config:Workspace.config
+  :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
+  -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
+  -> unit
   -> [ `Applied of success
      | `No_compaction of Keeper_post_turn.no_compaction
      | `Compaction_failed of failure
@@ -48,8 +46,17 @@ val run_admitted
     start + source-CAS commit + completion/failure. The lane stays runnable
     while the LLM works; a failed final admission cannot strand
     [compaction_active], and interleaved checkpoint changes fail the exact
-    source CAS. This is the single sanctioned caller of that admission
-    variant. *)
+    source CAS. A rejected completion after the checkpoint commit dispatches
+    an explicit lifecycle failure cleanup before reporting the checkpoint as
+    applied; if that cleanup is also rejected, the typed failure reports
+    [checkpoint_applied = true]. This is the single sanctioned caller of that
+    admission variant. *)
 
 val failure_to_string : failure -> string
 val observe_manifest : keeper_name:string -> (unit, string) result -> unit
+
+module For_testing : sig
+  val preserve_no_compaction_after_final_admission_busy
+    :  Keeper_event_queue_state.no_compaction_reason
+    -> bool
+end

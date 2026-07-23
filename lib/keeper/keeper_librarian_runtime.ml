@@ -223,15 +223,7 @@ let provider_for_librarian (provider_cfg : Llm_provider.Provider_config.t) =
     | None -> Some configured_librarian_max_tokens
   in
   let tuned_cfg =
-    { provider_cfg with
-      max_tokens
-    ; tool_choice = None
-    ; disable_parallel_tool_use = true
-    ; enable_thinking = Some false
-    ; preserve_thinking = Some false
-    ; thinking_budget = None
-    ; clear_thinking = Some true
-    }
+    Keeper_structured_output_schema.for_deterministic_subcall ~max_tokens provider_cfg
   in
   (* No wire response format. config/prompts/keeper.librarian.episode_extraction.md
      states the object shape and both enums, and [Keeper_librarian.episode_of_json_result]

@@ -209,6 +209,21 @@ let accept_response_shape_of_agent_sdk = function
     Accept_response_has_deliverable_content
 ;;
 
+type transcript_quarantine_reason =
+  | Structurally_invalid
+  | Unresolved_tool_results
+
+let transcript_quarantine_reason_to_string = function
+  | Structurally_invalid -> "structurally_invalid"
+  | Unresolved_tool_results -> "unresolved_tool_results"
+;;
+
+let transcript_quarantine_reason_of_string = function
+  | "structurally_invalid" -> Some Structurally_invalid
+  | "unresolved_tool_results" -> Some Unresolved_tool_results
+  | _ -> None
+;;
+
 type masc_internal_error =
   | Runtime_exhausted of {
       runtime_id : string;
@@ -254,6 +269,11 @@ type masc_internal_error =
     }
   | Internal_contract_rejected of {
       reason : string;
+    }
+  | Incomplete_tool_transcript of {
+      reason : transcript_quarantine_reason;
+      detail : string;
+      tool_use_ids : string list;
     }
   | Receipt_persistence_failed of {
       detail : string;
@@ -303,6 +323,16 @@ let cap_blocker_detail (s : string) : string =
 
 let string_opt_of_assoc key json =
   Json_field.string json key |> Json_field.to_option
+;;
+
+let string_list_of_assoc key json =
+  match Json_field.list json key |> Json_field.to_option with
+  | None -> []
+  | Some values ->
+    values
+    |> List.filter_map (function
+         | `String value -> Some value
+         | _ -> None)
 ;;
 
 let network_error_kind_to_string = function
@@ -416,6 +446,14 @@ let masc_internal_error_to_json = function
       [
         ("kind", `String "internal_contract_rejected");
         ("reason", `String reason);
+      ]
+  | Incomplete_tool_transcript { reason; detail; tool_use_ids } ->
+    `Assoc
+      [
+        ("kind", `String "incomplete_tool_transcript");
+        ("reason", `String (transcript_quarantine_reason_to_string reason));
+        ("detail", `String detail);
+        ("tool_use_ids", `List (List.map (fun id -> `String id) tool_use_ids));
       ]
   | Receipt_persistence_failed { detail } ->
     `Assoc
@@ -540,6 +578,7 @@ let summary_of_masc_internal_error = function
   | Internal_unhandled_exception _
   | Internal_bridge_exception _
   | Internal_contract_rejected _
+  | Incomplete_tool_transcript _
   | Receipt_persistence_failed _ -> None
 
 let kind_of_masc_internal_error = function
@@ -550,6 +589,7 @@ let kind_of_masc_internal_error = function
   | Internal_unhandled_exception _ -> "internal_unhandled_exception"
   | Internal_bridge_exception _ -> "internal_bridge_exception"
   | Internal_contract_rejected _ -> "internal_contract_rejected"
+  | Incomplete_tool_transcript _ -> "incomplete_tool_transcript"
   | Receipt_persistence_failed _ -> "receipt_persistence_failed"
 
 let runtime_id_of_masc_internal_error = function
@@ -564,6 +604,7 @@ let runtime_id_of_masc_internal_error = function
   | Internal_unhandled_exception _
   | Internal_bridge_exception _
   | Internal_contract_rejected _
+  | Incomplete_tool_transcript _
   | Receipt_persistence_failed _ -> "unknown"
 
 let accept_no_progress_retry_kind = function
@@ -594,6 +635,7 @@ let accept_no_progress_retry_kind = function
   | Internal_unhandled_exception _
   | Internal_bridge_exception _
   | Internal_contract_rejected _
+  | Incomplete_tool_transcript _
   | Receipt_persistence_failed _ ->
     None
 
@@ -754,6 +796,22 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
       | Some (`String "internal_contract_rejected") -> (
           match string_opt_of_assoc "reason" json with
           | Some reason -> Some (Internal_contract_rejected { reason })
+          | _ -> None)
+      | Some (`String "incomplete_tool_transcript") -> (
+          match
+            string_opt_of_assoc "reason" json,
+            string_opt_of_assoc "detail" json
+          with
+          | Some reason, Some detail ->
+            (match transcript_quarantine_reason_of_string reason with
+             | Some reason ->
+               Some
+                 (Incomplete_tool_transcript
+                    { reason
+                    ; detail
+                    ; tool_use_ids = string_list_of_assoc "tool_use_ids" json
+                    })
+             | None -> None)
           | _ -> None)
       | Some (`String "receipt_persistence_failed") -> (
           match string_opt_of_assoc "detail" json with

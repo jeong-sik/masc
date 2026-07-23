@@ -531,7 +531,7 @@ let run_keeper_invocation_turn_admitted
           ~masc_root
           ~keeper_name:meta.name
           ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-          ~generation:meta.runtime.generation ()
+          ~generation:meta.runtime.nonce ()
       in
       let effective_models =
         if direct_reply then
@@ -798,7 +798,7 @@ let run_keeper_invocation_turn_admitted
 		                              Keeper_turn_helpers.record_pre_dispatch_terminal_observation
 		                                ~config:ctx.config
 		                                ~meta
-		                                ~generation:meta.runtime.generation
+		                                ~generation:meta.runtime.nonce
 		                                ~runtime_id:retry.next_runtime
 		                                ~outcome:`Error
 		                                ~terminal_reason_code:
@@ -846,7 +846,7 @@ let run_keeper_invocation_turn_admitted
 			                                ?user_blocks
 			                                ~runtime_id
 			                                ~world_observation
-		                                ~generation:meta.runtime.generation
+		                                ~generation:meta.runtime.nonce
 		                                ?on_event
 		                                ~trajectory_acc
 		                                ?degraded_retry_runtime

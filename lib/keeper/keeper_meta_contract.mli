@@ -83,6 +83,12 @@ val compaction_retry_suspended : compaction_runtime -> bool
     retrying compaction for this keeper and each further stimulus escalates
     after a single bounded attempt, pending operator inspection. *)
 
+val transcript_quarantine_retry_escalation_threshold : int
+(** #25296: consecutive transcript-quarantine requeues tolerated before the
+    settlement escalates ([Transcript_quarantine_retry_exhausted]) instead of
+    retrying.  Single definition shared by the heartbeat settlement and
+    tests. *)
+
 type proactive_runtime = {
   count_total : int;
   last_ts : float;
@@ -228,20 +234,13 @@ val runtime_attempt_record_to_json :
 val runtime_attempt_record_of_json :
   Yojson.Safe.t -> runtime_attempt_record option
 
-(** {1 Tool call summary for continuity} *)
-
-type tool_call_summary = {
-  tool_name : string;
-  outcome : string;  (** "ok" | "error: <short_msg>" *)
-}
-
 (** {1 Agent runtime state record} *)
 
 type agent_runtime_state = {
   usage : usage_metrics;
   compaction_rt : compaction_runtime;
   proactive_rt : proactive_runtime;
-  generation : int;
+  nonce : int;
   trace_id : Keeper_id.Trace_id.t;
   trace_history : string list;
   last_handoff_ts : float;
@@ -255,10 +254,14 @@ type agent_runtime_state = {
   noop_turn_count : int;
   last_blocker : blocker_info option;
   last_runtime_attempt : runtime_attempt_record option;
-  last_turn_tool_calls : tool_call_summary list;
   message_scope_ack_id : string option;
   (** Stable chat-row id of the newest message-scope row injected into a
       completed Keeper turn. *)
+  transcript_quarantine_consecutive_retries : int;
+  (** #25296: consecutive transcript-quarantine requeue settlements for this
+      keeper.  Reset to 0 on a completed turn; the heartbeat settlement
+      escalates instead of requeuing once it reaches
+      {!transcript_quarantine_retry_escalation_threshold}. *)
 }
 
 (** {1 Keeper meta record} *)

@@ -163,6 +163,12 @@ let assemble_cost_event_payload
     (key_input_tokens, if usage_missing then `Null else `Int input_tokens);
     (key_output_tokens, if usage_missing then `Null else `Int output_tokens);
     (key_cost_usd, if usage_missing then `Null else `Float cost_usd);
+    (* Pricing-observation firewall: a usage_missing turn (no token
+       evidence — includes cost-only usage where only cost_usd was
+       reported) writes `Null`, not `Float x`.  This intentionally
+       changes the ledger for cost-only turns in this PR (not deferred
+       to #25558): a cost observation without token evidence must not
+       enter the ledger as a concrete number. *)
     (key_cost_status, `String cost_status_label);
     (key_cost_status_reason, `String cost_status_reason_label);
     (* #10318: self-describing reason for [cost_usd]'s value. *)

@@ -14,35 +14,12 @@
 
 open Tool_schemas_specs_types
 
-(* === Phase 0 spec data ==============================================
+(* === Phase 1 SSOT spec data =========================================
 
-   masc_config — single optional `category` filter. The enum mirrors
-   Tool_schemas_misc.config_category_enum_strings (Issue #8493). Phase
-   0 keeps a third copy in this generator to stay self-contained; the
-   regression test guarantees this copy stays aligned with the
-   hand-written schema, and Phase 1 collapses all three into a typed
-   SSOT. *)
+   masc_config — single optional `category` filter. The enum references
+   Tool_schemas_specs_types.config_category_enum_strings (Issue #8493 / #15257). *)
 
-let config_category_enum_strings =
-  [ "server"
-  ; "auth"
-  ; "transport"
-  ; "storage"
-  ; "runtime"
-  ; "rate_limiting"
-  ; "inference"
-  ; "keeper"
-  ; "keeper_execution"
-  ; "keeper_guardrails"
-  ; "autonomy"
-  ; "dashboard"
-  ; "operations"
-  ; "channel"
-  ; "process"
-  ; "worker"
-  ; "web_search"
-  ; "session"
-  ]
+let config_category_enum_strings = Tool_schemas_specs_types.config_category_enum_strings
 ;;
 
 let masc_config_spec : tool_spec =

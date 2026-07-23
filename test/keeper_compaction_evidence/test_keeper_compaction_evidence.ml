@@ -1,12 +1,13 @@
 let evidence : Keeper_compaction_evidence.t =
   Keeper_compaction_evidence.create
-~target_identity_fingerprint:"target-identity"
-~catalog_generation_fingerprint:"catalog-generation"
-~catalog_evidence_sha256:"catalog-evidence"
-~plan_fingerprint:"plan-fingerprint"
-~receipt_plan_fingerprint:"plan-fingerprint"
-~receipt_request_body_sha256:"request-body"
-    ~selected_target_ref:"compact-runtime"
+    ~slot_id:"compaction-slot"
+    ~call_id:"call-01"
+    ~target_identity_fingerprint:"target-identity"
+    ~catalog_generation_fingerprint:"catalog-generation"
+    ~catalog_evidence_sha256:"catalog-evidence"
+    ~plan_fingerprint:"plan-fingerprint"
+    ~receipt_plan_fingerprint:"plan-fingerprint"
+    ~receipt_request_body_sha256:"request-body"
     ~before_checkpoint_bytes:4096
     ~after_checkpoint_bytes:1024
     ~before_message_count:12
@@ -52,7 +53,8 @@ let remove name json =
 let test_projection_and_roundtrip () =
   let expected =
     `Assoc
-      [ "selected_target_ref", `String "compact-runtime"
+      [ "slot_id", `String "compaction-slot"
+      ; "call_id", `String "call-01"
       ; "target_identity_fingerprint", `String "target-identity"
       ; "catalog_generation_fingerprint", `String "catalog-generation"
       ; "catalog_evidence_sha256", `String "catalog-evidence"
@@ -123,8 +125,11 @@ let test_rejections () =
       , Invalid_field (Catalog_evidence_sha256, Expected_string)
       , replace "catalog_evidence_sha256" (`Int 42) canonical )
     ; ( "blank exact field"
-      , Invalid_field (Selected_target_ref, Blank_string)
-      , replace "selected_target_ref" (`String "   ") canonical )
+      , Invalid_field (Slot_id, Blank_string)
+      , replace "slot_id" (`String "   ") canonical )
+    ; ( "blank call id"
+      , Invalid_field (Call_id, Blank_string)
+      , replace "call_id" (`String "   ") canonical )
     ; ( "tampered plan fingerprint"
       , Plan_fingerprint_mismatch
           { plan_fingerprint = "plan-fingerprint"

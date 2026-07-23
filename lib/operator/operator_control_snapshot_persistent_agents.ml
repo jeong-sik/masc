@@ -111,7 +111,7 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                     ; ( "trace_id"
                       , `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id) )
                     ; "status", `String agent_status
-                    ; "generation", `Int meta.runtime.generation
+                    ; "generation", `Int meta.runtime.nonce
                     ; "turn_count", `Int meta.runtime.usage.total_turns
                     ; "last_model_used", `Null
                     ; "active_model", `Null

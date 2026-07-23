@@ -31,7 +31,7 @@ let compact_runtime_trust_cache_ttl_sec = 3.0
      drops from 400-580ms (miss) to ~43ms (hit) on warm cycles.
 
    Identity bits the key keeps:
-   - [meta.runtime.generation]: bumped on supervisor restart / takeover.
+   - [meta.runtime.nonce]: bumped on supervisor restart / takeover.
    - [meta.paused]: explicit pause/unpause toggle.
 
    Result: each keeper has exactly one cache slot.  Turn transitions
@@ -45,7 +45,7 @@ let compact_runtime_trust_cache_key
     "operator:keeper-runtime-trust:compact:v1:%s:%s:%d:%b"
     config.base_path
     meta.name
-    meta.runtime.generation
+    meta.runtime.nonce
     meta.paused
 ;;
 

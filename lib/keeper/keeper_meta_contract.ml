@@ -69,6 +69,15 @@ let compaction_retry_escalation_threshold = 3
 let compaction_retry_suspended rt =
   rt.consecutive_failures >= compaction_retry_escalation_threshold
 
+(* #25296: consecutive transcript-quarantine requeues tolerated before the
+   settlement escalates instead of retrying. Defined next to
+   [compaction_retry_escalation_threshold] so the heartbeat settlement reads
+   one family of retry ceilings. Three attempts keeps a transient
+   checkpoint-write race recoverable while bounding a structurally poisoned
+   transcript, which the admission rejects deterministically on every
+   re-lease. *)
+let transcript_quarantine_retry_escalation_threshold = 3
+
 type proactive_runtime =
   { count_total : int
   ; last_ts : float
@@ -341,16 +350,11 @@ type usage_metrics =
   ; last_latency_ms : int
   }
 
-type tool_call_summary =
-  { tool_name : string
-  ; outcome : string
-  }
-
 type agent_runtime_state =
   { usage : usage_metrics
   ; compaction_rt : compaction_runtime
   ; proactive_rt : proactive_runtime
-  ; generation : int
+  ; nonce : int
   ; trace_id : Keeper_id.Trace_id.t
   ; trace_history : string list
   ; last_handoff_ts : float
@@ -364,10 +368,19 @@ type agent_runtime_state =
   ; noop_turn_count : int
   ; last_blocker : blocker_info option
   ; last_runtime_attempt : runtime_attempt_record option
-  ; last_turn_tool_calls : tool_call_summary list
   ; message_scope_ack_id : string option
     (** Stable chat-row id of the newest message-scope row actually injected
         into a completed Keeper turn. Rows after this id remain pending. *)
+  ; transcript_quarantine_consecutive_retries : int
+    (* #25296: consecutive transcript-quarantine requeue settlements for this
+       keeper. Incremented each time a failed turn settles as
+       [Requeue Transcript_quarantine_retry], reset to 0 on a completed turn.
+       The heartbeat settlement escalates
+       ([Transcript_quarantine_retry_exhausted]) instead of requeuing once
+       this reaches [transcript_quarantine_retry_escalation_threshold];
+       without it a poisoned checkpoint — preserved unmodified by design —
+       loops the same source stimulus through the full turn pipeline on every
+       heartbeat. *)
   }
 
 type keeper_meta =

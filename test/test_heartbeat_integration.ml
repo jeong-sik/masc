@@ -248,6 +248,13 @@ let shutdown_schema5_fixture (operation : Shutdown_types.t) =
   | _ -> fail "shutdown JSON codec did not return an object"
 ;;
 
+let shutdown_schema6_fixture (operation : Shutdown_types.t) =
+  match Shutdown_store.to_json operation with
+  | `Assoc fields ->
+    `Assoc (replace_assoc_field "schema_version" (`Int 6) fields)
+  | _ -> fail "shutdown JSON codec did not return an object"
+;;
+
 let retired_stale_paused_schema5_fixture (operation : Shutdown_types.t) =
   match Shutdown_store.to_json operation with
   | `Assoc fields ->
@@ -926,7 +933,7 @@ let test_keeper_shutdown_store_round_trip_and_identity_guard () =
         ; keeper_name = meta.name
         ; lane_ownership = Shutdown_types.Registered_lane (Lane.id lane)
         ; trace_id = meta.runtime.trace_id
-        ; generation = meta.runtime.generation
+        ; generation = meta.runtime.nonce
         ; actor = "tester"
         ; cleanup_intent = retain_operator_cleanup
         ; turn_disposition = Shutdown_types.No_inflight_turn
@@ -1249,7 +1256,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         ; keeper_name = name
         ; lane_ownership = Shutdown_types.Registered_lane (Lane.id (Lane.create ()))
         ; trace_id = meta.runtime.trace_id
-        ; generation = meta.runtime.generation
+        ; generation = meta.runtime.nonce
         ; actor = "tester"
         ; cleanup_intent = { reason; remove_session = false }
         ; turn_disposition = Shutdown_types.No_inflight_turn
@@ -1334,8 +1341,8 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         | Error error -> fail (Shutdown_supersession.error_to_string error)
       in
       check int
-        "schema 5 CAS write upgrades the durable record to schema 6"
-        6
+        "schema 5 CAS write upgrades the durable record to schema 7"
+        7
         superseded.schema_version;
       (match superseded.phase with
        | Shutdown_types.Superseded
@@ -1364,7 +1371,89 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
            | _ -> fail "persisted supersession omitted schema_version")
         | _ -> fail "persisted supersession is not an object"
       in
-      check int "supersession wire schema is upgraded" 6 persisted_schema;
+      check int "supersession wire schema is upgraded" 7 persisted_schema;
+      (* #25491: a [Reconciliation_required] fence previously had no release
+         path at all. The worker no-ops on it by design and supersession
+         accepted only [Blocked], so the keeper was unreachable in every
+         direction (RFC-0000 §1.2 LAW 1 "no dead-end"). Since #25522 boot
+         recovery settles the phase automatically instead of minting it, so
+         this operator route is now the manual fallback. These pin that the
+         operator route releases it and that the accepted turn survives in the
+         durable record, since [Superseded] overwrites the phase that carried
+         it. *)
+      let unreconciled_turn =
+        { Shutdown_types.lane = Some Shutdown_types.Autonomous
+        ; admitted_at = Some 1784545390.0
+        ; observed_turn_id = Some 5744
+        ; observation_started_at = Some 1784545390.5
+        }
+      in
+      let reconciling =
+        operation
+          ~name:"reconciliation-keeper"
+          ~reason:Shutdown_types.Operator_stop_retain_meta
+          ~phase:(Shutdown_types.Reconciliation_required unreconciled_turn)
+      in
+      (match Shutdown_store.persist_new ~config reconciling with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:reconciling.keeper_name
+           ~operation_id:reconciling.operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         fail "reconciliation fixture admission was already reserved");
+      let reconciling_token =
+        match
+          Shutdown_supersession.preflight
+            ~config
+            ~keeper_name:reconciling.keeper_name
+            ~actor:"tester"
+        with
+        | Ok token -> token
+        | Error error -> fail (Shutdown_supersession.error_to_string error)
+      in
+      let reconciling_superseded =
+        match
+          Shutdown_supersession.commit_after_metadata_update ~config reconciling_token
+        with
+        | Ok (Shutdown_supersession.Shutdown_superseded superseded_operation) ->
+          superseded_operation
+        | Ok Shutdown_supersession.No_shutdown_admission ->
+          fail "reconciliation admission was not superseded"
+        | Error error -> fail (Shutdown_supersession.error_to_string error)
+      in
+      (match reconciling_superseded.phase with
+       | Shutdown_types.Superseded
+           (Shutdown_types.Operator_reconciliation_accepted
+              { actor; unreconciled_turn = recorded }) ->
+         check
+           string
+           "reconciliation supersession preserves the validated operator actor"
+           "tester"
+           actor;
+         check
+           (option int)
+           "the accepted turn is recorded so the audit says what was released"
+           (Some 5744)
+           recorded.observed_turn_id
+       | _ ->
+         fail "Reconciliation_required did not reach typed Superseded");
+      let reconciling_released =
+        Masc.Keeper_turn_admission.snapshot_for
+          ~base_path:config.base_path
+          ~keeper_name:reconciling.keeper_name
+      in
+      check
+        (option string)
+        "releasing the reconciliation fence frees exact admission"
+        None
+        (Option.map
+           Shutdown_types.Operation_id.to_string
+           reconciling_released.snapshot_shutdown_operation_id);
       let invalid_superseded =
         { superseded with
           operation_id = Shutdown_types.Operation_id.generate ()
@@ -1387,7 +1476,23 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
        with
        | Error (Shutdown_store.Decode_error _) -> ()
        | Error error -> fail (Shutdown_store.error_to_string error)
-       | Ok _ -> fail "schema 5 accepted the schema 6 superseded phase");
+       | Ok _ -> fail "schema 5 accepted the superseded phase");
+      (match
+         superseded
+         |> shutdown_schema6_fixture
+         |> Shutdown_store.of_json
+       with
+       | Ok _ -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      (match
+         reconciling_superseded
+         |> shutdown_schema6_fixture
+         |> Shutdown_store.of_json
+       with
+       | Error (Shutdown_store.Decode_error _) -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error)
+       | Ok _ ->
+         fail "schema 6 accepted the schema 7 reconciliation supersession");
       (match
          Masc.Keeper_turn_admission.restore_shutdown
            ~base_path:config.base_path
@@ -1508,7 +1613,7 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
              ~reason:Shutdown_types.Operator_stop_retain_meta
              ~phase:blocked_phase) with
           trace_id = live_meta.runtime.trace_id
-        ; generation = live_meta.runtime.generation
+        ; generation = live_meta.runtime.nonce
         }
       in
       (match Shutdown_store.persist_new ~config live_blocked with
@@ -1627,7 +1732,7 @@ let test_keeper_shutdown_store_isolates_corrupt_owner () =
           ; lane_ownership =
               Shutdown_types.Registered_lane (Lane.id (Lane.create ()))
           ; trace_id = meta.runtime.trace_id
-          ; generation = meta.runtime.generation
+          ; generation = meta.runtime.nonce
           ; actor = "tester"
           ; cleanup_intent = retain_operator_cleanup
           ; turn_disposition = Shutdown_types.No_inflight_turn
@@ -1781,7 +1886,7 @@ let test_retired_stale_paused_terminal_releases_exact_fence () =
         ; keeper_name = meta.name
         ; lane_ownership = Shutdown_types.Dormant_meta
         ; trace_id = meta.runtime.trace_id
-        ; generation = meta.runtime.generation
+        ; generation = meta.runtime.nonce
         ; actor = "keeper-autoboot"
         ; cleanup_intent = remove_meta_cleanup
         ; turn_disposition = Shutdown_types.No_inflight_turn
@@ -2055,7 +2160,7 @@ let test_dashboard_purge_resolution_is_fail_closed () =
         ; keeper_name = persisted.name
         ; lane_ownership = Shutdown_types.Dormant_meta
         ; trace_id = persisted.runtime.trace_id
-        ; generation = persisted.runtime.generation
+        ; generation = persisted.runtime.nonce
         ; actor = "supervisor"
         ; cleanup_intent = retain_operator_cleanup
         ; turn_disposition = Shutdown_types.No_inflight_turn
@@ -2355,7 +2460,7 @@ let test_keeper_shutdown_finalizes_idle_operation () =
         ; lane_ownership =
             Shutdown_types.Registered_lane (Lane.id (Lane.create ()))
         ; trace_id = meta.runtime.trace_id
-        ; generation = meta.runtime.generation
+        ; generation = meta.runtime.nonce
         ; actor = "operator"
         ; cleanup_intent = retain_operator_cleanup
         ; turn_disposition = Shutdown_types.No_inflight_turn
@@ -2481,7 +2586,7 @@ let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
         ; keeper_name = meta.name
         ; lane_ownership = Shutdown_types.Registered_lane (Lane.id entry.lane)
         ; trace_id = meta.runtime.trace_id
-        ; generation = meta.runtime.generation
+        ; generation = meta.runtime.nonce
         ; actor = "supervisor"
         ; cleanup_intent =
             { reason = Shutdown_types.Dead_tombstone_cleanup
@@ -2785,7 +2890,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
         ; keeper_name = meta.name
         ; lane_ownership = Shutdown_types.Dormant_meta
         ; trace_id = meta.runtime.trace_id
-        ; generation = meta.runtime.generation
+        ; generation = meta.runtime.nonce
         ; actor = "operator"
         ; cleanup_intent = dashboard_purge_cleanup meta.name meta
         ; turn_disposition = Shutdown_types.No_inflight_turn
@@ -2971,7 +3076,7 @@ let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
         ; lane_ownership =
             Shutdown_types.Registered_lane (Lane.id (Lane.create ()))
         ; trace_id = meta.runtime.trace_id
-        ; generation = meta.runtime.generation
+        ; generation = meta.runtime.nonce
         ; actor = "operator"
         ; cleanup_intent = remove_meta_cleanup
         ; turn_disposition = Shutdown_types.No_inflight_turn
@@ -2991,7 +3096,7 @@ let test_keeper_shutdown_cleanup_replays_after_meta_removal () =
            config
            ~name:meta.name
            ~trace_id:meta.runtime.trace_id
-           ~generation:meta.runtime.generation
+           ~generation:meta.runtime.nonce
        with
        | Ok () -> ()
        | Error error -> fail (Keeper_meta_store.identity_remove_error_to_string error));
@@ -3061,7 +3166,7 @@ let test_keeper_shutdown_recovers_committed_task_receipt () =
         ; lane_ownership =
             Shutdown_types.Registered_lane (Lane.id (Lane.create ()))
         ; trace_id = meta.runtime.trace_id
-        ; generation = meta.runtime.generation
+        ; generation = meta.runtime.nonce
         ; actor = "operator"
         ; cleanup_intent = retain_operator_cleanup
         ; turn_disposition = Shutdown_types.No_inflight_turn

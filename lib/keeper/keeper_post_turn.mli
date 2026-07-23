@@ -101,16 +101,19 @@ type prepared_compaction
     source CAS, not the turn slot, is the interleaving guard. The token is
     opaque and owns the exact Keeper identity and commit policy captured at
     preparation; callers cannot construct it or combine a plan with another
-    Keeper's metadata. *)
+    Keeper's metadata. It also owns the real post-dispatch observation and
+    durable terminalizer used by every uncommitted terminal path. *)
 
 (** Phase 1: load the durable source and run the policy + LLM planner.
     Admission-free by contract; the caller must not hold the keeper's turn
     slot while this runs. *)
 val prepare_compaction :
+  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard ->
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   trigger:Compaction_trigger.t ->
   projection_request:Keeper_compaction_projection_target.request ->
+  unit ->
   (prepared_compaction, compaction_recovery_error) result
 
 (** Phase 2: source-CAS commit of a fully-planned compaction.  The caller
@@ -121,9 +124,12 @@ val commit_prepared_compaction :
 
 (** Terminal source-bound disposition for a prepared exact-output result that
     cannot enter its commit admission. The provider execution has completed,
-    so the owning stimulus must never be requeued into another exact call. *)
+    so the owning stimulus must never be requeued into another exact call.
+    The exact attempt is durably quarantined before this function returns. *)
 val no_compaction_of_uncommitted_prepared :
-  prepared_compaction -> no_compaction
+  ?cause:Keeper_event_queue_state.exact_execution_terminal_cause ->
+  prepared_compaction ->
+  no_compaction
 
 (** Reload the canonical OAS checkpoint and apply an explicit typed
     compaction request. Returns success only after a structurally changed
@@ -131,8 +137,10 @@ val no_compaction_of_uncommitted_prepared :
     typed [Error].  Composition of {!prepare_compaction} and
     {!commit_prepared_compaction} for callers that stay synchronous. *)
 val recover_latest_checkpoint_for_compaction :
+  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard ->
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   trigger:Compaction_trigger.t ->
   projection_request:Keeper_compaction_projection_target.request ->
+  unit ->
   (compaction_recovery, compaction_recovery_error) result

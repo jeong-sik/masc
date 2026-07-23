@@ -410,6 +410,11 @@ let retired_keeper_meta_key_names =
   [ (* #23929 continuity purge left these behind in .masc/keepers/ *)
     "last_continuity_update_ts"
   ; "continuity_summary"
+    (* Dropped with [tool_call_summary]: both codec sides stopped knowing it in
+       the same change, and all 16 live keeper metas carry the key, so without
+       this entry every read of every existing file would warn and increment
+       MetaJsonFailures(site=unknown_keys) indefinitely. *)
+  ; "last_turn_tool_calls"
   ]
 ;;
 
@@ -601,6 +606,41 @@ let persist_compaction_outcome config ~keeper_name ~outcome
     |> Result.map (fun () -> `Persisted)
 ;;
 
+(* #25296: advance the transcript-quarantine retry streak on
+   [agent_runtime_state.transcript_quarantine_consecutive_retries] using the
+   same read/stamp/merge shape as {!persist_compaction_outcome}.
+
+   [`Retried] increments the streak each time a failed turn settles as
+   [Requeue Transcript_quarantine_retry] — including the escalated terminal
+   attempt, so an operator inspecting the meta sees the streak at the
+   ceiling. [`Recovered] resets it on a completed turn: any successful turn
+   proves the keeper is no longer pinned to the poisoned transcript. *)
+let persist_transcript_quarantine_outcome config ~keeper_name ~outcome
+  : ([ `Persisted | `No_durable_meta ], string) result
+  =
+  let stamp (m : Keeper_meta_contract.keeper_meta) =
+    let rt = m.runtime in
+    { m with
+      runtime =
+        { rt with
+          transcript_quarantine_consecutive_retries =
+            (match outcome with
+             | `Retried -> rt.transcript_quarantine_consecutive_retries + 1
+             | `Recovered -> 0)
+        }
+    }
+  in
+  match read_meta config keeper_name with
+  | Error msg -> Error msg
+  | Ok None -> Ok `No_durable_meta
+  | Ok (Some disk_meta) ->
+    write_meta_with_merge
+      ~merge:(fun ~latest ~caller:_ -> stamp latest)
+      config
+      (stamp disk_meta)
+    |> Result.map (fun () -> `Persisted)
+;;
+
 type identity_update_error =
   | Identity_missing
   | Identity_changed
@@ -646,7 +686,7 @@ let update_meta_if_identity
            | Ok (Some latest) ->
              if
                not (Keeper_id.Trace_id.equal latest.runtime.trace_id trace_id)
-               || not (Int.equal latest.runtime.generation generation)
+               || not (Int.equal latest.runtime.nonce generation)
              then Error Identity_changed
              else
                let caller = update latest in
@@ -694,7 +734,7 @@ let remove_meta_if_identity config ~name ~trace_id ~generation =
            | Ok (Some latest) ->
              if
                not (Keeper_id.Trace_id.equal latest.runtime.trace_id trace_id)
-               || not (Int.equal latest.runtime.generation generation)
+               || not (Int.equal latest.runtime.nonce generation)
              then Error Remove_identity_changed
              else
                try
@@ -730,7 +770,7 @@ let exact_identity_error_to_string = function
 let validate_exact_identity ~trace_id ~generation ~meta_version latest =
   if
     not (Keeper_id.Trace_id.equal latest.runtime.trace_id trace_id)
-    || not (Int.equal latest.runtime.generation generation)
+    || not (Int.equal latest.runtime.nonce generation)
   then Error Exact_identity_changed
   else if not (Int.equal latest.meta_version meta_version)
   then

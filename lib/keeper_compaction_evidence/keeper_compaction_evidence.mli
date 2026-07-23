@@ -1,7 +1,8 @@
 (** Exact structural evidence for one LLM compaction result. *)
 type t =
   private
-  { selected_target_ref : string
+  { slot_id : string
+  ; call_id : string
   ; target_identity_fingerprint : string
   ; catalog_generation_fingerprint : string
   ; catalog_evidence_sha256 : string
@@ -21,7 +22,8 @@ type t =
   }
 
 type field =
-  | Selected_target_ref
+  | Slot_id
+  | Call_id
   | Target_identity_fingerprint
   | Catalog_generation_fingerprint
   | Catalog_evidence_sha256
@@ -80,7 +82,8 @@ val exact_evidence_key : string
     and dashboard readers spell the key through this constant. *)
 
 val create
-  :  selected_target_ref:string
+  :  slot_id:string
+  -> call_id:string
   -> target_identity_fingerprint:string
   -> catalog_generation_fingerprint:string
   -> catalog_evidence_sha256:string

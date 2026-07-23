@@ -30,7 +30,8 @@ type compaction_plan =
   }
 
 type exact_execution_evidence =
-  { selected_target_ref : string
+  { slot_id : string
+  ; call_id : string
   ; target_identity_fingerprint : string
   ; catalog_generation_fingerprint : string
   ; catalog_evidence_sha256 : string
@@ -39,18 +40,58 @@ type exact_execution_evidence =
   ; receipt_request_body_sha256 : string
   }
 
+type attempt_observation =
+  { slot_id : string
+  ; call_id : string
+  ; phase : Exact_output.effect_phase
+  ; dispatch_count : int
+  ; catalog_generation_fingerprint : string
+  ; receipt_plan_fingerprint : string
+  ; receipt_request_body_sha256 : string
+  }
+
+type exact_write_outcome = Keeper_event_queue_persistence.exact_write_outcome =
+  | Fsync_completed
+  | Visible_sync_unconfirmed of string
+
+type exact_execution_guard =
+  { before_dispatch : attempt_observation -> (exact_write_outcome, string) result
+  ; release_before_dispatch : attempt_observation -> (exact_write_outcome, string) result
+  ; quarantine :
+      Keeper_event_queue_state.exact_execution_terminal_cause ->
+      attempt_observation ->
+      (exact_write_outcome, string) result
+  }
+
+type post_success_terminalizer =
+  { keeper_name : string
+  ; exact_execution_guard : exact_execution_guard
+  ; attempt_observation : attempt_observation
+  ; terminalization_mutex : Eio.Mutex.t
+  ; mutable canonical_terminal :
+      (Keeper_event_queue_state.exact_execution_terminal * unit Eio.Promise.t) option
+  }
+
 type completed_plan =
   { plan : compaction_plan
   ; exact_execution_evidence : exact_execution_evidence
+  ; post_success_terminalizer : post_success_terminalizer
   }
 
 type summarization_failure =
+  | Exact_lane_unconfigured
   | Exact_target_selection_failed
   | Exact_admission_failed
+  | Exact_attempt_start_failed of string
   | Exact_execution_context_unavailable
   | Exact_execution_failed_before_dispatch
-  | Exact_execution_failed_after_dispatch
+  | Exact_execution_terminal of Keeper_event_queue_state.exact_execution_terminal
+  | Exact_execution_failed_after_dispatch of attempt_observation
+  | Exact_attempt_already_started of attempt_observation
+  | Exact_execution_cancelled_after_dispatch of attempt_observation
+  | Exact_execution_provenance_mismatch of attempt_observation
   | Invalid_plan
+  | Invalid_plan_after_dispatch of attempt_observation
 
 type summarizer =
   units:Keeper_compaction_unit.closed_unit list ->
@@ -343,6 +384,7 @@ let exact_output_requirement =
 type admitted_slot =
   { slot_id : string
   ; ready_plan : Exact_output.ready_plan
+  ; attempt : Exact_output.attempt
   ; receipt : Exact_output.receipt
   }
 
@@ -351,21 +393,194 @@ type prepared_lane =
   ; admitted_slots : admitted_slot list
   }
 
-type attempt_observation =
-  { slot_id : string
-  ; phase : Exact_output.effect_phase
-  ; dispatch_count : int
-  ; catalog_generation_fingerprint : string
-  }
+let call_id_to_string call_id = Exact_output.call_id_to_string call_id
 
-let exact_execution_evidence ready_plan (success : Exact_output.success) =
+let observe_receipt ~slot_id receipt =
+  { slot_id
+  ; call_id = receipt |> Exact_output.receipt_call_id |> call_id_to_string
+  ; phase = Exact_output.receipt_phase receipt
+  ; dispatch_count = Exact_output.receipt_dispatch_count receipt
+  ; catalog_generation_fingerprint =
+      receipt
+      |> Exact_output.receipt_catalog_generation
+      |> Exact_output.catalog_generation_fingerprint
+  ; receipt_plan_fingerprint = Exact_output.receipt_plan_fingerprint receipt
+  ; receipt_request_body_sha256 =
+      Exact_output.receipt_request_body_sha256 receipt
+  }
+;;
+
+let observe_attempt (slot : admitted_slot) =
+  observe_receipt ~slot_id:slot.slot_id slot.receipt
+;;
+
+let is_before_dispatch_zero observation =
+  observation.phase = Exact_output.Before_dispatch
+  && observation.dispatch_count = 0
+;;
+
+let terminal_of_observation cause (observation : attempt_observation) =
+  Keeper_event_queue_state.
+    { cause; slot_id = observation.slot_id; call_id = observation.call_id }
+;;
+
+type exact_execution_release_result =
+  | Release_durable
+  | Release_failed
+  | Release_visible_terminal of Keeper_event_queue_state.exact_execution_terminal
+
+let release_exact_execution_before_dispatch
+      ~keeper_name
+      ~exact_execution_guard
+      observation
+  =
+  match exact_execution_guard with
+  | None -> Release_failed
+  | Some guard ->
+    (match guard.release_before_dispatch observation with
+     | Ok Fsync_completed -> Release_durable
+     | Ok (Visible_sync_unconfirmed detail) ->
+       Log.Keeper.error
+         ~keeper_name
+         "compaction exact pre-dispatch fence release is visible but sync is unconfirmed slot=%s call_id=%s: %s"
+         observation.slot_id
+         observation.call_id
+         detail;
+       Release_visible_terminal
+         (terminal_of_observation
+            Keeper_event_queue_state.Terminal_persistence_failed
+            observation)
+     | Error detail ->
+       Log.Keeper.error
+         ~keeper_name
+         "compaction exact pre-dispatch fence release failed slot=%s call_id=%s: %s"
+         observation.slot_id
+         observation.call_id
+         detail;
+       Release_failed)
+;;
+
+let quarantine_exact_execution ~keeper_name ~exact_execution_guard ~cause observation =
+  match exact_execution_guard with
+  | None -> Error "exact execution guard is unavailable"
+  | Some guard ->
+    (match guard.quarantine cause observation with
+     | Ok Fsync_completed -> Ok Fsync_completed
+     | Ok (Visible_sync_unconfirmed detail as outcome) ->
+       Log.Keeper.warn
+         ~keeper_name
+         "compaction exact terminal quarantine is visible but sync is unconfirmed slot=%s call_id=%s: %s"
+         observation.slot_id
+         observation.call_id
+         detail;
+       Ok outcome
+     | Error detail ->
+       Log.Keeper.error
+         ~keeper_name
+         "compaction exact terminal quarantine failed slot=%s call_id=%s: %s"
+         observation.slot_id
+         observation.call_id
+         detail;
+       Error detail)
+;;
+
+let terminal_failure_after_quarantine
+      ~keeper_name
+      ~exact_execution_guard
+      ~cause
+      ~failure
+      observation
+  =
+  ignore
+    (quarantine_exact_execution
+       ~keeper_name
+       ~exact_execution_guard
+       ~cause
+       observation
+     : (exact_write_outcome, string) result);
+  Error failure
+;;
+
+let log_terminal_quarantine_failure
+      terminalizer
+      (terminal : Keeper_event_queue_state.exact_execution_terminal)
+      detail
+  =
+  try
+    Log.Keeper.warn
+      ~keeper_name:terminalizer.keeper_name
+      "post-success exact-execution quarantine failed; retaining canonical \
+       terminal slot_id=%s call_id=%s: %s"
+      terminal.Keeper_event_queue_state.slot_id
+      terminal.call_id
+      detail
+  with
+  | _ -> ()
+;;
+
+let terminalize_post_success terminalizer cause =
+  let role =
+    Eio.Cancel.protect
+    @@ fun () ->
+    let role =
+      Eio.Mutex.use_rw ~protect:true terminalizer.terminalization_mutex
+      @@ fun () ->
+      match terminalizer.canonical_terminal with
+      | Some (terminal, completion) -> `Await (terminal, completion)
+      | None ->
+        let terminal =
+          Keeper_event_queue_state.
+            { cause
+            ; slot_id = terminalizer.attempt_observation.slot_id
+            ; call_id = terminalizer.attempt_observation.call_id
+            }
+        in
+        let completion, resolve_completion = Eio.Promise.create () in
+        terminalizer.canonical_terminal <- Some (terminal, completion);
+        `Own (terminal, resolve_completion)
+    in
+    match role with
+    | `Await _ as role -> role
+    | `Own (terminal, resolve_completion) ->
+      let failure =
+        try
+          match
+            quarantine_exact_execution
+              ~keeper_name:terminalizer.keeper_name
+              ~exact_execution_guard:(Some terminalizer.exact_execution_guard)
+              ~cause:terminal.cause
+              terminalizer.attempt_observation
+          with
+          | Ok Fsync_completed -> None
+          | Ok (Visible_sync_unconfirmed detail) ->
+            Log.Keeper.warn
+              ~keeper_name:terminalizer.keeper_name
+              "post-success exact-execution quarantine is visible but sync is unconfirmed slot_id=%s call_id=%s: %s"
+              terminal.slot_id
+              terminal.call_id
+              detail;
+            None
+          | Error detail -> Some detail
+        with
+        | exn -> Some ("raised " ^ Printexc.to_string exn)
+      in
+      Option.iter (log_terminal_quarantine_failure terminalizer terminal) failure;
+      Eio.Promise.resolve resolve_completion ();
+      `Done terminal
+  in
+  match role with
+  | `Done terminal -> terminal
+  | `Await (terminal, completion) ->
+    Eio.Promise.await completion;
+    terminal
+;;
+
+let exact_execution_evidence ~slot_id ready_plan (success : Exact_output.success) =
   let provenance = success.provenance in
   let identity = provenance.target_identity in
   let receipt = success.receipt in
-  { selected_target_ref =
-      identity
-      |> Exact_output.target_identity_ref
-      |> Exact_output.target_ref_id
+  { slot_id
+  ; call_id = call_id_to_string success.call_id
   ; target_identity_fingerprint =
       Exact_output.target_identity_fingerprint identity
   ; catalog_generation_fingerprint =
@@ -381,7 +596,7 @@ let exact_execution_evidence ready_plan (success : Exact_output.success) =
 
 let admit_all ~keeper_name selected_slots ~messages =
   let rec loop admitted = function
-    | [] -> List.rev admitted
+    | [] -> Ok (List.rev admitted)
     | (slot : Runtime_exact_output_registry.selected_slot) :: rest ->
       (match
          Exact_output.admit
@@ -390,8 +605,18 @@ let admit_all ~keeper_name selected_slots ~messages =
            exact_output_requirement
        with
        | Ok ready_plan ->
-         let receipt = Exact_output.attempt_receipt ready_plan in
-         loop ({ slot_id = slot.slot_id; ready_plan; receipt } :: admitted) rest
+         (match Exact_output.start_attempt ready_plan with
+          | Ok attempt ->
+            let receipt = Exact_output.attempt_receipt attempt in
+            loop
+              ({ slot_id = slot.slot_id; ready_plan; attempt; receipt } :: admitted)
+              rest
+          | Error (Exact_output.Call_id_generation_failed detail) ->
+            Log.Keeper.warn
+              ~keeper_name
+              "compaction exact attempt identity allocation failed slot=%s"
+              slot.slot_id;
+            Error (Exact_attempt_start_failed detail))
        | Error _ ->
          Log.Keeper.warn
            ~keeper_name
@@ -407,81 +632,206 @@ let prepare_lane ~keeper_name ~registry ~lane_id ~units =
   then Error Invalid_plan
   else
     let registry_generation = Runtime_exact_output_registry.generation registry in
-    match Runtime_exact_output_registry.lane_slots registry ~lane_id with
-    | Error error ->
+    match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
+    | Error
+        (Runtime_exact_output_registry.Exact_lane_unconfigured
+           { lane_id = missing_lane_id }) ->
       Log.Keeper.warn
         ~keeper_name
-        "compaction exact lane lookup rejected generation=%Ld: %s"
+        "compaction exact lane is unconfigured generation=%Ld lane_id=%s"
         registry_generation
-        (Runtime_exact_output_registry.error_to_string error);
+        missing_lane_id;
+      Error Exact_lane_unconfigured
+    | Error
+        (Runtime_exact_output_registry.No_usable_lane_slots
+           { unavailable_slots; _ }) ->
+      List.iter
+        (fun unavailable ->
+           Log.Keeper.warn
+             ~keeper_name
+             "compaction exact slot unavailable generation=%Ld: %s"
+             registry_generation
+             (Runtime_exact_output_registry.unavailable_slot_to_string unavailable))
+        unavailable_slots;
       Error Exact_target_selection_failed
-    | Ok slot_ids ->
-      let selected_slots_result =
-        Runtime_exact_output_registry.resolve_slots registry slot_ids
-        |> List.fold_left
-             (fun selected_slots_result outcome ->
-                match selected_slots_result, outcome with
-                | (Error _ as error), _ -> error
-                | Ok selected_slots, Ok selected -> Ok (selected :: selected_slots)
-                | Ok _, Error error ->
-                  Log.Keeper.warn
-                    ~keeper_name
-                    "compaction exact registry readiness violated generation=%Ld: %s"
-                    registry_generation
-                    (Runtime_exact_output_registry.error_to_string error);
-                  Error Exact_target_selection_failed)
-             (Ok [])
-      in
-      (match selected_slots_result with
+    | Ok { selected_slots; unavailable_slots } ->
+      List.iter
+        (fun unavailable ->
+           Log.Keeper.warn
+             ~keeper_name
+             "compaction exact slot skipped generation=%Ld: %s"
+             registry_generation
+             (Runtime_exact_output_registry.unavailable_slot_to_string unavailable))
+        unavailable_slots;
+      let messages = messages_for_plan ~units in
+      (* Every usable candidate is admitted and starts exactly one independent
+         affine attempt before the first network effect. The attempt and its
+         receipt stay MASC-private and immutable for the lifetime of this lane. *)
+      (match admit_all ~keeper_name selected_slots ~messages with
        | Error _ as error -> error
-       | Ok selected_slots ->
-         let selected_slots = List.rev selected_slots in
-         if selected_slots = []
-         then Error Exact_target_selection_failed
-         else
-           let messages = messages_for_plan ~units in
-           (* Every candidate is admitted against the same immutable registry before
-              the first network effect. Each admitted plan's real receipt is retained
-              before execution enters a cancellation scope. *)
-           let admitted_slots = admit_all ~keeper_name selected_slots ~messages in
-           if admitted_slots = []
-           then Error Exact_admission_failed
-           else Ok { units; admitted_slots })
+       | Ok [] -> Error Exact_admission_failed
+       | Ok admitted_slots -> Ok { units; admitted_slots })
 ;;
 
-let execute_prepared_lane ~keeper_name ~net ?clock prepared_lane =
+let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepared_lane =
   let rec execute = function
     | [] -> Error Exact_execution_failed_before_dispatch
-    | { slot_id; ready_plan; receipt } :: rest ->
-      (match Exact_output.execute_once ~net ?clock ready_plan with
-       | Error _
-         when Exact_output.receipt_phase receipt = Exact_output.Before_dispatch
-              && Exact_output.receipt_dispatch_count receipt = 0 ->
-         Log.Keeper.warn
-           ~keeper_name
-           "compaction exact slot failed before dispatch slot=%s"
-           slot_id;
-         execute rest
-       | Error _ -> Error Exact_execution_failed_after_dispatch
-       | Ok success ->
-         (match plan_of_json ~units:prepared_lane.units success.output with
-          | Error detail ->
+    | ({ slot_id; ready_plan; attempt; receipt = _ } as slot) :: rest ->
+      let handle_result = function
+        | Error
+            ({ cause = Exact_output.Attempt_already_started; receipt; _ } :
+              Exact_output.execution_error) ->
+          let observation = observe_receipt ~slot_id receipt in
+          Log.Keeper.warn
+            ~keeper_name
+            "compaction exact attempt already consumed slot=%s call_id=%s"
+            slot_id
+            observation.call_id;
+          terminal_failure_after_quarantine
+            ~keeper_name
+            ~exact_execution_guard
+            ~cause:Keeper_event_queue_state.Attempt_already_started
+            ~failure:(Exact_attempt_already_started observation)
+            observation
+        | Error ({ receipt; _ } : Exact_output.execution_error) ->
+          let observation = observe_receipt ~slot_id receipt in
+          if is_before_dispatch_zero observation
+          then (
             Log.Keeper.warn
               ~keeper_name
-              "compaction exact output violated domain plan slot=%s: %s"
+              "compaction exact slot failed before dispatch slot=%s call_id=%s"
               slot_id
+              observation.call_id;
+            match
+              release_exact_execution_before_dispatch
+                ~keeper_name
+                ~exact_execution_guard
+                observation
+            with
+            | Release_durable -> execute rest
+            | Release_visible_terminal terminal ->
+              Error (Exact_execution_terminal terminal)
+            | Release_failed -> Error Exact_execution_failed_before_dispatch)
+          else (
+            terminal_failure_after_quarantine
+              ~keeper_name
+              ~exact_execution_guard
+              ~cause:Keeper_event_queue_state.Execution_failed_after_dispatch
+              ~failure:(Exact_execution_failed_after_dispatch observation)
+              observation)
+        | Ok (success : Exact_output.success) ->
+          let observation = observe_attempt slot in
+          let success_call_id = call_id_to_string success.call_id in
+          let success_receipt_call_id =
+            success.receipt
+            |> Exact_output.receipt_call_id
+            |> call_id_to_string
+          in
+          if
+            not
+              (String.equal success_call_id success_receipt_call_id
+               && String.equal success_call_id observation.call_id)
+          then (
+            terminal_failure_after_quarantine
+              ~keeper_name
+              ~exact_execution_guard
+              ~cause:Keeper_event_queue_state.Execution_provenance_mismatch
+              ~failure:(Exact_execution_provenance_mismatch observation)
+              observation)
+          else
+            (match plan_of_json ~units:prepared_lane.units success.output with
+             | Error detail ->
+               Log.Keeper.warn
+                 ~keeper_name
+                 "compaction exact output violated domain plan slot=%s call_id=%s: %s"
+                 slot_id
+                 observation.call_id
+                 detail;
+               terminal_failure_after_quarantine
+                 ~keeper_name
+                 ~exact_execution_guard
+                 ~cause:Keeper_event_queue_state.Domain_invalid_output
+                 ~failure:(Invalid_plan_after_dispatch observation)
+                 observation
+             | Ok plan ->
+               (match exact_execution_guard with
+                | None -> Error Exact_execution_failed_before_dispatch
+                | Some exact_execution_guard ->
+                  Ok
+                    { plan
+                    ; exact_execution_evidence =
+                        exact_execution_evidence ~slot_id ready_plan success
+                    ; post_success_terminalizer =
+                        { keeper_name
+                        ; exact_execution_guard
+                        ; attempt_observation = observation
+                        ; terminalization_mutex = Eio.Mutex.create ()
+                        ; canonical_terminal = None
+                        }
+                    }))
+      in
+      let initial_observation = observe_attempt slot in
+      (match exact_execution_guard with
+       | Some guard ->
+         (match guard.before_dispatch initial_observation with
+          | Error detail ->
+            Log.Keeper.error
+              ~keeper_name
+              "compaction exact pre-dispatch fence commit failed slot=%s call_id=%s: %s"
+              slot_id
+              initial_observation.call_id
               detail;
-            Error Invalid_plan
-          | Ok plan ->
-            Ok
-              { plan
-              ; exact_execution_evidence = exact_execution_evidence ready_plan success
-              }))
+            Error Exact_execution_failed_before_dispatch
+          | Ok (Visible_sync_unconfirmed detail) ->
+            Log.Keeper.error
+              ~keeper_name
+              "compaction exact pre-dispatch binding is visible but sync is unconfirmed; refusing POST and terminally settling the source slot=%s call_id=%s: %s"
+              slot_id
+              initial_observation.call_id
+              detail;
+            Error
+              (Exact_execution_terminal
+                 (terminal_of_observation
+                    Keeper_event_queue_state.Terminal_persistence_failed
+                    initial_observation))
+          | Ok Fsync_completed ->
+            (try handle_result (Exact_output.execute_once ~net ?clock attempt) with
+             | Eio.Cancel.Cancelled _ as cancellation ->
+               Eio.Cancel.protect
+               @@ fun () ->
+               let observation = observe_attempt slot in
+               if is_before_dispatch_zero observation
+               then (
+                 match
+                   release_exact_execution_before_dispatch
+                     ~keeper_name
+                     ~exact_execution_guard
+                     observation
+                 with
+                 | Release_visible_terminal terminal ->
+                   (* The binding removal is already visible. Consume
+                      cancellation only here so the original identity remains
+                      available for source-bound terminal settlement. *)
+                   Error (Exact_execution_terminal terminal)
+                 | Release_durable | Release_failed -> raise cancellation)
+               else (
+                 Log.Keeper.warn
+                   ~keeper_name
+                   "compaction exact cancellation became terminal slot=%s call_id=%s"
+                   slot_id
+                   observation.call_id;
+                 terminal_failure_after_quarantine
+                   ~keeper_name
+                   ~exact_execution_guard
+                   ~cause:Keeper_event_queue_state.Execution_cancelled_after_dispatch
+                   ~failure:(Exact_execution_cancelled_after_dispatch observation)
+                   observation)))
+       | None -> Error Exact_execution_failed_before_dispatch)
   in
   execute prepared_lane.admitted_slots
 ;;
 
-let run_exact ~keeper_name ~sw:_ ~net ~clock ~units =
+let run_exact ?exact_execution_guard ~keeper_name ~sw:_ ~net ~clock ~units () =
   if not (has_eligible_units units)
   then Error Invalid_plan
   else
@@ -495,24 +845,36 @@ let run_exact ~keeper_name ~sw:_ ~net ~clock ~units =
           ~lane_id:"compaction_exact"
           ~units
       in
-      execute_prepared_lane ~keeper_name ~net ?clock prepared_lane
+      execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepared_lane
 ;;
 
-let make_resolved ~(keeper_name : string) () : summarizer option =
+let make_resolved ?exact_execution_guard ~(keeper_name : string) () : summarizer option =
   match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
   | Some sw, Some net ->
     let clock = Eio_context.get_clock_opt () in
-    Some (fun ~units -> run_exact ~keeper_name ~sw ~net ~clock ~units)
+    Some
+      (fun ~units ->
+         run_exact ?exact_execution_guard ~keeper_name ~sw ~net ~clock ~units ())
   | _ -> None
 ;;
 
-let make ~keeper_name () = make_resolved ~keeper_name ()
+let make ?exact_execution_guard ~keeper_name () =
+  make_resolved ?exact_execution_guard ~keeper_name ()
+;;
 
 let completed_plan completed = completed.plan
 let completed_exact_execution_evidence completed = completed.exact_execution_evidence
-let exact_execution_evidence_selected_target_ref evidence = evidence.selected_target_ref
+let completed_post_success_terminalizer completed = completed.post_success_terminalizer
 
-let exact_execution_evidence_target_identity_fingerprint evidence =
+let completed_attempt_observation completed =
+  completed.post_success_terminalizer.attempt_observation
+;;
+
+let exact_execution_evidence_slot_id (evidence : exact_execution_evidence) = evidence.slot_id
+let exact_execution_evidence_call_id (evidence : exact_execution_evidence) = evidence.call_id
+
+let exact_execution_evidence_target_identity_fingerprint
+      (evidence : exact_execution_evidence) =
   evidence.target_identity_fingerprint
 ;;
 
@@ -521,17 +883,22 @@ let exact_execution_evidence_catalog_generation_fingerprint
   evidence.catalog_generation_fingerprint
 ;;
 
-let exact_execution_evidence_catalog_evidence_sha256 evidence =
+let exact_execution_evidence_catalog_evidence_sha256
+      (evidence : exact_execution_evidence) =
   evidence.catalog_evidence_sha256
 ;;
 
-let exact_execution_evidence_plan_fingerprint evidence = evidence.plan_fingerprint
+let exact_execution_evidence_plan_fingerprint (evidence : exact_execution_evidence) =
+  evidence.plan_fingerprint
+;;
 
-let exact_execution_evidence_receipt_plan_fingerprint evidence =
+let exact_execution_evidence_receipt_plan_fingerprint
+      (evidence : exact_execution_evidence) =
   evidence.receipt_plan_fingerprint
 ;;
 
-let exact_execution_evidence_receipt_request_body_sha256 evidence =
+let exact_execution_evidence_receipt_request_body_sha256
+      (evidence : exact_execution_evidence) =
   evidence.receipt_request_body_sha256
 ;;
 
@@ -543,16 +910,6 @@ module For_testing = struct
   ;;
 
   let attempt_observations prepared_lane =
-    List.map
-      (fun (slot : admitted_slot) ->
-        { slot_id = slot.slot_id
-        ; phase = Exact_output.receipt_phase slot.receipt
-        ; dispatch_count = Exact_output.receipt_dispatch_count slot.receipt
-        ; catalog_generation_fingerprint =
-            slot.receipt
-            |> Exact_output.receipt_catalog_generation
-            |> Exact_output.catalog_generation_fingerprint
-        })
-      prepared_lane.admitted_slots
+    List.map observe_attempt prepared_lane.admitted_slots
   ;;
 end

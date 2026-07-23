@@ -880,7 +880,7 @@ let snapshot_json_inner ~(config : Workspace.config) ~(meta : keeper_meta) =
   `Assoc
     [
       ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-      ("generation", `Int meta.runtime.generation);
+      ("generation", `Int meta.runtime.nonce);
       ( "turn_id",
         match
           latest_turn_id ~registry_entry ~latest_decision ~latest_tool_call
@@ -926,7 +926,7 @@ let snapshot_json ~(config : Workspace.config) ~(meta : keeper_meta) =
   let cache_key =
     { Snapshot_cache.base_path = config.base_path
     ; keeper_name = meta.name
-    ; generation = meta.runtime.generation
+    ; generation = meta.runtime.nonce
     ; last_turn_ts = meta.runtime.usage.last_turn_ts
     }
   in

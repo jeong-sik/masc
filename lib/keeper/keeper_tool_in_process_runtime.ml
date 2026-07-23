@@ -776,8 +776,8 @@ let handle_masc_schedule_with_outcome ~(config : Workspace.config) ~(meta : keep
 
 (* RFC-0252 — masc_fusion out-of-band panel+judge deliberation.  The
    gate -> fiber fork -> orchestrator logic lives in [Fusion_tool.handle];
-   this handler only gathers the keeper context (base_path, name, a fresh
-   run_id, wall-clock) and loads the [fusion] policy from runtime.toml.
+   this handler only gathers the keeper context and loads the [fusion] policy
+   from runtime.toml. The common async lifecycle owns the canonical run id.
 
    Switch: fusion forks a background fiber that MUST outlive this keeper turn
    (out-of-band, ~7x latency).  So it forks on the server ROOT switch
@@ -799,14 +799,12 @@ let handle_masc_fusion_with_outcome ~(config : Workspace.config) ~(meta : keeper
             (`Assoc [ "ok", `Bool false; "error", `String msg ]))
      | Ok policy ->
        let now_unix = Time_compat.now () in
-       let run_id = Random_id.prefixed ~prefix:"fus-" ~bytes:16 in
        Fusion_tool.handle_result
          ~sw
          ~net
          ~base_dir:config.Workspace.base_path
          ~keeper:meta.name
          ~now_unix
-         ~run_id
          ~policy
          ?continuation_channel
          ~args

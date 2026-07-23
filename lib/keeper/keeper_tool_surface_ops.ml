@@ -176,7 +176,7 @@ let maybe_reseed_keeper_identity_config ~(config : Workspace.config) (meta : kee
             trace_id = new_trace_id;
             trace_history =
               Json_util.dedupe_keep_order (previous_trace_id :: meta.runtime.trace_history);
-            generation = meta.runtime.generation + 1;
+            nonce = meta.runtime.nonce + 1;
           };
       }
     in

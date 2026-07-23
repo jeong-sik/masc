@@ -440,6 +440,9 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
     Keeper_registry.reset_turn_failures
       ~base_path:config.Workspace.base_path
       updated_meta.name;
+    Keeper_unified_turn_failure.reset_invalid_request_failures
+      ~keeper_name:updated_meta.name;
+    Keeper_unified_turn_failure.note_turn_success updated_meta.name;
     Health.record_success ~agent_name:updated_meta.name
   in
   match result.Keeper_agent_run.stop_reason with
@@ -610,17 +613,6 @@ let handle
       ~config
       ~original_meta:meta
       ~updated_meta
-  in
-  let tool_call_summaries =
-    result.Keeper_agent_run.tool_calls
-    |> List.map (fun (d : Keeper_agent_run.tool_call_detail) ->
-       ( { tool_name = d.tool_name; outcome = d.outcome }
-         : Keeper_meta_contract.tool_call_summary ))
-  in
-  let updated_meta =
-    { updated_meta with
-      runtime = { updated_meta.runtime with last_turn_tool_calls = tool_call_summaries }
-    }
   in
   (* Single source of truth for success-path terminal FSM transitions.
      Completion-contract observations never rewrite a successful runtime turn

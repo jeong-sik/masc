@@ -78,7 +78,7 @@ let validate_string_list field names =
 let validate_runtime_fields (runtime : agent_runtime_state) =
   if String.equal (Trace_id.to_string runtime.trace_id) ""
   then Error (Required_field_missing { field = "trace_id" })
-  else if runtime.generation < 0
+  else if runtime.nonce < 0
   then Error (Required_field_missing { field = "generation" })
   else if runtime.usage.total_turns < 0
   then Error (Required_field_missing { field = "usage.total_turns" })

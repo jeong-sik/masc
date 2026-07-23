@@ -292,6 +292,15 @@ let find_preset (policy : t) name =
       String.equal (Validated_preset.preset vp).name name)
     policy.presets
 
+let decide_top_level ~(policy : t) ~preset =
+  if not policy.enabled
+  then Error Fusion_types.Disabled
+  else
+    match find_preset policy preset with
+    | None -> Error (Fusion_types.Preset_unknown preset)
+    | Some _ -> Ok ()
+;;
+
 (* decide는 enabled/preset/depth의 구조적 판정만 담당한다 — "이 턴이 심의할 가치가
    있나"는 게이트가 score 비교나 문자열 매칭으로 판정하지 않고, 키퍼(이미 LLM)가
    판단해 masc_fusion을 호출하는 것으로 표현한다(RFC-0252 §6). 따라서 [req.trigger]는
@@ -300,12 +309,10 @@ let find_preset (policy : t) name =
    타입으로 증명됨 (RFC-0280, 기존 dead 재검증 제거). *)
 let decide ~(policy : t)
     (req : Fusion_types.fusion_request) : Fusion_types.gate_decision =
-  if not policy.enabled then Fusion_types.Deny Fusion_types.Disabled
-  else
-    match find_preset policy req.preset with
-    | None -> Fusion_types.Deny (Fusion_types.Preset_unknown req.preset)
-    | Some _vp ->
-      (match req.depth with
-       | Fusion_types.Fusion_depth.Nested ->
-         Fusion_types.Deny Fusion_types.Depth_exceeded
-       | Fusion_types.Fusion_depth.Top -> Fusion_types.Allow req)
+  match decide_top_level ~policy ~preset:req.preset with
+  | Error reason -> Fusion_types.Deny reason
+  | Ok () ->
+    (match req.depth with
+     | Fusion_types.Fusion_depth.Nested ->
+       Fusion_types.Deny Fusion_types.Depth_exceeded
+     | Fusion_types.Fusion_depth.Top -> Fusion_types.Allow req)

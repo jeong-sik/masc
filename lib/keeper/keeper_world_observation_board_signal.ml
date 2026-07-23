@@ -211,12 +211,23 @@ let text (signal : Board_dispatch.board_signal) =
        ])
 ;;
 
+let address_text (signal : Board_dispatch.board_signal) =
+  match signal.kind with
+  | Board_dispatch.Board_post_created ->
+    String.concat
+      "\n"
+      (List.filter
+         (fun part -> not (String.equal (String.trim part) ""))
+         [ signal.title; signal.content ])
+  | Board_dispatch.Board_comment_added -> signal.content
+  | Board_dispatch.Board_reaction_changed _ -> ""
+;;
+
 let mention_ids_of_signal signal =
-  (* Board dispatch still carries textual Board content. Convert that boundary
-     payload exactly once into canonical Keeper ids and compare only those typed
-     identities below. This deliberately replaces substring matching; tokens
-     such as [@foo-extra] and [email@foo.example] cannot address [foo]. *)
-  Keeper_lane_mentions.mention_ids_of_content (text signal)
+  Board.direct_targets_of_text (address_text signal)
+  |> List.filter_map (fun target ->
+    Board.Agent_id.to_string target |> Keeper_identity.Keeper_id.of_string)
+  |> List.sort_uniq Keeper_identity.Keeper_id.compare
 ;;
 
 let match_signal
@@ -313,6 +324,9 @@ let check_self_comment_status ~self_ids ~(post_id : string) : comment_status =
 type wake_reason =
   | Explicit_mention
       (** The signal mentions one of the keeper's identity targets. *)
+  | Broadcast
+      (** The exact [@@all] Keeper Board address selected every non-author
+          lane. *)
   | Thread_reply_after_self_comment
       (** A new external comment arrived on a post the keeper had commented on. *)
   | Reaction_after_self_activity
@@ -321,6 +335,7 @@ type wake_reason =
 
 let wake_reason_label = function
   | Explicit_mention -> "explicit_mention"
+  | Broadcast -> "broadcast"
   | Thread_reply_after_self_comment -> "thread_reply_after_self_comment"
   | Reaction_after_self_activity -> "reaction_after_self_activity"
 ;;

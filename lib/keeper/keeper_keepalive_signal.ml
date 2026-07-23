@@ -310,21 +310,9 @@ let wakeup_keeper ?base_path ?stimulus name =
     entries
 ;;
 
-(** Wake up all running keepers — used when a broadcast mentions @@all
-    or when a system-wide event requires immediate attention.
-    [None] preserves the legacy global wakeup behavior. *)
-let wakeup_all_keepers ?base_path () =
-  match base_path with
-  | None -> Keeper_registry.wakeup_all ~intent:Keeper_registry.Broadcast_signal ()
-  | Some expected ->
-    Keeper_registry.wakeup_all
-      ~intent:Keeper_registry.Broadcast_signal
-      ~base_path:expected
-      ()
-
 (* RFC-0020: enqueue the board signal as a typed [stimulus_payload] (PR-1).
    [reason] is the typed {!Board_wake.wake_reason} that selected this keeper;
-   here it only picks urgency (explicit mentions are [Immediate]). It is not
+   here it only picks urgency (explicit targets and broadcasts are [Immediate]). It is not
    carried in the payload — the next prompt re-derives board context from the
    typed [Board_signal] payload, not from a wake-reason string. *)
 let queue_reaction_target_of_board = function
@@ -366,7 +354,8 @@ let board_signal_stimulus
   { Keeper_event_queue.post_id = signal.post_id
   ; urgency =
       (match reason with
-       | Board_wake.Explicit_mention -> Keeper_event_queue.Immediate
+       | Board_wake.Explicit_mention | Board_wake.Broadcast ->
+         Keeper_event_queue.Immediate
        | Board_wake.Thread_reply_after_self_comment
        | Board_wake.Reaction_after_self_activity ->
          Keeper_event_queue.Normal)
@@ -410,7 +399,11 @@ let record_board_attention_candidate
      | Ok _ ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string BoardSignalAttentionCandidateTotal)
-         ~labels:[ ("keeper", meta.name); ("kind", signal_kind_label) ]
+         ~labels:
+           [ ("keeper", meta.name)
+           ; ("kind", signal_kind_label)
+           ; ("audience", Keeper_board_audience.label Keeper_board_audience.Discoverable)
+           ]
          ()
      | Error err ->
        Otel_metric_store.inc_counter
@@ -445,8 +438,9 @@ let deliver_addressed_board_signal
 
 let wakeup_relevant_keeper_for_board_signal
       ~(config : Workspace.config)
-      (signal : Board_dispatch.board_signal)
+      (addressed : Board_dispatch.addressed_board_signal)
   =
+  let signal = addressed.signal in
   let registry_entries =
     Keeper_registry.all ~base_path:config.base_path ()
     |> List.filter board_signal_entry_accepts_delivery
@@ -457,13 +451,37 @@ let wakeup_relevant_keeper_for_board_signal
     | Board_dispatch.Board_comment_added -> "comment_added"
     | Board_dispatch.Board_reaction_changed _ -> "reaction_changed"
   in
-  (* Every lane is independent: persist and signal each addressed Keeper
-     without a fleet-wide cap, ordering dependency, or content debounce. *)
-  let board_ym = Eio_guard.create_yield_meter () in
-  List.iter
-    (fun (entry : Keeper_registry.registry_entry) ->
-       (try
-          match read_meta config entry.name with
+  match Keeper_board_audience.of_board_audience addressed.audience with
+  | Error error ->
+    (* Fail closed: a classification error (unsupported [@@] selector,
+       mixed direct+broadcast address, or a Direct post without targets)
+       drops the ENTIRE signal.  There is no partial routing to the
+       otherwise-valid [@keeper] targets of a mixed address — accepting
+       them would silently reinterpret an ambiguous address.  The drop is
+       observable via the metric and warning below. *)
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string KeepaliveSignalFailures)
+      ~labels:[ ("keeper", "routing"); ("phase", "board_audience_classify") ]
+      ();
+    Log.Keeper.warn
+      "board signal audience rejected: post=%s error=%s"
+      signal.post_id
+      (Keeper_board_audience.classification_error_to_string error)
+  | Ok audience ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string BoardSignalRoutedTotal)
+      ~labels:
+        [ ("kind", signal_kind_label)
+        ; ("audience", Keeper_board_audience.label audience)
+        ]
+      ();
+    (* Every lane is independent: persist and signal each addressed Keeper
+       without a fleet-wide cap, ordering dependency, or content debounce. *)
+    let board_ym = Eio_guard.create_yield_meter () in
+    List.iter
+      (fun (entry : Keeper_registry.registry_entry) ->
+         (try
+            match read_meta config entry.name with
         | Error detail ->
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string KeepaliveSignalFailures)
@@ -483,7 +501,8 @@ let wakeup_relevant_keeper_for_board_signal
             entry.name
         | Ok (Some meta) ->
           (match
-             Keeper_world_observation.board_signal_wake_reason
+             Keeper_board_audience.route_for_keeper
+               ~audience
                ~meta
                ~signal
            with
@@ -497,17 +516,38 @@ let wakeup_relevant_keeper_for_board_signal
                meta.name
                signal.post_id
                (Keeper_world_observation_board_signal.unavailable_to_string unavailable)
-           | Keeper_world_observation_board_signal.Available None ->
+           | Keeper_world_observation_board_signal.Available
+               Keeper_board_audience.Ignore ->
              Otel_metric_store.inc_counter
                Keeper_metrics.(to_string BoardSignalNoWakeTotal)
-               ~labels:[ ("keeper", meta.name); ("kind", signal_kind_label) ]
+               ~labels:
+                 [ ("keeper", meta.name)
+                 ; ("kind", signal_kind_label)
+                 ; ("audience", Keeper_board_audience.label audience)
+                 ]
+               ()
+           | Keeper_world_observation_board_signal.Available
+               Keeper_board_audience.Judge_discoverable ->
+             (* Intentionally counted under [BoardSignalNoWakeTotal]:
+                [Judge_discoverable] issues no wake for this keeper — the
+                signal is recorded as an attention candidate below
+                instead. The [audience] label keeps this distinguishable
+                from the [Ignore] branch, which shares the counter. *)
+             Otel_metric_store.inc_counter
+               Keeper_metrics.(to_string BoardSignalNoWakeTotal)
+               ~labels:
+                 [ ("keeper", meta.name)
+                 ; ("kind", signal_kind_label)
+                 ; ("audience", Keeper_board_audience.label audience)
+                 ]
                ();
              record_board_attention_candidate
                ~config
                ~signal_kind_label
                ~meta
                signal
-           | Keeper_world_observation_board_signal.Available (Some reason) ->
+           | Keeper_world_observation_board_signal.Available
+               (Keeper_board_audience.Deliver reason) ->
              (match deliver_addressed_board_signal ~config ~reason ~signal meta with
               | Error detail ->
                 Otel_metric_store.inc_counter
@@ -522,6 +562,14 @@ let wakeup_relevant_keeper_for_board_signal
                   signal.post_id
                   detail
               | Ok () ->
+                Otel_metric_store.inc_counter
+                  Keeper_metrics.(to_string BoardSignalDeliveryTotal)
+                  ~labels:
+                    [ ("keeper", meta.name)
+                    ; ("kind", signal_kind_label)
+                    ; ("audience", Keeper_board_audience.label audience)
+                    ]
+                  ();
                 if meta.paused || entry.phase = Keeper_state_machine.Paused
                 then
                   Log.Keeper.info
@@ -531,8 +579,16 @@ let wakeup_relevant_keeper_for_board_signal
                     signal.post_id
                 else (
                   let outcome =
+                    let intent =
+                      match reason with
+                      | Board_wake.Broadcast -> Keeper_registry.Broadcast_signal
+                      | Board_wake.Explicit_mention
+                      | Board_wake.Thread_reply_after_self_comment
+                      | Board_wake.Reaction_after_self_activity ->
+                        Keeper_registry.Reactive_signal
+                    in
                     Keeper_registry.wakeup_running
-                      ~intent:Keeper_registry.Reactive_signal
+                      ~intent
                       ~base_path:config.base_path
                       meta.name
                   in
@@ -551,20 +607,20 @@ let wakeup_relevant_keeper_for_board_signal
                       meta.name
                       (Board_wake.wake_reason_label reason)
                       signal.post_id)))
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string KeepaliveSignalFailures)
-            ~labels:[ ("keeper", entry.name); ("phase", "board_lane_failure") ]
-            ();
-          Log.Keeper.warn
-            "board signal lane failed independently: keeper=%s post=%s error=%s"
-            entry.name
-            signal.post_id
-            (Printexc.to_string exn));
-       Eio_guard.yield_step board_ym)
-    registry_entries
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string KeepaliveSignalFailures)
+              ~labels:[ ("keeper", entry.name); ("phase", "board_lane_failure") ]
+              ();
+            Log.Keeper.warn
+              "board signal lane failed independently: keeper=%s post=%s error=%s"
+              entry.name
+              signal.post_id
+              (Printexc.to_string exn));
+         Eio_guard.yield_step board_ym)
+      registry_entries
 ;;
 
 (* Per-stage timing accumulator for Phase 0 profiling.

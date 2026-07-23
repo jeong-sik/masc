@@ -119,14 +119,12 @@ let test_removed_goal_is_rejected_before_parse () =
       let bytes_before = Fs_compat.load_file path in
       (match Keeper_meta_store.read_meta_file_path path with
        | Error err ->
-         Alcotest.(check bool)
-           "error gives exact reset remediation"
-           true
-           (String_util.contains_substring err "runtime reset required");
-         Alcotest.(check bool)
-           "error identifies the unknown goal key"
-           true
-           (String_util.contains_substring err "goal")
+         Alcotest.(check string)
+           "error identifies goal and gives exact reset remediation"
+           (Printf.sprintf
+              "keeper meta schema is incompatible at %s (unknown keys: goal); runtime reset required"
+              path)
+           err
        | Ok _ -> Alcotest.fail "removed goal must fail closed");
       Alcotest.(check string)
         "rejected metadata remains byte-for-byte unchanged"

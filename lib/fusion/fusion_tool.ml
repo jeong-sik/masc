@@ -124,6 +124,8 @@ let handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
        with
        | Error error -> submit_error_result ~tool_name error
        | Ok { Keeper_msg_async.request_id; acceptance = Durably_accepted } ->
+         Log.Keeper.info ~keeper_name:keeper
+           "fusion run %s durably accepted (async delivery)" request_id;
          status_result ~tool_name ~class_:Tool_result.Runtime_failure ~ok:true
            [ "status", `String "fusion_started"
            ; "run_id", `String request_id
@@ -135,6 +137,9 @@ let handle_with_compute_result ~compute ~sw ~net ~base_dir ~keeper ~now_unix
            { Keeper_msg_async.request_id
            ; acceptance = Reconciliation_required { reason }
            } ->
+         Log.Keeper.warn ~keeper_name:keeper
+           "fusion run %s acceptance uncertain, reconciliation required: %s"
+           request_id reason;
          status_result ~tool_name ~class_:Tool_result.Runtime_failure ~ok:false
            [ "error", `String "fusion_acceptance_uncertain"
            ; "run_id", `String request_id

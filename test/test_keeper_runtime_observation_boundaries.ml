@@ -148,11 +148,18 @@ let test_parse_error_empty_completion_is_auto_recoverable () =
     true
     (EC.is_auto_recoverable_turn_error err)
 
-(* OAS intentionally surfaces an empty completion with an unmodeled
-   stop_reason as a non-retryable [InvalidRequest]: retrying replays the
-   identical prompt and never terminates.  It must NOT be promoted to
-   auto-recoverable. *)
-let test_unmodeled_stop_reason_invalid_request_counts_toward_crash () =
+(* OAS surfaces an empty completion with an unmodeled stop_reason as a
+   non-retryable [InvalidRequest].  It must NOT be promoted to the
+   empty-completion exemption: main (#25592) classifies [InvalidRequest] as
+   auto-recoverable at the type level, but this shape is not an
+   empty-completion error and must not consume the empty-completion budget.
+   Its deterministic recurrence is bounded by the per-keeper consecutive
+   [InvalidRequest] counter (companion change), not by the exemption
+   budget. *)
+let test_unmodeled_stop_reason_invalid_request_is_not_empty_completion () =
+  let module KUF = Keeper_unified_turn_failure in
+  let keeper_name = "test-keeper-unmodeled-stop-reason" in
+  KUF.note_turn_success keeper_name;
   let err =
     Agent_sdk.Error.Api
       (Llm_provider.Retry.InvalidRequest
@@ -167,13 +174,24 @@ let test_unmodeled_stop_reason_invalid_request_counts_toward_crash () =
     false
     (EC.is_empty_completion_error err);
   Alcotest.(check bool)
-    "unmodeled stop_reason empty completion is not auto-recoverable"
+    "unmodeled stop_reason shape is classified as invalid request"
+    true
+    (EC.is_invalid_request_error err);
+  Alcotest.(check bool)
+    "invalid request does not consume the empty-completion exemption budget"
     false
-    (EC.is_auto_recoverable_turn_error err)
+    (KUF.account_failure_counting ~keeper_name ~is_auto_recoverable:true err);
+  KUF.note_turn_success keeper_name
 
-(* A generic 400 [InvalidRequest] recurs deterministically with the same
-   payload; it must never be exempt from the crash threshold. *)
-let test_generic_invalid_request_counts_toward_crash () =
+(* A generic 400 [InvalidRequest] is not an empty-completion exemption
+   either: main (#25592) classifies it as auto-recoverable, and its
+   deterministic recurrence is bounded by the per-keeper consecutive
+   [InvalidRequest] counter (companion change), not by the empty-completion
+   budget. *)
+let test_generic_invalid_request_is_not_empty_completion () =
+  let module KUF = Keeper_unified_turn_failure in
+  let keeper_name = "test-keeper-generic-invalid-request" in
+  KUF.note_turn_success keeper_name;
   let err =
     Agent_sdk.Error.Api
       (Llm_provider.Retry.InvalidRequest
@@ -182,9 +200,14 @@ let test_generic_invalid_request_counts_toward_crash () =
          })
   in
   Alcotest.(check bool)
-    "generic InvalidRequest is not auto-recoverable"
+    "generic InvalidRequest is not an empty completion error"
     false
-    (EC.is_auto_recoverable_turn_error err)
+    (EC.is_empty_completion_error err);
+  Alcotest.(check bool)
+    "generic InvalidRequest does not consume the empty-completion budget"
+    false
+    (KUF.account_failure_counting ~keeper_name ~is_auto_recoverable:true err);
+  KUF.note_turn_success keeper_name
 
 (* Bounded compensating accounting: the empty-completion exemption is capped
    per keeper; once the budget is exhausted the failure counts toward crash
@@ -265,10 +288,11 @@ let () =
         Alcotest.test_case "parse-error empty completion is auto-recoverable" `Quick
           test_parse_error_empty_completion_is_auto_recoverable;
         Alcotest.test_case
-          "unmodeled stop_reason InvalidRequest counts toward crash" `Quick
-          test_unmodeled_stop_reason_invalid_request_counts_toward_crash;
-        Alcotest.test_case "generic InvalidRequest counts toward crash" `Quick
-          test_generic_invalid_request_counts_toward_crash;
+          "unmodeled stop_reason InvalidRequest is not empty completion" `Quick
+          test_unmodeled_stop_reason_invalid_request_is_not_empty_completion;
+        Alcotest.test_case
+          "generic InvalidRequest is not empty completion" `Quick
+          test_generic_invalid_request_is_not_empty_completion;
         Alcotest.test_case "empty completion exemption budget is bounded" `Quick
           test_empty_completion_exemption_budget_is_bounded;
         Alcotest.test_case "extra system context preserves typed blocks" `Quick

@@ -762,9 +762,12 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
      [empty_completion_exemption_budget] consecutive exempted empty
      completions the failure counts toward the crash threshold again, and a
      successful turn resets the budget.  Only the modeled, non-overflow
-     shapes are exempt (see [is_empty_completion_error]); the unmodeled
-     stop_reason shape that OAS intentionally reports as non-retryable
-     [InvalidRequest] is NOT exempt and keeps counting toward crash.
+     shapes are exempt via [is_empty_completion_error]; the unmodeled
+     stop_reason shape that OAS reports as [InvalidRequest] is NOT an
+     empty-completion exemption — it falls under the [InvalidRequest] class
+     (#25592), whose compensating accounting is the per-keeper consecutive
+     counter in [Keeper_unified_turn_failure] (companion change), not this
+     budget.
 
    Provider parse rejections used to be listed here and had no such accounting.
    A provider that keeps emitting a malformed stream (for example a tool_call

@@ -19,6 +19,44 @@ type requeue_reason = State.requeue_reason =
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
 
+type exact_execution_terminal_cause = State.exact_execution_terminal_cause =
+  | Execution_failed_after_dispatch
+  | Attempt_already_started
+  | Execution_cancelled_after_dispatch
+  | Execution_provenance_mismatch
+  | Domain_invalid_output
+  | Invalid_structural_evidence
+  | Invalid_structural_source_after_dispatch
+  | Commit_admission_unavailable
+  | Lifecycle_transition_failed_after_dispatch
+  | Checkpoint_source_changed
+  | Checkpoint_persistence_failed
+  | Terminal_persistence_failed
+
+type exact_execution_terminal = State.exact_execution_terminal =
+  { cause : exact_execution_terminal_cause
+  ; slot_id : string
+  ; call_id : string
+  }
+
+type exact_execution_lease_status = State.exact_execution_lease_status =
+  | Dispatch_uncertain
+  | Terminal_quarantined of exact_execution_terminal_cause
+
+type exact_execution_binding = State.exact_execution_binding =
+  { lease_id : string
+  ; lease_sequence : int64
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  ; status : exact_execution_lease_status
+  }
+
+type exact_write_outcome =
+  | Fsync_completed
+  | Visible_sync_unconfirmed of string
+
 type escalation_reason = State.escalation_reason =
   | Failure_judgment_requested
   | Failure_judgment_boundary_failed of { detail : string }
@@ -26,8 +64,11 @@ type escalation_reason = State.escalation_reason =
       { judge_runtime_id : string
       ; rationale : string
       }
-  | Compaction_execution_may_have_dispatched
-  | Compaction_domain_invalid_output
+  | Compaction_exact_lane_unconfigured of { source : Keeper_checkpoint_ref.t }
+  | Compaction_exact_output_terminal of
+      { source : Keeper_checkpoint_ref.t
+      ; terminal : exact_execution_terminal
+      }
   | Compaction_retry_exhausted of
       { attempts : int
       ; detail : string
@@ -46,8 +87,8 @@ type no_compaction_reason = State.no_compaction_reason =
   | Invalid_structural_source
   | Structurally_unchanged
   | Checkpoint_not_reduced
-  | Execution_may_have_dispatched
-  | Domain_invalid_output
+  | Exact_lane_unconfigured
+  | Exact_execution_terminal of exact_execution_terminal
 
 type no_compaction = State.no_compaction =
   { source : Keeper_checkpoint_ref.t
@@ -166,7 +207,7 @@ let unsupported_inflight_path_of_owner owner =
   Filename.concat (keeper_runtime_dir_of_owner owner) unsupported_inflight_filename
 ;;
 
-let save_json_atomic path json =
+let save_json_atomic_with ~strict_parent_sync path json =
   match
     try Ok (Fs_compat.mkdir_p (Filename.dirname path)) with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -174,17 +215,65 @@ let save_json_atomic path json =
   with
   | Error _ as error -> error
   | Ok () ->
-    json
-    |> Safe_ops.sanitize_json_utf8
-    |> Yojson.Safe.pretty_to_string
-    |> Fs_compat.save_file_atomic path
+    let content =
+      json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string
+    in
+    if strict_parent_sync
+    then Fs_compat.save_file_atomic_strict path content
+    else Fs_compat.save_file_atomic path content
 ;;
 
-let save_state_unlocked owner state =
+let save_json_atomic = save_json_atomic_with ~strict_parent_sync:false
+let save_json_atomic_strict = save_json_atomic_with ~strict_parent_sync:true
+
+let save_json_atomic_strict_staged path json =
+  match
+    try Ok (Fs_compat.mkdir_p (Filename.dirname path)) with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Printexc.to_string exn)
+  with
+  | Error _ as error -> error
+  | Ok () ->
+    let content =
+      json |> Safe_ops.sanitize_json_utf8 |> Yojson.Safe.pretty_to_string
+    in
+    (match Fs_compat.save_file_atomic_strict_staged path content with
+     | Ok () -> Ok Fsync_completed
+     | Error (failure : Fs_compat.atomic_replace_failure) ->
+       let detail = Fs_compat.atomic_replace_failure_to_string failure in
+       (match failure.stage with
+        | Fs_compat.Before_rename ->
+          (match failure.exception_ with
+           | Eio.Cancel.Cancelled _ ->
+             Printexc.raise_with_backtrace failure.exception_ failure.backtrace
+           | _ -> Error detail)
+        | Fs_compat.After_rename ->
+          Ok (Visible_sync_unconfirmed detail)))
+;;
+
+let save_state_unlocked_with ~strict_parent_sync owner state =
   let keeper_name = keeper_name_of_owner owner in
   let path = snapshot_path_of_owner owner in
-  match save_json_atomic path (State.to_yojson state) with
+  let save = if strict_parent_sync then save_json_atomic_strict else save_json_atomic in
+  match save path (State.to_yojson state) with
   | Ok () -> Ok ()
+  | Error message ->
+    Error
+      (Printf.sprintf
+         "failed to persist keeper=%s path=%s: %s"
+         keeper_name
+         path
+         message)
+;;
+
+let save_state_unlocked = save_state_unlocked_with ~strict_parent_sync:false
+let save_state_unlocked_strict = save_state_unlocked_with ~strict_parent_sync:true
+
+let save_state_unlocked_strict_staged owner state =
+  let keeper_name = keeper_name_of_owner owner in
+  let path = snapshot_path_of_owner owner in
+  match save_json_atomic_strict_staged path (State.to_yojson state) with
+  | Ok outcome -> Ok outcome
   | Error message ->
     Error
       (Printf.sprintf
@@ -435,6 +524,10 @@ let transition_outbox_result ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map State.transition_outbox
 ;;
 
+let exact_execution_binding_result ~base_path ~keeper_name =
+  load_state_result ~base_path ~keeper_name |> Result.map State.exact_execution_binding
+;;
+
 let queue_of_stimuli stimuli =
   List.fold_left Keeper_event_queue.enqueue Keeper_event_queue.empty stimuli
 ;;
@@ -612,7 +705,12 @@ let discover_keeper_names_with_snapshots ~base_path =
        })
 ;;
 
-let commit_transform_unlocked owner ~after_commit transform =
+let commit_transform_unlocked
+      ?(strict_snapshot_durability = false)
+      owner
+      ~after_commit
+      transform
+  =
   match load_state_unlocked owner with
   | Error _ as error -> error
   | Ok current ->
@@ -623,26 +721,79 @@ let commit_transform_unlocked owner ~after_commit transform =
        (match bump_revision next with
         | Error _ as error -> error
         | Ok next ->
-          (match save_state_unlocked owner next with
+          let save_state =
+            if strict_snapshot_durability
+            then save_state_unlocked_strict
+            else save_state_unlocked
+          in
+          (match save_state owner next with
            | Error _ as error -> error
            | Ok () ->
              after_commit (State.pending next);
              Ok value)))
 ;;
 
-let commit_transform ~base_path ~keeper_name ~after_commit transform =
+let commit_transform
+      ?(strict_snapshot_durability = false)
+      ~base_path
+      ~keeper_name
+      ~after_commit
+      transform
+  =
   match resolve_owner ~base_path ~keeper_name with
   | Error _ as error -> error
   | Ok owner ->
     (try
        Owner_lock.with_durable_lock owner (fun () ->
-         commit_transform_unlocked owner ~after_commit transform)
+         commit_transform_unlocked
+           ~strict_snapshot_durability
+           owner
+           ~after_commit
+           transform)
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
        Error
          (Printf.sprintf
             "event queue transaction raised keeper=%s path=%s: %s"
+            (keeper_name_of_owner owner)
+            (snapshot_path_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
+let commit_exact_transform_unlocked owner ~after_commit transform =
+  match load_state_unlocked owner with
+  | Error _ as error -> error
+  | Ok current ->
+    (match transform current with
+     | Error _ as error -> error
+     | Ok (next, value) ->
+       let next =
+         if next == current then Ok next else bump_revision next
+       in
+       (match next with
+        | Error _ as error -> error
+        | Ok next ->
+          (match save_state_unlocked_strict_staged owner next with
+           | Error _ as error -> error
+           | Ok outcome ->
+             after_commit (State.pending next);
+             Ok (value, outcome))))
+;;
+
+let commit_exact_transform ~base_path ~keeper_name ~after_commit transform =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         commit_exact_transform_unlocked owner ~after_commit transform)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue exact transaction raised keeper=%s path=%s: %s"
             (keeper_name_of_owner owner)
             (snapshot_path_of_owner owner)
             (Printexc.to_string exn)))
@@ -751,6 +902,82 @@ let claim_board_result
     match State.claim_board ~claimed_at state with
     | Error _ as error -> error
     | Ok (state, lease) -> Ok (state, lease))
+;;
+
+let bind_exact_execution_result
+      ~base_path
+      ~keeper_name
+      ~lease
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+      ()
+  =
+  commit_exact_transform
+    ~base_path
+    ~keeper_name
+    ~after_commit:(fun _ -> ())
+    (fun state ->
+       State.bind_exact_execution
+         ~lease
+         ~slot_id
+         ~call_id
+         ~plan_fingerprint
+         ~request_body_sha256
+         state
+       |> Result.map (fun next -> next, ()))
+  |> Result.map snd
+;;
+
+let release_exact_execution_before_dispatch_result
+      ~base_path
+      ~keeper_name
+      ~lease
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+      ()
+  =
+  commit_exact_transform
+    ~base_path
+    ~keeper_name
+    ~after_commit:(fun _ -> ())
+    (fun state ->
+       State.release_exact_execution_before_dispatch
+         ~lease
+         ~slot_id
+         ~call_id
+         ~plan_fingerprint
+         ~request_body_sha256
+         state
+       |> Result.map (fun next -> next, ()))
+  |> Result.map snd
+;;
+
+let quarantine_exact_execution_result
+      ~base_path
+      ~keeper_name
+      ~lease
+      ~terminal
+      ~plan_fingerprint
+      ~request_body_sha256
+      ()
+  =
+  commit_exact_transform
+    ~base_path
+    ~keeper_name
+    ~after_commit:(fun _ -> ())
+    (fun state ->
+       State.quarantine_exact_execution
+         ~lease
+         ~terminal
+         ~plan_fingerprint
+         ~request_body_sha256
+         state
+       |> Result.map (fun next -> next, ()))
+  |> Result.map snd
 ;;
 
 let commit_settlement_transition_unlocked owner ~after_commit transition current =
@@ -865,6 +1092,50 @@ let settle_result
        Error
          (Printf.sprintf
             "event queue settlement raised keeper=%s: %s"
+            (keeper_name_of_owner owner)
+            (Printexc.to_string exn)))
+;;
+
+let settle_exact_execution_result
+      ?(after_commit = fun _ -> ())
+      ~base_path
+      ~keeper_name
+      ~settled_at
+      ~lease
+      ~slot_id
+      ~call_id
+      ~plan_fingerprint
+      ~request_body_sha256
+      ~settlement
+      ()
+  =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         match load_state_unlocked owner with
+         | Error _ as error -> error
+         | Ok state ->
+           commit_settlement_transition_unlocked
+             owner
+             ~after_commit
+             (State.settle_exact_execution
+                ~settled_at
+                ~lease
+                ~slot_id
+                ~call_id
+                ~plan_fingerprint
+                ~request_body_sha256
+                ~settlement)
+             state
+           |> Result.map fst)
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "exact execution settlement raised keeper=%s: %s"
             (keeper_name_of_owner owner)
             (Printexc.to_string exn)))
 ;;

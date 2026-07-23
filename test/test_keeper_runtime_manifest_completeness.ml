@@ -124,13 +124,14 @@ let test_is_complete_turn () =
 let test_compaction_evidence_public_projection () =
   let evidence =
     Keeper_compaction_evidence.create
-~target_identity_fingerprint:"target-identity"
-~catalog_generation_fingerprint:"catalog-generation"
-~catalog_evidence_sha256:"catalog-evidence"
-~plan_fingerprint:"plan-fingerprint"
-~receipt_plan_fingerprint:"plan-fingerprint"
-~receipt_request_body_sha256:"request-body"
-      ~selected_target_ref:"compact-runtime"
+      ~slot_id:"compaction-slot"
+      ~call_id:"call-01"
+      ~target_identity_fingerprint:"target-identity"
+      ~catalog_generation_fingerprint:"catalog-generation"
+      ~catalog_evidence_sha256:"catalog-evidence"
+      ~plan_fingerprint:"plan-fingerprint"
+      ~receipt_plan_fingerprint:"plan-fingerprint"
+      ~receipt_request_body_sha256:"request-body"
       ~before_checkpoint_bytes:4096
       ~after_checkpoint_bytes:1024
       ~before_message_count:12

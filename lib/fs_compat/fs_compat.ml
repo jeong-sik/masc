@@ -255,6 +255,42 @@ let save_file_atomic path content =
   Atomic_write.save_file_atomic ~save_file path content
 ;;
 
+type atomic_replace_failure_stage =
+  Atomic_write.atomic_replace_failure_stage =
+  | Before_rename
+  | After_rename
+
+type atomic_replace_failure =
+  Atomic_write.atomic_replace_failure =
+  { path : string
+  ; stage : atomic_replace_failure_stage
+  ; exception_ : exn
+  ; backtrace : Printexc.raw_backtrace
+  }
+
+let atomic_replace_failure_to_string =
+  Atomic_write.atomic_replace_failure_to_string
+;;
+
+let save_file_atomic_strict_staged path content =
+  Atomic_write.save_file_atomic_strict_staged ~save_file path content
+;;
+
+let save_file_atomic_strict path content =
+  Atomic_write.save_file_atomic_strict ~save_file path content
+;;
+
+module Atomic_replace_for_testing = struct
+  let save_file_atomic_strict_staged ?sync_file ~sync_parent path content =
+    Atomic_write.Atomic_replace_for_testing.save_file_atomic_strict_staged
+      ?sync_file
+      ~sync_parent
+      ~save_file
+      path
+      content
+  ;;
+end
+
 let open_atomic_temp_file ~temp_dir () =
   Atomic_write.open_atomic_temp_file ~temp_dir ()
 ;;

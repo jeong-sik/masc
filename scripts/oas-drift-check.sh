@@ -177,6 +177,119 @@ extract_metrics_fields() {
   | sort -u
 }
 
+# Complete public type/value declarations from the provider-neutral exact-output
+# surface. Prefixing each normalized declaration with its owner keeps multiline
+# type changes attributable while excluding documentation-only edits.
+extract_exact_output_declarations() {
+  local src="$1"
+  local file="${src}/lib/llm_provider/exact_output.mli"
+  [[ -f "${file}" ]] || { echo "missing ${file}" >&2; return 1; }
+  awk '
+    function flush() {
+      if (active && declaration != "") {
+        gsub(/[[:space:]]+/, " ", declaration)
+        sub(/^ /, "", declaration)
+        sub(/ $/, "", declaration)
+        print owner ":" declaration
+      }
+      active=0
+      owner=""
+      declaration=""
+    }
+    function strip_comments(line, start, rest, finish, before) {
+      while (1) {
+        if (in_comment) {
+          finish=index(line, "*)")
+          if (finish == 0) return ""
+          line=substr(line, finish + 2)
+          in_comment=0
+        } else {
+          start=index(line, "(*")
+          if (start == 0) return line
+          before=substr(line, 1, start - 1)
+          rest=substr(line, start + 2)
+          finish=index(rest, "*)")
+          if (finish == 0) {
+            in_comment=1
+            return before
+          }
+          line=before substr(rest, finish + 2)
+        }
+      }
+    }
+    {
+      line=strip_comments($0)
+      if (line ~ /^(type|val)[[:space:]]+/) {
+        flush()
+        split(line, parts, /[[:space:]:=]+/)
+        owner=parts[1] ":" parts[2]
+        active=1
+      } else if (line ~ /^[^[:space:]]/) {
+        flush()
+      }
+      if (active && line !~ /^[[:space:]]*$/) {
+        declaration=declaration " " line
+      }
+    }
+    END { flush() }
+  ' "${file}"
+}
+
+# Public re-export that MASC actually compiles against. Keep this separate from
+# the underlying Exact_output signature so removing or redirecting the
+# Agent_sdk.Exact_output alias cannot bypass the drift ratchet.
+extract_exact_output_reexport_declarations() {
+  local src="$1"
+  local file="${src}/lib/agent_sdk.mli"
+  [[ -f "${file}" ]] || { echo "missing ${file}" >&2; return 1; }
+  awk '
+    function flush() {
+      if (active && declaration != "") {
+        gsub(/[[:space:]]+/, " ", declaration)
+        sub(/^ /, "", declaration)
+        sub(/ $/, "", declaration)
+        print declaration
+      }
+      active=0
+      declaration=""
+    }
+    function strip_comments(line, start, rest, finish, before) {
+      while (1) {
+        if (in_comment) {
+          finish=index(line, "*)")
+          if (finish == 0) return ""
+          line=substr(line, finish + 2)
+          in_comment=0
+        } else {
+          start=index(line, "(*")
+          if (start == 0) return line
+          before=substr(line, 1, start - 1)
+          rest=substr(line, start + 2)
+          finish=index(rest, "*)")
+          if (finish == 0) {
+            in_comment=1
+            return before
+          }
+          line=before substr(rest, finish + 2)
+        }
+      }
+    }
+    {
+      line=strip_comments($0)
+      if (line ~ /^module[[:space:]]+Exact_output([[:space:]:=]|$)/) {
+        flush()
+        active=1
+      } else if (active && line ~ /^[^[:space:]]/) {
+        flush()
+      }
+      if (active && line !~ /^[[:space:]]*$/) {
+        declaration=declaration " " line
+      }
+    }
+    END { flush() }
+  ' "${file}"
+}
+
 lines_to_json_array() {
   # stdin: one entry per line; stdout: JSON array
   jq -R . | jq -s .
@@ -184,10 +297,12 @@ lines_to_json_array() {
 
 build_fingerprint() {
   local src="$1"
-  local ebv hev mf
+  local ebv hev mf eod eor
   ebv="$(extract_event_bus_variants   "${src}" | lines_to_json_array)"
   hev="$(extract_http_error_variants  "${src}" | lines_to_json_array)"
   mf="$( extract_metrics_fields       "${src}" | lines_to_json_array)"
+  eod="$(extract_exact_output_declarations "${src}" | lines_to_json_array)"
+  eor="$(extract_exact_output_reexport_declarations "${src}" | lines_to_json_array)"
 
   jq -n \
     --arg sha "${OAS_AGENT_SDK_SHA}" \
@@ -195,13 +310,17 @@ build_fingerprint() {
     --argjson ebv "${ebv}" \
     --argjson hev "${hev}" \
     --argjson mf  "${mf}" \
+    --argjson eod "${eod}" \
+    --argjson eor "${eor}" \
     '{
        pinned_sha:        $sha,
        pinned_version:    $ver,
        surfaces: {
          event_bus_payload_variants: $ebv,
          http_error_variants:        $hev,
-         metrics_fields:             $mf
+         metrics_fields:             $mf,
+         exact_output_declarations:  $eod,
+         exact_output_reexport_declarations: $eor
        }
      }'
 }
@@ -298,7 +417,7 @@ case "${MODE}" in
     if ! report_metadata_diff "${prev}" "${current}"; then
       drift=1
     fi
-    for section in event_bus_payload_variants http_error_variants metrics_fields; do
+    for section in event_bus_payload_variants http_error_variants metrics_fields exact_output_declarations exact_output_reexport_declarations; do
       prev_arr="$(jq ".surfaces.${section}" <<<"${prev}")"
       curr_arr="$(jq ".surfaces.${section}" <<<"${current}")"
       if ! report_diff "${section}" "${prev_arr}" "${curr_arr}"; then
@@ -316,6 +435,8 @@ case "${MODE}" in
     echo "  Review the delta above against MASC consumer sites:" >&2
     echo "    lib/oas_compat/oas_compat.ml      (Http_client + Metrics — single source)" >&2
     echo "    lib/oas_event_bridge.ml           (Event_bus payload matches — until adapter covers it)" >&2
+    echo "    lib/runtime/runtime_exact_output_registry.ml" >&2
+    echo "    lib/keeper/keeper_compaction_llm_summarizer.ml" >&2
     echo
     echo "  Repair flow (after consumer changes compile clean):" >&2
     echo "    bash scripts/oas-drift-check.sh --regenerate" >&2

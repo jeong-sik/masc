@@ -43,7 +43,11 @@ let install_queue base_path =
   | Error error -> fail (Q.install_error_to_string error)
 ;;
 
-let pending_entry ?(input_tag = "default") ~base_path =
+let pending_entry
+      ?(input_tag = "default")
+      ?(keeper_name = "keeper")
+      ~base_path
+  =
   let request_context =
     `Assoc
       [ ( "initial"
@@ -61,7 +65,7 @@ let pending_entry ?(input_tag = "default") ~base_path =
   let id =
     match
       Q.submit_pending
-        ~keeper_name:"keeper"
+        ~keeper_name
         ~tool_name:"external-effect"
         ~input:
           (`Assoc
@@ -508,17 +512,23 @@ let test_visible_completion_blocks_gate_delivery () =
          (F.resolver_snapshot
             ~source:"hitl-visible-completion"
             [ { id = "hitl-visible-completion"; base_url = server.base_url } ]);
+       select_auto_judge_mode base_path;
        let entry = pending_entry ~base_path in
+       let successor = pending_entry ~input_tag:"successor" ~base_path in
        let delivered = ref false in
-       Worker.For_testing.execute_prepared_flow_with_writers
-         ~complete_writer:visible_after_rename_writer
-         ~net
-         ~clock
-         ~on_summary:(fun _ -> delivered := true)
-         (prepare_exn entry);
+       (match
+          Worker.For_testing.execute_prepared_flow_with_writers
+            ~complete_writer:visible_after_rename_writer
+            ~net
+            ~clock
+            ~on_summary:(fun _ -> delivered := true)
+            (prepare_exn entry)
+        with
+        | exception Worker.Exact_terminalization_persistence_failed _ -> ()
+        | () -> fail "visible completion did not signal persistence uncertainty");
        check int "provider completed once" 1 (F.post_count server);
        check bool "unconfirmed completion forbids Gate delivery" false !delivered;
-       match Q.get_pending_entry ~id:entry.id with
+       (match Q.get_pending_entry ~id:entry.id with
        | Some
            { exact_attempt =
                Q.Exact_bound { status = Q.Exact_completed; _ }
@@ -526,7 +536,28 @@ let test_visible_completion_blocks_gate_delivery () =
            ; _
            } ->
          ()
-       | _ -> fail "visible completion did not retain recoverable completed state")
+       | _ -> fail "visible completion did not retain recoverable completed state");
+       install_queue base_path;
+       let recovery = Gate.resume_persisted_auto_judges ~base_path in
+       check
+         (list string)
+         "restart finalizes only the uncertain oldest entry"
+         [ entry.id ]
+         recovery.finalized_ids;
+       check
+         (list string)
+         "restart does not cross the finalization barrier"
+         []
+         recovery.started_ids;
+       check int "restart did not dispatch successor" 1 (F.post_count server);
+       (match Q.get_pending_entry ~id:successor.id with
+        | Some
+            { exact_attempt = Q.Exact_unbound
+            ; summary_status = Q.Summary_pending
+            ; _
+            } ->
+          ()
+        | _ -> fail "restart skipped the oldest finalization barrier"))
 ;;
 
 let test_postdispatch_failure_never_fails_over () =
@@ -623,7 +654,7 @@ let test_cancellation_after_dispatch_is_terminal () =
        | _ -> fail "post-dispatch cancellation was not terminally quarantined")
 ;;
 
-let test_unknown_callback_exception_is_terminal_and_owner_continues () =
+let test_unknown_callback_exception_preserves_owner_barrier () =
   run_eio @@ fun ~sw ~net ~clock ->
   with_temp_dir "hitl-unknown" @@ fun base_path ->
   Fun.protect
@@ -647,6 +678,12 @@ let test_unknown_callback_exception_is_terminal_and_owner_continues () =
        select_auto_judge_mode base_path;
        let failed = pending_entry ~input_tag:"failed" ~base_path in
        let successor = pending_entry ~input_tag:"successor" ~base_path in
+       let independent =
+         pending_entry
+           ~input_tag:"independent"
+           ~keeper_name:"other-keeper"
+           ~base_path
+       in
        check bool
          "first owner work claimed"
          true
@@ -666,7 +703,7 @@ let test_unknown_callback_exception_is_terminal_and_owner_continues () =
                 (prepare_exn failed)));
        F.await_first_request server;
        check int
-         "failed entry forbids POST and successor dispatches once"
+         "only the independent owner dispatches"
          1
          (F.post_count server);
        (match Q.get_pending_entry ~id:failed.id with
@@ -677,13 +714,21 @@ let test_unknown_callback_exception_is_terminal_and_owner_continues () =
            } ->
          ()
        | _ -> fail "unknown callback exception did not require operator recovery");
+       (match Q.get_pending_entry ~id:successor.id with
+        | Some
+            { exact_attempt = Q.Exact_unbound
+            ; summary_status = Q.Summary_pending
+            ; _
+            } ->
+          ()
+        | _ -> fail "durable failed predecessor did not block its owner FIFO");
        await_condition
          ~clock
          ~remaining:100
-         ~failure:"successor did not complete after failed owner work"
-         (fun () -> Option.is_none (Q.get_pending_entry ~id:successor.id));
+         ~failure:"independent owner did not complete after peer owner failure"
+         (fun () -> Option.is_none (Q.get_pending_entry ~id:independent.id));
        check int
-         "owner drain did not duplicate successor dispatch"
+         "root survived without dispatching the blocked successor"
          1
          (F.post_count server))
 ;;
@@ -822,9 +867,9 @@ let () =
             `Quick
             test_cancellation_after_dispatch_is_terminal
         ; test_case
-            "unknown callback is terminal and owner continues"
+            "unknown callback preserves owner barrier"
             `Quick
-            test_unknown_callback_exception_is_terminal_and_owner_continues
+            test_unknown_callback_exception_preserves_owner_barrier
         ; test_case
             "owner FIFO atomic drain is non-sharing"
             `Quick

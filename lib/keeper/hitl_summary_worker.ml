@@ -370,6 +370,24 @@ let log_exact_error (entry : pending_approval) operation detail =
     detail
 ;;
 
+exception Exact_terminalization_persistence_failed of string
+
+let signal_terminalization_persistence_failure
+      (entry : pending_approval)
+      operation
+      detail
+  =
+  record_outcome "exact_terminal_persistence_failure";
+  log_exact_error entry operation detail;
+  raise
+    (Exact_terminalization_persistence_failed
+       (Printf.sprintf
+          "HITL exact-output %s failed approval_id=%s: %s"
+          operation
+          entry.id
+          detail))
+;;
+
 let mark_unbound_failure (entry : pending_approval) reason =
   match
     Keeper_approval_queue.mark_summary_failed
@@ -426,9 +444,9 @@ let quarantine_identity
   match quarantine_identity_result entry identity cause with
   | Ok () -> ()
   | Error detail ->
-    log_exact_error
+    signal_terminalization_persistence_failure
       entry
-      "quarantine"
+      "quarantine persistence"
       detail
 ;;
 
@@ -443,24 +461,6 @@ let settle_current (entry : pending_approval) ~reason ~cause =
     mark_unbound_failure entry reason
   | Some { exact_attempt = Exact_bound binding; _ } ->
     quarantine_identity_result entry (exact_identity_of_binding binding) cause
-;;
-
-exception Exact_terminalization_persistence_failed of string
-
-let signal_terminalization_persistence_failure
-      (entry : pending_approval)
-      operation
-      detail
-  =
-  record_outcome "exact_terminal_persistence_failure";
-  log_exact_error entry operation detail;
-  raise
-    (Exact_terminalization_persistence_failed
-       (Printf.sprintf
-          "HITL exact-output %s failed approval_id=%s: %s"
-          operation
-          entry.id
-          detail))
 ;;
 
 let settle_current_or_signal (entry : pending_approval) ~reason ~cause =
@@ -499,11 +499,16 @@ let fail_final_before_dispatch (entry : pending_approval) candidate reason =
           ~reason
           ~retryable:false)
   with
-  | Ok _ -> ()
-  | Error error ->
-    log_exact_error
+  | Ok { write_outcome = Fsync_completed; _ } -> ()
+  | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
+    signal_terminalization_persistence_failure
       entry
-      "final pre-dispatch failure"
+      "final pre-dispatch failure persistence"
+      detail
+  | Error error ->
+    signal_terminalization_persistence_failure
+      entry
+      "final pre-dispatch failure persistence"
       (Keeper_approval_queue.exact_attempt_error_to_string error)
 ;;
 
@@ -616,7 +621,10 @@ let handle_success
          on_summary summary
        | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
          record_outcome "exact_terminal_sync_unconfirmed";
-         log_exact_error entry "completion sync" detail
+         signal_terminalization_persistence_failure
+           entry
+           "completion sync"
+           detail
        | Error error ->
          record_outcome "exact_terminal_persistence_failure";
          log_exact_error
@@ -736,6 +744,10 @@ let execute_prepared_flow ~net ?clock ~on_summary prepared =
     prepared
 ;;
 
+type finish_outcome =
+  | Conclusive_terminalization
+  | Terminalization_persistence_uncertain
+
 let spawn ~sw ~(entry : pending_approval) ~on_summary ~on_finish () =
   let* net =
     Eio_context.get_net_opt ()
@@ -745,9 +757,17 @@ let spawn ~sw ~(entry : pending_approval) ~on_summary ~on_finish () =
   let* prepared = prepare_flow ~entry in
   let clock = Eio_context.get_clock_opt () in
   Eio.Fiber.fork ~sw (fun () ->
-    Fun.protect
-      ~finally:on_finish
-      (fun () -> execute_prepared_flow ~net ?clock ~on_summary prepared));
+    match execute_prepared_flow ~net ?clock ~on_summary prepared with
+    | () -> on_finish Conclusive_terminalization
+    | exception Eio.Cancel.Cancelled _ as cancellation ->
+      on_finish Conclusive_terminalization;
+      raise cancellation
+    | exception Exact_terminalization_persistence_failed _ as uncertainty ->
+      on_finish Terminalization_persistence_uncertain;
+      raise uncertainty
+    | exception exn ->
+      on_finish Terminalization_persistence_uncertain;
+      raise exn);
   Ok ()
 ;;
 

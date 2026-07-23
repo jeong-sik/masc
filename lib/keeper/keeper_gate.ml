@@ -381,20 +381,28 @@ let compare_auto_judge_entries
   Int.compare left.sequence right.sequence
 ;;
 
-let ready_auto_judges_for_owner ?exclude_id ~base_path ~keeper_name entries =
-  let entries =
-    entries
-    |> List.filter (fun (entry : Keeper_approval_queue.pending_approval) ->
+let earliest_auto_judge_for_owner ?exclude_id ~base_path ~keeper_name entries =
+  entries
+  |> List.filter (fun (entry : Keeper_approval_queue.pending_approval) ->
       String.equal entry.audit_base_path base_path
       && String.equal entry.keeper_name keeper_name
       && (match exclude_id with
           | Some id -> not (String.equal id entry.id)
           | None -> true))
-    |> List.sort compare_auto_judge_entries
-  in
-  match entries with
-  | entry :: _ when auto_judge_entry_ready entry -> [ entry ]
-  | _ -> []
+  |> List.sort compare_auto_judge_entries
+  |> List.hd_opt
+;;
+
+let ready_auto_judges_for_owner ?exclude_id ~base_path ~keeper_name entries =
+  match
+    earliest_auto_judge_for_owner
+      ?exclude_id
+      ~base_path
+      ~keeper_name
+      entries
+  with
+  | Some entry when auto_judge_entry_ready entry -> [ entry ]
+  | Some _ | None -> []
 ;;
 
 type auto_judge_drain_outcome =
@@ -450,13 +458,21 @@ let rec spawn_claimed_auto_judge_entry
            ~sw
            ~entry
            ~on_summary
-           ~on_finish:(fun () ->
+           ~on_finish:(fun finish_outcome ->
              release_auto_judge entry;
-             ignore
-               (drain_auto_judge_owner
-                  ~base_path:entry.audit_base_path
-                  ~keeper_name:entry.keeper_name
-                  ()))
+             match finish_outcome with
+             | Hitl_summary_worker.Conclusive_terminalization ->
+               ignore
+                 (drain_auto_judge_owner
+                    ~base_path:entry.audit_base_path
+                    ~keeper_name:entry.keeper_name
+                    ())
+             | Hitl_summary_worker.Terminalization_persistence_uncertain ->
+               Log.Keeper.error
+                 ~keeper_name:entry.keeper_name
+                 "Auto Judge owner drain withheld after persistence uncertainty \
+                  approval=%s"
+                 entry.id)
            ()
        with
        | Ok () -> Ok Started
@@ -617,13 +633,26 @@ let recovered_work_for_base_path ~base_path =
   in
   if not enabled
   then []
-  else
-    Keeper_approval_queue.list_pending_entries ()
+  else (
+    let entries = Keeper_approval_queue.list_pending_entries () in
+    let owners =
+      List.fold_left
+        (fun owners (entry : Keeper_approval_queue.pending_approval) ->
+           if String.equal entry.audit_base_path base_path
+           then Auto_judge_owner_set.add (auto_judge_owner entry) owners
+           else owners)
+        Auto_judge_owner_set.empty
+        entries
+    in
+    owners
+    |> Auto_judge_owner_set.elements
+    |> List.filter_map (fun (_, keeper_name) ->
+      earliest_auto_judge_for_owner
+        ~base_path
+        ~keeper_name
+        entries)
     |> List.sort compare_auto_judge_entries
-    |> List.filter_map (fun (entry : Keeper_approval_queue.pending_approval) ->
-    if not (String.equal entry.audit_base_path base_path)
-    then None
-    else
+    |> List.filter_map (fun entry ->
         match classify_auto_judge_entry entry with
         | Auto_judge_not_requested
         | Auto_judge_pending_unbound ->
@@ -635,7 +664,7 @@ let recovered_work_for_base_path ~base_path =
         | Auto_judge_finalizable
             { judgment = Keeper_approval_queue.Require_human; _ }
         | Auto_judge_ineligible ->
-          None)
+          None))
 ;;
 
 let observe_recovered_work kind (entry : Keeper_approval_queue.pending_approval) =

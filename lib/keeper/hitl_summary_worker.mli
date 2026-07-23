@@ -8,17 +8,25 @@ val readiness : unit -> (unit, string) result
 (** Verify that the Gate prompt and the registry-owned [hitl_auto_judge] exact
     lane are currently available. No provider/model/runtime scalar is read. *)
 
+exception Exact_terminalization_persistence_failed of string
+
+type finish_outcome =
+  | Conclusive_terminalization
+  | Terminalization_persistence_uncertain
+
 val spawn
   :  sw:Eio.Switch.t
   -> entry:Keeper_approval_queue.pending_approval
   -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
-  -> on_finish:(unit -> unit)
+  -> on_finish:(finish_outcome -> unit)
   -> unit
   -> (unit, string) result
 (** Freeze and admit the whole ordered flow before forking. The production OAS
     callbacks bind/release the real candidate receipt in the durable approval
     queue. A summary reaches [on_summary] only after domain validation, exact
-    receipt/provenance verification, and [Fsync_completed] completion. *)
+    receipt/provenance verification, and [Fsync_completed] completion.
+    [on_finish] always permits active-owner cleanup, but only
+    [Conclusive_terminalization] permits the caller to drain later owner work. *)
 
 module For_testing : sig
   val system_prompt : unit -> (string, string) result

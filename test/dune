@@ -1291,14 +1291,18 @@
 ; Durable pre-dispatch fence and restart/cancellation fail-closed proof.
 (test
  (name test_keeper_exact_execution_lease_guard)
- (modules test_keeper_exact_execution_lease_guard)
+ (modules
+  test_keeper_exact_execution_lease_guard
+  test_keeper_exact_execution_lease_guard_fixture)
  (libraries alcotest masc masc_test_deps masc.keeper_checkpoint_ref eio_main unix))
 
 ; Process-isolated proof that exact-output bootstrap honors full catalog
 ; replacement precedence over deployment overlays and OAS embedded targets.
 (test
  (name test_exact_output_catalog_precedence)
- (modules test_exact_output_catalog_precedence)
+ (modules
+  test_exact_output_catalog_precedence
+  test_exact_output_catalog_precedence_fixture)
  (libraries alcotest masc_server masc_test_deps eio_main unix))
 
 ; Production entrypoint coverage for an intentionally absent Eio clock. This

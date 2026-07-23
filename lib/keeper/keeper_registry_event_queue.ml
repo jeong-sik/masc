@@ -22,39 +22,15 @@ type requeue_reason = Keeper_event_queue_persistence.requeue_reason =
   | Approval_grant_unconsumed
   | Approval_grant_state_unavailable
 
-type exact_execution_terminal_cause = Keeper_event_queue_persistence.exact_execution_terminal_cause =
-  | Execution_failed_after_dispatch
-  | Attempt_already_started
-  | Execution_cancelled_after_dispatch
-  | Execution_provenance_mismatch
-  | Domain_invalid_output
-  | Invalid_structural_evidence
-  | Invalid_structural_source_after_dispatch
-  | Commit_admission_unavailable
-  | Lifecycle_transition_failed_after_dispatch
-  | Checkpoint_source_changed
-  | Checkpoint_persistence_failed
-  | Terminal_persistence_failed
+let publish_pending ~base_path name pending =
+  match Keeper_registry.get ~base_path name with
+  | None -> ()
+  | Some entry -> Atomic.set entry.event_queue pending
+;;
 
-type exact_execution_terminal = Keeper_event_queue_persistence.exact_execution_terminal =
-  { cause : exact_execution_terminal_cause
-  ; slot_id : string
-  ; call_id : string
-  }
-
-type exact_execution_lease_status = Keeper_event_queue_persistence.exact_execution_lease_status =
-  | Dispatch_uncertain
-  | Terminal_quarantined of exact_execution_terminal_cause
-
-type exact_execution_binding = Keeper_event_queue_persistence.exact_execution_binding =
-  { lease_id : string
-  ; lease_sequence : int64
-  ; slot_id : string
-  ; call_id : string
-  ; plan_fingerprint : string
-  ; request_body_sha256 : string
-  ; status : exact_execution_lease_status
-  }
+include Keeper_registry_event_queue_exact_execution.Make (struct
+    let publish_pending = publish_pending
+  end)
 
 type escalation_reason = Keeper_event_queue_persistence.escalation_reason =
   | Failure_judgment_requested
@@ -151,92 +127,6 @@ type settle_result = Keeper_event_queue_persistence.settle_result =
 let lease_stimuli = Keeper_event_queue_persistence.lease_stimuli
 let lease_kind = Keeper_event_queue_persistence.lease_kind
 
-let bind_exact_execution_result
-      ~base_path
-      name
-      ~lease
-      ~slot_id
-      ~call_id
-      ~plan_fingerprint
-      ~request_body_sha256
-  =
-  Keeper_event_queue_persistence.bind_exact_execution_result
-    ~base_path
-    ~keeper_name:name
-    ~lease
-    ~slot_id
-    ~call_id
-    ~plan_fingerprint
-    ~request_body_sha256
-    ()
-;;
-
-let release_exact_execution_before_dispatch_result
-      ~base_path
-      name
-      ~lease
-      ~slot_id
-      ~call_id
-      ~plan_fingerprint
-      ~request_body_sha256
-  =
-  Keeper_event_queue_persistence.release_exact_execution_before_dispatch_result
-    ~base_path
-    ~keeper_name:name
-    ~lease
-    ~slot_id
-    ~call_id
-    ~plan_fingerprint
-    ~request_body_sha256
-    ()
-;;
-
-let quarantine_exact_execution_result
-      ~base_path
-      name
-      ~lease
-      ~terminal
-      ~plan_fingerprint
-      ~request_body_sha256
-  =
-  Keeper_event_queue_persistence.quarantine_exact_execution_result
-    ~base_path
-    ~keeper_name:name
-    ~lease
-    ~terminal
-    ~plan_fingerprint
-    ~request_body_sha256
-    ()
-;;
-
-let active_lease_result ~base_path name =
-  match Keeper_registry.get ~base_path name with
-  | None -> Error (Printf.sprintf "keeper not registered: %s" name)
-  | Some _ ->
-    Keeper_event_queue_persistence.active_lease_result
-      ~base_path
-      ~keeper_name:name
-;;
-
-let transition_outbox_result ~base_path name =
-  Keeper_event_queue_persistence.transition_outbox_result
-    ~base_path
-    ~keeper_name:name
-;;
-
-let exact_execution_binding_result ~base_path name =
-  Keeper_event_queue_persistence.exact_execution_binding_result
-    ~base_path
-    ~keeper_name:name
-;;
-
-let mark_transition_projected_result ~base_path name ~transition_id =
-  Keeper_event_queue_persistence.mark_transition_projected_result
-    ~base_path
-    ~keeper_name:name
-    ~transition_id
-;;
-
 let rec queue_contains queue stimulus =
   match Keeper_event_queue.dequeue queue with
   | None -> false
@@ -269,12 +159,6 @@ let enqueue_external_decision queue stimulus =
       (Printf.sprintf
          "conflicting durable stimulus already exists for post_id=%s"
          stimulus.post_id)
-;;
-
-let publish_pending ~base_path name pending =
-  match Keeper_registry.get ~base_path name with
-  | None -> ()
-  | Some entry -> Atomic.set entry.event_queue pending
 ;;
 
 let enqueue ~base_path name stimulus =
@@ -523,28 +407,6 @@ let settle_result ~base_path name ~settled_at ~lease ~settlement =
     ~keeper_name:name
     ~settled_at
     ~lease
-    ~settlement
-    ~after_commit:(publish_pending ~base_path name)
-    ()
-;;
-
-let settle_exact_execution_result
-      ~base_path
-      name
-      ~settled_at
-      ~lease
-      ~binding
-      ~settlement
-  =
-  Keeper_event_queue_persistence.settle_exact_execution_result
-    ~base_path
-    ~keeper_name:name
-    ~settled_at
-    ~lease
-    ~slot_id:binding.slot_id
-    ~call_id:binding.call_id
-    ~plan_fingerprint:binding.plan_fingerprint
-    ~request_body_sha256:binding.request_body_sha256
     ~settlement
     ~after_commit:(publish_pending ~base_path name)
     ()

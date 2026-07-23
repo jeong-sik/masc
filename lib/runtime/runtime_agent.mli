@@ -31,6 +31,7 @@ type stop_reason = Runtime_agent_context.stop_reason =
 type cooperative_yield_reason =
   | Chat_waiting
   | Durable_stimulus_waiting
+  | Terminal_tool_completed
 
 type cooperative_yield_decision =
   | Continue
@@ -229,6 +230,9 @@ module For_testing : sig
     Llm_provider.Llm_transport.t -> Llm_provider.Llm_transport.t
 
   val runtime_id_of_config : config -> string
+
+  val stop_reason_of_cooperative_yield :
+    turns_used:int -> cooperative_yield_reason -> stop_reason
 
   (* RFC-OAS-026 §4.6 fail-fast (pure decision; raises [Failure] when an idle
      deadline is configured but no clock resolves). *)

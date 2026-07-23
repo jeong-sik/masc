@@ -72,6 +72,7 @@ type stop_reason =
 type cooperative_yield_reason =
   | Chat_waiting
   | Durable_stimulus_waiting
+  | Terminal_tool_completed
 
 type cooperative_yield_decision =
   | Continue
@@ -770,6 +771,16 @@ let select_agent_result ~checkpoint ~resume ~build =
   | Some checkpoint -> resume checkpoint
   | None -> build ()
 
+let stop_reason_of_cooperative_yield ~turns_used = function
+  | Chat_waiting -> Yielded_to_chat_waiting { turns_used }
+  | Durable_stimulus_waiting ->
+    Yielded_to_durable_stimulus { turns_used }
+  (* The provider loop yielded at OAS's durable post-tool boundary because
+     the typed reply effect already completed. This is successful completion,
+     not a continuation checkpoint that should replay on the next cycle. *)
+  | Terminal_tool_completed -> Completed
+;;
+
 module For_testing = struct
   let provider_http_observation_transport = provider_http_observation_transport
   let runtime_id_of_config = runtime_id_of_config
@@ -798,6 +809,7 @@ module For_testing = struct
   let apply_runtime_model_input_capabilities =
     apply_runtime_model_input_capabilities
   let select_agent_result = select_agent_result
+  let stop_reason_of_cooperative_yield = stop_reason_of_cooperative_yield
 end
 
 (* ================================================================ *)
@@ -1278,11 +1290,9 @@ let run_blocks
     | Ok (`Yielded (decision, yielded, response)) ->
       close_after_success ();
       let stop_reason =
-        match decision with
-        | Chat_waiting ->
-          Yielded_to_chat_waiting { turns_used = yielded.turn }
-        | Durable_stimulus_waiting ->
-          Yielded_to_durable_stimulus { turns_used = yielded.turn }
+        stop_reason_of_cooperative_yield
+          ~turns_used:yielded.turn
+          decision
       in
       record_dashboard_oas_response
         ~config

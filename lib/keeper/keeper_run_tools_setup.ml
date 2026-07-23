@@ -86,7 +86,12 @@ let prepare_agent_setup
       Keeper_tool_execution.success
         (Yojson.Safe.to_string (`Assoc [ "results", `List [] ])))
   in
-  let { Keeper_tools_oas.tools = keeper_tools; cleanup = keeper_tools_cleanup } =
+  let
+    { Keeper_tools_oas.tools = keeper_tools
+    ; cleanup = keeper_tools_cleanup
+    ; terminal_effect_completed
+    }
+    =
     Keeper_tools_oas_bundle.make_tool_bundle
       ~config
       ~meta
@@ -249,6 +254,7 @@ let prepare_agent_setup
     ; record_tool_assignment
     ; config
     ; keeper_tools_cleanup
+    ; terminal_effect_completed
     ; manifest_keeper_turn_id
     ; meta
     ; turn_ctx_cell

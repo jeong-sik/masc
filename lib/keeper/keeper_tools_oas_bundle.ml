@@ -9,6 +9,18 @@
 
 open Keeper_tools_oas
 
+type completion_boundary =
+  | Continue_after_success
+  | Terminal_effect
+
+(* A connected-surface post is the reply deliverable for this Keeper turn.
+   Classify it from the closed runtime-handler ADT: no tool-name comparison,
+   payload inspection, retry count, or elapsed-time threshold participates. *)
+let completion_boundary_of_runtime_handler = function
+  | Keeper_tool_descriptor.Tool_surface_post -> Terminal_effect
+  | _ -> Continue_after_success
+;;
+
 let task_state_hint ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) : string =
   let meta = Keeper_current_task_reconcile.sync_current_task_id_from_backlog ~config meta in
   match meta.current_task_id with
@@ -68,6 +80,10 @@ let make_tool_bundle
   (* Every descriptor-declared model tool is materialized. The turn hook sends
      this exact list to OAS without per-Keeper or per-turn reduction. *)
   let model_visible_descriptors = Keeper_tool_descriptor.model_visible_descriptors () in
+  (* The bundle lives for exactly one Agent run. A successful terminal effect
+     flips this turn-local latch; the OAS tool-boundary probe observes it only
+     after the whole tool batch and checkpoint sink have completed. *)
+  let terminal_effect_completed = ref false in
   (* The handler dispatches with
      [~name:descriptor.internal_name] so all telemetry SSOT remains internal;
      exactly one projected Tool.schema.name is model-visible.
@@ -77,6 +93,12 @@ let make_tool_bundle
     List.concat_map
       (fun (descriptor : Keeper_tool_descriptor.t) ->
          let internal = descriptor.internal_name in
+         let on_completed =
+           match completion_boundary_of_runtime_handler descriptor.runtime_handler with
+           | Terminal_effect ->
+             Some (fun () -> terminal_effect_completed := true)
+           | Continue_after_success -> None
+         in
          Keeper_tool_descriptor.keeper_model_names descriptor
          |> List.map (fun model_name ->
              let h =
@@ -94,6 +116,7 @@ let make_tool_bundle
                  ?gate_context:gate_context_provider
                  ?gate_grant
                  ?record_gate_result
+                 ?on_completed
                  ~pre_validate_input:(fun input ->
                    match
                      Keeper_tool_descriptor_resolution.validate_public_input_for_tool_call
@@ -127,6 +150,7 @@ let make_tool_bundle
   ; cleanup =
       (fun () ->
         Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory)
+  ; terminal_effect_completed = (fun () -> !terminal_effect_completed)
   }
 ;;
 
@@ -151,3 +175,11 @@ let make_tools
      ())
     .tools
 ;;
+
+module For_testing = struct
+  let is_terminal_effect_handler handler =
+    match completion_boundary_of_runtime_handler handler with
+    | Terminal_effect -> true
+    | Continue_after_success -> false
+  ;;
+end

@@ -549,29 +549,36 @@ let run_turn
        (* Section 3: Dispatch — call Keeper_turn_driver.run_named / Agent.run. *)
        let turn_result =
          let cooperative_yield_probe =
-                match autonomous_yield_requested with
-                | None -> None
-                | Some requested ->
-                  Some
-                    (fun (_ : Agent_sdk.Agent.Advanced.tool_boundary) ->
-                       try
-                         match requested () with
-                         | Ok (Some request) ->
-                           Ok (Runtime_agent.Yield (runtime_yield_reason request))
-                         | Ok None -> Ok Runtime_agent.Continue
-                         | Error detail ->
-                           Error
-                             (Agent_sdk.Error.Internal
-                                ("keeper cooperative-yield snapshot failed: "
-                                 ^ detail))
-                       with
-                       | Eio.Cancel.Cancelled _ as exn -> raise exn
-                       | exn ->
+           Some
+             (fun (_ : Agent_sdk.Agent.Advanced.tool_boundary) ->
+                try
+                  (* [terminal_effect_completed] is set only by a successful
+                     descriptor-typed terminal effect. OAS invokes this probe
+                     after tool results and the checkpoint have persisted, so
+                     settlement cannot race ahead of the reply effect. *)
+                  if s.terminal_effect_completed ()
+                  then Ok (Runtime_agent.Yield Runtime_agent.Terminal_tool_completed)
+                  else
+                    match autonomous_yield_requested with
+                    | None -> Ok Runtime_agent.Continue
+                    | Some requested ->
+                      (match requested () with
+                       | Ok (Some request) ->
+                         Ok (Runtime_agent.Yield (runtime_yield_reason request))
+                       | Ok None -> Ok Runtime_agent.Continue
+                       | Error detail ->
                          Error
                            (Agent_sdk.Error.Internal
-                              (Printf.sprintf
-                                 "keeper cooperative-yield probe failed: %s"
-                                 (Printexc.to_string exn))))
+                              ("keeper cooperative-yield snapshot failed: "
+                               ^ detail)))
+                with
+                | Eio.Cancel.Cancelled _ as exn -> raise exn
+                | exn ->
+                  Error
+                    (Agent_sdk.Error.Internal
+                       (Printf.sprintf
+                          "keeper cooperative-yield probe failed: %s"
+                          (Printexc.to_string exn))))
          in
          let checkpoint_sidecar =
                 ctx_work.checkpoint.Agent_sdk.Checkpoint.working_context

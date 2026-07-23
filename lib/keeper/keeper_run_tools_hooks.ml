@@ -13,6 +13,7 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator
 type agent_setup =
   { tools : Agent_sdk.Tool.t list
   ; cleanup : unit -> unit
+  ; terminal_effect_completed : unit -> bool
   ; hooks : Agent_sdk.Hooks.hooks
   ; model_input_projection :
       Agent_sdk.Types.message list -> Agent_sdk.Types.message list
@@ -36,6 +37,7 @@ type ctx =
       turn:int -> tool_list:string list -> lane:turn_lane -> unit
   ; config : Workspace.config
   ; keeper_tools_cleanup : unit -> unit
+  ; terminal_effect_completed : unit -> bool
   ; manifest_keeper_turn_id : int option
   ; meta : Keeper_meta_contract.keeper_meta
   ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
@@ -143,6 +145,7 @@ let assemble_hooks
   let record_tool_assignment = ctx.record_tool_assignment in
   let config = ctx.config in
   let keeper_tools_cleanup = ctx.keeper_tools_cleanup in
+  let terminal_effect_completed = ctx.terminal_effect_completed in
   let manifest_keeper_turn_id = ctx.manifest_keeper_turn_id in
   let meta = ctx.meta in
   let turn_ctx_cell = ctx.turn_ctx_cell in
@@ -558,6 +561,7 @@ let assemble_hooks
     Ok
       { tools
       ; cleanup = keeper_tools_cleanup
+      ; terminal_effect_completed
       ; hooks
       ; model_input_projection
       ; acc

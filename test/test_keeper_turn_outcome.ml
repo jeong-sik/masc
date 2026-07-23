@@ -77,12 +77,35 @@ let test_autonomous_yield_boundary_contract () =
   in
   (match F.runtime_yield_reason chat with
    | Runtime_agent.Chat_waiting -> ()
-   | Runtime_agent.Durable_stimulus_waiting ->
+   | Runtime_agent.Durable_stimulus_waiting
+   | Runtime_agent.Terminal_tool_completed ->
      fail "chat request mapped to the durable reason");
-  match F.runtime_yield_reason durable_stimulus with
-  | Runtime_agent.Durable_stimulus_waiting -> ()
-  | Runtime_agent.Chat_waiting ->
-    fail "durable request mapped to the chat reason"
+  (match F.runtime_yield_reason durable_stimulus with
+   | Runtime_agent.Durable_stimulus_waiting -> ()
+   | Runtime_agent.Chat_waiting
+   | Runtime_agent.Terminal_tool_completed ->
+     fail "durable request mapped to the chat reason");
+  check bool "terminal tool yield settles as completion" true
+    (match
+       Runtime_agent.For_testing.stop_reason_of_cooperative_yield
+         ~turns_used:3
+         Runtime_agent.Terminal_tool_completed
+     with
+     | Runtime_agent.Completed -> true
+     | Runtime_agent.Yielded_to_chat_waiting _
+     | Runtime_agent.Yielded_to_durable_stimulus _
+     | Runtime_agent.InputRequired _ -> false)
+
+let test_terminal_effect_handler_contract () =
+  let is_terminal =
+    Masc.Keeper_tools_oas_bundle.For_testing.is_terminal_effect_handler
+  in
+  check bool "surface post is a terminal effect" true
+    (is_terminal Masc.Keeper_tool_descriptor.Tool_surface_post);
+  check bool "surface read is not a terminal effect" false
+    (is_terminal Masc.Keeper_tool_descriptor.Tool_surface_read);
+  check bool "filesystem write is not a reply terminal" false
+    (is_terminal Masc.Keeper_tool_descriptor.Tool_write_file)
 
 let payload fields = Some (`Assoc fields)
 
@@ -266,6 +289,8 @@ let () =
           test_case "of_result_surface" `Quick test_of_result_surface;
           test_case "autonomous yield boundary contract" `Quick
             test_autonomous_yield_boundary_contract;
+          test_case "terminal effect handler contract" `Quick
+            test_terminal_effect_handler_contract;
         ] );
       ( "payload_decode",
         [

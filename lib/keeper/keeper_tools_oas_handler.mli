@@ -33,6 +33,7 @@ val make_keeper_tool_handler
   -> ?gate_grant:Keeper_gate.cycle_grant
   -> ?record_gate_result:
        (operation:string -> input:Yojson.Safe.t -> Tool_result.result -> unit)
+  -> ?on_completed:(unit -> unit)
   -> ?pre_validate_input:
        (Yojson.Safe.t -> (Yojson.Safe.t, Tool_result.result) result)
   -> ?translate_input:(Yojson.Safe.t -> Yojson.Safe.t)

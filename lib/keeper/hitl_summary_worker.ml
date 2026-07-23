@@ -377,17 +377,13 @@ let mark_unbound_failure (entry : pending_approval) reason =
       ~reason
       ~retryable:false
   with
-  | Ok true -> ()
-  | Ok false ->
-    log_exact_error entry "unbound failure transition" "state did not change"
+  | Ok true -> Ok ()
+  | Ok false -> Error "unbound failure transition did not change state"
   | Error error ->
-    log_exact_error
-      entry
-      "unbound failure transition"
-      (Keeper_approval_queue.summary_transition_error_to_string error)
+    Error (Keeper_approval_queue.summary_transition_error_to_string error)
 ;;
 
-let quarantine_identity
+let quarantine_identity_result
       (entry : pending_approval)
       (identity : exact_identity)
       cause
@@ -415,12 +411,25 @@ let quarantine_identity
           ~request_body_sha256
           ~cause)
   with
-  | Ok _ -> ()
+  | Ok { write_outcome = Fsync_completed; _ } -> Ok ()
+  | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
+    Error ("quarantine durability confirmation failed: " ^ detail)
   | Error error ->
+    Error (Keeper_approval_queue.exact_attempt_error_to_string error)
+;;
+
+let quarantine_identity
+      (entry : pending_approval)
+      (identity : exact_identity)
+      cause
+  =
+  match quarantine_identity_result entry identity cause with
+  | Ok () -> ()
+  | Error detail ->
     log_exact_error
       entry
       "quarantine"
-      (Keeper_approval_queue.exact_attempt_error_to_string error)
+      detail
 ;;
 
 let quarantine_candidate (entry : pending_approval) candidate cause =
@@ -429,11 +438,39 @@ let quarantine_candidate (entry : pending_approval) candidate cause =
 
 let settle_current (entry : pending_approval) ~reason ~cause =
   match Keeper_approval_queue.get_pending_entry ~id:entry.id with
-  | None -> ()
+  | None -> Ok ()
   | Some { exact_attempt = Exact_unbound; _ } ->
     mark_unbound_failure entry reason
   | Some { exact_attempt = Exact_bound binding; _ } ->
-    quarantine_identity entry (exact_identity_of_binding binding) cause
+    quarantine_identity_result entry (exact_identity_of_binding binding) cause
+;;
+
+exception Exact_terminalization_persistence_failed of string
+
+let signal_terminalization_persistence_failure
+      (entry : pending_approval)
+      operation
+      detail
+  =
+  record_outcome "exact_terminal_persistence_failure";
+  log_exact_error entry operation detail;
+  raise
+    (Exact_terminalization_persistence_failed
+       (Printf.sprintf
+          "HITL exact-output %s failed approval_id=%s: %s"
+          operation
+          entry.id
+          detail))
+;;
+
+let settle_current_or_signal (entry : pending_approval) ~reason ~cause =
+  match settle_current entry ~reason ~cause with
+  | Ok () -> ()
+  | Error detail ->
+    signal_terminalization_persistence_failure
+      entry
+      "terminalization persistence"
+      detail
 ;;
 
 let fail_final_before_dispatch (entry : pending_approval) candidate reason =
@@ -592,14 +629,14 @@ let handle_success
 let handle_flow_error (prepared : prepared_flow) = function
   | Exact_output.Flow_attempt_already_started _ ->
     record_outcome "exact_attempt_replay";
-    settle_current
+    settle_current_or_signal
       prepared.entry
       ~reason:"HITL exact-output flow attempt was replayed"
       ~cause:Exact_attempt_replay
   | Exact_output.Flow_before_dispatch_callback_failed
       { candidate; cause; _ } ->
     record_outcome "exact_bind_failed";
-    settle_current
+    settle_current_or_signal
       prepared.entry
       ~reason:(flow_callback_error_to_string cause)
       ~cause:Exact_terminal_persistence_failure;
@@ -607,7 +644,7 @@ let handle_flow_error (prepared : prepared_flow) = function
   | Exact_output.Flow_before_advance_callback_failed
       { failed; cause; _ } ->
     record_outcome "exact_release_failed";
-    settle_current
+    settle_current_or_signal
       prepared.entry
       ~reason:(flow_callback_error_to_string cause)
       ~cause:Exact_terminal_persistence_failure;
@@ -651,25 +688,43 @@ let execute_prepared_flow_with_queue_writers
     | Error error -> handle_flow_error prepared error
   with
   | Eio.Cancel.Cancelled _ as cancellation ->
-    Eio.Cancel.protect
-    @@ fun () ->
-    record_outcome "exact_cancellation";
-    settle_current
-      prepared.entry
-      ~reason:"HITL exact-output flow was cancelled"
-      ~cause:Exact_cancellation;
-    raise cancellation
+    let settlement =
+      Eio.Cancel.protect
+      @@ fun () ->
+      record_outcome "exact_cancellation";
+      settle_current
+        prepared.entry
+        ~reason:"HITL exact-output flow was cancelled"
+        ~cause:Exact_cancellation
+    in
+    (match settlement with
+     | Ok () -> raise cancellation
+     | Error detail ->
+       signal_terminalization_persistence_failure
+         prepared.entry
+         "cancellation terminalization persistence"
+         detail)
+  | Exact_terminalization_persistence_failed _ as persistence_failure ->
+    raise persistence_failure
   | exn ->
     let detail = Printexc.to_string exn in
     record_outcome "crashed";
     log_exact_error prepared.entry "worker crash" detail;
-    Eio.Cancel.protect
-    @@ fun () ->
-    settle_current
-      prepared.entry
-      ~reason:("HITL exact-output worker crashed: " ^ detail)
-      ~cause:Exact_terminal_persistence_failure;
-    raise exn
+    let settlement =
+      Eio.Cancel.protect
+      @@ fun () ->
+      settle_current
+        prepared.entry
+        ~reason:("HITL exact-output worker crashed: " ^ detail)
+        ~cause:Exact_terminal_persistence_failure
+    in
+    (match settlement with
+     | Ok () -> ()
+     | Error persistence_detail ->
+       signal_terminalization_persistence_failure
+         prepared.entry
+         "crash terminalization persistence"
+         persistence_detail)
 ;;
 
 let execute_prepared_flow ~net ?clock ~on_summary prepared =

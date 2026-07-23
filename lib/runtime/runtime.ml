@@ -1148,7 +1148,7 @@ let init_default_degraded_report ~config_path =
      | Some report ->
        (match degrade_loaded_for_missing_catalog loaded report with
         | Error msg -> Error (Runtime_config_error msg)
-        | Ok (((active_runtimes, _, _, _, _, _, _, _, _) as degraded_loaded), degradation) ->
+        | Ok (((active_runtimes, _, _, _, _, _, _, _) as degraded_loaded), degradation) ->
           (match validate_runtime_max_context ~config_path active_runtimes with
            | Error msg -> Error (Runtime_config_error msg)
            | Ok () ->

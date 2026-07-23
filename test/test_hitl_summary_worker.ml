@@ -100,10 +100,14 @@ let run_eio f =
   @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
-  f
+  let net = Eio.Stdenv.net env in
+  let clock = Eio.Stdenv.clock env in
+  Eio_context.with_test_env
+    ~net
+    ~clock
+    ~mono_clock:(Eio.Stdenv.mono_clock env)
     ~sw
-    ~net:(Eio.Stdenv.net env)
-    ~clock:(Eio.Stdenv.clock env)
+  @@ fun () -> f ~sw ~net ~clock
 ;;
 
 let prepare_exn entry =
@@ -128,6 +132,27 @@ exception Unknown_writer_failure
 exception Cancel_after_request_arrived
 
 let unknown_writer _path _body = raise Unknown_writer_failure
+
+let rec await_condition ~clock ~remaining ~failure predicate =
+  if predicate ()
+  then ()
+  else if remaining = 0
+  then fail failure
+  else (
+    Eio.Time.sleep clock 0.01;
+    await_condition ~clock ~remaining:(remaining - 1) ~failure predicate)
+;;
+
+let select_auto_judge_mode base_path =
+  match
+    Keeper_gate_mode.set
+      (Workspace.default_config base_path)
+      ~actor:"test"
+      Keeper_gate_mode.Auto_judge
+  with
+  | Ok _ -> ()
+  | Error detail -> fail ("failed to select Auto Judge mode: " ^ detail)
+;;
 
 let test_parse_typed_judgments () =
   List.iter
@@ -598,7 +623,7 @@ let test_cancellation_after_dispatch_is_terminal () =
        | _ -> fail "post-dispatch cancellation was not terminally quarantined")
 ;;
 
-let test_unknown_callback_exception_is_terminal () =
+let test_unknown_callback_exception_is_terminal_and_owner_continues () =
   run_eio @@ fun ~sw ~net ~clock ->
   with_temp_dir "hitl-unknown" @@ fun base_path ->
   Fun.protect
@@ -619,67 +644,120 @@ let test_unknown_callback_exception_is_terminal () =
          (F.resolver_snapshot
             ~source:"hitl-unknown"
             [ { id = "hitl-unknown"; base_url = server.base_url } ]);
-       let entry = pending_entry ~base_path in
-       (match
-          Worker.For_testing.execute_prepared_flow_with_writers
-            ~bind_writer:unknown_writer
-            ~net
-            ~clock
-            ~on_summary:(fun _ -> fail "unknown callback delivered a summary")
-            (prepare_exn entry)
-        with
-        | exception Unknown_writer_failure -> ()
-        | () -> fail "unknown callback exception was swallowed");
-       check int "unknown pre-effect failure forbids POST" 0 (F.post_count server);
-       match Q.get_pending_entry ~id:entry.id with
+       select_auto_judge_mode base_path;
+       let failed = pending_entry ~input_tag:"failed" ~base_path in
+       let successor = pending_entry ~input_tag:"successor" ~base_path in
+       check bool
+         "first owner work claimed"
+         true
+         (Gate.For_testing.claim_auto_judge failed);
+       Eio.Fiber.fork ~sw (fun () ->
+         Fun.protect
+           ~finally:(fun () ->
+             Gate.For_testing.release_auto_judge failed;
+             ignore (Gate.resume_persisted_auto_judges ~base_path))
+           (fun () ->
+              Worker.For_testing.execute_prepared_flow_with_writers
+                ~bind_writer:unknown_writer
+                ~net
+                ~clock
+                ~on_summary:(fun _ ->
+                  fail "unknown callback delivered a summary")
+                (prepare_exn failed)));
+       F.await_first_request server;
+       check int
+         "failed entry forbids POST and successor dispatches once"
+         1
+         (F.post_count server);
+       (match Q.get_pending_entry ~id:failed.id with
        | Some
            { exact_attempt = Q.Exact_unbound
            ; summary_status = Q.Summary_failed { retryable = false; _ }
            ; _
            } ->
          ()
-       | _ -> fail "unknown callback exception did not require operator recovery")
+       | _ -> fail "unknown callback exception did not require operator recovery");
+       await_condition
+         ~clock
+         ~remaining:100
+         ~failure:"successor did not complete after failed owner work"
+         (fun () -> Option.is_none (Q.get_pending_entry ~id:successor.id));
+       check int
+         "owner drain did not duplicate successor dispatch"
+         1
+         (F.post_count server))
 ;;
 
-let test_owner_fifo_blocks_later_pending_entry () =
-  with_temp_dir "hitl-owner-fifo" @@ fun base_path ->
+let test_owner_fifo_atomic_drain_is_nonsharing () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-owner-fifo-drain" @@ fun base_path ->
   Fun.protect
     ~finally:Q.For_testing.reset_runtime_state
     (fun () ->
        install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       let release_first, resolve_release_first = Eio.Promise.create () in
+       let request_index = Atomic.make 0 in
+       let server =
+         F.start_server
+           ~on_request_before_reply:(fun () ->
+             if Atomic.fetch_and_add request_index 1 = 0
+             then Eio.Promise.await release_first)
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "approve")))
+       in
+       publish_lane
+         [ "hitl-owner-fifo-drain" ]
+         (F.resolver_snapshot
+            ~source:"hitl-owner-fifo-drain"
+            [ { id = "hitl-owner-fifo-drain"; base_url = server.base_url } ]);
+       select_auto_judge_mode base_path;
        let first = pending_entry ~input_tag:"first" ~base_path in
        let second = pending_entry ~input_tag:"second" ~base_path in
-       (match
-          Q.mark_summary_failed
-            ~id:first.id
-            ~reason:"operator recovery required"
-            ~retryable:false
-        with
-        | Ok true -> ()
-        | Ok false -> fail "oldest entry did not enter terminal failed state"
-        | Error error -> fail (Q.summary_transition_error_to_string error));
-       let first =
-         Q.get_pending_entry ~id:first.id
-         |> Option.get
-       in
-       let ready =
-         Gate.For_testing.ready_auto_judges_for_owner
-           ~base_path
-           ~keeper_name:first.keeper_name
-           [ second; first ]
-       in
-       check (list string) "later entry stays blocked" [] (List.map (fun e -> e.id) ready);
-       let ready_after_oldest_removed =
-         Gate.For_testing.ready_auto_judges_for_owner
-           ~base_path
-           ~keeper_name:first.keeper_name
-           [ second ]
-       in
+       let initial = Gate.resume_persisted_auto_judges ~base_path in
        check
          (list string)
-         "next entry becomes ready only after oldest is absent"
-         [ second.id ]
-         (List.map (fun entry -> entry.id) ready_after_oldest_removed))
+         "production recovery claims the oldest owner entry"
+         [ first.id ]
+         initial.started_ids;
+       F.await_first_request server;
+       let concurrent = Gate.resume_persisted_auto_judges ~base_path in
+       check
+         (list string)
+         "concurrent drain cannot claim the same owner"
+         []
+         concurrent.started_ids;
+       Eio.Time.sleep clock 0.02;
+       check int
+         "later owner work is not dispatched concurrently"
+         1
+         (F.post_count server);
+       (match Q.get_pending_entry ~id:second.id with
+        | Some
+            { exact_attempt = Q.Exact_unbound
+            ; summary_status = Q.Summary_pending
+            ; _
+            } ->
+          ()
+        | _ -> fail "later owner work was mutated before the oldest completed");
+       ignore (Eio.Promise.try_resolve resolve_release_first ());
+       await_condition
+         ~clock
+         ~remaining:100
+         ~failure:"owner drain did not dispatch the FIFO successor"
+         (fun () -> F.post_count server = 2);
+       await_condition
+         ~clock
+         ~remaining:100
+         ~failure:"FIFO successor did not complete"
+         (fun () -> Option.is_none (Q.get_pending_entry ~id:second.id));
+       check int
+         "each owner entry dispatches exactly once"
+         2
+         (F.post_count server))
 ;;
 
 let test_gate_judgment_prompt_comes_from_registry () =
@@ -744,13 +822,13 @@ let () =
             `Quick
             test_cancellation_after_dispatch_is_terminal
         ; test_case
-            "unknown callback exception is terminal"
+            "unknown callback is terminal and owner continues"
             `Quick
-            test_unknown_callback_exception_is_terminal
+            test_unknown_callback_exception_is_terminal_and_owner_continues
         ; test_case
-            "owner FIFO blocks later pending work"
+            "owner FIFO atomic drain is non-sharing"
             `Quick
-            test_owner_fifo_blocks_later_pending_entry
+            test_owner_fifo_atomic_drain_is_nonsharing
         ] )
     ]
 ;;

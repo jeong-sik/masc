@@ -2927,14 +2927,35 @@ let test_surface_post_append_failure_does_not_complete_terminal_effect () =
               "runtime failure emits no keeper chat broadcast"
               0
               !chat_broadcast_count;
-            let failure =
-              Masc.Keeper_unified_turn.For_testing.turn_failure_of_error
-                ~runtime_id:"opaque-runtime"
-                ~fallback_boundary:
-                  Masc.Keeper_runtime_failure_route.Oas_execution
-                ~exact_failure_execution:None
+            let exact_route =
+              Keeper_runtime_failure_route.route_of_error
+                ~boundary:Keeper_runtime_failure_route.Oas_execution
                 runtime_error
             in
+            let failure =
+              Masc.Keeper_unified_turn.For_testing.turn_failure_of_error
+                ~runtime_id:"forbidden-fallback-runtime"
+                ~fallback_boundary:Keeper_runtime_failure_route.Masc_execution
+                ~exact_failure_execution:
+                  (Some
+                     ( "opaque-runtime"
+                     , exact_route
+                     , Masc.Keeper_unified_turn.Follow_failure_route ))
+                runtime_error
+            in
+            check string
+              "unified failure keeps the exact execution runtime"
+              "opaque-runtime"
+              failure.runtime_id;
+            check bool
+              "unified failure keeps the exact OAS execution route"
+              true
+              (failure.route = exact_route);
+            (match failure.route with
+             | Keeper_runtime_failure_route.Escalate_judgment
+                 { provenance = Keeper_runtime_failure_route.Oas_internal_error; _ } ->
+               ()
+             | _ -> fail "unified failure fell back from the exact OAS route");
             let settlement =
               Masc.Keeper_heartbeat_loop.settlement_of_failure
                 ~settled_at:0.

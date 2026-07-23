@@ -37,7 +37,7 @@ let make_keeper_tool_handler
       record_gate_result;
     result
   in
-  let observe_terminal_result (result : Tool_result.result) =
+  let observe_terminal_execution_result (result : Tool_result.result) =
     (match result with
      | Tool_result.Completed _ ->
        Option.iter (fun completed -> completed ()) on_completed
@@ -107,7 +107,9 @@ let make_keeper_tool_handler
             ; "error", `String error_text
             ]
              @ invocation_fields));
-      validation_result |> record_result ~input |> observe_terminal_result
+      (* Input rejection is proven pre-effect. Keep it in dispatch telemetry,
+         but do not poison the request-scoped terminal-effect state. *)
+      validation_result |> record_result ~input
     in
     match pre_validate_input raw_input with
     | Error validation_result ->
@@ -154,7 +156,7 @@ let make_keeper_tool_handler
                 ~input
                 ()
               |> record_result ~input
-              |> observe_terminal_result
+              |> observe_terminal_execution_result
             in
             result
           in

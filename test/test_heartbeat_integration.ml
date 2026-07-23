@@ -248,6 +248,13 @@ let shutdown_schema5_fixture (operation : Shutdown_types.t) =
   | _ -> fail "shutdown JSON codec did not return an object"
 ;;
 
+let shutdown_schema6_fixture (operation : Shutdown_types.t) =
+  match Shutdown_store.to_json operation with
+  | `Assoc fields ->
+    `Assoc (replace_assoc_field "schema_version" (`Int 6) fields)
+  | _ -> fail "shutdown JSON codec did not return an object"
+;;
+
 let retired_stale_paused_schema5_fixture (operation : Shutdown_types.t) =
   match Shutdown_store.to_json operation with
   | `Assoc fields ->
@@ -1334,8 +1341,8 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
         | Error error -> fail (Shutdown_supersession.error_to_string error)
       in
       check int
-        "schema 5 CAS write upgrades the durable record to schema 6"
-        6
+        "schema 5 CAS write upgrades the durable record to schema 7"
+        7
         superseded.schema_version;
       (match superseded.phase with
        | Shutdown_types.Superseded
@@ -1364,7 +1371,89 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
            | _ -> fail "persisted supersession omitted schema_version")
         | _ -> fail "persisted supersession is not an object"
       in
-      check int "supersession wire schema is upgraded" 6 persisted_schema;
+      check int "supersession wire schema is upgraded" 7 persisted_schema;
+      (* #25491: a [Reconciliation_required] fence previously had no release
+         path at all. The worker no-ops on it by design and supersession
+         accepted only [Blocked], so the keeper was unreachable in every
+         direction (RFC-0000 §1.2 LAW 1 "no dead-end"). Since #25522 boot
+         recovery settles the phase automatically instead of minting it, so
+         this operator route is now the manual fallback. These pin that the
+         operator route releases it and that the accepted turn survives in the
+         durable record, since [Superseded] overwrites the phase that carried
+         it. *)
+      let unreconciled_turn =
+        { Shutdown_types.lane = Some Shutdown_types.Autonomous
+        ; admitted_at = Some 1784545390.0
+        ; observed_turn_id = Some 5744
+        ; observation_started_at = Some 1784545390.5
+        }
+      in
+      let reconciling =
+        operation
+          ~name:"reconciliation-keeper"
+          ~reason:Shutdown_types.Operator_stop_retain_meta
+          ~phase:(Shutdown_types.Reconciliation_required unreconciled_turn)
+      in
+      (match Shutdown_store.persist_new ~config reconciling with
+       | Ok () -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      (match
+         Masc.Keeper_turn_admission.begin_shutdown
+           ~base_path:config.base_path
+           ~keeper_name:reconciling.keeper_name
+           ~operation_id:reconciling.operation_id
+       with
+       | Masc.Keeper_turn_admission.Shutdown_reserved _ -> ()
+       | Masc.Keeper_turn_admission.Shutdown_already_reserved _ ->
+         fail "reconciliation fixture admission was already reserved");
+      let reconciling_token =
+        match
+          Shutdown_supersession.preflight
+            ~config
+            ~keeper_name:reconciling.keeper_name
+            ~actor:"tester"
+        with
+        | Ok token -> token
+        | Error error -> fail (Shutdown_supersession.error_to_string error)
+      in
+      let reconciling_superseded =
+        match
+          Shutdown_supersession.commit_after_metadata_update ~config reconciling_token
+        with
+        | Ok (Shutdown_supersession.Shutdown_superseded superseded_operation) ->
+          superseded_operation
+        | Ok Shutdown_supersession.No_shutdown_admission ->
+          fail "reconciliation admission was not superseded"
+        | Error error -> fail (Shutdown_supersession.error_to_string error)
+      in
+      (match reconciling_superseded.phase with
+       | Shutdown_types.Superseded
+           (Shutdown_types.Operator_reconciliation_accepted
+              { actor; unreconciled_turn = recorded }) ->
+         check
+           string
+           "reconciliation supersession preserves the validated operator actor"
+           "tester"
+           actor;
+         check
+           (option int)
+           "the accepted turn is recorded so the audit says what was released"
+           (Some 5744)
+           recorded.observed_turn_id
+       | _ ->
+         fail "Reconciliation_required did not reach typed Superseded");
+      let reconciling_released =
+        Masc.Keeper_turn_admission.snapshot_for
+          ~base_path:config.base_path
+          ~keeper_name:reconciling.keeper_name
+      in
+      check
+        (option string)
+        "releasing the reconciliation fence frees exact admission"
+        None
+        (Option.map
+           Shutdown_types.Operation_id.to_string
+           reconciling_released.snapshot_shutdown_operation_id);
       let invalid_superseded =
         { superseded with
           operation_id = Shutdown_types.Operation_id.generate ()
@@ -1387,7 +1476,23 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
        with
        | Error (Shutdown_store.Decode_error _) -> ()
        | Error error -> fail (Shutdown_store.error_to_string error)
-       | Ok _ -> fail "schema 5 accepted the schema 6 superseded phase");
+       | Ok _ -> fail "schema 5 accepted the superseded phase");
+      (match
+         superseded
+         |> shutdown_schema6_fixture
+         |> Shutdown_store.of_json
+       with
+       | Ok _ -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error));
+      (match
+         reconciling_superseded
+         |> shutdown_schema6_fixture
+         |> Shutdown_store.of_json
+       with
+       | Error (Shutdown_store.Decode_error _) -> ()
+       | Error error -> fail (Shutdown_store.error_to_string error)
+       | Ok _ ->
+         fail "schema 6 accepted the schema 7 reconciliation supersession");
       (match
          Masc.Keeper_turn_admission.restore_shutdown
            ~base_path:config.base_path

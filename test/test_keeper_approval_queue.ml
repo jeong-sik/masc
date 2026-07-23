@@ -429,6 +429,7 @@ let delivery_json ~entry ~remember_rule =
     ; "decision", `Assoc [ "kind", `String "approve" ]
     ; "source", `String "human_operator"
     ; "remember_rule", `Bool remember_rule
+    ; "rule_expires_at", `Null
     ; "created_by", `Null
     ; "grant_consumed", `Bool false
     ]
@@ -445,7 +446,7 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 3
+            [ "version", `Int 5
             ; "next_sequence", `Int 1
             ; "pending", `List []
             ; "deliveries", `List []
@@ -608,55 +609,6 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
         | None -> Alcotest.fail "pending request was not restored");
        reject_and_cleanup ~base_path first;
        reject_and_cleanup ~base_path changed)
-;;
-
-let test_unversioned_request_context_is_not_replayed_as_exact () =
-  let base_path = temp_dir () in
-  let keeper_name = "queue-legacy-context" in
-  Fun.protect
-    ~finally:(fun () ->
-      AQ.For_testing.reset_runtime_state ();
-      cleanup_dir base_path)
-    (fun () ->
-       AQ.For_testing.reset_runtime_state ();
-       ignore (install_exn ~base_path);
-       let id =
-         submit_with_context
-           ~request_context:(`Assoc [ "history_digest", `String "retired-projection" ])
-           ~base_path
-           ~keeper_name
-           ~input:(`String "legacy")
-           ()
-       in
-       let snapshot = read_pending_snapshot ~base_path in
-       let unversioned =
-         match snapshot with
-         | `Assoc fields ->
-           let pending =
-             match List.assoc_opt "pending" fields with
-             | Some (`List entries) ->
-               `List
-                 (List.map
-                    (function
-                      | `Assoc entry_fields ->
-                        `Assoc (List.remove_assoc "request_context_version" entry_fields)
-                      | entry -> entry)
-                    entries)
-             | Some pending -> pending
-             | None -> `List []
-           in
-           `Assoc (("pending", pending) :: List.remove_assoc "pending" fields)
-         | other -> other
-       in
-       AQ.For_testing.reset_runtime_state ();
-       write_pending_snapshot ~base_path unversioned;
-       ignore (install_exn ~base_path);
-       (match AQ.get_pending_entry ~id with
-        | Some { request_context = None; _ } -> ()
-        | Some { request_context = Some _; _ } ->
-          Alcotest.fail "unversioned projected context was treated as exact evidence"
-        | None -> Alcotest.fail "legacy pending request was not restored");
-       reject_and_cleanup ~base_path id)
 ;;
 
 let test_monotonic_sequence_survives_restart () =
@@ -1065,7 +1017,7 @@ let test_cycle_grant_uses_exact_effect_and_is_consumed_once () =
        drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
-let test_v4_exact_binding_codec_validates_entry_identity () =
+let test_exact_binding_codec_validates_entry_identity () =
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
@@ -1077,7 +1029,7 @@ let test_v4_exact_binding_codec_validates_entry_identity () =
        let id =
          submit
            ~base_path
-           ~keeper_name:"queue-v4-exact-codec"
+           ~keeper_name:"queue-exact-codec"
            ~input:(`Assoc [ "request", `String "codec" ])
        in
        check_update "mark exact codec pending" true (AQ.mark_summary_pending ~id);
@@ -1105,12 +1057,12 @@ let test_v4_exact_binding_codec_validates_entry_identity () =
               Alcotest.failf "%s runtime hash was accepted" label)
          invalid_hashes;
        check_exact_update
-         "bind valid v4 identity"
+         "bind valid exact identity"
          true
          (run_exact_transition AQ.bind_summary_exact_attempt identity);
        let snapshot = read_pending_snapshot ~base_path in
        let open Yojson.Safe.Util in
-       Alcotest.(check int) "v4 snapshot" 4 (snapshot |> member "version" |> to_int);
+       Alcotest.(check int) "v5 snapshot" 5 (snapshot |> member "version" |> to_int);
        let exact_json =
          snapshot
          |> member "pending"
@@ -1132,7 +1084,7 @@ let test_v4_exact_binding_codec_validates_entry_identity () =
             "codec sequence identity"
             identity.sequence_arg
             binding.sequence
-        | Ok _ -> Alcotest.fail "v4 bound exact attempt decoded as another state"
+        | Ok _ -> Alcotest.fail "bound exact attempt decoded as another state"
         | Error reason -> Alcotest.fail reason);
        let replace_field field value = function
          | `Assoc fields ->
@@ -2479,131 +2431,6 @@ let test_decisive_summary_finalizes_after_restart () =
        drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
-let test_legacy_exact_attempt_rows_are_hard_cut () =
-  let base_path = temp_dir () in
-  let keeper_name = "queue-legacy-hard-cut" in
-  Fun.protect
-    ~finally:(fun () ->
-      AQ.For_testing.reset_runtime_state ();
-      cleanup_dir base_path)
-    (fun () ->
-       AQ.For_testing.reset_runtime_state ();
-       ignore (install_exn ~base_path);
-       let pending_id =
-         submit
-           ~base_path
-           ~keeper_name
-           ~input:(`Assoc [ "target", `String "legacy-pending" ])
-       in
-       let delivery_id =
-         submit
-           ~base_path
-           ~keeper_name
-           ~input:(`Assoc [ "target", `String "legacy-delivery" ])
-       in
-       check_update
-         "legacy pending judge marked in flight"
-         true
-         (AQ.mark_summary_pending ~id:pending_id);
-       check_update
-         "legacy delivery judge marked in flight"
-         true
-         (AQ.mark_summary_pending ~id:delivery_id);
-       let current_snapshot = read_pending_snapshot ~base_path in
-       let legacy_entry id entries =
-         match
-           List.find_opt
-             (function
-               | `Assoc fields ->
-                 (match List.assoc_opt "id" fields with
-                  | Some (`String actual) -> String.equal actual id
-                  | Some _ | None -> false)
-               | _ -> false)
-             entries
-         with
-         | Some (`Assoc fields) ->
-           `Assoc
-             (("exact_attempt", `Assoc [ "state", `String "legacy_execution_uncertain" ])
-              :: List.remove_assoc "exact_attempt" fields)
-         | Some _ | None -> Alcotest.failf "snapshot entry %s not found" id
-       in
-       let v4_snapshot =
-         match current_snapshot with
-         | `Assoc fields ->
-           let entries =
-             match List.assoc_opt "pending" fields with
-             | Some (`List entries) -> entries
-             | _ -> Alcotest.fail "legacy pending list expected"
-           in
-           let pending_entry = legacy_entry pending_id entries in
-           let delivery_entry = legacy_entry delivery_id entries in
-           let delivery =
-             `Assoc
-               [ "entry", delivery_entry
-               ; "decision", `Assoc [ "kind", `String "approve" ]
-               ; "source", `String "human_operator"
-               ; "remember_rule", `Bool false
-               ; "rule_expires_at", `Null
-               ; "created_by", `Null
-               ; "grant_consumed", `Bool false
-               ]
-           in
-           `Assoc
-             (("version", `Int 4)
-              :: ("pending", `List [ pending_entry ])
-              :: ("deliveries", `List [ delivery ])
-              :: (fields
-                  |> List.remove_assoc "version"
-                  |> List.remove_assoc "pending"
-                  |> List.remove_assoc "deliveries"))
-         | _ -> Alcotest.fail "legacy snapshot object expected"
-       in
-       AQ.For_testing.reset_runtime_state ();
-       write_pending_snapshot ~base_path v4_snapshot;
-       Alcotest.(check int) "process state cleared" 0 (List.length (AQ.list_pending_entries ()));
-       let report = install_exn ~base_path in
-       Alcotest.(check int) "legacy pending removed" 0 report.loaded_pending;
-       Alcotest.(check int) "no delivery replay" 0 report.replayed_deliveries;
-       Alcotest.(check int)
-         "no delivery replay failure"
-         0
-         (List.length report.delivery_replay_failures);
-       Alcotest.(check bool)
-         "legacy pending absent"
-         true
-         (Option.is_none (AQ.get_pending_entry ~id:pending_id));
-       Alcotest.(check bool)
-         "legacy delivery absent"
-         true
-         (Option.is_none (AQ.get_pending_entry ~id:delivery_id));
-       let open Yojson.Safe.Util in
-       let persisted = read_pending_snapshot ~base_path in
-       Alcotest.(check int) "legacy snapshot migrated to v5" 5
-         (persisted |> member "version" |> to_int);
-       Alcotest.(check int) "persisted pending removed" 0
-         (persisted |> member "pending" |> to_list |> List.length);
-       Alcotest.(check int) "persisted delivery removed" 0
-         (persisted |> member "deliveries" |> to_list |> List.length);
-       let tombstone =
-         AQ.read_recent_audit ~base_path ~n:20 ()
-         |> List.find_opt (fun json ->
-           String.equal
-             "legacy_exact_attempt_hard_cut_tombstone"
-             (Safe_ops.json_string ~default:"" "event" json))
-         |> function
-         | Some json -> json
-         | None -> Alcotest.fail "hard-cut migration audit tombstone missing"
-       in
-       let check_tombstone_int label expected field =
-         Alcotest.(check int) label expected (tombstone |> member field |> to_int)
-       in
-       check_tombstone_int "source version" 4 "source_version";
-       check_tombstone_int "target version" 5 "target_version";
-       check_tombstone_int "one pending tombstoned" 1 "removed_pending";
-       check_tombstone_int "one delivery tombstoned" 1 "removed_deliveries";
-       check_tombstone_int "two rows tombstoned" 2 "removed_count")
-;;
-
 let test_malformed_snapshot_fails_install_and_is_observed () =
   let base_path = temp_dir () in
   Fun.protect
@@ -2615,7 +2442,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 3
+            [ "version", `Int 5
             ; "next_sequence", `Int 1
             ; "pending", `List [ `String "malformed-entry" ]
             ; "deliveries", `List []
@@ -2646,7 +2473,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 3
+               [ "version", `Int 5
                ; "next_sequence", `Int 1
                ; "pending", `List [ `String "malformed-entry" ]
                ; "deliveries", `List []
@@ -2660,7 +2487,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        Alcotest.(check bool) "malformed snapshot observed" true (after -. before >= 1.0))
 ;;
 
-let test_unsupported_version_snapshot_is_quarantined_and_store_starts_fresh () =
+let test_unsupported_version_snapshot_requires_runtime_reset () =
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () ->
@@ -2676,16 +2503,23 @@ let test_unsupported_version_snapshot_is_quarantined_and_store_starts_fresh () =
             ; "deliveries", `List []
             ]);
        (match AQ.install_persistence ~base_path with
-        | Ok _ -> ()
-        | Error _ ->
-          Alcotest.fail "unsupported version must quarantine, not fail install");
+        | Ok _ -> Alcotest.fail "unsupported version must fail install"
+        | Error
+            (AQ.Install_storage_failed
+              { reason =
+                  "gate_pending.version 2 is unsupported (current 5); reset \
+                   runtime state before restarting MASC"
+              ; _
+              }) ->
+          ()
+        | Error error ->
+          Alcotest.failf
+            "unsupported version returned the wrong error: %s"
+            (AQ.install_error_to_string error));
        let store_path = AQ.For_testing.pending_store_path ~base_path in
-       Alcotest.(check bool) "original moved away" false
+       Alcotest.(check bool) "original remains for operator reset" true
          (Sys.file_exists store_path);
-       let quarantine_path = store_path ^ ".v2.quarantine" in
-       Alcotest.(check bool) "quarantine file exists" true
-         (Sys.file_exists quarantine_path);
-       let preserved = Yojson.Safe.from_file quarantine_path in
+       let preserved = Yojson.Safe.from_file store_path in
        Alcotest.(check bool) "content preserved verbatim" true
          (Yojson.Safe.equal
             preserved
@@ -2693,42 +2527,7 @@ let test_unsupported_version_snapshot_is_quarantined_and_store_starts_fresh () =
                [ "version", `Int 2
                ; "pending", `List []
                ; "deliveries", `List []
-               ]));
-       let id =
-         submit ~base_path ~keeper_name:"queue-quarantine"
-           ~input:(`Assoc [ "target", `String "after-quarantine" ])
-       in
-       Alcotest.(check int) "fresh generation starts at sequence 1" 1
-         (pending_entry_exn id).sequence)
-;;
-
-let test_quarantine_name_collision_uses_next_free_name () =
-  let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      AQ.For_testing.reset_runtime_state ();
-      cleanup_dir base_path)
-    (fun () ->
-       AQ.For_testing.reset_runtime_state ();
-       let store_path = AQ.For_testing.pending_store_path ~base_path in
-       write_pending_snapshot
-         ~base_path
-         (`Assoc
-            [ "version", `Int 2
-            ; "pending", `List []
-            ; "deliveries", `List []
-            ]);
-       let occupied = store_path ^ ".v2.quarantine" in
-       ensure_dir (Filename.dirname occupied);
-       Out_channel.with_open_text occupied (fun channel ->
-         output_string channel "prior quarantine");
-       (match AQ.install_persistence ~base_path with
-        | Ok _ -> ()
-        | Error _ -> Alcotest.fail "install must quarantine");
-       Alcotest.(check bool) "prior quarantine kept" true
-         (Sys.file_exists occupied);
-       Alcotest.(check bool) "next free name used" true
-         (Sys.file_exists (store_path ^ ".v2.quarantine.1")))
+               ]))
 ;;
 
 let test_unreadable_json_snapshot_is_not_quarantined () =
@@ -2779,7 +2578,7 @@ let test_persisted_delivery_replays_before_origin_wake () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 3
+            [ "version", `Int 5
             ; "next_sequence", `Int 2
             ; "pending", `List []
             ; ( "deliveries"
@@ -2873,7 +2672,7 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 3
+            [ "version", `Int 5
             ; "next_sequence", `Int 4
             ; "pending", `List []
             ; ( "deliveries"
@@ -3119,10 +2918,6 @@ let () =
             `Quick
             test_submit_is_nonblocking_and_exactly_deduplicated
         ; Alcotest.test_case
-            "unversioned context is never replayed as exact"
-            `Quick
-            test_unversioned_request_context_is_not_replayed_as_exact
-        ; Alcotest.test_case
             "durable sequence survives restart"
             `Quick
             test_monotonic_sequence_survives_restart
@@ -3157,7 +2952,7 @@ let () =
         ; Alcotest.test_case
             "exact binding codec validates entry identity"
             `Quick
-            test_v4_exact_binding_codec_validates_entry_identity
+            test_exact_binding_codec_validates_entry_identity
         ; Alcotest.test_case
             "exact binding release and conflicts"
             `Quick
@@ -3211,21 +3006,13 @@ let () =
               `Quick
               test_exact_completed_restart_requires_fsync_confirmation
         ; Alcotest.test_case
-            "legacy exact-attempt rows are hard-cut"
-            `Quick
-            test_legacy_exact_attempt_rows_are_hard_cut
-        ; Alcotest.test_case
             "malformed snapshot is explicit"
             `Quick
             test_malformed_snapshot_fails_install_and_is_observed
         ; Alcotest.test_case
-            "unsupported version quarantines and restarts fresh"
+            "unsupported version requires runtime reset"
             `Quick
-            test_unsupported_version_snapshot_is_quarantined_and_store_starts_fresh
-        ; Alcotest.test_case
-            "quarantine name collision uses next free name"
-            `Quick
-            test_quarantine_name_collision_uses_next_free_name
+            test_unsupported_version_snapshot_requires_runtime_reset
         ; Alcotest.test_case
             "unreadable json is not quarantined"
             `Quick

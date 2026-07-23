@@ -190,8 +190,6 @@ let install_error_to_string = function
   | Install_storage_failed error -> storage_error_to_string error
 ;;
 
-let legacy_pending_store_version = 3
-let exact_attempt_pending_store_version = 4
 let pending_store_version = 5
 let pending_store_surface = "keeper_gate_pending"
 let pending_store_mutex = Cross_context_mutex.create ()
@@ -567,7 +565,7 @@ let validate_entry_exact_attempt
     Error "non-completed exact attempt requires a pending summary"
 ;;
 
-let pending_entry_of_yojson ~base_path ~snapshot_version json =
+let pending_entry_of_yojson ~base_path json =
   match json with
   | `Assoc fields ->
     let ( let* ) = Result.bind in
@@ -575,28 +573,25 @@ let pending_entry_of_yojson ~base_path ~snapshot_version json =
     let* () =
       reject_unknown_fields
         ~surface
-          ~allowed:
-            ([ "id"
-             ; "keeper_name"
-             ; "tool_name"
-             ; "input_hash"
-             ; "input"
-             ; "sequence"
-             ; "requested_at"
-             ; "turn_id"
-             ; "request_context"
-             ; "request_context_version"
-             ; "task_id"
-             ; "goal_id"
-             ; "goal_ids"
-             ; "continuation_channel"
-             ; "summary_status"
-             ]
-             @
-             if snapshot_version >= exact_attempt_pending_store_version
-             then [ "exact_attempt" ]
-             else [])
-          fields
+        ~allowed:
+          [ "id"
+          ; "keeper_name"
+          ; "tool_name"
+          ; "input_hash"
+          ; "input"
+          ; "sequence"
+          ; "requested_at"
+          ; "turn_id"
+          ; "request_context"
+          ; "request_context_version"
+          ; "task_id"
+          ; "goal_id"
+          ; "goal_ids"
+          ; "continuation_channel"
+          ; "summary_status"
+          ; "exact_attempt"
+          ]
+        fields
     in
     let* id = required_string ~surface "id" fields in
     let* keeper_name = required_string ~surface "keeper_name" fields in
@@ -622,10 +617,7 @@ let pending_entry_of_yojson ~base_path ~snapshot_version json =
         when Int.equal version exact_request_context_version ->
         Ok (Some context)
       | Some _, (None | Some `Null) ->
-        (* Pre-version records contain the retired projection format. It is
-           intentionally not inspected or migrated: there is no exact causal
-           evidence to recover from a digest projection. *)
-        Ok None
+        Error (surface ^ ".request_context requires request_context_version")
       | (None | Some `Null), Some (`Int version) ->
         Error
           (Printf.sprintf
@@ -651,13 +643,8 @@ let pending_entry_of_yojson ~base_path ~snapshot_version json =
     let* continuation_channel = Keeper_continuation_channel.of_yojson continuation_json in
       let* summary_json = required_member ~surface "summary_status" fields in
       let* summary_status = summary_status_of_yojson_with_error summary_json in
-      let* exact_attempt =
-        if snapshot_version = legacy_pending_store_version
-        then Ok Exact_unbound
-        else
-          let* exact_attempt_json = required_member ~surface "exact_attempt" fields in
-          exact_attempt_state_of_yojson_with_error exact_attempt_json
-      in
+      let* exact_attempt_json = required_member ~surface "exact_attempt" fields in
+      let* exact_attempt = exact_attempt_state_of_yojson_with_error exact_attempt_json in
       let* () =
         validate_entry_exact_attempt
           ~id
@@ -723,7 +710,7 @@ let approval_decision_of_yojson json =
   | _ -> Error "gate_pending.decision must be a JSON object"
 ;;
 
-let persisted_delivery_of_yojson ~base_path ~snapshot_version json =
+let persisted_delivery_of_yojson ~base_path json =
   match json with
   | `Assoc fields ->
     let ( let* ) = Result.bind in
@@ -743,9 +730,7 @@ let persisted_delivery_of_yojson ~base_path ~snapshot_version json =
         fields
     in
     let* entry_json = required_member ~surface "entry" fields in
-      let* entry =
-        pending_entry_of_yojson ~base_path ~snapshot_version entry_json
-      in
+    let* entry = pending_entry_of_yojson ~base_path entry_json in
     let* decision_json = required_member ~surface "decision" fields in
     let* decision = approval_decision_of_yojson decision_json in
     let* source_raw = required_string ~surface "source" fields in
@@ -822,78 +807,6 @@ let parse_list ~surface parse = function
   | _ -> Error (surface ^ " must be an array")
 ;;
 
-type hard_cut_migration =
-  { source_version : int
-  ; target_version : int
-  ; removed_pending : int
-  ; removed_deliveries : int
-  }
-
-let hard_cut_removed_count migration =
-  migration.removed_pending + migration.removed_deliveries
-;;
-
-(* Retain malformed non-row values so the strict decoder still rejects the
-   snapshot. Historical object rows are retained only when their typed codec
-   proves a full exact binding; no retired state token is interpreted here. *)
-let hard_cut_pending_row_has_full_identity = function
-  | `Assoc fields ->
-    (match List.assoc_opt "exact_attempt" fields with
-     | Some exact_attempt_json ->
-       (match exact_attempt_state_of_yojson_with_error exact_attempt_json with
-        | Ok (Exact_bound _) -> true
-        | Ok Exact_unbound | Error _ -> false)
-     | None -> false)
-  | _ -> true
-;;
-
-let hard_cut_delivery_row_has_full_identity = function
-  | `Assoc fields ->
-    (match List.assoc_opt "entry" fields with
-     | Some (`Assoc _ as entry) -> hard_cut_pending_row_has_full_identity entry
-     | Some _ | None -> true)
-  | _ -> true
-;;
-
-let filter_hard_cut_rows ~has_full_identity = function
-  | `List rows ->
-    let retained, removed =
-      List.fold_left
-        (fun (retained, removed) row ->
-           if has_full_identity row
-           then row :: retained, removed
-           else retained, removed + 1)
-        ([], 0)
-        rows
-    in
-    `List (List.rev retained), removed
-  | json -> json, 0
-;;
-
-let hard_cut_snapshot_rows ~snapshot_version ~pending_json ~delivery_json =
-  if snapshot_version = pending_store_version
-  then pending_json, delivery_json, None
-  else
-    let pending_json, removed_pending =
-      filter_hard_cut_rows
-        ~has_full_identity:hard_cut_pending_row_has_full_identity
-        pending_json
-    in
-    let delivery_json, removed_deliveries =
-      filter_hard_cut_rows
-        ~has_full_identity:hard_cut_delivery_row_has_full_identity
-        delivery_json
-    in
-    ( pending_json
-    , delivery_json
-    , Some
-        { source_version = snapshot_version
-        ; target_version = pending_store_version
-        ; removed_pending
-        ; removed_deliveries
-        } )
-;;
-
 let validate_snapshot_sequences ~next_sequence pending_entries delivery_entries =
   let sequences =
     List.map (fun (entry : pending_approval) -> entry.sequence) pending_entries
@@ -928,34 +841,33 @@ let snapshot_of_yojson ~base_path json =
         ~allowed:[ "version"; "next_sequence"; "pending"; "deliveries" ]
         fields
     in
-      let* snapshot_version =
+    let* () =
         match List.assoc_opt "version" fields with
-        | Some (`Int version)
-          when version = legacy_pending_store_version
-               || version = exact_attempt_pending_store_version
-               || version = pending_store_version ->
-          Ok version
+        | Some (`Int version) when version = pending_store_version -> Ok ()
         | Some (`Int version) ->
-          Error (Printf.sprintf "%s.version %d is unsupported" surface version)
+          Error
+            (Printf.sprintf
+               "%s.version %d is unsupported (current %d); reset runtime state \
+                before restarting MASC"
+               surface
+               version
+               pending_store_version)
       | Some _ -> Error (surface ^ ".version must be an integer")
       | None -> Error (surface ^ ".version is required")
     in
     let* next_sequence = required_positive_int ~surface "next_sequence" fields in
     let* pending_json = required_member ~surface "pending" fields in
     let* delivery_json = required_member ~surface "deliveries" fields in
-    let pending_json, delivery_json, hard_cut_migration =
-      hard_cut_snapshot_rows ~snapshot_version ~pending_json ~delivery_json
-    in
-      let* pending_entries =
-        parse_list
-          ~surface:"gate_pending.pending"
-          (pending_entry_of_yojson ~base_path ~snapshot_version)
-          pending_json
+    let* pending_entries =
+      parse_list
+        ~surface:"gate_pending.pending"
+        (pending_entry_of_yojson ~base_path)
+        pending_json
     in
     let* delivery_entries =
       parse_list
           ~surface:"gate_pending.deliveries"
-          (persisted_delivery_of_yojson ~base_path ~snapshot_version)
+          (persisted_delivery_of_yojson ~base_path)
           delivery_json
     in
     let* pending_map =
@@ -978,21 +890,8 @@ let snapshot_of_yojson ~base_path json =
     let* () =
       validate_snapshot_sequences ~next_sequence pending_entries delivery_entries
     in
-      Ok
-        ( snapshot_version
-        , pending_map
-        , delivery_map
-        , next_sequence
-        , hard_cut_migration )
+    Ok (pending_map, delivery_map, next_sequence)
   | _ -> Error "gate_pending snapshot must be a JSON object"
-;;
-
-let snapshot_version_of_yojson = function
-  | `Assoc fields -> (
-    match List.assoc_opt "version" fields with
-    | Some (`Int version) -> Some version
-    | Some _ | None -> None)
-  | _ -> None
 ;;
 
 let quarantine_restarted_entry (entry : pending_approval) =
@@ -1036,53 +935,11 @@ let quarantine_restarted_deliveries map =
     (false, SMap.empty)
 ;;
 
-let quarantine_path ~path ~version =
-  let base = Printf.sprintf "%s.v%d.quarantine" path version in
-  let rec find_free k =
-    let candidate =
-      if k = 0 then base else Printf.sprintf "%s.%d" base k
-    in
-    if Sys.file_exists candidate then find_free (k + 1) else candidate
-  in
-  find_free 0
-;;
-
-(* An unsupported snapshot version is a generational boundary, not
-   corruption: the durable file is preserved verbatim at a visible
-   quarantine path and the store starts a fresh generation. Only a rename
-   failure keeps the old fail-closed behavior — starting fresh while the
-   old file is still in place would let the next [put] overwrite the very
-   evidence the quarantine exists to preserve. *)
-let quarantine_snapshot_unlocked ~path ~version =
-  let target = quarantine_path ~path ~version in
-  try
-    Sys.rename path target;
-    Log.Server.error
-      "gate_pending snapshot version %d is unsupported (current %d); \
-       quarantined to %s and starting a fresh store generation"
-      version pending_store_version target;
-    Ok (SMap.empty, SMap.empty, first_sequence)
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    let reason =
-      Printf.sprintf
-        "gate_pending snapshot version %d is unsupported and quarantine \
-         rename to %s failed: %s"
-        version target (Printexc.to_string exn)
-    in
-    report_pending_read_drop
-      ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
-      ~path
-      ~detail:reason;
-    Error { path; reason }
-;;
-
 let load_snapshot_unlocked ~base_path =
   let path = pending_store_path ~base_path in
   try
     if not (Sys.file_exists path)
-    then Ok (SMap.empty, SMap.empty, first_sequence, None)
+    then Ok (SMap.empty, SMap.empty, first_sequence)
     else (
       match Safe_ops.read_json_file_safe path with
       | Error reason ->
@@ -1092,81 +949,36 @@ let load_snapshot_unlocked ~base_path =
           ~detail:reason;
         Error { path; reason }
       | Ok json ->
-        (match snapshot_version_of_yojson json with
-           | Some version
-             when version <> legacy_pending_store_version
-                  && version <> exact_attempt_pending_store_version
-                  && version <> pending_store_version ->
-             (match quarantine_snapshot_unlocked ~path ~version with
+        (match snapshot_of_yojson ~base_path json with
+         | Ok (loaded_pending, loaded_deliveries, loaded_next_sequence) ->
+           let pending_changed, loaded_pending =
+             quarantine_restarted_pending loaded_pending
+           in
+           let deliveries_changed, loaded_deliveries =
+             quarantine_restarted_deliveries loaded_deliveries
+           in
+           if pending_changed || deliveries_changed
+           then
+             (match
+                save_snapshot_file_unlocked
+                  ~base_path
+                  ~next_sequence:loaded_next_sequence
+                  ~pending_map:loaded_pending
+                  ~delivery_map:loaded_deliveries
+              with
               | Error _ as error -> error
-              | Ok (pending_map, delivery_map, next_sequence) ->
-                Ok (pending_map, delivery_map, next_sequence, None))
-           | Some _ | None ->
-             (match snapshot_of_yojson ~base_path json with
-              | Ok
-                  ( snapshot_version
-                  , loaded_pending
-                  , loaded_deliveries
-                  , loaded_next_sequence
-                  , hard_cut_migration ) ->
-                let pending_changed, loaded_pending =
-                  quarantine_restarted_pending loaded_pending
-                in
-                let deliveries_changed, loaded_deliveries =
-                  quarantine_restarted_deliveries loaded_deliveries
-                in
-                if
-                  snapshot_version <> pending_store_version
-                  || pending_changed
-                  || deliveries_changed
-                then
-                  (match
-                     save_snapshot_file_unlocked
-                       ~base_path
-                       ~next_sequence:loaded_next_sequence
-                       ~pending_map:loaded_pending
-                       ~delivery_map:loaded_deliveries
-                   with
-                   | Error _ as error -> error
-                   | Ok () ->
-                     Log.Server.warn
-                       "gate_pending hard-cut migrated workspace=%s \
-                        version=%d->%d removed_pending=%d \
-                        removed_deliveries=%d removed_count=%d \
-                        restart_quarantine=%b"
-                       base_path
-                       snapshot_version
-                       pending_store_version
-                       (Option.fold
-                          ~none:0
-                          ~some:(fun migration -> migration.removed_pending)
-                          hard_cut_migration)
-                       (Option.fold
-                          ~none:0
-                          ~some:(fun migration -> migration.removed_deliveries)
-                          hard_cut_migration)
-                       (Option.fold
-                          ~none:0
-                          ~some:hard_cut_removed_count
-                          hard_cut_migration)
-                       (pending_changed || deliveries_changed);
-                     Ok
-                       ( loaded_pending
-                       , loaded_deliveries
-                       , loaded_next_sequence
-                       , hard_cut_migration ))
-                else
-                  Ok
-                    ( loaded_pending
-                    , loaded_deliveries
-                    , loaded_next_sequence
-                    , hard_cut_migration )
-              | Error reason ->
-              report_pending_read_drop
-                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-                ~path
-                ~detail:reason;
-              Error { path; reason })))
+              | Ok () ->
+                Log.Server.warn
+                  "gate_pending restart quarantine workspace=%s"
+                  base_path;
+                Ok (loaded_pending, loaded_deliveries, loaded_next_sequence))
+           else Ok (loaded_pending, loaded_deliveries, loaded_next_sequence)
+         | Error reason ->
+           report_pending_read_drop
+             ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+             ~path
+             ~detail:reason;
+           Error { path; reason }))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -1270,7 +1082,6 @@ let read_recent_audit_raw store limit =
 let approval_audit_pending_event = "pending"
 let approval_audit_resolved_event = "resolved"
 let approval_audit_summary_event = "summary_updated"
-let approval_audit_hard_cut_event = "legacy_exact_attempt_hard_cut_tombstone"
 let approval_sse_pending_event = "approval:pending"
 let approval_sse_resolved_event = "approval:resolved"
 let approval_sse_summary_event = "approval:summary_updated"
@@ -1343,23 +1154,6 @@ let get_audit_store ~base_path () =
   | exn -> report_failure exn
 ;;
 
-let append_approval_audit_json
-      ~store
-      ~keeper_name
-      ~site
-      ~id
-      ~event_type
-      json
-  =
-  Cross_context_mutex.with_durable_lock audit_io_mutex (fun () ->
-    try
-      Fs_compat.append_jsonl (audit_today_path (Dated_jsonl.base_dir store)) json;
-      invalidate_recent_audit_cache_for_store store
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn -> record_queue_failure ~keeper_name ~site ~id ~event_type exn)
-;;
-
 let audit_approval_event
       ~base_path
       ~event_type
@@ -1419,44 +1213,13 @@ let audit_approval_event
             | None -> [])
          )
     in
-    append_approval_audit_json
-      ~store
-      ~keeper_name
-      ~site:"audit_append"
-      ~id
-      ~event_type
-      json
-;;
-
-let audit_hard_cut_migration ~base_path migration =
-  match get_audit_store ~base_path () with
-  | None -> ()
-  | Some store ->
-    let id = "gate_pending" in
-    let keeper_name = "aggregate" in
-    let event_type = approval_audit_hard_cut_event in
-    let json =
-      `Assoc
-        [ "ts", `Float (Unix.gettimeofday ())
-        ; "event", `String event_type
-        ; "id", `String id
-        ; "keeper", `String keeper_name
-        ; "tool", `String "approval_queue_migration"
-        ; "source_version", `Int migration.source_version
-        ; "target_version", `Int migration.target_version
-        ; "removed_pending", `Int migration.removed_pending
-        ; "removed_deliveries", `Int migration.removed_deliveries
-        ; "removed_count", `Int (hard_cut_removed_count migration)
-        ; "reason", `String "missing_full_exact_attempt_identity"
-        ]
-    in
-    append_approval_audit_json
-      ~store
-      ~keeper_name
-      ~site:"audit_hard_cut_tombstone"
-      ~id
-      ~event_type
-      json
+    Cross_context_mutex.with_durable_lock audit_io_mutex (fun () ->
+      try
+        Fs_compat.append_jsonl (audit_today_path (Dated_jsonl.base_dir store)) json;
+        invalidate_recent_audit_cache_for_store store
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn -> record_queue_failure ~keeper_name ~site:"audit_append" ~id ~event_type exn)
 ;;
 
 let audit_rule_event ~base_path ~event_type (rule : approval_rule) =
@@ -3174,11 +2937,7 @@ let install_persistence_internal ~after_load ~base_path =
       | Error storage_error ->
         mark_store_unavailable_unlocked ~base_path storage_error;
         Error storage_error
-      | Ok
-          ( loaded_pending
-          , loaded_deliveries
-          , loaded_next_sequence
-          , hard_cut_migration ) ->
+      | Ok (loaded_pending, loaded_deliveries, loaded_next_sequence) ->
         let current_pending =
           remove_base_entries ~base_path (Atomic.get pending) Fun.id
         in
@@ -3238,13 +2997,11 @@ let install_persistence_internal ~after_load ~base_path =
                 , SMap.bindings loaded_deliveries
                   |> List.map snd
                   |> List.sort (fun left right ->
-                    compare_pending_order left.entry right.entry)
-                , hard_cut_migration ))))
+                    compare_pending_order left.entry right.entry) ))))
   in
   match installed with
   | Error storage_error -> Error (Install_storage_failed storage_error)
-  | Ok (loaded_pending, loaded_deliveries, hard_cut_migration) ->
-    Option.iter (audit_hard_cut_migration ~base_path) hard_cut_migration;
+  | Ok (loaded_pending, loaded_deliveries) ->
     let rec replay count failures = function
       | [] ->
         Ok

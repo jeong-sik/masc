@@ -1435,8 +1435,10 @@ let test_post_success_terminalization_is_affine () =
      | Ok (Some _) -> Alcotest.fail "settlement retained active lease"
      | Error detail -> Alcotest.failf "settled lease reload failed: %s" detail);
     let state =
-      P.load_state_result ~base_path ~keeper_name
-      |> require_ok "reload canonical terminal state"
+      match P.load_state_result ~base_path ~keeper_name with
+      | Ok state -> state
+      | Error detail ->
+        Alcotest.failf "reload canonical terminal state failed: %s" detail
     in
     Alcotest.(check int)
       "reloaded state has no lease"

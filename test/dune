@@ -2515,8 +2515,6 @@
 
 (include stanzas/test_keeper_wire_capture_suppression.inc)
 
-(include stanzas/test_keeper_meta_canonicalize.inc)
-
 (include stanzas/test_keeper_meta_json_config_toml_only.inc)
 
 (include stanzas/test_keeper_compact_recovery_tool_surface.inc)

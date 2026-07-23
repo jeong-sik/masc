@@ -781,7 +781,6 @@ let initialize_owner_state_blocking
   Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
   bootstrap_server_state_blocking state;
   startup_recover_keeper_lifecycle_transactions state;
-  startup_migrate_retired_keeper_meta_keys state;
   sync_admin_token_env state;
   sync_internal_keeper_token_env state;
   sync_bootable_keeper_credentials state;

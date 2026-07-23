@@ -116,9 +116,64 @@ let test_removed_goal_is_rejected_before_parse () =
       Fs_compat.save_file
         path
         {|{"name":"config-key","agent_name":"config-key","trace_id":"trace-config-key","goal":"legacy profile goal"}|};
+      let bytes_before = Fs_compat.load_file path in
       (match Keeper_meta_store.read_meta_file_path path with
-       | Error _ -> ()
-       | Ok _ -> Alcotest.fail "removed goal must fail closed"))
+       | Error err ->
+         Alcotest.(check string)
+           "error identifies goal and gives exact reset remediation"
+           (Printf.sprintf
+              "keeper meta schema is incompatible at %s (unknown keys: goal); runtime reset required"
+              path)
+           err
+       | Ok _ -> Alcotest.fail "removed goal must fail closed");
+      Alcotest.(check string)
+        "rejected metadata remains byte-for-byte unchanged"
+        bytes_before
+        (Fs_compat.load_file path))
+
+let test_retired_keeper_name_is_rejected_before_parse () =
+  let path = Filename.temp_file "masc-retired-identity-key-" ".json" in
+  Fun.protect
+    ~finally:(fun () ->
+      if Sys.file_exists path then Sys.remove path)
+    (fun () ->
+      Fs_compat.save_file
+        path
+        {|{"name":"canonical","keeper_name":"retired","agent_name":"canonical","trace_id":"trace-canonical"}|};
+      let bytes_before = Fs_compat.load_file path in
+      (match Keeper_meta_store.read_meta_file_path path with
+       | Error err ->
+         Alcotest.(check string)
+           "retired parser alias is rejected with exact reset remediation"
+           (Printf.sprintf
+              "keeper meta schema is incompatible at %s (unknown keys: keeper_name); runtime reset required"
+              path)
+           err
+       | Ok _ -> Alcotest.fail "retired keeper_name must fail closed");
+      Alcotest.(check string)
+        "rejected retired identity metadata remains byte-for-byte unchanged"
+        bytes_before
+        (Fs_compat.load_file path))
+
+let test_unknown_keys_pure_contract () =
+  Alcotest.(check (list string))
+    "canonical object has no unknown keys"
+    []
+    (Keeper_meta_json.unknown_keeper_meta_keys (canonical_only_meta_json ()));
+  Alcotest.(check (list string))
+    "unknown keys preserve first-seen order"
+    [ "goal"; "future_runtime_field" ]
+    (Keeper_meta_json.unknown_keeper_meta_keys
+       (`Assoc
+         [ ("name", `String "x")
+         ; ("goal", `String "removed")
+         ; ("future_runtime_field", `Bool true)
+         ; ("goal", `String "duplicate")
+         ]));
+  Alcotest.(check (list string))
+    "non-object JSON has no top-level unknown keys"
+    []
+    (Keeper_meta_json.unknown_keeper_meta_keys (`List []))
 
 let () =
   Alcotest.run
@@ -144,6 +199,14 @@ let () =
             "removed goal is rejected before parse"
             `Quick
             test_removed_goal_is_rejected_before_parse
+        ; Alcotest.test_case
+            "retired keeper_name is rejected before parse"
+            `Quick
+            test_retired_keeper_name_is_rejected_before_parse
+        ; Alcotest.test_case
+            "unknown key classifier preserves pure contract"
+            `Quick
+            test_unknown_keys_pure_contract
         ] )
     ]
 ;;

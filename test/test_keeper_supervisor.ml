@@ -608,6 +608,51 @@ let test_declarative_boot_allows_empty_goal_links () =
       check bool "no boot failure recorded" true
         (Option.is_none (KR.boot_meta_failure_for ~base_path:config.base_path ~name)))
 
+let test_declarative_boot_does_not_materialize_incompatible_meta () =
+  with_config_dir @@ fun config_dir ->
+  Eio_main.run @@ fun env ->
+  ensure_test_runtime ();
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = Filename.dirname config_dir in
+  let name = "incompatible-meta" in
+  write_keeper_toml config_dir ~name;
+  Eio.Switch.on_release sw (fun () ->
+      Reg.For_testing.clear ();
+      KR.reset_test_state base_dir);
+  let config = Masc.Workspace.default_config base_dir in
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+  let ctx = keeper_runtime_context env sw config in
+  let meta_path = Keeper_types_profile.keeper_meta_path config name in
+  (match Keeper_meta_store.write_meta config (make_meta name) with
+   | Ok () -> ()
+   | Error err -> fail err);
+  let incompatible_json =
+    match Yojson.Safe.from_file meta_path with
+    | `Assoc fields -> `Assoc (fields @ [ "goal", `String "removed" ])
+    | _ -> fail "keeper meta fixture must be a JSON object"
+  in
+  Fs_compat.save_file meta_path (Yojson.Safe.to_string incompatible_json);
+  let bytes_before = Fs_compat.load_file meta_path in
+  let original_error =
+    match Keeper_meta_store.read_meta config name with
+    | Error err -> err
+    | Ok _ -> fail "incompatible meta must fail before declarative startup"
+  in
+  (match KR.load_or_materialize_boot_meta ctx name with
+   | Error err ->
+     check string "startup propagates the original read error unchanged"
+       original_error err
+   | Ok _ -> fail "incompatible meta must not enter TOML materialization");
+  check string "startup leaves incompatible meta byte-for-byte unchanged"
+    bytes_before
+    (Fs_compat.load_file meta_path);
+  match KR.boot_meta_failure_for ~base_path:config.base_path ~name with
+  | None -> fail "expected incompatible meta boot failure to be recorded"
+  | Some failure ->
+    check string "typed startup cause remains meta_read_error" "meta_read_error"
+      (KR.boot_meta_failure_cause_label failure.cause)
+
 let test_declarative_boot_records_typed_invalid_config_failure () =
   with_config_dir @@ fun config_dir ->
   Eio_main.run @@ fun env ->
@@ -1919,6 +1964,8 @@ let () =
         test_declarative_boot_materializes_instructions;
       test_case "declarative boot allows empty goal links" `Quick
         test_declarative_boot_allows_empty_goal_links;
+      test_case "declarative boot rejects incompatible persisted meta" `Quick
+        test_declarative_boot_does_not_materialize_incompatible_meta;
       test_case "declarative boot records typed invalid-config failure" `Quick
         test_declarative_boot_records_typed_invalid_config_failure;
       test_case "reconcile materializes configured keeper without meta" `Quick

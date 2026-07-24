@@ -188,7 +188,6 @@ let requested_messages_with_plan
   =
   match Keeper_compaction_unit.partition ~quarantine:true messages with
   | Error error -> Error (Invalid_structure error)
-  | Ok { closed_prefix = []; _ } -> Error No_eligible_history
   | Ok { closed_prefix = units; protected_suffix } ->
     (* Persistence-gate precondition, checked BEFORE the summarizer runs.
 
@@ -237,7 +236,9 @@ let requested_messages_with_plan
     (match Keeper_compaction_unit.validate messages with
      | Error error -> Error (Invalid_structure error)
      | Ok () ->
-    if not (Keeper_compaction_llm_summarizer.has_eligible_units units)
+    if units = []
+    then Error No_eligible_history
+    else if not (Keeper_compaction_llm_summarizer.has_eligible_units units)
     then Error No_eligible_history
     else
       (match plan_for_units ~units with

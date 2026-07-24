@@ -727,13 +727,9 @@ function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPres
   const lowRunningFiberMargin = asBoolean(raw.low_running_fiber_margin)
   const reactionCapacityBelowTarget = asBoolean(raw.reaction_capacity_below_target)
   const reactionCapacityShortfallCount = asNumber(raw.reaction_capacity_shortfall_count)
-  const executableReactionCapacityBelowTarget = asBoolean(raw.executable_reaction_capacity_below_target)
-  const executableReactionCapacityShortfallCount = asNumber(raw.executable_reaction_capacity_shortfall_count)
   const pausedKeeperCount = asNumber(raw.paused_keeper_count)
   const autobootEnabledKeeperCount = asNumber(raw.autoboot_enabled_keeper_count)
   const pausedAutobootEnabledKeeperCount = asNumber(raw.paused_autoboot_enabled_keeper_count)
-  const effectiveReactionCapacityCount = asNumber(raw.effective_reaction_capacity_count)
-  const executableReactionCapacityCount = asNumber(raw.executable_reaction_capacity_count)
   const targetReactionCapacityCount = asNumber(raw.target_reaction_capacity_count)
   const operatorActionRequired = asBoolean(raw.operator_action_required)
   if (
@@ -753,13 +749,9 @@ function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPres
     && lowRunningFiberMargin == null
     && reactionCapacityBelowTarget == null
     && reactionCapacityShortfallCount == null
-    && executableReactionCapacityBelowTarget == null
-    && executableReactionCapacityShortfallCount == null
     && pausedKeeperCount == null
     && autobootEnabledKeeperCount == null
     && pausedAutobootEnabledKeeperCount == null
-    && effectiveReactionCapacityCount == null
-    && executableReactionCapacityCount == null
     && targetReactionCapacityCount == null
     && operatorActionRequired == null
   ) {
@@ -782,13 +774,9 @@ function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPres
     low_running_fiber_margin: lowRunningFiberMargin ?? null,
     reaction_capacity_below_target: reactionCapacityBelowTarget ?? null,
     reaction_capacity_shortfall_count: reactionCapacityShortfallCount ?? null,
-    executable_reaction_capacity_below_target: executableReactionCapacityBelowTarget ?? null,
-    executable_reaction_capacity_shortfall_count: executableReactionCapacityShortfallCount ?? null,
     paused_keeper_count: pausedKeeperCount ?? null,
     autoboot_enabled_keeper_count: autobootEnabledKeeperCount ?? null,
     paused_autoboot_enabled_keeper_count: pausedAutobootEnabledKeeperCount ?? null,
-    effective_reaction_capacity_count: effectiveReactionCapacityCount ?? null,
-    executable_reaction_capacity_count: executableReactionCapacityCount ?? null,
     target_reaction_capacity_count: targetReactionCapacityCount ?? null,
     operator_action_required: operatorActionRequired ?? null,
   }

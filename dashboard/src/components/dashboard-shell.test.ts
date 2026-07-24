@@ -403,7 +403,7 @@ describe('dashboardHealthChips', () => {
     expect(chip?.detail).toContain('keeper_fibers=1')
   })
 
-  it('surfaces a P0 blocked fleet when health reports zero running keeper fibers', () => {
+  it('surfaces a P0 blocked fleet when health reports zero executable keeper fibers', () => {
     const chips = dashboardHealthChips({
       connected: true,
       counts: { keepers: 14, configured_keepers: 14 },
@@ -418,7 +418,7 @@ describe('dashboardHealthChips', () => {
           keeper_fleet_safety: {
             status: 'blocked',
             reason: null,
-            blocker: 'no_running_fibers',
+            blocker: 'no_executable_keeper_fibers',
             blocked_keepers: 14,
             blocked_count: 14,
             bootable_keeper_count: 1,
@@ -432,13 +432,9 @@ describe('dashboardHealthChips', () => {
             low_running_fiber_margin: false,
             reaction_capacity_below_target: true,
             reaction_capacity_shortfall_count: 14,
-            executable_reaction_capacity_below_target: true,
-            executable_reaction_capacity_shortfall_count: 14,
             paused_keeper_count: 13,
             autoboot_enabled_keeper_count: 14,
             paused_autoboot_enabled_keeper_count: 13,
-            effective_reaction_capacity_count: 0,
-            executable_reaction_capacity_count: 0,
             target_reaction_capacity_count: 14,
             operator_action_required: true,
           },
@@ -489,13 +485,9 @@ describe('dashboardHealthChips', () => {
             low_running_fiber_margin: true,
             reaction_capacity_below_target: true,
             reaction_capacity_shortfall_count: 3,
-            executable_reaction_capacity_below_target: true,
-            executable_reaction_capacity_shortfall_count: 3,
             paused_keeper_count: 3,
             autoboot_enabled_keeper_count: 3,
             paused_autoboot_enabled_keeper_count: 3,
-            effective_reaction_capacity_count: 0,
-            executable_reaction_capacity_count: 0,
             target_reaction_capacity_count: 3,
             operator_action_required: true,
           },
@@ -544,13 +536,9 @@ describe('dashboardHealthChips', () => {
             low_running_fiber_margin: true,
             reaction_capacity_below_target: true,
             reaction_capacity_shortfall_count: 14,
-            executable_reaction_capacity_below_target: true,
-            executable_reaction_capacity_shortfall_count: 14,
             paused_keeper_count: 14,
             autoboot_enabled_keeper_count: 14,
             paused_autoboot_enabled_keeper_count: 13,
-            effective_reaction_capacity_count: 0,
-            executable_reaction_capacity_count: 0,
             target_reaction_capacity_count: 14,
             operator_action_required: true,
           },
@@ -569,7 +557,7 @@ describe('dashboardHealthChips', () => {
     expect(chip?.detail).toContain('resume selected paused keepers')
   })
 
-  it('surfaces fleet capacity degradation when running fibers are below target', () => {
+  it('surfaces fleet capacity degradation when executable fibers are below target', () => {
     const chips = dashboardHealthChips({
       connected: true,
       counts: { keepers: 13, configured_keepers: 13 },
@@ -597,14 +585,10 @@ describe('dashboardHealthChips', () => {
             no_executable_keeper_fibers: false,
             low_running_fiber_margin: false,
             reaction_capacity_below_target: true,
-            reaction_capacity_shortfall_count: 10,
-            executable_reaction_capacity_below_target: true,
-            executable_reaction_capacity_shortfall_count: 2,
+            reaction_capacity_shortfall_count: 2,
             paused_keeper_count: 2,
             autoboot_enabled_keeper_count: 13,
             paused_autoboot_enabled_keeper_count: 2,
-            effective_reaction_capacity_count: 3,
-            executable_reaction_capacity_count: 11,
             target_reaction_capacity_count: 13,
             operator_action_required: true,
           },
@@ -624,7 +608,7 @@ describe('dashboardHealthChips', () => {
     expect(chip?.detail).toContain('executable_keeper_fiber_count=11')
     expect(chip?.detail).toContain('failing_keeper_fiber_count=8')
     expect(chip?.detail).toContain('target_reaction_capacity_count=13')
-    expect(chip?.detail).toContain('reaction_capacity_shortfall_count=10')
+    expect(chip?.detail).toContain('reaction_capacity_shortfall_count=2')
     expect(chip?.detail).toContain('blocker=reaction_capacity_below_target')
   })
 
@@ -657,13 +641,9 @@ describe('dashboardHealthChips', () => {
             low_running_fiber_margin: false,
             reaction_capacity_below_target: true,
             reaction_capacity_shortfall_count: 16,
-            executable_reaction_capacity_below_target: true,
-            executable_reaction_capacity_shortfall_count: 16,
             paused_keeper_count: 0,
             autoboot_enabled_keeper_count: 24,
             paused_autoboot_enabled_keeper_count: 0,
-            effective_reaction_capacity_count: 8,
-            executable_reaction_capacity_count: 8,
             target_reaction_capacity_count: 24,
             operator_action_required: true,
           },
@@ -681,7 +661,7 @@ describe('dashboardHealthChips', () => {
     expect(chip?.detail).not.toContain('FD pressure')
   })
 
-  it('does not infer executable truth from running or reaction capacity', () => {
+  it('does not infer executable truth from running capacity', () => {
     for (const executableValue of [undefined, '4'] as const) {
       const fleet = {
         status: 'degraded',
@@ -691,7 +671,6 @@ describe('dashboardHealthChips', () => {
         blocked_count: 2,
         running_keeper_fiber_count: 4,
         healthy_running_keeper_fiber_count: 4,
-        executable_reaction_capacity_count: 4,
         target_reaction_capacity_count: 6,
         reaction_capacity_below_target: true,
         reaction_capacity_shortfall_count: 2,

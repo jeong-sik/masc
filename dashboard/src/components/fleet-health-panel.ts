@@ -238,9 +238,8 @@ function FleetCommandStrip() {
   const fleetSafety = runtime?.fleet_safety ?? null
   const fleet = fleetSafety?.keeper_fleet_safety
   const pausedHealth = fleetSafety?.paused_keepers_health
-  const effective = fleet?.effective_reaction_capacity_count ?? fleet?.running_keeper_fiber_count ?? fleetSafety?.keeper_fibers
-  const executable = fleet?.executable_reaction_capacity_count ?? fleet?.executable_keeper_fiber_count
-  const target = fleet?.target_reaction_capacity_count ?? fleet?.autoboot_enabled_keeper_count
+  const executable = fleet?.executable_keeper_fiber_count
+  const target = fleet?.target_reaction_capacity_count
   const shortfall = fleet?.reaction_capacity_shortfall_count
   const pausedCount = pausedHealth?.count ?? fleet?.paused_keeper_count ?? fleetSafety?.paused_keepers
   const tone = fleet?.status === 'blocked'
@@ -261,9 +260,8 @@ function FleetCommandStrip() {
         <div class="fl-health" aria-label="Fleet health">
           <span class=${`fl-hpill ${tone}`}>${runtimeLabel}</span>
           <span class=${`fl-hpill ${shortfall && shortfall > 0 ? 'warn' : 'ok'}`}>
-            capacity ${countText(effective)}/${countText(target)}
+            capacity ${countText(executable)}/${countText(target)}
           </span>
-          <span class="fl-hpill">exec ${countText(executable)}</span>
           <span class=${`fl-hpill ${pausedCount && pausedCount > 0 ? 'warn' : 'ok'}`}>
             일시정지 ${countText(pausedCount)}
           </span>
@@ -363,9 +361,8 @@ function RuntimeBlockerBoard() {
   const fleetSafety = runtime?.fleet_safety ?? null
   const fleet = fleetSafety?.keeper_fleet_safety
   const pausedHealth = fleetSafety?.paused_keepers_health
-  const effective = fleet?.effective_reaction_capacity_count ?? fleet?.running_keeper_fiber_count ?? fleetSafety?.keeper_fibers
-  const executable = fleet?.executable_reaction_capacity_count ?? fleet?.executable_keeper_fiber_count
-  const target = fleet?.target_reaction_capacity_count ?? fleet?.autoboot_enabled_keeper_count
+  const executable = fleet?.executable_keeper_fiber_count
+  const target = fleet?.target_reaction_capacity_count
   const shortfall = fleet?.reaction_capacity_shortfall_count
   const pausedCount = pausedHealth?.count ?? fleet?.paused_keeper_count ?? fleetSafety?.paused_keepers
   const pausedNames = pausedHealth?.names ?? []
@@ -380,9 +377,9 @@ function RuntimeBlockerBoard() {
       <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <${StatTile}
           label="Reaction capacity"
-          value=${`${countText(effective)}/${countText(target)}`}
+          value=${`${countText(executable)}/${countText(target)}`}
           status=${capacityStatus}
-          delta=${{ direction: capacityStatus === 'ok' ? 'up' : 'down', text: `exec ${countText(executable)} · short ${countText(shortfall)}` }}
+          delta=${{ direction: capacityStatus === 'ok' ? 'up' : 'down', text: `short ${countText(shortfall)}` }}
         />
         <${StatTile}
           label="Paused keepers"

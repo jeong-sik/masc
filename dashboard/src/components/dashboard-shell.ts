@@ -260,8 +260,8 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
   const paused = fleetSafety.paused_keepers ?? 0
   const fleet = fleetSafety.keeper_fleet_safety
   const fleetStatus = fleet?.status
-  const runningFibers = fleet?.running_keeper_fiber_count ?? fibers
-  const healthyRunningFibers = fleet?.healthy_running_keeper_fiber_count ?? runningFibers
+  const runningFibers = fleet?.running_keeper_fiber_count ?? null
+  const healthyRunningFibers = fleet?.healthy_running_keeper_fiber_count ?? null
   const failingFibers = fleet?.failing_keeper_fiber_count ?? null
   const executableValue = fleet?.executable_keeper_fiber_count
   const executableFibers =
@@ -272,12 +272,9 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
       : null
   const pausedKeepers = fleet?.paused_keeper_count ?? paused
   const pausedAutobootKeepers = fleet?.paused_autoboot_enabled_keeper_count ?? null
-  const targetCapacity = fleet?.target_reaction_capacity_count ?? fleet?.autoboot_enabled_keeper_count ?? null
+  const targetCapacity = fleet?.target_reaction_capacity_count ?? null
   const bootableKeepers = fleet?.bootable_keeper_count ?? null
   const minimumRunning = fleet?.minimum_running_fibers ?? null
-  const noFibers = fleet?.no_running_fibers ?? fleetSafety.keeper_fleet_no_fibers
-  const requiresAction = fleet?.operator_action_required === true
-  const capacityBelowTarget = fleet?.reaction_capacity_below_target === true
   const capacityShortfall = fleet?.reaction_capacity_shortfall_count ?? null
   const pausedOnlyNoExecutable =
     executableFibers === 0
@@ -302,7 +299,7 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
       tone: 'warn',
     }
   }
-  if (fleetStatus === 'blocked' || (requiresAction && (runningFibers === 0 || noFibers === true))) {
+  if (fleetStatus === 'blocked') {
     const capacityDetail = [
       `status=${fleetStatus ?? 'blocked'}`,
       `running_keeper_fiber_count=${runningFibers ?? 0}`,
@@ -322,7 +319,7 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
       tone: 'bad',
     }
   }
-  if (fleetStatus === 'degraded' || (requiresAction && capacityBelowTarget)) {
+  if (fleetStatus === 'degraded') {
     const capacityDetail = [
       `status=${fleetStatus ?? 'degraded'}`,
       `healthy_running_keeper_fiber_count=${healthyRunningFibers ?? 0}`,
@@ -341,7 +338,11 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
       tone: 'warn',
     }
   }
-  if (fleetSafety.keeper_fleet_no_fibers === true || (fibers != null && fibers <= 1 && paused > 0)) {
+  if (
+    !fleet
+    && (fleetSafety.keeper_fleet_no_fibers === true
+      || (fibers != null && fibers <= 1 && paused > 0))
+  ) {
     return {
       key: 'fleet-liveness-risk',
       label: 'Fleet liveness risk',

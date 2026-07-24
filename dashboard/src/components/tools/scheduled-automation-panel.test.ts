@@ -457,9 +457,15 @@ describe('ScheduledAutomationPanel', () => {
           queue: 'keeper_event_queue',
           stimulus: 'schedule_due',
           stimulus_id: 'stimulus:keeper-wake-digest',
+          reaction_ledger_status: null,
+          reaction_ledger_error: null,
           keeper_name: 'schedule-keeper',
           schedule_id: 'sched-keeper-wake',
           urgency: 'immediate',
+          occurrence_status: 'awaiting_ack',
+          activation_status: 'deferred',
+          activation_reason: 'owner_unknown',
+          activation_detail: 'owner metadata unavailable',
           post_id: 'schedule-due:sched-keeper-wake',
         },
         keeper_queue_evidence: {
@@ -511,6 +517,10 @@ describe('ScheduledAutomationPanel', () => {
     expect(container.querySelector('[data-dispatch-receipt-row="stimulus"]')?.textContent).toContain('schedule_due')
     expect(container.querySelector('[data-dispatch-receipt-row="stimulus_id"]')?.textContent).toContain('stimulus:keeper-wake-digest')
     expect(container.querySelector('[data-dispatch-receipt-row="keeper"]')?.textContent).toContain('schedule-keeper')
+    expect(container.querySelector('[data-dispatch-receipt-row="occurrence_status"]')?.textContent).toContain('awaiting_ack')
+    expect(container.querySelector('[data-dispatch-receipt-row="activation_status"]')?.textContent).toContain('deferred')
+    expect(container.querySelector('[data-dispatch-receipt-row="activation_reason"]')?.textContent).toContain('owner_unknown')
+    expect(container.querySelector('[data-dispatch-receipt-row="activation_detail"]')?.textContent).toContain('owner metadata unavailable')
     expect(container.querySelector('[data-dispatch-receipt-row="post_id"]')?.textContent).toContain('schedule-due:sched-keeper-wake')
     const queueEvidence = container.querySelector('[data-schedule-keeper-queue-evidence="matched_pending"]')
     expect(queueEvidence).not.toBeNull()
@@ -664,6 +674,47 @@ describe('ScheduledAutomationPanel', () => {
     expect(ackReactionEvidence?.textContent).toContain('event_queue_ack_seen')
     expect(ackReactionEvidence?.textContent).toContain('true')
     expect(ackReactionEvidence?.textContent).toContain('event_queue_ack_recorded_at')
+  })
+
+  it.each([
+    ['owner_unknown', 'owner metadata unavailable'],
+    ['shutdown_fenced', 'shutdown-operation-id'],
+    ['not_running', 'Failing'],
+  ] as const)('renders canonical deferred activation reason %s', (activationReason, activationDetail) => {
+    const auto = automation([
+      request({
+        schedule_id: `sched-${activationReason}`,
+        status: 'succeeded',
+        dispatch_receipt: {
+          projection_status: 'recognized',
+          kind: 'masc.keeper_wake.enqueued',
+          queue: 'keeper_event_queue',
+          stimulus: 'schedule_due',
+          stimulus_id: 'stimulus:activation-proof',
+          reaction_ledger_status: null,
+          reaction_ledger_error: null,
+          keeper_name: 'schedule-keeper',
+          schedule_id: `sched-${activationReason}`,
+          urgency: 'immediate',
+          post_id: `schedule-due:sched-${activationReason}`,
+          occurrence_status: 'awaiting_ack',
+          activation_status: 'deferred',
+          activation_reason: activationReason,
+          activation_detail: activationDetail,
+        },
+      }),
+    ])
+
+    render(html`<${ScheduledAutomationPanel} automation=${auto} />`, container)
+
+    expect(container.querySelector('[data-dispatch-receipt-row="occurrence_status"]')?.textContent)
+      .toContain('awaiting_ack')
+    expect(container.querySelector('[data-dispatch-receipt-row="activation_status"]')?.textContent)
+      .toContain('deferred')
+    expect(container.querySelector('[data-dispatch-receipt-row="activation_reason"]')?.textContent)
+      .toContain(activationReason)
+    expect(container.querySelector('[data-dispatch-receipt-row="activation_detail"]')?.textContent)
+      .toContain(activationDetail)
   })
 
   it('shows missing wake evidence explicitly for keeper wake cards', async () => {

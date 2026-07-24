@@ -1415,42 +1415,22 @@ let keeper_fleet_safety_health_json
   let low_running_fiber_margin =
     target_count > 1 && phase_counts.running < minimum_running_fibers
   in
-  (* Recovering lanes are deliberately capacity-bearing for the fleet verdict:
-     [Failing] remains executable in the FSM and is eligible for
-     heartbeat-driven recovery. Keep that policy in one value so
-     the advertised effective count and its derived shortfall cannot diverge.
-     Actual healthy execution remains available separately as
-     [healthy_running_keeper_fiber_count]. *)
-  let effective_reaction_capacity_count =
-    phase_counts.running + phase_counts.recovering
-  in
   let reaction_capacity_shortfall_count =
-    max 0 (target_count - effective_reaction_capacity_count)
+    max 0 (target_count - executable_count)
   in
   let reaction_capacity_below_target =
     target_count > 0 && reaction_capacity_shortfall_count > 0
   in
   let keeper_bootstrap_blocked =
     (not keeper_bootstrap_enabled)
-    && (no_executable_keeper_fibers
-       || no_running_fibers
-       || low_running_fiber_margin
-       || reaction_capacity_below_target)
+    && (no_executable_keeper_fibers || reaction_capacity_below_target)
   in
   let active_task_owner_is_selected_blocker =
     active_task_owner_without_executable_fiber
     && not
          (no_executable_keeper_fibers
-          || no_running_fibers
-          || low_running_fiber_margin
           || reaction_capacity_below_target
           || keeper_bootstrap_blocked)
-  in
-  let executable_reaction_capacity_shortfall_count =
-    max 0 (target_count - executable_count)
-  in
-  let executable_reaction_capacity_below_target =
-    target_count > 0 && executable_reaction_capacity_shortfall_count > 0
   in
   let paused_total_count =
     match paused_keepers_json with
@@ -1476,31 +1456,23 @@ let keeper_fleet_safety_health_json
   in
   let status =
     if no_executable_keeper_fibers then "blocked"
-    else if no_running_fibers then "degraded"
-    else if low_running_fiber_margin then "degraded"
     else if reaction_capacity_below_target then "degraded"
     else if active_task_owner_without_executable_fiber then "degraded"
     else "ok"
   in
   let blocked_keeper_names =
-    if no_executable_keeper_fibers then names_not_in executable_names
-    else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target
-    then names_not_in (running_names @ recovering_names)
+    if no_executable_keeper_fibers || reaction_capacity_below_target
+    then names_not_in executable_names
     else if active_task_owner_is_selected_blocker then active_task_owner_blocked_names
     else []
   in
   (* Counts unique blocked keeper NAMES, not capacity shortfall. This
      intentionally differs from pre-#22388 behavior, which reported
-     [executable_reaction_capacity_shortfall_count]; see the PR summary.
+     a capacity shortfall; see the PR summary.
      Consumers should read this as "number of named blockers" rather than
      missing capacity slots. *)
   let blocked_count = List.length blocked_keeper_names in
-  let active_capacity_names =
-    if no_executable_keeper_fibers then executable_names
-    else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target
-    then running_names @ recovering_names
-    else running_names
-  in
+  let active_capacity_names = executable_names in
   let bootable_set = string_set_of_list bootable_names in
   let capacity_set = string_set_of_list active_capacity_names in
   let paused_set =
@@ -1533,8 +1505,6 @@ let keeper_fleet_safety_health_json
   let blocker =
     if keeper_bootstrap_blocked then Some "keeper_bootstrap_disabled"
     else if no_executable_keeper_fibers then Some "no_executable_keeper_fibers"
-    else if no_running_fibers then Some "no_healthy_running_keeper_fibers"
-    else if low_running_fiber_margin then Some "low_running_fiber_margin"
     else if reaction_capacity_below_target then Some "reaction_capacity_below_target"
     else if active_task_owner_without_executable_fiber
     then Some "active_task_owner_without_executable_fiber"
@@ -1570,8 +1540,6 @@ let keeper_fleet_safety_health_json
     ; "executable_keeper_fiber_count", `Int executable_count
     ; ( "executable_keeper_names"
       , `List (List.map (fun name -> `String name) executable_names) )
-    ; "effective_reaction_capacity_count", `Int effective_reaction_capacity_count
-    ; "executable_reaction_capacity_count", `Int executable_count
     ; "target_reaction_capacity_count", `Int target_count
     ; "minimum_running_fibers", `Int minimum_running_fibers
     ; "no_running_fibers", `Bool no_running_fibers
@@ -1614,10 +1582,6 @@ let keeper_fleet_safety_health_json
     ; "low_running_fiber_margin", `Bool low_running_fiber_margin
     ; "reaction_capacity_below_target", `Bool reaction_capacity_below_target
     ; "reaction_capacity_shortfall_count", `Int reaction_capacity_shortfall_count
-    ; ( "executable_reaction_capacity_below_target"
-      , `Bool executable_reaction_capacity_below_target )
-    ; ( "executable_reaction_capacity_shortfall_count"
-      , `Int executable_reaction_capacity_shortfall_count )
     ; "paused_keeper_count", `Int paused_total_count
     ; "paused_autoboot_enabled_keeper_count", `Int paused_autoboot_count
     ; "blocked_keeper_count", `Int blocked_count
@@ -1633,8 +1597,6 @@ let keeper_fleet_safety_health_json
     ; ( "operator_action_required"
       , `Bool
           (no_executable_keeper_fibers
-           || no_running_fibers
-           || low_running_fiber_margin
            || reaction_capacity_below_target
            || keeper_bootstrap_blocked
            || active_task_owner_without_executable_fiber) )

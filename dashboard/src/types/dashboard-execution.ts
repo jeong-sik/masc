@@ -220,13 +220,9 @@ export interface DashboardFleetPressureHealth {
   low_running_fiber_margin?: boolean | null
   reaction_capacity_below_target?: boolean | null
   reaction_capacity_shortfall_count?: number | null
-  executable_reaction_capacity_below_target?: boolean | null
-  executable_reaction_capacity_shortfall_count?: number | null
   paused_keeper_count?: number | null
   autoboot_enabled_keeper_count?: number | null
   paused_autoboot_enabled_keeper_count?: number | null
-  effective_reaction_capacity_count?: number | null
-  executable_reaction_capacity_count?: number | null
   target_reaction_capacity_count?: number | null
   operator_action_required?: boolean | null
 }

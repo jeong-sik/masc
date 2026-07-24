@@ -2333,7 +2333,7 @@ let test_health_json_reuses_canonical_owner_execution_snapshot () =
               (owner paused.name |> member "owner_lifecycle" |> to_string))))
 ;;
 
-let test_health_json_effective_capacity_includes_recovering_lanes () =
+let test_health_json_capacity_uses_execution_snapshot () =
   let previous_state = !Server_auth.server_state in
   Fun.protect
     ~finally:(fun () -> Server_auth.server_state := previous_state)
@@ -2359,7 +2359,7 @@ let test_health_json_effective_capacity_includes_recovering_lanes () =
       in
       let execution_snapshot :
           Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot =
-        { owners = []; executable_names = target_names }
+        { owners = []; executable_names = [ "running-a" ] }
       in
       let fleet_safety =
         Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
@@ -2378,24 +2378,28 @@ let test_health_json_effective_capacity_includes_recovering_lanes () =
         3
         (fleet_safety |> member "healthy_running_keeper_fiber_count" |> to_int);
       Alcotest.(check int)
-        "effective capacity includes actively recovering lanes"
-        7
-        (fleet_safety |> member "effective_reaction_capacity_count" |> to_int);
+        "canonical capacity comes only from the execution snapshot"
+        1
+        (fleet_safety |> member "executable_keeper_fiber_count" |> to_int);
       Alcotest.(check int)
-        "effective capacity has no target shortfall"
-        0
+        "phase counts do not conceal executable shortfall"
+        6
         (fleet_safety |> member "reaction_capacity_shortfall_count" |> to_int);
       Alcotest.(check bool)
-        "capacity verdict uses the advertised effective count"
-        false
+        "capacity verdict uses executable truth"
+        true
         (fleet_safety |> member "reaction_capacity_below_target" |> to_bool);
       Alcotest.(check string)
-        "active recovery does not request a stop/pause intervention"
-        "ok"
-        (fleet_safety |> member "status" |> to_string))
+        "partial executable capacity degrades the fleet"
+        "degraded"
+        (fleet_safety |> member "status" |> to_string);
+      Alcotest.(check bool)
+        "partial executable capacity requires operator action"
+        true
+        (fleet_safety |> member "operator_action_required" |> to_bool))
 ;;
 
-let test_health_json_degrades_when_reaction_capacity_below_target () =
+let test_health_json_degrades_when_only_one_running_phase_lane_is_live () =
   with_temp_dir "health-reaction-capacity-below-target" (fun dir ->
     let config_root = make_config_root dir in
     List.iter
@@ -2452,15 +2456,35 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
         with_running_keeper_metas config
           [ paused; running_a; running_b; runtime_only ]
           (fun () ->
+            List.iter
+              (fun (meta : Keeper_meta_contract.keeper_meta) ->
+                match
+                  Keeper_registry.get
+                    ~base_path:config.Workspace.base_path
+                    meta.name
+                with
+                | None -> Alcotest.fail ("missing registered keeper " ^ meta.name)
+                | Some entry ->
+                  Keeper_registry.For_testing.unsafe_put_entry
+                    ~base_path:config.Workspace.base_path
+                    meta.name
+                    { entry with
+                      conditions = { entry.conditions with fiber_alive = false }
+                    })
+              [ running_b; runtime_only ];
             let request = Httpun.Request.create `GET "/health" in
             let json = Server_routes_http_runtime.make_health_json request in
             let open Yojson.Safe.Util in
             let paused_keepers = json |> member "paused_keepers" in
             let fleet_safety = json |> member "keeper_fleet_safety" in
-            Alcotest.(check int) "health exposes running reaction capacity" 3
-              (fleet_safety |> member "effective_reaction_capacity_count" |> to_int);
-            Alcotest.(check int) "health exposes executable reaction capacity" 3
-              (fleet_safety |> member "executable_reaction_capacity_count" |> to_int);
+            Alcotest.(check int)
+              "phase snapshot still reports three Running lanes"
+              3
+              (fleet_safety |> member "running_keeper_fiber_count" |> to_int);
+            Alcotest.(check int)
+              "canonical execution snapshot reports only one live lane"
+              1
+              (fleet_safety |> member "executable_keeper_fiber_count" |> to_int);
             Alcotest.(check (list string))
               "health excludes paused registry entries from running capacity"
               [ "capacity-running-a"; "capacity-running-b"; "runtime-only" ]
@@ -2485,21 +2509,20 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
             (fleet_safety |> member "low_running_fiber_margin" |> to_bool);
           Alcotest.(check bool) "health marks capacity below target" true
             (fleet_safety |> member "reaction_capacity_below_target" |> to_bool);
-          Alcotest.(check int) "health exposes capacity shortfall" 1
+          Alcotest.(check int) "health exposes canonical capacity shortfall" 3
             (fleet_safety |> member "reaction_capacity_shortfall_count" |> to_int);
-          Alcotest.(check int) "health exposes executable capacity shortfall" 1
-            (fleet_safety
-             |> member "executable_reaction_capacity_shortfall_count"
-             |> to_int);
-          Alcotest.(check int) "health exposes blocked keeper count" 2
+          Alcotest.(check int) "health exposes blocked keeper count" 3
             (fleet_safety |> member "blocked_count" |> to_int);
           Alcotest.(check (list string)) "health exposes blocked keeper names"
-            [ "capacity-missing"; "example" ]
+            [ "capacity-missing"; "capacity-running-b"; "example" ]
             (fleet_safety |> member "blocked_keeper_names" |> to_list
              |> List.map to_string);
           Alcotest.(check (list (pair string string)))
             "health explains blocked keeper reasons"
-            [ ("capacity-missing", "not_registered"); ("example", "not_registered") ]
+            [ ("capacity-missing", "not_registered")
+            ; ("capacity-running-b", "phase_Running")
+            ; ("example", "not_registered")
+            ]
             (fleet_safety |> member "blocked_keeper_reasons" |> to_list
              |> List.map (fun row ->
                   (row |> member "keeper" |> to_string, row |> member "reason" |> to_string)));
@@ -2578,8 +2601,8 @@ let test_health_json_blocked_count_matches_blocked_names_with_non_target_capacit
             let json = Server_routes_http_runtime.make_health_json request in
             let open Yojson.Safe.Util in
             let fleet_safety = json |> member "keeper_fleet_safety" in
-            Alcotest.(check int) "health counts all running capacity" 2
-              (fleet_safety |> member "effective_reaction_capacity_count" |> to_int);
+            Alcotest.(check int) "health counts all live executable capacity" 2
+              (fleet_safety |> member "executable_keeper_fiber_count" |> to_int);
             Alcotest.(check int) "capacity shortfall remains numeric capacity" 1
               (fleet_safety |> member "reaction_capacity_shortfall_count" |> to_int);
             Alcotest.(check (list string)) "health names blocked target keepers"
@@ -4879,12 +4902,13 @@ let () =
             `Quick
             test_health_json_reuses_canonical_owner_execution_snapshot;
           Alcotest.test_case
-            "health json effective capacity includes recovering lanes"
+            "health json capacity uses execution snapshot"
             `Quick
-            test_health_json_effective_capacity_includes_recovering_lanes;
+            test_health_json_capacity_uses_execution_snapshot;
           Alcotest.test_case
-            "health json degrades when reaction capacity is below target"
-            `Quick test_health_json_degrades_when_reaction_capacity_below_target;
+            "health json degrades when only one Running-phase lane is live"
+            `Quick
+            test_health_json_degrades_when_only_one_running_phase_lane_is_live;
           Alcotest.test_case
             "health json blocked count matches named target blockers"
             `Quick

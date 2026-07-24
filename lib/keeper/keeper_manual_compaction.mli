@@ -15,20 +15,23 @@ type operation_outcome =
   | Compacted of success
   | No_compaction of Keeper_post_turn.no_compaction
 
-type lifecycle_stage =
+type pre_install_lifecycle_stage =
   | Operator_request
   | Compaction_started
-  | Compaction_completed
 
 type failure =
-  | Lifecycle of
-      { stage : lifecycle_stage
-      ; checkpoint_applied : bool
+  | Lifecycle_before_install of
+      { stage : pre_install_lifecycle_stage
       ; error : Keeper_context_runtime.lifecycle_dispatch_error
       }
-  | Lifecycle_with_failure_dispatch of
-      { stage : lifecycle_stage
-      ; checkpoint_applied : bool
+  | Lifecycle_before_install_with_failure_dispatch of
+      { stage : pre_install_lifecycle_stage
+      ; error : Keeper_context_runtime.lifecycle_dispatch_error
+      ; failure_dispatch :
+          (unit, Keeper_context_runtime.lifecycle_dispatch_error) result
+      }
+  | Lifecycle_after_install_with_failure_dispatch of
+      { installed_ref : Keeper_checkpoint_ref.t
       ; error : Keeper_context_runtime.lifecycle_dispatch_error
       ; failure_dispatch :
           (unit, Keeper_context_runtime.lifecycle_dispatch_error) result
@@ -71,9 +74,10 @@ val run_admitted
     callback exception cannot change [operation] from [`Applied] to failure.
     A rejected completion after the checkpoint commit dispatches an
     explicit lifecycle failure cleanup before reporting the checkpoint as
-    applied; if that cleanup is also rejected, the typed failure reports
-    [checkpoint_applied = true]. This is the single sanctioned caller of that
-    admission variant. *)
+    applied; if that cleanup is also rejected, the typed post-install failure
+    preserves the exact installed checkpoint reference. Pre-install lifecycle
+    failures use separate constructors whose stages cannot represent
+    completion. *)
 
 val failure_to_string : failure -> string
 val observe_manifest : keeper_name:string -> (unit, string) result -> unit

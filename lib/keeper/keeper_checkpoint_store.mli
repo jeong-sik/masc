@@ -198,10 +198,6 @@ type checkpoint_cas_error =
        ; candidate_turn : int
        }
    | Commit_not_installed of Keeper_fs.durable_write_error
-   | Transaction_outcome_unknown of
-       { possible_installed_ref : Keeper_checkpoint_ref.t
-       ; error : File_lock_eio.durable_lock_error
-       }
 
 type checkpoint_installation_auxiliary =
   | Commit_durability_unknown of Keeper_fs.durable_write_error
@@ -210,13 +206,18 @@ type checkpoint_installation_auxiliary =
   | Post_commit_unwind_interrupted of Eio.Exn.with_bt
   | History_write_failed of Eio.Exn.with_bt
 
+type not_installed_checkpoint =
+  { cause : checkpoint_cas_error
+  ; auxiliary : checkpoint_installation_auxiliary list
+  }
+
 type installed_checkpoint =
   { installed_ref : Keeper_checkpoint_ref.t
   ; auxiliary : checkpoint_installation_auxiliary list
   }
 
 type checkpoint_installation =
-  | Not_installed of checkpoint_cas_error
+  | Not_installed of not_installed_checkpoint
   | Installed of installed_checkpoint
 
 (** Conditionally publish [candidate] only when the canonical bytes still
@@ -226,9 +227,10 @@ type checkpoint_installation =
     ref is derived from the exact compact bytes passed to the durable atomic
     JSON writer. A writer error after atomic rename is an [Installed] result
     carrying [Commit_durability_unknown], never a retryable not-installed
-    failure. This same rule applies when releasing the stable lock fails after
-    the body:
-    [Transaction_outcome_unknown] requires reconciliation rather than retry.
+    failure. Releasing the stable lock cannot replace the already-computed body
+    result: [Not_installed] retains its exact cause and [Installed] retains its
+    exact reference, with [Release_process_lock_failed] appended as auxiliary
+    evidence in either case.
     The payload-store commit is not an operation terminal fact; the Keeper
     operation journal owns that authority.
 
@@ -253,6 +255,14 @@ module For_testing : sig
 
   val save_oas_if_source_with_release_failure :
     release_failure:File_lock_eio.durable_lock_error ->
+    on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
+    session_dir:string ->
+    expected_source_ref:Keeper_checkpoint_ref.t ->
+    Agent_sdk.Checkpoint.t ->
+    checkpoint_installation
+
+  val save_oas_if_source_with_acquire_failure :
+    acquire_failure:File_lock_eio.durable_lock_error ->
     on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
     session_dir:string ->
     expected_source_ref:Keeper_checkpoint_ref.t ->

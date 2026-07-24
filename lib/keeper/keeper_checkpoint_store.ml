@@ -545,10 +545,6 @@ type checkpoint_cas_error =
        ; candidate_turn : int
        }
    | Commit_not_installed of Keeper_fs.durable_write_error
-   | Transaction_outcome_unknown of
-       { possible_installed_ref : Keeper_checkpoint_ref.t
-       ; error : File_lock_eio.durable_lock_error
-       }
 
 type checkpoint_installation_auxiliary =
   | Commit_durability_unknown of Keeper_fs.durable_write_error
@@ -557,14 +553,35 @@ type checkpoint_installation_auxiliary =
   | Post_commit_unwind_interrupted of Eio.Exn.with_bt
   | History_write_failed of Eio.Exn.with_bt
 
+type not_installed_checkpoint =
+  { cause : checkpoint_cas_error
+  ; auxiliary : checkpoint_installation_auxiliary list
+  }
+
 type installed_checkpoint =
   { installed_ref : Keeper_checkpoint_ref.t
   ; auxiliary : checkpoint_installation_auxiliary list
   }
 
 type checkpoint_installation =
-  | Not_installed of checkpoint_cas_error
+  | Not_installed of not_installed_checkpoint
   | Installed of installed_checkpoint
+
+let not_installed cause = Not_installed { cause; auxiliary = [] }
+
+let append_installation_auxiliary installation auxiliary =
+  match installation with
+  | Not_installed outcome ->
+    Not_installed
+      { outcome with
+        auxiliary = outcome.auxiliary @ [ auxiliary ]
+      }
+  | Installed outcome ->
+    Installed
+      { outcome with
+        auxiliary = outcome.auxiliary @ [ auxiliary ]
+      }
+;;
 
 let checkpoint_generation_strict (checkpoint : Agent_sdk.Checkpoint.t) =
   match
@@ -649,28 +666,31 @@ let load_oas_with_ref ~session_dir ~session_id =
     exact_snapshot_checkpoint snapshot, exact_snapshot_reference snapshot)
 ;;
 
-let with_checkpoint_cas_lock ~session_dir ~candidate_ref f =
+let lock_failure_not_installed error =
+  not_installed
+    (Source_unavailable
+       (Ref_lock_failed (File_lock_eio.durable_lock_error_to_string error)))
+;;
+
+let installation_of_lock_observation = function
+  | File_lock_eio.Lock_not_acquired error -> lock_failure_not_installed error
+  | File_lock_eio.Body_completed { value; release_error = None } -> value
+  | File_lock_eio.Body_completed { value; release_error = Some error } ->
+    append_installation_auxiliary value (Release_process_lock_failed error)
+;;
+
+let with_checkpoint_cas_lock ~session_dir f =
   match canonical_session_location session_dir with
   | Error error ->
-    Not_installed
+    not_installed
       (Source_unavailable
          (Ref_lock_failed (save_oas_error_to_string error)))
   | Ok session_dir ->
     let lock_path = session_dir ^ ".checkpoint.lock" in
-    (match File_lock_eio.with_durable_lock ~lock_path (fun () -> f session_dir) with
-     | Ok result -> result
-     | Error error ->
-       (match error.File_lock_eio.phase with
-        | File_lock_eio.Release_process_lock ->
-          Not_installed
-            (Transaction_outcome_unknown
-               { possible_installed_ref = candidate_ref; error })
-        | File_lock_eio.Open_lock_file
-        | File_lock_eio.Acquire_process_lock ->
-          Not_installed
-            (Source_unavailable
-               (Ref_lock_failed
-                  (File_lock_eio.durable_lock_error_to_string error)))))
+    File_lock_eio.with_durable_lock_observed
+      ~lock_path
+      (fun () -> f session_dir)
+    |> installation_of_lock_observation
 
 let save_oas_if_source_with
     ~with_checkpoint_cas_lock
@@ -684,26 +704,26 @@ let save_oas_if_source_with
       Yojson.Safe.to_string (Agent_sdk.Checkpoint.to_json candidate))
   in
   match checkpoint_ref_of_canonical_bytes candidate_bytes candidate with
-  | Error error -> Not_installed (Candidate_identity_invalid error)
+  | Error error -> not_installed (Candidate_identity_invalid error)
   | Ok candidate_ref
     when not
            (Keeper_id.Trace_id.equal
               expected_source_ref.trace_id candidate_ref.trace_id) ->
-    Not_installed
+    not_installed
       (Candidate_session_mismatch
          { expected = expected_source_ref.trace_id
          ; candidate = candidate_ref.trace_id
          })
   | Ok candidate_ref
     when not (Int.equal expected_source_ref.generation candidate_ref.generation) ->
-    Not_installed
+    not_installed
       (Candidate_generation_mismatch
          { expected = expected_source_ref.generation
          ; candidate = candidate_ref.generation
          })
   | Ok candidate_ref
     when candidate_ref.turn_count < expected_source_ref.turn_count ->
-    Not_installed
+    not_installed
       (Candidate_turn_regressed
          { source_turn = expected_source_ref.turn_count
          ; candidate_turn = candidate_ref.turn_count
@@ -724,15 +744,15 @@ let save_oas_if_source_with
     let outcome =
       try
         `Returned
-          (with_checkpoint_cas_lock ~session_dir ~candidate_ref (fun session_dir ->
+          (with_checkpoint_cas_lock ~session_dir (fun session_dir ->
          match load_ref_locked ~session_dir ~expected_session_id with
-         | Error error -> Not_installed (Source_unavailable error)
+         | Error error -> not_installed (Source_unavailable error)
          | Ok snapshot
            when not
                   (Keeper_checkpoint_ref.equal
                      expected_source_ref
                      (exact_snapshot_reference snapshot)) ->
-           Not_installed (Source_changed (exact_snapshot_reference snapshot))
+           not_installed (Source_changed (exact_snapshot_reference snapshot))
          | Ok _ ->
            let canonical_path =
              oas_checkpoint_path
@@ -749,7 +769,7 @@ let save_oas_if_source_with
             with
             | Error error when error.Keeper_fs.renamed ->
               publish [ Commit_durability_unknown error ]
-            | Error error -> Not_installed (Commit_not_installed error)
+            | Error error -> not_installed (Commit_not_installed error)
             | Ok Keeper_fs.Committed ->
               (* The durable writer installs [candidate_bytes] verbatim - the
                  exact bytes [candidate_ref] was derived from - so the
@@ -760,11 +780,6 @@ let save_oas_if_source_with
               publish [ Commit_observer_failed failure ])))
       with
       | exn -> `Raised (exn, Printexc.get_raw_backtrace ())
-    in
-    let append_auxiliary installed auxiliary =
-      { installed with
-        auxiliary = installed.auxiliary @ [ auxiliary ]
-      }
     in
     let observed_installation installed_ref =
       match !committed_installation with
@@ -777,26 +792,13 @@ let save_oas_if_source_with
       | None -> !observed_ref
     in
     (match outcome with
-     | `Returned
-         (Not_installed
-            (Transaction_outcome_unknown
-               { possible_installed_ref; error }))
-       when (match known_installed_ref () with
-             | Some installed_ref ->
-               Keeper_checkpoint_ref.equal installed_ref possible_installed_ref
-             | None -> false) ->
-       Installed
-         (append_auxiliary
-            (observed_installation possible_installed_ref)
-            (Release_process_lock_failed error))
      | `Returned installation -> installation
      | `Raised (exn, backtrace) ->
        (match known_installed_ref () with
         | Some installed_ref ->
-          Installed
-            (append_auxiliary
-               (observed_installation installed_ref)
-               (Post_commit_unwind_interrupted (exn, backtrace)))
+          append_installation_auxiliary
+            (Installed (observed_installation installed_ref))
+            (Post_commit_unwind_interrupted (exn, backtrace))
         | None -> Printexc.raise_with_backtrace exn backtrace))
 
 let write_checkpoint_bytes
@@ -842,18 +844,34 @@ module For_testing = struct
       ~session_dir
       ~expected_source_ref
       candidate =
-    let with_release_failure ~session_dir ~candidate_ref f =
-      match with_checkpoint_cas_lock ~session_dir ~candidate_ref f with
-      | Installed _ ->
-        Not_installed
-          (Transaction_outcome_unknown
-             { possible_installed_ref = candidate_ref
-             ; error = release_failure
-             })
-      | Not_installed _ as outcome -> outcome
+    let with_release_failure ~session_dir f =
+      with_checkpoint_cas_lock ~session_dir f
+      |> fun installation ->
+      append_installation_auxiliary
+        installation
+        (Release_process_lock_failed release_failure)
     in
     save_oas_if_source_with
       ~with_checkpoint_cas_lock:with_release_failure
+      ~write_checkpoint_bytes
+      ~on_checkpoint_commit_observer
+      ~session_dir
+      ~expected_source_ref
+      candidate
+  ;;
+
+  let save_oas_if_source_with_acquire_failure
+      ~acquire_failure
+      ~on_checkpoint_commit_observer
+      ~session_dir
+      ~expected_source_ref
+      candidate =
+    let with_acquire_failure ~session_dir:_ _f =
+      installation_of_lock_observation
+        (File_lock_eio.Lock_not_acquired acquire_failure)
+    in
+    save_oas_if_source_with
+      ~with_checkpoint_cas_lock:with_acquire_failure
       ~write_checkpoint_bytes
       ~on_checkpoint_commit_observer
       ~session_dir
@@ -882,8 +900,8 @@ module For_testing = struct
       ~session_dir
       ~expected_source_ref
       candidate =
-    let with_post_commit_unwind ~session_dir ~candidate_ref f =
-      match with_checkpoint_cas_lock ~session_dir ~candidate_ref f with
+    let with_post_commit_unwind ~session_dir f =
+      match with_checkpoint_cas_lock ~session_dir f with
       | Installed _ as installation ->
         post_commit_unwind ();
         installation

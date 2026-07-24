@@ -17,20 +17,23 @@ type operation_outcome =
   | Compacted of success
   | No_compaction of Keeper_post_turn.no_compaction
 
-type lifecycle_stage =
+type pre_install_lifecycle_stage =
   | Operator_request
   | Compaction_started
-  | Compaction_completed
 
 type failure =
-  | Lifecycle of
-      { stage : lifecycle_stage
-      ; checkpoint_applied : bool
+  | Lifecycle_before_install of
+      { stage : pre_install_lifecycle_stage
       ; error : Keeper_context_runtime.lifecycle_dispatch_error
       }
-  | Lifecycle_with_failure_dispatch of
-      { stage : lifecycle_stage
-      ; checkpoint_applied : bool
+  | Lifecycle_before_install_with_failure_dispatch of
+      { stage : pre_install_lifecycle_stage
+      ; error : Keeper_context_runtime.lifecycle_dispatch_error
+      ; failure_dispatch :
+          (unit, Keeper_context_runtime.lifecycle_dispatch_error) result
+      }
+  | Lifecycle_after_install_with_failure_dispatch of
+      { installed_ref : Keeper_checkpoint_ref.t
       ; error : Keeper_context_runtime.lifecycle_dispatch_error
       ; failure_dispatch :
           (unit, Keeper_context_runtime.lifecycle_dispatch_error) result
@@ -120,15 +123,14 @@ let observe_terminal_dispatch_failure ~meta = function
 let run_start_lifecycle ~config ~meta =
   match dispatch_event ~config ~meta Keeper_state_machine.Operator_compact_requested with
   | Error error ->
-    Error (Lifecycle { stage = Operator_request; checkpoint_applied = false; error })
+    Error (Lifecycle_before_install { stage = Operator_request; error })
   | Ok () ->
     (match dispatch_event ~config ~meta Keeper_state_machine.Compaction_started with
      | Error error ->
        let failure_dispatch = dispatch_failed ~config ~meta "compaction_start_rejected" in
        Error
-         (Lifecycle_with_failure_dispatch
+         (Lifecycle_before_install_with_failure_dispatch
             { stage = Compaction_started
-            ; checkpoint_applied = false
             ; error
             ; failure_dispatch
             })
@@ -150,8 +152,8 @@ let run_commit ~on_checkpoint_installed ~config ~base_dir ~meta prepared =
     Error (Recovery (error, failure_dispatch))
   | Ok recovery ->
     (match recovery.checkpoint_installation with
-     | Keeper_checkpoint_store.Not_installed cas_error ->
-       let error = Keeper_post_turn.Checkpoint_cas_failed cas_error in
+     | Keeper_checkpoint_store.Not_installed not_installed ->
+       let error = Keeper_post_turn.Checkpoint_cas_failed not_installed.cause in
        let failure_dispatch =
          dispatch_failed
            ~config
@@ -188,9 +190,8 @@ let run_commit ~on_checkpoint_installed ~config ~base_dir ~meta prepared =
           Ok (Compacted { recovery; manifest })
         | Error _ ->
           Error
-            (Lifecycle_with_failure_dispatch
-               { stage = Compaction_completed
-               ; checkpoint_applied = true
+            (Lifecycle_after_install_with_failure_dispatch
+               { installed_ref = installed.installed_ref
                ; error
                ; failure_dispatch
                }))
@@ -375,10 +376,9 @@ let run_admitted
   { operation; checkpoint_commit_hint }
 ;;
 
-let lifecycle_stage_to_string = function
+let pre_install_lifecycle_stage_to_string = function
   | Operator_request -> "operator_request"
   | Compaction_started -> "compaction_started"
-  | Compaction_completed -> "compaction_completed"
 ;;
 
 let failure_dispatch_to_string = function
@@ -388,18 +388,28 @@ let failure_dispatch_to_string = function
 ;;
 
 let failure_to_string = function
-  | Lifecycle { stage; checkpoint_applied; error } ->
+  | Lifecycle_before_install { stage; error } ->
     Printf.sprintf
-      "stage=%s checkpoint_applied=%b error=%s"
-      (lifecycle_stage_to_string stage)
-      checkpoint_applied
+      "stage=%s installation=not_installed error=%s"
+      (pre_install_lifecycle_stage_to_string stage)
       (Keeper_context_runtime.lifecycle_dispatch_error_to_string error)
-  | Lifecycle_with_failure_dispatch
-      { stage; checkpoint_applied; error; failure_dispatch } ->
+  | Lifecycle_before_install_with_failure_dispatch
+      { stage; error; failure_dispatch } ->
     Printf.sprintf
-      "stage=%s checkpoint_applied=%b error=%s failure_dispatch=%s"
-      (lifecycle_stage_to_string stage)
-      checkpoint_applied
+      "stage=%s installation=not_installed error=%s failure_dispatch=%s"
+      (pre_install_lifecycle_stage_to_string stage)
+      (Keeper_context_runtime.lifecycle_dispatch_error_to_string error)
+      (failure_dispatch_to_string failure_dispatch)
+  | Lifecycle_after_install_with_failure_dispatch
+      { installed_ref; error; failure_dispatch } ->
+    Printf.sprintf
+      "stage=compaction_completed installation=installed \
+       trace_id=%s generation=%d turn_count=%d sha256=%s error=%s \
+       failure_dispatch=%s"
+      (Keeper_id.Trace_id.to_string installed_ref.trace_id)
+      installed_ref.generation
+      installed_ref.turn_count
+      installed_ref.sha256
       (Keeper_context_runtime.lifecycle_dispatch_error_to_string error)
       (failure_dispatch_to_string failure_dispatch)
   | Recovery (error, failure_dispatch) ->

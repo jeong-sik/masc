@@ -112,8 +112,24 @@ val with_lock :
     masked only after the OS lock is held, through body execution and release.
     The parent directory must exist. I/O failures are typed and body exceptions
     survive cleanup errors. *)
+type 'a durable_lock_observation =
+  | Lock_not_acquired of durable_lock_error
+  | Body_completed of
+      { value : 'a
+      ; release_error : durable_lock_error option
+      }
+
+val with_durable_lock_observed :
+  lock_path:string -> (unit -> 'a) -> 'a durable_lock_observation
+(** Preserve a completed body value even when releasing the process lock
+    fails. Open/acquire failures return [Lock_not_acquired] without running the
+    body. Body exceptions retain their original exception and raw backtrace. *)
+
 val with_durable_lock :
   lock_path:string -> (unit -> 'a) -> ('a, durable_lock_error) result
+(** Compatibility projection of {!with_durable_lock_observed}. A release
+    failure remains [Error] here; transaction owners that distinguish their
+    completed body result must use the observed surface. *)
 
 (** {1 Observability hook} *)
 

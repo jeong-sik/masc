@@ -91,8 +91,6 @@ let compaction_recovery_error_to_tag = function
     "checkpoint_candidate_invalid"
   | Checkpoint_cas_failed (Commit_not_installed _) ->
     "checkpoint_commit_not_installed"
-  | Checkpoint_cas_failed (Transaction_outcome_unknown _) ->
-    "checkpoint_transaction_outcome_unknown"
   | Checkpoint_candidate_failed _ -> "checkpoint_candidate_failed"
   | Compaction_rejected reason ->
     Keeper_compact_policy.compaction_rejection_to_tag reason
@@ -164,11 +162,6 @@ let checkpoint_cas_error_detail = function
   | Commit_not_installed error ->
     "checkpoint commit not installed: "
     ^ Keeper_fs.durable_write_error_to_string error
-  | Transaction_outcome_unknown { possible_installed_ref; error } ->
-    Printf.sprintf
-      "checkpoint transaction outcome unknown: %s error=%s"
-      (checkpoint_ref_detail possible_installed_ref)
-      (File_lock_eio.durable_lock_error_to_string error)
 
 let compaction_recovery_error_to_string = function
   | Checkpoint_ref_load_failed error -> checkpoint_ref_load_error_detail error
@@ -744,12 +737,13 @@ let commit_prepared_compaction_with
      | Ok
          ( _
          , Keeper_checkpoint_store.Not_installed
-             (Keeper_checkpoint_store.Source_changed actual) ) ->
+             { cause = Keeper_checkpoint_store.Source_changed actual; _ } ) ->
        Log.Keeper.warn
          "compaction checkpoint source changed: %s"
          (checkpoint_ref_detail actual);
        terminal Keeper_event_queue_state.Checkpoint_source_changed
-     | Ok (_, Keeper_checkpoint_store.Not_installed cas_error)
+     | Ok
+         (_, Keeper_checkpoint_store.Not_installed { cause = cas_error; _ })
      | Error (Persistence_error cas_error) ->
        let detail = checkpoint_cas_error_detail cas_error in
        Log.Keeper.error "compaction checkpoint save failed: %s" detail;

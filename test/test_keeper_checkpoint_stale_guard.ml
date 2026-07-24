@@ -548,7 +548,7 @@ let test_exact_source_cas_allows_one_equal_turn_writer () =
              | Keeper_checkpoint_store.Installed installed ->
                (marker, installed) :: committed, changed
              | Keeper_checkpoint_store.Not_installed
-                 (Keeper_checkpoint_store.Source_changed _) ->
+                 { cause = Keeper_checkpoint_store.Source_changed _; _ } ->
                committed, changed + 1
              | Keeper_checkpoint_store.Not_installed _ ->
                fail "CAS writer returned an unexpected error")
@@ -634,6 +634,18 @@ let test_exact_source_cas_updates_canonical_watermark () =
                 error = release_failure
               | _ -> false)
             installed.auxiliary)
+       ;
+       let disk_ref =
+         match
+           Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
+         with
+         | Ok (_, reference) -> reference
+         | Error _ -> fail "release-failure installed checkpoint was not readable"
+       in
+       check bool
+         "release failure preserves the exact installed ref"
+         true
+         (Keeper_checkpoint_ref.equal installed.installed_ref disk_ref)
      | Keeper_checkpoint_store.Not_installed _ ->
        fail "release failure downgraded the installed checkpoint");
     match
@@ -703,7 +715,7 @@ let test_post_rename_durability_unknown_is_installed () =
           candidate
       with
       | Keeper_checkpoint_store.Not_installed
-          (Keeper_checkpoint_store.Source_changed actual) ->
+          { cause = Keeper_checkpoint_store.Source_changed actual; _ } ->
         check bool
           "same-process retry is fenced by the installed ref"
           true
@@ -741,7 +753,7 @@ let test_pre_rename_write_failure_is_not_installed_and_retryable () =
     | Keeper_checkpoint_store.Installed _ ->
       fail "pre-rename write failure became Installed"
     | Keeper_checkpoint_store.Not_installed
-        (Keeper_checkpoint_store.Commit_not_installed error) ->
+        { cause = Keeper_checkpoint_store.Commit_not_installed error; _ } ->
       check bool
         "pre-rename write failure preserves its exact cause"
         true
@@ -771,6 +783,102 @@ let test_pre_rename_write_failure_is_not_installed_and_retryable () =
          fail "pre-rename failure consumed the exact-source retry")
     | Keeper_checkpoint_store.Not_installed _ ->
       fail "pre-rename write failure lost its Commit_not_installed cause")
+;;
+
+let test_release_failure_preserves_not_installed_cause () =
+  let session_id = "sess-cas-not-installed-release" in
+  with_exact_source_fixture ~session_id (fun ~session_dir ~source_ref ->
+    let advanced =
+      match
+        Keeper_checkpoint_store.save_oas_if_source
+          ~session_dir
+          ~expected_source_ref:source_ref
+          (make_checkpoint ~session_id ~turn_count:9 ~marker:"advanced"
+           |> with_generation 3)
+      with
+      | Keeper_checkpoint_store.Installed installed -> installed.installed_ref
+      | Keeper_checkpoint_store.Not_installed _ ->
+        fail "failed to advance the source before release-failure proof"
+    in
+    let release_failure =
+      { File_lock_eio.lock_path = session_dir ^ ".checkpoint.lock"
+      ; phase = File_lock_eio.Release_process_lock
+      ; cause =
+          { File_lock_eio.error = Unix.EIO
+          ; operation = "injected_release_after_not_installed"
+          ; argument = session_dir
+          }
+      ; cleanup_failure = None
+      }
+    in
+    let observer_count = ref 0 in
+    match
+      Keeper_checkpoint_store.For_testing.save_oas_if_source_with_release_failure
+        ~release_failure
+        ~on_checkpoint_commit_observer:(fun _ -> incr observer_count)
+        ~session_dir
+        ~expected_source_ref:source_ref
+        (make_checkpoint ~session_id ~turn_count:10 ~marker:"stale-source"
+         |> with_generation 3)
+    with
+    | Keeper_checkpoint_store.Installed _ ->
+      fail "release failure changed a source mismatch into Installed"
+    | Keeper_checkpoint_store.Not_installed outcome ->
+      (match outcome.cause with
+       | Keeper_checkpoint_store.Source_changed actual ->
+         check bool
+           "Not_installed retains the exact changed source"
+           true
+           (Keeper_checkpoint_ref.equal actual advanced)
+       | _ -> fail "release failure replaced the original non-install cause");
+      check int "non-install path emits no commit observer" 0 !observer_count;
+      match outcome.auxiliary with
+      | [ Keeper_checkpoint_store.Release_process_lock_failed error ] ->
+        check bool
+          "Not_installed retains the release failure"
+          true
+          (error = release_failure)
+  | _ -> fail "Not_installed release failure was not preserved"
+;;
+
+let test_acquire_failure_prevents_lock_body () =
+  let session_id = "sess-cas-acquire-failure" in
+  with_exact_source_fixture ~session_id (fun ~session_dir ~source_ref ->
+    let acquire_failure =
+      { File_lock_eio.lock_path = session_dir ^ ".checkpoint.lock"
+      ; phase = File_lock_eio.Open_lock_file
+      ; cause =
+          { File_lock_eio.error = Unix.EACCES
+          ; operation = "injected_open_before_body"
+          ; argument = session_dir
+          }
+      ; cleanup_failure = None
+      }
+    in
+    let observer_count = ref 0 in
+    match
+      Keeper_checkpoint_store.For_testing.save_oas_if_source_with_acquire_failure
+        ~acquire_failure
+        ~on_checkpoint_commit_observer:(fun _ -> incr observer_count)
+        ~session_dir
+        ~expected_source_ref:source_ref
+        (make_checkpoint ~session_id ~turn_count:9 ~marker:"not-admitted"
+         |> with_generation 3)
+    with
+    | Keeper_checkpoint_store.Installed _ ->
+      fail "lock acquisition failure admitted the checkpoint body"
+    | Keeper_checkpoint_store.Not_installed outcome ->
+      check int "acquire failure runs no commit observer" 0 !observer_count;
+      check bool "acquire failure has no release auxiliary" true
+        (outcome.auxiliary = []);
+      match outcome.cause with
+      | Keeper_checkpoint_store.Source_unavailable
+          (Keeper_checkpoint_store.Ref_lock_failed detail) ->
+        check bool
+          "acquire failure preserves its exact lock cause"
+          true
+          (Astring.String.is_infix ~affix:"injected_open_before_body" detail)
+      | _ -> fail "acquire failure changed its non-install cause")
 ;;
 
 let test_commit_observer_failure_is_installed () =
@@ -921,6 +1029,10 @@ let () =
             test_exact_source_cas_allows_one_equal_turn_writer;
           test_case "exact source CAS updates the canonical watermark" `Quick
             test_exact_source_cas_updates_canonical_watermark;
+          test_case "release failure preserves Not_installed cause" `Quick
+            test_release_failure_preserves_not_installed_cause;
+          test_case "acquire failure prevents the lock body" `Quick
+            test_acquire_failure_prevents_lock_body;
           test_case "post-rename durability uncertainty stays installed" `Quick
             test_post_rename_durability_unknown_is_installed;
           test_case "pre-rename write failure stays retryable" `Quick

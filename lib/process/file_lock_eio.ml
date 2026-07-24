@@ -474,11 +474,18 @@ let acquire_durable_flock ~execution_context lock_path =
             ~phase:Acquire_process_lock
             cause))
 
-let with_durable_lock ~lock_path f =
+type 'a durable_lock_observation =
+  | Lock_not_acquired of durable_lock_error
+  | Body_completed of
+      { value : 'a
+      ; release_error : durable_lock_error option
+      }
+
+let with_durable_lock_observed ~lock_path f =
   with_mutex lock_path (fun () ->
     let execution_context = Eio_guard.execution_context () in
     match acquire_durable_flock ~execution_context lock_path with
-    | Error _ as error -> error
+    | Error error -> Lock_not_acquired error
     | Ok fd ->
       let admitted () =
         let body =
@@ -488,14 +495,19 @@ let with_durable_lock ~lock_path f =
         in
         let release = release_durable_fd_result fd in
         match body, release with
-        | `Returned value, Ok () -> Ok value
-        | `Returned _, Error (cause, cleanup_failure) ->
-          Error
-            (durable_lock_error
-               ?cleanup_failure
-               ~lock_path
-               ~phase:Release_process_lock
-               cause)
+        | `Returned value, Ok () ->
+          Body_completed { value; release_error = None }
+        | `Returned value, Error (cause, cleanup_failure) ->
+          Body_completed
+            { value
+            ; release_error =
+                Some
+                  (durable_lock_error
+                     ?cleanup_failure
+                     ~lock_path
+                     ~phase:Release_process_lock
+                     cause)
+            }
         | `Raised (exn, backtrace), Ok () ->
           Printexc.raise_with_backtrace exn backtrace
         | `Raised (exn, backtrace), Error (release_failure, cleanup_failure) ->
@@ -513,6 +525,13 @@ let with_durable_lock ~lock_path f =
           Printexc.raise_with_backtrace exn backtrace
       in
       protect_cleanup execution_context admitted)
+
+let with_durable_lock ~lock_path f =
+  match with_durable_lock_observed ~lock_path f with
+  | Lock_not_acquired error -> Error error
+  | Body_completed { value; release_error = None } -> Ok value
+  | Body_completed { release_error = Some error; _ } -> Error error
+;;
 
 (** Number of tracked lock paths (for diagnostics). *)
 let lock_count () = SMap.cardinal (Atomic.get table).entries

@@ -77,9 +77,16 @@ let test_with_lock_inside_eio () =
 let test_durable_lock_open_failure_is_typed () =
   with_temp_path @@ fun path ->
   let path = Filename.concat path "missing/target" in
-  match File_lock_eio.with_durable_lock ~lock_path:path (fun () -> ()) with
-  | Ok () -> fail "durable lock unexpectedly created a missing parent tree"
-  | Error error ->
+  let body_ran = ref false in
+  match
+    File_lock_eio.with_durable_lock_observed
+      ~lock_path:path
+      (fun () -> body_ran := true)
+  with
+  | File_lock_eio.Body_completed _ ->
+    fail "durable lock unexpectedly created a missing parent tree"
+  | File_lock_eio.Lock_not_acquired error ->
+    check bool "lock body did not run before acquisition" false !body_ran;
     check bool "failure phase is lock-file open" true
       (match error.File_lock_eio.phase with
        | File_lock_eio.Open_lock_file -> true

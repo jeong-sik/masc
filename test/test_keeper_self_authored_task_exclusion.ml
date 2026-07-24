@@ -24,7 +24,7 @@ let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
   | Error message -> Alcotest.fail ("meta fixture rejected: " ^ message)
 ;;
 
-let task ?created_by ?(task_status = Todo) id : Masc_domain.task =
+let task ?created_by ?(task_status = Masc_domain.Todo) id : Masc_domain.task =
   { id
   ; title = "Task " ^ id
   ; description = ""

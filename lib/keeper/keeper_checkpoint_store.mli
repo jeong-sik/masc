@@ -207,10 +207,20 @@ type checkpoint_cas_error =
       ; error : File_lock_eio.durable_lock_error
       }
 
-type checkpoint_installation =
+type checkpoint_installation_auxiliary =
+  | Commit_observer_failed of Eio.Exn.with_bt
+  | Release_process_lock_failed of File_lock_eio.durable_lock_error
+  | Post_commit_unwind_interrupted of Eio.Exn.with_bt
+  | History_write_failed of Eio.Exn.with_bt
+
+type installed_checkpoint =
   { installed_ref : Keeper_checkpoint_ref.t
-  ; hint_failure : Eio.Exn.with_bt option
+  ; auxiliary : checkpoint_installation_auxiliary list
   }
+
+type checkpoint_installation =
+  | Not_installed of checkpoint_cas_error
+  | Installed of installed_checkpoint
 
 (** Conditionally publish [candidate] only when the canonical bytes still
     have exactly [expected_source_ref]. The stable session lock is reacquired,
@@ -224,17 +234,30 @@ type checkpoint_installation =
     The payload-store commit is not an operation terminal fact; the Keeper
     operation journal owns that authority.
 
-    [on_checkpoint_commit_hint] receives the exact installed reference in the
-    caller fiber when this invocation observes durable commit. It is a lossy,
-    best-effort hint, may run before the CAS lock is released, and must not be
-    used as an acknowledgement or restart authority. A callback failure or
-    cooperative cancellation observed after durable commit is returned in
-    [hint_failure] alongside the installed reference; it never becomes an
-    install failure or retry signal. An exception before commit is re-raised
-    with its original raw backtrace. *)
+    The closed result distinguishes [Not_installed] from [Installed].
+    Observer, release-lock, unwind, and history failures after durable commit
+    remain typed [auxiliary] facts beside the exact installed reference; they
+    never become install failures or retry signals. An exception before commit
+    is re-raised with its original raw backtrace. *)
 val save_oas_if_source :
-  on_checkpoint_commit_hint:(Keeper_checkpoint_ref.t -> unit) ->
   session_dir:string ->
   expected_source_ref:Keeper_checkpoint_ref.t ->
   Agent_sdk.Checkpoint.t ->
-  (checkpoint_installation, checkpoint_cas_error) result
+  checkpoint_installation
+
+module For_testing : sig
+  val save_oas_if_source_with_observer :
+    on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
+    session_dir:string ->
+    expected_source_ref:Keeper_checkpoint_ref.t ->
+    Agent_sdk.Checkpoint.t ->
+    checkpoint_installation
+
+  val save_oas_if_source_with_release_failure :
+    release_failure:File_lock_eio.durable_lock_error ->
+    on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
+    session_dir:string ->
+    expected_source_ref:Keeper_checkpoint_ref.t ->
+    Agent_sdk.Checkpoint.t ->
+    checkpoint_installation
+end

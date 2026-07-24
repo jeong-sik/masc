@@ -135,12 +135,8 @@ let run_start_lifecycle ~config ~meta =
      | Ok () -> Ok ())
 ;;
 
-let run_commit ~on_checkpoint_commit_hint ~config ~base_dir ~meta prepared =
-  match
-    Keeper_context_runtime.commit_prepared_compaction
-      ~on_checkpoint_commit_hint
-      prepared
-  with
+let run_commit ~on_checkpoint_installed ~config ~base_dir ~meta prepared =
+  match Keeper_context_runtime.commit_prepared_compaction prepared with
   | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
     let failure_dispatch =
       dispatch_failed ~config ~meta (Keeper_post_turn.compaction_recovery_error_to_tag error)
@@ -153,8 +149,20 @@ let run_commit ~on_checkpoint_commit_hint ~config ~base_dir ~meta prepared =
     in
     Error (Recovery (error, failure_dispatch))
   | Ok recovery ->
-    let manifest = append_manifest ~config ~base_dir ~meta recovery in
-    (match
+    (match recovery.checkpoint_installation with
+     | Keeper_checkpoint_store.Not_installed cas_error ->
+       let error = Keeper_post_turn.Checkpoint_cas_failed cas_error in
+       let failure_dispatch =
+         dispatch_failed
+           ~config
+           ~meta
+           (Keeper_post_turn.compaction_recovery_error_to_tag error)
+       in
+       Error (Recovery (error, failure_dispatch))
+     | Keeper_checkpoint_store.Installed installed ->
+       on_checkpoint_installed installed.installed_ref;
+       let manifest = append_manifest ~config ~base_dir ~meta recovery in
+       (match
        Keeper_context_runtime.dispatch_compaction_completed
          ~config
          ~keeper_name:meta.name
@@ -190,10 +198,10 @@ let run_commit ~on_checkpoint_commit_hint ~config ~base_dir ~meta prepared =
        Keeper_unified_metrics.broadcast_compaction
          ~name:meta.name
          recovery;
-       Ok (Compacted { recovery; manifest }))
+       Ok (Compacted { recovery; manifest })))
 ;;
 
-let finish_preparation ~on_checkpoint_commit_hint ~config ~base_dir ~meta = function
+let finish_preparation ~on_checkpoint_installed ~config ~base_dir ~meta = function
   | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
     let failure_dispatch =
       dispatch_failed
@@ -212,7 +220,7 @@ let finish_preparation ~on_checkpoint_commit_hint ~config ~base_dir ~meta = func
     in
     Error (Recovery (error, failure_dispatch))
   | Ok prepared ->
-    run_commit ~on_checkpoint_commit_hint ~config ~base_dir ~meta prepared
+    run_commit ~on_checkpoint_installed ~config ~base_dir ~meta prepared
 ;;
 
 let prepare_with ~prepare_compaction ~config ~meta =
@@ -267,7 +275,7 @@ let preserve_no_compaction_after_final_admission_busy = function
 
 let run_admitted_with
       ~prepare_compaction
-      ~on_checkpoint_commit_hint
+      ~on_checkpoint_installed
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
   =
@@ -304,7 +312,7 @@ let run_admitted_with
              | Error _ -> Error failure)
           | Ok () ->
             finish_preparation
-              ~on_checkpoint_commit_hint
+              ~on_checkpoint_installed
               ~config
               ~base_dir
               ~meta
@@ -347,7 +355,7 @@ let run_admitted
           ~trigger
           ~projection_request
           ())
-      ~on_checkpoint_commit_hint:(fun installed_ref ->
+      ~on_checkpoint_installed:(fun installed_ref ->
         committed_ref := Some installed_ref)
       ~config
       ~meta

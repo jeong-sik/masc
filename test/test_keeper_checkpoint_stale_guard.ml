@@ -495,35 +495,66 @@ let test_exact_source_cas_allows_one_equal_turn_writer () =
       | Ok (_, reference) -> reference
       | Error _ -> fail "CAS source load failed"
     in
-    let writer marker =
-      Keeper_checkpoint_store.save_oas_if_source
-        ~on_checkpoint_commit_hint:(fun _ -> ())
+    let left_observed = Atomic.make 0 in
+    let right_observed = Atomic.make 0 in
+    let left_ref = Atomic.make None in
+    let right_ref = Atomic.make None in
+    let writer marker observed observed_ref =
+      Keeper_checkpoint_store.For_testing.save_oas_if_source_with_observer
+        ~on_checkpoint_commit_observer:(fun installed_ref ->
+          Atomic.incr observed;
+          Atomic.set observed_ref (Some installed_ref))
         ~session_dir
         ~expected_source_ref:source_ref
         (make_checkpoint ~session_id ~turn_count:8 ~marker
          |> with_generation 3)
     in
-    let left = Domain.spawn (fun () -> "left", writer "left") in
-    let right = Domain.spawn (fun () -> "right", writer "right") in
+    let left =
+      Domain.spawn (fun () -> "left", writer "left" left_observed left_ref)
+    in
+    let right =
+      Domain.spawn (fun () -> "right", writer "right" right_observed right_ref)
+    in
     let committed, changed =
       [ Domain.join left; Domain.join right ]
       |> List.fold_left
            (fun (committed, changed) (marker, outcome) ->
              match outcome with
-             | Ok reference -> (marker, reference) :: committed, changed
-             | Error (Keeper_checkpoint_store.Source_changed _) ->
+             | Keeper_checkpoint_store.Installed installed ->
+               (marker, installed) :: committed, changed
+             | Keeper_checkpoint_store.Not_installed
+                 (Keeper_checkpoint_store.Source_changed _) ->
                committed, changed + 1
-             | Error _ -> fail "CAS writer returned an unexpected error")
+             | Keeper_checkpoint_store.Not_installed _ ->
+               fail "CAS writer returned an unexpected error")
            ([], 0)
     in
     check int "exactly one writer commits" 1 (List.length committed);
     check int "the competing source is rejected" 1 changed;
+    check int
+      "competing observer is emitted once for the winner"
+      1
+      (Atomic.get left_observed + Atomic.get right_observed);
     match committed,
       Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
     with
     | [ (winner, committed_ref) ], Ok (checkpoint, disk_ref) ->
+      let winner_observed, loser_observed, winner_ref =
+        if String.equal winner "left"
+        then Atomic.get left_observed, Atomic.get right_observed, Atomic.get left_ref
+        else Atomic.get right_observed, Atomic.get left_observed, Atomic.get right_ref
+      in
+      check int "winning writer observer count" 1 winner_observed;
+      check int "stale writer observer count" 0 loser_observed;
       check bool "committed ref identifies installed canonical bytes" true
         (Keeper_checkpoint_ref.equal committed_ref.installed_ref disk_ref);
+      check bool
+        "observer receives the exact installed ref"
+        true
+        (match winner_ref with
+         | Some observed_ref ->
+           Keeper_checkpoint_ref.equal observed_ref committed_ref.installed_ref
+         | None -> false);
       check bool "installed payload belongs to the winning writer" true
         (List.exists
            (fun (message : Agent_sdk.Types.message) ->
@@ -546,16 +577,40 @@ let test_exact_source_cas_updates_canonical_watermark () =
       | Ok (_, reference) -> reference
       | Error _ -> fail "CAS watermark source load failed"
     in
+    let release_failure =
+      { File_lock_eio.lock_path = session_dir ^ ".checkpoint.lock"
+      ; phase = File_lock_eio.Release_process_lock
+      ; cause =
+          { File_lock_eio.error = Unix.EIO
+          ; operation = "injected_release"
+          ; argument = session_dir
+          }
+      ; cleanup_failure = None
+      }
+    in
+    let observer_count = ref 0 in
     (match
-       Keeper_checkpoint_store.save_oas_if_source
-         ~on_checkpoint_commit_hint:(fun _ -> ())
+       Keeper_checkpoint_store.For_testing.save_oas_if_source_with_release_failure
+         ~release_failure
+         ~on_checkpoint_commit_observer:(fun _ -> incr observer_count)
          ~session_dir
          ~expected_source_ref:source_ref
          (make_checkpoint ~session_id ~turn_count:9 ~marker:"target"
           |> with_generation 3)
      with
-     | Ok _ -> ()
-     | Error _ -> fail "CAS watermark candidate did not commit");
+     | Keeper_checkpoint_store.Installed installed ->
+       check int "release-failure observer remains at-most-once" 1 !observer_count;
+       check bool
+         "release failure remains auxiliary to installed"
+         true
+         (List.exists
+            (function
+              | Keeper_checkpoint_store.Release_process_lock_failed error ->
+                error = release_failure
+              | _ -> false)
+            installed.auxiliary)
+     | Keeper_checkpoint_store.Not_installed _ ->
+       fail "release failure downgraded the installed checkpoint");
     match
       Keeper_checkpoint_store.save_oas_classified ~session_dir
         (make_checkpoint ~session_id ~turn_count:8 ~marker:"stale!")

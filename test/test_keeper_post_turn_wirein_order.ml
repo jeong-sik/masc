@@ -750,9 +750,10 @@ let test_manual_compaction_serializes_owner_lane () =
         | Error detail ->
           failf "race manual compaction claim failed: %s" detail
       in
+      let race_hints = ref 0 in
       let busy_after_prepare =
         Masc.Keeper_manual_compaction.run_admitted
-          ~on_checkpoint_commit_hint:(fun _ -> ())
+          ~on_checkpoint_commit_hint:(fun _ -> incr race_hints)
           ~config
           ~meta
           ~exact_execution_guard:
@@ -767,6 +768,7 @@ let test_manual_compaction_serializes_owner_lane () =
         "planning-admission race performs one exact dispatch"
         1
         (Exact_fixture.post_count race_server);
+      check int "noncommit path emits no hint" 0 !race_hints;
       let no_compaction =
         match busy_after_prepare with
         | `No_compaction
@@ -1080,9 +1082,11 @@ let test_manual_applied_hint_failure () =
                ~persistence_error_to_string:Fun.id
                detail));
        let callback_saw_released_admission = ref false in
+       let hint_calls = ref 0 in
        let result =
          Masc.Keeper_manual_compaction.run_admitted
            ~on_checkpoint_commit_hint:(fun _installed_ref ->
+             incr hint_calls;
              callback_saw_released_admission :=
                Option.is_none
                  (Admission.in_flight
@@ -1095,11 +1099,27 @@ let test_manual_applied_hint_failure () =
            ()
        in
        (match result.operation with
-       | `Applied _ ->
+       | `Applied success ->
          check bool
            "manual hint runs after compaction admission release"
            true
-           !callback_saw_released_admission
+           !callback_saw_released_admission;
+         check int "manual hint is attempted at-most-once" 1 !hint_calls;
+         (match
+            success.recovery.checkpoint_installation,
+            result.checkpoint_commit_hint
+          with
+          | Masc.Keeper_checkpoint_store.Installed installed,
+            Masc.Keeper_manual_compaction.Hint_failed { installed_ref; _ } ->
+            check bool
+              "manual hint carries exact installed ref"
+              true
+              (Keeper_checkpoint_ref.equal
+                 installed_ref
+                 installed.installed_ref)
+          | Masc.Keeper_checkpoint_store.Not_installed _, _ ->
+            fail "Applied manual compaction carried Not_installed"
+          | _ -> fail "raising manual hint lost its typed failure")
        | `No_compaction no_compaction ->
          failf
            "manual observer did not apply: %s"
@@ -1194,22 +1214,39 @@ let test_prepare_commit_source_cas () =
       "prepare performs one real exact dispatch"
       1
       (Exact_fixture.post_count exact_server);
-    (match
-       Post_turn.commit_prepared_compaction
-         ~on_checkpoint_commit_hint:(fun _ -> ())
-         prepared
-     with
-     | Ok _ -> ()
+    let recovery =
+      match
+        Post_turn.For_testing.commit_prepared_compaction_with_history
+          ~save_oas_history:(fun ~session_dir:_ _ ->
+            raise
+              (Eio.Cancel.Cancelled
+                 (Failure "injected history cancellation")))
+          prepared
+      with
+      | Ok recovery -> recovery
      | Error error ->
        failf
          "commit of a fresh prepared plan failed: %s"
-         (Post_turn.compaction_recovery_error_to_string error));
+         (Post_turn.compaction_recovery_error_to_string error)
+    in
+    (match recovery.checkpoint_installation with
+     | Masc.Keeper_checkpoint_store.Installed installed ->
+       check bool
+         "history cancellation remains typed after install"
+         true
+         (List.exists
+            (function
+              | Masc.Keeper_checkpoint_store.History_write_failed
+                  (Eio.Cancel.Cancelled _, _) ->
+                true
+              | _ -> false)
+            installed.auxiliary)
+     | Masc.Keeper_checkpoint_store.Not_installed _ ->
+       fail "history cancellation downgraded the installed checkpoint");
     (* The first commit advanced the durable source; the same
        prepared value is now stale and must be CAS-rejected. *)
     (match
-       Post_turn.commit_prepared_compaction
-         ~on_checkpoint_commit_hint:(fun _ -> ())
-         prepared
+       Post_turn.commit_prepared_compaction prepared
      with
      | Error
          (Post_turn.No_compaction

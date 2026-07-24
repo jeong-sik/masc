@@ -102,6 +102,7 @@ type context_budget_source =
 
 type compaction_recovery =
   { checkpoint : Agent_sdk.Checkpoint.t
+  ; checkpoint_installation : Keeper_checkpoint_store.checkpoint_installation
   ; trigger : Compaction_trigger.t
   ; evidence : Keeper_compaction_evidence.t
   ; turn_generation : int
@@ -189,8 +190,7 @@ val prepare_compaction
   -> (Keeper_post_turn.prepared_compaction, Keeper_post_turn.compaction_recovery_error) result
 
 val commit_prepared_compaction
-  :  on_checkpoint_commit_hint:(Keeper_checkpoint_ref.t -> unit)
-  -> Keeper_post_turn.prepared_compaction
+  :  Keeper_post_turn.prepared_compaction
   -> (compaction_recovery, Keeper_post_turn.compaction_recovery_error) result
 
 (** {1 Trace and Board Utilities} *)

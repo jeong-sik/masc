@@ -55,8 +55,7 @@ type post_turn_lifecycle = {
 
 type compaction_recovery = {
   checkpoint : Agent_sdk.Checkpoint.t;
-  installed_ref : Keeper_checkpoint_ref.t;
-  checkpoint_commit_hint_failure : Eio.Exn.with_bt option;
+  checkpoint_installation : Keeper_checkpoint_store.checkpoint_installation;
   trigger : Compaction_trigger.t;
   evidence : Keeper_compaction_evidence.t;
   turn_generation : int;
@@ -696,8 +695,8 @@ let prepare_compaction
     ~projection_request
 ;;
 
-let commit_prepared_compaction
-    ~on_checkpoint_commit_hint
+let commit_prepared_compaction_with
+    ~save_oas_checkpoint_if_source
     (prepared : prepared_compaction)
   : (compaction_recovery, compaction_recovery_error) result =
   (* Source-CAS commit.  The caller decides which admission (if any) guards
@@ -723,7 +722,6 @@ let commit_prepared_compaction
   (try
      match
        save_oas_checkpoint_if_source
-         ~on_checkpoint_commit_hint
          ~multimodal_policy:retry_meta.multimodal_policy
          ~keeper_name:retry_meta.name
          ~session
@@ -732,28 +730,33 @@ let commit_prepared_compaction
          ~generation:turn_generation
          ~expected_source_ref:source_ref
      with
-     | Ok (saved_checkpoint, installation) ->
+     | Ok
+         ( saved_checkpoint
+         , (Keeper_checkpoint_store.Installed installed as installation) ) ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string Compactions)
          ~labels:[ "keeper", retry_meta.name ]
          ();
        Ok
          { checkpoint = saved_checkpoint
-         ; installed_ref = installation.installed_ref
-         ; checkpoint_commit_hint_failure = installation.hint_failure
+         ; checkpoint_installation = installation
          ; trigger = prepared_trigger
          ; evidence
          ; turn_generation
          ; projection_target =
              Keeper_compaction_projection_target.bind_committed_checkpoint
-               installation.installed_ref
+               installed.installed_ref
                projection_target
          }
-     | Error (Persistence_error (Keeper_checkpoint_store.Source_changed actual)) ->
+     | Ok
+         ( _
+         , Keeper_checkpoint_store.Not_installed
+             (Keeper_checkpoint_store.Source_changed actual) ) ->
        Log.Keeper.warn
          "compaction checkpoint source changed: %s"
          (checkpoint_ref_detail actual);
        terminal Keeper_event_queue_state.Checkpoint_source_changed
+     | Ok (_, Keeper_checkpoint_store.Not_installed cas_error)
      | Error (Persistence_error cas_error) ->
        let detail = checkpoint_cas_error_detail cas_error in
        Log.Keeper.error "compaction checkpoint save failed: %s" detail;
@@ -778,6 +781,20 @@ let commit_prepared_compaction
      terminal Keeper_event_queue_state.Checkpoint_persistence_failed)
 ;;
 
+let commit_prepared_compaction =
+  commit_prepared_compaction_with ~save_oas_checkpoint_if_source
+;;
+
+module For_testing = struct
+  let commit_prepared_compaction_with_history ~save_oas_history prepared =
+    commit_prepared_compaction_with
+      ~save_oas_checkpoint_if_source:
+        (Keeper_context_core.For_testing.save_oas_checkpoint_if_source_with_history
+           ~save_oas_history)
+      prepared
+  ;;
+end
+
 let recover_latest_checkpoint_for_compaction
     ?exact_execution_guard
     ~(base_dir : string)
@@ -796,8 +813,5 @@ let recover_latest_checkpoint_for_compaction
       ()
   with
   | Error _ as error -> error
-  | Ok prepared ->
-    commit_prepared_compaction
-      ~on_checkpoint_commit_hint:(fun _ -> ())
-      prepared
+  | Ok prepared -> commit_prepared_compaction prepared
 ;;

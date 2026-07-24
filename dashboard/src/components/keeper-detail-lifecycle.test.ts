@@ -41,6 +41,44 @@ describe('KeeperLifecycleButtons', () => {
     fireEvent.click(getByRole('button', { name: '재개하기' }))
 
     expect(queryByText('기동하기')).toBeNull()
+    expect(queryByText('종료하기')).not.toBeNull()
     expect(runKeeperAction).toHaveBeenCalledWith('sangsu', 'resume', 2570)
+  })
+
+  it('disables resume with a reason when the durable owner generation is unavailable', () => {
+    const keeper = {
+      name: 'sangsu',
+      status: 'offline',
+      phase: 'Paused',
+      paused: true,
+      keepalive_running: false,
+    } as Keeper
+
+    const { getByRole } = render(html`
+      <${KeeperLifecycleButtons} keeper=${keeper} effectiveStatus="offline" />
+    `)
+    const resume = getByRole('button', { name: '재개하기' }) as HTMLButtonElement
+
+    expect(resume.disabled).toBe(true)
+    expect(resume.title).toContain('owner generation')
+    fireEvent.click(resume)
+    expect(runKeeperAction).not.toHaveBeenCalled()
+  })
+
+  it('uses typed action visibility for boot instead of the display-status classifier', () => {
+    const keeper = {
+      name: 'sangsu',
+      status: 'offline',
+      phase: 'Offline',
+      paused: false,
+      keepalive_running: false,
+    } as Keeper
+
+    const { getByRole } = render(html`
+      <${KeeperLifecycleButtons} keeper=${keeper} effectiveStatus="active" />
+    `)
+
+    fireEvent.click(getByRole('button', { name: '기동하기' }))
+    expect(runKeeperAction).toHaveBeenCalledWith('sangsu', 'boot')
   })
 })

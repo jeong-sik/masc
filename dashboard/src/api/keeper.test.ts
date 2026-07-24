@@ -1349,6 +1349,46 @@ describe('keeper lifecycle', () => {
     expect(fetchMock.mock.calls[1]![0]).toBe('/api/v1/keepers/offline-janitor/boot')
   })
 
+  it('preserves the durable commit when the follow-up boot fails', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          ok: false,
+          action: 'resume',
+          name: 'offline-janitor',
+          committed: true,
+          projection: 'committed_followup_failed',
+        }), {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          ok: false,
+          action: 'boot',
+          name: 'offline-janitor',
+          error: 'boot unavailable',
+        }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await resumeKeeper('offline-janitor', 7, {
+      operatorOperationId: 'dashboard-resume-offline-boot-failure-1',
+    })
+
+    expect(result).toMatchObject({
+      ok: false,
+      action: 'boot',
+      committed: true,
+      error: 'boot unavailable',
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('does not boot when Resume_owner was not durably committed', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({

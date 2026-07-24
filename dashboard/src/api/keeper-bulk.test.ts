@@ -9,7 +9,15 @@ afterEach(() => {
 })
 
 function stubFetch(response: unknown, init: { ok?: boolean; status?: number } = {}): void {
-  mockFetch.mockResolvedValue({
+  mockFetch.mockResolvedValue(mockResponse(response, init))
+  vi.stubGlobal('fetch', mockFetch)
+}
+
+function mockResponse(
+  response: unknown,
+  init: { ok?: boolean; status?: number } = {},
+): Response {
+  return {
     ok: init.ok ?? true,
     status: init.status ?? 200,
     statusText: 'OK',
@@ -17,8 +25,7 @@ function stubFetch(response: unknown, init: { ok?: boolean; status?: number } = 
     json: () => Promise.resolve(response),
     text: () => Promise.resolve(JSON.stringify(response)),
     clone() { return this },
-  } as Response)
-  vi.stubGlobal('fetch', mockFetch)
+  } as Response
 }
 
 describe('bulkKeeperDirective', () => {
@@ -89,6 +96,93 @@ describe('bulkKeeperDirective', () => {
     expect(res.succeeded).toBe(1)
     expect(res.results[1]!.ok).toBe(false)
     expect(res.results[1]!.error).toBe('keeper meta not found')
+  })
+
+  it('boots each offline keeper whose bulk resume was durably committed', async () => {
+    mockFetch
+      .mockResolvedValueOnce(mockResponse({
+        ok: false,
+        action: 'resume',
+        requested: 1,
+        succeeded: 0,
+        results: [
+          {
+            name: 'offline-rondo',
+            ok: false,
+            committed: true,
+            error: 'live owner missing',
+          },
+        ],
+      }, { status: 202 }))
+      .mockResolvedValueOnce(mockResponse({
+        ok: true,
+        action: 'boot',
+        name: 'offline-rondo',
+      }))
+    vi.stubGlobal('fetch', mockFetch)
+
+    const res = await bulkKeeperDirective(
+      [{
+        name: 'offline-rondo',
+        ownerGeneration: 7,
+        operatorOperationId: 'resume-offline-rondo-1',
+      }],
+      'resume',
+    )
+
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+    expect(mockFetch.mock.calls[1]![0]).toBe('/api/v1/keepers/offline-rondo/boot')
+    expect(res).toMatchObject({
+      ok: true,
+      succeeded: 1,
+      results: [{ name: 'offline-rondo', ok: true, action: 'boot', committed: true }],
+    })
+  })
+
+  it('reports a committed bulk resume when its follow-up boot fails', async () => {
+    mockFetch
+      .mockResolvedValueOnce(mockResponse({
+        ok: false,
+        action: 'resume',
+        requested: 1,
+        succeeded: 0,
+        results: [
+          {
+            name: 'offline-rondo',
+            ok: false,
+            committed: true,
+            error: 'live owner missing',
+          },
+        ],
+      }, { status: 202 }))
+      .mockResolvedValueOnce(mockResponse({
+        ok: false,
+        action: 'boot',
+        name: 'offline-rondo',
+        error: 'boot unavailable',
+      }, { ok: false, status: 503 }))
+    vi.stubGlobal('fetch', mockFetch)
+
+    const res = await bulkKeeperDirective(
+      [{
+        name: 'offline-rondo',
+        ownerGeneration: 7,
+        operatorOperationId: 'resume-offline-rondo-2',
+      }],
+      'resume',
+    )
+
+    expect(res).toMatchObject({
+      ok: false,
+      succeeded: 0,
+      results: [{
+        name: 'offline-rondo',
+        ok: false,
+        action: 'boot',
+        committed: true,
+        error: 'boot unavailable',
+      }],
+    })
   })
 
   it('returns a synthetic all-failed response when the HTTP call fails', async () => {

@@ -162,6 +162,7 @@ export function keeperCanWakeup(keeper: Keeper): boolean {
 export interface KeeperActionVisibility {
   canPause: boolean
   canResume: boolean
+  resumeUnavailableReason?: string
   canWake: boolean
   canBoot: boolean
   canShutdown: boolean
@@ -174,13 +175,20 @@ export function keeperActionVisibility(keeper: Keeper): KeeperActionVisibility {
   const isPaused = isKeeperPaused(keeper)
   const isOffline = isKeeperOffline(keeper)
   const isRunning = isKeeperRunningExcludingRestarting(keeper)
+  const hasOwnerGeneration =
+    typeof keeper.generation === 'number'
+    && Number.isInteger(keeper.generation)
+    && keeper.generation >= 0
   // A paused directive can outlive its process. The durable owner generation
   // remains the Resume_owner fencing token even after the live lane exits, so
   // paused always routes through resume before an offline lane is booted.
 
   return {
     canPause:    isRunning && !isPaused,
-    canResume:   isPaused,
+    canResume:   isPaused && hasOwnerGeneration,
+    resumeUnavailableReason: isPaused && !hasOwnerGeneration
+      ? '현재 owner generation을 확인할 수 없어 재개할 수 없습니다'
+      : undefined,
     canWake:     keeperCanWakeup(keeper),
     canBoot:     isOffline && !isPaused,
     canShutdown: isRunning || isPaused,

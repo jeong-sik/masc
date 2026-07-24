@@ -5,11 +5,13 @@
 
 type caller =
   | Anti_rationalization
+  | Goal_completion
   | Fusion_judge
   | Fusion_panel
 
 let caller_key = function
   | Anti_rationalization -> "anti_rationalization"
+  | Goal_completion -> "goal_completion"
   | Fusion_judge -> "fusion_judge"
   | Fusion_panel -> "fusion_panel"
 ;;

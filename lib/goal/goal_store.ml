@@ -16,6 +16,19 @@ let ( let* ) = Result.bind
 let clamp_priority p =
   max 1 (min 5 p)
 
+type completion_receipt =
+  { evaluator_runtime : string
+  ; reviewed_at : string
+  ; reviewed_goal_updated_at : string
+  ; review_prompt_sha256 : string
+  ; completion_claim : string
+  ; linked_task_ids : string list
+  }
+
+type completion_review_failure =
+  | Rejected
+  | Unavailable
+
 type goal = {
   id : string;
   title : string;
@@ -27,9 +40,31 @@ type goal = {
   parent_goal_id : string option;
   last_review_note : string option;
   last_review_at : string option;
+  completion_review_failure : completion_review_failure option;
+  completion_receipt : completion_receipt option;
   created_at : string;
   updated_at : string;
 }
+
+let validate_completion_invariant goal =
+  match goal.phase, goal.completion_receipt, goal.completion_review_failure with
+  | Goal_phase.Completed, None, _ ->
+    Error
+      "completed Goal requires a configured semantic-review completion receipt"
+  | (Goal_phase.Executing | Goal_phase.Blocked | Goal_phase.Paused | Goal_phase.Dropped),
+    Some _,
+    _ ->
+    Error "non-completed Goal cannot retain a completion receipt"
+  | Goal_phase.Completed, Some _, Some _ ->
+    Error "completed Goal cannot retain a failed completion-review outcome"
+  | _, _, Some _ when Option.is_none goal.last_review_note ->
+    Error "failed completion-review outcome requires a durable review note"
+  | Goal_phase.Completed, Some _, None
+  | (Goal_phase.Executing | Goal_phase.Blocked | Goal_phase.Paused | Goal_phase.Dropped),
+    None,
+    _ ->
+    Ok ()
+;;
 
 type state = {
   version : int;
@@ -58,9 +93,87 @@ and goal_to_yojson (goal : goal) =
       ("parent_goal_id", Json_util.string_opt_to_json goal.parent_goal_id);
       ("last_review_note", Json_util.string_opt_to_json goal.last_review_note);
       ("last_review_at", Json_util.string_opt_to_json goal.last_review_at);
+      ( "completion_review_failure"
+      , match goal.completion_review_failure with
+        | None -> `Null
+        | Some Rejected -> `String "rejected"
+        | Some Unavailable -> `String "unavailable" );
+      ( "completion_receipt"
+      , match goal.completion_receipt with
+        | None -> `Null
+        | Some receipt -> completion_receipt_to_yojson receipt );
       ("created_at", `String goal.created_at);
       ("updated_at", `String goal.updated_at);
     ]
+
+and completion_receipt_to_yojson receipt =
+  `Assoc
+    [ "evaluator_runtime", `String receipt.evaluator_runtime
+    ; "reviewed_at", `String receipt.reviewed_at
+    ; "reviewed_goal_updated_at", `String receipt.reviewed_goal_updated_at
+    ; "review_prompt_sha256", `String receipt.review_prompt_sha256
+    ; "completion_claim", `String receipt.completion_claim
+    ; ( "linked_task_ids"
+      , `List (List.map (fun task_id -> `String task_id) receipt.linked_task_ids) )
+    ]
+
+and completion_receipt_of_yojson = function
+  | `Assoc fields as json ->
+    let accepted_fields =
+      [ "evaluator_runtime"
+      ; "reviewed_at"
+      ; "reviewed_goal_updated_at"
+      ; "review_prompt_sha256"
+      ; "completion_claim"
+      ; "linked_task_ids"
+      ]
+    in
+    (match
+       List.find_map
+         (fun (field, _) ->
+            if List.mem field accepted_fields then None else Some field)
+         fields
+     with
+     | Some field ->
+       Error
+         (Printf.sprintf
+            "completion_receipt_of_yojson: unknown field %S"
+            field)
+     | None ->
+       (match
+          ( Json_util.assoc_member_opt "evaluator_runtime" json
+          , Json_util.assoc_member_opt "reviewed_at" json
+          , Json_util.assoc_member_opt "reviewed_goal_updated_at" json
+          , Json_util.assoc_member_opt "review_prompt_sha256" json
+          , Json_util.assoc_member_opt "completion_claim" json
+          , Json_util.assoc_member_opt "linked_task_ids" json )
+        with
+        | ( Some (`String evaluator_runtime)
+          , Some (`String reviewed_at)
+          , Some (`String reviewed_goal_updated_at)
+          , Some (`String review_prompt_sha256)
+          , Some (`String completion_claim)
+          , Some (`List linked_task_ids_json) ) ->
+          let rec parse_task_ids acc = function
+            | [] -> Ok (List.rev acc)
+            | `String task_id :: rest -> parse_task_ids (task_id :: acc) rest
+            | _ :: _ ->
+              Error
+                "completion_receipt_of_yojson: linked_task_ids must contain \
+                 only strings"
+          in
+          Result.map
+            (fun linked_task_ids ->
+               { evaluator_runtime
+               ; reviewed_at
+               ; reviewed_goal_updated_at
+               ; review_prompt_sha256
+               ; completion_claim
+               ; linked_task_ids
+               })
+            (parse_task_ids [] linked_task_ids_json)
+        | _ -> Error "completion_receipt_of_yojson: invalid receipt"))
+  | _ -> Error "completion_receipt_of_yojson: expected object"
 
 and state_of_yojson = function
   | `Assoc _ as json ->
@@ -98,6 +211,8 @@ and goal_of_yojson = function
         ; "parent_goal_id"
         ; "last_review_note"
         ; "last_review_at"
+        ; "completion_review_failure"
+        ; "completion_receipt"
         ; "created_at"
         ; "updated_at"
         ]
@@ -142,9 +257,37 @@ and goal_of_yojson = function
             | Some (`String value) -> Ok value
             | _ -> Error "goal_of_yojson: updated_at missing"
           in
-          (match phase, created_at, updated_at with
-           | Ok phase, Ok created_at, Ok updated_at ->
-             Ok
+          let completion_receipt =
+            match Json_util.assoc_member_opt "completion_receipt" json with
+            | None | Some `Null -> Ok None
+            | Some receipt_json ->
+              Result.map
+                (fun receipt -> Some receipt)
+                (completion_receipt_of_yojson receipt_json)
+          in
+          let completion_review_failure =
+            match Json_util.assoc_member_opt "completion_review_failure" json with
+            | None | Some `Null -> Ok None
+            | Some (`String "rejected") -> Ok (Some Rejected)
+            | Some (`String "unavailable") -> Ok (Some Unavailable)
+            | Some _ ->
+              Error
+                "goal_of_yojson: completion_review_failure must be rejected or \
+                 unavailable"
+          in
+          (match
+             ( phase
+             , created_at
+             , updated_at
+             , completion_receipt
+             , completion_review_failure )
+           with
+           | ( Ok phase
+             , Ok created_at
+             , Ok updated_at
+             , Ok completion_receipt
+             , Ok completion_review_failure ) ->
+             let goal =
                {
                     id;
                     title;
@@ -159,12 +302,18 @@ and goal_of_yojson = function
                     parent_goal_id = Json_util.get_string json "parent_goal_id";
                     last_review_note = Json_util.get_string json "last_review_note";
                     last_review_at = Json_util.get_string json "last_review_at";
+                    completion_review_failure;
+                    completion_receipt;
                     created_at;
                     updated_at;
                   }
-           | Error msg, _, _ -> Error msg
-           | _, Error msg, _ -> Error msg
-           | _, _, Error msg -> Error msg)
+             in
+             Ok goal
+           | Error msg, _, _, _, _ -> Error msg
+           | _, Error msg, _, _, _ -> Error msg
+           | _, _, Error msg, _, _ -> Error msg
+           | _, _, _, Error msg, _ -> Error msg
+           | _, _, _, _, Error msg -> Error msg)
       | None, _, _ -> Error "goal_of_yojson: invalid goal")
   | other_json ->
       Error ("goal_of_yojson: " ^ Yojson.Safe.to_string other_json)
@@ -315,6 +464,7 @@ let update_goal config ~goal_id f =
       | Some goal ->
           let now = Masc_domain.now_iso () in
           let updated_goal = f { goal with updated_at = now } in
+          let* () = validate_completion_invariant updated_goal in
           let next_state =
             {
               version = state.version + 1;
@@ -324,6 +474,42 @@ let update_goal config ~goal_id f =
           in
           let* () = write_state_result config next_state in
           Ok updated_goal)
+
+type conditional_update_error =
+  | Goal_not_found
+  | Goal_snapshot_changed
+  | Goal_persistence_failed of string
+
+let conditional_update_error_to_string = function
+  | Goal_not_found -> "goal not found"
+  | Goal_snapshot_changed ->
+    "Goal changed while completion was being reviewed; obtain a new verdict \
+     for the current Goal snapshot"
+  | Goal_persistence_failed msg -> msg
+;;
+
+let update_goal_if_unchanged config ~(expected : goal) f =
+  let lock_path = goals_path config in
+  Workspace_utils.with_file_lock config lock_path (fun () ->
+    let state = read_state config in
+    match find_goal state.goals expected.id with
+    | None -> Error Goal_not_found
+    | Some current when current <> expected -> Error Goal_snapshot_changed
+    | Some current ->
+      let now = Masc_domain.now_iso () in
+      let updated_goal = f { current with updated_at = now } in
+      (match validate_completion_invariant updated_goal with
+       | Error msg -> Error (Goal_persistence_failed msg)
+       | Ok () ->
+         let next_state =
+           { version = state.version + 1
+           ; updated_at = now
+           ; goals = replace_goal state.goals updated_goal
+           }
+         in
+         (match write_state_result config next_state with
+          | Ok () -> Ok updated_goal
+          | Error msg -> Error (Goal_persistence_failed msg))))
 
 type delete_goal_outcome =
   | Deleted
@@ -432,14 +618,11 @@ let validate_parent_goal_id goals ~goal_id ~parent_goal_id =
         Ok ()
 
 let upsert_goal config ?id ?title ?metric ?target_value ?due_date
-    ?priority ?phase ?parent_goal_id () =
+    ?priority ?parent_goal_id () =
   let is_new_goal = id = None in
   if is_new_goal && (title = None || title = Some "") then
     Error "title required for new goal"
   else
-    (* DET-OK: typed optional API param (not parsed input) — a new goal
-       without an explicit phase starts Executing, same as the removed match. *)
-    let default_phase = Option.value phase ~default:Goal_phase.Executing in
     let now = Masc_domain.now_iso () in
         let resolved_id = Option.value id ~default:(gen_goal_id ()) in
         (* Validate parent_goal_id before acquiring the write lock *)
@@ -471,14 +654,12 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
          | Error msg -> Error msg
          | Ok () ->
         let was_created = ref false in
+        let mutation_rejection = ref None in
         let state_result =
           update_state config (fun state ->
               match find_goal state.goals resolved_id with
               | Some existing ->
-                  (* DET-OK: typed optional param — omitted phase preserves
-                     the stored phase (same arm the removed match had). *)
-                  let next_phase = Option.value phase ~default:existing.phase in
-                  let next_goal =
+                  let candidate_goal =
                       {
                         existing with
                         title = Option.value title ~default:existing.title;
@@ -494,19 +675,28 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                         priority =
                           clamp_priority
                             (Option.value priority ~default:existing.priority);
-                        phase = next_phase;
                         parent_goal_id =
                           (match parent_goal_id with
                           | Some _ -> parent_goal_id
                           | None -> existing.parent_goal_id);
-                        updated_at = now;
                       }
                   in
-                  {
-                    version = state.version + 1;
-                    updated_at = now;
-                    goals = replace_goal state.goals next_goal;
-                  }
+                  if candidate_goal = existing
+                  then state
+                  else if existing.phase = Goal_phase.Completed
+                  then (
+                    mutation_rejection :=
+                      Some
+                        "completed Goal metadata is immutable; reopen the Goal \
+                         before changing its completion contract";
+                    state)
+                  else
+                    let next_goal = { candidate_goal with updated_at = now } in
+                    {
+                      version = state.version + 1;
+                      updated_at = now;
+                      goals = replace_goal state.goals next_goal;
+                    }
               | None ->
                   let new_goal =
                       {
@@ -516,10 +706,12 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                         target_value;
                         due_date;
                         priority = clamp_priority (Option.value priority ~default:3);
-                        phase = default_phase;
+                        phase = Goal_phase.Executing;
                         parent_goal_id;
                         last_review_note = None;
                         last_review_at = None;
+                        completion_review_failure = None;
+                        completion_receipt = None;
                         created_at = now;
                         updated_at = now;
                       }
@@ -531,9 +723,10 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                     goals = state.goals @ [ new_goal ];
                   })
         in
-        match state_result with
-        | Error msg -> Error msg
-        | Ok state ->
+        match !mutation_rejection, state_result with
+        | Some msg, _ -> Error msg
+        | None, Error msg -> Error msg
+        | None, Ok state ->
           match find_goal state.goals resolved_id with
           | Some goal ->
               Ok (goal, if !was_created then `created else `updated)

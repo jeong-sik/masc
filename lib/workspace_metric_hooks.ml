@@ -426,6 +426,70 @@ let install () =
     | Error err ->
       Error err);
 
+  Atomic.set Goal_completion_reviewer.run_llm_reviewer_fn
+    (fun ?sw ~evaluator_runtime ~prompt ~report_tool_schema () ->
+       let verdict_ref = ref None in
+       let protocol_error_ref = ref None in
+       let dispatch ~name ~args =
+         let start_time = Time_compat.now () in
+         match !verdict_ref with
+         | Some verdict ->
+           let detail =
+             Printf.sprintf
+               "Goal completion verdict already recorded (%s); \
+                report_goal_completion_verdict must be called exactly once"
+               (Goal_completion_reviewer.verdict_constructor_name verdict)
+           in
+           protocol_error_ref := Some detail;
+           Tool_result.error ~tool_name:name ~start_time detail
+         | None ->
+           (match Goal_completion_reviewer.parse_verdict_from_json args with
+            | Ok verdict ->
+              verdict_ref := Some verdict;
+              Tool_result.ok
+                ~tool_name:name
+                ~start_time
+                (match verdict with
+                 | Goal_completion_reviewer.Approve ->
+                   "Goal completion verdict recorded: APPROVE"
+                 | Goal_completion_reviewer.Reject reason ->
+                   "Goal completion verdict recorded: REJECT: " ^ reason)
+            | Error msg ->
+              protocol_error_ref := Some msg;
+              Log.Workspace.warn
+                "Goal completion structured verdict parse failed: %s"
+                msg;
+              Tool_result.error
+                ~tool_name:name
+                ~start_time
+                ("Invalid Goal completion verdict format: " ^ msg))
+       in
+       let apply_completion_verdict_config provider_cfg =
+         Ok
+           (Keeper_structured_output_schema.completion_verdict_tool_provider_config
+              provider_cfg)
+       in
+       match
+         Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Goal_completion (fun () ->
+           Keeper_turn_driver_wrappers.run_named_with_masc_tools
+             ~runtime_id:evaluator_runtime
+             ~base_path:(Env_config_core.base_path ())
+             ~goal:prompt
+             ~masc_tools:[ report_tool_schema ]
+             ~dispatch
+             ~provider_config_transform:apply_completion_verdict_config
+             ?sw
+             ())
+       with
+       | Ok _ ->
+         (match !protocol_error_ref with
+          | Some detail ->
+            Error
+              (Agent_sdk.Error.Internal
+                 ("Goal completion verdict protocol violation: " ^ detail))
+          | None -> Ok !verdict_ref)
+       | Error err -> Error err);
+
   Atomic.set Workspace_hooks.record_task_metric_fn (fun config ~agent_id ~task_id ~started_at ~completed_at ~success ~error_message ~collaborators ~handoff_from ~handoff_to ->
     let metric : Metrics_store_eio.task_metric = {
       id = Printf.sprintf "metric-%s-%d" task_id (Stdlib.Int.of_float (Time_compat.now () *. 1000.));

@@ -945,7 +945,7 @@ let test_deployment_exact_output_catalog_admits_seed_lanes () =
   let io : Exact_output.resolver_io =
     { getenv =
         (function
-          | "ZAI_CODING_API_KEY" | "DEEPSEEK_API_KEY" ->
+          | "ZAI_CODING_API_KEY" | "ZAI_API_KEY_SB" | "DEEPSEEK_API_KEY" ->
             Ok (Some "exact-output-seed-test")
           | _ -> Ok None)
     }

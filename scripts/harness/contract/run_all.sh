@@ -21,6 +21,7 @@ STOP_WAIT_SEC="${STOP_WAIT_SEC:-10}"
 
 export MCP_URL="${MCP_URL:-http://127.0.0.1:${PORT}/mcp}"
 export MCP_TOKEN="${MCP_TOKEN:-}"
+export MASC_CONTRACT_VERIFIER_API_KEY="${MASC_CONTRACT_VERIFIER_API_KEY:-contract-verifier-fixture-key}"
 HARNESS_ADMIN_AGENT="${MASC_HARNESS_ADMIN_AGENT:-contract-harness-admin}"
 export MCP_AGENT_NAME="${MCP_AGENT_NAME:-$HARNESS_ADMIN_AGENT}"
 export CURL_RETRY_COUNT="${CURL_RETRY_COUNT:-12}"
@@ -63,6 +64,12 @@ seed_contract_verifier_config() {
   cat >"$config_dir/runtime.toml" <<EOF
 [runtime]
 default = "contract_verifier.smoke"
+
+[runtime.exact_output_lanes.hitl_auto_judge]
+slots = ["contract_verifier.smoke"]
+
+[runtime.exact_output_lanes.board_attention_exact]
+slots = ["contract_verifier.smoke"]
 
 [providers.contract_verifier]
 display-name = "Contract Completion Verifier"

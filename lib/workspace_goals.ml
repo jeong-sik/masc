@@ -317,6 +317,10 @@ let handle_goal_completion_request
       (goal : Goal_store.goal)
       ~completion_claim
   =
+  Log.Workspace.info
+    "Goal completion review requested goal_id=%s actor=%s"
+    goal.id
+    ctx.agent_name;
   match goal_completion_evidence ctx goal with
   | Error msg ->
     (match
@@ -329,6 +333,10 @@ let handle_goal_completion_request
      | Error error ->
        conditional_goal_error_result ~tool_name ~start_time error
      | Ok _ ->
+       Log.Workspace.warn
+         "Goal completion remains nonterminal goal_id=%s outcome=unavailable \
+          stage=evidence"
+         goal.id;
        error_result_typed
          ~class_:Tool_result.Transient_error
          ~tool_name
@@ -376,6 +384,12 @@ let handle_goal_completion_request
         | Error error ->
           conditional_goal_error_result ~tool_name ~start_time error
         | Ok updated_goal ->
+          Log.Workspace.info
+            "Goal completion approved goal_id=%s evaluator_runtime=%s \
+             reviewed_goal_updated_at=%s"
+            goal.id
+            review.evaluator_runtime
+            goal.updated_at;
           emit_goal_event
             ctx
             ~goal_id:goal.id
@@ -406,6 +420,11 @@ let handle_goal_completion_request
         | Error error ->
           conditional_goal_error_result ~tool_name ~start_time error
         | Ok _ ->
+          Log.Workspace.warn
+            "Goal completion remains nonterminal goal_id=%s outcome=rejected \
+             evaluator_runtime=%s"
+            goal.id
+            review.evaluator_runtime;
           error_result_typed
             ~tool_name
             ~start_time
@@ -430,6 +449,11 @@ let handle_goal_completion_request
         | Error error ->
           conditional_goal_error_result ~tool_name ~start_time error
         | Ok _ ->
+          Log.Workspace.warn
+            "Goal completion remains nonterminal goal_id=%s \
+             outcome=unavailable evaluator_runtime=%s"
+            goal.id
+            review.evaluator_runtime;
           error_result_typed
             ~class_:Tool_result.Transient_error
             ~tool_name

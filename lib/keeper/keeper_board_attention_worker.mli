@@ -13,6 +13,7 @@ type contention =
 type step =
   | Idle
   | Contended of contention
+  | Rescan_later of contention
   | Judgment_completed of
       { candidate_id : string
       ; owner_wake : Keeper_registry.wakeup_outcome
@@ -23,9 +24,16 @@ type step =
       ; reason : Keeper_board_attention_partition.blocked_reason
       }
 
+type retry_reason =
+  | Exact_claim_contended
+  | Selected_generation_changed
+
 type drain_outcome =
   | Drained
-  | Retry_later of contention
+  | Retry_later of
+      { contention : contention
+      ; reason : retry_reason
+      }
 
 type rearm_schedule =
   | Rearm_scheduled of { delay_s : float }
@@ -171,10 +179,17 @@ module For_testing : sig
       completion durability failures return without re-entering OAS. Exact claim
       contention returns [Retry_later] without recursive same-turn retry. *)
 
+  val drain_available_with_process :
+    yield:(unit -> unit) ->
+    process:(unit -> (step, string) result) ->
+    (drain_outcome, string) result
+
   val make_contention_rearm_scheduler :
     fork:((unit -> unit) -> unit) ->
     sleep:(float -> unit) ->
-    request:(unit -> string) ->
+    request:
+      (unit ->
+       (Keeper_board_attention_worker_wake.wake_result, string) result) ->
     unit ->
     rearm_scheduler
 
@@ -183,6 +198,9 @@ module For_testing : sig
 
   val reset_contention_rearms :
     rearm_scheduler -> keep:contention option -> unit
+
+  val apply_drain_rearm :
+    rearm_scheduler -> drain_outcome -> rearm_schedule option
   (** Deterministic seam for the run-owner delayed rearm scheduler. Production
       supplies a structured [Eio.Fiber.fork] on the worker switch and its
       monotonic clock. *)

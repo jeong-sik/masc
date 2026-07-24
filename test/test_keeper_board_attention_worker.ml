@@ -240,6 +240,7 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
    | W.Judgment_completed _
    | W.Idle
    | W.Contended _
+   | W.Rescan_later _
    | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
      Alcotest.fail "worker exact callback chain did not complete");
@@ -366,9 +367,10 @@ let test_claim_generation_change_discards_without_sibling_selection () =
           ~prepare
           ~execute)
    with
-   | W.Idle -> ()
+   | W.Rescan_later _ -> ()
+   | W.Idle
    | W.Contended _ ->
-     Alcotest.fail "changed generation requested a delayed rearm"
+     Alcotest.fail "changed generation reported quiescent or same-generation contention"
    | W.Judgment_completed _
    | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
@@ -471,6 +473,7 @@ let test_exact_claim_retry_exhaustion_has_no_self_wake () =
           (P.Generation.equal generation contention.generation)
       | None -> Alcotest.fail "exact claim contention lost its selected target")
    | W.Idle
+   | W.Rescan_later _
    | W.Judgment_completed _
    | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
@@ -523,7 +526,7 @@ let test_contention_rearm_is_delayed_and_deduplicated () =
       ~sleep:(fun delay -> sleeps := !sleeps @ [ delay ])
       ~request:(fun () ->
         incr requests;
-        "signaled")
+        Ok Wake.Signaled)
       ()
   in
   let schedule () =
@@ -600,6 +603,153 @@ let test_contention_rearm_is_delayed_and_deduplicated () =
       delay_s
   | W.Rearm_deduplicated _ ->
     Alcotest.fail "reset retained a stale pending ticket"
+;;
+
+let test_rescan_later_reaches_delayed_run_rearm () =
+  let contention : W.contention =
+    { keeper_name = "sangsu"
+    ; partition_id = "partition-old-selection"
+    ; generation = P.Generation.initial
+    }
+  in
+  let process_calls = ref 0 in
+  let yields = ref 0 in
+  let outcome =
+    ok
+      "drain changed selection"
+      (W.For_testing.drain_available_with_process
+         ~yield:(fun () -> incr yields)
+         ~process:(fun () ->
+           incr process_calls;
+           Ok (W.Rescan_later contention)))
+  in
+  (match outcome with
+   | W.Retry_later
+       { contention = observed
+       ; reason = W.Selected_generation_changed
+       } ->
+     Alcotest.(check string)
+       "rescan retains old partition"
+       contention.partition_id
+       observed.partition_id;
+     Alcotest.(check bool)
+       "rescan retains old generation"
+       true
+       (P.Generation.equal contention.generation observed.generation)
+   | W.Drained
+   | W.Retry_later { reason = W.Exact_claim_contended; _ } ->
+     Alcotest.fail "changed selection did not reach typed delayed rescan");
+  Alcotest.(check int) "no same-turn rescan" 1 !process_calls;
+  Alcotest.(check int) "rescan did not yield into sibling claim" 0 !yields;
+  let tasks = ref [] in
+  let requests = ref 0 in
+  let scheduler =
+    W.For_testing.make_contention_rearm_scheduler
+      ~fork:(fun task -> tasks := task :: !tasks)
+      ~sleep:(fun _delay -> ())
+      ~request:(fun () ->
+        incr requests;
+        Ok Wake.Signaled)
+      ()
+  in
+  (match W.For_testing.apply_drain_rearm scheduler outcome with
+   | Some (W.Rearm_scheduled _) -> ()
+   | Some (W.Rearm_deduplicated _) | None ->
+     Alcotest.fail "run owner did not schedule the typed rescan");
+  Alcotest.(check int) "one delayed rescan fiber" 1 (List.length !tasks);
+  Alcotest.(check int) "rescan is not an immediate wake" 0 !requests
+;;
+
+let test_contention_wake_error_schedules_next_backoff () =
+  let contention : W.contention =
+    { keeper_name = "sangsu"
+    ; partition_id = "partition-wake-error"
+    ; generation = P.Generation.initial
+    }
+  in
+  let tasks = ref [] in
+  let request_calls = ref 0 in
+  let scheduler =
+    W.For_testing.make_contention_rearm_scheduler
+      ~fork:(fun task -> tasks := !tasks @ [ task ])
+      ~sleep:(fun _delay -> ())
+      ~request:(fun () ->
+        incr request_calls;
+        Error "injected wake delivery failure")
+      ()
+  in
+  ignore
+    (W.For_testing.schedule_contention_rearm scheduler contention
+     : W.rearm_schedule);
+  let first_task =
+    match !tasks with
+    | [ task ] ->
+      tasks := [];
+      task
+    | [] | _ :: _ :: _ -> Alcotest.fail "wake-error fixture task drifted"
+  in
+  first_task ();
+  Alcotest.(check int) "one failed typed wake delivery" 1 !request_calls;
+  Alcotest.(check int) "delivery error scheduled one retry" 1 (List.length !tasks);
+  match W.For_testing.schedule_contention_rearm scheduler contention with
+  | W.Rearm_deduplicated { delay_s } ->
+    Alcotest.(check (float 0.0001))
+      "delivery retry uses next backoff"
+      0.1
+      delay_s
+  | W.Rearm_scheduled _ ->
+    Alcotest.fail "delivery error left no pending retry ticket"
+;;
+
+let test_contention_wake_callback_is_outside_scheduler_lock () =
+  let contention : W.contention =
+    { keeper_name = "sangsu"
+    ; partition_id = "partition-reentrant-wake"
+    ; generation = P.Generation.initial
+    }
+  in
+  let tasks = ref [] in
+  let scheduler_ref : W.For_testing.rearm_scheduler option ref = ref None in
+  let reentrant_schedule = ref None in
+  let scheduler =
+    W.For_testing.make_contention_rearm_scheduler
+      ~fork:(fun task -> tasks := !tasks @ [ task ])
+      ~sleep:(fun _delay -> ())
+      ~request:(fun () ->
+        let scheduler =
+          match !scheduler_ref with
+          | Some scheduler -> scheduler
+          | None -> Alcotest.fail "reentrant scheduler was not installed"
+        in
+        reentrant_schedule :=
+          Some
+            (W.For_testing.schedule_contention_rearm
+               scheduler
+               contention);
+        Ok Wake.Signaled)
+      ()
+  in
+  scheduler_ref := Some scheduler;
+  ignore
+    (W.For_testing.schedule_contention_rearm scheduler contention
+     : W.rearm_schedule);
+  let first_task =
+    match !tasks with
+    | [ task ] ->
+      tasks := [];
+      task
+    | [] | _ :: _ :: _ -> Alcotest.fail "reentrant fixture task drifted"
+  in
+  first_task ();
+  (match !reentrant_schedule with
+   | Some (W.Rearm_scheduled { delay_s }) ->
+     Alcotest.(check (float 0.0001))
+       "reentrant schedule advances backoff"
+       0.1
+       delay_s
+   | Some (W.Rearm_deduplicated _) | None ->
+     Alcotest.fail "wake callback ran before ticket consumption or outside progress");
+  Alcotest.(check int) "reentrant callback queued one task" 1 (List.length !tasks)
 ;;
 
 let test_execution_error_preserves_bound_progress_without_hot_retry () =
@@ -1256,6 +1406,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
    with
    | W.Idle -> ()
    | W.Contended _
+   | W.Rescan_later _
    | W.Judgment_completed _
    | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
@@ -1370,6 +1521,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
    | W.Judgment_completed _
    | W.Idle
    | W.Contended _
+   | W.Rescan_later _
    | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
      Alcotest.fail "authorized manual requeue did not complete its exact judgment");
@@ -1785,6 +1937,18 @@ let () =
             "contention rearm is delayed and deduplicated"
             `Quick
             test_contention_rearm_is_delayed_and_deduplicated
+        ; Alcotest.test_case
+            "changed selection reaches delayed run rearm"
+            `Quick
+            test_rescan_later_reaches_delayed_run_rearm
+        ; Alcotest.test_case
+            "wake error schedules next contention backoff"
+            `Quick
+            test_contention_wake_error_schedules_next_backoff
+        ; Alcotest.test_case
+            "wake callback runs outside scheduler lock"
+            `Quick
+            test_contention_wake_callback_is_outside_scheduler_lock
         ; Alcotest.test_case
             "execution error preserves bound progress"
             `Quick

@@ -12,6 +12,7 @@ type contention =
 type step =
   | Idle
   | Contended of contention
+  | Rescan_later of contention
   | Judgment_completed of
       { candidate_id : string
       ; owner_wake : Keeper_registry.wakeup_outcome
@@ -22,9 +23,16 @@ type step =
       ; reason : Partition.blocked_reason
       }
 
+type retry_reason =
+  | Exact_claim_contended
+  | Selected_generation_changed
+
 type drain_outcome =
   | Drained
-  | Retry_later of contention
+  | Retry_later of
+      { contention : contention
+      ; reason : retry_reason
+      }
 
 type rearm_schedule =
   | Rearm_scheduled of { delay_s : float }
@@ -45,7 +53,7 @@ type rearm_scheduler =
   { mutex : Stdlib.Mutex.t
   ; fork : (unit -> unit) -> unit
   ; sleep : float -> unit
-  ; request : unit -> string
+  ; request : unit -> (Wake.wake_result, string) result
   ; mutable next_ticket_id : int
   ; mutable entries : rearm_entry list
   }
@@ -98,27 +106,46 @@ let cancel_rearm_ticket scheduler contention ticket outcome =
   then log_contention_rearm "cancelled" contention ~delay_s:ticket.delay_s ~outcome
 ;;
 
-let fire_rearm_ticket scheduler contention ticket =
-  let outcome =
+let wake_result_label = function
+  | Wake.Signaled -> "signaled"
+  | Wake.Coalesced -> "coalesced"
+  | Wake.Not_registered -> "not_registered"
+;;
+
+let fire_rearm_ticket scheduler contention ticket ~on_delivery_error =
+  let consumed =
     Stdlib.Mutex.protect scheduler.mutex (fun () ->
       match find_rearm_entry scheduler contention with
       | Some entry ->
         (match entry.pending with
          | Some current when Int.equal current.ticket_id ticket.ticket_id ->
            entry.pending <- None;
-           Some (scheduler.request ())
-         | Some _ | None -> None)
-      | None -> None)
+           true
+         | Some _ | None -> false)
+      | None -> false)
   in
-  match outcome with
-  | Some outcome ->
-    log_contention_rearm "fired" contention ~delay_s:ticket.delay_s ~outcome
-  | None ->
+  if not consumed
+  then
     log_contention_rearm
       "cancelled"
       contention
       ~delay_s:ticket.delay_s
       ~outcome:"stale_ticket"
+  else
+    match scheduler.request () with
+    | Ok wake ->
+      log_contention_rearm
+        "fired"
+        contention
+        ~delay_s:ticket.delay_s
+        ~outcome:(wake_result_label wake)
+    | Error _ ->
+      log_contention_rearm
+        "fired"
+        contention
+        ~delay_s:ticket.delay_s
+        ~outcome:"delivery_error";
+      ignore (on_delivery_error () : rearm_schedule)
 ;;
 
 let make_contention_rearm_scheduler ~fork ~sleep ~request () =
@@ -131,7 +158,7 @@ let make_contention_rearm_scheduler ~fork ~sleep ~request () =
   }
 ;;
 
-let schedule_contention_rearm scheduler contention =
+let rec schedule_contention_rearm scheduler contention =
   let decision =
     Stdlib.Mutex.protect scheduler.mutex (fun () ->
       let entry =
@@ -180,7 +207,12 @@ let schedule_contention_rearm scheduler contention =
               ticket
               "sleep_cancelled";
             raise exn);
-         fire_rearm_ticket scheduler contention ticket)
+         fire_rearm_ticket
+           scheduler
+           contention
+           ticket
+           ~on_delivery_error:(fun () ->
+             schedule_contention_rearm scheduler contention))
      with
      | exn ->
        cancel_rearm_ticket scheduler contention ticket "fork_cancelled";
@@ -223,6 +255,15 @@ let reset_contention_rearms scheduler ~keep =
            ~delay_s:0.0
            ~outcome:"history_removed")
     removed
+;;
+
+let apply_drain_rearm scheduler = function
+  | Drained ->
+    reset_contention_rearms scheduler ~keep:None;
+    None
+  | Retry_later { contention; reason = _ } ->
+    reset_contention_rearms scheduler ~keep:(Some contention);
+    Some (schedule_contention_rearm scheduler contention)
 ;;
 
 type settlement =
@@ -1166,7 +1207,7 @@ let process_next_with_claim_ready_exact
           selected_generation_is_ready ~partition_id ~generation
         in
         if not remains_ready
-        then Ok Idle
+        then Ok (Rescan_later { keeper_name; partition_id; generation })
         else if attempts_remaining > 1
         then claim_selected (attempts_remaining - 1)
         else Ok (Contended { keeper_name; partition_id; generation })
@@ -1320,29 +1361,20 @@ let observe_error ~base_path ~keeper_name detail =
   Log.Keeper.error "Board attention worker failed keeper=%s: %s" keeper_name detail
 ;;
 
-let rec drain_available
-          ~yield
-          ~now
-          ~worker_epoch
-          ~base_path
-          ~keeper_name
-          ~prepare
-          ~execute
-  =
-  match
-    process_next
-      ~now
-      ~worker_epoch
-      ~base_path
-      ~keeper_name
-      ~prepare
-      ~execute
-  with
+let rec drain_available_with_process ~yield ~process =
+  match process () with
   | Ok Idle -> Ok Drained
-  | Ok (Contended contention) -> Ok (Retry_later contention)
+  | Ok (Contended contention) ->
+    Ok (Retry_later { contention; reason = Exact_claim_contended })
+  | Ok (Rescan_later contention) ->
+    Ok (Retry_later { contention; reason = Selected_generation_changed })
   | Ok (Judgment_completed _ | Candidate_already_consumed _ | Partition_blocked _) ->
     yield ();
-    drain_available
+    drain_available_with_process ~yield ~process
+  | Error detail -> Error detail
+;;
+
+let drain_available
       ~yield
       ~now
       ~worker_epoch
@@ -1350,7 +1382,17 @@ let rec drain_available
       ~keeper_name
       ~prepare
       ~execute
-  | Error detail -> Error detail
+  =
+  drain_available_with_process
+    ~yield
+    ~process:(fun () ->
+      process_next
+        ~now
+        ~worker_epoch
+        ~base_path
+        ~keeper_name
+        ~prepare
+        ~execute)
 ;;
 
 let run
@@ -1407,12 +1449,7 @@ let run
              make_contention_rearm_scheduler
                ~fork:(fun task -> Eio.Fiber.fork ~sw task)
                ~sleep:(Eio.Time.sleep clock)
-               ~request:(fun () ->
-                 match Wake.request ~base_path ~keeper_name with
-                 | Ok Wake.Signaled -> "signaled"
-                 | Ok Wake.Coalesced -> "coalesced"
-                 | Ok Wake.Not_registered -> "not_registered"
-                 | Error _ -> "error")
+               ~request:(fun () -> Wake.request ~base_path ~keeper_name)
                ()
            in
            let rec await () =
@@ -1430,16 +1467,10 @@ let run
                  ~prepare
                  ~execute
              with
-             | Ok Drained ->
-               reset_contention_rearms contention_rearms ~keep:None;
-               await ()
-             | Ok (Retry_later contention) ->
-               reset_contention_rearms
-                 contention_rearms
-                 ~keep:(Some contention);
+             | Ok outcome ->
                ignore
-                 (schedule_contention_rearm contention_rearms contention
-                  : rearm_schedule);
+                 (apply_drain_rearm contention_rearms outcome
+                  : rearm_schedule option);
                await ()
              | Error detail -> fail Durable_drain detail
            in
@@ -1458,9 +1489,11 @@ module For_testing = struct
   let process_next = process_next
   let process_next_with_claim_ready_exact = process_next_with_claim_ready_exact
   let drain_available = drain_available
+  let drain_available_with_process = drain_available_with_process
   let make_contention_rearm_scheduler = make_contention_rearm_scheduler
   let schedule_contention_rearm = schedule_contention_rearm
   let reset_contention_rearms = reset_contention_rearms
+  let apply_drain_rearm = apply_drain_rearm
   let replay_completed_owner_wake = replay_completed_owner_wake
   let with_process_recovery_claim = with_process_recovery_claim
 end

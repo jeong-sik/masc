@@ -838,11 +838,27 @@ let successor_equal left right =
   | None, Some _ | Some _, None -> false
 ;;
 
+let manual_compaction_committed_equal
+    ~(left_commit : manual_compaction_commit)
+    ~(left_followup : manual_compaction_followup)
+    ~(right_commit : manual_compaction_commit)
+    ~(right_followup : manual_compaction_followup)
+  =
+  left_commit = right_commit && left_followup = right_followup
+;;
+
 let settlement_equal left right =
   match left, right with
   | Ack, Ack -> true
-  | Manual_compaction_committed left, Manual_compaction_committed right ->
-    left = right
+  | ( Manual_compaction_committed
+        { commit = left_commit; followup = left_followup }
+    , Manual_compaction_committed
+        { commit = right_commit; followup = right_followup } ) ->
+    manual_compaction_committed_equal
+      ~left_commit
+      ~left_followup
+      ~right_commit
+      ~right_followup
   | No_compaction left, No_compaction right ->
     Keeper_checkpoint_ref.equal left.source right.source
     && left.reason = right.reason

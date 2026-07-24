@@ -301,7 +301,6 @@ let test_manual_compaction_serializes_owner_lane () =
   Eio.Switch.run @@ fun sw ->
   with_eio_context env sw @@ fun () ->
   let base_path = Masc_test_deps.setup_test_workspace () in
-  let manifest_error = "injected post-install manifest append failure" in
   let meta = make_meta ~name:"compaction-owner" ~trace_id:"trace-compaction-owner" () in
   let peer = make_meta ~name:"compaction-peer" ~trace_id:"trace-compaction-peer" () in
   let runtime_snapshot = Runtime.For_testing.snapshot () in
@@ -827,6 +826,7 @@ let test_manual_compaction_serializes_owner_lane () =
        | Registry_queue.No_compaction _ ->
          fail "post-dispatch final admission changed its terminal cause"
        | Registry_queue.Ack
+       | Registry_queue.Manual_compaction_committed _
        | Registry_queue.Cancel_accepted _
        | Registry_queue.Transfer_accepted _
        | Registry_queue.Settle_from_source_terminal _
@@ -1082,6 +1082,7 @@ let test_manual_applied_hint_failure () =
             (Masc.Keeper_context_core.checkpoint_write_error_to_string
                ~persistence_error_to_string:Fun.id
                detail));
+       let manifest_error = "injected post-install manifest append failure" in
        let callback_saw_released_admission = ref false in
        let hint_calls = ref 0 in
        let result =

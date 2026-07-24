@@ -2545,21 +2545,46 @@ let test_transition_outbox_projects_with_stable_identity () =
      with
      | Persistence.Already_present -> ()
      | Persistence.Enqueued -> Alcotest.fail "outbox stimulus was duplicated");
-    let startup_report =
+    (match
+     Masc.Keeper_reaction_ledger.For_testing
+       .project_transition_outbox_after_append_result
+       ~after_ledger_append:(fun () ->
+         Error "injected failure after ledger append")
+       ~base_path
+       ~keeper_name
+   with
+   | Error _ -> ()
+   | Ok () ->
+     Alcotest.fail
+       "injected post-append failure unexpectedly retired the transition");
+  let retained_outbox =
+    match
+      Masc.Keeper_event_queue_persistence.read_transition_outbox_result
+        ~base_path
+        ~keeper_name
+    with
+    | Ok entries -> entries
+    | Error _ -> Alcotest.fail "failed to read retained transition outbox"
+  in
+  Alcotest.(check int)
+    "post-append failure retains one transition for retry"
+    1
+    (List.length retained_outbox);
+  let retry_report =
       Masc.Keeper_event_queue_recovery.project_discovered ~base_path
     in
     Alcotest.(check int)
       "startup discovery finds durable owner"
       1
-      startup_report.discovered;
+      retry_report.discovered;
     Alcotest.(check int)
       "startup sweep converges pending outbox"
       1
-      startup_report.converged;
+      retry_report.converged;
     Alcotest.(check int)
       "startup sweep retains no projection failures"
       0
-      (List.length startup_report.failures);
+      (List.length retry_report.failures);
     let state =
       Persistence.load_state_result ~base_path ~keeper_name
       |> require_ok "load projected state"

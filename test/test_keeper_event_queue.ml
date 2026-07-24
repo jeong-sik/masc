@@ -94,6 +94,16 @@ let claim_single ~base_path ~keeper_name ~claimed_at ~ready =
      | [] | _ :: _ :: _ ->
        Alcotest.fail "single event queue lease changed cardinality")
 
+let project_transition_canonically ~base_path ~keeper_name ~transition_id:_ =
+  match
+    Masc.Keeper_event_queue_recovery.project_owner_result
+      ~base_path
+      ~keeper_name
+  with
+  | Ok Masc.Keeper_event_queue_recovery.Transition_converged -> Ok ()
+  | Ok _ -> Error "canonical transition projection did not converge"
+  | Error _ -> Error "canonical transition projection failed"
+
 let settle_and_project
     ~base_path
     ~keeper_name
@@ -116,7 +126,7 @@ let settle_and_project
     | Ok _ -> Alcotest.fail "event queue settlement follow-up failed"
   in
   match
-    Masc.Keeper_registry_event_queue.mark_transition_projected_result
+    project_transition_canonically
       ~base_path
       keeper_name
       ~transition_id:receipt.transition_id
@@ -1263,7 +1273,7 @@ let () =
         | Error error -> Alcotest.fail ("board digest settlement failed: " ^ error)
       in
       (match
-         Masc.Keeper_registry_event_queue.mark_transition_projected_result
+         project_transition_canonically
            ~base_path
            keeper_name
            ~transition_id:board_receipt.transition_id
@@ -1373,7 +1383,7 @@ let () =
               error
         in
         match
-          Masc.Keeper_registry_event_queue.mark_transition_projected_result
+          project_transition_canonically
             ~base_path
             keeper_name
             ~transition_id:receipt.transition_id
@@ -1682,7 +1692,7 @@ let () =
        | Error error -> Alcotest.fail ("idempotent requeue failed: " ^ error));
       assert (length (Keeper_event_queue_persistence.load ~base_path ~keeper_name) = 2);
       (match
-         Masc.Keeper_registry_event_queue.mark_transition_projected_result
+         project_transition_canonically
            ~base_path
            keeper_name
            ~transition_id:requeue_receipt.transition_id

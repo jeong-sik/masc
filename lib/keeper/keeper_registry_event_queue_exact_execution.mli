@@ -113,9 +113,6 @@ module Make (Publish : sig
   val exact_execution_binding_result :
     base_path:string -> string -> (exact_execution_binding option, string) result
 
-  val mark_transition_projected_result :
-    base_path:string -> string -> transition_id:string -> (unit, string) result
-
   val settle_bound_exact_nonterminal_result :
     base_path:string ->
     string ->

@@ -1373,9 +1373,7 @@ let run_keepalive_unified_turn
                           ( Keeper_registry_event_queue.Settled _
                           | Keeper_registry_event_queue.Already_settled _ ) ->
                         lease_settled := true;
-                        require_transition_outbox_projection
-                          ~base_path:ctx.config.base_path
-                          ~keeper_name:meta_after_triage.name
+                        Ok ()
                       | Ok
                           (Keeper_registry_event_queue.Committed_followup_failed
                             { detail; _ }) ->
@@ -1393,9 +1391,20 @@ let run_keepalive_unified_turn
                  ()
              in
              (match committed with
-              | Transcript_pause_persisted
+              | Transcript_pause_persisted -> ()
               | Transcript_pause_and_settlement_persisted ->
-                ()
+                (match
+                   require_transition_outbox_projection
+                     ~base_path:ctx.config.base_path
+                     ~keeper_name:meta_after_triage.name
+                 with
+                 | Ok () -> ()
+                 | Error message ->
+                   Log.Keeper.error
+                     ~keeper_name:meta_after_triage.name
+                     "transcript corruption transition projection failed after durable settlement: %s"
+                     message;
+                   record_settlement_failure message)
               | Transcript_pause_persistence_failed message ->
                 Log.Keeper.error
                   ~keeper_name:meta_after_triage.name

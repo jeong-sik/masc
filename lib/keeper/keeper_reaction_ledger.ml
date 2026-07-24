@@ -417,7 +417,7 @@ let append_event_queue_transition_outbox_result
     append_sources 0 stimuli
 ;;
 
-let project_event_queue_transition_outbox_result ~base_path ~keeper_name =
+let project_event_queue_transition_outbox_with_after_append_result ~after_ledger_append ~base_path ~keeper_name =
   let ( let* ) = Result.bind in
   let* outbox =
     Keeper_event_queue_persistence.transition_outbox_result
@@ -433,6 +433,7 @@ let project_event_queue_transition_outbox_result ~base_path ~keeper_name =
         ~keeper_name
         entry
     in
+    let* () = after_ledger_append () in
     Keeper_event_queue_persistence.mark_transition_projected_result
       ~base_path
       ~keeper_name
@@ -444,6 +445,24 @@ let project_event_queue_transition_outbox_result ~base_path ~keeper_name =
          keeper_name
          (List.length entries))
 ;;
+
+let project_event_queue_transition_outbox_result ~base_path ~keeper_name =
+  project_event_queue_transition_outbox_with_after_append_result
+    ~after_ledger_append:(fun () -> Ok ())
+    ~base_path
+    ~keeper_name
+
+module For_testing = struct
+  let project_transition_outbox_after_append_result
+      ~after_ledger_append
+      ~base_path
+      ~keeper_name
+    =
+    project_event_queue_transition_outbox_with_after_append_result
+      ~after_ledger_append
+      ~base_path
+      ~keeper_name
+end
 
 let cursor_json { cursor_ts; post_id } =
   `Assoc

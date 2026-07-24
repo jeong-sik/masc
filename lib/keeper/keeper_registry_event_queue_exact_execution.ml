@@ -167,14 +167,7 @@ struct
       ~base_path
       ~keeper_name:name
   ;;
-  
-  let mark_transition_projected_result ~base_path name ~transition_id =
-    Keeper_event_queue_persistence.mark_transition_projected_result
-      ~base_path
-      ~keeper_name:name
-      ~transition_id
-  ;;
-  
+    
   let settle_bound_exact_nonterminal_result
         ~base_path
         name

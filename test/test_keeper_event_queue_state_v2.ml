@@ -2545,8 +2545,21 @@ let test_transition_outbox_projects_with_stable_identity () =
      with
      | Persistence.Already_present -> ()
      | Persistence.Enqueued -> Alcotest.fail "outbox stimulus was duplicated");
-    Masc.Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
-    |> require_ok "project transition outbox";
+    let startup_report =
+      Masc.Keeper_event_queue_recovery.project_discovered ~base_path
+    in
+    Alcotest.(check int)
+      "startup discovery finds durable owner"
+      1
+      startup_report.discovered;
+    Alcotest.(check int)
+      "startup sweep converges pending outbox"
+      1
+      startup_report.converged;
+    Alcotest.(check int)
+      "startup sweep retains no projection failures"
+      0
+      (List.length startup_report.failures);
     let state =
       Persistence.load_state_result ~base_path ~keeper_name
       |> require_ok "load projected state"
@@ -2555,6 +2568,19 @@ let test_transition_outbox_projects_with_stable_identity () =
       "projection retires outbox"
       0
       (List.length (State.transition_outbox state));
+    (match
+       Masc.Keeper_event_queue_recovery.project_owner_result
+         ~base_path
+         ~keeper_name
+     with
+     | Ok Masc.Keeper_event_queue_recovery.No_pending_transition -> ()
+     | Ok Masc.Keeper_event_queue_recovery.Transition_converged ->
+       Alcotest.fail "empty outbox unexpectedly required convergence"
+     | Ok Masc.Keeper_event_queue_recovery.Claim_busy ->
+       Alcotest.fail "owner claim remained busy after startup sweep"
+     | Error error ->
+       Alcotest.fail
+         (Masc.Keeper_event_queue_recovery.projection_error_to_string error));
     Masc.Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
     |> require_ok "empty outbox projection is idempotent";
     let summary =

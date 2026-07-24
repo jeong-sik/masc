@@ -575,9 +575,18 @@ let compaction_outcome_of_cycle_outcome = function
 ;;
 
 let project_transition_outbox ~base_path ~keeper_name =
-  Keeper_reaction_ledger.project_event_queue_transition_outbox_result
-    ~base_path
-    ~keeper_name
+  match
+    Keeper_event_queue_recovery.project_owner_result
+      ~base_path
+      ~keeper_name
+  with
+  | Ok
+      ( Keeper_event_queue_recovery.No_pending_transition
+      | Keeper_event_queue_recovery.Transition_converged
+      | Keeper_event_queue_recovery.Claim_busy ) ->
+    Ok ()
+  | Error error ->
+    Error (Keeper_event_queue_recovery.projection_error_to_string error)
 ;;
 
 let exact_terminal_source = function
@@ -1017,14 +1026,7 @@ let run_keepalive_unified_turn
             | Ok
                 ( Keeper_registry_event_queue.Settled _
                 | Keeper_registry_event_queue.Already_settled _ ) ->
-              lease_settled := true;
-              (match
-                 project_transition_outbox
-                   ~base_path:ctx.config.base_path
-                   ~keeper_name:meta_after_triage.name
-               with
-               | Ok () -> ()
-               | Error message -> record_settlement_failure message)
+              lease_settled := true
             | Ok (Keeper_registry_event_queue.Committed_followup_failed { detail; _ }) ->
               lease_settled := true;
               record_settlement_failure detail

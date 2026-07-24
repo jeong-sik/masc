@@ -453,7 +453,9 @@ let test_ready_runtime_raw_domain_save () =
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
-  Executor_pool_ref.set (Domain_pool.executor_pool pool);
+  Executor_pool_ref.For_testing.with_pool
+    (Domain_pool.executor_pool pool)
+  @@ fun () ->
   Eio_guard.enable ();
   Fun.protect ~finally:Eio_guard.disable @@ fun () ->
   let base_dir = temp_dir () in

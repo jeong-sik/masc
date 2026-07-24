@@ -7,6 +7,23 @@
     fails closed and requires reset. [event-queue-inflight.json] is rejected
     explicitly rather than migrated or treated as a second authority. *)
 
+type owner_identity
+type owner_identity_error
+
+val resolve_owner_identity :
+  base_path:string ->
+  keeper_name:string ->
+  (owner_identity, owner_identity_error) result
+(** Resolve the canonical process-local owner identity shared by every durable
+    event-queue operation. The representation and owner-lock implementation
+    remain private to [masc.keeper_runtime]. *)
+
+val owner_identity_error_to_string : owner_identity_error -> string
+val owner_identity_equal : owner_identity -> owner_identity -> bool
+val owner_identity_hash : owner_identity -> int
+val owner_identity_base_path : owner_identity -> string
+val owner_identity_keeper_name : owner_identity -> string
+
 type lease_kind = Keeper_event_queue_state.lease_kind =
   | Single
   | Board_batch
@@ -188,11 +205,6 @@ val lease_kind : lease -> lease_kind
 
 val active_lease_result :
   base_path:string -> keeper_name:string -> (lease option, string) result
-
-val transition_outbox_result :
-  base_path:string -> keeper_name:string -> (outbox_entry list, string) result
-(** Read the single pending projection entry for this Keeper lane.  The state
-    machine blocks new claims until this list is drained. *)
 
 val exact_execution_binding_result :
   base_path:string -> keeper_name:string -> (exact_execution_binding option, string) result
@@ -474,11 +486,15 @@ val prepare_registration_after_exact_recovery_result :
     registration recovery. Dispatch-uncertain bindings and source-less terminal
     quarantines remain fail-closed. *)
 
-val mark_transition_projected_result :
+val project_transition_outbox_result :
+  append_before_retire:(outbox_entry -> (unit, string) result) ->
   base_path:string ->
   keeper_name:string ->
-  transition_id:string ->
   (unit, string) result
+(** Read the single pending transition under the canonical lane identity,
+    invoke the supplied ledger append, and retire only after that append
+    succeeds. Raw outbox entries and the retirement primitive are not exported
+    independently. *)
 
 val persist :
   base_path:string -> keeper_name:string -> Keeper_event_queue.t -> unit

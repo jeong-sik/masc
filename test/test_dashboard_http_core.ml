@@ -296,7 +296,7 @@ let test_run_dashboard_compute_with_pool_uses_executor_domain () =
   let exec_pool =
     Eio.Executor_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env)
   in
-  Server_dashboard_http_core.set_executor_pool exec_pool;
+  Executor_pool_ref.For_testing.with_pool exec_pool @@ fun () ->
   let caller_domain = Domain.self () in
   let result_domain =
     Server_dashboard_http_core.run_dashboard_compute

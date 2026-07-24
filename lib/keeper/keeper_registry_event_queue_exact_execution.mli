@@ -105,16 +105,8 @@ module Make (Publish : sig
     string ->
     (Keeper_event_queue_persistence.lease option, string) result
 
-  val transition_outbox_result :
-    base_path:string ->
-    string ->
-    (Keeper_event_queue_persistence.outbox_entry list, string) result
-
   val exact_execution_binding_result :
     base_path:string -> string -> (exact_execution_binding option, string) result
-
-  val mark_transition_projected_result :
-    base_path:string -> string -> transition_id:string -> (unit, string) result
 
   val settle_bound_exact_nonterminal_result :
     base_path:string ->

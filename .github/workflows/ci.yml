@@ -964,6 +964,11 @@ jobs:
           chmod +x scripts/check-boundary-guard.sh
           scripts/check-boundary-guard.sh
 
+      - name: Check keeper event queue projection boundary
+        run: |
+          chmod +x scripts/check-keeper-event-queue-projection-boundary.sh
+          scripts/check-keeper-event-queue-projection-boundary.sh
+
       - name: Check boundary-guard .mli pairing (sweep-miss gate)
         env:
           BASE_REF: origin/${{ github.base_ref || 'main' }}

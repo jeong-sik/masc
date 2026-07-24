@@ -374,76 +374,77 @@ let event_queue_transition_reaction_json
        ])
 ;;
 
-let append_event_queue_transition_outbox_result
-      ~base_path
-      ~keeper_name
-      (entry : Keeper_event_queue_state.outbox_entry)
+let after_ledger_append_hook :
+  (unit -> (unit, string) result) option Atomic.t
   =
-  match entry.stimuli with
-  | [] ->
-    Error
-      (Printf.sprintf
-         "event queue settlement outbox has no sources keeper=%s transition_id=%s"
-         keeper_name
-         entry.receipt.transition_id)
-  | stimuli ->
-    let store = store_for_base_path ~base_path ~keeper_name in
-    let source_count = List.length stimuli in
-    let rec append_sources source_index = function
-      | [] -> Ok ()
-      | stimulus :: rest ->
-        let event_id = event_queue_transition_event_id entry.receipt source_index in
-        (try
-           Dated_jsonl.append
-             store
-             (event_queue_transition_reaction_json
-                ~keeper_name
-                ~source_index
-                ~source_count
-                ~transition_source:(transition_source_of_stimulus stimulus)
-                entry.receipt
-                stimulus);
-           append_sources (source_index + 1) rest
-         with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn ->
-           Error
-             (Printf.sprintf
-                "event queue settlement ledger append failed keeper=%s event_id=%s: %s"
-                keeper_name
-                event_id
-                (Printexc.to_string exn)))
-    in
-    append_sources 0 stimuli
+  Atomic.make None
 ;;
+
+let after_ledger_append_hook_mutex = Stdlib.Mutex.create ()
 
 let project_event_queue_transition_outbox_result ~base_path ~keeper_name =
   let ( let* ) = Result.bind in
-  let* outbox =
-    Keeper_event_queue_persistence.transition_outbox_result
-      ~base_path
-      ~keeper_name
-  in
-  match outbox with
-  | [] -> Ok ()
-  | [ entry ] ->
-    let* () =
-      append_event_queue_transition_outbox_result
-        ~base_path
-        ~keeper_name
-        entry
+  Keeper_event_queue_persistence.project_transition_outbox_result
+    ~append_before_retire:(fun
+        (entry : Keeper_event_queue_state.outbox_entry)
+      ->
+      match entry.stimuli with
+      | [] ->
+        Error
+          (Printf.sprintf
+             "event queue settlement outbox has no sources keeper=%s transition_id=%s"
+             keeper_name
+             entry.receipt.transition_id)
+      | stimuli ->
+        let store = store_for_base_path ~base_path ~keeper_name in
+        let source_count = List.length stimuli in
+        let rec append_sources source_index = function
+          | [] -> Ok ()
+          | stimulus :: rest ->
+            let event_id =
+              event_queue_transition_event_id entry.receipt source_index
+            in
+            (try
+               Dated_jsonl.append
+                 store
+                 (event_queue_transition_reaction_json
+                    ~keeper_name
+                    ~source_index
+                    ~source_count
+                    ~transition_source:(transition_source_of_stimulus stimulus)
+                    entry.receipt
+                    stimulus);
+               append_sources (source_index + 1) rest
+             with
+             | Eio.Cancel.Cancelled _ as exn -> raise exn
+             | exn ->
+               Error
+                 (Printf.sprintf
+                    "event queue settlement ledger append failed keeper=%s event_id=%s: %s"
+                    keeper_name
+                    event_id
+                    (Printexc.to_string exn)))
+        in
+        let* () = append_sources 0 stimuli in
+        (match Atomic.get after_ledger_append_hook with
+         | None -> Ok ()
+         | Some hook -> hook ()))
+    ~base_path
+    ~keeper_name
+
+module For_testing = struct
+  let with_after_ledger_append ~after_ledger_append f =
+    Stdlib.Mutex.lock after_ledger_append_hook_mutex;
+    let previous =
+      Atomic.exchange after_ledger_append_hook (Some after_ledger_append)
     in
-    Keeper_event_queue_persistence.mark_transition_projected_result
-      ~base_path
-      ~keeper_name
-      ~transition_id:entry.receipt.transition_id
-  | entries ->
-    Error
-      (Printf.sprintf
-         "event queue transition outbox cardinality invalid keeper=%s count=%d"
-         keeper_name
-         (List.length entries))
-;;
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set after_ledger_append_hook previous;
+        Stdlib.Mutex.unlock after_ledger_append_hook_mutex)
+      f
+  ;;
+end
 
 let cursor_json { cursor_ts; post_id } =
   `Assoc

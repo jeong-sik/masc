@@ -79,6 +79,64 @@ let wake_enqueue_counts_of_dispatches dispatches =
     dispatches
 ;;
 
+type transition_outbox_projection_source =
+  | Startup_projection
+  | Maintenance_projection
+
+let transition_outbox_projection_source_to_string = function
+  | Startup_projection -> "startup"
+  | Maintenance_projection -> "maintenance"
+;;
+
+let project_keeper_transition_outboxes ~source ~base_path ~budget ~cursor =
+  let page =
+    Keeper_event_queue_recovery.project_discovered_bounded
+      ~base_path
+      ~budget
+      ~cursor
+  in
+  let report = page.report in
+  let source_label = transition_outbox_projection_source_to_string source in
+  Option.iter
+    (fun error ->
+       Log.Server.error
+         "keeper transition outbox %s discovery retained error=%s"
+         source_label
+         (Keeper_event_queue_recovery.discovery_error_to_string error))
+    report.discovery_error;
+  List.iter
+    (fun (failure : Keeper_event_queue_recovery.owner_failure) ->
+       Log.Server.error
+         "keeper transition outbox %s retained keeper=%s error=%s"
+         source_label
+         failure.keeper_name
+         (Keeper_event_queue_recovery.projection_error_to_string failure.error))
+    report.failures;
+  let should_log =
+    match source with
+    | Startup_projection -> true
+    | Maintenance_projection ->
+      report.converged > 0
+      || report.claim_busy > 0
+      || report.failures <> []
+      || Option.is_some report.discovery_error
+  in
+  if should_log
+  then
+    Log.Server.info
+      "keeper transition outbox %s discovered=%d processed=%d deferred=%d \
+       converged=%d no_pending=%d claim_busy=%d failures=%d"
+      source_label
+      report.discovered
+      report.processed
+      report.deferred
+      report.converged
+      report.no_pending
+      report.claim_busy
+      (List.length report.failures);
+  page.next_cursor
+;;
+
 (* Run one consolidation pass over every keeper that currently has a fact store.
    The optional [complete] injection lets tests drive the loop with a fake model.
    Provider transport owns the only LLM timeout boundary. The output contract is
@@ -490,7 +548,35 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~sw
     ~on_error:(log_server_fiber_crash "maintenance_cleanup")
     (fun () ->
+    let base_path = (Mcp_server.workspace_config state).base_path in
     let last_prune = ref (Unix.gettimeofday ()) in
+    let transition_projection_cursor =
+      ref Keeper_event_queue_recovery.initial_sweep_cursor
+    in
+    let transition_projection_budget =
+      match
+        Keeper_event_queue_recovery.owner_budget
+          ~max_owners:(Keeper_config.keeper_batch_limit ())
+      with
+      | Ok budget -> Some budget
+      | Error error ->
+        Log.Server.error
+          "keeper transition outbox maintenance disabled: %s"
+          (Keeper_event_queue_recovery.owner_budget_error_to_string error);
+        None
+    in
+    let project_transition_outboxes source =
+      Option.iter
+        (fun budget ->
+           transition_projection_cursor :=
+             project_keeper_transition_outboxes
+               ~source
+               ~base_path
+               ~budget
+               ~cursor:!transition_projection_cursor)
+        transition_projection_budget
+    in
+    project_transition_outboxes Startup_projection;
     (* Restore MCP transport sessions from disk before first cleanup cycle.
        Grace period timestamps survive server restart, so recently-active
        clients can reconnect without "Unknown Mcp-Session-Id" errors. *)
@@ -499,6 +585,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
        Log.Server.warn "session restore failed: %s" (Printexc.to_string exn));
     let rec loop () =
       Eio.Time.sleep clock Env_config_runtime.InternalTimers.janitor_interval_sec;
+      project_transition_outboxes Maintenance_projection;
       (try
          let stale_sids = Sse.cleanup_stale () in
          List.iter Server_routes_http_common.stop_sse_session stale_sids;

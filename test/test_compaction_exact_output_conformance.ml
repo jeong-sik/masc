@@ -1077,8 +1077,10 @@ let test_post_success_terminalization_overlap_is_affine_and_durable () =
    | Ok None -> ()
    | Ok (Some _) -> Alcotest.fail "overlap settlement retained exact binding"
    | Error detail -> Alcotest.failf "overlap binding reload failed: %s" detail);
-  match P.transition_outbox_result ~base_path ~keeper_name with
-  | Ok [ _ ] -> ()
+  match P.load_state_result ~base_path ~keeper_name with
+  | Ok state
+    when List.length (Keeper_event_queue_state.transition_outbox state) = 1 ->
+    ()
   | Ok _ -> Alcotest.fail "overlap produced other than one durable settlement"
   | Error detail -> Alcotest.failf "overlap outbox reload failed: %s" detail
 ;;
@@ -1454,27 +1456,29 @@ let test_visible_sync_uncertainty_seams () =
      | Ok (Some _) -> Alcotest.fail "visible quarantine settlement retained binding"
      | Error detail ->
        Alcotest.failf "visible quarantine binding reload failed: %s" detail);
-    match P.transition_outbox_result ~base_path ~keeper_name with
-    | Ok [ { receipt = durable_receipt; _ } ] ->
-      Alcotest.(check bool)
-        "visible quarantine has exactly one durable settlement"
-        true
-        (receipt = durable_receipt);
-      (match durable_receipt.settlement with
-       | P.Settle_exact
-           { outcome = P.Terminal cause
-           ; slot_id = durable_slot
-           ; call_id = durable_call
-           ; _
-           } ->
+    match P.load_state_result ~base_path ~keeper_name with
+    | Ok state ->
+      (match Keeper_event_queue_state.transition_outbox state with
+       | [ { receipt = durable_receipt; _ } ] ->
          Alcotest.(check bool)
-           "visible quarantine settlement preserves cause and identity"
+           "visible quarantine has exactly one durable settlement"
            true
-           (cause = terminal.cause
-            && String.equal durable_slot terminal.slot_id
-            && String.equal durable_call terminal.call_id)
-       | _ -> Alcotest.fail "visible quarantine lost exact terminal settlement")
-    | Ok _ -> Alcotest.fail "visible quarantine produced multiple settlements"
+           (receipt = durable_receipt);
+         (match durable_receipt.settlement with
+          | P.Settle_exact
+              { outcome = P.Terminal cause
+              ; slot_id = durable_slot
+              ; call_id = durable_call
+              ; _
+              } ->
+            Alcotest.(check bool)
+              "visible quarantine settlement preserves cause and identity"
+              true
+              (cause = terminal.cause
+               && String.equal durable_slot terminal.slot_id
+               && String.equal durable_call terminal.call_id)
+          | _ -> Alcotest.fail "visible quarantine lost exact terminal settlement")
+       | _ -> Alcotest.fail "visible quarantine produced multiple settlements")
     | Error detail -> Alcotest.failf "visible quarantine outbox reload failed: %s" detail
   in
   List.iter

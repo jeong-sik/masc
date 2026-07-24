@@ -150,3 +150,12 @@ val fleet_summary_json :
 val unavailable_fleet_summary_json : unit -> Yojson.Safe.t
 (** Canonical empty fleet projection used when server state is unavailable.
     Kept here so schema and field ownership remain single-source. *)
+
+module For_testing : sig
+  val with_after_ledger_append :
+    after_ledger_append:(unit -> (unit, string) result) ->
+    (unit -> 'a) ->
+    'a
+  (** Scoped post-append fault seam. The callback must invoke the canonical
+      recovery projector; this seam cannot read or retire an outbox itself. *)
+end

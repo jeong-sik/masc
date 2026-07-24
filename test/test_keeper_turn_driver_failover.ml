@@ -944,6 +944,7 @@ let serving_constraint () =
     ~source_ref:"probe://incident/2793"
     ~checked_at_unix_s:0
     ~confidence:Llm_provider.Serving_constraint.High
+    ~expires_at_unix_s:200
     ~accepted_through:524298
     ~rejected_from:524299
     ()

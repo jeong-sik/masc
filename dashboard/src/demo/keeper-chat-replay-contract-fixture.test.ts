@@ -84,11 +84,14 @@ describe('Keeper Chat replay contract fixture', () => {
       ),
     ).not.toBeNull()
 
-    expect(
-      container.querySelector(
-        '[data-chat-entry-id="smoke-legacy-user"][data-chat-stream-contract-badge-state="no-turn-ref"][data-chat-stream-contract-status="history_without_turn_ref"][data-chat-stream-contract-delivery-receipt="no_delivery_receipt"] [data-chat-stream-contract-badge="no-turn-ref"]',
-      ),
-    ).not.toBeNull()
+    // User rows no longer render the no-turn-ref badge (a missing turn_ref is
+    // their normal state); the contract attributes still land in the DOM.
+    const legacyUserRow = container.querySelector(
+      '[data-chat-entry-id="smoke-legacy-user"][data-chat-stream-contract-status="history_without_turn_ref"][data-chat-stream-contract-delivery-receipt="no_delivery_receipt"]',
+    )
+    expect(legacyUserRow).not.toBeNull()
+    expect(legacyUserRow?.getAttribute('data-chat-stream-contract-badge-state')).toBeNull()
+    expect(legacyUserRow?.querySelector('[data-chat-stream-contract-badge]')).toBeNull()
 
     expect(
       container.querySelector(

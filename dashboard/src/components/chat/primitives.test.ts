@@ -389,6 +389,19 @@ describe('ChatTranscript', () => {
         },
       },
       {
+        id: 'smoke-legacy-assistant-no-turn',
+        role: 'assistant',
+        content: 'assistant row without turn ref',
+        ts: 1_780_000_002,
+        source: 'direct_assistant',
+        stream_contract: {
+          source: 'keeper_chat_store',
+          status: 'history_without_turn_ref',
+          delivery_receipt: 'no_delivery_receipt',
+          reason: 'history row has no durable turn_ref; cannot join stream events',
+        },
+      },
+      {
         id: 'smoke-error-assistant',
         role: 'assistant',
         content: 'Keeper request failed: Timeout after 630.0s',
@@ -424,11 +437,19 @@ describe('ChatTranscript', () => {
     expect(legacy.getAttribute('data-chat-stream-contract-source')).toBe('keeper_chat_store')
     expect(legacy.getAttribute('data-chat-stream-contract-status')).toBe('history_without_turn_ref')
     expect(legacy.getAttribute('data-chat-stream-contract-delivery-receipt')).toBe('no_delivery_receipt')
-    expect(legacy.getAttribute('data-chat-stream-contract-badge-state')).toBe('no-turn-ref')
-    const noTurnBadge = legacy.querySelector('[data-chat-stream-contract-badge]')
+    // A missing turn_ref is the normal state of every user row (persisted at
+    // request-accept time, before the turn exists), so the badge is
+    // suppressed there — the contract attributes still render for debugging.
+    expect(legacy.getAttribute('data-chat-stream-contract-badge-state')).toBeNull()
+    expect(legacy.querySelector('[data-chat-stream-contract-badge]')).toBeNull()
+
+    // On assistant rows the same status still marks a real join gap and
+    // renders the badge.
+    const legacyAssistant = container.querySelector('[data-chat-entry-id="smoke-legacy-assistant-no-turn"]') as HTMLElement
+    expect(legacyAssistant).not.toBeNull()
+    expect(legacyAssistant.getAttribute('data-chat-stream-contract-badge-state')).toBe('no-turn-ref')
+    const noTurnBadge = legacyAssistant.querySelector('[data-chat-stream-contract-badge]')
     expect(noTurnBadge?.textContent).toContain('턴 연결 없음')
-    expect(noTurnBadge?.getAttribute('title')).toContain('conversation_id=discord:guild-1:channel:chan-1')
-    expect(noTurnBadge?.getAttribute('title')).toContain('speaker_name=Minsu')
 
     const failure = container.querySelector('[data-chat-entry-id="smoke-error-assistant"]') as HTMLElement
     expect(failure).not.toBeNull()

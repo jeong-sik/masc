@@ -196,9 +196,7 @@ let publish_operator_snapshot_invalidation_if_current ~generation =
 let begin_operator_snapshot_compute () =
   Dashboard_projection_cache.with_snapshot_publication_generation (fun generation ->
     Stdlib.Mutex.protect operator_snapshot_cache_mu (fun () ->
-      ignore
-        (synchronize_operator_snapshot_generation generation
-         : operator_snapshot_publication);
+      ignore (synchronize_operator_snapshot_generation generation);
       mark_cached_surface_attempt operator_snapshot_cache;
       let sequence =
         Atomic.fetch_and_add operator_snapshot_compute_sequence 1 + 1

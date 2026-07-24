@@ -1006,6 +1006,7 @@ let rec converge_requeue_conflict
     ~keeper_name
     ~partition
     ~expected_quarantine_id
+    ()
   =
   let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
   let* candidate =
@@ -1079,6 +1080,7 @@ let rec converge_requeue_conflict
            ~keeper_name
            ~partition
            ~expected_quarantine_id
+           ()
        | Partition.Generation_conflict detail ->
          Error ("partition target generation changed during requeue: " ^ detail))
   | Partition.Ready
@@ -1096,6 +1098,7 @@ let confirm_requeue_outcome
       ~keeper_name
       ~partition
       ~expected_quarantine_id
+      ()
   = function
   | Partition.Requeued transition ->
     confirm_requeue_transition ~base_path transition

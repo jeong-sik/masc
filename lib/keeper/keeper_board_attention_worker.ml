@@ -460,9 +460,6 @@ let candidate_provenance (provenance : Partition.exact_provenance) :
 let attempt_provenance_of_reason = function
   | Partition.Exact_execution_quarantined (Partition.Bound provenance) ->
     Some (candidate_provenance provenance)
-  | Partition.Exact_execution_quarantined
-      (Partition.Advancing { next; _ }) ->
-    Some (candidate_provenance next)
   | Partition.Exact_execution_quarantined Partition.Unbound
   | Partition.Candidate_membership_conflict _
   | Partition.Durable_partition_invariant _
@@ -575,7 +572,7 @@ let running_progress partition =
 
 let preserve_durable_progress partition fallback =
   match running_progress partition with
-  | Some ((Partition.Bound _ | Partition.Advancing _) as progress) ->
+  | Some (Partition.Bound _ as progress) ->
     Partition.Exact_execution_quarantined progress
   | Some Partition.Unbound | None -> fallback
 ;;
@@ -646,7 +643,7 @@ let setup_error_detail = function
     "board exact lane has no admitted slots"
   | Exact_flow.Candidate_invalid { position; slot_id = _ } ->
     Printf.sprintf "board exact lane slot %d has invalid identity" position
-  | Exact_flow.Flow_admission_failed -> "OAS exact-flow admission failed"
+  | Exact_flow.Flow_snapshot_failed -> "OAS exact-flow snapshot failed"
   | Exact_flow.Flow_start_failed -> "OAS exact-flow start failed"
 ;;
 
@@ -668,27 +665,20 @@ let before_dispatch_failure_reason partition ~cause ~current =
   | Some (Partition.Bound durable as progress)
     when exact_provenance_equal durable projected ->
     Partition.Exact_execution_quarantined progress
-  | Some (Partition.Advancing { next; _ } as progress)
-    when exact_provenance_equal next projected ->
-    Partition.Exact_execution_quarantined progress
   | Some Partition.Unbound
-  | Some (Partition.Bound _ | Partition.Advancing _)
+  | Some (Partition.Bound _)
   | None -> callback_invariant "before-dispatch" cause
 ;;
 
-let before_advance_failure_reason partition ~cause ~failed ~next =
+let before_advance_failure_reason partition ~cause ~failed =
   let failed = partition_provenance failed in
-  let next = partition_provenance next in
   match running_progress partition with
   | Some (Partition.Bound durable as progress)
     when exact_provenance_equal durable failed ->
     Partition.Exact_execution_quarantined progress
-  | Some (Partition.Advancing durable as progress)
-    when exact_provenance_equal durable.failed failed
-         && exact_provenance_equal durable.next next ->
-    Partition.Exact_execution_quarantined progress
-  | Some Partition.Unbound
-  | Some (Partition.Bound _ | Partition.Advancing _)
+  | Some Partition.Unbound ->
+    Partition.Exact_execution_quarantined (Partition.Bound failed)
+  | Some (Partition.Bound _)
   | None -> callback_invariant "before-advance" cause
 ;;
 
@@ -699,8 +689,8 @@ let execution_blocked_reason partition = function
       { cause; current; evidence = _ } ->
     before_dispatch_failure_reason partition ~cause ~current
   | Exact_flow.Before_advance_persistence_failed
-      { cause; failed; next; evidence = _ } ->
-    before_advance_failure_reason partition ~cause ~failed ~next
+      { cause; failed; evidence = _ } ->
+    before_advance_failure_reason partition ~cause ~failed
   | Exact_flow.Exact_execution_failed _ ->
     preserve_durable_progress partition Partition.Exact_execution_terminal
   | Exact_flow.Provenance_mismatch detail ->
@@ -709,6 +699,8 @@ let execution_blocked_reason partition = function
       (Partition.Execution_provenance_mismatch detail)
   | Exact_flow.Domain_output_invalid detail ->
     preserve_durable_progress partition (Partition.Domain_output_invalid detail)
+  | Exact_flow.Domain_settlement_failed ->
+    preserve_durable_progress partition Partition.Exact_execution_terminal
 ;;
 
 let confirm_exact_transition latest_partition operation = function
@@ -741,17 +733,14 @@ let before_advance
       ~base_path
       latest_partition
       ~failed
-      ~next
   =
   let failed = partition_provenance failed in
-  let next = partition_provenance next in
-  Partition.record_before_advance
+  Partition.release_before_advance
     ~worker_epoch
     ~base_path
     ~partition:!latest_partition
     ~failed
-    ~next
-  |> confirm_exact_transition latest_partition "exact before-advance record"
+  |> confirm_exact_transition latest_partition "exact before-advance release"
 ;;
 
 let complete_existing_judgment

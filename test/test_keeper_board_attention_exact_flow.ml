@@ -7,7 +7,7 @@ module Judgment = Keeper_board_attention_judgment
 
 type callback_event =
   | Dispatch of Exact_flow.attempt_provenance
-  | Advance of Exact_flow.attempt_provenance * Exact_flow.attempt_provenance
+  | Advance of Exact_flow.attempt_provenance
 
 let has_prompt_root path =
   Sys.file_exists (Filename.concat path "config/prompts")
@@ -235,10 +235,9 @@ let test_explicit_lane_failover_and_success_provenance () =
       in
       let before_advance
             ~(failed : Exact_flow.attempt_provenance)
-            ~(next : Exact_flow.attempt_provenance)
         : (unit, string) result
         =
-        events := Advance (failed, next) :: !events;
+        events := Advance failed :: !events;
         Ok ()
       in
       let judgment =
@@ -255,7 +254,7 @@ let test_explicit_lane_failover_and_success_provenance () =
       Alcotest.(check int) "second slot dispatched once" 1 (Fixture.post_count server);
       match List.rev !events with
       | [ Dispatch first_dispatch
-        ; Advance (failed, next)
+        ; Advance failed
         ; Dispatch second_dispatch
         ] ->
         Alcotest.(check string)
@@ -263,7 +262,6 @@ let test_explicit_lane_failover_and_success_provenance () =
           first.id
           first_dispatch.slot_id;
         check_same_provenance "failed projection" first_dispatch failed;
-        check_same_provenance "next projection" next second_dispatch;
         Alcotest.(check string)
           "second dispatch uses second lane slot"
           second.id
@@ -290,7 +288,7 @@ let test_explicit_lane_failover_and_success_provenance () =
            Alcotest.fail "strict singleton verdict changed decision")
       | _ ->
         Alcotest.fail
-          "expected dispatch(first), advance(first,next), dispatch(next) projections"))
+          "expected dispatch(first), release(first), dispatch(next) projections"))
 ;;
 
 let test_domain_candidate_id_mismatch_does_not_advance () =
@@ -330,13 +328,11 @@ let test_domain_candidate_id_mismatch_does_not_advance () =
       in
       let before_advance
             ~(failed : Exact_flow.attempt_provenance)
-            ~(next : Exact_flow.attempt_provenance)
         : (unit, string) result
         =
         Alcotest.failf
-          "domain-invalid OAS success must not advance from %s to %s"
+          "domain-invalid OAS success must not advance from %s"
           failed.slot_id
-          next.slot_id
       in
       (match
          Exact_flow.execute

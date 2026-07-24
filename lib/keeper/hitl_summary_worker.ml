@@ -80,6 +80,17 @@ let output_requirement =
     ~minimum_guarantee:Exact_output.Json_syntax
 ;;
 
+let flow_preferences, flow_scope =
+  match
+    ( Exact_output.create_flow_preference_store ~capacity:1
+    , Exact_output.make_flow_scope ~id:lane_id )
+  with
+  | Ok preferences, Ok scope -> preferences, scope
+  | Error (Exact_output.Invalid_flow_preference_capacity _), _
+  | _, Error Exact_output.Blank_flow_scope_id ->
+    invalid_arg "static HITL exact-flow scope is invalid"
+;;
+
 type prepared_flow =
   { entry : pending_approval
   ; generated_at : float
@@ -98,7 +109,11 @@ let flow_candidates selected_slots =
   let rec loop candidates = function
     | [] -> Ok (List.rev candidates)
     | (slot : Registry.selected_slot) :: rest ->
-      (match Exact_output.make_flow_candidate ~id:slot.slot_id ~target:slot.target with
+      (match
+         Exact_output.make_flow_candidate
+           ~id:slot.slot_id
+           ~admitted_target:slot.target
+       with
        | Ok candidate -> loop (candidate :: candidates) rest
        | Error Exact_output.Blank_flow_candidate_id ->
          Error "HITL exact-output lane contains a blank slot id")
@@ -106,14 +121,20 @@ let flow_candidates selected_slots =
   loop [] selected_slots
 ;;
 
-let admit_resolved_lane ~messages (resolved : Registry.resolved_lane) =
+let snapshot_resolved_lane ~messages (resolved : Registry.resolved_lane) =
   let* candidates = flow_candidates resolved.selected_slots in
   match candidates with
   | [] -> Error "HITL exact-output lane has no usable candidates"
   | first :: rest ->
-    Exact_output.admit_flow ~first ~rest ~messages output_requirement
+    Exact_output.snapshot_flow
+      ~preferences:flow_preferences
+      ~scope:flow_scope
+      ~first
+      ~rest
+      ~messages
+      output_requirement
     |> Result.map_error (fun _ ->
-      "HITL exact-output flow admitted no candidates")
+      "HITL exact-output flow snapshot failed")
 ;;
 
 let prepare_flow ~(entry : pending_approval) =
@@ -134,13 +155,13 @@ let prepare_flow ~(entry : pending_approval) =
     Registry.resolve_lane registry ~lane_id
     |> Result.map_error lane_error
   in
-  let* ready_flow =
-    admit_resolved_lane
+  let* snapshot =
+    snapshot_resolved_lane
       ~messages:(messages_for_summary ~system_prompt ~context_bundle)
       resolved
   in
   let* attempt =
-    Exact_output.start_flow ready_flow
+    Exact_output.start_flow snapshot
     |> Result.map_error (fun _ ->
       "HITL exact-output flow attempt allocation failed")
   in
@@ -154,8 +175,8 @@ let readiness () =
     Registry.resolve_lane registry ~lane_id
     |> Result.map_error lane_error
   in
-  let* _ready_flow =
-    admit_resolved_lane
+  let* _snapshot =
+    snapshot_resolved_lane
       ~messages:
         (messages_for_summary ~system_prompt ~context_bundle:(`Assoc []))
       resolved
@@ -204,7 +225,7 @@ let exact_identity_of_candidate
       (candidate : Exact_output.flow_attempt_receipt)
   =
   let receipt = candidate.receipt in
-  { slot_id = candidate.identity.candidate_id
+  { slot_id = candidate.visit.identity.candidate_id
   ; call_id =
       receipt
       |> Exact_output.receipt_call_id
@@ -363,18 +384,20 @@ let before_advance
       ~queue_writers
       (entry : pending_approval)
       ~failed
-      ~failure:_
       ~next:_
   =
-  let identity = exact_identity_of_candidate failed in
-  match release_exact_attempt queue_writers entry identity with
-  | Ok { write_outcome = Fsync_completed; _ } -> Ok ()
-  | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
-    Error (Exact_release_sync_unconfirmed detail)
-  | Error error ->
-    Error
-      (Exact_release_failed
-         (Keeper_approval_queue.exact_attempt_error_to_string error))
+  match failed with
+  | Exact_output.Flow_candidate_rejected _ -> Ok ()
+  | Exact_output.Flow_candidate_execution_failed { candidate; cause = _ } ->
+    let identity = exact_identity_of_candidate candidate in
+    (match release_exact_attempt queue_writers entry identity with
+     | Ok { write_outcome = Fsync_completed; _ } -> Ok ()
+     | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
+       Error (Exact_release_sync_unconfirmed detail)
+     | Error error ->
+       Error
+         (Exact_release_failed
+            (Keeper_approval_queue.exact_attempt_error_to_string error)))
 ;;
 
 let log_exact_error (entry : pending_approval) operation detail =
@@ -550,9 +573,9 @@ let receipt_matches
 ;;
 
 let success_provenance_matches (flow_success : Exact_output.flow_success) =
-  let candidate = flow_success.candidate in
-  let identity = candidate.identity in
-  let success = flow_success.success in
+  let candidate = Exact_output.flow_success_candidate flow_success in
+  let identity = candidate.visit.identity in
+  let success = Exact_output.flow_success_output flow_success in
   let provenance = success.provenance in
   String.equal
     (Exact_output.call_id_to_string success.call_id)
@@ -585,9 +608,15 @@ let handle_success
       (flow_success : Exact_output.flow_success)
   =
   let entry = prepared.entry in
-  let candidate = flow_success.candidate in
+  let candidate = Exact_output.flow_success_candidate flow_success in
+  let success = Exact_output.flow_success_output flow_success in
   if not (success_provenance_matches flow_success)
   then (
+    ignore
+      (Exact_output.settle_flow_domain
+         flow_success
+         Exact_output.Domain_rejected
+       : (Exact_output.domain_settlement_receipt, Exact_output.domain_settlement_error) result);
     record_outcome "exact_provenance_mismatch";
     quarantine_candidate entry candidate Exact_flow_execution_failed)
   else
@@ -600,33 +629,47 @@ let handle_success
       parse_summary
         ~generated_at:prepared.generated_at
         ~model_run_id:call_id
-        flow_success.success.output
+        success.output
     with
     | Error detail ->
+      ignore
+        (Exact_output.settle_flow_domain
+           flow_success
+           Exact_output.Domain_rejected
+         : (Exact_output.domain_settlement_receipt, Exact_output.domain_settlement_error) result);
       record_outcome "exact_domain_invalid_output";
       log_exact_error entry "domain validation" detail;
       quarantine_candidate entry candidate Exact_domain_invalid_output
     | Ok summary ->
       let identity = exact_identity_of_candidate candidate in
-      (match complete_exact_attempt queue_writers entry identity summary with
-       | Ok { write_outcome = Fsync_completed; _ } ->
-         record_outcome "ok_summary";
-         on_summary summary
-       | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
-         record_outcome "exact_terminal_sync_unconfirmed";
-         signal_terminalization_persistence_failure
-           entry
-           "completion sync"
-           detail
-       | Error error when exact_attempt_source_resolved entry error ->
-         record_outcome "exact_source_resolved"
-       | Error error ->
-         record_outcome "exact_terminal_persistence_failure";
-         log_exact_error
-           entry
-           "completion"
-           (Keeper_approval_queue.exact_attempt_error_to_string error);
-         quarantine_identity entry identity Exact_terminal_persistence_failure)
+      (match
+         Exact_output.settle_flow_domain
+           flow_success
+           Exact_output.Domain_valid
+       with
+       | Error _ ->
+         record_outcome "exact_domain_settlement_failed";
+         quarantine_identity entry identity Exact_flow_execution_failed
+       | Ok _ ->
+         (match complete_exact_attempt queue_writers entry identity summary with
+          | Ok { write_outcome = Fsync_completed; _ } ->
+            record_outcome "ok_summary";
+            on_summary summary
+          | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->
+            record_outcome "exact_terminal_sync_unconfirmed";
+            signal_terminalization_persistence_failure
+              entry
+              "completion sync"
+              detail
+          | Error error when exact_attempt_source_resolved entry error ->
+            record_outcome "exact_source_resolved"
+          | Error error ->
+            record_outcome "exact_terminal_persistence_failure";
+            log_exact_error
+              entry
+              "completion"
+              (Keeper_approval_queue.exact_attempt_error_to_string error);
+            quarantine_identity entry identity Exact_terminal_persistence_failure))
 ;;
 
 let handle_flow_error (prepared : prepared_flow) = function
@@ -636,6 +679,31 @@ let handle_flow_error (prepared : prepared_flow) = function
       prepared.entry
       ~reason:"HITL exact-output flow attempt was replayed"
       ~cause:Exact_attempt_replay
+  | Exact_output.Flow_success_ordinal_exhausted evidence ->
+    record_outcome "exact_success_ordinal_exhausted";
+    (match List.rev evidence.attempts with
+     | candidate :: _ ->
+       quarantine_candidate
+         prepared.entry
+         candidate
+         Exact_flow_execution_failed
+     | [] ->
+       settle_current_or_signal
+         prepared.entry
+         ~reason:"HITL exact-output success ordinal allocation failed"
+         ~cause:Exact_flow_execution_failed)
+  | Exact_output.Flow_attempt_start_failed _ ->
+    record_outcome "exact_attempt_start_failed";
+    settle_current_or_signal
+      prepared.entry
+      ~reason:"HITL exact-output candidate attempt allocation failed"
+      ~cause:Exact_flow_execution_failed
+  | Exact_output.Flow_candidates_exhausted _ ->
+    record_outcome "exact_candidates_exhausted";
+    settle_current_or_signal
+      prepared.entry
+      ~reason:"HITL exact-output candidates exhausted before dispatch"
+      ~cause:Exact_flow_execution_failed
   | Exact_output.Flow_before_dispatch_callback_failed
       { candidate; cause; _ } ->
     record_outcome "exact_bind_failed";

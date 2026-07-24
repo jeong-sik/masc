@@ -350,7 +350,7 @@ check_boundary() {
   check_lane_binding "${FLOW_ML}" \
     || fail "Board attention exact lane binding contract failed"
   require_once "Exact_output.make_flow_candidate" "${FLOW_ML}"
-  require_once "Exact_output.admit_flow" "${FLOW_ML}"
+  require_once "Exact_output.snapshot_flow" "${FLOW_ML}"
   require_once "Exact_output.start_flow" "${FLOW_ML}"
   require_once "Exact_output.execute_flow_once" "${FLOW_ML}"
   require_once "Exact_flow.prepare" "${WORKER_ML}"

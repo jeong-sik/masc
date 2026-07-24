@@ -230,13 +230,15 @@ type exact_setup_error =
       ; trace_id : string
       ; generation : int
       }
-  | Exact_flow_admission_failed of Exact_output.flow_admission_error
+  | Exact_flow_snapshot_failed of Exact_output.flow_snapshot_error
   | Exact_flow_start_failed of Exact_output.flow_start_error
 
 type exact_execution_failure =
   | Exact_attempt_already_started
   | Exact_callback_persistence_failed of string
   | Exact_provider_execution_failed of Exact_output.execution_error_cause
+  | Exact_flow_progress_failed of string
+  | Exact_domain_settlement_failed
 
 type exact_execution_error =
   { dispatched : bool
@@ -287,7 +289,7 @@ let exact_setup_error_to_string = function
       state
       trace_id
       generation
-  | Exact_flow_admission_failed
+  | Exact_flow_snapshot_failed
       (Exact_output.Duplicate_flow_candidate_id
          { candidate_id; first_position; duplicate_position }) ->
     Printf.sprintf
@@ -295,22 +297,14 @@ let exact_setup_error_to_string = function
       candidate_id
       first_position
       duplicate_position
-  | Exact_flow_admission_failed (No_admitted_flow_candidates admissions) ->
+  | Exact_flow_snapshot_failed
+      (Exact_output.Flow_preference_capacity_exhausted { capacity }) ->
     Printf.sprintf
-      "exact flow has no admitted candidates (candidates=%d)"
-      (List.length admissions)
+      "exact flow preference capacity exhausted capacity=%d"
+      capacity
   | Exact_flow_start_failed
-      (Exact_output.Flow_candidate_attempt_start_failed
-         { identity; position; cause; admissions = _ }) ->
-    let detail =
-      match cause with
-      | Exact_output.Call_id_generation_failed detail -> detail
-    in
-    Printf.sprintf
-      "exact flow attempt start failed candidate=%S position=%d: %s"
-      identity.candidate_id
-      position
-      detail
+      (Exact_output.Flow_id_generation_failed detail) ->
+    "exact flow identity allocation failed: " ^ detail
 ;;
 
 let extraction_error_to_string = function
@@ -325,6 +319,10 @@ let extraction_error_to_string = function
         "callback_persistence_failed: " ^ detail
       | Exact_provider_execution_failed cause ->
         execution_error_cause_to_string cause
+      | Exact_flow_progress_failed detail ->
+        "flow_progress_failed: " ^ detail
+      | Exact_domain_settlement_failed ->
+        "domain_settlement_failed"
     in
     Printf.sprintf
       "librarian exact execution failed dispatched=%b cause=%s"
@@ -415,7 +413,7 @@ let receipt_json (receipt : Exact_output.receipt) =
 
 let attempt_receipt_json (attempt : Exact_output.flow_attempt_receipt) =
   `Assoc
-    [ "candidate_id", `String attempt.identity.candidate_id
+    [ "candidate_id", `String attempt.visit.identity.candidate_id
     ; "receipt", receipt_json attempt.receipt
     ]
 ;;
@@ -501,7 +499,11 @@ let flow_candidates selected_slots =
   let rec loop position acc = function
     | [] -> Ok (List.rev acc)
     | (slot : Runtime_exact_output_registry.selected_slot) :: rest ->
-      (match Exact_output.make_flow_candidate ~id:slot.slot_id ~target:slot.target with
+      (match
+         Exact_output.make_flow_candidate
+           ~id:slot.slot_id
+           ~admitted_target:slot.target
+       with
        | Ok candidate -> loop (position + 1) (candidate :: acc) rest
        | Error Exact_output.Blank_flow_candidate_id ->
          Error
@@ -513,24 +515,44 @@ let flow_candidates selected_slots =
   loop 0 [] selected_slots
 ;;
 
-let exact_execution_error = function
+let flow_preferences, flow_scope =
+  match
+    ( Exact_output.create_flow_preference_store ~capacity:1
+    , Exact_output.make_flow_scope ~id:exact_lane_id )
+  with
+  | Ok preferences, Ok scope -> preferences, scope
+  | Error (Exact_output.Invalid_flow_preference_capacity _), _
+  | _, Error Exact_output.Blank_flow_scope_id ->
+    invalid_arg "static Librarian exact-flow scope is invalid"
+;;
+
+let exact_execution_error error =
+  let dispatched =
+    match Exact_output.flow_execution_error_outward_dispatch error with
+    | Exact_output.No_outward_dispatch -> false
+    | Exact_output.Outward_dispatch_started -> true
+  in
+  let failure =
+    match error with
   | Exact_output.Flow_attempt_already_started _ ->
-    { dispatched = false; failure = Exact_attempt_already_started }
-  | Flow_before_dispatch_callback_failed { candidate; cause; evidence = _ } ->
-    { dispatched =
-        Exact_output.receipt_dispatch_count candidate.receipt > 0
-    ; failure = Exact_callback_persistence_failed cause
-    }
-  | Flow_before_advance_callback_failed
-      { failed; failure = _; next = _; cause; evidence = _ } ->
-    { dispatched =
-        Exact_output.receipt_dispatch_count failed.receipt > 0
-    ; failure = Exact_callback_persistence_failed cause
-    }
-  | Flow_exact_execution_failed { candidate = _; cause; evidence = _ } ->
-    { dispatched = Exact_output.receipt_dispatch_count cause.receipt > 0
-    ; failure = Exact_provider_execution_failed cause.cause
-    }
+    Exact_attempt_already_started
+  | Flow_success_ordinal_exhausted _ ->
+    Exact_flow_progress_failed "success_ordinal_exhausted"
+  | Flow_attempt_start_failed { cause; _ } ->
+    let detail =
+      match cause with
+      | Exact_output.Call_id_generation_failed detail -> detail
+    in
+    Exact_flow_progress_failed ("attempt_start_failed: " ^ detail)
+  | Flow_before_dispatch_callback_failed { cause; _ }
+  | Flow_before_advance_callback_failed { cause; _ } ->
+    Exact_callback_persistence_failed cause
+  | Flow_candidates_exhausted _ ->
+    Exact_flow_progress_failed "candidates_exhausted"
+  | Flow_exact_execution_failed { cause; _ } ->
+    Exact_provider_execution_failed cause.cause
+  in
+  { dispatched; failure }
 ;;
 
 let persist_exact_execution_terminal
@@ -550,6 +572,26 @@ let persist_exact_execution_terminal
       [ "candidate", attempt_receipt_json candidate
       ; "failure_cause", `String (execution_error_cause_to_string cause.cause)
       ]
+  | Flow_success_ordinal_exhausted evidence ->
+    (match List.rev evidence.attempts with
+     | candidate :: _ ->
+       persist_exact_flow_state
+         ~keeper_id
+         ~trace_id
+         ~generation
+         ~state:"execution_terminal"
+         [ "candidate", attempt_receipt_json candidate
+         ; "failure_cause", `String "success_ordinal_exhausted"
+         ]
+     | [] -> Error "success ordinal exhausted without attempt evidence")
+  | Flow_attempt_start_failed _
+  | Flow_candidates_exhausted _ ->
+    persist_exact_flow_state
+      ~keeper_id
+      ~trace_id
+      ~generation
+      ~state:"execution_terminal"
+      []
   | Flow_attempt_already_started _ -> Ok ()
   | Flow_before_dispatch_callback_failed { cause; _ }
   | Flow_before_advance_callback_failed { cause; _ } ->
@@ -600,16 +642,18 @@ let extract_with_exact_output_classified_unlocked
                     ~minimum_guarantee:Exact_output.Json_syntax
                 in
                 (match
-                   Exact_output.admit_flow
+                   Exact_output.snapshot_flow
+                     ~preferences:flow_preferences
+                     ~scope:flow_scope
                      ~first
                      ~rest
                      ~messages
                      requirement
                  with
                  | Error error ->
-                   Error (Exact_setup_failed (Exact_flow_admission_failed error))
-                 | Ok ready_flow ->
-                   (match Exact_output.start_flow ready_flow with
+                   Error (Exact_setup_failed (Exact_flow_snapshot_failed error))
+                 | Ok snapshot ->
+                   (match Exact_output.start_flow snapshot with
                     | Error error ->
                       Error (Exact_setup_failed (Exact_flow_start_failed error))
                     | Ok attempt ->
@@ -624,19 +668,22 @@ let extract_with_exact_output_classified_unlocked
                                ~generation
                                ~state:"candidate_bound"
                                [ "candidate", attempt_receipt_json candidate ])
-                           ~before_advance:(fun ~failed ~failure ~next ->
-                             persist_exact_flow_state
-                               ~keeper_id
-                               ~trace_id:inp.trace_id
-                               ~generation
-                               ~state:"candidate_advance_committed"
-                               [ "failed_candidate", attempt_receipt_json failed
-                               ; ( "failure_cause"
-                                 , `String
-                                     (execution_error_cause_to_string
-                                        failure.cause) )
-                               ; "next_candidate", attempt_receipt_json next
-                               ])
+                           ~before_advance:(fun ~failed ~next:_ ->
+                             match failed with
+                             | Exact_output.Flow_candidate_rejected _ -> Ok ()
+                             | Exact_output.Flow_candidate_execution_failed
+                                 { candidate; cause } ->
+                               persist_exact_flow_state
+                                 ~keeper_id
+                                 ~trace_id:inp.trace_id
+                                 ~generation
+                                 ~state:"execution_terminal"
+                                 [ "candidate", attempt_receipt_json candidate
+                                 ; ( "failure_cause"
+                                   , `String
+                                       (execution_error_cause_to_string
+                                          cause.cause) )
+                                 ])
                            attempt
                        with
                        | Error error ->
@@ -658,13 +705,19 @@ let extract_with_exact_output_classified_unlocked
                                      Exact_callback_persistence_failed detail
                                  }))
                        | Ok success ->
+                         let candidate =
+                           Exact_output.flow_success_candidate success
+                         in
+                         let output =
+                           Exact_output.flow_success_output success
+                         in
                          (match
                             persist_exact_flow_state
                               ~keeper_id
                               ~trace_id:inp.trace_id
                               ~generation
                               ~state:"oas_success"
-                              [ "candidate", attempt_receipt_json success.candidate ]
+                              [ "candidate", attempt_receipt_json candidate ]
                           with
                           | Error detail ->
                             Error
@@ -678,17 +731,34 @@ let extract_with_exact_output_classified_unlocked
                                Keeper_librarian.episode_of_json_result
                                  ~generation
                                  inp
-                                 success.success.output
+                                 output.output
                              with
                              | Ok episode ->
-                               (match
+                               let domain_settled =
+                                 match
+                                   Exact_output.settle_flow_domain
+                                     success
+                                     Exact_output.Domain_valid
+                                 with
+                                 | Ok _ -> true
+                                 | Error _ -> false
+                               in
+                               if not domain_settled
+                               then
+                                 Error
+                                   (Exact_execution_failed
+                                      { dispatched = true
+                                      ; failure = Exact_domain_settlement_failed
+                                      })
+                               else
+                                 (match
                                   persist_exact_flow_state
                                     ~keeper_id
                                     ~trace_id:inp.trace_id
                                     ~generation
                                     ~state:"domain_valid"
                                     [ ( "candidate"
-                                      , attempt_receipt_json success.candidate )
+                                      , attempt_receipt_json candidate )
                                     ]
                                 with
                                 | Ok () -> Ok episode
@@ -703,14 +773,31 @@ let extract_with_exact_output_classified_unlocked
                                let parse_error =
                                  Keeper_librarian.parse_error_to_string error
                                in
-                               (match
+                               let domain_settled =
+                                 match
+                                   Exact_output.settle_flow_domain
+                                     success
+                                     Exact_output.Domain_rejected
+                                 with
+                                 | Ok _ -> true
+                                 | Error _ -> false
+                               in
+                               if not domain_settled
+                               then
+                                 Error
+                                   (Exact_execution_failed
+                                      { dispatched = true
+                                      ; failure = Exact_domain_settlement_failed
+                                      })
+                               else
+                                 (match
                                   persist_exact_flow_state
                                     ~keeper_id
                                     ~trace_id:inp.trace_id
                                     ~generation
                                     ~state:"domain_invalid"
                                     [ ( "candidate"
-                                      , attempt_receipt_json success.candidate )
+                                      , attempt_receipt_json candidate )
                                     ; "parse_error", `String parse_error
                                     ]
                                 with

@@ -36,10 +36,6 @@ type exact_provenance =
 type running_progress =
   | Unbound
   | Bound of exact_provenance
-  | Advancing of
-      { failed : exact_provenance
-      ; next : exact_provenance
-      }
 
 type blocked_reason =
   | Candidate_membership_conflict of string
@@ -116,7 +112,7 @@ val ensure_roots :
 val recover_for_process_start :
   now:float -> base_path:string -> keeper_name:string -> (int, string) result
 (** Canonically compact the append ledger. Only [Running Unbound] returns to
-    [Ready]. [Bound] and [Advancing] executions become terminal
+    [Ready]. [Bound] executions become terminal
     [Blocked (Exact_execution_quarantined _)] and can never be redispatched.
     The return value is the number of Running roots terminalized or released.
     Old schema rows and non-tail malformed JSON are rejected without migration.
@@ -141,21 +137,21 @@ val bind_before_dispatch :
   partition:t ->
   provenance:exact_provenance ->
   (exact_transition, string) result
-(** Cursor-fenced durable [before_dispatch] callback. The initial call moves
-    [Unbound -> Bound]. After an exact [before_advance], only its retained
-    [next] identity can move [Advancing -> Bound]. An idempotent call appends
-    the same row again so only [Fsync_completed] authorizes OAS dispatch. *)
+(** Cursor-fenced durable [before_dispatch] callback. The call moves
+    [Unbound -> Bound]. An idempotent repeat retains the same binding so only
+    [Fsync_completed] authorizes OAS dispatch. *)
 
-val record_before_advance :
+val release_before_advance :
   worker_epoch:Worker_epoch.t ->
   base_path:string ->
   partition:t ->
   failed:exact_provenance ->
-  next:exact_provenance ->
   (exact_transition, string) result
-(** Atomically persist [Bound failed -> Advancing {failed; next}] before OAS
-    advances. The callback accepts no Provider failure, receipt phase, or
-    dispatch count. Only [Fsync_completed] authorizes advancement. *)
+(** Atomically persist [Bound failed -> Unbound] before OAS advances from a
+    zero-dispatch execution failure. Rejected candidates have no receipt and
+    require no MASC state transition. The callback accepts no Provider failure,
+    successor identity, receipt phase, or dispatch count. Only
+    [Fsync_completed] authorizes advancement. *)
 
 val complete :
   now:float ->
@@ -177,7 +173,7 @@ val complete_existing_judgment :
   (exact_transition, string) result
 (** Atomically project a current-schema judgment already durable in the
     Candidate ledger from [Running Unbound] directly to [Completed]. This
-    creates no dispatch binding; [Bound] and [Advancing] are rejected. The
+    creates no dispatch binding; [Bound] is rejected. The
     caller must inspect the exact write outcome. *)
 
 val confirm_completed :

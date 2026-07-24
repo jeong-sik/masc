@@ -531,47 +531,45 @@ let test_existing_judgment_completion_is_atomic_and_restart_safe () =
          { candidate_id = bound_candidate.candidate_id
          ; judgment = judgment bound_proof
          });
-  let advancing_claim = claim ~base_path ~worker_epoch:owner ~now:15.0 in
+  let released_claim = claim ~base_path ~worker_epoch:owner ~now:15.0 in
   let failed =
     provenance ~slot_id:"failed-existing-slot" ~call_id:"failed-existing-call" ()
   in
-  let next =
-    provenance ~slot_id:"next-existing-slot" ~call_id:"next-existing-call" ()
-  in
-  let advancing_bound =
+  let released_bound =
     P.bind_before_dispatch
       ~worker_epoch:owner
       ~base_path
-      ~partition:advancing_claim
+      ~partition:released_claim
       ~provenance:failed
-    |> ok "bind advancing existing-judgment rejection fixture"
-    |> fsynced "bind advancing existing-judgment rejection fixture"
+    |> ok "bind released existing-judgment rejection fixture"
+    |> fsynced "bind released existing-judgment rejection fixture"
   in
-  let advancing =
-    P.record_before_advance
+  let released =
+    P.release_before_advance
       ~worker_epoch:owner
       ~base_path
-      ~partition:advancing_bound
+      ~partition:released_bound
       ~failed
-      ~next
-    |> ok "advance existing-judgment rejection fixture"
-    |> fsynced "advance existing-judgment rejection fixture"
+    |> ok "release existing-judgment rejection fixture"
+    |> fsynced "release existing-judgment rejection fixture"
   in
-  expect_error
-    "existing judgment rejects Advancing"
+  ignore
     (P.complete_existing_judgment
        ~now:16.0
        ~worker_epoch:owner
        ~base_path
-       ~partition:advancing
+       ~partition:released
        ~item:
          { candidate_id = advancing_candidate.candidate_id
-         ; judgment = judgment next
-         });
+         ; judgment = judgment failed
+         }
+     |> ok "complete existing judgment after zero-dispatch release"
+     |> fsynced "complete existing judgment after zero-dispatch release"
+      : P.t);
   ignore (completed : P.t)
 ;;
 
-let test_before_advance_is_atomic_and_exact () =
+let test_before_advance_release_is_atomic_and_exact () =
   with_temp_base "board-attention-partition-advance" @@ fun base_path ->
   let pending = candidate ~id:"candidate-advance" ~recorded_at:1.0 () in
   ignore (roots ~base_path [ pending ] : P.t list);
@@ -590,64 +588,33 @@ let test_before_advance_is_atomic_and_exact () =
   in
   expect_error
     "before advance requires exact failed binding"
-    (P.record_before_advance
+    (P.release_before_advance
        ~worker_epoch:owner
        ~base_path
        ~partition:bound
-       ~failed:(provenance ~call_id:"other-call" ())
-       ~next);
-  expect_error
-    "before advance rejects same attempt"
-    (P.record_before_advance
-       ~worker_epoch:owner
-       ~base_path
-       ~partition:bound
-       ~failed
-       ~next:failed);
-  let advancing_transition =
+       ~failed:(provenance ~call_id:"other-call" ()));
+  let release_transition =
     ok
-      "record before advance"
-      (P.record_before_advance
+      "release before advance"
+      (P.release_before_advance
          ~worker_epoch:owner
          ~base_path
          ~partition:bound
-         ~failed
-         ~next)
+         ~failed)
   in
-  Alcotest.(check bool) "advance changes durable state" true advancing_transition.changed;
-  let advancing = fsynced "record before advance" advancing_transition in
-  (match advancing.state with
-   | P.Running { progress = P.Advancing durable; _ } ->
-     Alcotest.(check bool) "failed proof retained" true (durable.failed = failed);
-     Alcotest.(check bool) "next proof retained" true (durable.next = next)
-   | _ -> Alcotest.fail "partition was not Advancing");
-  let repeated =
-    ok
-      "repeat before advance"
-      (P.record_before_advance
-         ~worker_epoch:owner
-         ~base_path
-         ~partition:advancing
-         ~failed
-         ~next)
-  in
-  Alcotest.(check bool) "idempotent advance reports no state change" false repeated.changed;
-  ignore (fsynced "repeat before advance" repeated : P.t);
-  expect_error
-    "advancing can bind only retained next proof"
-    (P.bind_before_dispatch
-       ~worker_epoch:owner
-       ~base_path
-       ~partition:advancing
-       ~provenance:(provenance ~call_id:"unplanned-call" ()));
+  Alcotest.(check bool) "release changes durable state" true release_transition.changed;
+  let released = fsynced "release before advance" release_transition in
+  (match released.state with
+   | P.Running { progress = P.Unbound; _ } -> ()
+   | _ -> Alcotest.fail "released partition was not Unbound");
   let rebound =
     P.bind_before_dispatch
       ~worker_epoch:owner
       ~base_path
-      ~partition:advancing
+      ~partition:released
       ~provenance:next
-    |> ok "bind retained next"
-    |> fsynced "bind retained next"
+    |> ok "bind OAS-selected successor"
+    |> fsynced "bind OAS-selected successor"
   in
   expect_error
     "completion cannot use prior attempt provenance"
@@ -726,9 +693,8 @@ let test_restart_releases_only_unbound_and_quarantines_dispatchable () =
   with_temp_base "board-attention-partition-restart-hard-cut" @@ fun base_path ->
   let unbound_candidate = candidate ~id:"candidate-unbound" ~recorded_at:1.0 () in
   let bound_candidate = candidate ~id:"candidate-bound" ~recorded_at:2.0 () in
-  let advancing_candidate = candidate ~id:"candidate-advancing" ~recorded_at:3.0 () in
   ignore
-    (roots ~base_path [ advancing_candidate; bound_candidate; unbound_candidate ] : P.t list);
+    (roots ~base_path [ bound_candidate; unbound_candidate ] : P.t list);
   let owner = P.Worker_epoch.generate () in
   let unbound = claim ~base_path ~worker_epoch:owner ~now:10.0 in
   let bound_claim = claim ~base_path ~worker_epoch:owner ~now:11.0 in
@@ -742,37 +708,15 @@ let test_restart_releases_only_unbound_and_quarantines_dispatchable () =
      |> ok "bind restart fixture"
      |> fsynced "bind restart fixture"
       : P.t);
-  let advancing_claim = claim ~base_path ~worker_epoch:owner ~now:12.0 in
-  let failed = provenance ~slot_id:"failed-slot" ~call_id:"failed-call" () in
-  let next = provenance ~slot_id:"next-slot" ~call_id:"next-call" () in
-  let advancing_bound =
-    P.bind_before_dispatch
-      ~worker_epoch:owner
-      ~base_path
-      ~partition:advancing_claim
-      ~provenance:failed
-    |> ok "bind advancing fixture"
-    |> fsynced "bind advancing fixture"
-  in
-  ignore
-    (P.record_before_advance
-       ~worker_epoch:owner
-       ~base_path
-       ~partition:advancing_bound
-       ~failed
-       ~next
-     |> ok "advance restart fixture"
-     |> fsynced "advance restart fixture"
-      : P.t);
   Alcotest.(check int)
     "all prior Running roots are explicitly resolved"
-    3
+    2
     (ok
        "process-start recovery"
        (P.recover_for_process_start ~now:20.0 ~base_path ~keeper_name:"sangsu"));
   let recovered = ok "load recovered partitions" (P.load ~base_path ~keeper_name:"sangsu") in
   (match recovered with
-   | [ first; second; third ] ->
+   | [ first; second ] ->
      (match first.state with
       | P.Ready ->
         Alcotest.(check string)
@@ -785,12 +729,6 @@ let test_restart_releases_only_unbound_and_quarantines_dispatchable () =
           { reason = P.Exact_execution_quarantined (P.Bound durable); _ } ->
         Alcotest.(check bool) "Bound proof retained in quarantine" true (durable = bound_proof)
       | _ -> Alcotest.fail "Bound Running was not quarantined");
-     (match third.state with
-      | P.Blocked
-          { reason = P.Exact_execution_quarantined (P.Advancing durable); _ } ->
-        Alcotest.(check bool) "failed proof retained in quarantine" true (durable.failed = failed);
-        Alcotest.(check bool) "next proof retained in quarantine" true (durable.next = next)
-      | _ -> Alcotest.fail "Advancing Running was not quarantined");
      let settled_blocked =
        ok "settle terminal Blocked" (P.settle ~now:21.0 ~base_path ~partition:second)
      in
@@ -1041,9 +979,9 @@ let () =
             `Quick
             test_existing_judgment_completion_is_atomic_and_restart_safe
         ; Alcotest.test_case
-            "before advance is atomic and exact"
+            "before advance release is atomic and exact"
             `Quick
-            test_before_advance_is_atomic_and_exact
+            test_before_advance_release_is_atomic_and_exact
         ; Alcotest.test_case
             "runtime transitions append then startup compacts"
             `Quick

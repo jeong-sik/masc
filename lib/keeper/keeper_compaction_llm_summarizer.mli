@@ -68,9 +68,9 @@ type summarizer =
 
 (** Pure lane lookup and construction of one immutable OAS exact flow against
     exactly one caller-supplied registry generation. MASC supplies only ordered
-    opaque slot identities and domain messages/schema. OAS performs candidate
-    admission and allocates every non-shared affine attempt before any network
-    effect. *)
+    opaque slot identities and domain messages/schema. OAS freezes candidate
+    visits and allocates one non-shared affine attempt only when that candidate
+    is reached, before any network effect. *)
 val prepare_lane
   :  keeper_name:string
   -> registry:Runtime_exact_output_registry.t

@@ -48,9 +48,9 @@ forbid_pattern() {
 
 check_boundary() {
   require_pattern \
-    'Exact_output\.admit_flow' \
+    'Exact_output\.snapshot_flow' \
     "$WORKER" \
-    "worker must admit one immutable OAS flow"
+    "worker must snapshot one immutable OAS flow"
   require_pattern \
     'Exact_output\.start_flow' \
     "$WORKER" \

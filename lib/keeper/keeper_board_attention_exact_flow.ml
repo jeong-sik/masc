@@ -14,7 +14,7 @@ type setup_error =
       { position : int
       ; slot_id : string
       }
-  | Flow_admission_failed
+  | Flow_snapshot_failed
   | Flow_start_failed
 
 type attempt_provenance =
@@ -34,12 +34,12 @@ type 'callback_error execution_error =
   | Before_advance_persistence_failed of
       { cause : 'callback_error
       ; failed : attempt_provenance
-      ; next : attempt_provenance
       ; evidence : attempt_provenance list
       }
   | Exact_execution_failed of attempt_provenance list
   | Provenance_mismatch of string
   | Domain_output_invalid of string
+  | Domain_settlement_failed
 
 type prepared =
   { candidate : Keeper_board_attention_candidate.candidate
@@ -49,6 +49,17 @@ type prepared =
 
 let message role text =
   Agent_sdk.Types.make_message ~role [ Agent_sdk.Types.Text text ]
+;;
+
+let flow_preferences, flow_scope =
+  match
+    ( Exact_output.create_flow_preference_store ~capacity:1
+    , Exact_output.make_flow_scope ~id:lane_id )
+  with
+  | Ok preferences, Ok scope -> preferences, scope
+  | Error (Exact_output.Invalid_flow_preference_capacity _), _
+  | _, Error Exact_output.Blank_flow_scope_id ->
+    invalid_arg "static Board attention exact-flow scope is invalid"
 ;;
 
 let messages candidate =
@@ -68,7 +79,9 @@ let flow_candidates selected_slots =
     | [] -> Ok (List.rev acc)
     | (slot : Runtime_exact_output_registry.selected_slot) :: rest ->
       (match
-         Exact_output.make_flow_candidate ~id:slot.slot_id ~target:slot.target
+         Exact_output.make_flow_candidate
+           ~id:slot.slot_id
+           ~admitted_target:slot.target
        with
        | Ok candidate -> loop (position + 1) (candidate :: acc) rest
        | Error Exact_output.Blank_flow_candidate_id ->
@@ -114,12 +127,18 @@ let prepare ~net candidate =
              .board_attention_judgment_batch_output_schema
            ~minimum_guarantee:Exact_output.Json_syntax
        in
-       let* ready_flow =
-         Exact_output.admit_flow ~first ~rest ~messages requirement
-         |> Result.map_error (fun _ -> Flow_admission_failed)
+       let* snapshot =
+         Exact_output.snapshot_flow
+           ~preferences:flow_preferences
+           ~scope:flow_scope
+           ~first
+           ~rest
+           ~messages
+           requirement
+         |> Result.map_error (fun _ -> Flow_snapshot_failed)
        in
        let* attempt =
-         Exact_output.start_flow ready_flow
+         Exact_output.start_flow snapshot
          |> Result.map_error (fun _ -> Flow_start_failed)
        in
        Ok { candidate; net; attempt })
@@ -130,7 +149,7 @@ let string_of_call_id call_id = Exact_output.call_id_to_string call_id
 let attempt_provenance
       (attempt : Exact_output.flow_attempt_receipt)
   =
-  { slot_id = attempt.identity.candidate_id
+  { slot_id = attempt.visit.identity.candidate_id
   ; call_id =
       attempt.receipt
       |> Exact_output.receipt_call_id
@@ -150,7 +169,7 @@ let admitted_candidate candidate_id admissions =
   List.find_map
     (function
       | Exact_output.Candidate_admitted admitted
-        when String.equal admitted.identity.candidate_id candidate_id ->
+        when String.equal admitted.visit.identity.candidate_id candidate_id ->
         Some admitted
       | Exact_output.Candidate_admitted _ | Exact_output.Candidate_rejected _ ->
         None)
@@ -167,12 +186,16 @@ let require_equal ~field left right =
 ;;
 
 let judgment_of_success candidate (flow_success : Exact_output.flow_success) =
-  let selected = flow_success.candidate in
-  let success = flow_success.success in
+  let selected = Exact_output.flow_success_candidate flow_success in
+  let success = Exact_output.flow_success_output flow_success in
   let current = attempt_provenance selected in
   let slot_id = current.slot_id in
   let* admitted =
-    match admitted_candidate slot_id flow_success.evidence.admissions with
+    match
+      admitted_candidate
+        slot_id
+        (Exact_output.flow_success_evidence flow_success).admissions
+    with
     | Some admitted -> Ok admitted
     | None ->
       Error
@@ -290,6 +313,7 @@ let terminal_outcome = function
   | Error (Exact_execution_failed _) -> Exact_execution_failure
   | Error (Provenance_mismatch _) -> Execution_provenance_mismatch
   | Error (Domain_output_invalid _) -> Invalid_domain_output
+  | Error Domain_settlement_failed -> Exact_execution_failure
 ;;
 
 let observe_terminal prepared result =
@@ -304,10 +328,11 @@ let execute ?clock ~before_dispatch ~before_advance prepared =
   let oas_before_dispatch receipt =
     before_dispatch (attempt_provenance receipt)
   in
-  let oas_before_advance ~failed ~failure:_ ~next =
-    before_advance
-      ~failed:(attempt_provenance failed)
-      ~next:(attempt_provenance next)
+  let oas_before_advance ~failed ~next:_ =
+    match failed with
+    | Exact_output.Flow_candidate_rejected _ -> Ok ()
+    | Exact_output.Flow_candidate_execution_failed { candidate; cause = _ } ->
+      before_advance ~failed:(attempt_provenance candidate)
   in
   let result =
     match
@@ -318,7 +343,23 @@ let execute ?clock ~before_dispatch ~before_advance prepared =
         ~before_advance:oas_before_advance
         prepared.attempt
     with
-    | Ok success -> judgment_of_success prepared.candidate success
+    | Ok success ->
+      (match judgment_of_success prepared.candidate success with
+       | Ok judgment ->
+         (match
+            Exact_output.settle_flow_domain
+              success
+              Exact_output.Domain_valid
+          with
+          | Ok _ -> Ok judgment
+          | Error _ -> Error Domain_settlement_failed)
+       | Error error ->
+         ignore
+           (Exact_output.settle_flow_domain
+              success
+              Exact_output.Domain_rejected
+            : (Exact_output.domain_settlement_receipt, Exact_output.domain_settlement_error) result);
+         Error error)
     | Error (Exact_output.Flow_attempt_already_started evidence) ->
       Error (Flow_already_started (evidence_provenance evidence))
     | Error
@@ -332,14 +373,30 @@ let execute ?clock ~before_dispatch ~before_advance prepared =
            })
     | Error
         (Exact_output.Flow_before_advance_callback_failed
-           { cause; evidence; failed; failure = _; next }) ->
+           { cause
+           ; evidence
+           ; failed =
+               Exact_output.Flow_candidate_execution_failed
+                 { candidate; cause = _ }
+           ; next = _
+           }) ->
       Error
         (Before_advance_persistence_failed
            { cause
-           ; failed = attempt_provenance failed
-           ; next = attempt_provenance next
+           ; failed = attempt_provenance candidate
            ; evidence = evidence_provenance evidence
            })
+    | Error
+        (Exact_output.Flow_before_advance_callback_failed
+           { failed = Exact_output.Flow_candidate_rejected _
+           ; evidence
+           ; _
+           }) ->
+      Error (Exact_execution_failed (evidence_provenance evidence))
+    | Error (Exact_output.Flow_success_ordinal_exhausted evidence)
+    | Error (Exact_output.Flow_attempt_start_failed { evidence; _ })
+    | Error (Exact_output.Flow_candidates_exhausted { evidence; _ }) ->
+      Error (Exact_execution_failed (evidence_provenance evidence))
     | Error
         (Exact_output.Flow_exact_execution_failed
            { evidence; candidate = _; cause = _ }) ->

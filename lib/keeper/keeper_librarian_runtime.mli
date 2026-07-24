@@ -109,13 +109,15 @@ type exact_setup_error =
       ; trace_id : string
       ; generation : int
       }
-  | Exact_flow_admission_failed of Agent_sdk.Exact_output.flow_admission_error
+  | Exact_flow_snapshot_failed of Agent_sdk.Exact_output.flow_snapshot_error
   | Exact_flow_start_failed of Agent_sdk.Exact_output.flow_start_error
 
 type exact_execution_failure =
   | Exact_attempt_already_started
   | Exact_callback_persistence_failed of string
   | Exact_provider_execution_failed of Agent_sdk.Exact_output.execution_error_cause
+  | Exact_flow_progress_failed of string
+  | Exact_domain_settlement_failed
 
 type exact_execution_error =
   { dispatched : bool

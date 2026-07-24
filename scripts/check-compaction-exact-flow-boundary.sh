@@ -29,7 +29,7 @@ check_boundary() {
   [[ -f "${TARGET}" ]] || fail "target not found: ${TARGET}"
 
   require_once "Exact_output.make_flow_candidate"
-  require_once "Exact_output.admit_flow"
+  require_once "Exact_output.snapshot_flow"
   require_once "Exact_output.start_flow"
   require_once "Exact_output.execute_flow_once"
 
@@ -86,7 +86,7 @@ self_test() {
   target="${fixture}/lib/keeper/keeper_compaction_llm_summarizer.ml"
   cat >"${target}" <<'EOF'
 let _ = Exact_output.make_flow_candidate
-let _ = Exact_output.admit_flow
+let _ = Exact_output.snapshot_flow
 let _ = Exact_output.start_flow
 let _ = Exact_output.execute_flow_once
 EOF

@@ -16,7 +16,7 @@ type setup_error =
       { position : int
       ; slot_id : string
       }
-  | Flow_admission_failed
+  | Flow_snapshot_failed
   | Flow_start_failed
 
 type attempt_provenance =
@@ -39,18 +39,18 @@ type 'callback_error execution_error =
   | Before_advance_persistence_failed of
       { cause : 'callback_error
       ; failed : attempt_provenance
-      ; next : attempt_provenance
       ; evidence : attempt_provenance list
       }
   | Exact_execution_failed of attempt_provenance list
   | Provenance_mismatch of string
   | Domain_output_invalid of string
+  | Domain_settlement_failed
 
 type prepared
 
 val lane_id : string
 
-(** Admit only an effective resumable pending candidate. Quarantined and
+(** Snapshot only an effective resumable pending candidate. Quarantined and
     requeue-requested candidates are not executable; a durably requeued pending
     candidate is executable through the same exact flow as a normal pending one. *)
 val prepare :
@@ -66,7 +66,6 @@ val execute :
     (attempt_provenance -> (unit, 'callback_error) result) ->
   before_advance:
     (failed:attempt_provenance ->
-     next:attempt_provenance ->
      (unit, 'callback_error) result) ->
   prepared ->
   ( Keeper_board_attention_candidate.judgment

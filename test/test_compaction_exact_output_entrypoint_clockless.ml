@@ -112,10 +112,11 @@ let with_clockless_eio_context env sw f =
     | Some _ -> fail "clock was installed inside the clockless exact-output scope")
 ;;
 
-let test_invalid_plan_is_distinct_from_before_dispatch_failure () =
-  (* Both typed failures cross the real production composition boundary:
-     domain-invalid output dispatches once, while a timeout requiring an absent
-     clock is rejected before dispatch and performs no POST. *)
+let test_domain_invalid_and_clockless_flow_failure_are_terminal () =
+  (* Both typed failures cross the real production composition boundary.
+     MASC never reads receipt phase/count: domain-invalid output remains a
+     domain terminal, while the opaque OAS flow failure becomes a generic
+     source-bound execution terminal. *)
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun sw ->
@@ -148,8 +149,12 @@ let test_invalid_plan_is_distinct_from_before_dispatch_failure () =
         ~source:"post-turn domain-invalid plan"
         invalid_server;
       (match decision () with
-       | Compact_policy.Rejected (Manual, Invalid_compaction_plan) -> ()
-       | _ -> fail "invalid provider plan was not a typed source terminal");
+       | Compact_policy.Rejected
+           ( Manual
+           , Exact_execution_terminal
+               { cause = Keeper_event_queue_state.Domain_invalid_output; _ } ) ->
+         ()
+       | _ -> fail "invalid domain plan was not a typed source terminal");
       check int
         "domain-invalid plan dispatches exactly once"
         1
@@ -166,8 +171,12 @@ let test_invalid_plan_is_distinct_from_before_dispatch_failure () =
         ~source:"post-turn before-dispatch rejection"
         before_dispatch_server;
       (match decision () with
-       | Compact_policy.Rejected (Manual, Exact_execution_failed_before_dispatch) -> ()
-       | _ -> fail "pre-dispatch execution failure was collapsed into an invalid plan");
+       | Compact_policy.Rejected
+           ( Manual
+           , Exact_execution_terminal
+               { cause = Keeper_event_queue_state.Exact_execution_failed; _ } ) ->
+         ()
+       | _ -> fail "clockless OAS flow failure was not a generic source terminal");
       check int
         "before-dispatch lane performs no HTTP request"
         0
@@ -179,9 +188,9 @@ let () =
     "compaction exact-output clockless entrypoint"
     [ ( "production entrypoint"
       , [ test_case
-            "invalid plan is distinct from before-dispatch failure"
+            "domain invalid and clockless flow failure are terminal"
             `Quick
-            test_invalid_plan_is_distinct_from_before_dispatch_failure
+            test_domain_invalid_and_clockless_flow_failure_are_terminal
         ] )
     ]
 ;;

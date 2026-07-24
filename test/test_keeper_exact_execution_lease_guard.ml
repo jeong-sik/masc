@@ -184,7 +184,7 @@ let test_before_dispatch_release_allows_registration_requeue () =
    | Ok (Some _) -> Alcotest.fail "before-dispatch release retained the binding"
    | Error detail -> Alcotest.failf "released binding load failed: %s" detail);
   let terminal : P.exact_execution_terminal =
-    { cause = P.Execution_failed_after_dispatch
+    { cause = P.Exact_execution_failed
     ; slot_id
     ; call_id
     ; plan_fingerprint
@@ -276,7 +276,7 @@ let test_restart_recovery_never_requeues_bound_lease () =
     bind_and_quarantine
       ~base_path
       ~keeper_name
-      ~cause:P.Execution_failed_after_dispatch
+      ~cause:P.Exact_execution_failed
       ~slot_id
       ~call_id
       ~plan_fingerprint
@@ -465,7 +465,7 @@ let run_exact_wal_followup_replay_case ~label ~failure ~expected_stage =
     bind_and_quarantine
       ~base_path
       ~keeper_name
-      ~cause:P.Execution_failed_after_dispatch
+      ~cause:P.Exact_execution_failed
       ~slot_id
       ~call_id
       ~plan_fingerprint
@@ -597,7 +597,7 @@ let test_visible_prepare_sync_failure_recovers_once () =
     bind_and_quarantine
       ~base_path
       ~keeper_name
-      ~cause:P.Execution_failed_after_dispatch
+      ~cause:P.Exact_execution_failed
       ~slot_id
       ~call_id
       ~plan_fingerprint
@@ -681,7 +681,7 @@ let test_stale_finalize_preserves_active_successor () =
     bind_and_quarantine
       ~base_path
       ~keeper_name
-      ~cause:P.Execution_failed_after_dispatch
+      ~cause:P.Exact_execution_failed
       ~slot_id:"slot-stale"
       ~call_id:"call-stale"
       ~plan_fingerprint:"plan-stale"
@@ -803,7 +803,7 @@ let test_cancellation_surfaces_only_after_terminal_settlement () =
     bind_and_quarantine
       ~base_path
       ~keeper_name
-      ~cause:P.Execution_cancelled_after_dispatch
+      ~cause:P.Exact_execution_cancelled
       ~slot_id
       ~call_id
       ~plan_fingerprint

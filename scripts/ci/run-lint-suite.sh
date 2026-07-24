@@ -51,6 +51,8 @@ blocking_lints() {
   run_lint "Tool substrate adapter surface" bash scripts/lint/no-tool-substrate-adapter-surface.sh --fail
   run_lint "Tool -> Keeper dependency-direction ratchet (RFC-0194)" bash scripts/lint/tool-keeper-boundary-ratchet.sh --fail
   run_lint "MASC domain ownership ratchet" bash scripts/lint/masc-domain-boundary-ratchet.sh --fail
+  run_lint "Compaction exact-flow boundary self-test" bash scripts/check-compaction-exact-flow-boundary.sh --self-test
+  run_lint "Compaction exact-flow boundary" bash scripts/check-compaction-exact-flow-boundary.sh
   run_lint "No Tool_result.error + Printexc (RFC-0148)" bash scripts/lint/no-tool-result-error-printexc.sh
   run_lint "Boundary redaction SSOT (RFC-0132 PR-3)" bash scripts/lint/no-runtime-literal-outside-boundary-redaction.sh --fail
   run_lint "No fabricated telemetry" bash scripts/lint/no-fabricated-telemetry.sh

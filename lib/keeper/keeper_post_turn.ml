@@ -508,7 +508,9 @@ let terminal_reason_of_rejection = function
   | Exact_admission_failed
   | Exact_attempt_start_failed
   | Exact_execution_context_unavailable
-  | Exact_execution_failed_before_dispatch -> None
+  | Exact_execution_guard_failed
+  | Exact_flow_already_started ->
+    None
 ;;
 
 type prepared_compaction =
@@ -761,7 +763,7 @@ let commit_prepared_compaction (prepared : prepared_compaction)
        terminal Keeper_event_queue_state.Invalid_structural_source_after_dispatch
    with
    | Eio.Cancel.Cancelled _ ->
-     terminal Keeper_event_queue_state.Execution_cancelled_after_dispatch
+     terminal Keeper_event_queue_state.Exact_execution_cancelled
    | exn ->
      let detail = Printexc.to_string exn in
      log_keeper_exn ~label:"compaction checkpoint save exception" exn;

@@ -156,10 +156,8 @@ let test_exact_output_terminal_reasons_round_trip () =
          "exact terminal receipt retains call provenance"
          true
          (State.transition_receipt_equal receipt restored))
-    [ State.Execution_failed_after_dispatch
-    ; State.Attempt_already_started
-    ; State.Execution_cancelled_after_dispatch
-    ; State.Execution_provenance_mismatch
+    [ State.Exact_execution_failed
+    ; State.Exact_execution_cancelled
     ; State.Domain_invalid_output
     ; State.Invalid_structural_evidence
     ; State.Invalid_structural_source_after_dispatch
@@ -204,7 +202,7 @@ let test_exact_terminal_codec_rejects_missing_or_blank_call_identity () =
         (State.No_compaction
            (no_compaction
               ~turn_count:7
-              (exact_terminal State.Execution_cancelled_after_dispatch)))
+              (exact_terminal State.Exact_execution_cancelled)))
       claimed
     |> require_ok "settle closed exact terminal"
   in
@@ -285,7 +283,7 @@ let test_cancelled_exact_terminal_consumes_queue_durably () =
               (exact_terminal
                  ~slot_id:"cancelled-slot"
                  ~call_id:"cancelled-call"
-                 State.Execution_cancelled_after_dispatch)))
+                 State.Exact_execution_cancelled)))
       claimed
     |> require_ok "settle cancelled exact terminal"
   in
@@ -1570,14 +1568,14 @@ let test_in_lane_compaction_streak_bounds_retries () =
          })
       (no_compaction
          ~turn_count:14
-         (exact_terminal State.Execution_failed_after_dispatch))
+         (exact_terminal State.Exact_execution_failed))
   in
   (match dispatch_terminal with
    | Masc.Keeper_registry_event_queue.Escalate
        { reason =
            Masc.Keeper_registry_event_queue.Compaction_exact_output_terminal
              { terminal =
-                 { cause = State.Execution_failed_after_dispatch; _ }
+                 { cause = State.Exact_execution_failed; _ }
              ; _
              }
        ; successor = None
@@ -1752,7 +1750,7 @@ let test_compaction_outcome_mapping_covers_in_lane_dispositions () =
        (Masc.Keeper_unified_turn.source_lease_disposition_after_no_compaction
           (no_compaction
              ~turn_count:18
-             (exact_terminal State.Execution_failed_after_dispatch))));
+             (exact_terminal State.Exact_execution_failed))));
   check
     "domain-invalid terminal records failure without retry"
     "failed"

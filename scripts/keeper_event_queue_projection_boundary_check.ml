@@ -122,7 +122,7 @@ let reject_guarded_owner_reexport ~file ~surface visit =
     ; expr =
         (fun self expression ->
            match expression.pexp_desc with
-           | Pexp_pack packed -> self.module_expr self packed
+           | Pexp_pack (packed, _) -> self.module_expr self packed
            | _ -> Ast_iterator.default_iterator.expr self expression)
     }
   in

@@ -103,6 +103,98 @@ sys.stdout.write("".join(output))
 PY
 }
 
+check_lane_binding() {
+  local target="$1"
+  python3 - "${target}" <<'PY'
+import pathlib
+import re
+import sys
+
+target = pathlib.Path(sys.argv[1])
+source = target.read_text()
+tokens = []
+index = 0
+
+while index < len(source):
+    if source[index].isspace():
+        index += 1
+        continue
+
+    if source.startswith("(*", index):
+        depth = 1
+        index += 2
+        while index < len(source) and depth:
+            if source.startswith("(*", index):
+                depth += 1
+                index += 2
+            elif source.startswith("*)", index):
+                depth -= 1
+                index += 2
+            else:
+                index += 1
+        if depth:
+            raise SystemExit(f"{target}: unterminated OCaml comment")
+        continue
+
+    quoted_match = re.match(r"\{([a-z_][A-Za-z0-9_']*)?\|", source[index:])
+    if quoted_match is not None:
+        identifier = quoted_match.group(1) or ""
+        close = f"|{identifier}}}"
+        index += len(quoted_match.group(0))
+        close_index = source.find(close, index)
+        if close_index < 0:
+            raise SystemExit(f"{target}: unterminated OCaml quoted string")
+        index = close_index + len(close)
+        continue
+
+    if source[index] == '"':
+        start = index
+        index += 1
+        escaped = False
+        while index < len(source):
+            char = source[index]
+            index += 1
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                break
+        else:
+            raise SystemExit(f"{target}: unterminated OCaml string")
+        tokens.append(("string", source[start:index]))
+        continue
+
+    identifier = re.match(r"[A-Za-z_][A-Za-z0-9_']*", source[index:])
+    if identifier is not None:
+        value = identifier.group(0)
+        tokens.append(("identifier", value))
+        index += len(value)
+        continue
+
+    tokens.append(("symbol", source[index]))
+    index += 1
+
+bindings = []
+for offset in range(len(tokens) - 3):
+    if (
+        tokens[offset] == ("identifier", "let")
+        and tokens[offset + 1] == ("identifier", "lane_id")
+        and tokens[offset + 2] == ("symbol", "=")
+    ):
+        bindings.append(tokens[offset + 3])
+
+expected = ("string", '"board_attention_exact"')
+if bindings != [expected]:
+    rendered = ", ".join(f"{kind}:{value}" for kind, value in bindings) or "none"
+    raise SystemExit(
+        f"{target}: expected exactly one "
+        'let lane_id = "board_attention_exact" binding; '
+        f"found {len(bindings)} ({rendered})"
+    )
+PY
+}
+
 count_fixed() {
   local token="$1"
   local target="$2"
@@ -211,7 +303,8 @@ check_boundary() {
     [[ -f "${target}" ]] || fail "required target not found: ${target}"
   done
 
-  require_once 'let lane_id = "board_attention_exact"' "${FLOW_ML}"
+  check_lane_binding "${FLOW_ML}" \
+    || fail "Board attention exact lane binding contract failed"
   require_once "Exact_output.make_flow_candidate" "${FLOW_ML}"
   require_once "Exact_output.admit_flow" "${FLOW_ML}"
   require_once "Exact_output.start_flow" "${FLOW_ML}"
@@ -302,6 +395,20 @@ EOF
     bash "${BASH_SOURCE[0]}" --check >/dev/null
   cp "${worker_backup}" "${fixture}/lib/keeper/keeper_board_attention_worker.ml"
 
+  cat >>"${fixture}/lib/keeper/keeper_board_attention_exact_flow.ml" <<'EOF'
+(*
+let lane_id = "board_attention_exact"
+*)
+let _boundary_lane_string_decoy =
+  "let lane_id = \"board_attention_exact\""
+let _boundary_lane_quoted_string_decoy = {|
+let lane_id = "board_attention_exact"
+|}
+EOF
+  MASC_BOARD_ATTENTION_BOUNDARY_ROOT="${fixture}" \
+    bash "${BASH_SOURCE[0]}" --check >/dev/null
+  cp "${flow_backup}" "${fixture}/lib/keeper/keeper_board_attention_exact_flow.ml"
+
   printf '%s\n' 'let _ = Exact_output.receipt_phase' \
     >"${fixture}/lib/keeper/keeper_librarian_runtime.ml"
   MASC_BOARD_ATTENTION_BOUNDARY_ROOT="${fixture}" \
@@ -377,6 +484,16 @@ PY
   fi
   cp "${flow_backup}" "${fixture}/lib/keeper/keeper_board_attention_exact_flow.ml"
 
+  printf '\n%s\n' 'let lane_id = "board_attention_exact"' \
+    >>"${fixture}/lib/keeper/keeper_board_attention_exact_flow.ml"
+  if
+    MASC_BOARD_ATTENTION_BOUNDARY_ROOT="${fixture}" \
+      bash "${BASH_SOURCE[0]}" --check >/dev/null 2>&1
+  then
+    fail "self-test accepted duplicate Board attention lane bindings"
+  fi
+  cp "${flow_backup}" "${fixture}/lib/keeper/keeper_board_attention_exact_flow.ml"
+
   python3 - \
     "${fixture}/config/runtime.toml" <<'PY'
 import pathlib
@@ -432,7 +549,7 @@ PY
   fi
 
   printf '%s\n' \
-    '[board-attention-exact-flow-boundary:self-test] clean=pass quoted=pass unrelated=pass lane=fail candidate=fail config=fail forbidden=fail pricing=fail legacy=fail missing=fail'
+    '[board-attention-exact-flow-boundary:self-test] clean=pass quoted=pass lane-decoys=pass unrelated=pass lane=fail duplicate-lane=fail candidate=fail config=fail forbidden=fail pricing=fail legacy=fail missing=fail'
 )
 
 case "${1:-}" in

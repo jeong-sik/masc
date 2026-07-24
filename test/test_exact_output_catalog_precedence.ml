@@ -643,7 +643,7 @@ let test_repo_seed_board_attention_lane_admits () =
   let board_lane =
     List.find_opt
       (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-         String.equal lane.id Keeper_board_attention_exact_flow.lane_id)
+         String.equal lane.id Masc.Keeper_board_attention_exact_flow.lane_id)
       lanes
   in
   (match board_lane with

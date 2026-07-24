@@ -380,9 +380,12 @@ let test_missing_lane_is_setup_error_without_dispatch () =
           ~source:"Board attention missing-lane conformance"
           [ fixture ]
       in
-      ignore
-        (Runtime_exact_output_registry.publish ~lanes:[] snapshot
-          : Runtime_exact_output_registry.t);
+      (match Runtime_exact_output_registry.publish ~lanes:[] snapshot with
+       | Ok _ -> ()
+       | Error error ->
+         Alcotest.failf
+           "missing-lane registry fixture did not publish: %s"
+           (Runtime_exact_output_registry.publication_error_to_string error));
       (match Exact_flow.prepare ~net:(Some net) candidate with
        | Error Exact_flow.Lane_unavailable -> ()
        | Ok _ -> Alcotest.fail "missing Board-attention lane was synthesized"

@@ -1,4 +1,6 @@
 module A = Masc.Keeper_board_attention_candidate
+module Event_queue = Masc.Keeper_event_queue
+module Event_queue_persistence = Masc.Keeper_event_queue_persistence
 module J = Masc.Keeper_board_attention_judgment
 module Wake = Masc.Keeper_board_attention_worker_wake
 
@@ -468,7 +470,7 @@ let test_non_finite_lifecycle_times_are_rejected () =
   let ledger_path =
     Filename.concat
       (Filename.concat
-         (Masc.Common.masc_dir_from_base_path ~base_path)
+         (Common.masc_dir_from_base_path ~base_path)
          "board_attention_candidates")
       "sangsu.jsonl"
   in
@@ -721,12 +723,12 @@ let test_relevant_delivery_uses_exact_candidate_identity () =
    | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
      Alcotest.fail "relevant judgment consumed without durable enqueue");
   match
-    Keeper_event_queue_persistence.load
+    Event_queue_persistence.load
       ~base_path
       ~keeper_name:persisted.keeper_name
-    |> Keeper_event_queue.to_list
+    |> Event_queue.to_list
   with
-  | [ { payload = Keeper_event_queue.Board_attention attention; _ } ] ->
+  | [ { payload = Event_queue.Board_attention attention; _ } ] ->
     Alcotest.(check string)
       "exact candidate delivery identity"
       persisted.candidate_id

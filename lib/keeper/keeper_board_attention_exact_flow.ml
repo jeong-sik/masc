@@ -258,7 +258,46 @@ let judgment_of_success candidate (flow_success : Exact_output.flow_success) =
       (Domain_output_invalid
          (Printf.sprintf
             "singleton verdict count must be exactly one, got %d"
-            (List.length items)))
+             (List.length items)))
+;;
+
+type terminal_outcome =
+  | Judgment_completed
+  | Flow_replayed
+  | Before_dispatch_persistence_failure
+  | Before_advance_persistence_failure
+  | Exact_execution_failure
+  | Execution_provenance_mismatch
+  | Invalid_domain_output
+
+let terminal_outcome_to_string = function
+  | Judgment_completed -> "judgment_completed"
+  | Flow_replayed -> "flow_replayed"
+  | Before_dispatch_persistence_failure -> "before_dispatch_persistence_failure"
+  | Before_advance_persistence_failure -> "before_advance_persistence_failure"
+  | Exact_execution_failure -> "exact_execution_failure"
+  | Execution_provenance_mismatch -> "execution_provenance_mismatch"
+  | Invalid_domain_output -> "invalid_domain_output"
+;;
+
+let terminal_outcome = function
+  | Ok _ -> Judgment_completed
+  | Error (Flow_already_started _) -> Flow_replayed
+  | Error (Before_dispatch_persistence_failed _) ->
+    Before_dispatch_persistence_failure
+  | Error (Before_advance_persistence_failed _) ->
+    Before_advance_persistence_failure
+  | Error (Exact_execution_failed _) -> Exact_execution_failure
+  | Error (Provenance_mismatch _) -> Execution_provenance_mismatch
+  | Error (Domain_output_invalid _) -> Invalid_domain_output
+;;
+
+let observe_terminal prepared result =
+  Log.Keeper.info
+    ~keeper_name:prepared.candidate.keeper_name
+    "board_attention exact_flow.execute terminal candidate_id=%s outcome=%s"
+    prepared.candidate.candidate_id
+    (result |> terminal_outcome |> terminal_outcome_to_string)
 ;;
 
 let execute ?clock ~before_dispatch ~before_advance prepared =
@@ -270,38 +309,42 @@ let execute ?clock ~before_dispatch ~before_advance prepared =
       ~failed:(attempt_provenance failed)
       ~next:(attempt_provenance next)
   in
-  match
-    Exact_output.execute_flow_once
-      ~net:prepared.net
-      ?clock
-      ~before_dispatch:oas_before_dispatch
-      ~before_advance:oas_before_advance
-      prepared.attempt
-  with
-  | Ok success -> judgment_of_success prepared.candidate success
-  | Error (Exact_output.Flow_attempt_already_started evidence) ->
-    Error (Flow_already_started (evidence_provenance evidence))
-  | Error
-      (Exact_output.Flow_before_dispatch_callback_failed
-         { cause; evidence; candidate }) ->
-    Error
-      (Before_dispatch_persistence_failed
-         { cause
-         ; current = attempt_provenance candidate
-         ; evidence = evidence_provenance evidence
-         })
-  | Error
-      (Exact_output.Flow_before_advance_callback_failed
-         { cause; evidence; failed; failure = _; next }) ->
-    Error
-      (Before_advance_persistence_failed
-         { cause
-         ; failed = attempt_provenance failed
-         ; next = attempt_provenance next
-         ; evidence = evidence_provenance evidence
-         })
-  | Error
-      (Exact_output.Flow_exact_execution_failed
-         { evidence; candidate = _; cause = _ }) ->
-    Error (Exact_execution_failed (evidence_provenance evidence))
+  let result =
+    match
+      Exact_output.execute_flow_once
+        ~net:prepared.net
+        ?clock
+        ~before_dispatch:oas_before_dispatch
+        ~before_advance:oas_before_advance
+        prepared.attempt
+    with
+    | Ok success -> judgment_of_success prepared.candidate success
+    | Error (Exact_output.Flow_attempt_already_started evidence) ->
+      Error (Flow_already_started (evidence_provenance evidence))
+    | Error
+        (Exact_output.Flow_before_dispatch_callback_failed
+           { cause; evidence; candidate }) ->
+      Error
+        (Before_dispatch_persistence_failed
+           { cause
+           ; current = attempt_provenance candidate
+           ; evidence = evidence_provenance evidence
+           })
+    | Error
+        (Exact_output.Flow_before_advance_callback_failed
+           { cause; evidence; failed; failure = _; next }) ->
+      Error
+        (Before_advance_persistence_failed
+           { cause
+           ; failed = attempt_provenance failed
+           ; next = attempt_provenance next
+           ; evidence = evidence_provenance evidence
+           })
+    | Error
+        (Exact_output.Flow_exact_execution_failed
+           { evidence; candidate = _; cause = _ }) ->
+      Error (Exact_execution_failed (evidence_provenance evidence))
+  in
+  observe_terminal prepared result;
+  result
 ;;

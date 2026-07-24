@@ -580,15 +580,15 @@ let test_restart_releases_only_unbound_and_quarantines_dispatchable () =
   let unbound = claim ~base_path ~worker_epoch:owner ~now:10.0 in
   let bound_claim = claim ~base_path ~worker_epoch:owner ~now:11.0 in
   let bound_proof = provenance ~slot_id:"bound-slot" ~call_id:"bound-call" () in
-  let bound =
-    P.bind_before_dispatch
-      ~worker_epoch:owner
-      ~base_path
-      ~partition:bound_claim
-      ~provenance:bound_proof
-    |> ok "bind restart fixture"
-    |> fsynced "bind restart fixture"
-  in
+  ignore
+    (P.bind_before_dispatch
+       ~worker_epoch:owner
+       ~base_path
+       ~partition:bound_claim
+       ~provenance:bound_proof
+     |> ok "bind restart fixture"
+     |> fsynced "bind restart fixture"
+      : P.t);
   let advancing_claim = claim ~base_path ~worker_epoch:owner ~now:12.0 in
   let failed = provenance ~slot_id:"failed-slot" ~call_id:"failed-call" () in
   let next = provenance ~slot_id:"next-slot" ~call_id:"next-call" () in

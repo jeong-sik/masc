@@ -387,6 +387,69 @@ let () = test "workspace_add_task_with_result_returns_typed_task_id" (fun () ->
          "expected typed add_task success, got %s"
          (Workspace.add_task_error_to_string err)))
 
+(* Regression for the self-author claim-path filter (issue #25459 / #25429):
+   the auto-claim path in keeper_tool_task_runtime composes
+   [not (task_is_self_authored ~meta t)] into the [claim_next_r] task_filter so
+   a keeper is not auto-assigned a task it authored itself. This exercises the
+   real [claim_next_r] selection (the predicate itself is unit-tested in
+   test_keeper_self_authored_task_exclusion). Ordering-independent: a single
+   self-authored task is claimable without the filter and NOT claimable with
+   it, so reverting the filter turns the second assertion RED. *)
+let claimed_title = function
+  | Masc_domain.Claim_next_claimed { title; _ } -> Some title
+  | Masc_domain.Claim_next_no_unclaimed
+  | Masc_domain.Claim_next_no_eligible _
+  | Masc_domain.Claim_next_error _ -> None
+;;
+
+let () = test "auto_claim_takes_self_authored_task_without_filter" (fun () ->
+  let ctx = make_test_ctx_with_agent "taskmaster" in
+  let _ =
+    Workspace.add_task_with_result ctx.Task.Tool.config
+      ~created_by:"taskmaster" ~title:"self routing task" ~priority:1
+      ~description:""
+  in
+  let result = Workspace.claim_next_r ctx.Task.Tool.config ~agent_name:"taskmaster" () in
+  assert (claimed_title result = Some "self routing task"))
+
+let () = test "auto_claim_self_author_filter_excludes_self_authored_task" (fun () ->
+  let ctx = make_test_ctx_with_agent "taskmaster" in
+  let _ =
+    Workspace.add_task_with_result ctx.Task.Tool.config
+      ~created_by:"taskmaster" ~title:"self routing task" ~priority:1
+      ~description:""
+  in
+  let self_excluding (t : Masc_domain.task) = t.created_by <> Some "taskmaster" in
+  let result =
+    Workspace.claim_next_r ctx.Task.Tool.config ~agent_name:"taskmaster"
+      ~hard_filter:self_excluding ()
+  in
+  assert (claimed_title result = None))
+
+(* Regression for the adversarial P1 on #25460: the self-author exclusion must
+   SURVIVE the scope fallback. The keeper auto-claim passes
+   [allow_scope_fallback:true]; a keeper whose backlog holds only its own
+   routing/report tasks has no goal-scoped task ([task_filter:(fun _ -> false)]
+   forces that here), so [claim_next_r] widens — and the widening used to drop
+   [task_filter], claiming the keeper's own task right back. With the exclusion
+   moved to [hard_filter] the widening still respects it, so the own-task is NOT
+   claimed. Reverting the exclusion back into [task_filter] turns this RED. *)
+let () = test "auto_claim_hard_filter_survives_scope_fallback" (fun () ->
+  let ctx = make_test_ctx_with_agent "taskmaster" in
+  let _ =
+    Workspace.add_task_with_result ctx.Task.Tool.config
+      ~created_by:"taskmaster" ~title:"self routing task" ~priority:1
+      ~description:""
+  in
+  let self_excluding (t : Masc_domain.task) = t.created_by <> Some "taskmaster" in
+  let result =
+    Workspace.claim_next_r ctx.Task.Tool.config ~agent_name:"taskmaster"
+      ~task_filter:(fun _ -> false)
+      ~hard_filter:self_excluding
+      ~allow_scope_fallback:true ()
+  in
+  assert (claimed_title result = None))
+
 let () = test "handle_batch_add_tasks_returns_structured_task_ids" (fun () ->
   let ctx = make_test_ctx () in
   let result =

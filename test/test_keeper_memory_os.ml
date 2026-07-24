@@ -238,6 +238,20 @@ let invalid_schema_provider_cfg () =
     ()
 ;;
 
+let json_only_provider_cfg () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.OpenAI_compat
+    ~model_id:"json-only-memory-summary"
+    ~base_url:"https://json-only.invalid/v1"
+    ~max_tokens:4096
+    ~model_capabilities_override:
+      { Llm_provider.Capabilities.openai_compat_chat_extended_capabilities with
+        supports_structured_output = false
+      ; supports_response_format_json = true
+      }
+    ()
+;;
+
 let with_eio f =
   Eio_main.run
   @@ fun env ->
@@ -1424,11 +1438,33 @@ let test_memory_llm_summary_provider_requests_json_schema () =
        (Llm_provider.Provider_config.validate_output_schema_request provider_cfg))
 ;;
 
-let test_memory_llm_summary_rejects_invalid_schema_provider () =
+let test_memory_llm_summary_accepts_json_object_mode () =
+  let provider_cfg =
+    Memory_summary.provider_for_summary (json_only_provider_cfg ())
+  in
   Alcotest.(check bool)
-    "localhost OpenAI-compatible schema provider rejected"
+    "JSON-only provider is eligible"
+    true
+    (Memory_summary.summary_json_guarantee_supported
+       (json_only_provider_cfg ()));
+  Alcotest.(check bool)
+    "summary requests JSON-object mode"
+    true
+    (match provider_cfg.response_format with
+     | Agent_sdk.Types.JsonMode -> true
+     | Agent_sdk.Types.JsonSchema _ | Agent_sdk.Types.Off -> false);
+  Alcotest.(check (option bool))
+    "JSON-object mode carries no output schema"
+    None
+    (Option.map (fun _ -> true) provider_cfg.output_schema)
+;;
+
+let test_memory_llm_summary_rejects_provider_without_json_guarantee () =
+  Alcotest.(check bool)
+    "provider without a JSON guarantee rejected"
     false
-    (Memory_summary.summary_schema_supported (invalid_schema_provider_cfg ()))
+    (Memory_summary.summary_json_guarantee_supported
+       (invalid_schema_provider_cfg ()))
 ;;
 
 let test_memory_llm_summary_response_parser_accepts_only_summary_json () =
@@ -4608,9 +4644,13 @@ let () =
             `Quick
             test_memory_llm_summary_provider_requests_json_schema
         ; Alcotest.test_case
-            "memory llm summary rejects invalid schema provider"
+            "memory llm summary accepts json object mode"
             `Quick
-            test_memory_llm_summary_rejects_invalid_schema_provider
+            test_memory_llm_summary_accepts_json_object_mode
+        ; Alcotest.test_case
+            "memory llm summary rejects provider without json guarantee"
+            `Quick
+            test_memory_llm_summary_rejects_provider_without_json_guarantee
         ; Alcotest.test_case
             "memory llm summary accepts only summary json"
             `Quick

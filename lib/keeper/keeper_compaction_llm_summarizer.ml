@@ -763,6 +763,12 @@ let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepar
     | Eio.Cancel.Cancelled _ as cancellation ->
       Eio.Cancel.protect
       @@ fun () ->
+      (* A durable bind is MASC's only ownership signal. MASC deliberately does
+         not inspect OAS receipt phase/count after cancellation. If OAS had
+         proved safe advancement it would first invoke [before_advance], whose
+         fsynced release clears [bound_observation]. Therefore a still-bound
+         identity is always source-terminal; a pre-bind cancellation is
+         re-raised. *)
       (match !bound_observation with
        | None -> raise cancellation
        | Some observation ->

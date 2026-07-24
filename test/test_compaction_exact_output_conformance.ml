@@ -430,6 +430,31 @@ let test_bind_failure_prevents_post () =
   Alcotest.(check int) "bind failure prevents POST" 0 (F.post_count server)
 ;;
 
+let test_missing_dispatch_guard_prevents_post () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let slot_id = "missing-dispatch-guard" in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc missing dispatch guard"
+      [ { id = slot_id; base_url = server.base_url } ]
+  in
+  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
+  let prepared = prepare_exn ~keeper_name:"keeper-missing-guard" ~registry in
+  (match
+     C.execute_prepared_lane
+       ~keeper_name:"keeper-missing-guard"
+       ~net
+       ~clock
+       prepared
+   with
+   | Error C.Exact_execution_guard_failed -> ()
+   | Error _ -> Alcotest.fail "missing guard returned the wrong typed failure"
+   | Ok _ -> Alcotest.fail "missing guard unexpectedly executed");
+  Alcotest.(check int) "missing guard prevents POST" 0 (F.post_count server)
+;;
+
 let test_release_failure_blocks_successor () =
   run_eio
   @@ fun ~sw ~net ~clock ->
@@ -1486,6 +1511,10 @@ let () =
             "bind failure prevents POST"
             `Quick
             test_bind_failure_prevents_post
+        ; Alcotest.test_case
+            "missing guard prevents POST"
+            `Quick
+            test_missing_dispatch_guard_prevents_post
         ; Alcotest.test_case
             "release failure blocks successor"
             `Quick

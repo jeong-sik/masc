@@ -76,6 +76,10 @@ val prepare_lane
     successor. MASC only durably binds the supplied identity, durably releases
     the failed identity, and quarantines source-bound terminal identities.
     MASC never reads receipt phase/count or provider/admission failure causes.
+    Cancellation before a durable bind is re-raised. Once a durable bind exists,
+    cancellation is a phase-neutral source-bound terminal unless OAS first
+    invokes [release_before_dispatch]; MASC never reconstructs dispatch state
+    from cancellation or receipt details.
     Domain-invalid output is terminal and cannot enter OAS failover. *)
 val execute_prepared_lane
   :  keeper_name:string

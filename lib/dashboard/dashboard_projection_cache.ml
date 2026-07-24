@@ -20,7 +20,7 @@ let snapshot_cache_ttl_s = 5.0
 let digest_cache_ttl_s = 5.0
 let snapshot_publication_mu = Stdlib.Mutex.create ()
 let snapshot_invalidation_generation_ref = Atomic.make 0
-let snapshot_generation_observer = Atomic.make None
+let snapshot_generation_observer : (int -> unit) option Atomic.t = Atomic.make None
 
 let register_snapshot_generation_observer observer =
   Atomic.set snapshot_generation_observer (Some observer)
@@ -44,6 +44,10 @@ let invalidate_snapshot_json ~config =
       Dashboard_cache.invalidate_prefix "operator_snapshot:";
       Atomic.fetch_and_add snapshot_invalidation_generation_ref 1 + 1)
   in
+  (* The callback intentionally runs after the generation lock is released.
+     It must use the publication owner's generation/terminal CAS rather than
+     fabricating an envelope from a later cache read: callbacks may arrive out
+     of order under concurrent invalidations. *)
   match Atomic.get snapshot_generation_observer with
   | None -> ()
   | Some observer ->

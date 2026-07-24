@@ -558,18 +558,44 @@ let test_dashboard_shell_http_json_prefers_light_last_good_while_prewarming () =
          |> to_bool))
 
 let test_operator_snapshot_default_route_hydrates_first_success () =
-  let source =
+  let http_source =
     read_file "lib/server/server_dashboard_http_core_operator_snapshot_http.ml"
   in
+  let owner_source =
+    read_file "lib/server/server_dashboard_http_core_operator.ml"
+  in
+  let refresh_source =
+    read_file "lib/server/server_dashboard_http_core_snapshot_refresh.ml"
+  in
+  let execution_source =
+    read_file "lib/server/server_dashboard_http_execution_surfaces.ml"
+  in
   check bool "operator snapshot uses generation-aware cache publication" true
-    (contains_substring source "operator_snapshot_publication"
-     && contains_substring source "publication.Core_operator.generation"
-     && contains_substring source
+    (contains_substring http_source "operator_snapshot_publication"
+     && contains_substring http_source
+          "(publication : Core_operator.operator_snapshot_publication)"
+     && contains_substring http_source
           "Printf.sprintf \"default-summary:g%d\"");
   check bool "operator snapshot no longer serves raw initializing cache" true
     (not
-       (contains_substring source
-          "then cached_surface_json operator_snapshot_cache"))
+       (contains_substring http_source
+          "then cached_surface_json operator_snapshot_cache"));
+  check bool "publication owner replaces immutable records" true
+    (contains_substring owner_source "operator_snapshot_publication_ref :="
+     && not
+          (contains_substring owner_source
+             "patch_operator_snapshot_cached_json"));
+  check bool "metadata is finalized before terminal publication" true
+    (contains_substring refresh_source
+       "|> Core_operator_query.with_operator_snapshot_metadata"
+     && not (contains_substring refresh_source "{ publication with json }"));
+  check bool "invalidation SSE uses canonical owner tombstone" true
+    (contains_substring execution_source
+       ".publish_operator_snapshot_invalidation_if_current"
+     && not (contains_substring execution_source "let tombstone =")
+     && not
+          (contains_substring execution_source
+             "patch_operator_snapshot_cache_for_keeper"))
 
 let test_dashboard_query_cache_segment_normalizes_missing_values () =
   check string "missing none" "missing"

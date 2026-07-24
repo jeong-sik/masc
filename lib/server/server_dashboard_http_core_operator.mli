@@ -21,8 +21,11 @@ val operator_snapshot_publication : unit -> operator_snapshot_publication
 val operator_snapshot_publication_json : operator_snapshot_publication -> Yojson.Safe.t
 val operator_snapshot_cache_diagnostics_json : unit -> Yojson.Safe.t
 
-val patch_operator_snapshot_cached_json :
-  (Yojson.Safe.t -> Yojson.Safe.t) -> unit
+val publish_operator_snapshot_invalidation_if_current :
+  generation:int -> operator_snapshot_publication option
+(** Install or return the canonical generation tombstone only while
+    [generation] is still current. A delayed observer returns [None] after a
+    newer generation or any same-generation terminal publication. *)
 
 val begin_operator_snapshot_compute : unit -> operator_snapshot_compute
 

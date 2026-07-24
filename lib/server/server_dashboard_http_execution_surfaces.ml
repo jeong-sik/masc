@@ -127,11 +127,15 @@ let execution_actor_for_request ~base_path request =
 (* Wire operator broadcast refs now that Sse is in scope. *)
 let () =
   operator_snapshot_broadcast_ref
-  := (fun publication ->
+  := (fun
+       (publication :
+         Server_dashboard_http_core_operator.operator_snapshot_publication)
+     ->
     let current =
       Server_dashboard_http_core_operator.operator_snapshot_publication ()
     in
-    if Int.equal current.generation publication.generation
+    if String.equal current.epoch publication.epoch
+       && Int.equal current.generation publication.generation
        && Int.equal
             current.compute_sequence
             publication.compute_sequence
@@ -148,24 +152,13 @@ let () =
 let () =
   Dashboard_projection_cache.register_snapshot_generation_observer
     (fun generation ->
-       let current =
-         Server_dashboard_http_core_operator.operator_snapshot_publication ()
-       in
-       let tombstone =
-         { current with
-           generation
-         ; json =
-             `Assoc
-               [ "status", `String "invalidated"
-               ; "generated_at", `String (Masc_domain.now_iso ())
-               ]
-         ; has_success = false
-         }
-       in
-       broadcast_cached_surface
-         ~event_type:"operator_snapshot"
-         (Server_dashboard_http_core_operator.operator_snapshot_publication_json
-            tombstone))
+       match
+         Server_dashboard_http_core_operator
+         .publish_operator_snapshot_invalidation_if_current
+           ~generation
+       with
+       | None -> ()
+       | Some publication -> !operator_snapshot_broadcast_ref publication)
 ;;
 
 let () =
@@ -718,43 +711,11 @@ let patchexecution_cache_for_keeper ~keeper_name ~event ~keepalive_running =
   | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> ()
 ;;
 
-let patch_operator_snapshot_json_for_keeper
-    ~keeper_name
-    ~event
-    ~keepalive_running
-  = function
-  | `Assoc fields ->
-    (match List.assoc_opt "keepers" fields with
-     | Some (`Assoc keeper_fields) ->
-       (match List.assoc_opt "items" keeper_fields with
-        | Some (`List rows) ->
-          let keeper_fields =
-            upsert_assoc_field
-              "items"
-              (`List (patch_keeper_rows ~keeper_name ~event ~keepalive_running rows))
-              keeper_fields
-          in
-          `Assoc (upsert_assoc_field "keepers" (`Assoc keeper_fields) fields)
-        | Some _ | None -> `Assoc fields)
-     | Some _ | None -> `Assoc fields)
-  | (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) as json ->
-    json
-;;
-
-let patch_operator_snapshot_cache_for_keeper ~keeper_name ~event ~keepalive_running =
-  Server_dashboard_http_core_operator.patch_operator_snapshot_cached_json
-    (patch_operator_snapshot_json_for_keeper
-       ~keeper_name
-       ~event
-       ~keepalive_running)
-;;
-
 let patch_keeper_dependent_caches ~keeper_name ~event =
   match keepalive_running_of_lifecycle_event event with
   | None -> ()
   | Some keepalive_running ->
-    patchexecution_cache_for_keeper ~keeper_name ~event ~keepalive_running;
-    patch_operator_snapshot_cache_for_keeper ~keeper_name ~event ~keepalive_running
+    patchexecution_cache_for_keeper ~keeper_name ~event ~keepalive_running
 ;;
 
 (** Late-bound broadcast hook. Set after [broadcast_namespace_truth_snapshot]

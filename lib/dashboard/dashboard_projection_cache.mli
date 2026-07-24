@@ -27,8 +27,10 @@ val with_snapshot_publication_generation : (int -> 'a) -> 'a
 
 val register_snapshot_generation_observer : (int -> unit) -> unit
 (** Register the transport observer for generation invalidations. The observer
-    runs after the publication guard is released and must publish a generation
-    tombstone so consumers can reject delayed older snapshots. *)
+    runs after the publication guard is released and may therefore observe
+    callbacks out of order. It must ask the serialized publication owner for a
+    current generation tombstone rather than fabricating one from a later
+    read. *)
 
 val get_or_compute_digest_json :
   config:Workspace_utils.config ->

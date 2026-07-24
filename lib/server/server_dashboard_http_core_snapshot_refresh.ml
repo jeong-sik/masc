@@ -32,6 +32,12 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
   let config = workspace_scope.config in
   let proc_mgr = state.Mcp_server.proc_mgr in
   let net, mono_clock = Core_runtime.state_dashboard_runtime_caps state in
+  let default_cache_key generation =
+    Core_cache.dashboard_cache_key
+      config
+      "operator_snapshot"
+      (Printf.sprintf "default-summary:g%d" generation)
+  in
   let compute () =
     let compute = Core_operator.begin_operator_snapshot_compute () in
     let started_at = Unix.gettimeofday () in
@@ -79,7 +85,11 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
              |> Core_cache.with_projection_diagnostics
                   ~surface:"operator_snapshot"
                   ~started_at
-                  ~extra:(Core_operator.operator_snapshot_extra ()))
+                  ~extra:(Core_operator.operator_snapshot_extra ())
+             |> Core_operator_query.with_operator_snapshot_metadata
+                  ~config
+                  ~cache_key:(default_cache_key compute.generation)
+                  ~query:(Core_operator_query.operator_snapshot_default_query ()))
       in
       compute, json
     with
@@ -92,14 +102,7 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
        with
        | None -> ()
        | Some publication ->
-         let json =
-           publication.json
-           |> Core_operator_query.with_operator_snapshot_metadata
-                ~config
-                ~query:(Core_operator_query.operator_snapshot_default_query ())
-         in
-         !Core_operator.operator_snapshot_broadcast_ref
-           { publication with json });
+         !Core_operator.operator_snapshot_broadcast_ref publication);
       raise exn
   in
   Proactive_refresh.start
@@ -120,12 +123,5 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
       with
       | None -> ()
       | Some publication ->
-        let json =
-          publication.json
-          |> Core_operator_query.with_operator_snapshot_metadata
-               ~config
-               ~query:(Core_operator_query.operator_snapshot_default_query ())
-        in
-        !Core_operator.operator_snapshot_broadcast_ref
-          { publication with json }
+        !Core_operator.operator_snapshot_broadcast_ref publication)
 ;;

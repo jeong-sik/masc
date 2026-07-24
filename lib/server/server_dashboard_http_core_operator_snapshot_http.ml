@@ -60,7 +60,13 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
     | None -> true
     | Some raw -> String.equal (String.lowercase_ascii (String.trim raw)) "summary"
   in
-  let compute_default_summary () =
+  let default_cache_key generation =
+    Core_cache.dashboard_cache_key
+      config
+      "operator_snapshot"
+      (Printf.sprintf "default-summary:g%d" generation)
+  in
+  let compute_default_summary ~generation =
     let started_at = Unix.gettimeofday () in
     Core_runtime.run_dashboard_compute
       ~mode:Offloaded_readonly
@@ -93,22 +99,17 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
          ~surface:"operator_snapshot"
          ~started_at
          ~extra:(Core_operator.operator_snapshot_extra ())
-  in
-  let default_cache_key generation =
-    Core_cache.dashboard_cache_key
-      config
-      "operator_snapshot"
-      (Printf.sprintf "default-summary:g%d" generation)
+    |> Core_operator_query.with_operator_snapshot_metadata
+         ~config
+         ~cache_key:(default_cache_key generation)
+         ~query:(Core_operator_query.operator_snapshot_default_query ())
   in
   if default_summary_request
   then (
-    let attach publication =
-      let cache_key = default_cache_key publication.Core_operator.generation in
+    let attach
+          (publication : Core_operator.operator_snapshot_publication)
+      =
       Core_operator.operator_snapshot_publication_json publication
-      |> Core_operator_query.with_operator_snapshot_metadata
-           ~config
-           ~cache_key
-           ~query:(Core_operator_query.operator_snapshot_default_query ())
     in
     let current = Core_operator.operator_snapshot_publication () in
     if current.has_success
@@ -118,7 +119,7 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
       let compute_and_publish () =
         let compute = Core_operator.begin_operator_snapshot_compute () in
         try
-          let json = compute_default_summary () in
+          let json = compute_default_summary ~generation:compute.generation in
           ignore
             (Core_operator.publish_operator_snapshot_if_current
                ~compute
@@ -135,15 +136,7 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
            with
            | None -> ()
            | Some publication ->
-             let json =
-               publication.json
-               |> Core_operator_query.with_operator_snapshot_metadata
-                    ~config
-                    ~cache_key
-                    ~query:(Core_operator_query.operator_snapshot_default_query ())
-             in
-             !Core_operator.operator_snapshot_broadcast_ref
-               { publication with json });
+             !Core_operator.operator_snapshot_broadcast_ref publication);
           raise exn
       in
       ignore

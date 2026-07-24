@@ -52,52 +52,75 @@ let operator_snapshot_cache =
 ;;
 
 let operator_snapshot_cache_mu = Stdlib.Mutex.create ()
-
-let operator_snapshot_cache_generation =
-  Atomic.make 0
-;;
-
 let operator_snapshot_compute_sequence = Atomic.make 0
-let operator_snapshot_published_sequence = ref 0
-let operator_snapshot_terminal_sequence = ref 0
 
 let operator_snapshot_epoch =
   (* NDT-OK: process-incarnation identity entropy only. *)
   Uuidm.v4_gen (Random.State.make_self_init ()) () |> Uuidm.to_string
 ;;
 
-let initializing_operator_snapshot_json () =
+let invalidated_operator_snapshot_json () =
   `Assoc
-    [ "status", `String "initializing"
+    [ "status", `String "invalidated"
     ; "generated_at", `String (Masc_domain.now_iso ())
     ]
 ;;
 
+let make_operator_snapshot_publication
+      ~generation
+      ~compute_sequence
+      ~terminal_sequence
+  =
+  { epoch = operator_snapshot_epoch
+  ; generation
+  ; compute_sequence
+  ; terminal_sequence
+  ; json = cached_surface_json operator_snapshot_cache
+  ; has_success = cached_surface_has_success operator_snapshot_cache
+  }
+;;
+
+(* The publication record is immutable and replaced only while
+   [operator_snapshot_cache_mu] is held. Cache diagnostics are frozen into the
+   record at a terminal transition, so one identity never acquires a second
+   JSON value merely because wall time advanced. *)
+let operator_snapshot_publication_ref =
+  ref
+    (make_operator_snapshot_publication
+       ~generation:0
+       ~compute_sequence:0
+       ~terminal_sequence:0)
+;;
+
+let install_operator_snapshot_invalidation generation =
+  invalidate_cached_surface operator_snapshot_cache;
+  operator_snapshot_cache.json <- invalidated_operator_snapshot_json ();
+  let publication =
+    make_operator_snapshot_publication
+      ~generation
+      ~compute_sequence:0
+      ~terminal_sequence:0
+  in
+  operator_snapshot_publication_ref := publication;
+  publication
+;;
+
 let synchronize_operator_snapshot_generation generation =
-  let cached_generation = Atomic.get operator_snapshot_cache_generation in
-  if not (Int.equal cached_generation generation)
-  then (
-    invalidate_cached_surface operator_snapshot_cache;
-    operator_snapshot_cache.json <- initializing_operator_snapshot_json ();
-    operator_snapshot_published_sequence := 0;
-    operator_snapshot_terminal_sequence := 0;
-    Atomic.set operator_snapshot_cache_generation generation)
+  let publication = !operator_snapshot_publication_ref in
+  if generation > publication.generation
+  then install_operator_snapshot_invalidation generation
+  else publication
 ;;
 
 let operator_snapshot_publication () =
   Dashboard_projection_cache.with_snapshot_publication_generation (fun generation ->
     Stdlib.Mutex.protect operator_snapshot_cache_mu (fun () ->
-      synchronize_operator_snapshot_generation generation;
-      { epoch = operator_snapshot_epoch
-      ; generation
-      ; compute_sequence = !operator_snapshot_published_sequence
-      ; terminal_sequence = !operator_snapshot_terminal_sequence
-      ; json = cached_surface_json operator_snapshot_cache
-      ; has_success = cached_surface_has_success operator_snapshot_cache
-      }))
+      synchronize_operator_snapshot_generation generation))
 ;;
 
-let operator_snapshot_publication_json publication =
+let operator_snapshot_publication_json
+      (publication : operator_snapshot_publication)
+  =
   match publication.json with
   | `Assoc fields ->
     `Assoc
@@ -124,14 +147,21 @@ let operator_snapshot_cache_diagnostics_json () =
   operator_snapshot_publication () |> operator_snapshot_publication_json
 ;;
 
-let patch_operator_snapshot_cached_json patch =
-  Dashboard_projection_cache.with_snapshot_publication_generation (fun generation ->
-    Stdlib.Mutex.protect operator_snapshot_cache_mu (fun () ->
-      synchronize_operator_snapshot_generation generation;
-      if cached_surface_has_success operator_snapshot_cache
-      then
-        operator_snapshot_cache.json
-        <- patch (cached_surface_json operator_snapshot_cache)))
+let publish_operator_snapshot_invalidation_if_current ~generation =
+  Dashboard_projection_cache.with_snapshot_publication_generation
+    (fun current_generation ->
+       if not (Int.equal generation current_generation)
+       then None
+       else
+         Stdlib.Mutex.protect operator_snapshot_cache_mu (fun () ->
+           let publication =
+             synchronize_operator_snapshot_generation current_generation
+           in
+           if not (Int.equal publication.generation generation)
+              || publication.has_success
+              || publication.terminal_sequence > 0
+           then None
+           else Some publication))
 ;;
 
 let begin_operator_snapshot_compute () =
@@ -150,21 +180,19 @@ let publish_operator_snapshot_if_current ~compute json =
     if Int.equal current compute.generation
     then (
       Stdlib.Mutex.protect operator_snapshot_cache_mu (fun () ->
-        synchronize_operator_snapshot_generation current;
-        if compute.sequence > !operator_snapshot_terminal_sequence
+        let publication = synchronize_operator_snapshot_generation current in
+        if Int.equal publication.generation compute.generation
+           && compute.sequence > publication.terminal_sequence
         then (
           mark_cached_surface_success operator_snapshot_cache json;
-          operator_snapshot_terminal_sequence := compute.sequence;
-          operator_snapshot_published_sequence := compute.sequence;
-          Atomic.set operator_snapshot_cache_generation compute.generation;
-          Some
-            { epoch = operator_snapshot_epoch
-            ; generation = compute.generation
-            ; compute_sequence = compute.sequence
-            ; terminal_sequence = compute.sequence
-            ; json = cached_surface_json operator_snapshot_cache
-            ; has_success = true
-            })
+          let published =
+            make_operator_snapshot_publication
+              ~generation:compute.generation
+              ~compute_sequence:compute.sequence
+              ~terminal_sequence:compute.sequence
+          in
+          operator_snapshot_publication_ref := published;
+          Some published)
         else None))
     else None)
 ;;
@@ -174,19 +202,19 @@ let mark_operator_snapshot_error_if_current ~compute exn =
     if Int.equal current compute.generation
     then
       Stdlib.Mutex.protect operator_snapshot_cache_mu (fun () ->
-        synchronize_operator_snapshot_generation current;
-        if compute.sequence > !operator_snapshot_terminal_sequence
+        let publication = synchronize_operator_snapshot_generation current in
+        if Int.equal publication.generation compute.generation
+           && compute.sequence > publication.terminal_sequence
         then (
-          operator_snapshot_terminal_sequence := compute.sequence;
           mark_cached_surface_error operator_snapshot_cache exn;
-          Some
-            { epoch = operator_snapshot_epoch
-            ; generation = compute.generation
-            ; compute_sequence = !operator_snapshot_published_sequence
-            ; terminal_sequence = compute.sequence
-            ; json = cached_surface_json operator_snapshot_cache
-            ; has_success = cached_surface_has_success operator_snapshot_cache
-            })
+          let terminal =
+            make_operator_snapshot_publication
+              ~generation:compute.generation
+              ~compute_sequence:publication.compute_sequence
+              ~terminal_sequence:compute.sequence
+          in
+          operator_snapshot_publication_ref := terminal;
+          Some terminal)
         else None)
     else None)
 ;;

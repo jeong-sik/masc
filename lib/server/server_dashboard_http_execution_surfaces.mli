@@ -62,8 +62,7 @@
     [keeper_agent_status_opt] / [patched_keeper_status],
     [patch_keeper_rows] SSE-event row patcher helper,
     [running_keeper_names],
-    [patchexecution_cache_for_keeper] /
-    [patch_operator_snapshot_cache_for_keeper],
+    [patchexecution_cache_for_keeper],
     [transport_health_cache_diagnostics]). *)
 
 (** {1 Cache cells} *)
@@ -129,9 +128,10 @@ val invalidate_execution_cache_with_hooks_for_testing :
 
 val patch_keeper_dependent_caches :
   keeper_name:string -> event:string -> unit
-(** Applies in-place patches to every cached surface that
-    depends on [keeper_name]'s status.  Maps SSOT
-    lifecycle [event] names through the helpers below. *)
+(** Applies the lifecycle delta to the execution cache and its serialized
+    default body. Operator snapshots are never patched in place; their mutation
+    paths advance the projection generation and publish a canonical tombstone.
+    Maps SSOT lifecycle [event] names through the helpers below. *)
 
 (** {1 Refresh fibers} *)
 

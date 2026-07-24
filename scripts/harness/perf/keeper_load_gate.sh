@@ -249,6 +249,34 @@ is-default = true
 max-concurrent = 64
 EOF
 
+cat > "$BASE_PATH/.masc/config/oas-models-overlay.toml" <<EOF
+[[providers]]
+id = "mock"
+kind = "openai_compat"
+base_url = "http://127.0.0.1:$MOCK_PORT"
+request_path = "/chat/completions"
+api_key_env = ""
+default_model = "$BORROW_MODEL"
+capabilities_base = "openai_chat"
+
+[[models]]
+id_prefix = "$BORROW_MODEL"
+provider_name = "mock"
+base = "openai_chat"
+max_context_tokens = 131072
+max_output_tokens = 4096
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = false
+supports_structured_output = false
+supports_native_streaming = true
+
+[[targets]]
+id = "mock.mockmodel"
+provider_ref = "mock"
+model_id = "$BORROW_MODEL"
+EOF
+
 for ((k=1;k<=KEEPERS;k++)); do
   cat > "$BASE_PATH/.masc/config/keepers/perf_keeper_${k}.toml" <<EOF
 [keeper]

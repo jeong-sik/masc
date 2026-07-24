@@ -103,6 +103,11 @@ supports_named_tool_choice = true
 supports_response_format_json = true
 supports_structured_output = true
 supports_native_streaming = false
+
+[[targets]]
+id = "contract_verifier.smoke"
+provider_ref = "contract_verifier"
+model_id = "contract-verifier"
 EOF
 }
 

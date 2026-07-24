@@ -340,6 +340,34 @@ is-default = true
 max-concurrent = 1
 |}
 
+let catalog_overlay_seed =
+  {|
+[[providers]]
+id = "deepseek"
+kind = "openai_compat"
+base_url = "http://127.0.0.1:9/v1"
+request_path = "/chat/completions"
+api_key_env = ""
+capabilities_base = "openai_chat"
+
+[[models]]
+id_prefix = "deepseek-v4-flash"
+provider_name = "deepseek"
+base = "openai_chat"
+max_context_tokens = 32768
+max_output_tokens = 1024
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = false
+supports_structured_output = false
+supports_native_streaming = true
+
+[[targets]]
+id = "deepseek.smoke"
+provider_ref = "deepseek"
+model_id = "deepseek-v4-flash"
+|}
+
 let seed_server_config ~base_path =
   let masc_dir = Filename.concat base_path ".masc" in
   let config_dir = Filename.concat masc_dir "config" in
@@ -353,7 +381,13 @@ let seed_server_config ~base_path =
     let oc = open_out runtime_dst in
     Fun.protect
       ~finally:(fun () -> close_out_noerr oc)
-      (fun () -> output_string oc runtime_seed)
+      (fun () -> output_string oc runtime_seed);
+  let overlay_dst = Filename.concat config_dir "oas-models-overlay.toml" in
+  if not (Sys.file_exists overlay_dst) then
+    let oc = open_out overlay_dst in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc catalog_overlay_seed)
 
 let with_server f =
   let exe = find_main_eio_exe () in

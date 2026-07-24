@@ -116,6 +116,7 @@ harness_seed_server_config() {
   local repo_root="$1"
   local base_path="$2"
   local config_dir="${base_path%/}/.masc/config"
+  local seeded_runtime=0
 
   mkdir -p \
     "$config_dir" \
@@ -147,6 +148,36 @@ supports-tool-choice = true
 [deepseek.smoke]
 is-default = true
 max-concurrent = 1
+EOF
+    seeded_runtime=1
+  fi
+
+  if [[ "$seeded_runtime" == "1" && ! -f "$config_dir/oas-models-overlay.toml" ]]; then
+    cat >"$config_dir/oas-models-overlay.toml" <<'EOF'
+[[providers]]
+id = "deepseek"
+kind = "openai_compat"
+base_url = "http://127.0.0.1:9/v1"
+request_path = "/chat/completions"
+api_key_env = ""
+capabilities_base = "openai_chat"
+
+[[models]]
+id_prefix = "transport-harness-smoke"
+provider_name = "deepseek"
+base = "openai_chat"
+max_context_tokens = 32768
+max_output_tokens = 1024
+supports_tools = true
+supports_tool_choice = true
+supports_response_format_json = false
+supports_structured_output = false
+supports_native_streaming = true
+
+[[targets]]
+id = "deepseek.smoke"
+provider_ref = "deepseek"
+model_id = "transport-harness-smoke"
 EOF
   fi
 }

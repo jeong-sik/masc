@@ -144,12 +144,24 @@ let keeper_event_queue_health_json () =
       ; "recoverable_oldest_arrived_at_unix", `Null
       ; "recoverable_oldest_age_seconds", `Null
       ; "recoverable_by_keeper", `List []
-      ; "paused_retained_pending_count", `Int 0
-      ; "paused_retained_inflight_count", `Int 0
-      ; "paused_retained_count", `Int 0
-      ; "paused_retained_oldest_arrived_at_unix", `Null
-      ; "paused_retained_oldest_age_seconds", `Null
-      ; "paused_retained_by_keeper", `List []
+      ; "retained_disabled_pending_count", `Int 0
+      ; "retained_disabled_inflight_count", `Int 0
+      ; "retained_disabled_backlog_count", `Int 0
+      ; "retained_disabled_oldest_arrived_at_unix", `Null
+      ; "retained_disabled_oldest_age_seconds", `Null
+      ; "retained_disabled_by_keeper", `List []
+      ; "paused_dead_pending_count", `Int 0
+      ; "paused_dead_inflight_count", `Int 0
+      ; "paused_dead_backlog_count", `Int 0
+      ; "paused_dead_oldest_arrived_at_unix", `Null
+      ; "paused_dead_oldest_age_seconds", `Null
+      ; "paused_dead_by_keeper", `List []
+      ; "shutdown_fenced_pending_count", `Int 0
+      ; "shutdown_fenced_inflight_count", `Int 0
+      ; "shutdown_fenced_backlog_count", `Int 0
+      ; "shutdown_fenced_oldest_arrived_at_unix", `Null
+      ; "shutdown_fenced_oldest_age_seconds", `Null
+      ; "shutdown_fenced_by_keeper", `List []
       ; "unclassified_pending_count", `Int 0
       ; "unclassified_inflight_count", `Int 0
       ; "unclassified_count", `Int 0
@@ -195,9 +207,11 @@ let keeper_event_queue_health_json () =
       | Keeper_activation_readiness.Recoverable ->
         Keeper_event_queue_persistence.Recoverable
       | Keeper_activation_readiness.Retained_disabled _
-      | Keeper_activation_readiness.Paused_dead _
+        -> Keeper_event_queue_persistence.Retained_disabled
+      | Keeper_activation_readiness.Paused_dead _ ->
+        Keeper_event_queue_persistence.Paused_dead
       | Keeper_activation_readiness.Shutdown_fenced _ ->
-        Keeper_event_queue_persistence.Paused_retained
+        Keeper_event_queue_persistence.Shutdown_fenced
       | Keeper_activation_readiness.Unknown detail ->
         Keeper_event_queue_persistence.Lifecycle_unknown detail
     in
@@ -212,6 +226,7 @@ let keeper_fleet_runtime_resolution_base_fields
     () =
   let base_path = runtime_base_path_opt () in
   let phase_snapshot = keeper_phase_snapshot ?base_path () in
+  let execution_snapshot = keeper_execution_snapshot ?base_path () in
   let phase_counts = phase_snapshot.counts in
   let keeper_fibers = phase_counts.running in
   let paused_keepers_json =
@@ -229,14 +244,16 @@ let keeper_fleet_runtime_resolution_base_fields
         ~bootable_names:scan.bootable_names
         ~autoboot_scan:scan.autoboot_scan
         ~phase_snapshot
+        ~execution_snapshot
         ?base_path
         ~phase_counts
         ~paused_keepers_json
         ()
   | None ->
-    keeper_fleet_safety_health_json
-      ~phase_snapshot
-      ?base_path
+      keeper_fleet_safety_health_json
+        ~phase_snapshot
+        ~execution_snapshot
+        ?base_path
       ~phase_counts
       ~paused_keepers_json
       ()

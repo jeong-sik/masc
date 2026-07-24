@@ -1920,7 +1920,7 @@ let test_health_json_ignores_stale_active_task_alias_when_agent_executable () =
           { Types.tasks = [ task ]; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
         let phase_counts :
             Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
-          { running = 1; failing = 0; recovering = 0; executable = 1 }
+          { running = 1; failing = 0; recovering = 0 }
         in
         let phase_snapshot :
             Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot =
@@ -1928,7 +1928,6 @@ let test_health_json_ignores_stale_active_task_alias_when_agent_executable () =
             counts = phase_counts;
             running_names = [ executor.name ];
             recovering_names = [];
-            executable_names = [ executor.name ];
             phase_values = [ (executor.name, Keeper_state_machine.Running) ];
             phase_details =
               [
@@ -1945,12 +1944,17 @@ let test_health_json_ignores_stale_active_task_alias_when_agent_executable () =
               ];
           }
         in
+        let execution_snapshot :
+            Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot =
+          { executable_names = [ executor.name ] }
+        in
         let fleet_safety =
           Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
             ~bootable_names:[]
             ~autoboot_scan:
               Server_routes_http_runtime_fleet_scan.empty_autoboot_keeper_scan
             ~phase_snapshot
+            ~execution_snapshot
             ~phase_counts
             ~paused_keepers_json:(`Assoc [ ("count", `Int 0) ])
             ()
@@ -2162,7 +2166,7 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
           { Types.tasks = [ task ]; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
         let phase_counts :
             Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
-          { running = 0; failing = 0; recovering = 0; executable = 0 }
+          { running = 0; failing = 0; recovering = 0 }
         in
         let phase_snapshot :
             Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot =
@@ -2170,10 +2174,13 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
             counts = phase_counts;
             running_names = [];
             recovering_names = [];
-            executable_names = [];
             phase_values = [];
             phase_details = [];
           }
+        in
+        let execution_snapshot :
+            Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot =
+          { executable_names = [] }
         in
         let fleet_safety =
           Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
@@ -2181,6 +2188,7 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
             ~autoboot_scan:
               Server_routes_http_runtime_fleet_scan.empty_autoboot_keeper_scan
             ~phase_snapshot
+            ~execution_snapshot
             ~phase_counts
             ~paused_keepers_json:(`Assoc [ ("count", `Int 0) ])
             ()
@@ -2221,17 +2229,20 @@ let test_health_json_effective_capacity_includes_recovering_lanes () =
       let target_names = running_names @ recovering_names in
       let phase_counts :
           Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
-        { running = 3; failing = 4; recovering = 4; executable = 7 }
+        { running = 3; failing = 4; recovering = 4 }
       in
       let phase_snapshot :
           Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot =
         { counts = phase_counts
         ; running_names
         ; recovering_names
-        ; executable_names = target_names
         ; phase_values = []
         ; phase_details = []
         }
+      in
+      let execution_snapshot :
+          Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot =
+        { executable_names = target_names }
       in
       let fleet_safety =
         Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
@@ -2239,6 +2250,7 @@ let test_health_json_effective_capacity_includes_recovering_lanes () =
           ~autoboot_scan:
             { autoboot_names = target_names; read_errors = [] }
           ~phase_snapshot
+          ~execution_snapshot
           ~phase_counts
           ~paused_keepers_json:(`Assoc [ ("count", `Int 0) ])
           ()
@@ -2479,7 +2491,7 @@ let test_health_json_exposes_disabled_keeper_bootstrap_blocker () =
         let config = (Mcp_server.workspace_config state) in
         let phase_counts :
             Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
-          { running = 0; failing = 0; recovering = 0; executable = 0 }
+          { running = 0; failing = 0; recovering = 0 }
         in
         let phase_snapshot :
             Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot =
@@ -2487,10 +2499,13 @@ let test_health_json_exposes_disabled_keeper_bootstrap_blocker () =
             counts = phase_counts;
             running_names = [];
             recovering_names = [];
-            executable_names = [];
             phase_values = [];
             phase_details = [];
           }
+        in
+        let execution_snapshot :
+            Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot =
+          { executable_names = [] }
         in
         let paused_keepers_json =
           Server_routes_http_runtime_fleet_scan.durable_paused_keeper_scan config
@@ -2502,6 +2517,7 @@ let test_health_json_exposes_disabled_keeper_bootstrap_blocker () =
           Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
             ~keeper_bootstrap_enabled:false
             ~phase_snapshot
+            ~execution_snapshot
             ~phase_counts
             ~paused_keepers_json
             ()

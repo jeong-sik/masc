@@ -1720,7 +1720,9 @@ let age_seconds_json ~now = function
 type owner_lifecycle =
   | Runnable
   | Recoverable
-  | Paused_retained
+  | Retained_disabled
+  | Paused_dead
+  | Shutdown_fenced
   | Lifecycle_unknown of string
 
 type keeper_summary =
@@ -1740,7 +1742,11 @@ let keeper_summary ~base_path ~owner_lifecycle keeper_name =
   let owner_lifecycle = owner_lifecycle ~keeper_name in
   let lifecycle_read_errors =
     match owner_lifecycle with
-    | Runnable | Recoverable | Paused_retained -> []
+    | Runnable
+    | Recoverable
+    | Retained_disabled
+    | Paused_dead
+    | Shutdown_fenced -> []
     | Lifecycle_unknown detail ->
       [ Printf.sprintf "keeper lifecycle unavailable keeper=%s: %s" keeper_name detail ]
   in
@@ -1783,7 +1789,9 @@ let keeper_summary ~base_path ~owner_lifecycle keeper_name =
 let owner_lifecycle_wire = function
   | Runnable -> "runnable"
   | Recoverable -> "recoverable"
-  | Paused_retained -> "paused_retained"
+  | Retained_disabled -> "retained_disabled"
+  | Paused_dead -> "paused_dead"
+  | Shutdown_fenced -> "shutdown_fenced"
   | Lifecycle_unknown _ -> "unclassified"
 ;;
 
@@ -1895,28 +1903,66 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
     backlog_summary
       ~matches:(function
         | Runnable -> true
-        | Recoverable | Paused_retained | Lifecycle_unknown _ -> false)
+        | Recoverable
+        | Retained_disabled
+        | Paused_dead
+        | Shutdown_fenced
+        | Lifecycle_unknown _ -> false)
       summaries
   in
   let recoverable =
     backlog_summary
       ~matches:(function
         | Recoverable -> true
-        | Runnable | Paused_retained | Lifecycle_unknown _ -> false)
+        | Runnable
+        | Retained_disabled
+        | Paused_dead
+        | Shutdown_fenced
+        | Lifecycle_unknown _ -> false)
       summaries
   in
-  let paused_retained =
+  let retained_disabled =
     backlog_summary
       ~matches:(function
-        | Paused_retained -> true
-        | Runnable | Recoverable | Lifecycle_unknown _ -> false)
+        | Retained_disabled -> true
+        | Runnable
+        | Recoverable
+        | Paused_dead
+        | Shutdown_fenced
+        | Lifecycle_unknown _ -> false)
+      summaries
+  in
+  let paused_dead =
+    backlog_summary
+      ~matches:(function
+        | Paused_dead -> true
+        | Runnable
+        | Recoverable
+        | Retained_disabled
+        | Shutdown_fenced
+        | Lifecycle_unknown _ -> false)
+      summaries
+  in
+  let shutdown_fenced =
+    backlog_summary
+      ~matches:(function
+        | Shutdown_fenced -> true
+        | Runnable
+        | Recoverable
+        | Retained_disabled
+        | Paused_dead
+        | Lifecycle_unknown _ -> false)
       summaries
   in
   let unclassified =
     backlog_summary
       ~matches:(function
         | Lifecycle_unknown _ -> true
-        | Runnable | Recoverable | Paused_retained -> false)
+        | Runnable
+        | Recoverable
+        | Retained_disabled
+        | Paused_dead
+        | Shutdown_fenced -> false)
       summaries
   in
   let read_errors =
@@ -1939,7 +1985,9 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
     read_errors <> []
     || outbox_count > 0
     || recoverable.pending_count + recoverable.inflight_count > 0
-    || paused_retained.pending_count + paused_retained.inflight_count > 0
+    || retained_disabled.pending_count + retained_disabled.inflight_count > 0
+    || paused_dead.pending_count + paused_dead.inflight_count > 0
+    || shutdown_fenced.pending_count + shutdown_fenced.inflight_count > 0
   in
   `Assoc
     [ "schema", `String "masc.keeper_event_queue.fleet_summary.v2"
@@ -1980,16 +2028,43 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
            |> List.filter (fun (summary : keeper_summary) ->
              summary.pending_count + summary.inflight_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )
-    ; "paused_retained_pending_count", `Int paused_retained.pending_count
-    ; "paused_retained_inflight_count", `Int paused_retained.inflight_count
-    ; ( "paused_retained_count"
-      , `Int (paused_retained.pending_count + paused_retained.inflight_count) )
-    ; ( "paused_retained_oldest_arrived_at_unix"
-      , json_of_float_opt paused_retained.oldest )
-    ; "paused_retained_oldest_age_seconds", age_seconds_json ~now paused_retained.oldest
-    ; ( "paused_retained_by_keeper"
+    ; "retained_disabled_pending_count", `Int retained_disabled.pending_count
+    ; "retained_disabled_inflight_count", `Int retained_disabled.inflight_count
+    ; ( "retained_disabled_backlog_count"
+      , `Int (retained_disabled.pending_count + retained_disabled.inflight_count) )
+    ; ( "retained_disabled_oldest_arrived_at_unix"
+      , json_of_float_opt retained_disabled.oldest )
+    ; ( "retained_disabled_oldest_age_seconds"
+      , age_seconds_json ~now retained_disabled.oldest )
+    ; ( "retained_disabled_by_keeper"
       , `List
-          (paused_retained.keepers
+          (retained_disabled.keepers
+           |> List.filter (fun (summary : keeper_summary) ->
+             summary.pending_count + summary.inflight_count > 0)
+           |> List.map (compact_backlog_count_json ~now)) )
+    ; "paused_dead_pending_count", `Int paused_dead.pending_count
+    ; "paused_dead_inflight_count", `Int paused_dead.inflight_count
+    ; ( "paused_dead_backlog_count"
+      , `Int (paused_dead.pending_count + paused_dead.inflight_count) )
+    ; "paused_dead_oldest_arrived_at_unix", json_of_float_opt paused_dead.oldest
+    ; "paused_dead_oldest_age_seconds", age_seconds_json ~now paused_dead.oldest
+    ; ( "paused_dead_by_keeper"
+      , `List
+          (paused_dead.keepers
+           |> List.filter (fun (summary : keeper_summary) ->
+             summary.pending_count + summary.inflight_count > 0)
+           |> List.map (compact_backlog_count_json ~now)) )
+    ; "shutdown_fenced_pending_count", `Int shutdown_fenced.pending_count
+    ; "shutdown_fenced_inflight_count", `Int shutdown_fenced.inflight_count
+    ; ( "shutdown_fenced_backlog_count"
+      , `Int (shutdown_fenced.pending_count + shutdown_fenced.inflight_count) )
+    ; ( "shutdown_fenced_oldest_arrived_at_unix"
+      , json_of_float_opt shutdown_fenced.oldest )
+    ; ( "shutdown_fenced_oldest_age_seconds"
+      , age_seconds_json ~now shutdown_fenced.oldest )
+    ; ( "shutdown_fenced_by_keeper"
+      , `List
+          (shutdown_fenced.keepers
            |> List.filter (fun (summary : keeper_summary) ->
              summary.pending_count + summary.inflight_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )

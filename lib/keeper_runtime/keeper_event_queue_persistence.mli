@@ -563,14 +563,17 @@ val drop_by_post_id :
 type owner_lifecycle =
   | Runnable
   | Recoverable
-  | Paused_retained
+  | Retained_disabled
+  | Paused_dead
+  | Shutdown_fenced
   | Lifecycle_unknown of string
 
 (** Fleet projection split by the caller's canonical durable owner-lifecycle
     read. [Runnable] requires a live owner fiber; [Recoverable] is permitted
-    owner truth with durable demand but no live fiber. Queue persistence
-    deliberately does not infer pause state from event contents or elapsed
-    time. *)
+    owner truth with durable demand but no live fiber. Disabled, paused/dead,
+    and shutdown-fenced owners remain distinct closed variants. Queue
+    persistence deliberately does not infer owner truth from event contents or
+    elapsed time. *)
 val fleet_summary_json :
   now:float ->
   base_path:string ->

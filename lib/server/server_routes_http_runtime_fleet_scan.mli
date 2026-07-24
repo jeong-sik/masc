@@ -80,7 +80,6 @@ type keeper_phase_counts = {
   running : int;
   failing : int;
   recovering : int;
-  executable : int;
 }
 type keeper_phase_detail = {
   phase : string;
@@ -95,17 +94,25 @@ type keeper_phase_snapshot = {
   counts : keeper_phase_counts;
   running_names : string list;
   recovering_names : string list;
-  executable_names : string list;
   phase_values : (string * Keeper_state_machine.phase) list;
   phase_details : (string * keeper_phase_detail) list;
 }
 val keeper_phase_snapshot : ?base_path:string -> unit -> keeper_phase_snapshot
 val keeper_phase_counts : ?base_path:string -> unit -> keeper_phase_counts
+type keeper_execution_snapshot = {
+  executable_names : string list;
+}
+val keeper_execution_snapshot :
+  ?base_path:string -> unit -> keeper_execution_snapshot
+(** Closed executable-owner projection. Names are included only when
+    [Keeper_activation_readiness.classify_owner_execution] observes an actual
+    live registry fiber as [Executable]. *)
 val active_task_owner_fiber_scan_semantics : string
 val keeper_fleet_safety_health_json :
   ?bootable_names:string list ->
   ?autoboot_scan:autoboot_keeper_scan ->
   ?phase_snapshot:keeper_phase_snapshot ->
+  ?execution_snapshot:keeper_execution_snapshot ->
   ?base_path:string ->
   ?reaction_capacity_names:string list ->
   ?keeper_bootstrap_enabled:bool ->

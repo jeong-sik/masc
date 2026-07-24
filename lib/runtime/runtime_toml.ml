@@ -1020,7 +1020,7 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
                @ error
                    ("runtime." ^ key)
                    (Printf.sprintf
-                      "unknown [runtime] key %S; expected default, librarian, \
+                      "unknown [runtime] key %S; expected default, \
                        structured_judge, cross_verifier, \
                        media_failover, [runtime.lanes], \
                        [runtime.exact_output_lanes], [runtime.assignments], or a \

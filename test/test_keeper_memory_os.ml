@@ -204,37 +204,6 @@ let message_text (message : Agent_sdk.Types.message) =
   |> String.concat "\n"
 ;;
 
-let fake_response raw : Agent_sdk.Types.api_response =
-  { id = "fake-librarian-response"
-  ; model = "fake-librarian-model"
-  ; stop_reason = Agent_sdk.Types.EndTurn
-  ; content = [ Agent_sdk.Types.Text raw ]
-  ; usage = None
-  ; telemetry = None
-  }
-;;
-
-let test_provider_cfg () =
-  Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.Anthropic
-    ~model_id:"fake-librarian-model"
-    ~base_url:"https://api.anthropic.com"
-    ~max_tokens:4096
-    ~enable_thinking:true
-    ~preserve_thinking:true
-    ~thinking_budget:512
-    ()
-;;
-
-let invalid_schema_provider_cfg () =
-  Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.OpenAI_compat
-    ~model_id:"fake-librarian-model"
-    ~base_url:"http://127.0.0.1:1"
-    ~max_tokens:4096
-    ()
-;;
-
 let with_eio f =
   Eio_main.run
   @@ fun env ->

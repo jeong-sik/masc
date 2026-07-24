@@ -186,8 +186,8 @@ let validate_lane_candidates_capability
   check (Runtime_lane.ordered_candidates lane)
 ;;
 
-(* [runtime].cross_verifier mirrors [runtime].librarian validation: an unknown
-   id is an operator typo rejected at load, not a silent fallback
+(* [runtime].cross_verifier treats an unknown id as an operator typo rejected at
+   load, not a silent fallback
    (Unknown→Permissive anti-pattern). [None] is the designed "inherit
    [runtime].default" case. A lane id is accepted when every candidate
    declares JSON mode (#25394). *)
@@ -287,9 +287,9 @@ let validate_structured_judge_runtime ~(config_path : string)
                runtime.model.id)))
 ;;
 
-(* [runtime].media_failover (RFC-0265) mirrors [runtime].librarian validation for
-   each id in the ordered list: an unknown id is an operator typo rejected at
-   load, not a silent drop (Unknown→Permissive anti-pattern). [[]] is the designed
+(* [runtime].media_failover (RFC-0265) validates each id in the ordered list: an
+   unknown id is an operator typo rejected at load, not a silent drop
+   (Unknown→Permissive anti-pattern). [[]] is the designed
    "derive capable runtimes from declared capabilities" case. *)
 let validate_media_failover ~(config_path : string)
     ~(dropped_bindings : (string * string) list) (runtimes : t list)

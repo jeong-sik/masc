@@ -19,6 +19,10 @@ import {
   type RuntimeDraft,
 } from './keeper-config-panel'
 
+type ResumeKeeperResult = Awaited<
+  ReturnType<(typeof import('../api/keeper'))['resumeKeeper']>
+>
+
 void vi
 
 function makeSlot(overrides: Partial<KeeperHookSlot> = {}): KeeperHookSlot {
@@ -847,7 +851,11 @@ const mocks = vi.hoisted(() => {
     showToast: vi.fn(),
     updateKeeperRuntime: vi.fn(async () => ({ ok: true })),
     pauseKeeper: vi.fn(async () => ({ ok: true, action: 'pause', name: 'keeper-sangsu' })),
-    resumeKeeper: vi.fn(async () => ({ ok: true, action: 'resume', name: 'keeper-sangsu' })),
+    resumeKeeper: vi.fn(async (): Promise<ResumeKeeperResult> => ({
+      ok: true,
+      action: 'resume',
+      name: 'keeper-sangsu',
+    })),
     wakeKeeper: vi.fn(async () => ({ ok: true, action: 'wakeup', name: 'keeper-sangsu' })),
   }
 })

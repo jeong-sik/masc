@@ -5,9 +5,13 @@ import '@testing-library/jest-dom'
 
 import type { Keeper } from '../types'
 
+type ResumeKeeperResult = Awaited<
+  ReturnType<(typeof import('../api/keeper'))['resumeKeeper']>
+>
+
 const mocks = vi.hoisted(() => ({
   pauseKeeper: vi.fn(async () => ({ ok: true })),
-  resumeKeeper: vi.fn(async () => ({ ok: true })),
+  resumeKeeper: vi.fn(async (): Promise<ResumeKeeperResult> => ({ ok: true })),
   wakeKeeper: vi.fn(async () => ({ ok: true })),
   refreshAfterRuntimeAction: vi.fn(async () => undefined),
   showToast: vi.fn(),

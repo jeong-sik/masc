@@ -1,3 +1,11 @@
+type checkpoint_commit_hint_outcome =
+  | Hint_not_emitted
+  | Hint_delivered of Keeper_checkpoint_ref.t
+  | Hint_failed of
+      { installed_ref : Keeper_checkpoint_ref.t
+      ; failure : Eio.Exn.with_bt
+      }
+
 type success =
   { recovery : Keeper_context_runtime.compaction_recovery
   ; manifest : (unit, string) result
@@ -29,17 +37,25 @@ type failure =
       Keeper_post_turn.compaction_recovery_error
       * (unit, Keeper_context_runtime.lifecycle_dispatch_error) result
 
+type admitted_operation =
+  [ `Applied of success
+  | `No_compaction of Keeper_post_turn.no_compaction
+  | `Compaction_failed of failure
+  | `Busy of Keeper_turn_admission.autonomous_block
+  ]
+
+type admitted_result =
+  { operation : admitted_operation
+  ; checkpoint_commit_hint : checkpoint_commit_hint_outcome
+  }
+
 val run_admitted
   :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
-  -> on_checkpoint_committed:(unit -> unit)
+  -> on_checkpoint_commit_hint:(Keeper_checkpoint_ref.t -> unit)
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> unit
-  -> [ `Applied of success
-     | `No_compaction of Keeper_post_turn.no_compaction
-     | `Compaction_failed of failure
-     | `Busy of Keeper_turn_admission.autonomous_block
-     ]
+  -> admitted_result
 (** The provider call runs OUTSIDE the keeper admission: [run_admitted]
     first performs a state-free availability preflight, then splits into
     [prepare_compaction] (durable load + policy + LLM plan, no slot held and no
@@ -47,13 +63,13 @@ val run_admitted
     start + source-CAS commit + completion/failure. The lane stays runnable
     while the LLM works; a failed final admission cannot strand
     [compaction_active], and interleaved checkpoint changes fail the exact
-    source CAS. [on_checkpoint_committed] runs only when that source-CAS
-    checkpoint becomes durably committed, and only after final compaction
-    admission has been released. It runs without [Eio.Cancel.protect] and must
-    not perform I/O, suspend, or raise. If it violates that contract while a
-    prior operation exception or cancellation is already unwinding, the prior
-    exception and its raw backtrace take precedence; the observer failure is
-    logged. A rejected completion after the checkpoint commit dispatches an
+    source CAS. [on_checkpoint_commit_hint] receives the exact installed
+    checkpoint reference only after final compaction admission has been
+    released. It is a lossy same-invocation hint, not an acknowledgement,
+    durable event, or restart authority. Process death may drop it. Its
+    delivery result is returned separately in [checkpoint_commit_hint], so a
+    callback exception cannot change [operation] from [`Applied] to failure.
+    A rejected completion after the checkpoint commit dispatches an
     explicit lifecycle failure cleanup before reporting the checkpoint as
     applied; if that cleanup is also rejected, the typed failure reports
     [checkpoint_applied = true]. This is the single sanctioned caller of that

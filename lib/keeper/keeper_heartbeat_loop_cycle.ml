@@ -441,8 +441,16 @@ let run_keeper_cycle
   =
   run_keeper_cycle_with
     ~run_manual_compaction:
-      (Keeper_manual_compaction.run_admitted
-         ~on_checkpoint_committed:(fun () -> ()))
+      (fun ?exact_execution_guard ~config ~meta () ->
+         let result =
+           Keeper_manual_compaction.run_admitted
+             ?exact_execution_guard
+             ~on_checkpoint_commit_hint:(fun _ -> ())
+             ~config
+             ~meta
+             ()
+         in
+         result.operation)
     ?exact_execution_guard
     ?event_bus
     ?hitl_resolution

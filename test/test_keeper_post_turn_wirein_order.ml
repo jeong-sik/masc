@@ -14,6 +14,8 @@ module Exact_fixture = Compaction_exact_output_fixture
 module Schema = Masc.Keeper_structured_output_schema
 module Summarizer = Masc.Keeper_compaction_llm_summarizer
 
+exception Checkpoint_commit_hint_failure
+
 let exact_terminal ?(slot_id = "compaction-slot") ?(call_id = "call-compaction") cause =
   Keeper_event_queue_state.
     { cause
@@ -748,10 +750,9 @@ let test_manual_compaction_serializes_owner_lane () =
         | Error detail ->
           failf "race manual compaction claim failed: %s" detail
       in
-      let checkpoint_commits = ref 0 in
       let busy_after_prepare =
         Masc.Keeper_manual_compaction.run_admitted
-          ~on_checkpoint_committed:(fun () -> incr checkpoint_commits)
+          ~on_checkpoint_commit_hint:(fun _ -> ())
           ~config
           ~meta
           ~exact_execution_guard:
@@ -760,15 +761,12 @@ let test_manual_compaction_serializes_owner_lane () =
                ~keeper_name:meta.name
                ~lease:race_lease)
           ()
+        |> fun result -> result.operation
       in
       check int
         "planning-admission race performs one exact dispatch"
         1
         (Exact_fixture.post_count race_server);
-      check int
-        "provider success without final commit observes no checkpoint"
-        0
-        !checkpoint_commits;
       let no_compaction =
         match busy_after_prepare with
         | `No_compaction
@@ -1018,7 +1016,7 @@ let test_malformed_structure_preserves_checkpoint () =
   | _ -> fail "malformed compaction was not rejected with typed structure")
 ;;
 
-let test_manual_applied_observer () =
+let test_manual_applied_hint_failure () =
   Eio_main.run @@ fun env ->
   Masc_test_deps.init_eio_clock env;
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1081,29 +1079,25 @@ let test_manual_applied_observer () =
             (Masc.Keeper_context_core.checkpoint_write_error_to_string
                ~persistence_error_to_string:Fun.id
                detail));
-       let checkpoint_commits = ref 0 in
        let callback_saw_released_admission = ref false in
-       match
+       let result =
          Masc.Keeper_manual_compaction.run_admitted
-           ~on_checkpoint_committed:(fun () ->
-             incr checkpoint_commits;
+           ~on_checkpoint_commit_hint:(fun _installed_ref ->
              callback_saw_released_admission :=
                Option.is_none
                  (Admission.in_flight
                     ~base_path
-                    ~keeper_name:meta.name))
+                    ~keeper_name:meta.name);
+             raise Checkpoint_commit_hint_failure)
            ~config
            ~meta
            ~exact_execution_guard:Exact_fixture.permissive_exact_execution_guard
            ()
-       with
+       in
+       (match result.operation with
        | `Applied _ ->
-         check int
-           "manual Applied observes one durable checkpoint commit"
-           1
-           !checkpoint_commits;
          check bool
-           "manual observer runs after compaction admission release"
+           "manual hint runs after compaction admission release"
            true
            !callback_saw_released_admission
        | `No_compaction no_compaction ->
@@ -1115,7 +1109,17 @@ let test_manual_applied_observer () =
          failf
            "manual observer compaction failed: %s"
            (Masc.Keeper_manual_compaction.failure_to_string failure)
-       | `Busy _ -> fail "manual observer compaction was unexpectedly busy")
+       | `Busy _ -> fail "manual hint compaction was unexpectedly busy");
+       match result.checkpoint_commit_hint with
+       | Masc.Keeper_manual_compaction.Hint_failed
+           { failure = Checkpoint_commit_hint_failure, _; _ } ->
+         ()
+       | Masc.Keeper_manual_compaction.Hint_failed { failure = exn, _; _ } ->
+         failf "manual hint failed with the wrong exception: %s" (Printexc.to_string exn)
+       | Masc.Keeper_manual_compaction.Hint_delivered _ ->
+         fail "raising manual hint was reported delivered"
+       | Masc.Keeper_manual_compaction.Hint_not_emitted ->
+         fail "Applied manual compaction emitted no hint")
 ;;
 
 let test_prepare_commit_source_cas () =
@@ -1190,11 +1194,9 @@ let test_prepare_commit_source_cas () =
       "prepare performs one real exact dispatch"
       1
       (Exact_fixture.post_count exact_server);
-    let checkpoint_commits = ref 0 in
-    let on_checkpoint_committed () = incr checkpoint_commits in
     (match
        Post_turn.commit_prepared_compaction
-         ~on_checkpoint_committed
+         ~on_checkpoint_commit_hint:(fun _ -> ())
          prepared
      with
      | Ok _ -> ()
@@ -1202,13 +1204,11 @@ let test_prepare_commit_source_cas () =
        failf
          "commit of a fresh prepared plan failed: %s"
          (Post_turn.compaction_recovery_error_to_string error));
-    check int "fresh prepared commit is observed once" 1 !checkpoint_commits;
     (* The first commit advanced the durable source; the same
        prepared value is now stale and must be CAS-rejected. *)
-    let commits_before_stale = !checkpoint_commits in
     (match
        Post_turn.commit_prepared_compaction
-         ~on_checkpoint_committed
+         ~on_checkpoint_commit_hint:(fun _ -> ())
          prepared
      with
      | Error
@@ -1227,11 +1227,7 @@ let test_prepare_commit_source_cas () =
        failf
          "stale prepared value failed with the wrong error: %s"
          (Post_turn.compaction_recovery_error_to_string error)
-     | Ok _ -> fail "stale prepared value committed past the source CAS");
-    check int
-      "stale prepared commit observes no durable checkpoint"
-      0
-      (!checkpoint_commits - commits_before_stale))
+     | Ok _ -> fail "stale prepared value committed past the source CAS"))
 ;;
 
 let test_invalid_structural_evidence_after_dispatch_is_terminal () =
@@ -1479,8 +1475,8 @@ let () =
         `Quick test_regular_post_turn_does_not_auto_compact;
       test_case "manual compaction serializes the owner lane"
         `Quick test_manual_compaction_serializes_owner_lane;
-      test_case "manual Applied observes its checkpoint commit"
-        `Quick test_manual_applied_observer;
+      test_case "manual Applied preserves hint failure"
+        `Quick test_manual_applied_hint_failure;
       test_case "malformed structure preserves checkpoint"
         `Quick test_malformed_structure_preserves_checkpoint;
       test_case "prepare/commit source CAS"

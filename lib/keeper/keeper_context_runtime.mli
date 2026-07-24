@@ -189,7 +189,7 @@ val prepare_compaction
   -> (Keeper_post_turn.prepared_compaction, Keeper_post_turn.compaction_recovery_error) result
 
 val commit_prepared_compaction
-  :  on_checkpoint_committed:(unit -> unit)
+  :  on_checkpoint_commit_hint:(Keeper_checkpoint_ref.t -> unit)
   -> Keeper_post_turn.prepared_compaction
   -> (compaction_recovery, Keeper_post_turn.compaction_recovery_error) result
 

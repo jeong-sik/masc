@@ -150,7 +150,7 @@ val save_oas_checkpoint_classified :
     has [expected_source_ref]. Equal-turn content changes are rejected by the
     checkpoint store's exact byte-identity CAS. *)
 val save_oas_checkpoint_if_source :
-  on_checkpoint_committed:(unit -> unit) ->
+  on_checkpoint_commit_hint:(Keeper_checkpoint_ref.t -> unit) ->
   multimodal_policy:Keeper_types_profile.multimodal_policy ->
   keeper_name:string ->
   session:session_context ->
@@ -158,7 +158,7 @@ val save_oas_checkpoint_if_source :
   ctx:working_context ->
   generation:int ->
   expected_source_ref:Keeper_checkpoint_ref.t ->
-  ( Agent_sdk.Checkpoint.t * Keeper_checkpoint_ref.t
+  ( Agent_sdk.Checkpoint.t * Keeper_checkpoint_store.checkpoint_installation
   , Keeper_checkpoint_store.checkpoint_cas_error checkpoint_write_error )
   result
 

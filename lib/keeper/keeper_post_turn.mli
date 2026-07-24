@@ -30,6 +30,8 @@ type post_turn_lifecycle =
     Manual and provider-overflow callers consume the same result. *)
 type compaction_recovery =
   { checkpoint : Agent_sdk.Checkpoint.t
+  ; installed_ref : Keeper_checkpoint_ref.t
+  ; checkpoint_commit_hint_failure : Eio.Exn.with_bt option
   ; trigger : Compaction_trigger.t
   ; evidence : Keeper_compaction_evidence.t
   ; turn_generation : int
@@ -119,7 +121,7 @@ val prepare_compaction :
 (** Phase 2: source-CAS commit of a fully-planned compaction.  The caller
     decides which admission (if any) guards this phase. *)
 val commit_prepared_compaction :
-  on_checkpoint_committed:(unit -> unit) ->
+  on_checkpoint_commit_hint:(Keeper_checkpoint_ref.t -> unit) ->
   prepared_compaction ->
   (compaction_recovery, compaction_recovery_error) result
 

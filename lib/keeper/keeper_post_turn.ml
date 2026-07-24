@@ -55,6 +55,8 @@ type post_turn_lifecycle = {
 
 type compaction_recovery = {
   checkpoint : Agent_sdk.Checkpoint.t;
+  installed_ref : Keeper_checkpoint_ref.t;
+  checkpoint_commit_hint_failure : Eio.Exn.with_bt option;
   trigger : Compaction_trigger.t;
   evidence : Keeper_compaction_evidence.t;
   turn_generation : int;
@@ -695,7 +697,7 @@ let prepare_compaction
 ;;
 
 let commit_prepared_compaction
-    ~on_checkpoint_committed
+    ~on_checkpoint_commit_hint
     (prepared : prepared_compaction)
   : (compaction_recovery, compaction_recovery_error) result =
   (* Source-CAS commit.  The caller decides which admission (if any) guards
@@ -721,7 +723,7 @@ let commit_prepared_compaction
   (try
      match
        save_oas_checkpoint_if_source
-         ~on_checkpoint_committed
+         ~on_checkpoint_commit_hint
          ~multimodal_policy:retry_meta.multimodal_policy
          ~keeper_name:retry_meta.name
          ~session
@@ -730,19 +732,21 @@ let commit_prepared_compaction
          ~generation:turn_generation
          ~expected_source_ref:source_ref
      with
-     | Ok (saved_checkpoint, installed_ref) ->
+     | Ok (saved_checkpoint, installation) ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string Compactions)
          ~labels:[ "keeper", retry_meta.name ]
          ();
        Ok
          { checkpoint = saved_checkpoint
+         ; installed_ref = installation.installed_ref
+         ; checkpoint_commit_hint_failure = installation.hint_failure
          ; trigger = prepared_trigger
          ; evidence
          ; turn_generation
          ; projection_target =
              Keeper_compaction_projection_target.bind_committed_checkpoint
-               installed_ref
+               installation.installed_ref
                projection_target
          }
      | Error (Persistence_error (Keeper_checkpoint_store.Source_changed actual)) ->
@@ -794,6 +798,6 @@ let recover_latest_checkpoint_for_compaction
   | Error _ as error -> error
   | Ok prepared ->
     commit_prepared_compaction
-      ~on_checkpoint_committed:(fun () -> ())
+      ~on_checkpoint_commit_hint:(fun _ -> ())
       prepared
 ;;

@@ -112,7 +112,7 @@ let save_oas_checkpoint_classified
      | Error error -> Error (Persistence_error error))
 
 let save_oas_checkpoint_if_source
-    ~on_checkpoint_committed
+    ~on_checkpoint_commit_hint
     ~multimodal_policy
     ~keeper_name
     ~session
@@ -134,17 +134,17 @@ let save_oas_checkpoint_if_source
   | Ok checkpoint ->
     (match
        Keeper_checkpoint_store.save_oas_if_source
-         ~on_checkpoint_committed
+         ~on_checkpoint_commit_hint
          ~session_dir:session.session_dir
          ~expected_source_ref
          checkpoint
      with
      | Error error -> Error (Persistence_error error)
-     | Ok installed_ref ->
+     | Ok installation ->
        Keeper_checkpoint_store.save_oas_history
          ~session_dir:session.session_dir
          checkpoint;
-       Ok (checkpoint, installed_ref))
+       Ok (checkpoint, installation))
 
 let save_oas_checkpoint
     ~multimodal_policy

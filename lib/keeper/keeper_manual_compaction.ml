@@ -1,4 +1,13 @@
 open Keeper_meta_contract
+
+type checkpoint_commit_hint_outcome =
+  | Hint_not_emitted
+  | Hint_delivered of Keeper_checkpoint_ref.t
+  | Hint_failed of
+      { installed_ref : Keeper_checkpoint_ref.t
+      ; failure : Eio.Exn.with_bt
+      }
+
 type success =
   { recovery : Keeper_context_runtime.compaction_recovery
   ; manifest : (unit, string) result
@@ -29,6 +38,19 @@ type failure =
   | Recovery of
       Keeper_post_turn.compaction_recovery_error
       * (unit, Keeper_context_runtime.lifecycle_dispatch_error) result
+
+type admitted_operation =
+  [ `Applied of success
+  | `No_compaction of Keeper_post_turn.no_compaction
+  | `Compaction_failed of failure
+  | `Busy of Keeper_turn_admission.autonomous_block
+  ]
+
+type admitted_result =
+  { operation : admitted_operation
+  ; checkpoint_commit_hint : checkpoint_commit_hint_outcome
+  }
+
 let append_manifest ~config ~base_dir ~(meta : keeper_meta) recovery =
   let trigger = recovery.Keeper_context_runtime.trigger in
     let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
@@ -113,10 +135,10 @@ let run_start_lifecycle ~config ~meta =
      | Ok () -> Ok ())
 ;;
 
-let run_commit ~on_checkpoint_committed ~config ~base_dir ~meta prepared =
+let run_commit ~on_checkpoint_commit_hint ~config ~base_dir ~meta prepared =
   match
     Keeper_context_runtime.commit_prepared_compaction
-      ~on_checkpoint_committed
+      ~on_checkpoint_commit_hint
       prepared
   with
   | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
@@ -171,7 +193,7 @@ let run_commit ~on_checkpoint_committed ~config ~base_dir ~meta prepared =
        Ok (Compacted { recovery; manifest }))
 ;;
 
-let finish_preparation ~on_checkpoint_committed ~config ~base_dir ~meta = function
+let finish_preparation ~on_checkpoint_commit_hint ~config ~base_dir ~meta = function
   | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
     let failure_dispatch =
       dispatch_failed
@@ -190,7 +212,7 @@ let finish_preparation ~on_checkpoint_committed ~config ~base_dir ~meta = functi
     in
     Error (Recovery (error, failure_dispatch))
   | Ok prepared ->
-    run_commit ~on_checkpoint_committed ~config ~base_dir ~meta prepared
+    run_commit ~on_checkpoint_commit_hint ~config ~base_dir ~meta prepared
 ;;
 
 let prepare_with ~prepare_compaction ~config ~meta =
@@ -220,14 +242,6 @@ let prepare_with ~prepare_compaction ~config ~meta =
       ~projection_request )
 ;;
 
-let no_compaction_after_prepared_cancellation prepared =
-  Eio.Cancel.protect (fun () ->
-    No_compaction
-      (Keeper_post_turn.no_compaction_of_uncommitted_prepared
-         ~cause:Keeper_event_queue_state.Exact_execution_cancelled
-         prepared))
-;;
-
 let observe_manifest ~keeper_name = function
   | Ok () -> ()
   | Error detail ->
@@ -253,7 +267,7 @@ let preserve_no_compaction_after_final_admission_busy = function
 
 let run_admitted_with
       ~prepare_compaction
-      ~on_checkpoint_committed
+      ~on_checkpoint_commit_hint
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
   =
@@ -290,21 +304,13 @@ let run_admitted_with
              | Error _ -> Error failure)
           | Ok () ->
             finish_preparation
-              ~on_checkpoint_committed
+              ~on_checkpoint_commit_hint
               ~config
               ~base_dir
               ~meta
               preparation)
     in
-    let admitted =
-      match preparation with
-      | Ok prepared ->
-        (try final_admission () with
-         | Eio.Cancel.Cancelled _ ->
-           Eio.Cancel.protect (fun () ->
-             `Ran (Ok (no_compaction_after_prepared_cancellation prepared))))
-      | Error _ -> final_admission ()
-    in
+    let admitted = final_admission () in
     (match admitted
      with
      | `Busy block ->
@@ -326,33 +332,39 @@ let run_admitted_with
 
 let run_admitted
     ?exact_execution_guard
-    ~on_checkpoint_committed
+    ~on_checkpoint_commit_hint
     ~config
     ~meta
     () =
-  let committed = ref false in
-  let outcome =
-    try
-      `Returned
-        (run_admitted_with
-           ~prepare_compaction:(fun ~base_dir ~meta ~trigger ~projection_request ->
-             Keeper_context_runtime.prepare_compaction
-               ?exact_execution_guard
-               ~base_dir
-               ~meta
-               ~trigger
-               ~projection_request
-               ())
-           ~on_checkpoint_committed:(fun () -> committed := true)
-           ~config
-           ~meta)
-    with
-    | exn -> `Raised (exn, Printexc.get_raw_backtrace ())
+  let committed_ref = ref None in
+  let operation =
+    run_admitted_with
+      ~prepare_compaction:(fun ~base_dir ~meta ~trigger ~projection_request ->
+        Keeper_context_runtime.prepare_compaction
+          ?exact_execution_guard
+          ~base_dir
+          ~meta
+          ~trigger
+          ~projection_request
+          ())
+      ~on_checkpoint_commit_hint:(fun installed_ref ->
+        committed_ref := Some installed_ref)
+      ~config
+      ~meta
   in
-  Keeper_fs.finish_durable_commit_observation
-    ~commit_observed:committed
-    ~on_durable_commit:on_checkpoint_committed
-    outcome
+  let checkpoint_commit_hint =
+    match !committed_ref with
+    | None -> Hint_not_emitted
+    | Some installed_ref ->
+      (match on_checkpoint_commit_hint installed_ref with
+       | () -> Hint_delivered installed_ref
+       | exception exn ->
+         Hint_failed
+           { installed_ref
+           ; failure = exn, Printexc.get_raw_backtrace ()
+           })
+  in
+  { operation; checkpoint_commit_hint }
 ;;
 
 let lifecycle_stage_to_string = function

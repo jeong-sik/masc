@@ -207,6 +207,11 @@ type checkpoint_cas_error =
       ; error : File_lock_eio.durable_lock_error
       }
 
+type checkpoint_installation =
+  { installed_ref : Keeper_checkpoint_ref.t
+  ; hint_failure : Eio.Exn.with_bt option
+  }
+
 (** Conditionally publish [candidate] only when the canonical bytes still
     have exactly [expected_source_ref]. The stable session lock is reacquired,
     current bytes are re-read and hashed, and an equal-turn checkpoint with
@@ -214,18 +219,22 @@ type checkpoint_cas_error =
     ref is derived from the exact compact bytes passed to the durable atomic
     JSON writer. A writer error after atomic rename is
     [Commit_durability_unknown], never a retryable not-installed failure. This
-     same rule applies when releasing the stable lock fails after the body:
-     [Transaction_outcome_unknown] requires reconciliation rather than retry. The
-     payload-store commit is not an operation terminal fact; the Keeper operation
-     journal owns that authority. [on_checkpoint_committed] runs exactly once
-     after the CAS lock scope has unwound when durable commit was observed. It
-     runs without [Eio.Cancel.protect] and must not perform I/O, suspend, or
-     raise. If it violates that contract while a prior operation exception or
-     cancellation is already unwinding, the prior exception and its raw
-     backtrace take precedence; the observer failure is logged. *)
+    same rule applies when releasing the stable lock fails after the body:
+    [Transaction_outcome_unknown] requires reconciliation rather than retry.
+    The payload-store commit is not an operation terminal fact; the Keeper
+    operation journal owns that authority.
+
+    [on_checkpoint_commit_hint] receives the exact installed reference in the
+    caller fiber when this invocation observes durable commit. It is a lossy,
+    best-effort hint, may run before the CAS lock is released, and must not be
+    used as an acknowledgement or restart authority. A callback failure or
+    cooperative cancellation observed after durable commit is returned in
+    [hint_failure] alongside the installed reference; it never becomes an
+    install failure or retry signal. An exception before commit is re-raised
+    with its original raw backtrace. *)
 val save_oas_if_source :
-  on_checkpoint_committed:(unit -> unit) ->
+  on_checkpoint_commit_hint:(Keeper_checkpoint_ref.t -> unit) ->
   session_dir:string ->
   expected_source_ref:Keeper_checkpoint_ref.t ->
   Agent_sdk.Checkpoint.t ->
-  (Keeper_checkpoint_ref.t, checkpoint_cas_error) result
+  (checkpoint_installation, checkpoint_cas_error) result

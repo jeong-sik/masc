@@ -47,7 +47,76 @@ let network_error_kind_to_wire = function
 
 let invalid_request_reason_to_wire = function
   | Agent_sdk.Retry.Json_parse_error -> "json_parse_error"
+  | Agent_sdk.Retry.Request_body_too_large _ -> "request_body_too_large"
   | Agent_sdk.Retry.Unknown_invalid_request -> "unknown_invalid_request"
+;;
+
+let serving_constraint_source_kind_to_wire = function
+  | Llm_provider.Serving_constraint.Declaration -> "declaration"
+  | Llm_provider.Serving_constraint.Probe -> "probe"
+;;
+
+let serving_constraint_confidence_to_wire = function
+  | Llm_provider.Serving_constraint.Low -> "low"
+  | Llm_provider.Serving_constraint.Medium -> "medium"
+  | Llm_provider.Serving_constraint.High -> "high"
+;;
+
+let serving_constraint_to_json
+      (constraint_ : Llm_provider.Serving_constraint.t)
+  =
+  let observation = constraint_.observation in
+  let evidence = constraint_.evidence in
+  `Assoc
+    [ "accepted_through", `Int observation.accepted_through
+    ; "rejected_from", Json_util.int_opt_to_json observation.rejected_from
+    ; "source_kind",
+      `String (serving_constraint_source_kind_to_wire evidence.source_kind)
+    ; "source_ref", `String evidence.source_ref
+    ; "checked_at_unix_s", `Int evidence.checked_at_unix_s
+    ; "confidence",
+      `String (serving_constraint_confidence_to_wire evidence.confidence)
+    ; "expires_at_unix_s", Json_util.int_opt_to_json evidence.expires_at_unix_s
+    ]
+;;
+
+let input_capacity_reason_to_json = function
+  | Agent_sdk.Retry.Serving_constraint_rejected reason ->
+    let fields =
+      match reason with
+      | Llm_provider.Serving_constraint.Evidence_not_yet_valid
+          { now_unix_s; checked_at_unix_s } ->
+        [ "kind", `String "evidence_not_yet_valid"
+        ; "now_unix_s", `Int now_unix_s
+        ; "checked_at_unix_s", `Int checked_at_unix_s
+        ]
+      | Llm_provider.Serving_constraint.Evidence_expired
+          { now_unix_s; expires_at_unix_s } ->
+        [ "kind", `String "evidence_expired"
+        ; "now_unix_s", `Int now_unix_s
+        ; "expires_at_unix_s", `Int expires_at_unix_s
+        ]
+      | Llm_provider.Serving_constraint.Boundary_unknown
+          { input_tokens; accepted_through; rejected_from } ->
+        [ "kind", `String "boundary_unknown"
+        ; "input_tokens", `Int input_tokens
+        ; "accepted_through", `Int accepted_through
+        ; "rejected_from", Json_util.int_opt_to_json rejected_from
+        ]
+      | Llm_provider.Serving_constraint.Input_rejected
+          { input_tokens; accepted_through; rejected_from } ->
+        [ "kind", `String "input_rejected"
+        ; "input_tokens", `Int input_tokens
+        ; "accepted_through", `Int accepted_through
+        ; "rejected_from", `Int rejected_from
+        ]
+    in
+    `Assoc fields
+  | Agent_sdk.Retry.Token_measurement_unavailable protocol ->
+    `Assoc
+      [ "kind", `String "token_measurement_unavailable"
+      ; "protocol", `String (Llm_provider.Input_token_count.show_protocol protocol)
+      ]
 ;;
 
 let terminal_effect_disposition_to_wire effect_disposition =
@@ -110,6 +179,12 @@ let sdk_api_error_fields = function
     [ "variant", `String "context_overflow"
     ; "message", `String message
     ; "limit", Json_util.int_opt_to_json limit
+    ]
+  | Agent_sdk.Retry.InputCapacity { message; constraint_; reason } ->
+    [ "variant", `String "input_capacity"
+    ; "message", `String message
+    ; "constraint", serving_constraint_to_json constraint_
+    ; "reason", input_capacity_reason_to_json reason
     ]
   | Agent_sdk.Retry.NetworkError { message; kind } ->
     [ "variant", `String "network_error"

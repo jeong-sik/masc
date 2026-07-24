@@ -61,8 +61,8 @@ val turn_tool_event_integrity_error
   :  turn_tool_event_tracker
   -> Agent_sdk.Error.sdk_error option
 
-(** Build an overflow event only from typed [Api (ContextOverflow _)].
-    Non-overflow errors return [None]. *)
+(** Build an overflow event from typed [Api (ContextOverflow _)] or a typed,
+    compactable [InputCapacity]. Other errors return [None]. *)
 val context_overflow_event_of_error
   :  Agent_sdk.Error.sdk_error
   -> Keeper_state_machine.event option

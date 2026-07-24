@@ -56,7 +56,9 @@ type rotate_class =
 (** Deterministic-failure classes escalated for an LLM-boundary verdict. *)
 type judgment_class =
   | Deterministic_request  (** request-body/schema rejections; retry is futile *)
-  | Context_overflow  (** typed context-window overflow *)
+  | Context_overflow
+      (** typed context-window overflow or a current serving constraint with an
+          evidenced accepted-through bound that compaction can satisfy *)
   | Contract_violation
       (** completion/progress contract rejections without a recovery hint,
           max-tokens ceiling violations, internal contract rejections *)

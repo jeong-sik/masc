@@ -406,7 +406,12 @@ let context_overflow_event_of_error
   match err with
   | Agent_sdk.Error.Api (ContextOverflow { limit; _ }) ->
     Some (Keeper_state_machine.Context_overflow_detected { limit_tokens = limit })
-  | _ -> None
+  | _ ->
+    Option.map
+      (fun limit_tokens ->
+         Keeper_state_machine.Context_overflow_detected
+           { limit_tokens = Some limit_tokens })
+      (Keeper_input_capacity.compaction_limit err)
 
 (* Prefix that tags a [last_compaction_decision] value as a provider-overflow
    recovery failure. Kept as a named binding so the observability regression test

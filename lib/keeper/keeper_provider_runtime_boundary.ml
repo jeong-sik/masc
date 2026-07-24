@@ -258,7 +258,7 @@ let classify_sdk_error (err : Agent_sdk.Error.sdk_error) : t =
        classify_provider_error provider_error
      | Agent_sdk.Error.Api (NetworkError _ | Overloaded _ | ServerError _
        | RateLimited _ | AuthError _ | AuthorizationError _ | PaymentRequired _
-       | InvalidRequest _ | NotFound _ | ContextOverflow _)
+       | InvalidRequest _ | NotFound _ | ContextOverflow _ | InputCapacity _)
      | Agent_sdk.Error.Agent _
      | Agent_sdk.Error.Mcp _
      | Agent_sdk.Error.Config _

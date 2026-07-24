@@ -72,7 +72,8 @@ val is_accept_no_usable_progress_error : Agent_sdk.Error.sdk_error -> bool
     severity only; it grants no retry, admission, pause, or blocker authority. *)
 val should_warn_keeper_cycle_failed : Agent_sdk.Error.sdk_error -> bool
 
-(** [true] when a structured error indicates context overflow. *)
+(** [true] when a structured error indicates context overflow or carries a
+    current serving constraint that compaction can satisfy. *)
 val is_context_overflow : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when the error is an OAS [InputRequired] — the agent paused
@@ -103,6 +104,7 @@ type degraded_retry_reason =
   | Rate_limit
   | Server_error
   | Auth_error
+  | Input_capacity
   | Empty_no_progress
   | Thinking_only_no_progress
 

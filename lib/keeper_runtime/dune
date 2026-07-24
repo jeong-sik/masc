@@ -16,6 +16,7 @@
   keeper_fd_pressure
   keeper_recording_error_state
   keeper_internal_error
+  keeper_input_capacity
   keeper_runtime_failure_route
   keeper_failure_judgment_contract
   keeper_latched_reason

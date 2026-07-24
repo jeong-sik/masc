@@ -320,6 +320,57 @@ let test_authorization_errors_have_typed_projection () =
        (Llm_provider.Error.AuthorizationError
           { provider = "provider"; detail = "permission refused" }))
 
+let test_input_capacity_projection_preserves_evidence () =
+  let constraint_ =
+    Llm_provider.Serving_constraint.make
+      ~source_kind:Llm_provider.Serving_constraint.Probe
+      ~source_ref:"probe://incident/2793"
+      ~checked_at_unix_s:100
+      ~confidence:Llm_provider.Serving_constraint.High
+      ~expires_at_unix_s:200
+      ~accepted_through:524298
+      ~rejected_from:524299
+      ()
+    |> Result.get_ok
+  in
+  let projection =
+    Error_json.agent_failed_error_projection
+      (Agent_sdk.Error.Api
+         (Agent_sdk.Retry.InputCapacity
+            { message = "typed capacity"
+            ; constraint_
+            ; reason =
+                Agent_sdk.Retry.Serving_constraint_rejected
+                  (Llm_provider.Serving_constraint.Input_rejected
+                     { input_tokens = 524299
+                     ; accepted_through = 524298
+                     ; rejected_from = 524299
+                     })
+            }))
+  in
+  check
+    (option string)
+    "typed variant"
+    (Some "input_capacity")
+    (string_of_field (member "variant" projection.error_detail));
+  let constraint_json = member "constraint" projection.error_detail |> Option.get in
+  check
+    (option int)
+    "accepted-through evidence"
+    (Some 524298)
+    (int_of_field (member "accepted_through" constraint_json));
+  check
+    (option string)
+    "probe provenance"
+    (Some "probe://incident/2793")
+    (string_of_field (member "source_ref" constraint_json));
+  let reason_json = member "reason" projection.error_detail |> Option.get in
+  check
+    (option string)
+    "typed reason"
+    (Some "input_rejected")
+    (string_of_field (member "kind" reason_json))
+
 let () =
   run "keeper_execution_join"
     [ ( "join_table"
@@ -343,5 +394,7 @@ let () =
             test_terminal_agent_failure_projection_redacts_detail
         ; test_case "authorization errors have typed projection" `Quick
             test_authorization_errors_have_typed_projection
+        ; test_case "input capacity preserves typed evidence" `Quick
+            test_input_capacity_projection_preserves_evidence
         ] )
     ]

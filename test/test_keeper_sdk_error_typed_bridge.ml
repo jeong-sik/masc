@@ -9,7 +9,7 @@
     Coverage:
     - all [api_error] variants (RateLimited / Overloaded / ServerError /
       AuthError / AuthorizationError / PaymentRequired / InvalidRequest /
-      NotFound / ContextOverflow / NetworkError / Timeout)
+      NotFound / ContextOverflow / InputCapacity / NetworkError / Timeout)
     - agent_error variants reached via [SdkE.Agent _] routing
     - all top-level non-Agent / non-Api wrappers (Mcp / Config /
       Serialization / Io / Orchestration / Internal) *)
@@ -29,6 +29,18 @@ let typed_wire t = Code.to_wire t
 let unknown_invalid_request message =
   Retry.InvalidRequest
     { message; reason = Retry.Unknown_invalid_request }
+
+let serving_constraint =
+  Llm_provider.Serving_constraint.make
+    ~source_kind:Llm_provider.Serving_constraint.Probe
+    ~source_ref:"probe://incident/2793"
+    ~checked_at_unix_s:0
+    ~confidence:Llm_provider.Serving_constraint.High
+    ~accepted_through:524298
+    ~rejected_from:524299
+    ()
+  |> Result.get_ok
+;;
 
 let terminal_invocation tool_use_id =
   Tool_contract.Invocation.create
@@ -85,6 +97,28 @@ let api_cases : (string * SdkE.api_error * string) list =
   ; ( "ContextOverflow"
     , Retry.ContextOverflow { message = "ctx"; limit = Some 8192 }
     , "api_error_context_overflow" )
+  ; ( "InputCapacityRejected"
+    , Retry.InputCapacity
+        { message = "capacity"
+        ; constraint_ = serving_constraint
+        ; reason =
+            Retry.Serving_constraint_rejected
+              (Llm_provider.Serving_constraint.Input_rejected
+                 { input_tokens = 524299
+                 ; accepted_through = 524298
+                 ; rejected_from = 524299
+                 })
+        }
+    , "api_error_input_capacity:serving_constraint_rejected" )
+  ; ( "InputCapacityMeasurementUnavailable"
+    , Retry.InputCapacity
+        { message = "capacity"
+        ; constraint_ = serving_constraint
+        ; reason =
+            Retry.Token_measurement_unavailable
+              Llm_provider.Input_token_count.Anthropic_messages_count_tokens
+        }
+    , "api_error_input_capacity:measurement_unavailable" )
   ; ( "NetworkError"
     , Retry.NetworkError { message = "ECONNRESET"; kind = Http.Connection_refused }
     , "api_error_network" )
@@ -393,6 +427,26 @@ let test_payment_required_is_hard_quota () =
       "expected hard_quota, got %s"
       (EC.degraded_retry_reason_to_string reason)
   | None -> Alcotest.fail "expected hard_quota recoverable reason"
+;;
+
+let test_input_capacity_is_typed_runtime_recovery () =
+  let err =
+    SdkE.Api
+      (Retry.InputCapacity
+         { message = "measurement unavailable"
+         ; constraint_ = serving_constraint
+         ; reason =
+             Retry.Token_measurement_unavailable
+               Llm_provider.Input_token_count.Anthropic_messages_count_tokens
+         })
+  in
+  match EC.recoverable_runtime_failure_reason err with
+  | Some EC.Input_capacity -> ()
+  | Some reason ->
+    Alcotest.failf
+      "expected input_capacity, got %s"
+      (EC.degraded_retry_reason_to_string reason)
+  | None -> Alcotest.fail "typed input capacity did not expose a runtime recovery reason"
 ;;
 
 (* Regression: a transient Overloaded (529/CapacityExhausted) whose prose
@@ -933,6 +987,10 @@ let () =
             "payment required is classified as hard quota"
             `Quick
             test_payment_required_is_hard_quota
+        ; Alcotest.test_case
+            "input capacity is typed runtime recovery"
+            `Quick
+            test_input_capacity_is_typed_runtime_recovery
         ; Alcotest.test_case
             "transient overload with quota prose is not hard quota"
             `Quick

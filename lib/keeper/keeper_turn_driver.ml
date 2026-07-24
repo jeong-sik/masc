@@ -114,6 +114,13 @@ let lane_should_retry
   else if Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next error
   then
     allow_accept_no_progress_retry
+  else if Keeper_turn_driver_try_runtime.input_capacity_should_try_next error
+  then
+    (* InputCapacity is typed, zero-dispatch evidence for this resolved
+       candidate. A later candidate may have a current constraint or a real
+       measurement contract. The final compactable error remains intact for
+       the existing durable compaction path. *)
+    true
   else if Keeper_turn_driver_try_runtime.context_overflow_should_try_next error
   then
     (* A typed ContextOverflow is a per-candidate capacity bound, not a request

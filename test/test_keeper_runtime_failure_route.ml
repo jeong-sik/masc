@@ -93,6 +93,53 @@ let test_api_auth_rotates_invalid_request_judges () =
     Alcotest.failf "invalid request should judge, got %s"
       (KFR.route_kind_label other)
 
+let test_api_input_capacity_uses_typed_recovery () =
+  let constraint_ =
+    Llm_provider.Serving_constraint.make
+      ~source_kind:Llm_provider.Serving_constraint.Probe
+      ~source_ref:"probe://incident/2793"
+      ~checked_at_unix_s:0
+      ~confidence:Llm_provider.Serving_constraint.High
+      ~accepted_through:524298
+      ~rejected_from:524299
+      ()
+    |> Result.get_ok
+  in
+  let error reason =
+    Agent_sdk.Error.Api
+      (Llm_provider.Retry.InputCapacity
+         { message = "typed capacity"; constraint_; reason })
+  in
+  check_route
+    "current accepted bound escalates to compaction judgment"
+    (KFR.Escalate_judgment
+       { judgment = KFR.Context_overflow
+       ; provenance = KFR.Oas_api_error
+       ; detail =
+           Agent_sdk.Error.to_string
+             (error
+                (Llm_provider.Retry.Serving_constraint_rejected
+                   (Llm_provider.Serving_constraint.Input_rejected
+                      { input_tokens = 524299
+                      ; accepted_through = 524298
+                      ; rejected_from = 524299
+                      })))
+           |> Keeper_internal_error.cap_blocker_detail
+       })
+    (error
+       (Llm_provider.Retry.Serving_constraint_rejected
+          (Llm_provider.Serving_constraint.Input_rejected
+             { input_tokens = 524299
+             ; accepted_through = 524298
+             ; rejected_from = 524299
+             })));
+  check_route
+    "measurement-unavailable rotates"
+    (KFR.Rotate_now { rotate = KFR.Model_unavailable })
+    (error
+       (Llm_provider.Retry.Token_measurement_unavailable
+          Llm_provider.Input_token_count.Anthropic_messages_count_tokens))
+
 let test_provider_quota_family_threads_hint () =
   check_route
     "provider HardQuota preserves retry-after"
@@ -387,6 +434,10 @@ let () =
             `Quick
             test_api_server_error_uses_typed_variant
         ; Alcotest.test_case "auth rotates, invalid judges" `Quick test_api_auth_rotates_invalid_request_judges
+        ; Alcotest.test_case
+            "input capacity typed recovery"
+            `Quick
+            test_api_input_capacity_uses_typed_recovery
         ] )
     ; ( "provider"
       , [ Alcotest.test_case "quota family hints" `Quick test_provider_quota_family_threads_hint

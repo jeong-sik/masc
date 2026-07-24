@@ -938,6 +938,87 @@ let context_overflow_error message =
   Agent_sdk.Error.Api
     (Agent_sdk.Retry.ContextOverflow { message; limit = Some 32768 })
 
+let serving_constraint () =
+  Llm_provider.Serving_constraint.make
+    ~source_kind:Llm_provider.Serving_constraint.Probe
+    ~source_ref:"probe://incident/2793"
+    ~checked_at_unix_s:0
+    ~confidence:Llm_provider.Serving_constraint.High
+    ~accepted_through:524298
+    ~rejected_from:524299
+    ()
+  |> Result.get_ok
+
+let input_capacity_error reason =
+  Agent_sdk.Error.Api
+    (Agent_sdk.Retry.InputCapacity
+       { message = "typed input-capacity admission"
+       ; constraint_ = serving_constraint ()
+       ; reason
+       })
+
+let test_attempt_loop_input_capacity_tries_next_candidate () =
+  let attempts = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"resilient"
+      ~runtime_id_of:(fun runtime_id -> runtime_id)
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+        attempts := !attempts @ [ runtime_id ];
+        match candidate with
+        | "unmeasurable.test_model" ->
+          Error
+            (input_capacity_error
+               (Agent_sdk.Retry.Token_measurement_unavailable
+                  Llm_provider.Input_token_count.Anthropic_messages_count_tokens)),
+          None
+        | "measurable.test_model" -> Ok runtime_id, None
+        | other -> Alcotest.failf "unexpected candidate %s" other)
+      [ "unmeasurable.test_model"; "measurable.test_model" ]
+  in
+  (match result with
+   | Ok runtime_id ->
+     Alcotest.(check string)
+       "next runtime serves the turn"
+       "measurable.test_model"
+       runtime_id
+   | Error error ->
+     Alcotest.failf
+       "typed input capacity did not fail over: %s"
+       (Agent_sdk.Error.to_string error));
+  Alcotest.(check (list string))
+    "typed zero-dispatch failure advances the lane"
+    [ "unmeasurable.test_model"; "measurable.test_model" ]
+    !attempts
+
+let test_attempt_loop_compactable_input_capacity_stays_typed_on_last_candidate () =
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"resilient"
+      ~runtime_id_of:(fun runtime_id -> runtime_id)
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id:_ _candidate ->
+        Error
+          (input_capacity_error
+             (Agent_sdk.Retry.Serving_constraint_rejected
+                (Llm_provider.Serving_constraint.Input_rejected
+                   { input_tokens = 524299
+                   ; accepted_through = 524298
+                   ; rejected_from = 524299
+                   }))),
+        None)
+      [ "first.test_model"; "last.test_model" ]
+  in
+  match result with
+  | Error error ->
+    (match Masc.Keeper_unified_turn.context_overflow_event_of_error error with
+     | Some
+         (Keeper_state_machine.Context_overflow_detected
+            { limit_tokens = Some 524298 }) -> ()
+     | _ -> Alcotest.fail "typed accepted-through bound did not reach compaction")
+  | Ok _ -> Alcotest.fail "last compactable input-capacity failure was lost"
+
 (* A typed ContextOverflow is a per-candidate capacity bound: a later lane
    candidate with a larger context window can still serve the same turn, so
    the walk must continue instead of treating the 400 mapping as terminal. *)
@@ -1083,6 +1164,14 @@ let () =
             "context overflow tries next lane candidate"
             `Quick
             test_attempt_loop_overflow_tries_next_candidate;
+          Alcotest.test_case
+            "input capacity tries next lane candidate"
+            `Quick
+            test_attempt_loop_input_capacity_tries_next_candidate;
+          Alcotest.test_case
+            "compactable input capacity reaches compaction"
+            `Quick
+            test_attempt_loop_compactable_input_capacity_stays_typed_on_last_candidate;
           Alcotest.test_case
             "context overflow on last candidate stays terminal"
             `Quick

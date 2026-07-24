@@ -97,6 +97,14 @@ let user_message_of_sdk_error = function
     provider_network_user_message ~kind ~detail:message ()
   | Agent_sdk.Error.Api (Agent_sdk.Retry.ContextOverflow { limit; _ }) ->
     context_overflow_user_message ~limit
+  | Agent_sdk.Error.Api
+      (Agent_sdk.Retry.InputCapacity { reason; _ }) ->
+    (match Keeper_input_capacity.recovery_of_reason reason with
+     | Keeper_input_capacity.Compact_to_accepted_through accepted_through ->
+       context_overflow_user_message ~limit:(Some accepted_through)
+     | Keeper_input_capacity.Failover_only ->
+       "The selected runtime could not verify this request against its current \
+        input-capacity evidence. The message was not dispatched.")
   | Agent_sdk.Error.Provider
       (Llm_provider.Error.NetworkError { provider; kind; detail; _ }) ->
     provider_network_user_message ~provider ~kind ~detail ()
@@ -162,6 +170,12 @@ let api_error_terminal_reason_code (err : Agent_sdk.Error.api_error) : string =
   | Agent_sdk.Retry.InvalidRequest _ -> "api_error_invalid_request"
   | Agent_sdk.Retry.NotFound _ -> "api_error_not_found"
   | Agent_sdk.Retry.ContextOverflow _ -> "api_error_context_overflow"
+  | Agent_sdk.Retry.InputCapacity { reason; _ } ->
+    (match reason with
+     | Agent_sdk.Retry.Serving_constraint_rejected _ ->
+       "api_error_input_capacity:serving_constraint_rejected"
+     | Agent_sdk.Retry.Token_measurement_unavailable _ ->
+       "api_error_input_capacity:measurement_unavailable")
   (* SSOT: the two transient wire codes are owned by [Keeper_terminal_reason]
      so the consumer-side disposition classifier
      ([Keeper_terminal_reason.is_transient_provider_runtime_failure]) and this

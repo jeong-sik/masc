@@ -301,6 +301,7 @@ let test_manual_compaction_serializes_owner_lane () =
   Eio.Switch.run @@ fun sw ->
   with_eio_context env sw @@ fun () ->
   let base_path = Masc_test_deps.setup_test_workspace () in
+  let manifest_error = "injected post-install manifest append failure" in
   let meta = make_meta ~name:"compaction-owner" ~trace_id:"trace-compaction-owner" () in
   let peer = make_meta ~name:"compaction-peer" ~trace_id:"trace-compaction-peer" () in
   let runtime_snapshot = Runtime.For_testing.snapshot () in
@@ -1084,11 +1085,14 @@ let test_manual_applied_hint_failure () =
        let callback_saw_released_admission = ref false in
        let hint_calls = ref 0 in
        let result =
-         Masc.Keeper_manual_compaction.For_testing.run_admitted_with_install_observer
+         Masc.Keeper_manual_compaction.For_testing.
+           run_admitted_with_install_observer_and_manifest_failure
+           ~manifest_error
            ~on_checkpoint_installed_observer:(fun _ ->
              Masc.Keeper_registry.For_testing.unregister
                ~base_path
-               meta.name)
+               meta.name;
+             raise (Failure "injected checkpoint commit observer failure"))
            ~on_checkpoint_commit_hint:(fun _installed_ref ->
              incr hint_calls;
              callback_saw_released_admission :=
@@ -1136,64 +1140,135 @@ let test_manual_applied_hint_failure () =
             fail
               "post-install completion and cleanup rejection did not stay Applied");
          (match success.receipt.manifest with
-          | Ok () -> ()
           | Error detail ->
-            failf "post-install degraded manifest was not durable: %s" detail);
+            check string "manifest failure is exact" manifest_error detail
+          | Ok () -> fail "injected manifest append unexpectedly succeeded");
          check int
            "post-install lifecycle rejection performs one provider POST"
            1
            (Exact_fixture.post_count exact_server);
-         let manifest_path =
-           Masc.Keeper_runtime_manifest.path_for_trace
-             config
-             ~keeper_name:meta.name
-             ~trace_id:
-               (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+         let stimulus : Queue.stimulus =
+           { post_id = Queue.manual_compaction_post_id
+           ; urgency = Queue.Normal
+           ; arrived_at = 1.0
+           ; payload = Queue.Manual_compaction_requested
+           }
          in
-         let manifest =
-           Fs_compat.load_file manifest_path
-           |> String.split_on_char '\n'
-           |> List.filter (fun line -> String.trim line <> "")
-           |> List.rev
+         Result.get_ok
+           (Registry_queue.enqueue_durable_result
+              ~base_path
+              meta.name
+              stimulus);
+         let lease =
+           Registry_queue.claim_when_result
+             ~base_path
+             meta.name
+             ~claimed_at:2.0
+             ~ready:(fun _ -> true)
+           |> Result.get_ok
            |> function
-           | line :: _ -> Yojson.Safe.from_string line
-           | [] -> fail "post-install degraded manifest row is missing"
+           | Some lease -> lease
+           | None -> fail "manual compaction receipt fixture was not leased"
          in
+         let settlement =
+           Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
+             ~base_path
+             ~settled_at:3.0
+             ~stop_requested:false
+             ~compaction_consecutive_failures:0
+             ~lease
+             (Some
+                (Cycle.Manual_compaction_applied
+                   { receipt = success.receipt
+                   ; followup = Cycle.Completed meta
+                   }))
+         in
+         (match
+            Registry_queue.settle_result
+              ~base_path
+              meta.name
+              ~settled_at:3.0
+              ~lease
+              ~settlement
+          with
+          | Ok
+              ( Registry_queue.Settled _
+              | Registry_queue.Already_settled _ ) ->
+            ()
+          | Ok (Registry_queue.Committed_followup_failed { detail; _ })
+          | Error detail ->
+            failf "manual compaction receipt settlement failed: %s" detail);
+         let entry =
+           Registry_queue.transition_outbox_result ~base_path meta.name
+           |> Result.get_ok
+           |> function
+           | [ entry ] -> entry
+           | entries ->
+             failf
+               "manual compaction durable outbox count=%d"
+               (List.length entries)
+         in
+         (match entry.receipt.settlement with
+          | Registry_queue.Manual_compaction_committed
+              { commit
+              ; followup = Keeper_event_queue_state.Compaction_commit_ack
+              } ->
+            check bool
+              "durable queue receipt carries exact installed ref"
+              true
+              (Keeper_checkpoint_ref.equal
+                 success.receipt.installation.installed_ref
+                 commit.installed_ref);
+            check bool
+              "durable queue receipt carries observer auxiliary"
+              true
+              (List.exists
+                 (function
+                   | Keeper_event_queue_state.Compaction_commit_observer_failed _
+                     -> true
+                   | _ -> false)
+                 commit.auxiliary);
+            (match commit.lifecycle with
+             | Keeper_event_queue_state.
+                 Compaction_completion_rejected_failure_dispatch_failed _ ->
+               ()
+             | _ -> fail "durable queue receipt lost lifecycle failure");
+            check (option string)
+              "durable queue receipt carries manifest error"
+              (Some manifest_error)
+              commit.manifest_error;
+            check bool
+              "durable queue receipt requires operator action"
+              true
+              (Keeper_event_queue_state.
+                 manual_compaction_commit_requires_operator_action
+                 commit)
+          | _ -> fail "manual compaction durable settlement was not committed");
          let open Yojson.Safe.Util in
-         let decision = manifest |> member "decision" in
-         let public_decision =
-           Masc.Keeper_runtime_manifest.public_projection_of_decision decision
+         let public_receipt =
+           Keeper_event_queue_state.transition_receipt_to_yojson entry.receipt
+           |> member "settlement"
+           |> member "receipt"
          in
-         check string
-           "post-install anomaly degrades manifest health"
-           "degraded"
-           (manifest |> member "status" |> to_string);
          check bool
-           "post-install anomaly requires operator action"
+           "public durable receipt requires operator action"
            true
-           (public_decision
-            |> member "operator_action_required"
-            |> to_bool);
+           (public_receipt |> member "operator_action_required" |> to_bool);
          check string
-           "durable receipt states installed"
-           "installed"
-           (public_decision
-            |> member "checkpoint_installation_state"
-            |> to_string);
-         check string
-           "durable receipt carries exact sha"
+           "public durable receipt carries exact sha"
            success.receipt.installation.installed_ref.sha256
-           (public_decision
+           (public_receipt
             |> member "checkpoint_installed_ref"
             |> member "sha256"
             |> to_string);
          check string
-           "durable receipt carries lifecycle failure"
-           "completion_rejected_failure_dispatch_failed"
-           (public_decision
-            |> member "compaction_lifecycle"
-            |> member "kind"
-            |> to_string)
+           "public durable receipt carries manifest failure"
+           manifest_error
+           (public_receipt |> member "manifest_error" |> to_string);
+         check int
+           "durable receipt path never redispatches provider"
+           1
+           (Exact_fixture.post_count exact_server)
        | `No_compaction no_compaction ->
          failf
            "manual observer did not apply: %s"

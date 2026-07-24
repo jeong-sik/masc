@@ -186,6 +186,46 @@ type accepted_source_terminal =
   ; source_receipt : source_terminal_receipt
   }
 
+type manual_compaction_auxiliary =
+  | Compaction_commit_durability_unknown of { detail : string }
+  | Compaction_commit_observer_failed of
+      { detail : string
+      ; backtrace_present : bool
+      }
+  | Compaction_release_process_lock_failed of { detail : string }
+  | Compaction_post_commit_unwind_interrupted of
+      { detail : string
+      ; backtrace_present : bool
+      }
+  | Compaction_history_write_failed of
+      { detail : string
+      ; backtrace_present : bool
+      }
+
+type manual_compaction_lifecycle =
+  | Compaction_completion_applied
+  | Compaction_completion_rejected_failure_dispatched of
+      { completion_error : string }
+  | Compaction_completion_rejected_failure_dispatch_failed of
+      { completion_error : string
+      ; failure_dispatch_error : string
+      }
+
+type manual_compaction_commit =
+  { installed_ref : Keeper_checkpoint_ref.t
+  ; auxiliary : manual_compaction_auxiliary list
+  ; lifecycle : manual_compaction_lifecycle
+  ; manifest_error : string option
+  }
+
+type manual_compaction_followup =
+  | Compaction_commit_ack
+  | Compaction_commit_failure_judgment of Keeper_event_queue.stimulus
+
+val manual_compaction_commit_requires_operator_action
+  :  manual_compaction_commit
+  -> bool
+
 val no_compaction_reason_label : no_compaction_reason -> string
 val no_compaction_reason_of_label : string -> (no_compaction_reason, string) result
 val no_compaction_reason_to_string : no_compaction_reason -> string
@@ -202,6 +242,10 @@ val escalation_reason_requests_external_input : escalation_reason -> bool
 
 type settlement =
   | Ack
+  | Manual_compaction_committed of
+      { commit : manual_compaction_commit
+      ; followup : manual_compaction_followup
+      }
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer

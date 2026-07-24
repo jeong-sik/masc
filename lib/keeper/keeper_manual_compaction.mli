@@ -99,6 +99,9 @@ val run_admitted
 
 val failure_to_string : failure -> string
 val observe_manifest : keeper_name:string -> (unit, string) result -> unit
+val queue_commit_of_applied_receipt
+  :  applied_receipt
+  -> Keeper_event_queue_state.manual_compaction_commit
 
 module For_testing : sig
   val preserve_no_compaction_after_final_admission_busy
@@ -107,6 +110,16 @@ module For_testing : sig
 
   val run_admitted_with_install_observer :
     ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard ->
+    on_checkpoint_installed_observer:(Keeper_checkpoint_ref.t -> unit) ->
+    on_checkpoint_commit_hint:(Keeper_checkpoint_ref.t -> unit) ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    unit ->
+    admitted_result
+
+  val run_admitted_with_install_observer_and_manifest_failure :
+    ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard ->
+    manifest_error:string ->
     on_checkpoint_installed_observer:(Keeper_checkpoint_ref.t -> unit) ->
     on_checkpoint_commit_hint:(Keeper_checkpoint_ref.t -> unit) ->
     config:Workspace.config ->

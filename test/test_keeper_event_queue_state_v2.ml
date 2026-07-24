@@ -1395,9 +1395,11 @@ let test_applied_compaction_settles_followup_atomically () =
          })
   in
   (match settlement judgment_failure with
-   | Masc.Keeper_registry_event_queue.Escalate
-       { reason = Masc.Keeper_registry_event_queue.Failure_judgment_requested
-       ; successor = Some { Queue.payload = Queue.Failure_judgment successor; _ }
+   | Masc.Keeper_registry_event_queue.Manual_compaction_committed
+       { followup =
+           Keeper_event_queue_state.Compaction_commit_failure_judgment
+             { Queue.payload = Queue.Failure_judgment successor; _ }
+       ; _
        } ->
      Alcotest.(check string)
        "atomic successor keeps exact final runtime"
@@ -1412,7 +1414,9 @@ let test_applied_compaction_settles_followup_atomically () =
          })
   in
   (match settlement retry_failure with
-   | Masc.Keeper_registry_event_queue.Ack -> ()
+   | Masc.Keeper_registry_event_queue.Manual_compaction_committed
+       { followup = Keeper_event_queue_state.Compaction_commit_ack; _ } ->
+     ()
    | _ -> Alcotest.fail "follow-up retry replayed an already-applied compaction");
   let completion_error =
     Masc.Keeper_context_runtime.Transition_rejected
@@ -1444,7 +1448,15 @@ let test_applied_compaction_settles_followup_atomically () =
        ~lease
        (Some committed)
    with
-   | Masc.Keeper_registry_event_queue.Ack -> ()
+   | Masc.Keeper_registry_event_queue.Manual_compaction_committed
+       { commit
+       ; followup = Keeper_event_queue_state.Compaction_commit_ack
+       } ->
+     Alcotest.(check bool)
+       "post-install lifecycle receipt requires operator action"
+       true
+       (Keeper_event_queue_state.manual_compaction_commit_requires_operator_action
+          commit)
    | Masc.Keeper_registry_event_queue.Requeue
        Masc.Keeper_registry_event_queue.Context_compaction_retry ->
      Alcotest.fail "post-install lifecycle failure replayed provider compaction"

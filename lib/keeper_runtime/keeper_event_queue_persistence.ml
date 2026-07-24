@@ -162,6 +162,10 @@ type accepted_source_terminal = State.accepted_source_terminal =
 
 type settlement = State.settlement =
   | Ack
+  | Manual_compaction_committed of
+      { commit : State.manual_compaction_commit
+      ; followup : State.manual_compaction_followup
+      }
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer

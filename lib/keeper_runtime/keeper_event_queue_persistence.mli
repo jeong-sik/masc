@@ -172,6 +172,10 @@ type accepted_source_terminal = Keeper_event_queue_state.accepted_source_termina
 
 type settlement = Keeper_event_queue_state.settlement =
   | Ack
+  | Manual_compaction_committed of
+      { commit : Keeper_event_queue_state.manual_compaction_commit
+      ; followup : Keeper_event_queue_state.manual_compaction_followup
+      }
   | No_compaction of no_compaction
   | Cancel_accepted of accepted_cancellation
   | Transfer_accepted of accepted_transfer

@@ -297,6 +297,15 @@ let record_event_queue_turn_started ~base_path ~keeper_name stimulus =
 
 let reaction_kind_of_settlement = function
   | Keeper_event_queue_state.Ack -> Event_queue_ack
+  | Keeper_event_queue_state.Manual_compaction_committed
+      { followup = Keeper_event_queue_state.Compaction_commit_ack; _ } ->
+    Event_queue_ack
+  | Keeper_event_queue_state.Manual_compaction_committed
+      { followup =
+          Keeper_event_queue_state.Compaction_commit_failure_judgment _
+      ; _
+      } ->
+    Event_queue_escalated
   | Keeper_event_queue_state.No_compaction _ -> Event_queue_no_compaction
   | Keeper_event_queue_state.Cancel_accepted _ -> Event_queue_cancelled
   | Keeper_event_queue_state.Transfer_accepted _ -> Event_queue_ack
@@ -679,6 +688,10 @@ let require_finite_float ~missing ~non_finite field json =
 let reaction_kind_matches_settlement reaction_kind settlement =
   match reaction_kind, settlement with
   | Event_queue_ack, Keeper_event_queue_state.Ack -> true
+  | Event_queue_ack,
+    Keeper_event_queue_state.Manual_compaction_committed
+      { followup = Keeper_event_queue_state.Compaction_commit_ack; _ } ->
+    true
   | Event_queue_ack, Keeper_event_queue_state.Transfer_accepted _ -> true
   | Event_queue_ack, Keeper_event_queue_state.Settle_from_source_terminal _ -> true
   | Event_queue_no_compaction, Keeper_event_queue_state.No_compaction _ -> true
@@ -690,18 +703,27 @@ let reaction_kind_matches_settlement reaction_kind settlement =
   | Event_queue_requeued, Keeper_event_queue_state.Requeue _ -> true
   | Event_queue_escalated, Keeper_event_queue_state.Escalate _ -> true
   | Event_queue_escalated,
+    Keeper_event_queue_state.Manual_compaction_committed
+      { followup =
+          Keeper_event_queue_state.Compaction_commit_failure_judgment _
+      ; _
+      } ->
+    true
+  | Event_queue_escalated,
     Keeper_event_queue_state.Settle_exact { semantic = Exact_escalate; _ } ->
     true
   | Turn_started, _
   | Cursor_ack, _
   | Event_queue_ack,
-    ( Keeper_event_queue_state.No_compaction _
+    ( Keeper_event_queue_state.Manual_compaction_committed _
+    | Keeper_event_queue_state.No_compaction _
     | Keeper_event_queue_state.Cancel_accepted _
     | Keeper_event_queue_state.Settle_exact _
     | Keeper_event_queue_state.Requeue _
     | Keeper_event_queue_state.Escalate _ )
   | Event_queue_no_compaction,
     ( Keeper_event_queue_state.Ack
+    | Keeper_event_queue_state.Manual_compaction_committed _
     | Keeper_event_queue_state.Cancel_accepted _
     | Keeper_event_queue_state.Transfer_accepted _
     | Keeper_event_queue_state.Settle_from_source_terminal _
@@ -710,6 +732,7 @@ let reaction_kind_matches_settlement reaction_kind settlement =
     | Keeper_event_queue_state.Escalate _ )
   | Event_queue_cancelled,
     ( Keeper_event_queue_state.Ack
+    | Keeper_event_queue_state.Manual_compaction_committed _
     | Keeper_event_queue_state.No_compaction _
     | Keeper_event_queue_state.Transfer_accepted _
     | Keeper_event_queue_state.Settle_from_source_terminal _
@@ -718,6 +741,7 @@ let reaction_kind_matches_settlement reaction_kind settlement =
     | Keeper_event_queue_state.Escalate _ )
   | Event_queue_requeued,
     ( Keeper_event_queue_state.Ack
+    | Keeper_event_queue_state.Manual_compaction_committed _
     | Keeper_event_queue_state.No_compaction _
     | Keeper_event_queue_state.Cancel_accepted _
     | Keeper_event_queue_state.Transfer_accepted _
@@ -726,6 +750,7 @@ let reaction_kind_matches_settlement reaction_kind settlement =
     | Keeper_event_queue_state.Escalate _ )
   | Event_queue_escalated,
     ( Keeper_event_queue_state.Ack
+    | Keeper_event_queue_state.Manual_compaction_committed _
     | Keeper_event_queue_state.No_compaction _
     | Keeper_event_queue_state.Cancel_accepted _
     | Keeper_event_queue_state.Transfer_accepted _
@@ -1439,6 +1464,7 @@ let summarize_rows ~keeper_name ~limit rows =
          if Keeper_event_queue_state.escalation_reason_requests_external_input reason
          then incr event_queue_external_input_count
        | Keeper_event_queue_state.Ack
+       | Keeper_event_queue_state.Manual_compaction_committed _
        | Keeper_event_queue_state.No_compaction _
        | Keeper_event_queue_state.Cancel_accepted _
        | Keeper_event_queue_state.Transfer_accepted _

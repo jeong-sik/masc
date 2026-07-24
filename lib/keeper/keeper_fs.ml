@@ -424,18 +424,31 @@ let save_bytes_durable_atomic_core
   confirm_temp_directory_lease temp_directory_lease
 ;;
 
+type durable_commit_outcome =
+  | Committed
+  | Committed_but_observer_failed of Eio.Exn.with_bt
+
+let check_durable_write_completion result =
+  Eio_guard.check_if_ready ();
+  result
+;;
+
 let observe_durable_write_success ~on_durable_commit = function
   | Error _ as error ->
     Eio_guard.check_if_ready ();
     error
-  | Ok () as success ->
+  | Ok () ->
     (* The blocking transaction and both final directory-lease confirmations
        are complete. This pure caller-fiber publication must precede the
        cooperative cancellation check: a systhread cannot stop once running,
        so cancellation may already be pending after a fully durable commit. *)
-    on_durable_commit ();
-    Eio_guard.check_if_ready ();
-    success
+    (match on_durable_commit () with
+     | () ->
+       Eio_guard.check_if_ready ();
+       Ok Committed
+     | exception exn ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       Ok (Committed_but_observer_failed (exn, backtrace)))
 ;;
 
 let save_bytes_durable_atomic_observed_with
@@ -466,14 +479,15 @@ let save_bytes_durable_atomic_with
       path
       bytes
   =
-  save_bytes_durable_atomic_observed_with
-    ~on_durable_commit:(fun () -> ())
-    ~before_stage
-    ?before_directory_fsync
-    ?ownership_root
-    ?temp_dir
-    path
-    bytes
+  protect_durable_write (fun () ->
+    save_bytes_durable_atomic_core
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      bytes)
+  |> check_durable_write_completion
 ;;
 
 let save_json_durable_atomic_from_with
@@ -510,7 +524,7 @@ let save_json_durable_atomic_from_with
       ?temp_dir
       path
       bytes)
-  |> observe_durable_write_success ~on_durable_commit:(fun () -> ())
+  |> check_durable_write_completion
 ;;
 
 let save_json_durable_atomic_with
@@ -533,8 +547,7 @@ let save_json_durable_atomic_with
 ;;
 
 let save_bytes_durable_atomic ?ownership_root ?temp_dir path bytes =
-  save_bytes_durable_atomic_observed_with
-    ~on_durable_commit:(fun () -> ())
+  save_bytes_durable_atomic_with
     ~before_stage:(fun _ -> ())
     ?ownership_root
     ?temp_dir
@@ -682,8 +695,7 @@ module For_testing = struct
         path
         bytes
     =
-    save_bytes_durable_atomic_observed
-      ~on_durable_commit:(fun () -> ())
+    save_bytes_durable_atomic_with
       ~before_stage
       ?before_directory_fsync
       ?ownership_root

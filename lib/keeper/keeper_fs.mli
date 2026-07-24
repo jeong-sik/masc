@@ -58,19 +58,30 @@ type durable_write_error =
   ; failure : durable_write_failure
   }
 
+type durable_commit_outcome =
+  | Committed
+  | Committed_but_observer_failed of Eio.Exn.with_bt
+
 (** Strict durable atomic write with a required terminal observer.
     [on_durable_commit] runs exactly once in the caller fiber after the payload,
     rename, required directory fsyncs, and final directory-lease confirmations
     have all succeeded, but before pending cooperative cancellation is checked.
     It is not called on an error. The callback must be synchronous,
-    non-blocking, perform no I/O or Eio operation, and must not raise. *)
+    non-blocking, and perform no I/O or Eio operation.
+
+    A normally returning callback produces [Committed], after which pending
+    cooperative cancellation is checked as usual. An observer exception,
+    including [Eio.Cancel.Cancelled], produces
+    [Committed_but_observer_failed] with its raw backtrace instead of escaping
+    through the pre-commit write-failure channel. The caller owns any
+    identity-bound reconciliation required by that outcome. *)
 val save_bytes_durable_atomic_observed
   :  on_durable_commit:(unit -> unit)
   -> ?ownership_root:string
   -> ?temp_dir:string
   -> string
   -> string
-  -> (unit, durable_write_error) result
+  -> (durable_commit_outcome, durable_write_error) result
 
 (** Strict durable atomic write of the supplied immutable byte string.
     The payload is written exactly, without parsing or re-encoding. This
@@ -150,7 +161,7 @@ module For_testing : sig
     -> ?temp_dir:string
     -> string
     -> string
-    -> (unit, durable_write_error) result
+    -> (durable_commit_outcome, durable_write_error) result
 
   val save_bytes_durable_atomic
     :  before_stage:(durable_write_stage -> unit)

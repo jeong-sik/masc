@@ -103,6 +103,13 @@ let require_durable_ok label = function
   | Error detail -> failf "%s: %s" label (KF.durable_write_error_to_string detail)
 ;;
 
+let require_observed_commit label = function
+  | Ok KF.Committed -> ()
+  | Ok (KF.Committed_but_observer_failed (exn, _)) ->
+    failf "%s: durable observer failed: %s" label (Printexc.to_string exn)
+  | Error detail -> failf "%s: %s" label (KF.durable_write_error_to_string detail)
+;;
+
 let require_directory_lease label = function
   | Ok _ -> ()
   | Error _ -> failf "%s: directory lease preparation failed" label
@@ -154,7 +161,7 @@ let test_non_directory_ancestor_does_not_poison_preparation () =
        let sibling_path = Filename.concat base "sibling/request.json" in
        match KF.save_json_durable_atomic sibling_path (`Assoc []) with
        | Ok () -> ()
-       | Error error ->
+        | Error error ->
          failf
            "directory prepare failure poisoned the next write: %s"
            (KF.durable_write_error_to_string error))
@@ -828,7 +835,7 @@ let test_durable_commit_observer_cardinality () =
     (fun () ->
        let committed = ref 0 in
        let committed_path = Filename.concat base "committed.bin" in
-       require_durable_ok
+       require_observed_commit
          "observed durable write"
          (KF.For_testing.save_bytes_durable_atomic_observed
             ~on_durable_commit:(fun () -> incr committed)
@@ -848,11 +855,15 @@ let test_durable_commit_observer_cardinality () =
             "rejected"
         with
         | Error { renamed = false; stage = KF.Payload_fsync; _ } -> ()
-        | Error error ->
+       | Error error ->
           failf
             "unexpected observed write error: %s"
             (KF.durable_write_error_to_string error)
-       | Ok () -> fail "injected precommit failure unexpectedly succeeded");
+        | Ok KF.Committed -> fail "injected precommit failure unexpectedly committed"
+        | Ok (KF.Committed_but_observer_failed (exn, _)) ->
+          failf
+            "injected precommit failure reached observer: %s"
+            (Printexc.to_string exn));
        check int "failed write does not publish" 0 !rejected;
        let post_rename = ref 0 in
        let post_rename_path = Filename.concat base "post-rename.bin" in
@@ -876,8 +887,67 @@ let test_durable_commit_observer_cardinality () =
           failf
             "unexpected post-rename observed write error: %s"
             (KF.durable_write_error_to_string error)
-        | Ok () -> fail "injected parent directory fsync failure unexpectedly succeeded");
+        | Ok KF.Committed ->
+          fail "injected parent directory fsync failure unexpectedly committed"
+        | Ok (KF.Committed_but_observer_failed (exn, _)) ->
+          failf
+            "injected parent directory fsync failure reached observer: %s"
+            (Printexc.to_string exn));
        check int "post-rename fsync failure does not publish" 0 !post_rename)
+;;
+
+let test_durable_commit_observer_failure_is_typed () =
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let assert_typed_failure ~label ~filename ~payload exception_ backtrace =
+         let path = Filename.concat base filename in
+         let observer_count = ref 0 in
+         (match
+            KF.For_testing.save_bytes_durable_atomic_observed
+              ~on_durable_commit:(fun () ->
+                incr observer_count;
+                Printexc.raise_with_backtrace exception_ backtrace)
+              ~before_stage:(fun _ -> ())
+              path
+              payload
+          with
+          | Ok (KF.Committed_but_observer_failed (observed_exn, observed_backtrace)) ->
+            check bool (label ^ " exception identity") true (observed_exn == exception_);
+            check
+              string
+              (label ^ " raw backtrace")
+              (Printexc.raw_backtrace_to_string backtrace)
+              (Printexc.raw_backtrace_to_string observed_backtrace)
+          | Ok KF.Committed -> failf "%s observer failure was lost" label
+          | Error error ->
+            failf
+              "%s durable write failed before observer: %s"
+              label
+              (KF.durable_write_error_to_string error));
+         check int (label ^ " observer cardinality") 1 !observer_count;
+         check
+           string
+           (label ^ " payload remains committed")
+           payload
+           (In_channel.with_open_bin path In_channel.input_all)
+       in
+       let ordinary_exception = Failure "injected durable observer failure" in
+       assert_typed_failure
+         ~label:"ordinary observer exception"
+         ~filename:"observer-failed.bin"
+         ~payload:"committed-before-observer-failure"
+         ordinary_exception
+         (Printexc.get_callstack 32);
+       let cancellation = Eio.Cancel.Cancelled Synthetic_observer_cancel in
+       assert_typed_failure
+         ~label:"observer cancellation"
+         ~filename:"observer-cancelled.bin"
+         ~payload:"committed-before-observer-cancellation"
+         cancellation
+         (Printexc.get_callstack 32))
 ;;
 
 let test_durable_commit_observer_precedes_pending_cancellation () =
@@ -924,7 +994,11 @@ let test_durable_commit_observer_precedes_pending_cancellation () =
                    path
                    "committed-before-cancel"
                with
-               | Ok () -> `Returned
+               | Ok KF.Committed -> `Returned
+               | Ok (KF.Committed_but_observer_failed (exn, _)) ->
+                 failf
+                   "pending-cancellation observer failed: %s"
+                   (Printexc.to_string exn)
                | Error error ->
                  failf
                    "pending-cancellation write failed: %s"
@@ -988,7 +1062,11 @@ let test_durable_commit_observer_error_preserves_pending_cancellation () =
                    path
                    "must-not-commit"
                with
-               | Ok () -> `Returned_ok
+               | Ok KF.Committed -> `Returned_ok
+               | Ok (KF.Committed_but_observer_failed (exn, _)) ->
+                 failf
+                   "precommit error unexpectedly reached observer: %s"
+                   (Printexc.to_string exn)
                | Error _ -> `Returned_error)
            with
            | Eio.Cancel.Cancelled _ -> `Cancelled
@@ -1061,7 +1139,9 @@ let test_durable_commit_observer_waits_for_reanchor () =
        check int "observer remains absent before re-anchor fsync" 0
          (Atomic.get publish_count);
        release_blocking_hook reanchor_fsync;
-       require_durable_ok "re-anchored observed write" (Eio.Promise.await outcome);
+       require_observed_commit
+         "re-anchored observed write"
+         (Eio.Promise.await outcome);
        check int "main write and re-anchor both fsync" 2
          (Atomic.get fsync_count);
        check int "observer publishes once after re-anchor" 1
@@ -1118,6 +1198,10 @@ let () =
             "success publishes once and error never publishes"
             `Quick
             test_durable_commit_observer_cardinality
+        ; test_case
+            "observer exception and cancellation return committed evidence"
+            `Quick
+            test_durable_commit_observer_failure_is_typed
         ; test_case
             "publication precedes pending cancellation"
             `Quick

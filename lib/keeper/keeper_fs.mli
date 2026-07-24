@@ -84,9 +84,9 @@ val save_bytes_durable_atomic_observed
   -> (durable_commit_outcome, durable_write_error) result
 
 (** Strict durable atomic write of the supplied immutable byte string.
-    The payload is written exactly, without parsing or re-encoding. This
-    delegates to {!save_bytes_durable_atomic_observed} with an explicit
-    no-op observer. *)
+    The payload is written exactly, without parsing or re-encoding. It provides
+    equivalent semantics through the same core transaction and completion
+    check without installing an observer. *)
 val save_bytes_durable_atomic
   :  ?ownership_root:string
   -> ?temp_dir:string

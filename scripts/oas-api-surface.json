@@ -1,6 +1,6 @@
 {
-  "pinned_sha": "f443220428751a266c26308d3e094c1d0fb31680",
-  "pinned_version": "v0.222.0",
+  "pinned_sha": "f448e5185ebd07ef7e0b3d8fb4a30b134b681c28",
+  "pinned_version": "v0.222.1",
   "surfaces": {
     "event_bus_payload_variants": [
       "AgentCompleted",
@@ -74,6 +74,7 @@
       "type:admission_error:type admission_error = | Provider_schema_unavailable | Json_syntax_unavailable | Unsupported_schema_keyword of string | Unsupported_schema_type of string | Invalid_schema | Wire_admission_rejected of wire_admission_error",
       "type:plan_provenance:type plan_provenance = { source_schema_fingerprint : schema_fingerprint ; effective_schema_fingerprint : schema_fingerprint option ; actual_assurance : actual_assurance ; catalog_generation : catalog_generation ; catalog_evidence : catalog_evidence ; target_identity : target_identity }",
       "type:effect_phase:type effect_phase = | Not_started | Before_dispatch | Dispatch_started | Response_received | Terminal",
+      "type:provider_trace:type provider_trace",
       "type:raw_response:type raw_response = { body : string ; body_sha256 : string }",
       "type:execution_error_cause:type execution_error_cause = | Attempt_already_started | Clock_required_for_timeout | Frozen_request_mismatch | Completion_failed | Incomplete_output | Missing_output | Ambiguous_output of int | Unexpected_output_content | Invalid_json_output | Internal_non_json_output",
       "type:execution_error:type execution_error = { call_id : call_id ; receipt : receipt ; cause : execution_error_cause ; raw_response : raw_response option }",
@@ -113,6 +114,8 @@
       "val:receipt_phase:val receipt_phase : receipt -> effect_phase",
       "val:receipt_dispatch_count:val receipt_dispatch_count : receipt -> int",
       "val:receipt_http_status:val receipt_http_status : receipt -> int option",
+      "val:receipt_provider_trace:val receipt_provider_trace : receipt -> provider_trace option",
+      "val:provider_trace_fingerprint:val provider_trace_fingerprint : provider_trace -> string",
       "val:receipt_plan_fingerprint:val receipt_plan_fingerprint : receipt -> string",
       "val:receipt_request_body_sha256:val receipt_request_body_sha256 : receipt -> string",
       "val:receipt_catalog_generation:val receipt_catalog_generation : receipt -> catalog_generation",

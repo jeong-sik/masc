@@ -8,9 +8,14 @@ val provider_for_summary :
   Llm_provider.Provider_config.t ->
   Llm_provider.Provider_config.t
 (** Tune the summary request while preserving the selected provider config's
-    exact temperature, including omission. *)
+    exact temperature, including omission. Native JSON Schema is preferred;
+    JSON-object mode is sufficient because the response is parsed and validated
+    locally before use. *)
 
-val summary_schema_supported : Llm_provider.Provider_config.t -> bool
+val summary_json_guarantee_supported :
+  Llm_provider.Provider_config.t -> bool
+(** Whether the provider can guarantee JSON syntax through native schema or
+    JSON-object mode. *)
 
 val messages_for_summary :
   trace_id:string -> texts:string list -> Agent_sdk.Types.message list

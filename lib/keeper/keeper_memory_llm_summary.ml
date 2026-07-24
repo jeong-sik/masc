@@ -57,11 +57,12 @@ let provider_for_summary (provider_cfg : Llm_provider.Provider_config.t) =
     tool_choice = None;
     disable_parallel_tool_use = true;
   }
-  |> Keeper_structured_output_schema.apply_to_provider_config
+  |> Keeper_structured_output_schema.apply_schema_json_mode_or_prompt_tier
+       ~log_label:"memory LLM summary"
        Keeper_structured_output_schema.memory_bank_summary_output_schema
 
-let summary_schema_supported provider_cfg =
-  Keeper_structured_output_schema.provider_config_accepts_schema
+let summary_json_guarantee_supported provider_cfg =
+  Keeper_structured_output_schema.provider_config_accepts_schema_or_json_mode
     Keeper_structured_output_schema.memory_bank_summary_output_schema
     provider_cfg
 
@@ -266,10 +267,12 @@ let make
                provider_runtime_id err;
              None
          | Ok provider ->
-             let providers = [ provider ] |> List.filter summary_schema_supported in
+             let providers =
+               [ provider ] |> List.filter summary_json_guarantee_supported
+             in
              if providers = [] then begin
                Log.Keeper.warn ~keeper_name:keeper_name
-                 "memory LLM summary has no schema-capable direct completion providers runtime=%s"
+                 "memory LLM summary has no JSON-capable completion providers runtime=%s"
                  provider_runtime_id;
                None
              end else

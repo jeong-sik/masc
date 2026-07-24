@@ -411,12 +411,20 @@ let log_activation_outcome ~schedule_id ~keeper_name = function
   | Keeper_wake_activation_not_required -> ()
   | Keeper_wake_activation_deferred reason ->
     let reason, detail = keeper_wake_activation_deferred_reason_fields reason in
-    Log.Keeper.info
-      "schedule stimulus retained without owner activation schedule_id=%s keeper=%s reason=%s detail=%s"
-      schedule_id
-      keeper_name
-      reason
-      (Option.value ~default:"none" detail)
+    (match detail with
+     | None ->
+       Log.Keeper.info
+         "schedule stimulus retained without owner activation schedule_id=%s keeper=%s reason=%s"
+         schedule_id
+         keeper_name
+         reason
+     | Some detail ->
+       Log.Keeper.info
+         "schedule stimulus retained without owner activation schedule_id=%s keeper=%s reason=%s detail=%s"
+         schedule_id
+         keeper_name
+         reason
+         detail)
 ;;
 
 let retryable_dispatch_failure detail =

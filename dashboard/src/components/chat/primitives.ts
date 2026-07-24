@@ -590,6 +590,12 @@ function streamContractBadgeInfo(entry: KeeperConversationEntry): StreamContract
     case 'no_delivery_receipt':
       switch (contract.status) {
         case 'history_without_turn_ref':
+          // User rows are persisted at request-accept time, before the turn
+          // (and its turn_ref) exists, and nothing back-stamps them — a
+          // missing turn_ref is the normal state of every user row, so the
+          // badge would be pure noise there. On assistant rows it still
+          // marks a real turn-join gap worth surfacing.
+          if (entry.role === 'user') return null
           return { label: '턴 연결 없음', title, state: 'no-turn-ref' }
         case 'contract_gap':
           return { label: '수신 gap', title, state: 'contract-gap' }

@@ -1659,11 +1659,15 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
           : action === 'resume'
             ? await resumeKeeper(keeperName, c.metrics.generation)
             : await wakeKeeper(keeperName)
-      if (!result.ok) {
+      if (!result.ok && result.committed !== true) {
         throw new Error(result.error || `${action} directive failed`)
       }
       runtimeDraft.value = null
       await loadKeeperConfig(keeperName, { force: true })
+      if (!result.ok) {
+        showToast(result.error || `${action} directive failed`, 'error')
+        return
+      }
       const label =
         action === 'pause' ? '일시정지' : action === 'resume' ? '재개' : '깨우기'
       showToast(`keeper ${label} 요청 완료`, 'success')

@@ -137,6 +137,7 @@ describe('bulkKeeperDirective', () => {
       succeeded: 1,
       results: [{ name: 'offline-rondo', ok: true, action: 'boot', committed: true }],
     })
+    expect(res.results[0]).not.toHaveProperty('error')
   })
 
   it('reports a committed bulk resume when its follow-up boot fails', async () => {

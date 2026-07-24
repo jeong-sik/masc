@@ -1059,6 +1059,46 @@ describe('KeeperConfigPanel', () => {
     expect(container.textContent).toContain('alive')
   })
 
+  it('reloads the config after a committed resume whose follow-up boot failed', async () => {
+    const config = makeKeeperConfig({
+      autoboot_enabled: false,
+      runtime: {
+        paused: true,
+        registered: false,
+        keepalive_running: false,
+        registry_state: 'missing',
+        fiber_health: 'dead',
+      },
+    })
+    mocks.fetchKeeperConfig
+      .mockResolvedValueOnce(config)
+      .mockResolvedValueOnce(config)
+    mocks.resumeKeeper.mockResolvedValueOnce({
+      ok: false,
+      action: 'boot',
+      name: 'keeper-sangsu',
+      committed: true,
+      error: 'boot unavailable',
+    })
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+    selectKcfTab(container, '상태·진단')
+    await flush()
+    const resumeButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('재개·등록'),
+    )
+
+    resumeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    await flush()
+    await flush()
+
+    expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(2)
+    expect(mocks.showToast).toHaveBeenCalledWith('boot unavailable', 'error')
+  })
+
   it('unsubscribes shared keeper config handlers on unmount', async () => {
     expect(keeperConfigSubscriptionCountsForTests()).toEqual({ reset: 0, update: 0 })
 

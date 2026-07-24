@@ -1,13 +1,41 @@
 import { h } from 'preact'
-import { cleanup, render } from '@testing-library/preact'
-import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 
 import type { Keeper } from '../types'
+
+const mocks = vi.hoisted(() => ({
+  pauseKeeper: vi.fn(async () => ({ ok: true })),
+  resumeKeeper: vi.fn(async () => ({ ok: true })),
+  wakeKeeper: vi.fn(async () => ({ ok: true })),
+  refreshAfterRuntimeAction: vi.fn(async () => undefined),
+  showToast: vi.fn(),
+}))
+
+vi.mock('../api/keeper', () => ({
+  pauseKeeper: mocks.pauseKeeper,
+  resumeKeeper: mocks.resumeKeeper,
+  wakeKeeper: mocks.wakeKeeper,
+}))
+
+vi.mock('./keeper-detail-helpers', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./keeper-detail-helpers')>()
+  return {
+    ...actual,
+    refreshAfterRuntimeAction: mocks.refreshAfterRuntimeAction,
+  }
+})
+
+vi.mock('./common/toast', () => ({
+  showToast: mocks.showToast,
+}))
+
 import { KeeperRuntimeAlertStrip } from './keeper-detail-alert-strip'
 
 afterEach(() => {
   cleanup()
+  vi.clearAllMocks()
 })
 
 function keeper(overrides: Partial<Keeper> = {}): Keeper {
@@ -259,6 +287,30 @@ describe('KeeperRuntimeAlertStrip', () => {
       .find(button => button.textContent?.includes('재개하기')) as HTMLButtonElement
     expect(resumeButton.disabled).toBe(true)
     expect(resumeButton.title).toContain('owner generation')
+  })
+
+  it('refreshes server truth after a committed resume whose follow-up boot failed', async () => {
+    mocks.resumeKeeper.mockResolvedValueOnce({
+      ok: false,
+      committed: true,
+      error: 'boot unavailable',
+    })
+    const { container } = render(h(KeeperRuntimeAlertStrip, {
+      keeper: keeper({
+        phase: 'Paused',
+        generation: 7,
+        needs_attention: true,
+      }),
+    }))
+    const resumeButton = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('재개하기')) as HTMLButtonElement
+
+    fireEvent.click(resumeButton)
+
+    await waitFor(() => {
+      expect(mocks.refreshAfterRuntimeAction).toHaveBeenCalledTimes(1)
+    })
+    expect(mocks.showToast).toHaveBeenCalledWith('boot unavailable', 'error')
   })
 
   it('uses lifecycle action visibility SSOT to show wake for non-paused blocked keepers', () => {

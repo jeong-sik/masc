@@ -247,13 +247,17 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           : action === 'resume'
             ? await resumeKeeper(keeper.name, keeper.generation)
             : await wakeKeeper(keeper.name)
-      if (res.ok) {
+      if (res.ok || res.committed === true) {
+        await refreshAfterRuntimeAction()
+        if (!res.ok) {
+          showToast(res.error ?? '실패', 'error')
+          return
+        }
         const msg =
           action === 'pause' ? `${keeper.name} 일시정지됨`
             : action === 'resume' ? `${keeper.name} 재개됨`
             : `${keeper.name} 깨움 신호 전송됨`
         showToast(msg, 'success')
-        await refreshAfterRuntimeAction()
       } else {
         showToast(res.error ?? '실패', 'error')
       }

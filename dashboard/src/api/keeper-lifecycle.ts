@@ -446,7 +446,7 @@ export async function bulkKeeperDirective(
         if (action === 'resume' && !result.ok && result.committed === true) {
           recoveredCommittedResume = true
           const boot = await bootKeeper(result.name, opts)
-          return { ...result, ...boot, name: result.name, committed: true }
+          return { ...boot, name: result.name, committed: true }
         }
         return result
       }))

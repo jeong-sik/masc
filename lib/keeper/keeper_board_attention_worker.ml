@@ -28,9 +28,30 @@ type drain_outcome =
 
 type rearm_schedule =
   | Rearm_scheduled of { delay_s : float }
-  | Rearm_deduplicated
+  | Rearm_deduplicated of { delay_s : float }
 
-let contention_rearm_delay_s = 0.05
+type rearm_ticket =
+  { ticket_id : int
+  ; delay_s : float
+  }
+
+type rearm_entry =
+  { key : contention
+  ; mutable next_delay_s : float
+  ; mutable pending : rearm_ticket option
+  }
+
+type rearm_scheduler =
+  { mutex : Stdlib.Mutex.t
+  ; fork : (unit -> unit) -> unit
+  ; sleep : float -> unit
+  ; request : unit -> string
+  ; mutable next_ticket_id : int
+  ; mutable entries : rearm_entry list
+  }
+
+let contention_rearm_base_delay_s = 0.05
+let contention_rearm_max_delay_s = 5.0
 
 let contention_equal (left : contention) (right : contention) =
   String.equal left.keeper_name right.keeper_name
@@ -38,36 +59,170 @@ let contention_equal (left : contention) (right : contention) =
   && Partition.Generation.equal left.generation right.generation
 ;;
 
-let make_contention_rearm_scheduler ~fork ~sleep ~request () =
-  let mutex = Stdlib.Mutex.create () in
-  let pending : contention list ref = ref [] in
-  let clear contention =
-    Stdlib.Mutex.protect mutex (fun () ->
-      pending := List.filter (fun current -> not (contention_equal current contention)) !pending)
+let contention_generation_label (contention : contention) =
+  contention.generation
+  |> Partition.Generation.to_yojson
+  |> Yojson.Safe.to_string
+;;
+
+let log_contention_rearm event (contention : contention) ~delay_s ~outcome =
+  Log.Keeper.info
+    "board_attention_claim_contention event=%s keeper=%s partition=%s generation=%s delay_ms=%d outcome=%s"
+    event
+    contention.keeper_name
+    contention.partition_id
+    (contention_generation_label contention)
+    (int_of_float (delay_s *. 1000.0))
+    outcome
+;;
+
+let find_rearm_entry scheduler contention =
+  List.find_opt
+    (fun entry -> contention_equal entry.key contention)
+    scheduler.entries
+;;
+
+let cancel_rearm_ticket scheduler contention ticket outcome =
+  let cancelled =
+    Stdlib.Mutex.protect scheduler.mutex (fun () ->
+      match find_rearm_entry scheduler contention with
+      | Some entry ->
+        (match entry.pending with
+         | Some current when Int.equal current.ticket_id ticket.ticket_id ->
+           entry.pending <- None;
+           true
+         | Some _ | None -> false)
+      | None -> false)
   in
-  fun contention ->
-    let installed =
-      Stdlib.Mutex.protect mutex (fun () ->
-        if List.exists (contention_equal contention) !pending
-        then false
-        else (
-          pending := contention :: !pending;
-          true))
-    in
-    if not installed
-    then Rearm_deduplicated
-    else (
-      (try
-         fork (fun () ->
-           Fun.protect
-             ~finally:(fun () -> clear contention)
-             (fun () -> sleep contention_rearm_delay_s);
-           request ())
-       with
-       | exn ->
-         clear contention;
-         raise exn);
-      Rearm_scheduled { delay_s = contention_rearm_delay_s })
+  if cancelled
+  then log_contention_rearm "cancelled" contention ~delay_s:ticket.delay_s ~outcome
+;;
+
+let fire_rearm_ticket scheduler contention ticket =
+  let outcome =
+    Stdlib.Mutex.protect scheduler.mutex (fun () ->
+      match find_rearm_entry scheduler contention with
+      | Some entry ->
+        (match entry.pending with
+         | Some current when Int.equal current.ticket_id ticket.ticket_id ->
+           entry.pending <- None;
+           Some (scheduler.request ())
+         | Some _ | None -> None)
+      | None -> None)
+  in
+  match outcome with
+  | Some outcome ->
+    log_contention_rearm "fired" contention ~delay_s:ticket.delay_s ~outcome
+  | None ->
+    log_contention_rearm
+      "cancelled"
+      contention
+      ~delay_s:ticket.delay_s
+      ~outcome:"stale_ticket"
+;;
+
+let make_contention_rearm_scheduler ~fork ~sleep ~request () =
+  { mutex = Stdlib.Mutex.create ()
+  ; fork
+  ; sleep
+  ; request
+  ; next_ticket_id = 0
+  ; entries = []
+  }
+;;
+
+let schedule_contention_rearm scheduler contention =
+  let decision =
+    Stdlib.Mutex.protect scheduler.mutex (fun () ->
+      let entry =
+        match find_rearm_entry scheduler contention with
+        | Some entry -> entry
+        | None ->
+          let entry =
+            { key = contention
+            ; next_delay_s = contention_rearm_base_delay_s
+            ; pending = None
+            }
+          in
+          scheduler.entries <- entry :: scheduler.entries;
+          entry
+      in
+      match entry.pending with
+      | Some ticket -> `Deduplicated ticket.delay_s
+      | None ->
+        let ticket =
+          { ticket_id = scheduler.next_ticket_id
+          ; delay_s = entry.next_delay_s
+          }
+        in
+        scheduler.next_ticket_id <- scheduler.next_ticket_id + 1;
+        entry.next_delay_s <-
+          Float.min contention_rearm_max_delay_s (entry.next_delay_s *. 2.0);
+        entry.pending <- Some ticket;
+        `Scheduled ticket)
+  in
+  match decision with
+  | `Deduplicated delay_s ->
+    log_contention_rearm
+      "deduplicated"
+      contention
+      ~delay_s
+      ~outcome:"pending";
+    Rearm_deduplicated { delay_s }
+  | `Scheduled ticket ->
+    (try
+       scheduler.fork (fun () ->
+         (try scheduler.sleep ticket.delay_s with
+          | exn ->
+            cancel_rearm_ticket
+              scheduler
+              contention
+              ticket
+              "sleep_cancelled";
+            raise exn);
+         fire_rearm_ticket scheduler contention ticket)
+     with
+     | exn ->
+       cancel_rearm_ticket scheduler contention ticket "fork_cancelled";
+       raise exn);
+    log_contention_rearm
+      "scheduled"
+      contention
+      ~delay_s:ticket.delay_s
+      ~outcome:"scheduled";
+    Rearm_scheduled { delay_s = ticket.delay_s }
+;;
+
+let reset_contention_rearms scheduler ~keep =
+  let removed =
+    Stdlib.Mutex.protect scheduler.mutex (fun () ->
+      let retained, removed =
+        List.partition
+          (fun entry ->
+             match keep with
+             | Some contention -> contention_equal entry.key contention
+             | None -> false)
+          scheduler.entries
+      in
+      scheduler.entries <- retained;
+      removed)
+  in
+  List.iter
+    (fun entry ->
+       match entry.pending with
+       | Some ticket ->
+         log_contention_rearm
+           "cancelled"
+           entry.key
+           ~delay_s:ticket.delay_s
+           ~outcome:"reset"
+       | None ->
+         log_contention_rearm
+           "reset"
+           entry.key
+           ~delay_s:0.0
+           ~outcome:"history_removed")
+    removed
 ;;
 
 type settlement =
@@ -1248,18 +1403,16 @@ let run
          | Ok () ->
            let prepare = Exact_flow.prepare ~net in
            let execute = Exact_flow.execute ~clock in
-           let schedule_contention_rearm =
+           let contention_rearms =
              make_contention_rearm_scheduler
                ~fork:(fun task -> Eio.Fiber.fork ~sw task)
                ~sleep:(Eio.Time.sleep clock)
                ~request:(fun () ->
                  match Wake.request ~base_path ~keeper_name with
-                 | Ok (Wake.Signaled | Wake.Coalesced | Wake.Not_registered) -> ()
-                 | Error detail ->
-                   Log.Keeper.error
-                     "Board attention delayed contention wake failed keeper=%s: %s"
-                     keeper_name
-                     detail)
+                 | Ok Wake.Signaled -> "signaled"
+                 | Ok Wake.Coalesced -> "coalesced"
+                 | Ok Wake.Not_registered -> "not_registered"
+                 | Error _ -> "error")
                ()
            in
            let rec await () =
@@ -1277,9 +1430,16 @@ let run
                  ~prepare
                  ~execute
              with
-             | Ok Drained -> await ()
+             | Ok Drained ->
+               reset_contention_rearms contention_rearms ~keep:None;
+               await ()
              | Ok (Retry_later contention) ->
-               ignore (schedule_contention_rearm contention : rearm_schedule);
+               reset_contention_rearms
+                 contention_rearms
+                 ~keep:(Some contention);
+               ignore
+                 (schedule_contention_rearm contention_rearms contention
+                  : rearm_schedule);
                await ()
              | Error detail -> fail Durable_drain detail
            in
@@ -1293,10 +1453,14 @@ let run
 ;;
 
 module For_testing = struct
+  type nonrec rearm_scheduler = rearm_scheduler
+
   let process_next = process_next
   let process_next_with_claim_ready_exact = process_next_with_claim_ready_exact
   let drain_available = drain_available
   let make_contention_rearm_scheduler = make_contention_rearm_scheduler
+  let schedule_contention_rearm = schedule_contention_rearm
+  let reset_contention_rearms = reset_contention_rearms
   let replay_completed_owner_wake = replay_completed_owner_wake
   let with_process_recovery_claim = with_process_recovery_claim
 end

@@ -517,37 +517,89 @@ let test_contention_rearm_is_delayed_and_deduplicated () =
   let tasks : (unit -> unit) list ref = ref [] in
   let sleeps = ref [] in
   let requests = ref 0 in
-  let schedule =
+  let scheduler =
     W.For_testing.make_contention_rearm_scheduler
-      ~fork:(fun task -> tasks := task :: !tasks)
-      ~sleep:(fun delay -> sleeps := delay :: !sleeps)
-      ~request:(fun () -> incr requests)
+      ~fork:(fun task -> tasks := !tasks @ [ task ])
+      ~sleep:(fun delay -> sleeps := !sleeps @ [ delay ])
+      ~request:(fun () ->
+        incr requests;
+        "signaled")
       ()
   in
-  let delay =
-    match schedule contention with
-    | W.Rearm_scheduled { delay_s } -> delay_s
-    | W.Rearm_deduplicated -> Alcotest.fail "first contention was deduplicated"
+  let schedule () =
+    W.For_testing.schedule_contention_rearm scheduler contention
   in
-  (match schedule contention with
-   | W.Rearm_deduplicated -> ()
-   | W.Rearm_scheduled _ -> Alcotest.fail "duplicate contention forked another rearm");
-  Alcotest.(check int) "one structured delayed task" 1 (List.length !tasks);
-  Alcotest.(check int) "no immediate wake" 0 !requests;
-  Alcotest.(check int) "delay has not run" 0 (List.length !sleeps);
-  let task =
+  let take_task () =
     match !tasks with
     | [ task ] ->
       tasks := [];
       task
     | [] | _ :: _ :: _ -> Alcotest.fail "contention rearm task cardinality drifted"
   in
-  task ();
-  Alcotest.(check (float 0.0)) "fixed bounded delay" delay (List.hd !sleeps);
+  let first_delay =
+    match schedule () with
+    | W.Rearm_scheduled { delay_s } -> delay_s
+    | W.Rearm_deduplicated _ -> Alcotest.fail "first contention was deduplicated"
+  in
+  (match schedule () with
+   | W.Rearm_deduplicated { delay_s } ->
+     Alcotest.(check (float 0.0))
+       "duplicate retains pending delay"
+       first_delay
+       delay_s
+   | W.Rearm_scheduled _ -> Alcotest.fail "duplicate contention forked another rearm");
+  Alcotest.(check int) "one structured delayed task" 1 (List.length !tasks);
+  Alcotest.(check int) "no immediate wake" 0 !requests;
+  Alcotest.(check int) "delay has not run" 0 (List.length !sleeps);
+  take_task () ();
+  Alcotest.(check (float 0.0))
+    "base bounded delay"
+    first_delay
+    (List.hd !sleeps);
   Alcotest.(check int) "one delayed wake" 1 !requests;
-  match schedule contention with
-  | W.Rearm_scheduled _ -> ()
-  | W.Rearm_deduplicated -> Alcotest.fail "completed rearm did not clear its typed key"
+  let second_delay =
+    match schedule () with
+    | W.Rearm_scheduled { delay_s } -> delay_s
+    | W.Rearm_deduplicated _ ->
+      Alcotest.fail "fired rearm did not preserve retry history"
+  in
+  Alcotest.(check bool)
+    "persistent contention backs off below 20Hz"
+    true
+    (second_delay > first_delay);
+  take_task () ();
+  let capped_delay = ref second_delay in
+  for _attempt = 1 to 10 do
+    (match schedule () with
+     | W.Rearm_scheduled { delay_s } -> capped_delay := delay_s
+     | W.Rearm_deduplicated _ ->
+       Alcotest.fail "sequential persistent retry was deduplicated");
+    take_task () ()
+  done;
+  Alcotest.(check (float 0.0001)) "backoff caps conservatively" 5.0 !capped_delay;
+  Alcotest.(check bool)
+    "every contention delay is capped"
+    true
+    (List.for_all (fun delay -> delay <= 5.0) !sleeps);
+  let requests_before_reset = !requests in
+  (match schedule () with
+   | W.Rearm_scheduled _ -> ()
+   | W.Rearm_deduplicated _ ->
+     Alcotest.fail "reset fixture did not schedule a ticket");
+  W.For_testing.reset_contention_rearms scheduler ~keep:None;
+  take_task () ();
+  Alcotest.(check int)
+    "reset suppresses stale ticket wake"
+    requests_before_reset
+    !requests;
+  match schedule () with
+  | W.Rearm_scheduled { delay_s } ->
+    Alcotest.(check (float 0.0001))
+      "reset removes generation retry history"
+      0.05
+      delay_s
+  | W.Rearm_deduplicated _ ->
+    Alcotest.fail "reset retained a stale pending ticket"
 ;;
 
 let test_execution_error_preserves_bound_progress_without_hot_retry () =

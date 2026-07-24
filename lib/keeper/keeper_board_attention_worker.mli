@@ -29,7 +29,7 @@ type drain_outcome =
 
 type rearm_schedule =
   | Rearm_scheduled of { delay_s : float }
-  | Rearm_deduplicated
+  | Rearm_deduplicated of { delay_s : float }
 
 type settlement =
   | No_completed_partition
@@ -78,6 +78,8 @@ val settle_one_completed :
     invokes OAS. *)
 
 module For_testing : sig
+  type rearm_scheduler
+
   val process_next_with_claim_ready_exact :
     claim_ready_exact:
       (now:float ->
@@ -172,10 +174,15 @@ module For_testing : sig
   val make_contention_rearm_scheduler :
     fork:((unit -> unit) -> unit) ->
     sleep:(float -> unit) ->
-    request:(unit -> unit) ->
+    request:(unit -> string) ->
     unit ->
-    contention ->
-    rearm_schedule
+    rearm_scheduler
+
+  val schedule_contention_rearm :
+    rearm_scheduler -> contention -> rearm_schedule
+
+  val reset_contention_rearms :
+    rearm_scheduler -> keep:contention option -> unit
   (** Deterministic seam for the run-owner delayed rearm scheduler. Production
       supplies a structured [Eio.Fiber.fork] on the worker switch and its
       monotonic clock. *)

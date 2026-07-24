@@ -421,6 +421,7 @@ describe('dashboardHealthChips', () => {
             bootable_keeper_count: 1,
             running_keeper_fiber_count: 0,
             failing_keeper_fiber_count: 0,
+            recovering_keeper_fiber_count: 0,
             executable_keeper_fiber_count: 0,
             no_executable_keeper_fibers: true,
             reaction_capacity_below_target: true,
@@ -445,7 +446,10 @@ describe('dashboardHealthChips', () => {
     expect(chip?.detail).toContain('status=blocked')
     expect(chip?.detail).toContain('executable_keeper_fiber_count=0')
     expect(chip?.detail).toContain('paused_keeper_count=13')
+    expect(chip?.detail).toContain('failing_keeper_fiber_count=0')
+    expect(chip?.detail).toContain('recovering_keeper_fiber_count=0')
     expect(chip?.detail).toContain('target_reaction_capacity_count=14')
+    expect(chip?.detail).toContain('blocker=no_executable_keeper_fibers')
     expect(chip?.detail).toContain('resume selected paused keepers')
   })
 
@@ -468,6 +472,7 @@ describe('dashboardHealthChips', () => {
             bootable_keeper_count: 3,
             running_keeper_fiber_count: 0,
             failing_keeper_fiber_count: 0,
+            recovering_keeper_fiber_count: 0,
             executable_keeper_fiber_count: 0,
             no_executable_keeper_fibers: true,
             reaction_capacity_below_target: true,
@@ -491,6 +496,84 @@ describe('dashboardHealthChips', () => {
     }))
     expect(chip?.detail).toContain('paused_keeper_count=3')
     expect(chip?.detail).toContain('resume selected paused keepers')
+  })
+
+  it.each([
+    [
+      'failing-only',
+      {
+        status: 'blocked',
+        reason: null,
+        blocker: 'no_executable_keeper_fibers',
+        blocked_keeper_count: 2,
+        failing_keeper_fiber_count: 2,
+        recovering_keeper_fiber_count: 0,
+        executable_keeper_fiber_count: 0,
+        paused_keeper_count: 0,
+        target_reaction_capacity_count: 2,
+      },
+      'failing_keeper_fiber_count=2',
+      'inspect and recover failing keepers',
+    ],
+    [
+      'recovering-only',
+      {
+        status: 'blocked',
+        reason: null,
+        blocker: 'no_executable_keeper_fibers',
+        blocked_keeper_count: 2,
+        failing_keeper_fiber_count: 0,
+        recovering_keeper_fiber_count: 2,
+        executable_keeper_fiber_count: 0,
+        paused_keeper_count: 0,
+        target_reaction_capacity_count: 2,
+      },
+      'recovering_keeper_fiber_count=2',
+      'keeper recovery is in progress',
+    ],
+    [
+      'unknown',
+      {
+        status: 'blocked',
+        reason: null,
+        blocker: 'no_executable_keeper_fibers',
+        blocked_keeper_count: 2,
+        failing_keeper_fiber_count: 0,
+        recovering_keeper_fiber_count: 0,
+        executable_keeper_fiber_count: 0,
+        paused_keeper_count: 0,
+        target_reaction_capacity_count: 2,
+      },
+      'blocker=no_executable_keeper_fibers',
+      'blocked by no_executable_keeper_fibers',
+    ],
+  ] as const)('uses canonical %s evidence for blocked fleet operator advice', (
+    _caseName,
+    fleet,
+    evidence,
+    operatorAction,
+  ) => {
+    const chips = dashboardHealthChips({
+      connected: true,
+      counts: { keepers: 2, configured_keepers: 2 },
+      keepers: [],
+      runtimeResolution: {
+        status: 'ready',
+        warnings: [],
+        fleet_safety: {
+          keeper_fibers: 0,
+          paused_keepers: 0,
+          keeper_fleet_safety: fleet,
+        },
+      } as any,
+      executionError: null,
+      loading: false,
+    })
+
+    const detail = chips.find(c => c.key === 'fleet-liveness-risk')?.detail
+    expect(detail).toContain(evidence)
+    expect(detail).toContain(operatorAction)
+    expect(detail).not.toContain('resume selected paused keepers')
   })
 
   it('keeps mixed paused fleets blocked when autoboot keepers are still below target', () => {

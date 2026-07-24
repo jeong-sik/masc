@@ -712,6 +712,7 @@ function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPres
   const bootableKeeperCount = asNumber(raw.bootable_keeper_count)
   const runningKeeperFiberCount = asNumber(raw.running_keeper_fiber_count)
   const failingKeeperFiberCount = asNumber(raw.failing_keeper_fiber_count)
+  const recoveringKeeperFiberCount = asNumber(raw.recovering_keeper_fiber_count)
   const executableKeeperFiberCount = asNumber(raw.executable_keeper_fiber_count)
   const noExecutableKeeperFibers = asBoolean(raw.no_executable_keeper_fibers)
   const reactionCapacityBelowTarget = asBoolean(raw.reaction_capacity_below_target)
@@ -729,6 +730,7 @@ function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPres
     && bootableKeeperCount == null
     && runningKeeperFiberCount == null
     && failingKeeperFiberCount == null
+    && recoveringKeeperFiberCount == null
     && executableKeeperFiberCount == null
     && noExecutableKeeperFibers == null
     && reactionCapacityBelowTarget == null
@@ -749,6 +751,7 @@ function normalizeDashboardFleetPressureHealth(raw: unknown): DashboardFleetPres
     bootable_keeper_count: bootableKeeperCount ?? null,
     running_keeper_fiber_count: runningKeeperFiberCount ?? null,
     failing_keeper_fiber_count: failingKeeperFiberCount ?? null,
+    recovering_keeper_fiber_count: recoveringKeeperFiberCount ?? null,
     executable_keeper_fiber_count: executableKeeperFiberCount ?? null,
     no_executable_keeper_fibers: noExecutableKeeperFibers ?? null,
     reaction_capacity_below_target: reactionCapacityBelowTarget ?? null,

@@ -277,23 +277,38 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
     }
   }
   const pausedKeepers = fleet.paused_keeper_count
+  const failingKeepers = fleet.failing_keeper_fiber_count
+  const recoveringKeepers = fleet.recovering_keeper_fiber_count
   const pausedAutobootKeepers = fleet?.paused_autoboot_enabled_keeper_count ?? null
   const targetCapacity = fleet?.target_reaction_capacity_count ?? null
   const bootableKeepers = fleet?.bootable_keeper_count ?? null
   const capacityShortfall = fleet?.reaction_capacity_shortfall_count ?? null
   if (fleetStatus === 'blocked') {
+    const blocker = fleet.blocker?.trim() || null
     const capacityDetail = [
       `status=${fleetStatus}`,
       `executable_keeper_fiber_count=${executableFibers}`,
       pausedKeepers != null ? `paused_keeper_count=${pausedKeepers}` : null,
+      failingKeepers != null ? `failing_keeper_fiber_count=${failingKeepers}` : null,
+      recoveringKeepers != null ? `recovering_keeper_fiber_count=${recoveringKeepers}` : null,
       pausedAutobootKeepers != null ? `paused_autoboot_enabled_keeper_count=${pausedAutobootKeepers}` : null,
       bootableKeepers != null ? `bootable_keeper_count=${bootableKeepers}` : null,
       targetCapacity != null ? `target_reaction_capacity_count=${targetCapacity}` : null,
+      blocker != null ? `blocker=${blocker}` : null,
     ].filter((item): item is string => item != null).join(', ')
+    const operatorAction = (pausedKeepers ?? 0) > 0
+      ? 'resume selected paused keepers or confirm an intentional operator pause policy.'
+      : (failingKeepers ?? 0) > 0
+        ? 'inspect and recover failing keepers before retrying scheduled activation.'
+        : (recoveringKeepers ?? 0) > 0
+          ? 'keeper recovery is in progress; wait for executable capacity before intervening.'
+          : blocker != null
+            ? `blocked by ${blocker}; inspect canonical fleet evidence before choosing an operator action.`
+            : 'blocked cause unavailable; no operator action inferred.'
     return {
       key: 'fleet-liveness-risk',
       label: 'P0 fleet blocked',
-      detail: `${capacityDetail}; resume selected paused keepers or confirm an intentional operator pause policy.`,
+      detail: `${capacityDetail}; ${operatorAction}`,
       tone: 'bad',
     }
   }

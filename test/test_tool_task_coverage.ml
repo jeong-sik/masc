@@ -327,6 +327,25 @@ let () = test "dispatch_add_task" (fun () ->
   | None -> failwith "dispatch returned None"
 )
 
+let () = test "keeper dispatch keeps task author distinct from actor identity" (fun () ->
+  let ctx = make_test_ctx_with_agent "taskmaster-agent" in
+  let args = `Assoc [ ("title", `String "Keeper-authored task") ] in
+  let result =
+    Task.Tool.dispatch_for_keeper
+      ~created_by:"taskmaster"
+      ctx
+      ~name:"masc_add_task"
+      ~args
+  in
+  (match result with
+   | Some result -> assert (Tool_result.is_success result)
+   | None -> failwith "Keeper add-task dispatch returned None");
+  match (Workspace.read_backlog ctx.config).tasks with
+  | [ task ] -> assert (task.created_by = Some "taskmaster")
+  | tasks ->
+    failwith
+      (Printf.sprintf "expected exactly one task, got %d" (List.length tasks)))
+
 let () = test "handle_add_task_returns_structured_task_id" (fun () ->
   let ctx = make_test_ctx () in
   let result =

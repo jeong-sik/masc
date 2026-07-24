@@ -69,7 +69,12 @@ val review_completion_notes :
   Masc_domain.configured_llm_completion_verdict option
 
 val handle_add_task :
-  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+  ?created_by:string ->
+  tool_name:string ->
+  start_time:float ->
+  context ->
+  Yojson.Safe.t ->
+  Tool_result.result
 
 (** RFC-0267 Phase 2: [masc_task_set_goal] — assign an existing goalless task to
     a goal. Thin adapter over {!Task_goal_assignment.set_task_goal}. *)
@@ -77,7 +82,12 @@ val handle_set_goal :
   tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 
 val handle_batch_add_tasks :
-  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+  ?created_by:string ->
+  tool_name:string ->
+  start_time:float ->
+  context ->
+  Yojson.Safe.t ->
+  Tool_result.result
 
 val handle_claim :
   tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result

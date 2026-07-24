@@ -760,11 +760,13 @@ let handle_task_history ~tool_name ~start_time ctx args =
 
 include Tool_task_schemas
 (* Dispatch function *)
-let dispatch_with_task_list_projection task_list_projection ctx ~name ~args =
+let dispatch_with_task_list_projection ?created_by task_list_projection ctx ~name ~args =
   let start = Time_compat.now () in
   match name with
-  | "masc_add_task" -> Some (handle_add_task ~tool_name:name ~start_time:start ctx args)
-  | "masc_batch_add_tasks" -> Some (handle_batch_add_tasks ~tool_name:name ~start_time:start ctx args)
+  | "masc_add_task" ->
+    Some (handle_add_task ?created_by ~tool_name:name ~start_time:start ctx args)
+  | "masc_batch_add_tasks" ->
+    Some (handle_batch_add_tasks ?created_by ~tool_name:name ~start_time:start ctx args)
   | "keeper_task_claim" ->
       let task_id = get_string args "task_id" "" in
       if String.equal task_id ""
@@ -792,8 +794,9 @@ let dispatch ctx ~name ~args =
     ~args
 ;;
 
-let dispatch_for_keeper ctx ~name ~args =
+let dispatch_for_keeper ?created_by ctx ~name ~args =
   dispatch_with_task_list_projection
+    ?created_by
     Tool_capability_projection.Keeper_tasks_list
     ctx
     ~name

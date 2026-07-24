@@ -265,7 +265,7 @@ include Tool_task_contract_gate
 
 (* Handlers *)
 
-let handle_add_task ~tool_name ~start_time ctx args =
+let handle_add_task ?created_by ~tool_name ~start_time ctx args =
   let valid_keys =
     [ "title"; "priority"; "description"; "goal_id"; "contract"; "predecessor_task_id" ]
   in
@@ -335,10 +335,11 @@ let handle_add_task ~tool_name ~start_time ctx args =
           ~tool_name ~start_time error
     | Ok contract ->
         let add_result =
+          let created_by = Option.value ~default:ctx.agent_name created_by in
           Workspace.add_task_with_result ?contract
             ?goal_id
             ?predecessor_task_id
-            ~created_by:ctx.agent_name ctx.config ~title:trimmed_title
+            ~created_by ctx.config ~title:trimmed_title
             ~priority ~description
         in
         (match add_result with
@@ -412,7 +413,7 @@ let handle_set_goal ~tool_name ~start_time ctx args =
           ~tool_name ~start_time
           (Task_goal_assignment.set_task_goal_error_to_string err))
 
-let handle_batch_add_tasks ~tool_name ~start_time ctx args =
+let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
   let valid_item_keys = [ "title"; "priority"; "description"; "goal_id"; "contract" ] in
   let tasks_json = match Json_util.assoc_member_opt "tasks" args with
     | Some (`List l) -> l
@@ -483,8 +484,9 @@ let handle_batch_add_tasks ~tool_name ~start_time ctx args =
       List.filter_map (function Ok t -> Some t | Error _ -> None) validated
     in
     let batch_result =
+      let created_by = Option.value ~default:ctx.agent_name created_by in
       Workspace.batch_add_tasks_with_contracts_result
-        ~created_by:ctx.agent_name ctx.config tasks
+        ~created_by ctx.config tasks
     in
     (match batch_result with
      | Ok created ->

@@ -138,7 +138,7 @@ let allowed_internal_alias ~file binding =
 
 let pattern_variables pattern =
   let variables = ref [] in
-  let remember name =
+  let remember (name : string Location.loc) =
     if
       not
         (List.exists

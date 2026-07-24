@@ -709,7 +709,7 @@ let test_stale_finalize_preserves_active_successor () =
    | Ok _ -> Alcotest.fail "stale-owner setup did not stop after WAL commit"
    | Error detail -> Alcotest.failf "stale-owner WAL commit failed: %s" detail);
   let recovered = require_loaded_state "stale-owner restart" ~base_path ~keeper_name in
-  let _receipt =
+  let receipt =
     require_single_exact_outbox
       ~disposition_id:disposition.disposition_id
       "stale-owner restart"

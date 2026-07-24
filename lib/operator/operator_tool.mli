@@ -7,8 +7,8 @@
     so the SDK adapter can advertise the operator-remote subset
     separately from the full tool catalog.
 
-    Internal: 22 schema-constructor / action-enum / dispatcher
-    helper functions stay private — the .mli pins {!schemas} /
+    Internal schema-constructor / action-enum / dispatcher helpers stay
+    private — the .mli pins {!schemas} /
     {!remote_schemas} list contents at module init, so caller
     contract is the lists, not the constructors. *)
 

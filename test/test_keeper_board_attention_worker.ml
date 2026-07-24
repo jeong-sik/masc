@@ -1121,9 +1121,14 @@ let test_ready_requested_recovery_fails_closed () =
           ~requested_at:40.0)
      : A.candidate);
   let ready =
-    ok
-      "inject premature Ready partition"
-      (P.requeue_blocked ~base_path ~partition:blocked)
+    match
+      ok
+        "inject premature Ready partition"
+        (P.requeue_blocked ~base_path ~partition:blocked)
+    with
+    | P.Requeued transition -> transition
+    | P.Generation_conflict detail ->
+      Alcotest.failf "premature Ready fixture conflicted: %s" detail
   in
   (match ready.write_outcome with
    | P.Fsync_completed -> ()
@@ -1207,6 +1212,179 @@ let test_stale_quarantine_generation_is_rejected () =
     when String.equal current.quarantine_id quarantine.quarantine_id ->
     ()
   | _ -> Alcotest.fail "stale generation rejection mutated durable state"
+;;
+
+let test_same_quarantine_command_cas_loser_converges () =
+  with_temp_base "board-attention-worker-same-command-cas" @@ fun base_path ->
+  ignore (record ~base_path (candidate ()) : A.candidate);
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    raise (Failure "injected exact worker exception")
+  in
+  (match
+     ok
+       "create durable quarantine"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked _ -> ()
+   | _ -> Alcotest.fail "fixture did not block the singleton partition");
+  let quarantined = load_one_candidate ~base_path in
+  let partition = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status with
+    | A.Quarantine { quarantine; phase = A.Quarantined } -> quarantine
+    | _ -> Alcotest.fail "fixture candidate was not Quarantined"
+  in
+  let request : Q.request =
+    { candidate_id = quarantined.candidate_id
+    ; expected_quarantine_id = quarantine.quarantine_id
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"sangsu"
+        ~raw_partition_id:partition.partition_id
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "manual command rejected: %s" (Q.input_error_to_string error)
+  in
+  let report =
+    ok
+      "same command CAS loser converges"
+      (Q.For_testing.execute_with_before_partition_commit
+         ~before_partition_commit:(fun observed ->
+           let competing =
+             match
+               ok
+                 "competing command commits Ready"
+                 (P.requeue_blocked ~base_path ~partition:observed)
+             with
+             | P.Requeued transition -> transition
+             | P.Generation_conflict detail ->
+               Alcotest.failf "competing command conflicted: %s" detail
+           in
+           match competing.write_outcome with
+           | P.Fsync_completed -> ()
+           | P.Visible_sync_unconfirmed detail ->
+             Alcotest.failf "competing Ready was not durable: %s" detail)
+         ~now:20.0
+         ~base_path
+         command)
+  in
+  match report.partition.state with
+  | P.Ready -> ()
+  | _ -> Alcotest.fail "same command CAS loser did not converge to Ready"
+;;
+
+let test_stale_blocked_snapshot_cannot_requeue_new_generation () =
+  with_temp_base "board-attention-worker-stale-blocked-generation" @@ fun base_path ->
+  ignore (record ~base_path (candidate ()) : A.candidate);
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    raise (Failure "injected first exact worker exception")
+  in
+  (match
+     ok
+       "create first durable quarantine"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked _ -> ()
+   | _ -> Alcotest.fail "fixture did not block the singleton partition");
+  let quarantined = load_one_candidate ~base_path in
+  let partition = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status with
+    | A.Quarantine { quarantine; phase = A.Quarantined } -> quarantine
+    | _ -> Alcotest.fail "fixture candidate was not Quarantined"
+  in
+  let request : Q.request =
+    { candidate_id = quarantined.candidate_id
+    ; expected_quarantine_id = quarantine.quarantine_id
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"sangsu"
+        ~raw_partition_id:partition.partition_id
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "manual command rejected: %s" (Q.input_error_to_string error)
+  in
+  let ready_snapshot = ref None in
+  (match
+     Q.For_testing.execute_with_before_partition_commit
+       ~before_partition_commit:(fun observed ->
+         let first_ready =
+           match
+             ok
+               "competing command requeues first generation"
+               (P.requeue_blocked ~base_path ~partition:observed)
+           with
+           | P.Requeued transition -> transition
+           | P.Generation_conflict detail ->
+             Alcotest.failf "first Ready generation conflicted: %s" detail
+         in
+         (match first_ready.write_outcome with
+          | P.Fsync_completed -> ()
+          | P.Visible_sync_unconfirmed detail ->
+            Alcotest.failf "first Ready transition was not durable: %s" detail);
+         ready_snapshot := Some first_ready.partition;
+         let owner = P.Worker_epoch.generate () in
+         let running =
+           match
+             ok
+               "worker claims requeued partition"
+               (P.claim_next
+                  ~now:20.0
+                  ~worker_epoch:owner
+                  ~base_path
+                  ~keeper_name:"sangsu")
+           with
+           | Some partition -> partition
+           | None -> Alcotest.fail "requeued partition was not claimable"
+         in
+         let newer =
+           ok
+             "worker commits newer Blocked generation"
+             (P.block
+                ~now:21.0
+                ~worker_epoch:owner
+                ~base_path
+                ~partition:running
+                (P.Unexpected_worker_failure "newer exact worker failure"))
+         in
+         match newer.write_outcome with
+         | P.Fsync_completed -> ()
+         | P.Visible_sync_unconfirmed detail ->
+           Alcotest.failf "newer Blocked generation was not durable: %s" detail)
+       ~now:19.0
+       ~base_path
+       command
+   with
+   | Error error ->
+     Alcotest.(check string)
+       "stale command returns partition conflict"
+       "partition_state_conflict"
+       (Q.execution_error_label error)
+   | Ok _ ->
+     Alcotest.fail "stale command requeued a newer failure generation");
+  (match !ready_snapshot with
+   | None -> Alcotest.fail "competing command did not retain its Ready snapshot"
+   | Some ready ->
+     (match P.confirm_ready ~base_path ~partition:ready with
+      | Error _ -> ()
+      | Ok _ ->
+        Alcotest.fail "Ready confirmation reopened a newer Blocked generation"));
+  match (load_one_partition ~base_path).state with
+  | P.Blocked { blocked_at; _ } ->
+    Alcotest.(check (float 0.0)) "newer Blocked generation retained" 21.0 blocked_at
+  | _ -> Alcotest.fail "stale command changed the newer Blocked generation"
 ;;
 
 let test_cross_domain_wake_is_coalesced_and_rearmed () =
@@ -1342,6 +1520,14 @@ let () =
             "stale quarantine generation is rejected"
             `Quick
             test_stale_quarantine_generation_is_rejected
+        ; Alcotest.test_case
+            "same quarantine command CAS loser converges"
+            `Quick
+            test_same_quarantine_command_cas_loser_converges
+        ; Alcotest.test_case
+            "stale Blocked snapshot cannot requeue a newer generation"
+            `Quick
+            test_stale_blocked_snapshot_cannot_requeue_new_generation
         ; Alcotest.test_case
             "cross-domain wake coalesces and rearms"
             `Quick

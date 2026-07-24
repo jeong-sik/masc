@@ -263,7 +263,7 @@ let confirm_requeue ~base_path transition =
   | Partition.Fsync_completed -> Ok transition.partition
   | Partition.Visible_sync_unconfirmed _ ->
     (match
-       Partition.requeue_blocked
+       Partition.confirm_ready
          ~base_path
          ~partition:transition.partition
      with
@@ -275,40 +275,97 @@ let confirm_requeue ~base_path transition =
           Error (Durability_unconfirmed detail)))
 ;;
 
+let confirm_ready_partition ~base_path partition =
+  match Partition.confirm_ready ~base_path ~partition with
+  | Error detail -> Error (Durability_unconfirmed detail)
+  | Ok confirmed ->
+    (match confirmed.write_outcome with
+     | Partition.Fsync_completed -> Ok confirmed.partition
+     | Partition.Visible_sync_unconfirmed detail ->
+       Error (Durability_unconfirmed detail))
+;;
+
 let request_wake ~base_path command candidate partition =
   match Wake.request ~base_path ~keeper_name:command.keeper_name with
   | Ok wake -> Ok { candidate; partition; wake }
   | Error detail -> Error (Wake_request_failed detail)
 ;;
 
-let commit_partition_ready ~base_path partition =
+let rec reload_same_generation_ready
+    ?(allow_requeue = true)
+    ~base_path
+    command
+  =
+  let* candidate = find_candidate ~base_path command in
+  let* observed = matching_quarantine command candidate in
+  match observed.phase with
+  | Candidate.Requeued _ ->
+    let* partition = find_partition ~base_path command in
+    (match partition.Partition.state with
+     | Partition.Ready -> confirm_ready_partition ~base_path partition
+     | Partition.Blocked { blocked_at; _ }
+       when allow_requeue
+            && Float.equal blocked_at observed.quarantine.quarantined_at ->
+       (match Partition.requeue_blocked ~base_path ~partition with
+        | Error detail -> Error (Partition_state_conflict detail)
+        | Ok (Partition.Requeued transition) ->
+          confirm_requeue ~base_path transition
+        | Ok (Partition.Generation_conflict _) ->
+          reload_same_generation_ready
+            ~allow_requeue:false
+            ~base_path
+            command)
+     | Partition.Blocked _
+     | Partition.Running _
+     | Partition.Completed _
+     | Partition.Settled _ ->
+       Error
+         (Partition_state_conflict
+            "the partition did not converge to Ready for this quarantine generation"))
+  | Candidate.Quarantined | Candidate.Requeue_requested _ ->
+    Error
+      (Candidate_state_conflict
+         "the candidate did not converge to Requeued for this quarantine generation")
+;;
+
+let commit_partition_ready ~base_path command partition =
   match partition.Partition.state with
   | Partition.Blocked _ ->
     (match Partition.requeue_blocked ~base_path ~partition with
      | Error detail -> Error (Partition_state_conflict detail)
-     | Ok transition -> confirm_requeue ~base_path transition)
-  | Partition.Ready -> Ok partition
+     | Ok (Partition.Generation_conflict _) ->
+       reload_same_generation_ready ~base_path command
+     | Ok (Partition.Requeued transition) ->
+       confirm_requeue ~base_path transition)
+  | Partition.Ready -> confirm_ready_partition ~base_path partition
   | Partition.Running _ | Partition.Completed _ | Partition.Settled _ ->
     Error
       (Partition_state_conflict
          "partition advanced before candidate requeue authorization")
 ;;
 
-let execute ~now ~base_path command =
+let execute_with_before_partition_commit
+    ~before_partition_commit
+    ~now
+    ~base_path
+    command
+  =
   let* candidate = find_candidate ~base_path command in
   let* observed = matching_quarantine command candidate in
   let* partition = find_partition ~base_path command in
   match observed.phase, partition.state with
   | Candidate.Requeued _, Partition.Blocked { blocked_at; _ }
     when Float.equal blocked_at observed.quarantine.quarantined_at ->
-    let* ready = commit_partition_ready ~base_path partition in
+    before_partition_commit partition;
+    let* ready = commit_partition_ready ~base_path command partition in
     request_wake ~base_path command candidate ready
   | Candidate.Requeued _, Partition.Blocked _ ->
     Error
       (Partition_state_conflict
          "a newer Blocked generation is awaiting candidate projection")
   | Candidate.Requeued _, Partition.Ready ->
-    request_wake ~base_path command candidate partition
+    let* ready = confirm_ready_partition ~base_path partition in
+    request_wake ~base_path command candidate ready
   | Candidate.Requeued _,
     (Partition.Running _ | Partition.Completed _ | Partition.Settled _) ->
     Error
@@ -340,7 +397,8 @@ let execute ~now ~base_path command =
       | Ok candidate -> Ok candidate
       | Error detail -> Error (Candidate_state_conflict detail)
     in
-    let* ready = commit_partition_ready ~base_path partition in
+    before_partition_commit partition;
+    let* ready = commit_partition_ready ~base_path command partition in
     request_wake ~base_path command authorized ready
   | (Candidate.Quarantined | Candidate.Requeue_requested _),
     (Partition.Ready | Partition.Running _ | Partition.Completed _
@@ -349,6 +407,17 @@ let execute ~now ~base_path command =
       (Partition_state_conflict
          "partition became claimable before candidate requeue authorization")
 ;;
+
+let execute =
+  execute_with_before_partition_commit
+    ~before_partition_commit:(fun (_partition : Partition.t) -> ())
+;;
+
+module For_testing = struct
+  let execute_with_before_partition_commit =
+    execute_with_before_partition_commit
+  ;;
+end
 
 let audit config ~actor command ~outcome =
   try

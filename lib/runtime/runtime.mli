@@ -126,14 +126,6 @@ val load_list :
     keeper→runtime-id list; [media_failover] is the RFC-0265 ordered reroute
     list; [lanes] is the ordered failover candidate lists. *)
 
-val effective_exact_output_lane_declarations :
-  Runtime_schema.exact_output_lane_decl list ->
-  Runtime_schema.exact_output_lane_decl list
-(** Return exactly the explicitly declared exact-output lanes, preserving lane
-    and slot order. No lane is derived from the default runtime,
-    [structured_judge], or a [runtime.lanes] route; missing declarations remain
-    missing and are rejected only by consumers that require them. *)
-
 val runtime_ids : t list -> string list
 
 (** {1 Lazy default runtime singleton}

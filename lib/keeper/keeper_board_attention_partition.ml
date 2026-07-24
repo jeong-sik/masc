@@ -100,6 +100,10 @@ type exact_transition =
   ; write_outcome : exact_write_outcome
   }
 
+type requeue_blocked_outcome =
+  | Requeued of exact_transition
+  | Generation_conflict of string
+
 let ( let* ) = Result.bind
 let schema_version = 4
 
@@ -1257,25 +1261,112 @@ let confirm_blocked ~base_path ~(partition : t) =
     Error ("partition is not Blocked: " ^ partition.partition_id)
 ;;
 
+type requeue_decision =
+  | Append_ready of t
+  | Observe_generation_conflict of string
+
+let update_requeue_exact_or_observe ~base_path ~keeper_name decide =
+  let ledger_path = path ~base_path ~keeper_name in
+  run_blocking "board-attention-partition-exact-observe" (fun () ->
+    let entry = cache_entry ledger_path in
+    Stdlib.Mutex.protect entry.mutation_mutex (fun () ->
+      let* view = read_view_blocking ledger_path in
+      let* () = validate_keeper_identity ~keeper_name view in
+      let* decision = decide view in
+      match decision with
+      | `Observe result -> Ok (`Observed result)
+      | `Append (rows, result) ->
+        (match rows with
+         | [] -> Error "exact partition update must append a cursor-fenced row"
+         | _ :: _ ->
+           let* updated = apply_rows view rows in
+           let suffix = serialize rows in
+           (match
+              Fs_compat.append_private_jsonl_durable_locked_at_cursor_result
+                ledger_path
+                ~expected:view.cursor
+                suffix
+            with
+            | Error (Fs_compat.Cursor_mismatch _ as conflict) ->
+              Ok
+                (`Observed
+                   (Observe_generation_conflict
+                      (Fs_compat.private_jsonl_transaction_error_to_string
+                         conflict)))
+            | append_result ->
+              (match exact_cursor_result ~ledger_path append_result with
+               | Error error -> Error error
+               | Ok (cursor, write_outcome) ->
+                 Atomic.set entry.cached (Some { updated with cursor });
+                 Ok (`Written (result, write_outcome)))))))
+;;
+
 let requeue_blocked ~base_path ~(partition : t) =
-  let* (requeued, changed), write_outcome =
-    update_exact ~base_path ~keeper_name:partition.keeper_name (fun view ->
-      match Id_map.find_opt partition.partition_id view.by_id with
-      | None ->
-        Error ("Board attention partition not found: " ^ partition.partition_id)
-      | Some current when not (same_partition_identity current partition) ->
-        Error ("partition identity changed: " ^ partition.partition_id)
-      | Some ({ state = Blocked _; _ } as current) ->
-        let ready = { current with state = Ready } in
-        Ok ([ ready ], (ready, true))
-      | Some ({ state = Ready; _ } as current) ->
-        Ok ([ current ], (current, false))
-      | Some { state = Running _ | Completed _ | Settled _; _ } ->
-        Error
-          ("partition already advanced beyond manual requeue: "
-           ^ partition.partition_id))
-  in
-  Ok { partition = requeued; changed; write_outcome }
+  match partition.state with
+  | Blocked _ ->
+    let* outcome =
+      update_requeue_exact_or_observe
+        ~base_path
+        ~keeper_name:partition.keeper_name
+        (fun view ->
+        match Id_map.find_opt partition.partition_id view.by_id with
+        | None ->
+          Error ("Board attention partition not found: " ^ partition.partition_id)
+        | Some current when current = partition ->
+          let ready = { current with state = Ready } in
+          Ok (`Append ([ ready ], Append_ready ready))
+        | Some { state = Blocked _; _ } ->
+          Ok
+            (`Observe
+               (Observe_generation_conflict
+                  ("blocked partition generation changed before manual requeue: "
+                   ^ partition.partition_id)))
+        | Some { state = Ready | Running _ | Completed _ | Settled _; _ } ->
+          Ok
+            (`Observe
+               (Observe_generation_conflict
+                  ("partition already advanced beyond the observed Blocked generation: "
+                   ^ partition.partition_id))))
+    in
+    (match outcome with
+     | `Written (Append_ready ready, write_outcome) ->
+       Ok
+         (Requeued
+            { partition = ready
+            ; changed = true
+            ; write_outcome
+            })
+     | `Observed (Observe_generation_conflict detail) ->
+       Ok (Generation_conflict detail)
+     | `Written (Observe_generation_conflict _, _)
+     | `Observed (Append_ready _) ->
+       Error "invalid exact requeue decision")
+  | Ready | Running _ | Completed _ | Settled _ ->
+    Error ("partition is not Blocked: " ^ partition.partition_id)
+;;
+
+let confirm_ready ~base_path ~(partition : t) =
+  match partition.state with
+  | Ready ->
+    let* (confirmed, changed), write_outcome =
+      update_exact ~base_path ~keeper_name:partition.keeper_name (fun view ->
+        match Id_map.find_opt partition.partition_id view.by_id with
+        | None ->
+          Error ("Board attention partition not found: " ^ partition.partition_id)
+        | Some current when current = partition ->
+          Ok ([ current ], (current, false))
+        | Some { state = Ready; _ } ->
+          Error
+            ("ready partition identity changed before fsync confirmation: "
+             ^ partition.partition_id)
+        | Some { state = Blocked _ | Running _ | Completed _ | Settled _; _ } ->
+          Error
+            ("partition advanced before Ready fsync confirmation: "
+             ^ partition.partition_id))
+    in
+    Ok { partition = confirmed; changed; write_outcome }
+  | Blocked _ | Running _ | Completed _ | Settled _ ->
+    Error ("partition is not Ready: " ^ partition.partition_id)
 ;;
 
 let completed ~base_path ~keeper_name =

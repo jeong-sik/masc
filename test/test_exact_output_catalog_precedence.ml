@@ -501,9 +501,7 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
       Alcotest.failf
         "missing-HITL runtime fixture failed to parse: %d error(s)"
         (List.length errors)
-    | Ok (config : Runtime_schema.config) ->
-      Runtime.effective_exact_output_lane_declarations
-        config.exact_output_lane_decls
+    | Ok (config : Runtime_schema.config) -> config.exact_output_lane_decls
   in
   let missing_registry =
     let snapshot =
@@ -640,9 +638,7 @@ let test_repo_seed_board_attention_lane_admits () =
       Alcotest.failf
         "repo runtime seed failed to parse for exact lanes: %d error(s)"
         (List.length errors)
-    | Ok (config : Runtime_schema.config) ->
-      Runtime.effective_exact_output_lane_declarations
-        config.exact_output_lane_decls
+    | Ok (config : Runtime_schema.config) -> config.exact_output_lane_decls
   in
   let board_lane =
     List.find_opt

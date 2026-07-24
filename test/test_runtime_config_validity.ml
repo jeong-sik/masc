@@ -1784,13 +1784,6 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
          check (list string) "active runtime ids"
            [ "ollama.good" ]
            (Runtime.get_runtime_ids ());
-check
-  (list string)
-  "zero explicit exact-output lanes stay zero after degraded init"
-  []
-  (Runtime.effective_exact_output_lane_declarations []
-   |> List.map (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-     lane.id));
          check (list string) "no dropped assignment"
            []
            (List.map

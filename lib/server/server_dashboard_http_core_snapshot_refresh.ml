@@ -33,56 +33,73 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
   let proc_mgr = state.Mcp_server.proc_mgr in
   let net, mono_clock = Core_runtime.state_dashboard_runtime_caps state in
   let compute () =
-    mark_cached_surface_attempt Core_operator.operator_snapshot_cache;
+    let compute = Core_operator.begin_operator_snapshot_compute () in
     let started_at = Unix.gettimeofday () in
     try
-      Core_runtime.run_dashboard_compute
-        ~mode:Offloaded_readonly
-        ?net
-        ?mono_clock
-        ~sw
-        ~clock
-        ~config
-        (fun ~config ~sw ->
-           let ctx : _ Operator_control.context =
-             { config
-             ; agent_name = "dashboard"
-             ; sw
-             ; clock
-             ; proc_mgr
-             ; net = None
-             ; delegated_dispatch = None
-             ; mcp_session_id = None
-             }
-           in
-           let t_snapshot = Unix.gettimeofday () in
-           let json =
-             Operator_control.snapshot_json
-               ~actor:"dashboard"
-               ~view:"summary"
-               ~include_messages:true
-               ~include_keepers:true
-               ~include_summary_fields:false
-               ~lightweight_summary:true
-               ctx
-           in
-           let dt_snapshot = Unix.gettimeofday () -. t_snapshot in
-           let dt_total = Unix.gettimeofday () -. started_at in
-           if dt_total >= 5.0
-           then
-             Log.Dashboard.warn
-               "[operator_snapshot profile] total=%.1fs snapshot=%.1fs"
-               dt_total
-               dt_snapshot;
-           json
-           |> Core_cache.with_projection_diagnostics
-                ~surface:"operator_snapshot"
-                ~started_at
-                ~extra:(Core_operator.operator_snapshot_extra ()))
+      let json =
+        Core_runtime.run_dashboard_compute
+          ~mode:Offloaded_readonly
+          ?net
+          ?mono_clock
+          ~sw
+          ~clock
+          ~config
+          (fun ~config ~sw ->
+             let ctx : _ Operator_control.context =
+               { config
+               ; agent_name = "dashboard"
+               ; sw
+               ; clock
+               ; proc_mgr
+               ; net = None
+               ; delegated_dispatch = None
+               ; mcp_session_id = None
+               }
+             in
+             let t_snapshot = Unix.gettimeofday () in
+             let json =
+               Operator_control.snapshot_json
+                 ~actor:"dashboard"
+                 ~view:"summary"
+                 ~include_messages:true
+                 ~include_keepers:true
+                 ~include_summary_fields:false
+                 ~lightweight_summary:true
+                 ctx
+             in
+             let dt_snapshot = Unix.gettimeofday () -. t_snapshot in
+             let dt_total = Unix.gettimeofday () -. started_at in
+             if dt_total >= 5.0
+             then
+               Log.Dashboard.warn
+                 "[operator_snapshot profile] total=%.1fs snapshot=%.1fs"
+                 dt_total
+                 dt_snapshot;
+             json
+             |> Core_cache.with_projection_diagnostics
+                  ~surface:"operator_snapshot"
+                  ~started_at
+                  ~extra:(Core_operator.operator_snapshot_extra ()))
+      in
+      compute, json
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      mark_cached_surface_error Core_operator.operator_snapshot_cache exn;
+      (match
+         Core_operator.mark_operator_snapshot_error_if_current
+           ~compute
+           exn
+       with
+       | None -> ()
+       | Some publication ->
+         let json =
+           publication.json
+           |> Core_operator_query.with_operator_snapshot_metadata
+                ~config
+                ~query:(Core_operator_query.operator_snapshot_default_query ())
+         in
+         !Core_operator.operator_snapshot_broadcast_ref
+           { publication with json });
       raise exn
   in
   Proactive_refresh.start
@@ -94,15 +111,21 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
            ~interval_s:Core_operator.operator_refresh_interval_s)
         with
         timeout_s = Core_operator.operator_refresh_interval_s *. 0.8
-      ; on_error = Some (mark_cached_surface_error Core_operator.operator_snapshot_cache)
       ; warm_delay_s = 120.0
       }
     ~compute
-    ~on_result:(fun json ->
-      mark_cached_surface_success Core_operator.operator_snapshot_cache json;
-      !Core_operator.operator_snapshot_broadcast_ref
-        (cached_surface_json Core_operator.operator_snapshot_cache
-         |> Core_operator_query.with_operator_snapshot_metadata
-              ~config
-              ~query:(Core_operator_query.operator_snapshot_default_query ())))
+    ~on_result:(fun (compute, json) ->
+      match
+        Core_operator.publish_operator_snapshot_if_current ~compute json
+      with
+      | None -> ()
+      | Some publication ->
+        let json =
+          publication.json
+          |> Core_operator_query.with_operator_snapshot_metadata
+               ~config
+               ~query:(Core_operator_query.operator_snapshot_default_query ())
+        in
+        !Core_operator.operator_snapshot_broadcast_ref
+          { publication with json }
 ;;

@@ -561,11 +561,11 @@ let test_operator_snapshot_default_route_hydrates_first_success () =
   let source =
     read_file "lib/server/server_dashboard_http_core_operator_snapshot_http.ml"
   in
-  check bool "operator snapshot uses first-success cache helper" true
-    (contains_substring source "cached_surface_or_first_success_json"
-     && contains_substring source "operator_snapshot_cache"
+  check bool "operator snapshot uses generation-aware cache publication" true
+    (contains_substring source "operator_snapshot_publication"
+     && contains_substring source "publication.Core_operator.generation"
      && contains_substring source
-          "dashboard_cache_key config \"operator_snapshot\" \"default-summary\"");
+          "Printf.sprintf \"default-summary:g%d\"");
   check bool "operator snapshot no longer serves raw initializing cache" true
     (not
        (contains_substring source
@@ -661,7 +661,7 @@ let test_operator_snapshot_default_route_exposes_provenance () =
       ]
   in
   with_cached_surface_success
-    Server_dashboard_http_core_operator.operator_snapshot_cache
+    Server_dashboard_http_core_operator.For_testing.operator_snapshot_cache
     seed
   @@ fun () ->
   let json =

@@ -87,6 +87,10 @@ type exact_transition =
   ; write_outcome : exact_write_outcome
   }
 
+type requeue_blocked_outcome =
+  | Requeued of exact_transition
+  | Generation_conflict of string
+
 val state_to_string : state -> string
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
@@ -182,7 +186,15 @@ val confirm_blocked :
   base_path:string -> partition:t -> (exact_transition, string) result
 
 val requeue_blocked :
+  base_path:string -> partition:t -> (requeue_blocked_outcome, string) result
+(** Atomically move exactly the supplied [Blocked] generation to [Ready].
+    A different durable generation is returned as [Generation_conflict];
+    persistence and validation failures remain errors. *)
+
+val confirm_ready :
   base_path:string -> partition:t -> (exact_transition, string) result
+(** Reappend an unchanged [Ready] snapshot for fsync confirmation. This never
+    converts a later [Blocked] generation back to [Ready]. *)
 
 val completed : base_path:string -> keeper_name:string -> (t list, string) result
 

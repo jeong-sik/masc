@@ -55,6 +55,7 @@ blocking_lints() {
   run_lint "Compaction exact-flow boundary" bash scripts/check-compaction-exact-flow-boundary.sh
   run_lint "No Tool_result.error + Printexc (RFC-0148)" bash scripts/lint/no-tool-result-error-printexc.sh
   run_lint "Board attention exact-flow boundary self-test" bash scripts/check-board-attention-exact-flow-boundary.sh --self-test
+  run_lint "Board attention exact-flow boundary" bash scripts/check-board-attention-exact-flow-boundary.sh --check
   run_lint "Boundary redaction SSOT (RFC-0132 PR-3)" bash scripts/lint/no-runtime-literal-outside-boundary-redaction.sh --fail
   run_lint "No fabricated telemetry" bash scripts/lint/no-fabricated-telemetry.sh
   run_lint "No oas_* prefix in lib/ (RFC-0047)" bash scripts/lint/no-oas-prefix-in-lib.sh

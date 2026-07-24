@@ -1177,10 +1177,6 @@ let init_default_degraded_report ~config_path =
 
 let runtime_state () = Atomic.get loaded_state_ref
 
-let effective_exact_output_lane_declarations exact_output_lane_decls =
-  exact_output_lane_decls
-;;
-
 let get_default_runtime () = (runtime_state ()).default_runtime
 let get_runtimes () = (runtime_state ()).runtimes
 let get_runtime_ids () = runtime_ids (runtime_state ()).runtimes

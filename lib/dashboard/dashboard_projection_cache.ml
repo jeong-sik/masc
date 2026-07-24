@@ -18,6 +18,18 @@ let normalize_actor_name = function
 
 let snapshot_cache_ttl_s = 5.0
 let digest_cache_ttl_s = 5.0
+let snapshot_publication_mu = Stdlib.Mutex.create ()
+let snapshot_invalidation_generation_ref = Atomic.make 0
+let snapshot_generation_observer = Atomic.make None
+
+let register_snapshot_generation_observer observer =
+  Atomic.set snapshot_generation_observer (Some observer)
+;;
+
+let with_snapshot_publication_generation f =
+  Stdlib.Mutex.protect snapshot_publication_mu (fun () ->
+    f (Atomic.get snapshot_invalidation_generation_ref))
+;;
 
 let get_or_compute_snapshot_json ~config ~actor compute =
   let actor_name = normalize_actor_name actor in
@@ -26,7 +38,23 @@ let get_or_compute_snapshot_json ~config ~actor compute =
     ~ttl:snapshot_cache_ttl_s (fun () -> compute actor_name)
 
 let invalidate_snapshot_json ~config =
-  Dashboard_cache.invalidate_prefix (actor_cache_key config "snapshot" "")
+  let generation =
+    Stdlib.Mutex.protect snapshot_publication_mu (fun () ->
+      Dashboard_cache.invalidate_prefix (actor_cache_key config "snapshot" "");
+      Dashboard_cache.invalidate_prefix "operator_snapshot:";
+      Atomic.fetch_and_add snapshot_invalidation_generation_ref 1 + 1)
+  in
+  match Atomic.get snapshot_generation_observer with
+  | None -> ()
+  | Some observer ->
+    (try observer generation with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Dashboard.warn
+         "snapshot generation observer failed generation=%d: %s"
+         generation
+         (Printexc.to_string exn))
+;;
 
 let get_or_compute_digest_json ~config ~actor compute =
   let actor_name = normalize_actor_name actor in
@@ -75,5 +103,3 @@ let operator_snapshot_json ?actor ?view ?include_messages ?include_keepers ?incl
 
 let operator_digest_json ?actor ?target_type ?target_id ?include_workers ctx =
   (!operator_digest_json_ref).digest ?actor ?target_type ?target_id ?include_workers ctx
-
-

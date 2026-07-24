@@ -643,7 +643,7 @@ let confirm_requeue_transition ~base_path transition =
   | Partition.Fsync_completed -> Ok transition.partition
   | Partition.Visible_sync_unconfirmed _ ->
     let* confirmed =
-      Partition.requeue_blocked
+      Partition.confirm_ready
         ~base_path
         ~partition:transition.partition
     in
@@ -651,6 +651,86 @@ let confirm_requeue_transition ~base_path transition =
      | Partition.Fsync_completed -> Ok confirmed.partition
      | Partition.Visible_sync_unconfirmed detail ->
        Error ("requeued partition fsync remains unconfirmed: " ^ detail))
+;;
+
+let rec converge_requeue_conflict
+    ?(allow_requeue = true)
+    ~base_path
+    ~keeper_name
+    ~partition
+    ~expected_quarantine_id
+    ~expected_quarantined_at
+  =
+  let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
+  let* candidate =
+    match
+      List.find_opt
+        (fun candidate ->
+           String.equal
+             candidate.Candidate.candidate_id
+             partition.Partition.candidate_id)
+        candidates
+    with
+    | Some candidate -> Ok candidate
+    | None ->
+      Error
+        ("partition candidate disappeared during requeue convergence: "
+         ^ partition.candidate_id)
+  in
+  let* () =
+    match Candidate.quarantine_state candidate.status with
+    | Some
+        { quarantine
+        ; phase = Candidate.Requeued _
+        }
+      when String.equal quarantine.partition_id partition.partition_id
+           && String.equal quarantine.quarantine_id expected_quarantine_id
+           && Float.equal quarantine.quarantined_at expected_quarantined_at ->
+      Ok ()
+    | Some _ | None ->
+      Error
+        ("candidate quarantine generation changed during requeue convergence: "
+         ^ partition.partition_id)
+  in
+  let* partitions = Partition.load ~base_path ~keeper_name in
+  let* current =
+    match
+      List.find_opt
+        (fun current ->
+           String.equal current.Partition.partition_id partition.partition_id)
+        partitions
+    with
+    | Some current -> Ok current
+    | None ->
+      Error
+        ("partition disappeared during requeue convergence: "
+         ^ partition.partition_id)
+  in
+  match current.state with
+  | Partition.Ready ->
+    let* confirmation = Partition.confirm_ready ~base_path ~partition:current in
+    confirm_requeue_transition ~base_path confirmation
+  | Partition.Blocked { blocked_at; _ }
+    when allow_requeue && Float.equal blocked_at expected_quarantined_at ->
+    let* outcome = Partition.requeue_blocked ~base_path ~partition:current in
+    (match outcome with
+     | Partition.Requeued transition ->
+       confirm_requeue_transition ~base_path transition
+     | Partition.Generation_conflict _ ->
+       converge_requeue_conflict
+         ~allow_requeue:false
+         ~base_path
+         ~keeper_name
+         ~partition
+         ~expected_quarantine_id
+         ~expected_quarantined_at)
+  | Partition.Blocked _
+  | Partition.Running _
+  | Partition.Completed _
+  | Partition.Settled _ ->
+    Error
+      ("partition generation changed during requeue convergence: "
+       ^ partition.partition_id)
 ;;
 
 let reconcile_quarantines ~now ~base_path ~keeper_name =
@@ -690,7 +770,23 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
                 ~requeued_at:now
             in
             let* transition =
-              Partition.requeue_blocked ~base_path ~partition
+              let* outcome = Partition.requeue_blocked ~base_path ~partition in
+              match outcome with
+              | Partition.Requeued transition -> Ok transition
+              | Partition.Generation_conflict _ ->
+                let* ready =
+                  converge_requeue_conflict
+                    ~base_path
+                    ~keeper_name
+                    ~partition
+                    ~expected_quarantine_id:state.quarantine.quarantine_id
+                    ~expected_quarantined_at:state.quarantine.quarantined_at
+                in
+                Ok
+                  { Partition.partition = ready
+                  ; changed = false
+                  ; write_outcome = Partition.Fsync_completed
+                  }
             in
             let* (_ : Partition.t) =
               confirm_requeue_transition ~base_path transition
@@ -702,7 +798,23 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
             if Float.equal state.quarantine.quarantined_at blocked_at
             then (
               let* transition =
-                Partition.requeue_blocked ~base_path ~partition
+                let* outcome = Partition.requeue_blocked ~base_path ~partition in
+                match outcome with
+                | Partition.Requeued transition -> Ok transition
+                | Partition.Generation_conflict _ ->
+                  let* ready =
+                    converge_requeue_conflict
+                      ~base_path
+                      ~keeper_name
+                      ~partition
+                      ~expected_quarantine_id:state.quarantine.quarantine_id
+                      ~expected_quarantined_at:state.quarantine.quarantined_at
+                  in
+                  Ok
+                    { Partition.partition = ready
+                    ; changed = false
+                    ; write_outcome = Partition.Fsync_completed
+                    }
               in
               let* (_ : Partition.t) =
                 confirm_requeue_transition ~base_path transition
@@ -735,7 +847,14 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
             Error
               ("Ready partition has an unacknowledged quarantine: "
                ^ partition.partition_id)
-          | Candidate.Requeued _ -> loop rest)
+          | Candidate.Requeued _ ->
+            let* confirmation =
+              Partition.confirm_ready ~base_path ~partition
+            in
+            let* (_ : Partition.t) =
+              confirm_requeue_transition ~base_path confirmation
+            in
+            loop rest)
        | Partition.Ready, _
        | Partition.Running _, _
        | Partition.Completed _, _

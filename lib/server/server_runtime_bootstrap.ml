@@ -1416,8 +1416,8 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
               (`Assoc
                 [
                   ( "snapshot",
-                    Server_dashboard_http.cached_surface_json
-                      Server_dashboard_http.operator_snapshot_cache );
+                    Server_dashboard_http.operator_snapshot_cache_diagnostics_json
+                      () );
                   ( "digest",
                     Server_dashboard_http.cached_surface_json
                       Server_dashboard_http.operator_digest_cache );

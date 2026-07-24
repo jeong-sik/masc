@@ -97,16 +97,10 @@ let user_message_of_sdk_error = function
     provider_network_user_message ~kind ~detail:message ()
   | Agent_sdk.Error.Api (Agent_sdk.Retry.ContextOverflow { limit; _ }) ->
     context_overflow_user_message ~limit
-  | (Agent_sdk.Error.Api (Agent_sdk.Retry.InputCapacity _) as err) ->
-    (match Keeper_input_capacity.compaction_limit err with
-     | Some accepted_through ->
-       Printf.sprintf
-         "This conversation exceeds a current runtime input-capacity bound \
-          (~%d tokens). Transcript compaction is required before retrying."
-         accepted_through
-     | None ->
-       "The runtime flow reported an input-capacity failure that cannot be \
-        repaired from current evidence.")
+  | Agent_sdk.Error.Api (Agent_sdk.Retry.InputCapacity _) ->
+    "The runtime flow reported a typed input-capacity failure. MASC did not \
+     infer a compaction or select another runtime; the failure is escalated as \
+     a deterministic judgment."
   | Agent_sdk.Error.Provider
       (Llm_provider.Error.NetworkError { provider; kind; detail; _ }) ->
     provider_network_user_message ~provider ~kind ~detail ()

@@ -320,6 +320,38 @@ let test_authorization_errors_have_typed_projection () =
        (Llm_provider.Error.AuthorizationError
           { provider = "provider"; detail = "permission refused" }))
 
+let test_request_body_too_large_projection_preserves_bounds () =
+  let projection =
+    Error_json.agent_failed_error_projection
+      (Agent_sdk.Error.Api
+         (Agent_sdk.Retry.InvalidRequest
+            { message = "request body too large"
+            ; reason =
+                Agent_sdk.Retry.Request_body_too_large
+                  { actual_bytes = 1_671_330; limit_bytes = 1_048_576 }
+            }))
+  in
+  check
+    (option string)
+    "typed variant"
+    (Some "invalid_request")
+    (string_of_field (member "variant" projection.error_detail));
+  check
+    (option string)
+    "typed reason"
+    (Some "request_body_too_large")
+    (string_of_field (member "reason" projection.error_detail));
+  check
+    (option int)
+    "actual request bytes"
+    (Some 1_671_330)
+    (int_of_field (member "actual_bytes" projection.error_detail));
+  check
+    (option int)
+    "request byte limit"
+    (Some 1_048_576)
+    (int_of_field (member "limit_bytes" projection.error_detail))
+
 let test_input_capacity_projection_preserves_evidence () =
   let constraint_ =
     Llm_provider.Serving_constraint.make
@@ -394,6 +426,8 @@ let () =
             test_terminal_agent_failure_projection_redacts_detail
         ; test_case "authorization errors have typed projection" `Quick
             test_authorization_errors_have_typed_projection
+        ; test_case "request body size preserves typed bounds" `Quick
+            test_request_body_too_large_projection_preserves_bounds
         ; test_case "input capacity preserves typed evidence" `Quick
             test_input_capacity_projection_preserves_evidence
         ] )

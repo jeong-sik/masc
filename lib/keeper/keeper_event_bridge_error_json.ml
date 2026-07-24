@@ -173,6 +173,13 @@ let sdk_api_error_fields = function
     ; "message", `String message
     ; "reason", `String (invalid_request_reason_to_wire reason)
     ]
+    @ (match reason with
+       | Agent_sdk.Retry.Request_body_too_large { actual_bytes; limit_bytes } ->
+         [ "actual_bytes", `Int actual_bytes
+         ; "limit_bytes", `Int limit_bytes
+         ]
+       | Agent_sdk.Retry.Json_parse_error
+       | Agent_sdk.Retry.Unknown_invalid_request -> [])
   | Agent_sdk.Retry.NotFound { message } ->
     [ "variant", `String "not_found"; "message", `String message ]
   | Agent_sdk.Retry.ContextOverflow { message; limit } ->

@@ -761,8 +761,7 @@ let is_invalid_request_error (err : Agent_sdk.Error.sdk_error) : bool =
 let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (ContextOverflow _) -> true
-  | Agent_sdk.Error.Api (InputCapacity _) ->
-    Option.is_some (Keeper_input_capacity.compaction_limit err)
+  | Agent_sdk.Error.Api (InputCapacity _) -> false
   | Agent_sdk.Error.Agent (UnrecognizedStopReason { reason = "model_context_window_exceeded"; _ }) -> true
   | _ ->
     let msg = Agent_sdk.Error.to_string err in

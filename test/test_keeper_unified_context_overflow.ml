@@ -19,7 +19,7 @@ let serving_constraint ?(expires_at_unix_s = 4_102_444_800) () =
 let input_capacity constraint_ reason =
   Agent_sdk.Error.Api
     (InputCapacity
-       { message = "typed capacity"
+       { message = "Context overflow: typed capacity"
        ; constraint_
        ; reason = Agent_sdk.Retry.Serving_constraint_rejected reason
        })
@@ -54,9 +54,9 @@ let test_is_context_overflow_only_for_overflow_errors () =
     (EC.is_context_overflow (Agent_sdk.Error.Internal "some error"))
 ;;
 
-let test_input_capacity_compacts_only_for_oas_validated_bound () =
+let test_input_capacity_is_not_context_overflow () =
   let constraint_ = serving_constraint () in
-  let compactable =
+  let capacity_error =
     input_capacity
       constraint_
       (Llm_provider.Serving_constraint.Boundary_unknown
@@ -67,49 +67,16 @@ let test_input_capacity_compacts_only_for_oas_validated_bound () =
   in
   check
     bool
-    "OAS-validated accepted bound is compactable"
-    true
-    (EC.is_context_overflow compactable);
-  (match Masc.Keeper_unified_turn.context_overflow_event_of_error compactable with
-   | Some
-       (Keeper_state_machine.Context_overflow_detected
-          { limit_tokens = Some 524298 }) -> ()
-   | _ -> fail "accepted-through evidence was not preserved");
-  let stale_constraint = serving_constraint ~expires_at_unix_s:1000 () in
-  let stale =
-    input_capacity
-      stale_constraint
-      (Llm_provider.Serving_constraint.Evidence_expired
-         { now_unix_s = 1000; expires_at_unix_s = 1000 })
-  in
-  check bool "stale evidence is not compactable" false (EC.is_context_overflow stale);
-  check
-    bool
-    "stale evidence emits no overflow event"
-    true
-    (Option.is_none (Masc.Keeper_unified_turn.context_overflow_event_of_error stale));
-  let measurement_unavailable =
-    Agent_sdk.Error.Api
-      (InputCapacity
-         { message = "measurement unavailable"
-         ; constraint_
-         ; reason =
-             Agent_sdk.Retry.Token_measurement_unavailable
-               Llm_provider.Input_token_count.Anthropic_messages_count_tokens
-         })
-  in
-  check
-    bool
-    "unmeasured input is not compactable"
+    "typed input capacity is not context overflow"
     false
-    (EC.is_context_overflow measurement_unavailable);
+    (EC.is_context_overflow capacity_error);
   check
     bool
-    "unmeasured input emits no overflow event"
+    "typed input capacity emits no overflow event"
     true
     (Option.is_none
        (Masc.Keeper_unified_turn.context_overflow_event_of_error
-          measurement_unavailable))
+          capacity_error))
 ;;
 
 (* ContextOverflow is routed as an explicit recoverable turn failure after OAS
@@ -136,9 +103,9 @@ let () =
             `Quick
             test_context_overflow_is_auto_recoverable
         ; test_case
-            "input capacity compacts only for OAS-validated accepted bound"
+            "input capacity is not context overflow"
             `Quick
-            test_input_capacity_compacts_only_for_oas_validated_bound
+            test_input_capacity_is_not_context_overflow
         ] )
     ]
 ;;

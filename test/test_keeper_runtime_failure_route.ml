@@ -93,7 +93,7 @@ let test_api_auth_rotates_invalid_request_judges () =
     Alcotest.failf "invalid request should judge, got %s"
       (KFR.route_kind_label other)
 
-let test_api_input_capacity_never_rotates_runtime () =
+let test_api_input_capacity_is_terminal_judgment () =
   let constraint_ =
     Llm_provider.Serving_constraint.make
       ~source_kind:Llm_provider.Serving_constraint.Probe
@@ -112,9 +112,9 @@ let test_api_input_capacity_never_rotates_runtime () =
          { message = "typed capacity"; constraint_; reason })
   in
   check_route
-    "current accepted bound escalates to compaction judgment"
+    "accepted bound remains a deterministic terminal judgment"
     (KFR.Escalate_judgment
-       { judgment = KFR.Context_overflow
+       { judgment = KFR.Deterministic_request
        ; provenance = KFR.Oas_api_error
        ; detail =
            Agent_sdk.Error.to_string
@@ -445,9 +445,9 @@ let () =
             test_api_server_error_uses_typed_variant
         ; Alcotest.test_case "auth rotates, invalid judges" `Quick test_api_auth_rotates_invalid_request_judges
         ; Alcotest.test_case
-            "input capacity never rotates runtime"
+            "input capacity is terminal judgment"
             `Quick
-            test_api_input_capacity_never_rotates_runtime
+            test_api_input_capacity_is_terminal_judgment
         ] )
     ; ( "provider"
       , [ Alcotest.test_case "quota family hints" `Quick test_provider_quota_family_threads_hint

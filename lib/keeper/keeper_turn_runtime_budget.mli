@@ -194,10 +194,8 @@ val turn_event_bus_evidence_detail :
 val context_overflow_event_of_error :
   Agent_sdk.Error.sdk_error ->
   Keeper_state_machine.event option
-(** [Some] for typed [Api (ContextOverflow _)] and for typed serving-constraint
-    rejections that preserve an [accepted_through] observation. The event
-    carries only an evidenced bound and never derives one from provider prose.
-    Expired/future evidence and unavailable measurements return [None]. *)
+(** [Some] only for typed [Api (ContextOverflow _)]. Other errors return
+    [None]. *)
 
 val provider_overflow_decision : reason:string -> string
 (** The [compaction_rt.last_decision] value stamped by [record_overflow_failure]

@@ -253,7 +253,7 @@ let test_submit_strict_worker_failure_is_not_replayed_inline () =
            raise Strict_worker_failure)
        in
        (match result with
-        | Error (Executor_pool_ref.Submission_failed (Strict_worker_failure, _)) -> ()
+        | Error (Executor_pool_ref.Work_failed (Strict_worker_failure, _)) -> ()
         | Error error ->
           fail
             ("unexpected strict submission error: "
@@ -279,21 +279,28 @@ let test_startup_installs_pool_before_strict_read () =
            ~domain_count:1
            (Eio.Stdenv.domain_mgr env)
        in
+       let previous_domain_pool = Domain_pool_ref.get () in
        Executor_pool_ref.For_testing.with_pool_option None
        @@ fun () ->
-       let caller_domain = Domain.self () in
-       Server_runtime_bootstrap.For_testing.install_domain_pool_references pool;
-       match
-         Executor_pool_ref.submit_strict (fun () ->
-           Domain.self () <> caller_domain)
-       with
-       | Ok ran_off_caller ->
-         check bool "startup-installed pool owns the first strict read" true
-           ran_off_caller
-       | Error error ->
-         fail
-           ("startup did not install the strict executor pool: "
-            ^ Executor_pool_ref.strict_submit_error_to_string error))
+       Fun.protect
+         ~finally:(fun () ->
+           match previous_domain_pool with
+           | None -> Domain_pool_ref.clear_for_tests ()
+           | Some previous -> Domain_pool_ref.set previous)
+         (fun () ->
+            let caller_domain = Domain.self () in
+            Server_runtime_bootstrap.For_testing.install_domain_pool_references pool;
+            match
+              Executor_pool_ref.submit_strict (fun () ->
+                Domain.self () <> caller_domain)
+            with
+            | Ok ran_off_caller ->
+              check bool "startup-installed pool owns the first strict read" true
+                ran_off_caller
+            | Error error ->
+              fail
+                ("startup did not install the strict executor pool: "
+                 ^ Executor_pool_ref.strict_submit_error_to_string error)))
 ;;
 
 let () =

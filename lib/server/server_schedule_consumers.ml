@@ -408,6 +408,12 @@ let activation_outcome_for_required_wake config ~base_path ~keeper_name =
       | Ok None -> Error "durable keeper metadata missing"
       | Error detail -> Error detail)
   with
+  | Error (Executor_pool_ref.Work_failed failure) ->
+    Keeper_wake_activation_deferred
+      (Keeper_wake_activation_owner_unknown
+         ("durable keeper metadata read failed: "
+          ^ Executor_pool_ref.strict_submit_error_to_string
+              (Executor_pool_ref.Work_failed failure)))
   | Error error ->
     Keeper_wake_activation_deferred
       (Keeper_wake_activation_owner_unknown

@@ -331,10 +331,7 @@ let test_board_post_schedule_is_rejected_without_mutation () =
   with_workspace
   @@ fun config ->
   let request = create_board_schedule config in
-  let result =
-    Executor_pool_ref.For_testing.with_pool_option None (fun () ->
-      tick_ok config ~now:201.0)
-  in
+  let result = tick_ok config ~now:201.0 in
   check int "one dispatch" 1 (List.length result.dispatches);
   check string "dispatch status" "unsupported"
     (Schedule_runner.dispatch_status_to_string (List.hd result.dispatches).status);
@@ -351,7 +348,10 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
   with_workspace
   @@ fun config ->
   let request = create_keeper_wake_schedule config in
-  let result = tick_ok config ~now:201.0 in
+  let result =
+    Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+      tick_ok config ~now:201.0)
+  in
   let occurrence_id = single_occurrence_id result in
   check int "one dispatch" 1 (List.length result.dispatches);
   check string "dispatch status" "succeeded"

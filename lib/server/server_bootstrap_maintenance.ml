@@ -162,6 +162,8 @@ let load_durable_demand_meta ~base_path ~config ~keeper_name =
          | Ok (Some meta) -> Ok (Some meta)))
   with
   | Ok outcome -> outcome
+  | Error (Executor_pool_ref.Work_failed failure) ->
+    Error (`Demand_execution_failed failure)
   | Error error -> Error (`Executor_unavailable error)
 ;;
 
@@ -205,6 +207,12 @@ let recover_projected_durable_demand_owner
          "keeper durable demand recovery retained keeper=%s reason=executor_unavailable detail=%s"
          keeper_name
          (Executor_pool_ref.strict_submit_error_to_string error)
+     | Error (`Demand_execution_failed (exn, backtrace)) ->
+       Log.Server.error
+         "keeper durable demand recovery retained keeper=%s reason=demand_execution_failed detail=%s\n%s"
+         keeper_name
+         (Printexc.to_string exn)
+         (Printexc.raw_backtrace_to_string backtrace)
      | Ok None -> ()
      | Ok (Some meta) ->
        let admission =

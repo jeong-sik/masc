@@ -31,11 +31,17 @@ end
 type strict_submit_error =
   | Pool_unavailable
   | Caller_not_in_eio
+  | Work_failed of Eio.Exn.with_bt
   | Submission_failed of Eio.Exn.with_bt
 
 let strict_submit_error_to_string = function
   | Pool_unavailable -> "executor pool is not installed"
   | Caller_not_in_eio -> "executor pool submission requires an Eio fiber"
+  | Work_failed (exn, backtrace) ->
+    Printf.sprintf
+      "executor pool work failed: %s\n%s"
+      (Printexc.to_string exn)
+      (Printexc.raw_backtrace_to_string backtrace)
   | Submission_failed (exn, backtrace) ->
     Printf.sprintf
       "executor pool submission failed: %s\n%s"
@@ -49,9 +55,15 @@ let submit_strict ?(weight = 1.0) f =
   | Some _, Eio_guard.Non_eio -> Error Caller_not_in_eio
   | Some p, Eio_guard.Eio_fiber ->
     (try
-       Ok
-         (Eio.Executor_pool.submit_exn p ~weight (fun () ->
-            Eio.Switch.run (fun _sw -> f ())))
+       Eio.Executor_pool.submit_exn p ~weight (fun () ->
+         Eio.Switch.run (fun _sw ->
+           try Ok (f ()) with
+           | Eio.Cancel.Cancelled _ as exn ->
+             let backtrace = Printexc.get_raw_backtrace () in
+             Printexc.raise_with_backtrace exn backtrace
+           | exn ->
+             let backtrace = Printexc.get_raw_backtrace () in
+             Error (Work_failed (exn, backtrace))))
      with
      | Eio.Cancel.Cancelled _ as exn ->
        let backtrace = Printexc.get_raw_backtrace () in

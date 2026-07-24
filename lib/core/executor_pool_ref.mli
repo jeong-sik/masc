@@ -24,6 +24,7 @@ end
 type strict_submit_error =
   | Pool_unavailable
   | Caller_not_in_eio
+  | Work_failed of Eio.Exn.with_bt
   | Submission_failed of Eio.Exn.with_bt
 
 val strict_submit_error_to_string : strict_submit_error -> string
@@ -35,9 +36,10 @@ val submit_strict :
 (** Submit [f] exactly once to an installed pool from an Eio fiber.
 
     Missing pools and non-Eio callers return typed errors without invoking
-    [f]. A worker/submission exception is returned with its backtrace after at
-    most one invocation; the closure is never replayed inline. Cancellation is
-    re-raised with its original backtrace. *)
+    [f]. A [Work_failed] result means [f] ran exactly once and raised;
+    [Submission_failed] is reserved for executor infrastructure failure. The
+    closure is never replayed inline. Cancellation is re-raised with its
+    original backtrace at both layers. *)
 
 val submit_or_inline : ?weight:float -> (unit -> 'a) -> 'a
 (** Run [f] on an Executor_pool worker (a real Eio fiber under

@@ -23,6 +23,7 @@ type projection_error =
 
 type discovery_error =
   | Snapshot_discovery_failed of string
+  | Sweep_execution_failed of Eio.Exn.with_bt
   | Sweep_executor_unavailable of Executor_pool_ref.strict_submit_error
 
 type owner_failure =
@@ -76,6 +77,11 @@ let projection_error_to_string = function
 let discovery_error_to_string = function
   | Snapshot_discovery_failed detail ->
     "event queue snapshot discovery failed: " ^ detail
+  | Sweep_execution_failed (exn, backtrace) ->
+    Printf.sprintf
+      "event queue snapshot sweep raised: %s\n%s"
+      (Printexc.to_string exn)
+      (Printexc.raw_backtrace_to_string backtrace)
   | Sweep_executor_unavailable error ->
     "event queue snapshot sweep executor unavailable: "
     ^ Executor_pool_ref.strict_submit_error_to_string error
@@ -178,6 +184,8 @@ let project_owner_result ~base_path ~keeper_name =
       project_owner_result_inline ~base_path ~keeper_name)
   with
   | Ok outcome -> outcome
+  | Error (Executor_pool_ref.Work_failed failure) ->
+    Error (Unexpected_projection_failure failure)
   | Error error -> Error (Executor_unavailable error)
 ;;
 
@@ -276,6 +284,12 @@ let project_discovered_bounded ~base_path ~budget ~cursor =
   with
   | Ok page -> page
   | Error error ->
+    let discovery_error =
+      match error with
+      | Executor_pool_ref.Work_failed failure ->
+        Sweep_execution_failed failure
+      | error -> Sweep_executor_unavailable error
+    in
     { report =
         { discovered = 0
         ; processed = 0
@@ -285,7 +299,7 @@ let project_discovered_bounded ~base_path ~budget ~cursor =
         ; claim_busy = 0
         ; projections = []
         ; failures = []
-        ; discovery_error = Some (Sweep_executor_unavailable error)
+        ; discovery_error = Some discovery_error
         }
     ; next_cursor = cursor
     }

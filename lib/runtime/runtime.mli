@@ -209,11 +209,37 @@ val keeper_assignments : unit -> (string * string) list
     Dashboard/operator surfaces use this to expose assignment blast radius
     without parsing TOML independently. *)
 
-val memory_os_consolidation_runtime_id : unit -> string option
-(** [\[runtime\].memory_os_consolidation] runtime id for the periodic Memory OS
-    fact-survival consolidation pass, or [None] when it inherits
-    [\[runtime\].default]. Validated at load so [Some] always resolves to a
-    configured runtime. *)
+val resolve_memory_os_consolidation_runtime : unit -> (t, string) result
+(** Resolve the effective runtime for the periodic Memory OS fact-survival
+    consolidation pass from one immutable loaded-state snapshot. An absent
+    [\[runtime\].memory_os_consolidation] inherits [\[runtime\].default].
+    An uninitialized state or an explicit id missing from the same snapshot is
+    [Error], never a fallback to another runtime. *)
+
+type memory_os_consolidation_source =
+  | Consolidation_configured
+  | Consolidation_inherited_default
+
+type effective_memory_os_consolidation =
+  { effective_runtime : t
+  ; resolution_source : memory_os_consolidation_source
+  }
+
+type dashboard_runtime_defaults_snapshot =
+  { default_runtime : t option
+  ; runtimes : t list
+  ; memory_os_consolidation_runtime_id : string option
+  ; memory_os_consolidation : (effective_memory_os_consolidation, string) result
+  ; structured_judge_runtime_id : string option
+  ; cross_verifier_runtime_id : string option
+  ; media_failover : string list
+  ; config_path : string option
+  }
+
+val dashboard_runtime_defaults_snapshot : unit -> dashboard_runtime_defaults_snapshot
+(** Capture every value consumed by the dashboard runtime-defaults endpoint from
+    one immutable loaded-state snapshot. The consolidation resolution retains
+    configured-vs-inherited provenance and any invariant error. *)
 
 val cross_verifier_runtime_id : unit -> string option
 (** [\[runtime\].cross_verifier] runtime id for the anti-rationalization

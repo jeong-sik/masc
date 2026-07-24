@@ -177,10 +177,9 @@ module KeeperMemoryOs = struct
      TTL/cap retention was removed (RFC-0259 supersession), so with this pass off
      the Tier-1 fact store only grows (idealist: 449 rows, 0 with valid_until).
      Failures are graceful no-ops (transport/parse errors never mutate the store).
-     Runtime selection uses the dedicated consolidation override when set, then
-     the default runtime. Set the env false to disable. *)
+     Runtime selection belongs to [runtime.toml]; set the env false to disable
+     the pass. *)
   let consolidation_enabled_default = true
-  let consolidation_runtime_id_default = None
 
   (* Env-key SSOT: the config-introspection registry
      (env_config_snapshot.ml memory_entries) and the tests reference these
@@ -193,21 +192,12 @@ module KeeperMemoryOs = struct
   let librarian_global_slot_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
   let gc_env_key = "MASC_KEEPER_MEMORY_OS_GC"
   let consolidation_env_key = "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
-  let consolidation_runtime_id_env_key = "MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID"
-
-  let optional_string_default value = Option.value value ~default:""
-  ;;
 
   let get_bool_logged ?(invalid = Env_config_memory.Default) name ~default =
     Env_config_memory.get_bool_logged
       ~invalid
       name
       ~default
-  ;;
-
-  let nonempty_string value =
-    let value = String.trim value in
-    if String.equal value "" then None else Some value
   ;;
 
   (** Memory OS recall prompt injection kill switch. Default: true; invalid
@@ -291,16 +281,6 @@ module KeeperMemoryOs = struct
       ~invalid:Env_config_memory.Fail_closed
       consolidation_env_key
       ~default:consolidation_enabled_default
-  ;;
-
-  (** Optional runtime id override for Memory OS consolidation.
-      @category Runtime
-      @ops_class operator *)
-  let consolidation_runtime_id () =
-    get_string
-      ~default:(optional_string_default consolidation_runtime_id_default)
-      consolidation_runtime_id_env_key
-    |> nonempty_string
   ;;
 end
 

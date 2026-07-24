@@ -1209,10 +1209,77 @@ let runtime_id_for_keeper (keeper_name : string) : string option =
 
 let keeper_assignments () = (runtime_state ()).keeper_assignments
 
-(* Dedicated Memory OS consolidation routing. [None] means the periodic pass
-   inherits [runtime].default. *)
-let memory_os_consolidation_runtime_id () =
-  (runtime_state ()).memory_os_consolidation_runtime_id
+type memory_os_consolidation_source =
+  | Consolidation_configured
+  | Consolidation_inherited_default
+
+type effective_memory_os_consolidation =
+  { effective_runtime : t
+  ; resolution_source : memory_os_consolidation_source
+  }
+
+type dashboard_runtime_defaults_snapshot =
+  { default_runtime : t option
+  ; runtimes : t list
+  ; memory_os_consolidation_runtime_id : string option
+  ; memory_os_consolidation : (effective_memory_os_consolidation, string) result
+  ; structured_judge_runtime_id : string option
+  ; cross_verifier_runtime_id : string option
+  ; media_failover : string list
+  ; config_path : string option
+  }
+
+(* Resolve the effective Memory OS consolidation runtime from the supplied
+   immutable loaded-state snapshot. Only an absent task route inherits the
+   default. A configured id missing from the same snapshot is an invariant
+   violation, never permission to execute on a different runtime. *)
+let resolve_memory_os_consolidation_from_state (state : loaded_state) =
+  match state.default_runtime, state.memory_os_consolidation_runtime_id with
+  | None, _ ->
+    Error
+      "Memory OS consolidation runtime cannot resolve before runtime initialization"
+  | Some default_runtime, None ->
+    Ok
+      { effective_runtime = default_runtime
+      ; resolution_source = Consolidation_inherited_default
+      }
+  | Some _, Some runtime_id ->
+    (match
+       List.find_opt
+         (fun (runtime : t) -> String.equal runtime.id runtime_id)
+         state.runtimes
+     with
+     | Some runtime ->
+       Ok
+         { effective_runtime = runtime
+         ; resolution_source = Consolidation_configured
+         }
+     | None ->
+       Error
+         (Printf.sprintf
+            "configured [runtime].memory_os_consolidation id %S is absent from \
+             the loaded runtime snapshot"
+            runtime_id))
+;;
+
+let resolve_memory_os_consolidation_runtime () =
+  resolve_memory_os_consolidation_from_state (runtime_state ())
+  |> Result.map (fun resolution -> resolution.effective_runtime)
+;;
+
+let dashboard_runtime_defaults_snapshot () =
+  let state = runtime_state () in
+  { default_runtime = state.default_runtime
+  ; runtimes = state.runtimes
+  ; memory_os_consolidation_runtime_id =
+      state.memory_os_consolidation_runtime_id
+  ; memory_os_consolidation =
+      resolve_memory_os_consolidation_from_state state
+  ; structured_judge_runtime_id = state.structured_judge_runtime_id
+  ; cross_verifier_runtime_id = state.cross_verifier_runtime_id
+  ; media_failover = state.media_failover
+  ; config_path = state.config_path
+  }
 ;;
 
 (* [runtime].structured_judge is the explicit runtime.toml SSOT for

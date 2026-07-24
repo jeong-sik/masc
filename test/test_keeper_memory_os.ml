@@ -1081,10 +1081,6 @@ let memory_os_knob_readers : (string * (unit -> unit)) list =
     , fun () -> ignore (Env_config.KeeperMemoryOs.gc_enabled () : bool) )
   ; ( Env_config.KeeperMemoryOs.consolidation_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.consolidation_enabled () : bool) )
-  ; ( Env_config.KeeperMemoryOs.consolidation_runtime_id_env_key
-    , fun () ->
-        ignore (Env_config.KeeperMemoryOs.consolidation_runtime_id () : string option)
-    )
   ]
 ;;
 

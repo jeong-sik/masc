@@ -93,18 +93,23 @@ let reject_guarded_owner_reexport ~file ~surface visit =
       module_expr =
         (fun self expression ->
            (match expression.pmod_desc with
-            | Pmod_ident identifier ->
-              reject identifier.txt identifier.loc
-            | Pmod_unpack _ ->
-              let line, column, _ = location_fields expression.pmod_loc in
-              failf
-                "%s:%d:%d %s uses opaque module unpack"
-                file
-                line
-                column
-                surface
-            | _ -> ());
-           Ast_iterator.default_iterator.module_expr self expression)
+             | Pmod_ident identifier ->
+               reject identifier.txt identifier.loc
+             | Pmod_unpack packed ->
+               let packed_iterator =
+                 { Ast_iterator.default_iterator with
+                   expr =
+                     (fun self expression ->
+                        (match expression.pexp_desc with
+                         | Pexp_ident identifier ->
+                           reject identifier.txt identifier.loc
+                         | _ -> ());
+                        Ast_iterator.default_iterator.expr self expression)
+                 }
+               in
+               packed_iterator.expr packed_iterator packed
+             | _ -> ());
+            Ast_iterator.default_iterator.module_expr self expression)
     ; module_type =
         (fun self module_type ->
            (match module_type.pmty_desc with
@@ -565,8 +570,11 @@ let run_ast_rejection_fixtures
          ()))
     [ "guarded_longident_prefix.ml"
     ; "guarded_pack.ml"
-    ; "opaque_unpack.ml"
+    ; "guarded_unpack.ml"
     ];
+  let (_ : (string * occurrence) list) =
+    fixture_definitions (fixture "opaque_unpack.ml")
+  in
   List.iter
     (fun name ->
        let file = fixture name in

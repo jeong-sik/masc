@@ -6,13 +6,34 @@ type checkpoint_commit_hint_outcome =
       ; failure : Eio.Exn.with_bt
       }
 
-type success =
-  { recovery : Keeper_context_runtime.compaction_recovery
+type post_install_lifecycle =
+  | Completion_applied
+  | Completion_rejected_failure_dispatched of
+      { completion_error : Keeper_context_runtime.lifecycle_dispatch_error }
+  | Completion_rejected_failure_dispatch_failed of
+      { completion_error : Keeper_context_runtime.lifecycle_dispatch_error
+      ; failure_dispatch_error : Keeper_context_runtime.lifecycle_dispatch_error
+      }
+
+type applied_receipt =
+  { installation : Keeper_checkpoint_store.installed_checkpoint
+  ; lifecycle : post_install_lifecycle
   ; manifest : (unit, string) result
   }
 
+type success =
+  { recovery : Keeper_context_runtime.compaction_recovery
+  ; receipt : applied_receipt
+  }
+
+type committed =
+  { recovery : Keeper_context_runtime.compaction_recovery
+  ; installation : Keeper_checkpoint_store.installed_checkpoint
+  ; lifecycle : post_install_lifecycle
+  }
+
 type operation_outcome =
-  | Compacted of success
+  | Compacted of committed
   | No_compaction of Keeper_post_turn.no_compaction
 
 type pre_install_lifecycle_stage =
@@ -26,12 +47,6 @@ type failure =
       }
   | Lifecycle_before_install_with_failure_dispatch of
       { stage : pre_install_lifecycle_stage
-      ; error : Keeper_context_runtime.lifecycle_dispatch_error
-      ; failure_dispatch :
-          (unit, Keeper_context_runtime.lifecycle_dispatch_error) result
-      }
-  | Lifecycle_after_install_with_failure_dispatch of
-      { installed_ref : Keeper_checkpoint_ref.t
       ; error : Keeper_context_runtime.lifecycle_dispatch_error
       ; failure_dispatch :
           (unit, Keeper_context_runtime.lifecycle_dispatch_error) result
@@ -72,12 +87,15 @@ val run_admitted
     durable event, or restart authority. Process death may drop it. Its
     delivery result is returned separately in [checkpoint_commit_hint], so a
     callback exception cannot change [operation] from [`Applied] to failure.
-    A rejected completion after the checkpoint commit dispatches an
-    explicit lifecycle failure cleanup before reporting the checkpoint as
-    applied; if that cleanup is also rejected, the typed post-install failure
-    preserves the exact installed checkpoint reference. Pre-install lifecycle
-    failures use separate constructors whose stages cannot represent
-    completion. *)
+    A rejected completion after the checkpoint commit dispatches an explicit
+    lifecycle failure cleanup, but neither rejection can turn the installed
+    checkpoint into [`Compaction_failed] or a retry. The closed
+    [post_install_lifecycle] fact, exact installed reference, Store auxiliary
+    evidence, and manifest append result remain in the [`Applied] receipt.
+    The structured manifest is appended after admission release with
+    [status=degraded] and [operator_action_required=true] for every post-install
+    anomaly. Pre-install lifecycle failures use separate constructors whose
+    stages cannot represent completion. *)
 
 val failure_to_string : failure -> string
 val observe_manifest : keeper_name:string -> (unit, string) result -> unit
@@ -86,4 +104,17 @@ module For_testing : sig
   val preserve_no_compaction_after_final_admission_busy
     :  Keeper_event_queue_state.no_compaction_reason
     -> bool
+
+  val run_admitted_with_install_observer :
+    ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard ->
+    on_checkpoint_installed_observer:(Keeper_checkpoint_ref.t -> unit) ->
+    on_checkpoint_commit_hint:(Keeper_checkpoint_ref.t -> unit) ->
+    config:Workspace.config ->
+    meta:Keeper_meta_contract.keeper_meta ->
+    unit ->
+    admitted_result
+
+  val checkpoint_installation_auxiliary_to_json :
+    Keeper_checkpoint_store.checkpoint_installation_auxiliary ->
+    Yojson.Safe.t
 end

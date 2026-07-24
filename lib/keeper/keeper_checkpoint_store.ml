@@ -845,11 +845,18 @@ module For_testing = struct
       ~expected_source_ref
       candidate =
     let with_release_failure ~session_dir f =
-      with_checkpoint_cas_lock ~session_dir f
-      |> fun installation ->
-      append_installation_auxiliary
-        installation
-        (Release_process_lock_failed release_failure)
+      match canonical_session_location session_dir with
+      | Error error ->
+        not_installed
+          (Source_unavailable
+             (Ref_lock_failed (save_oas_error_to_string error)))
+      | Ok session_dir ->
+        let lock_path = session_dir ^ ".checkpoint.lock" in
+        File_lock_eio.For_testing.with_durable_lock_observed_with_release_failure
+          ~release_failure
+          ~lock_path
+          (fun () -> f session_dir)
+        |> installation_of_lock_observation
     in
     save_oas_if_source_with
       ~with_checkpoint_cas_lock:with_release_failure

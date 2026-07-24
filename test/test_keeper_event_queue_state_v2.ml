@@ -53,6 +53,18 @@ let no_compaction ~turn_count reason : State.no_compaction =
   { source = checkpoint_source ~turn_count; reason }
 ;;
 
+let applied_compaction_receipt
+    ?(lifecycle = Masc.Keeper_manual_compaction.Completion_applied)
+    () =
+  let installation : Masc.Keeper_checkpoint_store.installed_checkpoint =
+    { installed_ref = checkpoint_source ~turn_count:9; auxiliary = [] }
+  in
+  { Masc.Keeper_manual_compaction.installation = installation
+  ; lifecycle
+  ; manifest = Ok ()
+  }
+;;
+
 let exact_terminal ?(slot_id = "slot-terminal") ?(call_id = "call-terminal") cause =
   State.Exact_execution_terminal
     { cause
@@ -1360,7 +1372,7 @@ let test_applied_compaction_settles_followup_atomically () =
          1.0)
   in
   let meta = cycle_meta () in
-  let settlement failure =
+  let settlement ?(receipt = applied_compaction_receipt ()) failure =
     Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
       ~base_path:(Sys.getcwd ())
       ~settled_at:8.0
@@ -1369,7 +1381,10 @@ let test_applied_compaction_settles_followup_atomically () =
       ~lease
       (Some
          (Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_applied
-            (Masc.Keeper_heartbeat_loop_cycle.Failed { meta; failure })))
+            { receipt
+            ; followup =
+                Masc.Keeper_heartbeat_loop_cycle.Failed { meta; failure }
+            }))
   in
   let judgment_failure =
     turn_failure
@@ -1396,9 +1411,50 @@ let test_applied_compaction_settles_followup_atomically () =
          ; retry_after = None
          })
   in
-  match settlement retry_failure with
-  | Masc.Keeper_registry_event_queue.Ack -> ()
-  | _ -> Alcotest.fail "follow-up retry replayed an already-applied compaction"
+  (match settlement retry_failure with
+   | Masc.Keeper_registry_event_queue.Ack -> ()
+   | _ -> Alcotest.fail "follow-up retry replayed an already-applied compaction");
+  let completion_error =
+    Keeper_context_runtime.Transition_rejected
+      (Keeper_state_machine.Precondition_violation
+         { event = "compaction_completed"; reason = "injected completion rejection" })
+  in
+  let failure_dispatch_error =
+    Keeper_context_runtime.Transition_rejected
+      (Keeper_state_machine.Precondition_violation
+         { event = "compaction_failed"; reason = "injected cleanup rejection" })
+  in
+  let receipt =
+    applied_compaction_receipt
+      ~lifecycle:
+        (Masc.Keeper_manual_compaction.Completion_rejected_failure_dispatch_failed
+           { completion_error; failure_dispatch_error })
+      ()
+  in
+  let committed =
+    Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_applied
+      { receipt; followup = Masc.Keeper_heartbeat_loop_cycle.Completed meta }
+  in
+  (match
+     Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
+       ~base_path:(Sys.getcwd ())
+       ~settled_at:8.0
+       ~stop_requested:false
+       ~compaction_consecutive_failures:0
+       ~lease
+       (Some committed)
+   with
+   | Masc.Keeper_registry_event_queue.Ack -> ()
+   | Masc.Keeper_registry_event_queue.Requeue
+       Masc.Keeper_registry_event_queue.Context_compaction_retry ->
+     Alcotest.fail "post-install lifecycle failure replayed provider compaction"
+   | _ -> Alcotest.fail "post-install lifecycle failure was not acknowledged");
+  match
+    Masc.Keeper_heartbeat_loop.compaction_outcome_of_cycle_outcome
+      (Some committed)
+  with
+  | Some `Committed -> ()
+  | _ -> Alcotest.fail "post-install lifecycle failure was not stamped committed"
 ;;
 
 (* RFC-0351 S0 / #25461: a manual-compaction failure requeues while the streak

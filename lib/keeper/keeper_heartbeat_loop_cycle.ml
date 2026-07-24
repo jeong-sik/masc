@@ -59,7 +59,10 @@ type cycle_outcome =
       { meta : keeper_meta
       ; no_compaction : Keeper_post_turn.no_compaction
       }
-  | Manual_compaction_applied of cycle_outcome
+  | Manual_compaction_applied of
+      { receipt : Keeper_manual_compaction.applied_receipt
+      ; followup : cycle_outcome
+      }
 
 and failure_judgment_terminal =
   | Judgment_boundary_failed of { detail : string }
@@ -78,19 +81,19 @@ let rec meta = function
   | Manual_compaction_failed { meta; _ }
   | Manual_compaction_not_applied { meta; _ } ->
     meta
-  | Manual_compaction_applied outcome -> meta outcome
+  | Manual_compaction_applied { followup; _ } -> meta followup
 ;;
 
 let rec turn_failure = function
   | Failed { failure; _ } -> Some failure
-  | Manual_compaction_applied outcome -> turn_failure outcome
+  | Manual_compaction_applied { followup; _ } -> turn_failure followup
   | Completed _ | Cancelled _ | Skipped _ | Busy _
   | Judgment_settled _ | Manual_compaction_failed _
   | Manual_compaction_not_applied _ -> None
 ;;
 
 let manual_compaction_followup_failure = function
-  | Manual_compaction_applied outcome -> turn_failure outcome
+  | Manual_compaction_applied { followup; _ } -> turn_failure followup
   | Completed _ | Cancelled _ | Skipped _ | Failed _ | Busy _
   | Judgment_settled _ | Manual_compaction_failed _
   | Manual_compaction_not_applied _ -> None
@@ -398,7 +401,8 @@ let run_keeper_cycle_with
        [run_admitted]) and releases the slot the moment the checkpoint
        commits. The follow-up turn then re-enters the standard lane below,
        where a chat backlog wins — the remedy may cut the line, an arbitrary
-       LLM turn may not. [Manual_compaction_applied (Busy _)] settles the
+       LLM turn may not. [Manual_compaction_applied { followup = Busy _; _ }]
+       settles the
        stimulus as Ack, so a yielded follow-up does not replay compaction. *)
     (match
        run_manual_compaction
@@ -420,7 +424,9 @@ let run_keeper_cycle_with
          "manual compaction reached typed terminal: %s"
          (Keeper_event_queue_state.no_compaction_reason_label no_compaction.reason);
        Manual_compaction_not_applied { meta = meta_after_triage; no_compaction }
-     | `Applied _success -> Manual_compaction_applied (run_standard_cycle ()))
+     | `Applied success ->
+       Manual_compaction_applied
+         { receipt = success.receipt; followup = run_standard_cycle () })
 ;;
 
 let run_keeper_cycle

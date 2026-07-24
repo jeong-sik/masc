@@ -1084,7 +1084,11 @@ let test_manual_applied_hint_failure () =
        let callback_saw_released_admission = ref false in
        let hint_calls = ref 0 in
        let result =
-         Masc.Keeper_manual_compaction.run_admitted
+         Masc.Keeper_manual_compaction.For_testing.run_admitted_with_install_observer
+           ~on_checkpoint_installed_observer:(fun _ ->
+             Masc.Keeper_registry.For_testing.unregister
+               ~base_path
+               meta.name)
            ~on_checkpoint_commit_hint:(fun _installed_ref ->
              incr hint_calls;
              callback_saw_released_admission :=
@@ -1107,17 +1111,89 @@ let test_manual_applied_hint_failure () =
          check int "manual hint is attempted at-most-once" 1 !hint_calls;
          (match
             success.recovery.checkpoint_installation,
+            success.receipt.installation,
             result.checkpoint_commit_hint
           with
           | Masc.Keeper_checkpoint_store.Installed installed,
+            receipt_installation,
             Masc.Keeper_manual_compaction.Hint_failed { installed_ref; _ } ->
             check bool
               "manual hint carries exact installed ref"
               true
-              (installed_ref = installed.installed_ref)
-          | Masc.Keeper_checkpoint_store.Not_installed _, _ ->
+              (installed_ref = installed.installed_ref);
+            check bool
+              "cycle receipt carries exact installed ref"
+              true
+              (installed_ref = receipt_installation.installed_ref)
+          | Masc.Keeper_checkpoint_store.Not_installed _, _, _ ->
             fail "Applied manual compaction carried Not_installed"
-          | _ -> fail "raising manual hint lost its typed failure")
+          | _ -> fail "raising manual hint lost its typed failure");
+         (match success.receipt.lifecycle with
+          | Masc.Keeper_manual_compaction.Completion_rejected_failure_dispatch_failed
+              _ ->
+            ()
+          | _ ->
+            fail
+              "post-install completion and cleanup rejection did not stay Applied");
+         (match success.receipt.manifest with
+          | Ok () -> ()
+          | Error detail ->
+            failf "post-install degraded manifest was not durable: %s" detail);
+         check int
+           "post-install lifecycle rejection performs one provider POST"
+           1
+           (Exact_fixture.post_count exact_server);
+         let manifest_path =
+           Masc.Keeper_runtime_manifest.path_for_trace
+             config
+             ~keeper_name:meta.name
+             ~trace_id:
+               (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+         in
+         let manifest =
+           Fs_compat.load_file manifest_path
+           |> String.split_on_char '\n'
+           |> List.filter (fun line -> String.trim line <> "")
+           |> List.rev
+           |> function
+           | line :: _ -> Yojson.Safe.from_string line
+           | [] -> fail "post-install degraded manifest row is missing"
+         in
+         let open Yojson.Safe.Util in
+         let decision = manifest |> member "decision" in
+         let public_decision =
+           Masc.Keeper_runtime_manifest.public_projection_of_decision decision
+         in
+         check string
+           "post-install anomaly degrades manifest health"
+           "degraded"
+           (manifest |> member "status" |> to_string);
+         check bool
+           "post-install anomaly requires operator action"
+           true
+           (public_decision
+            |> member "operator_action_required"
+            |> to_bool);
+         check string
+           "durable receipt states installed"
+           "installed"
+           (public_decision
+            |> member "checkpoint_installation_state"
+            |> to_string);
+         check string
+           "durable receipt carries exact sha"
+           success.receipt.installation.installed_ref.sha256
+           (public_decision
+            |> member "checkpoint_installed_ref"
+            |> member "sha256"
+            |> to_string);
+         check string
+           "durable receipt carries lifecycle failure"
+           "completion_rejected_failure_dispatch_failed"
+           (public_decision
+            |> member "compaction_lifecycle"
+            |> member "kind"
+            |> to_string)
        | `No_compaction no_compaction ->
          failf
            "manual observer did not apply: %s"
@@ -1138,6 +1214,62 @@ let test_manual_applied_hint_failure () =
          fail "raising manual hint was reported delivered"
        | Masc.Keeper_manual_compaction.Hint_not_emitted ->
          fail "Applied manual compaction emitted no hint")
+;;
+
+let test_checkpoint_installation_auxiliary_manifest_tags () =
+  let write_error =
+    { Keeper_fs.renamed = true
+    ; stage = Keeper_fs.Parent_directory_fsync_after_rename
+    ; failure = Keeper_fs.Operation_failed "injected durability uncertainty"
+    }
+  in
+  let lock_error =
+    { File_lock_eio.lock_path = "/tmp/checkpoint-installation-auxiliary.lock"
+    ; phase = File_lock_eio.Release_process_lock
+    ; cause =
+        { File_lock_eio.error = Unix.EIO
+        ; operation = "injected_release"
+        ; argument = "/tmp/checkpoint-installation-auxiliary.lock"
+        }
+    ; cleanup_failure = None
+    }
+  in
+  let failure detail = Failure detail, Printexc.get_callstack 1 in
+  let auxiliaries =
+    [ Masc.Keeper_checkpoint_store.Commit_durability_unknown write_error
+    ; Masc.Keeper_checkpoint_store.Commit_observer_failed (failure "observer")
+    ; Masc.Keeper_checkpoint_store.Release_process_lock_failed lock_error
+    ; Masc.Keeper_checkpoint_store.Post_commit_unwind_interrupted
+        (failure "unwind")
+    ; Masc.Keeper_checkpoint_store.History_write_failed (failure "history")
+    ]
+  in
+  let kinds =
+    auxiliaries
+    |> List.map
+         Masc.Keeper_manual_compaction.For_testing.checkpoint_installation_auxiliary_to_json
+    |> List.map (fun json ->
+      let open Yojson.Safe.Util in
+      check bool
+        "every installation auxiliary requires operator action"
+        true
+        (json |> member "operator_action_required" |> to_bool);
+      check bool
+        "every installation auxiliary has detail"
+        true
+        (json |> member "detail" |> to_string |> String.trim |> fun detail ->
+         detail <> "");
+      json |> member "kind" |> to_string)
+  in
+  check (list string)
+    "all installation auxiliary constructors have stable manifest tags"
+    [ "commit_durability_unknown"
+    ; "commit_observer_failed"
+    ; "release_process_lock_failed"
+    ; "post_commit_unwind_interrupted"
+    ; "history_write_failed"
+    ]
+    kinds
 ;;
 
 let test_prepare_commit_source_cas () =
@@ -1517,6 +1649,8 @@ let () =
         `Quick test_manual_compaction_serializes_owner_lane;
       test_case "manual Applied preserves hint failure"
         `Quick test_manual_applied_hint_failure;
+      test_case "checkpoint installation auxiliary manifest tags"
+        `Quick test_checkpoint_installation_auxiliary_manifest_tags;
       test_case "malformed structure preserves checkpoint"
         `Quick test_malformed_structure_preserves_checkpoint;
       test_case "prepare/commit source CAS"

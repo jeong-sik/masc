@@ -131,6 +131,18 @@ val with_durable_lock :
     failure remains [Error] here; transaction owners that distinguish their
     completed body result must use the observed surface. *)
 
+module For_testing : sig
+  val with_durable_lock_observed_with_release_failure :
+    release_failure:durable_lock_error ->
+    lock_path:string ->
+    (unit -> 'a) ->
+    'a durable_lock_observation
+  (** Acquire and release the real durable lock, then deterministically report
+      [release_failure] through the same [Body_completed] path used by a real
+      release error. The file descriptor is released before the injected
+      observation is returned. *)
+end
+
 (** {1 Observability hook} *)
 
 (** Fires after every {!acquire_flock_retry} / {!acquire_flock_retry_cooperative}

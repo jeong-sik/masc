@@ -383,6 +383,12 @@ let decision_public_allowlist =
     ; "ratio"; "threshold"; "count"
     ; "source_requeued"; Keeper_compaction_evidence.exact_evidence_key
     ; "clock_refs"
+    ; "checkpoint_installation_schema"; "checkpoint_installation_state"
+    ; "checkpoint_installed_ref"; "checkpoint_installation_auxiliary"
+    ; "compaction_post_install_schema"; "compaction_lifecycle"
+    ; "operator_action_required"; "trace_id"; "generation"; "turn_count"
+    ; "sha256"; "kind"; "detail"; "backtrace_present"; "completion_error"
+    ; "failure_dispatch"; "failure_dispatch_error"
     ]
 
 let compaction_evidence_public_allowlist =

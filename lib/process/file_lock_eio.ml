@@ -481,7 +481,19 @@ type 'a durable_lock_observation =
       ; release_error : durable_lock_error option
       }
 
-let with_durable_lock_observed ~lock_path f =
+let release_durable_lock_result ~lock_path fd =
+  match release_durable_fd_result fd with
+  | Ok () -> Ok ()
+  | Error (cause, cleanup_failure) ->
+    Error
+      (durable_lock_error
+         ?cleanup_failure
+         ~lock_path
+         ~phase:Release_process_lock
+         cause)
+;;
+
+let with_durable_lock_observed_with ~release_fd ~lock_path f =
   with_mutex lock_path (fun () ->
     let execution_context = Eio_guard.execution_context () in
     match acquire_durable_flock ~execution_context lock_path with
@@ -493,29 +505,24 @@ let with_durable_lock_observed ~lock_path f =
           | value -> `Returned value
           | exception exn -> `Raised (exn, Printexc.get_raw_backtrace ())
         in
-        let release = release_durable_fd_result fd in
+        let release = release_fd fd in
         match body, release with
         | `Returned value, Ok () ->
           Body_completed { value; release_error = None }
-        | `Returned value, Error (cause, cleanup_failure) ->
+        | `Returned value, Error error ->
           Body_completed
             { value
-            ; release_error =
-                Some
-                  (durable_lock_error
-                     ?cleanup_failure
-                     ~lock_path
-                     ~phase:Release_process_lock
-                     cause)
+            ; release_error = Some error
             }
         | `Raised (exn, backtrace), Ok () ->
           Printexc.raise_with_backtrace exn backtrace
-        | `Raised (exn, backtrace), Error (release_failure, cleanup_failure) ->
+        | `Raised (exn, backtrace), Error error ->
+          let release_failure = error.cause in
           Log.Misc.error
             "file_lock_eio: release failed during body exception lock_path=%s operation=%s argument=%s error=%s%s"
             lock_path release_failure.operation release_failure.argument
             (Unix.error_message release_failure.error)
-            (match cleanup_failure with
+            (match error.cleanup_failure with
              | None -> ""
              | Some cleanup ->
                Printf.sprintf
@@ -526,12 +533,33 @@ let with_durable_lock_observed ~lock_path f =
       in
       protect_cleanup execution_context admitted)
 
+let with_durable_lock_observed ~lock_path f =
+  with_durable_lock_observed_with
+    ~release_fd:(release_durable_lock_result ~lock_path)
+    ~lock_path
+    f
+;;
+
 let with_durable_lock ~lock_path f =
   match with_durable_lock_observed ~lock_path f with
   | Lock_not_acquired error -> Error error
   | Body_completed { value; release_error = None } -> Ok value
   | Body_completed { release_error = Some error; _ } -> Error error
 ;;
+
+module For_testing = struct
+  let with_durable_lock_observed_with_release_failure
+      ~release_failure
+      ~lock_path
+      f =
+    let release_fd fd =
+      match release_durable_lock_result ~lock_path fd with
+      | Error error -> Error error
+      | Ok () -> Error release_failure
+    in
+    with_durable_lock_observed_with ~release_fd ~lock_path f
+  ;;
+end
 
 (** Number of tracked lock paths (for diagnostics). *)
 let lock_count () = SMap.cardinal (Atomic.get table).entries

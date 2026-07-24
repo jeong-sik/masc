@@ -79,63 +79,6 @@ let validation_error_data message =
     ; "message", `String message
     ]
 
-type compaction_checkpoint_commit_state = Not_installed
-
-let compaction_checkpoint_commit_state_to_string = function
-  | Not_installed -> "not_installed"
-
-let compaction_recovery_error_data ?dispatch_error error =
-  let tag = Keeper_post_turn.compaction_recovery_error_to_tag error in
-  let detail = Keeper_post_turn.compaction_recovery_error_to_string error in
-  let checkpoint_commit_state = Not_installed in
-  let recovery_code =
-    match error with
-    | Keeper_post_turn.Checkpoint_ref_load_failed
-        Keeper_checkpoint_store.Ref_not_found -> Not_found
-    | Compaction_rejected Exact_lane_unconfigured
-    | Compaction_rejected Exact_target_selection_failed
-    | Compaction_rejected Exact_admission_failed
-    | Compaction_rejected (Invalid_structure _)
-    | Compaction_rejected No_eligible_history
-    | Compaction_rejected Structurally_unchanged
-    | Compaction_rejected Checkpoint_not_reduced
-    | No_compaction _ ->
-      Precondition_failed
-    | Retry_suspended _ -> Precondition_failed
-    | Compaction_rejected Exact_execution_context_unavailable
-    | Compaction_rejected Exact_attempt_start_failed
-    | Compaction_rejected Exact_execution_guard_failed
-    | Compaction_rejected Exact_flow_already_started
-    | Compaction_rejected (Exact_execution_terminal _)
-    | Compaction_rejected Invalid_compaction_plan
-    | Compaction_rejected (Invalid_structural_evidence _)
-    | Checkpoint_ref_load_failed _
-    | Checkpoint_candidate_failed _ -> Internal_error
-    | Checkpoint_cas_failed (Source_changed _) -> Conflict
-    | Checkpoint_cas_failed _ -> Internal_error
-  in
-  let code =
-    match dispatch_error with
-    | None -> recovery_code
-    | Some _ -> Conflict
-  in
-  error_assoc
-    ([ "error_code", `String (error_code_to_string code)
-     ; "message", `String detail
-     ; "compaction_error", `String tag
-     ; ( "checkpoint_commit_state"
-       , `String
-           (compaction_checkpoint_commit_state_to_string checkpoint_commit_state) )
-     ]
-     @
-     match dispatch_error with
-     | None -> []
-     | Some error ->
-       [ "recovery_error_code", `String (error_code_to_string recovery_code)
-       ; ( "lifecycle_dispatch_error"
-         , `String
-             (Keeper_context_runtime.lifecycle_dispatch_error_to_string error) ) ])
-
 let keeper_sandbox_status_fleet_names ctx =
   let registry_names =
     Keeper_registry.all ~base_path:ctx.config.base_path ()

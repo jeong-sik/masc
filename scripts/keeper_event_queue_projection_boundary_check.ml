@@ -98,13 +98,24 @@ let reject_guarded_owner_reexport ~file ~surface visit =
              | Pmod_unpack packed ->
                let packed_iterator =
                  { Ast_iterator.default_iterator with
+                   module_expr =
+                     (fun self expression ->
+                        match expression.pmod_desc with
+                        | Pmod_ident identifier ->
+                          reject identifier.txt identifier.loc
+                        | Pmod_unpack packed -> self.expr self packed
+                        | _ ->
+                          Ast_iterator.default_iterator.module_expr
+                            self
+                            expression)
+                 ;
                    expr =
                      (fun self expression ->
-                        (match expression.pexp_desc with
-                         | Pexp_ident identifier ->
-                           reject identifier.txt identifier.loc
-                         | _ -> ());
-                        Ast_iterator.default_iterator.expr self expression)
+                        match expression.pexp_desc with
+                        | Pexp_ident identifier ->
+                          reject identifier.txt identifier.loc
+                        | Pexp_pack (packed, _) -> self.module_expr self packed
+                        | _ -> Ast_iterator.default_iterator.expr self expression)
                  }
                in
                packed_iterator.expr packed_iterator packed
@@ -568,6 +579,7 @@ let run_ast_rejection_fixtures
          let (_ : (string * occurrence) list) = fixture_definitions file in
          ()))
     [ "guarded_longident_prefix.ml"
+    ; "guarded_alias_inside_unpack.ml"
     ; "guarded_pack.ml"
     ; "guarded_unpack.ml"
     ];

@@ -46,7 +46,7 @@ val dispatch :
 (** Keeper-model dispatch projects semantic task-list guidance to
     [keeper_tasks_list] instead of the external [masc_tasks] transport name. *)
 val dispatch_for_keeper :
-  ?created_by:string ->
+  created_by:string ->
   context ->
   name:string ->
   args:Yojson.Safe.t ->

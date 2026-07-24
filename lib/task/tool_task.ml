@@ -794,9 +794,9 @@ let dispatch ctx ~name ~args =
     ~args
 ;;
 
-let dispatch_for_keeper ?created_by ctx ~name ~args =
+let dispatch_for_keeper ~created_by ctx ~name ~args =
   dispatch_with_task_list_projection
-    ?created_by
+    ~created_by
     Tool_capability_projection.Keeper_tasks_list
     ctx
     ~name

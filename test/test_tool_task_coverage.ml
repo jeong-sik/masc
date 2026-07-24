@@ -2299,6 +2299,7 @@ let () = test "keeper transition rejection projects Keeper task-list guidance" (
   let ctx = make_test_ctx () in
   let result =
     Task.Tool.dispatch_for_keeper
+      ~created_by:ctx.agent_name
       ctx
       ~name:"masc_transition"
       ~args:

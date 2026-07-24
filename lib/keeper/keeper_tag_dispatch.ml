@@ -138,6 +138,7 @@ let dispatch
     (* ── Tier B: Eio-dependent ─────────────────────────────────── *)
     | Mod_task ->
       Task.Tool.dispatch_for_keeper
+        ~created_by:agent_name
         { Task.Tool.config; agent_name; sw = Eio_context.get_switch_opt () }
         ~name
         ~args

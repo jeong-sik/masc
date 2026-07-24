@@ -335,7 +335,11 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
           ~tool_name ~start_time error
     | Ok contract ->
         let add_result =
-          let created_by = Option.value ~default:ctx.agent_name created_by in
+          let created_by =
+            match created_by with
+            | Some author -> author
+            | None -> ctx.agent_name
+          in
           Workspace.add_task_with_result ?contract
             ?goal_id
             ?predecessor_task_id
@@ -484,7 +488,11 @@ let handle_batch_add_tasks ?created_by ~tool_name ~start_time ctx args =
       List.filter_map (function Ok t -> Some t | Error _ -> None) validated
     in
     let batch_result =
-      let created_by = Option.value ~default:ctx.agent_name created_by in
+      let created_by =
+        match created_by with
+        | Some author -> author
+        | None -> ctx.agent_name
+      in
       Workspace.batch_add_tasks_with_contracts_result
         ~created_by ctx.config tasks
     in

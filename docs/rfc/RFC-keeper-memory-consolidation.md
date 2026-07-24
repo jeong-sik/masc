@@ -117,8 +117,8 @@ facts(`claim`)를 jaccard≥0.5로 대조:
 ### §5.2 Stage 1 회귀 테스트 (구현됨)
 
 - **kill-switch 계약 단위 테스트**: `test/test_keeper_bank_longterm_inject_flag.ml`. 키 SSOT를
-  `Keeper_memory_bank_env.bank_longterm_inject_enabled`(named consumer, 기존 `memory_llm_summary_enabled`
-  관습) 한 곳으로 모으고, keeper_turn 가드와 테스트가 같은 함수를 호출한다. pin: unset→default ON
+  `Keeper_memory_bank_env.bank_longterm_inject_enabled` named consumer 한 곳으로 모으고, keeper_turn
+  가드와 테스트가 같은 함수를 호출한다. pin: unset→default ON
   (Stage 1 무동작변화 약속), off/on 토큰 집합, invalid→default ON fallback. **non-vacuity 증명**:
   default `true`→`false` mutation 시 2 케이스 red 확인 후 복원(revert-green discriminator).
 - **단위 격리 불가 항목 (정직)**: `durable_text` gating이 실제 `build_turn_prompt` 거대 클로저

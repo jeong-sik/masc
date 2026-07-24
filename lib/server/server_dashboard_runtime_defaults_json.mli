@@ -17,7 +17,7 @@ type resolved =
   ; default_model : string option
   ; default_max_context : int option
   ; runtimes : runtime_entry list
-  ; librarian_runtime_id : string option
+  ; memory_os_consolidation_runtime_id : string option
   ; structured_judge_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list

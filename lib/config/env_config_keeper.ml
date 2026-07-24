@@ -169,7 +169,6 @@ module KeeperMemoryOs = struct
   let librarian_enabled_default = true
   let librarian_cadence_turns_default = 3
   let librarian_max_messages_default = 24
-  let librarian_runtime_id_default = None
   let librarian_global_slot_default = 1
   let gc_enabled_default = true
   (* On by default (RFC keeper-memory-bank-write-reduction §4b, operator decision
@@ -177,8 +176,9 @@ module KeeperMemoryOs = struct
      decider of which facts survive (RFC-0247; spec/12 §Compaction) — deterministic
      TTL/cap retention was removed (RFC-0259 supersession), so with this pass off
      the Tier-1 fact store only grows (idealist: 449 rows, 0 with valid_until).
-     Failures are graceful no-ops (transport/parse errors never mutate the store),
-     and the runtime inherits the librarian's model. Set the env false to disable. *)
+     Failures are graceful no-ops (transport/parse errors never mutate the store).
+     Runtime selection uses the dedicated consolidation override when set, then
+     the default runtime. Set the env false to disable. *)
   let consolidation_enabled_default = true
   let consolidation_runtime_id_default = None
 
@@ -190,7 +190,6 @@ module KeeperMemoryOs = struct
   let librarian_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
   let librarian_cadence_turns_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS"
   let librarian_max_messages_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
-  let librarian_runtime_id_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
   let librarian_global_slot_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
   let gc_env_key = "MASC_KEEPER_MEMORY_OS_GC"
   let consolidation_env_key = "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
@@ -257,16 +256,6 @@ module KeeperMemoryOs = struct
       (get_int_logged
          librarian_max_messages_env_key
          ~default:librarian_max_messages_default)
-  ;;
-
-  (** Legacy Memory OS summary runtime override; not used by exact extraction.
-      @category Runtime
-      @ops_class operator *)
-  let librarian_runtime_id () =
-    get_string
-      ~default:(optional_string_default librarian_runtime_id_default)
-      librarian_runtime_id_env_key
-    |> nonempty_string
   ;;
 
   (** Fleet-wide concurrency gate for librarian provider calls. Default: 1; 0
@@ -646,9 +635,9 @@ end
 
 (* MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST (KeeperRuntimeProviderFilter) was
    deleted (audit F8): its value was threaded as [?provider_filter] into
-   [Keeper_turn_driver.run_named] and [Keeper_memory_llm_summary.make], both of
-   which silently ignored it after the RFC-0206 single-runtime purge. The knob
-   was dead while its docs were live; deletion documents reality. Provider
-   selection is runtime.toml SSOT ([runtime].default / [[runtime.assignments]]). *)
+   [Keeper_turn_driver.run_named], which silently ignored it after the RFC-0206
+   single-runtime purge. The knob was dead while its docs were live; deletion
+   documents reality. Provider selection is runtime.toml SSOT
+   ([runtime].default / [[runtime.assignments]]). *)
 
 (** Print configuration summary for debugging *)

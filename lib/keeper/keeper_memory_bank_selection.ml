@@ -70,7 +70,6 @@ let consensus_re_cached : (string * Re.re) option ref = ref None
 let memory_env_opt = Keeper_memory_bank_env.memory_env_opt
 let memory_env_int_logged = Keeper_memory_bank_env.memory_env_int_logged
 let memory_env_bool_logged = Keeper_memory_bank_env.memory_env_bool_logged
-let memory_llm_summary_enabled = Keeper_memory_bank_env.memory_llm_summary_enabled
 
 let consensus_pattern_key () =
   match memory_env_opt "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN" with

@@ -188,8 +188,8 @@ describe('RuntimeEnvironmentEditor assignments section', () => {
 
 const sourceWithCapabilities = `[runtime]
 default = "ollama_cloud.minimax-m3"
-librarian = "ollama_cloud.flash-nojson"
 structured_judge = "ollama_cloud.flash-nojson"
+cross_verifier = "ollama_cloud.flash-nojson"
 
 [providers.ollama_cloud]
 display-name = "Ollama Cloud"
@@ -231,8 +231,8 @@ price-output = 0.28
 
 const sourceWithUnknownLaneCapabilities = `[runtime]
 default = "ollama_cloud.minimax-m3"
-librarian = "ollama_cloud.flash-unknown"
-cross_verifier = "ollama_cloud.missing-binding"
+structured_judge = "ollama_cloud.missing-binding"
+cross_verifier = "ollama_cloud.flash-unknown"
 
 [providers.ollama_cloud]
 display-name = "Ollama Cloud"
@@ -299,12 +299,12 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
       container,
       'routing',
       sourceWithCapabilities.replace(
-        'librarian = "ollama_cloud.flash-nojson"',
-        'librarian = "ollama_cloud.minimax-m3"',
+        'cross_verifier = "ollama_cloud.flash-nojson"',
+        'cross_verifier = "ollama_cloud.minimax-m3"',
       ),
     )
 
-    const badge = container.querySelector('[data-testid="runtime-lane-librarian-capability"]')
+    const badge = container.querySelector('[data-testid="runtime-lane-cross_verifier-capability"]')
     expect(badge?.getAttribute('data-runtime-lane-capability')).toBe('supported')
     expect(badge?.classList.contains('rt-ok')).toBe(true)
     expect(badge?.textContent).toContain('JSON 모드 필요')
@@ -341,17 +341,17 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
     const container = document.createElement('div')
     mountSection(container, 'routing', sourceWithUnknownLaneCapabilities)
 
-    const librarian = container.querySelector('[data-testid="runtime-lane-librarian-capability"]')
-    expect(librarian?.getAttribute('data-runtime-lane-capability')).toBe('unknown')
-    expect(librarian?.classList.contains('rt-unknown')).toBe(true)
-    expect(librarian?.classList.contains('rt-ok')).toBe(false)
-    expect(librarian?.textContent).toContain('JSON 모드 필요')
-    expect(librarian?.textContent).toContain('flash-unknown capability 미확인')
-
     const crossVerifier = container.querySelector('[data-testid="runtime-lane-cross_verifier-capability"]')
     expect(crossVerifier?.getAttribute('data-runtime-lane-capability')).toBe('unknown')
     expect(crossVerifier?.classList.contains('rt-unknown')).toBe(true)
-    expect(crossVerifier?.textContent).toContain('runtime binding 없음: ollama_cloud.missing-binding')
+    expect(crossVerifier?.classList.contains('rt-ok')).toBe(false)
+    expect(crossVerifier?.textContent).toContain('JSON 모드 필요')
+    expect(crossVerifier?.textContent).toContain('flash-unknown capability 미확인')
+
+    const structuredJudge = container.querySelector('[data-testid="runtime-lane-structured_judge-capability"]')
+    expect(structuredJudge?.getAttribute('data-runtime-lane-capability')).toBe('unknown')
+    expect(structuredJudge?.classList.contains('rt-unknown')).toBe(true)
+    expect(structuredJudge?.textContent).toContain('runtime binding 없음: ollama_cloud.missing-binding')
 
     render(null, container)
   })
@@ -362,12 +362,12 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
       container,
       'routing',
       sourceWithUnknownLaneCapabilities.replace(
-        'librarian = "ollama_cloud.flash-unknown"\n',
+        'cross_verifier = "ollama_cloud.flash-unknown"\n',
         '',
       ),
     )
 
-    const badge = container.querySelector('[data-testid="runtime-lane-librarian-capability"]')
+    const badge = container.querySelector('[data-testid="runtime-lane-cross_verifier-capability"]')
     expect(badge?.getAttribute('data-runtime-lane-capability')).toBe('unconfigured')
     expect(badge?.classList.contains('rt-unknown')).toBe(true)
     expect(badge?.textContent).toContain('lane 미설정')

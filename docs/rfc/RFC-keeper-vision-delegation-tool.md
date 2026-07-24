@@ -89,7 +89,7 @@ This is a Phase-0b *design* prerequisite (resolve before Phase 1), not an Open Q
 
 ### 2.6 Mid-turn provider sub-call — new tool-execution shape `[review]`
 
-The librarian (`keeper_librarian_runtime.ml:20-22`, routed by `runtime_id_for_librarian`) proves the *mechanism* — pick a runtime, build one-shot messages, call `Llm_provider.Complete.complete ~sw ~net ?clock ~config`. But it runs on the **post-turn** path, not as a keeper tool. The in-process tool handler contract (`keeper_tool_in_process_runtime.mli`, RFC-0179) is `~args -> string` with **no `sw/net/clock`** threaded to the handler, and the executor variants (`keeper_tool_descriptor.ml:3-11`) are `In_process | Host_process | Sandbox_process` — none calls an LLM. `analyze_image` therefore needs either a network-capable in-process handler (thread the Eio context the dispatcher already receives at `keeper_tool_dispatch_runtime.mli:162-166`) or a new executor variant. This is real infra, not glue.
+The post-turn librarian (`keeper_librarian_runtime.ml`) proves one-shot exact-output execution, but it does not expose a reusable Librarian runtime route and it is not a keeper tool. The in-process tool handler contract (`keeper_tool_in_process_runtime.mli`, RFC-0179) is `~args -> string` with **no `sw/net/clock`** threaded to the handler, and the executor variants (`keeper_tool_descriptor.ml:3-11`) are `In_process | Host_process | Sandbox_process` — none calls an LLM. `analyze_image` therefore needs either a network-capable in-process handler (thread the Eio context the dispatcher already receives at `keeper_tool_dispatch_runtime.mli:162-166`) or a new executor variant. This is real infra, not glue.
 
 ## 3. Trade-offs
 

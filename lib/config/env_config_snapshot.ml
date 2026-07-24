@@ -377,11 +377,6 @@ let memory_entries =
       Memory_os_defaults.librarian_max_messages_env_key
       "Recent-message window for librarian extraction (floor 1)";
     entry
-      ~default:
-        (optional_default_to_display Memory_os_defaults.librarian_runtime_id_default)
-      Memory_os_defaults.librarian_runtime_id_env_key
-      "Legacy runtime id override for Memory OS LLM summary generation; does not route post-turn Librarian exact-output extraction; (none) displays the empty default";
-    entry
       ~default:(string_of_int Memory_os_defaults.librarian_global_slot_default)
       Memory_os_defaults.librarian_global_slot_env_key
       "Fleet-wide concurrency gate for librarian provider calls; 0 disables";

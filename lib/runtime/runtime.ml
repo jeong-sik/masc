@@ -30,7 +30,7 @@ let id_of_binding (b : binding) : string = binding_key b
     resolve 또는 provider_config materialize 가 실패하면 [Error reason] —
     동작은 fail-closed 그대로(partial-boot 없음, 해당 binding 은 Runtime 목록에서
     제외)이되 왜 제외되는지 이유를 잃지 않는다. 이 이유는 assignment / default /
-    librarian / lane 검증이 "not found" 대신 근본 원인을 표면화하는 데 쓰인다
+    task-route / lane 검증이 "not found" 대신 근본 원인을 표면화하는 데 쓰인다
     (Unknown→silent-drop 안티패턴 차단). *)
 let of_binding_result (cfg : config) (b : binding) : (t, string) result =
   match provider_of_id cfg b.provider_id, model_of_id cfg b.model_id with
@@ -62,7 +62,7 @@ let is_local_runtime (runtime : t) = is_local_provider runtime.provider
 (* Split configured bindings into successfully materialized runtimes and the
    ones that were defined but could not be materialized, each paired with the
    reason it was dropped. The drop set ([id -> reason]) lets assignment /
-   default / librarian / lane validation surface *why* a target binding is
+   default / task-route / lane validation surface *why* a target binding is
    absent from the runtime list (e.g. "provider ... uses protocol messages-http,
    which the runtime adapter cannot build a provider_config for ...") instead of
    the misleading "not found among N runtimes", which points the operator at a
@@ -133,14 +133,15 @@ let validate_keeper_assignments ~(config_path : string)
             ~runtime_count:(List.length runtimes) runtime_id))
 ;;
 
-(* [runtime].librarian must resolve to a configured runtime when set, mirroring
-   [runtime].default / [runtime.assignments] validation: an unknown id is an
-   operator typo rejected at load, not a silent fallback (Unknown→Permissive
-   anti-pattern). [None] is the designed "inherit the keeper's runtime" case. *)
-let validate_librarian_runtime ~(config_path : string)
-    ~(dropped_bindings : (string * string) list) (runtimes : t list)
-    (librarian_id : string option) : (unit, string) result =
-  match librarian_id with
+(* [runtime].memory_os_consolidation must resolve to a configured runtime when
+   set. [None] is the designed inheritance of [runtime].default; an unknown id
+   is an operator typo rejected at load, never a silent fallback. *)
+let validate_memory_os_consolidation_runtime
+    ~(config_path : string)
+    ~(dropped_bindings : (string * string) list)
+    (runtimes : t list)
+    (runtime_id : string option) : (unit, string) result =
+  match runtime_id with
   | None -> Ok ()
   | Some id ->
     if List.exists (fun (r : t) -> String.equal r.id id) runtimes
@@ -148,7 +149,7 @@ let validate_librarian_runtime ~(config_path : string)
     else
       Error
         (Printf.sprintf
-           "%s: [runtime].librarian = %S%s"
+           "%s: [runtime].memory_os_consolidation = %S%s"
            config_path
            id
            (unresolved_runtime_suffix ~dropped_bindings
@@ -208,8 +209,8 @@ let validate_lane_candidates_capability
   check (Runtime_lane.ordered_candidates lane)
 ;;
 
-(* [runtime].cross_verifier mirrors [runtime].librarian validation: an unknown
-   id is an operator typo rejected at load, not a silent fallback
+(* [runtime].cross_verifier treats an unknown id as an operator typo rejected at
+   load, not a silent fallback
    (Unknown→Permissive anti-pattern). [None] is the designed "inherit
    [runtime].default" case. A lane id is accepted when every candidate
    declares JSON mode (#25394). *)
@@ -258,8 +259,8 @@ let validate_cross_verifier_runtime ~(config_path : string)
 ;;
 
 (* [runtime].structured_judge is the explicit lane for provider-native schema
-   requests. Unlike the librarian lane, this lane must declare structured output,
-   not just JSON mode. [None] remains a migration fallback for existing configs;
+   requests. It must declare structured output, not just JSON mode. [None]
+   remains a migration fallback for existing configs;
    unsupported resolved runtimes are rejected by each caller's OAS schema
    validation instead of silently dropping the schema. A [runtime.lanes] id is
    accepted when every candidate declares structured output (#25394): every
@@ -309,9 +310,9 @@ let validate_structured_judge_runtime ~(config_path : string)
                runtime.model.id)))
 ;;
 
-(* [runtime].media_failover (RFC-0265) mirrors [runtime].librarian validation for
-   each id in the ordered list: an unknown id is an operator typo rejected at
-   load, not a silent drop (Unknown→Permissive anti-pattern). [[]] is the designed
+(* [runtime].media_failover (RFC-0265) validates each id in the ordered list: an
+   unknown id is an operator typo rejected at load, not a silent drop
+   (Unknown→Permissive anti-pattern). [[]] is the designed
    "derive capable runtimes from declared capabilities" case. *)
 let validate_media_failover ~(config_path : string)
     ~(dropped_bindings : (string * string) list) (runtimes : t list)
@@ -384,9 +385,8 @@ let lanes_of_decls ~(config_path : string)
 
    An unknown model resolves to OAS [provider_default], whose guessed capabilities
    (notably [thinking_control_format = No_thinking_control]) silently drop
-   thinking/sampling control a binding may require — that guess corrupted the
-   memory-os librarian for minimax-m3 (2026-06-19, before it was catalogued).
-   Reject such a binding at load instead of discovering corruption at runtime
+   thinking/sampling control a binding may require. Reject such a binding at
+   load instead of discovering corruption at runtime
    (Unknown->Permissive anti-pattern; mirrors [runtime].default validation,
    RFC-0206 §2.1 no-silent-fallback).
 
@@ -750,8 +750,8 @@ let missing_reference_error
 ;;
 
 let degrade_loaded_for_missing_catalog
-    ( (runtimes, configured_default, assignments, librarian_id, structured_judge_id,
-       cross_verifier_id, media_failover, lanes) :
+    ( (runtimes, configured_default, assignments, memory_os_consolidation_id,
+       structured_judge_id, cross_verifier_id, media_failover, lanes) :
       t list
       * t
       * (string * string) list
@@ -852,7 +852,11 @@ let degrade_loaded_for_missing_catalog
       None, Some { route_name; runtime_id }
     | Some _ as value -> value, None
   in
-  let librarian_id, librarian_drop = drop_route "[runtime].librarian" librarian_id in
+  let memory_os_consolidation_id, memory_os_consolidation_drop =
+    drop_route
+      "[runtime].memory_os_consolidation"
+      memory_os_consolidation_id
+  in
   let structured_judge_id, structured_judge_drop =
     drop_route "[runtime].structured_judge" structured_judge_id
   in
@@ -861,7 +865,7 @@ let degrade_loaded_for_missing_catalog
   in
   let dropped_routes =
     [ default_drop
-    ; librarian_drop
+    ; memory_os_consolidation_drop
     ; structured_judge_drop
     ; cross_verifier_drop
     ]
@@ -918,7 +922,7 @@ let degrade_loaded_for_missing_catalog
       ( ( active_runtimes
         , configured_default
         , kept_assignments
-        , librarian_id
+        , memory_os_consolidation_id
         , structured_judge_id
         , cross_verifier_id
         , kept_media_failover
@@ -931,7 +935,6 @@ let hitl_auto_judge_lane_id = "hitl_auto_judge"
 let ensure_hitl_auto_judge_lane
     ~runtimes
     ~default_runtime
-    ~librarian_runtime_id
     ~structured_judge_runtime_id
     ~lanes
     exact_output_lane_decls
@@ -945,9 +948,9 @@ let ensure_hitl_auto_judge_lane
     Ok exact_output_lane_decls
   else
     let assignment_id =
-      match structured_judge_runtime_id, librarian_runtime_id with
-      | Some runtime_id, _ | None, Some runtime_id -> runtime_id
-      | None, None -> default_runtime.id
+      match structured_judge_runtime_id with
+      | Some runtime_id -> runtime_id
+      | None -> default_runtime.id
     in
     let slot_ids =
       match
@@ -1022,8 +1025,11 @@ let materialize_config
     validate_keeper_assignments ~config_path ~dropped_bindings runtimes assignments
   in
   let* () =
-    validate_librarian_runtime ~config_path ~dropped_bindings runtimes
-      cfg.librarian_runtime_id
+    validate_memory_os_consolidation_runtime
+      ~config_path
+      ~dropped_bindings
+      runtimes
+      cfg.memory_os_consolidation_runtime_id
   in
   (* Lanes are materialized before the judge/verifier route validations so a
      route id can name a lane (#25394); candidate resolution is enforced by
@@ -1058,7 +1064,7 @@ let materialize_config
     ( runtimes
     , rt
     , assignments
-    , cfg.librarian_runtime_id
+    , cfg.memory_os_consolidation_runtime_id
     , cfg.structured_judge_runtime_id
     , cfg.cross_verifier_runtime_id
     , cfg.media_failover
@@ -1068,7 +1074,6 @@ let materialize_config
     ensure_hitl_auto_judge_lane
       ~runtimes
       ~default_runtime:rt
-      ~librarian_runtime_id:cfg.librarian_runtime_id
       ~structured_judge_runtime_id:cfg.structured_judge_runtime_id
       ~lanes
       cfg.exact_output_lane_decls
@@ -1122,7 +1127,7 @@ type loaded_state =
   { default_runtime : t option
   ; runtimes : t list
   ; keeper_assignments : (string * string) list
-  ; librarian_runtime_id : string option
+  ; memory_os_consolidation_runtime_id : string option
   ; structured_judge_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
@@ -1135,7 +1140,7 @@ let empty_loaded_state =
   { default_runtime = None
   ; runtimes = []
   ; keeper_assignments = []
-  ; librarian_runtime_id = None
+  ; memory_os_consolidation_runtime_id = None
   ; structured_judge_runtime_id = None
   ; cross_verifier_runtime_id = None
   ; media_failover = []
@@ -1154,7 +1159,7 @@ let set_loaded
     ( runtimes
     , rt
     , assignments
-    , librarian_id
+    , memory_os_consolidation_id
     , structured_judge_id
     , cross_verifier_id
     , media_failover
@@ -1163,7 +1168,7 @@ let set_loaded
     { default_runtime = Some rt
     ; runtimes
     ; keeper_assignments = assignments
-    ; librarian_runtime_id = librarian_id
+    ; memory_os_consolidation_runtime_id = memory_os_consolidation_id
     ; structured_judge_runtime_id = structured_judge_id
     ; cross_verifier_runtime_id = cross_verifier_id
     ; media_failover
@@ -1219,7 +1224,9 @@ let init_default_degraded_report ~config_path =
      | Some report ->
        (match degrade_loaded_for_missing_catalog loaded report with
         | Error msg -> Error (Runtime_config_error msg)
-        | Ok (((active_runtimes, _, _, _, _, _, _, _) as degraded_loaded), degradation) ->
+        | Ok
+            (((active_runtimes, _, _, _, _, _, _, _) as degraded_loaded), degradation)
+          ->
           (match validate_runtime_max_context ~config_path active_runtimes with
            | Error msg -> Error (Runtime_config_error msg)
            | Ok () ->
@@ -1241,7 +1248,6 @@ let effective_exact_output_lane_declarations exact_output_lane_decls =
     ensure_hitl_auto_judge_lane
       ~runtimes:state.runtimes
       ~default_runtime
-      ~librarian_runtime_id:state.librarian_runtime_id
       ~structured_judge_runtime_id:state.structured_judge_runtime_id
       ~lanes:state.lanes
       exact_output_lane_decls
@@ -1279,21 +1285,20 @@ let runtime_id_for_keeper (keeper_name : string) : string option =
 
 let keeper_assignments () = (runtime_state ()).keeper_assignments
 
-(* [runtime].librarian routing for the memory-os librarian. [None] = the
-   librarian inherits each keeper's runtime (legacy). Reads the Atomic ref set by
-   [init_default]; the env override lives in keeper_librarian_runtime. *)
-let librarian_runtime_id () = (runtime_state ()).librarian_runtime_id
+(* Dedicated Memory OS consolidation routing. [None] means the periodic pass
+   inherits [runtime].default. *)
+let memory_os_consolidation_runtime_id () =
+  (runtime_state ()).memory_os_consolidation_runtime_id
+;;
 
 (* [runtime].structured_judge is the explicit runtime.toml SSOT for
    provider-native schema requests. *)
 let structured_judge_runtime_id () = (runtime_state ()).structured_judge_runtime_id
 
 let runtime_id_for_structured_judge () =
-  let state = runtime_state () in
-  match state.structured_judge_runtime_id, state.librarian_runtime_id with
-  | Some id, _ -> id
-  | None, Some id -> id
-  | None, None -> default_runtime_id_or_fail ()
+  match (runtime_state ()).structured_judge_runtime_id with
+  | Some id -> id
+  | None -> default_runtime_id_or_fail ()
 ;;
 
 (* [runtime].cross_verifier routing for the anti-rationalization evaluator.
@@ -1958,10 +1963,6 @@ let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
 
 let set_runtime_default ?runtime_config_path ~runtime_id () =
   set_runtime_scalar ?runtime_config_path ~key:"default" ~runtime_id:(Some runtime_id) ()
-;;
-
-let set_runtime_librarian ?runtime_config_path ~runtime_id () =
-  set_runtime_scalar ?runtime_config_path ~key:"librarian" ~runtime_id ()
 ;;
 
 let set_runtime_structured_judge ?runtime_config_path ~runtime_id () =

@@ -36,8 +36,8 @@ val decide_capability_gate :
     [(label, known_to_oas_catalog)] per runtime binding. Returns [Error] when any
     configured model is unknown to the OAS capability catalog: an unknown model
     resolves to [provider_default] and silently drops thinking/sampling control
-    (corrupted the memory-os librarian for minimax-m3, 2026-06-19). Empty entries
-    are allowed for focused config probes. *)
+    required by the binding. Empty entries are allowed for focused config
+    probes. *)
 
 type missing_catalog_model =
   { runtime_id : string
@@ -111,13 +111,15 @@ val load_list :
      , string )
      result
 (** [load_list ~config_path] parses runtime.toml into [(runtimes, default,
-    keeper_assignments, librarian_runtime_id, structured_judge_runtime_id,
-    cross_verifier_runtime_id, media_failover, lanes)].
+    keeper_assignments, memory_os_consolidation_runtime_id,
+    structured_judge_runtime_id, cross_verifier_runtime_id, media_failover,
+    lanes)].
     Fails ([Error]) if
     [\[runtime\].default] is missing / unresolved, if any
     [\[runtime.assignments\]] target does not resolve to a configured runtime, if
-    [\[runtime\].librarian] / [\[runtime\].structured_judge] /
-    [\[runtime\].cross_verifier] is set to an unresolved id, if any
+    [\[runtime\].memory_os_consolidation] /
+    [\[runtime\].structured_judge] / [\[runtime\].cross_verifier] is set to an
+    unresolved id, if any
     [\[runtime\].media_failover] entry does not resolve, or if any
     [\[runtime.lanes.<id>\]] candidate does not resolve (mirrors default
     validation — no silent fallback for a typo'd id). [keeper_assignments] is the
@@ -216,18 +218,16 @@ val keeper_assignments : unit -> (string * string) list
     Dashboard/operator surfaces use this to expose assignment blast radius
     without parsing TOML independently. *)
 
+val memory_os_consolidation_runtime_id : unit -> string option
+(** [\[runtime\].memory_os_consolidation] runtime id for the periodic Memory OS
+    fact-survival consolidation pass, or [None] when it inherits
+    [\[runtime\].default]. Validated at load so [Some] always resolves to a
+    configured runtime. *)
+
 val cross_verifier_runtime_id : unit -> string option
 (** [\[runtime\].cross_verifier] runtime id for the anti-rationalization
     evaluator, or [None] when unset (the evaluator uses [\[runtime\].default]).
     Validated at load so a [Some] always resolves to a configured runtime. *)
-
-val librarian_runtime_id : unit -> string option
-(** Legacy [\[runtime\].librarian] runtime id for Memory OS LLM summary
-    generation and the consolidation fallback, or [None] when summary generation
-    inherits each keeper's runtime. It does not route post-turn Librarian
-    exact-output extraction. Validated at load so a [Some] always resolves to a
-    configured runtime. [MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID] overrides
-    summary generation only. *)
 
 val structured_judge_runtime_id : unit -> string option
 (** [\[runtime\].structured_judge] runtime id for provider-native
@@ -237,8 +237,7 @@ val structured_judge_runtime_id : unit -> string option
 
 val runtime_id_for_structured_judge : unit -> string
 (** Resolved runtime id for configured structured-output judgment calls.
-    Uses [\[runtime\].structured_judge] first, then the existing
-    [\[runtime\].librarian] migration lane, then [\[runtime\].default]. The final
+    Uses [\[runtime\].structured_judge] first, then [\[runtime\].default]. The
     default path still fails loudly at each caller's schema validation if the
     runtime cannot satisfy provider-native structured output. *)
 
@@ -421,12 +420,6 @@ val set_runtime_default :
   ?runtime_config_path:string -> runtime_id:string -> unit -> (unit, string) result
 (** Persist [\[runtime\]].default through the runtime.toml SSOT writer,
     validate the resulting config, atomically write it, and refresh the
-    in-process runtime cache. *)
-
-val set_runtime_librarian :
-  ?runtime_config_path:string -> runtime_id:string option -> unit -> (unit, string) result
-(** Persist or clear [\[runtime\]].librarian through the runtime.toml SSOT
-    writer, validate the resulting config, atomically write it, and refresh the
     in-process runtime cache. *)
 
 val set_runtime_structured_judge :

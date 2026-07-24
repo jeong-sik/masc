@@ -2,9 +2,8 @@
 
     Mirrors [Keeper_librarian_runtime]: the LLM call is an injectable [complete_fn]
     (default = the real provider) so the read -> prompt -> LLM -> parse -> apply ->
-    write-back loop is driveable with a fake completion in tests. Reuses
-    [Keeper_memory_llm_summary]'s provider/transport helpers. The structure is
-    deterministic; the only judgement is the model's consolidation plan.
+    write-back loop is driveable with a fake completion in tests. The structure
+    is deterministic; the only judgement is the model's consolidation plan.
 
     This is the read/write loop only — the cadence (when to consolidate) is the caller's.
     Like the GC fiber, it stays disabled until a live shadow run validates it. *)
@@ -12,8 +11,8 @@
 module Io = Keeper_memory_os_io
 module Consolidation = Keeper_memory_os_consolidation
 
-(* Same shape as [Keeper_memory_llm_summary.complete_fn]; the LLM call is
-   injectable so the loop is driveable with a fake completion in tests. *)
+(* The LLM call is injectable so the loop is driveable with a fake completion
+   in tests. *)
 type complete_fn = Keeper_provider_subcall.complete_fn
 
 let user_message text : Agent_sdk.Types.message = Agent_sdk.Types.user_msg text

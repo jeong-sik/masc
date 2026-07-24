@@ -81,17 +81,17 @@ let wake_enqueue_counts_of_dispatches dispatches =
 
 (* Resolve the runtime for the Memory OS per-keeper consolidation pass, keeping
    its identity paired with the provider config through the inference boundary.
-   The dedicated consolidation env var takes precedence; otherwise inherit the
-   legacy [runtime].librarian summary runtime. Post-turn Librarian exact-output
-   extraction does not consume either setting. An explicit but unknown runtime
-   ID is logged and falls back to the default so typos in operator config are
-   not silently masked. *)
+   The dedicated consolidation env var takes precedence over the typed TOML
+   route; when neither is set, inherit the default runtime. Post-turn Librarian
+   exact-output extraction does not consume this setting. An explicit but
+   unknown env runtime ID is logged and falls back to the default so typos are
+   not silently masked; TOML ids are validated at config load. *)
 let runtime_for_memory_os_consolidation () =
   let default_runtime () = Runtime.get_default_runtime () in
   let runtime_id =
     match Env_config.KeeperMemoryOs.consolidation_runtime_id () with
     | Some id -> Some id
-    | None -> Runtime.librarian_runtime_id ()
+    | None -> Runtime.memory_os_consolidation_runtime_id ()
   in
   match runtime_id with
   | None -> default_runtime ()

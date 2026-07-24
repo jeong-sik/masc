@@ -173,13 +173,10 @@ type config =
   ; models : model_spec list
   ; bindings : binding list
   ; default_runtime_id : string option
-  ; librarian_runtime_id : string option
-    (** [\[runtime\].librarian] — legacy runtime id for Memory OS LLM summary
-        generation and the consolidation fallback. It does not route post-turn
-        Librarian exact-output extraction. [None] = summary generation inherits
-        each keeper's runtime. Unknown id rejected at load like
-        [\[runtime\].default]; [MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID]
-        overrides summary generation only. *)
+  ; memory_os_consolidation_runtime_id : string option
+    (** [\[runtime\].memory_os_consolidation] — runtime id for the periodic
+        Memory OS fact-survival consolidation pass. [None] inherits
+        [\[runtime\].default]. Unknown ids are rejected at load. *)
   ; structured_judge_runtime_id : string option
     (** [\[runtime\].structured_judge] — runtime id for provider-native
         structured-output judge calls. When set, the model must declare

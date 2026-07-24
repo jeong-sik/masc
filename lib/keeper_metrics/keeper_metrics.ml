@@ -135,8 +135,6 @@ type t =
   | ThinkingPersistFailures
   | CheckpointFailures
   | DecisionAuditRingOverflows
-  | MemoryLlmSummaryOutcomes
-  | MemoryLlmSummaryChainExhausted
   | HitlSummaryOutcomes
   | OasEnvKeyRejections
   | MemoryWriteFailures
@@ -357,9 +355,6 @@ let to_string = function
   | ThinkingPersistFailures -> "masc_keeper_thinking_persist_failures_total"
   | CheckpointFailures -> "masc_keeper_checkpoint_failures_total"
   | DecisionAuditRingOverflows -> "masc_keeper_decision_audit_ring_overflows_total"
-  | MemoryLlmSummaryOutcomes -> "masc_keeper_memory_llm_summary_outcomes_total"
-  | MemoryLlmSummaryChainExhausted ->
-    "masc_keeper_memory_llm_summary_chain_exhausted_total"
   | HitlSummaryOutcomes -> "masc_keeper_hitl_summary_outcomes_total"
   | OasEnvKeyRejections -> "masc_keeper_oas_env_key_rejections_total"
   | MemoryWriteFailures -> "masc_keeper_memory_write_failures_total"

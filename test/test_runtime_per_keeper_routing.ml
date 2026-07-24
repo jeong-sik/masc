@@ -680,28 +680,6 @@ let test_runtime_route_writer_rejects_unknown_default_without_write () =
       (Runtime.get_default_runtime_id ()))
 ;;
 
-let test_runtime_route_writer_clears_optional_librarian () =
-  with_runtime_file (fun path ->
-    (match Runtime.set_runtime_librarian ~runtime_config_path:path ~runtime_id:(Some "openai.gpt") () with
-     | Ok () -> ()
-     | Error msg -> Alcotest.failf "set_runtime_librarian failed: %s" msg);
-    Alcotest.(check (option string))
-      "librarian set"
-      (Some "openai.gpt")
-      (Runtime.librarian_runtime_id ());
-    (match Runtime.set_runtime_librarian ~runtime_config_path:path ~runtime_id:None () with
-     | Ok () -> ()
-     | Error msg -> Alcotest.failf "clear runtime librarian failed: %s" msg);
-    Alcotest.(check bool)
-      "runtime.toml librarian removed"
-      false
-      (string_contains (Fs_compat.load_file path) "librarian");
-    Alcotest.(check (option string))
-      "librarian cache cleared"
-      None
-      (Runtime.librarian_runtime_id ()))
-;;
-
 let test_runtime_route_writer_updates_media_failover () =
   with_runtime_file (fun path ->
     (match
@@ -1898,10 +1876,6 @@ let () =
             "unknown default route is rejected before runtime.toml write"
             `Quick
             test_runtime_route_writer_rejects_unknown_default_without_write
-        ; Alcotest.test_case
-            "dashboard runtime route writer clears optional librarian"
-            `Quick
-            test_runtime_route_writer_clears_optional_librarian
         ; Alcotest.test_case
             "dashboard runtime route writer updates media_failover"
             `Quick

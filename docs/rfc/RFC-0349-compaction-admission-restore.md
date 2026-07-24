@@ -152,7 +152,7 @@ A green unit test alone is not sufficient for §3.3: the starvation only manifes
 
 ## 6. Interaction with the live `structured_judge` drift
 
-Independently of this RFC, the live config had lost `[runtime].structured_judge`, so the compaction summarizer fell back to `[runtime].librarian = glm-coding.glm-5-turbo`, which declares `supports-structured-output = false`. Compaction would therefore have been **rejected with `Summarizer_unavailable` even when requested** — the outcome `keeper_compact_policy.ml` already documents ("could never compact, so their history only grew", #25051).
+Independently of this RFC, the live config had lost `[runtime].structured_judge`, so the compaction summarizer ultimately resolved to `glm-coding.glm-5-turbo`, which declares `supports-structured-output = false`. At the time this happened through an intermediate migration route that has since been retired; current code falls back directly to `[runtime].default`. Compaction would therefore have been **rejected with `Summarizer_unavailable` even when requested** — the outcome `keeper_compact_policy.ml` already documents ("could never compact, so their history only grew", #25051).
 
 That drift is an operational fix (restore `structured_judge = "ollama_cloud_native.minimax-m3-native-structured"`, the only lane declaring `supports-structured-output = true`), not a code change, and it must be in place for this RFC's acceptance to be observable. It is recorded here so the two are not confused: **restoring the summarizer lane does not restore admission, and restoring admission does not restore the summarizer lane.** Both are required.
 

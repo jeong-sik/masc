@@ -21,7 +21,7 @@ let test_build_resolved_serializes_defaults_and_routing () =
           ; is_default = false
           }
         ]
-    ; librarian_runtime_id = Some "openai.gpt-4o"
+    ; memory_os_consolidation_runtime_id = Some "anthropic.sonnet"
     ; structured_judge_runtime_id = Some "openai.gpt-4o"
     ; cross_verifier_runtime_id = None
     ; media_failover = [ "openai.gpt-4o" ]
@@ -49,8 +49,10 @@ let test_build_resolved_serializes_defaults_and_routing () =
   Alcotest.(check bool) "runtime is_default" true
     (member "is_default" first |> Yojson.Safe.Util.to_bool);
   let routing = member "model_routing" json in
-  Alcotest.(check string) "librarian routing" "openai.gpt-4o"
-    (member "librarian_runtime_id" routing |> Yojson.Safe.Util.to_string);
+  Alcotest.(check string)
+    "Memory OS consolidation routing" "anthropic.sonnet"
+    (member "memory_os_consolidation_runtime_id" routing
+     |> Yojson.Safe.Util.to_string);
   Alcotest.(check string) "structured judge routing" "openai.gpt-4o"
     (member "structured_judge_runtime_id" routing |> Yojson.Safe.Util.to_string)
 let test_build_uninitialized_emits_null_not_fabricated_default () =
@@ -61,7 +63,7 @@ let test_build_uninitialized_emits_null_not_fabricated_default () =
     ; default_model = None
     ; default_max_context = None
     ; runtimes = []
-    ; librarian_runtime_id = None
+    ; memory_os_consolidation_runtime_id = None
     ; structured_judge_runtime_id = None
     ; cross_verifier_runtime_id = None
     ; media_failover = []
@@ -76,6 +78,8 @@ let test_build_uninitialized_emits_null_not_fabricated_default () =
   Alcotest.(check int) "runtimes empty" 0
     (member "runtimes" json |> Yojson.Safe.Util.to_list |> List.length);
   let routing = member "model_routing" json in
+  Alcotest.(check bool) "Memory OS consolidation null" true
+    (member "memory_os_consolidation_runtime_id" routing = `Null);
   Alcotest.(check bool) "cross_verifier null" true
     (member "cross_verifier_runtime_id" routing = `Null);
   Alcotest.(check bool) "structured_judge null" true

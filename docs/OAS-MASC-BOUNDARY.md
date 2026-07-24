@@ -170,12 +170,9 @@ OAS  ──does not know──→ MASC
   Provider-error and OAS-run-timeout metric counters follow the same
   projection rule: they retain error kind, runtime, capacity scope, and timeout
   source, but the historical `provider` label value is the neutral `runtime`
-  lane rather than a concrete provider/model identity. The keeper
-  memory-summary outcome counter (`masc_keeper_memory_llm_summary_outcomes_total`)
-  and its warn logs follow the same rule: they keep the historical `provider`
-  label key and the `runtime_id`/`outcome` evidence, but the `provider` value is
-  the neutral `runtime` lane and the warn logs name the runtime rather than the
-  model id.
+  lane rather than a concrete provider/model identity. The dormant keeper
+  memory-bank LLM summary sub-call and its provider-labelled metrics are
+  removed; memory-bank consolidation remains deterministic.
   The typed `Provider_error` contract itself is also runtime-lane scoped:
   variants no longer store provider/model identifiers, and legacy JSON keys
   such as `provider`, `affected`, and `model_name` emit neutral `runtime`

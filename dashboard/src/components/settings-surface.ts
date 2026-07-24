@@ -161,7 +161,7 @@ const SETTINGS_CONTROL_INVENTORY: readonly SettingsControlInventoryItem[] = [
     label: 'Model routing lanes',
     kind: 'live-write',
     source: 'GET /api/v1/dashboard/runtime-defaults',
-    action: 'PATCH /api/v1/runtime/routing for default/librarian/structured_judge/cross_verifier',
+    action: 'PATCH /api/v1/runtime/routing for default/structured_judge/cross_verifier',
   },
   {
     id: 'runtime-media-failover',
@@ -1355,7 +1355,6 @@ export function SettingsSurface() {
   const runtimeConfigPath = runtimeResolved?.config_path ?? null
   const defaultRuntimeId = runtimeResolved?.default_runtime?.id ?? null
   const runtimeCount = runtimeResolved?.runtimes.length ?? 0
-  const librarianRuntime = runtimeDefaults?.model_routing.librarian_runtime_id ?? null
   const structuredJudgeRuntime = runtimeDefaults?.model_routing.structured_judge_runtime_id ?? null
   const crossVerifierRuntime = runtimeDefaults?.model_routing.cross_verifier_runtime_id ?? null
   const mediaFailover = runtimeDefaults?.model_routing.media_failover ?? []
@@ -1606,20 +1605,10 @@ export function SettingsSurface() {
                       }}
                     />
                     <${RuntimeRoutingSelect}
-                      label="Librarian"
-                      hint="[runtime].librarian · 턴 후 에피소드 추출"
-                      value=${librarianRuntime}
-                      fallbackLabel="default runtime"
-                      options=${runtimeSelectOptions}
-                      disabled=${runtimeRoutingDisabled}
-                      testId="runtime-routing-librarian"
-                      onChange=${(runtimeId: string | null) => void applyRuntimeRoutingPatch('librarian', runtimeId)}
-                    />
-                    <${RuntimeRoutingSelect}
                       label="Structured judge"
                       hint="[runtime].structured_judge"
                       value=${structuredJudgeRuntime}
-                      fallbackLabel="librarian/default fallback"
+                      fallbackLabel="default runtime"
                       options=${runtimeSelectOptions}
                       disabled=${runtimeRoutingDisabled}
                       testId="runtime-routing-structured-judge"

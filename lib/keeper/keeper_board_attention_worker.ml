@@ -47,6 +47,7 @@ type rearm_entry =
   { key : contention
   ; mutable next_delay_s : float
   ; mutable pending : rearm_ticket option
+  ; mutable inflight : rearm_ticket option
   }
 
 type rearm_scheduler =
@@ -90,6 +91,19 @@ let find_rearm_entry scheduler contention =
     scheduler.entries
 ;;
 
+let prepare_rearm_ticket_locked scheduler entry =
+  let ticket =
+    { ticket_id = scheduler.next_ticket_id
+    ; delay_s = entry.next_delay_s
+    }
+  in
+  scheduler.next_ticket_id <- scheduler.next_ticket_id + 1;
+  entry.next_delay_s <-
+    Float.min contention_rearm_max_delay_s (entry.next_delay_s *. 2.0);
+  entry.pending <- Some ticket;
+  ticket
+;;
+
 let cancel_rearm_ticket scheduler contention ticket outcome =
   let cancelled =
     Stdlib.Mutex.protect scheduler.mutex (fun () ->
@@ -112,16 +126,18 @@ let wake_result_label = function
   | Wake.Not_registered -> "not_registered"
 ;;
 
-let fire_rearm_ticket scheduler contention ticket ~on_delivery_error =
+let fire_rearm_ticket scheduler contention ticket ~launch_delivery_retry =
   let consumed =
     Stdlib.Mutex.protect scheduler.mutex (fun () ->
       match find_rearm_entry scheduler contention with
       | Some entry ->
-        (match entry.pending with
-         | Some current when Int.equal current.ticket_id ticket.ticket_id ->
+        (match entry.pending, entry.inflight with
+         | Some current, None when Int.equal current.ticket_id ticket.ticket_id ->
            entry.pending <- None;
+           entry.inflight <- Some ticket;
            true
-         | Some _ | None -> false)
+         | Some _, (Some _ | None)
+         | None, (Some _ | None) -> false)
       | None -> false)
   in
   if not consumed
@@ -132,20 +148,41 @@ let fire_rearm_ticket scheduler contention ticket ~on_delivery_error =
       ~delay_s:ticket.delay_s
       ~outcome:"stale_ticket"
   else
-    match scheduler.request () with
-    | Ok wake ->
+    let delivery = scheduler.request () in
+    let completion =
+      Stdlib.Mutex.protect scheduler.mutex (fun () ->
+        match find_rearm_entry scheduler contention with
+        | Some entry ->
+          (match entry.inflight with
+           | Some current when Int.equal current.ticket_id ticket.ticket_id ->
+             entry.inflight <- None;
+             (match delivery with
+              | Ok wake -> `Delivered wake
+              | Error _ ->
+                `Retry (prepare_rearm_ticket_locked scheduler entry))
+           | Some _ | None -> `Suppressed)
+        | None -> `Suppressed)
+    in
+    match completion with
+    | `Delivered wake ->
       log_contention_rearm
         "fired"
         contention
         ~delay_s:ticket.delay_s
         ~outcome:(wake_result_label wake)
-    | Error _ ->
+    | `Retry next_ticket ->
       log_contention_rearm
         "fired"
         contention
         ~delay_s:ticket.delay_s
         ~outcome:"delivery_error";
-      ignore (on_delivery_error () : rearm_schedule)
+      launch_delivery_retry next_ticket
+    | `Suppressed ->
+      log_contention_rearm
+        "cancelled"
+        contention
+        ~delay_s:ticket.delay_s
+        ~outcome:"delivery_reset"
 ;;
 
 let make_contention_rearm_scheduler ~fork ~sleep ~request () =
@@ -158,7 +195,7 @@ let make_contention_rearm_scheduler ~fork ~sleep ~request () =
   }
 ;;
 
-let rec schedule_contention_rearm scheduler contention =
+let schedule_contention_rearm scheduler contention =
   let decision =
     Stdlib.Mutex.protect scheduler.mutex (fun () ->
       let entry =
@@ -169,54 +206,57 @@ let rec schedule_contention_rearm scheduler contention =
             { key = contention
             ; next_delay_s = contention_rearm_base_delay_s
             ; pending = None
+            ; inflight = None
             }
           in
           scheduler.entries <- entry :: scheduler.entries;
           entry
       in
-      match entry.pending with
-      | Some ticket -> `Deduplicated ticket.delay_s
-      | None ->
-        let ticket =
-          { ticket_id = scheduler.next_ticket_id
-          ; delay_s = entry.next_delay_s
-          }
-        in
-        scheduler.next_ticket_id <- scheduler.next_ticket_id + 1;
-        entry.next_delay_s <-
-          Float.min contention_rearm_max_delay_s (entry.next_delay_s *. 2.0);
-        entry.pending <- Some ticket;
-        `Scheduled ticket)
+      match entry.pending, entry.inflight with
+      | Some ticket, (Some _ | None) ->
+        `Deduplicated (ticket.delay_s, "pending")
+      | None, Some ticket ->
+        `Deduplicated (ticket.delay_s, "inflight")
+      | None, None ->
+        `Scheduled (prepare_rearm_ticket_locked scheduler entry))
   in
   match decision with
-  | `Deduplicated delay_s ->
+  | `Deduplicated (delay_s, outcome) ->
     log_contention_rearm
       "deduplicated"
       contention
       ~delay_s
-      ~outcome:"pending";
+      ~outcome;
     Rearm_deduplicated { delay_s }
   | `Scheduled ticket ->
-    (try
-       scheduler.fork (fun () ->
-         (try scheduler.sleep ticket.delay_s with
-          | exn ->
-            cancel_rearm_ticket
-              scheduler
-              contention
-              ticket
-              "sleep_cancelled";
-            raise exn);
-         fire_rearm_ticket
-           scheduler
-           contention
-           ticket
-           ~on_delivery_error:(fun () ->
-             schedule_contention_rearm scheduler contention))
-     with
-     | exn ->
-       cancel_rearm_ticket scheduler contention ticket "fork_cancelled";
-       raise exn);
+    let rec launch ticket =
+      (try
+         scheduler.fork (fun () ->
+           (try scheduler.sleep ticket.delay_s with
+            | exn ->
+              cancel_rearm_ticket
+                scheduler
+                contention
+                ticket
+                "sleep_cancelled";
+              raise exn);
+           fire_rearm_ticket
+             scheduler
+             contention
+             ticket
+             ~launch_delivery_retry:(fun next_ticket ->
+               launch next_ticket;
+               log_contention_rearm
+                 "scheduled"
+                 contention
+                 ~delay_s:next_ticket.delay_s
+                 ~outcome:"delivery_retry"))
+       with
+       | exn ->
+         cancel_rearm_ticket scheduler contention ticket "fork_cancelled";
+         raise exn)
+    in
+    launch ticket;
     log_contention_rearm
       "scheduled"
       contention
@@ -241,14 +281,15 @@ let reset_contention_rearms scheduler ~keep =
   in
   List.iter
     (fun entry ->
-       match entry.pending with
-       | Some ticket ->
+       match entry.pending, entry.inflight with
+       | Some ticket, (Some _ | None)
+       | None, Some ticket ->
          log_contention_rearm
            "cancelled"
            entry.key
            ~delay_s:ticket.delay_s
            ~outcome:"reset"
-       | None ->
+       | None, None ->
          log_contention_rearm
            "reset"
            entry.key

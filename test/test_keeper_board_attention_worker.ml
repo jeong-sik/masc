@@ -742,14 +742,58 @@ let test_contention_wake_callback_is_outside_scheduler_lock () =
   in
   first_task ();
   (match !reentrant_schedule with
-   | Some (W.Rearm_scheduled { delay_s }) ->
+   | Some (W.Rearm_deduplicated { delay_s }) ->
      Alcotest.(check (float 0.0001))
-       "reentrant schedule advances backoff"
-       0.1
+       "inflight ticket deduplicates reentrant schedule"
+       0.05
        delay_s
-   | Some (W.Rearm_deduplicated _) | None ->
-     Alcotest.fail "wake callback ran before ticket consumption or outside progress");
-  Alcotest.(check int) "reentrant callback queued one task" 1 (List.length !tasks)
+   | Some (W.Rearm_scheduled _) | None ->
+     Alcotest.fail "wake callback did not observe the inflight ticket");
+  Alcotest.(check int) "reentrant callback queued no duplicate task" 0 (List.length !tasks)
+;;
+
+let test_reset_during_wake_error_suppresses_old_generation_rearm () =
+  let contention : W.contention =
+    { keeper_name = "sangsu"
+    ; partition_id = "partition-reset-during-wake"
+    ; generation = P.Generation.initial
+    }
+  in
+  let tasks = ref [] in
+  let request_calls = ref 0 in
+  let scheduler_ref : W.For_testing.rearm_scheduler option ref = ref None in
+  let scheduler =
+    W.For_testing.make_contention_rearm_scheduler
+      ~fork:(fun task -> tasks := !tasks @ [ task ])
+      ~sleep:(fun _delay -> ())
+      ~request:(fun () ->
+        incr request_calls;
+        let scheduler =
+          match !scheduler_ref with
+          | Some scheduler -> scheduler
+          | None -> Alcotest.fail "reset-race scheduler was not installed"
+        in
+        W.For_testing.reset_contention_rearms scheduler ~keep:None;
+        Error "injected wake error after reset")
+      ()
+  in
+  scheduler_ref := Some scheduler;
+  ignore
+    (W.For_testing.schedule_contention_rearm scheduler contention
+     : W.rearm_schedule);
+  let first_task =
+    match !tasks with
+    | [ task ] ->
+      tasks := [];
+      task
+    | [] | _ :: _ :: _ -> Alcotest.fail "reset-race fixture task drifted"
+  in
+  first_task ();
+  Alcotest.(check int) "one reset-raced wake delivery" 1 !request_calls;
+  Alcotest.(check int)
+    "reset prevents old generation ticket resurrection"
+    0
+    (List.length !tasks)
 ;;
 
 let test_execution_error_preserves_bound_progress_without_hot_retry () =
@@ -1949,6 +1993,10 @@ let () =
             "wake callback runs outside scheduler lock"
             `Quick
             test_contention_wake_callback_is_outside_scheduler_lock
+        ; Alcotest.test_case
+            "reset during wake error suppresses old generation rearm"
+            `Quick
+            test_reset_during_wake_error_suppresses_old_generation_rearm
         ; Alcotest.test_case
             "execution error preserves bound progress"
             `Quick

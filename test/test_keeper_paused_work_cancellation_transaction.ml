@@ -812,7 +812,18 @@ let test_transcript_corruption_projection_failure_recovers () =
        Alcotest.(check int)
          "retry retires transcript transition"
          0
-         (List.length outbox))
+         (List.length outbox);
+       let summary =
+         Keeper_reaction_ledger.summary_for_keeper
+           ~base_path
+           ~keeper_name
+           ~limit:20
+       in
+       let open Yojson.Safe.Util in
+       Alcotest.(check int)
+         "stable transcript escalation id deduplicates crash replay"
+         1
+         (summary |> member "event_queue_escalation_count" |> to_int))
 ;;
 
 let assert_transcript_corruption_pause_failure_preserves_lease ~persist_pause =

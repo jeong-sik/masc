@@ -48,6 +48,49 @@ if [[ "${qualified_call_count}" != "1" ]]; then
   fail "canonical reaction ledger must contain exactly one qualified retirement call"
 fi
 
+persistence_source=lib/keeper_runtime/keeper_event_queue_persistence.ml
+persistence_interface=lib/keeper_runtime/keeper_event_queue_persistence.mli
+for expected_single_reference in "${persistence_source}" "${persistence_interface}"; do
+  reference_count="$({
+    rg -o --fixed-strings 'mark_transition_projected_result' \
+      "${expected_single_reference}" || true
+  } | wc -l | tr -d '[:space:]')"
+  if [[ "${reference_count}" != "1" ]]; then
+    fail "${expected_single_reference} must contain exactly one retirement definition/declaration"
+  fi
+done
+
+projector_symbol='project_event_queue_transition_outbox_result'
+projector_actual="$({
+  rg -l --fixed-strings \
+    "${projector_symbol}" \
+    lib \
+    --glob '*.ml' \
+    --glob '*.mli' || true
+} | LC_ALL=C sort)"
+projector_expected="$(printf '%s\n' \
+  lib/keeper/keeper_event_queue_recovery.ml \
+  lib/keeper/keeper_reaction_ledger.ml \
+  lib/keeper/keeper_reaction_ledger.mli \
+  | LC_ALL=C sort)"
+if [[ "${projector_actual}" != "${projector_expected}" ]]; then
+  printf '%s\n' \
+    "expected canonical projector references:" \
+    "${projector_expected}" \
+    "actual references:" \
+    "${projector_actual}" >&2
+  fail "production callers must enter the canonical ledger projector through recovery"
+fi
+
+recovery_projector_call_count="$({
+  rg -o --fixed-strings \
+    "Keeper_reaction_ledger.${projector_symbol}" \
+    lib/keeper/keeper_event_queue_recovery.ml || true
+} | wc -l | tr -d '[:space:]')"
+if [[ "${recovery_projector_call_count}" != "1" ]]; then
+  fail "recovery must contain exactly one qualified canonical ledger projector call"
+fi
+
 if ! rg \
   --quiet \
   --multiline \

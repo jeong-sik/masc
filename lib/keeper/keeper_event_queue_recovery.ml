@@ -27,13 +27,24 @@ type owner_failure =
   ; error : projection_error
   }
 
+type owner_budget_error = Invalid_owner_budget of int
+type owner_budget = Owner_budget of int
+type sweep_cursor = Sweep_cursor of string option
+
 type sweep_report =
   { discovered : int
+  ; processed : int
+  ; deferred : int
   ; no_pending : int
   ; converged : int
   ; claim_busy : int
   ; failures : owner_failure list
   ; discovery_error : discovery_error option
+  }
+
+type sweep_page =
+  { report : sweep_report
+  ; next_cursor : sweep_cursor
   }
 
 let projection_error_to_string = function
@@ -53,6 +64,20 @@ let projection_error_to_string = function
 let discovery_error_to_string (Snapshot_discovery_failed detail) =
   "event queue snapshot discovery failed: " ^ detail
 ;;
+
+let owner_budget_error_to_string (Invalid_owner_budget max_owners) =
+  Printf.sprintf
+    "event queue transition projection owner budget must be positive (got %d)"
+    max_owners
+;;
+
+let owner_budget ~max_owners =
+  if max_owners > 0
+  then Ok (Owner_budget max_owners)
+  else Error (Invalid_owner_budget max_owners)
+;;
+
+let initial_sweep_cursor = Sweep_cursor None
 
 let owner_claims = Owner_claims.create 16
 let owner_claims_mutex = Mutex.create ()
@@ -123,19 +148,54 @@ let project_resolved_owner owner =
   | Owner_claim_acquired result -> result
 ;;
 
-let project_owner_result ~base_path ~keeper_name =
+let project_owner_result_inline ~base_path ~keeper_name =
   match Persistence.resolve_owner_identity ~base_path ~keeper_name with
   | Error error -> Error (Owner_unavailable error)
   | Ok owner -> project_resolved_owner owner
 ;;
 
-let project_discovered ~base_path =
-  let discovery =
-    Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
-      ~base_path
+let project_owner_result ~base_path ~keeper_name =
+  Executor_pool_ref.submit_or_inline (fun () ->
+    project_owner_result_inline ~base_path ~keeper_name)
+;;
+
+let ordered_owner_page ~budget:(Owner_budget max_owners) ~cursor:(Sweep_cursor cursor) names =
+  let names = List.sort_uniq String.compare names in
+  let ordered =
+    match cursor with
+    | None -> names
+    | Some after ->
+      let later, earlier =
+        List.partition (fun keeper_name -> String.compare keeper_name after > 0) names
+      in
+      later @ earlier
+  in
+  let rec take remaining acc = function
+    | _ when remaining = 0 -> List.rev acc
+    | [] -> List.rev acc
+    | keeper_name :: rest -> take (remaining - 1) (keeper_name :: acc) rest
+  in
+  let selected = take max_owners [] ordered in
+  let deferred = List.length names - List.length selected in
+  let next_cursor =
+    if deferred = 0
+    then initial_sweep_cursor
+    else
+      match List.rev selected with
+      | [] -> initial_sweep_cursor
+      | keeper_name :: _ -> Sweep_cursor (Some keeper_name)
+  in
+  names, selected, deferred, next_cursor
+;;
+
+let project_discovery_inline ~base_path ~budget ~cursor discovery =
+  let names, selected, deferred, next_cursor =
+    ordered_owner_page ~budget ~cursor discovery.keeper_names
   in
   let initial =
-    { discovered = List.length discovery.keeper_names
+    { discovered = List.length names
+    ; processed = List.length selected
+    ; deferred
     ; no_pending = 0
     ; converged = 0
     ; claim_busy = 0
@@ -149,7 +209,7 @@ let project_discovered ~base_path =
   let report =
     List.fold_left
       (fun report keeper_name ->
-         match project_owner_result ~base_path ~keeper_name with
+         match project_owner_result_inline ~base_path ~keeper_name with
          | Ok No_pending_transition ->
            { report with no_pending = report.no_pending + 1 }
          | Ok Transition_converged ->
@@ -161,9 +221,33 @@ let project_discovered ~base_path =
              failures = { keeper_name; error } :: report.failures
            })
       initial
-      discovery.keeper_names
+      selected
   in
-  { report with failures = List.rev report.failures }
+  { report = { report with failures = List.rev report.failures }; next_cursor }
+;;
+
+let project_discovered_bounded ~base_path ~budget ~cursor =
+  Executor_pool_ref.submit_or_inline (fun () ->
+    let discovery =
+      Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
+        ~base_path
+    in
+    project_discovery_inline ~base_path ~budget ~cursor discovery)
+;;
+
+let project_discovered ~base_path =
+  Executor_pool_ref.submit_or_inline (fun () ->
+    let discovery =
+      Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
+        ~base_path
+    in
+    let budget = Owner_budget (max 1 (List.length discovery.keeper_names)) in
+    (project_discovery_inline
+       ~base_path
+       ~budget
+       ~cursor:initial_sweep_cursor
+       discovery)
+      .report)
 ;;
 
 module For_testing = struct
@@ -178,5 +262,16 @@ module For_testing = struct
       (match with_owner_claim owner f with
        | Owner_claim_busy -> Ok Claim_already_held
        | Owner_claim_acquired value -> Ok (Claim_acquired value))
+  ;;
+
+  let pending_transition_count_result ~base_path ~keeper_name =
+    match Persistence.resolve_owner_identity ~base_path ~keeper_name with
+    | Error error -> Error (Owner_unavailable error)
+    | Ok owner ->
+      let base_path = Persistence.owner_identity_base_path owner in
+      let keeper_name = Persistence.owner_identity_keeper_name owner in
+      (match Persistence.transition_outbox_result ~base_path ~keeper_name with
+       | Ok entries -> Ok (List.length entries)
+       | Error detail -> Error (Outbox_unavailable detail))
   ;;
 end

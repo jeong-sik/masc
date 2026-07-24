@@ -88,8 +88,14 @@ let transition_outbox_projection_source_to_string = function
   | Maintenance_projection -> "maintenance"
 ;;
 
-let project_keeper_transition_outboxes ~source ~base_path =
-  let report = Keeper_event_queue_recovery.project_discovered ~base_path in
+let project_keeper_transition_outboxes ~source ~base_path ~budget ~cursor =
+  let page =
+    Keeper_event_queue_recovery.project_discovered_bounded
+      ~base_path
+      ~budget
+      ~cursor
+  in
+  let report = page.report in
   let source_label = transition_outbox_projection_source_to_string source in
   Option.iter
     (fun error ->
@@ -118,14 +124,17 @@ let project_keeper_transition_outboxes ~source ~base_path =
   if should_log
   then
     Log.Server.info
-      "keeper transition outbox %s discovered=%d converged=%d no_pending=%d \
-       claim_busy=%d failures=%d"
+      "keeper transition outbox %s discovered=%d processed=%d deferred=%d \
+       converged=%d no_pending=%d claim_busy=%d failures=%d"
       source_label
       report.discovered
+      report.processed
+      report.deferred
       report.converged
       report.no_pending
       report.claim_busy
-      (List.length report.failures)
+      (List.length report.failures);
+  page.next_cursor
 ;;
 
 (* Run one consolidation pass over every keeper that currently has a fact store.
@@ -541,9 +550,33 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     (fun () ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     let last_prune = ref (Unix.gettimeofday ()) in
-    project_keeper_transition_outboxes
-      ~source:Startup_projection
-      ~base_path;
+    let transition_projection_cursor =
+      ref Keeper_event_queue_recovery.initial_sweep_cursor
+    in
+    let transition_projection_budget =
+      match
+        Keeper_event_queue_recovery.owner_budget
+          ~max_owners:(Keeper_config.keeper_batch_limit ())
+      with
+      | Ok budget -> Some budget
+      | Error error ->
+        Log.Server.error
+          "keeper transition outbox maintenance disabled: %s"
+          (Keeper_event_queue_recovery.owner_budget_error_to_string error);
+        None
+    in
+    let project_transition_outboxes source =
+      Option.iter
+        (fun budget ->
+           transition_projection_cursor :=
+             project_keeper_transition_outboxes
+               ~source
+               ~base_path
+               ~budget
+               ~cursor:!transition_projection_cursor)
+        transition_projection_budget
+    in
+    project_transition_outboxes Startup_projection;
     (* Restore MCP transport sessions from disk before first cleanup cycle.
        Grace period timestamps survive server restart, so recently-active
        clients can reconnect without "Unknown Mcp-Session-Id" errors. *)
@@ -552,9 +585,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
        Log.Server.warn "session restore failed: %s" (Printexc.to_string exn));
     let rec loop () =
       Eio.Time.sleep clock Env_config_runtime.InternalTimers.janitor_interval_sec;
-      project_keeper_transition_outboxes
-        ~source:Maintenance_projection
-        ~base_path;
+      project_transition_outboxes Maintenance_projection;
       (try
          let stale_sids = Sse.cleanup_stale () in
          List.iter Server_routes_http_common.stop_sse_session stale_sids;

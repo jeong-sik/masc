@@ -256,6 +256,17 @@ val run_heartbeat_loop :
   wakeup:bool Atomic.t -> unit
 
 module For_testing : sig
+  type transition_projection_gate =
+    | Projection_ready_for_cycle
+    | Projection_deferred_nonfailure
+    | Projection_failed_for_cycle of Keeper_event_queue_recovery.projection_error
+
+  val classify_transition_projection :
+    ( Keeper_event_queue_recovery.projection_outcome
+    , Keeper_event_queue_recovery.projection_error )
+    result ->
+    transition_projection_gate
+
   type transcript_corruption_commit =
     | Transcript_pause_persisted
     | Transcript_pause_and_settlement_persisted

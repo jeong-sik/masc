@@ -121,6 +121,14 @@ type keepalive_turn_outcome = {
 
 exception Event_queue_settlement_failed of string
 
+type transition_projection_gate =
+  | Projection_ready_for_cycle
+  | Projection_deferred_nonfailure
+  | Projection_failed_for_cycle of Keeper_event_queue_recovery.projection_error
+
+exception Event_queue_projection_deferred
+exception Event_queue_projection_failed of Keeper_event_queue_recovery.projection_error
+
 type board_attention_settlement_outcome =
   | Board_attention_settled of
       Keeper_board_attention_worker.settlement
@@ -580,20 +588,13 @@ let project_transition_outbox ~base_path ~keeper_name =
     ~keeper_name
 ;;
 
-let require_transition_outbox_projection ~base_path ~keeper_name =
-  match project_transition_outbox ~base_path ~keeper_name with
+let classify_transition_projection = function
   | Ok
       ( Keeper_event_queue_recovery.No_pending_transition
       | Keeper_event_queue_recovery.Transition_converged ) ->
-    Ok ()
-  | Ok Keeper_event_queue_recovery.Claim_busy ->
-    Error
-      (Printf.sprintf
-         "event queue transition projection deferred because the canonical owner \
-          claim is busy keeper=%s; the next Keeper cycle will retry"
-         keeper_name)
-  | Error error ->
-    Error (Keeper_event_queue_recovery.projection_error_to_string error)
+    Projection_ready_for_cycle
+  | Ok Keeper_event_queue_recovery.Claim_busy -> Projection_deferred_nonfailure
+  | Error error -> Projection_failed_for_cycle error
 ;;
 
 let exact_terminal_source = function
@@ -899,6 +900,12 @@ module For_testing = struct
     | Transcript_pause_settlement_failed of string
 
   let exact_execution_guard = exact_execution_guard
+  type nonrec transition_projection_gate = transition_projection_gate =
+    | Projection_ready_for_cycle
+    | Projection_deferred_nonfailure
+    | Projection_failed_for_cycle of Keeper_event_queue_recovery.projection_error
+
+  let classify_transition_projection = classify_transition_projection
   let commit_transcript_corruption = commit_transcript_corruption
   let commit_transcript_corruption_and_project =
     commit_transcript_corruption_and_project
@@ -1065,12 +1072,21 @@ let run_keepalive_unified_turn
     in
     try
       (match
-         require_transition_outbox_projection
-           ~base_path:ctx.config.base_path
-           ~keeper_name:meta_after_triage.name
+         classify_transition_projection
+           (project_transition_outbox
+              ~base_path:ctx.config.base_path
+              ~keeper_name:meta_after_triage.name)
        with
-       | Ok () -> ()
-       | Error message -> raise (Event_queue_settlement_failed message));
+       | Projection_ready_for_cycle -> ()
+       | Projection_deferred_nonfailure ->
+         Log.Keeper.info
+           ~keeper_name:meta_after_triage.name
+           "event queue transition projection deferred because the canonical owner \
+            claim is busy; this keepalive cycle performs no dispatch and records no \
+            failure";
+         raise Event_queue_projection_deferred
+       | Projection_failed_for_cycle error ->
+         raise (Event_queue_projection_failed error));
       (match
          settle_board_attention_on_owner_lane
            ~base_path:ctx.config.base_path
@@ -1411,9 +1427,21 @@ let run_keepalive_unified_turn
                      ~keeper_name:meta_after_triage.name)
                  ?settle
                  ~project_transition_outbox:(fun () ->
-                   require_transition_outbox_projection
-                     ~base_path:ctx.config.base_path
-                     ~keeper_name:meta_after_triage.name)
+                   match
+                     classify_transition_projection
+                       (project_transition_outbox
+                          ~base_path:ctx.config.base_path
+                          ~keeper_name:meta_after_triage.name)
+                   with
+                   | Projection_ready_for_cycle -> Ok ()
+                   | Projection_deferred_nonfailure ->
+                     Log.Keeper.info
+                       ~keeper_name:meta_after_triage.name
+                       "transcript corruption transition projection deferred after \
+                        durable settlement because the canonical owner claim is busy; \
+                        the outbox remains durable";
+                     Ok ()
+                   | Projection_failed_for_cycle error -> Error error)
                  ()
              in
              (match committed with
@@ -1433,12 +1461,13 @@ let run_keepalive_unified_turn
                 record_settlement_failure message);
              (match projection with
               | Ok () -> ()
-              | Error message ->
+              | Error error ->
                 Log.Keeper.error
                   ~keeper_name:meta_after_triage.name
                   "transcript corruption transition projection failed after durable settlement: %s"
-                  message;
-                record_settlement_failure message);
+                  (Keeper_event_queue_recovery.projection_error_to_string error);
+                record_settlement_failure
+                  (Keeper_event_queue_recovery.projection_error_to_string error));
              Some committed
            | Keeper_unified_turn.Follow_failure_route
            | Keeper_unified_turn.Follow_failure_route_after_no_compaction _
@@ -1597,12 +1626,19 @@ let run_keepalive_unified_turn
               | Keeper_registry_event_queue.Already_settled _ ) ->
             lease_settled := true;
             (match
-               require_transition_outbox_projection
-                 ~base_path:ctx.config.base_path
-                 ~keeper_name:meta_after_triage.name
+               classify_transition_projection
+                 (project_transition_outbox
+                    ~base_path:ctx.config.base_path
+                    ~keeper_name:meta_after_triage.name)
              with
-             | Error message -> raise (Event_queue_settlement_failed message)
-             | Ok () -> ());
+             | Projection_ready_for_cycle -> ()
+             | Projection_deferred_nonfailure ->
+               Log.Keeper.info
+                 ~keeper_name:meta_after_triage.name
+                 "event queue transition projection deferred after durable settlement \
+                  because the canonical owner claim is busy; the outbox remains durable"
+             | Projection_failed_for_cycle error ->
+               raise (Event_queue_projection_failed error));
             check_cancellation_after_exact_terminal_settlement settlement;
             if settlement_is_ack settlement
             then
@@ -1620,6 +1656,16 @@ let run_keepalive_unified_turn
             check_cancellation_after_exact_terminal_settlement settlement));
       { meta = meta_after_cycle; cycle_crashed = !settlement_failed }
     with
+    | Event_queue_projection_deferred ->
+      { meta = meta_after_triage; cycle_crashed = false }
+    | Event_queue_projection_failed error ->
+      if not !transcript_corruption_detected
+      then requeue_unsettled Keeper_registry_event_queue.Cycle_crashed;
+      record_crashed_cycle_failure
+        ~base_path:ctx.config.base_path
+        ~keeper_name:meta_after_triage.name
+        (Failure (Keeper_event_queue_recovery.projection_error_to_string error));
+      { meta = meta_after_triage; cycle_crashed = true }
     | Eio.Cancel.Cancelled _ as e ->
       let backtrace = Printexc.get_raw_backtrace () in
       if

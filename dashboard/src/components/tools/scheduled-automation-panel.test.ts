@@ -57,6 +57,32 @@ async function flush(): Promise<void> {
   }
 }
 
+describe('filterMatches', () => {
+  it('classifies every terminal status via the shared SCHED_TERMINAL SSOT set', () => {
+    expect(filterMatches('terminal', request({ schedule_id: 't1', status: 'succeeded' }))).toBe(true)
+    expect(filterMatches('terminal', request({ schedule_id: 't2', status: 'failed' }))).toBe(true)
+    expect(filterMatches('terminal', request({ schedule_id: 't3', status: 'cancelled' }))).toBe(true)
+    expect(filterMatches('terminal', request({ schedule_id: 't4', status: 'expired' }))).toBe(true)
+  })
+
+  it('keeps non-terminal statuses out of the terminal filter', () => {
+    expect(filterMatches('terminal', request({ schedule_id: 'n1', status: 'running' }))).toBe(false)
+    expect(filterMatches('terminal', request({ schedule_id: 'n2', status: 'scheduled' }))).toBe(false)
+    expect(filterMatches('terminal', request({ schedule_id: 'n3', status: 'due' }))).toBe(false)
+  })
+
+  it('matches each non-terminal filter to its own status', () => {
+    expect(filterMatches('running', request({ schedule_id: 'r1', status: 'running' }))).toBe(true)
+    expect(filterMatches('scheduled', request({ schedule_id: 'r2', status: 'scheduled' }))).toBe(true)
+    expect(filterMatches('due', request({ schedule_id: 'r3', status: 'due' }))).toBe(true)
+  })
+
+  it('treats the "all" filter as universal', () => {
+    expect(filterMatches('all', request({ schedule_id: 'a1', status: 'failed' }))).toBe(true)
+    expect(filterMatches('all', request({ schedule_id: 'a2', status: 'running' }))).toBe(true)
+  })
+})
+
 describe('selectWakeSignals', () => {
   it('returns an empty list for missing automation', () => {
     expect(selectWakeSignals(null)).toEqual([])

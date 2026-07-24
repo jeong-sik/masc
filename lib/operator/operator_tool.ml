@@ -447,6 +447,8 @@ let board_attention_quarantine_requeue_result
     in
     (match result with
      | Ok report ->
+       Operator_control.invalidate_snapshot_cache ();
+       Dashboard_projection_cache.invalidate_snapshot_json ~config:ctx.config;
        Tool_result.make_ok
          ~tool_name
          ~start_time

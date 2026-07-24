@@ -1974,21 +1974,42 @@ let apply_judgment_and_deliver ~base_path ~keeper_name ~candidate_id ~judgment =
     | None -> Error ("Board attention candidate not found: " ^ candidate_id)
   in
   let* judged_candidate =
-    match candidate.status with
-    | Pending _ -> record_judgment ~base_path candidate judgment
-    | Judged judged when same_judgment judged.judgment judgment -> Ok candidate
-    | Consumed consumed when same_judgment consumed.judgment judgment -> Ok candidate
-    | Judged _ | Consumed _ ->
+    match resumable_status candidate.status with
+    | Some (Resumable_pending _) ->
+      record_judgment ~base_path candidate judgment
+    | Some (Resumable_judged judged)
+      when same_judgment judged.judgment judgment ->
+      Ok candidate
+    | Some (Resumable_consumed consumed)
+      when same_judgment consumed.judgment judgment ->
+      Ok candidate
+    | Some (Resumable_judged _ | Resumable_consumed _) ->
       Error ("Board attention candidate judgment conflicts with worker result: " ^ candidate_id)
+    | None ->
+      Error
+        ("Quarantined or requeue-requested Board attention candidate cannot be settled: "
+         ^ candidate_id)
   in
-  match judged_candidate.status with
-  | Consumed _ -> Ok judged_candidate
-  | Pending _ ->
+  match resumable_status judged_candidate.status with
+  | Some (Resumable_consumed _) ->
+    normalize_requeued_consumed ~base_path ~keeper_name ~candidate_id
+  | Some (Resumable_pending _) ->
     Error ("Board attention candidate remained Pending after judgment commit: " ^ candidate_id)
-  | Judged judged ->
+  | Some (Resumable_judged judged) ->
     let* delivered = consume_judged ~base_path judged_candidate judged in
-    (match delivered.status with
-     | Consumed _ -> Ok delivered
-     | Pending _ | Judged _ ->
-       Error ("Board attention candidate delivery did not reach Consumed: " ^ candidate_id))
+    (match resumable_status delivered.status with
+     | Some (Resumable_consumed _) ->
+       normalize_requeued_consumed ~base_path ~keeper_name ~candidate_id
+     | Some (Resumable_pending _ | Resumable_judged _) ->
+       Error
+         ("Board attention candidate delivery did not reach Consumed: "
+          ^ candidate_id)
+     | None ->
+       Error
+         ("Board attention candidate became quarantined during delivery: "
+          ^ candidate_id))
+  | None ->
+    Error
+      ("Quarantined or requeue-requested Board attention candidate cannot be settled: "
+       ^ candidate_id)
 ;;

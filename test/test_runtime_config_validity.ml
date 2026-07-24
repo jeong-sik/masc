@@ -2428,17 +2428,6 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
         lane_id
          (Runtime_exact_output_registry.lane_resolution_error_to_string error)
   in
-  let require_lane_unconfigured label ~lane_id registry =
-    match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
-    | Error (Runtime_exact_output_registry.Exact_lane_unconfigured { lane_id = actual }) ->
-      check string label lane_id actual
-    | Error error ->
-      failf
-        "%s returned the wrong typed error: %s"
-        label
-        (Runtime_exact_output_registry.lane_resolution_error_to_string error)
-    | Ok _ -> failf "%s unexpectedly resolved" label
-  in
   let lane_is_unconfigured ~lane_id registry =
     match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
     | Error

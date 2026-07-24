@@ -8,7 +8,7 @@
     - [Full]: developer / internal MCP surface (full catalog).
     - [Managed_agent]: spawned agent surface (SDK contract +
       passthrough subset).
-    - [Operator_remote]: control-plane surface (6 operator tools).
+    - [Operator_remote]: control-plane surface (7 operator tools).
 
     Pagination contract: callers consume {!parse_cursor_only_params}
     / {!requested_tool_list_params} as concrete records — record

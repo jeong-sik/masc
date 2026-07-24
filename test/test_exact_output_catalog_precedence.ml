@@ -657,15 +657,22 @@ let test_repo_seed_board_attention_lane_admits () =
        "repo Board attention lane has configured slots"
        true
        (lane.slot_ids <> []));
-  let credential_env = "ZAI_API_KEY_SB" in
-  let previous_credential = Sys.getenv_opt credential_env in
+  let credential_envs = [ "ZAI_API_KEY_SB"; "DEEPSEEK_API_KEY" ] in
+  let previous_credentials =
+    List.map
+      (fun credential_env -> credential_env, Sys.getenv_opt credential_env)
+      credential_envs
+  in
   Fun.protect
     ~finally:(fun () ->
-      Unix.putenv
-        credential_env
-        (Option.value ~default:"" previous_credential))
+      List.iter
+        (fun (credential_env, previous_credential) ->
+           Unix.putenv
+             credential_env
+             (Option.value ~default:"" previous_credential))
+        previous_credentials)
     (fun () ->
-       Unix.putenv credential_env "";
+       List.iter (fun credential_env -> Unix.putenv credential_env "") credential_envs;
        let unavailable_message =
          try
            Server_runtime_bootstrap.For_testing.configure_exact_output_registry
@@ -684,7 +691,10 @@ let test_repo_seed_board_attention_lane_admits () =
          "credential failure gives provider-neutral credential guidance"
          true
          (String_util.contains_substring unavailable_message "credential");
-       Unix.putenv credential_env "exact-output-seed-test";
+       List.iter
+         (fun credential_env ->
+            Unix.putenv credential_env "exact-output-seed-test")
+         credential_envs;
        let require_published_seed label =
          Server_runtime_bootstrap.For_testing.configure_exact_output_registry
            ~config_root

@@ -586,7 +586,10 @@ let handle_keeper_board_attention_quarantine_recovery_post
          |> Command.audit_json
        in
        (match result with
-        | Ok report -> respond (Command.success_json ~audit command report)
+        | Ok report ->
+          Operator_control.invalidate_snapshot_cache ();
+          Dashboard_projection_cache.invalidate_snapshot_json ~config;
+          respond (Command.success_json ~audit command report)
         | Error error ->
           respond
             ~status:(keeper_board_attention_quarantine_error_status error)

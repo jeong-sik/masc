@@ -837,7 +837,7 @@ let test_unexpected_exception_is_terminal_without_hot_retry () =
   Alcotest.(check int) "one exceptional execution" 1 !calls
 ;;
 
-let test_manual_quarantine_requeue_resumes_intermediate_and_is_idempotent () =
+let test_requested_blocked_recovery_and_sequential_cas_converge () =
   with_temp_base "board-attention-worker-manual-requeue" @@ fun base_path ->
   let persisted = record ~base_path (candidate ()) in
   let execute ~before_dispatch:_ ~before_advance:_ _candidate =
@@ -894,15 +894,21 @@ let test_manual_quarantine_requeue_resumes_intermediate_and_is_idempotent () =
       Alcotest.failf "%s: %s" label (Q.execution_error_label error)
   in
   let report = run "resume requeue-requested" in
-  (match report.candidate.status, report.partition.state with
-   | A.Quarantine { phase = A.Requeued _; _ }, P.Ready -> ()
-   | _ -> Alcotest.fail "manual recovery did not reach Requeued/Ready");
+  let recovered_quarantine_id =
+    match report.candidate.status, report.partition.state with
+    | A.Quarantine { quarantine; phase = A.Requeued _ }, P.Ready ->
+      quarantine.quarantine_id
+    | _ -> Alcotest.fail "manual recovery did not reach Requeued/Ready"
+  in
   let replay = run "idempotent replay" in
-  match replay.candidate.status with
+  match replay.candidate.status, replay.partition.state with
   | A.Quarantine
-      { quarantine = replayed; phase = A.Requeued _ }
-    when String.equal replayed.quarantine_id quarantine.quarantine_id ->
-    ()
+      { quarantine = replayed; phase = A.Requeued _ },
+    P.Ready ->
+    Alcotest.(check string)
+      "two sequential CAS commands converge on one quarantine generation"
+      recovered_quarantine_id
+      replayed.quarantine_id
   | _ -> Alcotest.fail "manual recovery replay lost its generation marker"
 ;;
 
@@ -1021,17 +1027,34 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
   check_json_string "candidate_id" persisted.candidate_id;
   check_json_string "quarantine_id" quarantine.quarantine_id;
   check_json_string "phase" "requeued";
-  let ready =
-    ok
-      "commit partition Ready after candidate authorization"
-      (P.requeue_blocked
-         ~base_path
-         ~partition:(load_one_partition ~base_path))
+  let request : Q.request =
+    { candidate_id = persisted.candidate_id
+    ; expected_quarantine_id = quarantine.quarantine_id
+    ; decision = Q.Acknowledge_and_requeue
+    }
   in
-  (match ready.write_outcome with
-   | P.Fsync_completed -> ()
-   | P.Visible_sync_unconfirmed detail ->
-     Alcotest.failf "authorized Ready commit was not fsynced: %s" detail);
+  let command =
+    match
+      Q.make
+        ~keeper_name:"sangsu"
+        ~raw_partition_id:blocked.partition_id
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "requeued command rejected: %s" (Q.input_error_to_string error)
+  in
+  let recovered =
+    match Q.execute ~now:32.0 ~base_path command with
+    | Ok report -> report
+    | Error error ->
+      Alcotest.failf
+        "Requeued+Blocked recovery failed: %s"
+        (Q.execution_error_label error)
+  in
+  (match recovered.candidate.status, recovered.partition.state with
+   | A.Quarantine { phase = A.Requeued _; _ }, P.Ready -> ()
+   | _ -> Alcotest.fail "Requeued+Blocked recovery did not commit Ready");
   let exact = provenance "manual-requeue-success" in
   let execute ~before_dispatch ~before_advance:_ _candidate =
     ok "bind manual requeue attempt" (before_dispatch exact);
@@ -1067,6 +1090,123 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
   (match (Q.inventory ~base_path ~keeper_names:[ "sangsu" ]).items with
    | [] -> ()
    | _ -> Alcotest.fail "settled candidate remained in quarantine inventory")
+;;
+
+let test_ready_requested_recovery_fails_closed () =
+  with_temp_base "board-attention-worker-ready-requested" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ~id:"candidate-ready-requested" ()) in
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    raise (Failure "injected exact worker exception")
+  in
+  ignore
+    (ok
+       "create Ready+Requested quarantine"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+     : W.step);
+  let quarantined = load_one_candidate ~base_path in
+  let blocked = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status with
+    | A.Quarantine { quarantine; phase = A.Quarantined } -> quarantine
+    | _ -> Alcotest.fail "Ready+Requested fixture did not project quarantine"
+  in
+  ignore
+    (ok
+       "persist Ready+Requested candidate phase"
+       (A.request_quarantine_requeue
+          ~base_path
+          ~candidate:quarantined
+          ~partition_id:blocked.partition_id
+          ~expected_quarantine_id:quarantine.quarantine_id
+          ~requested_at:40.0)
+     : A.candidate);
+  let ready =
+    ok
+      "inject premature Ready partition"
+      (P.requeue_blocked ~base_path ~partition:blocked)
+  in
+  (match ready.write_outcome with
+   | P.Fsync_completed -> ()
+   | P.Visible_sync_unconfirmed detail ->
+     Alcotest.failf "premature Ready fixture was not fsynced: %s" detail);
+  let request : Q.request =
+    { candidate_id = persisted.candidate_id
+    ; expected_quarantine_id = quarantine.quarantine_id
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"sangsu"
+        ~raw_partition_id:blocked.partition_id
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "Ready+Requested command rejected: %s" (Q.input_error_to_string error)
+  in
+  (match Q.execute ~now:41.0 ~base_path command with
+   | Error (Q.Partition_state_conflict _) -> ()
+   | Error error ->
+     Alcotest.failf
+       "Ready+Requested returned wrong error: %s"
+       (Q.execution_error_label error)
+   | Ok _ -> Alcotest.fail "Ready+Requested recovery did not fail closed");
+  match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+  | A.Quarantine { phase = A.Requeue_requested _; _ }, P.Ready -> ()
+  | _ -> Alcotest.fail "Ready+Requested rejection mutated durable state"
+;;
+
+let test_stale_quarantine_generation_is_rejected () =
+  with_temp_base "board-attention-worker-stale-quarantine" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ~id:"candidate-stale-generation" ()) in
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    raise (Failure "injected exact worker exception")
+  in
+  ignore
+    (ok
+       "create stale-generation quarantine"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+     : W.step);
+  let quarantined = load_one_candidate ~base_path in
+  let blocked = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status with
+    | A.Quarantine { quarantine; phase = A.Quarantined } -> quarantine
+    | _ -> Alcotest.fail "stale-generation fixture did not project quarantine"
+  in
+  let request : Q.request =
+    { candidate_id = persisted.candidate_id
+    ; expected_quarantine_id = quarantine.quarantine_id ^ "-stale"
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"sangsu"
+        ~raw_partition_id:blocked.partition_id
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "stale-generation command rejected: %s" (Q.input_error_to_string error)
+  in
+  (match Q.execute ~now:50.0 ~base_path command with
+   | Error (Q.Candidate_state_conflict _) -> ()
+   | Error error ->
+     Alcotest.failf
+       "stale generation returned wrong error: %s"
+       (Q.execution_error_label error)
+   | Ok _ -> Alcotest.fail "stale quarantine generation was accepted");
+  match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+  | A.Quarantine
+      { quarantine = current; phase = A.Quarantined },
+    P.Blocked _
+    when String.equal current.quarantine_id quarantine.quarantine_id ->
+    ()
+  | _ -> Alcotest.fail "stale generation rejection mutated durable state"
 ;;
 
 let test_cross_domain_wake_is_coalesced_and_rearmed () =
@@ -1187,13 +1327,21 @@ let () =
             `Quick
             test_unexpected_exception_is_terminal_without_hot_retry
         ; Alcotest.test_case
-            "manual quarantine requeue resumes and is idempotent"
+            "Requested+Blocked recovery and two sequential CAS converge"
             `Quick
-            test_manual_quarantine_requeue_resumes_intermediate_and_is_idempotent
+            test_requested_blocked_recovery_and_sequential_cas_converge
         ; Alcotest.test_case
-            "manual requeue is unclaimable until authorized and settles normally"
+            "Requeued+Blocked recovery settles normally"
             `Quick
             test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles
+        ; Alcotest.test_case
+            "Ready+Requested recovery fails closed"
+            `Quick
+            test_ready_requested_recovery_fails_closed
+        ; Alcotest.test_case
+            "stale quarantine generation is rejected"
+            `Quick
+            test_stale_quarantine_generation_is_rejected
         ; Alcotest.test_case
             "cross-domain wake coalesces and rearms"
             `Quick

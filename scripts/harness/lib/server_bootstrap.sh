@@ -170,8 +170,8 @@ max_context_tokens = 32768
 max_output_tokens = 1024
 supports_tools = true
 supports_tool_choice = true
-supports_response_format_json = true
-supports_structured_output = true
+supports_response_format_json = false
+supports_structured_output = false
 supports_native_streaming = true
 
 [[targets]]

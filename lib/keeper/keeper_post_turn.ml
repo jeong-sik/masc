@@ -694,7 +694,9 @@ let prepare_compaction
     ~projection_request
 ;;
 
-let commit_prepared_compaction (prepared : prepared_compaction)
+let commit_prepared_compaction
+    ~on_checkpoint_committed
+    (prepared : prepared_compaction)
   : (compaction_recovery, compaction_recovery_error) result =
   (* Source-CAS commit.  The caller decides which admission (if any) guards
      this phase; correctness against interleaved state change is enforced
@@ -719,6 +721,7 @@ let commit_prepared_compaction (prepared : prepared_compaction)
   (try
      match
        save_oas_checkpoint_if_source
+         ~on_checkpoint_committed
          ~multimodal_policy:retry_meta.multimodal_policy
          ~keeper_name:retry_meta.name
          ~session
@@ -789,5 +792,8 @@ let recover_latest_checkpoint_for_compaction
       ()
   with
   | Error _ as error -> error
-  | Ok prepared -> commit_prepared_compaction prepared
+  | Ok prepared ->
+    commit_prepared_compaction
+      ~on_checkpoint_committed:(fun () -> ())
+      prepared
 ;;

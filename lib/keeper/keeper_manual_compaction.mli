@@ -31,6 +31,7 @@ type failure =
 
 val run_admitted
   :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
+  -> on_checkpoint_committed:(unit -> unit)
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> unit
@@ -46,8 +47,14 @@ val run_admitted
     start + source-CAS commit + completion/failure. The lane stays runnable
     while the LLM works; a failed final admission cannot strand
     [compaction_active], and interleaved checkpoint changes fail the exact
-    source CAS. A rejected completion after the checkpoint commit dispatches
-    an explicit lifecycle failure cleanup before reporting the checkpoint as
+    source CAS. [on_checkpoint_committed] runs only when that source-CAS
+    checkpoint becomes durably committed, and only after final compaction
+    admission has been released. It runs without [Eio.Cancel.protect] and must
+    not perform I/O, suspend, or raise. If it violates that contract while a
+    prior operation exception or cancellation is already unwinding, the prior
+    exception and its raw backtrace take precedence; the observer failure is
+    logged. A rejected completion after the checkpoint commit dispatches an
+    explicit lifecycle failure cleanup before reporting the checkpoint as
     applied; if that cleanup is also rejected, the typed failure reports
     [checkpoint_applied = true]. This is the single sanctioned caller of that
     admission variant. *)

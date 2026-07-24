@@ -119,6 +119,7 @@ val prepare_compaction :
 (** Phase 2: source-CAS commit of a fully-planned compaction.  The caller
     decides which admission (if any) guards this phase. *)
 val commit_prepared_compaction :
+  on_checkpoint_committed:(unit -> unit) ->
   prepared_compaction ->
   (compaction_recovery, compaction_recovery_error) result
 

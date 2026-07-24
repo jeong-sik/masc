@@ -451,6 +451,37 @@ let observe_durable_write_success ~on_durable_commit = function
        Ok (Committed_but_observer_failed (exn, backtrace)))
 ;;
 
+let finish_durable_commit_observation
+      ~(commit_observed : bool ref)
+      ~on_durable_commit
+      outcome
+  =
+  let notify () =
+    if !commit_observed
+    then (
+      commit_observed := false;
+      on_durable_commit ())
+  in
+  match outcome with
+  | `Returned value ->
+    notify ();
+    value
+  | `Raised (exn, backtrace) ->
+    (try notify () with
+     | observer_exn ->
+       (* The observer contract forbids raising. If it is violated while an
+          earlier operation exception is already in flight, preserve that
+          operation exception and its exact backtrace rather than masking the
+          cause that forced cleanup/unwinding. *)
+       (try
+          Log.Keeper.error
+            "durable commit observer raised while preserving an earlier exception: %s"
+            (Printexc.to_string observer_exn)
+        with
+        | _ -> ()));
+    Printexc.raise_with_backtrace exn backtrace
+;;
+
 let save_bytes_durable_atomic_observed_with
       ~on_durable_commit
       ~before_stage

@@ -113,8 +113,12 @@ let run_start_lifecycle ~config ~meta =
      | Ok () -> Ok ())
 ;;
 
-let run_commit ~config ~base_dir ~meta prepared =
-  match Keeper_context_runtime.commit_prepared_compaction prepared with
+let run_commit ~on_checkpoint_committed ~config ~base_dir ~meta prepared =
+  match
+    Keeper_context_runtime.commit_prepared_compaction
+      ~on_checkpoint_committed
+      prepared
+  with
   | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
     let failure_dispatch =
       dispatch_failed ~config ~meta (Keeper_post_turn.compaction_recovery_error_to_tag error)
@@ -167,7 +171,7 @@ let run_commit ~config ~base_dir ~meta prepared =
        Ok (Compacted { recovery; manifest }))
 ;;
 
-let finish_preparation ~config ~base_dir ~meta = function
+let finish_preparation ~on_checkpoint_committed ~config ~base_dir ~meta = function
   | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
     let failure_dispatch =
       dispatch_failed
@@ -185,7 +189,8 @@ let finish_preparation ~config ~base_dir ~meta = function
         (Keeper_post_turn.compaction_recovery_error_to_tag error)
     in
     Error (Recovery (error, failure_dispatch))
-  | Ok prepared -> run_commit ~config ~base_dir ~meta prepared
+  | Ok prepared ->
+    run_commit ~on_checkpoint_committed ~config ~base_dir ~meta prepared
 ;;
 
 let prepare_with ~prepare_compaction ~config ~meta =
@@ -248,6 +253,7 @@ let preserve_no_compaction_after_final_admission_busy = function
 
 let run_admitted_with
       ~prepare_compaction
+      ~on_checkpoint_committed
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
   =
@@ -282,7 +288,13 @@ let run_admitted_with
              | Error (Keeper_post_turn.No_compaction no_compaction) ->
                Ok (No_compaction no_compaction)
              | Error _ -> Error failure)
-          | Ok () -> finish_preparation ~config ~base_dir ~meta preparation)
+          | Ok () ->
+            finish_preparation
+              ~on_checkpoint_committed
+              ~config
+              ~base_dir
+              ~meta
+              preparation)
     in
     let admitted =
       match preparation with
@@ -312,18 +324,35 @@ let run_admitted_with
 ;;
 
 
-let run_admitted ?exact_execution_guard ~config ~meta () =
-  run_admitted_with
-    ~prepare_compaction:(fun ~base_dir ~meta ~trigger ~projection_request ->
-      Keeper_context_runtime.prepare_compaction
-        ?exact_execution_guard
-        ~base_dir
-        ~meta
-        ~trigger
-        ~projection_request
-        ())
+let run_admitted
+    ?exact_execution_guard
+    ~on_checkpoint_committed
     ~config
     ~meta
+    () =
+  let committed = ref false in
+  let outcome =
+    try
+      `Returned
+        (run_admitted_with
+           ~prepare_compaction:(fun ~base_dir ~meta ~trigger ~projection_request ->
+             Keeper_context_runtime.prepare_compaction
+               ?exact_execution_guard
+               ~base_dir
+               ~meta
+               ~trigger
+               ~projection_request
+               ())
+           ~on_checkpoint_committed:(fun () -> committed := true)
+           ~config
+           ~meta)
+    with
+    | exn -> `Raised (exn, Printexc.get_raw_backtrace ())
+  in
+  Keeper_fs.finish_durable_commit_observation
+    ~commit_observed:committed
+    ~on_durable_commit:on_checkpoint_committed
+    outcome
 ;;
 
 let lifecycle_stage_to_string = function

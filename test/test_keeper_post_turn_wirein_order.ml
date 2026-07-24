@@ -748,8 +748,10 @@ let test_manual_compaction_serializes_owner_lane () =
         | Error detail ->
           failf "race manual compaction claim failed: %s" detail
       in
+      let checkpoint_commits = ref 0 in
       let busy_after_prepare =
         Masc.Keeper_manual_compaction.run_admitted
+          ~on_checkpoint_committed:(fun () -> incr checkpoint_commits)
           ~config
           ~meta
           ~exact_execution_guard:
@@ -763,6 +765,10 @@ let test_manual_compaction_serializes_owner_lane () =
         "planning-admission race performs one exact dispatch"
         1
         (Exact_fixture.post_count race_server);
+      check int
+        "provider success without final commit observes no checkpoint"
+        0
+        !checkpoint_commits;
       let no_compaction =
         match busy_after_prepare with
         | `No_compaction
@@ -1012,6 +1018,106 @@ let test_malformed_structure_preserves_checkpoint () =
   | _ -> fail "malformed compaction was not rejected with typed structure")
 ;;
 
+let test_manual_applied_observer () =
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  with_eio_context env sw @@ fun () ->
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let meta =
+    make_meta
+      ~name:"manual-commit-observer"
+      ~trace_id:"trace-manual-commit-observer"
+      ()
+  in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Admission.For_testing.reset ();
+      Masc.Keeper_registry.For_testing.unregister ~base_path meta.name;
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       init_runtime_fixture ();
+       let exact_server =
+         Exact_fixture.start_server
+           ~sw
+           ~net:(Eio.Stdenv.net env)
+           ~clock:(Eio.Stdenv.clock env)
+           (Exact_fixture.Reply (summarize_response "manual observer compacted"))
+       in
+       publish_exact_fixture ~source:"manual commit observer" exact_server;
+       Result.get_ok (Masc.Keeper_meta_store.write_meta config meta);
+       ignore
+         (Masc.Keeper_registry.For_testing.register ~base_path meta.name meta);
+       let checkpoint =
+         { (make_checkpoint ()) with
+           session_id = "trace-manual-commit-observer"
+         ; agent_name = meta.agent_name
+         }
+       in
+       let session =
+         Masc.Keeper_context_core.create_session
+           ~session_id:checkpoint.session_id
+           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+       in
+       (match
+          Masc.Keeper_context_core.save_oas_checkpoint_classified
+            ~multimodal_policy:meta.multimodal_policy
+            ~keeper_name:meta.name
+            ~session
+            ~agent_name:meta.agent_name
+            ~ctx:(Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint)
+            ~generation:meta.runtime.nonce
+        with
+        | Ok (_, Masc.Keeper_checkpoint_store.Saved _) -> ()
+        | Ok (_, Stale_noop _) -> fail "manual observer fixture save was stale"
+        | Error detail ->
+          failf
+            "manual observer fixture save failed: %s"
+            (Masc.Keeper_context_core.checkpoint_write_error_to_string
+               ~persistence_error_to_string:Fun.id
+               detail));
+       let checkpoint_commits = ref 0 in
+       let callback_saw_released_admission = ref false in
+       match
+         Masc.Keeper_manual_compaction.run_admitted
+           ~on_checkpoint_committed:(fun () ->
+             incr checkpoint_commits;
+             callback_saw_released_admission :=
+               Option.is_none
+                 (Admission.in_flight
+                    ~base_path
+                    ~keeper_name:meta.name))
+           ~config
+           ~meta
+           ~exact_execution_guard:Exact_fixture.permissive_exact_execution_guard
+           ()
+       with
+       | `Applied _ ->
+         check int
+           "manual Applied observes one durable checkpoint commit"
+           1
+           !checkpoint_commits;
+         check bool
+           "manual observer runs after compaction admission release"
+           true
+           !callback_saw_released_admission
+       | `No_compaction no_compaction ->
+         failf
+           "manual observer did not apply: %s"
+           (Keeper_event_queue_state.no_compaction_reason_label
+              no_compaction.reason)
+       | `Compaction_failed failure ->
+         failf
+           "manual observer compaction failed: %s"
+           (Masc.Keeper_manual_compaction.failure_to_string failure)
+       | `Busy _ -> fail "manual observer compaction was unexpectedly busy")
+;;
+
 let test_prepare_commit_source_cas () =
   (* The prepare/commit split exists so the provider call can run outside
      the keeper admission; the source CAS — not the slot — is the
@@ -1084,15 +1190,27 @@ let test_prepare_commit_source_cas () =
       "prepare performs one real exact dispatch"
       1
       (Exact_fixture.post_count exact_server);
-    (match Post_turn.commit_prepared_compaction prepared with
+    let checkpoint_commits = ref 0 in
+    let on_checkpoint_committed () = incr checkpoint_commits in
+    (match
+       Post_turn.commit_prepared_compaction
+         ~on_checkpoint_committed
+         prepared
+     with
      | Ok _ -> ()
      | Error error ->
        failf
          "commit of a fresh prepared plan failed: %s"
          (Post_turn.compaction_recovery_error_to_string error));
+    check int "fresh prepared commit is observed once" 1 !checkpoint_commits;
     (* The first commit advanced the durable source; the same
        prepared value is now stale and must be CAS-rejected. *)
-    (match Post_turn.commit_prepared_compaction prepared with
+    let commits_before_stale = !checkpoint_commits in
+    (match
+       Post_turn.commit_prepared_compaction
+         ~on_checkpoint_committed
+         prepared
+     with
      | Error
          (Post_turn.No_compaction
             { reason =
@@ -1109,7 +1227,11 @@ let test_prepare_commit_source_cas () =
        failf
          "stale prepared value failed with the wrong error: %s"
          (Post_turn.compaction_recovery_error_to_string error)
-     | Ok _ -> fail "stale prepared value committed past the source CAS"))
+     | Ok _ -> fail "stale prepared value committed past the source CAS");
+    check int
+      "stale prepared commit observes no durable checkpoint"
+      0
+      (!checkpoint_commits - commits_before_stale))
 ;;
 
 let test_invalid_structural_evidence_after_dispatch_is_terminal () =
@@ -1357,6 +1479,8 @@ let () =
         `Quick test_regular_post_turn_does_not_auto_compact;
       test_case "manual compaction serializes the owner lane"
         `Quick test_manual_compaction_serializes_owner_lane;
+      test_case "manual Applied observes its checkpoint commit"
+        `Quick test_manual_applied_observer;
       test_case "malformed structure preserves checkpoint"
         `Quick test_malformed_structure_preserves_checkpoint;
       test_case "prepare/commit source CAS"

@@ -661,6 +661,7 @@ let with_checkpoint_cas_lock ~session_dir ~candidate_ref f =
                   (File_lock_eio.durable_lock_error_to_string error)))))
 
 let save_oas_if_source
+    ~(on_checkpoint_committed : unit -> unit)
     ~session_dir
     ~(expected_source_ref : Keeper_checkpoint_ref.t)
     (candidate : Agent_sdk.Checkpoint.t) =
@@ -695,42 +696,55 @@ let save_oas_if_source
          })
   | Ok candidate_ref ->
     let expected_session_id = expected_source_ref.trace_id in
-    with_checkpoint_cas_lock ~session_dir ~candidate_ref (fun session_dir ->
-      match load_ref_locked ~session_dir ~expected_session_id with
-      | Error error -> Error (Source_unavailable error)
-      | Ok snapshot
-        when not
-               (Keeper_checkpoint_ref.equal
-                  expected_source_ref
-                  (exact_snapshot_reference snapshot)) ->
-        Error (Source_changed (exact_snapshot_reference snapshot))
-      | Ok _ ->
-           let canonical_path =
-             oas_checkpoint_path
-               ~session_dir
-               ~session_id:(Keeper_id.Trace_id.to_string expected_session_id)
-           in
-           let ownership_root = Filename.dirname session_dir in
-           (match
-              Keeper_fs.save_bytes_durable_atomic
-                ~ownership_root
-                canonical_path
-                candidate_bytes
-            with
-            | Error error when error.Keeper_fs.renamed ->
-              Error
-                (Commit_durability_unknown
-                   { installed_ref = candidate_ref; error })
-            | Error error -> Error (Commit_not_installed error)
-            | Ok () ->
-              (* The durable writer installs [candidate_bytes] verbatim — the
-                 exact bytes [candidate_ref] was derived from — so the
-                 published file and the returned ref agree by construction,
-                 not by an encoding contract. Once the writer returns [Ok],
-                 rename and both durability fsyncs have completed; a
-                 post-commit read cannot downgrade that committed outcome to
-                 a retryable failure. *)
-              Ok candidate_ref))
+    let committed = ref false in
+    let outcome =
+      try
+        `Returned
+          (with_checkpoint_cas_lock ~session_dir ~candidate_ref (fun session_dir ->
+             match load_ref_locked ~session_dir ~expected_session_id with
+             | Error error -> Error (Source_unavailable error)
+             | Ok snapshot
+               when not
+                      (Keeper_checkpoint_ref.equal
+                         expected_source_ref
+                         (exact_snapshot_reference snapshot)) ->
+               Error (Source_changed (exact_snapshot_reference snapshot))
+             | Ok _ ->
+                  let canonical_path =
+                    oas_checkpoint_path
+                      ~session_dir
+                      ~session_id:
+                        (Keeper_id.Trace_id.to_string expected_session_id)
+                  in
+                  let ownership_root = Filename.dirname session_dir in
+                  (match
+                     Keeper_fs.save_bytes_durable_atomic_observed
+                       ~on_durable_commit:(fun () -> committed := true)
+                       ~ownership_root
+                       canonical_path
+                       candidate_bytes
+                   with
+                   | Error error when error.Keeper_fs.renamed ->
+                     Error
+                       (Commit_durability_unknown
+                          { installed_ref = candidate_ref; error })
+                   | Error error -> Error (Commit_not_installed error)
+                   | Ok () ->
+                     (* The durable writer installs [candidate_bytes] verbatim —
+                        the exact bytes [candidate_ref] was derived from — so the
+                        published file and the returned ref agree by construction,
+                        not by an encoding contract. Once the writer returns [Ok],
+                        rename and both durability fsyncs have completed; a
+                        post-commit read cannot downgrade that committed outcome
+                        to a retryable failure. *)
+                     Ok candidate_ref)))
+      with
+      | exn -> `Raised (exn, Printexc.get_raw_backtrace ())
+    in
+    Keeper_fs.finish_durable_commit_observation
+      ~commit_observed:committed
+      ~on_durable_commit:on_checkpoint_committed
+      outcome
 
 let save_oas_classified_typed
     ~(session_dir : string)

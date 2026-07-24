@@ -214,11 +214,17 @@ type checkpoint_cas_error =
     ref is derived from the exact compact bytes passed to the durable atomic
     JSON writer. A writer error after atomic rename is
     [Commit_durability_unknown], never a retryable not-installed failure. This
-    same rule applies when releasing the stable lock fails after the body:
-    [Transaction_outcome_unknown] requires reconciliation rather than retry. The
-    payload-store commit is not an operation terminal fact; the Keeper operation
-    journal owns that authority. *)
+     same rule applies when releasing the stable lock fails after the body:
+     [Transaction_outcome_unknown] requires reconciliation rather than retry. The
+     payload-store commit is not an operation terminal fact; the Keeper operation
+     journal owns that authority. [on_checkpoint_committed] runs exactly once
+     after the CAS lock scope has unwound when durable commit was observed. It
+     runs without [Eio.Cancel.protect] and must not perform I/O, suspend, or
+     raise. If it violates that contract while a prior operation exception or
+     cancellation is already unwinding, the prior exception and its raw
+     backtrace take precedence; the observer failure is logged. *)
 val save_oas_if_source :
+  on_checkpoint_committed:(unit -> unit) ->
   session_dir:string ->
   expected_source_ref:Keeper_checkpoint_ref.t ->
   Agent_sdk.Checkpoint.t ->

@@ -3,6 +3,8 @@ open Alcotest
 module KF = Masc.Keeper_fs
 
 exception Requested_cancel
+exception Underlying_failure
+exception Observer_failure
 
 type blocking_hook =
   { entered : unit Eio.Promise.t
@@ -109,6 +111,7 @@ let test_write_context_cancellation_is_not_swallowed () =
        let path = Filename.concat base "record.json" in
        require_write_ok "seed write" (KF.save_json_durable_atomic path (`Assoc []));
        let hook = blocking_hook () in
+       let observed_commits = Atomic.make 0 in
        let context, resolve_context = Eio.Promise.create () in
        let result, resolve_result = Eio.Promise.create () in
        Eio.Switch.run
@@ -121,12 +124,13 @@ let test_write_context_cancellation_is_not_swallowed () =
              Eio.Cancel.sub (fun cancel_context ->
                Eio.Promise.resolve resolve_context cancel_context;
                match
-                 KF.For_testing.save_json_durable_atomic
+                 KF.For_testing.save_bytes_durable_atomic_observed
+                   ~on_durable_commit:(fun () -> Atomic.incr observed_commits)
                    ~before_stage:(function
                      | KF.Payload_write -> block_once hook
                      | _ -> ())
                    path
-                   (`Assoc [ "version", `Int 2 ])
+                   {|{"version":2}|}
                with
                | Ok () -> Returned_ok
                | Error error -> Returned_error (KF.durable_write_error_to_string error))
@@ -140,7 +144,93 @@ let test_write_context_cancellation_is_not_swallowed () =
        Eio.Cancel.cancel cancel_context Requested_cancel;
        release hook;
        expect_cancelled (Eio.Promise.await result);
+       check int
+         "durably committed cancelled write is observed exactly once"
+         1
+         (Atomic.get observed_commits);
        check bool "completed write remains visible" true (Sys.file_exists path))
+;;
+
+let with_recorded_backtraces f =
+  let was_recording = Printexc.backtrace_status () in
+  Printexc.record_backtrace true;
+  Fun.protect
+    ~finally:(fun () -> Printexc.record_backtrace was_recording)
+    f
+;;
+
+let test_deferred_observer_preserves_cancellation_backtrace () =
+  Eio_main.run
+  @@ fun _env ->
+  with_recorded_backtraces
+  @@ fun () ->
+  let cancelled_exn, cancelled_backtrace =
+    try
+      Eio.Cancel.sub (fun cancel_context ->
+        Eio.Cancel.cancel cancel_context Requested_cancel;
+        Eio.Fiber.yield ();
+        fail "cancelled context returned")
+    with
+    | Eio.Cancel.Cancelled _ as exn ->
+      exn, Printexc.get_raw_backtrace ()
+  in
+  let expected_backtrace =
+    Printexc.raw_backtrace_to_string cancelled_backtrace
+  in
+  let commit_observed = ref true in
+  let observer_calls = ref 0 in
+  let reraised_backtrace =
+    try
+      ignore
+        (KF.finish_durable_commit_observation
+           ~commit_observed
+           ~on_durable_commit:(fun () -> incr observer_calls)
+           (`Raised (cancelled_exn, cancelled_backtrace)));
+      fail "captured cancellation returned"
+    with
+    | Eio.Cancel.Cancelled _ -> Printexc.get_raw_backtrace ()
+  in
+  check int "cancelled durable commit observer runs once" 1 !observer_calls;
+  check bool "cancelled durable commit latch is consumed" false !commit_observed;
+  check string
+    "cancelled durable commit preserves raw backtrace"
+    expected_backtrace
+    (Printexc.raw_backtrace_to_string reraised_backtrace)
+;;
+
+let test_raising_observer_does_not_mask_underlying_backtrace () =
+  with_recorded_backtraces
+  @@ fun () ->
+  let underlying_exn, underlying_backtrace =
+    try raise Underlying_failure with
+    | Underlying_failure as exn ->
+      exn, Printexc.get_raw_backtrace ()
+  in
+  let expected_backtrace =
+    Printexc.raw_backtrace_to_string underlying_backtrace
+  in
+  let commit_observed = ref true in
+  let observer_calls = ref 0 in
+  let reraised_backtrace =
+    try
+      ignore
+        (KF.finish_durable_commit_observation
+           ~commit_observed
+           ~on_durable_commit:(fun () ->
+             incr observer_calls;
+             raise Observer_failure)
+           (`Raised (underlying_exn, underlying_backtrace)));
+      fail "captured operation failure returned"
+    with
+    | Underlying_failure -> Printexc.get_raw_backtrace ()
+    | Observer_failure -> fail "observer failure masked the operation failure"
+  in
+  check int "raising durable commit observer runs once" 1 !observer_calls;
+  check bool "raising durable commit observer consumes latch" false !commit_observed;
+  check string
+    "raising observer preserves the underlying raw backtrace"
+    expected_backtrace
+    (Printexc.raw_backtrace_to_string reraised_backtrace)
 ;;
 
 let test_remove_context_cancellation_is_not_swallowed () =
@@ -208,9 +298,17 @@ let () =
     "Keeper_fs systhread cancellation"
     [ ( "durability",
         [ test_case
-            "write context cancellation propagates"
+            "observed write context cancellation propagates"
             `Quick
             test_write_context_cancellation_is_not_swallowed
+        ; test_case
+            "deferred observer preserves cancellation backtrace"
+            `Quick
+            test_deferred_observer_preserves_cancellation_backtrace
+        ; test_case
+            "raising observer preserves underlying backtrace"
+            `Quick
+            test_raising_observer_does_not_mask_underlying_backtrace
         ; test_case
             "remove context cancellation propagates"
             `Quick

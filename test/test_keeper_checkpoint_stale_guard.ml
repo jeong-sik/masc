@@ -495,15 +495,18 @@ let test_exact_source_cas_allows_one_equal_turn_writer () =
       | Ok (_, reference) -> reference
       | Error _ -> fail "CAS source load failed"
     in
-    let writer marker =
+    let left_observed = Atomic.make 0 in
+    let right_observed = Atomic.make 0 in
+    let writer marker observed =
       Keeper_checkpoint_store.save_oas_if_source
+        ~on_checkpoint_committed:(fun () -> Atomic.incr observed)
         ~session_dir
         ~expected_source_ref:source_ref
         (make_checkpoint ~session_id ~turn_count:8 ~marker
          |> with_generation 3)
     in
-    let left = Domain.spawn (fun () -> "left", writer "left") in
-    let right = Domain.spawn (fun () -> "right", writer "right") in
+    let left = Domain.spawn (fun () -> "left", writer "left" left_observed) in
+    let right = Domain.spawn (fun () -> "right", writer "right" right_observed) in
     let committed, changed =
       [ Domain.join left; Domain.join right ]
       |> List.fold_left
@@ -517,10 +520,19 @@ let test_exact_source_cas_allows_one_equal_turn_writer () =
     in
     check int "exactly one writer commits" 1 (List.length committed);
     check int "the competing source is rejected" 1 changed;
+    check int "durable commit is observed exactly once across writers" 1
+      (Atomic.get left_observed + Atomic.get right_observed);
     match committed,
       Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
     with
     | [ (winner, committed_ref) ], Ok (checkpoint, disk_ref) ->
+      let winner_observed, loser_observed =
+        if String.equal winner "left"
+        then Atomic.get left_observed, Atomic.get right_observed
+        else Atomic.get right_observed, Atomic.get left_observed
+      in
+      check int "winning writer observes its durable commit" 1 winner_observed;
+      check int "Source_changed writer observes no durable commit" 0 loser_observed;
       check bool "committed ref identifies installed canonical bytes" true
         (Keeper_checkpoint_ref.equal committed_ref disk_ref);
       check bool "installed payload belongs to the winning writer" true
@@ -545,8 +557,10 @@ let test_exact_source_cas_updates_canonical_watermark () =
       | Ok (_, reference) -> reference
       | Error _ -> fail "CAS watermark source load failed"
     in
+    let checkpoint_commits = ref 0 in
     (match
        Keeper_checkpoint_store.save_oas_if_source
+         ~on_checkpoint_committed:(fun () -> incr checkpoint_commits)
          ~session_dir
          ~expected_source_ref:source_ref
          (make_checkpoint ~session_id ~turn_count:9 ~marker:"target"
@@ -554,6 +568,7 @@ let test_exact_source_cas_updates_canonical_watermark () =
      with
      | Ok _ -> ()
      | Error _ -> fail "CAS watermark candidate did not commit");
+    check int "CAS watermark commit is observed once" 1 !checkpoint_commits;
     match
       Keeper_checkpoint_store.save_oas_classified ~session_dir
         (make_checkpoint ~session_id ~turn_count:8 ~marker:"stale!")

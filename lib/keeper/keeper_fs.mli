@@ -83,6 +83,19 @@ val save_bytes_durable_atomic_observed
   -> string
   -> (durable_commit_outcome, durable_write_error) result
 
+(** Deliver a deferred durable-commit observation and finish a captured
+    operation outcome. [commit_observed] is cleared before the observer runs,
+    making delivery affine even when the observer raises. For [`Returned], an
+    observer exception propagates. For [`Raised], an observer exception is
+    logged but the original exception is re-raised with its captured raw
+    backtrace, so cleanup failure cannot mask the operation failure. Call only
+    after every lock or serialized admission owning the operation has unwound. *)
+val finish_durable_commit_observation
+  :  commit_observed:bool ref
+  -> on_durable_commit:(unit -> unit)
+  -> [ `Returned of 'a | `Raised of exn * Printexc.raw_backtrace ]
+  -> 'a
+
 (** Strict durable atomic write of the supplied immutable byte string.
     The payload is written exactly, without parsing or re-encoding. It provides
     equivalent semantics through the same core transaction and completion

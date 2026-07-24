@@ -112,6 +112,7 @@ let save_oas_checkpoint_classified
      | Error error -> Error (Persistence_error error))
 
 let save_oas_checkpoint_if_source
+    ~on_checkpoint_committed
     ~multimodal_policy
     ~keeper_name
     ~session
@@ -133,6 +134,7 @@ let save_oas_checkpoint_if_source
   | Ok checkpoint ->
     (match
        Keeper_checkpoint_store.save_oas_if_source
+         ~on_checkpoint_committed
          ~session_dir:session.session_dir
          ~expected_source_ref
          checkpoint

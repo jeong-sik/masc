@@ -189,7 +189,8 @@ val prepare_compaction
   -> (Keeper_post_turn.prepared_compaction, Keeper_post_turn.compaction_recovery_error) result
 
 val commit_prepared_compaction
-  :  Keeper_post_turn.prepared_compaction
+  :  on_checkpoint_committed:(unit -> unit)
+  -> Keeper_post_turn.prepared_compaction
   -> (compaction_recovery, Keeper_post_turn.compaction_recovery_error) result
 
 (** {1 Trace and Board Utilities} *)

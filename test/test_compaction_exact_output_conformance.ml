@@ -971,6 +971,35 @@ let test_post_success_restart_remains_at_most_once_and_fail_closed () =
     "durable binding retains the source lease sequence"
     lease.sequence
     binding_before.lease_sequence;
+  let state_before_probe =
+    match P.load_state_result ~base_path ~keeper_name with
+    | Ok state -> state
+    | Error detail ->
+        Alcotest.failf "pre-recovery state load failed: %s" detail
+  in
+  Alcotest.(check bool)
+    "post-success stop creates no pending successor"
+    true
+    (Q.is_empty (State.pending state_before_probe));
+  let pending_successor : Q.stimulus =
+    { post_id = "post-success-restart-fence-probe"
+    ; urgency = Q.Immediate
+    ; arrived_at = 2.5
+    ; payload = Q.Manual_compaction_requested
+    }
+  in
+  let expected_pending =
+    Q.enqueue Q.empty pending_successor
+  in
+  (match
+     P.update_checked_result
+       ~base_path
+       ~keeper_name
+       (fun pending -> Ok (Q.enqueue pending pending_successor))
+   with
+   | Ok () -> ()
+   | Error detail ->
+       Alcotest.failf "pending successor probe persist failed: %s" detail);
   (match
      Recovery.prepare_registration_result
        ~base_path
@@ -992,9 +1021,9 @@ let test_post_success_restart_remains_at_most_once_and_fail_closed () =
     true
     (State.exact_execution_binding recovered = Some binding_before);
   Alcotest.(check bool)
-    "restart creates no pending successor"
+    "restart adds no pending or requeue beyond the probe"
     true
-    (Q.is_empty (State.pending recovered));
+    (State.pending recovered = expected_pending);
   Alcotest.(check int)
     "restart creates no requeue transition"
     0
@@ -1016,6 +1045,16 @@ let test_post_success_restart_remains_at_most_once_and_fail_closed () =
        Alcotest.fail "post-recovery scheduling claimed a successor"
    | Error detail ->
        Alcotest.failf "post-recovery scheduling boundary failed: %s" detail);
+  let after_claim =
+    match P.load_state_result ~base_path ~keeper_name with
+    | Ok state -> state
+    | Error detail ->
+        Alcotest.failf "post-claim state reload failed: %s" detail
+  in
+  Alcotest.(check bool)
+    "fenced successor remains pending after scheduling"
+    true
+    (State.pending after_claim = expected_pending);
   Alcotest.(check int)
     "provider POST remains exactly once after restart"
     1

@@ -402,10 +402,11 @@ let activation_deferred_of_paused_dead = function
 
 let activation_outcome_for_required_wake config ~base_path ~keeper_name =
   let meta_result =
-    match Keeper_meta_store.read_effective_meta config keeper_name with
-    | Ok (Some meta) -> Ok meta
-    | Ok None -> Error "durable keeper metadata missing"
-    | Error detail -> Error detail
+    Executor_pool_ref.submit_or_inline (fun () ->
+      match Keeper_meta_store.read_effective_meta config keeper_name with
+      | Ok (Some meta) -> Ok meta
+      | Ok None -> Error "durable keeper metadata missing"
+      | Error detail -> Error detail)
   in
   let admission =
     Keeper_turn_admission.snapshot_for ~base_path ~keeper_name

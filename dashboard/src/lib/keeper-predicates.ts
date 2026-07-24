@@ -162,6 +162,7 @@ export function keeperCanWakeup(keeper: Keeper): boolean {
 export interface KeeperActionVisibility {
   canPause: boolean
   canResume: boolean
+  resumeUnavailableReason?: string
   canWake: boolean
   canBoot: boolean
   canShutdown: boolean
@@ -174,19 +175,22 @@ export function keeperActionVisibility(keeper: Keeper): KeeperActionVisibility {
   const isPaused = isKeeperPaused(keeper)
   const isOffline = isKeeperOffline(keeper)
   const isRunning = isKeeperRunningExcludingRestarting(keeper)
-  // A paused directive can outlive its process: the persisted `paused` flag
-  // stays set after the keeper fiber dies, but only a live fiber can be
-  // resumed — resume needs a live owner nonce as its fencing token, and
-  // a dead keeper has none. Treat paused-but-not-live as needing boot, so
-  // the boot verb surfaces for a dead paused keeper and resume stays hidden
-  // instead of returning "current owner generation is unavailable".
-  const live = keeper.keepalive_running === true
+  const hasOwnerGeneration =
+    typeof keeper.generation === 'number'
+    && Number.isInteger(keeper.generation)
+    && keeper.generation >= 0
+  // A paused directive can outlive its process. The durable owner generation
+  // remains the Resume_owner fencing token even after the live lane exits, so
+  // paused always routes through resume before an offline lane is booted.
 
   return {
     canPause:    isRunning && !isPaused,
-    canResume:   isPaused && live,
+    canResume:   isPaused && hasOwnerGeneration,
+    resumeUnavailableReason: isPaused && !hasOwnerGeneration
+      ? '현재 owner generation을 확인할 수 없어 재개할 수 없습니다'
+      : undefined,
     canWake:     keeperCanWakeup(keeper),
-    canBoot:     isOffline || (isPaused && !live),
+    canBoot:     isOffline && !isPaused,
     canShutdown: isRunning || isPaused,
   }
 }

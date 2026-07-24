@@ -314,7 +314,11 @@ export async function resumeKeeper(
     `Failed to resume ${name}`,
     opts,
   )
-  if (result.ok) clearCommittedResumeIntent(name, intent)
+  if (result.ok || result.committed === true) clearCommittedResumeIntent(name, intent)
+  if (!result.ok && result.committed === true) {
+    const boot = await bootKeeper(name, opts)
+    return { ...boot, committed: true }
+  }
   return result
 }
 
@@ -341,6 +345,8 @@ export interface BulkKeeperResumeTarget {
 export interface BulkKeeperDirectiveResult {
   name: string
   ok: boolean
+  action?: KeeperLifecycleResponse['action']
+  committed?: boolean
   error?: string
 }
 
@@ -424,12 +430,36 @@ export async function bulkKeeperDirective(
       fallbackError,
     )
     if (isRecord(payload) && Array.isArray(payload.results)) {
-      for (const result of payload.results) {
-        if (!isRecord(result) || result.ok !== true || typeof result.name !== 'string') continue
-        const committed = resumeIntents.find(({ name }) => name === result.name)
-        if (committed) clearCommittedResumeIntent(committed.name, committed.intent)
+      const intentsByName = new Map(
+        resumeIntents.map(({ name, intent }) => [name, intent] as const),
+      )
+      let recoveredCommittedResume = false
+      const results = await Promise.all(payload.results.map(async rawResult => {
+        if (!isRecord(rawResult) || typeof rawResult.name !== 'string') {
+          return rawResult as unknown as BulkKeeperDirectiveResult
+        }
+        const result = rawResult as unknown as BulkKeeperDirectiveResult
+        const intent = intentsByName.get(result.name)
+        if (intent && (result.ok || result.committed === true)) {
+          clearCommittedResumeIntent(result.name, intent)
+        }
+        if (action === 'resume' && !result.ok && result.committed === true) {
+          recoveredCommittedResume = true
+          const boot = await bootKeeper(result.name, opts)
+          return { ...result, ...boot, name: result.name, committed: true }
+        }
+        return result
+      }))
+      if (!recoveredCommittedResume) {
+        return { ...(payload as unknown as BulkKeeperDirectiveResponse), results }
       }
-      return payload as unknown as BulkKeeperDirectiveResponse
+      const succeeded = results.filter(result => result.ok).length
+      return {
+        ...(payload as unknown as BulkKeeperDirectiveResponse),
+        ok: succeeded === names.length,
+        succeeded,
+        results,
+      }
     }
     return {
       ok: false,

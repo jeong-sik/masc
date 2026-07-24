@@ -885,7 +885,7 @@ let process_next_with_claim_ready_exact
   let selected_generation_is_ready ~partition_id ~generation =
     let* partitions = Partition.load ~base_path ~keeper_name in
     Ok
-      List.exists
+      (List.exists
         (fun (partition : Partition.t) ->
            String.equal partition.partition_id partition_id
            && Partition.Generation.equal partition.generation generation
@@ -896,7 +896,7 @@ let process_next_with_claim_ready_exact
            | Partition.Completed _
            | Partition.Settled _
            | Partition.Blocked _ -> false)
-        partitions
+        partitions)
   in
   let process_selected prepared partition =
     let latest_partition : Partition.t ref = ref partition in

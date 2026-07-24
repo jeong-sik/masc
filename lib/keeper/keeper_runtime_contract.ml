@@ -38,19 +38,6 @@ let task_is_linked_to_keeper_goals ?(task_goal_index = Hashtbl.create 0) goal_id
     (fun goal_id -> List.mem goal_id task_goal_ids)
     goal_ids
 
-(* A task is claimable-by-a-fresh-keeper only in [Todo]. Enumerate every
-   [task_status] variant so a new constructor forces a decision here rather than
-   silently widening "claimable" to e.g. a future [BlockedOnReview]. *)
-let task_is_unclaimed_todo (task : Masc_domain.task) =
-  match task.task_status with
-  | Masc_domain.Todo -> true
-  | Masc_domain.AwaitingVerification _
-  | Masc_domain.Claimed _
-  | Masc_domain.InProgress _
-  | Masc_domain.Done _
-  | Masc_domain.Cancelled _ ->
-    false
-
 (* Closed set of claim-scope modes. Was a bare [string] (#20674): producers
    and consumers matched on free string literals, so the compiler could not
    force a consumer to handle a new mode, and a dropped producer left a dead
@@ -96,8 +83,10 @@ let meta_only_claim_goal_scope ?task_goal_index (meta : keeper_meta) =
 
    Goal-scope is a *priority hint*, not a hard gate: a keeper must never sit idle
    while the backlog holds claimable work. When the keeper's active goals have no
-   claimable (Todo + unclaimed) task linked to them, widen the filter back to
-   all_tasks and record [fallback_reason] so the widening is visible.
+   claim-pool candidate linked to them, widen the filter back to all_tasks and
+   record [fallback_reason] so the widening is visible. Claim-pool membership
+   is owned by [Workspace_task_schedule]; this resolver must not maintain a
+   narrower copy that omits verification work.
 
    Restores the [allow_empty_goal_scope_fallback] stopgap (RFC-0067 §1, PR
    #13673) that was dropped when the resolver was simplified to a pure in-memory
@@ -120,7 +109,7 @@ let resolve_claim_goal_scope_for_tasks ~(config : Workspace.config)
     let task_goal_index = Workspace_goal_index.build_task_goal_index_for_config config in
     let scoped_claimable_exists =
       List.exists (fun task ->
-             task_is_unclaimed_todo task
+             Workspace_task_schedule.task_is_claim_pool_candidate task
              && task_eligible task
              && task_is_linked_to_keeper_goals ~task_goal_index goal_ids task)
         tasks

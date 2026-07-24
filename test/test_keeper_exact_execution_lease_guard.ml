@@ -636,7 +636,7 @@ let test_visible_prepare_sync_failure_recovers_once () =
   check_no_active_lease "visible prepare first restart" recovered;
   check_no_exact_binding "visible prepare first restart" recovered;
   check_no_pending "visible prepare first restart" recovered;
-  let _receipt =
+  let receipt =
     require_single_exact_outbox
       ~disposition_id:disposition.disposition_id
       "visible prepare first restart"
@@ -709,7 +709,7 @@ let test_stale_finalize_preserves_active_successor () =
    | Ok _ -> Alcotest.fail "stale-owner setup did not stop after WAL commit"
    | Error detail -> Alcotest.failf "stale-owner WAL commit failed: %s" detail);
   let recovered = require_loaded_state "stale-owner restart" ~base_path ~keeper_name in
-  let receipt =
+  let _receipt =
     require_single_exact_outbox
       ~disposition_id:disposition.disposition_id
       "stale-owner restart"

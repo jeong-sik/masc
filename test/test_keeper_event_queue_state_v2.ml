@@ -2863,6 +2863,8 @@ let test_transition_outbox_claim_contention_and_release () =
       .pending_transition_count_result
         ~base_path:alias_base_path
         ~keeper_name
+      |> Result.map_error
+           Masc.Keeper_event_queue_recovery.projection_error_to_string
       |> require_ok "read transition retired after contention"
     in
     Alcotest.(check int)
@@ -2975,7 +2977,9 @@ let test_transition_outbox_projection_keeps_scheduler_progress () =
      with
      | Persistence.Settled _ -> ()
      | Persistence.Already_settled _ ->
-       Alcotest.fail "offloaded projection source was already settled");
+       Alcotest.fail "offloaded projection source was already settled"
+     | Persistence.Committed_followup_failed { detail; _ } ->
+       Alcotest.failf "offloaded projection settlement follow-up failed: %s" detail);
     let pool =
       Domain_pool.create
         ~sw

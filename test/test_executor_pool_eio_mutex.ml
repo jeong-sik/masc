@@ -190,8 +190,7 @@ let test_with_pool_restores_exact_previous_pool_after_exception () =
             "inner pool installed"
             true
             (same_pool_option (Some inner) (Executor_pool_ref.get ()));
-          raise With_pool_probe);
-        false
+          raise With_pool_probe)
       with
       | With_pool_probe -> true
     in

@@ -538,8 +538,14 @@ let test_acked_occurrence_recovery_does_not_enqueue_or_wake_again () =
        | Ok _ -> fail "scheduled occurrence settlement follow-up failed"
        | Error detail -> fail detail);
       (match Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name with
-       | Ok () -> ()
-       | Error detail -> fail detail);
+       | Ok
+           ( Keeper_event_queue_recovery.No_pending_transition
+           | Keeper_event_queue_recovery.Transition_converged ) ->
+         ()
+       | Ok Keeper_event_queue_recovery.Claim_busy ->
+         fail "scheduled occurrence projection was deferred by a busy owner claim"
+       | Error error ->
+         fail (Keeper_event_queue_recovery.projection_error_to_string error));
       (match Schedule_store.get_schedule config ~schedule_id:request.schedule_id with
        | Some stored ->
          check string "crash window leaves schedule running" "running"
@@ -646,8 +652,14 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_or_wake_again () =
         (Yojson.Safe.to_string
            (Keeper_event_queue_state.to_yojson cancelled_state));
       (match Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name with
-       | Ok () -> ()
-       | Error detail -> fail detail);
+       | Ok
+           ( Keeper_event_queue_recovery.No_pending_transition
+           | Keeper_event_queue_recovery.Transition_converged ) ->
+         ()
+       | Ok Keeper_event_queue_recovery.Claim_busy ->
+         fail "scheduled cancellation projection was deferred by a busy owner claim"
+       | Error error ->
+         fail (Keeper_event_queue_recovery.projection_error_to_string error));
       (match Schedule_store.recover_running_on_startup config ~now:204.0 with
        | Ok (_, 1) -> ()
        | Ok (_, recovered) -> failf "expected one recovered schedule, got %d" recovered

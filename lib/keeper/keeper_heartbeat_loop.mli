@@ -185,7 +185,11 @@ val settlement_of_cycle_outcome :
     stimulus re-enters every cycle (RFC-0351 S0, #25461). *)
 
 val project_transition_outbox :
-  base_path:string -> keeper_name:string -> (unit, string) result
+  base_path:string ->
+  keeper_name:string ->
+  ( Keeper_event_queue_recovery.projection_outcome
+  , Keeper_event_queue_recovery.projection_error )
+  result
 (** Idempotently materialize the lane's single durable transition into the
     reaction ledger, then retire the outbox entry. New claims remain blocked
     while this projection is incomplete. *)

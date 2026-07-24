@@ -2581,8 +2581,19 @@ let test_transition_outbox_projects_with_stable_identity () =
      | Error error ->
        Alcotest.fail
          (Masc.Keeper_event_queue_recovery.projection_error_to_string error));
-    Masc.Keeper_heartbeat_loop.project_transition_outbox ~base_path ~keeper_name
-    |> require_ok "empty outbox projection is idempotent";
+    (match
+       Masc.Keeper_heartbeat_loop.project_transition_outbox
+         ~base_path
+         ~keeper_name
+     with
+     | Ok Masc.Keeper_event_queue_recovery.No_pending_transition -> ()
+     | Ok Masc.Keeper_event_queue_recovery.Transition_converged ->
+       Alcotest.fail "empty heartbeat projection unexpectedly converged work"
+     | Ok Masc.Keeper_event_queue_recovery.Claim_busy ->
+       Alcotest.fail "empty heartbeat projection retained an owner claim"
+     | Error error ->
+       Alcotest.fail
+         (Masc.Keeper_event_queue_recovery.projection_error_to_string error));
     let summary =
       Masc.Keeper_reaction_ledger.summary_for_keeper
         ~base_path
@@ -2595,6 +2606,141 @@ let test_transition_outbox_projects_with_stable_identity () =
       1
       (summary |> member "event_queue_ack_count" |> to_int);
     ())
+;;
+
+exception Transition_projection_claim_cancelled
+exception Transition_projection_claim_failed
+
+let test_transition_outbox_claim_contention_and_release () =
+  Eio_main.run
+  @@ fun _env ->
+  with_temp_dir "keeper-event-queue-v2-projection-claim" (fun base_path ->
+    let keeper_name = "projection_claim_keeper" in
+    let alias_base_path = Filename.concat base_path "." in
+    Persistence.update_result ~base_path ~keeper_name (fun pending ->
+      Queue.enqueue pending (stimulus "projection-claim-source" 1.0))
+    |> require_ok "seed current-schema projection claim owner";
+    let entered, resolve_entered = Eio.Promise.create () in
+    let release, resolve_release = Eio.Promise.create () in
+    let holder, resolve_holder = Eio.Promise.create () in
+    Eio.Switch.run
+    @@ fun sw ->
+    Eio.Fiber.fork ~sw (fun () ->
+      let outcome =
+        Masc.Keeper_event_queue_recovery.For_testing.with_owner_claim
+          ~base_path
+          ~keeper_name
+          (fun () ->
+             Eio.Promise.resolve resolve_entered ();
+             Eio.Promise.await release)
+      in
+      Eio.Promise.resolve resolve_holder outcome);
+    Eio.Promise.await entered;
+    (match
+       Masc.Keeper_heartbeat_loop.project_transition_outbox
+         ~base_path:alias_base_path
+         ~keeper_name
+     with
+     | Ok Masc.Keeper_event_queue_recovery.Claim_busy -> ()
+     | Ok
+         ( Masc.Keeper_event_queue_recovery.No_pending_transition
+         | Masc.Keeper_event_queue_recovery.Transition_converged ) ->
+       Alcotest.fail "heartbeat collapsed canonical owner contention into success"
+     | Error error ->
+       Alcotest.fail
+         (Masc.Keeper_event_queue_recovery.projection_error_to_string error));
+    let maintenance_report =
+      Masc.Keeper_event_queue_recovery.project_discovered ~base_path
+    in
+    Alcotest.(check int)
+      "maintenance sweep preserves canonical owner contention"
+      1
+      maintenance_report.claim_busy;
+    Alcotest.(check int)
+      "contention sweep performs no projection"
+      0
+      maintenance_report.converged;
+    Eio.Promise.resolve resolve_release ();
+    (match Eio.Promise.await holder with
+     | Ok
+         (Masc.Keeper_event_queue_recovery.For_testing.Claim_acquired ()) ->
+       ()
+     | Ok Masc.Keeper_event_queue_recovery.For_testing.Claim_already_held ->
+       Alcotest.fail "first canonical owner claim was unexpectedly busy"
+     | Error error ->
+       Alcotest.fail
+         (Masc.Keeper_event_queue_recovery.projection_error_to_string error));
+    let require_reacquired label =
+      match
+        Masc.Keeper_event_queue_recovery.project_owner_result
+          ~base_path:alias_base_path
+          ~keeper_name
+      with
+      | Ok Masc.Keeper_event_queue_recovery.No_pending_transition -> ()
+      | Ok Masc.Keeper_event_queue_recovery.Transition_converged ->
+        Alcotest.failf "%s unexpectedly converged an outbox" label
+      | Ok Masc.Keeper_event_queue_recovery.Claim_busy ->
+        Alcotest.failf "%s did not release the canonical owner claim" label
+      | Error error ->
+        Alcotest.fail
+          (Masc.Keeper_event_queue_recovery.projection_error_to_string error)
+    in
+    require_reacquired "normal completion";
+    let exception_observed =
+      try
+        match
+          Masc.Keeper_event_queue_recovery.For_testing.with_owner_claim
+            ~base_path
+            ~keeper_name
+            (fun () -> raise Transition_projection_claim_failed)
+        with
+        | Ok
+            (Masc.Keeper_event_queue_recovery.For_testing.Claim_acquired _) ->
+          false
+        | Ok Masc.Keeper_event_queue_recovery.For_testing.Claim_already_held ->
+          Alcotest.fail "exception test could not acquire canonical owner claim"
+        | Error error ->
+          Alcotest.fail
+            (Masc.Keeper_event_queue_recovery.projection_error_to_string error)
+      with
+      | Transition_projection_claim_failed -> true
+    in
+    Alcotest.(check bool)
+      "claim callback exception propagates"
+      true
+      exception_observed;
+    require_reacquired "exception completion";
+    let cancellation_observed =
+      try
+        Eio.Cancel.sub (fun cancel_context ->
+          match
+            Masc.Keeper_event_queue_recovery.For_testing.with_owner_claim
+              ~base_path
+              ~keeper_name
+              (fun () ->
+                 Eio.Cancel.cancel
+                   cancel_context
+                   Transition_projection_claim_cancelled;
+                 Eio.Fiber.yield ())
+          with
+          | Ok
+              (Masc.Keeper_event_queue_recovery.For_testing.Claim_acquired ())
+            ->
+            ()
+          | Ok Masc.Keeper_event_queue_recovery.For_testing.Claim_already_held ->
+            Alcotest.fail "cancellation test could not acquire canonical owner claim"
+          | Error error ->
+            Alcotest.fail
+              (Masc.Keeper_event_queue_recovery.projection_error_to_string error));
+        false
+      with
+      | Eio.Cancel.Cancelled _ -> true
+    in
+    Alcotest.(check bool)
+      "claim callback cancellation propagates"
+      true
+      cancellation_observed;
+    require_reacquired "cancellation completion")
 ;;
 
 let test_registration_preparation_is_atomic_and_fail_closed () =
@@ -2835,6 +2981,10 @@ let () =
             "transition outbox projection"
             `Quick
             test_transition_outbox_projects_with_stable_identity
+        ; Alcotest.test_case
+            "transition outbox projection claim contention"
+            `Quick
+            test_transition_outbox_claim_contention_and_release
         ; Alcotest.test_case
             "registration preparation"
             `Quick

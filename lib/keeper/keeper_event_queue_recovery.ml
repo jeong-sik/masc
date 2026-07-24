@@ -1,14 +1,18 @@
-module Owner_key = struct
-  type t = string * string
+module Owner_lock = Keeper_event_queue_owner_lock
 
-  let equal (left_base, left_keeper) (right_base, right_keeper) =
-    String.equal left_base right_base && String.equal left_keeper right_keeper
+module Owner_identity = struct
+  type t = Owner_lock.t
+
+  let equal = ( == )
+
+  let hash owner =
+    Hashtbl.hash
+      ( Owner_lock.base_path owner
+      , Owner_lock.keeper_name owner |> Keeper_id.Keeper_name.to_string )
   ;;
-
-  let hash = Hashtbl.hash
 end
 
-module Owner_claims = Hashtbl.Make (Owner_key)
+module Owner_claims = Hashtbl.Make (Owner_identity)
 
 type projection_outcome =
   | No_pending_transition
@@ -16,6 +20,7 @@ type projection_outcome =
   | Claim_busy
 
 type projection_error =
+  | Owner_unavailable of Owner_lock.resolve_error
   | Outbox_unavailable of string
   | Ledger_projection_failed of string
   | Unexpected_projection_failure of Eio.Exn.with_bt
@@ -37,6 +42,8 @@ type sweep_report =
   }
 
 let projection_error_to_string = function
+  | Owner_unavailable error ->
+    Owner_lock.resolve_error_to_string error
   | Outbox_unavailable detail ->
     "event queue transition outbox unavailable: " ^ detail
   | Ledger_projection_failed detail ->
@@ -73,7 +80,24 @@ let release_owner_claim owner =
   with_owner_claims_lock (fun () -> Owner_claims.remove owner_claims owner)
 ;;
 
-let project_claimed_owner ~base_path ~keeper_name =
+type 'a owner_claim_outcome =
+  | Owner_claim_acquired of 'a
+  | Owner_claim_busy
+
+let with_owner_claim owner f =
+  if not (try_acquire_owner_claim owner)
+  then Owner_claim_busy
+  else
+    Fun.protect
+      ~finally:(fun () -> release_owner_claim owner)
+      (fun () -> Owner_claim_acquired (f ()))
+;;
+
+let project_claimed_owner owner =
+  let base_path = Owner_lock.base_path owner in
+  let keeper_name =
+    Owner_lock.keeper_name owner |> Keeper_id.Keeper_name.to_string
+  in
   match
     Keeper_event_queue_persistence.transition_outbox_result
       ~base_path
@@ -91,21 +115,25 @@ let project_claimed_owner ~base_path ~keeper_name =
      | Error detail -> Error (Ledger_projection_failed detail))
 ;;
 
+let project_resolved_owner owner =
+  match
+    with_owner_claim owner (fun () ->
+      try project_claimed_owner owner with
+      | Eio.Cancel.Cancelled _ as exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        Printexc.raise_with_backtrace exn backtrace
+      | exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        Error (Unexpected_projection_failure (exn, backtrace)))
+  with
+  | Owner_claim_busy -> Ok Claim_busy
+  | Owner_claim_acquired result -> result
+;;
+
 let project_owner_result ~base_path ~keeper_name =
-  let owner = base_path, keeper_name in
-  if not (try_acquire_owner_claim owner)
-  then Ok Claim_busy
-  else
-    Fun.protect
-      ~finally:(fun () -> release_owner_claim owner)
-      (fun () ->
-         try project_claimed_owner ~base_path ~keeper_name with
-         | Eio.Cancel.Cancelled _ as exn ->
-           let backtrace = Printexc.get_raw_backtrace () in
-           Printexc.raise_with_backtrace exn backtrace
-         | exn ->
-           let backtrace = Printexc.get_raw_backtrace () in
-           Error (Unexpected_projection_failure (exn, backtrace)))
+  match Owner_lock.resolve ~base_path ~keeper_name with
+  | Error error -> Error (Owner_unavailable error)
+  | Ok owner -> project_resolved_owner owner
 ;;
 
 let project_discovered ~base_path =
@@ -144,3 +172,18 @@ let project_discovered ~base_path =
   in
   { report with failures = List.rev report.failures }
 ;;
+
+module For_testing = struct
+  type 'a claim_outcome =
+    | Claim_acquired of 'a
+    | Claim_already_held
+
+  let with_owner_claim ~base_path ~keeper_name f =
+    match Owner_lock.resolve ~base_path ~keeper_name with
+    | Error error -> Error (Owner_unavailable error)
+    | Ok owner ->
+      (match with_owner_claim owner f with
+       | Owner_claim_busy -> Ok Claim_already_held
+       | Owner_claim_acquired value -> Ok (Claim_acquired value))
+  ;;
+end

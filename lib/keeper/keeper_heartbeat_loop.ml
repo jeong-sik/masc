@@ -575,16 +575,23 @@ let compaction_outcome_of_cycle_outcome = function
 ;;
 
 let project_transition_outbox ~base_path ~keeper_name =
-  match
-    Keeper_event_queue_recovery.project_owner_result
-      ~base_path
-      ~keeper_name
-  with
+  Keeper_event_queue_recovery.project_owner_result
+    ~base_path
+    ~keeper_name
+;;
+
+let require_transition_outbox_projection ~base_path ~keeper_name =
+  match project_transition_outbox ~base_path ~keeper_name with
   | Ok
       ( Keeper_event_queue_recovery.No_pending_transition
-      | Keeper_event_queue_recovery.Transition_converged
-      | Keeper_event_queue_recovery.Claim_busy ) ->
+      | Keeper_event_queue_recovery.Transition_converged ) ->
     Ok ()
+  | Ok Keeper_event_queue_recovery.Claim_busy ->
+    Error
+      (Printf.sprintf
+         "event queue transition projection deferred because the canonical owner \
+          claim is busy keeper=%s; the next Keeper cycle will retry"
+         keeper_name)
   | Error error ->
     Error (Keeper_event_queue_recovery.projection_error_to_string error)
 ;;
@@ -1036,7 +1043,7 @@ let run_keepalive_unified_turn
     in
     try
       (match
-         project_transition_outbox
+         require_transition_outbox_projection
            ~base_path:ctx.config.base_path
            ~keeper_name:meta_after_triage.name
        with
@@ -1366,7 +1373,7 @@ let run_keepalive_unified_turn
                           ( Keeper_registry_event_queue.Settled _
                           | Keeper_registry_event_queue.Already_settled _ ) ->
                         lease_settled := true;
-                        project_transition_outbox
+                        require_transition_outbox_projection
                           ~base_path:ctx.config.base_path
                           ~keeper_name:meta_after_triage.name
                       | Ok
@@ -1559,7 +1566,7 @@ let run_keepalive_unified_turn
               | Keeper_registry_event_queue.Already_settled _ ) ->
             lease_settled := true;
             (match
-               project_transition_outbox
+               require_transition_outbox_projection
                  ~base_path:ctx.config.base_path
                  ~keeper_name:meta_after_triage.name
              with

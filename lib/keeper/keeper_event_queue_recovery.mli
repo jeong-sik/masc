@@ -11,6 +11,7 @@ type projection_outcome =
   | Claim_busy
 
 type projection_error =
+  | Owner_unavailable of Keeper_event_queue_owner_lock.resolve_error
   | Outbox_unavailable of string
   | Ledger_projection_failed of string
   | Unexpected_projection_failure of Eio.Exn.with_bt
@@ -48,3 +49,17 @@ val project_discovered : base_path:string -> sweep_report
 (** Discover current-schema durable queue owners and project each owner through
     {!project_owner_result}. A partial discovery error is retained alongside
     results for every owner that was discovered successfully. *)
+
+module For_testing : sig
+  type 'a claim_outcome =
+    | Claim_acquired of 'a
+    | Claim_already_held
+
+  val with_owner_claim :
+    base_path:string ->
+    keeper_name:string ->
+    (unit -> 'a) ->
+    ('a claim_outcome, projection_error) result
+  (** Hold the canonical process-local owner claim while running the callback.
+      The claim-table mutex is not held while the callback runs. *)
+end

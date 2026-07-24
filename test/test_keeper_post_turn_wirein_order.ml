@@ -1217,9 +1217,7 @@ let test_manual_applied_hint_failure () =
             check bool
               "durable queue receipt carries exact installed ref"
               true
-              (Masc.Keeper_checkpoint_ref.equal
-                 success.receipt.installation.installed_ref
-                 commit.installed_ref);
+              (success.receipt.installation.installed_ref = commit.installed_ref);
             check bool
               "durable queue receipt carries observer auxiliary"
               true

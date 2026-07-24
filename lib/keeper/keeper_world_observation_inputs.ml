@@ -19,17 +19,6 @@ let backlog_updated_since_last_scheduled_autonomous
     | None -> false)
 ;;
 
-let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta)
-    ~(tasks : Masc_domain.task list) () =
-  (* [read_backlog_counts] already loaded [tasks]. Reuse them to get the same
-     empty-scope fallback as the claim path without a second backlog read. *)
-  let scope =
-    Keeper_runtime_contract.resolve_claim_goal_scope_for_tasks ~config ~meta
-      ~tasks ()
-  in
-  scope.task_filter
-;;
-
 (* A keeper must not treat a task it authored itself as work waiting for it.
    Without this, a persona whose response to "an unclaimed task exists" is to
    create a routing/report task produces a closed positive feedback loop: the
@@ -38,13 +27,37 @@ let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta)
    authored 367 of the active tasks, 272 of them the same four "Route g0700 #N"
    templates re-emitted once per iteration (#28..#90), none ever claimed.
 
-   [created_by] carries the keeper handle ([meta.name], e.g. "taskmaster"), not
-   the agent name, so it is compared against [meta.name]. A task with no
-   [created_by] has no known author and is never excluded. *)
-let task_is_self_authored ~(meta : keeper_meta) (task : Masc_domain.task) =
-  match task.created_by with
-  | None -> false
-  | Some author -> String.equal author meta.name
+   Only unclaimed [Todo] work is excluded. Once another keeper submits an
+   authored task for verification, the author remains a valid verifier. *)
+let task_is_self_authored_todo ~(meta : keeper_meta) (task : Masc_domain.task) =
+  match task.task_status, task.created_by with
+  | Masc_domain.Todo, Some author -> String.equal author meta.name
+  | Masc_domain.Todo, None -> false
+  | ( Masc_domain.AwaitingVerification _
+    | Masc_domain.Claimed _
+    | Masc_domain.InProgress _
+    | Masc_domain.Done _
+    | Masc_domain.Cancelled _ )
+    , (None | Some _) ->
+    false
+;;
+
+let claim_goal_scope_filter ~(config : Workspace.config) ~(meta : keeper_meta)
+    ~(tasks : Masc_domain.task list) () =
+  (* [read_backlog_counts] already loaded [tasks]. Reuse them to get the same
+     empty-scope fallback as the claim path without a second backlog read.
+     Self-authored Todo work is a hard exclusion, so it cannot keep the scope
+     artificially nonempty and hide eligible peer work. *)
+  let task_eligible task = not (task_is_self_authored_todo ~meta task) in
+  let scope =
+    Keeper_runtime_contract.resolve_claim_goal_scope_for_tasks
+      ~config
+      ~meta
+      ~tasks
+      ~task_eligible
+      ()
+  in
+  scope.task_filter
 ;;
 
 let actionable_verification_request_ids ~(config : Workspace.config) : string list =
@@ -117,7 +130,7 @@ let read_backlog_counts ~(config : Workspace.config) ~(meta : keeper_meta)
               (* Self-authored tasks stay in [unclaimed] (the count stays an
                  honest view of the backlog) but are not offered back to their
                  author as claimable work — that edge is the feedback loop. *)
-              && not (task_is_self_authored ~meta task))
+              && not (task_is_self_authored_todo ~meta task))
            unclaimed_tasks)
     in
     let failed =

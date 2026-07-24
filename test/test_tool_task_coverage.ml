@@ -408,7 +408,8 @@ let () = test "workspace_add_task_with_result_returns_typed_task_id" (fun () ->
 
 (* Regression for the self-author claim-path filter (issue #25459 / #25429):
    the auto-claim path in keeper_tool_task_runtime composes
-   [not (task_is_self_authored ~meta t)] into the [claim_next_r] task_filter so
+   [not (task_is_self_authored_todo ~meta t)] into the [claim_next_r] hard
+   filter so
    a keeper is not auto-assigned a task it authored itself. This exercises the
    real [claim_next_r] selection (the predicate itself is unit-tested in
    test_keeper_self_authored_task_exclusion). Ordering-independent: a single

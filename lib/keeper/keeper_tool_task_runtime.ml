@@ -512,8 +512,18 @@ let handle_keeper_task_tool_with_outcome
                        , Keeper_tool_outcome.to_json Keeper_tool_outcome.Progress );
                      ]))))
     | Task_claim ->
+    let auto_claim_eligible task =
+      not
+        (Keeper_world_observation_inputs.task_is_self_authored_todo
+           ~meta
+           task)
+    in
     let claim_goal_scope =
-      Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
+      Keeper_runtime_contract.resolve_claim_goal_scope
+        ~config
+        ~meta
+        ~task_eligible:auto_claim_eligible
+        ()
     in
     let requested_task_id =
       Safe_ops.json_string ~default:"" "task_id" args |> String.trim
@@ -563,8 +573,7 @@ let handle_keeper_task_tool_with_outcome
              task right back — exactly the case this is meant to prevent. *)
           Workspace.claim_next_r config ~agent_name:meta.agent_name
             ~task_filter:claim_goal_scope.task_filter
-            ~hard_filter:(fun task ->
-              not (Keeper_world_observation_inputs.task_is_self_authored ~meta task))
+            ~hard_filter:auto_claim_eligible
             ~allow_scope_fallback:true
             ()
       in

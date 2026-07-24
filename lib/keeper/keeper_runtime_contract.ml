@@ -113,7 +113,7 @@ let meta_only_claim_goal_scope ?task_goal_index (meta : keeper_meta) =
    backlog. Kept off the pure signal-only observation resolver
    ([resolve_observation_claim_goal_scope]). *)
 let resolve_claim_goal_scope_for_tasks ~(config : Workspace.config)
-    ~(meta : keeper_meta) ~(tasks : Masc_domain.task list) () =
+    ~(meta : keeper_meta) ~(tasks : Masc_domain.task list) ~task_eligible () =
   match meta.active_goal_ids with
   | [] -> meta_only_claim_goal_scope meta
   | goal_ids ->
@@ -121,6 +121,7 @@ let resolve_claim_goal_scope_for_tasks ~(config : Workspace.config)
     let scoped_claimable_exists =
       List.exists (fun task ->
              task_is_unclaimed_todo task
+             && task_eligible task
              && task_is_linked_to_keeper_goals ~task_goal_index goal_ids task)
         tasks
     in
@@ -135,9 +136,10 @@ let resolve_claim_goal_scope_for_tasks ~(config : Workspace.config)
         fallback_reason = Some "no_scoped_claimable_tasks";
       }
 
-let resolve_claim_goal_scope ~(config : Workspace.config) ~(meta : keeper_meta) () =
+let resolve_claim_goal_scope ~(config : Workspace.config) ~(meta : keeper_meta)
+    ~task_eligible () =
   let tasks = Workspace.get_tasks_safe config in
-  resolve_claim_goal_scope_for_tasks ~config ~meta ~tasks ()
+  resolve_claim_goal_scope_for_tasks ~config ~meta ~tasks ~task_eligible ()
 
 let resolve_observation_claim_goal_scope ~(config : Workspace.config)
     ~(meta : keeper_meta) () =

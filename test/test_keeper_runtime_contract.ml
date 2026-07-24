@@ -49,7 +49,8 @@ let test_active_goal_ids_filter_claimable_tasks () =
       add_task ~goal_id:"goal-b" config ~title:"goal b task";
       let meta = make_meta ~active_goal_ids:[ "goal-a" ] () in
       let scope =
-        Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
+        Keeper_runtime_contract.resolve_claim_goal_scope
+          ~config ~meta ~task_eligible:(fun _ -> true) ()
       in
       check string "mode" "active_goal_ids"
         (Keeper_runtime_contract.claim_scope_mode_to_string scope.mode);
@@ -88,7 +89,8 @@ let test_no_scoped_match_falls_back_to_all_tasks () =
       add_task ~goal_id:"goal-b" config ~title:"goal b task";
       let meta = make_meta ~active_goal_ids:[ "goal-a" ] () in
       let scope =
-        Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
+        Keeper_runtime_contract.resolve_claim_goal_scope
+          ~config ~meta ~task_eligible:(fun _ -> true) ()
       in
       check string "fallback mode" "empty_goal_scope_fallback_all_tasks"
         (Keeper_runtime_contract.claim_scope_mode_to_string scope.mode);
@@ -122,7 +124,7 @@ let test_preloaded_tasks_fall_back_to_all_tasks () =
       let tasks = Workspace.get_tasks_raw config in
       let scope =
         Keeper_runtime_contract.resolve_claim_goal_scope_for_tasks ~config
-          ~meta ~tasks ()
+          ~meta ~tasks ~task_eligible:(fun _ -> true) ()
       in
       check string "fallback mode" "empty_goal_scope_fallback_all_tasks"
         (Keeper_runtime_contract.claim_scope_mode_to_string scope.mode);
@@ -144,7 +146,8 @@ let test_scoped_match_present_keeps_isolation () =
       add_task ~goal_id:"goal-b" config ~title:"goal b task";
       let meta = make_meta ~active_goal_ids:[ "goal-a" ] () in
       let scope =
-        Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
+        Keeper_runtime_contract.resolve_claim_goal_scope
+          ~config ~meta ~task_eligible:(fun _ -> true) ()
       in
       check string "scoped mode" "active_goal_ids"
         (Keeper_runtime_contract.claim_scope_mode_to_string scope.mode);

@@ -97,14 +97,16 @@ let user_message_of_sdk_error = function
     provider_network_user_message ~kind ~detail:message ()
   | Agent_sdk.Error.Api (Agent_sdk.Retry.ContextOverflow { limit; _ }) ->
     context_overflow_user_message ~limit
-  | Agent_sdk.Error.Api
-      (Agent_sdk.Retry.InputCapacity { reason; _ }) ->
-    (match Keeper_input_capacity.recovery_of_reason reason with
-     | Keeper_input_capacity.Compact_to_accepted_through accepted_through ->
-       context_overflow_user_message ~limit:(Some accepted_through)
-     | Keeper_input_capacity.Failover_only ->
-       "The selected runtime could not verify this request against its current \
-        input-capacity evidence. The message was not dispatched.")
+  | (Agent_sdk.Error.Api (Agent_sdk.Retry.InputCapacity _) as err) ->
+    (match Keeper_input_capacity.compaction_limit err with
+     | Some accepted_through ->
+       Printf.sprintf
+         "This conversation exceeds a current runtime input-capacity bound \
+          (~%d tokens). Transcript compaction is required before retrying."
+         accepted_through
+     | None ->
+       "The runtime flow reported an input-capacity failure that cannot be \
+        repaired from current evidence.")
   | Agent_sdk.Error.Provider
       (Llm_provider.Error.NetworkError { provider; kind; detail; _ }) ->
     provider_network_user_message ~provider ~kind ~detail ()

@@ -93,7 +93,7 @@ let test_api_auth_rotates_invalid_request_judges () =
     Alcotest.failf "invalid request should judge, got %s"
       (KFR.route_kind_label other)
 
-let test_api_input_capacity_uses_typed_recovery () =
+let test_api_input_capacity_never_rotates_runtime () =
   let constraint_ =
     Llm_provider.Serving_constraint.make
       ~source_kind:Llm_provider.Serving_constraint.Probe
@@ -134,12 +134,21 @@ let test_api_input_capacity_uses_typed_recovery () =
              ; accepted_through = 524298
              ; rejected_from = 524299
              })));
+  let measurement_unavailable =
+    error
+      (Llm_provider.Retry.Token_measurement_unavailable
+         Llm_provider.Input_token_count.Anthropic_messages_count_tokens)
+  in
   check_route
-    "measurement-unavailable rotates"
-    (KFR.Rotate_now { rotate = KFR.Model_unavailable })
-    (error
-       (Llm_provider.Retry.Token_measurement_unavailable
-          Llm_provider.Input_token_count.Anthropic_messages_count_tokens))
+    "measurement-unavailable remains a terminal judgment"
+    (KFR.Escalate_judgment
+       { judgment = KFR.Deterministic_request
+       ; provenance = KFR.Oas_api_error
+       ; detail =
+           Agent_sdk.Error.to_string measurement_unavailable
+           |> Keeper_internal_error.cap_blocker_detail
+       })
+    measurement_unavailable
 
 let test_provider_quota_family_threads_hint () =
   check_route
@@ -436,9 +445,9 @@ let () =
             test_api_server_error_uses_typed_variant
         ; Alcotest.test_case "auth rotates, invalid judges" `Quick test_api_auth_rotates_invalid_request_judges
         ; Alcotest.test_case
-            "input capacity typed recovery"
+            "input capacity never rotates runtime"
             `Quick
-            test_api_input_capacity_uses_typed_recovery
+            test_api_input_capacity_never_rotates_runtime
         ] )
     ; ( "provider"
       , [ Alcotest.test_case "quota family hints" `Quick test_provider_quota_family_threads_hint

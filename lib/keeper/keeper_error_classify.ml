@@ -357,7 +357,6 @@ type degraded_retry_reason =
   | Rate_limit
   | Server_error
   | Auth_error
-  | Input_capacity
   | Empty_no_progress
   | Thinking_only_no_progress
 
@@ -370,7 +369,6 @@ let degraded_retry_reason_to_string = function
   | Rate_limit -> "rate_limit"
   | Server_error -> "server_error"
   | Auth_error -> "auth_error"
-  | Input_capacity -> "input_capacity"
   | Empty_no_progress -> "empty_no_progress"
   | Thinking_only_no_progress -> "thinking_only_no_progress"
 
@@ -542,8 +540,6 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
              ( Llm_provider.Retry.AuthError _
              | Llm_provider.Retry.AuthorizationError _ ) ->
              Some Auth_error
-         | Agent_sdk.Error.Api (Llm_provider.Retry.InputCapacity _) ->
-             Some Input_capacity
          | Agent_sdk.Error.Provider
              (Llm_provider.Error.RateLimit _) ->
              Some Rate_limit
@@ -576,6 +572,7 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
          | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
+         | Agent_sdk.Error.Api (Llm_provider.Retry.InputCapacity _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) -> None
          (* Non-API error families have no rotation reason here: structured
@@ -639,7 +636,6 @@ let default_degraded_rotation_candidates
       ( Capacity_backpressure
       | Server_error
       | Auth_error
-      | Input_capacity
       | Runtime_exhausted
       | Runtime_candidates_filtered
       | Resumable_cli_session ) ->

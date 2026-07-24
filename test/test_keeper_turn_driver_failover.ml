@@ -958,7 +958,7 @@ let input_capacity_error reason =
        ; reason
        })
 
-let test_attempt_loop_input_capacity_tries_next_candidate () =
+let test_attempt_loop_input_capacity_does_not_advance_masc_lane () =
   let attempts = ref [] in
   let result =
     Driver.For_testing.attempt_runtime_candidates
@@ -974,51 +974,23 @@ let test_attempt_loop_input_capacity_tries_next_candidate () =
                (Agent_sdk.Retry.Token_measurement_unavailable
                   Llm_provider.Input_token_count.Anthropic_messages_count_tokens)),
           None
-        | "measurable.test_model" -> Ok runtime_id, None
-        | other -> Alcotest.failf "unexpected candidate %s" other)
+        | other ->
+          Alcotest.failf
+            "MASC advanced to candidate %s without an OAS flow receipt"
+            other)
       [ "unmeasurable.test_model"; "measurable.test_model" ]
   in
   (match result with
-   | Ok runtime_id ->
-     Alcotest.(check string)
-       "next runtime serves the turn"
-       "measurable.test_model"
-       runtime_id
+   | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.InputCapacity _)) -> ()
    | Error error ->
      Alcotest.failf
-       "typed input capacity did not fail over: %s"
-       (Agent_sdk.Error.to_string error));
+       "typed input capacity was not preserved: %s"
+       (Agent_sdk.Error.to_string error)
+   | Ok _ -> Alcotest.fail "MASC must not advance an InputCapacity failure");
   Alcotest.(check (list string))
-    "typed zero-dispatch failure advances the lane"
-    [ "unmeasurable.test_model"; "measurable.test_model" ]
+    "only OAS may advance the candidate flow"
+    [ "unmeasurable.test_model" ]
     !attempts
-
-let test_attempt_loop_compactable_input_capacity_stays_typed_on_last_candidate () =
-  let result =
-    Driver.For_testing.attempt_runtime_candidates
-      ~runtime_id:"resilient"
-      ~runtime_id_of:(fun runtime_id -> runtime_id)
-      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
-      ~run_attempt:(fun ~idx:_ ~runtime_id:_ _candidate ->
-        Error
-          (input_capacity_error
-             (Agent_sdk.Retry.Serving_constraint_rejected
-                (Llm_provider.Serving_constraint.Input_rejected
-                   { input_tokens = 524299
-                   ; accepted_through = 524298
-                   ; rejected_from = 524299
-                   }))),
-        None)
-      [ "first.test_model"; "last.test_model" ]
-  in
-  match result with
-  | Error error ->
-    (match Masc.Keeper_unified_turn.context_overflow_event_of_error error with
-     | Some
-         (Keeper_state_machine.Context_overflow_detected
-            { limit_tokens = Some 524298 }) -> ()
-     | _ -> Alcotest.fail "typed accepted-through bound did not reach compaction")
-  | Ok _ -> Alcotest.fail "last compactable input-capacity failure was lost"
 
 (* A typed ContextOverflow is a per-candidate capacity bound: a later lane
    candidate with a larger context window can still serve the same turn, so
@@ -1166,13 +1138,9 @@ let () =
             `Quick
             test_attempt_loop_overflow_tries_next_candidate;
           Alcotest.test_case
-            "input capacity tries next lane candidate"
+            "input capacity does not advance MASC lane"
             `Quick
-            test_attempt_loop_input_capacity_tries_next_candidate;
-          Alcotest.test_case
-            "compactable input capacity reaches compaction"
-            `Quick
-            test_attempt_loop_compactable_input_capacity_stays_typed_on_last_candidate;
+            test_attempt_loop_input_capacity_does_not_advance_masc_lane;
           Alcotest.test_case
             "context overflow on last candidate stays terminal"
             `Quick

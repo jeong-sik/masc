@@ -82,7 +82,29 @@ let test_input_capacity_compacts_only_with_current_bound () =
     bool
     "stale evidence emits no overflow event"
     true
-    (Option.is_none (Masc.Keeper_unified_turn.context_overflow_event_of_error stale))
+    (Option.is_none (Masc.Keeper_unified_turn.context_overflow_event_of_error stale));
+  let measurement_unavailable =
+    Agent_sdk.Error.Api
+      (InputCapacity
+         { message = "measurement unavailable"
+         ; constraint_
+         ; reason =
+             Agent_sdk.Retry.Token_measurement_unavailable
+               Llm_provider.Input_token_count.Anthropic_messages_count_tokens
+         })
+  in
+  check
+    bool
+    "unmeasured input is not compactable"
+    false
+    (EC.is_context_overflow measurement_unavailable);
+  check
+    bool
+    "unmeasured input emits no overflow event"
+    true
+    (Option.is_none
+       (Masc.Keeper_unified_turn.context_overflow_event_of_error
+          measurement_unavailable))
 ;;
 
 (* ContextOverflow is routed as an explicit recoverable turn failure after OAS

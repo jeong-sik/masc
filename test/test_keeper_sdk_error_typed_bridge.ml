@@ -430,7 +430,7 @@ let test_payment_required_is_hard_quota () =
   | None -> Alcotest.fail "expected hard_quota recoverable reason"
 ;;
 
-let test_input_capacity_is_typed_runtime_recovery () =
+let test_input_capacity_is_not_runtime_recovery () =
   let err =
     SdkE.Api
       (Retry.InputCapacity
@@ -442,12 +442,11 @@ let test_input_capacity_is_typed_runtime_recovery () =
          })
   in
   match EC.recoverable_runtime_failure_reason err with
-  | Some EC.Input_capacity -> ()
+  | None -> ()
   | Some reason ->
     Alcotest.failf
-      "expected input_capacity, got %s"
+      "InputCapacity must not select MASC runtime recovery, got %s"
       (EC.degraded_retry_reason_to_string reason)
-  | None -> Alcotest.fail "typed input capacity did not expose a runtime recovery reason"
 ;;
 
 (* Regression: a transient Overloaded (529/CapacityExhausted) whose prose
@@ -989,9 +988,9 @@ let () =
             `Quick
             test_payment_required_is_hard_quota
         ; Alcotest.test_case
-            "input capacity is typed runtime recovery"
+            "input capacity is not MASC runtime recovery"
             `Quick
-            test_input_capacity_is_typed_runtime_recovery
+            test_input_capacity_is_not_runtime_recovery
         ; Alcotest.test_case
             "transient overload with quota prose is not hard quota"
             `Quick

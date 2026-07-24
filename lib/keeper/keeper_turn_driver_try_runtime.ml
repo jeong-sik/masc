@@ -44,7 +44,3 @@ let context_overflow_should_try_next = function
   | Agent_sdk.Error.Orchestration _
   | Agent_sdk.Error.Internal _ -> false
 ;;
-
-let input_capacity_should_try_next =
-  Keeper_input_capacity.should_try_next_runtime
-;;

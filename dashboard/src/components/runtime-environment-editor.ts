@@ -78,7 +78,7 @@ interface RuntimeEnvironmentEditorProps {
   draftDirty?: boolean
   saving?: boolean
   onRoutingChange: (
-    lane: 'default' | 'librarian' | 'structured_judge' | 'cross_verifier',
+    lane: 'default' | 'structured_judge' | 'cross_verifier',
     runtimeId: string | null,
   ) => void
   onAssignmentChange: (keeperName: string, runtimeId: string | null) => void
@@ -314,7 +314,6 @@ export function RuntimeEnvironmentEditor({
   const runtimeIds = runtimeOptions(environment)
   const isDisabled = disabled === true || saving === true
 
-  const librarianLane = environment.librarianRuntimeId
   const crossVerifierLane = environment.crossVerifierRuntimeId
   const assignments = environment.assignments
   const keeperList = keepers.value
@@ -336,7 +335,7 @@ export function RuntimeEnvironmentEditor({
     if (runtimeId !== '') onRoutingChange('default', runtimeId)
   }
 
-  function updateRoutingLane(lane: 'librarian' | 'structured_judge' | 'cross_verifier', runtimeId: string) {
+  function updateRoutingLane(lane: 'structured_judge' | 'cross_verifier', runtimeId: string) {
     onRoutingChange(lane, runtimeId === '' ? null : runtimeId)
   }
 
@@ -501,7 +500,7 @@ export function RuntimeEnvironmentEditor({
   // so the narrow Settings embed can wrap labels, controls, and capability badges.
 
   function laneRow(
-    lane: 'default' | 'librarian' | 'structured_judge' | 'cross_verifier',
+    lane: 'default' | 'structured_judge' | 'cross_verifier',
     label: string,
     hint: string,
     value: string,
@@ -514,8 +513,8 @@ export function RuntimeEnvironmentEditor({
     // structured_judge requires provider-native structured output, not just JSON
     // mode: the server rejects a structured_judge runtime whose model does not
     // declare supports-structured-output (lib/runtime/runtime.ml:142-151, "must
-    // declare structured output, not just JSON mode"). librarian / cross_verifier
-    // need JSON mode (grounding.md). Both read the already-parsed capability off
+    // declare structured output, not just JSON mode"). cross_verifier needs JSON
+    // mode (grounding.md). Both read the already-parsed capability off
     // the model — no /api/v1/providers projection needed.
     const capValue =
       !model || requirement === 'none'
@@ -675,7 +674,7 @@ export function RuntimeEnvironmentEditor({
         </div>
       ` : null}
 
-      <!-- routing — runtime-editor.jsx:135-141. default lane is live; librarian /
+      <!-- routing — runtime-editor.jsx:135-141. default lane is live;
            structured_judge / cross_verifier are read from
            [runtime] and written back. -->
       <div class=${section === 'routing' ? '' : 'hidden'} data-testid="runtime-section-routing">
@@ -689,14 +688,6 @@ export function RuntimeEnvironmentEditor({
           environment.defaultRuntimeId || firstId(environment.bindings),
           updateDefault,
           'none',
-        )}
-        ${laneRow(
-          'librarian',
-          'memory-os 라이브러리안',
-          '[runtime].librarian — 턴 후 에피소드 추출, JSON 모드 필요',
-          librarianLane,
-          runtimeId => updateRoutingLane('librarian', runtimeId),
-          'json',
         )}
         ${laneRow(
           'structured_judge',

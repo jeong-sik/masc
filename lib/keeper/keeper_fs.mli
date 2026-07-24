@@ -58,8 +58,24 @@ type durable_write_error =
   ; failure : durable_write_failure
   }
 
+(** Strict durable atomic write with a required terminal observer.
+    [on_durable_commit] runs exactly once in the caller fiber after the payload,
+    rename, required directory fsyncs, and final directory-lease confirmations
+    have all succeeded, but before pending cooperative cancellation is checked.
+    It is not called on an error. The callback must be synchronous,
+    non-blocking, perform no I/O or Eio operation, and must not raise. *)
+val save_bytes_durable_atomic_observed
+  :  on_durable_commit:(unit -> unit)
+  -> ?ownership_root:string
+  -> ?temp_dir:string
+  -> string
+  -> string
+  -> (unit, durable_write_error) result
+
 (** Strict durable atomic write of the supplied immutable byte string.
-    The payload is written exactly, without parsing or re-encoding. *)
+    The payload is written exactly, without parsing or re-encoding. This
+    delegates to {!save_bytes_durable_atomic_observed} with an explicit
+    no-op observer. *)
 val save_bytes_durable_atomic
   :  ?ownership_root:string
   -> ?temp_dir:string
@@ -126,6 +142,16 @@ module For_testing : sig
       named filesystem operation. [before_directory_fsync] runs immediately
       before anchoring one directory component in the durability systhread.
       Either may raise to verify the typed contract and retry behavior. *)
+  val save_bytes_durable_atomic_observed
+    :  on_durable_commit:(unit -> unit)
+    -> before_stage:(durable_write_stage -> unit)
+    -> ?before_directory_fsync:(string -> unit)
+    -> ?ownership_root:string
+    -> ?temp_dir:string
+    -> string
+    -> string
+    -> (unit, durable_write_error) result
+
   val save_bytes_durable_atomic
     :  before_stage:(durable_write_stage -> unit)
     -> ?before_directory_fsync:(string -> unit)

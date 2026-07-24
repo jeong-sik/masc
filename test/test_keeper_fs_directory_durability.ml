@@ -4,6 +4,7 @@ module KF = Masc.Keeper_fs
 module KDD = Masc.Keeper_fs_durable_directory
 
 exception Synthetic_owner_failure
+exception Synthetic_observer_cancel
 
 (* This is a test-runner watchdog, not a production scheduling policy. It
    localizes a coordination liveness regression instead of consuming the
@@ -819,6 +820,254 @@ let test_invalidate_reaps_resolved_ticket () =
          (Atomic.get reclaimed_before_release))
 ;;
 
+let test_durable_commit_observer_cardinality () =
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let committed = ref 0 in
+       let committed_path = Filename.concat base "committed.bin" in
+       require_durable_ok
+         "observed durable write"
+         (KF.For_testing.save_bytes_durable_atomic_observed
+            ~on_durable_commit:(fun () -> incr committed)
+            ~before_stage:(fun _ -> ())
+            committed_path
+            "committed");
+       check int "successful write publishes once" 1 !committed;
+       let rejected = ref 0 in
+       let rejected_path = Filename.concat base "rejected.bin" in
+       (match
+          KF.For_testing.save_bytes_durable_atomic_observed
+            ~on_durable_commit:(fun () -> incr rejected)
+            ~before_stage:(function
+              | KF.Payload_fsync -> failwith "injected precommit failure"
+              | _ -> ())
+            rejected_path
+            "rejected"
+        with
+        | Error { renamed = false; stage = KF.Payload_fsync; _ } -> ()
+        | Error error ->
+          failf
+            "unexpected observed write error: %s"
+            (KF.durable_write_error_to_string error)
+       | Ok () -> fail "injected precommit failure unexpectedly succeeded");
+       check int "failed write does not publish" 0 !rejected;
+       let post_rename = ref 0 in
+       let post_rename_path = Filename.concat base "post-rename.bin" in
+       (match
+          KF.For_testing.save_bytes_durable_atomic_observed
+            ~on_durable_commit:(fun () -> incr post_rename)
+            ~before_stage:(function
+              | KF.Parent_directory_fsync_after_rename ->
+                failwith "injected parent directory fsync failure"
+              | _ -> ())
+            post_rename_path
+            "renamed-not-durable"
+        with
+        | Error
+            { renamed = true
+            ; stage = KF.Parent_directory_fsync_after_rename
+            ; _
+            } ->
+          ()
+        | Error error ->
+          failf
+            "unexpected post-rename observed write error: %s"
+            (KF.durable_write_error_to_string error)
+        | Ok () -> fail "injected parent directory fsync failure unexpectedly succeeded");
+       check int "post-rename fsync failure does not publish" 0 !post_rename)
+;;
+
+let test_durable_commit_observer_precedes_pending_cancellation () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Time.with_timeout_exn
+    (Eio.Stdenv.clock env)
+    coordination_watchdog_seconds
+  @@ fun () ->
+  with_eio_guard
+  @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let path = Filename.concat base "cancelled-after-commit.bin" in
+       let hook = blocking_hook base in
+       let context, resolve_context = Eio.Promise.create () in
+       let outcome, resolve_outcome = Eio.Promise.create () in
+       let publish_count = Atomic.make 0 in
+       let published_on_caller_thread = Atomic.make false in
+       Eio.Switch.run
+       @@ fun sw ->
+       with_blocking_hook_release hook
+       @@ fun () ->
+       Eio.Fiber.fork ~sw (fun () ->
+         let caller_thread_id = Thread.id (Thread.self ()) in
+         let outcome =
+           try
+             Eio.Cancel.sub (fun cancel_context ->
+               Eio.Promise.resolve resolve_context cancel_context;
+               match
+                 KF.For_testing.save_bytes_durable_atomic_observed
+                   ~on_durable_commit:(fun () ->
+                     Atomic.set
+                       published_on_caller_thread
+                       (Thread.id (Thread.self ()) = caller_thread_id);
+                     ignore (Atomic.fetch_and_add publish_count 1))
+                   ~before_stage:(function
+                     | KF.Parent_directory_fsync_after_rename ->
+                       block_once hook (fun () -> ()) base
+                     | _ -> ())
+                   path
+                   "committed-before-cancel"
+               with
+               | Ok () -> `Returned
+               | Error error ->
+                 failf
+                   "pending-cancellation write failed: %s"
+                   (KF.durable_write_error_to_string error))
+           with
+           | Eio.Cancel.Cancelled _ -> `Cancelled
+         in
+         Eio.Promise.resolve resolve_outcome outcome);
+       let cancel_context = Eio.Promise.await context in
+       Eio.Promise.await hook.entered;
+       Eio.Cancel.cancel cancel_context Synthetic_observer_cancel;
+       release_blocking_hook hook;
+       (match Eio.Promise.await outcome with
+        | `Cancelled -> ()
+        | `Returned -> fail "pending cancellation was not propagated");
+       check int "publication precedes pending cancellation" 1
+         (Atomic.get publish_count);
+       check bool "observer ran on caller thread" true
+         (Atomic.get published_on_caller_thread))
+;;
+
+let test_durable_commit_observer_error_preserves_pending_cancellation () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Time.with_timeout_exn
+    (Eio.Stdenv.clock env)
+    coordination_watchdog_seconds
+  @@ fun () ->
+  with_eio_guard
+  @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let path = Filename.concat base "cancelled-with-error.bin" in
+       let hook = blocking_hook base in
+       let context, resolve_context = Eio.Promise.create () in
+       let outcome, resolve_outcome = Eio.Promise.create () in
+       let publish_count = Atomic.make 0 in
+       Eio.Switch.run
+       @@ fun sw ->
+       with_blocking_hook_release hook
+       @@ fun () ->
+       Eio.Fiber.fork ~sw (fun () ->
+         let outcome =
+           try
+             Eio.Cancel.sub (fun cancel_context ->
+               Eio.Promise.resolve resolve_context cancel_context;
+               match
+                 KF.For_testing.save_bytes_durable_atomic_observed
+                   ~on_durable_commit:(fun () ->
+                     ignore (Atomic.fetch_and_add publish_count 1))
+                   ~before_stage:(function
+                     | KF.Payload_fsync ->
+                       block_once
+                         hook
+                         (fun () -> failwith "injected operation error")
+                         base
+                     | _ -> ())
+                   path
+                   "must-not-commit"
+               with
+               | Ok () -> `Returned_ok
+               | Error _ -> `Returned_error)
+           with
+           | Eio.Cancel.Cancelled _ -> `Cancelled
+         in
+         Eio.Promise.resolve resolve_outcome outcome);
+       let cancel_context = Eio.Promise.await context in
+       Eio.Promise.await hook.entered;
+       Eio.Cancel.cancel cancel_context Synthetic_observer_cancel;
+       release_blocking_hook hook;
+       (match Eio.Promise.await outcome with
+        | `Cancelled -> ()
+        | `Returned_ok -> fail "faulted write unexpectedly succeeded"
+        | `Returned_error ->
+          fail "pending cancellation was hidden by the operation error");
+       check int "cancelled error path does not publish" 0
+         (Atomic.get publish_count))
+;;
+
+let test_durable_commit_observer_waits_for_reanchor () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Time.with_timeout_exn
+    (Eio.Stdenv.clock env)
+    coordination_watchdog_seconds
+  @@ fun () ->
+  with_eio_guard
+  @@ fun () ->
+  KF.clear_dir_cache ();
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let dir = Filename.concat base "owned" in
+       let path = Filename.concat dir "request.bin" in
+       require_durable_ok
+         "seed directory lease"
+         (KF.save_bytes_durable_atomic path "seed");
+       let initial_fsync = blocking_hook dir in
+       let reanchor_fsync = blocking_hook dir in
+       let fsync_count = Atomic.make 0 in
+       let publish_count = Atomic.make 0 in
+       let outcome, resolve_outcome = Eio.Promise.create () in
+       Eio.Switch.run
+       @@ fun sw ->
+       with_blocking_hook_release initial_fsync
+       @@ fun () ->
+       with_blocking_hook_release reanchor_fsync
+       @@ fun () ->
+       Eio.Fiber.fork ~sw (fun () ->
+         let result =
+           KF.For_testing.save_bytes_durable_atomic_observed
+             ~on_durable_commit:(fun () ->
+               ignore (Atomic.fetch_and_add publish_count 1))
+             ~before_stage:(function
+               | KF.Parent_directory_fsync_after_rename ->
+                 let occurrence = Atomic.fetch_and_add fsync_count 1 in
+                 if occurrence = 0
+                 then block_once initial_fsync (fun () -> ()) dir
+                 else if occurrence = 1
+                 then block_once reanchor_fsync (fun () -> ()) dir
+               | _ -> ())
+             path
+             "replacement"
+         in
+         Eio.Promise.resolve resolve_outcome result);
+       Eio.Promise.await initial_fsync.entered;
+       KF.invalidate_dir dir;
+       release_blocking_hook initial_fsync;
+       Eio.Promise.await reanchor_fsync.entered;
+       check int "observer remains absent before re-anchor fsync" 0
+         (Atomic.get publish_count);
+       release_blocking_hook reanchor_fsync;
+       require_durable_ok "re-anchored observed write" (Eio.Promise.await outcome);
+       check int "main write and re-anchor both fsync" 2
+         (Atomic.get fsync_count);
+       check int "observer publishes once after re-anchor" 1
+         (Atomic.get publish_count))
+;;
+
 let () =
   run
     "Keeper_fs directory durability"
@@ -863,6 +1112,24 @@ let () =
             "pressure observer preserves post-unlink error"
             `Quick
             test_pressure_observer_failure_preserves_post_unlink_error
+        ] )
+    ; ( "durable commit observer"
+      , [ test_case
+            "success publishes once and error never publishes"
+            `Quick
+            test_durable_commit_observer_cardinality
+        ; test_case
+            "publication precedes pending cancellation"
+            `Quick
+            test_durable_commit_observer_precedes_pending_cancellation
+        ; test_case
+            "pending cancellation wins over operation error"
+            `Quick
+            test_durable_commit_observer_error_preserves_pending_cancellation
+        ; test_case
+            "publication waits for directory lease re-anchor"
+            `Quick
+            test_durable_commit_observer_waits_for_reanchor
         ] )
     ; ( "coordination"
       , [ test_case

@@ -28,6 +28,11 @@ val user_message_with_hitl_resolution :
     Reject rationale and edited JSON are always explicit and never imply a
     one-shot grant; only an approved journal can render exact authorization. *)
 
+val goal_summary_for_turn : Goal_store.goal -> string
+(** Add a fixed continuation marker only for the typed failed-completion state.
+    Review text is deliberately not copied into the Keeper prompt; the Keeper
+    can inspect the durable reason through [masc_goal_list]. *)
+
 (** Summary of event-bus signals observed during a single keeper turn.
     Exposed for regression tests. *)
 type turn_event_bus_summary =

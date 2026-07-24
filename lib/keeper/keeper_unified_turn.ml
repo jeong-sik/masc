@@ -192,6 +192,15 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
   | None -> user_message
 ;;
 
+let goal_summary_for_turn (goal : Goal_store.goal) =
+  match goal.phase, goal.completion_review_failure with
+  | Goal_phase.Executing, Some _ ->
+    Printf.sprintf
+      "%s [completion review pending rework; inspect masc_goal_list]"
+      goal.title
+  | _ -> goal.title
+;;
+
 type provider_overflow_recovery =
   | Not_provider_overflow
   | Provider_overflow_applied of Keeper_context_runtime.compaction_recovery
@@ -717,7 +726,7 @@ let run_keeper_cycle
                  List.map
                    (fun goal_id ->
                      match Goal_store.get_goal config ~goal_id with
-                     | Some { Goal_store.title; _ } -> (goal_id, title)
+                     | Some goal -> (goal_id, goal_summary_for_turn goal)
                      | None -> (goal_id, ""))
                    meta.active_goal_ids
                in

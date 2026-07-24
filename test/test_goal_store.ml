@@ -48,6 +48,8 @@ let make_goal id title =
     priority = 3; phase = Goal_phase.Executing;
     parent_goal_id = None;
     last_review_note = None; last_review_at = None;
+    completion_review_failure = None;
+    completion_receipt = None;
     created_at = ts; updated_at = ts;
   }
 
@@ -249,11 +251,18 @@ let test_phaseless_row_no_longer_decodes () =
 
 let test_blocked_phase_serializes_without_status () =
   with_workspace @@ fun config ->
-  let goal, _kind =
-    match Goal_store.upsert_goal config ~title:"Blocked goal"
-            ~phase:Goal_phase.Blocked ()
+  let created, _kind =
+    match Goal_store.upsert_goal config ~title:"Blocked goal" ()
     with
     | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let goal =
+    match
+      Goal_store.update_goal config ~goal_id:created.id (fun current ->
+        { current with phase = Goal_phase.Blocked })
+    with
+    | Ok goal -> goal
     | Error msg -> fail msg
   in
   check string "blocked phase stored" "blocked" (Goal_phase.to_string goal.phase);
@@ -265,9 +274,32 @@ let test_blocked_phase_serializes_without_status () =
 let test_list_goals_filters_by_phase () =
   with_workspace @@ fun config ->
   let make title phase =
-    match Goal_store.upsert_goal config ~title ~phase () with
-    | Ok _ -> ()
+    match Goal_store.upsert_goal config ~title () with
     | Error msg -> fail msg
+    | Ok (goal, _) ->
+      let completion_receipt =
+        match phase with
+        | Goal_phase.Completed ->
+          Some
+            { Goal_store.evaluator_runtime = "test.goal-completion-reviewer"
+            ; reviewed_at = iso_now ()
+            ; reviewed_goal_updated_at = goal.updated_at
+            ; review_prompt_sha256 = String.make 64 'a'
+            ; completion_claim = "fixture proof"
+            ; linked_task_ids = []
+            }
+        | Goal_phase.Executing
+        | Goal_phase.Blocked
+        | Goal_phase.Paused
+        | Goal_phase.Dropped ->
+          None
+      in
+      (match
+         Goal_store.update_goal config ~goal_id:goal.id (fun current ->
+           { current with phase; completion_receipt })
+       with
+       | Ok _ -> ()
+       | Error msg -> fail msg)
   in
   make "Executing goal" Goal_phase.Executing;
   make "Completed goal" Goal_phase.Completed;
@@ -294,6 +326,35 @@ let test_update_missing_goal_does_not_bump () =
   let after = Goal_store.read_state config in
   check int "version unchanged on missing update" before.version after.version;
   check string "updated_at unchanged on missing update" before.updated_at after.updated_at
+
+let test_update_cannot_complete_without_receipt () =
+  with_workspace
+  @@ fun config ->
+  let goal, _ =
+    match Goal_store.upsert_goal config ~title:"Needs semantic proof" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let before = Goal_store.read_state config in
+  (match
+     Goal_store.update_goal config ~goal_id:goal.id (fun current ->
+       { current with phase = Goal_phase.Completed })
+   with
+   | Ok _ -> fail "completion without a semantic-review receipt was accepted"
+   | Error msg ->
+     check
+       bool
+       "rejection names missing completion receipt"
+       true
+       (String.starts_with ~prefix:"completed Goal requires" msg));
+  let after = Goal_store.read_state config in
+  check int "rejected completion does not bump version" before.version after.version;
+  match Goal_store.get_goal config ~goal_id:goal.id with
+  | Some current ->
+    check bool "Goal remains executing" true
+      (current.phase = Goal_phase.Executing)
+  | None -> fail "Goal disappeared after rejected completion"
+;;
 
 let test_write_state_sanitizes_invalid_utf8_before_persisting () =
   with_workspace @@ fun config ->
@@ -362,6 +423,8 @@ let () =
             test_list_goals_filters_by_phase;
           test_case "missing update: no bump" `Quick
             test_update_missing_goal_does_not_bump;
+          test_case "completion requires receipt" `Quick
+            test_update_cannot_complete_without_receipt;
           test_case "write_state sanitizes invalid utf8" `Quick
             test_write_state_sanitizes_invalid_utf8_before_persisting;
           test_case "recovery mirror write failure preserves primary" `Quick

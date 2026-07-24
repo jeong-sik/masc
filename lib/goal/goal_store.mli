@@ -43,6 +43,26 @@ val parse_goal_phase : string option -> Goal_phase.t option
 
 (** {1 Goal record} *)
 
+type completion_receipt =
+  { evaluator_runtime : string
+  ; reviewed_at : string
+  ; reviewed_goal_updated_at : string
+  ; review_prompt_sha256 : string
+  ; completion_claim : string
+  ; linked_task_ids : string list
+  }
+(** Durable proof that the configured semantic reviewer approved the exact Goal
+    snapshot committed as [Completed]. Runtime identity is a provider-neutral
+    route id; no provider or model name is persisted here. *)
+
+val completion_receipt_to_yojson : completion_receipt -> Yojson.Safe.t
+
+type completion_review_failure =
+  | Rejected
+  | Unavailable
+(** Typed reason why the most recent completion attempt remained nonterminal.
+    The detailed durable explanation remains in [last_review_note]. *)
+
 type goal = {
   id : string;
   title : string;
@@ -54,6 +74,8 @@ type goal = {
   parent_goal_id : string option;
   last_review_note : string option;
   last_review_at : string option;
+  completion_review_failure : completion_review_failure option;
+  completion_receipt : completion_receipt option;
   created_at : string;
   updated_at : string;
 }
@@ -138,6 +160,22 @@ val update_goal :
     (with [updated_at] pre-stamped), normalises the result,
     and writes back.  Errors when the [goal_id] is unknown. *)
 
+type conditional_update_error =
+  | Goal_not_found
+  | Goal_snapshot_changed
+  | Goal_persistence_failed of string
+
+val conditional_update_error_to_string : conditional_update_error -> string
+
+val update_goal_if_unchanged :
+  Workspace_utils.config ->
+  expected:goal ->
+  (goal -> goal) ->
+  (goal, conditional_update_error) result
+(** Atomically updates one Goal only when its current persisted record exactly
+    equals [expected]. The equality is structural over the typed record, not a
+    serialized string or selected-field heuristic. *)
+
 type delete_goal_outcome =
   | Deleted
   | Deleted_with_orphaned_links of string
@@ -177,7 +215,6 @@ val upsert_goal :
   ?target_value:string ->
   ?due_date:string ->
   ?priority:int ->
-  ?phase:Goal_phase.t ->
   ?parent_goal_id:string ->
   unit ->
   (goal * [ `created | `updated ], string) result
@@ -187,9 +224,8 @@ val upsert_goal :
     paired with [`created] / [`updated] so callers can
     branch on the outcome.
 
-    Errors:
-    - [title] required for new goals (omit / empty string
-      on a new goal id).
-    - [phase] and legacy [status] disagree (when both are
-      supplied and {!phase_of_goal_status} of [status] does
-      not equal [phase]). *)
+    New Goals always start [Executing]. Lifecycle changes are deliberately
+    absent from this API and must go through the transition boundary.
+
+    Errors when [title] is omitted or empty for a new Goal, or when a caller
+    tries to mutate a completed Goal before reopening it. *)

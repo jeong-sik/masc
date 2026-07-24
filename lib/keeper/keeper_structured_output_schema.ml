@@ -303,7 +303,9 @@ let without_response_format (provider_cfg : Llm_provider.Provider_config.t) =
    2026-07-21). Converges with the fusion-judge / failure-judge /
    consolidation / board-attention / librarian surfaces above: no wire
    response format; the tool schema carries the verdict enum SSOT. *)
-let anti_rationalization_reviewer_provider_config = without_response_format
+let completion_verdict_tool_provider_config = without_response_format
+let anti_rationalization_reviewer_provider_config =
+  completion_verdict_tool_provider_config
 
 (* Capability-aware three-tier response-format selection for a request whose
    prompt already states the exact output shape (#25266). Tier 1: a provider

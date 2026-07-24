@@ -61,5 +61,7 @@ val decide_transition :
   phase:t ->
   action:action ->
   (transition_outcome, string) result
-(** Pure transition decider. [Request_complete] completes directly from
-    [Executing]. Returns [Error msg] for invalid pairs. *)
+(** Pure transition decider. [Request_complete] yields [Complete] from
+    [Executing]; the workspace adapter must obtain and atomically persist the
+    required semantic completion verdict before committing [Completed].
+    Returns [Error msg] for invalid pairs. *)

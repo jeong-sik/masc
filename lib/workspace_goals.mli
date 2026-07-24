@@ -30,8 +30,11 @@ val handle_goal_upsert
 
 (** [handle_goal_transition ctx args] handles
     [masc_goal_transition].  Required arg: [action] (one of
-    {!goal_transition_action_strings}). [request_complete] moves an executing
-    Goal directly to [Completed]. *)
+    {!goal_transition_action_strings}). [request_complete] invokes the
+    configured semantic reviewer and moves an executing Goal to [Completed]
+    only after one structured approval bound to the unchanged Goal snapshot.
+    A non-empty [note] completion claim is required. Rejection or evaluator
+    unavailability leaves the Goal nonterminal. *)
 val handle_goal_transition
   :  tool_name:string
   -> start_time:float

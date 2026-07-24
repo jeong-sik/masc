@@ -34,16 +34,18 @@ import { keeperActionVisibility } from '../lib/keeper-predicates'
 
 // ── Shared helpers ────────────────────────────────────────────────────────
 
-function afterAction(): void {
+async function afterAction(): Promise<void> {
   // Reconcile the optimistic patch against the authoritative server
   // snapshots that drive status UI: execution rows for the roster and light
   // shell runtime-health for top-strip / roster aggregate counts. This avoids
   // the old full `refreshDashboard()` bootstrap while keeping every status
   // surface on the same post-action truth source.
-  void refreshKeeperRuntimeStatus().catch(err => {
+  try {
+    await refreshKeeperRuntimeStatus()
+  } catch (err) {
     const message = err instanceof Error ? err.message : 'dashboard refresh failed'
     showToast(message, 'warning')
-  })
+  }
 }
 
 export type KeeperActionKey = 'pause' | 'resume' | 'wakeup' | 'boot' | 'shutdown'
@@ -140,7 +142,7 @@ export async function runKeeperAction(
       ? applyOptimisticKeeperDirective(name, action)
       : null
   try {
-    let res: { ok: boolean; error?: string }
+    let res: { ok: boolean; error?: string; committed?: boolean }
     switch (action) {
       case 'pause':    res = await pauseKeeper(name);    break
       case 'resume':   res = await resumeKeeper(name, ownerGeneration);   break
@@ -150,7 +152,13 @@ export async function runKeeperAction(
     }
     if (res.ok) {
       showToast(`${name} ${noun}됨`, 'success')
-      afterAction()
+      await afterAction()
+    } else if (res.committed === true) {
+      // Resume_owner already cleared the durable paused latch. A follow-up
+      // boot failure must reconcile from server truth instead of restoring
+      // the obsolete paused snapshot.
+      await afterAction()
+      showToast(res.error ?? `${noun} 실패`, 'error')
     } else {
       revert?.()
       showToast(res.error ?? `${noun} 실패`, 'error')
@@ -188,6 +196,7 @@ export function KeeperActionButtons({
 }) {
   const busy = useSignal(false)
   const vis = keeperActionVisibility(keeper)
+  const showResume = vis.canResume || vis.resumeUnavailableReason !== undefined
 
   async function handle(e: Event, action: KeeperActionKey) {
     if (stopPropagation) e.stopPropagation()
@@ -233,13 +242,13 @@ export function KeeperActionButtons({
             title=${KEEPER_ACTION_LABELS.pause.title}
           >${text('pause')}<//>`
         : null}
-      ${vis.canResume
+      ${showResume
         ? html`<${ActionButton}
             variant="ok"
             size=${size}
-            disabled=${busy.value}
+            disabled=${busy.value || vis.resumeUnavailableReason !== undefined}
             onClick=${(e: Event) => handle(e, 'resume')}
-            title=${KEEPER_ACTION_LABELS.resume.title}
+            title=${vis.resumeUnavailableReason ?? KEEPER_ACTION_LABELS.resume.title}
           >${text('resume')}<//>`
         : null}
       ${vis.canWake && !vis.canBoot

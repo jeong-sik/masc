@@ -6,43 +6,46 @@ import type { Keeper } from '../types'
 import { DialogOverlay } from './common/dialog'
 import { TextArea } from './common/input'
 import { Checkbox } from './common/checkbox'
-import { isOfflineStatus } from '../lib/keeper-classifiers'
 import { keeperActionVisibility } from '../lib/keeper-predicates'
 
-export function KeeperLifecycleButtons({ keeper, effectiveStatus }: { keeper: Keeper; effectiveStatus: string }) {
-  // SSOT: `isOfflineStatus` from keeper-classifiers.ts (includes crashed,
-  // unbooted, stopped). `'working'` is a UI-derived PulseState, not a
-  // backend agent status — kept inline for the running check since no
-  // SSOT predicate covers the full display-status union.
-  const isOffline = isOfflineStatus(effectiveStatus)
-  const isRunning = ['active', 'running', 'idle', 'busy', 'listening', 'working'].includes(effectiveStatus)
+export function KeeperLifecycleButtons({ keeper }: { keeper: Keeper; effectiveStatus: string }) {
   const visibility = keeperActionVisibility(keeper)
+  const showResume = visibility.canResume || visibility.resumeUnavailableReason !== undefined
 
-  // Both buttons route through runKeeperAction: same toast copy, same
+  // All buttons route through runKeeperAction: same toast copy, same
   // post-action refresh (refreshKeeperRuntimeStatus), and the shutdown
   // confirm gate lives there — this surface previously duplicated all three.
-  if (visibility.canResume) return html`
-    <button type="button"
-      class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)] hover:bg-[var(--ok-soft)] transition-colors v2-monitoring-action"
-      title=${KEEPER_ACTION_LABELS.resume.title}
-      onClick=${() => { void runKeeperAction(keeper.name, 'resume', keeper.generation) }}
-    >${KEEPER_ACTION_LABELS.resume.verb}</button>`
+  if (!showResume && !visibility.canBoot && !visibility.canShutdown) return null
 
-  if (isOffline && visibility.canBoot) return html`
-    <button type="button"
-      class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--ok-border)] bg-[var(--ok-soft)] text-[var(--color-status-ok)] hover:bg-[var(--ok-soft)] transition-colors v2-monitoring-action"
-      title=${KEEPER_ACTION_LABELS.boot.title}
-      onClick=${() => { void runKeeperAction(keeper.name, 'boot') }}
-    >${KEEPER_ACTION_LABELS.boot.verb}</button>`
-
-  if (isRunning) return html`
-    <button type="button"
-      class="py-1 px-3 rounded-[var(--r-1)] text-2xs font-semibold cursor-pointer border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--rose-light)] hover:bg-[var(--bad-soft)] transition-colors v2-monitoring-action"
-      title=${KEEPER_ACTION_LABELS.shutdown.title}
-      onClick=${() => { void runKeeperAction(keeper.name, 'shutdown') }}
-    >${KEEPER_ACTION_LABELS.shutdown.verb}</button>`
-
-  return null
+  return html`
+    <div class="flex items-center gap-1 v2-monitoring-action">
+      ${showResume
+        ? html`<${ActionButton}
+            variant="ok"
+            size="sm"
+            disabled=${visibility.resumeUnavailableReason !== undefined}
+            title=${visibility.resumeUnavailableReason ?? KEEPER_ACTION_LABELS.resume.title}
+            onClick=${() => { void runKeeperAction(keeper.name, 'resume', keeper.generation) }}
+          >${KEEPER_ACTION_LABELS.resume.verb}<//>`
+        : null}
+      ${visibility.canBoot
+        ? html`<${ActionButton}
+            variant="ok"
+            size="sm"
+            title=${KEEPER_ACTION_LABELS.boot.title}
+            onClick=${() => { void runKeeperAction(keeper.name, 'boot') }}
+          >${KEEPER_ACTION_LABELS.boot.verb}<//>`
+        : null}
+      ${visibility.canShutdown
+        ? html`<${ActionButton}
+            variant="danger"
+            size="sm"
+            title=${KEEPER_ACTION_LABELS.shutdown.title}
+            onClick=${() => { void runKeeperAction(keeper.name, 'shutdown') }}
+          >${KEEPER_ACTION_LABELS.shutdown.verb}<//>`
+        : null}
+    </div>
+  `
 }
 
 export function KeeperClearContextDialog({

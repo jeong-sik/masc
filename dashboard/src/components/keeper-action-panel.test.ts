@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
 
 // Mock modules with lucide-preact icons that cause test-env errors
 vi.mock('./common/confirm-dialog', () => ({ requestConfirm: vi.fn(async () => false) }))
@@ -30,6 +30,7 @@ function makeKeeper(overrides: Partial<Keeper>): Keeper {
     status: 'active',
     phase: 'Running',
     paused: false,
+    generation: 1,
     // A keeper with its fiber alive is the normal case; tests that exercise
     // the durable paused-owner path override this to false explicitly.
     keepalive_running: true,
@@ -118,6 +119,20 @@ describe('keeperActionVisibility', () => {
       expect(v.canResume).toBe(true)
       expect(v.canBoot).toBe(false)
     })
+
+    it('keeps resume visible but disabled when the durable generation is unavailable', () => {
+      const k = makeKeeper({
+        status: 'offline',
+        phase: 'Paused',
+        paused: true,
+        keepalive_running: false,
+        generation: undefined,
+      })
+      const v = keeperActionVisibility(k)
+      expect(v.canResume).toBe(false)
+      expect(v.resumeUnavailableReason).toContain('owner generation')
+      expect(v.canBoot).toBe(false)
+    })
   })
 
   describe('offline keeper', () => {
@@ -166,6 +181,10 @@ describe('keeperActionVisibility', () => {
 })
 
 describe('runKeeperAction', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
   it('refreshes the shared runtime status source after a successful directive', async () => {
     vi.mocked(pauseKeeper).mockResolvedValueOnce({ ok: true })
 
@@ -181,5 +200,20 @@ describe('runKeeperAction', () => {
     await runKeeperAction('rondo', 'resume', 7)
 
     expect(resumeKeeper).toHaveBeenCalledWith('rondo', 7)
+  })
+
+  it('refreshes server truth instead of reverting after a committed resume whose boot failed', async () => {
+    const revert = vi.fn()
+    vi.mocked(applyOptimisticKeeperDirective).mockReturnValueOnce(revert)
+    vi.mocked(resumeKeeper).mockResolvedValueOnce({
+      ok: false,
+      committed: true,
+      error: 'boot unavailable',
+    })
+
+    await runKeeperAction('rondo', 'resume', 7)
+
+    expect(revert).not.toHaveBeenCalled()
+    expect(refreshKeeperRuntimeStatus).toHaveBeenCalledTimes(1)
   })
 })

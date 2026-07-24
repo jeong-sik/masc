@@ -11,12 +11,15 @@ module C = Keeper_compaction_llm_summarizer
 module F = Compaction_exact_output_fixture
 module P = Keeper_event_queue_persistence
 module Q = Keeper_event_queue
+module Recovery = Keeper_exact_disposition_recovery
 module Registry = Runtime_exact_output_registry
 module S = Keeper_structured_output_schema
+module State = Keeper_event_queue_state
 module T = Agent_sdk.Types
 module U = Keeper_compaction_unit
 
 exception Cancel_after_request_arrived
+exception Stop_after_oas_success of C.attempt_observation
 
 let conformance_lane_id = "compaction-exact-conformance"
 
@@ -878,6 +881,189 @@ let test_heartbeat_guard_binds_before_post () =
   Alcotest.(check int) "guarded flow posts once" 1 (F.post_count server)
 ;;
 
+let test_post_success_restart_remains_at_most_once_and_fail_closed () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "masc-post-success-restart-at-most-once" @@ fun base_path ->
+  let keeper_name = "restart-at-most-once" in
+  let lease = claim_manual_lease ~base_path ~keeper_name in
+  let first_slot = "restart-first" in
+  let successor_slot = "restart-successor" in
+  let first =
+    F.start_server ~sw ~net ~clock (F.Reply valid_response)
+  in
+  let successor =
+    F.start_server ~sw ~net ~clock (F.Reply valid_response)
+  in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"post-success-restart-at-most-once"
+      [ { id = first_slot; base_url = first.base_url }
+      ; { id = successor_slot; base_url = successor.base_url }
+      ]
+  in
+  let registry =
+    publish_exn ~slot_ids:[ first_slot; successor_slot ] snapshot
+  in
+  let prepared = prepare_exn ~keeper_name ~registry in
+  let guard =
+    Keeper_heartbeat_loop.For_testing.exact_execution_guard
+      ~base_path
+      ~keeper_name
+      ~lease
+  in
+  let observation =
+    try
+      let completed =
+        execute_prepared_lane
+          ~keeper_name
+          ~net
+          ~clock
+          ~exact_execution_guard:guard
+          prepared
+        |> completed_exn
+      in
+      raise
+        (Stop_after_oas_success
+           (C.completed_attempt_observation completed))
+    with
+    | Stop_after_oas_success observation -> observation
+  in
+  Alcotest.(check int)
+    "provider POST completed exactly once before restart"
+    1
+    (F.post_count first);
+  Alcotest.(check int)
+    "successor was not dispatched before restart"
+    0
+    (F.post_count successor);
+  let binding_before =
+    match P.exact_execution_binding_result ~base_path ~keeper_name with
+    | Ok (Some ({ status = P.Dispatch_uncertain; _ } as binding)) ->
+        binding
+    | Ok (Some _) ->
+        Alcotest.fail "post-success stop did not retain dispatch-uncertain binding"
+    | Ok None ->
+        Alcotest.fail "post-success stop lost exact execution binding"
+    | Error detail ->
+        Alcotest.failf "post-success binding load failed: %s" detail
+  in
+  Alcotest.(check string)
+    "durable binding retains the OAS slot identity"
+    observation.slot_id
+    binding_before.slot_id;
+  Alcotest.(check string)
+    "durable binding retains the OAS call identity"
+    observation.call_id
+    binding_before.call_id;
+  Alcotest.(check string)
+    "durable binding retains the OAS plan identity"
+    observation.receipt_plan_fingerprint
+    binding_before.plan_fingerprint;
+  Alcotest.(check string)
+    "durable binding retains the OAS request identity"
+    observation.receipt_request_body_sha256
+    binding_before.request_body_sha256;
+  Alcotest.(check string)
+    "durable binding retains the source lease"
+    lease.lease_id
+    binding_before.lease_id;
+  Alcotest.(check int64)
+    "durable binding retains the source lease sequence"
+    lease.sequence
+    binding_before.lease_sequence;
+  let state_before_probe =
+    match P.load_state_result ~base_path ~keeper_name with
+    | Ok state -> state
+    | Error detail ->
+        Alcotest.failf "pre-recovery state load failed: %s" detail
+  in
+  Alcotest.(check bool)
+    "post-success stop creates no pending successor"
+    true
+    (Q.is_empty (State.pending state_before_probe));
+  let pending_successor : Q.stimulus =
+    { post_id = "post-success-restart-fence-probe"
+    ; urgency = Q.Immediate
+    ; arrived_at = 2.5
+    ; payload = Q.Manual_compaction_requested
+    }
+  in
+  let expected_pending =
+    Q.enqueue Q.empty pending_successor
+  in
+  (match
+     P.update_checked_result
+       ~base_path
+       ~keeper_name
+       (fun pending -> Ok (Q.enqueue pending pending_successor))
+   with
+   | Ok () -> ()
+   | Error detail ->
+       Alcotest.failf "pending successor probe persist failed: %s" detail);
+  (match
+     Recovery.prepare_registration_result
+       ~base_path
+       ~keeper_name
+       ~settled_at:3.0
+   with
+   | Error _ -> ()
+   | Ok _ ->
+       Alcotest.fail
+         "fresh runtime admitted a dispatch-uncertain exact execution");
+  let recovered =
+    match P.load_state_result ~base_path ~keeper_name with
+    | Ok state -> state
+    | Error detail ->
+        Alcotest.failf "fresh state reload failed: %s" detail
+  in
+  Alcotest.(check bool)
+    "durable opaque binding identity is unchanged"
+    true
+    (State.exact_execution_binding recovered = Some binding_before);
+  Alcotest.(check bool)
+    "restart adds no pending or requeue beyond the probe"
+    true
+    (State.pending recovered = expected_pending);
+  Alcotest.(check int)
+    "restart creates no requeue transition"
+    0
+    (List.length (State.transition_outbox recovered));
+  Alcotest.(check bool)
+    "restart retains the complete original active lease"
+    true
+    (State.active_lease recovered = Some lease);
+  (match
+     P.claim_when_result
+       ~base_path
+       ~keeper_name
+       ~claimed_at:4.0
+       ~ready:(fun _ -> true)
+       ()
+   with
+   | Ok None -> ()
+   | Ok (Some _) ->
+       Alcotest.fail "post-recovery scheduling claimed a successor"
+   | Error detail ->
+       Alcotest.failf "post-recovery scheduling boundary failed: %s" detail);
+  let after_claim =
+    match P.load_state_result ~base_path ~keeper_name with
+    | Ok state -> state
+    | Error detail ->
+        Alcotest.failf "post-claim state reload failed: %s" detail
+  in
+  Alcotest.(check bool)
+    "fenced successor remains pending after scheduling"
+    true
+    (State.pending after_claim = expected_pending);
+  Alcotest.(check int)
+    "provider POST remains exactly once after restart"
+    1
+    (F.post_count first);
+  Alcotest.(check int)
+    "restart does not dispatch the successor"
+    0
+    (F.post_count successor)
+
 let test_post_success_terminalization_is_canonical_and_durable () =
   run_eio
   @@ fun ~sw ~net ~clock ->
@@ -1527,6 +1713,10 @@ let () =
             "heartbeat guard binds before POST"
             `Quick
             test_heartbeat_guard_binds_before_post
+        ; Alcotest.test_case
+            "post-success restart stays fenced at most once"
+            `Quick
+            test_post_success_restart_remains_at_most_once_and_fail_closed
         ; Alcotest.test_case
             "visible sync uncertainty seams fail closed"
             `Quick

@@ -2,6 +2,8 @@ open Alcotest
 
 module EC = Masc.Keeper_error_classify
 
+(* Incident-bound probe fixture, not a catalog default. Keep the interval and
+   expiry aligned with the evidence identified by [source_ref]. *)
 let serving_constraint ~expires_at_unix_s =
   Llm_provider.Serving_constraint.make
     ~source_kind:Llm_provider.Serving_constraint.Probe

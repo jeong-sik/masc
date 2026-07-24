@@ -1667,6 +1667,22 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
          check (list string) "active runtime ids"
            [ "ollama.good" ]
            (Runtime.get_runtime_ids ());
+         (match Runtime.effective_exact_output_lane_declarations [] with
+          | Error detail ->
+            failf
+              "effective exact-output lanes must use degraded runtime state: %s"
+              detail
+          | Ok [ lane ] ->
+            check string "synthesized HITL lane id"
+              "hitl_auto_judge"
+              lane.Runtime_schema.id;
+            check (list string) "synthesized HITL lane uses active default only"
+              [ "ollama.good" ]
+              lane.slot_ids
+          | Ok lanes ->
+            failf
+              "expected one synthesized HITL lane, got %d"
+              (List.length lanes));
          check (list string) "no dropped assignment"
            []
            (List.map
@@ -2217,6 +2233,8 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
       ~source:"runtime raw-save exact replacement"
       [ { id = "slot-a"; base_url = "http://127.0.0.1:9" }
       ; { id = "slot-b"; base_url = "http://127.0.0.1:10" }
+      ; { id = "local.chat"; base_url = "http://127.0.0.1:11" }
+      ; { id = "local.libr"; base_url = "http://127.0.0.1:12" }
       ]
   in
   ignore
@@ -2262,9 +2280,9 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
         "exact-output registry must be published: %s"
         (Runtime_exact_output_registry.publication_error_to_string error)
   in
-  let slots_exn registry =
+  let slots_exn ~lane_id registry =
     match
-      Runtime_exact_output_registry.resolve_lane registry ~lane_id:"compaction_exact"
+      Runtime_exact_output_registry.resolve_lane registry ~lane_id
     with
     | Ok resolved ->
       (match resolved.unavailable_slots with
@@ -2274,7 +2292,8 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
            resolved.selected_slots
        | unavailable_slots ->
          failf
-           "compaction lane unexpectedly has unavailable slots: %s"
+           "exact-output lane %S unexpectedly has unavailable slots: %s"
+           lane_id
            (String.concat
               "; "
               (List.map
@@ -2282,7 +2301,8 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
                  unavailable_slots)))
     | Error error ->
       failf
-        "compaction lane must exist: %s"
+        "exact-output lane %S must exist: %s"
+        lane_id
         (Runtime_exact_output_registry.lane_resolution_error_to_string error)
   in
   let baseline = content ~default:"local.chat" "slot-a" in
@@ -2308,7 +2328,9 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
     check int64 "invalid save preserves registry generation" stable_generation
       (Runtime_exact_output_registry.generation after_invalid);
     check (list string) "invalid save preserves registry slots" [ "slot-a" ]
-      (slots_exn after_invalid);
+      (slots_exn ~lane_id:"compaction_exact" after_invalid);
+    check (list string) "invalid save preserves synthesized HITL lane" [ "local.chat" ]
+      (slots_exn ~lane_id:"hitl_auto_judge" after_invalid);
     let replacement = content ~default:"local.libr" "slot-b" in
     let failed_path = path ^ ".directory" in
     Unix.mkdir failed_path 0o755;
@@ -2326,7 +2348,12 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
          check int64 "write failure preserves registry generation" stable_generation
            (Runtime_exact_output_registry.generation after_write_failure);
          check (list string) "write failure preserves registry slots" [ "slot-a" ]
-           (slots_exn after_write_failure));
+           (slots_exn ~lane_id:"compaction_exact" after_write_failure);
+         check
+           (list string)
+           "write failure preserves synthesized HITL lane"
+           [ "local.chat" ]
+           (slots_exn ~lane_id:"hitl_auto_judge" after_write_failure));
     (match Runtime.save_config_text ~runtime_config_path:path replacement with
      | Error detail -> failf "valid exact replacement failed: %s" detail
      | Ok () -> ());
@@ -2340,7 +2367,9 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
          stable_generation
        > 0);
     check (list string) "valid save commits registry slots" [ "slot-b" ]
-      (slots_exn replaced))
+      (slots_exn ~lane_id:"compaction_exact" replaced);
+    check (list string) "valid save refreshes synthesized HITL lane" [ "local.libr" ]
+      (slots_exn ~lane_id:"hitl_auto_judge" replaced))
 
 let test_deprecated_capability_notice_warns_once_per_process () =
   (* runtime.toml is re-parsed on every keeper boot; a per-parse deprecation

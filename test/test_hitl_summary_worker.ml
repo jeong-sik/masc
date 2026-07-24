@@ -132,6 +132,27 @@ let prepare_exn entry =
   | Error detail -> fail detail
 ;;
 
+let test_readiness_rejects_lane_without_json_guarantee () =
+  Prompt_registry.set_markdown_dir
+    (Masc_test_deps.source_path "config/prompts");
+  let slot_id = "hitl-readiness-no-json" in
+  publish_lane
+    [ slot_id ]
+    (F.resolver_snapshot
+       ~supports_response_format_json:false
+       ~supports_structured_output:false
+       ~source:"hitl-readiness-no-json"
+       [ { id = slot_id; base_url = "http://127.0.0.1:9" } ]);
+  match Worker.readiness () with
+  | Ok () -> fail "readiness admitted a lane without the HITL output guarantee"
+  | Error detail ->
+    check
+      string
+      "readiness reports OAS admission rejection"
+      "HITL exact-output flow admitted no candidates"
+      detail
+;;
+
 let visible_after_rename_writer path body =
   match Fs_compat.save_file_atomic path body with
   | Error reason -> failf "visible writer could not replace %s: %s" path reason
@@ -827,6 +848,50 @@ let test_cancellation_after_dispatch_is_terminal () =
        | _ -> fail "post-dispatch cancellation was not terminally quarantined")
 ;;
 
+let test_pre_worker_start_failure_is_retryable () =
+  run_eio @@ fun ~sw:_ ~net:_ ~clock:_ ->
+  with_temp_dir "hitl-pre-worker-start-failure" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       select_auto_judge_mode base_path;
+       let entry = pending_entry ~base_path () in
+       let successor = pending_entry ~input_tag:"successor" ~base_path () in
+       (match
+          Gate.For_testing.spawn_auto_judge_entry_with_worker
+            ~spawn_worker:
+              (fun ~sw:_ ~entry:_ ~on_summary:_ ~on_finish:_ () ->
+                 Error "no usable exact-output lane slots")
+            entry
+        with
+        | Error detail ->
+          check
+            string
+            "pre-worker failure is returned"
+            "no usable exact-output lane slots"
+            detail
+        | Ok _ -> fail "pre-worker failure was reported as a successful start");
+       (match Q.get_pending_entry ~id:entry.id with
+       | Some
+           { exact_attempt = Q.Exact_unbound
+           ; summary_status = Q.Summary_failed { reason; retryable = true }
+           ; _
+           } ->
+         check
+           string
+           "retryable failure reason is durable"
+           "no usable exact-output lane slots"
+           reason
+       | _ -> fail "pre-worker failure was not durably retryable");
+       check
+         bool
+         "pre-worker failure releases the owner claim"
+         true
+         (Gate.For_testing.claim_auto_judge successor);
+       Gate.For_testing.release_auto_judge successor)
+;;
+
 let test_visible_uncertainty_withholds_production_drain () =
   run_eio_without_context @@ fun ~sw ~net ~clock ~mono_clock ->
   with_temp_dir "hitl-uncertain-lifecycle" @@ fun base_path ->
@@ -1021,6 +1086,10 @@ let () =
             "prompt is registry-owned"
             `Quick
             test_gate_judgment_prompt_comes_from_registry
+        ; test_case
+            "readiness requires JSON admission"
+            `Quick
+            test_readiness_rejects_lane_without_json_guarantee
         ] )
     ; ( "production exact flow"
       , [ test_case
@@ -1059,6 +1128,10 @@ let () =
             "post-dispatch cancellation is terminal"
             `Quick
             test_cancellation_after_dispatch_is_terminal
+        ; test_case
+            "pre-worker start failure is retryable"
+            `Quick
+            test_pre_worker_start_failure_is_retryable
         ; test_case
             "visible uncertainty withholds production drain"
             `Quick

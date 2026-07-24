@@ -186,46 +186,26 @@ let load_exact_output_lane_declarations () =
          "exact-output registry: runtime.toml path is unavailable")
   | Some config_path ->
     (match Runtime_toml.parse_file config_path with
-     | Ok (config : Runtime_schema.config) -> config.exact_output_lane_decls
      | Error errors ->
        raise
          (Env_config_core.Config_error
             (Printf.sprintf
                "exact-output registry: runtime config parse failed (%s): %d error(s)"
                config_path
-               (List.length errors))))
-;;
-
-let hitl_auto_judge_lane_id = "hitl_auto_judge"
-
-let structured_judge_exact_slot_ids () =
-  let assignment_id = Runtime.runtime_id_for_structured_judge () in
-  match Runtime.resolve_assignment assignment_id with
-  | `Single_runtime runtime -> [ runtime.Runtime.id ]
-  | `Lane lane -> lane.Runtime_lane.candidates
-  | `Missing ->
-    raise
-      (Env_config_core.Config_error
-         (Printf.sprintf
-            "exact-output registry: structured-judge assignment %S does not resolve \
-             to a runtime or lane"
-            assignment_id))
-;;
-
-let ensure_hitl_auto_judge_lane lanes =
-  if
-    List.exists
-      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-         String.equal lane.id hitl_auto_judge_lane_id)
-      lanes
-  then
-    lanes
-  else
-    lanes
-    @ [ { Runtime_schema.id = hitl_auto_judge_lane_id
-        ; slot_ids = structured_judge_exact_slot_ids ()
-        }
-      ]
+               (List.length errors)))
+     | Ok (config : Runtime_schema.config) ->
+       (match
+          Runtime.effective_exact_output_lane_declarations
+            config.exact_output_lane_decls
+        with
+        | Ok lanes -> lanes
+        | Error detail ->
+          raise
+            (Env_config_core.Config_error
+               (Printf.sprintf
+                  "exact-output registry: effective runtime lane materialization failed (%s): %s"
+                  config_path
+                  detail))))
 ;;
 
 let configure_exact_output_registry ?config_root () =
@@ -259,9 +239,7 @@ let configure_exact_output_registry ?config_root () =
          ("exact-output resolver snapshot: "
           ^ exact_output_snapshot_error_to_string error))
   | Ok resolver_snapshot ->
-    let lanes =
-      load_exact_output_lane_declarations () |> ensure_hitl_auto_judge_lane
-    in
+    let lanes = load_exact_output_lane_declarations () in
     (match Runtime.publish_exact_output_registry ~lanes resolver_snapshot with
      | Error detail ->
        raise

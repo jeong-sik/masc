@@ -106,6 +106,16 @@ let flow_candidates selected_slots =
   loop [] selected_slots
 ;;
 
+let admit_resolved_lane ~messages (resolved : Registry.resolved_lane) =
+  let* candidates = flow_candidates resolved.selected_slots in
+  match candidates with
+  | [] -> Error "HITL exact-output lane has no usable candidates"
+  | first :: rest ->
+    Exact_output.admit_flow ~first ~rest ~messages output_requirement
+    |> Result.map_error (fun _ ->
+      "HITL exact-output flow admitted no candidates")
+;;
+
 let prepare_flow ~(entry : pending_approval) =
   let* context_bundle =
     build_context_bundle ~entry
@@ -124,18 +134,10 @@ let prepare_flow ~(entry : pending_approval) =
     Registry.resolve_lane registry ~lane_id
     |> Result.map_error lane_error
   in
-  let* candidates = flow_candidates resolved.selected_slots in
   let* ready_flow =
-    match candidates with
-    | [] -> Error "HITL exact-output lane has no usable candidates"
-    | first :: rest ->
-      Exact_output.admit_flow
-        ~first
-        ~rest
-        ~messages:(messages_for_summary ~system_prompt ~context_bundle)
-        output_requirement
-      |> Result.map_error (fun _ ->
-        "HITL exact-output flow admitted no candidates")
+    admit_resolved_lane
+      ~messages:(messages_for_summary ~system_prompt ~context_bundle)
+      resolved
   in
   let* attempt =
     Exact_output.start_flow ready_flow
@@ -146,11 +148,17 @@ let prepare_flow ~(entry : pending_approval) =
 ;;
 
 let readiness () =
-  let* (_ : string) = system_prompt () in
+  let* system_prompt = system_prompt () in
   let* registry = Registry.current () |> Result.map_error registry_error in
-  let* (_ : Registry.resolved_lane) =
+  let* resolved =
     Registry.resolve_lane registry ~lane_id
     |> Result.map_error lane_error
+  in
+  let* _ready_flow =
+    admit_resolved_lane
+      ~messages:
+        (messages_for_summary ~system_prompt ~context_bundle:(`Assoc []))
+      resolved
   in
   Ok ()
 ;;
@@ -478,6 +486,13 @@ let settle_current (entry : pending_approval) ~reason ~cause =
     Ok ()
   | Some { exact_attempt = Exact_unbound; _ } ->
     mark_unbound_failure entry reason
+  | Some
+      { exact_attempt =
+          Exact_bound { status = (Exact_completed | Exact_quarantined _); _ }
+      ; _
+      } ->
+    record_outcome "exact_source_resolved";
+    Ok ()
   | Some { exact_attempt = Exact_bound binding; _ } ->
     quarantine_identity_result entry (exact_identity_of_binding binding) cause
 ;;

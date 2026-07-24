@@ -1049,7 +1049,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [pr-live-gate, changes]
-    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.keeper_cwd == 'true') }}
+    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.dashboard == 'true' || needs.changes.outputs.keeper_cwd == 'true') }}
 
     steps:
       - name: Checkout
@@ -1067,7 +1067,7 @@ jobs:
         run: scripts/stringly-boundary-ratchet.sh
 
       - name: Run OAS boundary ratchet
-        if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true'
+        if: needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true' || needs.changes.outputs.dashboard == 'true'
         run: |
           scripts/test_oas_boundary_ratchet.sh
           scripts/oas-boundary-ratchet.sh

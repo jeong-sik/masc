@@ -4,13 +4,13 @@ module EC = Masc.Keeper_error_classify
 
 (* Incident-bound probe fixture, not a catalog default. Keep the interval and
    expiry aligned with the evidence identified by [source_ref]. *)
-let serving_constraint ~expires_at_unix_s =
+let serving_constraint ?expires_at_unix_s () =
   Llm_provider.Serving_constraint.make
     ~source_kind:Llm_provider.Serving_constraint.Probe
     ~source_ref:"probe://incident/2793"
     ~checked_at_unix_s:100
     ~confidence:Llm_provider.Serving_constraint.High
-    ~expires_at_unix_s
+    ?expires_at_unix_s
     ~accepted_through:524298
     ~rejected_from:524299
     ()
@@ -54,8 +54,8 @@ let test_is_context_overflow_only_for_overflow_errors () =
     (EC.is_context_overflow (Agent_sdk.Error.Internal "some error"))
 ;;
 
-let test_input_capacity_compacts_only_with_current_bound () =
-  let constraint_ = serving_constraint ~expires_at_unix_s:1000 in
+let test_input_capacity_compacts_only_for_oas_validated_bound () =
+  let constraint_ = serving_constraint () in
   let compactable =
     input_capacity
       constraint_
@@ -65,15 +65,20 @@ let test_input_capacity_compacts_only_with_current_bound () =
          ; rejected_from = None
          })
   in
-  check bool "known accepted bound is compactable" true (EC.is_context_overflow compactable);
+  check
+    bool
+    "OAS-validated accepted bound is compactable"
+    true
+    (EC.is_context_overflow compactable);
   (match Masc.Keeper_unified_turn.context_overflow_event_of_error compactable with
    | Some
        (Keeper_state_machine.Context_overflow_detected
           { limit_tokens = Some 524298 }) -> ()
    | _ -> fail "accepted-through evidence was not preserved");
+  let stale_constraint = serving_constraint ~expires_at_unix_s:1000 () in
   let stale =
     input_capacity
-      constraint_
+      stale_constraint
       (Llm_provider.Serving_constraint.Evidence_expired
          { now_unix_s = 1000; expires_at_unix_s = 1000 })
   in
@@ -131,9 +136,9 @@ let () =
             `Quick
             test_context_overflow_is_auto_recoverable
         ; test_case
-            "input capacity compacts only with current bound"
+            "input capacity compacts only for OAS-validated accepted bound"
             `Quick
-            test_input_capacity_compacts_only_with_current_bound
+            test_input_capacity_compacts_only_for_oas_validated_bound
         ] )
     ]
 ;;

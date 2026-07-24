@@ -1,9 +1,10 @@
-(** Provider-neutral projection of a proven compactable input bound.
+(** Provider-neutral projection of an OAS-validated compactable input bound.
 
     MASC consumes the provider-neutral evidence only. Provider/model names,
     endpoint URLs, HTTP prose, and tokenizer guesses are intentionally absent. *)
 
 val compaction_limit : Agent_sdk.Error.sdk_error -> int option
-(** [Some n] only when current evidence proves input at or below [n] was
-    accepted. [None] means compaction cannot repair the typed failure
-    (expired/future evidence or unavailable measurement). *)
+(** [Some n] only when OAS returns a typed [Input_rejected] or
+    [Boundary_unknown] reason carrying [accepted_through = n]. MASC does not
+    re-evaluate evidence time. [None] means OAS classified the evidence as
+    expired/not-yet-valid, or token measurement was unavailable. *)

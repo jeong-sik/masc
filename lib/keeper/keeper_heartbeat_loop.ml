@@ -464,7 +464,8 @@ let settlement_of_cycle_outcome
      along their usual typed routes and the stimulus re-enters). *)
   | None, _ ->
     (match outcome with
-  | Some (Cycle.Manual_compaction_applied _ as applied) ->
+  | Some (Cycle.Manual_compaction_applied { receipt; _ } as applied) ->
+    let commit = Keeper_manual_compaction.queue_commit_of_applied_receipt receipt in
     (match Cycle.manual_compaction_followup_failure applied with
      | Some
          ({ Keeper_unified_turn.source_lease_disposition =
@@ -474,10 +475,10 @@ let settlement_of_cycle_outcome
                 { judgment; provenance; detail }
           ; _
           } as failure) ->
-       Keeper_registry_event_queue.Escalate
-         { reason = Keeper_registry_event_queue.Failure_judgment_requested
-         ; successor =
-             Some
+       Keeper_registry_event_queue.Manual_compaction_committed
+         { commit
+         ; followup =
+             Keeper_event_queue_state.Compaction_commit_failure_judgment
                (failure_judgment_successor
                   ~arrived_at:settled_at
                   failure
@@ -485,7 +486,11 @@ let settlement_of_cycle_outcome
                   provenance
                   detail)
          }
-     | Some _ | None -> Keeper_registry_event_queue.Ack)
+     | Some _ | None ->
+       Keeper_registry_event_queue.Manual_compaction_committed
+         { commit
+         ; followup = Keeper_event_queue_state.Compaction_commit_ack
+         })
   | Some (Cycle.Completed _) -> Keeper_registry_event_queue.Ack
   | Some (Cycle.Cancelled _) ->
     Keeper_registry_event_queue.Requeue Keeper_registry_event_queue.Cancelled
@@ -616,6 +621,7 @@ let exact_terminal_source = function
       } ->
     Some (source, terminal)
   | Keeper_registry_event_queue.Ack
+  | Keeper_registry_event_queue.Manual_compaction_committed _
   | Keeper_registry_event_queue.No_compaction _
   | Keeper_registry_event_queue.Cancel_accepted _
   | Keeper_registry_event_queue.Transfer_accepted _
@@ -677,6 +683,7 @@ let settle_claimed_lease
              | Keeper_registry_event_queue.Escalate _ ->
                Keeper_registry_event_queue.Exact_escalate
              | Keeper_registry_event_queue.Ack
+             | Keeper_registry_event_queue.Manual_compaction_committed _
              | Keeper_registry_event_queue.Cancel_accepted _
              | Keeper_registry_event_queue.Transfer_accepted _
              | Keeper_registry_event_queue.Settle_from_source_terminal _
@@ -771,11 +778,18 @@ let exact_execution_guard ~base_path ~keeper_name ~lease =
 
 let settlement_is_ack = function
   | Keeper_registry_event_queue.Ack
+  | Keeper_registry_event_queue.Manual_compaction_committed
+      { followup = Keeper_event_queue_state.Compaction_commit_ack; _ }
   | Keeper_registry_event_queue.No_compaction _
   | Keeper_registry_event_queue.Cancel_accepted _
   | Keeper_registry_event_queue.Transfer_accepted _ -> true
   | Keeper_registry_event_queue.Settle_from_source_terminal _ -> true
   | Keeper_registry_event_queue.Settle_exact _ -> true
+  | Keeper_registry_event_queue.Manual_compaction_committed
+      { followup =
+          Keeper_event_queue_state.Compaction_commit_failure_judgment _
+      ; _
+      }
   | Keeper_registry_event_queue.Requeue _
   | Keeper_registry_event_queue.Escalate _ ->
     false
@@ -790,6 +804,7 @@ let settlement_is_exact_output_terminal = function
       } ->
     true
   | Keeper_registry_event_queue.Ack
+  | Keeper_registry_event_queue.Manual_compaction_committed _
   | Keeper_registry_event_queue.No_compaction _
   | Keeper_registry_event_queue.Cancel_accepted _
   | Keeper_registry_event_queue.Transfer_accepted _
@@ -828,6 +843,7 @@ let settlement_is_exact_output_cancellation = function
       } ->
     true
   | Keeper_registry_event_queue.Ack
+  | Keeper_registry_event_queue.Manual_compaction_committed _
   | Keeper_registry_event_queue.No_compaction _
   | Keeper_registry_event_queue.Cancel_accepted _
   | Keeper_registry_event_queue.Transfer_accepted _

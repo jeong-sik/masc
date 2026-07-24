@@ -77,13 +77,51 @@ let test_with_lock_inside_eio () =
 let test_durable_lock_open_failure_is_typed () =
   with_temp_path @@ fun path ->
   let path = Filename.concat path "missing/target" in
-  match File_lock_eio.with_durable_lock ~lock_path:path (fun () -> ()) with
-  | Ok () -> fail "durable lock unexpectedly created a missing parent tree"
-  | Error error ->
+  let body_ran = ref false in
+  match
+    File_lock_eio.with_durable_lock_observed
+      ~lock_path:path
+      (fun () -> body_ran := true)
+  with
+  | File_lock_eio.Body_completed _ ->
+    fail "durable lock unexpectedly created a missing parent tree"
+  | File_lock_eio.Lock_not_acquired error ->
+    check bool "lock body did not run before acquisition" false !body_ran;
     check bool "failure phase is lock-file open" true
       (match error.File_lock_eio.phase with
        | File_lock_eio.Open_lock_file -> true
        | Acquire_process_lock | Release_process_lock -> false)
+
+let test_durable_lock_release_failure_preserves_completed_value () =
+  with_temp_path @@ fun lock_path ->
+  let release_failure =
+    { File_lock_eio.lock_path
+    ; phase = File_lock_eio.Release_process_lock
+    ; cause =
+        { File_lock_eio.error = Unix.EIO
+        ; operation = "injected_release_after_body"
+        ; argument = lock_path
+        }
+    ; cleanup_failure = None
+    }
+  in
+  match
+    File_lock_eio.For_testing.with_durable_lock_observed_with_release_failure
+      ~release_failure
+      ~lock_path
+      (fun () -> "completed")
+  with
+  | File_lock_eio.Lock_not_acquired error ->
+    fail
+      ("durable lock was not acquired: "
+       ^ File_lock_eio.durable_lock_error_to_string error)
+  | File_lock_eio.Body_completed { value; release_error } ->
+    check string "completed body value survives release failure" "completed" value;
+    check bool
+      "release failure is exact"
+      true
+      (release_error = Some release_failure)
+;;
 
 let with_external_lock_holder lock_path f =
   let ready_read, ready_write = Unix.pipe () in
@@ -161,6 +199,8 @@ let () =
           test_case "works inside Eio context" `Quick test_with_lock_inside_eio;
           test_case "durable lock open failure is typed" `Quick
             test_durable_lock_open_failure_is_typed;
+          test_case "durable lock release failure preserves body value" `Quick
+            test_durable_lock_release_failure_preserves_completed_value;
           test_case "durable cross-process wait is cancellable" `Quick
             test_durable_lock_wait_is_cancellable;
         ] );

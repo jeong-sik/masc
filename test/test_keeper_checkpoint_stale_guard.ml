@@ -480,6 +480,31 @@ let test_ready_runtime_raw_domain_save () =
   | Error _ -> fail "raw-domain checkpoint did not round-trip"
   | Ok checkpoint -> check int "raw-domain turn persisted" 11 checkpoint.turn_count
 
+let with_recorded_backtraces f =
+  let was_recording = Printexc.backtrace_status () in
+  Printexc.record_backtrace true;
+  Fun.protect
+    ~finally:(fun () -> Printexc.record_backtrace was_recording)
+    f
+;;
+
+let with_exact_source_fixture ~session_id f =
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
+    save_ok ~session_dir
+      (make_checkpoint ~session_id ~turn_count:8 ~marker:"source"
+       |> with_generation 3)
+      "exact source seed save";
+    let source_ref =
+      match
+        Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
+      with
+      | Ok (_, reference) -> reference
+      | Error _ -> fail "exact source load failed"
+    in
+    f ~session_dir ~source_ref)
+;;
+
 let test_exact_source_cas_allows_one_equal_turn_writer () =
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
@@ -495,34 +520,66 @@ let test_exact_source_cas_allows_one_equal_turn_writer () =
       | Ok (_, reference) -> reference
       | Error _ -> fail "CAS source load failed"
     in
-    let writer marker =
-      Keeper_checkpoint_store.save_oas_if_source
+    let left_observed = Atomic.make 0 in
+    let right_observed = Atomic.make 0 in
+    let left_ref = Atomic.make None in
+    let right_ref = Atomic.make None in
+    let writer marker observed observed_ref =
+      Keeper_checkpoint_store.For_testing.save_oas_if_source_with_observer
+        ~on_checkpoint_commit_observer:(fun installed_ref ->
+          Atomic.incr observed;
+          Atomic.set observed_ref (Some installed_ref))
         ~session_dir
         ~expected_source_ref:source_ref
         (make_checkpoint ~session_id ~turn_count:8 ~marker
          |> with_generation 3)
     in
-    let left = Domain.spawn (fun () -> "left", writer "left") in
-    let right = Domain.spawn (fun () -> "right", writer "right") in
+    let left =
+      Domain.spawn (fun () -> "left", writer "left" left_observed left_ref)
+    in
+    let right =
+      Domain.spawn (fun () -> "right", writer "right" right_observed right_ref)
+    in
     let committed, changed =
       [ Domain.join left; Domain.join right ]
       |> List.fold_left
            (fun (committed, changed) (marker, outcome) ->
              match outcome with
-             | Ok reference -> (marker, reference) :: committed, changed
-             | Error (Keeper_checkpoint_store.Source_changed _) ->
+             | Keeper_checkpoint_store.Installed installed ->
+               (marker, installed) :: committed, changed
+             | Keeper_checkpoint_store.Not_installed
+                 { cause = Keeper_checkpoint_store.Source_changed _; _ } ->
                committed, changed + 1
-             | Error _ -> fail "CAS writer returned an unexpected error")
+             | Keeper_checkpoint_store.Not_installed _ ->
+               fail "CAS writer returned an unexpected error")
            ([], 0)
     in
     check int "exactly one writer commits" 1 (List.length committed);
     check int "the competing source is rejected" 1 changed;
+    check int
+      "competing observer is emitted once for the winner"
+      1
+      (Atomic.get left_observed + Atomic.get right_observed);
     match committed,
       Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
     with
     | [ (winner, committed_ref) ], Ok (checkpoint, disk_ref) ->
+      let winner_observed, loser_observed, winner_ref =
+        if String.equal winner "left"
+        then Atomic.get left_observed, Atomic.get right_observed, Atomic.get left_ref
+        else Atomic.get right_observed, Atomic.get left_observed, Atomic.get right_ref
+      in
+      check int "winning writer observer count" 1 winner_observed;
+      check int "stale writer observer count" 0 loser_observed;
       check bool "committed ref identifies installed canonical bytes" true
-        (Keeper_checkpoint_ref.equal committed_ref disk_ref);
+        (Keeper_checkpoint_ref.equal committed_ref.installed_ref disk_ref);
+      check bool
+        "observer receives the exact installed ref"
+        true
+        (match winner_ref with
+         | Some observed_ref ->
+           Keeper_checkpoint_ref.equal observed_ref committed_ref.installed_ref
+         | None -> false);
       check bool "installed payload belongs to the winning writer" true
         (List.exists
            (fun (message : Agent_sdk.Types.message) ->
@@ -545,15 +602,52 @@ let test_exact_source_cas_updates_canonical_watermark () =
       | Ok (_, reference) -> reference
       | Error _ -> fail "CAS watermark source load failed"
     in
+    let release_failure =
+      { File_lock_eio.lock_path = session_dir ^ ".checkpoint.lock"
+      ; phase = File_lock_eio.Release_process_lock
+      ; cause =
+          { File_lock_eio.error = Unix.EIO
+          ; operation = "injected_release"
+          ; argument = session_dir
+          }
+      ; cleanup_failure = None
+      }
+    in
+    let observer_count = ref 0 in
     (match
-       Keeper_checkpoint_store.save_oas_if_source
+       Keeper_checkpoint_store.For_testing.save_oas_if_source_with_release_failure
+         ~release_failure
+         ~on_checkpoint_commit_observer:(fun _ -> incr observer_count)
          ~session_dir
          ~expected_source_ref:source_ref
          (make_checkpoint ~session_id ~turn_count:9 ~marker:"target"
           |> with_generation 3)
      with
-     | Ok _ -> ()
-     | Error _ -> fail "CAS watermark candidate did not commit");
+     | Keeper_checkpoint_store.Installed installed ->
+       check int "release-failure observer remains at-most-once" 1 !observer_count;
+       check bool
+         "release failure remains auxiliary to installed"
+         true
+         (List.exists
+            (function
+              | Keeper_checkpoint_store.Release_process_lock_failed error ->
+                error = release_failure
+              | _ -> false)
+            installed.auxiliary)
+       ;
+       let disk_ref =
+         match
+           Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
+         with
+         | Ok (_, reference) -> reference
+         | Error _ -> fail "release-failure installed checkpoint was not readable"
+       in
+       check bool
+         "release failure preserves the exact installed ref"
+         true
+         (Keeper_checkpoint_ref.equal installed.installed_ref disk_ref)
+     | Keeper_checkpoint_store.Not_installed _ ->
+       fail "release failure downgraded the installed checkpoint");
     match
       Keeper_checkpoint_store.save_oas_classified ~session_dir
         (make_checkpoint ~session_id ~turn_count:8 ~marker:"stale!")
@@ -567,6 +661,288 @@ let test_exact_source_cas_updates_canonical_watermark () =
     | Ok (Keeper_checkpoint_store.Saved _) ->
       fail "stale save ignored the canonical checkpoint installed by CAS"
     | Error error -> fail ("post-CAS stale classification failed: " ^ error))
+
+let test_post_rename_durability_unknown_is_installed () =
+  let session_id = "sess-cas-post-rename" in
+  with_exact_source_fixture ~session_id (fun ~session_dir ~source_ref ->
+    let candidate =
+      make_checkpoint ~session_id ~turn_count:9 ~marker:"post-rename"
+      |> with_generation 3
+    in
+    let durability_error =
+      { Keeper_fs.renamed = true
+      ; stage = Keeper_fs.Parent_directory_fsync_after_rename
+      ; failure =
+          Keeper_fs.Operation_failed "injected post-rename durability failure"
+      }
+    in
+    match
+      Keeper_checkpoint_store.For_testing.save_oas_if_source_with_writer
+        ~write_checkpoint_bytes:
+          (fun ~on_durable_commit:_ ~ownership_root:_ ~path ~bytes ->
+             Fs_compat.save_file path bytes;
+             Error durability_error)
+        ~on_checkpoint_commit_observer:(fun _ -> ())
+        ~session_dir
+        ~expected_source_ref:source_ref
+        candidate
+    with
+    | Keeper_checkpoint_store.Not_installed _ ->
+      fail "post-rename durability uncertainty became Not_installed"
+    | Keeper_checkpoint_store.Installed installed ->
+      (match installed.auxiliary with
+       | [ Keeper_checkpoint_store.Commit_durability_unknown error ] ->
+         check bool
+           "post-rename durability cause is preserved"
+           true
+           (error = durability_error)
+       | _ -> fail "post-rename durability auxiliary was not preserved");
+      let disk_ref =
+        match
+          Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
+        with
+        | Ok (_, reference) -> reference
+        | Error _ -> fail "post-rename candidate was not externally installed"
+      in
+      check bool
+        "post-rename outcome carries the exact installed ref"
+        true
+        (Keeper_checkpoint_ref.equal installed.installed_ref disk_ref);
+      match
+        Keeper_checkpoint_store.save_oas_if_source
+          ~session_dir
+          ~expected_source_ref:source_ref
+          candidate
+      with
+      | Keeper_checkpoint_store.Not_installed
+          { cause = Keeper_checkpoint_store.Source_changed actual; _ } ->
+        check bool
+          "same-process retry is fenced by the installed ref"
+          true
+          (Keeper_checkpoint_ref.equal actual installed.installed_ref)
+      | Keeper_checkpoint_store.Installed _ ->
+        fail "post-rename candidate was installed twice"
+      | Keeper_checkpoint_store.Not_installed _ ->
+        fail "post-rename retry failed without exact source evidence")
+;;
+
+let test_pre_rename_write_failure_is_not_installed_and_retryable () =
+  let session_id = "sess-cas-pre-rename" in
+  with_exact_source_fixture ~session_id (fun ~session_dir ~source_ref ->
+    let candidate =
+      make_checkpoint ~session_id ~turn_count:9 ~marker:"pre-rename"
+      |> with_generation 3
+    in
+    let write_error =
+      { Keeper_fs.renamed = false
+      ; stage = Keeper_fs.Payload_write
+      ; failure = Keeper_fs.Operation_failed "injected pre-rename write failure"
+      }
+    in
+    let observer_count = ref 0 in
+    match
+      Keeper_checkpoint_store.For_testing.save_oas_if_source_with_writer
+        ~write_checkpoint_bytes:
+          (fun ~on_durable_commit:_ ~ownership_root:_ ~path:_ ~bytes:_ ->
+             Error write_error)
+        ~on_checkpoint_commit_observer:(fun _ -> incr observer_count)
+        ~session_dir
+        ~expected_source_ref:source_ref
+        candidate
+    with
+    | Keeper_checkpoint_store.Installed _ ->
+      fail "pre-rename write failure became Installed"
+    | Keeper_checkpoint_store.Not_installed
+        { cause = Keeper_checkpoint_store.Commit_not_installed error; _ } ->
+      check bool
+        "pre-rename write failure preserves its exact cause"
+        true
+        (error = write_error);
+      check int "pre-rename failure emits no commit observer" 0 !observer_count;
+      (match
+         Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
+       with
+       | Ok (_, disk_ref) ->
+         check bool
+           "pre-rename failure leaves the canonical ref unchanged"
+           true
+           (Keeper_checkpoint_ref.equal source_ref disk_ref)
+       | Error _ -> fail "pre-rename failure removed the canonical checkpoint");
+      (match
+         Keeper_checkpoint_store.save_oas_if_source
+           ~session_dir
+           ~expected_source_ref:source_ref
+           candidate
+       with
+       | Keeper_checkpoint_store.Installed installed ->
+         check bool
+           "pre-rename failure remains retryable from the same source"
+           false
+           (Keeper_checkpoint_ref.equal source_ref installed.installed_ref)
+       | Keeper_checkpoint_store.Not_installed _ ->
+         fail "pre-rename failure consumed the exact-source retry")
+    | Keeper_checkpoint_store.Not_installed _ ->
+      fail "pre-rename write failure lost its Commit_not_installed cause")
+;;
+
+let test_release_failure_preserves_not_installed_cause () =
+  let session_id = "sess-cas-not-installed-release" in
+  with_exact_source_fixture ~session_id (fun ~session_dir ~source_ref ->
+    let advanced =
+      match
+        Keeper_checkpoint_store.save_oas_if_source
+          ~session_dir
+          ~expected_source_ref:source_ref
+          (make_checkpoint ~session_id ~turn_count:9 ~marker:"advanced"
+           |> with_generation 3)
+      with
+      | Keeper_checkpoint_store.Installed installed -> installed.installed_ref
+      | Keeper_checkpoint_store.Not_installed _ ->
+        fail "failed to advance the source before release-failure proof"
+    in
+    let release_failure =
+      { File_lock_eio.lock_path = session_dir ^ ".checkpoint.lock"
+      ; phase = File_lock_eio.Release_process_lock
+      ; cause =
+          { File_lock_eio.error = Unix.EIO
+          ; operation = "injected_release_after_not_installed"
+          ; argument = session_dir
+          }
+      ; cleanup_failure = None
+      }
+    in
+    let observer_count = ref 0 in
+    match
+      Keeper_checkpoint_store.For_testing.save_oas_if_source_with_release_failure
+        ~release_failure
+        ~on_checkpoint_commit_observer:(fun _ -> incr observer_count)
+        ~session_dir
+        ~expected_source_ref:source_ref
+        (make_checkpoint ~session_id ~turn_count:10 ~marker:"stale-source"
+         |> with_generation 3)
+    with
+    | Keeper_checkpoint_store.Installed _ ->
+      fail "release failure changed a source mismatch into Installed"
+    | Keeper_checkpoint_store.Not_installed outcome ->
+      (match outcome.cause with
+       | Keeper_checkpoint_store.Source_changed actual ->
+         check bool
+           "Not_installed retains the exact changed source"
+           true
+           (Keeper_checkpoint_ref.equal actual advanced)
+       | _ -> fail "release failure replaced the original non-install cause");
+      check int "non-install path emits no commit observer" 0 !observer_count;
+      match outcome.auxiliary with
+      | [ Keeper_checkpoint_store.Release_process_lock_failed error ] ->
+        check bool
+          "Not_installed retains the release failure"
+          true
+          (error = release_failure)
+      | _ -> fail "Not_installed release failure was not preserved")
+;;
+
+let test_acquire_failure_prevents_lock_body () =
+  let session_id = "sess-cas-acquire-failure" in
+  with_exact_source_fixture ~session_id (fun ~session_dir ~source_ref ->
+    let acquire_failure =
+      { File_lock_eio.lock_path = session_dir ^ ".checkpoint.lock"
+      ; phase = File_lock_eio.Open_lock_file
+      ; cause =
+          { File_lock_eio.error = Unix.EACCES
+          ; operation = "injected_open_before_body"
+          ; argument = session_dir
+          }
+      ; cleanup_failure = None
+      }
+    in
+    let observer_count = ref 0 in
+    match
+      Keeper_checkpoint_store.For_testing.save_oas_if_source_with_acquire_failure
+        ~acquire_failure
+        ~on_checkpoint_commit_observer:(fun _ -> incr observer_count)
+        ~session_dir
+        ~expected_source_ref:source_ref
+        (make_checkpoint ~session_id ~turn_count:9 ~marker:"not-admitted"
+         |> with_generation 3)
+    with
+    | Keeper_checkpoint_store.Installed _ ->
+      fail "lock acquisition failure admitted the checkpoint body"
+    | Keeper_checkpoint_store.Not_installed outcome ->
+      check int "acquire failure runs no commit observer" 0 !observer_count;
+      check bool "acquire failure has no release auxiliary" true
+        (outcome.auxiliary = []);
+      match outcome.cause with
+      | Keeper_checkpoint_store.Source_unavailable
+          (Keeper_checkpoint_store.Ref_lock_failed detail) ->
+        check bool
+          "acquire failure preserves its exact lock cause"
+          true
+          (Astring.String.is_infix ~affix:"injected_open_before_body" detail)
+      | _ -> fail "acquire failure changed its non-install cause")
+;;
+
+let test_commit_observer_failure_is_installed () =
+  let session_id = "sess-cas-observer-failure" in
+  with_exact_source_fixture ~session_id (fun ~session_dir ~source_ref ->
+    let outcome =
+      with_recorded_backtraces (fun () ->
+        Keeper_checkpoint_store.For_testing.save_oas_if_source_with_observer
+          ~on_checkpoint_commit_observer:(fun _ ->
+            failwith "injected commit observer failure")
+          ~session_dir
+          ~expected_source_ref:source_ref
+          (make_checkpoint ~session_id ~turn_count:9 ~marker:"observer-failure"
+           |> with_generation 3))
+    in
+    match outcome with
+    | Keeper_checkpoint_store.Not_installed _ ->
+      fail "commit observer failure downgraded the installed checkpoint"
+    | Keeper_checkpoint_store.Installed installed ->
+      match installed.auxiliary with
+      | [ Keeper_checkpoint_store.Commit_observer_failed
+            (Failure detail, backtrace) ] ->
+        check string
+          "commit observer failure cause"
+          "injected commit observer failure"
+          detail;
+        check bool
+          "commit observer failure preserves its raw backtrace"
+          true
+          (Printexc.raw_backtrace_length backtrace > 0)
+      | _ -> fail "commit observer failure was not preserved as auxiliary")
+;;
+
+let test_post_commit_unwind_is_installed () =
+  let session_id = "sess-cas-post-commit-unwind" in
+  with_exact_source_fixture ~session_id (fun ~session_dir ~source_ref ->
+    let outcome =
+      with_recorded_backtraces (fun () ->
+        Keeper_checkpoint_store.For_testing.save_oas_if_source_with_post_commit_unwind
+          ~post_commit_unwind:(fun () ->
+            failwith "injected post-commit unwind")
+          ~on_checkpoint_commit_observer:(fun _ -> ())
+          ~session_dir
+          ~expected_source_ref:source_ref
+          (make_checkpoint ~session_id ~turn_count:9 ~marker:"post-commit-unwind"
+           |> with_generation 3))
+    in
+    match outcome with
+    | Keeper_checkpoint_store.Not_installed _ ->
+      fail "post-commit unwind downgraded the installed checkpoint"
+    | Keeper_checkpoint_store.Installed installed ->
+      match installed.auxiliary with
+      | [ Keeper_checkpoint_store.Post_commit_unwind_interrupted
+            (Failure detail, backtrace) ] ->
+        check string
+          "post-commit unwind cause"
+          "injected post-commit unwind"
+          detail;
+        check bool
+          "post-commit unwind preserves its raw backtrace"
+          true
+          (Printexc.raw_backtrace_length backtrace > 0)
+      | _ -> fail "post-commit unwind was not preserved as auxiliary")
+;;
 
 let test_checkpoint_ref_requires_generation () =
   let session_dir = temp_dir () in
@@ -653,6 +1029,18 @@ let () =
             test_exact_source_cas_allows_one_equal_turn_writer;
           test_case "exact source CAS updates the canonical watermark" `Quick
             test_exact_source_cas_updates_canonical_watermark;
+          test_case "release failure preserves Not_installed cause" `Quick
+            test_release_failure_preserves_not_installed_cause;
+          test_case "acquire failure prevents the lock body" `Quick
+            test_acquire_failure_prevents_lock_body;
+          test_case "post-rename durability uncertainty stays installed" `Quick
+            test_post_rename_durability_unknown_is_installed;
+          test_case "pre-rename write failure stays retryable" `Quick
+            test_pre_rename_write_failure_is_not_installed_and_retryable;
+          test_case "commit observer failure stays installed" `Quick
+            test_commit_observer_failure_is_installed;
+          test_case "post-commit unwind stays installed" `Quick
+            test_post_commit_unwind_is_installed;
           test_case "checkpoint refs require keeper generation" `Quick
             test_checkpoint_ref_requires_generation;
           test_case "exact snapshot preserves canonical bytes" `Quick

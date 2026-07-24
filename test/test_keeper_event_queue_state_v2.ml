@@ -53,6 +53,19 @@ let no_compaction ~turn_count reason : State.no_compaction =
   { source = checkpoint_source ~turn_count; reason }
 ;;
 
+let applied_compaction_receipt
+    ?(lifecycle = Masc.Keeper_manual_compaction.Completion_applied)
+    ?(manifest = Ok ())
+    () =
+  let installation : Masc.Keeper_checkpoint_store.installed_checkpoint =
+    { installed_ref = checkpoint_source ~turn_count:9; auxiliary = [] }
+  in
+  { Masc.Keeper_manual_compaction.installation = installation
+  ; lifecycle
+  ; manifest
+  }
+;;
+
 let exact_terminal ?(slot_id = "slot-terminal") ?(call_id = "call-terminal") cause =
   State.Exact_execution_terminal
     { cause
@@ -1360,7 +1373,7 @@ let test_applied_compaction_settles_followup_atomically () =
          1.0)
   in
   let meta = cycle_meta () in
-  let settlement failure =
+  let settlement ?(receipt = applied_compaction_receipt ()) failure =
     Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
       ~base_path:(Sys.getcwd ())
       ~settled_at:8.0
@@ -1369,7 +1382,10 @@ let test_applied_compaction_settles_followup_atomically () =
       ~lease
       (Some
          (Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_applied
-            (Masc.Keeper_heartbeat_loop_cycle.Failed { meta; failure })))
+            { receipt
+            ; followup =
+                Masc.Keeper_heartbeat_loop_cycle.Failed { meta; failure }
+            }))
   in
   let judgment_failure =
     turn_failure
@@ -1380,9 +1396,11 @@ let test_applied_compaction_settles_followup_atomically () =
          })
   in
   (match settlement judgment_failure with
-   | Masc.Keeper_registry_event_queue.Escalate
-       { reason = Masc.Keeper_registry_event_queue.Failure_judgment_requested
-       ; successor = Some { Queue.payload = Queue.Failure_judgment successor; _ }
+   | Masc.Keeper_registry_event_queue.Manual_compaction_committed
+       { followup =
+           Keeper_event_queue_state.Compaction_commit_failure_judgment
+             { Queue.payload = Queue.Failure_judgment successor; _ }
+       ; _
        } ->
      Alcotest.(check string)
        "atomic successor keeps exact final runtime"
@@ -1396,9 +1414,139 @@ let test_applied_compaction_settles_followup_atomically () =
          ; retry_after = None
          })
   in
-  match settlement retry_failure with
-  | Masc.Keeper_registry_event_queue.Ack -> ()
-  | _ -> Alcotest.fail "follow-up retry replayed an already-applied compaction"
+  (match settlement retry_failure with
+   | Masc.Keeper_registry_event_queue.Manual_compaction_committed
+       { followup = Keeper_event_queue_state.Compaction_commit_ack; _ } ->
+     ()
+   | _ -> Alcotest.fail "follow-up retry replayed an already-applied compaction");
+  let completion_error =
+    Masc.Keeper_context_runtime.Transition_rejected
+      (Keeper_state_machine.Precondition_violation
+         { event = "compaction_completed"; reason = "injected completion rejection" })
+  in
+  let failure_dispatch_error =
+    Masc.Keeper_context_runtime.Transition_rejected
+      (Keeper_state_machine.Precondition_violation
+         { event = "compaction_failed"; reason = "injected cleanup rejection" })
+  in
+  let receipt =
+    applied_compaction_receipt
+      ~lifecycle:
+        (Masc.Keeper_manual_compaction.Completion_rejected_failure_dispatch_failed
+           { completion_error; failure_dispatch_error })
+      ()
+  in
+  let committed =
+    Masc.Keeper_heartbeat_loop_cycle.Manual_compaction_applied
+      { receipt; followup = Masc.Keeper_heartbeat_loop_cycle.Completed meta }
+  in
+  (match
+     Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
+       ~base_path:(Sys.getcwd ())
+       ~settled_at:8.0
+       ~stop_requested:false
+       ~compaction_consecutive_failures:0
+       ~lease
+       (Some committed)
+   with
+   | Masc.Keeper_registry_event_queue.Manual_compaction_committed
+       { commit
+       ; followup = Keeper_event_queue_state.Compaction_commit_ack
+       } ->
+     Alcotest.(check bool)
+       "post-install lifecycle receipt requires operator action"
+       true
+       (Keeper_event_queue_state.manual_compaction_commit_requires_operator_action
+          commit)
+   | Masc.Keeper_registry_event_queue.Requeue
+       Masc.Keeper_registry_event_queue.Context_compaction_retry ->
+     Alcotest.fail "post-install lifecycle failure replayed provider compaction"
+   | _ -> Alcotest.fail "post-install lifecycle failure was not acknowledged");
+let manifest_error = "injected post-install manifest failure" in
+let manifest_settlement =
+  settlement
+    ~receipt:
+      (applied_compaction_receipt
+         ~manifest:(Error manifest_error)
+         ())
+    retry_failure
+in
+let manifest_commit =
+  match manifest_settlement with
+  | Masc.Keeper_registry_event_queue.Manual_compaction_committed
+      { commit
+      ; followup = Keeper_event_queue_state.Compaction_commit_ack
+      } ->
+    Alcotest.(check (option string))
+      "committed receipt preserves manifest error"
+      (Some manifest_error)
+      commit.manifest_error;
+    Alcotest.(check bool)
+      "manifest error requires operator action"
+      true
+      (Keeper_event_queue_state.manual_compaction_commit_requires_operator_action
+         commit);
+    commit
+  | _ -> Alcotest.fail "manifest failure was not committed as an applied receipt"
+in
+let manifest_source =
+  stimulus
+    ~payload:Queue.Manual_compaction_requested
+    Queue.manual_compaction_post_id
+    1.0
+in
+let manifest_state =
+  State.with_pending (queue [ manifest_source ]) State.empty
+in
+let manifest_state, manifest_lease = claim_head manifest_state in
+let manifest_lease = require_some "manifest receipt lease" manifest_lease in
+let _, manifest_result =
+  State.settle
+    ~settled_at:9.0
+    ~lease:manifest_lease
+    ~settlement:manifest_settlement
+    manifest_state
+  |> require_ok "settle manifest failure receipt"
+in
+let manifest_receipt =
+  match manifest_result with
+  | State.Settled receipt -> receipt
+  | State.Already_settled _ ->
+    Alcotest.fail "manifest failure receipt unexpectedly replayed"
+in
+let public_manifest_receipt =
+  State.transition_receipt_to_yojson manifest_receipt
+  |> Yojson.Safe.Util.member "settlement"
+  |> Yojson.Safe.Util.member "receipt"
+in
+Alcotest.(check string)
+  "public receipt preserves manifest error"
+  manifest_error
+  Yojson.Safe.Util.(public_manifest_receipt |> member "manifest_error" |> to_string);
+Alcotest.(check bool)
+  "public receipt preserves operator action"
+  true
+  Yojson.Safe.Util.(
+    public_manifest_receipt |> member "operator_action_required" |> to_bool);
+let restored_manifest_receipt =
+  State.transition_receipt_to_yojson manifest_receipt
+  |> State.transition_receipt_of_yojson
+  |> require_ok "decode manifest failure receipt"
+in
+Alcotest.(check bool)
+  "manifest failure receipt round-trips"
+  true
+  (State.transition_receipt_equal manifest_receipt restored_manifest_receipt);
+Alcotest.(check (option string))
+  "round-tripped committed receipt preserves manifest error"
+  (Some manifest_error)
+  manifest_commit.manifest_error;
+  match
+    Masc.Keeper_heartbeat_loop.compaction_outcome_of_cycle_outcome
+      (Some committed)
+  with
+  | Some `Committed -> ()
+  | _ -> Alcotest.fail "post-install lifecycle failure was not stamped committed"
 ;;
 
 (* RFC-0351 S0 / #25461: a manual-compaction failure requeues while the streak

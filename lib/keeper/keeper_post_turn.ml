@@ -55,6 +55,7 @@ type post_turn_lifecycle = {
 
 type compaction_recovery = {
   checkpoint : Agent_sdk.Checkpoint.t;
+  checkpoint_installation : Keeper_checkpoint_store.checkpoint_installation;
   trigger : Compaction_trigger.t;
   evidence : Keeper_compaction_evidence.t;
   turn_generation : int;
@@ -90,10 +91,6 @@ let compaction_recovery_error_to_tag = function
     "checkpoint_candidate_invalid"
   | Checkpoint_cas_failed (Commit_not_installed _) ->
     "checkpoint_commit_not_installed"
-  | Checkpoint_cas_failed (Commit_durability_unknown _) ->
-    "checkpoint_commit_durability_unknown"
-  | Checkpoint_cas_failed (Transaction_outcome_unknown _) ->
-    "checkpoint_transaction_outcome_unknown"
   | Checkpoint_candidate_failed _ -> "checkpoint_candidate_failed"
   | Compaction_rejected reason ->
     Keeper_compact_policy.compaction_rejection_to_tag reason
@@ -165,16 +162,6 @@ let checkpoint_cas_error_detail = function
   | Commit_not_installed error ->
     "checkpoint commit not installed: "
     ^ Keeper_fs.durable_write_error_to_string error
-  | Commit_durability_unknown { installed_ref; error } ->
-    Printf.sprintf
-      "checkpoint commit durability unknown: %s error=%s"
-      (checkpoint_ref_detail installed_ref)
-      (Keeper_fs.durable_write_error_to_string error)
-  | Transaction_outcome_unknown { possible_installed_ref; error } ->
-    Printf.sprintf
-      "checkpoint transaction outcome unknown: %s error=%s"
-      (checkpoint_ref_detail possible_installed_ref)
-      (File_lock_eio.durable_lock_error_to_string error)
 
 let compaction_recovery_error_to_string = function
   | Checkpoint_ref_load_failed error -> checkpoint_ref_load_error_detail error
@@ -694,7 +681,9 @@ let prepare_compaction
     ~projection_request
 ;;
 
-let commit_prepared_compaction (prepared : prepared_compaction)
+let commit_prepared_compaction_with
+    ~save_oas_checkpoint_if_source
+    (prepared : prepared_compaction)
   : (compaction_recovery, compaction_recovery_error) result =
   (* Source-CAS commit.  The caller decides which admission (if any) guards
      this phase; correctness against interleaved state change is enforced
@@ -727,26 +716,34 @@ let commit_prepared_compaction (prepared : prepared_compaction)
          ~generation:turn_generation
          ~expected_source_ref:source_ref
      with
-     | Ok (saved_checkpoint, installed_ref) ->
+     | Ok
+         ( saved_checkpoint
+         , (Keeper_checkpoint_store.Installed installed as installation) ) ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string Compactions)
          ~labels:[ "keeper", retry_meta.name ]
          ();
        Ok
          { checkpoint = saved_checkpoint
+         ; checkpoint_installation = installation
          ; trigger = prepared_trigger
          ; evidence
          ; turn_generation
          ; projection_target =
              Keeper_compaction_projection_target.bind_committed_checkpoint
-               installed_ref
+               installed.installed_ref
                projection_target
          }
-     | Error (Persistence_error (Keeper_checkpoint_store.Source_changed actual)) ->
+     | Ok
+         ( _
+         , Keeper_checkpoint_store.Not_installed
+             { cause = Keeper_checkpoint_store.Source_changed actual; _ } ) ->
        Log.Keeper.warn
          "compaction checkpoint source changed: %s"
          (checkpoint_ref_detail actual);
        terminal Keeper_event_queue_state.Checkpoint_source_changed
+     | Ok
+         (_, Keeper_checkpoint_store.Not_installed { cause = cas_error; _ })
      | Error (Persistence_error cas_error) ->
        let detail = checkpoint_cas_error_detail cas_error in
        Log.Keeper.error "compaction checkpoint save failed: %s" detail;
@@ -770,6 +767,20 @@ let commit_prepared_compaction (prepared : prepared_compaction)
      Log.Keeper.error "compaction checkpoint save exception became terminal: %s" detail;
      terminal Keeper_event_queue_state.Checkpoint_persistence_failed)
 ;;
+
+let commit_prepared_compaction =
+  commit_prepared_compaction_with ~save_oas_checkpoint_if_source
+;;
+
+module For_testing = struct
+  let commit_prepared_compaction_with_history ~save_oas_history prepared =
+    commit_prepared_compaction_with
+      ~save_oas_checkpoint_if_source:
+        (Keeper_context_core.For_testing.save_oas_checkpoint_if_source_with_history
+           ~save_oas_history)
+      prepared
+  ;;
+end
 
 let recover_latest_checkpoint_for_compaction
     ?exact_execution_guard

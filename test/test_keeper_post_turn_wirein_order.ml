@@ -14,6 +14,7 @@ module Exact_fixture = Compaction_exact_output_fixture
 module Schema = Masc.Keeper_structured_output_schema
 module Summarizer = Masc.Keeper_compaction_llm_summarizer
 
+
 let exact_terminal ?(slot_id = "compaction-slot") ?(call_id = "call-compaction") cause =
   Keeper_event_queue_state.
     { cause
@@ -820,6 +821,7 @@ let test_manual_compaction_serializes_owner_lane () =
        | Registry_queue.No_compaction _ ->
          fail "post-dispatch final admission changed its terminal cause"
        | Registry_queue.Ack
+       | Registry_queue.Manual_compaction_committed _
        | Registry_queue.Cancel_accepted _
        | Registry_queue.Transfer_accepted _
        | Registry_queue.Settle_from_source_terminal _
@@ -1012,6 +1014,62 @@ let test_malformed_structure_preserves_checkpoint () =
   | _ -> fail "malformed compaction was not rejected with typed structure")
 ;;
 
+let test_checkpoint_installation_auxiliary_manifest_tags () =
+  let write_error =
+    { Masc.Keeper_fs.renamed = true
+    ; stage = Masc.Keeper_fs.Parent_directory_fsync_after_rename
+    ; failure = Masc.Keeper_fs.Operation_failed "injected durability uncertainty"
+    }
+  in
+  let lock_error =
+    { File_lock_eio.lock_path = "/tmp/checkpoint-installation-auxiliary.lock"
+    ; phase = File_lock_eio.Release_process_lock
+    ; cause =
+        { File_lock_eio.error = Unix.EIO
+        ; operation = "injected_release"
+        ; argument = "/tmp/checkpoint-installation-auxiliary.lock"
+        }
+    ; cleanup_failure = None
+    }
+  in
+  let failure detail = Failure detail, Printexc.get_callstack 1 in
+  let auxiliaries =
+    [ Masc.Keeper_checkpoint_store.Commit_durability_unknown write_error
+    ; Masc.Keeper_checkpoint_store.Commit_observer_failed (failure "observer")
+    ; Masc.Keeper_checkpoint_store.Release_process_lock_failed lock_error
+    ; Masc.Keeper_checkpoint_store.Post_commit_unwind_interrupted
+        (failure "unwind")
+    ; Masc.Keeper_checkpoint_store.History_write_failed (failure "history")
+    ]
+  in
+  let kinds =
+    auxiliaries
+    |> List.map
+         Masc.Keeper_manual_compaction.For_testing.checkpoint_installation_auxiliary_to_json
+    |> List.map (fun json ->
+      let open Yojson.Safe.Util in
+      check bool
+        "every installation auxiliary requires operator action"
+        true
+        (json |> member "operator_action_required" |> to_bool);
+      check bool
+        "every installation auxiliary has detail"
+        true
+        (json |> member "detail" |> to_string |> String.trim |> fun detail ->
+         detail <> "");
+      json |> member "kind" |> to_string)
+  in
+  check (list string)
+    "all installation auxiliary constructors have stable manifest tags"
+    [ "commit_durability_unknown"
+    ; "commit_observer_failed"
+    ; "release_process_lock_failed"
+    ; "post_commit_unwind_interrupted"
+    ; "history_write_failed"
+    ]
+    kinds
+;;
+
 let test_prepare_commit_source_cas () =
   (* The prepare/commit split exists so the provider call can run outside
      the keeper admission; the source CAS — not the slot — is the
@@ -1084,15 +1142,45 @@ let test_prepare_commit_source_cas () =
       "prepare performs one real exact dispatch"
       1
       (Exact_fixture.post_count exact_server);
-    (match Post_turn.commit_prepared_compaction prepared with
-     | Ok _ -> ()
-     | Error error ->
-       failf
-         "commit of a fresh prepared plan failed: %s"
-         (Post_turn.compaction_recovery_error_to_string error));
+    let was_recording = Printexc.backtrace_status () in
+    Printexc.record_backtrace true;
+    let recovery =
+      Fun.protect
+        ~finally:(fun () -> Printexc.record_backtrace was_recording)
+        (fun () ->
+           match
+             Post_turn.For_testing.commit_prepared_compaction_with_history
+               ~save_oas_history:(fun ~session_dir:_ _ ->
+                 raise
+                   (Eio.Cancel.Cancelled
+                      (Failure "injected history cancellation")))
+               prepared
+           with
+           | Ok recovery -> recovery
+           | Error error ->
+             failf
+               "commit of a fresh prepared plan failed: %s"
+               (Post_turn.compaction_recovery_error_to_string error))
+    in
+    (match recovery.checkpoint_installation with
+     | Masc.Keeper_checkpoint_store.Installed installed ->
+       check bool
+         "history cancellation remains typed after install"
+         true
+         (List.exists
+            (function
+              | Masc.Keeper_checkpoint_store.History_write_failed
+                  (Eio.Cancel.Cancelled _, backtrace) ->
+                Printexc.raw_backtrace_length backtrace > 0
+              | _ -> false)
+            installed.auxiliary)
+     | Masc.Keeper_checkpoint_store.Not_installed _ ->
+       fail "history cancellation downgraded the installed checkpoint");
     (* The first commit advanced the durable source; the same
        prepared value is now stale and must be CAS-rejected. *)
-    (match Post_turn.commit_prepared_compaction prepared with
+    (match
+       Post_turn.commit_prepared_compaction prepared
+     with
      | Error
          (Post_turn.No_compaction
             { reason =
@@ -1357,6 +1445,8 @@ let () =
         `Quick test_regular_post_turn_does_not_auto_compact;
       test_case "manual compaction serializes the owner lane"
         `Quick test_manual_compaction_serializes_owner_lane;
+      test_case "checkpoint installation auxiliary manifest tags"
+        `Quick test_checkpoint_installation_auxiliary_manifest_tags;
       test_case "malformed structure preserves checkpoint"
         `Quick test_malformed_structure_preserves_checkpoint;
       test_case "prepare/commit source CAS"

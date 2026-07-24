@@ -30,6 +30,7 @@ type post_turn_lifecycle =
     Manual and provider-overflow callers consume the same result. *)
 type compaction_recovery =
   { checkpoint : Agent_sdk.Checkpoint.t
+  ; checkpoint_installation : Keeper_checkpoint_store.checkpoint_installation
   ; trigger : Compaction_trigger.t
   ; evidence : Keeper_compaction_evidence.t
   ; turn_generation : int
@@ -121,6 +122,14 @@ val prepare_compaction :
 val commit_prepared_compaction :
   prepared_compaction ->
   (compaction_recovery, compaction_recovery_error) result
+
+module For_testing : sig
+  val commit_prepared_compaction_with_history :
+    save_oas_history:
+      (session_dir:string -> Agent_sdk.Checkpoint.t -> unit) ->
+    prepared_compaction ->
+    (compaction_recovery, compaction_recovery_error) result
+end
 
 (** Terminal source-bound disposition for a prepared exact-output result that
     cannot enter its commit admission. The provider execution has completed,

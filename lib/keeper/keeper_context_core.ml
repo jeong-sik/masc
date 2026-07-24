@@ -111,7 +111,8 @@ let save_oas_checkpoint_classified
      | Ok outcome -> Ok (checkpoint, outcome)
      | Error error -> Error (Persistence_error error))
 
-let save_oas_checkpoint_if_source
+let save_oas_checkpoint_if_source_with
+    ~save_oas_history
     ~multimodal_policy
     ~keeper_name
     ~session
@@ -137,12 +138,37 @@ let save_oas_checkpoint_if_source
          ~expected_source_ref
          checkpoint
      with
-     | Error error -> Error (Persistence_error error)
-     | Ok installed_ref ->
-       Keeper_checkpoint_store.save_oas_history
-         ~session_dir:session.session_dir
-         checkpoint;
-       Ok (checkpoint, installed_ref))
+     | Keeper_checkpoint_store.Not_installed _ as installation ->
+       Ok (checkpoint, installation)
+     | Keeper_checkpoint_store.Installed installed ->
+       let installation =
+         match
+           save_oas_history
+             ~session_dir:session.session_dir
+             checkpoint
+         with
+         | () -> Keeper_checkpoint_store.Installed installed
+         | exception exn ->
+           let failure = exn, Printexc.get_raw_backtrace () in
+           Keeper_checkpoint_store.Installed
+             { installed with
+               auxiliary =
+                 installed.auxiliary
+                 @ [ Keeper_checkpoint_store.History_write_failed failure ]
+             }
+       in
+       Ok (checkpoint, installation))
+
+let save_oas_checkpoint_if_source =
+  save_oas_checkpoint_if_source_with
+    ~save_oas_history:Keeper_checkpoint_store.save_oas_history
+;;
+
+module For_testing = struct
+  let save_oas_checkpoint_if_source_with_history ~save_oas_history =
+    save_oas_checkpoint_if_source_with ~save_oas_history
+  ;;
+end
 
 let save_oas_checkpoint
     ~multimodal_policy

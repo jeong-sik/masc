@@ -838,7 +838,7 @@ let test_release_failure_preserves_not_installed_cause () =
           "Not_installed retains the release failure"
           true
           (error = release_failure)
-  | _ -> fail "Not_installed release failure was not preserved"
+      | _ -> fail "Not_installed release failure was not preserved")
 ;;
 
 let test_acquire_failure_prevents_lock_body () =

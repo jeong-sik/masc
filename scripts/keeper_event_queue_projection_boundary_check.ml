@@ -209,7 +209,7 @@ let collect_structure_definitions ~file structure =
     ; expr =
         (fun self expression ->
            (match expression.pexp_desc with
-            | Pexp_pack packed ->
+            | Pexp_pack (packed, _) ->
               reject_guarded_owner_reexport
                 ~file
                 ~surface:"first-class module pack"

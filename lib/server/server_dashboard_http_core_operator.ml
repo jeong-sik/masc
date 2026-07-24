@@ -10,6 +10,7 @@ type operator_snapshot_publication =
   ; generation : int
   ; compute_sequence : int
   ; terminal_sequence : int
+  ; fresh_until_unix : float option
   ; json : Yojson.Safe.t
   ; has_success : bool
   }
@@ -70,11 +71,13 @@ let make_operator_snapshot_publication
       ~generation
       ~compute_sequence
       ~terminal_sequence
+      ~fresh_until_unix
   =
   { epoch = operator_snapshot_epoch
   ; generation
   ; compute_sequence
   ; terminal_sequence
+  ; fresh_until_unix
   ; json = cached_surface_json operator_snapshot_cache
   ; has_success = cached_surface_has_success operator_snapshot_cache
   }
@@ -89,7 +92,8 @@ let operator_snapshot_publication_ref =
     (make_operator_snapshot_publication
        ~generation:0
        ~compute_sequence:0
-       ~terminal_sequence:0)
+       ~terminal_sequence:0
+       ~fresh_until_unix:None)
 ;;
 
 let install_operator_snapshot_invalidation generation =
@@ -100,6 +104,7 @@ let install_operator_snapshot_invalidation generation =
       ~generation
       ~compute_sequence:0
       ~terminal_sequence:0
+      ~fresh_until_unix:None
   in
   operator_snapshot_publication_ref := publication;
   publication
@@ -112,15 +117,36 @@ let synchronize_operator_snapshot_generation generation =
   else publication
 ;;
 
-let operator_snapshot_publication () =
+let read_operator_snapshot_publication f =
   Dashboard_projection_cache.with_snapshot_publication_generation (fun generation ->
     Stdlib.Mutex.protect operator_snapshot_cache_mu (fun () ->
-      synchronize_operator_snapshot_generation generation))
+      synchronize_operator_snapshot_generation generation |> f))
+;;
+
+let operator_snapshot_publication () =
+  read_operator_snapshot_publication Fun.id
+;;
+
+let operator_snapshot_publication_with_freshness () =
+  read_operator_snapshot_publication (fun publication ->
+    let is_fresh =
+      publication.has_success
+      &&
+      match publication.fresh_until_unix with
+      | Some deadline -> Time_compat.now () < deadline
+      | None -> false
+    in
+    publication, is_fresh)
 ;;
 
 let operator_snapshot_publication_json
       (publication : operator_snapshot_publication)
   =
+  let fresh_until_json =
+    match publication.fresh_until_unix with
+    | Some value -> `Float value
+    | None -> `Null
+  in
   match publication.json with
   | `Assoc fields ->
     `Assoc
@@ -128,17 +154,20 @@ let operator_snapshot_publication_json
        :: ("snapshot_epoch", `String publication.epoch)
        :: ("snapshot_compute_sequence", `Int publication.compute_sequence)
        :: ("snapshot_terminal_sequence", `Int publication.terminal_sequence)
+       :: ("snapshot_fresh_until_unix", fresh_until_json)
        :: (fields
            |> List.remove_assoc "snapshot_generation"
            |> List.remove_assoc "snapshot_epoch"
            |> List.remove_assoc "snapshot_compute_sequence"
-           |> List.remove_assoc "snapshot_terminal_sequence"))
+           |> List.remove_assoc "snapshot_terminal_sequence"
+           |> List.remove_assoc "snapshot_fresh_until_unix"))
   | json ->
     `Assoc
       [ "snapshot_epoch", `String publication.epoch
       ; "snapshot_generation", `Int publication.generation
       ; "snapshot_compute_sequence", `Int publication.compute_sequence
       ; "snapshot_terminal_sequence", `Int publication.terminal_sequence
+      ; "snapshot_fresh_until_unix", fresh_until_json
       ; "payload", json
       ]
 ;;
@@ -175,7 +204,15 @@ let begin_operator_snapshot_compute () =
       { generation; sequence }))
 ;;
 
-let publish_operator_snapshot_if_current ~compute json =
+let operator_snapshot_freshness_ttl_s =
+  Server_dashboard_http_core_cache.standard_cache_ttl_s
+;;
+
+let publish_operator_snapshot_if_current_with_freshness
+      ~compute
+      ~fresh_for_s
+      json
+  =
   Dashboard_projection_cache.with_snapshot_publication_generation (fun current ->
     if Int.equal current compute.generation
     then (
@@ -190,11 +227,19 @@ let publish_operator_snapshot_if_current ~compute json =
               ~generation:compute.generation
               ~compute_sequence:compute.sequence
               ~terminal_sequence:compute.sequence
+              ~fresh_until_unix:(Some (Time_compat.now () +. fresh_for_s))
           in
           operator_snapshot_publication_ref := published;
           Some published)
         else None))
     else None)
+;;
+
+let publish_operator_snapshot_if_current ~compute json =
+  publish_operator_snapshot_if_current_with_freshness
+    ~compute
+    ~fresh_for_s:operator_snapshot_freshness_ttl_s
+    json
 ;;
 
 let mark_operator_snapshot_error_if_current ~compute exn =
@@ -208,10 +253,16 @@ let mark_operator_snapshot_error_if_current ~compute exn =
         then (
           mark_cached_surface_error operator_snapshot_cache exn;
           let terminal =
+            let fresh_until_unix =
+              Option.map
+                (fun deadline -> Float.min deadline (Time_compat.now ()))
+                publication.fresh_until_unix
+            in
             make_operator_snapshot_publication
               ~generation:compute.generation
               ~compute_sequence:publication.compute_sequence
               ~terminal_sequence:compute.sequence
+              ~fresh_until_unix
           in
           operator_snapshot_publication_ref := terminal;
           Some terminal)
@@ -242,5 +293,10 @@ let operator_snapshot_extra () =
 ;;
 
 module For_testing = struct
-  let operator_snapshot_cache = operator_snapshot_cache
+  let publish_operator_snapshot_success ?(fresh_for_s = operator_snapshot_freshness_ttl_s) json =
+    let compute = begin_operator_snapshot_compute () in
+    publish_operator_snapshot_if_current_with_freshness
+      ~compute
+      ~fresh_for_s
+      json
 end

@@ -111,8 +111,10 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
       =
       Core_operator.operator_snapshot_publication_json publication
     in
-    let current = Core_operator.operator_snapshot_publication () in
-    if current.has_success
+    let current, is_fresh =
+      Core_operator.operator_snapshot_publication_with_freshness ()
+    in
+    if is_fresh
     then attach current
     else (
       let cache_key = default_cache_key current.generation in
@@ -139,9 +141,26 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
              !Core_operator.operator_snapshot_broadcast_ref publication);
           raise exn
       in
+      let refresh_cache_key =
+        if current.has_success
+        then
+          Printf.sprintf
+            "%s:publication:%s:g%d:c%d"
+            cache_key
+            current.epoch
+            current.generation
+            current.compute_sequence
+        else cache_key
+      in
+      if current.has_success
+      then
+        Dashboard_cache.seed_stale_if_missing
+          refresh_cache_key
+          ~stale_for:standard_cache_ttl_s
+          current.json;
       ignore
         (Dashboard_cache.get_or_compute_with_timeout
-           cache_key
+           refresh_cache_key
            ~ttl:standard_cache_ttl_s
            ~clock
            ~timeout_sec:Core_cache.dashboard_request_timeout_s

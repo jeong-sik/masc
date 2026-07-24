@@ -5,6 +5,7 @@ type operator_snapshot_publication =
   ; generation : int
   ; compute_sequence : int
   ; terminal_sequence : int
+  ; fresh_until_unix : float option
   ; json : Yojson.Safe.t
   ; has_success : bool
   }
@@ -18,6 +19,11 @@ val operator_snapshot_broadcast_ref : (operator_snapshot_publication -> unit) re
 val operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref
 val _operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref
 val operator_snapshot_publication : unit -> operator_snapshot_publication
+val operator_snapshot_publication_with_freshness :
+  unit -> operator_snapshot_publication * bool
+(** Return one canonical publication and its deadline status from the same
+    serialized owner read. *)
+
 val operator_snapshot_publication_json : operator_snapshot_publication -> Yojson.Safe.t
 val operator_snapshot_cache_diagnostics_json : unit -> Yojson.Safe.t
 
@@ -45,5 +51,8 @@ val operator_refresh_interval_s : float
 val operator_snapshot_extra : unit -> (string * Yojson.Safe.t) list
 
 module For_testing : sig
-  val operator_snapshot_cache : Server_dashboard_http_cache.cached_surface
+  val publish_operator_snapshot_success :
+    ?fresh_for_s:float ->
+    Yojson.Safe.t ->
+    operator_snapshot_publication option
 end

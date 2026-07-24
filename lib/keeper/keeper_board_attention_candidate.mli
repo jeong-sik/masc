@@ -3,26 +3,25 @@
     A candidate is persisted before any model call. Its lifecycle is
     [Pending -> Judged -> Consumed]. Relevant judgments become normal
     Keeper-lane events only after an exact candidate-id durable queue commit;
-    failures retain the latest retryable evidence and never consume the
+    delivery failures retain the latest failure evidence and never consume the
     candidate. Pending work has no wall-clock expiry: it remains durable until
     judgment and delivery succeed. *)
 
-type retryable_failure_kind =
-  | Runtime_configuration_unavailable
-  | Prompt_contract_unavailable
-  | Provider_unavailable
-  | Response_contract_unavailable
+type delivery_failure_kind =
   | Durable_delivery_unavailable
 
-type retryable_failure =
-  { kind : retryable_failure_kind
+type delivery_failure =
+  { kind : delivery_failure_kind
   ; detail : string
   ; failed_at : float
   }
 
 type judgment =
   { verdict : Keeper_board_attention_judgment.t
-  ; runtime_id : string
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
   ; judged_at : float
   }
 
@@ -30,11 +29,11 @@ type delivery =
   | Enqueued_to_keeper_lane
   | Not_relevant
 
-type pending_state = { last_failure : retryable_failure option }
+type pending_state = { last_delivery_failure : delivery_failure option }
 
 type judged_state =
   { judgment : judgment
-  ; last_failure : retryable_failure option
+  ; last_delivery_failure : delivery_failure option
   }
 
 type consumed_state =
@@ -56,6 +55,9 @@ type candidate =
   ; recorded_at : float
   ; status : status
   }
+(** All persisted lifecycle timestamps are finite. Non-finite [recorded_at],
+    delivery failure [failed_at], and [consumed_at] values are rejected on
+    both record and load. *)
 
 module Context_key : sig
   type t
@@ -93,15 +95,20 @@ type record_acceptance =
 
 exception Candidate_unavailable of string
 
-val retryable_failure_kind_to_string : retryable_failure_kind -> string
-val retryable_failure_kind_of_string : string -> retryable_failure_kind option
-val retryable_failure_to_yojson : retryable_failure -> Yojson.Safe.t
-val retryable_failure_of_yojson : Yojson.Safe.t -> (retryable_failure, string) result
+val delivery_failure_kind_to_string : delivery_failure_kind -> string
+val delivery_failure_kind_of_string : string -> delivery_failure_kind option
+val delivery_failure_to_yojson : delivery_failure -> Yojson.Safe.t
+val delivery_failure_of_yojson : Yojson.Safe.t -> (delivery_failure, string) result
 val judgment_to_yojson : judgment -> Yojson.Safe.t
 val judgment_of_yojson : Yojson.Safe.t -> (judgment, string) result
 val delivery_to_string : delivery -> string
 val delivery_of_string : string -> delivery option
 val signal_to_yojson : Board_dispatch.board_signal -> Yojson.Safe.t
+
+val singleton_judgment_request : candidate -> (Yojson.Safe.t, string) result
+(** Validate the current durable request schema and its outer candidate,
+    Keeper, and signal identity, then return the one-item exact-flow input.
+    Old or partial request JSON is rejected without compatibility decoding. *)
 
 val of_board_evidence :
   meta:Keeper_meta_contract.keeper_meta ->
@@ -126,25 +133,17 @@ val load_candidates :
   base_path:string -> keeper_name:string -> (candidate list, string) result
 
 val record : base_path:string -> candidate -> record_result
+(** Validate the current request schema and finite lifecycle timestamps before
+    changing the durable ledger. *)
 
-val record_retryable_failure :
+val record_delivery_failure :
   base_path:string ->
   candidate ->
-  retryable_failure ->
+  delivery_failure ->
   (candidate, string) result
 
 val record_judgment :
   base_path:string -> candidate -> judgment -> (candidate, string) result
-
-val judge_singleton :
-  sw:Eio.Switch.t ->
-  net:Eio_context.eio_net option ->
-  base_path:string ->
-  candidate ->
-  (judgment, Keeper_board_attention_failure.attempt_failure) result
-(** Invoke the configured structured judge for exactly one immutable
-    candidate. The response must cover that exact candidate identity. This is
-    Provider work and must never run under Keeper turn admission. *)
 
 val apply_judgment_and_deliver :
   base_path:string ->

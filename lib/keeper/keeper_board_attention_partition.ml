@@ -1,7 +1,6 @@
 (* See .mli. *)
 
 module Candidate = Keeper_board_attention_candidate
-module Failure = Keeper_board_attention_failure
 module Id_map = Map.Make (String)
 module Id_set = Set.Make (String)
 
@@ -39,20 +38,38 @@ type completed_item =
   ; judgment : Candidate.judgment
   }
 
+type exact_provenance =
+  { slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  }
+
+type running_progress =
+  | Unbound
+  | Bound of exact_provenance
+  | Advancing of
+      { failed : exact_provenance
+      ; next : exact_provenance
+      }
+
 type blocked_reason =
   | Candidate_membership_conflict of string
   | Durable_partition_invariant of string
-  | Judgment_blocked of Failure.blocked
+  | Exact_setup_unavailable of string
+  | Exact_flow_replayed
+  | Exact_execution_terminal
+  | Domain_output_invalid of string
+  | Execution_provenance_mismatch of string
+  | Unexpected_worker_failure of string
+  | Exact_execution_quarantined of running_progress
 
 type state =
   | Ready
   | Running of
       { worker_epoch : Worker_epoch.t
       ; started_at : float
-      }
-  | Deferred of
-      { failure : Failure.retryable
-      ; deferred_at : float
+      ; progress : running_progress
       }
   | Completed of
       { item : completed_item
@@ -73,25 +90,49 @@ type t =
   ; state : state
   }
 
-type completion =
-  | Partition_completed of t
-  | Partition_deferred of t
-  | Partition_blocked of t
+type exact_write_outcome =
+  | Fsync_completed
+  | Visible_sync_unconfirmed of string
 
-type claim_recovery =
-  | Claim_released of t
-  | Claim_already_transitioned of t
+type exact_transition =
+  { partition : t
+  ; changed : bool
+  ; write_outcome : exact_write_outcome
+  }
 
 let ( let* ) = Result.bind
-let schema_version = 2
+let schema_version = 3
 
 let state_to_string = function
   | Ready -> "ready"
   | Running _ -> "running"
-  | Deferred _ -> "deferred"
   | Completed _ -> "completed"
   | Settled _ -> "settled"
   | Blocked _ -> "blocked"
+;;
+
+let exact_provenance_to_yojson provenance =
+  `Assoc
+    [ "slot_id", `String provenance.slot_id
+    ; "call_id", `String provenance.call_id
+    ; "plan_fingerprint", `String provenance.plan_fingerprint
+    ; "request_body_sha256", `String provenance.request_body_sha256
+    ]
+;;
+
+let running_progress_to_yojson = function
+  | Unbound -> `Assoc [ "kind", `String "unbound" ]
+  | Bound provenance ->
+    `Assoc
+      [ "kind", `String "bound"
+      ; "provenance", exact_provenance_to_yojson provenance
+      ]
+  | Advancing { failed; next } ->
+    `Assoc
+      [ "kind", `String "advancing"
+      ; "failed", exact_provenance_to_yojson failed
+      ; "next", exact_provenance_to_yojson next
+      ]
 ;;
 
 let blocked_reason_to_yojson = function
@@ -99,10 +140,24 @@ let blocked_reason_to_yojson = function
     `Assoc [ "kind", `String "candidate_membership_conflict"; "detail", `String detail ]
   | Durable_partition_invariant detail ->
     `Assoc [ "kind", `String "durable_partition_invariant"; "detail", `String detail ]
-  | Judgment_blocked failure ->
+  | Exact_setup_unavailable detail ->
+    `Assoc [ "kind", `String "exact_setup_unavailable"; "detail", `String detail ]
+  | Exact_flow_replayed -> `Assoc [ "kind", `String "exact_flow_replayed" ]
+  | Exact_execution_terminal ->
+    `Assoc [ "kind", `String "exact_execution_terminal" ]
+  | Domain_output_invalid detail ->
+    `Assoc [ "kind", `String "domain_output_invalid"; "detail", `String detail ]
+  | Execution_provenance_mismatch detail ->
     `Assoc
-      [ "kind", `String "judgment_blocked"
-      ; "failure", Failure.blocked_to_yojson failure
+      [ "kind", `String "execution_provenance_mismatch"
+      ; "detail", `String detail
+      ]
+  | Unexpected_worker_failure detail ->
+    `Assoc [ "kind", `String "unexpected_worker_failure"; "detail", `String detail ]
+  | Exact_execution_quarantined progress ->
+    `Assoc
+      [ "kind", `String "exact_execution_quarantined"
+      ; "progress", running_progress_to_yojson progress
       ]
 ;;
 
@@ -115,17 +170,12 @@ let completed_item_to_yojson (item : completed_item) =
 
 let state_to_yojson = function
   | Ready -> `Assoc [ "kind", `String "ready" ]
-  | Running { worker_epoch; started_at } ->
+  | Running { worker_epoch; started_at; progress } ->
     `Assoc
       [ "kind", `String "running"
       ; "worker_epoch", `String (Worker_epoch.to_string worker_epoch)
       ; "started_at", `Float started_at
-      ]
-  | Deferred { failure; deferred_at } ->
-    `Assoc
-      [ "kind", `String "deferred"
-      ; "failure", Failure.retryable_to_yojson failure
-      ; "deferred_at", `Float deferred_at
+      ; "progress", running_progress_to_yojson progress
       ]
   | Completed { item; completed_at } ->
     `Assoc
@@ -193,6 +243,54 @@ let float_json ~context = function
   | _ -> Error (context ^ " must be a number")
 ;;
 
+let exact_provenance_of_yojson json =
+  let context = "Board attention exact provenance" in
+  let* fields = assoc ~context json in
+  let* () =
+    exact_fields
+      ~context
+      [ "slot_id"; "call_id"; "plan_fingerprint"; "request_body_sha256" ]
+      fields
+  in
+  let* slot_json = field ~context "slot_id" fields in
+  let* slot_id = string_json ~context:(context ^ ".slot_id") slot_json in
+  let* call_json = field ~context "call_id" fields in
+  let* call_id = string_json ~context:(context ^ ".call_id") call_json in
+  let* fingerprint_json = field ~context "plan_fingerprint" fields in
+  let* plan_fingerprint =
+    string_json ~context:(context ^ ".plan_fingerprint") fingerprint_json
+  in
+  let* body_json = field ~context "request_body_sha256" fields in
+  let* request_body_sha256 =
+    string_json ~context:(context ^ ".request_body_sha256") body_json
+  in
+  Ok { slot_id; call_id; plan_fingerprint; request_body_sha256 }
+;;
+
+let running_progress_of_yojson json =
+  let context = "Board attention exact progress" in
+  let* fields = assoc ~context json in
+  let* kind_json = field ~context "kind" fields in
+  let* kind = string_json ~context:(context ^ ".kind") kind_json in
+  match kind with
+  | "unbound" ->
+    let* () = exact_fields ~context [ "kind" ] fields in
+    Ok Unbound
+  | "bound" ->
+    let* () = exact_fields ~context [ "kind"; "provenance" ] fields in
+    let* provenance_json = field ~context "provenance" fields in
+    let* provenance = exact_provenance_of_yojson provenance_json in
+    Ok (Bound provenance)
+  | "advancing" ->
+    let* () = exact_fields ~context [ "kind"; "failed"; "next" ] fields in
+    let* failed_json = field ~context "failed" fields in
+    let* failed = exact_provenance_of_yojson failed_json in
+    let* next_json = field ~context "next" fields in
+    let* next = exact_provenance_of_yojson next_json in
+    Ok (Advancing { failed; next })
+  | value -> Error (Printf.sprintf "unknown Board attention exact progress %S" value)
+;;
+
 let blocked_reason_of_yojson json =
   let context = "Board attention blocked reason" in
   let* fields = assoc ~context json in
@@ -209,11 +307,39 @@ let blocked_reason_of_yojson json =
     let* detail_json = field ~context "detail" fields in
     let* detail = string_json ~context:(context ^ ".detail") detail_json in
     Ok (Durable_partition_invariant detail)
-  | "judgment_blocked" ->
-    let* () = exact_fields ~context [ "kind"; "failure" ] fields in
-    let* failure_json = field ~context "failure" fields in
-    let* failure = Failure.blocked_of_yojson failure_json in
-    Ok (Judgment_blocked failure)
+  | "exact_setup_unavailable" ->
+    let* () = exact_fields ~context [ "kind"; "detail" ] fields in
+    let* detail_json = field ~context "detail" fields in
+    let* detail = string_json ~context:(context ^ ".detail") detail_json in
+    Ok (Exact_setup_unavailable detail)
+  | "exact_flow_replayed" ->
+    let* () = exact_fields ~context [ "kind" ] fields in
+    Ok Exact_flow_replayed
+  | "exact_execution_terminal" ->
+    let* () = exact_fields ~context [ "kind" ] fields in
+    Ok Exact_execution_terminal
+  | "domain_output_invalid" ->
+    let* () = exact_fields ~context [ "kind"; "detail" ] fields in
+    let* detail_json = field ~context "detail" fields in
+    let* detail = string_json ~context:(context ^ ".detail") detail_json in
+    Ok (Domain_output_invalid detail)
+  | "execution_provenance_mismatch" ->
+    let* () = exact_fields ~context [ "kind"; "detail" ] fields in
+    let* detail_json = field ~context "detail" fields in
+    let* detail = string_json ~context:(context ^ ".detail") detail_json in
+    Ok (Execution_provenance_mismatch detail)
+  | "unexpected_worker_failure" ->
+    let* () = exact_fields ~context [ "kind"; "detail" ] fields in
+    let* detail_json = field ~context "detail" fields in
+    let* detail = string_json ~context:(context ^ ".detail") detail_json in
+    Ok (Unexpected_worker_failure detail)
+  | "exact_execution_quarantined" ->
+    let* () = exact_fields ~context [ "kind"; "progress" ] fields in
+    let* progress_json = field ~context "progress" fields in
+    let* progress = running_progress_of_yojson progress_json in
+    (match progress with
+     | Bound _ | Advancing _ -> Ok (Exact_execution_quarantined progress)
+     | Unbound -> Error "unbound execution cannot be quarantined")
   | value -> Error (Printf.sprintf "unknown Board attention blocked reason %S" value)
 ;;
 
@@ -238,20 +364,17 @@ let state_of_yojson json =
     let* () = exact_fields ~context [ "kind" ] fields in
     Ok Ready
   | "running" ->
-    let* () = exact_fields ~context [ "kind"; "worker_epoch"; "started_at" ] fields in
+    let* () =
+      exact_fields ~context [ "kind"; "worker_epoch"; "started_at"; "progress" ] fields
+    in
     let* epoch_json = field ~context "worker_epoch" fields in
     let* epoch_raw = string_json ~context:(context ^ ".worker_epoch") epoch_json in
     let* worker_epoch = Worker_epoch.of_string epoch_raw in
     let* started_json = field ~context "started_at" fields in
     let* started_at = float_json ~context:(context ^ ".started_at") started_json in
-    Ok (Running { worker_epoch; started_at })
-  | "deferred" ->
-    let* () = exact_fields ~context [ "kind"; "failure"; "deferred_at" ] fields in
-    let* failure_json = field ~context "failure" fields in
-    let* failure = Failure.retryable_of_yojson failure_json in
-    let* deferred_json = field ~context "deferred_at" fields in
-    let* deferred_at = float_json ~context:(context ^ ".deferred_at") deferred_json in
-    Ok (Deferred { failure; deferred_at })
+    let* progress_json = field ~context "progress" fields in
+    let* progress = running_progress_of_yojson progress_json in
+    Ok (Running { worker_epoch; started_at; progress })
   | "completed" ->
     let* () = exact_fields ~context [ "kind"; "item"; "completed_at" ] fields in
     let* item_json = field ~context "item" fields in
@@ -317,7 +440,7 @@ let of_yojson json =
     match state with
     | Completed { item; _ } when String.equal item.candidate_id candidate_id -> Ok ()
     | Completed _ -> Error "completed item identity differs from partition candidate"
-    | Ready | Running _ | Deferred _ | Settled _ | Blocked _ -> Ok ()
+    | Ready | Running _ | Settled _ | Blocked _ -> Ok ()
   in
   Ok { partition_id; keeper_name; context_key; candidate_id; created_at; state }
 ;;
@@ -407,7 +530,7 @@ let empty_view cursor =
 ;;
 
 let is_live = function
-  | Ready | Running _ | Deferred _ | Completed _ | Blocked _ -> true
+  | Ready | Running _ | Completed _ | Blocked _ -> true
   | Settled _ -> false
 ;;
 
@@ -425,12 +548,12 @@ let remove_partition_indexes view partition =
   let ready =
     match partition.state with
     | Ready -> Ready_set.remove (ready_order partition) view.ready
-    | Running _ | Deferred _ | Completed _ | Settled _ | Blocked _ -> view.ready
+    | Running _ | Completed _ | Settled _ | Blocked _ -> view.ready
   in
   let completed =
     match partition.state with
     | Completed _ -> Id_set.remove partition.partition_id view.completed
-    | Ready | Running _ | Deferred _ | Settled _ | Blocked _ -> view.completed
+    | Ready | Running _ | Settled _ | Blocked _ -> view.completed
   in
   let live_candidate_owner =
     if is_live partition.state
@@ -463,12 +586,12 @@ let add_partition_indexes view partition =
   let ready =
     match partition.state with
     | Ready -> Ready_set.add (ready_order partition) view.ready
-    | Running _ | Deferred _ | Completed _ | Settled _ | Blocked _ -> view.ready
+    | Running _ | Completed _ | Settled _ | Blocked _ -> view.ready
   in
   let completed =
     match partition.state with
     | Completed _ -> Id_set.add partition.partition_id view.completed
-    | Ready | Running _ | Deferred _ | Settled _ | Blocked _ -> view.completed
+    | Ready | Running _ | Settled _ | Blocked _ -> view.completed
   in
   Ok
     { view with
@@ -489,17 +612,19 @@ let same_partition_identity left right =
 
 let legal_transition previous next =
   match previous, next with
-  | Ready, Running _ -> true
-  | Running _, (Ready | Deferred _ | Completed _ | Blocked _) -> true
-  | Deferred _, Ready -> true
-  | Completed _, Settled _ -> true
-  | Ready, (Ready | Deferred _ | Completed _ | Settled _ | Blocked _)
-  | Running _, (Running _ | Settled _)
-  | Deferred _, (Running _ | Deferred _ | Completed _ | Settled _ | Blocked _)
-  | Completed _, (Ready | Running _ | Deferred _ | Completed _ | Blocked _)
-  | Settled _, (Ready | Running _ | Deferred _ | Completed _ | Settled _ | Blocked _)
-  | Blocked _, (Ready | Running _ | Deferred _ | Completed _ | Settled _ | Blocked _) ->
-    false
+  | Ready, Running { progress = Unbound; _ } -> true
+  | Running { progress = Unbound; _ }, Ready -> true
+  | Running { progress = Unbound; _ }, Running { progress = Bound _; _ } -> true
+  | Running { progress = Bound _; _ }, Running { progress = Advancing _; _ } -> true
+  | Running { progress = Advancing _; _ }, Running { progress = Bound _; _ } -> true
+  | Running { progress = Bound _; _ }, Completed _ -> true
+  | Running _, Blocked _ -> true
+  | (Completed _ | Blocked _), Settled _ -> true
+  | Ready, _
+  | Running _, _
+  | Completed _, _
+  | Settled _, _
+  | Blocked _, _ -> false
 ;;
 
 let validate_root_identity partition =
@@ -607,6 +732,15 @@ let cursor_result ~ledger_path result =
     Ok value
 ;;
 
+let exact_cursor_result ~ledger_path result =
+  match Fs_compat.private_jsonl_cursor_success_receipt result with
+  | Error error -> Error (store_error error)
+  | Ok { value; settlement_error = None } -> Ok (value, Fsync_completed)
+  | Ok { value; settlement_error = Some error } ->
+    observe_settlement_warning ~ledger_path error;
+    Ok (value, Visible_sync_unconfirmed (store_error error))
+;;
+
 let invalidate_cached entry observed =
   (* fire-and-forget: false means a concurrent writer won; the loser simply keeps no stale cache *)
   ignore (Atomic.compare_and_set entry.cached observed None : bool)
@@ -696,6 +830,32 @@ let update ~base_path ~keeper_name decide =
            Ok result)))
 ;;
 
+let update_exact ~base_path ~keeper_name decide =
+  let ledger_path = path ~base_path ~keeper_name in
+  run_blocking "board-attention-partition-exact-update" (fun () ->
+    let entry = cache_entry ledger_path in
+    Stdlib.Mutex.protect entry.mutation_mutex (fun () ->
+      let* view = read_view_blocking ledger_path in
+      let* () = validate_keeper_identity ~keeper_name view in
+      let* rows, result = decide view in
+      match rows with
+      | [] -> Error "exact partition update must append a cursor-fenced row"
+      | _ :: _ ->
+        let* updated = apply_rows view rows in
+        let suffix = serialize rows in
+        (match
+           Fs_compat.append_private_jsonl_durable_locked_at_cursor_result
+             ledger_path
+             ~expected:view.cursor
+             suffix
+           |> exact_cursor_result ~ledger_path
+         with
+         | Error error -> Error error
+         | Ok (cursor, write_outcome) ->
+           Atomic.set entry.cached (Some { updated with cursor });
+           Ok (result, write_outcome))))
+;;
+
 let compare_candidate left right =
   match Float.compare left.Candidate.recorded_at right.Candidate.recorded_at with
   | 0 -> String.compare left.candidate_id right.candidate_id
@@ -711,14 +871,46 @@ let nonempty label value =
 ;;
 
 let validate_judgment (judgment : Candidate.judgment) =
-  let* () = nonempty "partition judgment runtime_id" judgment.runtime_id in
+  let* () = nonempty "partition judgment slot_id" judgment.slot_id in
+  let* () = nonempty "partition judgment call_id" judgment.call_id in
+  let* () =
+    nonempty "partition judgment plan_fingerprint" judgment.plan_fingerprint
+  in
+  let* () =
+    nonempty "partition judgment request_body_sha256" judgment.request_body_sha256
+  in
   let* () = valid_time "partition judgment judged_at" judgment.judged_at in
   Keeper_board_attention_judgment.of_yojson
     (Keeper_board_attention_judgment.to_yojson judgment.verdict)
   |> Result.map ignore
 ;;
 
-let validate_failure = Failure.validate_retryable
+let validate_exact_provenance provenance =
+  let* () = nonempty "partition exact provenance slot_id" provenance.slot_id in
+  let* () = nonempty "partition exact provenance call_id" provenance.call_id in
+  let* () =
+    nonempty
+      "partition exact provenance plan_fingerprint"
+      provenance.plan_fingerprint
+  in
+  nonempty
+    "partition exact provenance request_body_sha256"
+    provenance.request_body_sha256
+;;
+
+let exact_provenance_equal left right =
+  String.equal left.slot_id right.slot_id
+  && String.equal left.call_id right.call_id
+  && String.equal left.plan_fingerprint right.plan_fingerprint
+  && String.equal left.request_body_sha256 right.request_body_sha256
+;;
+
+let judgment_provenance (judgment : Candidate.judgment) =
+  { slot_id = judgment.slot_id
+  ; call_id = judgment.call_id
+  ; plan_fingerprint = judgment.plan_fingerprint
+  ; request_body_sha256 = judgment.request_body_sha256
+  }
 ;;
 
 let validate_blocked_reason = function
@@ -726,7 +918,23 @@ let validate_blocked_reason = function
     nonempty "candidate membership conflict detail" detail
   | Durable_partition_invariant detail ->
     nonempty "durable partition invariant detail" detail
-  | Judgment_blocked failure -> Failure.validate_blocked failure
+  | Exact_setup_unavailable detail ->
+    nonempty "exact setup unavailable detail" detail
+  | Exact_flow_replayed -> Ok ()
+  | Exact_execution_terminal -> Ok ()
+  | Domain_output_invalid detail ->
+    nonempty "domain output invalid detail" detail
+  | Execution_provenance_mismatch detail ->
+    nonempty "execution provenance mismatch detail" detail
+  | Unexpected_worker_failure detail ->
+    nonempty "unexpected worker failure detail" detail
+  | Exact_execution_quarantined (Bound provenance) ->
+    validate_exact_provenance provenance
+  | Exact_execution_quarantined (Advancing { failed; next }) ->
+    let* () = validate_exact_provenance failed in
+    validate_exact_provenance next
+  | Exact_execution_quarantined Unbound ->
+    Error "unbound execution cannot be quarantined"
 ;;
 
 let ensure_roots ~base_path ~keeper_name candidates =
@@ -784,7 +992,8 @@ let ensure_roots ~base_path ~keeper_name candidates =
     Ok (roots, List.length roots))
 ;;
 
-let recover_for_process_start ~base_path ~keeper_name =
+let recover_for_process_start ~now ~base_path ~keeper_name =
+  let* () = valid_time "partition process-start recovery time" now in
   let ledger_path = path ~base_path ~keeper_name in
   run_blocking "board-attention-partition-process-start" (fun () ->
     let entry = cache_entry ledger_path in
@@ -805,9 +1014,19 @@ let recover_for_process_start ~base_path ~keeper_name =
           |> List.fold_left
                (fun (recovered, latest) partition ->
                   match partition.state with
-                  | Running _ ->
+                  | Running { progress = Unbound; _ } ->
                     recovered + 1, { partition with state = Ready } :: latest
-                  | Ready | Deferred _ | Completed _ | Settled _ | Blocked _ ->
+                  | Running ({ progress = (Bound _ | Advancing _) as progress; _ }) ->
+                    ( recovered + 1
+                    , { partition with
+                        state =
+                          Blocked
+                            { reason = Exact_execution_quarantined progress
+                            ; blocked_at = now
+                            }
+                      }
+                      :: latest )
+                  | Ready | Completed _ | Settled _ | Blocked _ ->
                     recovered, partition :: latest)
                (0, [])
         in
@@ -832,44 +1051,6 @@ let recover_for_process_start ~base_path ~keeper_name =
              Ok recovered)))
 ;;
 
-let release_due_provider_retries ~now ~base_path ~keeper_name =
-  let* () = valid_time "Provider retry release time" now in
-  update ~base_path ~keeper_name (fun view ->
-    let released =
-      view_partitions view
-      |> List.fold_left
-           (fun acc partition ->
-              match partition.state with
-              | Deferred { failure; _ } ->
-                (match Failure.retry_deadline failure with
-                 | Some deadline when Float.compare now deadline >= 0 ->
-                   { partition with state = Ready } :: acc
-                 | Some _ | None -> acc)
-              | Ready | Running _ | Completed _ | Settled _ | Blocked _ -> acc)
-           []
-      |> List.rev
-    in
-    Ok (released, List.length released))
-;;
-
-let next_provider_retry_deadline ~base_path ~keeper_name =
-  let* view = read_view (path ~base_path ~keeper_name) in
-  let* () = validate_keeper_identity ~keeper_name view in
-  Ok
-    (Id_map.fold
-       (fun _ partition earliest ->
-          match partition.state with
-          | Deferred { failure; _ } ->
-            (match earliest, Failure.retry_deadline failure with
-             | None, deadline -> deadline
-             | Some current, Some candidate
-               when Float.compare candidate current < 0 -> Some candidate
-             | Some _, Some _ | Some _, None -> earliest)
-          | Ready | Running _ | Completed _ | Settled _ | Blocked _ -> earliest)
-       view.by_id
-       None)
-;;
-
 let claim_next ~now ~worker_epoch ~base_path ~keeper_name =
   let* () = valid_time "partition claim time" now in
   update ~base_path ~keeper_name (fun view ->
@@ -880,71 +1061,161 @@ let claim_next ~now ~worker_epoch ~base_path ~keeper_name =
        | None -> Error ("ready index lost partition " ^ selected_order.partition_id)
        | Some selected ->
          let claimed =
-           { selected with state = Running { worker_epoch; started_at = now } }
+           { selected with
+             state = Running { worker_epoch; started_at = now; progress = Unbound }
+           }
          in
          Ok ([ claimed ], Some claimed)))
 ;;
 
-let recover_claim_after_lane_abort ~worker_epoch ~base_path ~partition =
-  update ~base_path ~keeper_name:partition.keeper_name (fun view ->
-    match Id_map.find_opt partition.partition_id view.by_id with
-    | None -> Error ("partition not found during claim recovery: " ^ partition.partition_id)
-    | Some current ->
-      (match current.state with
-       | Running running when Worker_epoch.equal running.worker_epoch worker_epoch ->
-         let released = { current with state = Ready } in
-         Ok ([ released ], Claim_released released)
-       | Running running ->
-         Error
-           (Printf.sprintf
-              "claim recovery cannot revoke worker %s"
-              (Worker_epoch.to_string running.worker_epoch))
-       | Ready | Deferred _ | Completed _ | Settled _ | Blocked _ ->
-         Ok ([], Claim_already_transitioned current)))
-;;
-
-let transition_running ~base_path ~partition ~worker_epoch state wrap =
+let transition_running ~base_path ~partition ~worker_epoch decide =
   update ~base_path ~keeper_name:partition.keeper_name (fun view ->
     match Id_map.find_opt partition.partition_id view.by_id with
     | None -> Error ("Board attention partition not found: " ^ partition.partition_id)
     | Some current ->
       (match current.state with
        | Running running when Worker_epoch.equal running.worker_epoch worker_epoch ->
+         let* state = decide running in
          let updated = { current with state } in
-         Ok ([ updated ], wrap updated)
+         if updated = current then Ok ([], current) else Ok ([ updated ], updated)
        | Running running ->
          Error
            (Printf.sprintf
               "partition %s is owned by worker %s"
               partition.partition_id
               (Worker_epoch.to_string running.worker_epoch))
-       | Ready | Deferred _ | Completed _ | Settled _ | Blocked _ ->
+       | Ready | Completed _ | Settled _ | Blocked _ ->
          Error ("partition is not Running: " ^ partition.partition_id)))
 ;;
 
-let complete ~now ~worker_epoch ~base_path ~partition ~item =
+let transition_running_exact ~base_path ~partition ~worker_epoch decide =
+  let* (partition, changed), write_outcome =
+    update_exact ~base_path ~keeper_name:partition.keeper_name (fun view ->
+      match Id_map.find_opt partition.partition_id view.by_id with
+      | None -> Error ("Board attention partition not found: " ^ partition.partition_id)
+      | Some current ->
+        (match current.state with
+         | Running running when Worker_epoch.equal running.worker_epoch worker_epoch ->
+           let* state = decide running in
+           let updated = { current with state } in
+           Ok ([ updated ], (updated, updated <> current))
+         | Running running ->
+           Error
+             (Printf.sprintf
+                "partition %s is owned by worker %s"
+                partition.partition_id
+                (Worker_epoch.to_string running.worker_epoch))
+         | Ready | Completed _ | Settled _ | Blocked _ ->
+           Error ("partition is not Running: " ^ partition.partition_id)))
+  in
+  Ok { partition; changed; write_outcome }
+;;
+
+let bind_before_dispatch ~worker_epoch ~base_path ~partition ~provenance =
+  let* () = validate_exact_provenance provenance in
+  transition_running_exact
+    ~base_path
+    ~partition
+    ~worker_epoch
+    (fun running ->
+      match running.progress with
+      | Unbound ->
+        Ok (Running { running with progress = Bound provenance })
+      | Bound current when exact_provenance_equal current provenance ->
+        Ok (Running running)
+      | Bound _ ->
+        Error "before-dispatch binding conflicts with the durable exact provenance"
+      | Advancing { next; _ } when exact_provenance_equal next provenance ->
+        Ok (Running { running with progress = Bound provenance })
+      | Advancing _ ->
+        Error "before-dispatch binding differs from the durable next provenance")
+;;
+
+let record_before_advance ~worker_epoch ~base_path ~partition ~failed ~next =
+  let* () = validate_exact_provenance failed in
+  let* () = validate_exact_provenance next in
+  if exact_provenance_equal failed next
+  then Error "before-advance next provenance must differ from failed provenance"
+  else
+    transition_running_exact
+      ~base_path
+      ~partition
+      ~worker_epoch
+      (fun running ->
+        match running.progress with
+        | Bound current when exact_provenance_equal current failed ->
+          Ok (Running { running with progress = Advancing { failed; next } })
+        | Bound _ ->
+          Error "before-advance failed provenance differs from the durable binding"
+        | Advancing current
+          when exact_provenance_equal current.failed failed
+               && exact_provenance_equal current.next next -> Ok (Running running)
+        | Advancing _ ->
+          Error "before-advance pair conflicts with the durable advancement"
+        | Unbound -> Error "before-advance requires a durable exact binding")
+;;
+
+let validate_completion ~now ~(partition : t) ~(item : completed_item) =
   let* () = valid_time "partition completion time" now in
   let* () = validate_judgment item.judgment in
   if not (String.equal item.candidate_id partition.candidate_id)
   then Error "partition completion candidate identity mismatch"
-  else
-    transition_running
-      ~base_path
-      ~partition
-      ~worker_epoch
-      (Completed { item; completed_at = now })
-      (fun row -> Partition_completed row)
+  else Ok ()
 ;;
 
-let defer ~now ~worker_epoch ~base_path ~partition failure =
-  let* () = valid_time "partition defer time" now in
-  let* () = validate_failure failure in
-  transition_running
+let complete ~now ~worker_epoch ~base_path ~partition ~item =
+  let* () = validate_completion ~now ~partition ~item in
+  let provenance = judgment_provenance item.judgment in
+  transition_running_exact
     ~base_path
     ~partition
     ~worker_epoch
-    (Deferred { failure; deferred_at = now })
-    (fun row -> Partition_deferred row)
+    (fun running ->
+      match running.progress with
+      | Bound current when exact_provenance_equal current provenance ->
+        Ok (Completed { item; completed_at = now })
+      | Bound _ ->
+        Error "judgment provenance differs from the durable exact binding"
+      | Unbound -> Error "partition completion requires a durable exact binding"
+      | Advancing _ -> Error "partition completion cannot bypass pending advancement")
+;;
+
+let complete_existing_judgment ~now ~worker_epoch ~base_path ~partition ~item =
+  let* () = validate_completion ~now ~partition ~item in
+  transition_running_exact
+    ~base_path
+    ~partition
+    ~worker_epoch
+    (fun running ->
+      match running.progress with
+      | Unbound -> Ok (Completed { item; completed_at = now })
+      | Bound _ ->
+        Error "existing judgment completion cannot bypass a durable exact binding"
+      | Advancing _ ->
+        Error "existing judgment completion cannot bypass pending advancement")
+;;
+
+let confirm_completed ~base_path ~(partition : t) =
+  match partition.state with
+  | Completed { item; completed_at } ->
+    let* () = validate_completion ~now:completed_at ~partition ~item in
+    let* (confirmed, changed), write_outcome =
+      update_exact ~base_path ~keeper_name:partition.keeper_name (fun view ->
+        match Id_map.find_opt partition.partition_id view.by_id with
+        | None ->
+          Error ("Board attention partition not found: " ^ partition.partition_id)
+        | Some ({ state = Completed { item = current_item; _ }; _ } as current)
+          when current_item = item -> Ok ([ current ], (current, false))
+        | Some { state = Completed _; _ } ->
+          Error
+            ("completed partition item conflicts with durable state: "
+             ^ partition.partition_id)
+        | Some _ ->
+          Error ("partition is not Completed: " ^ partition.partition_id))
+    in
+    Ok { partition = confirmed; changed; write_outcome }
+  | Ready | Running _ | Settled _ | Blocked _ ->
+    Error ("partition is not Completed: " ^ partition.partition_id)
 ;;
 
 let block ~now ~worker_epoch ~base_path ~partition reason =
@@ -954,8 +1225,7 @@ let block ~now ~worker_epoch ~base_path ~partition reason =
     ~base_path
     ~partition
     ~worker_epoch
-    (Blocked { reason; blocked_at = now })
-    (fun row -> Partition_blocked row)
+    (fun _ -> Ok (Blocked { reason; blocked_at = now }))
 ;;
 
 let completed ~base_path ~keeper_name =
@@ -978,11 +1248,11 @@ let settle ~now ~base_path ~partition =
     match Id_map.find_opt partition.partition_id view.by_id with
     | None -> Error ("partition settlement target not found: " ^ partition.partition_id)
     | Some ({ state = Settled _; _ } as current) -> Ok ([], current)
-    | Some ({ state = Completed _; _ } as current) ->
+    | Some ({ state = (Completed _ | Blocked _); _ } as current) ->
       let settled = { current with state = Settled { settled_at = now } } in
       Ok ([ settled ], settled)
     | Some current ->
-      Error ("only Completed partition can settle: " ^ current.partition_id))
+      Error ("only Completed or Blocked partition can settle: " ^ current.partition_id))
 ;;
 
 module For_testing = struct

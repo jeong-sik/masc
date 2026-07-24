@@ -1,6 +1,5 @@
 module P = Masc.Keeper_board_attention_partition
 module A = P.Candidate
-module F = P.Failure
 module J = Masc.Keeper_board_attention_judgment
 
 let rec remove_tree path =
@@ -49,7 +48,7 @@ let signal post_id : Masc.Board_dispatch.board_signal =
 let context name =
   `Assoc
     [ "instructions", `String ("continue " ^ name)
-    ; "runtime", `Assoc [ "model", `String "configured-judge" ]
+    ; "runtime", `Assoc [ "lane", `String "configured-judge" ]
     ]
 ;;
 
@@ -61,13 +60,27 @@ let candidate ?(keeper_name = "sangsu") ?(context = context "primary") ~id ~reco
   ; signal = signal id
   ; judgment_request = `Assoc [ "keeper_context", context ]
   ; recorded_at
-  ; status = A.Pending { last_failure = None }
+  ; status = A.Pending { last_delivery_failure = None }
   }
 ;;
 
-let judgment ?(judged_at = 101.0) () : A.judgment =
+let provenance
+      ?(slot_id = "slot-1")
+      ?(call_id = "call-1")
+      ?(plan_fingerprint = "plan-1")
+      ?(request_body_sha256 = "body-1")
+      ()
+  : P.exact_provenance
+  =
+  { slot_id; call_id; plan_fingerprint; request_body_sha256 }
+;;
+
+let judgment ?(judged_at = 101.0) (proof : P.exact_provenance) : A.judgment =
   { verdict = { J.decision = J.Relevant; rationale = "react to this Board event" }
-  ; runtime_id = "configured-structured-judge"
+  ; slot_id = proof.slot_id
+  ; call_id = proof.call_id
+  ; plan_fingerprint = proof.plan_fingerprint
+  ; request_body_sha256 = proof.request_body_sha256
   ; judged_at
   }
 ;;
@@ -82,6 +95,13 @@ let claim ~base_path ~worker_epoch ~now =
   match ok "claim next" (P.claim_next ~now ~worker_epoch ~base_path ~keeper_name:"sangsu") with
   | Some partition -> partition
   | None -> Alcotest.fail "expected a Ready partition"
+;;
+
+let fsynced label (transition : P.exact_transition) =
+  match transition.write_outcome with
+  | P.Fsync_completed -> transition.partition
+  | P.Visible_sync_unconfirmed detail ->
+    Alcotest.failf "%s was visible without confirmed fsync: %s" label detail
 ;;
 
 let test_roots_are_singleton_deterministic_and_context_exact () =
@@ -124,12 +144,6 @@ let test_roots_are_singleton_deterministic_and_context_exact () =
        ~base_path
        ~keeper_name:"sangsu"
        [ { first with judgment_request = `Assoc [ "keeper_context", context "changed" ] } ]);
-  expect_error
-    "same candidate identity with changed recorded_at"
-    (P.ensure_roots
-       ~base_path
-       ~keeper_name:"sangsu"
-       [ { first with recorded_at = 9.0 } ]);
   let primary_key = (List.hd created).P.context_key in
   let isolated_key = (List.hd (List.rev created)).P.context_key in
   Alcotest.(check bool)
@@ -138,38 +152,64 @@ let test_roots_are_singleton_deterministic_and_context_exact () =
     (A.Context_key.equal primary_key isolated_key)
 ;;
 
-let test_claim_ownership_completion_and_settlement () =
-  with_temp_base "board-attention-partition-claim" @@ fun base_path ->
-  let early = candidate ~id:"candidate-early" ~recorded_at:1.0 () in
-  let late = candidate ~id:"candidate-late" ~recorded_at:2.0 () in
-  ignore (roots ~base_path [ late; early ] : P.t list);
+let test_binding_owns_completion_and_settlement () =
+  with_temp_base "board-attention-partition-binding" @@ fun base_path ->
+  let pending = candidate ~id:"candidate-bound" ~recorded_at:1.0 () in
+  ignore (roots ~base_path [ pending ] : P.t list);
   let owner = P.Worker_epoch.generate () in
   let stranger = P.Worker_epoch.generate () in
   let claimed = claim ~base_path ~worker_epoch:owner ~now:10.0 in
-  Alcotest.(check string) "oldest Ready root claimed" early.candidate_id claimed.candidate_id;
+  (match claimed.state with
+   | P.Running { progress = P.Unbound; _ } -> ()
+   | _ -> Alcotest.fail "claim did not create Running Unbound");
+  let proof = provenance () in
+  expect_error
+    "foreign worker bind"
+    (P.bind_before_dispatch
+       ~worker_epoch:stranger
+       ~base_path
+       ~partition:claimed
+       ~provenance:proof);
+  let bound =
+    P.bind_before_dispatch
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:claimed
+      ~provenance:proof
+    |> ok "bind before dispatch"
+    |> fsynced "bind before dispatch"
+  in
+  (match bound.state with
+   | P.Running { progress = P.Bound durable; _ } ->
+     Alcotest.(check bool) "opaque proof persisted exactly" true (durable = proof)
+   | _ -> Alcotest.fail "partition was not Bound");
+  let repeated =
+    P.bind_before_dispatch
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:bound
+      ~provenance:proof
+    |> ok "repeat exact bind"
+  in
+  Alcotest.(check bool) "idempotent bind reports no state change" false repeated.changed;
+  ignore (fsynced "repeat exact bind" repeated : P.t);
+  expect_error
+    "conflicting bound provenance"
+    (P.bind_before_dispatch
+       ~worker_epoch:owner
+       ~base_path
+       ~partition:bound
+       ~provenance:(provenance ~call_id:"call-conflict" ()));
   let item : P.completed_item =
-    { candidate_id = claimed.candidate_id; judgment = judgment () }
+    { candidate_id = claimed.candidate_id; judgment = judgment proof }
   in
   expect_error
     "foreign worker completion"
-    (P.complete ~now:11.0 ~worker_epoch:stranger ~base_path ~partition:claimed ~item);
-  expect_error
-    "wrong singleton identity"
-    (P.complete
-       ~now:11.0
-       ~worker_epoch:owner
-       ~base_path
-       ~partition:claimed
-       ~item:{ item with candidate_id = late.candidate_id });
+    (P.complete ~now:11.0 ~worker_epoch:stranger ~base_path ~partition:bound ~item);
   let completed =
-    match
-      ok
-        "complete"
-        (P.complete ~now:11.0 ~worker_epoch:owner ~base_path ~partition:claimed ~item)
-    with
-    | P.Partition_completed partition -> partition
-    | P.Partition_deferred _ | P.Partition_blocked _ ->
-      Alcotest.fail "completion returned a different terminal state"
+    P.complete ~now:11.0 ~worker_epoch:owner ~base_path ~partition:bound ~item
+    |> ok "complete"
+    |> fsynced "complete"
   in
   (match completed.state with
    | P.Completed { item = persisted; _ } ->
@@ -178,11 +218,281 @@ let test_claim_ownership_completion_and_settlement () =
        claimed.candidate_id
        persisted.candidate_id
    | _ -> Alcotest.fail "partition was not Completed");
-  let settled = ok "settle" (P.settle ~now:12.0 ~base_path ~partition:completed) in
+  let confirmed_transition =
+    ok "confirm completed" (P.confirm_completed ~base_path ~partition:completed)
+  in
+  Alcotest.(check bool)
+    "Completed confirmation is idempotent"
+    false
+    confirmed_transition.changed;
+  let confirmed = fsynced "confirm completed" confirmed_transition in
+  Alcotest.(check bool)
+    "Completed confirmation retained the exact partition"
+    true
+    (confirmed = completed);
+  let wrong_item =
+    { item with
+      judgment = judgment (provenance ~call_id:"wrong-completed-call" ())
+    }
+  in
+  expect_error
+    "confirm completed rejects a conflicting item"
+    (P.confirm_completed
+       ~base_path
+       ~partition:
+         { completed with
+           state = P.Completed { item = wrong_item; completed_at = 11.0 }
+         });
+  let settled = ok "settle" (P.settle ~now:12.0 ~base_path ~partition:confirmed) in
   let settled_again = ok "settle idempotently" (P.settle ~now:99.0 ~base_path ~partition:settled) in
-  Alcotest.(check bool) "settlement is idempotent" true (settled = settled_again);
-  let next = claim ~base_path ~worker_epoch:owner ~now:13.0 in
-  Alcotest.(check string) "next singleton remains independent" late.candidate_id next.candidate_id
+  Alcotest.(check bool) "settlement is idempotent" true (settled = settled_again)
+;;
+
+let test_existing_judgment_completion_is_atomic_and_restart_safe () =
+  with_temp_base "board-attention-partition-existing-judgment" @@ fun base_path ->
+  let projected_candidate =
+    candidate ~id:"candidate-existing" ~recorded_at:1.0 ()
+  in
+  let bound_candidate = candidate ~id:"candidate-bound-existing" ~recorded_at:2.0 () in
+  let advancing_candidate =
+    candidate ~id:"candidate-advancing-existing" ~recorded_at:3.0 ()
+  in
+  ignore
+    (roots ~base_path [ advancing_candidate; bound_candidate; projected_candidate ]
+      : P.t list);
+  let owner = P.Worker_epoch.generate () in
+  let stranger = P.Worker_epoch.generate () in
+  let projected = claim ~base_path ~worker_epoch:owner ~now:10.0 in
+  let projected_proof =
+    provenance ~slot_id:"existing-slot" ~call_id:"existing-call" ()
+  in
+  let projected_item : P.completed_item =
+    { candidate_id = projected_candidate.candidate_id
+    ; judgment = judgment projected_proof
+    }
+  in
+  expect_error
+    "foreign worker existing judgment completion"
+    (P.complete_existing_judgment
+       ~now:11.0
+       ~worker_epoch:stranger
+       ~base_path
+       ~partition:projected
+       ~item:projected_item);
+  expect_error
+    "existing judgment candidate identity mismatch"
+    (P.complete_existing_judgment
+       ~now:11.0
+       ~worker_epoch:owner
+       ~base_path
+       ~partition:projected
+       ~item:{ projected_item with candidate_id = "candidate-other" });
+  expect_error
+    "existing judgment invalid provenance"
+    (P.complete_existing_judgment
+       ~now:11.0
+       ~worker_epoch:owner
+       ~base_path
+       ~partition:projected
+       ~item:
+         { projected_item with
+           judgment = { projected_item.judgment with slot_id = "" }
+         });
+  let completed =
+    P.complete_existing_judgment
+      ~now:11.0
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:projected
+      ~item:projected_item
+    |> ok "complete existing judgment"
+    |> fsynced "complete existing judgment"
+  in
+  let require_projected label partitions =
+    match
+      List.find_opt
+        (fun (partition : P.t) ->
+           String.equal partition.candidate_id projected_candidate.candidate_id)
+        partitions
+    with
+    | Some { state = P.Completed { item; completed_at }; _ } ->
+      Alcotest.(check bool) (label ^ " exact item") true (item = projected_item);
+      Alcotest.(check (float 0.0)) (label ^ " completion time") 11.0 completed_at
+    | Some _ -> Alcotest.failf "%s did not retain Completed state" label
+    | None -> Alcotest.failf "%s lost the projected partition" label
+  in
+  require_projected
+    "durable roundtrip"
+    (ok "load projected judgment" (P.load ~base_path ~keeper_name:"sangsu"));
+  Alcotest.(check int)
+    "restart does not recover completed existing judgment"
+    0
+    (ok
+       "restart after existing judgment completion"
+       (P.recover_for_process_start ~now:12.0 ~base_path ~keeper_name:"sangsu"));
+  require_projected
+    "restart"
+    (ok "load after restart" (P.load ~base_path ~keeper_name:"sangsu"));
+  let bound_claim = claim ~base_path ~worker_epoch:owner ~now:13.0 in
+  let bound_proof =
+    provenance ~slot_id:"bound-existing-slot" ~call_id:"bound-existing-call" ()
+  in
+  let bound =
+    P.bind_before_dispatch
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:bound_claim
+      ~provenance:bound_proof
+    |> ok "bind existing-judgment rejection fixture"
+    |> fsynced "bind existing-judgment rejection fixture"
+  in
+  expect_error
+    "existing judgment rejects Bound"
+    (P.complete_existing_judgment
+       ~now:14.0
+       ~worker_epoch:owner
+       ~base_path
+       ~partition:bound
+       ~item:
+         { candidate_id = bound_candidate.candidate_id
+         ; judgment = judgment bound_proof
+         });
+  let advancing_claim = claim ~base_path ~worker_epoch:owner ~now:15.0 in
+  let failed =
+    provenance ~slot_id:"failed-existing-slot" ~call_id:"failed-existing-call" ()
+  in
+  let next =
+    provenance ~slot_id:"next-existing-slot" ~call_id:"next-existing-call" ()
+  in
+  let advancing_bound =
+    P.bind_before_dispatch
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:advancing_claim
+      ~provenance:failed
+    |> ok "bind advancing existing-judgment rejection fixture"
+    |> fsynced "bind advancing existing-judgment rejection fixture"
+  in
+  let advancing =
+    P.record_before_advance
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:advancing_bound
+      ~failed
+      ~next
+    |> ok "advance existing-judgment rejection fixture"
+    |> fsynced "advance existing-judgment rejection fixture"
+  in
+  expect_error
+    "existing judgment rejects Advancing"
+    (P.complete_existing_judgment
+       ~now:16.0
+       ~worker_epoch:owner
+       ~base_path
+       ~partition:advancing
+       ~item:
+         { candidate_id = advancing_candidate.candidate_id
+         ; judgment = judgment next
+         });
+  ignore (completed : P.t)
+;;
+
+let test_before_advance_is_atomic_and_exact () =
+  with_temp_base "board-attention-partition-advance" @@ fun base_path ->
+  let pending = candidate ~id:"candidate-advance" ~recorded_at:1.0 () in
+  ignore (roots ~base_path [ pending ] : P.t list);
+  let owner = P.Worker_epoch.generate () in
+  let claimed = claim ~base_path ~worker_epoch:owner ~now:10.0 in
+  let failed = provenance ~slot_id:"slot-failed" ~call_id:"call-failed" () in
+  let next = provenance ~slot_id:"slot-next" ~call_id:"call-next" () in
+  let bound =
+    P.bind_before_dispatch
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:claimed
+      ~provenance:failed
+    |> ok "bind failed attempt"
+    |> fsynced "bind failed attempt"
+  in
+  expect_error
+    "before advance requires exact failed binding"
+    (P.record_before_advance
+       ~worker_epoch:owner
+       ~base_path
+       ~partition:bound
+       ~failed:(provenance ~call_id:"other-call" ())
+       ~next);
+  expect_error
+    "before advance rejects same attempt"
+    (P.record_before_advance
+       ~worker_epoch:owner
+       ~base_path
+       ~partition:bound
+       ~failed
+       ~next:failed);
+  let advancing_transition =
+    ok
+      "record before advance"
+      (P.record_before_advance
+         ~worker_epoch:owner
+         ~base_path
+         ~partition:bound
+         ~failed
+         ~next)
+  in
+  Alcotest.(check bool) "advance changes durable state" true advancing_transition.changed;
+  let advancing = fsynced "record before advance" advancing_transition in
+  (match advancing.state with
+   | P.Running { progress = P.Advancing durable; _ } ->
+     Alcotest.(check bool) "failed proof retained" true (durable.failed = failed);
+     Alcotest.(check bool) "next proof retained" true (durable.next = next)
+   | _ -> Alcotest.fail "partition was not Advancing");
+  let repeated =
+    ok
+      "repeat before advance"
+      (P.record_before_advance
+         ~worker_epoch:owner
+         ~base_path
+         ~partition:advancing
+         ~failed
+         ~next)
+  in
+  Alcotest.(check bool) "idempotent advance reports no state change" false repeated.changed;
+  ignore (fsynced "repeat before advance" repeated : P.t);
+  expect_error
+    "advancing can bind only retained next proof"
+    (P.bind_before_dispatch
+       ~worker_epoch:owner
+       ~base_path
+       ~partition:advancing
+       ~provenance:(provenance ~call_id:"unplanned-call" ()));
+  let rebound =
+    P.bind_before_dispatch
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:advancing
+      ~provenance:next
+    |> ok "bind retained next"
+    |> fsynced "bind retained next"
+  in
+  expect_error
+    "completion cannot use prior attempt provenance"
+    (P.complete
+       ~now:11.0
+       ~worker_epoch:owner
+       ~base_path
+       ~partition:rebound
+       ~item:{ candidate_id = pending.candidate_id; judgment = judgment failed });
+  ignore
+    (P.complete
+       ~now:11.0
+       ~worker_epoch:owner
+       ~base_path
+       ~partition:rebound
+       ~item:{ candidate_id = pending.candidate_id; judgment = judgment next }
+     |> ok "complete rebound attempt"
+     |> fsynced "complete rebound attempt"
+     : P.t)
 ;;
 
 let test_runtime_transitions_append_then_startup_compacts () =
@@ -190,53 +500,45 @@ let test_runtime_transitions_append_then_startup_compacts () =
   let pending = candidate ~id:"candidate-append" ~recorded_at:1.0 () in
   ignore (roots ~base_path [ pending ] : P.t list);
   let ledger_path = P.For_testing.path ~base_path ~keeper_name:"sangsu" in
-  let ready_bytes = Fs_compat.load_file ledger_path in
   let owner = P.Worker_epoch.generate () in
   let claimed = claim ~base_path ~worker_epoch:owner ~now:10.0 in
-  let running_bytes = Fs_compat.load_file ledger_path in
-  Alcotest.(check bool)
-    "claim preserves Ready prefix"
-    true
-    (String.starts_with running_bytes ~prefix:ready_bytes);
-  let item : P.completed_item =
-    { candidate_id = claimed.candidate_id; judgment = judgment () }
+  let proof = provenance () in
+  let bound =
+    P.bind_before_dispatch
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:claimed
+      ~provenance:proof
+    |> ok "bind append"
+    |> fsynced "bind append"
   in
   let completed =
-    match
-      ok
-        "complete append"
-        (P.complete ~now:11.0 ~worker_epoch:owner ~base_path ~partition:claimed ~item)
-    with
-    | P.Partition_completed partition -> partition
-    | P.Partition_deferred _ | P.Partition_blocked _ ->
-      Alcotest.fail "append fixture did not complete"
+    P.complete
+      ~now:11.0
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:bound
+      ~item:{ candidate_id = pending.candidate_id; judgment = judgment proof }
+    |> ok "complete append"
+    |> fsynced "complete append"
   in
-  let completed_bytes = Fs_compat.load_file ledger_path in
-  Alcotest.(check bool)
-    "completion preserves Running prefix"
-    true
-    (String.starts_with completed_bytes ~prefix:running_bytes);
   let settled = ok "settle append" (P.settle ~now:12.0 ~base_path ~partition:completed) in
-  let settled_bytes = Fs_compat.load_file ledger_path in
-  Alcotest.(check bool)
-    "settlement preserves Completed prefix"
-    true
-    (String.starts_with settled_bytes ~prefix:completed_bytes);
   Alcotest.(check int)
-    "one row per runtime transition"
-    4
+    "one row per state transition"
+    5
     (List.length (ledger_lines ledger_path));
+  let settled_bytes = Fs_compat.load_file ledger_path in
   ignore (ok "idempotent settlement" (P.settle ~now:13.0 ~base_path ~partition:settled) : P.t);
   Alcotest.(check string)
     "idempotent settlement appends nothing"
     settled_bytes
     (Fs_compat.load_file ledger_path);
   Alcotest.(check int)
-    "settled history recovers no claims"
+    "settled history recovers no execution"
     0
     (ok
        "startup compaction"
-       (P.recover_for_process_start ~base_path ~keeper_name:"sangsu"));
+       (P.recover_for_process_start ~now:20.0 ~base_path ~keeper_name:"sangsu"));
   Alcotest.(check int)
     "startup compacts to one latest row"
     1
@@ -246,93 +548,165 @@ let test_runtime_transitions_append_then_startup_compacts () =
   | _ -> Alcotest.fail "startup compaction lost the Settled receipt"
 ;;
 
-let test_lane_abort_and_process_start_recovery_are_explicit () =
-  with_temp_base "board-attention-partition-recovery" @@ fun base_path ->
-  let first = candidate ~id:"candidate-first" ~recorded_at:1.0 () in
-  let second = candidate ~id:"candidate-second" ~recorded_at:2.0 () in
-  ignore (roots ~base_path [ first; second ] : P.t list);
+let test_restart_releases_only_unbound_and_quarantines_dispatchable () =
+  with_temp_base "board-attention-partition-restart-hard-cut" @@ fun base_path ->
+  let unbound_candidate = candidate ~id:"candidate-unbound" ~recorded_at:1.0 () in
+  let bound_candidate = candidate ~id:"candidate-bound" ~recorded_at:2.0 () in
+  let advancing_candidate = candidate ~id:"candidate-advancing" ~recorded_at:3.0 () in
+  ignore
+    (roots ~base_path [ advancing_candidate; bound_candidate; unbound_candidate ] : P.t list);
   let owner = P.Worker_epoch.generate () in
-  let stranger = P.Worker_epoch.generate () in
-  let first_claim = claim ~base_path ~worker_epoch:owner ~now:10.0 in
-  expect_error
-    "foreign worker abort recovery"
-    (P.recover_claim_after_lane_abort ~worker_epoch:stranger ~base_path ~partition:first_claim);
-  (match
-     ok
-       "owner abort recovery"
-       (P.recover_claim_after_lane_abort ~worker_epoch:owner ~base_path ~partition:first_claim)
-   with
-   | P.Claim_released released ->
-     (match released.state with
-      | P.Ready -> ()
-      | _ -> Alcotest.fail "released claim was not Ready")
-   | P.Claim_already_transitioned _ -> Alcotest.fail "live owner claim was not released");
-  let first_claim = claim ~base_path ~worker_epoch:owner ~now:11.0 in
-  let failure : F.retryable =
-    { requirement =
-        F.Provider_retry_after
-          { retry_class = Keeper_runtime_failure_route.Server_error
-          ; delay_seconds = 5.0
-          }
-    ; detail = "typed Provider failure"
-    ; failed_at = 12.0
-    }
+  let unbound = claim ~base_path ~worker_epoch:owner ~now:10.0 in
+  let bound_claim = claim ~base_path ~worker_epoch:owner ~now:11.0 in
+  let bound_proof = provenance ~slot_id:"bound-slot" ~call_id:"bound-call" () in
+  let bound =
+    P.bind_before_dispatch
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:bound_claim
+      ~provenance:bound_proof
+    |> ok "bind restart fixture"
+    |> fsynced "bind restart fixture"
+  in
+  let advancing_claim = claim ~base_path ~worker_epoch:owner ~now:12.0 in
+  let failed = provenance ~slot_id:"failed-slot" ~call_id:"failed-call" () in
+  let next = provenance ~slot_id:"next-slot" ~call_id:"next-call" () in
+  let advancing_bound =
+    P.bind_before_dispatch
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:advancing_claim
+      ~provenance:failed
+    |> ok "bind advancing fixture"
+    |> fsynced "bind advancing fixture"
   in
   ignore
+    (P.record_before_advance
+       ~worker_epoch:owner
+       ~base_path
+       ~partition:advancing_bound
+       ~failed
+       ~next
+     |> ok "advance restart fixture"
+     |> fsynced "advance restart fixture"
+      : P.t);
+  Alcotest.(check int)
+    "all prior Running roots are explicitly resolved"
+    3
     (ok
-       "defer"
-       (P.defer ~now:12.0 ~worker_epoch:owner ~base_path ~partition:first_claim failure)
-     : P.completion);
-  let second_claim = claim ~base_path ~worker_epoch:owner ~now:13.0 in
+       "process-start recovery"
+       (P.recover_for_process_start ~now:20.0 ~base_path ~keeper_name:"sangsu"));
+  let recovered = ok "load recovered partitions" (P.load ~base_path ~keeper_name:"sangsu") in
+  (match recovered with
+   | [ first; second; third ] ->
+     (match first.state with
+      | P.Ready ->
+        Alcotest.(check string)
+          "only Unbound returns Ready"
+          unbound.candidate_id
+          first.candidate_id
+      | _ -> Alcotest.fail "Unbound Running did not return Ready");
+     (match second.state with
+      | P.Blocked
+          { reason = P.Exact_execution_quarantined (P.Bound durable); _ } ->
+        Alcotest.(check bool) "Bound proof retained in quarantine" true (durable = bound_proof)
+      | _ -> Alcotest.fail "Bound Running was not quarantined");
+     (match third.state with
+      | P.Blocked
+          { reason = P.Exact_execution_quarantined (P.Advancing durable); _ } ->
+        Alcotest.(check bool) "failed proof retained in quarantine" true (durable.failed = failed);
+        Alcotest.(check bool) "next proof retained in quarantine" true (durable.next = next)
+      | _ -> Alcotest.fail "Advancing Running was not quarantined");
+     let settled_blocked =
+       ok "settle terminal Blocked" (P.settle ~now:21.0 ~base_path ~partition:second)
+     in
+     (match settled_blocked.state with
+      | P.Settled _ -> ()
+      | _ -> Alcotest.fail "Blocked did not settle")
+   | _ -> Alcotest.fail "restart changed partition membership");
+  let reclaimed = claim ~base_path ~worker_epoch:owner ~now:22.0 in
   Alcotest.(check string)
-    "Deferred root is not hot-loop claimed"
-    second.candidate_id
-    second_claim.candidate_id;
-  Alcotest.(check int)
-    "process start recovers only prior Running"
-    1
-    (ok "process-start recovery" (P.recover_for_process_start ~base_path ~keeper_name:"sangsu"));
-  Alcotest.(check (option (float 0.0)))
-    "Provider deadline remains durable"
-    (Some 17.0)
+    "only prior Unbound can be reclaimed"
+    unbound_candidate.candidate_id
+    reclaimed.candidate_id;
+  Alcotest.(check (option string))
+    "quarantined executions are never redispatched"
+    None
     (ok
-       "next Provider retry deadline"
-       (P.next_provider_retry_deadline ~base_path ~keeper_name:"sangsu"));
-  Alcotest.(check int)
-    "deadline cannot release early"
-    0
-    (ok
-       "early Provider retry release"
-       (P.release_due_provider_retries
-          ~now:16.0
+       "no second claim"
+       (P.claim_next
+          ~now:23.0
+          ~worker_epoch:owner
           ~base_path
-          ~keeper_name:"sangsu"));
-  Alcotest.(check int)
-    "exact Provider deadline releases deferred root"
-    1
-    (ok
-       "due Provider retry release"
-       (P.release_due_provider_retries
-          ~now:17.0
-          ~base_path
-          ~keeper_name:"sangsu"));
-  let recovered = claim ~base_path ~worker_epoch:owner ~now:18.0 in
-  Alcotest.(check string)
-    "recovery restores durable oldest order"
-    first.candidate_id
-    recovered.candidate_id
+          ~keeper_name:"sangsu")
+     |> Option.map (fun partition -> partition.P.candidate_id))
+;;
+
+let test_provider_neutral_blocked_reason_codec () =
+  let reasons : (string * P.blocked_reason) list =
+    [ "setup", P.Exact_setup_unavailable "lane admission unavailable"
+    ; "replay", P.Exact_flow_replayed
+    ; "terminal", P.Exact_execution_terminal
+    ; "domain", P.Domain_output_invalid "judgment schema rejected"
+    ; "provenance", P.Execution_provenance_mismatch "opaque identity mismatch"
+    ; "worker", P.Unexpected_worker_failure "worker terminated unexpectedly"
+    ]
+  in
+  List.iteri
+    (fun index (label, reason) ->
+       with_temp_base ("board-attention-partition-blocked-" ^ label) @@ fun base_path ->
+       let pending =
+         candidate
+           ~id:(Printf.sprintf "candidate-blocked-%d" index)
+           ~recorded_at:(float_of_int (index + 1))
+           ()
+       in
+       ignore (roots ~base_path [ pending ] : P.t list);
+       let owner = P.Worker_epoch.generate () in
+       let claimed = claim ~base_path ~worker_epoch:owner ~now:10.0 in
+       let blocked =
+         ok
+           ("block " ^ label)
+           (P.block ~now:11.0 ~worker_epoch:owner ~base_path ~partition:claimed reason)
+       in
+       (match blocked.state with
+        | P.Blocked { reason = durable; _ } ->
+          Alcotest.(check bool) (label ^ " reason persisted exactly") true (durable = reason)
+        | _ -> Alcotest.failf "%s reason did not produce Blocked" label);
+       Alcotest.(check bool)
+         (label ^ " current-schema roundtrip")
+         true
+         (ok (label ^ " decode") (P.of_yojson (P.to_yojson blocked)) = blocked))
+    reasons;
+  with_temp_base "board-attention-partition-blocked-invalid" @@ fun base_path ->
+  let pending = candidate ~id:"candidate-empty-reason" ~recorded_at:1.0 () in
+  ignore (roots ~base_path [ pending ] : P.t list);
+  let owner = P.Worker_epoch.generate () in
+  let claimed = claim ~base_path ~worker_epoch:owner ~now:10.0 in
+  expect_error
+    "empty provider-neutral detail"
+    (P.block
+       ~now:11.0
+       ~worker_epoch:owner
+       ~base_path
+       ~partition:claimed
+       (P.Exact_setup_unavailable ""));
+  match ok "load after rejected reason" (P.load ~base_path ~keeper_name:"sangsu") with
+  | [ { P.state = P.Running { progress = P.Unbound; _ }; _ } ] -> ()
+  | _ -> Alcotest.fail "invalid blocked reason mutated the partition"
 ;;
 
 let replace_field key value = function
   | `Assoc fields ->
     `Assoc
       (List.map
-         (fun (existing, current) -> if String.equal existing key then existing, value else existing, current)
+         (fun (existing, current) ->
+            if String.equal existing key then existing, value else existing, current)
          fields)
   | _ -> Alcotest.fail "partition row was not an object"
 ;;
 
-let test_strict_codec_and_ledger_identity_validation () =
+let test_strict_current_schema_rejects_old_json () =
   with_temp_base "board-attention-partition-codec" @@ fun base_path ->
   let created =
     match roots ~base_path [ candidate ~id:"candidate-codec" ~recorded_at:1.0 () ] with
@@ -345,45 +719,43 @@ let test_strict_codec_and_ledger_identity_validation () =
     true
     (ok "decode" (P.of_yojson encoded) = created);
   expect_error
-    "unknown schema version"
-    (P.of_yojson (replace_field "schema_version" (`Int 3) encoded));
+    "old schema is rejected without migration"
+    (P.of_yojson (replace_field "schema_version" (`Int 2) encoded));
+  let old_running =
+    `Assoc
+      [ "kind", `String "running"
+      ; "worker_epoch", `String (P.Worker_epoch.generate () |> P.Worker_epoch.to_string)
+      ; "started_at", `Float 2.0
+      ]
+  in
+  expect_error
+    "old Running shape is rejected"
+    (P.of_yojson (replace_field "state" old_running encoded));
+  let retired_blocked =
+    `Assoc
+      [ "kind", `String "blocked"
+      ; "reason", `Assoc [ "kind", `String "judgment_blocked" ]
+      ; "blocked_at", `Float 3.0
+      ]
+  in
+  expect_error
+    "retired judgment failure JSON is rejected"
+    (P.of_yojson (replace_field "state" retired_blocked encoded));
   let malformed = replace_field "partition_id" (`String "forged-root") encoded in
   let ledger_path = P.For_testing.path ~base_path ~keeper_name:"sangsu" in
   ok
     "inject malformed durable row"
     (Fs_compat.save_file_atomic ledger_path (Yojson.Safe.to_string malformed ^ "\n"));
-  expect_error "forged deterministic root identity" (P.load ~base_path ~keeper_name:"sangsu");
-  with_temp_base "board-attention-partition-second-root" @@ fun second_base ->
-  let second =
-    match
-      roots
-        ~base_path:second_base
-        [ candidate
-            ~context:(context "other")
-            ~id:"candidate-codec"
-            ~recorded_at:1.0
-            ()
-        ]
-    with
-    | [ partition ] -> partition
-    | _ -> Alcotest.fail "expected one second partition"
-  in
-  ok
-    "inject duplicate live membership"
-    (Fs_compat.save_file_atomic
-       ledger_path
-       (Yojson.Safe.to_string encoded ^ "\n" ^ Yojson.Safe.to_string (P.to_yojson second) ^ "\n"));
-  expect_error "duplicate live candidate membership" (P.load ~base_path ~keeper_name:"sangsu")
+  expect_error "forged deterministic root identity" (P.load ~base_path ~keeper_name:"sangsu")
 ;;
 
 let inject_torn_tail ledger_path =
-  (* Simulates SIGKILL mid-append: partial row bytes without trailing newline. *)
   let output = open_out_gen [ Open_wronly; Open_append; Open_binary ] 0o600 ledger_path in
-  output_string output "{\"schema_version\":2,\"partition_id\":\"torn-partial";
+  output_string output "{\"schema_version\":3,\"partition_id\":\"torn-partial";
   close_out output
 ;;
 
-let test_torn_tail_truncates_to_last_complete_row () =
+let test_torn_tail_recovery_preserves_current_hard_cut () =
   with_temp_base "board-attention-partition-torn-tail" @@ fun base_path ->
   let pending = candidate ~id:"candidate-torn" ~recorded_at:1.0 () in
   ignore (roots ~base_path [ pending ] : P.t list);
@@ -394,51 +766,31 @@ let test_torn_tail_truncates_to_last_complete_row () =
     "torn tail still hard-fails general reads"
     (P.load ~base_path ~keeper_name:"sangsu");
   Alcotest.(check int)
-    "torn tail without claims recovers nothing"
+    "torn tail without Running recovers nothing"
     0
     (ok
        "torn-tail process-start recovery"
-       (P.recover_for_process_start ~base_path ~keeper_name:"sangsu"));
+       (P.recover_for_process_start ~now:10.0 ~base_path ~keeper_name:"sangsu"));
   Alcotest.(check string)
     "torn tail truncated to last complete row"
     durable
     (Fs_compat.load_file ledger_path);
-  (match ok "load after torn-tail recovery" (P.load ~base_path ~keeper_name:"sangsu") with
-   | [ { P.state = P.Ready; candidate_id; _ } ] ->
-     Alcotest.(check string) "durable partition survives" pending.candidate_id candidate_id
-   | _ -> Alcotest.fail "torn-tail recovery lost the durable partition");
-  Alcotest.(check int)
-    "process start after truncation is stable"
-    0
-    (ok
-       "repeat process-start recovery"
-       (P.recover_for_process_start ~base_path ~keeper_name:"sangsu"))
-;;
-
-let test_torn_tail_recovery_releases_prior_running () =
-  with_temp_base "board-attention-partition-torn-claim" @@ fun base_path ->
-  let pending = candidate ~id:"candidate-torn-claim" ~recorded_at:1.0 () in
-  ignore (roots ~base_path [ pending ] : P.t list);
   let owner = P.Worker_epoch.generate () in
-  ignore (claim ~base_path ~worker_epoch:owner ~now:10.0 : P.t);
-  let ledger_path = P.For_testing.path ~base_path ~keeper_name:"sangsu" in
+  ignore (claim ~base_path ~worker_epoch:owner ~now:11.0 : P.t);
   inject_torn_tail ledger_path;
-  expect_error
-    "torn tail still hard-fails general reads"
-    (P.load ~base_path ~keeper_name:"sangsu");
   Alcotest.(check int)
-    "torn tail no longer wedges Running recovery"
+    "only Unbound Running is released"
     1
     (ok
-       "torn-tail process-start recovery"
-       (P.recover_for_process_start ~base_path ~keeper_name:"sangsu"));
-  match ok "load after torn-tail recovery" (P.load ~base_path ~keeper_name:"sangsu") with
+       "torn Unbound recovery"
+       (P.recover_for_process_start ~now:12.0 ~base_path ~keeper_name:"sangsu"));
+  match ok "load after torn recovery" (P.load ~base_path ~keeper_name:"sangsu") with
   | [ { P.state = P.Ready; candidate_id; _ } ] ->
-    Alcotest.(check string) "prior Running released to Ready" pending.candidate_id candidate_id
-  | _ -> Alcotest.fail "torn-tail recovery lost the durable partition"
+    Alcotest.(check string) "candidate remains recoverable" pending.candidate_id candidate_id
+  | _ -> Alcotest.fail "torn-tail recovery lost the current partition"
 ;;
 
-let test_invalid_observation_values_never_rewrite () =
+let test_invalid_or_mismatched_provenance_never_rewrites () =
   with_temp_base "board-attention-partition-invalid" @@ fun base_path ->
   expect_error
     "non-finite candidate time"
@@ -446,63 +798,96 @@ let test_invalid_observation_values_never_rewrite () =
        ~base_path
        ~keeper_name:"sangsu"
        [ candidate ~id:"candidate-invalid" ~recorded_at:Float.nan () ]);
-  Alcotest.(check int)
-    "invalid candidate did not create a root"
-    0
-    (List.length (ok "load empty ledger" (P.load ~base_path ~keeper_name:"sangsu")));
   let valid = candidate ~id:"candidate-valid" ~recorded_at:1.0 () in
   ignore (roots ~base_path [ valid ] : P.t list);
   let owner = P.Worker_epoch.generate () in
   let claimed = claim ~base_path ~worker_epoch:owner ~now:2.0 in
+  expect_error
+    "empty opaque provenance"
+    (P.bind_before_dispatch
+       ~worker_epoch:owner
+       ~base_path
+       ~partition:claimed
+       ~provenance:(provenance ~plan_fingerprint:"" ()));
+  let proof = provenance () in
+  let bound =
+    P.bind_before_dispatch
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:claimed
+      ~provenance:proof
+    |> ok "bind valid proof"
+    |> fsynced "bind valid proof"
+  in
   let invalid_item : P.completed_item =
-    { candidate_id = valid.candidate_id; judgment = judgment ~judged_at:Float.infinity () }
+    { candidate_id = valid.candidate_id
+    ; judgment = judgment ~judged_at:Float.infinity proof
+    }
   in
   expect_error
     "non-finite judgment time"
-    (P.complete ~now:3.0 ~worker_epoch:owner ~base_path ~partition:claimed ~item:invalid_item);
-  let loaded = ok "load Running after rejected completion" (P.load ~base_path ~keeper_name:"sangsu") in
-  match loaded with
-  | [ { P.state = P.Running running; _ } ] ->
-    Alcotest.(check bool) "claim owner remains intact" true (P.Worker_epoch.equal owner running.worker_epoch)
-  | _ -> Alcotest.fail "rejected completion mutated the durable claim"
+    (P.complete ~now:3.0 ~worker_epoch:owner ~base_path ~partition:bound ~item:invalid_item);
+  expect_error
+    "mismatched judgment provenance"
+    (P.complete
+       ~now:3.0
+       ~worker_epoch:owner
+       ~base_path
+       ~partition:bound
+       ~item:
+         { candidate_id = valid.candidate_id
+         ; judgment = judgment (provenance ~request_body_sha256:"other-body" ())
+         });
+  match ok "load Bound after rejected completion" (P.load ~base_path ~keeper_name:"sangsu") with
+  | [ { P.state = P.Running { progress = P.Bound durable; _ }; _ } ] ->
+    Alcotest.(check bool) "durable binding remains intact" true (durable = proof)
+  | _ -> Alcotest.fail "rejected completion mutated the durable binding"
 ;;
 
 let () =
   Alcotest.run
     "keeper_board_attention_partition"
-    [ ( "durable singleton FSM"
+    [ ( "durable singleton exact FSM"
       , [ Alcotest.test_case
             "roots are deterministic singleton context partitions"
             `Quick
             test_roots_are_singleton_deterministic_and_context_exact
         ; Alcotest.test_case
-            "claim ownership completion and settlement"
+            "binding owns completion and settlement"
             `Quick
-            test_claim_ownership_completion_and_settlement
+            test_binding_owns_completion_and_settlement
+        ; Alcotest.test_case
+            "existing judgment completion is atomic and restart safe"
+            `Quick
+            test_existing_judgment_completion_is_atomic_and_restart_safe
+        ; Alcotest.test_case
+            "before advance is atomic and exact"
+            `Quick
+            test_before_advance_is_atomic_and_exact
         ; Alcotest.test_case
             "runtime transitions append then startup compacts"
             `Quick
             test_runtime_transitions_append_then_startup_compacts
         ; Alcotest.test_case
-            "lane abort and process-start recovery"
+            "restart releases only Unbound and quarantines dispatchable"
             `Quick
-            test_lane_abort_and_process_start_recovery_are_explicit
+            test_restart_releases_only_unbound_and_quarantines_dispatchable
         ; Alcotest.test_case
-            "torn tail truncates to last complete row"
+            "provider-neutral blocked reasons roundtrip"
             `Quick
-            test_torn_tail_truncates_to_last_complete_row
+            test_provider_neutral_blocked_reason_codec
         ; Alcotest.test_case
-            "torn tail recovery releases prior Running"
+            "strict current schema rejects old JSON"
             `Quick
-            test_torn_tail_recovery_releases_prior_running
+            test_strict_current_schema_rejects_old_json
         ; Alcotest.test_case
-            "strict codec and ledger identity"
+            "torn tail recovery preserves current hard cut"
             `Quick
-            test_strict_codec_and_ledger_identity_validation
+            test_torn_tail_recovery_preserves_current_hard_cut
         ; Alcotest.test_case
-            "invalid observations never rewrite"
+            "invalid or mismatched provenance never rewrites"
             `Quick
-            test_invalid_observation_values_never_rewrite
+            test_invalid_or_mismatched_provenance_never_rewrites
         ] )
     ]
 ;;

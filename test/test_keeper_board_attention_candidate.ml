@@ -36,7 +36,77 @@ let signal ?(content = "Persisted Board evidence") post_id :
   }
 ;;
 
-let candidate ?(context = `Assoc [ "instructions", `String "continue" ]) signal :
+let post_id_exn value =
+  match Masc.Board.Post_id.of_string value with
+  | Ok value -> value
+  | Error _ -> Alcotest.fail ("invalid Board post id fixture: " ^ value)
+;;
+
+let agent_id_exn value =
+  match Masc.Board.Agent_id.of_string value with
+  | Ok value -> value
+  | Error _ -> Alcotest.fail ("invalid Board agent id fixture: " ^ value)
+;;
+
+let comment_id_exn value =
+  match Masc.Board.Comment_id.of_string value with
+  | Ok value -> value
+  | Error _ -> Alcotest.fail ("invalid Board comment id fixture: " ^ value)
+;;
+
+let post_of_signal (signal : Masc.Board_dispatch.board_signal) : Masc.Board.post =
+  { id = post_id_exn signal.post_id
+  ; author = agent_id_exn signal.author
+  ; title = signal.title
+  ; body = signal.content
+  ; content = signal.content
+  ; post_kind = Masc.Board.Human_post
+  ; meta_json = None
+  ; visibility = Masc.Board.Public
+  ; created_at = 1.0
+  ; updated_at = Option.value signal.updated_at ~default:1.0
+  ; expires_at = 3601.0
+  ; votes_up = 0
+  ; votes_down = 0
+  ; reply_count = 0
+  ; pinned = false
+  ; hearth = signal.hearth
+  ; thread_id = None
+  ; origin = None
+  }
+;;
+
+let comment_of_signal
+      (signal : Masc.Board_dispatch.board_signal)
+  : Masc.Board.comment
+  =
+  { id = comment_id_exn ("comment-" ^ signal.post_id)
+  ; post_id = post_id_exn signal.post_id
+  ; parent_id = None
+  ; author = agent_id_exn "comment-author"
+  ; content = "Canonical Board comment"
+  ; created_at = 2.0
+  ; expires_at = 3602.0
+  ; votes_up = 0
+  ; votes_down = 0
+  }
+;;
+
+let keeper_context ?(active_goal_ids = []) () =
+  `Assoc
+    [ "lane_keeper_name", `String "sangsu"
+    ; "agent_name", `String "sangsu-agent"
+    ; "keeper_record_id", `Null
+    ; "keeper_runtime_uid", `Null
+    ; "persona", `Null
+    ; "instructions", `String "continue"
+    ; "active_goal_ids", `List (List.map (fun id -> `String id) active_goal_ids)
+    ; "current_task_id", `Null
+    ; "mention_keeper_ids", `List [ `String "sangsu" ]
+    ]
+;;
+
+let candidate ?(context = keeper_context ()) signal :
   A.candidate
   =
   let keeper_name = "sangsu" in
@@ -56,16 +126,23 @@ let candidate ?(context = `Assoc [ "instructions", `String "continue" ]) signal 
       `Assoc
         [ "candidate_id", `String candidate_id
         ; "signal", A.signal_to_yojson signal
+        ; "post", Masc.Board.post_to_yojson (post_of_signal signal)
+        ; ( "comments"
+          , `List
+              [ Masc.Board.comment_to_yojson (comment_of_signal signal) ] )
         ; "keeper_context", context
         ]
   ; recorded_at = 1.0
-  ; status = A.Pending { last_failure = None }
+  ; status = A.Pending { last_delivery_failure = None }
   }
 ;;
 
 let judgment decision : A.judgment =
   { verdict = { J.decision; rationale = "typed structured verdict" }
-  ; runtime_id = "configured-structured-judge"
+  ; slot_id = "board-attention-primary"
+  ; call_id = "call-board-attention"
+  ; plan_fingerprint = "plan-board-attention"
+  ; request_body_sha256 = "request-board-attention"
   ; judged_at = 2.0
   }
 ;;
@@ -86,11 +163,7 @@ let load_one ~base_path =
 let test_codec_and_context_identity_are_strict () =
   let original =
     candidate
-      ~context:
-        (`Assoc
-           [ "instructions", `String "continue"
-           ; "goals", `List [ `String "g-1"; `String "g-2" ]
-           ])
+      ~context:(keeper_context ~active_goal_ids:[ "g-1"; "g-2" ] ())
       (signal "post-codec")
   in
   Alcotest.(check bool)
@@ -101,10 +174,9 @@ let test_codec_and_context_identity_are_strict () =
   let reordered =
     candidate
       ~context:
-        (`Assoc
-           [ "goals", `List [ `String "g-1"; `String "g-2" ]
-           ; "instructions", `String "continue"
-           ])
+        (match keeper_context ~active_goal_ids:[ "g-1"; "g-2" ] () with
+         | `Assoc fields -> `Assoc (List.rev fields)
+         | _ -> assert false)
       (signal "post-reordered")
     |> A.Context_key.of_candidate
     |> ok "reordered context"
@@ -115,11 +187,7 @@ let test_codec_and_context_identity_are_strict () =
     (A.Context_key.equal left reordered);
   let changed_list =
     candidate
-      ~context:
-        (`Assoc
-           [ "instructions", `String "continue"
-           ; "goals", `List [ `String "g-2"; `String "g-1" ]
-           ])
+      ~context:(keeper_context ~active_goal_ids:[ "g-2"; "g-1" ] ())
       (signal "post-list-order")
     |> A.Context_key.of_candidate
     |> ok "changed list context"
@@ -140,6 +208,181 @@ let test_codec_and_context_identity_are_strict () =
    with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "duplicate keeper_context authority was accepted")
+;;
+
+let rewrite_assoc_field key rewrite = function
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (field, value) ->
+            if String.equal field key
+            then field, rewrite value
+            else field, value)
+         fields)
+  | _ -> Alcotest.fail ("expected object while rewriting field " ^ key)
+;;
+
+let add_legacy_extra = function
+  | `Assoc fields -> `Assoc (("legacy_extra", `String "must-not-survive") :: fields)
+  | _ -> Alcotest.fail "expected Board object fixture"
+;;
+
+let test_singleton_request_is_canonical_and_identity_bound () =
+  let original = candidate (signal "post-canonical-request") in
+  ignore
+    (ok
+       "canonical singleton request"
+       (A.singleton_judgment_request original)
+      : Yojson.Safe.t);
+  let noisy_request =
+    original.judgment_request
+    |> rewrite_assoc_field "post" add_legacy_extra
+    |> rewrite_assoc_field "comments" (function
+      | `List comments -> `List (List.map add_legacy_extra comments)
+      | _ -> Alcotest.fail "expected comments array")
+  in
+  (match
+     A.singleton_judgment_request
+       { original with judgment_request = noisy_request }
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "unknown nested Board fields were accepted");
+  let mismatched_post =
+    original.judgment_request
+    |> rewrite_assoc_field "post" (rewrite_assoc_field "id" (fun _ ->
+      `String "different-post"))
+  in
+  (match
+     A.singleton_judgment_request
+       { original with judgment_request = mismatched_post }
+   with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "mismatched Board post identity was accepted");
+  let mismatched_comment =
+    original.judgment_request
+    |> rewrite_assoc_field "comments" (function
+      | `List (comment :: rest) ->
+        `List
+          (rewrite_assoc_field
+             "post_id"
+             (fun _ -> `String "different-post")
+             comment
+           :: rest)
+      | `List [] -> Alcotest.fail "expected one Board comment fixture"
+      | _ -> Alcotest.fail "expected comments array")
+  in
+  match
+    A.singleton_judgment_request
+      { original with judgment_request = mismatched_comment }
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "mismatched Board comment identity was accepted"
+;;
+
+let test_record_rejects_malformed_without_poisoning_ledger () =
+  with_temp_base "board-attention-candidate-record-validation" @@ fun base_path ->
+  let valid = candidate (signal "post-record-validation") in
+  let malformed_request =
+    valid.judgment_request
+    |> rewrite_assoc_field "post" (rewrite_assoc_field "id" (fun _ ->
+      `String "different-post"))
+  in
+  (match
+     A.record
+       ~base_path
+       { valid with judgment_request = malformed_request }
+   with
+   | A.Record_error _ -> ()
+   | A.Recorded _ | A.Duplicate _ ->
+     Alcotest.fail "malformed in-memory candidate was recorded");
+  Alcotest.(check int)
+    "failed validation did not poison the ledger"
+    0
+    (ok
+       "load ledger after rejected record"
+       (A.load_candidates ~base_path ~keeper_name:valid.keeper_name)
+     |> List.length);
+  let noisy_request =
+    valid.judgment_request
+    |> rewrite_assoc_field "post" add_legacy_extra
+    |> rewrite_assoc_field "comments" (function
+      | `List comments -> `List (List.map add_legacy_extra comments)
+      | _ -> Alcotest.fail "expected comments array")
+  in
+  (match A.record ~base_path { valid with judgment_request = noisy_request } with
+   | A.Record_error _ -> ()
+   | A.Recorded _ | A.Duplicate _ ->
+     Alcotest.fail "unknown nested Board fields were canonicalized and recorded");
+  Alcotest.(check int)
+    "rejected old JSON left the ledger empty"
+    0
+    (ok
+       "load ledger after rejected old JSON"
+       (A.load_candidates ~base_path ~keeper_name:valid.keeper_name)
+     |> List.length);
+  let persisted = record ~base_path valid in
+  Alcotest.(check bool)
+    "valid current request is the only durable row"
+    true
+    (load_one ~base_path = persisted)
+;;
+
+let test_non_finite_lifecycle_times_are_rejected () =
+  with_temp_base "board-attention-candidate-finite-times" @@ fun base_path ->
+  let valid = candidate (signal "post-finite-times") in
+  let expect_record_error label candidate =
+    match A.record ~base_path candidate with
+    | A.Record_error _ -> ()
+    | A.Recorded _ | A.Duplicate _ -> Alcotest.fail (label ^ " was recorded")
+  in
+  expect_record_error
+    "NaN recorded_at"
+    { valid with recorded_at = Float.nan };
+  let infinite_failure : A.delivery_failure =
+    { kind = A.Durable_delivery_unavailable
+    ; detail = "injected non-finite failure time"
+    ; failed_at = Float.infinity
+    }
+  in
+  expect_record_error
+    "infinite delivery failed_at"
+    { valid with
+      status = A.Pending { last_delivery_failure = Some infinite_failure }
+    };
+  expect_record_error
+    "negative-infinite consumed_at"
+    { valid with
+      status =
+        A.Consumed
+          { judgment = judgment J.Not_relevant
+          ; delivery = A.Not_relevant
+          ; consumed_at = Float.neg_infinity
+          }
+    };
+  Alcotest.(check int)
+    "non-finite records did not poison the ledger"
+    0
+    (ok
+       "load after rejected non-finite records"
+       (A.load_candidates ~base_path ~keeper_name:valid.keeper_name)
+     |> List.length);
+  ignore (record ~base_path valid : A.candidate);
+  let ledger_path =
+    Filename.concat
+      (Filename.concat
+         (Masc.Common.masc_dir_from_base_path ~base_path)
+         "board_attention_candidates")
+      "sangsu.jsonl"
+  in
+  let non_finite_row =
+    A.candidate_to_json { valid with recorded_at = Float.infinity }
+    |> Yojson.Safe.to_string
+  in
+  Out_channel.with_open_bin ledger_path (fun channel ->
+    output_string channel (non_finite_row ^ "\n"));
+  match A.load_candidates ~base_path ~keeper_name:valid.keeper_name with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "load accepted a non-finite durable candidate"
 ;;
 
 let test_record_dedupes_exact_identity_and_rejects_conflict () =
@@ -178,8 +421,10 @@ let test_record_requests_worker_without_invoking_judgment () =
      ; candidate = persisted
      } ->
      (match persisted.status with
-      | A.Pending { last_failure = None } -> ()
-      | A.Pending { last_failure = Some _ } | A.Judged _ | A.Consumed _ ->
+      | A.Pending { last_delivery_failure = None } -> ()
+      | A.Pending { last_delivery_failure = Some _ }
+      | A.Judged _
+      | A.Consumed _ ->
         Alcotest.fail "producer performed judgment work")
    | _ -> Alcotest.fail "candidate returned the wrong worker-wake acceptance");
   match Wake.await registration with
@@ -274,6 +519,18 @@ let () =
             "codec and context identity are strict"
             `Quick
             test_codec_and_context_identity_are_strict
+        ; Alcotest.test_case
+            "singleton request is canonical and identity bound"
+            `Quick
+            test_singleton_request_is_canonical_and_identity_bound
+        ; Alcotest.test_case
+            "record rejects malformed input without poisoning ledger"
+            `Quick
+            test_record_rejects_malformed_without_poisoning_ledger
+        ; Alcotest.test_case
+            "non-finite lifecycle times are rejected"
+            `Quick
+            test_non_finite_lifecycle_times_are_rejected
         ; Alcotest.test_case
             "record dedupes exact identity"
             `Quick

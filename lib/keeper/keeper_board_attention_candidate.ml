@@ -2,24 +2,21 @@
 
 module Board_signal = Keeper_world_observation_board_signal
 module Candidate_map = Map.Make (String)
-module Judgment_failure = Keeper_board_attention_failure
-
-type retryable_failure_kind =
-  | Runtime_configuration_unavailable
-  | Prompt_contract_unavailable
-  | Provider_unavailable
-  | Response_contract_unavailable
+type delivery_failure_kind =
   | Durable_delivery_unavailable
 
-type retryable_failure =
-  { kind : retryable_failure_kind
+type delivery_failure =
+  { kind : delivery_failure_kind
   ; detail : string
   ; failed_at : float
   }
 
 type judgment =
   { verdict : Keeper_board_attention_judgment.t
-  ; runtime_id : string
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
   ; judged_at : float
   }
 
@@ -27,11 +24,11 @@ type delivery =
   | Enqueued_to_keeper_lane
   | Not_relevant
 
-type pending_state = { last_failure : retryable_failure option }
+type pending_state = { last_delivery_failure : delivery_failure option }
 
 type judged_state =
   { judgment : judgment
-  ; last_failure : retryable_failure option
+  ; last_delivery_failure : delivery_failure option
   }
 
 type consumed_state =
@@ -75,19 +72,11 @@ type record_acceptance =
 
 exception Candidate_unavailable of string
 
-let retryable_failure_kind_to_string = function
-  | Runtime_configuration_unavailable -> "runtime_configuration_unavailable"
-  | Prompt_contract_unavailable -> "prompt_contract_unavailable"
-  | Provider_unavailable -> "provider_unavailable"
-  | Response_contract_unavailable -> "response_contract_unavailable"
+let delivery_failure_kind_to_string = function
   | Durable_delivery_unavailable -> "durable_delivery_unavailable"
 ;;
 
-let retryable_failure_kind_of_string = function
-  | "runtime_configuration_unavailable" -> Some Runtime_configuration_unavailable
-  | "prompt_contract_unavailable" -> Some Prompt_contract_unavailable
-  | "provider_unavailable" -> Some Provider_unavailable
-  | "response_contract_unavailable" -> Some Response_contract_unavailable
+let delivery_failure_kind_of_string = function
   | "durable_delivery_unavailable" -> Some Durable_delivery_unavailable
   | _ -> None
 ;;
@@ -232,7 +221,7 @@ let of_board_evidence
       ; signal
       ; judgment_request
       ; recorded_at
-      ; status = Pending { last_failure = None }
+      ; status = Pending { last_delivery_failure = None }
       }
 ;;
 
@@ -256,9 +245,9 @@ let of_board_signal
         | Error detail -> raise (Candidate_unavailable detail)))
 ;;
 
-let retryable_failure_to_yojson failure =
+let delivery_failure_to_yojson failure =
   `Assoc
-    [ "kind", `String (retryable_failure_kind_to_string failure.kind)
+    [ "kind", `String (delivery_failure_kind_to_string failure.kind)
     ; "detail", `String failure.detail
     ; "failed_at", `Float failure.failed_at
     ]
@@ -267,7 +256,10 @@ let retryable_failure_to_yojson failure =
 let judgment_to_yojson judgment =
   `Assoc
     [ "verdict", Keeper_board_attention_judgment.to_yojson judgment.verdict
-    ; "runtime_id", `String judgment.runtime_id
+    ; "slot_id", `String judgment.slot_id
+    ; "call_id", `String judgment.call_id
+    ; "plan_fingerprint", `String judgment.plan_fingerprint
+    ; "request_body_sha256", `String judgment.request_body_sha256
     ; "judged_at", `Float judgment.judged_at
     ]
 ;;
@@ -276,15 +268,19 @@ let status_to_yojson = function
   | Pending pending ->
     `Assoc
       [ "kind", `String "pending"
-      ; ( "last_failure"
-        , option_json retryable_failure_to_yojson pending.last_failure )
+      ; ( "last_delivery_failure"
+        , option_json
+            delivery_failure_to_yojson
+            pending.last_delivery_failure )
       ]
   | Judged judged ->
     `Assoc
       [ "kind", `String "judged"
       ; "judgment", judgment_to_yojson judged.judgment
-      ; ( "last_failure"
-        , option_json retryable_failure_to_yojson judged.last_failure )
+      ; ( "last_delivery_failure"
+        , option_json
+            delivery_failure_to_yojson
+            judged.last_delivery_failure )
       ]
   | Consumed consumed ->
     `Assoc
@@ -421,6 +417,30 @@ let float_json ~context = function
   | _ -> Error (context ^ " must be a number")
 ;;
 
+let finite_time ~context value =
+  if Float.is_finite value then Ok () else Error (context ^ " must be finite")
+;;
+
+let finite_float_json ~context json =
+  let* value = float_json ~context json in
+  let* () = finite_time ~context value in
+  Ok value
+;;
+
+let validate_candidate_times (candidate : candidate) =
+  let* () = finite_time ~context:"candidate.recorded_at" candidate.recorded_at in
+  match candidate.status with
+  | Pending { last_delivery_failure = None }
+  | Judged { last_delivery_failure = None; _ } -> Ok ()
+  | Pending { last_delivery_failure = Some failure }
+  | Judged { last_delivery_failure = Some failure; _ } ->
+    finite_time
+      ~context:"candidate.status.last_delivery_failure.failed_at"
+      failure.failed_at
+  | Consumed consumed ->
+    finite_time ~context:"candidate.status.consumed_at" consumed.consumed_at
+;;
+
 let optional_json parser = function
   | `Null -> Ok None
   | value ->
@@ -520,35 +540,94 @@ let signal_of_yojson json =
     }
 ;;
 
-let retryable_failure_of_yojson json =
-  let context = "candidate.status.last_failure" in
+let delivery_failure_of_yojson json =
+  let context = "candidate.status.last_delivery_failure" in
   let* fields = assoc ~context json in
   let* () = exact_fields ~context [ "kind"; "detail"; "failed_at" ] fields in
   let* kind_json = field ~context "kind" fields in
   let* kind_raw = string_json ~context:(context ^ ".kind") kind_json in
   let* kind =
-    match retryable_failure_kind_of_string kind_raw with
+    match delivery_failure_kind_of_string kind_raw with
     | Some kind -> Ok kind
-    | None -> Error (Printf.sprintf "unknown retryable failure kind %S" kind_raw)
+    | None -> Error (Printf.sprintf "unknown delivery failure kind %S" kind_raw)
   in
   let* detail_json = field ~context "detail" fields in
   let* detail = string_json ~context:(context ^ ".detail") detail_json in
   let* failed_at_json = field ~context "failed_at" fields in
-  let* failed_at = float_json ~context:(context ^ ".failed_at") failed_at_json in
+  let* failed_at =
+    finite_float_json ~context:(context ^ ".failed_at") failed_at_json
+  in
   Ok { kind; detail; failed_at }
 ;;
 
 let judgment_of_yojson json =
   let context = "candidate.status.judgment" in
   let* fields = assoc ~context json in
-  let* () = exact_fields ~context [ "verdict"; "runtime_id"; "judged_at" ] fields in
+  let* () =
+    exact_fields
+      ~context
+      [ "verdict"
+      ; "slot_id"
+      ; "call_id"
+      ; "plan_fingerprint"
+      ; "request_body_sha256"
+      ; "judged_at"
+      ]
+      fields
+  in
   let* verdict_json = field ~context "verdict" fields in
   let* verdict = Keeper_board_attention_judgment.of_yojson verdict_json in
-  let* runtime_id_json = field ~context "runtime_id" fields in
-  let* runtime_id = string_json ~context:(context ^ ".runtime_id") runtime_id_json in
+  let* slot_id_json = field ~context "slot_id" fields in
+  let* slot_id = string_json ~context:(context ^ ".slot_id") slot_id_json in
+  let* () =
+    if String.equal (String.trim slot_id) ""
+    then Error (context ^ ".slot_id must not be empty")
+    else Ok ()
+  in
+  let* call_id_json = field ~context "call_id" fields in
+  let* call_id = string_json ~context:(context ^ ".call_id") call_id_json in
+  let* () =
+    if String.equal (String.trim call_id) ""
+    then Error (context ^ ".call_id must not be empty")
+    else Ok ()
+  in
+  let* plan_fingerprint_json = field ~context "plan_fingerprint" fields in
+  let* plan_fingerprint =
+    string_json
+      ~context:(context ^ ".plan_fingerprint")
+      plan_fingerprint_json
+  in
+  let* () =
+    if String.equal (String.trim plan_fingerprint) ""
+    then Error (context ^ ".plan_fingerprint must not be empty")
+    else Ok ()
+  in
+  let* request_body_sha256_json = field ~context "request_body_sha256" fields in
+  let* request_body_sha256 =
+    string_json
+      ~context:(context ^ ".request_body_sha256")
+      request_body_sha256_json
+  in
+  let* () =
+    if String.equal (String.trim request_body_sha256) ""
+    then Error (context ^ ".request_body_sha256 must not be empty")
+    else Ok ()
+  in
   let* judged_at_json = field ~context "judged_at" fields in
   let* judged_at = float_json ~context:(context ^ ".judged_at") judged_at_json in
-  Ok { verdict; runtime_id; judged_at }
+  let* () =
+    if Float.is_finite judged_at
+    then Ok ()
+    else Error (context ^ ".judged_at must be finite")
+  in
+  Ok
+    { verdict
+    ; slot_id
+    ; call_id
+    ; plan_fingerprint
+    ; request_body_sha256
+    ; judged_at
+    }
 ;;
 
 let status_of_yojson json =
@@ -558,21 +637,28 @@ let status_of_yojson json =
   let* kind = string_json ~context:(context ^ ".kind") kind_json in
   match kind with
   | "pending" ->
-    let* () = exact_fields ~context [ "kind"; "last_failure" ] fields in
-    let* failure_json = field ~context "last_failure" fields in
-    let* last_failure =
-      optional_json retryable_failure_of_yojson failure_json
+    let* () =
+      exact_fields ~context [ "kind"; "last_delivery_failure" ] fields
     in
-    Ok (Pending { last_failure })
+    let* failure_json = field ~context "last_delivery_failure" fields in
+    let* last_delivery_failure =
+      optional_json delivery_failure_of_yojson failure_json
+    in
+    Ok (Pending { last_delivery_failure })
   | "judged" ->
-    let* () = exact_fields ~context [ "kind"; "judgment"; "last_failure" ] fields in
+    let* () =
+      exact_fields
+        ~context
+        [ "kind"; "judgment"; "last_delivery_failure" ]
+        fields
+    in
     let* judgment_json = field ~context "judgment" fields in
     let* judgment = judgment_of_yojson judgment_json in
-    let* failure_json = field ~context "last_failure" fields in
-    let* last_failure =
-      optional_json retryable_failure_of_yojson failure_json
+    let* failure_json = field ~context "last_delivery_failure" fields in
+    let* last_delivery_failure =
+      optional_json delivery_failure_of_yojson failure_json
     in
-    Ok (Judged { judgment; last_failure })
+    Ok (Judged { judgment; last_delivery_failure })
   | "consumed" ->
     let* () =
       exact_fields
@@ -590,9 +676,205 @@ let status_of_yojson json =
       | None -> Error (Printf.sprintf "unknown Board attention delivery %S" delivery_raw)
     in
     let* consumed_at_json = field ~context "consumed_at" fields in
-    let* consumed_at = float_json ~context:(context ^ ".consumed_at") consumed_at_json in
+    let* consumed_at =
+      finite_float_json ~context:(context ^ ".consumed_at") consumed_at_json
+    in
     Ok (Consumed { judgment; delivery; consumed_at })
   | value -> Error (Printf.sprintf "unknown Board attention candidate status %S" value)
+;;
+
+let string_list_of_yojson ~context = function
+  | `List values ->
+    List.fold_left
+      (fun result value ->
+         let* () = result in
+         let* (_ : string) = string_json ~context value in
+         Ok ())
+      (Ok ())
+      values
+  | _ -> Error (context ^ " must be an array of strings")
+;;
+
+let optional_string_of_yojson ~context = function
+  | `Null -> Ok ()
+  | value ->
+    let* (_ : string) = string_json ~context value in
+    Ok ()
+;;
+
+let validate_keeper_context ~keeper_name json =
+  let context = "candidate.judgment_request.keeper_context" in
+  let* fields = assoc ~context json in
+  let* () =
+    exact_fields
+      ~context
+      [ "lane_keeper_name"
+      ; "agent_name"
+      ; "keeper_record_id"
+      ; "keeper_runtime_uid"
+      ; "persona"
+      ; "instructions"
+      ; "active_goal_ids"
+      ; "current_task_id"
+      ; "mention_keeper_ids"
+      ]
+      fields
+  in
+  let* lane_keeper_name_json = field ~context "lane_keeper_name" fields in
+  let* lane_keeper_name =
+    string_json
+      ~context:(context ^ ".lane_keeper_name")
+      lane_keeper_name_json
+  in
+  let* () =
+    if String.equal lane_keeper_name keeper_name
+    then Ok ()
+    else Error (context ^ ".lane_keeper_name does not match candidate keeper_name")
+  in
+  let* agent_name_json = field ~context "agent_name" fields in
+  let* (_ : string) =
+    string_json ~context:(context ^ ".agent_name") agent_name_json
+  in
+  let* instructions_json = field ~context "instructions" fields in
+  let* (_ : string) =
+    string_json ~context:(context ^ ".instructions") instructions_json
+  in
+  let* keeper_record_id = field ~context "keeper_record_id" fields in
+  let* () =
+    optional_string_of_yojson
+      ~context:(context ^ ".keeper_record_id")
+      keeper_record_id
+  in
+  let* keeper_runtime_uid = field ~context "keeper_runtime_uid" fields in
+  let* () =
+    optional_string_of_yojson
+      ~context:(context ^ ".keeper_runtime_uid")
+      keeper_runtime_uid
+  in
+  let* persona = field ~context "persona" fields in
+  let* () =
+    optional_string_of_yojson ~context:(context ^ ".persona") persona
+  in
+  let* active_goal_ids = field ~context "active_goal_ids" fields in
+  let* () =
+    string_list_of_yojson
+      ~context:(context ^ ".active_goal_ids")
+      active_goal_ids
+  in
+  let* current_task_id = field ~context "current_task_id" fields in
+  let* () =
+    optional_string_of_yojson
+      ~context:(context ^ ".current_task_id")
+      current_task_id
+  in
+  let* mention_keeper_ids = field ~context "mention_keeper_ids" fields in
+  let* () =
+    string_list_of_yojson
+      ~context:(context ^ ".mention_keeper_ids")
+      mention_keeper_ids
+  in
+  let* canonical = Context_key.of_yojson json in
+  Ok (Context_key.to_yojson canonical)
+;;
+
+let canonical_judgment_request candidate =
+  let context = "candidate.judgment_request" in
+  let* fields = assoc ~context candidate.judgment_request in
+  let* () =
+    exact_fields
+      ~context
+      [ "candidate_id"; "signal"; "post"; "comments"; "keeper_context" ]
+      fields
+  in
+  let* candidate_id_json = field ~context "candidate_id" fields in
+  let* candidate_id =
+    string_json ~context:(context ^ ".candidate_id") candidate_id_json
+  in
+  let* () =
+    if String.equal candidate_id candidate.candidate_id
+    then Ok ()
+    else Error (context ^ ".candidate_id does not match durable candidate identity")
+  in
+  let* signal_json = field ~context "signal" fields in
+  let* request_signal = signal_of_yojson signal_json in
+  let* () =
+    if request_signal = candidate.signal
+    then Ok ()
+    else Error (context ^ ".signal does not match durable candidate signal")
+  in
+  let* post = field ~context "post" fields in
+  let* canonical_post =
+    match Board.post_of_yojson post with
+    | None -> Error (context ^ ".post does not match the current Board post schema")
+    | Some decoded ->
+      let post_id = Board.Post_id.to_string decoded.id in
+      if String.equal post_id candidate.signal.post_id
+      then Ok (Board.post_to_yojson decoded)
+      else Error (context ^ ".post.id does not match durable signal.post_id")
+  in
+  let* comments = field ~context "comments" fields in
+  let* canonical_comments =
+    match comments with
+    | `List values ->
+      List.fold_left
+        (fun result value ->
+           let* canonical = result in
+           match Board.comment_of_yojson value with
+           | None ->
+             Error
+               (context
+                ^ ".comments[] does not match the current Board comment schema")
+           | Some decoded ->
+             let post_id = Board.Post_id.to_string decoded.post_id in
+             if String.equal post_id candidate.signal.post_id
+             then Ok (Board.comment_to_yojson decoded :: canonical)
+             else
+               Error
+                 (context
+                  ^ ".comments[].post_id does not match durable signal.post_id"))
+        (Ok [])
+        values
+      |> Result.map List.rev
+    | _ -> Error (context ^ ".comments must be an array of objects")
+  in
+  let* keeper_context = field ~context "keeper_context" fields in
+  let* canonical_keeper_context =
+    validate_keeper_context ~keeper_name:candidate.keeper_name keeper_context
+  in
+  Ok
+    (`Assoc
+       [ "candidate_id", `String candidate.candidate_id
+       ; "signal", signal_to_yojson candidate.signal
+       ; "post", canonical_post
+       ; "comments", `List canonical_comments
+       ; "keeper_context", canonical_keeper_context
+       ])
+;;
+
+let require_current_canonical_judgment_request candidate =
+  let* canonical = canonical_judgment_request candidate in
+  if Yojson.Safe.equal candidate.judgment_request canonical
+  then Ok canonical
+  else
+    Error
+      "candidate.judgment_request does not match the current canonical Board schema"
+;;
+
+let singleton_judgment_request candidate =
+  let context = "canonical candidate.judgment_request" in
+  let* canonical = require_current_canonical_judgment_request candidate in
+  let* fields = assoc ~context canonical in
+  let* keeper_context = field ~context "keeper_context" fields in
+  let item_fields =
+    List.filter
+      (fun (key, _) -> not (String.equal key "keeper_context"))
+      fields
+  in
+  Ok
+    (`Assoc
+       [ "keeper_context", keeper_context
+       ; "items", `List [ `Assoc item_fields ]
+       ])
 ;;
 
 let candidate_of_json json =
@@ -623,14 +905,18 @@ let candidate_of_json json =
     else Error "candidate_id does not match the exact Keeper and Board signal identity"
   in
   let* judgment_request = field ~context "judgment_request" fields in
-  let* (_ : (string * Yojson.Safe.t) list) =
-    assoc ~context:(context ^ ".judgment_request") judgment_request
-  in
   let* recorded_at_json = field ~context "recorded_at" fields in
-  let* recorded_at = float_json ~context:(context ^ ".recorded_at") recorded_at_json in
+  let* recorded_at =
+    finite_float_json ~context:(context ^ ".recorded_at") recorded_at_json
+  in
   let* status_json = field ~context "status" fields in
   let* status = status_of_yojson status_json in
-  Ok { candidate_id; keeper_name; signal; judgment_request; recorded_at; status }
+  let candidate =
+    { candidate_id; keeper_name; signal; judgment_request; recorded_at; status }
+  in
+  let* () = validate_candidate_times candidate in
+  let* (_ : Yojson.Safe.t) = singleton_judgment_request candidate in
+  Ok candidate
 ;;
 
 let parse_rows content =
@@ -798,7 +1084,17 @@ let update_ledger_many ~base_path ~keeper_name decide =
            | Ok (None, result) -> None, Ok result
            | Ok (Some updated, result) ->
              let compacted = latest_candidates (candidates @ updated) in
-             Some (serialize_candidates compacted), Ok result))
+             let validation =
+               List.fold_left
+                 (fun validation candidate ->
+                    let* () = validation in
+                    validate_candidate_times candidate)
+                 (Ok ())
+                 compacted
+             in
+             (match validation with
+              | Error detail -> None, Error detail
+              | Ok () -> Some (serialize_candidates compacted), Ok result)))
     with
     | Error error -> Error error
     | Ok result -> result
@@ -828,21 +1124,28 @@ let find_candidate candidates candidate_id =
 ;;
 
 let record ~base_path candidate =
-  match
-    update_ledger
-      ~base_path
-      ~keeper_name:candidate.keeper_name
-      (fun candidates ->
-         match find_candidate candidates candidate.candidate_id with
-         | None -> Ok (Some candidate, Recorded candidate)
-         | Some existing when existing.signal = candidate.signal ->
-           Ok (None, Duplicate existing)
-         | Some _ ->
-           Error
-             "candidate identity conflict: the same candidate_id has a different Board signal")
-  with
-  | Ok result -> result
-  | Error detail -> Record_error detail
+  let validation =
+    let* () = validate_candidate_times candidate in
+    singleton_judgment_request candidate
+  in
+  match validation with
+  | Error detail -> Record_error ("invalid Board attention candidate: " ^ detail)
+  | Ok _ ->
+    (match
+       update_ledger
+         ~base_path
+         ~keeper_name:candidate.keeper_name
+         (fun candidates ->
+            match find_candidate candidates candidate.candidate_id with
+            | None -> Ok (Some candidate, Recorded candidate)
+            | Some existing when existing.signal = candidate.signal ->
+              Ok (None, Duplicate existing)
+            | Some _ ->
+              Error
+                "candidate identity conflict: the same candidate_id has a different Board signal")
+     with
+     | Ok result -> result
+     | Error detail -> Record_error detail)
 ;;
 
 let update_candidate ~base_path candidate_id keeper_name transition =
@@ -855,40 +1158,46 @@ let update_candidate ~base_path candidate_id keeper_name transition =
        | Some updated -> Ok (Some updated, updated)))
 ;;
 
-let same_failure left right =
+let same_delivery_failure left right =
   left.kind = right.kind && String.equal left.detail right.detail
 ;;
 
 let same_judgment left right =
   left.verdict = right.verdict
-  && String.equal left.runtime_id right.runtime_id
+  && String.equal left.slot_id right.slot_id
+  && String.equal left.call_id right.call_id
+  && String.equal left.plan_fingerprint right.plan_fingerprint
+  && String.equal left.request_body_sha256 right.request_body_sha256
   && Float.equal left.judged_at right.judged_at
 ;;
 
-let candidate_with_retryable_failure current failure =
+let candidate_with_delivery_failure current failure =
   match current.status with
   | Pending pending ->
-    (match pending.last_failure with
-     | Some existing when same_failure existing failure -> current
-     | Some _ | None ->
-       { current with status = Pending { last_failure = Some failure } })
-  | Judged judged ->
-    (match judged.last_failure with
-     | Some existing when same_failure existing failure -> current
+    (match pending.last_delivery_failure with
+     | Some existing when same_delivery_failure existing failure -> current
      | Some _ | None ->
        { current with
-         status = Judged { judged with last_failure = Some failure }
+         status = Pending { last_delivery_failure = Some failure }
+       })
+  | Judged judged ->
+    (match judged.last_delivery_failure with
+     | Some existing when same_delivery_failure existing failure -> current
+     | Some _ | None ->
+       { current with
+         status =
+           Judged { judged with last_delivery_failure = Some failure }
        })
   | Consumed _ -> current
 ;;
 
-let record_retryable_failure ~base_path candidate failure =
+let record_delivery_failure ~base_path candidate failure =
   update_candidate
     ~base_path
     candidate.candidate_id
     candidate.keeper_name
     (fun current ->
-       let updated = candidate_with_retryable_failure current failure in
+       let updated = candidate_with_delivery_failure current failure in
        if updated = current then None else Some updated)
 ;;
 
@@ -905,7 +1214,8 @@ let record_judgment ~base_path candidate judgment =
        | Pending _ ->
          let updated =
            { current with
-             status = Judged { judgment; last_failure = None }
+             status =
+               Judged { judgment; last_delivery_failure = None }
            }
          in
          Ok (Some updated, updated)
@@ -951,7 +1261,9 @@ let mark_consumed ~base_path candidate judgment delivery =
             ^ candidate.candidate_id)))
 ;;
 
-let failure ~kind detail = { kind; detail; failed_at = Time_compat.now () }
+let delivery_failure ~kind detail =
+  { kind; detail; failed_at = Time_compat.now () }
+;;
 
 let board_attention_stimulus candidate =
   { Keeper_event_queue.post_id = candidate.signal.post_id
@@ -1036,17 +1348,10 @@ let consume_judged ~base_path candidate (judged : judged_state) =
        Ok consumed
      | Keeper_registry_event_queue.Identity_conflict detail
      | Keeper_registry_event_queue.Storage_error detail ->
-       record_retryable_failure
+       record_delivery_failure
          ~base_path
          candidate
-         (failure ~kind:Durable_delivery_unavailable detail))
-;;
-
-let reject_unregistered_tool ~name ~args:_ =
-  Tool_result.error
-    ~tool_name:name
-    ~start_time:(Time_compat.now ())
-    "Board attention judgment is a tool-free boundary"
+         (delivery_failure ~kind:Durable_delivery_unavailable detail))
 ;;
 
 let record_and_wake ~base_path candidate =
@@ -1066,8 +1371,7 @@ let record_and_wake ~base_path candidate =
   | Duplicate persisted ->
     let* wake =
       match persisted.status with
-      | Pending _ | Judged _ ->
-        request_worker persisted
+      | Pending _ | Judged _ -> request_worker persisted
       | Consumed _ -> Ok Wake_not_required
     in
     Ok
@@ -1075,149 +1379,6 @@ let record_and_wake ~base_path candidate =
       ; persistence = Candidate_already_present
       ; wake
       }
-;;
-
-(* The configured output contract remains a one-item [verdicts] array so the
-   prompt/schema SSOT does not fork. Partition membership itself is singleton:
-   no candidate count, byte estimate, or token heuristic participates. *)
-
-let prompt_name_batch = Keeper_prompt_names.board_attention_judgment_batch
-
-let singleton_request_json candidate =
-  match candidate.judgment_request with
-  | `Assoc fields ->
-    let contexts, item_fields =
-      List.partition
-        (fun (key, _) -> String.equal key "keeper_context")
-        fields
-    in
-    (match contexts with
-     | [ (_, keeper_context) ] ->
-       Ok
-         (`Assoc
-            [ "keeper_context", keeper_context
-            ; "items", `List [ `Assoc item_fields ]
-            ])
-     | [] -> Error "singleton judgment request lacks keeper_context"
-     | _ -> Error "singleton judgment request contains multiple keeper_context fields")
-  | _ -> Error "singleton judgment request must be an object"
-;;
-
-let build_singleton_prompt candidate =
-  let* json = singleton_request_json candidate in
-  Prompt_registry.render_prompt_template
-    prompt_name_batch
-    [ "batch_request_json", Yojson.Safe.to_string json ]
-;;
-
-(* Batch integrity does not come from the wire format. Verdicts are matched by
-   [candidate_id], and a reply is accepted only when its id set equals the
-   requested set exactly ([validate_batch_coverage]); unknown or duplicated ids
-   fail the whole batch back to Pending. A provider honouring the schema
-   perfectly can still answer for the wrong ids, so the schema never covered
-   the failure mode that matters here. *)
-let apply_batch_output_schema provider_config =
-  Ok (Keeper_structured_output_schema.without_response_format provider_config)
-;;
-
-let judge_singleton ~sw ~net ~base_path candidate =
-  let runtime_id_result =
-    try Ok (Runtime.runtime_id_for_structured_judge ()) with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn ->
-      Error
-        (Judgment_failure.runtime_configuration_change
-           ~failed_at:(Time_compat.now ())
-           ~detail:(Printexc.to_string exn))
-  in
-  match runtime_id_result with
-  | Error _ as error -> error
-  | Ok runtime_id ->
-    (match build_singleton_prompt candidate with
-     | Error detail ->
-       Error
-         (Judgment_failure.blocked
-            ~blocked_at:(Time_compat.now ())
-            ~kind:Judgment_failure.Prompt_contract_unavailable
-            ~detail)
-     | Ok prompt ->
-       let provider_result =
-         try
-           match
-             Keeper_turn_driver_wrappers.run_named_with_masc_tools
-               ~runtime_id
-               ~keeper_name:candidate.keeper_name
-               ~goal:prompt
-               ~base_path
-               ~masc_tools:[]
-               ~dispatch:reject_unregistered_tool
-               ~provider_config_transform:apply_batch_output_schema
-               ~sw
-               ?net
-               ()
-           with
-           | Ok result -> Ok result
-           | Error error ->
-             Error
-               (Judgment_failure.of_sdk_error
-                  ~observed_at:(Time_compat.now ())
-                  error)
-         with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn ->
-           Error
-             (Judgment_failure.blocked
-                ~blocked_at:(Time_compat.now ())
-                ~kind:Judgment_failure.Unexpected_judgment_exception
-                ~detail:(Printexc.to_string exn))
-       in
-       (match provider_result with
-        | Error _ as error -> error
-        | Ok result ->
-          (match
-             Agent_sdk_response.structured_json_of_response
-               ~schema_name:Keeper_board_attention_judgment.batch_schema_name
-               result.response
-           with
-           | Error detail ->
-             Error
-               (Judgment_failure.blocked
-                  ~blocked_at:(Time_compat.now ())
-                  ~kind:Judgment_failure.Response_contract_unavailable
-                  ~detail)
-           | Ok json ->
-             (match Keeper_board_attention_judgment.batch_of_yojson json with
-              | Error detail ->
-                Error
-                  (Judgment_failure.blocked
-                     ~blocked_at:(Time_compat.now ())
-                     ~kind:Judgment_failure.Response_contract_unavailable
-                     ~detail)
-              | Ok [ item ] when String.equal item.candidate_id candidate.candidate_id ->
-                Ok
-                  { verdict = item.verdict
-                  ; runtime_id
-                  ; judged_at = Time_compat.now ()
-                  }
-              | Ok [ item ] ->
-                Error
-                  (Judgment_failure.blocked
-                     ~blocked_at:(Time_compat.now ())
-                     ~kind:Judgment_failure.Response_contract_unavailable
-                     ~detail:
-                       (Printf.sprintf
-                          "singleton verdict identity mismatch expected=%S actual=%S"
-                          candidate.candidate_id
-                          item.candidate_id))
-              | Ok items ->
-                Error
-                  (Judgment_failure.blocked
-                     ~blocked_at:(Time_compat.now ())
-                     ~kind:Judgment_failure.Response_contract_unavailable
-                     ~detail:
-                       (Printf.sprintf
-                          "singleton verdict count must be exactly one, got %d"
-                          (List.length items)))))))
 ;;
 
 let apply_judgment_and_deliver ~base_path ~keeper_name ~candidate_id ~judgment =

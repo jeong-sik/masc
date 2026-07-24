@@ -187,7 +187,6 @@
   test_keeper_external_attention
   test_keeper_waiting_inventory
   test_keeper_board_attention_candidate
-  test_keeper_board_attention_failure
   test_keeper_board_attention_partition
   test_keeper_board_attention_worker
   test_keeper_runtime_trust_snapshot
@@ -500,7 +499,6 @@
   test_keeper_external_attention
   test_keeper_waiting_inventory
   test_keeper_board_attention_candidate
-  test_keeper_board_attention_failure
   test_keeper_board_attention_partition
   test_keeper_board_attention_worker
   test_keeper_runtime_trust_snapshot
@@ -1296,6 +1294,12 @@
 (test
  (name test_librarian_exact_output_conformance)
  (modules test_librarian_exact_output_conformance)
+ (libraries alcotest compaction_exact_output_fixture masc_test_deps eio_main unix))
+
+; Production Board-attention adapter proof over the provider-neutral OAS lane.
+(test
+ (name test_keeper_board_attention_exact_flow)
+ (modules test_keeper_board_attention_exact_flow)
  (libraries alcotest compaction_exact_output_fixture masc_test_deps eio_main unix))
 
 ; Durable pre-dispatch fence and restart/cancellation fail-closed proof.

@@ -504,15 +504,14 @@ let expect_boundary_rejection label check =
   if not rejected then failf "AST rejection fixture unexpectedly passed: %s" label
 ;;
 
-let empty_matrix_entry ~kind expectations name =
+let matrix_entry ~kind expectations name =
   match List.assoc_opt name expectations with
-  | Some [] -> []
-  | Some _ -> failf "%s matrix entry for %s must remain empty" kind name
+  | Some expected -> expected
   | None -> failf "%s matrix is missing target %s" kind name
 ;;
 
 let expect_exact_rejection ~kind ~expectations ~table ~contents name =
-  let expected = empty_matrix_entry ~kind expectations name in
+  let expected = matrix_entry ~kind expectations name in
   expect_boundary_rejection
     (kind ^ ":" ^ name)
     (fun () ->
@@ -651,14 +650,16 @@ let run () =
   let ledger_mli = "lib/keeper/keeper_reaction_ledger.mli" in
   let recovery_ml = "lib/keeper/keeper_event_queue_recovery.ml" in
   let definition_expectations =
-    [ "append_event_queue_transition_outbox_result", []
+    [ ( "append_event_queue_transition_outbox_result"
+      , [ ledger_ml, "append_event_queue_transition_outbox_result" ] )
     ; "mark_transition_projected_result", [ persistence_ml, "mark_transition_projected_result" ]
     ; ( "project_event_queue_transition_outbox_result"
       , [ ledger_ml, "project_event_queue_transition_outbox_result" ] )
     ; "project_transition_outbox_after_append_result", []
     ; ( "project_transition_outbox_result"
       , [ persistence_ml, "project_transition_outbox_result" ] )
-    ; "run_after_ledger_append_hook", []
+    ; ( "run_after_ledger_append_hook"
+      , [ ledger_ml, "run_after_ledger_append_hook" ] )
     ; "transition_outbox_result", []
     ; ( "with_after_ledger_append"
       , [ ledger_ml, "For_testing.with_after_ledger_append" ] )

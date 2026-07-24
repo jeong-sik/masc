@@ -232,3 +232,14 @@ model_id = "GLM-5-Turbo"
 id = "deepseek.deepseek-v4-pro"
 provider_ref = "deepseek"
 model_id = "deepseek-v4-pro"
+
+# Fleet default runtime id (config/runtime.toml `default` and the release
+# evidence smoke fixture in scripts/release-evidence.sh). #25648's
+# ensure_hitl_auto_judge_lane synthesizes the hitl_auto_judge exact-output
+# lane with this id as slot 1; without the target binding the frozen-catalog
+# publish rejects it and the server FATALs at boot (main CI Build and Test
+# red, run 30057220649).
+[[targets]]
+id = "ollama_cloud.deepseek-v4-flash"
+provider_ref = "ollama_cloud"
+model_id = "deepseek-v4-flash"

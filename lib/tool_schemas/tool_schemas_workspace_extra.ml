@@ -57,7 +57,7 @@ let schemas : tool_schema list =
     }
   ; { name = "masc_goal_transition"
     ; description =
-        "Apply an explicit Goal lifecycle transition. request_complete asks the configured semantic reviewer to verify the completion claim in note and completes only on structured approval."
+        "Apply an explicit Goal lifecycle transition. request_complete requires a non-empty completion claim in note, asks the configured semantic reviewer to verify it, and completes only on structured approval."
     ; input_schema =
         `Assoc
           [ "type", `String "object"

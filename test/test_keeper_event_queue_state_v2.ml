@@ -2734,9 +2734,20 @@ let test_transition_outbox_projects_with_stable_identity () =
     "post-append failure retains one transition for retry"
     1
     retained_outbox_count;
+  let projection_budget =
+    match Masc.Keeper_event_queue_recovery.owner_budget ~max_owners:1 with
+    | Ok budget -> budget
+    | Error error ->
+      Alcotest.fail
+        (Masc.Keeper_event_queue_recovery.owner_budget_error_to_string error)
+  in
   let retry_report =
-      Masc.Keeper_event_queue_recovery.project_discovered ~base_path
-    in
+    (Masc.Keeper_event_queue_recovery.project_discovered_bounded
+       ~base_path
+       ~budget:projection_budget
+       ~cursor:Masc.Keeper_event_queue_recovery.initial_sweep_cursor)
+      .report
+  in
     Alcotest.(check int)
       "recovery sweep finds durable owner"
       1
@@ -2959,8 +2970,19 @@ let test_transition_outbox_claim_contention_and_release () =
      | Error error ->
        Alcotest.fail
          (Masc.Keeper_event_queue_recovery.projection_error_to_string error));
+    let projection_budget =
+      match Masc.Keeper_event_queue_recovery.owner_budget ~max_owners:1 with
+      | Ok budget -> budget
+      | Error error ->
+        Alcotest.fail
+          (Masc.Keeper_event_queue_recovery.owner_budget_error_to_string error)
+    in
     let maintenance_report =
-      Masc.Keeper_event_queue_recovery.project_discovered ~base_path
+      (Masc.Keeper_event_queue_recovery.project_discovered_bounded
+         ~base_path
+         ~budget:projection_budget
+         ~cursor:Masc.Keeper_event_queue_recovery.initial_sweep_cursor)
+        .report
     in
     Alcotest.(check int)
       "maintenance sweep preserves canonical owner contention"

@@ -4759,6 +4759,26 @@ let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
                   contains_substring error "required default profile")
                rejection_errors)))
 
+let test_transition_projection_cursor_commits_before_isolated_owner_recovery () =
+  let cursor_committed = ref false in
+  let processed = ref [] in
+  Server_bootstrap_maintenance.For_testing.consume_owner_projection_batch
+    ~commit_cursor:(fun () -> cursor_committed := true)
+    ~keeper_name:Fun.id
+    ~recover_owner:(fun owner ->
+      Alcotest.(check bool)
+        "cursor commits before owner activation"
+        true
+        !cursor_committed;
+      processed := owner :: !processed;
+      if String.equal owner "first" then failwith "injected owner activation failure")
+    [ "first"; "second" ];
+  Alcotest.(check (list string))
+    "ordinary first-owner failure does not starve the next owner"
+    [ "first"; "second" ]
+    (List.rev !processed)
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -4767,6 +4787,10 @@ let () =
     [
       ( "bootstrap",
         [
+          Alcotest.test_case
+            "transition projection cursor commits before isolated owner recovery"
+            `Quick
+            test_transition_projection_cursor_commits_before_isolated_owner_recovery;
           Alcotest.test_case
             "model catalog installs explicit env override"
             `Quick test_model_catalog_configuration_installs_explicit_env_override;

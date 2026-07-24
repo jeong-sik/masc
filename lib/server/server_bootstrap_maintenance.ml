@@ -234,7 +234,37 @@ let recover_projected_durable_demand_owner
             (Keeper_activation_readiness.owner_execution_truth_to_wire retained)))
 ;;
 
-let recover_keeper_durable_demand_owners ~source ~budget ~cursor ctx =
+let consume_owner_projection_batch
+      ~commit_cursor
+      ~keeper_name
+      ~recover_owner
+      projections
+  =
+  commit_cursor ();
+  List.iter
+    (fun projection ->
+       let owner = keeper_name projection in
+       try recover_owner projection with
+       | Eio.Cancel.Cancelled _ as exn ->
+         let backtrace = Printexc.get_raw_backtrace () in
+         Printexc.raise_with_backtrace exn backtrace
+       | exn ->
+         let backtrace = Printexc.get_raw_backtrace () in
+         Log.Server.error
+           "keeper durable demand recovery owner failed keeper=%s error=%s\n%s"
+           owner
+           (Printexc.to_string exn)
+           (Printexc.raw_backtrace_to_string backtrace))
+    projections
+;;
+
+let recover_keeper_durable_demand_owners
+      ~source
+      ~budget
+      ~cursor
+      ~commit_cursor
+      ctx
+  =
   let page =
     project_keeper_transition_outboxes
       ~source
@@ -242,11 +272,19 @@ let recover_keeper_durable_demand_owners ~source ~budget ~cursor ctx =
       ~budget
       ~cursor
   in
-  List.iter
-    (recover_projected_durable_demand_owner ctx)
-    page.report.projections;
-  page.next_cursor
+  consume_owner_projection_batch
+    ~commit_cursor:(fun () -> commit_cursor page.next_cursor)
+    ~keeper_name:(fun
+                   (projection : Keeper_event_queue_recovery.owner_projection)
+                 ->
+      projection.keeper_name)
+    ~recover_owner:(recover_projected_durable_demand_owner ctx)
+    page.report.projections
 ;;
+
+module For_testing = struct
+  let consume_owner_projection_batch = consume_owner_projection_batch
+end
 
 (* Run one consolidation pass over every keeper that currently has a fact store.
    The optional [complete] injection lets tests drive the loop with a fake model.
@@ -690,12 +728,13 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     let recover_durable_demand_owners source =
       Option.iter
         (fun budget ->
-           transition_projection_cursor :=
-             recover_keeper_durable_demand_owners
-               ~source
-               ~budget
-               ~cursor:!transition_projection_cursor
-               recovery_ctx)
+           recover_keeper_durable_demand_owners
+             ~source
+             ~budget
+             ~cursor:!transition_projection_cursor
+             ~commit_cursor:(fun next_cursor ->
+               transition_projection_cursor := next_cursor)
+             recovery_ctx)
         transition_projection_budget
     in
     recover_durable_demand_owners Startup_projection;

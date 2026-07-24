@@ -260,21 +260,6 @@ let project_discovered_bounded ~base_path ~budget ~cursor =
     project_discovery_inline ~base_path ~budget ~cursor discovery)
 ;;
 
-let project_discovered ~base_path =
-  Executor_pool_ref.submit_or_inline (fun () ->
-    let discovery =
-      Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
-        ~base_path
-    in
-    let budget = Owner_budget (max 1 (List.length discovery.keeper_names)) in
-    (project_discovery_inline
-       ~base_path
-       ~budget
-       ~cursor:initial_sweep_cursor
-       discovery)
-      .report)
-;;
-
 module For_testing = struct
   type 'a claim_outcome =
     | Claim_acquired of 'a

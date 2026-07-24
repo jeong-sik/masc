@@ -65,13 +65,6 @@ val project_owner_result :
     masking. [Transition_converged] does not identify which process performed
     the physical append or retirement. *)
 
-val project_discovered : base_path:string -> sweep_report
-(** Discover current-schema durable queue owners and project each owner through
-    {!project_owner_result}. [projections] is the canonical sorted, deduplicated
-    owner set and its typed per-owner outcome. Callers must reuse it rather than
-    performing a second filesystem discovery. A partial discovery error is
-    retained alongside every owner discovered successfully. *)
-
 val project_discovered_bounded :
   base_path:string ->
   budget:owner_budget ->

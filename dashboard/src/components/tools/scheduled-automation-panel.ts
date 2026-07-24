@@ -614,11 +614,14 @@ function hasWakeEvidenceSummary(request: DashboardScheduledAutomationRequest): b
 }
 
 function wakeEvidenceJoinKey(request: DashboardScheduledAutomationRequest): string | null {
+  const receipt = request.dispatch_receipt?.projection_status === 'recognized'
+    ? request.dispatch_receipt
+    : null
   const candidates = [
-    request.dispatch_receipt?.post_id,
+    receipt?.post_id,
     request.keeper_queue_evidence?.post_id,
     request.keeper_reaction_evidence?.post_id,
-    request.dispatch_receipt?.stimulus_id,
+    receipt?.stimulus_id,
     request.keeper_reaction_evidence?.stimulus_id,
   ]
   for (const candidate of candidates) {

@@ -178,8 +178,17 @@ let read_exact_output_overlay path =
   | Sys_error detail -> Error detail
 ;;
 
-let load_exact_output_lane_declarations () =
-  match Runtime.config_path () with
+let load_exact_output_lane_declarations ?config_root () =
+  let runtime_config_path =
+    match config_root with
+    | Some config_root ->
+      let path =
+        Filename.concat config_root Config_dir_resolver.runtime_toml_filename
+      in
+      if Sys.file_exists path then Some path else None
+    | None -> Runtime.config_path ()
+  in
+  match runtime_config_path with
   | None ->
     raise
       (Env_config_core.Config_error
@@ -193,19 +202,7 @@ let load_exact_output_lane_declarations () =
                "exact-output registry: runtime config parse failed (%s): %d error(s)"
                config_path
                (List.length errors)))
-     | Ok (config : Runtime_schema.config) ->
-       (match
-          Runtime.effective_exact_output_lane_declarations
-            config.exact_output_lane_decls
-        with
-        | Ok lanes -> lanes
-        | Error detail ->
-          raise
-            (Env_config_core.Config_error
-               (Printf.sprintf
-                  "exact-output registry: effective runtime lane materialization failed (%s): %s"
-                  config_path
-                  detail))))
+     | Ok (config : Runtime_schema.config) -> config.exact_output_lane_decls)
 ;;
 
 let configure_exact_output_registry ?config_root () =
@@ -239,7 +236,7 @@ let configure_exact_output_registry ?config_root () =
          ("exact-output resolver snapshot: "
           ^ exact_output_snapshot_error_to_string error))
   | Ok resolver_snapshot ->
-    let lanes = load_exact_output_lane_declarations () in
+    let lanes = load_exact_output_lane_declarations ?config_root () in
     (match Runtime.publish_exact_output_registry ~lanes resolver_snapshot with
      | Error detail ->
        raise

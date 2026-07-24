@@ -24,6 +24,8 @@ structured_judge = "ollama_cloud_native.minimax-m3-native-structured"
 # this explicit smart lane.
 cross_verifier = "deepseek.deepseek-v4-pro"
 
+# Existing workspaces are not overwritten by this seed. Copy the required lane
+# declarations into the live runtime.toml before enabling their consumers.
 [runtime.exact_output_lanes.librarian_exact]
 slots = ["glm-coding.glm-5-turbo", "deepseek.deepseek-v4-pro"]
 

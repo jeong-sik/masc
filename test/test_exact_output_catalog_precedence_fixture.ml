@@ -41,7 +41,6 @@ let replacement_target = "replacement-only-target"
 let replacement_structured_judge_target = "replacement_provider.replacement"
 let replacement_secondary_runtime_target = "replacement_provider.secondary"
 let replacement_secondary_target = "replacement-secondary-target"
-let embedded_target = "ollama-cloud-minimax-m3-json"
 
 let catalog_toml
       ?(api_key_env = "")
@@ -59,6 +58,7 @@ kind = "openai_compat"
 base_url = "http://127.0.0.1:1"
 request_path = "/v1/chat/completions"
 api_key_env = %S
+capabilities_base = "openai_chat_extended"
 
 [[models]]
 id_prefix = %S

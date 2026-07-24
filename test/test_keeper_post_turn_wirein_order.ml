@@ -1199,14 +1199,22 @@ let test_manual_applied_hint_failure () =
           | Ok (Registry_queue.Committed_followup_failed { detail; _ })
           | Error detail ->
             failf "manual compaction receipt settlement failed: %s" detail);
+         let projected_entries = ref [] in
+         Registry_queue.project_transition_outbox_result
+           ~append_before_retire:(fun entry ->
+             projected_entries := entry :: !projected_entries;
+             Ok ())
+           ~base_path
+           ~keeper_name:meta.name
+         |> Result.map_error (fun detail ->
+              "manual compaction receipt projection failed: " ^ detail)
+         |> Result.get_ok;
          let entry =
-           Registry_queue.transition_outbox_result ~base_path meta.name
-           |> Result.get_ok
-           |> function
+           match List.rev !projected_entries with
            | [ entry ] -> entry
            | entries ->
              failf
-               "manual compaction durable outbox count=%d"
+               "manual compaction projected receipt count=%d"
                (List.length entries)
          in
          (match entry.receipt.settlement with

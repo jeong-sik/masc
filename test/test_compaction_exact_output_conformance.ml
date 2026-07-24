@@ -999,18 +999,23 @@ let test_post_success_restart_remains_at_most_once_and_fail_closed () =
     "restart creates no requeue transition"
     0
     (List.length (State.transition_outbox recovered));
-  (match State.active_lease recovered with
-   | Some active ->
-       Alcotest.(check string)
-         "restart retains the original active lease"
-         lease.lease_id
-         active.lease_id;
-       Alcotest.(check int64)
-         "restart retains the original lease sequence"
-         lease.sequence
-         active.sequence
-   | None ->
-       Alcotest.fail "restart removed the original active lease");
+  Alcotest.(check bool)
+    "restart retains the complete original active lease"
+    true
+    (State.active_lease recovered = Some lease);
+  (match
+     P.claim_when_result
+       ~base_path
+       ~keeper_name
+       ~claimed_at:4.0
+       ~ready:(fun _ -> true)
+       ()
+   with
+   | Ok None -> ()
+   | Ok (Some _) ->
+       Alcotest.fail "post-recovery scheduling claimed a successor"
+   | Error detail ->
+       Alcotest.failf "post-recovery scheduling boundary failed: %s" detail);
   Alcotest.(check int)
     "provider POST remains exactly once after restart"
     1

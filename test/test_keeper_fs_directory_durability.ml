@@ -905,7 +905,7 @@ let test_durable_commit_observer_precedes_pending_cancellation () =
        with_blocking_hook_release hook
        @@ fun () ->
        Eio.Fiber.fork ~sw (fun () ->
-         let caller_thread_id = Thread.id (Thread.self ()) in
+         let caller_domain_id = Domain.self () in
          let outcome =
            try
              Eio.Cancel.sub (fun cancel_context ->
@@ -915,7 +915,7 @@ let test_durable_commit_observer_precedes_pending_cancellation () =
                    ~on_durable_commit:(fun () ->
                      Atomic.set
                        published_on_caller_thread
-                       (Thread.id (Thread.self ()) = caller_thread_id);
+                       (Domain.self () = caller_domain_id);
                      ignore (Atomic.fetch_and_add publish_count 1))
                    ~before_stage:(function
                      | KF.Parent_directory_fsync_after_rename ->

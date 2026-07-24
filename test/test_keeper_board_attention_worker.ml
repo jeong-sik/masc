@@ -239,6 +239,7 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
      when String.equal candidate_id persisted.candidate_id -> ()
    | W.Judgment_completed _
    | W.Idle
+   | W.Contended _
    | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
      Alcotest.fail "worker exact callback chain did not complete");
@@ -293,7 +294,8 @@ let test_setup_error_stops_before_claim_without_hot_retry () =
        "typed setup failure stops the lifecycle"
        "Board attention exact setup unavailable before claim: network context unavailable"
        detail
-   | Ok () -> Alcotest.fail "setup-unavailable drain returned normally");
+   | Ok (W.Drained | W.Retry_later _) ->
+     Alcotest.fail "setup-unavailable drain returned normally");
   Alcotest.(check int) "one setup attempt" 1 !calls;
   Alcotest.(check int) "setup failure did not yield into a retry" 0 !yields;
   (match (load_one_candidate ~base_path).status with
@@ -365,6 +367,8 @@ let test_claim_generation_change_discards_without_sibling_selection () =
           ~execute)
    with
    | W.Idle -> ()
+   | W.Contended _ ->
+     Alcotest.fail "changed generation requested a delayed rearm"
    | W.Judgment_completed _
    | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
@@ -450,11 +454,27 @@ let test_exact_claim_retry_exhaustion_has_no_self_wake () =
           ~prepare
           ~execute)
    with
-   | W.Idle -> ()
+   | W.Contended contention ->
+     (match !selected with
+      | Some (partition_id, generation) ->
+        Alcotest.(check string)
+          "contention retains Keeper"
+          "sangsu"
+          contention.keeper_name;
+        Alcotest.(check string)
+          "contention retains partition"
+          partition_id
+          contention.partition_id;
+        Alcotest.(check bool)
+          "contention retains generation"
+          true
+          (P.Generation.equal generation contention.generation)
+      | None -> Alcotest.fail "exact claim contention lost its selected target")
+   | W.Idle
    | W.Judgment_completed _
    | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
-     Alcotest.fail "exact claim exhaustion produced a terminal step");
+     Alcotest.fail "exact claim exhaustion reported quiescent or terminal");
   Alcotest.(check int) "one prepared target" 1 !prepare_calls;
   Alcotest.(check int) "initial claim plus two retries" 3 !claim_calls;
   Alcotest.(check int) "no exact dispatch" 0 !execute_calls;
@@ -477,6 +497,57 @@ let test_exact_claim_retry_exhaustion_has_no_self_wake () =
      Alcotest.fail "claim exhaustion enqueued an immediate self wake"
    | Wake.Not_registered -> Alcotest.fail "claim exhaustion lost wake registration");
   Wake.unregister registration
+;;
+
+let test_contention_rearm_is_delayed_and_deduplicated () =
+  with_temp_base "board-attention-worker-contention-rearm" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  ignore
+    (ok
+       "create contention root"
+       (P.ensure_roots ~base_path ~keeper_name:"sangsu" [ persisted ])
+     : int);
+  let partition = load_one_partition ~base_path in
+  let contention : W.contention =
+    { keeper_name = "sangsu"
+    ; partition_id = partition.partition_id
+    ; generation = partition.generation
+    }
+  in
+  let tasks : (unit -> unit) list ref = ref [] in
+  let sleeps = ref [] in
+  let requests = ref 0 in
+  let schedule =
+    W.For_testing.make_contention_rearm_scheduler
+      ~fork:(fun task -> tasks := task :: !tasks)
+      ~sleep:(fun delay -> sleeps := delay :: !sleeps)
+      ~request:(fun () -> incr requests)
+      ()
+  in
+  let delay =
+    match schedule contention with
+    | W.Rearm_scheduled { delay_s } -> delay_s
+    | W.Rearm_deduplicated -> Alcotest.fail "first contention was deduplicated"
+  in
+  (match schedule contention with
+   | W.Rearm_deduplicated -> ()
+   | W.Rearm_scheduled _ -> Alcotest.fail "duplicate contention forked another rearm");
+  Alcotest.(check int) "one structured delayed task" 1 (List.length !tasks);
+  Alcotest.(check int) "no immediate wake" 0 !requests;
+  Alcotest.(check int) "delay has not run" 0 (List.length !sleeps);
+  let task =
+    match !tasks with
+    | [ task ] ->
+      tasks := [];
+      task
+    | [] | _ :: _ :: _ -> Alcotest.fail "contention rearm task cardinality drifted"
+  in
+  task ();
+  Alcotest.(check (float 0.0)) "fixed bounded delay" delay (List.hd !sleeps);
+  Alcotest.(check int) "one delayed wake" 1 !requests;
+  match schedule contention with
+  | W.Rearm_scheduled _ -> ()
+  | W.Rearm_deduplicated -> Alcotest.fail "completed rearm did not clear its typed key"
 ;;
 
 let test_execution_error_preserves_bound_progress_without_hot_retry () =
@@ -737,9 +808,10 @@ let test_terminal_root_does_not_strand_ready_sibling () =
   let sibling = record ~base_path (candidate ~id:"ready-sibling" ~recorded_at:2.0 ()) in
   let sibling_exact = provenance "sibling" in
   let calls = ref [] in
-  ok
-    "drain terminal then sibling"
-    (W.For_testing.drain_available
+  ignore
+    (ok
+       "drain terminal then sibling"
+       (W.For_testing.drain_available
        ~yield:(fun () -> ())
        ~now:(fun () -> 3.0)
        ~worker_epoch:(P.Worker_epoch.generate ())
@@ -752,7 +824,8 @@ let test_terminal_root_does_not_strand_ready_sibling () =
          then Error (E.Exact_execution_failed [])
          else (
            ok "bind sibling" (before_dispatch sibling_exact);
-           Ok (judgment sibling_exact J.Not_relevant))));
+           Ok (judgment sibling_exact J.Not_relevant))))
+     : W.drain_outcome);
   Alcotest.(check (list string))
     "terminal root and sibling were each visited once"
     [ first.candidate_id; sibling.candidate_id ]
@@ -1130,6 +1203,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
           ~execute:execute_before_authorization)
    with
    | W.Idle -> ()
+   | W.Contended _
    | W.Judgment_completed _
    | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
@@ -1243,6 +1317,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
      when String.equal candidate_id persisted.candidate_id -> ()
    | W.Judgment_completed _
    | W.Idle
+   | W.Contended _
    | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
      Alcotest.fail "authorized manual requeue did not complete its exact judgment");
@@ -1654,6 +1729,10 @@ let () =
             "exact claim retry exhaustion has no self wake"
             `Quick
             test_exact_claim_retry_exhaustion_has_no_self_wake
+        ; Alcotest.test_case
+            "contention rearm is delayed and deduplicated"
+            `Quick
+            test_contention_rearm_is_delayed_and_deduplicated
         ; Alcotest.test_case
             "execution error preserves bound progress"
             `Quick

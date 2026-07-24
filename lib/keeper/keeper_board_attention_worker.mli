@@ -4,8 +4,15 @@
     callbacks. OAS owns provider-neutral flow admission, dispatch, and
     advancement. Process-local wakes only request another durable inspection. *)
 
+type contention =
+  { keeper_name : string
+  ; partition_id : string
+  ; generation : Keeper_board_attention_partition.Generation.t
+  }
+
 type step =
   | Idle
+  | Contended of contention
   | Judgment_completed of
       { candidate_id : string
       ; owner_wake : Keeper_registry.wakeup_outcome
@@ -15,6 +22,14 @@ type step =
       { candidate_id : string
       ; reason : Keeper_board_attention_partition.blocked_reason
       }
+
+type drain_outcome =
+  | Drained
+  | Retry_later of contention
+
+type rearm_schedule =
+  | Rearm_scheduled of { delay_s : float }
+  | Rearm_deduplicated
 
 type settlement =
   | No_completed_partition
@@ -46,9 +61,11 @@ val run :
 (** Register and run the wake-driven worker until [sw] is cancelled. The clock
     is forwarded to OAS execution. MASC owns no Provider execution policy.
     Setup or durability errors end this lifecycle instead of awaiting another
-    wake. Cancellation performs no partition I/O: process-start recovery releases
-    an unbound claim and quarantines every durably bound execution. Process
-    recovery ownership is released when the lifecycle ends or is cancelled. *)
+    wake. Exact claim contention schedules one generation-keyed delayed wake on
+    the worker switch; it never recursively claims a sibling in the same turn.
+    Cancellation performs no partition I/O: process-start recovery releases an
+    unbound claim and quarantines every durably bound execution. Process recovery
+    ownership is released when the lifecycle ends or is cancelled. *)
 
 val settle_one_completed :
   base_path:string ->
@@ -147,9 +164,21 @@ module For_testing : sig
        ( Keeper_board_attention_candidate.judgment
        , string Keeper_board_attention_exact_flow.execution_error )
        result) ->
-    (unit, string) result
+    (drain_outcome, string) result
   (** Drain every currently claimable root. Terminal failures remain Blocked and
-      completion durability failures return without re-entering OAS. *)
+      completion durability failures return without re-entering OAS. Exact claim
+      contention returns [Retry_later] without recursive same-turn retry. *)
+
+  val make_contention_rearm_scheduler :
+    fork:((unit -> unit) -> unit) ->
+    sleep:(float -> unit) ->
+    request:(unit -> unit) ->
+    unit ->
+    contention ->
+    rearm_schedule
+  (** Deterministic seam for the run-owner delayed rearm scheduler. Production
+      supplies a structured [Eio.Fiber.fork] on the worker switch and its
+      monotonic clock. *)
 
   val replay_completed_owner_wake :
     base_path:string ->

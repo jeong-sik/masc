@@ -3,8 +3,15 @@ module Exact_flow = Keeper_board_attention_exact_flow
 module Partition = Keeper_board_attention_partition
 module Wake = Keeper_board_attention_worker_wake
 
+type contention =
+  { keeper_name : string
+  ; partition_id : string
+  ; generation : Partition.Generation.t
+  }
+
 type step =
   | Idle
+  | Contended of contention
   | Judgment_completed of
       { candidate_id : string
       ; owner_wake : Keeper_registry.wakeup_outcome
@@ -14,6 +21,54 @@ type step =
       { candidate_id : string
       ; reason : Partition.blocked_reason
       }
+
+type drain_outcome =
+  | Drained
+  | Retry_later of contention
+
+type rearm_schedule =
+  | Rearm_scheduled of { delay_s : float }
+  | Rearm_deduplicated
+
+let contention_rearm_delay_s = 0.05
+
+let contention_equal (left : contention) (right : contention) =
+  String.equal left.keeper_name right.keeper_name
+  && String.equal left.partition_id right.partition_id
+  && Partition.Generation.equal left.generation right.generation
+;;
+
+let make_contention_rearm_scheduler ~fork ~sleep ~request () =
+  let mutex = Stdlib.Mutex.create () in
+  let pending : contention list ref = ref [] in
+  let clear contention =
+    Stdlib.Mutex.protect mutex (fun () ->
+      pending := List.filter (fun current -> not (contention_equal current contention)) !pending)
+  in
+  fun contention ->
+    let installed =
+      Stdlib.Mutex.protect mutex (fun () ->
+        if List.exists (contention_equal contention) !pending
+        then false
+        else (
+          pending := contention :: !pending;
+          true))
+    in
+    if not installed
+    then Rearm_deduplicated
+    else (
+      (try
+         fork (fun () ->
+           Fun.protect
+             ~finally:(fun () -> clear contention)
+             (fun () -> sleep contention_rearm_delay_s);
+           request ())
+       with
+       | exn ->
+         clear contention;
+         raise exn);
+      Rearm_scheduled { delay_s = contention_rearm_delay_s })
+;;
 
 type settlement =
   | No_completed_partition
@@ -955,9 +1010,11 @@ let process_next_with_claim_ready_exact
         let* remains_ready =
           selected_generation_is_ready ~partition_id ~generation
         in
-        if remains_ready && attempts_remaining > 1
+        if not remains_ready
+        then Ok Idle
+        else if attempts_remaining > 1
         then claim_selected (attempts_remaining - 1)
-        else Ok Idle
+        else Ok (Contended { keeper_name; partition_id; generation })
     in
     claim_selected 3
 ;;
@@ -1126,7 +1183,8 @@ let rec drain_available
       ~prepare
       ~execute
   with
-  | Ok Idle -> Ok ()
+  | Ok Idle -> Ok Drained
+  | Ok (Contended contention) -> Ok (Retry_later contention)
   | Ok (Judgment_completed _ | Candidate_already_consumed _ | Partition_blocked _) ->
     yield ();
     drain_available
@@ -1190,6 +1248,20 @@ let run
          | Ok () ->
            let prepare = Exact_flow.prepare ~net in
            let execute = Exact_flow.execute ~clock in
+           let schedule_contention_rearm =
+             make_contention_rearm_scheduler
+               ~fork:(fun task -> Eio.Fiber.fork ~sw task)
+               ~sleep:(Eio.Time.sleep clock)
+               ~request:(fun () ->
+                 match Wake.request ~base_path ~keeper_name with
+                 | Ok (Wake.Signaled | Wake.Coalesced | Wake.Not_registered) -> ()
+                 | Error detail ->
+                   Log.Keeper.error
+                     "Board attention delayed contention wake failed keeper=%s: %s"
+                     keeper_name
+                     detail)
+               ()
+           in
            let rec await () =
              match Wake.await registration with
              | Wake.Registration_closed -> Ok ()
@@ -1205,7 +1277,10 @@ let run
                  ~prepare
                  ~execute
              with
-             | Ok () -> await ()
+             | Ok Drained -> await ()
+             | Ok (Retry_later contention) ->
+               ignore (schedule_contention_rearm contention : rearm_schedule);
+               await ()
              | Error detail -> fail Durable_drain detail
            in
            (try drain () with
@@ -1221,6 +1296,7 @@ module For_testing = struct
   let process_next = process_next
   let process_next_with_claim_ready_exact = process_next_with_claim_ready_exact
   let drain_available = drain_available
+  let make_contention_rearm_scheduler = make_contention_rearm_scheduler
   let replay_completed_owner_wake = replay_completed_owner_wake
   let with_process_recovery_claim = with_process_recovery_claim
 end

@@ -167,10 +167,10 @@ describe('thread history merge & persistence', () => {
   })
 
   it('does not duplicate a local message when server history arrives with a different timestamp', () => {
-    appendThreadEntry('echo', entry({ id: 'local-1', text: 'gg', rawText: 'gg', timestamp: '2026-06-10T00:00:01.000Z' }))
+    appendThreadEntry('echo', entry({ id: 'local-1', text: 'gg', rawText: 'gg', requestId: 'kmsg-r1', timestamp: '2026-06-10T00:00:01.000Z' }))
 
     mergeServerHistoryEntries('echo', [
-      entry({ id: 'hist-1', text: 'gg', rawText: 'gg', delivery: 'history', timestamp: '2026-06-10T00:00:05.000Z' }),
+      entry({ id: 'hist-1', text: 'gg', rawText: 'gg', requestId: 'kmsg-r1', delivery: 'history', timestamp: '2026-06-10T00:00:05.000Z' }),
     ])
 
     const matches = (keeperThreads.value.echo ?? []).filter(e => e.text === 'gg')
@@ -184,6 +184,7 @@ describe('thread history merge & persistence', () => {
       role: 'assistant',
       text: 'final answer',
       rawText: 'final answer',
+      requestId: 'kmsg-r1',
       delivery: 'streaming',
       streamState: 'streaming',
     }))
@@ -200,6 +201,7 @@ describe('thread history merge & persistence', () => {
         role: 'assistant',
         text: 'final answer',
         rawText: 'final answer',
+        requestId: 'kmsg-r1',
         delivery: 'history',
         timestamp: '2026-06-10T00:00:05.000Z',
       }),
@@ -216,14 +218,14 @@ describe('thread history merge & persistence', () => {
 
   it('distributes identical-text assistant turns trace 1:1 across history rows (#21748)', () => {
     // Two local optimistic assistants with the SAME reply text but distinct
-    // thinking traces. Before the fix, both history rows matched the FIRST
-    // local source via the role+text fallback, so the second row inherited the
-    // first turn's trace.
+    // thinking traces and distinct requestIds. Each history row must inherit
+    // its OWN turn's trace via the requestId join, never the other's.
     appendThreadEntry('echo', entry({
       id: 'local-a',
       role: 'assistant',
       text: 'done',
       rawText: 'done',
+      requestId: 'kmsg-ra',
       delivery: 'delivered',
       streamState: null,
       timestamp: '2026-06-10T00:00:01.000Z',
@@ -233,6 +235,7 @@ describe('thread history merge & persistence', () => {
       role: 'assistant',
       text: 'done',
       rawText: 'done',
+      requestId: 'kmsg-rb',
       delivery: 'delivered',
       streamState: null,
       timestamp: '2026-06-10T00:00:02.000Z',
@@ -241,8 +244,8 @@ describe('thread history merge & persistence', () => {
     appendAssistantThinkingDelta('echo', 'local-b', 'second turn reasoning')
 
     mergeServerHistoryEntries('echo', [
-      entry({ id: 'hist-a', role: 'assistant', text: 'done', rawText: 'done', delivery: 'history', timestamp: '2026-06-10T00:00:01.000Z' }),
-      entry({ id: 'hist-b', role: 'assistant', text: 'done', rawText: 'done', delivery: 'history', timestamp: '2026-06-10T00:00:02.000Z' }),
+      entry({ id: 'hist-a', role: 'assistant', text: 'done', rawText: 'done', requestId: 'kmsg-ra', delivery: 'history', timestamp: '2026-06-10T00:00:01.000Z' }),
+      entry({ id: 'hist-b', role: 'assistant', text: 'done', rawText: 'done', requestId: 'kmsg-rb', delivery: 'history', timestamp: '2026-06-10T00:00:02.000Z' }),
     ])
 
     const thread = keeperThreads.value.echo ?? []
@@ -378,13 +381,17 @@ describe('thread history merge & persistence', () => {
     expect(thread.filter(e => e.role === 'tool')).toHaveLength(2)
   })
 
-  it('keeps the role+text fallback for legacy local entries without requestId', () => {
+  it('never merges a legacy local entry that carries no requestId (role+text fallback hard-cut)', () => {
+    // The legacy role+text heuristic was removed: without a requestId the
+    // local row and the history row are distinct rows, even with identical
+    // text. A text-less placeholder can no longer be reconciled by text.
     appendThreadEntry('echo', entry({
       id: 'local-legacy',
       role: 'assistant',
       text: 'done',
       rawText: 'done',
       delivery: 'delivered',
+      timestamp: '2026-06-10T00:00:01.000Z',
     }))
 
     mergeServerHistoryEntries('echo', [
@@ -392,8 +399,7 @@ describe('thread history merge & persistence', () => {
     ])
 
     const thread = keeperThreads.value.echo ?? []
-    expect(thread).toHaveLength(1)
-    expect(thread[0]?.id).toBe('hist-legacy')
+    expect(thread.map(e => e.id)).toEqual(['local-legacy', 'hist-legacy'])
   })
 
   it('does not merge same-text rows that carry different requestIds', () => {

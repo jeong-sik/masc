@@ -2256,7 +2256,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       // Server already persisted the user turn, but the assistant reply is
       // still queued and has not been written yet.
       fetchKeeperChatHistory.mockResolvedValue([
-        { role: 'user', content: '진행 상황?', ts: 1_780_000_000 },
+        { role: 'user', content: '진행 상황?', ts: 1_780_000_000, delivery_key: { kind: 'direct_request', request_id: 'kmsg_echo_1' } },
       ])
 
       // First poll says queued; second poll completes so the test can finish.

@@ -1332,28 +1332,26 @@ export function finalizeAssistantEntry(
 
 // Dedup key for merging server history with locally-appended entries.
 // Server ids win when both sides have already converged. User/assistant
-// optimistic rows still fall back to role + text because the POST can create
-// the local row before the server-minted id is known. Tool rows are execution
-// facts and can share argument/output text across separate calls, so they only
-// dedup by the explicit `tool-<tool_call_id>` id shape.
+// rows converge only through delivery_key.request_id — the backend-stamped
+// turn identity that joins a local placeholder to its history row even when
+// the placeholder has no text yet (stream interrupted before the reply
+// arrived). Two rows that both carry a requestId belong to the same turn
+// iff the ids match; a row without a requestId (pre-delivery_key history,
+// connector-originated) never merges with a local row — the legacy
+// role+text heuristic was hard-cut because it collapsed distinct same-text
+// turns and could never reconcile a text-less placeholder. Tool rows are
+// execution facts and can share argument/output text across separate
+// calls, so they only dedup by the explicit `tool-<tool_call_id>` id shape.
 function sameConversationEntry(
   left: KeeperConversationEntry,
   right: KeeperConversationEntry,
 ): boolean {
   if (left.id === right.id) return true
   if (left.role === 'tool' || right.role === 'tool') return false
-  // requestId (delivery_key.request_id) is the backend-stamped turn identity:
-  // it joins a local placeholder to its history row even when the placeholder
-  // has no text yet (stream interrupted before the reply arrived). Two rows
-  // that both carry a requestId belong to the same turn iff the ids match —
-  // a mismatch must NOT fall through to the role+text heuristic, or two
-  // distinct same-text turns would collapse into one.
   const leftRequestId = left.requestId?.trim()
   const rightRequestId = right.requestId?.trim()
-  if (leftRequestId && rightRequestId) {
-    return left.role === right.role && leftRequestId === rightRequestId
-  }
-  return left.role === right.role && left.text === right.text
+  if (!leftRequestId || !rightRequestId) return false
+  return left.role === right.role && leftRequestId === rightRequestId
 }
 
 // Entries with no parseable timestamp (live placeholders, still-streaming
@@ -1371,9 +1369,11 @@ function mergeLocalAssistantTraceSteps(
   // Tracks local trace sources already claimed by an earlier history row.
   // Join order: requestId (backend-stamped turn identity) first, then
   // turn_ref when OAS/MASC provides it on both the live reply details and
-  // the persisted history row. The role+text fallback remains only for
-  // legacy rows without either key; `consumed` keeps every match 1:1 instead
-  // of letting duplicate assistant text reuse the first local trace source
+  // the persisted history row. There is no text-based fallback: a local
+  // trace source that shares neither key with the history row stays
+  // unmerged (and is dropped by the same requestId rule in replaceThread
+  // once its turn converges). `consumed` keeps every match 1:1 instead of
+  // letting duplicate assistant text reuse the first local trace source
   // (#21748).
   consumed: Set<string>,
 ): KeeperConversationEntry {
@@ -1414,20 +1414,7 @@ function mergeLocalAssistantTraceSteps(
       traceSteps: localTraceSourceByTurnRef.traceSteps,
     }
   }
-  const localTraceSource = localEntries.find(
-    entry =>
-      entry.role === 'assistant'
-      && (entry.traceSteps?.length ?? 0) > 0
-      && !(entry.turnRef?.trim())
-      && !consumed.has(entry.id)
-      && sameConversationEntry(entry, historyEntry),
-  )
-  if (!localTraceSource?.traceSteps?.length) return historyEntry
-  consumed.add(localTraceSource.id)
-  return {
-    ...historyEntry,
-    traceSteps: localTraceSource.traceSteps,
-  }
+  return historyEntry
 }
 
 function replaceThread(name: string, entries: KeeperConversationEntry[]): void {

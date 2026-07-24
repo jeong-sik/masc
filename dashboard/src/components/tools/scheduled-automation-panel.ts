@@ -17,6 +17,8 @@ import { SigilBadge } from '../v2/primitives-v2'
 import { kSigil, kSlot } from '../keeper-badge'
 import {
   schedPayloadSpec,
+  SCHED_TERMINAL,
+  SCHED_TERMINAL_NORMALIZED,
   schedStatusSpec,
   type SchedStatusSpec,
 } from '../v2/schedule-constants'
@@ -113,7 +115,7 @@ export function filterMatches(filter: ScheduleFilterKey, request: DashboardSched
     case 'running':
       return status === 'running'
     case 'terminal':
-      return ['succeeded', 'failed', 'expired', 'cancelled'].includes(status)
+      return SCHED_TERMINAL_NORMALIZED.has(status)
     default:
       // Exhaustiveness: a new ScheduleFilterKey must fail to compile here rather
       // than silently fall through to "show all" (Unknown->Permissive-Default).
@@ -1018,24 +1020,12 @@ function DurableSignalItem({
    prototype model (relative due text "4h 12m 후", payload `body`) are rendered
    from the real ISO timestamps / marked data-stub rather than invented. */
 
-// Live status strings are lower_snake; the vendored SCHED_STATUS map is keyed
-// on Schedule_domain PascalCase. Total function:
-// unknown statuses fall back to schedStatusSpec's dim spec.
-const LIVE_STATUS_TO_SPEC_KEY: Readonly<Record<string, string>> = {
-  scheduled: 'Scheduled',
-  due: 'Due',
-  running: 'Running',
-  succeeded: 'Succeeded',
-  failed: 'Failed',
-  cancelled: 'Cancelled',
-  expired: 'Expired',
-}
-
+// Live status strings are lower_snake, matching the SCHED_STATUS keys directly
+// (residual of #23582: the prior PascalCase bridge mapped onto stale keys and
+// collapsed live Korean labels to English fallbacks). Unknown statuses fall
+// back to schedStatusSpec's dim spec.
 function statusSpecForLive(status: string | null | undefined): SchedStatusSpec {
-  const key = LIVE_STATUS_TO_SPEC_KEY[normalized(status)]
-  // Pass the resolved PascalCase key when known, else the raw value so the
-  // fallback renders the original string rather than a generic placeholder.
-  return schedStatusSpec(key ?? status ?? undefined)
+  return schedStatusSpec(normalized(status))
 }
 
 type PayloadSupportState = NonNullable<DashboardScheduledAutomationRequest['payload_support']>
@@ -1442,15 +1432,13 @@ interface SchCadenceDef {
   readonly glyph: string
   readonly cls: string
 }
-const SCH_TERMINAL_STATUSES = ['succeeded', 'failed', 'cancelled', 'expired'] as const
 const SCH_TABS: readonly SchTabDef[] = [
   { key: 'scheduled', label: '예약됨', statuses: ['scheduled'] },
   { key: 'due', label: 'due', statuses: ['due'] },
   { key: 'running', label: '실행 중', statuses: ['running'] },
-  { key: 'done', label: '완료 · 종료', statuses: SCH_TERMINAL_STATUSES },
+  { key: 'done', label: '완료 · 종료', statuses: SCHED_TERMINAL },
   { key: 'all', label: '전체', statuses: null },
 ]
-const SCH_TERMINAL_STATUS_SET: ReadonlySet<string> = new Set(SCH_TERMINAL_STATUSES)
 const SCH_CADENCES: readonly SchCadenceDef[] = [
   { key: 'daily', label: '정기 · 매일', shortLabel: '정기', glyph: '◈', cls: 'ok' },
   { key: 'interval', label: '폴링 · 주기', shortLabel: '폴링', glyph: '↻', cls: 'volt' },
@@ -1547,7 +1535,7 @@ function SchCadenceSummary({
 }
 
 function isTerminalSchedule(request: DashboardScheduledAutomationRequest): boolean {
-  return SCH_TERMINAL_STATUS_SET.has(normalized(effectiveStatus(request)))
+  return SCHED_TERMINAL_NORMALIZED.has(normalized(effectiveStatus(request)))
 }
 
 function SchPollingStrip({
@@ -1962,9 +1950,6 @@ function SchedulePrototypeSurface({
 // Aside triage buckets. Due schedules surface under '해야 할 일'; terminal
 // schedules feed the recent-execution list. Derived only from the projection.
 const SCHEDULE_ASIDE_DUE: ReadonlySet<string> = new Set(['due'])
-const SCHEDULE_ASIDE_TERMINAL: ReadonlySet<string> = new Set([
-  'succeeded', 'failed', 'cancelled', 'expired',
-])
 const SCHEDULE_ASIDE_RECENT_MAX = 6
 
 function scheduleAsideSummary(request: DashboardScheduledAutomationRequest): string {
@@ -1991,7 +1976,7 @@ export function ScheduleAside({
   const failed = requests.filter(request => asideStatus(request) === 'failed' && !payloadSupportBlocksWake(request))
   const due = requests.filter(request => SCHEDULE_ASIDE_DUE.has(asideStatus(request)) && !payloadSupportBlocksWake(request))
   const recent = requests
-    .filter(request => SCHEDULE_ASIDE_TERMINAL.has(asideStatus(request)))
+    .filter(request => SCHED_TERMINAL_NORMALIZED.has(asideStatus(request)))
     .slice(0, SCHEDULE_ASIDE_RECENT_MAX)
   const needTotal = due.length
 

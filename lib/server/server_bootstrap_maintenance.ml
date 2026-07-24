@@ -612,18 +612,25 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                  0
              in
              let total =
-               prune_dir (Filename.concat masc "audit")
-               + prune_dir (Filename.concat masc "telemetry")
-               + prune_dir (Filename.concat masc "messages")
-               + prune_dir (Filename.concat masc "events")
-               + prune_dir (Filename.concat masc "activity-events")
-               + prune_recall_injections ()
-               + prune_dir (Filename.concat masc "voice_sessions")
-               + prune_dir (Filename.concat masc "tool_calls")
+               Server_runtime_startup_maintenance.prune_store_dir
+                 ~prune_dir:(fun _ ->
+               let prune_store_dir =
+                 Server_runtime_startup_maintenance.prune_store_dir ~prune_dir
+               in
+               prune_store_dir (Filename.concat masc "audit")
+               + prune_store_dir (Filename.concat masc "telemetry")
+               + prune_store_dir (Filename.concat masc "messages")
+               + prune_store_dir (Filename.concat masc "events")
+               + prune_store_dir (Filename.concat masc "activity-events")
+               + Server_runtime_startup_maintenance.prune_store_dir
+                   ~prune_dir:(fun _ -> prune_recall_injections ())
+                   (Filename.concat masc "recall_injections")
+               + prune_store_dir (Filename.concat masc "voice_sessions")
+               + prune_store_dir (Filename.concat masc "tool_calls")
                (* transition-audit was absent from this list since its
                   introduction (RFC-0002) — 82 MB across 3 month-dirs by
                   2026-06-10, scanned by every store-fallback read. *)
-               + prune_dir (Filename.concat masc "transition-audit")
+               + prune_store_dir (Filename.concat masc "transition-audit")
                (* trajectories: flat <trace_id>.jsonl under
                   trajectories/<keeper>/ — Dated_jsonl.prune is a no-op
                   there, so prune by mtime, keeper-scoped. *)
@@ -642,6 +649,8 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                + Server_runtime_startup_maintenance.prune_keeper_scoped_stores
                    ~prune_dir
                    ~masc_root:masc
+                 )
+                 masc
              in
              if total > 0
              then

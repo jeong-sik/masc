@@ -70,6 +70,22 @@ let test_prune_flat_jsonl_removes_old_files () =
   Alcotest.(check bool) "recent file kept" true (Sys.file_exists recent_file);
   Alcotest.(check bool) "non-jsonl file kept" true (Sys.file_exists stray)
 
+let test_prune_flat_jsonl_keeps_symlinked_files () =
+  let keeper = fresh_dir "masc_prune_flat_symlink" in
+  let external_dir = fresh_dir "masc_prune_flat_external" in
+  let external_file = Filename.concat external_dir "trace.jsonl" in
+  let oc = open_out external_file in
+  output_string oc "{}\n";
+  close_out oc;
+  let old_ts = Unix.gettimeofday () -. (40. *. 86400.) in
+  Unix.utimes external_file old_ts old_ts;
+  let link = Filename.concat keeper "trace-link.jsonl" in
+  Unix.symlink external_file link;
+  let n = SM.prune_flat_jsonl_older_than ~days:30 keeper in
+  Alcotest.(check int) "symlink is not pruned" 0 n;
+  Alcotest.(check bool) "symlink remains" true (Sys.file_exists link);
+  Alcotest.(check bool) "external file remains" true (Sys.file_exists external_file)
+
 let visited = ref []
 
 let record_visit dir =
@@ -92,7 +108,11 @@ let test_prune_keeper_scoped_stores_visits_all_stores () =
   let masc_root = fresh_dir "masc_keeper_scoped" in
   let keepers = Filename.concat masc_root "keepers" in
   List.iter
-    (fun name -> Fs_compat.mkdir_p (Filename.concat keepers name))
+    (fun name ->
+      let keeper_dir = Filename.concat keepers name in
+      List.iter
+        (fun store -> Fs_compat.mkdir_p (Filename.concat keeper_dir store))
+        SM.keeper_scoped_dated_stores)
     [ "keeper-a"; "keeper-b" ];
   let stray = Filename.concat keepers "stray.txt" in
   let oc = open_out stray in
@@ -201,6 +221,8 @@ let () =
         [
           Alcotest.test_case "populated trajectories dir prunes old files" `Quick
             test_prune_flat_jsonl_removes_old_files;
+          Alcotest.test_case "symlinked flat file is not removed" `Quick
+            test_prune_flat_jsonl_keeps_symlinked_files;
         ] );
       ( "prune_keeper_scoped_stores",
         [

@@ -116,7 +116,7 @@ let prune_flat_jsonl_older_than ~days dir =
         if Filename.check_suffix name ".jsonl"
         then
           let path = Filename.concat dir name in
-          match (try Some (Unix.stat path) with Unix.Unix_error _ -> None) with
+          match (try Some (Unix.lstat path) with Unix.Unix_error _ -> None) with
           | Some (stat : Unix.stats)
             when stat.st_kind = Unix.S_REG && stat.st_mtime < cutoff ->
             (try
@@ -156,6 +156,8 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
        Filename.concat (Mcp_server.workspace_config state).base_path "data/tool-metrics"
      in
      let total =
+       prune_store_dir
+         ~prune_dir:(fun _ ->
        (* Every directly pruned leaf goes through [prune_store_dir]: any of
           these can itself be a symlink to an external dated-JSONL store, and
           [prune_dir]'s own [Sys.file_exists] follows it before
@@ -166,7 +168,9 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
        + prune_store_dir ~prune_dir (Filename.concat masc "messages")
        + prune_store_dir ~prune_dir (Filename.concat masc "events")
        + prune_store_dir ~prune_dir (Filename.concat masc "activity-events")
-       + prune_recall_injections ()
+       + prune_store_dir
+           ~prune_dir:(fun _ -> prune_recall_injections ())
+           (Filename.concat masc "recall_injections")
        + prune_store_dir ~prune_dir (Filename.concat masc "voice_sessions")
        (* trajectories: flat <trace_id>.jsonl under trajectories/<keeper>/ —
           Dated_jsonl.prune is a no-op there, prune by mtime keeper-scoped.
@@ -180,6 +184,8 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
           the SSOT fold shared with the 24h periodic pass. *)
        + prune_keeper_scoped_stores ~prune_dir ~masc_root:masc
        + prune_children_dirs ~prune_dir (Filename.concat masc "resilience_audit")
+         )
+         masc
      in
      if total > 0 then
          Log.Misc.info "startup prune: pruned %d old JSONL day-files (retention=%dd)"

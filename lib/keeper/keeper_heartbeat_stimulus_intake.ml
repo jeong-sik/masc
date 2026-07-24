@@ -134,7 +134,8 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Bg_completed _
-  | Keeper_event_queue.Goal_assigned _ ->
+  | Keeper_event_queue.Goal_assigned _
+  | Keeper_event_queue.Goal_completion_review_failed _ ->
     (* No dedicated turn_reason: like the other async-completion wakes, the
        stimulus itself forces the keeper to re-run its cycle and proceed on its
        own state. *)
@@ -203,6 +204,16 @@ let consume_single_heartbeat_stimulus
       "turn entry: goal assignment delivered goal_id=%s assigned_by=%s (keeper=%s)"
       ga.ga_goal_id
       ga.ga_assigned_by
+      meta_after_triage.name;
+    pending_board_events_of_stimulus_result ~meta_after_triage stim
+  | Keeper_event_queue.Goal_completion_review_failed failure ->
+    Log.Keeper.info
+      "turn entry: Goal completion review failure delivered goal_id=%s \
+       failure=%s review=%s (keeper=%s)"
+      failure.gcrf_goal_id
+      (Keeper_event_queue.goal_completion_review_failure_kind_to_string
+         failure.gcrf_failure)
+      failure.gcrf_review_fingerprint
       meta_after_triage.name;
     pending_board_events_of_stimulus_result ~meta_after_triage stim
   | Keeper_event_queue.Failure_judgment fj ->
@@ -321,7 +332,8 @@ let stimulus_ready_for_intake (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Failure_judgment _
   | Keeper_event_queue.Manual_compaction_requested
-  | Keeper_event_queue.Goal_assigned _ ->
+  | Keeper_event_queue.Goal_assigned _
+  | Keeper_event_queue.Goal_completion_review_failed _ ->
     true
 ;;
 

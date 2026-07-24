@@ -96,6 +96,11 @@ type stimulus_payload =
           stimulus; the owning Keeper consumes it under its turn slot. *)
   | Goal_assigned of goal_assignment
       (** A goal was newly added to this keeper's [active_goal_ids]. *)
+  | Goal_completion_review_failed of goal_completion_review_failure
+      (** A semantic Goal-completion review kept an owned Goal nonterminal.
+          The payload contains only typed/fixed recovery context; the detailed
+          reviewer note remains in Goal_store and is not copied into the
+          automatic prompt. *)
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
@@ -201,6 +206,23 @@ and goal_assignment = {
 }
 (** Payload for [Goal_assigned]. *)
 
+and goal_completion_review_failure_kind =
+  | Goal_completion_rejected
+  | Goal_completion_unavailable
+
+and goal_completion_review_failure = {
+  gcrf_goal_id : string;
+  gcrf_goal_title : string;
+  gcrf_reviewed_at : string;
+  gcrf_review_fingerprint : string;
+  gcrf_failure : goal_completion_review_failure_kind;
+}
+(** Payload for [Goal_completion_review_failed].
+
+    [gcrf_review_fingerprint] is the SHA-256 identity of the typed durable
+    review outcome (Goal id, review time, failure kind, and durable note). It
+    is correlation/dedup evidence, never a routing heuristic. *)
+
 
 val fusion_completion_post_id : fusion_completion -> post_id
 (** Canonical dedup/correlation id for [Fusion_completed], always
@@ -221,6 +243,12 @@ val failure_judgment_post_id : failure_judgment -> post_id
 val manual_compaction_post_id : post_id
 
 val goal_assignment_post_id : goal_assignment -> post_id
+
+val goal_completion_review_failure_post_id :
+  goal_completion_review_failure -> post_id
+
+val goal_completion_review_failure_kind_to_string :
+  goal_completion_review_failure_kind -> string
 
 val hitl_resolution_decision_to_string : hitl_resolution_decision -> string
 (** Stable wire/log label for a HITL resolution wake decision. *)

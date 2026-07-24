@@ -991,6 +991,32 @@ let start_keeper_loops_owned
       f
   in
   let config = workspace_scope.Mcp_server.config in
+  let goal_completion_recovery =
+    Keeper_goal_completion_failure_wake.reconcile_all ~config
+  in
+  if goal_completion_recovery.examined > 0
+  then
+    Log.Keeper.info
+      "Goal completion failure startup recovery examined=%d projected=%d \
+       unowned=%d incomplete=%d"
+      goal_completion_recovery.examined
+      goal_completion_recovery.projected
+      (List.length goal_completion_recovery.unowned)
+      (List.length goal_completion_recovery.incomplete);
+  List.iter
+    (fun goal_id ->
+       Log.Keeper.warn
+         "Goal completion failure startup recovery has no Keeper owner \
+          goal_id=%s"
+         goal_id)
+    goal_completion_recovery.unowned;
+  List.iter
+    (fun (goal_id, failure) ->
+       Log.Keeper.error
+         "Goal completion failure startup recovery incomplete goal_id=%s: %s"
+         goal_id
+         (Keeper_goal_completion_failure_wake.failure_to_string failure))
+    goal_completion_recovery.incomplete;
   (* [claimed_persistence] can only be constructed by the typed one-shot claim
      boundary before readiness publication. No late exception can turn an
      already-visible HTTP state into a degraded bootstrap. *)

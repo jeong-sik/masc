@@ -594,6 +594,13 @@ let test_goal_completion_rejection_is_durable_and_nonterminal () =
     "semantic rejection is explicit"
     "precondition_failed"
     (get_string_field error "error_code");
+  check
+    bool
+    "unowned failed Goal is explicit"
+    true
+    (contains_substring
+       (get_string_field error "message")
+       "no Keeper active_goal_ids currently owns it");
   let current = current_goal config goal.id in
   check bool "rejected Goal stays executing" true
     (current.phase = Goal_phase.Executing);

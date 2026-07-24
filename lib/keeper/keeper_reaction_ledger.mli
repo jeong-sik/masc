@@ -26,6 +26,8 @@ type stimulus_kind =
   | Manual_compaction
   | Goal_assigned
       (** RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
+  | Goal_completion_review_failed
+      (** An owned Goal remained nonterminal after semantic completion review. *)
 
 type reaction_kind =
   | Turn_started

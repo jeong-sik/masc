@@ -57,8 +57,12 @@ let validate_completion_invariant goal =
     Error "non-completed Goal cannot retain a completion receipt"
   | Goal_phase.Completed, Some _, Some _ ->
     Error "completed Goal cannot retain a failed completion-review outcome"
-  | _, _, Some _ when Option.is_none goal.last_review_note ->
-    Error "failed completion-review outcome requires a durable review note"
+  | _, _, Some _
+    when Option.is_none goal.last_review_note
+         || Option.is_none goal.last_review_at ->
+    Error
+      "failed completion-review outcome requires a durable review note and \
+       review timestamp"
   | Goal_phase.Completed, Some _, None
   | (Goal_phase.Executing | Goal_phase.Blocked | Goal_phase.Paused | Goal_phase.Dropped),
     None,

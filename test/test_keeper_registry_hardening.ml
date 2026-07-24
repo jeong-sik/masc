@@ -545,6 +545,320 @@ let test_goal_assignment_defers_offline_lane_after_queue_commit () =
        | _ -> fail "goal assignment was not retained in the offline lane")
 ;;
 
+let test_goal_completion_failure_wakes_only_durable_owners_once () =
+  let dir = temp_dir "registry_goal_completion_failure_wakeup" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.For_testing.clear ();
+      cleanup_dir dir)
+    (fun () ->
+       Eio_main.run
+       @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       KR.For_testing.clear ();
+       let config = Masc.Workspace.default_config dir in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "planner"));
+       let goal, _ =
+         match
+           Goal_store.upsert_goal
+             config
+             ~title:"Prove completion recovery"
+             ()
+         with
+         | Ok value -> value
+         | Error detail -> fail detail
+       in
+       let owner =
+         { (make_meta "goal-owner") with
+           active_goal_ids = [ goal.id ]
+         }
+       in
+       let owner_peer =
+         { (make_meta "goal-owner-peer") with
+           active_goal_ids = [ goal.id ]
+         }
+       in
+       let unrelated =
+         { (make_meta "unrelated-keeper") with
+           active_goal_ids = [ "another-goal" ]
+         }
+       in
+       (match Masc.Keeper_meta_store.write_meta config owner with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       (match Masc.Keeper_meta_store.write_meta config owner_peer with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       (match Masc.Keeper_meta_store.write_meta config unrelated with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       let failed_goal =
+         match
+           Goal_store.update_goal
+             config
+             ~goal_id:goal.id
+             (fun current ->
+                { current with
+                  last_review_note = Some "Missing production evidence"
+                ; last_review_at = Some "2026-07-24T00:00:00Z"
+                ; completion_review_failure =
+                    Some Goal_store.Rejected
+                })
+         with
+         | Ok value -> value
+         | Error detail -> fail detail
+       in
+       let project () =
+         Masc.Keeper_goal_completion_failure_wake.project
+           ~config
+           ~goal:failed_goal
+           ~failure:Goal_store.Rejected
+       in
+       let startup_recovery =
+         Masc.Keeper_goal_completion_failure_wake.reconcile_all ~config
+       in
+       check int "startup recovery examines durable failure" 1
+         startup_recovery.examined;
+       check int "startup recovery projects crash-gap wake" 1
+         startup_recovery.projected;
+       check (list string) "owned failure is not unowned" []
+         startup_recovery.unowned;
+       check int "startup recovery has no incomplete delivery" 0
+         (List.length startup_recovery.incomplete);
+       (match project () with
+        | Masc.Keeper_goal_completion_failure_wake.Projected projection ->
+          check
+            (list string)
+            "only exact Goal owners selected"
+            [ owner.name; owner_peer.name ]
+            projection.owner_names;
+          check
+            (list string)
+            "startup projection deduplicates on direct retry"
+            [ owner.name; owner_peer.name ]
+            projection.already_present_owner_names
+        | Masc.Keeper_goal_completion_failure_wake.Unowned ->
+          fail "owned Goal was reported unowned"
+        | Masc.Keeper_goal_completion_failure_wake.Incomplete
+            { failure; _ } ->
+          fail
+            (Masc.Keeper_goal_completion_failure_wake.failure_to_string
+               failure));
+       let owner_snapshot () =
+         Masc.Keeper_registry_event_queue.snapshot
+           ~base_path:config.base_path
+           owner.name
+       in
+       check int "owner has one durable wake" 1
+         (Keeper_event_queue.length (owner_snapshot ()));
+       check int "peer owner has one durable wake" 1
+         (Masc.Keeper_registry_event_queue.snapshot
+            ~base_path:config.base_path
+            owner_peer.name
+          |> Keeper_event_queue.length);
+       check int "unrelated Keeper has no wake" 0
+         (Masc.Keeper_registry_event_queue.snapshot
+            ~base_path:config.base_path
+            unrelated.name
+          |> Keeper_event_queue.length);
+       check int "repeat projection still one delivery" 1
+         (Keeper_event_queue.length (owner_snapshot ()));
+       KR.For_testing.clear ();
+       check int "restart reload keeps one delivery" 1
+         (Keeper_event_queue_persistence.load
+            ~base_path:config.base_path
+            ~keeper_name:owner.name
+          |> Keeper_event_queue.length);
+       let contains_text text needle =
+         let text_len = String.length text in
+         let needle_len = String.length needle in
+         let rec loop index =
+           index + needle_len <= text_len
+           && (String.equal
+                 (String.sub text index needle_len)
+                 needle
+               || loop (index + 1))
+         in
+         String.equal needle "" || loop 0
+       in
+       match Keeper_event_queue.to_list (owner_snapshot ()) with
+       | [ ({ payload =
+                Keeper_event_queue.Goal_completion_review_failed failure
+            ; _
+            } as stimulus) ] ->
+         check string "wake goal id" goal.id failure.gcrf_goal_id;
+         check
+           string
+           "wake contains durable review timestamp"
+           "2026-07-24T00:00:00Z"
+           failure.gcrf_reviewed_at;
+         check int "wake fingerprint is SHA-256" 64
+           (String.length failure.gcrf_review_fingerprint);
+         (match
+            Masc.Keeper_world_observation.pending_board_event_of_stimulus
+              ~meta:owner
+              stimulus
+          with
+          | Ok (Some event) ->
+            check bool "wake is actionable turn input" true
+              (contains_text event.preview "submit a new completion claim");
+            check bool "raw reviewer reason is not auto-injected" false
+              (contains_text event.preview "Missing production evidence");
+            ignore
+              (KR.For_testing.register
+                 ~base_path:config.base_path
+                 owner.name
+                 owner);
+            let lease =
+              match
+                Masc.Keeper_registry_event_queue.claim_when_result
+                  ~base_path:config.base_path
+                  owner.name
+                  ~claimed_at:1.0
+                  ~ready:(fun _ -> true)
+              with
+              | Ok (Some lease) -> lease
+              | Ok None -> fail "owner completion wake was not claimable"
+              | Error detail -> fail detail
+            in
+            Masc.Keeper_reaction_ledger.record_event_queue_turn_started
+              ~base_path:config.base_path
+              ~keeper_name:owner.name
+              stimulus;
+            (match
+               Masc.Keeper_registry_event_queue.settle_result
+                 ~base_path:config.base_path
+                 owner.name
+                 ~settled_at:2.0
+                 ~lease
+                 ~settlement:Masc.Keeper_registry_event_queue.Ack
+             with
+             | Ok
+                 (Masc.Keeper_registry_event_queue.Settled _
+                 | Masc.Keeper_registry_event_queue.Already_settled _) ->
+               ()
+             | Ok
+                 (Masc.Keeper_registry_event_queue.Committed_followup_failed
+                    { detail; _ }) ->
+               fail detail
+             | Error detail -> fail detail);
+            (match
+               Masc.Keeper_reaction_ledger
+               .project_event_queue_transition_outbox_result
+                 ~base_path:config.base_path
+                 ~keeper_name:owner.name
+             with
+             | Ok () -> ()
+             | Error detail -> fail detail);
+            let after_delivery_recovery =
+              Masc.Keeper_goal_completion_failure_wake.reconcile_all
+                ~config
+            in
+            check int "delivered failure remains reconciled" 1
+              after_delivery_recovery.projected;
+            check int "delivered failure is not re-enqueued" 0
+              (Keeper_event_queue.length (owner_snapshot ()));
+            check int "undelivered peer remains pending" 1
+              (Masc.Keeper_registry_event_queue.snapshot
+                 ~base_path:config.base_path
+                 owner_peer.name
+               |> Keeper_event_queue.length)
+          | Ok None -> fail "Goal completion failure wake rendered empty"
+          | Error _ -> fail "Goal completion failure wake required Board I/O")
+       | _ -> fail "restart changed Goal completion failure wake")
+;;
+
+let test_goal_completion_failure_reports_unowned () =
+  let dir = temp_dir "registry_goal_completion_failure_unowned" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.For_testing.clear ();
+      cleanup_dir dir)
+    (fun () ->
+       Eio_main.run
+       @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       let config = Masc.Workspace.default_config dir in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "planner"));
+       let goal, _ =
+         match Goal_store.upsert_goal config ~title:"Unowned Goal" () with
+         | Ok value -> value
+         | Error detail -> fail detail
+       in
+       let failed_goal =
+         match
+           Goal_store.update_goal
+             config
+             ~goal_id:goal.id
+             (fun current ->
+                { current with
+                  last_review_note = Some "Reviewer unavailable"
+                ; last_review_at = Some "2026-07-24T00:00:00Z"
+                ; completion_review_failure =
+                    Some Goal_store.Unavailable
+                })
+         with
+         | Ok value -> value
+         | Error detail -> fail detail
+       in
+       (match
+          Masc.Keeper_goal_completion_failure_wake.project
+            ~config
+            ~goal:failed_goal
+            ~failure:Goal_store.Unavailable
+        with
+        | Masc.Keeper_goal_completion_failure_wake.Unowned -> ()
+        | Masc.Keeper_goal_completion_failure_wake.Projected _ ->
+          fail "unowned Goal produced a synthetic owner wake"
+        | Masc.Keeper_goal_completion_failure_wake.Incomplete
+            { failure; _ } ->
+          fail
+            (Masc.Keeper_goal_completion_failure_wake.failure_to_string
+               failure));
+       let later_owner =
+         { (make_meta "later-goal-owner") with
+           active_goal_ids = [ goal.id ]
+         }
+       in
+       (match Masc.Keeper_meta_store.write_meta config later_owner with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       let owner_runtime_dir =
+         Filename.concat
+           (Common.keepers_runtime_dir_of_base ~base_path:config.base_path)
+           later_owner.name
+       in
+       Workspace_utils.mkdir_p owner_runtime_dir;
+       let queue_path =
+         Filename.concat owner_runtime_dir "event-queue.json"
+       in
+       Unix.mkdir queue_path 0o755;
+       let storage_blocked =
+         Masc.Keeper_goal_completion_failure_wake.reconcile_all ~config
+       in
+       (match storage_blocked.incomplete with
+        | [ (goal_id, Masc.Keeper_goal_completion_failure_wake.Delivery_failed
+                        [ (keeper_name, _) ]) ] ->
+          check string "storage failure keeps exact Goal identity" goal.id goal_id;
+          check string "storage failure keeps exact owner identity"
+            later_owner.name keeper_name
+        | _ -> fail "durable enqueue failure was not returned as typed incomplete");
+       Unix.rmdir queue_path;
+       let recovered =
+         Masc.Keeper_goal_completion_failure_wake.reconcile_all ~config
+       in
+       check int "later owner assignment becomes projectable" 1
+         recovered.projected;
+       check
+         int
+         "later owner receives the durable failed-review wake"
+         1
+         (Masc.Keeper_registry_event_queue.snapshot
+            ~base_path:config.base_path
+            later_owner.name
+          |> Keeper_event_queue.length))
+;;
+
 let contains_substring text needle =
   let text_len = String.length text in
   let needle_len = String.length needle in
@@ -728,6 +1042,14 @@ let () =
             "goal assignment persists while offline wake is deferred"
             `Quick
             test_goal_assignment_defers_offline_lane_after_queue_commit
+        ; test_case
+            "Goal completion failure wakes only durable owners once"
+            `Quick
+            test_goal_completion_failure_wakes_only_durable_owners_once
+        ; test_case
+            "Goal completion failure reports unowned"
+            `Quick
+            test_goal_completion_failure_reports_unowned
         ] )
     ; ( "tool_dispatch_exact_resources"
       , [ test_case "preserves exact meta after healthy entry replacement" `Quick

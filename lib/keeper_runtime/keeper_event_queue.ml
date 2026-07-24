@@ -85,6 +85,10 @@ type stimulus_payload =
          discovered only if some unrelated stimulus happened to fire.
          Uses the same no-dedicated-reason pattern as async completions:
          turn_reason; the injected pending observation drives the turn. *)
+  | Goal_completion_review_failed of goal_completion_review_failure
+      (* A configured semantic completion review kept an owned Goal
+         nonterminal. This is an actionable owner-lane wake, not reviewer text:
+         the detailed reason remains in Goal_store. *)
 
 and board_attention = {
   candidate_id : string;
@@ -178,6 +182,18 @@ and goal_assignment = {
      repeat assignments of the same goal dedup regardless of actor. *)
 }
 
+and goal_completion_review_failure_kind =
+  | Goal_completion_rejected
+  | Goal_completion_unavailable
+
+and goal_completion_review_failure = {
+  gcrf_goal_id : string;
+  gcrf_goal_title : string;
+  gcrf_reviewed_at : string;
+  gcrf_review_fingerprint : string;
+  gcrf_failure : goal_completion_review_failure_kind;
+}
+
 let fusion_completion_post_id (fc : fusion_completion) = "fusion-run:" ^ fc.run_id
 
 let bg_job_completion_post_id (c : bg_job_completion) =
@@ -201,6 +217,29 @@ let goal_assignment_post_id (ga : goal_assignment) =
   (* Stable per goal: re-assigning the same goal before the keeper consumes
      the first wake collapses under queue identity dedup. *)
   "goal-assigned:" ^ ga.ga_goal_id
+
+let goal_completion_review_failure_kind_to_string = function
+  | Goal_completion_rejected -> "rejected"
+  | Goal_completion_unavailable -> "unavailable"
+
+let goal_completion_review_failure_kind_of_string = function
+  | "rejected" -> Ok Goal_completion_rejected
+  | "unavailable" -> Ok Goal_completion_unavailable
+  | other ->
+    Error
+      (Printf.sprintf
+         "unknown goal completion review failure kind: %s"
+         other)
+
+let goal_completion_review_failure_post_id
+      (failure : goal_completion_review_failure)
+  =
+  String.concat
+    ":"
+    [ "goal-completion-review-failed"
+    ; failure.gcrf_goal_id
+    ; failure.gcrf_review_fingerprint
+    ]
 
 let hitl_resolution_decision_to_string = function
   | Hitl_approved -> "approve"
@@ -246,6 +285,8 @@ let identity_payload = function
   | Failure_judgment fj -> Failure_judgment { fj with fj_detail = "" }
   | Goal_assigned ga ->
     Goal_assigned { ga with ga_goal_title = ""; ga_assigned_by = "" }
+  | Goal_completion_review_failed failure ->
+    Goal_completion_review_failed { failure with gcrf_goal_title = "" }
   | ( Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
     | Bg_completed _ | Schedule_due _ | Connector_attention _ | Hitl_resolved _
     | Manual_compaction_requested
@@ -362,6 +403,7 @@ let payload_kind_label = function
   | Failure_judgment _ -> "failure_judgment"
   | Manual_compaction_requested -> "manual_compaction_requested"
   | Goal_assigned _ -> "goal_assigned"
+  | Goal_completion_review_failed _ -> "goal_completion_review_failed"
 
 let is_board_signal = function
   | Board_signal _ | Board_attention _ -> true
@@ -369,6 +411,7 @@ let is_board_signal = function
   | Schedule_due _ | Connector_attention _ | Hitl_resolved _
   | Failure_judgment _ | Manual_compaction_requested | Goal_assigned _ ->
     false
+  | Goal_completion_review_failed _ -> false
 
 let drain_board_all (queue : t) : stimulus list * t =
   let board, rest =
@@ -591,6 +634,18 @@ let payload_to_yojson = function
       ; "goal_title", `String ga.ga_goal_title
       ; "assigned_by", `String ga.ga_assigned_by
       ]
+  | Goal_completion_review_failed failure ->
+    `Assoc
+      [ "kind", `String "goal_completion_review_failed"
+      ; "goal_id", `String failure.gcrf_goal_id
+      ; "goal_title", `String failure.gcrf_goal_title
+      ; "reviewed_at", `String failure.gcrf_reviewed_at
+      ; "review_fingerprint", `String failure.gcrf_review_fingerprint
+      ; ( "failure"
+        , `String
+            (goal_completion_review_failure_kind_to_string
+               failure.gcrf_failure) )
+      ]
 
 let continuation_channel_field fields =
   let* json = required_field ~context:"stimulus.payload" "channel" fields in
@@ -748,6 +803,25 @@ let payload_of_yojson json =
          { ga_goal_id = goal_id
          ; ga_goal_title = goal_title
          ; ga_assigned_by = assigned_by
+         })
+  | "goal_completion_review_failed" ->
+    let* goal_id = string_field ~context "goal_id" fields in
+    let* goal_title = string_field ~context "goal_title" fields in
+    let* reviewed_at = string_field ~context "reviewed_at" fields in
+    let* review_fingerprint =
+      string_field ~context "review_fingerprint" fields
+    in
+    let* failure_label = string_field ~context "failure" fields in
+    let* failure =
+      goal_completion_review_failure_kind_of_string failure_label
+    in
+    Ok
+      (Goal_completion_review_failed
+         { gcrf_goal_id = goal_id
+         ; gcrf_goal_title = goal_title
+         ; gcrf_reviewed_at = reviewed_at
+         ; gcrf_review_fingerprint = review_fingerprint
+         ; gcrf_failure = failure
          })
   | value -> Error (Printf.sprintf "unknown stimulus payload kind: %s" value)
 

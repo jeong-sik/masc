@@ -61,7 +61,8 @@ type completion_review_failure =
   | Rejected
   | Unavailable
 (** Typed reason why the most recent completion attempt remained nonterminal.
-    The detailed durable explanation remains in [last_review_note]. *)
+    The detailed durable explanation and occurrence time remain in
+    [last_review_note] and [last_review_at]. *)
 
 type goal = {
   id : string;

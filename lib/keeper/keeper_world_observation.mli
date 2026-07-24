@@ -29,6 +29,9 @@ type pending_board_event_kind =
   | Goal_assigned
       (** RFC-0315 P3 W0: a goal entered this keeper's [active_goal_ids];
           the assignment edge surfaces as actionable turn input. *)
+  | Goal_completion_review_failed
+      (** An owned Goal stayed nonterminal after semantic completion review;
+          the owner must inspect its durable Goal state and continue. *)
 
 type pending_board_event = {
   event_kind : pending_board_event_kind;

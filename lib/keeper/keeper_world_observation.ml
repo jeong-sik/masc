@@ -28,6 +28,7 @@ type pending_board_event_kind =
   | External_attention
   | Failure_judgment
   | Goal_assigned
+  | Goal_completion_review_failed
 
 type pending_board_event =
   { event_kind : pending_board_event_kind
@@ -673,6 +674,46 @@ let pending_board_event_of_goal_assignment
   }
 ;;
 
+let pending_board_event_of_goal_completion_review_failure
+      ~meta:(_ : keeper_meta)
+      ~(arrived_at : float)
+      (failure : Keeper_event_queue.goal_completion_review_failure)
+  : pending_board_event
+  =
+  let failure_label =
+    Keeper_event_queue.goal_completion_review_failure_kind_to_string
+      failure.gcrf_failure
+  in
+  { event_kind = Goal_completion_review_failed
+  ; post_id =
+      Keeper_event_queue.goal_completion_review_failure_post_id failure
+  ; author = "goal_completion_reviewer"
+  ; title =
+      Printf.sprintf
+        "Goal completion review %s: %s"
+        failure_label
+        failure.gcrf_goal_title
+  ; preview =
+      short_preview
+        ~max_len:fusion_result_preview_max_len
+        (Printf.sprintf
+           "Goal %s remains nonterminal after semantic completion review. \
+            Read its durable completion_review_failure and last_review_note, \
+            address the missing evidence or evaluator availability, then \
+            submit a new completion claim for verification."
+           failure.gcrf_goal_id)
+  ; hearth = None
+  ; post_kind = Board.System_post
+  ; updated_at = arrived_at
+  ; explicit_mention = false
+  ; matched_targets = []
+  ; self_commented = false
+  ; new_external_since = 1
+  ; latest_external_author = None
+  ; latest_external_preview = None
+  }
+;;
+
 let pending_board_event_of_stimulus
       ~(meta : keeper_meta)
   (stimulus : Keeper_event_queue.stimulus)
@@ -720,6 +761,13 @@ let pending_board_event_of_stimulus
             ~meta
             ~arrived_at:stimulus.arrived_at
             ga))
+  | Keeper_event_queue.Goal_completion_review_failed failure ->
+    Ok
+      (Some
+         (pending_board_event_of_goal_completion_review_failure
+            ~meta
+            ~arrived_at:stimulus.arrived_at
+            failure))
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Hitl_resolved _

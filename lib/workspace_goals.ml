@@ -310,6 +310,66 @@ let conditional_goal_error_result
     (Goal_store.conditional_update_error_to_string error)
 ;;
 
+let completion_review_failure_result
+      ~tool_name
+      ~start_time
+      ~(ctx : context)
+      ~(failure : Goal_store.completion_review_failure)
+      ~(updated_goal : Goal_store.goal)
+      ~(class_ : Tool_result.tool_failure_class)
+      ~message
+  =
+  match
+    Keeper_goal_completion_failure_wake.project
+      ~config:ctx.config
+      ~goal:updated_goal
+      ~failure
+  with
+  | Keeper_goal_completion_failure_wake.Projected projection ->
+    Log.Workspace.info
+      "Goal completion failure owner wake committed goal_id=%s owners=[%s]"
+      updated_goal.id
+      (String.concat "," projection.owner_names);
+    error_result_typed
+      ~class_
+      ~tool_name
+      ~start_time
+      ~code:Precondition_failed
+      message
+  | Keeper_goal_completion_failure_wake.Unowned ->
+    Log.Workspace.warn
+      "Goal completion failure has no Keeper owner goal_id=%s"
+      updated_goal.id;
+    error_result_typed
+      ~class_
+      ~tool_name
+      ~start_time
+      ~code:Precondition_failed
+      (message
+       ^ "; Goal remains nonterminal and no Keeper active_goal_ids currently \
+          owns it")
+  | Keeper_goal_completion_failure_wake.Incomplete { projection; failure } ->
+    let detail =
+      Keeper_goal_completion_failure_wake.failure_to_string failure
+    in
+    Log.Workspace.error
+      "Goal completion failure wake incomplete goal_id=%s projected=[%s]: %s"
+      updated_goal.id
+      (String.concat
+         ","
+         (projection.enqueued_owner_names
+          @ projection.already_present_owner_names))
+      detail;
+    error_result_typed
+      ~class_:Tool_result.Runtime_failure
+      ~tool_name
+      ~start_time
+      ~code:Internal_error
+      (message
+       ^ "; Goal remains nonterminal, but its owner wake is incomplete: "
+       ^ detail)
+;;
+
 let handle_goal_completion_request
       ~tool_name
       ~start_time
@@ -332,17 +392,19 @@ let handle_goal_completion_request
      with
      | Error error ->
        conditional_goal_error_result ~tool_name ~start_time error
-     | Ok _ ->
+     | Ok updated_goal ->
        Log.Workspace.warn
          "Goal completion remains nonterminal goal_id=%s outcome=unavailable \
           stage=evidence"
          goal.id;
-       error_result_typed
-         ~class_:Tool_result.Transient_error
+       completion_review_failure_result
          ~tool_name
          ~start_time
-         ~code:Precondition_failed
-         (msg ^ "; Goal remains nonterminal"))
+         ~ctx
+         ~failure:Goal_store.Unavailable
+         ~updated_goal
+         ~class_:Tool_result.Transient_error
+         ~message:(msg ^ "; Goal remains nonterminal"))
   | Ok (linked_tasks, child_goals) ->
     let request : Goal_completion_reviewer.review_request =
       { goal
@@ -419,17 +481,20 @@ let handle_goal_completion_request
         with
         | Error error ->
           conditional_goal_error_result ~tool_name ~start_time error
-        | Ok _ ->
+        | Ok updated_goal ->
           Log.Workspace.warn
             "Goal completion remains nonterminal goal_id=%s outcome=rejected \
              evaluator_runtime=%s"
             goal.id
             review.evaluator_runtime;
-          error_result_typed
+          completion_review_failure_result
             ~tool_name
             ~start_time
-            ~code:Precondition_failed
-            ("Configured LLM rejected Goal completion: " ^ reason))
+            ~ctx
+            ~failure:Goal_store.Rejected
+            ~updated_goal
+            ~class_:Tool_result.Workflow_rejection
+            ~message:("Configured LLM rejected Goal completion: " ^ reason))
      | None,
        ( Goal_completion_reviewer.Invalid_verdict
        | Goal_completion_reviewer.Evaluator_unavailable ),
@@ -448,18 +513,20 @@ let handle_goal_completion_request
         with
         | Error error ->
           conditional_goal_error_result ~tool_name ~start_time error
-        | Ok _ ->
+        | Ok updated_goal ->
           Log.Workspace.warn
             "Goal completion remains nonterminal goal_id=%s \
              outcome=unavailable evaluator_runtime=%s"
             goal.id
             review.evaluator_runtime;
-          error_result_typed
-            ~class_:Tool_result.Transient_error
+          completion_review_failure_result
             ~tool_name
             ~start_time
-            ~code:Precondition_failed
-            (reason ^ "; Goal remains nonterminal"))
+            ~ctx
+            ~failure:Goal_store.Unavailable
+            ~updated_goal
+            ~class_:Tool_result.Transient_error
+            ~message:(reason ^ "; Goal remains nonterminal"))
      | Some _, (Goal_completion_reviewer.Invalid_verdict
                | Goal_completion_reviewer.Evaluator_unavailable), _
      | None, Goal_completion_reviewer.Structured_tool, _

@@ -870,7 +870,8 @@ let source_terminal_receipt_of_stimulus source =
   | Keeper_event_queue.Connector_attention _
   | Keeper_event_queue.Failure_judgment _
   | Keeper_event_queue.Manual_compaction_requested
-  | Keeper_event_queue.Goal_assigned _ ->
+  | Keeper_event_queue.Goal_assigned _
+  | Keeper_event_queue.Goal_completion_review_failed _ ->
     Error "source event does not carry a typed terminal receipt"
 ;;
 

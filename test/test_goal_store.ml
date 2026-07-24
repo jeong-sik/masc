@@ -356,6 +356,46 @@ let test_update_cannot_complete_without_receipt () =
   | None -> fail "Goal disappeared after rejected completion"
 ;;
 
+let test_failed_completion_review_requires_timestamp () =
+  with_workspace
+  @@ fun config ->
+  let goal, _ =
+    match Goal_store.upsert_goal config ~title:"Needs durable failed review" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let before = Goal_store.read_state config in
+  (match
+     Goal_store.update_goal config ~goal_id:goal.id (fun current ->
+       { current with
+         completion_review_failure = Some Goal_store.Rejected;
+         last_review_note = Some "semantic evidence was insufficient";
+         last_review_at = None
+       })
+   with
+   | Ok _ -> fail "failed completion review without a timestamp was accepted"
+   | Error msg ->
+     check
+       bool
+       "rejection names missing durable failure evidence"
+       true
+       (String.starts_with
+          ~prefix:"failed completion-review outcome requires"
+          msg));
+  let after = Goal_store.read_state config in
+  check int "rejected failure state does not bump version" before.version after.version;
+  match Goal_store.get_goal config ~goal_id:goal.id with
+  | Some current ->
+    check (option string) "review note was not partially persisted" None
+      current.last_review_note;
+    check
+      bool
+      "failed outcome was not partially persisted"
+      true
+      (Option.is_none current.completion_review_failure)
+  | None -> fail "Goal disappeared after rejected failure-state update"
+;;
+
 let test_write_state_sanitizes_invalid_utf8_before_persisting () =
   with_workspace @@ fun config ->
   Safe_ops.reset_persistence_utf8_repair_stats_for_tests ();
@@ -425,6 +465,8 @@ let () =
             test_update_missing_goal_does_not_bump;
           test_case "completion requires receipt" `Quick
             test_update_cannot_complete_without_receipt;
+          test_case "failed review requires durable timestamp" `Quick
+            test_failed_completion_review_requires_timestamp;
           test_case "write_state sanitizes invalid utf8" `Quick
             test_write_state_sanitizes_invalid_utf8_before_persisting;
           test_case "recovery mirror write failure preserves primary" `Quick

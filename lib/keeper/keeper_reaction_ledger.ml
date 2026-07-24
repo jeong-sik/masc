@@ -17,6 +17,7 @@ type stimulus_kind =
   | Manual_compaction
   | Goal_assigned
       (* RFC-0315 P3 W0: goal entered active_goal_ids — assignment edge wake. *)
+  | Goal_completion_review_failed
 
 type reaction_kind =
   | Turn_started
@@ -48,6 +49,7 @@ let stimulus_kind_to_string = function
   | Failure_judgment -> "failure_judgment"
   | Manual_compaction -> "manual_compaction"
   | Goal_assigned -> "goal_assigned"
+  | Goal_completion_review_failed -> "goal_completion_review_failed"
 ;;
 
 (* stimulus_kind_to_string의 역. 닫힌 합에 없는 문자열(스키마 드리프트/손상 row)은
@@ -65,6 +67,7 @@ let stimulus_kind_of_string = function
   | "failure_judgment" -> Some Failure_judgment
   | "manual_compaction" -> Some Manual_compaction
   | "goal_assigned" -> Some Goal_assigned
+  | "goal_completion_review_failed" -> Some Goal_completion_review_failed
   | _ -> None
 ;;
 
@@ -112,6 +115,8 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Failure_judgment _ -> Failure_judgment
   | Keeper_event_queue.Manual_compaction_requested -> Manual_compaction
   | Keeper_event_queue.Goal_assigned _ -> Goal_assigned
+  | Keeper_event_queue.Goal_completion_review_failed _ ->
+    Goal_completion_review_failed
 ;;
 
 let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -121,6 +126,9 @@ let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Board_signal _, Board_signal ->
     board_stimulus_id ~post_id:stimulus.post_id
   | Keeper_event_queue.Schedule_due _, Schedule_due -> stimulus.post_id
+  | ( Keeper_event_queue.Goal_completion_review_failed _
+    , Goal_completion_review_failed ) ->
+    stimulus.post_id
   | _, kind ->
     digest_id
       "stimulus"
@@ -223,6 +231,13 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "goal_assigned goal_id=%s assigned_by=%s"
       ga.ga_goal_id
       ga.ga_assigned_by
+  | Keeper_event_queue.Goal_completion_review_failed failure ->
+    Printf.sprintf
+      "goal_completion_review_failed goal_id=%s failure=%s review=%s"
+      failure.gcrf_goal_id
+      (Keeper_event_queue.goal_completion_review_failure_kind_to_string
+         failure.gcrf_failure)
+      failure.gcrf_review_fingerprint
 ;;
 
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
@@ -242,6 +257,7 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Failure_judgment _
     | Keeper_event_queue.Manual_compaction_requested
     | Keeper_event_queue.Goal_assigned _ -> None
+    | Keeper_event_queue.Goal_completion_review_failed _ -> None
   in
   `Assoc
     (base_fields
@@ -996,7 +1012,7 @@ let decode_current_row ~keeper_name row =
       | Board_signal, (Some _ | None)
       | ( Bootstrap | Fusion_completed | Bg_completed | Schedule_due
         | Connector_attention | Hitl_resolved | Failure_judgment
-        | Manual_compaction | Goal_assigned ),
+        | Manual_compaction | Goal_assigned | Goal_completion_review_failed ),
         _ -> Ok ()
     in
     let expected_event_id = digest_id "krl" (stimulus_id ^ "|stimulus") in
@@ -1352,7 +1368,7 @@ let board_stimulus_token metadata stimulus_kind =
     Option.map (fun timestamp -> timestamp, post_id) updated_at
   | Bootstrap | Fusion_completed | Bg_completed | Schedule_due
   | Connector_attention | Hitl_resolved | Failure_judgment
-  | Manual_compaction | Goal_assigned -> None
+  | Manual_compaction | Goal_assigned | Goal_completion_review_failed -> None
 ;;
 
 let summarize_rows ~keeper_name ~limit rows =

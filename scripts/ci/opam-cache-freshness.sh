@@ -27,7 +27,7 @@ refresh_repository() {
       ;;
     false|"")
       echo "[opam-cache-freshness] fallback or empty dependency cache; refreshing repositories"
-      opam update --repositories-only
+      opam update --repositories
       ;;
     *)
       printf '[opam-cache-freshness] invalid cache-hit value: %q\n' \
@@ -96,13 +96,13 @@ EOF
   : >"${log}"
   PATH="${fake_bin}:${PATH}" OPAM_FRESHNESS_TEST_LOG="${log}" \
     "${SCRIPT_PATH}" --refresh false >/dev/null
-  [[ "$(cat "${log}")" == "update --repositories-only" ]] \
+  [[ "$(cat "${log}")" == "update --repositories" ]] \
     || fail "fallback cache did not refresh opam repositories exactly once"
 
   : >"${log}"
   PATH="${fake_bin}:${PATH}" OPAM_FRESHNESS_TEST_LOG="${log}" \
     "${SCRIPT_PATH}" --refresh "" >/dev/null
-  [[ "$(cat "${log}")" == "update --repositories-only" ]] \
+  [[ "$(cat "${log}")" == "update --repositories" ]] \
     || fail "empty cache did not refresh opam repositories exactly once"
 
   : >"${log}"
@@ -115,7 +115,7 @@ EOF
   set -e
   [[ "${status}" -eq 17 ]] \
     || fail "repository refresh failure was not propagated (status=${status})"
-  [[ "$(cat "${log}")" == "update --repositories-only" ]] \
+  [[ "$(cat "${log}")" == "update --repositories" ]] \
     || fail "failed repository refresh did not invoke the canonical update"
 
   echo "[opam-cache-freshness:self-test] pass"

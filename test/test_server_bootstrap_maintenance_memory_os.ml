@@ -50,6 +50,34 @@ let provider_cfg () =
     ()
 ;;
 
+let with_env name value f =
+  let previous = Sys.getenv_opt name in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some old -> Unix.putenv name old
+      | None -> Unix.putenv name "")
+    (fun () ->
+      Unix.putenv name value;
+      f ())
+;;
+
+let with_runtime_config content f =
+  let path = Filename.temp_file "memory-os-consolidation-runtime-" ".toml" in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      try Sys.remove path with
+      | Sys_error _ -> ())
+    (fun () ->
+      Out_channel.with_open_text path (fun channel ->
+        Out_channel.output_string channel content);
+      match Runtime.init_default ~config_path:path with
+      | Error msg -> Alcotest.failf "runtime config should load: %s" msg
+      | Ok () -> f ())
+;;
+
 let with_temp_keepers f =
   let marker = Filename.temp_file "consolidation-tick-" ".tmp" in
   Sys.remove marker;
@@ -200,6 +228,41 @@ let test_tick_serializes_provider_calls () =
             !max_in_flight))))
 ;;
 
+let test_consolidation_runtime_uses_typed_route () =
+  let config =
+    {|
+[providers.local]
+display-name = "Local"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.chat]
+api-name = "chat"
+max-context = 1024
+
+[models.consolidation]
+api-name = "consolidation"
+max-context = 1024
+
+[local.chat]
+[local.consolidation]
+
+[runtime]
+default = "local.chat"
+memory_os_consolidation = "local.consolidation"
+|}
+  in
+  with_env Env_config.KeeperMemoryOs.consolidation_runtime_id_env_key "" (fun () ->
+    with_runtime_config config (fun () ->
+      match Server_bootstrap_maintenance.runtime_for_memory_os_consolidation () with
+      | None -> Alcotest.fail "typed consolidation runtime should resolve"
+      | Some runtime ->
+        Alcotest.(check string)
+          "typed task route wins over default"
+          "local.consolidation"
+          runtime.Runtime.id))
+;;
+
 let () =
   Alcotest.run
     "server_bootstrap_maintenance_memory_os"
@@ -216,6 +279,10 @@ let () =
             "tick serializes provider calls"
             `Quick
             test_tick_serializes_provider_calls
+        ; Alcotest.test_case
+            "typed route selects consolidation runtime"
+            `Quick
+            test_consolidation_runtime_uses_typed_route
         ] )
     ]
 ;;

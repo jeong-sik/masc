@@ -30,7 +30,7 @@ let id_of_binding (b : binding) : string = binding_key b
     resolve 또는 provider_config materialize 가 실패하면 [Error reason] —
     동작은 fail-closed 그대로(partial-boot 없음, 해당 binding 은 Runtime 목록에서
     제외)이되 왜 제외되는지 이유를 잃지 않는다. 이 이유는 assignment / default /
-    librarian / lane 검증이 "not found" 대신 근본 원인을 표면화하는 데 쓰인다
+    task-route / lane 검증이 "not found" 대신 근본 원인을 표면화하는 데 쓰인다
     (Unknown→silent-drop 안티패턴 차단). *)
 let of_binding_result (cfg : config) (b : binding) : (t, string) result =
   match provider_of_id cfg b.provider_id, model_of_id cfg b.model_id with
@@ -62,7 +62,7 @@ let is_local_runtime (runtime : t) = is_local_provider runtime.provider
 (* Split configured bindings into successfully materialized runtimes and the
    ones that were defined but could not be materialized, each paired with the
    reason it was dropped. The drop set ([id -> reason]) lets assignment /
-   default / librarian / lane validation surface *why* a target binding is
+   default / task-route / lane validation surface *why* a target binding is
    absent from the runtime list (e.g. "provider ... uses protocol messages-http,
    which the runtime adapter cannot build a provider_config for ...") instead of
    the misleading "not found among N runtimes", which points the operator at a
@@ -131,6 +131,29 @@ let validate_keeper_assignments ~(config_path : string)
          runtime_id
          (unresolved_runtime_suffix ~dropped_bindings
             ~runtime_count:(List.length runtimes) runtime_id))
+;;
+
+(* [runtime].memory_os_consolidation must resolve to a configured runtime when
+   set. [None] is the designed inheritance of [runtime].default; an unknown id
+   is an operator typo rejected at load, never a silent fallback. *)
+let validate_memory_os_consolidation_runtime
+    ~(config_path : string)
+    ~(dropped_bindings : (string * string) list)
+    (runtimes : t list)
+    (runtime_id : string option) : (unit, string) result =
+  match runtime_id with
+  | None -> Ok ()
+  | Some id ->
+    if List.exists (fun (r : t) -> String.equal r.id id) runtimes
+    then Ok ()
+    else
+      Error
+        (Printf.sprintf
+           "%s: [runtime].memory_os_consolidation = %S%s"
+           config_path
+           id
+           (unresolved_runtime_suffix ~dropped_bindings
+              ~runtime_count:(List.length runtimes) id))
 ;;
 
 (* Route ids resolve with lane precedence ([resolve_assignment] prefers a lane
@@ -236,8 +259,8 @@ let validate_cross_verifier_runtime ~(config_path : string)
 ;;
 
 (* [runtime].structured_judge is the explicit lane for provider-native schema
-   requests. Unlike the librarian lane, this lane must declare structured output,
-   not just JSON mode. [None] remains a migration fallback for existing configs;
+   requests. It must declare structured output, not just JSON mode. [None]
+   remains a migration fallback for existing configs;
    unsupported resolved runtimes are rejected by each caller's OAS schema
    validation instead of silently dropping the schema. A [runtime.lanes] id is
    accepted when every candidate declares structured output (#25394): every
@@ -362,9 +385,8 @@ let lanes_of_decls ~(config_path : string)
 
    An unknown model resolves to OAS [provider_default], whose guessed capabilities
    (notably [thinking_control_format = No_thinking_control]) silently drop
-   thinking/sampling control a binding may require — that guess corrupted the
-   memory-os librarian for minimax-m3 (2026-06-19, before it was catalogued).
-   Reject such a binding at load instead of discovering corruption at runtime
+   thinking/sampling control a binding may require. Reject such a binding at
+   load instead of discovering corruption at runtime
    (Unknown->Permissive anti-pattern; mirrors [runtime].default validation,
    RFC-0206 §2.1 no-silent-fallback).
 
@@ -728,11 +750,12 @@ let missing_reference_error
 ;;
 
 let degrade_loaded_for_missing_catalog
-    ( (runtimes, configured_default, assignments, structured_judge_id, cross_verifier_id,
-       media_failover, lanes) :
+    ( (runtimes, configured_default, assignments, memory_os_consolidation_id,
+       structured_judge_id, cross_verifier_id, media_failover, lanes) :
       t list
       * t
       * (string * string) list
+      * string option
       * string option
       * string option
       * string list
@@ -741,6 +764,7 @@ let degrade_loaded_for_missing_catalog
   : ( ( t list
         * t
         * (string * string) list
+        * string option
         * string option
         * string option
         * string list
@@ -828,6 +852,11 @@ let degrade_loaded_for_missing_catalog
       None, Some { route_name; runtime_id }
     | Some _ as value -> value, None
   in
+  let memory_os_consolidation_id, memory_os_consolidation_drop =
+    drop_route
+      "[runtime].memory_os_consolidation"
+      memory_os_consolidation_id
+  in
   let structured_judge_id, structured_judge_drop =
     drop_route "[runtime].structured_judge" structured_judge_id
   in
@@ -836,6 +865,7 @@ let degrade_loaded_for_missing_catalog
   in
   let dropped_routes =
     [ default_drop
+    ; memory_os_consolidation_drop
     ; structured_judge_drop
     ; cross_verifier_drop
     ]
@@ -892,6 +922,7 @@ let degrade_loaded_for_missing_catalog
       ( ( active_runtimes
         , configured_default
         , kept_assignments
+        , memory_os_consolidation_id
         , structured_judge_id
         , cross_verifier_id
         , kept_media_failover
@@ -961,6 +992,7 @@ let materialize_config
        * (string * string) list
        * string option
        * string option
+       * string option
        * string list
        * Runtime_lane.t list)
       * Runtime_schema.exact_output_lane_decl list
@@ -991,6 +1023,13 @@ let materialize_config
   in
   let* () =
     validate_keeper_assignments ~config_path ~dropped_bindings runtimes assignments
+  in
+  let* () =
+    validate_memory_os_consolidation_runtime
+      ~config_path
+      ~dropped_bindings
+      runtimes
+      cfg.memory_os_consolidation_runtime_id
   in
   (* Lanes are materialized before the judge/verifier route validations so a
      route id can name a lane (#25394); candidate resolution is enforced by
@@ -1025,6 +1064,7 @@ let materialize_config
     ( runtimes
     , rt
     , assignments
+    , cfg.memory_os_consolidation_runtime_id
     , cfg.structured_judge_runtime_id
     , cfg.cross_verifier_runtime_id
     , cfg.media_failover
@@ -1045,6 +1085,7 @@ let load_list_internal ~(config_path : string) ~validate_max_context
   : ( (t list
        * t
        * (string * string) list
+       * string option
        * string option
        * string option
        * string list
@@ -1086,6 +1127,7 @@ type loaded_state =
   { default_runtime : t option
   ; runtimes : t list
   ; keeper_assignments : (string * string) list
+  ; memory_os_consolidation_runtime_id : string option
   ; structured_judge_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
@@ -1098,6 +1140,7 @@ let empty_loaded_state =
   { default_runtime = None
   ; runtimes = []
   ; keeper_assignments = []
+  ; memory_os_consolidation_runtime_id = None
   ; structured_judge_runtime_id = None
   ; cross_verifier_runtime_id = None
   ; media_failover = []
@@ -1116,6 +1159,7 @@ let set_loaded
     ( runtimes
     , rt
     , assignments
+    , memory_os_consolidation_id
     , structured_judge_id
     , cross_verifier_id
     , media_failover
@@ -1124,6 +1168,7 @@ let set_loaded
     { default_runtime = Some rt
     ; runtimes
     ; keeper_assignments = assignments
+    ; memory_os_consolidation_runtime_id = memory_os_consolidation_id
     ; structured_judge_runtime_id = structured_judge_id
     ; cross_verifier_runtime_id = cross_verifier_id
     ; media_failover
@@ -1154,7 +1199,7 @@ let publish_exact_output_registry ~lanes resolver_snapshot =
 let init_default_strict_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:true with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
@@ -1168,7 +1213,7 @@ let init_default_strict ~config_path =
 let init_default_degraded_report ~config_path =
   match load_list_internal ~config_path ~validate_max_context:false with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok (((runtimes, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
+  | Ok (((runtimes, _, _, _, _, _, _, _) as loaded), _exact_output_lane_decls) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | None ->
        (match validate_runtime_max_context ~config_path runtimes with
@@ -1179,7 +1224,9 @@ let init_default_degraded_report ~config_path =
      | Some report ->
        (match degrade_loaded_for_missing_catalog loaded report with
         | Error msg -> Error (Runtime_config_error msg)
-        | Ok (((active_runtimes, _, _, _, _, _, _) as degraded_loaded), degradation) ->
+        | Ok
+            (((active_runtimes, _, _, _, _, _, _, _) as degraded_loaded), degradation)
+          ->
           (match validate_runtime_max_context ~config_path active_runtimes with
            | Error msg -> Error (Runtime_config_error msg)
            | Ok () ->
@@ -1237,6 +1284,12 @@ let runtime_id_for_keeper (keeper_name : string) : string option =
 ;;
 
 let keeper_assignments () = (runtime_state ()).keeper_assignments
+
+(* Dedicated Memory OS consolidation routing. [None] means the periodic pass
+   inherits [runtime].default. *)
+let memory_os_consolidation_runtime_id () =
+  (runtime_state ()).memory_os_consolidation_runtime_id
+;;
 
 (* [runtime].structured_judge is the explicit runtime.toml SSOT for
    provider-native schema requests. *)

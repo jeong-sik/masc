@@ -239,6 +239,10 @@ type config =
   ; models : model_spec list
   ; bindings : binding list
   ; default_runtime_id : string option
+  ; memory_os_consolidation_runtime_id : string option
+    (** [\[runtime\].memory_os_consolidation] — runtime id for the periodic
+        Memory OS fact-survival consolidation pass. [None] inherits
+        [\[runtime\].default]. Unknown ids are rejected at load. *)
   ; structured_judge_runtime_id : string option
     (** [\[runtime\].structured_judge] — runtime id for provider-native
         structured-output judge calls such as dashboard operator

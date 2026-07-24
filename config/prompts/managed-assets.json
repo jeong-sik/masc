@@ -27,6 +27,8 @@
     "keeper.librarian.episode_extraction.md",
     "keeper.librarian.memory_consolidation.md",
     "keeper.librarian.system.md",
+    "keeper.memory_llm_summary.system.md",
+    "keeper.memory_llm_summary.user.md",
     "keeper.memory_os_recall.context.md",
     "keeper.memory_os_recall.episodes_section.md",
     "keeper.memory_os_recall.facts_section.md",

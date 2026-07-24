@@ -616,6 +616,7 @@ let test_repo_runtime_bindings_resolve_through_oas_provider_config () =
       ( runtimes
       , _default
       , _assignments
+      , _memory_os_consolidation
       , _structured_judge
       , _cross_verifier
       , _media_failover , _lanes ) ->
@@ -739,12 +740,18 @@ let test_repo_runtime_toml_loads () =
       ( runtimes
       , default
       , assignments
+      , memory_os_consolidation
       , structured_judge
       , _cross_verifier
       , _media_failover , _lanes ) ->
     check bool "at least one runtime" true (List.length runtimes > 0);
     check string "default runtime" "ollama_cloud.deepseek-v4-flash"
       default.Runtime.id;
+    check
+      (option string)
+      "Memory OS consolidation runtime"
+      (Some "ollama_cloud_native.minimax-m3-native-structured")
+      memory_os_consolidation;
     check
       (option string)
       "structured judge runtime"
@@ -1009,6 +1016,26 @@ let test_runtime_toml_rejects_unknown_runtime_key () =
       (String_util.contains_substring rendered "runtime.defualt");
     check bool "error explains unknown runtime key" true
       (String_util.contains_substring rendered "unknown [runtime] key")
+
+let test_runtime_toml_rejects_retired_librarian_key () =
+  let content =
+    "[runtime]\n\
+     default = \"local.sample\"\n\
+     librarian = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> failf "retired [runtime].librarian key should fail parse"
+  | Error errs ->
+    let rendered =
+      errs
+      |> List.map (fun (err : Runtime_toml.parse_error) ->
+        Printf.sprintf "%s: %s" err.path err.message)
+      |> String.concat "\n"
+    in
+    check bool "error names retired key" true
+      (String_util.contains_substring rendered "runtime.librarian");
+    check bool "error names replacement route" true
+      (String_util.contains_substring rendered "runtime].memory_os_consolidation")
 
 let test_runtime_toml_allows_runtime_profile_tables () =
   let content =
@@ -1786,6 +1813,7 @@ let test_runtime_toml_max_concurrent_flows_to_provider_config () =
         ( runtimes
         , _default
         , _assignments
+        , _memory_os_consolidation
         , _structured_judge
         , _cross_verifier
         , _media_failover
@@ -1854,6 +1882,7 @@ let test_cross_verifier_runtime_routing () =
         ( _runtimes
         , _default
         , _assignments
+        , _memory_os_consolidation
         , _structured_judge
         , cross_verifier
         , _media_failover , _lanes ) ->
@@ -1864,6 +1893,7 @@ let test_cross_verifier_runtime_routing () =
     | Error msg -> failf "absent cross_verifier should load: %s" msg
     | Ok
         ( _
+        , _
         , _
         , _
         , _structured_judge
@@ -1882,6 +1912,55 @@ let test_cross_verifier_runtime_routing () =
         "[runtime].cross_verifier must reject models without JSON response \
          format support"
     | Error _ -> ())
+
+let test_memory_os_consolidation_runtime_routing () =
+  with_fake_runtime_model_catalog @@ fun () ->
+  let base =
+    "[providers.local]\n\
+     display-name = \"Local\"\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://localhost:11434\"\n\
+     \n\
+     [models.chat]\n\
+     api-name = \"chat\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.consolidation]\n\
+     api-name = \"consolidation\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.chat]\n\
+     \n\
+     [local.consolidation]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.chat\"\n"
+  in
+  with_temp_runtime_toml
+    (base ^ "memory_os_consolidation = \"local.consolidation\"\n")
+    (fun path ->
+       match Runtime.load_list ~config_path:path with
+       | Error msg -> failf "Memory OS consolidation routing should load: %s" msg
+       | Ok (_, _, _, consolidation, _, _, _, _) ->
+         check
+           (option string)
+           "Memory OS consolidation runtime id"
+           (Some "local.consolidation")
+           consolidation);
+  with_temp_runtime_toml base (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg -> failf "absent Memory OS consolidation route should load: %s" msg
+    | Ok (_, _, _, consolidation, _, _, _, _) ->
+      check (option string) "Memory OS consolidation route unset" None consolidation);
+  with_temp_runtime_toml
+    (base ^ "memory_os_consolidation = \"local.nope\"\n")
+    (fun path ->
+       match Runtime.load_list ~config_path:path with
+       | Ok _ ->
+         failf "unknown [runtime].memory_os_consolidation id must be rejected"
+       | Error msg ->
+         check bool "error names Memory OS consolidation route" true
+           (String_util.contains_substring msg "memory_os_consolidation"))
 
 let test_structured_judge_runtime_routing () =
   with_fake_runtime_model_catalog @@ fun () ->
@@ -1913,7 +1992,7 @@ let test_structured_judge_runtime_routing () =
   with_temp_runtime_toml (base ^ "structured_judge = \"local.judge\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "structured_judge routing should load: %s" msg
-    | Ok (_, _, _, structured_judge, _, _, _) ->
+    | Ok (_, _, _, _, structured_judge, _, _, _) ->
       check
         (option string)
         "structured_judge runtime id"
@@ -1922,7 +2001,7 @@ let test_structured_judge_runtime_routing () =
   with_temp_runtime_toml base (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "absent structured_judge should load: %s" msg
-    | Ok (_, _, _, structured_judge, _, _, _) ->
+    | Ok (_, _, _, _, structured_judge, _, _, _) ->
       check (option string) "structured_judge unset is None" None structured_judge);
   with_temp_runtime_toml (base ^ "structured_judge = \"local.nope\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
@@ -2052,7 +2131,7 @@ let test_structured_judge_lane_target () =
   with_temp_runtime_toml capable_lane (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "lane-targeted structured_judge should load: %s" msg
-    | Ok (_, _, _, structured_judge, _, _, lanes) ->
+    | Ok (_, _, _, _, structured_judge, _, _, lanes) ->
       check
         (option string)
         "structured_judge keeps the lane id"
@@ -2120,7 +2199,7 @@ let test_cross_verifier_lane_target () =
   with_temp_runtime_toml json_capable_lane (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "lane-targeted cross_verifier should load: %s" msg
-    | Ok (_, _, _, _, cross_verifier, _, _) ->
+    | Ok (_, _, _, _, _, cross_verifier, _, _) ->
       check
         (option string)
         "cross_verifier keeps the lane id"
@@ -2594,6 +2673,9 @@ let () =
             "[runtime].cross_verifier resolves, defaults to None, rejects unknown"
             `Quick test_cross_verifier_runtime_routing;
           test_case
+            "[runtime].memory_os_consolidation resolves and rejects unknown"
+            `Quick test_memory_os_consolidation_runtime_routing;
+          test_case
             "[runtime].structured_judge resolves and rejects unsupported models"
             `Quick test_structured_judge_runtime_routing;
           test_case
@@ -2621,6 +2703,8 @@ let () =
             test_runtime_toml_reserves_web_search_namespace;
           test_case "runtime table rejects unknown keys" `Quick
             test_runtime_toml_rejects_unknown_runtime_key;
+          test_case "runtime table rejects retired librarian key" `Quick
+            test_runtime_toml_rejects_retired_librarian_key;
           test_case "runtime table allows profile tables" `Quick
             test_runtime_toml_allows_runtime_profile_tables;
           test_case "runtime table rejects wrong-type media_failover" `Quick

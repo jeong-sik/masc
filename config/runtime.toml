@@ -11,6 +11,9 @@
 
 [runtime]
 default = "ollama_cloud.deepseek-v4-flash"
+# Periodic Memory OS fact-survival consolidation is a separate task route from
+# post-turn Librarian extraction. Model/provider selection belongs only here.
+memory_os_consolidation = "ollama_cloud_native.minimax-m3-native-structured"
 # Existing deployments must opt in explicitly after the exact-output registry
 # is available:
 # [runtime.exact_output_lanes.librarian_exact]

@@ -127,7 +127,9 @@ let test_compaction_rejection_tag_is_stable () =
     string
     "diagnostic detail remains observable"
     "compaction rejected: invalid_structural_evidence:no_messages_compacted:\
-     invalid_structural_evidence:slot_id=compaction-slot:call_id=call-compaction"
+     invalid_structural_evidence:slot_id=compaction-slot:call_id=call-compaction:\
+     plan_fingerprint=compaction-plan:\
+     request_body_sha256=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
     (Post_turn.compaction_recovery_error_to_string error)
 
 let test_final_admission_busy_requeues_only_pre_dispatch_no_compaction () =
@@ -551,6 +553,41 @@ let test_manual_compaction_serializes_owner_lane () =
         Yojson.Safe.Util.(evidence |> member "call_id" |> to_string |> String.trim |> fun value -> value <> "");
       check bool "manifest retains nonblank exact slot id" true
         Yojson.Safe.Util.(evidence |> member "slot_id" |> to_string |> String.trim |> fun value -> value <> "");
+      let applied_settlement =
+        Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
+          ~base_path
+          ~settled_at:(Time_compat.now ())
+          ~stop_requested:false
+          ~compaction_consecutive_failures:
+            meta.runtime.compaction_rt.consecutive_failures
+          ~lease
+          (Some outcome)
+      in
+      (match
+         Masc.Keeper_heartbeat_loop.For_testing.settle_claimed_lease_exact
+           ~after_exact_disposition_prepare:(fun () -> ())
+           ~base_path
+           ~keeper_name:meta.name
+           ~settled_at:(Time_compat.now ())
+           ~lease
+           ~settlement:applied_settlement
+           ()
+       with
+       | Ok
+           ( Registry_queue.Settled _
+           | Registry_queue.Already_settled _ ) ->
+         (match
+            Masc.Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+              ~base_path
+              ~keeper_name:meta.name
+          with
+          | Ok () -> ()
+          | Error detail ->
+            failf "applied compaction ledger projection failed: %s" detail)
+       | Ok (Registry_queue.Committed_followup_failed { detail; _ }) ->
+         failf "applied compaction follow-up failed: %s" detail
+       | Error detail ->
+         failf "applied compaction settlement failed: %s" detail);
       let concurrent_checkpoint =
         { compacted with
           messages =
@@ -671,11 +708,55 @@ let test_manual_compaction_serializes_owner_lane () =
       publish_exact_fixture
         ~source:"post-turn planning-admission race"
         race_server;
+      let race_stimulus : Queue.stimulus =
+        { post_id = "manual-compaction-race"
+        ; urgency = Immediate
+        ; arrived_at = Time_compat.now ()
+        ; payload = Manual_compaction_requested
+        }
+      in
+      Result.get_ok
+        (Registry_queue.enqueue_durable_result
+           ~base_path
+           meta.name
+           race_stimulus);
+      check int
+        "race stimulus is durably pending"
+        1
+        (Keeper_event_queue_persistence.load_pending_result
+           ~base_path
+           ~keeper_name:meta.name
+         |> Result.get_ok
+         |> Queue.length);
+      (match Registry_queue.active_lease_result ~base_path meta.name with
+       | Ok None -> ()
+       | Ok (Some _) -> fail "applied compaction left its source lease active"
+       | Error detail -> failf "active lease read failed: %s" detail);
+      let race_lease =
+        match
+          Registry_queue.claim_when_result
+            ~base_path
+            meta.name
+            ~claimed_at:(Time_compat.now ())
+            ~ready:(fun stimulus ->
+              match stimulus.Queue.payload with
+              | Manual_compaction_requested -> true
+              | _ -> false)
+        with
+        | Ok (Some lease) -> lease
+        | Ok None -> fail "race manual compaction request was not claimed"
+        | Error detail ->
+          failf "race manual compaction claim failed: %s" detail
+      in
       let busy_after_prepare =
         Masc.Keeper_manual_compaction.run_admitted
           ~config
           ~meta
-          ~exact_execution_guard:Exact_fixture.permissive_exact_execution_guard
+          ~exact_execution_guard:
+            (Masc.Keeper_heartbeat_loop.For_testing.exact_execution_guard
+               ~base_path
+               ~keeper_name:meta.name
+               ~lease:race_lease)
           ()
       in
       check int
@@ -719,7 +800,7 @@ let test_manual_compaction_serializes_owner_lane () =
           ~stop_requested:false
           ~compaction_consecutive_failures:
             meta.runtime.compaction_rt.consecutive_failures
-          ~lease
+          ~lease:race_lease
           (Some
              (Cycle.Manual_compaction_not_applied
                 { meta; no_compaction }))
@@ -745,14 +826,31 @@ let test_manual_compaction_serializes_owner_lane () =
        | Registry_queue.Settle_exact _
        | Registry_queue.Escalate _ ->
          fail "post-dispatch final admission lost source-bound terminal evidence");
-      Registry_queue.settle_result
-        ~base_path
-        meta.name
-        ~settled_at:(Time_compat.now ())
-        ~lease
-        ~settlement
-      |> Result.get_ok
-      |> ignore;
+      (match
+         Masc.Keeper_heartbeat_loop.For_testing.settle_claimed_lease_exact
+           ~after_exact_disposition_prepare:(fun () -> ())
+           ~base_path
+           ~keeper_name:meta.name
+           ~settled_at:(Time_compat.now ())
+           ~lease:race_lease
+           ~settlement
+           ()
+       with
+       | Ok
+           ( Registry_queue.Settled _
+           | Registry_queue.Already_settled _ ) ->
+         (match
+            Masc.Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+              ~base_path
+              ~keeper_name:meta.name
+          with
+          | Ok () -> ()
+          | Error detail ->
+            failf "post-dispatch terminal ledger projection failed: %s" detail)
+       | Ok (Registry_queue.Committed_followup_failed { detail; _ }) ->
+         failf "post-dispatch terminal follow-up failed: %s" detail
+       | Error detail ->
+         failf "post-dispatch terminal settlement failed: %s" detail);
       let next_intake =
         Masc.Keeper_heartbeat_loop.heartbeat_event_intake
           ~ctx

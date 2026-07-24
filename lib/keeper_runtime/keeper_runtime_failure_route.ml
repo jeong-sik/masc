@@ -156,6 +156,7 @@ let route_of_api_error ~err (api : Llm_provider.Retry.api_error) =
   | Llm_provider.Retry.Timeout _ -> observe_retry Provider_timeout
   | Llm_provider.Retry.InvalidRequest _ -> judge Deterministic_request
   | Llm_provider.Retry.ContextOverflow _ -> judge Context_overflow
+  | Llm_provider.Retry.InputCapacity _ -> judge Deterministic_request
 
 let route_of_provider_error ~err (p : Llm_provider.Error.provider_error) =
   let judge = judge ~err ~provenance:Oas_provider_error in

@@ -97,7 +97,8 @@ let classify_error (err : Agent_sdk.Error.sdk_error) : error_classification =
   | Agent_sdk.Error.Provider (Llm_provider.Error.UnknownVariant _) -> Unclassified
   | Agent_sdk.Error.Api (InvalidRequest _ | ServerError _ | AuthError _
     | AuthorizationError _
-    | NotFound _ | PaymentRequired _ | ContextOverflow _) -> Non_transient
+    | NotFound _ | PaymentRequired _ | ContextOverflow _ | InputCapacity _) ->
+    Non_transient
   | Agent_sdk.Error.Agent
       ( HookExecutionFailed _
       | TerminalToolEffectFailed _
@@ -138,7 +139,8 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Api (PaymentRequired _)
   | Agent_sdk.Error.Api (InvalidRequest _)
   | Agent_sdk.Error.Api (NotFound _)
-  | Agent_sdk.Error.Api (ContextOverflow _) -> false
+  | Agent_sdk.Error.Api (ContextOverflow _)
+  | Agent_sdk.Error.Api (InputCapacity _) -> false
   (* Non-API error families are by definition not transient network errors. *)
   | Agent_sdk.Error.Provider _
   | Agent_sdk.Error.Agent _
@@ -244,7 +246,8 @@ let is_model_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (InvalidRequest _ | NetworkError _ | Timeout _
     | Overloaded _ | ServerError _ | RateLimited _ | AuthError _
-    | AuthorizationError _ | NotFound _ | PaymentRequired _ | ContextOverflow _) ->
+    | AuthorizationError _ | NotFound _ | PaymentRequired _ | ContextOverflow _
+    | InputCapacity _) ->
       false
   | Agent_sdk.Error.Provider _ -> false
   | Agent_sdk.Error.Agent _ -> false
@@ -569,6 +572,7 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
          | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
+         | Agent_sdk.Error.Api (Llm_provider.Retry.InputCapacity _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) -> None
          (* Non-API error families have no rotation reason here: structured
@@ -757,6 +761,7 @@ let is_invalid_request_error (err : Agent_sdk.Error.sdk_error) : bool =
 let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (ContextOverflow _) -> true
+  | Agent_sdk.Error.Api (InputCapacity _) -> false
   | Agent_sdk.Error.Agent (UnrecognizedStopReason { reason = "model_context_window_exceeded"; _ }) -> true
   | _ ->
     let msg = Agent_sdk.Error.to_string err in

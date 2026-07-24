@@ -194,8 +194,8 @@ val turn_event_bus_evidence_detail :
 val context_overflow_event_of_error :
   Agent_sdk.Error.sdk_error ->
   Keeper_state_machine.event option
-(** [Some] only for typed [Api (ContextOverflow _)]. The event preserves the
-    provider-declared limit and never invents an actual input-token count. *)
+(** [Some] only for typed [Api (ContextOverflow _)]. Other errors return
+    [None]. *)
 
 val provider_overflow_decision : reason:string -> string
 (** The [compaction_rt.last_decision] value stamped by [record_overflow_failure]

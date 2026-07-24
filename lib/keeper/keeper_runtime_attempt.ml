@@ -110,6 +110,8 @@ let sdk_error_to_runtime_outcome err =
            http_error ~code:400 ~body:message
          | ContextOverflow { message; _ } ->
            http_error ~code:400 ~body:message
+         | InputCapacity { message; _ } ->
+           http_error ~code:400 ~body:message
          | RateLimited { message; retry_after } ->
            (* Reconstruction boundary: [retry_after] is the resolved value
               (body-or-header) and the header slot is the only retry-after

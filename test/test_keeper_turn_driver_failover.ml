@@ -938,6 +938,60 @@ let context_overflow_error message =
   Agent_sdk.Error.Api
     (Agent_sdk.Retry.ContextOverflow { message; limit = Some 32768 })
 
+let serving_constraint () =
+  Llm_provider.Serving_constraint.make
+    ~source_kind:Llm_provider.Serving_constraint.Probe
+    ~source_ref:"probe://incident/2793"
+    ~checked_at_unix_s:0
+    ~confidence:Llm_provider.Serving_constraint.High
+    ~expires_at_unix_s:200
+    ~accepted_through:524298
+    ~rejected_from:524299
+    ()
+  |> Result.get_ok
+
+let input_capacity_error reason =
+  Agent_sdk.Error.Api
+    (Agent_sdk.Retry.InputCapacity
+       { message = "typed input-capacity admission"
+       ; constraint_ = serving_constraint ()
+       ; reason
+       })
+
+let test_attempt_loop_input_capacity_does_not_advance_masc_lane () =
+  let attempts = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"resilient"
+      ~runtime_id_of:(fun runtime_id -> runtime_id)
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+        attempts := !attempts @ [ runtime_id ];
+        match candidate with
+        | "unmeasurable.test_model" ->
+          Error
+            (input_capacity_error
+               (Agent_sdk.Retry.Token_measurement_unavailable
+                  Llm_provider.Input_token_count.Anthropic_messages_count_tokens)),
+          None
+        | other ->
+          Alcotest.failf
+            "MASC advanced to candidate %s without an OAS flow receipt"
+            other)
+      [ "unmeasurable.test_model"; "measurable.test_model" ]
+  in
+  (match result with
+   | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.InputCapacity _)) -> ()
+   | Error error ->
+     Alcotest.failf
+       "typed input capacity was not preserved: %s"
+       (Agent_sdk.Error.to_string error)
+   | Ok _ -> Alcotest.fail "MASC must not advance an InputCapacity failure");
+  Alcotest.(check (list string))
+    "only OAS may advance the candidate flow"
+    [ "unmeasurable.test_model" ]
+    !attempts
+
 (* A typed ContextOverflow is a per-candidate capacity bound: a later lane
    candidate with a larger context window can still serve the same turn, so
    the walk must continue instead of treating the 400 mapping as terminal. *)
@@ -1083,6 +1137,10 @@ let () =
             "context overflow tries next lane candidate"
             `Quick
             test_attempt_loop_overflow_tries_next_candidate;
+          Alcotest.test_case
+            "input capacity does not advance MASC lane"
+            `Quick
+            test_attempt_loop_input_capacity_does_not_advance_masc_lane;
           Alcotest.test_case
             "context overflow on last candidate stays terminal"
             `Quick

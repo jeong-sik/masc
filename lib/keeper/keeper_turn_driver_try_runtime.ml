@@ -32,7 +32,8 @@ let context_overflow_should_try_next = function
       | Agent_sdk.Retry.ServerError _ | Agent_sdk.Retry.AuthError _
       | Agent_sdk.Retry.AuthorizationError _
       | Agent_sdk.Retry.PaymentRequired _ | Agent_sdk.Retry.InvalidRequest _
-      | Agent_sdk.Retry.NotFound _ | Agent_sdk.Retry.NetworkError _
+      | Agent_sdk.Retry.NotFound _ | Agent_sdk.Retry.InputCapacity _
+      | Agent_sdk.Retry.NetworkError _
       | Agent_sdk.Retry.Timeout _ )
   | Agent_sdk.Error.Provider _
   | Agent_sdk.Error.Agent _

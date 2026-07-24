@@ -1107,13 +1107,6 @@ let load_list_internal ~(config_path : string) ~validate_max_context
   materialize_config ~validate_max_context ~config_path cfg
 ;;
 
-let load_exact_output_lane_declarations ~config_path =
-  let* _, exact_output_lane_decls =
-    load_list_internal ~config_path ~validate_max_context:true
-  in
-  Ok exact_output_lane_decls
-;;
-
 let load_list ~config_path =
   load_list_internal ~config_path ~validate_max_context:true
   |> Result.map fst
@@ -1237,6 +1230,22 @@ let init_default_degraded_report ~config_path =
              Ok (Initialized_degraded degradation))))
 
 let runtime_state () = Atomic.get loaded_state_ref
+
+let effective_exact_output_lane_declarations exact_output_lane_decls =
+  let state = runtime_state () in
+  match state.default_runtime with
+  | None ->
+    Error
+      "runtime exact-output lanes: effective runtime state is not initialized"
+  | Some default_runtime ->
+    ensure_hitl_auto_judge_lane
+      ~runtimes:state.runtimes
+      ~default_runtime
+      ~librarian_runtime_id:state.librarian_runtime_id
+      ~structured_judge_runtime_id:state.structured_judge_runtime_id
+      ~lanes:state.lanes
+      exact_output_lane_decls
+;;
 
 let get_default_runtime () = (runtime_state ()).default_runtime
 let get_runtimes () = (runtime_state ()).runtimes

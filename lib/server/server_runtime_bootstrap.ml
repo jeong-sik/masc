@@ -185,15 +185,27 @@ let load_exact_output_lane_declarations () =
       (Env_config_core.Config_error
          "exact-output registry: runtime.toml path is unavailable")
   | Some config_path ->
-    (match Runtime.load_exact_output_lane_declarations ~config_path with
-     | Ok lanes -> lanes
-     | Error detail ->
+    (match Runtime_toml.parse_file config_path with
+     | Error errors ->
        raise
          (Env_config_core.Config_error
             (Printf.sprintf
-               "exact-output registry: runtime config materialization failed (%s): %s"
+               "exact-output registry: runtime config parse failed (%s): %d error(s)"
                config_path
-               detail)))
+               (List.length errors)))
+     | Ok (config : Runtime_schema.config) ->
+       (match
+          Runtime.effective_exact_output_lane_declarations
+            config.exact_output_lane_decls
+        with
+        | Ok lanes -> lanes
+        | Error detail ->
+          raise
+            (Env_config_core.Config_error
+               (Printf.sprintf
+                  "exact-output registry: effective runtime lane materialization failed (%s): %s"
+                  config_path
+                  detail))))
 ;;
 
 let configure_exact_output_registry ?config_root () =

@@ -1667,6 +1667,22 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
          check (list string) "active runtime ids"
            [ "ollama.good" ]
            (Runtime.get_runtime_ids ());
+         (match Runtime.effective_exact_output_lane_declarations [] with
+          | Error detail ->
+            failf
+              "effective exact-output lanes must use degraded runtime state: %s"
+              detail
+          | Ok [ lane ] ->
+            check string "synthesized HITL lane id"
+              "hitl_auto_judge"
+              lane.Runtime_schema.id;
+            check (list string) "synthesized HITL lane uses active default only"
+              [ "ollama.good" ]
+              lane.slot_ids
+          | Ok lanes ->
+            failf
+              "expected one synthesized HITL lane, got %d"
+              (List.length lanes));
          check (list string) "no dropped assignment"
            []
            (List.map

@@ -124,13 +124,14 @@ val load_list :
     keeper→runtime-id list; [media_failover] is the RFC-0265 ordered reroute
     list; [lanes] is the ordered failover candidate lists. *)
 
-val load_exact_output_lane_declarations :
-  config_path:string ->
+val effective_exact_output_lane_declarations :
+  Runtime_schema.exact_output_lane_decl list ->
   (Runtime_schema.exact_output_lane_decl list, string) result
-(** Parse and materialize the effective exact-output lanes from runtime.toml.
+(** Materialize exact-output lanes from the initialized effective runtime state.
     When [hitl_auto_judge] is not explicitly declared, its opaque slot ids are
-    derived from the structured-judge assignment through the same pure path used
-    by runtime config writes. *)
+    derived from the effective structured-judge assignment through the same pure
+    path used by runtime config writes. This never reparses or revalidates
+    runtimes disabled by degraded startup. *)
 
 val runtime_ids : t list -> string list
 

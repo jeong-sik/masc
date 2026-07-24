@@ -712,7 +712,7 @@ let complete_existing_judgment
       judgment
   =
   let item : Partition.completed_item =
-    { candidate_id = (!latest_partition).candidate_id; judgment }
+    { Partition.candidate_id = (!latest_partition).candidate_id; judgment }
   in
   match
     Partition.complete_existing_judgment
@@ -754,7 +754,7 @@ let settle_existing_consumed
       judgment
   =
   let item : Partition.completed_item =
-    { candidate_id = (!latest_partition).candidate_id; judgment }
+    { Partition.candidate_id = (!latest_partition).candidate_id; judgment }
   in
   match
     Partition.complete_existing_judgment

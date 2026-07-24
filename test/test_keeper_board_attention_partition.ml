@@ -92,9 +92,30 @@ let roots ~base_path candidates =
 ;;
 
 let claim ~base_path ~worker_epoch ~now =
-  match ok "claim next" (P.claim_next ~now ~worker_epoch ~base_path ~keeper_name:"sangsu") with
+  let target =
+    ok "load claim target" (P.load ~base_path ~keeper_name:"sangsu")
+    |> List.find_opt (fun (partition : P.t) ->
+      match partition.state with
+      | P.Ready -> true
+      | P.Running _ | P.Completed _ | P.Settled _ | P.Blocked _ -> false)
+  in
+  let target =
+    match target with
+    | Some target -> target
+    | None -> Alcotest.fail "expected a Ready partition"
+  in
+  match
+    ok
+      "claim exact Ready target"
+      (P.claim_ready_exact
+         ~now
+         ~worker_epoch
+         ~base_path
+         ~keeper_name:"sangsu"
+         ~partition_id:target.partition_id)
+  with
   | Some partition -> partition
-  | None -> Alcotest.fail "expected a Ready partition"
+  | None -> Alcotest.fail "exact Ready target lost its claim"
 ;;
 
 let fsynced label (transition : P.exact_transition) =
@@ -150,6 +171,72 @@ let test_roots_are_singleton_deterministic_and_context_exact () =
     "different exact Keeper contexts do not collapse"
     false
     (A.Context_key.equal primary_key isolated_key)
+;;
+
+let test_exact_claim_never_claims_a_ready_sibling () =
+  with_temp_base "board-attention-partition-exact-claim" @@ fun base_path ->
+  let first = candidate ~id:"candidate-first" ~recorded_at:1.0 () in
+  let second = candidate ~id:"candidate-second" ~recorded_at:2.0 () in
+  let partitions = roots ~base_path [ first; second ] in
+  let partition_for candidate =
+    match
+      List.find_opt
+        (fun (partition : P.t) ->
+           String.equal partition.candidate_id candidate.A.candidate_id)
+        partitions
+    with
+    | Some partition -> partition
+    | None -> Alcotest.fail "candidate root is absent"
+  in
+  let first_partition = partition_for first in
+  let second_partition = partition_for second in
+  let competitor = P.Worker_epoch.generate () in
+  ignore
+    (ok
+       "competitor claims selected target"
+       (P.claim_ready_exact
+          ~now:10.0
+          ~worker_epoch:competitor
+          ~base_path
+          ~keeper_name:"sangsu"
+          ~partition_id:first_partition.partition_id)
+     : P.t option);
+  let stale_worker = P.Worker_epoch.generate () in
+  Alcotest.(check bool)
+    "stale target does not redirect to a sibling"
+    true
+    (Option.is_none
+       (ok
+          "stale exact target claim"
+          (P.claim_ready_exact
+             ~now:11.0
+             ~worker_epoch:stale_worker
+             ~base_path
+             ~keeper_name:"sangsu"
+             ~partition_id:first_partition.partition_id)));
+  (match
+     ok "load after stale target conflict" (P.load ~base_path ~keeper_name:"sangsu")
+     |> List.find_opt (fun (partition : P.t) ->
+       String.equal partition.partition_id second_partition.partition_id)
+   with
+   | Some { state = P.Ready; _ } -> ()
+   | Some _ | None -> Alcotest.fail "stale claim mutated the Ready sibling");
+  match
+    ok
+      "claim explicitly reselected sibling"
+      (P.claim_ready_exact
+         ~now:12.0
+         ~worker_epoch:stale_worker
+         ~base_path
+         ~keeper_name:"sangsu"
+         ~partition_id:second_partition.partition_id)
+  with
+  | Some claimed ->
+    Alcotest.(check string)
+      "explicit target identity"
+      second_partition.partition_id
+      claimed.partition_id
+  | None -> Alcotest.fail "explicitly reselected sibling was not claimed"
 ;;
 
 let test_binding_owns_completion_and_settlement () =
@@ -650,17 +737,14 @@ let test_restart_releases_only_unbound_and_quarantines_dispatchable () =
     "only prior Unbound can be reclaimed"
     unbound_candidate.candidate_id
     reclaimed.candidate_id;
-  Alcotest.(check (option string))
+  Alcotest.(check (list string))
     "quarantined executions are never redispatched"
-    None
-    (ok
-       "no second claim"
-       (P.claim_next
-          ~now:23.0
-          ~worker_epoch:owner
-          ~base_path
-          ~keeper_name:"sangsu")
-     |> Option.map (fun partition -> partition.P.candidate_id))
+    []
+    (ok "load terminalized roots" (P.load ~base_path ~keeper_name:"sangsu")
+     |> List.filter_map (fun (partition : P.t) ->
+       match partition.state with
+       | P.Ready -> Some partition.candidate_id
+       | P.Running _ | P.Completed _ | P.Settled _ | P.Blocked _ -> None))
 ;;
 
 let test_provider_neutral_blocked_reason_codec () =
@@ -874,6 +958,10 @@ let () =
             "roots are deterministic singleton context partitions"
             `Quick
             test_roots_are_singleton_deterministic_and_context_exact
+        ; Alcotest.test_case
+            "exact claim never redirects to a Ready sibling"
+            `Quick
+            test_exact_claim_never_claims_a_ready_sibling
         ; Alcotest.test_case
             "binding owns completion and settlement"
             `Quick

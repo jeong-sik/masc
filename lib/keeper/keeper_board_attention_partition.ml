@@ -64,13 +64,15 @@ type blocked_reason =
   | Unexpected_worker_failure of string
   | Exact_execution_quarantined of running_progress
 
+type running_state =
+  { worker_epoch : Worker_epoch.t
+  ; started_at : float
+  ; progress : running_progress
+  }
+
 type state =
   | Ready
-  | Running of
-      { worker_epoch : Worker_epoch.t
-      ; started_at : float
-      ; progress : running_progress
-      }
+  | Running of running_state
   | Completed of
       { item : completed_item
       ; completed_at : float
@@ -102,6 +104,7 @@ type exact_transition =
 
 type requeue_blocked_outcome =
   | Requeued of exact_transition
+  | Cursor_conflict of string
   | Generation_conflict of string
 
 let ( let* ) = Result.bind
@@ -1058,21 +1061,47 @@ let recover_for_process_start ~now ~base_path ~keeper_name =
              Ok recovered)))
 ;;
 
-let claim_next ~now ~worker_epoch ~base_path ~keeper_name =
+let claim_ready_exact
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~keeper_name
+      ~partition_id
+  =
   let* () = valid_time "partition claim time" now in
-  update ~base_path ~keeper_name (fun view ->
-    match Ready_set.min_elt_opt view.ready with
-    | None -> Ok ([], None)
-    | Some selected_order ->
-      (match Id_map.find_opt selected_order.partition_id view.by_id with
-       | None -> Error ("ready index lost partition " ^ selected_order.partition_id)
-       | Some selected ->
-         let claimed =
-           { selected with
-             state = Running { worker_epoch; started_at = now; progress = Unbound }
-           }
-         in
-         Ok ([ claimed ], Some claimed)))
+  let* () = nonempty "partition claim id" partition_id in
+  let ledger_path = path ~base_path ~keeper_name in
+  run_blocking "board-attention-partition-exact-claim" (fun () ->
+    let entry = cache_entry ledger_path in
+    Stdlib.Mutex.protect entry.mutation_mutex (fun () ->
+      let* view = read_view_blocking ledger_path in
+      let* () = validate_keeper_identity ~keeper_name view in
+      match Id_map.find_opt partition_id view.by_id with
+      | None -> Ok None
+      | Some selected ->
+        (match selected.state with
+         | Ready ->
+           let claimed =
+             { selected with
+               state = Running { worker_epoch; started_at = now; progress = Unbound }
+             }
+           in
+           let* updated = apply_rows view [ claimed ] in
+           let suffix = serialize [ claimed ] in
+           (match
+              Fs_compat.append_private_jsonl_durable_locked_at_cursor_result
+                ledger_path
+                ~expected:view.cursor
+                suffix
+            with
+            | Error (Fs_compat.Cursor_mismatch _) ->
+              Atomic.set entry.cached None;
+              Ok None
+            | append_result ->
+              let* cursor = cursor_result ~ledger_path append_result in
+              Atomic.set entry.cached (Some { updated with cursor });
+              Ok (Some claimed))
+         | Running _ | Completed _ | Settled _ | Blocked _ -> Ok None)))
 ;;
 
 let transition_running ~base_path ~partition ~worker_epoch decide =
@@ -1263,6 +1292,7 @@ let confirm_blocked ~base_path ~(partition : t) =
 
 type requeue_decision =
   | Append_ready of t
+  | Observe_cursor_conflict of string
   | Observe_generation_conflict of string
 
 let update_requeue_exact_or_observe ~base_path ~keeper_name decide =
@@ -1290,7 +1320,7 @@ let update_requeue_exact_or_observe ~base_path ~keeper_name decide =
             | Error (Fs_compat.Cursor_mismatch _ as conflict) ->
               Ok
                 (`Observed
-                   (Observe_generation_conflict
+                   (Observe_cursor_conflict
                       (Fs_compat.private_jsonl_transaction_error_to_string
                          conflict)))
             | append_result ->
@@ -1338,7 +1368,9 @@ let requeue_blocked ~base_path ~(partition : t) =
             })
      | `Observed (Observe_generation_conflict detail) ->
        Ok (Generation_conflict detail)
-     | `Written (Observe_generation_conflict _, _)
+     | `Observed (Observe_cursor_conflict detail) ->
+       Ok (Cursor_conflict detail)
+     | `Written ((Observe_cursor_conflict _ | Observe_generation_conflict _), _)
      | `Observed (Append_ready _) ->
        Error "invalid exact requeue decision")
   | Ready | Running _ | Completed _ | Settled _ ->

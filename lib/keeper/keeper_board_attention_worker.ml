@@ -618,16 +618,18 @@ let prepare_next_ready
   with
   | None -> Ok None
   | Some partition ->
+    let selected prepared = Ok (Some (partition.partition_id, prepared)) in
     (match candidate_by_id partition.candidate_id candidates with
-     | None -> Ok None
+     | None -> selected None
      | Some candidate ->
        (match validate_partition_member partition candidate with
-        | Error _ -> Ok None
+        | Error _ -> selected None
         | Ok () ->
           (match Candidate.resumable_status candidate.status with
            | Some (Candidate.Resumable_pending _) ->
              (match prepare candidate with
-              | Ok prepared -> Ok (Some (candidate.candidate_id, prepared))
+              | Ok prepared ->
+                selected (Some (candidate.candidate_id, prepared))
               | Error error ->
                 Error
                   ("Board attention exact setup unavailable before claim: "
@@ -635,12 +637,12 @@ let prepare_next_ready
            | Some
                (Candidate.Resumable_judged _
                | Candidate.Resumable_consumed _)
-           | None -> Ok None)))
+           | None -> selected None)))
 ;;
 
 let confirm_requeue_transition ~base_path transition =
   match transition.Partition.write_outcome with
-  | Partition.Fsync_completed -> Ok transition.partition
+  | Partition.Fsync_completed -> Ok transition
   | Partition.Visible_sync_unconfirmed _ ->
     let* confirmed =
       Partition.confirm_ready
@@ -648,12 +650,13 @@ let confirm_requeue_transition ~base_path transition =
         ~partition:transition.partition
     in
     (match confirmed.write_outcome with
-     | Partition.Fsync_completed -> Ok confirmed.partition
+     | Partition.Fsync_completed -> Ok confirmed
      | Partition.Visible_sync_unconfirmed detail ->
        Error ("requeued partition fsync remains unconfirmed: " ^ detail))
 ;;
 
 let rec converge_requeue_conflict
+    ?(remaining_cursor_retries = 2)
     ?(allow_requeue = true)
     ~base_path
     ~keeper_name
@@ -711,19 +714,36 @@ let rec converge_requeue_conflict
     let* confirmation = Partition.confirm_ready ~base_path ~partition:current in
     confirm_requeue_transition ~base_path confirmation
   | Partition.Blocked { blocked_at; _ }
-    when allow_requeue && Float.equal blocked_at expected_quarantined_at ->
-    let* outcome = Partition.requeue_blocked ~base_path ~partition:current in
-    (match outcome with
-     | Partition.Requeued transition ->
-       confirm_requeue_transition ~base_path transition
-     | Partition.Generation_conflict _ ->
-       converge_requeue_conflict
-         ~allow_requeue:false
-         ~base_path
-         ~keeper_name
-         ~partition
-         ~expected_quarantine_id
-         ~expected_quarantined_at)
+    when Float.equal blocked_at expected_quarantined_at ->
+    if not allow_requeue
+    then
+      Error
+        ("partition ledger cursor remained conflicted after bounded requeue retries: "
+         ^ partition.partition_id)
+    else
+      let* outcome = Partition.requeue_blocked ~base_path ~partition:current in
+      (match outcome with
+       | Partition.Requeued transition ->
+         confirm_requeue_transition ~base_path transition
+       | Partition.Cursor_conflict _ when remaining_cursor_retries > 0 ->
+         converge_requeue_conflict
+           ~remaining_cursor_retries:(remaining_cursor_retries - 1)
+           ~base_path
+           ~keeper_name
+           ~partition
+           ~expected_quarantine_id
+           ~expected_quarantined_at
+       | Partition.Cursor_conflict _ ->
+         converge_requeue_conflict
+           ~remaining_cursor_retries:0
+           ~allow_requeue:false
+           ~base_path
+           ~keeper_name
+           ~partition
+           ~expected_quarantine_id
+           ~expected_quarantined_at
+       | Partition.Generation_conflict detail ->
+         Error ("partition target generation changed during requeue: " ^ detail))
   | Partition.Blocked _
   | Partition.Running _
   | Partition.Completed _
@@ -731,6 +751,26 @@ let rec converge_requeue_conflict
     Error
       ("partition generation changed during requeue convergence: "
        ^ partition.partition_id)
+;;
+
+let confirm_requeue_outcome
+      ~base_path
+      ~keeper_name
+      ~partition
+      ~expected_quarantine_id
+      ~expected_quarantined_at
+  = function
+  | Partition.Requeued transition ->
+    confirm_requeue_transition ~base_path transition
+  | Partition.Cursor_conflict _ ->
+    converge_requeue_conflict
+      ~base_path
+      ~keeper_name
+      ~partition
+      ~expected_quarantine_id
+      ~expected_quarantined_at
+  | Partition.Generation_conflict detail ->
+    Error ("partition target generation changed during requeue: " ^ detail)
 ;;
 
 let reconcile_quarantines ~now ~base_path ~keeper_name =
@@ -761,7 +801,7 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
                 partition.partition_id ->
          (match state.phase with
           | Candidate.Requeue_requested _ ->
-            let* authorized =
+            let* (_ : Candidate.candidate) =
               Candidate.finish_quarantine_requeue
                 ~base_path
                 ~candidate
@@ -769,55 +809,30 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
                 ~expected_quarantine_id:state.quarantine.quarantine_id
                 ~requeued_at:now
             in
-            let* transition =
+            let* (_ : Partition.exact_transition) =
               let* outcome = Partition.requeue_blocked ~base_path ~partition in
-              match outcome with
-              | Partition.Requeued transition -> Ok transition
-              | Partition.Generation_conflict _ ->
-                let* ready =
-                  converge_requeue_conflict
-                    ~base_path
-                    ~keeper_name
-                    ~partition
-                    ~expected_quarantine_id:state.quarantine.quarantine_id
-                    ~expected_quarantined_at:state.quarantine.quarantined_at
-                in
-                Ok
-                  { Partition.partition = ready
-                  ; changed = false
-                  ; write_outcome = Partition.Fsync_completed
-                  }
+              confirm_requeue_outcome
+                ~base_path
+                ~keeper_name
+                ~partition
+                ~expected_quarantine_id:state.quarantine.quarantine_id
+                ~expected_quarantined_at:state.quarantine.quarantined_at
+                outcome
             in
-            let* (_ : Partition.t) =
-              confirm_requeue_transition ~base_path transition
-            in
-            ignore (authorized : Candidate.candidate);
             loop rest
           | Candidate.Quarantined -> loop rest
           | Candidate.Requeued _ ->
             if Float.equal state.quarantine.quarantined_at blocked_at
             then (
-              let* transition =
+              let* (_ : Partition.exact_transition) =
                 let* outcome = Partition.requeue_blocked ~base_path ~partition in
-                match outcome with
-                | Partition.Requeued transition -> Ok transition
-                | Partition.Generation_conflict _ ->
-                  let* ready =
-                    converge_requeue_conflict
-                      ~base_path
-                      ~keeper_name
-                      ~partition
-                      ~expected_quarantine_id:state.quarantine.quarantine_id
-                      ~expected_quarantined_at:state.quarantine.quarantined_at
-                  in
-                  Ok
-                    { Partition.partition = ready
-                    ; changed = false
-                    ; write_outcome = Partition.Fsync_completed
-                    }
-              in
-              let* (_ : Partition.t) =
-                confirm_requeue_transition ~base_path transition
+                confirm_requeue_outcome
+                  ~base_path
+                  ~keeper_name
+                  ~partition
+                  ~expected_quarantine_id:state.quarantine.quarantine_id
+                  ~expected_quarantined_at:state.quarantine.quarantined_at
+                  outcome
               in
               loop rest)
             else
@@ -874,46 +889,61 @@ let process_next
   =
   let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
   let* (_ : int) = Partition.ensure_roots ~base_path ~keeper_name candidates in
-  let* prepared =
-    prepare_next_ready ~base_path ~keeper_name ~prepare candidates
+  let rec select_and_claim candidates =
+    let* selected =
+      prepare_next_ready ~base_path ~keeper_name ~prepare candidates
+    in
+    match selected with
+    | None -> Ok Idle
+    | Some (partition_id, prepared) ->
+      let* claimed =
+        Partition.claim_ready_exact
+          ~now:(now ())
+          ~worker_epoch
+          ~base_path
+          ~keeper_name
+          ~partition_id
+      in
+      (match claimed with
+       | None ->
+         let* refreshed = Candidate.load_candidates ~base_path ~keeper_name in
+         select_and_claim refreshed
+       | Some partition ->
+         let latest_partition : Partition.t ref = ref partition in
+         (try
+            let* current_candidates =
+              Candidate.load_candidates ~base_path ~keeper_name
+            in
+            process_claimed
+              ~now
+              ~worker_epoch
+              ~base_path
+              ~prepared
+              ~execute
+              latest_partition
+              current_candidates
+          with
+          | Eio.Cancel.Cancelled _ as exn -> raise exn
+          | exn ->
+            Log.Keeper.error
+              "Board attention worker raised unexpectedly keeper=%s partition=%s: %s"
+              keeper_name
+              (!latest_partition).partition_id
+              (Printexc.to_string exn);
+            let reason =
+              preserve_durable_progress
+                !latest_partition
+                (Partition.Unexpected_worker_failure
+                   "Board attention worker raised unexpectedly")
+            in
+            blocked_step
+              ~now:(now ())
+              ~worker_epoch
+              ~base_path
+              !latest_partition
+              reason))
   in
-  let* claimed =
-    Partition.claim_next ~now:(now ()) ~worker_epoch ~base_path ~keeper_name
-  in
-  match claimed with
-  | None -> Ok Idle
-  | Some partition ->
-    let latest_partition = ref partition in
-    (try
-       let* current_candidates = Candidate.load_candidates ~base_path ~keeper_name in
-       process_claimed
-         ~now
-         ~worker_epoch
-         ~base_path
-         ~prepared
-         ~execute
-         latest_partition
-         current_candidates
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Log.Keeper.error
-         "Board attention worker raised unexpectedly keeper=%s partition=%s: %s"
-         keeper_name
-         (!latest_partition).partition_id
-         (Printexc.to_string exn);
-       let reason =
-         preserve_durable_progress
-           !latest_partition
-           (Partition.Unexpected_worker_failure
-              "Board attention worker raised unexpectedly")
-       in
-       blocked_step
-         ~now:(now ())
-         ~worker_epoch
-         ~base_path
-         !latest_partition
-         reason)
+  select_and_claim candidates
 ;;
 
 let completed_in_order ~base_path ~keeper_name =

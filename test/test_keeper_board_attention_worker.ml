@@ -734,15 +734,17 @@ let test_consumed_completed_crash_settles_without_duplicate_delivery () =
     1
     (relevant_delivery_count ~base_path ~candidate_id:persisted.candidate_id);
   let worker_epoch = P.Worker_epoch.generate () in
+  let claim_target = load_one_partition ~base_path in
   let claimed =
     match
       ok
         "claim existing Consumed root"
-        (P.claim_next
+        (P.claim_ready_exact
            ~now:3.0
            ~worker_epoch
            ~base_path
-           ~keeper_name:"sangsu")
+           ~keeper_name:"sangsu"
+           ~partition_id:claim_target.partition_id)
     with
     | Some partition -> partition
     | None -> Alcotest.fail "existing Consumed root was not claimable"
@@ -1127,6 +1129,8 @@ let test_ready_requested_recovery_fails_closed () =
         (P.requeue_blocked ~base_path ~partition:blocked)
     with
     | P.Requeued transition -> transition
+    | P.Cursor_conflict detail ->
+      Alcotest.failf "premature Ready cursor conflicted: %s" detail
     | P.Generation_conflict detail ->
       Alcotest.failf "premature Ready fixture conflicted: %s" detail
   in
@@ -1263,6 +1267,8 @@ let test_same_quarantine_command_cas_loser_converges () =
                  (P.requeue_blocked ~base_path ~partition:observed)
              with
              | P.Requeued transition -> transition
+             | P.Cursor_conflict detail ->
+               Alcotest.failf "competing command cursor conflicted: %s" detail
              | P.Generation_conflict detail ->
                Alcotest.failf "competing command conflicted: %s" detail
            in
@@ -1327,6 +1333,8 @@ let test_stale_blocked_snapshot_cannot_requeue_new_generation () =
                (P.requeue_blocked ~base_path ~partition:observed)
            with
            | P.Requeued transition -> transition
+           | P.Cursor_conflict detail ->
+             Alcotest.failf "first Ready cursor conflicted: %s" detail
            | P.Generation_conflict detail ->
              Alcotest.failf "first Ready generation conflicted: %s" detail
          in
@@ -1340,11 +1348,12 @@ let test_stale_blocked_snapshot_cannot_requeue_new_generation () =
            match
              ok
                "worker claims requeued partition"
-               (P.claim_next
+               (P.claim_ready_exact
                   ~now:20.0
                   ~worker_epoch:owner
                   ~base_path
-                  ~keeper_name:"sangsu")
+                  ~keeper_name:"sangsu"
+                  ~partition_id:first_ready.partition.partition_id)
            with
            | Some partition -> partition
            | None -> Alcotest.fail "requeued partition was not claimable"

@@ -291,7 +291,10 @@ let request_wake ~base_path command candidate partition =
   | Error detail -> Error (Wake_request_failed detail)
 ;;
 
+let requeue_cursor_retry_limit = 2
+
 let rec reload_same_generation_ready
+    ?(remaining_cursor_retries = requeue_cursor_retry_limit)
     ?(allow_requeue = true)
     ~base_path
     command
@@ -310,11 +313,19 @@ let rec reload_same_generation_ready
         | Error detail -> Error (Partition_state_conflict detail)
         | Ok (Partition.Requeued transition) ->
           confirm_requeue ~base_path transition
-        | Ok (Partition.Generation_conflict _) ->
+        | Ok (Partition.Cursor_conflict _) when remaining_cursor_retries > 0 ->
           reload_same_generation_ready
+            ~remaining_cursor_retries:(remaining_cursor_retries - 1)
+            ~base_path
+            command
+        | Ok (Partition.Cursor_conflict _) ->
+          reload_same_generation_ready
+            ~remaining_cursor_retries:0
             ~allow_requeue:false
             ~base_path
-            command)
+            command
+        | Ok (Partition.Generation_conflict detail) ->
+          Error (Partition_state_conflict detail))
      | Partition.Blocked _
      | Partition.Running _
      | Partition.Completed _
@@ -333,8 +344,10 @@ let commit_partition_ready ~base_path command partition =
   | Partition.Blocked _ ->
     (match Partition.requeue_blocked ~base_path ~partition with
      | Error detail -> Error (Partition_state_conflict detail)
-     | Ok (Partition.Generation_conflict _) ->
+     | Ok (Partition.Cursor_conflict _) ->
        reload_same_generation_ready ~base_path command
+     | Ok (Partition.Generation_conflict detail) ->
+       Error (Partition_state_conflict detail)
      | Ok (Partition.Requeued transition) ->
        confirm_requeue ~base_path transition)
   | Partition.Ready -> confirm_ready_partition ~base_path partition

@@ -51,13 +51,15 @@ type blocked_reason =
   | Unexpected_worker_failure of string
   | Exact_execution_quarantined of running_progress
 
+type running_state =
+  { worker_epoch : Worker_epoch.t
+  ; started_at : float
+  ; progress : running_progress
+  }
+
 type state =
   | Ready
-  | Running of
-      { worker_epoch : Worker_epoch.t
-      ; started_at : float
-      ; progress : running_progress
-      }
+  | Running of running_state
   | Completed of
       { item : completed_item
       ; completed_at : float
@@ -89,6 +91,7 @@ type exact_transition =
 
 type requeue_blocked_outcome =
   | Requeued of exact_transition
+  | Cursor_conflict of string
   | Generation_conflict of string
 
 val state_to_string : state -> string
@@ -113,14 +116,17 @@ val recover_for_process_start :
     Old schema rows and non-tail malformed JSON are rejected without migration.
     A torn final append is truncated under the ledger lock. *)
 
-val claim_next :
+val claim_ready_exact :
   now:float ->
   worker_epoch:Worker_epoch.t ->
   base_path:string ->
   keeper_name:string ->
+  partition_id:string ->
   (t option, string) result
-(** Claim the oldest [Ready] root as [Running Unbound]. [started_at] is
-    observation only, never lease or retry authority. *)
+(** Claim only the named [Ready] root as [Running Unbound]. [None] means the
+    observed target lost its readiness or the ledger cursor changed before the
+    append; no sibling is claimed. [started_at] is observation only, never
+    lease or retry authority. *)
 
 val bind_before_dispatch :
   worker_epoch:Worker_epoch.t ->
@@ -188,8 +194,10 @@ val confirm_blocked :
 val requeue_blocked :
   base_path:string -> partition:t -> (requeue_blocked_outcome, string) result
 (** Atomically move exactly the supplied [Blocked] generation to [Ready].
-    A different durable generation is returned as [Generation_conflict];
-    persistence and validation failures remain errors. *)
+    A stale ledger cursor is returned as [Cursor_conflict] without being
+    confused with a changed target. A different durable target generation is
+    returned as [Generation_conflict]; persistence and validation failures
+    remain errors. *)
 
 val confirm_ready :
   base_path:string -> partition:t -> (exact_transition, string) result

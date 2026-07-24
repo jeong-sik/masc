@@ -70,8 +70,6 @@ let registry_paused_keeper_names () =
        if e.meta.paused then Some e.name else None)
   |> sorted_unique_strings
 
-let running_paused_keeper_names = registry_paused_keeper_names
-
 let running_keeper_names ?base_path () =
   Keeper_registry.all ?base_path ()
   |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
@@ -140,17 +138,14 @@ let durable_paused_keeper_scan ?(include_details = true) config =
     read_errors = List.sort (fun (a, _) (b, _) -> String.compare a b) scan.read_errors;
   }
 
-let paused_keepers_health_json_of_scan ~running_names durable_scan =
-  let names = sorted_unique_strings (running_names @ durable_scan.names) in
+let paused_keepers_health_json_of_scan ~registry_paused_names durable_scan =
+  let names = sorted_unique_strings (registry_paused_names @ durable_scan.names) in
   `Assoc [
     ("count", `Int (List.length names));
     ("names", `List (List.map (fun name -> `String name) names));
-    ("registry_paused_count", `Int (List.length running_names));
-    ("registry_paused_names", `List (List.map (fun name -> `String name) running_names));
+    ("registry_paused_count", `Int (List.length registry_paused_names));
+    ("registry_paused_names", `List (List.map (fun name -> `String name) registry_paused_names));
     ("registry_paused_semantics", `String "registered keepers whose persisted meta has paused=true; this is not FSM phase=Running");
-    ("running_count", `Int (List.length running_names));
-    ("running_names", `List (List.map (fun name -> `String name) running_names));
-    ("running_count_semantics", `String "legacy alias for registry_paused_count");
     ("durable_count", `Int (List.length durable_scan.names));
     ("durable_names", `List (List.map (fun name -> `String name) durable_scan.names));
     ( "autoboot_enabled_count",
@@ -168,13 +163,13 @@ let paused_keepers_health_json_of_scan ~running_names durable_scan =
   ]
 
 let paused_keepers_health_json () =
-  let running_names = running_paused_keeper_names () in
+  let registry_paused_names = registry_paused_keeper_names () in
   let durable_scan =
     match current_server_state_opt () with
     | Some state -> durable_paused_keeper_scan (Mcp_server.workspace_config state)
     | None -> empty_paused_keeper_scan
   in
-  paused_keepers_health_json_of_scan ~running_names durable_scan
+  paused_keepers_health_json_of_scan ~registry_paused_names durable_scan
 
 type autoboot_keeper_scan = {
   autoboot_names : string list;
@@ -1407,14 +1402,7 @@ let keeper_fleet_safety_health_json
     | None -> []
   in
   let phase_detail name = List.assoc_opt name phase_details in
-  let minimum_running_fibers =
-    if target_count <= 1 then target_count else 2
-  in
-  let no_running_fibers = target_count > 0 && phase_counts.running = 0 in
   let no_executable_keeper_fibers = target_count > 0 && executable_count = 0 in
-  let low_running_fiber_margin =
-    target_count > 1 && phase_counts.running < minimum_running_fibers
-  in
   let reaction_capacity_shortfall_count =
     max 0 (target_count - executable_count)
   in
@@ -1471,7 +1459,7 @@ let keeper_fleet_safety_health_json
      a capacity shortfall; see the PR summary.
      Consumers should read this as "number of named blockers" rather than
      missing capacity slots. *)
-  let blocked_count = List.length blocked_keeper_names in
+  let blocked_keeper_count = List.length blocked_keeper_names in
   let active_capacity_names = executable_names in
   let bootable_set = string_set_of_list bootable_names in
   let capacity_set = string_set_of_list active_capacity_names in
@@ -1531,7 +1519,6 @@ let keeper_fleet_safety_health_json
                `Assoc [ ("keeper", `String keeper); ("error", `String error) ])
              autoboot_scan.read_errors) )
     ; "running_keeper_fiber_count", `Int phase_counts.running
-    ; "healthy_running_keeper_fiber_count", `Int phase_counts.running
     ; "running_keeper_names", `List (List.map (fun name -> `String name) running_names)
     ; "failing_keeper_fiber_count", `Int phase_counts.failing
     ; "recovering_keeper_fiber_count", `Int phase_counts.recovering
@@ -1541,8 +1528,6 @@ let keeper_fleet_safety_health_json
     ; ( "executable_keeper_names"
       , `List (List.map (fun name -> `String name) executable_names) )
     ; "target_reaction_capacity_count", `Int target_count
-    ; "minimum_running_fibers", `Int minimum_running_fibers
-    ; "no_running_fibers", `Bool no_running_fibers
     ; "no_executable_keeper_fibers", `Bool no_executable_keeper_fibers
     ; ( "active_task_owner_without_executable_fiber"
       , `Bool active_task_owner_without_executable_fiber )
@@ -1579,18 +1564,13 @@ let keeper_fleet_safety_health_json
              (fun (source, error) ->
                `Assoc [ ("source", `String source); ("error", `String error) ])
              active_task_owner_scan.active_task_owner_scan_errors) )
-    ; "low_running_fiber_margin", `Bool low_running_fiber_margin
     ; "reaction_capacity_below_target", `Bool reaction_capacity_below_target
     ; "reaction_capacity_shortfall_count", `Int reaction_capacity_shortfall_count
     ; "paused_keeper_count", `Int paused_total_count
     ; "paused_autoboot_enabled_keeper_count", `Int paused_autoboot_count
-    ; "blocked_keeper_count", `Int blocked_count
-    ; "blocked_count", `Int blocked_count
-    ; ( "blocked_count_semantics"
+    ; "blocked_keeper_count", `Int blocked_keeper_count
+    ; ( "blocked_keeper_count_semantics"
       , `String "number of named keepers currently listed in blocked_keeper_names" )
-    ; "blocked_keepers", `Int blocked_count
-    ; ( "blocked_keepers_semantics"
-      , `String "legacy alias for blocked_keeper_count" )
     ; ( "blocked_keeper_names"
       , `List (List.map (fun name -> `String name) blocked_keeper_names) )
     ; "blocked_keeper_reasons", `List blocked_keeper_reasons

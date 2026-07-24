@@ -553,7 +553,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
         match fleet_meta_scan with
         | Some scan ->
           paused_keepers_health_json_of_scan
-            ~running_names:(running_paused_keeper_names ())
+            ~registry_paused_names:(registry_paused_keeper_names ())
             scan.paused_scan
         | None -> paused_keepers_health_json ())
   in

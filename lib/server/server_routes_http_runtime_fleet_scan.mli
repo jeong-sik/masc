@@ -29,11 +29,10 @@ val paused_keeper_detail_json :
   Keeper_meta_contract.keeper_meta ->
   [> `Assoc of (string * Yojson.Safe.t) list ]
 val registry_paused_keeper_names : unit -> String.t list
-val running_paused_keeper_names : unit -> String.t list
 val durable_paused_keeper_scan :
   ?include_details:bool -> Workspace.config -> paused_keeper_scan
 val paused_keepers_health_json_of_scan :
-  running_names:String.t list ->
+  registry_paused_names:String.t list ->
   paused_keeper_scan ->
   [> `Assoc of
        (string * [> `Int of int | `List of Yojson.Safe.t list | `String of string ])

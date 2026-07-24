@@ -256,13 +256,11 @@ interface DashboardHealthInput {
 
 function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): DashboardHealthChip | null {
   if (!fleetSafety) return null
-  const fibers = fleetSafety.keeper_fibers
-  const paused = fleetSafety.paused_keepers ?? 0
   const fleet = fleetSafety.keeper_fleet_safety
-  const fleetStatus = fleet?.status
-  const runningFibers = fleet?.running_keeper_fiber_count ?? null
-  const healthyRunningFibers = fleet?.healthy_running_keeper_fiber_count ?? null
-  const failingFibers = fleet?.failing_keeper_fiber_count ?? null
+  const fleetStatus =
+    fleet?.status === 'ok' || fleet?.status === 'degraded' || fleet?.status === 'blocked'
+      ? fleet.status
+      : null
   const executableValue = fleet?.executable_keeper_fiber_count
   const executableFibers =
     typeof executableValue === 'number'
@@ -270,47 +268,27 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
     && executableValue >= 0
       ? executableValue
       : null
-  const pausedKeepers = fleet?.paused_keeper_count ?? paused
-  const pausedAutobootKeepers = fleet?.paused_autoboot_enabled_keeper_count ?? null
-  const targetCapacity = fleet?.target_reaction_capacity_count ?? null
-  const bootableKeepers = fleet?.bootable_keeper_count ?? null
-  const minimumRunning = fleet?.minimum_running_fibers ?? null
-  const capacityShortfall = fleet?.reaction_capacity_shortfall_count ?? null
-  const pausedOnlyNoExecutable =
-    executableFibers === 0
-    && pausedAutobootKeepers != null
-    && pausedAutobootKeepers > 0
-    && targetCapacity != null
-    && pausedAutobootKeepers >= targetCapacity
-  if (pausedOnlyNoExecutable) {
-    const capacityDetail = [
-      `status=${fleetStatus ?? 'paused'}`,
-      `running_keeper_fiber_count=${runningFibers ?? 0}`,
-      `executable_keeper_fiber_count=${executableFibers}`,
-      `paused_keeper_count=${pausedKeepers}`,
-      `paused_autoboot_enabled_keeper_count=${pausedAutobootKeepers}`,
-      targetCapacity != null ? `target_reaction_capacity_count=${targetCapacity}` : null,
-      minimumRunning != null ? `minimum_running_fibers=${minimumRunning}` : null,
-    ].filter((item): item is string => item != null).join(', ')
+  if (!fleet || fleetStatus == null || executableFibers == null) {
     return {
       key: 'fleet-liveness-risk',
-      label: 'Fleet paused',
-      detail: `${capacityDetail}; paused is lifecycle state. Inspect row-level runtime blocker evidence before treating it as a blocker.`,
+      label: 'Fleet execution unavailable',
+      detail: 'canonical keeper_fleet_safety executable snapshot unavailable; no liveness or operator action inferred.',
       tone: 'warn',
     }
   }
+  const pausedKeepers = fleet.paused_keeper_count
+  const pausedAutobootKeepers = fleet?.paused_autoboot_enabled_keeper_count ?? null
+  const targetCapacity = fleet?.target_reaction_capacity_count ?? null
+  const bootableKeepers = fleet?.bootable_keeper_count ?? null
+  const capacityShortfall = fleet?.reaction_capacity_shortfall_count ?? null
   if (fleetStatus === 'blocked') {
     const capacityDetail = [
-      `status=${fleetStatus ?? 'blocked'}`,
-      `running_keeper_fiber_count=${runningFibers ?? 0}`,
-      executableFibers != null
-        ? `executable_keeper_fiber_count=${executableFibers}`
-        : 'executable_keeper_fiber_count=unavailable',
-      `paused_keeper_count=${pausedKeepers}`,
+      `status=${fleetStatus}`,
+      `executable_keeper_fiber_count=${executableFibers}`,
+      pausedKeepers != null ? `paused_keeper_count=${pausedKeepers}` : null,
       pausedAutobootKeepers != null ? `paused_autoboot_enabled_keeper_count=${pausedAutobootKeepers}` : null,
       bootableKeepers != null ? `bootable_keeper_count=${bootableKeepers}` : null,
       targetCapacity != null ? `target_reaction_capacity_count=${targetCapacity}` : null,
-      minimumRunning != null ? `minimum_running_fibers=${minimumRunning}` : null,
     ].filter((item): item is string => item != null).join(', ')
     return {
       key: 'fleet-liveness-risk',
@@ -321,12 +299,8 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
   }
   if (fleetStatus === 'degraded') {
     const capacityDetail = [
-      `status=${fleetStatus ?? 'degraded'}`,
-      `healthy_running_keeper_fiber_count=${healthyRunningFibers ?? 0}`,
-      executableFibers != null
-        ? `executable_keeper_fiber_count=${executableFibers}`
-        : 'executable_keeper_fiber_count=unavailable',
-      failingFibers != null ? `failing_keeper_fiber_count=${failingFibers}` : null,
+      `status=${fleetStatus}`,
+      `executable_keeper_fiber_count=${executableFibers}`,
       targetCapacity != null ? `target_reaction_capacity_count=${targetCapacity}` : null,
       capacityShortfall != null ? `reaction_capacity_shortfall_count=${capacityShortfall}` : null,
       fleet?.blocker ? `blocker=${fleet.blocker}` : null,
@@ -336,18 +310,6 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
       label: 'Fleet capacity degraded',
       detail: `${capacityDetail}; restore missing keeper fibers or confirm a reduced target capacity.`,
       tone: 'warn',
-    }
-  }
-  if (
-    !fleet
-    && (fleetSafety.keeper_fleet_no_fibers === true
-      || (fibers != null && fibers <= 1 && paused > 0))
-  ) {
-    return {
-      key: 'fleet-liveness-risk',
-      label: 'Fleet liveness risk',
-      detail: `keeper_fibers=${fibers ?? 0}, paused_keepers=${paused}; keeper fleet may be stalled.`,
-      tone: 'bad',
     }
   }
   return null

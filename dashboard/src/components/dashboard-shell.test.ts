@@ -340,7 +340,6 @@ describe('dashboardHealthChips', () => {
           keeper_fibers: 9,
           paused_keepers: 2,
           paused_keepers_health: { count: 3 },
-          keeper_fleet_no_fibers: false,
           keeper_fleet_safety: {
             running_keeper_fiber_count: 0,
             paused_keeper_count: 4,
@@ -376,7 +375,7 @@ describe('dashboardHealthChips', () => {
     })])
   })
 
-  it('surfaces fleet liveness risk when health shows stalled fibers with paused keepers', () => {
+  it('reports canonical fleet execution unavailable without phase inference', () => {
     const chips = dashboardHealthChips({
       connected: true,
       counts: { keepers: 2, configured_keepers: 2 },
@@ -387,7 +386,6 @@ describe('dashboardHealthChips', () => {
         fleet_safety: {
           keeper_fibers: 1,
           paused_keepers: 3,
-          keeper_fleet_no_fibers: null,
           keeper_fleet_safety: null,
         },
       } as any,
@@ -397,10 +395,11 @@ describe('dashboardHealthChips', () => {
 
     const chip = chips.find(c => c.key === 'fleet-liveness-risk')
     expect(chip).toEqual(expect.objectContaining({
-      label: 'Fleet liveness risk',
-      tone: 'bad',
+      label: 'Fleet execution unavailable',
+      tone: 'warn',
     }))
-    expect(chip?.detail).toContain('keeper_fibers=1')
+    expect(chip?.detail).toContain('canonical keeper_fleet_safety executable snapshot unavailable')
+    expect(chip?.detail).toContain('no liveness or operator action inferred')
   })
 
   it('surfaces a P0 blocked fleet when health reports zero executable keeper fibers', () => {
@@ -414,22 +413,16 @@ describe('dashboardHealthChips', () => {
         fleet_safety: {
           keeper_fibers: 0,
           paused_keepers: 13,
-          keeper_fleet_no_fibers: true,
           keeper_fleet_safety: {
             status: 'blocked',
             reason: null,
             blocker: 'no_executable_keeper_fibers',
-            blocked_keepers: 14,
-            blocked_count: 14,
+            blocked_keeper_count: 14,
             bootable_keeper_count: 1,
             running_keeper_fiber_count: 0,
-            healthy_running_keeper_fiber_count: 0,
             failing_keeper_fiber_count: 0,
             executable_keeper_fiber_count: 0,
-            minimum_running_fibers: 1,
-            no_running_fibers: true,
             no_executable_keeper_fibers: true,
-            low_running_fiber_margin: false,
             reaction_capacity_below_target: true,
             reaction_capacity_shortfall_count: 14,
             paused_keeper_count: 13,
@@ -450,13 +443,13 @@ describe('dashboardHealthChips', () => {
       tone: 'bad',
     }))
     expect(chip?.detail).toContain('status=blocked')
-    expect(chip?.detail).toContain('running_keeper_fiber_count=0')
+    expect(chip?.detail).toContain('executable_keeper_fiber_count=0')
     expect(chip?.detail).toContain('paused_keeper_count=13')
     expect(chip?.detail).toContain('target_reaction_capacity_count=14')
     expect(chip?.detail).toContain('resume selected paused keepers')
   })
 
-  it('labels an all-paused fleet as paused instead of blocked', () => {
+  it('does not override canonical blocked status for an all-paused fleet', () => {
     const chips = dashboardHealthChips({
       connected: true,
       counts: { keepers: 3, configured_keepers: 3 },
@@ -467,22 +460,16 @@ describe('dashboardHealthChips', () => {
         fleet_safety: {
           keeper_fibers: 0,
           paused_keepers: 3,
-          keeper_fleet_no_fibers: true,
           keeper_fleet_safety: {
             status: 'blocked',
             reason: null,
             blocker: 'no_executable_keeper_fibers',
-            blocked_keepers: 3,
-            blocked_count: 3,
+            blocked_keeper_count: 3,
             bootable_keeper_count: 3,
             running_keeper_fiber_count: 0,
-            healthy_running_keeper_fiber_count: 0,
             failing_keeper_fiber_count: 0,
             executable_keeper_fiber_count: 0,
-            minimum_running_fibers: 2,
-            no_running_fibers: true,
             no_executable_keeper_fibers: true,
-            low_running_fiber_margin: true,
             reaction_capacity_below_target: true,
             reaction_capacity_shortfall_count: 3,
             paused_keeper_count: 3,
@@ -499,12 +486,11 @@ describe('dashboardHealthChips', () => {
 
     const chip = chips.find(c => c.key === 'fleet-liveness-risk')
     expect(chip).toEqual(expect.objectContaining({
-      label: 'Fleet paused',
-      tone: 'warn',
+      label: 'P0 fleet blocked',
+      tone: 'bad',
     }))
     expect(chip?.detail).toContain('paused_keeper_count=3')
-    expect(chip?.detail).toContain('paused is lifecycle state')
-    expect(chip?.detail).not.toContain('resume selected paused keepers')
+    expect(chip?.detail).toContain('resume selected paused keepers')
   })
 
   it('keeps mixed paused fleets blocked when autoboot keepers are still below target', () => {
@@ -518,22 +504,16 @@ describe('dashboardHealthChips', () => {
         fleet_safety: {
           keeper_fibers: 0,
           paused_keepers: 14,
-          keeper_fleet_no_fibers: true,
           keeper_fleet_safety: {
             status: 'blocked',
             reason: null,
             blocker: 'no_executable_keeper_fibers',
-            blocked_keepers: 16,
-            blocked_count: 16,
+            blocked_keeper_count: 16,
             bootable_keeper_count: 2,
             running_keeper_fiber_count: 0,
-            healthy_running_keeper_fiber_count: 0,
             failing_keeper_fiber_count: 0,
             executable_keeper_fiber_count: 0,
-            minimum_running_fibers: 2,
-            no_running_fibers: true,
             no_executable_keeper_fibers: true,
-            low_running_fiber_margin: true,
             reaction_capacity_below_target: true,
             reaction_capacity_shortfall_count: 14,
             paused_keeper_count: 14,
@@ -568,22 +548,16 @@ describe('dashboardHealthChips', () => {
         fleet_safety: {
           keeper_fibers: 3,
           paused_keepers: 2,
-          keeper_fleet_no_fibers: false,
           keeper_fleet_safety: {
             status: 'degraded',
             reason: null,
             blocker: 'reaction_capacity_below_target',
-            blocked_keepers: 10,
-            blocked_count: 10,
+            blocked_keeper_count: 10,
             bootable_keeper_count: 11,
             running_keeper_fiber_count: 3,
-            healthy_running_keeper_fiber_count: 3,
             failing_keeper_fiber_count: 8,
             executable_keeper_fiber_count: 11,
-            minimum_running_fibers: 2,
-            no_running_fibers: false,
             no_executable_keeper_fibers: false,
-            low_running_fiber_margin: false,
             reaction_capacity_below_target: true,
             reaction_capacity_shortfall_count: 2,
             paused_keeper_count: 2,
@@ -604,7 +578,6 @@ describe('dashboardHealthChips', () => {
       tone: 'warn',
     }))
     expect(chip?.detail).toContain('status=degraded')
-    expect(chip?.detail).toContain('healthy_running_keeper_fiber_count=3')
     expect(chip?.detail).toContain('executable_keeper_fiber_count=11')
     expect(chip?.detail).toContain('failing_keeper_fiber_count=8')
     expect(chip?.detail).toContain('target_reaction_capacity_count=13')
@@ -623,22 +596,16 @@ describe('dashboardHealthChips', () => {
         fleet_safety: {
           keeper_fibers: 8,
           paused_keepers: 0,
-          keeper_fleet_no_fibers: false,
           keeper_fleet_safety: {
             status: 'degraded',
             reason: null,
             blocker: 'reaction_capacity_below_target',
-            blocked_keepers: 24,
-            blocked_count: 24,
+            blocked_keeper_count: 24,
             bootable_keeper_count: 24,
             running_keeper_fiber_count: 8,
-            healthy_running_keeper_fiber_count: 8,
             failing_keeper_fiber_count: 0,
             executable_keeper_fiber_count: 8,
-            minimum_running_fibers: 2,
-            no_running_fibers: false,
             no_executable_keeper_fibers: false,
-            low_running_fiber_margin: false,
             reaction_capacity_below_target: true,
             reaction_capacity_shortfall_count: 16,
             paused_keeper_count: 0,
@@ -667,10 +634,8 @@ describe('dashboardHealthChips', () => {
         status: 'degraded',
         reason: null,
         blocker: 'reaction_capacity_below_target',
-        blocked_keepers: 2,
-        blocked_count: 2,
+        blocked_keeper_count: 2,
         running_keeper_fiber_count: 4,
-        healthy_running_keeper_fiber_count: 4,
         target_reaction_capacity_count: 6,
         reaction_capacity_below_target: true,
         reaction_capacity_shortfall_count: 2,
@@ -689,7 +654,6 @@ describe('dashboardHealthChips', () => {
           fleet_safety: {
             keeper_fibers: 4,
             paused_keepers: 0,
-            keeper_fleet_no_fibers: false,
             keeper_fleet_safety: fleet,
           },
         } as any,
@@ -697,7 +661,12 @@ describe('dashboardHealthChips', () => {
         loading: false,
       })
       const chip = chips.find(c => c.key === 'fleet-liveness-risk')
-      expect(chip?.detail).toContain('executable_keeper_fiber_count=unavailable')
+      expect(chip).toEqual(expect.objectContaining({
+        label: 'Fleet execution unavailable',
+        tone: 'warn',
+      }))
+      expect(chip?.detail).toContain('canonical keeper_fleet_safety executable snapshot unavailable')
+      expect(chip?.detail).toContain('no liveness or operator action inferred')
       expect(chip?.detail).not.toContain('executable_keeper_fiber_count=4')
     }
   })
@@ -713,7 +682,6 @@ describe('dashboardHealthChips', () => {
         fleet_safety: {
           keeper_fibers: null,
           paused_keepers: null,
-          keeper_fleet_no_fibers: null,
           keeper_fleet_safety: null,
           keeper_reaction_ledger: {
             status: 'ok',
@@ -750,7 +718,6 @@ describe('dashboardHealthChips', () => {
         fleet_safety: {
           keeper_fibers: null,
           paused_keepers: null,
-          keeper_fleet_no_fibers: null,
           keeper_fleet_safety: null,
           keeper_reaction_ledger: {
             status: 'degraded',
@@ -789,7 +756,6 @@ describe('dashboardHealthChips', () => {
           keeper_fibers: 0,
           paused_keepers: 0,
           paused_keepers_health: null,
-          keeper_fleet_no_fibers: false,
           keeper_fleet_safety: null,
         },
       } as any,
@@ -820,7 +786,6 @@ describe('dashboardHealthChips', () => {
         fleet_safety: {
           keeper_fibers: 0,
           paused_keepers: 1,
-          keeper_fleet_no_fibers: false,
           keeper_fleet_safety: null,
         },
       } as any,

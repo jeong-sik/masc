@@ -99,14 +99,6 @@ let paused_keeper_count = function
   | _ -> 0
 ;;
 
-let bool_field name = function
-  | `Assoc fields ->
-      (match List.assoc_opt name fields with
-       | Some (`Bool value) -> value
-       | _ -> false)
-  | _ -> false
-;;
-
 (* Scope keeper counts to the active workspace's base_path so a running
    keeper from another workspace cannot mask a local outage in fleet
    safety. `bootable_keeper_count` is already derived from
@@ -222,7 +214,7 @@ let keeper_fleet_runtime_resolution_base_fields
     match meta_scan with
     | Some scan ->
       paused_keepers_health_json_of_scan
-        ~running_names:(running_paused_keeper_names ())
+        ~registry_paused_names:(registry_paused_keeper_names ())
         scan.paused_scan
     | None -> paused_keepers_health_json ()
   in
@@ -259,7 +251,6 @@ let keeper_fleet_runtime_resolution_base_fields
     [ "keeper_fibers", `Int keeper_fibers
     ; "paused_keepers", `Int (paused_keeper_count paused_keepers_json)
     ; "paused_keepers_health", paused_keepers_json
-    ; "keeper_fleet_no_fibers", `Bool (bool_field "no_running_fibers" fleet_safety)
     ; ( "fd_observation"
       , Keeper_fd_pressure.runtime_state_json ~active_keepers:keeper_fibers
           () )

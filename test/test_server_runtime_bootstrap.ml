@@ -1465,8 +1465,6 @@ let test_health_json_surfaces_durable_paused_keepers () =
             (fleet_safety |> member "paused_autoboot_enabled_keeper_count" |> to_int);
           Alcotest.(check int) "health exposes target reaction capacity" 1
             (fleet_safety |> member "target_reaction_capacity_count" |> to_int);
-          Alcotest.(check int) "health exposes minimum running fibers" 1
-            (fleet_safety |> member "minimum_running_fibers" |> to_int);
           Alcotest.(check string) "health marks fleet blocked" "blocked"
             (fleet_safety |> member "status" |> to_string);
           Alcotest.(check string) "health marks fleet blocker"
@@ -2374,10 +2372,6 @@ let test_health_json_capacity_uses_execution_snapshot () =
       in
       let open Yojson.Safe.Util in
       Alcotest.(check int)
-        "healthy running count remains actual running lanes"
-        3
-        (fleet_safety |> member "healthy_running_keeper_fiber_count" |> to_int);
-      Alcotest.(check int)
         "canonical capacity comes only from the execution snapshot"
         1
         (fleet_safety |> member "executable_keeper_fiber_count" |> to_int);
@@ -2503,16 +2497,12 @@ let test_health_json_degrades_when_only_one_running_phase_lane_is_live () =
               [ "capacity-paused" ]
               (paused_keepers |> member "durable_names" |> to_list
                |> List.map to_string);
-          Alcotest.(check int) "health exposes minimum running fibers" 2
-            (fleet_safety |> member "minimum_running_fibers" |> to_int);
-          Alcotest.(check bool) "health is not below minimum margin" false
-            (fleet_safety |> member "low_running_fiber_margin" |> to_bool);
           Alcotest.(check bool) "health marks capacity below target" true
             (fleet_safety |> member "reaction_capacity_below_target" |> to_bool);
           Alcotest.(check int) "health exposes canonical capacity shortfall" 3
             (fleet_safety |> member "reaction_capacity_shortfall_count" |> to_int);
           Alcotest.(check int) "health exposes blocked keeper count" 3
-            (fleet_safety |> member "blocked_count" |> to_int);
+            (fleet_safety |> member "blocked_keeper_count" |> to_int);
           Alcotest.(check (list string)) "health exposes blocked keeper names"
             [ "capacity-missing"; "capacity-running-b"; "example" ]
             (fleet_safety |> member "blocked_keeper_names" |> to_list
@@ -2610,9 +2600,7 @@ let test_health_json_blocked_count_matches_blocked_names_with_non_target_capacit
               (fleet_safety |> member "blocked_keeper_names" |> to_list
                |> List.map to_string);
             Alcotest.(check int) "blocked count matches blocked keeper names" 2
-              (fleet_safety |> member "blocked_count" |> to_int);
-            Alcotest.(check int) "blocked_keepers alias matches names" 2
-              (fleet_safety |> member "blocked_keepers" |> to_int))))
+              (fleet_safety |> member "blocked_keeper_count" |> to_int))))
 
 let test_health_json_exposes_disabled_keeper_bootstrap_blocker () =
   with_temp_dir "health-keeper-bootstrap-disabled" (fun dir ->
@@ -2651,7 +2639,7 @@ let test_health_json_exposes_disabled_keeper_bootstrap_blocker () =
           Server_routes_http_runtime_fleet_scan.durable_paused_keeper_scan config
           |> Server_routes_http_runtime_fleet_scan
              .paused_keepers_health_json_of_scan
-               ~running_names:[]
+               ~registry_paused_names:[]
         in
         let fleet_safety =
           Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
@@ -2968,8 +2956,6 @@ let test_health_json_distinguishes_failing_executable_keepers () =
           let json = Server_routes_http_runtime.make_health_json request in
           let open Yojson.Safe.Util in
           let fleet_safety = json |> member "keeper_fleet_safety" in
-          Alcotest.(check int) "health exposes no healthy running fibers" 0
-            (fleet_safety |> member "healthy_running_keeper_fiber_count" |> to_int);
           Alcotest.(check int) "health exposes failing keeper fibers" 1
             (fleet_safety |> member "failing_keeper_fiber_count" |> to_int);
           Alcotest.(check int) "health exposes executable keeper fibers" 1
@@ -2982,14 +2968,12 @@ let test_health_json_distinguishes_failing_executable_keepers () =
             [ "capacity-failing" ]
             (fleet_safety |> member "executable_keeper_names" |> to_list
              |> List.map to_string);
-          Alcotest.(check bool) "health marks no running fibers" true
-            (fleet_safety |> member "no_running_fibers" |> to_bool);
           Alcotest.(check bool) "health does not mark no executable fibers" false
             (fleet_safety |> member "no_executable_keeper_fibers" |> to_bool);
           Alcotest.(check string) "health marks degraded not blocked" "degraded"
             (fleet_safety |> member "status" |> to_string);
-          Alcotest.(check string) "health marks healthy-running blocker"
-            "no_healthy_running_keeper_fibers"
+          Alcotest.(check string) "health marks executable shortfall blocker"
+            "reaction_capacity_below_target"
             (fleet_safety |> member "blocker" |> to_string);
           Alcotest.(check bool) "health still asks for operator action" true
             (fleet_safety |> member "operator_action_required" |> to_bool))))

@@ -162,7 +162,6 @@ describe('App v2 header chrome', () => {
         keeper_fibers: 7,
         paused_keepers: 3,
         paused_keepers_health: { count: 3 },
-        keeper_fleet_no_fibers: false,
         keeper_fleet_safety: {
           running_keeper_fiber_count: 1,
           paused_keeper_count: 3,

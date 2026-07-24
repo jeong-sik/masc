@@ -135,7 +135,6 @@ export interface DashboardFleetSafetyHealth {
   keeper_fibers: number | null
   paused_keepers: number | null
   paused_keepers_health: DashboardPausedKeepersHealth | null
-  keeper_fleet_no_fibers: boolean | null
   keeper_fleet_safety: DashboardFleetPressureHealth | null
   keeper_reaction_ledger: DashboardKeeperReactionLedgerHealth | null
 }
@@ -169,8 +168,6 @@ export interface DashboardPausedKeeperReadError {
 export interface DashboardPausedKeepersHealth {
   count: number | null
   names: string[]
-  running_count: number | null
-  running_names: string[]
   durable_count: number | null
   durable_names: string[]
   autoboot_enabled_count: number | null
@@ -204,20 +201,15 @@ export interface DashboardKeeperReactionLedgerHealth {
 }
 
 export interface DashboardFleetPressureHealth {
-  status: string | null
+  status: 'ok' | 'degraded' | 'blocked' | null
   reason: string | null
   blocker?: string | null
-  blocked_keepers: number | null
-  blocked_count: number | null
+  blocked_keeper_count: number | null
   bootable_keeper_count?: number | null
   running_keeper_fiber_count?: number | null
-  healthy_running_keeper_fiber_count?: number | null
   failing_keeper_fiber_count?: number | null
   executable_keeper_fiber_count?: number | null
-  minimum_running_fibers?: number | null
-  no_running_fibers?: boolean | null
   no_executable_keeper_fibers?: boolean | null
-  low_running_fiber_margin?: boolean | null
   reaction_capacity_below_target?: boolean | null
   reaction_capacity_shortfall_count?: number | null
   paused_keeper_count?: number | null

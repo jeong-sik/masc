@@ -943,6 +943,16 @@ let test_unleased_transcript_corruption_only_persists_pause () =
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let pool =
+    Domain_pool.create
+      ~sw
+      ~domain_count:1
+      (Eio.Stdenv.domain_mgr env)
+  in
+  Executor_pool_ref.For_testing.with_pool
+    (Domain_pool.executor_pool pool)
+  @@ fun () ->
   Alcotest.run
     "paused work cancellation transaction"
     [ ( "transaction"

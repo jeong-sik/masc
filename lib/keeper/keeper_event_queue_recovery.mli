@@ -12,11 +12,15 @@ type projection_outcome =
 
 type projection_error =
   | Owner_unavailable of Keeper_event_queue_persistence.owner_identity_error
+  | Executor_unavailable of Executor_pool_ref.strict_submit_error
   | Outbox_unavailable of string
   | Ledger_projection_failed of string
   | Unexpected_projection_failure of Eio.Exn.with_bt
 
-type discovery_error = Snapshot_discovery_failed of string
+type discovery_error =
+  | Snapshot_discovery_failed of string
+  | Sweep_execution_failed of Eio.Exn.with_bt
+  | Sweep_executor_unavailable of Executor_pool_ref.strict_submit_error
 
 type owner_failure =
   { keeper_name : string
@@ -27,6 +31,11 @@ type owner_budget_error = Invalid_owner_budget of int
 type owner_budget
 type sweep_cursor
 
+type owner_projection =
+  { keeper_name : string
+  ; outcome : (projection_outcome, projection_error) result
+  }
+
 type sweep_report =
   { discovered : int
   ; processed : int
@@ -34,6 +43,7 @@ type sweep_report =
   ; no_pending : int
   ; converged : int
   ; claim_busy : int
+  ; projections : owner_projection list
   ; failures : owner_failure list
   ; discovery_error : discovery_error option
   }
@@ -56,13 +66,9 @@ val project_owner_result :
 (** Acquire the process-local owner claim, inspect the durable outbox, and
     invoke the canonical reaction-ledger projector when work is present.
     Durable I/O runs outside the claim-table mutex and without cancellation
-    masking. [Transition_converged] does not identify which process performed
-    the physical append or retirement. *)
-
-val project_discovered : base_path:string -> sweep_report
-(** Discover current-schema durable queue owners and project each owner through
-    {!project_owner_result}. A partial discovery error is retained alongside
-    results for every owner that was discovered successfully. *)
+    masking, and requires the startup executor pool; it is never run inline.
+    [Transition_converged] does not identify which process performed the
+    physical append or retirement. *)
 
 val project_discovered_bounded :
   base_path:string ->
@@ -71,8 +77,11 @@ val project_discovered_bounded :
   sweep_page
 (** Project one deterministic owner page. The next cursor resumes strictly
     after the last processed canonical keeper name and wraps in lexical order,
-    so repeated maintenance ticks cannot starve a durable owner. The cursor is
-    process-local and carries no migration or persistence contract. *)
+    so repeated maintenance ticks cannot starve a durable owner.
+    [report.projections] contains exactly one typed outcome per selected owner
+    in page order. The cursor is process-local and carries no migration or
+    persistence contract. Executor unavailability returns an empty page with
+    the unchanged cursor and a typed [discovery_error]. *)
 
 module For_testing : sig
   type 'a claim_outcome =

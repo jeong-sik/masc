@@ -2561,6 +2561,7 @@ let schedule_keeper_queue_evidence_dashboard_json
               ; stimulus_id = _
               ; reaction_ledger_status = _
               ; occurrence_status = _
+              ; activation_outcome = _
               }) ->
           let due_at = execution.Schedule_domain.due_at in
           let payload_digest = execution.Schedule_domain.payload_digest in
@@ -2639,6 +2640,7 @@ let schedule_keeper_reaction_evidence_dashboard_json
               ; stimulus_id
               ; reaction_ledger_status = _
               ; occurrence_status = _
+              ; activation_outcome = _
               }) ->
           let base_fields =
             [ "source", `String "keeper_reaction_ledger"

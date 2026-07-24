@@ -159,6 +159,67 @@ let unsupported_payload =
     ]
 ;;
 
+let canonical_keeper_wake_receipt_fields () =
+  [ "kind", `String "masc.keeper_wake.enqueued"
+  ; "keeper_name", `String "schedule-keeper"
+  ; "schedule_id", `String "canonical-schedule"
+  ; "urgency", `String "immediate"
+  ; "post_id", `String "canonical-occurrence"
+  ; "queue", `String "keeper_event_queue"
+  ; "stimulus", `String "schedule_due"
+  ; "stimulus_id", `String "canonical-occurrence"
+  ; "reaction_ledger_status", `String "recorded"
+  ; "reaction_ledger_error", `Null
+  ; "occurrence_status", `String "awaiting_ack"
+  ; "activation_status", `String "deferred"
+  ; "activation_reason", `String "owner_unknown"
+  ; "activation_detail", `String "owner metadata unavailable"
+  ]
+;;
+
+let set_receipt_field name value fields =
+  (name, value) :: List.remove_assoc name fields
+;;
+
+let test_keeper_wake_receipt_decoder_rejects_noncanonical_shapes () =
+  let canonical = canonical_keeper_wake_receipt_fields () in
+  (match Server_schedule_consumers.dispatch_receipt_of_detail (`Assoc canonical) with
+   | Ok _ -> ()
+   | Error detail -> fail ("canonical receipt rejected: " ^ detail));
+  let reject label fields =
+    match Server_schedule_consumers.dispatch_receipt_of_detail (`Assoc fields) with
+    | Error _ -> ()
+    | Ok _ -> fail (label ^ " was accepted")
+  in
+  reject
+    "recorded receipt carrying an error"
+    (canonical
+     |> set_receipt_field "reaction_ledger_error" (`String "unexpected"));
+  reject
+    "reaction ledger error without failure status"
+    (canonical
+     |> set_receipt_field "reaction_ledger_status" `Null
+     |> set_receipt_field "reaction_ledger_error" (`String "unexpected"));
+  reject
+    "signaled activation carrying deferred reason"
+    (canonical
+     |> set_receipt_field "activation_status" (`String "signaled"));
+  reject
+    "detail-free activation reason carrying detail"
+    (canonical
+     |> set_receipt_field "activation_reason" (`String "autoboot_disabled"));
+  reject
+    "terminal occurrence carrying deferred activation"
+    (canonical
+     |> set_receipt_field "occurrence_status" (`String "already_acked"));
+  reject
+    "awaiting occurrence carrying not-required activation"
+    (canonical
+     |> set_receipt_field "activation_status" (`String "not_required")
+     |> set_receipt_field "activation_reason" `Null
+     |> set_receipt_field "activation_detail" `Null)
+;;
+
 let create_board_schedule config =
   match
     Schedule_service.create config ~schedule_id:"board-sched-1"
@@ -287,7 +348,10 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
   with_workspace
   @@ fun config ->
   let request = create_keeper_wake_schedule config in
-  let result = tick_ok config ~now:201.0 in
+  let result =
+    Executor_pool_ref.For_testing.with_pool_option None (fun () ->
+      tick_ok config ~now:201.0)
+  in
   let occurrence_id = single_occurrence_id result in
   check int "one dispatch" 1 (List.length result.dispatches);
   check string "dispatch status" "succeeded"
@@ -320,7 +384,15 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
         check string "execution detail stimulus" "schedule_due"
           (detail |> member "stimulus" |> to_string);
         check string "execution keeper" "schedule-keeper"
-          (detail |> member "keeper_name" |> to_string)
+          (detail |> member "keeper_name" |> to_string);
+        check string "durable enqueue is separate from activation" "deferred"
+          (detail |> member "activation_status" |> to_string);
+        check string "missing owner truth fails activation closed" "owner_unknown"
+          (detail |> member "activation_reason" |> to_string);
+        check string
+          "absent executor produces typed no-activation"
+          "durable keeper metadata read unavailable: executor pool is not installed"
+          (detail |> member "activation_detail" |> to_string)
       | None -> fail "execution detail missing"));
   let queue =
     Keeper_registry_event_queue.snapshot
@@ -361,6 +433,10 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
       (receipt |> member "kind" |> to_string);
     check string "receipt occurrence awaits ack" "awaiting_ack"
       (receipt |> member "occurrence_status" |> to_string);
+    check string "receipt activation is deferred" "deferred"
+      (receipt |> member "activation_status" |> to_string);
+    check string "receipt activation reason is typed" "owner_unknown"
+      (receipt |> member "activation_reason" |> to_string);
     check string "receipt queue" "keeper_event_queue"
       (receipt |> member "queue" |> to_string);
     check string "receipt stimulus" "schedule_due"
@@ -561,7 +637,9 @@ let test_acked_occurrence_recovery_does_not_enqueue_or_wake_again () =
       (match List.hd retried.dispatches with
        | { detail = Some detail; _ } ->
          check string "retry observes terminal ack" "already_acked"
-           Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string)
+           Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string);
+         check string "terminal ack needs no activation" "not_required"
+           Yojson.Safe.Util.(detail |> member "activation_status" |> to_string)
        | _ -> fail "retry completion receipt missing");
       check int "retry enqueues no second occurrence" 0
         (Keeper_registry_event_queue.snapshot ~base_path keeper_name
@@ -671,7 +749,9 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_or_wake_again () =
       (match List.hd retried.dispatches with
        | { detail = Some detail; _ } ->
          check string "retry observes terminal cancellation" "already_cancelled"
-           Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string)
+           Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string);
+         check string "terminal cancellation needs no activation" "not_required"
+           Yojson.Safe.Util.(detail |> member "activation_status" |> to_string)
        | _ -> fail "cancelled retry completion receipt missing");
       check int "cancelled retry enqueues no second occurrence" 0
         (Keeper_registry_event_queue.snapshot ~base_path keeper_name
@@ -1197,6 +1277,9 @@ let () =
             test_dashboard_projects_quarantined_and_unreadable_reaction_evidence
         ; test_case "keeper wake rejects invalid keeper name" `Quick
             test_keeper_wake_consumer_rejects_invalid_keeper_name
+        ; test_case "keeper wake receipt decoder rejects noncanonical shapes"
+            `Quick
+            test_keeper_wake_receipt_decoder_rejects_noncanonical_shapes
         ] )
     ]
 ;;

@@ -16,11 +16,15 @@ type projection_outcome =
 
 type projection_error =
   | Owner_unavailable of Persistence.owner_identity_error
+  | Executor_unavailable of Executor_pool_ref.strict_submit_error
   | Outbox_unavailable of string
   | Ledger_projection_failed of string
   | Unexpected_projection_failure of Eio.Exn.with_bt
 
-type discovery_error = Snapshot_discovery_failed of string
+type discovery_error =
+  | Snapshot_discovery_failed of string
+  | Sweep_execution_failed of Eio.Exn.with_bt
+  | Sweep_executor_unavailable of Executor_pool_ref.strict_submit_error
 
 type owner_failure =
   { keeper_name : string
@@ -31,6 +35,11 @@ type owner_budget_error = Invalid_owner_budget of int
 type owner_budget = Owner_budget of int
 type sweep_cursor = Sweep_cursor of string option
 
+type owner_projection =
+  { keeper_name : string
+  ; outcome : (projection_outcome, projection_error) result
+  }
+
 type sweep_report =
   { discovered : int
   ; processed : int
@@ -38,6 +47,7 @@ type sweep_report =
   ; no_pending : int
   ; converged : int
   ; claim_busy : int
+  ; projections : owner_projection list
   ; failures : owner_failure list
   ; discovery_error : discovery_error option
   }
@@ -50,6 +60,9 @@ type sweep_page =
 let projection_error_to_string = function
   | Owner_unavailable error ->
     Persistence.owner_identity_error_to_string error
+  | Executor_unavailable error ->
+    "event queue transition executor unavailable: "
+    ^ Executor_pool_ref.strict_submit_error_to_string error
   | Outbox_unavailable detail ->
     "event queue transition outbox unavailable: " ^ detail
   | Ledger_projection_failed detail ->
@@ -61,8 +74,17 @@ let projection_error_to_string = function
       (Printexc.raw_backtrace_to_string backtrace)
 ;;
 
-let discovery_error_to_string (Snapshot_discovery_failed detail) =
-  "event queue snapshot discovery failed: " ^ detail
+let discovery_error_to_string = function
+  | Snapshot_discovery_failed detail ->
+    "event queue snapshot discovery failed: " ^ detail
+  | Sweep_execution_failed (exn, backtrace) ->
+    Printf.sprintf
+      "event queue snapshot sweep raised: %s\n%s"
+      (Printexc.to_string exn)
+      (Printexc.raw_backtrace_to_string backtrace)
+  | Sweep_executor_unavailable error ->
+    "event queue snapshot sweep executor unavailable: "
+    ^ Executor_pool_ref.strict_submit_error_to_string error
 ;;
 
 let owner_budget_error_to_string (Invalid_owner_budget max_owners) =
@@ -157,8 +179,14 @@ let project_owner_result_inline ~base_path ~keeper_name =
 ;;
 
 let project_owner_result ~base_path ~keeper_name =
-  Executor_pool_ref.submit_or_inline (fun () ->
-    project_owner_result_inline ~base_path ~keeper_name)
+  match
+    Executor_pool_ref.submit_strict (fun () ->
+      project_owner_result_inline ~base_path ~keeper_name)
+  with
+  | Ok outcome -> outcome
+  | Error (Executor_pool_ref.Work_failed failure) ->
+    Error (Unexpected_projection_failure failure)
+  | Error error -> Error (Executor_unavailable error)
 ;;
 
 let ordered_owner_page ~budget:(Owner_budget max_owners) ~cursor:(Sweep_cursor cursor) names =
@@ -205,6 +233,7 @@ let project_discovery_inline
     ; no_pending = 0
     ; converged = 0
     ; claim_busy = 0
+    ; projections = []
     ; failures = []
     ; discovery_error =
         Option.map
@@ -215,7 +244,13 @@ let project_discovery_inline
   let report =
     List.fold_left
       (fun report keeper_name ->
-         match project_owner_result_inline ~base_path ~keeper_name with
+         let outcome = project_owner_result_inline ~base_path ~keeper_name in
+         let report =
+           { report with
+             projections = { keeper_name; outcome } :: report.projections
+           }
+         in
+         match outcome with
          | Ok No_pending_transition ->
            { report with no_pending = report.no_pending + 1 }
          | Ok Transition_converged ->
@@ -229,31 +264,45 @@ let project_discovery_inline
       initial
       selected
   in
-  { report = { report with failures = List.rev report.failures }; next_cursor }
+  { report =
+      { report with
+        projections = List.rev report.projections
+      ; failures = List.rev report.failures
+      }
+  ; next_cursor
+  }
 ;;
 
 let project_discovered_bounded ~base_path ~budget ~cursor =
-  Executor_pool_ref.submit_or_inline (fun () ->
-    let discovery =
-      Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
-        ~base_path
+  match
+    Executor_pool_ref.submit_strict (fun () ->
+      let discovery =
+        Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
+          ~base_path
+      in
+      project_discovery_inline ~base_path ~budget ~cursor discovery)
+  with
+  | Ok page -> page
+  | Error error ->
+    let discovery_error =
+      match error with
+      | Executor_pool_ref.Work_failed failure ->
+        Sweep_execution_failed failure
+      | error -> Sweep_executor_unavailable error
     in
-    project_discovery_inline ~base_path ~budget ~cursor discovery)
-;;
-
-let project_discovered ~base_path =
-  Executor_pool_ref.submit_or_inline (fun () ->
-    let discovery =
-      Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
-        ~base_path
-    in
-    let budget = Owner_budget (max 1 (List.length discovery.keeper_names)) in
-    (project_discovery_inline
-       ~base_path
-       ~budget
-       ~cursor:initial_sweep_cursor
-       discovery)
-      .report)
+    { report =
+        { discovered = 0
+        ; processed = 0
+        ; deferred = 0
+        ; no_pending = 0
+        ; converged = 0
+        ; claim_busy = 0
+        ; projections = []
+        ; failures = []
+        ; discovery_error = Some discovery_error
+        }
+    ; next_cursor = cursor
+    }
 ;;
 
 module For_testing = struct

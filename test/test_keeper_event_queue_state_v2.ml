@@ -12,6 +12,22 @@ let require_some label = function
   | None -> Alcotest.failf "%s: expected Some" label
 ;;
 
+let with_strict_executor f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let pool =
+    Domain_pool.create
+      ~sw
+      ~domain_count:1
+      (Eio.Stdenv.domain_mgr env)
+  in
+  Executor_pool_ref.For_testing.with_pool
+    (Domain_pool.executor_pool pool)
+    f
+;;
+
 (* Test-local shim for the excised [Keeper_approval_queue.resolve] wrapper:
    reproduces its unit projection over [resolve_with_policy] so these
    assertions keep exercising the production resolution path. *)
@@ -2437,6 +2453,8 @@ let test_incompatible_settlement_wal_requires_reset_without_rewrite () =
 ;;
 
 let test_context_compaction_retry_is_durable_and_lane_local () =
+  with_strict_executor
+  @@ fun () ->
   with_temp_dir "keeper-event-queue-v2-retry-tail" (fun base_path ->
     let keeper_name = "retry_tail_keeper" in
     let peer_keeper_name = "independent_peer_keeper" in
@@ -2662,6 +2680,8 @@ let test_current_state_fresh_write_read_restart () =
 ;;
 
 let test_transition_outbox_projects_with_stable_identity () =
+  with_strict_executor
+  @@ fun () ->
   with_temp_dir "keeper-event-queue-v2-outbox" (fun base_path ->
     let keeper_name = "projection_keeper" in
     let source = stimulus "projected-source" 1.0 in
@@ -2734,9 +2754,20 @@ let test_transition_outbox_projects_with_stable_identity () =
     "post-append failure retains one transition for retry"
     1
     retained_outbox_count;
+  let projection_budget =
+    match Masc.Keeper_event_queue_recovery.owner_budget ~max_owners:1 with
+    | Ok budget -> budget
+    | Error error ->
+      Alcotest.fail
+        (Masc.Keeper_event_queue_recovery.owner_budget_error_to_string error)
+  in
   let retry_report =
-      Masc.Keeper_event_queue_recovery.project_discovered ~base_path
-    in
+    (Masc.Keeper_event_queue_recovery.project_discovered_bounded
+       ~base_path
+       ~budget:projection_budget
+       ~cursor:Masc.Keeper_event_queue_recovery.initial_sweep_cursor)
+      .report
+  in
     Alcotest.(check int)
       "recovery sweep finds durable owner"
       1
@@ -2816,8 +2847,8 @@ let test_transition_outbox_projects_with_stable_identity () =
 ;;
 
 let test_transition_outbox_bounded_sweep_continuation () =
-  Eio_main.run
-  @@ fun _env ->
+  with_strict_executor
+  @@ fun () ->
   with_temp_dir "keeper-event-queue-v2-projection-budget" (fun base_path ->
     let seed_pending keeper_name source_id =
       Persistence.update_result ~base_path ~keeper_name (fun pending ->
@@ -2896,8 +2927,8 @@ exception Transition_projection_claim_cancelled
 exception Transition_projection_claim_failed
 
 let test_transition_outbox_claim_contention_and_release () =
-  Eio_main.run
-  @@ fun _env ->
+  with_strict_executor
+  @@ fun () ->
   with_temp_dir "keeper-event-queue-v2-projection-claim" (fun base_path ->
     let keeper_name = "projection_claim_keeper" in
     let alias_base_path = Filename.concat base_path "." in
@@ -2959,8 +2990,19 @@ let test_transition_outbox_claim_contention_and_release () =
      | Error error ->
        Alcotest.fail
          (Masc.Keeper_event_queue_recovery.projection_error_to_string error));
+    let projection_budget =
+      match Masc.Keeper_event_queue_recovery.owner_budget ~max_owners:1 with
+      | Ok budget -> budget
+      | Error error ->
+        Alcotest.fail
+          (Masc.Keeper_event_queue_recovery.owner_budget_error_to_string error)
+    in
     let maintenance_report =
-      Masc.Keeper_event_queue_recovery.project_discovered ~base_path
+      (Masc.Keeper_event_queue_recovery.project_discovered_bounded
+         ~base_path
+         ~budget:projection_budget
+         ~cursor:Masc.Keeper_event_queue_recovery.initial_sweep_cursor)
+        .report
     in
     Alcotest.(check int)
       "maintenance sweep preserves canonical owner contention"
@@ -2970,6 +3012,17 @@ let test_transition_outbox_claim_contention_and_release () =
       "contention sweep performs no projection"
       0
       maintenance_report.converged;
+    (match maintenance_report.projections with
+     | [ ({ keeper_name = actual
+          ; outcome = Ok Masc.Keeper_event_queue_recovery.Claim_busy
+          } : Masc.Keeper_event_queue_recovery.owner_projection) ] ->
+       Alcotest.(check string)
+         "maintenance sweep preserves the discovered owner identity"
+         keeper_name
+         actual
+     | _ ->
+       Alcotest.fail
+         "maintenance sweep did not retain the typed per-owner projection outcome");
     let retained_count =
       Masc.Keeper_event_queue_recovery.For_testing
       .pending_transition_count_result

@@ -553,7 +553,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
         match fleet_meta_scan with
         | Some scan ->
           paused_keepers_health_json_of_scan
-            ~running_names:(running_paused_keeper_names ())
+            ~registry_paused_names:(registry_paused_keeper_names ())
             scan.paused_scan
         | None -> paused_keepers_health_json ())
   in
@@ -569,9 +569,16 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     compute_section ~name:"keeper_board_event_collection" ?section_timings_ref
       keeper_board_event_collection_health_json
   in
+  let execution_snapshot =
+    match server_state with
+    | Some state ->
+      keeper_execution_snapshot (Mcp_server.workspace_config state)
+    | None -> empty_keeper_execution_snapshot
+  in
   let keeper_event_queue_json =
     compute_section ~name:"keeper_event_queue" ?section_timings_ref
-      keeper_event_queue_health_json
+      (fun () ->
+        keeper_event_queue_health_json ~execution_snapshot ())
   in
   let fd_accountant_json =
     compute_section ~name:"fd_accountant" ?section_timings_ref fd_accountant_snapshot_json
@@ -591,6 +598,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
             ~bootable_names:scan.bootable_names
             ~autoboot_scan:scan.autoboot_scan
             ~phase_snapshot
+            ~execution_snapshot
             ?base_path
             ~phase_counts
             ~paused_keepers_json
@@ -598,6 +606,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
         | None ->
           keeper_fleet_safety_health_json
             ~phase_snapshot
+            ~execution_snapshot
             ?base_path
             ~phase_counts
             ~paused_keepers_json
@@ -873,12 +882,30 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
         ; ("runnable_oldest_arrived_at_unix", `Null)
         ; ("runnable_oldest_age_seconds", `Null)
         ; ("runnable_by_keeper", `List [])
-        ; ("paused_retained_pending_count", `Int 0)
-        ; ("paused_retained_inflight_count", `Int 0)
-        ; ("paused_retained_count", `Int 0)
-        ; ("paused_retained_oldest_arrived_at_unix", `Null)
-        ; ("paused_retained_oldest_age_seconds", `Null)
-        ; ("paused_retained_by_keeper", `List [])
+        ; ("recoverable_pending_count", `Int 0)
+        ; ("recoverable_inflight_count", `Int 0)
+        ; ("recoverable_backlog_count", `Int 0)
+        ; ("recoverable_oldest_arrived_at_unix", `Null)
+        ; ("recoverable_oldest_age_seconds", `Null)
+        ; ("recoverable_by_keeper", `List [])
+        ; ("retained_disabled_pending_count", `Int 0)
+        ; ("retained_disabled_inflight_count", `Int 0)
+        ; ("retained_disabled_backlog_count", `Int 0)
+        ; ("retained_disabled_oldest_arrived_at_unix", `Null)
+        ; ("retained_disabled_oldest_age_seconds", `Null)
+        ; ("retained_disabled_by_keeper", `List [])
+        ; ("paused_dead_pending_count", `Int 0)
+        ; ("paused_dead_inflight_count", `Int 0)
+        ; ("paused_dead_backlog_count", `Int 0)
+        ; ("paused_dead_oldest_arrived_at_unix", `Null)
+        ; ("paused_dead_oldest_age_seconds", `Null)
+        ; ("paused_dead_by_keeper", `List [])
+        ; ("shutdown_fenced_pending_count", `Int 0)
+        ; ("shutdown_fenced_inflight_count", `Int 0)
+        ; ("shutdown_fenced_backlog_count", `Int 0)
+        ; ("shutdown_fenced_oldest_arrived_at_unix", `Null)
+        ; ("shutdown_fenced_oldest_age_seconds", `Null)
+        ; ("shutdown_fenced_by_keeper", `List [])
         ; ("unclassified_pending_count", `Int 0)
         ; ("unclassified_inflight_count", `Int 0)
         ; ("unclassified_count", `Int 0)

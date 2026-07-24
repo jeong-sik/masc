@@ -71,6 +71,21 @@ let contains_substring ~needle haystack =
   in
   String.equal needle "" || scan 0
 
+let with_strict_executor f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let pool =
+    Domain_pool.create
+      ~sw
+      ~domain_count:1
+      (Eio.Stdenv.domain_mgr env)
+  in
+  Executor_pool_ref.For_testing.with_pool
+    (Domain_pool.executor_pool pool)
+    f
+
 let restored_log_messages_since before_seq =
   Log.Ring.recent ~limit:20 ~module_filter:"Keeper" ~since_seq:before_seq ()
   |> List.filter_map (fun (entry : Log.Ring.entry) ->
@@ -95,6 +110,8 @@ let claim_single ~base_path ~keeper_name ~claimed_at ~ready =
        Alcotest.fail "single event queue lease changed cardinality")
 
 let project_transition_canonically ~base_path ~keeper_name ~transition_id:_ =
+  with_strict_executor
+  @@ fun () ->
   match
     Masc.Keeper_event_queue_recovery.project_owner_result
       ~base_path
@@ -909,7 +926,7 @@ let () =
       Unix.mkdir dot_noise_keeper_dir 0o755;
       let owner_lifecycle ~keeper_name =
         if String.equal keeper_name pending_keeper
-        then Keeper_event_queue_persistence.Paused_retained
+        then Keeper_event_queue_persistence.Paused_dead
         else Keeper_event_queue_persistence.Runnable
       in
       let json =
@@ -939,19 +956,19 @@ let () =
         25.0
         (float_field "runnable_oldest_age_seconds" json);
       Alcotest.(check int)
-        "paused retained count"
+        "paused/dead backlog count"
         2
-        (int_field "paused_retained_count" json);
+        (int_field "paused_dead_backlog_count" json);
       Alcotest.(check int)
-        "paused retained keeper count"
+        "paused/dead keeper count"
         1
-        (List.length (list_field "paused_retained_by_keeper" json));
+        (List.length (list_field "paused_dead_by_keeper" json));
       Alcotest.(check (float 0.001))
-        "paused retained oldest age"
+        "paused/dead oldest age"
         20.0
-        (float_field "paused_retained_oldest_age_seconds" json);
+        (float_field "paused_dead_oldest_age_seconds" json);
       Alcotest.(check bool)
-        "paused retained work requires explicit operator action"
+        "paused/dead work requires explicit operator action"
         true
         (bool_field "operator_action_required" json);
       Alcotest.(check int)
@@ -970,7 +987,7 @@ let () =
         (int_field "pending_count" pending_summary);
       Alcotest.(check string)
         "pending keeper lifecycle"
-        "paused_retained"
+        "paused_dead"
         (string_field "owner_lifecycle" pending_summary);
       Alcotest.(check int)
         "inflight keeper inflight"
@@ -983,7 +1000,37 @@ let () =
       Alcotest.(check (float 0.001))
         "inflight keeper oldest age"
         25.0
-        (float_field "oldest_age_seconds" inflight_summary));
+        (float_field "oldest_age_seconds" inflight_summary);
+      let retained_disabled_json =
+        Keeper_event_queue_persistence.fleet_summary_json
+          ~now:30.0
+          ~base_path
+          ~owner_lifecycle:(fun ~keeper_name:_ ->
+            Keeper_event_queue_persistence.Retained_disabled)
+      in
+      Alcotest.(check int)
+        "disabled retention remains its own typed backlog"
+        3
+        (int_field "retained_disabled_backlog_count" retained_disabled_json);
+      Alcotest.(check int)
+        "disabled retention does not collapse into paused/dead"
+        0
+        (int_field "paused_dead_backlog_count" retained_disabled_json);
+      let shutdown_fenced_json =
+        Keeper_event_queue_persistence.fleet_summary_json
+          ~now:30.0
+          ~base_path
+          ~owner_lifecycle:(fun ~keeper_name:_ ->
+            Keeper_event_queue_persistence.Shutdown_fenced)
+      in
+      Alcotest.(check int)
+        "shutdown fence remains its own typed backlog"
+        3
+        (int_field "shutdown_fenced_backlog_count" shutdown_fenced_json);
+      Alcotest.(check int)
+        "shutdown fence does not collapse into paused/dead"
+        0
+        (int_field "paused_dead_backlog_count" shutdown_fenced_json));
 
   (* --- durable fleet summary: corrupt queue snapshots must not look green. --- *)
   let base_path = temp_dir "keeper-event-queue-fleet-summary-corrupt" in

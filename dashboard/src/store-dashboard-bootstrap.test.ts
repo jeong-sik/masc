@@ -396,7 +396,7 @@ describe('refreshKeeperRuntimeStatus', () => {
         keeper_fibers: 1,
         paused_keepers: 3,
         paused_keepers_health: { count: 3, names: ['a', 'b', 'c'] },
-        keeper_fleet_safety: { running_keeper_fiber_count: 1, paused_keeper_count: 3 },
+        keeper_fleet_safety: { executable_keeper_fiber_count: 1, paused_keeper_count: 3 },
       },
     })
     apiMocks.fetchDashboardExecution.mockResolvedValue({

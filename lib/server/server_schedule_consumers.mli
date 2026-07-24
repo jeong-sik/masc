@@ -9,6 +9,20 @@ type keeper_wake_occurrence_status =
   | Keeper_wake_already_acked
   | Keeper_wake_already_cancelled
 
+type keeper_wake_activation_deferred_reason =
+  | Keeper_wake_activation_lifecycle_denied of string
+  | Keeper_wake_activation_autoboot_disabled
+  | Keeper_wake_activation_proactive_disabled
+  | Keeper_wake_activation_shutdown_fenced of Keeper_shutdown_types.Operation_id.t
+  | Keeper_wake_activation_owner_unknown of string
+  | Keeper_wake_activation_unregistered
+  | Keeper_wake_activation_not_running of Keeper_state_machine.phase
+
+type keeper_wake_activation_outcome =
+  | Keeper_wake_activation_signaled
+  | Keeper_wake_activation_deferred of keeper_wake_activation_deferred_reason
+  | Keeper_wake_activation_not_required
+
 type dispatch_receipt =
   | Keeper_wake_enqueued of
       { keeper_name : string
@@ -20,6 +34,7 @@ type dispatch_receipt =
       ; stimulus_id : string option
       ; reaction_ledger_status : keeper_wake_reaction_ledger_status option
       ; occurrence_status : keeper_wake_occurrence_status
+      ; activation_outcome : keeper_wake_activation_outcome
       }
 
 val dispatch_receipt_of_detail :

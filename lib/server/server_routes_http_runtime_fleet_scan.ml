@@ -70,8 +70,6 @@ let registry_paused_keeper_names () =
        if e.meta.paused then Some e.name else None)
   |> sorted_unique_strings
 
-let running_paused_keeper_names = registry_paused_keeper_names
-
 let running_keeper_names ?base_path () =
   Keeper_registry.all ?base_path ()
   |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
@@ -140,17 +138,14 @@ let durable_paused_keeper_scan ?(include_details = true) config =
     read_errors = List.sort (fun (a, _) (b, _) -> String.compare a b) scan.read_errors;
   }
 
-let paused_keepers_health_json_of_scan ~running_names durable_scan =
-  let names = sorted_unique_strings (running_names @ durable_scan.names) in
+let paused_keepers_health_json_of_scan ~registry_paused_names durable_scan =
+  let names = sorted_unique_strings (registry_paused_names @ durable_scan.names) in
   `Assoc [
     ("count", `Int (List.length names));
     ("names", `List (List.map (fun name -> `String name) names));
-    ("registry_paused_count", `Int (List.length running_names));
-    ("registry_paused_names", `List (List.map (fun name -> `String name) running_names));
+    ("registry_paused_count", `Int (List.length registry_paused_names));
+    ("registry_paused_names", `List (List.map (fun name -> `String name) registry_paused_names));
     ("registry_paused_semantics", `String "registered keepers whose persisted meta has paused=true; this is not FSM phase=Running");
-    ("running_count", `Int (List.length running_names));
-    ("running_names", `List (List.map (fun name -> `String name) running_names));
-    ("running_count_semantics", `String "legacy alias for registry_paused_count");
     ("durable_count", `Int (List.length durable_scan.names));
     ("durable_names", `List (List.map (fun name -> `String name) durable_scan.names));
     ( "autoboot_enabled_count",
@@ -168,13 +163,13 @@ let paused_keepers_health_json_of_scan ~running_names durable_scan =
   ]
 
 let paused_keepers_health_json () =
-  let running_names = running_paused_keeper_names () in
+  let registry_paused_names = registry_paused_keeper_names () in
   let durable_scan =
     match current_server_state_opt () with
     | Some state -> durable_paused_keeper_scan (Mcp_server.workspace_config state)
     | None -> empty_paused_keeper_scan
   in
-  paused_keepers_health_json_of_scan ~running_names durable_scan
+  paused_keepers_health_json_of_scan ~registry_paused_names durable_scan
 
 type autoboot_keeper_scan = {
   autoboot_names : string list;
@@ -374,11 +369,10 @@ type keeper_phase_counts =
   { running : int
   ; failing : int
   ; recovering : int
-  ; executable : int
   }
 
 let empty_keeper_phase_counts =
-  { running = 0; failing = 0; recovering = 0; executable = 0 }
+  { running = 0; failing = 0; recovering = 0 }
 
 type keeper_phase_detail =
   { phase : string
@@ -394,7 +388,6 @@ type keeper_phase_snapshot =
   { counts : keeper_phase_counts
   ; running_names : string list
   ; recovering_names : string list
-  ; executable_names : string list
   ; phase_values : (string * Keeper_state_machine.phase) list
   ; phase_details : (string * keeper_phase_detail) list
   }
@@ -430,16 +423,8 @@ let keeper_phase_snapshot ?base_path () =
           in
           let counts = acc.counts in
           let capacity_eligible = not entry.meta.paused in
-          let can_execute =
-            capacity_eligible && Keeper_state_machine.can_execute_turn entry.phase
-          in
-          let executable = if can_execute then counts.executable + 1 else counts.executable in
-          let executable_names =
-            if can_execute then entry.name :: acc.executable_names
-            else acc.executable_names
-          in
-          (* Failing remains executable and can recover on the next successful
-             heartbeat or turn. Count it separately without a restart gate. *)
+          (* Phase inventory is not execution truth. Executability is projected
+             separately through the shared closed owner-execution ADT. *)
           let is_recovering =
             match entry.phase with
             | Keeper_state_machine.Failing
@@ -458,23 +443,21 @@ let keeper_phase_snapshot ?base_path () =
           | Keeper_state_machine.Running when capacity_eligible ->
             {
               acc with
-              counts = { counts with running = counts.running + 1; executable };
+              counts = { counts with running = counts.running + 1 };
               running_names = entry.name :: acc.running_names;
               recovering_names;
-              executable_names;
             }
           | Keeper_state_machine.Running ->
-            { acc with counts = { counts with executable }; executable_names }
+            acc
           | Keeper_state_machine.Failing when capacity_eligible ->
             {
               acc with
               counts =
-                { counts with failing = counts.failing + 1; recovering; executable };
+                { counts with failing = counts.failing + 1; recovering };
               recovering_names;
-              executable_names;
             }
           | Keeper_state_machine.Failing ->
-            { acc with counts = { counts with executable }; executable_names }
+            acc
           | Keeper_state_machine.Offline
           | Keeper_state_machine.Overflowed
           | Keeper_state_machine.Compacting
@@ -485,12 +468,11 @@ let keeper_phase_snapshot ?base_path () =
           | Keeper_state_machine.Crashed
           | Keeper_state_machine.Restarting
           | Keeper_state_machine.Dead ->
-            { acc with counts = { counts with executable }; executable_names })
+            acc)
        {
          counts = empty_keeper_phase_counts;
          running_names = [];
          recovering_names = [];
-         executable_names = [];
          phase_values = [];
          phase_details = [];
        }
@@ -499,7 +481,6 @@ let keeper_phase_snapshot ?base_path () =
     snapshot with
     running_names = sorted_unique_strings snapshot.running_names;
     recovering_names = sorted_unique_strings snapshot.recovering_names;
-    executable_names = sorted_unique_strings snapshot.executable_names;
     phase_values =
       List.sort (fun (a, _) (b, _) -> String.compare a b) snapshot.phase_values;
     phase_details =
@@ -507,6 +488,83 @@ let keeper_phase_snapshot ?base_path () =
   }
 
 let keeper_phase_counts ?base_path () = (keeper_phase_snapshot ?base_path ()).counts
+
+type keeper_execution_owner =
+  { keeper_name : string
+  ; truth : Keeper_activation_readiness.owner_execution_truth
+  }
+
+type keeper_execution_snapshot =
+  { owners : keeper_execution_owner list
+  ; executable_names : string list
+  }
+
+let empty_keeper_execution_snapshot =
+  { owners = []; executable_names = [] }
+;;
+
+let keeper_execution_snapshot config =
+  let base_path = config.Workspace.base_path in
+  let registry_names =
+    Keeper_registry.all ~base_path ()
+    |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
+  in
+  let queue_names =
+    Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
+      ~base_path
+    |> fun discovery -> discovery.keeper_names
+  in
+  let owner_names = sorted_unique_strings (registry_names @ queue_names) in
+  let owners =
+    List.map
+      (fun keeper_name ->
+        let meta_result =
+          match Keeper_meta_store.read_effective_meta config keeper_name with
+          | Ok (Some meta) -> Ok meta
+          | Ok None -> Error "durable keeper metadata missing"
+          | Error detail -> Error detail
+        in
+        let admission =
+          Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
+        in
+        let runtime =
+          Keeper_activation_readiness.owner_runtime_of_registry_entry
+            (Keeper_registry.get ~base_path keeper_name)
+        in
+        let truth =
+          Keeper_activation_readiness.classify_owner_execution
+            ~shutdown_operation_id:admission.snapshot_shutdown_operation_id
+            ~runtime
+            meta_result
+        in
+        { keeper_name; truth })
+      owner_names
+  in
+  let executable_names =
+    owners
+    |> List.filter_map (fun owner ->
+      match owner.truth with
+      | Keeper_activation_readiness.Executable -> Some owner.keeper_name
+      | Keeper_activation_readiness.Recoverable
+      | Keeper_activation_readiness.Retained_disabled _
+      | Keeper_activation_readiness.Paused_dead _
+      | Keeper_activation_readiness.Shutdown_fenced _
+      | Keeper_activation_readiness.Unknown _ -> None)
+  in
+  { owners; executable_names }
+;;
+
+let owner_execution_truth snapshot ~keeper_name =
+  match
+    List.find_opt
+      (fun owner -> String.equal owner.keeper_name keeper_name)
+      snapshot.owners
+  with
+  | Some owner -> owner.truth
+  | None ->
+    Keeper_activation_readiness.Unknown
+      "owner absent from canonical execution snapshot"
+;;
 
 let string_set_of_list values =
   List.fold_left (fun acc value -> String_set.add value acc) String_set.empty values
@@ -1255,6 +1313,7 @@ let keeper_fleet_safety_health_json
     ?bootable_names:bootable_names_override
     ?autoboot_scan:autoboot_scan_override
     ?phase_snapshot
+    ~execution_snapshot
     ?base_path
     ?reaction_capacity_names
     ?keeper_bootstrap_enabled:keeper_bootstrap_enabled_override
@@ -1293,6 +1352,8 @@ let keeper_fleet_safety_health_json
       current_server_state_opt ()
       |> Option.map (fun state -> (Mcp_server.workspace_config state).base_path)
   in
+  let executable_names = execution_snapshot.executable_names in
+  let executable_count = List.length executable_names in
   let fallback_running_names =
     match reaction_capacity_names with
     | Some names -> sorted_unique_strings names
@@ -1307,11 +1368,6 @@ let keeper_fleet_safety_health_json
     match phase_snapshot with
     | Some snapshot -> snapshot.recovering_names
     | None -> []
-  in
-  let executable_names =
-    match phase_snapshot with
-    | Some snapshot -> snapshot.executable_names
-    | None -> fallback_running_names
   in
   let active_task_owner_scan =
     match current_server_state_opt () with
@@ -1346,50 +1402,23 @@ let keeper_fleet_safety_health_json
     | None -> []
   in
   let phase_detail name = List.assoc_opt name phase_details in
-  let minimum_running_fibers =
-    if target_count <= 1 then target_count else 2
-  in
-  let no_running_fibers = target_count > 0 && phase_counts.running = 0 in
-  let no_executable_keeper_fibers = target_count > 0 && phase_counts.executable = 0 in
-  let low_running_fiber_margin =
-    target_count > 1 && phase_counts.running < minimum_running_fibers
-  in
-  (* Recovering lanes are deliberately capacity-bearing for the fleet verdict:
-     [Failing] remains executable in the FSM and is eligible for
-     heartbeat-driven recovery. Keep that policy in one value so
-     the advertised effective count and its derived shortfall cannot diverge.
-     Actual healthy execution remains available separately as
-     [healthy_running_keeper_fiber_count]. *)
-  let effective_reaction_capacity_count =
-    phase_counts.running + phase_counts.recovering
-  in
+  let no_executable_keeper_fibers = target_count > 0 && executable_count = 0 in
   let reaction_capacity_shortfall_count =
-    max 0 (target_count - effective_reaction_capacity_count)
+    max 0 (target_count - executable_count)
   in
   let reaction_capacity_below_target =
     target_count > 0 && reaction_capacity_shortfall_count > 0
   in
   let keeper_bootstrap_blocked =
     (not keeper_bootstrap_enabled)
-    && (no_executable_keeper_fibers
-       || no_running_fibers
-       || low_running_fiber_margin
-       || reaction_capacity_below_target)
+    && (no_executable_keeper_fibers || reaction_capacity_below_target)
   in
   let active_task_owner_is_selected_blocker =
     active_task_owner_without_executable_fiber
     && not
          (no_executable_keeper_fibers
-          || no_running_fibers
-          || low_running_fiber_margin
           || reaction_capacity_below_target
           || keeper_bootstrap_blocked)
-  in
-  let executable_reaction_capacity_shortfall_count =
-    max 0 (target_count - phase_counts.executable)
-  in
-  let executable_reaction_capacity_below_target =
-    target_count > 0 && executable_reaction_capacity_shortfall_count > 0
   in
   let paused_total_count =
     match paused_keepers_json with
@@ -1415,31 +1444,23 @@ let keeper_fleet_safety_health_json
   in
   let status =
     if no_executable_keeper_fibers then "blocked"
-    else if no_running_fibers then "degraded"
-    else if low_running_fiber_margin then "degraded"
     else if reaction_capacity_below_target then "degraded"
     else if active_task_owner_without_executable_fiber then "degraded"
     else "ok"
   in
   let blocked_keeper_names =
-    if no_executable_keeper_fibers then names_not_in executable_names
-    else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target
-    then names_not_in (running_names @ recovering_names)
+    if no_executable_keeper_fibers || reaction_capacity_below_target
+    then names_not_in executable_names
     else if active_task_owner_is_selected_blocker then active_task_owner_blocked_names
     else []
   in
   (* Counts unique blocked keeper NAMES, not capacity shortfall. This
      intentionally differs from pre-#22388 behavior, which reported
-     [executable_reaction_capacity_shortfall_count]; see the PR summary.
+     a capacity shortfall; see the PR summary.
      Consumers should read this as "number of named blockers" rather than
      missing capacity slots. *)
-  let blocked_count = List.length blocked_keeper_names in
-  let active_capacity_names =
-    if no_executable_keeper_fibers then executable_names
-    else if no_running_fibers || low_running_fiber_margin || reaction_capacity_below_target
-    then running_names @ recovering_names
-    else running_names
-  in
+  let blocked_keeper_count = List.length blocked_keeper_names in
+  let active_capacity_names = executable_names in
   let bootable_set = string_set_of_list bootable_names in
   let capacity_set = string_set_of_list active_capacity_names in
   let paused_set =
@@ -1472,8 +1493,6 @@ let keeper_fleet_safety_health_json
   let blocker =
     if keeper_bootstrap_blocked then Some "keeper_bootstrap_disabled"
     else if no_executable_keeper_fibers then Some "no_executable_keeper_fibers"
-    else if no_running_fibers then Some "no_healthy_running_keeper_fibers"
-    else if low_running_fiber_margin then Some "low_running_fiber_margin"
     else if reaction_capacity_below_target then Some "reaction_capacity_below_target"
     else if active_task_owner_without_executable_fiber
     then Some "active_task_owner_without_executable_fiber"
@@ -1500,20 +1519,15 @@ let keeper_fleet_safety_health_json
                `Assoc [ ("keeper", `String keeper); ("error", `String error) ])
              autoboot_scan.read_errors) )
     ; "running_keeper_fiber_count", `Int phase_counts.running
-    ; "healthy_running_keeper_fiber_count", `Int phase_counts.running
     ; "running_keeper_names", `List (List.map (fun name -> `String name) running_names)
     ; "failing_keeper_fiber_count", `Int phase_counts.failing
     ; "recovering_keeper_fiber_count", `Int phase_counts.recovering
     ; ( "recovering_keeper_names"
       , `List (List.map (fun name -> `String name) recovering_names) )
-    ; "executable_keeper_fiber_count", `Int phase_counts.executable
+    ; "executable_keeper_fiber_count", `Int executable_count
     ; ( "executable_keeper_names"
       , `List (List.map (fun name -> `String name) executable_names) )
-    ; "effective_reaction_capacity_count", `Int effective_reaction_capacity_count
-    ; "executable_reaction_capacity_count", `Int phase_counts.executable
     ; "target_reaction_capacity_count", `Int target_count
-    ; "minimum_running_fibers", `Int minimum_running_fibers
-    ; "no_running_fibers", `Bool no_running_fibers
     ; "no_executable_keeper_fibers", `Bool no_executable_keeper_fibers
     ; ( "active_task_owner_without_executable_fiber"
       , `Bool active_task_owner_without_executable_fiber )
@@ -1550,30 +1564,19 @@ let keeper_fleet_safety_health_json
              (fun (source, error) ->
                `Assoc [ ("source", `String source); ("error", `String error) ])
              active_task_owner_scan.active_task_owner_scan_errors) )
-    ; "low_running_fiber_margin", `Bool low_running_fiber_margin
     ; "reaction_capacity_below_target", `Bool reaction_capacity_below_target
     ; "reaction_capacity_shortfall_count", `Int reaction_capacity_shortfall_count
-    ; ( "executable_reaction_capacity_below_target"
-      , `Bool executable_reaction_capacity_below_target )
-    ; ( "executable_reaction_capacity_shortfall_count"
-      , `Int executable_reaction_capacity_shortfall_count )
     ; "paused_keeper_count", `Int paused_total_count
     ; "paused_autoboot_enabled_keeper_count", `Int paused_autoboot_count
-    ; "blocked_keeper_count", `Int blocked_count
-    ; "blocked_count", `Int blocked_count
-    ; ( "blocked_count_semantics"
+    ; "blocked_keeper_count", `Int blocked_keeper_count
+    ; ( "blocked_keeper_count_semantics"
       , `String "number of named keepers currently listed in blocked_keeper_names" )
-    ; "blocked_keepers", `Int blocked_count
-    ; ( "blocked_keepers_semantics"
-      , `String "legacy alias for blocked_keeper_count" )
     ; ( "blocked_keeper_names"
       , `List (List.map (fun name -> `String name) blocked_keeper_names) )
     ; "blocked_keeper_reasons", `List blocked_keeper_reasons
     ; ( "operator_action_required"
       , `Bool
           (no_executable_keeper_fibers
-           || no_running_fibers
-           || low_running_fiber_margin
            || reaction_capacity_below_target
            || keeper_bootstrap_blocked
            || active_task_owner_without_executable_fiber) )

@@ -346,9 +346,14 @@ let configure_exact_output_registry ?config_root () =
            "exact_output: librarian is degraded until [runtime.exact_output_lanes.librarian_exact] is configured with OAS target refs")
 ;;
 
+let install_domain_pool_references domain_pool =
+  Domain_pool_ref.set domain_pool;
+  Executor_pool_ref.set (Domain_pool.executor_pool domain_pool)
+;;
 
 module For_testing = struct
   let configure_exact_output_registry = configure_exact_output_registry
+  let install_domain_pool_references = install_domain_pool_references
 end
 
 (* GC tuning for long-running server with bursty allocation.
@@ -943,8 +948,7 @@ let initialize_owner_state_blocking
       ?domain_count:(Env_config.Executor.domain_count_override ())
       domain_mgr
   in
-  Domain_pool_ref.set domain_pool;
-  Executor_pool_ref.set (Domain_pool.executor_pool domain_pool);
+  install_domain_pool_references domain_pool;
   Log.Server.info
     "Domain_pool created (%d domains) for dashboard/keeper compute"
     (Domain_pool.domain_count domain_pool);

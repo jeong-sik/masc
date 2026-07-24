@@ -76,22 +76,61 @@ export interface DashboardScheduledAutomationExecution {
   error?: string | null
 }
 
-export interface DashboardScheduledAutomationDispatchReceipt {
-  projection_status: 'recognized' | 'unrecognized_detail'
-  kind?: string
-  queue?: string
-  stimulus?: string
-  stimulus_id?: string | null
-  reaction_ledger_status?: string | null
-  reaction_ledger_error?: string | null
-  keeper_name?: string
-  schedule_id?: string
-  urgency?: string
-  post_id?: string
-  author?: string
-  hearth?: string | null
-  reason?: string
-}
+type DashboardScheduledAutomationDeferredActivation =
+  | {
+      activation_status: 'deferred'
+      activation_reason:
+        | 'lifecycle_denied'
+        | 'shutdown_fenced'
+        | 'owner_unknown'
+        | 'not_running'
+      activation_detail: string
+    }
+  | {
+      activation_status: 'deferred'
+      activation_reason:
+        | 'autoboot_disabled'
+        | 'proactive_disabled'
+        | 'unregistered'
+      activation_detail: null
+    }
+
+type DashboardScheduledAutomationOccurrenceActivation =
+  | ({
+      occurrence_status: 'awaiting_ack'
+    } & (
+      | {
+          activation_status: 'signaled'
+          activation_reason: null
+          activation_detail: null
+        }
+      | DashboardScheduledAutomationDeferredActivation
+    ))
+  | {
+      occurrence_status: 'already_acked' | 'already_cancelled'
+      activation_status: 'not_required'
+      activation_reason: null
+      activation_detail: null
+    }
+
+export type DashboardScheduledAutomationDispatchReceipt =
+  | ({
+      projection_status: 'recognized'
+      kind: 'masc.keeper_wake.enqueued'
+      queue: string
+      stimulus: string
+      stimulus_id: string | null
+      reaction_ledger_status: 'recorded' | 'record_failed' | null
+      reaction_ledger_error: string | null
+      keeper_name: string
+      schedule_id: string
+      urgency: string
+      post_id: string
+    } & DashboardScheduledAutomationOccurrenceActivation)
+  | {
+      projection_status: 'unrecognized_detail'
+      reason: string
+    }
 
 export interface DashboardScheduledAutomationKeeperReactionEvidence {
   projection_status:

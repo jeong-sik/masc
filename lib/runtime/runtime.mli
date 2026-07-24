@@ -126,6 +126,14 @@ val load_list :
     keeper→runtime-id list; [media_failover] is the RFC-0265 ordered reroute
     list; [lanes] is the ordered failover candidate lists. *)
 
+val effective_exact_output_lane_declarations :
+  Runtime_schema.exact_output_lane_decl list ->
+  Runtime_schema.exact_output_lane_decl list
+(** Return exactly the explicitly declared exact-output lanes, preserving lane
+    and slot order. No lane is derived from the default runtime,
+    [structured_judge], or a [runtime.lanes] route; missing declarations remain
+    missing and are rejected only by consumers that require them. *)
+
 val runtime_ids : t list -> string list
 
 (** {1 Lazy default runtime singleton}
@@ -143,10 +151,10 @@ val init_default : config_path:string -> (unit, string) result
 val publish_exact_output_registry :
   lanes:Runtime_schema.exact_output_lane_decl list ->
   Agent_sdk.Exact_output.resolver_snapshot ->
-  (int64, string) result
-(** Publish one immutable OAS resolver-and-lane snapshot and return its
-    generation. This is the production bootstrap boundary; callers provide
-    opaque target references and never receive the private registry value. *)
+  (Runtime_exact_output_registry.t, string) result
+(** Publish one immutable OAS resolver-and-lane snapshot and return that exact
+    publication. Startup callers validate mandatory lanes against this value,
+    so validation cannot observe a later global generation. *)
 
 val init_default_strict : config_path:string -> (unit, string) result
 (** Fail-closed startup entry point: {!init_default} PLUS the OAS

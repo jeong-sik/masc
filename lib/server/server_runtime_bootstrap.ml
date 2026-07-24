@@ -202,10 +202,85 @@ let load_exact_output_lane_declarations ?config_root () =
                "exact-output registry: runtime config parse failed (%s): %d error(s)"
                config_path
                (List.length errors)))
-     | Ok (config : Runtime_schema.config) -> config.exact_output_lane_decls)
+     | Ok (config : Runtime_schema.config) ->
+       ( config_path
+       , config.exact_output_lane_decls ))
+;;
+
+let mandatory_exact_output_lane_ids =
+  [ "hitl_auto_judge"; Keeper_board_attention_exact_flow.lane_id ]
+;;
+
+let require_explicit_mandatory_exact_output_lanes ~config_path lanes =
+  List.iter
+    (fun lane_id ->
+       match
+         List.find_opt
+           (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+              String.equal lane.id lane_id)
+           lanes
+       with
+       | None ->
+         raise
+           (Env_config_core.Config_error
+              (Printf.sprintf
+                 "exact-output registry: mandatory lane %S is missing in %s; add \
+                  [runtime.exact_output_lanes.%s] with a non-empty slots array \
+                  of OAS target refs, or reset the preserved runtime.toml and \
+                  restart so MASC can reseed it; existing runtime configs are \
+                  never migrated automatically"
+                 lane_id
+                 config_path
+                 lane_id))
+       | Some { slot_ids = []; _ } ->
+         raise
+           (Env_config_core.Config_error
+              (Printf.sprintf
+                 "exact-output registry: mandatory lane %S has no slots in %s; \
+                  configure at least one OAS target ref or reset the preserved \
+                  runtime.toml and restart so MASC can reseed it; existing \
+                  runtime configs are never migrated automatically"
+                 lane_id
+                 config_path))
+       | Some { slot_ids = _ :: _; _ } -> ())
+    mandatory_exact_output_lane_ids
+;;
+
+let require_usable_mandatory_exact_output_lanes ~config_path registry =
+  List.iter
+    (fun lane_id ->
+       match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
+       | Ok { selected_slots = _ :: _; _ } -> ()
+       | Ok { selected_slots = []; _ } ->
+         raise
+           (Env_config_core.Config_error
+              (Printf.sprintf
+                 "exact-output registry: mandatory lane %S in %s resolved \
+                  without a usable admitted slot; make at least one configured \
+                  target credential available and restart; no runtime, \
+                  environment, or migration fallback is applied"
+                 lane_id
+                 config_path))
+       | Error error ->
+         raise
+           (Env_config_core.Config_error
+              (Printf.sprintf
+                 "exact-output registry: mandatory lane %S in %s has no \
+                  credential-usable admitted slot: %s; make at least one \
+                  configured target credential available and restart; no \
+                  runtime, environment, or migration fallback is applied"
+                 lane_id
+                 config_path
+                 (Runtime_exact_output_registry.lane_resolution_error_to_string
+                    error))))
+    mandatory_exact_output_lane_ids
 ;;
 
 let configure_exact_output_registry ?config_root () =
+  let config_path, lanes =
+    load_exact_output_lane_declarations ?config_root ()
+  in
+  require_explicit_mandatory_exact_output_lanes ~config_path lanes;
   let catalog, catalog_description =
     match nonempty_env Sys.getenv_opt oas_model_catalog_env_var_name with
     | Some path -> Exact_output.Full_replacement_file path, " from full replacement " ^ path
@@ -236,13 +311,17 @@ let configure_exact_output_registry ?config_root () =
          ("exact-output resolver snapshot: "
           ^ exact_output_snapshot_error_to_string error))
   | Ok resolver_snapshot ->
-    let lanes = load_exact_output_lane_declarations ?config_root () in
     (match Runtime.publish_exact_output_registry ~lanes resolver_snapshot with
      | Error detail ->
        raise
          (Env_config_core.Config_error
             ("exact-output resolver-and-lane registry: " ^ detail))
-     | Ok generation ->
+     | Ok registry ->
+       (* [resolve_lane] is the exact credential-availability path used by
+          execution. Validate the immutable value returned by atomic publication
+          before Keeper persistence recovery or any worker can be produced. *)
+       require_usable_mandatory_exact_output_lanes ~config_path registry;
+       let generation = Runtime_exact_output_registry.generation registry in
        Log.Misc.info
          "exact_output: immutable resolver-and-lane registry generation %Ld published%s"
          generation
@@ -266,6 +345,7 @@ let configure_exact_output_registry ?config_root () =
          Log.Server.warn
            "exact_output: librarian is degraded until [runtime.exact_output_lanes.librarian_exact] is configured with OAS target refs")
 ;;
+
 
 module For_testing = struct
   let configure_exact_output_registry = configure_exact_output_registry

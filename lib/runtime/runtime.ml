@@ -1125,7 +1125,7 @@ let init_default ~config_path =
 
 let publish_exact_output_registry ~lanes resolver_snapshot =
   match Runtime_exact_output_registry.publish ~lanes resolver_snapshot with
-  | Ok registry -> Ok (Runtime_exact_output_registry.generation registry)
+  | Ok registry -> Ok registry
   | Error error ->
     Error (Runtime_exact_output_registry.publication_error_to_string error)
 ;;
@@ -1176,6 +1176,10 @@ let init_default_degraded_report ~config_path =
              Ok (Initialized_degraded degradation))))
 
 let runtime_state () = Atomic.get loaded_state_ref
+
+let effective_exact_output_lane_declarations exact_output_lane_decls =
+  exact_output_lane_decls
+;;
 
 let get_default_runtime () = (runtime_state ()).default_runtime
 let get_runtimes () = (runtime_state ()).runtimes

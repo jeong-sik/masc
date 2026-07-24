@@ -230,6 +230,22 @@ let test_keeper_chat_recovery_route_is_exact () =
   check bool "recovery route rejects extra segments" true
     (Server_dashboard_http_keeper_api.classify_keeper_post_route (path ^ "/bulk")
      = Server_dashboard_http_keeper_api.Keeper_post_unknown)
+  ;
+  let quarantine_path =
+    "/api/v1/keepers/idealist/board-attention/quarantines/ba-root-123/recovery"
+  in
+  (match
+     Server_dashboard_http_keeper_api.classify_keeper_post_route quarantine_path
+   with
+   | Server_dashboard_http_keeper_api
+     .Keeper_post_board_attention_quarantine_recovery route ->
+     check string "quarantine route keeper" "idealist" route.keeper_name;
+     check string "quarantine route partition" "ba-root-123" route.partition_id
+   | _ -> fail "exact Board quarantine recovery route was not classified");
+  check bool "quarantine route rejects extra segments" true
+    (Server_dashboard_http_keeper_api.classify_keeper_post_route
+       (quarantine_path ^ "/bulk")
+     = Server_dashboard_http_keeper_api.Keeper_post_unknown)
 
 let with_test_env f =
   let dir = test_dir () in

@@ -235,14 +235,35 @@ let test_binding_owns_completion_and_settlement () =
       judgment = judgment (provenance ~call_id:"wrong-completed-call" ())
     }
   in
+  let conflicting_completed =
+    let wrong_state =
+      `Assoc
+        [ "kind", `String "completed"
+        ; ( "item"
+          , `Assoc
+              [ "candidate_id", `String wrong_item.candidate_id
+              ; "judgment", A.judgment_to_yojson wrong_item.judgment
+              ] )
+        ; "completed_at", `Float 11.0
+        ]
+    in
+    match P.to_yojson completed with
+    | `Assoc fields ->
+      let encoded =
+        `Assoc
+          (List.map
+             (fun (key, value) ->
+                if String.equal key "state" then key, wrong_state else key, value)
+             fields)
+      in
+      ok "decode conflicting completed fixture" (P.of_yojson encoded)
+    | _ -> Alcotest.fail "completed partition fixture was not an object"
+  in
   expect_error
     "confirm completed rejects a conflicting item"
     (P.confirm_completed
        ~base_path
-       ~partition:
-         { completed with
-           state = P.Completed { item = wrong_item; completed_at = 11.0 }
-         });
+       ~partition:conflicting_completed);
   let settled = ok "settle" (P.settle ~now:12.0 ~base_path ~partition:confirmed) in
   let settled_again = ok "settle idempotently" (P.settle ~now:99.0 ~base_path ~partition:settled) in
   Alcotest.(check bool) "settlement is idempotent" true (settled = settled_again)
@@ -668,6 +689,7 @@ let test_provider_neutral_blocked_reason_codec () =
          ok
            ("block " ^ label)
            (P.block ~now:11.0 ~worker_epoch:owner ~base_path ~partition:claimed reason)
+         |> fsynced ("block " ^ label)
        in
        (match blocked.state with
         | P.Blocked { reason = durable; _ } ->
@@ -720,7 +742,7 @@ let test_strict_current_schema_rejects_old_json () =
     (ok "decode" (P.of_yojson encoded) = created);
   expect_error
     "old schema is rejected without migration"
-    (P.of_yojson (replace_field "schema_version" (`Int 2) encoded));
+    (P.of_yojson (replace_field "schema_version" (`Int 3) encoded));
   let old_running =
     `Assoc
       [ "kind", `String "running"
@@ -751,7 +773,7 @@ let test_strict_current_schema_rejects_old_json () =
 
 let inject_torn_tail ledger_path =
   let output = open_out_gen [ Open_wronly; Open_append; Open_binary ] 0o600 ledger_path in
-  output_string output "{\"schema_version\":3,\"partition_id\":\"torn-partial";
+  output_string output "{\"schema_version\":4,\"partition_id\":\"torn-partial";
   close_out output
 ;;
 

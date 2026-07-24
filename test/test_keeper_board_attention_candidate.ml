@@ -147,6 +147,22 @@ let judgment decision : A.judgment =
   }
 ;;
 
+let invalid_judgment_fixtures () =
+  let valid = judgment J.Not_relevant in
+  [ ( "blank verdict rationale"
+    , { valid with
+        verdict = { valid.verdict with rationale = " \t" }
+      } )
+  ; "blank slot_id", { valid with slot_id = "\n" }
+  ; "blank call_id", { valid with call_id = " " }
+  ; "blank plan_fingerprint", { valid with plan_fingerprint = "\t" }
+  ; "blank request_body_sha256", { valid with request_body_sha256 = "\r\n" }
+  ; "NaN judged_at", { valid with judged_at = Float.nan }
+  ; "+Infinity judged_at", { valid with judged_at = Float.infinity }
+  ; "-Infinity judged_at", { valid with judged_at = Float.neg_infinity }
+  ]
+;;
+
 let record ~base_path candidate =
   match A.record ~base_path candidate with
   | A.Recorded candidate -> candidate
@@ -166,10 +182,20 @@ let test_codec_and_context_identity_are_strict () =
       ~context:(keeper_context ~active_goal_ids:[ "g-1"; "g-2" ] ())
       (signal "post-codec")
   in
+  let encoded = A.candidate_to_json original in
   Alcotest.(check bool)
     "candidate roundtrip"
     true
-    (ok "decode candidate" (A.candidate_of_json (A.candidate_to_json original)) = original);
+    (ok "decode candidate" (A.candidate_of_json encoded) = original);
+  let old_schema =
+    match encoded with
+    | `Assoc fields ->
+      `Assoc (List.filter (fun (name, _) -> not (String.equal name "schema_version")) fields)
+    | _ -> Alcotest.fail "candidate codec did not produce an object"
+  in
+  (match A.candidate_of_json old_schema with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "pre-quarantine candidate schema was accepted");
   let left = ok "left context" (A.Context_key.of_candidate original) in
   let reordered =
     candidate
@@ -225,6 +251,31 @@ let rewrite_assoc_field key rewrite = function
 let add_legacy_extra = function
   | `Assoc fields -> `Assoc (("legacy_extra", `String "must-not-survive") :: fields)
   | _ -> Alcotest.fail "expected Board object fixture"
+;;
+
+let set_assoc_field key value = function
+  | `Assoc fields ->
+    if List.exists (fun (field, _) -> String.equal field key) fields
+    then
+      `Assoc
+        (List.map
+           (fun (field, current) ->
+              if String.equal field key then field, value else field, current)
+           fields)
+    else `Assoc (fields @ [ key, value ])
+  | _ -> Alcotest.fail ("expected object while setting field " ^ key)
+;;
+
+let rewrite_first_comment rewrite = function
+  | `List (comment :: rest) -> `List (rewrite comment :: rest)
+  | `List [] -> Alcotest.fail "expected one Board comment fixture"
+  | _ -> Alcotest.fail "expected comments array"
+;;
+
+let expect_record_error ~base_path label candidate =
+  match A.record ~base_path candidate with
+  | A.Record_error _ -> ()
+  | A.Recorded _ | A.Duplicate _ -> Alcotest.fail (label ^ " was recorded")
 ;;
 
 let test_singleton_request_is_canonical_and_identity_bound () =
@@ -327,15 +378,60 @@ let test_record_rejects_malformed_without_poisoning_ledger () =
     (load_one ~base_path = persisted)
 ;;
 
+let test_judgment_write_invariant_rejects_blank_provenance () =
+  with_temp_base "board-attention-candidate-judgment-invariant" @@ fun base_path ->
+  let persisted =
+    record ~base_path (candidate (signal "post-judgment-invariant"))
+  in
+  let valid = judgment J.Not_relevant in
+  let invalid_judgments = invalid_judgment_fixtures () in
+  List.iter
+    (fun (label, invalid) ->
+       match A.record_judgment ~base_path persisted invalid with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail (label ^ " judgment was recorded"))
+    invalid_judgments;
+  let terminal = candidate (signal "post-consumed-invariant") in
+  let invalid_terminal =
+    { terminal with
+      status =
+        A.Consumed
+          { judgment =
+              { valid with
+                verdict = { valid.verdict with rationale = " " }
+              }
+          ; delivery = A.Not_relevant
+          ; consumed_at = 3.0
+          }
+    }
+  in
+  expect_record_error
+    ~base_path
+    "Consumed candidate with blank verdict"
+    invalid_terminal;
+  match (load_one ~base_path).status with
+  | A.Pending { last_delivery_failure = None } -> ()
+  | A.Pending { last_delivery_failure = Some _ }
+  | A.Judged _
+  | A.Consumed _
+  | A.Quarantine _ ->
+    Alcotest.fail "rejected judgment changed the durable Pending candidate"
+;;
+
+let test_direct_judgment_decoder_enforces_invariant () =
+  List.iter
+    (fun (label, invalid) ->
+       match A.judgment_of_yojson (A.judgment_to_yojson invalid) with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail (label ^ " was accepted by judgment decoder"))
+    (invalid_judgment_fixtures ())
+;;
+
 let test_non_finite_lifecycle_times_are_rejected () =
   with_temp_base "board-attention-candidate-finite-times" @@ fun base_path ->
   let valid = candidate (signal "post-finite-times") in
-  let expect_record_error label candidate =
-    match A.record ~base_path candidate with
-    | A.Record_error _ -> ()
-    | A.Recorded _ | A.Duplicate _ -> Alcotest.fail (label ^ " was recorded")
-  in
   expect_record_error
+    ~base_path
     "NaN recorded_at"
     { valid with recorded_at = Float.nan };
   let infinite_failure : A.delivery_failure =
@@ -345,11 +441,13 @@ let test_non_finite_lifecycle_times_are_rejected () =
     }
   in
   expect_record_error
+    ~base_path
     "infinite delivery failed_at"
     { valid with
       status = A.Pending { last_delivery_failure = Some infinite_failure }
     };
   expect_record_error
+    ~base_path
     "negative-infinite consumed_at"
     { valid with
       status =
@@ -383,6 +481,130 @@ let test_non_finite_lifecycle_times_are_rejected () =
   match A.load_candidates ~base_path ~keeper_name:valid.keeper_name with
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "load accepted a non-finite durable candidate"
+;;
+
+let test_non_finite_complete_request_evidence_is_rejected () =
+  with_temp_base "board-attention-candidate-request-finite" @@ fun base_path ->
+  let base = candidate (signal "post-request-finite") in
+  let at_signal value =
+    let signal =
+      { (signal "post-request-finite") with updated_at = Some value }
+    in
+    let candidate = candidate signal in
+    { candidate with
+      judgment_request =
+        candidate.judgment_request
+        |> rewrite_assoc_field
+             "post"
+             (rewrite_assoc_field "updated_at" (fun _ -> `Float 42.0))
+    }
+  in
+  let at_post value =
+    { base with
+      judgment_request =
+        base.judgment_request
+        |> rewrite_assoc_field
+             "post"
+             (rewrite_assoc_field "created_at" (fun _ -> `Float value))
+    }
+  in
+  let at_comment value =
+    { base with
+      judgment_request =
+        base.judgment_request
+        |> rewrite_assoc_field
+             "comments"
+             (rewrite_first_comment
+                (rewrite_assoc_field "created_at" (fun _ -> `Float value)))
+    }
+  in
+  let at_nested_evidence value =
+    let nested =
+      `Assoc
+        [ ( "evidence"
+          , `List [ `Assoc [ "confidence", `Float value ] ] )
+        ]
+    in
+    { base with
+      judgment_request =
+        base.judgment_request
+        |> rewrite_assoc_field "post" (set_assoc_field "meta" nested)
+    }
+  in
+  let locations =
+    [ "signal.updated_at", at_signal
+    ; "post.created_at", at_post
+    ; "comment.created_at", at_comment
+    ; "nested post evidence", at_nested_evidence
+    ]
+  in
+  let non_finite_values =
+    [ "NaN", Float.nan
+    ; "+Infinity", Float.infinity
+    ; "-Infinity", Float.neg_infinity
+    ]
+  in
+  List.iter
+    (fun (location, make_candidate) ->
+       List.iter
+         (fun (number, value) ->
+            expect_record_error
+              ~base_path
+              (number ^ " at " ^ location)
+              (make_candidate value))
+         non_finite_values)
+    locations;
+  Alcotest.(check int)
+    "non-finite request fixtures left no durable row"
+    0
+    (ok
+       "load after rejected request fixtures"
+       (A.load_candidates ~base_path ~keeper_name:base.keeper_name)
+     |> List.length)
+;;
+
+let test_finite_numeric_boundary_is_persisted () =
+  with_temp_base "board-attention-candidate-finite-boundary" @@ fun base_path ->
+  let signal =
+    { (signal "post-finite-boundary") with
+      updated_at = Some Float.max_float
+    }
+  in
+  let original = candidate signal in
+  let nested_boundary =
+    `Assoc
+      [ ( "evidence"
+        , `List
+            [ `Assoc
+                [ "positive", `Float Float.max_float
+                ; "negative", `Float (-. Float.max_float)
+                ]
+            ] )
+      ]
+  in
+  let judgment_request =
+    original.judgment_request
+    |> rewrite_assoc_field
+         "post"
+         (fun post ->
+            post
+            |> rewrite_assoc_field
+                 "created_at"
+                 (fun _ -> `Float (-. Float.max_float))
+            |> set_assoc_field "meta" nested_boundary)
+    |> rewrite_assoc_field
+         "comments"
+         (rewrite_first_comment
+            (rewrite_assoc_field
+               "created_at"
+               (fun _ -> `Float Float.max_float)))
+  in
+  let original = { original with judgment_request } in
+  let persisted = record ~base_path original in
+  Alcotest.(check bool)
+    "largest finite magnitudes round-trip"
+    true
+    (load_one ~base_path = persisted)
 ;;
 
 let test_record_dedupes_exact_identity_and_rejects_conflict () =
@@ -424,7 +646,8 @@ let test_record_requests_worker_without_invoking_judgment () =
       | A.Pending { last_delivery_failure = None } -> ()
       | A.Pending { last_delivery_failure = Some _ }
       | A.Judged _
-      | A.Consumed _ ->
+      | A.Consumed _
+      | A.Quarantine _ ->
         Alcotest.fail "producer performed judgment work")
    | _ -> Alcotest.fail "candidate returned the wrong worker-wake acceptance");
   match Wake.await registration with
@@ -458,7 +681,7 @@ let test_not_relevant_delivery_is_idempotent () =
   in
   (match consumed.status with
    | A.Consumed { delivery = A.Not_relevant; _ } -> ()
-   | A.Pending _ | A.Judged _ | A.Consumed _ ->
+   | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
      Alcotest.fail "not-relevant judgment did not reach Consumed");
   let replayed =
     ok
@@ -495,7 +718,7 @@ let test_relevant_delivery_uses_exact_candidate_identity () =
   in
   (match consumed.status with
    | A.Consumed { delivery = A.Enqueued_to_keeper_lane; _ } -> ()
-   | A.Pending _ | A.Judged _ | A.Consumed _ ->
+   | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
      Alcotest.fail "relevant judgment consumed without durable enqueue");
   match
     Keeper_event_queue_persistence.load
@@ -528,9 +751,25 @@ let () =
             `Quick
             test_record_rejects_malformed_without_poisoning_ledger
         ; Alcotest.test_case
+            "judgment write invariant rejects blank provenance"
+            `Quick
+            test_judgment_write_invariant_rejects_blank_provenance
+        ; Alcotest.test_case
+            "direct judgment decoder enforces invariant"
+            `Quick
+            test_direct_judgment_decoder_enforces_invariant
+        ; Alcotest.test_case
             "non-finite lifecycle times are rejected"
             `Quick
             test_non_finite_lifecycle_times_are_rejected
+        ; Alcotest.test_case
+            "non-finite complete request evidence is rejected"
+            `Quick
+            test_non_finite_complete_request_evidence_is_rejected
+        ; Alcotest.test_case
+            "finite numeric boundary is persisted"
+            `Quick
+            test_finite_numeric_boundary_is_persisted
         ; Alcotest.test_case
             "record dedupes exact identity"
             `Quick

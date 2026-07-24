@@ -51,19 +51,19 @@ let run_eio f =
 let post_id_exn raw =
   match Board.Post_id.of_string raw with
   | Ok id -> id
-  | Error error -> Alcotest.fail error
+  | Error _ -> Alcotest.failf "invalid Board post id fixture: %s" raw
 ;;
 
 let agent_id_exn raw =
   match Board.Agent_id.of_string raw with
   | Ok id -> id
-  | Error error -> Alcotest.fail error
+  | Error _ -> Alcotest.failf "invalid Board agent id fixture: %s" raw
 ;;
 
 let comment_id_exn raw =
   match Board.Comment_id.of_string raw with
   | Ok id -> id
-  | Error error -> Alcotest.fail error
+  | Error _ -> Alcotest.failf "invalid Board comment id fixture: %s" raw
 ;;
 
 let signal post_id : Board_dispatch.board_signal =
@@ -390,11 +390,54 @@ let test_missing_lane_is_setup_error_without_dispatch () =
       Alcotest.(check int) "missing lane performs no provider POST" 0 (Fixture.post_count server)))
 ;;
 
+let test_prepare_resumable_status_gate () =
+  let pending = candidate "board-attention-gate" in
+  let quarantine : Candidate.quarantine =
+    { quarantine_id = "ba-quarantine-gate"
+    ; partition_id = "ba-root-gate"
+    ; failure_category = Candidate.Unexpected_worker_failure
+    ; attempt_provenance = None
+    ; quarantined_at = 2.0
+    ; prior_status =
+        Candidate.Resumable_pending { last_delivery_failure = None }
+    }
+  in
+  let quarantined phase =
+    { pending with status = Candidate.Quarantine { quarantine; phase } }
+  in
+  let expect_candidate_not_pending label candidate =
+    match Exact_flow.prepare ~net:None candidate with
+    | Error Exact_flow.Candidate_not_pending -> ()
+    | Error _ -> Alcotest.failf "%s returned a different setup error" label
+    | Ok _ -> Alcotest.failf "%s was admitted before requeue authorization" label
+  in
+  let expect_network_unavailable label candidate =
+    match Exact_flow.prepare ~net:None candidate with
+    | Error Exact_flow.Network_unavailable -> ()
+    | Error _ -> Alcotest.failf "%s did not reach the network gate" label
+    | Ok _ -> Alcotest.failf "%s unexpectedly prepared without a network" label
+  in
+  expect_candidate_not_pending
+    "quarantined candidate"
+    (quarantined Candidate.Quarantined);
+  expect_candidate_not_pending
+    "requeue-requested candidate"
+    (quarantined (Candidate.Requeue_requested { requested_at = 3.0 }));
+  expect_network_unavailable "normal pending candidate" pending;
+  expect_network_unavailable
+    "authorized requeued candidate"
+    (quarantined (Candidate.Requeued { requeued_at = 4.0 }))
+;;
+
 let () =
   Alcotest.run
     "Keeper Board-attention exact flow"
     [ ( "production adapter"
       , [ Alcotest.test_case
+            "resumable status gate requires durable requeue authorization"
+            `Quick
+            test_prepare_resumable_status_gate
+        ; Alcotest.test_case
             "explicit lane failover preserves projection order and success provenance"
             `Quick
             test_explicit_lane_failover_and_success_provenance

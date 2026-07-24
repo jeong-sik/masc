@@ -22,6 +22,31 @@ type settlement =
       ; continuation_wake : Keeper_registry.wakeup_outcome option
       }
 
+type fatal_stage =
+  | Registration
+  | Process_start_recovery
+  | Durable_drain
+  | Control_loop
+
+type fatal_error =
+  { stage : fatal_stage
+  ; detail : string
+  }
+
+let fatal_stage_to_string = function
+  | Registration -> "registration"
+  | Process_start_recovery -> "process_start_recovery"
+  | Durable_drain -> "durable_drain"
+  | Control_loop -> "control_loop"
+;;
+
+let fatal_error_to_string error =
+  Printf.sprintf
+    "Board attention worker fatal stage=%s detail=%s"
+    (fatal_stage_to_string error.stage)
+    error.detail
+;;
+
 let ( let* ) = Result.bind
 
 let owner_wake ~base_path ~keeper_name =
@@ -50,8 +75,101 @@ let validate_partition_member partition candidate =
     else Error "partition member Keeper context changed"
 ;;
 
+let confirm_blocked_transition ~base_path transition =
+  match transition.Partition.write_outcome with
+  | Partition.Fsync_completed -> Ok transition.partition
+  | Partition.Visible_sync_unconfirmed _ ->
+    let* confirmed =
+      Partition.confirm_blocked ~base_path ~partition:transition.partition
+    in
+    (match confirmed.write_outcome with
+     | Partition.Fsync_completed -> Ok confirmed.partition
+     | Partition.Visible_sync_unconfirmed detail ->
+       Error ("Blocked partition fsync remains unconfirmed: " ^ detail))
+;;
+
+let failure_category_of_reason = function
+  | Partition.Candidate_membership_conflict _ ->
+    Candidate.Candidate_membership_conflict
+  | Partition.Durable_partition_invariant _ ->
+    Candidate.Durable_partition_invariant
+  | Partition.Exact_setup_unavailable _ -> Candidate.Exact_setup_unavailable
+  | Partition.Exact_flow_replayed -> Candidate.Exact_flow_replayed
+  | Partition.Exact_execution_terminal -> Candidate.Exact_execution_terminal
+  | Partition.Domain_output_invalid _ -> Candidate.Domain_output_invalid
+  | Partition.Execution_provenance_mismatch _ ->
+    Candidate.Execution_provenance_mismatch
+  | Partition.Unexpected_worker_failure _ ->
+    Candidate.Unexpected_worker_failure
+  | Partition.Exact_execution_quarantined _ ->
+    Candidate.Exact_execution_quarantined
+;;
+
+let candidate_provenance (provenance : Partition.exact_provenance) :
+    Candidate.attempt_provenance
+  =
+  { slot_id = provenance.slot_id
+  ; call_id = provenance.call_id
+  ; plan_fingerprint = provenance.plan_fingerprint
+  ; request_body_sha256 = provenance.request_body_sha256
+  }
+;;
+
+let attempt_provenance_of_reason = function
+  | Partition.Exact_execution_quarantined (Partition.Bound provenance) ->
+    Some (candidate_provenance provenance)
+  | Partition.Exact_execution_quarantined
+      (Partition.Advancing { next; _ }) ->
+    Some (candidate_provenance next)
+  | Partition.Exact_execution_quarantined Partition.Unbound
+  | Partition.Candidate_membership_conflict _
+  | Partition.Durable_partition_invariant _
+  | Partition.Exact_setup_unavailable _
+  | Partition.Exact_flow_replayed
+  | Partition.Exact_execution_terminal
+  | Partition.Domain_output_invalid _
+  | Partition.Execution_provenance_mismatch _
+  | Partition.Unexpected_worker_failure _ -> None
+;;
+
+let quarantine_blocked_partition ~base_path partition =
+  match partition.Partition.state with
+  | Partition.Blocked { reason; blocked_at } ->
+    let* candidates =
+      Candidate.load_candidates
+        ~base_path
+        ~keeper_name:partition.keeper_name
+    in
+    let* candidate =
+      match
+        List.find_opt
+          (fun candidate ->
+             String.equal candidate.Candidate.candidate_id partition.candidate_id)
+          candidates
+      with
+      | Some candidate -> Ok candidate
+      | None ->
+        Error
+          ("Blocked partition candidate is absent: "
+           ^ partition.candidate_id)
+    in
+    Candidate.quarantine
+      ~base_path
+      ~candidate
+      ~partition_id:partition.partition_id
+      ~failure_category:(failure_category_of_reason reason)
+      ~attempt_provenance:(attempt_provenance_of_reason reason)
+      ~quarantined_at:blocked_at
+    |> Result.map ignore
+  | Partition.Ready
+  | Partition.Running _
+  | Partition.Completed _
+  | Partition.Settled _ ->
+    Error ("partition is not Blocked: " ^ partition.partition_id)
+;;
+
 let blocked_step ~now ~worker_epoch ~base_path partition reason =
-  let* blocked =
+  let* transition =
     Partition.block
       ~now
       ~worker_epoch
@@ -59,6 +177,8 @@ let blocked_step ~now ~worker_epoch ~base_path partition reason =
       ~partition
       reason
   in
+  let* blocked = confirm_blocked_transition ~base_path transition in
+  let* () = quarantine_blocked_partition ~base_path blocked in
   Ok (Partition_blocked { candidate_id = blocked.candidate_id; reason })
 ;;
 
@@ -101,6 +221,22 @@ let complete_partition ~now ~worker_epoch ~base_path latest_partition judgment =
     ~item
 ;;
 
+let running_progress partition =
+  match partition.Partition.state with
+  | Partition.Running { progress; _ } -> Some progress
+  | Partition.Ready
+  | Partition.Completed _
+  | Partition.Settled _
+  | Partition.Blocked _ -> None
+;;
+
+let preserve_durable_progress partition fallback =
+  match running_progress partition with
+  | Some ((Partition.Bound _ | Partition.Advancing _) as progress) ->
+    Partition.Exact_execution_quarantined progress
+  | Some Partition.Unbound | None -> fallback
+;;
+
 let complete_and_signal
       ~now
       ~worker_epoch
@@ -131,13 +267,18 @@ let complete_and_signal
       (Judgment_completed
          { candidate_id = completed.candidate_id; owner_wake })
   | Error detail ->
+    let reason =
+      preserve_durable_progress
+        !latest_partition
+        (Partition.Durable_partition_invariant
+           ("exact completion failed: " ^ detail))
+    in
     blocked_step
       ~now
       ~worker_epoch
       ~base_path
       !latest_partition
-      (Partition.Durable_partition_invariant
-         ("exact completion failed: " ^ detail))
+      reason
 ;;
 
 let partition_provenance
@@ -151,26 +292,19 @@ let partition_provenance
   }
 ;;
 
-let setup_blocked_reason = function
-  | Exact_flow.Network_unavailable ->
-    Partition.Exact_setup_unavailable "network context unavailable"
-  | Exact_flow.Candidate_not_pending ->
-    Partition.Exact_setup_unavailable "candidate is no longer pending"
+let setup_error_detail = function
+  | Exact_flow.Network_unavailable -> "network context unavailable"
+  | Exact_flow.Candidate_not_pending -> "candidate is no longer pending"
   | Exact_flow.Prompt_contract_unavailable detail ->
-    Partition.Exact_setup_unavailable ("prompt contract unavailable: " ^ detail)
-  | Exact_flow.Registry_unavailable ->
-    Partition.Exact_setup_unavailable "runtime registry unavailable"
-  | Exact_flow.Lane_unavailable ->
-    Partition.Exact_setup_unavailable "board exact lane unavailable"
+    "prompt contract unavailable: " ^ detail
+  | Exact_flow.Registry_unavailable -> "runtime registry unavailable"
+  | Exact_flow.Lane_unavailable -> "board exact lane unavailable"
   | Exact_flow.Lane_resolved_without_slots ->
-    Partition.Exact_setup_unavailable "board exact lane has no admitted slots"
+    "board exact lane has no admitted slots"
   | Exact_flow.Candidate_invalid { position; slot_id = _ } ->
-    Partition.Exact_setup_unavailable
-      (Printf.sprintf "board exact lane slot %d has invalid identity" position)
-  | Exact_flow.Flow_admission_failed ->
-    Partition.Exact_setup_unavailable "OAS exact-flow admission failed"
-  | Exact_flow.Flow_start_failed ->
-    Partition.Exact_setup_unavailable "OAS exact-flow start failed"
+    Printf.sprintf "board exact lane slot %d has invalid identity" position
+  | Exact_flow.Flow_admission_failed -> "OAS exact-flow admission failed"
+  | Exact_flow.Flow_start_failed -> "OAS exact-flow start failed"
 ;;
 
 let exact_provenance_equal left right =
@@ -178,22 +312,6 @@ let exact_provenance_equal left right =
   && String.equal left.call_id right.call_id
   && String.equal left.plan_fingerprint right.plan_fingerprint
   && String.equal left.request_body_sha256 right.request_body_sha256
-;;
-
-let running_progress partition =
-  match partition.Partition.state with
-  | Partition.Running { progress; _ } -> Some progress
-  | Partition.Ready
-  | Partition.Completed _
-  | Partition.Settled _
-  | Partition.Blocked _ -> None
-;;
-
-let preserve_durable_progress partition fallback =
-  match running_progress partition with
-  | Some ((Partition.Bound _ | Partition.Advancing _) as progress) ->
-    Partition.Exact_execution_quarantined progress
-  | Some Partition.Unbound | None -> fallback
 ;;
 
 let callback_invariant operation cause =
@@ -369,6 +487,12 @@ let settle_existing_consumed
         "existing consumed completion"
         transition
     in
+    let* (_ : Candidate.candidate) =
+      Candidate.normalize_requeued_consumed
+        ~base_path
+        ~keeper_name:completed.keeper_name
+        ~candidate_id:completed.candidate_id
+    in
     let* settled =
       Partition.settle ~now:(now ()) ~base_path ~partition:completed
     in
@@ -379,50 +503,40 @@ let process_pending
       ~now
       ~worker_epoch
       ~base_path
-      ~prepare
       ~execute
       latest_partition
-      candidate
+      prepared
   =
-  match prepare candidate with
+  match
+    execute
+      ~before_dispatch:
+        (before_dispatch ~worker_epoch ~base_path latest_partition)
+      ~before_advance:
+        (before_advance ~worker_epoch ~base_path latest_partition)
+      prepared
+  with
   | Error error ->
+    let reason = execution_blocked_reason !latest_partition error in
     blocked_step
       ~now:(now ())
       ~worker_epoch
       ~base_path
       !latest_partition
-      (setup_blocked_reason error)
-  | Ok prepared ->
-    (match
-       execute
-         ~before_dispatch:
-           (before_dispatch ~worker_epoch ~base_path latest_partition)
-         ~before_advance:
-           (before_advance ~worker_epoch ~base_path latest_partition)
-         prepared
-     with
-     | Error error ->
-       let reason = execution_blocked_reason !latest_partition error in
-       blocked_step
-         ~now:(now ())
-         ~worker_epoch
-         ~base_path
-         !latest_partition
-         reason
-     | Ok judgment ->
-       complete_and_signal
-         ~now:(now ())
-         ~worker_epoch
-         ~base_path
-         latest_partition
-         judgment)
+      reason
+  | Ok judgment ->
+    complete_and_signal
+      ~now:(now ())
+      ~worker_epoch
+      ~base_path
+      latest_partition
+      judgment
 ;;
 
 let process_claimed
       ~now
       ~worker_epoch
       ~base_path
-      ~prepare
+      ~prepared
       ~execute
       latest_partition
       candidates
@@ -447,65 +561,188 @@ let process_claimed
          partition
          (Partition.Candidate_membership_conflict detail)
      | Ok () ->
-       (match candidate.status with
-        | Candidate.Pending _ ->
-          process_pending
-            ~now
-            ~worker_epoch
-            ~base_path
-            ~prepare
-            ~execute
-            latest_partition
-            candidate
-        | Candidate.Judged judged ->
+       (match Candidate.resumable_status candidate.status with
+        | Some (Candidate.Resumable_pending _) ->
+          (match prepared with
+           | Some (candidate_id, prepared)
+             when String.equal candidate_id candidate.candidate_id ->
+             process_pending
+               ~now
+               ~worker_epoch
+               ~base_path
+               ~execute
+               latest_partition
+               prepared
+           | Some _ | None ->
+             Error
+               ("Board attention claimed Pending candidate without successful "
+                ^ "pre-claim exact setup: "
+                ^ candidate.candidate_id))
+        | Some (Candidate.Resumable_judged judged) ->
           complete_existing_judgment
             ~now
             ~worker_epoch
             ~base_path
             latest_partition
             judged.judgment
-        | Candidate.Consumed consumed ->
+        | Some (Candidate.Resumable_consumed consumed) ->
           settle_existing_consumed
             ~now
             ~worker_epoch
             ~base_path
             latest_partition
-            consumed.judgment))
+            consumed.judgment
+        | None ->
+          Error
+            ("Quarantined Board attention candidate became claimable: "
+             ^ candidate.candidate_id)))
 ;;
 
-let quarantine_cancelled_execution
-      ~now
-      ~worker_epoch
+let prepare_next_ready
       ~base_path
       ~keeper_name
-      latest_partition
+      ~prepare
+      candidates
   =
-  match (!latest_partition).Partition.state with
-  | Partition.Running
-      { progress = ((Partition.Bound _ | Partition.Advancing _) as progress); _ } ->
-    (match
-       Partition.block
-         ~now:(now ())
-         ~worker_epoch
-         ~base_path
-         ~partition:!latest_partition
-         (Partition.Exact_execution_quarantined progress)
-     with
-     | Ok _ -> ()
-     | Error detail ->
-       Log.Keeper.error
-         "Board attention cancellation quarantine failed keeper=%s partition=%s: %s"
-         keeper_name
-         (!latest_partition).partition_id
-         detail)
-  | Partition.Running { progress = Partition.Unbound; _ } ->
-    (* No durable dispatch ownership exists. Keep Running Unbound so the sole
-       process-start recovery path can return it to Ready. *)
-    ()
-  | Partition.Ready
-  | Partition.Completed _
-  | Partition.Settled _
-  | Partition.Blocked _ -> ()
+  let* partitions = Partition.load ~base_path ~keeper_name in
+  match
+    List.find_opt
+      (fun (partition : Partition.t) ->
+         match partition.state with
+         | Partition.Ready -> true
+         | Partition.Running _
+         | Partition.Completed _
+         | Partition.Settled _
+         | Partition.Blocked _ -> false)
+      partitions
+  with
+  | None -> Ok None
+  | Some partition ->
+    (match candidate_by_id partition.candidate_id candidates with
+     | None -> Ok None
+     | Some candidate ->
+       (match validate_partition_member partition candidate with
+        | Error _ -> Ok None
+        | Ok () ->
+          (match Candidate.resumable_status candidate.status with
+           | Some (Candidate.Resumable_pending _) ->
+             (match prepare candidate with
+              | Ok prepared -> Ok (Some (candidate.candidate_id, prepared))
+              | Error error ->
+                Error
+                  ("Board attention exact setup unavailable before claim: "
+                   ^ setup_error_detail error))
+           | Some
+               (Candidate.Resumable_judged _
+               | Candidate.Resumable_consumed _)
+           | None -> Ok None)))
+;;
+
+let confirm_requeue_transition ~base_path transition =
+  match transition.Partition.write_outcome with
+  | Partition.Fsync_completed -> Ok transition.partition
+  | Partition.Visible_sync_unconfirmed _ ->
+    let* confirmed =
+      Partition.requeue_blocked
+        ~base_path
+        ~partition:transition.partition
+    in
+    (match confirmed.write_outcome with
+     | Partition.Fsync_completed -> Ok confirmed.partition
+     | Partition.Visible_sync_unconfirmed detail ->
+       Error ("requeued partition fsync remains unconfirmed: " ^ detail))
+;;
+
+let reconcile_quarantines ~now ~base_path ~keeper_name =
+  let* partitions = Partition.load ~base_path ~keeper_name in
+  let rec loop = function
+    | [] -> Ok ()
+    | partition :: rest ->
+      let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
+      let* candidate =
+        match
+          List.find_opt
+            (fun candidate ->
+               String.equal
+                 candidate.Candidate.candidate_id
+                 partition.Partition.candidate_id)
+            candidates
+        with
+        | Some candidate -> Ok candidate
+        | None ->
+          Error
+            ("partition candidate is absent during quarantine reconciliation: "
+             ^ partition.candidate_id)
+      in
+      (match partition.state, Candidate.quarantine_state candidate.status with
+       | Partition.Blocked { reason; blocked_at }, Some state
+         when String.equal
+                state.quarantine.partition_id
+                partition.partition_id ->
+         (match state.phase with
+          | Candidate.Requeue_requested _ ->
+            let* authorized =
+              Candidate.finish_quarantine_requeue
+                ~base_path
+                ~candidate
+                ~partition_id:partition.partition_id
+                ~expected_quarantine_id:state.quarantine.quarantine_id
+                ~requeued_at:now
+            in
+            let* transition =
+              Partition.requeue_blocked ~base_path ~partition
+            in
+            let* (_ : Partition.t) =
+              confirm_requeue_transition ~base_path transition
+            in
+            ignore (authorized : Candidate.candidate);
+            loop rest
+          | Candidate.Quarantined -> loop rest
+          | Candidate.Requeued _ ->
+            if Float.equal state.quarantine.quarantined_at blocked_at
+            then (
+              let* transition =
+                Partition.requeue_blocked ~base_path ~partition
+              in
+              let* (_ : Partition.t) =
+                confirm_requeue_transition ~base_path transition
+              in
+              loop rest)
+            else
+              let* (_ : Candidate.candidate) =
+                Candidate.quarantine
+                  ~base_path
+                  ~candidate
+                  ~partition_id:partition.partition_id
+                  ~failure_category:(failure_category_of_reason reason)
+                  ~attempt_provenance:(attempt_provenance_of_reason reason)
+                  ~quarantined_at:blocked_at
+              in
+              loop rest)
+       | Partition.Blocked _, _ ->
+         let* () = quarantine_blocked_partition ~base_path partition in
+         loop rest
+       | Partition.Ready, Some state
+         when String.equal
+                state.quarantine.partition_id
+                partition.partition_id ->
+         (match state.phase with
+          | Candidate.Requeue_requested _ ->
+            Error
+              ("Ready partition preceded candidate requeue authorization: "
+               ^ partition.partition_id)
+          | Candidate.Quarantined ->
+            Error
+              ("Ready partition has an unacknowledged quarantine: "
+               ^ partition.partition_id)
+          | Candidate.Requeued _ -> loop rest)
+       | Partition.Ready, _
+       | Partition.Running _, _
+       | Partition.Completed _, _
+       | Partition.Settled _, _ ->
+         loop rest)
+  in
+  loop partitions
 ;;
 
 let process_next
@@ -518,6 +755,9 @@ let process_next
   =
   let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
   let* (_ : int) = Partition.ensure_roots ~base_path ~keeper_name candidates in
+  let* prepared =
+    prepare_next_ready ~base_path ~keeper_name ~prepare candidates
+  in
   let* claimed =
     Partition.claim_next ~now:(now ()) ~worker_epoch ~base_path ~keeper_name
   in
@@ -531,21 +771,18 @@ let process_next
          ~now
          ~worker_epoch
          ~base_path
-         ~prepare
+         ~prepared
          ~execute
          latest_partition
          current_candidates
      with
-     | Eio.Cancel.Cancelled _ as exn ->
-       Eio.Cancel.protect (fun () ->
-         quarantine_cancelled_execution
-           ~now
-           ~worker_epoch
-           ~base_path
-           ~keeper_name
-           latest_partition);
-       raise exn
-     | _exn ->
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Keeper.error
+         "Board attention worker raised unexpectedly keeper=%s partition=%s: %s"
+         keeper_name
+         (!latest_partition).partition_id
+         (Printexc.to_string exn);
        let reason =
          preserve_durable_progress
            !latest_partition
@@ -672,11 +909,20 @@ let release_process_recovery ~base_path ~keeper_name =
     Hashtbl.remove recovered_process_keys key)
 ;;
 
+let protect_process_recovery_release release =
+  match Eio.Fiber.is_cancelled () with
+  | true | false -> Eio.Cancel.protect release
+  | exception Effect.Unhandled _ -> release ()
+;;
+
 let with_process_recovery_claim ~base_path ~keeper_name run =
   let claimed = claim_process_recovery ~base_path ~keeper_name in
   Fun.protect
     ~finally:(fun () ->
-      if claimed then release_process_recovery ~base_path ~keeper_name)
+      if claimed
+      then
+        protect_process_recovery_release (fun () ->
+          release_process_recovery ~base_path ~keeper_name))
     (fun () -> run claimed)
 ;;
 
@@ -732,71 +978,73 @@ let run
       ~keeper_name
   =
   match Wake.register ~sw ~base_path ~keeper_name with
-  | Error detail -> observe_error ~base_path ~keeper_name detail
+  | Error detail ->
+    observe_error ~base_path ~keeper_name detail;
+    Error { stage = Registration; detail }
   | Ok registration ->
-    with_process_recovery_claim ~base_path ~keeper_name @@ fun owns_process_recovery ->
-    let worker_epoch = Partition.Worker_epoch.generate () in
-    let startup_ready =
-      if owns_process_recovery
-      then (
-        try
-          match
-            Partition.recover_for_process_start
-              ~now:(Time_compat.now ())
-              ~base_path
-              ~keeper_name
-          with
-          | Ok _ ->
-            (match
+    Fun.protect
+      ~finally:(fun () ->
+        protect_process_recovery_release (fun () -> Wake.unregister registration))
+      (fun () ->
+         with_process_recovery_claim ~base_path ~keeper_name
+         @@ fun owns_process_recovery ->
+         let worker_epoch = Partition.Worker_epoch.generate () in
+         let fail stage detail =
+           observe_error ~base_path ~keeper_name detail;
+           Error { stage; detail }
+         in
+         let startup =
+           if not owns_process_recovery
+           then Ok ()
+           else
+             let now = Time_compat.now () in
+             let* (_ : int) =
+               Partition.recover_for_process_start
+                 ~now
+                 ~base_path
+                 ~keeper_name
+             in
+             let* () =
+               reconcile_quarantines ~now ~base_path ~keeper_name
+             in
+             let* (_ : Keeper_registry.wakeup_outcome option) =
                replay_completed_owner_wake
                  ~base_path
                  ~keeper_name
                  ~wake_owner:owner_wake
+             in
+             Ok ()
+         in
+         match startup with
+         | Error detail -> fail Process_start_recovery detail
+         | Ok () ->
+           let prepare = Exact_flow.prepare ~net in
+           let execute = Exact_flow.execute ~clock in
+           let rec await () =
+             match Wake.await registration with
+             | Wake.Registration_closed -> Ok ()
+             | Wake.Wake -> drain ()
+           and drain () =
+             match
+               drain_available
+                 ~yield:Eio.Fiber.yield
+                 ~now:Time_compat.now
+                 ~worker_epoch
+                 ~base_path
+                 ~keeper_name
+                 ~prepare
+                 ~execute
              with
-             | Ok _ -> true
-             | Error detail ->
-               observe_error ~base_path ~keeper_name detail;
-               false)
-          | Error detail ->
-            observe_error ~base_path ~keeper_name detail;
-            false
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn)
-      else true
-    in
-    let prepare = Exact_flow.prepare ~net in
-    let execute = Exact_flow.execute ~clock in
-    let rec await () =
-      match Wake.await registration with
-      | Wake.Registration_closed -> ()
-      | Wake.Wake -> drain ()
-    and drain () =
-      match
-        drain_available
-          ~yield:Eio.Fiber.yield
-          ~now:Time_compat.now
-          ~worker_epoch
-          ~base_path
-          ~keeper_name
-          ~prepare
-          ~execute
-      with
-      | Ok () -> await ()
-      | Error detail ->
-        observe_error ~base_path ~keeper_name detail;
-        await ()
-    in
-    let rec supervise action =
-      try action () with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-        observe_error
-          ~base_path
-          ~keeper_name
-          ("Board attention worker control loop raised: " ^ Printexc.to_string exn);
-        supervise await
-    in
-    supervise (if startup_ready then drain else await)
+             | Ok () -> await ()
+             | Error detail -> fail Durable_drain detail
+           in
+           (try drain () with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
+            | exn ->
+              fail
+                Control_loop
+                ("Board attention worker control loop raised: "
+                 ^ Printexc.to_string exn)))
 ;;
 
 module For_testing = struct

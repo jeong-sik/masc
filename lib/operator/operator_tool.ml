@@ -31,6 +31,10 @@ let operator_tool_name name =
   operator_remote_tool_name (Operator_remote_name.Operator_tool name)
 ;;
 
+let board_attention_quarantine_requeue_tool_name =
+  operator_tool_name Operator_name.Operator_board_attention_quarantine_requeue
+;;
+
 let chat_recovery_tool_name =
   operator_tool_name Operator_name.Operator_chat_recovery_resolve
 ;;
@@ -242,6 +246,50 @@ let chat_recovery_schema =
   }
 ;;
 
+let board_attention_quarantine_requeue_schema =
+  { name = board_attention_quarantine_requeue_tool_name
+  ; description =
+      "Acknowledge and requeue exactly one Board-attention quarantine. The observed keeper, partition, candidate, and opaque quarantine id must all match; this tool never auto-retries."
+  ; input_schema =
+      `Assoc
+        [ "type", `String "object"
+        ; "additionalProperties", `Bool false
+        ; ( "properties"
+          , schema_properties
+              [ ( "schema"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; ( "enum"
+                      , `List
+                          [ `String
+                              Keeper_board_attention_quarantine_command
+                              .tool_command_schema
+                          ] )
+                    ] )
+              ; "keeper_name", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+              ; "partition_id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+              ; "candidate_id", `Assoc [ "type", `String "string"; "minLength", `Int 1 ]
+              ; ( "expected_quarantine_id"
+                , `Assoc [ "type", `String "string"; "minLength", `Int 1 ] )
+              ; ( "decision"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; "enum", `List [ `String "acknowledge_and_requeue" ]
+                    ] )
+              ] )
+        ; ( "required"
+          , `List
+              [ `String "schema"
+              ; `String "keeper_name"
+              ; `String "partition_id"
+              ; `String "candidate_id"
+              ; `String "expected_quarantine_id"
+              ; `String "decision"
+              ] )
+        ]
+  }
+;;
+
 let task_recovery_schema =
   { name = task_recovery_tool_name
   ; description =
@@ -351,6 +399,67 @@ let recovery_mutation_failure_class = function
   | Keeper_chat_queue.Revision_exhausted
   | Keeper_chat_queue.Persist_failed _ ->
     Tool_result.Runtime_failure
+;;
+
+let board_attention_quarantine_failure_class = function
+  | Keeper_board_attention_quarantine_command.Candidate_state_conflict _
+  | Keeper_board_attention_quarantine_command.Partition_state_conflict _ ->
+    Tool_result.Workflow_rejection
+  | Keeper_board_attention_quarantine_command.Durability_unconfirmed _
+  | Keeper_board_attention_quarantine_command.Wake_request_failed _ ->
+    Tool_result.Runtime_failure
+;;
+
+let board_attention_quarantine_requeue_result
+      ~tool_name
+      ~start_time
+      (ctx : _ context)
+      args
+  =
+  let module Command = Keeper_board_attention_quarantine_command in
+  match Command.parse_tool_command args with
+  | Error error ->
+    let data = Command.input_error_to_json error in
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      ~data
+      (Yojson.Safe.to_string data)
+  | Ok command ->
+    let result =
+      Command.execute
+        ~now:(Time_compat.now ())
+        ~base_path:ctx.config.Workspace.base_path
+        command
+    in
+    let audit =
+      Command.audit
+        ctx.config
+        ~actor:ctx.agent_name
+        command
+        ~outcome:
+          (match result with
+           | Ok _ -> Audit_log.Success
+           | Error error ->
+             Audit_log.Failure (Command.execution_error_label error))
+      |> Command.audit_json
+    in
+    (match result with
+     | Ok report ->
+       Tool_result.make_ok
+         ~tool_name
+         ~start_time
+         ~data:(Command.success_json ~audit command report)
+         ()
+     | Error error ->
+       let data = Command.failure_json ~audit error in
+       Tool_result.make_err
+         ~tool_name
+         ~class_:(board_attention_quarantine_failure_class error)
+         ~start_time
+         ~data
+         (Yojson.Safe.to_string data))
 ;;
 
 let chat_recovery_result ~tool_name ~start_time (ctx : _ context) args =
@@ -567,6 +676,14 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
       Some
         (result_of_json ~tool_name:name ~start_time:start
            (Operator_control.action_json control_ctx args))
+  | tool_name
+    when String.equal tool_name board_attention_quarantine_requeue_tool_name ->
+      Some
+        (board_attention_quarantine_requeue_result
+           ~tool_name
+           ~start_time:start
+           ctx
+           args)
   | tool_name when String.equal tool_name chat_recovery_tool_name ->
       Some (chat_recovery_result ~tool_name ~start_time:start ctx args)
   | tool_name when String.equal tool_name task_recovery_tool_name ->
@@ -588,6 +705,7 @@ let schemas : tool_schema list =
     snapshot_schema ~remote:false;
     digest_schema ~remote:false;
     action_schema ~remote:false;
+    board_attention_quarantine_requeue_schema;
     chat_recovery_schema;
     task_recovery_schema;
     confirm_schema;
@@ -599,6 +717,7 @@ let remote_schemas : tool_schema list =
     snapshot_schema ~remote:true;
     digest_schema ~remote:true;
     action_schema ~remote:true;
+    board_attention_quarantine_requeue_schema;
     chat_recovery_schema;
     task_recovery_schema;
     confirm_schema;
@@ -618,7 +737,10 @@ let tool_spec_read_only =
 
 (* Tools with explicit catalog metadata that must be preserved. *)
 let operator_profile_only_tools =
-  [ chat_recovery_tool_name; task_recovery_tool_name ]
+  [ board_attention_quarantine_requeue_tool_name
+  ; chat_recovery_tool_name
+  ; task_recovery_tool_name
+  ]
 ;;
 
 let tool_spec_hidden =

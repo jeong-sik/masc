@@ -50,6 +50,9 @@ type prepared
 
 val lane_id : string
 
+(** Admit only an effective resumable pending candidate. Quarantined and
+    requeue-requested candidates are not executable; a durably requeued pending
+    candidate is executable through the same exact flow as a normal pending one. *)
 val prepare :
   net:Eio_context.eio_net option ->
   Keeper_board_attention_candidate.candidate ->
@@ -74,3 +77,6 @@ val execute :
     advancement. Cancellation is not caught. The caller's durable callback
     progress is the sole terminalization authority and must be quarantined
     under cancellation protection; no OAS receipt state is inspected. *)
+(** Cancellation is propagated promptly without protected partition I/O.
+    Durable [Bound] or [Advancing] progress is quarantined only by the subsequent
+    process-start recovery path. *)

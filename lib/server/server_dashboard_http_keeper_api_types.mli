@@ -65,6 +65,11 @@ type keeper_chat_recovery_route =
   ; receipt_id : string
   }
 
+type keeper_board_attention_quarantine_route =
+  { keeper_name : string
+  ; partition_id : string
+  }
+
 type keeper_post_route_kind =
   | Keeper_post_config
   | Keeper_post_secrets
@@ -77,6 +82,8 @@ type keeper_post_route_kind =
   | Keeper_post_paused_work
   | Keeper_post_catchup_judge
   | Keeper_post_chat_recovery of keeper_chat_recovery_route
+  | Keeper_post_board_attention_quarantine_recovery of
+      keeper_board_attention_quarantine_route
   | Keeper_post_unknown
 (** Sub-route kind for a [POST /api/v1/keepers/<name>/...] path. *)
 

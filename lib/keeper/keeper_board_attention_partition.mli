@@ -176,7 +176,13 @@ val block :
   base_path:string ->
   partition:t ->
   blocked_reason ->
-  (t, string) result
+  (exact_transition, string) result
+
+val confirm_blocked :
+  base_path:string -> partition:t -> (exact_transition, string) result
+
+val requeue_blocked :
+  base_path:string -> partition:t -> (exact_transition, string) result
 
 val completed : base_path:string -> keeper_name:string -> (t list, string) result
 

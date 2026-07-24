@@ -1,8 +1,10 @@
 (** Durable Board-attention judgment boundary.
 
     A candidate is persisted before any model call. Its lifecycle is
-    [Pending -> Judged -> Consumed]. Relevant judgments become normal
-    Keeper-lane events only after an exact candidate-id durable queue commit;
+    [Pending -> Judged -> Consumed]. A terminal exact-flow failure first
+    projects to [Quarantine Quarantined]; an operator-owned recovery advances
+    it through [Requeue_requested] to [Requeued] without losing the prior
+    domain state. Relevant judgments cross the owner lane only when the owner durably applies and consumes the exact candidate judgment;
     delivery failures retain the latest failure evidence and never consume the
     candidate. Pending work has no wall-clock expiry: it remains durable until
     judgment and delivery succeed. *)
@@ -42,10 +44,53 @@ type consumed_state =
   ; consumed_at : float
   }
 
+type resumable_status =
+  | Resumable_pending of pending_state
+  | Resumable_judged of judged_state
+  | Resumable_consumed of consumed_state
+
+type quarantine_failure_category =
+  | Candidate_membership_conflict
+  | Durable_partition_invariant
+  | Exact_setup_unavailable
+  | Exact_flow_replayed
+  | Exact_execution_terminal
+  | Domain_output_invalid
+  | Execution_provenance_mismatch
+  | Unexpected_worker_failure
+  | Exact_execution_quarantined
+
+type attempt_provenance =
+  { slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  }
+
+type quarantine =
+  { quarantine_id : string
+  ; partition_id : string
+  ; failure_category : quarantine_failure_category
+  ; attempt_provenance : attempt_provenance option
+  ; quarantined_at : float
+  ; prior_status : resumable_status
+  }
+
+type quarantine_phase =
+  | Quarantined
+  | Requeue_requested of { requested_at : float }
+  | Requeued of { requeued_at : float }
+
+type quarantine_state =
+  { quarantine : quarantine
+  ; phase : quarantine_phase
+  }
+
 type status =
   | Pending of pending_state
   | Judged of judged_state
   | Consumed of consumed_state
+  | Quarantine of quarantine_state
 
 type candidate =
   { candidate_id : string
@@ -55,9 +100,11 @@ type candidate =
   ; recorded_at : float
   ; status : status
   }
-(** All persisted lifecycle timestamps are finite. Non-finite [recorded_at],
-    delivery failure [failed_at], and [consumed_at] values are rejected on
-    both record and load. *)
+(** Every durable write is validated against the same current schema accepted
+    on load. All floats in the signal, exact judgment request (including nested
+    Board evidence), and lifecycle state must be finite. [Judged] and
+    [Consumed] states additionally require a nonblank verdict rationale and
+    nonblank judgment provenance. *)
 
 module Context_key : sig
   type t
@@ -103,6 +150,10 @@ val judgment_to_yojson : judgment -> Yojson.Safe.t
 val judgment_of_yojson : Yojson.Safe.t -> (judgment, string) result
 val delivery_to_string : delivery -> string
 val delivery_of_string : string -> delivery option
+val quarantine_failure_category_to_string : quarantine_failure_category -> string
+val quarantine_failure_category_of_string : string -> quarantine_failure_category option
+val resumable_status : status -> resumable_status option
+val quarantine_state : status -> quarantine_state option
 val signal_to_yojson : Board_dispatch.board_signal -> Yojson.Safe.t
 
 val singleton_judgment_request : candidate -> (Yojson.Safe.t, string) result
@@ -133,8 +184,8 @@ val load_candidates :
   base_path:string -> keeper_name:string -> (candidate list, string) result
 
 val record : base_path:string -> candidate -> record_result
-(** Validate the current request schema and finite lifecycle timestamps before
-    changing the durable ledger. *)
+(** Validate the complete current candidate invariant before changing the
+    durable ledger. *)
 
 val record_delivery_failure :
   base_path:string ->
@@ -144,6 +195,40 @@ val record_delivery_failure :
 
 val record_judgment :
   base_path:string -> candidate -> judgment -> (candidate, string) result
+
+val quarantine :
+  base_path:string ->
+  candidate:candidate ->
+  partition_id:string ->
+  failure_category:quarantine_failure_category ->
+  attempt_provenance:attempt_provenance option ->
+  quarantined_at:float ->
+  (candidate, string) result
+
+val request_quarantine_requeue :
+  base_path:string ->
+  candidate:candidate ->
+  partition_id:string ->
+  expected_quarantine_id:string ->
+  requested_at:float ->
+  (candidate, string) result
+
+val finish_quarantine_requeue :
+  base_path:string ->
+  candidate:candidate ->
+  partition_id:string ->
+  expected_quarantine_id:string ->
+  requeued_at:float ->
+  (candidate, string) result
+
+val normalize_requeued_consumed :
+  base_path:string ->
+  keeper_name:string ->
+  candidate_id:string ->
+  (candidate, string) result
+(** Remove the recovery wrapper after owner settlement observes an already
+    consumed resumable state. Direct [Consumed] is idempotent; every other
+    state is rejected. *)
 
 val apply_judgment_and_deliver :
   base_path:string ->

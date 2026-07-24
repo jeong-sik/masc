@@ -78,12 +78,19 @@ let flow_candidates selected_slots =
 ;;
 
 let prepare ~net candidate =
-  match candidate.Keeper_board_attention_candidate.status, net with
-  | (Keeper_board_attention_candidate.Judged _
-    | Keeper_board_attention_candidate.Consumed _), _ ->
+  match
+    ( Keeper_board_attention_candidate.resumable_status
+        candidate.Keeper_board_attention_candidate.status
+    , net )
+  with
+  | ( None
+    | Some
+        (Keeper_board_attention_candidate.Resumable_judged _
+        | Keeper_board_attention_candidate.Resumable_consumed _) ), _ ->
     Error Candidate_not_pending
-  | Keeper_board_attention_candidate.Pending _, None -> Error Network_unavailable
-  | Keeper_board_attention_candidate.Pending _, Some net ->
+  | Some (Keeper_board_attention_candidate.Resumable_pending _), None ->
+    Error Network_unavailable
+  | Some (Keeper_board_attention_candidate.Resumable_pending _), Some net ->
     let* messages =
       messages candidate
       |> Result.map_error (fun detail -> Prompt_contract_unavailable detail)

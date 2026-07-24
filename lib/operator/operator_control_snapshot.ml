@@ -640,7 +640,16 @@ let snapshot_json
       then Keeper_meta_store.persistent_agent_names config
       else []
     in
-    let result =
+  let board_attention_quarantines =
+  timed "board_attention_quarantines" (fun () ->
+    if initialized && include_keepers
+    then
+      Keeper_board_attention_quarantine_command.inventory_json
+        ~base_path:config.base_path
+        ~keeper_names
+    else `Assoc [ "count", `Int 0; "items", `List []; "errors", `List [] ])
+in
+  let result =
       `Assoc
         ([ "trace_id", `String trace_id
          ; "server_profile", operator_server_profile_json
@@ -648,6 +657,7 @@ let snapshot_json
          ; "authoritative_judgment_available", `Bool false
          ; "inference_inflight", Inference_inflight_observation.snapshot_json ()
          ; "workspace", workspace_json config
+         ; "board_attention_quarantines", board_attention_quarantines
          ]
          @ ((* Parallelize independent I/O: sessions, keepers, and persistent_agents. *)
             let empty_section = `Assoc [ "count", `Int 0; "items", `List [] ] in

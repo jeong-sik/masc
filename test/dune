@@ -1323,6 +1323,7 @@
  (modules
   test_exact_output_catalog_precedence
   test_exact_output_catalog_precedence_fixture)
+ (deps ../config/oas-models-overlay.toml ../config/runtime.toml)
  (libraries alcotest masc_server masc_test_deps eio_main unix))
 
 ; Production entrypoint coverage for an intentionally absent Eio clock. This

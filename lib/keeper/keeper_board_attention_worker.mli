@@ -23,18 +23,32 @@ type settlement =
       ; continuation_wake : Keeper_registry.wakeup_outcome option
       }
 
+type fatal_stage =
+  | Registration
+  | Process_start_recovery
+  | Durable_drain
+  | Control_loop
+
+type fatal_error =
+  { stage : fatal_stage
+  ; detail : string
+  }
+
+val fatal_error_to_string : fatal_error -> string
+
 val run :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   net:Eio_context.eio_net option ->
   base_path:string ->
   keeper_name:string ->
-  unit
+  (unit, fatal_error) result
 (** Register and run the wake-driven worker until [sw] is cancelled. The clock
     is forwarded to OAS execution. MASC owns no Provider execution policy.
-    Process-start recovery releases only an unbound claim and quarantines every
-    durably bound execution. Its process recovery ownership is released when
-    the worker lifecycle ends or is cancelled. *)
+    Setup or durability errors end this lifecycle instead of awaiting another
+    wake. Cancellation performs no partition I/O: process-start recovery releases
+    an unbound claim and quarantines every durably bound execution. Process
+    recovery ownership is released when the lifecycle ends or is cancelled. *)
 
 val settle_one_completed :
   base_path:string ->
@@ -71,7 +85,9 @@ module For_testing : sig
        result) ->
     (step, string) result
   (** Inject one provider-neutral exact-flow preparation and execution. The
-      execution seam must invoke the supplied callbacks at the same boundaries
+      next Pending candidate is prepared before it is claimed; setup failure
+      returns an error with the candidate still Pending and its partition Ready.
+      The execution seam must invoke the supplied callbacks at the same boundaries
       as OAS. It exposes no Provider cause, receipt phase, or dispatch count. *)
 
   val drain_available :

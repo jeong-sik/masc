@@ -37,10 +37,53 @@ type consumed_state =
   ; consumed_at : float
   }
 
+type resumable_status =
+  | Resumable_pending of pending_state
+  | Resumable_judged of judged_state
+  | Resumable_consumed of consumed_state
+
+type quarantine_failure_category =
+  | Candidate_membership_conflict
+  | Durable_partition_invariant
+  | Exact_setup_unavailable
+  | Exact_flow_replayed
+  | Exact_execution_terminal
+  | Domain_output_invalid
+  | Execution_provenance_mismatch
+  | Unexpected_worker_failure
+  | Exact_execution_quarantined
+
+type attempt_provenance =
+  { slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  }
+
+type quarantine =
+  { quarantine_id : string
+  ; partition_id : string
+  ; failure_category : quarantine_failure_category
+  ; attempt_provenance : attempt_provenance option
+  ; quarantined_at : float
+  ; prior_status : resumable_status
+  }
+
+type quarantine_phase =
+  | Quarantined
+  | Requeue_requested of { requested_at : float }
+  | Requeued of { requeued_at : float }
+
+type quarantine_state =
+  { quarantine : quarantine
+  ; phase : quarantine_phase
+  }
+
 type status =
   | Pending of pending_state
   | Judged of judged_state
   | Consumed of consumed_state
+  | Quarantine of quarantine_state
 
 type candidate =
   { candidate_id : string
@@ -71,6 +114,52 @@ type record_acceptance =
   }
 
 exception Candidate_unavailable of string
+
+let schema_version = 2
+
+let quarantine_failure_category_to_string = function
+  | Candidate_membership_conflict -> "candidate_membership_conflict"
+  | Durable_partition_invariant -> "durable_partition_invariant"
+  | Exact_setup_unavailable -> "exact_setup_unavailable"
+  | Exact_flow_replayed -> "exact_flow_replayed"
+  | Exact_execution_terminal -> "exact_execution_terminal"
+  | Domain_output_invalid -> "domain_output_invalid"
+  | Execution_provenance_mismatch -> "execution_provenance_mismatch"
+  | Unexpected_worker_failure -> "unexpected_worker_failure"
+  | Exact_execution_quarantined -> "exact_execution_quarantined"
+;;
+
+let quarantine_failure_category_of_string = function
+  | "candidate_membership_conflict" -> Some Candidate_membership_conflict
+  | "durable_partition_invariant" -> Some Durable_partition_invariant
+  | "exact_setup_unavailable" -> Some Exact_setup_unavailable
+  | "exact_flow_replayed" -> Some Exact_flow_replayed
+  | "exact_execution_terminal" -> Some Exact_execution_terminal
+  | "domain_output_invalid" -> Some Domain_output_invalid
+  | "execution_provenance_mismatch" -> Some Execution_provenance_mismatch
+  | "unexpected_worker_failure" -> Some Unexpected_worker_failure
+  | "exact_execution_quarantined" -> Some Exact_execution_quarantined
+  | _ -> None
+;;
+
+let resumable_status = function
+  | Pending pending -> Some (Resumable_pending pending)
+  | Judged judged -> Some (Resumable_judged judged)
+  | Consumed consumed -> Some (Resumable_consumed consumed)
+  | Quarantine { quarantine; phase = Requeued _ } -> Some quarantine.prior_status
+  | Quarantine { phase = (Quarantined | Requeue_requested _); _ } -> None
+;;
+
+let quarantine_state = function
+  | Quarantine state -> Some state
+  | Pending _ | Judged _ | Consumed _ -> None
+;;
+
+let status_of_resumable = function
+  | Resumable_pending pending -> Pending pending
+  | Resumable_judged judged -> Judged judged
+  | Resumable_consumed consumed -> Consumed consumed
+;;
 
 let delivery_failure_kind_to_string = function
   | Durable_delivery_unavailable -> "durable_delivery_unavailable"
@@ -264,8 +353,8 @@ let judgment_to_yojson judgment =
     ]
 ;;
 
-let status_to_yojson = function
-  | Pending pending ->
+let resumable_status_to_yojson = function
+  | Resumable_pending pending ->
     `Assoc
       [ "kind", `String "pending"
       ; ( "last_delivery_failure"
@@ -273,7 +362,7 @@ let status_to_yojson = function
             delivery_failure_to_yojson
             pending.last_delivery_failure )
       ]
-  | Judged judged ->
+  | Resumable_judged judged ->
     `Assoc
       [ "kind", `String "judged"
       ; "judgment", judgment_to_yojson judged.judgment
@@ -282,7 +371,7 @@ let status_to_yojson = function
             delivery_failure_to_yojson
             judged.last_delivery_failure )
       ]
-  | Consumed consumed ->
+  | Resumable_consumed consumed ->
     `Assoc
       [ "kind", `String "consumed"
       ; "judgment", judgment_to_yojson consumed.judgment
@@ -291,9 +380,56 @@ let status_to_yojson = function
       ]
 ;;
 
+let attempt_provenance_to_yojson provenance =
+  `Assoc
+    [ "slot_id", `String provenance.slot_id
+    ; "call_id", `String provenance.call_id
+    ; "plan_fingerprint", `String provenance.plan_fingerprint
+    ; "request_body_sha256", `String provenance.request_body_sha256
+    ]
+;;
+
+let quarantine_to_yojson quarantine =
+  `Assoc
+    [ "quarantine_id", `String quarantine.quarantine_id
+    ; "partition_id", `String quarantine.partition_id
+    ; ( "failure_category"
+      , `String
+          (quarantine_failure_category_to_string quarantine.failure_category) )
+    ; ( "attempt_provenance"
+      , option_json attempt_provenance_to_yojson quarantine.attempt_provenance )
+    ; "quarantined_at", `Float quarantine.quarantined_at
+    ; "prior_status", resumable_status_to_yojson quarantine.prior_status
+    ]
+;;
+
+let status_to_yojson = function
+  | Pending pending -> resumable_status_to_yojson (Resumable_pending pending)
+  | Judged judged -> resumable_status_to_yojson (Resumable_judged judged)
+  | Consumed consumed -> resumable_status_to_yojson (Resumable_consumed consumed)
+  | Quarantine { quarantine; phase = Quarantined } ->
+    `Assoc
+      [ "kind", `String "quarantined"
+      ; "quarantine", quarantine_to_yojson quarantine
+      ]
+  | Quarantine { quarantine; phase = Requeue_requested { requested_at } } ->
+    `Assoc
+      [ "kind", `String "requeue_requested"
+      ; "quarantine", quarantine_to_yojson quarantine
+      ; "requested_at", `Float requested_at
+      ]
+  | Quarantine { quarantine; phase = Requeued { requeued_at } } ->
+    `Assoc
+      [ "kind", `String "requeued"
+      ; "quarantine", quarantine_to_yojson quarantine
+      ; "requeued_at", `Float requeued_at
+      ]
+;;
+
 let candidate_to_json candidate =
   `Assoc
-    [ "candidate_id", `String candidate.candidate_id
+    [ "schema_version", `Int schema_version
+    ; "candidate_id", `String candidate.candidate_id
     ; "keeper_name", `String candidate.keeper_name
     ; "signal", signal_to_yojson candidate.signal
     ; "judgment_request", candidate.judgment_request
@@ -427,18 +563,139 @@ let finite_float_json ~context json =
   Ok value
 ;;
 
-let validate_candidate_times (candidate : candidate) =
-  let* () = finite_time ~context:"candidate.recorded_at" candidate.recorded_at in
-  match candidate.status with
-  | Pending { last_delivery_failure = None }
-  | Judged { last_delivery_failure = None; _ } -> Ok ()
-  | Pending { last_delivery_failure = Some failure }
-  | Judged { last_delivery_failure = Some failure; _ } ->
+let nonblank_string ~context value =
+  if String.equal (String.trim value) ""
+  then Error (context ^ " must not be empty")
+  else Ok ()
+;;
+
+let rec validate_finite_json ~context = function
+  | `Float value -> finite_time ~context value
+  | `Assoc fields ->
+    List.fold_left
+      (fun result (key, value) ->
+         let* () = result in
+         validate_finite_json ~context:(context ^ "." ^ key) value)
+      (Ok ())
+      fields
+  | `List values ->
+    let rec loop index = function
+      | [] -> Ok ()
+      | value :: rest ->
+        let* () =
+          validate_finite_json
+            ~context:(Printf.sprintf "%s[%d]" context index)
+            value
+        in
+        loop (index + 1) rest
+    in
+    loop 0 values
+  | `Bool _ | `Int _ | `Intlit _ | `Null | `String _ -> Ok ()
+;;
+
+let validate_judgment ~context (judgment : judgment) =
+  let* () =
+    nonblank_string
+      ~context:(context ^ ".verdict.rationale")
+      judgment.verdict.rationale
+  in
+  let* () = nonblank_string ~context:(context ^ ".slot_id") judgment.slot_id in
+  let* () = nonblank_string ~context:(context ^ ".call_id") judgment.call_id in
+  let* () =
+    nonblank_string
+      ~context:(context ^ ".plan_fingerprint")
+      judgment.plan_fingerprint
+  in
+  let* () =
+    nonblank_string
+      ~context:(context ^ ".request_body_sha256")
+      judgment.request_body_sha256
+  in
+  finite_time ~context:(context ^ ".judged_at") judgment.judged_at
+;;
+
+let validate_optional_delivery_failure = function
+  | None -> Ok ()
+  | Some failure ->
     finite_time
       ~context:"candidate.status.last_delivery_failure.failed_at"
       failure.failed_at
-  | Consumed consumed ->
+;;
+
+let validate_resumable_state = function
+  | Resumable_pending pending ->
+    validate_optional_delivery_failure pending.last_delivery_failure
+  | Resumable_judged judged ->
+    let* () =
+      validate_judgment ~context:"candidate.status.judgment" judged.judgment
+    in
+    validate_optional_delivery_failure judged.last_delivery_failure
+  | Resumable_consumed consumed ->
+    let* () =
+      validate_judgment ~context:"candidate.status.judgment" consumed.judgment
+    in
     finite_time ~context:"candidate.status.consumed_at" consumed.consumed_at
+;;
+
+let nonblank_quarantine_field context value =
+  if String.equal (String.trim value) ""
+  then Error (context ^ " must not be blank")
+  else Ok ()
+;;
+
+let validate_attempt_provenance provenance =
+  let* () = nonblank_quarantine_field "candidate quarantine slot_id" provenance.slot_id in
+  let* () = nonblank_quarantine_field "candidate quarantine call_id" provenance.call_id in
+  let* () =
+    nonblank_quarantine_field
+      "candidate quarantine plan_fingerprint"
+      provenance.plan_fingerprint
+  in
+  nonblank_quarantine_field
+    "candidate quarantine request_body_sha256"
+    provenance.request_body_sha256
+;;
+
+let validate_quarantine quarantine =
+  let* () =
+    nonblank_quarantine_field
+      "candidate quarantine quarantine_id"
+      quarantine.quarantine_id
+  in
+  let* () =
+    nonblank_quarantine_field
+      "candidate quarantine partition_id"
+      quarantine.partition_id
+  in
+  let* () =
+    match quarantine.attempt_provenance with
+    | None -> Ok ()
+    | Some provenance -> validate_attempt_provenance provenance
+  in
+  let* () =
+    finite_time
+      ~context:"candidate.status.quarantine.quarantined_at"
+      quarantine.quarantined_at
+  in
+  validate_resumable_state quarantine.prior_status
+;;
+
+let validate_candidate_state (candidate : candidate) =
+  let* () = finite_time ~context:"candidate.recorded_at" candidate.recorded_at in
+  match candidate.status with
+  | Pending pending -> validate_resumable_state (Resumable_pending pending)
+  | Judged judged -> validate_resumable_state (Resumable_judged judged)
+  | Consumed consumed -> validate_resumable_state (Resumable_consumed consumed)
+  | Quarantine { quarantine; phase } ->
+    let* () = validate_quarantine quarantine in
+    (match phase with
+     | Quarantined -> Ok ()
+     | Requeue_requested { requested_at } ->
+       finite_time
+         ~context:"candidate.status.quarantine.requested_at"
+         requested_at
+     | Requeued { requeued_at } ->
+       finite_time ~context:"candidate.status.quarantine.requeued_at" requeued_at)
 ;;
 
 let optional_json parser = function
@@ -527,7 +784,9 @@ let signal_of_yojson json =
   in
   let* updated_at_json = field ~context "updated_at" fields in
   let* updated_at =
-    optional_json (float_json ~context:(context ^ ".updated_at")) updated_at_json
+    optional_json
+      (finite_float_json ~context:(context ^ ".updated_at"))
+      updated_at_json
   in
   Ok
     { Board_dispatch.kind = kind
@@ -579,28 +838,13 @@ let judgment_of_yojson json =
   let* verdict = Keeper_board_attention_judgment.of_yojson verdict_json in
   let* slot_id_json = field ~context "slot_id" fields in
   let* slot_id = string_json ~context:(context ^ ".slot_id") slot_id_json in
-  let* () =
-    if String.equal (String.trim slot_id) ""
-    then Error (context ^ ".slot_id must not be empty")
-    else Ok ()
-  in
   let* call_id_json = field ~context "call_id" fields in
   let* call_id = string_json ~context:(context ^ ".call_id") call_id_json in
-  let* () =
-    if String.equal (String.trim call_id) ""
-    then Error (context ^ ".call_id must not be empty")
-    else Ok ()
-  in
   let* plan_fingerprint_json = field ~context "plan_fingerprint" fields in
   let* plan_fingerprint =
     string_json
       ~context:(context ^ ".plan_fingerprint")
       plan_fingerprint_json
-  in
-  let* () =
-    if String.equal (String.trim plan_fingerprint) ""
-    then Error (context ^ ".plan_fingerprint must not be empty")
-    else Ok ()
   in
   let* request_body_sha256_json = field ~context "request_body_sha256" fields in
   let* request_body_sha256 =
@@ -608,19 +852,9 @@ let judgment_of_yojson json =
       ~context:(context ^ ".request_body_sha256")
       request_body_sha256_json
   in
-  let* () =
-    if String.equal (String.trim request_body_sha256) ""
-    then Error (context ^ ".request_body_sha256 must not be empty")
-    else Ok ()
-  in
   let* judged_at_json = field ~context "judged_at" fields in
   let* judged_at = float_json ~context:(context ^ ".judged_at") judged_at_json in
-  let* () =
-    if Float.is_finite judged_at
-    then Ok ()
-    else Error (context ^ ".judged_at must be finite")
-  in
-  Ok
+  let judgment =
     { verdict
     ; slot_id
     ; call_id
@@ -628,9 +862,14 @@ let judgment_of_yojson json =
     ; request_body_sha256
     ; judged_at
     }
+  in
+  let* () =
+    validate_judgment ~context judgment
+  in
+  Ok judgment
 ;;
 
-let status_of_yojson json =
+let resumable_status_of_yojson json =
   let context = "candidate.status" in
   let* fields = assoc ~context json in
   let* kind_json = field ~context "kind" fields in
@@ -644,7 +883,7 @@ let status_of_yojson json =
     let* last_delivery_failure =
       optional_json delivery_failure_of_yojson failure_json
     in
-    Ok (Pending { last_delivery_failure })
+    Ok (Resumable_pending { last_delivery_failure })
   | "judged" ->
     let* () =
       exact_fields
@@ -658,7 +897,7 @@ let status_of_yojson json =
     let* last_delivery_failure =
       optional_json delivery_failure_of_yojson failure_json
     in
-    Ok (Judged { judgment; last_delivery_failure })
+    Ok (Resumable_judged { judgment; last_delivery_failure })
   | "consumed" ->
     let* () =
       exact_fields
@@ -679,7 +918,125 @@ let status_of_yojson json =
     let* consumed_at =
       finite_float_json ~context:(context ^ ".consumed_at") consumed_at_json
     in
-    Ok (Consumed { judgment; delivery; consumed_at })
+    Ok (Resumable_consumed { judgment; delivery; consumed_at })
+  | value ->
+    Error (Printf.sprintf "unknown resumable Board attention status %S" value)
+;;
+
+let attempt_provenance_of_yojson json =
+  let context = "candidate quarantine attempt provenance" in
+  let* fields = assoc ~context json in
+  let* () =
+    exact_fields
+      ~context
+      [ "slot_id"; "call_id"; "plan_fingerprint"; "request_body_sha256" ]
+      fields
+  in
+  let* slot_id_json = field ~context "slot_id" fields in
+  let* slot_id = string_json ~context:(context ^ ".slot_id") slot_id_json in
+  let* call_id_json = field ~context "call_id" fields in
+  let* call_id = string_json ~context:(context ^ ".call_id") call_id_json in
+  let* plan_json = field ~context "plan_fingerprint" fields in
+  let* plan_fingerprint =
+    string_json ~context:(context ^ ".plan_fingerprint") plan_json
+  in
+  let* request_json = field ~context "request_body_sha256" fields in
+  let* request_body_sha256 =
+    string_json ~context:(context ^ ".request_body_sha256") request_json
+  in
+  Ok { slot_id; call_id; plan_fingerprint; request_body_sha256 }
+;;
+
+let quarantine_of_yojson json =
+  let context = "candidate quarantine" in
+  let* fields = assoc ~context json in
+  let* () =
+    exact_fields
+      ~context
+      [ "quarantine_id"
+      ; "partition_id"
+      ; "failure_category"
+      ; "attempt_provenance"
+      ; "quarantined_at"
+      ; "prior_status"
+      ]
+      fields
+  in
+  let* quarantine_id_json = field ~context "quarantine_id" fields in
+  let* quarantine_id =
+    string_json ~context:(context ^ ".quarantine_id") quarantine_id_json
+  in
+  let* partition_id_json = field ~context "partition_id" fields in
+  let* partition_id =
+    string_json ~context:(context ^ ".partition_id") partition_id_json
+  in
+  let* category_json = field ~context "failure_category" fields in
+  let* category_raw =
+    string_json ~context:(context ^ ".failure_category") category_json
+  in
+  let* failure_category =
+    match quarantine_failure_category_of_string category_raw with
+    | Some category -> Ok category
+    | None -> Error ("unknown candidate quarantine failure category: " ^ category_raw)
+  in
+  let* provenance_json = field ~context "attempt_provenance" fields in
+  let* attempt_provenance =
+    optional_json attempt_provenance_of_yojson provenance_json
+  in
+  let* quarantined_at_json = field ~context "quarantined_at" fields in
+  let* quarantined_at =
+    finite_float_json
+      ~context:(context ^ ".quarantined_at")
+      quarantined_at_json
+  in
+  let* prior_json = field ~context "prior_status" fields in
+  let* prior_status = resumable_status_of_yojson prior_json in
+  Ok
+    { quarantine_id
+    ; partition_id
+    ; failure_category
+    ; attempt_provenance
+    ; quarantined_at
+    ; prior_status
+    }
+;;
+
+let status_of_yojson json =
+  let context = "candidate.status" in
+  let* fields = assoc ~context json in
+  let* kind_json = field ~context "kind" fields in
+  let* kind = string_json ~context:(context ^ ".kind") kind_json in
+  match kind with
+  | "pending" | "judged" | "consumed" ->
+    let* resumable = resumable_status_of_yojson json in
+    Ok (status_of_resumable resumable)
+  | "quarantined" ->
+    let* () = exact_fields ~context [ "kind"; "quarantine" ] fields in
+    let* quarantine_json = field ~context "quarantine" fields in
+    let* quarantine = quarantine_of_yojson quarantine_json in
+    Ok (Quarantine { quarantine; phase = Quarantined })
+  | "requeue_requested" ->
+    let* () =
+      exact_fields ~context [ "kind"; "quarantine"; "requested_at" ] fields
+    in
+    let* quarantine_json = field ~context "quarantine" fields in
+    let* quarantine = quarantine_of_yojson quarantine_json in
+    let* requested_json = field ~context "requested_at" fields in
+    let* requested_at =
+      finite_float_json ~context:(context ^ ".requested_at") requested_json
+    in
+    Ok (Quarantine { quarantine; phase = Requeue_requested { requested_at } })
+  | "requeued" ->
+    let* () =
+      exact_fields ~context [ "kind"; "quarantine"; "requeued_at" ] fields
+    in
+    let* quarantine_json = field ~context "quarantine" fields in
+    let* quarantine = quarantine_of_yojson quarantine_json in
+    let* requeued_json = field ~context "requeued_at" fields in
+    let* requeued_at =
+      finite_float_json ~context:(context ^ ".requeued_at") requeued_json
+    in
+    Ok (Quarantine { quarantine; phase = Requeued { requeued_at } })
   | value -> Error (Printf.sprintf "unknown Board attention candidate status %S" value)
 ;;
 
@@ -779,6 +1136,7 @@ let validate_keeper_context ~keeper_name json =
 
 let canonical_judgment_request candidate =
   let context = "candidate.judgment_request" in
+  let* () = validate_finite_json ~context candidate.judgment_request in
   let* fields = assoc ~context candidate.judgment_request in
   let* () =
     exact_fields
@@ -877,13 +1235,24 @@ let singleton_judgment_request candidate =
        ])
 ;;
 
+let validate_candidate_for_persistence candidate =
+  let* () =
+    validate_finite_json
+      ~context:"candidate.signal"
+      (signal_to_yojson candidate.signal)
+  in
+  let* (_ : Yojson.Safe.t) = singleton_judgment_request candidate in
+  validate_candidate_state candidate
+;;
+
 let candidate_of_json json =
   let context = "board attention candidate" in
   let* fields = assoc ~context json in
   let* () =
     exact_fields
       ~context
-      [ "candidate_id"
+      [ "schema_version"
+      ; "candidate_id"
       ; "keeper_name"
       ; "signal"
       ; "judgment_request"
@@ -891,6 +1260,17 @@ let candidate_of_json json =
       ; "status"
       ]
       fields
+  in
+  let* version_json = field ~context "schema_version" fields in
+  let* () =
+    match version_json with
+    | `Int version when Int.equal version schema_version -> Ok ()
+    | `Int version ->
+      Error
+        (Printf.sprintf
+           "unsupported Board attention candidate schema version %d"
+           version)
+    | _ -> Error (context ^ ".schema_version must be an integer")
   in
   let* candidate_id_json = field ~context "candidate_id" fields in
   let* candidate_id = string_json ~context:(context ^ ".candidate_id") candidate_id_json in
@@ -914,8 +1294,7 @@ let candidate_of_json json =
   let candidate =
     { candidate_id; keeper_name; signal; judgment_request; recorded_at; status }
   in
-  let* () = validate_candidate_times candidate in
-  let* (_ : Yojson.Safe.t) = singleton_judgment_request candidate in
+  let* () = validate_candidate_for_persistence candidate in
   Ok candidate
 ;;
 
@@ -1088,7 +1467,7 @@ let update_ledger_many ~base_path ~keeper_name decide =
                List.fold_left
                  (fun validation candidate ->
                     let* () = validation in
-                    validate_candidate_times candidate)
+                    validate_candidate_for_persistence candidate)
                  (Ok ())
                  compacted
              in
@@ -1124,13 +1503,9 @@ let find_candidate candidates candidate_id =
 ;;
 
 let record ~base_path candidate =
-  let validation =
-    let* () = validate_candidate_times candidate in
-    singleton_judgment_request candidate
-  in
-  match validation with
+  match validate_candidate_for_persistence candidate with
   | Error detail -> Record_error ("invalid Board attention candidate: " ^ detail)
-  | Ok _ ->
+  | Ok () ->
     (match
        update_ledger
          ~base_path
@@ -1171,24 +1546,41 @@ let same_judgment left right =
   && Float.equal left.judged_at right.judged_at
 ;;
 
-let candidate_with_delivery_failure current failure =
-  match current.status with
-  | Pending pending ->
+let replace_resumable_status status resumable =
+  match status with
+  | Pending _ | Judged _ | Consumed _ -> status_of_resumable resumable
+  | Quarantine ({ quarantine; phase = Requeued _ } as state) ->
+    Quarantine
+      { state with
+        quarantine = { quarantine with prior_status = resumable }
+      }
+  | Quarantine ({ phase = (Quarantined | Requeue_requested _); _ } as state) ->
+    Quarantine state
+;;
+
+let resumable_with_delivery_failure resumable failure =
+  match resumable with
+  | Resumable_pending pending ->
     (match pending.last_delivery_failure with
-     | Some existing when same_delivery_failure existing failure -> current
+     | Some existing when same_delivery_failure existing failure -> resumable
      | Some _ | None ->
-       { current with
-         status = Pending { last_delivery_failure = Some failure }
-       })
-  | Judged judged ->
+       Resumable_pending { last_delivery_failure = Some failure })
+  | Resumable_judged judged ->
     (match judged.last_delivery_failure with
-     | Some existing when same_delivery_failure existing failure -> current
+     | Some existing when same_delivery_failure existing failure -> resumable
      | Some _ | None ->
-       { current with
-         status =
-           Judged { judged with last_delivery_failure = Some failure }
-       })
-  | Consumed _ -> current
+       Resumable_judged { judged with last_delivery_failure = Some failure })
+  | Resumable_consumed _ -> resumable
+;;
+
+let candidate_with_delivery_failure current failure =
+  match resumable_status current.status with
+  | None -> current
+  | Some resumable ->
+    let updated = resumable_with_delivery_failure resumable failure in
+    if updated = resumable
+    then current
+    else { current with status = replace_resumable_status current.status updated }
 ;;
 
 let record_delivery_failure ~base_path candidate failure =
@@ -1210,22 +1602,30 @@ let record_judgment ~base_path candidate judgment =
            "Board attention candidate not found: %s"
            candidate.candidate_id)
     | Some current ->
-      (match current.status with
-       | Pending _ ->
+      (match resumable_status current.status with
+       | Some (Resumable_pending _) ->
          let updated =
            { current with
              status =
-               Judged { judgment; last_delivery_failure = None }
+               status_of_resumable
+                 (Resumable_judged
+                    { judgment; last_delivery_failure = None })
            }
          in
          Ok (Some updated, updated)
-       | Judged judged when same_judgment judged.judgment judgment ->
+       | Some (Resumable_judged judged)
+         when same_judgment judged.judgment judgment ->
          Ok (None, current)
-       | Consumed consumed when same_judgment consumed.judgment judgment ->
+       | Some (Resumable_consumed consumed)
+         when same_judgment consumed.judgment judgment ->
          Ok (None, current)
-       | Judged _ | Consumed _ ->
+       | Some (Resumable_judged _ | Resumable_consumed _) ->
          Error
            ("Board attention candidate judgment conflict: "
+            ^ candidate.candidate_id)
+       | None ->
+         Error
+           ("Quarantined Board attention candidate cannot be judged: "
             ^ candidate.candidate_id)))
 ;;
 
@@ -1238,27 +1638,211 @@ let mark_consumed ~base_path candidate judgment delivery =
            "Board attention candidate not found: %s"
            candidate.candidate_id)
     | Some current ->
-      (match current.status with
-       | Judged judged when same_judgment judged.judgment judgment ->
+      (match resumable_status current.status with
+       | Some (Resumable_judged judged)
+         when same_judgment judged.judgment judgment ->
          let updated =
            { current with
              status =
-               Consumed
-                 { judgment; delivery; consumed_at = Time_compat.now () }
+               status_of_resumable
+                 (Resumable_consumed
+                    { judgment; delivery; consumed_at = Time_compat.now () })
            }
          in
          Ok (Some updated, updated)
-       | Consumed consumed
+       | Some (Resumable_consumed consumed)
          when same_judgment consumed.judgment judgment
               && consumed.delivery = delivery -> Ok (None, current)
-       | Pending _ ->
+       | Some (Resumable_pending _) ->
          Error
            ("Pending Board attention candidate cannot be consumed: "
             ^ candidate.candidate_id)
-       | Judged _ | Consumed _ ->
+       | Some (Resumable_judged _ | Resumable_consumed _) ->
          Error
            ("Board attention candidate consumption conflict: "
+            ^ candidate.candidate_id)
+       | None ->
+         Error
+           ("Quarantined Board attention candidate cannot be consumed: "
             ^ candidate.candidate_id)))
+;;
+
+let quarantine_id
+      ~candidate_id
+      ~partition_id
+      ~failure_category
+      ~attempt_provenance
+      ~quarantined_at
+  =
+  let provenance =
+    match attempt_provenance with
+    | None -> [ "" ]
+    | Some provenance ->
+      [ provenance.slot_id
+      ; provenance.call_id
+      ; provenance.plan_fingerprint
+      ; provenance.request_body_sha256
+      ]
+  in
+  String.concat
+    "\000"
+    ([ candidate_id
+     ; partition_id
+     ; quarantine_failure_category_to_string failure_category
+     ; Printf.sprintf "%.17g" quarantined_at
+     ]
+     @ provenance)
+  |> Digestif.SHA256.digest_string
+  |> Digestif.SHA256.to_hex
+  |> ( ^ ) "ba-quarantine-"
+;;
+
+let normalize_requeued_consumed ~base_path ~keeper_name ~candidate_id =
+  update_ledger ~base_path ~keeper_name (fun candidates ->
+    match find_candidate candidates candidate_id with
+    | None -> Error ("Board attention candidate not found: " ^ candidate_id)
+    | Some current ->
+      (match current.status with
+       | Consumed _ -> Ok (None, current)
+       | Quarantine
+           { quarantine = { prior_status = Resumable_consumed consumed; _ }
+           ; phase = Requeued _
+           } ->
+         let updated = { current with status = Consumed consumed } in
+         Ok (Some updated, updated)
+       | Pending _ | Judged _ | Quarantine _ ->
+         Error
+           ("Board attention candidate is not requeued-consumed: "
+            ^ candidate_id)))
+;;
+
+let same_quarantine_identity left right =
+  String.equal left.quarantine_id right.quarantine_id
+  && String.equal left.partition_id right.partition_id
+;;
+
+let quarantine
+      ~base_path
+      ~(candidate : candidate)
+      ~partition_id
+      ~failure_category
+      ~attempt_provenance
+      ~quarantined_at
+  =
+  let quarantine_id =
+    quarantine_id
+      ~candidate_id:candidate.candidate_id
+      ~partition_id
+      ~failure_category
+      ~attempt_provenance
+      ~quarantined_at
+  in
+  update_ledger ~base_path ~keeper_name:candidate.keeper_name (fun candidates ->
+    match find_candidate candidates candidate.candidate_id with
+    | None ->
+      Error ("Board attention candidate not found: " ^ candidate.candidate_id)
+    | Some current ->
+      let prior_status =
+        match resumable_status current.status with
+        | Some status -> status
+        | None ->
+          (match current.status with
+           | Quarantine state -> state.quarantine.prior_status
+           | Pending _ | Judged _ | Consumed _ -> assert false)
+      in
+      let requested =
+        { quarantine_id
+        ; partition_id
+        ; failure_category
+        ; attempt_provenance
+        ; quarantined_at
+        ; prior_status
+        }
+      in
+      (match current.status with
+       | Quarantine state
+         when same_quarantine_identity state.quarantine requested ->
+         Ok (None, current)
+       | Quarantine { phase = (Quarantined | Requeue_requested _); _ } ->
+         Error
+           ("candidate is already quarantined by another generation: "
+            ^ current.candidate_id)
+       | Pending _ | Judged _ | Consumed _ | Quarantine { phase = Requeued _; _ } ->
+         let updated =
+           { current with
+             status = Quarantine { quarantine = requested; phase = Quarantined }
+           }
+         in
+         Ok (Some updated, updated)))
+;;
+
+let request_quarantine_requeue
+      ~base_path
+      ~(candidate : candidate)
+      ~partition_id
+      ~expected_quarantine_id
+      ~requested_at
+  =
+  update_ledger ~base_path ~keeper_name:candidate.keeper_name (fun candidates ->
+    match find_candidate candidates candidate.candidate_id with
+    | None ->
+      Error ("Board attention candidate not found: " ^ candidate.candidate_id)
+    | Some current ->
+      (match current.status with
+       | Quarantine ({ quarantine; phase = Quarantined } as state)
+         when String.equal quarantine.partition_id partition_id
+              && String.equal quarantine.quarantine_id expected_quarantine_id ->
+         let updated =
+           { current with
+             status =
+               Quarantine
+                 { state with phase = Requeue_requested { requested_at } }
+           }
+         in
+         Ok (Some updated, updated)
+       | Quarantine
+           { quarantine
+           ; phase = (Requeue_requested _ | Requeued _)
+           }
+         when String.equal quarantine.partition_id partition_id
+              && String.equal quarantine.quarantine_id expected_quarantine_id ->
+         Ok (None, current)
+       | Pending _ | Judged _ | Consumed _ | Quarantine _ ->
+         Error
+           ("candidate quarantine generation does not match operator request: "
+            ^ current.candidate_id)))
+;;
+
+let finish_quarantine_requeue
+      ~base_path
+      ~(candidate : candidate)
+      ~partition_id
+      ~expected_quarantine_id
+      ~requeued_at
+  =
+  update_ledger ~base_path ~keeper_name:candidate.keeper_name (fun candidates ->
+    match find_candidate candidates candidate.candidate_id with
+    | None ->
+      Error ("Board attention candidate not found: " ^ candidate.candidate_id)
+    | Some current ->
+      (match current.status with
+       | Quarantine ({ quarantine; phase = Requeue_requested _ } as state)
+         when String.equal quarantine.partition_id partition_id
+              && String.equal quarantine.quarantine_id expected_quarantine_id ->
+         let updated =
+           { current with
+             status = Quarantine { state with phase = Requeued { requeued_at } }
+           }
+         in
+         Ok (Some updated, updated)
+       | Quarantine { quarantine; phase = Requeued _ }
+         when String.equal quarantine.partition_id partition_id
+              && String.equal quarantine.quarantine_id expected_quarantine_id ->
+         Ok (None, current)
+       | Pending _ | Judged _ | Consumed _ | Quarantine _ ->
+         Error
+           ("candidate is not in the requested requeue generation: "
+            ^ current.candidate_id)))
 ;;
 
 let delivery_failure ~kind detail =
@@ -1370,9 +1954,10 @@ let record_and_wake ~base_path candidate =
     Ok { candidate = persisted; persistence = Candidate_recorded; wake }
   | Duplicate persisted ->
     let* wake =
-      match persisted.status with
-      | Pending _ | Judged _ -> request_worker persisted
-      | Consumed _ -> Ok Wake_not_required
+      match resumable_status persisted.status with
+      | Some (Resumable_pending _ | Resumable_judged _) ->
+        request_worker persisted
+      | Some (Resumable_consumed _) | None -> Ok Wake_not_required
     in
     Ok
       { candidate = persisted

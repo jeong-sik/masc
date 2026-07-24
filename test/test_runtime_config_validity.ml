@@ -762,27 +762,41 @@ let test_repo_runtime_toml_loads () =
     (match Runtime_toml.parse_file path with
      | Error _ -> fail "repo runtime.toml exact-output lanes must parse"
      | Ok config ->
-       let lane_ids =
-         List.map
-           (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-              lane.id)
-           config.exact_output_lane_decls
-       in
-       check
-         (list string)
-         "public seed exact-output lanes"
-         [ "librarian_exact"
-         ; "compaction_exact"
-         ; "hitl_auto_judge"
-         ]
-         lane_ids;
-       List.iter
-         (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-            check bool
-              (Printf.sprintf "%s has at least one target" lane.id)
-              true
-              (not (List.is_empty lane.slot_ids)))
-         config.exact_output_lane_decls);
+let lane_signatures =
+  config.exact_output_lane_decls
+  |> List.map (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+    lane.id, lane.slot_ids)
+  |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+in
+check
+  (list string)
+  "public seed exact-output lane ids"
+  [ "board_attention_exact"
+  ; "compaction_exact"
+  ; "hitl_auto_judge"
+  ; "librarian_exact"
+  ]
+  (List.map fst lane_signatures);
+check
+  (list (pair string (list string)))
+  "Board exact-output lanes and opaque slot order"
+  [ ( "board_attention_exact"
+    , [ "glm-coding.glm-5-turbo"; "glm-coding.glm-4-7-coding" ] )
+  ; ( "hitl_auto_judge"
+    , [ "glm-coding.glm-5-turbo"; "glm-coding.glm-4-7-coding" ] )
+  ]
+  (List.filter
+     (fun (lane_id, _) ->
+       String.equal lane_id "board_attention_exact"
+       || String.equal lane_id "hitl_auto_judge")
+     lane_signatures);
+List.iter
+  (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+     check bool
+       (Printf.sprintf "%s has at least one target" lane.id)
+       true
+       (not (List.is_empty lane.slot_ids)))
+  config.exact_output_lane_decls);
     check (option (float 0.0)) "Ollama Cloud connect timeout override"
       (Some 600.0)
       default.provider_config.connect_timeout_s;
@@ -1770,6 +1784,13 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
          check (list string) "active runtime ids"
            [ "ollama.good" ]
            (Runtime.get_runtime_ids ());
+check
+  (list string)
+  "zero explicit exact-output lanes stay zero after degraded init"
+  []
+  (Runtime.effective_exact_output_lane_declarations []
+   |> List.map (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+     lane.id));
          check (list string) "no dropped assignment"
            []
            (List.map
@@ -2405,7 +2426,18 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
       failf
         "exact-output lane %S must exist: %s"
         lane_id
+         (Runtime_exact_output_registry.lane_resolution_error_to_string error)
+  in
+  let require_lane_unconfigured label ~lane_id registry =
+    match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
+    | Error (Runtime_exact_output_registry.Exact_lane_unconfigured { lane_id = actual }) ->
+      check string label lane_id actual
+    | Error error ->
+      failf
+        "%s returned the wrong typed error: %s"
+        label
         (Runtime_exact_output_registry.lane_resolution_error_to_string error)
+    | Ok _ -> failf "%s unexpectedly resolved" label
   in
   let lane_is_unconfigured ~lane_id registry =
     match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
@@ -2439,8 +2471,8 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
       (Runtime_exact_output_registry.generation after_invalid);
     check (list string) "invalid save preserves registry slots" [ "slot-a" ]
       (slots_exn ~lane_id:"compaction_exact" after_invalid);
-    check bool "invalid save does not synthesize HITL lane" true
-      (lane_is_unconfigured ~lane_id:"hitl_auto_judge" after_invalid);
+check bool "invalid save does not synthesize HITL lane" true
+  (lane_is_unconfigured ~lane_id:"hitl_auto_judge" after_invalid);
     let replacement = content ~default:"local.libr" "slot-b" in
     let failed_path = path ^ ".directory" in
     Unix.mkdir failed_path 0o755;
@@ -2459,8 +2491,8 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
            (Runtime_exact_output_registry.generation after_write_failure);
          check (list string) "write failure preserves registry slots" [ "slot-a" ]
            (slots_exn ~lane_id:"compaction_exact" after_write_failure);
-         check bool "write failure does not synthesize HITL lane" true
-           (lane_is_unconfigured ~lane_id:"hitl_auto_judge" after_write_failure));
+check bool "write failure does not synthesize HITL lane" true
+  (lane_is_unconfigured ~lane_id:"hitl_auto_judge" after_write_failure));
     (match Runtime.save_config_text ~runtime_config_path:path replacement with
      | Error detail -> failf "valid exact replacement failed: %s" detail
      | Ok () -> ());
@@ -2475,8 +2507,8 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
        > 0);
     check (list string) "valid save commits registry slots" [ "slot-b" ]
       (slots_exn ~lane_id:"compaction_exact" replaced);
-    check bool "valid save does not synthesize HITL lane" true
-      (lane_is_unconfigured ~lane_id:"hitl_auto_judge" replaced))
+check bool "valid save does not synthesize HITL lane" true
+  (lane_is_unconfigured ~lane_id:"hitl_auto_judge" replaced))
 
 let test_deprecated_capability_notice_warns_once_per_process () =
   (* runtime.toml is re-parsed on every keeper boot; a per-parse deprecation

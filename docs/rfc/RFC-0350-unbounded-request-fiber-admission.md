@@ -1,13 +1,13 @@
-# RFC-0350 — Unbounded request-fiber admission (durable queue + owner-lane drain + typed saturation)
+# RFC-0350 — Unbounded request-fiber admission (durable queue + lifecycle-sibling worker + typed saturation)
 
 - Status: Draft
 - Author: MASC Agent (for vincent)
 - Date: 2026-07-20
-- Related: 레인 보고서 `reports/masc-nondeterministic-lane-analysis-2026-07-17.html` (2026-07-17, repo 외부), #24886 (07-17 429 폭풍 인시던트), #25045 (board attention owner-lane drain), RFC-0000 §1.2 (Four Laws) / §3.7 (`cap ≠ backpressure`), RFC-0277 (fusion per_hour_budget 삭제), RFC-0153 (Withdrawn), RFC-0192 (Retired)
+- Related: 레인 보고서 `reports/masc-nondeterministic-lane-analysis-2026-07-17.html` (2026-07-17, repo 외부), #24886 (07-17 429 폭풍 인시던트), #25045 (board attention durable worker), RFC-0000 §1.2 (Four Laws) / §3.7 (`cap ≠ backpressure`), RFC-0277 (fusion per_hour_budget 삭제), RFC-0153 (Withdrawn), RFC-0192 (Retired)
 
 ## 0. Summary
 
-07-17 인시던트 총평(레인 보고서)이 지목한 무제한 fork 4개 레인 중 board attention judge는 #25045 계열(owner-lane 직렬 drain + 배치 + TTL)로 수리됐고, provider max-concurrent dead knob은 OAS `Provider_admission.with_admission` 배선으로 수리됐다. **나머지 3개 — fusion run fork, keeper_msg 요청 fork, HTTP/MCP accept/request fiber — 는 2026-07-18 fresh grep 기준 여전히 무제한이다.**
+07-17 인시던트 총평(레인 보고서)이 지목한 무제한 fork 4개 레인 중 board attention judge는 durable candidate + lifecycle-sibling 직렬 worker + candidate당 singleton exact flow로 수리됐다. MASC는 입력과 durable callback만 소유하고, target admission·provider-attempt dispatch·advance는 OAS가 소유한다. provider max-concurrent dead knob도 OAS `Provider_admission.with_admission` 배선으로 수리됐다. **나머지 3개 — fusion run fork, keeper_msg 요청 fork, HTTP/MCP accept/request fiber — 는 2026-07-18 fresh grep 기준 여전히 무제한이다.**
 
 본 RFC는 이 3개 갭에 같은 구조적 경계를 적용한다: **(1) backlog는 살아있는 fiber가 아니라 durable store에, (2) 실행은 owner lane의 직렬(또는 고정 소수 워커) drain이 독점, (3) 포화는 생산자에게 typed signal로 되돌린다.** RFC-0277이 문서화한 `cap ≠ backpressure` 교훈에 따라 임의 숫자 rate cap은 재도입하지 않는다. 숫자 상한이 불가피한 지점(HTTP 동시 연결)은 typed saturation signal + 명시적 거부 응답(503/Retry-After)으로 처리하고 silent drop을 금지한다.
 
@@ -19,7 +19,7 @@
 
 > 현재 N=16이 살아있는 것은 설계 덕이 아니라 트래픽이 낮아서이며, 첫 붕괴 지점은 CPU도 fiber 수도 아니라 (a) 단일 Eio 도메인 수렴 + (b) 무제한 큐/원장으로의 생산 O(N·M) vs 고정 drain(keeper당 30초에 stimulus 1개)의 교차점이다. 07-17 인시던트는 이 일반 실패 모드의 board-attention 사례일 뿐이다.
 
-board attention은 이 모드의 **첫 번째** 발현이었고 owner-lane drain으로 수리됐다. 아래 3개 레인은 동일한 형태(생산 무제한 · 실행 무제한 fork · drain 부재 또는 고정)가 그대로 남아 있다.
+board attention은 이 모드의 **첫 번째** 발현이었고 durable candidate를 lifecycle-sibling 직렬 worker가 candidate당 singleton exact flow로 drain하도록 수리됐다. 아래 3개 레인은 동일한 형태(생산 무제한 · 실행 무제한 fork · drain 부재 또는 고정)가 그대로 남아 있다.
 
 ### 1.2 Gap A — fusion run fork
 
@@ -43,7 +43,7 @@ board attention은 이 모드의 **첫 번째** 발현이었고 owner-lane drain
 
 ### 1.5 repo가 이미 받아들인 경계 패턴 (선례)
 
-1. **board attention judge** (#25045 계열): 생산자는 durable candidate 기록 + typed wake 요청만 하고, 실행은 owner lane(keeper turn slot) 위의 직렬 drain이 독점 — `keeper_heartbeat_loop.ml:432-445` (`drain_board_attention_candidates_on_owner_lane`), `keeper_board_attention_candidate.ml:1226` (`drain_pending_on_owner_lane`). 배치 + TTL 포함. record 경로는 더 이상 fork하지 않는다.
+1. **board attention judge** (#25045 계열): 생산자는 durable candidate 기록 + typed wake 요청만 하고, Keeper lifecycle의 sibling worker가 candidate를 하나씩 직렬 drain한다. 각 candidate는 singleton exact flow이며 MASC는 immutable 입력과 before-dispatch/before-advance durable callback만 소유한다. target admission·provider-attempt dispatch·advance는 OAS가 소유하고, MASC에는 batch/TTL 또는 provider 재시도 정책이 없다. record 경로는 모델 호출을 fork하지 않는다.
 2. **provider max-concurrent**: dead knob을 OAS `Provider_admission.with_admission` (`oas/lib/llm_provider/provider_admission.mli:26-33`)에 배선 — 초과분은 drop이 아니라 slot 대기.
 3. **HITL Gate Auto Judge**: atomic claim-set + durable queue + chained drain (`keeper_gate.ml:304` `claim_auto_judge`, claim-set 타입 :283-294) — 보고서가 "구조적으로 올바르게 bounded된 유일한 LLM 레인"으로 확인한 exemplar.
 

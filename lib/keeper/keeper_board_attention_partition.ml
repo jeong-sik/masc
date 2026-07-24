@@ -101,7 +101,7 @@ type exact_transition =
   }
 
 let ( let* ) = Result.bind
-let schema_version = 3
+let schema_version = 4
 
 let state_to_string = function
   | Ready -> "ready"
@@ -619,6 +619,7 @@ let legal_transition previous next =
   | Running { progress = Advancing _; _ }, Running { progress = Bound _; _ } -> true
   | Running { progress = Bound _; _ }, Completed _ -> true
   | Running _, Blocked _ -> true
+  | Blocked _, Ready -> true
   | (Completed _ | Blocked _), Settled _ -> true
   | Ready, _
   | Running _, _
@@ -949,9 +950,11 @@ let ensure_roots ~base_path ~keeper_name candidates =
               then Error "candidate Keeper differs from partition ledger Keeper"
               else
                 let* () = valid_time "candidate recorded_at" candidate.recorded_at in
-                match candidate.status with
-                | Candidate.Consumed _ -> Ok roots
-                | Candidate.Pending _ | Candidate.Judged _ ->
+                match Candidate.resumable_status candidate.status with
+                | None | Some (Candidate.Resumable_consumed _) -> Ok roots
+                | Some
+                    (Candidate.Resumable_pending _
+                    | Candidate.Resumable_judged _) ->
                   let* context_key = Candidate.Context_key.of_candidate candidate in
                   (match Id_map.find_opt candidate.candidate_id view.live_candidate_owner with
                    | Some owner_id ->
@@ -1221,11 +1224,58 @@ let confirm_completed ~base_path ~(partition : t) =
 let block ~now ~worker_epoch ~base_path ~partition reason =
   let* () = valid_time "partition block time" now in
   let* () = validate_blocked_reason reason in
-  transition_running
+  transition_running_exact
     ~base_path
     ~partition
     ~worker_epoch
     (fun _ -> Ok (Blocked { reason; blocked_at = now }))
+;;
+
+let confirm_blocked ~base_path ~(partition : t) =
+  match partition.state with
+  | Blocked { reason; blocked_at } ->
+    let* () = valid_time "partition block time" blocked_at in
+    let* () = validate_blocked_reason reason in
+    let* (confirmed, changed), write_outcome =
+      update_exact ~base_path ~keeper_name:partition.keeper_name (fun view ->
+        match Id_map.find_opt partition.partition_id view.by_id with
+        | None ->
+          Error ("Board attention partition not found: " ^ partition.partition_id)
+        | Some ({ state = Blocked current; _ } as durable)
+          when current.reason = reason
+               && Float.equal current.blocked_at blocked_at ->
+          Ok ([ durable ], (durable, false))
+        | Some { state = Blocked _; _ } ->
+          Error
+            ("blocked partition generation conflicts with durable state: "
+             ^ partition.partition_id)
+        | Some _ ->
+          Error ("partition is not Blocked: " ^ partition.partition_id))
+    in
+    Ok { partition = confirmed; changed; write_outcome }
+  | Ready | Running _ | Completed _ | Settled _ ->
+    Error ("partition is not Blocked: " ^ partition.partition_id)
+;;
+
+let requeue_blocked ~base_path ~(partition : t) =
+  let* (requeued, changed), write_outcome =
+    update_exact ~base_path ~keeper_name:partition.keeper_name (fun view ->
+      match Id_map.find_opt partition.partition_id view.by_id with
+      | None ->
+        Error ("Board attention partition not found: " ^ partition.partition_id)
+      | Some current when not (same_partition_identity current partition) ->
+        Error ("partition identity changed: " ^ partition.partition_id)
+      | Some ({ state = Blocked _; _ } as current) ->
+        let ready = { current with state = Ready } in
+        Ok ([ ready ], (ready, true))
+      | Some ({ state = Ready; _ } as current) ->
+        Ok ([ current ], (current, false))
+      | Some { state = Running _ | Completed _ | Settled _; _ } ->
+        Error
+          ("partition already advanced beyond manual requeue: "
+           ^ partition.partition_id))
+  in
+  Ok { partition = requeued; changed; write_outcome }
 ;;
 
 let completed ~base_path ~keeper_name =

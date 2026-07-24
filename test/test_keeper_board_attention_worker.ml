@@ -4,6 +4,7 @@ module Event_queue = Masc.Keeper_event_queue
 module Event_queue_persistence = Masc.Keeper_event_queue_persistence
 module J = Masc.Keeper_board_attention_judgment
 module P = Masc.Keeper_board_attention_partition
+module Q = Masc.Keeper_board_attention_quarantine_command
 module W = Masc.Keeper_board_attention_worker
 module Wake = Masc.Keeper_board_attention_worker_wake
 
@@ -247,7 +248,10 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
     !callbacks;
   (match (load_one_candidate ~base_path).status with
    | A.Pending { last_delivery_failure = None } -> ()
-   | A.Pending { last_delivery_failure = Some _ } | A.Judged _ | A.Consumed _ ->
+   | A.Pending { last_delivery_failure = Some _ }
+   | A.Judged _
+   | A.Consumed _
+   | A.Quarantine _ ->
      Alcotest.fail "background worker crossed the owner settlement boundary");
   (match load_one_partition ~base_path with
    | { state = P.Completed { item = { judgment = observed; _ }; completed_at }; _ } ->
@@ -264,40 +268,44 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
   | _ -> Alcotest.fail "owner settlement did not consume and settle the judgment"
 ;;
 
-let test_setup_error_mapping_is_terminal_without_hot_retry () =
+let test_setup_error_stops_before_claim_without_hot_retry () =
   with_temp_base "board-attention-worker-setup-error" @@ fun base_path ->
-  let persisted = record ~base_path (candidate ()) in
+  ignore (record ~base_path (candidate ()) : A.candidate);
   let calls = ref 0 in
+  let yields = ref 0 in
   let prepare _candidate =
     incr calls;
     Error E.Network_unavailable
   in
   (match
-     ok
-       "setup error"
-       (process
-          ~base_path
-          ~prepare
-          ~execute:(fun ~before_dispatch:_ ~before_advance:_ _ ->
-            Alcotest.fail "setup error reached execution"))
+     W.For_testing.drain_available
+       ~yield:(fun () -> incr yields)
+       ~now:(fun () -> 3.0)
+       ~worker_epoch:(P.Worker_epoch.generate ())
+       ~base_path
+       ~keeper_name:"sangsu"
+       ~prepare
+       ~execute:(fun ~before_dispatch:_ ~before_advance:_ _ ->
+         Alcotest.fail "setup error reached execution")
    with
-   | W.Partition_blocked
-       { candidate_id; reason = P.Exact_setup_unavailable detail }
-     when String.equal candidate_id persisted.candidate_id
-          && String.equal detail "network context unavailable" -> ()
-   | _ -> Alcotest.fail "typed setup error was not durably terminalized");
-  (match
-     ok
-       "setup error is not retried"
-       (process
-          ~base_path
-          ~prepare
-          ~execute:(fun ~before_dispatch:_ ~before_advance:_ _ ->
-            Alcotest.fail "blocked setup reached execution"))
-   with
-   | W.Idle -> ()
-   | _ -> Alcotest.fail "blocked setup became claimable");
-  Alcotest.(check int) "one setup attempt" 1 !calls
+   | Error detail ->
+     Alcotest.(check string)
+       "typed setup failure stops the lifecycle"
+       "Board attention exact setup unavailable before claim: network context unavailable"
+       detail
+   | Ok () -> Alcotest.fail "setup-unavailable drain returned normally");
+  Alcotest.(check int) "one setup attempt" 1 !calls;
+  Alcotest.(check int) "setup failure did not yield into a retry" 0 !yields;
+  (match (load_one_candidate ~base_path).status with
+   | A.Pending { last_delivery_failure = None } -> ()
+   | A.Pending { last_delivery_failure = Some _ }
+   | A.Judged _
+   | A.Consumed _
+   | A.Quarantine _ ->
+     Alcotest.fail "setup failure changed the Pending candidate");
+  match (load_one_partition ~base_path).state with
+  | P.Ready -> ()
+  | _ -> Alcotest.fail "setup failure claimed or terminalized the partition"
 ;;
 
 let test_execution_error_preserves_bound_progress_without_hot_retry () =
@@ -328,6 +336,43 @@ let test_execution_error_preserves_bound_progress_without_hot_retry () =
    | W.Idle -> ()
    | _ -> Alcotest.fail "terminal exact execution became claimable");
   Alcotest.(check int) "one exact execution" 1 !calls
+;;
+
+let test_completion_failure_preserves_bound_provenance () =
+  with_temp_base "board-attention-worker-completion-failure" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let bound = provenance "completion-bound" in
+  let mismatched = provenance "completion-mismatch" in
+  let execute ~before_dispatch ~before_advance:_ _candidate =
+    ok "bind successful exact execution" (before_dispatch bound);
+    Ok (judgment mismatched J.Not_relevant)
+  in
+  (match
+     ok
+       "completion failure"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked
+       { candidate_id; reason = P.Exact_execution_quarantined (P.Bound durable) }
+     when String.equal candidate_id persisted.candidate_id
+          && same_provenance durable bound -> ()
+   | _ -> Alcotest.fail "completion failure lost its durable Bound provenance");
+  (match (load_one_partition ~base_path).state with
+   | P.Blocked { reason = P.Exact_execution_quarantined (P.Bound durable); _ }
+     when same_provenance durable bound -> ()
+   | _ -> Alcotest.fail "completion failure did not persist the Bound quarantine");
+  match (load_one_candidate ~base_path).status with
+  | A.Quarantine
+      { quarantine =
+          { failure_category = A.Exact_execution_quarantined
+          ; attempt_provenance = Some _
+          ; _
+          }
+      ; phase = A.Quarantined
+      } ->
+    ()
+  | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
+    Alcotest.fail "failed completion did not quarantine the candidate"
 ;;
 
 let test_flow_already_started_blocks_unbound_without_hot_retry () =
@@ -389,7 +434,7 @@ let test_domain_error_quarantines_bound_progress_without_hot_retry () =
   Alcotest.(check int) "one domain-invalid exact execution" 1 !calls
 ;;
 
-let test_bound_cancellation_is_reraised_and_quarantined () =
+let test_bound_cancellation_is_prompt_and_process_recoverable () =
   Eio_main.run @@ fun _env ->
   with_temp_base "board-attention-worker-bound-cancel" @@ fun base_path ->
   ignore (record ~base_path (candidate ()) : A.candidate);
@@ -411,14 +456,27 @@ let test_bound_cancellation_is_reraised_and_quarantined () =
        Atomic.set returned true)
     (fun () -> Eio.Promise.await entered);
   Alcotest.(check bool) "cancellation did not return normally" false (Atomic.get returned);
+  (match load_one_partition ~base_path with
+   | { state = P.Running { progress = P.Bound durable; _ }; _ }
+     when same_provenance durable exact -> ()
+   | _ -> Alcotest.fail "cancellation performed partition I/O before returning");
+  Alcotest.(check int)
+    "process-start recovery quarantines one Bound execution"
+    1
+    (ok
+       "recover cancelled Bound"
+       (P.recover_for_process_start
+          ~now:4.0
+          ~base_path
+          ~keeper_name:"sangsu"));
   match load_one_partition ~base_path with
   | { state = P.Blocked { reason = P.Exact_execution_quarantined (P.Bound durable); _ }
     ; _
     } when same_provenance durable exact -> ()
-  | _ -> Alcotest.fail "cancelled Bound execution was not quarantined"
+  | _ -> Alcotest.fail "process-start recovery lost the cancelled Bound provenance"
 ;;
 
-let test_advancing_cancellation_preserves_failed_and_next () =
+let test_advancing_cancellation_is_prompt_and_process_recoverable () =
   Eio_main.run @@ fun _env ->
   with_temp_base "board-attention-worker-advancing-cancel" @@ fun base_path ->
   ignore (record ~base_path (candidate ()) : A.candidate);
@@ -442,13 +500,27 @@ let test_advancing_cancellation_preserves_failed_and_next () =
        Atomic.set returned true)
     (fun () -> Eio.Promise.await entered);
   Alcotest.(check bool) "advancing cancellation did not return" false (Atomic.get returned);
+  (match load_one_partition ~base_path with
+   | { state = P.Running { progress = P.Advancing durable; _ }; _ }
+     when same_provenance durable.failed failed
+          && same_provenance durable.next next -> ()
+   | _ -> Alcotest.fail "advancing cancellation performed partition I/O");
+  Alcotest.(check int)
+    "process-start recovery quarantines one Advancing execution"
+    1
+    (ok
+       "recover cancelled Advancing"
+       (P.recover_for_process_start
+          ~now:4.0
+          ~base_path
+          ~keeper_name:"sangsu"));
   match load_one_partition ~base_path with
   | { state = P.Blocked
         { reason = P.Exact_execution_quarantined (P.Advancing durable); _ }
     ; _
     } when same_provenance durable.failed failed
            && same_provenance durable.next next -> ()
-  | _ -> Alcotest.fail "cancelled Advancing execution lost its durable pair"
+  | _ -> Alcotest.fail "process-start recovery lost the cancelled Advancing pair"
 ;;
 
 let test_unbound_cancellation_waits_for_process_start_recovery () =
@@ -655,7 +727,7 @@ let test_consumed_completed_crash_settles_without_duplicate_delivery () =
   in
   (match consumed.status with
    | A.Consumed { delivery = A.Enqueued_to_keeper_lane; _ } -> ()
-   | A.Pending _ | A.Judged _ | A.Consumed _ ->
+   | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
      Alcotest.fail "Relevant candidate was not durably Consumed");
   Alcotest.(check int)
     "one Relevant delivery before crash"
@@ -765,8 +837,240 @@ let test_unexpected_exception_is_terminal_without_hot_retry () =
   Alcotest.(check int) "one exceptional execution" 1 !calls
 ;;
 
+let test_manual_quarantine_requeue_resumes_intermediate_and_is_idempotent () =
+  with_temp_base "board-attention-worker-manual-requeue" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    raise (Failure "injected exact worker exception")
+  in
+  (match
+     ok
+       "create durable quarantine"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Partition_blocked _ -> ()
+   | _ -> Alcotest.fail "fixture did not block the singleton partition");
+  let quarantined = load_one_candidate ~base_path in
+  let partition = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status with
+    | A.Quarantine { quarantine; phase = A.Quarantined } -> quarantine
+    | _ -> Alcotest.fail "blocked root did not project a candidate quarantine"
+  in
+  let requested =
+    ok
+      "persist requeue-requested crash point"
+      (A.request_quarantine_requeue
+         ~base_path
+         ~candidate:quarantined
+         ~partition_id:partition.partition_id
+         ~expected_quarantine_id:quarantine.quarantine_id
+         ~requested_at:20.0)
+  in
+  (match requested.status with
+   | A.Quarantine { phase = A.Requeue_requested _; _ } -> ()
+   | _ -> Alcotest.fail "candidate did not retain requeue-requested");
+  let request : Q.request =
+    { candidate_id = persisted.candidate_id
+    ; expected_quarantine_id = quarantine.quarantine_id
+    ; decision = Q.Acknowledge_and_requeue
+    }
+  in
+  let command =
+    match
+      Q.make
+        ~keeper_name:"sangsu"
+        ~raw_partition_id:partition.partition_id
+        request
+    with
+    | Ok command -> command
+    | Error error ->
+      Alcotest.failf "manual command rejected: %s" (Q.input_error_to_string error)
+  in
+  let run label =
+    match Q.execute ~now:21.0 ~base_path command with
+    | Ok report -> report
+    | Error error ->
+      Alcotest.failf "%s: %s" label (Q.execution_error_label error)
+  in
+  let report = run "resume requeue-requested" in
+  (match report.candidate.status, report.partition.state with
+   | A.Quarantine { phase = A.Requeued _; _ }, P.Ready -> ()
+   | _ -> Alcotest.fail "manual recovery did not reach Requeued/Ready");
+  let replay = run "idempotent replay" in
+  match replay.candidate.status with
+  | A.Quarantine
+      { quarantine = replayed; phase = A.Requeued _ }
+    when String.equal replayed.quarantine_id quarantine.quarantine_id ->
+    ()
+  | _ -> Alcotest.fail "manual recovery replay lost its generation marker"
+;;
+
+let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles () =
+  with_temp_base "board-attention-worker-manual-requeue-interleaving" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ~id:"candidate-interleaving" ()) in
+  let failed_exact = provenance "manual-requeue-failure" in
+  let execute ~before_dispatch ~before_advance:_ _candidate =
+    ok "bind failed manual requeue attempt" (before_dispatch failed_exact);
+    raise (Failure "injected exact worker exception")
+  in
+  ignore
+    (ok
+       "create interleaving quarantine"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+     : W.step);
+  let quarantined = load_one_candidate ~base_path in
+  let blocked = load_one_partition ~base_path in
+  let quarantine =
+    match quarantined.status with
+    | A.Quarantine { quarantine; phase = A.Quarantined } -> quarantine
+    | _ -> Alcotest.fail "interleaving fixture did not project quarantine"
+  in
+  let requested =
+    ok
+      "persist requeue request"
+      (A.request_quarantine_requeue
+         ~base_path
+         ~candidate:quarantined
+         ~partition_id:blocked.partition_id
+         ~expected_quarantine_id:quarantine.quarantine_id
+         ~requested_at:30.0)
+  in
+  let execute_calls = ref 0 in
+  let execute_before_authorization ~before_dispatch:_ ~before_advance:_ _candidate =
+    incr execute_calls;
+    Alcotest.fail "requeue-requested candidate became claimable"
+  in
+  (match
+     ok
+       "process while requeue authorization is incomplete"
+       (process
+          ~base_path
+          ~prepare:(fun candidate -> Ok candidate)
+          ~execute:execute_before_authorization)
+   with
+   | W.Idle -> ()
+   | W.Judgment_completed _
+   | W.Candidate_already_consumed _
+   | W.Partition_blocked _ ->
+     Alcotest.fail "blocked partition was exposed before authorization");
+  Alcotest.(check int) "no exact dispatch before authorization" 0 !execute_calls;
+  (match (load_one_partition ~base_path).state with
+   | P.Blocked _ -> ()
+   | _ -> Alcotest.fail "partition became Ready before candidate authorization");
+  let requeued =
+    ok
+      "persist candidate requeue authorization"
+      (A.finish_quarantine_requeue
+         ~base_path
+         ~candidate:requested
+         ~partition_id:blocked.partition_id
+         ~expected_quarantine_id:quarantine.quarantine_id
+         ~requeued_at:31.0)
+  in
+  (match requeued.status, (load_one_partition ~base_path).state with
+   | A.Quarantine { phase = A.Requeued _; _ }, P.Blocked _ -> ()
+   | _ -> Alcotest.fail "authorization was not durable before the Ready commit");
+  let inventory = Q.inventory ~base_path ~keeper_names:[ "sangsu" ] in
+  let inventory_item =
+    match inventory.items with
+    | [ item ] -> item
+    | _ -> Alcotest.fail "typed quarantine inventory did not expose one CAS target"
+  in
+  Alcotest.(check string)
+    "inventory keeper CAS"
+    "sangsu"
+    inventory_item.keeper_name;
+  Alcotest.(check string)
+    "inventory partition CAS"
+    blocked.partition_id
+    inventory_item.partition_id;
+  Alcotest.(check string)
+    "inventory candidate CAS"
+    persisted.candidate_id
+    inventory_item.candidate_id;
+  Alcotest.(check string)
+    "inventory quarantine CAS"
+    quarantine.quarantine_id
+    inventory_item.quarantine_id;
+  (match inventory_item.phase, inventory_item.requeued_at with
+   | Q.Inventory_requeued, Some 31.0 -> ()
+   | _ -> Alcotest.fail "inventory did not expose the durable requeue phase");
+  (match inventory_item.attempt_provenance with
+   | Some durable when same_provenance durable failed_exact -> ()
+   | _ -> Alcotest.fail "inventory lost opaque attempt provenance references");
+  let inventory_json_item =
+    match
+      Q.inventory_to_json inventory
+      |> Yojson.Safe.Util.member "items"
+      |> Yojson.Safe.Util.to_list
+    with
+    | [ item ] -> item
+    | _ -> Alcotest.fail "snapshot inventory JSON did not expose one CAS target"
+  in
+  let check_json_string field expected =
+    Alcotest.(check string)
+      ("snapshot inventory " ^ field)
+      expected
+      (inventory_json_item
+       |> Yojson.Safe.Util.member field
+       |> Yojson.Safe.Util.to_string)
+  in
+  check_json_string "keeper_name" "sangsu";
+  check_json_string "partition_id" blocked.partition_id;
+  check_json_string "candidate_id" persisted.candidate_id;
+  check_json_string "quarantine_id" quarantine.quarantine_id;
+  check_json_string "phase" "requeued";
+  let ready =
+    ok
+      "commit partition Ready after candidate authorization"
+      (P.requeue_blocked
+         ~base_path
+         ~partition:(load_one_partition ~base_path))
+  in
+  (match ready.write_outcome with
+   | P.Fsync_completed -> ()
+   | P.Visible_sync_unconfirmed detail ->
+     Alcotest.failf "authorized Ready commit was not fsynced: %s" detail);
+  let exact = provenance "manual-requeue-success" in
+  let execute ~before_dispatch ~before_advance:_ _candidate =
+    ok "bind manual requeue attempt" (before_dispatch exact);
+    Ok (judgment exact J.Not_relevant)
+  in
+  (match
+     ok
+       "execute authorized manual requeue"
+       (process ~base_path ~prepare:(fun candidate -> Ok candidate) ~execute)
+   with
+   | W.Judgment_completed { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | W.Judgment_completed _
+   | W.Idle
+   | W.Candidate_already_consumed _
+   | W.Partition_blocked _ ->
+     Alcotest.fail "authorized manual requeue did not complete its exact judgment");
+  (match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+   | A.Quarantine { phase = A.Requeued _; _ }, P.Completed _ -> ()
+   | _ -> Alcotest.fail "exact completion crossed the owner settlement boundary");
+  (match
+     ok
+       "owner settlement"
+       (W.settle_one_completed ~base_path ~keeper_name:"sangsu")
+   with
+   | W.Partition_settled { candidate_id; _ }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | W.Partition_settled _ -> Alcotest.fail "a different candidate was settled"
+   | W.No_completed_partition -> Alcotest.fail "completed judgment was not settled");
+  (match (load_one_candidate ~base_path).status, (load_one_partition ~base_path).state with
+   | A.Consumed { delivery = A.Not_relevant; _ }, P.Settled _ -> ()
+   | _ -> Alcotest.fail "manual requeue did not normalize, consume, and settle");
+  (match (Q.inventory ~base_path ~keeper_names:[ "sangsu" ]).items with
+   | [] -> ()
+   | _ -> Alcotest.fail "settled candidate remained in quarantine inventory")
+;;
+
 let test_cross_domain_wake_is_coalesced_and_rearmed () =
-  Eio_main.run @@ fun _env ->
+  Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   with_temp_base "board-attention-worker-wake" @@ fun base_path ->
   (match ok "unregistered request" (Wake.request ~base_path ~keeper_name:"sangsu") with
@@ -775,6 +1079,20 @@ let test_cross_domain_wake_is_coalesced_and_rearmed () =
   let registration =
     ok "register worker wake" (Wake.register ~sw ~base_path ~keeper_name:"sangsu")
   in
+  (match
+     W.run
+       ~sw
+       ~clock:(Eio.Stdenv.clock env)
+       ~net:None
+       ~base_path
+       ~keeper_name:"sangsu"
+   with
+   | Error { stage = W.Registration; _ } -> ()
+   | Error fatal ->
+     Alcotest.failf
+       "duplicate registration returned the wrong fatal stage: %s"
+       (W.fatal_error_to_string fatal)
+   | Ok () -> Alcotest.fail "duplicate registration returned normally");
   let first =
     Domain.spawn (fun () -> Wake.request ~base_path ~keeper_name:"sangsu")
     |> Domain.join
@@ -789,9 +1107,15 @@ let test_cross_domain_wake_is_coalesced_and_rearmed () =
   (match Wake.await registration with
    | Wake.Wake -> ()
    | Wake.Registration_closed -> Alcotest.fail "live registration closed");
-  match ok "rearmed wake" (Wake.request ~base_path ~keeper_name:"sangsu") with
-  | Wake.Signaled -> ()
-  | Wake.Coalesced | Wake.Not_registered -> Alcotest.fail "consumed wake did not rearm"
+  (match ok "rearmed wake" (Wake.request ~base_path ~keeper_name:"sangsu") with
+   | Wake.Signaled -> ()
+   | Wake.Coalesced | Wake.Not_registered ->
+     Alcotest.fail "consumed wake did not rearm");
+  Wake.unregister registration;
+  match ok "explicit unregister" (Wake.request ~base_path ~keeper_name:"sangsu") with
+  | Wake.Not_registered -> ()
+  | Wake.Signaled | Wake.Coalesced ->
+    Alcotest.fail "worker lifetime left a stale wake registration"
 ;;
 
 let () =
@@ -803,13 +1127,17 @@ let () =
             `Quick
             test_worker_exact_callback_integration_and_owner_settlement
         ; Alcotest.test_case
-            "setup error mapping is terminal"
+            "setup error stops before claim"
             `Quick
-            test_setup_error_mapping_is_terminal_without_hot_retry
+            test_setup_error_stops_before_claim_without_hot_retry
         ; Alcotest.test_case
             "execution error preserves bound progress"
             `Quick
             test_execution_error_preserves_bound_progress_without_hot_retry
+        ; Alcotest.test_case
+            "completion failure preserves bound provenance"
+            `Quick
+            test_completion_failure_preserves_bound_provenance
         ; Alcotest.test_case
             "flow replay blocks Unbound without retry"
             `Quick
@@ -819,13 +1147,13 @@ let () =
             `Quick
             test_domain_error_quarantines_bound_progress_without_hot_retry
         ; Alcotest.test_case
-            "Bound cancellation is reraised and quarantined"
+            "Bound cancellation is prompt and process-recoverable"
             `Quick
-            test_bound_cancellation_is_reraised_and_quarantined
+            test_bound_cancellation_is_prompt_and_process_recoverable
         ; Alcotest.test_case
-            "Advancing cancellation preserves the exact pair"
+            "Advancing cancellation is prompt and process-recoverable"
             `Quick
-            test_advancing_cancellation_preserves_failed_and_next
+            test_advancing_cancellation_is_prompt_and_process_recoverable
         ; Alcotest.test_case
             "Unbound cancellation waits for process-start recovery"
             `Quick
@@ -858,6 +1186,14 @@ let () =
             "unexpected exception is terminal"
             `Quick
             test_unexpected_exception_is_terminal_without_hot_retry
+        ; Alcotest.test_case
+            "manual quarantine requeue resumes and is idempotent"
+            `Quick
+            test_manual_quarantine_requeue_resumes_intermediate_and_is_idempotent
+        ; Alcotest.test_case
+            "manual requeue is unclaimable until authorized and settles normally"
+            `Quick
+            test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles
         ; Alcotest.test_case
             "cross-domain wake coalesces and rearms"
             `Quick

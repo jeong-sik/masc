@@ -29,13 +29,15 @@ let targets =
 
 let is_target name = List.mem name targets
 
-let rec longident_leaf = function
+let rec longident_leaf (identifier : Longident.t) =
+  match identifier with
   | Longident.Lident name -> name
   | Longident.Ldot (_, name) -> name.txt
   | Longident.Lapply (_, right) -> longident_leaf right.txt
 ;;
 
-let rec longident_segments = function
+let rec longident_segments (identifier : Longident.t) =
+  match identifier with
   | Longident.Lident name -> [ name ]
   | Longident.Ldot (prefix, name) -> longident_segments prefix.txt @ [ name.txt ]
   | Longident.Lapply (left, right) ->
@@ -127,7 +129,7 @@ let reject_guarded_owner_reexport ~file ~surface visit =
   visit iterator
 ;;
 
-let allowed_internal_alias ~file binding =
+let allowed_internal_alias ~file (binding : module_binding) =
   String.equal file "lib/keeper/keeper_event_queue_recovery.ml"
   && binding.pmb_name.txt = Some "Persistence"
   &&
@@ -136,7 +138,7 @@ let allowed_internal_alias ~file binding =
   | _ -> false
 ;;
 
-let pattern_variables pattern =
+let pattern_variables (pattern : pattern) =
   let variables = ref [] in
   let remember (name : string Location.loc) =
     if
@@ -169,7 +171,7 @@ let collect_structure_definitions ~file structure =
       value_binding =
         (fun self binding ->
            pattern_variables binding.pvb_pat
-           |> List.iter (fun name ->
+           |> List.iter (fun (name : string Location.loc) ->
               add
                 definitions
                 ~file
@@ -178,7 +180,7 @@ let collect_structure_definitions ~file structure =
                 name.loc);
            Ast_iterator.default_iterator.value_binding self binding)
     ; module_binding =
-        (fun self binding ->
+        (fun self (binding : module_binding) ->
            if not (allowed_internal_alias ~file binding)
            then
              reject_guarded_owner_reexport
@@ -229,7 +231,7 @@ let collect_signature_declarations ~file signature =
   let iterator =
     { Ast_iterator.default_iterator with
       value_description =
-        (fun self value ->
+        (fun self (value : value_description) ->
            add
              declarations
              ~file
@@ -238,7 +240,7 @@ let collect_signature_declarations ~file signature =
              value.pval_name.loc;
            Ast_iterator.default_iterator.value_description self value)
     ; module_declaration =
-        (fun self declaration ->
+        (fun self (declaration : module_declaration) ->
            reject_guarded_owner_reexport
              ~file
              ~surface:"signature module alias"
@@ -251,7 +253,7 @@ let collect_signature_declarations ~file signature =
            Ast_iterator.default_iterator.module_declaration self declaration;
            module_path := previous)
     ; module_type_declaration =
-        (fun self declaration ->
+        (fun self (declaration : module_type_declaration) ->
            Option.iter
              (fun module_type ->
                 reject_guarded_owner_reexport
@@ -388,7 +390,7 @@ let inspect_implementation file =
             | _ -> ());
            Ast_iterator.default_iterator.expr self expression)
     ; value_binding =
-        (fun self binding ->
+        (fun self (binding : Parsetree.value_binding) ->
            let previous = !current_caller in
            (match binding.pvb_pat.ppat_desc with
             | Ppat_var name ->
@@ -397,7 +399,7 @@ let inspect_implementation file =
            Ast_iterator.default_iterator.value_binding self binding;
            current_caller := previous)
     ; module_binding =
-        (fun self binding ->
+        (fun self (binding : Parsetree.module_binding) ->
            let previous = !module_path in
            (match binding.pmb_name.txt with
             | Some name -> module_path := previous @ [ name ]

@@ -308,7 +308,7 @@ let test_setup_error_stops_before_claim_without_hot_retry () =
   | _ -> Alcotest.fail "setup failure claimed or terminalized the partition"
 ;;
 
-let test_prepare_claim_retry_exhaustion_is_bounded_and_read_only () =
+let test_claim_generation_change_discards_without_sibling_selection () =
   with_temp_base "board-attention-worker-claim-retry-bound" @@ fun base_path ->
   let candidates =
     List.init 4 (fun index ->
@@ -341,7 +341,8 @@ let test_prepare_claim_retry_exhaustion_is_bounded_and_read_only () =
             ~worker_epoch:competitor
             ~base_path
             ~keeper_name:"sangsu"
-            ~partition_id:partition.partition_id)
+            ~partition_id:partition.partition_id
+            ~generation:partition.generation)
      with
      | Some _ -> ()
      | None -> Alcotest.fail "competitor did not win prepared target");
@@ -368,7 +369,7 @@ let test_prepare_claim_retry_exhaustion_is_bounded_and_read_only () =
    | W.Candidate_already_consumed _
    | W.Partition_blocked _ ->
      Alcotest.fail "claim retry exhaustion produced a terminal step");
-  Alcotest.(check int) "prepare attempts are bounded" 3 !prepare_calls;
+  Alcotest.(check int) "selected target is prepared once" 1 !prepare_calls;
   Alcotest.(check int) "no prepared attempt was dispatched" 0 !execute_calls;
   let running, ready =
     ok "classify roots after retry exhaustion" (P.load ~base_path ~keeper_name:"sangsu")
@@ -383,9 +384,99 @@ let test_prepare_claim_retry_exhaustion_is_bounded_and_read_only () =
             | P.Blocked _ -> running, ready)
          (0, 0)
   in
-  Alcotest.(check int) "only competing workers claimed targets" 3 running;
-  Alcotest.(check int) "final classification leaves sibling Ready" 1 ready;
+  Alcotest.(check int) "only the competing worker claimed a target" 1 running;
+  Alcotest.(check int) "all siblings remain Ready" 3 ready;
   Alcotest.(check int) "all candidates remain present" 4 (List.length candidates)
+;;
+
+let test_exact_claim_retry_exhaustion_has_no_self_wake () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  with_temp_base "board-attention-worker-exact-claim-exhaustion" @@ fun base_path ->
+  List.iter
+    (fun index ->
+       ignore
+         (record
+            ~base_path
+            (candidate
+               ~id:(Printf.sprintf "candidate-exact-claim-%d" index)
+               ~recorded_at:(float_of_int index)
+               ())
+          : A.candidate))
+    [ 0; 1 ];
+  let registration =
+    ok "register exact claim wake" (Wake.register ~sw ~base_path ~keeper_name:"sangsu")
+  in
+  let prepare_calls = ref 0 in
+  let claim_calls = ref 0 in
+  let execute_calls = ref 0 in
+  let selected : (string * P.Generation.t) option ref = ref None in
+  let claim_ready_exact
+        ~now:_
+        ~worker_epoch:_
+        ~base_path:_
+        ~keeper_name:_
+        ~partition_id
+        ~generation
+    =
+    incr claim_calls;
+    (match !selected with
+     | None -> selected := Some (partition_id, generation)
+     | Some (expected_id, expected_generation) ->
+       Alcotest.(check string) "retry keeps partition id" expected_id partition_id;
+       Alcotest.(check bool)
+         "retry keeps partition generation"
+         true
+         (P.Generation.equal expected_generation generation));
+    Ok None
+  in
+  let prepare candidate =
+    incr prepare_calls;
+    Ok candidate
+  in
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    incr execute_calls;
+    Alcotest.fail "exhausted exact claim dispatched a prepared attempt"
+  in
+  (match
+     ok
+       "exhaust exact claim conflicts"
+       (W.For_testing.process_next_with_claim_ready_exact
+          ~claim_ready_exact
+          ~now:(fun () -> 10.0)
+          ~worker_epoch:(P.Worker_epoch.generate ())
+          ~base_path
+          ~keeper_name:"sangsu"
+          ~prepare
+          ~execute)
+   with
+   | W.Idle -> ()
+   | W.Judgment_completed _
+   | W.Candidate_already_consumed _
+   | W.Partition_blocked _ ->
+     Alcotest.fail "exact claim exhaustion produced a terminal step");
+  Alcotest.(check int) "one prepared target" 1 !prepare_calls;
+  Alcotest.(check int) "initial claim plus two retries" 3 !claim_calls;
+  Alcotest.(check int) "no exact dispatch" 0 !execute_calls;
+  let ready =
+    ok "load roots after exact claim exhaustion" (P.load ~base_path ~keeper_name:"sangsu")
+    |> List.fold_left
+         (fun count (partition : P.t) ->
+            match partition.state with
+            | P.Ready -> count + 1
+            | P.Running _
+            | P.Completed _
+            | P.Settled _
+            | P.Blocked _ -> count)
+         0
+  in
+  Alcotest.(check int) "no sibling was claimed" 2 ready;
+  (match ok "probe pending self wake" (Wake.request ~base_path ~keeper_name:"sangsu") with
+   | Wake.Signaled -> ()
+   | Wake.Coalesced ->
+     Alcotest.fail "claim exhaustion enqueued an immediate self wake"
+   | Wake.Not_registered -> Alcotest.fail "claim exhaustion lost wake registration");
+  Wake.unregister registration
 ;;
 
 let test_execution_error_preserves_bound_progress_without_hot_retry () =
@@ -824,7 +915,8 @@ let test_consumed_completed_crash_settles_without_duplicate_delivery () =
            ~worker_epoch
            ~base_path
            ~keeper_name:"sangsu"
-           ~partition_id:claim_target.partition_id)
+           ~partition_id:claim_target.partition_id
+           ~generation:claim_target.generation)
     with
     | Some partition -> partition
     | None -> Alcotest.fail "existing Consumed root was not claimable"
@@ -1438,7 +1530,8 @@ let test_stale_blocked_snapshot_cannot_requeue_new_generation () =
                   ~worker_epoch:owner
                   ~base_path
                   ~keeper_name:"sangsu"
-                  ~partition_id:first_ready.partition.partition_id)
+                  ~partition_id:first_ready.partition.partition_id
+                  ~generation:first_ready.partition.generation)
            with
            | Some partition -> partition
            | None -> Alcotest.fail "requeued partition was not claimable"
@@ -1554,9 +1647,13 @@ let () =
             `Quick
             test_setup_error_stops_before_claim_without_hot_retry
         ; Alcotest.test_case
-            "prepare and claim retry exhaustion is bounded and read only"
+            "claim generation change discards without sibling selection"
             `Quick
-            test_prepare_claim_retry_exhaustion_is_bounded_and_read_only
+            test_claim_generation_change_discards_without_sibling_selection
+        ; Alcotest.test_case
+            "exact claim retry exhaustion has no self wake"
+            `Quick
+            test_exact_claim_retry_exhaustion_has_no_self_wake
         ; Alcotest.test_case
             "execution error preserves bound progress"
             `Quick

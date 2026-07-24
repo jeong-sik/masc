@@ -112,7 +112,8 @@ let claim ~base_path ~worker_epoch ~now =
          ~worker_epoch
          ~base_path
          ~keeper_name:"sangsu"
-         ~partition_id:target.partition_id)
+         ~partition_id:target.partition_id
+         ~generation:target.generation)
   with
   | Some partition -> partition
   | None -> Alcotest.fail "exact Ready target lost its claim"
@@ -199,7 +200,8 @@ let test_exact_claim_never_claims_a_ready_sibling () =
           ~worker_epoch:competitor
           ~base_path
           ~keeper_name:"sangsu"
-          ~partition_id:first_partition.partition_id)
+          ~partition_id:first_partition.partition_id
+          ~generation:first_partition.generation)
      : P.t option);
   let stale_worker = P.Worker_epoch.generate () in
   Alcotest.(check bool)
@@ -213,7 +215,8 @@ let test_exact_claim_never_claims_a_ready_sibling () =
              ~worker_epoch:stale_worker
              ~base_path
              ~keeper_name:"sangsu"
-             ~partition_id:first_partition.partition_id)));
+             ~partition_id:first_partition.partition_id
+             ~generation:first_partition.generation)));
   (match
      ok "load after stale target conflict" (P.load ~base_path ~keeper_name:"sangsu")
      |> List.find_opt (fun (partition : P.t) ->
@@ -229,7 +232,8 @@ let test_exact_claim_never_claims_a_ready_sibling () =
          ~worker_epoch:stale_worker
          ~base_path
          ~keeper_name:"sangsu"
-         ~partition_id:second_partition.partition_id)
+         ~partition_id:second_partition.partition_id
+         ~generation:second_partition.generation)
   with
   | Some claimed ->
     Alcotest.(check string)
@@ -257,7 +261,8 @@ let test_generation_advances_only_for_state_transition () =
            ~worker_epoch:owner
            ~base_path
            ~keeper_name:"sangsu"
-           ~partition_id:ready.partition_id)
+           ~partition_id:ready.partition_id
+           ~generation:ready.generation)
     with
     | Some partition -> partition
     | None -> Alcotest.fail "generation fixture lost its Ready target"

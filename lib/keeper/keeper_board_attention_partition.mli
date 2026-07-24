@@ -128,11 +128,12 @@ val claim_ready_exact :
   base_path:string ->
   keeper_name:string ->
   partition_id:string ->
+  generation:Generation.t ->
   (t option, string) result
-(** Claim only the named [Ready] root as [Running Unbound]. [None] means the
-    observed target lost its readiness or the ledger cursor changed before the
-    append; no sibling is claimed. [started_at] is observation only, never
-    lease or retry authority. *)
+(** Claim only the named [Ready] generation as [Running Unbound]. [None] means
+    the observed target lost its readiness, changed generation, or the ledger
+    cursor changed before the append; no sibling is claimed. [started_at] is
+    observation only, never lease or retry authority. *)
 
 val bind_before_dispatch :
   worker_epoch:Worker_epoch.t ->

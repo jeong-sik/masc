@@ -61,6 +61,40 @@ val settle_one_completed :
     invokes OAS. *)
 
 module For_testing : sig
+  val process_next_with_claim_ready_exact :
+    claim_ready_exact:
+      (now:float ->
+       worker_epoch:Keeper_board_attention_partition.Worker_epoch.t ->
+       base_path:string ->
+       keeper_name:string ->
+       partition_id:string ->
+       generation:Keeper_board_attention_partition.Generation.t ->
+       (Keeper_board_attention_partition.t option, string) result) ->
+    now:(unit -> float) ->
+    worker_epoch:Keeper_board_attention_partition.Worker_epoch.t ->
+    base_path:string ->
+    keeper_name:string ->
+    prepare:
+      (Keeper_board_attention_candidate.candidate ->
+       ( 'prepared
+       , Keeper_board_attention_exact_flow.setup_error )
+       result) ->
+    execute:
+      (before_dispatch:
+         (Keeper_board_attention_exact_flow.attempt_provenance ->
+          (unit, string) result) ->
+       before_advance:
+         (failed:Keeper_board_attention_exact_flow.attempt_provenance ->
+          next:Keeper_board_attention_exact_flow.attempt_provenance ->
+          (unit, string) result) ->
+       'prepared ->
+       ( Keeper_board_attention_candidate.judgment
+       , string Keeper_board_attention_exact_flow.execution_error )
+       result) ->
+    (step, string) result
+  (** Test seam for deterministic exact-claim conflicts. Production always uses
+      [Keeper_board_attention_partition.claim_ready_exact]. *)
+
   val process_next :
     now:(unit -> float) ->
     worker_epoch:Keeper_board_attention_partition.Worker_epoch.t ->

@@ -619,7 +619,9 @@ let prepare_next_ready
   with
   | None -> Ok None
   | Some partition ->
-    let selected prepared = Ok (Some (partition.partition_id, prepared)) in
+    let selected prepared =
+      Ok (Some (partition.partition_id, partition.generation, prepared))
+    in
     (match candidate_by_id partition.candidate_id candidates with
      | None -> selected None
      | Some candidate ->
@@ -658,7 +660,6 @@ let confirm_requeue_transition ~base_path transition =
 
 let rec converge_requeue_conflict
     ?(remaining_cursor_retries = 2)
-    ?(allow_requeue = true)
     ~base_path
     ~keeper_name
     ~partition
@@ -719,7 +720,7 @@ let rec converge_requeue_conflict
     let* confirmation = Partition.confirm_ready ~base_path ~partition:current in
     confirm_requeue_transition ~base_path confirmation
   | Partition.Blocked _ when current = partition ->
-    if not allow_requeue
+    if remaining_cursor_retries <= 0
     then
       Error
         ("partition ledger cursor remained conflicted after bounded requeue retries: "
@@ -729,17 +730,9 @@ let rec converge_requeue_conflict
       (match outcome with
        | Partition.Requeued transition ->
          confirm_requeue_transition ~base_path transition
-       | Partition.Cursor_conflict _ when remaining_cursor_retries > 0 ->
-         converge_requeue_conflict
-           ~remaining_cursor_retries:(remaining_cursor_retries - 1)
-           ~base_path
-           ~keeper_name
-           ~partition
-           ~expected_quarantine_id
        | Partition.Cursor_conflict _ ->
          converge_requeue_conflict
-           ~remaining_cursor_retries:0
-           ~allow_requeue:false
+           ~remaining_cursor_retries:(remaining_cursor_retries - 1)
            ~base_path
            ~keeper_name
            ~partition
@@ -878,7 +871,8 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
   loop partitions
 ;;
 
-let process_next
+let process_next_with_claim_ready_exact
+      ~claim_ready_exact
       ~now
       ~worker_epoch
       ~base_path
@@ -888,11 +882,14 @@ let process_next
   =
   let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
   let* (_ : int) = Partition.ensure_roots ~base_path ~keeper_name candidates in
-  let finish_after_claim_conflicts () =
+  let selected_generation_is_ready ~partition_id ~generation =
     let* partitions = Partition.load ~base_path ~keeper_name in
-    let ready_remains =
+    Ok
       List.exists
         (fun (partition : Partition.t) ->
+           String.equal partition.partition_id partition_id
+           && Partition.Generation.equal partition.generation generation
+           &&
            match partition.state with
            | Partition.Ready -> true
            | Partition.Running _
@@ -900,71 +897,74 @@ let process_next
            | Partition.Settled _
            | Partition.Blocked _ -> false)
         partitions
-    in
-    if ready_remains
-    then
-      let* (_ : Wake.wake_result) = Wake.request ~base_path ~keeper_name in
-      Ok Idle
-    else Ok Idle
   in
-  let rec select_and_claim attempts_remaining candidates =
-    if attempts_remaining <= 0
-    then finish_after_claim_conflicts ()
-    else
-    let* selected =
-      prepare_next_ready ~base_path ~keeper_name ~prepare candidates
-    in
-    match selected with
-    | None -> Ok Idle
-    | Some (partition_id, prepared) ->
+  let process_selected prepared partition =
+    let latest_partition : Partition.t ref = ref partition in
+    try
+      let* current_candidates =
+        Candidate.load_candidates ~base_path ~keeper_name
+      in
+      process_claimed
+        ~now
+        ~worker_epoch
+        ~base_path
+        ~prepared
+        ~execute
+        latest_partition
+        current_candidates
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Log.Keeper.error
+        "Board attention worker raised unexpectedly keeper=%s partition=%s: %s"
+        keeper_name
+        (!latest_partition).partition_id
+        (Printexc.to_string exn);
+      let reason =
+        preserve_durable_progress
+          !latest_partition
+          (Partition.Unexpected_worker_failure
+             "Board attention worker raised unexpectedly")
+      in
+      blocked_step
+        ~now:(now ())
+        ~worker_epoch
+        ~base_path
+        !latest_partition
+        reason
+  in
+  let* selected =
+    prepare_next_ready ~base_path ~keeper_name ~prepare candidates
+  in
+  match selected with
+  | None -> Ok Idle
+  | Some (partition_id, generation, prepared) ->
+    let rec claim_selected attempts_remaining =
       let* claimed =
-        Partition.claim_ready_exact
+        claim_ready_exact
           ~now:(now ())
           ~worker_epoch
           ~base_path
           ~keeper_name
           ~partition_id
+          ~generation
       in
-      (match claimed with
-       | None ->
-         let* refreshed = Candidate.load_candidates ~base_path ~keeper_name in
-         select_and_claim (attempts_remaining - 1) refreshed
-       | Some partition ->
-         let latest_partition : Partition.t ref = ref partition in
-         (try
-            let* current_candidates =
-              Candidate.load_candidates ~base_path ~keeper_name
-            in
-            process_claimed
-              ~now
-              ~worker_epoch
-              ~base_path
-              ~prepared
-              ~execute
-              latest_partition
-              current_candidates
-          with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn ->
-            Log.Keeper.error
-              "Board attention worker raised unexpectedly keeper=%s partition=%s: %s"
-              keeper_name
-              (!latest_partition).partition_id
-              (Printexc.to_string exn);
-            let reason =
-              preserve_durable_progress
-                !latest_partition
-                (Partition.Unexpected_worker_failure
-                   "Board attention worker raised unexpectedly")
-            in
-            blocked_step
-              ~now:(now ())
-              ~worker_epoch
-              ~base_path
-              !latest_partition
-              reason))
-  in
-  select_and_claim 3 candidates
+      match claimed with
+      | Some partition -> process_selected prepared partition
+      | None ->
+        let* remains_ready =
+          selected_generation_is_ready ~partition_id ~generation
+        in
+        if remains_ready && attempts_remaining > 1
+        then claim_selected (attempts_remaining - 1)
+        else Ok Idle
+    in
+    claim_selected 3
+;;
+
+let process_next =
+  process_next_with_claim_ready_exact
+    ~claim_ready_exact:Partition.claim_ready_exact
 ;;
 
 let completed_in_order ~base_path ~keeper_name =
@@ -1219,6 +1219,7 @@ let run
 
 module For_testing = struct
   let process_next = process_next
+  let process_next_with_claim_ready_exact = process_next_with_claim_ready_exact
   let drain_available = drain_available
   let replay_completed_owner_wake = replay_completed_owner_wake
   let with_process_recovery_claim = with_process_recovery_claim

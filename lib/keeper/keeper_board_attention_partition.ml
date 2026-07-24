@@ -1102,6 +1102,7 @@ let claim_ready_exact
       ~base_path
       ~keeper_name
       ~partition_id
+      ~generation
   =
   let* () = valid_time "partition claim time" now in
   let* () = nonempty "partition claim id" partition_id in
@@ -1113,7 +1114,7 @@ let claim_ready_exact
       let* () = validate_keeper_identity ~keeper_name view in
       match Id_map.find_opt partition_id view.by_id with
       | None -> Ok None
-      | Some selected ->
+      | Some selected when Generation.equal selected.generation generation ->
         (match selected.state with
          | Ready ->
            let* claimed =
@@ -1136,7 +1137,8 @@ let claim_ready_exact
               let* cursor = cursor_result ~ledger_path append_result in
               Atomic.set entry.cached (Some { updated with cursor });
               Ok (Some claimed))
-         | Running _ | Completed _ | Settled _ | Blocked _ -> Ok None)))
+         | Running _ | Completed _ | Settled _ | Blocked _ -> Ok None)
+      | Some _ -> Ok None))
 ;;
 
 let transition_running ~base_path ~partition ~worker_epoch decide =

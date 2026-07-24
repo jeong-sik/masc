@@ -57,16 +57,33 @@ def last_git_activity(filepath: Path) -> str:
         return "-"
 
 
+# Sub-doc marker: numeric id immediately followed by "-phase-"
+# (e.g. RFC-0003-phase-2-...). Plain "-phase-" inside a slug
+# (RFC-0115-ktc-turn-phase-spec-...) is NOT a sub-doc.
+PHASE_SUB_DOC_RE = re.compile(r"^RFC-(\d+)-phase-")
+
+
+def entry_key(fpath: Path) -> str:
+    """Collision-free key: full stem sans the RFC- prefix.
+
+    Numbered RFCs keep their short id prefix (0003-keeper-state-machine),
+    slug-only RFCs key on the whole slug (keeper-credential-device-flow).
+    """
+    stem = fpath.stem
+    return stem[4:] if stem.startswith("RFC-") else stem
+
+
 def collect_entries() -> dict[str, RfcEntry]:
     entries: dict[str, RfcEntry] = {}
-    sub_docs: dict[str, list[str]] = {}
+    sub_doc_files: list[tuple[str, str]] = []  # (parent numeric id, filename)
 
     for fpath in sorted(RFC_DIR.glob("RFC-*.md")):
         name = fpath.name
-        num = name[4:8]
+        key = entry_key(fpath)
 
-        if "-phase-" in name:
-            sub_docs.setdefault(num, []).append(name)
+        m = PHASE_SUB_DOC_RE.match(name)
+        if m:
+            sub_doc_files.append((m.group(1), name))
             continue
 
         fm = extract_frontmatter(fpath)
@@ -77,17 +94,32 @@ def collect_entries() -> dict[str, RfcEntry]:
                 if line.startswith("# "):
                     first_line = line
                     break
-            title = re.sub(r"^# RFC[- ]*\d+[.: —–-]*\s*", "", first_line)
+            title = re.sub(r"^# RFC[- :]*\d*[.: —–-]*\s*", "", first_line)
             if not title:
                 title = "(untitled)"
 
-        entries[num] = RfcEntry(
-            number=num,
+        entries[key] = RfcEntry(
+            number=key,
             title=title,
             status=fm.get("status", "Draft"),
             last_activity=last_git_activity(fpath),
-            sub_docs=sub_docs.get(num, []),
         )
+
+    # Attach sub-docs to the parent entry sharing their numeric id.
+    # Multiple entries may share an id prefix (e.g. 0107-a, 0107-b); attach to
+    # the last-sorted one, mirroring the pre-fix collapse order.
+    num_to_keys: dict[str, list[str]] = {}
+    for key in entries:
+        m = re.match(r"(\d+)", key)
+        if m:
+            num_to_keys.setdefault(m.group(1), []).append(key)
+
+    for num, name in sub_doc_files:
+        parents = num_to_keys.get(num, [])
+        if not parents:
+            print(f"WARNING: sub-doc {name} has no parent RFC entry", file=sys.stderr)
+            continue
+        entries[sorted(parents)[-1]].sub_docs.append(name)
 
     return entries
 

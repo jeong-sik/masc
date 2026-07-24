@@ -431,7 +431,7 @@ let test_predispatch_failure_advances_only_to_oas_successor () =
          ~on_summary:(fun _ -> ())
          (prepare_exn entry);
        check int "OAS-selected successor posted once" 1 (F.post_count successor);
-       match Q.get_pending_entry ~id:entry.id with
+       (match Q.get_pending_entry ~id:entry.id with
        | Some
            { exact_attempt =
                Q.Exact_bound

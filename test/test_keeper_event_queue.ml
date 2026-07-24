@@ -253,7 +253,7 @@ let () =
          ; board_post_id = "post-1"
          ; channel = Keeper_continuation_channel.unrouted "test fixture"
          })
-      "post-1");
+      "fusion-run:fus-1");
   (* Reply-route parity: every continuation-bearing wake serializes its exact
      originating channel. A missing route is malformed durable state, not an
      implicit [Unrouted] destination. *)

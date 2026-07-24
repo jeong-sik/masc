@@ -91,8 +91,6 @@ let compaction_recovery_error_to_tag = function
     "checkpoint_candidate_invalid"
   | Checkpoint_cas_failed (Commit_not_installed _) ->
     "checkpoint_commit_not_installed"
-  | Checkpoint_cas_failed (Commit_durability_unknown _) ->
-    "checkpoint_commit_durability_unknown"
   | Checkpoint_cas_failed (Transaction_outcome_unknown _) ->
     "checkpoint_transaction_outcome_unknown"
   | Checkpoint_candidate_failed _ -> "checkpoint_candidate_failed"
@@ -166,11 +164,6 @@ let checkpoint_cas_error_detail = function
   | Commit_not_installed error ->
     "checkpoint commit not installed: "
     ^ Keeper_fs.durable_write_error_to_string error
-  | Commit_durability_unknown { installed_ref; error } ->
-    Printf.sprintf
-      "checkpoint commit durability unknown: %s error=%s"
-      (checkpoint_ref_detail installed_ref)
-      (Keeper_fs.durable_write_error_to_string error)
   | Transaction_outcome_unknown { possible_installed_ref; error } ->
     Printf.sprintf
       "checkpoint transaction outcome unknown: %s error=%s"

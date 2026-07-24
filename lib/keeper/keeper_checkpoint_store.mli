@@ -193,21 +193,18 @@ type checkpoint_cas_error =
       { expected : int
       ; candidate : int
       }
-  | Candidate_turn_regressed of
-      { source_turn : int
-      ; candidate_turn : int
-      }
-  | Commit_not_installed of Keeper_fs.durable_write_error
-  | Commit_durability_unknown of
-      { installed_ref : Keeper_checkpoint_ref.t
-      ; error : Keeper_fs.durable_write_error
-      }
-  | Transaction_outcome_unknown of
-      { possible_installed_ref : Keeper_checkpoint_ref.t
-      ; error : File_lock_eio.durable_lock_error
-      }
+   | Candidate_turn_regressed of
+       { source_turn : int
+       ; candidate_turn : int
+       }
+   | Commit_not_installed of Keeper_fs.durable_write_error
+   | Transaction_outcome_unknown of
+       { possible_installed_ref : Keeper_checkpoint_ref.t
+       ; error : File_lock_eio.durable_lock_error
+       }
 
 type checkpoint_installation_auxiliary =
+  | Commit_durability_unknown of Keeper_fs.durable_write_error
   | Commit_observer_failed of Eio.Exn.with_bt
   | Release_process_lock_failed of File_lock_eio.durable_lock_error
   | Post_commit_unwind_interrupted of Eio.Exn.with_bt
@@ -227,9 +224,10 @@ type checkpoint_installation =
     current bytes are re-read and hashed, and an equal-turn checkpoint with
     different content is rejected as [Source_changed]. On success the returned
     ref is derived from the exact compact bytes passed to the durable atomic
-    JSON writer. A writer error after atomic rename is
-    [Commit_durability_unknown], never a retryable not-installed failure. This
-    same rule applies when releasing the stable lock fails after the body:
+    JSON writer. A writer error after atomic rename is an [Installed] result
+    carrying [Commit_durability_unknown], never a retryable not-installed
+    failure. This same rule applies when releasing the stable lock fails after
+    the body:
     [Transaction_outcome_unknown] requires reconciliation rather than retry.
     The payload-store commit is not an operation terminal fact; the Keeper
     operation journal owns that authority.
@@ -255,6 +253,27 @@ module For_testing : sig
 
   val save_oas_if_source_with_release_failure :
     release_failure:File_lock_eio.durable_lock_error ->
+    on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
+    session_dir:string ->
+    expected_source_ref:Keeper_checkpoint_ref.t ->
+    Agent_sdk.Checkpoint.t ->
+    checkpoint_installation
+
+  val save_oas_if_source_with_writer :
+    write_checkpoint_bytes:
+      (on_durable_commit:(unit -> unit) ->
+       ownership_root:string ->
+       path:string ->
+       bytes:string ->
+       (Keeper_fs.durable_commit_outcome, Keeper_fs.durable_write_error) result) ->
+    on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
+    session_dir:string ->
+    expected_source_ref:Keeper_checkpoint_ref.t ->
+    Agent_sdk.Checkpoint.t ->
+    checkpoint_installation
+
+  val save_oas_if_source_with_post_commit_unwind :
+    post_commit_unwind:(unit -> unit) ->
     on_checkpoint_commit_observer:(Keeper_checkpoint_ref.t -> unit) ->
     session_dir:string ->
     expected_source_ref:Keeper_checkpoint_ref.t ->

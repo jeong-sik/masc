@@ -91,12 +91,10 @@ let compaction_dispatch_error_data ~stage ~checkpoint_applied error =
 
 type compaction_checkpoint_commit_state =
   | Not_installed
-  | Installed_durability_unknown
   | Outcome_unknown
 
 let compaction_checkpoint_commit_state_to_string = function
   | Not_installed -> "not_installed"
-  | Installed_durability_unknown -> "installed_durability_unknown"
   | Outcome_unknown -> "transaction_outcome_unknown"
 
 let compaction_recovery_error_data ?dispatch_error error =
@@ -104,9 +102,6 @@ let compaction_recovery_error_data ?dispatch_error error =
   let detail = Keeper_post_turn.compaction_recovery_error_to_string error in
   let checkpoint_commit_state, checkpoint_applied =
     match error with
-    | Keeper_post_turn.Checkpoint_cas_failed
-        (Keeper_checkpoint_store.Commit_durability_unknown _) ->
-      Installed_durability_unknown, `Bool true
     | Checkpoint_cas_failed (Transaction_outcome_unknown _) ->
       Outcome_unknown, `Null
     | Checkpoint_ref_load_failed _
@@ -150,7 +145,6 @@ let compaction_recovery_error_data ?dispatch_error error =
     | Checkpoint_cas_failed (Commit_not_installed _)
     | Checkpoint_candidate_failed _ -> Internal_error
     | Checkpoint_cas_failed (Source_changed _)
-    | Checkpoint_cas_failed (Commit_durability_unknown _)
     | Checkpoint_cas_failed (Transaction_outcome_unknown _) -> Conflict
   in
   let code =

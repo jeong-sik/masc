@@ -1114,7 +1114,7 @@ let test_manual_applied_hint_failure () =
             check bool
               "manual hint carries exact installed ref"
               true
-              (Keeper_checkpoint_ref.equal
+              (Masc.Keeper_checkpoint_ref.equal
                  installed_ref
                  installed.installed_ref)
           | Masc.Keeper_checkpoint_store.Not_installed _, _ ->
@@ -1214,20 +1214,25 @@ let test_prepare_commit_source_cas () =
       "prepare performs one real exact dispatch"
       1
       (Exact_fixture.post_count exact_server);
+    let was_recording = Printexc.backtrace_status () in
+    Printexc.record_backtrace true;
     let recovery =
-      match
-        Post_turn.For_testing.commit_prepared_compaction_with_history
-          ~save_oas_history:(fun ~session_dir:_ _ ->
-            raise
-              (Eio.Cancel.Cancelled
-                 (Failure "injected history cancellation")))
-          prepared
-      with
-      | Ok recovery -> recovery
-     | Error error ->
-       failf
-         "commit of a fresh prepared plan failed: %s"
-         (Post_turn.compaction_recovery_error_to_string error)
+      Fun.protect
+        ~finally:(fun () -> Printexc.record_backtrace was_recording)
+        (fun () ->
+           match
+             Post_turn.For_testing.commit_prepared_compaction_with_history
+               ~save_oas_history:(fun ~session_dir:_ _ ->
+                 raise
+                   (Eio.Cancel.Cancelled
+                      (Failure "injected history cancellation")))
+               prepared
+           with
+           | Ok recovery -> recovery
+           | Error error ->
+             failf
+               "commit of a fresh prepared plan failed: %s"
+               (Post_turn.compaction_recovery_error_to_string error))
     in
     (match recovery.checkpoint_installation with
      | Masc.Keeper_checkpoint_store.Installed installed ->
@@ -1237,8 +1242,8 @@ let test_prepare_commit_source_cas () =
          (List.exists
             (function
               | Masc.Keeper_checkpoint_store.History_write_failed
-                  (Eio.Cancel.Cancelled _, _) ->
-                true
+                  (Eio.Cancel.Cancelled _, backtrace) ->
+                Printexc.raw_backtrace_length backtrace > 0
               | _ -> false)
             installed.auxiliary)
      | Masc.Keeper_checkpoint_store.Not_installed _ ->

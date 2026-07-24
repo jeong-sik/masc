@@ -540,21 +540,18 @@ type checkpoint_cas_error =
       { expected : int
       ; candidate : int
       }
-  | Candidate_turn_regressed of
-      { source_turn : int
-      ; candidate_turn : int
-      }
-  | Commit_not_installed of Keeper_fs.durable_write_error
-  | Commit_durability_unknown of
-      { installed_ref : Keeper_checkpoint_ref.t
-      ; error : Keeper_fs.durable_write_error
-      }
-  | Transaction_outcome_unknown of
-      { possible_installed_ref : Keeper_checkpoint_ref.t
-      ; error : File_lock_eio.durable_lock_error
-      }
+   | Candidate_turn_regressed of
+       { source_turn : int
+       ; candidate_turn : int
+       }
+   | Commit_not_installed of Keeper_fs.durable_write_error
+   | Transaction_outcome_unknown of
+       { possible_installed_ref : Keeper_checkpoint_ref.t
+       ; error : File_lock_eio.durable_lock_error
+       }
 
 type checkpoint_installation_auxiliary =
+  | Commit_durability_unknown of Keeper_fs.durable_write_error
   | Commit_observer_failed of Eio.Exn.with_bt
   | Release_process_lock_failed of File_lock_eio.durable_lock_error
   | Post_commit_unwind_interrupted of Eio.Exn.with_bt
@@ -677,6 +674,7 @@ let with_checkpoint_cas_lock ~session_dir ~candidate_ref f =
 
 let save_oas_if_source_with
     ~with_checkpoint_cas_lock
+    ~write_checkpoint_bytes
     ~(on_checkpoint_commit_observer : Keeper_checkpoint_ref.t -> unit)
     ~session_dir
     ~(expected_source_ref : Keeper_checkpoint_ref.t)
@@ -743,16 +741,14 @@ let save_oas_if_source_with
            in
            let ownership_root = Filename.dirname session_dir in
            (match
-              Keeper_fs.save_bytes_durable_atomic_observed
+              write_checkpoint_bytes
                 ~on_durable_commit:observe_commit
                 ~ownership_root
-                canonical_path
-                candidate_bytes
+                ~path:canonical_path
+                ~bytes:candidate_bytes
             with
             | Error error when error.Keeper_fs.renamed ->
-              Not_installed
-                (Commit_durability_unknown
-                   { installed_ref = candidate_ref; error })
+              publish [ Commit_durability_unknown error ]
             | Error error -> Not_installed (Commit_not_installed error)
             | Ok Keeper_fs.Committed ->
               (* The durable writer installs [candidate_bytes] verbatim - the
@@ -775,14 +771,19 @@ let save_oas_if_source_with
       | Some installed -> installed
       | None -> { installed_ref; auxiliary = [] }
     in
+    let known_installed_ref () =
+      match !committed_installation with
+      | Some installed -> Some installed.installed_ref
+      | None -> !observed_ref
+    in
     (match outcome with
      | `Returned
          (Not_installed
             (Transaction_outcome_unknown
                { possible_installed_ref; error }))
-       when (match !observed_ref with
-             | Some observed_ref ->
-               Keeper_checkpoint_ref.equal observed_ref possible_installed_ref
+       when (match known_installed_ref () with
+             | Some installed_ref ->
+               Keeper_checkpoint_ref.equal installed_ref possible_installed_ref
              | None -> false) ->
        Installed
          (append_auxiliary
@@ -790,7 +791,7 @@ let save_oas_if_source_with
             (Release_process_lock_failed error))
      | `Returned installation -> installation
      | `Raised (exn, backtrace) ->
-       (match !observed_ref with
+       (match known_installed_ref () with
         | Some installed_ref ->
           Installed
             (append_auxiliary
@@ -798,9 +799,22 @@ let save_oas_if_source_with
                (Post_commit_unwind_interrupted (exn, backtrace)))
         | None -> Printexc.raise_with_backtrace exn backtrace))
 
+let write_checkpoint_bytes
+    ~on_durable_commit
+    ~ownership_root
+    ~path
+    ~bytes =
+  Keeper_fs.save_bytes_durable_atomic_observed
+    ~on_durable_commit
+    ~ownership_root
+    path
+    bytes
+;;
+
 let save_oas_if_source ~session_dir ~expected_source_ref candidate =
   save_oas_if_source_with
     ~with_checkpoint_cas_lock
+    ~write_checkpoint_bytes
     ~on_checkpoint_commit_observer:(fun _ -> ())
     ~session_dir
     ~expected_source_ref
@@ -815,6 +829,7 @@ module For_testing = struct
       candidate =
     save_oas_if_source_with
       ~with_checkpoint_cas_lock
+      ~write_checkpoint_bytes
       ~on_checkpoint_commit_observer
       ~session_dir
       ~expected_source_ref
@@ -839,6 +854,44 @@ module For_testing = struct
     in
     save_oas_if_source_with
       ~with_checkpoint_cas_lock:with_release_failure
+      ~write_checkpoint_bytes
+      ~on_checkpoint_commit_observer
+      ~session_dir
+      ~expected_source_ref
+      candidate
+  ;;
+
+  let save_oas_if_source_with_writer
+      ~write_checkpoint_bytes
+      ~on_checkpoint_commit_observer
+      ~session_dir
+      ~expected_source_ref
+      candidate =
+    save_oas_if_source_with
+      ~with_checkpoint_cas_lock
+      ~write_checkpoint_bytes
+      ~on_checkpoint_commit_observer
+      ~session_dir
+      ~expected_source_ref
+      candidate
+  ;;
+
+  let save_oas_if_source_with_post_commit_unwind
+      ~post_commit_unwind
+      ~on_checkpoint_commit_observer
+      ~session_dir
+      ~expected_source_ref
+      candidate =
+    let with_post_commit_unwind ~session_dir ~candidate_ref f =
+      match with_checkpoint_cas_lock ~session_dir ~candidate_ref f with
+      | Installed _ as installation ->
+        post_commit_unwind ();
+        installation
+      | Not_installed _ as outcome -> outcome
+    in
+    save_oas_if_source_with
+      ~with_checkpoint_cas_lock:with_post_commit_unwind
+      ~write_checkpoint_bytes
       ~on_checkpoint_commit_observer
       ~session_dir
       ~expected_source_ref

@@ -480,6 +480,31 @@ let test_ready_runtime_raw_domain_save () =
   | Error _ -> fail "raw-domain checkpoint did not round-trip"
   | Ok checkpoint -> check int "raw-domain turn persisted" 11 checkpoint.turn_count
 
+let with_recorded_backtraces f =
+  let was_recording = Printexc.backtrace_status () in
+  Printexc.record_backtrace true;
+  Fun.protect
+    ~finally:(fun () -> Printexc.record_backtrace was_recording)
+    f
+;;
+
+let with_exact_source_fixture ~session_id f =
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
+    save_ok ~session_dir
+      (make_checkpoint ~session_id ~turn_count:8 ~marker:"source"
+       |> with_generation 3)
+      "exact source seed save";
+    let source_ref =
+      match
+        Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
+      with
+      | Ok (_, reference) -> reference
+      | Error _ -> fail "exact source load failed"
+    in
+    f ~session_dir ~source_ref)
+;;
+
 let test_exact_source_cas_allows_one_equal_turn_writer () =
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
@@ -625,6 +650,133 @@ let test_exact_source_cas_updates_canonical_watermark () =
       fail "stale save ignored the canonical checkpoint installed by CAS"
     | Error error -> fail ("post-CAS stale classification failed: " ^ error))
 
+let test_post_rename_durability_unknown_is_installed () =
+  let session_id = "sess-cas-post-rename" in
+  with_exact_source_fixture ~session_id (fun ~session_dir ~source_ref ->
+    let candidate =
+      make_checkpoint ~session_id ~turn_count:9 ~marker:"post-rename"
+      |> with_generation 3
+    in
+    let durability_error =
+      { Keeper_fs.renamed = true
+      ; stage = Keeper_fs.Parent_directory_fsync_after_rename
+      ; failure =
+          Keeper_fs.Operation_failed "injected post-rename durability failure"
+      }
+    in
+    match
+      Keeper_checkpoint_store.For_testing.save_oas_if_source_with_writer
+        ~write_checkpoint_bytes:
+          (fun ~on_durable_commit:_ ~ownership_root:_ ~path ~bytes ->
+             Fs_compat.save_file path bytes;
+             Error durability_error)
+        ~on_checkpoint_commit_observer:(fun _ -> ())
+        ~session_dir
+        ~expected_source_ref:source_ref
+        candidate
+    with
+    | Keeper_checkpoint_store.Not_installed _ ->
+      fail "post-rename durability uncertainty became Not_installed"
+    | Keeper_checkpoint_store.Installed installed ->
+      (match installed.auxiliary with
+       | [ Keeper_checkpoint_store.Commit_durability_unknown error ] ->
+         check bool
+           "post-rename durability cause is preserved"
+           true
+           (error = durability_error)
+       | _ -> fail "post-rename durability auxiliary was not preserved");
+      let disk_ref =
+        match
+          Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
+        with
+        | Ok (_, reference) -> reference
+        | Error _ -> fail "post-rename candidate was not externally installed"
+      in
+      check bool
+        "post-rename outcome carries the exact installed ref"
+        true
+        (Keeper_checkpoint_ref.equal installed.installed_ref disk_ref);
+      match
+        Keeper_checkpoint_store.save_oas_if_source
+          ~session_dir
+          ~expected_source_ref:source_ref
+          candidate
+      with
+      | Keeper_checkpoint_store.Not_installed
+          (Keeper_checkpoint_store.Source_changed actual) ->
+        check bool
+          "same-process retry is fenced by the installed ref"
+          true
+          (Keeper_checkpoint_ref.equal actual installed.installed_ref)
+      | Keeper_checkpoint_store.Installed _ ->
+        fail "post-rename candidate was installed twice"
+      | Keeper_checkpoint_store.Not_installed _ ->
+        fail "post-rename retry failed without exact source evidence")
+;;
+
+let test_commit_observer_failure_is_installed () =
+  let session_id = "sess-cas-observer-failure" in
+  with_exact_source_fixture ~session_id (fun ~session_dir ~source_ref ->
+    let outcome =
+      with_recorded_backtraces (fun () ->
+        Keeper_checkpoint_store.For_testing.save_oas_if_source_with_observer
+          ~on_checkpoint_commit_observer:(fun _ ->
+            failwith "injected commit observer failure")
+          ~session_dir
+          ~expected_source_ref:source_ref
+          (make_checkpoint ~session_id ~turn_count:9 ~marker:"observer-failure"
+           |> with_generation 3))
+    in
+    match outcome with
+    | Keeper_checkpoint_store.Not_installed _ ->
+      fail "commit observer failure downgraded the installed checkpoint"
+    | Keeper_checkpoint_store.Installed installed ->
+      match installed.auxiliary with
+      | [ Keeper_checkpoint_store.Commit_observer_failed
+            (Failure detail, backtrace) ] ->
+        check string
+          "commit observer failure cause"
+          "injected commit observer failure"
+          detail;
+        check bool
+          "commit observer failure preserves its raw backtrace"
+          true
+          (Printexc.raw_backtrace_length backtrace > 0)
+      | _ -> fail "commit observer failure was not preserved as auxiliary")
+;;
+
+let test_post_commit_unwind_is_installed () =
+  let session_id = "sess-cas-post-commit-unwind" in
+  with_exact_source_fixture ~session_id (fun ~session_dir ~source_ref ->
+    let outcome =
+      with_recorded_backtraces (fun () ->
+        Keeper_checkpoint_store.For_testing.save_oas_if_source_with_post_commit_unwind
+          ~post_commit_unwind:(fun () ->
+            failwith "injected post-commit unwind")
+          ~on_checkpoint_commit_observer:(fun _ -> ())
+          ~session_dir
+          ~expected_source_ref:source_ref
+          (make_checkpoint ~session_id ~turn_count:9 ~marker:"post-commit-unwind"
+           |> with_generation 3))
+    in
+    match outcome with
+    | Keeper_checkpoint_store.Not_installed _ ->
+      fail "post-commit unwind downgraded the installed checkpoint"
+    | Keeper_checkpoint_store.Installed installed ->
+      match installed.auxiliary with
+      | [ Keeper_checkpoint_store.Post_commit_unwind_interrupted
+            (Failure detail, backtrace) ] ->
+        check string
+          "post-commit unwind cause"
+          "injected post-commit unwind"
+          detail;
+        check bool
+          "post-commit unwind preserves its raw backtrace"
+          true
+          (Printexc.raw_backtrace_length backtrace > 0)
+      | _ -> fail "post-commit unwind was not preserved as auxiliary")
+;;
+
 let test_checkpoint_ref_requires_generation () =
   let session_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir session_dir) (fun () ->
@@ -710,6 +862,12 @@ let () =
             test_exact_source_cas_allows_one_equal_turn_writer;
           test_case "exact source CAS updates the canonical watermark" `Quick
             test_exact_source_cas_updates_canonical_watermark;
+          test_case "post-rename durability uncertainty stays installed" `Quick
+            test_post_rename_durability_unknown_is_installed;
+          test_case "commit observer failure stays installed" `Quick
+            test_commit_observer_failure_is_installed;
+          test_case "post-commit unwind stays installed" `Quick
+            test_post_commit_unwind_is_installed;
           test_case "checkpoint refs require keeper generation" `Quick
             test_checkpoint_ref_requires_generation;
           test_case "exact snapshot preserves canonical bytes" `Quick

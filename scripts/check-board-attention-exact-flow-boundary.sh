@@ -11,6 +11,8 @@ WORKER_ML="${REPO_ROOT}/lib/keeper/keeper_board_attention_worker.ml"
 WORKER_MLI="${REPO_ROOT}/lib/keeper/keeper_board_attention_worker.mli"
 PARTITION_ML="${REPO_ROOT}/lib/keeper/keeper_board_attention_partition.ml"
 PARTITION_MLI="${REPO_ROOT}/lib/keeper/keeper_board_attention_partition.mli"
+QUARANTINE_ML="${REPO_ROOT}/lib/keeper/keeper_board_attention_quarantine_command.ml"
+QUARANTINE_MLI="${REPO_ROOT}/lib/keeper/keeper_board_attention_quarantine_command.mli"
 RUNTIME_CONFIG="${REPO_ROOT}/config/runtime.toml"
 TARGETS=(
   "${FLOW_ML}"
@@ -21,6 +23,8 @@ TARGETS=(
   "${WORKER_MLI}"
   "${PARTITION_ML}"
   "${PARTITION_MLI}"
+  "${QUARANTINE_ML}"
+  "${QUARANTINE_MLI}"
 )
 
 fail() {
@@ -395,7 +399,7 @@ check_boundary() {
 }
 
 self_test() (
-  local fixture worker_backup candidate_backup flow_backup runtime_backup injection target relative
+  local fixture worker_backup candidate_backup flow_backup quarantine_backup runtime_backup injection target relative
   fixture="$(mktemp -d "${TMPDIR:-/tmp}/board-attention-exact-flow-boundary.XXXXXX")"
   trap "rm -rf '${fixture}'" EXIT
   for target in "${TARGETS[@]}" "${RUNTIME_CONFIG}"; do
@@ -406,10 +410,12 @@ self_test() (
   worker_backup="${fixture}/worker.ml.clean"
   candidate_backup="${fixture}/candidate.ml.clean"
   flow_backup="${fixture}/flow.ml.clean"
+  quarantine_backup="${fixture}/quarantine.ml.clean"
   runtime_backup="${fixture}/runtime.toml.clean"
   cp "${fixture}/lib/keeper/keeper_board_attention_worker.ml" "${worker_backup}"
   cp "${fixture}/lib/keeper/keeper_board_attention_candidate.ml" "${candidate_backup}"
   cp "${fixture}/lib/keeper/keeper_board_attention_exact_flow.ml" "${flow_backup}"
+  cp "${fixture}/lib/keeper/keeper_board_attention_quarantine_command.ml" "${quarantine_backup}"
   cp "${fixture}/config/runtime.toml" "${runtime_backup}"
 
   MASC_BOARD_ATTENTION_BOUNDARY_ROOT="${fixture}" \
@@ -517,6 +523,17 @@ EOF
   fi
   cp "${candidate_backup}" "${fixture}/lib/keeper/keeper_board_attention_candidate.ml"
 
+  printf '%s\n' 'let provider_id = "forbidden"' \
+    >>"${fixture}/lib/keeper/keeper_board_attention_quarantine_command.ml"
+  if
+    MASC_BOARD_ATTENTION_BOUNDARY_ROOT="${fixture}" \
+      bash "${BASH_SOURCE[0]}" --check >/dev/null 2>&1
+  then
+    fail "self-test accepted provider policy on the quarantine command surface"
+  fi
+  cp "${quarantine_backup}" \
+    "${fixture}/lib/keeper/keeper_board_attention_quarantine_command.ml"
+
   python3 - "${fixture}/lib/keeper/keeper_board_attention_exact_flow.ml" <<'PY'
 import pathlib
 import sys
@@ -622,7 +639,7 @@ PY
   fi
 
   printf '%s\n' \
-    '[board-attention-exact-flow-boundary:self-test] clean=pass quoted=pass lane-decoys=pass retired-decoys=pass unrelated=pass lane=fail composed-lane=fail duplicate-lane=fail candidate=fail config=fail forbidden=fail pricing=fail legacy=fail missing=fail'
+    '[board-attention-exact-flow-boundary:self-test] clean=pass quoted=pass lane-decoys=pass retired-decoys=pass unrelated=pass lane=fail composed-lane=fail duplicate-lane=fail candidate=fail quarantine=fail config=fail forbidden=fail pricing=fail legacy=fail missing=fail'
 )
 
 case "${1:-}" in

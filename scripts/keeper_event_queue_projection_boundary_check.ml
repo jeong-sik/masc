@@ -37,6 +37,13 @@ let rec longident_leaf = function
   | Longident.Lapply (_, right) -> longident_leaf right.txt
 ;;
 
+let rec longident_segments = function
+  | Longident.Lident name -> [ name ]
+  | Longident.Ldot (prefix, name) -> longident_segments prefix.txt @ [ name.txt ]
+  | Longident.Lapply (left, right) ->
+    longident_segments left.txt @ longident_segments right.txt
+;;
+
 let location_fields (location : Location.t) =
   let start = location.loc_start in
   start.pos_lnum, start.pos_cnum - start.pos_bol, start.pos_cnum
@@ -63,12 +70,15 @@ let guarded_owner_modules =
 ;;
 
 let guarded_owner identifier =
-  let name = longident_leaf identifier in
-  if List.mem name guarded_owner_modules then Some name else None
+  longident_segments identifier
+  |> List.find_opt (fun name -> List.mem name guarded_owner_modules)
 ;;
 
 let reject_guarded_owner_reexport ~file ~surface visit =
-  let reject owner location =
+  let reject identifier location =
+    match guarded_owner identifier with
+    | None -> ()
+    | Some owner ->
     let line, column, _ = location_fields location in
     failf
       "%s:%d:%d %s re-exports guarded projection owner %s"
@@ -84,37 +94,69 @@ let reject_guarded_owner_reexport ~file ~surface visit =
         (fun self expression ->
            (match expression.pmod_desc with
             | Pmod_ident identifier ->
-              (match guarded_owner identifier.txt with
-               | Some owner -> reject owner identifier.loc
-               | None -> ())
+              reject identifier.txt identifier.loc
+            | Pmod_unpack _ ->
+              let line, column, _ = location_fields expression.pmod_loc in
+              failf
+                "%s:%d:%d %s uses opaque module unpack"
+                file
+                line
+                column
+                surface
             | _ -> ());
            Ast_iterator.default_iterator.module_expr self expression)
     ; module_type =
         (fun self module_type ->
            (match module_type.pmty_desc with
             | Pmty_ident identifier | Pmty_alias identifier ->
-              (match guarded_owner identifier.txt with
-               | Some owner -> reject owner identifier.loc
-               | None -> ())
+              reject identifier.txt identifier.loc
+            | Pmty_with (_, constraints) ->
+              List.iter
+                (function
+                  | Pwith_module (_, manifest) | Pwith_modsubst (_, manifest) ->
+                    reject manifest.txt manifest.loc
+                  | _ -> ())
+                constraints
             | _ -> ());
            Ast_iterator.default_iterator.module_type self module_type)
+    ; expr =
+        (fun self expression ->
+           match expression.pexp_desc with
+           | Pexp_pack packed -> self.module_expr self packed
+           | _ -> Ast_iterator.default_iterator.expr self expression)
     }
   in
   visit iterator
 ;;
 
-let rec direct_guarded_owner_of_module_expr expression =
-  match expression.pmod_desc with
-  | Pmod_ident identifier -> guarded_owner identifier.txt
-  | Pmod_constraint (nested, _) -> direct_guarded_owner_of_module_expr nested
-  | _ -> None
-;;
-
 let allowed_internal_alias ~file binding =
   String.equal file "lib/keeper/keeper_event_queue_recovery.ml"
   && binding.pmb_name.txt = Some "Persistence"
-  && direct_guarded_owner_of_module_expr binding.pmb_expr
-     = Some "Keeper_event_queue_persistence"
+  &&
+  match binding.pmb_expr.pmod_desc with
+  | Pmod_ident { txt = Longident.Lident "Keeper_event_queue_persistence"; _ } -> true
+  | _ -> false
+;;
+
+let pattern_variables pattern =
+  let variables = ref [] in
+  let remember name =
+    if not (List.exists (fun existing -> String.equal existing.txt name.txt) !variables)
+    then variables := name :: !variables
+  in
+  let iterator =
+    { Ast_iterator.default_iterator with
+      pat =
+        (fun self nested ->
+           (match nested.ppat_desc with
+            | Ppat_var name -> remember name
+            | Ppat_alias (_, name) -> remember name
+            | _ -> ());
+           Ast_iterator.default_iterator.pat self nested)
+    }
+  in
+  iterator.pat iterator pattern;
+  List.rev !variables
 ;;
 
 let collect_structure_definitions ~file structure =
@@ -123,15 +165,14 @@ let collect_structure_definitions ~file structure =
     { Ast_iterator.default_iterator with
       value_binding =
         (fun self binding ->
-           (match binding.pvb_pat.ppat_desc with
-            | Ppat_var name ->
+           pattern_variables binding.pvb_pat
+           |> List.iter (fun name ->
               add
                 definitions
                 ~file
                 ~caller:(qualified_name !module_path name.txt)
                 ~name:name.txt
-                name.loc
-            | _ -> ());
+                name.loc);
            Ast_iterator.default_iterator.value_binding self binding)
     ; module_binding =
         (fun self binding ->
@@ -156,8 +197,25 @@ let collect_structure_definitions ~file structure =
                 ~surface:"structure include"
                 (fun iterator ->
                    iterator.module_expr iterator inclusion.pincl_mod)
+            | Pstr_primitive value ->
+              add
+                definitions
+                ~file
+                ~caller:(qualified_name !module_path value.pval_name.txt)
+                ~name:value.pval_name.txt
+                value.pval_name.loc
             | _ -> ());
            Ast_iterator.default_iterator.structure_item self item)
+    ; expr =
+        (fun self expression ->
+           (match expression.pexp_desc with
+            | Pexp_pack packed ->
+              reject_guarded_owner_reexport
+                ~file
+                ~surface:"first-class module pack"
+                (fun iterator -> iterator.module_expr iterator packed)
+            | _ -> ());
+           Ast_iterator.default_iterator.expr self expression)
     }
   in
   iterator.structure iterator structure
@@ -211,6 +269,27 @@ let collect_signature_declarations ~file signature =
                 ~surface:"signature include"
                 (fun iterator ->
                    iterator.module_type iterator inclusion.pincl_mod)
+            | Psig_modsubst substitution ->
+              (match guarded_owner substitution.pms_manifest.txt with
+               | None -> ()
+               | Some owner ->
+                 let line, column, _ =
+                   location_fields substitution.pms_manifest.loc
+                 in
+                 failf
+                   "%s:%d:%d signature module substitution re-exports guarded projection owner %s"
+                   file
+                   line
+                   column
+                   owner)
+            | Psig_modtypesubst declaration ->
+              Option.iter
+                (fun module_type ->
+                   reject_guarded_owner_reexport
+                     ~file
+                     ~surface:"signature module type substitution"
+                     (fun iterator -> iterator.module_type iterator module_type))
+                declaration.pmtd_type
             | _ -> ());
            Ast_iterator.default_iterator.signature_item self item)
     }
@@ -236,6 +315,37 @@ let parse_interface file =
        let lexbuf = Lexing.from_channel channel in
        Location.init lexbuf file;
        Parse.interface lexbuf)
+;;
+
+let fixture_definitions file =
+  let saved = !definitions in
+  Fun.protect
+    ~finally:(fun () -> definitions := saved)
+    (fun () ->
+       definitions := [];
+       collect_structure_definitions ~file (parse_implementation file);
+       List.rev !definitions)
+;;
+
+let run_pattern_fixture_tests () =
+  let constrained_file =
+    "scripts/fixtures/keeper_event_queue_projection_boundary/constrained_binding.ml"
+  in
+  let comment_and_string_file =
+    "scripts/fixtures/keeper_event_queue_projection_boundary/comment_and_string.ml"
+  in
+  (match fixture_definitions constrained_file with
+   | [ _ ] -> ()
+   | found ->
+     failf
+       "constrained target binding fixture escaped definition collection: expected 1, got %d"
+       (List.length found));
+  match fixture_definitions comment_and_string_file with
+  | [] -> ()
+  | found ->
+    failf
+      "comment/string fixture produced guarded definitions: expected 0, got %d"
+      (List.length found)
 ;;
 
 let inspect_implementation file =
@@ -393,6 +503,7 @@ let () =
     | _ -> failf "usage: checker REPO_ROOT"
   in
   Sys.chdir root;
+  run_pattern_fixture_tests ();
   source_files "lib"
   |> List.iter (fun file ->
     if Filename.check_suffix file ".mli"

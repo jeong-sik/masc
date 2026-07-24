@@ -7,8 +7,6 @@ type runtime = {
   mono_clock : Eio.Time.Mono.ty Eio.Resource.t;
 }
 
-let set_executor_pool pool = Executor_pool_ref.set pool
-
 let run_dashboard_compute ?(mode = Offloaded_readonly) ?runtime ~sw ~clock
     ~(config : Workspace.config) compute =
   let _ = runtime, clock in

@@ -498,6 +498,28 @@ let test_goal_completion_requires_structured_approval () =
      |> fun current -> Option.is_none current.completion_receipt)
 ;;
 
+let test_goal_completion_requires_nonempty_claim () =
+  with_workspace
+  @@ fun config ->
+  let goal, _ =
+    match Goal_store.upsert_goal config ~title:"Completion needs a claim" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  goal_reviewer_run := (fun _ -> fail "reviewer ran without a completion claim");
+  let error = request_complete config goal.id |> expect_error in
+  check
+    string
+    "missing claim is a validation error"
+    "validation_error"
+    (get_string_field error "error_code");
+  let current = current_goal config goal.id in
+  check bool "missing claim cannot complete" true
+    (current.phase = Goal_phase.Executing);
+  check bool "missing claim writes no receipt" true
+    (Option.is_none current.completion_receipt)
+;;
+
 let test_goal_completion_supplies_open_task_as_evidence () =
   with_workspace
   @@ fun config ->
@@ -599,7 +621,12 @@ let test_goal_completion_unavailable_is_retryable_and_nonterminal () =
   goal_reviewer_run :=
     (fun _ ->
        Error (Agent_sdk.Error.Internal "review runtime temporarily unavailable"));
-  let result = request_complete config goal.id in
+  let result =
+    request_complete
+      ~note:"Retry after the configured evaluator becomes available."
+      config
+      goal.id
+  in
   (match result with
    | Some result ->
      check
@@ -626,7 +653,12 @@ let test_goal_completion_missing_verdict_is_nonterminal () =
     | Error msg -> fail msg
   in
   goal_reviewer_run := (fun _ -> Ok None);
-  let result = request_complete config goal.id in
+  let result =
+    request_complete
+      ~note:"The linked evidence should be reviewed through the typed tool."
+      config
+      goal.id
+  in
   (match result with
    | Some result ->
      check bool "missing verdict fails" false (Tool_result.is_success result);
@@ -662,7 +694,13 @@ let test_goal_completion_rejects_stale_approval () =
         | Ok _ -> ()
         | Error msg -> fail msg);
        Ok (Some Goal_completion_reviewer.Approve));
-  let error = request_complete config goal.id |> expect_error in
+  let error =
+    request_complete
+      ~note:"The Goal reached the original target before the concurrent edit."
+      config
+      goal.id
+    |> expect_error
+  in
   check
     string
     "stale approval is a conflict"
@@ -735,6 +773,10 @@ let () =
             "completion requires structured approval"
             `Quick
             test_goal_completion_requires_structured_approval
+        ; test_case
+            "completion requires non-empty claim"
+            `Quick
+            test_goal_completion_requires_nonempty_claim
         ; test_case
             "completion supplies open Task as evidence"
             `Quick

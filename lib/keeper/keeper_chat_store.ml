@@ -232,6 +232,12 @@ type chat_message = {
          stream response represented by this row. [None] means pre-K1f row or
          no lifecycle proof. Malformed persisted values are reported and read
          as [None], keeping the row valid. *)
+  delivery_key : Keeper_chat_delivery_identity.delivery_key option;
+      (* The exact delivery identity persisted by the idempotent append-once
+         paths.  [None] on rows written by the plain append paths and on rows
+         written before this field existed.  A malformed persisted value is
+         reported as a persistence read drop and reads as [None]; the row
+         stays valid. *)
 }
 
 let redaction_for ~base_dir ~keeper_name =
@@ -1243,6 +1249,24 @@ let parse_line ~file_path (line : string) : chat_message option =
       | Some stream_lifecycle_json ->
           parse_stream_lifecycle ~path:file_path stream_lifecycle_json
     in
+    let delivery_key =
+      (* Same read-drop convention as [turn_ref]: a malformed persisted
+         value is surfaced and reads as [None] — the row stays valid. *)
+      match Json_util.assoc_member_opt "delivery_key" json with
+      | None -> None
+      | Some delivery_key_json -> (
+          match
+            Keeper_chat_delivery_identity.delivery_key_of_yojson
+              delivery_key_json
+          with
+          | Ok key -> Some key
+          | Error detail ->
+              report_persistence_read_drop
+                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                ~path:file_path
+                ~detail:(Printf.sprintf "invalid delivery_key: %s" detail);
+              None)
+    in
     if role_label = "" || content = "" then (
       report_persistence_read_drop
         ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
@@ -1276,7 +1300,8 @@ let parse_line ~file_path (line : string) : chat_message option =
             { id; role; content; ts; attachments; tool_call_id; tool_call_name;
               source; surface; conversation_id; external_message_id;
               workspace_id; speaker;
-              audio; blocks; mentions; kind; turn_ref; stream_lifecycle }
+              audio; blocks; mentions; kind; turn_ref; stream_lifecycle;
+              delivery_key }
   with Yojson.Json_error detail ->
     report_persistence_read_drop
       ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
@@ -1636,7 +1661,16 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
                 ]
               @ blocks_fields_of_list (blocks_with_trace_block ~trace_block m)
               @ opt_string_field "turn_ref"
-                  (Option.map Ids.Turn_ref.to_string m.turn_ref)))
+                  (Option.map Ids.Turn_ref.to_string m.turn_ref)
+              (* Expose the persisted delivery identity so the dashboard can
+                 reconcile a history reload against its optimistic turn rows
+                 on the exact [delivery_key.request_id]. *)
+              @ (match m.delivery_key with
+                 | None -> []
+                 | Some key ->
+                     [ ( "delivery_key"
+                       , Keeper_chat_delivery_identity.delivery_key_to_yojson
+                           key ) ])))
        messages)
 
 (* RFC-0233 §7: a turn's transcript derived by an exact join on the

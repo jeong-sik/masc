@@ -207,6 +207,13 @@ type chat_message = {
           the writer could not prove lifecycle events. Malformed persisted
           values are reported as persistence read drops and read as [None];
           the row stays valid. *)
+  delivery_key : Keeper_chat_delivery_identity.delivery_key option;
+      (** The exact delivery identity persisted by the idempotent append-once
+          paths ({!append_user_message_once} /
+          {!append_assistant_message_once}).  [None] on rows written by the
+          plain append paths and on rows written before this field existed.
+          A malformed persisted value is reported as a persistence read drop
+          and reads as [None]; the row stays valid. *)
 }
 
 (** {1 I/O} *)
@@ -391,8 +398,11 @@ val load_page :
     [ts] field; [tool_call_id] / [tool_call_name] / [source] /
     [conversation_id] / [external_message_id] / [workspace_id] /
     [speaker_id] / [speaker_name] / [speaker_authority] appear only
-    when present. When [base_dir] is supplied, the history endpoint marks
-    audio clips as [expired] when the underlying MP3 file is gone. *)
+    when present. [delivery_key] appears only on rows persisted by the
+    idempotent append-once paths, verbatim as the typed delivery
+    identity object. When [base_dir] is supplied, the history endpoint
+    marks audio clips as [expired] when the underlying MP3 file is
+    gone. *)
 val to_json_array :
   ?base_dir:string ->
   ?trace_block_by_turn_ref:(Ids.Turn_ref.t -> chat_block option) ->

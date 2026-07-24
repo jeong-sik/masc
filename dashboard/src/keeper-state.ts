@@ -855,6 +855,15 @@ function fallbackHistoryEntryId(
   return `${role}-${timestamp ?? 'entry'}-${(hash >>> 0).toString(36)}`
 }
 
+// Turn identity carried on persisted history rows as
+// `delivery_key: {"kind":"direct_request","request_id":"kmsg-..."}`. `kind`
+// may take other values, so only the `request_id` string is extracted; any
+// other shape yields null (the row itself is never dropped for this).
+function requestIdFromDeliveryKey(raw: unknown): string | null {
+  if (!isRecord(raw)) return null
+  return asString(raw.request_id) ?? null
+}
+
 function normalizeHistoryEntry(
   raw: unknown,
   keeperName?: string,
@@ -884,6 +893,7 @@ function normalizeHistoryEntry(
   const speakerAuthority = asString(raw.speaker_authority) ?? null
   // RFC-0233 §7: asString rejects malformed join keys instead of repairing them.
   const turnRef = asString(raw.turn_ref) ?? null
+  const requestId = requestIdFromDeliveryKey(raw.delivery_key)
   // keeper_chat_store mints kind=transport_failure (row content is the
   // "Keeper request failed: ..." text) so a reload can tell a failed request
   // apart from a real reply. Preserve that writer-declared provenance as its
@@ -912,6 +922,7 @@ function normalizeHistoryEntry(
     rawText,
     timestamp,
     turnRef,
+    requestId,
     delivery,
     error: delivery === 'transport_failure' ? rawText : null,
     streamState: null,
@@ -1331,6 +1342,17 @@ function sameConversationEntry(
 ): boolean {
   if (left.id === right.id) return true
   if (left.role === 'tool' || right.role === 'tool') return false
+  // requestId (delivery_key.request_id) is the backend-stamped turn identity:
+  // it joins a local placeholder to its history row even when the placeholder
+  // has no text yet (stream interrupted before the reply arrived). Two rows
+  // that both carry a requestId belong to the same turn iff the ids match —
+  // a mismatch must NOT fall through to the role+text heuristic, or two
+  // distinct same-text turns would collapse into one.
+  const leftRequestId = left.requestId?.trim()
+  const rightRequestId = right.requestId?.trim()
+  if (leftRequestId && rightRequestId) {
+    return left.role === right.role && leftRequestId === rightRequestId
+  }
   return left.role === right.role && left.text === right.text
 }
 
@@ -1347,14 +1369,34 @@ function mergeLocalAssistantTraceSteps(
   historyEntry: KeeperConversationEntry,
   localEntries: KeeperConversationEntry[],
   // Tracks local trace sources already claimed by an earlier history row.
-  // When OAS/MASC provides turn_ref on both the live reply details and the
-  // persisted history row, that value is the exact join key. The role+text
-  // fallback remains only for legacy rows without turn_ref; `consumed` keeps
-  // those fallback matches 1:1 instead of letting duplicate assistant text reuse
-  // the first local trace source (#21748).
+  // Join order: requestId (backend-stamped turn identity) first, then
+  // turn_ref when OAS/MASC provides it on both the live reply details and
+  // the persisted history row. The role+text fallback remains only for
+  // legacy rows without either key; `consumed` keeps every match 1:1 instead
+  // of letting duplicate assistant text reuse the first local trace source
+  // (#21748).
   consumed: Set<string>,
 ): KeeperConversationEntry {
   if (historyEntry.role !== 'assistant') return historyEntry
+  // requestId join first: a placeholder whose stream died before REPLY_DETAILS
+  // has no turnRef and possibly no text, but it does carry the request id.
+  const historyRequestId = historyEntry.requestId?.trim()
+  const localTraceSourceByRequestId = historyRequestId
+    ? localEntries.find(
+        entry =>
+          entry.role === 'assistant'
+          && (entry.traceSteps?.length ?? 0) > 0
+          && !consumed.has(entry.id)
+          && entry.requestId?.trim() === historyRequestId,
+      )
+    : undefined
+  if (localTraceSourceByRequestId?.traceSteps?.length) {
+    consumed.add(localTraceSourceByRequestId.id)
+    return {
+      ...historyEntry,
+      traceSteps: localTraceSourceByRequestId.traceSteps,
+    }
+  }
   const historyTurnRef = historyEntry.turnRef?.trim()
   const localTraceSourceByTurnRef = historyTurnRef
     ? localEntries.find(
@@ -1471,6 +1513,10 @@ interface RestChatHistoryMessage {
   speaker_authority?: string
   // RFC-0233 §7: MASC-minted "<trace_id>#<absolute_turn>" turn join key.
   turn_ref?: string | null
+  // Backend-stamped turn identity (e.g.
+  // `{"kind":"direct_request","request_id":"kmsg-..."}`); extracted
+  // tolerantly — only the request_id string is read.
+  delivery_key?: unknown
   audio?: unknown
   // Persisted upload rows (snake_case from keeper_chat_store) — normalized to
   // KeeperConversationAttachment at consume time so reload keeps the cards.
@@ -1522,6 +1568,7 @@ function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEn
     // Tool rows share the same untrusted REST boundary; reject malformed
     // turn_ref values here too so this path matches normalizeHistoryEntry.
     turnRef: asString(message.turn_ref) ?? null,
+    requestId: requestIdFromDeliveryKey(message.delivery_key),
   }
 }
 
@@ -1559,6 +1606,7 @@ export function chatHistoryEntriesFromRest(
         kind: message.kind,
         blocks: message.blocks,
         turn_ref: message.turn_ref,
+        delivery_key: message.delivery_key,
         stream_contract: message.stream_contract,
       },
       keeperName,

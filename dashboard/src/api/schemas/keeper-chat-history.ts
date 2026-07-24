@@ -285,6 +285,12 @@ export const KeeperChatHistoryMessageSchema = object({
   // :848-861). Without decoding these, a user's upload appears live but
   // vanishes on reload even though it is on disk.
   attachments: optional(array(KeeperChatHistoryAttachmentSchema)),
+  // Turn identity stamped by the backend on every dashboard-originated row
+  // (keeper_chat_store.ml delivery_key, e.g.
+  // `{"kind":"direct_request","request_id":"kmsg-..."}`). Accepted as
+  // `unknown` so a shape drift never drops the row; the consumer extracts
+  // `request_id` tolerantly (absent/malformed -> undefined).
+  delivery_key: optional(unknown()),
   // RFC-0235 P3: server-parsed rich chat blocks. Carried on history rows so
   // reloads preserve the structured render instead of re-parsing plain text.
   blocks: optional(array(KeeperChatBlockSchema)),

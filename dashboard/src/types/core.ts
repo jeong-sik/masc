@@ -978,6 +978,12 @@ export interface KeeperConversationEntry {
   // chat message's originating turn so turn consumers can prefer exact matching
   // over timestamp-window fallback.
   turnRef?: string | null
+  // Turn identity for history reconciliation: the backend persists
+  // `delivery_key.request_id` ('kmsg-...') on every dashboard-originated row
+  // of a turn. Local placeholders carry the same id from send time, so a
+  // history merge can converge a turn even when the text/turnRef join keys
+  // are unavailable (e.g. a stream interrupted before the reply arrived).
+  requestId?: string | null
   delivery: KeeperConversationDelivery
   streamState?: KeeperConversationStreamState
   streamContract?: KeeperConversationStreamContract | null

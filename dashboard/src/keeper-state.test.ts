@@ -21,7 +21,7 @@ import {
   removeThreadEntries,
   setStatusDetail,
 } from './keeper-state'
-import type { ChatBlock, KeeperConversationEntry } from './types'
+import type { ChatBlock, ChatTraceStep, KeeperConversationEntry } from './types'
 
 describe('normalizeStatusDetail', () => {
   it('infers and hides internal keeper history from direct comms', () => {
@@ -297,6 +297,125 @@ describe('thread history merge & persistence', () => {
     expect(traceTextOf('hist-a')).not.toBe(traceTextOf('hist-b'))
     expect(traceTextOf('hist-a')).toBe('turn-a reasoning')
     expect(traceTextOf('hist-b')).toBe('turn-b reasoning')
+  })
+
+  it('converges a stream-interrupted placeholder turn to a single assistant row via requestId', () => {
+    // Live stream died right after the tool events: the local assistant
+    // placeholder keeps text='' with only the accumulated tool trace and
+    // never received REPLY_DETAILS (turnRef stays null). The real reply
+    // arrives later as a REST history row. The backend stamps
+    // delivery_key.request_id ('kmsg-...') on every row of the turn, so
+    // history convergence must fold the placeholder into the history row
+    // instead of leaving a second "턴 타임라인" behind.
+    const R = 'kmsg_turn_1'
+    const traceSteps: ChatTraceStep[] = [
+      { kind: 'tool', name: 'read_file', toolCallId: 'call-1', status: 'ok' },
+      { kind: 'tool', name: 'write_file', toolCallId: 'call-2', status: 'ok' },
+    ]
+    appendThreadEntry('echo', entry({
+      id: `pending-user-${R}`,
+      role: 'user',
+      text: '질문',
+      rawText: '질문',
+      delivery: 'delivered',
+      timestamp: '2026-06-10T00:00:01.000Z',
+      requestId: R,
+    }))
+    appendThreadEntry('echo', entry({
+      id: 'tool-call-1',
+      role: 'tool',
+      source: 'tool_result',
+      label: 'read_file',
+      text: '{"path":"a"}',
+      rawText: '{"path":"a"}',
+      delivery: 'delivered',
+      timestamp: '2026-06-10T00:00:02.000Z',
+    }))
+    appendThreadEntry('echo', entry({
+      id: 'tool-call-2',
+      role: 'tool',
+      source: 'tool_result',
+      label: 'write_file',
+      text: '{"path":"b"}',
+      rawText: '{"path":"b"}',
+      delivery: 'delivered',
+      timestamp: '2026-06-10T00:00:03.000Z',
+    }))
+    appendThreadEntry('echo', entry({
+      id: `pending-assistant-${R}`,
+      role: 'assistant',
+      text: '',
+      rawText: '',
+      delivery: 'error',
+      timestamp: '2026-06-10T00:00:04.000Z',
+      requestId: R,
+      traceSteps,
+    }))
+
+    const history = chatHistoryEntriesFromRest('echo', [
+      { role: 'user', content: '질문', ts: 1_780_000_001, delivery_key: { kind: 'direct_request', request_id: R } },
+      { role: 'tool', content: '{"path":"a"}', ts: 1_780_000_002, tool_call_id: 'call-1', tool_call_name: 'read_file', delivery_key: { kind: 'direct_request', request_id: R } },
+      { role: 'tool', content: '{"path":"b"}', ts: 1_780_000_003, tool_call_id: 'call-2', tool_call_name: 'write_file', delivery_key: { kind: 'direct_request', request_id: R } },
+      { role: 'assistant', content: '답변', ts: 1_780_000_004, turn_ref: 'trace-x#1', delivery_key: { kind: 'direct_request', request_id: R } },
+    ])
+    mergeServerHistoryEntries('echo', history)
+
+    const thread = keeperThreads.value.echo ?? []
+    // Exactly one assistant row survives: the canonical history row.
+    const assistants = thread.filter(e => e.role === 'assistant')
+    expect(assistants).toHaveLength(1)
+    expect(assistants[0]?.text).toBe('답변')
+    expect(assistants[0]?.delivery).toBe('history')
+    expect(assistants[0]?.requestId).toBe(R)
+    // The interrupted placeholder's live tool trace is inherited.
+    expect(assistants[0]?.traceSteps).toEqual(traceSteps)
+    // The optimistic user row converges to the history row too.
+    const users = thread.filter(e => e.role === 'user')
+    expect(users).toHaveLength(1)
+    expect(users[0]?.delivery).toBe('history')
+    expect(users[0]?.requestId).toBe(R)
+    // Tool rows stay single (dedup by the tool-<tool_call_id> id shape).
+    expect(thread.filter(e => e.role === 'tool')).toHaveLength(2)
+  })
+
+  it('keeps the role+text fallback for legacy local entries without requestId', () => {
+    appendThreadEntry('echo', entry({
+      id: 'local-legacy',
+      role: 'assistant',
+      text: 'done',
+      rawText: 'done',
+      delivery: 'delivered',
+    }))
+
+    mergeServerHistoryEntries('echo', [
+      entry({ id: 'hist-legacy', role: 'assistant', text: 'done', rawText: 'done', delivery: 'history', timestamp: '2026-06-10T00:00:05.000Z' }),
+    ])
+
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread).toHaveLength(1)
+    expect(thread[0]?.id).toBe('hist-legacy')
+  })
+
+  it('does not merge same-text rows that carry different requestIds', () => {
+    // Identical reply text across two distinct turns: requestId is the turn
+    // identity, so the history row of one request must not claim the local
+    // row of another even when role+text coincide.
+    appendThreadEntry('echo', entry({
+      id: 'local-a',
+      role: 'assistant',
+      text: 'done',
+      rawText: 'done',
+      delivery: 'delivered',
+      timestamp: '2026-06-10T00:00:01.000Z',
+      requestId: 'kmsg_1',
+    }))
+
+    mergeServerHistoryEntries('echo', [
+      entry({ id: 'hist-b', role: 'assistant', text: 'done', rawText: 'done', delivery: 'history', timestamp: '2026-06-10T00:00:02.000Z', requestId: 'kmsg_2' }),
+    ])
+
+    const ids = (keeperThreads.value.echo ?? []).map(e => e.id)
+    expect(ids).toEqual(['local-a', 'hist-b'])
   })
 
   it('keeps local entries the server has not persisted yet', () => {

@@ -66,6 +66,7 @@ import {
   setActiveStreamRequestId,
   setRecordValue,
   setStatusDetail,
+  updateThreadEntry,
 } from './keeper-state'
 import {
   abortKeeperThreadMessage,
@@ -500,6 +501,18 @@ function pendingAssistantEntryId(requestId: string): string {
   return `pending-assistant-${requestId}`
 }
 
+// The live-send placeholders are appended before the server mints the
+// request id; once KEEPER_QUEUE_REQUEST arrives, stamp it onto both rows so
+// a later history merge can reconcile the turn by requestId even when the
+// stream dies before the reply text lands.
+function stampPlaceholderRequestId(keeperName: string, entryIds: string[], requestId: string): void {
+  for (const entryId of entryIds) {
+    updateThreadEntry(keeperName, entryId, entry => (
+      entry.requestId === requestId ? entry : { ...entry, requestId }
+    ))
+  }
+}
+
 function isMissingQueuedKeeperRequestError(err: unknown): boolean {
   const record = isRecord(err) ? err : null
   const method = asString(record?.method, '').trim().toUpperCase()
@@ -528,6 +541,7 @@ function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
       timestamp: new Date(request.submittedAt).toISOString(),
       delivery: 'delivered',
       streamState: null,
+      requestId: request.requestId,
       streamContract: keeperStreamContract('pending_request_store', 'client_placeholder', {
         requestId: request.requestId,
         deliveryReceipt: 'no_delivery_receipt',
@@ -548,6 +562,7 @@ function ensurePendingThreadEntries(request: PendingKeeperChatRequest): string {
       timestamp: assistantDraft?.timestamp ?? null,
       delivery: assistantDraft?.delivery ?? 'queued',
       streamState: assistantDraft ? assistantDraft.streamState : 'opening',
+      requestId: request.requestId,
       streamContract: keeperStreamContract('pending_request_store', 'client_placeholder', {
         requestId: request.requestId,
         deliveryReceipt: 'no_delivery_receipt',
@@ -1306,6 +1321,7 @@ export async function sendKeeperThreadMessage(
             setRecordValue(keeperActionErrors, keeperName, message)
           } else if (controller.signal.aborted) {
             requestId = nextRequestId
+            stampPlaceholderRequestId(keeperName, [localId, assistantId], nextRequestId)
             const pendingRequest = withCurrentPendingAssistantDraft({
               requestId: nextRequestId,
               keeperName,
@@ -1325,6 +1341,7 @@ export async function sendKeeperThreadMessage(
             })
           } else {
             requestId = nextRequestId
+            stampPlaceholderRequestId(keeperName, [localId, assistantId], nextRequestId)
             // This live send now owns the request; resume must defer to it
             // (and not mint a duplicate pending entry) until handoff/finally.
             setActiveStreamRequestId(keeperName, requestId)

@@ -8,12 +8,10 @@ type occurrence =
   ; offset : int
   }
 
+exception Boundary_violation of string
+
 let failf format =
-  Printf.ksprintf
-    (fun message ->
-       prerr_endline ("[keeper-event-queue-projection-boundary] " ^ message);
-       exit 1)
-    format
+  Printf.ksprintf (fun message -> raise (Boundary_violation message)) format
 ;;
 
 let targets =
@@ -317,14 +315,27 @@ let parse_interface file =
        Parse.interface lexbuf)
 ;;
 
-let fixture_definitions file =
+let fixture_definitions ?reported_file file =
+  let reported_file = Option.value reported_file ~default:file in
   let saved = !definitions in
   Fun.protect
     ~finally:(fun () -> definitions := saved)
     (fun () ->
        definitions := [];
-       collect_structure_definitions ~file (parse_implementation file);
+       collect_structure_definitions
+         ~file:reported_file
+         (parse_implementation file);
        List.rev !definitions)
+;;
+
+let fixture_declarations file =
+  let saved = !declarations in
+  Fun.protect
+    ~finally:(fun () -> declarations := saved)
+    (fun () ->
+       declarations := [];
+       collect_signature_declarations ~file (parse_interface file);
+       List.rev !declarations)
 ;;
 
 let run_pattern_fixture_tests () =
@@ -425,7 +436,7 @@ let render_occurrence occurrence =
     occurrence.caller
 ;;
 
-let check_exact table ~kind name expected =
+let check_exact ?(report_actual = true) table ~kind name expected =
   let actual =
     !table
     |> List.filter_map (fun (candidate, occurrence) ->
@@ -437,15 +448,17 @@ let check_exact table ~kind name expected =
   let actual_keys = List.map occurrence_key actual in
   if actual_keys <> expected
   then (
-    List.iter
-      (fun occurrence ->
-         prerr_endline
-           (Printf.sprintf
-              "[keeper-event-queue-projection-boundary] actual %s %s: %s"
-              kind
-              name
-              (render_occurrence occurrence)))
-      actual;
+    if report_actual
+    then
+      List.iter
+        (fun occurrence ->
+           prerr_endline
+             (Printf.sprintf
+                "[keeper-event-queue-projection-boundary] actual %s %s: %s"
+                kind
+                name
+                (render_occurrence occurrence)))
+        actual;
     failf
       "%s %s expected=[%s] actual=[%s]"
       kind
@@ -459,6 +472,111 @@ let check_exact table ~kind name expected =
             (fun occurrence ->
                occurrence.file ^ ":" ^ occurrence.caller)
             actual)))
+;;
+
+let with_table table contents check =
+  let saved = !table in
+  Fun.protect
+    ~finally:(fun () -> table := saved)
+    (fun () ->
+       table := contents;
+       check ())
+;;
+
+let expect_boundary_rejection label check =
+  let rejected =
+    match check () with
+    | () -> false
+    | exception Boundary_violation _ -> true
+  in
+  if not rejected then failf "AST rejection fixture unexpectedly passed: %s" label
+;;
+
+let empty_matrix_entry ~kind expectations name =
+  match List.assoc_opt name expectations with
+  | Some [] -> []
+  | Some _ -> failf "%s matrix entry for %s must remain empty" kind name
+  | None -> failf "%s matrix is missing target %s" kind name
+;;
+
+let expect_exact_rejection ~kind ~expectations ~table ~contents name =
+  let expected = empty_matrix_entry ~kind expectations name in
+  expect_boundary_rejection
+    (kind ^ ":" ^ name)
+    (fun () ->
+       with_table table contents (fun () ->
+         check_exact ~report_actual:false table ~kind name expected))
+;;
+
+let run_ast_rejection_fixtures
+    ~definition_expectations
+    ~declaration_expectations
+    ()
+  =
+  let fixture name =
+    Filename.concat
+      "scripts/fixtures/keeper_event_queue_projection_boundary"
+      name
+  in
+  let shadow_definitions =
+    fixture_definitions (fixture "target_local_shadows.ml")
+  in
+  let shadow_declarations =
+    fixture_declarations (fixture "target_declarations.mli")
+  in
+  List.iter
+    (fun name ->
+       expect_exact_rejection
+         ~kind:"definition"
+         ~expectations:definition_expectations
+         ~table:definitions
+         ~contents:shadow_definitions
+         name;
+       expect_exact_rejection
+         ~kind:"declaration"
+         ~expectations:declaration_expectations
+         ~table:declarations
+         ~contents:shadow_declarations
+         name)
+    [ "append_event_queue_transition_outbox_result"
+    ; "run_after_ledger_append_hook"
+    ];
+  let primitive_definitions =
+    fixture_definitions (fixture "target_primitive.ml")
+  in
+  expect_exact_rejection
+    ~kind:"definition"
+    ~expectations:definition_expectations
+    ~table:definitions
+    ~contents:primitive_definitions
+    "project_transition_outbox_after_append_result";
+  List.iter
+    (fun name ->
+       let file = fixture name in
+       expect_boundary_rejection file (fun () ->
+         ignore (fixture_definitions file)))
+    [ "guarded_longident_prefix.ml"
+    ; "guarded_pack.ml"
+    ; "opaque_unpack.ml"
+    ];
+  List.iter
+    (fun name ->
+       let file = fixture name in
+       expect_boundary_rejection file (fun () ->
+         ignore (fixture_declarations file)))
+    [ "guarded_modsubst.mli"; "guarded_with_module.mli" ];
+  let recovery_file = "lib/keeper/keeper_event_queue_recovery.ml" in
+  ignore
+    (fixture_definitions
+       ~reported_file:recovery_file
+       (fixture "allowed_bare_alias.ml"));
+  expect_boundary_rejection
+    "constrained recovery alias"
+    (fun () ->
+       ignore
+         (fixture_definitions
+            ~reported_file:recovery_file
+            (fixture "constrained_alias.ml")))
 ;;
 
 let unique_reference name =
@@ -496,19 +614,13 @@ let check_order ~file ~caller first_name second_name =
       (render_occurrence second)
 ;;
 
-let () =
+let run () =
   let root =
     match Array.to_list Sys.argv with
     | [ _; root ] -> root
     | _ -> failf "usage: checker REPO_ROOT"
   in
   Sys.chdir root;
-  run_pattern_fixture_tests ();
-  source_files "lib"
-  |> List.iter (fun file ->
-    if Filename.check_suffix file ".mli"
-    then inspect_interface file
-    else inspect_implementation file);
   let persistence_ml =
     "lib/keeper_runtime/keeper_event_queue_persistence.ml"
   in
@@ -518,6 +630,44 @@ let () =
   let ledger_ml = "lib/keeper/keeper_reaction_ledger.ml" in
   let ledger_mli = "lib/keeper/keeper_reaction_ledger.mli" in
   let recovery_ml = "lib/keeper/keeper_event_queue_recovery.ml" in
+  let definition_expectations =
+    [ "append_event_queue_transition_outbox_result", []
+    ; "mark_transition_projected_result", [ persistence_ml, "mark_transition_projected_result" ]
+    ; ( "project_event_queue_transition_outbox_result"
+      , [ ledger_ml, "project_event_queue_transition_outbox_result" ] )
+    ; "project_transition_outbox_after_append_result", []
+    ; ( "project_transition_outbox_result"
+      , [ persistence_ml, "project_transition_outbox_result" ] )
+    ; "run_after_ledger_append_hook", []
+    ; "transition_outbox_result", []
+    ; ( "with_after_ledger_append"
+      , [ ledger_ml, "For_testing.with_after_ledger_append" ] )
+    ]
+  in
+  let declaration_expectations =
+    [ "append_event_queue_transition_outbox_result", []
+    ; "mark_transition_projected_result", []
+    ; ( "project_event_queue_transition_outbox_result"
+      , [ ledger_mli, "project_event_queue_transition_outbox_result" ] )
+    ; "project_transition_outbox_after_append_result", []
+    ; ( "project_transition_outbox_result"
+      , [ persistence_mli, "project_transition_outbox_result" ] )
+    ; "run_after_ledger_append_hook", []
+    ; "transition_outbox_result", []
+    ; ( "with_after_ledger_append"
+      , [ ledger_mli, "For_testing.with_after_ledger_append" ] )
+    ]
+  in
+  run_pattern_fixture_tests ();
+  run_ast_rejection_fixtures
+    ~definition_expectations
+    ~declaration_expectations
+    ();
+  source_files "lib"
+  |> List.iter (fun file ->
+    if Filename.check_suffix file ".mli"
+    then inspect_interface file
+    else inspect_implementation file);
   List.iter
     (fun (name, expected) ->
        check_exact occurrences ~kind:"reference" name expected)
@@ -539,29 +689,11 @@ let () =
   List.iter
     (fun (name, expected) ->
        check_exact definitions ~kind:"definition" name expected)
-    [ "mark_transition_projected_result", [ persistence_ml, "mark_transition_projected_result" ]
-    ; ( "project_event_queue_transition_outbox_result"
-      , [ ledger_ml, "project_event_queue_transition_outbox_result" ] )
-    ; "project_transition_outbox_after_append_result", []
-    ; ( "project_transition_outbox_result"
-      , [ persistence_ml, "project_transition_outbox_result" ] )
-    ; "transition_outbox_result", []
-    ; ( "with_after_ledger_append"
-      , [ ledger_ml, "For_testing.with_after_ledger_append" ] )
-    ];
+    definition_expectations;
   List.iter
     (fun (name, expected) ->
        check_exact declarations ~kind:"declaration" name expected)
-    [ "mark_transition_projected_result", []
-    ; ( "project_event_queue_transition_outbox_result"
-      , [ ledger_mli, "project_event_queue_transition_outbox_result" ] )
-    ; "project_transition_outbox_after_append_result", []
-    ; ( "project_transition_outbox_result"
-      , [ persistence_mli, "project_transition_outbox_result" ] )
-    ; "transition_outbox_result", []
-    ; ( "with_after_ledger_append"
-      , [ ledger_mli, "For_testing.with_after_ledger_append" ] )
-    ];
+    declaration_expectations;
   check_order
     ~file:persistence_ml
     ~caller:"project_transition_outbox_result"
@@ -573,4 +705,12 @@ let () =
     "append_event_queue_transition_outbox_result"
     "run_after_ledger_append_hook";
   print_endline "[keeper-event-queue-projection-boundary] OK"
+;;
+
+let () =
+  match run () with
+  | () -> ()
+  | exception Boundary_violation message ->
+    prerr_endline ("[keeper-event-queue-projection-boundary] " ^ message);
+    exit 1
 ;;

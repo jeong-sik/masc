@@ -829,6 +829,9 @@ let test_strict_current_schema_rejects_old_json () =
     true
     (ok "decode" (P.of_yojson encoded) = created);
   expect_error
+    "immediate prior schema v5 is rejected without migration"
+    (P.of_yojson (replace_field "schema_version" (`Int 5) encoded));
+  expect_error
     "old schema is rejected without migration"
     (P.of_yojson (replace_field "schema_version" (`Int 4) encoded));
   let old_running =

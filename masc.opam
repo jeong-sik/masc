@@ -52,9 +52,9 @@ depends: [
   "httpun-eio" {>= "0.2"}
   "httpun-ws" {= "0.2.0"}
   "bigstringaf" {>= "0.10"}
-  "eio" {>= "1.0"}
-  "eio_main" {>= "1.0"}
-  "eio_posix" {>= "0.16"}
+  "eio" {>= "1.4"}
+  "eio_main" {>= "1.4"}
+  "eio_posix" {>= "1.4"}
   "cstruct" {>= "6.0"}
   "digestif" {>= "1.1"}
   "ocaml-protoc-plugin" {>= "4.0"}

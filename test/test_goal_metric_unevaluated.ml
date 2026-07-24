@@ -27,6 +27,8 @@ let make_goal ?metric ?target_value id title =
     parent_goal_id = None;
     last_review_note = None;
     last_review_at = None;
+    completion_review_failure = None;
+    completion_receipt = None;
     created_at = iso_now ();
     updated_at = iso_now ();
   }

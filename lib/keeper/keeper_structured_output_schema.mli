@@ -70,6 +70,13 @@ val anti_rationalization_reviewer_provider_config
     rejected json_object-only providers, leaving every task nonterminal
     (2026-07-21 live incident). *)
 
+val completion_verdict_tool_provider_config
+  :  Llm_provider.Provider_config.t
+  -> Llm_provider.Provider_config.t
+(** Provider-neutral config for completion reviewers whose only verdict channel
+    is an exactly-once typed tool call. No response format is requested because
+    final assistant text is not parsed. *)
+
 val apply_schema_json_mode_or_prompt_tier
   :  log_label:string
   -> Yojson.Safe.t

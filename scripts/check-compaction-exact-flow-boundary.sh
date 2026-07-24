@@ -90,6 +90,9 @@ let _ = Exact_output.admit_flow
 let _ = Exact_output.start_flow
 let _ = Exact_output.execute_flow_once
 EOF
+  printf '%s\n' \
+    'let _ = Exact_attempt_already_started' \
+    >"${fixture}/lib/keeper/keeper_librarian_runtime.ml"
 
   MASC_COMPACTION_BOUNDARY_ROOT="${fixture}" \
     MASC_COMPACTION_EXACT_FLOW_TARGET="${target}" \
@@ -103,7 +106,8 @@ EOF
   then
     fail "self-test forbidden receipt inspection unexpectedly passed"
   fi
-  echo "[compaction-exact-flow-boundary:self-test] clean=pass forbidden=fail"
+  echo \
+    "[compaction-exact-flow-boundary:self-test] clean=pass unrelated=pass forbidden=fail"
 }
 
 case "${1:-}" in

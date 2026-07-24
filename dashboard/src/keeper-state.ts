@@ -855,13 +855,28 @@ function fallbackHistoryEntryId(
   return `${role}-${timestamp ?? 'entry'}-${(hash >>> 0).toString(36)}`
 }
 
-// Turn identity carried on persisted history rows as
-// `delivery_key: {"kind":"direct_request","request_id":"kmsg-..."}`. `kind`
-// may take other values, so only the `request_id` string is extracted; any
-// other shape yields null (the row itself is never dropped for this).
-function requestIdFromDeliveryKey(raw: unknown): string | null {
-  if (!isRecord(raw)) return null
-  return asString(raw.request_id) ?? null
+interface DeliveryIdentity {
+  requestId: string | null
+  queueReceiptIds: string[]
+}
+
+// Typed delivery identity carried on persisted history rows. Unknown or
+// malformed shapes fail closed for reconciliation without dropping the row.
+function deliveryIdentityFromKey(raw: unknown): DeliveryIdentity {
+  if (!isRecord(raw)) return { requestId: null, queueReceiptIds: [] }
+  const kind = asString(raw.kind)
+  if (kind === 'direct_request' || kind === 'async_request') {
+    const requestId = asString(raw.request_id)?.trim() ?? ''
+    return { requestId: requestId || null, queueReceiptIds: [] }
+  }
+  const rawReceiptIds = normalizeStringArray(raw.receipt_ids)
+  if (kind === 'queue_receipts' && rawReceiptIds !== null) {
+    const queueReceiptIds = rawReceiptIds
+      .map(receiptId => receiptId.trim())
+      .filter((receiptId): receiptId is string => receiptId.length > 0)
+    return { requestId: null, queueReceiptIds: [...new Set(queueReceiptIds)] }
+  }
+  return { requestId: null, queueReceiptIds: [] }
 }
 
 function normalizeHistoryEntry(
@@ -893,7 +908,7 @@ function normalizeHistoryEntry(
   const speakerAuthority = asString(raw.speaker_authority) ?? null
   // RFC-0233 §7: asString rejects malformed join keys instead of repairing them.
   const turnRef = asString(raw.turn_ref) ?? null
-  const requestId = requestIdFromDeliveryKey(raw.delivery_key)
+  const deliveryIdentity = deliveryIdentityFromKey(raw.delivery_key)
   // keeper_chat_store mints kind=transport_failure (row content is the
   // "Keeper request failed: ..." text) so a reload can tell a failed request
   // apart from a real reply. Preserve that writer-declared provenance as its
@@ -922,7 +937,8 @@ function normalizeHistoryEntry(
     rawText,
     timestamp,
     turnRef,
-    requestId,
+    requestId: deliveryIdentity.requestId,
+    queueReceiptIds: deliveryIdentity.queueReceiptIds,
     delivery,
     error: delivery === 'transport_failure' ? rawText : null,
     streamState: null,
@@ -1332,26 +1348,46 @@ export function finalizeAssistantEntry(
 
 // Dedup key for merging server history with locally-appended entries.
 // Server ids win when both sides have already converged. User/assistant
-// rows converge only through delivery_key.request_id — the backend-stamped
-// turn identity that joins a local placeholder to its history row even when
-// the placeholder has no text yet (stream interrupted before the reply
-// arrived). Two rows that both carry a requestId belong to the same turn
-// iff the ids match; a row without a requestId (pre-delivery_key history,
-// connector-originated) never merges with a local row — the legacy
-// role+text heuristic was hard-cut because it collapsed distinct same-text
-// turns and could never reconcile a text-less placeholder. Tool rows are
-// execution facts and can share argument/output text across separate
-// calls, so they only dedup by the explicit `tool-<tool_call_id>` id shape.
+// rows converge through exact producer identities only: request id first,
+// then a shared queue receipt, then turn_ref when neither side carries a
+// delivery key. Conflicting delivery identities fail closed. The legacy
+// role+text heuristic stays hard-cut because it collapsed distinct same-text
+// turns. Tool rows only dedup by their explicit `tool-<tool_call_id>` id.
+function queueReceiptIds(entry: KeeperConversationEntry): string[] {
+  const receiptIds = new Set(
+    (entry.queueReceiptIds ?? [])
+      .map(receiptId => receiptId.trim())
+      .filter(receiptId => receiptId.length > 0),
+  )
+  const localReceiptId = entry.details?.queueReceiptId?.trim()
+  if (localReceiptId) receiptIds.add(localReceiptId)
+  return [...receiptIds]
+}
+
 function sameConversationEntry(
   left: KeeperConversationEntry,
   right: KeeperConversationEntry,
 ): boolean {
   if (left.id === right.id) return true
   if (left.role === 'tool' || right.role === 'tool') return false
+  if (left.role !== right.role) return false
   const leftRequestId = left.requestId?.trim()
   const rightRequestId = right.requestId?.trim()
-  if (!leftRequestId || !rightRequestId) return false
-  return left.role === right.role && leftRequestId === rightRequestId
+  if (leftRequestId && rightRequestId) return leftRequestId === rightRequestId
+
+  const leftReceiptIds = queueReceiptIds(left)
+  const rightReceiptIds = queueReceiptIds(right)
+  if (leftReceiptIds.length > 0 && rightReceiptIds.length > 0) {
+    const rightReceipts = new Set(rightReceiptIds)
+    return leftReceiptIds.some(receiptId => rightReceipts.has(receiptId))
+  }
+  if (leftRequestId || rightRequestId || leftReceiptIds.length > 0 || rightReceiptIds.length > 0) {
+    return false
+  }
+
+  const leftTurnRef = left.turnRef?.trim()
+  const rightTurnRef = right.turnRef?.trim()
+  return Boolean(leftTurnRef && rightTurnRef && leftTurnRef === rightTurnRef)
 }
 
 // Entries with no parseable timestamp (live placeholders, still-streaming
@@ -1439,13 +1475,12 @@ function replaceThread(name: string, entries: KeeperConversationEntry[]): void {
       // later flip to delivered and leave a duplicate "작업 과정" card behind.
       const isCoveredToolRow = entry.role === 'tool' && coveredByHistory
       // In-flight (sending/streaming/queued) entries represent live state and
-      // must survive history merges until they finalize. Otherwise a queued
-      // assistant with empty text can be mistaken for an older empty-text
-      // history row and dropped, making the queued reply look like an error.
+      // must survive history merges until they finalize.
       // A terminal durable-receipt observation is also operator evidence, not
       // a duplicate assistant reply: keep it alongside the canonical history
       // row so its Pending/Inflight/Delivered/Failed lifecycle remains visible.
-      const isReceiptObservation = Boolean(entry.details?.queueReceiptId)
+      const isReceiptObservation =
+        entry.role === 'assistant' && Boolean(entry.details?.queueReceiptId)
       const shouldKeepLocalEntry = isInFlightDelivery(entry.delivery)
         || isReceiptObservation
         || !coveredByHistory
@@ -1500,9 +1535,8 @@ interface RestChatHistoryMessage {
   speaker_authority?: string
   // RFC-0233 §7: MASC-minted "<trace_id>#<absolute_turn>" turn join key.
   turn_ref?: string | null
-  // Backend-stamped turn identity (e.g.
-  // `{"kind":"direct_request","request_id":"kmsg-..."}`); extracted
-  // tolerantly — only the request_id string is read.
+  // Backend-stamped delivery identity: direct/async request id or queue
+  // receipt ids. Unknown shapes are ignored without dropping the row.
   delivery_key?: unknown
   audio?: unknown
   // Persisted upload rows (snake_case from keeper_chat_store) — normalized to
@@ -1555,7 +1589,6 @@ function toolHistoryEntry(message: RestChatHistoryMessage): KeeperConversationEn
     // Tool rows share the same untrusted REST boundary; reject malformed
     // turn_ref values here too so this path matches normalizeHistoryEntry.
     turnRef: asString(message.turn_ref) ?? null,
-    requestId: requestIdFromDeliveryKey(message.delivery_key),
   }
 }
 

@@ -513,6 +513,29 @@ function stampPlaceholderRequestId(keeperName: string, entryIds: string[], reque
   }
 }
 
+// A busy Keeper can persist history under queue_receipts rather than the
+// request id. Stamp the validated durable receipt onto both optimistic rows
+// so either role can converge with its canonical history row.
+function stampPlaceholderQueueReceiptId(
+  keeperName: string,
+  entryIds: string[],
+  queueReceiptId: string,
+): void {
+  for (const entryId of entryIds) {
+    updateThreadEntry(keeperName, entryId, entry => (
+      entry.details?.queueReceiptId === queueReceiptId
+        ? entry
+        : {
+            ...entry,
+            details: {
+              ...entry.details,
+              queueReceiptId,
+            },
+          }
+    ))
+  }
+}
+
 function isMissingQueuedKeeperRequestError(err: unknown): boolean {
   const record = isRecord(err) ? err : null
   const method = asString(record?.method, '').trim().toUpperCase()
@@ -1367,6 +1390,16 @@ export async function sendKeeperThreadMessage(
         const error = applyKeeperStreamEvent(keeperName, assistantId, event)
         if (error) {
           throw new Error(error)
+        }
+        if (event.type === 'CUSTOM' && event.name === 'KEEPER_CHAT_QUEUED' && isRecord(event.value)) {
+          const queueReceiptId = asString(event.value.receipt_id, '').trim()
+          if (queueReceiptId) {
+            stampPlaceholderQueueReceiptId(
+              keeperName,
+              [localId, assistantId],
+              queueReceiptId,
+            )
+          }
         }
         persistPendingAssistantDraft(keeperName, requestId, assistantId)
         if (event.type === 'TOOL_CALL_END') {

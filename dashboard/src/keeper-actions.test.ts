@@ -1672,7 +1672,12 @@ describe('sendKeeperThreadMessage stream outcome', () => {
 
     await sendKeeperThreadMessage('echo', '진행 상황?')
 
-    const reply = (keeperThreads.value.echo ?? []).find(entry => entry.role === 'assistant')
+    const thread = keeperThreads.value.echo ?? []
+    const user = thread.find(entry => entry.role === 'user')
+    const reply = thread.find(entry => entry.role === 'assistant')
+    expect(user?.details?.queueReceiptId).toBe(
+      'chatq_00000000-0000-4000-8000-000000000001',
+    )
     expect(reply?.delivery).toBe('queued')
     expect(reply?.text).toContain('message is queued')
     expect(reply?.details).toMatchObject({

@@ -99,9 +99,12 @@ Each migration PR:
   `{"kind":"direct_request","request_id":"kmsg-..."}` (other `kind` values:
   `async_request` with `request_id`, `queue_receipts` with `receipt_ids`).
   Rows written by the plain append paths omit the field entirely. The
-  dashboard uses `delivery_key.request_id` as the turn reconciliation key
-  between optimistic rows and a history reload. Consumers MUST treat the
-  field as optional (absent on legacy and plain-append rows).
+  dashboard reconciles optimistic rows using exact typed identity:
+  `request_id` for direct/async delivery, or an intersecting `receipt_ids`
+  value for queue delivery. If neither side carries a delivery key, an exact
+  non-empty `turn_ref` match is the final fallback. It never reconciles by
+  role/text. Consumers MUST treat `delivery_key` as optional (absent on
+  legacy and plain-append rows).
 
 ## Non-goals
 

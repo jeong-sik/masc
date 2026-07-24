@@ -356,12 +356,12 @@ check_boundary() {
   require_once "Exact_flow.prepare" "${WORKER_ML}"
   require_once "Exact_flow.execute" "${WORKER_ML}"
   require_once "Partition.bind_before_dispatch" "${WORKER_ML}"
-  require_once "Partition.record_before_advance" "${WORKER_ML}"
+  require_once "Partition.release_before_advance" "${WORKER_ML}"
   require_present "Partition.Fsync_completed" "${WORKER_ML}"
   require_once "let bind_before_dispatch" "${PARTITION_ML}"
-  require_once "let record_before_advance" "${PARTITION_ML}"
+  require_once "let release_before_advance" "${PARTITION_ML}"
   require_once "val bind_before_dispatch" "${PARTITION_MLI}"
-  require_once "val record_before_advance" "${PARTITION_MLI}"
+  require_once "val release_before_advance" "${PARTITION_MLI}"
   check_lane_declaration \
     || fail "Board attention lane declaration contract failed"
 

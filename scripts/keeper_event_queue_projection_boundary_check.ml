@@ -33,7 +33,7 @@ let is_target name = List.mem name targets
 
 let rec longident_leaf = function
   | Longident.Lident name -> name
-  | Longident.Ldot (_, name) -> name
+  | Longident.Ldot (_, name) -> name.txt
   | Longident.Lapply (_, right) -> longident_leaf right
 ;;
 

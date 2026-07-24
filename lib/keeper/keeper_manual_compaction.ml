@@ -1,13 +1,5 @@
 open Keeper_meta_contract
 
-type checkpoint_commit_hint_outcome =
-  | Hint_not_emitted
-  | Hint_delivered of Keeper_checkpoint_ref.t
-  | Hint_failed of
-      { installed_ref : Keeper_checkpoint_ref.t
-      ; failure : Eio.Exn.with_bt
-      }
-
 type post_install_lifecycle =
   | Completion_applied
   | Completion_rejected_failure_dispatched of
@@ -63,11 +55,6 @@ type admitted_operation =
   | `Compaction_failed of failure
   | `Busy of Keeper_turn_admission.autonomous_block
   ]
-
-type admitted_result =
-  { operation : admitted_operation
-  ; checkpoint_commit_hint : checkpoint_commit_hint_outcome
-  }
 
 let checkpoint_ref_to_json (reference : Keeper_checkpoint_ref.t) =
   `Assoc
@@ -532,77 +519,24 @@ let run_admitted_with
      | `Ran (Ok (No_compaction no_compaction)) -> `No_compaction no_compaction)
 ;;
 
-let run_admitted_with_install_observer_with
-    ~append_compaction_manifest
-    ?exact_execution_guard
-    ~on_checkpoint_installed_observer
-    ~on_checkpoint_commit_hint
-    ~config
-    ~meta
-    () =
-  let committed_ref = ref None in
-  let operation =
-    run_admitted_with
-      ~append_compaction_manifest
-      ~prepare_compaction:(fun ~base_dir ~meta ~trigger ~projection_request ->
-        Keeper_context_runtime.prepare_compaction
-          ?exact_execution_guard
-          ~base_dir
-          ~meta
-          ~trigger
-          ~projection_request
-          ())
-      ~on_checkpoint_installed:(fun installed_ref ->
-        committed_ref := Some installed_ref;
-        on_checkpoint_installed_observer installed_ref)
-      ~config
-      ~meta
-  in
-  let checkpoint_commit_hint =
-    match !committed_ref with
-    | None -> Hint_not_emitted
-    | Some installed_ref ->
-      (match on_checkpoint_commit_hint installed_ref with
-       | () -> Hint_delivered installed_ref
-       | exception exn ->
-         Hint_failed
-           { installed_ref
-           ; failure = exn, Printexc.get_raw_backtrace ()
-           })
-  in
-  { operation; checkpoint_commit_hint }
-;;
-
-let run_admitted_with_install_observer
-    ?exact_execution_guard
-    ~on_checkpoint_installed_observer
-    ~on_checkpoint_commit_hint
-    ~config
-    ~meta
-    () =
-  run_admitted_with_install_observer_with
-    ~append_compaction_manifest:append_manifest
-    ?exact_execution_guard
-    ~on_checkpoint_installed_observer
-    ~on_checkpoint_commit_hint
-    ~config
-    ~meta
-    ()
-;;
-
 let run_admitted
     ?exact_execution_guard
-    ~on_checkpoint_commit_hint
     ~config
     ~meta
     () =
-  run_admitted_with_install_observer
-    ?exact_execution_guard
-    ~on_checkpoint_installed_observer:(fun _ -> ())
-    ~on_checkpoint_commit_hint
+  run_admitted_with
+    ~append_compaction_manifest:append_manifest
+    ~prepare_compaction:(fun ~base_dir ~meta ~trigger ~projection_request ->
+      Keeper_context_runtime.prepare_compaction
+        ?exact_execution_guard
+        ~base_dir
+        ~meta
+        ~trigger
+        ~projection_request
+        ())
+    ~on_checkpoint_installed:(fun _ -> ())
     ~config
     ~meta
-    ()
 ;;
 
 let pre_install_lifecycle_stage_to_string = function
@@ -639,30 +573,6 @@ let failure_to_string = function
 module For_testing = struct
   let preserve_no_compaction_after_final_admission_busy =
     preserve_no_compaction_after_final_admission_busy
-  ;;
-
-  let run_admitted_with_install_observer =
-    run_admitted_with_install_observer
-  ;;
-
-  let run_admitted_with_install_observer_and_manifest_failure
-      ?exact_execution_guard
-      ~manifest_error
-      ~on_checkpoint_installed_observer
-      ~on_checkpoint_commit_hint
-      ~config
-      ~meta
-      () =
-    run_admitted_with_install_observer_with
-      ~append_compaction_manifest:
-        (fun ~config:_ ~base_dir:_ ~meta:_ ~installation:_ ~lifecycle:_ _ ->
-           Error manifest_error)
-      ?exact_execution_guard
-      ~on_checkpoint_installed_observer
-      ~on_checkpoint_commit_hint
-      ~config
-      ~meta
-      ()
   ;;
 
   let checkpoint_installation_auxiliary_to_json =

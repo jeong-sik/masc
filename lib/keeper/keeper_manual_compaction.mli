@@ -1,11 +1,3 @@
-type checkpoint_commit_hint_outcome =
-  | Hint_not_emitted
-  | Hint_delivered of Keeper_checkpoint_ref.t
-  | Hint_failed of
-      { installed_ref : Keeper_checkpoint_ref.t
-      ; failure : Eio.Exn.with_bt
-      }
-
 type post_install_lifecycle =
   | Completion_applied
   | Completion_rejected_failure_dispatched of
@@ -62,18 +54,12 @@ type admitted_operation =
   | `Busy of Keeper_turn_admission.autonomous_block
   ]
 
-type admitted_result =
-  { operation : admitted_operation
-  ; checkpoint_commit_hint : checkpoint_commit_hint_outcome
-  }
-
 val run_admitted
   :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
-  -> on_checkpoint_commit_hint:(Keeper_checkpoint_ref.t -> unit)
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> unit
-  -> admitted_result
+  -> admitted_operation
 (** The provider call runs OUTSIDE the keeper admission: [run_admitted]
     first performs a state-free availability preflight, then splits into
     [prepare_compaction] (durable load + policy + LLM plan, no slot held and no
@@ -81,12 +67,7 @@ val run_admitted
     start + source-CAS commit + completion/failure. The lane stays runnable
     while the LLM works; a failed final admission cannot strand
     [compaction_active], and interleaved checkpoint changes fail the exact
-    source CAS. [on_checkpoint_commit_hint] receives the exact installed
-    checkpoint reference only after final compaction admission has been
-    released. It is a lossy same-invocation hint, not an acknowledgement,
-    durable event, or restart authority. Process death may drop it. Its
-    delivery result is returned separately in [checkpoint_commit_hint], so a
-    callback exception cannot change [operation] from [`Applied] to failure.
+    source CAS.
     A rejected completion after the checkpoint commit dispatches an explicit
     lifecycle failure cleanup, but neither rejection can turn the installed
     checkpoint into [`Compaction_failed] or a retry. The closed
@@ -107,25 +88,6 @@ module For_testing : sig
   val preserve_no_compaction_after_final_admission_busy
     :  Keeper_event_queue_state.no_compaction_reason
     -> bool
-
-  val run_admitted_with_install_observer :
-    ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard ->
-    on_checkpoint_installed_observer:(Keeper_checkpoint_ref.t -> unit) ->
-    on_checkpoint_commit_hint:(Keeper_checkpoint_ref.t -> unit) ->
-    config:Workspace.config ->
-    meta:Keeper_meta_contract.keeper_meta ->
-    unit ->
-    admitted_result
-
-  val run_admitted_with_install_observer_and_manifest_failure :
-    ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard ->
-    manifest_error:string ->
-    on_checkpoint_installed_observer:(Keeper_checkpoint_ref.t -> unit) ->
-    on_checkpoint_commit_hint:(Keeper_checkpoint_ref.t -> unit) ->
-    config:Workspace.config ->
-    meta:Keeper_meta_contract.keeper_meta ->
-    unit ->
-    admitted_result
 
   val checkpoint_installation_auxiliary_to_json :
     Keeper_checkpoint_store.checkpoint_installation_auxiliary ->

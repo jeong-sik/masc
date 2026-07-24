@@ -445,18 +445,14 @@ let run_keeper_cycle
       ?manual_compaction_requested
       ()
   =
-  run_keeper_cycle_with
-    ~run_manual_compaction:
-      (fun ?exact_execution_guard ~config ~meta () ->
-         let result =
-           Keeper_manual_compaction.run_admitted
-             ?exact_execution_guard
-             ~on_checkpoint_commit_hint:(fun _ -> ())
-             ~config
-             ~meta
-             ()
-         in
-         result.operation)
+run_keeper_cycle_with
+  ~run_manual_compaction:
+    (fun ?exact_execution_guard ~config ~meta () ->
+       Keeper_manual_compaction.run_admitted
+         ?exact_execution_guard
+         ~config
+         ~meta
+         ())
     ?exact_execution_guard
     ?event_bus
     ?hitl_resolution

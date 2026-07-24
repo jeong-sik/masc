@@ -14,7 +14,6 @@ module Exact_fixture = Compaction_exact_output_fixture
 module Schema = Masc.Keeper_structured_output_schema
 module Summarizer = Masc.Keeper_compaction_llm_summarizer
 
-exception Checkpoint_commit_hint_failure
 
 let exact_terminal ?(slot_id = "compaction-slot") ?(call_id = "call-compaction") cause =
   Keeper_event_queue_state.
@@ -750,10 +749,8 @@ let test_manual_compaction_serializes_owner_lane () =
         | Error detail ->
           failf "race manual compaction claim failed: %s" detail
       in
-      let race_hints = ref 0 in
       let busy_after_prepare =
         Masc.Keeper_manual_compaction.run_admitted
-          ~on_checkpoint_commit_hint:(fun _ -> incr race_hints)
           ~config
           ~meta
           ~exact_execution_guard:
@@ -762,13 +759,11 @@ let test_manual_compaction_serializes_owner_lane () =
                ~keeper_name:meta.name
                ~lease:race_lease)
           ()
-        |> fun result -> result.operation
       in
       check int
         "planning-admission race performs one exact dispatch"
         1
         (Exact_fixture.post_count race_server);
-      check int "noncommit path emits no hint" 0 !race_hints;
       let no_compaction =
         match busy_after_prepare with
         | `No_compaction
@@ -1017,285 +1012,6 @@ let test_malformed_structure_preserves_checkpoint () =
             { message_index = 0; tool_use_id = "orphan" }) ) ->
     ()
   | _ -> fail "malformed compaction was not rejected with typed structure")
-;;
-
-let test_manual_applied_hint_failure () =
-  Eio_main.run @@ fun env ->
-  Masc_test_deps.init_eio_clock env;
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  Eio.Switch.run @@ fun sw ->
-  with_eio_context env sw @@ fun () ->
-  let base_path = Masc_test_deps.setup_test_workspace () in
-  let meta =
-    make_meta
-      ~name:"manual-commit-observer"
-      ~trace_id:"trace-manual-commit-observer"
-      ()
-  in
-  let runtime_snapshot = Runtime.For_testing.snapshot () in
-  Fun.protect
-    ~finally:(fun () ->
-      Runtime.For_testing.restore runtime_snapshot;
-      Admission.For_testing.reset ();
-      Masc.Keeper_registry.For_testing.unregister ~base_path meta.name;
-      Masc_test_deps.cleanup_test_workspace base_path)
-    (fun () ->
-       let config = Masc.Workspace.default_config base_path in
-       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       init_runtime_fixture ();
-       let exact_server =
-         Exact_fixture.start_server
-           ~sw
-           ~net:(Eio.Stdenv.net env)
-           ~clock:(Eio.Stdenv.clock env)
-           (Exact_fixture.Reply (summarize_response "manual observer compacted"))
-       in
-       publish_exact_fixture ~source:"manual commit observer" exact_server;
-       Result.get_ok (Masc.Keeper_meta_store.write_meta config meta);
-       ignore
-         (Masc.Keeper_registry.For_testing.register ~base_path meta.name meta);
-       let checkpoint =
-         { (make_checkpoint ()) with
-           session_id = "trace-manual-commit-observer"
-         ; agent_name = meta.agent_name
-         }
-       in
-       let session =
-         Masc.Keeper_context_core.create_session
-           ~session_id:checkpoint.session_id
-           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
-       in
-       (match
-          Masc.Keeper_context_core.save_oas_checkpoint_classified
-            ~multimodal_policy:meta.multimodal_policy
-            ~keeper_name:meta.name
-            ~session
-            ~agent_name:meta.agent_name
-            ~ctx:(Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint)
-            ~generation:meta.runtime.nonce
-        with
-        | Ok (_, Masc.Keeper_checkpoint_store.Saved _) -> ()
-        | Ok (_, Stale_noop _) -> fail "manual observer fixture save was stale"
-        | Error detail ->
-          failf
-            "manual observer fixture save failed: %s"
-            (Masc.Keeper_context_core.checkpoint_write_error_to_string
-               ~persistence_error_to_string:Fun.id
-               detail));
-       let manifest_error = "injected post-install manifest append failure" in
-       let callback_saw_released_admission = ref false in
-       let hint_calls = ref 0 in
-       let result =
-         Masc.Keeper_manual_compaction.For_testing.
-           run_admitted_with_install_observer_and_manifest_failure
-           ~manifest_error
-           ~on_checkpoint_installed_observer:(fun _ ->
-             Masc.Keeper_registry.For_testing.unregister
-               ~base_path
-               meta.name;
-             raise (Failure "injected checkpoint commit observer failure"))
-           ~on_checkpoint_commit_hint:(fun _installed_ref ->
-             incr hint_calls;
-             callback_saw_released_admission :=
-               Option.is_none
-                 (Admission.in_flight
-                    ~base_path
-                    ~keeper_name:meta.name);
-             raise Checkpoint_commit_hint_failure)
-           ~config
-           ~meta
-           ~exact_execution_guard:Exact_fixture.permissive_exact_execution_guard
-           ()
-       in
-       (match result.operation with
-       | `Applied success ->
-         check bool
-           "manual hint runs after compaction admission release"
-           true
-           !callback_saw_released_admission;
-         check int "manual hint is attempted at-most-once" 1 !hint_calls;
-         (match
-            success.recovery.checkpoint_installation,
-            success.receipt.installation,
-            result.checkpoint_commit_hint
-          with
-          | Masc.Keeper_checkpoint_store.Installed installed,
-            receipt_installation,
-            Masc.Keeper_manual_compaction.Hint_failed { installed_ref; _ } ->
-            check bool
-              "manual hint carries exact installed ref"
-              true
-              (installed_ref = installed.installed_ref);
-            check bool
-              "cycle receipt carries exact installed ref"
-              true
-              (installed_ref = receipt_installation.installed_ref)
-          | Masc.Keeper_checkpoint_store.Not_installed _, _, _ ->
-            fail "Applied manual compaction carried Not_installed"
-          | _ -> fail "raising manual hint lost its typed failure");
-         (match success.receipt.lifecycle with
-          | Masc.Keeper_manual_compaction.Completion_rejected_failure_dispatch_failed
-              _ ->
-            ()
-          | _ ->
-            fail
-              "post-install completion and cleanup rejection did not stay Applied");
-         (match success.receipt.manifest with
-          | Error detail ->
-            check string "manifest failure is exact" manifest_error detail
-          | Ok () -> fail "injected manifest append unexpectedly succeeded");
-         check int
-           "post-install lifecycle rejection performs one provider POST"
-           1
-           (Exact_fixture.post_count exact_server);
-         let stimulus : Queue.stimulus =
-           { post_id = Queue.manual_compaction_post_id
-           ; urgency = Queue.Normal
-           ; arrived_at = 1.0
-           ; payload = Queue.Manual_compaction_requested
-           }
-         in
-         Result.get_ok
-           (Registry_queue.enqueue_durable_result
-              ~base_path
-              meta.name
-              stimulus);
-         let lease =
-           Registry_queue.claim_when_result
-             ~base_path
-             meta.name
-             ~claimed_at:2.0
-             ~ready:(fun _ -> true)
-           |> Result.get_ok
-           |> function
-           | Some lease -> lease
-           | None -> fail "manual compaction receipt fixture was not leased"
-         in
-         let settlement =
-           Masc.Keeper_heartbeat_loop.settlement_of_cycle_outcome
-             ~base_path
-             ~settled_at:3.0
-             ~stop_requested:false
-             ~compaction_consecutive_failures:0
-             ~lease
-             (Some
-                (Cycle.Manual_compaction_applied
-                   { receipt = success.receipt
-                   ; followup = Cycle.Completed meta
-                   }))
-         in
-         (match
-            Registry_queue.settle_result
-              ~base_path
-              meta.name
-              ~settled_at:3.0
-              ~lease
-              ~settlement
-          with
-          | Ok
-              ( Registry_queue.Settled _
-              | Registry_queue.Already_settled _ ) ->
-            ()
-          | Ok (Registry_queue.Committed_followup_failed { detail; _ })
-          | Error detail ->
-            failf "manual compaction receipt settlement failed: %s" detail);
-         let projected_entries = ref [] in
-         Registry_queue.project_transition_outbox_result
-           ~append_before_retire:(fun entry ->
-             projected_entries := entry :: !projected_entries;
-             Ok ())
-           ~base_path
-           ~keeper_name:meta.name
-         |> Result.map_error (fun detail ->
-              "manual compaction receipt projection failed: " ^ detail)
-         |> Result.get_ok;
-         let entry =
-           match List.rev !projected_entries with
-           | [ entry ] -> entry
-           | entries ->
-             failf
-               "manual compaction projected receipt count=%d"
-               (List.length entries)
-         in
-         (match entry.receipt.settlement with
-          | Registry_queue.Manual_compaction_committed
-              { commit
-              ; followup = Keeper_event_queue_state.Compaction_commit_ack
-              } ->
-            check bool
-              "durable queue receipt carries exact installed ref"
-              true
-              (success.receipt.installation.installed_ref = commit.installed_ref);
-            check bool
-              "durable queue receipt carries observer auxiliary"
-              true
-              (List.exists
-                 (function
-                   | Keeper_event_queue_state.Compaction_commit_observer_failed _
-                     -> true
-                   | _ -> false)
-                 commit.auxiliary);
-            (match commit.lifecycle with
-             | Keeper_event_queue_state.
-                 Compaction_completion_rejected_failure_dispatch_failed _ ->
-               ()
-             | _ -> fail "durable queue receipt lost lifecycle failure");
-            check (option string)
-              "durable queue receipt carries manifest error"
-              (Some manifest_error)
-              commit.manifest_error;
-            check bool
-              "durable queue receipt requires operator action"
-              true
-              (Keeper_event_queue_state.
-                 manual_compaction_commit_requires_operator_action
-                 commit)
-          | _ -> fail "manual compaction durable settlement was not committed");
-         let open Yojson.Safe.Util in
-         let public_receipt =
-           Keeper_event_queue_state.transition_receipt_to_yojson entry.receipt
-           |> member "settlement"
-           |> member "receipt"
-         in
-         check bool
-           "public durable receipt requires operator action"
-           true
-           (public_receipt |> member "operator_action_required" |> to_bool);
-         check string
-           "public durable receipt carries exact sha"
-           success.receipt.installation.installed_ref.sha256
-           (public_receipt
-            |> member "checkpoint_installed_ref"
-            |> member "sha256"
-            |> to_string);
-         check string
-           "public durable receipt carries manifest failure"
-           manifest_error
-           (public_receipt |> member "manifest_error" |> to_string);
-         check int
-           "durable receipt path never redispatches provider"
-           1
-           (Exact_fixture.post_count exact_server)
-       | `No_compaction no_compaction ->
-         failf
-           "manual observer did not apply: %s"
-           (Keeper_event_queue_state.no_compaction_reason_label
-              no_compaction.reason)
-       | `Compaction_failed failure ->
-         failf
-           "manual observer compaction failed: %s"
-           (Masc.Keeper_manual_compaction.failure_to_string failure)
-       | `Busy _ -> fail "manual hint compaction was unexpectedly busy");
-       match result.checkpoint_commit_hint with
-       | Masc.Keeper_manual_compaction.Hint_failed
-           { failure = Checkpoint_commit_hint_failure, _; _ } ->
-         ()
-       | Masc.Keeper_manual_compaction.Hint_failed { failure = exn, _; _ } ->
-         failf "manual hint failed with the wrong exception: %s" (Printexc.to_string exn)
-       | Masc.Keeper_manual_compaction.Hint_delivered _ ->
-         fail "raising manual hint was reported delivered"
-       | Masc.Keeper_manual_compaction.Hint_not_emitted ->
-         fail "Applied manual compaction emitted no hint")
 ;;
 
 let test_checkpoint_installation_auxiliary_manifest_tags () =
@@ -1729,8 +1445,6 @@ let () =
         `Quick test_regular_post_turn_does_not_auto_compact;
       test_case "manual compaction serializes the owner lane"
         `Quick test_manual_compaction_serializes_owner_lane;
-      test_case "manual Applied preserves hint failure"
-        `Quick test_manual_applied_hint_failure;
       test_case "checkpoint installation auxiliary manifest tags"
         `Quick test_checkpoint_installation_auxiliary_manifest_tags;
       test_case "malformed structure preserves checkpoint"

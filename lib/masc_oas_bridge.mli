@@ -6,6 +6,7 @@
 
 type caller =
   | Anti_rationalization
+  | Goal_completion
   | Fusion_judge
   | Fusion_panel
 

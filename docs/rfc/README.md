@@ -344,7 +344,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | elim | Withdrawn command-policy classification experiment | Withdrawn | 7b62a87d44 2026-07-13 | - |
 | keep | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | a48d59f034 2026-07-24 | - |
 | runt | Per-runtime note field & dashboard surfacing | Draft | f3e073c3c9 2026-06-25 | - |
-| sche | Separate schedule definitions, occurrence delivery, and work outcomes | Draft | ee2f49fe0a 2026-07-24 | - |
+| sche | Separate schedule definitions, occurrence delivery, and work outcomes | Draft | e190805cc8 2026-07-24 | - |
 | type | Withdraw product-specific egress effect classification | Withdrawn | 7b62a87d44 2026-07-13 | - |
 
 ### 신규 RFC

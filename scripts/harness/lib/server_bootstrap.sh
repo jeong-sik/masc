@@ -116,6 +116,7 @@ harness_seed_server_config() {
   local repo_root="$1"
   local base_path="$2"
   local config_dir="${base_path%/}/.masc/config"
+  local seeded_runtime=0
 
   mkdir -p \
     "$config_dir" \
@@ -148,9 +149,10 @@ supports-tool-choice = true
 is-default = true
 max-concurrent = 1
 EOF
+    seeded_runtime=1
   fi
 
-  if [[ ! -f "$config_dir/oas-models-overlay.toml" ]]; then
+  if [[ "$seeded_runtime" == "1" && ! -f "$config_dir/oas-models-overlay.toml" ]]; then
     cat >"$config_dir/oas-models-overlay.toml" <<'EOF'
 [[providers]]
 id = "deepseek"

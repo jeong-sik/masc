@@ -198,6 +198,24 @@ let test_symlinked_store_not_followed () =
     true
     (n = String.length real_store)
 
+let test_symlinked_store_ancestor_not_followed () =
+  counter := 0;
+  let parent = fresh_dir "masc_prune_store_ancestor" in
+  let external_target = fresh_dir "masc_prune_external_ancestor_target" in
+  Fs_compat.mkdir_p (Filename.concat external_target "tool-metrics");
+  let linked_data_root = Filename.concat parent "data" in
+  Unix.symlink external_target linked_data_root;
+  let tool_metrics = Filename.concat linked_data_root "tool-metrics" in
+  let n =
+    SM.prune_store_dir
+      ~prune_dir:(fun _ ->
+        SM.prune_store_dir ~prune_dir:record_prune tool_metrics)
+      linked_data_root
+  in
+  Alcotest.(check int) "prune never crosses a symlinked ancestor" 0 !counter;
+  Alcotest.(check int) "symlinked ancestor counts zero" 0 n
+;;
+
 let () =
   Alcotest.run "server_runtime_startup_maintenance"
     [
@@ -216,6 +234,8 @@ let () =
         [
           Alcotest.test_case "symlinked store is not followed" `Quick
             test_symlinked_store_not_followed;
+          Alcotest.test_case "symlinked store ancestor is not followed" `Quick
+            test_symlinked_store_ancestor_not_followed;
         ] );
       ( "prune_flat_jsonl_older_than",
         [

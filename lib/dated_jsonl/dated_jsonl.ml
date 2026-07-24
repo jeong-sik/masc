@@ -592,8 +592,14 @@ let load_tail_lines_result path ~max_lines =
              Error (Io_error { operation = Read_file; path; detail }))
 ;;
 
+let directory_is_present path =
+  match inspect_directory_result ~missing_is_empty:true path with
+  | Ok Directory_present -> true
+  | Ok Directory_missing | Error _ -> false
+;;
+
 let prune_unlocked t ~days =
-  if days <= 0 then 0
+  if days <= 0 || not (directory_is_present t.base_dir) then 0
   else begin
     let now = Unix.gettimeofday () in
     let cutoff = now -. (float_of_int days *. Masc_time_constants.day) in
@@ -631,7 +637,7 @@ let prune_unlocked t ~days =
   end
 
 let prune_to_max_bytes_unlocked t ~max_bytes ~keep_path =
-  if max_bytes <= 0 then 0
+  if max_bytes <= 0 || not (directory_is_present t.base_dir) then 0
   else begin
     let files = day_file_paths_oldest_first t.base_dir in
     let total =

@@ -642,6 +642,24 @@ let test_prune_does_not_follow_symlinked_day_file () =
   check bool "external day file behind the symlink survives" true
     (Sys.file_exists external_file)
 
+let test_prune_does_not_follow_symlinked_base () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let parent = tmpdir "dated_jsonl_prune_symlink_base" in
+  let external_dir = tmpdir "dated_jsonl_external_base" in
+  let old_month = Filename.concat external_dir "2020-01" in
+  Fs_compat.mkdir_p old_month;
+  let external_file = Filename.concat old_month "15.jsonl" in
+  Fs_compat.append_file external_file "{\"external\":true}\n";
+  let linked_base = Filename.concat parent "ledger" in
+  Unix.symlink external_dir linked_base;
+  let store = Dated_jsonl.create ~base_dir:linked_base () in
+  let deleted = Dated_jsonl.prune store ~days:30 in
+  check int "symlinked base prunes nothing" 0 deleted;
+  check bool "external file behind the base survives" true
+    (Sys.file_exists external_file)
+;;
+
 let test_prune_zero_days () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -788,6 +806,8 @@ let () =
             test_prune_does_not_follow_symlinked_month;
           test_case "does not follow a symlinked day file" `Quick
             test_prune_does_not_follow_symlinked_day_file;
+          test_case "does not follow a symlinked base" `Quick
+            test_prune_does_not_follow_symlinked_base;
           test_case "max bytes prunes oldest completed day-files" `Quick
             test_max_bytes_prunes_oldest_completed_day_files;
           test_case "max bytes preserves current day-file" `Quick

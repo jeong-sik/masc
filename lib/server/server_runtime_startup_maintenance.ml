@@ -155,6 +155,9 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
      let tool_metrics_dir =
        Filename.concat (Mcp_server.workspace_config state).base_path "data/tool-metrics"
      in
+     let data_root =
+       Filename.concat (Mcp_server.workspace_config state).base_path "data"
+     in
      let total =
        prune_store_dir
          ~prune_dir:(fun _ ->
@@ -164,7 +167,9 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
           [Dated_jsonl.prune] deletes day files at the target. *)
        prune_store_dir ~prune_dir (Filename.concat masc "audit")
        + prune_store_dir ~prune_dir (Filename.concat masc "telemetry")
-       + prune_store_dir ~prune_dir tool_metrics_dir
+       + prune_store_dir
+           ~prune_dir:(fun _ -> prune_store_dir ~prune_dir tool_metrics_dir)
+           data_root
        + prune_store_dir ~prune_dir (Filename.concat masc "messages")
        + prune_store_dir ~prune_dir (Filename.concat masc "events")
        + prune_store_dir ~prune_dir (Filename.concat masc "activity-events")

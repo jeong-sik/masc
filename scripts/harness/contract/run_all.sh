@@ -64,6 +64,12 @@ seed_contract_verifier_config() {
 [runtime]
 default = "contract_verifier.smoke"
 
+[runtime.exact_output_lanes.hitl_auto_judge]
+slots = ["contract_verifier.smoke"]
+
+[runtime.exact_output_lanes.board_attention_exact]
+slots = ["contract_verifier.smoke"]
+
 [providers.contract_verifier]
 display-name = "Contract Completion Verifier"
 protocol = "openai-compatible-http"

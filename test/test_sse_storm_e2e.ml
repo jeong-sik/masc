@@ -322,6 +322,12 @@ let runtime_seed =
 [runtime]
 default = "deepseek.smoke"
 
+[runtime.exact_output_lanes.hitl_auto_judge]
+slots = ["deepseek.smoke"]
+
+[runtime.exact_output_lanes.board_attention_exact]
+slots = ["deepseek.smoke"]
+
 [providers.deepseek]
 display-name = "SSE Storm Smoke"
 protocol = "openai-compatible-http"

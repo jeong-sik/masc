@@ -236,6 +236,33 @@ let test_global_autonomous_off_blocks_readiness () =
      | Some hint -> contains hint "MASC_KEEPER_AUTONOMOUS_ENABLED"
      | None -> false)
 
+let test_owner_activation_shutdown_fence_blocks_boot () =
+  without_overrides @@ fun () ->
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  check bool "shutdown fence is a closed activation blocker" true
+    (match
+       Readiness.classify_owner_activation
+         ~shutdown_operation_id:(Some operation_id)
+         (Ok (ready_meta ()))
+     with
+     | Readiness.Activation_blocked (Readiness.Shutdown_fenced actual) ->
+       Keeper_shutdown_types.Operation_id.equal operation_id actual
+     | Readiness.Activation_allowed
+     | Readiness.Activation_blocked (Readiness.Autonomous_blocked _)
+     | Readiness.Activation_unknown _ -> false)
+
+let test_owner_activation_unknown_fails_closed () =
+  check bool "unreadable owner truth cannot authorize activation" true
+    (match
+       Readiness.classify_owner_activation
+         ~shutdown_operation_id:None
+         (Error "meta unavailable")
+     with
+     | Readiness.Activation_unknown "meta unavailable" -> true
+     | Readiness.Activation_allowed
+     | Readiness.Activation_blocked _
+     | Readiness.Activation_unknown _ -> false)
+
 let operator_pause =
   Keeper_latched_reason.Operator_paused
     { operator_actor = Keeper_latched_reason.operator_actor_keeper_down }
@@ -438,6 +465,10 @@ let () =
       , [ test_case "default ready" `Quick test_default_autonomous_ready
         ; test_case "global off blocks readiness" `Quick
             test_global_autonomous_off_blocks_readiness
+        ; test_case "shutdown fence blocks boot" `Quick
+            test_owner_activation_shutdown_fence_blocks_boot
+        ; test_case "unknown owner truth fails closed" `Quick
+            test_owner_activation_unknown_fails_closed
         ] )
     ; ( "typed lifecycle admission"
       , [ test_case "active" `Quick test_active_admission

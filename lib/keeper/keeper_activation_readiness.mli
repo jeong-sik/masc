@@ -8,6 +8,15 @@ type autonomous_blocker =
   | Autoboot_disabled
   | Proactive_disabled
 
+type owner_activation_blocker =
+  | Autonomous_blocked of autonomous_blocker
+  | Shutdown_fenced of Keeper_shutdown_types.Operation_id.t
+
+type owner_activation =
+  | Activation_allowed
+  | Activation_blocked of owner_activation_blocker
+  | Activation_unknown of string
+
 (** Typed operator-facing projection of the persisted Keeper lifecycle and
     supervisor recovery policy. Server/dashboard code consumes this value; it
     must not reclassify pause/dead states independently. *)
@@ -44,5 +53,16 @@ val ready_for_unclaimed_backlog : Keeper_meta_contract.keeper_meta -> bool
 val autonomous_check_value : autonomous_activation -> string
 
 val autonomous_blocker_to_wire : autonomous_blocker -> string
+
+val owner_activation_blocker_to_wire : owner_activation_blocker -> string
+
+val classify_owner_activation :
+  shutdown_operation_id:Keeper_shutdown_types.Operation_id.t option ->
+  (Keeper_meta_contract.keeper_meta, string) result ->
+  owner_activation
+(** Pure, closed owner activation verdict shared by supervisor and health.
+    [Activation_allowed] means policy permits either signaling an existing
+    lane or supervisor boot; it does not assert that a live lane exists.
+    Missing/unreadable metadata fails closed as [Activation_unknown]. *)
 
 val to_yojson : t -> Yojson.Safe.t

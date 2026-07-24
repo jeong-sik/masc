@@ -165,18 +165,26 @@ let keeper_event_queue_health_json () =
          durable queue ages; queue parsing below stays deterministic. *)
     in
     let owner_lifecycle ~keeper_name =
-      match Keeper_meta_store.read_meta config keeper_name with
-      | Ok (Some meta) ->
-        (match pause_kind meta with
-         | Active -> Keeper_event_queue_persistence.Runnable
-         | Operator_paused
-         | Unclassified_paused
-         | Dead_tombstone
-         | Transcript_corruption_reset_required ->
-           Keeper_event_queue_persistence.Paused_retained)
-      | Ok None ->
-        Keeper_event_queue_persistence.Lifecycle_unknown "durable keeper metadata missing"
-      | Error detail -> Keeper_event_queue_persistence.Lifecycle_unknown detail
+      let meta_result =
+        match Keeper_meta_store.read_effective_meta config keeper_name with
+        | Ok (Some meta) -> Ok meta
+        | Ok None -> Error "durable keeper metadata missing"
+        | Error detail -> Error detail
+      in
+      let admission =
+        Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
+      in
+      match
+        Keeper_activation_readiness.classify_owner_activation
+          ~shutdown_operation_id:admission.snapshot_shutdown_operation_id
+          meta_result
+      with
+      | Keeper_activation_readiness.Activation_allowed ->
+        Keeper_event_queue_persistence.Runnable
+      | Keeper_activation_readiness.Activation_blocked _ ->
+        Keeper_event_queue_persistence.Paused_retained
+      | Keeper_activation_readiness.Activation_unknown detail ->
+        Keeper_event_queue_persistence.Lifecycle_unknown detail
     in
     Keeper_event_queue_persistence.fleet_summary_json
       ~now

@@ -17,8 +17,9 @@ val supervise_keepalive :
   'a Keeper_types_profile.context ->
   Keeper_meta_contract.keeper_meta ->
   unit
-(** Register and launch a supervised keepalive fiber when spawn admission
-    allows it. When the injected launch gate returns [Error _] (registry
-    FSM rejected [Fiber_started]), no [Started]/[Running] event is
-    published — the gate already resolved the entry through the crash
-    path. *)
+(** Register and launch a supervised keepalive fiber only when the shared
+    owner-activation verdict permits it. Lifecycle/policy blocks, unreadable
+    owner truth, and a shutdown fence retain durable work without booting.
+    When the injected launch gate returns [Error _] (registry FSM rejected
+    [Fiber_started]), no [Started]/[Running] event is published — the gate
+    already resolved the entry through the crash path. *)

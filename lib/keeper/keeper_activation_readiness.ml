@@ -3,6 +3,15 @@ type autonomous_blocker =
   | Autoboot_disabled
   | Proactive_disabled
 
+type owner_activation_blocker =
+  | Autonomous_blocked of autonomous_blocker
+  | Shutdown_fenced of Keeper_shutdown_types.Operation_id.t
+
+type owner_activation =
+  | Activation_allowed
+  | Activation_blocked of owner_activation_blocker
+  | Activation_unknown of string
+
 type pause_kind =
   | Active
   | Operator_paused
@@ -79,6 +88,11 @@ let autonomous_blocker_to_wire = function
   | Proactive_disabled -> "proactive_disabled"
 ;;
 
+let owner_activation_blocker_to_wire = function
+  | Autonomous_blocked blocker -> autonomous_blocker_to_wire blocker
+  | Shutdown_fenced _ -> "shutdown_fenced"
+;;
+
 (* The typed blocker is shared with the lifecycle and feature-gate verdicts.
    The hint checks the meta flag directly to distinguish a global kill-switch
    from a per-keeper flag without parsing the boundary string projection. *)
@@ -133,6 +147,19 @@ let autonomous_activation (meta : Keeper_meta_contract.keeper_meta) =
   ; blocker
   ; hint = autonomous_hint meta blocker
   }
+;;
+
+let classify_owner_activation ~shutdown_operation_id meta_result =
+  match meta_result with
+  | Error detail -> Activation_unknown detail
+  | Ok meta ->
+    (match shutdown_operation_id with
+     | Some operation_id -> Activation_blocked (Shutdown_fenced operation_id)
+     | None ->
+       let activation = autonomous_activation meta in
+       (match activation.blocker with
+        | None -> Activation_allowed
+        | Some blocker -> Activation_blocked (Autonomous_blocked blocker)))
 ;;
 
 let of_meta meta =

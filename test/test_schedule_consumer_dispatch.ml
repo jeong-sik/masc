@@ -320,7 +320,11 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
         check string "execution detail stimulus" "schedule_due"
           (detail |> member "stimulus" |> to_string);
         check string "execution keeper" "schedule-keeper"
-          (detail |> member "keeper_name" |> to_string)
+          (detail |> member "keeper_name" |> to_string);
+        check string "durable enqueue is separate from activation" "deferred"
+          (detail |> member "activation_status" |> to_string);
+        check string "missing owner truth fails activation closed" "owner_unknown"
+          (detail |> member "activation_reason" |> to_string)
       | None -> fail "execution detail missing"));
   let queue =
     Keeper_registry_event_queue.snapshot
@@ -361,6 +365,10 @@ let test_keeper_wake_consumer_enqueues_typed_stimulus_and_succeeds_schedule () =
       (receipt |> member "kind" |> to_string);
     check string "receipt occurrence awaits ack" "awaiting_ack"
       (receipt |> member "occurrence_status" |> to_string);
+    check string "receipt activation is deferred" "deferred"
+      (receipt |> member "activation_status" |> to_string);
+    check string "receipt activation reason is typed" "owner_unknown"
+      (receipt |> member "activation_reason" |> to_string);
     check string "receipt queue" "keeper_event_queue"
       (receipt |> member "queue" |> to_string);
     check string "receipt stimulus" "schedule_due"
@@ -561,7 +569,9 @@ let test_acked_occurrence_recovery_does_not_enqueue_or_wake_again () =
       (match List.hd retried.dispatches with
        | { detail = Some detail; _ } ->
          check string "retry observes terminal ack" "already_acked"
-           Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string)
+           Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string);
+         check string "terminal ack needs no activation" "not_required"
+           Yojson.Safe.Util.(detail |> member "activation_status" |> to_string)
        | _ -> fail "retry completion receipt missing");
       check int "retry enqueues no second occurrence" 0
         (Keeper_registry_event_queue.snapshot ~base_path keeper_name
@@ -671,7 +681,9 @@ let test_cancelled_occurrence_recovery_does_not_enqueue_or_wake_again () =
       (match List.hd retried.dispatches with
        | { detail = Some detail; _ } ->
          check string "retry observes terminal cancellation" "already_cancelled"
-           Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string)
+           Yojson.Safe.Util.(detail |> member "occurrence_status" |> to_string);
+         check string "terminal cancellation needs no activation" "not_required"
+           Yojson.Safe.Util.(detail |> member "activation_status" |> to_string)
        | _ -> fail "cancelled retry completion receipt missing");
       check int "cancelled retry enqueues no second occurrence" 0
         (Keeper_registry_event_queue.snapshot ~base_path keeper_name

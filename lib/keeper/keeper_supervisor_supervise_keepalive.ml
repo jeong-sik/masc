@@ -47,14 +47,18 @@ let supervise_keepalive
       (ctx : _ context)
       (meta : keeper_meta)
   =
-  let lifecycle_state =
-    Keeper_lifecycle_admission.state
-      ~paused:meta.paused
-      ~latched_reason:meta.latched_reason
+  let base_path = ctx.config.base_path in
+  let admission =
+    Keeper_turn_admission.snapshot_for
+      ~base_path
+      ~keeper_name:meta.name
   in
-  match Keeper_lifecycle_admission.admit_autonomous lifecycle_state with
-  | Keeper_lifecycle_admission.Autonomous_denied denial ->
-    let reason = Keeper_lifecycle_admission.autonomous_denial_to_wire denial in
+  let activation =
+    Keeper_activation_readiness.classify_owner_activation
+      ~shutdown_operation_id:admission.snapshot_shutdown_operation_id
+      (Ok meta)
+  in
+  let record_activation_denial reason =
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string LifecycleDispatchRejections)
       ~labels:
@@ -71,19 +75,39 @@ let supervise_keepalive
            })
       meta.name
       reason
-      ();
-    Log.Keeper.info
-      "%s: supervisor keepalive start denied by lifecycle admission: %s"
+      ()
+  in
+  match activation with
+  | Keeper_activation_readiness.Activation_unknown detail ->
+    record_activation_denial "activation_unknown";
+    Log.Keeper.error
+      "%s: supervisor keepalive start denied because owner activation truth is unknown: %s"
       meta.name
-      reason
-  | Keeper_lifecycle_admission.Autonomous_admitted ->
-    if Keeper_registry.is_registered ~base_path:ctx.config.base_path meta.name
+      detail
+  | Keeper_activation_readiness.Activation_blocked blocker ->
+    let reason =
+      Keeper_activation_readiness.owner_activation_blocker_to_wire blocker
+    in
+    record_activation_denial reason;
+    (match blocker with
+     | Keeper_activation_readiness.Shutdown_fenced operation_id ->
+       Log.Keeper.warn
+         "%s: supervisor keepalive start denied by shutdown operation %s"
+         meta.name
+         (Keeper_shutdown_types.Operation_id.to_string operation_id)
+     | Keeper_activation_readiness.Autonomous_blocked _ ->
+       Log.Keeper.info
+         "%s: supervisor keepalive start denied by owner activation policy: %s"
+         meta.name
+         reason)
+  | Keeper_activation_readiness.Activation_allowed ->
+    if Keeper_registry.is_registered ~base_path meta.name
     then ()
     else
     (* Register in Keeper_registry — single source of truth. *)
     match
       Keeper_registry.register_offline_if_admitted
-        ~base_path:ctx.config.base_path
+        ~base_path
         meta.name
         meta
     with
@@ -123,7 +147,7 @@ let supervise_keepalive
        drift condition itself is unchanged and still surfaces on the
        registration that succeeds. *)
     let () =
-      Startup_helpers.log_persona_drift_if_missing ~base_path:ctx.config.base_path meta
+      Startup_helpers.log_persona_drift_if_missing ~base_path meta
     in
     (* Workspace initialization *)
     (try
@@ -164,7 +188,7 @@ let supervise_keepalive
         Log.Keeper.error "supervisor presence sync failed: %s" (Printexc.to_string exn);
         meta
     in
-    Keeper_registry.update_meta ~base_path:ctx.config.base_path meta.name live_meta;
+    Keeper_registry.update_meta ~base_path meta.name live_meta;
     match launch_supervised_fiber ~proactive_warmup_sec ctx live_meta reg with
     | Error _ ->
       (* The launch gate aborted fail-closed (no fiber forked; [done_p]

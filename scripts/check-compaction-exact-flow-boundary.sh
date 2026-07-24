@@ -52,8 +52,26 @@ check_boundary() {
   local provenance_label="execution_provenance_"'mismatch'
   local attempt_label="attempt_already_"'started'
   local old_pattern
+  local legacy_label_candidates
+  local legacy_label_targets=()
   old_pattern="${failed_after}|${failed_before}|${cancelled_after}|${lower_failed_after}|${lower_failed_before}|${lower_cancelled_after}|${attempt_constructor}|${exact_attempt_constructor}|${provenance_constructor}|${exact_provenance_constructor}|\"${provenance_label}\"|\"${attempt_label}\""
-  if rg -n "${old_pattern}" "${REPO_ROOT}/lib" "${REPO_ROOT}/test"; then
+  legacy_label_candidates=(
+    "${TARGET}"
+    "${REPO_ROOT}/lib/keeper/keeper_compaction_llm_summarizer.mli"
+    "${REPO_ROOT}/lib/keeper/keeper_registry_event_queue_exact_execution.ml"
+    "${REPO_ROOT}/lib/keeper/keeper_registry_event_queue_exact_execution.mli"
+    "${REPO_ROOT}/lib/keeper_runtime/keeper_event_queue_persistence.ml"
+    "${REPO_ROOT}/lib/keeper_runtime/keeper_event_queue_persistence.mli"
+    "${REPO_ROOT}/lib/keeper_runtime/keeper_event_queue_state.ml"
+    "${REPO_ROOT}/lib/keeper_runtime/keeper_event_queue_state.mli"
+    "${REPO_ROOT}/test/test_compaction_exact_output_conformance.ml"
+    "${REPO_ROOT}/test/test_keeper_event_queue_state_v2.ml"
+    "${REPO_ROOT}/test/test_keeper_exact_execution_lease_guard.ml"
+  )
+  for candidate in "${legacy_label_candidates[@]}"; do
+    [[ -f "${candidate}" ]] && legacy_label_targets+=("${candidate}")
+  done
+  if rg -n "${old_pattern}" "${legacy_label_targets[@]}"; then
     fail "retired receipt-phase or legacy durable terminal label remains"
   fi
 

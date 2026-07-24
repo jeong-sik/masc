@@ -38,6 +38,16 @@ val handle_keeper_chat_recovery_post :
   string ->
   unit
 
+val handle_keeper_board_attention_quarantine_recovery_post :
+  Mcp_server.server_state ->
+  string ->
+  Httpun.Request.t ->
+  Httpun.Reqd.t ->
+  keeper_name:string ->
+  raw_partition_id:string ->
+  string ->
+  unit
+
 val stat_json_of_path : string -> Yojson.Safe.t
 val oas_checkpoint_summary_json :
   source_kind:string ->

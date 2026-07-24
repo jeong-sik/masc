@@ -251,6 +251,10 @@ let test_operator_remote_tool_name_ssot_matches_remote_schemas () =
   check bool "chat recovery cannot bypass operator profile" false
     (Tool_catalog.allow_direct_call "masc_operator_chat_recovery_resolve")
   ;
+  check bool "Board quarantine recovery cannot bypass operator profile" false
+    (Tool_catalog.allow_direct_call
+       "masc_operator_board_attention_quarantine_requeue")
+  ;
   check bool "task recovery cannot bypass operator profile" false
     (Tool_catalog.allow_direct_call "masc_operator_task_recovery_resolve")
 ;;

@@ -17,7 +17,20 @@ val get_or_compute_snapshot_json :
     normalized actor name produced by {!normalize_actor_name}. *)
 
 val invalidate_snapshot_json : config:Workspace_utils.config -> unit
-(** Drop every snapshot cache entry for the given config (all actors). *)
+(** Drop every actor and HTTP operator-snapshot cache entry and advance the
+    publication generation so an in-flight older computation cannot republish
+    after this invalidation. *)
+
+val with_snapshot_publication_generation : (int -> 'a) -> 'a
+(** Run one short, non-yielding publication operation against the current
+    process-local generation. Invalidation uses the same guard. *)
+
+val register_snapshot_generation_observer : (int -> unit) -> unit
+(** Register the transport observer for generation invalidations. The observer
+    runs after the publication guard is released and may therefore observe
+    callbacks out of order. It must ask the serialized publication owner for a
+    current generation tombstone rather than fabricating one from a later
+    read. *)
 
 val get_or_compute_digest_json :
   config:Workspace_utils.config ->
@@ -69,5 +82,3 @@ val operator_digest_json :
   ?include_workers:bool ->
   'a Tool_operator.context ->
   (Yojson.Safe.t, string) result
-
-

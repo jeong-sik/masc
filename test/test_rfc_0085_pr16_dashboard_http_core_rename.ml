@@ -15,7 +15,6 @@ let renamed_identifiers =
   ; "_last_good_shell", "last_good_shell"
   ; "_operator_snapshot_broadcast_ref", "operator_snapshot_broadcast_ref"
   ; "_operator_digest_broadcast_ref", "operator_digest_broadcast_ref"
-  ; "_operator_snapshot_cache", "operator_snapshot_cache"
   ; "_operator_digest_cache", "operator_digest_cache"
   ; "_operator_refresh_interval_s", "operator_refresh_interval_s"
   ; "_mission_cache", "mission_cache"

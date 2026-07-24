@@ -143,10 +143,10 @@ val init_default : config_path:string -> (unit, string) result
 val publish_exact_output_registry :
   lanes:Runtime_schema.exact_output_lane_decl list ->
   Agent_sdk.Exact_output.resolver_snapshot ->
-  (int64, string) result
-(** Publish one immutable OAS resolver-and-lane snapshot and return its
-    generation. This is the production bootstrap boundary; callers provide
-    opaque target references and never receive the private registry value. *)
+  (Runtime_exact_output_registry.t, string) result
+(** Publish one immutable OAS resolver-and-lane snapshot and return that exact
+    publication. Startup callers validate mandatory lanes against this value,
+    so validation cannot observe a later global generation. *)
 
 val init_default_strict : config_path:string -> (unit, string) result
 (** Fail-closed startup entry point: {!init_default} PLUS the OAS

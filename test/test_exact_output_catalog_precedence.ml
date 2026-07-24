@@ -95,6 +95,31 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
     require_registry_unpublished label
   in
   require_registry_unpublished "fresh process";
+  let require_missing_mandatory_lane_rejected ~lane_id content =
+    write_file runtime_path content;
+    let message =
+      try
+        create_server_state ();
+        Alcotest.failf "missing mandatory exact lane %s must reject startup" lane_id
+      with
+      | Env_config_core.Config_error message -> message
+    in
+    Alcotest.(check bool)
+      ("missing lane error names " ^ lane_id)
+      true
+      (String_util.contains_substring message lane_id);
+    Alcotest.(check bool)
+      "missing lane error gives runtime.toml reset guidance"
+      true
+      (String_util.contains_substring message "reset the preserved runtime.toml");
+    require_registry_unpublished ("missing mandatory exact lane " ^ lane_id)
+  in
+  require_missing_mandatory_lane_rejected
+    ~lane_id:"hitl_auto_judge"
+    (runtime_toml ~include_hitl_auto_judge:false replacement_target);
+  require_missing_mandatory_lane_rejected
+    ~lane_id:"board_attention_exact"
+    (runtime_toml ~include_board_attention:false replacement_target);
   require_bootstrap_rejected "overlay target is suppressed" overlay_target;
 
   write_file runtime_path (runtime_toml replacement_target);
@@ -467,13 +492,49 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
       ~config_root
       ()
   in
+  write_file
+    runtime_path
+    (runtime_toml ~include_hitl_auto_judge:false replacement_target);
+  let explicit_lanes =
+    match Runtime_toml.parse_file runtime_path with
+    | Error errors ->
+      Alcotest.failf
+        "missing-HITL runtime fixture failed to parse: %d error(s)"
+        (List.length errors)
+    | Ok (config : Runtime_schema.config) -> config.exact_output_lane_decls
+  in
+  let missing_registry =
+    let snapshot =
+      load_control_snapshot
+        (Exact_output.Full_replacement
+           { source = replacement_path; contents = replacement_catalog })
+    in
+    match Registry.publish ~lanes:explicit_lanes snapshot with
+    | Ok registry -> registry
+    | Error error ->
+      Alcotest.failf
+        "explicit lanes without HITL failed to publish: %s"
+        (Registry.publication_error_to_string error)
+  in
+  (match Registry.resolve_lane missing_registry ~lane_id:"hitl_auto_judge" with
+   | Error (Registry.Exact_lane_unconfigured { lane_id }) ->
+     Alcotest.(check string)
+       "missing HITL remains typed unconfigured"
+       "hitl_auto_judge"
+       lane_id
+   | Error error ->
+     Alcotest.failf
+       "missing HITL returned the wrong typed error: %s"
+       (Registry.lane_resolution_error_to_string error)
+   | Ok _ -> Alcotest.fail "missing HITL exact lane was synthesized");
   write_file runtime_path (runtime_toml replacement_target);
   create_server_state ();
-  let default_registry = current_registry "default HITL lane bootstrap" in
-  require_lane_unconfigured
-    "missing HITL lane stays unconfigured"
+let default_registry = current_registry "default HITL lane bootstrap" in
+require_lane_slots
+  "explicit default HITL lane keeps its configured slot"
     ~lane_id:"hitl_auto_judge"
-    default_registry;
+~expected:[ replacement_target ]
+default_registry;
   let structured_judge_candidates =
     [ replacement_structured_judge_target
     ; replacement_secondary_runtime_target
@@ -485,9 +546,10 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
        ~structured_judge_candidates
        replacement_target);
   create_server_state ();
-  require_lane_unconfigured
-    "structured-judge route does not synthesize an exact-output lane"
+require_lane_slots
+  "structured-judge runtime lane does not rewrite the explicit exact lane"
     ~lane_id:"hitl_auto_judge"
+~expected:[ replacement_target ]
     (current_registry "runtime-lane HITL bootstrap");
   let explicit_slots = [ replacement_secondary_target; replacement_target ] in
   write_file
@@ -502,6 +564,161 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
     ~lane_id:"hitl_auto_judge"
     ~expected:explicit_slots
     (current_registry "explicit HITL lane bootstrap")
+;;
+
+let test_published_registry_value_is_generation_stable () =
+  let lane_id = "generation-swap" in
+  let resolver_snapshot =
+    load_control_snapshot
+      (Exact_output.Full_replacement
+         { source = "immutable-generation-swap"; contents = replacement_catalog })
+  in
+  let publish slot_ids =
+    match
+      Runtime.publish_exact_output_registry
+        ~lanes:[ Runtime_schema.{ id = lane_id; slot_ids } ]
+        resolver_snapshot
+    with
+    | Ok registry -> registry
+    | Error detail ->
+      Alcotest.failf "failed to publish immutable generation fixture: %s" detail
+  in
+  let first = publish [ replacement_target ] in
+  let first_generation = Runtime_exact_output_registry.generation first in
+  let second = publish [ replacement_secondary_target ] in
+  let second_generation = Runtime_exact_output_registry.generation second in
+  Alcotest.(check int64)
+    "later publication advances generation"
+    (Int64.succ first_generation)
+    second_generation;
+  Alcotest.(check int64)
+    "captured publication retains its generation"
+    first_generation
+    (Runtime_exact_output_registry.generation first);
+  (match Runtime_exact_output_registry.resolve_lane first ~lane_id with
+   | Ok _ -> ()
+   | Error _ ->
+     Alcotest.fail
+       "captured publication must remain resolvable after the global generation swaps");
+  (match Runtime_exact_output_registry.resolve_lane second ~lane_id with
+   | Ok _ -> ()
+   | Error _ -> Alcotest.fail "latest publication must remain resolvable");
+  match Runtime_exact_output_registry.current () with
+  | Ok current ->
+    Alcotest.(check int64)
+      "global registry points at the latest publication"
+      second_generation
+      (Runtime_exact_output_registry.generation current)
+  | Error _ -> Alcotest.fail "latest publication must be globally installed"
+;;
+
+let test_repo_seed_board_attention_lane_admits () =
+  with_temp_dir "exact-output-repo-seed-admission" @@ fun root ->
+  let config_root = Filename.concat root "config" in
+  mkdir_p config_root;
+  let repo_root = Masc_test_deps.find_project_root () in
+  let source_config = Filename.concat repo_root "config" in
+  let runtime_path = Filename.concat config_root "runtime.toml" in
+  let overlay_path = Filename.concat config_root "oas-models-overlay.toml" in
+  write_file
+    runtime_path
+    (Fs_compat.load_file (Filename.concat source_config "runtime.toml"));
+  write_file
+    overlay_path
+    (Fs_compat.load_file
+       (Filename.concat source_config "oas-models-overlay.toml"));
+  Unix.putenv "MASC_CONFIG_DIR" config_root;
+  Unix.putenv "OAS_MODEL_CATALOG" "";
+  (match Runtime.init_default ~config_path:runtime_path with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "repo runtime seed failed to load: %s" detail);
+  let lanes =
+    match Runtime_toml.parse_file runtime_path with
+    | Error errors ->
+      Alcotest.failf
+        "repo runtime seed failed to parse for exact lanes: %d error(s)"
+        (List.length errors)
+    | Ok (config : Runtime_schema.config) -> config.exact_output_lane_decls
+  in
+  let board_lane =
+    List.find_opt
+      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         String.equal lane.id Masc.Keeper_board_attention_exact_flow.lane_id)
+      lanes
+  in
+  (match board_lane with
+   | None -> Alcotest.fail "repo runtime seed is missing the Board attention lane"
+   | Some lane ->
+     Alcotest.(check bool)
+       "repo Board attention lane has configured slots"
+       true
+       (lane.slot_ids <> []));
+  let credential_envs = [ "ZAI_API_KEY_SB"; "DEEPSEEK_API_KEY" ] in
+  let previous_credentials =
+    List.map
+      (fun credential_env -> credential_env, Sys.getenv_opt credential_env)
+      credential_envs
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun (credential_env, previous_credential) ->
+           Unix.putenv
+             credential_env
+             (Option.value ~default:"" previous_credential))
+        previous_credentials)
+    (fun () ->
+       List.iter (fun credential_env -> Unix.putenv credential_env "") credential_envs;
+       let unavailable_message =
+         try
+           Server_runtime_bootstrap.For_testing.configure_exact_output_registry
+             ~config_root
+             ();
+           Alcotest.fail
+             "mandatory seed lanes must reject startup without a usable credential"
+         with
+         | Env_config_core.Config_error message -> message
+       in
+       Alcotest.(check bool)
+         "credential failure names the first mandatory lane"
+         true
+         (String_util.contains_substring unavailable_message "hitl_auto_judge");
+       Alcotest.(check bool)
+         "credential failure gives provider-neutral credential guidance"
+         true
+         (String_util.contains_substring unavailable_message "credential");
+       List.iter
+         (fun credential_env ->
+            Unix.putenv credential_env "exact-output-seed-test")
+         credential_envs;
+       let require_published_seed label =
+         Server_runtime_bootstrap.For_testing.configure_exact_output_registry
+           ~config_root
+           ();
+         let registry = current_registry label in
+         List.iter
+           (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+              require_lane_slots
+                (label ^ " " ^ lane.id)
+                ~lane_id:lane.id
+                ~expected:lane.slot_ids
+                registry)
+           lanes
+       in
+       require_published_seed "repo config plus deployment overlay";
+       let overlay_without_pricing =
+         Fs_compat.load_file
+           (Filename.concat source_config "oas-models-overlay.toml")
+         |> String.split_on_char '\n'
+         |> List.filter (fun line ->
+           let line = String.trim line in
+           not
+             (String.starts_with ~prefix:"input_per_million =" line
+              || String.starts_with ~prefix:"output_per_million =" line))
+         |> String.concat "\n"
+       in
+       write_file overlay_path overlay_without_pricing;
+       require_published_seed "pricing-free deployment overlay")
 ;;
 
 let () =
@@ -527,7 +744,7 @@ let () =
                ~proc_mgr
                ~fs)
         ; Alcotest.test_case
-            "HITL lane stays explicit and preserves configured order"
+"HITL lane is explicit, typed when missing, and preserves configured order"
             `Quick
             (test_hitl_auto_judge_lane_bootstrap
                ~clock
@@ -543,9 +760,18 @@ let () =
             "closed registry transaction publishes final generation and lane"
             `Quick
             test_closed_registry_transaction
+; Alcotest.test_case
+    "captured publication remains stable across global generation swap"
+    `Quick
+    test_published_registry_value_is_generation_stable
+
         ; Alcotest.test_case
             "after-rename runtime save converges file, registry, and cache"
             `Quick
             test_runtime_after_rename_converges_state
+        ; Alcotest.test_case
+            "repo config and deployment overlay admit the Board attention seed lane"
+            `Quick
+            test_repo_seed_board_attention_lane_admits
         ] ) ]
 ;;

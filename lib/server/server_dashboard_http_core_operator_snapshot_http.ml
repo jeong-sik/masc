@@ -6,10 +6,9 @@
 
     1. **Default summary request** (no actor, no include_messages
        override, no include_keepers override; view omitted or
-       "summary") — serves the cached `operator_snapshot_cache`
-       surface via `cached_surface_or_first_success_json` with a 5s
-       SWR window. Failures fall back through to a fresh compute
-       under `Offloaded_readonly` mode.
+       "summary") — serves the generation-guarded operator snapshot
+       surface with a 5s SWR window. Failures fall back through to a
+       fresh compute under `Offloaded_readonly` mode.
 
     2. **Parameterized request** — on-demand compute with 5s SWR
        cache. Cache key is the colon-delimited concatenation of
@@ -61,7 +60,13 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
     | None -> true
     | Some raw -> String.equal (String.lowercase_ascii (String.trim raw)) "summary"
   in
-  let compute_default_summary () =
+  let default_cache_key generation =
+    Core_cache.dashboard_cache_key
+      config
+      "operator_snapshot"
+      (Printf.sprintf "default-summary:g%d" generation)
+  in
+  let compute_default_summary ~generation =
     let started_at = Unix.gettimeofday () in
     Core_runtime.run_dashboard_compute
       ~mode:Offloaded_readonly
@@ -94,23 +99,74 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
          ~surface:"operator_snapshot"
          ~started_at
          ~extra:(Core_operator.operator_snapshot_extra ())
-  in
-  let default_cache_key =
-    Core_cache.dashboard_cache_key config "operator_snapshot" "default-summary"
-  in
-  if default_summary_request
-  then
-    cached_surface_or_first_success_json
-      Core_operator.operator_snapshot_cache
-      ~cache_key:default_cache_key
-      ~ttl:standard_cache_ttl_s
-      ~clock
-      ~timeout_sec:Core_cache.dashboard_request_timeout_s
-      compute_default_summary
     |> Core_operator_query.with_operator_snapshot_metadata
          ~config
-         ~cache_key:default_cache_key
+         ~cache_key:(default_cache_key generation)
          ~query:(Core_operator_query.operator_snapshot_default_query ())
+  in
+  if default_summary_request
+  then (
+    let attach
+          (publication : Core_operator.operator_snapshot_publication)
+      =
+      Core_operator.operator_snapshot_publication_json publication
+    in
+    let current, is_fresh =
+      Core_operator.operator_snapshot_publication_with_freshness ()
+    in
+    if is_fresh
+    then attach current
+    else (
+      let cache_key = default_cache_key current.generation in
+      let compute_and_publish () =
+        let compute = Core_operator.begin_operator_snapshot_compute () in
+        try
+          let json = compute_default_summary ~generation:compute.generation in
+          ignore
+            (Core_operator.publish_operator_snapshot_if_current
+               ~compute
+               json
+             : Core_operator.operator_snapshot_publication option);
+          json
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          (match
+             Core_operator.mark_operator_snapshot_error_if_current
+               ~compute
+               exn
+           with
+           | None -> ()
+           | Some publication ->
+             !Core_operator.operator_snapshot_broadcast_ref publication);
+          raise exn
+      in
+      let refresh_cache_key =
+        if current.has_success
+        then
+          Printf.sprintf
+            "%s:publication:%s:g%d:c%d"
+            cache_key
+            current.epoch
+            current.generation
+            current.compute_sequence
+        else cache_key
+      in
+      if current.has_success
+      then
+        Dashboard_cache.seed_stale_if_missing
+          refresh_cache_key
+          ~stale_for:standard_cache_ttl_s
+          current.json;
+      ignore
+        (Dashboard_cache.get_or_compute_with_timeout
+           refresh_cache_key
+           ~ttl:standard_cache_ttl_s
+           ~clock
+           ~timeout_sec:Core_cache.dashboard_request_timeout_s
+           compute_and_publish
+         : Yojson.Safe.t);
+      Core_operator.operator_snapshot_publication () |> attach))
   else (
     let started_at = Unix.gettimeofday () in
     let include_messages =
@@ -128,14 +184,21 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
       | Some raw -> String.equal (String.lowercase_ascii (String.trim raw)) "summary"
       | None -> false
     in
+    let optional_cache_key_part = function
+      | None -> "n"
+      | Some value -> Printf.sprintf "s%d:%s" (String.length value) value
+    in
     let cache_key =
-      Printf.sprintf
-        "operator_snapshot:param:%s|%s|%b|%b|%b"
-        (Option.value ~default:"" actor)
-        (Option.value ~default:"" view)
-        include_messages
-        include_keepers
-        lightweight_summary
+      Core_cache.dashboard_cache_key
+        config
+        "operator_snapshot"
+        (Printf.sprintf
+           "param:%s|%s|%b|%b|%b"
+           (optional_cache_key_part actor)
+           (optional_cache_key_part view)
+           include_messages
+           include_keepers
+           lightweight_summary)
     in
     let query =
       Core_operator_query.operator_snapshot_query_json

@@ -168,6 +168,7 @@ end
 module Operator_name = struct
   type t =
     | Operator_action
+    | Operator_board_attention_quarantine_requeue
     | Operator_chat_recovery_resolve
     | Operator_confirm
     | Operator_digest
@@ -176,6 +177,8 @@ module Operator_name = struct
 
   let to_string = function
     | Operator_action -> "masc_operator_action"
+    | Operator_board_attention_quarantine_requeue ->
+      "masc_operator_board_attention_quarantine_requeue"
     | Operator_chat_recovery_resolve -> "masc_operator_chat_recovery_resolve"
     | Operator_confirm -> "masc_operator_confirm"
     | Operator_digest -> "masc_operator_digest"
@@ -185,6 +188,8 @@ module Operator_name = struct
 
   let of_string = function
     | "masc_operator_action" -> Some Operator_action
+    | "masc_operator_board_attention_quarantine_requeue" ->
+      Some Operator_board_attention_quarantine_requeue
     | "masc_operator_chat_recovery_resolve" -> Some Operator_chat_recovery_resolve
     | "masc_operator_confirm" -> Some Operator_confirm
     | "masc_operator_digest" -> Some Operator_digest
@@ -213,6 +218,7 @@ module Operator_remote_name = struct
     [ Operator_tool Operator_name.Operator_snapshot
     ; Operator_tool Operator_name.Operator_digest
     ; Operator_tool Operator_name.Operator_action
+    ; Operator_tool Operator_name.Operator_board_attention_quarantine_requeue
     ; Operator_tool Operator_name.Operator_chat_recovery_resolve
     ; Operator_tool Operator_name.Operator_task_recovery_resolve
     ; Operator_tool Operator_name.Operator_confirm

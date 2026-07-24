@@ -515,6 +515,87 @@ let handle_keeper_chat_recovery_post state agent_name req reqd ~keeper_name
             ~status:(keeper_chat_recovery_error_status error)
             (Keeper_chat_recovery_command.mutation_error_json ~audit error)))
 
+let keeper_board_attention_quarantine_error_status = function
+  | Keeper_board_attention_quarantine_command.Candidate_state_conflict _
+  | Keeper_board_attention_quarantine_command.Partition_state_conflict _ ->
+    `Conflict
+  | Keeper_board_attention_quarantine_command.Durability_unconfirmed _
+  | Keeper_board_attention_quarantine_command.Wake_request_failed _ ->
+    `Service_unavailable
+;;
+
+let handle_keeper_board_attention_quarantine_recovery_post
+      state
+      agent_name
+      req
+      reqd
+      ~keeper_name
+      ~raw_partition_id
+      body_str
+  =
+  let module Command = Keeper_board_attention_quarantine_command in
+  let respond ?(status = `OK) json =
+    Http.Response.json_value ~status ~request:req json reqd
+  in
+  let parsed =
+    try Yojson.Safe.from_string body_str |> Command.parse_request with
+    | Yojson.Json_error _ -> Error (Command.Invalid_field "request body")
+  in
+  match parsed with
+  | Error error ->
+    respond
+      ~status:`Bad_request
+      (`Assoc
+        [ "schema", `String Command.result_schema
+        ; "ok", `Bool false
+        ; "error", Command.input_error_to_json error
+        ])
+  | Ok recovery_request ->
+    (match
+       Command.make
+         ~keeper_name
+         ~raw_partition_id
+         recovery_request
+     with
+     | Error error ->
+       respond
+         ~status:`Bad_request
+         (`Assoc
+           [ "schema", `String Command.result_schema
+           ; "ok", `Bool false
+           ; "error", Command.input_error_to_json error
+           ])
+     | Ok command ->
+       let config = Mcp_server.workspace_config state in
+       let result =
+         Command.execute
+           ~now:(Time_compat.now ())
+           ~base_path:config.Workspace.base_path
+           command
+       in
+       let audit =
+         Command.audit
+           config
+           ~actor:agent_name
+           command
+           ~outcome:
+             (match result with
+              | Ok _ -> Audit_log.Success
+              | Error error ->
+                Audit_log.Failure (Command.execution_error_label error))
+         |> Command.audit_json
+       in
+       (match result with
+        | Ok report ->
+          Operator_control.invalidate_snapshot_cache ();
+          Dashboard_projection_cache.invalidate_snapshot_json ~config;
+          respond (Command.success_json ~audit command report)
+        | Error error ->
+          respond
+            ~status:(keeper_board_attention_quarantine_error_status error)
+            (Command.failure_json ~audit error)))
+;;
+
 let dashboard_field_type_error key expected value =
   Error
     (Printf.sprintf "%s must be %s (received %s)" key expected

@@ -120,7 +120,13 @@ let replacement_catalog =
     ()
 ;;
 
-let runtime_toml ?hitl_slots ?structured_judge_candidates lane_target =
+let runtime_toml
+      ?hitl_slots
+      ?structured_judge_candidates
+      ?(include_board_attention = true)
+      ?(include_hitl_auto_judge = true)
+      lane_target
+  =
   let structured_judge_route, structured_judge_lane =
     match structured_judge_candidates with
     | None -> "", ""
@@ -129,6 +135,23 @@ let runtime_toml ?hitl_slots ?structured_judge_candidates lane_target =
       , Printf.sprintf
           "\n[runtime.lanes.judges]\nstrategy = \"ordered\"\ncandidates = [%s]\n"
           (candidates |> List.map (Printf.sprintf "%S") |> String.concat ", ") )
+  in
+  let board_attention_lane =
+    if include_board_attention
+    then
+      Printf.sprintf
+        "\n[runtime.exact_output_lanes.board_attention_exact]\nslots = [%S]\n"
+        lane_target
+    else ""
+  in
+  let hitl_auto_judge_lane =
+    if include_hitl_auto_judge
+    then
+      let slot_ids = Option.value ~default:[ lane_target ] hitl_slots in
+      Printf.sprintf
+        "\n[runtime.exact_output_lanes.hitl_auto_judge]\nslots = [%s]\n"
+        (slot_ids |> List.map (Printf.sprintf "%S") |> String.concat ", ")
+    else ""
   in
   let base =
     (Printf.sprintf
@@ -165,15 +188,11 @@ slots = [%S]
 |}
        structured_judge_route
        lane_target)
+    ^ board_attention_lane
     ^ structured_judge_lane
+    ^ hitl_auto_judge_lane
   in
-  match hitl_slots with
-  | None -> base
-  | Some slot_ids ->
-    Printf.sprintf
-      "%s\n[runtime.exact_output_lanes.hitl_auto_judge]\nslots = [%s]\n"
-      base
-      (slot_ids |> List.map (Printf.sprintf "%S") |> String.concat ", ")
+  base
 ;;
 
 let failed_runtime_toml =

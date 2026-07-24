@@ -11,10 +11,11 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Operator_remote
 
 let operator_remote_instructions =
-  "MASC remote operator profile exposes six operator tools: \
-masc_operator_snapshot, masc_operator_digest, masc_operator_action, masc_operator_chat_recovery_resolve, masc_operator_task_recovery_resolve, and masc_operator_confirm. \
+  "MASC remote operator profile exposes seven operator tools: \
+masc_operator_snapshot, masc_operator_digest, masc_operator_action, masc_operator_board_attention_quarantine_requeue, masc_operator_chat_recovery_resolve, masc_operator_task_recovery_resolve, and masc_operator_confirm. \
 Read raw state with masc_operator_snapshot first when needed, and prefer masc_operator_digest for intervention-oriented supervision. \
 Use masc_operator_action for guided actions only. \
+Use masc_operator_board_attention_quarantine_requeue only with the exact Keeper, partition, candidate, and quarantine id observed from durable state; it never auto-retries. \
 Use masc_operator_chat_recovery_resolve only with the exact receipt_id, revision, and lease_id observed from queue state; it never auto-redelivers. \
 Use masc_operator_task_recovery_resolve only with the exact task owner and backlog version observed from Task state; it performs no liveness inference. \
 When confirm_required=true, you must call masc_operator_confirm with the returned confirm_token before the action executes. \
@@ -214,6 +215,7 @@ let custom_tool_titles : (string * string) list = [
   ("masc_operator_snapshot", "Operator Snapshot");
   ("masc_operator_digest", "Operator Digest");
   ("masc_operator_action", "Operator Action");
+  ("masc_operator_board_attention_quarantine_requeue", "Requeue Board Quarantine");
   ("masc_operator_chat_recovery_resolve", "Resolve Chat Recovery");
   ("masc_operator_task_recovery_resolve", "Resolve Task Recovery");
   ("masc_operator_confirm", "Operator Confirm");

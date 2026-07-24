@@ -32,3 +32,7 @@ val request :
 
 val await : registration -> await_result
 (** Cancellably consume one hint or observe registration closure. *)
+
+val unregister : registration -> unit
+(** Immediately close and remove the exact process-local registration.
+    Switch release remains an idempotent fallback. *)

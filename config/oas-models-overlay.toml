@@ -4,7 +4,17 @@
 # model builds. OAS owns the embedded base catalog; copying upstream rows here
 # would recreate the full-catalog fork this overlay replaces.
 
-# Z.AI coding-plan endpoint under [providers.glm-coding].
+# Exact-output GLM targets use the public MASC runtime credential contract.
+# This exact-only provider deliberately has no credential aliases or fallback.
+[[providers]]
+id = "glm-coding-sb-exact"
+kind = "glm"
+base_url = "https://api.z.ai/api/coding/paas/v4"
+request_path = "/chat/completions"
+api_key_env = "ZAI_API_KEY_SB"
+capabilities_base = "glm"
+
+# Z.AI coding-plan runtime capability rows.
 [[models]]
 id_prefix = "GLM-5-Turbo"
 provider_name = "glm-coding"
@@ -221,12 +231,46 @@ supports_response_format_json = false
 supports_structured_output = false
 supports_native_streaming = true
 
+# Exact-only copies bind target admission to the exact provider credential above.
+[[models]]
+id_prefix = "GLM-5-Turbo"
+provider_name = "glm-coding-sb-exact"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "glm-4.7"
+provider_name = "glm-coding-sb-exact"
+base = "glm"
+max_context_tokens = 200000
+max_output_tokens = 128000
+supports_tools = true
+supports_tool_choice = true
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_response_format_json = true
+supports_native_streaming = true
+
 # Opaque exact-output slot bindings. MASC routes only by [id]; OAS owns the
 # provider/model join, capability admission, and wire materialization.
 [[targets]]
 id = "glm-coding.glm-5-turbo"
-provider_ref = "glm-coding"
+provider_ref = "glm-coding-sb-exact"
 model_id = "GLM-5-Turbo"
+
+[[targets]]
+id = "glm-coding.glm-4-7-coding"
+provider_ref = "glm-coding-sb-exact"
+model_id = "glm-4.7"
 
 [[targets]]
 id = "deepseek.deepseek-v4-pro"

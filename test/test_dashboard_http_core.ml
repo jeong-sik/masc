@@ -230,6 +230,22 @@ let test_keeper_chat_recovery_route_is_exact () =
   check bool "recovery route rejects extra segments" true
     (Server_dashboard_http_keeper_api.classify_keeper_post_route (path ^ "/bulk")
      = Server_dashboard_http_keeper_api.Keeper_post_unknown)
+  ;
+  let quarantine_path =
+    "/api/v1/keepers/idealist/board-attention/quarantines/ba-root-123/recovery"
+  in
+  (match
+     Server_dashboard_http_keeper_api.classify_keeper_post_route quarantine_path
+   with
+   | Server_dashboard_http_keeper_api
+     .Keeper_post_board_attention_quarantine_recovery route ->
+     check string "quarantine route keeper" "idealist" route.keeper_name;
+     check string "quarantine route partition" "ba-root-123" route.partition_id
+   | _ -> fail "exact Board quarantine recovery route was not classified");
+  check bool "quarantine route rejects extra segments" true
+    (Server_dashboard_http_keeper_api.classify_keeper_post_route
+       (quarantine_path ^ "/bulk")
+     = Server_dashboard_http_keeper_api.Keeper_post_unknown)
 
 let with_test_env f =
   let dir = test_dir () in
@@ -542,18 +558,51 @@ let test_dashboard_shell_http_json_prefers_light_last_good_while_prewarming () =
          |> to_bool))
 
 let test_operator_snapshot_default_route_hydrates_first_success () =
-  let source =
+  let http_source =
     read_file "lib/server/server_dashboard_http_core_operator_snapshot_http.ml"
   in
-  check bool "operator snapshot uses first-success cache helper" true
-    (contains_substring source "cached_surface_or_first_success_json"
-     && contains_substring source "operator_snapshot_cache"
-     && contains_substring source
-          "dashboard_cache_key config \"operator_snapshot\" \"default-summary\"");
+  let owner_source =
+    read_file "lib/server/server_dashboard_http_core_operator.ml"
+  in
+  let refresh_source =
+    read_file "lib/server/server_dashboard_http_core_snapshot_refresh.ml"
+  in
+  let execution_source =
+    read_file "lib/server/server_dashboard_http_execution_surfaces.ml"
+  in
+  check bool "operator snapshot uses generation-aware cache publication" true
+    (contains_substring http_source "operator_snapshot_publication"
+     && contains_substring http_source
+          "(publication : Core_operator.operator_snapshot_publication)"
+     && contains_substring http_source
+          "operator_snapshot_publication_with_freshness"
+     && contains_substring http_source
+          "Printf.sprintf \"default-summary:g%d\"");
   check bool "operator snapshot no longer serves raw initializing cache" true
     (not
-       (contains_substring source
-          "then cached_surface_json operator_snapshot_cache"))
+       (contains_substring http_source
+          "then cached_surface_json operator_snapshot_cache"));
+  check bool "publication owner replaces immutable records" true
+    (contains_substring owner_source "operator_snapshot_publication_ref :="
+     && contains_substring owner_source "fresh_until_unix"
+     && not
+          (contains_substring owner_source
+             "patch_operator_snapshot_cached_json"));
+  check bool "metadata is finalized before terminal publication" true
+    (contains_substring refresh_source
+       "|> Core_operator_query.with_operator_snapshot_metadata"
+     && not (contains_substring refresh_source "{ publication with json }"));
+  check bool "invalidation SSE uses canonical owner tombstone" true
+    (contains_substring execution_source
+       ".publish_operator_snapshot_invalidation_if_current"
+     && not (contains_substring execution_source "let tombstone =")
+     && not
+          (contains_substring execution_source
+             "patch_operator_snapshot_cache_for_keeper"));
+  check bool "stale publication enters serialized SWR refresh" true
+    (contains_substring http_source "Dashboard_cache.seed_stale_if_missing"
+     && contains_substring http_source
+          "Dashboard_cache.get_or_compute_with_timeout")
 
 let test_dashboard_query_cache_segment_normalizes_missing_values () =
   check string "missing none" "missing"
@@ -637,17 +686,43 @@ let test_operator_snapshot_default_route_exposes_provenance () =
   let state =
     Lib.Mcp_server_eio.For_testing.create_state ~base_path:config.base_path ()
   in
+  let current = Server_dashboard_http_core_operator.operator_snapshot_publication () in
+  let cache_key =
+    Server_dashboard_http_core_cache.dashboard_cache_key
+      config
+      "operator_snapshot"
+      (Printf.sprintf "default-summary:g%d" current.generation)
+  in
   let seed =
     `Assoc
       [ "available_actions", `List []
       ; "keepers", `List []
       ; "generated_at", `String "2026-05-15T00:00:00Z"
       ]
+    |> Server_dashboard_http_core_operator_query.with_operator_snapshot_metadata
+         ~config
+         ~cache_key
+         ~query:
+           (Server_dashboard_http_core_operator_query
+            .operator_snapshot_default_query ())
   in
-  with_cached_surface_success
-    Server_dashboard_http_core_operator.operator_snapshot_cache
-    seed
-  @@ fun () ->
+  let publication =
+    match
+      Server_dashboard_http_core_operator.For_testing
+      .publish_operator_snapshot_success
+        seed
+    with
+    | Some publication -> publication
+    | None -> fail "canonical operator snapshot test publication was superseded"
+  in
+  let current, is_fresh =
+    Server_dashboard_http_core_operator.operator_snapshot_publication_with_freshness ()
+  in
+  check bool "canonical publication is fresh" true is_fresh;
+  check int
+    "canonical publication identity retained"
+    publication.compute_sequence
+    current.compute_sequence;
   let json =
     Server_dashboard_http_core.operator_snapshot_http_json
       ~state
@@ -655,6 +730,12 @@ let test_operator_snapshot_default_route_exposes_provenance () =
       ~clock:(Eio.Stdenv.clock env)
       (request "/api/v1/operator")
   in
+  check string
+    "HTTP serves the canonical publication byte-for-byte"
+    (Yojson.Safe.to_string
+       (Server_dashboard_http_core_operator.operator_snapshot_publication_json
+          publication))
+    (Yojson.Safe.to_string json);
   let open Yojson.Safe.Util in
   check string "surface" "/api/v1/operator"
     (json |> member "dashboard_surface" |> to_string);
@@ -672,11 +753,27 @@ let test_operator_snapshot_default_route_exposes_provenance () =
     (json |> member "query" |> member "default_summary_request" |> to_bool);
   check bool "query includes keepers" true
     (json |> member "query" |> member "include_keepers" |> to_bool);
-  check string "cache state" "fresh"
-    (json |> member "cache" |> member "cache_state" |> to_string);
   check bool "cache key surfaced" true
     (String.length (json |> member "cache" |> member "request_cache_key" |> to_string)
-     > 0)
+     > 0);
+  let stale_publication =
+    match
+      Server_dashboard_http_core_operator.For_testing
+      .publish_operator_snapshot_success
+        ~fresh_for_s:(-1.0)
+        seed
+    with
+    | Some publication -> publication
+    | None -> fail "stale canonical operator snapshot test publication was superseded"
+  in
+  let current, is_fresh =
+    Server_dashboard_http_core_operator.operator_snapshot_publication_with_freshness ()
+  in
+  check bool "expired canonical publication is stale" false is_fresh;
+  check int
+    "stale publication remains canonical"
+    stale_publication.compute_sequence
+    current.compute_sequence
 
 let test_operator_digest_default_route_exposes_provenance () =
   with_test_env @@ fun ~env ~sw ~config ->

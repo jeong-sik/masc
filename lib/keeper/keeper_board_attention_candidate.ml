@@ -2,24 +2,23 @@
 
 module Board_signal = Keeper_world_observation_board_signal
 module Candidate_map = Map.Make (String)
-module Judgment_failure = Keeper_board_attention_failure
+module Partition_generation = Keeper_board_attention_partition_generation
 
-type retryable_failure_kind =
-  | Runtime_configuration_unavailable
-  | Prompt_contract_unavailable
-  | Provider_unavailable
-  | Response_contract_unavailable
+type delivery_failure_kind =
   | Durable_delivery_unavailable
 
-type retryable_failure =
-  { kind : retryable_failure_kind
+type delivery_failure =
+  { kind : delivery_failure_kind
   ; detail : string
   ; failed_at : float
   }
 
 type judgment =
   { verdict : Keeper_board_attention_judgment.t
-  ; runtime_id : string
+  ; slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
   ; judged_at : float
   }
 
@@ -27,11 +26,11 @@ type delivery =
   | Enqueued_to_keeper_lane
   | Not_relevant
 
-type pending_state = { last_failure : retryable_failure option }
+type pending_state = { last_delivery_failure : delivery_failure option }
 
 type judged_state =
   { judgment : judgment
-  ; last_failure : retryable_failure option
+  ; last_delivery_failure : delivery_failure option
   }
 
 type consumed_state =
@@ -40,10 +39,54 @@ type consumed_state =
   ; consumed_at : float
   }
 
+type resumable_status =
+  | Resumable_pending of pending_state
+  | Resumable_judged of judged_state
+  | Resumable_consumed of consumed_state
+
+type quarantine_failure_category =
+  | Candidate_membership_conflict
+  | Durable_partition_invariant
+  | Exact_setup_unavailable
+  | Exact_flow_replayed
+  | Exact_execution_terminal
+  | Domain_output_invalid
+  | Execution_provenance_mismatch
+  | Unexpected_worker_failure
+  | Exact_execution_quarantined
+
+type attempt_provenance =
+  { slot_id : string
+  ; call_id : string
+  ; plan_fingerprint : string
+  ; request_body_sha256 : string
+  }
+
+type quarantine =
+  { quarantine_id : string
+  ; partition_id : string
+  ; partition_generation : Partition_generation.t
+  ; failure_category : quarantine_failure_category
+  ; attempt_provenance : attempt_provenance option
+  ; quarantined_at : float
+  ; prior_status : resumable_status
+  }
+
+type quarantine_phase =
+  | Quarantined
+  | Requeue_requested of { requested_at : float }
+  | Requeued of { requeued_at : float }
+
+type quarantine_state =
+  { quarantine : quarantine
+  ; phase : quarantine_phase
+  }
+
 type status =
   | Pending of pending_state
   | Judged of judged_state
   | Consumed of consumed_state
+  | Quarantine of quarantine_state
 
 type candidate =
   { candidate_id : string
@@ -75,19 +118,57 @@ type record_acceptance =
 
 exception Candidate_unavailable of string
 
-let retryable_failure_kind_to_string = function
-  | Runtime_configuration_unavailable -> "runtime_configuration_unavailable"
-  | Prompt_contract_unavailable -> "prompt_contract_unavailable"
-  | Provider_unavailable -> "provider_unavailable"
-  | Response_contract_unavailable -> "response_contract_unavailable"
+let schema_version = 3
+
+let quarantine_failure_category_to_string = function
+  | Candidate_membership_conflict -> "candidate_membership_conflict"
+  | Durable_partition_invariant -> "durable_partition_invariant"
+  | Exact_setup_unavailable -> "exact_setup_unavailable"
+  | Exact_flow_replayed -> "exact_flow_replayed"
+  | Exact_execution_terminal -> "exact_execution_terminal"
+  | Domain_output_invalid -> "domain_output_invalid"
+  | Execution_provenance_mismatch -> "execution_provenance_mismatch"
+  | Unexpected_worker_failure -> "unexpected_worker_failure"
+  | Exact_execution_quarantined -> "exact_execution_quarantined"
+;;
+
+let quarantine_failure_category_of_string = function
+  | "candidate_membership_conflict" -> Some Candidate_membership_conflict
+  | "durable_partition_invariant" -> Some Durable_partition_invariant
+  | "exact_setup_unavailable" -> Some Exact_setup_unavailable
+  | "exact_flow_replayed" -> Some Exact_flow_replayed
+  | "exact_execution_terminal" -> Some Exact_execution_terminal
+  | "domain_output_invalid" -> Some Domain_output_invalid
+  | "execution_provenance_mismatch" -> Some Execution_provenance_mismatch
+  | "unexpected_worker_failure" -> Some Unexpected_worker_failure
+  | "exact_execution_quarantined" -> Some Exact_execution_quarantined
+  | _ -> None
+;;
+
+let resumable_status = function
+  | Pending pending -> Some (Resumable_pending pending)
+  | Judged judged -> Some (Resumable_judged judged)
+  | Consumed consumed -> Some (Resumable_consumed consumed)
+  | Quarantine { quarantine; phase = Requeued _ } -> Some quarantine.prior_status
+  | Quarantine { phase = (Quarantined | Requeue_requested _); _ } -> None
+;;
+
+let quarantine_state = function
+  | Quarantine state -> Some state
+  | Pending _ | Judged _ | Consumed _ -> None
+;;
+
+let status_of_resumable = function
+  | Resumable_pending pending -> Pending pending
+  | Resumable_judged judged -> Judged judged
+  | Resumable_consumed consumed -> Consumed consumed
+;;
+
+let delivery_failure_kind_to_string = function
   | Durable_delivery_unavailable -> "durable_delivery_unavailable"
 ;;
 
-let retryable_failure_kind_of_string = function
-  | "runtime_configuration_unavailable" -> Some Runtime_configuration_unavailable
-  | "prompt_contract_unavailable" -> Some Prompt_contract_unavailable
-  | "provider_unavailable" -> Some Provider_unavailable
-  | "response_contract_unavailable" -> Some Response_contract_unavailable
+let delivery_failure_kind_of_string = function
   | "durable_delivery_unavailable" -> Some Durable_delivery_unavailable
   | _ -> None
 ;;
@@ -232,7 +313,7 @@ let of_board_evidence
       ; signal
       ; judgment_request
       ; recorded_at
-      ; status = Pending { last_failure = None }
+      ; status = Pending { last_delivery_failure = None }
       }
 ;;
 
@@ -256,9 +337,9 @@ let of_board_signal
         | Error detail -> raise (Candidate_unavailable detail)))
 ;;
 
-let retryable_failure_to_yojson failure =
+let delivery_failure_to_yojson failure =
   `Assoc
-    [ "kind", `String (retryable_failure_kind_to_string failure.kind)
+    [ "kind", `String (delivery_failure_kind_to_string failure.kind)
     ; "detail", `String failure.detail
     ; "failed_at", `Float failure.failed_at
     ]
@@ -267,26 +348,33 @@ let retryable_failure_to_yojson failure =
 let judgment_to_yojson judgment =
   `Assoc
     [ "verdict", Keeper_board_attention_judgment.to_yojson judgment.verdict
-    ; "runtime_id", `String judgment.runtime_id
+    ; "slot_id", `String judgment.slot_id
+    ; "call_id", `String judgment.call_id
+    ; "plan_fingerprint", `String judgment.plan_fingerprint
+    ; "request_body_sha256", `String judgment.request_body_sha256
     ; "judged_at", `Float judgment.judged_at
     ]
 ;;
 
-let status_to_yojson = function
-  | Pending pending ->
+let resumable_status_to_yojson = function
+  | Resumable_pending pending ->
     `Assoc
       [ "kind", `String "pending"
-      ; ( "last_failure"
-        , option_json retryable_failure_to_yojson pending.last_failure )
+      ; ( "last_delivery_failure"
+        , option_json
+            delivery_failure_to_yojson
+            pending.last_delivery_failure )
       ]
-  | Judged judged ->
+  | Resumable_judged judged ->
     `Assoc
       [ "kind", `String "judged"
       ; "judgment", judgment_to_yojson judged.judgment
-      ; ( "last_failure"
-        , option_json retryable_failure_to_yojson judged.last_failure )
+      ; ( "last_delivery_failure"
+        , option_json
+            delivery_failure_to_yojson
+            judged.last_delivery_failure )
       ]
-  | Consumed consumed ->
+  | Resumable_consumed consumed ->
     `Assoc
       [ "kind", `String "consumed"
       ; "judgment", judgment_to_yojson consumed.judgment
@@ -295,9 +383,58 @@ let status_to_yojson = function
       ]
 ;;
 
+let attempt_provenance_to_yojson provenance =
+  `Assoc
+    [ "slot_id", `String provenance.slot_id
+    ; "call_id", `String provenance.call_id
+    ; "plan_fingerprint", `String provenance.plan_fingerprint
+    ; "request_body_sha256", `String provenance.request_body_sha256
+    ]
+;;
+
+let quarantine_to_yojson quarantine =
+  `Assoc
+    [ "quarantine_id", `String quarantine.quarantine_id
+    ; "partition_id", `String quarantine.partition_id
+    ; ( "partition_generation"
+      , Partition_generation.to_yojson quarantine.partition_generation )
+    ; ( "failure_category"
+      , `String
+          (quarantine_failure_category_to_string quarantine.failure_category) )
+    ; ( "attempt_provenance"
+      , option_json attempt_provenance_to_yojson quarantine.attempt_provenance )
+    ; "quarantined_at", `Float quarantine.quarantined_at
+    ; "prior_status", resumable_status_to_yojson quarantine.prior_status
+    ]
+;;
+
+let status_to_yojson = function
+  | Pending pending -> resumable_status_to_yojson (Resumable_pending pending)
+  | Judged judged -> resumable_status_to_yojson (Resumable_judged judged)
+  | Consumed consumed -> resumable_status_to_yojson (Resumable_consumed consumed)
+  | Quarantine { quarantine; phase = Quarantined } ->
+    `Assoc
+      [ "kind", `String "quarantined"
+      ; "quarantine", quarantine_to_yojson quarantine
+      ]
+  | Quarantine { quarantine; phase = Requeue_requested { requested_at } } ->
+    `Assoc
+      [ "kind", `String "requeue_requested"
+      ; "quarantine", quarantine_to_yojson quarantine
+      ; "requested_at", `Float requested_at
+      ]
+  | Quarantine { quarantine; phase = Requeued { requeued_at } } ->
+    `Assoc
+      [ "kind", `String "requeued"
+      ; "quarantine", quarantine_to_yojson quarantine
+      ; "requeued_at", `Float requeued_at
+      ]
+;;
+
 let candidate_to_json candidate =
   `Assoc
-    [ "candidate_id", `String candidate.candidate_id
+    [ "schema_version", `Int schema_version
+    ; "candidate_id", `String candidate.candidate_id
     ; "keeper_name", `String candidate.keeper_name
     ; "signal", signal_to_yojson candidate.signal
     ; "judgment_request", candidate.judgment_request
@@ -421,6 +558,151 @@ let float_json ~context = function
   | _ -> Error (context ^ " must be a number")
 ;;
 
+let finite_time ~context value =
+  if Float.is_finite value then Ok () else Error (context ^ " must be finite")
+;;
+
+let finite_float_json ~context json =
+  let* value = float_json ~context json in
+  let* () = finite_time ~context value in
+  Ok value
+;;
+
+let nonblank_string ~context value =
+  if String.equal (String.trim value) ""
+  then Error (context ^ " must not be empty")
+  else Ok ()
+;;
+
+let rec validate_finite_json ~context = function
+  | `Float value -> finite_time ~context value
+  | `Assoc fields ->
+    List.fold_left
+      (fun result (key, value) ->
+         let* () = result in
+         validate_finite_json ~context:(context ^ "." ^ key) value)
+      (Ok ())
+      fields
+  | `List values ->
+    let rec loop index = function
+      | [] -> Ok ()
+      | value :: rest ->
+        let* () =
+          validate_finite_json
+            ~context:(Printf.sprintf "%s[%d]" context index)
+            value
+        in
+        loop (index + 1) rest
+    in
+    loop 0 values
+  | `Bool _ | `Int _ | `Intlit _ | `Null | `String _ -> Ok ()
+;;
+
+let validate_judgment ~context (judgment : judgment) =
+  let* () =
+    nonblank_string
+      ~context:(context ^ ".verdict.rationale")
+      judgment.verdict.rationale
+  in
+  let* () = nonblank_string ~context:(context ^ ".slot_id") judgment.slot_id in
+  let* () = nonblank_string ~context:(context ^ ".call_id") judgment.call_id in
+  let* () =
+    nonblank_string
+      ~context:(context ^ ".plan_fingerprint")
+      judgment.plan_fingerprint
+  in
+  let* () =
+    nonblank_string
+      ~context:(context ^ ".request_body_sha256")
+      judgment.request_body_sha256
+  in
+  finite_time ~context:(context ^ ".judged_at") judgment.judged_at
+;;
+
+let validate_optional_delivery_failure = function
+  | None -> Ok ()
+  | Some failure ->
+    finite_time
+      ~context:"candidate.status.last_delivery_failure.failed_at"
+      failure.failed_at
+;;
+
+let validate_resumable_state = function
+  | Resumable_pending pending ->
+    validate_optional_delivery_failure pending.last_delivery_failure
+  | Resumable_judged judged ->
+    let* () =
+      validate_judgment ~context:"candidate.status.judgment" judged.judgment
+    in
+    validate_optional_delivery_failure judged.last_delivery_failure
+  | Resumable_consumed consumed ->
+    let* () =
+      validate_judgment ~context:"candidate.status.judgment" consumed.judgment
+    in
+    finite_time ~context:"candidate.status.consumed_at" consumed.consumed_at
+;;
+
+let nonblank_quarantine_field context value =
+  if String.equal (String.trim value) ""
+  then Error (context ^ " must not be blank")
+  else Ok ()
+;;
+
+let validate_attempt_provenance provenance =
+  let* () = nonblank_quarantine_field "candidate quarantine slot_id" provenance.slot_id in
+  let* () = nonblank_quarantine_field "candidate quarantine call_id" provenance.call_id in
+  let* () =
+    nonblank_quarantine_field
+      "candidate quarantine plan_fingerprint"
+      provenance.plan_fingerprint
+  in
+  nonblank_quarantine_field
+    "candidate quarantine request_body_sha256"
+    provenance.request_body_sha256
+;;
+
+let validate_quarantine quarantine =
+  let* () =
+    nonblank_quarantine_field
+      "candidate quarantine quarantine_id"
+      quarantine.quarantine_id
+  in
+  let* () =
+    nonblank_quarantine_field
+      "candidate quarantine partition_id"
+      quarantine.partition_id
+  in
+  let* () =
+    match quarantine.attempt_provenance with
+    | None -> Ok ()
+    | Some provenance -> validate_attempt_provenance provenance
+  in
+  let* () =
+    finite_time
+      ~context:"candidate.status.quarantine.quarantined_at"
+      quarantine.quarantined_at
+  in
+  validate_resumable_state quarantine.prior_status
+;;
+
+let validate_candidate_state (candidate : candidate) =
+  let* () = finite_time ~context:"candidate.recorded_at" candidate.recorded_at in
+  match candidate.status with
+  | Pending pending -> validate_resumable_state (Resumable_pending pending)
+  | Judged judged -> validate_resumable_state (Resumable_judged judged)
+  | Consumed consumed -> validate_resumable_state (Resumable_consumed consumed)
+  | Quarantine { quarantine; phase } ->
+    let* () = validate_quarantine quarantine in
+    (match phase with
+     | Quarantined -> Ok ()
+     | Requeue_requested { requested_at } ->
+       finite_time
+         ~context:"candidate.status.quarantine.requested_at"
+         requested_at
+     | Requeued { requeued_at } ->
+       finite_time ~context:"candidate.status.quarantine.requeued_at" requeued_at)
+;;
+
 let optional_json parser = function
   | `Null -> Ok None
   | value ->
@@ -507,7 +789,9 @@ let signal_of_yojson json =
   in
   let* updated_at_json = field ~context "updated_at" fields in
   let* updated_at =
-    optional_json (float_json ~context:(context ^ ".updated_at")) updated_at_json
+    optional_json
+      (finite_float_json ~context:(context ^ ".updated_at"))
+      updated_at_json
   in
   Ok
     { Board_dispatch.kind = kind
@@ -520,59 +804,105 @@ let signal_of_yojson json =
     }
 ;;
 
-let retryable_failure_of_yojson json =
-  let context = "candidate.status.last_failure" in
+let delivery_failure_of_yojson json =
+  let context = "candidate.status.last_delivery_failure" in
   let* fields = assoc ~context json in
   let* () = exact_fields ~context [ "kind"; "detail"; "failed_at" ] fields in
   let* kind_json = field ~context "kind" fields in
   let* kind_raw = string_json ~context:(context ^ ".kind") kind_json in
   let* kind =
-    match retryable_failure_kind_of_string kind_raw with
+    match delivery_failure_kind_of_string kind_raw with
     | Some kind -> Ok kind
-    | None -> Error (Printf.sprintf "unknown retryable failure kind %S" kind_raw)
+    | None -> Error (Printf.sprintf "unknown delivery failure kind %S" kind_raw)
   in
   let* detail_json = field ~context "detail" fields in
   let* detail = string_json ~context:(context ^ ".detail") detail_json in
   let* failed_at_json = field ~context "failed_at" fields in
-  let* failed_at = float_json ~context:(context ^ ".failed_at") failed_at_json in
+  let* failed_at =
+    finite_float_json ~context:(context ^ ".failed_at") failed_at_json
+  in
   Ok { kind; detail; failed_at }
 ;;
 
 let judgment_of_yojson json =
   let context = "candidate.status.judgment" in
   let* fields = assoc ~context json in
-  let* () = exact_fields ~context [ "verdict"; "runtime_id"; "judged_at" ] fields in
+  let* () =
+    exact_fields
+      ~context
+      [ "verdict"
+      ; "slot_id"
+      ; "call_id"
+      ; "plan_fingerprint"
+      ; "request_body_sha256"
+      ; "judged_at"
+      ]
+      fields
+  in
   let* verdict_json = field ~context "verdict" fields in
   let* verdict = Keeper_board_attention_judgment.of_yojson verdict_json in
-  let* runtime_id_json = field ~context "runtime_id" fields in
-  let* runtime_id = string_json ~context:(context ^ ".runtime_id") runtime_id_json in
+  let* slot_id_json = field ~context "slot_id" fields in
+  let* slot_id = string_json ~context:(context ^ ".slot_id") slot_id_json in
+  let* call_id_json = field ~context "call_id" fields in
+  let* call_id = string_json ~context:(context ^ ".call_id") call_id_json in
+  let* plan_fingerprint_json = field ~context "plan_fingerprint" fields in
+  let* plan_fingerprint =
+    string_json
+      ~context:(context ^ ".plan_fingerprint")
+      plan_fingerprint_json
+  in
+  let* request_body_sha256_json = field ~context "request_body_sha256" fields in
+  let* request_body_sha256 =
+    string_json
+      ~context:(context ^ ".request_body_sha256")
+      request_body_sha256_json
+  in
   let* judged_at_json = field ~context "judged_at" fields in
   let* judged_at = float_json ~context:(context ^ ".judged_at") judged_at_json in
-  Ok { verdict; runtime_id; judged_at }
+  let judgment =
+    { verdict
+    ; slot_id
+    ; call_id
+    ; plan_fingerprint
+    ; request_body_sha256
+    ; judged_at
+    }
+  in
+  let* () =
+    validate_judgment ~context judgment
+  in
+  Ok judgment
 ;;
 
-let status_of_yojson json =
+let resumable_status_of_yojson json =
   let context = "candidate.status" in
   let* fields = assoc ~context json in
   let* kind_json = field ~context "kind" fields in
   let* kind = string_json ~context:(context ^ ".kind") kind_json in
   match kind with
   | "pending" ->
-    let* () = exact_fields ~context [ "kind"; "last_failure" ] fields in
-    let* failure_json = field ~context "last_failure" fields in
-    let* last_failure =
-      optional_json retryable_failure_of_yojson failure_json
+    let* () =
+      exact_fields ~context [ "kind"; "last_delivery_failure" ] fields
     in
-    Ok (Pending { last_failure })
+    let* failure_json = field ~context "last_delivery_failure" fields in
+    let* last_delivery_failure =
+      optional_json delivery_failure_of_yojson failure_json
+    in
+    Ok (Resumable_pending { last_delivery_failure })
   | "judged" ->
-    let* () = exact_fields ~context [ "kind"; "judgment"; "last_failure" ] fields in
+    let* () =
+      exact_fields
+        ~context
+        [ "kind"; "judgment"; "last_delivery_failure" ]
+        fields
+    in
     let* judgment_json = field ~context "judgment" fields in
     let* judgment = judgment_of_yojson judgment_json in
-    let* failure_json = field ~context "last_failure" fields in
-    let* last_failure =
-      optional_json retryable_failure_of_yojson failure_json
+    let* failure_json = field ~context "last_delivery_failure" fields in
+    let* last_delivery_failure =
+      optional_json delivery_failure_of_yojson failure_json
     in
-    Ok (Judged { judgment; last_failure })
+    Ok (Resumable_judged { judgment; last_delivery_failure })
   | "consumed" ->
     let* () =
       exact_fields
@@ -590,9 +920,338 @@ let status_of_yojson json =
       | None -> Error (Printf.sprintf "unknown Board attention delivery %S" delivery_raw)
     in
     let* consumed_at_json = field ~context "consumed_at" fields in
-    let* consumed_at = float_json ~context:(context ^ ".consumed_at") consumed_at_json in
-    Ok (Consumed { judgment; delivery; consumed_at })
+    let* consumed_at =
+      finite_float_json ~context:(context ^ ".consumed_at") consumed_at_json
+    in
+    Ok (Resumable_consumed { judgment; delivery; consumed_at })
+  | value ->
+    Error (Printf.sprintf "unknown resumable Board attention status %S" value)
+;;
+
+let attempt_provenance_of_yojson json =
+  let context = "candidate quarantine attempt provenance" in
+  let* fields = assoc ~context json in
+  let* () =
+    exact_fields
+      ~context
+      [ "slot_id"; "call_id"; "plan_fingerprint"; "request_body_sha256" ]
+      fields
+  in
+  let* slot_id_json = field ~context "slot_id" fields in
+  let* slot_id = string_json ~context:(context ^ ".slot_id") slot_id_json in
+  let* call_id_json = field ~context "call_id" fields in
+  let* call_id = string_json ~context:(context ^ ".call_id") call_id_json in
+  let* plan_json = field ~context "plan_fingerprint" fields in
+  let* plan_fingerprint =
+    string_json ~context:(context ^ ".plan_fingerprint") plan_json
+  in
+  let* request_json = field ~context "request_body_sha256" fields in
+  let* request_body_sha256 =
+    string_json ~context:(context ^ ".request_body_sha256") request_json
+  in
+  Ok { slot_id; call_id; plan_fingerprint; request_body_sha256 }
+;;
+
+let quarantine_of_yojson json =
+  let context = "candidate quarantine" in
+  let* fields = assoc ~context json in
+  let* () =
+    exact_fields
+      ~context
+      [ "quarantine_id"
+      ; "partition_id"
+      ; "partition_generation"
+      ; "failure_category"
+      ; "attempt_provenance"
+      ; "quarantined_at"
+      ; "prior_status"
+      ]
+      fields
+  in
+  let* quarantine_id_json = field ~context "quarantine_id" fields in
+  let* quarantine_id =
+    string_json ~context:(context ^ ".quarantine_id") quarantine_id_json
+  in
+  let* partition_id_json = field ~context "partition_id" fields in
+  let* partition_id =
+    string_json ~context:(context ^ ".partition_id") partition_id_json
+  in
+  let* generation_json = field ~context "partition_generation" fields in
+  let* partition_generation = Partition_generation.of_yojson generation_json in
+  let* category_json = field ~context "failure_category" fields in
+  let* category_raw =
+    string_json ~context:(context ^ ".failure_category") category_json
+  in
+  let* failure_category =
+    match quarantine_failure_category_of_string category_raw with
+    | Some category -> Ok category
+    | None -> Error ("unknown candidate quarantine failure category: " ^ category_raw)
+  in
+  let* provenance_json = field ~context "attempt_provenance" fields in
+  let* attempt_provenance =
+    optional_json attempt_provenance_of_yojson provenance_json
+  in
+  let* quarantined_at_json = field ~context "quarantined_at" fields in
+  let* quarantined_at =
+    finite_float_json
+      ~context:(context ^ ".quarantined_at")
+      quarantined_at_json
+  in
+  let* prior_json = field ~context "prior_status" fields in
+  let* prior_status = resumable_status_of_yojson prior_json in
+  Ok
+    { quarantine_id
+    ; partition_id
+    ; partition_generation
+    ; failure_category
+    ; attempt_provenance
+    ; quarantined_at
+    ; prior_status
+    }
+;;
+
+let status_of_yojson json =
+  let context = "candidate.status" in
+  let* fields = assoc ~context json in
+  let* kind_json = field ~context "kind" fields in
+  let* kind = string_json ~context:(context ^ ".kind") kind_json in
+  match kind with
+  | "pending" | "judged" | "consumed" ->
+    let* resumable = resumable_status_of_yojson json in
+    Ok (status_of_resumable resumable)
+  | "quarantined" ->
+    let* () = exact_fields ~context [ "kind"; "quarantine" ] fields in
+    let* quarantine_json = field ~context "quarantine" fields in
+    let* quarantine = quarantine_of_yojson quarantine_json in
+    Ok (Quarantine { quarantine; phase = Quarantined })
+  | "requeue_requested" ->
+    let* () =
+      exact_fields ~context [ "kind"; "quarantine"; "requested_at" ] fields
+    in
+    let* quarantine_json = field ~context "quarantine" fields in
+    let* quarantine = quarantine_of_yojson quarantine_json in
+    let* requested_json = field ~context "requested_at" fields in
+    let* requested_at =
+      finite_float_json ~context:(context ^ ".requested_at") requested_json
+    in
+    Ok (Quarantine { quarantine; phase = Requeue_requested { requested_at } })
+  | "requeued" ->
+    let* () =
+      exact_fields ~context [ "kind"; "quarantine"; "requeued_at" ] fields
+    in
+    let* quarantine_json = field ~context "quarantine" fields in
+    let* quarantine = quarantine_of_yojson quarantine_json in
+    let* requeued_json = field ~context "requeued_at" fields in
+    let* requeued_at =
+      finite_float_json ~context:(context ^ ".requeued_at") requeued_json
+    in
+    Ok (Quarantine { quarantine; phase = Requeued { requeued_at } })
   | value -> Error (Printf.sprintf "unknown Board attention candidate status %S" value)
+;;
+
+let string_list_of_yojson ~context = function
+  | `List values ->
+    List.fold_left
+      (fun result value ->
+         let* () = result in
+         let* (_ : string) = string_json ~context value in
+         Ok ())
+      (Ok ())
+      values
+  | _ -> Error (context ^ " must be an array of strings")
+;;
+
+let optional_string_of_yojson ~context = function
+  | `Null -> Ok ()
+  | value ->
+    let* (_ : string) = string_json ~context value in
+    Ok ()
+;;
+
+let validate_keeper_context ~keeper_name json =
+  let context = "candidate.judgment_request.keeper_context" in
+  let* fields = assoc ~context json in
+  let* () =
+    exact_fields
+      ~context
+      [ "lane_keeper_name"
+      ; "agent_name"
+      ; "keeper_record_id"
+      ; "keeper_runtime_uid"
+      ; "persona"
+      ; "instructions"
+      ; "active_goal_ids"
+      ; "current_task_id"
+      ; "mention_keeper_ids"
+      ]
+      fields
+  in
+  let* lane_keeper_name_json = field ~context "lane_keeper_name" fields in
+  let* lane_keeper_name =
+    string_json
+      ~context:(context ^ ".lane_keeper_name")
+      lane_keeper_name_json
+  in
+  let* () =
+    if String.equal lane_keeper_name keeper_name
+    then Ok ()
+    else Error (context ^ ".lane_keeper_name does not match candidate keeper_name")
+  in
+  let* agent_name_json = field ~context "agent_name" fields in
+  let* (_ : string) =
+    string_json ~context:(context ^ ".agent_name") agent_name_json
+  in
+  let* instructions_json = field ~context "instructions" fields in
+  let* (_ : string) =
+    string_json ~context:(context ^ ".instructions") instructions_json
+  in
+  let* keeper_record_id = field ~context "keeper_record_id" fields in
+  let* () =
+    optional_string_of_yojson
+      ~context:(context ^ ".keeper_record_id")
+      keeper_record_id
+  in
+  let* keeper_runtime_uid = field ~context "keeper_runtime_uid" fields in
+  let* () =
+    optional_string_of_yojson
+      ~context:(context ^ ".keeper_runtime_uid")
+      keeper_runtime_uid
+  in
+  let* persona = field ~context "persona" fields in
+  let* () =
+    optional_string_of_yojson ~context:(context ^ ".persona") persona
+  in
+  let* active_goal_ids = field ~context "active_goal_ids" fields in
+  let* () =
+    string_list_of_yojson
+      ~context:(context ^ ".active_goal_ids")
+      active_goal_ids
+  in
+  let* current_task_id = field ~context "current_task_id" fields in
+  let* () =
+    optional_string_of_yojson
+      ~context:(context ^ ".current_task_id")
+      current_task_id
+  in
+  let* mention_keeper_ids = field ~context "mention_keeper_ids" fields in
+  let* () =
+    string_list_of_yojson
+      ~context:(context ^ ".mention_keeper_ids")
+      mention_keeper_ids
+  in
+  let* canonical = Context_key.of_yojson json in
+  Ok (Context_key.to_yojson canonical)
+;;
+
+let canonical_judgment_request candidate =
+  let context = "candidate.judgment_request" in
+  let* () = validate_finite_json ~context candidate.judgment_request in
+  let* fields = assoc ~context candidate.judgment_request in
+  let* () =
+    exact_fields
+      ~context
+      [ "candidate_id"; "signal"; "post"; "comments"; "keeper_context" ]
+      fields
+  in
+  let* candidate_id_json = field ~context "candidate_id" fields in
+  let* candidate_id =
+    string_json ~context:(context ^ ".candidate_id") candidate_id_json
+  in
+  let* () =
+    if String.equal candidate_id candidate.candidate_id
+    then Ok ()
+    else Error (context ^ ".candidate_id does not match durable candidate identity")
+  in
+  let* signal_json = field ~context "signal" fields in
+  let* request_signal = signal_of_yojson signal_json in
+  let* () =
+    if request_signal = candidate.signal
+    then Ok ()
+    else Error (context ^ ".signal does not match durable candidate signal")
+  in
+  let* post = field ~context "post" fields in
+  let* canonical_post =
+    match Board.post_of_yojson post with
+    | None -> Error (context ^ ".post does not match the current Board post schema")
+    | Some decoded ->
+      let post_id = Board.Post_id.to_string decoded.id in
+      if String.equal post_id candidate.signal.post_id
+      then Ok (Board.post_to_yojson decoded)
+      else Error (context ^ ".post.id does not match durable signal.post_id")
+  in
+  let* comments = field ~context "comments" fields in
+  let* canonical_comments =
+    match comments with
+    | `List values ->
+      List.fold_left
+        (fun result value ->
+           let* canonical = result in
+           match Board.comment_of_yojson value with
+           | None ->
+             Error
+               (context
+                ^ ".comments[] does not match the current Board comment schema")
+           | Some decoded ->
+             let post_id = Board.Post_id.to_string decoded.post_id in
+             if String.equal post_id candidate.signal.post_id
+             then Ok (Board.comment_to_yojson decoded :: canonical)
+             else
+               Error
+                 (context
+                  ^ ".comments[].post_id does not match durable signal.post_id"))
+        (Ok [])
+        values
+      |> Result.map List.rev
+    | _ -> Error (context ^ ".comments must be an array of objects")
+  in
+  let* keeper_context = field ~context "keeper_context" fields in
+  let* canonical_keeper_context =
+    validate_keeper_context ~keeper_name:candidate.keeper_name keeper_context
+  in
+  Ok
+    (`Assoc
+       [ "candidate_id", `String candidate.candidate_id
+       ; "signal", signal_to_yojson candidate.signal
+       ; "post", canonical_post
+       ; "comments", `List canonical_comments
+       ; "keeper_context", canonical_keeper_context
+       ])
+;;
+
+let require_current_canonical_judgment_request candidate =
+  let* canonical = canonical_judgment_request candidate in
+  if Yojson.Safe.equal candidate.judgment_request canonical
+  then Ok canonical
+  else
+    Error
+      "candidate.judgment_request does not match the current canonical Board schema"
+;;
+
+let singleton_judgment_request candidate =
+  let context = "canonical candidate.judgment_request" in
+  let* canonical = require_current_canonical_judgment_request candidate in
+  let* fields = assoc ~context canonical in
+  let* keeper_context = field ~context "keeper_context" fields in
+  let item_fields =
+    List.filter
+      (fun (key, _) -> not (String.equal key "keeper_context"))
+      fields
+  in
+  Ok
+    (`Assoc
+       [ "keeper_context", keeper_context
+       ; "items", `List [ `Assoc item_fields ]
+       ])
+;;
+
+let validate_candidate_for_persistence candidate =
+  let* () =
+    validate_finite_json
+      ~context:"candidate.signal"
+      (signal_to_yojson candidate.signal)
+  in
+  let* (_ : Yojson.Safe.t) = singleton_judgment_request candidate in
+  validate_candidate_state candidate
 ;;
 
 let candidate_of_json json =
@@ -601,7 +1260,8 @@ let candidate_of_json json =
   let* () =
     exact_fields
       ~context
-      [ "candidate_id"
+      [ "schema_version"
+      ; "candidate_id"
       ; "keeper_name"
       ; "signal"
       ; "judgment_request"
@@ -609,6 +1269,17 @@ let candidate_of_json json =
       ; "status"
       ]
       fields
+  in
+  let* version_json = field ~context "schema_version" fields in
+  let* () =
+    match version_json with
+    | `Int version when Int.equal version schema_version -> Ok ()
+    | `Int version ->
+      Error
+        (Printf.sprintf
+           "unsupported Board attention candidate schema version %d"
+           version)
+    | _ -> Error (context ^ ".schema_version must be an integer")
   in
   let* candidate_id_json = field ~context "candidate_id" fields in
   let* candidate_id = string_json ~context:(context ^ ".candidate_id") candidate_id_json in
@@ -623,14 +1294,17 @@ let candidate_of_json json =
     else Error "candidate_id does not match the exact Keeper and Board signal identity"
   in
   let* judgment_request = field ~context "judgment_request" fields in
-  let* (_ : (string * Yojson.Safe.t) list) =
-    assoc ~context:(context ^ ".judgment_request") judgment_request
-  in
   let* recorded_at_json = field ~context "recorded_at" fields in
-  let* recorded_at = float_json ~context:(context ^ ".recorded_at") recorded_at_json in
+  let* recorded_at =
+    finite_float_json ~context:(context ^ ".recorded_at") recorded_at_json
+  in
   let* status_json = field ~context "status" fields in
   let* status = status_of_yojson status_json in
-  Ok { candidate_id; keeper_name; signal; judgment_request; recorded_at; status }
+  let candidate =
+    { candidate_id; keeper_name; signal; judgment_request; recorded_at; status }
+  in
+  let* () = validate_candidate_for_persistence candidate in
+  Ok candidate
 ;;
 
 let parse_rows content =
@@ -798,7 +1472,17 @@ let update_ledger_many ~base_path ~keeper_name decide =
            | Ok (None, result) -> None, Ok result
            | Ok (Some updated, result) ->
              let compacted = latest_candidates (candidates @ updated) in
-             Some (serialize_candidates compacted), Ok result))
+             let validation =
+               List.fold_left
+                 (fun validation candidate ->
+                    let* () = validation in
+                    validate_candidate_for_persistence candidate)
+                 (Ok ())
+                 compacted
+             in
+             (match validation with
+              | Error detail -> None, Error detail
+              | Ok () -> Some (serialize_candidates compacted), Ok result)))
     with
     | Error error -> Error error
     | Ok result -> result
@@ -828,21 +1512,24 @@ let find_candidate candidates candidate_id =
 ;;
 
 let record ~base_path candidate =
-  match
-    update_ledger
-      ~base_path
-      ~keeper_name:candidate.keeper_name
-      (fun candidates ->
-         match find_candidate candidates candidate.candidate_id with
-         | None -> Ok (Some candidate, Recorded candidate)
-         | Some existing when existing.signal = candidate.signal ->
-           Ok (None, Duplicate existing)
-         | Some _ ->
-           Error
-             "candidate identity conflict: the same candidate_id has a different Board signal")
-  with
-  | Ok result -> result
-  | Error detail -> Record_error detail
+  match validate_candidate_for_persistence candidate with
+  | Error detail -> Record_error ("invalid Board attention candidate: " ^ detail)
+  | Ok () ->
+    (match
+       update_ledger
+         ~base_path
+         ~keeper_name:candidate.keeper_name
+         (fun candidates ->
+            match find_candidate candidates candidate.candidate_id with
+            | None -> Ok (Some candidate, Recorded candidate)
+            | Some existing when existing.signal = candidate.signal ->
+              Ok (None, Duplicate existing)
+            | Some _ ->
+              Error
+                "candidate identity conflict: the same candidate_id has a different Board signal")
+     with
+     | Ok result -> result
+     | Error detail -> Record_error detail)
 ;;
 
 let update_candidate ~base_path candidate_id keeper_name transition =
@@ -855,40 +1542,63 @@ let update_candidate ~base_path candidate_id keeper_name transition =
        | Some updated -> Ok (Some updated, updated)))
 ;;
 
-let same_failure left right =
+let same_delivery_failure left right =
   left.kind = right.kind && String.equal left.detail right.detail
 ;;
 
 let same_judgment left right =
   left.verdict = right.verdict
-  && String.equal left.runtime_id right.runtime_id
+  && String.equal left.slot_id right.slot_id
+  && String.equal left.call_id right.call_id
+  && String.equal left.plan_fingerprint right.plan_fingerprint
+  && String.equal left.request_body_sha256 right.request_body_sha256
   && Float.equal left.judged_at right.judged_at
 ;;
 
-let candidate_with_retryable_failure current failure =
-  match current.status with
-  | Pending pending ->
-    (match pending.last_failure with
-     | Some existing when same_failure existing failure -> current
-     | Some _ | None ->
-       { current with status = Pending { last_failure = Some failure } })
-  | Judged judged ->
-    (match judged.last_failure with
-     | Some existing when same_failure existing failure -> current
-     | Some _ | None ->
-       { current with
-         status = Judged { judged with last_failure = Some failure }
-       })
-  | Consumed _ -> current
+let replace_resumable_status status resumable =
+  match status with
+  | Pending _ | Judged _ | Consumed _ -> status_of_resumable resumable
+  | Quarantine ({ quarantine; phase = Requeued _ } as state) ->
+    Quarantine
+      { state with
+        quarantine = { quarantine with prior_status = resumable }
+      }
+  | Quarantine ({ phase = (Quarantined | Requeue_requested _); _ } as state) ->
+    Quarantine state
 ;;
 
-let record_retryable_failure ~base_path candidate failure =
+let resumable_with_delivery_failure resumable failure =
+  match resumable with
+  | Resumable_pending pending ->
+    (match pending.last_delivery_failure with
+     | Some existing when same_delivery_failure existing failure -> resumable
+     | Some _ | None ->
+       Resumable_pending { last_delivery_failure = Some failure })
+  | Resumable_judged judged ->
+    (match judged.last_delivery_failure with
+     | Some existing when same_delivery_failure existing failure -> resumable
+     | Some _ | None ->
+       Resumable_judged { judged with last_delivery_failure = Some failure })
+  | Resumable_consumed _ -> resumable
+;;
+
+let candidate_with_delivery_failure current failure =
+  match resumable_status current.status with
+  | None -> current
+  | Some resumable ->
+    let updated = resumable_with_delivery_failure resumable failure in
+    if updated = resumable
+    then current
+    else { current with status = replace_resumable_status current.status updated }
+;;
+
+let record_delivery_failure ~base_path candidate failure =
   update_candidate
     ~base_path
     candidate.candidate_id
     candidate.keeper_name
     (fun current ->
-       let updated = candidate_with_retryable_failure current failure in
+       let updated = candidate_with_delivery_failure current failure in
        if updated = current then None else Some updated)
 ;;
 
@@ -901,21 +1611,30 @@ let record_judgment ~base_path candidate judgment =
            "Board attention candidate not found: %s"
            candidate.candidate_id)
     | Some current ->
-      (match current.status with
-       | Pending _ ->
+      (match resumable_status current.status with
+       | Some (Resumable_pending _) ->
          let updated =
            { current with
-             status = Judged { judgment; last_failure = None }
+             status =
+               status_of_resumable
+                 (Resumable_judged
+                    { judgment; last_delivery_failure = None })
            }
          in
          Ok (Some updated, updated)
-       | Judged judged when same_judgment judged.judgment judgment ->
+       | Some (Resumable_judged judged)
+         when same_judgment judged.judgment judgment ->
          Ok (None, current)
-       | Consumed consumed when same_judgment consumed.judgment judgment ->
+       | Some (Resumable_consumed consumed)
+         when same_judgment consumed.judgment judgment ->
          Ok (None, current)
-       | Judged _ | Consumed _ ->
+       | Some (Resumable_judged _ | Resumable_consumed _) ->
          Error
            ("Board attention candidate judgment conflict: "
+            ^ candidate.candidate_id)
+       | None ->
+         Error
+           ("Quarantined Board attention candidate cannot be judged: "
             ^ candidate.candidate_id)))
 ;;
 
@@ -928,30 +1647,225 @@ let mark_consumed ~base_path candidate judgment delivery =
            "Board attention candidate not found: %s"
            candidate.candidate_id)
     | Some current ->
-      (match current.status with
-       | Judged judged when same_judgment judged.judgment judgment ->
+      (match resumable_status current.status with
+       | Some (Resumable_judged judged)
+         when same_judgment judged.judgment judgment ->
          let updated =
            { current with
              status =
-               Consumed
-                 { judgment; delivery; consumed_at = Time_compat.now () }
+               status_of_resumable
+                 (Resumable_consumed
+                    { judgment; delivery; consumed_at = Time_compat.now () })
            }
          in
          Ok (Some updated, updated)
-       | Consumed consumed
+       | Some (Resumable_consumed consumed)
          when same_judgment consumed.judgment judgment
               && consumed.delivery = delivery -> Ok (None, current)
-       | Pending _ ->
+       | Some (Resumable_pending _) ->
          Error
            ("Pending Board attention candidate cannot be consumed: "
             ^ candidate.candidate_id)
-       | Judged _ | Consumed _ ->
+       | Some (Resumable_judged _ | Resumable_consumed _) ->
          Error
            ("Board attention candidate consumption conflict: "
+            ^ candidate.candidate_id)
+       | None ->
+         Error
+           ("Quarantined Board attention candidate cannot be consumed: "
             ^ candidate.candidate_id)))
 ;;
 
-let failure ~kind detail = { kind; detail; failed_at = Time_compat.now () }
+let quarantine_id
+      ~candidate_id
+      ~partition_id
+      ~partition_generation
+      ~failure_category
+      ~attempt_provenance
+      ~quarantined_at
+  =
+  let provenance =
+    match attempt_provenance with
+    | None -> [ "" ]
+    | Some provenance ->
+      [ provenance.slot_id
+      ; provenance.call_id
+      ; provenance.plan_fingerprint
+      ; provenance.request_body_sha256
+      ]
+  in
+  String.concat
+    "\000"
+    ([ candidate_id
+     ; partition_id
+     ; Yojson.Safe.to_string
+         (Partition_generation.to_yojson partition_generation)
+     ; quarantine_failure_category_to_string failure_category
+     ; Printf.sprintf "%.17g" quarantined_at
+     ]
+     @ provenance)
+  |> Digestif.SHA256.digest_string
+  |> Digestif.SHA256.to_hex
+  |> ( ^ ) "ba-quarantine-"
+;;
+
+let normalize_requeued_consumed ~base_path ~keeper_name ~candidate_id =
+  update_ledger ~base_path ~keeper_name (fun candidates ->
+    match find_candidate candidates candidate_id with
+    | None -> Error ("Board attention candidate not found: " ^ candidate_id)
+    | Some current ->
+      (match current.status with
+       | Consumed _ -> Ok (None, current)
+       | Quarantine
+           { quarantine = { prior_status = Resumable_consumed consumed; _ }
+           ; phase = Requeued _
+           } ->
+         let updated = { current with status = Consumed consumed } in
+         Ok (Some updated, updated)
+       | Pending _ | Judged _ | Quarantine _ ->
+         Error
+           ("Board attention candidate is not requeued-consumed: "
+            ^ candidate_id)))
+;;
+
+let same_quarantine_identity left right =
+  String.equal left.quarantine_id right.quarantine_id
+  && String.equal left.partition_id right.partition_id
+  && Partition_generation.equal
+       left.partition_generation
+       right.partition_generation
+;;
+
+let quarantine
+      ~base_path
+      ~(candidate : candidate)
+      ~partition_id
+      ~partition_generation
+      ~failure_category
+      ~attempt_provenance
+      ~quarantined_at
+  =
+  let quarantine_id =
+    quarantine_id
+      ~candidate_id:candidate.candidate_id
+      ~partition_id
+      ~partition_generation
+      ~failure_category
+      ~attempt_provenance
+      ~quarantined_at
+  in
+  update_ledger ~base_path ~keeper_name:candidate.keeper_name (fun candidates ->
+    match find_candidate candidates candidate.candidate_id with
+    | None ->
+      Error ("Board attention candidate not found: " ^ candidate.candidate_id)
+    | Some current ->
+      let prior_status =
+        match resumable_status current.status with
+        | Some status -> status
+        | None ->
+          (match current.status with
+           | Quarantine state -> state.quarantine.prior_status
+           | Pending _ | Judged _ | Consumed _ -> assert false)
+      in
+      let requested =
+        { quarantine_id
+        ; partition_id
+        ; partition_generation
+        ; failure_category
+        ; attempt_provenance
+        ; quarantined_at
+        ; prior_status
+        }
+      in
+      (match current.status with
+       | Quarantine state
+         when same_quarantine_identity state.quarantine requested ->
+         Ok (None, current)
+       | Quarantine { phase = (Quarantined | Requeue_requested _); _ } ->
+         Error
+           ("candidate is already quarantined by another generation: "
+            ^ current.candidate_id)
+       | Pending _ | Judged _ | Consumed _ | Quarantine { phase = Requeued _; _ } ->
+         let updated =
+           { current with
+             status = Quarantine { quarantine = requested; phase = Quarantined }
+           }
+         in
+         Ok (Some updated, updated)))
+;;
+
+let request_quarantine_requeue
+      ~base_path
+      ~(candidate : candidate)
+      ~partition_id
+      ~expected_quarantine_id
+      ~requested_at
+  =
+  update_ledger ~base_path ~keeper_name:candidate.keeper_name (fun candidates ->
+    match find_candidate candidates candidate.candidate_id with
+    | None ->
+      Error ("Board attention candidate not found: " ^ candidate.candidate_id)
+    | Some current ->
+      (match current.status with
+       | Quarantine ({ quarantine; phase = Quarantined } as state)
+         when String.equal quarantine.partition_id partition_id
+              && String.equal quarantine.quarantine_id expected_quarantine_id ->
+         let updated =
+           { current with
+             status =
+               Quarantine
+                 { state with phase = Requeue_requested { requested_at } }
+           }
+         in
+         Ok (Some updated, updated)
+       | Quarantine
+           { quarantine
+           ; phase = (Requeue_requested _ | Requeued _)
+           }
+         when String.equal quarantine.partition_id partition_id
+              && String.equal quarantine.quarantine_id expected_quarantine_id ->
+         Ok (None, current)
+       | Pending _ | Judged _ | Consumed _ | Quarantine _ ->
+         Error
+           ("candidate quarantine generation does not match operator request: "
+            ^ current.candidate_id)))
+;;
+
+let finish_quarantine_requeue
+      ~base_path
+      ~(candidate : candidate)
+      ~partition_id
+      ~expected_quarantine_id
+      ~requeued_at
+  =
+  update_ledger ~base_path ~keeper_name:candidate.keeper_name (fun candidates ->
+    match find_candidate candidates candidate.candidate_id with
+    | None ->
+      Error ("Board attention candidate not found: " ^ candidate.candidate_id)
+    | Some current ->
+      (match current.status with
+       | Quarantine ({ quarantine; phase = Requeue_requested _ } as state)
+         when String.equal quarantine.partition_id partition_id
+              && String.equal quarantine.quarantine_id expected_quarantine_id ->
+         let updated =
+           { current with
+             status = Quarantine { state with phase = Requeued { requeued_at } }
+           }
+         in
+         Ok (Some updated, updated)
+       | Quarantine { quarantine; phase = Requeued _ }
+         when String.equal quarantine.partition_id partition_id
+              && String.equal quarantine.quarantine_id expected_quarantine_id ->
+         Ok (None, current)
+       | Pending _ | Judged _ | Consumed _ | Quarantine _ ->
+         Error
+           ("candidate is not in the requested requeue generation: "
+            ^ current.candidate_id)))
+;;
+
+let delivery_failure ~kind detail =
+  { kind; detail; failed_at = Time_compat.now () }
+;;
 
 let board_attention_stimulus candidate =
   { Keeper_event_queue.post_id = candidate.signal.post_id
@@ -1036,17 +1950,10 @@ let consume_judged ~base_path candidate (judged : judged_state) =
        Ok consumed
      | Keeper_registry_event_queue.Identity_conflict detail
      | Keeper_registry_event_queue.Storage_error detail ->
-       record_retryable_failure
+       record_delivery_failure
          ~base_path
          candidate
-         (failure ~kind:Durable_delivery_unavailable detail))
-;;
-
-let reject_unregistered_tool ~name ~args:_ =
-  Tool_result.error
-    ~tool_name:name
-    ~start_time:(Time_compat.now ())
-    "Board attention judgment is a tool-free boundary"
+         (delivery_failure ~kind:Durable_delivery_unavailable detail))
 ;;
 
 let record_and_wake ~base_path candidate =
@@ -1065,159 +1972,16 @@ let record_and_wake ~base_path candidate =
     Ok { candidate = persisted; persistence = Candidate_recorded; wake }
   | Duplicate persisted ->
     let* wake =
-      match persisted.status with
-      | Pending _ | Judged _ ->
+      match resumable_status persisted.status with
+      | Some (Resumable_pending _ | Resumable_judged _) ->
         request_worker persisted
-      | Consumed _ -> Ok Wake_not_required
+      | Some (Resumable_consumed _) | None -> Ok Wake_not_required
     in
     Ok
       { candidate = persisted
       ; persistence = Candidate_already_present
       ; wake
       }
-;;
-
-(* The configured output contract remains a one-item [verdicts] array so the
-   prompt/schema SSOT does not fork. Partition membership itself is singleton:
-   no candidate count, byte estimate, or token heuristic participates. *)
-
-let prompt_name_batch = Keeper_prompt_names.board_attention_judgment_batch
-
-let singleton_request_json candidate =
-  match candidate.judgment_request with
-  | `Assoc fields ->
-    let contexts, item_fields =
-      List.partition
-        (fun (key, _) -> String.equal key "keeper_context")
-        fields
-    in
-    (match contexts with
-     | [ (_, keeper_context) ] ->
-       Ok
-         (`Assoc
-            [ "keeper_context", keeper_context
-            ; "items", `List [ `Assoc item_fields ]
-            ])
-     | [] -> Error "singleton judgment request lacks keeper_context"
-     | _ -> Error "singleton judgment request contains multiple keeper_context fields")
-  | _ -> Error "singleton judgment request must be an object"
-;;
-
-let build_singleton_prompt candidate =
-  let* json = singleton_request_json candidate in
-  Prompt_registry.render_prompt_template
-    prompt_name_batch
-    [ "batch_request_json", Yojson.Safe.to_string json ]
-;;
-
-(* Batch integrity does not come from the wire format. Verdicts are matched by
-   [candidate_id], and a reply is accepted only when its id set equals the
-   requested set exactly ([validate_batch_coverage]); unknown or duplicated ids
-   fail the whole batch back to Pending. A provider honouring the schema
-   perfectly can still answer for the wrong ids, so the schema never covered
-   the failure mode that matters here. *)
-let apply_batch_output_schema provider_config =
-  Ok (Keeper_structured_output_schema.without_response_format provider_config)
-;;
-
-let judge_singleton ~sw ~net ~base_path candidate =
-  let runtime_id_result =
-    try Ok (Runtime.runtime_id_for_structured_judge ()) with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn ->
-      Error
-        (Judgment_failure.runtime_configuration_change
-           ~failed_at:(Time_compat.now ())
-           ~detail:(Printexc.to_string exn))
-  in
-  match runtime_id_result with
-  | Error _ as error -> error
-  | Ok runtime_id ->
-    (match build_singleton_prompt candidate with
-     | Error detail ->
-       Error
-         (Judgment_failure.blocked
-            ~blocked_at:(Time_compat.now ())
-            ~kind:Judgment_failure.Prompt_contract_unavailable
-            ~detail)
-     | Ok prompt ->
-       let provider_result =
-         try
-           match
-             Keeper_turn_driver_wrappers.run_named_with_masc_tools
-               ~runtime_id
-               ~keeper_name:candidate.keeper_name
-               ~goal:prompt
-               ~base_path
-               ~masc_tools:[]
-               ~dispatch:reject_unregistered_tool
-               ~provider_config_transform:apply_batch_output_schema
-               ~sw
-               ?net
-               ()
-           with
-           | Ok result -> Ok result
-           | Error error ->
-             Error
-               (Judgment_failure.of_sdk_error
-                  ~observed_at:(Time_compat.now ())
-                  error)
-         with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn ->
-           Error
-             (Judgment_failure.blocked
-                ~blocked_at:(Time_compat.now ())
-                ~kind:Judgment_failure.Unexpected_judgment_exception
-                ~detail:(Printexc.to_string exn))
-       in
-       (match provider_result with
-        | Error _ as error -> error
-        | Ok result ->
-          (match
-             Agent_sdk_response.structured_json_of_response
-               ~schema_name:Keeper_board_attention_judgment.batch_schema_name
-               result.response
-           with
-           | Error detail ->
-             Error
-               (Judgment_failure.blocked
-                  ~blocked_at:(Time_compat.now ())
-                  ~kind:Judgment_failure.Response_contract_unavailable
-                  ~detail)
-           | Ok json ->
-             (match Keeper_board_attention_judgment.batch_of_yojson json with
-              | Error detail ->
-                Error
-                  (Judgment_failure.blocked
-                     ~blocked_at:(Time_compat.now ())
-                     ~kind:Judgment_failure.Response_contract_unavailable
-                     ~detail)
-              | Ok [ item ] when String.equal item.candidate_id candidate.candidate_id ->
-                Ok
-                  { verdict = item.verdict
-                  ; runtime_id
-                  ; judged_at = Time_compat.now ()
-                  }
-              | Ok [ item ] ->
-                Error
-                  (Judgment_failure.blocked
-                     ~blocked_at:(Time_compat.now ())
-                     ~kind:Judgment_failure.Response_contract_unavailable
-                     ~detail:
-                       (Printf.sprintf
-                          "singleton verdict identity mismatch expected=%S actual=%S"
-                          candidate.candidate_id
-                          item.candidate_id))
-              | Ok items ->
-                Error
-                  (Judgment_failure.blocked
-                     ~blocked_at:(Time_compat.now ())
-                     ~kind:Judgment_failure.Response_contract_unavailable
-                     ~detail:
-                       (Printf.sprintf
-                          "singleton verdict count must be exactly one, got %d"
-                          (List.length items)))))))
 ;;
 
 let apply_judgment_and_deliver ~base_path ~keeper_name ~candidate_id ~judgment =
@@ -1228,21 +1992,42 @@ let apply_judgment_and_deliver ~base_path ~keeper_name ~candidate_id ~judgment =
     | None -> Error ("Board attention candidate not found: " ^ candidate_id)
   in
   let* judged_candidate =
-    match candidate.status with
-    | Pending _ -> record_judgment ~base_path candidate judgment
-    | Judged judged when same_judgment judged.judgment judgment -> Ok candidate
-    | Consumed consumed when same_judgment consumed.judgment judgment -> Ok candidate
-    | Judged _ | Consumed _ ->
+    match resumable_status candidate.status with
+    | Some (Resumable_pending _) ->
+      record_judgment ~base_path candidate judgment
+    | Some (Resumable_judged judged)
+      when same_judgment judged.judgment judgment ->
+      Ok candidate
+    | Some (Resumable_consumed consumed)
+      when same_judgment consumed.judgment judgment ->
+      Ok candidate
+    | Some (Resumable_judged _ | Resumable_consumed _) ->
       Error ("Board attention candidate judgment conflicts with worker result: " ^ candidate_id)
+    | None ->
+      Error
+        ("Quarantined or requeue-requested Board attention candidate cannot be settled: "
+         ^ candidate_id)
   in
-  match judged_candidate.status with
-  | Consumed _ -> Ok judged_candidate
-  | Pending _ ->
+  match resumable_status judged_candidate.status with
+  | Some (Resumable_consumed _) ->
+    normalize_requeued_consumed ~base_path ~keeper_name ~candidate_id
+  | Some (Resumable_pending _) ->
     Error ("Board attention candidate remained Pending after judgment commit: " ^ candidate_id)
-  | Judged judged ->
+  | Some (Resumable_judged judged) ->
     let* delivered = consume_judged ~base_path judged_candidate judged in
-    (match delivered.status with
-     | Consumed _ -> Ok delivered
-     | Pending _ | Judged _ ->
-       Error ("Board attention candidate delivery did not reach Consumed: " ^ candidate_id))
+    (match resumable_status delivered.status with
+     | Some (Resumable_consumed _) ->
+       normalize_requeued_consumed ~base_path ~keeper_name ~candidate_id
+     | Some (Resumable_pending _ | Resumable_judged _) ->
+       Error
+         ("Board attention candidate delivery did not reach Consumed: "
+          ^ candidate_id)
+     | None ->
+       Error
+         ("Board attention candidate became quarantined during delivery: "
+          ^ candidate_id))
+  | None ->
+    Error
+      ("Quarantined or requeue-requested Board attention candidate cannot be settled: "
+       ^ candidate_id)
 ;;

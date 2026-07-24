@@ -76,6 +76,18 @@ val handle_keeper_chat_recovery_post :
     revision and lease evidence. The route is wired only behind token-bound
     [CanAdmin] authorization. *)
 
+val handle_keeper_board_attention_quarantine_recovery_post :
+  Mcp_server.server_state ->
+  string ->
+  Httpun.Request.t ->
+  Httpun.Reqd.t ->
+  keeper_name:string ->
+  raw_partition_id:string ->
+  string ->
+  unit
+(** Acknowledge and requeue one exact Board-attention quarantine. The route is
+    wired only behind token-bound [CanAdmin] authorization. *)
+
 (** {1 POST route classifier}
 
     keeper_post_route_kind ADT + classifier + path helpers live in

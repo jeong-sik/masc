@@ -237,17 +237,24 @@ let launch_supervised_fiber_body
       Eio_guard.protect
         (fun () ->
            try
-             (* Ambient Board semantic judgment is a sibling worker on this
-                exact Keeper lifecycle switch. It owns Provider calls and
-                returns only durable completed partitions to the short owner
-                admission path; cancellation joins it with the Keeper lane. *)
+             (* Ambient Board judgment is a sibling worker on this exact Keeper
+                lifecycle switch. It drains durable candidates as singleton
+                exact flows: MASC owns the input and durable callbacks, while
+                OAS owns target admission, dispatch, and advancement.
+                Cancellation joins the worker with the Keeper lane. *)
              Eio.Fiber.fork ~sw:lane_sw (fun () ->
-               Keeper_board_attention_worker.run
-                 ~sw:lane_sw
-                 ~clock:ctx.clock
-                 ~net:ctx.net
-                 ~base_path
-                 ~keeper_name:meta.name);
+               match
+                 Keeper_board_attention_worker.run
+                   ~sw:lane_sw
+                   ~clock:ctx.clock
+                   ~net:ctx.net
+                   ~base_path
+                   ~keeper_name:meta.name
+               with
+               | Ok () -> ()
+               | Error fatal ->
+                 failwith
+                   (Keeper_board_attention_worker.fatal_error_to_string fatal));
              (* Keeper lifetime, idle duration, and progress age are
                 observations only. The supervisor runs the lane directly;
                 configured provider/tool boundaries and explicit operator

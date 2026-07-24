@@ -201,8 +201,7 @@ let ensure_flusher_actor store =
          reachable from Domain_pool worker domains (board/dashboard projections).
          Defer on a non-owning domain: the flusher is a single CAS-guarded daemon
          started on the main domain at boot (mcp_server init_jsonl), so skipping
-         here starts nothing twice and loses nothing. Mirrors the
-         Keeper_board_attention_candidate.start_async guard (#25015). *)
+         here starts nothing twice and loses nothing. *)
       ()
   | Some sw ->
       let rec loop attempts_left =

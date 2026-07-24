@@ -35,8 +35,8 @@ let prompt_metadata key =
        [ "keeper_name"; "soul_profile"; "goal"; "triggers"; "world_state" ])
   | "dashboard.gate_judge" ->
       ("test prompt for " ^ key, [ "facts_json" ])
-  | "keeper.board_attention_judgment" ->
-      ("test prompt for " ^ key, [ "judgment_request_json" ])
+  | "keeper.board_attention_judgment_batch" ->
+      ("test prompt for " ^ key, [ "batch_request_json" ])
   | _ -> ("test prompt for " ^ key, [])
 
 let markdown_fixture key body =
@@ -69,8 +69,8 @@ let fixtures =
     ("deliberation.decision", "structured deliberation prompt");
     ("analysis.dry_run", "DRY RUN analysis prompt");
     ("dashboard.gate_judge", "Gate facts {{facts_json}}");
-    ( "keeper.board_attention_judgment"
-    , "Board attention {{judgment_request_json}}" );
+    ( "keeper.board_attention_judgment_batch"
+    , "Board attention {{batch_request_json}}" );
     ("test.unlisted.vars", "template body still has {{missing_var}}");
   ]
 

@@ -563,6 +563,15 @@ let make_flow_candidates ~keeper_name selected_slots =
   loop [] selected_slots
 ;;
 
+let log_unavailable_slot ~keeper_name ~registry_generation ~lane_id unavailable =
+  Log.Keeper.warn
+    ~keeper_name
+    "compaction exact opaque slot unavailable generation=%Ld lane_id=%s detail=%s"
+    registry_generation
+    lane_id
+    (Runtime_exact_output_registry.unavailable_slot_to_string unavailable)
+;;
+
 let prepare_lane ~keeper_name ~registry ~lane_id ~units =
   if not (has_eligible_units units)
   then Error Invalid_plan
@@ -587,17 +596,13 @@ let prepare_lane ~keeper_name ~registry ~lane_id ~units =
         registry_generation
         lane_id
         (List.length unavailable_slots);
+      List.iter
+        (log_unavailable_slot ~keeper_name ~registry_generation ~lane_id)
+        unavailable_slots;
       Error Exact_target_selection_failed
     | Ok { selected_slots; unavailable_slots } ->
       List.iter
-        (fun (unavailable : Runtime_exact_output_registry.unavailable_slot) ->
-           Log.Keeper.warn
-             ~keeper_name
-             "compaction exact opaque slot unavailable generation=%Ld lane_id=%s position=%d slot=%s"
-             registry_generation
-             lane_id
-             unavailable.position
-             unavailable.slot_id)
+        (log_unavailable_slot ~keeper_name ~registry_generation ~lane_id)
         unavailable_slots;
       let messages = messages_for_plan ~units in
       let* candidates = make_flow_candidates ~keeper_name selected_slots in

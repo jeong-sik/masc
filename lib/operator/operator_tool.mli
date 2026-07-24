@@ -7,8 +7,8 @@
     so the SDK adapter can advertise the operator-remote subset
     separately from the full tool catalog.
 
-    Internal: 22 schema-constructor / action-enum / dispatcher
-    helper functions stay private — the .mli pins {!schemas} /
+    Internal schema-constructor / action-enum / dispatcher helpers stay
+    private — the .mli pins {!schemas} /
     {!remote_schemas} list contents at module init, so caller
     contract is the lists, not the constructors. *)
 
@@ -47,6 +47,8 @@ val dispatch :
     - [masc_operator_digest] — daily digest.
     - [masc_operator_action] — schedule an action (requires
       confirm via separate call).
+    - [masc_operator_board_attention_quarantine_requeue] — exact manual
+      Board-attention quarantine recovery CAS.
     - [masc_operator_chat_recovery_resolve] — exact receipt recovery CAS.
     - [masc_operator_task_recovery_resolve] — exact Task owner/version
       recovery CAS.

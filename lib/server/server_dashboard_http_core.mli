@@ -33,7 +33,7 @@ val run_dashboard_compute :
 
 (** Internal cached surfaces for proactive refresh loops.
     Exposed for the facade module [Server_dashboard_http]. *)
-val operator_snapshot_cache : cached_surface
+val operator_snapshot_cache_diagnostics_json : unit -> Yojson.Safe.t
 val operator_digest_cache : cached_surface
 val shell_warmed : bool Atomic.t
 val shell_warming : bool Atomic.t
@@ -42,7 +42,10 @@ val last_good_shell_light : Yojson.Safe.t Atomic.t
 
 (** Late-bound broadcast callbacks — set by [Server_dashboard_http]
     after [Sse] module is in scope. *)
-val operator_snapshot_broadcast_ref : (Yojson.Safe.t -> unit) ref
+type operator_snapshot_publication =
+  Server_dashboard_http_core_operator.operator_snapshot_publication
+
+val operator_snapshot_broadcast_ref : (operator_snapshot_publication -> unit) ref
 val operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref
 val mission_cache : cached_surface
 

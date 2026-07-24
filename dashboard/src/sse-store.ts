@@ -83,8 +83,13 @@ export function registerGateRefresh(fn: (opts?: { force?: boolean }) => void): v
 }
 
 let _refreshOperatorFn: (() => void) | null = null
+let operatorSnapshotRefreshPending = false
+
 export function registerOperatorRefresh(fn: () => void): void {
   _refreshOperatorFn = fn
+  if (operatorSnapshotRefreshPending) {
+    requestOperatorSnapshotRefresh('operator_snapshot_registration_drain')
+  }
 }
 
 let _refreshMissionFn: (() => void) | null = null
@@ -146,6 +151,15 @@ function scheduleRefresh(key: string, fn: () => void, delayMs = SSE_DEFAULT_DEBO
     fn()
     delete _debounceTimers[key]
   }, delayMs)
+}
+
+function requestOperatorSnapshotRefresh(key: string): void {
+  if (_refreshOperatorFn) {
+    operatorSnapshotRefreshPending = false
+    scheduleRefresh(key, () => _refreshOperatorFn?.(), 0)
+  } else {
+    operatorSnapshotRefreshPending = true
+  }
 }
 
 // --- Declarative event routing ---
@@ -394,6 +408,12 @@ async function refreshActiveRoute(): Promise<void> {
 
 // --- SSE reconnection handler ---
 
+let activeOperatorSnapshotEpoch: string | null = null
+let latestOperatorSnapshotGeneration: number | null = null
+let latestOperatorSnapshotComputeSequence: number | null = null
+let latestOperatorSnapshotTerminalSequence: number | null = null
+const retiredOperatorSnapshotEpochs = new Set<string>()
+
 function handleReconnect(): void {
   const disconnectedMs = lastDisconnectedAt.value > 0
     ? Date.now() - lastDisconnectedAt.value
@@ -594,6 +614,84 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
   }
 
   if (event.type === 'operator_snapshot' && event.payload) {
+    const payload = isRecord(event.payload) ? event.payload : null
+    if (!payload) {
+      requestOperatorSnapshotRefresh('operator_snapshot_invalid_payload')
+      return true
+    }
+    const epoch = payload.snapshot_epoch
+    const generation = payload.snapshot_generation
+    const computeSequence = payload.snapshot_compute_sequence
+    const terminalSequence = payload.snapshot_terminal_sequence
+    if (
+      typeof epoch !== 'string'
+      || epoch.length === 0
+      || typeof generation !== 'number'
+      || !Number.isSafeInteger(generation)
+      || typeof computeSequence !== 'number'
+      || !Number.isSafeInteger(computeSequence)
+      || typeof terminalSequence !== 'number'
+      || !Number.isSafeInteger(terminalSequence)
+    ) {
+      requestOperatorSnapshotRefresh('operator_snapshot_missing_ordering')
+      return true
+    }
+    if (
+      typeof epoch === 'string'
+      && epoch.length > 0
+    ) {
+      if (retiredOperatorSnapshotEpochs.has(epoch)) {
+        return true
+      }
+      if (activeOperatorSnapshotEpoch !== epoch) {
+        if (activeOperatorSnapshotEpoch !== null) {
+          retiredOperatorSnapshotEpochs.add(activeOperatorSnapshotEpoch)
+        }
+        activeOperatorSnapshotEpoch = epoch
+        latestOperatorSnapshotGeneration = null
+        latestOperatorSnapshotComputeSequence = null
+        latestOperatorSnapshotTerminalSequence = null
+      }
+      if (
+        latestOperatorSnapshotGeneration !== null
+        && generation < latestOperatorSnapshotGeneration
+      ) {
+        return true
+      }
+      if (latestOperatorSnapshotGeneration !== generation) {
+        latestOperatorSnapshotGeneration = generation
+        latestOperatorSnapshotComputeSequence = null
+        latestOperatorSnapshotTerminalSequence = null
+      }
+      if (
+        typeof terminalSequence === 'number'
+        && Number.isSafeInteger(terminalSequence)
+      ) {
+        if (
+          latestOperatorSnapshotTerminalSequence !== null
+          && terminalSequence < latestOperatorSnapshotTerminalSequence
+        ) {
+          return true
+        }
+        latestOperatorSnapshotTerminalSequence = terminalSequence
+      }
+      if (
+        typeof computeSequence === 'number'
+        && Number.isSafeInteger(computeSequence)
+      ) {
+        if (
+          latestOperatorSnapshotComputeSequence !== null
+          && computeSequence < latestOperatorSnapshotComputeSequence
+        ) {
+          return true
+        }
+        latestOperatorSnapshotComputeSequence = computeSequence
+      }
+      if (payload.status === 'invalidated') {
+        requestOperatorSnapshotRefresh('operator_snapshot_invalidation')
+        return true
+      }
+    }
     handleOperatorSnapshot(event.payload)
     return true
   }

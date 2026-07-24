@@ -569,12 +569,20 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
         | Error msg ->
           error_result_typed ~tool_name ~start_time ~code:Conflict msg
         | Ok Goal_phase.Complete ->
-          handle_goal_completion_request
-            ~tool_name
-            ~start_time
-            ctx
-            goal
-            ~completion_claim:(Option.value ~default:"" note)
+          (match note with
+           | Some completion_claim when String.trim completion_claim <> "" ->
+             handle_goal_completion_request
+               ~tool_name
+               ~start_time
+               ctx
+               goal
+               ~completion_claim
+           | None | Some _ ->
+             error_result_typed
+               ~tool_name
+               ~start_time
+               ~code:Validation_error
+               "request_complete requires a non-empty note completion claim")
         | Ok (Goal_phase.Move_to phase) ->
           (match update_goal_phase ctx goal ~phase ?note () with
            | Error error ->

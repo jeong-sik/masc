@@ -33,7 +33,8 @@ val handle_goal_upsert
     {!goal_transition_action_strings}). [request_complete] invokes the
     configured semantic reviewer and moves an executing Goal to [Completed]
     only after one structured approval bound to the unchanged Goal snapshot.
-    Rejection or evaluator unavailability leaves the Goal nonterminal. *)
+    A non-empty [note] completion claim is required. Rejection or evaluator
+    unavailability leaves the Goal nonterminal. *)
 val handle_goal_transition
   :  tool_name:string
   -> start_time:float

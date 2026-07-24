@@ -79,6 +79,7 @@ val create_server_state :
 
 module For_testing : sig
   val configure_exact_output_registry : ?config_root:string -> unit -> unit
+  val install_domain_pool_references : Domain_pool.t -> unit
 end
 
 val runtime_path_diagnostics :

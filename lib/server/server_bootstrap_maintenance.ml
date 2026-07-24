@@ -146,19 +146,23 @@ let owner_has_durable_demand state =
 ;;
 
 let load_durable_demand_meta ~base_path ~config ~keeper_name =
-  Executor_pool_ref.submit_or_inline (fun () ->
-    match
-      Keeper_event_queue_persistence.load_state_result
-        ~base_path
-        ~keeper_name
-    with
-    | Error detail -> Error (`Demand_unknown detail)
-    | Ok state when not (owner_has_durable_demand state) -> Ok None
-    | Ok _state ->
-      (match Keeper_meta_store.read_effective_meta config keeper_name with
-       | Error detail -> Error (`Owner_unknown detail)
-       | Ok None -> Error (`Owner_unknown "durable_keeper_metadata_missing")
-       | Ok (Some meta) -> Ok (Some meta)))
+  match
+    Executor_pool_ref.submit_strict (fun () ->
+      match
+        Keeper_event_queue_persistence.load_state_result
+          ~base_path
+          ~keeper_name
+      with
+      | Error detail -> Error (`Demand_unknown detail)
+      | Ok state when not (owner_has_durable_demand state) -> Ok None
+      | Ok _state ->
+        (match Keeper_meta_store.read_effective_meta config keeper_name with
+         | Error detail -> Error (`Owner_unknown detail)
+         | Ok None -> Error (`Owner_unknown "durable_keeper_metadata_missing")
+         | Ok (Some meta) -> Ok (Some meta)))
+  with
+  | Ok outcome -> outcome
+  | Error error -> Error (`Executor_unavailable error)
 ;;
 
 let recover_projected_durable_demand_owner
@@ -196,6 +200,11 @@ let recover_projected_durable_demand_owner
          "keeper durable demand recovery retained keeper=%s reason=owner_unknown detail=%s"
          keeper_name
          detail
+     | Error (`Executor_unavailable error) ->
+       Log.Server.error
+         "keeper durable demand recovery retained keeper=%s reason=executor_unavailable detail=%s"
+         keeper_name
+         (Executor_pool_ref.strict_submit_error_to_string error)
      | Ok None -> ()
      | Ok (Some meta) ->
        let admission =
@@ -282,7 +291,7 @@ let recover_keeper_durable_demand_owners
     page.report.projections
 ;;
 
-module For_testing = struct
+module Recovery_for_testing = struct
   let consume_owner_projection_batch = consume_owner_projection_batch
 end
 

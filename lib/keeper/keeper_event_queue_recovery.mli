@@ -12,11 +12,14 @@ type projection_outcome =
 
 type projection_error =
   | Owner_unavailable of Keeper_event_queue_persistence.owner_identity_error
+  | Executor_unavailable of Executor_pool_ref.strict_submit_error
   | Outbox_unavailable of string
   | Ledger_projection_failed of string
   | Unexpected_projection_failure of Eio.Exn.with_bt
 
-type discovery_error = Snapshot_discovery_failed of string
+type discovery_error =
+  | Snapshot_discovery_failed of string
+  | Sweep_executor_unavailable of Executor_pool_ref.strict_submit_error
 
 type owner_failure =
   { keeper_name : string
@@ -62,8 +65,9 @@ val project_owner_result :
 (** Acquire the process-local owner claim, inspect the durable outbox, and
     invoke the canonical reaction-ledger projector when work is present.
     Durable I/O runs outside the claim-table mutex and without cancellation
-    masking. [Transition_converged] does not identify which process performed
-    the physical append or retirement. *)
+    masking, and requires the startup executor pool; it is never run inline.
+    [Transition_converged] does not identify which process performed the
+    physical append or retirement. *)
 
 val project_discovered_bounded :
   base_path:string ->
@@ -75,7 +79,8 @@ val project_discovered_bounded :
     so repeated maintenance ticks cannot starve a durable owner.
     [report.projections] contains exactly one typed outcome per selected owner
     in page order. The cursor is process-local and carries no migration or
-    persistence contract. *)
+    persistence contract. Executor unavailability returns an empty page with
+    the unchanged cursor and a typed [discovery_error]. *)
 
 module For_testing : sig
   type 'a claim_outcome =

@@ -12,10 +12,32 @@ val set : Eio.Executor_pool.t -> unit
 (** Install the pool reference. Idempotent overwrite. *)
 
 module For_testing : sig
+  val with_pool_option :
+    Eio.Executor_pool.t option -> (unit -> 'a) -> 'a
+  (** Install an exact optional pool for the dynamic extent of the callback. *)
+
   val with_pool : Eio.Executor_pool.t -> (unit -> 'a) -> 'a
   (** Install a pool only for the dynamic extent of the callback, then restore
       the exact previous option even when the callback raises. *)
 end
+
+type strict_submit_error =
+  | Pool_unavailable
+  | Caller_not_in_eio
+  | Submission_failed of Eio.Exn.with_bt
+
+val strict_submit_error_to_string : strict_submit_error -> string
+
+val submit_strict :
+  ?weight:float ->
+  (unit -> 'a) ->
+  ('a, strict_submit_error) result
+(** Submit [f] exactly once to an installed pool from an Eio fiber.
+
+    Missing pools and non-Eio callers return typed errors without invoking
+    [f]. A worker/submission exception is returned with its backtrace after at
+    most one invocation; the closure is never replayed inline. Cancellation is
+    re-raised with its original backtrace. *)
 
 val submit_or_inline : ?weight:float -> (unit -> 'a) -> 'a
 (** Run [f] on an Executor_pool worker (a real Eio fiber under

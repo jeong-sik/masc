@@ -23,7 +23,7 @@ val start_background_maintenance :
   env:Eio_unix.Stdenv.base ->
   Mcp_server.server_state -> string * string
 
-module For_testing : sig
+module Recovery_for_testing : sig
   val consume_owner_projection_batch :
     commit_cursor:(unit -> unit) ->
     keeper_name:('a -> string) ->

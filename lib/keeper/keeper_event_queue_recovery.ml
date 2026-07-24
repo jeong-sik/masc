@@ -16,11 +16,14 @@ type projection_outcome =
 
 type projection_error =
   | Owner_unavailable of Persistence.owner_identity_error
+  | Executor_unavailable of Executor_pool_ref.strict_submit_error
   | Outbox_unavailable of string
   | Ledger_projection_failed of string
   | Unexpected_projection_failure of Eio.Exn.with_bt
 
-type discovery_error = Snapshot_discovery_failed of string
+type discovery_error =
+  | Snapshot_discovery_failed of string
+  | Sweep_executor_unavailable of Executor_pool_ref.strict_submit_error
 
 type owner_failure =
   { keeper_name : string
@@ -56,6 +59,9 @@ type sweep_page =
 let projection_error_to_string = function
   | Owner_unavailable error ->
     Persistence.owner_identity_error_to_string error
+  | Executor_unavailable error ->
+    "event queue transition executor unavailable: "
+    ^ Executor_pool_ref.strict_submit_error_to_string error
   | Outbox_unavailable detail ->
     "event queue transition outbox unavailable: " ^ detail
   | Ledger_projection_failed detail ->
@@ -67,8 +73,12 @@ let projection_error_to_string = function
       (Printexc.raw_backtrace_to_string backtrace)
 ;;
 
-let discovery_error_to_string (Snapshot_discovery_failed detail) =
-  "event queue snapshot discovery failed: " ^ detail
+let discovery_error_to_string = function
+  | Snapshot_discovery_failed detail ->
+    "event queue snapshot discovery failed: " ^ detail
+  | Sweep_executor_unavailable error ->
+    "event queue snapshot sweep executor unavailable: "
+    ^ Executor_pool_ref.strict_submit_error_to_string error
 ;;
 
 let owner_budget_error_to_string (Invalid_owner_budget max_owners) =
@@ -163,8 +173,12 @@ let project_owner_result_inline ~base_path ~keeper_name =
 ;;
 
 let project_owner_result ~base_path ~keeper_name =
-  Executor_pool_ref.submit_or_inline (fun () ->
-    project_owner_result_inline ~base_path ~keeper_name)
+  match
+    Executor_pool_ref.submit_strict (fun () ->
+      project_owner_result_inline ~base_path ~keeper_name)
+  with
+  | Ok outcome -> outcome
+  | Error error -> Error (Executor_unavailable error)
 ;;
 
 let ordered_owner_page ~budget:(Owner_budget max_owners) ~cursor:(Sweep_cursor cursor) names =
@@ -252,12 +266,29 @@ let project_discovery_inline
 ;;
 
 let project_discovered_bounded ~base_path ~budget ~cursor =
-  Executor_pool_ref.submit_or_inline (fun () ->
-    let discovery =
-      Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
-        ~base_path
-    in
-    project_discovery_inline ~base_path ~budget ~cursor discovery)
+  match
+    Executor_pool_ref.submit_strict (fun () ->
+      let discovery =
+        Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
+          ~base_path
+      in
+      project_discovery_inline ~base_path ~budget ~cursor discovery)
+  with
+  | Ok page -> page
+  | Error error ->
+    { report =
+        { discovered = 0
+        ; processed = 0
+        ; deferred = 0
+        ; no_pending = 0
+        ; converged = 0
+        ; claim_busy = 0
+        ; projections = []
+        ; failures = []
+        ; discovery_error = Some (Sweep_executor_unavailable error)
+        }
+    ; next_cursor = cursor
+    }
 ;;
 
 module For_testing = struct

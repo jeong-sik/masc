@@ -2,6 +2,22 @@ include Test_keeper_exact_execution_lease_guard_fixture
 
 module State = Keeper_event_queue_state
 
+let with_strict_executor f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let pool =
+    Domain_pool.create
+      ~sw
+      ~domain_count:1
+      (Eio.Stdenv.domain_mgr env)
+  in
+  Executor_pool_ref.For_testing.with_pool
+    (Domain_pool.executor_pool pool)
+    f
+;;
+
 let settlement_wal_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
@@ -675,6 +691,8 @@ let test_visible_prepare_sync_failure_recovers_once () =
 ;;
 
 let test_stale_finalize_preserves_active_successor () =
+  with_strict_executor
+  @@ fun () ->
   with_temp_dir "masc-exact-stale-finalize" @@ fun base_path ->
   let keeper_name = "exact_stale_finalize" in
   let lease, terminal =

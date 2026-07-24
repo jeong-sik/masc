@@ -401,67 +401,73 @@ let activation_deferred_of_paused_dead = function
 ;;
 
 let activation_outcome_for_required_wake config ~base_path ~keeper_name =
-  let meta_result =
-    Executor_pool_ref.submit_or_inline (fun () ->
+  match
+    Executor_pool_ref.submit_strict (fun () ->
       match Keeper_meta_store.read_effective_meta config keeper_name with
       | Ok (Some meta) -> Ok meta
       | Ok None -> Error "durable keeper metadata missing"
       | Error detail -> Error detail)
-  in
-  let admission =
-    Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
-  in
-  let runtime =
-    Keeper_activation_readiness.owner_runtime_of_registry_entry
-      (Keeper_registry.get ~base_path keeper_name)
-  in
-  match
-    Keeper_activation_readiness.classify_owner_execution
-      ~shutdown_operation_id:admission.snapshot_shutdown_operation_id
-      ~runtime
-      meta_result
   with
-  | Keeper_activation_readiness.Retained_disabled
-      Keeper_activation_readiness.Retained_autoboot_disabled ->
+  | Error error ->
     Keeper_wake_activation_deferred
-      Keeper_wake_activation_autoboot_disabled
-  | Keeper_activation_readiness.Retained_disabled
-      Keeper_activation_readiness.Retained_proactive_disabled ->
-    Keeper_wake_activation_deferred
-      Keeper_wake_activation_proactive_disabled
-  | Keeper_activation_readiness.Paused_dead reason ->
-    Keeper_wake_activation_deferred
-      (activation_deferred_of_paused_dead reason)
-  | Keeper_activation_readiness.Shutdown_fenced operation_id ->
-    Keeper_wake_activation_deferred
-      (Keeper_wake_activation_shutdown_fenced operation_id)
-  | Keeper_activation_readiness.Unknown detail ->
-    Keeper_wake_activation_deferred
-      (Keeper_wake_activation_owner_unknown detail)
-  | Keeper_activation_readiness.Recoverable ->
-    (match runtime with
-     | Keeper_activation_readiness.Owner_unregistered ->
-       Keeper_wake_activation_deferred Keeper_wake_activation_unregistered
-     | Keeper_activation_readiness.Owner_registered { phase; _ } ->
-       Keeper_wake_activation_deferred
-         (Keeper_wake_activation_not_running phase))
-  | Keeper_activation_readiness.Executable ->
+      (Keeper_wake_activation_owner_unknown
+         ("durable keeper metadata read unavailable: "
+          ^ Executor_pool_ref.strict_submit_error_to_string error))
+  | Ok meta_result ->
+    let admission =
+      Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
+    in
+    let runtime =
+      Keeper_activation_readiness.owner_runtime_of_registry_entry
+        (Keeper_registry.get ~base_path keeper_name)
+    in
     (match
-       Keeper_registry.wakeup_running
-         ~intent:Keeper_registry.Scheduled_signal
-         ~base_path
-         keeper_name
+       Keeper_activation_readiness.classify_owner_execution
+         ~shutdown_operation_id:admission.snapshot_shutdown_operation_id
+         ~runtime
+         meta_result
      with
-     | Keeper_registry.Signaled -> Keeper_wake_activation_signaled
-     | Keeper_registry.Deferred_unregistered ->
-       Keeper_wake_activation_deferred Keeper_wake_activation_unregistered
-     | Keeper_registry.Deferred_not_running phase ->
+     | Keeper_activation_readiness.Retained_disabled
+         Keeper_activation_readiness.Retained_autoboot_disabled ->
        Keeper_wake_activation_deferred
-         (Keeper_wake_activation_not_running phase)
-     | Keeper_registry.Deferred_lifecycle denial ->
+         Keeper_wake_activation_autoboot_disabled
+     | Keeper_activation_readiness.Retained_disabled
+         Keeper_activation_readiness.Retained_proactive_disabled ->
        Keeper_wake_activation_deferred
-         (Keeper_wake_activation_lifecycle_denied
-            (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)))
+         Keeper_wake_activation_proactive_disabled
+     | Keeper_activation_readiness.Paused_dead reason ->
+       Keeper_wake_activation_deferred
+         (activation_deferred_of_paused_dead reason)
+     | Keeper_activation_readiness.Shutdown_fenced operation_id ->
+       Keeper_wake_activation_deferred
+         (Keeper_wake_activation_shutdown_fenced operation_id)
+     | Keeper_activation_readiness.Unknown detail ->
+       Keeper_wake_activation_deferred
+         (Keeper_wake_activation_owner_unknown detail)
+     | Keeper_activation_readiness.Recoverable ->
+       (match runtime with
+        | Keeper_activation_readiness.Owner_unregistered ->
+          Keeper_wake_activation_deferred Keeper_wake_activation_unregistered
+        | Keeper_activation_readiness.Owner_registered { phase; _ } ->
+          Keeper_wake_activation_deferred
+            (Keeper_wake_activation_not_running phase))
+     | Keeper_activation_readiness.Executable ->
+       (match
+          Keeper_registry.wakeup_running
+            ~intent:Keeper_registry.Scheduled_signal
+            ~base_path
+            keeper_name
+        with
+        | Keeper_registry.Signaled -> Keeper_wake_activation_signaled
+        | Keeper_registry.Deferred_unregistered ->
+          Keeper_wake_activation_deferred Keeper_wake_activation_unregistered
+        | Keeper_registry.Deferred_not_running phase ->
+          Keeper_wake_activation_deferred
+            (Keeper_wake_activation_not_running phase)
+        | Keeper_registry.Deferred_lifecycle denial ->
+          Keeper_wake_activation_deferred
+            (Keeper_wake_activation_lifecycle_denied
+               (Keeper_lifecycle_admission.autonomous_denial_to_wire denial))))
 ;;
 
 let log_activation_outcome ~schedule_id ~keeper_name = function

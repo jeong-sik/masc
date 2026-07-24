@@ -4762,7 +4762,7 @@ let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
 let test_transition_projection_cursor_commits_before_isolated_owner_recovery () =
   let cursor_committed = ref false in
   let processed = ref [] in
-  Server_bootstrap_maintenance.For_testing.consume_owner_projection_batch
+  Server_bootstrap_maintenance.Recovery_for_testing.consume_owner_projection_batch
     ~commit_cursor:(fun () -> cursor_committed := true)
     ~keeper_name:Fun.id
     ~recover_owner:(fun owner ->

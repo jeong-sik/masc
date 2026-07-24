@@ -71,6 +71,21 @@ let contains_substring ~needle haystack =
   in
   String.equal needle "" || scan 0
 
+let with_strict_executor f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let pool =
+    Domain_pool.create
+      ~sw
+      ~domain_count:1
+      (Eio.Stdenv.domain_mgr env)
+  in
+  Executor_pool_ref.For_testing.with_pool
+    (Domain_pool.executor_pool pool)
+    f
+
 let restored_log_messages_since before_seq =
   Log.Ring.recent ~limit:20 ~module_filter:"Keeper" ~since_seq:before_seq ()
   |> List.filter_map (fun (entry : Log.Ring.entry) ->
@@ -95,6 +110,8 @@ let claim_single ~base_path ~keeper_name ~claimed_at ~ready =
        Alcotest.fail "single event queue lease changed cardinality")
 
 let project_transition_canonically ~base_path ~keeper_name ~transition_id:_ =
+  with_strict_executor
+  @@ fun () ->
   match
     Masc.Keeper_event_queue_recovery.project_owner_result
       ~base_path

@@ -662,16 +662,14 @@ let run () =
   let ledger_mli = "lib/keeper/keeper_reaction_ledger.mli" in
   let recovery_ml = "lib/keeper/keeper_event_queue_recovery.ml" in
   let definition_expectations =
-    [ ( "append_event_queue_transition_outbox_result"
-      , [ ledger_ml, "append_event_queue_transition_outbox_result" ] )
+    [ "append_event_queue_transition_outbox_result", []
     ; "mark_transition_projected_result", [ persistence_ml, "mark_transition_projected_result" ]
     ; ( "project_event_queue_transition_outbox_result"
       , [ ledger_ml, "project_event_queue_transition_outbox_result" ] )
     ; "project_transition_outbox_after_append_result", []
     ; ( "project_transition_outbox_result"
       , [ persistence_ml, "project_transition_outbox_result" ] )
-    ; ( "run_after_ledger_append_hook"
-      , [ ledger_ml, "run_after_ledger_append_hook" ] )
+    ; "run_after_ledger_append_hook", []
     ; "transition_outbox_result", []
     ; ( "with_after_ledger_append"
       , [ ledger_ml, "For_testing.with_after_ledger_append" ] )
@@ -705,8 +703,7 @@ let run () =
     (fun (name, expected) ->
        check_exact occurrences ~kind:"reference" name expected)
     [ "append_before_retire", [ persistence_ml, "project_transition_outbox_result" ]
-    ; ( "append_event_queue_transition_outbox_result"
-      , [ ledger_ml, "project_event_queue_transition_outbox_result" ] )
+    ; "append_event_queue_transition_outbox_result", []
     ; ( "mark_transition_projected_result"
       , [ persistence_ml, "project_transition_outbox_result" ] )
     ; ( "project_event_queue_transition_outbox_result"
@@ -714,8 +711,7 @@ let run () =
     ; "project_transition_outbox_after_append_result", []
     ; ( "project_transition_outbox_result"
       , [ ledger_ml, "project_event_queue_transition_outbox_result" ] )
-    ; ( "run_after_ledger_append_hook"
-      , [ ledger_ml, "project_event_queue_transition_outbox_result" ] )
+    ; "run_after_ledger_append_hook", []
     ; "transition_outbox_result", []
     ; "with_after_ledger_append", []
     ];
@@ -732,11 +728,6 @@ let run () =
     ~caller:"project_transition_outbox_result"
     "append_before_retire"
     "mark_transition_projected_result";
-  check_order
-    ~file:ledger_ml
-    ~caller:"project_event_queue_transition_outbox_result"
-    "append_event_queue_transition_outbox_result"
-    "run_after_ledger_append_hook";
   print_endline "[keeper-event-queue-projection-boundary] OK"
 ;;
 

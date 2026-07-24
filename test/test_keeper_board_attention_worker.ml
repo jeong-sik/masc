@@ -141,6 +141,16 @@ let same_provenance
   && String.equal durable.request_body_sha256 projected.request_body_sha256
 ;;
 
+let same_candidate_provenance
+      (durable : A.attempt_provenance)
+      (projected : E.attempt_provenance)
+  =
+  String.equal durable.slot_id projected.slot_id
+  && String.equal durable.call_id projected.call_id
+  && String.equal durable.plan_fingerprint projected.plan_fingerprint
+  && String.equal durable.request_body_sha256 projected.request_body_sha256
+;;
+
 let record ~base_path candidate =
   match A.record ~base_path candidate with
   | A.Recorded candidate -> candidate
@@ -1283,10 +1293,9 @@ let test_process_recovery_claim_is_released_after_cancellation () =
       W.For_testing.with_process_recovery_claim
         ~base_path
         ~keeper_name:"sangsu"
-        (fun claimed ->
-           Alcotest.(check bool) "first lifecycle acquired recovery" true claimed;
-           raise (Eio.Cancel.Cancelled (Failure "injected lifecycle cancellation")));
-      false
+      (fun claimed ->
+         Alcotest.(check bool) "first lifecycle acquired recovery" true claimed;
+         raise (Eio.Cancel.Cancelled (Failure "injected lifecycle cancellation")))
     with
     | Eio.Cancel.Cancelled _ -> true
   in
@@ -1498,7 +1507,7 @@ let test_manual_quarantine_requeue_is_unclaimable_until_authorized_and_settles (
    | Q.Inventory_requeued, Some 31.0 -> ()
    | _ -> Alcotest.fail "inventory did not expose the durable requeue phase");
   (match inventory_item.attempt_provenance with
-   | Some durable when same_provenance durable failed_exact -> ()
+   | Some durable when same_candidate_provenance durable failed_exact -> ()
    | _ -> Alcotest.fail "inventory lost opaque attempt provenance references");
   let inventory_json_item =
     match

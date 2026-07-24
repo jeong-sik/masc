@@ -176,8 +176,9 @@ module KeeperMemoryOs = struct
      decider of which facts survive (RFC-0247; spec/12 §Compaction) — deterministic
      TTL/cap retention was removed (RFC-0259 supersession), so with this pass off
      the Tier-1 fact store only grows (idealist: 449 rows, 0 with valid_until).
-     Failures are graceful no-ops (transport/parse errors never mutate the store),
-     and the runtime inherits the librarian's model. Set the env false to disable. *)
+     Failures are graceful no-ops (transport/parse errors never mutate the store).
+     Runtime selection uses the dedicated consolidation override when set, then
+     the default runtime. Set the env false to disable. *)
   let consolidation_enabled_default = true
   let consolidation_runtime_id_default = None
 

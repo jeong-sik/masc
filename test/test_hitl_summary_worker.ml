@@ -526,7 +526,7 @@ let test_visible_bind_blocks_dispatch () =
          ~on_summary:(fun _ -> fail "unconfirmed bind delivered a summary")
          (prepare_exn entry);
        check int "unconfirmed bind forbids POST" 0 (F.post_count server);
-       (match Q.get_pending_entry ~id:entry.id with
+       match Q.get_pending_entry ~id:entry.id with
        | Some
            { exact_attempt =
                Q.Exact_bound
@@ -872,7 +872,7 @@ let test_pre_worker_start_failure_is_retryable () =
             "no usable exact-output lane slots"
             detail
         | Ok _ -> fail "pre-worker failure was reported as a successful start");
-       match Q.get_pending_entry ~id:entry.id with
+       (match Q.get_pending_entry ~id:entry.id with
        | Some
            { exact_attempt = Q.Exact_unbound
            ; summary_status = Q.Summary_failed { reason; retryable = true }

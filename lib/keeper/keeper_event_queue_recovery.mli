@@ -11,7 +11,7 @@ type projection_outcome =
   | Claim_busy
 
 type projection_error =
-  | Owner_unavailable of Keeper_event_queue_owner_lock.resolve_error
+  | Owner_unavailable of Keeper_event_queue_persistence.owner_identity_error
   | Outbox_unavailable of string
   | Ledger_projection_failed of string
   | Unexpected_projection_failure of Eio.Exn.with_bt

@@ -1,15 +1,10 @@
-module Owner_lock = Keeper_event_queue_owner_lock
+module Persistence = Keeper_event_queue_persistence
 
 module Owner_identity = struct
-  type t = Owner_lock.t
+  type t = Persistence.owner_identity
 
-  let equal = ( == )
-
-  let hash owner =
-    Hashtbl.hash
-      ( Owner_lock.base_path owner
-      , Owner_lock.keeper_name owner |> Keeper_id.Keeper_name.to_string )
-  ;;
+  let equal = Persistence.owner_identity_equal
+  let hash = Persistence.owner_identity_hash
 end
 
 module Owner_claims = Hashtbl.Make (Owner_identity)
@@ -20,7 +15,7 @@ type projection_outcome =
   | Claim_busy
 
 type projection_error =
-  | Owner_unavailable of Owner_lock.resolve_error
+  | Owner_unavailable of Persistence.owner_identity_error
   | Outbox_unavailable of string
   | Ledger_projection_failed of string
   | Unexpected_projection_failure of Eio.Exn.with_bt
@@ -43,7 +38,7 @@ type sweep_report =
 
 let projection_error_to_string = function
   | Owner_unavailable error ->
-    Owner_lock.resolve_error_to_string error
+    Persistence.owner_identity_error_to_string error
   | Outbox_unavailable detail ->
     "event queue transition outbox unavailable: " ^ detail
   | Ledger_projection_failed detail ->
@@ -94,12 +89,10 @@ let with_owner_claim owner f =
 ;;
 
 let project_claimed_owner owner =
-  let base_path = Owner_lock.base_path owner in
-  let keeper_name =
-    Owner_lock.keeper_name owner |> Keeper_id.Keeper_name.to_string
-  in
+  let base_path = Persistence.owner_identity_base_path owner in
+  let keeper_name = Persistence.owner_identity_keeper_name owner in
   match
-    Keeper_event_queue_persistence.transition_outbox_result
+    Persistence.transition_outbox_result
       ~base_path
       ~keeper_name
   with
@@ -131,7 +124,7 @@ let project_resolved_owner owner =
 ;;
 
 let project_owner_result ~base_path ~keeper_name =
-  match Owner_lock.resolve ~base_path ~keeper_name with
+  match Persistence.resolve_owner_identity ~base_path ~keeper_name with
   | Error error -> Error (Owner_unavailable error)
   | Ok owner -> project_resolved_owner owner
 ;;
@@ -179,7 +172,7 @@ module For_testing = struct
     | Claim_already_held
 
   let with_owner_claim ~base_path ~keeper_name f =
-    match Owner_lock.resolve ~base_path ~keeper_name with
+    match Persistence.resolve_owner_identity ~base_path ~keeper_name with
     | Error error -> Error (Owner_unavailable error)
     | Ok owner ->
       (match with_owner_claim owner f with

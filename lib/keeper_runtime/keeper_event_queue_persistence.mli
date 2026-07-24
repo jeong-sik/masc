@@ -7,6 +7,23 @@
     fails closed and requires reset. [event-queue-inflight.json] is rejected
     explicitly rather than migrated or treated as a second authority. *)
 
+type owner_identity
+type owner_identity_error
+
+val resolve_owner_identity :
+  base_path:string ->
+  keeper_name:string ->
+  (owner_identity, owner_identity_error) result
+(** Resolve the canonical process-local owner identity shared by every durable
+    event-queue operation. The representation and owner-lock implementation
+    remain private to [masc.keeper_runtime]. *)
+
+val owner_identity_error_to_string : owner_identity_error -> string
+val owner_identity_equal : owner_identity -> owner_identity -> bool
+val owner_identity_hash : owner_identity -> int
+val owner_identity_base_path : owner_identity -> string
+val owner_identity_keeper_name : owner_identity -> string
+
 type lease_kind = Keeper_event_queue_state.lease_kind =
   | Single
   | Board_batch

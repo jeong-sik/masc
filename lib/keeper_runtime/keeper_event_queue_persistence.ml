@@ -1,6 +1,25 @@
 module Owner_lock = Keeper_event_queue_owner_lock
 module State = Keeper_event_queue_state
 
+type owner_identity = Owner_lock.t
+type owner_identity_error = Owner_lock.resolve_error
+
+let resolve_owner_identity = Owner_lock.resolve
+let owner_identity_error_to_string = Owner_lock.resolve_error_to_string
+let owner_identity_equal = ( == )
+
+let owner_identity_hash owner =
+  Hashtbl.hash
+    ( Owner_lock.base_path owner
+    , Owner_lock.keeper_name owner |> Keeper_id.Keeper_name.to_string )
+;;
+
+let owner_identity_base_path = Owner_lock.base_path
+
+let owner_identity_keeper_name owner =
+  Owner_lock.keeper_name owner |> Keeper_id.Keeper_name.to_string
+;;
+
 type lease_kind = State.lease_kind =
   | Single
   | Board_batch

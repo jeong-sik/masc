@@ -1114,9 +1114,7 @@ let test_manual_applied_hint_failure () =
             check bool
               "manual hint carries exact installed ref"
               true
-              (Masc.Keeper_checkpoint_ref.equal
-                 installed_ref
-                 installed.installed_ref)
+              (installed_ref = installed.installed_ref)
           | Masc.Keeper_checkpoint_store.Not_installed _, _ ->
             fail "Applied manual compaction carried Not_installed"
           | _ -> fail "raising manual hint lost its typed failure")

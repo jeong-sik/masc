@@ -116,7 +116,7 @@ let runtime_base_path_opt () =
   | Some state -> Some (Mcp_server.workspace_config state).base_path
   | None -> None
 
-let keeper_event_queue_health_json () =
+let keeper_event_queue_health_json ~execution_snapshot () =
   match current_server_state_opt () with
   | None ->
     `Assoc
@@ -183,24 +183,8 @@ let keeper_event_queue_health_json () =
          durable queue ages; queue parsing below stays deterministic. *)
     in
     let owner_lifecycle ~keeper_name =
-      let meta_result =
-        match Keeper_meta_store.read_effective_meta config keeper_name with
-        | Ok (Some meta) -> Ok meta
-        | Ok None -> Error "durable keeper metadata missing"
-        | Error detail -> Error detail
-      in
-      let admission =
-        Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
-      in
-      let runtime =
-        Keeper_activation_readiness.owner_runtime_of_registry_entry
-          (Keeper_registry.get ~base_path keeper_name)
-      in
       match
-        Keeper_activation_readiness.classify_owner_execution
-          ~shutdown_operation_id:admission.snapshot_shutdown_operation_id
-          ~runtime
-          meta_result
+        owner_execution_truth execution_snapshot ~keeper_name
       with
       | Keeper_activation_readiness.Executable ->
         Keeper_event_queue_persistence.Runnable
@@ -226,7 +210,12 @@ let keeper_fleet_runtime_resolution_base_fields
     () =
   let base_path = runtime_base_path_opt () in
   let phase_snapshot = keeper_phase_snapshot ?base_path () in
-  let execution_snapshot = keeper_execution_snapshot ?base_path () in
+  let execution_snapshot =
+    match current_server_state_opt () with
+    | Some state ->
+      keeper_execution_snapshot (Mcp_server.workspace_config state)
+    | None -> empty_keeper_execution_snapshot
+  in
   let phase_counts = phase_snapshot.counts in
   let keeper_fibers = phase_counts.running in
   let paused_keepers_json =

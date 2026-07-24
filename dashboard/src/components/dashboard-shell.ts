@@ -263,9 +263,13 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
   const runningFibers = fleet?.running_keeper_fiber_count ?? fibers
   const healthyRunningFibers = fleet?.healthy_running_keeper_fiber_count ?? runningFibers
   const failingFibers = fleet?.failing_keeper_fiber_count ?? null
-  const executableFibers = fleet?.executable_keeper_fiber_count
-    ?? fleet?.executable_reaction_capacity_count
-    ?? runningFibers
+  const executableValue = fleet?.executable_keeper_fiber_count
+  const executableFibers =
+    typeof executableValue === 'number'
+    && Number.isInteger(executableValue)
+    && executableValue >= 0
+      ? executableValue
+      : null
   const pausedKeepers = fleet?.paused_keeper_count ?? paused
   const pausedAutobootKeepers = fleet?.paused_autoboot_enabled_keeper_count ?? null
   const targetCapacity = fleet?.target_reaction_capacity_count ?? fleet?.autoboot_enabled_keeper_count ?? null
@@ -274,9 +278,7 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
   const noFibers = fleet?.no_running_fibers ?? fleetSafety.keeper_fleet_no_fibers
   const requiresAction = fleet?.operator_action_required === true
   const capacityBelowTarget = fleet?.reaction_capacity_below_target === true
-  const capacityShortfall = fleet?.reaction_capacity_shortfall_count ?? (
-    targetCapacity != null && runningFibers != null ? Math.max(0, targetCapacity - runningFibers) : null
-  )
+  const capacityShortfall = fleet?.reaction_capacity_shortfall_count ?? null
   const pausedOnlyNoExecutable =
     executableFibers === 0
     && pausedAutobootKeepers != null
@@ -304,7 +306,9 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
     const capacityDetail = [
       `status=${fleetStatus ?? 'blocked'}`,
       `running_keeper_fiber_count=${runningFibers ?? 0}`,
-      executableFibers != null ? `executable_keeper_fiber_count=${executableFibers}` : null,
+      executableFibers != null
+        ? `executable_keeper_fiber_count=${executableFibers}`
+        : 'executable_keeper_fiber_count=unavailable',
       `paused_keeper_count=${pausedKeepers}`,
       pausedAutobootKeepers != null ? `paused_autoboot_enabled_keeper_count=${pausedAutobootKeepers}` : null,
       bootableKeepers != null ? `bootable_keeper_count=${bootableKeepers}` : null,
@@ -322,7 +326,9 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
     const capacityDetail = [
       `status=${fleetStatus ?? 'degraded'}`,
       `healthy_running_keeper_fiber_count=${healthyRunningFibers ?? 0}`,
-      executableFibers != null ? `executable_keeper_fiber_count=${executableFibers}` : null,
+      executableFibers != null
+        ? `executable_keeper_fiber_count=${executableFibers}`
+        : 'executable_keeper_fiber_count=unavailable',
       failingFibers != null ? `failing_keeper_fiber_count=${failingFibers}` : null,
       targetCapacity != null ? `target_reaction_capacity_count=${targetCapacity}` : null,
       capacityShortfall != null ? `reaction_capacity_shortfall_count=${capacityShortfall}` : null,

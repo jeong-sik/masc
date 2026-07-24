@@ -681,6 +681,48 @@ describe('dashboardHealthChips', () => {
     expect(chip?.detail).not.toContain('FD pressure')
   })
 
+  it('does not infer executable truth from running or reaction capacity', () => {
+    for (const executableValue of [undefined, '4'] as const) {
+      const fleet = {
+        status: 'degraded',
+        reason: null,
+        blocker: 'reaction_capacity_below_target',
+        blocked_keepers: 2,
+        blocked_count: 2,
+        running_keeper_fiber_count: 4,
+        healthy_running_keeper_fiber_count: 4,
+        executable_reaction_capacity_count: 4,
+        target_reaction_capacity_count: 6,
+        reaction_capacity_below_target: true,
+        reaction_capacity_shortfall_count: 2,
+        operator_action_required: true,
+        ...(executableValue === undefined
+          ? {}
+          : { executable_keeper_fiber_count: executableValue }),
+      }
+      const chips = dashboardHealthChips({
+        connected: true,
+        counts: { keepers: 6, configured_keepers: 6 },
+        keepers: [],
+        runtimeResolution: {
+          status: 'ready',
+          warnings: [],
+          fleet_safety: {
+            keeper_fibers: 4,
+            paused_keepers: 0,
+            keeper_fleet_no_fibers: false,
+            keeper_fleet_safety: fleet,
+          },
+        } as any,
+        executionError: null,
+        loading: false,
+      })
+      const chip = chips.find(c => c.key === 'fleet-liveness-risk')
+      expect(chip?.detail).toContain('executable_keeper_fiber_count=unavailable')
+      expect(chip?.detail).not.toContain('executable_keeper_fiber_count=4')
+    }
+  })
+
   it('surfaces quarantined reaction ledger rows even when pending backlog is clear', () => {
     const chips = dashboardHealthChips({
       connected: true,

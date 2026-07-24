@@ -1946,7 +1946,7 @@ let test_health_json_ignores_stale_active_task_alias_when_agent_executable () =
         in
         let execution_snapshot :
             Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot =
-          { executable_names = [ executor.name ] }
+          { owners = []; executable_names = [ executor.name ] }
         in
         let fleet_safety =
           Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
@@ -2180,7 +2180,7 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
         in
         let execution_snapshot :
             Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot =
-          { executable_names = [] }
+          { owners = []; executable_names = [] }
         in
         let fleet_safety =
           Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
@@ -2216,6 +2216,123 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
           false
           (fleet_safety |> member "operator_action_required" |> to_bool)))
 
+let test_health_json_reuses_canonical_owner_execution_snapshot () =
+  with_temp_dir "health-canonical-owner-execution-snapshot" (fun dir ->
+    let config_root = make_config_root dir in
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.For_testing.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = Mcp_server.workspace_config state in
+        let cached_missing =
+          make_keeper_meta
+            ~name:"canonical-meta-missing"
+            ~trace_id:"trace-canonical-meta-missing"
+            ()
+        in
+        let cached_disabled =
+          make_keeper_meta
+            ~name:"canonical-meta-disabled"
+            ~trace_id:"trace-canonical-meta-disabled"
+            ()
+        in
+        let paused =
+          make_keeper_meta
+            ~paused:true
+            ~name:"canonical-meta-paused"
+            ~trace_id:"trace-canonical-meta-paused"
+            ()
+        in
+        let cached_owners = [ cached_missing; cached_disabled; paused ] in
+        List.iter
+          (fun (meta : Keeper_meta_contract.keeper_meta) ->
+            Keeper_registry.For_testing.unregister
+              ~base_path:config.Workspace.base_path
+              meta.name;
+            ignore
+              (Keeper_registry.register_offline
+                 ~base_path:config.Workspace.base_path
+                 meta.name
+                 meta);
+            Keeper_event_queue_persistence.persist
+              ~base_path:config.Workspace.base_path
+              ~keeper_name:meta.name
+              Keeper_event_queue.empty)
+          cached_owners;
+        Fun.protect
+          ~finally:(fun () ->
+            List.iter
+              (fun (meta : Keeper_meta_contract.keeper_meta) ->
+                Keeper_registry.For_testing.unregister
+                  ~base_path:config.Workspace.base_path
+                  meta.name)
+              cached_owners)
+          (fun () ->
+            write_keeper_meta_exn
+              config
+              { cached_disabled with autoboot_enabled = false };
+            write_keeper_meta_exn config paused;
+            let missing_meta_path =
+              Keeper_types_profile.keeper_meta_path config cached_missing.name
+            in
+            if Sys.file_exists missing_meta_path then Sys.remove missing_meta_path;
+            let request = Httpun.Request.create `GET "/health" in
+            let json = Server_routes_http_runtime.make_health_json request in
+            let open Yojson.Safe.Util in
+            let fleet_safety = json |> member "keeper_fleet_safety" in
+            Alcotest.(check int)
+              "offline cached registry owners are not running"
+              0
+              (fleet_safety |> member "running_keeper_fiber_count" |> to_int);
+            Alcotest.(check int)
+              "durable missing/disabled owners are not executable"
+              0
+              (fleet_safety |> member "executable_keeper_fiber_count" |> to_int);
+            Alcotest.(check (list string))
+              "canonical execution snapshot exposes no executable names"
+              []
+              (fleet_safety
+               |> member "executable_keeper_names"
+               |> to_list
+               |> List.map to_string);
+            let queue_owners =
+              json
+              |> member "keeper_event_queue"
+              |> member "keepers"
+              |> to_list
+            in
+            let owner name =
+              List.find
+                (fun row ->
+                  String.equal
+                    (row |> member "keeper_name" |> to_string)
+                    name)
+                queue_owners
+            in
+            Alcotest.(check string)
+              "missing durable meta stays owner-local unknown"
+              "unclassified"
+              (owner cached_missing.name
+               |> member "owner_lifecycle"
+               |> to_string);
+            Alcotest.(check string)
+              "durable disabled meta overrides cached enabled registry meta"
+              "retained_disabled"
+              (owner cached_disabled.name
+               |> member "owner_lifecycle"
+               |> to_string);
+            Alcotest.(check string)
+              "paused durable owner remains a distinct retained variant"
+              "paused_dead"
+              (owner paused.name |> member "owner_lifecycle" |> to_string))))
+;;
+
 let test_health_json_effective_capacity_includes_recovering_lanes () =
   let previous_state = !Server_auth.server_state in
   Fun.protect
@@ -2242,7 +2359,7 @@ let test_health_json_effective_capacity_includes_recovering_lanes () =
       in
       let execution_snapshot :
           Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot =
-        { executable_names = target_names }
+        { owners = []; executable_names = target_names }
       in
       let fleet_safety =
         Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
@@ -2505,7 +2622,7 @@ let test_health_json_exposes_disabled_keeper_bootstrap_blocker () =
         in
         let execution_snapshot :
             Server_routes_http_runtime_fleet_scan.keeper_execution_snapshot =
-          { executable_names = [] }
+          { owners = []; executable_names = [] }
         in
         let paused_keepers_json =
           Server_routes_http_runtime_fleet_scan.durable_paused_keeper_scan config
@@ -4757,6 +4874,10 @@ let () =
             "health json preserves active task owner meta read error"
             `Quick
             test_health_json_preserves_active_task_owner_meta_read_error;
+          Alcotest.test_case
+            "health json reuses canonical owner execution snapshot"
+            `Quick
+            test_health_json_reuses_canonical_owner_execution_snapshot;
           Alcotest.test_case
             "health json effective capacity includes recovering lanes"
             `Quick

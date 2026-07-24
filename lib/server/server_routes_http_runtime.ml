@@ -569,9 +569,16 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     compute_section ~name:"keeper_board_event_collection" ?section_timings_ref
       keeper_board_event_collection_health_json
   in
+  let execution_snapshot =
+    match server_state with
+    | Some state ->
+      keeper_execution_snapshot (Mcp_server.workspace_config state)
+    | None -> empty_keeper_execution_snapshot
+  in
   let keeper_event_queue_json =
     compute_section ~name:"keeper_event_queue" ?section_timings_ref
-      keeper_event_queue_health_json
+      (fun () ->
+        keeper_event_queue_health_json ~execution_snapshot ())
   in
   let fd_accountant_json =
     compute_section ~name:"fd_accountant" ?section_timings_ref fd_accountant_snapshot_json
@@ -591,6 +598,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
             ~bootable_names:scan.bootable_names
             ~autoboot_scan:scan.autoboot_scan
             ~phase_snapshot
+            ~execution_snapshot
             ?base_path
             ~phase_counts
             ~paused_keepers_json
@@ -598,6 +606,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
         | None ->
           keeper_fleet_safety_health_json
             ~phase_snapshot
+            ~execution_snapshot
             ?base_path
             ~phase_counts
             ~paused_keepers_json

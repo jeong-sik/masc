@@ -494,38 +494,81 @@ let keeper_phase_snapshot ?base_path () =
 
 let keeper_phase_counts ?base_path () = (keeper_phase_snapshot ?base_path ()).counts
 
-type keeper_execution_snapshot =
-  { executable_names : string list
+type keeper_execution_owner =
+  { keeper_name : string
+  ; truth : Keeper_activation_readiness.owner_execution_truth
   }
 
-let keeper_execution_snapshot ?base_path () =
+type keeper_execution_snapshot =
+  { owners : keeper_execution_owner list
+  ; executable_names : string list
+  }
+
+let empty_keeper_execution_snapshot =
+  { owners = []; executable_names = [] }
+;;
+
+let keeper_execution_snapshot config =
+  let base_path = config.Workspace.base_path in
+  let registry_names =
+    Keeper_registry.all ~base_path ()
+    |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
+  in
+  let queue_names =
+    Keeper_event_queue_persistence.discover_keeper_names_with_snapshots
+      ~base_path
+    |> fun discovery -> discovery.keeper_names
+  in
+  let owner_names = sorted_unique_strings (registry_names @ queue_names) in
+  let owners =
+    List.map
+      (fun keeper_name ->
+        let meta_result =
+          match Keeper_meta_store.read_effective_meta config keeper_name with
+          | Ok (Some meta) -> Ok meta
+          | Ok None -> Error "durable keeper metadata missing"
+          | Error detail -> Error detail
+        in
+        let admission =
+          Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
+        in
+        let runtime =
+          Keeper_activation_readiness.owner_runtime_of_registry_entry
+            (Keeper_registry.get ~base_path keeper_name)
+        in
+        let truth =
+          Keeper_activation_readiness.classify_owner_execution
+            ~shutdown_operation_id:admission.snapshot_shutdown_operation_id
+            ~runtime
+            meta_result
+        in
+        { keeper_name; truth })
+      owner_names
+  in
   let executable_names =
-    Keeper_registry.all ?base_path ()
-    |> List.filter_map (fun (entry : Keeper_registry.registry_entry) ->
-      let admission =
-        Keeper_turn_admission.snapshot_for
-          ~base_path:entry.base_path
-          ~keeper_name:entry.name
-      in
-      let runtime =
-        Keeper_activation_readiness.owner_runtime_of_registry_entry
-          (Some entry)
-      in
-      match
-        Keeper_activation_readiness.classify_owner_execution
-          ~shutdown_operation_id:admission.snapshot_shutdown_operation_id
-          ~runtime
-          (Ok entry.meta)
-      with
-      | Keeper_activation_readiness.Executable -> Some entry.name
+    owners
+    |> List.filter_map (fun owner ->
+      match owner.truth with
+      | Keeper_activation_readiness.Executable -> Some owner.keeper_name
       | Keeper_activation_readiness.Recoverable
       | Keeper_activation_readiness.Retained_disabled _
       | Keeper_activation_readiness.Paused_dead _
       | Keeper_activation_readiness.Shutdown_fenced _
       | Keeper_activation_readiness.Unknown _ -> None)
-    |> sorted_unique_strings
   in
-  { executable_names }
+  { owners; executable_names }
+;;
+
+let owner_execution_truth snapshot ~keeper_name =
+  match
+    List.find_opt
+      (fun owner -> String.equal owner.keeper_name keeper_name)
+      snapshot.owners
+  with
+  | Some owner -> owner.truth
+  | None ->
+    Keeper_activation_readiness.Unknown
+      "owner absent from canonical execution snapshot"
 ;;
 
 let string_set_of_list values =
@@ -1275,7 +1318,7 @@ let keeper_fleet_safety_health_json
     ?bootable_names:bootable_names_override
     ?autoboot_scan:autoboot_scan_override
     ?phase_snapshot
-    ?execution_snapshot:execution_snapshot_override
+    ~execution_snapshot
     ?base_path
     ?reaction_capacity_names
     ?keeper_bootstrap_enabled:keeper_bootstrap_enabled_override
@@ -1313,11 +1356,6 @@ let keeper_fleet_safety_health_json
     | None ->
       current_server_state_opt ()
       |> Option.map (fun state -> (Mcp_server.workspace_config state).base_path)
-  in
-  let execution_snapshot =
-    match execution_snapshot_override with
-    | Some snapshot -> snapshot
-    | None -> keeper_execution_snapshot ?base_path:runtime_base_path ()
   in
   let executable_names = execution_snapshot.executable_names in
   let executable_count = List.length executable_names in

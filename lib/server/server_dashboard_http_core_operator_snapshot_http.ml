@@ -184,14 +184,18 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
       | Some raw -> String.equal (String.lowercase_ascii (String.trim raw)) "summary"
       | None -> false
     in
+    let optional_cache_key_part = function
+      | None -> "n"
+      | Some value -> Printf.sprintf "s%d:%s" (String.length value) value
+    in
     let cache_key =
       Core_cache.dashboard_cache_key
         config
         "operator_snapshot"
         (Printf.sprintf
            "param:%s|%s|%b|%b|%b"
-           (Option.value ~default:"" actor)
-           (Option.value ~default:"" view)
+           (optional_cache_key_part actor)
+           (optional_cache_key_part view)
            include_messages
            include_keepers
            lightweight_summary)

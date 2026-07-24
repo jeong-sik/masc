@@ -41,6 +41,7 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
   let compute () =
     let compute = Core_operator.begin_operator_snapshot_compute () in
     let started_at = Unix.gettimeofday () in
+    let started_mono = Eio.Time.now clock in
     try
       let json =
         Core_runtime.run_dashboard_compute
@@ -62,7 +63,7 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
                ; mcp_session_id = None
                }
              in
-             let t_snapshot = Unix.gettimeofday () in
+             let t_snapshot = Eio.Time.now clock in
              let json =
                Operator_control.snapshot_json
                  ~actor:"dashboard"
@@ -73,8 +74,9 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
                  ~lightweight_summary:true
                  ctx
              in
-             let dt_snapshot = Unix.gettimeofday () -. t_snapshot in
-             let dt_total = Unix.gettimeofday () -. started_at in
+             let finished_mono = Eio.Time.now clock in
+             let dt_snapshot = finished_mono -. t_snapshot in
+             let dt_total = finished_mono -. started_mono in
              if dt_total >= 5.0
              then
                Log.Dashboard.warn

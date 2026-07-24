@@ -20,6 +20,18 @@ let require_lane_slots label ~lane_id ~expected registry =
          selected_slots)
 ;;
 
+let require_lane_unconfigured label ~lane_id registry =
+  match Registry.resolve_lane registry ~lane_id with
+  | Error (Registry.Exact_lane_unconfigured { lane_id = actual_lane_id }) ->
+    Alcotest.(check string) label lane_id actual_lane_id
+  | Error error ->
+    Alcotest.failf
+      "%s returned the wrong failure: %s"
+      label
+      (Registry.lane_resolution_error_to_string error)
+  | Ok _ -> Alcotest.failf "%s unexpectedly resolved" label
+;;
+
 let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
   with_temp_dir "exact-output-catalog-precedence" @@ fun root ->
   let config_root = Filename.concat root "config" in
@@ -41,7 +53,6 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
          { source = overlay_path; contents = overlay_catalog })
   in
   require_admitted overlay_snapshot overlay_target;
-  require_admitted overlay_snapshot embedded_target;
   let replacement_snapshot =
     load_control_snapshot
       (Exact_output.Full_replacement
@@ -49,7 +60,6 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
   in
   require_admitted replacement_snapshot replacement_target;
   require_not_admitted replacement_snapshot overlay_target;
-  require_not_admitted replacement_snapshot embedded_target;
 
   Unix.putenv "MASC_CONFIG_DIR" config_root;
   Unix.putenv "OAS_MODEL_CATALOG" replacement_path;
@@ -86,7 +96,6 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
   in
   require_registry_unpublished "fresh process";
   require_bootstrap_rejected "overlay target is suppressed" overlay_target;
-  require_bootstrap_rejected "embedded target is suppressed" embedded_target;
 
   write_file runtime_path (runtime_toml replacement_target);
   create_server_state ();
@@ -461,10 +470,9 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
   write_file runtime_path (runtime_toml replacement_target);
   create_server_state ();
   let default_registry = current_registry "default HITL lane bootstrap" in
-  require_lane_slots
-    "missing HITL lane synthesizes the opaque structured-judge runtime"
+  require_lane_unconfigured
+    "missing HITL lane stays unconfigured"
     ~lane_id:"hitl_auto_judge"
-    ~expected:[ Runtime.runtime_id_for_structured_judge () ]
     default_registry;
   let structured_judge_candidates =
     [ replacement_structured_judge_target
@@ -477,10 +485,9 @@ let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs ()
        ~structured_judge_candidates
        replacement_target);
   create_server_state ();
-  require_lane_slots
-    "runtime-lane structured judge expands to ordered opaque candidates"
+  require_lane_unconfigured
+    "structured-judge route does not synthesize an exact-output lane"
     ~lane_id:"hitl_auto_judge"
-    ~expected:structured_judge_candidates
     (current_registry "runtime-lane HITL bootstrap");
   let explicit_slots = [ replacement_secondary_target; replacement_target ] in
   write_file
@@ -511,7 +518,7 @@ let () =
             `Quick
             test_offline_runtime_save_converges_by_write_stage
         ; Alcotest.test_case
-            "full replacement suppresses overlay and embedded targets"
+            "full replacement suppresses overlay targets"
             `Quick
             (test_full_replacement_precedence
                ~clock
@@ -520,7 +527,7 @@ let () =
                ~proc_mgr
                ~fs)
         ; Alcotest.test_case
-            "HITL lane synthesizes an opaque default and preserves explicit order"
+            "HITL lane stays explicit and preserves configured order"
             `Quick
             (test_hitl_auto_judge_lane_bootstrap
                ~clock

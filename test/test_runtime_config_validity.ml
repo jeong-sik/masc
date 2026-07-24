@@ -1,6 +1,8 @@
 open Alcotest
 open Masc
 
+module Exact_output = Agent_sdk.Exact_output
+
 let empty_env _name = None
 
 let parse_or_fail content =
@@ -760,8 +762,27 @@ let test_repo_runtime_toml_loads () =
     (match Runtime_toml.parse_file path with
      | Error _ -> fail "repo runtime.toml exact-output lanes must parse"
      | Ok config ->
-       check int "public seed has no provider-bound exact-output lanes" 0
-         (List.length config.exact_output_lane_decls));
+       let lane_ids =
+         List.map
+           (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+              lane.id)
+           config.exact_output_lane_decls
+       in
+       check
+         (list string)
+         "public seed exact-output lanes"
+         [ "librarian_exact"
+         ; "compaction_exact"
+         ; "hitl_auto_judge"
+         ]
+         lane_ids;
+       List.iter
+         (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+            check bool
+              (Printf.sprintf "%s has at least one target" lane.id)
+              true
+              (not (List.is_empty lane.slot_ids)))
+         config.exact_output_lane_decls);
     check (option (float 0.0)) "Ollama Cloud connect timeout override"
       (Some 600.0)
       default.provider_config.connect_timeout_s;
@@ -897,6 +918,87 @@ let test_repo_runtime_toml_loads () =
                caps.thinking_control_format
                Runtime_schema.Reasoning_effort)
         | None -> fail "expected Kimi K2.7 Code capabilities"))
+
+let test_deployment_exact_output_catalog_admits_seed_lanes () =
+  let root = repo_root () in
+  let runtime_path = Filename.concat root "config/runtime.toml" in
+  let overlay_path = Filename.concat root "config/oas-models-overlay.toml" in
+  let overlay_contents =
+    try In_channel.with_open_bin overlay_path In_channel.input_all with
+    | Sys_error detail ->
+      failf "deployment exact-output catalog cannot be read: %s" detail
+  in
+  let io : Exact_output.resolver_io =
+    { getenv =
+        (function
+          | "ZAI_CODING_API_KEY" | "DEEPSEEK_API_KEY" ->
+            Ok (Some "exact-output-seed-test")
+          | _ -> Ok None)
+    }
+  in
+  let snapshot =
+    match
+      Exact_output.load_resolver_snapshot
+        ~io
+        ~catalog:
+          (Exact_output.Embedded_with_overlay
+             { source = overlay_path; contents = overlay_contents })
+        ()
+    with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "deployment exact-output catalog should load"
+  in
+  let output_requirement =
+    Exact_output.make_output_requirement
+      ~schema:
+        (`Assoc
+           [ "type", `String "object"
+           ; "properties", `Assoc []
+           ; "additionalProperties", `Bool false
+           ])
+      ~minimum_guarantee:Exact_output.Json_syntax
+  in
+  let messages =
+    [ Agent_sdk.Types.text_message
+        Agent_sdk.Types.User
+        "Return one JSON object."
+    ]
+  in
+  match Runtime_toml.parse_file runtime_path with
+  | Error _ -> fail "repo runtime.toml exact-output lanes must parse"
+  | Ok config ->
+    List.iter
+      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         List.iter
+           (fun target_ref ->
+              match Exact_output.admit_target_ref snapshot target_ref with
+              | Ok admitted_target ->
+                (match Exact_output.resolve_target admitted_target with
+                 | Error _ ->
+                   failf
+                     "exact-output lane %s target %s must resolve with fixture credentials"
+                     lane.id
+                     target_ref
+                 | Ok target ->
+                   (match
+                      Exact_output.admit
+                        ~target
+                        ~messages
+                        output_requirement
+                    with
+                    | Ok _ -> ()
+                    | Error _ ->
+                      failf
+                        "exact-output lane %s target %s must satisfy Json_syntax"
+                        lane.id
+                        target_ref))
+              | Error _ ->
+                failf
+                  "exact-output lane %s target %s must exist in the frozen catalog"
+                  lane.id
+                  target_ref)
+           lane.slot_ids)
+      config.exact_output_lane_decls
 
 let test_toml_catalog_resolves_lifecycle_keys () =
   let doc =
@@ -1688,22 +1790,6 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
          check (list string) "active runtime ids"
            [ "ollama.good" ]
            (Runtime.get_runtime_ids ());
-         (match Runtime.effective_exact_output_lane_declarations [] with
-          | Error detail ->
-            failf
-              "effective exact-output lanes must use degraded runtime state: %s"
-              detail
-          | Ok [ lane ] ->
-            check string "synthesized HITL lane id"
-              "hitl_auto_judge"
-              lane.Runtime_schema.id;
-            check (list string) "synthesized HITL lane uses active default only"
-              [ "ollama.good" ]
-              lane.slot_ids
-          | Ok lanes ->
-            failf
-              "expected one synthesized HITL lane, got %d"
-              (List.length lanes));
          check (list string) "no dropped assignment"
            []
            (List.map
@@ -2341,6 +2427,14 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
         lane_id
         (Runtime_exact_output_registry.lane_resolution_error_to_string error)
   in
+  let lane_is_unconfigured ~lane_id registry =
+    match Runtime_exact_output_registry.resolve_lane registry ~lane_id with
+    | Error
+        (Runtime_exact_output_registry.Exact_lane_unconfigured
+           { lane_id = actual_lane_id }) ->
+      String.equal lane_id actual_lane_id
+    | Error _ | Ok _ -> false
+  in
   let baseline = content ~default:"local.chat" "slot-a" in
   with_temp_runtime_toml baseline (fun path ->
     (match Runtime.save_config_text ~runtime_config_path:path baseline with
@@ -2365,8 +2459,8 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
       (Runtime_exact_output_registry.generation after_invalid);
     check (list string) "invalid save preserves registry slots" [ "slot-a" ]
       (slots_exn ~lane_id:"compaction_exact" after_invalid);
-    check (list string) "invalid save preserves synthesized HITL lane" [ "local.chat" ]
-      (slots_exn ~lane_id:"hitl_auto_judge" after_invalid);
+    check bool "invalid save does not synthesize HITL lane" true
+      (lane_is_unconfigured ~lane_id:"hitl_auto_judge" after_invalid);
     let replacement = content ~default:"local.libr" "slot-b" in
     let failed_path = path ^ ".directory" in
     Unix.mkdir failed_path 0o755;
@@ -2385,11 +2479,8 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
            (Runtime_exact_output_registry.generation after_write_failure);
          check (list string) "write failure preserves registry slots" [ "slot-a" ]
            (slots_exn ~lane_id:"compaction_exact" after_write_failure);
-         check
-           (list string)
-           "write failure preserves synthesized HITL lane"
-           [ "local.chat" ]
-           (slots_exn ~lane_id:"hitl_auto_judge" after_write_failure));
+         check bool "write failure does not synthesize HITL lane" true
+           (lane_is_unconfigured ~lane_id:"hitl_auto_judge" after_write_failure));
     (match Runtime.save_config_text ~runtime_config_path:path replacement with
      | Error detail -> failf "valid exact replacement failed: %s" detail
      | Ok () -> ());
@@ -2404,8 +2495,8 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
        > 0);
     check (list string) "valid save commits registry slots" [ "slot-b" ]
       (slots_exn ~lane_id:"compaction_exact" replaced);
-    check (list string) "valid save refreshes synthesized HITL lane" [ "local.libr" ]
-      (slots_exn ~lane_id:"hitl_auto_judge" replaced))
+    check bool "valid save does not synthesize HITL lane" true
+      (lane_is_unconfigured ~lane_id:"hitl_auto_judge" replaced))
 
 let test_deprecated_capability_notice_warns_once_per_process () =
   (* runtime.toml is re-parsed on every keeper boot; a per-parse deprecation
@@ -2669,6 +2760,10 @@ let () =
             test_exact_output_lane_rejects_unknown_key;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
+          test_case
+            "deployment exact-output catalog admits repo seed lanes"
+            `Quick
+            test_deployment_exact_output_catalog_admits_seed_lanes;
           test_case
             "[runtime].cross_verifier resolves, defaults to None, rejects unknown"
             `Quick test_cross_verifier_runtime_routing;

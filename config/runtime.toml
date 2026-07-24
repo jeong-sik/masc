@@ -14,10 +14,6 @@ default = "ollama_cloud.deepseek-v4-flash"
 # Periodic Memory OS fact-survival consolidation is a separate task route from
 # post-turn Librarian extraction. Model/provider selection belongs only here.
 memory_os_consolidation = "ollama_cloud_native.minimax-m3-native-structured"
-# Existing deployments must opt in explicitly after the exact-output registry
-# is available:
-# [runtime.exact_output_lanes.librarian_exact]
-# slots = ["glm-coding.glm-5-turbo", "deepseek.deepseek-v4-pro"]
 # Provider-native structured-output judges must not inherit the fleet chat
 # default when that default lacks schema support. Keep this lane explicit so
 # structured judgment lanes fail at config load on typo/unsupported
@@ -27,6 +23,17 @@ structured_judge = "ollama_cloud_native.minimax-m3-native-structured"
 # Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
 # this explicit smart lane.
 cross_verifier = "deepseek.deepseek-v4-pro"
+
+# Existing workspaces are not overwritten by this seed. Copy the required lane
+# declarations into the live runtime.toml before enabling their consumers.
+[runtime.exact_output_lanes.librarian_exact]
+slots = ["glm-coding.glm-5-turbo", "deepseek.deepseek-v4-pro"]
+
+[runtime.exact_output_lanes.compaction_exact]
+slots = ["glm-coding.glm-5-turbo", "deepseek.deepseek-v4-pro"]
+
+[runtime.exact_output_lanes.hitl_auto_judge]
+slots = ["glm-coding.glm-5-turbo", "deepseek.deepseek-v4-pro"]
 
 [providers.ollama_cloud]
 display-name = "Ollama Cloud"

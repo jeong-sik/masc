@@ -2559,7 +2559,7 @@ let test_transition_outbox_projects_with_stable_identity () =
        "injected post-append failure unexpectedly retired the transition");
   let retained_outbox =
     match
-      Masc.Keeper_event_queue_persistence.read_transition_outbox_result
+      Masc.Keeper_event_queue_persistence.transition_outbox_result
         ~base_path
         ~keeper_name
     with
@@ -2574,15 +2574,15 @@ let test_transition_outbox_projects_with_stable_identity () =
       Masc.Keeper_event_queue_recovery.project_discovered ~base_path
     in
     Alcotest.(check int)
-      "startup discovery finds durable owner"
+      "recovery sweep finds durable owner"
       1
       retry_report.discovered;
     Alcotest.(check int)
-      "startup sweep converges pending outbox"
+      "recovery sweep converges pending outbox"
       1
       retry_report.converged;
     Alcotest.(check int)
-      "startup sweep retains no projection failures"
+      "recovery sweep retains no projection failures"
       0
       (List.length retry_report.failures);
     let state =
@@ -2602,7 +2602,7 @@ let test_transition_outbox_projects_with_stable_identity () =
      | Ok Masc.Keeper_event_queue_recovery.Transition_converged ->
        Alcotest.fail "empty outbox unexpectedly required convergence"
      | Ok Masc.Keeper_event_queue_recovery.Claim_busy ->
-       Alcotest.fail "owner claim remained busy after startup sweep"
+       Alcotest.fail "owner claim remained busy after recovery sweep"
      | Error error ->
        Alcotest.fail
          (Masc.Keeper_event_queue_recovery.projection_error_to_string error));

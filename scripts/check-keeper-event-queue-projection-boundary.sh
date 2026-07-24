@@ -39,4 +39,23 @@ if [[ "${actual}" != "${expected}" ]]; then
   fail "only the canonical reaction ledger may call the low-level retirement primitive"
 fi
 
+canonical_source=lib/keeper/keeper_reaction_ledger.ml
+qualified_call='Keeper_event_queue_persistence.mark_transition_projected_result'
+qualified_call_count="$({
+  rg -o --fixed-strings "${qualified_call}" "${canonical_source}" || true
+} | wc -l | tr -d '[:space:]')"
+if [[ "${qualified_call_count}" != "1" ]]; then
+  fail "canonical reaction ledger must contain exactly one qualified retirement call"
+fi
+
+if ! rg \
+  --quiet \
+  --multiline \
+  --multiline-dotall \
+  'let\* \(\) =\s+append_event_queue_transition_outbox_result.*?let\* \(\) = after_ledger_append \(\) in\s+Keeper_event_queue_persistence\.mark_transition_projected_result' \
+  "${canonical_source}"
+then
+  fail "canonical projection must append, pass the post-append seam, then retire"
+fi
+
 echo "[keeper-event-queue-projection-boundary] OK"

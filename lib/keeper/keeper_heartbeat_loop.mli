@@ -270,6 +270,18 @@ module For_testing : sig
     unit ->
     transcript_corruption_commit
 
+  val commit_transcript_corruption_and_project :
+    stop:bool Atomic.t ->
+    persist_pause:
+      (unit -> ([ `Persisted | `No_durable_meta ], string) result) ->
+    ?settle:(unit -> (unit, string) result) ->
+    project_transition_outbox:(unit -> (unit, string) result) ->
+    unit ->
+    transcript_corruption_commit * (unit, string) result
+  (** Execute the production transcript-corruption commit/project sequence.
+      Projection runs only after durable pause and settlement return, outside
+      the cancellation-protected commit region. *)
+
   val exact_execution_guard :
     base_path:string ->
     keeper_name:string ->

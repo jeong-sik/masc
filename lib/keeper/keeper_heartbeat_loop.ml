@@ -872,6 +872,25 @@ let commit_transcript_corruption ~stop ~persist_pause ?settle () =
           | Error detail -> Transcript_pause_settlement_failed detail)))
 ;;
 
+let commit_transcript_corruption_and_project
+      ~stop
+      ~persist_pause
+      ?settle
+      ~project_transition_outbox
+      ()
+  =
+  let committed = commit_transcript_corruption ~stop ~persist_pause ?settle () in
+  let projection =
+    match committed with
+    | Transcript_pause_and_settlement_persisted -> project_transition_outbox ()
+    | Transcript_pause_persisted
+    | Transcript_pause_persistence_failed _
+    | Transcript_pause_settlement_failed _ ->
+      Ok ()
+  in
+  committed, projection
+;;
+
 module For_testing = struct
   type nonrec transcript_corruption_commit = transcript_corruption_commit =
     | Transcript_pause_persisted
@@ -881,6 +900,9 @@ module For_testing = struct
 
   let exact_execution_guard = exact_execution_guard
   let commit_transcript_corruption = commit_transcript_corruption
+  let commit_transcript_corruption_and_project =
+    commit_transcript_corruption_and_project
+  ;;
 
   let settle_claimed_lease_exact
         ~after_exact_disposition_prepare
@@ -1380,31 +1402,23 @@ let run_keepalive_unified_turn
                         lease_settled := true;
                         Error detail)
              in
-             let committed =
-               commit_transcript_corruption
+             let committed, projection =
+               commit_transcript_corruption_and_project
                  ~stop
                  ~persist_pause:(fun () ->
                    Keeper_meta_store.persist_transcript_corruption_pause
                      ctx.config
                      ~keeper_name:meta_after_triage.name)
                  ?settle
+                 ~project_transition_outbox:(fun () ->
+                   require_transition_outbox_projection
+                     ~base_path:ctx.config.base_path
+                     ~keeper_name:meta_after_triage.name)
                  ()
              in
              (match committed with
               | Transcript_pause_persisted -> ()
-              | Transcript_pause_and_settlement_persisted ->
-                (match
-                   require_transition_outbox_projection
-                     ~base_path:ctx.config.base_path
-                     ~keeper_name:meta_after_triage.name
-                 with
-                 | Ok () -> ()
-                 | Error message ->
-                   Log.Keeper.error
-                     ~keeper_name:meta_after_triage.name
-                     "transcript corruption transition projection failed after durable settlement: %s"
-                     message;
-                   record_settlement_failure message)
+              | Transcript_pause_and_settlement_persisted -> ()
               | Transcript_pause_persistence_failed message ->
                 Log.Keeper.error
                   ~keeper_name:meta_after_triage.name
@@ -1415,6 +1429,14 @@ let run_keepalive_unified_turn
                 Log.Keeper.error
                   ~keeper_name:meta_after_triage.name
                   "transcript corruption terminal settlement failed: %s"
+                  message;
+                record_settlement_failure message);
+             (match projection with
+              | Ok () -> ()
+              | Error message ->
+                Log.Keeper.error
+                  ~keeper_name:meta_after_triage.name
+                  "transcript corruption transition projection failed after durable settlement: %s"
                   message;
                 record_settlement_failure message);
              Some committed

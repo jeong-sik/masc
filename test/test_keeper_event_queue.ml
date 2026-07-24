@@ -128,7 +128,7 @@ let settle_and_project
   match
     project_transition_canonically
       ~base_path
-      keeper_name
+      ~keeper_name
       ~transition_id:receipt.transition_id
   with
   | Ok () -> receipt
@@ -1275,7 +1275,7 @@ let () =
       (match
          project_transition_canonically
            ~base_path
-           keeper_name
+           ~keeper_name
            ~transition_id:board_receipt.transition_id
        with
        | Ok () -> ()
@@ -1385,7 +1385,7 @@ let () =
         match
           project_transition_canonically
             ~base_path
-            keeper_name
+            ~keeper_name
             ~transition_id:receipt.transition_id
         with
         | Ok () -> ()
@@ -1694,7 +1694,7 @@ let () =
       (match
          project_transition_canonically
            ~base_path
-           keeper_name
+           ~keeper_name
            ~transition_id:requeue_receipt.transition_id
        with
        | Ok () -> ()

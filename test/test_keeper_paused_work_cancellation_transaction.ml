@@ -723,6 +723,98 @@ let test_transcript_corruption_pause_precedes_settlement () =
        false)
 ;;
 
+let test_transcript_corruption_projection_failure_recovers () =
+  with_lane ~registered:false ~paused:false ~generation:24
+    (fun config keeper_name request ->
+       let base_path = config.Workspace.base_path in
+       let stop = Atomic.make false in
+       let committed, projection =
+         Heartbeat_testing.commit_transcript_corruption_and_project
+           ~stop
+           ~persist_pause:(fun () -> Ok `Persisted)
+           ~settle:(fun () ->
+             match
+               Registry_queue.settle_result
+                 ~base_path
+                 keeper_name
+                 ~settled_at:4.0
+                 ~lease:request.lease
+                 ~settlement:
+                   (Registry_queue.Escalate
+                      { reason =
+                          Registry_queue.Transcript_corruption_requires_reset
+                            { detail = "fixture transcript corruption" }
+                      ; successor = None
+                      })
+             with
+             | Error detail -> Error detail
+             | Ok
+                 ( Registry_queue.Settled _
+                 | Registry_queue.Already_settled _ ) ->
+               Ok ()
+             | Ok (Registry_queue.Committed_followup_failed { detail; _ }) ->
+               Error detail)
+           ~project_transition_outbox:(fun () ->
+             Keeper_reaction_ledger.For_testing
+             .project_transition_outbox_after_append_result
+               ~after_ledger_append:(fun () ->
+                 Error "injected failure after ledger append")
+               ~base_path
+               ~keeper_name)
+           ()
+       in
+       Alcotest.(check bool)
+         "transcript settlement commits before projection"
+         true
+         (match committed with
+          | Heartbeat_testing.Transcript_pause_and_settlement_persisted -> true
+          | Heartbeat_testing.Transcript_pause_persisted
+          | Heartbeat_testing.Transcript_pause_persistence_failed _
+          | Heartbeat_testing.Transcript_pause_settlement_failed _ ->
+            false);
+       Alcotest.(check (result unit string))
+         "post-append projection failure is returned"
+         (Error "injected failure after ledger append")
+         projection;
+       let retained =
+         Persistence.transition_outbox_result ~base_path ~keeper_name
+         |> require_ok "read retained transcript transition"
+       in
+       Alcotest.(check int)
+         "projection failure retains transcript transition"
+         1
+         (List.length retained);
+       let state =
+         Persistence.load_state_result ~base_path ~keeper_name
+         |> require_ok "load settled transcript transition"
+       in
+       Alcotest.(check int)
+         "durable transcript settlement removes the lease"
+         0
+         (List.length (State.leases state));
+       (match
+          Keeper_event_queue_recovery.project_owner_result
+            ~base_path
+            ~keeper_name
+        with
+        | Ok Keeper_event_queue_recovery.Transition_converged -> ()
+        | Ok Keeper_event_queue_recovery.No_pending_transition ->
+          Alcotest.fail "retained transcript transition was not retried"
+        | Ok Keeper_event_queue_recovery.Claim_busy ->
+          Alcotest.fail "transcript transition recovery claim remained busy"
+        | Error error ->
+          Alcotest.fail
+            (Keeper_event_queue_recovery.projection_error_to_string error));
+       let outbox =
+         Persistence.transition_outbox_result ~base_path ~keeper_name
+         |> require_ok "read converged transcript transition"
+       in
+       Alcotest.(check int)
+         "retry retires transcript transition"
+         0
+         (List.length outbox))
+;;
+
 let assert_transcript_corruption_pause_failure_preserves_lease ~persist_pause =
   with_lane ~registered:false ~paused:false ~generation:24
     (fun config keeper_name request ->
@@ -875,6 +967,10 @@ let () =
             "transcript pause precedes settlement"
             `Quick
             test_transcript_corruption_pause_precedes_settlement
+        ; Alcotest.test_case
+            "transcript projection failure retains outbox and recovers"
+            `Quick
+            test_transcript_corruption_projection_failure_recovers
         ; Alcotest.test_case
             "transcript pause failure preserves lease"
             `Quick

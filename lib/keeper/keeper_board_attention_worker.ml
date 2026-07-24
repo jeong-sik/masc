@@ -74,15 +74,65 @@ let contention_generation_label (contention : contention) =
   |> Yojson.Safe.to_string
 ;;
 
+type contention_rearm_outcome =
+  | Outcome_pending
+  | Outcome_inflight
+  | Outcome_scheduled
+  | Outcome_stale_ticket
+  | Outcome_signaled
+  | Outcome_coalesced
+  | Outcome_not_registered
+  | Outcome_delivery_error
+  | Outcome_delivery_reset
+  | Outcome_delivery_retry
+  | Outcome_sleep_cancelled
+  | Outcome_fork_cancelled
+  | Outcome_reset
+  | Outcome_history_removed
+
+let contention_rearm_outcome_label = function
+  | Outcome_pending -> "pending"
+  | Outcome_inflight -> "inflight"
+  | Outcome_scheduled -> "scheduled"
+  | Outcome_stale_ticket -> "stale_ticket"
+  | Outcome_signaled -> "signaled"
+  | Outcome_coalesced -> "coalesced"
+  | Outcome_not_registered -> "not_registered"
+  | Outcome_delivery_error -> "delivery_error"
+  | Outcome_delivery_reset -> "delivery_reset"
+  | Outcome_delivery_retry -> "delivery_retry"
+  | Outcome_sleep_cancelled -> "sleep_cancelled"
+  | Outcome_fork_cancelled -> "fork_cancelled"
+  | Outcome_reset -> "reset"
+  | Outcome_history_removed -> "history_removed"
+;;
+
 let log_contention_rearm event (contention : contention) ~delay_s ~outcome =
-  Log.Keeper.info
+  let write =
+    match outcome with
+    | Outcome_delivery_error
+    | Outcome_not_registered -> Log.Keeper.warn
+    | Outcome_pending
+    | Outcome_inflight
+    | Outcome_scheduled
+    | Outcome_stale_ticket
+    | Outcome_signaled
+    | Outcome_coalesced
+    | Outcome_delivery_reset
+    | Outcome_delivery_retry
+    | Outcome_sleep_cancelled
+    | Outcome_fork_cancelled
+    | Outcome_reset
+    | Outcome_history_removed -> Log.Keeper.info
+  in
+  write
     "board_attention_claim_contention event=%s keeper=%s partition=%s generation=%s delay_ms=%d outcome=%s"
     event
     contention.keeper_name
     contention.partition_id
     (contention_generation_label contention)
     (int_of_float (delay_s *. 1000.0))
-    outcome
+    (contention_rearm_outcome_label outcome)
 ;;
 
 let find_rearm_entry scheduler contention =
@@ -120,10 +170,10 @@ let cancel_rearm_ticket scheduler contention ticket outcome =
   then log_contention_rearm "cancelled" contention ~delay_s:ticket.delay_s ~outcome
 ;;
 
-let wake_result_label = function
-  | Wake.Signaled -> "signaled"
-  | Wake.Coalesced -> "coalesced"
-  | Wake.Not_registered -> "not_registered"
+let wake_result_outcome = function
+  | Wake.Signaled -> Outcome_signaled
+  | Wake.Coalesced -> Outcome_coalesced
+  | Wake.Not_registered -> Outcome_not_registered
 ;;
 
 let fire_rearm_ticket scheduler contention ticket ~launch_delivery_retry =
@@ -146,7 +196,7 @@ let fire_rearm_ticket scheduler contention ticket ~launch_delivery_retry =
       "cancelled"
       contention
       ~delay_s:ticket.delay_s
-      ~outcome:"stale_ticket"
+      ~outcome:Outcome_stale_ticket
   else
     let delivery = scheduler.request () in
     let completion =
@@ -169,20 +219,20 @@ let fire_rearm_ticket scheduler contention ticket ~launch_delivery_retry =
         "fired"
         contention
         ~delay_s:ticket.delay_s
-        ~outcome:(wake_result_label wake)
+        ~outcome:(wake_result_outcome wake)
     | `Retry next_ticket ->
       log_contention_rearm
         "fired"
         contention
         ~delay_s:ticket.delay_s
-        ~outcome:"delivery_error";
+        ~outcome:Outcome_delivery_error;
       launch_delivery_retry next_ticket
     | `Suppressed ->
       log_contention_rearm
         "cancelled"
         contention
         ~delay_s:ticket.delay_s
-        ~outcome:"delivery_reset"
+        ~outcome:Outcome_delivery_reset
 ;;
 
 let make_contention_rearm_scheduler ~fork ~sleep ~request () =
@@ -214,9 +264,9 @@ let schedule_contention_rearm scheduler contention =
       in
       match entry.pending, entry.inflight with
       | Some ticket, (Some _ | None) ->
-        `Deduplicated (ticket.delay_s, "pending")
+        `Deduplicated (ticket.delay_s, Outcome_pending)
       | None, Some ticket ->
-        `Deduplicated (ticket.delay_s, "inflight")
+        `Deduplicated (ticket.delay_s, Outcome_inflight)
       | None, None ->
         `Scheduled (prepare_rearm_ticket_locked scheduler entry))
   in
@@ -238,7 +288,7 @@ let schedule_contention_rearm scheduler contention =
                 scheduler
                 contention
                 ticket
-                "sleep_cancelled";
+                Outcome_sleep_cancelled;
               raise exn);
            fire_rearm_ticket
              scheduler
@@ -250,10 +300,10 @@ let schedule_contention_rearm scheduler contention =
                  "scheduled"
                  contention
                  ~delay_s:next_ticket.delay_s
-                 ~outcome:"delivery_retry"))
+                 ~outcome:Outcome_delivery_retry))
        with
        | exn ->
-         cancel_rearm_ticket scheduler contention ticket "fork_cancelled";
+         cancel_rearm_ticket scheduler contention ticket Outcome_fork_cancelled;
          raise exn)
     in
     launch ticket;
@@ -261,7 +311,7 @@ let schedule_contention_rearm scheduler contention =
       "scheduled"
       contention
       ~delay_s:ticket.delay_s
-      ~outcome:"scheduled";
+      ~outcome:Outcome_scheduled;
     Rearm_scheduled { delay_s = ticket.delay_s }
 ;;
 
@@ -288,13 +338,13 @@ let reset_contention_rearms scheduler ~keep =
            "cancelled"
            entry.key
            ~delay_s:ticket.delay_s
-           ~outcome:"reset"
+           ~outcome:Outcome_reset
        | None, None ->
          log_contention_rearm
            "reset"
            entry.key
            ~delay_s:0.0
-           ~outcome:"history_removed")
+           ~outcome:Outcome_history_removed)
     removed
 ;;
 

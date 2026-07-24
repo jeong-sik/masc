@@ -4,13 +4,13 @@ module EC = Masc.Keeper_error_classify
 
 (* Incident-bound probe fixture, not a catalog default. Keep the interval and
    expiry aligned with the evidence identified by [source_ref]. *)
-let serving_constraint ?expires_at_unix_s () =
+let serving_constraint ?(expires_at_unix_s = 4_102_444_800) () =
   Llm_provider.Serving_constraint.make
     ~source_kind:Llm_provider.Serving_constraint.Probe
     ~source_ref:"probe://incident/2793"
     ~checked_at_unix_s:100
     ~confidence:Llm_provider.Serving_constraint.High
-    ?expires_at_unix_s
+    ~expires_at_unix_s
     ~accepted_through:524298
     ~rejected_from:524299
     ()

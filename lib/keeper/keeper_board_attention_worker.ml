@@ -1309,9 +1309,15 @@ let process_next_with_claim_ready_exact
     claim_selected 3
 ;;
 
-let process_next =
+let process_next ~now ~worker_epoch ~base_path ~keeper_name ~prepare ~execute =
   process_next_with_claim_ready_exact
     ~claim_ready_exact:Partition.claim_ready_exact
+    ~now
+    ~worker_epoch
+    ~base_path
+    ~keeper_name
+    ~prepare
+    ~execute
 ;;
 
 let completed_in_order ~base_path ~keeper_name =

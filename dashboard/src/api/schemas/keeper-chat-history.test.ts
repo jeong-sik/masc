@@ -158,6 +158,25 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     expect(out?.turn_ref).toBeUndefined()
   })
 
+  it('passes delivery_key through without dropping the row, whatever its shape', () => {
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({ delivery_key: { kind: 'direct_request', request_id: 'kmsg-1' } }),
+    )
+    expect(out).not.toBeNull()
+    expect(out?.delivery_key).toEqual({ kind: 'direct_request', request_id: 'kmsg-1' })
+    // Malformed / unexpected shapes are tolerated too: the consumer extracts
+    // request_id tolerantly, so the row must survive.
+    expect(
+      safeParseKeeperChatHistoryMessage(validMessage({ delivery_key: 'kmsg-1' })),
+    ).not.toBeNull()
+    expect(
+      safeParseKeeperChatHistoryMessage(validMessage({ delivery_key: 42 })),
+    ).not.toBeNull()
+    expect(
+      safeParseKeeperChatHistoryMessage(validMessage())?.delivery_key,
+    ).toBeUndefined()
+  })
+
   it('returns null when turn_ref has the wrong type', () => {
     expect(
       safeParseKeeperChatHistoryMessage(validMessage({ turn_ref: 4071 })),

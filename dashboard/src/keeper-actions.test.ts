@@ -1672,7 +1672,12 @@ describe('sendKeeperThreadMessage stream outcome', () => {
 
     await sendKeeperThreadMessage('echo', '진행 상황?')
 
-    const reply = (keeperThreads.value.echo ?? []).find(entry => entry.role === 'assistant')
+    const thread = keeperThreads.value.echo ?? []
+    const user = thread.find(entry => entry.role === 'user')
+    const reply = thread.find(entry => entry.role === 'assistant')
+    expect(user?.details?.queueReceiptId).toBe(
+      'chatq_00000000-0000-4000-8000-000000000001',
+    )
     expect(reply?.delivery).toBe('queued')
     expect(reply?.text).toContain('message is queued')
     expect(reply?.details).toMatchObject({
@@ -2256,7 +2261,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       // Server already persisted the user turn, but the assistant reply is
       // still queued and has not been written yet.
       fetchKeeperChatHistory.mockResolvedValue([
-        { role: 'user', content: '진행 상황?', ts: 1_780_000_000 },
+        { role: 'user', content: '진행 상황?', ts: 1_780_000_000, delivery_key: { kind: 'direct_request', request_id: 'kmsg_echo_1' } },
       ])
 
       // First poll says queued; second poll completes so the test can finish.

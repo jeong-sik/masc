@@ -1415,12 +1415,12 @@ let test_applied_compaction_settles_followup_atomically () =
    | Masc.Keeper_registry_event_queue.Ack -> ()
    | _ -> Alcotest.fail "follow-up retry replayed an already-applied compaction");
   let completion_error =
-    Keeper_context_runtime.Transition_rejected
+    Masc.Keeper_context_runtime.Transition_rejected
       (Keeper_state_machine.Precondition_violation
          { event = "compaction_completed"; reason = "injected completion rejection" })
   in
   let failure_dispatch_error =
-    Keeper_context_runtime.Transition_rejected
+    Masc.Keeper_context_runtime.Transition_rejected
       (Keeper_state_machine.Precondition_violation
          { event = "compaction_failed"; reason = "injected cleanup rejection" })
   in

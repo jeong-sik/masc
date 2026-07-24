@@ -424,7 +424,7 @@ let run_keeper_cycle_with
          "manual compaction reached typed terminal: %s"
          (Keeper_event_queue_state.no_compaction_reason_label no_compaction.reason);
        Manual_compaction_not_applied { meta = meta_after_triage; no_compaction }
-     | `Applied success ->
+     | `Applied (success : Keeper_manual_compaction.success) ->
        Manual_compaction_applied
          { receipt = success.receipt; followup = run_standard_cycle () })
 ;;

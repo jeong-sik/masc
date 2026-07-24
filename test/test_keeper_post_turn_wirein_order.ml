@@ -1218,9 +1218,9 @@ let test_manual_applied_hint_failure () =
 
 let test_checkpoint_installation_auxiliary_manifest_tags () =
   let write_error =
-    { Keeper_fs.renamed = true
-    ; stage = Keeper_fs.Parent_directory_fsync_after_rename
-    ; failure = Keeper_fs.Operation_failed "injected durability uncertainty"
+    { Masc.Keeper_fs.renamed = true
+    ; stage = Masc.Keeper_fs.Parent_directory_fsync_after_rename
+    ; failure = Masc.Keeper_fs.Operation_failed "injected durability uncertainty"
     }
   in
   let lock_error =

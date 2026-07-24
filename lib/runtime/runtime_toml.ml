@@ -993,14 +993,6 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
                   }
                 , errs )
               | Error e -> section, errs @ e)
-           | "librarian" ->
-             ( section
-             , errs
-               @ error
-                   "runtime.librarian"
-                   "retired [runtime].librarian key; remove it and use \
-                    [runtime].memory_os_consolidation only when the Memory OS \
-                    consolidation pass must not inherit [runtime].default" )
            | "structured_judge" ->
              (match
                 parse_runtime_string_leaf ~path:"runtime.structured_judge" ~key value

@@ -350,11 +350,6 @@ let local_runtime_entries =
 
 module Memory_os_defaults = Env_config_keeper.KeeperMemoryOs
 
-let optional_default_to_display = function
-  | None -> "(none)"
-  | Some value -> value
-;;
-
 (* Env-var names come from Env_config_keeper.KeeperMemoryOs (the reader
    module), never from re-spelled literals: a registry entry whose env var
    nothing reads is a silent no-op reported as source=env. *)
@@ -388,12 +383,6 @@ let memory_entries =
       ~default:(string_of_bool Memory_os_defaults.consolidation_enabled_default)
       Memory_os_defaults.consolidation_env_key
       "Per-keeper Memory OS consolidation maintenance fiber kill switch; invalid values fail closed";
-    entry
-      ~default:
-        (optional_default_to_display
-           Memory_os_defaults.consolidation_runtime_id_default)
-      Memory_os_defaults.consolidation_runtime_id_env_key
-      "Optional runtime id override for Memory OS consolidation; (none) displays the empty default";
   ]
 
 let message_gc_entries =

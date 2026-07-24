@@ -1119,26 +1119,6 @@ let test_runtime_toml_rejects_unknown_runtime_key () =
     check bool "error explains unknown runtime key" true
       (String_util.contains_substring rendered "unknown [runtime] key")
 
-let test_runtime_toml_rejects_retired_librarian_key () =
-  let content =
-    "[runtime]\n\
-     default = \"local.sample\"\n\
-     librarian = \"local.sample\"\n"
-  in
-  match Runtime_toml.parse_string content with
-  | Ok _ -> failf "retired [runtime].librarian key should fail parse"
-  | Error errs ->
-    let rendered =
-      errs
-      |> List.map (fun (err : Runtime_toml.parse_error) ->
-        Printf.sprintf "%s: %s" err.path err.message)
-      |> String.concat "\n"
-    in
-    check bool "error names retired key" true
-      (String_util.contains_substring rendered "runtime.librarian");
-    check bool "error names replacement route" true
-      (String_util.contains_substring rendered "runtime].memory_os_consolidation")
-
 let test_runtime_toml_allows_runtime_profile_tables () =
   let content =
     "[providers.local]\n\
@@ -2798,8 +2778,6 @@ let () =
             test_runtime_toml_reserves_web_search_namespace;
           test_case "runtime table rejects unknown keys" `Quick
             test_runtime_toml_rejects_unknown_runtime_key;
-          test_case "runtime table rejects retired librarian key" `Quick
-            test_runtime_toml_rejects_retired_librarian_key;
           test_case "runtime table allows profile tables" `Quick
             test_runtime_toml_allows_runtime_profile_tables;
           test_case "runtime table rejects wrong-type media_failover" `Quick

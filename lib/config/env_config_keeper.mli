@@ -69,7 +69,6 @@ module KeeperMemoryOs : sig
   val librarian_global_slot_env_key : string
   val gc_env_key : string
   val consolidation_env_key : string
-  val consolidation_runtime_id_env_key : string
 
   val recall_enabled_default : bool
   val librarian_enabled_default : bool
@@ -78,7 +77,6 @@ module KeeperMemoryOs : sig
   val librarian_global_slot_default : int
   val gc_enabled_default : bool
   val consolidation_enabled_default : bool
-  val consolidation_runtime_id_default : string option
 
   val recall_enabled : unit -> bool
   val librarian_enabled : unit -> bool
@@ -87,7 +85,6 @@ module KeeperMemoryOs : sig
   val librarian_global_slot : unit -> int
   val gc_enabled : unit -> bool
   val consolidation_enabled : unit -> bool
-  val consolidation_runtime_id : unit -> string option
 end
 
 (** {1 Keeper dashboard compaction snapshots} *)

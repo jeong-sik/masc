@@ -50,18 +50,6 @@ let provider_cfg () =
     ()
 ;;
 
-let with_env name value f =
-  let previous = Sys.getenv_opt name in
-  Fun.protect
-    ~finally:(fun () ->
-      match previous with
-      | Some old -> Unix.putenv name old
-      | None -> Unix.putenv name "")
-    (fun () ->
-      Unix.putenv name value;
-      f ())
-;;
-
 let with_runtime_config content f =
   let path = Filename.temp_file "memory-os-consolidation-runtime-" ".toml" in
   let snapshot = Runtime.For_testing.snapshot () in
@@ -252,15 +240,91 @@ default = "local.chat"
 memory_os_consolidation = "local.consolidation"
 |}
   in
-  with_env Env_config.KeeperMemoryOs.consolidation_runtime_id_env_key "" (fun () ->
-    with_runtime_config config (fun () ->
-      match Server_bootstrap_maintenance.runtime_for_memory_os_consolidation () with
-      | None -> Alcotest.fail "typed consolidation runtime should resolve"
-      | Some runtime ->
+  with_runtime_config config (fun () ->
+    let snapshot = Runtime.dashboard_runtime_defaults_snapshot () in
+    Alcotest.(check (option string))
+      "snapshot preserves configured selector"
+      (Some "local.consolidation")
+      snapshot.memory_os_consolidation_runtime_id;
+    match snapshot.memory_os_consolidation with
+    | Error msg -> Alcotest.failf "typed consolidation runtime should resolve: %s" msg
+    | Ok resolution ->
+      Alcotest.(check string)
+        "typed task route wins over default"
+        "local.consolidation"
+        resolution.effective_runtime.Runtime.id;
+      Alcotest.(check bool)
+        "snapshot records configured source"
+        true
+        (resolution.resolution_source = Runtime.Consolidation_configured);
+      let dashboard =
+        Server_dashboard_runtime_defaults_json.resolved_of_snapshot snapshot
+      in
+      Alcotest.(check (option string))
+        "dashboard preserves configured selector"
+        (Some "local.consolidation")
+        dashboard.memory_os_consolidation_runtime_id;
+      (match dashboard.memory_os_consolidation
+       with
+       | Server_dashboard_runtime_defaults_json.Consolidation_resolved runtime_id ->
+         Alcotest.(check string)
+           "dashboard preserves configured snapshot route"
+           "local.consolidation"
+           runtime_id
+       | _ -> Alcotest.fail "dashboard changed configured snapshot resolution"))
+;;
+
+let test_consolidation_runtime_inherits_default () =
+  let config =
+    {|
+[providers.local]
+display-name = "Local"
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.chat]
+api-name = "chat"
+max-context = 1024
+
+[local.chat]
+
+[runtime]
+default = "local.chat"
+|}
+  in
+  with_runtime_config config (fun () ->
+    let snapshot = Runtime.dashboard_runtime_defaults_snapshot () in
+    Alcotest.(check (option string))
+      "snapshot preserves absent selector"
+      None
+      snapshot.memory_os_consolidation_runtime_id;
+    match snapshot.memory_os_consolidation with
+    | Error msg -> Alcotest.failf "default consolidation runtime should resolve: %s" msg
+    | Ok resolution ->
         Alcotest.(check string)
-          "typed task route wins over default"
-          "local.consolidation"
-          runtime.Runtime.id))
+          "absent task route inherits default"
+          "local.chat"
+          resolution.effective_runtime.Runtime.id;
+        Alcotest.(check bool)
+          "snapshot records inherited source"
+          true
+          (resolution.resolution_source
+           = Runtime.Consolidation_inherited_default);
+        let dashboard =
+          Server_dashboard_runtime_defaults_json.resolved_of_snapshot snapshot
+        in
+        Alcotest.(check (option string))
+          "dashboard preserves absent selector"
+          None
+          dashboard.memory_os_consolidation_runtime_id;
+        (match dashboard.memory_os_consolidation
+         with
+         | Server_dashboard_runtime_defaults_json.Consolidation_inherited runtime_id ->
+           Alcotest.(check string)
+             "dashboard preserves inherited snapshot route"
+             "local.chat"
+             runtime_id
+         | _ -> Alcotest.fail "dashboard changed inherited snapshot resolution"))
 ;;
 
 let () =
@@ -283,6 +347,10 @@ let () =
             "typed route selects consolidation runtime"
             `Quick
             test_consolidation_runtime_uses_typed_route
+        ; Alcotest.test_case
+            "absent route inherits default runtime"
+            `Quick
+            test_consolidation_runtime_inherits_default
         ] )
     ]
 ;;

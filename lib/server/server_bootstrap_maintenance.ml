@@ -79,33 +79,6 @@ let wake_enqueue_counts_of_dispatches dispatches =
     dispatches
 ;;
 
-(* Resolve the runtime for the Memory OS per-keeper consolidation pass, keeping
-   its identity paired with the provider config through the inference boundary.
-   The dedicated consolidation env var takes precedence over the typed TOML
-   route; when neither is set, inherit the default runtime. Post-turn Librarian
-   exact-output extraction does not consume this setting. An explicit but
-   unknown env runtime ID is logged and falls back to the default so typos are
-   not silently masked; TOML ids are validated at config load. *)
-let runtime_for_memory_os_consolidation () =
-  let default_runtime () = Runtime.get_default_runtime () in
-  let runtime_id =
-    match Env_config.KeeperMemoryOs.consolidation_runtime_id () with
-    | Some id -> Some id
-    | None -> Runtime.memory_os_consolidation_runtime_id ()
-  in
-  match runtime_id with
-  | None -> default_runtime ()
-  | Some id ->
-    (match Runtime.get_runtime_by_id id with
-     | Some rt -> Some rt
-     | None ->
-       Log.Server.warn
-         "memory_os_keeper_consolidation: requested runtime %s not found; \
-          falling back to default"
-         id;
-       default_runtime ())
-;;
-
 (* Run one consolidation pass over every keeper that currently has a fact store.
    The optional [complete] injection lets tests drive the loop with a fake model.
    Provider transport owns the only LLM timeout boundary. The output contract is
@@ -422,11 +395,12 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            so a 10-minute cadence bounds cost while still shrinking stores. *)
         let interval = 600.0 in
         let rec loop () =
-          (match runtime_for_memory_os_consolidation () with
-           | None ->
+          (match Runtime.resolve_memory_os_consolidation_runtime () with
+           | Error msg ->
              Log.Server.warn
-               "memory_os_keeper_consolidation: no runtime configured; skipping tick"
-           | Some runtime ->
+               "memory_os_keeper_consolidation: %s; skipping tick"
+               msg
+           | Ok runtime ->
              run_memory_os_consolidation_tick
                ~sw
                ~net:env#net

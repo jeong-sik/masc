@@ -35,6 +35,9 @@ slots = ["glm-coding.glm-5-turbo", "deepseek.deepseek-v4-pro"]
 [runtime.exact_output_lanes.hitl_auto_judge]
 slots = ["glm-coding.glm-5-turbo", "deepseek.deepseek-v4-pro"]
 
+[runtime.exact_output_lanes.board_attention_exact]
+slots = ["ollama_cloud_native.minimax-m3-native-structured"]
+
 [providers.ollama_cloud]
 display-name = "Ollama Cloud"
 protocol = "openai-compatible-http"

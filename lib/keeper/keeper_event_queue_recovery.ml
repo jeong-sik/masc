@@ -188,7 +188,11 @@ let ordered_owner_page ~budget:(Owner_budget max_owners) ~cursor:(Sweep_cursor c
   names, selected, deferred, next_cursor
 ;;
 
-let project_discovery_inline ~base_path ~budget ~cursor discovery =
+let project_discovery_inline
+    ~base_path
+    ~budget
+    ~cursor
+    (discovery : Persistence.snapshot_discovery) =
   let names, selected, deferred, next_cursor =
     ordered_owner_page ~budget ~cursor discovery.keeper_names
   in

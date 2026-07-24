@@ -255,6 +255,10 @@ describe('KeeperRuntimeAlertStrip', () => {
     expect(text).toContain('재개하기')
     expect(text).not.toContain('일시정지하기')
     expect(text).not.toContain('깨우기')
+    const resumeButton = Array.from(container.querySelectorAll('button'))
+      .find(button => button.textContent?.includes('재개하기')) as HTMLButtonElement
+    expect(resumeButton.disabled).toBe(true)
+    expect(resumeButton.title).toContain('owner generation')
   })
 
   it('uses lifecycle action visibility SSOT to show wake for non-paused blocked keepers', () => {

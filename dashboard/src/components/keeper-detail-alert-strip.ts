@@ -235,6 +235,8 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   if (!needsAttention && !hasActivitySignal && !hasRuntimeIdentitySignal && !hasExecutionEvidenceSignal) return null
 
   const actionVisibility = keeperActionVisibility(keeper)
+  const showResume =
+    actionVisibility.canResume || actionVisibility.resumeUnavailableReason !== undefined
   const directiveLoading = signal(false)
   const handleDirective = async (action: 'pause' | 'resume' | 'wakeup') => {
     directiveLoading.value = true
@@ -283,16 +285,17 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   return html`
     <div class="px-6 pt-4 v2-monitoring-surface">
       <div class="rounded-[var(--r-1)] border ${toneClass} px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-[var(--color-fg-primary)] v2-monitoring-panel">
-        ${actionVisibility.canResume
+        ${showResume
           ? html`<${RuntimeBadge} tone="warn">일시정지</${RuntimeBadge}>
             ${hasActivitySignal ? html`<span class="text-[var(--color-fg-muted)]">${renderActivitySignal()}</span>` : null}
             <${ActionButton}
               variant="ghost"
               size="sm"
               class="!py-0.5 !bg-[var(--color-bg-hover)] !text-[var(--color-fg-secondary)] inline-flex items-center"
-              disabled=${directiveLoading.value}
+              disabled=${directiveLoading.value || actionVisibility.resumeUnavailableReason !== undefined}
               onClick=${() => handleDirective('resume')}
-              title="재개: 일시정지된 keeper 를 다시 실행합니다 (paused → running)"
+              title=${actionVisibility.resumeUnavailableReason
+                ?? '재개: 일시정지된 keeper 를 다시 실행합니다 (paused → running)'}
             >재개하기<//>`
           : html`${actionVisibility.canPause
             ? html`<${ActionButton}

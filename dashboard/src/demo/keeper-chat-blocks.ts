@@ -1,5 +1,5 @@
 // Demo page for keeper-v2 chat rich blocks.
-// Loaded by public/keeper-blocks-demo.html. Renders a narrow ChatTranscript
+// Loaded by dev-fixtures/keeper-blocks-demo.html. Renders a narrow ChatTranscript
 // containing all four new block styles so the design can be reviewed/snapshot.
 
 import '../styles/ds-theme-tokens.css'

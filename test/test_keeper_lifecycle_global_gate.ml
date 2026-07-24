@@ -21,7 +21,7 @@ open Alcotest
 module WO = Masc.Keeper_world_observation
 module Readiness = Masc.Keeper_activation_readiness
 module Admission = Masc.Keeper_lifecycle_admission
-module State_machine = Masc.Keeper_state_machine
+module State_machine = Keeper_state_machine
 module Shutdown_types = Masc.Keeper_shutdown_types
 
 let contains haystack needle =

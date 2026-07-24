@@ -20,6 +20,9 @@ _opam/
 Thumbs.db
 
 # MASC runtime data (not part of source)
+# OCaml 5.x Runtime_events <PID>.events dumps (lib/core/masc_runtime_events.ml,
+# written at boot to repo root). .masc/events/ below is a separate directory.
+*.events
 .masc/
 
 

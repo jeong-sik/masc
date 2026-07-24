@@ -715,16 +715,20 @@ let test_stale_finalize_preserves_active_successor () =
       "stale-owner restart"
       recovered
   in
-  (match Keeper_event_queue_recovery.project_owner_result ~base_path ~keeper_name with
-   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
-   | Ok Keeper_event_queue_recovery.No_pending_transition ->
+  (match
+     Masc.Keeper_event_queue_recovery.project_owner_result
+       ~base_path
+       ~keeper_name
+   with
+   | Ok Masc.Keeper_event_queue_recovery.Transition_converged -> ()
+   | Ok Masc.Keeper_event_queue_recovery.No_pending_transition ->
      Alcotest.fail "stale-owner outbox disappeared before projection"
-   | Ok Keeper_event_queue_recovery.Claim_busy ->
+   | Ok Masc.Keeper_event_queue_recovery.Claim_busy ->
      Alcotest.fail "stale-owner outbox projection claim was busy"
    | Error error ->
      Alcotest.failf
        "stale-owner outbox projection failed: %s"
-       (Keeper_event_queue_recovery.projection_error_to_string error));
+       (Masc.Keeper_event_queue_recovery.projection_error_to_string error));
   let successor = claim_manual_lease ~base_path ~keeper_name in
   let before_retry =
     require_loaded_state "stale finalize before retry" ~base_path ~keeper_name

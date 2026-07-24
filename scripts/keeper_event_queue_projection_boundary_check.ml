@@ -139,7 +139,12 @@ let allowed_internal_alias ~file binding =
 let pattern_variables pattern =
   let variables = ref [] in
   let remember name =
-    if not (List.exists (fun existing -> String.equal existing.txt name.txt) !variables)
+    if
+      not
+        (List.exists
+           (fun (existing : string Location.loc) ->
+              String.equal existing.txt name.txt)
+           !variables)
     then variables := name :: !variables
   in
   let iterator =
@@ -554,7 +559,8 @@ let run_ast_rejection_fixtures
     (fun name ->
        let file = fixture name in
        expect_boundary_rejection file (fun () ->
-         ignore (fixture_definitions file)))
+         let (_ : (string * occurrence) list) = fixture_definitions file in
+         ()))
     [ "guarded_longident_prefix.ml"
     ; "guarded_pack.ml"
     ; "opaque_unpack.ml"
@@ -563,20 +569,24 @@ let run_ast_rejection_fixtures
     (fun name ->
        let file = fixture name in
        expect_boundary_rejection file (fun () ->
-         ignore (fixture_declarations file)))
+         let (_ : (string * occurrence) list) = fixture_declarations file in
+         ()))
     [ "guarded_modsubst.mli"; "guarded_with_module.mli" ];
   let recovery_file = "lib/keeper/keeper_event_queue_recovery.ml" in
-  ignore
-    (fixture_definitions
-       ~reported_file:recovery_file
-       (fixture "allowed_bare_alias.ml"));
+  let (_ : (string * occurrence) list) =
+    fixture_definitions
+      ~reported_file:recovery_file
+      (fixture "allowed_bare_alias.ml")
+  in
   expect_boundary_rejection
     "constrained recovery alias"
     (fun () ->
-       ignore
-         (fixture_definitions
-            ~reported_file:recovery_file
-            (fixture "constrained_alias.ml")))
+       let (_ : (string * occurrence) list) =
+         fixture_definitions
+           ~reported_file:recovery_file
+           (fixture "constrained_alias.ml")
+       in
+       ())
 ;;
 
 let unique_reference name =

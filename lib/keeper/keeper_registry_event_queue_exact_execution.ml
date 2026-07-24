@@ -161,7 +161,7 @@ struct
       ~base_path
       ~keeper_name:name
   ;;
-    
+
   let settle_bound_exact_nonterminal_result
         ~base_path
         name

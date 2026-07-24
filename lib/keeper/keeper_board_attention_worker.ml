@@ -1098,7 +1098,6 @@ let confirm_requeue_outcome
       ~keeper_name
       ~partition
       ~expected_quarantine_id
-      ()
   = function
   | Partition.Requeued transition ->
     confirm_requeue_transition ~base_path transition
@@ -1108,6 +1107,7 @@ let confirm_requeue_outcome
       ~keeper_name
       ~partition
       ~expected_quarantine_id
+      ()
   | Partition.Generation_conflict detail ->
     Error ("partition target generation changed during requeue: " ^ detail)
 ;;

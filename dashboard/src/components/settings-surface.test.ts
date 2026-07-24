@@ -150,6 +150,25 @@ function makeToolItem(overrides: Partial<DashboardToolInventoryItem> = {}): Dash
   }
 }
 
+function makeModelRouting(
+  overrides: {
+    structured_judge_runtime_id?: string | null
+    cross_verifier_runtime_id?: string | null
+    media_failover?: string[]
+  } = {},
+): RuntimeDefaultsResponse['model_routing'] {
+  return {
+    memory_os_consolidation_runtime_id: 'rt-a',
+    memory_os_consolidation_effective_runtime_id: 'rt-a',
+    memory_os_consolidation_status: 'resolved',
+    memory_os_consolidation_error: null,
+    structured_judge_runtime_id: null,
+    cross_verifier_runtime_id: null,
+    media_failover: [],
+    ...overrides,
+  }
+}
+
 function makeRuntimeDefaults(
   overrides: Partial<RuntimeDefaultsResponse> = {},
 ): RuntimeDefaultsResponse {
@@ -166,11 +185,7 @@ function makeRuntimeDefaults(
       { id: 'rt-b', provider: 'P', model: 'm2', max_context: 128000, is_default: false },
       { id: 'rt-c', provider: 'P', model: 'm3', max_context: 128000, is_default: false },
     ],
-    model_routing: {
-      structured_judge_runtime_id: null,
-      cross_verifier_runtime_id: null,
-      media_failover: [],
-    },
+    model_routing: makeModelRouting(),
     ...overrides,
   }
 }
@@ -1276,11 +1291,11 @@ describe('SettingsSurface', () => {
   it('routing section shows resolved model routing controls', async () => {
     stubRuntimeDefaults(
       makeRuntimeDefaults({
-        model_routing: {
+        model_routing: makeModelRouting({
           structured_judge_runtime_id: 'rt-c',
           cross_verifier_runtime_id: 'rt-a',
           media_failover: [],
-        },
+        }),
       }),
     )
     stubRuntimeResolved(makeRuntimeResolved())
@@ -1310,11 +1325,11 @@ describe('SettingsSurface', () => {
     apiMock.fetchRuntimeDefaults
       .mockResolvedValueOnce(makeRuntimeDefaults())
       .mockResolvedValueOnce(makeRuntimeDefaults({
-        model_routing: {
+        model_routing: makeModelRouting({
           structured_judge_runtime_id: 'rt-b',
           cross_verifier_runtime_id: null,
           media_failover: [],
-        },
+        }),
       }))
     render(html`<${SettingsSurface} />`, container)
 
@@ -1397,18 +1412,18 @@ describe('SettingsSurface', () => {
     apiMock.fetchRuntimeDefaults.mockReset()
     apiMock.fetchRuntimeDefaults
       .mockResolvedValueOnce(makeRuntimeDefaults({
-        model_routing: {
+        model_routing: makeModelRouting({
           structured_judge_runtime_id: null,
           cross_verifier_runtime_id: null,
           media_failover: ['rt-b'],
-        },
+        }),
       }))
       .mockResolvedValueOnce(makeRuntimeDefaults({
-        model_routing: {
+        model_routing: makeModelRouting({
           structured_judge_runtime_id: null,
           cross_verifier_runtime_id: null,
           media_failover: ['rt-b', 'rt-c'],
-        },
+        }),
       }))
     render(html`<${SettingsSurface} />`, container)
 

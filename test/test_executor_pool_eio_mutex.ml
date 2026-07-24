@@ -77,7 +77,9 @@ let test_submit_or_inline_preserves_mutex () =
       Fun.protect ~finally:Eio_guard.disable (fun () ->
         let dm = Eio.Stdenv.domain_mgr env in
         let pool = Domain_pool.create ~sw ~domain_count:1 dm in
-        Executor_pool_ref.set (Domain_pool.executor_pool pool);
+        Executor_pool_ref.For_testing.with_pool
+          (Domain_pool.executor_pool pool)
+        @@ fun () ->
         let mu = Eio.Mutex.create () in
         let v =
           Executor_pool_ref.submit_or_inline (fun () ->
@@ -99,7 +101,9 @@ let test_ready_raw_domain_uses_non_eio_path () =
         let pool =
           Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env)
         in
-        Executor_pool_ref.set (Domain_pool.executor_pool pool);
+        Executor_pool_ref.For_testing.with_pool
+          (Domain_pool.executor_pool pool)
+        @@ fun () ->
         check string "main caller has Eio handler" "eio_fiber"
           (context_label (Eio_guard.execution_context ()));
         let raw_mutex = Eio.Mutex.create () in
@@ -155,6 +159,53 @@ let test_ready_raw_domain_uses_non_eio_path () =
            fail ("raw Domain durable-directory operation failed: "
                  ^ Printexc.to_string exn)))))
 
+exception With_pool_probe
+
+let same_pool_option left right =
+  match left, right with
+  | None, None -> true
+  | Some left, Some right -> left == right
+  | None, Some _ | Some _, None -> false
+
+let test_with_pool_restores_exact_previous_pool_after_exception () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let make_pool () =
+    Domain_pool.create
+      ~sw
+      ~domain_count:1
+      (Eio.Stdenv.domain_mgr env)
+    |> Domain_pool.executor_pool
+  in
+  let outer = make_pool () in
+  let inner = make_pool () in
+  let initial = Executor_pool_ref.get () in
+  Executor_pool_ref.For_testing.with_pool outer (fun () ->
+    let raised =
+      try
+        Executor_pool_ref.For_testing.with_pool inner (fun () ->
+          check bool
+            "inner pool installed"
+            true
+            (same_pool_option (Some inner) (Executor_pool_ref.get ()));
+          raise With_pool_probe);
+        false
+      with
+      | With_pool_probe -> true
+    in
+    check bool "probe propagated" true raised;
+    check bool
+      "outer pool restored"
+      true
+      (same_pool_option (Some outer) (Executor_pool_ref.get ())));
+  check bool
+    "initial option restored"
+    true
+    (same_pool_option initial (Executor_pool_ref.get ()))
+;;
+
 let () =
   Alcotest.run "Executor_pool_ref Eio mutex safety"
     [ ( "offload"
@@ -166,5 +217,7 @@ let () =
             test_submit_or_inline_preserves_mutex
         ; test_case "ready raw Domain uses the non-Eio path" `Quick
             test_ready_raw_domain_uses_non_eio_path
+        ; test_case "with_pool restores after exception" `Quick
+            test_with_pool_restores_exact_previous_pool_after_exception
         ] )
     ]

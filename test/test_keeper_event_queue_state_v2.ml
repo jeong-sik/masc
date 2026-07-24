@@ -2779,7 +2779,9 @@ let test_transition_outbox_claim_contention_and_release () =
      with
      | Persistence.Settled _ -> ()
      | Persistence.Already_settled _ ->
-       Alcotest.fail "projection contention source was already settled");
+       Alcotest.fail "projection contention source was already settled"
+     | Persistence.Committed_followup_failed { detail; _ } ->
+       Alcotest.failf "projection contention settlement follow-up failed: %s" detail);
     let entered, resolve_entered = Eio.Promise.create () in
     let release, resolve_release = Eio.Promise.create () in
     let holder, resolve_holder = Eio.Promise.create () in
@@ -2825,6 +2827,8 @@ let test_transition_outbox_claim_contention_and_release () =
       .pending_transition_count_result
         ~base_path:alias_base_path
         ~keeper_name
+      |> Result.map_error
+           Masc.Keeper_event_queue_recovery.projection_error_to_string
       |> require_ok "read transition retained during owner contention"
     in
     Alcotest.(check int)

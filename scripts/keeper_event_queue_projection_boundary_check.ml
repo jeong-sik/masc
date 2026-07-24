@@ -34,7 +34,7 @@ let is_target name = List.mem name targets
 let rec longident_leaf = function
   | Longident.Lident name -> name
   | Longident.Ldot (_, name) -> name.txt
-  | Longident.Lapply (_, right) -> longident_leaf right
+  | Longident.Lapply (_, right) -> longident_leaf right.txt
 ;;
 
 let location_fields (location : Location.t) =
@@ -55,82 +55,167 @@ let add table ~file ~caller ~name location =
 
 let qualified_name modules name = String.concat "." (modules @ [ name ])
 
-let rec collect_structure_definitions ~file ~modules structure =
-  List.iter
-    (fun item ->
-       match item.pstr_desc with
-       | Pstr_value (_, bindings) ->
-         List.iter
-           (fun binding ->
-              match binding.pvb_pat.ppat_desc with
-              | Ppat_var name ->
-                add
-                  definitions
-                  ~file
-                  ~caller:(qualified_name modules name.txt)
-                  ~name:name.txt
-                  name.loc
-              | _ -> ())
-           bindings
-       | Pstr_module binding ->
-         (match binding.pmb_name.txt, binding.pmb_expr.pmod_desc with
-          | Some name, Pmod_structure nested ->
-            collect_structure_definitions
-              ~file
-              ~modules:(modules @ [ name ])
-              nested
-          | None, Pmod_structure nested ->
-            collect_structure_definitions ~file ~modules nested
-          | (Some _ | None), _ -> ())
-       | Pstr_recmodule bindings ->
-         List.iter
-           (fun binding ->
-              match binding.pmb_name.txt, binding.pmb_expr.pmod_desc with
-              | Some name, Pmod_structure nested ->
-                collect_structure_definitions
-                  ~file
-                  ~modules:(modules @ [ name ])
-                  nested
-              | (Some _ | None), _ -> ())
-           bindings
-       | _ -> ())
-    structure
+let guarded_owner_modules =
+  [ "Keeper_event_queue_persistence"
+  ; "Keeper_reaction_ledger"
+  ; "Keeper_event_queue_recovery"
+  ]
 ;;
 
-let rec collect_signature_declarations ~file ~modules signature =
-  List.iter
-    (fun item ->
-       match item.psig_desc with
-       | Psig_value value ->
-         add
-           declarations
-           ~file
-           ~caller:(qualified_name modules value.pval_name.txt)
-           ~name:value.pval_name.txt
-           value.pval_name.loc
-       | Psig_module declaration ->
-         (match declaration.pmd_name.txt, declaration.pmd_type.pmty_desc with
-          | Some name, Pmty_signature nested ->
-            collect_signature_declarations
-              ~file
-              ~modules:(modules @ [ name ])
-              nested
-          | None, Pmty_signature nested ->
-            collect_signature_declarations ~file ~modules nested
-          | (Some _ | None), _ -> ())
-       | Psig_recmodule declarations ->
-         List.iter
-           (fun declaration ->
-              match declaration.pmd_name.txt, declaration.pmd_type.pmty_desc with
-              | Some name, Pmty_signature nested ->
-                collect_signature_declarations
+let guarded_owner identifier =
+  let name = longident_leaf identifier in
+  if List.mem name guarded_owner_modules then Some name else None
+;;
+
+let reject_guarded_owner_reexport ~file ~surface visit =
+  let reject owner location =
+    let line, column, _ = location_fields location in
+    failf
+      "%s:%d:%d %s re-exports guarded projection owner %s"
+      file
+      line
+      column
+      surface
+      owner
+  in
+  let iterator =
+    { Ast_iterator.default_iterator with
+      module_expr =
+        (fun self expression ->
+           (match expression.pmod_desc with
+            | Pmod_ident identifier ->
+              (match guarded_owner identifier.txt with
+               | Some owner -> reject owner identifier.loc
+               | None -> ())
+            | _ -> ());
+           Ast_iterator.default_iterator.module_expr self expression)
+    ; module_type =
+        (fun self module_type ->
+           (match module_type.pmty_desc with
+            | Pmty_ident identifier | Pmty_alias identifier ->
+              (match guarded_owner identifier.txt with
+               | Some owner -> reject owner identifier.loc
+               | None -> ())
+            | _ -> ());
+           Ast_iterator.default_iterator.module_type self module_type)
+    }
+  in
+  visit iterator
+;;
+
+let rec direct_guarded_owner_of_module_expr expression =
+  match expression.pmod_desc with
+  | Pmod_ident identifier -> guarded_owner identifier.txt
+  | Pmod_constraint (nested, _) -> direct_guarded_owner_of_module_expr nested
+  | _ -> None
+;;
+
+let allowed_internal_alias ~file binding =
+  String.equal file "lib/keeper/keeper_event_queue_recovery.ml"
+  && binding.pmb_name.txt = Some "Persistence"
+  && direct_guarded_owner_of_module_expr binding.pmb_expr
+     = Some "Keeper_event_queue_persistence"
+;;
+
+let collect_structure_definitions ~file structure =
+  let module_path = ref [] in
+  let iterator =
+    { Ast_iterator.default_iterator with
+      value_binding =
+        (fun self binding ->
+           (match binding.pvb_pat.ppat_desc with
+            | Ppat_var name ->
+              add
+                definitions
+                ~file
+                ~caller:(qualified_name !module_path name.txt)
+                ~name:name.txt
+                name.loc
+            | _ -> ());
+           Ast_iterator.default_iterator.value_binding self binding)
+    ; module_binding =
+        (fun self binding ->
+           if not (allowed_internal_alias ~file binding)
+           then
+             reject_guarded_owner_reexport
+               ~file
+               ~surface:"module alias"
+               (fun iterator -> iterator.module_expr iterator binding.pmb_expr);
+           let previous = !module_path in
+           (match binding.pmb_name.txt with
+            | Some name -> module_path := previous @ [ name ]
+            | None -> ());
+           Ast_iterator.default_iterator.module_binding self binding;
+           module_path := previous)
+    ; structure_item =
+        (fun self item ->
+           (match item.pstr_desc with
+            | Pstr_include inclusion ->
+              reject_guarded_owner_reexport
+                ~file
+                ~surface:"structure include"
+                (fun iterator ->
+                   iterator.module_expr iterator inclusion.pincl_mod)
+            | _ -> ());
+           Ast_iterator.default_iterator.structure_item self item)
+    }
+  in
+  iterator.structure iterator structure
+;;
+
+let collect_signature_declarations ~file signature =
+  let module_path = ref [] in
+  let iterator =
+    { Ast_iterator.default_iterator with
+      value_description =
+        (fun self value ->
+           add
+             declarations
+             ~file
+             ~caller:(qualified_name !module_path value.pval_name.txt)
+             ~name:value.pval_name.txt
+             value.pval_name.loc;
+           Ast_iterator.default_iterator.value_description self value)
+    ; module_declaration =
+        (fun self declaration ->
+           reject_guarded_owner_reexport
+             ~file
+             ~surface:"signature module alias"
+             (fun iterator ->
+                iterator.module_type iterator declaration.pmd_type);
+           let previous = !module_path in
+           (match declaration.pmd_name.txt with
+            | Some name -> module_path := previous @ [ name ]
+            | None -> ());
+           Ast_iterator.default_iterator.module_declaration self declaration;
+           module_path := previous)
+    ; module_type_declaration =
+        (fun self declaration ->
+           Option.iter
+             (fun module_type ->
+                reject_guarded_owner_reexport
                   ~file
-                  ~modules:(modules @ [ name ])
-                  nested
-              | (Some _ | None), _ -> ())
-           declarations
-       | _ -> ())
-    signature
+                  ~surface:"module type alias"
+                  (fun iterator -> iterator.module_type iterator module_type))
+             declaration.pmtd_type;
+           let previous = !module_path in
+           module_path := previous @ [ "Module_type"; declaration.pmtd_name.txt ];
+           Ast_iterator.default_iterator.module_type_declaration self declaration;
+           module_path := previous)
+    ; signature_item =
+        (fun self item ->
+           (match item.psig_desc with
+            | Psig_include inclusion ->
+              reject_guarded_owner_reexport
+                ~file
+                ~surface:"signature include"
+                (fun iterator ->
+                   iterator.module_type iterator inclusion.pincl_mod)
+            | _ -> ());
+           Ast_iterator.default_iterator.signature_item self item)
+    }
+  in
+  iterator.signature iterator signature
 ;;
 
 let parse_implementation file =
@@ -158,7 +243,7 @@ let inspect_implementation file =
     try parse_implementation file with
     | exn -> failf "cannot parse %s: %s" file (Printexc.to_string exn)
   in
-  collect_structure_definitions ~file ~modules:[] structure;
+  collect_structure_definitions ~file structure;
   let module_path = ref [] in
   let current_caller = ref "<toplevel>" in
   let iterator =
@@ -203,7 +288,7 @@ let inspect_interface file =
     try parse_interface file with
     | exn -> failf "cannot parse %s: %s" file (Printexc.to_string exn)
   in
-  collect_signature_declarations ~file ~modules:[] signature
+  collect_signature_declarations ~file signature
 ;;
 
 let rec source_files directory =

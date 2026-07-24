@@ -539,7 +539,7 @@ let run_exact_wal_followup_replay_case ~label ~failure ~expected_stage =
   check_no_active_lease (label ^ " first restart") recovered;
   check_no_exact_binding (label ^ " first restart") recovered;
   check_no_pending (label ^ " first restart") recovered;
-  let _receipt =
+  let receipt =
     require_single_exact_outbox
       ~disposition_id:disposition.disposition_id
       (label ^ " first restart")
@@ -636,7 +636,7 @@ let test_visible_prepare_sync_failure_recovers_once () =
   check_no_active_lease "visible prepare first restart" recovered;
   check_no_exact_binding "visible prepare first restart" recovered;
   check_no_pending "visible prepare first restart" recovered;
-  let receipt =
+  let _receipt =
     require_single_exact_outbox
       ~disposition_id:disposition.disposition_id
       "visible prepare first restart"

@@ -309,7 +309,7 @@ let run_start_lifecycle ~config ~meta =
      | Ok () -> Ok ())
 ;;
 
-let run_commit ~on_checkpoint_installed ~config ~meta prepared =
+let run_commit ~config ~meta prepared =
   match Keeper_context_runtime.commit_prepared_compaction prepared with
   | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
     let failure_dispatch =
@@ -334,7 +334,6 @@ let run_commit ~on_checkpoint_installed ~config ~meta prepared =
        in
        Error (Recovery (error, failure_dispatch))
      | Keeper_checkpoint_store.Installed installed ->
-       on_checkpoint_installed installed.installed_ref;
        let lifecycle =
          match
            Keeper_context_runtime.dispatch_compaction_completed
@@ -367,7 +366,7 @@ let run_commit ~on_checkpoint_installed ~config ~meta prepared =
        Ok (Compacted { recovery; installation = installed; lifecycle }))
 ;;
 
-let finish_preparation ~on_checkpoint_installed ~config ~meta = function
+let finish_preparation ~config ~meta = function
   | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
     let failure_dispatch =
       dispatch_failed
@@ -386,7 +385,7 @@ let finish_preparation ~on_checkpoint_installed ~config ~meta = function
     in
     Error (Recovery (error, failure_dispatch))
   | Ok prepared ->
-    run_commit ~on_checkpoint_installed ~config ~meta prepared
+    run_commit ~config ~meta prepared
 ;;
 
 let prepare_with ~prepare_compaction ~config ~meta =
@@ -442,7 +441,6 @@ let preserve_no_compaction_after_final_admission_busy = function
 let run_admitted_with
       ~append_compaction_manifest
       ~prepare_compaction
-      ~on_checkpoint_installed
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
   =
@@ -479,7 +477,6 @@ let run_admitted_with
              | Error _ -> Error failure)
           | Ok () ->
             finish_preparation
-              ~on_checkpoint_installed
               ~config
               ~meta
               preparation)
@@ -534,7 +531,6 @@ let run_admitted
         ~trigger
         ~projection_request
         ())
-    ~on_checkpoint_installed:(fun _ -> ())
     ~config
     ~meta
 ;;

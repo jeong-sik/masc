@@ -18,6 +18,18 @@ if matches="$(
   fi
 fi
 
+if matches="$(
+  rg -n \
+    'checkpoint_commit_hint|Hint_not_emitted|Hint_delivered|Hint_failed|admitted_result|run_admitted_with_install_observer' \
+    "${roots[@]}" || true
+)"; then
+  if [[ -n "${matches}" ]]; then
+    echo "[checkpoint-installation-legacy-purge] forbidden manual-compaction legacy surface:" >&2
+    echo "${matches}" >&2
+    exit 1
+  fi
+fi
+
 checkpoint_surface_files=(
   lib/keeper/keeper_checkpoint_store.ml
   lib/keeper/keeper_checkpoint_store.mli
@@ -41,6 +53,22 @@ if matches="$(
 )"; then
   if [[ -n "${matches}" ]]; then
     echo "[checkpoint-installation-legacy-purge] forbidden checkpoint outcome residue:" >&2
+    echo "${matches}" >&2
+    exit 1
+  fi
+fi
+
+manual_compaction_surface_files=(
+  lib/keeper/keeper_manual_compaction.ml
+  lib/keeper/keeper_manual_compaction.mli
+)
+if matches="$(
+  rg -n \
+    'on_checkpoint_installed' \
+    "${manual_compaction_surface_files[@]}" || true
+)"; then
+  if [[ -n "${matches}" ]]; then
+    echo "[checkpoint-installation-legacy-purge] forbidden manual-compaction callback residue:" >&2
     echo "${matches}" >&2
     exit 1
   fi

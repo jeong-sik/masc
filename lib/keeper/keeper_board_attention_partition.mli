@@ -8,6 +8,7 @@
     history. *)
 
 module Candidate = Keeper_board_attention_candidate
+module Generation = Keeper_board_attention_partition_generation
 
 module Worker_epoch : sig
   type t
@@ -76,8 +77,13 @@ type t = private
   ; context_key : Candidate.Context_key.t
   ; candidate_id : string
   ; created_at : float
+  ; generation : Generation.t
   ; state : state
   }
+(** [generation] advances exactly once for each legal state transition.
+    Cursor-fenced confirmation reappends of an unchanged state retain the same
+    generation. Current-schema ledger decoding rejects non-successor transition
+    generations. *)
 
 type exact_write_outcome =
   | Fsync_completed

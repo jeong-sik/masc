@@ -239,6 +239,67 @@ let test_exact_claim_never_claims_a_ready_sibling () =
   | None -> Alcotest.fail "explicitly reselected sibling was not claimed"
 ;;
 
+let test_generation_advances_only_for_state_transition () =
+  with_temp_base "board-attention-partition-generation" @@ fun base_path ->
+  let pending = candidate ~id:"candidate-generation" ~recorded_at:1.0 () in
+  let ready =
+    match roots ~base_path [ pending ] with
+    | [ partition ] -> partition
+    | _ -> Alcotest.fail "generation fixture did not create one root"
+  in
+  let owner = P.Worker_epoch.generate () in
+  let running =
+    match
+      ok
+        "claim generation fixture"
+        (P.claim_ready_exact
+           ~now:2.0
+           ~worker_epoch:owner
+           ~base_path
+           ~keeper_name:"sangsu"
+           ~partition_id:ready.partition_id)
+    with
+    | Some partition -> partition
+    | None -> Alcotest.fail "generation fixture lost its Ready target"
+  in
+  Alcotest.(check bool)
+    "Ready to Running is one successor"
+    true
+    (P.Generation.is_direct_successor
+       ~previous:ready.generation
+       running.generation);
+  let proof = provenance () in
+  let bound =
+    P.bind_before_dispatch
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:running
+      ~provenance:proof
+    |> ok "bind generation fixture"
+    |> fsynced "bind generation fixture"
+  in
+  Alcotest.(check bool)
+    "Running progress transition is one successor"
+    true
+    (P.Generation.is_direct_successor
+       ~previous:running.generation
+       bound.generation);
+  let replay =
+    ok
+      "reappend unchanged Bound generation"
+      (P.bind_before_dispatch
+         ~worker_epoch:owner
+         ~base_path
+         ~partition:bound
+         ~provenance:proof)
+  in
+  Alcotest.(check bool) "unchanged reappend reports no change" false replay.changed;
+  Alcotest.(check bool)
+    "unchanged reappend retains generation"
+    true
+    (P.Generation.equal bound.generation replay.partition.generation)
+;;
+
 let test_binding_owns_completion_and_settlement () =
   with_temp_base "board-attention-partition-binding" @@ fun base_path ->
   let pending = candidate ~id:"candidate-bound" ~recorded_at:1.0 () in
@@ -826,7 +887,7 @@ let test_strict_current_schema_rejects_old_json () =
     (ok "decode" (P.of_yojson encoded) = created);
   expect_error
     "old schema is rejected without migration"
-    (P.of_yojson (replace_field "schema_version" (`Int 3) encoded));
+    (P.of_yojson (replace_field "schema_version" (`Int 4) encoded));
   let old_running =
     `Assoc
       [ "kind", `String "running"
@@ -857,7 +918,7 @@ let test_strict_current_schema_rejects_old_json () =
 
 let inject_torn_tail ledger_path =
   let output = open_out_gen [ Open_wronly; Open_append; Open_binary ] 0o600 ledger_path in
-  output_string output "{\"schema_version\":4,\"partition_id\":\"torn-partial";
+  output_string output "{\"schema_version\":5,\"partition_id\":\"torn-partial";
   close_out output
 ;;
 
@@ -962,6 +1023,10 @@ let () =
             "exact claim never redirects to a Ready sibling"
             `Quick
             test_exact_claim_never_claims_a_ready_sibling
+        ; Alcotest.test_case
+            "generation advances only for state transitions"
+            `Quick
+            test_generation_advances_only_for_state_transition
         ; Alcotest.test_case
             "binding owns completion and settlement"
             `Quick

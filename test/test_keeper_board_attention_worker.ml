@@ -308,6 +308,86 @@ let test_setup_error_stops_before_claim_without_hot_retry () =
   | _ -> Alcotest.fail "setup failure claimed or terminalized the partition"
 ;;
 
+let test_prepare_claim_retry_exhaustion_is_bounded_and_read_only () =
+  with_temp_base "board-attention-worker-claim-retry-bound" @@ fun base_path ->
+  let candidates =
+    List.init 4 (fun index ->
+      record
+        ~base_path
+        (candidate
+           ~id:(Printf.sprintf "candidate-claim-conflict-%d" index)
+           ~recorded_at:(float_of_int index)
+           ()))
+  in
+  let competitor = P.Worker_epoch.generate () in
+  let prepare_calls = ref 0 in
+  let prepare candidate =
+    incr prepare_calls;
+    let partition =
+      ok "load prepared claim target" (P.load ~base_path ~keeper_name:"sangsu")
+      |> List.find_opt (fun (partition : P.t) ->
+        String.equal partition.candidate_id candidate.A.candidate_id)
+    in
+    let partition =
+      match partition with
+      | Some partition -> partition
+      | None -> Alcotest.fail "prepared claim target disappeared"
+    in
+    (match
+       ok
+         "competitor wins prepared target"
+         (P.claim_ready_exact
+            ~now:10.0
+            ~worker_epoch:competitor
+            ~base_path
+            ~keeper_name:"sangsu"
+            ~partition_id:partition.partition_id)
+     with
+     | Some _ -> ()
+     | None -> Alcotest.fail "competitor did not win prepared target");
+    Ok candidate
+  in
+  let execute_calls = ref 0 in
+  let execute ~before_dispatch:_ ~before_advance:_ _candidate =
+    incr execute_calls;
+    Alcotest.fail "claim retry exhaustion dispatched a prepared attempt"
+  in
+  (match
+     ok
+       "bounded prepare and claim conflicts"
+       (W.For_testing.process_next
+          ~now:(fun () -> 10.0)
+          ~worker_epoch:(P.Worker_epoch.generate ())
+          ~base_path
+          ~keeper_name:"sangsu"
+          ~prepare
+          ~execute)
+   with
+   | W.Idle -> ()
+   | W.Judgment_completed _
+   | W.Candidate_already_consumed _
+   | W.Partition_blocked _ ->
+     Alcotest.fail "claim retry exhaustion produced a terminal step");
+  Alcotest.(check int) "prepare attempts are bounded" 3 !prepare_calls;
+  Alcotest.(check int) "no prepared attempt was dispatched" 0 !execute_calls;
+  let running, ready =
+    ok "classify roots after retry exhaustion" (P.load ~base_path ~keeper_name:"sangsu")
+    |> List.fold_left
+         (fun (running, ready) (partition : P.t) ->
+            match partition.state with
+            | P.Running { progress = P.Unbound; _ } -> running + 1, ready
+            | P.Ready -> running, ready + 1
+            | P.Running _
+            | P.Completed _
+            | P.Settled _
+            | P.Blocked _ -> running, ready)
+         (0, 0)
+  in
+  Alcotest.(check int) "only competing workers claimed targets" 3 running;
+  Alcotest.(check int) "final classification leaves sibling Ready" 1 ready;
+  Alcotest.(check int) "all candidates remain present" 4 (List.length candidates)
+;;
+
 let test_execution_error_preserves_bound_progress_without_hot_retry () =
   with_temp_base "board-attention-worker-execution-error" @@ fun base_path ->
   let persisted = record ~base_path (candidate ()) in
@@ -1322,6 +1402,11 @@ let test_stale_blocked_snapshot_cannot_requeue_new_generation () =
     | Error error ->
       Alcotest.failf "manual command rejected: %s" (Q.input_error_to_string error)
   in
+  let partition_blocked_at =
+    match partition.state with
+    | P.Blocked { blocked_at; _ } -> blocked_at
+    | _ -> Alcotest.fail "original requeue target was not Blocked"
+  in
   let ready_snapshot = ref None in
   (match
      Q.For_testing.execute_with_before_partition_commit
@@ -1360,9 +1445,9 @@ let test_stale_blocked_snapshot_cannot_requeue_new_generation () =
          in
          let newer =
            ok
-             "worker commits newer Blocked generation"
+             "worker commits same-timestamp newer Blocked generation"
              (P.block
-                ~now:21.0
+                ~now:partition_blocked_at
                 ~worker_epoch:owner
                 ~base_path
                 ~partition:running
@@ -1390,9 +1475,20 @@ let test_stale_blocked_snapshot_cannot_requeue_new_generation () =
       | Error _ -> ()
       | Ok _ ->
         Alcotest.fail "Ready confirmation reopened a newer Blocked generation"));
-  match (load_one_partition ~base_path).state with
-  | P.Blocked { blocked_at; _ } ->
-    Alcotest.(check (float 0.0)) "newer Blocked generation retained" 21.0 blocked_at
+  let durable = load_one_partition ~base_path in
+  Alcotest.(check bool)
+    "newer generation remains structurally distinct"
+    false
+    (P.Generation.equal partition.generation durable.generation);
+  match durable.state with
+  | P.Blocked
+      { blocked_at
+      ; reason = P.Unexpected_worker_failure "newer exact worker failure"
+      } ->
+    Alcotest.(check (float 0.0))
+      "same timestamp cannot collapse distinct generations"
+      partition_blocked_at
+      blocked_at
   | _ -> Alcotest.fail "stale command changed the newer Blocked generation"
 ;;
 
@@ -1457,6 +1553,10 @@ let () =
             "setup error stops before claim"
             `Quick
             test_setup_error_stops_before_claim_without_hot_retry
+        ; Alcotest.test_case
+            "prepare and claim retry exhaustion is bounded and read only"
+            `Quick
+            test_prepare_claim_retry_exhaustion_is_bounded_and_read_only
         ; Alcotest.test_case
             "execution error preserves bound progress"
             `Quick
@@ -1534,7 +1634,7 @@ let () =
             `Quick
             test_same_quarantine_command_cas_loser_converges
         ; Alcotest.test_case
-            "stale Blocked snapshot cannot requeue a newer generation"
+            "same-timestamp newer Blocked generation is rejected"
             `Quick
             test_stale_blocked_snapshot_cannot_requeue_new_generation
         ; Alcotest.test_case

@@ -2,6 +2,8 @@
 
 module Board_signal = Keeper_world_observation_board_signal
 module Candidate_map = Map.Make (String)
+module Partition_generation = Keeper_board_attention_partition_generation
+
 type delivery_failure_kind =
   | Durable_delivery_unavailable
 
@@ -63,6 +65,7 @@ type attempt_provenance =
 type quarantine =
   { quarantine_id : string
   ; partition_id : string
+  ; partition_generation : Partition_generation.t
   ; failure_category : quarantine_failure_category
   ; attempt_provenance : attempt_provenance option
   ; quarantined_at : float
@@ -115,7 +118,7 @@ type record_acceptance =
 
 exception Candidate_unavailable of string
 
-let schema_version = 2
+let schema_version = 3
 
 let quarantine_failure_category_to_string = function
   | Candidate_membership_conflict -> "candidate_membership_conflict"
@@ -393,6 +396,8 @@ let quarantine_to_yojson quarantine =
   `Assoc
     [ "quarantine_id", `String quarantine.quarantine_id
     ; "partition_id", `String quarantine.partition_id
+    ; ( "partition_generation"
+      , Partition_generation.to_yojson quarantine.partition_generation )
     ; ( "failure_category"
       , `String
           (quarantine_failure_category_to_string quarantine.failure_category) )
@@ -955,6 +960,7 @@ let quarantine_of_yojson json =
       ~context
       [ "quarantine_id"
       ; "partition_id"
+      ; "partition_generation"
       ; "failure_category"
       ; "attempt_provenance"
       ; "quarantined_at"
@@ -970,6 +976,8 @@ let quarantine_of_yojson json =
   let* partition_id =
     string_json ~context:(context ^ ".partition_id") partition_id_json
   in
+  let* generation_json = field ~context "partition_generation" fields in
+  let* partition_generation = Partition_generation.of_yojson generation_json in
   let* category_json = field ~context "failure_category" fields in
   let* category_raw =
     string_json ~context:(context ^ ".failure_category") category_json
@@ -994,6 +1002,7 @@ let quarantine_of_yojson json =
   Ok
     { quarantine_id
     ; partition_id
+    ; partition_generation
     ; failure_category
     ; attempt_provenance
     ; quarantined_at
@@ -1670,6 +1679,7 @@ let mark_consumed ~base_path candidate judgment delivery =
 let quarantine_id
       ~candidate_id
       ~partition_id
+      ~partition_generation
       ~failure_category
       ~attempt_provenance
       ~quarantined_at
@@ -1688,6 +1698,8 @@ let quarantine_id
     "\000"
     ([ candidate_id
      ; partition_id
+     ; Yojson.Safe.to_string
+         (Partition_generation.to_yojson partition_generation)
      ; quarantine_failure_category_to_string failure_category
      ; Printf.sprintf "%.17g" quarantined_at
      ]
@@ -1719,12 +1731,16 @@ let normalize_requeued_consumed ~base_path ~keeper_name ~candidate_id =
 let same_quarantine_identity left right =
   String.equal left.quarantine_id right.quarantine_id
   && String.equal left.partition_id right.partition_id
+  && Partition_generation.equal
+       left.partition_generation
+       right.partition_generation
 ;;
 
 let quarantine
       ~base_path
       ~(candidate : candidate)
       ~partition_id
+      ~partition_generation
       ~failure_category
       ~attempt_provenance
       ~quarantined_at
@@ -1733,6 +1749,7 @@ let quarantine
     quarantine_id
       ~candidate_id:candidate.candidate_id
       ~partition_id
+      ~partition_generation
       ~failure_category
       ~attempt_provenance
       ~quarantined_at
@@ -1753,6 +1770,7 @@ let quarantine
       let requested =
         { quarantine_id
         ; partition_id
+        ; partition_generation
         ; failure_category
         ; attempt_provenance
         ; quarantined_at

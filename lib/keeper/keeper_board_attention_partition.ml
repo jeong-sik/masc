@@ -1,6 +1,7 @@
 (* See .mli. *)
 
 module Candidate = Keeper_board_attention_candidate
+module Generation = Keeper_board_attention_partition_generation
 module Id_map = Map.Make (String)
 module Id_set = Set.Make (String)
 
@@ -89,6 +90,7 @@ type t =
   ; context_key : Candidate.Context_key.t
   ; candidate_id : string
   ; created_at : float
+  ; generation : Generation.t
   ; state : state
   }
 
@@ -108,7 +110,7 @@ type requeue_blocked_outcome =
   | Generation_conflict of string
 
 let ( let* ) = Result.bind
-let schema_version = 4
+let schema_version = 5
 
 let state_to_string = function
   | Ready -> "ready"
@@ -208,6 +210,7 @@ let to_yojson partition =
     ; "context_key", Candidate.Context_key.to_yojson partition.context_key
     ; "candidate_id", `String partition.candidate_id
     ; "created_at", `Float partition.created_at
+    ; "generation", Generation.to_yojson partition.generation
     ; "state", state_to_yojson partition.state
     ]
 ;;
@@ -416,6 +419,7 @@ let of_yojson json =
       ; "context_key"
       ; "candidate_id"
       ; "created_at"
+      ; "generation"
       ; "state"
       ]
       fields
@@ -441,6 +445,8 @@ let of_yojson json =
   let* candidate_id = string_json ~context:(context ^ ".candidate_id") candidate_json in
   let* created_json = field ~context "created_at" fields in
   let* created_at = float_json ~context:(context ^ ".created_at") created_json in
+  let* generation_json = field ~context "generation" fields in
+  let* generation = Generation.of_yojson generation_json in
   let* state_json = field ~context "state" fields in
   let* state = state_of_yojson state_json in
   let* () =
@@ -449,7 +455,15 @@ let of_yojson json =
     | Completed _ -> Error "completed item identity differs from partition candidate"
     | Ready | Running _ | Settled _ | Blocked _ -> Ok ()
   in
-  Ok { partition_id; keeper_name; context_key; candidate_id; created_at; state }
+  Ok
+    { partition_id
+    ; keeper_name
+    ; context_key
+    ; candidate_id
+    ; created_at
+    ; generation
+    ; state
+    }
 ;;
 
 let partition_dir base_path =
@@ -661,6 +675,16 @@ let apply_row view partition =
     then Error ("partition changed immutable identity: " ^ partition.partition_id)
     else if previous = partition
     then Ok view
+    else if
+      not
+        (Generation.is_direct_successor
+           ~previous:previous.generation
+           partition.generation)
+    then
+      Error
+        (Printf.sprintf
+           "partition %s generation is not the direct successor"
+           partition.partition_id)
     else if not (legal_transition previous.state partition.state)
     then
       Error
@@ -945,6 +969,14 @@ let validate_blocked_reason = function
     Error "unbound execution cannot be quarantined"
 ;;
 
+let advance_state partition state =
+  if partition.state = state
+  then Ok partition
+  else
+    let* generation = Generation.next partition.generation in
+    Ok { partition with generation; state }
+;;
+
 let ensure_roots ~base_path ~keeper_name candidates =
   update ~base_path ~keeper_name (fun view ->
     let* roots =
@@ -988,6 +1020,7 @@ let ensure_roots ~base_path ~keeper_name candidates =
                            ; context_key
                            ; candidate_id = candidate.candidate_id
                            ; created_at = candidate.recorded_at
+                           ; generation = Generation.initial
                            ; state = Ready
                            }
                            :: roots)
@@ -1019,26 +1052,28 @@ let recover_for_process_start ~now ~base_path ~keeper_name =
         let* rows = parse snapshot.bytes in
         let* current = apply_rows (empty_view snapshot.cursor) rows in
         let* () = validate_keeper_identity ~keeper_name current in
-        let recovered, latest =
+        let* recovered, latest =
           view_partitions current
           |> List.fold_left
-               (fun (recovered, latest) partition ->
+               (fun result partition ->
+                  let* recovered, latest = result in
                   match partition.state with
                   | Running { progress = Unbound; _ } ->
-                    recovered + 1, { partition with state = Ready } :: latest
+                    let* released = advance_state partition Ready in
+                    Ok (recovered + 1, released :: latest)
                   | Running ({ progress = (Bound _ | Advancing _) as progress; _ }) ->
-                    ( recovered + 1
-                    , { partition with
-                        state =
-                          Blocked
-                            { reason = Exact_execution_quarantined progress
-                            ; blocked_at = now
-                            }
-                      }
-                      :: latest )
+                    let* quarantined =
+                      advance_state
+                        partition
+                        (Blocked
+                           { reason = Exact_execution_quarantined progress
+                           ; blocked_at = now
+                           })
+                    in
+                    Ok (recovered + 1, quarantined :: latest)
                   | Ready | Completed _ | Settled _ | Blocked _ ->
-                    recovered, partition :: latest)
-               (0, [])
+                    Ok (recovered, partition :: latest))
+               (Ok (0, []))
         in
         let latest = List.rev latest in
         let canonical = serialize latest in
@@ -1081,10 +1116,10 @@ let claim_ready_exact
       | Some selected ->
         (match selected.state with
          | Ready ->
-           let claimed =
-             { selected with
-               state = Running { worker_epoch; started_at = now; progress = Unbound }
-             }
+           let* claimed =
+             advance_state
+               selected
+               (Running { worker_epoch; started_at = now; progress = Unbound })
            in
            let* updated = apply_rows view [ claimed ] in
            let suffix = serialize [ claimed ] in
@@ -1112,7 +1147,7 @@ let transition_running ~base_path ~partition ~worker_epoch decide =
       (match current.state with
        | Running running when Worker_epoch.equal running.worker_epoch worker_epoch ->
          let* state = decide running in
-         let updated = { current with state } in
+         let* updated = advance_state current state in
          if updated = current then Ok ([], current) else Ok ([ updated ], updated)
        | Running running ->
          Error
@@ -1133,7 +1168,7 @@ let transition_running_exact ~base_path ~partition ~worker_epoch decide =
         (match current.state with
          | Running running when Worker_epoch.equal running.worker_epoch worker_epoch ->
            let* state = decide running in
-           let updated = { current with state } in
+           let* updated = advance_state current state in
            Ok ([ updated ], (updated, updated <> current))
          | Running running ->
            Error
@@ -1240,8 +1275,8 @@ let confirm_completed ~base_path ~(partition : t) =
         match Id_map.find_opt partition.partition_id view.by_id with
         | None ->
           Error ("Board attention partition not found: " ^ partition.partition_id)
-        | Some ({ state = Completed { item = current_item; _ }; _ } as current)
-          when current_item = item -> Ok ([ current ], (current, false))
+        | Some ({ state = Completed _; _ } as current)
+          when current = partition -> Ok ([ current ], (current, false))
         | Some { state = Completed _; _ } ->
           Error
             ("completed partition item conflicts with durable state: "
@@ -1274,9 +1309,8 @@ let confirm_blocked ~base_path ~(partition : t) =
         match Id_map.find_opt partition.partition_id view.by_id with
         | None ->
           Error ("Board attention partition not found: " ^ partition.partition_id)
-        | Some ({ state = Blocked current; _ } as durable)
-          when current.reason = reason
-               && Float.equal current.blocked_at blocked_at ->
+        | Some ({ state = Blocked _; _ } as durable)
+          when durable = partition ->
           Ok ([ durable ], (durable, false))
         | Some { state = Blocked _; _ } ->
           Error
@@ -1343,7 +1377,7 @@ let requeue_blocked ~base_path ~(partition : t) =
         | None ->
           Error ("Board attention partition not found: " ^ partition.partition_id)
         | Some current when current = partition ->
-          let ready = { current with state = Ready } in
+          let* ready = advance_state current Ready in
           Ok (`Append ([ ready ], Append_ready ready))
         | Some { state = Blocked _; _ } ->
           Ok
@@ -1422,7 +1456,7 @@ let settle ~now ~base_path ~partition =
     | None -> Error ("partition settlement target not found: " ^ partition.partition_id)
     | Some ({ state = Settled _; _ } as current) -> Ok ([], current)
     | Some ({ state = (Completed _ | Blocked _); _ } as current) ->
-      let settled = { current with state = Settled { settled_at = now } } in
+      let* settled = advance_state current (Settled { settled_at = now }) in
       Ok ([ settled ], settled)
     | Some current ->
       Error ("only Completed or Blocked partition can settle: " ^ current.partition_id))

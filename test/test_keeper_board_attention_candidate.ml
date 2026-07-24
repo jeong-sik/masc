@@ -192,12 +192,18 @@ let test_codec_and_context_identity_are_strict () =
   let old_schema =
     match encoded with
     | `Assoc fields ->
-      `Assoc (List.filter (fun (name, _) -> not (String.equal name "schema_version")) fields)
+      `Assoc
+        (List.map
+           (fun (name, value) ->
+              if String.equal name "schema_version"
+              then name, `Int 2
+              else name, value)
+           fields)
     | _ -> Alcotest.fail "candidate codec did not produce an object"
   in
   (match A.candidate_of_json old_schema with
    | Error _ -> ()
-   | Ok _ -> Alcotest.fail "pre-quarantine candidate schema was accepted");
+   | Ok _ -> Alcotest.fail "candidate schema v2 was accepted");
   let left = ok "left context" (A.Context_key.of_candidate original) in
   let reordered =
     candidate

@@ -258,6 +258,18 @@ let matching_quarantine command candidate =
          "candidate quarantine generation differs from the command")
 ;;
 
+let matching_partition_generation quarantine partition =
+  if
+    Partition.Generation.equal
+      quarantine.Candidate.partition_generation
+      partition.Partition.generation
+  then Ok ()
+  else
+    Error
+      (Partition_state_conflict
+         "candidate quarantine targets a different partition generation")
+;;
+
 let confirm_requeue ~base_path transition =
   match transition.Partition.write_outcome with
   | Partition.Fsync_completed -> Ok transition.partition
@@ -297,18 +309,25 @@ let rec reload_same_generation_ready
     ?(remaining_cursor_retries = requeue_cursor_retry_limit)
     ?(allow_requeue = true)
     ~base_path
+    ~expected_blocked
     command
   =
   let* candidate = find_candidate ~base_path command in
   let* observed = matching_quarantine command candidate in
+  let* () =
+    matching_partition_generation observed.quarantine expected_blocked
+  in
   match observed.phase with
   | Candidate.Requeued _ ->
     let* partition = find_partition ~base_path command in
     (match partition.Partition.state with
-     | Partition.Ready -> confirm_ready_partition ~base_path partition
-     | Partition.Blocked { blocked_at; _ }
-       when allow_requeue
-            && Float.equal blocked_at observed.quarantine.quarantined_at ->
+     | Partition.Ready
+       when Partition.Generation.is_direct_successor
+              ~previous:expected_blocked.Partition.generation
+              partition.generation ->
+       confirm_ready_partition ~base_path partition
+     | Partition.Blocked _
+       when allow_requeue && partition = expected_blocked ->
        (match Partition.requeue_blocked ~base_path ~partition with
         | Error detail -> Error (Partition_state_conflict detail)
         | Ok (Partition.Requeued transition) ->
@@ -317,15 +336,18 @@ let rec reload_same_generation_ready
           reload_same_generation_ready
             ~remaining_cursor_retries:(remaining_cursor_retries - 1)
             ~base_path
+            ~expected_blocked
             command
         | Ok (Partition.Cursor_conflict _) ->
           reload_same_generation_ready
             ~remaining_cursor_retries:0
             ~allow_requeue:false
             ~base_path
+            ~expected_blocked
             command
         | Ok (Partition.Generation_conflict detail) ->
           Error (Partition_state_conflict detail))
+     | Partition.Ready
      | Partition.Blocked _
      | Partition.Running _
      | Partition.Completed _
@@ -345,7 +367,10 @@ let commit_partition_ready ~base_path command partition =
     (match Partition.requeue_blocked ~base_path ~partition with
      | Error detail -> Error (Partition_state_conflict detail)
      | Ok (Partition.Cursor_conflict _) ->
-       reload_same_generation_ready ~base_path command
+       reload_same_generation_ready
+         ~base_path
+         ~expected_blocked:partition
+         command
      | Ok (Partition.Generation_conflict detail) ->
        Error (Partition_state_conflict detail)
      | Ok (Partition.Requeued transition) ->
@@ -366,9 +391,18 @@ let execute_with_before_partition_commit
   let* candidate = find_candidate ~base_path command in
   let* observed = matching_quarantine command candidate in
   let* partition = find_partition ~base_path command in
+  let generation_matches =
+    Partition.Generation.equal
+      observed.quarantine.partition_generation
+      partition.generation
+  in
+  let ready_generation_matches =
+    Partition.Generation.is_direct_successor
+      ~previous:observed.quarantine.partition_generation
+      partition.generation
+  in
   match observed.phase, partition.state with
-  | Candidate.Requeued _, Partition.Blocked { blocked_at; _ }
-    when Float.equal blocked_at observed.quarantine.quarantined_at ->
+  | Candidate.Requeued _, Partition.Blocked _ when generation_matches ->
     before_partition_commit partition;
     let* ready = commit_partition_ready ~base_path command partition in
     request_wake ~base_path command candidate ready
@@ -376,16 +410,22 @@ let execute_with_before_partition_commit
     Error
       (Partition_state_conflict
          "a newer Blocked generation is awaiting candidate projection")
-  | Candidate.Requeued _, Partition.Ready ->
+  | Candidate.Requeued _, Partition.Ready when ready_generation_matches ->
     let* ready = confirm_ready_partition ~base_path partition in
     request_wake ~base_path command candidate ready
+  | Candidate.Requeued _,
+    Partition.Ready ->
+    Error
+      (Partition_state_conflict
+         "Ready partition is not the authorized generation successor")
   | Candidate.Requeued _,
     (Partition.Running _ | Partition.Completed _ | Partition.Settled _) ->
     Error
       (Partition_state_conflict
          "partition advanced beyond the authorized Ready boundary")
   | (Candidate.Quarantined | Candidate.Requeue_requested _),
-    Partition.Blocked _ ->
+    Partition.Blocked _
+    when generation_matches ->
     let* requested =
       match
         Candidate.request_quarantine_requeue
@@ -413,6 +453,11 @@ let execute_with_before_partition_commit
     before_partition_commit partition;
     let* ready = commit_partition_ready ~base_path command partition in
     request_wake ~base_path command authorized ready
+  | (Candidate.Quarantined | Candidate.Requeue_requested _),
+    Partition.Blocked _ ->
+    Error
+      (Partition_state_conflict
+         "candidate quarantine targets a different Blocked generation")
   | (Candidate.Quarantined | Candidate.Requeue_requested _),
     (Partition.Ready | Partition.Running _ | Partition.Completed _
     | Partition.Settled _) ->

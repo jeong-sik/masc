@@ -398,6 +398,8 @@ let test_prepare_resumable_status_gate () =
   let quarantine : Candidate.quarantine =
     { quarantine_id = "ba-quarantine-gate"
     ; partition_id = "ba-root-gate"
+    ; partition_generation =
+        Masc.Keeper_board_attention_partition_generation.initial
     ; failure_category = Candidate.Unexpected_worker_failure
     ; attempt_provenance = None
     ; quarantined_at = 2.0

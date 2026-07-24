@@ -157,6 +157,7 @@ let quarantine_blocked_partition ~base_path partition =
       ~base_path
       ~candidate
       ~partition_id:partition.partition_id
+      ~partition_generation:partition.generation
       ~failure_category:(failure_category_of_reason reason)
       ~attempt_provenance:(attempt_provenance_of_reason reason)
       ~quarantined_at:blocked_at
@@ -662,7 +663,6 @@ let rec converge_requeue_conflict
     ~keeper_name
     ~partition
     ~expected_quarantine_id
-    ~expected_quarantined_at
   =
   let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
   let* candidate =
@@ -688,7 +688,9 @@ let rec converge_requeue_conflict
         }
       when String.equal quarantine.partition_id partition.partition_id
            && String.equal quarantine.quarantine_id expected_quarantine_id
-           && Float.equal quarantine.quarantined_at expected_quarantined_at ->
+           && Partition.Generation.equal
+                quarantine.partition_generation
+                partition.generation ->
       Ok ()
     | Some _ | None ->
       Error
@@ -710,11 +712,13 @@ let rec converge_requeue_conflict
          ^ partition.partition_id)
   in
   match current.state with
-  | Partition.Ready ->
+  | Partition.Ready
+    when Partition.Generation.is_direct_successor
+           ~previous:partition.generation
+           current.generation ->
     let* confirmation = Partition.confirm_ready ~base_path ~partition:current in
     confirm_requeue_transition ~base_path confirmation
-  | Partition.Blocked { blocked_at; _ }
-    when Float.equal blocked_at expected_quarantined_at ->
+  | Partition.Blocked _ when current = partition ->
     if not allow_requeue
     then
       Error
@@ -732,7 +736,6 @@ let rec converge_requeue_conflict
            ~keeper_name
            ~partition
            ~expected_quarantine_id
-           ~expected_quarantined_at
        | Partition.Cursor_conflict _ ->
          converge_requeue_conflict
            ~remaining_cursor_retries:0
@@ -741,9 +744,9 @@ let rec converge_requeue_conflict
            ~keeper_name
            ~partition
            ~expected_quarantine_id
-           ~expected_quarantined_at
        | Partition.Generation_conflict detail ->
          Error ("partition target generation changed during requeue: " ^ detail))
+  | Partition.Ready
   | Partition.Blocked _
   | Partition.Running _
   | Partition.Completed _
@@ -758,7 +761,6 @@ let confirm_requeue_outcome
       ~keeper_name
       ~partition
       ~expected_quarantine_id
-      ~expected_quarantined_at
   = function
   | Partition.Requeued transition ->
     confirm_requeue_transition ~base_path transition
@@ -768,7 +770,6 @@ let confirm_requeue_outcome
       ~keeper_name
       ~partition
       ~expected_quarantine_id
-      ~expected_quarantined_at
   | Partition.Generation_conflict detail ->
     Error ("partition target generation changed during requeue: " ^ detail)
 ;;
@@ -795,10 +796,13 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
              ^ partition.candidate_id)
       in
       (match partition.state, Candidate.quarantine_state candidate.status with
-       | Partition.Blocked { reason; blocked_at }, Some state
+       | Partition.Blocked _, Some state
          when String.equal
                 state.quarantine.partition_id
-                partition.partition_id ->
+                partition.partition_id
+              && Partition.Generation.equal
+                   state.quarantine.partition_generation
+                   partition.generation ->
          (match state.phase with
           | Candidate.Requeue_requested _ ->
             let* (_ : Candidate.candidate) =
@@ -816,43 +820,31 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
                 ~keeper_name
                 ~partition
                 ~expected_quarantine_id:state.quarantine.quarantine_id
-                ~expected_quarantined_at:state.quarantine.quarantined_at
                 outcome
             in
             loop rest
           | Candidate.Quarantined -> loop rest
           | Candidate.Requeued _ ->
-            if Float.equal state.quarantine.quarantined_at blocked_at
-            then (
-              let* (_ : Partition.exact_transition) =
-                let* outcome = Partition.requeue_blocked ~base_path ~partition in
-                confirm_requeue_outcome
-                  ~base_path
-                  ~keeper_name
-                  ~partition
-                  ~expected_quarantine_id:state.quarantine.quarantine_id
-                  ~expected_quarantined_at:state.quarantine.quarantined_at
-                  outcome
-              in
-              loop rest)
-            else
-              let* (_ : Candidate.candidate) =
-                Candidate.quarantine
-                  ~base_path
-                  ~candidate
-                  ~partition_id:partition.partition_id
-                  ~failure_category:(failure_category_of_reason reason)
-                  ~attempt_provenance:(attempt_provenance_of_reason reason)
-                  ~quarantined_at:blocked_at
-              in
-              loop rest)
+            let* (_ : Partition.exact_transition) =
+              let* outcome = Partition.requeue_blocked ~base_path ~partition in
+              confirm_requeue_outcome
+                ~base_path
+                ~keeper_name
+                ~partition
+                ~expected_quarantine_id:state.quarantine.quarantine_id
+                outcome
+            in
+            loop rest)
        | Partition.Blocked _, _ ->
          let* () = quarantine_blocked_partition ~base_path partition in
          loop rest
        | Partition.Ready, Some state
          when String.equal
                 state.quarantine.partition_id
-                partition.partition_id ->
+                partition.partition_id
+              && Partition.Generation.is_direct_successor
+                   ~previous:state.quarantine.partition_generation
+                   partition.generation ->
          (match state.phase with
           | Candidate.Requeue_requested _ ->
             Error
@@ -866,10 +858,17 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
             let* confirmation =
               Partition.confirm_ready ~base_path ~partition
             in
-            let* (_ : Partition.t) =
+            let* (_ : Partition.exact_transition) =
               confirm_requeue_transition ~base_path confirmation
             in
             loop rest)
+       | Partition.Ready, Some state
+         when String.equal
+                state.quarantine.partition_id
+                partition.partition_id ->
+         Error
+           ("Ready partition is not the quarantined generation successor: "
+            ^ partition.partition_id)
        | Partition.Ready, _
        | Partition.Running _, _
        | Partition.Completed _, _
@@ -889,7 +888,29 @@ let process_next
   =
   let* candidates = Candidate.load_candidates ~base_path ~keeper_name in
   let* (_ : int) = Partition.ensure_roots ~base_path ~keeper_name candidates in
-  let rec select_and_claim candidates =
+  let finish_after_claim_conflicts () =
+    let* partitions = Partition.load ~base_path ~keeper_name in
+    let ready_remains =
+      List.exists
+        (fun (partition : Partition.t) ->
+           match partition.state with
+           | Partition.Ready -> true
+           | Partition.Running _
+           | Partition.Completed _
+           | Partition.Settled _
+           | Partition.Blocked _ -> false)
+        partitions
+    in
+    if ready_remains
+    then
+      let* (_ : Wake.wake_result) = Wake.request ~base_path ~keeper_name in
+      Ok Idle
+    else Ok Idle
+  in
+  let rec select_and_claim attempts_remaining candidates =
+    if attempts_remaining <= 0
+    then finish_after_claim_conflicts ()
+    else
     let* selected =
       prepare_next_ready ~base_path ~keeper_name ~prepare candidates
     in
@@ -907,7 +928,7 @@ let process_next
       (match claimed with
        | None ->
          let* refreshed = Candidate.load_candidates ~base_path ~keeper_name in
-         select_and_claim refreshed
+         select_and_claim (attempts_remaining - 1) refreshed
        | Some partition ->
          let latest_partition : Partition.t ref = ref partition in
          (try
@@ -943,7 +964,7 @@ let process_next
               !latest_partition
               reason))
   in
-  select_and_claim candidates
+  select_and_claim 3 candidates
 ;;
 
 let completed_in_order ~base_path ~keeper_name =

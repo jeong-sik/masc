@@ -9,6 +9,8 @@
     candidate. Pending work has no wall-clock expiry: it remains durable until
     judgment and delivery succeed. *)
 
+module Partition_generation = Keeper_board_attention_partition_generation
+
 type delivery_failure_kind =
   | Durable_delivery_unavailable
 
@@ -70,6 +72,7 @@ type attempt_provenance =
 type quarantine =
   { quarantine_id : string
   ; partition_id : string
+  ; partition_generation : Partition_generation.t
   ; failure_category : quarantine_failure_category
   ; attempt_provenance : attempt_provenance option
   ; quarantined_at : float
@@ -200,6 +203,7 @@ val quarantine :
   base_path:string ->
   candidate:candidate ->
   partition_id:string ->
+  partition_generation:Partition_generation.t ->
   failure_category:quarantine_failure_category ->
   attempt_provenance:attempt_provenance option ->
   quarantined_at:float ->

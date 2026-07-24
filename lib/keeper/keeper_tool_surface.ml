@@ -79,42 +79,15 @@ let validation_error_data message =
     ; "message", `String message
     ]
 
-let compaction_dispatch_error_data ~stage ~checkpoint_applied error =
-  let detail = Keeper_context_runtime.lifecycle_dispatch_error_to_string error in
-  error_assoc
-    [ "error_code", `String (error_code_to_string Conflict)
-    ; "message", `String (Printf.sprintf "compaction lifecycle dispatch failed: %s" detail)
-    ; "lifecycle_stage", `String stage
-    ; "checkpoint_applied", `Bool checkpoint_applied
-    ; "dispatch_error", `String detail
-    ]
-
-type compaction_checkpoint_commit_state =
-  | Not_installed
-  | Outcome_unknown
+type compaction_checkpoint_commit_state = Not_installed
 
 let compaction_checkpoint_commit_state_to_string = function
   | Not_installed -> "not_installed"
-  | Outcome_unknown -> "transaction_outcome_unknown"
 
 let compaction_recovery_error_data ?dispatch_error error =
   let tag = Keeper_post_turn.compaction_recovery_error_to_tag error in
   let detail = Keeper_post_turn.compaction_recovery_error_to_string error in
-  let checkpoint_commit_state, checkpoint_applied =
-    match error with
-    | Checkpoint_cas_failed (Transaction_outcome_unknown _) ->
-      Outcome_unknown, `Null
-    | Checkpoint_ref_load_failed _
-    | Checkpoint_cas_failed _
-    | Checkpoint_candidate_failed _
-    | Compaction_rejected _
-    | No_compaction _
-    (* Manual prepares bypass the suspension gate, so this surface cannot
-       observe [Retry_suspended] today; the arm keeps the classification
-       total if that routing ever changes. *)
-    | Retry_suspended _ ->
-      Not_installed, `Bool false
-  in
+  let checkpoint_commit_state = Not_installed in
   let recovery_code =
     match error with
     | Keeper_post_turn.Checkpoint_ref_load_failed
@@ -137,15 +110,9 @@ let compaction_recovery_error_data ?dispatch_error error =
     | Compaction_rejected Invalid_compaction_plan
     | Compaction_rejected (Invalid_structural_evidence _)
     | Checkpoint_ref_load_failed _
-    | Checkpoint_cas_failed (Source_unavailable _)
-    | Checkpoint_cas_failed (Candidate_identity_invalid _)
-    | Checkpoint_cas_failed (Candidate_session_mismatch _)
-    | Checkpoint_cas_failed (Candidate_generation_mismatch _)
-    | Checkpoint_cas_failed (Candidate_turn_regressed _)
-    | Checkpoint_cas_failed (Commit_not_installed _)
     | Checkpoint_candidate_failed _ -> Internal_error
-    | Checkpoint_cas_failed (Source_changed _)
-    | Checkpoint_cas_failed (Transaction_outcome_unknown _) -> Conflict
+    | Checkpoint_cas_failed (Source_changed _) -> Conflict
+    | Checkpoint_cas_failed _ -> Internal_error
   in
   let code =
     match dispatch_error with
@@ -159,7 +126,6 @@ let compaction_recovery_error_data ?dispatch_error error =
      ; ( "checkpoint_commit_state"
        , `String
            (compaction_checkpoint_commit_state_to_string checkpoint_commit_state) )
-     ; "checkpoint_applied", checkpoint_applied
      ]
      @
      match dispatch_error with

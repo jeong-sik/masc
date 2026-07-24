@@ -714,6 +714,65 @@ let test_post_rename_durability_unknown_is_installed () =
         fail "post-rename retry failed without exact source evidence")
 ;;
 
+let test_pre_rename_write_failure_is_not_installed_and_retryable () =
+  let session_id = "sess-cas-pre-rename" in
+  with_exact_source_fixture ~session_id (fun ~session_dir ~source_ref ->
+    let candidate =
+      make_checkpoint ~session_id ~turn_count:9 ~marker:"pre-rename"
+      |> with_generation 3
+    in
+    let write_error =
+      { Keeper_fs.renamed = false
+      ; stage = Keeper_fs.Payload_write
+      ; failure = Keeper_fs.Operation_failed "injected pre-rename write failure"
+      }
+    in
+    let observer_count = ref 0 in
+    match
+      Keeper_checkpoint_store.For_testing.save_oas_if_source_with_writer
+        ~write_checkpoint_bytes:
+          (fun ~on_durable_commit:_ ~ownership_root:_ ~path:_ ~bytes:_ ->
+             Error write_error)
+        ~on_checkpoint_commit_observer:(fun _ -> incr observer_count)
+        ~session_dir
+        ~expected_source_ref:source_ref
+        candidate
+    with
+    | Keeper_checkpoint_store.Installed _ ->
+      fail "pre-rename write failure became Installed"
+    | Keeper_checkpoint_store.Not_installed
+        (Keeper_checkpoint_store.Commit_not_installed error) ->
+      check bool
+        "pre-rename write failure preserves its exact cause"
+        true
+        (error = write_error);
+      check int "pre-rename failure emits no commit observer" 0 !observer_count;
+      (match
+         Keeper_checkpoint_store.load_oas_with_ref ~session_dir ~session_id
+       with
+       | Ok (_, disk_ref) ->
+         check bool
+           "pre-rename failure leaves the canonical ref unchanged"
+           true
+           (Keeper_checkpoint_ref.equal source_ref disk_ref)
+       | Error _ -> fail "pre-rename failure removed the canonical checkpoint");
+      (match
+         Keeper_checkpoint_store.save_oas_if_source
+           ~session_dir
+           ~expected_source_ref:source_ref
+           candidate
+       with
+       | Keeper_checkpoint_store.Installed installed ->
+         check bool
+           "pre-rename failure remains retryable from the same source"
+           false
+           (Keeper_checkpoint_ref.equal source_ref installed.installed_ref)
+       | Keeper_checkpoint_store.Not_installed _ ->
+         fail "pre-rename failure consumed the exact-source retry")
+    | Keeper_checkpoint_store.Not_installed _ ->
+      fail "pre-rename write failure lost its Commit_not_installed cause")
+;;
+
 let test_commit_observer_failure_is_installed () =
   let session_id = "sess-cas-observer-failure" in
   with_exact_source_fixture ~session_id (fun ~session_dir ~source_ref ->
@@ -864,6 +923,8 @@ let () =
             test_exact_source_cas_updates_canonical_watermark;
           test_case "post-rename durability uncertainty stays installed" `Quick
             test_post_rename_durability_unknown_is_installed;
+          test_case "pre-rename write failure stays retryable" `Quick
+            test_pre_rename_write_failure_is_not_installed_and_retryable;
           test_case "commit observer failure stays installed" `Quick
             test_commit_observer_failure_is_installed;
           test_case "post-commit unwind stays installed" `Quick

@@ -1,6 +1,8 @@
 open Alcotest
 open Masc
 
+module Exact_output = Agent_sdk.Exact_output
+
 let empty_env _name = None
 
 let parse_or_fail content =
@@ -760,8 +762,27 @@ let test_repo_runtime_toml_loads () =
     (match Runtime_toml.parse_file path with
      | Error _ -> fail "repo runtime.toml exact-output lanes must parse"
      | Ok config ->
-       check int "public seed has no provider-bound exact-output lanes" 0
-         (List.length config.exact_output_lane_decls));
+       let lane_ids =
+         List.map
+           (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+              lane.id)
+           config.exact_output_lane_decls
+       in
+       check
+         (list string)
+         "public seed exact-output lanes"
+         [ "librarian_exact"
+         ; "compaction_exact"
+         ; "hitl_auto_judge"
+         ]
+         lane_ids;
+       List.iter
+         (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+            check bool
+              (Printf.sprintf "%s has at least one target" lane.id)
+              true
+              (not (List.is_empty lane.slot_ids)))
+         config.exact_output_lane_decls);
     check (option (float 0.0)) "Ollama Cloud connect timeout override"
       (Some 600.0)
       default.provider_config.connect_timeout_s;
@@ -897,6 +918,45 @@ let test_repo_runtime_toml_loads () =
                caps.thinking_control_format
                Runtime_schema.Reasoning_effort)
         | None -> fail "expected Kimi K2.7 Code capabilities"))
+
+let test_deployment_exact_output_catalog_covers_seed_lanes () =
+  let root = repo_root () in
+  let runtime_path = Filename.concat root "config/runtime.toml" in
+  let overlay_path = Filename.concat root "config/oas-models-overlay.toml" in
+  let overlay_contents =
+    In_channel.with_open_bin overlay_path In_channel.input_all
+  in
+  let io : Exact_output.resolver_io =
+    { getenv = (fun _ -> Ok None) }
+  in
+  let snapshot =
+    match
+      Exact_output.load_resolver_snapshot
+        ~io
+        ~catalog:
+          (Exact_output.Embedded_with_overlay
+             { source = overlay_path; contents = overlay_contents })
+        ()
+    with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "deployment exact-output catalog should load"
+  in
+  match Runtime_toml.parse_file runtime_path with
+  | Error _ -> fail "repo runtime.toml exact-output lanes must parse"
+  | Ok config ->
+    List.iter
+      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+         List.iter
+           (fun target_ref ->
+              match Exact_output.admit_target_ref snapshot target_ref with
+              | Ok _ -> ()
+              | Error _ ->
+                failf
+                  "exact-output lane %s target %s must exist in the frozen catalog"
+                  lane.id
+                  target_ref)
+           lane.slot_ids)
+      config.exact_output_lane_decls
 
 let test_toml_catalog_resolves_lifecycle_keys () =
   let doc =
@@ -2669,6 +2729,10 @@ let () =
             test_exact_output_lane_rejects_unknown_key;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
+          test_case
+            "deployment exact-output catalog covers repo seed lanes"
+            `Quick
+            test_deployment_exact_output_catalog_covers_seed_lanes;
           test_case
             "[runtime].cross_verifier resolves, defaults to None, rejects unknown"
             `Quick test_cross_verifier_runtime_routing;

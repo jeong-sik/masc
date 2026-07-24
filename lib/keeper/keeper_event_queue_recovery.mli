@@ -27,6 +27,11 @@ type owner_budget_error = Invalid_owner_budget of int
 type owner_budget
 type sweep_cursor
 
+type owner_projection =
+  { keeper_name : string
+  ; outcome : (projection_outcome, projection_error) result
+  }
+
 type sweep_report =
   { discovered : int
   ; processed : int
@@ -34,6 +39,7 @@ type sweep_report =
   ; no_pending : int
   ; converged : int
   ; claim_busy : int
+  ; projections : owner_projection list
   ; failures : owner_failure list
   ; discovery_error : discovery_error option
   }
@@ -61,8 +67,10 @@ val project_owner_result :
 
 val project_discovered : base_path:string -> sweep_report
 (** Discover current-schema durable queue owners and project each owner through
-    {!project_owner_result}. A partial discovery error is retained alongside
-    results for every owner that was discovered successfully. *)
+    {!project_owner_result}. [projections] is the canonical sorted, deduplicated
+    owner set and its typed per-owner outcome. Callers must reuse it rather than
+    performing a second filesystem discovery. A partial discovery error is
+    retained alongside every owner discovered successfully. *)
 
 val project_discovered_bounded :
   base_path:string ->
@@ -71,8 +79,10 @@ val project_discovered_bounded :
   sweep_page
 (** Project one deterministic owner page. The next cursor resumes strictly
     after the last processed canonical keeper name and wraps in lexical order,
-    so repeated maintenance ticks cannot starve a durable owner. The cursor is
-    process-local and carries no migration or persistence contract. *)
+    so repeated maintenance ticks cannot starve a durable owner.
+    [report.projections] contains exactly one typed outcome per selected owner
+    in page order. The cursor is process-local and carries no migration or
+    persistence contract. *)
 
 module For_testing : sig
   type 'a claim_outcome =

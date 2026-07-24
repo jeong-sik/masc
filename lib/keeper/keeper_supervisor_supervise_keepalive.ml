@@ -53,12 +53,15 @@ let supervise_keepalive
       ~base_path
       ~keeper_name:meta.name
   in
-  let activation =
-    Keeper_activation_readiness.classify_owner_activation
+  let execution_truth =
+    Keeper_activation_readiness.classify_owner_execution
       ~shutdown_operation_id:admission.snapshot_shutdown_operation_id
+      ~runtime:
+        (Keeper_activation_readiness.owner_runtime_of_registry_entry
+           (Keeper_registry.get ~base_path meta.name))
       (Ok meta)
   in
-  let record_activation_denial reason =
+  let record_recovery_retained reason =
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string LifecycleDispatchRejections)
       ~labels:
@@ -77,79 +80,10 @@ let supervise_keepalive
       reason
       ()
   in
-  match activation with
-  | Keeper_activation_readiness.Activation_unknown detail ->
-    record_activation_denial "activation_unknown";
-    Log.Keeper.error
-      "%s: supervisor keepalive start denied because owner activation truth is unknown: %s"
-      meta.name
-      detail
-  | Keeper_activation_readiness.Activation_blocked blocker ->
-    let reason =
-      Keeper_activation_readiness.owner_activation_blocker_to_wire blocker
-    in
-    record_activation_denial reason;
-    (match blocker with
-     | Keeper_activation_readiness.Shutdown_fenced operation_id ->
-       Log.Keeper.warn
-         "%s: supervisor keepalive start denied by shutdown operation %s"
-         meta.name
-         (Keeper_shutdown_types.Operation_id.to_string operation_id)
-     | Keeper_activation_readiness.Autonomous_blocked _ ->
-       Log.Keeper.info
-         "%s: supervisor keepalive start denied by owner activation policy: %s"
-         meta.name
-         reason)
-  | Keeper_activation_readiness.Activation_allowed ->
-    if Keeper_registry.is_registered ~base_path meta.name
-    then ()
-    else
-    (* Register in Keeper_registry — single source of truth. *)
-    match
-      Keeper_registry.register_offline_if_admitted
-        ~base_path
-        meta.name
-        meta
-    with
-     (* Warn, not info: a keeper that cannot launch is a degraded state the
-        operator must be able to see in WARN/ERROR filters. The 2026-07-20/21
-        wedge produced 500+ of these lines, all invisible at INFO (#25491). A
-        single WARN during a normally draining shutdown is expected and
-        cheap; sustained repetition is the incident signal. *)
-     | Error (Keeper_registry.Registration_shutdown_reserved operation_id) ->
-       Log.Keeper.warn
-         "supervisor launch skipped %s because shutdown operation %s owns admission"
-         meta.name
-         (Keeper_shutdown_types.Operation_id.to_string operation_id)
-     | Error (Keeper_registry.Registration_lifecycle_reserved owner) ->
-       Log.Keeper.warn
-         "supervisor launch skipped %s because lifecycle transaction owns admission: %s"
-         meta.name
-         (Keeper_lifecycle_reservation.snapshot_to_string owner)
-     | Error (Keeper_registry.Registration_invalid validation_error) ->
-       Log.Keeper.error
-         "supervisor registry validation rejected %s: %s"
-         meta.name
-         (Keeper_registry.registry_entry_validation_error_to_string validation_error)
-     | Error (Keeper_registry.Registration_event_queue_unavailable { keeper_name; detail }) ->
-       Log.Keeper.error
-         "supervisor registry event queue unavailable keeper=%s: %s"
-         keeper_name
-         detail
-     | Ok reg ->
-    (* Persona drift is a property of a keeper that is actually joining the
-       fleet, so it is reported only once registration has committed. Reporting
-       it before [register_offline_if_admitted] meant every rejected
-       registration attempt also emitted a drift warning: when a shutdown
-       operation owns admission the supervisor retries roughly every 30s
-       forever, so a single blocked keeper produced ~120 drift warnings per
-       hour whose remediation ("add persona profile") cannot unblock it. The
-       drift condition itself is unchanged and still surfaces on the
-       registration that succeeds. *)
+  let launch_registered reg =
     let () =
       Startup_helpers.log_persona_drift_if_missing ~base_path meta
     in
-    (* Workspace initialization *)
     (try
        if not (Workspace_utils.is_initialized ctx.config)
        then (
@@ -190,12 +124,7 @@ let supervise_keepalive
     in
     Keeper_registry.update_meta ~base_path meta.name live_meta;
     match launch_supervised_fiber ~proactive_warmup_sec ctx live_meta reg with
-    | Error _ ->
-      (* The launch gate aborted fail-closed (no fiber forked; [done_p]
-         resolved through the crash path and Crashed published by the gate).
-         Announcing [Started]/[Running] here would report a keeper that is
-         not running. *)
-      ()
+    | Error _ -> ()
     | Ok () ->
       publish_lifecycle
         ~event:
@@ -206,4 +135,89 @@ let supervise_keepalive
         meta.name
         "supervised"
         ()
+  in
+  let register_and_launch () =
+    match
+      Keeper_registry.register_offline_if_admitted
+        ~base_path
+        meta.name
+        meta
+    with
+    | Error (Keeper_registry.Registration_shutdown_reserved operation_id) ->
+      Log.Keeper.warn
+        "supervisor launch skipped %s because shutdown operation %s owns admission"
+        meta.name
+        (Keeper_shutdown_types.Operation_id.to_string operation_id)
+    | Error (Keeper_registry.Registration_lifecycle_reserved owner) ->
+      Log.Keeper.warn
+        "supervisor launch skipped %s because lifecycle transaction owns admission: %s"
+        meta.name
+        (Keeper_lifecycle_reservation.snapshot_to_string owner)
+    | Error (Keeper_registry.Registration_invalid validation_error) ->
+      Log.Keeper.error
+        "supervisor registry validation rejected %s: %s"
+        meta.name
+        (Keeper_registry.registry_entry_validation_error_to_string validation_error)
+    | Error (Keeper_registry.Registration_event_queue_unavailable { keeper_name; detail }) ->
+      Log.Keeper.error
+        "supervisor registry event queue unavailable keeper=%s: %s"
+        keeper_name
+        detail
+    | Ok reg -> launch_registered reg
+  in
+  let reclaim_finished_entry (entry : Keeper_registry.registry_entry) =
+    if Option.is_some (Eio.Promise.peek entry.done_p)
+       && Keeper_registry.lane_has_exited entry
+    then
+      match Keeper_registry.unregister_exact entry with
+      | Keeper_registry.Exact_unregistered
+      | Keeper_registry.Exact_entry_missing -> ()
+      | Keeper_registry.Exact_entry_replaced ->
+        Log.Keeper.info
+          "supervisor recovery retained newer lane for %s"
+          meta.name
+      | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+        Log.Keeper.warn
+          "supervisor recovery could not reclaim %s because lifecycle transaction owns admission: %s"
+          meta.name
+          (Keeper_lifecycle_reservation.snapshot_to_string owner)
+  in
+  match execution_truth with
+  | Keeper_activation_readiness.Unknown detail ->
+    record_recovery_retained "unknown";
+    Log.Keeper.error
+      "%s: supervisor keepalive recovery retained because owner execution truth is unknown: %s"
+      meta.name
+      detail
+  | Keeper_activation_readiness.Shutdown_fenced operation_id ->
+    record_recovery_retained "shutdown_fenced";
+    Log.Keeper.warn
+      "%s: supervisor keepalive recovery retained by shutdown operation %s"
+      meta.name
+      (Keeper_shutdown_types.Operation_id.to_string operation_id)
+  | Keeper_activation_readiness.Retained_disabled reason ->
+    let reason =
+      Keeper_activation_readiness.retained_disabled_reason_to_wire reason
+    in
+    record_recovery_retained reason;
+    Log.Keeper.info
+      "%s: supervisor keepalive recovery retained by disabled policy: %s"
+      meta.name
+      reason
+  | Keeper_activation_readiness.Paused_dead reason ->
+    let reason =
+      Keeper_activation_readiness.paused_dead_reason_to_wire reason
+    in
+    record_recovery_retained reason;
+    Log.Keeper.info
+      "%s: supervisor keepalive recovery retained by paused/dead owner truth: %s"
+      meta.name
+      reason
+  | Keeper_activation_readiness.Executable -> ()
+  | Keeper_activation_readiness.Recoverable ->
+    Option.iter reclaim_finished_entry
+      (Keeper_registry.get ~base_path meta.name);
+    (match Keeper_registry.get ~base_path meta.name with
+     | Some reg -> launch_registered reg
+     | None -> register_and_launch ())
 ;;

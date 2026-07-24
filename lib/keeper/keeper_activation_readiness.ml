@@ -3,14 +3,29 @@ type autonomous_blocker =
   | Autoboot_disabled
   | Proactive_disabled
 
-type owner_activation_blocker =
-  | Autonomous_blocked of autonomous_blocker
-  | Shutdown_fenced of Keeper_shutdown_types.Operation_id.t
+type owner_runtime =
+  | Owner_unregistered
+  | Owner_registered of
+      { phase : Keeper_state_machine.phase
+      ; live_fiber : bool
+      ; lane_exited : bool
+      }
 
-type owner_activation =
-  | Activation_allowed
-  | Activation_blocked of owner_activation_blocker
-  | Activation_unknown of string
+type retained_disabled_reason =
+  | Retained_autoboot_disabled
+  | Retained_proactive_disabled
+
+type paused_dead_reason =
+  | Persisted_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
+  | Runtime_terminal of Keeper_state_machine.phase
+
+type owner_execution_truth =
+  | Executable
+  | Recoverable
+  | Retained_disabled of retained_disabled_reason
+  | Paused_dead of paused_dead_reason
+  | Shutdown_fenced of Keeper_shutdown_types.Operation_id.t
+  | Unknown of string
 
 type pause_kind =
   | Active
@@ -88,11 +103,6 @@ let autonomous_blocker_to_wire = function
   | Proactive_disabled -> "proactive_disabled"
 ;;
 
-let owner_activation_blocker_to_wire = function
-  | Autonomous_blocked blocker -> autonomous_blocker_to_wire blocker
-  | Shutdown_fenced _ -> "shutdown_fenced"
-;;
-
 (* The typed blocker is shared with the lifecycle and feature-gate verdicts.
    The hint checks the meta flag directly to distinguish a global kill-switch
    from a per-keeper flag without parsing the boundary string projection. *)
@@ -149,17 +159,68 @@ let autonomous_activation (meta : Keeper_meta_contract.keeper_meta) =
   }
 ;;
 
-let classify_owner_activation ~shutdown_operation_id meta_result =
+let owner_runtime_of_registry_entry = function
+  | None -> Owner_unregistered
+  | Some (entry : Keeper_registry.registry_entry) ->
+    let lane_exited = Keeper_registry.lane_has_exited entry in
+    let live_fiber =
+      entry.conditions.fiber_alive
+      && not lane_exited
+      && Option.is_none (Eio.Promise.peek entry.done_p)
+    in
+    Owner_registered { phase = entry.phase; live_fiber; lane_exited }
+;;
+
+let retained_disabled_reason_to_wire = function
+  | Retained_autoboot_disabled -> "autoboot_disabled"
+  | Retained_proactive_disabled -> "proactive_disabled"
+;;
+
+let paused_dead_reason_to_wire = function
+  | Persisted_lifecycle_denied denial ->
+    Keeper_lifecycle_admission.autonomous_denial_to_wire denial
+  | Runtime_terminal phase ->
+    "runtime_" ^ Keeper_state_machine.phase_to_string phase
+;;
+
+let owner_execution_truth_to_wire = function
+  | Executable -> "executable"
+  | Recoverable -> "recoverable"
+  | Retained_disabled reason -> retained_disabled_reason_to_wire reason
+  | Paused_dead reason -> paused_dead_reason_to_wire reason
+  | Shutdown_fenced _ -> "shutdown_fenced"
+  | Unknown _ -> "unknown"
+;;
+
+let classify_owner_execution ~shutdown_operation_id ~runtime meta_result =
   match meta_result with
-  | Error detail -> Activation_unknown detail
+  | Error detail -> Unknown detail
   | Ok meta ->
     (match shutdown_operation_id with
-     | Some operation_id -> Activation_blocked (Shutdown_fenced operation_id)
+     | Some operation_id -> Shutdown_fenced operation_id
      | None ->
        let activation = autonomous_activation meta in
        (match activation.blocker with
-        | None -> Activation_allowed
-        | Some blocker -> Activation_blocked (Autonomous_blocked blocker)))
+        | Some (Lifecycle_denied denial) ->
+          Paused_dead (Persisted_lifecycle_denied denial)
+        | Some Autoboot_disabled ->
+          Retained_disabled Retained_autoboot_disabled
+        | Some Proactive_disabled ->
+          Retained_disabled Retained_proactive_disabled
+        | None ->
+          (match runtime with
+           | Owner_unregistered -> Recoverable
+           | Owner_registered
+               { phase = (Keeper_state_machine.Paused | Keeper_state_machine.Dead)
+               ; _
+               } ->
+             Paused_dead
+               (Runtime_terminal
+                  (match runtime with
+                   | Owner_registered { phase; _ } -> phase
+                   | Owner_unregistered -> assert false))
+           | Owner_registered { live_fiber = true; _ } -> Executable
+           | Owner_registered { live_fiber = false; _ } -> Recoverable)))
 ;;
 
 let of_meta meta =

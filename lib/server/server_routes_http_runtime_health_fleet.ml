@@ -138,6 +138,12 @@ let keeper_event_queue_health_json () =
       ; "runnable_oldest_arrived_at_unix", `Null
       ; "runnable_oldest_age_seconds", `Null
       ; "runnable_by_keeper", `List []
+      ; "recoverable_pending_count", `Int 0
+      ; "recoverable_inflight_count", `Int 0
+      ; "recoverable_backlog_count", `Int 0
+      ; "recoverable_oldest_arrived_at_unix", `Null
+      ; "recoverable_oldest_age_seconds", `Null
+      ; "recoverable_by_keeper", `List []
       ; "paused_retained_pending_count", `Int 0
       ; "paused_retained_inflight_count", `Int 0
       ; "paused_retained_count", `Int 0
@@ -174,16 +180,25 @@ let keeper_event_queue_health_json () =
       let admission =
         Keeper_turn_admission.snapshot_for ~base_path ~keeper_name
       in
+      let runtime =
+        Keeper_activation_readiness.owner_runtime_of_registry_entry
+          (Keeper_registry.get ~base_path keeper_name)
+      in
       match
-        Keeper_activation_readiness.classify_owner_activation
+        Keeper_activation_readiness.classify_owner_execution
           ~shutdown_operation_id:admission.snapshot_shutdown_operation_id
+          ~runtime
           meta_result
       with
-      | Keeper_activation_readiness.Activation_allowed ->
+      | Keeper_activation_readiness.Executable ->
         Keeper_event_queue_persistence.Runnable
-      | Keeper_activation_readiness.Activation_blocked _ ->
+      | Keeper_activation_readiness.Recoverable ->
+        Keeper_event_queue_persistence.Recoverable
+      | Keeper_activation_readiness.Retained_disabled _
+      | Keeper_activation_readiness.Paused_dead _
+      | Keeper_activation_readiness.Shutdown_fenced _ ->
         Keeper_event_queue_persistence.Paused_retained
-      | Keeper_activation_readiness.Activation_unknown detail ->
+      | Keeper_activation_readiness.Unknown detail ->
         Keeper_event_queue_persistence.Lifecycle_unknown detail
     in
     Keeper_event_queue_persistence.fleet_summary_json

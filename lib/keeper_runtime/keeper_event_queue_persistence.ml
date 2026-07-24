@@ -1719,6 +1719,7 @@ let age_seconds_json ~now = function
 
 type owner_lifecycle =
   | Runnable
+  | Recoverable
   | Paused_retained
   | Lifecycle_unknown of string
 
@@ -1739,7 +1740,7 @@ let keeper_summary ~base_path ~owner_lifecycle keeper_name =
   let owner_lifecycle = owner_lifecycle ~keeper_name in
   let lifecycle_read_errors =
     match owner_lifecycle with
-    | Runnable | Paused_retained -> []
+    | Runnable | Recoverable | Paused_retained -> []
     | Lifecycle_unknown detail ->
       [ Printf.sprintf "keeper lifecycle unavailable keeper=%s: %s" keeper_name detail ]
   in
@@ -1781,6 +1782,7 @@ let keeper_summary ~base_path ~owner_lifecycle keeper_name =
 
 let owner_lifecycle_wire = function
   | Runnable -> "runnable"
+  | Recoverable -> "recoverable"
   | Paused_retained -> "paused_retained"
   | Lifecycle_unknown _ -> "unclassified"
 ;;
@@ -1891,17 +1893,30 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
   in
   let runnable =
     backlog_summary
-      ~matches:(function Runnable -> true | Paused_retained | Lifecycle_unknown _ -> false)
+      ~matches:(function
+        | Runnable -> true
+        | Recoverable | Paused_retained | Lifecycle_unknown _ -> false)
+      summaries
+  in
+  let recoverable =
+    backlog_summary
+      ~matches:(function
+        | Recoverable -> true
+        | Runnable | Paused_retained | Lifecycle_unknown _ -> false)
       summaries
   in
   let paused_retained =
     backlog_summary
-      ~matches:(function Paused_retained -> true | Runnable | Lifecycle_unknown _ -> false)
+      ~matches:(function
+        | Paused_retained -> true
+        | Runnable | Recoverable | Lifecycle_unknown _ -> false)
       summaries
   in
   let unclassified =
     backlog_summary
-      ~matches:(function Lifecycle_unknown _ -> true | Runnable | Paused_retained -> false)
+      ~matches:(function
+        | Lifecycle_unknown _ -> true
+        | Runnable | Recoverable | Paused_retained -> false)
       summaries
   in
   let read_errors =
@@ -1923,6 +1938,7 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
   let operator_action_required =
     read_errors <> []
     || outbox_count > 0
+    || recoverable.pending_count + recoverable.inflight_count > 0
     || paused_retained.pending_count + paused_retained.inflight_count > 0
   in
   `Assoc
@@ -1949,6 +1965,18 @@ let fleet_summary_json ~now ~base_path ~owner_lifecycle =
     ; ( "runnable_by_keeper"
       , `List
           (runnable.keepers
+           |> List.filter (fun (summary : keeper_summary) ->
+             summary.pending_count + summary.inflight_count > 0)
+           |> List.map (compact_backlog_count_json ~now)) )
+    ; "recoverable_pending_count", `Int recoverable.pending_count
+    ; "recoverable_inflight_count", `Int recoverable.inflight_count
+    ; ( "recoverable_backlog_count"
+      , `Int (recoverable.pending_count + recoverable.inflight_count) )
+    ; "recoverable_oldest_arrived_at_unix", json_of_float_opt recoverable.oldest
+    ; "recoverable_oldest_age_seconds", age_seconds_json ~now recoverable.oldest
+    ; ( "recoverable_by_keeper"
+      , `List
+          (recoverable.keepers
            |> List.filter (fun (summary : keeper_summary) ->
              summary.pending_count + summary.inflight_count > 0)
            |> List.map (compact_backlog_count_json ~now)) )

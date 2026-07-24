@@ -8,14 +8,29 @@ type autonomous_blocker =
   | Autoboot_disabled
   | Proactive_disabled
 
-type owner_activation_blocker =
-  | Autonomous_blocked of autonomous_blocker
-  | Shutdown_fenced of Keeper_shutdown_types.Operation_id.t
+type owner_runtime =
+  | Owner_unregistered
+  | Owner_registered of
+      { phase : Keeper_state_machine.phase
+      ; live_fiber : bool
+      ; lane_exited : bool
+      }
 
-type owner_activation =
-  | Activation_allowed
-  | Activation_blocked of owner_activation_blocker
-  | Activation_unknown of string
+type retained_disabled_reason =
+  | Retained_autoboot_disabled
+  | Retained_proactive_disabled
+
+type paused_dead_reason =
+  | Persisted_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
+  | Runtime_terminal of Keeper_state_machine.phase
+
+type owner_execution_truth =
+  | Executable
+  | Recoverable
+  | Retained_disabled of retained_disabled_reason
+  | Paused_dead of paused_dead_reason
+  | Shutdown_fenced of Keeper_shutdown_types.Operation_id.t
+  | Unknown of string
 
 (** Typed operator-facing projection of the persisted Keeper lifecycle and
     supervisor recovery policy. Server/dashboard code consumes this value; it
@@ -54,15 +69,24 @@ val autonomous_check_value : autonomous_activation -> string
 
 val autonomous_blocker_to_wire : autonomous_blocker -> string
 
-val owner_activation_blocker_to_wire : owner_activation_blocker -> string
+val owner_runtime_of_registry_entry :
+  Keeper_registry.registry_entry option -> owner_runtime
+(** Observe the live registry without deriving executability from phase or
+    permission alone. A live fiber requires the registry condition, an open
+    lane, and an unresolved lane completion promise. *)
 
-val classify_owner_activation :
+val retained_disabled_reason_to_wire : retained_disabled_reason -> string
+val paused_dead_reason_to_wire : paused_dead_reason -> string
+val owner_execution_truth_to_wire : owner_execution_truth -> string
+
+val classify_owner_execution :
   shutdown_operation_id:Keeper_shutdown_types.Operation_id.t option ->
+  runtime:owner_runtime ->
   (Keeper_meta_contract.keeper_meta, string) result ->
-  owner_activation
-(** Pure, closed owner activation verdict shared by supervisor and health.
-    [Activation_allowed] means policy permits either signaling an existing
-    lane or supervisor boot; it does not assert that a live lane exists.
-    Missing/unreadable metadata fails closed as [Activation_unknown]. *)
+  owner_execution_truth
+(** Pure, closed execution verdict shared by supervisor, maintenance, schedule
+    activation, and health. [Executable] requires a live registry fiber.
+    Policy permission without one is [Recoverable], never runnable.
+    Missing/unreadable metadata fails closed as [Unknown]. *)
 
 val to_yojson : t -> Yojson.Safe.t

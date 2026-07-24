@@ -2970,6 +2970,17 @@ let test_transition_outbox_claim_contention_and_release () =
       "contention sweep performs no projection"
       0
       maintenance_report.converged;
+    (match maintenance_report.projections with
+     | [ ({ keeper_name = actual
+          ; outcome = Ok Masc.Keeper_event_queue_recovery.Claim_busy
+          } : Masc.Keeper_event_queue_recovery.owner_projection) ] ->
+       Alcotest.(check string)
+         "maintenance sweep preserves the discovered owner identity"
+         keeper_name
+         actual
+     | _ ->
+       Alcotest.fail
+         "maintenance sweep did not retain the typed per-owner projection outcome");
     let retained_count =
       Masc.Keeper_event_queue_recovery.For_testing
       .pending_transition_count_result

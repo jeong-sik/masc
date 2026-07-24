@@ -31,6 +31,11 @@ type owner_budget_error = Invalid_owner_budget of int
 type owner_budget = Owner_budget of int
 type sweep_cursor = Sweep_cursor of string option
 
+type owner_projection =
+  { keeper_name : string
+  ; outcome : (projection_outcome, projection_error) result
+  }
+
 type sweep_report =
   { discovered : int
   ; processed : int
@@ -38,6 +43,7 @@ type sweep_report =
   ; no_pending : int
   ; converged : int
   ; claim_busy : int
+  ; projections : owner_projection list
   ; failures : owner_failure list
   ; discovery_error : discovery_error option
   }
@@ -205,6 +211,7 @@ let project_discovery_inline
     ; no_pending = 0
     ; converged = 0
     ; claim_busy = 0
+    ; projections = []
     ; failures = []
     ; discovery_error =
         Option.map
@@ -215,7 +222,13 @@ let project_discovery_inline
   let report =
     List.fold_left
       (fun report keeper_name ->
-         match project_owner_result_inline ~base_path ~keeper_name with
+         let outcome = project_owner_result_inline ~base_path ~keeper_name in
+         let report =
+           { report with
+             projections = { keeper_name; outcome } :: report.projections
+           }
+         in
+         match outcome with
          | Ok No_pending_transition ->
            { report with no_pending = report.no_pending + 1 }
          | Ok Transition_converged ->
@@ -229,7 +242,13 @@ let project_discovery_inline
       initial
       selected
   in
-  { report = { report with failures = List.rev report.failures }; next_cursor }
+  { report =
+      { report with
+        projections = List.rev report.projections
+      ; failures = List.rev report.failures
+      }
+  ; next_cursor
+  }
 ;;
 
 let project_discovered_bounded ~base_path ~budget ~cursor =

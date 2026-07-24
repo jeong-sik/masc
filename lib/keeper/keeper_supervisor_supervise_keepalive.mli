@@ -17,9 +17,11 @@ val supervise_keepalive :
   'a Keeper_types_profile.context ->
   Keeper_meta_contract.keeper_meta ->
   unit
-(** Register and launch a supervised keepalive fiber only when the shared
-    owner-activation verdict permits it. Lifecycle/policy blocks, unreadable
-    owner truth, and a shutdown fence retain durable work without booting.
+(** Register or relaunch a supervised keepalive fiber only when the shared
+    closed owner-execution verdict is [Recoverable]. [Executable] is a no-op;
+    lifecycle/policy blocks, unreadable owner truth, and a shutdown fence retain
+    durable work without booting. Registered but non-running owners enter the
+    same recovery path instead of being mistaken for executable owners.
     When the injected launch gate returns [Error _] (registry FSM rejected
     [Fiber_started]), no [Started]/[Running] event is published — the gate
     already resolved the entry through the crash path. *)

@@ -162,36 +162,73 @@ while index < len(source):
                 break
         else:
             raise SystemExit(f"{target}: unterminated OCaml string")
-        tokens.append(("string", source[start:index]))
+        tokens.append(("string", source[start:index], start, index))
         continue
 
     identifier = re.match(r"[A-Za-z_][A-Za-z0-9_']*", source[index:])
     if identifier is not None:
+        start = index
         value = identifier.group(0)
-        tokens.append(("identifier", value))
         index += len(value)
+        tokens.append(("identifier", value, start, index))
         continue
 
-    tokens.append(("symbol", source[index]))
+    tokens.append(("symbol", source[index], index, index + 1))
     index += 1
 
 bindings = []
 for offset in range(len(tokens) - 3):
     if (
-        tokens[offset] == ("identifier", "let")
-        and tokens[offset + 1] == ("identifier", "lane_id")
-        and tokens[offset + 2] == ("symbol", "=")
+        tokens[offset][:2] == ("identifier", "let")
+        and tokens[offset + 1][:2] == ("identifier", "lane_id")
+        and tokens[offset + 2][:2] == ("symbol", "=")
     ):
-        bindings.append(tokens[offset + 3])
+        bindings.append((tokens[offset + 3], offset + 4))
 
 expected = ("string", '"board_attention_exact"')
-if bindings != [expected]:
-    rendered = ", ".join(f"{kind}:{value}" for kind, value in bindings) or "none"
+if len(bindings) != 1 or bindings[0][0][:2] != expected:
+    rendered = (
+        ", ".join(f"{token[0]}:{token[1]}" for token, _ in bindings)
+        or "none"
+    )
     raise SystemExit(
         f"{target}: expected exactly one "
         'let lane_id = "board_attention_exact" binding; '
         f"found {len(bindings)} ({rendered})"
     )
+
+rhs, tail_offset = bindings[0]
+has_double_semicolon = (
+    tail_offset + 1 < len(tokens)
+    and tokens[tail_offset][:2] == ("symbol", ";")
+    and tokens[tail_offset + 1][:2] == ("symbol", ";")
+)
+if has_double_semicolon:
+    tail_offset += 2
+
+if tail_offset < len(tokens):
+    next_token = tokens[tail_offset]
+    declaration_keywords = {
+        "class",
+        "exception",
+        "external",
+        "include",
+        "let",
+        "module",
+        "open",
+        "type",
+    }
+    separated_by_newline = "\n" in source[rhs[3]:next_token[2]]
+    at_declaration_boundary = (
+        next_token[0] == "identifier"
+        and next_token[1] in declaration_keywords
+        and (has_double_semicolon or separated_by_newline)
+    )
+    if not at_declaration_boundary:
+        raise SystemExit(
+            f"{target}: lane_id RHS must end after the exact string literal; "
+            f"found trailing token {next_token[1]!r}"
+        )
 PY
 }
 
@@ -249,22 +286,25 @@ forbid_pattern() {
 }
 
 check_repo_retired_symbols() {
-  local matches status
-  if matches="$(
-    rg -n --hidden \
-      -g '!.git/**' \
-      -g '!_build/**' \
-      -g '!.worktrees/**' \
-      -g '!scripts/check-board-attention-exact-flow-boundary.sh' \
-      '(Keeper_board_attention_failure|keeper_board_attention_failure|drain_pending_on_owner_lane|drain_board_attention_candidates_on_owner_lane|keeper\.board_attention_judgment([^_[:alnum:]-]|$))' \
-      "${REPO_ROOT}" 2>/dev/null
-  )"; then
-    printf '%s\n' "${matches}" >&2
-    fail "retired Board attention symbol remains in the repository"
-  else
-    status=$?
-  fi
-  [[ ${status} -eq 1 ]] || fail "rg failed while checking repository retired symbols"
+  local target matches status found
+  local pattern='(Keeper_board_attention_failure|keeper_board_attention_failure|drain_pending_on_owner_lane|drain_board_attention_candidates_on_owner_lane|keeper\.board_attention_judgment([^_[:alnum:]-]|$))'
+  found=0
+  while IFS= read -r -d '' target; do
+    if matches="$(ocaml_code "${target}" | rg -n -- "${pattern}")"; then
+      printf '%s\n%s\n' "${target}" "${matches}" >&2
+      found=1
+    else
+      status=$?
+      [[ ${status} -eq 1 ]] \
+        || fail "masked OCaml retired-symbol scan failed: ${target}"
+    fi
+  done < <(
+    find "${REPO_ROOT}" \
+      -type d \( -name .git -o -name _build -o -name .worktrees \) -prune -o \
+      -type f \( -name '*.ml' -o -name '*.mli' \) -print0
+  )
+  (( found == 0 )) \
+    || fail "retired Board attention symbol remains in OCaml source"
   [[ ! -e "${REPO_ROOT}/config/prompts/keeper.board_attention_judgment.md" ]] \
     || fail "retired singular Board attention prompt remains"
 }
@@ -409,6 +449,19 @@ EOF
     bash "${BASH_SOURCE[0]}" --check >/dev/null
   cp "${flow_backup}" "${fixture}/lib/keeper/keeper_board_attention_exact_flow.ml"
 
+  cat >"${fixture}/lib/keeper/keeper_retired_symbol_decoy.ml" <<'EOF'
+(*
+let _ = Keeper_board_attention_failure.Provider_retry
+*)
+let _retired_symbol_string_decoy = "drain_pending_on_owner_lane"
+let _retired_symbol_quoted_string_decoy = {|
+keeper.board_attention_judgment
+|}
+EOF
+  MASC_BOARD_ATTENTION_BOUNDARY_ROOT="${fixture}" \
+    bash "${BASH_SOURCE[0]}" --check >/dev/null
+  rm "${fixture}/lib/keeper/keeper_retired_symbol_decoy.ml"
+
   printf '%s\n' 'let _ = Exact_output.receipt_phase' \
     >"${fixture}/lib/keeper/keeper_librarian_runtime.ml"
   MASC_BOARD_ATTENTION_BOUNDARY_ROOT="${fixture}" \
@@ -484,6 +537,26 @@ PY
   fi
   cp "${flow_backup}" "${fixture}/lib/keeper/keeper_board_attention_exact_flow.ml"
 
+  python3 - "${fixture}/lib/keeper/keeper_board_attention_exact_flow.ml" <<'PY'
+import pathlib
+import sys
+
+flow_path = pathlib.Path(sys.argv[1])
+source = flow_path.read_text()
+original = 'let lane_id = "board_attention_exact"'
+replacement = original + ' ^ "_wrong"'
+if source.count(original) != 1:
+    raise SystemExit("exact lane binding not found exactly once")
+flow_path.write_text(source.replace(original, replacement))
+PY
+  if
+    MASC_BOARD_ATTENTION_BOUNDARY_ROOT="${fixture}" \
+      bash "${BASH_SOURCE[0]}" --check >/dev/null 2>&1
+  then
+    fail "self-test accepted a composed Board attention lane value"
+  fi
+  cp "${flow_backup}" "${fixture}/lib/keeper/keeper_board_attention_exact_flow.ml"
+
   printf '\n%s\n' 'let lane_id = "board_attention_exact"' \
     >>"${fixture}/lib/keeper/keeper_board_attention_exact_flow.ml"
   if
@@ -549,7 +622,7 @@ PY
   fi
 
   printf '%s\n' \
-    '[board-attention-exact-flow-boundary:self-test] clean=pass quoted=pass lane-decoys=pass unrelated=pass lane=fail duplicate-lane=fail candidate=fail config=fail forbidden=fail pricing=fail legacy=fail missing=fail'
+    '[board-attention-exact-flow-boundary:self-test] clean=pass quoted=pass lane-decoys=pass retired-decoys=pass unrelated=pass lane=fail composed-lane=fail duplicate-lane=fail candidate=fail config=fail forbidden=fail pricing=fail legacy=fail missing=fail'
 )
 
 case "${1:-}" in

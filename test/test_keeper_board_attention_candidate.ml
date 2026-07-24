@@ -1,6 +1,6 @@
 module A = Masc.Keeper_board_attention_candidate
-module Event_queue = Masc.Keeper_event_queue
-module Event_queue_persistence = Masc.Keeper_event_queue_persistence
+module Event_queue = Keeper_event_queue
+module Event_queue_persistence = Keeper_event_queue_persistence
 module J = Masc.Keeper_board_attention_judgment
 module Wake = Masc.Keeper_board_attention_worker_wake
 

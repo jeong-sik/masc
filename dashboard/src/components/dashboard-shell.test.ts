@@ -786,7 +786,11 @@ describe('dashboardHealthChips', () => {
         fleet_safety: {
           keeper_fibers: 0,
           paused_keepers: 1,
-          keeper_fleet_safety: null,
+          keeper_fleet_safety: {
+            status: 'blocked',
+            executable_keeper_fiber_count: 0,
+            paused_keeper_count: 1,
+          },
         },
       } as any,
       executionError: null,

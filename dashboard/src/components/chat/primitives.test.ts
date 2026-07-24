@@ -394,6 +394,8 @@ describe('ChatTranscript', () => {
         content: 'assistant row without turn ref',
         ts: 1_780_000_002,
         source: 'direct_assistant',
+        conversation_id: 'discord:guild-1:channel:chan-1',
+        speaker_name: 'sangsu',
         stream_contract: {
           source: 'keeper_chat_store',
           status: 'history_without_turn_ref',
@@ -450,6 +452,8 @@ describe('ChatTranscript', () => {
     expect(legacyAssistant.getAttribute('data-chat-stream-contract-badge-state')).toBe('no-turn-ref')
     const noTurnBadge = legacyAssistant.querySelector('[data-chat-stream-contract-badge]')
     expect(noTurnBadge?.textContent).toContain('턴 연결 없음')
+    expect(noTurnBadge?.getAttribute('title')).toContain('conversation_id=discord:guild-1:channel:chan-1')
+    expect(noTurnBadge?.getAttribute('title')).toContain('speaker_name=sangsu')
 
     const failure = container.querySelector('[data-chat-entry-id="smoke-error-assistant"]') as HTMLElement
     expect(failure).not.toBeNull()

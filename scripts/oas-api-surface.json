@@ -1,6 +1,6 @@
 {
-  "pinned_sha": "f448e5185ebd07ef7e0b3d8fb4a30b134b681c28",
-  "pinned_version": "v0.222.1",
+  "pinned_sha": "45473aae840b8c917641811e9fa4006ebc09528f",
+  "pinned_version": "v0.222.2",
   "surfaces": {
     "event_bus_payload_variants": [
       "AgentCompleted",
@@ -70,7 +70,7 @@
       "type:actual_assurance:type actual_assurance = | Json_syntax_only | Provider_schema_requested",
       "type:target_selection_error:type target_selection_error = | Missing_target_credential of { target_ref : string ; environment_variable : string } | Target_credential_invalid of { target_ref : string ; environment_variable : string } | Target_credential_read_failed of { target_ref : string ; environment_variable : string }",
       "type:target_catalog_admission_error:type target_catalog_admission_error = | Target_ref_rejected of target_ref_error | Target_not_in_catalog of string",
-      "type:wire_admission_error:type wire_admission_error = | Capability_snapshot_missing | Inconsistent_output_contract | Output_contract_unavailable | Cross_feature_not_allowed | Global_admission_not_allowed | Invalid_connect_timeout | Invalid_body_timeout | Caller_supplied_header_not_allowed | Unsupported_image_input | Unsupported_document_input | Unsupported_audio_input | Unsupported_system_prompt | Unsupported_target_model of { model_id : string } | Target_request_rejected | Request_serialization_rejected",
+      "type:wire_admission_error:type wire_admission_error = | Capability_snapshot_missing | Inconsistent_output_contract | Output_contract_unavailable | Cross_feature_not_allowed | Global_admission_not_allowed | Invalid_connect_timeout | Invalid_body_timeout | Caller_supplied_header_not_allowed | Unsupported_image_input | Unsupported_document_input | Unsupported_audio_input | Unsupported_system_prompt | Token_measurement_required of Serving_constraint.t | Unsupported_target_model of { model_id : string } | Target_request_rejected | Request_body_too_large of { actual_bytes : int ; limit_bytes : int } | Request_serialization_rejected",
       "type:admission_error:type admission_error = | Provider_schema_unavailable | Json_syntax_unavailable | Unsupported_schema_keyword of string | Unsupported_schema_type of string | Invalid_schema | Wire_admission_rejected of wire_admission_error",
       "type:plan_provenance:type plan_provenance = { source_schema_fingerprint : schema_fingerprint ; effective_schema_fingerprint : schema_fingerprint option ; actual_assurance : actual_assurance ; catalog_generation : catalog_generation ; catalog_evidence : catalog_evidence ; target_identity : target_identity }",
       "type:effect_phase:type effect_phase = | Not_started | Before_dispatch | Dispatch_started | Response_received | Terminal",

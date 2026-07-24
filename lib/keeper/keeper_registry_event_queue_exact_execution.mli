@@ -105,11 +105,6 @@ module Make (Publish : sig
     string ->
     (Keeper_event_queue_persistence.lease option, string) result
 
-  val transition_outbox_result :
-    base_path:string ->
-    string ->
-    (Keeper_event_queue_persistence.outbox_entry list, string) result
-
   val exact_execution_binding_result :
     base_path:string -> string -> (exact_execution_binding option, string) result
 

@@ -156,12 +156,6 @@ struct
         ~keeper_name:name
   ;;
   
-  let transition_outbox_result ~base_path name =
-    Keeper_event_queue_persistence.transition_outbox_result
-      ~base_path
-      ~keeper_name:name
-  ;;
-  
   let exact_execution_binding_result ~base_path name =
     Keeper_event_queue_persistence.exact_execution_binding_result
       ~base_path

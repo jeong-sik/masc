@@ -114,9 +114,14 @@ let run_keeper_cycle = Cycle.run_keeper_cycle
    [Turn_failed] instead of [Turn_succeeded]. Such a cycle must also
    NOT refresh the work-as-heartbeat lease; the count is observation and never
    terminates the Keeper lane. *)
+type keepalive_cycle_status =
+  | Turn_cycle_completed
+  | Turn_cycle_crashed
+  | Deferred_projection_busy
+
 type keepalive_turn_outcome = {
   meta : keeper_meta;
-  cycle_crashed : bool;
+  cycle_status : keepalive_cycle_status;
 }
 
 exception Event_queue_settlement_failed of string
@@ -971,7 +976,7 @@ let run_keepalive_unified_turn
   : keepalive_turn_outcome
   =
   if not proactive_warmup_elapsed
-  then { meta = meta_after_triage; cycle_crashed = false }
+  then { meta = meta_after_triage; cycle_status = Turn_cycle_completed }
   else (
     let consumed_stimuli = ref [] in
     let claimed_lease = ref None in
@@ -1079,11 +1084,6 @@ let run_keepalive_unified_turn
        with
        | Projection_ready_for_cycle -> ()
        | Projection_deferred_nonfailure ->
-         Log.Keeper.info
-           ~keeper_name:meta_after_triage.name
-           "event queue transition projection deferred because the canonical owner \
-            claim is busy; this keepalive cycle performs no dispatch and records no \
-            failure";
          raise Event_queue_projection_deferred
        | Projection_failed_for_cycle error ->
          raise (Event_queue_projection_failed error));
@@ -1654,10 +1654,13 @@ let run_keepalive_unified_turn
               detail;
             record_settlement_failure detail;
             check_cancellation_after_exact_terminal_settlement settlement));
-      { meta = meta_after_cycle; cycle_crashed = !settlement_failed }
+      { meta = meta_after_cycle
+      ; cycle_status =
+          if !settlement_failed then Turn_cycle_crashed else Turn_cycle_completed
+      }
     with
     | Event_queue_projection_deferred ->
-      { meta = meta_after_triage; cycle_crashed = false }
+      { meta = meta_after_triage; cycle_status = Deferred_projection_busy }
     | Event_queue_projection_failed error ->
       if not !transcript_corruption_detected
       then requeue_unsettled Keeper_registry_event_queue.Cycle_crashed;
@@ -1665,7 +1668,7 @@ let run_keepalive_unified_turn
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
         (Failure (Keeper_event_queue_recovery.projection_error_to_string error));
-      { meta = meta_after_triage; cycle_crashed = true }
+      { meta = meta_after_triage; cycle_status = Turn_cycle_crashed }
     | Eio.Cancel.Cancelled _ as e ->
       let backtrace = Printexc.get_raw_backtrace () in
       if
@@ -1688,7 +1691,7 @@ let run_keepalive_unified_turn
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
         exn;
-      { meta = meta_after_triage; cycle_crashed = true })
+      { meta = meta_after_triage; cycle_status = Turn_cycle_crashed })
 ;;
 
 let refresh_work_as_heartbeat = Keeper_heartbeat_loop_refresh_work.refresh_work_as_heartbeat
@@ -1944,7 +1947,7 @@ let run_heartbeat_loop
         let t_turn_start = t_board_end in
         let turn_outcome =
           if not admitted_turn
-          then { meta = meta_current; cycle_crashed = false }
+          then { meta = meta_current; cycle_status = Turn_cycle_completed }
           else (
             (* Cycle 43: KeeperHeartbeat.tla TurnComplete bracket — the
                [turn_running] flag toggles around the dispatch and the
@@ -1976,47 +1979,56 @@ let run_heartbeat_loop
             r)
         in
         let meta_after_proactive = turn_outcome.meta in
-        if not lifecycle_blocked
-        then (
-          (* The registry tracks failure count as observation. A
-             lifecycle-blocked cycle did not run a turn and must not emit a
-             false [Turn_succeeded]. *)
-          let turn_fail_count =
-            Keeper_registry.get_turn_failures
-              ~base_path:ctx.config.base_path
-              m.name
-          in
-          (* RFC-0002: dispatch turn status event *)
-          Keeper_keepalive_signal.dispatch_keepalive_event
-            ~ctx
-            ~keeper_name:m.name
-            (turn_status_event
-               ~turn_fail_count);
-          if turn_fail_count > 0
-          then
-            Keeper_registry.set_failure_reason
-              ~base_path:ctx.config.base_path
-              m.name
-              (Some (Keeper_registry.Turn_consecutive_failures turn_fail_count));
-          (* Phase 1: work-as-heartbeat — renew point (b).
-             After turn, call Workspace.heartbeat to prove workspace I/O health.
-             On success: refresh freshness lease + reset consecutive_failures.
-             On failure: leave timestamp unchanged → presence sync resumes next cycle.
-             T6 audit: a crashed cycle proves nothing about health — do not
-             refresh the lease or reset consecutive_failures for it. *)
-          if turn_outcome.cycle_crashed
-          then
-            Log.Keeper.info
-              "%s: skipping work-as-heartbeat refresh after crashed keepalive cycle"
-              m.name
-          else
-            refresh_work_as_heartbeat
-              ~ctx
-              ~meta_after_proactive
-              ~proactive_warmup_elapsed
-              ~work_as_hb
-              ~last_successful_heartbeat_ts
-              ~consecutive_failures);
+        (match turn_outcome.cycle_status with
+         | Deferred_projection_busy ->
+           Log.Keeper.info
+             ~keeper_name:m.name
+             "event queue transition projection deferred because the canonical owner \
+              claim is busy; this keepalive cycle records no turn status, crash, or \
+              work-health refresh"
+         | Turn_cycle_completed | Turn_cycle_crashed ->
+           if not lifecycle_blocked
+           then (
+             (* The registry tracks failure count as observation. A
+                lifecycle-blocked or projection-deferred cycle did not run a turn
+                and must not emit a false [Turn_succeeded]. *)
+             let turn_fail_count =
+               Keeper_registry.get_turn_failures
+                 ~base_path:ctx.config.base_path
+                 m.name
+             in
+             (* RFC-0002: dispatch turn status event *)
+             Keeper_keepalive_signal.dispatch_keepalive_event
+               ~ctx
+               ~keeper_name:m.name
+               (turn_status_event
+                  ~turn_fail_count);
+             if turn_fail_count > 0
+             then
+               Keeper_registry.set_failure_reason
+                 ~base_path:ctx.config.base_path
+                 m.name
+                 (Some (Keeper_registry.Turn_consecutive_failures turn_fail_count));
+             (* Phase 1: work-as-heartbeat — renew point (b).
+                After turn, call Workspace.heartbeat to prove workspace I/O health.
+                On success: refresh freshness lease + reset consecutive_failures.
+                On failure: leave timestamp unchanged → presence sync resumes next cycle.
+                T6 audit: a crashed cycle proves nothing about health — do not
+                refresh the lease or reset consecutive_failures for it. *)
+             match turn_outcome.cycle_status with
+             | Turn_cycle_crashed ->
+               Log.Keeper.info
+                 "%s: skipping work-as-heartbeat refresh after crashed keepalive cycle"
+                 m.name
+             | Turn_cycle_completed ->
+               refresh_work_as_heartbeat
+                 ~ctx
+                 ~meta_after_proactive
+                 ~proactive_warmup_elapsed
+                 ~work_as_hb
+                 ~last_successful_heartbeat_ts
+                 ~consecutive_failures
+             | Deferred_projection_busy -> assert false));
         let t_turn_end = Time_compat.now () in
         let interval =
           float_of_int (Keeper_heartbeat_snapshot.keepalive_interval_sec ())

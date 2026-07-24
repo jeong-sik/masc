@@ -417,51 +417,46 @@ let append_event_queue_transition_outbox_result
     append_sources 0 stimuli
 ;;
 
-let project_event_queue_transition_outbox_with_after_append_result ~after_ledger_append ~base_path ~keeper_name =
-  let ( let* ) = Result.bind in
-  let* outbox =
-    Keeper_event_queue_persistence.transition_outbox_result
-      ~base_path
-      ~keeper_name
-  in
-  match outbox with
-  | [] -> Ok ()
-  | [ entry ] ->
-    let* () =
-      append_event_queue_transition_outbox_result
-        ~base_path
-        ~keeper_name
-        entry
-    in
-    let* () = after_ledger_append () in
-    Keeper_event_queue_persistence.mark_transition_projected_result
-      ~base_path
-      ~keeper_name
-      ~transition_id:entry.receipt.transition_id
-  | entries ->
-    Error
-      (Printf.sprintf
-         "event queue transition outbox cardinality invalid keeper=%s count=%d"
-         keeper_name
-         (List.length entries))
+let after_ledger_append_hook :
+  (unit -> (unit, string) result) option Atomic.t
+  =
+  Atomic.make None
+;;
+
+let after_ledger_append_hook_mutex = Stdlib.Mutex.create ()
+
+let run_after_ledger_append_hook () =
+  match Atomic.get after_ledger_append_hook with
+  | None -> Ok ()
+  | Some hook -> hook ()
 ;;
 
 let project_event_queue_transition_outbox_result ~base_path ~keeper_name =
-  project_event_queue_transition_outbox_with_after_append_result
-    ~after_ledger_append:(fun () -> Ok ())
+  let ( let* ) = Result.bind in
+  Keeper_event_queue_persistence.project_transition_outbox_result
+    ~append_before_retire:(fun entry ->
+      let* () =
+        append_event_queue_transition_outbox_result
+          ~base_path
+          ~keeper_name
+          entry
+      in
+      run_after_ledger_append_hook ())
     ~base_path
     ~keeper_name
 
 module For_testing = struct
-  let project_transition_outbox_after_append_result
-      ~after_ledger_append
-      ~base_path
-      ~keeper_name
-    =
-    project_event_queue_transition_outbox_with_after_append_result
-      ~after_ledger_append
-      ~base_path
-      ~keeper_name
+  let with_after_ledger_append ~after_ledger_append f =
+    Stdlib.Mutex.lock after_ledger_append_hook_mutex;
+    let previous =
+      Atomic.exchange after_ledger_append_hook (Some after_ledger_append)
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.set after_ledger_append_hook previous;
+        Stdlib.Mutex.unlock after_ledger_append_hook_mutex)
+      f
+  ;;
 end
 
 let cursor_json { cursor_ts; post_id } =

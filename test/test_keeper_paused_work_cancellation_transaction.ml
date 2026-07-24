@@ -729,39 +729,53 @@ let test_transcript_corruption_projection_failure_recovers () =
        let base_path = config.Workspace.base_path in
        let stop = Atomic.make false in
        let committed, projection =
-         Heartbeat_testing.commit_transcript_corruption_and_project
-           ~stop
-           ~persist_pause:(fun () -> Ok `Persisted)
-           ~settle:(fun () ->
-             match
-               Registry_queue.settle_result
-                 ~base_path
-                 keeper_name
-                 ~settled_at:4.0
-                 ~lease:request.lease
-                 ~settlement:
-                   (Registry_queue.Escalate
-                      { reason =
-                          Registry_queue.Transcript_corruption_requires_reset
-                            { detail = "fixture transcript corruption" }
-                      ; successor = None
-                      })
-             with
-             | Error detail -> Error detail
-             | Ok
-                 ( Registry_queue.Settled _
-                 | Registry_queue.Already_settled _ ) ->
-               Ok ()
-             | Ok (Registry_queue.Committed_followup_failed { detail; _ }) ->
-               Error detail)
-           ~project_transition_outbox:(fun () ->
-             Keeper_reaction_ledger.For_testing
-             .project_transition_outbox_after_append_result
-               ~after_ledger_append:(fun () ->
-                 Error "injected failure after ledger append")
-               ~base_path
-               ~keeper_name)
-           ()
+         Keeper_reaction_ledger.For_testing.with_after_ledger_append
+           ~after_ledger_append:(fun () ->
+             Error "injected failure after ledger append")
+           (fun () ->
+              Heartbeat_testing.commit_transcript_corruption_and_project
+                ~stop
+                ~persist_pause:(fun () -> Ok `Persisted)
+                ~settle:(fun () ->
+                  match
+                    Registry_queue.settle_result
+                      ~base_path
+                      keeper_name
+                      ~settled_at:4.0
+                      ~lease:request.lease
+                      ~settlement:
+                        (Registry_queue.Escalate
+                           { reason =
+                               Registry_queue.Transcript_corruption_requires_reset
+                                 { detail = "fixture transcript corruption" }
+                           ; successor = None
+                           })
+                  with
+                  | Error detail -> Error detail
+                  | Ok
+                      ( Registry_queue.Settled _
+                      | Registry_queue.Already_settled _ ) ->
+                    Ok ()
+                  | Ok (Registry_queue.Committed_followup_failed { detail; _ }) ->
+                    Error detail)
+                ~project_transition_outbox:(fun () ->
+                  match
+                    Keeper_event_queue_recovery.project_owner_result
+                      ~base_path
+                      ~keeper_name
+                  with
+                  | Ok Keeper_event_queue_recovery.Transition_converged -> Ok ()
+                  | Ok Keeper_event_queue_recovery.No_pending_transition ->
+                    Error "transcript transition disappeared before projection"
+                  | Ok Keeper_event_queue_recovery.Claim_busy ->
+                    Error "transcript transition projection claim was busy"
+                  | Error
+                      (Keeper_event_queue_recovery.Ledger_projection_failed detail) ->
+                    Error detail
+                  | Error error ->
+                    Error
+                      (Keeper_event_queue_recovery.projection_error_to_string error))
+                ())
        in
        Alcotest.(check bool)
          "transcript settlement commits before projection"
@@ -776,14 +790,17 @@ let test_transcript_corruption_projection_failure_recovers () =
          "post-append projection failure is returned"
          (Error "injected failure after ledger append")
          projection;
-       let retained =
-         Persistence.transition_outbox_result ~base_path ~keeper_name
+       let retained_count =
+         Keeper_event_queue_recovery.For_testing.pending_transition_count_result
+           ~base_path
+           ~keeper_name
+         |> Result.map_error Keeper_event_queue_recovery.projection_error_to_string
          |> require_ok "read retained transcript transition"
        in
        Alcotest.(check int)
          "projection failure retains transcript transition"
          1
-         (List.length retained);
+         retained_count;
        let state =
          Persistence.load_state_result ~base_path ~keeper_name
          |> require_ok "load settled transcript transition"
@@ -805,14 +822,17 @@ let test_transcript_corruption_projection_failure_recovers () =
         | Error error ->
           Alcotest.fail
             (Keeper_event_queue_recovery.projection_error_to_string error));
-       let outbox =
-         Persistence.transition_outbox_result ~base_path ~keeper_name
+       let outbox_count =
+         Keeper_event_queue_recovery.For_testing.pending_transition_count_result
+           ~base_path
+           ~keeper_name
+         |> Result.map_error Keeper_event_queue_recovery.projection_error_to_string
          |> require_ok "read converged transcript transition"
        in
        Alcotest.(check int)
          "retry retires transcript transition"
          0
-         (List.length outbox);
+         outbox_count;
        let summary =
          Keeper_reaction_ledger.summary_for_keeper
            ~base_path

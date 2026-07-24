@@ -944,6 +944,7 @@ let initialize_owner_state_blocking
       domain_mgr
   in
   Domain_pool_ref.set domain_pool;
+  Executor_pool_ref.set (Domain_pool.executor_pool domain_pool);
   Log.Server.info
     "Domain_pool created (%d domains) for dashboard/keeper compute"
     (Domain_pool.domain_count domain_pool);
@@ -1360,11 +1361,6 @@ let run ~sw ~env ~host ~port ~base_path ?input_base_path ~make_routes ~make_requ
       Server_slack_in_process_gateway.start ~sw ~env ~state;
       Server_bootstrap_http.print_startup_banner ~config ~resolved_base ~base_path
         ~masc_dir ~path_diagnostics;
-      (* Dashboard owns only its executor projection; the shared pool itself
-         belongs to the transport-neutral owner bootstrap so stdio Keepers get
-         the same offload behavior. *)
-      Server_dashboard_http.set_executor_pool
-        (Domain_pool.executor_pool activated_owner.domain_pool);
       (* Auxiliary transports start after owner readiness and report their own
          availability. They must not gain lifecycle authority over HTTP or
          unrelated Keeper lanes. *)

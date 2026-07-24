@@ -117,20 +117,22 @@ let project_claimed_owner owner =
   let base_path = Persistence.owner_identity_base_path owner in
   let keeper_name = Persistence.owner_identity_keeper_name owner in
   match
-    Persistence.transition_outbox_result
+    Persistence.load_state_result
       ~base_path
       ~keeper_name
   with
   | Error detail -> Error (Outbox_unavailable detail)
-  | Ok [] -> Ok No_pending_transition
-  | Ok (_ :: _) ->
-    (match
-       Keeper_reaction_ledger.project_event_queue_transition_outbox_result
-         ~base_path
-         ~keeper_name
-     with
-     | Ok () -> Ok Transition_converged
-     | Error detail -> Error (Ledger_projection_failed detail))
+  | Ok state ->
+    (match Keeper_event_queue_state.transition_outbox state with
+     | [] -> Ok No_pending_transition
+     | _ :: _ ->
+       (match
+          Keeper_reaction_ledger.project_event_queue_transition_outbox_result
+            ~base_path
+            ~keeper_name
+        with
+        | Ok () -> Ok Transition_converged
+        | Error detail -> Error (Ledger_projection_failed detail)))
 ;;
 
 let project_resolved_owner owner =
@@ -274,8 +276,9 @@ module For_testing = struct
     | Ok owner ->
       let base_path = Persistence.owner_identity_base_path owner in
       let keeper_name = Persistence.owner_identity_keeper_name owner in
-      (match Persistence.transition_outbox_result ~base_path ~keeper_name with
-       | Ok entries -> Ok (List.length entries)
+      (match Persistence.load_state_result ~base_path ~keeper_name with
+       | Ok state ->
+         Ok (List.length (Keeper_event_queue_state.transition_outbox state))
        | Error detail -> Error (Outbox_unavailable detail))
   ;;
 end

@@ -539,7 +539,7 @@ let run_exact_wal_followup_replay_case ~label ~failure ~expected_stage =
   check_no_active_lease (label ^ " first restart") recovered;
   check_no_exact_binding (label ^ " first restart") recovered;
   check_no_pending (label ^ " first restart") recovered;
-  let receipt =
+  let _receipt =
     require_single_exact_outbox
       ~disposition_id:disposition.disposition_id
       (label ^ " first restart")
@@ -715,14 +715,16 @@ let test_stale_finalize_preserves_active_successor () =
       "stale-owner restart"
       recovered
   in
-  (match
-     P.mark_transition_projected_result
-       ~base_path
-       ~keeper_name
-       ~transition_id:receipt.transition_id
-   with
-   | Ok () -> ()
-  | Error detail -> Alcotest.failf "stale-owner outbox projection failed: %s" detail);
+  (match Keeper_event_queue_recovery.project_owner_result ~base_path ~keeper_name with
+   | Ok Keeper_event_queue_recovery.Transition_converged -> ()
+   | Ok Keeper_event_queue_recovery.No_pending_transition ->
+     Alcotest.fail "stale-owner outbox disappeared before projection"
+   | Ok Keeper_event_queue_recovery.Claim_busy ->
+     Alcotest.fail "stale-owner outbox projection claim was busy"
+   | Error error ->
+     Alcotest.failf
+       "stale-owner outbox projection failed: %s"
+       (Keeper_event_queue_recovery.projection_error_to_string error));
   let successor = claim_manual_lease ~base_path ~keeper_name in
   let before_retry =
     require_loaded_state "stale finalize before retry" ~base_path ~keeper_name

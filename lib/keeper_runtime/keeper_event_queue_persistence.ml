@@ -572,10 +572,6 @@ let active_lease_result ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map State.active_lease
 ;;
 
-let transition_outbox_result ~base_path ~keeper_name =
-  load_state_result ~base_path ~keeper_name |> Result.map State.transition_outbox
-;;
-
 let exact_execution_binding_result ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map State.exact_execution_binding
 ;;
@@ -1629,6 +1625,29 @@ let mark_transition_projected_result ~base_path ~keeper_name ~transition_id =
        match State.mark_transition_projected ~transition_id state with
        | Error _ as error -> error
        | Ok state -> Ok (state, ()))
+;;
+
+let project_transition_outbox_result
+      ~append_before_retire
+      ~base_path
+      ~keeper_name
+  =
+  let ( let* ) = Result.bind in
+  let* state = load_state_result ~base_path ~keeper_name in
+  match State.transition_outbox state with
+  | [] -> Ok ()
+  | [ entry ] ->
+    let* () = append_before_retire entry in
+    mark_transition_projected_result
+      ~base_path
+      ~keeper_name
+      ~transition_id:entry.receipt.transition_id
+  | entries ->
+    Error
+      (Printf.sprintf
+         "event queue transition outbox cardinality invalid keeper=%s count=%d"
+         keeper_name
+         (List.length entries))
 ;;
 
 let remove_post_ids stimuli state =

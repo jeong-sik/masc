@@ -98,19 +98,24 @@ val provider_timeout_observation_reasons : string list
 val record_provider_timeout_observation :
   base_path:string -> keeper_name:string -> unit
 
+(** Closed accounting status for one keepalive cycle. A deferred projection
+    performs no turn accounting, crash accounting, or work-health refresh. *)
+type keepalive_cycle_status =
+  | Turn_cycle_completed
+  | Turn_cycle_crashed
+  | Deferred_projection_busy
+
 (** Outcome of one keepalive cycle evaluation.
 
-    [cycle_crashed = true] means the cycle's catch-all swallowed an
-    exception to keep the keeper fiber alive (T6 audit), or a durable
-    event-queue claim/settlement did not commit. The failure has
-    already been recorded via
-    [Keeper_registry.increment_turn_failures] — the same counter the
-    unified-turn failure path uses — so the caller dispatches
-    [Turn_failed]. Such a cycle must not refresh the
-    work-as-heartbeat lease. *)
+    [Turn_cycle_crashed] means the cycle's catch-all swallowed an exception to
+    keep the keeper fiber alive (T6 audit), or a durable event-queue
+    claim/settlement did not commit. The failure has already been recorded via
+    [Keeper_registry.increment_turn_failures], so the caller dispatches
+    [Turn_failed]. [Deferred_projection_busy] is a typed nonfailure and must
+    not dispatch either turn status or refresh the work-as-heartbeat lease. *)
 type keepalive_turn_outcome = {
   meta : keeper_meta;
-  cycle_crashed : bool;
+  cycle_status : keepalive_cycle_status;
 }
 
 (** Record a swallowed keepalive-cycle exception as a turn failure:

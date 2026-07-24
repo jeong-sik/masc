@@ -2386,11 +2386,23 @@ let test_context_compaction_retry_is_durable_and_lane_local () =
             (Queue.stimulus_to_yojson source)
             (Queue.stimulus_to_yojson retained))
      | _ -> Alcotest.fail "retryable transition changed the leased stimulus set");
-    Persistence.mark_transition_projected_result
-      ~base_path
-      ~keeper_name
-      ~transition_id:receipt.transition_id
-    |> require_ok "project retryable transition";
+    Alcotest.(check string)
+      "retryable outbox retains the settled transition identity"
+      receipt.transition_id
+      outbox_entry.receipt.transition_id;
+    (match
+       Masc.Keeper_event_queue_recovery.project_owner_result
+         ~base_path
+         ~keeper_name
+     with
+     | Ok Masc.Keeper_event_queue_recovery.Transition_converged -> ()
+     | Ok Masc.Keeper_event_queue_recovery.No_pending_transition ->
+       Alcotest.fail "retryable transition disappeared before projection"
+     | Ok Masc.Keeper_event_queue_recovery.Claim_busy ->
+       Alcotest.fail "retryable transition projection claim was busy"
+     | Error error ->
+       Alcotest.fail
+         (Masc.Keeper_event_queue_recovery.projection_error_to_string error));
     let next_lease =
       Persistence.claim_when_result
         ~base_path
@@ -2546,17 +2558,18 @@ let test_transition_outbox_projects_with_stable_identity () =
      | Persistence.Already_present -> ()
      | Persistence.Enqueued -> Alcotest.fail "outbox stimulus was duplicated");
     (match
-     Masc.Keeper_reaction_ledger.For_testing
-       .project_transition_outbox_after_append_result
-       ~after_ledger_append:(fun () ->
-         Error "injected failure after ledger append")
-       ~base_path
-       ~keeper_name
-   with
-   | Error _ -> ()
-   | Ok () ->
-     Alcotest.fail
-       "injected post-append failure unexpectedly retired the transition");
+       Masc.Keeper_reaction_ledger.For_testing.with_after_ledger_append
+         ~after_ledger_append:(fun () ->
+           Error "injected failure after ledger append")
+         (fun () ->
+            Masc.Keeper_event_queue_recovery.project_owner_result
+              ~base_path
+              ~keeper_name)
+     with
+     | Error _ -> ()
+     | Ok _ ->
+       Alcotest.fail
+         "injected post-append failure unexpectedly retired the transition");
   let retained_outbox_count =
     match
       Masc.Keeper_event_queue_recovery.For_testing
@@ -2689,7 +2702,9 @@ let test_transition_outbox_bounded_sweep_continuation () =
      with
      | Persistence.Settled _ -> ()
      | Persistence.Already_settled _ ->
-       Alcotest.fail "bounded projection source was already settled");
+       Alcotest.fail "bounded projection source was already settled"
+     | Persistence.Committed_followup_failed { detail; _ } ->
+       Alcotest.failf "bounded projection settlement follow-up failed: %s" detail);
     let budget =
       match Masc.Keeper_event_queue_recovery.owner_budget ~max_owners:2 with
       | Ok budget -> budget
@@ -2722,6 +2737,8 @@ let test_transition_outbox_bounded_sweep_continuation () =
       .pending_transition_count_result
         ~base_path
         ~keeper_name
+      |> Result.map_error
+           Masc.Keeper_event_queue_recovery.projection_error_to_string
       |> require_ok "read bounded projection outbox"
     in
     Alcotest.(check int) "bounded continuation retires the outbox" 0 pending_count)
@@ -2961,51 +2978,71 @@ let test_transition_outbox_projection_keeps_scheduler_progress () =
         ~domain_count:1
         (Eio.Stdenv.domain_mgr env)
     in
-    Executor_pool_ref.set (Domain_pool.executor_pool pool);
+    let main_domain = Domain.self () in
     let append_entered, resolve_append_entered = Eio.Promise.create () in
-    let release_append, resolve_release_append = Eio.Promise.create () in
     let projection_done, resolve_projection_done = Eio.Promise.create () in
+    let block_mutex = Stdlib.Mutex.create () in
+    let block_condition = Stdlib.Condition.create () in
     let released = Atomic.make false in
     let release_once () =
       if Atomic.compare_and_set released false true
-      then Eio.Promise.resolve resolve_release_append ()
+      then (
+        Stdlib.Mutex.lock block_mutex;
+        Stdlib.Condition.broadcast block_condition;
+        Stdlib.Mutex.unlock block_mutex)
     in
-    Fun.protect
-      ~finally:(fun () ->
-        release_once ();
-        Dated_jsonl.For_testing.reset_append_guard ())
+    Executor_pool_ref.For_testing.with_pool
+      (Domain_pool.executor_pool pool)
       (fun () ->
-         Dated_jsonl.set_append_guard (fun append ->
-           Eio.Promise.resolve resolve_append_entered ();
-           Eio.Promise.await release_append;
-           append ());
-         Eio.Fiber.fork ~sw (fun () ->
-           Eio.Promise.resolve
-             resolve_projection_done
-             (Masc.Keeper_event_queue_recovery.project_owner_result
-                ~base_path
-                ~keeper_name));
-         Eio.Promise.await append_entered;
-         let heartbeat_progressed, resolve_heartbeat_progressed =
-           Eio.Promise.create ()
-         in
-         Eio.Fiber.fork ~sw (fun () ->
-           Eio.Promise.resolve resolve_heartbeat_progressed ());
-         Eio.Promise.await heartbeat_progressed;
-         Alcotest.(check bool)
-           "main scheduler progresses while projector append is blocked"
-           true
-           (not (Atomic.get released));
-         release_once ();
-         match Eio.Promise.await projection_done with
-         | Ok Masc.Keeper_event_queue_recovery.Transition_converged -> ()
-         | Ok Masc.Keeper_event_queue_recovery.No_pending_transition ->
-           Alcotest.fail "blocked projector lost its durable transition"
-         | Ok Masc.Keeper_event_queue_recovery.Claim_busy ->
-           Alcotest.fail "blocked projector unexpectedly contended with itself"
-         | Error error ->
-           Alcotest.fail
-             (Masc.Keeper_event_queue_recovery.projection_error_to_string error)))
+         Fun.protect
+           ~finally:(fun () ->
+             release_once ();
+             Dated_jsonl.For_testing.reset_append_guard ())
+           (fun () ->
+              Dated_jsonl.set_append_guard (fun append ->
+                let off_main_domain = Domain.self () <> main_domain in
+                Eio.Promise.resolve resolve_append_entered off_main_domain;
+                if off_main_domain
+                then (
+                  Stdlib.Mutex.lock block_mutex;
+                  Fun.protect
+                    ~finally:(fun () -> Stdlib.Mutex.unlock block_mutex)
+                    (fun () ->
+                       while not (Atomic.get released) do
+                         Stdlib.Condition.wait block_condition block_mutex
+                       done));
+                append ());
+              Eio.Fiber.fork ~sw (fun () ->
+                Eio.Promise.resolve
+                  resolve_projection_done
+                  (Masc.Keeper_event_queue_recovery.project_owner_result
+                     ~base_path
+                     ~keeper_name));
+              let append_off_main_domain = Eio.Promise.await append_entered in
+              Alcotest.(check bool)
+                "projector append executes on a worker Domain"
+                true
+                append_off_main_domain;
+              let heartbeat_progressed, resolve_heartbeat_progressed =
+                Eio.Promise.create ()
+              in
+              Eio.Fiber.fork ~sw (fun () ->
+                Eio.Promise.resolve resolve_heartbeat_progressed ());
+              Eio.Promise.await heartbeat_progressed;
+              Alcotest.(check bool)
+                "main scheduler progresses while worker Domain is OS-blocked"
+                true
+                (not (Atomic.get released));
+              release_once ();
+              match Eio.Promise.await projection_done with
+              | Ok Masc.Keeper_event_queue_recovery.Transition_converged -> ()
+              | Ok Masc.Keeper_event_queue_recovery.No_pending_transition ->
+                Alcotest.fail "blocked projector lost its durable transition"
+              | Ok Masc.Keeper_event_queue_recovery.Claim_busy ->
+                Alcotest.fail "blocked projector unexpectedly contended with itself"
+              | Error error ->
+                Alcotest.fail
+                  (Masc.Keeper_event_queue_recovery.projection_error_to_string error))))
 ;;
 
 let test_registration_preparation_is_atomic_and_fail_closed () =

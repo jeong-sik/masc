@@ -18,6 +18,13 @@ let get () = Atomic.get pool
 
 let set p = Atomic.set pool (Some p)
 
+module For_testing = struct
+  let with_pool p f =
+    let previous = Atomic.exchange pool (Some p) in
+    Fun.protect ~finally:(fun () -> Atomic.set pool previous) f
+  ;;
+end
+
 (** Submit [f] to the executor pool if available, or run inline.
     Inline fallback ensures callers work in tests and before server init.
     Re-raises [Eio.Cancel.Cancelled] to preserve structured concurrency. *)

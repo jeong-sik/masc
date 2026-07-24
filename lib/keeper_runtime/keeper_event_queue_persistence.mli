@@ -206,11 +206,6 @@ val lease_kind : lease -> lease_kind
 val active_lease_result :
   base_path:string -> keeper_name:string -> (lease option, string) result
 
-val transition_outbox_result :
-  base_path:string -> keeper_name:string -> (outbox_entry list, string) result
-(** Read the single pending projection entry for this Keeper lane.  The state
-    machine blocks new claims until this list is drained. *)
-
 val exact_execution_binding_result :
   base_path:string -> keeper_name:string -> (exact_execution_binding option, string) result
 
@@ -491,11 +486,15 @@ val prepare_registration_after_exact_recovery_result :
     registration recovery. Dispatch-uncertain bindings and source-less terminal
     quarantines remain fail-closed. *)
 
-val mark_transition_projected_result :
+val project_transition_outbox_result :
+  append_before_retire:(outbox_entry -> (unit, string) result) ->
   base_path:string ->
   keeper_name:string ->
-  transition_id:string ->
   (unit, string) result
+(** Read the single pending transition under the canonical lane identity,
+    invoke the supplied ledger append, and retire only after that append
+    succeeds. Raw outbox entries and the retirement primitive are not exported
+    independently. *)
 
 val persist :
   base_path:string -> keeper_name:string -> Keeper_event_queue.t -> unit

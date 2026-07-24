@@ -302,7 +302,7 @@ describe('resolveRuntimeCounts', () => {
       shellConfiguredKeepers: 13,
       runtimeFleetSafety,
     })).toEqual({
-      live: { agents: 0, keepers: 9, pausedKeepers: 0, offlineKeepers: 6, transientKeepers: 0, keeperRows: 9, tasks: 0, totalRuntimes: 9, available: true },
+      live: { agents: 0, keepers: 9, pausedKeepers: 0, offlineKeepers: 6, transientKeepers: 0, keeperRows: 15, tasks: 0, totalRuntimes: 9, available: true },
       configured: { keepers: 13, totalRuntimes: 9, source: 'shell' },
       source: 'execution',
     })

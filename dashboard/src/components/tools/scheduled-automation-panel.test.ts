@@ -685,6 +685,11 @@ describe('ScheduledAutomationPanel', () => {
       request({
         schedule_id: `sched-${activationReason}`,
         status: 'succeeded',
+        last_execution: {
+          execution_id: `exec-${activationReason}`,
+          schedule_id: `sched-${activationReason}`,
+          status: 'succeeded',
+        },
         dispatch_receipt: {
           projection_status: 'recognized',
           kind: 'masc.keeper_wake.enqueued',

@@ -341,7 +341,7 @@ describe('dashboardHealthChips', () => {
           paused_keepers: 2,
           paused_keepers_health: { count: 3 },
           keeper_fleet_safety: {
-            running_keeper_fiber_count: 0,
+            executable_keeper_fiber_count: 0,
             paused_keeper_count: 4,
           },
         },

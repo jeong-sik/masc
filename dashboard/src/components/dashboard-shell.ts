@@ -301,6 +301,9 @@ function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): 
     const capacityDetail = [
       `status=${fleetStatus}`,
       `executable_keeper_fiber_count=${executableFibers}`,
+      fleet.failing_keeper_fiber_count != null
+        ? `failing_keeper_fiber_count=${fleet.failing_keeper_fiber_count}`
+        : null,
       targetCapacity != null ? `target_reaction_capacity_count=${targetCapacity}` : null,
       capacityShortfall != null ? `reaction_capacity_shortfall_count=${capacityShortfall}` : null,
       fleet?.blocker ? `blocker=${fleet.blocker}` : null,

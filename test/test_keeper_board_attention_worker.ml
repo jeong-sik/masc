@@ -1762,8 +1762,10 @@ let test_same_quarantine_command_cas_loser_converges () =
   let report =
     ok
       "same command CAS loser converges"
-      (Q.For_testing.execute_with_before_partition_commit
-         ~before_partition_commit:(fun observed ->
+      (Result.map_error
+         Q.execution_error_label
+         (Q.For_testing.execute_with_before_partition_commit
+            ~before_partition_commit:(fun observed ->
            let competing =
              match
                ok
@@ -1782,7 +1784,7 @@ let test_same_quarantine_command_cas_loser_converges () =
              Alcotest.failf "competing Ready was not durable: %s" detail)
          ~now:20.0
          ~base_path
-         command)
+         command))
   in
   match report.partition.state with
   | P.Ready -> ()

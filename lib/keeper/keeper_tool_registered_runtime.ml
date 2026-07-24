@@ -58,6 +58,7 @@ let handle_masc_tool_with_outcome
                    let result =
                      !Keeper_tool_shared_runtime.tag_dispatch_fn
                        ~config
+                       ~keeper_name:meta.name
                        ~agent_name:keeper_agent
                        ~tag
                        ~name

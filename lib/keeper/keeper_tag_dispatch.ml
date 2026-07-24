@@ -68,7 +68,8 @@ let get_fs_opt () = Fs_compat.get_fs_opt ()
 (** Dispatch a tool by its module tag using keeper-available context.
 
     @param config   Workspace configuration
-    @param agent_name  Keeper's agent name (meta.name)
+    @param keeper_name Keeper's stable handle ([meta.name])
+    @param agent_name  Keeper's task actor identity ([meta.agent_name])
     @param tag      Module tag from [Tool_dispatch.lookup_tag]
     @param name     Tool name
     @param args     Tool arguments JSON
@@ -77,6 +78,7 @@ let get_fs_opt () = Fs_compat.get_fs_opt ()
     does not recognize the tool name (should not happen when tag is correct). *)
 let dispatch
       ~(config : Workspace.config)
+      ~(keeper_name : string)
       ~(agent_name : string)
       ~(tag : Tool_dispatch.module_tag)
       ~(name : string)
@@ -138,7 +140,7 @@ let dispatch
     (* ── Tier B: Eio-dependent ─────────────────────────────────── *)
     | Mod_task ->
       Task.Tool.dispatch_for_keeper
-        ~created_by:agent_name
+        ~created_by:keeper_name
         { Task.Tool.config; agent_name; sw = Eio_context.get_switch_opt () }
         ~name
         ~args

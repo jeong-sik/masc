@@ -1017,8 +1017,10 @@ let commit_prepared_compaction_with
     observed_commit_completion prepared
 ;;
 
-let commit_prepared_compaction =
-  commit_prepared_compaction_with ~save_oas_checkpoint_if_source
+let commit_prepared_compaction prepared =
+  commit_prepared_compaction_with
+    ~save_oas_checkpoint_if_source
+    prepared
 ;;
 
 module For_testing = struct

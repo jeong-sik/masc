@@ -570,10 +570,9 @@ let quarantine_identity_result
           ~input_hash
           ~sequence
           ~slot_id
-          ~call_id
-          ~plan_fingerprint
-          ~request_body_sha256
-          ~cause)
+        ~call_id
+        ~plan_fingerprint
+        ~request_body_sha256)
   with
   | Ok { write_outcome = Fsync_completed; _ } -> Ok ()
   | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } ->

@@ -636,6 +636,7 @@ let legal_transition previous next =
   | Ready, Running { progress = Unbound; _ } -> true
   | Running { progress = Unbound; _ }, Ready -> true
   | Running { progress = Unbound; _ }, Running { progress = Bound _; _ } -> true
+  | Running { progress = Unbound; _ }, Completed _ -> true
   | Running { progress = Bound _; _ }, Running { progress = Advancing _; _ } -> true
   | Running { progress = Advancing _; _ }, Running { progress = Bound _; _ } -> true
   | Running { progress = Bound _; _ }, Completed _ -> true

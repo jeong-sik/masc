@@ -45,7 +45,7 @@ CAMEL_CASE_BOUNDARY_PATTERN = re.compile(
     r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
 )
 FORBIDDEN_ENV_IDENTIFIERS = frozenset(
-    ("Env_config", "Sys", "Unix", "UnixLabels", "getenv", "getenv_opt")
+    ("Env_config", "Sys", "Unix", "UnixLabels", "external", "getenv", "getenv_opt")
 )
 POLICY_TOKENS = frozenset(("provider", "model", "credential", "token"))
 TOKEN_NORMALIZATION = {
@@ -263,6 +263,7 @@ EOF
     'let _ = UnixLabels.unsafe_environment ()' \
     $'module U = UnixLabels\nlet _ = U.unsafe_getenv "PROVIDER_API_KEY"' \
     'let _ = let open UnixLabels in unsafe_getenv "PROVIDER_API_KEY"' \
+    $'external read_setting : string -> string = "caml_sys_getenv"\nlet _ = read_setting "PROVIDER_API_KEY"' \
     'let _ = Unix . gettimeofday ()' \
     'let _ = Unix.(gettimeofday ())' \
     'let _ = Wrapper.Unix.gettimeofday ()' \

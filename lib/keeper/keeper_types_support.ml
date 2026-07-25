@@ -16,14 +16,6 @@ let session_base_dir_ (config : Workspace.config) =
   let d = Filename.concat (Workspace.masc_root_dir config) "traces" in
   ensure_dir_ d
 
-(** RFC-0206 single-binding: API keys for the default runtime are resolved at
-    startup, so there is no per-label key check. Retained as a total no-op so
-    callers keep their result-shaped contract.
-    Runtime behavior changed: per-label key availability is no longer probed;
-    verify keeper turn startup at deploy. *)
-let ensure_api_keys_for_labels (_labels : string list) : (unit, string) result =
-  Ok ()
-
 (** Date-split metrics store: [.masc/keepers/<name>/metrics/YYYY-MM/DD.jsonl].
     Cached per keeper name so all callers share the same Eio.Mutex. *)
 let metrics_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 8

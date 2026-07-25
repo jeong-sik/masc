@@ -14,10 +14,6 @@ val keeper_dir_ : Workspace.config -> string
     creating it if missing. *)
 val session_base_dir_ : Workspace.config -> string
 
-(** Check API key availability for the given model labels via
-    [Runtime_runtime]. *)
-val ensure_api_keys_for_labels : string list -> (unit, string) result
-
 (** Date-split metrics store: [.masc/keepers/<name>/metrics/YYYY-MM/DD.jsonl].
     Cached per keeper name so all callers share the same Eio.Mutex. *)
 val keeper_metrics_store : Workspace.config -> string -> Dated_jsonl.t

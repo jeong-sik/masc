@@ -12,9 +12,6 @@
 val default_config_path : unit -> string option
 (** Alias for [Runtime.config_path]. *)
 
-val default_model_strings : runtime_id:string -> string list
-(** Alias for [Runtime_runtime.default_model_strings]. *)
-
 (** {1 Eio context validation} *)
 
 val require_eio :

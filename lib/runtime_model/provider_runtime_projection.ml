@@ -262,7 +262,3 @@ let default_execution_model_strings _runtime_id =
   | [] -> [ default_local_fallback_label () ]
   | labels -> labels
 ;;
-
-let default_execution_model_strings_result runtime_id =
-  Ok (default_execution_model_strings runtime_id)
-;;

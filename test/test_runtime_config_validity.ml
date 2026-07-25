@@ -2266,6 +2266,42 @@ let test_structured_judge_lane_shadow_precedence () =
       check bool "error names the incapable shadow candidate" true
         (String_util.contains_substring msg "local.jsononly"))
 
+(* memory_os_consolidation was validated before lanes_of_decls ran, so it was the
+   one route that could not name a lane while structured_judge and cross_verifier
+   could. It is now validated after lanes are materialised, with the same
+   lane-over-runtime precedence [resolve_assignment] applies. Its requirement is
+   Resolves_only, so a candidate without declared capabilities is admissible —
+   that is the difference from the judge and verifier lanes. *)
+let test_memory_os_consolidation_lane_target () =
+  with_fake_runtime_model_catalog @@ fun () ->
+  let lane_target =
+    judge_lane_base
+    ^ "memory_os_consolidation = \"consolidators\"\n\
+       \n\
+       [runtime.lanes.consolidators]\n\
+       strategy = \"ordered\"\n\
+       candidates = [\"local.chat\", \"local.judge\"]\n"
+  in
+  with_temp_runtime_toml lane_target (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg ->
+      failf "lane-targeted memory_os_consolidation should load: %s" msg
+    | Ok (_, _, _, _, _, _, _, lanes) ->
+      check bool "consolidators lane is materialized" true
+        (List.exists
+           (fun lane -> String.equal (Runtime_lane.id lane) "consolidators")
+           lanes));
+  (* An unknown id stays an operator typo whether or not lanes exist. *)
+  with_temp_runtime_toml
+    (judge_lane_base ^ "memory_os_consolidation = \"local.absent\"\n")
+    (fun path ->
+      match Runtime.load_list ~config_path:path with
+      | Ok _ ->
+        failf "unknown [runtime].memory_os_consolidation id must still be rejected"
+      | Error msg ->
+        check bool "error names the route" true
+          (String_util.contains_substring msg "memory_os_consolidation"))
+
 let test_cross_verifier_lane_target () =
   with_fake_runtime_model_catalog @@ fun () ->
   let json_capable_lane =
@@ -2776,6 +2812,9 @@ let () =
           test_case
             "[runtime].cross_verifier accepts JSON-capable lanes"
             `Quick test_cross_verifier_lane_target;
+          test_case
+            "[runtime].memory_os_consolidation accepts a lane id"
+            `Quick test_memory_os_consolidation_lane_target;
           test_case
             "save_config_text validates and refreshes cross_verifier runtime"
             `Quick test_save_config_text_refreshes_cross_verifier_runtime;

@@ -43,7 +43,7 @@ ENV_READ_PATTERNS = (
         "provider/model/credential environment projection",
         re.compile(
             r"\b(?:"
-            r"Env_config\.[A-Za-z0-9_'.]*(?:Provider|Model|Credential|Api_key|Token)"
+            r"Env_config\.[A-Za-z0-9_'.]*(?:Provider|Model|Credential|Api_key|Token)[A-Za-z0-9_'.]*"
             r"|(?:Provider|Model|Credential|Api_key|Token)[A-Za-z0-9_']*_env"
             r")\b",
             re.IGNORECASE,

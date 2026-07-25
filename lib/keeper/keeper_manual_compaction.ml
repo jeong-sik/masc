@@ -500,7 +500,9 @@ let resolve_uncommitted = function
        Uncommitted_observed_commit recovery)
 ;;
 
-let operation_of_observed_commit recovery =
+let operation_of_observed_commit
+      (recovery : Keeper_post_turn.compaction_recovery)
+  =
   match recovery.Keeper_post_turn.checkpoint_installation with
   | Keeper_checkpoint_store.Installed installation ->
     Ok

@@ -59,7 +59,7 @@
   ;; ordered multimodal delivery contracts;
   ;; its SHA and rationale live in scripts/oas-agent-sdk-pin.sh (SSOT).
   ;; See check-oas-pin.sh.
-  (agent_sdk (>= 0.223.0))
+  (agent_sdk (>= 0.223.1))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))
@@ -81,9 +81,9 @@
   (httpun-eio (>= 0.2))
   (httpun-ws (= 0.2.0))
   (bigstringaf (>= 0.10))
-   (eio (>= 1.4))
-   (eio_main (>= 1.4))
-   (eio_posix (>= 1.4))
+  (eio (>= 1.0))
+  (eio_main (>= 1.0))
+  (eio_posix (>= 0.16))
   (cstruct (>= 6.0))
   (digestif (>= 1.1))
   (ocaml-protoc-plugin (>= 4.0))

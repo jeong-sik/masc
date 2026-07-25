@@ -214,17 +214,32 @@ type route_requirement =
    unknown is carried over unchanged, not introduced here; whether an unknown
    capability should order a candidate later rather than exclude it up front is
    the separate question tracked against the format axis. *)
-let model_supports_response_format_json (runtime : t) =
-  match runtime.model.capabilities with
-  | Some caps -> caps.supports_response_format_json
-  | None -> false
-;;
+(* Neither [runtime].cross_verifier nor [runtime].structured_judge requests a wire
+   response format, so neither can require one.
 
-let model_supports_structured_output (runtime : t) =
-  match runtime.model.capabilities with
-  | Some caps -> caps.supports_structured_output
-  | None -> false
-;;
+   cross_verifier delivers its verdict through the report_review_verdict TOOL CALL
+   (lib/task/anti_rationalization.ml:243-248, with
+   Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config =
+   without_response_format at keeper_structured_output_schema.ml:306).
+   structured_judge applies the same without_response_format transform
+   (lib/keeper/keeper_failure_judge.ml:71-72, passed at :114) and parses by text
+   extraction with structured_json_of_response at :88-90; :79-80 calls that boundary
+   tool-free.
+
+   cross_verifier does need tool calling, and this catalog cannot say that.
+   Runtime_schema.model_capabilities declares supports_tool_choice,
+   supports_required_tool_choice, supports_named_tool_choice and
+   supports_parallel_tool_calls — the shapes of choosing a tool, not whether the
+   model can call one. Substituting supports_tool_choice would state a requirement
+   the role does not have, which is the same error as the JSON-mode requirement it
+   replaces. A capability that cannot be declared cannot be admitted on, so the
+   requirement is dropped rather than approximated.
+
+   The axis is not lost. A candidate that cannot serve the tool channel is refused
+   by OAS at dispatch through candidate_rejection_disposition
+   (oas/lib/llm_provider/exact_output.mli:126-132), which is pre-dispatch and
+   therefore failover-eligible — ordering rather than exclusion, which is what the
+   spec asks for. *)
 
 let validate_route_runtime
     ~(config_path : string)
@@ -962,11 +977,7 @@ let materialize_config
       ~config_path
       ~dropped_bindings
       ~route_name:"structured_judge"
-      ~requirement:
-        (Declares_capability
-           { key = "supports-structured-output"
-           ; supported_by = model_supports_structured_output
-           })
+      ~requirement:Resolves_only
       runtimes
       lanes
       cfg.structured_judge_runtime_id
@@ -976,11 +987,7 @@ let materialize_config
       ~config_path
       ~dropped_bindings
       ~route_name:"cross_verifier"
-      ~requirement:
-        (Declares_capability
-           { key = "supports-response-format-json"
-           ; supported_by = model_supports_response_format_json
-           })
+      ~requirement:Resolves_only
       runtimes
       lanes
       cfg.cross_verifier_runtime_id

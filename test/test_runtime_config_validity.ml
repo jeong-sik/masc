@@ -2077,13 +2077,18 @@ let test_cross_verifier_runtime_routing () =
     match Runtime.load_list ~config_path:path with
     | Ok _ -> failf "unknown [runtime].cross_verifier id must be rejected at load"
     | Error _ -> ());
+  (* The verdict travels as a report_review_verdict tool call and no wire response
+     format is requested (anti_rationalization.ml:243-248), so the JSON-mode
+     requirement was on the wrong axis. The right one — can this model call a tool
+     — is not declarable: Runtime_schema.model_capabilities carries the shapes of
+     tool CHOICE, not tool support. A candidate that cannot serve the tool channel
+     is refused by OAS at dispatch instead, which is failover-eligible. So a model
+     declaring nothing now resolves for this route. *)
   with_temp_runtime_toml (base ^ "cross_verifier = \"local.chat\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
-    | Ok _ ->
-      failf
-        "[runtime].cross_verifier must reject models without JSON response \
-         format support"
-    | Error _ -> ())
+    | Error msg ->
+      failf "[runtime].cross_verifier must accept a capability-free model: %s" msg
+    | Ok _ -> ())
 
 let test_memory_os_consolidation_runtime_routing () =
   with_fake_runtime_model_catalog @@ fun () ->
@@ -2179,13 +2184,16 @@ let test_structured_judge_runtime_routing () =
     match Runtime.load_list ~config_path:path with
     | Ok _ -> failf "unknown [runtime].structured_judge id must be rejected"
     | Error _ -> ());
+  (* Its consumer requests no wire format — keeper_failure_judge.ml:71-72 applies
+     without_response_format and :88-90 parses by text extraction, with :79-80
+     calling the boundary tool-free. A model that declares nothing therefore serves
+     this route, and refusing it was excluding a runtime on a capability the role
+     never asks for. *)
   with_temp_runtime_toml (base ^ "structured_judge = \"local.chat\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
-    | Ok _ ->
-      failf
-        "[runtime].structured_judge must reject models without structured-output \
-         support"
-    | Error _ -> ());
+    | Error msg ->
+      failf "[runtime].structured_judge must accept a capability-free model: %s" msg
+    | Ok _ -> ());
   with_temp_runtime_toml base (fun path ->
     match Runtime.save_config_text ~runtime_config_path:path base with
     | Error msg -> failf "save_config_text should load default fallback: %s" msg
@@ -2321,19 +2329,25 @@ let test_structured_judge_lane_target () =
        strategy = \"ordered\"\n\
        candidates = [\"local.judge\", \"local.jsononly\"]\n"
   in
+  (* Formerly rejected: every candidate had to declare supports-structured-output.
+     The consumer requests no wire format at all (keeper_failure_judge.ml:71-72
+     applies without_response_format, :88-90 parses by text extraction, :79-80 calls
+     the boundary tool-free), so a candidate that declares only json_object is a
+     usable candidate for this route and refusing the lane excluded runtimes on a
+     capability the role never asks for. The lane now resolves. *)
   with_temp_runtime_toml incapable_candidate_lane (fun path ->
     match Runtime.load_list ~config_path:path with
-    | Ok _ ->
-      failf
-        "structured_judge lane with a candidate lacking structured output must \
-         be rejected"
     | Error msg ->
-      check bool "error names the route" true
-        (String_util.contains_substring msg "structured_judge");
-      check bool "error names the incapable candidate" true
-        (String_util.contains_substring msg "local.jsononly");
-      check bool "error names the missing capability" true
-        (String_util.contains_substring msg "supports-structured-output"))
+      failf
+        "structured_judge lane should resolve without a wire-format requirement: %s"
+        msg
+    | Ok (_, _, _, _, structured_judge, _, _, lanes) ->
+      check (option string) "structured_judge keeps the lane id" (Some "judges")
+        structured_judge;
+      check bool "judges lane is materialized" true
+        (List.exists
+           (fun lane -> String.equal (Runtime_lane.id lane) "judges")
+           lanes))
 
 (* A lane that shadows a capable runtime id must be validated as the lane:
    [resolve_assignment] hands consumers the lane, so validating the shadowed
@@ -2348,15 +2362,28 @@ let test_structured_judge_lane_shadow_precedence () =
        strategy = \"ordered\"\n\
        candidates = [\"local.jsononly\"]\n"
   in
+  (* This used to prove lane-over-runtime precedence through a capability
+     rejection: the lane's only candidate lacked structured output, so an error
+     naming it showed the lane had been judged rather than the shadowed runtime.
+     The route requires no wire format now, so both branches return Ok and that
+     witness no longer exists at admission.
+
+     The precedence itself is covered where the consumers read it —
+     test_keeper_turn_driver_failover.ml:319
+     test_resolve_assignment_prefers_lane_over_runtime — so nothing is left
+     unasserted. What admission still guarantees is asserted here: a lane id that
+     shadows a runtime id is accepted and materialised, and the route keeps that
+     id rather than silently resolving to the shadowed runtime. *)
   with_temp_runtime_toml shadowing_lane (fun path ->
     match Runtime.load_list ~config_path:path with
-    | Ok _ ->
-      failf
-        "structured_judge naming a lane that shadows a capable runtime must \
-         be judged as the lane (incapable candidate rejected)"
-    | Error msg ->
-      check bool "error names the incapable shadow candidate" true
-        (String_util.contains_substring msg "local.jsononly"))
+    | Error msg -> failf "shadowing lane should resolve: %s" msg
+    | Ok (_, _, _, _, structured_judge, _, _, lanes) ->
+      check (option string) "structured_judge keeps the shadowing id"
+        (Some "local.judge") structured_judge;
+      check bool "the shadowing lane is materialized" true
+        (List.exists
+           (fun lane -> String.equal (Runtime_lane.id lane) "local.judge")
+           lanes))
 
 (* memory_os_consolidation was validated before lanes_of_decls ran, so it was the
    one route that could not name a lane while structured_judge and cross_verifier
@@ -2421,19 +2448,19 @@ let test_cross_verifier_lane_target () =
        strategy = \"ordered\"\n\
        candidates = [\"local.judge\", \"local.chat\"]\n"
   in
+  (* Formerly rejected because local.chat declares no JSON mode. The route requests
+     no wire format, so the lane resolves and OAS refuses an unusable candidate at
+     dispatch instead — pre-dispatch and failover-eligible. *)
   with_temp_runtime_toml json_incapable_lane (fun path ->
     match Runtime.load_list ~config_path:path with
-    | Ok _ ->
-      failf
-        "cross_verifier lane with a candidate lacking JSON mode must be \
-         rejected"
-    | Error msg ->
-      check bool "error names the route" true
-        (String_util.contains_substring msg "cross_verifier");
-      check bool "error names the incapable candidate" true
-        (String_util.contains_substring msg "local.chat");
-      check bool "error names the missing capability" true
-        (String_util.contains_substring msg "supports-response-format-json"))
+    | Error msg -> failf "cross_verifier lane should resolve: %s" msg
+    | Ok (_, _, _, _, _, cross_verifier, _, lanes) ->
+      check (option string) "cross_verifier keeps the lane id" (Some "verifiers")
+        cross_verifier;
+      check bool "verifiers lane is materialized" true
+        (List.exists
+           (fun lane -> String.equal (Runtime_lane.id lane) "verifiers")
+           lanes))
 
 let test_save_config_text_refreshes_cross_verifier_runtime () =
   with_fake_runtime_model_catalog @@ fun () ->

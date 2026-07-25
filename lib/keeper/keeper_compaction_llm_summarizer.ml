@@ -61,6 +61,23 @@ type exact_execution_guard =
       (exact_write_outcome, string) result
   }
 
+type post_success_completion =
+  { waiter : unit Eio.Promise.t
+  ; resolve : unit -> unit
+  }
+
+type post_success_phase =
+  | Open
+  | Commit_claimed of post_success_completion
+  | Installed_pending_valid of post_success_completion
+  | Committed of (unit, string) result
+  | Reject_claimed of
+      Keeper_event_queue_state.exact_execution_terminal
+      * post_success_completion
+  | Rejected of
+      Keeper_event_queue_state.exact_execution_terminal
+      * (unit, string) result
+
 type post_success_terminalizer =
   { base_path : string
   ; keeper_name : string
@@ -68,9 +85,10 @@ type post_success_terminalizer =
   ; flow_success : Exact_output.flow_success
   ; exact_execution_guard : exact_execution_guard
   ; attempt_observation : attempt_observation
-  ; terminalization_mutex : Eio.Mutex.t
-  ; mutable canonical_terminal :
-      (Keeper_event_queue_state.exact_execution_terminal * unit Eio.Promise.t) option
+  ; disposition_mutex : Eio.Mutex.t
+  ; mutable phase : post_success_phase
+  ; mutable domain_valid_attempts : int
+  ; mutable domain_rejected_attempts : int
   }
 
 type 'a post_success_boundary =
@@ -79,7 +97,42 @@ type 'a post_success_boundary =
 
 type post_success_terminalization =
   | Terminalized of Keeper_event_queue_state.exact_execution_terminal
+  | Terminalization_commit_in_progress of unit Eio.Promise.t
+  | Terminalization_already_committed
+  | Terminalization_invariant_failed of string
   | Terminalization_owner_unregistered_deferred
+
+type post_success_commit_claim =
+  | Commit_claim_acquired
+  | Commit_claim_in_progress of unit Eio.Promise.t
+  | Commit_claim_already_committed
+  | Commit_claim_rejected of
+      Keeper_event_queue_state.exact_execution_terminal
+      * (unit, string) result
+  | Commit_claim_owner_unregistered_deferred
+
+type 'a post_success_commit_boundary =
+  | Post_success_commit_owner_result of 'a
+  | Post_success_commit_in_progress of unit Eio.Promise.t
+  | Post_success_commit_already_committed
+  | Post_success_commit_rejected of
+      Keeper_event_queue_state.exact_execution_terminal
+      * (unit, string) result
+  | Post_success_commit_owner_unregistered_deferred
+
+type post_success_phase_snapshot =
+  | Phase_open
+  | Phase_commit_claimed
+  | Phase_installed_pending_valid
+  | Phase_committed
+  | Phase_reject_claimed
+  | Phase_rejected
+
+type post_success_snapshot =
+  { phase : post_success_phase_snapshot
+  ; domain_valid_attempts : int
+  ; domain_rejected_attempts : int
+  }
 
 type completed_plan =
   { plan : compaction_plan
@@ -519,55 +572,50 @@ let settle_exact_flow_domain flow_success disposition =
   |> Result.map_error domain_settlement_error_to_string
 ;;
 
-let settle_post_success_domain_valid terminalizer =
-  settle_exact_flow_domain terminalizer.flow_success Exact_output.Domain_valid
+let make_post_success_completion () =
+  let waiter, resolver = Eio.Promise.create () in
+  { waiter
+  ; resolve =
+      (fun () ->
+         ignore (Eio.Promise.try_resolve resolver () : bool))
+  }
 ;;
 
-let settle_post_success_domain_rejected terminalizer =
-  match
-    settle_exact_flow_domain
-      terminalizer.flow_success
-      Exact_output.Domain_rejected
-  with
-  | Ok () -> ()
-  | Error detail ->
-    Log.Keeper.error
-      ~keeper_name:terminalizer.keeper_name
-      "post-success exact flow domain rejection settlement failed slot_id=%s call_id=%s: %s"
-      terminalizer.attempt_observation.slot_id
-      terminalizer.attempt_observation.call_id
-      detail
+let terminal_for terminalizer cause =
+  Keeper_event_queue_state.
+    { cause
+    ; slot_id = terminalizer.attempt_observation.slot_id
+    ; call_id = terminalizer.attempt_observation.call_id
+    ; plan_fingerprint =
+        terminalizer.attempt_observation.receipt_plan_fingerprint
+    ; request_body_sha256 =
+        terminalizer.attempt_observation.receipt_request_body_sha256
+    }
 ;;
 
-let terminalize_post_success_current terminalizer cause =
-  let role =
-    Eio.Cancel.protect
-    @@ fun () ->
-    let role =
-      Eio.Mutex.use_rw ~protect:true terminalizer.terminalization_mutex
-      @@ fun () ->
-      match terminalizer.canonical_terminal with
-      | Some (terminal, completion) -> `Await (terminal, completion)
-      | None ->
-        let terminal =
-          Keeper_event_queue_state.
-            { cause
-            ; slot_id = terminalizer.attempt_observation.slot_id
-            ; call_id = terminalizer.attempt_observation.call_id
-            ; plan_fingerprint =
-                terminalizer.attempt_observation.receipt_plan_fingerprint
-            ; request_body_sha256 =
-                terminalizer.attempt_observation.receipt_request_body_sha256
-            }
-        in
-        let completion, resolve_completion = Eio.Promise.create () in
-        terminalizer.canonical_terminal <- Some (terminal, completion);
-        `Own (terminal, resolve_completion)
-    in
-    match role with
-    | `Await _ as role -> role
-    | `Own (terminal, resolve_completion) ->
-      settle_post_success_domain_rejected terminalizer;
+let with_disposition terminalizer callback =
+  Eio.Mutex.use_rw ~protect:true terminalizer.disposition_mutex callback
+;;
+
+let rejected_terminalization terminal result =
+  match result with
+  | Ok () -> Terminalized terminal
+  | Error detail -> Terminalization_invariant_failed detail
+;;
+
+let finish_rejection terminalizer terminal completion =
+  Eio.Cancel.protect
+  @@ fun () ->
+  let result =
+    match
+      settle_exact_flow_domain
+        terminalizer.flow_success
+        Exact_output.Domain_rejected
+    with
+    | Error detail ->
+      Error
+        ("post-success reject claimant could not settle OAS domain: " ^ detail)
+    | Ok () ->
       let failure =
         try
           match
@@ -590,25 +638,216 @@ let terminalize_post_success_current terminalizer cause =
         with
         | exn -> Some ("raised " ^ Printexc.to_string exn)
       in
-      Option.iter (log_terminal_quarantine_failure terminalizer terminal) failure;
-      Eio.Promise.resolve resolve_completion ();
-      `Done terminal
+      Option.iter
+        (log_terminal_quarantine_failure terminalizer terminal)
+        failure;
+      Ok ()
+  in
+  with_disposition terminalizer (fun () ->
+    match terminalizer.phase with
+    | Reject_claimed (claimed, _) when claimed = terminal ->
+      terminalizer.phase <- Rejected (terminal, result)
+    | Open
+    | Commit_claimed _
+    | Installed_pending_valid _
+    | Committed _
+    | Reject_claimed _
+    | Rejected _ ->
+      ());
+  completion.resolve ();
+  rejected_terminalization terminal result
+;;
+
+let claim_post_success_commit_current terminalizer =
+  with_disposition terminalizer (fun () ->
+    match terminalizer.phase with
+    | Open ->
+      let completion = make_post_success_completion () in
+      terminalizer.phase <- Commit_claimed completion;
+      Commit_claim_acquired
+    | Commit_claimed completion
+    | Installed_pending_valid completion ->
+      Commit_claim_in_progress completion.waiter
+    | Committed _ -> Commit_claim_already_committed
+    | Reject_claimed (_, completion) ->
+      Commit_claim_in_progress completion.waiter
+    | Rejected (terminal, result) ->
+      Commit_claim_rejected (terminal, result))
+;;
+
+let claim_post_success_commit terminalizer =
+  match
+    with_current_post_success terminalizer (fun () ->
+      claim_post_success_commit_current terminalizer)
+  with
+  | Post_success_current claim -> claim
+  | Post_success_owner_unregistered_deferred ->
+    Commit_claim_owner_unregistered_deferred
+;;
+
+let with_post_success_commit terminalizer commit =
+  match
+    with_current_post_success terminalizer (fun () ->
+      match claim_post_success_commit_current terminalizer with
+      | Commit_claim_acquired ->
+        Post_success_commit_owner_result (commit ())
+      | Commit_claim_in_progress waiter ->
+        Post_success_commit_in_progress waiter
+      | Commit_claim_already_committed ->
+        Post_success_commit_already_committed
+      | Commit_claim_rejected rejected ->
+        Post_success_commit_rejected rejected
+      | Commit_claim_owner_unregistered_deferred ->
+        Post_success_commit_owner_unregistered_deferred)
+  with
+  | Post_success_current result -> result
+  | Post_success_owner_unregistered_deferred ->
+    Post_success_commit_owner_unregistered_deferred
+;;
+
+let mark_post_success_checkpoint_installed terminalizer =
+  with_disposition terminalizer (fun () ->
+    match terminalizer.phase with
+    | Commit_claimed completion ->
+      terminalizer.phase <- Installed_pending_valid completion;
+      Ok ()
+    | Open
+    | Installed_pending_valid _
+    | Committed _
+    | Reject_claimed _
+    | Rejected _ ->
+      Error "post-success checkpoint installation has no commit claimant")
+;;
+
+let settle_post_success_domain_valid terminalizer =
+  let role =
+    with_disposition terminalizer (fun () ->
+      match terminalizer.phase with
+      | Installed_pending_valid completion
+        when terminalizer.domain_valid_attempts = 0 ->
+        terminalizer.domain_valid_attempts <-
+          terminalizer.domain_valid_attempts + 1;
+        `Own completion
+      | Committed result -> `Done result
+      | Open
+      | Commit_claimed _
+      | Installed_pending_valid _
+      | Reject_claimed _
+      | Rejected _ ->
+        `Done
+          (Error
+             "post-success Domain_valid settlement has no installed commit claimant"))
   in
   match role with
-  | `Done terminal -> terminal
+  | `Done result -> result
+  | `Own completion ->
+    let result =
+      settle_exact_flow_domain terminalizer.flow_success Exact_output.Domain_valid
+      |> Result.map_error (fun detail ->
+        "post-success commit claimant could not settle OAS domain: " ^ detail)
+    in
+    with_disposition terminalizer (fun () ->
+      match terminalizer.phase with
+      | Installed_pending_valid current when current == completion ->
+        terminalizer.phase <- Committed result
+      | Open
+      | Commit_claimed _
+      | Installed_pending_valid _
+      | Committed _
+      | Reject_claimed _
+      | Rejected _ ->
+        ());
+    completion.resolve ();
+    result
+;;
+
+let claim_rejection terminalizer ~from_commit cause =
+  with_disposition terminalizer (fun () ->
+    match terminalizer.phase, from_commit with
+    | Open, false ->
+      let terminal = terminal_for terminalizer cause in
+      let completion = make_post_success_completion () in
+      terminalizer.domain_rejected_attempts <-
+        terminalizer.domain_rejected_attempts + 1;
+      terminalizer.phase <- Reject_claimed (terminal, completion);
+      `Own (terminal, completion)
+    | Commit_claimed completion, true ->
+      let terminal = terminal_for terminalizer cause in
+      terminalizer.domain_rejected_attempts <-
+        terminalizer.domain_rejected_attempts + 1;
+      terminalizer.phase <- Reject_claimed (terminal, completion);
+      `Own (terminal, completion)
+    | Reject_claimed (terminal, completion), _ ->
+      `Await (terminal, completion)
+    | Rejected (terminal, result), _ -> `Done (terminal, result)
+    | Commit_claimed completion, false
+    | Installed_pending_valid completion, _ ->
+      `Commit_in_progress completion.waiter
+    | Committed _, _ -> `Already_committed
+    | Open, true ->
+      `Invariant "commit claimant rejection observed an open disposition")
+;;
+
+let finish_claimed_rejection terminalizer role =
+  match role with
+  | `Own (terminal, completion) ->
+    finish_rejection terminalizer terminal completion
   | `Await (terminal, completion) ->
-    Eio.Promise.await completion;
-    terminal
+    Eio.Promise.await completion.waiter;
+    (match
+       with_disposition terminalizer (fun () ->
+         match terminalizer.phase with
+         | Rejected (durable, result) when durable = terminal ->
+           Some result
+         | Open
+         | Commit_claimed _
+         | Installed_pending_valid _
+         | Committed _
+         | Reject_claimed _
+         | Rejected _ ->
+           None)
+     with
+     | Some result -> rejected_terminalization terminal result
+     | None ->
+       Terminalization_invariant_failed
+         "post-success reject waiter completed without canonical rejection")
+  | `Done (terminal, result) -> rejected_terminalization terminal result
+  | `Commit_in_progress waiter -> Terminalization_commit_in_progress waiter
+  | `Already_committed -> Terminalization_already_committed
+  | `Invariant detail -> Terminalization_invariant_failed detail
+;;
+
+let terminalize_claimed_commit terminalizer cause =
+  claim_rejection terminalizer ~from_commit:true cause
+  |> finish_claimed_rejection terminalizer
 ;;
 
 let terminalize_post_success (terminalizer : post_success_terminalizer) cause =
   match
     with_current_post_success terminalizer (fun () ->
-      terminalize_post_success_current terminalizer cause)
+      claim_rejection terminalizer ~from_commit:false cause
+      |> finish_claimed_rejection terminalizer)
   with
-  | Post_success_current terminal -> Terminalized terminal
+  | Post_success_current terminalization -> terminalization
   | Post_success_owner_unregistered_deferred ->
     Terminalization_owner_unregistered_deferred
+;;
+
+let post_success_snapshot terminalizer =
+  with_disposition terminalizer (fun () ->
+    let phase =
+      match terminalizer.phase with
+      | Open -> Phase_open
+      | Commit_claimed _ -> Phase_commit_claimed
+      | Installed_pending_valid _ -> Phase_installed_pending_valid
+      | Committed _ -> Phase_committed
+      | Reject_claimed _ -> Phase_reject_claimed
+      | Rejected _ -> Phase_rejected
+    in
+    { phase
+    ; domain_valid_attempts = terminalizer.domain_valid_attempts
+    ; domain_rejected_attempts = terminalizer.domain_rejected_attempts
+    })
 ;;
 
 let exact_execution_evidence (flow_success : Exact_output.flow_success) =
@@ -1049,8 +1288,10 @@ let execute_prepared_lane_current
                 ; flow_success
                 ; exact_execution_guard
                 ; attempt_observation = observation
-                ; terminalization_mutex = Eio.Mutex.create ()
-                ; canonical_terminal = None
+                ; disposition_mutex = Eio.Mutex.create ()
+                ; phase = Open
+                ; domain_valid_attempts = 0
+                ; domain_rejected_attempts = 0
                 }
             }))
   in
@@ -1198,4 +1439,5 @@ module For_testing = struct
       evidence.declared_candidate_snapshot
   ;;
 
+  let post_success_snapshot = post_success_snapshot
 end

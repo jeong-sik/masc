@@ -236,6 +236,12 @@ let completed_exn = function
 
 let terminalized_exn = function
   | C.Terminalized terminal -> terminal
+  | C.Terminalization_commit_in_progress _ ->
+    Alcotest.fail "terminalization unexpectedly lost to a commit claimant"
+  | C.Terminalization_already_committed ->
+    Alcotest.fail "terminalization unexpectedly observed a committed checkpoint"
+  | C.Terminalization_invariant_failed detail ->
+    Alcotest.failf "terminalization invariant failed: %s" detail
   | C.Terminalization_owner_unregistered_deferred ->
     Alcotest.fail "current exact owner unexpectedly deferred terminalization"
 ;;
@@ -1310,6 +1316,93 @@ let test_post_success_terminalization_is_canonical_and_durable () =
    | Error detail -> Alcotest.failf "terminal settlement failed: %s" detail)
 ;;
 
+let test_post_success_commit_claim_blocks_reject () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  let keeper_name = "keeper-post-success-commit-wins" in
+  let slot_id = "post-success-commit-wins" in
+  let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc post-success commit wins"
+      [ { id = slot_id; base_url = server.base_url } ]
+  in
+  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
+  let prepared = prepare_exn ~keeper_name ~registry () in
+  let quarantine_calls = ref 0 in
+  let guard : C.exact_execution_guard =
+    { F.permissive_exact_execution_guard with
+      quarantine =
+        (fun _cause _observation ->
+           incr quarantine_calls;
+           Ok C.Fsync_completed)
+    }
+  in
+  let completed =
+    execute_prepared_lane
+      ~keeper_name
+      ~net
+      ~clock
+      ~exact_execution_guard:guard
+      prepared
+    |> completed_exn
+  in
+  let terminalizer = C.completed_post_success_terminalizer completed in
+  (match C.claim_post_success_commit terminalizer with
+   | C.Commit_claim_acquired -> ()
+   | C.Commit_claim_in_progress _
+   | C.Commit_claim_already_committed
+   | C.Commit_claim_rejected _
+   | C.Commit_claim_owner_unregistered_deferred ->
+     Alcotest.fail "open post-success disposition did not grant commit claim");
+  (match C.mark_post_success_checkpoint_installed terminalizer with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "installed commit mark failed: %s" detail);
+  let completion =
+    match
+      C.terminalize_post_success
+        terminalizer
+        Keeper_event_queue_state.Commit_admission_unavailable
+    with
+    | C.Terminalization_commit_in_progress waiter -> waiter
+    | C.Terminalized _
+    | C.Terminalization_already_committed
+    | C.Terminalization_invariant_failed _
+    | C.Terminalization_owner_unregistered_deferred ->
+      Alcotest.fail "reject crossed an installed commit claim"
+  in
+  let pending = C.For_testing.post_success_snapshot terminalizer in
+  Alcotest.(check bool)
+    "installed checkpoint remains pending valid"
+    true
+    (pending.phase = C.Phase_installed_pending_valid);
+  Alcotest.(check int) "reject settlement has not run" 0 pending.domain_rejected_attempts;
+  Alcotest.(check int) "quarantine has not run" 0 !quarantine_calls;
+  (match C.settle_post_success_domain_valid terminalizer with
+   | Ok () -> ()
+   | Error detail -> Alcotest.failf "Domain_valid settlement failed: %s" detail);
+  Eio.Promise.await completion;
+  (match
+     C.terminalize_post_success
+       terminalizer
+       Keeper_event_queue_state.Checkpoint_persistence_failed
+   with
+   | C.Terminalization_already_committed -> ()
+   | C.Terminalized _
+   | C.Terminalization_commit_in_progress _
+   | C.Terminalization_invariant_failed _
+   | C.Terminalization_owner_unregistered_deferred ->
+     Alcotest.fail "committed checkpoint was downgraded by a later reject");
+  let committed = C.For_testing.post_success_snapshot terminalizer in
+  Alcotest.(check bool)
+    "post-success disposition is committed"
+    true
+    (committed.phase = C.Phase_committed);
+  Alcotest.(check int) "Domain_valid runs once" 1 committed.domain_valid_attempts;
+  Alcotest.(check int) "Domain_rejected never runs" 0 committed.domain_rejected_attempts;
+  Alcotest.(check int) "quarantine never runs" 0 !quarantine_calls
+;;
+
 let test_post_success_terminalization_overlap_is_affine_and_durable () =
   run_eio
   @@ fun ~sw ~net ~clock ->
@@ -1356,8 +1449,7 @@ let test_post_success_terminalization_overlap_is_affine_and_durable () =
   in
   let terminalizer = C.completed_post_success_terminalizer completed in
   let first_result, resolve_first_result = Eio.Promise.create () in
-  let second_started, resolve_second_started = Eio.Promise.create () in
-  let second_result, resolve_second_result = Eio.Promise.create () in
+  let checkpoint_calls = ref 0 in
   Eio.Fiber.fork ~sw (fun () ->
     C.terminalize_post_success
       terminalizer
@@ -1365,23 +1457,39 @@ let test_post_success_terminalization_overlap_is_affine_and_durable () =
     |> terminalized_exn
     |> Eio.Promise.resolve resolve_first_result);
   Eio.Promise.await quarantine_entered;
-  Eio.Fiber.fork ~sw (fun () ->
-    Eio.Promise.resolve resolve_second_started ();
-    C.terminalize_post_success
-      terminalizer
-      Keeper_event_queue_state.Checkpoint_persistence_failed
-    |> terminalized_exn
-    |> Eio.Promise.resolve resolve_second_result);
-  Eio.Promise.await second_started;
-  Eio.Fiber.yield ();
+  let commit_waiter =
+    match C.claim_post_success_commit terminalizer with
+    | C.Commit_claim_in_progress waiter -> waiter
+    | C.Commit_claim_acquired ->
+      incr checkpoint_calls;
+      Alcotest.fail "commit acquired after reject claim"
+    | C.Commit_claim_already_committed
+    | C.Commit_claim_rejected _
+    | C.Commit_claim_owner_unregistered_deferred ->
+      Alcotest.fail "reject claimant did not block concurrent commit"
+  in
+  let claimed = C.For_testing.post_success_snapshot terminalizer in
+  Alcotest.(check bool)
+    "reject claim is visible at the quarantine barrier"
+    true
+    (claimed.phase = C.Phase_reject_claimed);
+  Alcotest.(check int) "reject settlement claimed once" 1 claimed.domain_rejected_attempts;
+  Alcotest.(check int) "valid settlement not attempted" 0 claimed.domain_valid_attempts;
+  Alcotest.(check int) "blocked commit performs no checkpoint I/O" 0 !checkpoint_calls;
   Eio.Promise.resolve resolve_release_quarantine ();
   let first = Eio.Promise.await first_result in
-  let second = Eio.Promise.await second_result in
+  Eio.Promise.await commit_waiter;
+  (match C.claim_post_success_commit terminalizer with
+   | C.Commit_claim_rejected (terminal, Ok ()) when terminal = first -> ()
+   | C.Commit_claim_rejected (_, Error detail) ->
+     Alcotest.failf "canonical rejection failed: %s" detail
+   | C.Commit_claim_acquired
+   | C.Commit_claim_in_progress _
+   | C.Commit_claim_already_committed
+   | C.Commit_claim_rejected _
+   | C.Commit_claim_owner_unregistered_deferred ->
+     Alcotest.fail "commit did not observe the canonical rejected disposition");
   Alcotest.(check int) "overlap performs one quarantine" 1 !quarantine_calls;
-  Alcotest.(check bool)
-    "overlap returns one canonical terminal"
-    true
-    (first = second);
   Alcotest.(check bool)
     "first concurrent cause remains canonical"
     true
@@ -1393,7 +1501,7 @@ let test_post_success_terminalization_overlap_is_affine_and_durable () =
        ~keeper_name
        ~lease
        ~source
-       ~terminal:second
+       ~terminal:first
        ~settled_at:5.0
    with
    | Ok (P.Settled _) -> ()
@@ -1979,6 +2087,10 @@ let () =
             "terminalization is canonical and durable"
             `Quick
             test_post_success_terminalization_is_canonical_and_durable
+        ; Alcotest.test_case
+            "commit claim blocks reject after install"
+            `Quick
+            test_post_success_commit_claim_blocks_reject
         ; Alcotest.test_case
             "terminalization overlap is affine and durable"
             `Quick

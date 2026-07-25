@@ -134,7 +134,7 @@ let state_to_string = function
   | Blocked _ -> "blocked"
 ;;
 
-let exact_provenance_to_yojson provenance =
+let exact_provenance_to_yojson (provenance : exact_provenance) =
   `Assoc
     [ "slot_id", `String provenance.slot_id
     ; "call_id", `String provenance.call_id

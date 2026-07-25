@@ -21,6 +21,9 @@ type owner_state =
   ; keeper_name : string
   ; lane_id : Keeper_lane.Id.t
   ; phase : owner_phase Atomic.t
+  ; boundary_mu : Stdlib.Mutex.t
+  ; mutable boundary_users : int
+  ; mutable deferred_release : (unit -> unit) option
   ; librarian_execution_slot : librarian_execution_slot
   ; librarian_execution_slot_mu : Eio.Mutex.t
   }
@@ -84,6 +87,9 @@ let create_owner ~base_path ~keeper_name ~lane_id =
     ; keeper_name
     ; lane_id
     ; phase = Atomic.make Active
+    ; boundary_mu = Stdlib.Mutex.create ()
+    ; boundary_users = 0
+    ; deferred_release = None
     ; librarian_execution_slot = { capacity = 0; in_use = 0 }
     ; librarian_execution_slot_mu = Eio.Mutex.create ()
     }
@@ -117,17 +123,29 @@ let release_scope scope =
        scope.scope)
 ;;
 
-let rec retire_owner owner =
-  match Atomic.get owner.state.phase with
-  | Retired -> ()
-  | (Active | Draining) as phase ->
-    if Atomic.compare_and_set owner.state.phase phase Retired
-    then (
-      release_scope owner.compaction;
-      release_scope owner.board_attention;
-      release_scope owner.hitl_summary;
-      release_scope owner.librarian)
-    else retire_owner owner
+let release_owner_scopes owner =
+  release_scope owner.compaction;
+  release_scope owner.board_attention;
+  release_scope owner.hitl_summary;
+  release_scope owner.librarian
+;;
+
+let retire_owner owner =
+  let release_now =
+    Stdlib.Mutex.protect owner.state.boundary_mu (fun () ->
+      match Atomic.get owner.state.phase with
+      | Retired -> false
+      | Active
+      | Draining ->
+        Atomic.set owner.state.phase Retired;
+        if owner.state.boundary_users = 0
+        then true
+        else (
+          owner.state.deferred_release <-
+            Some (fun () -> release_owner_scopes owner);
+          false))
+  in
+  if release_now then release_owner_scopes owner
 ;;
 
 let for_registered ~registered_lane_id ~base_path ~keeper_name ~surface =
@@ -171,22 +189,49 @@ let for_registered ~registered_lane_id ~base_path ~keeper_name ~surface =
 let preference_store scope = scope.preference_store
 let scope scope = scope.scope
 
+let release_boundary owner =
+  let deferred =
+    Stdlib.Mutex.protect owner.boundary_mu (fun () ->
+      owner.boundary_users <- Int.max 0 (owner.boundary_users - 1);
+      if owner.boundary_users = 0
+      then (
+        let deferred = owner.deferred_release in
+        owner.deferred_release <- None;
+        deferred)
+      else None)
+  in
+  Option.iter (fun release -> release ()) deferred
+;;
+
 let with_boundary ~allow_draining scope ~registered_lane_id f =
-  Keeper_lifecycle_reservation.with_key_lock
-    ~base_path:scope.owner.base_path
-    ~keeper_name:scope.owner.keeper_name
-    (fun () ->
-       match registered_lane_id () with
-       | Some lane_id
-         when Keeper_lane.Id.equal scope.owner.lane_id lane_id
-              &&
-              (match Atomic.get scope.owner.phase with
-               | Active -> true
-               | Draining -> allow_draining
-               | Retired -> false) ->
-         Current (f ())
-       | Some _
-       | None -> Owner_unregistered_deferred)
+  let claimed =
+    Keeper_lifecycle_reservation.with_key_lock
+      ~base_path:scope.owner.base_path
+      ~keeper_name:scope.owner.keeper_name
+      (fun () ->
+         match registered_lane_id () with
+         | Some lane_id when Keeper_lane.Id.equal scope.owner.lane_id lane_id ->
+           Stdlib.Mutex.protect scope.owner.boundary_mu (fun () ->
+             match Atomic.get scope.owner.phase with
+             | Active ->
+               scope.owner.boundary_users <- scope.owner.boundary_users + 1;
+               true
+             | Draining when allow_draining ->
+               scope.owner.boundary_users <- scope.owner.boundary_users + 1;
+               true
+             | Draining
+             | Retired ->
+               false)
+         | Some _
+         | None ->
+           false)
+  in
+  if not claimed
+  then Owner_unregistered_deferred
+  else
+    Fun.protect
+      ~finally:(fun () -> release_boundary scope.owner)
+      (fun () -> Current (f ()))
 ;;
 
 let with_current scope ~registered_lane_id f =
@@ -222,14 +267,14 @@ let with_librarian_execution_slot scope ~capacity f =
         (fun () -> Some (f ()))
 ;;
 
-let rec transition_to_draining state =
-  match Atomic.get state.phase with
-  | Active ->
-    if Atomic.compare_and_set state.phase Active Draining
-    then Retirement_draining
-    else transition_to_draining state
-  | Draining -> Retirement_draining
-  | Retired -> Retirement_owner_replaced
+let transition_to_draining state =
+  Stdlib.Mutex.protect state.boundary_mu (fun () ->
+    match Atomic.get state.phase with
+    | Active ->
+      Atomic.set state.phase Draining;
+      Retirement_draining
+    | Draining -> Retirement_draining
+    | Retired -> Retirement_owner_replaced)
 ;;
 
 let begin_retirement ~base_path ~keeper_name ~expected_lane_id =

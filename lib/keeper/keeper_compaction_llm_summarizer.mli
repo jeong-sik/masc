@@ -16,7 +16,42 @@ type 'a post_success_boundary =
 
 type post_success_terminalization =
   | Terminalized of Keeper_event_queue_state.exact_execution_terminal
+  | Terminalization_commit_in_progress of unit Eio.Promise.t
+  | Terminalization_already_committed
+  | Terminalization_invariant_failed of string
   | Terminalization_owner_unregistered_deferred
+
+type post_success_commit_claim =
+  | Commit_claim_acquired
+  | Commit_claim_in_progress of unit Eio.Promise.t
+  | Commit_claim_already_committed
+  | Commit_claim_rejected of
+      Keeper_event_queue_state.exact_execution_terminal
+      * (unit, string) result
+  | Commit_claim_owner_unregistered_deferred
+
+type 'a post_success_commit_boundary =
+  | Post_success_commit_owner_result of 'a
+  | Post_success_commit_in_progress of unit Eio.Promise.t
+  | Post_success_commit_already_committed
+  | Post_success_commit_rejected of
+      Keeper_event_queue_state.exact_execution_terminal
+      * (unit, string) result
+  | Post_success_commit_owner_unregistered_deferred
+
+type post_success_phase_snapshot =
+  | Phase_open
+  | Phase_commit_claimed
+  | Phase_installed_pending_valid
+  | Phase_committed
+  | Phase_reject_claimed
+  | Phase_rejected
+
+type post_success_snapshot =
+  { phase : post_success_phase_snapshot
+  ; domain_valid_attempts : int
+  ; domain_rejected_attempts : int
+  }
 
 type prepared_lane
 
@@ -129,6 +164,24 @@ val completed_exact_execution_evidence : completed_plan -> exact_execution_evide
 val completed_attempt_observation : completed_plan -> attempt_observation
 val completed_post_success_terminalizer : completed_plan -> post_success_terminalizer
 
+val claim_post_success_commit :
+  post_success_terminalizer -> post_success_commit_claim
+
+(** Pin the exact-flow owner for the whole commit callback without holding the
+    lifecycle key lock. Only the [Open] claimant executes [commit]. *)
+val with_post_success_commit :
+  post_success_terminalizer ->
+  (unit -> 'a) ->
+  'a post_success_commit_boundary
+
+val mark_post_success_checkpoint_installed :
+  post_success_terminalizer -> (unit, string) result
+
+val terminalize_claimed_commit :
+  post_success_terminalizer ->
+  Keeper_event_queue_state.exact_execution_terminal_cause ->
+  post_success_terminalization
+
 val terminalize_post_success
   :  post_success_terminalizer
   -> Keeper_event_queue_state.exact_execution_terminal_cause
@@ -181,4 +234,7 @@ module For_testing : sig
 
   val attempt_observations : prepared_lane -> attempt_observation list
   val candidate_snapshot_slot_ids : prepared_lane -> string list
+
+  val post_success_snapshot :
+    post_success_terminalizer -> post_success_snapshot
 end

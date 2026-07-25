@@ -75,6 +75,23 @@ type compaction_recovery_error =
   | No_compaction of no_compaction
   | Retry_suspended of { consecutive_failures : int }
 
+type prepared_commit_failure =
+  { error : compaction_recovery_error
+  ; committed : compaction_recovery option
+  }
+
+type prepared_commit_completion =
+  | Commit_completion_committed of compaction_recovery
+  | Commit_completion_rejected of no_compaction
+  | Commit_completion_failed of prepared_commit_failure
+
+type prepared_commit_outcome =
+  | Committed of compaction_recovery
+  | Commit_in_progress of prepared_commit_completion Eio.Promise.t
+  | Already_committed of compaction_recovery
+  | Already_rejected of no_compaction
+  | Commit_failed of prepared_commit_failure
+
 let compaction_recovery_error_to_tag = function
   | Checkpoint_ref_load_failed Keeper_checkpoint_store.Ref_not_found ->
     "checkpoint_not_found"
@@ -520,7 +537,38 @@ type prepared_compaction =
   ; evidence : Keeper_compaction_evidence.t
   ; post_success_terminalizer :
       Keeper_compaction_llm_summarizer.post_success_terminalizer
+  ; commit_waiter : prepared_commit_completion Eio.Promise.t
+  ; publish_commit_completion : prepared_commit_completion -> unit
+  ; canonical_commit_completion :
+      prepared_commit_completion option Atomic.t
   }
+
+type uncommitted_prepared_outcome =
+  | Uncommitted_terminalized of no_compaction
+  | Uncommitted_commit_in_progress of
+      prepared_commit_completion Eio.Promise.t
+  | Uncommitted_already_committed of compaction_recovery
+  | Uncommitted_failed of compaction_recovery_error
+
+let publish_prepared_commit_completion prepared completion =
+  if
+    Atomic.compare_and_set
+      prepared.canonical_commit_completion
+      None
+      (Some completion)
+  then prepared.publish_commit_completion completion
+;;
+
+let observed_commit_completion prepared =
+  match Atomic.get prepared.canonical_commit_completion with
+  | Some (Commit_completion_committed recovery) ->
+    Already_committed recovery
+  | Some (Commit_completion_rejected no_compaction) ->
+    Already_rejected no_compaction
+  | Some (Commit_completion_failed failure) ->
+    Commit_failed failure
+  | None -> Commit_in_progress prepared.commit_waiter
+;;
 
 let no_compaction_of_uncommitted_prepared
       ?(cause = Keeper_event_queue_state.Commit_admission_unavailable)
@@ -532,12 +580,36 @@ let no_compaction_of_uncommitted_prepared
       cause
   with
   | Keeper_compaction_llm_summarizer.Terminalized terminal ->
-    Ok
+    let no_compaction =
       { source = prepared.source_ref
       ; reason = Exact_execution_terminal terminal
       }
+    in
+    publish_prepared_commit_completion
+      prepared
+      (Commit_completion_rejected no_compaction);
+    Uncommitted_terminalized no_compaction
+  | Keeper_compaction_llm_summarizer.Terminalization_commit_in_progress _ ->
+    Uncommitted_commit_in_progress prepared.commit_waiter
+  | Keeper_compaction_llm_summarizer.Terminalization_already_committed ->
+    (match observed_commit_completion prepared with
+     | Already_committed recovery ->
+       Uncommitted_already_committed recovery
+     | Commit_in_progress waiter ->
+       Uncommitted_commit_in_progress waiter
+     | Commit_failed failure -> Uncommitted_failed failure.error
+     | Already_rejected no_compaction ->
+       Uncommitted_terminalized no_compaction
+     | Committed recovery ->
+       Uncommitted_already_committed recovery)
+  | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed detail ->
+    let error = Checkpoint_candidate_failed detail in
+    publish_prepared_commit_completion
+      prepared
+      (Commit_completion_failed { error; committed = None });
+    Uncommitted_failed error
   | Keeper_compaction_llm_summarizer.Terminalization_owner_unregistered_deferred ->
-    Error
+    Uncommitted_failed
       (Compaction_rejected
          Keeper_compact_policy.Exact_owner_unregistered_deferred)
 ;;
@@ -618,6 +690,7 @@ let prepare_compaction_admitted
      | Keeper_compact_policy.Prepared prepared_trigger,
        Some evidence,
        Some post_success_terminalizer ->
+       let commit_waiter, commit_resolver = Eio.Promise.create () in
        Ok
          { session
          ; source_ref
@@ -628,6 +701,15 @@ let prepare_compaction_admitted
          ; context = preparation.context
          ; evidence
          ; post_success_terminalizer
+         ; commit_waiter
+         ; publish_commit_completion =
+             (fun completion ->
+                ignore
+                  (Eio.Promise.try_resolve
+                     commit_resolver
+                     completion
+                   : bool))
+         ; canonical_commit_completion = Atomic.make None
          }
      | Keeper_compact_policy.Rejected (_, reason), _, _ ->
        (match rejection_disposition reason with
@@ -703,15 +785,10 @@ let prepare_compaction
     ~projection_request
 ;;
 
-type prepared_commit_outcome =
-  | Prepared_commit_succeeded of compaction_recovery
-  | Prepared_commit_terminal of
-      Keeper_event_queue_state.exact_execution_terminal_cause
-
 let commit_prepared_compaction_with
     ~save_oas_checkpoint_if_source
     (prepared : prepared_compaction)
-  : (compaction_recovery, compaction_recovery_error) result =
+  : prepared_commit_outcome =
   (* Source-CAS commit.  The caller decides which admission (if any) guards
      this phase; correctness against interleaved state change is enforced
      by [expected_source_ref], not by the slot. *)
@@ -724,11 +801,57 @@ let commit_prepared_compaction_with
       ; context
       ; evidence
       ; post_success_terminalizer
+      ; _
       } =
     prepared
   in
-  let terminal cause = Prepared_commit_terminal cause in
-  let commit_current () =
+  let commit_failure ?committed error =
+    Commit_failed { error; committed }
+  in
+  let publish_owner outcome =
+    let completion =
+      match outcome with
+      | Committed recovery -> Commit_completion_committed recovery
+      | Already_rejected no_compaction ->
+        Commit_completion_rejected no_compaction
+      | Commit_failed failure -> Commit_completion_failed failure
+      | Commit_in_progress _
+      | Already_committed _ ->
+        invalid_arg "non-owner prepared commit outcome cannot be published"
+    in
+    publish_prepared_commit_completion prepared completion;
+    outcome
+  in
+  let terminalized_outcome = function
+    | Keeper_compaction_llm_summarizer.Terminalized terminal ->
+      Already_rejected
+        { source = source_ref
+        ; reason = Exact_execution_terminal terminal
+        }
+    | Keeper_compaction_llm_summarizer.Terminalization_commit_in_progress _ ->
+      commit_failure
+        (Checkpoint_candidate_failed
+           "post-success commit terminalization is already in progress")
+    | Keeper_compaction_llm_summarizer.Terminalization_already_committed ->
+      commit_failure
+        (Checkpoint_candidate_failed
+           "commit owner observed an already-committed terminalization")
+    | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed detail ->
+      commit_failure (Checkpoint_candidate_failed detail)
+    | Keeper_compaction_llm_summarizer.Terminalization_owner_unregistered_deferred ->
+      commit_failure
+        (Compaction_rejected
+           Keeper_compact_policy.Exact_owner_unregistered_deferred)
+  in
+  let terminalize_claimed cause =
+    Keeper_compaction_llm_summarizer.terminalize_claimed_commit
+      post_success_terminalizer
+      cause
+    |> terminalized_outcome
+    |> publish_owner
+  in
+  let installed_recovery = ref None in
+  let commit_claimed () =
     try
      match
        save_oas_checkpoint_if_source
@@ -743,22 +866,7 @@ let commit_prepared_compaction_with
      | Ok
          ( saved_checkpoint
          , (Keeper_checkpoint_store.Installed installed as installation) ) ->
-       (match
-          Keeper_compaction_llm_summarizer
-          .settle_post_success_domain_valid
-            post_success_terminalizer
-        with
-        | Ok () -> ()
-        | Error detail ->
-          Log.Keeper.error
-            "compaction checkpoint installed but OAS domain preference settlement failed keeper=%s: %s"
-            retry_meta.name
-            detail);
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string Compactions)
-         ~labels:[ "keeper", retry_meta.name ]
-         ();
-       Prepared_commit_succeeded
+       let recovery =
          { checkpoint = saved_checkpoint
          ; checkpoint_installation = installation
          ; trigger = prepared_trigger
@@ -769,6 +877,43 @@ let commit_prepared_compaction_with
                installed.installed_ref
                projection_target
          }
+       in
+       installed_recovery := Some recovery;
+       Eio.Cancel.protect
+       @@ fun () ->
+       (match
+          Keeper_compaction_llm_summarizer
+          .mark_post_success_checkpoint_installed
+            post_success_terminalizer
+        with
+        | Error detail ->
+          publish_owner
+            (commit_failure
+               ~committed:recovery
+               (Checkpoint_candidate_failed detail))
+        | Ok () ->
+          (match
+             Keeper_compaction_llm_summarizer
+             .settle_post_success_domain_valid
+               post_success_terminalizer
+           with
+           | Error detail ->
+             publish_owner
+               (commit_failure
+                  ~committed:recovery
+                  (Checkpoint_candidate_failed detail))
+           | Ok () ->
+             (try
+                Otel_metric_store.inc_counter
+                  Keeper_metrics.(to_string Compactions)
+                  ~labels:[ "keeper", retry_meta.name ]
+                  ()
+              with
+              | exn ->
+                log_keeper_exn
+                  ~label:"compaction committed metric emission"
+                  exn);
+             publish_owner (Committed recovery)))
      | Ok
          ( _
          , Keeper_checkpoint_store.Not_installed
@@ -776,7 +921,7 @@ let commit_prepared_compaction_with
        Log.Keeper.warn
          "compaction checkpoint source changed: %s"
          (checkpoint_ref_detail actual);
-       terminal Keeper_event_queue_state.Checkpoint_source_changed
+       terminalize_claimed Keeper_event_queue_state.Checkpoint_source_changed
      | Ok
          (_, Keeper_checkpoint_store.Not_installed { cause = cas_error; _ })
      | Error (Persistence_error cas_error) ->
@@ -790,35 +935,54 @@ let commit_prepared_compaction_with
              , Keeper_checkpoint_failure_operation.(to_label Compaction_save) )
          ]
          ();
-       terminal Keeper_event_queue_state.Checkpoint_persistence_failed
+       terminalize_claimed Keeper_event_queue_state.Checkpoint_persistence_failed
      | Error (Tool_history_invalid _) ->
-       terminal Keeper_event_queue_state.Invalid_structural_source_after_dispatch
+       terminalize_claimed
+         Keeper_event_queue_state.Invalid_structural_source_after_dispatch
     with
-    | Eio.Cancel.Cancelled _ ->
-      terminal Keeper_event_queue_state.Exact_execution_cancelled
+    | Eio.Cancel.Cancelled _ as exn ->
+      let raw_bt = Printexc.get_raw_backtrace () in
+      if Option.is_none !installed_recovery
+      then (
+        Eio.Cancel.protect (fun () ->
+          ignore
+            (terminalize_claimed
+               Keeper_event_queue_state.Exact_execution_cancelled)));
+      Printexc.raise_with_backtrace exn raw_bt
     | exn ->
       let detail = Printexc.to_string exn in
       log_keeper_exn ~label:"compaction checkpoint save exception" exn;
-      Log.Keeper.error "compaction checkpoint save exception became terminal: %s" detail;
-      terminal Keeper_event_queue_state.Checkpoint_persistence_failed
+      (match !installed_recovery with
+       | Some recovery ->
+         publish_owner
+           (commit_failure
+              ~committed:recovery
+              (Checkpoint_candidate_failed
+                 ("post-install compaction finalization raised: " ^ detail)))
+       | None ->
+         Log.Keeper.error
+           "compaction checkpoint save exception became terminal: %s"
+           detail;
+         terminalize_claimed
+           Keeper_event_queue_state.Checkpoint_persistence_failed)
   in
   match
-    Keeper_compaction_llm_summarizer.with_current_post_success
+    Keeper_compaction_llm_summarizer.with_post_success_commit
       prepared.post_success_terminalizer
-      commit_current
+      commit_claimed
   with
-  | Keeper_compaction_llm_summarizer.Post_success_owner_unregistered_deferred ->
-    Error
+  | Keeper_compaction_llm_summarizer.Post_success_commit_owner_unregistered_deferred ->
+    commit_failure
       (Compaction_rejected
          Keeper_compact_policy.Exact_owner_unregistered_deferred)
-  | Keeper_compaction_llm_summarizer.Post_success_current
-      (Prepared_commit_succeeded recovery) ->
-    Ok recovery
-  | Keeper_compaction_llm_summarizer.Post_success_current
-      (Prepared_commit_terminal cause) ->
-    (match no_compaction_of_uncommitted_prepared ~cause prepared with
-     | Ok no_compaction -> Error (No_compaction no_compaction)
-     | Error _ as error -> error)
+  | Keeper_compaction_llm_summarizer.Post_success_commit_owner_result result ->
+    result
+  | Keeper_compaction_llm_summarizer.Post_success_commit_in_progress _ ->
+    Commit_in_progress prepared.commit_waiter
+  | Keeper_compaction_llm_summarizer.Post_success_commit_already_committed ->
+    observed_commit_completion prepared
+  | Keeper_compaction_llm_summarizer.Post_success_commit_rejected _ ->
+    observed_commit_completion prepared
 ;;
 
 let commit_prepared_compaction =
@@ -832,6 +996,11 @@ module For_testing = struct
         (Keeper_context_core.For_testing.save_oas_checkpoint_if_source_with_history
            ~save_oas_history)
       prepared
+  ;;
+
+  let post_success_snapshot prepared =
+    Keeper_compaction_llm_summarizer.For_testing.post_success_snapshot
+      prepared.post_success_terminalizer
   ;;
 end
 
@@ -854,6 +1023,6 @@ let recover_latest_checkpoint_for_compaction
       ~projection_request
       ()
   with
-  | Error _ as error -> error
+  | Error error -> Commit_failed { error; committed = None }
   | Ok prepared -> commit_prepared_compaction prepared
 ;;

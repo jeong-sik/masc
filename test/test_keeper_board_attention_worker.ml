@@ -141,6 +141,22 @@ let same_provenance
   && String.equal durable.request_body_sha256 projected.request_body_sha256
 ;;
 
+let same_candidate_visit
+      (durable : P.candidate_visit)
+      (projected : E.candidate_visit)
+  =
+  String.equal durable.flow_id projected.flow_id
+  && Int.equal durable.ordinal projected.ordinal
+  && String.equal durable.slot_id projected.slot_id
+  && String.equal
+       durable.catalog_generation_fingerprint
+       projected.catalog_generation_fingerprint
+  && String.equal durable.catalog_evidence_sha256 projected.catalog_evidence_sha256
+  && String.equal
+       durable.target_identity_fingerprint
+       projected.target_identity_fingerprint
+;;
+
 let same_candidate_provenance
       (durable : A.attempt_provenance)
       (projected : E.attempt_provenance)
@@ -244,7 +260,8 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
                }
          ; _
          }
-       when same_provenance durable first && next = rejected -> ()
+       when same_provenance durable first
+            && same_candidate_visit next rejected -> ()
      | _ -> Alcotest.fail "executed failure did not retain its durable anchor");
     callbacks := !callbacks @ [ "advance-first" ];
     ok
@@ -263,8 +280,8 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
          ; _
          }
        when same_provenance durable first
-            && durable_rejected = rejected
-            && next = third_visit -> ()
+            && same_candidate_visit durable_rejected rejected
+            && same_candidate_visit next third_visit -> ()
      | _ -> Alcotest.fail "predispatch rejection overwrote the execution anchor");
     callbacks := !callbacks @ [ "advance-rejected" ];
     ok "bind third" (before_dispatch third);

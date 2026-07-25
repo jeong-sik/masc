@@ -784,7 +784,7 @@ let extract_with_exact_output_classified_unlocked
                        parse_error)))))
   in
   match clock with
-  | None -> Error Execution_clock_unavailable
+  | None -> Error (Execution_clock_unavailable : extraction_error)
   | Some clock ->
     let* messages =
       messages_for_librarian inp

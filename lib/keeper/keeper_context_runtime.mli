@@ -179,7 +179,7 @@ val recover_latest_checkpoint_for_compaction
   -> trigger:Compaction_trigger.t
   -> projection_request:Keeper_compaction_projection_target.request
   -> unit
-  -> (compaction_recovery, Keeper_post_turn.compaction_recovery_error) result
+  -> Keeper_post_turn.prepared_commit_outcome
 
 val prepare_compaction
   :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
@@ -193,7 +193,7 @@ val prepare_compaction
 
 val commit_prepared_compaction
   :  Keeper_post_turn.prepared_compaction
-  -> (compaction_recovery, Keeper_post_turn.compaction_recovery_error) result
+  -> Keeper_post_turn.prepared_commit_outcome
 
 (** {1 Trace and Board Utilities} *)
 

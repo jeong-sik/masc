@@ -187,6 +187,11 @@ let terminal_rejection terminalizer cause =
   with
   | Keeper_compaction_llm_summarizer.Terminalized terminal ->
     Exact_execution_terminal terminal
+  | Keeper_compaction_llm_summarizer.Terminalization_commit_in_progress _
+  | Keeper_compaction_llm_summarizer.Terminalization_already_committed
+  | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed _ ->
+    summarization_rejection
+      Keeper_compaction_llm_summarizer.Exact_flow_already_started
   | Keeper_compaction_llm_summarizer.Terminalization_owner_unregistered_deferred ->
     summarization_rejection
       Keeper_compaction_llm_summarizer.Exact_owner_unregistered_deferred
@@ -221,10 +226,10 @@ let requested_messages_with_plan
        The observable outcome is deliberately NOT identical to the late
        failure, and the difference is the point:
 
-       - Late: [commit_prepared_compaction] returns [Error], which
-         [Keeper_manual_compaction.run_commit] folds into its catch-all
-         [Error (Recovery _)] -> [Manual_compaction_failed] -> [Requeue
-         Context_compaction_retry]. That settlement is not an ack
+       - Late: [commit_prepared_compaction] returns a typed [Commit_failed],
+         which [Keeper_manual_compaction.run_commit] folds into
+         [Manual_compaction_failed] -> [Requeue Context_compaction_retry].
+         That settlement is not an ack
          (keeper_heartbeat_loop.ml), so the same doomed request is re-driven
          every cycle — one summarizer call each time. This is the live
          livelock: 102 failures and 104 compaction LLM calls in the 74 minutes
@@ -461,6 +466,12 @@ let compact_for_request_typed_with
          with
          | Keeper_compaction_llm_summarizer.Terminalized terminal ->
            reject (Invalid_structural_evidence (error, terminal))
+         | Keeper_compaction_llm_summarizer.Terminalization_commit_in_progress _
+         | Keeper_compaction_llm_summarizer.Terminalization_already_committed
+         | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed _ ->
+           reject
+             (summarization_rejection
+                Keeper_compaction_llm_summarizer.Exact_flow_already_started)
          | Keeper_compaction_llm_summarizer.Terminalization_owner_unregistered_deferred ->
            reject
              (summarization_rejection

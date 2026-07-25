@@ -1351,7 +1351,7 @@ let test_shutdown_drains_inflight_worker_then_retires () =
          Eio.Promise.resolve resolve_worker_result result);
        F.await_first_request server;
        let backlog_version =
-         match Masc.Workspace_backlog.read_backlog_r config with
+         match Masc.Workspace.read_backlog_r config with
          | Ok backlog -> backlog.version
          | Error detail -> fail detail
        in

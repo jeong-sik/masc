@@ -32,8 +32,9 @@ val with_current
   -> registered_lane_id:(unit -> Keeper_lane.Id.t option)
   -> (unit -> 'a)
   -> 'a current_boundary
-(** Run a generation-sensitive boundary while the Keeper lifecycle key lock is
-    held. A retired or replaced owner cannot cross the boundary. *)
+(** Acquire a generation-sensitive owner pin under the Keeper lifecycle key
+    lock, run the callback after releasing that lock, then release the pin.
+    A retired or replaced owner cannot acquire a new pin. *)
 
 val with_settlement
   :  t
@@ -41,7 +42,8 @@ val with_settlement
   -> (unit -> 'a)
   -> 'a current_boundary
 (** Finish an already-bound generation while its owner is [Active] or
-    [Draining]. It never admits a new dispatch. *)
+    [Draining]. The lifecycle key lock covers only pin acquisition; callback
+    I/O runs outside it. Scope release is deferred until the final pin leaves. *)
 
 val with_librarian_execution_slot
   :  t

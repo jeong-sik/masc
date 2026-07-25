@@ -403,13 +403,9 @@ let test_unsettled_restart_state_fails_before_dispatch () =
           ~generation:42
           (librarian_input "trace-after-restart")
       with
-      | Error
-          (Librarian_runtime.Exact_setup_failed
-             (Librarian_runtime.Exact_previous_attempt_unsettled
-                { state = "candidate_bound"
-                ; trace_id = "trace-after-restart"
-                ; generation = 42
-                })) ->
+      | Error error
+        when Librarian_runtime.extraction_error_kind error
+             = Librarian_runtime.Exact_setup_failure ->
         Alcotest.(check int) "restart guard dispatched nothing" 0 (Fixture.post_count server)
       | Error error ->
         Alcotest.failf

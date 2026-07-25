@@ -260,6 +260,68 @@ let recover_provider_context_overflow_in_lane
       | None -> Provider_overflow_retry_without_checkpoint { trigger; reason }
       | Some recovery -> Provider_overflow_retry_with_checkpoint { reason; recovery }
     in
+    let terminal_no_compaction no_compaction =
+      Eio.Cancel.protect (fun () ->
+        let error = Keeper_post_turn.No_compaction no_compaction in
+        let reason = Keeper_post_turn.compaction_recovery_error_to_string error in
+        (try record_overflow_failure ~config ~meta ~reason with
+         | exn ->
+           Log.Keeper.error
+             ~keeper_name:meta.name
+             "provider overflow terminal observation failed without reopening exact request: %s"
+             (Printexc.to_string exn));
+        ignore (release_failed_lifecycle reason : (unit, string) result);
+        Provider_overflow_no_compaction no_compaction)
+    in
+    let applied recovery =
+      match
+        dispatch_compaction_completed
+          ~config
+          ~origin
+          ~keeper_name:meta.name
+      with
+      | Ok () ->
+        Log.Keeper.info
+          ~keeper_name:meta.name
+          "provider overflow compaction committed; source stimulus will be requeued";
+        Keeper_unified_metrics.broadcast_compaction
+          ~name:meta.name
+          recovery;
+        Provider_overflow_applied recovery
+      | Error error ->
+        retry_after_started
+          ~recovery
+          (lifecycle_dispatch_error_to_string error)
+    in
+    let failed ({ error; committed } : Keeper_post_turn.prepared_commit_failure) =
+      match committed with
+      | None ->
+        retry_after_started
+          (Keeper_post_turn.compaction_recovery_error_to_string error)
+      | Some recovery ->
+        Log.Keeper.error
+          ~keeper_name:meta.name
+          "provider overflow checkpoint committed with failed exact-domain finalization: %s"
+          (Keeper_post_turn.compaction_recovery_error_to_string error);
+        applied recovery
+    in
+    let rec commit_outcome = function
+      | Keeper_post_turn.Committed recovery
+      | Keeper_post_turn.Already_committed recovery ->
+        applied recovery
+      | Keeper_post_turn.Already_rejected no_compaction ->
+        terminal_no_compaction no_compaction
+      | Keeper_post_turn.Commit_failed failure -> failed failure
+      | Keeper_post_turn.Commit_in_progress waiter ->
+        commit_completion (Eio.Promise.await waiter)
+    and commit_completion = function
+      | Keeper_post_turn.Commit_completion_committed recovery ->
+        applied recovery
+      | Keeper_post_turn.Commit_completion_rejected no_compaction ->
+        terminal_no_compaction no_compaction
+      | Keeper_post_turn.Commit_completion_failed failure ->
+        failed failure
+    in
     (match dispatch "context_overflow_detected" overflow_event with
      | Error reason ->
        record_overflow_failure ~config ~meta ~reason;
@@ -269,7 +331,8 @@ let recover_provider_context_overflow_in_lane
         | Error reason -> retry_after_started reason
         | Ok () ->
           (try
-             match
+             commit_outcome
+               (
                recover_latest_checkpoint_for_compaction
                  ?exact_execution_guard
                  ~base_path:config.base_path
@@ -277,42 +340,7 @@ let recover_provider_context_overflow_in_lane
                  ~meta
                  ~trigger
                  ~projection_request
-                 ()
-             with
-      | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
-        Eio.Cancel.protect (fun () ->
-          let reason = Keeper_post_turn.compaction_recovery_error_to_string error in
-          (try record_overflow_failure ~config ~meta ~reason with
-           | exn ->
-             Log.Keeper.error
-               ~keeper_name:meta.name
-               "provider overflow terminal observation failed without reopening exact request: %s"
-               (Printexc.to_string exn));
-          (* fire-and-forget: terminal disposition must not reopen on release failure. *)
-          ignore (release_failed_lifecycle reason : (unit, string) result);
-          Provider_overflow_no_compaction no_compaction)
-             | Error error ->
-               retry_after_started
-                 (Keeper_post_turn.compaction_recovery_error_to_string error)
-             | Ok recovery ->
-               (match
-                  dispatch_compaction_completed
-                    ~config
-                    ~origin
-                    ~keeper_name:meta.name
-                with
-                | Ok () ->
-                  Log.Keeper.info
-                    ~keeper_name:meta.name
-                    "provider overflow compaction committed; source stimulus will be requeued";
-                  Keeper_unified_metrics.broadcast_compaction
-                    ~name:meta.name
-                    recovery;
-                  Provider_overflow_applied recovery
-                | Error error ->
-                  retry_after_started
-                    ~recovery
-                    (lifecycle_dispatch_error_to_string error))
+                 ())
            with
            | Eio.Cancel.Cancelled _ as exn ->
              let backtrace = Printexc.get_raw_backtrace () in

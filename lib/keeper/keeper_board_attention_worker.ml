@@ -1032,20 +1032,21 @@ let process_pending
   | Ok judgment ->
     (match
        with_current prepared (fun () ->
-         complete_projection
-           ~now:(now ())
-           ~worker_epoch
-           ~base_path
-           latest_partition
-           judgment)
+         let* projection =
+           complete_projection
+             ~now:(now ())
+             ~worker_epoch
+             ~base_path
+             latest_partition
+             judgment
+         in
+         signal_completion projection)
      with
      | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
        Ok
          (Owner_unregistered_deferred
             { candidate_id = (!latest_partition).candidate_id })
-     | Keeper_exact_flow_scope.Current projection ->
-       let* projection = projection in
-       signal_completion projection)
+     | Keeper_exact_flow_scope.Current step -> step)
 ;;
 
 let process_claimed

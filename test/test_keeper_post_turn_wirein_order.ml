@@ -648,23 +648,26 @@ let test_manual_compaction_serializes_owner_lane () =
         1
         (Exact_fixture.post_count stale_server);
       (match stale_plan_result with
-       | Error
-           (Post_turn.No_compaction
-              { reason =
-                  Keeper_event_queue_state.Exact_execution_terminal
-                    { cause = Keeper_event_queue_state.Checkpoint_source_changed
-                    ; slot_id
-                    ; call_id
-                    }
-              ; _
-              }) ->
+       | Post_turn.Already_rejected
+           { reason =
+               Keeper_event_queue_state.Exact_execution_terminal
+                 { cause = Keeper_event_queue_state.Checkpoint_source_changed
+                 ; slot_id
+                 ; call_id
+                 }
+           ; _
+           } ->
          check bool "stale terminal retains slot id" true (String.trim slot_id <> "");
          check bool "stale terminal retains call id" true (String.trim call_id <> "")
-       | Error error ->
+       | Post_turn.Commit_failed { error; _ } ->
          failf
            "stale plan returned wrong error: %s"
            (Post_turn.compaction_recovery_error_to_string error)
-       | Ok _ -> fail "stale compaction plan replaced a concurrent checkpoint");
+       | Post_turn.Committed _
+       | Post_turn.Already_committed _ ->
+         fail "stale compaction plan replaced a concurrent checkpoint"
+       | Post_turn.Commit_in_progress _ ->
+         fail "stale compaction did not reach a canonical outcome");
       let retained_concurrent_checkpoint =
         Masc.Keeper_checkpoint_store.load_oas
           ~session_dir:session.session_dir
@@ -1094,11 +1097,28 @@ let test_checkpoint_installation_auxiliary_manifest_tags () =
     kinds
 ;;
 
+let[@inline never] raise_history_cancellation () =
+  raise
+    (Eio.Cancel.Cancelled
+       (Failure "injected history cancellation at canonical origin"))
+;;
+
+let string_contains ~needle haystack =
+  let needle_length = String.length needle in
+  let haystack_length = String.length haystack in
+  let rec loop offset =
+    offset + needle_length <= haystack_length
+    && (String.sub haystack offset needle_length = needle
+        || loop (offset + 1))
+  in
+  needle_length = 0 || loop 0
+;;
+
 let test_prepare_commit_source_cas () =
   (* The prepare/commit split exists so the provider call can run outside
      the keeper admission; the source CAS — not the slot — is the
-     interleaving guard.  Pin both halves: a prepared plan commits, and
-     the same prepared value is rejected once the source has advanced. *)
+     interleaving guard. Pin both halves with two tokens prepared from one
+     source: the first commits and the second is rejected after advancement. *)
   Eio_main.run @@ fun env ->
   Masc_test_deps.init_eio_clock env;
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1149,13 +1169,22 @@ let test_prepare_commit_source_cas () =
   in
   publish_exact_fixture ~source:"post-turn prepared source CAS" exact_server;
   ensure_registered_keeper ~base_path:config.base_path meta;
+  let quarantine_calls = ref 0 in
+  let exact_execution_guard : Summarizer.exact_execution_guard =
+    { Exact_fixture.permissive_exact_execution_guard with
+      quarantine =
+        (fun _cause _observation ->
+           incr quarantine_calls;
+           Ok Summarizer.Fsync_completed)
+    }
+  in
   match
     Post_turn.prepare_compaction
       ~base_path:config.base_path
       ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
       ~meta
       ~trigger:Compaction_trigger.Manual
-      ~exact_execution_guard:Exact_fixture.permissive_exact_execution_guard
+      ~exact_execution_guard
       ~projection_request:(projection_request_of_meta meta)
       ()
   with
@@ -1164,9 +1193,26 @@ let test_prepare_commit_source_cas () =
       "prepare failed: %s"
       (Post_turn.compaction_recovery_error_to_string error)
   | Ok prepared ->
+    let stale_prepared =
+      match
+        Post_turn.prepare_compaction
+          ~base_path:config.base_path
+          ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+          ~meta
+          ~trigger:Compaction_trigger.Manual
+          ~exact_execution_guard
+          ~projection_request:(projection_request_of_meta meta)
+          ()
+      with
+      | Ok stale_prepared -> stale_prepared
+      | Error error ->
+        failf
+          "second prepare failed: %s"
+          (Post_turn.compaction_recovery_error_to_string error)
+    in
     check int
-      "prepare performs one real exact dispatch"
-      1
+      "two prepared tokens perform one exact dispatch each"
+      2
       (Exact_fixture.post_count exact_server);
     let was_recording = Printexc.backtrace_status () in
     Printexc.record_backtrace true;
@@ -1177,16 +1223,22 @@ let test_prepare_commit_source_cas () =
            match
              Post_turn.For_testing.commit_prepared_compaction_with_history
                ~save_oas_history:(fun ~session_dir:_ _ ->
-                 raise
-                   (Eio.Cancel.Cancelled
-                      (Failure "injected history cancellation")))
+                 raise_history_cancellation ())
                prepared
            with
-           | Ok recovery -> recovery
-           | Error error ->
+           | Post_turn.Committed recovery -> recovery
+           | Post_turn.Commit_failed { error; _ } ->
              failf
                "commit of a fresh prepared plan failed: %s"
-               (Post_turn.compaction_recovery_error_to_string error))
+               (Post_turn.compaction_recovery_error_to_string error)
+           | Post_turn.Already_rejected no_compaction ->
+             failf
+               "fresh prepared plan was rejected: %s"
+               (Post_turn.compaction_recovery_error_to_string
+                  (Post_turn.No_compaction no_compaction))
+           | Post_turn.Commit_in_progress _
+           | Post_turn.Already_committed _ ->
+             fail "fresh prepared plan did not own its commit")
     in
     (match recovery.checkpoint_installation with
      | Masc.Keeper_checkpoint_store.Installed installed ->
@@ -1198,32 +1250,59 @@ let test_prepare_commit_source_cas () =
               | Masc.Keeper_checkpoint_store.History_write_failed
                   (Eio.Cancel.Cancelled _, backtrace) ->
                 Printexc.raw_backtrace_length backtrace > 0
+                && string_contains
+                     ~needle:"raise_history_cancellation"
+                     (Printexc.raw_backtrace_to_string backtrace)
               | _ -> false)
             installed.auxiliary)
      | Masc.Keeper_checkpoint_store.Not_installed _ ->
        fail "history cancellation downgraded the installed checkpoint");
-    (* The first commit advanced the durable source; the same
-       prepared value is now stale and must be CAS-rejected. *)
+    let committed_snapshot =
+      Post_turn.For_testing.post_success_snapshot prepared
+    in
+    check bool
+      "installed history cancellation leaves the affine phase committed"
+      true
+      (committed_snapshot.phase
+       = Masc.Keeper_compaction_llm_summarizer.Phase_committed);
+    check int
+      "history cancellation retains one Domain_valid settlement"
+      1
+      committed_snapshot.domain_valid_attempts;
+    check int
+      "history cancellation performs no Domain_rejected settlement"
+      0
+      committed_snapshot.domain_rejected_attempts;
+    check int
+      "history cancellation performs no quarantine"
+      0
+      !quarantine_calls;
+    (* Both tokens were prepared from the same source. The first commit
+       advances it; the second token now proves the source-CAS rejection
+       without violating the same-token affine commit contract. *)
     (match
-       Post_turn.commit_prepared_compaction prepared
+       Post_turn.commit_prepared_compaction stale_prepared
      with
-     | Error
-         (Post_turn.No_compaction
-            { reason =
-                Keeper_event_queue_state.Exact_execution_terminal
-                  { cause = Keeper_event_queue_state.Checkpoint_source_changed
-                  ; slot_id
-                  ; call_id
-                  }
-            ; _
-            }) ->
+     | Post_turn.Already_rejected
+         { reason =
+             Keeper_event_queue_state.Exact_execution_terminal
+               { cause = Keeper_event_queue_state.Checkpoint_source_changed
+               ; slot_id
+               ; call_id
+               }
+         ; _
+         } ->
        check bool "stale prepared terminal retains slot" true (String.trim slot_id <> "");
        check bool "stale prepared terminal retains call" true (String.trim call_id <> "")
-     | Error error ->
+     | Post_turn.Commit_failed { error; _ } ->
        failf
          "stale prepared value failed with the wrong error: %s"
          (Post_turn.compaction_recovery_error_to_string error)
-     | Ok _ -> fail "stale prepared value committed past the source CAS"))
+     | Post_turn.Committed _
+     | Post_turn.Already_committed _ ->
+       fail "stale prepared value committed past the source CAS"
+     | Post_turn.Commit_in_progress _ ->
+       fail "stale prepared value did not reach canonical rejection"))
 ;;
 
 let test_invalid_structural_evidence_after_dispatch_is_terminal () =

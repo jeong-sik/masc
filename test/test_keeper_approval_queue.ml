@@ -2226,7 +2226,7 @@ let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
             ~reason:"retired"
         with
         | Error error ->
-          fail (AQ.summary_owner_retirement_error_to_string error)
+          Alcotest.fail (AQ.summary_owner_retirement_error_to_string error)
         | Ok ids -> check (list string) "retired ids" [ retirable ] ids);
        match AQ.get_pending_entry ~id:retirable with
        | Some
@@ -2235,7 +2235,7 @@ let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
            ; _
            } ->
          ()
-       | Some _ | None -> fail "pending summary was not terminalized")
+       | Some _ | None -> Alcotest.fail "pending summary was not terminalized")
 ;;
 
 let test_dashboard_retry_rejects_cross_workspace_approval () =

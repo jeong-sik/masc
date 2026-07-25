@@ -417,13 +417,18 @@ let test_domain_candidate_id_mismatch_does_not_advance () =
         Ok ()
       in
       let before_advance
-            ~(failed : Exact_flow.attempt_provenance)
+            ~(failed : Exact_flow.advance_source)
             ~next:_
         : (unit, string) result
         =
+        let failed_slot_id =
+          match failed with
+          | Exact_flow.Executed_failure provenance -> provenance.slot_id
+          | Exact_flow.Predispatch_rejection visit -> visit.slot_id
+        in
         Alcotest.failf
           "domain-invalid OAS success must not advance from %s"
-          failed.slot_id
+          failed_slot_id
       in
       (match
          Exact_flow.execute

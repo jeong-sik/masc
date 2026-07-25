@@ -14,8 +14,8 @@ val read_backlog_counts
   -> meta:keeper_meta
   -> int * int * int * int * bool
 
-(** [task_is_self_authored ~meta task] is true when [task.created_by] is the
-    keeper's own handle ([meta.name]).
+(** [task_is_self_authored_todo ~meta task] is true when an unclaimed [Todo]
+    was authored by the keeper's own stable handle ([meta.name]).
 
     A keeper that treats its own output as work waiting for it closes a
     positive feedback loop: a persona whose response to "an unclaimed task
@@ -23,9 +23,10 @@ val read_backlog_counts
     authored by itself, which re-satisfies the trigger on the next observation.
     Self-authored tasks therefore stay in the [unclaimed] count (an honest view
     of the backlog) but are excluded from [claimable] in
-    {!read_backlog_counts}. A task with no [created_by] has no known author and
-    is never excluded. *)
-val task_is_self_authored : meta:keeper_meta -> Masc_domain.task -> bool
+    {!read_backlog_counts}. Verification work remains eligible even when the
+    keeper authored the original task. A task with no [created_by] has no known
+    author and is never excluded. *)
+val task_is_self_authored_todo : meta:keeper_meta -> Masc_domain.task -> bool
 
 val audit_tasks_without_actionable_verification_ids
   :  string list

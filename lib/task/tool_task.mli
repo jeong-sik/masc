@@ -7,8 +7,20 @@ type context = {
   sw: Eio.Switch.t option;
 }
 
-val handle_add_task : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
-val handle_batch_add_tasks : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_add_task :
+  ?created_by:string ->
+  tool_name:string ->
+  start_time:float ->
+  context ->
+  Yojson.Safe.t ->
+  Tool_result.result
+val handle_batch_add_tasks :
+  ?created_by:string ->
+  tool_name:string ->
+  start_time:float ->
+  context ->
+  Yojson.Safe.t ->
+  Tool_result.result
 val handle_claim : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_claim_next : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val handle_release : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
@@ -34,6 +46,7 @@ val dispatch :
 (** Keeper-model dispatch projects semantic task-list guidance to
     [keeper_tasks_list] instead of the external [masc_tasks] transport name. *)
 val dispatch_for_keeper :
+  created_by:string ->
   context ->
   name:string ->
   args:Yojson.Safe.t ->

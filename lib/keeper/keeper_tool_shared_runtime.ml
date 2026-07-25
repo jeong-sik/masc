@@ -346,6 +346,7 @@ let keeper_text_fallback_json ~(agent_id : string) ~(message : string) =
 
 let tag_dispatch_fn
   : (config:Workspace.config
+     -> keeper_name:string
      -> agent_name:string
      -> tag:Tool_dispatch.module_tag
      -> name:string
@@ -353,7 +354,15 @@ let tag_dispatch_fn
      -> Tool_result.result option)
       ref
   =
-  ref (fun ~config:_ ~agent_name:_ ~tag:_ ~name:_ ~args:_ -> None)
+  ref
+    (fun
+      ~config:_
+      ~keeper_name:_
+      ~agent_name:_
+      ~tag:_
+      ~name:_
+      ~args:_ ->
+      None)
 ;;
 
 let descriptor_active_names active_name_set descriptor =

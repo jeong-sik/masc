@@ -49,7 +49,8 @@ let test_active_goal_ids_filter_claimable_tasks () =
       add_task ~goal_id:"goal-b" config ~title:"goal b task";
       let meta = make_meta ~active_goal_ids:[ "goal-a" ] () in
       let scope =
-        Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
+        Keeper_runtime_contract.resolve_claim_goal_scope
+          ~config ~meta ~task_eligible:(fun _ -> true) ()
       in
       check string "mode" "active_goal_ids"
         (Keeper_runtime_contract.claim_scope_mode_to_string scope.mode);
@@ -88,7 +89,8 @@ let test_no_scoped_match_falls_back_to_all_tasks () =
       add_task ~goal_id:"goal-b" config ~title:"goal b task";
       let meta = make_meta ~active_goal_ids:[ "goal-a" ] () in
       let scope =
-        Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
+        Keeper_runtime_contract.resolve_claim_goal_scope
+          ~config ~meta ~task_eligible:(fun _ -> true) ()
       in
       check string "fallback mode" "empty_goal_scope_fallback_all_tasks"
         (Keeper_runtime_contract.claim_scope_mode_to_string scope.mode);
@@ -122,7 +124,7 @@ let test_preloaded_tasks_fall_back_to_all_tasks () =
       let tasks = Workspace.get_tasks_raw config in
       let scope =
         Keeper_runtime_contract.resolve_claim_goal_scope_for_tasks ~config
-          ~meta ~tasks ()
+          ~meta ~tasks ~task_eligible:(fun _ -> true) ()
       in
       check string "fallback mode" "empty_goal_scope_fallback_all_tasks"
         (Keeper_runtime_contract.claim_scope_mode_to_string scope.mode);
@@ -144,7 +146,8 @@ let test_scoped_match_present_keeps_isolation () =
       add_task ~goal_id:"goal-b" config ~title:"goal b task";
       let meta = make_meta ~active_goal_ids:[ "goal-a" ] () in
       let scope =
-        Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
+        Keeper_runtime_contract.resolve_claim_goal_scope
+          ~config ~meta ~task_eligible:(fun _ -> true) ()
       in
       check string "scoped mode" "active_goal_ids"
         (Keeper_runtime_contract.claim_scope_mode_to_string scope.mode);
@@ -156,6 +159,56 @@ let test_scoped_match_present_keeps_isolation () =
         |> List.map (fun (task : Masc_domain.task) -> task.title)
       in
       check (list string) "only linked task in scope" [ "goal a task" ] included)
+;;
+
+let test_scoped_verification_keeps_isolation () =
+  let config = make_config () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_config config)
+    (fun () ->
+      add_task ~goal_id:"goal-a" config ~title:"goal a verification";
+      add_task ~goal_id:"goal-b" config ~title:"goal b task";
+      let _ =
+        Workspace.claim_task
+          config
+          ~agent_name:"keeper-runtime-contract"
+          ~task_id:"task-001"
+      in
+      (match
+         Workspace.transition_task_r
+           config
+           ~agent_name:"keeper-runtime-contract"
+           ~task_id:"task-001"
+           ~action:Masc_domain.Submit_for_verification
+           ~notes:"verification setup notes"
+           ()
+       with
+       | Ok _ -> ()
+       | Error error -> fail (Masc_domain.masc_error_to_string error));
+      let meta = make_meta ~active_goal_ids:[ "goal-a" ] () in
+      let scope =
+        Keeper_runtime_contract.resolve_claim_goal_scope
+          ~config
+          ~meta
+          ~task_eligible:(fun _ -> true)
+          ()
+      in
+      check
+        string
+        "verification keeps scoped mode"
+        "active_goal_ids"
+        (Keeper_runtime_contract.claim_scope_mode_to_string scope.mode);
+      check (option string) "no fallback reason" None scope.fallback_reason;
+      let included =
+        Workspace.get_tasks_raw config
+        |> List.filter scope.task_filter
+        |> List.map (fun (task : Masc_domain.task) -> task.title)
+      in
+      check
+        (list string)
+        "scope includes linked verification"
+        [ "goal a verification" ]
+        included)
 ;;
 
 let () =
@@ -170,6 +223,8 @@ let () =
             test_no_scoped_match_falls_back_to_all_tasks
         ; test_case "preloaded tasks fall back to all_tasks" `Quick
             test_preloaded_tasks_fall_back_to_all_tasks
+        ; test_case "keeps isolation for scoped verification" `Quick
+            test_scoped_verification_keeps_isolation
         ] )
     ]
 ;;

@@ -805,7 +805,9 @@ let remove_entry ?lifecycle_token ?expected ~base_path name =
        | None | Some _ ->
          let updated = StringMap.remove key current in
          if Atomic.compare_and_set registry current updated
-         then Entry_removed entry
+         then (
+           Keeper_exact_flow_scope.release_owner ~base_path ~keeper_name:name;
+           Entry_removed entry)
          else loop ())
   in
   loop ())

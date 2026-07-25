@@ -51,17 +51,6 @@ let message role text =
   Agent_sdk.Types.make_message ~role [ Agent_sdk.Types.Text text ]
 ;;
 
-let flow_preferences, flow_scope =
-  match
-    ( Exact_output.create_flow_preference_store ~capacity:1
-    , Exact_output.make_flow_scope ~id:lane_id )
-  with
-  | Ok preferences, Ok scope -> preferences, scope
-  | Error (Exact_output.Invalid_flow_preference_capacity _), _
-  | _, Error Exact_output.Blank_flow_scope_id ->
-    invalid_arg "static Board attention exact-flow scope is invalid"
-;;
-
 let messages candidate =
   let* request =
     Keeper_board_attention_candidate.singleton_judgment_request candidate
@@ -90,7 +79,7 @@ let flow_candidates selected_slots =
   loop 0 [] selected_slots
 ;;
 
-let prepare ~net candidate =
+let prepare ?flow_scope ~base_path ~keeper_name ~net candidate =
   match
     ( Keeper_board_attention_candidate.resumable_status
         candidate.Keeper_board_attention_candidate.status
@@ -104,6 +93,18 @@ let prepare ~net candidate =
   | Some (Keeper_board_attention_candidate.Resumable_pending _), None ->
     Error Network_unavailable
   | Some (Keeper_board_attention_candidate.Resumable_pending _), Some net ->
+    let* flow_scope =
+      match flow_scope with
+      | Some flow_scope -> Ok flow_scope
+      | None ->
+        Keeper_exact_flow_scope.for_registered
+          ~is_registered:(fun () ->
+            Keeper_registry.is_registered ~base_path keeper_name)
+          ~base_path
+          ~keeper_name
+          ~surface:Keeper_exact_flow_scope.Board_attention
+        |> Result.map_error (fun _ -> Registry_unavailable)
+    in
     let* messages =
       messages candidate
       |> Result.map_error (fun detail -> Prompt_contract_unavailable detail)
@@ -129,8 +130,9 @@ let prepare ~net candidate =
        in
        let* snapshot =
          Exact_output.snapshot_flow
-           ~preferences:flow_preferences
-           ~scope:flow_scope
+           ~preferences:
+             (Keeper_exact_flow_scope.preference_store flow_scope)
+           ~scope:(Keeper_exact_flow_scope.scope flow_scope)
            ~first
            ~rest
            ~messages

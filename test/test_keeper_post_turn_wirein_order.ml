@@ -14,6 +14,9 @@ module Exact_fixture = Compaction_exact_output_fixture
 module Schema = Masc.Keeper_structured_output_schema
 module Summarizer = Masc.Keeper_compaction_llm_summarizer
 
+let compaction_flow_scope ~base_path keeper_name =
+  Summarizer.For_testing.create_flow_scope ~base_path ~keeper_name
+;;
 
 let exact_terminal ?(slot_id = "compaction-slot") ?(call_id = "call-compaction") cause =
   Keeper_event_queue_state.
@@ -621,6 +624,8 @@ let test_manual_compaction_serializes_owner_lane () =
         stale_server;
       let stale_plan_result =
         Post_turn.recover_latest_checkpoint_for_compaction
+          ~flow_scope:(compaction_flow_scope ~base_path:config.base_path meta.name)
+          ~base_path:config.base_path
           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
           ~meta
           ~trigger:Compaction_trigger.Manual
@@ -936,6 +941,8 @@ let test_missing_exact_lane_is_source_bound_no_compaction () =
             (Runtime_exact_output_registry.publication_error_to_string error));
        match
          Post_turn.prepare_compaction
+           ~flow_scope:(compaction_flow_scope ~base_path:config.base_path meta.name)
+           ~base_path:config.base_path
            ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
            ~meta
            ~trigger:Compaction_trigger.Manual
@@ -996,6 +1003,8 @@ let test_malformed_structure_preserves_checkpoint () =
     Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint in
   let preparation =
     Compact_policy.compact_for_request_typed
+      ~flow_scope:(compaction_flow_scope ~base_path:config.base_path meta.name)
+      ~base_path:config.base_path
       ~meta
       ~trigger:Compaction_trigger.Manual
       context
@@ -1126,6 +1135,8 @@ let test_prepare_commit_source_cas () =
   publish_exact_fixture ~source:"post-turn prepared source CAS" exact_server;
   match
     Post_turn.prepare_compaction
+      ~flow_scope:(compaction_flow_scope ~base_path:config.base_path meta.name)
+      ~base_path:config.base_path
       ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
       ~meta
       ~trigger:Compaction_trigger.Manual
@@ -1307,6 +1318,8 @@ let test_post_dispatch_non_reducing_output_is_quarantined () =
         in
         let preparation =
           Compact_policy.compact_for_request_typed
+            ~flow_scope:(compaction_flow_scope ~base_path:config.base_path name)
+            ~base_path:config.base_path
             ~exact_execution_guard
             ~meta:(make_meta ~name ())
             ~trigger:Compaction_trigger.Manual
@@ -1378,6 +1391,7 @@ let test_suspended_streak_refuses_reactive_prepare () =
   in
   let prepare ~streak ~trigger =
     Post_turn.prepare_compaction
+      ~base_path:base_dir
       ~base_dir
       ~meta:(meta_with_streak streak)
       ~trigger

@@ -277,12 +277,20 @@ let requested_messages_with_plan
                 }))
 ;;
 
-let requested_messages ?exact_execution_guard (meta : keeper_meta) messages =
+let requested_messages
+      ?flow_scope
+      ?exact_execution_guard
+      ~base_path
+      (meta : keeper_meta)
+      messages
+  =
   requested_messages_with_plan
     ~plan_for_units:(fun ~units ->
       match
         Keeper_compaction_llm_summarizer.make
+          ?flow_scope
           ?exact_execution_guard
+          ~base_path
           ~keeper_name:meta.name
           ()
       with
@@ -469,9 +477,21 @@ let compact_for_request_typed_with
         })
 ;;
 
-let compact_for_request_typed ?exact_execution_guard ~meta ~trigger ctx =
+let compact_for_request_typed
+      ?flow_scope
+      ?exact_execution_guard
+      ~base_path
+      ~meta
+      ~trigger
+      ctx
+  =
   compact_for_request_typed_with
-    ~requested_messages:(requested_messages ?exact_execution_guard meta)
+    ~requested_messages:
+      (requested_messages
+         ?flow_scope
+         ?exact_execution_guard
+         ~base_path
+         meta)
     ~meta
     ~trigger
     ctx

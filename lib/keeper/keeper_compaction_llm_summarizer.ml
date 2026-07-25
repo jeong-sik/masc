@@ -573,7 +573,7 @@ let log_unavailable_slot ~keeper_name ~registry_generation ~lane_id unavailable 
     (Runtime_exact_output_registry.unavailable_slot_to_string unavailable)
 ;;
 
-let prepare_lane ~keeper_name ~registry ~lane_id ~units =
+let prepare_lane ~flow_scope ~keeper_name ~registry ~lane_id ~units =
   if not (has_eligible_units units)
   then Error Invalid_plan
   else
@@ -851,15 +851,38 @@ let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepar
             }))
 ;;
 
-let run_exact ?exact_execution_guard ~keeper_name ~sw:_ ~net ~clock ~units () =
+let run_exact
+      ?flow_scope
+      ?exact_execution_guard
+      ~base_path
+      ~keeper_name
+      ~sw:_
+      ~net
+      ~clock
+      ~units
+      ()
+  =
   if not (has_eligible_units units)
   then Error Invalid_plan
   else
     match Runtime_exact_output_registry.current () with
     | Error _ -> Error Exact_target_selection_failed
     | Ok registry ->
+      let* flow_scope =
+        match flow_scope with
+        | Some flow_scope -> Ok flow_scope
+        | None ->
+          Keeper_exact_flow_scope.for_registered
+            ~is_registered:(fun () ->
+              Keeper_registry.is_registered ~base_path keeper_name)
+            ~base_path
+            ~keeper_name
+            ~surface:Keeper_exact_flow_scope.Compaction
+          |> Result.map_error (fun _ -> Exact_execution_context_unavailable)
+      in
       let* prepared_lane =
         prepare_lane
+          ~flow_scope
           ~keeper_name
           ~registry
           ~lane_id:"compaction_exact"
@@ -868,18 +891,34 @@ let run_exact ?exact_execution_guard ~keeper_name ~sw:_ ~net ~clock ~units () =
       execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepared_lane
 ;;
 
-let make_resolved ?exact_execution_guard ~(keeper_name : string) () : summarizer option =
+let make_resolved
+      ?flow_scope
+      ?exact_execution_guard
+      ~base_path
+      ~(keeper_name : string)
+      ()
+      : summarizer option
+  =
   match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
   | Some sw, Some net ->
     let clock = Eio_context.get_clock_opt () in
     Some
       (fun ~units ->
-         run_exact ?exact_execution_guard ~keeper_name ~sw ~net ~clock ~units ())
+         run_exact
+           ?flow_scope
+           ?exact_execution_guard
+           ~base_path
+           ~keeper_name
+           ~sw
+           ~net
+           ~clock
+           ~units
+           ())
   | _ -> None
 ;;
 
-let make ?exact_execution_guard ~keeper_name () =
-  make_resolved ?exact_execution_guard ~keeper_name ()
+let make ?flow_scope ?exact_execution_guard ~base_path ~keeper_name () =
+  make_resolved ?flow_scope ?exact_execution_guard ~base_path ~keeper_name ()
 ;;
 
 let completed_plan completed = completed.plan
@@ -933,5 +972,27 @@ module For_testing = struct
       Exact_output.flow_attempt_evidence prepared_lane.flow_attempt
     in
     List.map observe_flow_attempt_receipt evidence.attempts
+  ;;
+
+  let flow_id prepared_lane =
+    prepared_lane.flow_attempt
+    |> Exact_output.flow_attempt_id
+    |> Exact_output.flow_id_to_string
+  ;;
+
+  let candidate_snapshot_slot_ids prepared_lane =
+    let evidence : Exact_output.flow_evidence =
+      Exact_output.flow_attempt_evidence prepared_lane.flow_attempt
+    in
+    List.map
+      (fun candidate -> candidate.Exact_output.candidate_id)
+      evidence.candidate_snapshot
+  ;;
+
+  let create_flow_scope ~base_path ~keeper_name =
+    Keeper_exact_flow_scope.For_testing.create
+      ~base_path
+      ~keeper_name
+      ~surface:Keeper_exact_flow_scope.Compaction
   ;;
 end

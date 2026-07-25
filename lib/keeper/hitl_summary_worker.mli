@@ -6,8 +6,8 @@
 
 val readiness : unit -> (unit, string) result
 (** Verify that the Gate prompt and the registry-owned [hitl_auto_judge] exact
-    lane are currently available and that OAS admits at least one candidate for
-    the HITL output requirement. No provider/model/runtime scalar is read. *)
+    lane currently resolves to at least one opaque candidate. No provider,
+    model, runtime scalar, or execution preference is read. *)
 
 exception Exact_terminalization_persistence_failed of string
 

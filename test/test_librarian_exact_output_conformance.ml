@@ -41,6 +41,59 @@ let with_temp_keepers_dir f =
   Memory_io.For_testing.with_keepers_dir marker (fun () -> f marker)
 ;;
 
+let exact_flow_base_path = "/tmp/masc-librarian-exact-flow"
+
+let exact_flow_scope keeper_id =
+  Keeper_exact_flow_scope.For_testing.create
+    ~base_path:exact_flow_base_path
+    ~keeper_name:keeper_id
+    ~surface:Keeper_exact_flow_scope.Librarian
+;;
+
+let extract_with_exact_output_classified
+      ?clock
+      ~net
+      ~keeper_id
+      ~generation
+      input
+  =
+  Librarian_runtime.extract_with_exact_output_classified
+    ~flow_scope:(exact_flow_scope keeper_id)
+    ?clock
+    ~base_path:exact_flow_base_path
+    ~net
+    ~keeper_id
+    ~generation
+    input
+;;
+
+let extract_with_exact_output
+      ?clock
+      ~net
+      ~keeper_id
+      ~generation
+      input
+  =
+  Librarian_runtime.extract_with_exact_output
+    ~flow_scope:(exact_flow_scope keeper_id)
+    ?clock
+    ~base_path:exact_flow_base_path
+    ~net
+    ~keeper_id
+    ~generation
+    input
+;;
+
+let extract_and_append_with_exact_output ?clock ~net ~keeper_id input =
+  Librarian_runtime.extract_and_append_with_exact_output
+    ~flow_scope:(exact_flow_scope keeper_id)
+    ?clock
+    ~base_path:exact_flow_base_path
+    ~net
+    ~keeper_id
+    input
+;;
+
 let text_message text =
   Agent_sdk.Types.make_message
     ~role:Agent_sdk.Types.User
@@ -173,7 +226,7 @@ let test_json_only_target_is_admitted_and_persisted () =
         publish_lane [ slot ];
         let keeper_id = "librarian-json-only-keeper" in
         match
-          Librarian_runtime.extract_and_append_with_exact_output
+          extract_and_append_with_exact_output
             ~clock
             ~net
             ~keeper_id
@@ -219,7 +272,7 @@ let test_missing_json_capability_fails_before_dispatch () =
         ~supports_structured_output:false
         [ slot ];
       match
-        Librarian_runtime.extract_with_exact_output_classified
+        extract_with_exact_output_classified
           ~clock
           ~net
           ~keeper_id:"librarian-no-json-keeper"
@@ -262,7 +315,7 @@ let test_domain_invalid_output_does_not_fail_over () =
       in
       publish_lane slots;
       match
-        Librarian_runtime.extract_with_exact_output_classified
+        extract_with_exact_output_classified
           ~clock
           ~net
           ~keeper_id:"librarian-domain-invalid-keeper"
@@ -307,7 +360,7 @@ let test_unsettled_restart_state_fails_before_dispatch () =
       let keeper_id = "librarian-restart-guard-keeper" in
       write_exact_journal ~keeper_id ~state:"candidate_bound";
       match
-        Librarian_runtime.extract_with_exact_output_classified
+        extract_with_exact_output_classified
           ~clock
           ~net
           ~keeper_id
@@ -347,7 +400,7 @@ let test_oas_success_restart_state_starts_fresh_flow () =
       let keeper_id = "librarian-oas-success-restart-keeper" in
       write_exact_journal ~keeper_id ~state:"oas_success";
       match
-        Librarian_runtime.extract_with_exact_output_classified
+        extract_with_exact_output_classified
           ~clock
           ~net
           ~keeper_id
@@ -385,7 +438,7 @@ let test_missing_clock_fails_before_dispatch () =
       in
       publish_lane [ slot ];
       match
-        Librarian_runtime.extract_with_exact_output_classified
+        extract_with_exact_output_classified
           ~net
           ~keeper_id:"librarian-clock-guard-keeper"
           ~generation:1
@@ -418,7 +471,7 @@ let test_fact_upsert_failure_does_not_publish_episode () =
       let keeper_id = "librarian-fact-write-failure-keeper" in
       Unix.mkdir (Memory_io.facts_path ~keeper_id) 0o700;
       match
-        Librarian_runtime.extract_and_append_with_exact_output
+        extract_and_append_with_exact_output
           ~clock
           ~net
           ~keeper_id
@@ -455,7 +508,7 @@ let test_zero_dispatch_failure_advances_to_next_candidate () =
       publish_lane slots;
       let keeper_id = "librarian-safe-failover-keeper" in
       match
-        Librarian_runtime.extract_with_exact_output
+        extract_with_exact_output
           ~clock
           ~net
           ~keeper_id

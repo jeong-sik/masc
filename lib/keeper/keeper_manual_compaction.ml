@@ -409,6 +409,7 @@ let prepare_with ~prepare_compaction ~config ~meta =
   in
   ( base_dir
   , prepare_compaction
+      ~base_path:config.base_path
       ~base_dir
       ~meta
       ~trigger:Compaction_trigger.Manual

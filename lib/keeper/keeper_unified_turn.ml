@@ -272,6 +272,7 @@ let recover_provider_context_overflow_in_lane
              match
                recover_latest_checkpoint_for_compaction
                  ?exact_execution_guard
+                 ~base_path:config.base_path
                  ~base_dir
                  ~meta
                  ~trigger

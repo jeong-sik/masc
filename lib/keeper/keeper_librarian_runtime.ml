@@ -218,6 +218,7 @@ let message role text =
 ;;
 
 type exact_setup_error =
+  | Exact_owner_unavailable of string
   | Exact_registry_unavailable of Runtime_exact_output_registry.publication_error
   | Exact_lane_unavailable of Runtime_exact_output_registry.lane_resolution_error
   | Exact_candidate_invalid of
@@ -271,6 +272,8 @@ let execution_error_cause_to_string = function
 ;;
 
 let exact_setup_error_to_string = function
+  | Exact_owner_unavailable detail ->
+    "exact-flow owner unavailable: " ^ detail
   | Exact_registry_unavailable error ->
     "exact registry unavailable: "
     ^ Runtime_exact_output_registry.publication_error_to_string error
@@ -515,17 +518,6 @@ let flow_candidates selected_slots =
   loop 0 [] selected_slots
 ;;
 
-let flow_preferences, flow_scope =
-  match
-    ( Exact_output.create_flow_preference_store ~capacity:1
-    , Exact_output.make_flow_scope ~id:exact_lane_id )
-  with
-  | Ok preferences, Ok scope -> preferences, scope
-  | Error (Exact_output.Invalid_flow_preference_capacity _), _
-  | _, Error Exact_output.Blank_flow_scope_id ->
-    invalid_arg "static Librarian exact-flow scope is invalid"
-;;
-
 let exact_execution_error error =
   let dispatched =
     match Exact_output.flow_execution_error_outward_dispatch error with
@@ -600,6 +592,7 @@ let persist_exact_execution_terminal
 
 let extract_with_exact_output_classified_unlocked
     ?clock
+    ~flow_scope
     ~net
     ~keeper_id
     ~generation
@@ -643,8 +636,9 @@ let extract_with_exact_output_classified_unlocked
                 in
                 (match
                    Exact_output.snapshot_flow
-                     ~preferences:flow_preferences
-                     ~scope:flow_scope
+                     ~preferences:
+                       (Keeper_exact_flow_scope.preference_store flow_scope)
+                     ~scope:(Keeper_exact_flow_scope.scope flow_scope)
                      ~first
                      ~rest
                      ~messages
@@ -817,17 +811,33 @@ let extract_with_exact_output_classified_unlocked
 ;;
 
 let extract_with_exact_output_classified
+      ?flow_scope
       ?clock
+      ~base_path
       ~net
       ~keeper_id
       ~generation
       inp
   =
+  let* flow_scope =
+    match flow_scope with
+    | Some flow_scope -> Ok flow_scope
+    | None ->
+      Keeper_exact_flow_scope.for_registered
+        ~is_registered:(fun () ->
+          Keeper_registry.is_registered ~base_path keeper_id)
+        ~base_path
+        ~keeper_name:keeper_id
+        ~surface:Keeper_exact_flow_scope.Librarian
+      |> Result.map_error (fun detail ->
+        Exact_setup_failed (Exact_owner_unavailable detail))
+  in
   Eio_guard.with_mutex
     (exact_flow_mutex_for_keeper ~keeper_id)
     (fun () ->
       extract_with_exact_output_classified_unlocked
         ?clock
+        ~flow_scope
         ~net
         ~keeper_id
         ~generation
@@ -835,7 +845,9 @@ let extract_with_exact_output_classified
 ;;
 
 let extract_with_exact_output
+    ?flow_scope
     ?clock
+    ~base_path
     ~net
     ~keeper_id
     ~generation
@@ -843,7 +855,9 @@ let extract_with_exact_output
   =
   match
     extract_with_exact_output_classified
+      ?flow_scope
       ?clock
+      ~base_path
       ~net
       ~keeper_id
       ~generation
@@ -854,7 +868,9 @@ let extract_with_exact_output
 ;;
 
 let extract_and_append_with_exact_output_classified
+    ?flow_scope
     ?clock
+    ~base_path
     ~net
     ~keeper_id
     inp
@@ -870,7 +886,9 @@ let extract_and_append_with_exact_output_classified
     in
     (match
        extract_with_exact_output_classified
+         ?flow_scope
          ?clock
+         ~base_path
          ~net
          ~keeper_id
          ~generation
@@ -933,14 +951,18 @@ let extract_and_append_with_exact_output_classified
 ;;
 
 let extract_and_append_with_exact_output
+    ?flow_scope
     ?clock
+    ~base_path
     ~net
     ~keeper_id
     inp
   =
   match
     extract_and_append_with_exact_output_classified
+      ?flow_scope
       ?clock
+      ~base_path
       ~net
       ~keeper_id
       inp
@@ -949,7 +971,7 @@ let extract_and_append_with_exact_output
   | Ok episode -> Ok episode
 ;;
 
-let run_best_effort ~keeper_id (inp : Keeper_librarian.input) =
+let run_best_effort ~base_path ~keeper_id (inp : Keeper_librarian.input) =
   (* [cadence_due] short-circuits after [enabled]: a disabled keeper never
      advances its cadence counter, and a not-due turn skips extraction entirely
      (the messages remain in the window for the next due turn). The cadence
@@ -964,6 +986,7 @@ let run_best_effort ~keeper_id (inp : Keeper_librarian.input) =
            with_provider_slot ~keeper_id ~clock (fun () ->
              extract_and_append_with_exact_output_classified
                ~clock
+               ~base_path
                ~net
                ~keeper_id
                inp)

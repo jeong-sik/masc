@@ -193,9 +193,10 @@ let publish_exn ~slot_ids snapshot =
   F.publish_registry ~lane_id:conformance_lane_id ~slot_ids snapshot
 ;;
 
-let prepare_exn ~keeper_name ~registry =
+let prepare_with_scope_exn ~flow_scope ~keeper_name ~registry =
   match
     C.prepare_lane
+      ~flow_scope
       ~keeper_name
       ~registry
       ~lane_id:conformance_lane_id
@@ -205,18 +206,23 @@ let prepare_exn ~keeper_name ~registry =
   | Error _ -> Alcotest.fail "compaction flow preparation failed"
 ;;
 
+let prepare_exn ~keeper_name ~registry =
+  let flow_scope =
+    C.For_testing.create_flow_scope
+      ~base_path:"/tmp/masc-compaction-exact-output-conformance"
+      ~keeper_name
+  in
+  prepare_with_scope_exn ~flow_scope ~keeper_name ~registry
+;;
+
 let completed_exn = function
   | Ok completed -> completed
   | Error _ -> Alcotest.fail "compaction flow execution failed"
 ;;
 
-let observation_exn prepared slot_id =
-  C.For_testing.attempt_observations prepared
-  |> List.find_opt (fun (observation : C.attempt_observation) ->
-    String.equal observation.slot_id slot_id)
-  |> function
+let captured_observation_exn label = function
   | Some observation -> observation
-  | None -> Alcotest.failf "missing OAS flow attempt identity for %s" slot_id
+  | None -> Alcotest.failf "%s did not observe an OAS attempt identity" label
 ;;
 
 let check_identity label (observation : C.attempt_observation) =
@@ -256,6 +262,10 @@ let test_missing_compaction_lane_is_explicit_degraded_state () =
   in
   match
     C.prepare_lane
+      ~flow_scope:
+        (C.For_testing.create_flow_scope
+           ~base_path:"/tmp/masc-compaction-exact-output-conformance"
+           ~keeper_name:"keeper-missing-compaction-lane")
       ~keeper_name:"keeper-missing-compaction-lane"
       ~registry
       ~lane_id:"compaction_exact"
@@ -266,7 +276,7 @@ let test_missing_compaction_lane_is_explicit_degraded_state () =
   | Ok _ -> Alcotest.fail "missing lane must not be synthesized"
 ;;
 
-let test_preparation_freezes_order_generation_and_unique_call_ids () =
+let test_preparation_freezes_order_generation_and_defers_attempt_identity () =
   run_eio
   @@ fun ~sw ~net ~clock ->
   let first = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
@@ -290,15 +300,18 @@ let test_preparation_freezes_order_generation_and_unique_call_ids () =
     "one immutable MASC registry generation"
     (Registry.generation registry)
     (C.For_testing.registry_generation prepared);
-  (match C.For_testing.attempt_observations prepared with
-   | [ first_observation; second_observation ] ->
-     check_identity "first attempt" first_observation;
-     check_identity "second attempt" second_observation;
-     Alcotest.(check bool)
-       "candidate call ids are unique"
-       true
-       (not (String.equal first_observation.call_id second_observation.call_id))
-   | _ -> Alcotest.fail "prepared OAS flow did not retain two candidate identities");
+  Alcotest.(check (list string))
+    "OAS freezes the effective candidate snapshot"
+    [ "prepare-first"; "prepare-second" ]
+    (C.For_testing.candidate_snapshot_slot_ids prepared);
+  Alcotest.(check bool)
+    "flow identity is allocated without allocating candidate attempts"
+    true
+    (String.trim (C.For_testing.flow_id prepared) <> "");
+  Alcotest.(check int)
+    "preparation allocates no candidate attempt"
+    0
+    (List.length (C.For_testing.attempt_observations prepared));
   Alcotest.(check int) "preparation performs no first POST" 0 (F.post_count first);
   Alcotest.(check int) "preparation performs no second POST" 0 (F.post_count second)
 ;;
@@ -722,20 +735,147 @@ let test_independent_preparations_do_not_share_call_identity () =
   let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
   let keeper_a = prepare_exn ~keeper_name:"keeper-a" ~registry in
   let keeper_b = prepare_exn ~keeper_name:"keeper-b" ~registry in
-  let a = observation_exn keeper_a slot_id in
-  let b = observation_exn keeper_b slot_id in
   Alcotest.(check bool)
-    "independent flows own distinct call ids"
+    "independent preparations own distinct flow ids"
     true
-    (not (String.equal a.call_id b.call_id));
+    (not
+       (String.equal
+          (C.For_testing.flow_id keeper_a)
+          (C.For_testing.flow_id keeper_b)));
+  Alcotest.(check int)
+    "first preparation allocates no candidate attempt"
+    0
+    (List.length (C.For_testing.attempt_observations keeper_a));
+  Alcotest.(check int)
+    "second preparation allocates no candidate attempt"
+    0
+    (List.length (C.For_testing.attempt_observations keeper_b));
   let result_a, result_b =
     Eio.Fiber.pair
       (fun () -> execute_prepared_lane ~keeper_name:"keeper-a" ~net ~clock keeper_a)
       (fun () -> execute_prepared_lane ~keeper_name:"keeper-b" ~net ~clock keeper_b)
   in
-  ignore (completed_exn result_a : C.completed_plan);
-  ignore (completed_exn result_b : C.completed_plan);
+  let completed_a = completed_exn result_a in
+  let completed_b = completed_exn result_b in
+  let a = C.completed_attempt_observation completed_a in
+  let b = C.completed_attempt_observation completed_b in
+  check_identity "first reached attempt" a;
+  check_identity "second reached attempt" b;
+  Alcotest.(check bool)
+    "reached attempts own distinct call ids"
+    true
+    (not (String.equal a.call_id b.call_id));
   Alcotest.(check int) "independent flows post independently" 2 (F.post_count server)
+;;
+
+let test_two_keeper_scopes_freeze_and_do_not_share_preferences () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  with_temp_dir "masc-two-keeper-flow-scope"
+  @@ fun base_path ->
+  let keeper_a = "keeper-flow-scope-a" in
+  let keeper_b = "keeper-flow-scope-b" in
+  let slot_a = "two-keeper-slot-a" in
+  let slot_b = "two-keeper-slot-b" in
+  let server_a = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let server_b = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc two-keeper exact-flow scope"
+      [ { id = slot_a; base_url = server_a.base_url }
+      ; { id = slot_b; base_url = server_b.base_url }
+      ]
+  in
+  let flow_scope_a =
+    C.For_testing.create_flow_scope ~base_path ~keeper_name:keeper_a
+  in
+  let flow_scope_b =
+    C.For_testing.create_flow_scope ~base_path ~keeper_name:keeper_b
+  in
+  let registry_a = publish_exn ~slot_ids:[ slot_a; slot_b ] snapshot in
+  let prepared_a =
+    prepare_with_scope_exn
+      ~flow_scope:flow_scope_a
+      ~keeper_name:keeper_a
+      ~registry:registry_a
+  in
+  let registry_b = publish_exn ~slot_ids:[ slot_b; slot_a ] snapshot in
+  let prepared_b_before =
+    prepare_with_scope_exn
+      ~flow_scope:flow_scope_b
+      ~keeper_name:keeper_b
+      ~registry:registry_b
+  in
+  let lease_a = claim_manual_lease ~base_path ~keeper_name:keeper_a in
+  let guard_a =
+    Keeper_heartbeat_loop.For_testing.exact_execution_guard
+      ~base_path
+      ~keeper_name:keeper_a
+      ~lease:lease_a
+  in
+  let completed_a =
+    execute_prepared_lane
+      ~keeper_name:keeper_a
+      ~net
+      ~clock
+      ~exact_execution_guard:guard_a
+      prepared_a
+    |> completed_exn
+  in
+  let prepared_b_after =
+    prepare_with_scope_exn
+      ~flow_scope:flow_scope_b
+      ~keeper_name:keeper_b
+      ~registry:registry_b
+  in
+  Alcotest.(check (list string))
+    "keeper A freezes its declared snapshot"
+    [ slot_a; slot_b ]
+    (C.For_testing.candidate_snapshot_slot_ids prepared_a);
+  Alcotest.(check (list string))
+    "keeper B snapshot prepared before A success stays frozen"
+    [ slot_b; slot_a ]
+    (C.For_testing.candidate_snapshot_slot_ids prepared_b_before);
+  Alcotest.(check (list string))
+    "keeper A success cannot reorder keeper B future snapshot"
+    [ slot_b; slot_a ]
+    (C.For_testing.candidate_snapshot_slot_ids prepared_b_after);
+  Alcotest.(check bool)
+    "keeper scopes own non-shared flow identities"
+    true
+    (let ids =
+       [ C.For_testing.flow_id prepared_a
+       ; C.For_testing.flow_id prepared_b_before
+       ; C.For_testing.flow_id prepared_b_after
+       ]
+     in
+     List.sort_uniq String.compare ids |> List.length = 3);
+  let lease_b = claim_manual_lease ~base_path ~keeper_name:keeper_b in
+  let guard_b =
+    Keeper_heartbeat_loop.For_testing.exact_execution_guard
+      ~base_path
+      ~keeper_name:keeper_b
+      ~lease:lease_b
+  in
+  let completed_b =
+    execute_prepared_lane
+      ~keeper_name:keeper_b
+      ~net
+      ~clock
+      ~exact_execution_guard:guard_b
+      prepared_b_before
+    |> completed_exn
+  in
+  let observation_a = C.completed_attempt_observation completed_a in
+  let observation_b = C.completed_attempt_observation completed_b in
+  Alcotest.(check string) "keeper A dispatches its frozen first slot" slot_a observation_a.slot_id;
+  Alcotest.(check string) "keeper B dispatches its frozen first slot" slot_b observation_b.slot_id;
+  Alcotest.(check bool)
+    "keeper attempts do not share call identity"
+    true
+    (not (String.equal observation_a.call_id observation_b.call_id));
+  Alcotest.(check int) "keeper A posts once" 1 (F.post_count server_a);
+  Alcotest.(check int) "keeper B posts once" 1 (F.post_count server_b)
 ;;
 
 let test_same_flow_concurrent_loser_mutates_no_queue () =
@@ -858,12 +998,19 @@ let test_heartbeat_guard_binds_before_post () =
   in
   let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
   let prepared = prepare_exn ~keeper_name ~registry in
-  expected_observation := Some (observation_exn prepared slot_id);
-  let guard =
+  let durable_guard =
     Keeper_heartbeat_loop.For_testing.exact_execution_guard
       ~base_path
       ~keeper_name
       ~lease
+  in
+  let guard : C.exact_execution_guard =
+    { durable_guard with
+      before_dispatch =
+        (fun observation ->
+           expected_observation := Some observation;
+           durable_guard.before_dispatch observation)
+    }
   in
   ignore
     (execute_prepared_lane
@@ -1390,7 +1537,7 @@ let test_visible_sync_uncertainty_seams () =
     in
     let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
     let prepared = prepare_exn ~keeper_name ~registry in
-    let observation = observation_exn prepared slot_id in
+    let observed = ref None in
     let durable_guard =
       Keeper_heartbeat_loop.For_testing.exact_execution_guard
         ~base_path
@@ -1403,6 +1550,7 @@ let test_visible_sync_uncertainty_seams () =
         before_dispatch =
           (fun candidate ->
              incr bind_calls;
+             observed := Some candidate;
              match durable_guard.before_dispatch candidate with
              | Ok C.Fsync_completed ->
                Ok (C.Visible_sync_unconfirmed "injected bind visibility uncertainty")
@@ -1423,6 +1571,7 @@ let test_visible_sync_uncertainty_seams () =
       | Error _ -> Alcotest.fail "visible bind returned the wrong terminal"
       | Ok _ -> Alcotest.fail "visible bind unexpectedly dispatched"
     in
+    let observation = captured_observation_exn "visible bind" !observed in
     Alcotest.(check int) "visible bind callback runs once" 1 !bind_calls;
     Alcotest.(check int) "visible bind prevents POST" 0 (F.post_count server);
     Alcotest.(check bool)
@@ -1480,7 +1629,7 @@ let test_visible_sync_uncertainty_seams () =
     in
     let registry = publish_exn ~slot_ids:[ first_slot; successor_slot ] snapshot in
     let prepared = prepare_exn ~keeper_name ~registry in
-    let first_observation = observation_exn prepared first_slot in
+    let first_observation = ref None in
     let durable_guard =
       Keeper_heartbeat_loop.For_testing.exact_execution_guard
         ~base_path
@@ -1493,6 +1642,8 @@ let test_visible_sync_uncertainty_seams () =
       { before_dispatch =
           (fun candidate ->
              bound_slots := candidate.slot_id :: !bound_slots;
+             if String.equal candidate.slot_id first_slot
+             then first_observation := Some candidate;
              durable_guard.before_dispatch candidate)
       ; release_before_dispatch =
           (fun candidate ->
@@ -1517,6 +1668,9 @@ let test_visible_sync_uncertainty_seams () =
       | Error (C.Exact_execution_terminal terminal) -> terminal
       | Error _ -> Alcotest.fail "visible release returned the wrong terminal"
       | Ok _ -> Alcotest.fail "visible release incorrectly advanced"
+    in
+    let first_observation =
+      captured_observation_exn "visible release" !first_observation
     in
     Alcotest.(check (list string))
       "visible release never binds successor"
@@ -1564,7 +1718,7 @@ let test_visible_sync_uncertainty_seams () =
     in
     let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
     let prepared = prepare_exn ~keeper_name ~registry in
-    let observation = observation_exn prepared slot_id in
+    let observed = ref None in
     let durable_guard =
       Keeper_heartbeat_loop.For_testing.exact_execution_guard
         ~base_path
@@ -1577,6 +1731,7 @@ let test_visible_sync_uncertainty_seams () =
         quarantine =
           (fun cause candidate ->
              incr quarantine_calls;
+             observed := Some candidate;
              match durable_guard.quarantine cause candidate with
              | Ok C.Fsync_completed ->
                Ok (C.Visible_sync_unconfirmed "injected quarantine visibility uncertainty")
@@ -1596,6 +1751,9 @@ let test_visible_sync_uncertainty_seams () =
       | Error (C.Exact_execution_terminal terminal) -> terminal
       | Error _ -> Alcotest.fail "visible quarantine returned the wrong terminal"
       | Ok _ -> Alcotest.fail "domain-invalid output unexpectedly succeeded"
+    in
+    let observation =
+      captured_observation_exn "visible quarantine" !observed
     in
     Alcotest.(check int) "visible quarantine callback runs once" 1 !quarantine_calls;
     Alcotest.(check int) "visible quarantine follows one POST" 1 (F.post_count server);
@@ -1684,9 +1842,9 @@ let () =
             `Quick
             test_missing_compaction_lane_is_explicit_degraded_state
         ; Alcotest.test_case
-            "order, generation, and call ids are immutable"
+            "order and generation freeze before attempt allocation"
             `Quick
-            test_preparation_freezes_order_generation_and_unique_call_ids
+            test_preparation_freezes_order_generation_and_defers_attempt_identity
         ; Alcotest.test_case
             "replacement cannot mix prepared generation"
             `Quick
@@ -1757,6 +1915,10 @@ let () =
             "same-flow loser mutates no queue"
             `Quick
             test_same_flow_concurrent_loser_mutates_no_queue
+        ; Alcotest.test_case
+            "two keepers freeze and isolate future preferences"
+            `Quick
+            test_two_keeper_scopes_freeze_and_do_not_share_preferences
         ] )
     ]
 ;;

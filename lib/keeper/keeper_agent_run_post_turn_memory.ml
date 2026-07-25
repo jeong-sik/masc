@@ -121,6 +121,7 @@ let run
       }
     in
     Keeper_librarian_runtime.run_best_effort
+      ~base_path:config.base_path
       ~keeper_id:meta.name
       librarian_input
   in

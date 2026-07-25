@@ -80,17 +80,6 @@ let output_requirement =
     ~minimum_guarantee:Exact_output.Json_syntax
 ;;
 
-let flow_preferences, flow_scope =
-  match
-    ( Exact_output.create_flow_preference_store ~capacity:1
-    , Exact_output.make_flow_scope ~id:lane_id )
-  with
-  | Ok preferences, Ok scope -> preferences, scope
-  | Error (Exact_output.Invalid_flow_preference_capacity _), _
-  | _, Error Exact_output.Blank_flow_scope_id ->
-    invalid_arg "static HITL exact-flow scope is invalid"
-;;
-
 type prepared_flow =
   { entry : pending_approval
   ; generated_at : float
@@ -121,14 +110,19 @@ let flow_candidates selected_slots =
   loop [] selected_slots
 ;;
 
-let snapshot_resolved_lane ~messages (resolved : Registry.resolved_lane) =
+let snapshot_resolved_lane
+      ~flow_scope
+      ~messages
+      (resolved : Registry.resolved_lane)
+  =
   let* candidates = flow_candidates resolved.selected_slots in
   match candidates with
   | [] -> Error "HITL exact-output lane has no usable candidates"
   | first :: rest ->
     Exact_output.snapshot_flow
-      ~preferences:flow_preferences
-      ~scope:flow_scope
+      ~preferences:
+        (Keeper_exact_flow_scope.preference_store flow_scope)
+      ~scope:(Keeper_exact_flow_scope.scope flow_scope)
       ~first
       ~rest
       ~messages
@@ -137,7 +131,7 @@ let snapshot_resolved_lane ~messages (resolved : Registry.resolved_lane) =
       "HITL exact-output flow snapshot failed")
 ;;
 
-let prepare_flow ~(entry : pending_approval) =
+let prepare_flow_with_scope ~flow_scope ~(entry : pending_approval) =
   let* context_bundle =
     build_context_bundle ~entry
     |> Result.map_error context_bundle_error_to_string
@@ -157,6 +151,7 @@ let prepare_flow ~(entry : pending_approval) =
   in
   let* snapshot =
     snapshot_resolved_lane
+      ~flow_scope
       ~messages:(messages_for_summary ~system_prompt ~context_bundle)
       resolved
   in
@@ -168,6 +163,20 @@ let prepare_flow ~(entry : pending_approval) =
   Ok { entry; generated_at = Time_compat.now (); attempt }
 ;;
 
+let prepare_flow ~(entry : pending_approval) =
+  let base_path = entry.audit_base_path in
+  let keeper_name = entry.keeper_name in
+  let* flow_scope =
+    Keeper_exact_flow_scope.for_registered
+      ~is_registered:(fun () ->
+        Keeper_registry.is_registered ~base_path keeper_name)
+      ~base_path
+      ~keeper_name
+      ~surface:Keeper_exact_flow_scope.Hitl_summary
+  in
+  prepare_flow_with_scope ~flow_scope ~entry
+;;
+
 let readiness () =
   let* system_prompt = system_prompt () in
   let* registry = Registry.current () |> Result.map_error registry_error in
@@ -175,12 +184,13 @@ let readiness () =
     Registry.resolve_lane registry ~lane_id
     |> Result.map_error lane_error
   in
-  let* _snapshot =
-    snapshot_resolved_lane
-      ~messages:
-        (messages_for_summary ~system_prompt ~context_bundle:(`Assoc []))
-      resolved
+  let* candidates = flow_candidates resolved.selected_slots in
+  let* () =
+    match candidates with
+    | [] -> Error "HITL exact-output lane has no usable candidates"
+    | _ :: _ -> Ok ()
   in
+  ignore (messages_for_summary ~system_prompt ~context_bundle:(`Assoc []));
   Ok ()
 ;;
 
@@ -799,6 +809,7 @@ type finish_outcome =
 
 let spawn_with
       ~queue_writers
+      ~prepare_flow
       ~sw
       ~(entry : pending_approval)
       ~on_summary
@@ -840,7 +851,9 @@ let spawn_with
 ;;
 
 let spawn =
-  spawn_with ~queue_writers:production_exact_queue_writers
+  spawn_with
+    ~queue_writers:production_exact_queue_writers
+    ~prepare_flow
 ;;
 
 module For_testing = struct
@@ -854,7 +867,15 @@ module For_testing = struct
   let context_bundle_error_to_string = context_bundle_error_to_string
   let messages_for_summary = messages_for_summary
   let parse_summary = parse_summary
-  let prepare_flow = prepare_flow
+  let prepare_flow ~entry =
+    let flow_scope =
+      Keeper_exact_flow_scope.For_testing.create
+        ~base_path:entry.audit_base_path
+        ~keeper_name:entry.keeper_name
+        ~surface:Keeper_exact_flow_scope.Hitl_summary
+    in
+    prepare_flow_with_scope ~flow_scope ~entry
+  ;;
   let execute_prepared_flow = execute_prepared_flow
 
   let execute_prepared_flow_with_writers
@@ -888,6 +909,7 @@ module For_testing = struct
     let queue_writers = { bind_writer; release_writer; complete_writer } in
     spawn_with
       ~queue_writers
+      ~prepare_flow
       ~sw
       ~entry
       ~on_summary

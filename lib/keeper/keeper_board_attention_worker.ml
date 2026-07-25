@@ -1532,7 +1532,9 @@ let run
          match startup with
          | Error detail -> fail Process_start_recovery detail
          | Ok () ->
-           let prepare = Exact_flow.prepare ~net in
+           let prepare =
+             Exact_flow.prepare ~base_path ~keeper_name ~net
+           in
            let execute = Exact_flow.execute ~clock in
            let contention_rearms =
              make_contention_rearm_scheduler

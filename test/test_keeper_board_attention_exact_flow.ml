@@ -48,6 +48,25 @@ let run_eio f =
     ~clock:(Eio.Stdenv.clock env)
 ;;
 
+let prepare_exact ~net candidate =
+  let keeper_name =
+    "board-attention-exact-test-" ^ candidate.Candidate.candidate_id
+  in
+  let base_path = "/tmp/masc-board-attention-exact-flow" in
+  let flow_scope =
+    Keeper_exact_flow_scope.For_testing.create
+      ~base_path
+      ~keeper_name
+      ~surface:Keeper_exact_flow_scope.Board_attention
+  in
+  Exact_flow.prepare
+    ~flow_scope
+    ~base_path
+    ~keeper_name
+    ~net
+    candidate
+;;
+
 let post_id_exn raw =
   match Board.Post_id.of_string raw with
   | Ok id -> id
@@ -224,7 +243,7 @@ let test_explicit_lane_failover_and_success_provenance () =
         "board_attention_exact"
         Exact_flow.lane_id;
       let prepared =
-        match Exact_flow.prepare ~net:(Some net) candidate with
+        match prepare_exact ~net:(Some net) candidate with
         | Ok prepared -> prepared
         | Error _ -> Alcotest.fail "explicit Board-attention lane was not admitted"
       in
@@ -317,7 +336,7 @@ let test_domain_candidate_id_mismatch_does_not_advance () =
       let second = target "board-attention-must-not-run" unused.base_url in
       publish_lane [ first; second ];
       let prepared =
-        match Exact_flow.prepare ~net:(Some net) candidate with
+        match prepare_exact ~net:(Some net) candidate with
         | Ok prepared -> prepared
         | Error _ -> Alcotest.fail "valid domain-mismatch fixture was not admitted"
       in
@@ -382,7 +401,7 @@ let test_missing_lane_is_setup_error_without_dispatch () =
          Alcotest.failf
            "missing-lane registry fixture did not publish: %s"
            (Runtime_exact_output_registry.publication_error_to_string error));
-      (match Exact_flow.prepare ~net:(Some net) candidate with
+      (match prepare_exact ~net:(Some net) candidate with
        | Error Exact_flow.Lane_unavailable -> ()
        | Ok _ -> Alcotest.fail "missing Board-attention lane was synthesized"
        | Error _ -> Alcotest.fail "missing lane produced the wrong setup error");
@@ -407,13 +426,13 @@ let test_prepare_resumable_status_gate () =
     { pending with status = Candidate.Quarantine { quarantine; phase } }
   in
   let expect_candidate_not_pending label candidate =
-    match Exact_flow.prepare ~net:None candidate with
+    match prepare_exact ~net:None candidate with
     | Error Exact_flow.Candidate_not_pending -> ()
     | Error _ -> Alcotest.failf "%s returned a different setup error" label
     | Ok _ -> Alcotest.failf "%s was admitted before requeue authorization" label
   in
   let expect_network_unavailable label candidate =
-    match Exact_flow.prepare ~net:None candidate with
+    match prepare_exact ~net:None candidate with
     | Error Exact_flow.Network_unavailable -> ()
     | Error _ -> Alcotest.failf "%s did not reach the network gate" label
     | Ok _ -> Alcotest.failf "%s unexpectedly prepared without a network" label

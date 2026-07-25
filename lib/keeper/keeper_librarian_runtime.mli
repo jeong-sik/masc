@@ -97,6 +97,7 @@ val exact_lane_id : string
 (** OAS exact-output lane used by the Librarian. *)
 
 type exact_setup_error =
+  | Exact_owner_unavailable of string
   | Exact_registry_unavailable of Runtime_exact_output_registry.publication_error
   | Exact_lane_unavailable of Runtime_exact_output_registry.lane_resolution_error
   | Exact_candidate_invalid of
@@ -164,7 +165,9 @@ val librarian_provider_clock_unavailable_error : string
     classify the human diagnostic with substring matching. *)
 
 val extract_with_exact_output
-  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  :  ?flow_scope:Keeper_exact_flow_scope.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> base_path:string
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> keeper_id:string
   -> generation:int
@@ -172,7 +175,9 @@ val extract_with_exact_output
   -> (Keeper_memory_os_types.episode, string) result
 
 val extract_with_exact_output_classified
-  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  :  ?flow_scope:Keeper_exact_flow_scope.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> base_path:string
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> keeper_id:string
   -> generation:int
@@ -190,21 +195,26 @@ val extract_with_exact_output_classified
     {!librarian_provider_clock_unavailable_error} before provider I/O. *)
 
 val extract_and_append_with_exact_output
-  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  :  ?flow_scope:Keeper_exact_flow_scope.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> base_path:string
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> keeper_id:string
   -> Keeper_librarian.input
   -> (Keeper_memory_os_types.episode, string) result
 
 val extract_and_append_with_exact_output_classified
-  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  :  ?flow_scope:Keeper_exact_flow_scope.t
+  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> base_path:string
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> keeper_id:string
   -> Keeper_librarian.input
   -> (Keeper_memory_os_types.episode, extraction_error) result
 
 val run_best_effort
-  :  keeper_id:string
+  :  base_path:string
+  -> keeper_id:string
   -> Keeper_librarian.input
   -> unit
 (** Run the opt-in post-turn librarian path.

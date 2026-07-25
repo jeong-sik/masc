@@ -45,7 +45,7 @@ CAMEL_CASE_BOUNDARY_PATTERN = re.compile(
     r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
 )
 FORBIDDEN_ENV_IDENTIFIERS = frozenset(
-    ("Env_config", "Sys", "Unix", "getenv", "getenv_opt")
+    ("Env_config", "Sys", "Unix", "UnixLabels", "getenv", "getenv_opt")
 )
 POLICY_TOKENS = frozenset(("provider", "model", "credential", "token"))
 TOKEN_NORMALIZATION = {
@@ -53,6 +53,7 @@ TOKEN_NORMALIZATION = {
     "envs": "env",
     "environments": "env",
     "environment": "env",
+    "getenv": "env",
     "keys": "key",
     "models": "model",
     "providers": "provider",
@@ -62,7 +63,7 @@ TOKEN_NORMALIZATION = {
 
 def is_policy_environment_binding(identifier: str) -> bool:
     tokens = []
-    for snake_part in re.split(r"_+", identifier):
+    for snake_part in re.split(r"[_']+", identifier):
         for camel_part in CAMEL_CASE_BOUNDARY_PATTERN.split(snake_part):
             token = camel_part.rstrip("'").lower()
             if token:
@@ -257,6 +258,11 @@ EOF
     'let _ = Sys . getenv_opt "MASC_DEFAULT_MODEL"' \
     'let _ = Sys.(getenv_opt "MASC_DEFAULT_MODEL")' \
     'let _ = let open Unix in getenv "PROVIDER_API_KEY"' \
+    'let _ = UnixLabels.unsafe_getenv "PROVIDER_API_KEY"' \
+    'let _ = UnixLabels.environment ()' \
+    'let _ = UnixLabels.unsafe_environment ()' \
+    $'module U = UnixLabels\nlet _ = U.unsafe_getenv "PROVIDER_API_KEY"' \
+    'let _ = let open UnixLabels in unsafe_getenv "PROVIDER_API_KEY"' \
     'let _ = Unix . gettimeofday ()' \
     'let _ = Unix.(gettimeofday ())' \
     'let _ = Wrapper.Unix.gettimeofday ()' \
@@ -291,6 +297,10 @@ EOF
     'let _ = ProvidersEnvs.fallback ()' \
     'let _ = ApiKeys_envs.fallback ()' \
     'let _ = CredentialsEnvs.fallback ()' \
+    "let _ = Model'Env.fallback ()" \
+    "let _ = Api'Key'Env.fallback ()" \
+    'let _ = model_getenv ()' \
+    'let _ = ApiKeyGetenv ()' \
     "let _ = model'_env.fallback ()" \
     $'let _quote = \'"\'\nlet _ = Env_config.Model_defaults.default_runtime_opt ()' \
     'let _ = Credential_env.fallback ()'

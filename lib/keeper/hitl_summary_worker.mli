@@ -4,12 +4,16 @@
     admission, attempt allocation, execution, failover, receipts, and
     provenance. *)
 
-val readiness : unit -> (unit, string) result
-(** Verify that the Gate prompt and the registry-owned [hitl_auto_judge] exact
-    lane can produce one real OAS exact-output snapshot. No provider, model, or
-    runtime scalar is read. *)
+val snapshot_topology_readiness : unit -> (unit, string) result
+(** Verify only prompt availability and that the registry-owned
+    [hitl_auto_judge] topology can be frozen as an OAS exact-output snapshot.
+    This is not provider, credential, wire, or output admission. *)
 
 exception Exact_terminalization_persistence_failed of string
+
+type execution_boundary =
+  | Executed
+  | Deferred_unregistered
 
 type finish_outcome =
   | Conclusive_terminalization
@@ -63,7 +67,7 @@ module For_testing : sig
     -> ?clock:_ Eio.Time.clock
     -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
     -> prepared_flow
-    -> unit
+    -> execution_boundary
 
   type strict_snapshot_writer =
     Keeper_approval_queue.For_testing.strict_snapshot_writer
@@ -76,7 +80,7 @@ module For_testing : sig
     -> ?clock:_ Eio.Time.clock
     -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
     -> prepared_flow
-    -> unit
+    -> execution_boundary
   (** The same production callbacks with only the queue's strict atomic writer
       replaced, so durability-uncertainty tests exercise the real OAS flow. *)
 

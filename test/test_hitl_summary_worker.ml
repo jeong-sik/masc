@@ -154,25 +154,10 @@ let prepare_exn entry =
   | Error detail -> fail detail
 ;;
 
-let test_readiness_rejects_lane_without_json_guarantee () =
-  Prompt_registry.set_markdown_dir
-    (Masc_test_deps.source_path "config/prompts");
-  let slot_id = "hitl-readiness-no-json" in
-  publish_lane
-    [ slot_id ]
-    (F.resolver_snapshot
-       ~supports_response_format_json:false
-       ~supports_structured_output:false
-       ~source:"hitl-readiness-no-json"
-       [ { id = slot_id; base_url = "http://127.0.0.1:9" } ]);
-  match Worker.readiness () with
-  | Ok () -> fail "readiness admitted a lane without the HITL output guarantee"
-  | Error detail ->
-    check
-      string
-      "readiness reports OAS admission rejection"
-      "HITL exact-output flow admitted no candidates"
-      detail
+let require_executed = function
+  | Worker.Executed -> ()
+  | Worker.Deferred_unregistered ->
+    fail "registered HITL exact-flow owner was unexpectedly deferred"
 ;;
 
 let visible_after_rename_writer path body =
@@ -315,7 +300,8 @@ let test_json_mode_request_carries_canonical_domain_schema () =
          ~net
          ~clock
          ~on_summary:(fun _ -> ())
-         (prepare_exn entry);
+         (prepare_exn entry)
+       |> require_executed;
        let request_body =
          match F.request_bodies server with
          | [ body ] -> Yojson.Safe.from_string body
@@ -351,9 +337,12 @@ let test_json_mode_request_carries_canonical_domain_schema () =
 ;;
 
 let admission_id = function
-  | EO.Candidate_admitted candidate -> candidate.identity.candidate_id
+  | EO.Candidate_admitted candidate -> candidate.visit.identity.candidate_id
   | EO.Candidate_rejected rejection ->
     (EO.candidate_rejection_identity rejection).candidate_id
+;;
+
+let candidate_id (identity : EO.flow_candidate_identity) = identity.candidate_id
 ;;
 
 let test_flow_order_completion_and_replay () =
@@ -393,15 +382,27 @@ let test_flow_order_completion_and_replay () =
        let evidence = Worker.For_testing.flow_evidence prepared in
        check
          (list string)
-         "immutable admission order"
+         "immutable candidate order"
          [ "hitl-first"; "hitl-second" ]
+         (List.map candidate_id evidence.candidate_snapshot);
+       check
+         (list string)
+         "admission is deferred until execution"
+         []
          (List.map admission_id evidence.admissions);
        let delivered = ref None in
        Worker.For_testing.execute_prepared_flow
          ~net
          ~clock
          ~on_summary:(fun summary -> delivered := Some summary)
-         prepared;
+         prepared
+       |> require_executed;
+       check
+         (list string)
+         "only the reached candidate is admitted"
+         [ "hitl-first" ]
+         ((Worker.For_testing.flow_evidence prepared).admissions
+          |> List.map admission_id);
        check int "first candidate posted once" 1 (F.post_count first);
        check int "second candidate not used" 0 (F.post_count second);
        (match Q.get_pending_entry ~id:entry.id with
@@ -419,7 +420,8 @@ let test_flow_order_completion_and_replay () =
          ~net
          ~clock
          ~on_summary:(fun _ -> fail "replay delivered a second summary")
-         prepared;
+         prepared
+       |> require_executed;
        check int "replay made no second POST" 1 (F.post_count first))
 ;;
 
@@ -452,7 +454,8 @@ let test_predispatch_failure_advances_only_to_oas_successor () =
          ~net
          ~clock
          ~on_summary:(fun _ -> ())
-         (prepare_exn entry);
+         (prepare_exn entry)
+       |> require_executed;
        check int "OAS-selected successor posted once" 1 (F.post_count successor);
        match Q.get_pending_entry ~id:entry.id with
        | Some
@@ -499,6 +502,7 @@ let incapable_snapshot base_url =
 ;;
 
 let test_all_candidates_rejected_before_network () =
+  run_eio @@ fun ~sw:_ ~net ~clock ->
   with_temp_dir "hitl-all-rejected" @@ fun base_path ->
   Fun.protect
     ~finally:Q.For_testing.reset_runtime_state
@@ -510,14 +514,38 @@ let test_all_candidates_rejected_before_network () =
          [ "hitl-incapable" ]
          (incapable_snapshot "http://127.0.0.1:1");
        let entry = pending_entry ~base_path () in
-       match Worker.For_testing.prepare_flow ~entry with
-       | Ok _ -> fail "incapable candidate unexpectedly admitted"
-       | Error detail ->
-         check bool "admission failure is explicit" true
-           (Astring.String.is_infix ~affix:"admitted no candidates" detail);
-         (match Q.get_pending_entry ~id:entry.id with
-          | Some { exact_attempt = Q.Exact_unbound; _ } -> ()
-          | _ -> fail "admission failure mutated the exact queue binding"))
+       let prepared = prepare_exn entry in
+       let before = Worker.For_testing.flow_evidence prepared in
+       check
+         (list string)
+         "incapable topology remains frozen"
+         [ "hitl-incapable" ]
+         (List.map candidate_id before.candidate_snapshot);
+       check
+         (list string)
+         "incapable candidate is not pre-admitted"
+         []
+         (List.map admission_id before.admissions);
+       Worker.For_testing.execute_prepared_flow
+         ~net
+         ~clock
+         ~on_summary:(fun _ -> fail "incapable candidate delivered a summary")
+         prepared
+       |> require_executed;
+       check
+         (list string)
+         "execution records the rejected candidate"
+         [ "hitl-incapable" ]
+         ((Worker.For_testing.flow_evidence prepared).admissions
+          |> List.map admission_id);
+       match Q.get_pending_entry ~id:entry.id with
+       | Some
+           { exact_attempt = Q.Exact_unbound
+           ; summary_status = Q.Summary_failed { retryable = false; _ }
+           ; _
+           } ->
+         ()
+       | _ -> fail "pre-network rejection was not durably terminal")
 ;;
 
 let test_visible_bind_blocks_dispatch () =
@@ -547,7 +575,8 @@ let test_visible_bind_blocks_dispatch () =
          ~net
          ~clock
          ~on_summary:(fun _ -> fail "unconfirmed bind delivered a summary")
-         (prepare_exn entry);
+         (prepare_exn entry)
+       |> require_executed;
        check int "unconfirmed bind forbids POST" 0 (F.post_count server);
        match Q.get_pending_entry ~id:entry.id with
        | Some
@@ -593,7 +622,8 @@ let test_visible_advance_blocks_successor () =
          ~net
          ~clock
          ~on_summary:(fun _ -> fail "unconfirmed release advanced the flow")
-         (prepare_exn entry);
+         (prepare_exn entry)
+       |> require_executed;
        check int "unconfirmed release forbids successor POST" 0 (F.post_count successor);
        match Q.get_pending_entry ~id:entry.id with
        | Some
@@ -641,6 +671,7 @@ let test_visible_completion_blocks_gate_delivery () =
             ~clock
             ~on_summary:(fun _ -> delivered := true)
             (prepare_exn entry)
+          |> require_executed
         with
         | exception Worker.Exact_terminalization_persistence_failed _ -> ()
         | () -> fail "visible completion did not signal persistence uncertainty");
@@ -701,7 +732,8 @@ let test_flow_execution_failure_quarantines_and_blocks_owner () =
          ~net
          ~clock
          ~on_summary:(fun _ -> fail "flow execution failure delivered a summary")
-         (prepare_exn entry);
+         (prepare_exn entry)
+       |> require_executed;
        check int "failed candidate dispatched once" 1 (F.post_count failed);
        (match Q.get_pending_entry ~id:entry.id with
         | Some
@@ -816,7 +848,9 @@ let test_manual_resolution_race_is_conclusive () =
          true
          (match !finish_outcome with
           | Some Worker.Conclusive_terminalization -> true
-          | Some Worker.Terminalization_persistence_uncertain | None -> false);
+          | Some Worker.Terminalization_persistence_uncertain
+          | Some Worker.Owner_unregistered_deferred
+          | None -> false);
        check bool
          "manually resolved source left pending queue"
          true
@@ -853,7 +887,8 @@ let test_cancellation_after_dispatch_is_terminal () =
                  ~net
                  ~clock
                  ~on_summary:(fun _ -> fail "cancelled flow delivered a summary")
-                 (prepare_exn entry))
+                 (prepare_exn entry)
+               |> require_executed)
             (fun () ->
                F.await_first_request server;
                raise Cancel_after_request_arrived)
@@ -1109,10 +1144,6 @@ let () =
             "prompt is registry-owned"
             `Quick
             test_gate_judgment_prompt_comes_from_registry
-        ; test_case
-            "readiness requires JSON admission"
-            `Quick
-            test_readiness_rejects_lane_without_json_guarantee
         ] )
     ; ( "production exact flow"
       , [ test_case

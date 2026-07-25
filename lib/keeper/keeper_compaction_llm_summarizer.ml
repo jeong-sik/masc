@@ -81,6 +81,7 @@ type summarization_failure =
   | Exact_target_selection_failed
   | Exact_admission_failed
   | Exact_attempt_start_failed
+  | Exact_owner_unregistered_deferred
   | Exact_execution_context_unavailable
   | Exact_execution_guard_absent
   | Exact_execution_bind_failed
@@ -454,7 +455,7 @@ let terminal_after_quarantine
 ;;
 
 let log_terminal_quarantine_failure
-      terminalizer
+      (terminalizer : post_success_terminalizer)
       (terminal : Keeper_event_queue_state.exact_execution_terminal)
       detail
   =
@@ -675,16 +676,25 @@ let prepare_lane ~base_path ~keeper_name ~registry ~lane_id ~units =
       ~surface:Keeper_exact_flow_scope.Compaction
     |> Result.map_error (fun _ -> Exact_execution_context_unavailable)
   in
-  prepare_lane_with_scope
-    ~base_path
-    ~flow_scope
-    ~keeper_name
-    ~registry
-    ~lane_id
-    ~units
+  match
+    Keeper_exact_flow_scope.with_current
+      flow_scope
+      ~registered_lane_id:(registered_lane_id ~base_path ~keeper_name)
+      (fun () ->
+         prepare_lane_with_scope
+           ~base_path
+           ~flow_scope
+           ~keeper_name
+           ~registry
+           ~lane_id
+           ~units)
+  with
+  | Ok result -> result
+  | Error _ -> Error Exact_execution_context_unavailable
 ;;
 
 type exact_flow_callback_failure =
+  | Owner_unregistered_deferred
   | Bind_failed
   | Bind_sync_unconfirmed of Keeper_event_queue_state.exact_execution_terminal
   | Release_failed of Keeper_event_queue_state.exact_execution_terminal
@@ -768,6 +778,7 @@ let release_exact_execution
 ;;
 
 let summarization_failure_of_callback = function
+  | Owner_unregistered_deferred -> Exact_owner_unregistered_deferred
   | Bind_failed -> Exact_execution_bind_failed
   | Bind_sync_unconfirmed terminal
   | Release_failed terminal
@@ -782,22 +793,41 @@ let execute_prepared_lane_current
       ?exact_execution_guard
       prepared_lane
   =
+  let with_current callback =
+    Keeper_exact_flow_scope.with_current
+      prepared_lane.flow_scope
+      ~registered_lane_id:
+        (registered_lane_id
+           ~base_path:prepared_lane.base_path
+           ~keeper_name:prepared_lane.keeper_name)
+      callback
+  in
   let bound_observation = ref None in
   let before_dispatch candidate =
     let observation = observe_flow_attempt_receipt candidate in
-    match bind_exact_execution ~keeper_name ~exact_execution_guard observation with
-    | Error _ as error -> error
-    | Ok () ->
-      bound_observation := Some observation;
-      Ok ()
+    match
+      with_current (fun () ->
+        match bind_exact_execution ~keeper_name ~exact_execution_guard observation with
+        | Error _ as error -> error
+        | Ok () ->
+          bound_observation := Some observation;
+          Ok ())
+    with
+    | Error _ -> Error Owner_unregistered_deferred
+    | Ok result -> result
   in
   let before_advance ~failed ~failure:_ ~next:_ =
-    let observation = observe_flow_attempt_receipt failed in
-    match release_exact_execution ~keeper_name ~exact_execution_guard observation with
-    | Error _ as error -> error
-    | Ok () ->
-      bound_observation := None;
-      Ok ()
+    match
+      with_current (fun () ->
+        let observation = observe_flow_attempt_receipt failed in
+        match release_exact_execution ~keeper_name ~exact_execution_guard observation with
+       | Error _ as error -> error
+       | Ok () ->
+         bound_observation := None;
+         Ok ())
+    with
+    | Error _ -> Error Owner_unregistered_deferred
+    | Ok result -> result
   in
   let execution =
     try
@@ -821,28 +851,40 @@ let execute_prepared_lane_current
       (match !bound_observation with
        | None -> raise cancellation
        | Some observation ->
-         Log.Keeper.warn
-           ~keeper_name
-           "compaction exact cancellation quarantines only the durably bound identity slot=%s call_id=%s"
-           observation.slot_id
-           observation.call_id;
-         `Failure
-           (Exact_execution_terminal
-              (terminal_after_quarantine
-                 ~keeper_name
-                 ~exact_execution_guard
-                 ~cause:Keeper_event_queue_state.Exact_execution_cancelled
-                 observation)))
+         `Bound_cancellation observation)
   in
+  let settle_execution () =
   match execution with
-  | `Failure failure -> Error failure
+  | `Bound_cancellation observation ->
+    Log.Keeper.warn
+      ~keeper_name
+      "compaction exact cancellation quarantines only the durably bound identity slot=%s call_id=%s"
+      observation.slot_id
+      observation.call_id;
+    Error
+      (Exact_execution_terminal
+         (terminal_after_quarantine
+            ~keeper_name
+            ~exact_execution_guard
+            ~cause:Keeper_event_queue_state.Exact_execution_cancelled
+            observation))
   | `Flow (Error (Exact_output.Flow_attempt_already_started _)) ->
     Error Exact_flow_already_started
   | `Flow
       (Error
         (Exact_output.Flow_before_dispatch_callback_failed
+          { cause = Owner_unregistered_deferred; _ })) ->
+    Error Exact_owner_unregistered_deferred
+  | `Flow
+      (Error
+        (Exact_output.Flow_before_dispatch_callback_failed
           { cause; _ })) ->
     Error (summarization_failure_of_callback cause)
+  | `Flow
+      (Error
+        (Exact_output.Flow_before_advance_callback_failed
+          { cause = Owner_unregistered_deferred; _ })) ->
+    Error Exact_owner_unregistered_deferred
   | `Flow
       (Error
         (Exact_output.Flow_before_advance_callback_failed
@@ -892,6 +934,10 @@ let execute_prepared_lane_current
                 ; canonical_terminal = None
                 }
             }))
+  in
+  match with_current settle_execution with
+  | Error _ -> Error Exact_owner_unregistered_deferred
+  | Ok result -> result
 ;;
 
 let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepared_lane =
@@ -902,16 +948,16 @@ let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepar
         (registered_lane_id
            ~base_path:prepared_lane.base_path
            ~keeper_name:prepared_lane.keeper_name)
-      (fun () ->
-         execute_prepared_lane_current
-           ~keeper_name
-           ~net
-           ?clock
-           ?exact_execution_guard
-           prepared_lane)
+      (fun () -> ())
   with
-  | Ok result -> result
-  | Error _ -> Error Exact_execution_context_unavailable
+  | Error _ -> Error Exact_owner_unregistered_deferred
+  | Ok () ->
+    execute_prepared_lane_current
+      ~keeper_name
+      ~net
+      ?clock
+      ?exact_execution_guard
+      prepared_lane
 ;;
 
 let run_exact

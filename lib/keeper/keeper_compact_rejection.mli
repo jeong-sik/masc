@@ -3,6 +3,7 @@ type compaction_rejection =
   | Exact_target_selection_failed
   | Exact_admission_failed
   | Exact_attempt_start_failed
+  | Exact_owner_unregistered_deferred
   | Exact_execution_context_unavailable
   | Exact_execution_guard_absent
   | Exact_execution_bind_failed

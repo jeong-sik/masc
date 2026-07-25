@@ -30,6 +30,7 @@ type attempt_provenance =
     failure cause. *)
 
 type 'callback_error execution_error =
+  | Owner_unregistered_deferred
   | Flow_already_started of attempt_provenance list
   | Before_dispatch_persistence_failed of
       { cause : 'callback_error

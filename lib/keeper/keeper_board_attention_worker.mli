@@ -14,6 +14,7 @@ type step =
   | Idle
   | Contended of contention
   | Rescan_later of contention
+  | Owner_unregistered_deferred of { candidate_id : string }
   | Judgment_completed of
       { candidate_id : string
       ; owner_wake : Keeper_registry.wakeup_outcome
@@ -30,10 +31,15 @@ type retry_reason =
 
 type drain_outcome =
   | Drained
+  | Owner_generation_deferred of { candidate_id : string }
   | Retry_later of
       { contention : contention
       ; reason : retry_reason
       }
+(** [Owner_generation_deferred] terminates only the stale worker generation.
+    It neither marks the durable partition drained nor schedules a retry; the
+    unchanged pending partition remains discoverable when the lifecycle-owned
+    registration starts the next owner generation. *)
 
 type rearm_schedule =
   | Rearm_scheduled of { delay_s : float }

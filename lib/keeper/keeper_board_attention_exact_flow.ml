@@ -25,6 +25,7 @@ type attempt_provenance =
   }
 
 type 'callback_error execution_error =
+  | Owner_unregistered_deferred
   | Flow_already_started of attempt_provenance list
   | Before_dispatch_persistence_failed of
       { cause : 'callback_error
@@ -40,6 +41,10 @@ type 'callback_error execution_error =
   | Provenance_mismatch of string
   | Domain_output_invalid of string
   | Domain_settlement_failed
+
+type 'callback_error guarded_callback_error =
+  | Durable_callback_failed of 'callback_error
+  | Owner_generation_unregistered
 
 type prepared =
   { base_path : string
@@ -151,7 +156,14 @@ let prepare ~base_path ~keeper_name ~net candidate =
         in
         Ok { base_path; keeper_name; flow_scope; candidate; net; attempt }
     in
-    prepare_current ()
+    (match
+       Keeper_exact_flow_scope.with_current
+         flow_scope
+         ~registered_lane_id:(registered_lane_id ~base_path ~keeper_name)
+         prepare_current
+     with
+     | Ok result -> result
+     | Error _ -> Error Registry_unavailable)
 ;;
 
 let string_of_call_id call_id = Exact_output.call_id_to_string call_id
@@ -295,6 +307,7 @@ let judgment_of_success candidate (flow_success : Exact_output.flow_success) =
 ;;
 
 type terminal_outcome =
+  | Owner_unregistered
   | Judgment_completed
   | Flow_replayed
   | Before_dispatch_persistence_failure
@@ -304,6 +317,7 @@ type terminal_outcome =
   | Invalid_domain_output
 
 let terminal_outcome_to_string = function
+  | Owner_unregistered -> "owner_unregistered_deferred"
   | Judgment_completed -> "judgment_completed"
   | Flow_replayed -> "flow_replayed"
   | Before_dispatch_persistence_failure -> "before_dispatch_persistence_failure"
@@ -314,6 +328,7 @@ let terminal_outcome_to_string = function
 ;;
 
 let terminal_outcome = function
+  | Error Owner_unregistered_deferred -> Owner_unregistered
   | Ok _ -> Judgment_completed
   | Error (Flow_already_started _) -> Flow_replayed
   | Error (Before_dispatch_persistence_failed _) ->
@@ -335,14 +350,29 @@ let observe_terminal prepared result =
 ;;
 
 let execute_current ?clock ~before_dispatch ~before_advance prepared =
+  let with_current callback =
+    match
+      Keeper_exact_flow_scope.with_current
+        prepared.flow_scope
+        ~registered_lane_id:
+          (registered_lane_id
+             ~base_path:prepared.base_path
+             ~keeper_name:prepared.keeper_name)
+        callback
+    with
+    | Error _ -> Error Owner_generation_unregistered
+    | Ok (Error cause) -> Error (Durable_callback_failed cause)
+    | Ok (Ok ()) -> Ok ()
+  in
   let oas_before_dispatch receipt =
-    before_dispatch (attempt_provenance receipt)
+    with_current (fun () -> before_dispatch (attempt_provenance receipt))
   in
   let oas_before_advance ~failed ~next:_ =
-    match failed with
-    | Exact_output.Flow_candidate_rejected _ -> Ok ()
-    | Exact_output.Flow_candidate_execution_failed { candidate; cause = _ } ->
-      before_advance ~failed:(attempt_provenance candidate)
+    with_current (fun () ->
+      match failed with
+      | Exact_output.Flow_candidate_rejected _ -> Ok ()
+      | Exact_output.Flow_candidate_execution_failed { candidate; cause = _ } ->
+        before_advance ~failed:(attempt_provenance candidate))
   in
   let result =
     match
@@ -354,27 +384,45 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
         prepared.attempt
     with
     | Ok success ->
-      (match judgment_of_success prepared.candidate success with
-       | Ok judgment ->
-         (match
-            Exact_output.settle_flow_domain
-              success
-              Exact_output.Domain_valid
-          with
-          | Ok _ -> Ok judgment
-          | Error _ -> Error Domain_settlement_failed)
-       | Error error ->
-         ignore
-           (Exact_output.settle_flow_domain
-              success
-              Exact_output.Domain_rejected
-            : (Exact_output.domain_settlement_receipt, Exact_output.domain_settlement_error) result);
-         Error error)
+      let judgment = judgment_of_success prepared.candidate success in
+      (match
+         Keeper_exact_flow_scope.with_current
+           prepared.flow_scope
+           ~registered_lane_id:
+             (registered_lane_id
+                ~base_path:prepared.base_path
+                ~keeper_name:prepared.keeper_name)
+           (fun () ->
+              match judgment with
+              | Ok judgment ->
+                (match
+                   Exact_output.settle_flow_domain
+                     success
+                     Exact_output.Domain_valid
+                 with
+                 | Ok _ -> Ok judgment
+                 | Error _ -> Error Domain_settlement_failed)
+              | Error error ->
+                ignore
+                  (Exact_output.settle_flow_domain
+                     success
+                     Exact_output.Domain_rejected
+                   : ( Exact_output.domain_settlement_receipt
+                     , Exact_output.domain_settlement_error )
+                       result);
+                Error error)
+       with
+       | Error _ -> Error Owner_unregistered_deferred
+       | Ok result -> result)
     | Error (Exact_output.Flow_attempt_already_started evidence) ->
       Error (Flow_already_started (evidence_provenance evidence))
     | Error
         (Exact_output.Flow_before_dispatch_callback_failed
-           { cause; evidence; candidate }) ->
+           { cause = Owner_generation_unregistered; _ }) ->
+      Error Owner_unregistered_deferred
+    | Error
+        (Exact_output.Flow_before_dispatch_callback_failed
+           { cause = Durable_callback_failed cause; evidence; candidate }) ->
       Error
         (Before_dispatch_persistence_failed
            { cause
@@ -383,7 +431,11 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
            })
     | Error
         (Exact_output.Flow_before_advance_callback_failed
-           { cause
+           { cause = Owner_generation_unregistered; _ }) ->
+      Error Owner_unregistered_deferred
+    | Error
+        (Exact_output.Flow_before_advance_callback_failed
+           { cause = Durable_callback_failed cause
            ; evidence
            ; failed =
                Exact_output.Flow_candidate_execution_failed
@@ -424,9 +476,8 @@ let execute ?clock ~before_dispatch ~before_advance prepared =
         (registered_lane_id
            ~base_path:prepared.base_path
            ~keeper_name:prepared.keeper_name)
-      (fun () ->
-         execute_current ?clock ~before_dispatch ~before_advance prepared)
+      (fun () -> ())
   with
-  | Ok result -> result
-  | Error _ -> Error (Exact_execution_failed [])
+  | Error _ -> Error Owner_unregistered_deferred
+  | Ok () -> execute_current ?clock ~before_dispatch ~before_advance prepared
 ;;

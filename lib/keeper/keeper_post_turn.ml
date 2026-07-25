@@ -478,18 +478,26 @@ let apply_post_turn_lifecycle_with_resilience_handles
   let body = apply_tool_emission_wirein ~now:now_ts body in
   apply_multimodal_wirein ~now:now_ts body
 
-let terminal_reason_of_rejection = function
+type rejection_disposition =
+  | Terminal_no_compaction of Keeper_event_queue_state.no_compaction_reason
+  | Owner_generation_deferred
+  | Nonterminal_rejection
+
+let rejection_disposition = function
   | Keeper_compact_policy.No_eligible_history ->
-    Some Keeper_event_queue_state.No_eligible_history
-  | Invalid_structure _ -> Some Invalid_structural_source
-  | Structurally_unchanged -> Some Structurally_unchanged
-  | Checkpoint_not_reduced -> Some Checkpoint_not_reduced
+    Terminal_no_compaction Keeper_event_queue_state.No_eligible_history
+  | Invalid_structure _ -> Terminal_no_compaction Invalid_structural_source
+  | Structurally_unchanged -> Terminal_no_compaction Structurally_unchanged
+  | Checkpoint_not_reduced -> Terminal_no_compaction Checkpoint_not_reduced
   | Exact_execution_terminal terminal ->
-    Some (Keeper_event_queue_state.Exact_execution_terminal terminal)
+    Terminal_no_compaction
+      (Keeper_event_queue_state.Exact_execution_terminal terminal)
   | Invalid_structural_evidence (_, terminal) ->
-    Some (Keeper_event_queue_state.Exact_execution_terminal terminal)
+    Terminal_no_compaction
+      (Keeper_event_queue_state.Exact_execution_terminal terminal)
   | Exact_lane_unconfigured ->
-    Some Keeper_event_queue_state.Exact_lane_unconfigured
+    Terminal_no_compaction Keeper_event_queue_state.Exact_lane_unconfigured
+  | Exact_owner_unregistered_deferred -> Owner_generation_deferred
   | Invalid_compaction_plan
   | Exact_target_selection_failed
   | Exact_admission_failed
@@ -498,7 +506,7 @@ let terminal_reason_of_rejection = function
   | Exact_execution_guard_absent
   | Exact_execution_bind_failed
   | Exact_flow_already_started ->
-    None
+    Nonterminal_rejection
 ;;
 
 type prepared_compaction =
@@ -615,9 +623,12 @@ let prepare_compaction_admitted
          ; post_success_terminalizer
          }
      | Keeper_compact_policy.Rejected (_, reason), _, _ ->
-       (match terminal_reason_of_rejection reason with
-        | Some reason -> Error (No_compaction { source = source_ref; reason })
-        | None -> Error (Compaction_rejected reason))
+       (match rejection_disposition reason with
+        | Terminal_no_compaction terminal_reason ->
+          Error (No_compaction { source = source_ref; reason = terminal_reason })
+        | Owner_generation_deferred
+        | Nonterminal_rejection ->
+          Error (Compaction_rejected reason))
      | (Keeper_compact_policy.Applied _
        | Keeper_compact_policy.Not_requested
        | Keeper_compact_policy.Skipped_no_checkpoint) as decision, _, _ ->

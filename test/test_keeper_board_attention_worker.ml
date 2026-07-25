@@ -303,7 +303,10 @@ let test_setup_error_stops_before_claim_without_hot_retry () =
        "typed setup failure stops the lifecycle"
        "Board attention exact setup unavailable before claim: network context unavailable"
        detail
-   | Ok (W.Drained | W.Retry_later _) ->
+   | Ok
+       ( W.Drained
+       | W.Owner_generation_deferred _
+       | W.Retry_later _ ) ->
      Alcotest.fail "setup-unavailable drain returned normally");
   Alcotest.(check int) "one setup attempt" 1 !calls;
   Alcotest.(check int) "setup failure did not yield into a retry" 0 !yields;
@@ -645,6 +648,7 @@ let test_rescan_later_reaches_delayed_run_rearm () =
        true
        (P.Generation.equal contention.generation observed.generation)
    | W.Drained
+   | W.Owner_generation_deferred _
    | W.Retry_later { reason = W.Exact_claim_contended; _ } ->
      Alcotest.fail "changed selection did not reach typed delayed rescan");
   Alcotest.(check int) "no same-turn rescan" 1 !process_calls;

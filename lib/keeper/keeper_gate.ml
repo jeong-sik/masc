@@ -879,7 +879,7 @@ let request_operator_auto_judge_recovery ~base_path =
   | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
     Error "operator Auto Judge recovery requires auto_judge mode"
   | Ok Keeper_gate_mode.Auto_judge ->
-    (match Hitl_summary_worker.readiness () with
+    (match Hitl_summary_worker.snapshot_topology_readiness () with
      | Error detail -> Error detail
      | Ok () ->
       (match Keeper_approval_queue.restart_failed_summaries ~base_path with

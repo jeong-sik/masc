@@ -49,6 +49,7 @@ type summarization_failure =
   | Exact_target_selection_failed
   | Exact_admission_failed
   | Exact_attempt_start_failed
+  | Exact_owner_unregistered_deferred
   | Exact_execution_context_unavailable
   | Exact_execution_guard_absent
         (** No exact-execution guard was supplied to the summarizer, so the plan

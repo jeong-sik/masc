@@ -66,7 +66,7 @@ let read ~base_path =
 let status_json ~base_path =
   match read ~base_path with
   | Ok Auto_judge ->
-    (match Hitl_summary_worker.readiness () with
+    (match Hitl_summary_worker.snapshot_topology_readiness () with
      | Ok () ->
        `Assoc
          [ "mode", `String (to_string Auto_judge)

@@ -805,7 +805,7 @@ let test_two_keeper_scopes_freeze_and_do_not_share_preferences () =
        ~clock
        prepared_b_before
    with
-   | Error C.Exact_execution_context_unavailable -> ()
+   | Error C.Exact_owner_unregistered_deferred -> ()
    | Error _ ->
      Alcotest.fail "stale owner generation returned the wrong typed failure"
    | Ok _ ->
@@ -845,7 +845,7 @@ let test_two_keeper_scopes_freeze_and_do_not_share_preferences () =
       ~net
       ~clock
       ~exact_execution_guard:guard_b
-      prepared_b_before
+      prepared_b_after
     |> completed_exn
   in
   let observation_a = C.completed_attempt_observation completed_a in

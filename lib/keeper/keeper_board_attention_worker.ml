@@ -13,6 +13,7 @@ type step =
   | Idle
   | Contended of contention
   | Rescan_later of contention
+  | Owner_unregistered_deferred of { candidate_id : string }
   | Judgment_completed of
       { candidate_id : string
       ; owner_wake : Keeper_registry.wakeup_outcome
@@ -29,6 +30,7 @@ type retry_reason =
 
 type drain_outcome =
   | Drained
+  | Owner_generation_deferred of { candidate_id : string }
   | Retry_later of
       { contention : contention
       ; reason : retry_reason
@@ -350,6 +352,9 @@ let reset_contention_rearms scheduler ~keep =
 
 let apply_drain_rearm scheduler = function
   | Drained ->
+    reset_contention_rearms scheduler ~keep:None;
+    None
+  | Owner_generation_deferred _ ->
     reset_contention_rearms scheduler ~keep:None;
     None
   | Retry_later { contention; reason = _ } ->
@@ -682,25 +687,39 @@ let before_advance_failure_reason partition ~cause ~failed =
   | None -> callback_invariant "before-advance" cause
 ;;
 
-let execution_blocked_reason partition = function
+type execution_disposition =
+  | Execution_owner_deferred
+  | Execution_blocked of Partition.blocked_reason
+
+let execution_disposition partition = function
+  | Exact_flow.Owner_unregistered_deferred -> Execution_owner_deferred
   | Exact_flow.Flow_already_started _ ->
-    preserve_durable_progress partition Partition.Exact_flow_replayed
+    Execution_blocked
+      (preserve_durable_progress partition Partition.Exact_flow_replayed)
   | Exact_flow.Before_dispatch_persistence_failed
       { cause; current; evidence = _ } ->
-    before_dispatch_failure_reason partition ~cause ~current
+    Execution_blocked
+      (before_dispatch_failure_reason partition ~cause ~current)
   | Exact_flow.Before_advance_persistence_failed
       { cause; failed; evidence = _ } ->
-    before_advance_failure_reason partition ~cause ~failed
+    Execution_blocked
+      (before_advance_failure_reason partition ~cause ~failed)
   | Exact_flow.Exact_execution_failed _ ->
-    preserve_durable_progress partition Partition.Exact_execution_terminal
+    Execution_blocked
+      (preserve_durable_progress partition Partition.Exact_execution_terminal)
   | Exact_flow.Provenance_mismatch detail ->
-    preserve_durable_progress
-      partition
-      (Partition.Execution_provenance_mismatch detail)
+    Execution_blocked
+      (preserve_durable_progress
+         partition
+         (Partition.Execution_provenance_mismatch detail))
   | Exact_flow.Domain_output_invalid detail ->
-    preserve_durable_progress partition (Partition.Domain_output_invalid detail)
+    Execution_blocked
+      (preserve_durable_progress
+         partition
+         (Partition.Domain_output_invalid detail))
   | Exact_flow.Domain_settlement_failed ->
-    preserve_durable_progress partition Partition.Exact_execution_terminal
+    Execution_blocked
+      (preserve_durable_progress partition Partition.Exact_execution_terminal)
 ;;
 
 let confirm_exact_transition latest_partition operation = function
@@ -848,13 +867,18 @@ let process_pending
       prepared
   with
   | Error error ->
-    let reason = execution_blocked_reason !latest_partition error in
-    blocked_step
-      ~now:(now ())
-      ~worker_epoch
-      ~base_path
-      !latest_partition
-      reason
+    (match execution_disposition !latest_partition error with
+     | Execution_owner_deferred ->
+       Ok
+         (Owner_unregistered_deferred
+            { candidate_id = (!latest_partition).candidate_id })
+     | Execution_blocked reason ->
+       blocked_step
+         ~now:(now ())
+         ~worker_epoch
+         ~base_path
+         !latest_partition
+         reason)
   | Ok judgment ->
     complete_and_signal
       ~now:(now ())
@@ -1457,6 +1481,8 @@ let rec drain_available_with_process ~yield ~process =
     Ok (Retry_later { contention; reason = Exact_claim_contended })
   | Ok (Rescan_later contention) ->
     Ok (Retry_later { contention; reason = Selected_generation_changed })
+  | Ok (Owner_unregistered_deferred { candidate_id }) ->
+    Ok (Owner_generation_deferred { candidate_id })
   | Ok (Judgment_completed _ | Candidate_already_consumed _ | Partition_blocked _) ->
     yield ();
     drain_available_with_process ~yield ~process
@@ -1558,6 +1584,13 @@ let run
                  ~prepare
                  ~execute
              with
+             | Ok (Owner_generation_deferred { candidate_id }) ->
+               reset_contention_rearms contention_rearms ~keep:None;
+               Log.Keeper.info
+                 ~keeper_name
+                 "board_attention exact owner generation deferred candidate_id=%s; current worker generation exits without partition mutation"
+                 candidate_id;
+               Ok ()
              | Ok outcome ->
                ignore
                  (apply_drain_rearm contention_rearms outcome

@@ -579,7 +579,10 @@ let make_post_success_completion () =
   { waiter
   ; resolve =
       (fun () ->
-         ignore (Eio.Promise.try_resolve resolver () : bool))
+         match Eio.Promise.try_resolve resolver () with
+         | true
+         | false ->
+           ())
   }
 ;;
 

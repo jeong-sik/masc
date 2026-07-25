@@ -270,7 +270,13 @@ let recover_provider_context_overflow_in_lane
              ~keeper_name:meta.name
              "provider overflow terminal observation failed without reopening exact request: %s"
              (Printexc.to_string exn));
-        ignore (release_failed_lifecycle reason : (unit, string) result);
+        (match release_failed_lifecycle reason with
+         | Ok () -> ()
+         | Error detail ->
+           Log.Keeper.error
+             ~keeper_name:meta.name
+             "provider overflow terminal lifecycle cleanup failed; preserving the canonical no-compaction outcome: %s"
+             detail);
         Provider_overflow_no_compaction no_compaction)
     in
     let applied recovery =

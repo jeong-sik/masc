@@ -1593,34 +1593,6 @@ let run_keepalive_unified_turn
              ~lease
              !cycle_outcome_ref
          in
-         (* RFC-0351 S0 / #25461: advance the compaction streak the settlement
-            above just read. Ordering matters — the settlement decides
-            requeue-vs-escalate from the streak *before* this failure, and this
-            stamp records the failure for the next cycle. *)
-         (let compaction_outcome =
-            compaction_outcome_of_cycle_outcome !cycle_outcome_ref
-          in
-          match compaction_outcome with
-          | None -> ()
-          | Some `Recovered
-            when meta_after_triage.runtime.compaction_rt.consecutive_failures
-                 = 0 ->
-            (* Streak already clear: skip the read-modify-write that every
-               healthy completed turn would otherwise pay. *)
-            ()
-          | Some outcome ->
-            (match
-               Keeper_meta_store.persist_compaction_outcome
-                 ctx.config
-                 ~keeper_name:meta_after_triage.name
-                 ~outcome
-             with
-             | Ok (`Persisted | `No_durable_meta) -> ()
-             | Error message ->
-               Log.Keeper.warn
-                 "compaction outcome counter not persisted keeper=%s: %s"
-                 meta_after_triage.name
-                 message));
          (match
             settle_claimed_lease
               ~exact_execution:true
@@ -1670,6 +1642,45 @@ let run_keepalive_unified_turn
               detail;
             record_settlement_failure detail;
             check_cancellation_after_exact_terminal_settlement settlement));
+      (* RFC-0351 S0 / #25461: advance the compaction streak the settlement above
+         just read. Ordering still holds — [settlement_of_cycle_outcome] reads the
+         streak from [meta_after_triage] before this stamp, so requeue-vs-escalate
+         still decides on the count before this failure.
+
+         Hoisted out of the [Some lease] branch. A failure has to consume retry
+         budget whether or not the cycle happened to own an event-queue lease.
+         While this ran inside that branch, a keeper that claimed no lease could
+         neither compact — [dispatch_guard] is [None] without a lease, so the
+         summarizer rejects with an absent exact-execution guard — nor accumulate
+         the streak that would eventually suspend it. Measured 2026-07-25: two
+         keepers at 306 and 368 failed context_compacted attempts with
+         consecutive_failures = 0, retrying without bound, while keepers that did
+         hold a lease reached the ceiling at 21 and 3 and settled. Compaction
+         failures already map to [`Failed] (keeper_unified_turn.ml:448 ->
+         compaction_outcome_of_cycle_outcome), so nothing else was suppressing it. *)
+      (let compaction_outcome =
+         compaction_outcome_of_cycle_outcome !cycle_outcome_ref
+       in
+       match compaction_outcome with
+       | None -> ()
+       | Some `Recovered
+         when meta_after_triage.runtime.compaction_rt.consecutive_failures = 0 ->
+         (* Streak already clear: skip the read-modify-write that every healthy
+            completed turn would otherwise pay. *)
+         ()
+       | Some outcome ->
+         (match
+            Keeper_meta_store.persist_compaction_outcome
+              ctx.config
+              ~keeper_name:meta_after_triage.name
+              ~outcome
+          with
+          | Ok (`Persisted | `No_durable_meta) -> ()
+          | Error message ->
+            Log.Keeper.warn
+              "compaction outcome counter not persisted keeper=%s: %s"
+              meta_after_triage.name
+              message));
       { meta = meta_after_cycle
       ; cycle_status =
           if !settlement_failed then Turn_cycle_crashed else Turn_cycle_completed

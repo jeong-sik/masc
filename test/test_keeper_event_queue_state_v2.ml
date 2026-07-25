@@ -2019,6 +2019,38 @@ let with_temp_dir prefix f =
    path, the second unbounded loop, also follows the completed turn. A
    turn that did not complete keeps its ordinary typed settlement, so
    delivery is still retried. *)
+(* A compaction failure has to consume retry budget whether or not the cycle owned
+   an event-queue lease. keeper_heartbeat_loop.ml advances the streak after the
+   lease match rather than inside its [Some lease] branch, and
+   persist_compaction_outcome is the mechanism — which had no test.
+
+   Measured 2026-07-25: two keepers sat at 306 and 368 failed context_compacted
+   attempts with consecutive_failures = 0 and retried without bound, because the
+   advance was unreachable without a lease, while keepers that held one reached the
+   ceiling at 21 and 3 and settled. *)
+let test_compaction_failure_advances_streak_without_lease () =
+  with_temp_dir "compaction-streak-no-lease" @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  ignore (Masc.Workspace.init config ~agent_name:None : string);
+  let meta = cycle_meta () in
+  Result.get_ok (Masc.Keeper_meta_store.write_meta config meta);
+  (match
+     Masc.Keeper_meta_store.persist_compaction_outcome
+       config
+       ~keeper_name:meta.name
+       ~outcome:`Failed
+   with
+   | Ok (`Persisted | `No_durable_meta) -> ()
+   | Error message -> Alcotest.failf "persist compaction outcome: %s" message);
+  match Masc.Keeper_meta_store.read_meta config meta.name with
+  | Error message -> Alcotest.failf "read meta back: %s" message
+  | Ok None -> Alcotest.fail "meta disappeared after persisting the outcome"
+  | Ok (Some stored) ->
+    Alcotest.(check int)
+      "a compaction failure advances the streak"
+      1
+      stored.runtime.compaction_rt.consecutive_failures
+
 let test_approved_wake_settles_on_delivery_not_consumption () =
   with_temp_dir "approval-delivery-ack" @@ fun base_path ->
   ignore (Masc.Keeper_approval_queue.install_persistence ~base_path);
@@ -3454,6 +3486,10 @@ let () =
             "approved wake settles on delivery not consumption"
             `Quick
             test_approved_wake_settles_on_delivery_not_consumption
+        ; Alcotest.test_case
+            "a compaction failure advances the streak without a lease"
+            `Quick
+            test_compaction_failure_advances_streak_without_lease
         ; Alcotest.test_case
             "current state codec reads its own output"
             `Quick

@@ -942,10 +942,17 @@ List.iter
    every push for ~29 hours because the boot path that would have caught it runs
    only on push-to-main (#25663). This asserts presence, against the same value
    startup reads. *)
+let render_runtime_toml_errors (errors : Runtime_toml.parse_error list) =
+  errors
+  |> List.map (fun (error : Runtime_toml.parse_error) ->
+    Printf.sprintf "%s: %s" error.path error.message)
+  |> String.concat "; "
+;;
+
 let assert_mandatory_exact_output_lanes_declared ~label path =
   check bool (label ^ " exists") true (Sys.file_exists path);
   match Runtime_toml.parse_file path with
-  | Error msg -> failf "%s should load: %s" label msg
+  | Error errors -> failf "%s should load: %s" label (render_runtime_toml_errors errors)
   | Ok (config : Runtime_schema.config) ->
     List.iter
       (fun lane_id ->
@@ -1017,7 +1024,10 @@ let test_release_evidence_fixture_lanes_resolve_without_credentials () =
   match
     Runtime_toml.parse_file (Filename.concat fixture_dir "runtime.toml")
   with
-  | Error msg -> failf "release-evidence smoke runtime.toml should load: %s" msg
+  | Error errors ->
+    failf
+      "release-evidence smoke runtime.toml should load: %s"
+      (render_runtime_toml_errors errors)
   | Ok (config : Runtime_schema.config) ->
     List.iter
       (fun lane_id ->

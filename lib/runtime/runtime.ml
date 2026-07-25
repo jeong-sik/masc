@@ -214,15 +214,21 @@ type route_requirement =
    unknown is carried over unchanged, not introduced here; whether an unknown
    capability should order a candidate later rather than exclude it up front is
    the separate question tracked against the format axis. *)
-let model_supports_response_format_json (runtime : t) =
-  match runtime.model.capabilities with
-  | Some caps -> caps.supports_response_format_json
-  | None -> false
-;;
+(* The capability a route requires is the one its consumer actually uses.
 
-let model_supports_structured_output (runtime : t) =
+   [runtime].cross_verifier delivers its verdict through the report_review_verdict
+   TOOL CALL and requests no wire response format
+   (lib/task/anti_rationalization.ml:243-248, and
+   Keeper_structured_output_schema.anti_rationalization_reviewer_provider_config is
+   without_response_format). So the requirement is tool calling, not JSON mode.
+
+   [runtime].structured_judge requests no wire format either — the same
+   without_response_format transform (lib/keeper/keeper_failure_judge.ml:71-72,
+   passed at :114) with the response parsed by structured_json_of_response, i.e.
+   text extraction. :79-80 calls that boundary tool-free. It needs neither. *)
+let model_supports_tools (runtime : t) =
   match runtime.model.capabilities with
-  | Some caps -> caps.supports_structured_output
+  | Some caps -> caps.supports_tools
   | None -> false
 ;;
 
@@ -962,11 +968,7 @@ let materialize_config
       ~config_path
       ~dropped_bindings
       ~route_name:"structured_judge"
-      ~requirement:
-        (Declares_capability
-           { key = "supports-structured-output"
-           ; supported_by = model_supports_structured_output
-           })
+      ~requirement:Resolves_only
       runtimes
       lanes
       cfg.structured_judge_runtime_id
@@ -978,9 +980,7 @@ let materialize_config
       ~route_name:"cross_verifier"
       ~requirement:
         (Declares_capability
-           { key = "supports-response-format-json"
-           ; supported_by = model_supports_response_format_json
-           })
+           { key = "supports-tools"; supported_by = model_supports_tools })
       runtimes
       lanes
       cfg.cross_verifier_runtime_id

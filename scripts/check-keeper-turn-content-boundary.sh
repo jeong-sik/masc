@@ -29,6 +29,7 @@ FORBIDDEN_IDENTIFIERS = (
     "Provider_runtime_binding",
     "Runtime_model",
     "Keeper_model_labels",
+    "Keeper_context_runtime.effective_model_labels_for_turn",
     "ensure_api_keys_for_labels",
     "ensure_local_discovery_ready",
 )
@@ -141,7 +142,7 @@ PY
 self_test() (
   local fixture first second first_clean second_clean injection
   fixture="$(mktemp -d "${TMPDIR:-/tmp}/keeper-turn-content-boundary.XXXXXX")"
-  trap "rm -rf '${fixture}'" EXIT
+  trap 'rm -rf -- "${fixture}"' EXIT
   mkdir -p "${fixture}/lib/keeper"
   first="${fixture}/lib/keeper/keeper_turn.ml"
   second="${fixture}/lib/keeper/keeper_unified_turn_pre_dispatch.ml"
@@ -174,6 +175,7 @@ EOF
     'let _ = Provider_runtime_binding.find "x"' \
     'let _ = Runtime_model.resolve "x"' \
     'let _ = Keeper_model_labels.configured "x"' \
+    'let _ = Keeper_context_runtime.effective_model_labels_for_turn ctx' \
     'let _ = ensure_api_keys_for_labels []' \
     'let _ = ensure_local_discovery_ready []' \
     'let _ = Sys.getenv_opt "MASC_DEFAULT_MODEL"' \

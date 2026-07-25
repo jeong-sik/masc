@@ -34,16 +34,22 @@ FORBIDDEN_IDENTIFIERS = (
     "ensure_local_discovery_ready",
 )
 
-RAW_ENV_READ_PATTERN = re.compile(r"\b(?:Sys|Unix)\.getenv(?:_opt)?\b")
+RAW_ENV_READ_PATTERN = re.compile(r"\b(?:Sys|Unix)\s*\.\s*getenv(?:_opt)?\b")
 ENV_CONFIG_PATH_PATTERN = re.compile(
-    r"\bEnv_config(?:\.[A-Za-z_][A-Za-z0-9_']*)+\b"
+    r"(?<![A-Za-z0-9_'])"
+    r"Env_config(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_']*)+"
+    r"(?![A-Za-z0-9_'])"
 )
 ENV_BINDING_PATTERN = re.compile(r"\b[A-Za-z_][A-Za-z0-9_']*_env\b", re.IGNORECASE)
 POLICY_TOKENS = frozenset(("provider", "model", "credential", "token"))
 
 
 def has_policy_token(identifier: str) -> bool:
-    tokens = [token for token in re.split(r"_+", identifier.lower()) if token]
+    tokens = [
+        token.rstrip("'")
+        for token in re.split(r"_+", identifier.lower())
+        if token.rstrip("'")
+    ]
     return any(token in POLICY_TOKENS for token in tokens) or any(
         left == "api" and right == "key"
         for left, right in zip(tokens, tokens[1:])
@@ -51,7 +57,7 @@ def has_policy_token(identifier: str) -> bool:
 
 
 def is_policy_env_config_path(path: str) -> bool:
-    return any(has_policy_token(segment) for segment in path.split(".")[1:])
+    return any(has_policy_token(segment.strip()) for segment in path.split(".")[1:])
 
 
 def mask_non_code(source: str) -> str:
@@ -121,7 +127,10 @@ for raw_path in sys.argv[1:]:
     source = path.read_text(encoding="utf-8")
     code = mask_non_code(source)
     for identifier in FORBIDDEN_IDENTIFIERS:
-        match = re.search(rf"\b{re.escape(identifier)}\b", code)
+        qualified_pattern = r"\s*\.\s*".join(
+            re.escape(part) for part in identifier.split(".")
+        )
+        match = re.search(rf"\b{qualified_pattern}\b", code)
         if match:
             failures.append(
                 f"{path}:{location(source, match.start())}: forbidden identifier {identifier}"
@@ -192,8 +201,11 @@ Provider_runtime_binding ensure_local_discovery_ready
 |}
 let _ = Env_config.Tokenizer.path
 let _ = Env_config.Remodeling.enabled
+let _ = Env_config . Tokenizer . path
+let _ = Env_config . Remodeling . enabled
 let _ = Tokenizer_env.path
 let _ = Remodeling_env.enabled
+let _ = Tokenizer'_env.path
 EOF
   MASC_KEEPER_TURN_CONTENT_BOUNDARY_ROOT="${fixture}" \
     bash "${BASH_SOURCE[0]}" --check >/dev/null
@@ -205,9 +217,12 @@ EOF
     'let _ = Runtime_model.resolve "x"' \
     'let _ = Keeper_model_labels.configured "x"' \
     'let _ = Keeper_context_runtime.effective_model_labels_for_turn ctx' \
+    'let _ = Keeper_context_runtime . effective_model_labels_for_turn ctx' \
     'let _ = ensure_api_keys_for_labels []' \
     'let _ = ensure_local_discovery_ready []' \
     'let _ = Sys.getenv_opt "MASC_DEFAULT_MODEL"' \
+    'let _ = Sys . getenv_opt "MASC_DEFAULT_MODEL"' \
+    $'let _ = Unix.\ngetenv_opt "PROVIDER_API_KEY"' \
     'let _ = Unix.getenv "PROVIDER_API_KEY"' \
     'let _ = Env_config.Model_defaults.default_runtime_opt ()' \
     'let _ = Env_config.Default_model.value' \
@@ -217,6 +232,9 @@ EOF
     'let _ = Env_config.Default__model.value' \
     'let _ = Env_config.Runtime__api_key.path' \
     'let _ = Env_config.Nested.Default_model.value' \
+    'let _ = Env_config . Nested . Default_model.value' \
+    "let _ = Env_config.Model'.value" \
+    "let _ = model'_env.fallback ()" \
     'let _ = Credential_env.fallback ()'
   do
     cp "${first_clean}" "${first}"

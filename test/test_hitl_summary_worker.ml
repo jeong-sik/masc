@@ -330,7 +330,8 @@ let test_json_mode_request_carries_canonical_domain_schema () =
 
 let admission_id = function
   | EO.Candidate_admitted candidate -> candidate.identity.candidate_id
-  | EO.Candidate_rejected { identity; _ } -> identity.candidate_id
+  | EO.Candidate_rejected rejection ->
+    (EO.candidate_rejection_identity rejection).candidate_id
 ;;
 
 let test_flow_order_completion_and_replay () =

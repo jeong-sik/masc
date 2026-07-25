@@ -220,12 +220,10 @@ let test_worker_exact_callback_integration_and_owner_settlement () =
        when same_provenance durable first -> ()
      | _ -> Alcotest.fail "first callback did not durably bind projected provenance");
     callbacks := !callbacks @ [ "bind-first" ];
-    ok "record advance" (before_advance ~failed:first ~next:second);
+    ok "release failed attempt" (before_advance ~failed:first);
     (match (load_one_partition ~base_path).state with
-     | P.Running { progress = P.Advancing durable; _ }
-       when same_provenance durable.failed first
-            && same_provenance durable.next second -> ()
-     | _ -> Alcotest.fail "advance callback did not persist the projected pair");
+     | P.Running { progress = P.Unbound; _ } -> ()
+     | _ -> Alcotest.fail "advance callback did not release the failed attempt");
     callbacks := !callbacks @ [ "advance" ];
     ok "bind second" (before_dispatch second);
     (match (load_one_partition ~base_path).state with
@@ -974,12 +972,11 @@ let test_bound_cancellation_is_prompt_and_process_recoverable () =
   | _ -> Alcotest.fail "process-start recovery lost the cancelled Bound provenance"
 ;;
 
-let test_advancing_cancellation_is_prompt_and_process_recoverable () =
+let test_released_cancellation_is_prompt_and_process_recoverable () =
   Eio_main.run @@ fun _env ->
   with_temp_base "board-attention-worker-advancing-cancel" @@ fun base_path ->
   ignore (record ~base_path (candidate ()) : A.candidate);
   let failed = provenance "cancelled-failed" in
-  let next = provenance "cancelled-next" in
   let entered, publish_entered = Eio.Promise.create () in
   let never, _resolve_never = Eio.Promise.create () in
   let returned = Atomic.make false in
@@ -991,34 +988,28 @@ let test_advancing_cancellation_is_prompt_and_process_recoverable () =
             ~prepare:(fun candidate -> Ok candidate)
             ~execute:(fun ~before_dispatch ~before_advance _candidate ->
               ok "bind failed attempt" (before_dispatch failed);
-              ok "record pending advancement" (before_advance ~failed ~next);
+              ok "release failed attempt" (before_advance ~failed);
               Eio.Promise.resolve publish_entered ();
               Eio.Promise.await never)
           : (W.step, string) result);
        Atomic.set returned true)
     (fun () -> Eio.Promise.await entered);
-  Alcotest.(check bool) "advancing cancellation did not return" false (Atomic.get returned);
+  Alcotest.(check bool) "released cancellation did not return" false (Atomic.get returned);
   (match load_one_partition ~base_path with
-   | { state = P.Running { progress = P.Advancing durable; _ }; _ }
-     when same_provenance durable.failed failed
-          && same_provenance durable.next next -> ()
-   | _ -> Alcotest.fail "advancing cancellation performed partition I/O");
+   | { state = P.Running { progress = P.Unbound; _ }; _ } -> ()
+   | _ -> Alcotest.fail "released cancellation performed partition I/O");
   Alcotest.(check int)
-    "process-start recovery quarantines one Advancing execution"
+    "process-start recovery releases one Unbound execution"
     1
     (ok
-       "recover cancelled Advancing"
+       "recover cancelled released execution"
        (P.recover_for_process_start
           ~now:4.0
           ~base_path
           ~keeper_name:"sangsu"));
   match load_one_partition ~base_path with
-  | { state = P.Blocked
-        { reason = P.Exact_execution_quarantined (P.Advancing durable); _ }
-    ; _
-    } when same_provenance durable.failed failed
-           && same_provenance durable.next next -> ()
-  | _ -> Alcotest.fail "process-start recovery lost the cancelled Advancing pair"
+  | { state = P.Ready; _ } -> ()
+  | _ -> Alcotest.fail "process-start recovery did not return the released execution to Ready"
 ;;
 
 let test_unbound_cancellation_waits_for_process_start_recovery () =
@@ -2029,9 +2020,9 @@ let () =
             `Quick
             test_bound_cancellation_is_prompt_and_process_recoverable
         ; Alcotest.test_case
-            "Advancing cancellation is prompt and process-recoverable"
+            "Released cancellation returns Ready on process recovery"
             `Quick
-            test_advancing_cancellation_is_prompt_and_process_recoverable
+            test_released_cancellation_is_prompt_and_process_recoverable
         ; Alcotest.test_case
             "Unbound cancellation waits for process-start recovery"
             `Quick

@@ -7,11 +7,7 @@ let require_lane_slots label ~lane_id ~expected registry =
       "%s: %s"
       label
       (Registry.lane_resolution_error_to_string error)
-  | Ok { selected_slots; unavailable_slots } ->
-    Alcotest.(check int)
-      (label ^ " unavailable")
-      0
-      (List.length unavailable_slots);
+  | Ok { selected_slots } ->
     Alcotest.(check (list string))
       label
       expected
@@ -137,9 +133,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
           "%s: %s"
           label
           (Registry.lane_resolution_error_to_string error)
-      | Ok { selected_slots; unavailable_slots } ->
-        Alcotest.(check int) (label ^ " unavailable") 0
-          (List.length unavailable_slots);
+      | Ok { selected_slots } ->
         Alcotest.(check (list string))
           label
           [ replacement_target ]
@@ -334,29 +328,7 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
          (Registry.reservation_error_to_string error))
 ;;
 
-let unavailable_signature (slot : Registry.unavailable_slot) =
-  let kind, target_ref, environment_variable =
-    match slot.cause with
-    | Exact_output.Missing_target_credential
-        { target_ref; environment_variable } ->
-      "missing", target_ref, environment_variable
-    | Exact_output.Target_credential_invalid
-        { target_ref; environment_variable } ->
-      "invalid", target_ref, environment_variable
-    | Exact_output.Target_credential_read_failed
-        { target_ref; environment_variable } ->
-      "read-failed", target_ref, environment_variable
-  in
-  Printf.sprintf
-    "%d:%s:%s:%s:%s"
-    slot.position
-    slot.slot_id
-    kind
-    target_ref
-    environment_variable
-;;
-
-let test_registry_skips_typed_unavailable_credentials () =
+let test_registry_preserves_admitted_slots_without_resolving_credentials () =
   let contents =
     [ catalog_toml
         ~api_key_env:"MISSING_FIXTURE_KEY"
@@ -397,7 +369,7 @@ let test_registry_skips_typed_unavailable_credentials () =
       (Exact_output.Full_replacement
          { source = "registry credential outcomes"; contents })
   in
-  let unavailable =
+  let credential_constrained =
     [ "credential-missing"; "credential-invalid"; "credential-read-failed" ]
   in
   let lanes : Runtime_schema.exact_output_lane_decl list =
@@ -409,7 +381,7 @@ let test_registry_skips_typed_unavailable_credentials () =
           ; "credential-read-failed"
           ]
       }
-    ; { id = "all-unavailable"; slot_ids = unavailable }
+    ; { id = "credential-constrained"; slot_ids = credential_constrained }
     ]
   in
   let registry =
@@ -420,43 +392,21 @@ let test_registry_skips_typed_unavailable_credentials () =
         "credential outcomes must not block publication: %s"
         (Registry.publication_error_to_string error)
   in
-  let expected_mixed_unavailable =
-    [ "1:credential-missing:missing:credential-missing:MISSING_FIXTURE_KEY"
-    ; "3:credential-invalid:invalid:credential-invalid:INVALID_FIXTURE_KEY"
-    ; "4:credential-read-failed:read-failed:credential-read-failed:READ_FAILED_FIXTURE_KEY"
-    ]
-  in
-  (match Registry.resolve_lane registry ~lane_id:"mixed-credentials" with
-   | Error error ->
-     Alcotest.failf
-       "one usable slot must keep the lane available: %s"
-       (Registry.lane_resolution_error_to_string error)
-   | Ok { selected_slots; unavailable_slots } ->
-     Alcotest.(check (list string))
-       "usable slots retain declaration order"
-       [ "credential-available" ]
-       (List.map
-          (fun (slot : Registry.selected_slot) -> slot.slot_id)
-          selected_slots);
-     Alcotest.(check (list string))
-       "unavailable credential diagnostics retain declaration order"
-       expected_mixed_unavailable
-       (List.map unavailable_signature unavailable_slots));
-  match Registry.resolve_lane registry ~lane_id:"all-unavailable" with
-  | Error (Registry.No_usable_lane_slots { lane_id; unavailable_slots }) ->
-    Alcotest.(check string) "terminal lane id" "all-unavailable" lane_id;
-    Alcotest.(check (list string))
-      "terminal diagnostics retain declaration order"
-      [ "1:credential-missing:missing:credential-missing:MISSING_FIXTURE_KEY"
-      ; "2:credential-invalid:invalid:credential-invalid:INVALID_FIXTURE_KEY"
-      ; "3:credential-read-failed:read-failed:credential-read-failed:READ_FAILED_FIXTURE_KEY"
+  require_lane_slots
+    "MASC preserves every admitted mixed-credential slot"
+    ~lane_id:"mixed-credentials"
+    ~expected:
+      [ "credential-missing"
+      ; "credential-available"
+      ; "credential-invalid"
+      ; "credential-read-failed"
       ]
-      (List.map unavailable_signature unavailable_slots)
-  | Error error ->
-    Alcotest.failf
-      "all-unavailable lane returned the wrong typed failure: %s"
-      (Registry.lane_resolution_error_to_string error)
-  | Ok _ -> Alcotest.fail "all-unavailable lane must fail closed"
+    registry;
+  require_lane_slots
+    "MASC does not pre-resolve credential-constrained slots"
+    ~lane_id:"credential-constrained"
+    ~expected:credential_constrained
+    registry
 ;;
 
 let test_hitl_auto_judge_lane_bootstrap ~clock ~mono_clock ~net ~proc_mgr ~fs () =
@@ -753,9 +703,9 @@ let () =
                ~proc_mgr
                ~fs)
         ; Alcotest.test_case
-            "credential failures skip slots and fail only when none are usable"
+            "registry preserves admitted slots without resolving credentials"
             `Quick
-            test_registry_skips_typed_unavailable_credentials
+            test_registry_preserves_admitted_slots_without_resolving_credentials
         ; Alcotest.test_case
             "closed registry transaction publishes final generation and lane"
             `Quick

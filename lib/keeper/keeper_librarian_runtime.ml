@@ -505,7 +505,7 @@ let flow_candidates selected_slots =
       (match
          Exact_output.make_flow_candidate
            ~id:slot.slot_id
-           ~admitted_target:slot.target
+           ~admitted_target:slot.admitted_target
        with
        | Ok candidate -> loop (position + 1) (candidate :: acc) rest
        | Error Exact_output.Blank_flow_candidate_id ->
@@ -623,10 +623,8 @@ let extract_with_exact_output_classified_unlocked
                 Error
                   (Exact_setup_failed
                      (Exact_lane_unavailable
-                        (No_usable_lane_slots
-                           { lane_id = exact_lane_id
-                           ; unavailable_slots = resolved.unavailable_slots
-                           })))
+                        (No_admitted_lane_slots
+                           { lane_id = exact_lane_id })))
               | Ok (first :: rest) ->
                 let requirement =
                   Exact_output.make_output_requirement

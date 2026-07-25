@@ -70,7 +70,7 @@ let flow_candidates selected_slots =
       (match
          Exact_output.make_flow_candidate
            ~id:slot.slot_id
-           ~admitted_target:slot.target
+           ~admitted_target:slot.admitted_target
        with
        | Ok candidate -> loop (position + 1) (candidate :: acc) rest
        | Error Exact_output.Blank_flow_candidate_id ->

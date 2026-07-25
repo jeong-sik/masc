@@ -38,6 +38,9 @@ OCAML_IDENTIFIER_PATTERN = re.compile(
     r"(?<![A-Za-z0-9_'])[A-Za-z_][A-Za-z0-9_']*(?![A-Za-z0-9_'])"
 )
 CHAR_LITERAL_PATTERN = re.compile(r"'(?:[^'\\\r\n]|\\[^\r\n])'")
+APPROVED_UNIX_GETTIMEOFDAY_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_'.])Unix\.gettimeofday(?![A-Za-z0-9_'])"
+)
 CAMEL_CASE_BOUNDARY_PATTERN = re.compile(
     r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
 )
@@ -153,10 +156,14 @@ for raw_path in sys.argv[1:]:
             failures.append(
                 f"{path}:{location(source, match.start())}: forbidden identifier {identifier}"
             )
+    environment_code = APPROVED_UNIX_GETTIMEOFDAY_PATTERN.sub(
+        lambda candidate: " " * len(candidate.group(0)),
+        code,
+    )
     match = next(
         (
             candidate
-            for candidate in OCAML_IDENTIFIER_PATTERN.finditer(code)
+            for candidate in OCAML_IDENTIFIER_PATTERN.finditer(environment_code)
             if candidate.group(0).rstrip("'") in FORBIDDEN_ENV_IDENTIFIERS
         ),
         None,
@@ -216,6 +223,7 @@ Provider_runtime_binding ensure_local_discovery_ready
 let _tagged_decoy = {tag|Env_config environment getenv getenv_opt|tag}
 let _ordinary_env_decoy = "Env_config environment getenv getenv_opt"
 let _quote = '"'
+let _ = Unix.gettimeofday ()
 let _ = Env_configuration.Tokenizer.path
 let _ = getenv_optimal ()
 let _ = my_getenv_opt ()
@@ -249,6 +257,10 @@ EOF
     'let _ = Sys . getenv_opt "MASC_DEFAULT_MODEL"' \
     'let _ = Sys.(getenv_opt "MASC_DEFAULT_MODEL")' \
     'let _ = let open Unix in getenv "PROVIDER_API_KEY"' \
+    'let _ = Unix . gettimeofday ()' \
+    'let _ = Unix.(gettimeofday ())' \
+    'let _ = Wrapper.Unix.gettimeofday ()' \
+    $'module U = Unix\nlet _ = U.gettimeofday ()' \
     'let _ = Unix.environment ()' \
     'let _ = let open Unix in environment ()' \
     $'let _ = Unix.\ngetenv_opt "PROVIDER_API_KEY"' \

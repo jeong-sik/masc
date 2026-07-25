@@ -44,11 +44,18 @@ type candidate_visit =
 (** OAS-selected successor visit before an attempt exists. It deliberately has
     no call id, request plan, body hash, provider, model, or credential. *)
 
+type advance_source =
+  | Executed_failure of exact_provenance
+  | Predispatch_rejection of candidate_visit
+(** Opaque source of one OAS advancement. A predispatch rejection has no
+    execution receipt and therefore carries only its candidate visit. *)
+
 type running_progress =
   | Unbound
   | Bound of exact_provenance
   | Advancing of
-      { failed : exact_provenance
+      { execution_anchor : exact_provenance option
+      ; last_from : candidate_visit option
       ; next : candidate_visit
       }
 
@@ -161,14 +168,14 @@ val record_before_advance :
   worker_epoch:Worker_epoch.t ->
   base_path:string ->
   partition:t ->
-  failed:exact_provenance ->
+  source:advance_source ->
   next:candidate_visit ->
   (exact_transition, string) result
-(** Atomically persist [Bound failed -> Advancing { failed; next }] before OAS
-    advances from a zero-dispatch execution failure. [next] is the immutable
-    OAS-selected visit, not a MASC successor decision. Rejected candidates have
-    no execution receipt and require no MASC state transition. Only
-    [Fsync_completed] authorizes advancement. *)
+(** Atomically persist every OAS-selected advancement. Executed failure starts
+    from its exact binding; predispatch rejection carries only its immutable
+    candidate visit and may advance an existing [Advancing.next]. [next] is
+    OAS-selected, never a MASC successor decision. Only [Fsync_completed]
+    authorizes advancement. *)
 
 val complete :
   now:float ->

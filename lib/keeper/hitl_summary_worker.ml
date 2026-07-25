@@ -871,6 +871,7 @@ let execute_prepared_flow_with_queue_writers_current
       settle_current_generation (fun () -> handle_flow_error prepared error)
   with
   | Eio.Cancel.Cancelled _ as cancellation ->
+    let cancellation_backtrace = Printexc.get_raw_backtrace () in
     (try
        match
          Eio.Cancel.protect
@@ -902,7 +903,7 @@ let execute_prepared_flow_with_queue_writers_current
          prepared.entry
          "cancellation settlement raised"
          (Printexc.to_string exn));
-    raise cancellation
+    Printexc.raise_with_backtrace cancellation cancellation_backtrace
   | Exact_terminalization_persistence_failed _ as persistence_failure ->
     raise persistence_failure
   | exn ->
@@ -1009,16 +1010,17 @@ let spawn_with
         | Executed -> `Completed
         | Deferred_unregistered -> `Owner_unregistered
       with
-      | Eio.Cancel.Cancelled _ as cancellation -> `Cancelled cancellation
+      | Eio.Cancel.Cancelled _ as cancellation ->
+        `Cancelled (cancellation, Printexc.get_raw_backtrace ())
       | Exact_terminalization_persistence_failed _ as uncertainty ->
         `Uncertain uncertainty
       | exn -> `Uncertain exn
     in
     match execution_outcome with
     | `Completed -> on_finish Conclusive_terminalization
-    | `Cancelled cancellation ->
+    | `Cancelled (cancellation, cancellation_backtrace) ->
       on_finish Conclusive_terminalization;
-      raise cancellation
+      Printexc.raise_with_backtrace cancellation cancellation_backtrace
     | `Owner_unregistered -> on_finish Owner_unregistered_deferred
     | `Uncertain uncertainty ->
       on_finish Terminalization_persistence_uncertain;

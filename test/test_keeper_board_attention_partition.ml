@@ -569,7 +569,7 @@ let test_existing_judgment_completion_is_atomic_and_restart_safe () =
       ~worker_epoch:owner
       ~base_path
       ~partition:released_bound
-      ~failed
+      ~source:(P.Executed_failure failed)
       ~next
     |> ok "record existing-judgment advancement fixture"
     |> fsynced "record existing-judgment advancement fixture"
@@ -612,7 +612,8 @@ let test_before_advance_record_is_atomic_and_exact () =
        ~worker_epoch:owner
        ~base_path
        ~partition:bound
-       ~failed:(provenance ~call_id:"other-call" ())
+       ~source:
+         (P.Executed_failure (provenance ~call_id:"other-call" ()))
        ~next:next_visit);
   let advance_transition =
     ok
@@ -621,7 +622,7 @@ let test_before_advance_record_is_atomic_and_exact () =
          ~worker_epoch:owner
          ~base_path
          ~partition:bound
-         ~failed
+         ~source:(P.Executed_failure failed)
          ~next:next_visit)
   in
   Alcotest.(check bool)
@@ -634,7 +635,9 @@ let test_before_advance_record_is_atomic_and_exact () =
      Alcotest.(check bool)
        "failed receipt and selected visit persist exactly"
        true
-       (durable.failed = failed && durable.next = next_visit)
+       (durable.execution_anchor = Some failed
+        && durable.last_from = None
+        && durable.next = next_visit)
    | _ -> Alcotest.fail "partition did not retain Advancing evidence");
   let rebound =
     P.bind_before_dispatch
@@ -986,6 +989,73 @@ let test_invalid_or_mismatched_provenance_never_rewrites () =
   | _ -> Alcotest.fail "rejected completion mutated the durable binding"
 ;;
 
+let test_predispatch_rejection_chain_binds_oas_selected_third_slot () =
+  with_temp_base "board-attention-partition-predispatch-chain" @@ fun base_path ->
+  let pending = candidate ~id:"candidate-predispatch-chain" ~recorded_at:1.0 () in
+  ignore (roots ~base_path [ pending ] : P.t list);
+  let owner = P.Worker_epoch.generate () in
+  let claimed = claim ~base_path ~worker_epoch:owner ~now:10.0 in
+  let first = candidate_visit ~slot_id:"slot-a" () in
+  let second =
+    { (candidate_visit ~slot_id:"slot-b" ()) with ordinal = first.ordinal + 1 }
+  in
+  let third =
+    { (candidate_visit ~slot_id:"slot-c" ()) with ordinal = second.ordinal + 1 }
+  in
+  let after_first =
+    P.record_before_advance
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:claimed
+      ~source:(P.Predispatch_rejection first)
+      ~next:second
+    |> ok "record first predispatch rejection"
+    |> fsynced "record first predispatch rejection"
+  in
+  let after_second =
+    P.record_before_advance
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:after_first
+      ~source:(P.Predispatch_rejection second)
+      ~next:third
+    |> ok "record second predispatch rejection"
+    |> fsynced "record second predispatch rejection"
+  in
+  (match after_second.state with
+   | P.Running
+       { progress =
+           P.Advancing
+             { execution_anchor = None
+             ; last_from = Some durable
+             ; next = durable_next
+             }
+       ; _
+       } ->
+     Alcotest.(check bool)
+       "latest rejected visit and OAS successor are durable"
+       true
+       (durable = second && durable_next = third)
+   | _ -> Alcotest.fail "predispatch chain did not retain latest advancement");
+  let third_provenance = provenance ~slot_id:third.slot_id ~call_id:"call-c" () in
+  let rebound =
+    P.bind_before_dispatch
+      ~worker_epoch:owner
+      ~base_path
+      ~partition:after_second
+      ~provenance:third_provenance
+    |> ok "bind OAS-selected third slot"
+    |> fsynced "bind OAS-selected third slot"
+  in
+  match rebound.state with
+  | P.Running { progress = P.Bound durable; _ } ->
+    Alcotest.(check bool)
+      "third slot exact provenance is bound"
+      true
+      (durable = third_provenance)
+  | _ -> Alcotest.fail "third OAS-selected slot was not bindable"
+;;
+
 let () =
   Alcotest.run
     "keeper_board_attention_partition"
@@ -1014,6 +1084,10 @@ let () =
             "before advance record is atomic and exact"
             `Quick
             test_before_advance_record_is_atomic_and_exact
+        ; Alcotest.test_case
+            "predispatch rejection chain binds OAS-selected third slot"
+            `Quick
+            test_predispatch_rejection_chain_binds_oas_selected_third_slot
         ; Alcotest.test_case
             "runtime transitions append then startup compacts"
             `Quick

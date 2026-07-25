@@ -378,8 +378,8 @@ check_boundary() {
     'Keeper_board_attention_failure|attempt_failure|retryable|Retry\.|retry_after|retry_deadline|is_retryable|Partition_deferred|(^|[^[:alnum:]_])defer([^[:alnum:]_]|$)|release_due_provider_retries|next_provider_retry_deadline|recover_claim_after_lane_abort' \
     "Board attention execution must not regain local retry or defer authority"
   forbid_pattern \
-    'Exact_output\.(receipt_phase|receipt_dispatch_count)|receipt_(phase|dispatch_count)|dispatch_count|exact_execution_failed_before_dispatch' \
-    "Board attention execution must not inspect OAS receipt phase or dispatch count"
+    'Exact_output\.(receipt_phase|receipt_dispatch_count|candidate_rejection_(disposition|phase|dispatch_count))|receipt_(phase|dispatch_count)|candidate_rejection_(disposition|phase|dispatch_count)|dispatch_count|exact_execution_failed_before_dispatch' \
+    "Board attention execution must not inspect OAS receipt or candidate-rejection phase, disposition, or dispatch count"
   forbid_pattern \
     'Judgment_blocked|Claim_released|Claim_already_transitioned|Legacy_|legacy_failure' \
     "retired Board attention failure or claim-recovery surface returned"
@@ -515,6 +515,7 @@ EOF
     'let defer value = value' \
     'let _ = Exact_output.receipt_phase' \
     'let _ = Exact_output.receipt_dispatch_count' \
+    'let _ = Exact_output.candidate_rejection_disposition' \
     'let _ = Exact_output.admit_target_ref' \
     'let _ = Exact_output.resolve_target' \
     'let _ = Exact_output.receipt_target_identity' \

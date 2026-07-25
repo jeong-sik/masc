@@ -177,6 +177,14 @@ exception Cancel_after_request_arrived
 
 let unknown_writer _path _body = raise Unknown_writer_failure
 
+let[@inline never] raise_injected_cancellation expected_backtrace payload =
+  try raise (Eio.Cancel.Cancelled payload) with
+  | Eio.Cancel.Cancelled _ as cancellation ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    expected_backtrace := Some backtrace;
+    Printexc.raise_with_backtrace cancellation backtrace
+;;
+
 let rec await_condition ~clock ~remaining ~failure predicate =
   if predicate ()
   then ()
@@ -977,6 +985,90 @@ let test_cancellation_after_dispatch_is_terminal () =
        | _ -> fail "post-dispatch cancellation was not terminally quarantined")
 ;;
 
+let test_spawn_preserves_cancellation_origin_backtrace () =
+  let previous_backtrace_status = Printexc.backtrace_status () in
+  Fun.protect
+    ~finally:(fun () -> Printexc.record_backtrace previous_backtrace_status)
+    (fun () ->
+       Printexc.record_backtrace true;
+       run_eio @@ fun ~sw ~net ~clock ->
+       with_temp_dir "hitl-cancellation-backtrace" @@ fun base_path ->
+       Fun.protect
+         ~finally:Q.For_testing.reset_runtime_state
+         (fun () ->
+            install_queue base_path;
+            Prompt_registry.set_markdown_dir
+              (Masc_test_deps.source_path "config/prompts");
+            let server =
+              F.start_server
+                ~sw
+                ~net
+                ~clock
+                (F.Reply (F.openai_response (judgment_json "approve")))
+            in
+            publish_lane
+              [ "hitl-cancellation-backtrace" ]
+              (F.resolver_snapshot
+                 ~source:"hitl-cancellation-backtrace"
+                 [ { id = "hitl-cancellation-backtrace"
+                   ; base_url = server.base_url
+                   }
+                 ]);
+            let entry = pending_entry ~base_path () in
+            let expected_backtrace = ref None in
+            let finish_outcome = ref None in
+            let payload = Failure "injected HITL cancellation origin" in
+            let bind_writer _path _body =
+              raise_injected_cancellation expected_backtrace payload
+            in
+            let observed_payload, observed_backtrace =
+              match
+                Eio.Switch.run
+                @@ fun worker_sw ->
+                match
+                  Worker.For_testing.spawn_with_writers
+                    ~bind_writer
+                    ~sw:worker_sw
+                    ~entry
+                    ~on_summary:(fun _ ->
+                      fail "cancelled worker delivered a summary")
+                    ~on_finish:(fun outcome -> finish_outcome := Some outcome)
+                    ()
+                with
+                | Ok () -> ()
+                | Error detail -> fail detail
+              with
+              | exception Eio.Cancel.Cancelled observed_payload ->
+                observed_payload, Printexc.get_raw_backtrace ()
+              | () -> fail "injected cancellation did not leave the worker"
+            in
+            check bool
+              "cancellation payload identity is preserved"
+              true
+              (observed_payload == payload);
+            let expected_backtrace =
+              match !expected_backtrace with
+              | Some backtrace -> backtrace
+              | None -> fail "injected cancellation origin was not captured"
+            in
+            check string
+              "cancellation origin raw backtrace is preserved"
+              (Printexc.raw_backtrace_to_string expected_backtrace)
+              (Printexc.raw_backtrace_to_string observed_backtrace);
+            check bool
+              "cancellation still reports conclusive finish"
+              true
+              (match !finish_outcome with
+               | Some Worker.Conclusive_terminalization -> true
+               | Some Worker.Terminalization_persistence_uncertain
+               | Some Worker.Owner_unregistered_deferred
+               | None -> false);
+            check int
+              "cancelled before-dispatch callback made no request"
+              0
+              (F.post_count server)))
+;;
+
 let test_pre_worker_start_failure_is_retryable () =
   run_eio @@ fun ~sw:_ ~net:_ ~clock:_ ->
   with_temp_dir "hitl-pre-worker-start-failure" @@ fun base_path ->
@@ -1431,6 +1523,10 @@ let () =
             "post-dispatch cancellation is terminal"
             `Quick
             test_cancellation_after_dispatch_is_terminal
+        ; test_case
+            "spawn preserves cancellation origin backtrace"
+            `Quick
+            test_spawn_preserves_cancellation_origin_backtrace
         ; test_case
             "pre-worker start failure is retryable"
             `Quick

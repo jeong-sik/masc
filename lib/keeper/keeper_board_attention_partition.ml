@@ -55,11 +55,16 @@ type candidate_visit =
   ; target_identity_fingerprint : string
   }
 
+type advance_source =
+  | Executed_failure of exact_provenance
+  | Predispatch_rejection of candidate_visit
+
 type running_progress =
   | Unbound
   | Bound of exact_provenance
   | Advancing of
-      { failed : exact_provenance
+      { execution_anchor : exact_provenance option
+      ; last_from : candidate_visit option
       ; next : candidate_visit
       }
 
@@ -157,10 +162,17 @@ let running_progress_to_yojson = function
       [ "kind", `String "bound"
       ; "provenance", exact_provenance_to_yojson provenance
       ]
-  | Advancing { failed; next } ->
+  | Advancing { execution_anchor; last_from; next } ->
     `Assoc
       [ "kind", `String "advancing"
-      ; "failed", exact_provenance_to_yojson failed
+      ; ( "execution_anchor"
+        , match execution_anchor with
+          | Some provenance -> exact_provenance_to_yojson provenance
+          | None -> `Null )
+      ; ( "last_from"
+        , match last_from with
+          | Some visit -> candidate_visit_to_yojson visit
+          | None -> `Null )
       ; "next", candidate_visit_to_yojson next
       ]
 ;;
@@ -372,12 +384,30 @@ let running_progress_of_yojson json =
     let* provenance = exact_provenance_of_yojson provenance_json in
     Ok (Bound provenance)
   | "advancing" ->
-    let* () = exact_fields ~context [ "kind"; "failed"; "next" ] fields in
-    let* failed_json = field ~context "failed" fields in
-    let* failed = exact_provenance_of_yojson failed_json in
+    let* () =
+      exact_fields
+        ~context
+        [ "kind"; "execution_anchor"; "last_from"; "next" ]
+        fields
+    in
+    let* execution_anchor_json = field ~context "execution_anchor" fields in
+    let* execution_anchor =
+      match execution_anchor_json with
+      | `Null -> Ok None
+      | json -> exact_provenance_of_yojson json |> Result.map Option.some
+    in
+    let* last_from_json = field ~context "last_from" fields in
+    let* last_from =
+      match last_from_json with
+      | `Null -> Ok None
+      | json -> candidate_visit_of_yojson json |> Result.map Option.some
+    in
     let* next_json = field ~context "next" fields in
     let* next = candidate_visit_of_yojson next_json in
-    Ok (Advancing { failed; next })
+    (match execution_anchor, last_from with
+     | None, None ->
+       Error "advancing progress requires an execution anchor or rejected visit"
+     | _ -> Ok (Advancing { execution_anchor; last_from; next }))
   | value -> Error (Printf.sprintf "unknown Board attention exact progress %S" value)
 ;;
 
@@ -716,8 +746,11 @@ let legal_transition previous next =
   | Ready, Running { progress = Unbound; _ } -> true
   | Running { progress = Unbound; _ }, Ready -> true
   | Running { progress = Unbound; _ }, Running { progress = Bound _; _ } -> true
+  | Running { progress = Unbound; _ }, Running { progress = Advancing _; _ } -> true
   | Running { progress = Unbound; _ }, Completed _ -> true
   | Running { progress = Bound _; _ }, Running { progress = Advancing _; _ } -> true
+  | Running { progress = Advancing _; _ }, Running { progress = Advancing _; _ } ->
+    true
   | Running { progress = Advancing _; _ }, Running { progress = Bound _; _ } -> true
   | Running { progress = Bound _; _ }, Completed _ -> true
   | Running _, Blocked _ -> true
@@ -1031,6 +1064,11 @@ let candidate_visit_equal left right =
        right.target_identity_fingerprint
 ;;
 
+let advance_source_slot_id = function
+  | Executed_failure provenance -> provenance.slot_id
+  | Predispatch_rejection visit -> visit.slot_id
+;;
+
 let validate_candidate_visit visit =
   let* () = nonempty "partition candidate visit flow_id" visit.flow_id in
   let* () =
@@ -1052,6 +1090,11 @@ let validate_candidate_visit visit =
   nonempty
     "partition candidate visit target_identity_fingerprint"
     visit.target_identity_fingerprint
+;;
+
+let validate_advance_source = function
+  | Executed_failure provenance -> validate_exact_provenance provenance
+  | Predispatch_rejection visit -> validate_candidate_visit visit
 ;;
 
 let judgment_provenance (judgment : Candidate.judgment) =
@@ -1079,8 +1122,24 @@ let validate_blocked_reason = function
     nonempty "unexpected worker failure detail" detail
   | Exact_execution_quarantined (Bound provenance) ->
     validate_exact_provenance provenance
-  | Exact_execution_quarantined (Advancing { failed; next }) ->
-    let* () = validate_exact_provenance failed in
+  | Exact_execution_quarantined
+      (Advancing { execution_anchor; last_from; next }) ->
+    let* () =
+      match execution_anchor with
+      | Some provenance -> validate_exact_provenance provenance
+      | None -> Ok ()
+    in
+    let* () =
+      match last_from with
+      | Some visit -> validate_candidate_visit visit
+      | None -> Ok ()
+    in
+    let* () =
+      match execution_anchor, last_from with
+      | None, None ->
+        Error "advancing progress requires an execution anchor or rejected visit"
+      | _ -> Ok ()
+    in
     validate_candidate_visit next
   | Exact_execution_quarantined Unbound ->
     Error "unbound execution cannot be quarantined"
@@ -1321,10 +1380,10 @@ let bind_before_dispatch ~worker_epoch ~base_path ~partition ~provenance =
         Error "before-dispatch binding differs from the durable next provenance")
 ;;
 
-let record_before_advance ~worker_epoch ~base_path ~partition ~failed ~next =
-  let* () = validate_exact_provenance failed in
+let record_before_advance ~worker_epoch ~base_path ~partition ~source ~next =
+  let* () = validate_advance_source source in
   let* () = validate_candidate_visit next in
-  if String.equal failed.slot_id next.slot_id
+  if String.equal (advance_source_slot_id source) next.slot_id
   then Error "before-advance next visit must differ from the failed slot"
   else
     transition_running_exact
@@ -1333,16 +1392,74 @@ let record_before_advance ~worker_epoch ~base_path ~partition ~failed ~next =
       ~worker_epoch
       (fun running ->
         match running.progress with
-        | Bound current when exact_provenance_equal current failed ->
-          Ok (Running { running with progress = Advancing { failed; next } })
-        | Bound _ ->
-          Error "before-advance failed provenance differs from the durable binding"
-        | Advancing current
-          when exact_provenance_equal current.failed failed
-               && candidate_visit_equal current.next next -> Ok (Running running)
-        | Advancing _ ->
-          Error "before-advance pair conflicts with the durable advancement"
-        | Unbound -> Error "before-advance requires a durable exact binding")
+        | Bound current ->
+          (match source with
+           | Executed_failure failed when exact_provenance_equal current failed ->
+             Ok
+               (Running
+                  { running with
+                    progress =
+                      Advancing
+                        { execution_anchor = Some failed
+                        ; last_from = None
+                        ; next
+                        }
+                  })
+           | Executed_failure _ ->
+             Error "before-advance failed provenance differs from the durable binding"
+           | Predispatch_rejection _ ->
+             Error "before-advance predispatch rejection requires a durable advancing visit")
+        | Unbound ->
+          (match source with
+           | Predispatch_rejection _ ->
+             let last_from =
+               match source with
+               | Predispatch_rejection visit -> visit
+               | Executed_failure _ -> assert false
+             in
+             Ok
+               (Running
+                  { running with
+                    progress =
+                      Advancing
+                        { execution_anchor = None
+                        ; last_from = Some last_from
+                        ; next
+                        }
+                  })
+           | Executed_failure _ ->
+             Error "before-advance executed failure requires a durable exact binding")
+        | Advancing current ->
+          (match source with
+           | Executed_failure failed
+             when (match current.execution_anchor with
+                   | Some anchor -> exact_provenance_equal anchor failed
+                   | None -> false)
+                  && Option.is_none current.last_from
+                  && candidate_visit_equal current.next next ->
+             Ok (Running running)
+           | Predispatch_rejection rejected
+             when (match current.last_from with
+                   | Some last_from -> candidate_visit_equal last_from rejected
+                   | None -> false)
+                  && candidate_visit_equal current.next next ->
+             Ok (Running running)
+           | Predispatch_rejection rejected
+             when candidate_visit_equal current.next rejected ->
+             Ok
+               (Running
+                  { running with
+                    progress =
+                      Advancing
+                        { execution_anchor = current.execution_anchor
+                        ; last_from = Some rejected
+                        ; next
+                        }
+                  })
+           | Executed_failure _
+           | Predispatch_rejection _ ->
+             Error "before-advance pair conflicts with the durable advancement")
+        )
 ;;
 
 let validate_completion ~now ~(partition : t) ~(item : completed_item) =

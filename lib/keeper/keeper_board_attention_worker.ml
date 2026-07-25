@@ -475,8 +475,13 @@ let attempt_provenance_of_reason = function
   | Partition.Exact_execution_quarantined (Partition.Bound provenance) ->
     Some (candidate_provenance provenance)
   | Partition.Exact_execution_quarantined
-      (Partition.Advancing { failed; next = _ }) ->
+      (Partition.Advancing
+         { execution_anchor = Some failed; last_from = _; next = _ }) ->
     Some (candidate_provenance failed)
+  | Partition.Exact_execution_quarantined
+      (Partition.Advancing
+         { execution_anchor = None; last_from = _; next = _ }) ->
+    None
   | Partition.Exact_execution_quarantined Partition.Unbound
   | Partition.Candidate_membership_conflict _
   | Partition.Durable_partition_invariant _
@@ -701,6 +706,13 @@ let partition_candidate_visit (visit : Exact_flow.candidate_visit) :
   }
 ;;
 
+let partition_advance_source = function
+  | Exact_flow.Executed_failure provenance ->
+    Partition.Executed_failure (partition_provenance provenance)
+  | Exact_flow.Predispatch_rejection visit ->
+    Partition.Predispatch_rejection (partition_candidate_visit visit)
+;;
+
 let setup_error_detail = function
   | Exact_flow.Network_unavailable -> "network context unavailable"
   | Exact_flow.Candidate_not_pending -> "candidate is no longer pending"
@@ -716,11 +728,30 @@ let setup_error_detail = function
   | Exact_flow.Flow_start_failed -> "OAS exact-flow start failed"
 ;;
 
-let exact_provenance_equal left right =
+let exact_provenance_equal
+      (left : Partition.exact_provenance)
+      (right : Partition.exact_provenance)
+  =
   String.equal left.Partition.slot_id right.Partition.slot_id
   && String.equal left.call_id right.call_id
   && String.equal left.plan_fingerprint right.plan_fingerprint
   && String.equal left.request_body_sha256 right.request_body_sha256
+;;
+
+let candidate_visit_equal
+      (left : Partition.candidate_visit)
+      (right : Partition.candidate_visit)
+  =
+  String.equal left.flow_id right.flow_id
+  && Int.equal left.ordinal right.ordinal
+  && String.equal left.slot_id right.slot_id
+  && String.equal
+       left.catalog_generation_fingerprint
+       right.catalog_generation_fingerprint
+  && String.equal left.catalog_evidence_sha256 right.catalog_evidence_sha256
+  && String.equal
+       left.target_identity_fingerprint
+       right.target_identity_fingerprint
 ;;
 
 let callback_invariant operation cause =
@@ -743,19 +774,52 @@ let before_dispatch_failure_reason partition ~cause ~current =
   | None -> callback_invariant "before-dispatch" cause
 ;;
 
-let before_advance_failure_reason partition ~cause ~failed =
-  let failed = partition_provenance failed in
+let before_advance_failure_reason partition ~cause ~failed ~next =
+  let source = partition_advance_source failed in
+  let next = partition_candidate_visit next in
   match running_progress partition with
-  | Some (Partition.Bound durable as progress)
-    when exact_provenance_equal durable failed ->
+  | Some
+      (Partition.Advancing
+         { execution_anchor = Some anchor; last_from = None; next = durable_next }
+       as progress)
+    when (match source with
+          | Partition.Executed_failure failed ->
+            exact_provenance_equal anchor failed
+            && candidate_visit_equal durable_next next
+          | Partition.Predispatch_rejection _ -> false) ->
     Partition.Exact_execution_quarantined progress
-  | Some (Partition.Advancing { failed = durable; _ } as progress)
-    when exact_provenance_equal durable failed ->
+  | Some
+      (Partition.Advancing
+         { execution_anchor = _
+         ; last_from = Some durable_from
+         ; next = durable_next
+         } as progress)
+    when (match source with
+          | Partition.Predispatch_rejection rejected ->
+            candidate_visit_equal durable_from rejected
+            && candidate_visit_equal durable_next next
+          | Partition.Executed_failure _ -> false) ->
     Partition.Exact_execution_quarantined progress
+  | Some (Partition.Advancing _ as progress) ->
+    Partition.Exact_execution_quarantined progress
+  | Some (Partition.Bound durable as progress) ->
+    (match source with
+     | Partition.Executed_failure failed
+       when exact_provenance_equal durable failed ->
+       Partition.Exact_execution_quarantined progress
+     | Partition.Executed_failure _
+     | Partition.Predispatch_rejection _ ->
+       callback_invariant "before-advance" cause)
   | Some Partition.Unbound ->
-    Partition.Exact_execution_quarantined (Partition.Bound failed)
-  | Some (Partition.Bound _)
-  | Some (Partition.Advancing _)
+    (match source with
+     | Partition.Predispatch_rejection last_from ->
+       Partition.Exact_execution_quarantined
+         (Partition.Advancing
+            { execution_anchor = None
+            ; last_from = Some last_from
+            ; next
+            })
+     | Partition.Executed_failure _ -> callback_invariant "before-advance" cause)
   | None -> callback_invariant "before-advance" cause
 ;;
 
@@ -773,9 +837,9 @@ let execution_disposition partition = function
     Execution_blocked
       (before_dispatch_failure_reason partition ~cause ~current)
   | Exact_flow.Before_advance_persistence_failed
-      { cause; failed; evidence = _ } ->
+      { cause; failed; next; evidence = _ } ->
     Execution_blocked
-      (before_advance_failure_reason partition ~cause ~failed)
+      (before_advance_failure_reason partition ~cause ~failed ~next)
   | Exact_flow.Exact_execution_failed _ ->
     Execution_blocked
       (preserve_durable_progress partition Partition.Exact_execution_terminal)
@@ -826,13 +890,13 @@ let before_advance
       ~failed
       ~next
   =
-  let failed = partition_provenance failed in
+  let source = partition_advance_source failed in
   let next = partition_candidate_visit next in
   Partition.record_before_advance
     ~worker_epoch
     ~base_path
     ~partition:!latest_partition
-    ~failed
+    ~source
     ~next
   |> confirm_exact_transition latest_partition "exact before-advance record"
 ;;

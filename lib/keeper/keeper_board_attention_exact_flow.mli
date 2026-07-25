@@ -40,6 +40,13 @@ type candidate_visit =
     execution receipt exists yet, so this type contains no call id, request
     plan, or body hash. *)
 
+type advance_source =
+  | Executed_failure of attempt_provenance
+  | Predispatch_rejection of candidate_visit
+(** Opaque source of one OAS-selected advancement. Predispatch rejection
+    carries only the immutable candidate visit because no attempt receipt
+    exists. *)
+
 type 'callback_error execution_error =
   | Owner_unregistered_deferred
   | Flow_already_started of attempt_provenance list
@@ -50,7 +57,8 @@ type 'callback_error execution_error =
       }
   | Before_advance_persistence_failed of
       { cause : 'callback_error
-      ; failed : attempt_provenance
+      ; failed : advance_source
+      ; next : candidate_visit
       ; evidence : attempt_provenance list
       }
   | Exact_execution_failed of attempt_provenance list
@@ -79,7 +87,7 @@ val execute :
   before_dispatch:
     (attempt_provenance -> (unit, 'callback_error) result) ->
   before_advance:
-    (failed:attempt_provenance ->
+    (failed:advance_source ->
      next:candidate_visit ->
      (unit, 'callback_error) result) ->
   prepared ->

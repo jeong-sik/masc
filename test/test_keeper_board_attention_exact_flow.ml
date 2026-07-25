@@ -9,7 +9,7 @@ module Worker = Keeper_board_attention_worker
 
 type callback_event =
   | Dispatch of Exact_flow.attempt_provenance
-  | Advance of Exact_flow.attempt_provenance * Exact_flow.candidate_visit
+  | Advance of Exact_flow.advance_source * Exact_flow.candidate_visit
 
 let has_prompt_root path =
   Sys.file_exists (Filename.concat path "config/prompts")
@@ -217,9 +217,10 @@ let reserved_non_listening_loopback_base_url ~sw =
   | Unix.ADDR_UNIX _ -> assert false
 ;;
 
-let publish_lane fixtures =
+let publish_lane ?(api_key_envs = []) fixtures =
   let snapshot =
     Fixture.resolver_snapshot
+      ~api_key_envs
       ~supports_response_format_json:true
       ~supports_structured_output:false
       ~source:"Board attention exact-flow conformance"
@@ -257,10 +258,25 @@ let test_explicit_lane_failover_and_success_provenance () =
         Fixture.openai_response
           (judgment_output ~candidate_id:candidate.candidate_id)
       in
-      let server = Fixture.start_server ~sw ~net ~clock (Fixture.Reply response) in
-      let first = target "board-attention-unreachable" (reserved_non_listening_loopback_base_url ~sw) in
-      let second = target "board-attention-success" server.base_url in
-      publish_lane [ first; second ];
+      let rejected_server =
+        Fixture.start_server ~sw ~net ~clock (Fixture.Reply response)
+      in
+      let success_server =
+        Fixture.start_server ~sw ~net ~clock (Fixture.Reply response)
+      in
+      let first =
+        target
+          "board-attention-unreachable"
+          (reserved_non_listening_loopback_base_url ~sw)
+      in
+      let second =
+        target "board-attention-missing-credential" rejected_server.base_url
+      in
+      let third = target "board-attention-success" success_server.base_url in
+      publish_lane
+        ~api_key_envs:
+          [ second.id, "MASC_TEST_MISSING_BOARD_ATTENTION_KEY" ]
+        [ first; second; third ];
       Alcotest.(check string)
         "explicit production lane"
         "board_attention_exact"
@@ -276,7 +292,7 @@ let test_explicit_lane_failover_and_success_provenance () =
         Ok ()
       in
       let before_advance
-            ~(failed : Exact_flow.attempt_provenance)
+            ~(failed : Exact_flow.advance_source)
             ~(next : Exact_flow.candidate_visit)
         : (unit, string) result
         =
@@ -292,13 +308,22 @@ let test_explicit_lane_failover_and_success_provenance () =
             prepared
         with
         | Ok judgment -> judgment
-        | Error _ -> Alcotest.fail "OAS did not advance to the usable second slot"
+        | Error _ -> Alcotest.fail "OAS did not advance to the usable third slot"
       in
-      Alcotest.(check int) "second slot dispatched once" 1 (Fixture.post_count server);
+      Alcotest.(check int)
+        "predispatch-rejected slot made no request"
+        0
+        (Fixture.post_count rejected_server);
+      Alcotest.(check int)
+        "third slot dispatched once"
+        1
+        (Fixture.post_count success_server);
       match List.rev !events with
       | [ Dispatch first_dispatch
-        ; Advance (failed, next)
-        ; Dispatch second_dispatch
+        ; Advance (Exact_flow.Executed_failure failed, rejected_visit)
+        ; Advance
+            (Exact_flow.Predispatch_rejection rejected, success_visit)
+        ; Dispatch third_dispatch
         ] ->
         Alcotest.(check string)
           "first dispatch uses first lane slot"
@@ -306,28 +331,36 @@ let test_explicit_lane_failover_and_success_provenance () =
           first_dispatch.slot_id;
         check_same_provenance "failed projection" first_dispatch failed;
         Alcotest.(check string)
-          "OAS-selected successor visit is carried unchanged"
+          "OAS-selected rejected visit is carried unchanged"
           second.id
-          next.slot_id;
+          rejected_visit.slot_id;
+        Alcotest.(check bool)
+          "predispatch rejection retains only its visited identity"
+          true
+          (rejected = rejected_visit);
         Alcotest.(check string)
-          "second dispatch uses second lane slot"
-          second.id
-          second_dispatch.slot_id;
+          "OAS-selected final successor visit is carried unchanged"
+          third.id
+          success_visit.slot_id;
+        Alcotest.(check string)
+          "third dispatch uses third lane slot"
+          third.id
+          third_dispatch.slot_id;
         Alcotest.(check string)
           "success slot is opaque admitted slot"
-          second_dispatch.slot_id
+          third_dispatch.slot_id
           judgment.slot_id;
         Alcotest.(check string)
           "success call provenance"
-          second_dispatch.call_id
+          third_dispatch.call_id
           judgment.call_id;
         Alcotest.(check string)
           "success plan provenance"
-          second_dispatch.plan_fingerprint
+          third_dispatch.plan_fingerprint
           judgment.plan_fingerprint;
         Alcotest.(check string)
           "success request provenance"
-          second_dispatch.request_body_sha256
+          third_dispatch.request_body_sha256
           judgment.request_body_sha256;
         (match judgment.verdict.decision with
          | Judgment.Relevant -> ()
@@ -335,7 +368,7 @@ let test_explicit_lane_failover_and_success_provenance () =
            Alcotest.fail "strict singleton verdict changed decision")
       | _ ->
         Alcotest.fail
-          "expected dispatch(first), release(first), dispatch(next) projections"))
+          "expected dispatch(A), advance(A->B), advance(B->C), dispatch(C)"))
 ;;
 
 let test_domain_candidate_id_mismatch_does_not_advance () =

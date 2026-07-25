@@ -33,6 +33,10 @@ type candidate_visit =
   ; target_identity_fingerprint : string
   }
 
+type advance_source =
+  | Executed_failure of attempt_provenance
+  | Predispatch_rejection of candidate_visit
+
 type 'callback_error execution_error =
   | Owner_unregistered_deferred
   | Flow_already_started of attempt_provenance list
@@ -43,7 +47,8 @@ type 'callback_error execution_error =
       }
   | Before_advance_persistence_failed of
       { cause : 'callback_error
-      ; failed : attempt_provenance
+      ; failed : advance_source
+      ; next : candidate_visit
       ; evidence : attempt_provenance list
       }
   | Exact_execution_failed of attempt_provenance list
@@ -205,6 +210,14 @@ let candidate_visit (visit : Exact_output.flow_candidate_visit) =
   ; target_identity_fingerprint =
       Exact_output.target_identity_fingerprint identity.target_identity
   }
+;;
+
+let advance_source_of_failure = function
+  | Exact_output.Flow_candidate_execution_failed { candidate; cause = _ } ->
+    Executed_failure (attempt_provenance candidate)
+  | Exact_output.Flow_candidate_rejected rejection ->
+    Predispatch_rejection
+      (rejection |> Exact_output.candidate_rejection_visit |> candidate_visit)
 ;;
 
 let evidence_provenance (evidence : Exact_output.flow_evidence) =
@@ -395,12 +408,9 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
   in
   let oas_before_advance ~failed ~next =
     with_current (fun () ->
-      match failed with
-      | Exact_output.Flow_candidate_rejected _ -> Ok ()
-      | Exact_output.Flow_candidate_execution_failed { candidate; cause = _ } ->
-        before_advance
-          ~failed:(attempt_provenance candidate)
-          ~next:(candidate_visit next))
+      before_advance
+        ~failed:(advance_source_of_failure failed)
+        ~next:(candidate_visit next))
   in
   let result =
     match
@@ -466,24 +476,16 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
         (Exact_output.Flow_before_advance_callback_failed
            { cause = Durable_callback_failed cause
            ; evidence
-           ; failed =
-               Exact_output.Flow_candidate_execution_failed
-                 { candidate; cause = _ }
-           ; next = _
+           ; failed
+           ; next
            }) ->
       Error
         (Before_advance_persistence_failed
            { cause
-           ; failed = attempt_provenance candidate
+           ; failed = advance_source_of_failure failed
+           ; next = candidate_visit next
            ; evidence = evidence_provenance evidence
            })
-    | Error
-        (Exact_output.Flow_before_advance_callback_failed
-           { failed = Exact_output.Flow_candidate_rejected _
-           ; evidence
-           ; _
-           }) ->
-      Error (Exact_execution_failed (evidence_provenance evidence))
     | Error (Exact_output.Flow_success_ordinal_exhausted evidence)
     | Error (Exact_output.Flow_attempt_start_failed { evidence; _ })
     | Error (Exact_output.Flow_candidates_exhausted { evidence; _ }) ->

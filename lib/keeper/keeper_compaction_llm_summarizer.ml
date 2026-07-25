@@ -483,7 +483,10 @@ let log_terminal_quarantine_failure
   | _ -> ()
 ;;
 
-let with_current_post_success terminalizer callback =
+let with_current_post_success
+      (terminalizer : post_success_terminalizer)
+      callback
+  =
   match
     Keeper_exact_flow_scope.with_settlement
       terminalizer.flow_scope

@@ -34,30 +34,29 @@ FORBIDDEN_IDENTIFIERS = (
     "ensure_local_discovery_ready",
 )
 
-RAW_ENV_READ_PATTERN = re.compile(r"\b(?:Sys|Unix)\s*\.\s*getenv(?:_opt)?\b")
-ENV_CONFIG_PATH_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9_'])"
-    r"Env_config(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_']*)+"
-    r"(?![A-Za-z0-9_'])"
+OCAML_IDENTIFIER_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9_'])[A-Za-z_][A-Za-z0-9_']*(?![A-Za-z0-9_'])"
 )
 ENV_BINDING_PATTERN = re.compile(r"\b[A-Za-z_][A-Za-z0-9_']*_env\b", re.IGNORECASE)
+CHAR_LITERAL_PATTERN = re.compile(r"'(?:[^'\\\r\n]|\\[^\r\n])'")
+CAMEL_CASE_BOUNDARY_PATTERN = re.compile(
+    r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
+)
+FORBIDDEN_ENV_IDENTIFIERS = frozenset(("Env_config", "getenv", "getenv_opt"))
 POLICY_TOKENS = frozenset(("provider", "model", "credential", "token"))
 
 
 def has_policy_token(identifier: str) -> bool:
-    tokens = [
-        token.rstrip("'")
-        for token in re.split(r"_+", identifier.lower())
-        if token.rstrip("'")
-    ]
+    tokens = []
+    for snake_part in re.split(r"_+", identifier):
+        for camel_part in CAMEL_CASE_BOUNDARY_PATTERN.split(snake_part):
+            token = camel_part.rstrip("'").lower()
+            if token:
+                tokens.append(token)
     return any(token in POLICY_TOKENS for token in tokens) or any(
         left == "api" and right == "key"
         for left, right in zip(tokens, tokens[1:])
     )
-
-
-def is_policy_env_config_path(path: str) -> bool:
-    return any(has_policy_token(segment.strip()) for segment in path.split(".")[1:])
 
 
 def mask_non_code(source: str) -> str:
@@ -85,6 +84,11 @@ def mask_non_code(source: str) -> str:
                 else:
                     index += 1
             blank(start, index)
+            continue
+        char_literal = CHAR_LITERAL_PATTERN.match(source, index)
+        if char_literal:
+            blank(index, char_literal.end())
+            index = char_literal.end()
             continue
         if source[index] == '"':
             start = index
@@ -135,22 +139,17 @@ for raw_path in sys.argv[1:]:
             failures.append(
                 f"{path}:{location(source, match.start())}: forbidden identifier {identifier}"
             )
-    match = RAW_ENV_READ_PATTERN.search(code)
-    if match:
-        failures.append(
-            f"{path}:{location(source, match.start())}: forbidden raw environment read: {match.group(0)}"
-        )
     match = next(
         (
             candidate
-            for candidate in ENV_CONFIG_PATH_PATTERN.finditer(code)
-            if is_policy_env_config_path(candidate.group(0))
+            for candidate in OCAML_IDENTIFIER_PATTERN.finditer(code)
+            if candidate.group(0).rstrip("'") in FORBIDDEN_ENV_IDENTIFIERS
         ),
         None,
     )
     if match:
         failures.append(
-            f"{path}:{location(source, match.start())}: forbidden provider/model/credential environment projection: {match.group(0)}"
+            f"{path}:{location(source, match.start())}: forbidden environment dependency: {match.group(0)}"
         )
     match = next(
         (
@@ -199,10 +198,12 @@ let _decoy = "Keeper_model_labels ensure_api_keys_for_labels"
 let _quoted_decoy = {|
 Provider_runtime_binding ensure_local_discovery_ready
 |}
-let _ = Env_config.Tokenizer.path
-let _ = Env_config.Remodeling.enabled
-let _ = Env_config . Tokenizer . path
-let _ = Env_config . Remodeling . enabled
+let _tagged_decoy = {tag|Env_config getenv getenv_opt|tag}
+let _ordinary_env_decoy = "Env_config getenv getenv_opt"
+let _quote = '"'
+let _ = Env_configuration.Tokenizer.path
+let _ = getenv_optimal ()
+let _ = my_getenv_opt ()
 let _ = Tokenizer_env.path
 let _ = Remodeling_env.enabled
 let _ = Tokenizer'_env.path
@@ -222,9 +223,13 @@ EOF
     'let _ = ensure_local_discovery_ready []' \
     'let _ = Sys.getenv_opt "MASC_DEFAULT_MODEL"' \
     'let _ = Sys . getenv_opt "MASC_DEFAULT_MODEL"' \
+    'let _ = Sys.(getenv_opt "MASC_DEFAULT_MODEL")' \
+    'let _ = let open Unix in getenv "PROVIDER_API_KEY"' \
     $'let _ = Unix.\ngetenv_opt "PROVIDER_API_KEY"' \
     'let _ = Unix.getenv "PROVIDER_API_KEY"' \
     'let _ = Env_config.Model_defaults.default_runtime_opt ()' \
+    'let _ = Env_config.(Model_defaults.default_runtime_opt ())' \
+    'let _ = let open Env_config in Model_defaults.default_runtime_opt ()' \
     'let _ = Env_config.Default_model.value' \
     'let _ = Env_config.Cloud_provider.key' \
     'let _ = Env_config.Runtime_api_key.path' \
@@ -233,8 +238,14 @@ EOF
     'let _ = Env_config.Runtime__api_key.path' \
     'let _ = Env_config.Nested.Default_model.value' \
     'let _ = Env_config . Nested . Default_model.value' \
+    'let _ = Env_config.Runtime.ApiKey.value' \
+    'let _ = Env_config.Runtime.Api.Key.value' \
     "let _ = Env_config.Model'.value" \
+    "let _ = Env_config'.Model.value" \
+    'let _ = ApiKey_env.fallback ()' \
+    'let _ = APIKey_env.fallback ()' \
     "let _ = model'_env.fallback ()" \
+    $'let _quote = \'"\'\nlet _ = Env_config.Model_defaults.default_runtime_opt ()' \
     'let _ = Credential_env.fallback ()'
   do
     cp "${first_clean}" "${first}"

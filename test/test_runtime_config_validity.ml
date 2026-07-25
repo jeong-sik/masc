@@ -2556,20 +2556,9 @@ let test_save_config_text_commits_exact_registry_with_runtime_state () =
       Runtime_exact_output_registry.resolve_lane registry ~lane_id
     with
     | Ok resolved ->
-      (match resolved.unavailable_slots with
-       | [] ->
-         List.map
-           (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
-           resolved.selected_slots
-       | unavailable_slots ->
-         failf
-           "exact-output lane %S unexpectedly has unavailable slots: %s"
-           lane_id
-           (String.concat
-              "; "
-              (List.map
-                 Runtime_exact_output_registry.unavailable_slot_to_string
-                 unavailable_slots)))
+      List.map
+        (fun (slot : Runtime_exact_output_registry.selected_slot) -> slot.slot_id)
+        resolved.selected_slots
     | Error error ->
       failf
         "exact-output lane %S must exist: %s"

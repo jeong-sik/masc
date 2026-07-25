@@ -993,10 +993,15 @@ let test_malformed_structure_preserves_checkpoint () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun sw ->
   with_eio_context env sw @@ fun () ->
+  let base_path = Masc_test_deps.setup_test_workspace () in
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
-    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Masc_test_deps.cleanup_test_workspace base_path)
     (fun () ->
+  let config = Masc.Workspace.default_config base_path in
+  ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
   init_runtime_fixture ();
   let exact_server =
     Exact_fixture.start_server
@@ -1227,10 +1232,15 @@ let test_invalid_structural_evidence_after_dispatch_is_terminal () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun sw ->
   with_eio_context env sw @@ fun () ->
+  let base_path = Masc_test_deps.setup_test_workspace () in
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
-    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Masc_test_deps.cleanup_test_workspace base_path)
     (fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
       init_runtime_fixture ();
       let server =
         Exact_fixture.start_server
@@ -1241,6 +1251,7 @@ let test_invalid_structural_evidence_after_dispatch_is_terminal () =
       in
       publish_exact_fixture ~source:"invalid structural evidence" server;
       let meta = make_meta ~name:"invalid-evidence-terminal" () in
+      ensure_registered_keeper ~base_path:config.base_path meta;
       let context =
         make_checkpoint () |> Masc.Keeper_context_core.context_of_oas_checkpoint
       in
@@ -1257,6 +1268,7 @@ let test_invalid_structural_evidence_after_dispatch_is_terminal () =
         match
           Summarizer.make
             ~exact_execution_guard
+            ~base_path:config.base_path
             ~keeper_name:meta.name
             ()
         with
@@ -1303,10 +1315,15 @@ let test_post_dispatch_non_reducing_output_is_quarantined () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun sw ->
   with_eio_context env sw @@ fun () ->
+  let base_path = Masc_test_deps.setup_test_workspace () in
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   Fun.protect
-    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Masc_test_deps.cleanup_test_workspace base_path)
     (fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
       init_runtime_fixture ();
       let run_case ~name response =
         let server =

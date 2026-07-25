@@ -121,7 +121,7 @@ let admit_lane_slots resolver_snapshot admitted_by_id
           (position + 1)
           (String_set.add slot_id seen)
           admitted_by_id
-          ({ slot_id; admitted_target } :: admitted_slots)
+          (({ slot_id; admitted_target } : admitted_slot) :: admitted_slots)
           rest
   in
   match lane.slot_ids with

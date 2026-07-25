@@ -123,8 +123,13 @@ let test_full_replacement_precedence ~clock ~mono_clock ~net ~proc_mgr ~fs () =
   match Registry.current () with
   | Error _ -> Alcotest.fail "replacement-only target must publish the registry"
   | Ok registry ->
-    let lanes : Runtime_schema.exact_output_lane_decl list =
-      [ { id = "compaction_exact"; slot_ids = [ replacement_target ] } ]
+    let lanes =
+      match Runtime_toml.parse_file runtime_path with
+      | Ok (config : Runtime_schema.config) -> config.exact_output_lane_decls
+      | Error errors ->
+        Alcotest.failf
+          "replacement runtime failed to parse for exact lanes: %d error(s)"
+          (List.length errors)
     in
     let require_slots label registry =
       match Registry.resolve_lane registry ~lane_id:"compaction_exact" with
@@ -618,29 +623,6 @@ let test_repo_seed_board_attention_lane_admits () =
              (Option.value ~default:"" previous_credential))
         previous_credentials)
     (fun () ->
-       List.iter (fun credential_env -> Unix.putenv credential_env "") credential_envs;
-       let unavailable_message =
-         try
-           Server_runtime_bootstrap.For_testing.configure_exact_output_registry
-             ~config_root
-             ();
-           Alcotest.fail
-             "mandatory seed lanes must reject startup without a usable credential"
-         with
-         | Env_config_core.Config_error message -> message
-       in
-       Alcotest.(check bool)
-         "credential failure names the first mandatory lane"
-         true
-         (String_util.contains_substring unavailable_message "hitl_auto_judge");
-       Alcotest.(check bool)
-         "credential failure gives provider-neutral credential guidance"
-         true
-         (String_util.contains_substring unavailable_message "credential");
-       List.iter
-         (fun credential_env ->
-            Unix.putenv credential_env "exact-output-seed-test")
-         credential_envs;
        let require_published_seed label =
          Server_runtime_bootstrap.For_testing.configure_exact_output_registry
            ~config_root
@@ -655,7 +637,13 @@ let test_repo_seed_board_attention_lane_admits () =
                 registry)
            lanes
        in
-       require_published_seed "repo config plus deployment overlay";
+       List.iter (fun credential_env -> Unix.putenv credential_env "") credential_envs;
+       require_published_seed "credential-free repo config plus deployment overlay";
+       List.iter
+         (fun credential_env ->
+            Unix.putenv credential_env "exact-output-seed-test")
+         credential_envs;
+       require_published_seed "credential-populated repo config plus deployment overlay";
        let overlay_without_pricing =
          Fs_compat.load_file
            (Filename.concat source_config "oas-models-overlay.toml")

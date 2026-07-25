@@ -809,15 +809,17 @@ let extract_with_exact_output_classified
       ~generation
       inp
   =
-  let* flow_scope = resolve_flow_scope ~base_path ~keeper_id in
-  extract_with_flow_scope_classified
-    ?clock
-    ~base_path
-    ~net
-    ~keeper_id
-    ~generation
-    ~flow_scope
-    inp
+  match resolve_flow_scope ~base_path ~keeper_id with
+  | Error _ as error -> error
+  | Ok flow_scope ->
+    extract_with_flow_scope_classified
+      ?clock
+      ~base_path
+      ~net
+      ~keeper_id
+      ~generation
+      ~flow_scope
+      inp
 ;;
 
 let extract_with_exact_output
@@ -948,17 +950,19 @@ let extract_and_append_with_exact_output_classified
     ?clock
     ~base_path
     ~net
-    ~keeper_id
-    inp
+      ~keeper_id
+      inp
   =
-  let* flow_scope = resolve_flow_scope ~base_path ~keeper_id in
-  extract_and_append_with_flow_scope_classified
-    ?clock
-    ~base_path
-    ~net
-    ~keeper_id
-    ~flow_scope
-    inp
+  match resolve_flow_scope ~base_path ~keeper_id with
+  | Error _ as error -> error
+  | Ok flow_scope ->
+    extract_and_append_with_flow_scope_classified
+      ?clock
+      ~base_path
+      ~net
+      ~keeper_id
+      ~flow_scope
+      inp
 ;;
 
 let extract_and_append_with_exact_output

@@ -524,9 +524,10 @@ let run_admitted
     () =
   run_admitted_with
     ~append_compaction_manifest:append_manifest
-    ~prepare_compaction:(fun ~base_dir ~meta ~trigger ~projection_request ->
+    ~prepare_compaction:(fun ~base_path ~base_dir ~meta ~trigger ~projection_request ->
       Keeper_context_runtime.prepare_compaction
         ?exact_execution_guard
+        ~base_path
         ~base_dir
         ~meta
         ~trigger

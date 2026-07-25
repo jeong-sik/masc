@@ -626,7 +626,7 @@ let deliver_finalized_completion ~config operation =
   | Superseded _ -> Error Unsupported_phase
 ;;
 
-let complete_cleanup ~config ~entry operation cleanup =
+let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
   let retire_summary_owner () =
     match operation.cleanup_intent.reason with
     | Operator_stop_retain_meta -> Ok ()

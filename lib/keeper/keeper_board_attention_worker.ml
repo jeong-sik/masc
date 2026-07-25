@@ -16,7 +16,7 @@ type step =
   | Owner_unregistered_deferred of { candidate_id : string }
   | Judgment_completed of
       { candidate_id : string
-      ; owner_wake : Keeper_registry.wakeup_outcome
+      ; owner_wake : Keeper_registry.exact_wakeup_outcome
       }
   | Candidate_already_consumed of { candidate_id : string }
   | Partition_blocked of
@@ -403,6 +403,15 @@ let owner_wake ~base_path ~keeper_name =
     keeper_name
 ;;
 
+let exact_owner_wake ~base_path ~keeper_name =
+  match Keeper_registry.get ~base_path keeper_name with
+  | None -> Keeper_registry.Exact_wake_missing
+  | Some entry ->
+    Keeper_registry.wakeup_running_exact
+      ~intent:Keeper_registry.Attention_result
+      entry
+;;
+
 let candidate_by_id candidate_id candidates =
   List.find_opt
     (fun (candidate : Candidate.candidate) ->
@@ -582,7 +591,11 @@ let preserve_durable_progress partition fallback =
   | Some Partition.Unbound | None -> fallback
 ;;
 
-let complete_and_signal
+type completion_projection =
+  | Completion_projected of Partition.t * Keeper_registry.registry_entry
+  | Completion_blocked of step
+
+let complete_projection
       ~now
       ~worker_epoch
       ~base_path
@@ -605,12 +618,16 @@ let complete_and_signal
         "exact completion"
         transition
     in
-    let owner_wake =
-      owner_wake ~base_path ~keeper_name:completed.Partition.keeper_name
-    in
-    Ok
-      (Judgment_completed
-         { candidate_id = completed.candidate_id; owner_wake })
+    (match
+       Keeper_registry.get
+         ~base_path
+         completed.Partition.keeper_name
+     with
+     | Some owner -> Ok (Completion_projected (completed, owner))
+     | None ->
+       Error
+         ("exact completion lost its registered owner before projection: "
+          ^ completed.keeper_name))
   | Error detail ->
     let reason =
       preserve_durable_progress
@@ -624,6 +641,38 @@ let complete_and_signal
       ~base_path
       !latest_partition
       reason
+    |> Result.map (fun step -> Completion_blocked step)
+;;
+
+let signal_completion = function
+  | Completion_blocked step -> Ok step
+  | Completion_projected (completed, owner) ->
+    let owner_wake =
+      Keeper_registry.wakeup_running_exact
+        ~intent:Keeper_registry.Attention_result
+        owner
+    in
+    Ok
+      (Judgment_completed
+         { candidate_id = completed.candidate_id; owner_wake })
+;;
+
+let complete_and_signal
+      ~now
+      ~worker_epoch
+      ~base_path
+      latest_partition
+      judgment
+  =
+  let* projection =
+    complete_projection
+      ~now
+      ~worker_epoch
+      ~base_path
+      latest_partition
+      judgment
+  in
+  signal_completion projection
 ;;
 
 let partition_provenance
@@ -789,7 +838,9 @@ let complete_existing_judgment
         transition
     in
     let owner_wake =
-      owner_wake ~base_path ~keeper_name:completed.Partition.keeper_name
+      exact_owner_wake
+        ~base_path
+        ~keeper_name:completed.Partition.keeper_name
     in
     Ok
       (Judgment_completed
@@ -851,6 +902,7 @@ let settle_existing_consumed
 ;;
 
 let process_pending
+      ~with_current
       ~now
       ~worker_epoch
       ~base_path
@@ -880,15 +932,26 @@ let process_pending
          !latest_partition
          reason)
   | Ok judgment ->
-    complete_and_signal
-      ~now:(now ())
-      ~worker_epoch
-      ~base_path
-      latest_partition
-      judgment
+    (match
+       with_current prepared (fun () ->
+         complete_projection
+           ~now:(now ())
+           ~worker_epoch
+           ~base_path
+           latest_partition
+           judgment)
+     with
+     | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+       Ok
+         (Owner_unregistered_deferred
+            { candidate_id = (!latest_partition).candidate_id })
+     | Keeper_exact_flow_scope.Current projection ->
+       let* projection = projection in
+       signal_completion projection)
 ;;
 
 let process_claimed
+      ~with_current
       ~now
       ~worker_epoch
       ~base_path
@@ -923,6 +986,7 @@ let process_claimed
            | Some (candidate_id, prepared)
              when String.equal candidate_id candidate.candidate_id ->
              process_pending
+               ~with_current
                ~now
                ~worker_epoch
                ~base_path
@@ -1229,8 +1293,9 @@ let reconcile_quarantines ~now ~base_path ~keeper_name =
   loop partitions
 ;;
 
-let process_next_with_claim_ready_exact
+let process_next_with_claim_ready_exact_current
       ~claim_ready_exact
+      ~with_current
       ~now
       ~worker_epoch
       ~base_path
@@ -1263,6 +1328,7 @@ let process_next_with_claim_ready_exact
         Candidate.load_candidates ~base_path ~keeper_name
       in
       process_claimed
+        ~with_current
         ~now
         ~worker_epoch
         ~base_path
@@ -1322,9 +1388,53 @@ let process_next_with_claim_ready_exact
     claim_selected 3
 ;;
 
-let process_next ~now ~worker_epoch ~base_path ~keeper_name ~prepare ~execute =
-  process_next_with_claim_ready_exact
+let assume_current _prepared callback =
+  Keeper_exact_flow_scope.Current (callback ())
+;;
+
+let process_next_with_claim_ready_exact
+      ~claim_ready_exact
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~keeper_name
+      ~prepare
+      ~execute
+  =
+  process_next_with_claim_ready_exact_current
+    ~claim_ready_exact
+    ~with_current:assume_current
+    ~now
+    ~worker_epoch
+    ~base_path
+    ~keeper_name
+    ~prepare
+    ~execute
+;;
+
+let process_next_current
+      ~with_current
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~keeper_name
+      ~prepare
+      ~execute
+  =
+  process_next_with_claim_ready_exact_current
     ~claim_ready_exact:Partition.claim_ready_exact
+    ~with_current
+    ~now
+    ~worker_epoch
+    ~base_path
+    ~keeper_name
+    ~prepare
+    ~execute
+;;
+
+let process_next ~now ~worker_epoch ~base_path ~keeper_name ~prepare ~execute =
+  process_next_current
+    ~with_current:assume_current
     ~now
     ~worker_epoch
     ~base_path
@@ -1489,7 +1599,8 @@ let rec drain_available_with_process ~yield ~process =
   | Error detail -> Error detail
 ;;
 
-let drain_available
+let drain_available_current
+      ~with_current
       ~yield
       ~now
       ~worker_epoch
@@ -1501,13 +1612,34 @@ let drain_available
   drain_available_with_process
     ~yield
     ~process:(fun () ->
-      process_next
+      process_next_current
+        ~with_current
         ~now
         ~worker_epoch
         ~base_path
         ~keeper_name
         ~prepare
         ~execute)
+;;
+
+let drain_available
+      ~yield
+      ~now
+      ~worker_epoch
+      ~base_path
+      ~keeper_name
+      ~prepare
+      ~execute
+  =
+  drain_available_current
+    ~with_current:assume_current
+    ~yield
+    ~now
+    ~worker_epoch
+    ~base_path
+    ~keeper_name
+    ~prepare
+    ~execute
 ;;
 
 let run
@@ -1575,7 +1707,8 @@ let run
              | Wake.Wake -> drain ()
            and drain () =
              match
-               drain_available
+               drain_available_current
+                 ~with_current:Exact_flow.with_current_generation
                  ~yield:Eio.Fiber.yield
                  ~now:Time_compat.now
                  ~worker_epoch

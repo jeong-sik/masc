@@ -1,4 +1,4 @@
-(** MASC-owned HITL domain judgment over the provider-neutral OAS exact-output
+(** MASC-owned HITL domain judgment over the opaque-runtime OAS exact-output
     flow. MASC freezes the request and domain schema, validates the returned
     judgment, and owns approval queue durability. OAS alone owns candidate
     admission, attempt allocation, execution, failover, receipts, and
@@ -7,7 +7,7 @@
 val snapshot_topology_readiness : unit -> (unit, string) result
 (** Verify only prompt availability and that the registry-owned
     [hitl_auto_judge] topology can be frozen as an OAS exact-output snapshot.
-    This is not provider, credential, wire, or output admission. *)
+    This is not credential, wire, or output admission. *)
 
 exception Exact_terminalization_persistence_failed of string
 

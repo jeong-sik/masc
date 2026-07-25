@@ -548,9 +548,31 @@ let remove_session_dir ~config operation =
   else Ok ()
 ;;
 
-let unregister_exact operation entry =
+let unregister_exact ~base_path ~after_fence operation entry =
   match operation.lane_ownership, entry with
-  | (Dormant_meta | Registered_lane _), None -> Ok false
+  | (Dormant_meta | Registered_lane _), None ->
+    Keeper_lifecycle_reservation.with_key_lock
+      ~base_path
+      ~keeper_name:operation.keeper_name
+      (fun () ->
+         match
+           Keeper_registry.get
+             ~base_path
+             operation.keeper_name
+         with
+         | Some _ ->
+           Error
+             "Keeper registry became occupied before dormant finalization fence"
+         | None ->
+           (match operation.lane_ownership with
+            | Dormant_meta -> ()
+            | Registered_lane expected_lane_id ->
+              Keeper_exact_flow_scope.release_owner
+                ~base_path
+                ~keeper_name:operation.keeper_name
+                ~expected_lane_id);
+           after_fence ();
+           Ok false)
   | Dormant_meta, Some _ ->
     Error "dormant Keeper operation found a registered lane before finalization"
   | Registered_lane expected_lane_id, Some entry ->
@@ -561,7 +583,7 @@ let unregister_exact operation entry =
            expected_lane_id)
     then Error "Keeper registry lane changed before finalization"
     else
-    (match Keeper_registry.unregister_exact entry with
+    (match Keeper_registry.unregister_exact_with_fence ~after_fence entry with
      | Keeper_registry.Exact_unregistered
      | Keeper_registry.Exact_entry_missing -> Ok true
      | Keeper_registry.Exact_entry_replaced ->
@@ -644,17 +666,31 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
       |> Result.map_error
            Keeper_approval_queue.summary_owner_retirement_error_to_string
   in
-  match retire_summary_owner () with
-  | Error detail ->
-    block ~config operation Approval_summary_retirement detail
-  | Ok () ->
+  let retirement = ref None in
+  let retire_after_fence () = retirement := Some (retire_summary_owner ()) in
+  match
+    unregister_exact
+      ~base_path:config.base_path
+      ~after_fence:retire_after_fence
+      operation
+      entry
+  with
+  | Error detail -> block ~config operation Registry_unregister detail
+  | Ok registry_unregistered ->
+    (match !retirement with
+     | None ->
+       block
+         ~config
+         operation
+         Approval_summary_retirement
+         "summary retirement was not reached after exact owner fence"
+     | Some (Error detail) ->
+       block ~config operation Approval_summary_retirement detail
+     | Some (Ok ()) ->
     (match remove_meta_file ~config operation with
      | Error detail -> block ~config operation Meta_remove detail
      | Ok () ->
-       (match unregister_exact operation entry with
-        | Error detail -> block ~config operation Registry_unregister detail
-        | Ok registry_unregistered ->
-          (match remove_session_dir ~config operation with
+       (match remove_session_dir ~config operation with
            | Error detail -> block ~config operation Session_remove detail
            | Ok () ->
           let meta_removed =
@@ -698,7 +734,7 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
              (match replace ~config finalized with
               | Error _ as error -> error
               | Ok persisted_finalized ->
-                deliver_finalized_completion ~config persisted_finalized))))
+                deliver_finalized_completion ~config persisted_finalized)))
 ;;
 
 let run ~config ~entry operation =

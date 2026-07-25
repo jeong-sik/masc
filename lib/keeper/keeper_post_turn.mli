@@ -139,7 +139,7 @@ end
 val no_compaction_of_uncommitted_prepared :
   ?cause:Keeper_event_queue_state.exact_execution_terminal_cause ->
   prepared_compaction ->
-  no_compaction
+  (no_compaction, compaction_recovery_error) result
 
 (** Reload the canonical OAS checkpoint and apply an explicit typed
     compaction request. Returns success only after a structurally changed

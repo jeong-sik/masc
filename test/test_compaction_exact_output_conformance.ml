@@ -211,10 +211,10 @@ let ensure_registered_keeper ~base_path keeper_name =
 ;;
 
 let prepare_exn
-      ?(base_path = exact_flow_base_path)
       ~keeper_name
       ~registry
   =
+  let base_path = exact_flow_base_path in
   ensure_registered_keeper ~base_path keeper_name;
   match
     C.prepare_lane
@@ -231,6 +231,12 @@ let prepare_exn
 let completed_exn = function
   | Ok completed -> completed
   | Error _ -> Alcotest.fail "compaction flow execution failed"
+;;
+
+let terminalized_exn = function
+  | C.Terminalized terminal -> terminal
+  | C.Terminalization_owner_unregistered_deferred ->
+    Alcotest.fail "current exact owner unexpectedly deferred terminalization"
 ;;
 
 let captured_observation_exn label = function
@@ -1238,11 +1244,13 @@ let test_post_success_terminalization_is_canonical_and_durable () =
     C.terminalize_post_success
       terminalizer
       Keeper_event_queue_state.Invalid_structural_evidence
+    |> terminalized_exn
   in
   let replay =
     C.terminalize_post_success
       terminalizer
       Keeper_event_queue_state.Checkpoint_persistence_failed
+    |> terminalized_exn
   in
   Alcotest.(check int) "terminalizer quarantines once" 1 !quarantine_calls;
   Alcotest.(check bool) "terminalizer retains first canonical cause" true (first = replay);
@@ -1350,6 +1358,7 @@ let test_post_success_terminalization_overlap_is_affine_and_durable () =
     C.terminalize_post_success
       terminalizer
       Keeper_event_queue_state.Invalid_structural_evidence
+    |> terminalized_exn
     |> Eio.Promise.resolve resolve_first_result);
   Eio.Promise.await quarantine_entered;
   Eio.Fiber.fork ~sw (fun () ->
@@ -1357,6 +1366,7 @@ let test_post_success_terminalization_overlap_is_affine_and_durable () =
     C.terminalize_post_success
       terminalizer
       Keeper_event_queue_state.Checkpoint_persistence_failed
+    |> terminalized_exn
     |> Eio.Promise.resolve resolve_second_result);
   Eio.Promise.await second_started;
   Eio.Fiber.yield ();
@@ -1453,11 +1463,13 @@ let test_post_success_terminalization_failures_preserve_full_binding () =
          C.terminalize_post_success
            terminalizer
            Keeper_event_queue_state.Invalid_structural_evidence
+         |> terminalized_exn
        in
        let replay =
          C.terminalize_post_success
            terminalizer
            Keeper_event_queue_state.Checkpoint_persistence_failed
+         |> terminalized_exn
        in
        Alcotest.(check int) (label ^ " quarantine runs once") 1 !quarantine_calls;
        Alcotest.(check bool)
@@ -1815,6 +1827,74 @@ let test_visible_sync_uncertainty_seams () =
     ]
 ;;
 
+let test_post_success_owner_replacement_defers_all_projection () =
+  run_eio
+  @@ fun ~sw ~net ~clock ->
+  let keeper_name = "keeper-post-success-owner-replaced" in
+  let slot_id = "post-success-owner-replaced" in
+  let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let snapshot =
+    F.resolver_snapshot
+      ~source:"masc post-success owner replacement"
+      [ { id = slot_id; base_url = server.base_url } ]
+  in
+  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
+  let prepared = prepare_exn ~keeper_name ~registry in
+  let quarantine_calls = ref 0 in
+  let guard : C.exact_execution_guard =
+    { before_dispatch = (fun _ -> Ok C.Fsync_completed)
+    ; release_before_dispatch = (fun _ -> Ok C.Fsync_completed)
+    ; quarantine =
+        (fun _ _ ->
+           incr quarantine_calls;
+           Ok C.Fsync_completed)
+    }
+  in
+  let completed =
+    execute_prepared_lane
+      ~keeper_name
+      ~net
+      ~clock
+      ~exact_execution_guard:guard
+      prepared
+    |> completed_exn
+  in
+  let terminalizer = C.completed_post_success_terminalizer completed in
+  let old_entry =
+    match Keeper_registry.get ~base_path:exact_flow_base_path keeper_name with
+    | Some entry -> entry
+    | None -> Alcotest.fail "completed compaction owner disappeared"
+  in
+  (match Keeper_registry.unregister_exact old_entry with
+   | Keeper_registry.Exact_unregistered -> ()
+   | _ -> Alcotest.fail "completed compaction owner was not unregistered");
+  ensure_registered_keeper ~base_path:exact_flow_base_path keeper_name;
+  let projection_mutations = ref 0 in
+  (match
+     C.with_current_post_success terminalizer (fun () ->
+       incr projection_mutations)
+   with
+   | C.Post_success_owner_unregistered_deferred -> ()
+   | C.Post_success_current () ->
+     Alcotest.fail "replaced compaction owner committed a stale projection");
+  (match
+     C.terminalize_post_success
+       terminalizer
+       Keeper_event_queue_state.Checkpoint_persistence_failed
+   with
+   | C.Terminalization_owner_unregistered_deferred -> ()
+   | C.Terminalized _ ->
+     Alcotest.fail "replaced compaction owner quarantined a stale binding");
+  Alcotest.(check int)
+    "stale checkpoint projection mutates nothing"
+    0
+    !projection_mutations;
+  Alcotest.(check int)
+    "stale terminalization mutates nothing"
+    0
+    !quarantine_calls
+;;
+
 let () =
   Alcotest.run
     "compaction exact-flow conformance"
@@ -1887,6 +1967,10 @@ let () =
             "terminalization failures preserve full binding"
             `Quick
             test_post_success_terminalization_failures_preserve_full_binding
+        ; Alcotest.test_case
+            "owner replacement defers all post-success projection"
+            `Quick
+            test_post_success_owner_replacement_defers_all_projection
         ] )
     ; ( "affinity and non-sharing"
       , [ Alcotest.test_case

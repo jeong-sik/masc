@@ -454,6 +454,60 @@ let test_prepare_resumable_status_gate () =
     (quarantined (Candidate.Requeued { requeued_at = 4.0 }))
 ;;
 
+let test_replaced_owner_defers_final_projection_without_mutation () =
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      let candidate = candidate "board-attention-owner-replaced" in
+      let response =
+        Fixture.openai_response
+          (judgment_output ~candidate_id:candidate.candidate_id)
+      in
+      let server = Fixture.start_server ~sw ~net ~clock (Fixture.Reply response) in
+      publish_lane [ target "board-attention-owner-replaced" server.base_url ];
+      let prepared =
+        match prepare_exact ~net:(Some net) candidate with
+        | Ok prepared -> prepared
+        | Error _ -> Alcotest.fail "Board exact flow was not prepared"
+      in
+      let keeper_name =
+        "board-attention-exact-test-" ^ candidate.Candidate.candidate_id
+      in
+      let base_path = "/tmp/masc-board-attention-exact-flow" in
+      let old_entry =
+        match Keeper_registry.get ~base_path keeper_name with
+        | Some entry -> entry
+        | None -> Alcotest.fail "prepared Board owner disappeared"
+      in
+      (match Keeper_registry.unregister_exact old_entry with
+       | Keeper_registry.Exact_unregistered -> ()
+       | _ -> Alcotest.fail "old Board owner was not unregistered");
+      let replacement_meta =
+        Masc_test_deps.meta_of_json_fixture
+          (`Assoc
+            [ "name", `String keeper_name
+            ; "trace_id", `String ("replacement-" ^ keeper_name)
+            ])
+        |> Result.get_ok
+      in
+      ignore
+        (Keeper_registry.register_offline
+           ~base_path
+           keeper_name
+           replacement_meta);
+      let projection_mutations = ref 0 in
+      (match
+         Exact_flow.with_current_generation prepared (fun () ->
+           incr projection_mutations)
+       with
+       | Keeper_exact_flow_scope.Owner_unregistered_deferred -> ()
+       | Keeper_exact_flow_scope.Current () ->
+         Alcotest.fail "replaced Board owner committed a stale projection");
+      Alcotest.(check int)
+        "stale final projection mutates nothing"
+        0
+        !projection_mutations))
+;;
+
 let () =
   Alcotest.run
     "Keeper Board-attention exact flow"
@@ -474,6 +528,10 @@ let () =
             "missing lane is setup error without dispatch"
             `Quick
             test_missing_lane_is_setup_error_without_dispatch
+        ; Alcotest.test_case
+            "replaced owner defers final projection"
+            `Quick
+            test_replaced_owner_defers_final_projection_without_mutation
         ] )
     ]
 ;;

@@ -9,11 +9,13 @@ let exact_lane_id = "librarian_exact"
    Capacity is still read from [MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT]
    (default 1), but the nonblocking slot is keyed by [keeper_id] so each keeper
    gets its own concurrency budget. A capacity of 0 disables the gate entirely. *)
-let per_keeper_slot_capacity () =
+let per_keeper_execution_slot_capacity () =
   Env_config.KeeperMemoryOs.librarian_global_slot ()
 ;;
 
-let memory_os_librarian_provider_slot_site = "memory_os_librarian_provider_slot"
+let memory_os_librarian_execution_slot_site =
+  "memory_os_librarian_execution_slot"
+;;
 
 let registered_lane_id ~base_path ~keeper_id () =
   match Keeper_registry.get ~base_path keeper_id with
@@ -190,38 +192,50 @@ type exact_setup_error =
 type exact_execution_failure =
   | Exact_attempt_already_started
   | Exact_callback_persistence_failed of string
-  | Exact_provider_execution_failed of Exact_output.execution_error_cause
+  | Oas_execution_failed
   | Exact_flow_progress_failed of string
   | Exact_domain_settlement_failed
 
+type outward_effect =
+  | No_outward_effect
+  | Outward_effect_started
+
 type exact_execution_error =
-  { dispatched : bool
+  { outward_effect : outward_effect
   ; failure : exact_execution_failure
   }
 
+type exact_flow_callback_error =
+  | Callback_owner_unregistered_deferred
+  | Callback_persistence_failed of string
+
 type extraction_error =
   | Prompt_render_failed of string
-  | Provider_clock_unavailable
+  | Execution_clock_unavailable
   | Exact_setup_failed of exact_setup_error
   | Exact_execution_failed of exact_execution_error
-  | Provider_unparseable_response of string
+  | Domain_output_invalid of string
   | Memory_fact_upsert_failed of string
 
-let librarian_provider_clock_unavailable_error =
-  "memory os librarian provider clock unavailable"
+type extraction_error_kind =
+  | Prompt_render_failure
+  | Execution_clock_unavailable
+  | Exact_setup_failure
+  | Exact_execution_failure
+  | Domain_output_invalid
+  | Memory_fact_upsert_failure
+
+let extraction_error_kind = function
+  | Prompt_render_failed _ -> Prompt_render_failure
+  | Execution_clock_unavailable -> Execution_clock_unavailable
+  | Exact_setup_failed _ -> Exact_setup_failure
+  | Exact_execution_failed _ -> Exact_execution_failure
+  | Domain_output_invalid _ -> Domain_output_invalid
+  | Memory_fact_upsert_failed _ -> Memory_fact_upsert_failure
 ;;
 
-let execution_error_cause_to_string = function
-  | Exact_output.Attempt_already_started -> "attempt_already_started"
-  | Clock_required_for_timeout -> "clock_required_for_timeout"
-  | Frozen_request_mismatch -> "frozen_request_mismatch"
-  | Completion_failed -> "completion_failed"
-  | Incomplete_output -> "incomplete_output"
-  | Missing_output -> "missing_output"
-  | Ambiguous_output count -> Printf.sprintf "ambiguous_output(%d)" count
-  | Unexpected_output_content -> "unexpected_output_content"
-  | Invalid_json_output -> "invalid_json_output"
-  | Internal_non_json_output -> "internal_non_json_output"
+let librarian_execution_clock_unavailable_error =
+  "memory os librarian execution clock unavailable"
 ;;
 
 let exact_setup_error_to_string = function
@@ -265,35 +279,37 @@ let exact_setup_error_to_string = function
 
 let extraction_error_to_string = function
   | Prompt_render_failed msg -> msg
-  | Provider_clock_unavailable -> librarian_provider_clock_unavailable_error
+  | Execution_clock_unavailable -> librarian_execution_clock_unavailable_error
   | Exact_setup_failed error -> exact_setup_error_to_string error
-  | Exact_execution_failed { dispatched; failure } ->
+  | Exact_execution_failed { outward_effect; failure } ->
     let detail =
       match failure with
       | Exact_attempt_already_started -> "attempt_already_started"
       | Exact_callback_persistence_failed detail ->
         "callback_persistence_failed: " ^ detail
-      | Exact_provider_execution_failed cause ->
-        execution_error_cause_to_string cause
+      | Oas_execution_failed -> "oas_execution_failed"
       | Exact_flow_progress_failed detail ->
         "flow_progress_failed: " ^ detail
       | Exact_domain_settlement_failed ->
         "domain_settlement_failed"
     in
     Printf.sprintf
-      "librarian exact execution failed dispatched=%b cause=%s"
-      dispatched
+      "librarian exact execution failed outward_effect=%s cause=%s"
+      (match outward_effect with
+       | No_outward_effect -> "none"
+       | Outward_effect_started -> "started")
       detail
-  | Provider_unparseable_response msg ->
-    "librarian provider returned unparseable structured response: " ^ msg
+  | Domain_output_invalid msg ->
+    "librarian domain output invalid: " ^ msg
   | Memory_fact_upsert_failed msg -> "memory os fact upsert failed: " ^ msg
 ;;
 
 let should_record_cadence_backoff_after_error = function
-  | Exact_execution_failed { dispatched; _ } -> dispatched
+  | Exact_execution_failed { outward_effect = Outward_effect_started; _ } -> true
+  | Exact_execution_failed { outward_effect = No_outward_effect; _ } -> false
   | Exact_setup_failed (Exact_previous_attempt_unsettled _) -> true
-  | Provider_unparseable_response _ -> true
-  | Provider_clock_unavailable
+  | Domain_output_invalid _ -> true
+  | Execution_clock_unavailable
   | Prompt_render_failed _
   | Exact_setup_failed _
   | Memory_fact_upsert_failed _ ->
@@ -472,10 +488,10 @@ let flow_candidates selected_slots =
 ;;
 
 let exact_execution_error error =
-  let dispatched =
+  let outward_effect =
     match Exact_output.flow_execution_error_outward_dispatch error with
-    | Exact_output.No_outward_dispatch -> false
-    | Exact_output.Outward_dispatch_started -> true
+    | Exact_output.No_outward_dispatch -> No_outward_effect
+    | Exact_output.Outward_dispatch_started -> Outward_effect_started
   in
   let failure =
     match error with
@@ -491,13 +507,18 @@ let exact_execution_error error =
     Exact_flow_progress_failed ("attempt_start_failed: " ^ detail)
   | Flow_before_dispatch_callback_failed { cause; _ }
   | Flow_before_advance_callback_failed { cause; _ } ->
-    Exact_callback_persistence_failed cause
+    (match cause with
+     | Callback_owner_unregistered_deferred ->
+       Exact_flow_progress_failed "owner_unregistered_deferred"
+     | Callback_persistence_failed detail ->
+       Exact_callback_persistence_failed detail)
   | Flow_candidates_exhausted _ ->
     Exact_flow_progress_failed "candidates_exhausted"
   | Flow_exact_execution_failed { cause; _ } ->
-    Exact_provider_execution_failed cause.cause
+    ignore cause;
+    Oas_execution_failed
   in
-  { dispatched; failure }
+  { outward_effect; failure }
 ;;
 
 let persist_exact_execution_terminal
@@ -509,13 +530,14 @@ let persist_exact_execution_terminal
   match error with
   | Exact_output.Flow_exact_execution_failed
       { candidate; cause; evidence = _ } ->
+    ignore cause;
     persist_exact_flow_state
       ~keeper_id
       ~trace_id
       ~generation
       ~state:"execution_terminal"
       [ "candidate", attempt_receipt_json candidate
-      ; "failure_cause", `String (execution_error_cause_to_string cause.cause)
+      ; "failure_cause", `String "oas_execution_failed"
       ]
   | Flow_success_ordinal_exhausted evidence ->
     (match List.rev evidence.attempts with
@@ -540,19 +562,36 @@ let persist_exact_execution_terminal
   | Flow_attempt_already_started _ -> Ok ()
   | Flow_before_dispatch_callback_failed { cause; _ }
   | Flow_before_advance_callback_failed { cause; _ } ->
-    Error cause
+    (match cause with
+     | Callback_owner_unregistered_deferred ->
+       Error "owner generation unregistered before callback persistence"
+     | Callback_persistence_failed detail -> Error detail)
 ;;
 
 let extract_with_exact_output_classified_unlocked
     ?clock
+    ~base_path
     ~flow_scope
     ~net
     ~keeper_id
     ~generation
     (inp : Keeper_librarian.input)
   =
+  let with_current callback =
+    Keeper_exact_flow_scope.with_current
+      flow_scope
+      ~registered_lane_id:(registered_lane_id ~base_path ~keeper_id)
+      callback
+  in
+  let owner_unregistered () =
+    Error
+      (Exact_setup_failed
+         (Exact_owner_unavailable
+            ("librarian exact owner generation is no longer current: "
+             ^ keeper_id)))
+  in
   match clock with
-  | None -> Error Provider_clock_unavailable
+  | None -> Error Execution_clock_unavailable
   | Some clock ->
     (match messages_for_librarian inp with
      | Error msg -> Error (Prompt_render_failed msg)
@@ -586,77 +625,116 @@ let extract_with_exact_output_classified_unlocked
                     ~minimum_guarantee:Exact_output.Json_syntax
                 in
                 (match
-                   Exact_output.snapshot_flow
-                     ~preferences:
-                       (Keeper_exact_flow_scope.preference_store flow_scope)
-                     ~scope:(Keeper_exact_flow_scope.scope flow_scope)
-                     ~first
-                     ~rest
-                     ~messages
-                     requirement
+                   with_current (fun () ->
+                     Exact_output.snapshot_flow
+                       ~preferences:
+                         (Keeper_exact_flow_scope.preference_store flow_scope)
+                       ~scope:(Keeper_exact_flow_scope.scope flow_scope)
+                       ~first
+                       ~rest
+                       ~messages
+                       requirement)
                  with
-                 | Error error ->
+                 | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+                   owner_unregistered ()
+                 | Keeper_exact_flow_scope.Current (Error error) ->
                    Error (Exact_setup_failed (Exact_flow_snapshot_failed error))
-                 | Ok snapshot ->
-                   (match Exact_output.start_flow snapshot with
-                    | Error error ->
+                 | Keeper_exact_flow_scope.Current (Ok snapshot) ->
+                   (match
+                      with_current (fun () -> Exact_output.start_flow snapshot)
+                    with
+                    | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+                      owner_unregistered ()
+                    | Keeper_exact_flow_scope.Current (Error error) ->
                       Error (Exact_setup_failed (Exact_flow_start_failed error))
-                    | Ok attempt ->
+                    | Keeper_exact_flow_scope.Current (Ok attempt) ->
                       (match
                          Exact_output.execute_flow_once
                            ~net
                            ~clock
                            ~before_dispatch:(fun candidate ->
-                             persist_exact_flow_state
-                               ~keeper_id
-                               ~trace_id:inp.trace_id
-                               ~generation
-                               ~state:"candidate_bound"
-                               [ "candidate", attempt_receipt_json candidate ])
+                             match
+                               with_current (fun () ->
+                                 persist_exact_flow_state
+                                   ~keeper_id
+                                   ~trace_id:inp.trace_id
+                                   ~generation
+                                   ~state:"candidate_bound"
+                                   [ "candidate", attempt_receipt_json candidate ])
+                             with
+                             | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+                               Error Callback_owner_unregistered_deferred
+                             | Keeper_exact_flow_scope.Current result ->
+                               Result.map_error
+                                 (fun detail ->
+                                    Callback_persistence_failed detail)
+                                 result)
                            ~before_advance:(fun ~failed ~next:_ ->
-                             match failed with
-                             | Exact_output.Flow_candidate_rejected _ -> Ok ()
-                             | Exact_output.Flow_candidate_execution_failed
-                                 { candidate; cause } ->
-                               persist_exact_flow_state
-                                 ~keeper_id
-                                 ~trace_id:inp.trace_id
-                                 ~generation
-                                 ~state:"execution_terminal"
-                                 [ "candidate", attempt_receipt_json candidate
-                                 ; ( "failure_cause"
-                                   , `String
-                                       (execution_error_cause_to_string
-                                          cause.cause) )
-                                 ])
+                             match
+                               with_current (fun () ->
+                                 match failed with
+                                 | Exact_output.Flow_candidate_rejected _ ->
+                                   Ok ()
+                                 | Exact_output.Flow_candidate_execution_failed
+                                     { candidate; cause } ->
+                                   ignore cause;
+                                   persist_exact_flow_state
+                                     ~keeper_id
+                                     ~trace_id:inp.trace_id
+                                     ~generation
+                                     ~state:"execution_terminal"
+                                     [ "candidate", attempt_receipt_json candidate
+                                     ; ( "failure_cause"
+                                       , `String "oas_execution_failed" )
+                                     ])
+                             with
+                             | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+                               Error Callback_owner_unregistered_deferred
+                             | Keeper_exact_flow_scope.Current result ->
+                               Result.map_error
+                                 (fun detail ->
+                                    Callback_persistence_failed detail)
+                                 result)
                            attempt
                        with
+                       | Error
+                           (Exact_output.Flow_before_dispatch_callback_failed
+                              { cause = Callback_owner_unregistered_deferred; _ })
+                       | Error
+                           (Exact_output.Flow_before_advance_callback_failed
+                              { cause = Callback_owner_unregistered_deferred; _ }) ->
+                         owner_unregistered ()
                        | Error error ->
                          let classified = exact_execution_error error in
                          (match
-                            persist_exact_execution_terminal
-                              ~keeper_id
-                              ~trace_id:inp.trace_id
-                              ~generation
-                              error
+                            with_current (fun () ->
+                              persist_exact_execution_terminal
+                                ~keeper_id
+                                ~trace_id:inp.trace_id
+                                ~generation
+                                error)
                           with
-                          | Ok () ->
+                          | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+                            owner_unregistered ()
+                          | Keeper_exact_flow_scope.Current (Ok ()) ->
                             Error (Exact_execution_failed classified)
-                          | Error detail ->
+                          | Keeper_exact_flow_scope.Current (Error detail) ->
                             Error
                               (Exact_execution_failed
-                                 { dispatched = classified.dispatched
+                                 { outward_effect = classified.outward_effect
                                  ; failure =
                                      Exact_callback_persistence_failed detail
                                  }))
                        | Ok success ->
-                         let candidate =
-                           Exact_output.flow_success_candidate success
-                         in
-                         let output =
-                           Exact_output.flow_success_output success
-                         in
                          (match
+                            with_current (fun () ->
+                              let candidate =
+                                Exact_output.flow_success_candidate success
+                              in
+                              let output =
+                                Exact_output.flow_success_output success
+                              in
+                              match
                             persist_exact_flow_state
                               ~keeper_id
                               ~trace_id:inp.trace_id
@@ -667,7 +745,7 @@ let extract_with_exact_output_classified_unlocked
                           | Error detail ->
                             Error
                               (Exact_execution_failed
-                                 { dispatched = true
+                                 { outward_effect = Outward_effect_started
                                  ; failure =
                                      Exact_callback_persistence_failed detail
                                  })
@@ -692,7 +770,7 @@ let extract_with_exact_output_classified_unlocked
                                then
                                  Error
                                    (Exact_execution_failed
-                                      { dispatched = true
+                                      { outward_effect = Outward_effect_started
                                       ; failure = Exact_domain_settlement_failed
                                       })
                                else
@@ -710,7 +788,7 @@ let extract_with_exact_output_classified_unlocked
                                 | Error detail ->
                                   Error
                                     (Exact_execution_failed
-                                       { dispatched = true
+                                       { outward_effect = Outward_effect_started
                                        ; failure =
                                            Exact_callback_persistence_failed detail
                                        }))
@@ -731,7 +809,7 @@ let extract_with_exact_output_classified_unlocked
                                then
                                  Error
                                    (Exact_execution_failed
-                                      { dispatched = true
+                                      { outward_effect = Outward_effect_started
                                       ; failure = Exact_domain_settlement_failed
                                       })
                                else
@@ -749,16 +827,20 @@ let extract_with_exact_output_classified_unlocked
                                 | Error detail ->
                                   Error
                                     (Exact_execution_failed
-                                       { dispatched = true
+                                       { outward_effect = Outward_effect_started
                                        ; failure =
                                            Exact_callback_persistence_failed detail
                                        })
                                 | Ok () ->
                                   Error
-                                    (Provider_unparseable_response
+                                    (Domain_output_invalid
                                        (Printf.sprintf
                                           "librarian provider returned invalid episode JSON (%s)"
-                                          parse_error)))))))))))))
+                                          parse_error))))))))))))
+                          with
+                          | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+                            owner_unregistered ()
+                          | Keeper_exact_flow_scope.Current result -> result)))))))))
 ;;
 
 let resolve_flow_scope ~base_path ~keeper_id =
@@ -778,27 +860,19 @@ let extract_with_flow_scope_classified
       ~keeper_id
       ~generation
       ~flow_scope
-      inp
+  inp
   =
-  match
-    Keeper_exact_flow_scope.with_current
-      flow_scope
-      ~registered_lane_id:(registered_lane_id ~base_path ~keeper_id)
-      (fun () ->
-         Keeper_exact_flow_scope.with_librarian_exact_flow_lock
-           flow_scope
-           (fun () ->
-              extract_with_exact_output_classified_unlocked
-                ?clock
-                ~flow_scope
-                ~net
-                ~keeper_id
-                ~generation
-                inp))
-  with
-  | Ok result -> result
-  | Error detail ->
-    Error (Exact_setup_failed (Exact_owner_unavailable detail))
+  Keeper_exact_flow_scope.with_librarian_exact_flow_lock
+    flow_scope
+    (fun () ->
+       extract_with_exact_output_classified_unlocked
+         ?clock
+         ~base_path
+         ~flow_scope
+         ~net
+         ~keeper_id
+         ~generation
+         inp)
 ;;
 
 let extract_with_exact_output_classified
@@ -820,27 +894,6 @@ let extract_with_exact_output_classified
       ~generation
       ~flow_scope
       inp
-;;
-
-let extract_with_exact_output
-    ?clock
-    ~base_path
-    ~net
-    ~keeper_id
-    ~generation
-    inp
-  =
-  match
-    extract_with_exact_output_classified
-      ?clock
-      ~base_path
-      ~net
-      ~keeper_id
-      ~generation
-      inp
-  with
-  | Error err -> Error (extraction_error_to_string err)
-  | Ok episode -> Ok episode
 ;;
 
 let append_episode_for_current_owner
@@ -904,9 +957,13 @@ let append_episode_for_current_owner
              Ok episode
            | Error message -> Error (Memory_fact_upsert_failed message)))
   with
-  | Ok result -> result
-  | Error detail ->
-    Error (Exact_setup_failed (Exact_owner_unavailable detail))
+  | Keeper_exact_flow_scope.Current result -> result
+  | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+    Error
+      (Exact_setup_failed
+         (Exact_owner_unavailable
+            ("librarian exact owner generation is no longer current: "
+             ^ keeper_id)))
 ;;
 
 let extract_and_append_with_flow_scope_classified
@@ -918,32 +975,43 @@ let extract_and_append_with_flow_scope_classified
     inp
   =
   match clock with
-  | None -> Error Provider_clock_unavailable
+  | None -> Error Execution_clock_unavailable
   | Some _ ->
-    let generation =
-      Keeper_memory_os_io.next_generation_with_floor
-        ~floor:inp.Keeper_librarian.generation
-        ~keeper_id
-        ~trace_id:inp.Keeper_librarian.trace_id
-    in
     (match
-       extract_with_flow_scope_classified
-         ?clock
-         ~base_path
-         ~net
-         ~keeper_id
-         ~generation
-         ~flow_scope
-         inp
+       Keeper_exact_flow_scope.with_current
+         flow_scope
+         ~registered_lane_id:(registered_lane_id ~base_path ~keeper_id)
+         (fun () ->
+            Keeper_memory_os_io.next_generation_with_floor
+              ~floor:inp.Keeper_librarian.generation
+              ~keeper_id
+              ~trace_id:inp.Keeper_librarian.trace_id)
      with
-     | Error _ as error -> error
-     | Ok episode ->
-       append_episode_for_current_owner
-         ?clock
-         ~base_path
-         ~keeper_id
-         ~flow_scope
-         episode)
+     | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+       Error
+         (Exact_setup_failed
+            (Exact_owner_unavailable
+               ("librarian exact owner generation is no longer current: "
+                ^ keeper_id)))
+     | Keeper_exact_flow_scope.Current generation ->
+       (match
+          extract_with_flow_scope_classified
+            ?clock
+            ~base_path
+            ~net
+            ~keeper_id
+            ~generation
+            ~flow_scope
+            inp
+        with
+        | Error _ as error -> error
+        | Ok episode ->
+          append_episode_for_current_owner
+            ?clock
+            ~base_path
+            ~keeper_id
+            ~flow_scope
+            episode))
 ;;
 
 let extract_and_append_with_exact_output_classified
@@ -963,25 +1031,6 @@ let extract_and_append_with_exact_output_classified
       ~keeper_id
       ~flow_scope
       inp
-;;
-
-let extract_and_append_with_exact_output
-    ?clock
-    ~base_path
-    ~net
-    ~keeper_id
-    inp
-  =
-  match
-    extract_and_append_with_exact_output_classified
-      ?clock
-      ~base_path
-      ~net
-      ~keeper_id
-      inp
-  with
-  | Error err -> Error (extraction_error_to_string err)
-  | Ok episode -> Ok episode
 ;;
 
 let run_best_effort ~base_path ~keeper_id (inp : Keeper_librarian.input) =
@@ -1008,9 +1057,9 @@ let run_best_effort ~base_path ~keeper_id (inp : Keeper_librarian.input) =
              (extraction_error_to_string err)
          | Ok flow_scope ->
            (match
-              Keeper_exact_flow_scope.with_librarian_provider_slot
+              Keeper_exact_flow_scope.with_librarian_execution_slot
                 flow_scope
-                ~capacity:(per_keeper_slot_capacity ())
+                ~capacity:(per_keeper_execution_slot_capacity ())
                 (fun () ->
                    extract_and_append_with_flow_scope_classified
                      ~clock
@@ -1025,14 +1074,14 @@ let run_best_effort ~base_path ~keeper_id (inp : Keeper_librarian.input) =
                 Keeper_metrics.(to_string MemoryLaneProviderSlotBusy)
                 ~labels:
                   [ "keeper", keeper_id
-                  ; "site", memory_os_librarian_provider_slot_site
+                  ; "site", memory_os_librarian_execution_slot_site
                   ]
                 ();
               Log.Keeper.warn
                 ~keeper_name:keeper_id
                 "memory os librarian skipped lane=%s: per-keeper provider slot busy (capacity=%d)"
                 exact_lane_id
-                (per_keeper_slot_capacity ())
+                (per_keeper_execution_slot_capacity ())
             | Some (Ok episode) ->
               cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
               Log.Keeper.info

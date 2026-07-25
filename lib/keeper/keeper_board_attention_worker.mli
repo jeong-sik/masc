@@ -1,7 +1,7 @@
 (** Per-Keeper Board-attention judgment worker.
 
     MASC owns candidate membership, domain judgment state, and durable exact
-    callbacks. OAS owns provider-neutral flow admission, dispatch, and
+    callbacks. OAS owns opaque-runtime flow admission, dispatch, and
     advancement. Process-local wakes only request another durable inspection. *)
 
 type contention =
@@ -17,7 +17,7 @@ type step =
   | Owner_unregistered_deferred of { candidate_id : string }
   | Judgment_completed of
       { candidate_id : string
-      ; owner_wake : Keeper_registry.wakeup_outcome
+      ; owner_wake : Keeper_registry.exact_wakeup_outcome
       }
   | Candidate_already_consumed of { candidate_id : string }
   | Partition_blocked of
@@ -73,7 +73,7 @@ val run :
   keeper_name:string ->
   (unit, fatal_error) result
 (** Register and run the wake-driven worker until [sw] is cancelled. The clock
-    is forwarded to OAS execution. MASC owns no Provider execution policy.
+    is forwarded to OAS execution. MASC owns no execution-target policy.
     Setup or durability errors end this lifecycle instead of awaiting another
     wake. Exact claim contention schedules one generation-keyed delayed wake on
     the worker switch; it never recursively claims a sibling in the same turn.
@@ -149,11 +149,11 @@ module For_testing : sig
        , string Keeper_board_attention_exact_flow.execution_error )
        result) ->
     (step, string) result
-  (** Inject one provider-neutral exact-flow preparation and execution. The
+  (** Inject one opaque-runtime exact-flow preparation and execution. The
       next Pending candidate is prepared before it is claimed; setup failure
       returns an error with the candidate still Pending and its partition Ready.
       The execution seam must invoke the supplied callbacks at the same boundaries
-      as OAS. It exposes no Provider cause, receipt phase, or dispatch count. *)
+      as OAS. It exposes no target cause, receipt phase, or dispatch count. *)
 
   val drain_available :
     yield:(unit -> unit) ->

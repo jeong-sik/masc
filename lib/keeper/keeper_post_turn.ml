@@ -526,13 +526,20 @@ let no_compaction_of_uncommitted_prepared
       ?(cause = Keeper_event_queue_state.Commit_admission_unavailable)
       prepared
   =
-  { source = prepared.source_ref
-  ; reason =
-      Exact_execution_terminal
-        (Keeper_compaction_llm_summarizer.terminalize_post_success
-           prepared.post_success_terminalizer
-           cause)
-  }
+  match
+    Keeper_compaction_llm_summarizer.terminalize_post_success
+      prepared.post_success_terminalizer
+      cause
+  with
+  | Keeper_compaction_llm_summarizer.Terminalized terminal ->
+    Ok
+      { source = prepared.source_ref
+      ; reason = Exact_execution_terminal terminal
+      }
+  | Keeper_compaction_llm_summarizer.Terminalization_owner_unregistered_deferred ->
+    Error
+      (Compaction_rejected
+         Keeper_compact_policy.Exact_owner_unregistered_deferred)
 ;;
 
 let prepare_compaction_admitted
@@ -696,6 +703,11 @@ let prepare_compaction
     ~projection_request
 ;;
 
+type prepared_commit_outcome =
+  | Prepared_commit_succeeded of compaction_recovery
+  | Prepared_commit_terminal of
+      Keeper_event_queue_state.exact_execution_terminal_cause
+
 let commit_prepared_compaction_with
     ~save_oas_checkpoint_if_source
     (prepared : prepared_compaction)
@@ -715,12 +727,9 @@ let commit_prepared_compaction_with
       } =
     prepared
   in
-  let terminal cause =
-    Error
-      (No_compaction
-         (no_compaction_of_uncommitted_prepared ~cause prepared))
-  in
-  (try
+  let terminal cause = Prepared_commit_terminal cause in
+  let commit_current () =
+    try
      match
        save_oas_checkpoint_if_source
          ~multimodal_policy:retry_meta.multimodal_policy
@@ -738,7 +747,7 @@ let commit_prepared_compaction_with
          Keeper_metrics.(to_string Compactions)
          ~labels:[ "keeper", retry_meta.name ]
          ();
-       Ok
+       Prepared_commit_succeeded
          { checkpoint = saved_checkpoint
          ; checkpoint_installation = installation
          ; trigger = prepared_trigger
@@ -773,14 +782,32 @@ let commit_prepared_compaction_with
        terminal Keeper_event_queue_state.Checkpoint_persistence_failed
      | Error (Tool_history_invalid _) ->
        terminal Keeper_event_queue_state.Invalid_structural_source_after_dispatch
-   with
-   | Eio.Cancel.Cancelled _ ->
-     terminal Keeper_event_queue_state.Exact_execution_cancelled
-   | exn ->
-     let detail = Printexc.to_string exn in
-     log_keeper_exn ~label:"compaction checkpoint save exception" exn;
-     Log.Keeper.error "compaction checkpoint save exception became terminal: %s" detail;
-     terminal Keeper_event_queue_state.Checkpoint_persistence_failed)
+    with
+    | Eio.Cancel.Cancelled _ ->
+      terminal Keeper_event_queue_state.Exact_execution_cancelled
+    | exn ->
+      let detail = Printexc.to_string exn in
+      log_keeper_exn ~label:"compaction checkpoint save exception" exn;
+      Log.Keeper.error "compaction checkpoint save exception became terminal: %s" detail;
+      terminal Keeper_event_queue_state.Checkpoint_persistence_failed
+  in
+  match
+    Keeper_compaction_llm_summarizer.with_current_post_success
+      prepared.post_success_terminalizer
+      commit_current
+  with
+  | Keeper_compaction_llm_summarizer.Post_success_owner_unregistered_deferred ->
+    Error
+      (Compaction_rejected
+         Keeper_compact_policy.Exact_owner_unregistered_deferred)
+  | Keeper_compaction_llm_summarizer.Post_success_current
+      (Prepared_commit_succeeded recovery) ->
+    Ok recovery
+  | Keeper_compaction_llm_summarizer.Post_success_current
+      (Prepared_commit_terminal cause) ->
+    (match no_compaction_of_uncommitted_prepared ~cause prepared with
+     | Ok no_compaction -> Error (No_compaction no_compaction)
+     | Error _ as error -> error)
 ;;
 
 let commit_prepared_compaction =

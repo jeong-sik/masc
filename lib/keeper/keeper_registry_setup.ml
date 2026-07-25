@@ -778,7 +778,13 @@ type remove_entry_result =
   | Entry_replaced
   | Entry_lifecycle_reserved of Keeper_lifecycle_reservation.snapshot
 
-let remove_entry ?lifecycle_token ?expected ~base_path name =
+let remove_entry
+      ?lifecycle_token
+      ?expected
+      ?(after_fence = fun () -> ())
+      ~base_path
+      name
+  =
   Keeper_lifecycle_reservation.with_key_lock ~base_path ~keeper_name:name (fun () ->
   match
     Keeper_lifecycle_reservation.authorize
@@ -793,7 +799,16 @@ let remove_entry ?lifecycle_token ?expected ~base_path name =
   let rec loop () =
     let current = Atomic.get registry in
     match StringMap.find_opt key current with
-    | None -> Entry_missing
+    | None ->
+      Option.iter
+        (fun expected_entry ->
+           Keeper_exact_flow_scope.release_owner
+             ~base_path
+             ~keeper_name:name
+             ~expected_lane_id:(Keeper_lane.id expected_entry.lane))
+        expected;
+      after_fence ();
+      Entry_missing
     | Some entry ->
       (match expected with
        | Some expected_entry
@@ -805,11 +820,12 @@ let remove_entry ?lifecycle_token ?expected ~base_path name =
        | None | Some _ ->
          let updated = StringMap.remove key current in
          if Atomic.compare_and_set registry current updated
-         then (
-        Keeper_exact_flow_scope.release_owner
-          ~base_path
-          ~keeper_name:name
-          ~expected_lane_id:(Keeper_lane.id entry.lane);
+        then (
+           Keeper_exact_flow_scope.release_owner
+             ~base_path
+             ~keeper_name:name
+             ~expected_lane_id:(Keeper_lane.id entry.lane);
+           after_fence ();
            Entry_removed entry)
          else loop ())
   in
@@ -854,11 +870,12 @@ let unregister ~base_path name =
       (Keeper_lifecycle_reservation.snapshot_to_string owner)
 ;;
 
-let unregister_exact_internal ?lifecycle_token entry =
+let unregister_exact_internal ?lifecycle_token ?after_fence entry =
   match
     remove_entry
       ?lifecycle_token
       ~expected:entry
+      ?after_fence
       ~base_path:entry.base_path
       entry.name
   with
@@ -871,6 +888,10 @@ let unregister_exact_internal ?lifecycle_token entry =
 ;;
 
 let unregister_exact entry = unregister_exact_internal entry
+
+let unregister_exact_with_fence ~after_fence entry =
+  unregister_exact_internal ~after_fence entry
+;;
 
 let unregister_exact_for_lifecycle token entry =
   unregister_exact_internal ~lifecycle_token:token entry

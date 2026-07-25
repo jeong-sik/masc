@@ -6,7 +6,7 @@ type surface =
   | Hitl_summary
   | Librarian
 
-type librarian_provider_slot =
+type librarian_execution_slot =
   { mutable capacity : int
   ; mutable in_use : int
   }
@@ -15,9 +15,9 @@ type owner_state =
   { base_path : string
   ; keeper_name : string
   ; lane_id : Keeper_lane.Id.t
-  ; mutable retired : bool
-  ; librarian_provider_slot : librarian_provider_slot
-  ; librarian_provider_slot_mu : Eio.Mutex.t
+  ; retired : bool Atomic.t
+  ; librarian_execution_slot : librarian_execution_slot
+  ; librarian_execution_slot_mu : Eio.Mutex.t
   ; librarian_exact_flow_mu : Eio.Mutex.t
   }
 
@@ -26,6 +26,10 @@ type t =
   ; preference_store : Exact_output.flow_preference_store
   ; scope : Exact_output.flow_scope
   }
+
+type 'a current_boundary =
+  | Current of 'a
+  | Owner_unregistered_deferred
 
 type owner =
   { state : owner_state
@@ -70,9 +74,9 @@ let create_owner ~base_path ~keeper_name ~lane_id =
     { base_path
     ; keeper_name
     ; lane_id
-    ; retired = false
-    ; librarian_provider_slot = { capacity = 0; in_use = 0 }
-    ; librarian_provider_slot_mu = Eio.Mutex.create ()
+    ; retired = Atomic.make false
+    ; librarian_execution_slot = { capacity = 0; in_use = 0 }
+    ; librarian_execution_slot_mu = Eio.Mutex.create ()
     ; librarian_exact_flow_mu = Eio.Mutex.create ()
     }
   in
@@ -106,9 +110,8 @@ let release_scope scope =
 ;;
 
 let retire_owner owner =
-  if not owner.state.retired
+  if Atomic.compare_and_set owner.state.retired false true
   then (
-    owner.state.retired <- true;
     release_scope owner.compaction;
     release_scope owner.board_attention;
     release_scope owner.hitl_summary;
@@ -132,7 +135,7 @@ let for_registered ~registered_lane_id ~base_path ~keeper_name ~surface =
            Stdlib.Mutex.protect owners_mu (fun () ->
              match Hashtbl.find_opt owners key with
              | Some owner
-               when (not owner.state.retired)
+               when (not (Atomic.get owner.state.retired))
                     && Keeper_lane.Id.equal owner.state.lane_id lane_id ->
                owner
              | Some stale ->
@@ -158,24 +161,20 @@ let with_current scope ~registered_lane_id f =
     (fun () ->
        match registered_lane_id () with
        | Some lane_id
-         when (not scope.owner.retired)
+         when (not (Atomic.get scope.owner.retired))
               && Keeper_lane.Id.equal scope.owner.lane_id lane_id ->
-         Ok (f ())
+         Current (f ())
        | Some _
-       | None ->
-         Error
-           (Printf.sprintf
-              "exact-flow owner generation is no longer current: keeper=%s"
-              scope.owner.keeper_name))
+       | None -> Owner_unregistered_deferred)
 ;;
 
-let with_librarian_provider_slot scope ~capacity f =
+let with_librarian_execution_slot scope ~capacity f =
   if capacity = 0
   then Some (f ())
   else
-    let slot = scope.owner.librarian_provider_slot in
+    let slot = scope.owner.librarian_execution_slot in
     let acquired =
-      Eio_guard.with_mutex scope.owner.librarian_provider_slot_mu (fun () ->
+      Eio_guard.with_mutex scope.owner.librarian_execution_slot_mu (fun () ->
         slot.capacity <- capacity;
         if slot.in_use >= slot.capacity
         then false
@@ -189,7 +188,7 @@ let with_librarian_provider_slot scope ~capacity f =
       Fun.protect
         ~finally:(fun () ->
           Eio_guard.with_mutex
-            scope.owner.librarian_provider_slot_mu
+            scope.owner.librarian_execution_slot_mu
             (fun () -> slot.in_use <- Int.max 0 (slot.in_use - 1)))
         (fun () -> Some (f ()))
 ;;

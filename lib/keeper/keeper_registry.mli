@@ -97,6 +97,14 @@ type unregister_exact_result =
     different identity and is retained. *)
 val unregister_exact : registry_entry -> unregister_exact_result
 
+val unregister_exact_with_fence
+  :  after_fence:(unit -> unit)
+  -> registry_entry
+  -> unregister_exact_result
+(** Remove the exact owner and invoke [after_fence] while its lifecycle key is
+    still locked. The callback must not re-enter the registry or lifecycle
+    lock. *)
+
 val unregister_exact_for_lifecycle :
   Keeper_lifecycle_reservation.token ->
   registry_entry ->

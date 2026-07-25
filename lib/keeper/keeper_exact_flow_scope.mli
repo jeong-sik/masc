@@ -8,6 +8,10 @@ type surface =
 
 type t
 
+type 'a current_boundary =
+  | Current of 'a
+  | Owner_unregistered_deferred
+
 val for_registered
   :  registered_lane_id:(unit -> Keeper_lane.Id.t option)
   -> base_path:string
@@ -22,11 +26,11 @@ val with_current
   :  t
   -> registered_lane_id:(unit -> Keeper_lane.Id.t option)
   -> (unit -> 'a)
-  -> ('a, string) result
+  -> 'a current_boundary
 (** Run a generation-sensitive boundary while the Keeper lifecycle key lock is
     held. A retired or replaced owner cannot cross the boundary. *)
 
-val with_librarian_provider_slot
+val with_librarian_execution_slot
   :  t
   -> capacity:int
   -> (unit -> 'a)

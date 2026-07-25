@@ -10,6 +10,14 @@ type completed_plan
 
 type post_success_terminalizer
 
+type 'a post_success_boundary =
+  | Post_success_current of 'a
+  | Post_success_owner_unregistered_deferred
+
+type post_success_terminalization =
+  | Terminalized of Keeper_event_queue_state.exact_execution_terminal
+  | Terminalization_owner_unregistered_deferred
+
 type prepared_lane
 
 type attempt_observation =
@@ -124,7 +132,7 @@ val completed_post_success_terminalizer : completed_plan -> post_success_termina
 val terminalize_post_success
   :  post_success_terminalizer
   -> Keeper_event_queue_state.exact_execution_terminal_cause
-  -> Keeper_event_queue_state.exact_execution_terminal
+  -> post_success_terminalization
 (** Durably quarantine the real retained attempt observation before returning
     its source-bound terminal identity. The first call atomically owns the
     canonical cause, performs the only quarantine attempt outside the mutex
@@ -134,6 +142,13 @@ val terminalize_post_success
     canonical terminal; the durable binding remains dispatch-uncertain and
     therefore fail-closed against restart replay. A cancelled waiter can retry
     and retrieve the same canonical terminal without repeating quarantine. *)
+
+val with_current_post_success
+  :  post_success_terminalizer
+  -> (unit -> 'a)
+  -> 'a post_success_boundary
+(** Fence local checkpoint and projection commits against the exact Keeper
+    generation that produced the completed plan. *)
 
 val exact_execution_evidence_slot_id : exact_execution_evidence -> string
 val exact_execution_evidence_call_id : exact_execution_evidence -> string

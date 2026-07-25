@@ -162,8 +162,9 @@ let prepare ~base_path ~keeper_name ~net candidate =
          ~registered_lane_id:(registered_lane_id ~base_path ~keeper_name)
          prepare_current
      with
-     | Ok result -> result
-     | Error _ -> Error Registry_unavailable)
+     | Keeper_exact_flow_scope.Current result -> result
+     | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+       Error Registry_unavailable)
 ;;
 
 let string_of_call_id call_id = Exact_output.call_id_to_string call_id
@@ -360,9 +361,11 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
              ~keeper_name:prepared.keeper_name)
         callback
     with
-    | Error _ -> Error Owner_generation_unregistered
-    | Ok (Error cause) -> Error (Durable_callback_failed cause)
-    | Ok (Ok ()) -> Ok ()
+    | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+      Error Owner_generation_unregistered
+    | Keeper_exact_flow_scope.Current (Error cause) ->
+      Error (Durable_callback_failed cause)
+    | Keeper_exact_flow_scope.Current (Ok ()) -> Ok ()
   in
   let oas_before_dispatch receipt =
     with_current (fun () -> before_dispatch (attempt_provenance receipt))
@@ -412,8 +415,9 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
                        result);
                 Error error)
        with
-       | Error _ -> Error Owner_unregistered_deferred
-       | Ok result -> result)
+       | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+         Error Owner_unregistered_deferred
+       | Keeper_exact_flow_scope.Current result -> result)
     | Error (Exact_output.Flow_attempt_already_started evidence) ->
       Error (Flow_already_started (evidence_provenance evidence))
     | Error
@@ -468,16 +472,22 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
   result
 ;;
 
+let with_current_generation prepared callback =
+  Keeper_exact_flow_scope.with_current
+    prepared.flow_scope
+    ~registered_lane_id:
+      (registered_lane_id
+         ~base_path:prepared.base_path
+         ~keeper_name:prepared.keeper_name)
+    callback
+;;
+
 let execute ?clock ~before_dispatch ~before_advance prepared =
   match
-    Keeper_exact_flow_scope.with_current
-      prepared.flow_scope
-      ~registered_lane_id:
-        (registered_lane_id
-           ~base_path:prepared.base_path
-           ~keeper_name:prepared.keeper_name)
-      (fun () -> ())
+    with_current_generation prepared (fun () -> ())
   with
-  | Error _ -> Error Owner_unregistered_deferred
-  | Ok () -> execute_current ?clock ~before_dispatch ~before_advance prepared
+  | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+    Error Owner_unregistered_deferred
+  | Keeper_exact_flow_scope.Current () ->
+    execute_current ?clock ~before_dispatch ~before_advance prepared
 ;;

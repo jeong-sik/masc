@@ -134,40 +134,6 @@ let test_cadence_record_attempt_defers () =
   check bool "after a completed non-success attempt the next turn is not due" false
     (R.cadence_due ~keeper_id:kid ~trace_id:tid)
 
-let test_cadence_error_backoff_policy () =
-  check bool "dispatched exact execution failure defers cadence" true
-    (R.should_record_cadence_backoff_after_error
-       (R.Exact_execution_failed
-          { dispatched = true
-          ; failure =
-              R.Exact_provider_execution_failed
-                Agent_sdk.Exact_output.Completion_failed
-          }));
-  check bool "zero-dispatch exact execution failure stays due" false
-    (R.should_record_cadence_backoff_after_error
-       (R.Exact_execution_failed
-          { dispatched = false
-          ; failure =
-              R.Exact_provider_execution_failed
-                Agent_sdk.Exact_output.Completion_failed
-          }));
-  check bool "durable unsettled prior attempt defers cadence" true
-    (R.should_record_cadence_backoff_after_error
-       (R.Exact_setup_failed
-          (R.Exact_previous_attempt_unsettled
-             { state = "candidate_bound"; trace_id = "trace"; generation = 1 })));
-  check bool "domain-invalid exact output defers cadence" true
-    (R.should_record_cadence_backoff_after_error
-       (R.Provider_unparseable_response "invalid_json"));
-  check bool "prompt render failure stays due" false
-    (R.should_record_cadence_backoff_after_error
-       (R.Prompt_render_failed "missing template"));
-  check bool "fact upsert failure stays due" false
-    (R.should_record_cadence_backoff_after_error
-       (R.Memory_fact_upsert_failed "permission denied"));
-  check bool "missing provider clock does not claim a completed attempt" false
-    (R.should_record_cadence_backoff_after_error R.Provider_clock_unavailable)
-
 (* [cadence_due] drives the real per-(keeper, trace) counter table (the gate
    [run_best_effort] uses). A fresh pair is due immediately, and successful
    structured extractions are due once per configured period. Asserted as
@@ -418,7 +384,6 @@ let () =
           test_case "step transitions" `Quick test_cadence_step_transitions;
           test_case "record success resets" `Quick test_cadence_record_success_resets;
           test_case "record attempt defers" `Quick test_cadence_record_attempt_defers;
-          test_case "error backoff policy" `Quick test_cadence_error_backoff_policy;
           test_case "cadence_due fires once per period" `Quick test_cadence_due_periodic;
           test_case "cadence_due is per-keeper" `Quick test_cadence_due_independent_keepers;
           test_case "cadence_due resets on trace rollover" `Quick

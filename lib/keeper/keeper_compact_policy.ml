@@ -178,6 +178,20 @@ let selected_message_count units selected =
     0
     selected
 ;;
+
+let terminal_rejection terminalizer cause =
+  match
+    Keeper_compaction_llm_summarizer.terminalize_post_success
+      terminalizer
+      cause
+  with
+  | Keeper_compaction_llm_summarizer.Terminalized terminal ->
+    Exact_execution_terminal terminal
+  | Keeper_compaction_llm_summarizer.Terminalization_owner_unregistered_deferred ->
+    summarization_rejection
+      Keeper_compaction_llm_summarizer.Exact_owner_unregistered_deferred
+;;
+
 let requested_messages_with_plan
       ~(plan_for_units :
          units:Keeper_compaction_unit.closed_unit list ->
@@ -256,10 +270,9 @@ let requested_messages_with_plan
             if not (Keeper_compaction_llm_summarizer.has_changes plan)
             then
               Error
-                (Exact_execution_terminal
-                   (Keeper_compaction_llm_summarizer.terminalize_post_success
-                      post_success_terminalizer
-                      Keeper_event_queue_state.Domain_invalid_output))
+                (terminal_rejection
+                   post_success_terminalizer
+                   Keeper_event_queue_state.Domain_invalid_output)
             else
               Ok
                 { messages =
@@ -392,15 +405,11 @@ let compact_for_request_typed_with
       ; post_success_terminalizer = None
       }
     in
-    let terminal cause =
-      Keeper_compaction_llm_summarizer.terminalize_post_success
-        requested.post_success_terminalizer
-        cause
-    in
     let reject_post_dispatch_domain_output () =
       reject
-        (Exact_execution_terminal
-           (terminal Keeper_event_queue_state.Domain_invalid_output))
+        (terminal_rejection
+           requested.post_success_terminalizer
+           Keeper_event_queue_state.Domain_invalid_output)
     in
     if after_bytes = before_bytes
     then reject_post_dispatch_domain_output ()
@@ -445,10 +454,18 @@ let compact_for_request_typed_with
           ~after_tool_result_count
       with
       | Error error ->
-        reject
-          (Invalid_structural_evidence
-             ( error
-             , terminal Keeper_event_queue_state.Invalid_structural_evidence ))
+        (match
+           Keeper_compaction_llm_summarizer.terminalize_post_success
+             requested.post_success_terminalizer
+             Keeper_event_queue_state.Invalid_structural_evidence
+         with
+         | Keeper_compaction_llm_summarizer.Terminalized terminal ->
+           reject (Invalid_structural_evidence (error, terminal))
+         | Keeper_compaction_llm_summarizer.Terminalization_owner_unregistered_deferred ->
+           reject
+             (summarization_rejection
+                Keeper_compaction_llm_summarizer
+                .Exact_owner_unregistered_deferred))
       | Ok evidence ->
         let compacted_ctx = sync_oas_context compacted_ctx in
         Log.Harness.emit

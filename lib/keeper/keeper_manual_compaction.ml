@@ -467,12 +467,14 @@ let run_admitted_with
           | Error failure ->
             (match preparation with
              | Ok prepared ->
-               Ok
-                 (No_compaction
-                    (Keeper_post_turn.no_compaction_of_uncommitted_prepared
-                       ~cause:
-                         Keeper_event_queue_state.Lifecycle_transition_failed_after_dispatch
-                       prepared))
+               (match
+                  Keeper_post_turn.no_compaction_of_uncommitted_prepared
+                    ~cause:
+                      Keeper_event_queue_state.Lifecycle_transition_failed_after_dispatch
+                    prepared
+                with
+                | Ok no_compaction -> Ok (No_compaction no_compaction)
+                | Error _ -> Error failure)
              | Error (Keeper_post_turn.No_compaction no_compaction) ->
                Ok (No_compaction no_compaction)
              | Error _ -> Error failure)
@@ -488,8 +490,12 @@ let run_admitted_with
      | `Busy block ->
        (match preparation with
         | Ok prepared ->
-          `No_compaction
-            (Keeper_post_turn.no_compaction_of_uncommitted_prepared prepared)
+          (match
+             Keeper_post_turn.no_compaction_of_uncommitted_prepared prepared
+           with
+           | Ok no_compaction -> `No_compaction no_compaction
+           | Error error ->
+             `Compaction_failed (Recovery (error, Ok ())))
         | Error (Keeper_post_turn.No_compaction no_compaction)
           when preserve_no_compaction_after_final_admission_busy no_compaction.reason ->
           `No_compaction no_compaction

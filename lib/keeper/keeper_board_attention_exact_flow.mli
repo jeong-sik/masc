@@ -1,4 +1,4 @@
-(** Provider-neutral exact-output execution for one durable Board candidate.
+(** Opaque-runtime exact-output execution for one durable Board candidate.
 
     MASC owns the immutable Board input, strict domain decoder, and durable
     callbacks. OAS owns lane admission, affine attempts, dispatch, and
@@ -25,9 +25,8 @@ type attempt_provenance =
   ; plan_fingerprint : string
   ; request_body_sha256 : string
   }
-(** Provider-neutral identity of one admitted attempt. It deliberately excludes
-    the raw OAS receipt, effect phase, dispatch count, target, and provider
-    failure cause. *)
+(** Opaque identity of one admitted attempt. It deliberately excludes the raw
+    OAS receipt, effect phase, dispatch count, target, and execution cause. *)
 
 type 'callback_error execution_error =
   | Owner_unregistered_deferred
@@ -82,3 +81,10 @@ val execute :
 (** Cancellation is propagated promptly without protected partition I/O.
     Durable [Bound] or [Advancing] progress is quarantined only by the subsequent
     process-start recovery path. *)
+
+val with_current_generation
+  :  prepared
+  -> (unit -> 'a)
+  -> 'a Keeper_exact_flow_scope.current_boundary
+(** Fence a local durable projection against Keeper owner replacement. The
+    callback must not perform network I/O or re-enter the lifecycle key lock. *)

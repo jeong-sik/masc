@@ -184,8 +184,9 @@ let prepare_flow_with_scope ~base_path ~keeper_name ~flow_scope ~(entry : pendin
            ; attempt
            })
   with
-  | Ok result -> result
-  | Error detail -> Error detail
+  | Keeper_exact_flow_scope.Current result -> result
+  | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+    Error "HITL exact-output owner generation is no longer registered"
 ;;
 
 let prepare_flow ~(entry : pending_approval) =
@@ -812,27 +813,30 @@ let execute_prepared_flow_with_queue_writers_current
       (prepared : prepared_flow)
   =
   let guarded_before_dispatch candidate =
-    match
-      with_current_generation prepared (fun () ->
-        before_dispatch ~queue_writers prepared.entry candidate)
+    match with_current_generation prepared (fun () ->
+      before_dispatch ~queue_writers prepared.entry candidate)
     with
-    | Error _ -> Error Owner_generation_unregistered
-    | Ok (Error cause) -> Error (Durable_flow_callback_failed cause)
-    | Ok (Ok ()) -> Ok ()
+    | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+      Error Owner_generation_unregistered
+    | Keeper_exact_flow_scope.Current (Error cause) ->
+      Error (Durable_flow_callback_failed cause)
+    | Keeper_exact_flow_scope.Current (Ok ()) -> Ok ()
   in
   let guarded_before_advance ~failed ~next =
-    match
-      with_current_generation prepared (fun () ->
-        before_advance ~queue_writers prepared.entry ~failed ~next)
+    match with_current_generation prepared (fun () ->
+      before_advance ~queue_writers prepared.entry ~failed ~next)
     with
-    | Error _ -> Error Owner_generation_unregistered
-    | Ok (Error cause) -> Error (Durable_flow_callback_failed cause)
-    | Ok (Ok ()) -> Ok ()
+    | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+      Error Owner_generation_unregistered
+    | Keeper_exact_flow_scope.Current (Error cause) ->
+      Error (Durable_flow_callback_failed cause)
+    | Keeper_exact_flow_scope.Current (Ok ()) -> Ok ()
   in
   let settle_current_generation callback =
     match with_current_generation prepared callback with
-    | Error _ -> Deferred_unregistered
-    | Ok () -> Executed
+    | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+      Deferred_unregistered
+    | Keeper_exact_flow_scope.Current () -> Executed
   in
   try
     match
@@ -868,9 +872,10 @@ let execute_prepared_flow_with_queue_writers_current
           ~cause:Exact_cancellation)
     in
     (match settlement with
-     | Error _ -> Deferred_unregistered
-     | Ok (Ok ()) -> raise cancellation
-     | Ok (Error detail) ->
+     | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+       Deferred_unregistered
+     | Keeper_exact_flow_scope.Current (Ok ()) -> raise cancellation
+     | Keeper_exact_flow_scope.Current (Error detail) ->
        signal_terminalization_persistence_failure
          prepared.entry
          "cancellation terminalization persistence"
@@ -891,9 +896,10 @@ let execute_prepared_flow_with_queue_writers_current
           ~cause:Exact_terminal_persistence_failure)
     in
     (match settlement with
-     | Error _ -> Deferred_unregistered
-     | Ok (Ok ()) -> Executed
-     | Ok (Error persistence_detail) ->
+     | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+       Deferred_unregistered
+     | Keeper_exact_flow_scope.Current (Ok ()) -> Executed
+     | Keeper_exact_flow_scope.Current (Error persistence_detail) ->
        signal_terminalization_persistence_failure
          prepared.entry
          "crash terminalization persistence"
@@ -916,8 +922,9 @@ let execute_prepared_flow_with_queue_writers
            ~keeper_name:prepared.keeper_name)
       (fun () -> ())
   with
-  | Error _ -> Deferred_unregistered
-  | Ok () ->
+  | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+    Deferred_unregistered
+  | Keeper_exact_flow_scope.Current () ->
     execute_prepared_flow_with_queue_writers_current
       ~queue_writers
       ~net

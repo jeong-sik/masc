@@ -2618,6 +2618,20 @@ let test_destructive_shutdown_blocks_before_cleanup_on_bound_summary () =
                 meta.name
                 meta
             in
+            let old_flow_scope =
+              match
+                Masc.Keeper_exact_flow_scope.for_registered
+                  ~registered_lane_id:(fun () ->
+                    match R.get ~base_path:config.base_path meta.name with
+                    | Some current -> Some (Lane.id current.lane)
+                    | None -> None)
+                  ~base_path:config.base_path
+                  ~keeper_name:meta.name
+                  ~surface:Masc.Keeper_exact_flow_scope.Hitl_summary
+              with
+              | Ok scope -> scope
+              | Error detail -> fail detail
+            in
             ignore
               (install_pending_summary
                  ~base_path:config.base_path
@@ -2684,9 +2698,21 @@ let test_destructive_shutdown_blocks_before_cleanup_on_bound_summary () =
              | Ok (Some _) -> ()
              | Ok None -> fail "retirement failure removed metadata"
              | Error detail -> fail detail);
-            check bool "registry preserved" true
-              (Option.is_some
+            check bool "registry fenced before retirement scan" true
+              (Option.is_none
                  (R.get ~base_path:config.base_path meta.name));
+            (match
+               Masc.Keeper_exact_flow_scope.with_current
+                 old_flow_scope
+                 ~registered_lane_id:(fun () ->
+                   match R.get ~base_path:config.base_path meta.name with
+                   | Some current -> Some (Lane.id current.lane)
+                   | None -> None)
+                 (fun () -> ())
+             with
+             | Masc.Keeper_exact_flow_scope.Owner_unregistered_deferred -> ()
+             | Masc.Keeper_exact_flow_scope.Current () ->
+               fail "retirement scan ran before the exact owner fence");
             check bool "session preserved" true (Sys.file_exists session_dir)))
     [ `Remove; `Dead; `Purge ]
 ;;

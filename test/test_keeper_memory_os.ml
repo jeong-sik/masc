@@ -3193,7 +3193,7 @@ let test_librarian_provider_slot_gate_caps_at_capacity () =
     Eio.Fiber.fork ~sw (fun () ->
       first
       := Some
-           (Exact_flow_scope.with_librarian_provider_slot
+           (Exact_flow_scope.with_librarian_execution_slot
               scope
               ~capacity:1
               (fun () ->
@@ -3202,7 +3202,7 @@ let test_librarian_provider_slot_gate_caps_at_capacity () =
                  "ran")));
     Eio.Promise.await entered;
     let second =
-      Exact_flow_scope.with_librarian_provider_slot
+      Exact_flow_scope.with_librarian_execution_slot
         scope
         ~capacity:1
         (fun () -> "ran")
@@ -3229,7 +3229,7 @@ let test_librarian_provider_slot_gate_disabled_at_zero () =
     Eio.Fiber.fork ~sw (fun () ->
       first
       := Some
-           (Exact_flow_scope.with_librarian_provider_slot
+           (Exact_flow_scope.with_librarian_execution_slot
               scope
               ~capacity:0
               (fun () ->
@@ -3238,7 +3238,7 @@ let test_librarian_provider_slot_gate_disabled_at_zero () =
                  "ran")));
     Eio.Promise.await entered;
     let second =
-      Exact_flow_scope.with_librarian_provider_slot
+      Exact_flow_scope.with_librarian_execution_slot
         scope
         ~capacity:0
         (fun () -> "ran")
@@ -3266,7 +3266,7 @@ let test_librarian_provider_slot_gate_is_per_keeper () =
     Eio.Fiber.fork ~sw (fun () ->
       first
       := Some
-           (Exact_flow_scope.with_librarian_provider_slot
+           (Exact_flow_scope.with_librarian_execution_slot
               scope_a
               ~capacity:1
               (fun () ->
@@ -3275,7 +3275,7 @@ let test_librarian_provider_slot_gate_is_per_keeper () =
                  "ran")));
     Eio.Promise.await entered;
     let other_keeper =
-      Exact_flow_scope.with_librarian_provider_slot
+      Exact_flow_scope.with_librarian_execution_slot
         scope_b
         ~capacity:1
         (fun () -> "ran")

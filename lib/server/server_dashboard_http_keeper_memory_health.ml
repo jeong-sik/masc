@@ -56,7 +56,9 @@ let near_duplicate_threshold = 0.0
 let provider_slot_busy_threshold = 0.0
 
 let provider_slot_busy_metric = Keeper_metrics.(to_string MemoryLaneProviderSlotBusy)
-let provider_slot_busy_site = Keeper_librarian_runtime.memory_os_librarian_provider_slot_site
+let provider_slot_busy_site =
+  Keeper_librarian_runtime.memory_os_librarian_execution_slot_site
+;;
 
 let alert_code_to_string = function
   | Ttl_expired_on_disk -> "ttl_expired_on_disk"

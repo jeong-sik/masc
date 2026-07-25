@@ -62,13 +62,23 @@ type exact_execution_guard =
   }
 
 type post_success_terminalizer =
-  { keeper_name : string
+  { base_path : string
+  ; keeper_name : string
+  ; flow_scope : Keeper_exact_flow_scope.t
   ; exact_execution_guard : exact_execution_guard
   ; attempt_observation : attempt_observation
   ; terminalization_mutex : Eio.Mutex.t
   ; mutable canonical_terminal :
       (Keeper_event_queue_state.exact_execution_terminal * unit Eio.Promise.t) option
   }
+
+type 'a post_success_boundary =
+  | Post_success_current of 'a
+  | Post_success_owner_unregistered_deferred
+
+type post_success_terminalization =
+  | Terminalized of Keeper_event_queue_state.exact_execution_terminal
+  | Terminalization_owner_unregistered_deferred
 
 type completed_plan =
   { plan : compaction_plan
@@ -471,7 +481,27 @@ let log_terminal_quarantine_failure
   | _ -> ()
 ;;
 
-let terminalize_post_success terminalizer cause =
+let with_current_post_success terminalizer callback =
+  match
+    Keeper_exact_flow_scope.with_current
+      terminalizer.flow_scope
+      ~registered_lane_id:
+        (fun () ->
+           match
+             Keeper_registry.get
+               ~base_path:terminalizer.base_path
+               terminalizer.keeper_name
+           with
+           | Some entry -> Some (Keeper_lane.id entry.lane)
+           | None -> None)
+      callback
+  with
+  | Keeper_exact_flow_scope.Current value -> Post_success_current value
+  | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+    Post_success_owner_unregistered_deferred
+;;
+
+let terminalize_post_success_current terminalizer cause =
   let role =
     Eio.Cancel.protect
     @@ fun () ->
@@ -530,6 +560,16 @@ let terminalize_post_success terminalizer cause =
   | `Await (terminal, completion) ->
     Eio.Promise.await completion;
     terminal
+;;
+
+let terminalize_post_success terminalizer cause =
+  match
+    with_current_post_success terminalizer (fun () ->
+      terminalize_post_success_current terminalizer cause)
+  with
+  | Post_success_current terminal -> Terminalized terminal
+  | Post_success_owner_unregistered_deferred ->
+    Terminalization_owner_unregistered_deferred
 ;;
 
 let exact_execution_evidence (flow_success : Exact_output.flow_success) =
@@ -689,8 +729,9 @@ let prepare_lane ~base_path ~keeper_name ~registry ~lane_id ~units =
            ~lane_id
            ~units)
   with
-  | Ok result -> result
-  | Error _ -> Error Exact_execution_context_unavailable
+  | Keeper_exact_flow_scope.Current result -> result
+  | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+    Error Exact_execution_context_unavailable
 ;;
 
 type exact_flow_callback_failure =
@@ -813,8 +854,9 @@ let execute_prepared_lane_current
           bound_observation := Some observation;
           Ok ())
     with
-    | Error _ -> Error Owner_unregistered_deferred
-    | Ok result -> result
+    | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+      Error Owner_unregistered_deferred
+    | Keeper_exact_flow_scope.Current result -> result
   in
   let before_advance ~failed ~failure:_ ~next:_ =
     match
@@ -826,8 +868,9 @@ let execute_prepared_lane_current
          bound_observation := None;
          Ok ())
     with
-    | Error _ -> Error Owner_unregistered_deferred
-    | Ok result -> result
+    | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+      Error Owner_unregistered_deferred
+    | Keeper_exact_flow_scope.Current result -> result
   in
   let execution =
     try
@@ -927,7 +970,9 @@ let execute_prepared_lane_current
             { plan
             ; exact_execution_evidence = exact_execution_evidence flow_success
             ; post_success_terminalizer =
-                { keeper_name
+                { base_path = prepared_lane.base_path
+                ; keeper_name
+                ; flow_scope = prepared_lane.flow_scope
                 ; exact_execution_guard
                 ; attempt_observation = observation
                 ; terminalization_mutex = Eio.Mutex.create ()
@@ -936,8 +981,9 @@ let execute_prepared_lane_current
             }))
   in
   match with_current settle_execution with
-  | Error _ -> Error Exact_owner_unregistered_deferred
-  | Ok result -> result
+  | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+    Error Exact_owner_unregistered_deferred
+  | Keeper_exact_flow_scope.Current result -> result
 ;;
 
 let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepared_lane =
@@ -950,8 +996,9 @@ let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepar
            ~keeper_name:prepared_lane.keeper_name)
       (fun () -> ())
   with
-  | Error _ -> Error Exact_owner_unregistered_deferred
-  | Ok () ->
+  | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+    Error Exact_owner_unregistered_deferred
+  | Keeper_exact_flow_scope.Current () ->
     execute_prepared_lane_current
       ~keeper_name
       ~net

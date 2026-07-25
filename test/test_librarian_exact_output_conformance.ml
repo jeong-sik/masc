@@ -86,24 +86,32 @@ let extract_with_exact_output
       ~generation
       input
   =
-  ensure_registered_keeper keeper_id;
-  Librarian_runtime.extract_with_exact_output
-    ?clock
-    ~base_path:exact_flow_base_path
-    ~net
-    ~keeper_id
-    ~generation
-    input
+  match
+    extract_with_exact_output_classified
+      ?clock
+      ~net
+      ~keeper_id
+      ~generation
+      input
+  with
+  | Ok episode -> Ok episode
+  | Error error ->
+    Error (Librarian_runtime.extraction_error_to_string error)
 ;;
 
 let extract_and_append_with_exact_output ?clock ~net ~keeper_id input =
   ensure_registered_keeper keeper_id;
-  Librarian_runtime.extract_and_append_with_exact_output
-    ?clock
-    ~base_path:exact_flow_base_path
-    ~net
-    ~keeper_id
-    input
+  match
+    Librarian_runtime.extract_and_append_with_exact_output_classified
+      ?clock
+      ~base_path:exact_flow_base_path
+      ~net
+      ~keeper_id
+      input
+  with
+  | Ok episode -> Ok episode
+  | Error error ->
+    Error (Librarian_runtime.extraction_error_to_string error)
 ;;
 
 let text_message text =
@@ -334,7 +342,9 @@ let test_domain_invalid_output_does_not_fail_over () =
           ~generation:1
           (librarian_input "trace-domain-invalid")
       with
-      | Error (Librarian_runtime.Provider_unparseable_response _) ->
+      | Error error
+        when Librarian_runtime.extraction_error_kind error
+             = Librarian_runtime.Domain_output_invalid ->
         Alcotest.(check int)
           "first exact candidate dispatched once"
           1
@@ -456,7 +466,9 @@ let test_missing_clock_fails_before_dispatch () =
           ~generation:1
           (librarian_input "trace-clock-guard")
       with
-      | Error Librarian_runtime.Provider_clock_unavailable ->
+      | Error error
+        when Librarian_runtime.extraction_error_kind error
+             = Librarian_runtime.Execution_clock_unavailable ->
         Alcotest.(check int) "missing clock dispatched nothing" 0 (Fixture.post_count server)
       | Error error ->
         Alcotest.failf
@@ -539,6 +551,72 @@ let test_zero_dispatch_failure_advances_to_next_candidate () =
           (exact_journal_state ~keeper_id))))
 ;;
 
+let test_owner_replacement_during_post_defers_settlement () =
+  with_prompt_registry (fun () ->
+  with_temp_keepers_dir (fun _ ->
+    run_eio (fun ~sw ~net ~clock ->
+      let keeper_id = "librarian-owner-replaced-keeper" in
+      ensure_registered_keeper keeper_id;
+      let old_entry =
+        match Keeper_registry.get ~base_path:exact_flow_base_path keeper_id with
+        | Some entry -> entry
+        | None -> Alcotest.fail "librarian owner was not registered"
+      in
+      let replace_owner () =
+        (match Keeper_registry.unregister_exact old_entry with
+         | Keeper_registry.Exact_unregistered -> ()
+         | _ -> Alcotest.fail "librarian old owner was not fenced");
+        let replacement_meta =
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc
+              [ "name", `String keeper_id
+              ; "trace_id", `String "trace-librarian-owner-replacement"
+              ])
+          |> Result.get_ok
+        in
+        ignore
+          (Keeper_registry.register_offline
+             ~base_path:exact_flow_base_path
+             keeper_id
+             replacement_meta)
+      in
+      let server =
+        Fixture.start_server
+          ~on_request_before_reply:replace_owner
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (Fixture.openai_response valid_output))
+      in
+      publish_lane
+        [ { id = "librarian-owner-replaced"; base_url = server.base_url } ];
+      match
+        extract_with_exact_output_classified
+          ~clock
+          ~net
+          ~keeper_id
+          ~generation:1
+          (librarian_input "trace-librarian-owner-replaced")
+      with
+      | Error error
+        when Librarian_runtime.extraction_error_kind error
+             = Librarian_runtime.Exact_setup_failure ->
+        Alcotest.(check int)
+          "network dispatch completed once"
+          1
+          (Fixture.post_count server);
+        Alcotest.(check string)
+          "stale generation commits no success settlement"
+          "candidate_bound"
+          (exact_journal_state ~keeper_id)
+      | Error error ->
+        Alcotest.failf
+          "owner replacement returned wrong typed boundary: %s"
+          (Librarian_runtime.extraction_error_to_string error)
+      | Ok _ ->
+        Alcotest.fail "replaced librarian owner committed stale success")))
+;;
+
 let () =
   Alcotest.run
     "librarian_exact_output_conformance"
@@ -575,6 +653,10 @@ let () =
             "zero-dispatch failure advances to next candidate"
             `Quick
             test_zero_dispatch_failure_advances_to_next_candidate
+        ; Alcotest.test_case
+            "owner replacement during POST defers settlement"
+            `Quick
+            test_owner_replacement_during_post_defers_settlement
         ] )
     ]
 ;;

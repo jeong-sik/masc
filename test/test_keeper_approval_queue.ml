@@ -2204,8 +2204,8 @@ let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
         with
         | Error (AQ.Summary_owner_retirement_exact_attempt_unsettled _) -> ()
        | Error error ->
-          fail (AQ.summary_owner_retirement_error_to_string error)
-        | Ok _ -> fail "bound owner retirement succeeded");
+          Alcotest.fail (AQ.summary_owner_retirement_error_to_string error)
+        | Ok _ -> Alcotest.fail "bound owner retirement succeeded");
        (match AQ.get_pending_entry ~id:bound with
         | Some
             { summary_status = AQ.Summary_pending
@@ -2213,10 +2213,12 @@ let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
             ; _
             } ->
           check string "bound call unchanged" "call" binding.call_id
-        | Some _ | None -> fail "bound entry changed on failed retirement");
+        | Some _ | None ->
+          Alcotest.fail "bound entry changed on failed retirement");
        (match AQ.get_pending_entry ~id:sibling with
         | Some { summary_status = AQ.Summary_pending; _ } -> ()
-        | Some _ | None -> fail "blocked retirement partially mutated");
+        | Some _ | None ->
+          Alcotest.fail "blocked retirement partially mutated");
        (match
           AQ.retire_summary_owner
             ~base_path

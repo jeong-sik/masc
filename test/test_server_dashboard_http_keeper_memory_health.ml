@@ -253,7 +253,7 @@ let test_reports_provider_slot_busy_metric_as_alert () =
     KeeperMetrics.(to_string MemoryLaneProviderSlotBusy)
     ~labels:
       [ "keeper", keeper_id
-      ; "site", LibrarianRuntime.memory_os_librarian_provider_slot_site
+      ; "site", LibrarianRuntime.memory_os_librarian_execution_slot_site
       ]
     ~delta:3.0
     ();

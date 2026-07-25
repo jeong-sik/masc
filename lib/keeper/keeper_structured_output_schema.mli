@@ -70,17 +70,6 @@ val anti_rationalization_reviewer_provider_config
     rejected json_object-only providers, leaving every task nonterminal
     (2026-07-21 live incident). *)
 
-val apply_schema_json_mode_or_prompt_tier
-  :  log_label:string
-  -> Yojson.Safe.t
-  -> Llm_provider.Provider_config.t
-  -> Llm_provider.Provider_config.t
-(** Three-tier response-format selection (#25266): enforce [schema] when the
-    provider supports strict json_schema; else set JSON mode ([JsonMode]) when
-    the provider supports json_object; else prompt only. Use ONLY where the
-    prompt already states the schema and the parser validates the response —
-    the json_object tier drops the strict guarantee. *)
-
 val validate_provider_config
   :  Yojson.Safe.t
   -> Llm_provider.Provider_config.t
@@ -92,14 +81,6 @@ val provider_config_accepts_schema
   -> Llm_provider.Provider_config.t
   -> bool
 (** True when [validate_provider_config] accepts [provider_cfg]. *)
-
-val provider_config_accepts_schema_or_json_mode
-  :  Yojson.Safe.t
-  -> Llm_provider.Provider_config.t
-  -> bool
-(** True when the provider can enforce [schema] (strict) OR honor JSON mode
-    (#25266). Eligibility gate for structured lanes that have a
-    json_object fallback; a provider with neither capability is rejected. *)
 
 val for_deterministic_subcall
   :  max_tokens:int option
@@ -125,5 +106,4 @@ val for_deterministic_subcall
     room than a per-turn summary); everything else is not.
 
     This does NOT apply the response-format/schema tier — sites differ there
-    and compose {!without_response_format} or
-    {!apply_schema_json_mode_or_prompt_tier} themselves. *)
+    and compose {!without_response_format} themselves. *)

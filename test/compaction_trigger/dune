@@ -1,0 +1,12 @@
+; Deliberately NOT in test/dune. That stanza links masc_test_deps, which pulls the
+; agent_sdk chain; this leaf needs only yojson, so keeping it separate lets the
+; codec be built and run while the shared opam switch holds a different agent_sdk
+; than the pin. Same reason lib/compaction_trigger/dune stays a leaf.
+
+(include_subdirs no)
+
+(test
+ (name test_compaction_trigger_codec)
+ (flags
+  (:standard -w +4))
+ (libraries masc_compaction_trigger yojson))

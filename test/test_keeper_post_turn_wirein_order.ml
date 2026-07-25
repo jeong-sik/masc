@@ -1432,7 +1432,15 @@ let run_post_install_domain_valid_failure ~name domain_valid_failure =
         | Some waiter -> Eio.Promise.await waiter
         | None -> fail "post-install failure did not capture the commit waiter");
        (match !outer_waiter with
-        | Some waiter -> ignore (Eio.Promise.await waiter)
+        | Some waiter ->
+          (match Eio.Promise.await waiter with
+           | Post_turn.Commit_completion_failed
+               { committed = Some _; _ } ->
+             ()
+           | Post_turn.Commit_completion_failed { committed = None; _ }
+           | Post_turn.Commit_completion_committed _
+           | Post_turn.Commit_completion_rejected _ ->
+             fail "outer waiter did not retain the durable failed commit")
         | None -> fail "post-install failure did not capture the outer waiter");
        let snapshot = Post_turn.For_testing.post_success_snapshot prepared in
        check bool

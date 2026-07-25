@@ -56,26 +56,15 @@ type publication_error =
  
 type selected_slot =
   { slot_id : string
-  ; target : Exact_output.selected_target
-  }
-
-type unavailable_slot =
-  { position : int
-  ; slot_id : string
-  ; cause : Exact_output.target_selection_error
+  ; admitted_target : Exact_output.admitted_target
   }
 
 type resolved_lane =
-  { selected_slots : selected_slot list
-  ; unavailable_slots : unavailable_slot list
-  }
+  { selected_slots : selected_slot list }
 
 type lane_resolution_error =
   | Exact_lane_unconfigured of { lane_id : string }
-  | No_usable_lane_slots of
-      { lane_id : string
-      ; unavailable_slots : unavailable_slot list
-      }
+  | No_admitted_lane_slots of { lane_id : string }
 
 type prepared_replacement =
   { base : t option
@@ -132,7 +121,7 @@ let admit_lane_slots resolver_snapshot admitted_by_id
           (position + 1)
           (String_set.add slot_id seen)
           admitted_by_id
-          ({ slot_id; admitted_target } :: admitted_slots)
+          (({ slot_id; admitted_target } : admitted_slot) :: admitted_slots)
           rest
   in
   match lane.slot_ids with
@@ -355,29 +344,18 @@ let resolve_lane registry ~lane_id =
   with
   | None -> Error (Exact_lane_unconfigured { lane_id })
   | Some lane ->
-    let rec loop position selected_slots unavailable_slots = function
-      | [] ->
-        let selected_slots = List.rev selected_slots in
-        let unavailable_slots = List.rev unavailable_slots in
-        if selected_slots = []
-        then Error (No_usable_lane_slots { lane_id; unavailable_slots })
-        else Ok { selected_slots; unavailable_slots }
-      | slot :: rest ->
-        (match Exact_output.resolve_target slot.admitted_target with
-         | Ok target ->
-           loop
-             (position + 1)
-             ({ slot_id = slot.slot_id; target } :: selected_slots)
-             unavailable_slots
-             rest
-         | Error cause ->
-           loop
-             (position + 1)
-             selected_slots
-             ({ position; slot_id = slot.slot_id; cause } :: unavailable_slots)
-             rest)
+    let selected_slots =
+      List.map
+        (fun (slot : admitted_slot) ->
+           ({ slot_id = slot.slot_id
+            ; admitted_target = slot.admitted_target
+            }
+             : selected_slot))
+        lane.slots
     in
-    loop 1 [] [] lane.slots
+    if selected_slots = []
+    then Error (No_admitted_lane_slots { lane_id })
+    else Ok { selected_slots }
 ;;
 
 let publication_error_to_string = function
@@ -428,41 +406,11 @@ let publication_error_to_string = function
       target_ref
 ;;
 
-let unavailable_slot_to_string { position; slot_id; cause } =
-  let detail =
-    match cause with
-    | Exact_output.Missing_target_credential
-        { target_ref; environment_variable } ->
-      Printf.sprintf
-        "target %S requires environment variable %s"
-        target_ref
-        environment_variable
-    | Exact_output.Target_credential_invalid
-        { target_ref; environment_variable } ->
-      Printf.sprintf
-        "target %S has an invalid credential in environment variable %s"
-        target_ref
-        environment_variable
-    | Exact_output.Target_credential_read_failed
-        { target_ref; environment_variable } ->
-      Printf.sprintf
-        "target %S credential environment variable %s could not be read"
-        target_ref
-        environment_variable
-  in
-  Printf.sprintf "exact-output slot %d (%S): %s" position slot_id detail
-;;
-
 let lane_resolution_error_to_string = function
   | Exact_lane_unconfigured { lane_id } ->
     Printf.sprintf "exact-output lane %S is not configured" lane_id
-  | No_usable_lane_slots { lane_id; unavailable_slots } ->
-    Printf.sprintf
-      "exact-output lane %S has no usable slots: %s"
-      lane_id
-      (unavailable_slots
-       |> List.map unavailable_slot_to_string
-       |> String.concat "; ")
+  | No_admitted_lane_slots { lane_id } ->
+    Printf.sprintf "exact-output lane %S has no admitted slots" lane_id
 ;;
 
 let reservation_error_to_string = function

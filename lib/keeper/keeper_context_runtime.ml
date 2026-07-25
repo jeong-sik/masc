@@ -88,15 +88,6 @@ type post_turn_lifecycle = Keeper_post_turn.post_turn_lifecycle = {
   message_count : int;
 }
 
-type compaction_recovery = Keeper_post_turn.compaction_recovery = {
-  checkpoint : Agent_sdk.Checkpoint.t;
-  checkpoint_installation : Keeper_checkpoint_store.checkpoint_installation;
-  trigger : Compaction_trigger.t;
-  evidence : Keeper_compaction_evidence.t;
-  turn_generation : int;
-  projection_target : Keeper_compaction_projection_target.committed;
-}
-
 type max_context_resolution = {
   requested_override : int option;
   primary_budget : int;

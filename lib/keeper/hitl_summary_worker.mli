@@ -1,19 +1,24 @@
-(** MASC-owned HITL domain judgment over the provider-neutral OAS exact-output
+(** MASC-owned HITL domain judgment over the opaque-runtime OAS exact-output
     flow. MASC freezes the request and domain schema, validates the returned
     judgment, and owns approval queue durability. OAS alone owns candidate
     admission, attempt allocation, execution, failover, receipts, and
     provenance. *)
 
-val readiness : unit -> (unit, string) result
-(** Verify that the Gate prompt and the registry-owned [hitl_auto_judge] exact
-    lane are currently available and that OAS admits at least one candidate for
-    the HITL output requirement. No provider/model/runtime scalar is read. *)
+val snapshot_topology_readiness : unit -> (unit, string) result
+(** Verify only prompt availability and that the registry-owned
+    [hitl_auto_judge] topology can be frozen as an OAS exact-output snapshot.
+    This is not credential, wire, or output admission. *)
 
 exception Exact_terminalization_persistence_failed of string
+
+type execution_boundary =
+  | Executed
+  | Deferred_unregistered
 
 type finish_outcome =
   | Conclusive_terminalization
   | Terminalization_persistence_uncertain
+  | Owner_unregistered_deferred
 
 val spawn
   :  sw:Eio.Switch.t
@@ -62,7 +67,7 @@ module For_testing : sig
     -> ?clock:_ Eio.Time.clock
     -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
     -> prepared_flow
-    -> unit
+    -> execution_boundary
 
   type strict_snapshot_writer =
     Keeper_approval_queue.For_testing.strict_snapshot_writer
@@ -71,11 +76,13 @@ module For_testing : sig
     :  ?bind_writer:strict_snapshot_writer
     -> ?release_writer:strict_snapshot_writer
     -> ?complete_writer:strict_snapshot_writer
+    -> ?quarantine_writer:strict_snapshot_writer
+    -> ?after_bind:(unit -> unit)
     -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
     -> ?clock:_ Eio.Time.clock
     -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
     -> prepared_flow
-    -> unit
+    -> execution_boundary
   (** The same production callbacks with only the queue's strict atomic writer
       replaced, so durability-uncertainty tests exercise the real OAS flow. *)
 
@@ -83,6 +90,8 @@ module For_testing : sig
     :  ?bind_writer:strict_snapshot_writer
     -> ?release_writer:strict_snapshot_writer
     -> ?complete_writer:strict_snapshot_writer
+    -> ?quarantine_writer:strict_snapshot_writer
+    -> ?after_bind:(unit -> unit)
     -> sw:Eio.Switch.t
     -> entry:Keeper_approval_queue.pending_approval
     -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)

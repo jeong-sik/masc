@@ -350,7 +350,7 @@ check_boundary() {
   check_lane_binding "${FLOW_ML}" \
     || fail "Board attention exact lane binding contract failed"
   require_once "Exact_output.make_flow_candidate" "${FLOW_ML}"
-  require_once "Exact_output.admit_flow" "${FLOW_ML}"
+  require_once "Exact_output.snapshot_flow" "${FLOW_ML}"
   require_once "Exact_output.start_flow" "${FLOW_ML}"
   require_once "Exact_output.execute_flow_once" "${FLOW_ML}"
   require_once "Exact_flow.prepare" "${WORKER_ML}"
@@ -378,8 +378,8 @@ check_boundary() {
     'Keeper_board_attention_failure|attempt_failure|retryable|Retry\.|retry_after|retry_deadline|is_retryable|Partition_deferred|(^|[^[:alnum:]_])defer([^[:alnum:]_]|$)|release_due_provider_retries|next_provider_retry_deadline|recover_claim_after_lane_abort' \
     "Board attention execution must not regain local retry or defer authority"
   forbid_pattern \
-    'Exact_output\.(receipt_phase|receipt_dispatch_count)|receipt_(phase|dispatch_count)|dispatch_count|exact_execution_failed_before_dispatch' \
-    "Board attention execution must not inspect OAS receipt phase or dispatch count"
+    'Exact_output\.(receipt_phase|receipt_dispatch_count|candidate_rejection_(disposition|phase|dispatch_count))|receipt_(phase|dispatch_count)|candidate_rejection_(disposition|phase|dispatch_count)|dispatch_count|exact_execution_failed_before_dispatch' \
+    "Board attention execution must not inspect OAS receipt or candidate-rejection phase, disposition, or dispatch count"
   forbid_pattern \
     'Judgment_blocked|Claim_released|Claim_already_transitioned|Legacy_|legacy_failure' \
     "retired Board attention failure or claim-recovery surface returned"
@@ -420,6 +420,26 @@ self_test() (
 
   MASC_BOARD_ATTENTION_BOUNDARY_ROOT="${fixture}" \
     bash "${BASH_SOURCE[0]}" --check >/dev/null
+
+  printf '%s\n' 'let _ = Exact_flow.prepare' \
+    >>"${fixture}/lib/keeper/keeper_board_attention_worker.ml"
+  if
+    MASC_BOARD_ATTENTION_BOUNDARY_ROOT="${fixture}" \
+      bash "${BASH_SOURCE[0]}" --check >/dev/null 2>&1
+  then
+    fail "self-test accepted duplicate Board prepare surface"
+  fi
+  cp "${worker_backup}" "${fixture}/lib/keeper/keeper_board_attention_worker.ml"
+
+  printf '%s\n' 'let _ = Exact_flow.execute' \
+    >>"${fixture}/lib/keeper/keeper_board_attention_worker.ml"
+  if
+    MASC_BOARD_ATTENTION_BOUNDARY_ROOT="${fixture}" \
+      bash "${BASH_SOURCE[0]}" --check >/dev/null 2>&1
+  then
+    fail "self-test accepted duplicate Board execute surface"
+  fi
+  cp "${worker_backup}" "${fixture}/lib/keeper/keeper_board_attention_worker.ml"
 
   cat >>"${fixture}/lib/keeper/keeper_board_attention_worker.ml" <<'EOF'
 (*
@@ -495,6 +515,7 @@ EOF
     'let defer value = value' \
     'let _ = Exact_output.receipt_phase' \
     'let _ = Exact_output.receipt_dispatch_count' \
+    'let _ = Exact_output.candidate_rejection_disposition' \
     'let _ = Exact_output.admit_target_ref' \
     'let _ = Exact_output.resolve_target' \
     'let _ = Exact_output.receipt_target_identity' \
@@ -639,7 +660,7 @@ PY
   fi
 
   printf '%s\n' \
-    '[board-attention-exact-flow-boundary:self-test] clean=pass quoted=pass lane-decoys=pass retired-decoys=pass unrelated=pass lane=fail composed-lane=fail duplicate-lane=fail candidate=fail quarantine=fail config=fail forbidden=fail pricing=fail legacy=fail missing=fail'
+    '[board-attention-exact-flow-boundary:self-test] clean=pass prepare=fail execute=fail quoted=pass lane-decoys=pass retired-decoys=pass unrelated=pass lane=fail composed-lane=fail duplicate-lane=fail candidate=fail quarantine=fail config=fail forbidden=fail pricing=fail legacy=fail missing=fail'
 )
 
 case "${1:-}" in

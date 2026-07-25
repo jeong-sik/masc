@@ -21,7 +21,7 @@ serialized within that Keeper's memory lane. Fibers are owned by a structured
 `Eio.Switch`; cancellation records the unconsumed job so it can be resumed
 rather than silently discarded.
 
-There is no cross-Keeper provider slot, fixed wait window, environment-driven
+There is no cross-Keeper execution slot, fixed wait window, environment-driven
 capacity gate, or inline fallback that bypasses the lane.
 
 ## Verification

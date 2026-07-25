@@ -437,7 +437,8 @@ let handle_gate_mode_body state operator_name request reqd body_str =
          let config = Mcp_server.workspace_config state in
          let readiness =
            match mode with
-           | Keeper_gate_mode.Auto_judge -> Hitl_summary_worker.readiness ()
+           | Keeper_gate_mode.Auto_judge ->
+             Hitl_summary_worker.snapshot_topology_readiness ()
            | Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow -> Ok ()
          in
          (match readiness with

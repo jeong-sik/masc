@@ -9,6 +9,8 @@ module Compact_policy = Masc.Keeper_compact_policy
 module Exact_fixture = Compaction_exact_output_fixture
 module Schema = Masc.Keeper_structured_output_schema
 
+let exact_flow_base_path = "/tmp/masc-compaction-clockless"
+
 let compaction_decision ?summary unit_index action =
   `Assoc
     [ Schema.compaction_plan_field_unit_index, `Int unit_index
@@ -127,11 +129,18 @@ let test_domain_invalid_and_clockless_flow_failure_are_terminal () =
     (fun () ->
       init_runtime_fixture ();
       let meta = make_meta () in
+      Masc.Keeper_registry.For_testing.clear ();
+      ignore
+        (Masc.Keeper_registry.register_offline
+           ~base_path:exact_flow_base_path
+           meta.name
+           meta);
       let context =
         Masc.Keeper_context_core.context_of_oas_checkpoint (make_checkpoint ())
       in
       let decision () =
         Compact_policy.compact_for_request_typed
+          ~base_path:exact_flow_base_path
           ~meta
           ~trigger:Compaction_trigger.Manual
           ~exact_execution_guard:Exact_fixture.permissive_exact_execution_guard

@@ -2078,16 +2078,17 @@ let test_cross_verifier_runtime_routing () =
     | Ok _ -> failf "unknown [runtime].cross_verifier id must be rejected at load"
     | Error _ -> ());
   (* The verdict travels as a report_review_verdict tool call and no wire response
-     format is requested (anti_rationalization.ml:243-248), so the requirement is
-     tool calling. local.chat declares no capabilities, so it is still refused —
-     for the capability the consumer actually uses. *)
+     format is requested (anti_rationalization.ml:243-248), so the JSON-mode
+     requirement was on the wrong axis. The right one — can this model call a tool
+     — is not declarable: Runtime_schema.model_capabilities carries the shapes of
+     tool CHOICE, not tool support. A candidate that cannot serve the tool channel
+     is refused by OAS at dispatch instead, which is failover-eligible. So a model
+     declaring nothing now resolves for this route. *)
   with_temp_runtime_toml (base ^ "cross_verifier = \"local.chat\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
-    | Ok _ ->
-      failf "[runtime].cross_verifier must reject models without tool support"
     | Error msg ->
-      check bool "error names the tool capability" true
-        (String_util.contains_substring msg "supports-tools"))
+      failf "[runtime].cross_verifier must accept a capability-free model: %s" msg
+    | Ok _ -> ())
 
 let test_memory_os_consolidation_runtime_routing () =
   with_fake_runtime_model_catalog @@ fun () ->
@@ -2267,7 +2268,6 @@ let judge_lane_base =
    max-context = 1024\n\
    \n\
    [models.judge.capabilities]\n\
-   supports-tools = true\n\
    supports-response-format-json = true\n\
    supports-structured-output = true\n\
    \n\
@@ -2276,7 +2276,6 @@ let judge_lane_base =
    max-context = 1024\n\
    \n\
    [models.judge2.capabilities]\n\
-   supports-tools = true\n\
    supports-response-format-json = true\n\
    supports-structured-output = true\n\
    \n\
@@ -2285,7 +2284,6 @@ let judge_lane_base =
    max-context = 1024\n\
    \n\
    [models.jsononly.capabilities]\n\
-   supports-tools = true\n\
    supports-response-format-json = true\n\
    supports-structured-output = false\n\
    \n\
@@ -2437,19 +2435,19 @@ let test_cross_verifier_lane_target () =
        strategy = \"ordered\"\n\
        candidates = [\"local.judge\", \"local.chat\"]\n"
   in
+  (* Formerly rejected because local.chat declares no JSON mode. The route requests
+     no wire format, so the lane resolves and OAS refuses an unusable candidate at
+     dispatch instead — pre-dispatch and failover-eligible. *)
   with_temp_runtime_toml json_incapable_lane (fun path ->
     match Runtime.load_list ~config_path:path with
-    | Ok _ ->
-      failf
-        "cross_verifier lane with a candidate lacking tool support must be \
-         rejected"
-    | Error msg ->
-      check bool "error names the route" true
-        (String_util.contains_substring msg "cross_verifier");
-      check bool "error names the incapable candidate" true
-        (String_util.contains_substring msg "local.chat");
-      check bool "error names the missing capability" true
-        (String_util.contains_substring msg "supports-tools"))
+    | Error msg -> failf "cross_verifier lane should resolve: %s" msg
+    | Ok (_, _, _, _, _, cross_verifier, _, lanes) ->
+      check (option string) "cross_verifier keeps the lane id" (Some "verifiers")
+        cross_verifier;
+      check bool "verifiers lane is materialized" true
+        (List.exists
+           (fun lane -> String.equal (Runtime_lane.id lane) "verifiers")
+           lanes))
 
 let test_save_config_text_refreshes_cross_verifier_runtime () =
   with_fake_runtime_model_catalog @@ fun () ->

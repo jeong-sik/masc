@@ -1315,7 +1315,7 @@ let test_prepare_commit_source_cas () =
        fail "stale prepared value did not reach canonical rejection"))
 ;;
 
-let test_post_install_failure_resolves_commit_waiter () =
+let run_post_install_domain_valid_failure ~name domain_valid_failure =
   Eio_main.run @@ fun env ->
   Masc_test_deps.init_eio_clock env;
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1328,7 +1328,7 @@ let test_post_install_failure_resolves_commit_waiter () =
       Runtime.For_testing.restore runtime_snapshot;
       Masc_test_deps.cleanup_test_workspace base_path)
     (fun () ->
-       let meta = make_meta ~name:"post-install-waiter" () in
+       let meta = make_meta ~name () in
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
        init_runtime_fixture ();
@@ -1364,7 +1364,7 @@ let test_post_install_failure_resolves_commit_waiter () =
            ~clock:(Eio.Stdenv.clock env)
            (Exact_fixture.Reply (summarize_response "shorter"))
        in
-       publish_exact_fixture ~source:"post-install waiter" exact_server;
+       publish_exact_fixture ~source:name exact_server;
        ensure_registered_keeper ~base_path:config.base_path meta;
        let quarantine_calls = ref 0 in
        let exact_execution_guard : Summarizer.exact_execution_guard =
@@ -1393,6 +1393,7 @@ let test_post_install_failure_resolves_commit_waiter () =
              (Post_turn.compaction_recovery_error_to_string error)
        in
        let internal_waiter = ref None in
+       let outer_waiter = ref None in
        let outcome =
          Post_turn.For_testing.commit_prepared_compaction_with_history
            ~after_checkpoint_installed:(fun () ->
@@ -1401,12 +1402,20 @@ let test_post_install_failure_resolves_commit_waiter () =
              with
              | Summarizer.Commit_claim_in_progress waiter ->
                internal_waiter := Some waiter;
-               raise (Failure "injected post-install finalization failure")
+               (match Post_turn.commit_prepared_compaction prepared with
+                | Post_turn.Commit_in_progress waiter ->
+                  outer_waiter := Some waiter
+                | Post_turn.Committed _
+                | Post_turn.Commit_failed _
+                | Post_turn.Already_committed _
+                | Post_turn.Already_rejected _ ->
+                  fail "installed commit did not expose its outer waiter")
              | Summarizer.Commit_claim_acquired
              | Summarizer.Commit_claim_already_committed
              | Summarizer.Commit_claim_rejected _
              | Summarizer.Commit_claim_owner_unregistered_deferred ->
                fail "installed commit did not expose its affine waiter")
+           ~domain_valid_failure
            ~save_oas_history:(fun ~session_dir:_ _ -> ())
            prepared
        in
@@ -1422,6 +1431,9 @@ let test_post_install_failure_resolves_commit_waiter () =
        (match !internal_waiter with
         | Some waiter -> Eio.Promise.await waiter
         | None -> fail "post-install failure did not capture the commit waiter");
+       (match !outer_waiter with
+        | Some waiter -> ignore (Eio.Promise.await waiter)
+        | None -> fail "post-install failure did not capture the outer waiter");
        let snapshot = Post_turn.For_testing.post_success_snapshot prepared in
        check bool
          "post-install failure closes the affine commit phase"
@@ -1442,7 +1454,38 @@ let test_post_install_failure_resolves_commit_waiter () =
        check int
          "post-install finalization performs no provider redispatch"
          1
-         (Exact_fixture.post_count exact_server))
+         (Exact_fixture.post_count exact_server);
+       (match
+          Post_turn.For_testing.claim_post_success_commit prepared
+        with
+        | Summarizer.Commit_claim_already_committed -> ()
+        | Summarizer.Commit_claim_acquired
+        | Summarizer.Commit_claim_in_progress _
+        | Summarizer.Commit_claim_rejected _
+        | Summarizer.Commit_claim_owner_unregistered_deferred ->
+          fail "closed Domain_valid failure admitted another claimant");
+       (match Post_turn.commit_prepared_compaction prepared with
+        | Post_turn.Commit_failed { committed = Some _; _ } -> ()
+        | Post_turn.Commit_failed { committed = None; _ }
+        | Post_turn.Committed _
+        | Post_turn.Commit_in_progress _
+        | Post_turn.Already_committed _
+        | Post_turn.Already_rejected _ ->
+          fail "closed Domain_valid failure lost its canonical outer result"))
+;;
+
+let test_post_install_domain_valid_error_resolves_waiters () =
+  run_post_install_domain_valid_failure
+    ~name:"post-install-domain-valid-error"
+    (Post_turn.For_testing.Domain_valid_error
+       "injected Domain_valid settlement error")
+;;
+
+let test_post_install_domain_valid_exception_resolves_waiters () =
+  run_post_install_domain_valid_failure
+    ~name:"post-install-domain-valid-exception"
+    (Post_turn.For_testing.Domain_valid_exception
+       (Failure "injected Domain_valid settlement exception"))
 ;;
 
 let test_invalid_structural_evidence_after_dispatch_is_terminal () =
@@ -1729,11 +1772,6 @@ let test_exact_scope_release_defers_until_settlement_pin_leaves () =
          | Some entry -> Some (Masc.Keeper_lane.id entry.lane)
          | None -> None
        in
-       let lane_id =
-         match registered_lane_id () with
-         | Some lane_id -> lane_id
-         | None -> fail "scope pin fixture did not register its owner"
-       in
        let flow_scope =
          match
            Masc.Keeper_exact_flow_scope.for_registered
@@ -1748,7 +1786,7 @@ let test_exact_scope_release_defers_until_settlement_pin_leaves () =
        let entered, publish_entered = Eio.Promise.create () in
        let continue_promise, publish_continue = Eio.Promise.create () in
        let settlement = ref None in
-       let (), () =
+       let () =
          Eio.Fiber.both
            (fun () ->
               settlement :=
@@ -1833,8 +1871,10 @@ let () =
         `Quick test_malformed_structure_preserves_checkpoint;
       test_case "prepare/commit source CAS"
         `Quick test_prepare_commit_source_cas;
-      test_case "post-install failure resolves commit waiter"
-        `Quick test_post_install_failure_resolves_commit_waiter;
+      test_case "post-install Domain_valid error resolves waiters"
+        `Quick test_post_install_domain_valid_error_resolves_waiters;
+      test_case "post-install Domain_valid exception resolves waiters"
+        `Quick test_post_install_domain_valid_exception_resolves_waiters;
       test_case "invalid structural evidence is post-dispatch terminal"
         `Quick test_invalid_structural_evidence_after_dispatch_is_terminal;
       test_case "non-reducing output is quarantined"

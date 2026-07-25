@@ -97,6 +97,8 @@ type 'a post_success_boundary =
 
 type post_success_terminalization =
   | Terminalized of Keeper_event_queue_state.exact_execution_terminal
+  | Terminalization_persistence_failed of
+      Keeper_event_queue_state.exact_execution_terminal * string
   | Terminalization_commit_in_progress of unit Eio.Promise.t
   | Terminalization_already_committed
   | Terminalization_invariant_failed of string
@@ -600,7 +602,7 @@ let with_disposition terminalizer callback =
 let rejected_terminalization terminal result =
   match result with
   | Ok () -> Terminalized terminal
-  | Error detail -> Terminalization_invariant_failed detail
+  | Error detail -> Terminalization_persistence_failed (terminal, detail)
 ;;
 
 let finish_rejection
@@ -742,6 +744,8 @@ let finalize_installed_commit terminalizer completion result =
 ;;
 
 let settle_post_success_domain_valid_with_failure
+      ?(settle_domain = settle_exact_flow_domain)
+      ?(on_await = fun () -> ())
       terminalizer
       ~failure_detail
   =
@@ -754,7 +758,7 @@ let settle_post_success_domain_valid_with_failure
           terminalizer.domain_valid_attempts + 1;
         `Own completion
       | Installed_pending_valid completion ->
-        `Finalize_failed completion
+        `Await completion
       | Committed result -> `Done result
       | Open
       | Commit_claimed _
@@ -766,15 +770,23 @@ let settle_post_success_domain_valid_with_failure
   in
   match role with
   | `Done result -> result
-  | `Finalize_failed completion ->
-    finalize_installed_commit
-      terminalizer
-      completion
-      (Error failure_detail)
+  | `Await completion ->
+    on_await ();
+    Eio.Promise.await completion.waiter;
+    with_disposition terminalizer (fun () ->
+      match terminalizer.phase with
+      | Committed result -> result
+      | Open
+      | Commit_claimed _
+      | Installed_pending_valid _
+      | Reject_claimed _
+      | Rejected _ ->
+        Error
+          "post-success Domain_valid waiter completed without canonical commit")
   | `Own completion ->
     let result =
       try
-        settle_exact_flow_domain terminalizer.flow_success Exact_output.Domain_valid
+        settle_domain terminalizer.flow_success Exact_output.Domain_valid
         |> Result.map_error (fun detail ->
           "post-success commit claimant could not settle OAS domain: " ^ detail)
       with
@@ -1481,4 +1493,32 @@ module For_testing = struct
   ;;
 
   let post_success_snapshot = post_success_snapshot
+
+  let settle_post_success_domain_valid_with_error terminalizer detail =
+    settle_post_success_domain_valid_with_failure
+      ~settle_domain:(fun _ _ -> Error detail)
+      terminalizer
+      ~failure_detail:detail
+  ;;
+
+  let settle_post_success_domain_valid_with_exception terminalizer exn =
+    settle_post_success_domain_valid_with_failure
+      ~settle_domain:(fun _ _ -> raise exn)
+      terminalizer
+      ~failure_detail:"injected Domain_valid settlement exception"
+  ;;
+
+  let settle_post_success_domain_valid_with ~settle terminalizer =
+    settle_post_success_domain_valid_with_failure
+      ~settle_domain:(fun _ _ -> settle ())
+      terminalizer
+      ~failure_detail:"injected Domain_valid settlement failed"
+  ;;
+
+  let settle_post_success_domain_valid_with_wait_hook ~on_wait terminalizer =
+    settle_post_success_domain_valid_with_failure
+      ~on_await:on_wait
+      terminalizer
+      ~failure_detail:"concurrent Domain_valid settlement failed"
+  ;;
 end

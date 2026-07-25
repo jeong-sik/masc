@@ -240,6 +240,8 @@ let terminalized_exn = function
     Alcotest.fail "terminalization unexpectedly lost to a commit claimant"
   | C.Terminalization_already_committed ->
     Alcotest.fail "terminalization unexpectedly observed a committed checkpoint"
+  | C.Terminalization_persistence_failed (_, detail) ->
+    Alcotest.failf "terminalization persistence failed: %s" detail
   | C.Terminalization_invariant_failed detail ->
     Alcotest.failf "terminalization invariant failed: %s" detail
   | C.Terminalization_owner_unregistered_deferred ->
@@ -1367,6 +1369,7 @@ let test_post_success_commit_claim_blocks_reject () =
     | C.Terminalization_commit_in_progress waiter -> waiter
     | C.Terminalized _
     | C.Terminalization_already_committed
+    | C.Terminalization_persistence_failed _
     | C.Terminalization_invariant_failed _
     | C.Terminalization_owner_unregistered_deferred ->
       Alcotest.fail "reject crossed an installed commit claim"
@@ -1378,9 +1381,39 @@ let test_post_success_commit_claim_blocks_reject () =
     (pending.phase = C.Phase_installed_pending_valid);
   Alcotest.(check int) "reject settlement has not run" 0 pending.domain_rejected_attempts;
   Alcotest.(check int) "quarantine has not run" 0 !quarantine_calls;
-  (match C.settle_post_success_domain_valid terminalizer with
+  let settlement_entered, resolve_settlement_entered =
+    Eio.Promise.create ()
+  in
+  let release_settlement, resolve_release_settlement =
+    Eio.Promise.create ()
+  in
+  let waiter_joined, resolve_waiter_joined = Eio.Promise.create () in
+  let first_result, resolve_first_result = Eio.Promise.create () in
+  let second_result, resolve_second_result = Eio.Promise.create () in
+  Eio.Fiber.fork ~sw (fun () ->
+    C.For_testing.settle_post_success_domain_valid_with
+      ~settle:(fun () ->
+        Eio.Promise.resolve resolve_settlement_entered ();
+        Eio.Promise.await release_settlement;
+        Ok ())
+      terminalizer
+    |> Eio.Promise.resolve resolve_first_result);
+  Eio.Promise.await settlement_entered;
+  Eio.Fiber.fork ~sw (fun () ->
+    C.For_testing.settle_post_success_domain_valid_with_wait_hook
+      ~on_wait:(fun () -> Eio.Promise.resolve resolve_waiter_joined ())
+      terminalizer
+    |> Eio.Promise.resolve resolve_second_result);
+  Eio.Promise.await waiter_joined;
+  Eio.Promise.resolve resolve_release_settlement ();
+  (match Eio.Promise.await first_result with
    | Ok () -> ()
-   | Error detail -> Alcotest.failf "Domain_valid settlement failed: %s" detail);
+   | Error detail ->
+     Alcotest.failf "first Domain_valid settlement failed: %s" detail);
+  (match Eio.Promise.await second_result with
+   | Ok () -> ()
+   | Error detail ->
+     Alcotest.failf "joined Domain_valid settlement diverged: %s" detail);
   Eio.Promise.await completion;
   (match
      C.terminalize_post_success
@@ -1390,6 +1423,7 @@ let test_post_success_commit_claim_blocks_reject () =
    | C.Terminalization_already_committed -> ()
    | C.Terminalized _
    | C.Terminalization_commit_in_progress _
+   | C.Terminalization_persistence_failed _
    | C.Terminalization_invariant_failed _
    | C.Terminalization_owner_unregistered_deferred ->
      Alcotest.fail "committed checkpoint was downgraded by a later reject");
@@ -1552,11 +1586,13 @@ let test_post_success_terminalization_failures_preserve_full_binding () =
            ~lease
        in
        let quarantine_calls = ref 0 in
+       let quarantine_causes = ref [] in
        let guard : C.exact_execution_guard =
          { durable_guard with
            quarantine =
              (fun cause observation ->
                 incr quarantine_calls;
+                quarantine_causes := cause :: !quarantine_causes;
                 quarantine cause observation)
          }
        in
@@ -1571,27 +1607,43 @@ let test_post_success_terminalization_failures_preserve_full_binding () =
        in
        let observation = C.completed_attempt_observation completed in
        let terminalizer = C.completed_post_success_terminalizer completed in
+       let persistence_failure_exn = function
+         | C.Terminalization_persistence_failed (terminal, detail) ->
+           terminal, detail
+         | C.Terminalized _
+         | C.Terminalization_commit_in_progress _
+         | C.Terminalization_already_committed
+         | C.Terminalization_invariant_failed _
+         | C.Terminalization_owner_unregistered_deferred ->
+           Alcotest.fail
+             "quarantine persistence failure was not surfaced as typed uncertainty"
+       in
        let first =
          C.terminalize_post_success
            terminalizer
            Keeper_event_queue_state.Invalid_structural_evidence
-         |> terminalized_exn
+         |> persistence_failure_exn
        in
        let replay =
          C.terminalize_post_success
            terminalizer
            Keeper_event_queue_state.Checkpoint_persistence_failed
-         |> terminalized_exn
+         |> persistence_failure_exn
        in
        Alcotest.(check int) (label ^ " quarantine runs once") 1 !quarantine_calls;
+       Alcotest.(check string)
+         (label ^ " replay returns canonical failure")
+         (snd first)
+         (snd replay);
        Alcotest.(check bool)
          (label ^ " replay returns canonical terminal")
          true
-         (first = replay);
+         (fst first = fst replay);
        Alcotest.(check bool)
          (label ^ " first cause remains canonical")
          true
-         (first.cause = Keeper_event_queue_state.Invalid_structural_evidence);
+         ((fst first).cause
+          = Keeper_event_queue_state.Invalid_structural_evidence);
        match P.exact_execution_binding_result ~base_path ~keeper_name with
        | Ok
            (Some

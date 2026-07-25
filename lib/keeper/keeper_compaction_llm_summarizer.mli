@@ -16,6 +16,8 @@ type 'a post_success_boundary =
 
 type post_success_terminalization =
   | Terminalized of Keeper_event_queue_state.exact_execution_terminal
+  | Terminalization_persistence_failed of
+      Keeper_event_queue_state.exact_execution_terminal * string
   | Terminalization_commit_in_progress of unit Eio.Promise.t
   | Terminalization_already_committed
   | Terminalization_invariant_failed of string
@@ -244,4 +246,20 @@ module For_testing : sig
 
   val post_success_snapshot :
     post_success_terminalizer -> post_success_snapshot
+
+  val settle_post_success_domain_valid_with_error :
+    post_success_terminalizer -> string -> (unit, string) result
+
+  val settle_post_success_domain_valid_with_exception :
+    post_success_terminalizer -> exn -> (unit, string) result
+
+  val settle_post_success_domain_valid_with :
+    settle:(unit -> (unit, string) result) ->
+    post_success_terminalizer ->
+    (unit, string) result
+
+  val settle_post_success_domain_valid_with_wait_hook :
+    on_wait:(unit -> unit) ->
+    post_success_terminalizer ->
+    (unit, string) result
 end

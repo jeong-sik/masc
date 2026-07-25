@@ -1056,17 +1056,123 @@ let test_spawn_preserves_cancellation_origin_backtrace () =
               (Printexc.raw_backtrace_to_string expected_backtrace)
               (Printexc.raw_backtrace_to_string observed_backtrace);
             check bool
-              "cancellation still reports conclusive finish"
+              "pre-bind cancellation reports non-conclusive uncertainty"
               true
               (match !finish_outcome with
-               | Some Worker.Conclusive_terminalization -> true
-               | Some Worker.Terminalization_persistence_uncertain
+               | Some Worker.Terminalization_persistence_uncertain -> true
+               | Some Worker.Conclusive_terminalization
                | Some Worker.Owner_unregistered_deferred
                | None -> false);
             check int
               "cancelled before-dispatch callback made no request"
               0
               (F.post_count server)))
+;;
+
+let test_prebind_cancellation_withholds_production_gate_drain () =
+  let previous_backtrace_status = Printexc.backtrace_status () in
+  Fun.protect
+    ~finally:(fun () -> Printexc.record_backtrace previous_backtrace_status)
+    (fun () ->
+       Printexc.record_backtrace true;
+       run_eio @@ fun ~sw ~net ~clock ->
+       with_temp_dir "hitl-prebind-cancellation-gate" @@ fun base_path ->
+       Fun.protect
+         ~finally:Q.For_testing.reset_runtime_state
+         (fun () ->
+            install_queue base_path;
+            Prompt_registry.set_markdown_dir
+              (Masc_test_deps.source_path "config/prompts");
+            let server =
+              F.start_server
+                ~sw
+                ~net
+                ~clock
+                (F.Reply (F.openai_response (judgment_json "approve")))
+            in
+            publish_lane
+              [ "hitl-prebind-cancellation-gate" ]
+              (F.resolver_snapshot
+                 ~source:"hitl-prebind-cancellation-gate"
+                 [ { id = "hitl-prebind-cancellation-gate"
+                   ; base_url = server.base_url
+                   }
+                 ]);
+            select_auto_judge_mode base_path;
+            let cancelled =
+              pending_entry ~input_tag:"cancelled" ~base_path ()
+            in
+            let successor =
+              pending_entry ~input_tag:"successor" ~base_path ()
+            in
+            let bind_calls = ref 0 in
+            let expected_backtrace = ref None in
+            let payload =
+              Failure "injected Gate pre-bind cancellation origin"
+            in
+            let observed_payload, observed_backtrace =
+              match
+                Eio.Switch.run
+                @@ fun worker_sw ->
+                match
+                  Gate.For_testing.spawn_auto_judge_entry_with_worker
+                    ~spawn_worker:
+                      (fun ~sw ~entry ~on_summary ~on_finish () ->
+                         Worker.For_testing.spawn_with_writers
+                           ~bind_writer:(fun _path _body ->
+                             incr bind_calls;
+                             raise_injected_cancellation
+                               expected_backtrace
+                               payload)
+                           ~sw
+                           ~entry
+                           ~on_summary
+                           ~on_finish
+                           ())
+                    cancelled
+                with
+                | Ok true -> ()
+                | Ok false -> fail "production Gate did not claim oldest work"
+                | Error detail -> fail detail
+              with
+              | exception Eio.Cancel.Cancelled observed_payload ->
+                observed_payload, Printexc.get_raw_backtrace ()
+              | () -> fail "Gate worker cancellation did not reach its supervisor"
+            in
+            check bool
+              "Gate cancellation payload identity is preserved"
+              true
+              (observed_payload == payload);
+            let expected_backtrace =
+              match !expected_backtrace with
+              | Some backtrace -> backtrace
+              | None -> fail "Gate cancellation origin was not captured"
+            in
+            check string
+              "Gate cancellation raw backtrace is preserved"
+              (Printexc.raw_backtrace_to_string expected_backtrace)
+              (Printexc.raw_backtrace_to_string observed_backtrace);
+            check int "Gate invokes the cancelled bind exactly once" 1 !bind_calls;
+            check int
+              "pre-bind Gate cancellation performs no provider POST"
+              0
+              (F.post_count server);
+            (match Q.get_pending_entry ~id:cancelled.id with
+             | Some
+                 { exact_attempt = Q.Exact_unbound
+                 ; summary_status = Q.Summary_pending
+                 ; _
+                 } ->
+               ()
+             | _ -> fail "Gate drained or mutated the cancelled pending entry");
+            match Q.get_pending_entry ~id:successor.id with
+            | Some
+                { exact_attempt = Q.Exact_unbound
+                ; summary_status = Q.Summary_pending
+                ; _
+                } ->
+              ()
+            | _ -> fail "Gate drained or dispatched successor work"))
 ;;
 
 let test_bound_cancellation_cleanup_uncertainty_preserves_origin () =
@@ -1622,6 +1728,10 @@ let () =
             "spawn preserves cancellation origin backtrace"
             `Quick
             test_spawn_preserves_cancellation_origin_backtrace
+        ; test_case
+            "pre-bind cancellation withholds production Gate drain"
+            `Quick
+            test_prebind_cancellation_withholds_production_gate_drain
         ; test_case
             "bound cancellation cleanup uncertainty preserves origin"
             `Quick

@@ -189,6 +189,7 @@ let terminal_rejection terminalizer cause =
     Exact_execution_terminal terminal
   | Keeper_compaction_llm_summarizer.Terminalization_commit_in_progress _
   | Keeper_compaction_llm_summarizer.Terminalization_already_committed
+  | Keeper_compaction_llm_summarizer.Terminalization_persistence_failed _
   | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed _ ->
     summarization_rejection
       Keeper_compaction_llm_summarizer.Exact_flow_already_started
@@ -468,6 +469,7 @@ let compact_for_request_typed_with
            reject (Invalid_structural_evidence (error, terminal))
          | Keeper_compaction_llm_summarizer.Terminalization_commit_in_progress _
          | Keeper_compaction_llm_summarizer.Terminalization_already_committed
+         | Keeper_compaction_llm_summarizer.Terminalization_persistence_failed _
          | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed _ ->
            reject
              (summarization_rejection

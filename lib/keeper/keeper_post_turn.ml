@@ -602,6 +602,8 @@ let no_compaction_of_uncommitted_prepared
        Uncommitted_terminalized no_compaction
      | Committed recovery ->
        Uncommitted_already_committed recovery)
+  | Keeper_compaction_llm_summarizer.Terminalization_persistence_failed
+      (_, detail)
   | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed detail ->
     let error = Checkpoint_candidate_failed detail in
     publish_prepared_commit_completion
@@ -787,6 +789,8 @@ let prepare_compaction
 
 let commit_prepared_compaction_with
     ?(after_checkpoint_installed = fun () -> ())
+    ?(settle_post_success_domain_valid =
+      Keeper_compaction_llm_summarizer.settle_post_success_domain_valid)
     ~save_oas_checkpoint_if_source
     (prepared : prepared_compaction)
   : prepared_commit_outcome =
@@ -837,6 +841,8 @@ let commit_prepared_compaction_with
       commit_failure
         (Checkpoint_candidate_failed
            "commit owner observed an already-committed terminalization")
+    | Keeper_compaction_llm_summarizer.Terminalization_persistence_failed
+        (_, detail)
     | Keeper_compaction_llm_summarizer.Terminalization_invariant_failed detail ->
       commit_failure (Checkpoint_candidate_failed detail)
     | Keeper_compaction_llm_summarizer.Terminalization_owner_unregistered_deferred ->
@@ -895,9 +901,7 @@ let commit_prepared_compaction_with
         | Ok () ->
           after_checkpoint_installed ();
           (match
-             Keeper_compaction_llm_summarizer
-             .settle_post_success_domain_valid
-               post_success_terminalizer
+             settle_post_success_domain_valid post_success_terminalizer
            with
            | Error detail ->
              publish_owner
@@ -1024,13 +1028,36 @@ let commit_prepared_compaction prepared =
 ;;
 
 module For_testing = struct
+  type domain_valid_failure =
+    | Domain_valid_error of string
+    | Domain_valid_exception of exn
+
   let commit_prepared_compaction_with_history
         ?after_checkpoint_installed
+        ?domain_valid_failure
         ~save_oas_history
         prepared
     =
+    let settle_post_success_domain_valid =
+      match domain_valid_failure with
+      | None ->
+        Keeper_compaction_llm_summarizer.settle_post_success_domain_valid
+      | Some (Domain_valid_error detail) ->
+        (fun terminalizer ->
+           Keeper_compaction_llm_summarizer.For_testing
+           .settle_post_success_domain_valid_with_error
+             terminalizer
+             detail)
+      | Some (Domain_valid_exception exn) ->
+        (fun terminalizer ->
+           Keeper_compaction_llm_summarizer.For_testing
+           .settle_post_success_domain_valid_with_exception
+             terminalizer
+             exn)
+    in
     commit_prepared_compaction_with
       ?after_checkpoint_installed
+      ~settle_post_success_domain_valid
       ~save_oas_checkpoint_if_source:
         (Keeper_context_core.For_testing.save_oas_checkpoint_if_source_with_history
            ~save_oas_history)

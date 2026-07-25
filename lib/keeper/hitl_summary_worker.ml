@@ -1077,7 +1077,7 @@ let spawn_with
     match execution_outcome with
     | `Completed -> on_finish Conclusive_terminalization
     | `Cancelled (cancellation, cancellation_backtrace) ->
-      on_finish Conclusive_terminalization;
+      on_finish Terminalization_persistence_uncertain;
       Printexc.raise_with_backtrace cancellation cancellation_backtrace
     | `Cancelled_uncertain
         (cancellation, cancellation_backtrace, _detail) ->

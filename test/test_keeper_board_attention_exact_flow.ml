@@ -250,10 +250,40 @@ let check_same_provenance label
     actual.request_body_sha256
 ;;
 
+let partition_history ~base_path ~keeper_name =
+  Partition.For_testing.path ~base_path ~keeper_name
+  |> Fs_compat.load_file
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> not (String.equal line ""))
+  |> List.map (fun line ->
+    match Partition.of_yojson (Yojson.Safe.from_string line) with
+    | Ok partition -> partition
+    | Error detail ->
+      Alcotest.failf "partition history decode failed: %s" detail)
+;;
+
 let test_explicit_lane_failover_and_success_provenance () =
   with_prompt_registry (fun () ->
     run_eio (fun ~sw ~net ~clock ->
-      let candidate = candidate "board-attention-failover" in
+      with_temp_base "board-attention-production-chain" @@ fun base_path ->
+      let candidate = candidate "board-attention-production-chain" in
+      (match Candidate.record ~base_path candidate with
+       | Candidate.Recorded _ -> ()
+       | Candidate.Duplicate _ -> Alcotest.fail "fresh candidate duplicated"
+       | Candidate.Record_error detail -> Alcotest.fail detail);
+      let meta =
+        Masc_test_deps.meta_of_json_fixture
+          (`Assoc
+            [ "name", `String candidate.keeper_name
+            ; "trace_id", `String "trace-board-production-chain"
+            ])
+        |> Result.get_ok
+      in
+      ignore
+        (Keeper_registry.register_offline
+           ~base_path
+           candidate.keeper_name
+           meta);
       let response =
         Fixture.openai_response
           (judgment_output ~candidate_id:candidate.candidate_id)
@@ -277,98 +307,78 @@ let test_explicit_lane_failover_and_success_provenance () =
         ~api_key_envs:
           [ second.id, "MASC_TEST_MISSING_BOARD_ATTENTION_KEY" ]
         [ first; second; third ];
-      Alcotest.(check string)
-        "explicit production lane"
-        "board_attention_exact"
-        Exact_flow.lane_id;
-      let prepared =
-        match prepare_exact ~net:(Some net) candidate with
-        | Ok prepared -> prepared
-        | Error _ -> Alcotest.fail "explicit Board-attention lane was not admitted"
-      in
-      let events = ref [] in
-      let before_dispatch provenance : (unit, string) result =
-        events := Dispatch provenance :: !events;
-        Ok ()
-      in
-      let before_advance
-            ~(failed : Exact_flow.advance_source)
-            ~(next : Exact_flow.candidate_visit)
-        : (unit, string) result
-        =
-        events := Advance (failed, next) :: !events;
-        Ok ()
-      in
-      let judgment =
-        match
-          Exact_flow.execute
-            ~clock
-            ~before_dispatch
-            ~before_advance
-            prepared
-        with
-        | Ok judgment -> judgment
-        | Error _ -> Alcotest.fail "OAS did not advance to the usable third slot"
-      in
+      (match
+         Worker.For_testing.process_next_exact
+           ~clock
+           ~net:(Some net)
+           ~now:(fun () -> 3.0)
+           ~worker_epoch:(Partition.Worker_epoch.generate ())
+           ~base_path
+           ~keeper_name:candidate.keeper_name
+       with
+       | Ok (Worker.Judgment_completed { candidate_id; _ })
+         when String.equal candidate_id candidate.candidate_id -> ()
+       | Ok _ -> Alcotest.fail "production exact flow did not complete"
+       | Error detail -> Alcotest.fail detail);
       Alcotest.(check int)
-        "predispatch-rejected slot made no request"
+        "B rejected before HTTP"
         0
         (Fixture.post_count rejected_server);
       Alcotest.(check int)
-        "third slot dispatched once"
+        "C dispatched once"
         1
         (Fixture.post_count success_server);
-      match List.rev !events with
-      | [ Dispatch first_dispatch
-        ; Advance (Exact_flow.Executed_failure failed, rejected_visit)
-        ; Advance
-            (Exact_flow.Predispatch_rejection rejected, success_visit)
-        ; Dispatch third_dispatch
+      let relevant =
+        partition_history ~base_path ~keeper_name:candidate.keeper_name
+        |> List.filter_map (fun partition ->
+          match partition.Partition.state with
+          | Partition.Running { progress = Partition.Bound proof; _ } ->
+            Some (`Bound proof)
+          | Partition.Running
+              { progress =
+                  Partition.Advancing
+                    { execution_anchor; last_from; next }
+              ; _
+              } ->
+            Some (`Advance (execution_anchor, last_from, next))
+          | Partition.Completed { item = { judgment; _ }; _ } ->
+            Some (`Completed judgment)
+          | _ -> None)
+      in
+      match relevant with
+      | [ `Bound first_bound
+        ; `Advance (Some first_anchor, None, rejected_visit)
+        ; `Advance (Some retained_anchor, Some rejected, success_visit)
+        ; `Bound third_bound
+        ; `Completed judgment
         ] ->
-        Alcotest.(check string)
-          "first dispatch uses first lane slot"
-          first.id
-          first_dispatch.slot_id;
-        check_same_provenance "failed projection" first_dispatch failed;
-        Alcotest.(check string)
-          "OAS-selected rejected visit is carried unchanged"
-          second.id
-          rejected_visit.slot_id;
         Alcotest.(check bool)
-          "predispatch rejection retains only its visited identity"
+          "A exact execution anchor persisted"
           true
-          (rejected = rejected_visit);
-        Alcotest.(check string)
-          "OAS-selected final successor visit is carried unchanged"
-          third.id
-          success_visit.slot_id;
-        Alcotest.(check string)
-          "third dispatch uses third lane slot"
-          third.id
-          third_dispatch.slot_id;
-        Alcotest.(check string)
-          "success slot is opaque admitted slot"
-          third_dispatch.slot_id
-          judgment.slot_id;
-        Alcotest.(check string)
-          "success call provenance"
-          third_dispatch.call_id
-          judgment.call_id;
-        Alcotest.(check string)
-          "success plan provenance"
-          third_dispatch.plan_fingerprint
-          judgment.plan_fingerprint;
-        Alcotest.(check string)
-          "success request provenance"
-          third_dispatch.request_body_sha256
-          judgment.request_body_sha256;
-        (match judgment.verdict.decision with
-         | Judgment.Relevant -> ()
-         | Judgment.Not_relevant ->
-           Alcotest.fail "strict singleton verdict changed decision")
+          (first_bound = first_anchor
+           && first_anchor = retained_anchor
+           && String.equal first_bound.slot_id first.id);
+        Alcotest.(check bool)
+          "B rejection identity persisted before C"
+          true
+          (rejected = rejected_visit
+           && String.equal rejected.slot_id second.id
+           && String.equal success_visit.slot_id third.id);
+        Alcotest.(check bool)
+          "C bound and completed with exact provenance"
+          true
+          (String.equal third_bound.slot_id third.id
+           && String.equal judgment.slot_id third_bound.slot_id
+           && String.equal judgment.call_id third_bound.call_id
+           && String.equal
+                judgment.plan_fingerprint
+                third_bound.plan_fingerprint
+           && String.equal
+                judgment.request_body_sha256
+                third_bound.request_body_sha256)
       | _ ->
         Alcotest.fail
-          "expected dispatch(A), advance(A->B), advance(B->C), dispatch(C)"))
+          "expected Bound(A), Advancing(A->B), Advancing(B->C), Bound(C), Completed(C)"))
 ;;
 
 let test_domain_candidate_id_mismatch_does_not_advance () =

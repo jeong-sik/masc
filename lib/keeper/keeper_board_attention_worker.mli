@@ -127,7 +127,8 @@ module For_testing : sig
          (Keeper_board_attention_exact_flow.attempt_provenance ->
           (unit, string) result) ->
        before_advance:
-         (failed:Keeper_board_attention_exact_flow.attempt_provenance ->
+         (failed:Keeper_board_attention_exact_flow.advance_source ->
+          next:Keeper_board_attention_exact_flow.candidate_visit ->
           (unit, string) result) ->
        'prepared ->
        ( Keeper_board_attention_candidate.judgment
@@ -152,7 +153,8 @@ module For_testing : sig
          (Keeper_board_attention_exact_flow.attempt_provenance ->
           (unit, string) result) ->
        before_advance:
-         (failed:Keeper_board_attention_exact_flow.attempt_provenance ->
+         (failed:Keeper_board_attention_exact_flow.advance_source ->
+          next:Keeper_board_attention_exact_flow.candidate_visit ->
           (unit, string) result) ->
        'prepared ->
        ( Keeper_board_attention_candidate.judgment

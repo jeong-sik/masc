@@ -978,8 +978,29 @@ let assert_mandatory_exact_output_lanes_declared ~label path =
       Server_runtime_bootstrap.mandatory_exact_output_lane_ids
 ;;
 
+let boot_path_fixtures_root () =
+  Filename.concat (repo_root ()) "scripts/fixtures"
+;;
+
 let release_evidence_fixture_dir () =
-  Filename.concat (repo_root ()) "scripts/fixtures/release-evidence"
+  Filename.concat (boot_path_fixtures_root ()) "release-evidence"
+;;
+
+(* Discovered, not enumerated: any scripts/fixtures/<name>/runtime.toml is a
+   boot-path config and is checked without touching this test. Enumerating the
+   sites by hand is what let four of them be patched in #25700 while the fifth
+   drifted. *)
+let discover_boot_path_fixture_runtime_tomls () =
+  let root = boot_path_fixtures_root () in
+  if not (Sys.file_exists root) then []
+  else
+    Sys.readdir root
+    |> Array.to_list
+    |> List.sort String.compare
+    |> List.filter_map (fun entry ->
+      let candidate = Filename.concat (Filename.concat root entry) "runtime.toml" in
+      if Sys.file_exists candidate then Some ("scripts/fixtures/" ^ entry ^ "/runtime.toml", candidate)
+      else None)
 ;;
 
 let test_repo_runtime_toml_declares_mandatory_exact_output_lanes () =
@@ -988,10 +1009,14 @@ let test_repo_runtime_toml_declares_mandatory_exact_output_lanes () =
     (Filename.concat (repo_root ()) "config/runtime.toml")
 ;;
 
-let test_release_evidence_fixture_declares_mandatory_exact_output_lanes () =
-  assert_mandatory_exact_output_lanes_declared
-    ~label:"scripts/fixtures/release-evidence/runtime.toml"
-    (Filename.concat (release_evidence_fixture_dir ()) "runtime.toml")
+let test_boot_path_fixtures_declare_mandatory_exact_output_lanes () =
+  let fixtures = discover_boot_path_fixture_runtime_tomls () in
+  (* Without this the scan below passes vacuously when discovery finds nothing —
+     the same absence-is-invisible shape this whole test exists to reject. *)
+  check bool "at least one boot-path fixture was discovered" true (fixtures <> []);
+  List.iter
+    (fun (label, path) -> assert_mandatory_exact_output_lanes_declared ~label path)
+    fixtures
 ;;
 
 (* release-evidence.sh boots the installed binary in a credential-less CI job,
@@ -3152,8 +3177,8 @@ let () =
             "repo runtime.toml declares every mandatory exact-output lane"
             `Quick test_repo_runtime_toml_declares_mandatory_exact_output_lanes;
           test_case
-            "release-evidence smoke fixture declares every mandatory exact-output lane"
-            `Quick test_release_evidence_fixture_declares_mandatory_exact_output_lanes;
+            "every discovered boot-path fixture declares the mandatory exact-output lanes"
+            `Quick test_boot_path_fixtures_declare_mandatory_exact_output_lanes;
           test_case
             "release-evidence smoke lanes resolve with no credential present"
             `Quick test_release_evidence_fixture_lanes_resolve_without_credentials

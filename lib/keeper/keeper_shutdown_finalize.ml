@@ -734,7 +734,7 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
              (match replace ~config finalized with
               | Error _ as error -> error
               | Ok persisted_finalized ->
-                deliver_finalized_completion ~config persisted_finalized)))
+                deliver_finalized_completion ~config persisted_finalized))))
 ;;
 
 let run ~config ~entry operation =

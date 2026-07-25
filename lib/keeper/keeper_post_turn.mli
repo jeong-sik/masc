@@ -149,6 +149,7 @@ val commit_prepared_compaction :
 
 module For_testing : sig
   val commit_prepared_compaction_with_history :
+    ?after_checkpoint_installed:(unit -> unit) ->
     save_oas_history:
       (session_dir:string -> Agent_sdk.Checkpoint.t -> unit) ->
     prepared_compaction ->
@@ -157,6 +158,10 @@ module For_testing : sig
   val post_success_snapshot :
     prepared_compaction ->
     Keeper_compaction_llm_summarizer.post_success_snapshot
+
+  val claim_post_success_commit :
+    prepared_compaction ->
+    Keeper_compaction_llm_summarizer.post_success_commit_claim
 end
 
 (** Affine disposition for a prepared exact-output result that cannot enter

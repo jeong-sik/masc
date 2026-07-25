@@ -329,7 +329,7 @@ let run_commit ~config ~meta prepared =
     in
     Error (Recovery (error, failure_dispatch))
   in
-  let committed recovery =
+  let committed (recovery : Keeper_post_turn.compaction_recovery) =
     (match recovery.checkpoint_installation with
      | Keeper_checkpoint_store.Not_installed not_installed ->
        let error = Keeper_post_turn.Checkpoint_cas_failed not_installed.cause in

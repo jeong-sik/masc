@@ -786,6 +786,7 @@ let prepare_compaction
 ;;
 
 let commit_prepared_compaction_with
+    ?(after_checkpoint_installed = fun () -> ())
     ~save_oas_checkpoint_if_source
     (prepared : prepared_compaction)
   : prepared_commit_outcome =
@@ -892,6 +893,7 @@ let commit_prepared_compaction_with
                ~committed:recovery
                (Checkpoint_candidate_failed detail))
         | Ok () ->
+          after_checkpoint_installed ();
           (match
              Keeper_compaction_llm_summarizer
              .settle_post_success_domain_valid
@@ -942,23 +944,53 @@ let commit_prepared_compaction_with
     with
     | Eio.Cancel.Cancelled _ as exn ->
       let raw_bt = Printexc.get_raw_backtrace () in
-      if Option.is_none !installed_recovery
-      then (
-        Eio.Cancel.protect (fun () ->
+      Eio.Cancel.protect (fun () ->
+        match !installed_recovery with
+        | None ->
           ignore
             (terminalize_claimed
-               Keeper_event_queue_state.Exact_execution_cancelled)));
+               Keeper_event_queue_state.Exact_execution_cancelled)
+        | Some recovery ->
+          let detail =
+            "post-install compaction finalization was cancelled: "
+            ^ Printexc.to_string exn
+          in
+          let terminal_detail =
+            match
+              Keeper_compaction_llm_summarizer
+              .finish_post_success_commit_failure
+                post_success_terminalizer
+                detail
+            with
+            | Ok () -> detail
+            | Error terminal_detail -> terminal_detail
+          in
+          ignore
+            (publish_owner
+               (commit_failure
+                  ~committed:recovery
+                  (Checkpoint_candidate_failed terminal_detail))));
       Printexc.raise_with_backtrace exn raw_bt
     | exn ->
       let detail = Printexc.to_string exn in
       log_keeper_exn ~label:"compaction checkpoint save exception" exn;
       (match !installed_recovery with
        | Some recovery ->
+         let terminal_detail =
+           match
+             Keeper_compaction_llm_summarizer
+             .finish_post_success_commit_failure
+               post_success_terminalizer
+               ("post-install compaction finalization raised: " ^ detail)
+           with
+           | Ok () -> detail
+           | Error terminal_detail -> terminal_detail
+         in
          publish_owner
            (commit_failure
               ~committed:recovery
               (Checkpoint_candidate_failed
-                 ("post-install compaction finalization raised: " ^ detail)))
+                 terminal_detail))
        | None ->
          Log.Keeper.error
            "compaction checkpoint save exception became terminal: %s"
@@ -990,8 +1022,13 @@ let commit_prepared_compaction =
 ;;
 
 module For_testing = struct
-  let commit_prepared_compaction_with_history ~save_oas_history prepared =
+  let commit_prepared_compaction_with_history
+        ?after_checkpoint_installed
+        ~save_oas_history
+        prepared
+    =
     commit_prepared_compaction_with
+      ?after_checkpoint_installed
       ~save_oas_checkpoint_if_source:
         (Keeper_context_core.For_testing.save_oas_checkpoint_if_source_with_history
            ~save_oas_history)
@@ -1000,6 +1037,11 @@ module For_testing = struct
 
   let post_success_snapshot prepared =
     Keeper_compaction_llm_summarizer.For_testing.post_success_snapshot
+      prepared.post_success_terminalizer
+  ;;
+
+  let claim_post_success_commit prepared =
+    Keeper_compaction_llm_summarizer.claim_post_success_commit
       prepared.post_success_terminalizer
   ;;
 end

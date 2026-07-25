@@ -76,6 +76,8 @@ module For_testing : sig
     :  ?bind_writer:strict_snapshot_writer
     -> ?release_writer:strict_snapshot_writer
     -> ?complete_writer:strict_snapshot_writer
+    -> ?quarantine_writer:strict_snapshot_writer
+    -> ?after_bind:(unit -> unit)
     -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
     -> ?clock:_ Eio.Time.clock
     -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)
@@ -88,6 +90,8 @@ module For_testing : sig
     :  ?bind_writer:strict_snapshot_writer
     -> ?release_writer:strict_snapshot_writer
     -> ?complete_writer:strict_snapshot_writer
+    -> ?quarantine_writer:strict_snapshot_writer
+    -> ?after_bind:(unit -> unit)
     -> sw:Eio.Switch.t
     -> entry:Keeper_approval_queue.pending_approval
     -> on_summary:(Keeper_approval_queue.hitl_context_summary -> unit)

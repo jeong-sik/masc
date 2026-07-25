@@ -149,41 +149,80 @@ let retire_owner owner =
 ;;
 
 let for_registered ~registered_lane_id ~base_path ~keeper_name ~surface =
-  Keeper_lifecycle_reservation.with_key_lock
-    ~base_path
-    ~keeper_name
-    (fun () ->
-       match registered_lane_id () with
-       | None ->
-         Error
-           (Printf.sprintf
-              "exact-flow owner is not registered: keeper=%s"
-              keeper_name)
-       | Some lane_id ->
-         let key = owner_key ~base_path ~keeper_name in
-         let owner =
+  let key = owner_key ~base_path ~keeper_name in
+  let unavailable () =
+    Printf.sprintf
+      "exact-flow owner is not registered: keeper=%s"
+      keeper_name
+  in
+  let draining () =
+    Printf.sprintf
+      "exact-flow owner is draining: keeper=%s"
+      keeper_name
+  in
+  let initial =
+    Keeper_lifecycle_reservation.with_key_lock
+      ~base_path
+      ~keeper_name
+      (fun () ->
+         match registered_lane_id () with
+         | None -> `Error (unavailable ())
+         | Some lane_id ->
            Stdlib.Mutex.protect owners_mu (fun () ->
              match Hashtbl.find_opt owners key with
              | Some owner
                when Atomic.get owner.state.phase = Active
                     && Keeper_lane.Id.equal owner.state.lane_id lane_id ->
-               Ok owner
-             | Some owner when Keeper_lane.Id.equal owner.state.lane_id lane_id ->
-               Error
-                 (Printf.sprintf
-                    "exact-flow owner is draining: keeper=%s"
-                    keeper_name)
-             | Some stale ->
-               retire_owner stale;
-               let owner = create_owner ~base_path ~keeper_name ~lane_id in
-               Hashtbl.replace owners key owner;
-               Ok owner
+               `Existing owner
+             | Some owner
+               when Keeper_lane.Id.equal owner.state.lane_id lane_id ->
+               `Error (draining ())
+             | Some _
              | None ->
-               let owner = create_owner ~base_path ~keeper_name ~lane_id in
-               Hashtbl.add owners key owner;
-               Ok owner)
-         in
-         Result.map (fun owner -> surface_scope owner surface) owner)
+               `Create lane_id))
+  in
+  match initial with
+  | `Error detail -> Error detail
+  | `Existing owner -> Ok (surface_scope owner surface)
+  | `Create lane_id ->
+    let candidate = create_owner ~base_path ~keeper_name ~lane_id in
+    let installed =
+      Keeper_lifecycle_reservation.with_key_lock
+        ~base_path
+        ~keeper_name
+        (fun () ->
+           match registered_lane_id () with
+           | Some current_lane_id
+             when Keeper_lane.Id.equal current_lane_id lane_id ->
+             Stdlib.Mutex.protect owners_mu (fun () ->
+               match Hashtbl.find_opt owners key with
+               | Some owner
+                 when Atomic.get owner.state.phase = Active
+                      && Keeper_lane.Id.equal owner.state.lane_id lane_id ->
+                 `Existing owner
+               | Some owner
+                 when Keeper_lane.Id.equal owner.state.lane_id lane_id ->
+                 `Error (draining ())
+               | Some stale ->
+                 Hashtbl.replace owners key candidate;
+                 `Installed (candidate, Some stale)
+               | None ->
+                 Hashtbl.add owners key candidate;
+                 `Installed (candidate, None))
+           | Some _
+           | None ->
+             `Error (unavailable ()))
+    in
+    (match installed with
+     | `Existing owner ->
+       retire_owner candidate;
+       Ok (surface_scope owner surface)
+     | `Installed (owner, stale) ->
+       Option.iter retire_owner stale;
+       Ok (surface_scope owner surface)
+     | `Error detail ->
+       retire_owner candidate;
+       Error detail)
 ;;
 
 let preference_store scope = scope.preference_store

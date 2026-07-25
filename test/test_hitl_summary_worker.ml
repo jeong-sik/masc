@@ -1069,6 +1069,101 @@ let test_spawn_preserves_cancellation_origin_backtrace () =
               (F.post_count server)))
 ;;
 
+let test_bound_cancellation_cleanup_uncertainty_preserves_origin () =
+  let previous_backtrace_status = Printexc.backtrace_status () in
+  Fun.protect
+    ~finally:(fun () -> Printexc.record_backtrace previous_backtrace_status)
+    (fun () ->
+       Printexc.record_backtrace true;
+       run_eio @@ fun ~sw ~net ~clock ->
+       with_temp_dir "hitl-bound-cancellation-uncertain" @@ fun base_path ->
+       Fun.protect
+         ~finally:Q.For_testing.reset_runtime_state
+         (fun () ->
+            install_queue base_path;
+            Prompt_registry.set_markdown_dir
+              (Masc_test_deps.source_path "config/prompts");
+            let server =
+              F.start_server
+                ~sw
+                ~net
+                ~clock
+                (F.Reply (F.openai_response (judgment_json "approve")))
+            in
+            publish_lane
+              [ "hitl-bound-cancellation-uncertain" ]
+              (F.resolver_snapshot
+                 ~source:"hitl-bound-cancellation-uncertain"
+                 [ { id = "hitl-bound-cancellation-uncertain"
+                   ; base_url = server.base_url
+                   }
+                 ]);
+            let entry = pending_entry ~base_path () in
+            let expected_backtrace = ref None in
+            let finish_outcome = ref None in
+            let payload =
+              Failure "injected bound HITL cancellation origin"
+            in
+            let observed_payload, observed_backtrace =
+              match
+                Eio.Switch.run
+                @@ fun worker_sw ->
+                match
+                  Worker.For_testing.spawn_with_writers
+                    ~quarantine_writer:unknown_writer
+                    ~after_bind:(fun () ->
+                      raise_injected_cancellation expected_backtrace payload)
+                    ~sw:worker_sw
+                    ~entry
+                    ~on_summary:(fun _ ->
+                      fail "cancelled worker delivered a summary")
+                    ~on_finish:(fun outcome -> finish_outcome := Some outcome)
+                    ()
+                with
+                | Ok () -> ()
+                | Error detail -> fail detail
+              with
+              | exception Eio.Cancel.Cancelled observed_payload ->
+                observed_payload, Printexc.get_raw_backtrace ()
+              | () -> fail "injected cancellation did not leave the worker"
+            in
+            check bool
+              "bound cancellation payload identity is preserved"
+              true
+              (observed_payload == payload);
+            let expected_backtrace =
+              match !expected_backtrace with
+              | Some backtrace -> backtrace
+              | None -> fail "bound cancellation origin was not captured"
+            in
+            check string
+              "bound cancellation raw backtrace is preserved"
+              (Printexc.raw_backtrace_to_string expected_backtrace)
+              (Printexc.raw_backtrace_to_string observed_backtrace);
+            check bool
+              "failed bound cleanup reports persistence uncertainty"
+              true
+              (match !finish_outcome with
+               | Some Worker.Terminalization_persistence_uncertain -> true
+               | Some Worker.Conclusive_terminalization
+               | Some Worker.Owner_unregistered_deferred
+               | None -> false);
+            check int
+              "cancellation before dispatch performs no provider POST"
+              0
+              (F.post_count server);
+            match Q.get_pending_entry ~id:entry.id with
+            | Some
+                { exact_attempt = Q.Exact_bound _
+                ; summary_status = Q.Summary_pending
+                ; _
+                } ->
+              ()
+            | _ ->
+              fail
+                "failed cancellation cleanup did not preserve the durable binding"))
+;;
+
 let test_pre_worker_start_failure_is_retryable () =
   run_eio @@ fun ~sw:_ ~net:_ ~clock:_ ->
   with_temp_dir "hitl-pre-worker-start-failure" @@ fun base_path ->
@@ -1527,6 +1622,10 @@ let () =
             "spawn preserves cancellation origin backtrace"
             `Quick
             test_spawn_preserves_cancellation_origin_backtrace
+        ; test_case
+            "bound cancellation cleanup uncertainty preserves origin"
+            `Quick
+            test_bound_cancellation_cleanup_uncertainty_preserves_origin
         ; test_case
             "pre-worker start failure is retryable"
             `Quick

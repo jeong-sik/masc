@@ -202,6 +202,13 @@ val settle_post_success_domain_valid
 (** Install the OAS flow preference only after the validated compaction
     checkpoint is durable. The caller must hold [with_current_post_success]. *)
 
+val finish_post_success_commit_failure
+  :  post_success_terminalizer
+  -> string
+  -> (unit, string) result
+(** After durable checkpoint installation, settle or conservatively finalize
+    the affine commit and always release its existing completion waiter. *)
+
 val with_current_post_success
   :  post_success_terminalizer
   -> (unit -> 'a)

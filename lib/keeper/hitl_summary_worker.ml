@@ -272,10 +272,17 @@ type exact_queue_writers =
   { bind_writer : strict_snapshot_writer option
   ; release_writer : strict_snapshot_writer option
   ; complete_writer : strict_snapshot_writer option
+  ; quarantine_writer : strict_snapshot_writer option
+  ; after_bind : (unit -> unit) option
   }
 
 let production_exact_queue_writers =
-  { bind_writer = None; release_writer = None; complete_writer = None }
+  { bind_writer = None
+  ; release_writer = None
+  ; complete_writer = None
+  ; quarantine_writer = None
+  ; after_bind = None
+  }
 ;;
 
 let exact_identity_of_candidate
@@ -477,6 +484,7 @@ let exact_attempt_source_resolved (entry : pending_approval) = function
 ;;
 
 exception Exact_terminalization_persistence_failed of string
+exception Cancelled_uncertain of exn * Printexc.raw_backtrace * string
 let signal_terminalization_persistence_failure
       (entry : pending_approval)
       operation
@@ -507,10 +515,43 @@ let mark_unbound_failure (entry : pending_approval) reason =
 ;;
 
 let quarantine_identity_result
+      ?writer
       (entry : pending_approval)
       (identity : exact_identity)
       cause
   =
+  let quarantine
+        ~id
+        ~input_hash
+        ~sequence
+        ~slot_id
+        ~call_id
+        ~plan_fingerprint
+        ~request_body_sha256
+    =
+    match writer with
+    | None ->
+      Keeper_approval_queue.quarantine_summary_exact_attempt
+        ~id
+        ~input_hash
+        ~sequence
+        ~slot_id
+        ~call_id
+        ~plan_fingerprint
+        ~request_body_sha256
+        ~cause
+    | Some save_file_atomic_strict_staged ->
+      Keeper_approval_queue.For_testing.quarantine_summary_exact_attempt_with_writer
+        ~save_file_atomic_strict_staged
+        ~id
+        ~input_hash
+        ~sequence
+        ~slot_id
+        ~call_id
+        ~plan_fingerprint
+        ~request_body_sha256
+        ~cause
+  in
   match
     with_exact_identity
       entry
@@ -524,7 +565,7 @@ let quarantine_identity_result
         ~plan_fingerprint
         ~request_body_sha256
       ->
-        Keeper_approval_queue.quarantine_summary_exact_attempt
+        quarantine
           ~id
           ~input_hash
           ~sequence
@@ -562,7 +603,7 @@ let quarantine_candidate (entry : pending_approval) candidate cause =
   quarantine_identity entry (exact_identity_of_candidate candidate) cause
 ;;
 
-let settle_current (entry : pending_approval) ~reason ~cause =
+let settle_current ?quarantine_writer (entry : pending_approval) ~reason ~cause =
   match Keeper_approval_queue.get_pending_entry ~id:entry.id with
   | None ->
     record_outcome "exact_source_resolved";
@@ -577,7 +618,11 @@ let settle_current (entry : pending_approval) ~reason ~cause =
     record_outcome "exact_source_resolved";
     Ok ()
   | Some { exact_attempt = Exact_bound binding; _ } ->
-    quarantine_identity_result entry (exact_identity_of_binding binding) cause
+    quarantine_identity_result
+      ?writer:quarantine_writer
+      entry
+      (exact_identity_of_binding binding)
+      cause
 ;;
 
 let settle_current_or_signal (entry : pending_approval) ~reason ~cause =
@@ -822,6 +867,7 @@ let execute_prepared_flow_with_queue_writers_current
       ~on_summary
       (prepared : prepared_flow)
   =
+  let bound = ref false in
   let guarded_before_dispatch candidate =
     match with_current_generation prepared (fun () ->
       before_dispatch ~queue_writers prepared.entry candidate)
@@ -830,7 +876,10 @@ let execute_prepared_flow_with_queue_writers_current
       Error Owner_generation_unregistered
     | Keeper_exact_flow_scope.Current (Error cause) ->
       Error (Durable_flow_callback_failed cause)
-    | Keeper_exact_flow_scope.Current (Ok ()) -> Ok ()
+    | Keeper_exact_flow_scope.Current (Ok ()) ->
+      bound := true;
+      Option.iter (fun after_bind -> after_bind ()) queue_writers.after_bind;
+      Ok ()
   in
   let guarded_before_advance ~failed ~next =
     match with_current_generation prepared (fun () ->
@@ -840,7 +889,9 @@ let execute_prepared_flow_with_queue_writers_current
       Error Owner_generation_unregistered
     | Keeper_exact_flow_scope.Current (Error cause) ->
       Error (Durable_flow_callback_failed cause)
-    | Keeper_exact_flow_scope.Current (Ok ()) -> Ok ()
+    | Keeper_exact_flow_scope.Current (Ok ()) ->
+      bound := false;
+      Ok ()
   in
   let settle_current_generation callback =
     match with_settlement_generation prepared callback with
@@ -872,38 +923,43 @@ let execute_prepared_flow_with_queue_writers_current
   with
   | Eio.Cancel.Cancelled _ as cancellation ->
     let cancellation_backtrace = Printexc.get_raw_backtrace () in
-    (try
-       match
-         Eio.Cancel.protect
-         @@ fun () ->
-         with_settlement_generation prepared (fun () ->
-           record_outcome "exact_cancellation";
-           settle_current
-             prepared.entry
-             ~reason:"HITL exact-output flow was cancelled"
-             ~cause:Exact_cancellation)
-       with
-       | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-         record_outcome "exact_cancellation_owner_replaced";
-         log_exact_error
-           prepared.entry
-           "cancellation settlement"
-           "exact owner generation was replaced before best-effort settlement"
-       | Keeper_exact_flow_scope.Current (Ok ()) -> ()
-       | Keeper_exact_flow_scope.Current (Error detail) ->
-         record_outcome "exact_cancellation_settlement_failed";
-         log_exact_error
-           prepared.entry
-           "cancellation terminalization persistence"
-           detail
-     with
-     | Eio.Cancel.Cancelled _ -> ()
-     | exn ->
-       log_exact_error
-         prepared.entry
-         "cancellation settlement raised"
-         (Printexc.to_string exn));
-    Printexc.raise_with_backtrace cancellation cancellation_backtrace
+    if not !bound
+    then Printexc.raise_with_backtrace cancellation cancellation_backtrace
+    else (
+      let settlement =
+        try
+          Eio.Cancel.protect
+          @@ fun () ->
+          match
+            with_settlement_generation prepared (fun () ->
+              record_outcome "exact_cancellation";
+              settle_current
+                ?quarantine_writer:queue_writers.quarantine_writer
+                prepared.entry
+                ~reason:"HITL exact-output flow was cancelled"
+                ~cause:Exact_cancellation)
+          with
+          | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+            Error
+              "exact owner generation was replaced before cancellation settlement"
+          | Keeper_exact_flow_scope.Current result -> result
+        with
+        | exn ->
+          Error
+            ("cancellation settlement raised: " ^ Printexc.to_string exn)
+      in
+      match settlement with
+      | Ok () ->
+        Printexc.raise_with_backtrace cancellation cancellation_backtrace
+      | Error detail ->
+        record_outcome "exact_cancellation_settlement_failed";
+        log_exact_error
+          prepared.entry
+          "cancellation terminalization persistence"
+          detail;
+        raise
+          (Cancelled_uncertain
+             (cancellation, cancellation_backtrace, detail)))
   | Exact_terminalization_persistence_failed _ as persistence_failure ->
     raise persistence_failure
   | exn ->
@@ -1010,6 +1066,9 @@ let spawn_with
         | Executed -> `Completed
         | Deferred_unregistered -> `Owner_unregistered
       with
+      | Cancelled_uncertain (cancellation, cancellation_backtrace, detail) ->
+        `Cancelled_uncertain
+          (cancellation, cancellation_backtrace, detail)
       | Eio.Cancel.Cancelled _ as cancellation ->
         `Cancelled (cancellation, Printexc.get_raw_backtrace ())
       | Exact_terminalization_persistence_failed _ as uncertainty ->
@@ -1020,6 +1079,10 @@ let spawn_with
     | `Completed -> on_finish Conclusive_terminalization
     | `Cancelled (cancellation, cancellation_backtrace) ->
       on_finish Conclusive_terminalization;
+      Printexc.raise_with_backtrace cancellation cancellation_backtrace
+    | `Cancelled_uncertain
+        (cancellation, cancellation_backtrace, _detail) ->
+      on_finish Terminalization_persistence_uncertain;
       Printexc.raise_with_backtrace cancellation cancellation_backtrace
     | `Owner_unregistered -> on_finish Owner_unregistered_deferred
     | `Uncertain uncertainty ->
@@ -1052,12 +1115,21 @@ module For_testing = struct
         ?bind_writer
         ?release_writer
         ?complete_writer
+        ?quarantine_writer
+        ?after_bind
         ~net
         ?clock
         ~on_summary
         prepared
     =
-    let queue_writers = { bind_writer; release_writer; complete_writer } in
+    let queue_writers =
+      { bind_writer
+      ; release_writer
+      ; complete_writer
+      ; quarantine_writer
+      ; after_bind
+      }
+    in
     execute_prepared_flow_with_queue_writers
       ~queue_writers
       ~net
@@ -1070,13 +1142,22 @@ module For_testing = struct
         ?bind_writer
         ?release_writer
         ?complete_writer
+        ?quarantine_writer
+        ?after_bind
         ~sw
         ~entry
         ~on_summary
         ~on_finish
         ()
     =
-    let queue_writers = { bind_writer; release_writer; complete_writer } in
+    let queue_writers =
+      { bind_writer
+      ; release_writer
+      ; complete_writer
+      ; quarantine_writer
+      ; after_bind
+      }
+    in
     spawn_with
       ~queue_writers
       ~prepare_flow

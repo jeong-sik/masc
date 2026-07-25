@@ -1315,6 +1315,136 @@ let test_prepare_commit_source_cas () =
        fail "stale prepared value did not reach canonical rejection"))
 ;;
 
+let test_post_install_failure_resolves_commit_waiter () =
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  with_eio_context env sw @@ fun () ->
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+       let meta = make_meta ~name:"post-install-waiter" () in
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       init_runtime_fixture ();
+       let checkpoint = make_checkpoint () in
+       let session =
+         Masc.Keeper_context_core.create_session
+           ~session_id:checkpoint.session_id
+           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+       in
+       let context =
+         Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint
+       in
+       (match
+          Masc.Keeper_context_core.save_oas_checkpoint_classified
+            ~multimodal_policy:meta.multimodal_policy
+            ~keeper_name:meta.name
+            ~session
+            ~agent_name:meta.agent_name
+            ~ctx:context
+            ~generation:1
+        with
+        | Ok _ -> ()
+        | Error detail ->
+          failf
+            "fixture checkpoint save failed: %s"
+            (Masc.Keeper_context_core.checkpoint_write_error_to_string
+               ~persistence_error_to_string:(fun detail -> detail)
+               detail));
+       let exact_server =
+         Exact_fixture.start_server
+           ~sw
+           ~net:(Eio.Stdenv.net env)
+           ~clock:(Eio.Stdenv.clock env)
+           (Exact_fixture.Reply (summarize_response "shorter"))
+       in
+       publish_exact_fixture ~source:"post-install waiter" exact_server;
+       ensure_registered_keeper ~base_path:config.base_path meta;
+       let quarantine_calls = ref 0 in
+       let exact_execution_guard : Summarizer.exact_execution_guard =
+         { Exact_fixture.permissive_exact_execution_guard with
+           quarantine =
+             (fun _cause _observation ->
+                incr quarantine_calls;
+                Ok Summarizer.Fsync_completed)
+         }
+       in
+       let prepared =
+         match
+           Post_turn.prepare_compaction
+             ~base_path:config.base_path
+             ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
+             ~meta
+             ~trigger:Compaction_trigger.Manual
+             ~exact_execution_guard
+             ~projection_request:(projection_request_of_meta meta)
+             ()
+         with
+         | Ok prepared -> prepared
+         | Error error ->
+           failf
+             "prepare failed: %s"
+             (Post_turn.compaction_recovery_error_to_string error)
+       in
+       let internal_waiter = ref None in
+       let outcome =
+         Post_turn.For_testing.commit_prepared_compaction_with_history
+           ~after_checkpoint_installed:(fun () ->
+             match
+               Post_turn.For_testing.claim_post_success_commit prepared
+             with
+             | Summarizer.Commit_claim_in_progress waiter ->
+               internal_waiter := Some waiter;
+               raise (Failure "injected post-install finalization failure")
+             | Summarizer.Commit_claim_acquired
+             | Summarizer.Commit_claim_already_committed
+             | Summarizer.Commit_claim_rejected _
+             | Summarizer.Commit_claim_owner_unregistered_deferred ->
+               fail "installed commit did not expose its affine waiter")
+           ~save_oas_history:(fun ~session_dir:_ _ -> ())
+           prepared
+       in
+       (match outcome with
+        | Post_turn.Commit_failed { committed = Some _; _ } -> ()
+        | Post_turn.Commit_failed { committed = None; _ } ->
+          fail "post-install failure lost the durable recovery"
+        | Post_turn.Committed _
+        | Post_turn.Commit_in_progress _
+        | Post_turn.Already_committed _
+        | Post_turn.Already_rejected _ ->
+          fail "post-install failure did not publish typed commit failure");
+       (match !internal_waiter with
+        | Some waiter -> Eio.Promise.await waiter
+        | None -> fail "post-install failure did not capture the commit waiter");
+       let snapshot = Post_turn.For_testing.post_success_snapshot prepared in
+       check bool
+         "post-install failure closes the affine commit phase"
+         true
+         (snapshot.phase = Summarizer.Phase_committed);
+       check int
+         "post-install failure attempts Domain_valid exactly once"
+         1
+         snapshot.domain_valid_attempts;
+       check int
+         "post-install failure never rejects the installed checkpoint"
+         0
+         snapshot.domain_rejected_attempts;
+       check int
+         "post-install failure never quarantines the installed checkpoint"
+         0
+         !quarantine_calls;
+       check int
+         "post-install finalization performs no provider redispatch"
+         1
+         (Exact_fixture.post_count exact_server))
+;;
+
 let test_invalid_structural_evidence_after_dispatch_is_terminal () =
   Eio_main.run @@ fun env ->
   Masc_test_deps.init_eio_clock env;
@@ -1581,6 +1711,15 @@ let test_exact_scope_release_defers_until_settlement_pin_leaves () =
        init_runtime_fixture ();
        let meta = make_meta ~name:"scope-pin-release" () in
        ensure_registered_keeper ~base_path:config.base_path meta;
+       let registered_owner =
+         match
+           Masc.Keeper_registry.get
+             ~base_path:config.base_path
+             meta.name
+         with
+         | Some owner -> owner
+         | None -> fail "scope pin fixture did not retain its owner"
+       in
        let registered_lane_id () =
          match
            Masc.Keeper_registry.get
@@ -1622,10 +1761,40 @@ let test_exact_scope_release_defers_until_settlement_pin_leaves () =
                         Eio.Promise.await continue_promise)))
            (fun () ->
               Eio.Promise.await entered;
-              Masc.Keeper_exact_flow_scope.release_owner
-                ~base_path:config.base_path
-                ~keeper_name:meta.name
-                ~expected_lane_id:lane_id;
+              (match
+                 Masc.Keeper_registry.unregister_exact registered_owner
+               with
+               | Masc.Keeper_registry.Exact_unregistered -> ()
+               | _ -> fail "scope pin fixture could not replace its owner");
+              let replacement_meta =
+                make_meta ~name:meta.name ()
+              in
+              ignore
+                (Masc.Keeper_registry.register_offline
+                   ~base_path:config.base_path
+                   meta.name
+                   replacement_meta);
+              let replacement_scope =
+                match
+                  Masc.Keeper_exact_flow_scope.for_registered
+                    ~registered_lane_id
+                    ~base_path:config.base_path
+                    ~keeper_name:meta.name
+                    ~surface:Masc.Keeper_exact_flow_scope.Compaction
+                with
+                | Ok replacement_scope -> replacement_scope
+                | Error detail ->
+                  failf "replacement scope allocation failed: %s" detail
+              in
+              (match
+                 Masc.Keeper_exact_flow_scope.with_current
+                   replacement_scope
+                   ~registered_lane_id
+                   (fun () -> ())
+               with
+               | Masc.Keeper_exact_flow_scope.Current () -> ()
+               | Masc.Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+                 fail "replacement scope was not active");
               (match
                  Masc.Keeper_exact_flow_scope.with_settlement
                    flow_scope
@@ -1634,7 +1803,7 @@ let test_exact_scope_release_defers_until_settlement_pin_leaves () =
                with
                | Masc.Keeper_exact_flow_scope.Owner_unregistered_deferred -> ()
                | Masc.Keeper_exact_flow_scope.Current () ->
-                 fail "retired owner admitted a new settlement pin");
+                 fail "replaced owner admitted a new settlement pin");
               Eio.Promise.resolve publish_continue ())
        in
        match !settlement with
@@ -1664,6 +1833,8 @@ let () =
         `Quick test_malformed_structure_preserves_checkpoint;
       test_case "prepare/commit source CAS"
         `Quick test_prepare_commit_source_cas;
+      test_case "post-install failure resolves commit waiter"
+        `Quick test_post_install_failure_resolves_commit_waiter;
       test_case "invalid structural evidence is post-dispatch terminal"
         `Quick test_invalid_structural_evidence_after_dispatch_is_terminal;
       test_case "non-reducing output is quarantined"

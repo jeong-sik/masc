@@ -620,7 +620,7 @@ let finish_rejection
       Error
         ("post-success reject claimant could not settle OAS domain: " ^ detail)
     | Ok () ->
-      let failure =
+      let quarantine_result =
         try
           match
             quarantine_exact_execution
@@ -629,23 +629,25 @@ let finish_rejection
               ~cause:terminal.cause
               terminalizer.attempt_observation
           with
-          | Ok Fsync_completed -> None
+          | Ok Fsync_completed -> Ok ()
           | Ok (Visible_sync_unconfirmed detail) ->
-            Log.Keeper.warn
-              ~keeper_name:terminalizer.keeper_name
-              "post-success exact-execution quarantine is visible but sync is unconfirmed slot_id=%s call_id=%s: %s"
-              terminal.slot_id
-              terminal.call_id
-              detail;
-            None
-          | Error detail -> Some detail
+            Error
+              ("post-success exact-execution quarantine sync is unconfirmed: "
+               ^ detail)
+          | Error detail ->
+            Error
+              ("post-success exact-execution quarantine failed: " ^ detail)
         with
-        | exn -> Some ("raised " ^ Printexc.to_string exn)
+        | exn ->
+          Error
+            ("post-success exact-execution quarantine raised: "
+             ^ Printexc.to_string exn)
       in
-      Option.iter
-        (log_terminal_quarantine_failure terminalizer terminal)
-        failure;
-      Ok ()
+      (match quarantine_result with
+       | Ok () -> ()
+       | Error detail ->
+         log_terminal_quarantine_failure terminalizer terminal detail);
+      quarantine_result
   in
   with_disposition terminalizer (fun () ->
     match terminalizer.phase with
@@ -723,7 +725,26 @@ let mark_post_success_checkpoint_installed terminalizer =
       Error "post-success checkpoint installation has no commit claimant")
 ;;
 
-let settle_post_success_domain_valid terminalizer =
+let finalize_installed_commit terminalizer completion result =
+  with_disposition terminalizer (fun () ->
+    match terminalizer.phase with
+    | Installed_pending_valid current when current == completion ->
+      terminalizer.phase <- Committed result
+    | Open
+    | Commit_claimed _
+    | Installed_pending_valid _
+    | Committed _
+    | Reject_claimed _
+    | Rejected _ ->
+      ());
+  completion.resolve ();
+  result
+;;
+
+let settle_post_success_domain_valid_with_failure
+      terminalizer
+      ~failure_detail
+  =
   let role =
     with_disposition terminalizer (fun () ->
       match terminalizer.phase with
@@ -732,10 +753,11 @@ let settle_post_success_domain_valid terminalizer =
         terminalizer.domain_valid_attempts <-
           terminalizer.domain_valid_attempts + 1;
         `Own completion
+      | Installed_pending_valid completion ->
+        `Finalize_failed completion
       | Committed result -> `Done result
       | Open
       | Commit_claimed _
-      | Installed_pending_valid _
       | Reject_claimed _
       | Rejected _ ->
         `Done
@@ -744,25 +766,36 @@ let settle_post_success_domain_valid terminalizer =
   in
   match role with
   | `Done result -> result
+  | `Finalize_failed completion ->
+    finalize_installed_commit
+      terminalizer
+      completion
+      (Error failure_detail)
   | `Own completion ->
     let result =
-      settle_exact_flow_domain terminalizer.flow_success Exact_output.Domain_valid
-      |> Result.map_error (fun detail ->
-        "post-success commit claimant could not settle OAS domain: " ^ detail)
+      try
+        settle_exact_flow_domain terminalizer.flow_success Exact_output.Domain_valid
+        |> Result.map_error (fun detail ->
+          "post-success commit claimant could not settle OAS domain: " ^ detail)
+      with
+      | exn ->
+        Error
+          (failure_detail ^ ": " ^ Printexc.to_string exn)
     in
-    with_disposition terminalizer (fun () ->
-      match terminalizer.phase with
-      | Installed_pending_valid current when current == completion ->
-        terminalizer.phase <- Committed result
-      | Open
-      | Commit_claimed _
-      | Installed_pending_valid _
-      | Committed _
-      | Reject_claimed _
-      | Rejected _ ->
-        ());
-    completion.resolve ();
-    result
+    finalize_installed_commit terminalizer completion result
+;;
+
+let settle_post_success_domain_valid terminalizer =
+  settle_post_success_domain_valid_with_failure
+    terminalizer
+    ~failure_detail:"post-success Domain_valid settlement raised"
+;;
+
+let finish_post_success_commit_failure terminalizer detail =
+  Eio.Cancel.protect (fun () ->
+    settle_post_success_domain_valid_with_failure
+      terminalizer
+      ~failure_detail:detail)
 ;;
 
 let claim_rejection terminalizer ~from_commit cause =

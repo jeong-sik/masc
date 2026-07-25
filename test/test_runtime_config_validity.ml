@@ -1332,6 +1332,8 @@ let test_runtime_toml_omitted_max_request_body_bytes_is_none () =
      api-name = \"sample\"\n\
      max-context = 1024\n\
      \n\
+     [local.sample]\n\
+     \n\
      [runtime]\n\
      default = \"local.sample\"\n"
   in

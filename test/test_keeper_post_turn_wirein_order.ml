@@ -1608,15 +1608,17 @@ let test_exact_scope_release_defers_until_settlement_pin_leaves () =
        in
        let entered, publish_entered = Eio.Promise.create () in
        let continue_promise, publish_continue = Eio.Promise.create () in
-       let settlement, () =
-         Eio.Fiber.both
-           (fun () ->
-              Masc.Keeper_exact_flow_scope.with_settlement
-                flow_scope
-                ~registered_lane_id
-                (fun () ->
-                   Eio.Promise.resolve publish_entered ();
-                   Eio.Promise.await continue_promise))
+       let settlement = ref None in
+       Eio.Fiber.both
+         (fun () ->
+            settlement :=
+              Some
+                (Masc.Keeper_exact_flow_scope.with_settlement
+                   flow_scope
+                   ~registered_lane_id
+                   (fun () ->
+                      Eio.Promise.resolve publish_entered ();
+                      Eio.Promise.await continue_promise)))
            (fun () ->
               Eio.Promise.await entered;
               Masc.Keeper_exact_flow_scope.release_owner
@@ -1632,12 +1634,12 @@ let test_exact_scope_release_defers_until_settlement_pin_leaves () =
                | Masc.Keeper_exact_flow_scope.Owner_unregistered_deferred -> ()
                | Masc.Keeper_exact_flow_scope.Current () ->
                  fail "retired owner admitted a new settlement pin");
-              Eio.Promise.resolve publish_continue ())
-       in
-       match settlement with
-       | Masc.Keeper_exact_flow_scope.Current () -> ()
-       | Masc.Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-         fail "release_owner invalidated an already-acquired settlement pin")
+              Eio.Promise.resolve publish_continue ());
+       match !settlement with
+       | Some (Masc.Keeper_exact_flow_scope.Current ()) -> ()
+       | Some Masc.Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+         fail "release_owner invalidated an already-acquired settlement pin"
+       | None -> fail "settlement pin fiber returned without an outcome")
 ;;
 
 let () =

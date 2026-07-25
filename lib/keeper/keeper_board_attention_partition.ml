@@ -1044,7 +1044,10 @@ let validate_exact_provenance (provenance : exact_provenance) =
     provenance.request_body_sha256
 ;;
 
-let exact_provenance_equal left right =
+let exact_provenance_equal
+      (left : exact_provenance)
+      (right : exact_provenance)
+  =
   String.equal left.slot_id right.slot_id
   && String.equal left.call_id right.call_id
   && String.equal left.plan_fingerprint right.plan_fingerprint

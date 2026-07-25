@@ -214,7 +214,7 @@ let append_manifest
     ~(installation : Keeper_checkpoint_store.installed_checkpoint)
     ~lifecycle
     recovery =
-  let trigger = recovery.Keeper_context_runtime.trigger in
+  let trigger = recovery.Keeper_post_turn.trigger in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let context : Keeper_runtime_manifest.turn_context =
     { manifest_keeper_name = meta.name

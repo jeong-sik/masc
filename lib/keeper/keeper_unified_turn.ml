@@ -382,7 +382,7 @@ let append_provider_overflow_manifest
       outcome
   =
   let append_recovery ~status ~error ~recovery turn_state =
-    let evidence = recovery.evidence in
+    let evidence = recovery.Keeper_post_turn.evidence in
     let trigger = recovery.trigger in
     let session_id = recovery.checkpoint.session_id in
     let checkpoint_path =

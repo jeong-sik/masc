@@ -699,8 +699,8 @@ let with_post_success_commit terminalizer commit =
         Post_success_commit_in_progress waiter
       | Commit_claim_already_committed ->
         Post_success_commit_already_committed
-      | Commit_claim_rejected rejected ->
-        Post_success_commit_rejected rejected
+      | Commit_claim_rejected (terminal, result) ->
+        Post_success_commit_rejected (terminal, result)
       | Commit_claim_owner_unregistered_deferred ->
         Post_success_commit_owner_unregistered_deferred)
   with

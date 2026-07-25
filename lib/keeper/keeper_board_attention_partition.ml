@@ -1031,7 +1031,7 @@ let validate_judgment (judgment : Candidate.judgment) =
   |> Result.map ignore
 ;;
 
-let validate_exact_provenance provenance =
+let validate_exact_provenance (provenance : exact_provenance) =
   let* () = nonempty "partition exact provenance slot_id" provenance.slot_id in
   let* () = nonempty "partition exact provenance call_id" provenance.call_id in
   let* () =

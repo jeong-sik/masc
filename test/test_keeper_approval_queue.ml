@@ -2227,7 +2227,8 @@ let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
         with
         | Error error ->
           Alcotest.fail (AQ.summary_owner_retirement_error_to_string error)
-        | Ok ids -> check (list string) "retired ids" [ retirable ] ids);
+        | Ok ids ->
+          Alcotest.(check (list string)) "retired ids" [ retirable ] ids);
        match AQ.get_pending_entry ~id:retirable with
        | Some
            { summary_status =

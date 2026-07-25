@@ -958,7 +958,7 @@ let extract_and_append_with_flow_scope_classified
     ~keeper_id
     ~flow_scope
     inp
-  =
+  : (Keeper_memory_os_types.episode, extraction_error) result =
   match clock with
   | None -> Error Execution_clock_unavailable
   | Some _ ->

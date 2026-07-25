@@ -781,7 +781,6 @@ type remove_entry_result =
 let remove_entry
       ?lifecycle_token
       ?expected
-      ?(after_fence = fun () -> ())
       ~base_path
       name
   =
@@ -807,7 +806,6 @@ let remove_entry
              ~keeper_name:name
              ~expected_lane_id:(Keeper_lane.id expected_entry.lane))
         expected;
-      after_fence ();
       Entry_missing
     | Some entry ->
       (match expected with
@@ -825,7 +823,6 @@ let remove_entry
              ~base_path
              ~keeper_name:name
              ~expected_lane_id:(Keeper_lane.id entry.lane);
-           after_fence ();
            Entry_removed entry)
          else loop ())
   in
@@ -870,12 +867,11 @@ let unregister ~base_path name =
       (Keeper_lifecycle_reservation.snapshot_to_string owner)
 ;;
 
-let unregister_exact_internal ?lifecycle_token ?after_fence entry =
+let unregister_exact_internal ?lifecycle_token entry =
   match
     remove_entry
       ?lifecycle_token
       ~expected:entry
-      ?after_fence
       ~base_path:entry.base_path
       entry.name
   with
@@ -888,10 +884,6 @@ let unregister_exact_internal ?lifecycle_token ?after_fence entry =
 ;;
 
 let unregister_exact entry = unregister_exact_internal entry
-
-let unregister_exact_with_fence ~after_fence entry =
-  unregister_exact_internal ~after_fence entry
-;;
 
 let unregister_exact_for_lifecycle token entry =
   unregister_exact_internal ~lifecycle_token:token entry

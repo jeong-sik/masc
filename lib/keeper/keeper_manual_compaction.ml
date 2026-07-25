@@ -16,12 +16,12 @@ type applied_receipt =
   }
 
 type success =
-  { recovery : Keeper_context_runtime.compaction_recovery
+  { recovery : Keeper_post_turn.compaction_recovery
   ; receipt : applied_receipt
   }
 
 type committed =
-  { recovery : Keeper_context_runtime.compaction_recovery
+  { recovery : Keeper_post_turn.compaction_recovery
   ; installation : Keeper_checkpoint_store.installed_checkpoint
   ; lifecycle : post_install_lifecycle
   }

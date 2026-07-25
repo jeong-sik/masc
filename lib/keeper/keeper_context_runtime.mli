@@ -100,15 +100,6 @@ type context_budget_source =
   | Requested_override
   | Requested_override_clamped_to_provider
 
-type compaction_recovery =
-  { checkpoint : Agent_sdk.Checkpoint.t
-  ; checkpoint_installation : Keeper_checkpoint_store.checkpoint_installation
-  ; trigger : Compaction_trigger.t
-  ; evidence : Keeper_compaction_evidence.t
-  ; turn_generation : int
-  ; projection_target : Keeper_compaction_projection_target.committed
-  }
-
 (** {1 Checkpoint Loading} *)
 
 val load_context_from_checkpoint

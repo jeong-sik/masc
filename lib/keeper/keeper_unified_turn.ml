@@ -194,7 +194,7 @@ let user_message_with_hitl_resolution ~base_path ~user_message = function
 
 type provider_overflow_recovery =
   | Not_provider_overflow
-  | Provider_overflow_applied of Keeper_context_runtime.compaction_recovery
+  | Provider_overflow_applied of Keeper_post_turn.compaction_recovery
   | Provider_overflow_no_compaction of Keeper_post_turn.no_compaction
   | Provider_overflow_retry_without_checkpoint of
       { trigger : Compaction_trigger.t
@@ -202,7 +202,7 @@ type provider_overflow_recovery =
       }
   | Provider_overflow_retry_with_checkpoint of
       { reason : string
-      ; recovery : Keeper_context_runtime.compaction_recovery
+      ; recovery : Keeper_post_turn.compaction_recovery
       }
 
 let recover_provider_context_overflow_in_lane

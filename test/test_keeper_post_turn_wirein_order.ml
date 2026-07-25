@@ -659,6 +659,11 @@ let test_manual_compaction_serializes_owner_lane () =
            } ->
          check bool "stale terminal retains slot id" true (String.trim slot_id <> "");
          check bool "stale terminal retains call id" true (String.trim call_id <> "")
+       | Post_turn.Already_rejected no_compaction ->
+         failf
+           "stale plan returned an unexpected rejection: %s"
+           (Post_turn.compaction_recovery_error_to_string
+              (Post_turn.No_compaction no_compaction))
        | Post_turn.Commit_failed { error; _ } ->
          failf
            "stale plan returned wrong error: %s"
@@ -1294,6 +1299,11 @@ let test_prepare_commit_source_cas () =
          } ->
        check bool "stale prepared terminal retains slot" true (String.trim slot_id <> "");
        check bool "stale prepared terminal retains call" true (String.trim call_id <> "")
+     | Post_turn.Already_rejected no_compaction ->
+       failf
+         "stale prepared value returned an unexpected rejection: %s"
+         (Post_turn.compaction_recovery_error_to_string
+            (Post_turn.No_compaction no_compaction))
      | Post_turn.Commit_failed { error; _ } ->
        failf
          "stale prepared value failed with the wrong error: %s"
@@ -1552,6 +1562,84 @@ let test_suspended_streak_refuses_reactive_prepare () =
   | Ok _ -> fail "reactive prepare on an empty store produced a compaction"
 ;;
 
+let test_exact_scope_release_defers_until_settlement_pin_leaves () =
+  Eio_main.run @@ fun env ->
+  Masc_test_deps.init_eio_clock env;
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  with_eio_context env sw @@ fun () ->
+  let base_path = Masc_test_deps.setup_test_workspace () in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_exact_flow_scope.clear ();
+      Runtime.For_testing.restore runtime_snapshot;
+      Masc_test_deps.cleanup_test_workspace base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       init_runtime_fixture ();
+       let meta = make_meta ~name:"scope-pin-release" () in
+       ensure_registered_keeper ~base_path:config.base_path meta;
+       let registered_lane_id () =
+         match
+           Masc.Keeper_registry.get
+             ~base_path:config.base_path
+             meta.name
+         with
+         | Some entry -> Some (Masc.Keeper_lane.id entry.lane)
+         | None -> None
+       in
+       let lane_id =
+         match registered_lane_id () with
+         | Some lane_id -> lane_id
+         | None -> fail "scope pin fixture did not register its owner"
+       in
+       let flow_scope =
+         match
+           Masc.Keeper_exact_flow_scope.for_registered
+             ~registered_lane_id
+             ~base_path:config.base_path
+             ~keeper_name:meta.name
+             ~surface:Masc.Keeper_exact_flow_scope.Compaction
+         with
+         | Ok flow_scope -> flow_scope
+         | Error detail -> failf "scope pin fixture failed: %s" detail
+       in
+       let entered, publish_entered = Eio.Promise.create () in
+       let continue_promise, publish_continue = Eio.Promise.create () in
+       let settlement, () =
+         Eio.Fiber.both
+           (fun () ->
+              Masc.Keeper_exact_flow_scope.with_settlement
+                flow_scope
+                ~registered_lane_id
+                (fun () ->
+                   Eio.Promise.resolve publish_entered ();
+                   Eio.Promise.await continue_promise))
+           (fun () ->
+              Eio.Promise.await entered;
+              Masc.Keeper_exact_flow_scope.release_owner
+                ~base_path:config.base_path
+                ~keeper_name:meta.name
+                ~expected_lane_id:lane_id;
+              (match
+                 Masc.Keeper_exact_flow_scope.with_settlement
+                   flow_scope
+                   ~registered_lane_id
+                   (fun () -> ())
+               with
+               | Masc.Keeper_exact_flow_scope.Owner_unregistered_deferred -> ()
+               | Masc.Keeper_exact_flow_scope.Current () ->
+                 fail "retired owner admitted a new settlement pin");
+              Eio.Promise.resolve publish_continue ())
+       in
+       match settlement with
+       | Masc.Keeper_exact_flow_scope.Current () -> ()
+       | Masc.Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+         fail "release_owner invalidated an already-acquired settlement pin")
+;;
+
 let () =
   run "post-turn durability" [
     "durable compaction", [
@@ -1578,6 +1666,8 @@ let () =
         `Quick test_post_dispatch_non_reducing_output_is_quarantined;
       test_case "suspended streak refuses reactive prepare"
         `Quick test_suspended_streak_refuses_reactive_prepare;
+      test_case "exact scope release waits for settlement pin"
+        `Quick test_exact_scope_release_defers_until_settlement_pin_leaves;
       test_case "missing exact lane is source-bound no-compaction"
         `Quick test_missing_exact_lane_is_source_bound_no_compaction;
     ];

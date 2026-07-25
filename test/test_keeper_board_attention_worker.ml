@@ -1087,7 +1087,9 @@ let test_released_cancellation_is_prompt_and_process_recoverable () =
            }
      ; _
      }
-     when same_provenance durable failed && durable_next = next -> ()
+     when same_provenance durable failed
+          && same_candidate_visit durable_next next ->
+    ()
    | _ -> Alcotest.fail "cancellation lost durable advancement evidence");
   Alcotest.(check int)
     "process-start recovery quarantines one advancing execution"
@@ -1112,7 +1114,9 @@ let test_released_cancellation_is_prompt_and_process_recoverable () =
           }
     ; _
     }
-    when same_provenance durable failed && durable_next = next -> ()
+    when same_provenance durable failed
+         && same_candidate_visit durable_next next ->
+   ()
   | _ -> Alcotest.fail "process-start recovery lost durable advancement evidence"
 ;;
 

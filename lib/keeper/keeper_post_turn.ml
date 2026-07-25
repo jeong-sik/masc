@@ -1012,7 +1012,7 @@ let recover_latest_checkpoint_for_compaction
     ~(trigger : Compaction_trigger.t)
     ~projection_request
     ()
-  : (compaction_recovery, compaction_recovery_error) result =
+  : prepared_commit_outcome =
   match
     prepare_compaction
       ?exact_execution_guard

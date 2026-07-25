@@ -603,7 +603,11 @@ let rejected_terminalization terminal result =
   | Error detail -> Terminalization_invariant_failed detail
 ;;
 
-let finish_rejection terminalizer terminal completion =
+let finish_rejection
+      terminalizer
+      (terminal : Keeper_event_queue_state.exact_execution_terminal)
+      completion
+  =
   Eio.Cancel.protect
   @@ fun () ->
   let result =
@@ -1173,8 +1177,7 @@ let execute_prepared_lane_current
            prepared_lane.flow_attempt)
     with
     | Eio.Cancel.Cancelled _ as cancellation ->
-      Eio.Cancel.protect
-      @@ fun () ->
+      let raw_bt = Printexc.get_raw_backtrace () in
       (* A durable bind is MASC's only ownership signal. MASC deliberately does
          not inspect OAS receipt phase/count after cancellation. If OAS had
          proved safe advancement it would first invoke [before_advance], whose
@@ -1182,7 +1185,7 @@ let execute_prepared_lane_current
          identity is always source-terminal; a pre-bind cancellation is
          re-raised. *)
       (match !bound_observation with
-       | None -> raise cancellation
+       | None -> Printexc.raise_with_backtrace cancellation raw_bt
        | Some observation ->
          `Bound_cancellation observation)
   in
@@ -1295,10 +1298,15 @@ let execute_prepared_lane_current
                 }
             }))
   in
-  match with_settlement settle_execution with
-  | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-    Error Exact_owner_unregistered_deferred
-  | Keeper_exact_flow_scope.Current result -> result
+  let settle () =
+    match with_settlement settle_execution with
+    | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+      Error Exact_owner_unregistered_deferred
+    | Keeper_exact_flow_scope.Current result -> result
+  in
+  match execution with
+  | `Bound_cancellation _ -> Eio.Cancel.protect settle
+  | `Flow _ -> settle ()
 ;;
 
 let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepared_lane =

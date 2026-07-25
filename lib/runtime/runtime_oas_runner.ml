@@ -10,9 +10,6 @@
 
 let default_config_path = Runtime.config_path
 
-let default_model_strings ~runtime_id =
-  Provider_runtime_projection.default_execution_model_strings runtime_id
-
 (* Named model execution *)
 
 let require_eio ?sw ?net () =

@@ -82,17 +82,3 @@ val record_pre_dispatch_terminal_observation :
   unit -> unit
 (** Record a terminal observation (receipt + activity graph event) for a
     pre-dispatch failure or early exit. *)
-
-val ensure_local_discovery_ready :
-  ?refresh:(string list -> bool) ->
-  string list ->
-  (unit, string) result
-(** Ensure local-provider discovery is refreshed before a turn when the
-    selected labels depend on runtime discovery. *)
-
-module For_testing : sig
-  val with_local_discovery_refresh :
-    (string list -> bool) -> (unit -> 'a) -> 'a
-  (** Install a scoped refresh override and force the discovery branch for
-      deterministic preflight tests. *)
-end

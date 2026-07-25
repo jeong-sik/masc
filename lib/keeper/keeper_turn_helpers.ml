@@ -367,23 +367,3 @@ let record_pre_dispatch_terminal_observation
       ~side_effect:(activity_kind ^ " emit")
       (Printexc.to_string exn)
 ;;
-
-let local_discovery_refresh_for_test : (string list -> bool) option Atomic.t =
-  Atomic.make None
-;;
-
-(* Local discovery disabled: tier-based local/non-local classification
-   no longer exists. All providers are treated uniformly. *)
-let ensure_local_discovery_ready ?refresh:_ (_labels : string list) : (unit, string) result =
-  Ok ()
-;;
-
-module For_testing = struct
-  let with_local_discovery_refresh refresh f =
-    let previous = Atomic.get local_discovery_refresh_for_test in
-    Atomic.set local_discovery_refresh_for_test (Some refresh);
-    Eio_guard.protect
-      ~finally:(fun () -> Atomic.set local_discovery_refresh_for_test previous)
-      f
-  ;;
-end

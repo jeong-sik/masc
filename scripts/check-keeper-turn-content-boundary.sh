@@ -37,25 +37,38 @@ FORBIDDEN_IDENTIFIERS = (
 OCAML_IDENTIFIER_PATTERN = re.compile(
     r"(?<![A-Za-z0-9_'])[A-Za-z_][A-Za-z0-9_']*(?![A-Za-z0-9_'])"
 )
-ENV_BINDING_PATTERN = re.compile(r"\b[A-Za-z_][A-Za-z0-9_']*_env\b", re.IGNORECASE)
 CHAR_LITERAL_PATTERN = re.compile(r"'(?:[^'\\\r\n]|\\[^\r\n])'")
 CAMEL_CASE_BOUNDARY_PATTERN = re.compile(
     r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
 )
-FORBIDDEN_ENV_IDENTIFIERS = frozenset(("Env_config", "getenv", "getenv_opt"))
+FORBIDDEN_ENV_IDENTIFIERS = frozenset(
+    ("Env_config", "environment", "getenv", "getenv_opt")
+)
 POLICY_TOKENS = frozenset(("provider", "model", "credential", "token"))
+TOKEN_NORMALIZATION = {
+    "credentials": "credential",
+    "environments": "env",
+    "environment": "env",
+    "keys": "key",
+    "models": "model",
+    "providers": "provider",
+    "tokens": "token",
+}
 
 
-def has_policy_token(identifier: str) -> bool:
+def is_policy_environment_binding(identifier: str) -> bool:
     tokens = []
     for snake_part in re.split(r"_+", identifier):
         for camel_part in CAMEL_CASE_BOUNDARY_PATTERN.split(snake_part):
             token = camel_part.rstrip("'").lower()
             if token:
-                tokens.append(token)
-    return any(token in POLICY_TOKENS for token in tokens) or any(
-        left == "api" and right == "key"
-        for left, right in zip(tokens, tokens[1:])
+                tokens.append(TOKEN_NORMALIZATION.get(token, token))
+    return "env" in tokens and (
+        any(token in POLICY_TOKENS for token in tokens)
+        or any(
+            left == "api" and right == "key"
+            for left, right in zip(tokens, tokens[1:])
+        )
     )
 
 
@@ -154,8 +167,8 @@ for raw_path in sys.argv[1:]:
     match = next(
         (
             candidate
-            for candidate in ENV_BINDING_PATTERN.finditer(code)
-            if has_policy_token(candidate.group(0))
+            for candidate in OCAML_IDENTIFIER_PATTERN.finditer(code)
+            if is_policy_environment_binding(candidate.group(0))
         ),
         None,
     )
@@ -190,23 +203,30 @@ self_test() (
     bash "${BASH_SOURCE[0]}" --check >/dev/null
 
   cat >>"${first}" <<'EOF'
-(*
+(* 
 let _ = Provider_runtime_projection.default_execution_model_strings "ignored"
 let _ = Sys.getenv_opt "MASC_DEFAULT_MODEL"
+let _ = Unix.environment ()
 *)
 let _decoy = "Keeper_model_labels ensure_api_keys_for_labels"
 let _quoted_decoy = {|
 Provider_runtime_binding ensure_local_discovery_ready
 |}
-let _tagged_decoy = {tag|Env_config getenv getenv_opt|tag}
-let _ordinary_env_decoy = "Env_config getenv getenv_opt"
+let _tagged_decoy = {tag|Env_config environment getenv getenv_opt|tag}
+let _ordinary_env_decoy = "Env_config environment getenv getenv_opt"
 let _quote = '"'
 let _ = Env_configuration.Tokenizer.path
 let _ = getenv_optimal ()
 let _ = my_getenv_opt ()
+let _ = environment_name ()
+let _ = runtime_environment ()
 let _ = Tokenizer_env.path
+let _ = TokenizerEnv.path
 let _ = Remodeling_env.enabled
+let _ = RemodelingEnv.enabled
 let _ = Tokenizer'_env.path
+let _ = modeling_env ()
+let _ = Credentialing_env.path
 EOF
   MASC_KEEPER_TURN_CONTENT_BOUNDARY_ROOT="${fixture}" \
     bash "${BASH_SOURCE[0]}" --check >/dev/null
@@ -227,6 +247,8 @@ EOF
     'let _ = Sys . getenv_opt "MASC_DEFAULT_MODEL"' \
     'let _ = Sys.(getenv_opt "MASC_DEFAULT_MODEL")' \
     'let _ = let open Unix in getenv "PROVIDER_API_KEY"' \
+    'let _ = Unix.environment ()' \
+    'let _ = let open Unix in environment ()' \
     $'let _ = Unix.\ngetenv_opt "PROVIDER_API_KEY"' \
     'let _ = Unix.getenv "PROVIDER_API_KEY"' \
     'let _ = Env_config.Model_defaults.default_runtime_opt ()' \
@@ -246,6 +268,11 @@ EOF
     "let _ = Env_config'.Model.value" \
     'let _ = ApiKey_env.fallback ()' \
     'let _ = APIKey_env.fallback ()' \
+    'let _ = ApiKeyEnv.fallback ()' \
+    'let _ = apiKeyEnv ()' \
+    'let _ = ApiKeysEnv.fallback ()' \
+    'let _ = Credentials_env.fallback ()' \
+    'let _ = model_env_opt ()' \
     "let _ = model'_env.fallback ()" \
     $'let _quote = \'"\'\nlet _ = Env_config.Model_defaults.default_runtime_opt ()' \
     'let _ = Credential_env.fallback ()'

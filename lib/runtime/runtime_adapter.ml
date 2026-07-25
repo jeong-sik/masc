@@ -345,6 +345,7 @@ let model_capabilities_override_of_model_spec
 
 (* --- provider × model spec → Provider_config.t --- *)
 let provider_config_from_declared_provider ?keep_alive ?num_ctx ?max_concurrent_requests
+    ?max_request_body_bytes
     (provider : Runtime_schema.provider) (spec : Runtime_schema.model_spec)
   : (Llm_provider.Provider_config.t, string) result =
   let registry_entry = find_registry_entry provider.id in
@@ -406,6 +407,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?max_concurrent_
             ?num_ctx
             ?connect_timeout_s:provider.connect_timeout_s
             ?max_concurrent_requests
+            ?max_request_body_bytes
             ())
      | Error reason -> Error reason)
   | Cli _ ->
@@ -431,6 +433,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx ?max_concurrent_
             ?num_ctx
             ?connect_timeout_s:provider.connect_timeout_s
             ?max_concurrent_requests
+            ?max_request_body_bytes
             ())
      | Error reason -> Error reason)
 ;;
@@ -457,6 +460,7 @@ let binding_to_provider_config (cfg : Runtime_schema.config) (binding : Runtime_
          ?keep_alive:binding.keep_alive
          ?num_ctx:binding.num_ctx
          ?max_concurrent_requests:binding.max_concurrent
+         ?max_request_body_bytes:binding.max_request_body_bytes
          provider
          spec)
 ;;

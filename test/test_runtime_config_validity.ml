@@ -1287,6 +1287,96 @@ let test_runtime_toml_parses_optional_max_concurrent () =
          binding.Runtime_schema.max_concurrent
      | bindings -> failf "expected one binding, got %d" (List.length bindings))
 
+let test_runtime_toml_parses_optional_max_request_body_bytes () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     max-request-body-bytes = 1048576\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Error errs ->
+    let rendered =
+      errs
+      |> List.map (fun (err : Runtime_toml.parse_error) ->
+        Printf.sprintf "%s: %s" err.path err.message)
+      |> String.concat "\n"
+    in
+    failf "runtime TOML should parse optional max-request-body-bytes:\n%s" rendered
+  | Ok cfg ->
+    (match cfg.Runtime_schema.bindings with
+     | [ binding ] ->
+       check (option int) "explicit max-request-body-bytes opt-in" (Some 1048576)
+         binding.Runtime_schema.max_request_body_bytes
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
+let test_runtime_toml_omitted_max_request_body_bytes_is_none () =
+  (* Undeclared must stay None rather than acquiring a default. OAS reads None as
+     "no ceiling declared" and passes every size; a default here would silently
+     become a product-wide cap nobody chose. *)
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Error _ -> failf "runtime TOML without the knob should still parse"
+  | Ok cfg ->
+    (match cfg.Runtime_schema.bindings with
+     | [ binding ] ->
+       check (option int) "omitted max-request-body-bytes stays None" None
+         binding.Runtime_schema.max_request_body_bytes
+     | bindings -> failf "expected one binding, got %d" (List.length bindings))
+
+let test_runtime_toml_rejects_non_positive_max_request_body_bytes () =
+  let template n =
+    Printf.sprintf
+      "[providers.local]\n\
+       protocol = \"openai-compatible-http\"\n\
+       endpoint = \"http://127.0.0.1:1/v1\"\n\
+       \n\
+       [models.sample]\n\
+       api-name = \"sample\"\n\
+       max-context = 1024\n\
+       \n\
+       [local.sample]\n\
+       max-request-body-bytes = %d\n\
+       \n\
+       [runtime]\n\
+       default = \"local.sample\"\n"
+      n
+  in
+  List.iter
+    (fun n ->
+       match Runtime_toml.parse_string (template n) with
+       | Ok _ -> failf "max-request-body-bytes = %d should be rejected" n
+       | Error errs ->
+         let rendered =
+           errs
+           |> List.map (fun (err : Runtime_toml.parse_error) ->
+             Printf.sprintf "%s: %s" err.path err.message)
+           |> String.concat "\n"
+         in
+         check bool (Printf.sprintf "error mentions the knob for %d" n) true
+           (String_util.contains_substring rendered "max-request-body-bytes"))
+    [ 0; -1 ]
+
 let test_runtime_toml_separates_wizard_default_from_runtime_default_marker () =
   let content =
     "[providers.local]\n\
@@ -2831,6 +2921,12 @@ let () =
             test_runtime_toml_rejects_non_positive_max_concurrent;
           test_case "max-concurrent flows from binding to provider config" `Quick
             test_runtime_toml_max_concurrent_flows_to_provider_config;
+          test_case "max-request-body-bytes is optional opt-in" `Quick
+            test_runtime_toml_parses_optional_max_request_body_bytes;
+          test_case "omitted max-request-body-bytes stays None" `Quick
+            test_runtime_toml_omitted_max_request_body_bytes_is_none;
+          test_case "non-positive max-request-body-bytes is rejected" `Quick
+            test_runtime_toml_rejects_non_positive_max_request_body_bytes;
           test_case
             "deprecated capability notice warns once per process, not per parse"
             `Quick test_deprecated_capability_notice_warns_once_per_process;

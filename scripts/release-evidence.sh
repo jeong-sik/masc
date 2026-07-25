@@ -36,6 +36,14 @@ cd "$repo_root"
 [[ -x "$BINARY" ]] || { echo "release-evidence: binary not executable: $BINARY" >&2; exit 1; }
 [[ -f config/oas-models-overlay.toml ]] || { echo "release-evidence: config/oas-models-overlay.toml missing" >&2; exit 1; }
 
+readonly SMOKE_FIXTURE_DIR="$repo_root/scripts/fixtures/release-evidence"
+for smoke_fixture in runtime.toml oas-models-overlay.toml; do
+  [[ -f "$SMOKE_FIXTURE_DIR/$smoke_fixture" ]] || {
+    echo "release-evidence: smoke fixture missing: scripts/fixtures/release-evidence/$smoke_fixture" >&2
+    exit 1
+  }
+done
+
 mkdir -p "$(dirname "$OUTFILE")"
 out_dir="$(cd "$(dirname "$OUTFILE")" && pwd)"
 
@@ -223,35 +231,16 @@ copy_install_smoke() {
   mkdir -p "$prefix_dir" "$base_path/.masc/config"
   cp "$BINARY" "$installed_bin"
   chmod +x "$installed_bin"
-  cat >"$base_path/.masc/config/runtime.toml" <<'EOF'
-[runtime]
-# The smoke runtime's model id must be known to the OAS capability catalog, or
-# the startup capability gate (validate_runtime_model_capabilities, RFC-0206)
-# refuses to boot (a fixture model named "smoke" is absent from the catalog and
-# was rejected, breaking this evidence step on every OCaml push to main).
-# deepseek-v4-flash is the catalog-known fleet default; the provider endpoint
-# below is an isolated dead port and MASC_KEEPER_BOOTSTRAP_ENABLED=false, so no
-# real provider call is made — this fixture only checks the binary boots and
-# serves /health. The [models.deepseek-v4-flash] block mirrors
-# config/runtime.toml's shape so the runtime resolves; its model id is what the
-# gate matches against the catalog.
-default = "ollama_cloud.deepseek-v4-flash"
-
-[providers.ollama_cloud]
-display-name = "Release Evidence Smoke"
-protocol = "openai-compatible-http"
-endpoint = "http://127.0.0.1:9/v1"
-
-[models.deepseek-v4-flash]
-api-name = "deepseek-v4-flash"
-max-context = 32768
-tools-support = true
-streaming = true
-
-[ollama_cloud.deepseek-v4-flash]
-is-default = true
-max-concurrent = 1
-EOF
+  # The smoke config is a checked-in fixture, not a heredoc. A heredoc is
+  # invisible to the compiler and to every test, so a new startup requirement —
+  # such as the mandatory exact-output lanes added in #25671 — drifts silently
+  # and only fails here, on a step that runs on push-to-main and never on a PR
+  # (#25663). As files, these are checked against
+  # Server_runtime_bootstrap.mandatory_exact_output_lane_ids by
+  # test_runtime_config_validity, which runs in every PR.
+  cp "$SMOKE_FIXTURE_DIR/runtime.toml" "$base_path/.masc/config/runtime.toml"
+  cp "$SMOKE_FIXTURE_DIR/oas-models-overlay.toml" \
+    "$base_path/.masc/config/oas-models-overlay.toml"
 }
 
 capture_installed_version() {

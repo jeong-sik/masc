@@ -933,6 +933,131 @@ List.iter
                Runtime_schema.Reasoning_effort)
         | None -> fail "expected Kimi K2.7 Code capabilities"))
 
+(* The lane-resolution test below iterates the lanes a config declares, so it
+   passes vacuously on a config that declares none of them. Startup does the
+   opposite: it requires every id in
+   Server_runtime_bootstrap.mandatory_exact_output_lane_ids to be present with a
+   non-empty slot list and synthesizes nothing. Absence is therefore the failure
+   mode no existing test could see — #25671 added hitl_auto_judge and main failed
+   every push for ~29 hours because the boot path that would have caught it runs
+   only on push-to-main (#25663). This asserts presence, against the same value
+   startup reads. *)
+let assert_mandatory_exact_output_lanes_declared ~label path =
+  check bool (label ^ " exists") true (Sys.file_exists path);
+  match Runtime_toml.parse_file path with
+  | Error msg -> failf "%s should load: %s" label msg
+  | Ok (config : Runtime_schema.config) ->
+    List.iter
+      (fun lane_id ->
+         match
+           List.find_opt
+             (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+                String.equal lane.id lane_id)
+             config.exact_output_lane_decls
+         with
+         | None ->
+           failf
+             "%s must declare mandatory exact-output lane %s; startup raises \
+              Config_error instead of synthesizing it"
+             label
+             lane_id
+         | Some { slot_ids = []; _ } ->
+           failf
+             "%s declares mandatory exact-output lane %s with no slots; startup \
+              requires at least one OAS target ref"
+             label
+             lane_id
+         | Some { slot_ids = _ :: _; _ } -> ())
+      Server_runtime_bootstrap.mandatory_exact_output_lane_ids
+;;
+
+let release_evidence_fixture_dir () =
+  Filename.concat (repo_root ()) "scripts/fixtures/release-evidence"
+;;
+
+let test_repo_runtime_toml_declares_mandatory_exact_output_lanes () =
+  assert_mandatory_exact_output_lanes_declared
+    ~label:"config/runtime.toml"
+    (Filename.concat (repo_root ()) "config/runtime.toml")
+;;
+
+let test_release_evidence_fixture_declares_mandatory_exact_output_lanes () =
+  assert_mandatory_exact_output_lanes_declared
+    ~label:"scripts/fixtures/release-evidence/runtime.toml"
+    (Filename.concat (release_evidence_fixture_dir ()) "runtime.toml")
+;;
+
+(* release-evidence.sh boots the installed binary in a credential-less CI job,
+   so the second startup gate (require_usable_mandatory_exact_output_lanes,
+   which calls resolve_lane) only passes if the fixture's lane slots are
+   admitted and resolved with no environment secret at all. getenv returns
+   Ok None for every name here, which is stricter than CI: any fixture slot that
+   grows an api_key_env fails this test instead of failing a push to main. *)
+let test_release_evidence_fixture_lanes_resolve_without_credentials () =
+  let fixture_dir = release_evidence_fixture_dir () in
+  let overlay_path = Filename.concat fixture_dir "oas-models-overlay.toml" in
+  let overlay_contents =
+    try In_channel.with_open_bin overlay_path In_channel.input_all with
+    | Sys_error detail ->
+      failf "release-evidence smoke overlay cannot be read: %s" detail
+  in
+  let io : Exact_output.resolver_io = { getenv = (fun _ -> Ok None) } in
+  let snapshot =
+    match
+      Exact_output.load_resolver_snapshot
+        ~io
+        ~catalog:
+          (Exact_output.Embedded_with_overlay
+             { source = overlay_path; contents = overlay_contents })
+        ()
+    with
+    | Ok snapshot -> snapshot
+    | Error _ -> fail "release-evidence smoke overlay should load"
+  in
+  match
+    Runtime_toml.parse_file (Filename.concat fixture_dir "runtime.toml")
+  with
+  | Error msg -> failf "release-evidence smoke runtime.toml should load: %s" msg
+  | Ok (config : Runtime_schema.config) ->
+    List.iter
+      (fun lane_id ->
+         match
+           List.find_opt
+             (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+                String.equal lane.id lane_id)
+             config.exact_output_lane_decls
+         with
+         | None ->
+           failf
+             "release-evidence smoke runtime.toml must declare lane %s"
+             lane_id
+         | Some lane ->
+           check bool
+             (Printf.sprintf "lane %s has slots" lane_id)
+             true
+             (lane.slot_ids <> []);
+           List.iter
+             (fun target_ref ->
+                match Exact_output.admit_target_ref snapshot target_ref with
+                | Error _ ->
+                  failf
+                    "release-evidence smoke lane %s target %s must exist in the \
+                     overlaid catalog"
+                    lane_id
+                    target_ref
+                | Ok admitted_target ->
+                  (match Exact_output.resolve_target admitted_target with
+                   | Ok _ -> ()
+                   | Error _ ->
+                     failf
+                       "release-evidence smoke lane %s target %s must resolve \
+                        with no credential in the environment"
+                       lane_id
+                       target_ref))
+             lane.slot_ids)
+      Server_runtime_bootstrap.mandatory_exact_output_lane_ids
+;;
+
 let test_deployment_exact_output_catalog_admits_seed_lanes () =
   let root = repo_root () in
   let runtime_path = Filename.concat root "config/runtime.toml" in
@@ -3012,6 +3137,15 @@ let () =
             `Quick test_runtime_max_context_missing_both_sources_rejected_at_load;
           test_case
             "assignments: unassigned keeper rides [runtime].default"
-            `Quick test_runtime_assignment_default_rider_resolves_to_default_runtime
+            `Quick test_runtime_assignment_default_rider_resolves_to_default_runtime;
+          test_case
+            "repo runtime.toml declares every mandatory exact-output lane"
+            `Quick test_repo_runtime_toml_declares_mandatory_exact_output_lanes;
+          test_case
+            "release-evidence smoke fixture declares every mandatory exact-output lane"
+            `Quick test_release_evidence_fixture_declares_mandatory_exact_output_lanes;
+          test_case
+            "release-evidence smoke lanes resolve with no credential present"
+            `Quick test_release_evidence_fixture_lanes_resolve_without_credentials
         ] )
     ]

@@ -4,6 +4,11 @@
     admission, attempt allocation, execution, failover, receipts, and
     provenance. *)
 
+val lane_id : string
+(** The registry lane id this worker resolves. Exposed so startup validation and
+    config fixtures name the lane through this module instead of repeating the
+    literal, matching {!Keeper_board_attention_exact_flow.lane_id}. *)
+
 val readiness : unit -> (unit, string) result
 (** Verify that the Gate prompt and the registry-owned [hitl_auto_judge] exact
     lane are currently available and that OAS admits at least one candidate for

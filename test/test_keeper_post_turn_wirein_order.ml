@@ -9,7 +9,6 @@ module Cycle = Masc.Keeper_heartbeat_loop_cycle
 module Queue = Keeper_event_queue
 module Registry_queue = Masc.Keeper_registry_event_queue
 module WO = Masc.Keeper_world_observation
-module Projection_target = Masc.Keeper_compaction_projection_target
 module Exact_fixture = Compaction_exact_output_fixture
 module Schema = Masc.Keeper_structured_output_schema
 module Summarizer = Masc.Keeper_compaction_llm_summarizer
@@ -165,24 +164,6 @@ let test_final_admission_busy_requeues_only_pre_dispatch_no_compaction () =
           (exact_terminal Keeper_event_queue_state.Exact_execution_failed)))
 ;;
 
-let test_empty_projection_target_is_typed () =
-  let resolver_called = ref false in
-  let evidence =
-    Projection_target.request
-      ~assignment_id:""
-      ~resolve_context_window:(fun _ ->
-        resolver_called := true;
-        Projection_target.Resolved_context_window 1)
-    |> Projection_target.capture
-    |> Projection_target.captured_evidence
-  in
-  check bool "empty assignment skips runtime resolution" false !resolver_called;
-  match evidence with
-  | Projection_target.Unavailable Projection_target.Empty_assignment -> ()
-  | Projection_target.Exact _ | Projection_target.Unavailable _ ->
-    fail "empty assignment was not retained as typed unavailable evidence"
-;;
-
 let make_meta
       ?(name = "post-turn-no-auto-compact")
       ?(trace_id = "trace-post-turn-no-auto-compact")
@@ -198,25 +179,6 @@ let make_meta
   with
   | Ok meta -> meta
   | Error detail -> failf "keeper meta fixture failed: %s" detail
-
-let projection_request_of_meta
-      (meta : Masc.Keeper_meta_contract.keeper_meta)
-  =
-  Projection_target.request
-    ~assignment_id:(Masc.Keeper_meta_contract.runtime_id_of_meta meta)
-    ~resolve_context_window:(fun runtime ->
-      match
-        Masc.Keeper_context_runtime.resolve_max_context_resolution_for_runtime
-          ~requested_override:meta.max_context_override
-          runtime
-      with
-      | Ok resolution ->
-        Projection_target.Resolved_context_window resolution.effective_budget
-      | Error (Invalid_requested_context_override value) ->
-        Projection_target.Invalid_context_window value
-      | Error (Runtime_context_window_unavailable _) ->
-        Projection_target.Context_window_not_resolved)
-;;
 
 let make_checkpoint () =
   Agent_sdk.Checkpoint.
@@ -640,7 +602,6 @@ let test_manual_compaction_serializes_owner_lane () =
           ~meta
           ~trigger:Compaction_trigger.Manual
           ~exact_execution_guard:Exact_fixture.permissive_exact_execution_guard
-          ~projection_request:(projection_request_of_meta meta)
           ()
       in
       check int
@@ -964,7 +925,6 @@ let test_missing_exact_lane_is_source_bound_no_compaction () =
            ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
            ~meta
            ~trigger:Compaction_trigger.Manual
-           ~projection_request:(projection_request_of_meta meta)
            ()
        with
        | Error
@@ -1190,7 +1150,6 @@ let test_prepare_commit_source_cas () =
       ~meta
       ~trigger:Compaction_trigger.Manual
       ~exact_execution_guard
-      ~projection_request:(projection_request_of_meta meta)
       ()
   with
   | Error error ->
@@ -1206,7 +1165,6 @@ let test_prepare_commit_source_cas () =
           ~meta
           ~trigger:Compaction_trigger.Manual
           ~exact_execution_guard
-          ~projection_request:(projection_request_of_meta meta)
           ()
       with
       | Ok stale_prepared -> stale_prepared
@@ -1383,7 +1341,6 @@ let run_post_install_domain_valid_failure ~name domain_valid_failure =
              ~meta
              ~trigger:Compaction_trigger.Manual
              ~exact_execution_guard
-             ~projection_request:(projection_request_of_meta meta)
              ()
          with
          | Ok prepared -> prepared
@@ -1681,19 +1638,12 @@ let test_suspended_streak_refuses_reactive_prepare () =
       (Filename.get_temp_dir_name ())
       (Printf.sprintf "masc-prepare-admission-%d" (Unix.getpid ()))
   in
-  let projection_request =
-    Projection_target.request
-      ~assignment_id:""
-      ~resolve_context_window:(fun _ ->
-        Projection_target.Resolved_context_window 1)
-  in
   let prepare ~streak ~trigger =
     Post_turn.prepare_compaction
       ~base_path:base_dir
       ~base_dir
       ~meta:(meta_with_streak streak)
       ~trigger
-      ~projection_request
       ()
   in
   let suspended = meta_with_streak 3 in
@@ -1867,8 +1817,6 @@ let () =
       test_case
         "final-admission Busy distinguishes pre-dispatch from exact terminal"
         `Quick test_final_admission_busy_requeues_only_pre_dispatch_no_compaction;
-      test_case "empty projection target is typed"
-        `Quick test_empty_projection_target_is_typed;
       test_case "regular post-turn does not auto-compact"
         `Quick test_regular_post_turn_does_not_auto_compact;
       test_case "manual compaction serializes the owner lane"

@@ -168,7 +168,6 @@ val recover_latest_checkpoint_for_compaction
   -> base_dir:string
   -> meta:keeper_meta
   -> trigger:Compaction_trigger.t
-  -> projection_request:Keeper_compaction_projection_target.request
   -> unit
   -> Keeper_post_turn.prepared_commit_outcome
 
@@ -178,7 +177,6 @@ val prepare_compaction
   -> base_dir:string
   -> meta:Keeper_meta_contract.keeper_meta
   -> trigger:Compaction_trigger.t
-  -> projection_request:Keeper_compaction_projection_target.request
   -> unit
   -> (Keeper_post_turn.prepared_compaction, Keeper_post_turn.compaction_recovery_error) result
 

@@ -168,7 +168,6 @@ val recover_latest_checkpoint_for_compaction
   -> base_dir:string
   -> meta:keeper_meta
   -> trigger:Compaction_trigger.t
-  -> projection_request:Keeper_compaction_projection_target.request
   -> unit
   -> Keeper_post_turn.prepared_commit_outcome
 
@@ -178,7 +177,6 @@ val prepare_compaction
   -> base_dir:string
   -> meta:Keeper_meta_contract.keeper_meta
   -> trigger:Compaction_trigger.t
-  -> projection_request:Keeper_compaction_projection_target.request
   -> unit
   -> (Keeper_post_turn.prepared_compaction, Keeper_post_turn.compaction_recovery_error) result
 
@@ -207,14 +205,6 @@ val resolve_max_context_resolution_for_runtime_id
   :  requested_override:int option
   -> runtime_id:string
   -> (max_context_resolution, max_context_resolution_error) result
-
-val resolve_max_context_resolution_for_runtime
-  :  requested_override:int option
-  -> Runtime.t
-  -> (max_context_resolution, max_context_resolution_error) result
-(** Resolve against the supplied immutable runtime snapshot. Callers that need
-    another projection of the same provider/model must use this form rather
-    than resolving the runtime id twice across a config refresh. *)
 
 val max_context_resolution_error_to_string
   :  max_context_resolution_error

@@ -27,6 +27,10 @@ require_once() {
 
 check_boundary() {
   [[ -f "${TARGET}" ]] || fail "target not found: ${TARGET}"
+  [[ ! -e "${REPO_ROOT}/lib/keeper/keeper_compaction_projection_target.ml" ]] \
+    || fail "retired compaction provider/model projection carrier remains"
+  [[ ! -e "${REPO_ROOT}/lib/keeper/keeper_compaction_projection_target.mli" ]] \
+    || fail "retired compaction provider/model projection interface remains"
 
   require_once "Exact_output.make_flow_candidate"
   require_once "Exact_output.snapshot_flow"
@@ -38,6 +42,43 @@ check_boundary() {
   forbidden_pattern='Exact_output\.admit_flow|Exact_output\.admit([^_[:alnum:]]|$)|Exact_output\.(start_attempt|execute_once|receipt_phase|receipt_dispatch_count)|Exact_output\.effect_phase|type admitted_slot|is_before_dispatch_zero|ready_plan'
   if rg -n "${forbidden_pattern}" "${TARGET}"; then
     fail "MASC-local exact admission/attempt/receipt control flow is forbidden"
+  fi
+
+  local retired_projection_pattern
+  local strict_projection_pattern
+  local candidate
+  local strict_projection_targets=()
+  local mixed_projection_targets=()
+  retired_projection_pattern='Keeper_compaction_projection_target|keeper_compaction_projection_target|\bprojection_(request|target)\b|\b(captured_evidence|committed_evidence)\b'
+  strict_projection_pattern="${retired_projection_pattern}|Runtime\\.resolve_assignment|\\bruntime\\.(id|provider|provider_config|model|model_id|protocol)\\b|\\bprovider\\.(id|kind|protocol|model|model_id)\\b|\\bmodel\\.(id|provider|protocol)\\b|\\b(Llm_provider\\.)?Provider_config\\b|\\bprovider_config\\b|\\b(provider_id|model_id|oas_provider_kind|provider_kind)\\b|\\.protocol\\b|\\bprotocol[[:space:]]*[:=]|\"protocol\""
+
+  while IFS= read -r candidate; do
+    strict_projection_targets+=("${candidate}")
+  done < <(
+    find "${REPO_ROOT}/lib/keeper" -maxdepth 1 -type f \
+      \( -name '*compaction*' -o -name 'keeper_compact*' \) \
+      -print \
+      | sort
+  )
+  for candidate in \
+    "${REPO_ROOT}/lib/keeper/keeper_post_turn.ml" \
+    "${REPO_ROOT}/lib/keeper/keeper_post_turn.mli"
+  do
+    [[ -f "${candidate}" ]] && strict_projection_targets+=("${candidate}")
+  done
+  if rg -n "${strict_projection_pattern}" "${strict_projection_targets[@]}"; then
+    fail "dedicated MASC compaction code must not resolve or project provider/model identity"
+  fi
+
+  for candidate in \
+    "${REPO_ROOT}/lib/keeper/keeper_context_runtime.ml" \
+    "${REPO_ROOT}/lib/keeper/keeper_context_runtime.mli" \
+    "${REPO_ROOT}/lib/keeper/keeper_unified_turn.ml"
+  do
+    [[ -f "${candidate}" ]] && mixed_projection_targets+=("${candidate}")
+  done
+  if rg -n "${retired_projection_pattern}" "${mixed_projection_targets[@]}"; then
+    fail "retired compaction projection carrier remains in an adjacent mixed-purpose path"
   fi
 
   local failed_after="Execution_failed_"'after_dispatch'
@@ -80,11 +121,12 @@ check_boundary() {
 }
 
 self_test() {
-  local fixture target clean
+  local fixture target clean adjacent adjacent_clean alternate
   fixture="$(mktemp -d "${TMPDIR:-/tmp}/compaction-exact-flow-boundary.XXXXXX")"
   trap "rm -rf '${fixture}'" EXIT
   mkdir -p "${fixture}/lib/keeper" "${fixture}/test"
   target="${fixture}/lib/keeper/keeper_compaction_llm_summarizer.ml"
+  adjacent="${fixture}/lib/keeper/keeper_post_turn.ml"
   cat >"${target}" <<'EOF'
 let _ = Exact_output.make_flow_candidate
 let _ = Exact_output.snapshot_flow
@@ -92,8 +134,11 @@ let _ = Exact_output.start_flow
 let _ = Exact_output.execute_flow_once
 let _ = Exact_output.settle_flow_domain
 EOF
+  printf '%s\n' 'let _ = ()' >"${adjacent}"
   clean="${fixture}/compaction.ml.clean"
+  adjacent_clean="${fixture}/post-turn.ml.clean"
   cp "${target}" "${clean}"
+  cp "${adjacent}" "${adjacent_clean}"
   printf '%s\n' \
     'let _ = Exact_attempt_already_started' \
     >"${fixture}/lib/keeper/keeper_librarian_runtime.ml"
@@ -147,8 +192,48 @@ PY
   then
     fail "self-test forbidden receipt inspection unexpectedly passed"
   fi
+  cp "${clean}" "${target}"
+
+  printf '%s\n' 'let provider_id = "forbidden"' >>"${adjacent}"
+  if
+    MASC_COMPACTION_BOUNDARY_ROOT="${fixture}" \
+      MASC_COMPACTION_EXACT_FLOW_TARGET="${target}" \
+      "${BASH_SOURCE[0]}" --check-only >/dev/null 2>&1
+  then
+    fail "self-test provider/model projection unexpectedly passed"
+  fi
+  cp "${adjacent_clean}" "${adjacent}"
+
+  alternate="${fixture}/lib/keeper/keeper_compaction_runtime_target.ml"
+  cat >"${alternate}" <<'EOF'
+let _ = Runtime.resolve_assignment
+let _ runtime = runtime.provider.protocol
+EOF
+  if
+    MASC_COMPACTION_BOUNDARY_ROOT="${fixture}" \
+      MASC_COMPACTION_EXACT_FLOW_TARGET="${target}" \
+      "${BASH_SOURCE[0]}" --check-only >/dev/null 2>&1
+  then
+    fail "self-test dynamically discovered provider/model projection unexpectedly passed"
+  fi
+  rm -f "${alternate}"
+
+  printf '%s\n' 'let _ = ()' \
+    >"${fixture}/lib/keeper/keeper_compaction_projection_target.ml"
+  if
+    MASC_COMPACTION_BOUNDARY_ROOT="${fixture}" \
+      MASC_COMPACTION_EXACT_FLOW_TARGET="${target}" \
+      "${BASH_SOURCE[0]}" --check-only >/dev/null 2>&1
+  then
+    fail "self-test retired projection carrier unexpectedly passed"
+  fi
+  rm -f "${fixture}/lib/keeper/keeper_compaction_projection_target.ml"
+
+  MASC_COMPACTION_BOUNDARY_ROOT="${fixture}" \
+    MASC_COMPACTION_EXACT_FLOW_TARGET="${target}" \
+    "${BASH_SOURCE[0]}" --check-only >/dev/null
   echo \
-    "[compaction-exact-flow-boundary:self-test] clean=pass unrelated=pass duplicate=fail missing=fail legacy=fail forbidden=fail"
+    "[compaction-exact-flow-boundary:self-test] clean=pass unrelated=pass duplicate=fail missing=fail legacy=fail forbidden=fail projection=fail dynamic=fail carrier=fail restored=pass"
 }
 
 case "${1:-}" in

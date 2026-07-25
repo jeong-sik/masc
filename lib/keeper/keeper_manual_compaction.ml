@@ -430,30 +430,12 @@ let finish_preparation ~config ~meta = function
 
 let prepare_with ~prepare_compaction ~config ~meta =
   let base_dir = Keeper_types_profile.session_base_dir config in
-  let projection_request =
-    Keeper_compaction_projection_target.request
-      ~assignment_id:(runtime_id_of_meta meta)
-      ~resolve_context_window:(fun runtime ->
-        match
-          Keeper_context_runtime.resolve_max_context_resolution_for_runtime
-            ~requested_override:meta.max_context_override
-            runtime
-        with
-        | Ok resolution ->
-          Keeper_compaction_projection_target.Resolved_context_window
-            resolution.effective_budget
-        | Error (Invalid_requested_context_override value) ->
-          Keeper_compaction_projection_target.Invalid_context_window value
-        | Error (Runtime_context_window_unavailable _) ->
-          Keeper_compaction_projection_target.Context_window_not_resolved)
-  in
   ( base_dir
   , prepare_compaction
       ~base_path:config.base_path
       ~base_dir
       ~meta
-      ~trigger:Compaction_trigger.Manual
-      ~projection_request )
+      ~trigger:Compaction_trigger.Manual )
 ;;
 
 let observe_manifest ~keeper_name = function
@@ -663,14 +645,13 @@ let run_admitted
     () =
   run_admitted_with
     ~append_compaction_manifest:append_manifest
-    ~prepare_compaction:(fun ~base_path ~base_dir ~meta ~trigger ~projection_request ->
+    ~prepare_compaction:(fun ~base_path ~base_dir ~meta ~trigger ->
       Keeper_context_runtime.prepare_compaction
         ?exact_execution_guard
         ~base_path
         ~base_dir
         ~meta
         ~trigger
-        ~projection_request
         ())
     ~config
     ~meta

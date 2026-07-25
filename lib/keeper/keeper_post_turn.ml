@@ -59,7 +59,6 @@ type compaction_recovery = {
   trigger : Compaction_trigger.t;
   evidence : Keeper_compaction_evidence.t;
   turn_generation : int;
-  projection_target : Keeper_compaction_projection_target.committed;
 }
 
 type no_compaction = Keeper_event_queue_state.no_compaction =
@@ -532,7 +531,6 @@ type prepared_compaction =
   ; retry_meta : keeper_meta
   ; turn_generation : int
   ; prepared_trigger : Compaction_trigger.t
-  ; projection_target : Keeper_compaction_projection_target.t
   ; context : Keeper_context_core.working_context
   ; evidence : Keeper_compaction_evidence.t
   ; post_success_terminalizer :
@@ -621,15 +619,11 @@ let prepare_compaction_admitted
       ~base_dir
       ~(meta : keeper_meta)
       ~(trigger : Compaction_trigger.t)
-      ~projection_request
   : (prepared_compaction, compaction_recovery_error) result =
   (* Load the durable source and run the policy + LLM planner.  This phase
      is deliberately admission-free: the keeper's turn slot is not held
      while the provider call runs.  Correctness after an interleaved state
      change is enforced by the source CAS at commit, not by the slot. *)
-  let projection_target =
-    Keeper_compaction_projection_target.capture projection_request
-  in
   let session =
     create_session
       ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
@@ -699,7 +693,6 @@ let prepare_compaction_admitted
          ; retry_meta
          ; turn_generation
          ; prepared_trigger
-         ; projection_target
          ; context = preparation.context
          ; evidence
          ; post_success_terminalizer
@@ -746,7 +739,6 @@ let prepare_compaction_with
       ~base_dir
       ~(meta : keeper_meta)
       ~(trigger : Compaction_trigger.t)
-      ~projection_request
   : (prepared_compaction, compaction_recovery_error) result =
   let suspended =
     Keeper_meta_contract.compaction_retry_suspended meta.runtime.compaction_rt
@@ -764,7 +756,6 @@ let prepare_compaction_with
       ~base_dir
       ~meta
       ~trigger
-      ~projection_request
 ;;
 
 let prepare_compaction
@@ -773,7 +764,6 @@ let prepare_compaction
       ~base_dir
       ~meta
       ~trigger
-      ~projection_request
       ()
   =
   prepare_compaction_with
@@ -784,7 +774,6 @@ let prepare_compaction
     ~base_dir
     ~meta
     ~trigger
-    ~projection_request
 ;;
 
 let commit_prepared_compaction_with
@@ -802,7 +791,6 @@ let commit_prepared_compaction_with
       ; retry_meta
       ; turn_generation
       ; prepared_trigger
-      ; projection_target
       ; context
       ; evidence
       ; post_success_terminalizer
@@ -872,17 +860,13 @@ let commit_prepared_compaction_with
      with
      | Ok
          ( saved_checkpoint
-         , (Keeper_checkpoint_store.Installed installed as installation) ) ->
+         , (Keeper_checkpoint_store.Installed _ as installation) ) ->
        let recovery =
          { checkpoint = saved_checkpoint
          ; checkpoint_installation = installation
          ; trigger = prepared_trigger
          ; evidence
          ; turn_generation
-         ; projection_target =
-             Keeper_compaction_projection_target.bind_committed_checkpoint
-               installed.installed_ref
-               projection_target
          }
        in
        installed_recovery := Some recovery;
@@ -1081,7 +1065,6 @@ let recover_latest_checkpoint_for_compaction
     ~(base_dir : string)
     ~(meta : keeper_meta)
     ~(trigger : Compaction_trigger.t)
-    ~projection_request
     ()
   : prepared_commit_outcome =
   match
@@ -1091,7 +1074,6 @@ let recover_latest_checkpoint_for_compaction
       ~base_dir
       ~meta
       ~trigger
-      ~projection_request
       ()
   with
   | Error error -> Commit_failed { error; committed = None }

@@ -206,14 +206,6 @@ val resolve_max_context_resolution_for_runtime_id
   -> runtime_id:string
   -> (max_context_resolution, max_context_resolution_error) result
 
-val resolve_max_context_resolution_for_runtime
-  :  requested_override:int option
-  -> Runtime.t
-  -> (max_context_resolution, max_context_resolution_error) result
-(** Resolve against the supplied immutable runtime snapshot. Callers that need
-    another projection of the same provider/model must use this form rather
-    than resolving the runtime id twice across a config refresh. *)
-
 val max_context_resolution_error_to_string
   :  max_context_resolution_error
   -> string

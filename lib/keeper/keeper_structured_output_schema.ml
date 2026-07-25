@@ -21,9 +21,11 @@ let enum_schema values =
 ;;
 
 let nullable_enum_schema values =
+  (* MASC declares provider-neutral content semantics; OAS owns provider and
+     wire admission for the resulting schema. *)
   `Assoc
-    [ "type", `List [ `String "string"; `String "null" ]
-    ; "enum", `List ((`Null) :: List.map (fun value -> `String value) values)
+    [ "anyOf"
+    , `List [ enum_schema values; `Assoc [ "type", `String "null" ] ]
     ]
 ;;
 

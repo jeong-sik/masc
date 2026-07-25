@@ -37,9 +37,29 @@ let with_temp_dir prefix f =
 
 let install_queue base_path =
   Q.For_testing.reset_runtime_state ();
+  Masc.Keeper_registry.For_testing.clear ();
   match Q.install_persistence ~base_path with
   | Ok _ -> ()
   | Error error -> fail (Q.install_error_to_string error)
+;;
+
+let ensure_registered_keeper ~base_path keeper_name =
+  match Masc.Keeper_registry.get ~base_path keeper_name with
+  | Some _ -> ()
+  | None ->
+    let meta =
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_name
+          ; "trace_id", `String ("trace-" ^ keeper_name)
+          ])
+      |> Result.get_ok
+    in
+    ignore
+      (Masc.Keeper_registry.register_offline
+         ~base_path
+         keeper_name
+         meta)
 ;;
 
 let pending_entry
@@ -85,7 +105,9 @@ let pending_entry
    | Ok false -> fail "summary did not enter pending state"
    | Error error -> fail (Q.summary_transition_error_to_string error));
   match Q.get_pending_entry ~id with
-  | Some entry -> entry
+  | Some entry ->
+    ensure_registered_keeper ~base_path entry.keeper_name;
+    entry
   | None -> fail "pending approval disappeared"
 ;;
 

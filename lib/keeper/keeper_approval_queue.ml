@@ -14,6 +14,10 @@ type summary_transition_error =
   | Summary_transition_storage_error of storage_error
   | Summary_transition_rejected of summary_transition_rejection
 
+type summary_owner_retirement_error =
+  | Summary_owner_retirement_storage_error of storage_error
+  | Summary_owner_retirement_exact_attempt_unsettled of exact_attempt_binding
+
 type exact_attempt_rejection =
   | Exact_attempt_not_found of string
   | Exact_attempt_key_mismatch of
@@ -131,6 +135,17 @@ let summary_transition_error_to_string = function
   | Summary_transition_rejected (Summary_exact_attempt_bound binding) ->
     "legacy summary transition rejected for exact attempt: "
     ^ exact_attempt_binding_to_string binding
+;;
+
+let summary_owner_retirement_error_to_string = function
+  | Summary_owner_retirement_storage_error error ->
+    storage_error_to_string error
+  | Summary_owner_retirement_exact_attempt_unsettled binding ->
+    Printf.sprintf
+      "approval summary owner retirement blocked by unsettled exact attempt: approval=%s slot=%s call=%s"
+      binding.approval_id
+      binding.slot_id
+      binding.call_id
 ;;
 
 let exact_attempt_error_to_string = function
@@ -2404,6 +2419,38 @@ let restart_failed_summaries ~base_path =
   | Ok ids ->
     List.iter (fun id -> publish_summary_update ~id) ids;
     Ok ids
+;;
+
+let retire_summary_owner ~base_path ~keeper_name ~reason =
+  let result =
+    with_pending_store_lock (fun () ->
+      let current = Atomic.get pending in
+      let ids, next, bound =
+        SMap.fold
+          (fun id (entry : pending_approval) (ids, map, bound) ->
+             if String.equal entry.audit_base_path base_path
+                && String.equal entry.keeper_name keeper_name
+             then
+               match entry.summary_status, entry.exact_attempt with
+               | Summary_pending, Exact_bound attempt -> ids, map, Some attempt
+               | Summary_pending, Exact_unbound ->
+                 (id :: ids, SMap.add id { entry with summary_status = Summary_failed { reason; retryable = false } } map, bound)
+               | _ -> ids, map, bound
+             else ids, map, bound)
+          current
+          ([], current, None)
+      in
+      match bound, ids with
+      | Some attempt, _ -> Error (Summary_owner_retirement_exact_attempt_unsettled attempt)
+      | None, [] -> Ok []
+      | None, _ ->
+        (match persist_snapshot_unlocked ~base_path ~pending_map:next ~delivery_map:(Atomic.get deliveries) with
+         | Error error -> Error (Summary_owner_retirement_storage_error error)
+         | Ok () -> Atomic.set pending next; Ok (List.rev ids)))
+  in
+  match result with
+  | Error _ as error -> error
+  | Ok ids -> List.iter (fun id -> publish_summary_update ~id) ids; Ok ids
 ;;
 
 let record_resolution_delivery_failure ~keeper_name ~approval_id reason =

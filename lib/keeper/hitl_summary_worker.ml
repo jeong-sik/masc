@@ -81,7 +81,10 @@ let output_requirement =
 ;;
 
 type prepared_flow =
-  { entry : pending_approval
+  { base_path : string
+  ; keeper_name : string
+  ; flow_scope : Keeper_exact_flow_scope.t
+  ; entry : pending_approval
   ; generated_at : float
   ; attempt : Exact_output.flow_attempt
   }
@@ -131,7 +134,14 @@ let snapshot_resolved_lane
       "HITL exact-output flow snapshot failed")
 ;;
 
-let prepare_flow_with_scope ~flow_scope ~(entry : pending_approval) =
+let registered_lane_id ~base_path ~keeper_name () =
+  match Keeper_registry.get ~base_path keeper_name with
+  | Some registry_entry ->
+    Some (Keeper_lane.id registry_entry.lane)
+  | None -> None
+;;
+
+let prepare_flow_with_scope ~base_path ~keeper_name ~flow_scope ~(entry : pending_approval) =
   let* context_bundle =
     build_context_bundle ~entry
     |> Result.map_error context_bundle_error_to_string
@@ -160,7 +170,14 @@ let prepare_flow_with_scope ~flow_scope ~(entry : pending_approval) =
     |> Result.map_error (fun _ ->
       "HITL exact-output flow attempt allocation failed")
   in
-  Ok { entry; generated_at = Time_compat.now (); attempt }
+  Ok
+    { base_path
+    ; keeper_name
+    ; flow_scope
+    ; entry
+    ; generated_at = Time_compat.now ()
+    ; attempt
+    }
 ;;
 
 let prepare_flow ~(entry : pending_approval) =
@@ -168,13 +185,12 @@ let prepare_flow ~(entry : pending_approval) =
   let keeper_name = entry.keeper_name in
   let* flow_scope =
     Keeper_exact_flow_scope.for_registered
-      ~is_registered:(fun () ->
-        Keeper_registry.is_registered ~base_path keeper_name)
+      ~registered_lane_id:(registered_lane_id ~base_path ~keeper_name)
       ~base_path
       ~keeper_name
       ~surface:Keeper_exact_flow_scope.Hitl_summary
   in
-  prepare_flow_with_scope ~flow_scope ~entry
+  prepare_flow_with_scope ~base_path ~keeper_name ~flow_scope ~entry
 ;;
 
 let readiness () =
@@ -184,14 +200,36 @@ let readiness () =
     Registry.resolve_lane registry ~lane_id
     |> Result.map_error lane_error
   in
-  let* candidates = flow_candidates resolved.selected_slots in
-  let* () =
-    match candidates with
-    | [] -> Error "HITL exact-output lane has no usable candidates"
-    | _ :: _ -> Ok ()
+  let preference_store =
+    Exact_output.create_flow_preference_store ~capacity:1
+    |> Result.get_ok
   in
-  ignore (messages_for_summary ~system_prompt ~context_bundle:(`Assoc []));
-  Ok ()
+  let scope =
+    Exact_output.make_flow_scope ~id:"masc:hitl-readiness"
+    |> Result.get_ok
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      ignore
+        (Exact_output.remove_flow_preference_scope preference_store scope))
+    (fun () ->
+       let* candidates = flow_candidates resolved.selected_slots in
+       match candidates with
+       | [] -> Error "HITL exact-output lane has no usable candidates"
+       | first :: rest ->
+         Exact_output.snapshot_flow
+           ~preferences:preference_store
+           ~scope
+           ~first
+           ~rest
+           ~messages:
+             (messages_for_summary
+                ~system_prompt
+                ~context_bundle:(`Assoc []))
+           output_requirement
+         |> Result.map (fun _ -> ())
+         |> Result.map_error (fun _ ->
+           "HITL exact-output readiness snapshot failed"))
 ;;
 
 (* ── MASC domain validation ─────────────────────── *)
@@ -735,7 +773,7 @@ let handle_flow_error (prepared : prepared_flow) = function
     quarantine_candidate prepared.entry candidate Exact_flow_execution_failed
 ;;
 
-let execute_prepared_flow_with_queue_writers
+let execute_prepared_flow_with_queue_writers_current
       ~queue_writers
       ~net
       ?clock
@@ -794,6 +832,32 @@ let execute_prepared_flow_with_queue_writers
          persistence_detail)
 ;;
 
+let execute_prepared_flow_with_queue_writers
+      ~queue_writers
+      ~net
+      ?clock
+      ~on_summary
+      (prepared : prepared_flow)
+  =
+  match
+    Keeper_exact_flow_scope.with_current
+      prepared.flow_scope
+      ~registered_lane_id:
+        (registered_lane_id
+           ~base_path:prepared.base_path
+           ~keeper_name:prepared.keeper_name)
+      (fun () ->
+         execute_prepared_flow_with_queue_writers_current
+           ~queue_writers
+           ~net
+           ?clock
+           ~on_summary
+           prepared)
+  with
+  | Ok result -> result
+  | Error detail -> Error detail
+;;
+
 let execute_prepared_flow ~net ?clock ~on_summary prepared =
   execute_prepared_flow_with_queue_writers
     ~queue_writers:production_exact_queue_writers
@@ -806,6 +870,7 @@ let execute_prepared_flow ~net ?clock ~on_summary prepared =
 type finish_outcome =
   | Conclusive_terminalization
   | Terminalization_persistence_uncertain
+  | Owner_unregistered_deferred
 
 let spawn_with
       ~queue_writers
@@ -821,9 +886,18 @@ let spawn_with
     |> Option.to_result
          ~none:"HITL exact-output flow: Eio net is unavailable"
   in
-  let* prepared = prepare_flow ~entry in
-  let clock = Eio_context.get_clock_opt () in
-  Eio.Fiber.fork ~sw (fun () ->
+  match prepare_flow ~entry with
+  | Error _
+    when not
+           (Keeper_registry.is_registered
+              ~base_path:entry.audit_base_path
+              entry.keeper_name) ->
+    on_finish Owner_unregistered_deferred;
+    Ok ()
+  | Error detail -> Error detail
+  | Ok prepared ->
+    let clock = Eio_context.get_clock_opt () in
+    Eio.Fiber.fork ~sw (fun () ->
     let execution_outcome =
       try
         execute_prepared_flow_with_queue_writers
@@ -844,10 +918,10 @@ let spawn_with
     | `Cancelled cancellation ->
       on_finish Conclusive_terminalization;
       raise cancellation
-    | `Uncertain uncertainty ->
-      on_finish Terminalization_persistence_uncertain;
-      raise uncertainty);
-  Ok ()
+      | `Uncertain uncertainty ->
+        on_finish Terminalization_persistence_uncertain;
+        raise uncertainty);
+    Ok ()
 ;;
 
 let spawn =
@@ -867,15 +941,7 @@ module For_testing = struct
   let context_bundle_error_to_string = context_bundle_error_to_string
   let messages_for_summary = messages_for_summary
   let parse_summary = parse_summary
-  let prepare_flow ~entry =
-    let flow_scope =
-      Keeper_exact_flow_scope.For_testing.create
-        ~base_path:entry.audit_base_path
-        ~keeper_name:entry.keeper_name
-        ~surface:Keeper_exact_flow_scope.Hitl_summary
-    in
-    prepare_flow_with_scope ~flow_scope ~entry
-  ;;
+  let prepare_flow = prepare_flow
   let execute_prepared_flow = execute_prepared_flow
 
   let execute_prepared_flow_with_writers

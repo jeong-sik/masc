@@ -485,7 +485,8 @@ let rec spawn_claimed_auto_judge_entry_with
                  ~keeper_name:entry.keeper_name
                  "Auto Judge owner drain withheld after persistence uncertainty \
                   approval=%s"
-                 entry.id)
+                 entry.id
+             | Hitl_summary_worker.Owner_unregistered_deferred -> ())
            ()
        with
        | Ok () -> Ok Started

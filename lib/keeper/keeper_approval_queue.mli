@@ -18,6 +18,10 @@ type summary_transition_error =
   | Summary_transition_storage_error of storage_error
   | Summary_transition_rejected of summary_transition_rejection
 
+type summary_owner_retirement_error =
+  | Summary_owner_retirement_storage_error of storage_error
+  | Summary_owner_retirement_exact_attempt_unsettled of exact_attempt_binding
+
 type exact_attempt_rejection =
   | Exact_attempt_not_found of string
   | Exact_attempt_key_mismatch of
@@ -101,6 +105,7 @@ type install_error = Install_storage_failed of storage_error
 
 val storage_error_to_string : storage_error -> string
 val summary_transition_error_to_string : summary_transition_error -> string
+val summary_owner_retirement_error_to_string : summary_owner_retirement_error -> string
 val exact_attempt_error_to_string : exact_attempt_error -> string
 val grant_error_to_string : grant_error -> string
 val install_error_to_string : install_error -> string
@@ -435,5 +440,14 @@ val restart_failed_summary : id:string -> (bool, summary_transition_error) resul
     action permits a new exact attempt. Returns the reopened approval ids. *)
 val restart_failed_summaries :
   base_path:string -> (string list, summary_transition_error) result
+
+(** Fail closed when permanently retiring a Keeper that still owns an exact
+    summary attempt. Otherwise terminalize every unbound pending summary in one
+    durable snapshot, leaving already terminal summaries unchanged. *)
+val retire_summary_owner :
+  base_path:string ->
+  keeper_name:string ->
+  reason:string ->
+  (string list, summary_owner_retirement_error) result
 
 val pending_count_for_keeper : keeper_name:string -> int

@@ -627,15 +627,36 @@ let deliver_finalized_completion ~config operation =
 ;;
 
 let complete_cleanup ~config ~entry operation cleanup =
-  match remove_meta_file ~config operation with
-  | Error detail -> block ~config operation Meta_remove detail
+  let retire_summary_owner () =
+    match operation.cleanup_intent.reason with
+    | Operator_stop_retain_meta -> Ok ()
+    | Operator_stop_remove_meta
+    | Dead_tombstone_cleanup
+    | Dashboard_keeper_purge _ ->
+      Keeper_approval_queue.retire_summary_owner
+        ~base_path:config.base_path
+        ~keeper_name:operation.keeper_name
+        ~reason:
+          (Printf.sprintf
+             "Keeper permanently retired before HITL context summary completed (%s)"
+             (cleanup_reason_label operation.cleanup_intent.reason))
+      |> Result.map (fun _ -> ())
+      |> Result.map_error
+           Keeper_approval_queue.summary_owner_retirement_error_to_string
+  in
+  match retire_summary_owner () with
+  | Error detail ->
+    block ~config operation Approval_summary_retirement detail
   | Ok () ->
-    (match unregister_exact operation entry with
-     | Error detail -> block ~config operation Registry_unregister detail
-     | Ok registry_unregistered ->
-       (match remove_session_dir ~config operation with
-        | Error detail -> block ~config operation Session_remove detail
-        | Ok () ->
+    (match remove_meta_file ~config operation with
+     | Error detail -> block ~config operation Meta_remove detail
+     | Ok () ->
+       (match unregister_exact operation entry with
+        | Error detail -> block ~config operation Registry_unregister detail
+        | Ok registry_unregistered ->
+          (match remove_session_dir ~config operation with
+           | Error detail -> block ~config operation Session_remove detail
+           | Ok () ->
           let meta_removed =
             match
               meta_disposition_of_cleanup_reason operation.cleanup_intent.reason
@@ -674,10 +695,10 @@ let complete_cleanup ~config ~entry operation cleanup =
             ; updated_at = Masc_domain.now_iso ()
             }
           in
-          (match replace ~config finalized with
-           | Error _ as error -> error
-           | Ok persisted_finalized ->
-             deliver_finalized_completion ~config persisted_finalized)))
+             (match replace ~config finalized with
+              | Error _ as error -> error
+              | Ok persisted_finalized ->
+                deliver_finalized_completion ~config persisted_finalized))))
 ;;
 
 let run ~config ~entry operation =

@@ -82,6 +82,7 @@ type failure_stage =
   | Unhandled_worker
   | Task_settlement
   | Pending_confirm_cleanup
+  | Approval_summary_retirement
   | Meta_update
   | Meta_remove
   | Session_remove

@@ -6,14 +6,15 @@
 
 val readiness : unit -> (unit, string) result
 (** Verify that the Gate prompt and the registry-owned [hitl_auto_judge] exact
-    lane currently resolves to at least one opaque candidate. No provider,
-    model, runtime scalar, or execution preference is read. *)
+    lane can produce one real OAS exact-output snapshot. No provider, model, or
+    runtime scalar is read. *)
 
 exception Exact_terminalization_persistence_failed of string
 
 type finish_outcome =
   | Conclusive_terminalization
   | Terminalization_persistence_uncertain
+  | Owner_unregistered_deferred
 
 val spawn
   :  sw:Eio.Switch.t

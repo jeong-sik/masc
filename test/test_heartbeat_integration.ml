@@ -31,6 +31,7 @@ module Shutdown_prepare_join = Masc.Keeper_shutdown_prepare_join
 module Shutdown_finalize = Masc.Keeper_shutdown_finalize
 module Shutdown_runtime = Masc.Keeper_shutdown_runtime
 module Shutdown_supersession = Masc.Keeper_shutdown_supersession
+module Approval_queue = Masc.Keeper_approval_queue
 module Turn_up_args = Masc.Keeper_turn_up_args
 module Turn_up_update = Masc.Keeper_turn_up_update
 module Keeper_meta_contract = Masc.Keeper_meta_contract
@@ -2424,6 +2425,50 @@ let test_keeper_shutdown_prepare_failure_rolls_back_fence () =
           "failed shutdown prepare left the keeper admission fence closed: \
            chat backlog fences the slot")
 
+let install_pending_summary ~base_path ~keeper_name ~bind_exact =
+  Approval_queue.For_testing.reset_runtime_state ();
+  (match Approval_queue.install_persistence ~base_path with
+   | Ok _ -> ()
+   | Error error -> fail (Approval_queue.install_error_to_string error));
+  let id =
+    match
+      Approval_queue.submit_pending
+        ~keeper_name
+        ~tool_name:"shutdown-fixture"
+        ~input:(`String "effect")
+        ~base_path
+        ()
+    with
+    | Ok id -> id
+    | Error error -> fail (Approval_queue.storage_error_to_string error)
+  in
+  (match Approval_queue.mark_summary_pending ~id with
+   | Ok true -> ()
+   | Ok false -> fail "summary did not become pending"
+   | Error error ->
+     fail (Approval_queue.summary_transition_error_to_string error));
+  if bind_exact
+  then (
+    let entry =
+      match Approval_queue.get_pending_entry ~id with
+      | Some entry -> entry
+      | None -> fail "pending summary disappeared before exact bind"
+    in
+    match
+      Approval_queue.bind_summary_exact_attempt
+        ~id
+        ~input_hash:entry.input_hash
+        ~sequence:entry.sequence
+        ~slot_id:"shutdown-slot"
+        ~call_id:"shutdown-call"
+        ~plan_fingerprint:(String.make 64 'p')
+        ~request_body_sha256:(String.make 64 'r')
+    with
+    | Ok _ -> ()
+    | Error error -> fail (Approval_queue.exact_attempt_error_to_string error));
+  id
+;;
+
 let test_keeper_shutdown_finalizes_idle_operation () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2433,6 +2478,7 @@ let test_keeper_shutdown_finalizes_idle_operation () =
       Shutdown_finalize.For_testing.reset_remove_pending_confirms_by_target ();
       Masc.Keeper_chat_queue.For_testing.reset ();
       Masc.Keeper_turn_admission.For_testing.reset ();
+      Approval_queue.For_testing.reset_runtime_state ();
       R.For_testing.clear ();
       cleanup_dir base_dir)
     (fun () ->
@@ -2446,6 +2492,12 @@ let test_keeper_shutdown_finalizes_idle_operation () =
         | Error detail -> fail detail
       in
       let meta = make_meta "shutdown-finalize-keeper" in
+      let approval_id =
+        install_pending_summary
+          ~base_path:config.base_path
+          ~keeper_name:meta.name
+          ~bind_exact:false
+      in
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
        | Error detail -> fail detail);
@@ -2520,6 +2572,9 @@ let test_keeper_shutdown_finalizes_idle_operation () =
              ~base_path:config.base_path
               ~keeper_name:meta.name)
              .snapshot_shutdown_operation_id);
+      (match Approval_queue.get_pending_entry ~id:approval_id with
+       | Some { summary_status = Approval_queue.Summary_pending; _ } -> ()
+       | Some _ | None -> fail "retain-meta shutdown changed pending summary");
       match Keeper_meta_store.read_meta config meta.name with
       | Ok (Some retained) ->
         check bool "retained Keeper is paused" true retained.paused;
@@ -2527,6 +2582,114 @@ let test_keeper_shutdown_finalizes_idle_operation () =
           (Option.is_none retained.current_task_id)
       | Ok None -> fail "retained Keeper metadata disappeared"
       | Error detail -> fail detail)
+
+let test_destructive_shutdown_blocks_before_cleanup_on_bound_summary () =
+  List.iter
+    (fun mode ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       let label =
+         match mode with
+         | `Remove -> "remove"
+         | `Dead -> "dead"
+         | `Purge -> "purge"
+       in
+       let base_dir = temp_dir ("shutdown-summary-retirement-" ^ label) in
+       Fun.protect
+         ~finally:(fun () ->
+           Approval_queue.For_testing.reset_runtime_state ();
+           R.For_testing.clear ();
+           cleanup_dir base_dir)
+         (fun () ->
+            let config = Masc.Workspace.default_config base_dir in
+            ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+            let backlog_version =
+              match Workspace_backlog.read_backlog_r config with
+              | Ok backlog -> backlog.version
+              | Error detail -> fail detail
+            in
+            let meta = make_meta ("shutdown-summary-" ^ label) in
+            (match Keeper_meta_store.write_meta config meta with
+             | Ok () -> ()
+             | Error detail -> fail detail);
+            let entry =
+              R.For_testing.register
+                ~base_path:config.base_path
+                meta.name
+                meta
+            in
+            ignore
+              (install_pending_summary
+                 ~base_path:config.base_path
+                 ~keeper_name:meta.name
+                 ~bind_exact:true);
+            let session_dir =
+              Filename.concat
+                (Keeper_types_profile.session_base_dir config)
+                (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+            in
+            Fs_compat.mkdir_p session_dir;
+            let cleanup_intent =
+              match mode with
+              | `Remove -> { remove_meta_cleanup with remove_session = true }
+              | `Dead ->
+                { Shutdown_types.reason =
+                    Shutdown_types.Dead_tombstone_cleanup
+                ; remove_session = true
+                }
+              | `Purge -> dashboard_purge_cleanup meta.name meta
+            in
+            let operation_id = Shutdown_types.Operation_id.generate () in
+            let operation : Shutdown_types.t =
+              { schema_version = Shutdown_types.schema_version
+              ; revision = 0
+              ; operation_id
+              ; keeper_name = meta.name
+              ; lane_ownership =
+                  Shutdown_types.Registered_lane (Lane.id entry.lane)
+              ; trace_id = meta.runtime.trace_id
+              ; generation = meta.runtime.nonce
+              ; actor = "operator"
+              ; cleanup_intent
+              ; turn_disposition = Shutdown_types.No_inflight_turn
+              ; expected_backlog_version = backlog_version
+              ; owned_task_ids = []
+              ; join_evidence = None
+              ; phase =
+                  Shutdown_types.Cleanup_ready
+                    { settled_task_ids = []; pending_confirms_removed = 0 }
+              ; created_at = Masc_domain.now_iso ()
+              ; updated_at = Masc_domain.now_iso ()
+              }
+            in
+            (match Shutdown_store.persist_new ~config operation with
+             | Ok () -> ()
+             | Error error -> fail (Shutdown_store.error_to_string error));
+            let blocked =
+              match
+                Shutdown_finalize.run
+                  ~config
+                  ~entry:(Some entry)
+                  operation
+              with
+              | Ok blocked -> blocked
+              | Error error -> fail (Shutdown_finalize.error_to_string error)
+            in
+            (match blocked.phase with
+             | Shutdown_types.Blocked
+                 { stage = Shutdown_types.Approval_summary_retirement; _ } ->
+               ()
+             | _ -> fail "destructive cleanup did not block at retirement");
+            (match Keeper_meta_store.read_meta config meta.name with
+             | Ok (Some _) -> ()
+             | Ok None -> fail "retirement failure removed metadata"
+             | Error detail -> fail detail);
+            check bool "registry preserved" true
+              (Option.is_some
+                 (R.get ~base_path:config.base_path meta.name));
+            check bool "session preserved" true (Sys.file_exists session_dir)))
+    [ `Remove; `Dead; `Purge ]
+;;
 
 let test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt () =
   Eio_main.run @@ fun env ->
@@ -3672,6 +3835,8 @@ let () =
         test_keeper_shutdown_prepare_failure_rolls_back_fence;
       test_case "shutdown finalizes idle operation" `Quick
         test_keeper_shutdown_finalizes_idle_operation;
+      test_case "destructive shutdown blocks on bound summary" `Quick
+        test_destructive_shutdown_blocks_before_cleanup_on_bound_summary;
       test_case "shutdown delivers dead tombstone completion after receipt" `Quick
         test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt;
       test_case "dashboard purge finalizes artifacts and receipt" `Quick

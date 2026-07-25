@@ -133,28 +133,6 @@ let validate_keeper_assignments ~(config_path : string)
             ~runtime_count:(List.length runtimes) runtime_id))
 ;;
 
-(* [runtime].memory_os_consolidation must resolve to a configured runtime when
-   set. [None] is the designed inheritance of [runtime].default; an unknown id
-   is an operator typo rejected at load, never a silent fallback. *)
-let validate_memory_os_consolidation_runtime
-    ~(config_path : string)
-    ~(dropped_bindings : (string * string) list)
-    (runtimes : t list)
-    (runtime_id : string option) : (unit, string) result =
-  match runtime_id with
-  | None -> Ok ()
-  | Some id ->
-    if List.exists (fun (r : t) -> String.equal r.id id) runtimes
-    then Ok ()
-    else
-      Error
-        (Printf.sprintf
-           "%s: [runtime].memory_os_consolidation = %S%s"
-           config_path
-           id
-           (unresolved_runtime_suffix ~dropped_bindings
-              ~runtime_count:(List.length runtimes) id))
-;;
 
 (* Route ids resolve with lane precedence ([resolve_assignment] prefers a lane
    over a same-named runtime), so route validation must judge the same target
@@ -209,105 +187,96 @@ let validate_lane_candidates_capability
   check (Runtime_lane.ordered_candidates lane)
 ;;
 
-(* [runtime].cross_verifier treats an unknown id as an operator typo rejected at
-   load, not a silent fallback
-   (Unknown→Permissive anti-pattern). [None] is the designed "inherit
-   [runtime].default" case. A lane id is accepted when every candidate
-   declares JSON mode (#25394). *)
-let validate_cross_verifier_runtime ~(config_path : string)
-    ~(dropped_bindings : (string * string) list) (runtimes : t list)
-    (lanes : Runtime_lane.t list)
-    (cross_verifier_id : string option) : (unit, string) result =
-  let supports_json (runtime : t) =
-    match runtime.model.capabilities with
-    | Some caps -> caps.supports_response_format_json
-    | None -> false
-  in
-  match cross_verifier_id with
-  | None -> Ok ()
-  | Some id ->
-    (match find_declared_lane lanes id with
-     | Some lane ->
-       validate_lane_candidates_capability
-         ~config_path
-         ~route_name:"cross_verifier"
-         ~capability_key:"supports-response-format-json"
-         ~runtime_supports:supports_json
-         runtimes
-         lane
-     | None ->
-    (match List.find_opt (fun (r : t) -> String.equal r.id id) runtimes with
-     | None ->
-      Error
-        (Printf.sprintf
-           "%s: [runtime].cross_verifier = %S%s"
-           config_path
-           id
-           (unresolved_runtime_suffix ~dropped_bindings
-              ~runtime_count:(List.length runtimes) id))
-     | Some runtime ->
-       if supports_json runtime
-       then Ok ()
-       else
-          Error
-            (Printf.sprintf
-               "%s: [runtime].cross_verifier = %S uses model %S, which does \
-                not declare supports-response-format-json"
-               config_path
-               id
-               runtime.model.id)))
+(* One admission path for the routes that name a runtime. Each route resolves an
+   id with lane precedence ([resolve_assignment] prefers a lane over a same-named
+   runtime), and some routes additionally require the resolved target to declare a
+   capability. The requirement is a closed variant rather than an optional
+   argument, so a route that needs no capability states that instead of relying on
+   a caller to omit a parameter that silently changes the outcome.
+
+   Merging the three per-route validators removed an asymmetry with no stated
+   reason: [runtime].memory_os_consolidation was validated before lanes were
+   materialised, so it alone could not name a lane while cross_verifier and
+   structured_judge could.
+
+   [None] stays the designed "inherit [runtime].default" case for every route, and
+   an unknown id remains an operator typo rejected at load rather than a silent
+   fallback (Unknown -> Permissive anti-pattern). *)
+type route_requirement =
+  | Resolves_only
+  | Declares_capability of
+      { key : string
+      ; supported_by : t -> bool
+      }
+
+(* Capability accessors preserve the existing [None -> false] reading: a model
+   with no declared capabilities does not satisfy the requirement. That denial on
+   unknown is carried over unchanged, not introduced here; whether an unknown
+   capability should order a candidate later rather than exclude it up front is
+   the separate question tracked against the format axis. *)
+let model_supports_response_format_json (runtime : t) =
+  match runtime.model.capabilities with
+  | Some caps -> caps.supports_response_format_json
+  | None -> false
 ;;
 
-(* [runtime].structured_judge is the explicit lane for provider-native schema
-   requests. It must declare structured output, not just JSON mode. [None]
-   remains a migration fallback for existing configs;
-   unsupported resolved runtimes are rejected by each caller's OAS schema
-   validation instead of silently dropping the schema. A [runtime.lanes] id is
-   accepted when every candidate declares structured output (#25394): every
-   consumer routes through [resolve_assignment]-aware paths
-   ([Keeper_turn_driver.run_named] or the compaction candidate expansion). *)
-let validate_structured_judge_runtime ~(config_path : string)
-    ~(dropped_bindings : (string * string) list) (runtimes : t list)
+let model_supports_structured_output (runtime : t) =
+  match runtime.model.capabilities with
+  | Some caps -> caps.supports_structured_output
+  | None -> false
+;;
+
+let validate_route_runtime
+    ~(config_path : string)
+    ~(dropped_bindings : (string * string) list)
+    ~(route_name : string)
+    ~(requirement : route_requirement)
+    (runtimes : t list)
     (lanes : Runtime_lane.t list)
-    (structured_judge_id : string option) : (unit, string) result =
-  let supports_structured (runtime : t) =
-    match runtime.model.capabilities with
-    | Some caps -> caps.supports_structured_output
-    | None -> false
-  in
-  match structured_judge_id with
+    (route_id : string option) : (unit, string) result =
+  match route_id with
   | None -> Ok ()
   | Some id ->
-    (match find_declared_lane lanes id with
-     | Some lane ->
+    (match find_declared_lane lanes id, requirement with
+     | Some _, Resolves_only ->
+       (* [validate_lanes] already guaranteed every candidate id resolves. *)
+       Ok ()
+     | Some lane, Declares_capability { key; supported_by } ->
        validate_lane_candidates_capability
          ~config_path
-         ~route_name:"structured_judge"
-         ~capability_key:"supports-structured-output"
-         ~runtime_supports:supports_structured
+         ~route_name
+         ~capability_key:key
+         ~runtime_supports:supported_by
          runtimes
          lane
-     | None ->
-    (match List.find_opt (fun (r : t) -> String.equal r.id id) runtimes with
-     | None ->
-       Error
-         (Printf.sprintf
-            "%s: [runtime].structured_judge = %S%s"
-            config_path
-            id
-            (unresolved_runtime_suffix ~dropped_bindings
-               ~runtime_count:(List.length runtimes) id))
-     | Some runtime ->
-       if supports_structured runtime
-       then Ok ()
-       else
+     | None, _ ->
+       (match List.find_opt (fun (r : t) -> String.equal r.id id) runtimes with
+        | None ->
           Error
             (Printf.sprintf
-               "%s: [runtime].structured_judge = %S uses model %S, which does \
-                not declare supports-structured-output"
+               "%s: [runtime].%s = %S%s"
                config_path
+               route_name
                id
-               runtime.model.id)))
+               (unresolved_runtime_suffix
+                  ~dropped_bindings
+                  ~runtime_count:(List.length runtimes)
+                  id))
+        | Some runtime ->
+          (match requirement with
+           | Resolves_only -> Ok ()
+           | Declares_capability { key; supported_by } ->
+             if supported_by runtime
+             then Ok ()
+             else
+               Error
+                 (Printf.sprintf
+                    "%s: [runtime].%s = %S uses model %S, which does not declare %s"
+                    config_path
+                    route_name
+                    id
+                    runtime.model.id
+                    key))))
 ;;
 
 (* [runtime].media_failover (RFC-0265) validates each id in the ordered list: an
@@ -971,26 +940,48 @@ let materialize_config
   let* () =
     validate_keeper_assignments ~config_path ~dropped_bindings runtimes assignments
   in
-  let* () =
-    validate_memory_os_consolidation_runtime
-      ~config_path
-      ~dropped_bindings
-      runtimes
-      cfg.memory_os_consolidation_runtime_id
-  in
-  (* Lanes are materialized before the judge/verifier route validations so a
-     route id can name a lane (#25394); candidate resolution is enforced by
-     [validate_lanes] inside [lanes_of_decls]. *)
+  (* Lanes are materialized before every route validation so any route id can
+     name a lane (#25394); candidate resolution is enforced by [validate_lanes]
+     inside [lanes_of_decls]. memory_os_consolidation used to be validated above
+     this point, which is the only reason it could not name a lane. *)
   let* lanes =
     lanes_of_decls ~config_path ~dropped_bindings runtimes cfg.lane_decls
   in
   let* () =
-    validate_structured_judge_runtime ~config_path ~dropped_bindings runtimes
+    validate_route_runtime
+      ~config_path
+      ~dropped_bindings
+      ~route_name:"memory_os_consolidation"
+      ~requirement:Resolves_only
+      runtimes
+      lanes
+      cfg.memory_os_consolidation_runtime_id
+  in
+  let* () =
+    validate_route_runtime
+      ~config_path
+      ~dropped_bindings
+      ~route_name:"structured_judge"
+      ~requirement:
+        (Declares_capability
+           { key = "supports-structured-output"
+           ; supported_by = model_supports_structured_output
+           })
+      runtimes
       lanes
       cfg.structured_judge_runtime_id
   in
   let* () =
-    validate_cross_verifier_runtime ~config_path ~dropped_bindings runtimes
+    validate_route_runtime
+      ~config_path
+      ~dropped_bindings
+      ~route_name:"cross_verifier"
+      ~requirement:
+        (Declares_capability
+           { key = "supports-response-format-json"
+           ; supported_by = model_supports_response_format_json
+           })
+      runtimes
       lanes
       cfg.cross_verifier_runtime_id
   in

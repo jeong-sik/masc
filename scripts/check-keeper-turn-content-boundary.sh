@@ -34,24 +34,24 @@ FORBIDDEN_IDENTIFIERS = (
     "ensure_local_discovery_ready",
 )
 
-ENV_READ_PATTERNS = (
-    (
-        "raw environment read",
-        re.compile(r"\b(?:Sys|Unix)\.getenv(?:_opt)?\b"),
-    ),
-    (
-        "provider/model/credential environment projection",
-        re.compile(
-            r"\b(?:"
-            r"Env_config\.(?:[A-Za-z0-9_']+\.)*"
-            r"(?:[A-Za-z0-9']+_)*(?:Provider|Model|Credential|Api_key|Token)"
-            r"(?:_[A-Za-z0-9_']*)?(?:\.[A-Za-z0-9_']+)*"
-            r"|(?:Provider|Model|Credential|Api_key|Token)[A-Za-z0-9_']*_env"
-            r")\b",
-            re.IGNORECASE,
-        ),
-    ),
+RAW_ENV_READ_PATTERN = re.compile(r"\b(?:Sys|Unix)\.getenv(?:_opt)?\b")
+ENV_CONFIG_PATH_PATTERN = re.compile(
+    r"\bEnv_config(?:\.[A-Za-z_][A-Za-z0-9_']*)+\b"
 )
+ENV_BINDING_PATTERN = re.compile(r"\b[A-Za-z_][A-Za-z0-9_']*_env\b", re.IGNORECASE)
+POLICY_TOKENS = frozenset(("provider", "model", "credential", "token"))
+
+
+def has_policy_token(identifier: str) -> bool:
+    tokens = [token for token in re.split(r"_+", identifier.lower()) if token]
+    return any(token in POLICY_TOKENS for token in tokens) or any(
+        left == "api" and right == "key"
+        for left, right in zip(tokens, tokens[1:])
+    )
+
+
+def is_policy_env_config_path(path: str) -> bool:
+    return any(has_policy_token(segment) for segment in path.split(".")[1:])
 
 
 def mask_non_code(source: str) -> str:
@@ -126,12 +126,35 @@ for raw_path in sys.argv[1:]:
             failures.append(
                 f"{path}:{location(source, match.start())}: forbidden identifier {identifier}"
             )
-    for label, pattern in ENV_READ_PATTERNS:
-        match = pattern.search(code)
-        if match:
-            failures.append(
-                f"{path}:{location(source, match.start())}: forbidden {label}: {match.group(0)}"
-            )
+    match = RAW_ENV_READ_PATTERN.search(code)
+    if match:
+        failures.append(
+            f"{path}:{location(source, match.start())}: forbidden raw environment read: {match.group(0)}"
+        )
+    match = next(
+        (
+            candidate
+            for candidate in ENV_CONFIG_PATH_PATTERN.finditer(code)
+            if is_policy_env_config_path(candidate.group(0))
+        ),
+        None,
+    )
+    if match:
+        failures.append(
+            f"{path}:{location(source, match.start())}: forbidden provider/model/credential environment projection: {match.group(0)}"
+        )
+    match = next(
+        (
+            candidate
+            for candidate in ENV_BINDING_PATTERN.finditer(code)
+            if has_policy_token(candidate.group(0))
+        ),
+        None,
+    )
+    if match:
+        failures.append(
+            f"{path}:{location(source, match.start())}: forbidden provider/model/credential environment projection: {match.group(0)}"
+        )
 
 if failures:
     print("\n".join(failures), file=sys.stderr)
@@ -169,6 +192,8 @@ Provider_runtime_binding ensure_local_discovery_ready
 |}
 let _ = Env_config.Tokenizer.path
 let _ = Env_config.Remodeling.enabled
+let _ = Tokenizer_env.path
+let _ = Remodeling_env.enabled
 EOF
   MASC_KEEPER_TURN_CONTENT_BOUNDARY_ROOT="${fixture}" \
     bash "${BASH_SOURCE[0]}" --check >/dev/null
@@ -188,6 +213,10 @@ EOF
     'let _ = Env_config.Default_model.value' \
     'let _ = Env_config.Cloud_provider.key' \
     'let _ = Env_config.Runtime_api_key.path' \
+    'let _ = Env_config._model.value' \
+    'let _ = Env_config.Default__model.value' \
+    'let _ = Env_config.Runtime__api_key.path' \
+    'let _ = Env_config.Nested.Default_model.value' \
     'let _ = Credential_env.fallback ()'
   do
     cp "${first_clean}" "${first}"

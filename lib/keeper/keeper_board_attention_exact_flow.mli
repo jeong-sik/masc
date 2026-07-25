@@ -54,7 +54,6 @@ val lane_id : string
     requeue-requested candidates are not executable; a durably requeued pending
     candidate is executable through the same exact flow as a normal pending one. *)
 val prepare :
-  ?flow_scope:Keeper_exact_flow_scope.t ->
   base_path:string ->
   keeper_name:string ->
   net:Eio_context.eio_net option ->

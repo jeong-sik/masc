@@ -193,10 +193,32 @@ let publish_exn ~slot_ids snapshot =
   F.publish_registry ~lane_id:conformance_lane_id ~slot_ids snapshot
 ;;
 
-let prepare_with_scope_exn ~flow_scope ~keeper_name ~registry =
+let exact_flow_base_path = "/tmp/masc-compaction-exact-output-conformance"
+
+let ensure_registered_keeper ~base_path keeper_name =
+  match Keeper_registry.get ~base_path keeper_name with
+  | Some _ -> ()
+  | None ->
+    let meta =
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_name
+          ; "trace_id", `String ("trace-" ^ keeper_name)
+          ])
+      |> Result.get_ok
+    in
+    ignore (Keeper_registry.register_offline ~base_path keeper_name meta)
+;;
+
+let prepare_exn
+      ?(base_path = exact_flow_base_path)
+      ~keeper_name
+      ~registry
+  =
+  ensure_registered_keeper ~base_path keeper_name;
   match
     C.prepare_lane
-      ~flow_scope
+      ~base_path
       ~keeper_name
       ~registry
       ~lane_id:conformance_lane_id
@@ -204,15 +226,6 @@ let prepare_with_scope_exn ~flow_scope ~keeper_name ~registry =
   with
   | Ok prepared -> prepared
   | Error _ -> Alcotest.fail "compaction flow preparation failed"
-;;
-
-let prepare_exn ~keeper_name ~registry =
-  let flow_scope =
-    C.For_testing.create_flow_scope
-      ~base_path:"/tmp/masc-compaction-exact-output-conformance"
-      ~keeper_name
-  in
-  prepare_with_scope_exn ~flow_scope ~keeper_name ~registry
 ;;
 
 let completed_exn = function
@@ -260,13 +273,30 @@ let test_missing_compaction_lane_is_explicit_degraded_state () =
         "empty exact-output registry must publish: %s"
         (Registry.publication_error_to_string error)
   in
+  let keeper_name = "keeper-missing-compaction-lane" in
+  ensure_registered_keeper ~base_path:exact_flow_base_path keeper_name;
+  List.iter
+    (fun (base_path, requested_keeper) ->
+       match
+         C.prepare_lane
+           ~base_path
+           ~keeper_name:requested_keeper
+           ~registry
+           ~lane_id:"compaction_exact"
+           ~units
+       with
+       | Error C.Exact_execution_context_unavailable -> ()
+       | Error _ ->
+         Alcotest.fail "wrong registry owner returned the wrong typed failure"
+       | Ok _ ->
+         Alcotest.fail "wrong registry root/name acquired an exact-flow owner")
+    [ exact_flow_base_path ^ "-wrong", keeper_name
+    ; exact_flow_base_path, keeper_name ^ "-wrong"
+    ];
   match
     C.prepare_lane
-      ~flow_scope:
-        (C.For_testing.create_flow_scope
-           ~base_path:"/tmp/masc-compaction-exact-output-conformance"
-           ~keeper_name:"keeper-missing-compaction-lane")
-      ~keeper_name:"keeper-missing-compaction-lane"
+      ~base_path:exact_flow_base_path
+      ~keeper_name
       ~registry
       ~lane_id:"compaction_exact"
       ~units
@@ -304,10 +334,6 @@ let test_preparation_freezes_order_generation_and_defers_attempt_identity () =
     "OAS freezes the effective candidate snapshot"
     [ "prepare-first"; "prepare-second" ]
     (C.For_testing.candidate_snapshot_slot_ids prepared);
-  Alcotest.(check bool)
-    "flow identity is allocated without allocating candidate attempts"
-    true
-    (String.trim (C.For_testing.flow_id prepared) <> "");
   Alcotest.(check int)
     "preparation allocates no candidate attempt"
     0
@@ -722,52 +748,6 @@ let test_cancellation_quarantines_only_bound_identity () =
   Alcotest.(check int) "cancellation never dispatches successor" 0 (F.post_count successor)
 ;;
 
-let test_independent_preparations_do_not_share_call_identity () =
-  run_eio
-  @@ fun ~sw ~net ~clock ->
-  let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
-  let slot_id = "independent-flow-slot" in
-  let snapshot =
-    F.resolver_snapshot
-      ~source:"masc flow non-sharing"
-      [ { id = slot_id; base_url = server.base_url } ]
-  in
-  let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
-  let keeper_a = prepare_exn ~keeper_name:"keeper-a" ~registry in
-  let keeper_b = prepare_exn ~keeper_name:"keeper-b" ~registry in
-  Alcotest.(check bool)
-    "independent preparations own distinct flow ids"
-    true
-    (not
-       (String.equal
-          (C.For_testing.flow_id keeper_a)
-          (C.For_testing.flow_id keeper_b)));
-  Alcotest.(check int)
-    "first preparation allocates no candidate attempt"
-    0
-    (List.length (C.For_testing.attempt_observations keeper_a));
-  Alcotest.(check int)
-    "second preparation allocates no candidate attempt"
-    0
-    (List.length (C.For_testing.attempt_observations keeper_b));
-  let result_a, result_b =
-    Eio.Fiber.pair
-      (fun () -> execute_prepared_lane ~keeper_name:"keeper-a" ~net ~clock keeper_a)
-      (fun () -> execute_prepared_lane ~keeper_name:"keeper-b" ~net ~clock keeper_b)
-  in
-  let completed_a = completed_exn result_a in
-  let completed_b = completed_exn result_b in
-  let a = C.completed_attempt_observation completed_a in
-  let b = C.completed_attempt_observation completed_b in
-  check_identity "first reached attempt" a;
-  check_identity "second reached attempt" b;
-  Alcotest.(check bool)
-    "reached attempts own distinct call ids"
-    true
-    (not (String.equal a.call_id b.call_id));
-  Alcotest.(check int) "independent flows post independently" 2 (F.post_count server)
-;;
-
 let test_two_keeper_scopes_freeze_and_do_not_share_preferences () =
   run_eio
   @@ fun ~sw ~net ~clock ->
@@ -786,23 +766,17 @@ let test_two_keeper_scopes_freeze_and_do_not_share_preferences () =
       ; { id = slot_b; base_url = server_b.base_url }
       ]
   in
-  let flow_scope_a =
-    C.For_testing.create_flow_scope ~base_path ~keeper_name:keeper_a
-  in
-  let flow_scope_b =
-    C.For_testing.create_flow_scope ~base_path ~keeper_name:keeper_b
-  in
   let registry_a = publish_exn ~slot_ids:[ slot_a; slot_b ] snapshot in
   let prepared_a =
-    prepare_with_scope_exn
-      ~flow_scope:flow_scope_a
+    prepare_exn
+      ~base_path
       ~keeper_name:keeper_a
       ~registry:registry_a
   in
   let registry_b = publish_exn ~slot_ids:[ slot_b; slot_a ] snapshot in
   let prepared_b_before =
-    prepare_with_scope_exn
-      ~flow_scope:flow_scope_b
+    prepare_exn
+      ~base_path
       ~keeper_name:keeper_b
       ~registry:registry_b
   in
@@ -822,9 +796,27 @@ let test_two_keeper_scopes_freeze_and_do_not_share_preferences () =
       prepared_a
     |> completed_exn
   in
+  Keeper_registry.For_testing.unregister ~base_path keeper_b;
+  ensure_registered_keeper ~base_path keeper_b;
+  (match
+     C.execute_prepared_lane
+       ~keeper_name:keeper_b
+       ~net
+       ~clock
+       prepared_b_before
+   with
+   | Error C.Exact_execution_context_unavailable -> ()
+   | Error _ ->
+     Alcotest.fail "stale owner generation returned the wrong typed failure"
+   | Ok _ ->
+     Alcotest.fail "stale owner generation crossed re-registration");
+  Alcotest.(check int)
+    "stale owner dispatched nothing"
+    0
+    (F.post_count server_b);
   let prepared_b_after =
-    prepare_with_scope_exn
-      ~flow_scope:flow_scope_b
+    prepare_exn
+      ~base_path
       ~keeper_name:keeper_b
       ~registry:registry_b
   in
@@ -840,16 +832,6 @@ let test_two_keeper_scopes_freeze_and_do_not_share_preferences () =
     "keeper A success cannot reorder keeper B future snapshot"
     [ slot_b; slot_a ]
     (C.For_testing.candidate_snapshot_slot_ids prepared_b_after);
-  Alcotest.(check bool)
-    "keeper scopes own non-shared flow identities"
-    true
-    (let ids =
-       [ C.For_testing.flow_id prepared_a
-       ; C.For_testing.flow_id prepared_b_before
-       ; C.For_testing.flow_id prepared_b_after
-       ]
-     in
-     List.sort_uniq String.compare ids |> List.length = 3);
   let lease_b = claim_manual_lease ~base_path ~keeper_name:keeper_b in
   let guard_b =
     Keeper_heartbeat_loop.For_testing.exact_execution_guard
@@ -1908,10 +1890,6 @@ let () =
         ] )
     ; ( "affinity and non-sharing"
       , [ Alcotest.test_case
-            "independent flows do not share call identity"
-            `Quick
-            test_independent_preparations_do_not_share_call_identity
-        ; Alcotest.test_case
             "same-flow loser mutates no queue"
             `Quick
             test_same_flow_concurrent_loser_mutates_no_queue

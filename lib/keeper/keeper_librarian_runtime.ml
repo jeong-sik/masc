@@ -15,57 +15,10 @@ let per_keeper_slot_capacity () =
 
 let memory_os_librarian_provider_slot_site = "memory_os_librarian_provider_slot"
 
-type provider_slot =
-  { capacity : int
-  ; mutable in_use : int
-  }
-
-let provider_slots_mu = Eio.Mutex.create ()
-let provider_slots : (string, provider_slot) Hashtbl.t = Hashtbl.create 64
-let exact_flow_mutexes : (string, Eio.Mutex.t) Hashtbl.t = Hashtbl.create 64
-
-let provider_slot_for_keeper ~keeper_id capacity =
-  Eio_guard.with_mutex provider_slots_mu (fun () ->
-    match Hashtbl.find_opt provider_slots keeper_id with
-    | Some slot when slot.capacity = capacity -> slot
-    | _ ->
-      let slot = { capacity; in_use = 0 } in
-      Hashtbl.replace provider_slots keeper_id slot;
-      slot)
-;;
-
-let exact_flow_mutex_for_keeper ~keeper_id =
-  Eio_guard.with_mutex provider_slots_mu (fun () ->
-    match Hashtbl.find_opt exact_flow_mutexes keeper_id with
-    | Some mutex -> mutex
-    | None ->
-      let mutex = Eio.Mutex.create () in
-      Hashtbl.replace exact_flow_mutexes keeper_id mutex;
-      mutex)
-;;
-
-let with_provider_slot ~keeper_id ~clock:_ f =
-  let capacity = per_keeper_slot_capacity () in
-  let slot = provider_slot_for_keeper ~keeper_id capacity in
-  if capacity = 0
-  then Some (f ())
-  else
-    let acquired =
-      Eio_guard.with_mutex provider_slots_mu (fun () ->
-        if slot.in_use >= slot.capacity
-        then false
-        else (
-          slot.in_use <- slot.in_use + 1;
-          true))
-    in
-    if not acquired
-    then None
-    else
-      Fun.protect
-        ~finally:(fun () ->
-          Eio_guard.with_mutex provider_slots_mu (fun () ->
-            slot.in_use <- Int.max 0 (slot.in_use - 1)))
-        (fun () -> Some (f ()))
+let registered_lane_id ~base_path ~keeper_id () =
+  match Keeper_registry.get ~base_path keeper_id with
+  | Some entry -> Some (Keeper_lane.id entry.lane)
+  | None -> None
 ;;
 
 let enabled () =
@@ -808,8 +761,47 @@ let extract_with_exact_output_classified_unlocked
                                           parse_error)))))))))))))
 ;;
 
+let resolve_flow_scope ~base_path ~keeper_id =
+  Keeper_exact_flow_scope.for_registered
+    ~registered_lane_id:(registered_lane_id ~base_path ~keeper_id)
+    ~base_path
+    ~keeper_name:keeper_id
+    ~surface:Keeper_exact_flow_scope.Librarian
+  |> Result.map_error (fun detail ->
+    Exact_setup_failed (Exact_owner_unavailable detail))
+;;
+
+let extract_with_flow_scope_classified
+      ?clock
+      ~base_path
+      ~net
+      ~keeper_id
+      ~generation
+      ~flow_scope
+      inp
+  =
+  match
+    Keeper_exact_flow_scope.with_current
+      flow_scope
+      ~registered_lane_id:(registered_lane_id ~base_path ~keeper_id)
+      (fun () ->
+         Keeper_exact_flow_scope.with_librarian_exact_flow_lock
+           flow_scope
+           (fun () ->
+              extract_with_exact_output_classified_unlocked
+                ?clock
+                ~flow_scope
+                ~net
+                ~keeper_id
+                ~generation
+                inp))
+  with
+  | Ok result -> result
+  | Error detail ->
+    Error (Exact_setup_failed (Exact_owner_unavailable detail))
+;;
+
 let extract_with_exact_output_classified
-      ?flow_scope
       ?clock
       ~base_path
       ~net
@@ -817,33 +809,18 @@ let extract_with_exact_output_classified
       ~generation
       inp
   =
-  let* flow_scope =
-    match flow_scope with
-    | Some flow_scope -> Ok flow_scope
-    | None ->
-      Keeper_exact_flow_scope.for_registered
-        ~is_registered:(fun () ->
-          Keeper_registry.is_registered ~base_path keeper_id)
-        ~base_path
-        ~keeper_name:keeper_id
-        ~surface:Keeper_exact_flow_scope.Librarian
-      |> Result.map_error (fun detail ->
-        Exact_setup_failed (Exact_owner_unavailable detail))
-  in
-  Eio_guard.with_mutex
-    (exact_flow_mutex_for_keeper ~keeper_id)
-    (fun () ->
-      extract_with_exact_output_classified_unlocked
-        ?clock
-        ~flow_scope
-        ~net
-        ~keeper_id
-        ~generation
-        inp)
+  let* flow_scope = resolve_flow_scope ~base_path ~keeper_id in
+  extract_with_flow_scope_classified
+    ?clock
+    ~base_path
+    ~net
+    ~keeper_id
+    ~generation
+    ~flow_scope
+    inp
 ;;
 
 let extract_with_exact_output
-    ?flow_scope
     ?clock
     ~base_path
     ~net
@@ -853,7 +830,6 @@ let extract_with_exact_output
   =
   match
     extract_with_exact_output_classified
-      ?flow_scope
       ?clock
       ~base_path
       ~net
@@ -865,12 +841,78 @@ let extract_with_exact_output
   | Ok episode -> Ok episode
 ;;
 
-let extract_and_append_with_exact_output_classified
-    ?flow_scope
+let append_episode_for_current_owner
+    ?clock
+    ~base_path
+    ~keeper_id
+    ~flow_scope
+    episode
+  =
+  match
+    Keeper_exact_flow_scope.with_current
+      flow_scope
+      ~registered_lane_id:(registered_lane_id ~base_path ~keeper_id)
+      (fun () ->
+         let now = episode.Keeper_memory_os_types.created_at in
+         Keeper_memory_os_io.with_episode_bundle_lock ?clock ~keeper_id (fun () ->
+           match
+             try
+               let merge ~existing ~incoming =
+                 let provenance =
+                   let key = Keeper_memory_os_types.claim_identity incoming in
+                   if Keeper_recall_injection_window.recently_injected ~keeper_id ~key
+                   then (
+                     Otel_metric_store.inc_counter
+                       Keeper_metrics.(to_string MemoryOsReobserveEchoSuppressed)
+                       ~labels:[ "keeper", keeper_id ]
+                       ();
+                     Keeper_memory_os_policy.Recalled_echo)
+                   else Keeper_memory_os_policy.Independent_observation
+                 in
+                 Keeper_memory_os_policy.reobserve_fact
+                   ~now
+                   ~provenance
+                   ~existing
+                   ~incoming
+               in
+               let (_ : Keeper_memory_os_io.fact_merge_stats) =
+                 File_lock_eio.with_lock
+                   ?clock
+                   (Keeper_memory_os_io.facts_path ~keeper_id)
+                   (fun () ->
+                      Keeper_memory_os_io.merge_facts
+                        ~keeper_id
+                        ~merge
+                        ~incoming:episode.Keeper_memory_os_types.claims)
+               in
+               Ok ()
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               let message = Printexc.to_string exn in
+               Log.Keeper.warn
+                 "memory os fact upsert failed keeper=%s: %s"
+                 keeper_id
+                 message;
+               Error message
+           with
+           | Ok () ->
+             Keeper_memory_os_io.append_episode ~keeper_id episode;
+             Keeper_memory_os_io.append_event ~keeper_id episode;
+             Ok episode
+           | Error message -> Error (Memory_fact_upsert_failed message)))
+  with
+  | Ok result -> result
+  | Error detail ->
+    Error (Exact_setup_failed (Exact_owner_unavailable detail))
+;;
+
+let extract_and_append_with_flow_scope_classified
     ?clock
     ~base_path
     ~net
     ~keeper_id
+    ~flow_scope
     inp
   =
   match clock with
@@ -883,73 +925,43 @@ let extract_and_append_with_exact_output_classified
         ~trace_id:inp.Keeper_librarian.trace_id
     in
     (match
-       extract_with_exact_output_classified
-         ?flow_scope
+       extract_with_flow_scope_classified
          ?clock
          ~base_path
          ~net
          ~keeper_id
          ~generation
+         ~flow_scope
          inp
      with
-  | Error _ as e -> e
-  | Ok episode ->
-    let now = episode.Keeper_memory_os_types.created_at in
-    (* RFC-0243: UPSERT claims into the fact store instead of blind-appending. A claim
-       re-extracted across turns is folded into the existing row
-       (Keeper_memory_os_policy.reobserve_fact refreshes [last_verified_at]
-       only) rather than accumulating as a duplicate. Every resulting fact is
-       preserved. Only after the facts are durable do we publish the episode file
-       and append the event row; the event row is
-       the reader-visible commit marker for [read_episodes_tail].
+     | Error _ as error -> error
+     | Ok episode ->
+       append_episode_for_current_owner
+         ?clock
+         ~base_path
+         ~keeper_id
+         ~flow_scope
+         episode)
+;;
 
-       RFC-0285 §8: before folding, decide each claim's provenance. A claim
-       whose identity was recall-injected into this keeper's recent prompts is
-       an echo — the model restating what it just read — and must not advance
-       the truth anchor recall's recency ranking reads. The judgment (window
-       join + metric) lives here at the write boundary; the fold itself stays
-       a pure function of the decision. *)
-    Keeper_memory_os_io.with_episode_bundle_lock ?clock ~keeper_id (fun () ->
-      match
-        try
-          let merge ~existing ~incoming =
-            let provenance =
-              let key = Keeper_memory_os_types.claim_identity incoming in
-              if Keeper_recall_injection_window.recently_injected ~keeper_id ~key
-              then (
-                Otel_metric_store.inc_counter
-                  Keeper_metrics.(to_string MemoryOsReobserveEchoSuppressed)
-                  ~labels:[ "keeper", keeper_id ]
-                  ();
-                Keeper_memory_os_policy.Recalled_echo)
-              else Keeper_memory_os_policy.Independent_observation
-            in
-            Keeper_memory_os_policy.reobserve_fact ~now ~provenance ~existing ~incoming
-          in
-          let (_ : Keeper_memory_os_io.fact_merge_stats) =
-            File_lock_eio.with_lock ?clock (Keeper_memory_os_io.facts_path ~keeper_id) (fun () ->
-              Keeper_memory_os_io.merge_facts
-                ~keeper_id
-                ~merge
-                ~incoming:episode.Keeper_memory_os_types.claims)
-          in
-          Ok ()
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          let message = Printexc.to_string exn in
-          Log.Keeper.warn "memory os fact upsert failed keeper=%s: %s" keeper_id message;
-          Error message
-      with
-      | Ok () ->
-        Keeper_memory_os_io.append_episode ~keeper_id episode;
-        Keeper_memory_os_io.append_event ~keeper_id episode;
-        Ok episode
-      | Error message -> Error (Memory_fact_upsert_failed message)))
+let extract_and_append_with_exact_output_classified
+    ?clock
+    ~base_path
+    ~net
+    ~keeper_id
+    inp
+  =
+  let* flow_scope = resolve_flow_scope ~base_path ~keeper_id in
+  extract_and_append_with_flow_scope_classified
+    ?clock
+    ~base_path
+    ~net
+    ~keeper_id
+    ~flow_scope
+    inp
 ;;
 
 let extract_and_append_with_exact_output
-    ?flow_scope
     ?clock
     ~base_path
     ~net
@@ -958,7 +970,6 @@ let extract_and_append_with_exact_output
   =
   match
     extract_and_append_with_exact_output_classified
-      ?flow_scope
       ?clock
       ~base_path
       ~net
@@ -980,44 +991,65 @@ let run_best_effort ~base_path ~keeper_id (inp : Keeper_librarian.input) =
     try
       match Eio_context.get_net_opt (), Eio_context.get_clock_opt () with
       | Some net, Some clock ->
-        (match
-           with_provider_slot ~keeper_id ~clock (fun () ->
-             extract_and_append_with_exact_output_classified
-               ~clock
-               ~base_path
-               ~net
-               ~keeper_id
-               inp)
-         with
-             | None ->
-               Otel_metric_store.inc_counter
-                 Keeper_metrics.(to_string MemoryLaneProviderSlotBusy)
+        (match resolve_flow_scope ~base_path ~keeper_id with
+         | Error err ->
+           Otel_metric_store.inc_counter
+             Keeper_metrics.(to_string EpisodeCreateFailures)
+             ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
+             ();
+           Log.Keeper.warn
+             ~keeper_name:keeper_id
+             "memory os librarian failed lane=%s: %s; cadence deferred=false"
+             exact_lane_id
+             (extraction_error_to_string err)
+         | Ok flow_scope ->
+           (match
+              Keeper_exact_flow_scope.with_librarian_provider_slot
+                flow_scope
+                ~capacity:(per_keeper_slot_capacity ())
+                (fun () ->
+                   extract_and_append_with_flow_scope_classified
+                     ~clock
+                     ~base_path
+                     ~net
+                     ~keeper_id
+                     ~flow_scope
+                     inp)
+            with
+            | None ->
+              Otel_metric_store.inc_counter
+                Keeper_metrics.(to_string MemoryLaneProviderSlotBusy)
                 ~labels:
-                  [ "keeper", keeper_id; "site", memory_os_librarian_provider_slot_site ]
-               ();
-               Log.Keeper.warn ~keeper_name:keeper_id
-                 "memory os librarian skipped lane=%s: per-keeper provider slot busy (capacity=%d)"
-                 exact_lane_id
-                 (per_keeper_slot_capacity ())
-             | Some (Ok episode) ->
-               cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
-               Log.Keeper.info ~keeper_name:keeper_id
-                 "memory os librarian wrote episode trace_id=%s generation=%d claims=%d"
-                 episode.Keeper_memory_os_types.trace_id
-                 episode.generation
-                 (List.length episode.claims)
-             | Some (Error err) ->
-               Otel_metric_store.inc_counter
-                 Keeper_metrics.(to_string EpisodeCreateFailures)
-                 ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
-                 ();
-               if should_record_cadence_backoff_after_error err
-               then cadence_record_attempt ~keeper_id ~trace_id:inp.trace_id;
-               Log.Keeper.warn ~keeper_name:keeper_id
-                 "memory os librarian failed lane=%s: %s; cadence deferred=%b"
-                 exact_lane_id
-                 (extraction_error_to_string err)
-                 (should_record_cadence_backoff_after_error err))
+                  [ "keeper", keeper_id
+                  ; "site", memory_os_librarian_provider_slot_site
+                  ]
+                ();
+              Log.Keeper.warn
+                ~keeper_name:keeper_id
+                "memory os librarian skipped lane=%s: per-keeper provider slot busy (capacity=%d)"
+                exact_lane_id
+                (per_keeper_slot_capacity ())
+            | Some (Ok episode) ->
+              cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
+              Log.Keeper.info
+                ~keeper_name:keeper_id
+                "memory os librarian wrote episode trace_id=%s generation=%d claims=%d"
+                episode.Keeper_memory_os_types.trace_id
+                episode.generation
+                (List.length episode.claims)
+            | Some (Error err) ->
+              Otel_metric_store.inc_counter
+                Keeper_metrics.(to_string EpisodeCreateFailures)
+                ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
+                ();
+              if should_record_cadence_backoff_after_error err
+              then cadence_record_attempt ~keeper_id ~trace_id:inp.trace_id;
+              Log.Keeper.warn
+                ~keeper_name:keeper_id
+                "memory os librarian failed lane=%s: %s; cadence deferred=%b"
+                exact_lane_id
+                (extraction_error_to_string err)
+                (should_record_cadence_backoff_after_error err)))
       | _ ->
         Log.Keeper.warn ~keeper_name:keeper_id
           "memory os librarian skipped: Eio net/clock context unavailable lane=%s"

@@ -172,8 +172,7 @@ val dispatch_post_turn_lifecycle_events
   -> unit
 
 val recover_latest_checkpoint_for_compaction
-  :  ?flow_scope:Keeper_exact_flow_scope.t
-  -> ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
+  :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
   -> base_path:string
   -> base_dir:string
   -> meta:keeper_meta
@@ -183,8 +182,7 @@ val recover_latest_checkpoint_for_compaction
   -> (compaction_recovery, Keeper_post_turn.compaction_recovery_error) result
 
 val prepare_compaction
-  :  ?flow_scope:Keeper_exact_flow_scope.t
-  -> ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
+  :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
   -> base_path:string
   -> base_dir:string
   -> meta:Keeper_meta_contract.keeper_meta

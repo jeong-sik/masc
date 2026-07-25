@@ -53,8 +53,7 @@ type compaction_preparation =
     Every refusal preserves the original context and returns a typed reason.
     The caller owns the durable save and promotion from [Prepared] to [Applied]. *)
 val compact_for_request_typed
-  :  ?flow_scope:Keeper_exact_flow_scope.t
-  -> ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
+  :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
   -> base_path:string
   -> meta:Keeper_meta_contract.keeper_meta
   -> trigger:Compaction_trigger.t

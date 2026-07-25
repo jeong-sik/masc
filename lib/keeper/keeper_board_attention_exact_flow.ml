@@ -42,7 +42,10 @@ type 'callback_error execution_error =
   | Domain_settlement_failed
 
 type prepared =
-  { candidate : Keeper_board_attention_candidate.candidate
+  { base_path : string
+  ; keeper_name : string
+  ; flow_scope : Keeper_exact_flow_scope.t
+  ; candidate : Keeper_board_attention_candidate.candidate
   ; net : Eio_context.eio_net
   ; attempt : Exact_output.flow_attempt
   }
@@ -79,7 +82,13 @@ let flow_candidates selected_slots =
   loop 0 [] selected_slots
 ;;
 
-let prepare ?flow_scope ~base_path ~keeper_name ~net candidate =
+let registered_lane_id ~base_path ~keeper_name () =
+  match Keeper_registry.get ~base_path keeper_name with
+  | Some entry -> Some (Keeper_lane.id entry.lane)
+  | None -> None
+;;
+
+let prepare ~base_path ~keeper_name ~net candidate =
   match
     ( Keeper_board_attention_candidate.resumable_status
         candidate.Keeper_board_attention_candidate.status
@@ -94,56 +103,55 @@ let prepare ?flow_scope ~base_path ~keeper_name ~net candidate =
     Error Network_unavailable
   | Some (Keeper_board_attention_candidate.Resumable_pending _), Some net ->
     let* flow_scope =
-      match flow_scope with
-      | Some flow_scope -> Ok flow_scope
-      | None ->
-        Keeper_exact_flow_scope.for_registered
-          ~is_registered:(fun () ->
-            Keeper_registry.is_registered ~base_path keeper_name)
-          ~base_path
-          ~keeper_name
-          ~surface:Keeper_exact_flow_scope.Board_attention
-        |> Result.map_error (fun _ -> Registry_unavailable)
-    in
-    let* messages =
-      messages candidate
-      |> Result.map_error (fun detail -> Prompt_contract_unavailable detail)
-    in
-    let* registry =
-      Runtime_exact_output_registry.current ()
+      Keeper_exact_flow_scope.for_registered
+        ~registered_lane_id:(registered_lane_id ~base_path ~keeper_name)
+        ~base_path
+        ~keeper_name
+        ~surface:Keeper_exact_flow_scope.Board_attention
       |> Result.map_error (fun _ -> Registry_unavailable)
     in
-    let* resolved =
-      Runtime_exact_output_registry.resolve_lane registry ~lane_id
-      |> Result.map_error (fun _ -> Lane_unavailable)
+    let prepare_current () =
+      let* messages =
+        messages candidate
+        |> Result.map_error (fun detail -> Prompt_contract_unavailable detail)
+      in
+      let* registry =
+        Runtime_exact_output_registry.current ()
+        |> Result.map_error (fun _ -> Registry_unavailable)
+      in
+      let* resolved =
+        Runtime_exact_output_registry.resolve_lane registry ~lane_id
+        |> Result.map_error (fun _ -> Lane_unavailable)
+      in
+      let* candidates = flow_candidates resolved.selected_slots in
+      match candidates with
+      | [] -> Error Lane_resolved_without_slots
+      | first :: rest ->
+        let requirement =
+          Exact_output.make_output_requirement
+            ~schema:
+              Keeper_structured_output_schema
+              .board_attention_judgment_batch_output_schema
+            ~minimum_guarantee:Exact_output.Json_syntax
+        in
+        let* snapshot =
+          Exact_output.snapshot_flow
+            ~preferences:
+              (Keeper_exact_flow_scope.preference_store flow_scope)
+            ~scope:(Keeper_exact_flow_scope.scope flow_scope)
+            ~first
+            ~rest
+            ~messages
+            requirement
+          |> Result.map_error (fun _ -> Flow_snapshot_failed)
+        in
+        let* attempt =
+          Exact_output.start_flow snapshot
+          |> Result.map_error (fun _ -> Flow_start_failed)
+        in
+        Ok { base_path; keeper_name; flow_scope; candidate; net; attempt }
     in
-    let* candidates = flow_candidates resolved.selected_slots in
-    (match candidates with
-     | [] -> Error Lane_resolved_without_slots
-     | first :: rest ->
-       let requirement =
-         Exact_output.make_output_requirement
-           ~schema:
-             Keeper_structured_output_schema
-             .board_attention_judgment_batch_output_schema
-           ~minimum_guarantee:Exact_output.Json_syntax
-       in
-       let* snapshot =
-         Exact_output.snapshot_flow
-           ~preferences:
-             (Keeper_exact_flow_scope.preference_store flow_scope)
-           ~scope:(Keeper_exact_flow_scope.scope flow_scope)
-           ~first
-           ~rest
-           ~messages
-           requirement
-         |> Result.map_error (fun _ -> Flow_snapshot_failed)
-       in
-       let* attempt =
-         Exact_output.start_flow snapshot
-         |> Result.map_error (fun _ -> Flow_start_failed)
-       in
-       Ok { candidate; net; attempt })
+    prepare_current ()
 ;;
 
 let string_of_call_id call_id = Exact_output.call_id_to_string call_id
@@ -326,7 +334,7 @@ let observe_terminal prepared result =
     (result |> terminal_outcome |> terminal_outcome_to_string)
 ;;
 
-let execute ?clock ~before_dispatch ~before_advance prepared =
+let execute_current ?clock ~before_dispatch ~before_advance prepared =
   let oas_before_dispatch receipt =
     before_dispatch (attempt_provenance receipt)
   in
@@ -406,4 +414,19 @@ let execute ?clock ~before_dispatch ~before_advance prepared =
   in
   observe_terminal prepared result;
   result
+;;
+
+let execute ?clock ~before_dispatch ~before_advance prepared =
+  match
+    Keeper_exact_flow_scope.with_current
+      prepared.flow_scope
+      ~registered_lane_id:
+        (registered_lane_id
+           ~base_path:prepared.base_path
+           ~keeper_name:prepared.keeper_name)
+      (fun () ->
+         execute_current ?clock ~before_dispatch ~before_advance prepared)
+  with
+  | Ok result -> result
+  | Error _ -> Error (Exact_execution_failed [])
 ;;

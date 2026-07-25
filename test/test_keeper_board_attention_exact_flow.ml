@@ -53,14 +53,19 @@ let prepare_exact ~net candidate =
     "board-attention-exact-test-" ^ candidate.Candidate.candidate_id
   in
   let base_path = "/tmp/masc-board-attention-exact-flow" in
-  let flow_scope =
-    Keeper_exact_flow_scope.For_testing.create
-      ~base_path
-      ~keeper_name
-      ~surface:Keeper_exact_flow_scope.Board_attention
-  in
+  (match Keeper_registry.get ~base_path keeper_name with
+   | Some _ -> ()
+   | None ->
+     let meta =
+       Masc_test_deps.meta_of_json_fixture
+         (`Assoc
+           [ "name", `String keeper_name
+           ; "trace_id", `String ("trace-" ^ keeper_name)
+           ])
+       |> Result.get_ok
+     in
+     ignore (Keeper_registry.register_offline ~base_path keeper_name meta));
   Exact_flow.prepare
-    ~flow_scope
     ~base_path
     ~keeper_name
     ~net

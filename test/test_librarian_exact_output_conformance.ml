@@ -43,11 +43,23 @@ let with_temp_keepers_dir f =
 
 let exact_flow_base_path = "/tmp/masc-librarian-exact-flow"
 
-let exact_flow_scope keeper_id =
-  Keeper_exact_flow_scope.For_testing.create
-    ~base_path:exact_flow_base_path
-    ~keeper_name:keeper_id
-    ~surface:Keeper_exact_flow_scope.Librarian
+let ensure_registered_keeper keeper_id =
+  match Masc.Keeper_registry.get ~base_path:exact_flow_base_path keeper_id with
+  | Some _ -> ()
+  | None ->
+    let meta =
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_id
+          ; "trace_id", `String ("trace-" ^ keeper_id)
+          ])
+      |> Result.get_ok
+    in
+    ignore
+      (Masc.Keeper_registry.register_offline
+         ~base_path:exact_flow_base_path
+         keeper_id
+         meta)
 ;;
 
 let extract_with_exact_output_classified
@@ -57,8 +69,8 @@ let extract_with_exact_output_classified
       ~generation
       input
   =
+  ensure_registered_keeper keeper_id;
   Librarian_runtime.extract_with_exact_output_classified
-    ~flow_scope:(exact_flow_scope keeper_id)
     ?clock
     ~base_path:exact_flow_base_path
     ~net
@@ -74,8 +86,8 @@ let extract_with_exact_output
       ~generation
       input
   =
+  ensure_registered_keeper keeper_id;
   Librarian_runtime.extract_with_exact_output
-    ~flow_scope:(exact_flow_scope keeper_id)
     ?clock
     ~base_path:exact_flow_base_path
     ~net
@@ -85,8 +97,8 @@ let extract_with_exact_output
 ;;
 
 let extract_and_append_with_exact_output ?clock ~net ~keeper_id input =
+  ensure_registered_keeper keeper_id;
   Librarian_runtime.extract_and_append_with_exact_output
-    ~flow_scope:(exact_flow_scope keeper_id)
     ?clock
     ~base_path:exact_flow_base_path
     ~net

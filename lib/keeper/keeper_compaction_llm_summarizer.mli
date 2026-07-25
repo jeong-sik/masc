@@ -72,7 +72,7 @@ type summarizer =
     visits and allocates one non-shared affine attempt only when that candidate
     is reached, before any network effect. *)
 val prepare_lane
-  :  flow_scope:Keeper_exact_flow_scope.t
+  :  base_path:string
   -> keeper_name:string
   -> registry:Runtime_exact_output_registry.t
   -> lane_id:string
@@ -102,8 +102,7 @@ val execute_prepared_lane
     execute-once, advancement, and provenance. [plan_of_json] alone enforces the
     MASC-owned compaction schema and domain rules after success. *)
 val make
-  :  ?flow_scope:Keeper_exact_flow_scope.t
-  -> ?exact_execution_guard:exact_execution_guard
+  :  ?exact_execution_guard:exact_execution_guard
   -> base_path:string
   -> keeper_name:string
   -> unit
@@ -157,11 +156,5 @@ module For_testing : sig
   val registry_generation : prepared_lane -> int64
 
   val attempt_observations : prepared_lane -> attempt_observation list
-  val flow_id : prepared_lane -> string
   val candidate_snapshot_slot_ids : prepared_lane -> string list
-
-  val create_flow_scope
-    :  base_path:string
-    -> keeper_name:string
-    -> Keeper_exact_flow_scope.t
 end

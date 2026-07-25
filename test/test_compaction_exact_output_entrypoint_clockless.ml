@@ -129,15 +129,17 @@ let test_domain_invalid_and_clockless_flow_failure_are_terminal () =
     (fun () ->
       init_runtime_fixture ();
       let meta = make_meta () in
+      Masc.Keeper_registry.For_testing.clear ();
+      ignore
+        (Masc.Keeper_registry.register_offline
+           ~base_path:exact_flow_base_path
+           meta.name
+           meta);
       let context =
         Masc.Keeper_context_core.context_of_oas_checkpoint (make_checkpoint ())
       in
       let decision () =
         Compact_policy.compact_for_request_typed
-          ~flow_scope:
-            (Masc.Keeper_compaction_llm_summarizer.For_testing.create_flow_scope
-               ~base_path:exact_flow_base_path
-               ~keeper_name:meta.name)
           ~base_path:exact_flow_base_path
           ~meta
           ~trigger:Compaction_trigger.Manual

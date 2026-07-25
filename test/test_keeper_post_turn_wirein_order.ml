@@ -14,8 +14,18 @@ module Exact_fixture = Compaction_exact_output_fixture
 module Schema = Masc.Keeper_structured_output_schema
 module Summarizer = Masc.Keeper_compaction_llm_summarizer
 
-let compaction_flow_scope ~base_path keeper_name =
-  Summarizer.For_testing.create_flow_scope ~base_path ~keeper_name
+let ensure_registered_keeper
+      ~base_path
+      (meta : Masc.Keeper_meta_contract.keeper_meta)
+  =
+  match Masc.Keeper_registry.get ~base_path meta.name with
+  | Some _ -> ()
+  | None ->
+    ignore
+      (Masc.Keeper_registry.register_offline
+         ~base_path
+         meta.name
+         meta)
 ;;
 
 let exact_terminal ?(slot_id = "compaction-slot") ?(call_id = "call-compaction") cause =
@@ -622,9 +632,9 @@ let test_manual_compaction_serializes_owner_lane () =
       publish_exact_fixture
         ~source:"post-turn stale-source CAS"
         stale_server;
+      ensure_registered_keeper ~base_path:config.base_path meta;
       let stale_plan_result =
         Post_turn.recover_latest_checkpoint_for_compaction
-          ~flow_scope:(compaction_flow_scope ~base_path:config.base_path meta.name)
           ~base_path:config.base_path
           ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
           ~meta
@@ -939,9 +949,9 @@ let test_missing_exact_lane_is_source_bound_no_compaction () =
           failf
             "empty exact lane registry fixture failed: %s"
             (Runtime_exact_output_registry.publication_error_to_string error));
+       ensure_registered_keeper ~base_path:config.base_path meta;
        match
          Post_turn.prepare_compaction
-           ~flow_scope:(compaction_flow_scope ~base_path:config.base_path meta.name)
            ~base_path:config.base_path
            ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
            ~meta
@@ -1001,9 +1011,9 @@ let test_malformed_structure_preserves_checkpoint () =
   let checkpoint = { (make_checkpoint ()) with messages = [ orphan ] } in
   let context =
     Masc.Keeper_context_core.context_of_oas_checkpoint checkpoint in
+  ensure_registered_keeper ~base_path:config.base_path meta;
   let preparation =
     Compact_policy.compact_for_request_typed
-      ~flow_scope:(compaction_flow_scope ~base_path:config.base_path meta.name)
       ~base_path:config.base_path
       ~meta
       ~trigger:Compaction_trigger.Manual
@@ -1133,9 +1143,9 @@ let test_prepare_commit_source_cas () =
       (Exact_fixture.Reply (summarize_response "shorter"))
   in
   publish_exact_fixture ~source:"post-turn prepared source CAS" exact_server;
+  ensure_registered_keeper ~base_path:config.base_path meta;
   match
     Post_turn.prepare_compaction
-      ~flow_scope:(compaction_flow_scope ~base_path:config.base_path meta.name)
       ~base_path:config.base_path
       ~base_dir:(Masc.Keeper_types_profile.session_base_dir config)
       ~meta
@@ -1316,12 +1326,13 @@ let test_post_dispatch_non_reducing_output_is_quarantined () =
                  Ok Summarizer.Fsync_completed)
           }
         in
+        let meta = make_meta ~name () in
+        ensure_registered_keeper ~base_path:config.base_path meta;
         let preparation =
           Compact_policy.compact_for_request_typed
-            ~flow_scope:(compaction_flow_scope ~base_path:config.base_path name)
             ~base_path:config.base_path
             ~exact_execution_guard
-            ~meta:(make_meta ~name ())
+            ~meta
             ~trigger:Compaction_trigger.Manual
             (make_checkpoint ()
              |> Masc.Keeper_context_core.context_of_oas_checkpoint)

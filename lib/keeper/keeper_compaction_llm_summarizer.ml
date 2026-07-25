@@ -377,7 +377,10 @@ let exact_output_requirement =
 ;;
 
 type prepared_lane =
-  { units : Keeper_compaction_unit.closed_unit list
+  { base_path : string
+  ; keeper_name : string
+  ; flow_scope : Keeper_exact_flow_scope.t
+  ; units : Keeper_compaction_unit.closed_unit list
   ; registry_generation : int64
   ; ordered_slot_ids : string list
   ; flow_attempt : Exact_output.flow_attempt
@@ -573,7 +576,20 @@ let log_unavailable_slot ~keeper_name ~registry_generation ~lane_id unavailable 
     (Runtime_exact_output_registry.unavailable_slot_to_string unavailable)
 ;;
 
-let prepare_lane ~flow_scope ~keeper_name ~registry ~lane_id ~units =
+let registered_lane_id ~base_path ~keeper_name () =
+  match Keeper_registry.get ~base_path keeper_name with
+  | Some entry -> Some (Keeper_lane.id entry.lane)
+  | None -> None
+;;
+
+let prepare_lane_with_scope
+      ~base_path
+      ~flow_scope
+      ~keeper_name
+      ~registry
+      ~lane_id
+     ~units
+  =
   if not (has_eligible_units units)
   then Error Invalid_plan
   else
@@ -636,7 +652,10 @@ let prepare_lane ~flow_scope ~keeper_name ~registry ~lane_id ~units =
                Error Exact_attempt_start_failed
              | Ok flow_attempt ->
                Ok
-                 { units
+                 { base_path
+                 ; keeper_name
+                 ; flow_scope
+                 ; units
                  ; registry_generation
                  ; ordered_slot_ids =
                      List.map
@@ -645,6 +664,24 @@ let prepare_lane ~flow_scope ~keeper_name ~registry ~lane_id ~units =
                        selected_slots
                  ; flow_attempt
                  })))
+;;
+
+let prepare_lane ~base_path ~keeper_name ~registry ~lane_id ~units =
+  let* flow_scope =
+    Keeper_exact_flow_scope.for_registered
+      ~registered_lane_id:(registered_lane_id ~base_path ~keeper_name)
+      ~base_path
+      ~keeper_name
+      ~surface:Keeper_exact_flow_scope.Compaction
+    |> Result.map_error (fun _ -> Exact_execution_context_unavailable)
+  in
+  prepare_lane_with_scope
+    ~base_path
+    ~flow_scope
+    ~keeper_name
+    ~registry
+    ~lane_id
+    ~units
 ;;
 
 type exact_flow_callback_failure =
@@ -738,7 +775,13 @@ let summarization_failure_of_callback = function
     Exact_execution_terminal terminal
 ;;
 
-let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepared_lane =
+let execute_prepared_lane_current
+      ~keeper_name
+      ~net
+      ?clock
+      ?exact_execution_guard
+      prepared_lane
+  =
   let bound_observation = ref None in
   let before_dispatch candidate =
     let observation = observe_flow_attempt_receipt candidate in
@@ -851,8 +894,27 @@ let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepar
             }))
 ;;
 
+let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepared_lane =
+  match
+    Keeper_exact_flow_scope.with_current
+      prepared_lane.flow_scope
+      ~registered_lane_id:
+        (registered_lane_id
+           ~base_path:prepared_lane.base_path
+           ~keeper_name:prepared_lane.keeper_name)
+      (fun () ->
+         execute_prepared_lane_current
+           ~keeper_name
+           ~net
+           ?clock
+           ?exact_execution_guard
+           prepared_lane)
+  with
+  | Ok result -> result
+  | Error _ -> Error Exact_execution_context_unavailable
+;;
+
 let run_exact
-      ?flow_scope
       ?exact_execution_guard
       ~base_path
       ~keeper_name
@@ -868,21 +930,9 @@ let run_exact
     match Runtime_exact_output_registry.current () with
     | Error _ -> Error Exact_target_selection_failed
     | Ok registry ->
-      let* flow_scope =
-        match flow_scope with
-        | Some flow_scope -> Ok flow_scope
-        | None ->
-          Keeper_exact_flow_scope.for_registered
-            ~is_registered:(fun () ->
-              Keeper_registry.is_registered ~base_path keeper_name)
-            ~base_path
-            ~keeper_name
-            ~surface:Keeper_exact_flow_scope.Compaction
-          |> Result.map_error (fun _ -> Exact_execution_context_unavailable)
-      in
       let* prepared_lane =
         prepare_lane
-          ~flow_scope
+          ~base_path
           ~keeper_name
           ~registry
           ~lane_id:"compaction_exact"
@@ -892,7 +942,6 @@ let run_exact
 ;;
 
 let make_resolved
-      ?flow_scope
       ?exact_execution_guard
       ~base_path
       ~(keeper_name : string)
@@ -905,7 +954,6 @@ let make_resolved
     Some
       (fun ~units ->
          run_exact
-           ?flow_scope
            ?exact_execution_guard
            ~base_path
            ~keeper_name
@@ -917,8 +965,8 @@ let make_resolved
   | _ -> None
 ;;
 
-let make ?flow_scope ?exact_execution_guard ~base_path ~keeper_name () =
-  make_resolved ?flow_scope ?exact_execution_guard ~base_path ~keeper_name ()
+let make ?exact_execution_guard ~base_path ~keeper_name () =
+  make_resolved ?exact_execution_guard ~base_path ~keeper_name ()
 ;;
 
 let completed_plan completed = completed.plan
@@ -974,12 +1022,6 @@ module For_testing = struct
     List.map observe_flow_attempt_receipt evidence.attempts
   ;;
 
-  let flow_id prepared_lane =
-    prepared_lane.flow_attempt
-    |> Exact_output.flow_attempt_id
-    |> Exact_output.flow_id_to_string
-  ;;
-
   let candidate_snapshot_slot_ids prepared_lane =
     let evidence : Exact_output.flow_evidence =
       Exact_output.flow_attempt_evidence prepared_lane.flow_attempt
@@ -989,10 +1031,4 @@ module For_testing = struct
       evidence.candidate_snapshot
   ;;
 
-  let create_flow_scope ~base_path ~keeper_name =
-    Keeper_exact_flow_scope.For_testing.create
-      ~base_path
-      ~keeper_name
-      ~surface:Keeper_exact_flow_scope.Compaction
-  ;;
 end

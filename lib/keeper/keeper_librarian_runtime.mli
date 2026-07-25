@@ -146,27 +146,13 @@ val per_keeper_slot_capacity : unit -> int
     [MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT] (default 1, 0 disables the
     gate). The capacity is applied per keeper, not fleet-wide. *)
 
-val with_provider_slot
-  :  keeper_id:string
-  -> clock:float Eio.Time.clock_ty Eio.Resource.t
-  -> (unit -> 'a)
-  -> 'a option
-(** Run [f] under the per-keeper librarian provider slot — the #21230/P0-4
-    storm guard. At capacity N per keeper, the (N+1)-th concurrent entrant for
-    the same keeper returns [None] immediately (drop, not block); capacity 0
-    disables the gate so [f] always runs ([Some]). The
-    provider slot registry is guarded through [Eio_guard.with_mutex], avoiding
-    blocking stdlib locks on keeper runtime fibers. Exposed for storm-guard
-    regression coverage (#21376). *)
-
 val librarian_provider_clock_unavailable_error : string
 (** Stable error returned before provider I/O when provider-backed librarian
     extraction is called without a clock. Exposed so callers/tests do not
     classify the human diagnostic with substring matching. *)
 
 val extract_with_exact_output
-  :  ?flow_scope:Keeper_exact_flow_scope.t
-  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> base_path:string
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> keeper_id:string
@@ -175,8 +161,7 @@ val extract_with_exact_output
   -> (Keeper_memory_os_types.episode, string) result
 
 val extract_with_exact_output_classified
-  :  ?flow_scope:Keeper_exact_flow_scope.t
-  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> base_path:string
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> keeper_id:string
@@ -195,8 +180,7 @@ val extract_with_exact_output_classified
     {!librarian_provider_clock_unavailable_error} before provider I/O. *)
 
 val extract_and_append_with_exact_output
-  :  ?flow_scope:Keeper_exact_flow_scope.t
-  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> base_path:string
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> keeper_id:string
@@ -204,8 +188,7 @@ val extract_and_append_with_exact_output
   -> (Keeper_memory_os_types.episode, string) result
 
 val extract_and_append_with_exact_output_classified
-  :  ?flow_scope:Keeper_exact_flow_scope.t
-  -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> base_path:string
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> keeper_id:string

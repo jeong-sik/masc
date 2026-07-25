@@ -666,7 +666,6 @@ let prepare_compaction_with
 ;;
 
 let prepare_compaction
-      ?flow_scope
       ?exact_execution_guard
       ~base_path
       ~base_dir
@@ -678,7 +677,6 @@ let prepare_compaction
   prepare_compaction_with
     ~compact_for_request:
       (Keeper_compact_policy.compact_for_request_typed
-         ?flow_scope
          ?exact_execution_guard
          ~base_path)
     ~base_dir
@@ -789,7 +787,6 @@ module For_testing = struct
 end
 
 let recover_latest_checkpoint_for_compaction
-    ?flow_scope
     ?exact_execution_guard
     ~(base_path : string)
     ~(base_dir : string)
@@ -800,7 +797,6 @@ let recover_latest_checkpoint_for_compaction
   : (compaction_recovery, compaction_recovery_error) result =
   match
     prepare_compaction
-      ?flow_scope
       ?exact_execution_guard
       ~base_path
       ~base_dir

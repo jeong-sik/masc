@@ -50,7 +50,14 @@ type summarization_failure =
   | Exact_admission_failed
   | Exact_attempt_start_failed
   | Exact_execution_context_unavailable
-  | Exact_execution_guard_failed
+  | Exact_execution_guard_absent
+        (** No exact-execution guard was supplied to the summarizer, so the plan
+            was built and then refused. In production the guard is constructed
+            only when the cycle claimed an event-queue stimulus lease, so this
+            reports a missing lease rather than a persistence fault. *)
+  | Exact_execution_bind_failed
+        (** A guard was supplied and its before-dispatch bind did not reach
+            Fsync_completed. A persistence fault, unrelated to lease ownership. *)
   | Exact_flow_already_started
   | Exact_execution_terminal of Keeper_event_queue_state.exact_execution_terminal
   | Invalid_plan

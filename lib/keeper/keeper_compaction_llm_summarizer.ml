@@ -82,7 +82,8 @@ type summarization_failure =
   | Exact_admission_failed
   | Exact_attempt_start_failed
   | Exact_execution_context_unavailable
-  | Exact_execution_guard_failed
+  | Exact_execution_guard_absent
+  | Exact_execution_bind_failed
   | Exact_flow_already_started
   | Exact_execution_terminal of Keeper_event_queue_state.exact_execution_terminal
   | Invalid_plan
@@ -730,7 +731,7 @@ let release_exact_execution
 ;;
 
 let summarization_failure_of_callback = function
-  | Bind_failed -> Exact_execution_guard_failed
+  | Bind_failed -> Exact_execution_bind_failed
   | Bind_sync_unconfirmed terminal
   | Release_failed terminal
   | Release_sync_unconfirmed terminal ->
@@ -835,7 +836,7 @@ let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepar
                observation))
      | Ok plan ->
        (match exact_execution_guard with
-        | None -> Error Exact_execution_guard_failed
+        | None -> Error Exact_execution_guard_absent
         | Some exact_execution_guard ->
           Ok
             { plan

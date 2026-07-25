@@ -495,7 +495,8 @@ let terminal_reason_of_rejection = function
   | Exact_admission_failed
   | Exact_attempt_start_failed
   | Exact_execution_context_unavailable
-  | Exact_execution_guard_failed
+  | Exact_execution_guard_absent
+  | Exact_execution_bind_failed
   | Exact_flow_already_started ->
     None
 ;;

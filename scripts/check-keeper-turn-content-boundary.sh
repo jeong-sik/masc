@@ -44,8 +44,8 @@ ENV_READ_PATTERNS = (
         re.compile(
             r"\b(?:"
             r"Env_config\.(?:[A-Za-z0-9_']+\.)*"
-            r"(?:Provider|Model|Credential|Api_key|Token)"
-            r"(?:_[A-Za-z0-9_']+)?(?:\.[A-Za-z0-9_']+)*"
+            r"(?:[A-Za-z0-9']+_)*(?:Provider|Model|Credential|Api_key|Token)"
+            r"(?:_[A-Za-z0-9_']*)?(?:\.[A-Za-z0-9_']+)*"
             r"|(?:Provider|Model|Credential|Api_key|Token)[A-Za-z0-9_']*_env"
             r")\b",
             re.IGNORECASE,
@@ -185,6 +185,9 @@ EOF
     'let _ = Sys.getenv_opt "MASC_DEFAULT_MODEL"' \
     'let _ = Unix.getenv "PROVIDER_API_KEY"' \
     'let _ = Env_config.Model_defaults.default_runtime_opt ()' \
+    'let _ = Env_config.Default_model.value' \
+    'let _ = Env_config.Cloud_provider.key' \
+    'let _ = Env_config.Runtime_api_key.path' \
     'let _ = Credential_env.fallback ()'
   do
     cp "${first_clean}" "${first}"

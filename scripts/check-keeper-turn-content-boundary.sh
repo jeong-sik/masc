@@ -43,7 +43,9 @@ ENV_READ_PATTERNS = (
         "provider/model/credential environment projection",
         re.compile(
             r"\b(?:"
-            r"Env_config\.[A-Za-z0-9_'.]*(?:Provider|Model|Credential|Api_key|Token)[A-Za-z0-9_'.]*"
+            r"Env_config\.(?:[A-Za-z0-9_']+\.)*"
+            r"(?:Provider|Model|Credential|Api_key|Token)"
+            r"(?:_[A-Za-z0-9_']+)?(?:\.[A-Za-z0-9_']+)*"
             r"|(?:Provider|Model|Credential|Api_key|Token)[A-Za-z0-9_']*_env"
             r")\b",
             re.IGNORECASE,
@@ -165,6 +167,8 @@ let _decoy = "Keeper_model_labels ensure_api_keys_for_labels"
 let _quoted_decoy = {|
 Provider_runtime_binding ensure_local_discovery_ready
 |}
+let _ = Env_config.Tokenizer.path
+let _ = Env_config.Remodeling.enabled
 EOF
   MASC_KEEPER_TURN_CONTENT_BOUNDARY_ROOT="${fixture}" \
     bash "${BASH_SOURCE[0]}" --check >/dev/null

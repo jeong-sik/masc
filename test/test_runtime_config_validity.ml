@@ -2362,15 +2362,28 @@ let test_structured_judge_lane_shadow_precedence () =
        strategy = \"ordered\"\n\
        candidates = [\"local.jsononly\"]\n"
   in
+  (* This used to prove lane-over-runtime precedence through a capability
+     rejection: the lane's only candidate lacked structured output, so an error
+     naming it showed the lane had been judged rather than the shadowed runtime.
+     The route requires no wire format now, so both branches return Ok and that
+     witness no longer exists at admission.
+
+     The precedence itself is covered where the consumers read it —
+     test_keeper_turn_driver_failover.ml:319
+     test_resolve_assignment_prefers_lane_over_runtime — so nothing is left
+     unasserted. What admission still guarantees is asserted here: a lane id that
+     shadows a runtime id is accepted and materialised, and the route keeps that
+     id rather than silently resolving to the shadowed runtime. *)
   with_temp_runtime_toml shadowing_lane (fun path ->
     match Runtime.load_list ~config_path:path with
-    | Ok _ ->
-      failf
-        "structured_judge naming a lane that shadows a capable runtime must \
-         be judged as the lane (incapable candidate rejected)"
-    | Error msg ->
-      check bool "error names the incapable shadow candidate" true
-        (String_util.contains_substring msg "local.jsononly"))
+    | Error msg -> failf "shadowing lane should resolve: %s" msg
+    | Ok (_, _, _, _, structured_judge, _, _, lanes) ->
+      check (option string) "structured_judge keeps the shadowing id"
+        (Some "local.judge") structured_judge;
+      check bool "the shadowing lane is materialized" true
+        (List.exists
+           (fun lane -> String.equal (Runtime_lane.id lane) "local.judge")
+           lanes))
 
 (* memory_os_consolidation was validated before lanes_of_decls ran, so it was the
    one route that could not name a lane while structured_judge and cross_verifier

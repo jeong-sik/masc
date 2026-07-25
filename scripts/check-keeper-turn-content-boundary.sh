@@ -42,11 +42,12 @@ CAMEL_CASE_BOUNDARY_PATTERN = re.compile(
     r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
 )
 FORBIDDEN_ENV_IDENTIFIERS = frozenset(
-    ("Env_config", "environment", "getenv", "getenv_opt")
+    ("Env_config", "Sys", "Unix", "getenv", "getenv_opt")
 )
 POLICY_TOKENS = frozenset(("provider", "model", "credential", "token"))
 TOKEN_NORMALIZATION = {
     "credentials": "credential",
+    "envs": "env",
     "environments": "env",
     "environment": "env",
     "keys": "key",
@@ -218,6 +219,7 @@ let _quote = '"'
 let _ = Env_configuration.Tokenizer.path
 let _ = getenv_optimal ()
 let _ = my_getenv_opt ()
+let environment = execution_context
 let _ = environment_name ()
 let _ = runtime_environment ()
 let _ = Tokenizer_env.path
@@ -273,6 +275,10 @@ EOF
     'let _ = ApiKeysEnv.fallback ()' \
     'let _ = Credentials_env.fallback ()' \
     'let _ = model_env_opt ()' \
+    'let _ = Models_envs.fallback ()' \
+    'let _ = ProvidersEnvs.fallback ()' \
+    'let _ = ApiKeys_envs.fallback ()' \
+    'let _ = CredentialsEnvs.fallback ()' \
     "let _ = model'_env.fallback ()" \
     $'let _quote = \'"\'\nlet _ = Env_config.Model_defaults.default_runtime_opt ()' \
     'let _ = Credential_env.fallback ()'

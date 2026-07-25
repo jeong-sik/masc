@@ -94,6 +94,16 @@ val settle_one_completed :
 module For_testing : sig
   type rearm_scheduler
 
+  val process_next_exact
+    :  clock:_ Eio.Time.clock
+    -> net:Eio_context.eio_net option
+    -> now:(unit -> float)
+    -> worker_epoch:Keeper_board_attention_partition.Worker_epoch.t
+    -> base_path:string
+    -> keeper_name:string
+    -> (step, string) result
+  (** Exercise the production prepare/execute/result projection path. *)
+
   val process_next_with_claim_ready_exact :
     claim_ready_exact:
       (now:float ->

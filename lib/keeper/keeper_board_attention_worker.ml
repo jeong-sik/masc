@@ -925,12 +925,20 @@ let process_pending
          (Owner_unregistered_deferred
             { candidate_id = (!latest_partition).candidate_id })
      | Execution_blocked reason ->
-       blocked_step
-         ~now:(now ())
-         ~worker_epoch
-         ~base_path
-         !latest_partition
-         reason)
+       (match
+          with_current prepared (fun () ->
+            blocked_step
+              ~now:(now ())
+              ~worker_epoch
+              ~base_path
+              !latest_partition
+              reason)
+        with
+        | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+          Ok
+            (Owner_unregistered_deferred
+               { candidate_id = (!latest_partition).candidate_id })
+        | Keeper_exact_flow_scope.Current step -> step))
   | Ok judgment ->
     (match
        with_current prepared (fun () ->
@@ -1443,6 +1451,17 @@ let process_next ~now ~worker_epoch ~base_path ~keeper_name ~prepare ~execute =
     ~execute
 ;;
 
+let process_next_exact ~clock ~net ~now ~worker_epoch ~base_path ~keeper_name =
+  process_next_current
+    ~with_current:Exact_flow.with_settlement_generation
+    ~now
+    ~worker_epoch
+    ~base_path
+    ~keeper_name
+    ~prepare:(Exact_flow.prepare ~base_path ~keeper_name ~net)
+    ~execute:(Exact_flow.execute ~clock)
+;;
+
 let completed_in_order ~base_path ~keeper_name =
   let* completed = Partition.completed ~base_path ~keeper_name in
   Ok
@@ -1708,7 +1727,7 @@ let run
            and drain () =
              match
                drain_available_current
-                 ~with_current:Exact_flow.with_current_generation
+                 ~with_current:Exact_flow.with_settlement_generation
                  ~yield:Eio.Fiber.yield
                  ~now:Time_compat.now
                  ~worker_epoch
@@ -1744,6 +1763,7 @@ module For_testing = struct
   type nonrec rearm_scheduler = rearm_scheduler
 
   let process_next = process_next
+  let process_next_exact = process_next_exact
   let process_next_with_claim_ready_exact = process_next_with_claim_ready_exact
   let drain_available = drain_available
   let drain_available_with_process = drain_available_with_process

@@ -2583,7 +2583,7 @@ let test_keeper_shutdown_finalizes_idle_operation () =
       | Ok None -> fail "retained Keeper metadata disappeared"
       | Error detail -> fail detail)
 
-let test_destructive_shutdown_blocks_before_cleanup_on_bound_summary () =
+let test_destructive_shutdown_drains_bound_summary_then_completes () =
   List.iter
     (fun mode ->
        Eio_main.run @@ fun env ->
@@ -2598,6 +2598,7 @@ let test_destructive_shutdown_blocks_before_cleanup_on_bound_summary () =
        Fun.protect
          ~finally:(fun () ->
            Approval_queue.For_testing.reset_runtime_state ();
+           Shutdown_finalize.For_testing.reset_completion_handler ();
            R.For_testing.clear ();
            cleanup_dir base_dir)
          (fun () ->
@@ -2632,11 +2633,14 @@ let test_destructive_shutdown_blocks_before_cleanup_on_bound_summary () =
               | Ok scope -> scope
               | Error detail -> fail detail
             in
-            ignore
-              (install_pending_summary
-                 ~base_path:config.base_path
-                 ~keeper_name:meta.name
-                 ~bind_exact:true);
+            let approval_id =
+              install_pending_summary
+                ~base_path:config.base_path
+                ~keeper_name:meta.name
+                ~bind_exact:true
+            in
+            Shutdown_finalize.register_completion_handler
+              (fun _config _operation _action -> Ok ());
             let session_dir =
               Filename.concat
                 (Keeper_types_profile.session_base_dir config)
@@ -2679,27 +2683,27 @@ let test_destructive_shutdown_blocks_before_cleanup_on_bound_summary () =
             (match Shutdown_store.persist_new ~config operation with
              | Ok () -> ()
              | Error error -> fail (Shutdown_store.error_to_string error));
-            let blocked =
+            let draining =
               match
                 Shutdown_finalize.run
                   ~config
                   ~entry:(Some entry)
                   operation
               with
-              | Ok blocked -> blocked
+              | Error (Shutdown_finalize.Finalization_draining (draining, _)) ->
+                draining
               | Error error -> fail (Shutdown_finalize.error_to_string error)
+              | Ok _ -> fail "bound shutdown skipped the draining boundary"
             in
-            (match blocked.phase with
-             | Shutdown_types.Blocked
-                 { stage = Shutdown_types.Approval_summary_retirement; _ } ->
-               ()
-             | _ -> fail "destructive cleanup did not block at retirement");
+            (match draining.phase with
+             | Shutdown_types.Cleanup_ready _ -> ()
+             | _ -> fail "draining shutdown did not remain retryable");
             (match Keeper_meta_store.read_meta config meta.name with
              | Ok (Some _) -> ()
              | Ok None -> fail "retirement failure removed metadata"
              | Error detail -> fail detail);
-            check bool "registry fenced before retirement scan" true
-              (Option.is_none
+            check bool "registry identity retained while draining" true
+              (Option.is_some
                  (R.get ~base_path:config.base_path meta.name));
             (match
                Masc.Keeper_exact_flow_scope.with_current
@@ -2712,8 +2716,56 @@ let test_destructive_shutdown_blocks_before_cleanup_on_bound_summary () =
              with
              | Masc.Keeper_exact_flow_scope.Owner_unregistered_deferred -> ()
              | Masc.Keeper_exact_flow_scope.Current () ->
-               fail "retirement scan ran before the exact owner fence");
-            check bool "session preserved" true (Sys.file_exists session_dir)))
+               fail "draining owner admitted new exact work");
+            (match
+               Masc.Keeper_exact_flow_scope.with_settlement
+                 old_flow_scope
+                 ~registered_lane_id:(fun () ->
+                   match R.get ~base_path:config.base_path meta.name with
+                   | Some current -> Some (Lane.id current.lane)
+                   | None -> None)
+                 (fun () -> ())
+             with
+             | Masc.Keeper_exact_flow_scope.Current () -> ()
+             | Masc.Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+               fail "draining owner rejected bound settlement");
+            let pending =
+              match Approval_queue.get_pending_entry ~id:approval_id with
+              | Some pending -> pending
+              | None -> fail "bound summary disappeared while draining"
+            in
+            (match
+               Approval_queue.quarantine_summary_exact_attempt
+                 ~id:approval_id
+                 ~input_hash:pending.input_hash
+                 ~sequence:pending.sequence
+                 ~slot_id:"shutdown-slot"
+                 ~call_id:"shutdown-call"
+                 ~plan_fingerprint:(String.make 64 'p')
+                 ~request_body_sha256:(String.make 64 'r')
+                 ~cause:Approval_queue.Exact_flow_execution_failed
+             with
+             | Ok _ -> ()
+             | Error error ->
+               fail (Approval_queue.exact_attempt_error_to_string error));
+            let finalized =
+              match
+                Shutdown_finalize.run
+                  ~config
+                  ~entry:(Some entry)
+                  draining
+              with
+              | Ok finalized -> finalized
+              | Error error -> fail (Shutdown_finalize.error_to_string error)
+            in
+            (match finalized.phase with
+             | Shutdown_types.Finalized _ -> ()
+             | _ -> fail "settled draining shutdown did not finalize");
+            check bool "registry retired after settlement" true
+              (Option.is_none
+                 (R.get ~base_path:config.base_path meta.name));
+            check bool "session removed after settlement" false
+              (Sys.file_exists session_dir)))
     [ `Remove; `Dead; `Purge ]
 ;;
 
@@ -3862,7 +3914,7 @@ let () =
       test_case "shutdown finalizes idle operation" `Quick
         test_keeper_shutdown_finalizes_idle_operation;
       test_case "destructive shutdown blocks on bound summary" `Quick
-        test_destructive_shutdown_blocks_before_cleanup_on_bound_summary;
+        test_destructive_shutdown_drains_bound_summary_then_completes;
       test_case "shutdown delivers dead tombstone completion after receipt" `Quick
         test_keeper_shutdown_delivers_dead_tombstone_completion_after_receipt;
       test_case "dashboard purge finalizes artifacts and receipt" `Quick

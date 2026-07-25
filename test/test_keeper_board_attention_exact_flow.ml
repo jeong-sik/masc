@@ -4,6 +4,8 @@ module Candidate = Keeper_board_attention_candidate
 module Exact_flow = Keeper_board_attention_exact_flow
 module Fixture = Compaction_exact_output_fixture
 module Judgment = Keeper_board_attention_judgment
+module Partition = Keeper_board_attention_partition
+module Worker = Keeper_board_attention_worker
 
 type callback_event =
   | Dispatch of Exact_flow.attempt_provenance
@@ -46,6 +48,22 @@ let run_eio f =
     ~sw
     ~net:(Eio.Stdenv.net env)
     ~clock:(Eio.Stdenv.clock env)
+;;
+
+let rec remove_tree path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path
+      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path)
+    else Sys.remove path
+;;
+
+let with_temp_base prefix f =
+  let base_path = Filename.temp_dir prefix "" in
+  Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () -> f base_path)
 ;;
 
 let prepare_exact ~net candidate =
@@ -508,6 +526,97 @@ let test_replaced_owner_defers_final_projection_without_mutation () =
         !projection_mutations))
 ;;
 
+let test_owner_replacement_during_post_defers_error_projection () =
+  with_prompt_registry (fun () ->
+    run_eio (fun ~sw ~net ~clock ->
+      with_temp_base "board-owner-replacement" @@ fun base_path ->
+      Fun.protect
+        ~finally:(fun () -> Keeper_registry.For_testing.clear ())
+        (fun () ->
+           let candidate = candidate "board-owner-replacement-post" in
+           (match Candidate.record ~base_path candidate with
+            | Candidate.Recorded _ -> ()
+            | Candidate.Duplicate _ ->
+              Alcotest.fail "fresh Board candidate was duplicated"
+            | Candidate.Record_error detail -> Alcotest.fail detail);
+           let meta =
+             Masc_test_deps.meta_of_json_fixture
+               (`Assoc
+                 [ "name", `String candidate.keeper_name
+                 ; "trace_id", `String "trace-board-owner-replacement-post"
+                 ])
+             |> Result.get_ok
+           in
+           let old_owner =
+             Keeper_registry.register_offline
+               ~base_path
+               candidate.keeper_name
+               meta
+           in
+           let replace_owner () =
+             (match Keeper_registry.unregister_exact old_owner with
+              | Keeper_registry.Exact_unregistered -> ()
+              | _ -> Alcotest.fail "Board old owner was not unregistered");
+             let replacement_meta =
+               Masc_test_deps.meta_of_json_fixture
+                 (`Assoc
+                   [ "name", `String candidate.keeper_name
+                   ; "trace_id", `String "trace-board-owner-replacement-next"
+                   ])
+               |> Result.get_ok
+             in
+             ignore
+               (Keeper_registry.register_offline
+                  ~base_path
+                  candidate.keeper_name
+                  replacement_meta)
+           in
+           let server =
+             Fixture.start_server
+               ~on_request_before_reply:replace_owner
+               ~sw
+               ~net
+               ~clock
+               Fixture.Abort_after_request
+           in
+           publish_lane
+             [ target "board-owner-replacement-post" server.base_url ];
+           (match
+              Worker.For_testing.process_next_exact
+                ~clock
+                ~net:(Some net)
+                ~now:(fun () -> 3.0)
+                ~worker_epoch:(Partition.Worker_epoch.generate ())
+                ~base_path
+                ~keeper_name:candidate.keeper_name
+            with
+            | Ok (Worker.Owner_unregistered_deferred _) -> ()
+            | Ok _ ->
+              Alcotest.fail "stale Board owner projected a terminal error"
+            | Error detail -> Alcotest.fail detail);
+           Alcotest.(check int)
+             "real Board POST crossed replacement hook once"
+             1
+             (Fixture.post_count server);
+           (match
+              Candidate.load_candidates
+                ~base_path
+                ~keeper_name:candidate.keeper_name
+            with
+            | Ok [ { status = Candidate.Pending { last_delivery_failure = None }; _ } ] ->
+              ()
+            | Ok _ -> Alcotest.fail "stale Board error mutated the candidate"
+            | Error detail -> Alcotest.fail detail);
+           match
+             Partition.load ~base_path ~keeper_name:candidate.keeper_name
+           with
+           | Ok [ { state = Partition.Running { progress = Partition.Bound _; _ }; _ } ] ->
+             ()
+           | Ok _ ->
+             Alcotest.fail "stale Board error blocked or completed the partition"
+           | Error detail -> Alcotest.fail detail)))
+;;
+
 let () =
   Alcotest.run
     "Keeper Board-attention exact flow"
@@ -532,6 +641,10 @@ let () =
             "replaced owner defers final projection"
             `Quick
             test_replaced_owner_defers_final_projection_without_mutation
+        ; Alcotest.test_case
+            "owner replacement during POST defers error projection"
+            `Quick
+            test_owner_replacement_during_post_defers_error_projection
         ] )
     ]
 ;;

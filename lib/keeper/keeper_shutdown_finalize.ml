@@ -4,6 +4,7 @@ type error =
   | Store_error of Keeper_shutdown_store.error
   | Unsupported_phase
   | Finalization_blocked of Keeper_shutdown_types.t
+  | Finalization_draining of Keeper_shutdown_types.t * string
   | Completion_failed of Keeper_shutdown_types.t * string
 
 let error_to_string = function
@@ -13,6 +14,11 @@ let error_to_string = function
     Printf.sprintf
       "Keeper shutdown finalization blocked in operation %s"
       (Operation_id.to_string operation.operation_id)
+  | Finalization_draining (operation, detail) ->
+    Printf.sprintf
+      "Keeper shutdown finalization is draining operation %s: %s"
+      (Operation_id.to_string operation.operation_id)
+      detail
   | Completion_failed (operation, detail) ->
     Printf.sprintf
       "Keeper shutdown completion delivery failed in operation %s: %s"
@@ -548,9 +554,9 @@ let remove_session_dir ~config operation =
   else Ok ()
 ;;
 
-let unregister_exact ~base_path ~after_fence operation entry =
+let begin_exact_retirement ~base_path operation entry =
   match operation.lane_ownership, entry with
-  | (Dormant_meta | Registered_lane _), None ->
+  | Dormant_meta, None ->
     Keeper_lifecycle_reservation.with_key_lock
       ~base_path
       ~keeper_name:operation.keeper_name
@@ -563,18 +569,20 @@ let unregister_exact ~base_path ~after_fence operation entry =
          | Some _ ->
            Error
              "Keeper registry became occupied before dormant finalization fence"
-         | None ->
-           (match operation.lane_ownership with
-            | Dormant_meta -> ()
-            | Registered_lane expected_lane_id ->
-              Keeper_exact_flow_scope.release_owner
-                ~base_path
-                ~keeper_name:operation.keeper_name
-                ~expected_lane_id);
-           after_fence ();
-           Ok false)
+         | None -> Ok ())
   | Dormant_meta, Some _ ->
     Error "dormant Keeper operation found a registered lane before finalization"
+  | Registered_lane expected_lane_id, None ->
+    (match
+       Keeper_exact_flow_scope.begin_retirement
+         ~base_path
+         ~keeper_name:operation.keeper_name
+         ~expected_lane_id
+     with
+     | Keeper_exact_flow_scope.Retirement_draining
+     | Keeper_exact_flow_scope.Retirement_not_allocated -> Ok ()
+     | Keeper_exact_flow_scope.Retirement_owner_replaced ->
+       Error "Keeper exact owner was replaced before finalization")
   | Registered_lane expected_lane_id, Some entry ->
     if
       not
@@ -583,9 +591,45 @@ let unregister_exact ~base_path ~after_fence operation entry =
            expected_lane_id)
     then Error "Keeper registry lane changed before finalization"
     else
-    (match Keeper_registry.unregister_exact_with_fence ~after_fence entry with
-     | Keeper_registry.Exact_unregistered
-     | Keeper_registry.Exact_entry_missing -> Ok true
+      (match
+         Keeper_exact_flow_scope.begin_retirement
+           ~base_path
+           ~keeper_name:operation.keeper_name
+           ~expected_lane_id
+       with
+       | Keeper_exact_flow_scope.Retirement_draining
+       | Keeper_exact_flow_scope.Retirement_not_allocated -> Ok ()
+       | Keeper_exact_flow_scope.Retirement_owner_replaced ->
+         Error "Keeper exact owner was replaced before finalization")
+;;
+
+let unregister_retired_exact ~base_path operation entry =
+  match operation.lane_ownership, entry with
+  | Dormant_meta, None -> Ok false
+  | Dormant_meta, Some _ ->
+    Error "dormant Keeper operation found a registered lane before finalization"
+  | Registered_lane expected_lane_id, None ->
+    Keeper_exact_flow_scope.release_owner
+      ~base_path
+      ~keeper_name:operation.keeper_name
+      ~expected_lane_id;
+    Ok false
+  | Registered_lane expected_lane_id, Some entry ->
+    if
+      not
+        (Keeper_lane.Id.equal
+           (Keeper_lane.id entry.Keeper_registry.lane)
+           expected_lane_id)
+    then Error "Keeper registry lane changed before finalization"
+    else
+      (match Keeper_registry.unregister_exact entry with
+       | Keeper_registry.Exact_unregistered
+       | Keeper_registry.Exact_entry_missing ->
+         Keeper_exact_flow_scope.release_owner
+           ~base_path
+           ~keeper_name:operation.keeper_name
+           ~expected_lane_id;
+         Ok true
      | Keeper_registry.Exact_entry_replaced ->
        Error "Keeper registry lane was replaced during finalization"
      | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
@@ -655,86 +699,91 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
     | Operator_stop_remove_meta
     | Dead_tombstone_cleanup
     | Dashboard_keeper_purge _ ->
-      Keeper_approval_queue.retire_summary_owner
-        ~base_path:config.base_path
-        ~keeper_name:operation.keeper_name
-        ~reason:
-          (Printf.sprintf
-             "Keeper permanently retired before HITL context summary completed (%s)"
-             (cleanup_reason_label operation.cleanup_intent.reason))
-      |> Result.map (fun _ -> ())
-      |> Result.map_error
-           Keeper_approval_queue.summary_owner_retirement_error_to_string
+      (match
+         Keeper_approval_queue.retire_summary_owner
+           ~base_path:config.base_path
+           ~keeper_name:operation.keeper_name
+           ~reason:
+             (Printf.sprintf
+                "Keeper permanently retired before HITL context summary completed (%s)"
+                (cleanup_reason_label operation.cleanup_intent.reason))
+       with
+       | Ok _ -> Ok ()
+       | Error
+           (Keeper_approval_queue.Summary_owner_retirement_exact_attempt_unsettled
+              _ as error) ->
+         Error
+           (`Draining
+              (Keeper_approval_queue.summary_owner_retirement_error_to_string
+                 error))
+       | Error error ->
+         Error
+           (`Failed
+              (Keeper_approval_queue.summary_owner_retirement_error_to_string
+                 error)))
   in
-  let retirement = ref None in
-  let retire_after_fence () = retirement := Some (retire_summary_owner ()) in
-  match
-    unregister_exact
-      ~base_path:config.base_path
-      ~after_fence:retire_after_fence
-      operation
-      entry
-  with
+  let finish registry_unregistered =
+    match remove_meta_file ~config operation with
+    | Error detail -> block ~config operation Meta_remove detail
+    | Ok () ->
+      (match remove_session_dir ~config operation with
+       | Error detail -> block ~config operation Session_remove detail
+       | Ok () ->
+         let meta_removed =
+           match meta_disposition_of_cleanup_reason operation.cleanup_intent.reason with
+           | Remove_meta -> true
+           | Retain_operator_pause
+           | Retain_dead_tombstone -> false
+         in
+         let accumulator_dropped =
+           meta_removed
+           || registry_unregistered
+           ||
+           match operation.lane_ownership with
+           | Dormant_meta -> true
+           | Registered_lane _ -> false
+         in
+         if accumulator_dropped
+         then Keeper_tool_emission_hook.drop_keeper_accumulator operation.keeper_name;
+         let completion =
+           match completion_action_of_cleanup_reason operation.cleanup_intent.reason with
+           | None -> Completion_not_requested
+           | Some action -> Completion_pending action
+         in
+         let evidence =
+           { cleanup
+           ; meta_removed
+           ; session_removed = operation.cleanup_intent.remove_session
+           ; registry_unregistered
+           ; accumulator_dropped
+           ; completion
+           }
+         in
+         let finalized =
+           { operation with
+             phase = Finalized evidence
+           ; updated_at = Masc_domain.now_iso ()
+           }
+         in
+         match replace ~config finalized with
+         | Error _ as error -> error
+         | Ok persisted_finalized ->
+           deliver_finalized_completion ~config persisted_finalized)
+  in
+  match begin_exact_retirement ~base_path:config.base_path operation entry with
   | Error detail -> block ~config operation Registry_unregister detail
-  | Ok registry_unregistered ->
-    (match !retirement with
-     | None ->
-       block
-         ~config
-         operation
-         Approval_summary_retirement
-         "summary retirement was not reached after exact owner fence"
-     | Some (Error detail) ->
+  | Ok () ->
+    (match retire_summary_owner () with
+     | Error (`Draining detail) ->
+       Error (Finalization_draining (operation, detail))
+     | Error (`Failed detail) ->
        block ~config operation Approval_summary_retirement detail
-     | Some (Ok ()) ->
-    (match remove_meta_file ~config operation with
-     | Error detail -> block ~config operation Meta_remove detail
      | Ok () ->
-       (match remove_session_dir ~config operation with
-           | Error detail -> block ~config operation Session_remove detail
-           | Ok () ->
-          let meta_removed =
-            match
-              meta_disposition_of_cleanup_reason operation.cleanup_intent.reason
-            with
-            | Remove_meta -> true
-            | Retain_operator_pause
-            | Retain_dead_tombstone -> false
-          in
-          let accumulator_dropped =
-            meta_removed
-            || registry_unregistered
-            ||
-            match operation.lane_ownership with
-            | Dormant_meta -> true
-            | Registered_lane _ -> false
-          in
-          if accumulator_dropped
-          then Keeper_tool_emission_hook.drop_keeper_accumulator operation.keeper_name;
-          let completion =
-            match completion_action_of_cleanup_reason operation.cleanup_intent.reason with
-            | None -> Completion_not_requested
-            | Some action -> Completion_pending action
-          in
-          let evidence =
-            { cleanup
-            ; meta_removed
-            ; session_removed = operation.cleanup_intent.remove_session
-            ; registry_unregistered
-            ; accumulator_dropped
-            ; completion
-            }
-          in
-          let finalized =
-            { operation with
-              phase = Finalized evidence
-            ; updated_at = Masc_domain.now_iso ()
-            }
-          in
-             (match replace ~config finalized with
-              | Error _ as error -> error
-              | Ok persisted_finalized ->
-                deliver_finalized_completion ~config persisted_finalized))))
+       (match
+          unregister_retired_exact ~base_path:config.base_path operation entry
+        with
+        | Error detail -> block ~config operation Registry_unregister detail
+        | Ok registry_unregistered -> finish registry_unregistered))
 ;;
 
 let run ~config ~entry operation =

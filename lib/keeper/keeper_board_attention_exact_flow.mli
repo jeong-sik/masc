@@ -88,3 +88,10 @@ val with_current_generation
   -> 'a Keeper_exact_flow_scope.current_boundary
 (** Fence a local durable projection against Keeper owner replacement. The
     callback must not perform network I/O or re-enter the lifecycle key lock. *)
+
+val with_settlement_generation
+  :  prepared
+  -> (unit -> 'a)
+  -> 'a Keeper_exact_flow_scope.current_boundary
+(** Fence the terminal durable projection of an already-bound attempt. Unlike
+    admission, this remains available while shutdown is draining the owner. *)

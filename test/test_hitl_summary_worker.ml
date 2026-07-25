@@ -787,6 +787,77 @@ let test_flow_execution_failure_quarantines_and_blocks_owner () =
        | _ -> fail "quarantined owner did not preserve its unbound successor")
 ;;
 
+let test_owner_replacement_during_post_defers_terminal_mutation () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-owner-replacement" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       let entry = pending_entry ~base_path () in
+       let old_owner =
+         match Masc.Keeper_registry.get ~base_path entry.keeper_name with
+         | Some owner -> owner
+         | None -> fail "HITL owner was not registered"
+       in
+       let replace_owner () =
+         (match Masc.Keeper_registry.unregister_exact old_owner with
+          | Masc.Keeper_registry.Exact_unregistered -> ()
+          | _ -> fail "HITL old owner was not unregistered");
+         let replacement_meta =
+           Masc_test_deps.meta_of_json_fixture
+             (`Assoc
+               [ "name", `String entry.keeper_name
+               ; "trace_id", `String "trace-hitl-owner-replacement"
+               ])
+           |> Result.get_ok
+         in
+         ignore
+           (Masc.Keeper_registry.register_offline
+              ~base_path
+              entry.keeper_name
+              replacement_meta)
+       in
+       let server =
+         F.start_server
+           ~on_request_before_reply:replace_owner
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "approve")))
+       in
+       publish_lane
+         [ "hitl-owner-replacement" ]
+         (F.resolver_snapshot
+            ~source:"hitl-owner-replacement"
+            [ { id = "hitl-owner-replacement"; base_url = server.base_url } ]);
+       let prepared = prepare_exn entry in
+       (match
+          Worker.For_testing.execute_prepared_flow
+            ~net
+            ~clock
+            ~on_summary:(fun _ ->
+              fail "stale HITL owner delivered a terminal summary")
+            prepared
+        with
+        | Worker.Deferred_unregistered -> ()
+        | Worker.Executed ->
+          fail "stale HITL owner crossed the terminal generation fence");
+       check int "real POST crossed the replacement hook once" 1 (F.post_count server);
+       match Q.get_pending_entry ~id:entry.id with
+       | Some
+           { exact_attempt =
+               Q.Exact_bound
+                 { status = Q.Exact_dispatch_uncertain; _ }
+           ; summary_status = Q.Summary_pending
+           ; _
+           } ->
+         ()
+       | _ -> fail "stale HITL result mutated the bound pending summary")
+;;
+
 let test_manual_resolution_race_is_conclusive () =
   run_eio @@ fun ~sw ~net ~clock ->
   with_temp_dir "hitl-manual-resolution-race" @@ fun base_path ->
@@ -1174,6 +1245,10 @@ let () =
             "flow execution failure quarantines and blocks owner"
             `Quick
             test_flow_execution_failure_quarantines_and_blocks_owner
+        ; test_case
+            "owner replacement during POST defers terminal mutation"
+            `Quick
+            test_owner_replacement_during_post_defers_terminal_mutation
         ; test_case
             "manual resolution race is conclusive"
             `Quick

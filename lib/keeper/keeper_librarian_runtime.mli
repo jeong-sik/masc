@@ -60,7 +60,7 @@ val cadence_record_attempt : keeper_id:string -> trace_id:string -> unit
     [trace_id] so transient provider failures and unparseable structured-output
     failures do not immediately retry every keeper turn. This intentionally does
     not mark the extraction as semantically successful. Skipped work such as a
-    busy provider slot must not call this, because no provider attempt happened.
+    busy execution slot must not call this, because no attempt happened.
 
     Uses [Eio_guard.with_mutex] so runtime fibers take a cooperative mutex while
     focused pre-Eio tests keep a direct single-threaded path. *)
@@ -73,11 +73,6 @@ val cadence_counter_entries : unit -> int
 
     Uses [Eio_guard.with_mutex_ro] so runtime fibers take a cooperative mutex
     while focused pre-Eio tests keep a direct single-threaded path. *)
-
-val memory_os_librarian_execution_slot_site : string
-(** OTel [site] label used when the per-Keeper librarian execution slot is busy.
-    The producer and dashboard health reader share this value so label drift
-    cannot silently hide provider-slot-busy alerts. *)
 
 val max_messages : unit -> int
 (** Base per-turn cap on checkpoint messages sent to the librarian prompt. The
@@ -121,11 +116,6 @@ val per_keeper_execution_slot_capacity : unit -> int
     [MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT] (default 1, 0 disables the
     gate). The capacity is applied per keeper, not fleet-wide. *)
 
-val librarian_execution_clock_unavailable_error : string
-(** Stable error returned before OAS I/O when exact librarian
-    extraction is called without a clock. Exposed so callers/tests do not
-    classify the human diagnostic with substring matching. *)
-
 val extract_with_exact_output_classified
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> base_path:string
@@ -137,13 +127,13 @@ val extract_with_exact_output_classified
 (** OAS exact-output Librarian extraction. Target resolution, capability
     admission, wire materialization, and failover are owned by OAS. MASC
     supplies only the immutable prompt, domain schema, minimum JSON guarantee,
-    post-success domain validation, and an fsync-backed receipt journal for
-    OAS's predetermined candidate transitions. An unsettled journal from a
-    prior process fails closed before dispatch. Calls are serialized per keeper
-    so the bounded journal remains a single affine flow. [clock] stays optional at the API
+    post-success domain validation, and an fsync-backed generation journal for
+    OAS's predetermined candidate transitions. An unsettled journal blocks only
+    the same trace generation; historical pre-release journals are not migrated
+    or consulted. [clock] stays optional at the API
     boundary because [run_best_effort] may be called from contexts that cannot
-    supply an Eio clock; [None] returns
-    {!librarian_execution_clock_unavailable_error} before OAS I/O. *)
+    supply an Eio clock; [None] returns a typed
+    [Execution_clock_unavailable] classification before OAS I/O. *)
 
 val extract_and_append_with_exact_output_classified
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t

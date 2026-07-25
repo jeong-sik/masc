@@ -389,7 +389,7 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
     | Ok success ->
       let judgment = judgment_of_success prepared.candidate success in
       (match
-         Keeper_exact_flow_scope.with_current
+         Keeper_exact_flow_scope.with_settlement
            prepared.flow_scope
            ~registered_lane_id:
              (registered_lane_id
@@ -474,6 +474,16 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
 
 let with_current_generation prepared callback =
   Keeper_exact_flow_scope.with_current
+    prepared.flow_scope
+    ~registered_lane_id:
+      (registered_lane_id
+         ~base_path:prepared.base_path
+         ~keeper_name:prepared.keeper_name)
+    callback
+;;
+
+let with_settlement_generation prepared callback =
+  Keeper_exact_flow_scope.with_settlement
     prepared.flow_scope
     ~registered_lane_id:
       (registered_lane_id

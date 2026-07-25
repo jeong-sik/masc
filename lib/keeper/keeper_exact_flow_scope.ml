@@ -11,14 +11,18 @@ type librarian_execution_slot =
   ; mutable in_use : int
   }
 
+type owner_phase =
+  | Active
+  | Draining
+  | Retired
+
 type owner_state =
   { base_path : string
   ; keeper_name : string
   ; lane_id : Keeper_lane.Id.t
-  ; retired : bool Atomic.t
+  ; phase : owner_phase Atomic.t
   ; librarian_execution_slot : librarian_execution_slot
   ; librarian_execution_slot_mu : Eio.Mutex.t
-  ; librarian_exact_flow_mu : Eio.Mutex.t
   }
 
 type t =
@@ -30,6 +34,11 @@ type t =
 type 'a current_boundary =
   | Current of 'a
   | Owner_unregistered_deferred
+
+type retirement_boundary =
+  | Retirement_draining
+  | Retirement_not_allocated
+  | Retirement_owner_replaced
 
 type owner =
   { state : owner_state
@@ -74,10 +83,9 @@ let create_owner ~base_path ~keeper_name ~lane_id =
     { base_path
     ; keeper_name
     ; lane_id
-    ; retired = Atomic.make false
+    ; phase = Atomic.make Active
     ; librarian_execution_slot = { capacity = 0; in_use = 0 }
     ; librarian_execution_slot_mu = Eio.Mutex.create ()
-    ; librarian_exact_flow_mu = Eio.Mutex.create ()
     }
   in
   { state
@@ -109,13 +117,17 @@ let release_scope scope =
        scope.scope)
 ;;
 
-let retire_owner owner =
-  if Atomic.compare_and_set owner.state.retired false true
-  then (
-    release_scope owner.compaction;
-    release_scope owner.board_attention;
-    release_scope owner.hitl_summary;
-    release_scope owner.librarian)
+let rec retire_owner owner =
+  match Atomic.get owner.state.phase with
+  | Retired -> ()
+  | (Active | Draining) as phase ->
+    if Atomic.compare_and_set owner.state.phase phase Retired
+    then (
+      release_scope owner.compaction;
+      release_scope owner.board_attention;
+      release_scope owner.hitl_summary;
+      release_scope owner.librarian)
+    else retire_owner owner
 ;;
 
 let for_registered ~registered_lane_id ~base_path ~keeper_name ~surface =
@@ -135,37 +147,54 @@ let for_registered ~registered_lane_id ~base_path ~keeper_name ~surface =
            Stdlib.Mutex.protect owners_mu (fun () ->
              match Hashtbl.find_opt owners key with
              | Some owner
-               when (not (Atomic.get owner.state.retired))
+               when Atomic.get owner.state.phase = Active
                     && Keeper_lane.Id.equal owner.state.lane_id lane_id ->
-               owner
+               Ok owner
+             | Some owner when Keeper_lane.Id.equal owner.state.lane_id lane_id ->
+               Error
+                 (Printf.sprintf
+                    "exact-flow owner is draining: keeper=%s"
+                    keeper_name)
              | Some stale ->
                retire_owner stale;
                let owner = create_owner ~base_path ~keeper_name ~lane_id in
                Hashtbl.replace owners key owner;
-               owner
+               Ok owner
              | None ->
                let owner = create_owner ~base_path ~keeper_name ~lane_id in
                Hashtbl.add owners key owner;
-               owner)
+               Ok owner)
          in
-         Ok (surface_scope owner surface))
+         Result.map (fun owner -> surface_scope owner surface) owner)
 ;;
 
 let preference_store scope = scope.preference_store
 let scope scope = scope.scope
 
-let with_current scope ~registered_lane_id f =
+let with_boundary ~allow_draining scope ~registered_lane_id f =
   Keeper_lifecycle_reservation.with_key_lock
     ~base_path:scope.owner.base_path
     ~keeper_name:scope.owner.keeper_name
     (fun () ->
        match registered_lane_id () with
        | Some lane_id
-         when (not (Atomic.get scope.owner.retired))
-              && Keeper_lane.Id.equal scope.owner.lane_id lane_id ->
+         when Keeper_lane.Id.equal scope.owner.lane_id lane_id
+              &&
+              (match Atomic.get scope.owner.phase with
+               | Active -> true
+               | Draining -> allow_draining
+               | Retired -> false) ->
          Current (f ())
        | Some _
        | None -> Owner_unregistered_deferred)
+;;
+
+let with_current scope ~registered_lane_id f =
+  with_boundary ~allow_draining:false scope ~registered_lane_id f
+;;
+
+let with_settlement scope ~registered_lane_id f =
+  with_boundary ~allow_draining:true scope ~registered_lane_id f
 ;;
 
 let with_librarian_execution_slot scope ~capacity f =
@@ -193,8 +222,29 @@ let with_librarian_execution_slot scope ~capacity f =
         (fun () -> Some (f ()))
 ;;
 
-let with_librarian_exact_flow_lock scope f =
-  Eio_guard.with_mutex scope.owner.librarian_exact_flow_mu f
+let rec transition_to_draining state =
+  match Atomic.get state.phase with
+  | Active ->
+    if Atomic.compare_and_set state.phase Active Draining
+    then Retirement_draining
+    else transition_to_draining state
+  | Draining -> Retirement_draining
+  | Retired -> Retirement_owner_replaced
+;;
+
+let begin_retirement ~base_path ~keeper_name ~expected_lane_id =
+  Keeper_lifecycle_reservation.with_key_lock
+    ~base_path
+    ~keeper_name
+    (fun () ->
+       let key = owner_key ~base_path ~keeper_name in
+       Stdlib.Mutex.protect owners_mu (fun () ->
+         match Hashtbl.find_opt owners key with
+         | None -> Retirement_not_allocated
+         | Some owner
+           when Keeper_lane.Id.equal owner.state.lane_id expected_lane_id ->
+           transition_to_draining owner.state
+         | Some _ -> Retirement_owner_replaced))
 ;;
 
 let release_owner ~base_path ~keeper_name ~expected_lane_id =

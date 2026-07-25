@@ -2212,7 +2212,7 @@ let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
             ; exact_attempt = AQ.Exact_bound binding
             ; _
             } ->
-          check string "bound call unchanged" "call" binding.call_id
+          Alcotest.(check string) "bound call unchanged" "call" binding.call_id
         | Some _ | None ->
           Alcotest.fail "bound entry changed on failed retirement");
        (match AQ.get_pending_entry ~id:sibling with

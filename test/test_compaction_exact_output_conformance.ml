@@ -211,10 +211,11 @@ let ensure_registered_keeper ~base_path keeper_name =
 ;;
 
 let prepare_exn
+      ?(base_path = exact_flow_base_path)
       ~keeper_name
       ~registry
+      ()
   =
-  let base_path = exact_flow_base_path in
   ensure_registered_keeper ~base_path keeper_name;
   match
     C.prepare_lane
@@ -327,7 +328,7 @@ let test_preparation_freezes_order_generation_and_defers_attempt_identity () =
   let registry =
     publish_exn ~slot_ids:[ "prepare-first"; "prepare-second" ] snapshot
   in
-  let prepared = prepare_exn ~keeper_name:"keeper-preparation" ~registry in
+  let prepared = prepare_exn ~keeper_name:"keeper-preparation" ~registry () in
   Alcotest.(check (list string))
     "MASC opaque declaration order"
     [ "prepare-first"; "prepare-second" ]
@@ -359,7 +360,7 @@ let test_published_replacement_cannot_mix_prepared_generation () =
       [ { id = "frozen-slot"; base_url = server_a.base_url } ]
   in
   let registry_a = publish_exn ~slot_ids:[ "frozen-slot" ] snapshot_a in
-  let prepared_a = prepare_exn ~keeper_name:"keeper-frozen-a" ~registry:registry_a in
+  let prepared_a = prepare_exn ~keeper_name:"keeper-frozen-a" ~registry:registry_a () in
   let snapshot_b =
     F.resolver_snapshot
       ~source:"masc replacement registry B"
@@ -413,7 +414,7 @@ let test_durable_release_precedes_successor_bind_and_post () =
       ~slot_ids:[ "unreachable-first"; "successful-second"; "forbidden-third" ]
       snapshot
   in
-  let prepared = prepare_exn ~keeper_name:"keeper-advance-order" ~registry in
+  let prepared = prepare_exn ~keeper_name:"keeper-advance-order" ~registry () in
   let guard : C.exact_execution_guard =
     { before_dispatch =
         (fun observation ->
@@ -457,7 +458,7 @@ let test_bind_failure_prevents_post () =
       [ { id = "bind-failure"; base_url = server.base_url } ]
   in
   let registry = publish_exn ~slot_ids:[ "bind-failure" ] snapshot in
-  let prepared = prepare_exn ~keeper_name:"keeper-bind-failure" ~registry in
+  let prepared = prepare_exn ~keeper_name:"keeper-bind-failure" ~registry () in
   let guard : C.exact_execution_guard =
     { before_dispatch = (fun _ -> Error "injected durable bind failure")
     ; release_before_dispatch = (fun _ -> Alcotest.fail "release must not run")
@@ -489,7 +490,7 @@ let test_missing_dispatch_guard_prevents_post () =
       [ { id = slot_id; base_url = server.base_url } ]
   in
   let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
-  let prepared = prepare_exn ~keeper_name:"keeper-missing-guard" ~registry in
+  let prepared = prepare_exn ~keeper_name:"keeper-missing-guard" ~registry () in
   (match
      C.execute_prepared_lane
        ~keeper_name:"keeper-missing-guard"
@@ -517,7 +518,7 @@ let test_release_failure_blocks_successor () =
       ]
   in
   let registry = publish_exn ~slot_ids:[ first_slot; successor_slot ] snapshot in
-  let prepared = prepare_exn ~keeper_name:"keeper-release-failure" ~registry in
+  let prepared = prepare_exn ~keeper_name:"keeper-release-failure" ~registry () in
   let events = ref [] in
   let guard : C.exact_execution_guard =
     { before_dispatch =
@@ -574,7 +575,7 @@ let test_domain_invalid_output_never_reenters_failover () =
       ~slot_ids:[ first_slot; "forbidden-domain-successor" ]
       snapshot
   in
-  let prepared = prepare_exn ~keeper_name:"keeper-domain-invalid" ~registry in
+  let prepared = prepare_exn ~keeper_name:"keeper-domain-invalid" ~registry () in
   let quarantined = ref [] in
   let guard : C.exact_execution_guard =
     { before_dispatch = (fun _ -> Ok C.Fsync_completed)
@@ -631,7 +632,7 @@ let test_final_oas_flow_failure_is_generic_source_terminal () =
       ~slot_ids:[ first_slot; "forbidden-failure-successor" ]
       snapshot
   in
-  let prepared = prepare_exn ~keeper_name:"keeper-flow-failure" ~registry in
+  let prepared = prepare_exn ~keeper_name:"keeper-flow-failure" ~registry () in
   let quarantined = ref [] in
   let guard : C.exact_execution_guard =
     { before_dispatch = (fun _ -> Ok C.Fsync_completed)
@@ -696,7 +697,7 @@ let test_cancellation_quarantines_only_bound_identity () =
       ~slot_ids:[ first_slot; "forbidden-cancel-successor" ]
       snapshot
   in
-  let prepared = prepare_exn ~keeper_name:"keeper-cancelled" ~registry in
+  let prepared = prepare_exn ~keeper_name:"keeper-cancelled" ~registry () in
   let bound = ref [] in
   let quarantined = ref [] in
   let guard : C.exact_execution_guard =
@@ -778,6 +779,7 @@ let test_two_keeper_scopes_freeze_and_do_not_share_preferences () =
       ~base_path
       ~keeper_name:keeper_a
       ~registry:registry_a
+      ()
   in
   let registry_b = publish_exn ~slot_ids:[ slot_b; slot_a ] snapshot in
   let prepared_b_before =
@@ -785,6 +787,7 @@ let test_two_keeper_scopes_freeze_and_do_not_share_preferences () =
       ~base_path
       ~keeper_name:keeper_b
       ~registry:registry_b
+      ()
   in
   let lease_a = claim_manual_lease ~base_path ~keeper_name:keeper_a in
   let guard_a =
@@ -825,6 +828,7 @@ let test_two_keeper_scopes_freeze_and_do_not_share_preferences () =
       ~base_path
       ~keeper_name:keeper_b
       ~registry:registry_b
+      ()
   in
   Alcotest.(check (list string))
     "keeper A freezes its declared snapshot"
@@ -883,7 +887,7 @@ let test_same_flow_concurrent_loser_mutates_no_queue () =
       [ { id = slot_id; base_url = server.base_url } ]
   in
   let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
-  let prepared = prepare_exn ~keeper_name ~registry in
+  let prepared = prepare_exn ~keeper_name ~registry () in
   let durable_guard =
     Keeper_heartbeat_loop.For_testing.exact_execution_guard
       ~base_path
@@ -985,7 +989,7 @@ let test_heartbeat_guard_binds_before_post () =
       [ { id = slot_id; base_url = server.base_url } ]
   in
   let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
-  let prepared = prepare_exn ~keeper_name ~registry in
+  let prepared = prepare_exn ~keeper_name ~registry () in
   let durable_guard =
     Keeper_heartbeat_loop.For_testing.exact_execution_guard
       ~base_path
@@ -1039,7 +1043,7 @@ let test_post_success_restart_remains_at_most_once_and_fail_closed () =
   let registry =
     publish_exn ~slot_ids:[ first_slot; successor_slot ] snapshot
   in
-  let prepared = prepare_exn ~keeper_name ~registry in
+  let prepared = prepare_exn ~keeper_name ~registry () in
   let guard =
     Keeper_heartbeat_loop.For_testing.exact_execution_guard
       ~base_path
@@ -1214,7 +1218,7 @@ let test_post_success_terminalization_is_canonical_and_durable () =
       [ { id = slot_id; base_url = server.base_url } ]
   in
   let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
-  let prepared = prepare_exn ~keeper_name ~registry in
+  let prepared = prepare_exn ~keeper_name ~registry () in
   let durable_guard =
     Keeper_heartbeat_loop.For_testing.exact_execution_guard
       ~base_path
@@ -1321,7 +1325,7 @@ let test_post_success_terminalization_overlap_is_affine_and_durable () =
       [ { id = slot_id; base_url = server.base_url } ]
   in
   let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
-  let prepared = prepare_exn ~keeper_name ~registry in
+  let prepared = prepare_exn ~keeper_name ~registry () in
   let durable_guard =
     Keeper_heartbeat_loop.For_testing.exact_execution_guard
       ~base_path
@@ -1432,7 +1436,7 @@ let test_post_success_terminalization_failures_preserve_full_binding () =
            [ { id = slot_id; base_url = server.base_url } ]
        in
        let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
-       let prepared = prepare_exn ~keeper_name ~registry in
+       let prepared = prepare_exn ~keeper_name ~registry () in
        let durable_guard =
          Keeper_heartbeat_loop.For_testing.exact_execution_guard
            ~base_path
@@ -1530,7 +1534,7 @@ let test_visible_sync_uncertainty_seams () =
         [ { id = slot_id; base_url = server.base_url } ]
     in
     let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
-    let prepared = prepare_exn ~keeper_name ~registry in
+    let prepared = prepare_exn ~keeper_name ~registry () in
     let observed = ref None in
     let durable_guard =
       Keeper_heartbeat_loop.For_testing.exact_execution_guard
@@ -1622,7 +1626,7 @@ let test_visible_sync_uncertainty_seams () =
         ]
     in
     let registry = publish_exn ~slot_ids:[ first_slot; successor_slot ] snapshot in
-    let prepared = prepare_exn ~keeper_name ~registry in
+    let prepared = prepare_exn ~keeper_name ~registry () in
     let first_observation = ref None in
     let durable_guard =
       Keeper_heartbeat_loop.For_testing.exact_execution_guard
@@ -1711,7 +1715,7 @@ let test_visible_sync_uncertainty_seams () =
         [ { id = slot_id; base_url = server.base_url } ]
     in
     let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
-    let prepared = prepare_exn ~keeper_name ~registry in
+    let prepared = prepare_exn ~keeper_name ~registry () in
     let observed = ref None in
     let durable_guard =
       Keeper_heartbeat_loop.For_testing.exact_execution_guard
@@ -1839,7 +1843,7 @@ let test_post_success_owner_replacement_defers_all_projection () =
       [ { id = slot_id; base_url = server.base_url } ]
   in
   let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
-  let prepared = prepare_exn ~keeper_name ~registry in
+  let prepared = prepare_exn ~keeper_name ~registry () in
   let quarantine_calls = ref 0 in
   let guard : C.exact_execution_guard =
     { before_dispatch = (fun _ -> Ok C.Fsync_completed)

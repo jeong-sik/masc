@@ -562,7 +562,7 @@ let terminalize_post_success_current terminalizer cause =
     terminal
 ;;
 
-let terminalize_post_success terminalizer cause =
+let terminalize_post_success (terminalizer : post_success_terminalizer) cause =
   match
     with_current_post_success terminalizer (fun () ->
       terminalize_post_success_current terminalizer cause)

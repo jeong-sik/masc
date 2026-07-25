@@ -136,7 +136,7 @@ type t =
   | MemoryLaneDropped
   | MemoryLanePending
   | MemoryLaneInFlight
-  | MemoryLaneProviderSlotBusy
+  | MemoryLaneExecutionSlotBusy
   | MemoryBankCompactionFailures
   | WriteMetaCycleFailures
   | MetricsSseFailures

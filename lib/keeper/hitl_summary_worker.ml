@@ -805,6 +805,16 @@ let with_current_generation (prepared : prepared_flow) callback =
     callback
 ;;
 
+let with_settlement_generation (prepared : prepared_flow) callback =
+  Keeper_exact_flow_scope.with_settlement
+    prepared.flow_scope
+    ~registered_lane_id:
+      (registered_lane_id
+         ~base_path:prepared.base_path
+         ~keeper_name:prepared.keeper_name)
+    callback
+;;
+
 let execute_prepared_flow_with_queue_writers_current
       ~queue_writers
       ~net
@@ -833,7 +843,7 @@ let execute_prepared_flow_with_queue_writers_current
     | Keeper_exact_flow_scope.Current (Ok ()) -> Ok ()
   in
   let settle_current_generation callback =
-    match with_current_generation prepared callback with
+    match with_settlement_generation prepared callback with
     | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
       Deferred_unregistered
     | Keeper_exact_flow_scope.Current () -> Executed
@@ -864,7 +874,7 @@ let execute_prepared_flow_with_queue_writers_current
     let settlement =
       Eio.Cancel.protect
       @@ fun () ->
-      with_current_generation prepared (fun () ->
+      with_settlement_generation prepared (fun () ->
         record_outcome "exact_cancellation";
         settle_current
           prepared.entry
@@ -889,7 +899,7 @@ let execute_prepared_flow_with_queue_writers_current
     let settlement =
       Eio.Cancel.protect
       @@ fun () ->
-      with_current_generation prepared (fun () ->
+      with_settlement_generation prepared (fun () ->
         settle_current
           prepared.entry
           ~reason:("HITL exact-output worker crashed: " ^ detail)

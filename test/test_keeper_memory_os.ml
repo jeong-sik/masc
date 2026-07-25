@@ -4715,15 +4715,15 @@ let () =
         ] )
     ; ( "librarian runtime"
       , [ Alcotest.test_case
-            "provider slot gate caps concurrency at capacity"
+            "execution slot gate caps concurrency at capacity"
             `Quick
             test_librarian_provider_slot_gate_caps_at_capacity
         ; Alcotest.test_case
-            "provider slot gate disabled at capacity 0"
+            "execution slot gate disabled at capacity 0"
             `Quick
             test_librarian_provider_slot_gate_disabled_at_zero
         ; Alcotest.test_case
-            "provider slot gate isolates keepers"
+            "execution slot gate isolates keepers"
             `Quick
             test_librarian_provider_slot_gate_is_per_keeper
         ] )

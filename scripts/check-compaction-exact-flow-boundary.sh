@@ -32,9 +32,10 @@ check_boundary() {
   require_once "Exact_output.snapshot_flow"
   require_once "Exact_output.start_flow"
   require_once "Exact_output.execute_flow_once"
+  require_once "Exact_output.settle_flow_domain"
 
   local forbidden_pattern
-  forbidden_pattern='Exact_output\.admit([^_[:alnum:]]|$)|Exact_output\.(start_attempt|execute_once|receipt_phase|receipt_dispatch_count)|Exact_output\.effect_phase|type admitted_slot|is_before_dispatch_zero|ready_plan'
+  forbidden_pattern='Exact_output\.admit_flow|Exact_output\.admit([^_[:alnum:]]|$)|Exact_output\.(start_attempt|execute_once|receipt_phase|receipt_dispatch_count)|Exact_output\.effect_phase|type admitted_slot|is_before_dispatch_zero|ready_plan'
   if rg -n "${forbidden_pattern}" "${TARGET}"; then
     fail "MASC-local exact admission/attempt/receipt control flow is forbidden"
   fi
@@ -79,7 +80,7 @@ check_boundary() {
 }
 
 self_test() {
-  local fixture target
+  local fixture target clean
   fixture="$(mktemp -d "${TMPDIR:-/tmp}/compaction-exact-flow-boundary.XXXXXX")"
   trap "rm -rf '${fixture}'" EXIT
   mkdir -p "${fixture}/lib/keeper" "${fixture}/test"
@@ -89,7 +90,10 @@ let _ = Exact_output.make_flow_candidate
 let _ = Exact_output.snapshot_flow
 let _ = Exact_output.start_flow
 let _ = Exact_output.execute_flow_once
+let _ = Exact_output.settle_flow_domain
 EOF
+  clean="${fixture}/compaction.ml.clean"
+  cp "${target}" "${clean}"
   printf '%s\n' \
     'let _ = Exact_attempt_already_started' \
     >"${fixture}/lib/keeper/keeper_librarian_runtime.ml"
@@ -97,6 +101,43 @@ EOF
   MASC_COMPACTION_BOUNDARY_ROOT="${fixture}" \
     MASC_COMPACTION_EXACT_FLOW_TARGET="${target}" \
     "${BASH_SOURCE[0]}" --check-only >/dev/null
+
+  printf '%s\n' 'let _ = Exact_output.snapshot_flow' >>"${target}"
+  if
+    MASC_COMPACTION_BOUNDARY_ROOT="${fixture}" \
+      MASC_COMPACTION_EXACT_FLOW_TARGET="${target}" \
+      "${BASH_SOURCE[0]}" --check-only >/dev/null 2>&1
+  then
+    fail "self-test duplicate canonical snapshot unexpectedly passed"
+  fi
+  cp "${clean}" "${target}"
+
+  python3 - "${target}" <<'PY'
+import pathlib
+import sys
+
+target = pathlib.Path(sys.argv[1])
+source = target.read_text()
+target.write_text(source.replace("let _ = Exact_output.snapshot_flow\n", "", 1))
+PY
+  if
+    MASC_COMPACTION_BOUNDARY_ROOT="${fixture}" \
+      MASC_COMPACTION_EXACT_FLOW_TARGET="${target}" \
+      "${BASH_SOURCE[0]}" --check-only >/dev/null 2>&1
+  then
+    fail "self-test missing canonical snapshot unexpectedly passed"
+  fi
+  cp "${clean}" "${target}"
+
+  printf '%s\n' 'let _ = Exact_output.admit_flow' >>"${target}"
+  if
+    MASC_COMPACTION_BOUNDARY_ROOT="${fixture}" \
+      MASC_COMPACTION_EXACT_FLOW_TARGET="${target}" \
+      "${BASH_SOURCE[0]}" --check-only >/dev/null 2>&1
+  then
+    fail "self-test retired admission unexpectedly passed"
+  fi
+  cp "${clean}" "${target}"
 
   printf '%s\n' 'let _ = Exact_output.receipt_phase' >>"${target}"
   if
@@ -107,7 +148,7 @@ EOF
     fail "self-test forbidden receipt inspection unexpectedly passed"
   fi
   echo \
-    "[compaction-exact-flow-boundary:self-test] clean=pass unrelated=pass forbidden=fail"
+    "[compaction-exact-flow-boundary:self-test] clean=pass unrelated=pass duplicate=fail missing=fail legacy=fail forbidden=fail"
 }
 
 case "${1:-}" in

@@ -24,6 +24,15 @@ type attempt_provenance =
   ; request_body_sha256 : string
   }
 
+type candidate_visit =
+  { flow_id : string
+  ; ordinal : int
+  ; slot_id : string
+  ; catalog_generation_fingerprint : string
+  ; catalog_evidence_sha256 : string
+  ; target_identity_fingerprint : string
+  }
+
 type 'callback_error execution_error =
   | Owner_unregistered_deferred
   | Flow_already_started of attempt_provenance list
@@ -181,6 +190,20 @@ let attempt_provenance
       Exact_output.receipt_plan_fingerprint attempt.receipt
   ; request_body_sha256 =
       Exact_output.receipt_request_body_sha256 attempt.receipt
+  }
+;;
+
+let candidate_visit (visit : Exact_output.flow_candidate_visit) =
+  let identity = visit.identity in
+  { flow_id = Exact_output.flow_id_to_string visit.flow_id
+  ; ordinal = Exact_output.flow_visit_ordinal_to_int visit.ordinal
+  ; slot_id = identity.candidate_id
+  ; catalog_generation_fingerprint =
+      Exact_output.catalog_generation_fingerprint identity.catalog_generation
+  ; catalog_evidence_sha256 =
+      Exact_output.catalog_evidence_sha256 identity.catalog_evidence
+  ; target_identity_fingerprint =
+      Exact_output.target_identity_fingerprint identity.target_identity
   }
 ;;
 
@@ -370,12 +393,14 @@ let execute_current ?clock ~before_dispatch ~before_advance prepared =
   let oas_before_dispatch receipt =
     with_current (fun () -> before_dispatch (attempt_provenance receipt))
   in
-  let oas_before_advance ~failed ~next:_ =
+  let oas_before_advance ~failed ~next =
     with_current (fun () ->
       match failed with
       | Exact_output.Flow_candidate_rejected _ -> Ok ()
       | Exact_output.Flow_candidate_execution_failed { candidate; cause = _ } ->
-        before_advance ~failed:(attempt_provenance candidate))
+        before_advance
+          ~failed:(attempt_provenance candidate)
+          ~next:(candidate_visit next))
   in
   let result =
     match

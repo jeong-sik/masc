@@ -28,6 +28,18 @@ type attempt_provenance =
 (** Opaque identity of one admitted attempt. It deliberately excludes the raw
     OAS receipt, effect phase, dispatch count, target, and execution cause. *)
 
+type candidate_visit =
+  { flow_id : string
+  ; ordinal : int
+  ; slot_id : string
+  ; catalog_generation_fingerprint : string
+  ; catalog_evidence_sha256 : string
+  ; target_identity_fingerprint : string
+  }
+(** Opaque projection of the immutable OAS-selected successor visit. No
+    execution receipt exists yet, so this type contains no call id, request
+    plan, or body hash. *)
+
 type 'callback_error execution_error =
   | Owner_unregistered_deferred
   | Flow_already_started of attempt_provenance list
@@ -68,6 +80,7 @@ val execute :
     (attempt_provenance -> (unit, 'callback_error) result) ->
   before_advance:
     (failed:attempt_provenance ->
+     next:candidate_visit ->
      (unit, 'callback_error) result) ->
   prepared ->
   ( Keeper_board_attention_candidate.judgment

@@ -1192,6 +1192,180 @@ let test_gate_judgment_prompt_comes_from_registry () =
   | Ok prompt -> check bool "prompt is non-empty" true (String.trim prompt <> "")
 ;;
 
+let test_shutdown_drains_inflight_worker_then_retires () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-shutdown-drain" @@ fun base_path ->
+  Fun.protect
+    ~finally:(fun () ->
+      Q.For_testing.reset_runtime_state ();
+      Masc.Keeper_shutdown_finalize.For_testing.reset_completion_handler ();
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      Masc.Keeper_registry.For_testing.clear ();
+      Masc.Keeper_exact_flow_scope.clear ())
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let approval =
+         pending_entry
+           ~keeper_name:"hitl-shutdown-drain-owner"
+           ~base_path
+           ()
+       in
+       let owner =
+         match
+           Masc.Keeper_registry.get
+             ~base_path
+             approval.keeper_name
+         with
+         | Some owner -> owner
+         | None -> fail "HITL shutdown owner was not registered"
+       in
+       (match Masc.Keeper_meta_store.write_meta config owner.meta with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       let release_response, resolve_release_response = Eio.Promise.create () in
+       let server =
+         F.start_server
+           ~on_request_before_reply:(fun () ->
+             Eio.Promise.await release_response)
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "approve")))
+       in
+       publish_lane
+         [ "hitl-shutdown-drain" ]
+         (F.resolver_snapshot
+            ~source:"hitl-shutdown-drain"
+            [ { id = "hitl-shutdown-drain"; base_url = server.base_url } ]);
+       let prepared = prepare_exn approval in
+       let summaries = ref 0 in
+       let worker_result, resolve_worker_result = Eio.Promise.create () in
+       Eio.Fiber.fork ~sw (fun () ->
+         let result =
+           try
+             `Returned
+               (Worker.For_testing.execute_prepared_flow
+                  ~net
+                  ~clock
+                  ~on_summary:(fun _ -> incr summaries)
+                  prepared)
+           with
+           | exn -> `Raised exn
+         in
+         Eio.Promise.resolve resolve_worker_result result);
+       F.await_first_request server;
+       let backlog_version =
+         match Masc.Workspace_backlog.read_backlog_r config with
+         | Ok backlog -> backlog.version
+         | Error detail -> fail detail
+       in
+       let operation_id =
+         Masc.Keeper_shutdown_types.Operation_id.generate ()
+       in
+       let operation : Masc.Keeper_shutdown_types.t =
+         { schema_version = Masc.Keeper_shutdown_types.schema_version
+         ; revision = 0
+         ; operation_id
+         ; keeper_name = approval.keeper_name
+         ; lane_ownership =
+             Masc.Keeper_shutdown_types.Registered_lane
+               (Masc.Keeper_lane.id owner.lane)
+         ; trace_id = owner.meta.runtime.trace_id
+         ; generation = owner.meta.runtime.nonce
+         ; actor = "operator"
+         ; cleanup_intent =
+             { reason =
+                 Masc.Keeper_shutdown_types.Operator_stop_remove_meta
+             ; remove_session = false
+             }
+         ; turn_disposition =
+             Masc.Keeper_shutdown_types.No_inflight_turn
+         ; expected_backlog_version = backlog_version
+         ; owned_task_ids = []
+         ; join_evidence = None
+         ; phase =
+             Masc.Keeper_shutdown_types.Cleanup_ready
+               { settled_task_ids = []
+               ; pending_confirms_removed = 0
+               }
+         ; created_at = Masc_domain.now_iso ()
+         ; updated_at = Masc_domain.now_iso ()
+         }
+       in
+       (match
+          Masc.Keeper_shutdown_store.persist_new
+            ~config
+            operation
+        with
+        | Ok () -> ()
+        | Error error ->
+          fail
+            (Masc.Keeper_shutdown_store.error_to_string error));
+       let draining =
+         match
+           Masc.Keeper_shutdown_finalize.run
+             ~config
+             ~entry:(Some owner)
+             operation
+         with
+         | Error
+             (Masc.Keeper_shutdown_finalize.Finalization_draining
+                (draining, _)) ->
+           draining
+         | Error error ->
+           fail
+             (Masc.Keeper_shutdown_finalize.error_to_string error)
+         | Ok _ ->
+           fail "in-flight HITL worker skipped the Draining boundary"
+       in
+       Eio.Promise.resolve resolve_release_response ();
+       (match Eio.Promise.await worker_result with
+        | `Returned Worker.Executed -> ()
+        | `Returned Worker.Deferred_unregistered ->
+          fail "Draining generation rejected its bound HITL settlement"
+        | `Raised exn -> raise exn);
+       let finalized =
+         match
+           Masc.Keeper_shutdown_finalize.run
+             ~config
+             ~entry:(Some owner)
+             draining
+         with
+         | Ok finalized -> finalized
+         | Error error ->
+           fail
+             (Masc.Keeper_shutdown_finalize.error_to_string error)
+       in
+       (match finalized.phase with
+        | Masc.Keeper_shutdown_types.Finalized _ -> ()
+        | _ -> fail "settled HITL shutdown retry did not reach Retired");
+       check int "in-flight worker dispatched once" 1 (F.post_count server);
+       check int "in-flight worker projected one summary" 1 !summaries;
+       check bool
+         "Retired owner left no registry identity"
+         true
+         (Option.is_none
+            (Masc.Keeper_registry.get
+               ~base_path
+               approval.keeper_name));
+       (match
+          Worker.For_testing.execute_prepared_flow
+            ~net
+            ~clock
+            ~on_summary:(fun _ -> incr summaries)
+            prepared
+        with
+        | Worker.Deferred_unregistered -> ()
+        | Worker.Executed ->
+          fail "Retired HITL generation redispatched stale work");
+       check int "Retired retry dispatched nothing" 1 (F.post_count server);
+       check int "Retired retry mutated no summary" 1 !summaries)
+;;
+
 let () =
   run
     "Hitl_summary_worker"
@@ -1269,6 +1443,10 @@ let () =
             "owner FIFO atomic drain is non-sharing"
             `Quick
             test_owner_fifo_atomic_drain_is_nonsharing
+        ; test_case
+            "shutdown drains in-flight worker then retires"
+            `Quick
+            test_shutdown_drains_inflight_worker_then_retires
         ] )
     ]
 ;;

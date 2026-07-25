@@ -75,6 +75,25 @@ let provenance
   { slot_id; call_id; plan_fingerprint; request_body_sha256 }
 ;;
 
+let candidate_visit
+      ?(flow_id = "flow-1")
+      ?(ordinal = 1)
+      ?(slot_id = "slot-next")
+      ?(catalog_generation_fingerprint = "generation-1")
+      ?(catalog_evidence_sha256 = "evidence-1")
+      ?(target_identity_fingerprint = "target-1")
+      ()
+  : P.candidate_visit
+  =
+  { flow_id
+  ; ordinal
+  ; slot_id
+  ; catalog_generation_fingerprint
+  ; catalog_evidence_sha256
+  ; target_identity_fingerprint
+  }
+;;
+
 let judgment ?(judged_at = 101.0) (proof : P.exact_provenance) : A.judgment =
   { verdict = { J.decision = J.Relevant; rationale = "react to this Board event" }
   ; slot_id = proof.slot_id
@@ -544,39 +563,40 @@ let test_existing_judgment_completion_is_atomic_and_restart_safe () =
     |> ok "bind released existing-judgment rejection fixture"
     |> fsynced "bind released existing-judgment rejection fixture"
   in
-  let released =
-    P.release_before_advance
+  let next = candidate_visit ~slot_id:"next-existing-slot" () in
+  let advancing =
+    P.record_before_advance
       ~worker_epoch:owner
       ~base_path
       ~partition:released_bound
       ~failed
-    |> ok "release existing-judgment rejection fixture"
-    |> fsynced "release existing-judgment rejection fixture"
+      ~next
+    |> ok "record existing-judgment advancement fixture"
+    |> fsynced "record existing-judgment advancement fixture"
   in
-  ignore
+  expect_error
+    "existing judgment cannot bypass OAS-selected advancement"
     (P.complete_existing_judgment
        ~now:16.0
        ~worker_epoch:owner
        ~base_path
-       ~partition:released
+       ~partition:advancing
        ~item:
          { candidate_id = advancing_candidate.candidate_id
          ; judgment = judgment failed
-         }
-     |> ok "complete existing judgment after zero-dispatch release"
-     |> fsynced "complete existing judgment after zero-dispatch release"
-      : P.t);
+         });
   ignore (completed : P.t)
 ;;
 
-let test_before_advance_release_is_atomic_and_exact () =
+let test_before_advance_record_is_atomic_and_exact () =
   with_temp_base "board-attention-partition-advance" @@ fun base_path ->
   let pending = candidate ~id:"candidate-advance" ~recorded_at:1.0 () in
   ignore (roots ~base_path [ pending ] : P.t list);
   let owner = P.Worker_epoch.generate () in
   let claimed = claim ~base_path ~worker_epoch:owner ~now:10.0 in
   let failed = provenance ~slot_id:"slot-failed" ~call_id:"call-failed" () in
-  let next = provenance ~slot_id:"slot-next" ~call_id:"call-next" () in
+  let next_visit = candidate_visit ~slot_id:"slot-next" () in
+  let next = provenance ~slot_id:next_visit.slot_id ~call_id:"call-next" () in
   let bound =
     P.bind_before_dispatch
       ~worker_epoch:owner
@@ -588,30 +608,39 @@ let test_before_advance_release_is_atomic_and_exact () =
   in
   expect_error
     "before advance requires exact failed binding"
-    (P.release_before_advance
+    (P.record_before_advance
        ~worker_epoch:owner
        ~base_path
        ~partition:bound
-       ~failed:(provenance ~call_id:"other-call" ()));
-  let release_transition =
+       ~failed:(provenance ~call_id:"other-call" ())
+       ~next:next_visit);
+  let advance_transition =
     ok
-      "release before advance"
-      (P.release_before_advance
+      "record before advance"
+      (P.record_before_advance
          ~worker_epoch:owner
          ~base_path
          ~partition:bound
-         ~failed)
+         ~failed
+         ~next:next_visit)
   in
-  Alcotest.(check bool) "release changes durable state" true release_transition.changed;
-  let released = fsynced "release before advance" release_transition in
-  (match released.state with
-   | P.Running { progress = P.Unbound; _ } -> ()
-   | _ -> Alcotest.fail "released partition was not Unbound");
+  Alcotest.(check bool)
+    "advance record changes durable state"
+    true
+    advance_transition.changed;
+  let advancing = fsynced "record before advance" advance_transition in
+  (match advancing.state with
+   | P.Running { progress = P.Advancing durable; _ } ->
+     Alcotest.(check bool)
+       "failed receipt and selected visit persist exactly"
+       true
+       (durable.failed = failed && durable.next = next_visit)
+   | _ -> Alcotest.fail "partition did not retain Advancing evidence");
   let rebound =
     P.bind_before_dispatch
       ~worker_epoch:owner
       ~base_path
-      ~partition:released
+      ~partition:advancing
       ~provenance:next
     |> ok "bind OAS-selected successor"
     |> fsynced "bind OAS-selected successor"
@@ -864,7 +893,7 @@ let test_strict_current_schema_rejects_old_json () =
 
 let inject_torn_tail ledger_path =
   let output = open_out_gen [ Open_wronly; Open_append; Open_binary ] 0o600 ledger_path in
-  output_string output "{\"schema_version\":5,\"partition_id\":\"torn-partial";
+  output_string output "{\"schema_version\":6,\"partition_id\":\"torn-partial";
   close_out output
 ;;
 
@@ -982,9 +1011,9 @@ let () =
             `Quick
             test_existing_judgment_completion_is_atomic_and_restart_safe
         ; Alcotest.test_case
-            "before advance release is atomic and exact"
+            "before advance record is atomic and exact"
             `Quick
-            test_before_advance_release_is_atomic_and_exact
+            test_before_advance_record_is_atomic_and_exact
         ; Alcotest.test_case
             "runtime transitions append then startup compacts"
             `Quick

@@ -65,6 +65,7 @@ type post_success_terminalizer =
   { base_path : string
   ; keeper_name : string
   ; flow_scope : Keeper_exact_flow_scope.t
+  ; flow_success : Exact_output.flow_success
   ; exact_execution_guard : exact_execution_guard
   ; attempt_observation : attempt_observation
   ; terminalization_mutex : Eio.Mutex.t
@@ -403,10 +404,11 @@ let observe_flow_attempt_receipt
       (candidate : Exact_output.flow_attempt_receipt)
   =
   let receipt = candidate.receipt in
-  { slot_id = candidate.identity.candidate_id
+  let identity = candidate.visit.identity in
+  { slot_id = identity.candidate_id
   ; call_id = receipt |> Exact_output.receipt_call_id |> call_id_to_string
   ; catalog_generation_fingerprint =
-      candidate.identity.catalog_generation
+      identity.catalog_generation
       |> Exact_output.catalog_generation_fingerprint
   ; receipt_plan_fingerprint = Exact_output.receipt_plan_fingerprint receipt
   ; receipt_request_body_sha256 =
@@ -483,7 +485,7 @@ let log_terminal_quarantine_failure
 
 let with_current_post_success terminalizer callback =
   match
-    Keeper_exact_flow_scope.with_current
+    Keeper_exact_flow_scope.with_settlement
       terminalizer.flow_scope
       ~registered_lane_id:
         (fun () ->
@@ -499,6 +501,39 @@ let with_current_post_success terminalizer callback =
   | Keeper_exact_flow_scope.Current value -> Post_success_current value
   | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
     Post_success_owner_unregistered_deferred
+;;
+
+let domain_settlement_error_to_string = function
+  | Exact_output.Domain_already_settled ->
+    "OAS exact flow domain disposition was already settled"
+  | Exact_output.Domain_preference_scope_released ->
+    "OAS exact flow preference scope was released before domain settlement"
+;;
+
+let settle_exact_flow_domain flow_success disposition =
+  Exact_output.settle_flow_domain flow_success disposition
+  |> Result.map (fun _ -> ())
+  |> Result.map_error domain_settlement_error_to_string
+;;
+
+let settle_post_success_domain_valid terminalizer =
+  settle_exact_flow_domain terminalizer.flow_success Exact_output.Domain_valid
+;;
+
+let settle_post_success_domain_rejected terminalizer =
+  match
+    settle_exact_flow_domain
+      terminalizer.flow_success
+      Exact_output.Domain_rejected
+  with
+  | Ok () -> ()
+  | Error detail ->
+    Log.Keeper.error
+      ~keeper_name:terminalizer.keeper_name
+      "post-success exact flow domain rejection settlement failed slot_id=%s call_id=%s: %s"
+      terminalizer.attempt_observation.slot_id
+      terminalizer.attempt_observation.call_id
+      detail
 ;;
 
 let terminalize_post_success_current terminalizer cause =
@@ -529,6 +564,7 @@ let terminalize_post_success_current terminalizer cause =
     match role with
     | `Await _ as role -> role
     | `Own (terminal, resolve_completion) ->
+      settle_post_success_domain_rejected terminalizer;
       let failure =
         try
           match
@@ -573,10 +609,14 @@ let terminalize_post_success (terminalizer : post_success_terminalizer) cause =
 ;;
 
 let exact_execution_evidence (flow_success : Exact_output.flow_success) =
-  let success = flow_success.success in
+  let success = Exact_output.flow_success_output flow_success in
   let provenance = success.provenance in
   let identity = provenance.target_identity in
-  let observation = observe_flow_attempt_receipt flow_success.candidate in
+  let observation =
+    flow_success
+    |> Exact_output.flow_success_candidate
+    |> observe_flow_attempt_receipt
+  in
   { slot_id = observation.slot_id
   ; call_id = observation.call_id
   ; target_identity_fingerprint =
@@ -596,7 +636,11 @@ let make_flow_candidates ~keeper_name selected_slots =
   let rec loop candidates = function
     | [] -> Ok (List.rev candidates)
     | (slot : Runtime_exact_output_registry.selected_slot) :: rest ->
-      (match Exact_output.make_flow_candidate ~id:slot.slot_id ~target:slot.target with
+      (match
+         Exact_output.make_flow_candidate
+           ~id:slot.slot_id
+           ~admitted_target:slot.admitted_target
+       with
        | Ok candidate -> loop (candidate :: candidates) rest
        | Error _ ->
          Log.Keeper.error
@@ -606,15 +650,6 @@ let make_flow_candidates ~keeper_name selected_slots =
          Error Exact_admission_failed)
   in
   loop [] selected_slots
-;;
-
-let log_unavailable_slot ~keeper_name ~registry_generation ~lane_id unavailable =
-  Log.Keeper.warn
-    ~keeper_name
-    "compaction exact opaque slot unavailable generation=%Ld lane_id=%s detail=%s"
-    registry_generation
-    lane_id
-    (Runtime_exact_output_registry.unavailable_slot_to_string unavailable)
 ;;
 
 let registered_lane_id ~base_path ~keeper_name () =
@@ -646,29 +681,25 @@ let prepare_lane_with_scope
         missing_lane_id;
       Error Exact_lane_unconfigured
     | Error
-        (Runtime_exact_output_registry.No_usable_lane_slots
-           { unavailable_slots; _ }) ->
+        (Runtime_exact_output_registry.No_admitted_lane_slots
+           { lane_id = empty_lane_id }) ->
       Log.Keeper.warn
         ~keeper_name
-        "compaction exact lane has no usable opaque slots generation=%Ld lane_id=%s unavailable_count=%d"
+        "compaction exact lane has no admitted opaque slots generation=%Ld lane_id=%s"
         registry_generation
-        lane_id
-        (List.length unavailable_slots);
-      List.iter
-        (log_unavailable_slot ~keeper_name ~registry_generation ~lane_id)
-        unavailable_slots;
+        empty_lane_id;
       Error Exact_target_selection_failed
-    | Ok { selected_slots; unavailable_slots } ->
-      List.iter
-        (log_unavailable_slot ~keeper_name ~registry_generation ~lane_id)
-        unavailable_slots;
+    | Ok { selected_slots } ->
       let messages = messages_for_plan ~units in
       let* candidates = make_flow_candidates ~keeper_name selected_slots in
       (match candidates with
        | [] -> Error Exact_target_selection_failed
        | first :: rest ->
          (match
-            Exact_output.admit_flow
+            Exact_output.snapshot_flow
+              ~preferences:
+                (Keeper_exact_flow_scope.preference_store flow_scope)
+              ~scope:(Keeper_exact_flow_scope.scope flow_scope)
               ~first
               ~rest
               ~messages
@@ -682,8 +713,8 @@ let prepare_lane_with_scope
               lane_id
               (List.length candidates);
             Error Exact_admission_failed
-          | Ok ready_flow ->
-            (match Exact_output.start_flow ready_flow with
+          | Ok flow_snapshot ->
+            (match Exact_output.start_flow flow_snapshot with
              | Error _ ->
                Log.Keeper.error
                  ~keeper_name
@@ -843,6 +874,15 @@ let execute_prepared_lane_current
            ~keeper_name:prepared_lane.keeper_name)
       callback
   in
+  let with_settlement callback =
+    Keeper_exact_flow_scope.with_settlement
+      prepared_lane.flow_scope
+      ~registered_lane_id:
+        (registered_lane_id
+           ~base_path:prepared_lane.base_path
+           ~keeper_name:prepared_lane.keeper_name)
+      callback
+  in
   let bound_observation = ref None in
   let before_dispatch candidate =
     let observation = observe_flow_attempt_receipt candidate in
@@ -858,15 +898,23 @@ let execute_prepared_lane_current
       Error Owner_unregistered_deferred
     | Keeper_exact_flow_scope.Current result -> result
   in
-  let before_advance ~failed ~failure:_ ~next:_ =
+  let before_advance ~failed ~next:_ =
     match
       with_current (fun () ->
-        let observation = observe_flow_attempt_receipt failed in
-        match release_exact_execution ~keeper_name ~exact_execution_guard observation with
-       | Error _ as error -> error
-       | Ok () ->
-         bound_observation := None;
-         Ok ())
+        match failed with
+        | Exact_output.Flow_candidate_rejected _ -> Ok ()
+        | Exact_output.Flow_candidate_execution_failed { candidate; cause = _ } ->
+          let observation = observe_flow_attempt_receipt candidate in
+          (match
+             release_exact_execution
+               ~keeper_name
+               ~exact_execution_guard
+               observation
+           with
+           | Error _ as error -> error
+           | Ok () ->
+             bound_observation := None;
+             Ok ()))
     with
     | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
       Error Owner_unregistered_deferred
@@ -913,6 +961,10 @@ let execute_prepared_lane_current
             observation))
   | `Flow (Error (Exact_output.Flow_attempt_already_started _)) ->
     Error Exact_flow_already_started
+  | `Flow (Error (Exact_output.Flow_success_ordinal_exhausted _))
+  | `Flow (Error (Exact_output.Flow_attempt_start_failed _))
+  | `Flow (Error (Exact_output.Flow_candidates_exhausted _)) ->
+    Error Exact_attempt_start_failed
   | `Flow
       (Error
         (Exact_output.Flow_before_dispatch_callback_failed
@@ -946,9 +998,27 @@ let execute_prepared_lane_current
             ~cause:Keeper_event_queue_state.Exact_execution_failed
             observation))
   | `Flow (Ok (flow_success : Exact_output.flow_success)) ->
-    let observation = observe_flow_attempt_receipt flow_success.candidate in
-    (match plan_of_json ~units:prepared_lane.units flow_success.success.output with
+    let observation =
+      flow_success
+      |> Exact_output.flow_success_candidate
+      |> observe_flow_attempt_receipt
+    in
+    let success = Exact_output.flow_success_output flow_success in
+    (match plan_of_json ~units:prepared_lane.units success.output with
      | Error detail ->
+       (match
+          settle_exact_flow_domain
+            flow_success
+            Exact_output.Domain_rejected
+        with
+        | Ok () -> ()
+        | Error detail ->
+          Log.Keeper.error
+            ~keeper_name
+            "compaction exact domain rejection settlement failed slot=%s call_id=%s: %s"
+            observation.slot_id
+            observation.call_id
+            detail);
        Log.Keeper.warn
          ~keeper_name
          "compaction exact output violated MASC domain plan slot=%s call_id=%s: %s"
@@ -973,6 +1043,7 @@ let execute_prepared_lane_current
                 { base_path = prepared_lane.base_path
                 ; keeper_name
                 ; flow_scope = prepared_lane.flow_scope
+                ; flow_success
                 ; exact_execution_guard
                 ; attempt_observation = observation
                 ; terminalization_mutex = Eio.Mutex.create ()
@@ -980,7 +1051,7 @@ let execute_prepared_lane_current
                 }
             }))
   in
-  match with_current settle_execution with
+  match with_settlement settle_execution with
   | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
     Error Exact_owner_unregistered_deferred
   | Keeper_exact_flow_scope.Current result -> result
@@ -1121,7 +1192,7 @@ module For_testing = struct
     in
     List.map
       (fun candidate -> candidate.Exact_output.candidate_id)
-      evidence.candidate_snapshot
+      evidence.declared_candidate_snapshot
   ;;
 
 end

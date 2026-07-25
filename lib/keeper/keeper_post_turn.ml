@@ -723,7 +723,7 @@ let commit_prepared_compaction_with
       ; projection_target
       ; context
       ; evidence
-      ; post_success_terminalizer = _
+      ; post_success_terminalizer
       } =
     prepared
   in
@@ -743,6 +743,17 @@ let commit_prepared_compaction_with
      | Ok
          ( saved_checkpoint
          , (Keeper_checkpoint_store.Installed installed as installation) ) ->
+       (match
+          Keeper_compaction_llm_summarizer
+          .settle_post_success_domain_valid
+            post_success_terminalizer
+        with
+        | Ok () -> ()
+        | Error detail ->
+          Log.Keeper.error
+            "compaction checkpoint installed but OAS domain preference settlement failed keeper=%s: %s"
+            retry_meta.name
+            detail);
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string Compactions)
          ~labels:[ "keeper", retry_meta.name ]

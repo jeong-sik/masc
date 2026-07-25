@@ -33,9 +33,24 @@ type exact_provenance =
 (** Opaque OAS attempt identity. MASC compares and persists these fields but
     never derives provider, model, tier, retry, or failover policy from them. *)
 
+type candidate_visit =
+  { flow_id : string
+  ; ordinal : int
+  ; slot_id : string
+  ; catalog_generation_fingerprint : string
+  ; catalog_evidence_sha256 : string
+  ; target_identity_fingerprint : string
+  }
+(** OAS-selected successor visit before an attempt exists. It deliberately has
+    no call id, request plan, body hash, provider, model, or credential. *)
+
 type running_progress =
   | Unbound
   | Bound of exact_provenance
+  | Advancing of
+      { failed : exact_provenance
+      ; next : candidate_visit
+      }
 
 type blocked_reason =
   | Candidate_membership_conflict of string
@@ -139,18 +154,20 @@ val bind_before_dispatch :
   (exact_transition, string) result
 (** Cursor-fenced durable [before_dispatch] callback. The call moves
     [Unbound -> Bound]. An idempotent repeat retains the same binding so only
-    [Fsync_completed] authorizes OAS dispatch. *)
+    [Fsync_completed] authorizes OAS dispatch. An [Advancing] partition accepts
+    only the OAS-selected successor slot. *)
 
-val release_before_advance :
+val record_before_advance :
   worker_epoch:Worker_epoch.t ->
   base_path:string ->
   partition:t ->
   failed:exact_provenance ->
+  next:candidate_visit ->
   (exact_transition, string) result
-(** Atomically persist [Bound failed -> Unbound] before OAS advances from a
-    zero-dispatch execution failure. Rejected candidates have no receipt and
-    require no MASC state transition. The callback accepts no Provider failure,
-    successor identity, receipt phase, or dispatch count. Only
+(** Atomically persist [Bound failed -> Advancing { failed; next }] before OAS
+    advances from a zero-dispatch execution failure. [next] is the immutable
+    OAS-selected visit, not a MASC successor decision. Rejected candidates have
+    no execution receipt and require no MASC state transition. Only
     [Fsync_completed] authorizes advancement. *)
 
 val complete :

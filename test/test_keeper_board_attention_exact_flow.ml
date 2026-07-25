@@ -9,7 +9,7 @@ module Worker = Keeper_board_attention_worker
 
 type callback_event =
   | Dispatch of Exact_flow.attempt_provenance
-  | Advance of Exact_flow.attempt_provenance
+  | Advance of Exact_flow.attempt_provenance * Exact_flow.candidate_visit
 
 let has_prompt_root path =
   Sys.file_exists (Filename.concat path "config/prompts")
@@ -277,9 +277,10 @@ let test_explicit_lane_failover_and_success_provenance () =
       in
       let before_advance
             ~(failed : Exact_flow.attempt_provenance)
+            ~(next : Exact_flow.candidate_visit)
         : (unit, string) result
         =
-        events := Advance failed :: !events;
+        events := Advance (failed, next) :: !events;
         Ok ()
       in
       let judgment =
@@ -296,7 +297,7 @@ let test_explicit_lane_failover_and_success_provenance () =
       Alcotest.(check int) "second slot dispatched once" 1 (Fixture.post_count server);
       match List.rev !events with
       | [ Dispatch first_dispatch
-        ; Advance failed
+        ; Advance (failed, next)
         ; Dispatch second_dispatch
         ] ->
         Alcotest.(check string)
@@ -304,6 +305,10 @@ let test_explicit_lane_failover_and_success_provenance () =
           first.id
           first_dispatch.slot_id;
         check_same_provenance "failed projection" first_dispatch failed;
+        Alcotest.(check string)
+          "OAS-selected successor visit is carried unchanged"
+          second.id
+          next.slot_id;
         Alcotest.(check string)
           "second dispatch uses second lane slot"
           second.id
@@ -370,6 +375,7 @@ let test_domain_candidate_id_mismatch_does_not_advance () =
       in
       let before_advance
             ~(failed : Exact_flow.attempt_provenance)
+            ~next:_
         : (unit, string) result
         =
         Alcotest.failf
@@ -526,7 +532,7 @@ let test_replaced_owner_defers_final_projection_without_mutation () =
         !projection_mutations))
 ;;
 
-let test_owner_replacement_during_post_defers_error_projection () =
+let test_owner_replacement_during_post_defers_success_projection () =
   with_prompt_registry (fun () ->
     run_eio (fun ~sw ~net ~clock ->
       with_temp_base "board-owner-replacement" @@ fun base_path ->
@@ -577,7 +583,10 @@ let test_owner_replacement_during_post_defers_error_projection () =
                ~sw
                ~net
                ~clock
-               Fixture.Abort_after_request
+               (Fixture.Reply
+                  (Fixture.openai_response
+                     (judgment_output
+                        ~candidate_id:candidate.candidate_id)))
            in
            publish_lane
              [ target "board-owner-replacement-post" server.base_url ];
@@ -592,7 +601,7 @@ let test_owner_replacement_during_post_defers_error_projection () =
             with
             | Ok (Worker.Owner_unregistered_deferred _) -> ()
             | Ok _ ->
-              Alcotest.fail "stale Board owner projected a terminal error"
+              Alcotest.fail "stale Board owner projected a successful judgment"
             | Error detail -> Alcotest.fail detail);
            Alcotest.(check int)
              "real Board POST crossed replacement hook once"
@@ -605,7 +614,7 @@ let test_owner_replacement_during_post_defers_error_projection () =
             with
             | Ok [ { status = Candidate.Pending { last_delivery_failure = None }; _ } ] ->
               ()
-            | Ok _ -> Alcotest.fail "stale Board error mutated the candidate"
+            | Ok _ -> Alcotest.fail "stale Board success mutated the candidate"
             | Error detail -> Alcotest.fail detail);
            match
              Partition.load ~base_path ~keeper_name:candidate.keeper_name
@@ -613,7 +622,7 @@ let test_owner_replacement_during_post_defers_error_projection () =
            | Ok [ { state = Partition.Running { progress = Partition.Bound _; _ }; _ } ] ->
              ()
            | Ok _ ->
-             Alcotest.fail "stale Board error blocked or completed the partition"
+             Alcotest.fail "stale Board success blocked or completed the partition"
            | Error detail -> Alcotest.fail detail)))
 ;;
 
@@ -642,9 +651,9 @@ let () =
             `Quick
             test_replaced_owner_defers_final_projection_without_mutation
         ; Alcotest.test_case
-            "owner replacement during POST defers error projection"
+            "owner replacement during POST defers success projection"
             `Quick
-            test_owner_replacement_during_post_defers_error_projection
+            test_owner_replacement_during_post_defers_success_projection
         ] )
     ]
 ;;

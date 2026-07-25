@@ -871,25 +871,38 @@ let execute_prepared_flow_with_queue_writers_current
       settle_current_generation (fun () -> handle_flow_error prepared error)
   with
   | Eio.Cancel.Cancelled _ as cancellation ->
-    let settlement =
-      Eio.Cancel.protect
-      @@ fun () ->
-      with_settlement_generation prepared (fun () ->
-        record_outcome "exact_cancellation";
-        settle_current
-          prepared.entry
-          ~reason:"HITL exact-output flow was cancelled"
-          ~cause:Exact_cancellation)
-    in
-    (match settlement with
-     | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-       Deferred_unregistered
-     | Keeper_exact_flow_scope.Current (Ok ()) -> raise cancellation
-     | Keeper_exact_flow_scope.Current (Error detail) ->
-       signal_terminalization_persistence_failure
+    (try
+       match
+         Eio.Cancel.protect
+         @@ fun () ->
+         with_settlement_generation prepared (fun () ->
+           record_outcome "exact_cancellation";
+           settle_current
+             prepared.entry
+             ~reason:"HITL exact-output flow was cancelled"
+             ~cause:Exact_cancellation)
+       with
+       | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
+         record_outcome "exact_cancellation_owner_replaced";
+         log_exact_error
+           prepared.entry
+           "cancellation settlement"
+           "exact owner generation was replaced before best-effort settlement"
+       | Keeper_exact_flow_scope.Current (Ok ()) -> ()
+       | Keeper_exact_flow_scope.Current (Error detail) ->
+         record_outcome "exact_cancellation_settlement_failed";
+         log_exact_error
+           prepared.entry
+           "cancellation terminalization persistence"
+           detail
+     with
+     | Eio.Cancel.Cancelled _ -> ()
+     | exn ->
+       log_exact_error
          prepared.entry
-         "cancellation terminalization persistence"
-         detail)
+         "cancellation settlement raised"
+         (Printexc.to_string exn));
+    raise cancellation
   | Exact_terminalization_persistence_failed _ as persistence_failure ->
     raise persistence_failure
   | exn ->

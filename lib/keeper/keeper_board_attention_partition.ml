@@ -46,12 +46,21 @@ type exact_provenance =
   ; request_body_sha256 : string
   }
 
+type candidate_visit =
+  { flow_id : string
+  ; ordinal : int
+  ; slot_id : string
+  ; catalog_generation_fingerprint : string
+  ; catalog_evidence_sha256 : string
+  ; target_identity_fingerprint : string
+  }
+
 type running_progress =
   | Unbound
   | Bound of exact_provenance
   | Advancing of
       { failed : exact_provenance
-      ; next : exact_provenance
+      ; next : candidate_visit
       }
 
 type blocked_reason =
@@ -110,7 +119,7 @@ type requeue_blocked_outcome =
   | Generation_conflict of string
 
 let ( let* ) = Result.bind
-let schema_version = 5
+let schema_version = 6
 
 let state_to_string = function
   | Ready -> "ready"
@@ -129,6 +138,18 @@ let exact_provenance_to_yojson provenance =
     ]
 ;;
 
+let candidate_visit_to_yojson visit =
+  `Assoc
+    [ "flow_id", `String visit.flow_id
+    ; "ordinal", `Int visit.ordinal
+    ; "slot_id", `String visit.slot_id
+    ; ( "catalog_generation_fingerprint"
+      , `String visit.catalog_generation_fingerprint )
+    ; "catalog_evidence_sha256", `String visit.catalog_evidence_sha256
+    ; "target_identity_fingerprint", `String visit.target_identity_fingerprint
+    ]
+;;
+
 let running_progress_to_yojson = function
   | Unbound -> `Assoc [ "kind", `String "unbound" ]
   | Bound provenance ->
@@ -140,7 +161,7 @@ let running_progress_to_yojson = function
     `Assoc
       [ "kind", `String "advancing"
       ; "failed", exact_provenance_to_yojson failed
-      ; "next", exact_provenance_to_yojson next
+      ; "next", candidate_visit_to_yojson next
       ]
 ;;
 
@@ -253,6 +274,12 @@ let float_json ~context = function
   | _ -> Error (context ^ " must be a number")
 ;;
 
+let nonnegative_int_json ~context = function
+  | `Int value when value >= 0 -> Ok value
+  | `Int _ -> Error (context ^ " must be nonnegative")
+  | _ -> Error (context ^ " must be an integer")
+;;
+
 let exact_provenance_of_yojson json =
   let context = "Board attention exact provenance" in
   let* fields = assoc ~context json in
@@ -277,6 +304,59 @@ let exact_provenance_of_yojson json =
   Ok { slot_id; call_id; plan_fingerprint; request_body_sha256 }
 ;;
 
+let candidate_visit_of_yojson json =
+  let context = "Board attention exact candidate visit" in
+  let* fields = assoc ~context json in
+  let* () =
+    exact_fields
+      ~context
+      [ "flow_id"
+      ; "ordinal"
+      ; "slot_id"
+      ; "catalog_generation_fingerprint"
+      ; "catalog_evidence_sha256"
+      ; "target_identity_fingerprint"
+      ]
+      fields
+  in
+  let* flow_id_json = field ~context "flow_id" fields in
+  let* flow_id = string_json ~context:(context ^ ".flow_id") flow_id_json in
+  let* ordinal_json = field ~context "ordinal" fields in
+  let* ordinal =
+    nonnegative_int_json ~context:(context ^ ".ordinal") ordinal_json
+  in
+  let* slot_json = field ~context "slot_id" fields in
+  let* slot_id = string_json ~context:(context ^ ".slot_id") slot_json in
+  let* generation_json =
+    field ~context "catalog_generation_fingerprint" fields
+  in
+  let* catalog_generation_fingerprint =
+    string_json
+      ~context:(context ^ ".catalog_generation_fingerprint")
+      generation_json
+  in
+  let* evidence_json = field ~context "catalog_evidence_sha256" fields in
+  let* catalog_evidence_sha256 =
+    string_json
+      ~context:(context ^ ".catalog_evidence_sha256")
+      evidence_json
+  in
+  let* target_json = field ~context "target_identity_fingerprint" fields in
+  let* target_identity_fingerprint =
+    string_json
+      ~context:(context ^ ".target_identity_fingerprint")
+      target_json
+  in
+  Ok
+    { flow_id
+    ; ordinal
+    ; slot_id
+    ; catalog_generation_fingerprint
+    ; catalog_evidence_sha256
+    ; target_identity_fingerprint
+    }
+;;
+
 let running_progress_of_yojson json =
   let context = "Board attention exact progress" in
   let* fields = assoc ~context json in
@@ -296,7 +376,7 @@ let running_progress_of_yojson json =
     let* failed_json = field ~context "failed" fields in
     let* failed = exact_provenance_of_yojson failed_json in
     let* next_json = field ~context "next" fields in
-    let* next = exact_provenance_of_yojson next_json in
+    let* next = candidate_visit_of_yojson next_json in
     Ok (Advancing { failed; next })
   | value -> Error (Printf.sprintf "unknown Board attention exact progress %S" value)
 ;;
@@ -938,6 +1018,42 @@ let exact_provenance_equal left right =
   && String.equal left.request_body_sha256 right.request_body_sha256
 ;;
 
+let candidate_visit_equal left right =
+  String.equal left.flow_id right.flow_id
+  && Int.equal left.ordinal right.ordinal
+  && String.equal left.slot_id right.slot_id
+  && String.equal
+       left.catalog_generation_fingerprint
+       right.catalog_generation_fingerprint
+  && String.equal left.catalog_evidence_sha256 right.catalog_evidence_sha256
+  && String.equal
+       left.target_identity_fingerprint
+       right.target_identity_fingerprint
+;;
+
+let validate_candidate_visit visit =
+  let* () = nonempty "partition candidate visit flow_id" visit.flow_id in
+  let* () =
+    if visit.ordinal >= 0
+    then Ok ()
+    else Error "partition candidate visit ordinal must be nonnegative"
+  in
+  let* () = nonempty "partition candidate visit slot_id" visit.slot_id in
+  let* () =
+    nonempty
+      "partition candidate visit catalog_generation_fingerprint"
+      visit.catalog_generation_fingerprint
+  in
+  let* () =
+    nonempty
+      "partition candidate visit catalog_evidence_sha256"
+      visit.catalog_evidence_sha256
+  in
+  nonempty
+    "partition candidate visit target_identity_fingerprint"
+    visit.target_identity_fingerprint
+;;
+
 let judgment_provenance (judgment : Candidate.judgment) =
   { slot_id = judgment.slot_id
   ; call_id = judgment.call_id
@@ -965,7 +1081,7 @@ let validate_blocked_reason = function
     validate_exact_provenance provenance
   | Exact_execution_quarantined (Advancing { failed; next }) ->
     let* () = validate_exact_provenance failed in
-    validate_exact_provenance next
+    validate_candidate_visit next
   | Exact_execution_quarantined Unbound ->
     Error "unbound execution cannot be quarantined"
 ;;
@@ -1199,7 +1315,7 @@ let bind_before_dispatch ~worker_epoch ~base_path ~partition ~provenance =
         Ok (Running running)
       | Bound _ ->
         Error "before-dispatch binding conflicts with the durable exact provenance"
-      | Advancing { next; _ } when exact_provenance_equal next provenance ->
+      | Advancing { next; _ } when String.equal next.slot_id provenance.slot_id ->
         Ok (Running { running with progress = Bound provenance })
       | Advancing _ ->
         Error "before-dispatch binding differs from the durable next provenance")
@@ -1207,9 +1323,9 @@ let bind_before_dispatch ~worker_epoch ~base_path ~partition ~provenance =
 
 let record_before_advance ~worker_epoch ~base_path ~partition ~failed ~next =
   let* () = validate_exact_provenance failed in
-  let* () = validate_exact_provenance next in
-  if exact_provenance_equal failed next
-  then Error "before-advance next provenance must differ from failed provenance"
+  let* () = validate_candidate_visit next in
+  if String.equal failed.slot_id next.slot_id
+  then Error "before-advance next visit must differ from the failed slot"
   else
     transition_running_exact
       ~base_path
@@ -1223,7 +1339,7 @@ let record_before_advance ~worker_epoch ~base_path ~partition ~failed ~next =
           Error "before-advance failed provenance differs from the durable binding"
         | Advancing current
           when exact_provenance_equal current.failed failed
-               && exact_provenance_equal current.next next -> Ok (Running running)
+               && candidate_visit_equal current.next next -> Ok (Running running)
         | Advancing _ ->
           Error "before-advance pair conflicts with the durable advancement"
         | Unbound -> Error "before-advance requires a durable exact binding")

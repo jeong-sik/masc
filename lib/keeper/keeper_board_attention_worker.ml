@@ -474,6 +474,9 @@ let candidate_provenance (provenance : Partition.exact_provenance) :
 let attempt_provenance_of_reason = function
   | Partition.Exact_execution_quarantined (Partition.Bound provenance) ->
     Some (candidate_provenance provenance)
+  | Partition.Exact_execution_quarantined
+      (Partition.Advancing { failed; next = _ }) ->
+    Some (candidate_provenance failed)
   | Partition.Exact_execution_quarantined Partition.Unbound
   | Partition.Candidate_membership_conflict _
   | Partition.Durable_partition_invariant _
@@ -586,7 +589,7 @@ let running_progress partition =
 
 let preserve_durable_progress partition fallback =
   match running_progress partition with
-  | Some (Partition.Bound _ as progress) ->
+  | Some ((Partition.Bound _ | Partition.Advancing _) as progress) ->
     Partition.Exact_execution_quarantined progress
   | Some Partition.Unbound | None -> fallback
 ;;
@@ -686,6 +689,18 @@ let partition_provenance
   }
 ;;
 
+let partition_candidate_visit (visit : Exact_flow.candidate_visit) :
+    Partition.candidate_visit
+  =
+  { flow_id = visit.flow_id
+  ; ordinal = visit.ordinal
+  ; slot_id = visit.slot_id
+  ; catalog_generation_fingerprint = visit.catalog_generation_fingerprint
+  ; catalog_evidence_sha256 = visit.catalog_evidence_sha256
+  ; target_identity_fingerprint = visit.target_identity_fingerprint
+  }
+;;
+
 let setup_error_detail = function
   | Exact_flow.Network_unavailable -> "network context unavailable"
   | Exact_flow.Candidate_not_pending -> "candidate is no longer pending"
@@ -719,8 +734,12 @@ let before_dispatch_failure_reason partition ~cause ~current =
   | Some (Partition.Bound durable as progress)
     when exact_provenance_equal durable projected ->
     Partition.Exact_execution_quarantined progress
+  | Some (Partition.Advancing { next; _ } as progress)
+    when String.equal next.slot_id projected.slot_id ->
+    Partition.Exact_execution_quarantined progress
   | Some Partition.Unbound
   | Some (Partition.Bound _)
+  | Some (Partition.Advancing _)
   | None -> callback_invariant "before-dispatch" cause
 ;;
 
@@ -730,9 +749,13 @@ let before_advance_failure_reason partition ~cause ~failed =
   | Some (Partition.Bound durable as progress)
     when exact_provenance_equal durable failed ->
     Partition.Exact_execution_quarantined progress
+  | Some (Partition.Advancing { failed = durable; _ } as progress)
+    when exact_provenance_equal durable failed ->
+    Partition.Exact_execution_quarantined progress
   | Some Partition.Unbound ->
     Partition.Exact_execution_quarantined (Partition.Bound failed)
   | Some (Partition.Bound _)
+  | Some (Partition.Advancing _)
   | None -> callback_invariant "before-advance" cause
 ;;
 
@@ -801,14 +824,17 @@ let before_advance
       ~base_path
       latest_partition
       ~failed
+      ~next
   =
   let failed = partition_provenance failed in
-  Partition.release_before_advance
+  let next = partition_candidate_visit next in
+  Partition.record_before_advance
     ~worker_epoch
     ~base_path
     ~partition:!latest_partition
     ~failed
-  |> confirm_exact_transition latest_partition "exact before-advance release"
+    ~next
+  |> confirm_exact_transition latest_partition "exact before-advance record"
 ;;
 
 let complete_existing_judgment
@@ -1451,6 +1477,12 @@ let process_next ~now ~worker_epoch ~base_path ~keeper_name ~prepare ~execute =
     ~execute
 ;;
 
+let prepare_exact ~base_path ~keeper_name ~net =
+  Exact_flow.prepare ~base_path ~keeper_name ~net
+;;
+
+let execute_exact ~clock = Exact_flow.execute ~clock
+
 let process_next_exact ~clock ~net ~now ~worker_epoch ~base_path ~keeper_name =
   process_next_current
     ~with_current:Exact_flow.with_settlement_generation
@@ -1458,8 +1490,8 @@ let process_next_exact ~clock ~net ~now ~worker_epoch ~base_path ~keeper_name =
     ~worker_epoch
     ~base_path
     ~keeper_name
-    ~prepare:(Exact_flow.prepare ~base_path ~keeper_name ~net)
-    ~execute:(Exact_flow.execute ~clock)
+    ~prepare:(prepare_exact ~base_path ~keeper_name ~net)
+    ~execute:(execute_exact ~clock)
 ;;
 
 let completed_in_order ~base_path ~keeper_name =
@@ -1710,9 +1742,9 @@ let run
          | Error detail -> fail Process_start_recovery detail
          | Ok () ->
            let prepare =
-             Exact_flow.prepare ~base_path ~keeper_name ~net
+             prepare_exact ~base_path ~keeper_name ~net
            in
-           let execute = Exact_flow.execute ~clock in
+           let execute = execute_exact ~clock in
            let contention_rearms =
              make_contention_rearm_scheduler
                ~fork:(fun task -> Eio.Fiber.fork ~sw task)

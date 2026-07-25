@@ -143,12 +143,20 @@ val terminalize_post_success
     therefore fail-closed against restart replay. A cancelled waiter can retry
     and retrieve the same canonical terminal without repeating quarantine. *)
 
+val settle_post_success_domain_valid
+  :  post_success_terminalizer
+  -> (unit, string) result
+(** Install the OAS flow preference only after the validated compaction
+    checkpoint is durable. The caller must hold [with_current_post_success]. *)
+
 val with_current_post_success
   :  post_success_terminalizer
   -> (unit -> 'a)
   -> 'a post_success_boundary
 (** Fence local checkpoint and projection commits against the exact Keeper
-    generation that produced the completed plan. *)
+    generation that produced the completed plan. Already-bound work may finish
+    while that exact generation is Draining; replacement and Retired
+    generations remain deferred. *)
 
 val exact_execution_evidence_slot_id : exact_execution_evidence -> string
 val exact_execution_evidence_call_id : exact_execution_evidence -> string

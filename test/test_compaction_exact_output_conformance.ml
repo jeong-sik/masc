@@ -1831,12 +1831,20 @@ let test_visible_sync_uncertainty_seams () =
     ]
 ;;
 
-let test_post_success_owner_replacement_defers_all_projection () =
+let test_post_success_owner_replacement_defers_success_projection () =
   run_eio
   @@ fun ~sw ~net ~clock ->
   let keeper_name = "keeper-post-success-owner-replaced" in
   let slot_id = "post-success-owner-replaced" in
-  let server = F.start_server ~sw ~net ~clock (F.Reply valid_response) in
+  let replace_owner = ref (fun () -> ()) in
+  let server =
+    F.start_server
+      ~on_request_before_reply:(fun () -> !replace_owner ())
+      ~sw
+      ~net
+      ~clock
+      (F.Reply valid_response)
+  in
   let snapshot =
     F.resolver_snapshot
       ~source:"masc post-success owner replacement"
@@ -1844,57 +1852,65 @@ let test_post_success_owner_replacement_defers_all_projection () =
   in
   let registry = publish_exn ~slot_ids:[ slot_id ] snapshot in
   let prepared = prepare_exn ~keeper_name ~registry () in
+  let old_entry =
+    match Keeper_registry.get ~base_path:exact_flow_base_path keeper_name with
+    | Some entry -> entry
+    | None -> Alcotest.fail "prepared compaction owner disappeared"
+  in
+  replace_owner :=
+    (fun () ->
+       (match Keeper_registry.unregister_exact old_entry with
+        | Keeper_registry.Exact_unregistered -> ()
+        | _ -> Alcotest.fail "compaction owner was not replaced during POST");
+       ensure_registered_keeper ~base_path:exact_flow_base_path keeper_name);
+  let bind_calls = ref 0 in
+  let release_calls = ref 0 in
   let quarantine_calls = ref 0 in
   let guard : C.exact_execution_guard =
-    { before_dispatch = (fun _ -> Ok C.Fsync_completed)
-    ; release_before_dispatch = (fun _ -> Ok C.Fsync_completed)
+    { before_dispatch =
+        (fun _ ->
+           incr bind_calls;
+           Ok C.Fsync_completed)
+    ; release_before_dispatch =
+        (fun _ ->
+           incr release_calls;
+           Ok C.Fsync_completed)
     ; quarantine =
         (fun _ _ ->
            incr quarantine_calls;
            Ok C.Fsync_completed)
     }
   in
-  let completed =
+  (match
     execute_prepared_lane
       ~keeper_name
       ~net
       ~clock
       ~exact_execution_guard:guard
       prepared
-    |> completed_exn
-  in
-  let terminalizer = C.completed_post_success_terminalizer completed in
-  let old_entry =
-    match Keeper_registry.get ~base_path:exact_flow_base_path keeper_name with
-    | Some entry -> entry
-    | None -> Alcotest.fail "completed compaction owner disappeared"
-  in
-  (match Keeper_registry.unregister_exact old_entry with
-   | Keeper_registry.Exact_unregistered -> ()
-   | _ -> Alcotest.fail "completed compaction owner was not unregistered");
-  ensure_registered_keeper ~base_path:exact_flow_base_path keeper_name;
-  let projection_mutations = ref 0 in
-  (match
-     C.with_current_post_success terminalizer (fun () ->
-       incr projection_mutations)
    with
-   | C.Post_success_owner_unregistered_deferred -> ()
-   | C.Post_success_current () ->
-     Alcotest.fail "replaced compaction owner committed a stale projection");
+   | Error C.Exact_owner_unregistered_deferred -> ()
+   | Error _ -> Alcotest.fail "POST replacement returned the wrong terminal"
+   | Ok _ -> Alcotest.fail "replaced compaction owner retained stale success");
   (match
-     C.terminalize_post_success
-       terminalizer
-       Keeper_event_queue_state.Checkpoint_persistence_failed
+     execute_prepared_lane
+       ~keeper_name
+       ~net
+       ~clock
+       ~exact_execution_guard:guard
+       prepared
    with
-   | C.Terminalization_owner_unregistered_deferred -> ()
-   | C.Terminalized _ ->
-     Alcotest.fail "replaced compaction owner quarantined a stale binding");
+   | Error C.Exact_owner_unregistered_deferred -> ()
+   | Error _ -> Alcotest.fail "stale retry returned the wrong terminal"
+   | Ok _ -> Alcotest.fail "stale retry projected a completed plan");
   Alcotest.(check int)
-    "stale checkpoint projection mutates nothing"
-    0
-    !projection_mutations;
+    "real compaction POST crossed replacement exactly once"
+    1
+    (F.post_count server);
+  Alcotest.(check int) "replacement binds one exact identity" 1 !bind_calls;
+  Alcotest.(check int) "replacement releases no stale identity" 0 !release_calls;
   Alcotest.(check int)
-    "stale terminalization mutates nothing"
+    "replacement quarantines no stale success"
     0
     !quarantine_calls
 ;;
@@ -1972,9 +1988,9 @@ let () =
             `Quick
             test_post_success_terminalization_failures_preserve_full_binding
         ; Alcotest.test_case
-            "owner replacement defers all post-success projection"
+            "owner replacement during POST defers success projection"
             `Quick
-            test_post_success_owner_replacement_defers_all_projection
+            test_post_success_owner_replacement_defers_success_projection
         ] )
     ; ( "affinity and non-sharing"
       , [ Alcotest.test_case

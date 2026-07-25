@@ -356,12 +356,12 @@ check_boundary() {
   require_once "Exact_flow.prepare" "${WORKER_ML}"
   require_once "Exact_flow.execute" "${WORKER_ML}"
   require_once "Partition.bind_before_dispatch" "${WORKER_ML}"
-  require_once "Partition.release_before_advance" "${WORKER_ML}"
+  require_once "Partition.record_before_advance" "${WORKER_ML}"
   require_present "Partition.Fsync_completed" "${WORKER_ML}"
   require_once "let bind_before_dispatch" "${PARTITION_ML}"
-  require_once "let release_before_advance" "${PARTITION_ML}"
+  require_once "let record_before_advance" "${PARTITION_ML}"
   require_once "val bind_before_dispatch" "${PARTITION_MLI}"
-  require_once "val release_before_advance" "${PARTITION_MLI}"
+  require_once "val record_before_advance" "${PARTITION_MLI}"
   check_lane_declaration \
     || fail "Board attention lane declaration contract failed"
 
@@ -420,6 +420,26 @@ self_test() (
 
   MASC_BOARD_ATTENTION_BOUNDARY_ROOT="${fixture}" \
     bash "${BASH_SOURCE[0]}" --check >/dev/null
+
+  printf '%s\n' 'let _ = Exact_flow.prepare' \
+    >>"${fixture}/lib/keeper/keeper_board_attention_worker.ml"
+  if
+    MASC_BOARD_ATTENTION_BOUNDARY_ROOT="${fixture}" \
+      bash "${BASH_SOURCE[0]}" --check >/dev/null 2>&1
+  then
+    fail "self-test accepted duplicate Board prepare surface"
+  fi
+  cp "${worker_backup}" "${fixture}/lib/keeper/keeper_board_attention_worker.ml"
+
+  printf '%s\n' 'let _ = Exact_flow.execute' \
+    >>"${fixture}/lib/keeper/keeper_board_attention_worker.ml"
+  if
+    MASC_BOARD_ATTENTION_BOUNDARY_ROOT="${fixture}" \
+      bash "${BASH_SOURCE[0]}" --check >/dev/null 2>&1
+  then
+    fail "self-test accepted duplicate Board execute surface"
+  fi
+  cp "${worker_backup}" "${fixture}/lib/keeper/keeper_board_attention_worker.ml"
 
   cat >>"${fixture}/lib/keeper/keeper_board_attention_worker.ml" <<'EOF'
 (*
@@ -639,7 +659,7 @@ PY
   fi
 
   printf '%s\n' \
-    '[board-attention-exact-flow-boundary:self-test] clean=pass quoted=pass lane-decoys=pass retired-decoys=pass unrelated=pass lane=fail composed-lane=fail duplicate-lane=fail candidate=fail quarantine=fail config=fail forbidden=fail pricing=fail legacy=fail missing=fail'
+    '[board-attention-exact-flow-boundary:self-test] clean=pass prepare=fail execute=fail quoted=pass lane-decoys=pass retired-decoys=pass unrelated=pass lane=fail composed-lane=fail duplicate-lane=fail candidate=fail quarantine=fail config=fail forbidden=fail pricing=fail legacy=fail missing=fail'
 )
 
 case "${1:-}" in

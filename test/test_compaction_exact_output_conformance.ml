@@ -427,7 +427,7 @@ let test_bind_failure_prevents_post () =
        ~exact_execution_guard:guard
        prepared
    with
-   | Error C.Exact_execution_guard_failed -> ()
+   | Error (C.Exact_execution_guard_absent | C.Exact_execution_bind_failed) -> ()
    | Error _ -> Alcotest.fail "bind failure returned the wrong typed failure"
    | Ok _ -> Alcotest.fail "bind failure unexpectedly executed");
   Alcotest.(check int) "bind failure prevents POST" 0 (F.post_count server)
@@ -452,7 +452,7 @@ let test_missing_dispatch_guard_prevents_post () =
        ~clock
        prepared
    with
-   | Error C.Exact_execution_guard_failed -> ()
+   | Error (C.Exact_execution_guard_absent | C.Exact_execution_bind_failed) -> ()
    | Error _ -> Alcotest.fail "missing guard returned the wrong typed failure"
    | Ok _ -> Alcotest.fail "missing guard unexpectedly executed");
   Alcotest.(check int) "missing guard prevents POST" 0 (F.post_count server)

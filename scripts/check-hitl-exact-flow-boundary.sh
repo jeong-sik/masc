@@ -60,13 +60,21 @@ check_boundary() {
     "$WORKER" \
     "worker must execute only the affine OAS flow"
   require_pattern \
-    '~before_dispatch:\(before_dispatch[[:space:]]+~queue_writers[[:space:]]+prepared\.entry\)' \
+    'let guarded_before_dispatch[[:space:]]+candidate[[:space:]]*=[[:space:]]*match[[:space:]]+with_current_generation[[:space:]]+prepared[[:space:]]+\(fun[[:space:]]+\(\)[[:space:]]*->[[:space:]]*before_dispatch[[:space:]]+~queue_writers[[:space:]]+prepared\.entry[[:space:]]+candidate\)' \
     "$WORKER" \
-    "execute_flow_once must use the production durable bind callback"
+    "guarded before_dispatch must call the production durable bind callback inside the owner-generation fence"
   require_pattern \
-    '~before_advance:\(before_advance[[:space:]]+~queue_writers[[:space:]]+prepared\.entry\)' \
+    'let guarded_before_advance[[:space:]]+~failed[[:space:]]+~next[[:space:]]*=[[:space:]]*match[[:space:]]+with_current_generation[[:space:]]+prepared[[:space:]]+\(fun[[:space:]]+\(\)[[:space:]]*->[[:space:]]*before_advance[[:space:]]+~queue_writers[[:space:]]+prepared\.entry[[:space:]]+~failed[[:space:]]+~next\)' \
     "$WORKER" \
-    "execute_flow_once must use the production durable advance callback"
+    "guarded before_advance must call the production durable advance callback inside the owner-generation fence"
+  require_pattern \
+    '~before_dispatch:guarded_before_dispatch' \
+    "$WORKER" \
+    "execute_flow_once must use the owner-generation-guarded durable bind callback"
+  require_pattern \
+    '~before_advance:guarded_before_advance' \
+    "$WORKER" \
+    "execute_flow_once must use the owner-generation-guarded durable advance callback"
   require_pattern \
     'bind_summary_exact_attempt' \
     "$WORKER" \
@@ -196,6 +204,30 @@ self_test() (
     fi
     cp "$WORKER" "$fixture/lib/keeper/hitl_summary_worker.ml"
   done
+
+  sed \
+    's/~before_dispatch:guarded_before_dispatch/~before_dispatch:(before_dispatch ~queue_writers prepared.entry)/' \
+    "$fixture/lib/keeper/hitl_summary_worker.ml" \
+    >"$fixture/lib/keeper/hitl_summary_worker.ml.tmp"
+  mv \
+    "$fixture/lib/keeper/hitl_summary_worker.ml.tmp" \
+    "$fixture/lib/keeper/hitl_summary_worker.ml"
+  if HITL_EXACT_BOUNDARY_ROOT="$fixture" "$0" --check >/dev/null 2>&1; then
+    fail "self-test accepted an unguarded production before_dispatch callback"
+  fi
+  cp "$WORKER" "$fixture/lib/keeper/hitl_summary_worker.ml"
+
+  sed \
+    's/~before_advance:guarded_before_advance/~before_advance:(before_advance ~queue_writers prepared.entry)/' \
+    "$fixture/lib/keeper/hitl_summary_worker.ml" \
+    >"$fixture/lib/keeper/hitl_summary_worker.ml.tmp"
+  mv \
+    "$fixture/lib/keeper/hitl_summary_worker.ml.tmp" \
+    "$fixture/lib/keeper/hitl_summary_worker.ml"
+  if HITL_EXACT_BOUNDARY_ROOT="$fixture" "$0" --check >/dev/null 2>&1; then
+    fail "self-test accepted an unguarded production before_advance callback"
+  fi
+  cp "$WORKER" "$fixture/lib/keeper/hitl_summary_worker.ml"
 
   printf 'let _ = fail_summary_exact_attempt_before_dispatch\n' \
     >"$fixture/lib/keeper/retired_exact_failure.ml"

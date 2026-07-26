@@ -1,13 +1,19 @@
 (** Canonical, fresh-state-only Memory OS persistence.
 
-    A store has one authority:
+    HEAD is the sole mutable authority:
 
-    {v HEAD -> immutable commit record -> immutable manifest
-             -> immutable facts/episode objects v}
+    {v HEAD -> immutable commit -> immutable manifest
+             -> immutable facts and episode objects v}
 
-    Immutable object presence is never authority.  The implementation does not
-    enumerate objects, read legacy Memory OS files, migrate old rows, or retry a
-    stale HEAD publication. *)
+    Only objects reachable through the current HEAD have meaning. Every
+    [snapshot], [prepared_commit], [commit_receipt], and
+    [pending_publication] carries an opaque runtime store binding. Passing a
+    value to a different store instance fails closed.
+
+    The winning genesis publication creates an opaque persisted store
+    identifier. Every later HEAD and commit preserves that exact identifier,
+    which distinguishes independently created stores and participates in every
+    commit receipt commitment. *)
 
 module Sha256 : sig
   type t
@@ -16,83 +22,75 @@ module Sha256 : sig
   val to_string : t -> string
 end
 
-type artifact_kind =
-  | Fact_object
-  | Episode_object
-  | Manifest_object
-  | Commit_record_object
-
-type immutable_ref
-
-val immutable_ref_kind : immutable_ref -> artifact_kind
-val immutable_ref_leaf : immutable_ref -> string
-val immutable_ref_sha256 : immutable_ref -> Sha256.t
-val immutable_ref_byte_count : immutable_ref -> int
-
 type state =
   { facts : Keeper_memory_os_types.fact list
   ; episodes : Keeper_memory_os_types.episode list
   }
 
-type 'a observation =
-  { value : 'a
-  ; settlement_error : Fs_compat.private_jsonl_transaction_error option
-  }
-
-type error =
-  | Invalid_layout of string
-  | Root_binding_changed
-  | Invalid_domain_value of string
-  | Conflicting_operation of
-      { operation_id : string
-      ; committed_payload_sha256 : Sha256.t
-      ; requested_payload_sha256 : Sha256.t
-      }
-  | Store_open_failed of
-      { path : string
-      ; exception_ : exn
-      ; backtrace : Printexc.raw_backtrace
-      }
-  | Immutable_create_failed of
-      artifact_kind * Fs_compat.capability_write_error
-  | Immutable_read_failed of
-      immutable_ref * exn * Printexc.raw_backtrace
-  | Immutable_digest_mismatch of immutable_ref
-  | Invalid_store_json of
-      { artifact : string
-      ; detail : string
-      }
-  | Head_busy of { lock_path : string }
-  | Head_conflict of
-      { expected : string
-      ; actual : string
-      }
-  | Head_publication_indeterminate of
-      Fs_compat.private_jsonl_transaction_error
-  | Head_transaction_failed of
-      Fs_compat.private_jsonl_transaction_error
-
 type t
 type snapshot
 type prepared_commit
 type commit_receipt
+type pending_publication
+type settlement_warning
+type error
 
+(** [prepare] performs a final live HEAD revalidation against [expected].
+    [Stale_expected current] reports the authoritative snapshot observed when
+    that exact cursor check fails.
+
+    [Current_commit_replay] is returned only when that final revalidation still
+    identifies the exact commit authoritative in [expected], and that commit
+    has the same operation identifier and exact state digest. Earlier commits
+    are not inspected and no broader execute-once guarantee is implied.
+    Reusing that current operation identifier with a different state is an
+    error. *)
 type prepare_outcome =
   | Prepared of prepared_commit
-  | Already_committed of commit_receipt
+  | Current_commit_replay of commit_receipt
+  | Stale_expected of snapshot
 
-val with_open :
-  fs:Eio.Fs.dir_ty Eio.Path.t ->
-  root_path:string ->
+(** Publication outcomes are effect-first.
+
+    [Committed] includes a publication whose authoritative effect was proven
+    even when later resource settlement produced warnings. [Stale current]
+    proves that this call did not publish and carries the authoritative
+    snapshot observed by the failed compare-and-swap. [Indeterminate] means
+    publication may have occurred; callers must pass the pending value to
+    [settle] and must not dispatch [publish] again. Any [Error] returned by
+    [publish] means this call did not publish HEAD. *)
+type publish_outcome =
+  | Committed of commit_receipt
+  | Stale of snapshot
+  | Indeterminate of pending_publication
+
+(** [Settled_not_published] is returned only when the previous authority is
+    still proven current. A different later authority cannot by itself prove
+    whether the pending publication occurred, so it remains
+    [Still_indeterminate]. An [Error] from [settle] also leaves the original
+    pending publication unresolved. Only [settle] may be retried with that
+    pending value; [publish] must not be dispatched again. *)
+type settle_outcome =
+  | Settled_committed of commit_receipt
+  | Settled_not_published of snapshot
+  | Still_indeterminate of pending_publication
+
+(** Open a store below an already-authorized private root capability. The
+    callback delimits the lifetime of the open store resources. Values are not
+    generatively typed: the implementation embeds an opaque runtime binding and
+    rejects values produced by any other store instance. *)
+val with_store :
+  secure_random:Eio.Flow.source_ty Eio.Resource.t ->
+  root:Eio.Fs.dir_ty Eio.Path.t ->
   owner_id:string ->
   (t -> ('a, error) result) ->
   ('a, error) result
 
-val load : t -> (snapshot observation, error) result
+val load : t -> (snapshot, error) result
 
 val snapshot_state : snapshot -> state
-val snapshot_sequence : snapshot -> int64
-val snapshot_head_commit : snapshot -> immutable_ref option
+val snapshot_generation : snapshot -> int64
+val snapshot_settlement_warnings : snapshot -> settlement_warning list
 
 val prepare :
   t ->
@@ -104,12 +102,37 @@ val prepare :
 val publish :
   t ->
   prepared_commit ->
-  (commit_receipt observation, error) result
+  (publish_outcome, error) result
+
+val settle :
+  t ->
+  pending_publication ->
+  (settle_outcome, error) result
 
 val committed_snapshot : commit_receipt -> snapshot
+
+(** A receipt identifier is the domain-separated SHA-256 digest of the
+    canonical commit envelope: schema, persisted store identifier, owner,
+    generation, operation identifier, exact manifest reference, and state
+    digest. The envelope contains no parent commit reference. The receipt proves
+    the exact commit identity that was authoritative when publication was
+    established; it proves neither ancestry nor that the commit remains current
+    after a later publication. *)
 val commit_receipt_id : commit_receipt -> Sha256.t
 val commit_receipt_operation_id : commit_receipt -> string
-val commit_receipt_payload_sha256 : commit_receipt -> Sha256.t
-val commit_receipt_sequence : commit_receipt -> int64
+val commit_receipt_state_sha256 : commit_receipt -> Sha256.t
+val commit_receipt_generation : commit_receipt -> int64
+val commit_receipt_settlement_warnings :
+  commit_receipt ->
+  settlement_warning list
 
+val pending_publication_operation_id : pending_publication -> string
+val pending_publication_generation : pending_publication -> int64
+val pending_publication_receipt_id : pending_publication -> Sha256.t
+val pending_publication_settlement_warnings :
+  pending_publication ->
+  settlement_warning list
+
+val settlement_warning_to_string : settlement_warning -> string
+val error_settlement_warnings : error -> settlement_warning list
 val error_to_string : error -> string

@@ -121,8 +121,8 @@ type error =
   ; settlement_warnings : settlement_warning list
   }
 
-let make_error ?(settlement_warnings = []) kind =
-  { kind; settlement_warnings }
+let make_error ?(settlement_warnings = []) (kind : error_kind) =
+  ({ kind; settlement_warnings } : error)
 ;;
 
 let prepend_warnings warnings (error : error) =
@@ -425,7 +425,7 @@ let settlement_warning_to_string = function
 
 let error_settlement_warnings (value : error) = value.settlement_warnings
 
-let error_to_string value =
+let error_to_string (value : error) =
   match value.kind with
   | Invalid_layout detail ->
     "invalid Memory OS store layout: " ^ detail
@@ -607,7 +607,7 @@ let immutable_ref_of_json json =
   then Error "immutable byte_count must be positive"
   else if Int64.compare byte_count max_immutable_bytes > 0
   then Error "immutable byte_count exceeds the store maximum"
-  else Ok { kind; leaf; sha256 = digest; byte_count }
+  else Ok ({ kind; leaf; sha256 = digest; byte_count } : immutable_ref)
 ;;
 
 let validate_schema expected fields =
@@ -654,7 +654,7 @@ let head_record_of_json json =
   in
   if commit_ref.kind <> Commit_object
   then Error "HEAD commit ref has the wrong kind"
-  else Ok { store_id; owner_id; generation; commit_ref }
+  else Ok ({ store_id; owner_id; generation; commit_ref } : head_record)
 ;;
 
 let facts_object_to_json (value : facts_object) =
@@ -745,7 +745,7 @@ let validate_fact (fact : Types.fact) =
     | Some _ | None -> Ok ()
 ;;
 
-let validate_episode episode =
+let validate_episode (episode : Types.episode) =
   let optional_finite = function
     | None -> true
     | Some value -> finite value
@@ -805,7 +805,7 @@ let facts_object_of_json json =
   let* () =
     validate_persisted_identity ~store_id ~owner_id ~generation
   in
-  Ok { store_id; owner_id; generation; facts }
+  Ok ({ store_id; owner_id; generation; facts } : facts_object)
 ;;
 
 let episode_object_of_json json =
@@ -823,7 +823,7 @@ let episode_object_of_json json =
   let* () =
     validate_persisted_identity ~store_id ~owner_id ~generation
   in
-  Ok { store_id; owner_id; generation; episode }
+  Ok ({ store_id; owner_id; generation; episode } : episode_object)
 ;;
 
 let manifest_of_json json =
@@ -858,12 +858,13 @@ let manifest_of_json json =
   then Error "manifest episode ref has the wrong kind"
   else
     Ok
-      { store_id
-      ; owner_id
-      ; generation
-      ; facts_ref
-      ; episode_refs
-      }
+      ({ store_id
+       ; owner_id
+       ; generation
+       ; facts_ref
+       ; episode_refs
+       }
+       : manifest)
 ;;
 
 let commit_record_of_json json =
@@ -909,7 +910,7 @@ let commit_record_of_json json =
   else if manifest_ref.kind <> Manifest_object
   then Error "commit manifest ref has the wrong kind"
   else
-    let value =
+    let value : commit_record =
       { store_id
       ; owner_id
       ; generation
@@ -932,7 +933,7 @@ let state_to_json (value : state) =
     ]
 ;;
 
-let state_digest value =
+let state_digest (value : state) =
   state_to_json value |> canonical_json |> hash_domain "state"
 ;;
 
@@ -1001,13 +1002,13 @@ let warnings_of_head values =
   List.map (fun value -> Head_settlement_warning value) values
 ;;
 
-let warnings_of_exact reference values =
+let warnings_of_exact (reference : immutable_ref) values =
   List.map
     (fun value -> Immutable_settlement_warning (reference, value))
     values
 ;;
 
-let read_object_raw store reference =
+let read_object_raw (store : t) (reference : immutable_ref) =
   match
     Exact_read.read
       ~parent:store.root
@@ -1038,14 +1039,20 @@ let read_object_raw store reference =
     else Ok (raw, warnings)
 ;;
 
-let read_object store reference ~artifact ~decode ~encode =
+let read_object
+      (store : t)
+      (reference : immutable_ref)
+      ~artifact
+      ~decode
+      ~encode
+  =
   let* raw, warnings = read_object_raw store reference in
   match decode_canonical ~artifact ~decode ~encode raw with
   | Ok value -> Ok (value, warnings)
   | Error error -> Error (prepend_warnings warnings error)
 ;;
 
-let random_token store purpose =
+let random_token (store : t) purpose =
   try
     let entropy = Cstruct.create 32 in
     Eio.Flow.read_exact store.secure_random entropy;
@@ -1062,7 +1069,7 @@ let random_token store purpose =
          (Entropy_source_failed { purpose; exception_; backtrace }))
 ;;
 
-let fresh_leaf store kind =
+let fresh_leaf (store : t) (kind : artifact_kind) =
   let purpose = "leaf/" ^ artifact_kind_token kind in
   let* token = random_token store purpose in
   Ok
@@ -1073,7 +1080,7 @@ let fresh_leaf store kind =
      ^ ".json")
 ;;
 
-let create_raw_object store kind raw =
+let create_raw_object (store : t) (kind : artifact_kind) raw =
   let byte_count = Int64.of_int (String.length raw) in
   if
     Int64.compare byte_count 0L <= 0
@@ -1085,7 +1092,7 @@ let create_raw_object store kind raw =
             { kind; byte_count; maximum = max_immutable_bytes }))
   else
     let* leaf = fresh_leaf store kind in
-    let reference =
+    let reference : immutable_ref =
       { kind; leaf; sha256 = sha256 raw; byte_count }
     in
     match
@@ -1102,7 +1109,7 @@ let create_raw_object store kind raw =
            (Immutable_create_failed { kind; leaf; failure }))
 ;;
 
-let create_object store kind encode value =
+let create_object (store : t) (kind : artifact_kind) encode value =
   create_raw_object store kind (canonical_json (encode value))
 ;;
 
@@ -1113,22 +1120,23 @@ let same_head_authority (left : snapshot) (right : snapshot) =
   && left.head_row = right.head_row
 ;;
 
-let empty_snapshot binding head_snapshot =
-  { binding
-  ; cursor = Head.snapshot_cursor head_snapshot
-  ; head_row = None
-  ; store_id = None
-  ; generation = 0L
-  ; commit_ref = None
-  ; commit = None
-  ; manifest_ref = None
-  ; facts_ref = None
-  ; episode_objects = []
-  ; state = { facts = []; episodes = [] }
-  ; settlement_warnings =
-      warnings_of_head
-        (Head.snapshot_settlement_warnings head_snapshot)
-  }
+let empty_snapshot (binding : binding) (head_snapshot : Head.snapshot) =
+  ({ binding
+   ; cursor = Head.snapshot_cursor head_snapshot
+   ; head_row = None
+   ; store_id = None
+   ; generation = 0L
+   ; commit_ref = None
+   ; commit = None
+   ; manifest_ref = None
+   ; facts_ref = None
+   ; episode_objects = []
+   ; state = { facts = []; episodes = [] }
+   ; settlement_warnings =
+       warnings_of_head
+         (Head.snapshot_settlement_warnings head_snapshot)
+   }
+   : snapshot)
 ;;
 
 let load_from_head (store : t) (head_snapshot : Head.snapshot) =
@@ -1138,7 +1146,7 @@ let load_from_head (store : t) (head_snapshot : Head.snapshot) =
   match Head.snapshot_row head_snapshot with
   | None -> Ok (empty_snapshot store.binding head_snapshot)
   | Some row ->
-    let* head =
+    let* (head : head_record) =
       head_of_row row |> with_prior_warnings head_warnings
     in
     if not (String.equal head.owner_id store.owner_id)
@@ -1150,7 +1158,7 @@ let load_from_head (store : t) (head_snapshot : Head.snapshot) =
               "HEAD owner_id does not match the opened owner"))
     else
       let commit_artifact = "commit:" ^ head.commit_ref.leaf in
-      let* commit, commit_warnings =
+      let* ((commit : commit_record), commit_warnings) =
         read_object
           store
           head.commit_ref
@@ -1172,7 +1180,7 @@ let load_from_head (store : t) (head_snapshot : Head.snapshot) =
         |> with_prior_warnings warnings
       in
       let manifest_artifact = "manifest:" ^ commit.manifest_ref.leaf in
-      let* manifest, manifest_warnings =
+      let* ((manifest : manifest), manifest_warnings) =
         read_object
           store
           commit.manifest_ref
@@ -1194,7 +1202,7 @@ let load_from_head (store : t) (head_snapshot : Head.snapshot) =
         |> with_prior_warnings warnings
       in
       let facts_artifact = "facts:" ^ manifest.facts_ref.leaf in
-      let* facts_object, facts_warnings =
+      let* ((facts_object : facts_object), facts_warnings) =
         read_object
           store
           manifest.facts_ref
@@ -1215,12 +1223,17 @@ let load_from_head (store : t) (head_snapshot : Head.snapshot) =
           ~generation:facts_object.generation
         |> with_prior_warnings warnings
       in
-      let rec load_episodes references values objects warnings =
+      let rec load_episodes
+        (references : immutable_ref list)
+        (values : Types.episode list)
+        (objects : (immutable_ref * Types.episode) list)
+        (warnings : settlement_warning list)
+        =
         match references with
         | [] -> Ok (List.rev values, List.rev objects, warnings)
-        | reference :: rest ->
+        | (reference : immutable_ref) :: rest ->
           let artifact = "episode:" ^ reference.leaf in
-          let* episode_object, object_warnings =
+          let* ((episode_object : episode_object), object_warnings) =
             read_object
               store
               reference
@@ -1250,7 +1263,7 @@ let load_from_head (store : t) (head_snapshot : Head.snapshot) =
       let* episodes, episode_objects, warnings =
         load_episodes manifest.episode_refs [] [] warnings
       in
-      let state = { facts = facts_object.facts; episodes } in
+      let state : state = { facts = facts_object.facts; episodes } in
       let* () =
         match validate_state state with
         | Ok () -> Ok ()
@@ -1273,19 +1286,20 @@ let load_from_head (store : t) (head_snapshot : Head.snapshot) =
                 }))
       else
         Ok
-          { binding = store.binding
-          ; cursor = Head.snapshot_cursor head_snapshot
-          ; head_row = Some row
-          ; store_id = Some head.store_id
-          ; generation = head.generation
-          ; commit_ref = Some head.commit_ref
-          ; commit = Some commit
-          ; manifest_ref = Some commit.manifest_ref
-          ; facts_ref = Some manifest.facts_ref
-          ; episode_objects
-          ; state
-          ; settlement_warnings = warnings
-          }
+          ({ binding = store.binding
+           ; cursor = Head.snapshot_cursor head_snapshot
+           ; head_row = Some row
+           ; store_id = Some head.store_id
+           ; generation = head.generation
+           ; commit_ref = Some head.commit_ref
+           ; commit = Some commit
+           ; manifest_ref = Some commit.manifest_ref
+           ; facts_ref = Some manifest.facts_ref
+           ; episode_objects
+           ; state
+           ; settlement_warnings = warnings
+           }
+           : snapshot)
 ;;
 
 let check_active (store : t) =
@@ -1310,10 +1324,10 @@ let with_store ~secure_random ~root ~owner_id fn =
   then Error (make_error (Invalid_layout "owner_id must be non-empty"))
   else
     Eio.Switch.run (fun sw ->
-      let binding = { active = Atomic.make true } in
+      let binding : binding = { active = Atomic.make true } in
       Eio.Switch.on_release sw (fun () ->
         Atomic.set binding.active false);
-      fn { binding; secure_random; root; owner_id })
+      fn ({ binding; secure_random; root; owner_id } : t))
 ;;
 
 let load store =
@@ -1388,26 +1402,29 @@ let receipt_of_snapshot (snapshot : snapshot) =
   | None -> None
   | Some commit ->
     Some
-      { receipt_id = commit.receipt_id
-      ; operation_id = commit.operation_id
-      ; state_sha256 = commit.state_sha256
-      ; generation = commit.generation
-      ; snapshot
-      ; settlement_warnings = snapshot.settlement_warnings
-      }
+      ({ receipt_id = commit.receipt_id
+       ; operation_id = commit.operation_id
+       ; state_sha256 = commit.state_sha256
+       ; generation = commit.generation
+       ; snapshot
+       ; settlement_warnings = snapshot.settlement_warnings
+       }
+       : commit_receipt)
 ;;
 
 let create_episode_objects
-      store
+      (store : t)
       ~store_id
       ~owner_id
       ~generation
-      episodes
+      (episodes : Types.episode list)
   =
   let rec loop objects = function
     | [] -> Ok (List.rev objects)
     | episode :: rest ->
-      let value = { store_id; owner_id; generation; episode } in
+      let value : episode_object =
+        { store_id; owner_id; generation; episode }
+      in
       let* reference =
         create_object store Episode_object episode_object_to_json value
       in
@@ -1445,7 +1462,7 @@ let prepare
              (Invalid_domain_value detail))
     in
     let requested_state_sha256 = state_digest state in
-    let* current = load store in
+    let* (current : snapshot) = load store in
     if not (same_head_authority expected current)
     then Ok (Stale_expected current)
     else
@@ -1491,7 +1508,7 @@ let prepare
             | None -> random_token store "store-id"
           in
           let generation = Int64.succ current.generation in
-          let facts_value =
+          let facts_value : facts_object =
             { store_id
             ; owner_id = store.owner_id
             ; generation
@@ -1515,7 +1532,7 @@ let prepare
               state.episodes
             |> with_prior_warnings current.settlement_warnings
           in
-          let manifest =
+          let manifest : manifest =
             { store_id
             ; owner_id = store.owner_id
             ; generation
@@ -1531,7 +1548,7 @@ let prepare
               manifest
             |> with_prior_warnings current.settlement_warnings
           in
-          let provisional_commit =
+          let provisional_commit : commit_record =
             { store_id
             ; owner_id = store.owner_id
             ; generation
@@ -1542,7 +1559,9 @@ let prepare
             }
           in
           let receipt_id = receipt_digest provisional_commit in
-          let commit = { provisional_commit with receipt_id } in
+          let commit : commit_record =
+            { provisional_commit with receipt_id }
+          in
           let* commit_ref =
             create_object
               store
@@ -1551,7 +1570,7 @@ let prepare
               commit
             |> with_prior_warnings current.settlement_warnings
           in
-          let head =
+          let head : head_record =
             { store_id
             ; owner_id = store.owner_id
             ; generation
@@ -1568,55 +1587,62 @@ let prepare
           else
             Ok
               (Prepared
-                 { binding = store.binding
-                 ; expected_cursor = current.cursor
-                 ; previous = current
-                 ; store_id
-                 ; generation
-                 ; commit_ref
-                 ; commit
-                 ; manifest_ref
-                 ; facts_ref
-                 ; episode_objects
-                 ; state
-                 ; operation_id
-                 ; state_sha256 = requested_state_sha256
-                 ; receipt_id
-                 ; head_row
-                 ; settlement_warnings =
-                     current.settlement_warnings
-                 })
+                 ({ binding = store.binding
+                  ; expected_cursor = current.cursor
+                  ; previous = current
+                  ; store_id
+                  ; generation
+                  ; commit_ref
+                  ; commit
+                  ; manifest_ref
+                  ; facts_ref
+                  ; episode_objects
+                  ; state
+                  ; operation_id
+                  ; state_sha256 = requested_state_sha256
+                  ; receipt_id
+                  ; head_row
+                  ; settlement_warnings =
+                      current.settlement_warnings
+                  }
+                  : prepared_commit))
 ;;
 
 let snapshot_of_prepared
       (prepared : prepared_commit)
-      cursor
-      warnings
+      (cursor : Head.cursor)
+      (warnings : settlement_warning list)
   =
-  { binding = prepared.binding
-  ; cursor
-  ; head_row = Some prepared.head_row
-  ; store_id = Some prepared.store_id
-  ; generation = prepared.generation
-  ; commit_ref = Some prepared.commit_ref
-  ; commit = Some prepared.commit
-  ; manifest_ref = Some prepared.manifest_ref
-  ; facts_ref = Some prepared.facts_ref
-  ; episode_objects = prepared.episode_objects
-  ; state = prepared.state
-  ; settlement_warnings = warnings
-  }
+  ({ binding = prepared.binding
+   ; cursor
+   ; head_row = Some prepared.head_row
+   ; store_id = Some prepared.store_id
+   ; generation = prepared.generation
+   ; commit_ref = Some prepared.commit_ref
+   ; commit = Some prepared.commit
+   ; manifest_ref = Some prepared.manifest_ref
+   ; facts_ref = Some prepared.facts_ref
+   ; episode_objects = prepared.episode_objects
+   ; state = prepared.state
+   ; settlement_warnings = warnings
+   }
+   : snapshot)
 ;;
 
-let receipt_of_prepared prepared cursor warnings =
+let receipt_of_prepared
+      (prepared : prepared_commit)
+      (cursor : Head.cursor)
+      (warnings : settlement_warning list)
+  =
   let snapshot = snapshot_of_prepared prepared cursor warnings in
-  { receipt_id = prepared.receipt_id
-  ; operation_id = prepared.operation_id
-  ; state_sha256 = prepared.state_sha256
-  ; generation = prepared.generation
-  ; snapshot
-  ; settlement_warnings = warnings
-  }
+  ({ receipt_id = prepared.receipt_id
+   ; operation_id = prepared.operation_id
+   ; state_sha256 = prepared.state_sha256
+   ; generation = prepared.generation
+   ; snapshot
+   ; settlement_warnings = warnings
+   }
+   : commit_receipt)
 ;;
 
 let add_snapshot_warnings warnings (snapshot : snapshot) =

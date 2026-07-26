@@ -2598,16 +2598,21 @@ let read_existing_current_head ~root ~owner_id =
              in
              Ok (Some loaded)
          in
+         let verified_warnings =
+           match verified with
+           | None -> opening_warnings
+           | Some loaded -> loaded.warnings
+         in
          let* final_identity =
            read_store_identity ~root ~owner_id
-           |> with_prior_warnings opening_warnings
+           |> with_prior_warnings verified_warnings
          in
          let* final_identity_warnings =
            match final_identity with
            | None ->
              Error
                (make_error
-                  ~settlement_warnings:opening_warnings
+                  ~settlement_warnings:verified_warnings
                   (Invalid_store_identity
                      "identity disappeared during verified read"))
            | Some (final, warnings) ->
@@ -2617,36 +2622,35 @@ let read_existing_current_head ~root ~owner_id =
                Error
                  (make_error
                     ~settlement_warnings:
-                      (opening_warnings @ warnings)
+                      (verified_warnings @ warnings)
                     (Invalid_store_identity
                        "identity changed during verified read"))
          in
          let* final_row, final_head_warnings =
            read_existing_head_row ~root
            |> with_prior_warnings
-                (opening_warnings @ final_identity_warnings)
+                (verified_warnings @ final_identity_warnings)
          in
          if first_row <> final_row
          then
            Error
-             (make_error
-                ~settlement_warnings:
-                  (opening_warnings
-                   @ final_identity_warnings
-                   @ final_head_warnings)
-                Current_head_changed_during_read)
+              (make_error
+                 ~settlement_warnings:
+                   (verified_warnings
+                    @ final_identity_warnings
+                    @ final_head_warnings)
+                 Current_head_changed_during_read)
          else
-           let current_head, verified_warnings =
+           let current_head =
              match verified with
-             | None -> Empty, opening_warnings
+             | None -> Empty
              | Some loaded ->
-               ( Present
-                   { receipt_id = loaded.commit.receipt_id
-                   ; operation_id = loaded.commit.operation_id
-                   ; state_digest = loaded.commit.state_sha256
-                   ; generation = loaded.head.generation
-                   }
-               , loaded.warnings )
+               Present
+                 { receipt_id = loaded.commit.receipt_id
+                 ; operation_id = loaded.commit.operation_id
+                 ; state_digest = loaded.commit.state_sha256
+                 ; generation = loaded.head.generation
+                 }
            in
            Ok
              (Existing
@@ -3670,6 +3674,8 @@ module For_testing = struct
     | Store_identity_create_failed_error
     | Store_identity_read_failed_error
     | Invalid_store_identity_error
+    | Current_head_read_failed_error
+    | Current_head_changed_during_read_error
     | Invalid_publication_obligation_error
     | Publication_obligation_owner_mismatch_error
     | Publication_obligation_store_mismatch_error
@@ -3681,6 +3687,7 @@ module For_testing = struct
     | Head_indeterminate_warning_tag
     | Immutable_settlement_warning_tag
     | Store_identity_settlement_warning_tag
+    | Current_head_settlement_warning_tag
 
   let error_tag (value : error) =
     match value.kind with

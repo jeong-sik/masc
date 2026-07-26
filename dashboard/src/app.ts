@@ -280,7 +280,10 @@ export function App() {
     document.documentElement.setAttribute('data-theme', tweaksTheme.value === 'paper' ? 'paper' : '')
   }, [tweaksVolt.value, tweaksTheme.value])
 
-  const approvalsBadge = gateData.value?.approval_queue?.length ?? 0
+  const approvalsBadge =
+    gateData.value?.approval_queue_state?.state === 'ready'
+      ? gateData.value.approval_queue?.length
+      : undefined
 
   // Body grid columns. Desktop: nav rail (58px) + single content column. Mobile:
   // a single 1fr column — the nav becomes a fixed bottom tab bar (.v2-nav.is-mnav),

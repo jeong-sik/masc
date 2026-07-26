@@ -19,12 +19,14 @@ exception Exact_terminalization_persistence_failed of string
 type execution_boundary =
   | Executed
   | Identity_unbound_blocked
+  | Exact_rejection_blocked of Keeper_approval_queue.exact_attempt_rejection
   | Deferred_unregistered
 
 type finish_outcome =
   | Conclusive_terminalization
   | Terminalization_persistence_uncertain
   | Terminalization_identity_unbound
+  | Terminalization_rejected
   | Owner_unregistered_deferred
 
 val spawn

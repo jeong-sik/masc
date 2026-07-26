@@ -14,16 +14,10 @@ let dashboard_json ~base_path ~limit:_ ~offset:_ ~status_filter:_ =
       Keeper_approval_queue.list_pending_dashboard_json_for_workspace
         ~base_path
     with
-    | Ok json -> json, `Assoc [ "state", `String "ready" ]
+    | Ok items ->
+      `List items, Keeper_approval_queue.approval_queue_ready_state_json
     | Error error ->
-      ( `Null
-      , `Assoc
-          [ "state", `String "unavailable"
-          ; "code", `String "reset_required"
-          ; ( "operator_detail"
-            , `String
-                (Keeper_approval_queue.storage_error_to_string error) )
-          ] )
+      `Null, Keeper_approval_queue.approval_queue_unavailable_state_json error
   in
   let recent_resolved =
     Keeper_approval_queue.list_recent_resolved_json

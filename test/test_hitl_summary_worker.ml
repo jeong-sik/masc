@@ -158,6 +158,8 @@ let require_executed = function
   | Worker.Executed -> ()
   | Worker.Identity_unbound_blocked ->
     fail "registered HITL exact-flow owner stopped before binding an identity"
+  | Worker.Exact_rejection_blocked _ ->
+    fail "registered HITL exact-flow owner hit a deterministic exact rejection"
   | Worker.Deferred_unregistered ->
     fail "registered HITL exact-flow owner was unexpectedly deferred"
 ;;
@@ -535,6 +537,7 @@ let test_cancellation_between_candidates_terminalizes_released_identity () =
          | exception Eio.Cancel.Cancelled observed -> observed
          | Worker.Executed
          | Worker.Identity_unbound_blocked
+         | Worker.Exact_rejection_blocked _
          | Worker.Deferred_unregistered ->
            fail "between-candidate cancellation did not leave the flow"
        in
@@ -629,6 +632,8 @@ let test_all_candidates_rejected_before_network () =
         | Worker.Identity_unbound_blocked -> ()
         | Worker.Executed ->
           fail "identityless candidate exhaustion reported terminal success"
+        | Worker.Exact_rejection_blocked _ ->
+          fail "identityless candidate exhaustion reported an exact rejection"
         | Worker.Deferred_unregistered ->
           fail "registered owner was reported as unregistered");
        check
@@ -809,6 +814,110 @@ let test_visible_completion_blocks_gate_delivery () =
         | _ -> fail "restart skipped the oldest finalization barrier"))
 ;;
 
+let test_completion_identity_conflict_stays_deterministic () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-completion-identity-conflict" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       let server =
+         F.start_server
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "approve")))
+       in
+       publish_lane
+         [ "hitl-completion-identity-conflict" ]
+         (F.resolver_snapshot
+            ~source:"hitl-completion-identity-conflict"
+            [ { id = "hitl-completion-identity-conflict"
+              ; base_url = server.base_url
+              }
+            ]);
+       let entry = pending_entry ~base_path () in
+       let replacement_call_id = "replacement-call" in
+       let replace_bound_identity () =
+         match Q.get_pending_entry ~id:entry.id with
+         | Some { exact_attempt = Q.Exact_bound binding; _ } ->
+           let transition_exn operation = function
+             | Ok { Q.write_outcome = Q.Fsync_completed; _ } -> ()
+             | Ok { Q.write_outcome = Q.Visible_sync_unconfirmed detail; _ } ->
+               failf "%s was not durable: %s" operation detail
+             | Error error ->
+               failf
+                 "%s failed: %s"
+                 operation
+                 (Q.exact_attempt_error_to_string error)
+           in
+           Q.release_summary_exact_attempt_before_dispatch
+             ~id:entry.id
+             ~input_hash:entry.input_hash
+             ~sequence:entry.sequence
+             ~slot_id:binding.slot_id
+             ~call_id:binding.call_id
+             ~plan_fingerprint:binding.plan_fingerprint
+             ~request_body_sha256:binding.request_body_sha256
+           |> transition_exn "release original identity";
+           Q.bind_summary_exact_attempt
+             ~id:entry.id
+             ~input_hash:entry.input_hash
+             ~sequence:entry.sequence
+             ~slot_id:"replacement-slot"
+             ~call_id:replacement_call_id
+             ~plan_fingerprint:(String.make 64 'a')
+             ~request_body_sha256:(String.make 64 'b')
+           |> transition_exn "bind replacement identity"
+         | Some { exact_attempt = Q.Exact_unbound; _ } ->
+           fail "after_bind observed an unbound exact attempt"
+         | None -> fail "after_bind lost the pending approval"
+       in
+       let delivered = ref false in
+       (match
+          Worker.For_testing.execute_prepared_flow_with_writers
+            ~after_bind:replace_bound_identity
+            ~net
+            ~clock
+            ~on_summary:(fun _ -> delivered := true)
+            (prepare_exn entry)
+        with
+        | Worker.Exact_rejection_blocked
+            (Q.Exact_attempt_identity_conflict binding) ->
+          check string
+            "typed replacement identity survives"
+            replacement_call_id
+            binding.call_id
+        | Worker.Exact_rejection_blocked rejection ->
+          failf
+            "wrong deterministic rejection: %s"
+            (Q.exact_attempt_error_to_string
+               (Q.Exact_attempt_rejected rejection))
+        | Worker.Executed ->
+          fail "deterministic completion conflict reported success"
+        | Worker.Identity_unbound_blocked ->
+          fail "deterministic completion conflict lost its bound identity"
+        | Worker.Deferred_unregistered ->
+          fail "deterministic completion conflict lost its owner generation");
+       check bool "rejected completion delivered no summary" false !delivered;
+       match Q.get_pending_entry ~id:entry.id with
+       | Some
+           { exact_attempt =
+               Q.Exact_bound { call_id; status = Q.Exact_dispatch_uncertain; _ }
+           ; summary_status = Q.Summary_pending
+           ; summary_attempt_disposition = Q.Summary_attempt_in_flight
+           ; _
+           } ->
+         check string
+           "deterministic conflict retained replacement identity"
+           replacement_call_id
+           call_id
+       | _ ->
+         fail "deterministic completion conflict mutated durable uncertainty state")
+;;
+
 let test_flow_execution_failure_quarantines_and_blocks_owner () =
   run_eio @@ fun ~sw ~net ~clock ->
   with_temp_dir "hitl-flow-failure" @@ fun base_path ->
@@ -945,6 +1054,8 @@ let test_owner_replacement_during_post_defers_terminal_mutation () =
         | Worker.Deferred_unregistered -> ()
         | Worker.Identity_unbound_blocked ->
           fail "stale HITL owner was misclassified as identity-unbound"
+        | Worker.Exact_rejection_blocked _ ->
+          fail "stale HITL owner was misclassified as an exact rejection"
         | Worker.Executed ->
           fail "stale HITL owner crossed the terminal generation fence");
        check int "real POST crossed the replacement hook once" 1 (F.post_count server);
@@ -1023,6 +1134,7 @@ let test_manual_resolution_race_is_conclusive () =
            | Some Worker.Conclusive_terminalization -> true
            | Some Worker.Terminalization_persistence_uncertain
            | Some Worker.Terminalization_identity_unbound
+           | Some Worker.Terminalization_rejected
            | Some Worker.Owner_unregistered_deferred
            | None -> false);
        check bool
@@ -1157,6 +1269,7 @@ let test_spawn_preserves_cancellation_origin_backtrace () =
                 | Some Worker.Terminalization_identity_unbound -> true
                 | Some Worker.Conclusive_terminalization
                 | Some Worker.Terminalization_persistence_uncertain
+                | Some Worker.Terminalization_rejected
                 | Some Worker.Owner_unregistered_deferred
                 | None -> false);
             check int
@@ -1352,6 +1465,7 @@ let test_bound_cancellation_cleanup_uncertainty_preserves_origin () =
                 | Some Worker.Terminalization_persistence_uncertain -> true
                 | Some Worker.Conclusive_terminalization
                 | Some Worker.Terminalization_identity_unbound
+                | Some Worker.Terminalization_rejected
                 | Some Worker.Owner_unregistered_deferred
                 | None -> false);
             check int
@@ -1719,6 +1833,8 @@ let test_shutdown_drains_inflight_worker_then_retires () =
         | `Returned Worker.Executed -> ()
         | `Returned Worker.Identity_unbound_blocked ->
           fail "bound HITL settlement lost its attempt identity"
+        | `Returned (Worker.Exact_rejection_blocked _) ->
+          fail "bound HITL settlement hit a deterministic exact rejection"
         | `Returned Worker.Deferred_unregistered ->
           fail "Draining generation rejected its bound HITL settlement"
         | `Raised exn -> raise exn);
@@ -1756,6 +1872,8 @@ let test_shutdown_drains_inflight_worker_then_retires () =
         | Worker.Deferred_unregistered -> ()
         | Worker.Identity_unbound_blocked ->
           fail "Retired HITL generation was misclassified as identity-unbound"
+        | Worker.Exact_rejection_blocked _ ->
+          fail "Retired HITL generation was misclassified as an exact rejection"
         | Worker.Executed ->
           fail "Retired HITL generation redispatched stale work");
        check int "Retired retry dispatched nothing" 1 (F.post_count server);
@@ -1815,6 +1933,10 @@ let () =
             "visible completion blocks Gate delivery"
             `Quick
             test_visible_completion_blocks_gate_delivery
+        ; test_case
+            "completion identity conflict stays deterministic"
+            `Quick
+            test_completion_identity_conflict_stays_deterministic
         ; test_case
             "flow execution failure quarantines and blocks owner"
             `Quick

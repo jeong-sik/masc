@@ -134,7 +134,10 @@ export type KeeperApprovalQueueState =
   | {
       state: 'unavailable'
       code: 'reset_required'
+      title: string
       operator_detail: string
+      severity: 'bad'
+      icon: '!'
     }
 
 export interface KeeperResolvedApprovalItem {
@@ -177,7 +180,7 @@ export interface GateModeStatus {
 export interface DashboardGateResponse {
   generated_at?: string
   note?: string
-  approval_queue: KeeperApprovalQueueItem[]
+  approval_queue: KeeperApprovalQueueItem[] | null
   approval_queue_state: KeeperApprovalQueueState
   recent_resolved?: KeeperResolvedApprovalItem[]
   approval_rules?: KeeperApprovalRule[]

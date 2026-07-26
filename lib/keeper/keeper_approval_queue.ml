@@ -104,6 +104,25 @@ let storage_error_to_string error =
   Printf.sprintf "%s: %s" error.path error.reason
 ;;
 
+let approval_queue_unavailable_title =
+  "Gate durable queue unavailable · runtime reset required"
+;;
+
+let approval_queue_unavailable_severity = "bad"
+let approval_queue_unavailable_icon = "!"
+let approval_queue_ready_state_json = `Assoc [ "state", `String "ready" ]
+
+let approval_queue_unavailable_state_json error =
+  `Assoc
+    [ "state", `String "unavailable"
+    ; "code", `String "reset_required"
+    ; "title", `String approval_queue_unavailable_title
+    ; "operator_detail", `String (storage_error_to_string error)
+    ; "severity", `String approval_queue_unavailable_severity
+    ; "icon", `String approval_queue_unavailable_icon
+    ]
+;;
+
 let exact_attempt_binding_to_string binding =
   let status =
     match binding.status with
@@ -3269,8 +3288,7 @@ let list_pending_dashboard_json_for_workspace ~base_path =
   |> Result.map (fun entries ->
     entries
     |> List.map (fun entry ->
-      `Assoc (pending_entry_json_fields ~include_input:true entry))
-    |> fun json -> `List json)
+      `Assoc (pending_entry_json_fields ~include_input:true entry)))
 ;;
 
 let pending_count_for_keeper ~keeper_name : int =

@@ -28,7 +28,8 @@ import { TransportBeacon } from '../transport-beacon'
 const DEAD_PHASES = new Set(['Overflowed', 'Crashed', 'Dead'])
 
 interface AttentionAgg {
-  approvals: number
+  approvals: number | null
+  approvalQueueState: NonNullable<typeof gateData.value>['approval_queue_state'] | null
   keepers: number
   dead: number
   stale: number
@@ -37,11 +38,22 @@ interface AttentionAgg {
 
 function computeAttention(): AttentionAgg {
   const ks = keepers.value
-  const approvals = gateData.value?.approval_queue?.length ?? 0
+  const approvalQueueState = gateData.value?.approval_queue_state ?? null
+  const approvals =
+    approvalQueueState?.state === 'ready'
+      ? gateData.value?.approval_queue?.length ?? null
+      : null
   const attKeepers = ks.filter((k) => k.needs_attention === true).length
   const dead = ks.filter((k) => !!k.lifecycle_phase && DEAD_PHASES.has(k.lifecycle_phase)).length
   const stale = staleKeepers.value.size
-  return { approvals, keepers: attKeepers, dead, stale, total: approvals + attKeepers + dead + stale }
+  return {
+    approvals,
+    approvalQueueState,
+    keepers: attKeepers,
+    dead,
+    stale,
+    total: (approvals ?? 0) + attKeepers + dead + stale,
+  }
 }
 
 function AttentionIndicatorV2() {
@@ -54,6 +66,25 @@ function AttentionIndicatorV2() {
   }, [open])
 
   const a = computeAttention()
+  if (a.approvalQueueState?.state === 'unavailable') {
+    const state = a.approvalQueueState
+    return html`
+      <button
+        class=${`v2-statchip attn ${state.severity}`}
+        onClick=${() => navigate('approvals')}
+        title=${state.operator_detail}
+      >${state.icon} ${state.title}</button>
+    `
+  }
+  if (a.approvalQueueState?.state !== 'ready' || a.approvals === null) {
+    return html`
+      <button
+        class="v2-statchip attn warn"
+        onClick=${() => navigate('approvals')}
+        title="Gate queue state has not loaded"
+      >? 승인 큐 확인 필요</button>
+    `
+  }
   if (!a.total) {
     return html`<span class="v2-statchip live" title="처리할 항목 없음">${'✓'} 정상</span>`
   }
@@ -62,7 +93,7 @@ function AttentionIndicatorV2() {
     { k: 'keepers', n: a.keepers, lbl: '주의 keeper', sev: 'warn', nav: 'monitoring' as const },
     { k: 'dead', n: a.dead, lbl: '죽음·넘침', sev: 'bad', nav: 'monitoring' as const },
     { k: 'stale', n: a.stale, lbl: 'stale 게이트', sev: 'warn', nav: 'connectors' as const },
-  ].filter((r) => r.n > 0)
+  ].filter((r) => r.n !== null && r.n > 0)
   const tone = a.approvals > 0 || a.dead > 0 ? 'bad' : 'warn'
   return html`
     <div class="attn-wrap" onClick=${(e: Event) => e.stopPropagation()}>

@@ -188,7 +188,7 @@ export function computeOverviewStats(keeperList: readonly Keeper[], taskList: re
 
 export interface OverviewDigest {
   /** Exact pending requests from the Gate queue SSOT. */
-  openGateRequests: number
+  openGateRequests: number | null
   /** Top goals by priority (highest first), up to 3. */
   topGoals: Goal[]
   /** Most urgent goal label for the "최우선 목표" KPI, or null when none. */
@@ -523,7 +523,7 @@ function goalPriorityClass(priority: number): 'high' | 'normal' | 'low' {
 }
 
 export function computeOverviewDigest(
-  openGateRequests: number,
+  openGateRequests: number | null,
   goalList: readonly Goal[],
   fusionList: readonly FusionRunRecord[],
   scheduledAutomation?: DashboardScheduledAutomation | null,
@@ -1057,12 +1057,35 @@ function OverviewKpi({
 
 // Cross-surface KPI row — overview.jsx:106-114. Seven cells, each a deep link into
 // its surface. Labels and `sub` separators are copied verbatim from the prototype.
-function OverviewKpiStrip({ stats, digest }: { stats: OverviewStats; digest: OverviewDigest }) {
+function OverviewKpiStrip({
+  stats,
+  digest,
+  approvalQueueState,
+}: {
+  stats: OverviewStats
+  digest: OverviewDigest
+  approvalQueueState: NonNullable<typeof gateData.value>['approval_queue_state'] | undefined
+}) {
   return html`
     <section class="ov-kpis v2-overview-kpis" aria-label="Cross-surface KPIs" data-testid="overview-kpis">
       <${OverviewKpi} label="실행 중 keeper" value=${String(stats.run)} sub=${` / ${stats.total}`} tone="ok" testId="kpi-run" onClick=${() => navigate('monitoring')} />
       <${OverviewKpi} label="주의 필요" value=${String(stats.att)} tone=${stats.att > 0 ? 'bad' : undefined} testId="kpi-att" onClick=${() => navigate('monitoring')} />
-      <${OverviewKpi} label="열린 Gate" value=${String(digest.openGateRequests)} tone=${digest.openGateRequests > 0 ? 'warn' : undefined} testId="kpi-approvals" onClick=${() => navigate('approvals')} />
+      ${approvalQueueState?.state === 'unavailable'
+        ? html`<${OverviewKpi}
+            label="열린 Gate"
+            value=${`${approvalQueueState.icon} ${approvalQueueState.title}`}
+            sub=${approvalQueueState.operator_detail}
+            tone=${approvalQueueState.severity}
+            testId="kpi-approvals"
+            onClick=${() => navigate('approvals')}
+          />`
+        : html`<${OverviewKpi}
+            label="열린 Gate"
+            value=${digest.openGateRequests === null ? '—' : String(digest.openGateRequests)}
+            tone=${digest.openGateRequests === null || digest.openGateRequests > 0 ? 'warn' : undefined}
+            testId="kpi-approvals"
+            onClick=${() => navigate('approvals')}
+          />`}
       <${OverviewKpi} label="최우선 목표" value=${digest.topGoalLabel ?? '—'} tone="volt" testId="kpi-top-goal" onClick=${() => navigate('workspace', { section: 'work' })} />
       <${OverviewKpi} label="활성 커넥터" value="—" testId="kpi-connectors" onClick=${() => navigate('connectors')} />
       <${OverviewKpi} label="예약 HITL" value="—" testId="kpi-schedule" onClick=${() => navigate('schedule')} />
@@ -1246,9 +1269,11 @@ function DomainCard({
 function OverviewDomainSection({
   stats,
   digest,
+  approvalQueueState,
 }: {
   stats: OverviewStats
   digest: OverviewDigest
+  approvalQueueState: NonNullable<typeof gateData.value>['approval_queue_state'] | undefined
 }) {
   const scheduleSummary = digest.scheduledAutomation
   const scheduleRunnerSummary = digest.scheduleRunner
@@ -1291,14 +1316,35 @@ function OverviewDomainSection({
       <!-- APPROVALS · overview.jsx:182-198 -->
       <${DomainCard}
         title="Gate · HITL"
-        count=${String(digest.openGateRequests)}
-        tone="warn"
+        count=${approvalQueueState?.state === 'unavailable'
+          ? approvalQueueState.icon
+          : digest.openGateRequests === null
+            ? null
+            : String(digest.openGateRequests)}
+        tone=${approvalQueueState?.state === 'unavailable'
+          ? approvalQueueState.severity
+          : digest.openGateRequests === null || digest.openGateRequests > 0
+            ? 'warn'
+            : 'ok'}
         linkLabel="Gate"
         nav=${{ tab: 'approvals' }}
         testId="domain-approvals"
       >
         <div class="ov-mini-list">
-          ${digest.openGateRequests > 0
+          ${approvalQueueState?.state === 'unavailable'
+            ? html`
+                <div
+                  class="ov-mini-row"
+                  data-testid="overview-approval-queue-unavailable"
+                  data-severity=${approvalQueueState.severity}
+                  title=${approvalQueueState.operator_detail}
+                >
+                  <span class="ov-mini-txt">${approvalQueueState.icon} ${approvalQueueState.title}</span>
+                </div>
+              `
+            : digest.openGateRequests === null
+              ? html`<div class="ov-mini-empty">Gate queue state not loaded</div>`
+            : digest.openGateRequests > 0
             ? html`
                 <div class="ov-mini-row">
                   <span class="inline-block size-1.5 rounded-full bg-warning"></span>
@@ -1447,7 +1493,11 @@ export function Overview() {
   const keeperList = keepers.value
   const goalList = goals.value
   const fusionList = fusionRuns.value
-  const openGateRequests = gateData.value?.approval_queue?.length ?? 0
+  const approvalQueueState = gateData.value?.approval_queue_state
+  const openGateRequests =
+    approvalQueueState?.state === 'ready'
+      ? gateData.value?.approval_queue?.length ?? null
+      : null
   const scheduledAutomation = toolsData.value?.scheduled_automation ?? null
   const scheduleRunnerStatus =
     overviewFullHealthResource.state.value.status === 'loaded'
@@ -1464,12 +1514,20 @@ export function Overview() {
     <main class="ov v2-overview-surface ss-surface text-text-primary" data-testid="overview-surface">
       <div class="ov-scroll v2-overview-scroll">
         <${OverviewHeader} />
-        <${OverviewKpiStrip} stats=${stats} digest=${digest} />
+        <${OverviewKpiStrip}
+          stats=${stats}
+          digest=${digest}
+          approvalQueueState=${approvalQueueState}
+        />
         <div class="ov-grid v2-overview-primary-grid" data-testid="overview-primary-grid">
           <${OverviewAttentionPanel} keeperList=${keeperList} />
           <${OverviewTelemetry} telemetry=${telemetry} />
         </div>
-        <${OverviewDomainSection} stats=${stats} digest=${digest} />
+        <${OverviewDomainSection}
+          stats=${stats}
+          digest=${digest}
+          approvalQueueState=${approvalQueueState}
+        />
       </div>
     </main>
   `

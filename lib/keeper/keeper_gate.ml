@@ -567,6 +567,11 @@ let rec spawn_claimed_auto_judge_entry_with
                  "Auto Judge owner drain withheld after persistence uncertainty \
                   approval=%s"
                  entry.id
+             | Hitl_summary_worker.Terminalization_rejected ->
+               Log.Keeper.warn
+                 ~keeper_name:entry.keeper_name
+                 "Auto Judge owner drain withheld after deterministic exact-attempt rejection approval=%s"
+                 entry.id
              | Hitl_summary_worker.Owner_unregistered_deferred ->
                Keeper_approval_queue.audit_approval_event
                  ~base_path:entry.audit_base_path

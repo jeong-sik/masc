@@ -196,12 +196,11 @@ function ApHistory({ items }: { items: KeeperResolvedApprovalItem[] }) {
 }
 
 function approvalDetailRows(item: KeeperApprovalQueueItem): Array<{ label: string; value: string }> {
-  const disposition =
-    item.summary_attempt_disposition?.code ?? 'contract_unavailable'
+  const disposition = item.summary_attempt_disposition.code
   const exact =
-    item.exact_attempt?.state === 'bound'
+    item.exact_attempt.state === 'bound'
       ? `${item.exact_attempt.slot_id} · ${item.exact_attempt.status}`
-      : item.exact_attempt?.state ?? 'contract_unavailable'
+      : item.exact_attempt.state
   return [
     { label: '키퍼', value: item.keeper_name },
     { label: '작업', value: item.tool_name },
@@ -606,7 +605,7 @@ export function ApprovalsSurface() {
     }
   }, [])
 
-  const items = gateData.value?.approval_queue ?? []
+  const items = gateData.value?.approval_queue ?? null
   const queueUnavailable =
     gateData.value?.approval_queue_state?.state === 'unavailable'
       ? gateData.value.approval_queue_state
@@ -620,9 +619,11 @@ export function ApprovalsSurface() {
   const firstLoad = gateLoading.value && gateData.value === null
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [view, setView] = useState<ApprovalsView>('queue')
-  const selectedItem = items.find(item => item.id === selectedId) ?? items[0] ?? null
+  const selectedItem =
+    items?.find(item => item.id === selectedId) ?? items?.[0] ?? null
 
   const stats = useMemo(() => {
+    if (items === null) return null
     const longest = items.reduce((max, i) => Math.max(max, i.waiting_s ?? 0), 0)
     const keepers = new Set(items.map(i => i.keeper_name)).size
     return { longest, keepers }
@@ -648,7 +649,7 @@ export function ApprovalsSurface() {
                 aria-selected=${view === 'queue'}
                 onClick=${() => setView('queue')}
               >
-                큐${items.length > 0 ? html`<span class="ap-viewbtn-n mono">${items.length}</span>` : null}
+                큐${items && items.length > 0 ? html`<span class="ap-viewbtn-n mono">${items.length}</span>` : null}
               </button>
               <button
                 type="button"
@@ -657,7 +658,7 @@ export function ApprovalsSurface() {
                 onClick=${() => setView('history')}
               >이력</button>
             </div>
-            ${view === 'queue' && items.length > 0
+            ${view === 'queue' && items && items.length > 0 && stats
               ? html`<span class="ap-sla mono" title="가장 오래 대기 중인 건">최장 대기 ${apAge(stats.longest)}</span>`
               : null}
           </div>
@@ -666,8 +667,13 @@ export function ApprovalsSurface() {
         ${error ? html`<div class="ap-error" role="alert" data-testid="approvals-error">${error}</div>` : null}
         ${queueUnavailable
           ? html`
-              <div class="ap-error" role="alert" data-testid="approvals-queue-unavailable">
-                <strong>Gate durable queue unavailable · runtime reset required</strong>
+              <div
+                class=${`ap-error sev-${queueUnavailable.severity}`}
+                role="alert"
+                data-testid="approvals-queue-unavailable"
+                data-severity=${queueUnavailable.severity}
+              >
+                <strong><span aria-hidden="true">${queueUnavailable.icon}</span> ${queueUnavailable.title}</strong>
                 <span>${queueUnavailable.operator_detail}</span>
               </div>
             `
@@ -675,6 +681,8 @@ export function ApprovalsSurface() {
 
         ${firstLoad
           ? html`<${LoadingState}>Gate 큐 불러오는 중...<//>`
+          : queueUnavailable || items === null
+            ? null
           : view === 'history'
             ? html`<${ApHistory} items=${resolvedItems} />`
           : html`
@@ -685,7 +693,7 @@ export function ApprovalsSurface() {
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">관련 Keeper</div>
-            <div class="ov-kpi-v" data-testid="gate-kpi-keepers">${stats.keepers}</div>
+            <div class="ov-kpi-v" data-testid="gate-kpi-keepers">${stats?.keepers}</div>
           </div>
           <div class="ov-kpi">
             <div class="ov-kpi-k">Always 규칙</div>
@@ -729,7 +737,7 @@ export function ApprovalsSurface() {
           : null}
       `}
       </div>
-      ${!firstLoad ? html`
+      ${!firstLoad && !queueUnavailable && items !== null ? html`
         <${ApAside}
           openCount=${items.length}
           resolvedItems=${resolvedItems}

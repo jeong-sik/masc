@@ -1582,7 +1582,10 @@ describe('fetchDashboardGate', () => {
         approval_queue_state: {
           state: 'unavailable',
           code: 'reset_required',
+          title: 'Gate durable queue unavailable · runtime reset required',
           operator_detail: 'pending store requires reset',
+          severity: 'bad',
+          icon: '!',
         },
         recent_resolved: [],
       }), {
@@ -1594,11 +1597,14 @@ describe('fetchDashboardGate', () => {
 
     const result = await fetchDashboardGate()
 
-    expect(result.approval_queue).toEqual([])
+    expect(result.approval_queue).toBeNull()
     expect(result.approval_queue_state).toEqual({
       state: 'unavailable',
       code: 'reset_required',
+      title: 'Gate durable queue unavailable · runtime reset required',
       operator_detail: 'pending store requires reset',
+      severity: 'bad',
+      icon: '!',
     })
   })
 

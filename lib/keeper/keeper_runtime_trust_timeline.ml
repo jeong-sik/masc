@@ -393,19 +393,31 @@ let blocker_timeline_event ?task_id ?(goal_ids = []) ?trace_id
 let latest_tool_call_json ~(keeper_name : string) =
   Keeper_tool_call_log.read_latest ~keeper_name ()
 
-let pending_approval_json ~(keeper_name : string) =
-  match Keeper_approval_queue.list_pending_dashboard_json () with
-  | `List entries ->
-      entries
-      |> List.filter (fun json ->
-             String.equal keeper_name
-               (Safe_ops.json_string ~default:"" "keeper_name" json))
-      |> List.sort (fun left right ->
-             Float.compare
-               (Safe_ops.json_float ~default:0.0 "requested_at" right)
-               (Safe_ops.json_float ~default:0.0 "requested_at" left))
-      |> fun entries -> `List entries
-  | _ -> `List []
+let pending_approval_json_with_reader
+    ~(read_pending :
+       base_path:string ->
+       (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result)
+    ~(base_path : string) ~(keeper_name : string) =
+  read_pending ~base_path
+  |> Result.map (fun entries ->
+         entries
+         |> List.filter (fun json ->
+                String.equal keeper_name
+                  (Safe_ops.json_string ~default:"" "keeper_name" json))
+         |> List.sort (fun left right ->
+                Float.compare
+                  (Safe_ops.json_float ~default:0.0 "requested_at" right)
+                  (Safe_ops.json_float ~default:0.0 "requested_at" left)))
+
+let pending_approval_json ~(base_path : string) ~(keeper_name : string) =
+  pending_approval_json_with_reader
+    ~read_pending:
+      Keeper_approval_queue.list_pending_dashboard_json_for_workspace
+    ~base_path ~keeper_name
+
+module For_testing = struct
+  let pending_approval_json_with_reader = pending_approval_json_with_reader
+end
 
 let sort_timeline_events events =
   List.sort

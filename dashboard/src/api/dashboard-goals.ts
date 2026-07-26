@@ -328,6 +328,24 @@ function decodeGoalTreeSummary(raw: unknown): GoalTreeSummary {
   }
 }
 
+function rejectUnavailableApprovalQueue(raw: Record<string, unknown>): void {
+  if (!isRecord(raw.approval_queue_state)) return
+  const state = raw.approval_queue_state
+  if (state.state !== 'unavailable') return
+  const title = asString(state.title).trim()
+  const operatorDetail = asString(state.operator_detail).trim()
+  if (
+    state.code !== 'reset_required'
+    || state.severity !== 'bad'
+    || state.icon !== '!'
+    || !title
+    || !operatorDetail
+  ) {
+    throw new Error('유효하지 않은 dashboard goals approval_queue_state payload')
+  }
+  throw new Error(`${state.icon} ${title}: ${operatorDetail}`)
+}
+
 function decodeGoalDetailKeeper(raw: unknown): GoalDetailKeeper | null {
   if (!isRecord(raw)) return null
   const name = asString(raw.name)
@@ -374,6 +392,7 @@ function decodeGoalDetailTimelineEvent(raw: unknown): GoalDetailTimelineEvent | 
 
 function decodeDashboardGoalsTreeResponse(raw: unknown): DashboardGoalsTreeResponse | null {
   if (!isRecord(raw)) return null
+  rejectUnavailableApprovalQueue(raw)
   const tree = asRecordArray(raw.tree)
     .map(decodeGoalTreeNode)
     .filter((node): node is GoalTreeNode => node !== null)
@@ -386,6 +405,7 @@ function decodeDashboardGoalsTreeResponse(raw: unknown): DashboardGoalsTreeRespo
 
 function decodeDashboardGoalDetailResponse(raw: unknown): DashboardGoalDetailResponse | null {
   if (!isRecord(raw)) return null
+  rejectUnavailableApprovalQueue(raw)
   const goal = decodeGoalTreeNode(raw.goal)
   if (!goal) return null
   const generatedAt = asString(raw.generated_at)

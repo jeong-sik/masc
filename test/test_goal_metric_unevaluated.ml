@@ -233,6 +233,41 @@ let test_keeper_receipt_timeline_missing_runtime_stays_missing () =
     "ok · <missing receipt.runtime.name>"
     (json_str receipt_event "summary")
 
+let test_goals_tree_preserves_approval_queue_unavailable () =
+  let base_path = "/tmp/masc-goals-approval-unavailable" in
+  let config = Masc.Workspace.default_config base_path in
+  let requested_base_path = ref None in
+  let read_pending ~base_path =
+    requested_base_path := Some base_path;
+    let error : Masc.Keeper_approval_queue.storage_error =
+      {
+        path = Filename.concat base_path ".masc/keeper_approval_queue.json";
+        reason = "injected queue read failure";
+      }
+    in
+    Error error
+  in
+  let json =
+    Masc.Dashboard_goals.For_testing
+    .dashboard_goals_tree_json_with_pending_reader
+      ~read_pending ~config
+  in
+  check (option string) "uses the requested workspace" (Some base_path)
+    !requested_base_path;
+  let state =
+    match Yojson.Safe.Util.member "approval_queue_state" json with
+    | `Assoc _ as state -> state
+    | _ -> fail "approval queue state must be an object"
+  in
+  check string "queue is unavailable" "unavailable"
+    (json_str state "state");
+  check string "queue severity is bad" "bad"
+    (json_str state "severity");
+  check bool "tree is not synthesized" true
+    (Yojson.Safe.Util.member "tree" json = `Null);
+  check bool "summary is not synthesized" true
+    (Yojson.Safe.Util.member "summary" json = `Null)
+
 let () =
   run "goal metric unevaluated"
     [
@@ -254,5 +289,7 @@ let () =
             test_goal_projection_does_not_promote_child_approvals;
           test_case "invalid activity time stays unavailable" `Quick
             test_goal_projection_surfaces_invalid_activity_time;
+          test_case "queue failure remains typed unavailable" `Quick
+            test_goals_tree_preserves_approval_queue_unavailable;
         ] );
     ]

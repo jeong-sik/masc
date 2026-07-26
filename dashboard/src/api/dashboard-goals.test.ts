@@ -151,6 +151,26 @@ describe('fetchDashboardGoalsTree decoding', () => {
     expect(result.tree[0]!.attainment.note).toBe('Attainment projection missing from payload.')
   })
 
+  it('rejects a typed unavailable approval queue instead of decoding an empty tree', async () => {
+    getMock.mockResolvedValue({
+      generated_at: '2026-07-27T00:00:00Z',
+      approval_queue_state: {
+        state: 'unavailable',
+        code: 'reset_required',
+        title: 'Gate durable queue unavailable · runtime reset required',
+        operator_detail: 'pending store requires reset',
+        severity: 'bad',
+        icon: '!',
+      },
+      tree: null,
+      summary: null,
+    })
+
+    await expect(fetchDashboardGoalsTree()).rejects.toThrow(
+      '! Gate durable queue unavailable · runtime reset required: pending store requires reset',
+    )
+  })
+
   it('preserves an explicit runtime snapshot failure in Goal detail', async () => {
     getMock.mockResolvedValue({
       goal: validNode('goal-runtime', 'Runtime goal'),

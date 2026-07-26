@@ -188,6 +188,38 @@ describe('KeeperWorkspaceChat', () => {
     expect(container.querySelector('[data-testid="keeper-pending-approval-link"]')).toBeNull()
   })
 
+  it('renders the backend queue-unavailable state instead of a zero approval cue', async () => {
+    const { KeeperWorkspaceChat } = await loadChat()
+    mockGateData.value = {
+      ...gateResponse([]),
+      approval_queue: null,
+      approval_queue_state: {
+        state: 'unavailable',
+        code: 'reset_required',
+        title: 'Gate durable queue unavailable · runtime reset required',
+        operator_detail: 'pending store requires reset',
+        severity: 'bad',
+        icon: '!',
+      },
+    }
+
+    await act(async () => {
+      render(html`<${KeeperWorkspaceChat} keeper=${mockKeeper} />`, container)
+    })
+
+    const unavailable = container.querySelector(
+      '[data-testid="keeper-approval-queue-unavailable"]',
+    ) as HTMLButtonElement
+    expect(unavailable).not.toBeNull()
+    expect(unavailable.textContent).toContain('!')
+    expect(unavailable.textContent).toContain(
+      'Gate durable queue unavailable · runtime reset required',
+    )
+    expect(unavailable.getAttribute('title')).toBe('pending store requires reset')
+    expect(container.querySelector('[data-testid="keeper-pending-approval-link"]')).toBeNull()
+    expect(container.textContent).not.toContain('결재 대기 0건')
+  })
+
   it('renders the chat header and conversation panel', async () => {
     const { KeeperWorkspaceChat } = await loadChat()
 

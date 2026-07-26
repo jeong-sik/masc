@@ -39,14 +39,21 @@ function normalizeApprovalQueueState(raw: unknown): KeeperApprovalQueueState {
   if (
     raw.state === 'unavailable'
     && raw.code === 'reset_required'
+    && typeof raw.title === 'string'
+    && raw.title.trim() !== ''
     && typeof raw.operator_detail === 'string'
     && raw.operator_detail.trim() !== ''
-    && Object.keys(raw).length === 3
+    && raw.severity === 'bad'
+    && raw.icon === '!'
+    && Object.keys(raw).length === 6
   ) {
     return {
       state: 'unavailable',
       code: 'reset_required',
+      title: raw.title.trim(),
       operator_detail: raw.operator_detail.trim(),
+      severity: 'bad',
+      icon: '!',
     }
   }
   return gateSnapshotProtocolDrift('approval_queue_state is not a current closed variant')
@@ -146,12 +153,12 @@ export function fetchDashboardGate(
       signal: opts?.signal,
     })
     const approvalQueueState = normalizeApprovalQueueState(raw.approval_queue_state)
-    let approvalQueue: KeeperApprovalQueueItem[]
+    let approvalQueue: KeeperApprovalQueueItem[] | null
     if (approvalQueueState.state === 'unavailable') {
       if (raw.approval_queue !== null) {
         return gateSnapshotProtocolDrift('unavailable approval_queue must be null')
       }
-      approvalQueue = []
+      approvalQueue = null
     } else {
       if (!Array.isArray(raw.approval_queue)) {
         return gateSnapshotProtocolDrift('ready approval_queue must be an array')

@@ -934,13 +934,7 @@ let pending_approval_read_error error =
   ; due_at = None
   ; next_action = "reset_runtime_state"
   ; detail =
-      `Assoc
-        [ "state", `String "unavailable"
-        ; "code", `String "reset_required"
-        ; ( "operator_detail"
-          , `String
-              (Keeper_approval_queue.storage_error_to_string error) )
-        ]
+      Keeper_approval_queue.approval_queue_unavailable_state_json error
   }
 ;;
 
@@ -952,16 +946,10 @@ let dashboard_json_with_pending_reader ~read_pending config =
   let pending_approvals, pending_approval_state, pending_approval_read_error_rows =
     match read_pending ~base_path:config.Workspace.base_path with
     | Ok entries ->
-      entries, `Assoc [ "state", `String "ready" ], []
+      entries, Keeper_approval_queue.approval_queue_ready_state_json, []
     | Error error ->
       ( []
-      , `Assoc
-          [ "state", `String "unavailable"
-          ; "code", `String "reset_required"
-          ; ( "operator_detail"
-            , `String
-                (Keeper_approval_queue.storage_error_to_string error) )
-          ]
+      , Keeper_approval_queue.approval_queue_unavailable_state_json error
       , [ pending_approval_read_error error ] )
   in
   let fusion_runs = Fusion_run_registry.list_runs (Fusion_run_registry.global ()) in

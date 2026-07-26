@@ -53,7 +53,7 @@ function releasedRecoveryAttempt(id: string) {
 }
 
 function responseWithQueue(
-  approval_queue: KeeperApprovalQueueItem[],
+  approval_queue: KeeperApprovalQueueItem[] | null,
   recent_resolved: KeeperResolvedApprovalItem[] = [],
   approval_rules: KeeperApprovalRule[] = [],
   hitl: DashboardGateResponse['hitl'] = {
@@ -76,7 +76,7 @@ function responseWithQueue(
 // Mock the API seam refreshGate() reaches on mount, plus the SSE refresh
 // registry.
 async function loadSurface(
-  approval_queue: KeeperApprovalQueueItem[],
+  approval_queue: KeeperApprovalQueueItem[] | null,
   recent_resolved: KeeperResolvedApprovalItem[] = [],
   approval_rules: KeeperApprovalRule[] = [],
   hitl?: DashboardGateResponse['hitl'],
@@ -358,14 +358,17 @@ describe('ApprovalsSurface', () => {
 
   it('renders an explicit unavailable state instead of an empty queue', async () => {
     const { ApprovalsSurface } = await loadSurface(
-      [],
+      null,
       [],
       [],
       undefined,
       {
         state: 'unavailable',
         code: 'reset_required',
+        title: 'Gate durable queue unavailable · runtime reset required',
         operator_detail: 'pending store requires reset',
+        severity: 'bad',
+        icon: '!',
       },
     )
 
@@ -373,8 +376,15 @@ describe('ApprovalsSurface', () => {
     await flushUi()
 
     expect(container.querySelector('[data-testid="approvals-empty"]')).toBeNull()
-    expect(container.querySelector('[data-testid="approvals-queue-unavailable"]')).not.toBeNull()
-    expect(container.textContent).toContain('runtime reset required')
+    const unavailable = container.querySelector('[data-testid="approvals-queue-unavailable"]')
+    expect(unavailable).not.toBeNull()
+    expect(unavailable?.getAttribute('data-severity')).toBe('bad')
+    expect(unavailable?.textContent).toContain('!')
+    expect(unavailable?.textContent).toContain('Gate durable queue unavailable · runtime reset required')
+    expect(unavailable?.textContent).toContain('pending store requires reset')
+    expect(container.querySelector('.ov-kpis')).toBeNull()
+    expect(container.querySelector('[data-testid="approvals-aside"]')).toBeNull()
+    expect(container.textContent).not.toContain('열린 승인 0건')
   }, 20000)
 
   it('reports the observed Keeper count without classifying the queue', async () => {

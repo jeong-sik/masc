@@ -104,6 +104,11 @@ type install_report =
 type install_error = Install_storage_failed of storage_error
 
 val storage_error_to_string : storage_error -> string
+val approval_queue_unavailable_title : string
+val approval_queue_unavailable_severity : string
+val approval_queue_unavailable_icon : string
+val approval_queue_ready_state_json : Yojson.Safe.t
+val approval_queue_unavailable_state_json : storage_error -> Yojson.Safe.t
 val summary_transition_error_to_string : summary_transition_error -> string
 val exact_attempt_error_to_string : exact_attempt_error -> string
 val grant_error_to_string : grant_error -> string
@@ -334,7 +339,7 @@ val resolve_with_policy :
 val list_pending_json : unit -> Yojson.Safe.t
 val list_pending_dashboard_json : unit -> Yojson.Safe.t
 val list_pending_dashboard_json_for_workspace :
-  base_path:string -> (Yojson.Safe.t, storage_error) result
+  base_path:string -> (Yojson.Safe.t list, storage_error) result
 val list_pending_entries : unit -> pending_approval list
 val list_pending_entries_for_workspace :
   base_path:string -> (pending_approval list, storage_error) result

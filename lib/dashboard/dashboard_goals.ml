@@ -42,7 +42,8 @@ let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_meta_contract.kee
 
 
 
-let build_forest ~(config : Workspace.config) ~goals ~tasks =
+let build_forest ~(config : Workspace.config) ~goals ~tasks
+    ~(pending_approvals : Yojson.Safe.t list) =
   let goal_ids = List.map (fun (goal : Goal_store.goal) -> goal.id) goals in
   let is_root (goal : Goal_store.goal) =
     match goal.parent_goal_id with
@@ -55,11 +56,6 @@ let build_forest ~(config : Workspace.config) ~goals ~tasks =
            match Keeper_meta_store.read_meta config keeper_name with
            | Ok (Some meta) -> Some meta
            | Ok None | Error _ -> None)
-  in
-  let pending_approvals =
-    match Keeper_approval_queue.list_pending_dashboard_json () with
-    | `List items -> items
-    | _ -> []
   in
   let latest_receipts =
     keeper_metas
@@ -113,16 +109,22 @@ let build_goal_events_projection ~(config : Workspace.config) goals =
     Option.value (Hashtbl.find_opt events_table goal_id) ~default:[]
 
 let emit_all_goal_attainment_metrics ~(config : Workspace.config) =
-  let goals = Goal_store.list_goals config () in
-  let tasks = Workspace.get_tasks_safe config in
-  let forest = build_forest ~config ~goals ~tasks in
-  let all_nodes = flatten_tree [] forest in
-  List.iter
-    (fun (node : tree_node) ->
-      let goal = node.goal in
-      let attainment = goal_attainment_to_json goal node in
-      observe_goal_attainment_metrics goal attainment)
-    all_nodes
+  match
+    Keeper_approval_queue.list_pending_dashboard_json_for_workspace
+      ~base_path:config.base_path
+  with
+  | Error _ -> ()
+  | Ok pending_approvals ->
+      let goals = Goal_store.list_goals config () in
+      let tasks = Workspace.get_tasks_safe config in
+      let forest = build_forest ~config ~goals ~tasks ~pending_approvals in
+      let all_nodes = flatten_tree [] forest in
+      List.iter
+        (fun (node : tree_node) ->
+          let goal = node.goal in
+          let attainment = goal_attainment_to_json goal node in
+          observe_goal_attainment_metrics goal attainment)
+        all_nodes
 
 let rec tree_node_to_json ?(events_for_goal = fun _ -> []) node =
   let goal = node.goal in
@@ -177,12 +179,13 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> []) node =
 
 
 
-let goal_detail_json ~(config : Workspace.config) ~goal_id :
+let goal_detail_json_ready ~(config : Workspace.config)
+    ~(pending_approvals : Yojson.Safe.t list) ~goal_id :
     (Yojson.Safe.t, string) result =
   let goals = Goal_store.list_goals config () in
   let tasks = Workspace.get_tasks_safe config in
   let events_for_goal = build_goal_events_projection ~config goals in
-  let forest = build_forest ~config ~goals ~tasks in
+  let forest = build_forest ~config ~goals ~tasks ~pending_approvals in
   let all_nodes = flatten_tree [] forest in
   match List.find_opt (fun (node : tree_node) -> String.equal node.goal.id goal_id) all_nodes with
   | None -> Error (Printf.sprintf "Goal %s not found" goal_id)
@@ -209,10 +212,7 @@ let goal_detail_json ~(config : Workspace.config) ~goal_id :
                | Ok None | Error _ | Ok (Some _) -> None)
       in
       let approvals =
-        match Keeper_approval_queue.list_pending_dashboard_json () with
-        | `List items ->
-            items |> List.filter (approval_matches_goal goal_id)
-        | _ -> []
+        pending_approvals |> List.filter (approval_matches_goal goal_id)
       in
       let latest_receipts =
         keeper_details
@@ -224,6 +224,8 @@ let goal_detail_json ~(config : Workspace.config) ~goal_id :
         (`Assoc
           [
             ("generated_at", `String (Masc_domain.now_iso ()));
+            ( "approval_queue_state",
+              Keeper_approval_queue.approval_queue_ready_state_json );
             ("goal", tree_node_to_json ~events_for_goal node);
             ("linked_tasks", `List (List.map task_to_tree_json node.tasks));
             ("linked_keepers", `List (List.map goal_detail_keeper_json keeper_details));
@@ -234,11 +236,42 @@ let goal_detail_json ~(config : Workspace.config) ~goal_id :
                 (build_goal_timeline node keeper_details approvals goal_events) );
           ])
 
-let dashboard_goals_tree_json ~(config : Workspace.config) : Yojson.Safe.t =
+let goal_detail_json_with_pending_reader
+    ~(read_pending :
+       base_path:string ->
+       (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result)
+    ~(config : Workspace.config) ~goal_id =
+  match read_pending ~base_path:config.base_path with
+  | Ok pending_approvals ->
+      goal_detail_json_ready ~config ~pending_approvals ~goal_id
+  | Error error ->
+      Ok
+        (`Assoc
+          [
+            ("generated_at", `String (Masc_domain.now_iso ()));
+            ( "approval_queue_state",
+              Keeper_approval_queue.approval_queue_unavailable_state_json
+                error );
+            ("goal", `Null);
+            ("linked_tasks", `Null);
+            ("linked_keepers", `Null);
+            ("approvals", `Null);
+            ("execution_receipts", `Null);
+            ("timeline", `Null);
+          ])
+
+let goal_detail_json ~(config : Workspace.config) ~goal_id =
+  goal_detail_json_with_pending_reader
+    ~read_pending:
+      Keeper_approval_queue.list_pending_dashboard_json_for_workspace
+    ~config ~goal_id
+
+let dashboard_goals_tree_json_ready ~(config : Workspace.config)
+    ~(pending_approvals : Yojson.Safe.t list) : Yojson.Safe.t =
   let goals = Goal_store.list_goals config () in
   let tasks = Workspace.get_tasks_safe config in
   let events_for_goal = build_goal_events_projection ~config goals in
-  let forest = build_forest ~config ~goals ~tasks in
+  let forest = build_forest ~config ~goals ~tasks ~pending_approvals in
   let all_nodes = flatten_tree [] forest in
   let total_goals = List.length goals in
   let total_tasks =
@@ -267,14 +300,12 @@ let dashboard_goals_tree_json ~(config : Workspace.config) : Yojson.Safe.t =
            goal.phase = Goal_phase.Executing)
     |> List.length
   in
-  let pending_approval_total =
-    match Keeper_approval_queue.list_pending_dashboard_json () with
-    | `List items -> List.length items
-    | _ -> 0
-  in
+  let pending_approval_total = List.length pending_approvals in
   `Assoc
     [
       ("generated_at", `String (Masc_domain.now_iso ()));
+      ( "approval_queue_state",
+        Keeper_approval_queue.approval_queue_ready_state_json );
       ( "tree",
         `List
           (List.map
@@ -299,3 +330,35 @@ let dashboard_goals_tree_json ~(config : Workspace.config) : Yojson.Safe.t =
             ("pending_approvals", `Int pending_approval_total);
           ] );
     ]
+
+let dashboard_goals_tree_json_with_pending_reader
+    ~(read_pending :
+       base_path:string ->
+       (Yojson.Safe.t list, Keeper_approval_queue.storage_error) result)
+    ~(config : Workspace.config) =
+  match read_pending ~base_path:config.base_path with
+  | Ok pending_approvals ->
+      dashboard_goals_tree_json_ready ~config ~pending_approvals
+  | Error error ->
+      `Assoc
+        [
+          ("generated_at", `String (Masc_domain.now_iso ()));
+          ( "approval_queue_state",
+            Keeper_approval_queue.approval_queue_unavailable_state_json error );
+          ("tree", `Null);
+          ("summary", `Null);
+        ]
+
+let dashboard_goals_tree_json ~(config : Workspace.config) =
+  dashboard_goals_tree_json_with_pending_reader
+    ~read_pending:
+      Keeper_approval_queue.list_pending_dashboard_json_for_workspace
+    ~config
+
+module For_testing = struct
+  let dashboard_goals_tree_json_with_pending_reader =
+    dashboard_goals_tree_json_with_pending_reader
+
+  let goal_detail_json_with_pending_reader =
+    goal_detail_json_with_pending_reader
+end

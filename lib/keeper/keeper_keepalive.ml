@@ -487,7 +487,15 @@ let start_keeper_grpc_heartbeat
 
 (* ── Lifecycle bootstrap / publish helpers ── *)
 
-let bootstrap_live_keeper_meta ?lifecycle_token ~(ctx : _ context) (m : keeper_meta)
+type durable_meta_bootstrap =
+  | Bootstrap_required
+  | Durable_meta_already_committed
+
+let bootstrap_live_keeper_meta
+      ?lifecycle_token
+      ~durable_meta_bootstrap
+      ~(ctx : _ context)
+      (m : keeper_meta)
   : keeper_meta
   =
   try
@@ -520,13 +528,14 @@ let bootstrap_live_keeper_meta ?lifecycle_token ~(ctx : _ context) (m : keeper_m
           }
       }
     in
-    (match lifecycle_token with
-     | Some _ ->
-       (* The revival coordinator already committed the durable candidate.
+    (match lifecycle_token, durable_meta_bootstrap with
+     | Some _, _
+     | None, Durable_meta_already_committed ->
+       (* The lifecycle coordinator already committed the durable candidate.
           Keep this fresh presence timestamp in the new registry lane; the
           heartbeat persists it after the transaction releases ownership. *)
        ()
-     | None ->
+     | None, Bootstrap_required ->
        (match
           write_meta_with_merge
             ~merge:Keeper_meta_merge.monotonic_usage_counters
@@ -857,6 +866,7 @@ let start_keepalive_admitted
       ?(proactive_warmup_sec = 0)
       ?lifecycle_token
       ?launch_gate
+      ?(durable_meta_bootstrap = Bootstrap_required)
       ~permit
       (ctx : _ context)
   (m : keeper_meta)
@@ -1097,7 +1107,13 @@ let start_keepalive_admitted
       | Ok () ->
         let stop = reg.fiber_stop in
         let wakeup = reg.fiber_wakeup in
-        let live_meta = bootstrap_live_keeper_meta ?lifecycle_token ~ctx m in
+        let live_meta =
+          bootstrap_live_keeper_meta
+            ?lifecycle_token
+            ~durable_meta_bootstrap
+            ~ctx
+            m
+        in
         let live_meta_installed =
           match lifecycle_token with
           | None ->
@@ -1331,6 +1347,7 @@ let start_keepalive_under_admission
       ?(proactive_warmup_sec = 0)
       ?lifecycle_token
       ?launch_gate
+      ?(durable_meta_bootstrap = Bootstrap_required)
       permit
       (ctx : _ context)
       (meta : keeper_meta)
@@ -1345,6 +1362,7 @@ let start_keepalive_under_admission
            ~proactive_warmup_sec
            ?lifecycle_token
            ?launch_gate
+           ~durable_meta_bootstrap
            ~permit
            ctx
            meta)
@@ -1366,6 +1384,7 @@ let start_keepalive
       ?(proactive_warmup_sec = 0)
       ?lifecycle_token
       ?launch_gate
+      ?(durable_meta_bootstrap = Bootstrap_required)
       (ctx : _ context)
       (meta : keeper_meta)
   =
@@ -1391,6 +1410,7 @@ let start_keepalive
               ~proactive_warmup_sec
               ~lifecycle_token:token
               ?launch_gate
+              ~durable_meta_bootstrap
               permit
               ctx
               meta)
@@ -1407,6 +1427,7 @@ let start_keepalive
             start_keepalive_under_admission
               ~proactive_warmup_sec
               ?launch_gate
+              ~durable_meta_bootstrap
               permit
               ctx
               meta)

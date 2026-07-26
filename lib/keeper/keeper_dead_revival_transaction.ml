@@ -7,6 +7,7 @@ module Payload = Keeper_dead_revival_payload
 exception Injected_durable_publication_settlement_warning
 exception Injected_launch_publication_settlement_warning
 exception Injected_launch_publication_unchanged
+exception Injected_launch_publication_indeterminate
 exception Injected_reserved_post_publication_failure
 
 type boundary_hooks =
@@ -186,6 +187,23 @@ module Boundary_hooks_for_testing = struct
       Head.For_testing.hooks
         ~before_rename:(fun () ->
           raise Injected_launch_publication_unchanged)
+        ()
+    in
+    let previous =
+      Atomic.exchange
+        launch_compare_and_swap_hook
+        (Head.For_testing.compare_and_swap hooks)
+    in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set launch_compare_and_swap_hook previous)
+      fn
+  ;;
+
+  let with_launch_publication_indeterminate fn =
+    let hooks =
+      Head.For_testing.hooks
+        ~after_rename:(fun () ->
+          raise Injected_launch_publication_indeterminate)
         ()
     in
     let previous =
@@ -2333,10 +2351,8 @@ let revive_locked
            Keeper_keepalive.request_entry_stop entry;
            (* See the launch gate above: only completion of the already-aborted
               lane matters here; its terminal payload has no authority. *)
-           ignore (Keeper_lane.await_exit entry.lane : Keeper_lane.exit);
-           ignore
-             (Eio.Promise.await entry.done_p
-               : Keeper_registry.done_resolution);
+           let _lane_exit = Keeper_lane.await_exit entry.lane in
+           let _terminal = Eio.Promise.await entry.done_p in
            pending_launch_entry := None
        in
        let settle_pending_launch () =
@@ -2358,6 +2374,7 @@ let revive_locked
                 abort_pending_launch ();
                 launch_reconciliation_unresolved := false
               | Launch_reconciliation_unresolved _ ->
+                abort_pending_launch ();
                 launch_reconciliation_unresolved := true);
              reconciliation
            | None, _
@@ -2629,11 +2646,12 @@ let revive_locked
                                 Log.Keeper.error
                                   "keeper revival launch reconciliation remains \
                                    unresolved keeper=%s publication=%s \
-                                   observation=%s; retaining reservation and \
-                                   gated lane for restart recovery"
+                                   observation=%s; aborted gated lane and \
+                                   retained durable journal for exact recovery"
                                   committed.name
                                   publication_detail
                                   (error_to_string attention);
+                                release_observed token committed.name;
                                 Error attention)
                            | rejected ->
                              Keeper_keepalive.abort_launch_gate launch_gate;
@@ -2676,10 +2694,11 @@ let revive_locked
             | Launch_reconciliation_unresolved attention ->
               Log.Keeper.error
                 "keeper lifecycle cancellation left launch reconciliation \
-                 unresolved keeper=%s error=%s; retaining reservation and \
-                 gated lane for restart recovery"
+                 unresolved keeper=%s error=%s; gated lane was aborted and \
+                 durable journal remains for exact recovery"
                 original.name
-                (error_to_string attention));
+                (error_to_string attention);
+              release_observed token original.name);
          Printexc.raise_with_backtrace cancelled backtrace)))
 ;;
 

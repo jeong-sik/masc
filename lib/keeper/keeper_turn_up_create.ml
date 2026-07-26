@@ -367,14 +367,38 @@ let create_keeper_admitted_body
         Progress.stop_tracking task_id;
         tool_result_error (Printf.sprintf "initial checkpoint save failed: %s" detail)
       | Ok _ ->
+      let previous_runtime = Runtime.runtime_id_for_keeper p.name in
+      let runtime_assignment_changed = ref false in
+      let restore_runtime_assignment () =
+        if not !runtime_assignment_changed
+        then Ok ()
+        else
+          match previous_runtime with
+          | Some runtime_id ->
+            Runtime.set_runtime_id_for_keeper
+              ~keeper_name:p.name
+              ~runtime_id
+              ()
+          | None ->
+            Runtime.clear_runtime_id_for_keeper ~keeper_name:p.name ()
+      in
       let runtime_assignment_result =
         match p.runtime_id_opt with
         | None -> Ok ()
+        | Some runtime_id
+          when Option.equal String.equal previous_runtime (Some runtime_id) ->
+          Ok ()
         | Some runtime_id ->
-          Runtime.set_runtime_id_for_keeper
-            ~keeper_name:p.name
-            ~runtime_id
-            ()
+          (match
+             Runtime.set_runtime_id_for_keeper
+               ~keeper_name:p.name
+               ~runtime_id
+               ()
+           with
+           | Ok () ->
+             runtime_assignment_changed := true;
+             Ok ()
+           | Error _ as error -> error)
       in
       (match runtime_assignment_result with
        | Error e ->
@@ -395,18 +419,32 @@ let create_keeper_admitted_body
         Otel_metric_store.inc_counter Keeper_metrics.(to_string WriteMetaFailures)
           ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();
         Log.Keeper.error "create_keeper failed: write_meta error for name=%s: %s" p.name e;
+        let detail =
+          match restore_runtime_assignment () with
+          | Ok () -> e
+          | Error rollback ->
+            e ^ "; runtime assignment rollback failed: " ^ rollback
+        in
         Progress.stop_tracking task_id;
-        tool_result_error e
+        tool_result_error detail
       | Ok () ->
+        let committed_meta = { meta with meta_version = 1 } in
         Log.Keeper.debug "create_keeper: metadata written for name=%s trace_id=%s"
           p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
         Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
         Log.Keeper.info "create_keeper: starting keepalive for name=%s" p.name;
+        let launch_gate = create_launch_gate () in
         let launch_outcome =
-          start_keepalive_under_admission permit ctx meta
+          start_keepalive_under_admission
+            ~launch_gate
+            ~durable_meta_bootstrap:Durable_meta_already_committed
+            permit
+            ctx
+            committed_meta
         in
         (match launch_outcome with
          | Keepalive_started _ ->
+        commit_launch_gate launch_gate;
         Progress.Tracker.complete tracker ~message:"Keeper created" ();
         Log.Keeper.info "create_keeper: completed for name=%s trace_id=%s" p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
         let json = `Assoc [
@@ -428,11 +466,66 @@ let create_keeper_admitted_body
            | Keepalive_fiber_start_rejected _
            | Keepalive_lane_ownership_lost
            | Keepalive_fork_rejected _ ) as rejected ->
+           abort_launch_gate launch_gate;
+           let cleanup_errors = ref [] in
+           (match Keeper_registry.get ~base_path:ctx.config.base_path p.name with
+            | Some entry
+              when Keeper_id.Trace_id.equal
+                     entry.meta.runtime.trace_id
+                     meta.runtime.trace_id
+                   && Int.equal entry.meta.runtime.nonce meta.runtime.nonce ->
+              request_entry_stop entry;
+              let _lane_exit = Keeper_lane.await_exit entry.lane in
+              let _terminal = Eio.Promise.await entry.done_p in
+              (match Keeper_registry.unregister_exact entry with
+               | Keeper_registry.Exact_unregistered
+               | Keeper_registry.Exact_entry_missing -> ()
+               | Keeper_registry.Exact_entry_replaced ->
+                 cleanup_errors :=
+                   "candidate registry entry was replaced during rollback"
+                   :: !cleanup_errors
+               | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+                 cleanup_errors :=
+                   ("candidate registry rollback was reserved: "
+                    ^ Keeper_lifecycle_reservation.snapshot_to_string owner)
+                   :: !cleanup_errors)
+            | Some _ | None -> ());
+           let meta_removed =
+             match
+               Keeper_meta_store.remove_meta_if_identity
+                 ctx.config
+                 ~name:meta.name
+                 ~trace_id:meta.runtime.trace_id
+                 ~generation:meta.runtime.nonce
+             with
+             | Ok () -> true
+             | Error error ->
+               cleanup_errors :=
+                 ("candidate metadata rollback failed: "
+                  ^ Keeper_meta_store.identity_remove_error_to_string error)
+                 :: !cleanup_errors;
+               false
+           in
+           (if meta_removed
+            then
+              match restore_runtime_assignment () with
+              | Ok () -> ()
+              | Error detail ->
+                cleanup_errors :=
+                  ("runtime assignment rollback failed: " ^ detail)
+                  :: !cleanup_errors);
            Progress.stop_tracking task_id;
+           let cleanup_detail =
+             match List.rev !cleanup_errors with
+             | [] -> ""
+             | errors ->
+               "; recovery failed: " ^ String.concat "; " errors
+           in
            tool_result_error
              (Printf.sprintf
-                "keeper metadata was created but lane launch failed: %s"
-                (start_keepalive_outcome_to_string rejected))))
+                "keeper creation lane launch failed: %s%s"
+                (start_keepalive_outcome_to_string rejected)
+                cleanup_detail)))
 ;;
 
 let create_keeper_admitted permit ctx p =

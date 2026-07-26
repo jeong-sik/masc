@@ -100,6 +100,13 @@ let save_raw path content =
   Unix.chmod path 0o600
 ;;
 
+let read_raw path =
+  let channel = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in channel)
+    (fun () -> really_input_string channel (in_channel_length channel))
+;;
+
 let test_first_no_evidence_is_one () =
   with_base "masc_lifecycle_witness_create_" @@ fun base_path ->
   let witness = create ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-a" in
@@ -350,6 +357,57 @@ let test_shutdown_floor_bounds_create () =
   check int64 "create exceeds shutdown floor" 8L (target_nonce witness)
 ;;
 
+let test_runtime_max_is_last_publishable_nonce () =
+  with_base "masc_lifecycle_witness_runtime_max_" @@ fun base_path ->
+  let runtime_max = Int64.of_int max_int in
+  ignore
+    (Masc.Keeper_shutdown_generation_floor.record_exact
+       ~base_path
+       ~keeper_id:"keeper-a"
+       ~generation:(Int64.pred runtime_max)
+       ()
+     |> function
+     | Ok floor -> floor
+     | Error error ->
+       fail (Masc.Keeper_shutdown_generation_floor.error_to_string error));
+  let witness = create ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-a" in
+  check int64 "runtime maximum is publishable" runtime_max (target_nonce witness);
+  let path = authority_path ~base_path ~keeper_id:"keeper-a" in
+  let before = read_raw path in
+  (match create_result ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-b" with
+   | Error Nonce.Nonce_exhausted -> ()
+   | Error error ->
+     failf "unexpected runtime maximum error: %s" (Nonce.error_to_string error)
+   | Ok witness ->
+     failf "allocation exceeded runtime maximum: %Ld" (target_nonce witness));
+  check string "exhaustion publishes no new HEAD" before (read_raw path)
+;;
+
+let test_out_of_range_floor_is_rejected_before_head_creation () =
+  with_base "masc_lifecycle_witness_floor_range_" @@ fun base_path ->
+  let module Storage = Masc.Keeper_lifecycle_nonce_storage in
+  let keeper_id = "keeper-a" in
+  let result =
+    Storage.next_for_base_path_with_hooks
+      ~snapshot_warnings:Storage.Head.snapshot_settlement_warnings
+      ~compare_and_swap:Storage.Head.compare_and_swap
+      ~base_path
+      ~keeper_id
+      ~owner_id:"trace-a"
+      ~floor:(Int64.succ (Int64.of_int max_int))
+      ()
+  in
+  (match result with
+   | Error (Nonce.Runtime_nonce_out_of_range _) -> ()
+   | Error error ->
+     failf "unexpected out-of-range floor error: %s" (Nonce.error_to_string error)
+   | Ok nonce -> failf "out-of-range floor allocated %Ld" nonce);
+  check bool
+    "out-of-range floor created no HEAD"
+    false
+    (Sys.file_exists (authority_path ~base_path ~keeper_id))
+;;
+
 let test_invalid_current_evidence_is_generic () =
   with_base "masc_lifecycle_witness_invalid_" @@ fun base_path ->
   ignore (create ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-a");
@@ -396,6 +454,14 @@ let () =
             test_post_publication_cancellation_is_recovered
         ; test_case "concurrent create is exclusive" `Quick test_concurrent_create_witnesses_are_exclusive
         ; test_case "shutdown floor bounds create" `Quick test_shutdown_floor_bounds_create
+        ; test_case
+            "runtime maximum is the final publishable nonce"
+            `Quick
+            test_runtime_max_is_last_publishable_nonce
+        ; test_case
+            "out-of-range floor is rejected before HEAD creation"
+            `Quick
+            test_out_of_range_floor_is_rejected_before_head_creation
         ; test_case "invalid current evidence is generic" `Quick test_invalid_current_evidence_is_generic
         ; test_case
             "reentrant lease drains before admission release"

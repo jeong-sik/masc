@@ -95,6 +95,10 @@ type start_keepalive_outcome =
 
 type launch_gate
 
+type durable_meta_bootstrap =
+  | Bootstrap_required
+  | Durable_meta_already_committed
+
 (** A dead-revival lane can be forked under durable admission while remaining
     side-effect-free until its launch journal is confirmed. Settlement is
     exact-once; commit is idempotent but rejects a previously aborted gate. *)
@@ -111,6 +115,7 @@ val start_keepalive_under_admission :
   ?proactive_warmup_sec:int ->
   ?lifecycle_token:Keeper_lifecycle_reservation.token ->
   ?launch_gate:launch_gate ->
+  ?durable_meta_bootstrap:durable_meta_bootstrap ->
   Keeper_lifecycle_admission.Durable_transaction.permit ->
   'a context ->
   keeper_meta ->
@@ -123,6 +128,7 @@ val start_keepalive :
   ?proactive_warmup_sec:int ->
   ?lifecycle_token:Keeper_lifecycle_reservation.token ->
   ?launch_gate:launch_gate ->
+  ?durable_meta_bootstrap:durable_meta_bootstrap ->
   'a context ->
   keeper_meta ->
   start_keepalive_outcome

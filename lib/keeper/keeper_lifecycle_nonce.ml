@@ -38,7 +38,7 @@ let floor_for_create ~base_path ~keeper_id =
   | Ok None -> Ok 1L
   | Ok (Some floor) ->
     let generation = Keeper_shutdown_generation_floor.generation floor in
-    if Int64.equal generation Int64.max_int
+    if Int64.compare generation runtime_max_nonce >= 0
     then Error Nonce_exhausted
     else Ok (Int64.succ generation)
 ;;
@@ -80,7 +80,7 @@ let create permit ~base_path ~keeper_id ~owner_id () =
 
 let replace ~base_path ~keeper_id ~source ~owner_id () =
   let floor =
-    if Int64.equal source.nonce Int64.max_int
+    if Int64.compare source.nonce runtime_max_nonce >= 0
     then Error Nonce_exhausted
     else Ok (Int64.succ source.nonce)
   in
@@ -243,7 +243,7 @@ let settle_published_replace
       publication_error
   =
   let exact_target nonce =
-    if Int64.equal source.nonce Int64.max_int
+    if Int64.compare source.nonce runtime_max_nonce >= 0
        || not (Int64.equal nonce (Int64.succ source.nonce))
     then Error Authority_identity_mismatch
     else
@@ -304,7 +304,7 @@ let replace_settled permit ~base_path ~keeper_id ~source ~owner_id () =
 let runtime_int_of_nonce nonce =
   if
     Int64.compare nonce 0L <= 0
-    || Int64.compare nonce (Int64.of_int max_int) > 0
+    || Int64.compare nonce runtime_max_nonce > 0
   then Error (Runtime_nonce_out_of_range nonce)
   else Ok (Int64.to_int nonce)
 ;;
@@ -402,7 +402,7 @@ let error_to_string = function
       "lifecycle nonce %Ld publication is indeterminate: %s"
       nonce
       (head_failure_to_string failure)
-  | Nonce_exhausted -> "lifecycle nonce int64 authority is exhausted"
+  | Nonce_exhausted -> "lifecycle nonce runtime metadata range is exhausted"
   | Runtime_nonce_out_of_range nonce ->
     Printf.sprintf
       "lifecycle nonce %Ld cannot be represented by runtime metadata"

@@ -57,7 +57,7 @@ MASC Keepers (5 registered)
   qa-ui-smoke      gen=0  model=qwen3.5  proactive=true
   qa-surface       gen=0  model=qwen3.5  proactive=true
   qa-harness       gen=0  model=qwen3.5  proactive=true
-  sangsu           gen=0  model=qwen3.5  proactive=true
+  sangsu           gen=1  model=qwen3.5  proactive=true
 
 [j/k] Navigate  [Enter] Detail  [Tab] Dashboard  [q] Quit
 ```
@@ -71,7 +71,7 @@ Keeper: sangsu
 
   Identity
   Name:                  sangsu
-  Generation:            0
+  Generation:            1
 
   Live Context
   Context:               55.2%  ########-----------  70629 / 128000 tokens

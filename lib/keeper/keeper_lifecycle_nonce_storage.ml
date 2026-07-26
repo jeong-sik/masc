@@ -252,8 +252,12 @@ let yield_before_retry () =
   Eio.Fiber.yield ()
 ;;
 
+let runtime_max_nonce = Int64.of_int max_int
+
 let next_value ~floor current =
-  if Int64.equal current Int64.max_int
+  if Int64.compare floor runtime_max_nonce > 0
+  then Error (Runtime_nonce_out_of_range floor)
+  else if Int64.compare current runtime_max_nonce >= 0
   then Error Nonce_exhausted
   else
     let successor = Int64.succ current in
@@ -401,6 +405,8 @@ let next_for_base_path_with_hooks
   then Error Invalid_owner_id
   else if Int64.compare floor 0L <= 0
   then Error (Invalid_floor floor)
+  else if Int64.compare floor runtime_max_nonce > 0
+  then Error (Runtime_nonce_out_of_range floor)
   else
     let* root = prepare_root ~base_path in
     allocate

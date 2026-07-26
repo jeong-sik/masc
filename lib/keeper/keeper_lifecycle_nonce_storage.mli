@@ -35,6 +35,7 @@ val entropy_source :
   result
 
 val observed_nonce : keeper_id:string -> string option -> int64 option
+val runtime_max_nonce : int64
 
 val next_for_base_path_with_hooks :
   snapshot_warnings:(Head.snapshot -> Head.settlement_warning list) ->

@@ -113,6 +113,16 @@ let exited t = t.exited_p
 let peek_exit t = Eio.Promise.peek t.exited_p
 let await_exit t = Eio.Promise.await t.exited_p
 
+let next_fork_failure_key : exn option ref Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
+module For_testing = struct
+  let with_next_fork_failure failure fn =
+    Eio.Fiber.with_binding next_fork_failure_key (ref (Some failure)) fn
+  ;;
+end
+
 let rec claim_start t =
   if Atomic.compare_and_set t.state Not_started Starting
   then Ok ()
@@ -231,6 +241,14 @@ let fork ~sw t ~run ~cleanup =
   | Ok () ->
     let started = Atomic.make false in
     (try
+       (match Eio.Fiber.get next_fork_failure_key with
+        | Some pending ->
+          (match !pending with
+           | Some failure ->
+             pending := None;
+             raise failure
+           | None -> ())
+        | None -> ());
        Eio.Fiber.fork ~sw (fun () ->
          Atomic.set started true;
          let outcome =

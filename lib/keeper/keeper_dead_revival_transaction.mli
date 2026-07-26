@@ -138,6 +138,10 @@ module For_testing : sig
     (unit -> 'a) ->
     'a
 
+  val with_launch_publication_indeterminate :
+    (unit -> 'a) ->
+    'a
+
   val with_launch_publication_reread_attention :
     detail:string ->
     (unit -> 'a) ->

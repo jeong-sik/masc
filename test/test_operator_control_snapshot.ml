@@ -1519,6 +1519,62 @@ let test_dead_revival_final_clear_failure_preserves_commit () =
     persisted_after_recovery.runtime.nonce
 ;;
 
+let test_dead_revival_indeterminate_launch_releases_for_recovery () =
+  let keeper_name = "dead-revival-launch-publication-indeterminate" in
+  with_settled_dead_revival_fixture ~keeper_name
+  @@ fun base_dir config original _dead_entry ctx ->
+  let candidate =
+    { original with
+      paused = false
+    ; latched_reason = None
+    }
+  in
+  let result =
+    Keeper_dead_revival_transaction.For_testing
+    .with_launch_publication_reread_attention
+      ~detail:"injected indeterminate launch reread attention"
+      (fun () ->
+        Keeper_dead_revival_transaction.For_testing
+        .with_launch_publication_indeterminate
+          (fun () ->
+            Keeper_dead_revival_transaction.revive
+              ctx
+              ~original
+              ~candidate))
+  in
+  (match result with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "indeterminate launch was reported as committed");
+  Alcotest.(check bool)
+    "indeterminate launch releases lifecycle reservation"
+    true
+    (Option.is_none
+       (Keeper_lifecycle_reservation.current ~base_path:base_dir ~keeper_name));
+  Alcotest.(check bool)
+    "indeterminate gated lane is no longer live"
+    true
+    (match Keeper_registry.get ~base_path:base_dir keeper_name with
+     | None -> true
+     | Some entry -> Keeper_registry.lane_has_exited entry);
+  let recovery = Keeper_dead_revival_transaction.recover_pending config in
+  Alcotest.(check int)
+    "same-process recovery has no unresolved journal"
+    0
+    (List.length recovery.unresolved);
+  let persisted =
+    match Keeper_meta_store.read_meta config keeper_name with
+    | Ok (Some meta) -> meta
+    | Ok None -> Alcotest.fail "recovery removed committed revival metadata"
+    | Error detail -> Alcotest.fail detail
+  in
+  match Keeper_keepalive.start_keepalive ctx persisted with
+  | Keeper_keepalive.Keepalive_started _ -> ()
+  | rejected ->
+    Alcotest.fail
+      ("same-process recovery could not restart committed keeper: "
+       ^ Keeper_keepalive.start_keepalive_outcome_to_string rejected)
+;;
+
 let test_dead_revival_launch_publication_warning_preserves_commit () =
   let keeper_name = "dead-revival-launch-publication-warning" in
   with_settled_dead_revival_fixture ~keeper_name
@@ -2827,6 +2883,170 @@ let test_update_keeper_launch_failure_rolls_back_and_restarts () =
     ~base_dir
     ~config
     ~keeper_name
+;;
+
+let test_update_keeper_real_fork_rejection_rolls_back_and_restarts () =
+  let keeper_name = "update-real-fork-rejection-rollback" in
+  with_running_ordinary_update_fixture ~keeper_name
+  @@ fun base_dir config original ctx ->
+  let result =
+    Keeper_lane.For_testing.with_next_fork_failure
+      (Failure "injected candidate fork rejection")
+      (fun () ->
+        Keeper_turn_up_update.update_keeper
+          ctx
+          (ordinary_update_args keeper_name)
+          original)
+  in
+  Alcotest.(check bool)
+    "real fork rejection remains an error"
+    false
+    (Keeper_types_profile.tool_result_success result);
+  assert_ordinary_update_rolled_back_and_live
+    ~base_dir
+    ~config
+    ~keeper_name
+;;
+
+let test_update_keeper_phase_b_admission_failure_restarts_exact_lane () =
+  let keeper_name = "update-phase-b-admission-failure" in
+  with_running_ordinary_update_fixture ~keeper_name
+  @@ fun base_dir config original ctx ->
+  let result =
+    Keeper_turn_up_update.For_testing.with_phase_b_admission_failure
+      ~detail:"injected phase-B admission failure"
+      (fun () ->
+        Keeper_turn_up_update.update_keeper
+          ctx
+          (ordinary_update_args keeper_name)
+          original)
+  in
+  Alcotest.(check bool)
+    "phase-B admission failure remains an error"
+    false
+    (Keeper_types_profile.tool_result_success result);
+  assert_ordinary_update_rolled_back_and_live
+    ~base_dir
+    ~config
+    ~keeper_name
+;;
+
+let test_update_keeper_revalidation_failure_restarts_reserved_lane () =
+  let keeper_name = "update-durable-revalidation-failure" in
+  with_running_ordinary_update_fixture ~keeper_name
+  @@ fun base_dir config original ctx ->
+  let result =
+    Keeper_turn_up_update.For_testing.with_durable_revalidation_failure
+      ~detail:"injected durable revalidation failure"
+      (fun () ->
+        Keeper_turn_up_update.update_keeper
+          ctx
+          (ordinary_update_args keeper_name)
+          original)
+  in
+  Alcotest.(check bool)
+    "durable revalidation failure remains an error"
+    false
+    (Keeper_types_profile.tool_result_success result);
+  assert_ordinary_update_rolled_back_and_live
+    ~base_dir
+    ~config
+    ~keeper_name
+;;
+
+let test_update_keeper_runtime_rollback_failure_keeps_candidate_consistent () =
+  let keeper_name = "update-runtime-rollback-failure" in
+  with_running_ordinary_update_fixture ~keeper_name
+  @@ fun base_dir config original ctx ->
+  let candidate_runtime = "runtime.candidate" in
+  let parsed =
+    { (ordinary_update_args keeper_name) with
+      runtime_id_opt = Some candidate_runtime
+    ; proactive_enabled_opt = Some false
+    }
+  in
+  let result =
+    Keeper_turn_up_update.For_testing.with_runtime_rollback_failure
+      ~detail:"injected runtime rollback failure"
+      (fun () ->
+        Keeper_turn_up_update.For_testing.with_launch_failure
+          ~detail:"force candidate recovery"
+          (fun () ->
+            Keeper_turn_up_update.update_keeper ctx parsed original))
+  in
+  Alcotest.(check bool)
+    "runtime rollback failure remains explicit"
+    false
+    (Keeper_types_profile.tool_result_success result);
+  Alcotest.(check (option string))
+    "candidate runtime remains paired with candidate metadata"
+    (Some candidate_runtime)
+    (Runtime.runtime_id_for_keeper keeper_name);
+  let persisted =
+    match Keeper_meta_store.read_meta config keeper_name with
+    | Ok (Some meta) -> meta
+    | Ok None -> Alcotest.fail "candidate metadata disappeared"
+    | Error detail -> Alcotest.fail detail
+  in
+  Alcotest.(check bool)
+    "candidate metadata was retained"
+    false
+    persisted.proactive.enabled;
+  match Keeper_registry.get ~base_path:base_dir keeper_name with
+  | Some entry when not (Keeper_registry.lane_has_exited entry) -> ()
+  | Some _ -> Alcotest.fail "candidate recovery retained only an exited lane"
+  | None -> Alcotest.fail "candidate recovery did not restore a live lane"
+;;
+
+let test_create_keeper_fork_rejection_removes_candidate_state () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "create-fork-rejection-rollback" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
+      Keeper_registry.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let ctx : _ Keeper_tool_surface.context =
+        { config
+        ; agent_name = "operator"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config)
+        }
+      in
+      let parsed =
+        { (ordinary_update_args keeper_name) with
+          instructions_opt = Some "create transaction fixture"
+        ; proactive_enabled_opt = Some true
+        }
+      in
+      let result =
+        Keeper_lane.For_testing.with_next_fork_failure
+          (Failure "injected create fork rejection")
+          (fun () -> Keeper_turn_up_create.create_keeper ctx parsed)
+      in
+      Alcotest.(check bool)
+        "create fork rejection remains an error"
+        false
+        (Keeper_types_profile.tool_result_success result);
+      (match Keeper_meta_store.read_meta config keeper_name with
+       | Ok None -> ()
+       | Ok (Some _) -> Alcotest.fail "failed create retained candidate metadata"
+       | Error detail -> Alcotest.fail detail);
+      Alcotest.(check bool)
+        "failed create retained no registry lane"
+        true
+        (Option.is_none (Keeper_registry.get ~base_path:base_dir keeper_name)))
 ;;
 
 let test_update_keeper_supersession_failure_rolls_back_and_restarts () =
@@ -4404,6 +4624,10 @@ let () =
             `Quick
             test_dead_revival_final_clear_failure_preserves_commit;
           Alcotest.test_case
+            "indeterminate launch releases ownership for same-process recovery"
+            `Quick
+            test_dead_revival_indeterminate_launch_releases_for_recovery;
+          Alcotest.test_case
             "launch publication warning preserves committed revival"
             `Quick
             test_dead_revival_launch_publication_warning_preserves_commit;
@@ -4489,6 +4713,26 @@ let () =
             "keeper update launch failure rolls back and restarts"
             `Quick
             test_update_keeper_launch_failure_rolls_back_and_restarts;
+          Alcotest.test_case
+            "keeper update real fork rejection rolls back and restarts"
+            `Quick
+            test_update_keeper_real_fork_rejection_rolls_back_and_restarts;
+          Alcotest.test_case
+            "keeper update phase-B admission failure restarts exact lane"
+            `Quick
+            test_update_keeper_phase_b_admission_failure_restarts_exact_lane;
+          Alcotest.test_case
+            "keeper update read failure restarts reserved lane"
+            `Quick
+            test_update_keeper_revalidation_failure_restarts_reserved_lane;
+          Alcotest.test_case
+            "runtime rollback failure retains a consistent candidate lane"
+            `Quick
+            test_update_keeper_runtime_rollback_failure_keeps_candidate_consistent;
+          Alcotest.test_case
+            "create fork rejection removes candidate durable state"
+            `Quick
+            test_create_keeper_fork_rejection_removes_candidate_state;
           Alcotest.test_case
             "keeper update supersession failure rolls back and restarts"
             `Quick

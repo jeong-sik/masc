@@ -2,6 +2,7 @@ module StringMap = Set_util.StringMap
 
 type purpose = Keeper_registry_types.lifecycle_transaction_purpose =
   | Dead_revival
+  | Keeper_update
   | Paused_work_disposition
   | Shutdown_finalization
 
@@ -49,6 +50,7 @@ let key_locks_mutex = Mutex.create ()
 
 let purpose_to_string = function
   | Dead_revival -> "dead_revival"
+  | Keeper_update -> "keeper_update"
   | Paused_work_disposition -> "paused_work_disposition"
   | Shutdown_finalization -> "shutdown_finalization"
 ;;

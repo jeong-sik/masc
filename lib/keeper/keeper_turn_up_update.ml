@@ -27,6 +27,18 @@ let supersession_failure_hook_key : string Eio.Fiber.key =
   Eio.Fiber.create_key ()
 ;;
 
+let phase_b_admission_failure_hook_key : string Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
+let durable_revalidation_failure_hook_key : string Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
+let runtime_rollback_failure_hook_key : string Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
 let invoke_after_stop_join_hook () =
   Option.iter
     (fun after_stop_join -> after_stop_join ())
@@ -57,6 +69,18 @@ module For_testing = struct
 
   let with_supersession_failure ~detail fn =
     Eio.Fiber.with_binding supersession_failure_hook_key detail fn
+  ;;
+
+  let with_phase_b_admission_failure ~detail fn =
+    Eio.Fiber.with_binding phase_b_admission_failure_hook_key detail fn
+  ;;
+
+  let with_durable_revalidation_failure ~detail fn =
+    Eio.Fiber.with_binding durable_revalidation_failure_hook_key detail fn
+  ;;
+
+  let with_runtime_rollback_failure ~detail fn =
+    Eio.Fiber.with_binding runtime_rollback_failure_hook_key detail fn
   ;;
 end
 
@@ -449,10 +473,44 @@ let update_keeper ?(preserve_prompt_defaults = false)
                             ~base_path:ctx.config.base_path
                             updated.name
                         with
-                        | None -> Ok (latest, None)
+                        | None ->
+                          (match
+                             Keeper_lifecycle_reservation.acquire
+                               ~base_path:ctx.config.base_path
+                               ~keeper_name:updated.name
+                               ~expected_generation:latest.runtime.nonce
+                               ~purpose:Keeper_lifecycle_reservation.Keeper_update
+                           with
+                           | Error
+                               (Keeper_lifecycle_reservation.Already_reserved
+                                  owner) ->
+                             Error
+                               (tool_result_error
+                                  ("keeper update could not reserve lifecycle: "
+                                   ^ Keeper_lifecycle_reservation
+                                     .snapshot_to_string
+                                       owner))
+                           | Ok token -> Ok (latest, None, token))
                         | Some entry when same_identity entry latest ->
-                          request_entry_stop entry;
-                          Ok (latest, Some entry)
+                          (match
+                             Keeper_lifecycle_reservation.acquire
+                               ~base_path:ctx.config.base_path
+                               ~keeper_name:updated.name
+                               ~expected_generation:latest.runtime.nonce
+                               ~purpose:Keeper_lifecycle_reservation.Keeper_update
+                           with
+                           | Error
+                               (Keeper_lifecycle_reservation.Already_reserved
+                                  owner) ->
+                             Error
+                               (tool_result_error
+                                  ("keeper update could not reserve lifecycle: "
+                                   ^ Keeper_lifecycle_reservation
+                                     .snapshot_to_string
+                                       owner))
+                           | Ok token ->
+                             request_entry_stop entry;
+                             Ok (latest, Some entry, token))
                         | Some replacement ->
                           Error
                             (tool_result_error
@@ -491,26 +549,46 @@ let update_keeper ?(preserve_prompt_defaults = false)
            let run_transaction () =
              match phase_a with
              | Error result -> result
-             | Ok (phase_a_meta, stop_ticket) ->
+             | Ok (phase_a_meta, stop_ticket, update_token) ->
+               let token_released = ref false in
+               let release_update_token () =
+                 if not !token_released
+                 then (
+                   token_released := true;
+                   match Keeper_lifecycle_reservation.release update_token with
+                   | Keeper_lifecycle_reservation.Released -> ()
+                   | Keeper_lifecycle_reservation.Release_missing ->
+                     Log.Keeper.warn
+                       "keeper update lifecycle reservation disappeared \
+                        keeper=%s"
+                       updated.name
+                   | Keeper_lifecycle_reservation.Release_not_owner owner ->
+                     Log.Keeper.error
+                       "keeper update lifecycle reservation changed keeper=%s \
+                        owner=%s"
+                       updated.name
+                       (Keeper_lifecycle_reservation.snapshot_to_string owner))
+               in
                Option.iter
                  (fun (entry : Keeper_registry.registry_entry) ->
-                   ignore (Keeper_lane.await_exit entry.lane : Keeper_lane.exit);
-                   ignore
-                     (Eio.Promise.await entry.done_p
-                       : Keeper_registry.done_resolution))
+                   let _lane_exit = Keeper_lane.await_exit entry.lane in
+                   let _terminal = Eio.Promise.await entry.done_p in
+                   ())
                  stop_ticket;
                invoke_after_stop_join_hook ();
-               let run_update permit =
+               let run_update_owned permit =
                  match
-                   Keeper_lifecycle_reservation.current
+                   Keeper_lifecycle_reservation.authorize
+                     ~token:update_token
                      ~base_path:ctx.config.base_path
                      ~keeper_name:updated.name
+                     ()
                  with
-                 | Some owner ->
+                 | Error owner ->
                    tool_result_error
-                     ("keeper update phase-B blocked by lifecycle reservation: "
+                     ("keeper update phase-B lost lifecycle reservation: "
                       ^ Keeper_lifecycle_reservation.snapshot_to_string owner)
-                 | None ->
+                 | Ok () ->
                    let replacement =
                      match
                        Keeper_registry.get
@@ -539,6 +617,9 @@ let update_keeper ?(preserve_prompt_defaults = false)
                         else
                           match
                             start_keepalive_under_admission
+                              ~lifecycle_token:update_token
+                              ~durable_meta_bootstrap:
+                                Durable_meta_already_committed
                               permit
                               ctx
                               meta
@@ -566,9 +647,15 @@ let update_keeper ?(preserve_prompt_defaults = false)
                              ^ detail)
                       in
                       (match
-                         Keeper_meta_store.read_meta
-                           ctx.config
-                           updated.name
+                         match
+                           Eio.Fiber.get
+                             durable_revalidation_failure_hook_key
+                         with
+                         | Some detail -> Error detail
+                         | None ->
+                           Keeper_meta_store.read_meta
+                             ctx.config
+                             updated.name
                        with
                        | Error detail ->
                          fail_and_restart
@@ -624,16 +711,22 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                    if not !runtime_assignment_changed
                                    then Ok ()
                                    else
-                                     match previous_runtime with
-                                     | Some runtime_id ->
-                                       Runtime.set_runtime_id_for_keeper
-                                         ~keeper_name:candidate.name
-                                         ~runtime_id
-                                         ()
+                                     match
+                                       Eio.Fiber.get
+                                         runtime_rollback_failure_hook_key
+                                     with
+                                     | Some detail -> Error detail
                                      | None ->
-                                       Runtime.clear_runtime_id_for_keeper
-                                         ~keeper_name:candidate.name
-                                         ()
+                                       (match previous_runtime with
+                                        | Some runtime_id ->
+                                          Runtime.set_runtime_id_for_keeper
+                                            ~keeper_name:candidate.name
+                                            ~runtime_id
+                                            ()
+                                        | None ->
+                                          Runtime.clear_runtime_id_for_keeper
+                                            ~keeper_name:candidate.name
+                                            ())
                                  in
                                  let settle_registered_lane () =
                                    Option.iter abort_launch_gate !gate;
@@ -645,12 +738,13 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                    | None -> ()
                                    | Some entry ->
                                      request_entry_stop entry;
-                                     ignore
-                                       (Keeper_lane.await_exit entry.lane
-                                         : Keeper_lane.exit);
-                                     ignore
-                                       (Eio.Promise.await entry.done_p
-                                         : Keeper_registry.done_resolution)
+                                     let _lane_exit =
+                                       Keeper_lane.await_exit entry.lane
+                                     in
+                                     let _terminal =
+                                       Eio.Promise.await entry.done_p
+                                     in
+                                     ()
                                  in
                                  let restore_durable_meta () =
                                    match
@@ -677,7 +771,11 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                        }
                                      in
                                      (match
-                                        write_meta ctx.config rollback
+                                        write_meta_for_lifecycle
+                                          permit
+                                          update_token
+                                          ctx.config
+                                          rollback
                                       with
                                       | Error detail -> Error detail
                                       | Ok () ->
@@ -705,17 +803,37 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                    settle_registered_lane ();
                                    let errors = ref [] in
                                    (match restore_runtime_assignment () with
-                                    | Ok () -> ()
                                     | Error detail ->
                                       errors :=
                                         ("runtime rollback: " ^ detail)
-                                        :: !errors);
-                                   (match restore_durable_meta () with
-                                    | Error detail ->
-                                      errors :=
-                                        ("metadata rollback: " ^ detail)
-                                        :: !errors
-                                    | Ok restored ->
+                                        :: !errors;
+                                      (match
+                                         Keeper_meta_store.read_meta
+                                           ctx.config
+                                           candidate.name
+                                       with
+                                       | Ok (Some current)
+                                         when Keeper_id.Trace_id.equal
+                                                current.runtime.trace_id
+                                                candidate.runtime.trace_id
+                                              && Int.equal
+                                                   current.runtime.nonce
+                                                   candidate.runtime.nonce ->
+                                         (match restart_meta current with
+                                          | Ok () -> ()
+                                          | Error restart_detail ->
+                                            errors :=
+                                              ("candidate lane recovery: "
+                                               ^ restart_detail)
+                                              :: !errors)
+                                       | Ok _ | Error _ -> ())
+                                    | Ok () ->
+                                      (match restore_durable_meta () with
+                                       | Error detail ->
+                                         errors :=
+                                           ("metadata rollback: " ^ detail)
+                                           :: !errors
+                                       | Ok restored ->
                                       (match
                                          restart_meta restored
                                        with
@@ -723,7 +841,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                        | Error detail ->
                                          errors :=
                                            ("lane rollback: " ^ detail)
-                                           :: !errors));
+                                           :: !errors)));
                                    let detail =
                                      match List.rev !errors with
                                      | [] -> failure
@@ -765,7 +883,11 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                    | Ok () ->
                                      meta_write_attempted := true;
                                      (match
-                                        write_meta ctx.config candidate
+                                        write_meta_for_lifecycle
+                                          permit
+                                          update_token
+                                          ctx.config
+                                          candidate
                                       with
                                       | Error detail ->
                                         Otel_metric_store.inc_counter
@@ -871,7 +993,11 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                                    gate := Some launch_gate;
                                                    (match
                                                       start_keepalive_under_admission
+                                                        ~lifecycle_token:
+                                                          update_token
                                                         ~launch_gate
+                                                        ~durable_meta_bootstrap:
+                                                          Durable_meta_already_committed
                                                         permit
                                                         ctx
                                                         committed
@@ -913,7 +1039,68 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                       cancelled
                                       backtrace))))))
                in
-               match
+               let run_update permit =
+                 try
+                   let result = run_update_owned permit in
+                   release_update_token ();
+                   result
+                 with
+                 | exception_ ->
+                   let backtrace = Printexc.get_raw_backtrace () in
+                   Eio.Cancel.protect release_update_token;
+                   Printexc.raise_with_backtrace exception_ backtrace
+               in
+               let restart_after_admission_failure detail =
+                 release_update_token ();
+                 match start_keepalive ctx phase_a_meta with
+                 | Keepalive_started _
+                 | Keepalive_already_registered _ ->
+                   tool_result_error detail
+                 | rejected ->
+                   tool_result_error
+                     (detail
+                      ^ "; exact lane restart failed: "
+                      ^ start_keepalive_outcome_to_string rejected)
+               in
+               let phase_b =
+                 match Eio.Fiber.get phase_b_admission_failure_hook_key with
+                 | Some detail -> `Injected_failure detail
+                 | None ->
+                   `Admission
+                     (Keeper_lifecycle_admission.Durable_transaction
+                      .with_durable_lifecycle_admission
+                        ctx.config
+                        ~keeper_name:updated.name
+                        run_update)
+               in
+               match phase_b with
+               | `Injected_failure detail ->
+                 restart_after_admission_failure
+                   ("keeper update phase-B admission failed: " ^ detail)
+               | `Admission
+                   (Keeper_lifecycle_admission.Durable_transaction
+                    .Admission_completed result) ->
+                 result
+               | `Admission
+                   (Keeper_lifecycle_admission.Durable_transaction
+                    .Admission_completed_with_attention (result, failure)) ->
+                 Log.Keeper.error
+                   "keeper update lifecycle admission release requires \
+                    attention keeper=%s failure=%s"
+                   updated.name
+                   (Keeper_lifecycle_admission.Durable_transaction
+                    .authority_failure_to_wire
+                      failure);
+                 result
+               | `Admission
+                   (Keeper_lifecycle_admission.Durable_transaction
+                    .Admission_blocked reason) ->
+                 restart_after_admission_failure
+                   ("keeper update phase-B admission blocked: "
+                    ^ Keeper_lifecycle_admission.Durable_transaction
+                      .blocked_reason_to_wire
+                        reason)
+               (*
                  Keeper_lifecycle_admission.Durable_transaction
                  .with_durable_lifecycle_admission
                    ctx.config
@@ -936,6 +1123,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                | Keeper_lifecycle_admission.Durable_transaction
                  .Admission_blocked reason ->
                  admission_error reason
+               *)
            in
            let result = Eio.Cancel.protect run_transaction in
            Eio.Fiber.check ();

@@ -993,7 +993,7 @@ type recovery_claim =
   | Recovery_forward_complete of journal_stage
   | Recovery_already_cleared
 
-let rec claim_recovery_rollback config journal attempts =
+let rec claim_recovery_rollback config (journal : journal) attempts =
   if attempts <= 0
   then
     Error

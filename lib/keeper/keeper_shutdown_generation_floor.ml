@@ -92,7 +92,7 @@ let decode_row ~keeper_id raw =
   let invalid detail = Error (Invalid_current detail) in
   match Yojson.Safe.from_string raw with
   | exception Yojson.Json_error _ -> invalid "authority is not current canonical JSON"
-  | `Assoc fields as json ->
+  | `Assoc fields ->
     let names = List.map fst fields |> List.sort String.compare in
     let expected =
       [ "checksum_sha256"; "generation"; "keeper_id"; "schema" ]

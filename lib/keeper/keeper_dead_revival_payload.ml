@@ -834,7 +834,7 @@ let create config prepared =
                  ; initial_failure
                  ; reconciliation_failure =
                      Reconciliation_read_settlement_failed warnings
-                 }))
+                 })
           | Error (Observation_injected_read_failed detail) ->
             Error
               (Create_reconciliation_failed

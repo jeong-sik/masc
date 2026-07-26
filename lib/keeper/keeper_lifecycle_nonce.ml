@@ -122,15 +122,15 @@ let payload_json (row : row) =
     ]
 ;;
 
-let payload_bytes row =
+let payload_bytes (row : row) =
   Yojson.Safe.to_string (payload_json row)
 ;;
 
-let checksum row =
+let checksum (row : row) =
   sha256 ("keeper-lifecycle-nonce-checksum-v1\000" ^ payload_bytes row)
 ;;
 
-let row_bytes row =
+let row_bytes (row : row) =
   `Assoc
     [ "schema", `String schema
     ; "keeper_id", `String row.keeper_id

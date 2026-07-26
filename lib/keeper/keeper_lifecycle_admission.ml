@@ -603,7 +603,7 @@ module Durable_transaction = struct
       "revival_transaction_mismatch"
   ;;
 
-  let evidence_to_yojson evidence =
+  let evidence_to_yojson (evidence : evidence) =
     `Assoc
       [ "keeper_name", `String evidence.keeper_name
       ; "transaction_id", `String evidence.transaction_id

@@ -12,7 +12,7 @@ val supervise_keepalive :
      'a Keeper_types_profile.context ->
      Keeper_meta_contract.keeper_meta ->
      Keeper_registry.registry_entry ->
-     (unit, 'launch_error) result) ->
+     (unit, Keeper_state_machine.transition_error) result) ->
   proactive_warmup_sec:int ->
   'a Keeper_types_profile.context ->
   Keeper_meta_contract.keeper_meta ->

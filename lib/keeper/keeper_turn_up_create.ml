@@ -398,6 +398,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         tool_result_ok_data json
          | ( Keepalive_already_registered _
            | Keepalive_lifecycle_denied _
+           | Keepalive_transaction_admission_denied _
            | Keepalive_identity_unrepairable
            | Keepalive_registration_rejected _
            | Keepalive_fiber_start_rejected _

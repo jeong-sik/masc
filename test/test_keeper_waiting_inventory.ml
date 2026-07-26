@@ -980,7 +980,7 @@ let test_corrupt_pending_confirms_is_read_error () =
 let test_unavailable_pending_approval_store_is_read_error () =
   with_workspace
   @@ fun config ->
-  let error : Keeper_approval_queue.storage_error =
+  let error : Masc.Keeper_approval_queue.storage_error =
     { path = "keeper_gate_pending.json"
     ; reason = "current snapshot requires runtime reset"
     }

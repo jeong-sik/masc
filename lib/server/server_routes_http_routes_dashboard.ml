@@ -1162,8 +1162,9 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/gate/tool-events" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
-         let json = dashboard_gate_tool_events_http_json req in
+       with_public_read (fun state req reqd ->
+         let base_path = (Mcp_server.workspace_config state).base_path in
+         let json = dashboard_gate_tool_events_http_json req ~base_path in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/gate/mode" (fun request reqd ->

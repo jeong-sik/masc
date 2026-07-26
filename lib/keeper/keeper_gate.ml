@@ -448,10 +448,6 @@ let classify_auto_judge_entry
     Keeper_approval_queue.Exact_unbound,
     Keeper_approval_queue.Summary_pending ->
     Auto_judge_pending_unbound
-  | Keeper_approval_queue.Summary_attempt_identity_unbound,
-    Keeper_approval_queue.Exact_unbound,
-    Keeper_approval_queue.Summary_available summary ->
-    Auto_judge_finalizable summary
   | ( Keeper_approval_queue.Summary_attempt_settled
     | Keeper_approval_queue.Summary_attempt_persistence_uncertain ),
     Keeper_approval_queue.Exact_bound

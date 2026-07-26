@@ -2017,7 +2017,7 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
        drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
-let test_recovered_exact_unbound_is_rejected_without_completion () =
+let test_current_snapshot_rejects_unbound_available_summary () =
   let base_path = temp_dir () in
   let keeper_name = "queue-recovered-exact-unbound" in
   Fun.protect
@@ -2081,44 +2081,21 @@ let test_recovered_exact_unbound_is_rejected_without_completion () =
          | _ -> Alcotest.fail "pending snapshot root was not an object"
        in
        write_pending_snapshot ~base_path snapshot;
+       let original = read_pending_snapshot_bytes ~base_path in
        AQ.For_testing.reset_runtime_state ();
-       ignore (install_exn ~base_path);
-       let completion_calls = ref 0 in
-       let report =
-         Gate.For_testing.resume_persisted_auto_judges_with_exact_completion
-           ~complete_summary_exact_attempt:
-             (fun
-               ~id:_
-               ~input_hash:_
-               ~sequence:_
-               ~slot_id:_
-               ~call_id:_
-               ~plan_fingerprint:_
-               ~request_body_sha256:_
-               ~summary:_ ->
-              incr completion_calls;
-              Alcotest.fail
-                "recovered Exact_unbound row reached exact completion")
-           ~base_path
-       in
-       Alcotest.(check int) "recovered identity-unbound candidate" 1 report.requested;
-       Alcotest.(check int) "recovered identity-unbound finalizes zero" 0
-         (List.length report.finalized_ids);
-       Alcotest.(check int) "recovered identity-unbound completion calls" 0
-         !completion_calls;
-       (match report.failures with
-        | [ { Gate.approval_id
-            ; code = Gate.Resume_identity_unbound
-            ; operator_detail
-            } ] ->
-          Alcotest.(check string) "identity-unbound approval id" id approval_id;
-          Alcotest.(check bool) "identity-unbound operator detail is explicit" true
-            (String.trim operator_detail <> "")
-        | _ ->
+       (match AQ.install_persistence ~base_path with
+        | Error (AQ.Install_storage_failed _) -> ()
+        | Error error ->
           Alcotest.fail
-            "recovered Exact_unbound row lacked its typed failure report");
-       Alcotest.(check bool) "recovered identity-unbound remains pending" true
-         (Option.is_some (AQ.get_pending_entry ~id)))
+            ("impossible current snapshot returned the wrong error: "
+             ^ AQ.install_error_to_string error)
+        | Ok _ ->
+          Alcotest.fail
+            "current snapshot installed Exact_unbound with an available summary");
+       Alcotest.(check string)
+         "rejected current snapshot is preserved"
+         original
+         (read_pending_snapshot_bytes ~base_path))
 ;;
 
 let test_blocked_disposition_requires_operator_rearm_before_bind () =
@@ -2853,9 +2830,9 @@ let () =
               `Quick
               test_exact_completed_restart_requires_fsync_confirmation
         ; Alcotest.test_case
-            "recovered Exact_unbound rejects completion"
+            "current snapshot rejects unbound available summary"
             `Quick
-            test_recovered_exact_unbound_is_rejected_without_completion
+            test_current_snapshot_rejects_unbound_available_summary
         ; Alcotest.test_case
             "blocked disposition requires operator rearm before bind"
             `Quick

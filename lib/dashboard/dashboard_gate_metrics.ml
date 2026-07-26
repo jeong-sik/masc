@@ -165,9 +165,7 @@ let percentile_sorted arr p =
       let frac = rank -. float_of_int lo in
       Some (arr.(lo) +. ((arr.(hi) -. arr.(lo)) *. frac))
 
-(** Approval queue snapshot: depth + wait-time percentiles.
-    Reads {!Keeper_approval_queue.list_pending_json} for the live pending
-    set and computes p50/p95/oldest from [waiting_s] timestamps. *)
+(** Approval queue snapshot: depth + wait-time percentiles. *)
 type approval_summary = {
   depth : int;
   p50_wait_sec : float option;
@@ -175,22 +173,12 @@ type approval_summary = {
   oldest_pending_sec : float option;
 }
 
-let approval_queue_summary () : approval_summary =
-  let pending_json = Keeper_approval_queue.list_pending_json () in
+let approval_queue_summary_of_entries ~now_ts entries : approval_summary =
   let waits =
-    match pending_json with
-    | `List items ->
-      List.filter_map
-        (fun item ->
-          match item with
-          | `Assoc fields ->
-            (match List.assoc_opt "waiting_s" fields with
-             | Some (`Float f) -> Some f
-             | Some (`Int i) -> Some (float_of_int i)
-             | _ -> None)
-          | _ -> None)
-        items
-    | _ -> []
+    List.map
+      (fun (entry : Keeper_approval_queue.pending_approval) ->
+        Float.max 0.0 (now_ts -. entry.requested_at))
+      entries
   in
   let depth = List.length waits in
   if depth = 0 then
@@ -206,6 +194,12 @@ let approval_queue_summary () : approval_summary =
       p95_wait_sec = percentile_sorted arr 0.95;
       oldest_pending_sec = Some oldest;
     }
+
+let approval_queue_summary ?(now_ts = Unix.gettimeofday ()) ~base_path ()
+  : (approval_summary, Keeper_approval_queue.storage_error) result
+  =
+  Keeper_approval_queue.list_pending_entries_for_workspace ~base_path
+  |> Result.map (approval_queue_summary_of_entries ~now_ts)
 
 (* ── JSON projection ─────────────────────────────────────── *)
 
@@ -232,17 +226,42 @@ let approval_queue_json (summary : approval_summary) : Yojson.Safe.t =
     ("oldest_pending_sec", Json_util.float_opt_to_json summary.oldest_pending_sec);
   ]
 
-(** Top-level endpoint payload. *)
-let gate_tool_events_json ?(now_ts = Unix.gettimeofday ())
-    ~window_minutes () : Yojson.Safe.t =
+let gate_tool_events_json_with_pending_result
+      ?(now_ts = Unix.gettimeofday ())
+      ~window_minutes
+      pending_result
+  =
   let rejections = tool_rejections_json ~window_minutes ~now_ts () in
-  let approval = approval_queue_summary () in
+  let approval_queue_state, approval_queue =
+    match pending_result with
+    | Ok entries ->
+      ( Keeper_approval_queue.approval_queue_ready_state_json
+      , approval_queue_summary_of_entries ~now_ts entries
+        |> approval_queue_json )
+    | Error error ->
+      ( Keeper_approval_queue.approval_queue_unavailable_state_json error
+      , `Null )
+  in
   `Assoc [
     ("generated_at", `String (Masc_domain.iso8601_of_unix_seconds now_ts));
     ("window_minutes", `Int window_minutes);
     ("tool_rejections", `List rejections);
-    ("approval_queue", approval_queue_json approval);
+    ("approval_queue_state", approval_queue_state);
+    ("approval_queue", approval_queue);
   ]
+
+(** Top-level endpoint payload. *)
+let gate_tool_events_json ?now_ts ~base_path ~window_minutes () : Yojson.Safe.t =
+  let pending_result =
+    Keeper_approval_queue.list_pending_entries_for_workspace ~base_path
+  in
+  gate_tool_events_json_with_pending_result
+    ?now_ts
+    ~window_minutes
+    pending_result
+
+let gate_tool_events_json_with_pending_result_for_testing =
+  gate_tool_events_json_with_pending_result
 
 let () =
   Keeper_keepalive_signal.register_record_tool_skipped (fun ~keeper_name ~tool_name ~reason_code ->

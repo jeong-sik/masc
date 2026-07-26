@@ -184,14 +184,23 @@ let runtime_state_fields_json (config : Workspace_utils.config) (meta : keeper_m
 ;;
 
 let attention_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =
-  let pending_approval_count =
-    Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
+  let approval_queue =
+    match
+      Keeper_approval_queue.pending_count_for_keeper_in_workspace
+        ~base_path:config.base_path
+        ~keeper_name:meta.name
+    with
+    | Ok count -> `Ready count
+    | Error error -> `Unavailable error
   in
   let runtime_blocker = runtime_blocker_surface_opt config meta in
   let needs_attention, attention_reason, next_human_action =
-    if pending_approval_count > 0
-    then true, Some "approval_pending", Some "resolve_approval"
-    else (
+    match approval_queue with
+    | `Unavailable _ ->
+      true, Some "approval_queue_unavailable", Some "reset_runtime_state"
+    | `Ready pending_approval_count when pending_approval_count > 0 ->
+      true, Some "approval_pending", Some "resolve_approval"
+    | `Ready _ ->
       match runtime_blocker with
       | Some _ when meta.paused ->
         true, Some "paused", Some "inspect_blocker_before_resume"
@@ -205,11 +214,21 @@ let attention_fields_json (config : Workspace_utils.config) (meta : keeper_meta)
         true, Some "fiber_unresolved", Some "inspect_turn_finalization"
       | Some _ -> true, Some "runtime_blocked", Some "inspect_runtime_blocker"
       | None when meta.paused -> true, Some "paused", Some "resume_or_review"
-      | None -> false, None, None)
+      | None -> false, None, None
+  in
+  let approval_queue_state, pending_approval_count =
+    match approval_queue with
+    | `Ready count ->
+      Keeper_approval_queue.approval_queue_ready_state_json, `Int count
+    | `Unavailable error ->
+      ( Keeper_approval_queue.approval_queue_unavailable_state_json error
+      , `Null )
   in
   [ "needs_attention", `Bool needs_attention
   ; "attention_reason", Json_util.string_opt_to_json attention_reason
   ; "next_human_action", Json_util.string_opt_to_json next_human_action
+  ; "approval_queue_state", approval_queue_state
+  ; "pending_approval_count", pending_approval_count
   ; (* Typed pause reason surfaced as its stable wire form. [attention_reason]
        above collapses every pause to the single label "paused"; this field
        preserves {i why} the keeper is latched (operator pause, dead

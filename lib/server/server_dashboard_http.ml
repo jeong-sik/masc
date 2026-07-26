@@ -214,11 +214,14 @@ let dashboard_gate_http_json request ~base_path : Yojson.Safe.t =
 
 (** Read the optional [?window=<minutes>] query param.
     Defaults to 60 minutes; clamped to [5..1440]. *)
-let dashboard_gate_tool_events_http_json request : Yojson.Safe.t =
+let dashboard_gate_tool_events_http_json request ~base_path : Yojson.Safe.t =
   let window =
     int_query_param request "window" ~default:60 |> clamp ~min_v:5 ~max_v:1440
   in
-  Dashboard_gate_metrics.gate_tool_events_json ~window_minutes:window ()
+  Dashboard_gate_metrics.gate_tool_events_json
+    ~base_path
+    ~window_minutes:window
+    ()
 ;;
 
 (* /api/v1/dashboard/proof was measured at 28-60s (timeout) under

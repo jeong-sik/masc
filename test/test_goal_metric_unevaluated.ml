@@ -248,7 +248,7 @@ let test_goals_tree_preserves_approval_queue_unavailable () =
     Error error
   in
   let json =
-    Masc.Dashboard_goals.For_testing
+    Dashboard_goals.For_testing
     .dashboard_goals_tree_json_with_pending_reader
       ~read_pending ~config
   in

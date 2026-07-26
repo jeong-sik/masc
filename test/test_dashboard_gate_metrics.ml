@@ -63,22 +63,60 @@ let test_ring_caps_oldest_event () =
   check int "kept count" max_ring_size count
 
 let test_approval_summary_empty () =
-  let summary = GM.approval_queue_summary () in
+  let summary =
+    match
+      GM.approval_queue_summary
+        ~now_ts:now
+        ~base_path:"/tmp/masc-gate-metrics-empty"
+        ()
+    with
+    | Ok summary -> summary
+    | Error _ ->
+      Alcotest.fail "empty workspace queue unexpectedly unavailable"
+  in
   check int "empty queue depth" 0 summary.depth;
   check bool "p50 None" true (Option.is_none summary.p50_wait_sec);
   check bool "oldest None" true (Option.is_none summary.oldest_pending_sec)
 
 let test_json_shape () =
   inject ~tool:"bash" ~reason:"policy" ();
-  let json = GM.gate_tool_events_json ~now_ts:(now +. 1.0) ~window_minutes:60 () in
+  let json =
+    GM.gate_tool_events_json
+      ~now_ts:(now +. 1.0)
+      ~base_path:"/tmp/masc-gate-metrics-json"
+      ~window_minutes:60
+      ()
+  in
   let open Yojson.Safe.Util in
   let rejections = json |> member "tool_rejections" |> to_list in
   check bool "has rejections" true (List.length rejections > 0);
   let q = json |> member "approval_queue" in
   let depth = q |> member "depth" |> to_int in
   check bool "depth is int" true (depth >= 0);
+  check string "queue state ready" "ready"
+    (json |> member "approval_queue_state" |> member "state" |> to_string);
   let window = json |> member "window_minutes" |> to_int in
   check int "window propagated" 60 window
+
+let test_unavailable_queue_is_not_projected_as_empty () =
+  let error : Keeper_approval_queue.storage_error =
+    { path = "/tmp/masc-gate-metrics-unavailable"
+    ; reason = "current snapshot requires reset"
+    }
+  in
+  let json =
+    GM.gate_tool_events_json_with_pending_result_for_testing
+      ~now_ts:now
+      ~window_minutes:60
+      (Error error)
+  in
+  let open Yojson.Safe.Util in
+  check string "queue state unavailable" "unavailable"
+    (json |> member "approval_queue_state" |> member "state" |> to_string);
+  check string "operator action is reset" "reset_required"
+    (json |> member "approval_queue_state" |> member "code" |> to_string);
+  check bool "unavailable queue is null" true
+    (json |> member "approval_queue" = `Null)
 
 let test_record_failure_is_metric_visible () =
   let labels =
@@ -119,6 +157,10 @@ let () =
     ];
     "json", [
       test_case "json shape" `Quick (with_fresh test_json_shape);
+      test_case
+        "unavailable queue is not empty"
+        `Quick
+        (with_fresh test_unavailable_queue_is_not_projected_as_empty);
     ];
     "failure_visibility", [
       test_case "record failure increments metric" `Quick

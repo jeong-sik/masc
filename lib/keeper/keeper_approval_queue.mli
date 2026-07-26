@@ -459,4 +459,7 @@ val rearm_summary_attempt :
     may return to unbound only after its complete identity matches. Terminal
     exact quarantine is never rearmed. *)
 
-val pending_count_for_keeper : keeper_name:string -> int
+val pending_count_for_keeper_in_workspace :
+  base_path:string -> keeper_name:string -> (int, storage_error) result
+(** Count one keeper's pending approvals within the durable workspace store.
+    Store read failures remain explicit instead of collapsing to zero. *)

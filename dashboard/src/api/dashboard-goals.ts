@@ -5,6 +5,7 @@
 import { isRecord, asBoolean, asInt, asNullableString, asNumber, asRecordArray, asString, asStringArray } from '../components/common/normalize'
 import { normalizeKeeperTrustTerminalReason } from '../keeper-store-normalize'
 import { get } from './core'
+import { decodeKeeperApprovalQueueState } from './dashboard-gate'
 import type {
   DashboardGoalsTreeResponse,
   DashboardGoalDetailResponse,
@@ -307,17 +308,8 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
   }
 }
 
-function decodeGoalTreeSummary(raw: unknown): GoalTreeSummary {
-  if (!isRecord(raw)) {
-    return {
-      total_goals: 0,
-      active_goals: 0,
-      phase_counts: {},
-      total_tasks: 0,
-      done_tasks: 0,
-      pending_approvals: 0,
-    }
-  }
+function decodeGoalTreeSummary(raw: unknown): GoalTreeSummary | null {
+  if (!isRecord(raw)) return null
   return {
     total_goals: asInt(raw.total_goals) ?? 0,
     active_goals: asInt(raw.active_goals) ?? 0,
@@ -328,22 +320,14 @@ function decodeGoalTreeSummary(raw: unknown): GoalTreeSummary {
   }
 }
 
-function rejectUnavailableApprovalQueue(raw: Record<string, unknown>): void {
-  if (!isRecord(raw.approval_queue_state)) return
-  const state = raw.approval_queue_state
-  if (state.state !== 'unavailable') return
-  const title = asString(state.title, '').trim()
-  const operatorDetail = asString(state.operator_detail, '').trim()
-  if (
-    state.code !== 'reset_required'
-    || state.severity !== 'bad'
-    || state.icon !== '!'
-    || !title
-    || !operatorDetail
-  ) {
+function requireReadyApprovalQueue(raw: Record<string, unknown>): void {
+  const state = decodeKeeperApprovalQueueState(raw.approval_queue_state)
+  if (!state) {
     throw new Error('유효하지 않은 dashboard goals approval_queue_state payload')
   }
-  throw new Error(`${state.icon} ${title}: ${operatorDetail}`)
+  if (state.state === 'unavailable') {
+    throw new Error(`${state.icon} ${state.title}: ${state.operator_detail}`)
+  }
 }
 
 function decodeGoalDetailKeeper(raw: unknown): GoalDetailKeeper | null {
@@ -392,11 +376,13 @@ function decodeGoalDetailTimelineEvent(raw: unknown): GoalDetailTimelineEvent | 
 
 function decodeDashboardGoalsTreeResponse(raw: unknown): DashboardGoalsTreeResponse | null {
   if (!isRecord(raw)) return null
-  rejectUnavailableApprovalQueue(raw)
+  requireReadyApprovalQueue(raw)
+  if (!Array.isArray(raw.tree)) return null
   const tree = asRecordArray(raw.tree)
     .map(decodeGoalTreeNode)
     .filter((node): node is GoalTreeNode => node !== null)
   const summary = decodeGoalTreeSummary(raw.summary)
+  if (!summary) return null
   const generatedAt = asString(raw.generated_at)
   return generatedAt
     ? { generated_at: generatedAt, tree, summary }
@@ -405,7 +391,7 @@ function decodeDashboardGoalsTreeResponse(raw: unknown): DashboardGoalsTreeRespo
 
 function decodeDashboardGoalDetailResponse(raw: unknown): DashboardGoalDetailResponse | null {
   if (!isRecord(raw)) return null
-  rejectUnavailableApprovalQueue(raw)
+  requireReadyApprovalQueue(raw)
   const goal = decodeGoalTreeNode(raw.goal)
   if (!goal) return null
   const generatedAt = asString(raw.generated_at)

@@ -4,8 +4,7 @@
     Two ingestion paths backing the public surface:
     - In-memory ring of recent tool-skip events fed by
       {!record_tool_skipped} (called from [Keeper_hooks_oas]).
-    - Live approval queue read of
-      {!Keeper_approval_queue.list_pending_json}.
+    - Workspace-scoped durable approval queue reads.
 
     The ring buffer, rejection event record, and supporting helpers
     (snapshot, percentile, JSON projection) are intentionally hidden:
@@ -30,12 +29,20 @@ val record_tool_skipped :
     {!Keeper_metrics.(to_string LifecycleCallbackFailures)} and logged
     without failing the SSE broadcast path. *)
 
-val approval_queue_summary : unit -> approval_summary
+val approval_queue_summary :
+  ?now_ts:float ->
+  base_path:string ->
+  unit ->
+  (approval_summary, Keeper_approval_queue.storage_error) result
 (** Read the current approval queue and produce depth + wait-time
-    percentiles. *)
+    percentiles. Durable store unavailability remains explicit. *)
 
 val gate_tool_events_json :
-  ?now_ts:float -> window_minutes:int -> unit -> Yojson.Safe.t
+  ?now_ts:float ->
+  base_path:string ->
+  window_minutes:int ->
+  unit ->
+  Yojson.Safe.t
 (** Top-level HTTP endpoint payload combining tool-rejection counts
     over the [window_minutes] window with the approval queue summary.
     [now_ts] is injectable for testing. *)
@@ -72,6 +79,16 @@ val record_tool_skipped_with_append_for_testing :
 (** Run the production exception-handling path with an injected append
     callback so tests can prove metrics/log visibility without relying
     on an actual mutex failure. *)
+
+val gate_tool_events_json_with_pending_result_for_testing :
+  ?now_ts:float ->
+  window_minutes:int ->
+  ( Keeper_approval_queue.pending_approval list
+  , Keeper_approval_queue.storage_error )
+  result ->
+  Yojson.Safe.t
+(** Project an injected workspace read result through the production
+    ready/unavailable JSON boundary. *)
 
 val tool_rejection_counts :
   ?now_ts:float ->

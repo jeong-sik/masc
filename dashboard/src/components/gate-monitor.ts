@@ -16,6 +16,8 @@ import { useSavedSignal } from '../lib/saved-signal'
 import { MISSING_DATA_DASH } from '../lib/format-string'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { get, type GetOptions } from '../api/core'
+import { decodeKeeperApprovalQueueState } from '../api/dashboard-gate'
+import type { KeeperApprovalQueueState } from '../types'
 
 interface ToolRejection {
   tool: string
@@ -58,7 +60,23 @@ interface GateToolEvents {
   generated_at: string
   window_minutes: number
   tool_rejections: ToolRejection[]
-  approval_queue: ApprovalQueue
+  approval_queue_state: KeeperApprovalQueueState
+  approval_queue: ApprovalQueue | null
+}
+
+function invalidGateToolEvents(detail: string): never {
+  throw new Error(`invalid Gate tool-events payload: ${detail}`)
+}
+
+function queueNumber(raw: unknown, field: string): number {
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0) {
+    return invalidGateToolEvents(`approval_queue.${field} must be a non-negative number`)
+  }
+  return raw
+}
+
+function nullableQueueNumber(raw: unknown, field: string): number | null {
+  return raw === null ? null : queueNumber(raw, field)
 }
 
 async function fetchGateToolEvents(
@@ -70,6 +88,10 @@ async function fetchGateToolEvents(
     { signal: opts?.signal },
   )
   if (!isRecord(raw)) throw new Error('invalid Gate tool-events payload')
+  const approvalQueueState = decodeKeeperApprovalQueueState(raw.approval_queue_state)
+  if (!approvalQueueState) {
+    return invalidGateToolEvents('approval_queue_state is not a current closed variant')
+  }
   const rejections = Array.isArray(raw.tool_rejections)
     ? (raw.tool_rejections as unknown[]).filter(isRecord).map(r => ({
         tool: String(r.tool ?? ''),
@@ -77,16 +99,36 @@ async function fetchGateToolEvents(
         count: Number(r.count ?? 0),
       }))
     : []
-  const q = isRecord(raw.approval_queue) ? raw.approval_queue : {}
+  if (approvalQueueState.state === 'unavailable') {
+    if (raw.approval_queue !== null) {
+      return invalidGateToolEvents('unavailable approval_queue must be null')
+    }
+    return {
+      generated_at: String(raw.generated_at ?? ''),
+      window_minutes: Number(raw.window_minutes ?? windowMinutes),
+      tool_rejections: rejections,
+      approval_queue_state: approvalQueueState,
+      approval_queue: null,
+    }
+  }
+  if (!isRecord(raw.approval_queue)) {
+    return invalidGateToolEvents('ready approval_queue must be an object')
+  }
+  const q = raw.approval_queue
+  const depth = queueNumber(q.depth, 'depth')
+  if (!Number.isInteger(depth)) {
+    return invalidGateToolEvents('approval_queue.depth must be an integer')
+  }
   return {
     generated_at: String(raw.generated_at ?? ''),
     window_minutes: Number(raw.window_minutes ?? windowMinutes),
     tool_rejections: rejections,
+    approval_queue_state: approvalQueueState,
     approval_queue: {
-      depth: Number(q.depth ?? 0),
-      p50_wait_sec: typeof q.p50_wait_sec === 'number' ? q.p50_wait_sec : null,
-      p95_wait_sec: typeof q.p95_wait_sec === 'number' ? q.p95_wait_sec : null,
-      oldest_pending_sec: typeof q.oldest_pending_sec === 'number' ? q.oldest_pending_sec : null,
+      depth,
+      p50_wait_sec: nullableQueueNumber(q.p50_wait_sec, 'p50_wait_sec'),
+      p95_wait_sec: nullableQueueNumber(q.p95_wait_sec, 'p95_wait_sec'),
+      oldest_pending_sec: nullableQueueNumber(q.oldest_pending_sec, 'oldest_pending_sec'),
     },
   }
 }
@@ -155,7 +197,7 @@ export function GateMonitor() {
         : null}
 
       <${SectionCard} label="승인 대기열">
-        ${data ? html`
+        ${data?.approval_queue ? html`
           <div class="grid grid-cols-4 gap-3">
             <${StatTile}
               label="대기열 깊이"
@@ -178,6 +220,18 @@ export function GateMonitor() {
                 label=${data.approval_queue.depth === 0 ? '없음' : `${data.approval_queue.depth}건 대기`}
                 tone="info"
               />
+            </div>
+          </div>
+        ` : data?.approval_queue_state.state === 'unavailable' ? html`
+          <div
+            role="alert"
+            data-severity=${data.approval_queue_state.severity}
+            class="flex items-start gap-3 rounded-[var(--r-2)] border border-[var(--color-danger-border)] bg-[var(--color-danger-subtle)] p-3"
+          >
+            <span aria-hidden="true" class="font-bold text-[var(--color-danger-fg)]">${data.approval_queue_state.icon}</span>
+            <div class="min-w-0">
+              <div class="text-sm font-semibold text-[var(--color-danger-fg)]">${data.approval_queue_state.title}</div>
+              <div class="mt-1 text-xs text-[var(--color-fg-secondary)]">${data.approval_queue_state.operator_detail}</div>
             </div>
           </div>
         ` : null}

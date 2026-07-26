@@ -597,8 +597,7 @@ let validate_entry_exact_attempt
   | Summary_attempt_ready, Exact_unbound,
     (Summary_not_requested | Summary_pending) ->
     Ok ()
-  | Summary_attempt_identity_unbound, Exact_unbound,
-    (Summary_pending | Summary_available _) ->
+  | Summary_attempt_identity_unbound, Exact_unbound, Summary_pending ->
     Ok ()
   | Summary_attempt_persistence_uncertain, Exact_unbound, Summary_pending ->
     Ok ()
@@ -3291,10 +3290,12 @@ let list_pending_dashboard_json_for_workspace ~base_path =
       `Assoc (pending_entry_json_fields ~include_input:true entry)))
 ;;
 
-let pending_count_for_keeper ~keeper_name : int =
-  SMap.fold
-    (fun _ (entry : pending_approval) count ->
-       if String.equal entry.keeper_name keeper_name then count + 1 else count)
-    (Atomic.get pending)
-    0
+let pending_count_for_keeper_in_workspace ~base_path ~keeper_name =
+  list_pending_entries_for_workspace ~base_path
+  |> Result.map (fun entries ->
+    List.fold_left
+      (fun count (entry : pending_approval) ->
+        if String.equal entry.keeper_name keeper_name then count + 1 else count)
+      0
+      entries)
 ;;

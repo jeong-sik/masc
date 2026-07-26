@@ -31,8 +31,8 @@ function gateSnapshotProtocolDrift(detail: string): never {
   })
 }
 
-function normalizeApprovalQueueState(raw: unknown): KeeperApprovalQueueState {
-  if (!isRecord(raw)) return gateSnapshotProtocolDrift('approval_queue_state must be an object')
+export function decodeKeeperApprovalQueueState(raw: unknown): KeeperApprovalQueueState | null {
+  if (!isRecord(raw)) return null
   if (raw.state === 'ready' && Object.keys(raw).length === 1) {
     return { state: 'ready' }
   }
@@ -56,6 +56,12 @@ function normalizeApprovalQueueState(raw: unknown): KeeperApprovalQueueState {
       icon: '!',
     }
   }
+  return null
+}
+
+function normalizeApprovalQueueState(raw: unknown): KeeperApprovalQueueState {
+  const state = decodeKeeperApprovalQueueState(raw)
+  if (state) return state
   return gateSnapshotProtocolDrift('approval_queue_state is not a current closed variant')
 }
 

@@ -283,7 +283,7 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
           && (summaryStatus.status === 'not_requested' || summaryStatus.status === 'pending')
       case 'identity_unbound':
         return exactAttempt.state === 'unbound'
-          && (summaryStatus.status === 'pending' || summaryStatus.status === 'available')
+          && summaryStatus.status === 'pending'
       case 'in_flight':
         return exactAttempt.state === 'bound'
           && summaryStatus.status === 'pending'

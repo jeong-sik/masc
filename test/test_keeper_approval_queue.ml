@@ -74,8 +74,13 @@ let require_some message = function
   | None -> Alcotest.fail message
 ;;
 
+let require_ok message = function
+  | Ok value -> value
+  | Error error -> Alcotest.fail (AQ.storage_error_to_string error)
+;;
+
 let pending_entry_exn id =
-  AQ.get_pending_entry ~id |> require_some ("pending approval not found: " ^ id)
+  AQ.For_testing.get_pending_entry_unchecked ~id |> require_some ("pending approval not found: " ^ id)
 ;;
 
 let drop_resolution ~base_path ~keeper_name resolution =
@@ -511,7 +516,7 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        Alcotest.(check bool)
          "mutation id remains addressable"
          true
-         (Option.is_some (AQ.get_pending_entry ~id:mutation_id));
+         (Option.is_some (AQ.For_testing.get_pending_entry_unchecked ~id:mutation_id));
        let open Yojson.Safe.Util in
        let persisted_ids =
          read_pending_snapshot ~base_path
@@ -603,7 +608,7 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
          "dedup does not consume sequence"
          2
          (pending_entry_exn changed).sequence;
-       (match AQ.get_pending_entry ~id:first with
+       (match AQ.For_testing.get_pending_entry_unchecked ~id:first with
         | None -> Alcotest.fail "pending request missing"
         | Some entry ->
           Alcotest.(check bool) "summary is not started by queue" true
@@ -614,7 +619,7 @@ let test_submit_is_nonblocking_and_exactly_deduplicated () =
             entry.request_context);
        AQ.For_testing.reset_runtime_state ();
        ignore (install_exn ~base_path);
-       (match AQ.get_pending_entry ~id:first with
+       (match AQ.For_testing.get_pending_entry_unchecked ~id:first with
         | Some entry ->
           Alcotest.check (Alcotest.option yojson)
             "outer-turn context survives restart"
@@ -770,7 +775,7 @@ let test_resolution_is_durable_and_origin_scoped () =
        Alcotest.(check bool) "exact rule persisted" true
          (Option.is_some resolution_result.remembered_rule);
        Alcotest.(check bool) "pending removed" false
-         (Option.is_some (AQ.get_pending_entry ~id));
+         (Option.is_some (AQ.For_testing.get_pending_entry_unchecked ~id));
        let resolution =
          match durable_resolution_opt ~base_path ~keeper_name ~approval_id:id with
          | None -> Alcotest.fail "origin Keeper did not receive durable resolution"
@@ -1969,7 +1974,7 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
         | _ ->
           Alcotest.fail
             "deterministic completion rejection lost its typed recovery code");
-       (match AQ.get_pending_entry ~id with
+       (match AQ.For_testing.get_pending_entry_unchecked ~id with
         | Some { summary_attempt_disposition = AQ.Summary_attempt_settled; _ } ->
           ()
         | _ ->
@@ -1993,7 +1998,7 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
          1
          (List.length visible_report.failures);
        Alcotest.(check bool) "visible recovery keeps pending" true
-         (Option.is_some (AQ.get_pending_entry ~id));
+         (Option.is_some (AQ.For_testing.get_pending_entry_unchecked ~id));
        let error_report =
          Gate.For_testing.resume_persisted_auto_judges_with_exact_completion
            ~complete_summary_exact_attempt:
@@ -2020,7 +2025,7 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
          1
          (List.length error_report.failures);
        Alcotest.(check bool) "error recovery keeps pending" true
-         (Option.is_some (AQ.get_pending_entry ~id));
+         (Option.is_some (AQ.For_testing.get_pending_entry_unchecked ~id));
        let durable_report = Gate.resume_persisted_auto_judges ~base_path in
        Alcotest.(check (list string))
          "fsync-confirmed recovery finalizes once"
@@ -2035,7 +2040,7 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
          1
          !observed_calls;
        Alcotest.(check bool) "durable recovery removes pending" true
-         (Option.is_none (AQ.get_pending_entry ~id));
+         (Option.is_none (AQ.For_testing.get_pending_entry_unchecked ~id));
        let resolution =
          durable_resolution_opt ~base_path ~keeper_name ~approval_id:id
          |> require_some "fsync-confirmed recovery did not finalize"
@@ -2227,7 +2232,7 @@ let test_operator_recovery_skips_terminal_exact_failure () =
          "explicit operator action cannot reopen exact quarantine"
          false
          (rearm_exact ~base_path (pending_entry_exn quarantined_id));
-       (match AQ.get_pending_entry ~id:quarantined_id with
+       (match AQ.For_testing.get_pending_entry_unchecked ~id:quarantined_id with
         | Some
             { summary_status = AQ.Summary_failed { retryable = false; _ }
             ; exact_attempt =
@@ -2291,7 +2296,7 @@ let test_dashboard_resolve_rejects_cross_workspace_approval () =
        Alcotest.(check bool)
          "source approval remains pending"
          true
-         (Option.is_some (AQ.get_pending_entry ~id:approval_id));
+         (Option.is_some (AQ.For_testing.get_pending_entry_unchecked ~id:approval_id));
        List.iter
          (fun base_path ->
             Alcotest.(check bool)
@@ -2636,7 +2641,7 @@ let test_default_auto_judge_defers_without_blocking () =
        | Gate.Deferred { approval_id; reason = Gate.Auto_judge_unavailable detail } ->
          Alcotest.(check bool) "unavailable reason is explicit" true
            (String.length detail > 0);
-         (match AQ.get_pending_entry ~id:approval_id with
+         (match AQ.For_testing.get_pending_entry_unchecked ~id:approval_id with
           | Some
               { summary_status = AQ.Summary_pending
               ; exact_attempt = AQ.Exact_unbound

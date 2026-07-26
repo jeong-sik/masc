@@ -668,33 +668,35 @@ and retry_auto_judge_entry
         | None, Some id when String.equal id entry.id -> Ok Retry_started
         | None, (Some _ | None) -> Ok Retry_queued))
 
-and start_auto_judge approval_id =
-  match Keeper_approval_queue.get_pending_entry ~id:approval_id with
-  | None -> Ok Skipped
-  | Some entry ->
-    if not (claim_auto_judge entry)
-    then Ok Skipped
-    else
-        (match Keeper_approval_queue.mark_summary_pending ~id:approval_id with
-         | Error error ->
-           release_auto_judge entry;
-           Error
-             (Keeper_approval_queue.summary_transition_error_to_string error)
-       | Ok false ->
-         release_auto_judge entry;
-         Ok Skipped
-       | Ok true -> spawn_claimed_auto_judge_entry entry)
+and start_auto_judge (entry : Keeper_approval_queue.pending_approval) =
+  if not (claim_auto_judge entry)
+  then Ok Skipped
+  else
+    match Keeper_approval_queue.mark_summary_pending ~id:entry.id with
+    | Error error ->
+      release_auto_judge entry;
+      Error (Keeper_approval_queue.summary_transition_error_to_string error)
+    | Ok false ->
+      release_auto_judge entry;
+      Ok Skipped
+    | Ok true -> spawn_claimed_auto_judge_entry entry
 
 and start_auto_judge_entry (entry : Keeper_approval_queue.pending_approval) =
-  match Keeper_approval_queue.get_pending_entry ~id:entry.id with
-    | None -> Ok Skipped
-    | Some current ->
-      (match classify_auto_judge_entry current with
-       | Auto_judge_not_requested -> start_auto_judge current.id
-       | Auto_judge_pending_unbound -> spawn_auto_judge_entry current
-       | Auto_judge_finalizable _
-       | Auto_judge_ineligible ->
-         Ok Skipped)
+  match
+    Keeper_approval_queue.get_pending_entry_for_workspace
+      ~base_path:entry.audit_base_path
+      ~id:entry.id
+  with
+  | Error error ->
+    Error (Keeper_approval_queue.storage_error_to_string error)
+  | Ok None -> Ok Skipped
+  | Ok (Some current) ->
+    (match classify_auto_judge_entry current with
+     | Auto_judge_not_requested -> start_auto_judge current
+     | Auto_judge_pending_unbound -> spawn_auto_judge_entry current
+     | Auto_judge_finalizable _
+     | Auto_judge_ineligible ->
+       Ok Skipped)
 
 and drain_auto_judge_owner_queue ?exclude_id ~base_path ~keeper_name () =
   let rec loop failures = function
@@ -876,28 +878,32 @@ let retry_blocked_auto_judge
   | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
     Error "Auto Judge retry requires auto_judge mode"
   | Ok Keeper_gate_mode.Auto_judge ->
-    (match Keeper_approval_queue.get_pending_entry ~id:approval_id with
-  | None -> Error ("pending approval not found: " ^ approval_id)
-  | Some entry when not (String.equal entry.audit_base_path base_path) ->
-    Error ("pending approval not found: " ^ approval_id)
-  | Some entry ->
     (match
-       retry_auto_judge_entry
-         ~requested_by
-         ~expected_input_hash
-         ~expected_sequence
-         ~expected_exact_attempt
-         ~expected_disposition
-         entry
+       Keeper_approval_queue.get_pending_entry_for_workspace
+         ~base_path
+         ~id:approval_id
      with
-     | Error reason -> Error reason
-     | Ok Retry_skipped ->
-       Error
-         ("approval summary is not blocked or is already active: "
-          ^ approval_id)
-     | Ok Retry_queued ->
-       Log.Keeper.info
-         ~keeper_name:entry.keeper_name
+     | Error error ->
+       Error (Keeper_approval_queue.storage_error_to_string error)
+     | Ok None -> Error ("pending approval not found: " ^ approval_id)
+     | Ok (Some entry) ->
+       (match
+          retry_auto_judge_entry
+            ~requested_by
+            ~expected_input_hash
+            ~expected_sequence
+            ~expected_exact_attempt
+            ~expected_disposition
+            entry
+        with
+        | Error reason -> Error reason
+        | Ok Retry_skipped ->
+          Error
+            ("approval summary is not blocked or is already active: "
+             ^ approval_id)
+        | Ok Retry_queued ->
+          Log.Keeper.info
+            ~keeper_name:entry.keeper_name
          "auto judge operator retry queued approval=%s operation=%s actor=%s"
          entry.id
          entry.tool_name
@@ -1096,7 +1102,7 @@ let request_operator_auto_judge_recovery ~base_path =
                  0
                  entries
              in
-             Ok { started_ids; queued }))
+             Ok { started_ids; queued })))
 ;;
 
 let defer request reason =

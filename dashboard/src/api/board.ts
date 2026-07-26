@@ -82,6 +82,8 @@ function normalizeGateJudgment(raw: unknown): GateJudgment | null {
   return raw === 'approve' || raw === 'deny' || raw === 'require_human' ? raw : null
 }
 
+const CURRENT_HITL_CONTEXT_SUMMARY_VERSION = 2
+
 function normalizeHitlContextSummary(raw: unknown): HitlContextSummary | null {
   if (!isRecord(raw)) return null
   const summaryVersion = asInt(raw.summary_version)
@@ -95,8 +97,7 @@ function normalizeHitlContextSummary(raw: unknown): HitlContextSummary | null {
     : null
   const rationale = typeof raw.rationale === 'string' ? raw.rationale.trim() : null
   if (
-    typeof summaryVersion !== 'number'
-    || summaryVersion <= 0
+    summaryVersion !== CURRENT_HITL_CONTEXT_SUMMARY_VERSION
     || generatedAt === null
     || !modelRunId
     || !summaryText
@@ -154,6 +155,10 @@ const EXACT_ATTEMPT_QUARANTINE_CAUSES: ReadonlySet<string> = new Set([
   'domain_invalid_output',
   'terminal_persistence_failure',
 ])
+
+function exactAttemptQuarantineSummaryReason(cause: string): string {
+  return `Auto Judge exact attempt quarantined: ${cause}`
+}
 
 function hasOnlyKeys(raw: Record<string, unknown>, allowed: readonly string[]): boolean {
   const keys = Object.keys(raw)
@@ -293,12 +298,23 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
         return exactAttempt.state === 'bound'
           && (
             (exactAttempt.status === 'completed' && summaryStatus.status === 'available')
-            || (exactAttempt.status === 'quarantined' && summaryStatus.status === 'failed')
+            || (
+              exactAttempt.status === 'quarantined'
+              && exactAttempt.quarantine_cause !== null
+              && summaryStatus.status === 'failed'
+              && summaryStatus.reason
+                === exactAttemptQuarantineSummaryReason(exactAttempt.quarantine_cause)
+            )
           )
       case 'persistence_uncertain':
         if (exactAttempt.state === 'unbound') return summaryStatus.status === 'pending'
         if (exactAttempt.status === 'completed') return summaryStatus.status === 'available'
-        if (exactAttempt.status === 'quarantined') return summaryStatus.status === 'failed'
+        if (exactAttempt.status === 'quarantined') {
+          return exactAttempt.quarantine_cause !== null
+            && summaryStatus.status === 'failed'
+            && summaryStatus.reason
+              === exactAttemptQuarantineSummaryReason(exactAttempt.quarantine_cause)
+        }
         return summaryStatus.status === 'pending'
       default: {
         const _never: never = disposition

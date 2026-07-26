@@ -322,9 +322,39 @@ describe('normalizeKeeperApprovalQueueItem', () => {
           quarantine_cause: 'flow_execution_failed',
         },
         summary_attempt_disposition: { code: 'settled' },
-        summary_status: { status: 'failed', reason: 'exact attempt quarantined', retryable: false },
+        summary_status: {
+          status: 'failed',
+          reason: 'Auto Judge exact attempt quarantined: flow_execution_failed',
+          retryable: false,
+        },
       })!.summary_status,
-    ).toEqual({ status: 'failed', reason: 'exact attempt quarantined' })
+    ).toEqual({
+      status: 'failed',
+      reason: 'Auto Judge exact attempt quarantined: flow_execution_failed',
+    })
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        exact_attempt: {
+          state: 'bound',
+          approval_id: baseItem.id,
+          input_hash: baseItem.input_hash,
+          sequence: baseItem.sequence,
+          slot_id: 'slot-failed',
+          call_id: 'call-failed',
+          plan_fingerprint: 'plan-failed',
+          request_body_sha256: 'b'.repeat(64),
+          status: 'quarantined',
+          quarantine_cause: 'flow_execution_failed',
+        },
+        summary_attempt_disposition: { code: 'settled' },
+        summary_status: {
+          status: 'failed',
+          reason: 'Auto Judge exact attempt quarantined: cancellation',
+          retryable: false,
+        },
+      }),
+    ).toBeNull()
     expect(
       normalizeKeeperApprovalQueueItem({
         ...baseItem,
@@ -372,6 +402,36 @@ describe('normalizeKeeperApprovalQueueItem', () => {
     ).toBeNull()
     expect(
       normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: { status: 'weird' } }),
+    ).toBeNull()
+    expect(
+      normalizeKeeperApprovalQueueItem({
+        ...baseItem,
+        exact_attempt: {
+          state: 'bound',
+          approval_id: baseItem.id,
+          input_hash: baseItem.input_hash,
+          sequence: baseItem.sequence,
+          slot_id: 'slot-old-summary',
+          call_id: 'run-old-summary',
+          plan_fingerprint: 'plan-old-summary',
+          request_body_sha256: 'b'.repeat(64),
+          status: 'completed',
+          quarantine_cause: null,
+        },
+        summary_attempt_disposition: { code: 'settled' },
+        summary_status: {
+          status: 'available',
+          summary: {
+            summary_version: 1,
+            generated_at: 1_783_123_200,
+            model_run_id: 'run-old-summary',
+            context_summary: 'Old schema.',
+            key_questions: [],
+            judgment: 'require_human',
+            rationale: 'Old schema.',
+          },
+        },
+      }),
     ).toBeNull()
     // available with an empty summary body carries no operator value -> null
     expect(

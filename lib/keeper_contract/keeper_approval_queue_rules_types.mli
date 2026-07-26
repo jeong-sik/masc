@@ -18,6 +18,8 @@ type hitl_context_summary =
   ; rationale : string
   }
 
+val current_hitl_context_summary_version : int
+
 and summary_status =
   | Summary_not_requested
   | Summary_pending

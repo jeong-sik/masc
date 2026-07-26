@@ -227,6 +227,7 @@ module For_testing : sig
   val reset_audit_store : unit -> unit
   val reset_runtime_state : unit -> unit
   val with_pending_store_lock : (unit -> 'a) -> 'a
+  val get_pending_entry_unchecked : id:string -> pending_approval option
   val install_persistence_with_after_load_hook :
     base_path:string ->
     after_load:(unit -> unit) ->
@@ -347,7 +348,10 @@ val store_revision_for_workspace : base_path:string -> int
     projections cannot reuse a cache entry from an older authority state. *)
 (** Read one workspace's pending rows without collapsing an unavailable,
     malformed, or reset-required durable store into an empty projection. *)
-val get_pending_entry : id:string -> pending_approval option
+val get_pending_entry_for_workspace :
+  base_path:string
+  -> id:string
+  -> (pending_approval option, storage_error) result
 
 val bind_summary_exact_attempt :
   id:string ->

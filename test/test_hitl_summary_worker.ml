@@ -104,7 +104,7 @@ let pending_entry
    | Ok true -> ()
    | Ok false -> fail "summary did not enter pending state"
    | Error error -> fail (Q.summary_transition_error_to_string error));
-  match Q.get_pending_entry ~id with
+  match Q.For_testing.get_pending_entry_unchecked ~id with
   | Some entry ->
     ensure_registered_keeper ~base_path entry.keeper_name;
     entry
@@ -417,7 +417,7 @@ let test_flow_order_completion_and_replay () =
           |> List.map admission_id);
        check int "first candidate posted once" 1 (F.post_count first);
        check int "second candidate not used" 0 (F.post_count second);
-       (match Q.get_pending_entry ~id:entry.id with
+       (match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
         | Some
             { exact_attempt =
                 Q.Exact_bound
@@ -469,7 +469,7 @@ let test_predispatch_failure_advances_only_to_oas_successor () =
          (prepare_exn entry)
        |> require_executed;
        check int "OAS-selected successor posted once" 1 (F.post_count successor);
-       match Q.get_pending_entry ~id:entry.id with
+       match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
            { exact_attempt =
                Q.Exact_bound
@@ -547,7 +547,7 @@ let test_cancellation_between_candidates_terminalizes_released_identity () =
          (observed_payload == payload);
        check int "successor bind was attempted exactly once" 2 !bind_calls;
        check int "cancelled successor made no POST" 0 (F.post_count successor);
-       match Q.get_pending_entry ~id:entry.id with
+       match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
            { exact_attempt =
                Q.Exact_bound
@@ -642,7 +642,7 @@ let test_all_candidates_rejected_before_network () =
          [ "hitl-incapable" ]
          ((Worker.For_testing.flow_evidence prepared).admissions
           |> List.map admission_id);
-       match Q.get_pending_entry ~id:entry.id with
+       match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
            { exact_attempt = Q.Exact_unbound
            ; summary_status = Q.Summary_pending
@@ -683,7 +683,7 @@ let test_visible_bind_blocks_dispatch () =
          (prepare_exn entry)
        |> require_executed;
        check int "unconfirmed bind forbids POST" 0 (F.post_count server);
-       match Q.get_pending_entry ~id:entry.id with
+       match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
            { exact_attempt =
                Q.Exact_bound
@@ -730,7 +730,7 @@ let test_visible_advance_blocks_successor () =
          (prepare_exn entry)
        |> require_executed;
        check int "unconfirmed release forbids successor POST" 0 (F.post_count successor);
-       match Q.get_pending_entry ~id:entry.id with
+       match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
            { exact_attempt =
                Q.Exact_bound
@@ -782,7 +782,7 @@ let test_visible_completion_blocks_gate_delivery () =
         | () -> fail "visible completion did not signal persistence uncertainty");
        check int "provider completed once" 1 (F.post_count server);
        check bool "unconfirmed completion forbids Gate delivery" false !delivered;
-       (match Q.get_pending_entry ~id:entry.id with
+       (match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
            { exact_attempt =
                Q.Exact_bound { status = Q.Exact_completed; _ }
@@ -804,7 +804,7 @@ let test_visible_completion_blocks_gate_delivery () =
          []
          recovery.started_ids;
        check int "restart did not dispatch successor" 1 (F.post_count server);
-       (match Q.get_pending_entry ~id:successor.id with
+       (match Q.For_testing.get_pending_entry_unchecked ~id:successor.id with
         | Some
             { exact_attempt = Q.Exact_unbound
             ; summary_status = Q.Summary_pending
@@ -841,7 +841,7 @@ let test_completion_identity_conflict_stays_deterministic () =
        let entry = pending_entry ~base_path () in
        let replacement_call_id = "replacement-call" in
        let replace_bound_identity () =
-         match Q.get_pending_entry ~id:entry.id with
+         match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
          | Some { exact_attempt = Q.Exact_bound binding; _ } ->
            let transition_exn operation = function
              | Ok { Q.write_outcome = Q.Fsync_completed; _ } -> ()
@@ -902,7 +902,7 @@ let test_completion_identity_conflict_stays_deterministic () =
         | Worker.Deferred_unregistered ->
           fail "deterministic completion conflict lost its owner generation");
        check bool "rejected completion delivered no summary" false !delivered;
-       match Q.get_pending_entry ~id:entry.id with
+       match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
            { exact_attempt =
                Q.Exact_bound { call_id; status = Q.Exact_dispatch_uncertain; _ }
@@ -944,7 +944,7 @@ let test_flow_execution_failure_quarantines_and_blocks_owner () =
          (prepare_exn entry)
        |> require_executed;
        check int "failed candidate dispatched once" 1 (F.post_count failed);
-       (match Q.get_pending_entry ~id:entry.id with
+       (match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
         | Some
             { input_hash
             ; sequence
@@ -986,7 +986,7 @@ let test_flow_execution_failure_quarantines_and_blocks_owner () =
          []
          blocked.started_ids;
        check int "quarantined owner dispatches no successor" 1 (F.post_count failed);
-       match Q.get_pending_entry ~id:successor.id with
+       match Q.For_testing.get_pending_entry_unchecked ~id:successor.id with
        | Some
            { exact_attempt = Q.Exact_unbound
            ; summary_status = Q.Summary_pending
@@ -1059,7 +1059,7 @@ let test_owner_replacement_during_post_defers_terminal_mutation () =
         | Worker.Executed ->
           fail "stale HITL owner crossed the terminal generation fence");
        check int "real POST crossed the replacement hook once" 1 (F.post_count server);
-       match Q.get_pending_entry ~id:entry.id with
+       match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
            { exact_attempt =
                Q.Exact_bound
@@ -1140,7 +1140,7 @@ let test_manual_resolution_race_is_conclusive () =
        check bool
          "manually resolved source left pending queue"
          true
-         (Option.is_none (Q.get_pending_entry ~id:entry.id)))
+         (Option.is_none (Q.For_testing.get_pending_entry_unchecked ~id:entry.id)))
 ;;
 
 let test_cancellation_after_dispatch_is_terminal () =
@@ -1181,7 +1181,7 @@ let test_cancellation_after_dispatch_is_terminal () =
         with
         | exception Cancel_after_request_arrived -> ()
         | () -> fail "cancellation trigger did not win");
-       match Q.get_pending_entry ~id:entry.id with
+       match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
            { exact_attempt =
                Q.Exact_bound
@@ -1366,7 +1366,7 @@ let test_prebind_cancellation_withholds_production_gate_drain () =
               "pre-bind Gate cancellation performs no provider POST"
               0
               (F.post_count server);
-            (match Q.get_pending_entry ~id:cancelled.id with
+            (match Q.For_testing.get_pending_entry_unchecked ~id:cancelled.id with
              | Some
                  { exact_attempt = Q.Exact_unbound
                  ; summary_status = Q.Summary_pending
@@ -1376,7 +1376,7 @@ let test_prebind_cancellation_withholds_production_gate_drain () =
                  } ->
                ()
              | _ -> fail "Gate drained or mutated the cancelled pending entry");
-            match Q.get_pending_entry ~id:successor.id with
+            match Q.For_testing.get_pending_entry_unchecked ~id:successor.id with
             | Some
                 { exact_attempt = Q.Exact_unbound
                 ; summary_status = Q.Summary_pending
@@ -1472,7 +1472,7 @@ let test_bound_cancellation_cleanup_uncertainty_preserves_origin () =
               "cancellation before dispatch performs no provider POST"
               0
               (F.post_count server);
-            match Q.get_pending_entry ~id:entry.id with
+            match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
             | Some
                 { exact_attempt = Q.Exact_bound _
                 ; summary_status = Q.Summary_pending
@@ -1508,7 +1508,7 @@ let test_pre_worker_start_failure_preserves_unbound_pending () =
             "no usable exact-output lane slots"
             detail
         | Ok _ -> fail "pre-worker failure was reported as a successful start");
-       (match Q.get_pending_entry ~id:entry.id with
+       (match Q.For_testing.get_pending_entry_unchecked ~id:entry.id with
        | Some
            { exact_attempt = Q.Exact_unbound
            ; summary_status = Q.Summary_pending
@@ -1592,7 +1592,7 @@ let test_visible_uncertainty_withholds_production_drain () =
          true
          supervisor_observed_uncertainty;
        check int "only the uncertain entry dispatched" 1 (F.post_count server);
-       (match Q.get_pending_entry ~id:uncertain.id with
+       (match Q.For_testing.get_pending_entry_unchecked ~id:uncertain.id with
        | Some
            { exact_attempt =
                Q.Exact_bound { status = Q.Exact_completed; _ }
@@ -1603,7 +1603,7 @@ let test_visible_uncertainty_withholds_production_drain () =
            } ->
          ()
        | _ -> fail "uncertain completion did not remain durably visible");
-       (match Q.get_pending_entry ~id:successor.id with
+       (match Q.For_testing.get_pending_entry_unchecked ~id:successor.id with
         | Some
             { exact_attempt = Q.Exact_unbound
             ; summary_status = Q.Summary_pending
@@ -1665,7 +1665,7 @@ let test_owner_fifo_atomic_drain_is_nonsharing () =
          "later owner work is not dispatched concurrently"
          1
          (F.post_count server);
-       (match Q.get_pending_entry ~id:second.id with
+       (match Q.For_testing.get_pending_entry_unchecked ~id:second.id with
         | Some
             { exact_attempt = Q.Exact_unbound
             ; summary_status = Q.Summary_pending
@@ -1683,7 +1683,7 @@ let test_owner_fifo_atomic_drain_is_nonsharing () =
          ~clock
          ~remaining:100
          ~failure:"FIFO successor did not complete"
-         (fun () -> Option.is_none (Q.get_pending_entry ~id:second.id));
+         (fun () -> Option.is_none (Q.For_testing.get_pending_entry_unchecked ~id:second.id));
        check int
          "each owner entry dispatches exactly once"
          2

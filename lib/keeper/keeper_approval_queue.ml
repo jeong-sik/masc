@@ -254,7 +254,11 @@ let with_pending_store_lock f =
 
 let bump_store_revision_unlocked ~base_path =
   let revisions = Atomic.get store_revisions in
-  let revision = Option.value (SMap.find_opt base_path revisions) ~default:0 in
+  let revision =
+    match SMap.find_opt base_path revisions with
+    | Some revision -> revision
+    | None -> 0
+  in
   Atomic.set store_revisions (SMap.add base_path (revision + 1) revisions)
 ;;
 
@@ -1807,7 +1811,9 @@ let record_summary_updated ~now (entry : pending_approval) =
 (* ── Durable summary-state transitions ───────────────────── *)
 
 (** Read a pending entry by id. Returns [None] if already resolved. *)
-let get_pending_entry ~id : pending_approval option = SMap.find_opt id (Atomic.get pending)
+let find_pending_entry_unchecked ~id : pending_approval option =
+  SMap.find_opt id (Atomic.get pending)
+;;
 
 let summary_transition_rejection (entry : pending_approval) =
   match entry.exact_attempt with
@@ -1831,7 +1837,7 @@ let persist_pending_entry_unlocked ~map ~(entry : pending_approval) updated_entr
 
 let publish_summary_update ~id =
   let now = Time_compat.now () in
-  match get_pending_entry ~id with
+  match find_pending_entry_unchecked ~id with
   | Some updated -> record_summary_updated ~now updated
   | None -> ()
 ;;
@@ -3174,6 +3180,7 @@ module For_testing = struct
   ;;
 
   let with_pending_store_lock = with_pending_store_lock
+  let get_pending_entry_unchecked = find_pending_entry_unchecked
 
   let reset_runtime_state () =
     with_pending_store_lock (fun () ->
@@ -3290,6 +3297,17 @@ let list_pending_entries_for_workspace ~base_path =
       |> List.filter (fun (entry : pending_approval) ->
         String.equal entry.audit_base_path base_path)
       |> fun entries -> Ok entries)
+;;
+
+let get_pending_entry_for_workspace ~base_path ~id =
+  with_pending_store_lock (fun () ->
+    match SMap.find_opt base_path (Atomic.get unavailable_stores) with
+    | Some error -> Error error
+    | None ->
+      (match SMap.find_opt id (Atomic.get pending) with
+       | Some entry when String.equal entry.audit_base_path base_path ->
+         Ok (Some entry)
+       | Some _ | None -> Ok None))
 ;;
 
 let list_pending_dashboard_json_for_workspace ~base_path =

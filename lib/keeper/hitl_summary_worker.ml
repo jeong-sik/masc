@@ -4,7 +4,7 @@ module Exact_output = Agent_sdk.Exact_output
 module Registry = Runtime_exact_output_registry
 module Schema = Keeper_structured_output_schema
 
-let summary_version = 2
+let summary_version = current_hitl_context_summary_version
 let lane_id = "hitl_auto_judge"
 
 let system_prompt () =
@@ -665,25 +665,34 @@ let quarantine_candidate (entry : pending_approval) candidate cause =
 ;;
 
 let settle_current ?quarantine_writer (entry : pending_approval) ~reason ~cause =
-  match Keeper_approval_queue.get_pending_entry ~id:entry.id with
-  | None ->
+  match
+    Keeper_approval_queue.get_pending_entry_for_workspace
+      ~base_path:entry.audit_base_path
+      ~id:entry.id
+  with
+  | Error error ->
+    Error
+      (Exact_settlement_persistence_failed
+         (Keeper_approval_queue.storage_error_to_string error))
+  | Ok None ->
     record_outcome "exact_source_resolved";
     Ok ()
-  | Some { exact_attempt = Exact_unbound; _ } ->
+  | Ok (Some { exact_attempt = Exact_unbound; _ }) ->
     Error
       (Exact_settlement_identity_unbound
          (Printf.sprintf
             "HITL exact-output terminalization requires a bound attempt identity approval_id=%s: %s"
             entry.id
             reason))
-  | Some
+  | Ok
+      (Some
       { exact_attempt =
           Exact_bound { status = (Exact_completed | Exact_quarantined _); _ }
       ; _
-      } ->
+      }) ->
     record_outcome "exact_source_resolved";
     Ok ()
-  | Some { exact_attempt = Exact_bound binding; _ } ->
+  | Ok (Some { exact_attempt = Exact_bound binding; _ }) ->
     quarantine_identity_result
       ?writer:quarantine_writer
       entry

@@ -17,6 +17,8 @@ type hitl_context_summary =
   ; rationale : string
   }
 
+let current_hitl_context_summary_version = 2
+
 and summary_status =
   | Summary_not_requested
   | Summary_pending
@@ -558,6 +560,16 @@ let hitl_context_summary_of_yojson_with_error json =
         fields
     in
     let* summary_version = required_positive_int ~surface "summary_version" fields in
+    let* () =
+      if summary_version = current_hitl_context_summary_version
+      then Ok ()
+      else
+        Error
+          (Printf.sprintf
+             "%s.summary_version must be %d"
+             surface
+             current_hitl_context_summary_version)
+    in
     let* generated_at = required_float ~surface "generated_at" fields in
     let* model_run_id = required_string ~surface "model_run_id" fields in
     let* context_summary = required_string ~surface "context_summary" fields in

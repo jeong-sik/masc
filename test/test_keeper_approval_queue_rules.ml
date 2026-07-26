@@ -381,7 +381,7 @@ type eligibility_exact_identity =
   }
 
 let approval_entry_exn id =
-  match AQ.get_pending_entry ~id with
+  match AQ.For_testing.get_pending_entry_unchecked ~id with
   | Some entry -> entry
   | None -> fail ("pending approval not found: " ^ id)
 ;;
@@ -620,7 +620,7 @@ let test_completed_exact_judgment_finalizes_without_worker () =
   List.iter
     (fun id ->
        check bool ("finalized judgment leaves no pending approval: " ^ id) true
-         (Option.is_none (AQ.get_pending_entry ~id)))
+         (Option.is_none (AQ.For_testing.get_pending_entry_unchecked ~id)))
     expected_ids
 ;;
 

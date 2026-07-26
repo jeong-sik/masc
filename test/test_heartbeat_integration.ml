@@ -2450,7 +2450,7 @@ let install_pending_summary ~base_path ~keeper_name ~bind_exact =
   if bind_exact
   then (
     let entry =
-      match Approval_queue.get_pending_entry ~id with
+      match Approval_queue.For_testing.get_pending_entry_unchecked ~id with
       | Some entry -> entry
       | None -> fail "pending summary disappeared before exact bind"
     in
@@ -2572,7 +2572,7 @@ let test_keeper_shutdown_finalizes_idle_operation () =
              ~base_path:config.base_path
               ~keeper_name:meta.name)
              .snapshot_shutdown_operation_id);
-      (match Approval_queue.get_pending_entry ~id:approval_id with
+      (match Approval_queue.For_testing.get_pending_entry_unchecked ~id:approval_id with
        | Some { summary_status = Approval_queue.Summary_pending; _ } -> ()
        | Some _ | None -> fail "retain-meta shutdown changed pending summary");
       match Keeper_meta_store.read_meta config meta.name with
@@ -2730,7 +2730,7 @@ let test_destructive_shutdown_drains_bound_summary_then_completes () =
              | Masc.Keeper_exact_flow_scope.Owner_unregistered_deferred ->
                fail "draining owner rejected bound settlement");
             let pending =
-              match Approval_queue.get_pending_entry ~id:approval_id with
+              match Approval_queue.For_testing.get_pending_entry_unchecked ~id:approval_id with
               | Some pending -> pending
               | None -> fail "bound summary disappeared while draining"
             in

@@ -10,6 +10,22 @@ import { createManagedAsyncResource } from '../lib/async-state'
 // queue (and the Gate surface) flashed its empty state every cycle.
 export const gateResource = createManagedAsyncResource<DashboardGateResponse>()
 
+export function gateUnavailableSnapshot(operatorDetail: string): DashboardGateResponse {
+  return {
+    approval_queue: null,
+    approval_queue_state: {
+      state: 'unavailable',
+      code: 'reset_required',
+      title: 'Gate durable queue unavailable · runtime reset required',
+      operator_detail: operatorDetail,
+      severity: 'bad',
+      icon: '!',
+    },
+    recent_resolved: [],
+    approval_rules: [],
+  }
+}
+
 export const gateLoading = computed(() => gateResource.state.value.loading)
 export const gateError = signal('')
 export const gateData = computed(() => gateResource.state.value.data)

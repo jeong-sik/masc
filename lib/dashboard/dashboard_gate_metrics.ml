@@ -252,6 +252,7 @@ let gate_tool_events_json_with_pending_result
 
 (** Top-level endpoint payload. *)
 let gate_tool_events_json ~base_path ~window_minutes () : Yojson.Safe.t =
+  (* NDT-OK: HTTP observation boundary; captured once for the pure projection. *)
   let now_ts = Unix.gettimeofday () in
   let pending_result =
     Keeper_approval_queue.list_pending_entries_for_workspace ~base_path

@@ -1061,6 +1061,7 @@ let prepare_lane ~base_path ~keeper_name ~registry ~lane_id ~units =
 
 type exact_flow_callback_failure =
   | Owner_unregistered_deferred
+  | Guard_absent
   | Bind_failed
   | Bind_sync_unconfirmed of Keeper_event_queue_state.exact_execution_terminal
   | Release_failed of Keeper_event_queue_state.exact_execution_terminal
@@ -1078,7 +1079,7 @@ let bind_exact_execution
       "compaction exact durable execution guard is unavailable slot=%s call_id=%s"
       observation.slot_id
       observation.call_id;
-    Error Bind_failed
+    Error Guard_absent
   | Some guard ->
     (match guard.before_dispatch observation with
      | Ok Fsync_completed -> Ok ()
@@ -1145,6 +1146,7 @@ let release_exact_execution
 
 let summarization_failure_of_callback = function
   | Owner_unregistered_deferred -> Exact_owner_unregistered_deferred
+  | Guard_absent -> Exact_execution_guard_absent
   | Bind_failed -> Exact_execution_bind_failed
   | Bind_sync_unconfirmed terminal
   | Release_failed terminal
@@ -1365,35 +1367,17 @@ let execute_prepared_lane ~keeper_name ~net ?clock ?exact_execution_guard prepar
         (registered_lane_id
            ~base_path:prepared_lane.base_path
            ~keeper_name:prepared_lane.keeper_name)
-      (fun () -> ())
+      (fun () ->
+         execute_prepared_lane_current
+           ~keeper_name
+           ~net
+           ?clock
+           ?exact_execution_guard
+           prepared_lane)
   with
   | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
     Error Exact_owner_unregistered_deferred
-  | Keeper_exact_flow_scope.Current () ->
-    (* The guard is required to accept a plan, and [execute_prepared_lane_current]
-       reads it only after the provider has answered and the plan has been built
-       (:1329-1330 below). Its absence is knowable now: in production the guard is
-       constructed only when the cycle claimed an event-queue stimulus lease
-       (keeper_heartbeat_loop.ml:1362-1370), so a cycle woken by the proactive cadence
-       tick can never satisfy it and the dispatch is paid for and discarded. Measured:
-       sangsu 2026-07-25T09:31:46Z spent elapsed_ms=100507 on a provider_overflow
-       compaction and settled retryable_failure with the guard refusal.
-
-       The check sits here rather than at the policy entrypoint because the lane
-       classifications are produced by [prepare_lane_with_scope] (:955) on the way to
-       this point: refusing earlier reported a missing guard for an unconfigured lane
-       and lost a terminal configuration fault behind a nonterminal one
-       (test_keeper_post_turn_wirein_order.ml:855 pins that). Owner registration keeps
-       its precedence for the same reason — it is a deferral, not a refusal. *)
-    (match exact_execution_guard with
-     | None -> Error Exact_execution_guard_absent
-     | Some _ ->
-       execute_prepared_lane_current
-         ~keeper_name
-         ~net
-         ?clock
-         ?exact_execution_guard
-         prepared_lane)
+  | Keeper_exact_flow_scope.Current result -> result
 ;;
 
 let run_exact

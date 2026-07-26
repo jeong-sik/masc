@@ -192,28 +192,11 @@ let test_domain_invalid_and_clockless_flow_failure_are_terminal () =
         (Exact_fixture.post_count before_dispatch_server))
 ;;
 
-let test_absent_guard_refuses_before_the_summarizer_call () =
-  (* The summarizer refuses a plan built without a guard
-     (keeper_compaction_llm_summarizer.ml:1329-1330) only after the plan exists, so
-     the provider call is paid for and discarded. In production the guard is
-     constructed only when the cycle claimed an event-queue stimulus lease
-     (keeper_heartbeat_loop.ml:1362-1370), so a proactive-tick cycle can never
-     satisfy it and the outcome is known before any work starts. Measured cost of
-     the old order: sangsu 2026-07-25T09:31:46Z spent elapsed_ms=100507 on a
-     provider_overflow compaction and settled retryable_failure with
-     exact_execution_guard_failed.
-
-     What this test proves is the typed distinction, which is #25713's complaint:
-     before the hoist, an absent guard reached the summarizer and settled as
-     exact_execution_bind_failed, collapsing "no lease" and "the bind did not reach
-     the flow" into one string. After it, the absence reports itself.
-
-     What it does NOT prove is the saved provider call. This process has no Eio clock
-     by construction, so the unfixed path also refuses before dispatch here and the
-     post count is 0 either way — measured, not assumed. The saved call is evidenced
-     by the production record cited above, not by this fixture. The assertion stays
-     as a regression guard: if a future edit makes this boundary dispatch first, it
-     fails. *)
+let test_absent_guard_is_typed_at_before_dispatch () =
+  (* The existing before-dispatch callback already prevented POST when the guard
+     was absent. This test proves only that the current optional boundary reports
+     that absence separately from a supplied guard's persistence failure. It makes
+     no provider-cost claim. *)
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun sw ->
@@ -242,16 +225,14 @@ let test_absent_guard_refuses_before_the_summarizer_call () =
       in
       publish_exact_fixture ~source:"absent guard" server;
       let preparation =
-        (* No ~exact_execution_guard: the argument is optional at this boundary and
-           its absence is the production shape being pinned. *)
+        (* No ~exact_execution_guard: the current optional boundary must fail
+           closed with its own typed reason. *)
         Compact_policy.compact_for_request_typed
           ~base_path:exact_flow_base_path
           ~meta
           ~trigger:Compaction_trigger.Manual
           context
       in
-      (* Asserted before the constructor so an ordering regression cannot abort the
-         run before this line is reached. *)
       check int
         "no provider request is made when the guard is absent"
         0
@@ -278,9 +259,9 @@ let () =
             `Quick
             test_domain_invalid_and_clockless_flow_failure_are_terminal
         ; test_case
-            "an absent guard refuses before the summarizer call"
+            "an absent guard is typed at before-dispatch"
             `Quick
-            test_absent_guard_refuses_before_the_summarizer_call
+            test_absent_guard_is_typed_at_before_dispatch
         ] )
     ]
 ;;

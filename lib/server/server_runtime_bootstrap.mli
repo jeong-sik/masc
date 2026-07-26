@@ -89,11 +89,6 @@ val mandatory_exact_output_lane_ids : string list
 module For_testing : sig
   val configure_exact_output_registry : ?config_root:string -> unit -> unit
   val install_domain_pool_references : Domain_pool.t -> unit
-
-  val dispatch_grpc_tool_call :
-    dispatch:(Yojson.Safe.t -> (string, string) result) ->
-    string ->
-    (string, string) result
 end
 
 val runtime_path_diagnostics :

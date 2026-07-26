@@ -113,9 +113,7 @@ let test_grpc_tool_arguments_fail_closed_before_dispatch () =
   [ "malformed", "{"; "non-object", "[]" ]
   |> List.iter (fun (label, arguments_json) ->
     match
-      Server_runtime_bootstrap.For_testing.dispatch_grpc_tool_call
-        ~dispatch
-        arguments_json
+          Server_grpc_tool_dispatch.dispatch ~dispatch arguments_json
     with
     | Error message ->
       Alcotest.(check string)

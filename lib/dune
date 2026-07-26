@@ -2,7 +2,10 @@
 (library
  (name masc)
  (public_name masc)
- (private_modules keeper_fs_durable_directory keeper_exact_flow_scope)
+ (private_modules
+  keeper_fs_durable_directory
+  keeper_exact_flow_scope
+  server_grpc_tool_dispatch)
  (libraries
   mcp_protocol
   mcp_protocol.eio

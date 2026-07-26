@@ -95,8 +95,8 @@ val create :
   prepared ->
   (create_outcome, error) result
 (** Durably creates one exclusive mode-[0600] payload. Existing leaves are
-    never replaced. An exact pre-existing payload is reconciled as idempotent
-    success; conflicting bytes are rejected. *)
+    never replaced. [Target_unchanged] fails closed as [Create_unsettled];
+    only [Target_created] may reconcile after exact reread and parent fsync. *)
 
 val read :
   Workspace.config ->

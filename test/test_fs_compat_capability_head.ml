@@ -320,17 +320,22 @@ let test_strict_row_shape_rejection ~fs ~secure_random () =
 
 let test_reserved_namespace_is_rejected_before_dispatch ~fs () =
   with_tmp_dir "masc_capability_head_reserved_leaf_" @@ fun directory ->
-  let leaf = ".masc-capability-head-forbidden" in
   with_parent ~fs directory @@ fun parent ->
-  Head.read
-    ~secure_random:(Eio.Flow.string_source "")
-    ~parent
-    ~leaf
-  |> require_invalid_leaf ~expected:leaf "reserved capability HEAD namespace";
-  check (list string)
-    "reserved leaf creates neither target nor stable lock"
-    []
-    (directory_entries directory)
+  List.iter
+    (fun (label, leaf) ->
+       Head.read
+         ~secure_random:(Eio.Flow.string_source "")
+         ~parent
+         ~leaf
+       |> require_invalid_leaf ~expected:leaf label;
+       check (list string)
+         (label ^ " creates neither target nor stable lock")
+         []
+         (directory_entries directory))
+    [ "lowercase reserved capability HEAD namespace", ".masc-capability-head-forbidden"
+    ; "uppercase reserved capability HEAD namespace", ".MASC-CAPABILITY-HEAD-FORBIDDEN"
+    ; "mixed-case reserved capability HEAD namespace", ".MaSc-CaPaBiLiTy-HeAd-forbidden"
+    ]
 ;;
 
 let test_first_read_entropy_eof_is_unchanged_and_recoverable

@@ -212,10 +212,11 @@ let failure_for_effect publication_state error =
   failure ~target_effect:(target_effect_of_transaction publication_state) error
 
 let validate_leaf leaf =
+  let normalized_leaf = String.lowercase_ascii leaf in
   if String.equal leaf ""
      || String.equal leaf "."
      || String.equal leaf ".."
-     || String.starts_with ~prefix:internal_leaf_prefix leaf
+     || String.starts_with ~prefix:internal_leaf_prefix normalized_leaf
      || String.exists (fun char -> Char.equal char '/' || Char.equal char '\000') leaf
   then Error (Invalid_leaf leaf)
   else Ok ()

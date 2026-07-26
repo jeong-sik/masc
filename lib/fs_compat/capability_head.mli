@@ -9,8 +9,9 @@
     or replacement outside this surface is out of contract: remembering such a
     deletion would require a second persistent freshness authority, which this
     single-authority API intentionally rejects. The sibling namespace prefix
-    [.masc-capability-head-] is reserved for stable locks and publication stages;
-    public [leaf] values beginning with it are rejected with [Invalid_leaf]. *)
+    [.masc-capability-head-] and all of its ASCII case variants are reserved for
+    stable locks and publication stages; public [leaf] values beginning with any
+    such variant are rejected with [Invalid_leaf]. *)
 
 val max_row_bytes : int
 

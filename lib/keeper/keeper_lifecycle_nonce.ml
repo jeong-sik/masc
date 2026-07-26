@@ -352,7 +352,7 @@ let rec allocate
               ; evidence = Head.publication_evidence publication
               ; warnings
               })
-     | Error failure ->
+     | Error (failure : Head.failure) ->
        (match failure.target_effect, failure.error with
         | Head.Unchanged, (Head.Busy | Head.Conflict _) ->
           retry failure

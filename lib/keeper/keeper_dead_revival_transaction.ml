@@ -473,6 +473,14 @@ let reserve_journal config journal =
       ~parent
       ~snapshot
       ~journal
+  | Ok (_, _, Some existing) ->
+    Error
+      (Journal_conflict
+         (Printf.sprintf
+            "existing journal transaction=%s remains stage=%s"
+            existing.transaction_id
+            (Yojson.Safe.to_string
+               (journal_stage_to_json existing.stage))))
 ;;
 
 let transition_journal config ~expected_stage journal =

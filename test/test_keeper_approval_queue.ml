@@ -2175,6 +2175,8 @@ let test_blocked_disposition_requires_operator_rearm_before_bind () =
             ~id
             ~input_hash:entry.input_hash
             ~sequence:entry.sequence
+            ~expected_exact_attempt:entry.exact_attempt
+            ~expected_disposition:entry.summary_attempt_disposition
             ~requested_by:"operator:test"
         with
         | Ok true -> ()

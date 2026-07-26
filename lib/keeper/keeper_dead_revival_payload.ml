@@ -417,7 +417,7 @@ let payload_of_bytes raw =
 
 let payload_transaction_id payload = payload.transaction_id
 let payload_owner_id payload = payload.owner_id
-let payload_keeper_name payload = payload.keeper_name
+let payload_keeper_name (payload : payload) = payload.keeper_name
 let payload_expected_trace_id payload = payload.expected_trace_id
 let payload_expected_generation payload = payload.expected_generation
 let payload_original payload = payload.original
@@ -709,13 +709,12 @@ type observation_failure =
       Fs_compat.Capability_exact_read.failure
   | Observation_settlement_failed of
       Fs_compat.Capability_exact_read.settlement_warning list
+
+type reconciliation_observation_failure =
+  | Reconciliation_observation_failed of observation_failure
   | Observation_injected_read_failed of string
 
-let observe_reference
-      ?(for_reconciliation = false)
-      ~parent
-      reference
-  =
+let observe_reference ~parent reference =
   let read () =
     Fs_compat.Capability_exact_read.read
       ~parent
@@ -737,12 +736,21 @@ let observe_reference
           (Fs_compat.Capability_exact_read.observation_bytes observation)
       else Error (Observation_settlement_failed warnings)
   in
+  observe ()
+;;
+
+let observe_reference_for_reconciliation ~parent reference =
+  let observe () =
+    observe_reference ~parent reference
+    |> Result.map_error (fun failure ->
+      Reconciliation_observation_failed failure)
+  in
   match Eio.Fiber.get testing_hooks_key with
-  | Some hooks when for_reconciliation ->
+  | Some hooks ->
     (match hooks.reconciliation_read () with
      | `Fail detail -> Error (Observation_injected_read_failed detail)
      | `Use_production -> observe ())
-  | None | Some _ -> observe ()
+  | None -> observe ()
 ;;
 
 type parent_sync_failure =
@@ -786,10 +794,7 @@ let create config prepared =
          Error (Create_unsettled { prepared; initial_failure })
        | Target_created ->
          (match
-            observe_reference
-              ~for_reconciliation:true
-              ~parent
-              reference
+            observe_reference_for_reconciliation ~parent reference
           with
           | Ok observed when String.equal observed prepared.bytes ->
             (match sync_parent_for_reconciliation parent with
@@ -815,7 +820,9 @@ let create config prepared =
                     }))
           | Ok _ ->
             Error (Create_conflict { prepared; initial_failure })
-          | Error (Observation_read_failed failure) ->
+          | Error
+              (Reconciliation_observation_failed
+                 (Observation_read_failed failure)) ->
             (match failure.error with
              | Fs_compat.Capability_exact_read.Length_mismatch _ ->
                Error (Create_conflict { prepared; initial_failure })
@@ -827,7 +834,9 @@ let create config prepared =
                     ; reconciliation_failure =
                         Reconciliation_read_failed failure
                     }))
-          | Error (Observation_settlement_failed warnings) ->
+          | Error
+              (Reconciliation_observation_failed
+                 (Observation_settlement_failed warnings)) ->
             Error
               (Create_reconciliation_failed
                  { prepared

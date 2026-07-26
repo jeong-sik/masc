@@ -108,12 +108,24 @@ module Durable_transaction = struct
         ; observed : evidence option
         }
 
+  type permit_lifecycle =
+    { mutex : Eio.Mutex.t
+    ; leases_changed : Eio.Condition.t
+    ; mutable open_to_reentrant_leases : bool
+    ; mutable active_reentrant_leases : int
+    }
+
   type permit =
     { base_path : string
     ; keeper_name : string
     ; evidence : evidence option
     ; scope_id : int
-    ; valid : bool Atomic.t
+    ; lifecycle : permit_lifecycle
+    }
+
+  type permit_lease =
+    { permit_scope_id : int
+    ; mutable live : bool
     }
 
   type decision =
@@ -136,7 +148,37 @@ module Durable_transaction = struct
     | Admission_blocked of blocked_reason
 
   let active_permit_scope_key : permit Eio.Fiber.key = Eio.Fiber.create_key ()
+  let active_permit_lease_key : permit_lease Eio.Fiber.key =
+    Eio.Fiber.create_key ()
+  ;;
+
   let next_permit_scope = Atomic.make 0
+
+  let with_permit_lifecycle permit fn =
+    Eio.Mutex.use_rw ~protect:true permit.lifecycle.mutex (fun () ->
+      fn permit.lifecycle)
+  ;;
+
+  let close_to_reentrant_leases permit =
+    with_permit_lifecycle permit (fun lifecycle ->
+      lifecycle.open_to_reentrant_leases <- false)
+  ;;
+
+  let await_reentrant_leases_drained permit =
+    Eio.Condition.loop_no_mutex
+      permit.lifecycle.leases_changed
+      (fun () ->
+         with_permit_lifecycle permit (fun lifecycle ->
+           if lifecycle.active_reentrant_leases = 0
+           then Some ()
+           else None))
+  ;;
+
+  let close_and_drain_permit permit =
+    Eio.Cancel.protect (fun () ->
+      close_to_reentrant_leases permit;
+      await_reentrant_leases_drained permit)
+  ;;
 
   let with_active_permit ~base_path ~keeper_name ~evidence fn =
     let scope_id = Atomic.fetch_and_add next_permit_scope 1 in
@@ -145,13 +187,77 @@ module Durable_transaction = struct
       ; keeper_name
       ; evidence
       ; scope_id
-      ; valid = Atomic.make true
+      ; lifecycle =
+          { mutex = Eio.Mutex.create ()
+          ; leases_changed = Eio.Condition.create ()
+          ; open_to_reentrant_leases = true
+          ; active_reentrant_leases = 0
+          }
       }
     in
     Eio.Fiber.with_binding active_permit_scope_key permit (fun () ->
       Fun.protect
-        ~finally:(fun () -> Atomic.set permit.valid false)
+        ~finally:(fun () -> close_and_drain_permit permit)
         (fun () -> fn permit))
+  ;;
+
+  let permit_scope_matches (permit : permit) ~base_path keeper_name =
+    String.equal permit.base_path base_path
+    && String.equal permit.keeper_name keeper_name
+    &&
+    match Eio.Fiber.get active_permit_scope_key with
+    | Some active_permit -> Int.equal active_permit.scope_id permit.scope_id
+    | None -> false
+  ;;
+
+  let lease_is_live_for_permit permit = function
+    | Some lease ->
+      lease.live
+      && Int.equal lease.permit_scope_id permit.scope_id
+    | None -> false
+  ;;
+
+  let release_reentrant_lease permit lease =
+    let drained =
+      with_permit_lifecycle permit (fun lifecycle ->
+        if lease.live
+        then (
+          lease.live <- false;
+          lifecycle.active_reentrant_leases <-
+            lifecycle.active_reentrant_leases - 1;
+          lifecycle.active_reentrant_leases = 0)
+        else false)
+    in
+    if drained
+    then Eio.Condition.broadcast permit.lifecycle.leases_changed
+  ;;
+
+  let try_with_reentrant_lease permit fn =
+    let parent_lease = Eio.Fiber.get active_permit_lease_key in
+    let lease =
+      { permit_scope_id = permit.scope_id
+      ; live = false
+      }
+    in
+    Eio.Fiber.with_binding active_permit_lease_key lease (fun () ->
+      Fun.protect
+        ~finally:(fun () ->
+          Eio.Cancel.protect (fun () ->
+            release_reentrant_lease permit lease))
+        (fun () ->
+           let acquired =
+             with_permit_lifecycle permit (fun lifecycle ->
+               if
+                 lifecycle.open_to_reentrant_leases
+                 || lease_is_live_for_permit permit parent_lease
+               then (
+                 lifecycle.active_reentrant_leases <-
+                   lifecycle.active_reentrant_leases + 1;
+                 lease.live <- true;
+                 true)
+               else false)
+           in
+           if acquired then Some (fn permit) else None))
   ;;
 
   let journal_schema = "masc.keeper-dead-revival-journal.v3"
@@ -482,62 +588,65 @@ module Durable_transaction = struct
   ;;
 
   let permit_matches (permit : permit) ~base_path keeper_name =
-    Atomic.get permit.valid
-    && String.equal permit.base_path base_path
+    permit_scope_matches permit ~base_path keeper_name
     &&
-    String.equal permit.keeper_name keeper_name
-    &&
-    match Eio.Fiber.get active_permit_scope_key with
-    | Some active_permit ->
-      Atomic.get active_permit.valid
-      && Int.equal active_permit.scope_id permit.scope_id
-    | None -> false
+    let active_lease = Eio.Fiber.get active_permit_lease_key in
+    with_permit_lifecycle permit (fun lifecycle ->
+      lifecycle.open_to_reentrant_leases
+      || lease_is_live_for_permit permit active_lease)
   ;;
 
   let with_durable_lifecycle_admission config ~keeper_name fn =
+    let acquire_fresh () =
+      match authority_lock_path config keeper_name with
+      | Error failure ->
+        Admission_blocked
+          (Authority_unreadable { keeper_name; failure })
+      | Ok lock_path ->
+        (match
+           File_lock_eio.with_durable_lock_observed
+             ~lock_path
+             (fun () ->
+                match read_locked config keeper_name with
+                | Blocked reason -> Error reason
+                | Admitted evidence ->
+                  Ok
+                    (with_active_permit
+                       ~base_path:config.Workspace.base_path
+                       ~keeper_name
+                       ~evidence
+                       fn))
+         with
+         | File_lock_eio.Lock_not_acquired _ ->
+           Admission_blocked
+             (Authority_unreadable
+                { keeper_name; failure = Durable_lock_unavailable })
+         | File_lock_eio.Body_completed
+             { value = Error reason; release_error = None } ->
+           Admission_blocked reason
+         | File_lock_eio.Body_completed
+             { value = Ok value; release_error = None } ->
+           Admission_completed value
+         | File_lock_eio.Body_completed
+             { value = Error _; release_error = Some _ } ->
+           Admission_blocked
+             (Authority_unreadable
+                { keeper_name; failure = Durable_lock_release_failed })
+         | File_lock_eio.Body_completed
+             { value = Ok value; release_error = Some _ } ->
+           Admission_completed_with_attention
+             (value, Durable_lock_release_failed))
+    in
     match Eio.Fiber.get active_permit_scope_key with
     | Some permit
-      when permit_matches permit ~base_path:config.Workspace.base_path keeper_name ->
-      Admission_completed (fn permit)
-    | Some _ | None ->
-    match authority_lock_path config keeper_name with
-    | Error failure ->
-      Admission_blocked
-        (Authority_unreadable { keeper_name; failure })
-    | Ok lock_path ->
-      (match
-         File_lock_eio.with_durable_lock_observed
-           ~lock_path
-           (fun () ->
-              match read_locked config keeper_name with
-              | Blocked reason -> Error reason
-              | Admitted evidence ->
-                Ok
-                  (with_active_permit
-                     ~base_path:config.Workspace.base_path
-                     ~keeper_name
-                     ~evidence
-                     fn))
-       with
-       | File_lock_eio.Lock_not_acquired _ ->
-         Admission_blocked
-           (Authority_unreadable
-              { keeper_name; failure = Durable_lock_unavailable })
-       | File_lock_eio.Body_completed
-           { value = Error reason; release_error = None } ->
-         Admission_blocked reason
-       | File_lock_eio.Body_completed
-           { value = Ok value; release_error = None } ->
-         Admission_completed value
-       | File_lock_eio.Body_completed
-           { value = Error _; release_error = Some _ } ->
-         Admission_blocked
-           (Authority_unreadable
-              { keeper_name; failure = Durable_lock_release_failed })
-       | File_lock_eio.Body_completed
-           { value = Ok value; release_error = Some _ } ->
-         Admission_completed_with_attention
-           (value, Durable_lock_release_failed))
+      when permit_scope_matches
+             permit
+             ~base_path:config.Workspace.base_path
+             keeper_name ->
+      (match try_with_reentrant_lease permit fn with
+       | Some value -> Admission_completed value
+       | None -> acquire_fresh ())
+    | Some _ | None -> acquire_fresh ()
   ;;
 
   let with_recovery_lifecycle_admission

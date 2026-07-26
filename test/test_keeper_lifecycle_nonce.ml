@@ -379,64 +379,152 @@ let test_invalid_current_evidence_is_generic () =
   | Ok witness -> failf "invalid evidence allocated nonce %Ld" (target_nonce witness)
 ;;
 
-let test_inherited_permit_is_revoked_after_admission_scope () =
+exception Nested_admission_failure
+
+let test_reentrant_lease_drains_before_admission_release () =
   with_base "masc_lifecycle_permit_scope_" @@ fun base_path ->
   let module Admission =
     Masc.Keeper_lifecycle_admission.Durable_transaction
   in
   let config = Workspace.default_config base_path in
   Eio.Switch.run @@ fun sw ->
-  let child_started, resolve_child_started = Eio.Promise.create () in
-  let release_child, resolve_release_child = Eio.Promise.create () in
+  let child_entered, resolve_child_entered = Eio.Promise.create () in
+  let outer_body_returning, resolve_outer_body_returning =
+    Eio.Promise.create ()
+  in
+  let observe_after_close, resolve_observe_after_close =
+    Eio.Promise.create ()
+  in
+  let lease_observed, resolve_lease_observed = Eio.Promise.create () in
+  let release_child_body, resolve_release_child_body =
+    Eio.Promise.create ()
+  in
+  let first_reentry_done, resolve_first_reentry_done =
+    Eio.Promise.create ()
+  in
+  let allow_fresh_reentry, resolve_allow_fresh_reentry =
+    Eio.Promise.create ()
+  in
   let child_result, resolve_child_result = Eio.Promise.create () in
   let outer_result =
-    Admission.with_durable_lifecycle_admission
-      config
-      ~keeper_name:"keeper-a"
-      (fun permit ->
-         Eio.Fiber.fork ~sw (fun () ->
-           Eio.Promise.resolve resolve_child_started ();
-           Eio.Promise.await release_child;
-           let inherited_permit_is_live =
-             Admission.permit_matches
-               permit
-               ~base_path
-               "keeper-a"
+    Eio.Fiber.fork_promise ~sw (fun () ->
+      Admission.with_durable_lifecycle_admission
+        config
+        ~keeper_name:"keeper-a"
+        (fun permit ->
+           let exception_released =
+             try
+               ignore
+                 (Admission.with_durable_lifecycle_admission
+                    config
+                    ~keeper_name:"keeper-a"
+                    (fun _ -> raise Nested_admission_failure));
+               false
+             with Nested_admission_failure -> true
            in
-           let reacquired =
-             Admission.with_durable_lifecycle_admission
-               config
-               ~keeper_name:"keeper-a"
-               (fun fresh_permit ->
-                  ( Admission.permit_matches
-                      permit
-                      ~base_path
-                      "keeper-a"
-                  , Admission.permit_matches
-                      fresh_permit
-                      ~base_path
-                      "keeper-a" ))
+           check bool
+             "nested exception leaves its reentrant lease"
+             true
+             exception_released;
+           let cancellation_reason =
+             Failure "cancel nested lifecycle admission"
            in
-           Eio.Promise.resolve
-             resolve_child_result
-             (inherited_permit_is_live, reacquired));
-         Eio.Promise.await child_started;
-         check bool
-           "permit is live only inside its admission callback"
-           true
-           (Admission.permit_matches permit ~base_path "keeper-a"))
+           let cancellation_released =
+             try
+               Eio.Cancel.sub (fun context ->
+                 ignore
+                   (Admission.with_durable_lifecycle_admission
+                      config
+                      ~keeper_name:"keeper-a"
+                      (fun _ ->
+                         Eio.Cancel.cancel
+                           context
+                           cancellation_reason;
+                         Eio.Fiber.check ()));
+                 false)
+             with
+             | Eio.Cancel.Cancelled observed ->
+               observed == cancellation_reason
+           in
+           check bool
+             "nested cancellation leaves its reentrant lease"
+             true
+             cancellation_released;
+           Eio.Fiber.fork ~sw (fun () ->
+             let first_reentry =
+               Admission.with_durable_lifecycle_admission
+                 config
+                 ~keeper_name:"keeper-a"
+                 (fun leased_permit ->
+                    Eio.Promise.resolve resolve_child_entered ();
+                    Eio.Promise.await observe_after_close;
+                    Eio.Promise.resolve
+                      resolve_lease_observed
+                      (Admission.permit_matches
+                         leased_permit
+                         ~base_path
+                         "keeper-a");
+                    Eio.Promise.await release_child_body)
+             in
+             Eio.Promise.resolve
+               resolve_first_reentry_done
+               first_reentry;
+             Eio.Promise.await allow_fresh_reentry;
+             let inherited_permit_is_live =
+               Admission.permit_matches
+                 permit
+                 ~base_path
+                 "keeper-a"
+             in
+             let reacquired =
+               Admission.with_durable_lifecycle_admission
+                 config
+                 ~keeper_name:"keeper-a"
+                 (fun fresh_permit ->
+                    ( Admission.permit_matches
+                        permit
+                        ~base_path
+                        "keeper-a"
+                    , Admission.permit_matches
+                        fresh_permit
+                        ~base_path
+                        "keeper-a" ))
+             in
+             Eio.Promise.resolve
+               resolve_child_result
+               (inherited_permit_is_live, reacquired));
+           Eio.Promise.await child_entered;
+           Eio.Promise.resolve resolve_outer_body_returning ()))
   in
-  (match outer_result with
+  Eio.Promise.await outer_body_returning;
+  Eio.Fiber.yield ();
+  Eio.Fiber.yield ();
+  check bool
+    "outer admission waits for in-flight reentrant body"
+    false
+    (Option.is_some (Eio.Promise.peek outer_result));
+  Eio.Promise.resolve resolve_observe_after_close ();
+  check bool
+    "in-flight lease remains authorized while outer drains"
+    true
+    (Eio.Promise.await lease_observed);
+  Eio.Promise.resolve resolve_release_child_body ();
+  (match Eio.Promise.await first_reentry_done with
+   | Admission.Admission_completed () -> ()
+   | Admission.Admission_completed_with_attention ((), _) ->
+     fail "reentrant admission reported impossible lock-release attention"
+   | Admission.Admission_blocked reason ->
+     fail
+       (Admission.blocked_reason_to_wire reason));
+  (match Eio.Promise.await_exn outer_result with
    | Admission.Admission_completed () -> ()
    | Admission.Admission_completed_with_attention ((), _) ->
      fail "outer admission completed with unexpected release attention"
    | Admission.Admission_blocked reason ->
      fail
        (Admission.blocked_reason_to_wire reason));
-  Eio.Promise.resolve resolve_release_child ();
-  let inherited_permit_is_live, reacquired =
-    Eio.Promise.await child_result
-  in
+  Eio.Promise.resolve resolve_allow_fresh_reentry ();
+  let inherited_permit_is_live, reacquired = Eio.Promise.await child_result in
   check bool
     "inherited permit is revoked after parent scope"
     false
@@ -488,9 +576,9 @@ let () =
         ; test_case "shutdown floor bounds create" `Quick test_shutdown_floor_bounds_create
         ; test_case "invalid current evidence is generic" `Quick test_invalid_current_evidence_is_generic
         ; test_case
-            "inherited permit is revoked after admission scope"
+            "reentrant lease drains before admission release"
             `Quick
-            test_inherited_permit_is_revoked_after_admission_scope
+            test_reentrant_lease_drains_before_admission_release
         ] )
     ]
 ;;

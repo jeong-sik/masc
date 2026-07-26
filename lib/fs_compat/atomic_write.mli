@@ -331,7 +331,9 @@ exception Capability_write_cancelled of exn * capability_write_cancellation
     durable Bound obligation precedes payload creation. The Bound obligation
     is discharged only after rename, staging-directory sync and removal, and
     target-parent sync all complete. No target tree is scanned during failure
-    handling. *)
+    handling. [Out_of_memory], [Stack_overflow], [Sys.Break], and
+    [Eio.Cancel.Cancelled] are re-raised with their original backtrace rather
+    than entering the typed write-error channel. *)
 val replace_capability_file
   :  recovery:Publication_recovery_access.t
   -> parent:Eio.Fs.dir_ty Eio.Path.t
@@ -341,7 +343,8 @@ val replace_capability_file
 
 (** Exclusive creation is physically separate from replacement and has no
     recovery-obligation argument. Once the public leaf is created it is never
-    unlinked by failure cleanup. *)
+    unlinked by failure cleanup. Fatal runtime exceptions and cancellation
+    follow the same re-raise contract as {!replace_capability_file}. *)
 val create_capability_file_exclusive
   :  parent:Eio.Fs.dir_ty Eio.Path.t
   -> leaf:string

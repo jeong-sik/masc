@@ -90,6 +90,57 @@ let test_context_overflow_is_auto_recoverable () =
        (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 32768 })))
 ;;
 
+module Budget = Masc.Keeper_turn_runtime_budget
+
+let request_body_too_large ~actual_bytes ~limit_bytes =
+  Agent_sdk.Error.Api
+    (InvalidRequest
+       { message = "serialized request body exceeds the declared limit"
+       ; reason = Agent_sdk.Retry.Request_body_too_large { actual_bytes; limit_bytes }
+       })
+;;
+
+(* The byte axis used to fall through [| _ -> None] and produce no compaction
+   request at all, so these two assertions are the ones that failed before. *)
+let test_byte_axis_is_a_capacity_refusal () =
+  (match
+     Budget.capacity_refusal_of_error
+       (request_body_too_large ~actual_bytes:2_000_000 ~limit_bytes:1_048_576)
+   with
+   | Some
+       (Budget.Serialized_request_body
+          { actual_bytes = 2_000_000; limit_bytes = 1_048_576 }) -> ()
+   | Some (Budget.Serialized_request_body _) ->
+     fail "the measured byte pair was not carried through"
+   | Some (Budget.Provider_context_window _) ->
+     fail "a byte refusal was classified on the token axis"
+   | None -> fail "a declared-byte refusal was not classified as a capacity refusal");
+  match
+    Budget.capacity_refusal_of_error
+      (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 32768 }))
+  with
+  | Some (Budget.Provider_context_window { limit_tokens = Some 32768 }) -> ()
+  | Some _ | None -> fail "the context window axis regressed"
+;;
+
+(* The projection feeding the cascade path publishes
+   reason="provider_context_overflow" and the Sdk_context_window_exceeded blocker
+   class, so admitting a byte refusal there would label it as a window exceedance. *)
+let test_event_projection_admits_only_the_token_axis () =
+  (match
+     Budget.context_overflow_event_of_error
+       (request_body_too_large ~actual_bytes:2_000_000 ~limit_bytes:1_048_576)
+   with
+   | None -> ()
+   | Some _ -> fail "a byte refusal was projected as a context-overflow event");
+  match
+    Budget.context_overflow_event_of_error
+      (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = None }))
+  with
+  | Some (Keeper_state_machine.Context_overflow_detected { limit_tokens = None }) -> ()
+  | Some _ | None -> fail "the context overflow event projection regressed"
+;;
+
 let () =
   run
     "keeper_unified_context_overflow"
@@ -106,6 +157,14 @@ let () =
             "input capacity is not context overflow"
             `Quick
             test_input_capacity_is_not_context_overflow
+        ; test_case
+            "declared-byte refusal is a capacity refusal"
+            `Quick
+            test_byte_axis_is_a_capacity_refusal
+        ; test_case
+            "event projection admits only the token axis"
+            `Quick
+            test_event_projection_admits_only_the_token_axis
         ] )
     ]
 ;;

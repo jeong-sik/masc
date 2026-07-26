@@ -4,6 +4,21 @@ type t =
   | Provider_overflow of { limit_tokens : int option }
       (** Typed provider context-window overflow. [limit_tokens] is the
           provider-declared limit when present, never an estimated count. *)
+  | Request_body_over_capacity of
+      { actual_bytes : int
+      ; limit_bytes : int
+      }
+      (** The serialized request body exceeded the byte capacity the target
+          declares. Both integers are measured, never estimated:
+          [Agent_sdk.Retry.Request_body_too_large] carries them from the
+          serialization OAS performs before any HTTP call, so
+          [actual_bytes > limit_bytes] already held upstream and
+          {!of_detail_json} rejects a record where it does not.
+
+          Separate from {!Provider_overflow} because the unit differs. A byte
+          refusal says nothing about the provider's token window, so folding it
+          into [limit_tokens] would have to report [None] — an unknown limit for
+          a limit that is known exactly. *)
   | Manual
 
 (** Closed label set for Otel_metric_store / SSE [trigger] label.
@@ -25,6 +40,12 @@ type decode_error =
   | Unknown_kind of string
   | Missing_provider_limit
   | Invalid_provider_limit
+  | Missing_request_body_bytes of string
+  | Invalid_request_body_bytes of string
+  | Request_body_within_capacity of
+      { actual_bytes : int
+      ; limit_bytes : int
+      }
 
 val decode_error_to_string : decode_error -> string
 

@@ -212,13 +212,36 @@ let recover_provider_context_overflow_in_lane
       ~(meta : keeper_meta)
       error
   =
-  match context_overflow_event_of_error error with
+  match capacity_refusal_of_error error with
   | None -> Not_provider_overflow
-  | Some
-      ((Keeper_state_machine.Context_overflow_detected { limit_tokens }) as
-       overflow_event) ->
+  | Some refusal ->
     let origin = Keeper_registry.Post_turn_lifecycle in
-    let trigger = Compaction_trigger.Provider_overflow { limit_tokens } in
+    let trigger =
+      match refusal with
+      | Keeper_turn_runtime_budget.Provider_context_window { limit_tokens } ->
+        Compaction_trigger.Provider_overflow { limit_tokens }
+      | Keeper_turn_runtime_budget.Serialized_request_body { actual_bytes; limit_bytes }
+        -> Compaction_trigger.Request_body_over_capacity { actual_bytes; limit_bytes }
+    in
+    (* [Context_overflow_detected] is the only event that latches
+       [context_overflow] (keeper_state_machine.ml:214), the flag the lane needs
+       before it will admit a compaction, and that flag is axis-agnostic. Its
+       payload is read only for the "overflowed" lifecycle log line
+       (keeper_state_machine.ml:287-291), so a byte refusal carries no token limit
+       and that one line reads limit=unknown. The measured bytes are not lost:
+       they travel on [trigger] into the durable compaction record. Reshaping the
+       event payload into a closed capacity-evidence sum is the follow-up — it
+       touches keeper_state_machine_json.ml, a durable codec, so it needs a schema
+       migration rather than riding along here. *)
+    let overflow_event =
+      Keeper_state_machine.Context_overflow_detected
+        { limit_tokens =
+            (match refusal with
+             | Keeper_turn_runtime_budget.Provider_context_window { limit_tokens } ->
+               limit_tokens
+             | Keeper_turn_runtime_budget.Serialized_request_body _ -> None)
+        }
+    in
     let dispatch stage event =
       match
         dispatch_keeper_phase_event_result
@@ -369,12 +392,6 @@ let recover_provider_context_overflow_in_lane
                    (Printexc.to_string cleanup_exn));
              Printexc.raise_with_backtrace exn backtrace
            | exn -> retry_after_started (Printexc.to_string exn))))
-  | Some event ->
-    Log.Keeper.error
-      ~keeper_name:meta.name
-      "context overflow classifier returned a non-overflow event: %s"
-      (Keeper_state_machine.event_to_string event);
-    Not_provider_overflow
 ;;
 
 let append_provider_overflow_manifest

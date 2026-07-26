@@ -16,6 +16,7 @@
 open Fs_compat_internal
 
 module Atomic_orphan_size_class = Atomic_orphan_size_class
+module Capability_exact_read = Capability_exact_read
 
 (** Global fs — WORM Atomic (write-once at startup, read from any domain).
     Using Atomic.t is required for OCaml 5 multi-domain safety:

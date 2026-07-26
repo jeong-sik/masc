@@ -716,7 +716,13 @@
 (test
  (name test_runtime_config_validity)
  (modules test_runtime_config_validity)
- (deps ../config/oas-models-overlay.toml ../config/runtime.toml)
+ ; source_tree, not named files: the mandatory-lane check discovers every
+ ; scripts/fixtures/<name>/runtime.toml, so a fixture added later is covered
+ ; without editing this stanza.
+ (deps
+  ../config/oas-models-overlay.toml
+  ../config/runtime.toml
+  (source_tree ../scripts/fixtures))
  (libraries masc_test_deps compaction_exact_output_fixture))
 
 (test
@@ -1289,6 +1295,12 @@
   masc.keeper_checkpoint_ref
   eio_main
   unix))
+
+; Fresh-state canonical Memory OS authority and strict HEAD publication proof.
+(test
+ (name test_keeper_memory_os_store)
+ (modules test_keeper_memory_os_store)
+ (libraries alcotest fs_compat masc_test_deps eio_main unix yojson))
 
 ; Provider-neutral Memory OS Librarian exact-output composition proof.
 (test
@@ -2584,6 +2596,15 @@
  (deps
   (source_tree ../lib)
   (source_tree ../bin)))
+
+(test
+ (name test_fs_compat_capability_exact_read)
+ (modules test_fs_compat_capability_exact_read)
+ (libraries alcotest fs_compat fs_compat_test_support eio eio_main eio.unix unix)
+ (deps
+  ../lib/fs_compat/fs_compat.mli
+  ../lib/fs_compat/capability_exact_read_stubs.c))
+
 (include stanzas/test_keeper_turn_attempt_observer.inc)
 (include stanzas/test_keeper_gate_effect_coverage.inc)
 (include stanzas/test_keeper_hitl_resolution_prompt.inc)

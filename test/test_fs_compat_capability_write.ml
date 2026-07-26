@@ -158,6 +158,324 @@ let require_append_file = function
   | Error error -> fail (Fs_compat.capability_append_open_error_to_string error)
 ;;
 
+let nonrecoverable_write_exceptions () =
+  [ "out_of_memory", Out_of_memory
+  ; "stack_overflow", Stack_overflow
+  ; "sys_break", Sys.Break
+  ; "cancellation", Eio.Cancel.Cancelled Exit
+  ]
+;;
+
+let check_same_exception_and_backtrace
+      ~label
+      ~expected_exception
+      ~expected_backtrace
+      operation
+  =
+  let observed =
+    try
+      operation ();
+      None
+    with
+    | exception_ ->
+      Some (exception_, Printexc.get_raw_backtrace ())
+  in
+  match observed with
+  | None -> failf "%s unexpectedly entered the typed result channel" label
+  | Some (exception_, backtrace) ->
+    check bool (label ^ " preserves exception identity") true
+      (exception_ == expected_exception);
+    check string (label ^ " preserves raw backtrace")
+      (Printexc.raw_backtrace_to_string expected_backtrace)
+      (Printexc.raw_backtrace_to_string backtrace)
+;;
+
+let test_replace_nonrecoverable_exceptions_preserve_backtrace ~fs () =
+  with_tmp_dir @@ fun directory ->
+  let target = Filename.concat directory "target" in
+  write_file target "old";
+  with_replace_context ~fs directory @@ fun parent recovery ->
+  List.iter
+    (fun (name, exception_) ->
+       let backtrace = Printexc.get_callstack 32 in
+       check_same_exception_and_backtrace
+         ~label:("replace " ^ name)
+         ~expected_exception:exception_
+         ~expected_backtrace:backtrace
+         (fun () ->
+            ignore
+              (replace_capability_file_for_testing
+                 ~before_stage:(function
+                   | Fs_compat.Acquire_mutation_lease ->
+                     Printexc.raise_with_backtrace exception_ backtrace
+                   | _ -> ())
+                 ~recovery
+                 ~allowed_root_path:directory
+                 ~parent
+                 ~leaf:"target"
+                 ~permissions:0o640
+                 "new"
+               : (unit, Fs_compat.capability_write_error) result)))
+    (nonrecoverable_write_exceptions ());
+  check string "fatal replace attempts leave target unchanged" "old"
+    (read_file target)
+;;
+
+let test_create_nonrecoverable_exceptions_preserve_backtrace ~fs () =
+  with_tmp_dir @@ fun directory ->
+  with_parent_capability ~fs directory @@ fun parent ->
+  List.iter
+    (fun (name, exception_) ->
+       let backtrace = Printexc.get_callstack 32 in
+       check_same_exception_and_backtrace
+         ~label:("exclusive create " ^ name)
+         ~expected_exception:exception_
+         ~expected_backtrace:backtrace
+         (fun () ->
+            ignore
+              (Capability_write_test.create_capability_file_exclusive
+                 ~before_stage:(function
+                   | Fs_compat.Validate_leaf ->
+                     Printexc.raise_with_backtrace exception_ backtrace
+                   | _ -> ())
+                 ~parent
+                 ~leaf:"target"
+                 ~permissions:0o640
+                 "new"
+               : (unit, Fs_compat.capability_write_error) result)))
+    (nonrecoverable_write_exceptions ());
+  check bool "fatal create attempts do not publish target" false
+    (Sys.file_exists (Filename.concat directory "target"))
+;;
+
+let test_cleanup_fatal_exception_preserves_backtrace ~fs () =
+  with_tmp_dir @@ fun directory ->
+  with_parent_capability ~fs directory @@ fun parent ->
+  List.iter
+    (fun (name, fatal) ->
+       let backtrace = Printexc.get_callstack 32 in
+       check_same_exception_and_backtrace
+         ~label:("exclusive create cleanup " ^ name)
+         ~expected_exception:fatal
+         ~expected_backtrace:backtrace
+         (fun () ->
+            ignore
+              (Capability_write_test.create_capability_file_exclusive
+                 ~before_stage:(function
+                   | Fs_compat.Write_payload -> raise Exit
+                   | Fs_compat.Cleanup_close ->
+                     Printexc.raise_with_backtrace fatal backtrace
+                   | _ -> ())
+                 ~parent
+                 ~leaf:("target-" ^ name)
+                 ~permissions:0o640
+                 "new"
+               : (unit, Fs_compat.capability_write_error) result)))
+    [ "out_of_memory", Out_of_memory
+    ; "stack_overflow", Stack_overflow
+    ; "sys_break", Sys.Break
+    ]
+;;
+
+let require_capability_write_cancellation ~label operation =
+  try
+    operation ();
+    failf "%s cancellation was swallowed" label
+  with
+  | Eio.Cancel.Cancelled
+      (Fs_compat.Capability_write_cancelled (reason, cancellation)) ->
+    reason, cancellation, Printexc.get_raw_backtrace ()
+  | Eio.Cancel.Cancelled _ ->
+    failf "%s cancellation lost capability-write authority" label
+;;
+
+let check_interrupted_write_stage
+      ~label
+      ~expected_stage
+      (cancellation : Fs_compat.capability_write_cancellation)
+  =
+  match cancellation.interrupted_primary_failure with
+  | Some (Fs_compat.Write_primary_failure failure) ->
+    check bool (label ^ " preserves interrupted primary stage") true
+      (failure.stage = expected_stage)
+  | Some (Fs_compat.Recovery_primary_failure failure) ->
+    fail (Fs_compat.capability_recovery_failure_to_string failure)
+  | Some (Fs_compat.Recovery_access_primary_failure _) ->
+    failf "%s replaced the write primary with recovery access" label
+  | None -> failf "%s omitted the interrupted write primary" label
+;;
+
+let check_direct_cleanup_cancellation
+      ~label
+      ~reason
+      ~backtrace
+      ~expected_operation
+      ~expected_target_effect
+      ~expected_primary_stage
+      operation
+  =
+  let observed_reason, cancellation, observed_backtrace =
+    require_capability_write_cancellation ~label operation
+  in
+  check bool (label ^ " preserves reason identity") true
+    (observed_reason == reason);
+  check string (label ^ " preserves raw backtrace")
+    (Printexc.raw_backtrace_to_string backtrace)
+    (Printexc.raw_backtrace_to_string observed_backtrace);
+  check bool (label ^ " preserves operation") true
+    (cancellation.operation = expected_operation);
+  check bool (label ^ " preserves target effect") true
+    (cancellation.target_effect = expected_target_effect);
+  check bool (label ^ " has no invented recovery interruption") true
+    (Option.is_none cancellation.interrupted_recovery);
+  check_interrupted_write_stage
+    ~label
+    ~expected_stage:expected_primary_stage
+    cancellation
+;;
+
+let test_replace_direct_cleanup_cancellation_preserves_authority ~fs () =
+  let run
+        ~label
+        ~primary_stage
+        ~cleanup_stage
+        ~expected_target_effect
+    =
+    with_tmp_dir @@ fun directory ->
+    let target = Filename.concat directory "target" in
+    write_file target "old";
+    with_replace_context ~fs directory @@ fun parent recovery ->
+    let reason = Failure label in
+    let backtrace = Printexc.get_callstack 32 in
+    check_direct_cleanup_cancellation
+      ~label
+      ~reason
+      ~backtrace
+      ~expected_operation:Fs_compat.Atomic_replace_operation
+      ~expected_target_effect
+      ~expected_primary_stage:primary_stage
+      (fun () ->
+         ignore
+           (replace_capability_file_for_testing
+              ~before_stage:(fun stage ->
+                if stage = primary_stage
+                then raise Exit
+                else if stage = cleanup_stage
+                then
+                  Printexc.raise_with_backtrace
+                    (Eio.Cancel.Cancelled reason)
+                    backtrace)
+              ~recovery
+              ~allowed_root_path:directory
+              ~parent
+              ~leaf:"target"
+              ~permissions:0o640
+              "new"
+            : (unit, Fs_compat.capability_write_error) result))
+  in
+  run
+    ~label:"replace unchanged cleanup"
+    ~primary_stage:Fs_compat.Write_payload
+    ~cleanup_stage:Fs_compat.Cleanup_close
+    ~expected_target_effect:Fs_compat.Target_unchanged;
+  run
+    ~label:"replace published cleanup"
+    ~primary_stage:Fs_compat.Sync_parent
+    ~cleanup_stage:Fs_compat.Cleanup_sync_parent
+    ~expected_target_effect:Fs_compat.Target_replaced
+;;
+
+let test_create_direct_cleanup_cancellation_preserves_authority ~fs () =
+  let run
+        ~label
+        ~primary_stage
+        ~cleanup_stage
+        ~expected_target_effect
+    =
+    with_tmp_dir @@ fun directory ->
+    with_parent_capability ~fs directory @@ fun parent ->
+    let reason = Failure label in
+    let backtrace = Printexc.get_callstack 32 in
+    check_direct_cleanup_cancellation
+      ~label
+      ~reason
+      ~backtrace
+      ~expected_operation:Fs_compat.Create_exclusive_operation
+      ~expected_target_effect
+      ~expected_primary_stage:primary_stage
+      (fun () ->
+         ignore
+           (Capability_write_test.create_capability_file_exclusive
+              ~before_stage:(fun stage ->
+                if stage = primary_stage
+                then raise Exit
+                else if stage = cleanup_stage
+                then
+                  Printexc.raise_with_backtrace
+                    (Eio.Cancel.Cancelled reason)
+                    backtrace)
+              ~parent
+              ~leaf:"target"
+              ~permissions:0o640
+              "new"
+            : (unit, Fs_compat.capability_write_error) result))
+  in
+  run
+    ~label:"create incomplete cleanup"
+    ~primary_stage:Fs_compat.Write_payload
+    ~cleanup_stage:Fs_compat.Cleanup_close
+    ~expected_target_effect:Fs_compat.Target_created_incomplete;
+  run
+    ~label:"create complete cleanup"
+    ~primary_stage:Fs_compat.Sync_parent
+    ~cleanup_stage:Fs_compat.Cleanup_sync_parent
+    ~expected_target_effect:Fs_compat.Target_created
+;;
+
+let test_recovery_cancellation_preserves_authority_and_backtrace ~fs () =
+  with_tmp_dir @@ fun directory ->
+  let target = Filename.concat directory "target" in
+  write_file target "old";
+  with_replace_context ~fs directory @@ fun parent recovery ->
+  let reason = Failure "recovery discharge cancellation" in
+  let backtrace = Printexc.get_callstack 32 in
+  let observed_reason, cancellation, observed_backtrace =
+    require_capability_write_cancellation
+      ~label:"recovery discharge"
+      (fun () ->
+         ignore
+           (replace_capability_file_for_testing
+              ~before_stage:(function
+                | Fs_compat.Discharge_bound_recovery_obligation ->
+                  Printexc.raise_with_backtrace
+                    (Eio.Cancel.Cancelled reason)
+                    backtrace
+                | _ -> ())
+              ~recovery
+              ~allowed_root_path:directory
+              ~parent
+              ~leaf:"target"
+              ~permissions:0o640
+              "new"
+            : (unit, Fs_compat.capability_write_error) result))
+  in
+  check bool "recovery cancellation preserves reason identity" true
+    (observed_reason == reason);
+  check string "recovery cancellation preserves raw backtrace"
+    (Printexc.raw_backtrace_to_string backtrace)
+    (Printexc.raw_backtrace_to_string observed_backtrace);
+  check bool "recovery cancellation preserves replacement effect" true
+    (cancellation.target_effect = Fs_compat.Target_replaced);
+  check bool "recovery cancellation has no write primary" true
+    (Option.is_none cancellation.interrupted_primary_failure);
+  (match cancellation.interrupted_recovery with
+   | None -> fail "recovery cancellation omitted interruption authority"
+   | Some interruption ->
+     check bool "recovery cancellation preserves exact phase" true
+       (Fs_compat.capability_recovery_failure_phase interruption
+        = Fs_compat.Recovery_discharge_bound))
+;;
+
 let test_atomic_replace_preserves_requested_mode ~fs () =
   with_tmp_dir @@ fun directory ->
   let target = Filename.concat directory "target" in
@@ -1892,6 +2210,18 @@ let () =
             (test_atomic_replace_replaces_symlink_not_referent ~fs)
         ; test_case "large payload complete" `Quick
             (test_atomic_replace_writes_complete_large_payload ~fs)
+        ; test_case "replace fatal and cancellation preserve backtrace" `Quick
+            (test_replace_nonrecoverable_exceptions_preserve_backtrace ~fs)
+        ; test_case "create fatal and cancellation preserve backtrace" `Quick
+            (test_create_nonrecoverable_exceptions_preserve_backtrace ~fs)
+        ; test_case "cleanup fatal preserves backtrace" `Quick
+            (test_cleanup_fatal_exception_preserves_backtrace ~fs)
+        ; test_case "replace cleanup cancellation preserves authority" `Quick
+            (test_replace_direct_cleanup_cancellation_preserves_authority ~fs)
+        ; test_case "create cleanup cancellation preserves authority" `Quick
+            (test_create_direct_cleanup_cancellation_preserves_authority ~fs)
+        ; test_case "recovery cancellation preserves authority" `Quick
+            (test_recovery_cancellation_preserves_authority_and_backtrace ~fs)
         ; test_case "typed parent components" `Quick
             (test_atomic_replace_uses_typed_parent_components ~fs)
         ; test_case "owned restrictive staging directory" `Quick

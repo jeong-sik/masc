@@ -125,6 +125,7 @@ let check_publication_evidence label row (evidence : Head.publication_evidence) 
 ;;
 
 let cross_process_holder_arg = "--capability-head-cross-process-holder"
+let cross_process_timeout_seconds = 10.0
 
 let () =
   if
@@ -380,66 +381,68 @@ let test_cross_process_lock_then_stale_cursor
       ~fs
       ~secure_random
       ~process_mgr
+      ~clock
       ()
   =
   with_tmp_dir "masc_capability_head_cross_process_" @@ fun directory ->
   let leaf = "HEAD" in
   let child_row = "cross-process-winner" in
   with_parent ~fs directory @@ fun parent ->
-  let original = read ~secure_random ~parent ~leaf "cross-process initial read" in
-  Eio.Switch.run @@ fun sw ->
-  let child_stdin, parent_stdin = Eio.Process.pipe ~sw process_mgr in
-  let parent_stdout, child_stdout = Eio.Process.pipe ~sw process_mgr in
-  let child =
-    Eio.Process.spawn
-      ~sw
-      process_mgr
-      ~stdin:child_stdin
-      ~stdout:child_stdout
-      ~executable:Sys.executable_name
-      [ Sys.executable_name
-      ; cross_process_holder_arg
-      ; directory
-      ; leaf
-      ; child_row
-      ]
-  in
-  Eio.Flow.close child_stdin;
-  Eio.Flow.close child_stdout;
-  let ready = Cstruct.create 1 in
-  Eio.Flow.read_exact parent_stdout ready;
-  check string
-    "separate process owns the stable lock"
-    "R"
-    (Cstruct.to_string ready);
-  Head.compare_and_swap
-    ~secure_random
-    ~parent
-    ~leaf
-    ~expected:(Head.snapshot_cursor original)
-    ~row:"contender-must-not-publish"
-  |> require_busy "cross-process contender";
-  Eio.Flow.copy_string "X" parent_stdin;
-  Eio.Flow.close parent_stdin;
-  Eio.Process.await_exn child;
-  Eio.Flow.close parent_stdout;
-  let current =
+  Eio.Time.with_timeout_exn clock cross_process_timeout_seconds (fun () ->
+    let original = read ~secure_random ~parent ~leaf "cross-process initial read" in
+    Eio.Switch.run @@ fun sw ->
+    let child_stdin, parent_stdin = Eio.Process.pipe ~sw process_mgr in
+    let parent_stdout, child_stdout = Eio.Process.pipe ~sw process_mgr in
+    let child =
+      Eio.Process.spawn
+        ~sw
+        process_mgr
+        ~stdin:child_stdin
+        ~stdout:child_stdout
+        ~executable:Sys.executable_name
+        [ Sys.executable_name
+        ; cross_process_holder_arg
+        ; directory
+        ; leaf
+        ; child_row
+        ]
+    in
+    Eio.Flow.close child_stdin;
+    Eio.Flow.close child_stdout;
+    let ready = Cstruct.create 1 in
+    Eio.Flow.read_exact parent_stdout ready;
+    check string
+      "separate process owns the stable lock"
+      "R"
+      (Cstruct.to_string ready);
     Head.compare_and_swap
       ~secure_random
       ~parent
       ~leaf
       ~expected:(Head.snapshot_cursor original)
-      ~row:"stale-cursor-must-not-publish"
-    |> require_conflict "cursor after cross-process publication"
-  in
-  check_row
-    "released child publication invalidates the original cursor"
-    (Some child_row)
-    current;
-  read ~secure_random ~parent ~leaf "cross-process final read"
-  |> check_row
-       "cross-process winner remains the exact HEAD authority"
-       (Some child_row)
+      ~row:"contender-must-not-publish"
+    |> require_busy "cross-process contender";
+    Eio.Flow.copy_string "X" parent_stdin;
+    Eio.Flow.close parent_stdin;
+    Eio.Process.await_exn child;
+    Eio.Flow.close parent_stdout;
+    let current =
+      Head.compare_and_swap
+        ~secure_random
+        ~parent
+        ~leaf
+        ~expected:(Head.snapshot_cursor original)
+        ~row:"stale-cursor-must-not-publish"
+      |> require_conflict "cursor after cross-process publication"
+    in
+    check_row
+      "released child publication invalidates the original cursor"
+      (Some child_row)
+      current;
+    read ~secure_random ~parent ~leaf "cross-process final read"
+    |> check_row
+         "cross-process winner remains the exact HEAD authority"
+         (Some child_row))
 ;;
 
 let test_parent_cancellation_after_dispatch_returns_publication
@@ -682,6 +685,7 @@ let () =
   let fs = Eio.Stdenv.fs env in
   let secure_random = Eio.Stdenv.secure_random env in
   let process_mgr = Eio.Stdenv.process_mgr env in
+  let clock = Eio.Stdenv.clock env in
   run
     "fs_compat capability HEAD"
     [ ( "authority"
@@ -703,7 +707,8 @@ let () =
             (test_cross_process_lock_then_stale_cursor
                ~fs
                ~secure_random
-               ~process_mgr)
+               ~process_mgr
+               ~clock)
         ; test_case "parent cancellation after dispatch publishes once" `Quick
             (test_parent_cancellation_after_dispatch_returns_publication
                ~fs

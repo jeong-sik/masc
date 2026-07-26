@@ -407,7 +407,7 @@ let goal_completion_to_json (goal : Goal_store.goal) (node : tree_node) ~attainm
       ("task_total", `Int task_count);
       ("task_done", `Int task_done_count);
       ("task_open", `Int task_open_count);
-      ("is_complete", `Bool (goal.phase = Goal_phase.Completed));
+      ("is_complete", `Bool (Goal_phase.is_completed goal.phase));
       ("is_terminal", `Bool is_terminal);
       ("ready_to_request_completion", `Bool ready_to_request_completion);
     ]

@@ -515,7 +515,7 @@ let test_goal_completion_requires_nonempty_claim () =
     (get_string_field error "error_code");
   let current = current_goal config goal.id in
   check bool "missing claim cannot complete" true
-    (current.phase = Goal_phase.Executing);
+    (Goal_phase.is_executing current.phase);
   check bool "missing claim writes no receipt" true
     (Option.is_none current.completion_receipt)
 ;;
@@ -596,7 +596,7 @@ let test_goal_completion_rejection_is_durable_and_nonterminal () =
     (get_string_field error "error_code");
   let current = current_goal config goal.id in
   check bool "rejected Goal stays executing" true
-    (current.phase = Goal_phase.Executing);
+    (Goal_phase.is_executing current.phase);
   check
     (option string)
     "rejection reason is durable"
@@ -637,7 +637,7 @@ let test_goal_completion_unavailable_is_retryable_and_nonterminal () =
    | None -> fail "masc_goal_transition not handled");
   let current = current_goal config goal.id in
   check bool "unavailable Goal stays executing" true
-    (current.phase = Goal_phase.Executing);
+    (Goal_phase.is_executing current.phase);
   check bool "unavailable reason is durable" true
     (Option.is_some current.last_review_note);
   check bool "unavailable kind is typed" true
@@ -670,7 +670,7 @@ let test_goal_completion_missing_verdict_is_nonterminal () =
    | None -> fail "masc_goal_transition not handled");
   let current = current_goal config goal.id in
   check bool "missing verdict cannot complete" true
-    (current.phase = Goal_phase.Executing);
+    (Goal_phase.is_executing current.phase);
   check bool "missing verdict is typed unavailable" true
     (current.completion_review_failure = Some Goal_store.Unavailable);
   check bool "missing verdict writes no receipt" true
@@ -708,7 +708,7 @@ let test_goal_completion_rejects_stale_approval () =
     (get_string_field error "error_code");
   let current = current_goal config goal.id in
   check bool "stale approval cannot complete" true
-    (current.phase = Goal_phase.Executing);
+    (Goal_phase.is_executing current.phase);
   check bool "no stale receipt" true (Option.is_none current.completion_receipt)
 ;;
 let test_goal_block_and_unblock_have_no_operator_hierarchy () =

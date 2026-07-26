@@ -374,7 +374,12 @@ let handle_goal_completion_request
             ~expected:goal
             (fun current ->
                { current with
-                 phase = Goal_phase.Completed
+                 (* The only construction of [Completed] in the tree, and it
+                    must name the verdict receipt that authorized it. *)
+                 phase =
+                   Goal_phase.completed
+                     (Goal_phase.authorize_completion
+                        ~verdict_receipt_id:receipt.Goal_store.review_prompt_sha256)
                ; last_review_note = Some "Configured LLM approved Goal completion"
                ; last_review_at = Some reviewed_at
                ; completion_review_failure = None

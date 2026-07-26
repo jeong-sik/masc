@@ -683,7 +683,7 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                   in
                   if candidate_goal = existing
                   then state
-                  else if existing.phase = Goal_phase.Completed
+                  else if Goal_phase.is_completed existing.phase
                   then (
                     mutation_rejection :=
                       Some
@@ -706,7 +706,7 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                         target_value;
                         due_date;
                         priority = clamp_priority (Option.value priority ~default:3);
-                        phase = Goal_phase.Executing;
+                        phase = Goal_phase.executing;
                         parent_goal_id;
                         last_review_note = None;
                         last_review_at = None;
@@ -738,14 +738,14 @@ let compute_rollup goals =
     List_util.count_if predicate goals
   in
   {
-    active_count = count (fun goal -> goal.phase = Goal_phase.Executing);
+    active_count = count (fun goal -> goal.phase = Goal_phase.executing);
     paused_count =
       count (fun goal ->
           match goal.phase with
           | Goal_phase.Paused | Goal_phase.Blocked -> true
           | _ -> false);
-    done_count = count (fun goal -> goal.phase = Goal_phase.Completed);
-    dropped_count = count (fun goal -> goal.phase = Goal_phase.Dropped);
+    done_count = count (fun goal -> Goal_phase.is_completed goal.phase);
+    dropped_count = count (fun goal -> Goal_phase.is_dropped goal.phase);
   }
 
 (* RFC-0294: the horizon-driven refresh/snapshot scheduler ([snapshot],
@@ -754,4 +754,4 @@ let compute_rollup goals =
    cohort selector keyed on the now-deleted [horizon]. *)
 
 let active_goals config =
-  list_goals config ~phase:Goal_phase.Executing ()
+  list_goals config ~phase:Goal_phase.executing ()

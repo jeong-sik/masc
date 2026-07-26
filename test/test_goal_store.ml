@@ -11,6 +11,14 @@ module Types = Masc_domain
 open Alcotest
 open Masc
 
+(* Completion is authorized, not asserted: even a fixture has to name the
+   verdict receipt it is standing in for. *)
+let test_completed_phase =
+  Goal_phase.completed
+    (Goal_phase.authorize_completion ~verdict_receipt_id:"test-receipt")
+;;
+
+
 let temp_dir () =
   Filename.temp_dir "goal_store_test" ""
 
@@ -45,7 +53,7 @@ let make_goal id title =
   {
     Goal_store.id; title;
     metric = None; target_value = None; due_date = None;
-    priority = 3; phase = Goal_phase.Executing;
+    priority = 3; phase = Goal_phase.executing;
     parent_goal_id = None;
     last_review_note = None; last_review_at = None;
     completion_review_failure = None;
@@ -260,7 +268,7 @@ let test_blocked_phase_serializes_without_status () =
   let goal =
     match
       Goal_store.update_goal config ~goal_id:created.id (fun current ->
-        { current with phase = Goal_phase.Blocked })
+        { current with phase = Goal_phase.blocked })
     with
     | Ok goal -> goal
     | Error msg -> fail msg
@@ -301,11 +309,11 @@ let test_list_goals_filters_by_phase () =
        | Ok _ -> ()
        | Error msg -> fail msg)
   in
-  make "Executing goal" Goal_phase.Executing;
-  make "Completed goal" Goal_phase.Completed;
-  make "Blocked goal" Goal_phase.Blocked;
+  make "Executing goal" Goal_phase.executing;
+  make "Completed goal" test_completed_phase;
+  make "Blocked goal" Goal_phase.blocked;
   let goals =
-    Goal_store.list_goals config ~phase:Goal_phase.Completed ()
+    Goal_store.list_goals config ~phase:test_completed_phase ()
   in
   check int "one completed goal" 1 (List.length goals);
   match goals with
@@ -338,7 +346,7 @@ let test_update_cannot_complete_without_receipt () =
   let before = Goal_store.read_state config in
   (match
      Goal_store.update_goal config ~goal_id:goal.id (fun current ->
-       { current with phase = Goal_phase.Completed })
+       { current with phase = test_completed_phase })
    with
    | Ok _ -> fail "completion without a semantic-review receipt was accepted"
    | Error msg ->
@@ -352,7 +360,7 @@ let test_update_cannot_complete_without_receipt () =
   match Goal_store.get_goal config ~goal_id:goal.id with
   | Some current ->
     check bool "Goal remains executing" true
-      (current.phase = Goal_phase.Executing)
+      (current.phase = Goal_phase.executing)
   | None -> fail "Goal disappeared after rejected completion"
 ;;
 

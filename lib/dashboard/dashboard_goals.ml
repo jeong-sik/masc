@@ -256,15 +256,15 @@ let dashboard_goals_tree_json ~(config : Workspace.config) : Yojson.Safe.t =
                node.tasks))
       0 all_nodes
   in
-  let count_phase phase =
+  let count_phase is_phase =
     goals
-    |> List.filter (fun (goal : Goal_store.goal) -> goal.phase = phase)
+    |> List.filter (fun (goal : Goal_store.goal) -> is_phase goal.phase)
     |> List.length
   in
   let active_goal_count =
     goals
     |> List.filter (fun (goal : Goal_store.goal) ->
-           goal.phase = Goal_phase.Executing)
+           Goal_phase.is_executing goal.phase)
     |> List.length
   in
   let pending_approval_total =
@@ -288,11 +288,11 @@ let dashboard_goals_tree_json ~(config : Workspace.config) : Yojson.Safe.t =
             ( "phase_counts",
               `Assoc
                 [
-                  ("executing", `Int (count_phase Goal_phase.Executing));
-                  ("blocked", `Int (count_phase Goal_phase.Blocked));
-                  ("paused", `Int (count_phase Goal_phase.Paused));
-                  ("completed", `Int (count_phase Goal_phase.Completed));
-                  ("dropped", `Int (count_phase Goal_phase.Dropped));
+                  ("executing", `Int (count_phase Goal_phase.is_executing));
+                  ("blocked", `Int (count_phase Goal_phase.is_blocked));
+                  ("paused", `Int (count_phase Goal_phase.is_paused));
+                  ("completed", `Int (count_phase Goal_phase.is_completed));
+                  ("dropped", `Int (count_phase Goal_phase.is_dropped));
                 ] );
             ("total_tasks", `Int total_tasks);
             ("done_tasks", `Int done_tasks);

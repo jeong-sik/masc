@@ -5,6 +5,39 @@ type t =
   | Completed
   | Dropped
 
+let equal (a : t) (b : t) = a = b
+let executing = Executing
+let blocked = Blocked
+let paused = Paused
+let dropped = Dropped
+
+let is_executing = function
+  | Executing -> true
+  | Blocked | Paused | Completed | Dropped -> false
+
+let is_blocked = function
+  | Blocked -> true
+  | Executing | Paused | Completed | Dropped -> false
+
+let is_paused = function
+  | Paused -> true
+  | Executing | Blocked | Completed | Dropped -> false
+
+let is_completed = function
+  | Completed -> true
+  | Executing | Blocked | Paused | Dropped -> false
+
+let is_dropped = function
+  | Dropped -> true
+  | Executing | Blocked | Paused | Completed -> false
+
+(* Carries the receipt id so the authorization is traceable to one verdict
+   rather than being a bare token any caller could conjure for any goal. *)
+type completion_authorization = Authorized_by of string
+
+let authorize_completion ~verdict_receipt_id = Authorized_by verdict_receipt_id
+let completed (Authorized_by _ : completion_authorization) = Completed
+
 let to_string = function
   | Executing -> "executing"
   | Blocked -> "blocked"

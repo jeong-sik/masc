@@ -379,6 +379,79 @@ let test_invalid_current_evidence_is_generic () =
   | Ok witness -> failf "invalid evidence allocated nonce %Ld" (target_nonce witness)
 ;;
 
+let test_inherited_permit_is_revoked_after_admission_scope () =
+  with_base "masc_lifecycle_permit_scope_" @@ fun base_path ->
+  let module Admission =
+    Masc.Keeper_lifecycle_admission.Durable_transaction
+  in
+  let config = Workspace.default_config base_path in
+  Eio.Switch.run @@ fun sw ->
+  let child_started, resolve_child_started = Eio.Promise.create () in
+  let release_child, resolve_release_child = Eio.Promise.create () in
+  let child_result, resolve_child_result = Eio.Promise.create () in
+  let outer_result =
+    Admission.with_durable_lifecycle_admission
+      config
+      ~keeper_name:"keeper-a"
+      (fun permit ->
+         Eio.Fiber.fork ~sw (fun () ->
+           Eio.Promise.resolve resolve_child_started ();
+           Eio.Promise.await release_child;
+           let inherited_permit_is_live =
+             Admission.permit_matches
+               permit
+               ~base_path
+               "keeper-a"
+           in
+           let reacquired =
+             Admission.with_durable_lifecycle_admission
+               config
+               ~keeper_name:"keeper-a"
+               (fun fresh_permit ->
+                  ( Admission.permit_matches
+                      permit
+                      ~base_path
+                      "keeper-a"
+                  , Admission.permit_matches
+                      fresh_permit
+                      ~base_path
+                      "keeper-a" ))
+           in
+           Eio.Promise.resolve
+             resolve_child_result
+             (inherited_permit_is_live, reacquired));
+         Eio.Promise.await child_started;
+         check bool
+           "permit is live only inside its admission callback"
+           true
+           (Admission.permit_matches permit ~base_path "keeper-a"))
+  in
+  (match outer_result with
+   | Admission.Admission_completed () -> ()
+   | Admission.Admission_completed_with_attention ((), _) ->
+     fail "outer admission completed with unexpected release attention"
+   | Admission.Admission_blocked reason ->
+     fail
+       (Admission.blocked_reason_to_wire reason));
+  Eio.Promise.resolve resolve_release_child ();
+  let inherited_permit_is_live, reacquired =
+    Eio.Promise.await child_result
+  in
+  check bool
+    "inherited permit is revoked after parent scope"
+    false
+    inherited_permit_is_live;
+  match reacquired with
+  | Admission.Admission_completed (stale_matches, fresh_matches) ->
+    check bool "revoked binding cannot authorize reentry" false stale_matches;
+    check bool "reentry acquires a fresh live permit" true fresh_matches
+  | Admission.Admission_completed_with_attention _ ->
+    fail "fresh admission completed with unexpected release attention"
+  | Admission.Admission_blocked reason ->
+    fail
+      (Admission.blocked_reason_to_wire reason)
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -414,6 +487,10 @@ let () =
         ; test_case "concurrent create is exclusive" `Quick test_concurrent_create_witnesses_are_exclusive
         ; test_case "shutdown floor bounds create" `Quick test_shutdown_floor_bounds_create
         ; test_case "invalid current evidence is generic" `Quick test_invalid_current_evidence_is_generic
+        ; test_case
+            "inherited permit is revoked after admission scope"
+            `Quick
+            test_inherited_permit_is_revoked_after_admission_scope
         ] )
     ]
 ;;

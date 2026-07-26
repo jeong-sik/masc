@@ -113,6 +113,7 @@ module Durable_transaction = struct
     ; keeper_name : string
     ; evidence : evidence option
     ; scope_id : int
+    ; valid : bool Atomic.t
     }
 
   type decision =
@@ -139,8 +140,18 @@ module Durable_transaction = struct
 
   let with_active_permit ~base_path ~keeper_name ~evidence fn =
     let scope_id = Atomic.fetch_and_add next_permit_scope 1 in
-    let permit = { base_path; keeper_name; evidence; scope_id } in
-    Eio.Fiber.with_binding active_permit_scope_key permit (fun () -> fn permit)
+    let permit =
+      { base_path
+      ; keeper_name
+      ; evidence
+      ; scope_id
+      ; valid = Atomic.make true
+      }
+    in
+    Eio.Fiber.with_binding active_permit_scope_key permit (fun () ->
+      Fun.protect
+        ~finally:(fun () -> Atomic.set permit.valid false)
+        (fun () -> fn permit))
   ;;
 
   let journal_schema = "masc.keeper-dead-revival-journal.v3"
@@ -471,12 +482,15 @@ module Durable_transaction = struct
   ;;
 
   let permit_matches (permit : permit) ~base_path keeper_name =
-    String.equal permit.base_path base_path
+    Atomic.get permit.valid
+    && String.equal permit.base_path base_path
     &&
     String.equal permit.keeper_name keeper_name
     &&
     match Eio.Fiber.get active_permit_scope_key with
-    | Some active_permit -> Int.equal active_permit.scope_id permit.scope_id
+    | Some active_permit ->
+      Atomic.get active_permit.valid
+      && Int.equal active_permit.scope_id permit.scope_id
     | None -> false
   ;;
 

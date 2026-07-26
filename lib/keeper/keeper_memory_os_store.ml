@@ -1786,9 +1786,13 @@ let store_identity_warnings values =
     values
 ;;
 
-let read_store_identity_with_exact_read exact_read ~root ~owner_id =
+let read_store_identity_with_missing_warnings
+      ~on_missing_warnings
+      ~root
+      ~owner_id
+  =
   match
-    exact_read
+    Exact_read.read
       ~parent:root
       ~leaf:store_identity_leaf
       ~expected_length:store_identity_byte_count
@@ -1799,7 +1803,9 @@ let read_store_identity_with_exact_read exact_read ~root ~owner_id =
     (match failure.error with
      | Exact_read.Missing ->
        let warnings =
-         store_identity_warnings failure.settlement_warnings
+         failure.settlement_warnings
+         |> on_missing_warnings
+         |> store_identity_warnings
        in
        (match warnings with
         | [] -> Ok None
@@ -1844,8 +1850,11 @@ let read_store_identity_with_exact_read exact_read ~root ~owner_id =
        else Ok (Some (identity, warnings)))
 ;;
 
-let read_store_identity =
-  read_store_identity_with_exact_read Exact_read.read
+let read_store_identity ~root ~owner_id =
+  read_store_identity_with_missing_warnings
+    ~on_missing_warnings:Fun.id
+    ~root
+    ~owner_id
 ;;
 
 let private_root_entries root =
@@ -3756,10 +3765,18 @@ module For_testing = struct
       Current_head_settlement_warning_tag
   ;;
 
-  let read_store_identity_with_exact_hooks hooks ~root ~owner_id =
+  let read_store_identity_with_parent_settlement_failure ~root ~owner_id =
+    let on_missing_warnings warnings =
+      warnings
+      @ [ Exact_read.Settle_resources
+            { operation = Exact_read.Settle_parent_resources
+            ; detail = "injected parent settlement failure"
+            }
+        ]
+    in
     match
-      read_store_identity_with_exact_read
-        (Exact_read.For_testing.read ~hooks)
+      read_store_identity_with_missing_warnings
+        ~on_missing_warnings
         ~root
         ~owner_id
     with

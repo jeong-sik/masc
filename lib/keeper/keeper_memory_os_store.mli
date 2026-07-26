@@ -285,8 +285,7 @@ module For_testing : sig
   val error_tag : error -> error_tag
   val warning_tag : settlement_warning -> warning_tag
 
-  val read_store_identity_with_exact_hooks :
-    Fs_compat.Capability_exact_read.For_testing.hooks ->
+  val read_store_identity_with_parent_settlement_failure :
     root:Eio.Fs.dir_ty Eio.Path.t ->
     owner_id:string ->
     (bool, error) result

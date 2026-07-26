@@ -3,7 +3,6 @@ open Alcotest
 module Store = Masc.Keeper_memory_os_store
 module Types = Masc.Keeper_memory_os_types
 module Head = Fs_compat.Capability_head
-module Exact_read = Fs_compat.Capability_exact_read
 
 let require_ok = function
   | Ok value -> value
@@ -300,15 +299,8 @@ let test_existing_read_absent_is_effect_free ~fs () =
 let test_missing_identity_preserves_settlement_warning ~fs () =
   with_root ~fs "masc_memory_os_identity_missing_warning_"
   @@ fun _root_path root ->
-  let hooks =
-    Exact_read.For_testing.hooks
-      ~on_settle_resources:(fun () ->
-        raise (Failure "injected parent settlement failure"))
-      ()
-  in
   match
-    Store.For_testing.read_store_identity_with_exact_hooks
-      hooks
+    Store.For_testing.read_store_identity_with_parent_settlement_failure
       ~root
       ~owner_id:"keeper-a"
   with

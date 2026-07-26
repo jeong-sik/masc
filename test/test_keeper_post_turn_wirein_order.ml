@@ -1676,21 +1676,51 @@ let test_suspended_streak_refuses_reactive_prepare () =
        "suspended manual prepare did not reach the checkpoint load: %s"
        (Post_turn.compaction_recovery_error_to_string error)
    | Ok _ -> fail "manual prepare on an empty store produced a compaction");
-  match
-    prepare
-      ~streak:2
-      ~trigger:(Compaction_trigger.Provider_overflow { limit_tokens = None })
-  with
+  (match
+     prepare
+       ~streak:2
+       ~trigger:(Compaction_trigger.Provider_overflow { limit_tokens = None })
+   with
+   | Error
+       (Post_turn.Checkpoint_ref_load_failed Masc.Keeper_checkpoint_store.Ref_not_found)
+     ->
+     (* Below the threshold the reactive path is admitted unchanged. *)
+     ()
+   | Error error ->
+     failf
+       "below-threshold reactive prepare did not reach the checkpoint load: %s"
+       (Post_turn.compaction_recovery_error_to_string error)
+   | Ok _ -> fail "reactive prepare on an empty store produced a compaction");
+  (* The byte axis follows the same gate as the token axis, not the operator lever.
+     Both are raised by the turn path itself, so a suspended keeper must refuse both —
+     the compiler forced that decision when the variant was added (masc#25739) but
+     nothing pinned the answer, and the two plausible wrong answers are opposites:
+     treating it like Manual would let a failing keeper re-enter compaction every turn,
+     while refusing it below the threshold would deny a reduction the token axis is
+     granted. *)
+  let byte_over_capacity =
+    Compaction_trigger.Request_body_over_capacity
+      { actual_bytes = 2_000_000; limit_bytes = 1_048_576 }
+  in
+  (match prepare ~streak:3 ~trigger:byte_over_capacity with
+   | Error (Post_turn.Retry_suspended { consecutive_failures }) ->
+     check int "suspended byte-axis refusal reports the streak" 3 consecutive_failures
+   | Error error ->
+     failf
+       "suspended byte-axis prepare reached I/O instead of the admission gate: %s"
+       (Post_turn.compaction_recovery_error_to_string error)
+   | Ok _ -> fail "suspended byte-axis prepare produced a prepared compaction");
+  match prepare ~streak:2 ~trigger:byte_over_capacity with
   | Error
       (Post_turn.Checkpoint_ref_load_failed Masc.Keeper_checkpoint_store.Ref_not_found)
     ->
-    (* Below the threshold the reactive path is admitted unchanged. *)
+    (* Below the threshold the byte axis is admitted exactly as the token axis is. *)
     ()
   | Error error ->
     failf
-      "below-threshold reactive prepare did not reach the checkpoint load: %s"
+      "below-threshold byte-axis prepare did not reach the checkpoint load: %s"
       (Post_turn.compaction_recovery_error_to_string error)
-  | Ok _ -> fail "reactive prepare on an empty store produced a compaction"
+  | Ok _ -> fail "byte-axis prepare on an empty store produced a compaction"
 ;;
 
 let test_exact_scope_release_defers_until_settlement_pin_leaves () =

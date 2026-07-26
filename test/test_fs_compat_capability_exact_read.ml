@@ -1018,7 +1018,7 @@ let () =
   run_helper_if_requested ();
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
-  let clock = Eio.Stdenv.mono_clock env in
+  let clock = Eio.Stdenv.clock env in
   let process_mgr = Eio.Stdenv.process_mgr env in
   run
     "fs capability exact read"

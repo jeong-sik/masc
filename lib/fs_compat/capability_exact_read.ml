@@ -247,7 +247,8 @@ let close_leaf hooks fd =
   | Settlement_fatal (exn, backtrace), _
   | _, Settlement_fatal (exn, backtrace) ->
       Printexc.raise_with_backtrace exn backtrace
-  | _ ->
+  | (Settled | Settlement_warning _),
+    (Settled | Settlement_warning _) ->
       let warnings = function
         | Settlement_warning warning -> [warning]
         | Settled | Settlement_fatal _ -> []

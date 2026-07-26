@@ -377,6 +377,35 @@ module Canonical_bytes = struct
     | Measurement_counter_overflow -> Error Counter_overflow
   ;;
 
+  let measure_bounded_result ~ceiling emit =
+    let count = ref 0L in
+    let sink =
+      { write =
+          (fun _value ~off:_ ~len ->
+             let delta = Int64.of_int len in
+             if
+               Int64.compare
+                 !count
+                 (Int64.sub Int64.max_int delta)
+               > 0
+             then raise Measurement_counter_overflow;
+             let next = Int64.add !count delta in
+             if Int64.compare next ceiling > 0
+             then raise (Measurement_ceiling_exceeded next);
+             count := next)
+      }
+    in
+    try
+      match emit sink with
+      | Ok value -> Ok (value, !count)
+      | Error error -> Error (`Emitter error)
+    with
+    | Measurement_ceiling_exceeded observed ->
+      Error (`Measurement (Ceiling_exceeded observed))
+    | Measurement_counter_overflow ->
+      Error (`Measurement Counter_overflow)
+  ;;
+
   let digest ?domain emit =
     let context = ref Digestif.SHA256.empty in
     let feed value ~off ~len =
@@ -1070,7 +1099,9 @@ let immutable_ref_of_json json =
       byte_count
       immutable_serialization_safety_ceiling_bytes
     > 0
-  then Error "immutable byte_count exceeds the store maximum"
+  then
+    Error
+      "immutable byte_count exceeds the private implementation safety ceiling"
   else Ok ({ kind; leaf; sha256 = digest; byte_count } : immutable_ref)
 ;;
 
@@ -1591,6 +1622,10 @@ let create_planned_object
 
 let placeholder_digest = String.make 64 '0'
 
+(* These canonical lowercase 64-hex placeholders are byte-sizing witnesses
+   only. They are never persisted and never feed state, object, receipt, or
+   identity digests; real genesis identity and object references are generated
+   only after authority revalidation. *)
 let placeholder_leaf kind =
   "memory-os-"
   ^ artifact_kind_token kind
@@ -1611,11 +1646,73 @@ type graph_preflight =
   { generation : int64
   ; state_sha256 : Sha256.t
   ; facts_bytes : int64
-  ; episode_bytes : int64 list
   ; manifest_bytes : int64
   ; commit_bytes : int64
   ; head_row_bytes : int64
   }
+
+let measure_manifest_with_episodes
+      ~maximum
+      ~store_id
+      ~owner_id
+      ~generation
+      ~facts_bytes
+      (episodes : Types.episode list)
+  =
+  let facts_ref = placeholder_ref Facts_object facts_bytes in
+  let emit sink =
+    Canonical_bytes.write sink "{";
+    Canonical_bytes.field sink ~first:true "schema";
+    Canonical_bytes.json_string sink manifest_schema;
+    Canonical_bytes.field sink ~first:false "store_id";
+    Canonical_bytes.json_string sink store_id;
+    Canonical_bytes.field sink ~first:false "owner_id";
+    Canonical_bytes.json_string sink owner_id;
+    Canonical_bytes.field sink ~first:false "generation";
+    Canonical_bytes.int64_value sink generation;
+    Canonical_bytes.field sink ~first:false "facts";
+    emit_immutable_ref sink facts_ref;
+    Canonical_bytes.field sink ~first:false "episodes";
+    Canonical_bytes.write sink "[";
+    let rec loop first = function
+      | [] ->
+        Canonical_bytes.write sink "]}";
+        Ok ()
+      | episode :: rest ->
+        let episode_object : episode_object =
+          { store_id; owner_id; generation; episode }
+        in
+        let* byte_count =
+          measure_artifact
+            ~maximum
+            `Episode
+            (fun episode_sink ->
+               emit_episode_object episode_sink episode_object)
+        in
+        if not first then Canonical_bytes.write sink ",";
+        emit_immutable_ref
+          sink
+          (placeholder_ref Episode_object byte_count);
+        loop false rest
+    in
+    loop true episodes
+  in
+  match Canonical_bytes.measure_bounded_result ~ceiling:maximum emit with
+  | Ok ((), byte_count) -> Ok byte_count
+  | Error (`Emitter error) -> Error error
+  | Error
+      (`Measurement
+        (Canonical_bytes.Ceiling_exceeded observed_at_least_bytes)) ->
+    Error
+      (make_error
+         (Implementation_safety_ceiling_exceeded
+            { artifact = `Manifest
+            ; observed_at_least_bytes
+            ; ceiling_bytes = maximum
+            }))
+  | Error (`Measurement Canonical_bytes.Counter_overflow) ->
+    Error (make_error (Byte_accounting_overflow `Manifest))
+;;
 
 let preflight_graph
       ~maximum
@@ -1629,9 +1726,10 @@ let preflight_graph
   else
     let generation = Int64.succ expected.generation in
     let planned_store_id =
-      Option.value expected.store_id ~default:placeholder_digest
+      match expected.store_id with
+      | Some store_id -> store_id
+      | None -> placeholder_digest
     in
-    let state_sha256 = state_digest state in
     let facts_value : facts_object =
       { store_id = planned_store_id
       ; owner_id = store.owner_id
@@ -1645,39 +1743,14 @@ let preflight_graph
         `Facts
         (fun sink -> emit_facts_object sink facts_value)
     in
-    let rec measure_episodes measured = function
-      | [] -> Ok (List.rev measured)
-      | episode :: rest ->
-        let value : episode_object =
-          { store_id = planned_store_id
-          ; owner_id = store.owner_id
-          ; generation
-          ; episode
-          }
-        in
-        let* byte_count =
-          measure_artifact
-            ~maximum
-            `Episode
-            (fun sink -> emit_episode_object sink value)
-        in
-        measure_episodes (byte_count :: measured) rest
-    in
-    let* episode_bytes = measure_episodes [] state.episodes in
-    let manifest : manifest =
-      { store_id = planned_store_id
-      ; owner_id = store.owner_id
-      ; generation
-      ; facts_ref = placeholder_ref Facts_object facts_bytes
-      ; episode_refs =
-          list_map (placeholder_ref Episode_object) episode_bytes
-      }
-    in
     let* manifest_bytes =
-      measure_artifact
+      measure_manifest_with_episodes
         ~maximum
-        `Manifest
-        (fun sink -> emit_manifest sink manifest)
+        ~store_id:planned_store_id
+        ~owner_id:store.owner_id
+        ~generation
+        ~facts_bytes
+        state.episodes
     in
     let commit : commit_record =
       { store_id = planned_store_id
@@ -1685,7 +1758,7 @@ let preflight_graph
       ; generation
       ; operation_id
       ; manifest_ref = placeholder_ref Manifest_object manifest_bytes
-      ; state_sha256
+      ; state_sha256 = placeholder_digest
       ; receipt_id = placeholder_digest
       }
     in
@@ -1714,11 +1787,11 @@ let preflight_graph
       | Error Canonical_bytes.Counter_overflow ->
         Error (make_error (Byte_accounting_overflow `Head_row))
     in
+    let state_sha256 = state_digest state in
     Ok
       { generation
       ; state_sha256
       ; facts_bytes
-      ; episode_bytes
       ; manifest_bytes
       ; commit_bytes
       ; head_row_bytes
@@ -1839,41 +1912,65 @@ let load_from_head (store : t) (head_snapshot : Head.snapshot) =
         (references : immutable_ref list)
         (values : Types.episode list)
         (objects : (immutable_ref * Types.episode) list)
-        (warnings : settlement_warning list)
+        (warnings_rev : settlement_warning list)
         =
         match references with
-        | [] -> Ok (List.rev values, List.rev objects, warnings)
+        | [] ->
+          Ok
+            ( List.rev values
+            , List.rev objects
+            , List.rev warnings_rev )
         | (reference : immutable_ref) :: rest ->
           let artifact = "episode:" ^ reference.leaf in
           let* ((episode_object : episode_object), object_warnings) =
-            read_object
-              store
-              reference
-              ~artifact
-              ~decode:episode_object_of_json
-              ~encode:episode_object_to_json
-            |> with_prior_warnings warnings
+            match
+              read_object
+                store
+                reference
+                ~artifact
+                ~decode:episode_object_of_json
+                ~encode:episode_object_to_json
+            with
+            | Ok value -> Ok value
+            | Error error ->
+              Error
+                (prepend_warnings
+                   (List.rev warnings_rev)
+                   error)
           in
-          let warnings = warnings @ object_warnings in
+          let warnings_rev =
+            List.rev_append object_warnings warnings_rev
+          in
           let* () =
-            ensure_identity
-              ~artifact
-              ~expected_store_id:head.store_id
-              ~expected_owner_id:head.owner_id
-              ~expected_generation:head.generation
-              ~store_id:episode_object.store_id
-              ~owner_id:episode_object.owner_id
-              ~generation:episode_object.generation
-            |> with_prior_warnings warnings
+            match
+              ensure_identity
+                ~artifact
+                ~expected_store_id:head.store_id
+                ~expected_owner_id:head.owner_id
+                ~expected_generation:head.generation
+                ~store_id:episode_object.store_id
+                ~owner_id:episode_object.owner_id
+                ~generation:episode_object.generation
+            with
+            | Ok () -> Ok ()
+            | Error error ->
+              Error
+                (prepend_warnings
+                   (List.rev warnings_rev)
+                   error)
           in
           load_episodes
             rest
             (episode_object.episode :: values)
             ((reference, episode_object.episode) :: objects)
-            warnings
+            warnings_rev
       in
       let* episodes, episode_objects, warnings =
-        load_episodes manifest.episode_refs [] [] warnings
+        load_episodes
+          manifest.episode_refs
+          []
+          []
+          (List.rev warnings)
       in
       let state : state = { facts = facts_object.facts; episodes } in
       let* () =
@@ -2026,18 +2123,23 @@ let receipt_of_snapshot (snapshot : snapshot) =
 
 let create_episode_objects
       (store : t)
+      ~maximum
       ~store_id
       ~owner_id
       ~generation
-      ~(byte_counts : int64 list)
       (episodes : Types.episode list)
   =
-  let rec loop objects episodes byte_counts =
-    match episodes, byte_counts with
-    | [], [] -> Ok (List.rev objects)
-    | episode :: rest, byte_count :: remaining_counts ->
+  let rec loop objects = function
+    | [] -> Ok (List.rev objects)
+    | episode :: rest ->
       let value : episode_object =
         { store_id; owner_id; generation; episode }
+      in
+      let* byte_count =
+        measure_artifact
+          ~maximum
+          `Episode
+          (fun sink -> emit_episode_object sink value)
       in
       let* reference =
         create_planned_object
@@ -2049,16 +2151,8 @@ let create_episode_objects
       loop
         ((reference, episode) :: objects)
         rest
-        remaining_counts
-    | [], _ :: _ | _ :: _, [] ->
-      Error
-        (make_error
-           (Invalid_store_json
-              { artifact = "episode preflight"
-              ; detail = "episode byte-count plan does not match state"
-              }))
   in
-  loop [] episodes byte_counts
+  loop [] episodes
 ;;
 
 let prepare_with_implementation_ceiling
@@ -2164,10 +2258,10 @@ let prepare_with_implementation_ceiling
           let* episode_objects =
             create_episode_objects
               store
+              ~maximum
               ~store_id
               ~owner_id:store.owner_id
               ~generation
-              ~byte_counts:preflight.episode_bytes
               state.episodes
             |> with_prior_warnings current.settlement_warnings
           in

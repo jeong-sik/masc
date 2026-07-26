@@ -390,11 +390,14 @@ let test_concurrent_publish_has_single_cas_winner ~fs ~clock () =
                            let result =
                              Fun.protect
                                ~finally:(fun () ->
-                                 Eio.Promise.resolve resolve_release_a ())
+                                 Eio.Promise.resolve
+                                   resolve_release_a
+                                   (Ok ()))
                                (fun () ->
                                   Store.publish store_b prepared_b)
                            in
-                           contended_result := Some result))
+                           contended_result := Some result);
+                      Ok ())
                   with
                   | Ok () -> ()
                   | Error `Timeout ->
@@ -999,11 +1002,26 @@ let test_non_current_operation_is_not_replayed ~fs () =
     (Store.committed_snapshot receipt_a_again)
 ;;
 
-let expect_safety_violation label expected_artifact = function
+let expect_safety_violation
+      label
+      ~expected_artifact
+      ~expected_ceiling
+  = function
   | Error error ->
     (match Store.error_implementation_safety_violation error with
      | Some (violation : Store.implementation_safety_violation) ->
-       check bool label true (violation.artifact = expected_artifact)
+       check bool label true (violation.artifact = expected_artifact);
+       check int64
+         (label ^ " reports the exact implementation ceiling")
+         expected_ceiling
+         violation.ceiling_bytes;
+       check bool
+         (label ^ " reports bytes beyond that ceiling")
+         true
+         (Int64.compare
+            violation.observed_at_least_bytes
+            expected_ceiling
+          > 0)
      | None ->
        failf
          "%s: expected implementation safety violation, got %s"
@@ -1044,7 +1062,11 @@ let prepare_rejected_without_effect
   in
   expect_safety_violation
     "oversize artifact is typed"
-    artifact
+    ~expected_artifact:artifact
+    ~expected_ceiling:
+      (if artifact = `Head_row
+       then Int64.of_int Head.max_row_bytes
+       else maximum)
     result;
   check
     bool
@@ -1184,10 +1206,11 @@ let test_exact_implementation_boundary ~fs () =
 
 let test_canonical_state_and_digest_parity () =
   let special_fact =
-    { (fact "quote:\" slash:\\ control:\x7f utf8:hangul") with
+    { (fact "quote:\" slash:\\ control:\x7f utf8:한글") with
       observed_by = [ "keeper-a"; "quote:\""; "control:\x01" ]
-    ; valid_until = Some 20.5
-    ; last_verified_at = Some 15.25
+    ; first_seen = Float.max_float
+    ; valid_until = Some (-. Float.max_float)
+    ; last_verified_at = Some Float.min_positive_normal
     }
   in
   let special_episode =
@@ -1196,6 +1219,7 @@ let test_canonical_state_and_digest_parity () =
     ; open_items = [ "line\nbreak" ]
     ; constraints = [ "tab\tvalue" ]
     ; preserved_tool_refs = [ "tool\\ref" ]
+    ; created_at = -. Float.max_float
     ; terminal_marker = Some "terminal\rmarker"
     }
   in
@@ -1248,6 +1272,40 @@ let test_long_fact_list_is_stack_safe ~fs () =
     ~operation_id:"stack-safe"
     ~state:value
     ~artifact:`Facts
+;;
+
+let test_long_episode_claims_publish_reopen ~fs () =
+  with_root ~fs "masc_memory_os_long_episode_claims_"
+  @@ fun _root_path root ->
+  let rec build remaining claims =
+    if remaining = 0
+    then claims
+    else build (remaining - 1) (fact "long-claim" :: claims)
+  in
+  let claims = build 20_000 [] in
+  let value : Store.state =
+    { facts = []
+    ; episodes = [ { (episode "long-claims") with claims } ]
+    }
+  in
+  within_store ~root ~owner:"keeper-a" @@ fun store ->
+  let empty = require_ok (Store.load store) in
+  let prepared =
+    prepare_new store empty "long-claims-operation" value
+  in
+  ignore (publish_committed store prepared : Store.commit_receipt);
+  within_store ~seed:41 ~root ~owner:"keeper-a" @@ fun reopened ->
+  let current = require_ok (Store.load reopened) in
+  match (Store.snapshot_state current).episodes with
+  | [ observed ] ->
+    check int
+      "all long episode claims survive publish and reopen"
+      20_000
+      (List.length observed.claims)
+  | episodes ->
+    failf
+      "expected one reopened long-claims episode, observed %d"
+      (List.length episodes)
 ;;
 
 let () =
@@ -1303,6 +1361,8 @@ let () =
             test_canonical_state_and_digest_parity
         ; test_case "long fact list is stack-safe" `Quick
             (test_long_fact_list_is_stack_safe ~fs)
+        ; test_case "long episode claims publish and reopen" `Quick
+            (test_long_episode_claims_publish_reopen ~fs)
         ] )
     ]
 ;;

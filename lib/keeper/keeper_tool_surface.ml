@@ -26,8 +26,9 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
           Keeper_registry.all ~base_path:config.base_path ()
           |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
         in
+        let discovery = keeper_names config in
         let names =
-          registry_names @ keeper_names config
+          registry_names @ discovery.names
           |> List.map String.trim
           |> List.filter (fun name -> not (String.equal name ""))
           |> List.sort_uniq String.compare
@@ -45,12 +46,18 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
                 ("count", `Int (List.length names));
                 ("keepers", `List (List.map (fun name -> `String name) names));
                 ("items", `List rows);
+                ( "unavailable"
+                , current_meta_unavailable_collection_to_yojson
+                    (Current_meta_observed discovery.unavailable) );
               ]
           else
             `Assoc
               [
                 ("count", `Int (List.length rows));
                 ("keepers", `List rows);
+                ( "unavailable"
+                , current_meta_unavailable_collection_to_yojson
+                    (Current_meta_observed discovery.unavailable) );
               ]
         in
         json)

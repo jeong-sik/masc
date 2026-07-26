@@ -14,7 +14,10 @@
 
 include Operator_control_context_snapshot
 
-let persistent_agents_json ~discovery ~keeper_rows =
+let persistent_agents_json
+      ~(discovery : Keeper_meta_store.current_meta_discovery)
+      ~keeper_rows
+  =
   let rows_from_keeper_rows names rows =
     let wanted = List.sort_uniq String.compare names in
     let wanted_tbl = Hashtbl.create (List.length wanted) in

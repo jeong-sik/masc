@@ -469,7 +469,7 @@ module Durable_transaction = struct
                   Admitted (Some evidence)))))
   ;;
 
-  let permit_matches permit keeper_name =
+  let permit_matches (permit : permit) keeper_name =
     String.equal permit.keeper_name keeper_name
     &&
     match Eio.Fiber.get active_permit_scope_key with

@@ -765,7 +765,7 @@ let update_meta_if_identity
                      in
                      (match persist_meta config path persisted with
                       | Ok () -> Ok persisted
-                      | Error detail -> Error (Identity_write_failed detail)))))
+                     | Error detail -> Error (Identity_write_failed detail))))))
 ;;
 
 type identity_remove_error =

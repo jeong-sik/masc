@@ -19,7 +19,23 @@ open Keeper_turn_up_args
 let write_initial_meta witness config meta =
   Keeper_meta_store.create_meta witness config meta
 
-let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
+let create_keeper_admitted
+      (permit : Keeper_lifecycle_admission.Durable_transaction.permit)
+      (ctx : _ context)
+      (p : parsed_args)
+  : tool_result
+  =
+  if
+    not
+      (Keeper_lifecycle_admission.Durable_transaction.permit_matches
+         permit
+         p.name)
+  then tool_result_error "keeper creation lost durable lifecycle admission"
+  else
+  match Keeper_meta_store.read_meta ctx.config p.name with
+  | Error detail -> tool_result_error detail
+  | Ok (Some _) -> tool_result_error ("keeper already exists: " ^ p.name)
+  | Ok None ->
   Log.Keeper.info "create_keeper: starting for name=%s" p.name;
   let task_id = Printf.sprintf "keeper_create_%s" p.name in
   let tracker = Progress.start_tracking ~task_id ~total_steps:6 () in
@@ -380,7 +396,9 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
         Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
         Log.Keeper.info "create_keeper: starting keepalive for name=%s" p.name;
-        let launch_outcome = start_keepalive ctx meta in
+        let launch_outcome =
+          start_keepalive_under_admission permit ctx meta
+        in
         (match launch_outcome with
          | Keepalive_started _ ->
         Progress.Tracker.complete tracker ~message:"Keeper created" ();
@@ -409,3 +427,37 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
              (Printf.sprintf
                 "keeper metadata was created but lane launch failed: %s"
                 (start_keepalive_outcome_to_string rejected))))
+;;
+
+let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
+  match
+    Keeper_lifecycle_admission.Durable_transaction
+    .with_durable_lifecycle_admission
+      ctx.config
+      ~keeper_name:p.name
+      (fun permit -> create_keeper_admitted permit ctx p)
+  with
+  | Keeper_lifecycle_admission.Durable_transaction.Admission_completed result ->
+    result
+  | Keeper_lifecycle_admission.Durable_transaction
+    .Admission_completed_with_attention (result, failure) ->
+    Log.Keeper.error
+      "keeper creation lifecycle admission release requires attention \
+       keeper=%s failure=%s"
+      p.name
+      (Keeper_lifecycle_admission.Durable_transaction
+       .authority_failure_to_wire
+         failure);
+    result
+  | Keeper_lifecycle_admission.Durable_transaction.Admission_blocked reason ->
+    let detail =
+      Keeper_lifecycle_admission.Durable_transaction.blocked_reason_to_wire
+        reason
+    in
+    Log.Keeper.warn
+      "keeper creation blocked by durable lifecycle authority keeper=%s \
+       reason=%s"
+      p.name
+      detail;
+    tool_result_error detail
+;;

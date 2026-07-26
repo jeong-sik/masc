@@ -391,7 +391,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                   tool_result_error
                     (Printf.sprintf
                        "keeper metadata was updated but lane restart failed: %s"
-                       (start_keepalive_outcome_to_string rejected))))))
+                       (start_keepalive_outcome_to_string rejected)))))))
            in
            (match
               Keeper_lifecycle_admission.Durable_transaction

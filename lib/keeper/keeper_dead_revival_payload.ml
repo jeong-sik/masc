@@ -845,7 +845,7 @@ let create config prepared =
                  }))))
 ;;
 
-let validate_reference reference =
+let validate_reference (reference : immutable_ref) =
   if not (valid_authority_leaf reference.authority_leaf)
   then Error (Malformed_ref "authority_leaf is not canonical")
   else if not (valid_transaction_leaf reference.transaction_leaf)

@@ -37,12 +37,12 @@ let supervise_keepalive
       ~(publish_lifecycle :
          event:Keeper_lifecycle_events.lifecycle_event ->
          string -> string -> unit -> unit)
-      ~(launch_supervised_fiber :
+     ~(launch_supervised_fiber :
          proactive_warmup_sec:int ->
          _ context ->
          keeper_meta ->
          Keeper_registry.registry_entry ->
-         (unit, Keeper_state_machine.transition_error) result)
+         (unit, 'launch_error) result)
       ~proactive_warmup_sec
       (ctx : _ context)
       (meta : keeper_meta)

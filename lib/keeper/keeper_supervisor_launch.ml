@@ -655,6 +655,32 @@ let launch_supervised_fiber_admitted
     launch_supervised_fiber_body ~proactive_warmup_sec ctx meta reg
 ;;
 
+type supervised_launch_error =
+  | Supervised_launch_permit_mismatch
+  | Supervised_launch_rejected of Keeper_state_machine.transition_error
+
+let launch_supervised_fiber_under_admission
+      permit
+      ~proactive_warmup_sec
+      ctx
+      (meta : keeper_meta)
+      reg
+  =
+  if
+    not
+      (Keeper_lifecycle_admission.Durable_transaction.permit_matches
+         permit
+         meta.name)
+  then Error Supervised_launch_permit_mismatch
+  else
+    launch_supervised_fiber_admitted
+      ~proactive_warmup_sec
+      ctx
+      meta
+      reg
+    |> Result.map_error (fun error -> Supervised_launch_rejected error)
+;;
+
 (* #10993: persona drift visibility.
 
    [Keeper_identity.normalize_all_names ~check_persona:true] runs on
@@ -692,10 +718,11 @@ let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_m
     .with_durable_lifecycle_admission
       ctx.config
       ~keeper_name:meta.name
-      (fun _permit ->
+      (fun permit ->
          Keeper_supervisor_supervise_keepalive.supervise_keepalive
            ~publish_lifecycle
-           ~launch_supervised_fiber:launch_supervised_fiber_admitted
+           ~launch_supervised_fiber:
+             (launch_supervised_fiber_under_admission permit)
            ~proactive_warmup_sec
            ctx
            meta)

@@ -1499,11 +1499,34 @@ let test_launch_rejected_terminal_state_does_not_announce_running () =
       in
       Sup.with_restart_launch_noop_for_test (fun () ->
         match
-          Masc.Keeper_supervisor_launch.launch_supervised_fiber
-            ~proactive_warmup_sec:0 ctx meta reg
+          Masc.Keeper_lifecycle_admission.Durable_transaction
+          .with_durable_lifecycle_admission
+            config
+            ~keeper_name:name
+            (fun permit ->
+               Masc.Keeper_supervisor_launch
+               .launch_supervised_fiber_under_admission
+                 permit
+                 ~proactive_warmup_sec:0
+                 ctx
+                 meta
+                 reg)
         with
-        | Ok () -> fail "expected Fiber_started to be rejected in terminal state"
-        | Error _ -> ());
+        | Masc.Keeper_lifecycle_admission.Durable_transaction
+          .Admission_completed (Error _) ->
+          ()
+        | Masc.Keeper_lifecycle_admission.Durable_transaction
+          .Admission_completed (Ok ()) ->
+          fail "expected Fiber_started to be rejected in terminal state"
+        | Masc.Keeper_lifecycle_admission.Durable_transaction
+          .Admission_completed_with_attention (Error _, _) ->
+          ()
+        | Masc.Keeper_lifecycle_admission.Durable_transaction
+          .Admission_completed_with_attention (Ok (), _) ->
+          fail "expected Fiber_started to be rejected in terminal state"
+        | Masc.Keeper_lifecycle_admission.Durable_transaction
+          .Admission_blocked _ ->
+          fail "fixture durable admission was unexpectedly blocked");
       (match Reg.get_phase ~base_path:config.base_path name with
        | Some Keeper_state_machine.Dead -> ()
        | Some phase ->
@@ -1565,11 +1588,34 @@ let test_launch_fork_rejection_does_not_announce_running () =
         }
       in
       (match
-         Masc.Keeper_supervisor_launch.launch_supervised_fiber
-           ~proactive_warmup_sec:0 ctx meta reg
+         Masc.Keeper_lifecycle_admission.Durable_transaction
+         .with_durable_lifecycle_admission
+           config
+           ~keeper_name:name
+           (fun permit ->
+              Masc.Keeper_supervisor_launch
+              .launch_supervised_fiber_under_admission
+                permit
+                ~proactive_warmup_sec:0
+                ctx
+                meta
+                reg)
        with
-       | Ok () -> fail "expected lane fork rejection to propagate as Error"
-       | Error _ -> ());
+       | Masc.Keeper_lifecycle_admission.Durable_transaction
+         .Admission_completed (Error _) ->
+         ()
+       | Masc.Keeper_lifecycle_admission.Durable_transaction
+         .Admission_completed (Ok ()) ->
+         fail "expected lane fork rejection to propagate as Error"
+       | Masc.Keeper_lifecycle_admission.Durable_transaction
+         .Admission_completed_with_attention (Error _, _) ->
+         ()
+       | Masc.Keeper_lifecycle_admission.Durable_transaction
+         .Admission_completed_with_attention (Ok (), _) ->
+         fail "expected lane fork rejection to propagate as Error"
+       | Masc.Keeper_lifecycle_admission.Durable_transaction
+         .Admission_blocked _ ->
+         fail "fixture durable admission was unexpectedly blocked");
       check bool
         "fork-rejected launch resolves done through the crash path"
         true

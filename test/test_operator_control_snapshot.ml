@@ -1683,7 +1683,7 @@ let test_dead_revival_recovery_forwards_concurrent_launch_commit () =
     persisted.runtime.nonce
 ;;
 
-let test_dead_revival_ambiguous_reserved_cancellation_retains_payload () =
+let test_dead_revival_ambiguous_reserved_cancellation_settles_authority () =
   let keeper_name = "dead-revival-ambiguous-reserved-cancel" in
   with_settled_dead_revival_fixture ~keeper_name
   @@ fun base_dir config original _dead_entry ctx ->
@@ -1725,43 +1725,36 @@ let test_dead_revival_ambiguous_reserved_cancellation_retains_payload () =
        (Keeper_lifecycle_reservation.current
           ~base_path:base_dir
           ~keeper_name));
-  let active =
-    current_active_revival_journal ~config ~keeper_name
-  in
-  let payload_path = revival_payload_path config active.payload_ref in
-  Alcotest.(check bool)
-    "ambiguous Reserved cancellation retains payload evidence"
-    true
-    (Sys.file_exists payload_path);
   (match
      Keeper_dead_revival_transaction.For_testing.current_journal_stage
        ~config
        ~keeper_name
    with
-   | Ok `Reserved -> ()
-   | Ok _ -> Alcotest.fail "ambiguous Reserved journal changed stage"
+   | Ok `Cleared -> ()
+   | Ok _ -> Alcotest.fail "ambiguous Reserved cancellation was not settled"
    | Error error ->
      Alcotest.fail
        (Keeper_dead_revival_transaction.error_to_string error));
-  let recovery =
-    Keeper_dead_revival_transaction.recover_pending config
+  let persisted =
+    match Keeper_meta_store.read_meta config keeper_name with
+    | Ok (Some meta) -> meta
+    | Ok None -> Alcotest.fail "settled cancellation removed metadata"
+    | Error detail -> Alcotest.fail detail
   in
-  Alcotest.(check int)
-    "ambiguous Reserved recovery is a rollback clear"
-    0
-    recovery.recovered;
-  Alcotest.(check int)
-    "ambiguous Reserved recovery clears one transaction"
-    1
-    recovery.cleared;
-  Alcotest.(check int)
-    "ambiguous Reserved recovery fully settles"
-    0
-    (List.length recovery.unresolved);
   Alcotest.(check bool)
-    "ambiguous Reserved recovery removes payload"
-    false
-    (Sys.file_exists payload_path)
+    "ambiguous Reserved cancellation preserves forward generation"
+    true
+    (persisted.runtime.nonce > original.runtime.nonce);
+  Alcotest.(check bool)
+    "ambiguous Reserved cancellation preserves dead content"
+    true
+    (persisted.paused
+     && persisted.latched_reason = Some Keeper_latched_reason.Dead_tombstone);
+  Alcotest.(check bool)
+    "ambiguous Reserved cancellation removes stale registry identity"
+    true
+    (Option.is_none
+       (Keeper_registry.get ~base_path:base_dir keeper_name))
 ;;
 
 type launch_payload_damage =
@@ -3627,9 +3620,9 @@ let () =
             `Quick
             test_dead_revival_recovery_forwards_concurrent_launch_commit;
           Alcotest.test_case
-            "ambiguous Reserved cancellation retains payload for recovery"
+            "ambiguous Reserved cancellation settles forward authority"
             `Quick
-            test_dead_revival_ambiguous_reserved_cancellation_retains_payload;
+            test_dead_revival_ambiguous_reserved_cancellation_settles_authority;
           Alcotest.test_case
             "Launch-committed recovery forward-cleans a missing payload"
             `Quick

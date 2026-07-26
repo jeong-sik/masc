@@ -240,6 +240,12 @@ type success =
   ; entry : Keeper_registry.registry_entry
   }
 
+type replacement_publication =
+  | Replacement_allocated of
+      Keeper_lifecycle_nonce.replace Keeper_lifecycle_nonce.witness
+  | Replacement_recovered of
+      Keeper_lifecycle_nonce.recover_exact Keeper_lifecycle_nonce.witness
+
 type rollback_origin =
   | Rollback_from_reserved
   | Rollback_from_durable_committed
@@ -1406,7 +1412,101 @@ let release_observed token keeper =
       (Keeper_lifecycle_reservation.snapshot_to_string owner)
 ;;
 
-let clear_candidate_registry token config journal candidate =
+let replacement_target = function
+  | Replacement_allocated witness ->
+    Keeper_lifecycle_nonce.witness_target witness
+  | Replacement_recovered witness ->
+    Keeper_lifecycle_nonce.witness_target witness
+;;
+
+let allocate_or_recover_replacement
+      config
+      (original : keeper_meta)
+      (candidate : keeper_meta)
+  =
+  match
+    Keeper_lifecycle_nonce.identity
+      ~owner_id:
+        (Keeper_id.Trace_id.to_string original.runtime.trace_id)
+      ~nonce:(Int64.of_int original.runtime.nonce)
+  with
+  | Error error -> Error error
+  | Ok source ->
+    let owner_id =
+      Keeper_id.Trace_id.to_string candidate.runtime.trace_id
+    in
+    (match
+       Keeper_lifecycle_nonce.replace_settled
+         ~base_path:config.Workspace.base_path
+         ~keeper_id:original.name
+         ~source
+         ~owner_id
+         ()
+     with
+     | Ok (Keeper_lifecycle_nonce.Settled_allocated witness) ->
+       Ok (Replacement_allocated witness, None)
+     | Ok
+         (Keeper_lifecycle_nonce.Settled_recovered
+            (witness, attention)) ->
+       Ok (Replacement_recovered witness, attention)
+     | Error error -> Error error)
+;;
+
+let candidate_for_replacement publication (candidate : keeper_meta) =
+  let target = replacement_target publication in
+  let owner_id = Keeper_lifecycle_nonce.identity_owner_id target in
+  match Keeper_id.Trace_id.of_string owner_id with
+  | Error detail ->
+    Error
+      (Journal_ownership_changed
+         (Printf.sprintf
+            "replacement authority contains invalid trace identity: %s"
+            detail))
+  | Ok trace_id ->
+    (match
+       Keeper_lifecycle_nonce.runtime_int_of_nonce
+         (Keeper_lifecycle_nonce.identity_nonce target)
+     with
+     | Error error -> Error (Nonce_allocation_failed error)
+     | Ok nonce ->
+       Ok
+         { candidate with
+           runtime =
+             { candidate.runtime with
+               trace_id
+             ; nonce
+             }
+         })
+;;
+
+let write_replacement_meta
+      token
+      publication
+      config
+      (meta : keeper_meta)
+  =
+  match publication with
+  | Replacement_allocated witness ->
+    Keeper_meta_store.replace_meta
+      ~lifecycle_token:token
+      witness
+      config
+      meta
+  | Replacement_recovered witness ->
+    Keeper_meta_store.recover_meta_exact
+      ~lifecycle_token:token
+      witness
+      config
+      meta
+;;
+
+let clear_rollback_registry
+      token
+      config
+      (journal : journal)
+      original
+      candidate
+  =
   match
     Keeper_registry.get
       ~base_path:config.Workspace.base_path
@@ -1424,7 +1524,20 @@ let clear_candidate_registry token config journal candidate =
      | Keeper_registry.Exact_entry_replaced -> [ Rollback_registry_occupied entry ]
      | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
        [ Rollback_registry_reservation_changed owner ])
-  | Some _ -> []
+  | Some entry
+    when same_identity entry.meta original
+         && entry.phase = Keeper_state_machine.Dead
+         && Option.is_some (Eio.Promise.peek entry.done_p)
+         && Keeper_registry.lane_has_exited entry ->
+    (match Keeper_registry.unregister_exact_for_lifecycle token entry with
+     | Keeper_registry.Exact_unregistered
+     | Keeper_registry.Exact_entry_missing ->
+       []
+     | Keeper_registry.Exact_entry_replaced ->
+       [ Rollback_registry_occupied entry ]
+     | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+       [ Rollback_registry_reservation_changed owner ])
+  | Some entry -> [ Rollback_registry_occupied entry ]
 ;;
 
 let transition_cleanup_pending
@@ -1557,7 +1670,12 @@ let rollback token config (journal : journal) payload _original_entry =
        | Error detail -> [ Rollback_meta_write_failed detail ])
   in
   let registry_errors =
-    clear_candidate_registry token config journal candidate
+    clear_rollback_registry
+      token
+      config
+      journal
+      original
+      candidate
   in
   let errors = meta_errors @ registry_errors in
   if errors <> []
@@ -1630,6 +1748,72 @@ let validate_registry_snapshot config original =
   | Some entry -> Ok (Some entry)
 ;;
 
+let settle_replacement_before_reserved
+      token
+      config
+      publication
+      (original : keeper_meta)
+      (candidate : keeper_meta)
+  =
+  let registry_errors =
+    match
+      Keeper_registry.get
+        ~base_path:config.Workspace.base_path
+        original.name
+    with
+    | None -> []
+    | Some entry
+      when same_identity entry.meta original
+           && entry.phase = Keeper_state_machine.Dead
+           && Option.is_some (Eio.Promise.peek entry.done_p)
+           && Keeper_registry.lane_has_exited entry ->
+      (match Keeper_registry.unregister_exact_for_lifecycle token entry with
+       | Keeper_registry.Exact_unregistered
+       | Keeper_registry.Exact_entry_missing ->
+         []
+       | Keeper_registry.Exact_entry_replaced ->
+         [ Rollback_registry_occupied entry ]
+       | Keeper_registry.Exact_unregister_lifecycle_reserved owner ->
+         [ Rollback_registry_reservation_changed owner ])
+    | Some entry -> [ Rollback_registry_occupied entry ]
+  in
+  if registry_errors <> []
+  then registry_errors
+  else
+    match Keeper_meta_store.read_meta config original.name with
+    | Error detail -> [ Rollback_meta_write_failed detail ]
+    | Ok None -> [ Rollback_meta_missing ]
+    | Ok (Some current) ->
+      let restored =
+        { original with
+          meta_version = current.meta_version
+        ; runtime =
+            { original.runtime with
+              trace_id = candidate.runtime.trace_id
+            ; trace_history = candidate.runtime.trace_history
+            ; nonce = candidate.runtime.nonce
+            }
+        }
+      in
+      if same_persisted_payload current restored
+      then []
+      else if not (same_persisted_payload current original)
+      then
+        if same_identity current candidate
+        then [ Rollback_meta_payload_changed ]
+        else [ Rollback_meta_identity_changed ]
+      else
+        (match
+           write_replacement_meta
+             token
+             publication
+             config
+             restored
+         with
+         | Ok () -> []
+         | Error detail -> [ Rollback_meta_write_failed detail ])
+;;
+
 let reserve_validated_journal config ~original journal =
   match Keeper_meta_store.read_meta config original.name with
   | Error _ -> Error Durable_snapshot_changed
@@ -1699,6 +1883,40 @@ let cleanup_unreserved_payload config (journal : journal) ~cause =
         journal.transaction_id;
       Journal_ownership_changed
         "pre-Reserved payload cleanup was blocked by conflicting journal authority")
+;;
+
+let abort_replacement_before_reserved
+      token
+      config
+      publication
+      original
+      candidate
+      ?journal
+      cause
+      ()
+  =
+  let errors =
+    settle_replacement_before_reserved
+      token
+      config
+      publication
+      original
+      candidate
+  in
+  let cause =
+    match journal with
+    | None -> cause
+    | Some journal ->
+      cleanup_unreserved_payload config journal ~cause
+  in
+  match errors with
+  | [] -> Error cause
+  | _ ->
+    Error
+      (Rollback_failed
+         { cause = error_to_string cause
+         ; errors
+         })
 ;;
 
 let forward_cleanup config (journal : journal) =
@@ -1817,130 +2035,155 @@ let revive_locked (ctx : _ context) ~original ~candidate =
         cleanup_pre_journal_cancellation ();
         Printexc.raise_with_backtrace cancelled backtrace
     in
-    let nonce_result =
-      protect_pre_journal (fun () ->
-        let result =
-          Result.bind
-            (Keeper_lifecycle_nonce.identity
-               ~owner_id:(Keeper_id.Trace_id.to_string original.runtime.trace_id)
-               ~nonce:(Int64.of_int original.runtime.nonce))
-            (fun source ->
-              Result.bind
-                (Keeper_lifecycle_nonce.replace
-                   ~base_path:ctx.config.base_path
-                   ~keeper_id:original.name
-                   ~source
-                   ~owner_id:
-                     (Keeper_id.Trace_id.to_string candidate.runtime.trace_id)
-                   ())
-                (fun witness ->
-                  Result.map
-                    (fun nonce -> (witness, nonce))
-                    (Keeper_lifecycle_nonce.runtime_int_of_nonce
-                       (Keeper_lifecycle_nonce.witness_target witness))))
-        in
-        invoke_after_nonce_allocation_hook ();
-        result)
-    in
-    match nonce_result with
-    | Error error ->
-      observe
-        "nonce_allocation_failed"
-        original.name
-        (Keeper_lifecycle_nonce.error_to_string error);
-      release_observed token original.name;
-      Error (Nonce_allocation_failed error)
-    | Ok (nonce_witness, nonce) ->
-    let candidate =
-      { candidate with
-        runtime = { candidate.runtime with nonce }
-      }
-    in
     let journal_result =
       protect_pre_journal (fun () ->
-      match
-        make_prepared_journal
-          ~owner_id:(Keeper_lifecycle_reservation.owner_id token)
-          ~original
-          ~candidate
-      with
-      | Error failure -> Error (payload_failure Payload_prepare failure)
-      | Ok (journal, prepared) ->
-        journal_for_cleanup := Some journal;
-        (match Payload.create ctx.config prepared with
-         | Error failure ->
-           Error
-             (cleanup_unreserved_payload
-                ctx.config
-                journal
-                ~cause:(payload_failure Payload_create failure))
-         | Ok (Payload.Created _ | Payload.Reconciled_created _) ->
-           (match verify_payload ctx.config journal with
-            | Error failure ->
-              Error
-                (cleanup_unreserved_payload
-                   ctx.config
-                   journal
-                   ~cause:(payload_failure Payload_verify failure))
-            | Ok payload ->
-              verified_payload_for_cleanup := Some payload;
-              let result =
-                let result =
-                  reserve_validated_journal
-                    ctx.config
+        Eio.Cancel.protect (fun () ->
+          match
+            allocate_or_recover_replacement
+              ctx.config
+              original
+              candidate
+          with
+          | Error error ->
+            observe
+              "nonce_allocation_failed"
+              original.name
+              (Keeper_lifecycle_nonce.error_to_string error);
+            Error (Nonce_allocation_failed error)
+          | Ok (publication, publication_attention) ->
+            (match candidate_for_replacement publication candidate with
+             | Error error -> Error error
+             | Ok candidate ->
+               (match
+                  make_prepared_journal
+                    ~owner_id:(Keeper_lifecycle_reservation.owner_id token)
                     ~original
-                    journal
-                in
-                (match result with
-                 | Ok () -> journal_published := true
-                 | Error _ -> ());
-                invoke_after_journal_write_hook ();
-                result
-              in
-              (match result with
-               | Ok () ->
-                 journal_published := true;
-                 Ok (journal, payload)
-               | Error error ->
-                 Eio.Cancel.protect (fun () ->
-                 (match
-                    read_current_journal
-                      ~invalid:(fun detail ->
-                        Journal_ownership_changed detail)
-                      ctx.config
-                      journal.keeper_name
-                  with
-                  | Ok
-                      (_, _, Some (Active_journal current))
-                    when same_transaction current journal
-                         && current.stage = Reserved ->
-                    (match
-                       clear_journal ctx.config ~expected_stage:Reserved current
-                     with
-                     | Error attention -> Error attention
-                     | Ok () ->
-                       (match delete_payload ctx.config current with
-                        | Ok () -> Error error
-                        | Error failure ->
-                          Error (payload_failure Payload_delete failure)))
-                  | Ok (_, _, None)
-                  | Ok (_, _, Some (Cleared_tombstone _)) ->
-                    Error
-                      (cleanup_unreserved_payload
-                         ctx.config
-                         journal
-                         ~cause:error)
-                  | Error attention -> Error attention
-                  | Ok (_, _, Some (Active_journal _)) ->
-                    Error
-                      (Journal_ownership_changed
-                         "reservation publication settled to an unexpected active transaction")))))))
+                    ~candidate
+                with
+                | Error failure ->
+                  abort_replacement_before_reserved
+                    token
+                    ctx.config
+                    publication
+                    original
+                    candidate
+                    (payload_failure Payload_prepare failure)
+                    ()
+                | Ok (journal, prepared) ->
+                  journal_for_cleanup := Some journal;
+                  (match Payload.create ctx.config prepared with
+                   | Error failure ->
+                     journal_for_cleanup := None;
+                     verified_payload_for_cleanup := None;
+                     abort_replacement_before_reserved
+                       token
+                       ctx.config
+                       publication
+                       original
+                       candidate
+                       ~journal
+                       (payload_failure Payload_create failure)
+                       ()
+                   | Ok (Payload.Created _ | Payload.Reconciled_created _) ->
+                     (match verify_payload ctx.config journal with
+                      | Error failure ->
+                        journal_for_cleanup := None;
+                        verified_payload_for_cleanup := None;
+                        abort_replacement_before_reserved
+                          token
+                          ctx.config
+                          publication
+                          original
+                          candidate
+                          ~journal
+                          (payload_failure Payload_verify failure)
+                          ()
+                      | Ok payload ->
+                        verified_payload_for_cleanup := Some payload;
+                        let finish_reserved current =
+                          journal_for_cleanup := Some current;
+                          verified_payload_for_cleanup := Some payload;
+                          journal_published := true;
+                          (match publication_attention with
+                           | None -> ()
+                           | Some attention ->
+                             Log.Keeper.warn
+                               "keeper revival reconciled published lifecycle \
+                                nonce keeper=%s attention=%s"
+                               original.name
+                               (Keeper_lifecycle_nonce.error_to_string attention));
+                          invoke_after_nonce_allocation_hook ();
+                          invoke_after_journal_write_hook ();
+                          Ok (publication, current, payload, candidate)
+                        in
+                        (match
+                           reserve_validated_journal
+                             ctx.config
+                             ~original
+                             journal
+                         with
+                         | Ok () -> finish_reserved journal
+                         | Error publication_error ->
+                           (match
+                              read_current_journal
+                                ~invalid:(fun detail ->
+                                  Journal_ownership_changed detail)
+                                ctx.config
+                                journal.keeper_name
+                            with
+                            | Ok
+                                (_, _, Some (Active_journal current))
+                              when same_transaction current journal
+                                   && current.stage = Reserved ->
+                              Log.Keeper.warn
+                                "keeper revival reconciled Reserved journal \
+                                 publication keeper=%s attention=%s"
+                                original.name
+                                (error_to_string publication_error);
+                              finish_reserved current
+                            | Ok (_, _, None)
+                            | Ok (_, _, Some (Cleared_tombstone _)) ->
+                              journal_for_cleanup := None;
+                              verified_payload_for_cleanup := None;
+                              abort_replacement_before_reserved
+                                token
+                                ctx.config
+                                publication
+                                original
+                                candidate
+                                ~journal
+                                publication_error
+                                ()
+                            | Error attention ->
+                              journal_for_cleanup := None;
+                              verified_payload_for_cleanup := None;
+                              abort_replacement_before_reserved
+                                token
+                                ctx.config
+                                publication
+                                original
+                                candidate
+                                attention
+                                ()
+                            | Ok (_, _, Some (Active_journal _)) ->
+                              journal_for_cleanup := None;
+                              verified_payload_for_cleanup := None;
+                              abort_replacement_before_reserved
+                                token
+                                ctx.config
+                                publication
+                                original
+                                candidate
+                                (Journal_ownership_changed
+                                   "reservation publication settled to an \
+                                    unexpected active transaction")
+                                ()))))))))
     in
     (match journal_result with
      | Error error ->
        release_observed token original.name;
        Error error
-     | Ok (journal, verified_payload) ->
+     | Ok (publication, journal, verified_payload, candidate) ->
        (* The cancellation handler must restore the exact pre-transaction
           registry lane after removal. This ref carries only that immutable
           snapshot across the exception boundary; transaction ownership and
@@ -2019,9 +2262,9 @@ let revive_locked (ctx : _ context) ~original ~candidate =
                    (Registry_conflict conflict)
                | Ok () ->
                  (match
-                    Keeper_meta_store.replace_meta
-                      ~lifecycle_token:token
-                      nonce_witness
+                    write_replacement_meta
+                      token
+                      publication
                       ctx.config
                       candidate
                   with

@@ -139,6 +139,48 @@ let test_recover_exact_does_not_allocate () =
   check int64 "recovery consumed no nonce" 3L (target_nonce next)
 ;;
 
+let test_replace_settled_recovers_exact_published_target () =
+  with_base "masc_lifecycle_witness_settled_" @@ fun base_path ->
+  let created =
+    create ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-a"
+  in
+  let source = target_identity created in
+  let published =
+    Nonce.replace
+      ~base_path
+      ~keeper_id:"keeper-a"
+      ~source
+      ~owner_id:"trace-b"
+      ()
+    |> require_ok
+  in
+  match
+    Nonce.replace_settled
+      ~base_path
+      ~keeper_id:"keeper-a"
+      ~source
+      ~owner_id:"trace-c"
+      ()
+  with
+  | Ok (Nonce.Settled_recovered (witness, None)) ->
+    let target = Nonce.witness_target witness in
+    check string
+      "settlement retains exact published owner"
+      "trace-b"
+      (Nonce.identity_owner_id target);
+    check int64
+      "settlement retains exact published nonce"
+      (target_nonce published)
+      (Nonce.identity_nonce target)
+  | Ok (Nonce.Settled_recovered (_, Some _)) ->
+    fail "stale-source exact recovery reported unrelated publication attention"
+  | Ok (Nonce.Settled_allocated witness) ->
+    failf "stale source allocated nonce %Ld" (target_nonce witness)
+  | Error error ->
+    failf "exact published replacement was not recovered: %s"
+      (Nonce.error_to_string error)
+;;
+
 let test_concurrent_create_witnesses_are_exclusive () =
   with_base "masc_lifecycle_witness_concurrent_" @@ fun base_path ->
   let left = ref None in
@@ -199,6 +241,10 @@ let () =
       , [ test_case "first no-evidence allocation is one" `Quick test_first_no_evidence_is_one
         ; test_case "replace requires exact source" `Quick test_replace_requires_exact_source
         ; test_case "recover exact does not allocate" `Quick test_recover_exact_does_not_allocate
+        ; test_case
+            "settled replace recovers exact published target"
+            `Quick
+            test_replace_settled_recovers_exact_published_target
         ; test_case "concurrent create is exclusive" `Quick test_concurrent_create_witnesses_are_exclusive
         ; test_case "shutdown floor bounds create" `Quick test_shutdown_floor_bounds_create
         ; test_case "invalid current evidence is generic" `Quick test_invalid_current_evidence_is_generic

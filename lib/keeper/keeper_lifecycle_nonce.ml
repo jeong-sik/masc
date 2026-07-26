@@ -80,6 +80,10 @@ type 'kind witness =
   ; target : identity
   }
 
+type settled_replace =
+  | Settled_allocated of replace witness
+  | Settled_recovered of recover_exact witness * error option
+
 let ( let* ) result fn =
   match result with
   | Ok value -> fn value
@@ -402,7 +406,9 @@ let rec allocate
         Ok ()
       | Some _, Some _ -> Error Authority_identity_mismatch
     in
-    let current_nonce = Option.fold ~none:0L ~some:(fun row -> row.nonce) current in
+    let current_nonce =
+      Option.fold ~none:0L ~some:(fun (row : row) -> row.nonce) current
+    in
     let* desired = next_value ~floor current_nonce in
     let desired_row : row =
       { keeper_id
@@ -655,6 +661,62 @@ let recover_published_replace ~base_path ~keeper_id ~source () =
               Ok { base_path; keeper_id; source = Some source; target }
             | Some _, Some _ | None, None | Some _, None | None, Some _ ->
               Error Authority_identity_mismatch))
+;;
+
+let settle_published_replace
+      ~base_path
+      ~keeper_id
+      ~source
+      ~owner_id
+      publication_error
+  =
+  let exact_target nonce =
+    if Int64.equal source.nonce Int64.max_int
+       || not (Int64.equal nonce (Int64.succ source.nonce))
+    then Error Authority_identity_mismatch
+    else
+      Ok
+        { base_path
+        ; keeper_id
+        ; source = Some source
+        ; target = { owner_id; nonce }
+        }
+  in
+  match publication_error with
+  | Published_with_warnings { nonce; _ }
+  | Published_with_failure { nonce; _ } ->
+    exact_target nonce
+  | Publication_indeterminate { nonce; _ } ->
+    let* witness =
+      recover_published_replace ~base_path ~keeper_id ~source ()
+    in
+    let target = witness.target in
+    if String.equal target.owner_id owner_id
+       && Int64.equal target.nonce nonce
+    then Ok witness
+    else Error Authority_identity_mismatch
+  | error -> Error error
+;;
+
+let replace_settled ~base_path ~keeper_id ~source ~owner_id () =
+  match replace ~base_path ~keeper_id ~source ~owner_id () with
+  | Ok witness -> Ok (Settled_allocated witness)
+  | Error
+      (( Published_with_warnings _
+       | Published_with_failure _
+       | Publication_indeterminate _ ) as publication_error) ->
+    settle_published_replace
+      ~base_path
+      ~keeper_id
+      ~source
+      ~owner_id
+      publication_error
+    |> Result.map (fun witness ->
+      Settled_recovered (witness, Some publication_error))
+  | Error Authority_identity_mismatch ->
+    recover_published_replace ~base_path ~keeper_id ~source ()
+    |> Result.map (fun witness -> Settled_recovered (witness, None))
+  | Error error -> Error error
 ;;
 
 let runtime_int_of_nonce nonce =

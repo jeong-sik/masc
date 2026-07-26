@@ -59,6 +59,10 @@ type replace
 type recover_exact
 type 'kind witness
 
+type settled_replace =
+  | Settled_allocated of replace witness
+  | Settled_recovered of recover_exact witness * error option
+
 val identity :
   owner_id:string ->
   nonce:int64 ->
@@ -95,6 +99,17 @@ val recover_published_replace :
   source:identity ->
   unit ->
   (recover_exact witness, error) result
+
+val replace_settled :
+  base_path:string ->
+  keeper_id:string ->
+  source:identity ->
+  owner_id:string ->
+  unit ->
+  (settled_replace, error) result
+(** Allocate the replacement or convert only the actual publication result
+    from this call into an exact forward witness. No caller-provided
+    publication claim and no reverse witness is accepted. *)
 
 val witness_base_path : _ witness -> string
 val witness_keeper_id : _ witness -> string

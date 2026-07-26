@@ -38,7 +38,7 @@ let canonical_app_codes : (string * D.t) list =
   ; "external_cancel", D.External_cancel
   ; "turn_wall_clock_timeout", D.Turn_wall_clock_timeout
   ; "provider_error", D.Provider_error (Code.Provider_runtime_error "provider_error")
-  ; "unknown_error", D.Unknown { raw_error = "" }
+  ; "unknown_error", D.Unknown { raw_error = "unknown_error" }
   ]
 ;;
 
@@ -141,7 +141,7 @@ let round_trippable : (string * D.t) list =
   ; "Turn_wall_clock_timeout", D.Turn_wall_clock_timeout
   ; "Unknown empty", D.Unknown { raw_error = "" }
   ; "Unknown raw", D.Unknown { raw_error = "fresh_unmapped_label" }
-  ; (* Runtime wires that Code.of_wire recognises losslessly (no payload
+  ; (* Runtime wires that Code.of_wire_exact recognises losslessly (no payload
      or payload-loss is acceptable per RFC-0042 §5.2). *)
     "Provider_error/Heartbeat", D.Provider_error Code.Heartbeat_failures
   ; "Provider_error/Turn_failures", D.Provider_error Code.Turn_failures
@@ -194,14 +194,6 @@ let test_round_trip_lossy_payloads () =
 
 let runtime_codes_to_projection : (string * Code.t * D.t) list =
   [ "Healthy", Code.Healthy, D.Success
-  ; "Stale_turn_timeout/idle", Code.Stale_turn_timeout_idle, D.Turn_wall_clock_timeout
-  ; ( "Stale_turn_timeout/in_turn"
-    , Code.Stale_turn_timeout_in_turn
-    , D.Turn_wall_clock_timeout )
-  ; ( "Stale_turn_timeout/no_progress"
-    , Code.Stale_turn_timeout_no_progress
-    , D.Turn_wall_clock_timeout )
-  ; "Stale_turn_timeout/noop", Code.Stale_turn_timeout_noop, D.Turn_wall_clock_timeout
   ; "Heartbeat", Code.Heartbeat_failures, D.Provider_error Code.Heartbeat_failures
   ; "Turn_failures", Code.Turn_failures, D.Provider_error Code.Turn_failures
   ; "Storm", Code.Stale_termination_storm, D.Provider_error Code.Stale_termination_storm
@@ -225,6 +217,26 @@ let test_projection () =
        let actual = D.of_termination_code code in
        Alcotest.(check bool) (label ^ " projection") true (D.equal expected actual))
     runtime_codes_to_projection
+;;
+
+let test_lossy_terminal_wire_never_manufactures_typed_cause () =
+  Alcotest.(check bool)
+    "current wall-clock timeout is typed"
+    true
+    (D.equal
+       D.Turn_wall_clock_timeout
+       (D.of_wire "turn_wall_clock_timeout"));
+  [ "stale_turn_timeout"; "exception" ]
+  |> List.iter (fun wire ->
+    match Code.of_wire_exact wire with
+    | Some _ -> Alcotest.failf "%s unexpectedly decoded as a typed cause" wire
+    | None ->
+      Alcotest.(check bool)
+        (wire ^ " remains generic unknown")
+        true
+        (D.equal
+           (D.Unknown { raw_error = wire })
+           (D.of_wire wire)))
 ;;
 
 let check_runtime_failure_reason raw_error expected_code =
@@ -336,6 +348,10 @@ let () =
             "every runtime variant projects deterministically"
             `Quick
             test_projection
+        ; Alcotest.test_case
+            "lossy wire does not manufacture typed cause"
+            `Quick
+            test_lossy_terminal_wire_never_manufactures_typed_cause
         ] )
     ; ( "registry failure reason"
       , [ Alcotest.test_case

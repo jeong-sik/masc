@@ -1,36 +1,13 @@
-(** Closed sum type for the terminal code carried by a keeper turn's
-    receipt. See RFC-0042 (`docs/rfc/RFC-0042-keeper-terminal-code-closed-sum.md`)
-    for the full motivation.
+(** Typed terminal causes produced by the current Keeper runtime.
 
-    This module is introduced in PR-1 of the RFC migration and is
-    intentionally inert: no caller in the tree references it yet.
-    PR-2 swaps the existing typed bridges to return values of type [t];
-    PR-3 swaps [Keeper_turn_terminal.t.code] from
-    [string] to [t]; PR-4 converts the
-    [Keeper_execution_receipt] disposition mapping from
-    [String.starts_with ~prefix] to exhaustive [match].
-
-    Adding a new variant here is, by construction, a compile
-    obligation for every match site after PR-4 lands. *)
+    Adding a constructor is a compile obligation for every match site.
+    Wire decoding is deliberately narrower than wire encoding: a wire value
+    that discarded typed evidence cannot reconstruct a cause. *)
 
 type t =
   | Healthy
   (** Turn ended without error and reached the configured terminal
           runtime. *)
-  | Stale_turn_timeout_idle
-  (** [Keeper_registry.Stale_turn_timeout (Idle_turn _)]: the keeper
-          was [Running] but never observed a turn-start. *)
-  | Stale_turn_timeout_in_turn
-  (** Terminal code for a stale turn whose kill-class sub-class was not
-          preserved on the wire (formerly the retired [In_turn_hung]); produced
-          by the lossy [of_wire] / [of_failure_reason_option] canonicalisation. *)
-  | Stale_turn_timeout_no_progress
-  (** [Keeper_registry.Stale_turn_timeout (Mid_turn_no_progress _)]: a live
-          turn stayed inside its outer timeout but stopped producing
-          streaming/tool progress. *)
-  | Stale_turn_timeout_noop
-  (** [Keeper_registry.Stale_turn_timeout (Noop_failure_loop _)]:
-          turns kept firing but produced no tool calls. *)
   | Stale_termination_storm
   (** [Keeper_registry.Stale_termination_storm]: cohort window
           escalation threshold reached. *)
@@ -64,54 +41,20 @@ type t =
           a follow-up RFC will split it once production traces narrow
           the actual sub-kind set. *)
 
-(** Stable wire format. The strings produced here are byte-for-byte
-    compatible with the receipt JSON consumed by dashboards,
-    [bin/masc-trace], and external consumers.
-
-    The [Stale_turn_timeout_*] variants intentionally collapse to the
-    [stale_turn_timeout] wire string; the typed sub-class is still available
-    to OCaml callers. *)
+(** Stable wire format consumed by receipt JSON, dashboards,
+    [bin/masc-trace], and external consumers. *)
 val to_wire : t -> string
 
-(** Best-effort reverse of [to_wire]. Returned [None] for unknown wire
-    codes; callers that previously consumed unknown codes via
-    [String.starts_with ~prefix] should instead handle [None] (or wait
-    for PR-4, which removes the consumer side of [of_wire] entirely).
+(** Decode only current wire values with a one-to-one typed meaning.
 
-    Some wire strings are lossy ([stale_turn_timeout] cannot distinguish
-    [Idle_turn] / [Mid_turn_no_progress] / [Noop_failure_loop]).
-    Such wire strings deserialise to a single canonical sub-class —
-    documented in the [.ml] — to avoid silent fallthrough. *)
-val of_wire : string -> t option
+    Lossy values such as [exception], payload-bearing codes, and unknown strings
+    return [None]. They must remain display-only or produce a typed decode
+    failure; this function never invents missing evidence. *)
+val of_wire_exact : string -> t option
 
-(** Canonical bridge from the existing typed source.
-
-    Exhaustive over [Keeper_registry.failure_reason]: adding a new
-    constructor there is a compile error here, which is the property
-    this RFC is meant to provide. *)
-val of_failure_reason : Keeper_registry.failure_reason -> t
-
-(** Option-wrapped bridge. [None] is the legacy convention for a
-    keeper that became stale without a recorded [failure_reason]; the
-    pre-RFC string emitter mapped this to ["stale_turn_timeout"]. We
-    canonicalise to [Stale_turn_timeout_in_turn] so [to_wire] reproduces
-    the same bytes. PR-3 narrows callers to a non-option representation
-    where applicable.
-
-    @since 0.193.0 *)
-val of_failure_reason_option : Keeper_registry.failure_reason option -> t
-
-(** Wrap an [Agent_sdk.Error.t] wire string into the typed bridge.
-    The argument is the legacy parametrised wire string produced by
+(** Wrap an [Agent_sdk.Error.t] wire string produced by
     [Keeper_agent_error.terminal_reason_code_of_sdk_error] /
     [agent_error_terminal_reason_code] /
     [api_error_terminal_reason_code]. Returns [Sdk_error s] verbatim;
-    [to_wire] reproduces [s] byte-for-byte.
-
-    PR-2.5 introduces this as a thin typed bridge; a follow-up RFC
-    will replace [s] with a closed sub-sum once the parametrised
-    sub-kinds (`turns=N,limit=M`, `kind=token,used=K,limit=L`, …) are
-    inventoried from production traces.
-
-    @since 0.193.1 *)
+    [to_wire] reproduces [s] byte-for-byte. *)
 val of_sdk_error_wire : string -> t

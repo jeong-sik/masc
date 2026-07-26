@@ -574,7 +574,7 @@ let valid_leaf kind leaf =
     Option.is_some (Sha256.of_string token)
 ;;
 
-let immutable_ref_to_json reference =
+let immutable_ref_to_json (reference : immutable_ref) =
   `Assoc
     [ "kind", `String (artifact_kind_token reference.kind)
     ; "leaf", `String reference.leaf

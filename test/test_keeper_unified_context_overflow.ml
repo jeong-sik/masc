@@ -47,11 +47,22 @@ let test_is_context_overflow_only_for_overflow_errors () =
              { message = "Connection_reset"
              ; kind = Llm_provider.Http_client.Connection_refused
              })));
-  check
-    bool
-    "Internal does not match"
-    false
-    (EC.is_context_overflow (Agent_sdk.Error.Internal "some error"))
+  let rendered_only =
+    Agent_sdk.Error.Internal
+      "Context overflow: model_context_window_exceeded arbitrary provider text"
+  in
+  check bool "rendered internal text does not match" false
+    (EC.is_context_overflow rendered_only);
+  check bool "rendered internal text is not auto-recoverable" false
+    (EC.is_auto_recoverable_turn_error rendered_only);
+  let unrecognized_stop_reason =
+    Agent_sdk.Error.Agent
+      (UnrecognizedStopReason { reason = "model_context_window_exceeded" })
+  in
+  check bool "exact typed unrecognized stop reason matches" true
+    (EC.is_context_overflow unrecognized_stop_reason);
+  check bool "exact typed unrecognized stop reason is auto-recoverable" true
+    (EC.is_auto_recoverable_turn_error unrecognized_stop_reason)
 ;;
 
 let test_input_capacity_is_not_context_overflow () =

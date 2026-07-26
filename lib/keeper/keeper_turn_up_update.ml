@@ -43,6 +43,10 @@ let candidate_write_failure_hook_key : string Eio.Fiber.key =
   Eio.Fiber.create_key ()
 ;;
 
+let after_runtime_assignment_hook_key : (unit -> unit) Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
 let invoke_after_stop_join_hook () =
   Option.iter
     (fun after_stop_join -> after_stop_join ())
@@ -53,6 +57,12 @@ let invoke_after_candidate_write_hook () =
   Option.iter
     (fun after_candidate_write -> after_candidate_write ())
     (Eio.Fiber.get after_candidate_write_hook_key)
+;;
+
+let invoke_after_runtime_assignment_hook () =
+  Option.iter
+    (fun hook -> hook ())
+    (Eio.Fiber.get after_runtime_assignment_hook_key)
 ;;
 
 module For_testing = struct
@@ -89,6 +99,13 @@ module For_testing = struct
 
   let with_candidate_write_failure ~detail fn =
     Eio.Fiber.with_binding candidate_write_failure_hook_key detail fn
+  ;;
+
+  let with_after_runtime_assignment ~after_runtime_assignment fn =
+    Eio.Fiber.with_binding
+      after_runtime_assignment_hook_key
+      after_runtime_assignment
+      fn
   ;;
 end
 
@@ -720,266 +737,121 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                      | None -> previous_runtime
                                      | Some runtime_id -> Some runtime_id
                                    in
+                                   (match
+                                      Keeper_runtime_meta_transaction.prepare
+                                        ~operation:
+                                          Keeper_runtime_meta_journal.Update
+                                        ~config:ctx.config
+                                        ~keeper_name:candidate.name
+                                        ~previous_runtime
+                                        ~candidate_runtime
+                                        ~previous_meta:(Some latest)
+                                        ~candidate_meta:candidate
+                                    with
+                                    | Error failure ->
+                                      fail_and_restart
+                                        latest
+                                        (Keeper_runtime_meta_transaction
+                                         .recovery_failure_to_string
+                                           failure)
+                                    | Ok runtime_meta_intent ->
                                    let same_runtime_target target =
                                      Option.equal
                                        String.equal
                                        (Runtime.runtime_id_for_keeper candidate.name)
                                        target
                                    in
-                                   let converge_runtime_assignment target =
-                                     if same_runtime_target target
-                                     then Ok ()
-                                     else
-                                       let result =
-                                         match target with
-                                         | Some runtime_id ->
-                                           Runtime.set_runtime_id_for_keeper
-                                             ~keeper_name:candidate.name
-                                             ~runtime_id
-                                             ()
-                                         | None ->
-                                           Runtime.clear_runtime_id_for_keeper
-                                             ~keeper_name:candidate.name
-                                             ()
-                                       in
-                                       match result with
-                                       | Ok () -> Ok ()
-                                       | Error detail ->
-                                         if same_runtime_target target
-                                         then Ok ()
-                                         else Error detail
-                                   in
-                                   let runtime_assignment_changed = ref false in
-                                   let meta_write_attempted = ref false in
                                    let gate = ref None in
                                    let launch_committed = ref false in
                                    let last_recovery_failure = ref None in
-                                   let restore_runtime_assignment () =
-                                     if not !runtime_assignment_changed
-                                     then Ok ()
-                                     else
-                                       match
-                                       Eio.Fiber.get
-                                         runtime_rollback_failure_hook_key
-                                       with
-                                       | Some detail -> Error detail
-                                       | None ->
-                                         converge_runtime_assignment previous_runtime
+                                   let settle_registered_lane () =
+                                     Option.iter abort_launch_gate !gate;
+                                     match
+                                       Keeper_registry.get
+                                         ~base_path:ctx.config.base_path
+                                         candidate.name
+                                     with
+                                     | None -> ()
+                                     | Some entry ->
+                                       request_entry_stop entry;
+                                       let _lane_exit =
+                                         Keeper_lane.await_exit entry.lane
+                                       in
+                                       let _terminal =
+                                         Eio.Promise.await entry.done_p
+                                       in
+                                       ()
                                    in
-                                 let persisted_candidate_matches current =
-                                   Int.equal
-                                     current.meta_version
-                                     (candidate.meta_version + 1)
-                                   && { current with
-                                        meta_version = candidate.meta_version
-                                      }
-                                      = candidate
-                                 in
-                                 let settle_registered_lane () =
-                                   Option.iter abort_launch_gate !gate;
-                                   match
-                                     Keeper_registry.get
-                                       ~base_path:ctx.config.base_path
-                                       candidate.name
-                                   with
-                                   | None -> ()
-                                   | Some entry ->
-                                     request_entry_stop entry;
-                                     let _lane_exit =
-                                       Keeper_lane.await_exit entry.lane
-                                     in
-                                     let _terminal =
-                                       Eio.Promise.await entry.done_p
-                                     in
-                                     ()
-                                 in
-                                 let restore_durable_meta () =
-                                   match
-                                     Keeper_meta_store.read_meta
-                                       ctx.config
-                                       latest.name
-                                   with
-                                   | Error detail -> Error detail
-                                   | Ok None ->
-                                     Error
-                                       "rollback found no durable metadata"
-                                   | Ok (Some current)
-                                     when current = latest ->
-                                     Ok current
-                                   | Ok (Some current)
-                                     when !meta_write_attempted
-                                          && Int.equal
-                                               current.meta_version
-                                               (latest.meta_version + 1) ->
-                                     let rollback =
-                                       { latest with
-                                         meta_version =
-                                           current.meta_version
-                                       }
-                                     in
-                                     (match
-                                        write_meta_for_lifecycle
-                                          permit
-                                          update_token
-                                          ctx.config
-                                          rollback
-                                      with
-                                      | Error detail -> Error detail
-                                      | Ok () ->
-                                        (match
-                                           Keeper_meta_store.read_meta
-                                             ctx.config
-                                             latest.name
-                                         with
-                                         | Ok (Some restored) ->
-                                           Ok restored
-                                         | Ok None ->
-                                           Error
-                                             "rollback metadata disappeared \
-                                              after commit"
-                                         | Error detail -> Error detail))
-                                   | Ok (Some current) ->
-                                     Error
-                                       (Printf.sprintf
-                                          "rollback authority changed from \
-                                           meta_version=%d to %d"
-                                          latest.meta_version
-                                          current.meta_version)
-                                 in
                                    let recover failure =
                                      settle_registered_lane ();
-                                     let errors = ref [] in
-                                     let record detail =
-                                       errors := detail :: !errors
-                                     in
-                                     let rollback_metadata () =
-                                       match restore_durable_meta () with
-                                       | Error detail ->
-                                         record ("metadata rollback: " ^ detail)
-                                       | Ok restored ->
-                                         (match restart_meta restored with
-                                          | Ok () -> ()
-                                          | Error detail ->
-                                            record ("lane rollback: " ^ detail))
-                                     in
-                                     let forward_candidate_metadata () =
-                                       match
-                                         Keeper_meta_store.read_meta
-                                           ctx.config
-                                           candidate.name
-                                       with
-                                       | Ok (Some current)
-                                         when persisted_candidate_matches current ->
-                                         (match restart_meta current with
-                                          | Ok () -> ()
-                                          | Error restart_detail ->
-                                            record
-                                              ("candidate lane recovery: "
-                                               ^ restart_detail))
-                                       | Ok (Some current) when current = latest ->
-                                         (match
-                                            write_meta_for_lifecycle
-                                              permit
-                                              update_token
-                                              ctx.config
-                                              { candidate with
-                                                meta_version =
-                                                  current.meta_version
-                                              }
-                                          with
-                                          | Error forward_detail ->
-                                            record
-                                              ("candidate metadata forward recovery: "
-                                               ^ forward_detail)
-                                          | Ok () ->
-                                            (match
-                                               Keeper_meta_store.read_meta
-                                                 ctx.config
-                                                 candidate.name
-                                             with
-                                             | Ok (Some committed)
-                                               when persisted_candidate_matches
-                                                      committed ->
-                                               (match restart_meta committed with
-                                                | Ok () -> ()
-                                                | Error restart_detail ->
-                                                  record
-                                                    ("candidate lane recovery: "
-                                                     ^ restart_detail))
-                                             | Ok _ ->
-                                               record
-                                                 "candidate metadata forward recovery \
-                                                  did not publish the exact payload"
-                                             | Error reread_detail ->
-                                               record
-                                                 ("candidate metadata forward recovery \
-                                                   reread: "
-                                                  ^ reread_detail)))
-                                       | Ok (Some _) ->
-                                         record
-                                           "runtime authority settled while durable \
-                                            metadata contains a non-candidate payload"
-                                       | Ok None ->
-                                         record
-                                           "runtime authority settled while durable \
-                                            metadata is missing"
-                                       | Error reread_detail ->
-                                         record
-                                           ("runtime authority durable reread: "
-                                            ^ reread_detail)
-                                     in
-                                     (match restore_runtime_assignment () with
-                                      | Ok () -> rollback_metadata ()
-                                      | Error restore_detail ->
-                                        if same_runtime_target previous_runtime
-                                        then rollback_metadata ()
-                                        else if same_runtime_target candidate_runtime
-                                        then forward_candidate_metadata ()
-                                        else
-                                          (match
-                                             converge_runtime_assignment
-                                               previous_runtime
-                                           with
-                                           | Ok () -> rollback_metadata ()
-                                           | Error rollback_detail ->
-                                             (match
-                                                converge_runtime_assignment
-                                                  candidate_runtime
-                                              with
-                                              | Ok () ->
-                                                forward_candidate_metadata ()
-                                              | Error forward_detail ->
-                                                record
-                                                  (Printf.sprintf
-                                                     "runtime recovery could not \
-                                                      converge to rollback or forward \
-                                                      authority: initial=%s rollback=%s \
-                                                      forward=%s"
-                                                     restore_detail
-                                                     rollback_detail
-                                                     forward_detail))));
-                                     let detail =
-                                       match List.rev !errors with
-                                       | [] ->
-                                         last_recovery_failure := None;
-                                         failure
-                                       | errors ->
-                                         let recovery_failure =
-                                           String.concat "; " errors
-                                         in
-                                         last_recovery_failure :=
-                                           Some recovery_failure;
-                                         Log.Keeper.error
-                                           "keeper update exact recovery failed \
-                                            keeper=%s detail=%s"
-                                           candidate.name
-                                           recovery_failure;
-                                         failure
-                                         ^ "; recovery failed: "
-                                         ^ recovery_failure
-                                     in
-                                     tool_result_error detail
-                                 in
+                                     match
+                                       Keeper_runtime_meta_transaction.recover
+                                         ~lifecycle_token:update_token
+                                         permit
+                                         ctx.config
+                                         runtime_meta_intent
+                                         ~prefer:
+                                           (match
+                                              Eio.Fiber.get
+                                                runtime_rollback_failure_hook_key
+                                            with
+                                            | Some _ -> `Forward
+                                            | None -> `Rollback)
+                                     with
+                                     | Error recovery_failure ->
+                                       let detail =
+                                         Keeper_runtime_meta_transaction
+                                         .recovery_failure_to_string
+                                           recovery_failure
+                                       in
+                                       last_recovery_failure := Some detail;
+                                       Log.Keeper.error
+                                         "keeper update exact recovery failed \
+                                          keeper=%s detail=%s"
+                                         candidate.name
+                                         detail;
+                                       tool_result_error
+                                         (failure
+                                          ^ "; recovery failed: "
+                                          ^ detail)
+                                     | Ok _ ->
+                                       let restart_result =
+                                         match
+                                           Keeper_meta_store.read_meta
+                                             ctx.config
+                                             candidate.name
+                                         with
+                                         | Error detail -> Error detail
+                                         | Ok None ->
+                                           Error
+                                             "recovered metadata is missing"
+                                         | Ok (Some current) ->
+                                           if autonomous_admitted current
+                                           then restart_meta current
+                                           else Ok ()
+                                       in
+                                       (match restart_result with
+                                        | Ok () ->
+                                          last_recovery_failure := None;
+                                          tool_result_error failure
+                                        | Error detail ->
+                                          last_recovery_failure := Some detail;
+                                          tool_result_error
+                                            (failure
+                                             ^ "; recovered lane restart failed: "
+                                             ^ detail))
+                                   in
+                                   let complete_forward () =
+                                     Keeper_runtime_meta_transaction
+                                     .complete_forward
+                                       ~lifecycle_token:update_token
+                                       permit
+                                       ctx.config
+                                       runtime_meta_intent
+                                     |> Result.map_error
+                                          Keeper_runtime_meta_transaction
+                                          .recovery_failure_to_string
+                                   in
                                  let apply_runtime_assignment () =
                                    match p.runtime_id_opt with
                                    | None -> Ok ()
@@ -990,7 +862,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                             (Some runtime_id) ->
                                      Ok ()
                                      | Some runtime_id ->
-                                       runtime_assignment_changed := true;
                                        (match
                                           Runtime.set_runtime_id_for_keeper
                                             ~keeper_name:candidate.name
@@ -1013,7 +884,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                          failed: "
                                         ^ detail)
                                    | Ok () ->
-                                     meta_write_attempted := true;
+                                     invoke_after_runtime_assignment_hook ();
                                      let candidate_write =
                                        match
                                          Eio.Fiber.get
@@ -1077,14 +948,24 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                              enqueue_goal_assignment_wakes
                                                ~old_ids:latest.active_goal_ids
                                                candidate;
-                                             tool_result_error
-                                               (Printf.sprintf
-                                                "keeper metadata was updated, \
-                                                 but newer shutdown operation \
-                                                 %s owns lane admission"
-                                                (Keeper_shutdown_types
-                                                 .Operation_id.to_string
-                                                   operation_id))
+                                             let detail =
+                                               Printf.sprintf
+                                                 "keeper metadata was updated, \
+                                                  but newer shutdown operation \
+                                                  %s owns lane admission"
+                                                 (Keeper_shutdown_types
+                                                  .Operation_id.to_string
+                                                    operation_id)
+                                             in
+                                             (match complete_forward () with
+                                              | Ok () ->
+                                                tool_result_error detail
+                                              | Error cleanup_detail ->
+                                                tool_result_error
+                                                  (detail
+                                                   ^ "; runtime/meta authority \
+                                                      cleanup failed: "
+                                                   ^ cleanup_detail))
                                          | `Committed
                                              (Keeper_shutdown_supersession
                                               .No_shutdown_admission
@@ -1115,10 +996,18 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                                   ~old_ids:
                                                     latest.active_goal_ids
                                                   committed;
-                                                tool_result_ok_data
-                                                  (Keeper_meta_json
-                                                   .meta_to_json
-                                                     committed))
+                                                match complete_forward () with
+                                                | Ok () ->
+                                                  tool_result_ok_data
+                                                    (Keeper_meta_json
+                                                     .meta_to_json
+                                                       committed)
+                                                | Error detail ->
+                                                  tool_result_error
+                                                    ("keeper update committed but \
+                                                      runtime/meta authority cleanup \
+                                                      failed: "
+                                                     ^ detail))
                                               else
                                                 (match
                                                    Eio.Fiber.get
@@ -1154,10 +1043,18 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                                         ~old_ids:
                                                           latest.active_goal_ids
                                                         committed;
-                                                      tool_result_ok_data
-                                                        (Keeper_meta_json
-                                                         .meta_to_json
-                                                           committed)
+                                                      (match complete_forward () with
+                                                       | Ok () ->
+                                                         tool_result_ok_data
+                                                           (Keeper_meta_json
+                                                            .meta_to_json
+                                                              committed)
+                                                       | Error detail ->
+                                                         tool_result_error
+                                                           ("keeper update committed \
+                                                             but runtime/meta authority \
+                                                             cleanup failed: "
+                                                            ^ detail))
                                                     | rejected ->
                                                       recover
                                                         (Printf.sprintf

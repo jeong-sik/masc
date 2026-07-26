@@ -1853,6 +1853,47 @@ let fail_with_rollback permit token config journal payload original_entry cause 
   | _ -> Error (Rollback_failed { cause; errors })
 ;;
 
+exception Cancellation_recovery_failed of
+  { original : exn
+  ; recovery_errors : rollback_error list
+  }
+
+let cancellation_with_recovery_errors cancelled recovery_errors =
+  if recovery_errors = []
+  then cancelled
+  else
+    match cancelled with
+    | Eio.Cancel.Cancelled
+        (Cancellation_recovery_failed
+           { original; recovery_errors = existing }) ->
+      Eio.Cancel.Cancelled
+        (Cancellation_recovery_failed
+           { original
+           ; recovery_errors = existing @ recovery_errors
+           })
+    | Eio.Cancel.Cancelled original ->
+      Eio.Cancel.Cancelled
+        (Cancellation_recovery_failed { original; recovery_errors })
+    | exception_ ->
+      Eio.Cancel.Cancelled
+        (Cancellation_recovery_failed
+           { original = exception_
+           ; recovery_errors
+           })
+;;
+
+module Previous_for_testing = For_testing
+
+module For_testing = struct
+  include Previous_for_testing
+
+  let cancellation_with_runtime_recovery_failure ~detail cancelled =
+    cancellation_with_recovery_errors
+      cancelled
+      [ Rollback_runtime_assignment_failed detail ]
+  ;;
+end
+
 let validate_registry_snapshot config original =
   match Keeper_registry.get ~base_path:config.Workspace.base_path original.name with
   | None -> Ok None
@@ -2418,7 +2459,7 @@ let revive_locked
        let abort_pending_launch () =
          match !pending_launch_entry with
          | None -> Keeper_keepalive.abort_launch_gate launch_gate
-         | Some entry ->
+         | Some (entry : Keeper_registry.registry_entry) ->
            Atomic.set entry.fiber_stop true;
            Keeper_keepalive.abort_launch_gate launch_gate;
            Keeper_keepalive.request_entry_stop entry;
@@ -2740,6 +2781,7 @@ let revive_locked
        try run () with
        | Eio.Cancel.Cancelled _ as cancelled ->
          let backtrace = Printexc.get_raw_backtrace () in
+         let cancellation_recovery_errors = ref [] in
          if not (Keeper_keepalive.launch_gate_is_committed launch_gate)
          then
            (match settle_pending_launch () with
@@ -2757,6 +2799,10 @@ let revive_locked
                 in
                 if errors <> []
                 then
+                  cancellation_recovery_errors :=
+                    errors @ !cancellation_recovery_errors;
+                if errors <> []
+                then
                   Log.Keeper.error
                     "keeper lifecycle cancellation rollback failed keeper=%s errors=%s"
                     original.name
@@ -2772,7 +2818,11 @@ let revive_locked
                 original.name
                 (error_to_string attention);
               release_observed token original.name);
-         Printexc.raise_with_backtrace cancelled backtrace)))
+         Printexc.raise_with_backtrace
+           (cancellation_with_recovery_errors
+              cancelled
+              (List.rev !cancellation_recovery_errors))
+           backtrace)))
 ;;
 
 let revive ?runtime_id (ctx : _ context) ~original ~candidate =
@@ -2807,6 +2857,7 @@ let revive ?runtime_id (ctx : _ context) ~original ~candidate =
            with
            | Eio.Cancel.Cancelled _ as cancelled ->
              let backtrace = Printexc.get_raw_backtrace () in
+             let cancellation_recovery_errors = ref [] in
              if
                not (Keeper_keepalive.launch_gate_is_committed launch_gate)
                && not !launch_reconciliation_unresolved
@@ -2819,12 +2870,18 @@ let revive ?runtime_id (ctx : _ context) ~original ~candidate =
                  with
                  | Ok () -> ()
                  | Error detail ->
+                   cancellation_recovery_errors :=
+                     [ Rollback_runtime_assignment_failed detail ];
                    Log.Keeper.error
                      "keeper revival cancellation could not restore runtime \
                       assignment keeper=%s error=%s"
                      original.name
                      detail);
-             Printexc.raise_with_backtrace cancelled backtrace)
+             Printexc.raise_with_backtrace
+               (cancellation_with_recovery_errors
+                  cancelled
+                  !cancellation_recovery_errors)
+               backtrace)
   with
   | Admission_completed value -> value
   | Admission_completed_with_attention
@@ -3085,7 +3142,11 @@ let protect_shard_from_orphan_cleanup_locked config shard =
       (fun result leaf ->
          let ( let* ) = Result.bind in
          let* protect_shard = result in
-         if not (Filename.check_suffix leaf ".json")
+         if
+           not
+             (Filename.check_suffix leaf ".json"
+              && String.length leaf >= 8
+              && String.equal (String.sub leaf 0 8) "revival-")
          then Ok protect_shard
          else
            match
@@ -3178,7 +3239,11 @@ let recover_pending config =
     | Ok files ->
       List.fold_left
         (fun summary file ->
-           if not (Filename.check_suffix file ".json")
+           if
+             not
+               (Filename.check_suffix file ".json"
+                && String.length file >= 8
+                && String.equal (String.sub file 0 8) "revival-")
            then summary
            else
              let path = Filename.concat dir file in

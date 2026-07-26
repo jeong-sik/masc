@@ -398,9 +398,11 @@ let test_out_of_range_floor_is_rejected_before_head_creation () =
       ()
   in
   (match result with
-   | Error (Nonce.Runtime_nonce_out_of_range _) -> ()
-   | Error error ->
-     failf "unexpected out-of-range floor error: %s" (Nonce.error_to_string error)
+   | Error
+       (Masc.Keeper_lifecycle_nonce_types.Runtime_nonce_out_of_range _) ->
+     ()
+   | Error _ ->
+     fail "unexpected out-of-range floor error"
    | Ok nonce -> failf "out-of-range floor allocated %Ld" nonce);
   check bool
     "out-of-range floor created no HEAD"

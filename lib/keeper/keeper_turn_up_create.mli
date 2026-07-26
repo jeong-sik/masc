@@ -25,3 +25,10 @@ val create_keeper :
   _ Keeper_types_profile.context ->
   Keeper_turn_up_args.parsed_args ->
   tool_result
+
+module For_testing : sig
+  val with_after_runtime_assignment :
+    after_runtime_assignment:(unit -> unit) ->
+    (unit -> 'a) ->
+    'a
+end

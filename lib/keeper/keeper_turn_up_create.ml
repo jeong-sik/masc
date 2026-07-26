@@ -12,6 +12,25 @@ open Keeper_keepalive
 open Keeper_execution
 open Keeper_turn_up_args
 
+let after_runtime_assignment_hook_key : (unit -> unit) Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
+let invoke_after_runtime_assignment_hook () =
+  Option.iter
+    (fun hook -> hook ())
+    (Eio.Fiber.get after_runtime_assignment_hook_key)
+;;
+
+module For_testing = struct
+  let with_after_runtime_assignment ~after_runtime_assignment fn =
+    Eio.Fiber.with_binding
+      after_runtime_assignment_hook_key
+      after_runtime_assignment
+      fn
+  ;;
+end
+
 
 (* #9749: bootstrap can race a heartbeat/supervisor meta write after
    crash recovery. Retry on CAS conflict while keeping heartbeat-owned
@@ -374,6 +393,22 @@ let create_keeper_admitted_body
           | None -> previous_runtime
           | Some runtime_id -> Some runtime_id
         in
+        match
+          Keeper_runtime_meta_transaction.prepare
+            ~operation:Keeper_runtime_meta_journal.Create
+            ~config:ctx.config
+            ~keeper_name:p.name
+            ~previous_runtime
+            ~candidate_runtime
+            ~previous_meta:None
+            ~candidate_meta:meta
+        with
+        | Error failure ->
+          Progress.stop_tracking task_id;
+          tool_result_error
+            (Keeper_runtime_meta_transaction.recovery_failure_to_string
+               failure)
+        | Ok runtime_meta_intent ->
         let runtime_assignment_changed = ref false in
       let same_runtime_target target =
         Option.equal
@@ -434,6 +469,20 @@ let create_keeper_admitted_body
       in
       (match runtime_assignment_result with
        | Error e ->
+         let recovery_detail =
+           match
+             Keeper_runtime_meta_transaction.recover
+               permit
+               ctx.config
+               runtime_meta_intent
+               ~prefer:`Rollback
+           with
+           | Ok _ -> ""
+           | Error failure ->
+             "; recovery failed: "
+             ^ Keeper_runtime_meta_transaction.recovery_failure_to_string
+                 failure
+         in
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string LifecycleDispatchRejections)
            ~labels:[("keeper", p.name); ("event", "create_runtime_assignment")]
@@ -443,8 +492,9 @@ let create_keeper_admitted_body
            p.name
            e;
          Progress.stop_tracking task_id;
-         tool_result_error e
+         tool_result_error (e ^ recovery_detail)
         | Ok () ->
+        invoke_after_runtime_assignment_hook ();
         Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
         let committed_meta = { meta with meta_version = 1 } in
       let same_committed_meta current =
@@ -453,112 +503,22 @@ let create_keeper_admitted_body
             (Yojson.Safe.to_string
                (Keeper_meta_json.meta_to_json committed_meta))
         in
-        let observe_candidate_meta () =
-          match Keeper_meta_store.read_meta ctx.config p.name with
-          | Error detail ->
-            Error ("metadata authority reread failed: " ^ detail)
-          | Ok None -> Ok `Missing
-          | Ok (Some current) when same_committed_meta current ->
-            Ok `Candidate
-          | Ok (Some _) ->
-            Error "metadata authority differs from the exact create candidate"
-        in
-        let ensure_candidate_meta () =
-          match observe_candidate_meta () with
-          | Ok `Candidate -> Ok ()
-          | Error _ as error -> error
-          | Ok `Missing ->
-            let write_error =
-              match
-                write_initial_meta permit nonce_witness ctx.config meta
-              with
-              | Ok () -> None
-              | Error detail -> Some detail
-            in
-            (match observe_candidate_meta () with
-             | Ok `Candidate -> Ok ()
-             | Ok `Missing ->
-               Error
-                 (Option.fold
-                    ~none:"candidate metadata remained missing after forward write"
-                    ~some:(fun detail ->
-                      "candidate metadata forward write failed: " ^ detail)
-                    write_error)
-             | Error detail ->
-               Error
-                 (Option.fold
-                    ~none:detail
-                    ~some:(fun write_detail ->
-                      write_detail ^ "; " ^ detail)
-                    write_error))
-        in
-        let remove_candidate_meta () =
-          match observe_candidate_meta () with
-          | Ok `Missing -> Ok ()
-          | Error _ as error -> error
-          | Ok `Candidate ->
-            let remove_error =
-              match
-                Keeper_meta_store.remove_meta_if_identity
-                  ctx.config
-                  ~name:meta.name
-                  ~trace_id:meta.runtime.trace_id
-                  ~generation:meta.runtime.nonce
-              with
-              | Ok () -> None
-              | Error error ->
-                Some
-                  (Keeper_meta_store.identity_remove_error_to_string error)
-            in
-            (match observe_candidate_meta () with
-             | Ok `Missing -> Ok ()
-             | Ok `Candidate ->
-               Error
-                 (Option.fold
-                    ~none:"candidate metadata remained after rollback"
-                    ~some:(fun detail ->
-                      "candidate metadata rollback failed: " ^ detail)
-                    remove_error)
-             | Error detail ->
-               Error
-                 (Option.fold
-                    ~none:detail
-                    ~some:(fun remove_detail ->
-                      remove_detail ^ "; " ^ detail)
-                    remove_error))
-        in
-        let rollback_create_state () =
-          match restore_runtime_assignment () with
-          | Error detail ->
-            Error ("runtime rollback failed: " ^ detail)
-          | Ok () -> remove_candidate_meta ()
-        in
-        let forward_create_state () =
-          match ensure_candidate_meta () with
-          | Error detail -> Error detail
-          | Ok () ->
-            (match converge_runtime_assignment candidate_runtime with
-             | Ok () -> Ok ()
-             | Error detail ->
-               Error ("candidate runtime forward recovery failed: " ^ detail))
-        in
         let settle_create_state () =
-          match rollback_create_state () with
-          | Ok () -> Ok `Rolled_back
-          | Error first_rollback ->
-            (match forward_create_state () with
-             | Ok () -> Ok `Forward
-             | Error forward ->
-               (match rollback_create_state () with
-                | Ok () -> Ok `Rolled_back
-                | Error second_rollback ->
-                  Error
-                    (Printf.sprintf
-                       "exact create recovery could not converge: rollback=%s; \
-                        forward=%s; final_rollback=%s"
-                       first_rollback
-                       forward
-                       second_rollback)))
+          match
+            Keeper_runtime_meta_transaction.recover
+              permit
+              ctx.config
+              runtime_meta_intent
+              ~prefer:`Rollback
+          with
+          | Ok Keeper_runtime_meta_transaction.Rolled_back ->
+            Ok `Rolled_back
+          | Ok Keeper_runtime_meta_transaction.Forward_committed ->
+            Ok `Forward
+          | Error failure ->
+            Error
+              (Keeper_runtime_meta_transaction.recovery_failure_to_string
+                 failure)
         in
         let write_result =
         match write_initial_meta permit nonce_witness ctx.config meta with
@@ -619,19 +579,33 @@ let create_keeper_admitted_body
         (match launch_outcome with
          | Keepalive_started _ ->
         commit_launch_gate launch_gate;
-        Progress.Tracker.complete tracker ~message:"Keeper created" ();
-        Log.Keeper.info "create_keeper: completed for name=%s trace_id=%s" p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
-        let json = `Assoc [
-          ("name", `String meta.name);
-          ("agent_name", `String meta.agent_name);
-          ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-          ("generation", `Int meta.runtime.nonce);
-          ("instructions", `String meta.instructions);
-          ("proactive_enabled", `Bool meta.proactive.enabled);
-          ("max_context_override", Json_util.int_opt_to_json meta.max_context_override);
-          ("oas_env", `Assoc (List.map (fun (k, v) -> (k, `String v)) meta.oas_env));
-        ] in
-        tool_result_ok_data json
+        (match
+           Keeper_runtime_meta_transaction.complete_forward
+             permit
+             ctx.config
+             runtime_meta_intent
+         with
+         | Error failure ->
+           Progress.stop_tracking task_id;
+           tool_result_error
+             ("keeper creation committed but runtime/meta authority cleanup \
+               failed: "
+              ^ Keeper_runtime_meta_transaction.recovery_failure_to_string
+                  failure)
+         | Ok () ->
+           Progress.Tracker.complete tracker ~message:"Keeper created" ();
+           Log.Keeper.info "create_keeper: completed for name=%s trace_id=%s" p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
+           let json = `Assoc [
+             ("name", `String meta.name);
+             ("agent_name", `String meta.agent_name);
+             ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
+             ("generation", `Int meta.runtime.nonce);
+             ("instructions", `String meta.instructions);
+             ("proactive_enabled", `Bool meta.proactive.enabled);
+             ("max_context_override", Json_util.int_opt_to_json meta.max_context_override);
+             ("oas_env", `Assoc (List.map (fun (k, v) -> (k, `String v)) meta.oas_env));
+           ] in
+           tool_result_ok_data json)
          | ( Keepalive_already_registered _
            | Keepalive_lifecycle_denied _
            | Keepalive_transaction_admission_denied _

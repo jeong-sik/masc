@@ -16,6 +16,8 @@
   keeper_lifecycle_admission_durable_types
   keeper_lifecycle_admission_journal
   keeper_lifecycle_admission_permit
+  keeper_runtime_meta_journal
+  keeper_runtime_meta_transaction
   keeper_lifecycle_nonce_storage
   keeper_lifecycle_nonce_types
   keeper_meta_runtime_sync_internal)

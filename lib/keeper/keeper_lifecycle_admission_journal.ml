@@ -273,7 +273,7 @@ let journal_entropy () =
   | _ -> Error Entropy_unavailable
 ;;
 
-let read_locked config keeper_name =
+let read_revival_locked config keeper_name =
   match journal_parent config, journal_entropy () with
   | Error failure, _ | _, Error failure ->
     Blocked (Authority_unreadable { keeper_name; failure })
@@ -330,4 +330,18 @@ let read_locked config keeper_name =
                   Blocked (Forward_cleanup_authority evidence)
                 | Cleared ->
                   Admitted (Some evidence)))))
+;;
+
+let read_locked config keeper_name =
+  match read_revival_locked config keeper_name with
+  | Blocked _ as blocked -> blocked
+  | Admitted revival_evidence ->
+    (match
+       Keeper_runtime_meta_journal.admission_decision
+         config
+         keeper_name
+     with
+     | Blocked _ as blocked -> blocked
+     | Admitted (Some evidence) -> Admitted (Some evidence)
+     | Admitted None -> Admitted revival_evidence)
 ;;

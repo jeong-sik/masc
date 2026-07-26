@@ -85,4 +85,9 @@ module For_testing : sig
   val with_durable_revalidation_failure : detail:string -> (unit -> 'a) -> 'a
   val with_runtime_rollback_failure : detail:string -> (unit -> 'a) -> 'a
   val with_candidate_write_failure : detail:string -> (unit -> 'a) -> 'a
+
+  val with_after_runtime_assignment :
+    after_runtime_assignment:(unit -> unit) ->
+    (unit -> 'a) ->
+    'a
 end

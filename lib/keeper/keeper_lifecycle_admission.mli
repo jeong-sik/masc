@@ -86,6 +86,7 @@ module Durable_transaction : sig
         }
       | Rollback_capable_authority of evidence
       | Forward_cleanup_authority of evidence
+      | Runtime_meta_authority of evidence
       | Revival_transaction_mismatch of
         { keeper_name : string
         ; observed : evidence option

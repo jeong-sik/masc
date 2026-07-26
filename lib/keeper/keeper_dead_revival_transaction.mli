@@ -75,6 +75,11 @@ type success =
 
 val error_to_string : error -> string
 
+exception Cancellation_recovery_failed of
+  { original : exn
+  ; recovery_errors : rollback_error list
+  }
+
 val revive :
   ?runtime_id:string ->
   'a Keeper_types_profile.context ->
@@ -98,6 +103,11 @@ type recovery_summary =
 val recover_pending : Workspace.config -> recovery_summary
 
 module For_testing : sig
+  val cancellation_with_runtime_recovery_failure :
+    detail:string ->
+    exn ->
+    exn
+
   val with_boundary_hooks :
     ?after_nonce_allocation:(unit -> unit) ->
     ?after_journal_write:(unit -> unit) ->

@@ -3185,6 +3185,141 @@ let test_create_keeper_fork_rejection_removes_candidate_state () =
         (Option.is_none (Keeper_registry.get ~base_path:base_dir keeper_name)))
 ;;
 
+let test_create_runtime_meta_crash_recovery_removes_dangling_runtime () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "create-runtime-meta-crash" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
+      Keeper_registry.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let ctx : _ Keeper_tool_surface.context =
+        { config
+        ; agent_name = "operator"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config)
+        }
+      in
+      let parsed =
+        { (ordinary_update_args keeper_name) with
+          instructions_opt = Some "create crash transaction fixture"
+        ; proactive_enabled_opt = Some true
+        ; runtime_id_opt = Some "runtime.create-crash"
+        }
+      in
+      let crashed =
+        try
+          ignore
+            (Keeper_turn_up_create.For_testing
+             .with_after_runtime_assignment
+               ~after_runtime_assignment:(fun () ->
+                 raise (Failure "injected create process crash"))
+               (fun () ->
+                  Keeper_turn_up_create.create_keeper ctx parsed));
+          false
+        with
+        | Failure "injected create process crash" -> true
+      in
+      Alcotest.(check bool)
+        "create crash hook escaped before metadata publication"
+        true
+        crashed;
+      let recovery =
+        Keeper_runtime_meta_transaction.recover_pending config
+      in
+      Alcotest.(check int)
+        "create crash recovery is resolved"
+        0
+        (List.length recovery.unresolved);
+      Alcotest.(check int)
+        "create crash recovery rolled back one transaction"
+        1
+        recovery.recovered;
+      Alcotest.(check (option string))
+        "create crash recovery removed runtime-only assignment"
+        None
+        (Runtime.runtime_id_for_keeper keeper_name);
+      match Keeper_meta_store.read_meta config keeper_name with
+      | Ok None -> ()
+      | Ok (Some _) ->
+        Alcotest.fail "create crash recovery retained candidate metadata"
+      | Error detail -> Alcotest.fail detail)
+;;
+
+let test_update_runtime_meta_crash_recovery_retries_durable_intent () =
+  let keeper_name = "update-runtime-meta-crash" in
+  with_running_ordinary_update_fixture ~keeper_name
+  @@ fun _base_dir config original ctx ->
+  let candidate_runtime = "runtime.update-crash" in
+  let parsed =
+    { (ordinary_update_args keeper_name) with
+      runtime_id_opt = Some candidate_runtime
+    ; proactive_enabled_opt = Some false
+    }
+  in
+  let crashed =
+    try
+      ignore
+        (Keeper_turn_up_update.For_testing
+         .with_after_runtime_assignment
+           ~after_runtime_assignment:(fun () ->
+             raise (Failure "injected update process crash"))
+           (fun () ->
+              Keeper_turn_up_update.update_keeper ctx parsed original));
+      false
+    with
+    | Failure "injected update process crash" -> true
+  in
+  Alcotest.(check bool)
+    "update crash hook escaped before metadata publication"
+    true
+    crashed;
+  let first_recovery =
+    Keeper_runtime_meta_transaction.For_testing
+    .with_metadata_convergence_failure
+      (fun _ -> Some "injected metadata convergence outage")
+      (fun () -> Keeper_runtime_meta_transaction.recover_pending config)
+  in
+  Alcotest.(check int)
+    "failed bidirectional convergence retains durable intent"
+    1
+    (List.length first_recovery.unresolved);
+  let retry =
+    Keeper_runtime_meta_transaction.recover_pending config
+  in
+  Alcotest.(check int)
+    "retry resolves retained runtime/meta intent"
+    0
+    (List.length retry.unresolved);
+  Alcotest.(check int)
+    "retry rolls the transaction back"
+    1
+    retry.recovered;
+  Alcotest.(check (option string))
+    "update crash recovery restores prior runtime"
+    None
+    (Runtime.runtime_id_for_keeper keeper_name);
+  match Keeper_meta_store.read_meta config keeper_name with
+  | Ok (Some persisted) ->
+    Alcotest.(check bool)
+      "update crash recovery restores prior metadata payload"
+      original.proactive.enabled
+      persisted.proactive.enabled
+  | Ok None -> Alcotest.fail "update crash recovery removed metadata"
+  | Error detail -> Alcotest.fail detail
+;;
+
 let test_update_keeper_supersession_failure_rolls_back_and_restarts () =
   let keeper_name = "update-supersession-failure-rollback" in
   with_running_ordinary_update_fixture ~keeper_name
@@ -3237,6 +3372,29 @@ let test_update_keeper_cancellation_rolls_back_and_restarts () =
     ~base_dir
     ~config
     ~keeper_name
+;;
+
+let test_dead_revival_cancellation_preserves_typed_recovery_failure () =
+  let cancelled =
+    Keeper_dead_revival_transaction.For_testing
+    .cancellation_with_runtime_recovery_failure
+      ~detail:"injected cancellation recovery failure"
+      (Eio.Cancel.Cancelled (Failure "original cancellation"))
+  in
+  match cancelled with
+  | Eio.Cancel.Cancelled
+      (Keeper_dead_revival_transaction.Cancellation_recovery_failed
+         { recovery_errors =
+             [ Keeper_dead_revival_transaction
+               .Rollback_runtime_assignment_failed detail
+             ]
+         ; _
+         })
+    when String.equal detail "injected cancellation recovery failure" ->
+    ()
+  | _ ->
+    Alcotest.fail
+      "revival cancellation discarded typed runtime recovery evidence"
 ;;
 
 type dead_revival_cancellation_boundary =
@@ -4867,6 +5025,14 @@ let () =
             `Quick
             test_create_keeper_fork_rejection_removes_candidate_state;
           Alcotest.test_case
+            "create crash recovery removes runtime-only assignment"
+            `Quick
+            test_create_runtime_meta_crash_recovery_removes_dangling_runtime;
+          Alcotest.test_case
+            "update crash recovery retries retained durable intent"
+            `Quick
+            test_update_runtime_meta_crash_recovery_retries_durable_intent;
+          Alcotest.test_case
             "keeper update supersession failure rolls back and restarts"
             `Quick
             test_update_keeper_supersession_failure_rolls_back_and_restarts;
@@ -4874,6 +5040,10 @@ let () =
             "keeper update cancellation rolls back and restarts"
             `Quick
             test_update_keeper_cancellation_rolls_back_and_restarts;
+          Alcotest.test_case
+            "revival cancellation preserves typed recovery failure"
+            `Quick
+            test_dead_revival_cancellation_preserves_typed_recovery_failure;
           Alcotest.test_case
             "nonce-boundary cancellation releases revival reservation"
             `Quick

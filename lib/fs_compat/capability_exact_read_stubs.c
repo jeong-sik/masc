@@ -6,6 +6,13 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 
+/* _POSIX_C_SOURCE alone hides the BSD extensions on Apple platforms, so
+   O_NOFOLLOW disappears from <fcntl.h> and the guard below fires. glibc
+   re-exposes them through _GNU_SOURCE, which is why Linux CI never saw this. */
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#define _DARWIN_C_SOURCE
+#endif
+
 #include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>

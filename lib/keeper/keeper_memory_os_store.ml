@@ -279,22 +279,24 @@ type pending_publication =
   ; settlement_warnings : settlement_warning list
   }
 
+type head_authority =
+  { payload_sha256 : Sha256.t
+  ; payload_bytes : int64
+  ; store_id : string
+  ; generation : int64
+  ; commit_ref : immutable_ref
+  ; receipt_id : Sha256.t
+  }
+
 type authority_token =
   | Empty_authority
-  | Head_authority of
-      { payload_sha256 : Sha256.t
-      ; payload_bytes : int64
-      ; store_id : string
-      ; generation : int64
-      ; commit_ref : immutable_ref
-      ; receipt_id : Sha256.t
-      }
+  | Head_authority of head_authority
 
 type publication_obligation =
   { owner_id : string
   ; store_id : string
   ; expected : authority_token
-  ; desired : authority_token
+  ; desired : head_authority
   ; operation_id : string
   ; state_sha256 : Sha256.t
   }
@@ -2821,14 +2823,13 @@ let authority_of_prepared (prepared : prepared_commit) =
   let payload_sha256, payload_bytes =
     head_payload_fingerprint prepared.head_row
   in
-  Head_authority
-    { payload_sha256
-    ; payload_bytes
-    ; store_id = prepared.store_id
-    ; generation = prepared.generation
-    ; commit_ref = prepared.commit_ref
-    ; receipt_id = prepared.receipt_id
-    }
+  { payload_sha256
+  ; payload_bytes
+  ; store_id = prepared.store_id
+  ; generation = prepared.generation
+  ; commit_ref = prepared.commit_ref
+  ; receipt_id = prepared.receipt_id
+  }
 ;;
 
 let same_immutable_ref (left : immutable_ref) (right : immutable_ref) =
@@ -2935,18 +2936,23 @@ let authority_token_of_json json =
   | _ -> Error ("unknown authority kind " ^ kind)
 ;;
 
+let publication_obligation_payload_fields
+      (value : publication_obligation)
+  =
+  [ "schema", `String publication_obligation_schema
+  ; "owner_id", `String value.owner_id
+  ; "store_id", `String value.store_id
+  ; "expected", authority_token_to_json value.expected
+  ; "desired", authority_token_to_json (Head_authority value.desired)
+  ; "operation_id", `String value.operation_id
+  ; "state_sha256", `String (Sha256.to_string value.state_sha256)
+  ]
+;;
+
 let publication_obligation_payload_to_json
       (value : publication_obligation)
   =
-  `Assoc
-    [ "schema", `String publication_obligation_schema
-    ; "owner_id", `String value.owner_id
-    ; "store_id", `String value.store_id
-    ; "expected", authority_token_to_json value.expected
-    ; "desired", authority_token_to_json value.desired
-    ; "operation_id", `String value.operation_id
-    ; "state_sha256", `String (Sha256.to_string value.state_sha256)
-    ]
+  `Assoc (publication_obligation_payload_fields value)
 ;;
 
 let publication_obligation_checksum value =
@@ -2956,17 +2962,14 @@ let publication_obligation_checksum value =
 ;;
 
 let publication_obligation_to_bytes value =
-  match publication_obligation_payload_to_json value with
-  | `Assoc fields ->
-    canonical_json
-      (`Assoc
-         (fields
-          @ [ ( "checksum_sha256"
-              , `String
-                  (Sha256.to_string
-                     (publication_obligation_checksum value)) )
-            ]))
-  | _ -> assert false
+  canonical_json
+    (`Assoc
+       (publication_obligation_payload_fields value
+        @ [ ( "checksum_sha256"
+            , `String
+                (Sha256.to_string
+                   (publication_obligation_checksum value)) )
+          ]))
 ;;
 
 let validate_publication_obligation
@@ -2979,16 +2982,15 @@ let validate_publication_obligation
   else if String.trim value.operation_id = ""
   then Error "operation_id must be non-empty"
   else
-    match value.desired, value.expected with
-    | Empty_authority, _ ->
-      Error "desired authority must name a HEAD commit"
-    | Head_authority desired, Empty_authority ->
+    let desired = value.desired in
+    match value.expected with
+    | Empty_authority ->
       if not (String.equal desired.store_id value.store_id)
       then Error "desired authority store identifier differs from scope"
       else if Int64.equal desired.generation 1L
       then Ok ()
       else Error "genesis desired generation must be one"
-    | Head_authority desired, Head_authority expected ->
+    | Head_authority expected ->
       if
         not (String.equal desired.store_id value.store_id)
         || not (String.equal expected.store_id value.store_id)
@@ -3028,7 +3030,13 @@ let decode_publication_obligation raw =
     let* expected_json = required_field "expected" fields in
     let* expected = authority_token_of_json expected_json in
     let* desired_json = required_field "desired" fields in
-    let* desired = authority_token_of_json desired_json in
+    let* desired_token = authority_token_of_json desired_json in
+    let* desired =
+      match desired_token with
+      | Empty_authority ->
+        Error "desired authority must name a HEAD commit"
+      | Head_authority desired -> Ok desired
+    in
     let* operation_id = string_field "operation_id" fields in
     let* state_sha256 = sha256_field "state_sha256" fields in
     let* checksum = sha256_field "checksum_sha256" fields in
@@ -3059,6 +3067,30 @@ let publication_obligation_of_bytes raw =
   | Ok value -> Ok value
   | Error detail ->
     Error (make_error (Invalid_publication_obligation detail))
+;;
+
+let publication_obligation_operation_id
+      (value : publication_obligation)
+  =
+  value.operation_id
+;;
+
+let publication_obligation_desired_receipt_id
+      (value : publication_obligation)
+  =
+  value.desired.receipt_id
+;;
+
+let publication_obligation_desired_state_sha256
+      (value : publication_obligation)
+  =
+  value.state_sha256
+;;
+
+let publication_obligation_desired_generation
+      (value : publication_obligation)
+  =
+  value.desired.generation
 ;;
 
 let publication_obligation_of_prepared
@@ -3094,44 +3126,38 @@ let validate_publication_obligation_scope
       (store : t)
       (obligation : publication_obligation)
   =
-  match obligation.desired with
-  | Empty_authority ->
+  let desired = obligation.desired in
+  let artifact = "obligation commit:" ^ desired.commit_ref.leaf in
+  let* ((commit : commit_record), warnings) =
+    read_object
+      store
+      desired.commit_ref
+      ~artifact
+      ~decode:commit_record_of_json
+      ~encode:commit_record_to_json
+  in
+  let* () =
+    ensure_identity
+      ~artifact
+      ~expected_store_id:desired.store_id
+      ~expected_owner_id:obligation.owner_id
+      ~expected_generation:desired.generation
+      ~store_id:commit.store_id
+      ~owner_id:commit.owner_id
+      ~generation:commit.generation
+    |> with_prior_warnings warnings
+  in
+  if
+    not (Sha256.equal commit.receipt_id desired.receipt_id)
+    || not (String.equal commit.operation_id obligation.operation_id)
+    || not (Sha256.equal commit.state_sha256 obligation.state_sha256)
+  then
     Error
       (make_error
+         ~settlement_warnings:warnings
          (Publication_obligation_mismatch
-            "desired authority does not contain a commit scope proof"))
-  | Head_authority desired ->
-    let artifact = "obligation commit:" ^ desired.commit_ref.leaf in
-    let* ((commit : commit_record), warnings) =
-      read_object
-        store
-        desired.commit_ref
-        ~artifact
-        ~decode:commit_record_of_json
-        ~encode:commit_record_to_json
-    in
-    let* () =
-      ensure_identity
-        ~artifact
-        ~expected_store_id:desired.store_id
-        ~expected_owner_id:obligation.owner_id
-        ~expected_generation:desired.generation
-        ~store_id:commit.store_id
-        ~owner_id:commit.owner_id
-        ~generation:commit.generation
-      |> with_prior_warnings warnings
-    in
-    if
-      not (Sha256.equal commit.receipt_id desired.receipt_id)
-      || not (String.equal commit.operation_id obligation.operation_id)
-      || not (Sha256.equal commit.state_sha256 obligation.state_sha256)
-    then
-      Error
-        (make_error
-           ~settlement_warnings:warnings
-           (Publication_obligation_mismatch
-              "desired commit scope proof diverges from receipt metadata"))
-    else Ok warnings
+            "desired commit scope proof diverges from receipt metadata"))
+  else Ok warnings
 ;;
 
 let validate_superseding_authority
@@ -3145,20 +3171,17 @@ let validate_superseding_authority
          ~settlement_warnings:current.settlement_warnings
          (Publication_obligation_mismatch detail))
   in
-  match obligation.expected, obligation.desired, current_authority with
-  | _, Empty_authority, _ ->
-    mismatch "desired authority is unexpectedly empty"
-  | Empty_authority, Head_authority _, Empty_authority ->
+  let desired = obligation.desired in
+  match obligation.expected, current_authority with
+  | Empty_authority, Empty_authority ->
     mismatch "empty authority should have matched the genesis expectation"
-  | Empty_authority, Head_authority desired, Head_authority observed ->
+  | Empty_authority, Head_authority observed ->
     if Sha256.equal observed.receipt_id desired.receipt_id
     then mismatch "desired receipt appears under different HEAD authority"
     else Ok ()
-  | Head_authority _, Head_authority _, Empty_authority ->
+  | Head_authority _, Empty_authority ->
     mismatch "current authority regressed below the non-empty expectation"
-  | ( Head_authority expected
-    , Head_authority desired
-    , Head_authority observed ) ->
+  | Head_authority expected, Head_authority observed ->
     if not (String.equal observed.store_id desired.store_id)
     then mismatch "current authority belongs to a different persisted store"
     else if Int64.compare observed.generation desired.generation < 0
@@ -3194,20 +3217,21 @@ let recover_publication
   else
     let* current = load store in
     let* current_authority = authority_of_snapshot current in
-    if same_authority current_authority obligation.desired
+    if
+      same_authority
+        current_authority
+        (Head_authority obligation.desired)
     then
-      (match receipt_of_snapshot current, obligation.desired with
-       | Some receipt, Head_authority desired
+      (match receipt_of_snapshot current with
+       | Some receipt
          when
+           let desired = obligation.desired in
            Int64.equal receipt.generation desired.generation
            && Sha256.equal receipt.receipt_id desired.receipt_id
            && String.equal receipt.operation_id obligation.operation_id
            && Sha256.equal receipt.state_sha256 obligation.state_sha256 ->
          Ok (Recovered_committed receipt)
-       | Some _, Head_authority _
-       | None, Head_authority _
-       | Some _, Empty_authority
-       | None, Empty_authority ->
+       | Some _ | None ->
          Error
            (make_error
               ~settlement_warnings:current.settlement_warnings

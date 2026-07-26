@@ -188,6 +188,26 @@ val publication_obligation_of_bytes :
   string ->
   (publication_obligation, error) result
 
+(** Provider-neutral identity projections over the exact canonical desired
+    publication already bound by the obligation checksum. These expose no
+    expected authority, store-private payload, or immutable object reference
+    and confer no Memory OS read or publication authority. *)
+val publication_obligation_operation_id :
+  publication_obligation ->
+  string
+
+val publication_obligation_desired_receipt_id :
+  publication_obligation ->
+  Sha256.t
+
+val publication_obligation_desired_state_sha256 :
+  publication_obligation ->
+  Sha256.t
+
+val publication_obligation_desired_generation :
+  publication_obligation ->
+  int64
+
 val publish :
   t ->
   prepared_commit ->

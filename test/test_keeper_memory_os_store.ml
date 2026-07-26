@@ -1889,6 +1889,57 @@ let test_obligation_codec_is_exact_and_tamper_evident ~fs () =
     (Store.publication_obligation_of_bytes (" " ^ bytes))
 ;;
 
+let test_obligation_projectors_bind_published_identity ~fs () =
+  with_root ~fs "masc_memory_os_obligation_projectors_"
+  @@ fun _root_path root ->
+  within_store ~root ~owner:"keeper-a" @@ fun store ->
+  let empty = require_ok (Store.load store) in
+  let prepared =
+    prepare_new
+      store
+      empty
+      "projected-obligation-operation"
+      (state "projected-obligation")
+  in
+  let prepared_obligation =
+    require_ok
+      (Store.publication_obligation_of_prepared store prepared)
+  in
+  let encoded =
+    Store.publication_obligation_to_bytes prepared_obligation
+  in
+  let decoded_obligation =
+    require_ok (Store.publication_obligation_of_bytes encoded)
+  in
+  check string
+    "decoded obligation retains exact canonical bytes"
+    encoded
+    (Store.publication_obligation_to_bytes decoded_obligation);
+  let receipt = publish_committed store prepared in
+  let check_projection label obligation =
+    check string
+      (label ^ " operation id")
+      (Store.commit_receipt_operation_id receipt)
+      (Store.publication_obligation_operation_id obligation);
+    check string
+      (label ^ " desired receipt id")
+      (sha256_string (Store.commit_receipt_id receipt))
+      (sha256_string
+         (Store.publication_obligation_desired_receipt_id obligation));
+    check string
+      (label ^ " desired state digest")
+      (sha256_string (Store.commit_receipt_state_sha256 receipt))
+      (sha256_string
+         (Store.publication_obligation_desired_state_sha256 obligation));
+    check int64
+      (label ^ " desired generation")
+      (Store.commit_receipt_generation receipt)
+      (Store.publication_obligation_desired_generation obligation)
+  in
+  check_projection "prepared" prepared_obligation;
+  check_projection "decoded" decoded_obligation
+;;
+
 let test_foreign_owner_obligation_fails_closed ~fs () =
   with_root ~fs "masc_memory_os_obligation_owner_source_"
   @@ fun _source_path source ->
@@ -2031,6 +2082,8 @@ let () =
             (test_same_receipt_different_authority_fails_closed ~fs)
         ; test_case "obligation codec is exact and tamper evident" `Quick
             (test_obligation_codec_is_exact_and_tamper_evident ~fs)
+        ; test_case "obligation projectors bind published identity" `Quick
+            (test_obligation_projectors_bind_published_identity ~fs)
         ; test_case "foreign owner obligation fails closed" `Quick
             (test_foreign_owner_obligation_fails_closed ~fs)
         ; test_case "recovery validates desired reachable graph" `Quick

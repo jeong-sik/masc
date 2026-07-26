@@ -217,7 +217,7 @@ let seed_commit ?(seed = 0) ~root claim =
   publish_committed store prepared
 ;;
 
-let load_result ?(seed = 101) ~root =
+let load_result ?(seed = 101) ~root () =
   Store.with_store
     ~secure_random:(entropy_source seed)
     ~root
@@ -419,7 +419,7 @@ let test_same_length_digest_precedes_decode ~fs () =
   expect_error_contains
     "digest mismatch precedes invalid JSON decode"
     "does not match its sha-256 digest"
-    (load_result ~root)
+    (load_result ~root ())
 ;;
 
 let test_head_identity_and_ref_tamper_fail_closed ~fs () =
@@ -468,7 +468,7 @@ let test_head_identity_and_ref_tamper_fail_closed ~fs () =
       expect_error_contains
         (label ^ " tamper fails closed")
         expected_error
-        (load_result ~seed:(100 + index) ~root))
+        (load_result ~seed:(100 + index) ~root ()))
     cases
 ;;
 

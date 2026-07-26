@@ -157,6 +157,13 @@ let test_pipeline_marks_execution_not_configured () =
      = Some (`String "not_configured"))
 
 let test_pipeline_executes_strategy_when_executor_supplied () =
+  let failure = "Connection timeout while fetching" in
+  let expected_message =
+    Printf.sprintf
+      "permanent error: %s \226\128\148 handoff requested: %s"
+      failure
+      failure
+  in
   let requested = ref None in
   let executor =
     make_executor
@@ -168,16 +175,16 @@ let test_pipeline_executes_strategy_when_executor_supplied () =
   let outcome =
     KB.apply_post_turn_resilience witness ~strategy_executor:executor
       ~now:2.75 ~working_context:None
-      ~maybe_error:(Some "Connection timeout while fetching") ()
+      ~maybe_error:(Some failure) ()
   in
   (match outcome.strategy_execution with
    | Some
        (KB.Strategy_execution_completed
           (R.HandoffRequested { message; preserve_state })) ->
-       assert (message = "Connection timeout while fetching");
+       assert (message = expected_message);
        assert preserve_state
    | _ -> assert false);
-  assert (!requested = Some ("Connection timeout while fetching", true));
+  assert (!requested = Some (expected_message, true));
   assert
     (strategy_execution_status outcome.resilience_meta
      = Some (`String "completed"))

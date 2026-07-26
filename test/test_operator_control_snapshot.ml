@@ -2476,6 +2476,257 @@ let test_dead_revival_existing_reserved_journal_blocks () =
               ~keeper_name)))
 ;;
 
+module Durable_admission =
+  Keeper_lifecycle_admission.Durable_transaction
+
+let replace_revival_journal_stage raw stage =
+  match Yojson.Safe.from_string raw with
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (key, value) ->
+            if String.equal key "stage"
+            then key, stage
+            else key, value)
+         fields)
+    |> Yojson.Safe.to_string
+  | _ -> Alcotest.fail "revival journal fixture is not an object"
+;;
+
+let replace_durable_admission_row ~config ~keeper_name row =
+  match
+    Durable_admission.For_testing.replace_current_row
+      ~config
+      ~keeper_name
+      ~row
+  with
+  | Ok () -> ()
+  | Error detail -> Alcotest.fail detail
+;;
+
+let expect_durable_start_admitted ~config ~keeper_name label =
+  match
+    Durable_admission.with_durable_start_admission
+      config
+      ~keeper_name
+      (fun _permit -> ())
+  with
+  | Durable_admission.Admission_completed ()
+  | Durable_admission.Admission_completed_with_attention ((), _) -> ()
+  | Durable_admission.Admission_blocked reason ->
+    Alcotest.failf
+      "%s unexpectedly blocked: %s"
+      label
+      (Durable_admission.blocked_reason_to_wire reason)
+;;
+
+let expect_durable_start_blocked ~config ~keeper_name label =
+  match
+    Durable_admission.with_durable_start_admission
+      config
+      ~keeper_name
+      (fun _permit -> ())
+  with
+  | Durable_admission.Admission_blocked _ -> ()
+  | Durable_admission.Admission_completed ()
+  | Durable_admission.Admission_completed_with_attention ((), _) ->
+    Alcotest.failf "%s unexpectedly admitted" label
+;;
+
+let test_keeper_lifecycle_transaction_admission_current_schema () =
+  let keeper_name = "dead-revival-start-admission" in
+  with_settled_dead_revival_fixture ~keeper_name
+  @@ fun _base_dir config original _dead_entry _ctx ->
+  expect_durable_start_admitted
+    ~config
+    ~keeper_name
+    "absent authority";
+  let candidate =
+    { original with
+      paused = false
+    ; latched_reason = None
+    ; runtime =
+        { original.runtime with
+          nonce = original.runtime.nonce + 1
+        }
+    }
+  in
+  let reserved =
+    match
+      Keeper_dead_revival_transaction.For_testing.reserve_journal
+        ~config
+        ~owner_id:"durable-start-admission-owner"
+        ~original
+        ~candidate
+    with
+    | Ok row -> row
+    | Error error ->
+      Alcotest.fail
+        (Keeper_dead_revival_transaction.error_to_string error)
+  in
+  let blocked_stages =
+    [ "Reserved", `Assoc [ "reserved", `Bool true ]
+    ; "Durable_committed", `Assoc [ "durable_committed", `Bool true ]
+    ; "Rollback_reserved", `Assoc [ "rollback_reserved", `Bool true ]
+    ; ( "Rollback_durable_committed"
+      , `Assoc [ "rollback_durable_committed", `Bool true ] )
+    ; ( "Rollback_cleanup_pending_from_reserved"
+      , `Assoc
+          [ ( "rollback_cleanup_pending"
+            , `Assoc [ "from_reserved", `Bool true ] )
+          ] )
+    ; ( "Rollback_cleanup_pending_from_durable_committed"
+      , `Assoc
+          [ ( "rollback_cleanup_pending"
+            , `Assoc [ "from_durable_committed", `Bool true ] )
+          ] )
+    ]
+  in
+  List.iter
+    (fun (label, stage) ->
+       replace_durable_admission_row
+         ~config
+         ~keeper_name
+         (replace_revival_journal_stage reserved stage);
+       expect_durable_start_blocked ~config ~keeper_name label)
+    blocked_stages;
+  let admitted_stages =
+    [ "Launch_committed", `Assoc [ "launch_committed", `Bool true ]
+    ; ( "Forward_cleanup_pending"
+      , `Assoc [ "forward_cleanup_pending", `Bool true ] )
+    ]
+  in
+  List.iter
+    (fun (label, stage) ->
+       replace_durable_admission_row
+         ~config
+         ~keeper_name
+         (replace_revival_journal_stage reserved stage);
+       expect_durable_start_admitted ~config ~keeper_name label)
+    admitted_stages;
+  let reserved_json = Yojson.Safe.from_string reserved in
+  let transaction_id =
+    Yojson.Safe.Util.(reserved_json |> member "transaction_id" |> to_string)
+  in
+  let cleared =
+    `Assoc
+      [ "schema", `String "masc.keeper-dead-revival-journal.v3"
+      ; "transaction_id", `String transaction_id
+      ; "keeper_name", `String keeper_name
+      ; "stage", `Assoc [ "cleared", `Bool true ]
+      ]
+    |> Yojson.Safe.to_string
+  in
+  replace_durable_admission_row ~config ~keeper_name cleared;
+  expect_durable_start_admitted ~config ~keeper_name "Cleared";
+  replace_durable_admission_row
+    ~config
+    ~keeper_name
+    {|{"schema":"invalid-current-row"}|};
+  (match
+     Durable_admission.with_durable_start_admission
+       config
+       ~keeper_name
+       (fun _permit -> ())
+   with
+   | Durable_admission.Admission_blocked
+       (Durable_admission.Authority_invalid
+          { failure = Durable_admission.Invalid_current_schema; _ }) ->
+     ()
+   | Durable_admission.Admission_blocked reason ->
+     Alcotest.failf
+       "invalid current row returned wrong block: %s"
+       (Durable_admission.blocked_reason_to_wire reason)
+   | Durable_admission.Admission_completed ()
+   | Durable_admission.Admission_completed_with_attention ((), _) ->
+     Alcotest.fail "invalid current row was admitted")
+;;
+
+let test_keeper_lifecycle_transaction_admission_waits_for_cleanup () =
+  let keeper_name = "dead-revival-start-admission-cleanup-race" in
+  with_settled_dead_revival_fixture ~keeper_name
+  @@ fun _base_dir config original _dead_entry ctx ->
+  let candidate =
+    { original with
+      paused = false
+    ; latched_reason = None
+    ; runtime =
+        { original.runtime with
+          nonce = original.runtime.nonce + 1
+        }
+    }
+  in
+  (match
+     Keeper_dead_revival_transaction.For_testing.reserve_journal
+       ~config
+       ~owner_id:"durable-start-admission-cleanup-owner"
+       ~original
+       ~candidate
+   with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.fail
+       (Keeper_dead_revival_transaction.error_to_string error));
+  (match Keeper_meta_store.write_meta config candidate with
+   | Ok () -> ()
+   | Error detail -> Alcotest.fail detail);
+  (match
+     Keeper_dead_revival_transaction.For_testing.advance_to_launch_committed
+       ~config
+       ~keeper_name
+   with
+   | Ok () -> ()
+   | Error error ->
+     Alcotest.fail
+       (Keeper_dead_revival_transaction.error_to_string error));
+  let cleanup_paused_p, cleanup_paused_u = Eio.Promise.create () in
+  let release_cleanup_p, release_cleanup_u = Eio.Promise.create () in
+  let recovery_done_p, recovery_done_u = Eio.Promise.create () in
+  let admission_started_p, admission_started_u = Eio.Promise.create () in
+  let admission_done_p, admission_done_u = Eio.Promise.create () in
+  Keeper_dead_revival_transaction.For_testing.with_cleanup_boundary_hooks
+    ~after_cleanup_pending:(fun direction ->
+      match direction with
+      | `Forward ->
+        Eio.Promise.resolve cleanup_paused_u ();
+        Eio.Promise.await release_cleanup_p;
+        None
+      | `Rollback -> None)
+    (fun () ->
+       Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+         Eio.Promise.resolve
+           recovery_done_u
+           (Keeper_dead_revival_transaction.recover_pending config)));
+  Eio.Promise.await cleanup_paused_p;
+  Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+    Eio.Promise.resolve admission_started_u ();
+    Eio.Promise.resolve
+      admission_done_u
+      (Durable_admission.with_durable_start_admission
+         config
+         ~keeper_name
+         (fun _permit -> ())));
+  Eio.Promise.await admission_started_p;
+  Eio.Fiber.yield ();
+  Alcotest.(check bool)
+    "admission waits while cleanup owns durable authority"
+    true
+    (Option.is_none (Eio.Promise.peek admission_done_p));
+  Eio.Promise.resolve release_cleanup_u ();
+  let recovery = Eio.Promise.await recovery_done_p in
+  Alcotest.(check int)
+    "cleanup race has no unresolved transaction"
+    0
+    (List.length recovery.unresolved);
+  (match Eio.Promise.await admission_done_p with
+   | Durable_admission.Admission_completed ()
+   | Durable_admission.Admission_completed_with_attention ((), _) -> ()
+   | Durable_admission.Admission_blocked reason ->
+     Alcotest.failf
+       "admission remained blocked after cleanup: %s"
+       (Durable_admission.blocked_reason_to_wire reason))
+;;
+
 let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -3450,6 +3701,14 @@ let () =
             "pre-existing current-schema journal blocks revival"
             `Quick
             test_dead_revival_existing_reserved_journal_blocks;
+          Alcotest.test_case
+            "current-schema lifecycle authority fences Keeper lane starts"
+            `Quick
+            test_keeper_lifecycle_transaction_admission_current_schema;
+          Alcotest.test_case
+            "Keeper lane admission waits for concurrent lifecycle cleanup"
+            `Quick
+            test_keeper_lifecycle_transaction_admission_waits_for_cleanup;
           Alcotest.test_case
             "operator resume clears persisted dead-tombstone state"
             `Quick

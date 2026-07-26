@@ -703,6 +703,8 @@ type start_keepalive_outcome =
   | Keepalive_started of Keeper_registry.registry_entry
   | Keepalive_already_registered of Keeper_registry.registry_entry
   | Keepalive_lifecycle_denied of Keeper_lifecycle_admission.autonomous_denial
+  | Keepalive_transaction_admission_denied of
+      Keeper_lifecycle_admission.Durable_transaction.blocked_reason
   | Keepalive_identity_unrepairable
   | Keepalive_registration_rejected of Keeper_registry.registration_error
   | Keepalive_fiber_start_rejected of Keeper_state_machine.transition_error
@@ -719,6 +721,9 @@ let start_keepalive_outcome_to_string = function
       (Keeper_lane.Id.to_string (Keeper_lane.id entry.lane))
   | Keepalive_lifecycle_denied denial ->
     Keeper_lifecycle_admission.autonomous_denial_to_wire denial
+  | Keepalive_transaction_admission_denied reason ->
+    Keeper_lifecycle_admission.Durable_transaction.blocked_reason_to_wire
+      reason
   | Keepalive_identity_unrepairable -> "keeper identity drift could not be repaired"
   | Keepalive_registration_rejected
       (Keeper_registry.Registration_shutdown_reserved operation_id) ->
@@ -785,7 +790,7 @@ let record_lifecycle_start_denial
        reason)
 ;;
 
-let start_keepalive
+let start_keepalive_admitted
       ?(proactive_warmup_sec = 0)
       ?lifecycle_token
       (ctx : _ context)
@@ -1186,6 +1191,78 @@ type joined_stop =
 type joined_stop_result =
   | Keeper_not_registered
   | Keeper_joined of joined_stop
+
+let start_keepalive
+      ?(proactive_warmup_sec = 0)
+      ?lifecycle_token
+      (ctx : _ context)
+      (meta : keeper_meta)
+  =
+  let start () =
+    start_keepalive_admitted
+      ~proactive_warmup_sec
+      ?lifecycle_token
+      ctx
+      meta
+  in
+  let denied reason =
+    Log.Keeper.error
+      "start_keepalive denied by durable lifecycle authority keeper=%s reason=%s"
+      meta.name
+      (Keeper_lifecycle_admission.Durable_transaction
+       .blocked_reason_to_wire
+         reason);
+    Keepalive_transaction_admission_denied reason
+  in
+  match lifecycle_token with
+  | Some token ->
+    (match
+       Keeper_lifecycle_admission.Durable_transaction
+       .admit_revival_launch_under_lock
+         ctx.config
+         ~keeper_name:meta.name
+         ~owner_id:(Keeper_lifecycle_reservation.owner_id token)
+     with
+     | Ok permit
+       when
+         Keeper_lifecycle_admission.Durable_transaction.permit_matches
+           permit
+           meta.name ->
+       start ()
+     | Ok _ ->
+       denied
+         (Keeper_lifecycle_admission.Durable_transaction.Authority_invalid
+            { keeper_name = meta.name
+            ; failure =
+                Keeper_lifecycle_admission.Durable_transaction
+                .Invalid_current_schema
+            })
+     | Error reason -> denied reason)
+  | None ->
+    (match
+       Keeper_lifecycle_admission.Durable_transaction
+       .with_durable_start_admission
+         ctx.config
+         ~keeper_name:meta.name
+         (fun _permit -> start ())
+     with
+     | Keeper_lifecycle_admission.Durable_transaction.Admission_completed
+         outcome ->
+       outcome
+     | Keeper_lifecycle_admission.Durable_transaction
+       .Admission_completed_with_attention (outcome, failure) ->
+       Log.Keeper.error
+         "start_keepalive durable admission lock release requires attention \
+          keeper=%s failure=%s"
+         meta.name
+         (Keeper_lifecycle_admission.Durable_transaction
+          .authority_failure_to_wire
+            failure);
+       outcome
+     | Keeper_lifecycle_admission.Durable_transaction.Admission_blocked
+         reason ->
+       denied reason)
+;;
 
 let request_entry_stop (entry : Keeper_registry.registry_entry) =
        (* tla-lint: allow-mutation: fiber signal — stop+wakeup pair triggers cooperative shutdown *)

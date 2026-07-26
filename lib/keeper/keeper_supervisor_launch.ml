@@ -597,7 +597,7 @@ let launch_supervised_fiber_body
     fiber is forked. Returns [Error _] when the launch was refused; in that
     case nothing was forked, no [Started]/[Running] event may be published
     by the caller, and [done_p] has been resolved through the crash path. *)
-let launch_supervised_fiber
+let launch_supervised_fiber_admitted
       ~proactive_warmup_sec
       ctx
       (meta : keeper_meta)
@@ -653,6 +653,45 @@ let launch_supervised_fiber
        [Error] here so the caller suppresses the Started/Running lifecycle
        for a keeper whose lane was never forked. *)
     launch_supervised_fiber_body ~proactive_warmup_sec ctx meta reg
+;;
+
+type supervised_launch_error =
+  | Supervised_transition_rejected of Keeper_state_machine.transition_error
+  | Supervised_transaction_admission_denied of
+      Keeper_lifecycle_admission.Durable_transaction.blocked_reason
+
+let launch_supervised_fiber ~proactive_warmup_sec ctx meta reg =
+  match
+    Keeper_lifecycle_admission.Durable_transaction
+    .with_durable_start_admission
+      ctx.config
+      ~keeper_name:meta.name
+      (fun _permit ->
+         launch_supervised_fiber_admitted
+           ~proactive_warmup_sec
+           ctx
+           meta
+           reg)
+  with
+  | Keeper_lifecycle_admission.Durable_transaction.Admission_completed
+      (Ok ())
+  | Keeper_lifecycle_admission.Durable_transaction
+    .Admission_completed_with_attention (Ok (), _) ->
+    Ok ()
+  | Keeper_lifecycle_admission.Durable_transaction.Admission_completed
+      (Error error)
+  | Keeper_lifecycle_admission.Durable_transaction
+    .Admission_completed_with_attention (Error error, _) ->
+    Error (Supervised_transition_rejected error)
+  | Keeper_lifecycle_admission.Durable_transaction.Admission_blocked
+      reason ->
+    Log.Keeper.error
+      "supervisor lane start denied by durable lifecycle authority keeper=%s \
+       reason=%s"
+      meta.name
+      (Keeper_lifecycle_admission.Durable_transaction.blocked_reason_to_wire
+         reason);
+    Error (Supervised_transaction_admission_denied reason)
 ;;
 
 (* #10993: persona drift visibility.

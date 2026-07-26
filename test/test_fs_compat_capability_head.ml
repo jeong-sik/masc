@@ -153,6 +153,46 @@ let check_publication_evidence label row (evidence : Head.publication_evidence) 
     (String.length evidence.Head.intended_sha256)
 ;;
 
+let raise_with_captured_backtrace captured exn =
+  try raise exn with
+  | raised ->
+    let raw_backtrace = Printexc.get_raw_backtrace () in
+    captured := Some raw_backtrace;
+    Printexc.raise_with_backtrace raised raw_backtrace
+;;
+
+let fatal_kind = function
+  | Out_of_memory -> "Out_of_memory"
+  | Stack_overflow -> "Stack_overflow"
+  | Sys.Break -> "Sys.Break"
+  | exn -> Printexc.to_string exn
+;;
+
+let require_original_fatal_backtrace ~label ~expected ~captured run =
+  Printexc.record_backtrace true;
+  let outcome =
+    try
+      ignore (run ());
+      `Returned
+    with
+    | exn -> `Raised (exn, Printexc.get_raw_backtrace ())
+  in
+  match outcome, !captured with
+  | `Raised (observed, observed_backtrace), Some original_backtrace ->
+    check string
+      (label ^ " preserves fatal kind")
+      (fatal_kind expected)
+      (fatal_kind observed);
+    check string
+      (label ^ " preserves original raw backtrace")
+      (Printexc.raw_backtrace_to_string original_backtrace)
+      (Printexc.raw_backtrace_to_string observed_backtrace)
+  | `Raised (_, _), None ->
+    failf "%s: fatal source did not capture its raw backtrace" label
+  | `Returned, _ ->
+    failf "%s: fatal exception was flattened into a typed result" label
+;;
+
 let cross_process_holder_arg = "--capability-head-cross-process-holder"
 let cross_process_timeout_seconds = 10.0
 
@@ -772,6 +812,111 @@ let test_resource_settlement_warning_preserves_success ~fs ~secure_random () =
   |> check_row "settlement warning does not hide publication" (Some "settled-row")
 ;;
 
+let test_pre_publication_fatal_preserves_backtrace_and_disk
+      ~fs
+      ~secure_random
+      ()
+  =
+  with_tmp_dir "masc_capability_head_pre_fatal_" @@ fun directory ->
+  let leaf = "HEAD" in
+  with_parent ~fs directory @@ fun parent ->
+  let absent = read ~secure_random ~parent ~leaf "pre-publication fatal fixture" in
+  let captured = ref None in
+  let hooks =
+    Head.For_testing.hooks
+      ~before_rename:(fun () ->
+        raise_with_captured_backtrace captured Sys.Break)
+      ()
+  in
+  require_original_fatal_backtrace
+    ~label:"pre-publication Sys.Break"
+    ~expected:Sys.Break
+    ~captured
+    (fun () ->
+      publish_for_testing
+        hooks
+        ~secure_random
+        ~parent
+        ~leaf
+        ~expected:absent
+        ~row:"must-not-publish");
+  read ~secure_random ~parent ~leaf "pre-publication fatal final read"
+  |> check_row "pre-publication fatal leaves HEAD absent" None;
+  check bool
+    "pre-publication fatal cleans its private stage"
+    false
+    (directory_entries directory
+     |> List.exists (String.starts_with ~prefix:".masc-capability-head-stage-"))
+;;
+
+let test_post_rename_fatal_preserves_backtrace_and_disk
+      ~fs
+      ~secure_random
+      ()
+  =
+  with_tmp_dir "masc_capability_head_post_fatal_" @@ fun directory ->
+  let leaf = "HEAD" in
+  with_parent ~fs directory @@ fun parent ->
+  let absent = read ~secure_random ~parent ~leaf "post-rename fatal fixture" in
+  let captured = ref None in
+  let hooks =
+    Head.For_testing.hooks
+      ~after_rename:(fun () ->
+        raise_with_captured_backtrace captured Out_of_memory)
+      ()
+  in
+  require_original_fatal_backtrace
+    ~label:"post-rename Out_of_memory"
+    ~expected:Out_of_memory
+    ~captured
+    (fun () ->
+      publish_for_testing
+        hooks
+        ~secure_random
+        ~parent
+        ~leaf
+        ~expected:absent
+        ~row:"renamed-before-fatal");
+  read ~secure_random ~parent ~leaf "post-rename fatal final read"
+  |> check_row
+       "post-rename fatal does not erase the visible HEAD effect"
+       (Some "renamed-before-fatal")
+;;
+
+let test_settlement_fatal_preserves_backtrace_and_disk
+      ~fs
+      ~secure_random
+      ()
+  =
+  with_tmp_dir "masc_capability_head_settlement_fatal_" @@ fun directory ->
+  let leaf = "HEAD" in
+  with_parent ~fs directory @@ fun parent ->
+  let absent = read ~secure_random ~parent ~leaf "settlement fatal fixture" in
+  let captured = ref None in
+  let hooks =
+    Head.For_testing.hooks
+      ~on_resource_settlement:(fun () ->
+        raise_with_captured_backtrace captured Stack_overflow)
+      ()
+  in
+  require_original_fatal_backtrace
+    ~label:"settlement Stack_overflow"
+    ~expected:Stack_overflow
+    ~captured
+    (fun () ->
+      publish_for_testing
+        hooks
+        ~secure_random
+        ~parent
+        ~leaf
+        ~expected:absent
+        ~row:"durable-before-settlement-fatal");
+  read ~secure_random ~parent ~leaf "settlement fatal final read"
+  |> check_row
+       "settlement fatal does not erase the durable HEAD effect"
+       (Some "durable-before-settlement-fatal")
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
@@ -829,6 +974,18 @@ let () =
             (test_after_verified_failure_reports_published ~fs ~secure_random)
         ; test_case "settlement warning preserves success" `Quick
             (test_resource_settlement_warning_preserves_success
+               ~fs
+               ~secure_random)
+        ; test_case "pre-publication fatal preserves backtrace and disk" `Quick
+            (test_pre_publication_fatal_preserves_backtrace_and_disk
+               ~fs
+               ~secure_random)
+        ; test_case "post-rename fatal preserves backtrace and disk" `Quick
+            (test_post_rename_fatal_preserves_backtrace_and_disk
+               ~fs
+               ~secure_random)
+        ; test_case "settlement fatal preserves backtrace and disk" `Quick
+            (test_settlement_fatal_preserves_backtrace_and_disk
                ~fs
                ~secure_random)
         ] )

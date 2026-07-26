@@ -38,6 +38,24 @@ type publication_obligation
 type settlement_warning
 type error
 
+type current_head_projection =
+  { receipt_id : Sha256.t
+  ; operation_id : string
+  ; state_digest : Sha256.t
+  ; generation : int64
+  }
+
+type current_head =
+  | Empty
+  | Present of current_head_projection
+
+type existing_store =
+  | Absent
+  | Existing of
+      { current_head : current_head
+      ; settlement_warnings : settlement_warning list
+      }
+
 type persisted_artifact =
   [ `Facts
   | `Episode
@@ -116,6 +134,19 @@ val with_store :
   owner_id:string ->
   (t -> ('a, error) result) ->
   ('a, error) result
+
+(** Read the current store authority without creating the private root, store
+    identity, stable HEAD lock, HEAD, or any immutable object.
+
+    A missing root or a genuinely empty root without an identity is [Absent].
+    Data without the exact current identity is rejected rather than adopted or
+    migrated. [Present] is returned only after the exact canonical HEAD framing,
+    every reachable immutable object and digest, the reconstructed state digest,
+    and a final unchanged HEAD observation have been verified. *)
+val read_existing_current_head :
+  root:Eio.Fs.dir_ty Eio.Path.t ->
+  owner_id:string ->
+  (existing_store, error) result
 
 val load : t -> (snapshot, error) result
 
@@ -236,6 +267,8 @@ module For_testing : sig
     | Store_identity_create_failed_error
     | Store_identity_read_failed_error
     | Invalid_store_identity_error
+    | Current_head_read_failed_error
+    | Current_head_changed_during_read_error
     | Invalid_publication_obligation_error
     | Publication_obligation_owner_mismatch_error
     | Publication_obligation_store_mismatch_error
@@ -247,6 +280,7 @@ module For_testing : sig
     | Head_indeterminate_warning_tag
     | Immutable_settlement_warning_tag
     | Store_identity_settlement_warning_tag
+    | Current_head_settlement_warning_tag
 
   val error_tag : error -> error_tag
   val warning_tag : settlement_warning -> warning_tag

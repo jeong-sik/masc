@@ -99,6 +99,7 @@ type settlement_warning =
   | Head_indeterminate_warning of Head.error
   | Immutable_settlement_warning of immutable_ref * Exact_read.settlement_warning
   | Store_identity_settlement_warning of Exact_read.settlement_warning
+  | Current_head_settlement_warning of Exact_read.settlement_warning
 
 type error_kind =
   | Invalid_layout of string
@@ -141,6 +142,8 @@ type error_kind =
   | Store_identity_create_failed of Fs_compat.capability_write_error
   | Store_identity_read_failed of Exact_read.error
   | Invalid_store_identity of string
+  | Current_head_read_failed of Exact_read.error
+  | Current_head_changed_during_read
   | Invalid_publication_obligation of string
   | Publication_obligation_owner_mismatch of
       { obligation_owner_id : string
@@ -315,6 +318,24 @@ type recovery_outcome =
   | Recovered_committed of commit_receipt
   | Recovered_not_published of snapshot
   | Recovered_superseded of snapshot
+
+type current_head_projection =
+  { receipt_id : Sha256.t
+  ; operation_id : string
+  ; state_digest : Sha256.t
+  ; generation : int64
+  }
+
+type current_head =
+  | Empty
+  | Present of current_head_projection
+
+type existing_store =
+  | Absent
+  | Existing of
+      { current_head : current_head
+      ; settlement_warnings : settlement_warning list
+      }
 
 module Canonical_bytes = struct
   type sink =
@@ -924,6 +945,13 @@ let settlement_warning_to_string = function
       (Exact_read.Settle_resources diagnostic) ->
     "store identity parent resource settlement warning: "
     ^ exact_read_diagnostic_to_string diagnostic
+  | Current_head_settlement_warning (Exact_read.Close_failed diagnostic) ->
+    "current HEAD close failed: "
+    ^ exact_read_diagnostic_to_string diagnostic
+  | Current_head_settlement_warning
+      (Exact_read.Settle_resources diagnostic) ->
+    "current HEAD parent resource settlement warning: "
+    ^ exact_read_diagnostic_to_string diagnostic
 ;;
 
 let error_settlement_warnings (value : error) = value.settlement_warnings
@@ -1039,6 +1067,11 @@ let error_to_string (value : error) =
     ^ exact_read_error_to_string failure
   | Invalid_store_identity detail ->
     "invalid Memory OS store identity: " ^ detail
+  | Current_head_read_failed failure ->
+    "failed to read existing Memory OS HEAD: "
+    ^ exact_read_error_to_string failure
+  | Current_head_changed_during_read ->
+    "existing Memory OS HEAD changed during verified read"
   | Invalid_publication_obligation detail ->
     "invalid Memory OS publication obligation: " ^ detail
   | Publication_obligation_owner_mismatch
@@ -1572,10 +1605,23 @@ let warnings_of_exact (reference : immutable_ref) values =
     values
 ;;
 
-let read_object_raw (store : t) (reference : immutable_ref) =
+type read_context =
+  { root : Eio.Fs.dir_ty Eio.Path.t
+  ; owner_id : string
+  ; store_id : string
+  }
+
+let read_context_of_store (store : t) =
+  { root = store.root
+  ; owner_id = store.owner_id
+  ; store_id = store.store_id
+  }
+;;
+
+let read_object_raw_in (context : read_context) (reference : immutable_ref) =
   match
     Exact_read.read
-      ~parent:store.root
+      ~parent:context.root
       ~leaf:reference.leaf
       ~expected_length:reference.byte_count
       ~max_length:immutable_serialization_safety_ceiling_bytes
@@ -1603,17 +1649,30 @@ let read_object_raw (store : t) (reference : immutable_ref) =
     else Ok (raw, warnings)
 ;;
 
-let read_object
-      (store : t)
+let read_object_raw store reference =
+  read_object_raw_in (read_context_of_store store) reference
+;;
+
+let read_object_in
+      (context : read_context)
       (reference : immutable_ref)
       ~artifact
       ~decode
       ~encode
   =
-  let* raw, warnings = read_object_raw store reference in
+  let* raw, warnings = read_object_raw_in context reference in
   match decode_canonical ~artifact ~decode ~encode raw with
   | Ok value -> Ok (value, warnings)
   | Error error -> Error (prepend_warnings warnings error)
+;;
+
+let read_object store reference ~artifact ~decode ~encode =
+  read_object_in
+    (read_context_of_store store)
+    reference
+    ~artifact
+    ~decode
+    ~encode
 ;;
 
 let random_token_from_source secure_random purpose =
@@ -2116,25 +2175,32 @@ let empty_snapshot (store : t) (head_snapshot : Head.snapshot) =
    : snapshot)
 ;;
 
-let load_from_head (store : t) (head_snapshot : Head.snapshot) =
-  let head_warnings =
-    store.opening_warnings
-    @ warnings_of_head (Head.snapshot_settlement_warnings head_snapshot)
-  in
-  match Head.snapshot_row head_snapshot with
-  | None -> Ok (empty_snapshot store head_snapshot)
-  | Some row ->
+type verified_head =
+  { head : head_record
+  ; commit : commit_record
+  ; manifest : manifest
+  ; episode_objects : (immutable_ref * Types.episode) list
+  ; state : state
+  ; warnings : settlement_warning list
+  }
+
+let load_verified_row
+      (context : read_context)
+      ~opening_warnings
+      row
+  =
+  let head_warnings = opening_warnings in
     let* (head : head_record) =
       head_of_row row |> with_prior_warnings head_warnings
     in
-    if not (String.equal head.owner_id store.owner_id)
+    if not (String.equal head.owner_id context.owner_id)
     then
       Error
         (make_error
            ~settlement_warnings:head_warnings
            (Persisted_store_binding_mismatch
               "HEAD owner_id does not match the opened owner"))
-    else if not (String.equal head.store_id store.store_id)
+    else if not (String.equal head.store_id context.store_id)
     then
       Error
         (make_error
@@ -2144,8 +2210,8 @@ let load_from_head (store : t) (head_snapshot : Head.snapshot) =
     else
       let commit_artifact = "commit:" ^ head.commit_ref.leaf in
       let* ((commit : commit_record), commit_warnings) =
-        read_object
-          store
+        read_object_in
+          context
           head.commit_ref
           ~artifact:commit_artifact
           ~decode:commit_record_of_json
@@ -2166,8 +2232,8 @@ let load_from_head (store : t) (head_snapshot : Head.snapshot) =
       in
       let manifest_artifact = "manifest:" ^ commit.manifest_ref.leaf in
       let* ((manifest : manifest), manifest_warnings) =
-        read_object
-          store
+        read_object_in
+          context
           commit.manifest_ref
           ~artifact:manifest_artifact
           ~decode:manifest_of_json
@@ -2188,8 +2254,8 @@ let load_from_head (store : t) (head_snapshot : Head.snapshot) =
       in
       let facts_artifact = "facts:" ^ manifest.facts_ref.leaf in
       let* ((facts_object : facts_object), facts_warnings) =
-        read_object
-          store
+        read_object_in
+          context
           manifest.facts_ref
           ~artifact:facts_artifact
           ~decode:facts_object_of_json
@@ -2224,8 +2290,8 @@ let load_from_head (store : t) (head_snapshot : Head.snapshot) =
           let artifact = "episode:" ^ reference.leaf in
           let* ((episode_object : episode_object), object_warnings) =
             match
-              read_object
-                store
+              read_object_in
+                context
                 reference
                 ~artifact
                 ~decode:episode_object_of_json
@@ -2295,20 +2361,45 @@ let load_from_head (store : t) (head_snapshot : Head.snapshot) =
                 }))
       else
         Ok
-          ({ binding = store.binding
-           ; cursor = Head.snapshot_cursor head_snapshot
-           ; head_row = Some row
-           ; store_id = Some head.store_id
-           ; generation = head.generation
-           ; commit_ref = Some head.commit_ref
-           ; commit = Some commit
-           ; manifest_ref = Some commit.manifest_ref
-           ; facts_ref = Some manifest.facts_ref
+          ({ head
+           ; commit
+           ; manifest
            ; episode_objects
            ; state
-           ; settlement_warnings = warnings
+           ; warnings
            }
-           : snapshot)
+           : verified_head)
+;;
+
+let load_from_head (store : t) (head_snapshot : Head.snapshot) =
+  let head_warnings =
+    store.opening_warnings
+    @ warnings_of_head (Head.snapshot_settlement_warnings head_snapshot)
+  in
+  match Head.snapshot_row head_snapshot with
+  | None -> Ok (empty_snapshot store head_snapshot)
+  | Some row ->
+    let* verified =
+      load_verified_row
+        (read_context_of_store store)
+        ~opening_warnings:head_warnings
+        row
+    in
+    Ok
+      ({ binding = store.binding
+       ; cursor = Head.snapshot_cursor head_snapshot
+       ; head_row = Some row
+       ; store_id = Some verified.head.store_id
+       ; generation = verified.head.generation
+       ; commit_ref = Some verified.head.commit_ref
+       ; commit = Some verified.commit
+       ; manifest_ref = Some verified.commit.manifest_ref
+       ; facts_ref = Some verified.manifest.facts_ref
+       ; episode_objects = verified.episode_objects
+       ; state = verified.state
+       ; settlement_warnings = verified.warnings
+       }
+       : snapshot)
 ;;
 
 let check_active (store : t) =
@@ -2348,6 +2439,223 @@ let with_store ~secure_random ~root ~owner_id fn =
          ; opening_warnings
          }
          : t))
+;;
+
+type existing_root =
+  | Existing_root_absent
+  | Existing_root_entries of string list
+
+let inspect_existing_root root =
+  try Ok (Existing_root_entries (Eio.Path.read_dir root)) with
+  | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _)
+  | Unix.Unix_error (Unix.ENOENT, _, _) ->
+    Ok Existing_root_absent
+  | (Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow | Sys.Break)
+    as exception_ ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Printexc.raise_with_backtrace exception_ backtrace
+  | exception_ ->
+    Error
+      (make_error
+         (Invalid_layout
+            ("failed to inspect existing private store root: "
+             ^ Printexc.to_string exception_)))
+;;
+
+let current_head_warnings values =
+  List.map
+    (fun value -> Current_head_settlement_warning value)
+    values
+;;
+
+let corrupt_existing_head detail =
+  make_error
+    (Head_operation_failed
+       { phase = "read-only"
+       ; failure = Head.Corrupt_head detail
+       })
+;;
+
+let row_of_existing_head_payload payload =
+  let length = String.length payload in
+  if length < 2
+  then
+    Error
+      (corrupt_existing_head
+         "HEAD must contain one non-empty LF-terminated row")
+  else if not (Char.equal payload.[length - 1] '\n')
+  then Error (corrupt_existing_head "HEAD is not LF-terminated")
+  else
+    let row = String.sub payload 0 (length - 1) in
+    if String.length row > Head.max_row_bytes
+    then
+      Error
+        (corrupt_existing_head "HEAD row exceeds max_row_bytes")
+    else if
+      String.exists
+        (fun char -> Char.equal char '\n' || Char.equal char '\r')
+        row
+    then
+      Error
+        (corrupt_existing_head "HEAD contains multiple rows or CR")
+    else Ok row
+;;
+
+let read_existing_head_row ~root =
+  let path = Eio.Path.(root / head_leaf) in
+  try
+    match Eio.Path.kind ~follow:false path with
+    | `Not_found -> Ok (None, [])
+    | `Regular_file ->
+      let stat = Eio.Path.stat ~follow:false path in
+      let expected_length = Optint.Int63.to_int64 stat.size in
+      let maximum = Int64.of_int (Head.max_row_bytes + 1) in
+      (match
+         Exact_read.read
+           ~parent:root
+           ~leaf:head_leaf
+           ~expected_length
+           ~max_length:maximum
+       with
+       | Error failure ->
+         let failure : Exact_read.failure = failure in
+         Error
+           (make_error
+              ~settlement_warnings:
+                (current_head_warnings failure.settlement_warnings)
+              (Current_head_read_failed failure.error))
+       | Ok observation ->
+         let warnings =
+           current_head_warnings
+             (Exact_read.observation_settlement_warnings observation)
+         in
+         let* row =
+           row_of_existing_head_payload
+             (Exact_read.observation_bytes observation)
+           |> with_prior_warnings warnings
+         in
+         Ok (Some row, warnings))
+    | `Symbolic_link ->
+      Error
+        (corrupt_existing_head "HEAD path is a symbolic link")
+    | _ ->
+      Error
+        (corrupt_existing_head "HEAD path is not a regular file")
+  with
+  | (Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow | Sys.Break)
+    as exception_ ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Printexc.raise_with_backtrace exception_ backtrace
+  | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _)
+  | Unix.Unix_error (Unix.ENOENT, _, _) ->
+    Error (make_error (Current_head_read_failed Exact_read.Missing))
+  | exception_ ->
+    Error
+      (make_error
+         (Invalid_layout
+            ("failed to inspect existing Memory OS HEAD: "
+             ^ Printexc.to_string exception_)))
+;;
+
+let read_existing_current_head ~root ~owner_id =
+  if String.trim owner_id = ""
+  then Error (make_error (Invalid_layout "owner_id must be non-empty"))
+  else
+    let* root_observation = inspect_existing_root root in
+    match root_observation with
+    | Existing_root_absent -> Ok Absent
+    | Existing_root_entries entries ->
+      let* observed_identity = read_store_identity ~root ~owner_id in
+      (match observed_identity with
+       | None ->
+         if entries = []
+         then Ok Absent
+         else
+           Error
+             (make_error
+                (Store_identity_missing_from_non_fresh_root
+                   (List.length entries)))
+       | Some (identity, identity_warnings) ->
+         let context : read_context =
+           { root; owner_id; store_id = identity.store_id }
+         in
+         let* first_row, first_head_warnings =
+           read_existing_head_row ~root
+           |> with_prior_warnings identity_warnings
+         in
+         let opening_warnings =
+           identity_warnings @ first_head_warnings
+         in
+         let* verified =
+           match first_row with
+           | None -> Ok None
+           | Some row ->
+             let* loaded =
+               load_verified_row
+                 context
+                 ~opening_warnings
+                 row
+             in
+             Ok (Some loaded)
+         in
+         let* final_identity =
+           read_store_identity ~root ~owner_id
+           |> with_prior_warnings opening_warnings
+         in
+         let* final_identity_warnings =
+           match final_identity with
+           | None ->
+             Error
+               (make_error
+                  ~settlement_warnings:opening_warnings
+                  (Invalid_store_identity
+                     "identity disappeared during verified read"))
+           | Some (final, warnings) ->
+             if String.equal final.store_id identity.store_id
+             then Ok warnings
+             else
+               Error
+                 (make_error
+                    ~settlement_warnings:
+                      (opening_warnings @ warnings)
+                    (Invalid_store_identity
+                       "identity changed during verified read"))
+         in
+         let* final_row, final_head_warnings =
+           read_existing_head_row ~root
+           |> with_prior_warnings
+                (opening_warnings @ final_identity_warnings)
+         in
+         if first_row <> final_row
+         then
+           Error
+             (make_error
+                ~settlement_warnings:
+                  (opening_warnings
+                   @ final_identity_warnings
+                   @ final_head_warnings)
+                Current_head_changed_during_read)
+         else
+           let current_head, verified_warnings =
+             match verified with
+             | None -> Empty, opening_warnings
+             | Some loaded ->
+               ( Present
+                   { receipt_id = loaded.commit.receipt_id
+                   ; operation_id = loaded.commit.operation_id
+                   ; state_digest = loaded.commit.state_sha256
+                   ; generation = loaded.head.generation
+                   }
+               , loaded.warnings )
+           in
+           Ok
+             (Existing
+                { current_head
+                ; settlement_warnings =
+                    verified_warnings
+                    @ final_identity_warnings
+                    @ final_head_warnings
+                }))
 ;;
 
 let load store =
@@ -3403,6 +3711,9 @@ module For_testing = struct
     | Store_identity_create_failed _ -> Store_identity_create_failed_error
     | Store_identity_read_failed _ -> Store_identity_read_failed_error
     | Invalid_store_identity _ -> Invalid_store_identity_error
+    | Current_head_read_failed _ -> Current_head_read_failed_error
+    | Current_head_changed_during_read ->
+      Current_head_changed_during_read_error
     | Invalid_publication_obligation _ ->
       Invalid_publication_obligation_error
     | Publication_obligation_owner_mismatch _ ->
@@ -3420,6 +3731,8 @@ module For_testing = struct
     | Immutable_settlement_warning _ -> Immutable_settlement_warning_tag
     | Store_identity_settlement_warning _ ->
       Store_identity_settlement_warning_tag
+    | Current_head_settlement_warning _ ->
+      Current_head_settlement_warning_tag
   ;;
 
   let publish_with_head_hooks hooks store prepared =

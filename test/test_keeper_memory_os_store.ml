@@ -55,6 +55,14 @@ let with_root ~fs prefix fn =
     (fun () -> fn root Eio.Path.(fs / root))
 ;;
 
+let with_absent_root ~fs prefix fn =
+  let root = Filename.temp_file prefix ".tmp" in
+  Sys.remove root;
+  Fun.protect
+    ~finally:(fun () -> remove_tree root)
+    (fun () -> fn root Eio.Path.(fs / root))
+;;
+
 let entropy_source ?(chunks = 256) seed =
   Eio.Flow.string_source
     (String.init
@@ -177,6 +185,14 @@ let root_snapshot root =
     leaf, load_raw path)
 ;;
 
+let check_root_snapshot label expected actual =
+  check
+    (list (pair string string))
+    label
+    expected
+    actual
+;;
+
 let immutable_object_sizes root =
   Sys.readdir root
   |> Array.to_list
@@ -244,6 +260,184 @@ let load_result ?(seed = 101) ~root () =
     ~root
     ~owner_id:"keeper-a"
     (fun store -> Store.load store)
+;;
+
+let test_existing_read_absent_is_effect_free ~fs () =
+  with_absent_root ~fs "masc_memory_os_existing_absent_"
+  @@ fun root_path root ->
+  (match
+     require_ok
+       (Store.read_existing_current_head
+          ~root
+          ~owner_id:"keeper-a")
+   with
+   | Store.Absent -> ()
+   | Store.Existing _ ->
+     fail "absent private root was reported as an existing store");
+  check bool
+    "absent private root remains absent"
+    false
+    (Sys.file_exists root_path);
+  with_root ~fs "masc_memory_os_existing_empty_without_identity_"
+  @@ fun empty_path empty_root ->
+  let before = root_snapshot empty_path in
+  (match
+     require_ok
+       (Store.read_existing_current_head
+          ~root:empty_root
+          ~owner_id:"keeper-a")
+   with
+   | Store.Absent -> ()
+   | Store.Existing _ ->
+     fail "identity-free empty root was reported as an existing store");
+  check_root_snapshot
+    "identity-free empty root remains byte-for-byte unchanged"
+    before
+    (root_snapshot empty_path)
+;;
+
+let test_existing_read_empty_store_is_read_only ~fs () =
+  with_root ~fs "masc_memory_os_existing_valid_empty_"
+  @@ fun root_path root ->
+  within_store ~root ~owner:"keeper-a" (fun _ -> ());
+  let before = root_snapshot root_path in
+  (match
+     require_ok
+       (Store.read_existing_current_head
+          ~root
+          ~owner_id:"keeper-a")
+   with
+   | Store.Existing { current_head = Store.Empty; _ } -> ()
+   | Store.Existing { current_head = Store.Present _; _ } ->
+     fail "identity-only store unexpectedly had a current HEAD"
+   | Store.Absent ->
+     fail "valid identity-only store was reported absent");
+  check_root_snapshot
+    "valid empty store read creates no stable lock or HEAD"
+    before
+    (root_snapshot root_path)
+;;
+
+let test_existing_read_populated_projection_is_exact ~fs () =
+  with_root ~fs "masc_memory_os_existing_populated_"
+  @@ fun root_path root ->
+  let receipt = seed_commit ~root "projection" in
+  let before = root_snapshot root_path in
+  (match
+     require_ok
+       (Store.read_existing_current_head
+          ~root
+          ~owner_id:"keeper-a")
+   with
+   | Store.Existing
+       { current_head =
+           Store.Present
+             { receipt_id
+             ; operation_id
+             ; state_digest
+             ; generation
+             }
+       ; _
+       } ->
+     check string
+       "projection receipt id"
+       (sha256_string (Store.commit_receipt_id receipt))
+       (sha256_string receipt_id);
+     check string
+       "projection operation id"
+       "operation-projection"
+       operation_id;
+     check string
+       "projection state digest"
+       (sha256_string (Store.commit_receipt_state_sha256 receipt))
+       (sha256_string state_digest);
+     check int64
+       "projection generation"
+       (Store.commit_receipt_generation receipt)
+       generation
+   | Store.Existing { current_head = Store.Empty; _ } ->
+     fail "populated store was projected as empty"
+   | Store.Absent ->
+     fail "populated store was reported absent");
+  check_root_snapshot
+    "populated projection read is byte-for-byte read-only"
+    before
+    (root_snapshot root_path)
+;;
+
+let test_existing_read_rejects_current_schema_failures ~fs () =
+  with_root ~fs "masc_memory_os_existing_identity_tamper_"
+  @@ fun root_path root ->
+  within_store ~root ~owner:"keeper-a" (fun _ -> ());
+  let identity_path = store_identity_path root_path in
+  load_raw identity_path
+  |> Yojson.Safe.from_string
+  |> replace_json_field "store_id" (`String (String.make 64 'a'))
+  |> Yojson.Safe.to_string
+  |> save_raw identity_path;
+  let before = root_snapshot root_path in
+  expect_error_tag
+    "tampered current identity fails closed"
+    Store.For_testing.Invalid_store_identity_error
+    (Store.read_existing_current_head
+       ~root
+       ~owner_id:"keeper-a");
+  check_root_snapshot
+    "identity failure is read-only"
+    before
+    (root_snapshot root_path);
+  with_root ~fs "masc_memory_os_existing_foreign_owner_"
+  @@ fun foreign_path foreign_root ->
+  within_store ~root:foreign_root ~owner:"keeper-a" (fun _ -> ());
+  let before = root_snapshot foreign_path in
+  expect_error_tag
+    "foreign owner identity fails closed"
+    Store.For_testing.Invalid_store_identity_error
+    (Store.read_existing_current_head
+       ~root:foreign_root
+       ~owner_id:"keeper-b");
+  check_root_snapshot
+    "foreign owner failure is read-only"
+    before
+    (root_snapshot foreign_path);
+  with_root ~fs "masc_memory_os_existing_nonfresh_"
+  @@ fun nonfresh_path nonfresh_root ->
+  save_raw (Filename.concat nonfresh_path "legacy.json") "{}";
+  let before = root_snapshot nonfresh_path in
+  expect_error_tag
+    "nonfresh data without current identity is never adopted"
+    Store.For_testing.Store_identity_missing_from_non_fresh_root_error
+    (Store.read_existing_current_head
+       ~root:nonfresh_root
+       ~owner_id:"keeper-a");
+  check_root_snapshot
+    "nonfresh rejection is read-only"
+    before
+    (root_snapshot nonfresh_path);
+  with_root ~fs "masc_memory_os_existing_graph_tamper_"
+  @@ fun graph_path graph_root ->
+  ignore (seed_commit ~root:graph_root "graph-tamper"
+    : Store.commit_receipt);
+  let commit_path =
+    load_head graph_path
+    |> commit_leaf_of_head
+    |> Filename.concat graph_path
+  in
+  let raw = load_raw commit_path in
+  let tampered = Bytes.of_string raw in
+  Bytes.set tampered 0 '[';
+  save_raw commit_path (Bytes.unsafe_to_string tampered);
+  let before = root_snapshot graph_path in
+  expect_error_tag
+    "reachable immutable graph tamper fails closed"
+    Store.For_testing.Immutable_digest_mismatch_error
+    (Store.read_existing_current_head
+       ~root:graph_root
+       ~owner_id:"keeper-a");
+  check_root_snapshot
+    "graph tamper failure is read-only"
+    before
+    (root_snapshot graph_path)
 ;;
 
 let test_genesis_roundtrip_reopen ~fs () =
@@ -1732,7 +1926,15 @@ let () =
   run
     "keeper memory os canonical store"
     [ ( "store"
-      , [ test_case "genesis roundtrip reopen" `Quick
+      , [ test_case "existing absent read is effect-free" `Quick
+            (test_existing_read_absent_is_effect_free ~fs)
+        ; test_case "existing empty store read is read-only" `Quick
+            (test_existing_read_empty_store_is_read_only ~fs)
+        ; test_case "existing populated projection is exact" `Quick
+            (test_existing_read_populated_projection_is_exact ~fs)
+        ; test_case "existing read rejects current-schema failures" `Quick
+            (test_existing_read_rejects_current_schema_failures ~fs)
+        ; test_case "genesis roundtrip reopen" `Quick
             (test_genesis_roundtrip_reopen ~fs)
         ; test_case "current replay and conflict" `Quick
             (test_current_replay_and_conflict ~fs)

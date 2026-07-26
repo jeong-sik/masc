@@ -332,8 +332,8 @@ function rejectUnavailableApprovalQueue(raw: Record<string, unknown>): void {
   if (!isRecord(raw.approval_queue_state)) return
   const state = raw.approval_queue_state
   if (state.state !== 'unavailable') return
-  const title = asString(state.title).trim()
-  const operatorDetail = asString(state.operator_detail).trim()
+  const title = asString(state.title, '').trim()
+  const operatorDetail = asString(state.operator_detail, '').trim()
   if (
     state.code !== 'reset_required'
     || state.severity !== 'bad'

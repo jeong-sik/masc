@@ -25,8 +25,30 @@ type error =
   | Entropy_source_failed of string
   | Corrupt_current of corruption
   | Head_read_failed of Head.failure
+  | Head_read_settlement_failed of
+      { cursor : Head.cursor
+      ; row : string option
+      ; observed_nonce : int64 option
+      ; warnings : Head.settlement_warning list
+      }
   | Head_write_failed of Head.failure
-  | Publication_indeterminate of Head.failure
+  | Contention_exhausted of
+      { attempts : int
+      ; last_failure : Head.failure
+      }
+  | Published_with_warnings of
+      { nonce : int64
+      ; evidence : Head.publication_evidence
+      ; warnings : Head.settlement_warning list
+      }
+  | Published_with_failure of
+      { nonce : int64
+      ; failure : Head.failure
+      }
+  | Publication_indeterminate of
+      { nonce : int64
+      ; failure : Head.failure
+      }
   | Nonce_exhausted
   | Runtime_nonce_out_of_range of int64
 
@@ -244,15 +266,59 @@ let next_value ~floor current =
     Ok (if Int64.compare floor successor > 0 then floor else successor)
 ;;
 
-let rec allocate ~root ~keeper_id ~owner_id ~floor =
+let head_contention_retry_limit = 2
+
+let observed_nonce ~keeper_id = function
+  | None -> Some 0L
+  | Some raw ->
+    (match decode_row ~keeper_id raw with
+     | Ok row -> Some row.nonce
+     | Error _ -> None)
+;;
+
+let rec allocate
+          ~snapshot_warnings
+          ~compare_and_swap
+          ~remaining_retries
+          ~attempts
+          ~root
+          ~keeper_id
+          ~owner_id
+          ~floor
+  =
+  let retry failure =
+    if remaining_retries = 0
+    then Error (Contention_exhausted { attempts; last_failure = failure })
+    else (
+      yield_before_retry ();
+      allocate
+        ~snapshot_warnings
+        ~compare_and_swap
+        ~remaining_retries:(remaining_retries - 1)
+        ~attempts:(attempts + 1)
+        ~root
+        ~keeper_id
+        ~owner_id
+        ~floor)
+  in
   let leaf = authority_leaf ~keeper_id in
   let* read_entropy = entropy_source () in
   match Head.read ~secure_random:read_entropy ~parent:root ~leaf with
   | Error failure when failure.error = Head.Busy ->
-    yield_before_retry ();
-    allocate ~root ~keeper_id ~owner_id ~floor
+    retry failure
   | Error failure -> Error (Head_read_failed failure)
   | Ok snapshot ->
+    let warnings = snapshot_warnings snapshot in
+    if warnings <> []
+    then
+      Error
+        (Head_read_settlement_failed
+           { cursor = Head.snapshot_cursor snapshot
+           ; row = Head.snapshot_row snapshot
+           ; observed_nonce = observed_nonce ~keeper_id (Head.snapshot_row snapshot)
+           ; warnings
+           })
+    else
     let current =
       match Head.snapshot_row snapshot with
       | None -> Ok 0L
@@ -268,26 +334,38 @@ let rec allocate ~root ~keeper_id ~owner_id ~floor =
     in
     let* write_entropy = entropy_source () in
     (match
-       Head.compare_and_swap
+       compare_and_swap
          ~secure_random:write_entropy
          ~parent:root
          ~leaf
          ~expected:(Head.snapshot_cursor snapshot)
          ~row:(row_bytes desired_row)
      with
-     | Ok _ -> Ok desired
+     | Ok publication ->
+       let warnings = Head.publication_settlement_warnings publication in
+       if warnings = []
+       then Ok desired
+       else
+         Error
+           (Published_with_warnings
+              { nonce = desired
+              ; evidence = Head.publication_evidence publication
+              ; warnings
+              })
      | Error failure ->
        (match failure.target_effect, failure.error with
         | Head.Unchanged, (Head.Busy | Head.Conflict _) ->
-          yield_before_retry ();
-          allocate ~root ~keeper_id ~owner_id ~floor
-        | Head.Published _, _ -> Ok desired
+          retry failure
+        | Head.Published _, _ ->
+          Error (Published_with_failure { nonce = desired; failure })
         | Head.Publication_indeterminate _, _ ->
-          Error (Publication_indeterminate failure)
+          Error (Publication_indeterminate { nonce = desired; failure })
         | Head.Unchanged, _ -> Error (Head_write_failed failure)))
 ;;
 
-let next_for_base_path
+let next_for_base_path_with_hooks
+      ~snapshot_warnings
+      ~compare_and_swap
       ~base_path
       ~keeper_id
       ~owner_id
@@ -306,7 +384,21 @@ let next_for_base_path
   then Error (Invalid_floor floor)
   else
     let* root = prepare_root ~base_path in
-    allocate ~root ~keeper_id ~owner_id ~floor
+    allocate
+      ~snapshot_warnings
+      ~compare_and_swap
+      ~remaining_retries:head_contention_retry_limit
+      ~attempts:1
+      ~root
+      ~keeper_id
+      ~owner_id
+      ~floor
+;;
+
+let next_for_base_path =
+  next_for_base_path_with_hooks
+    ~snapshot_warnings:Head.snapshot_settlement_warnings
+    ~compare_and_swap:Head.compare_and_swap
 ;;
 
 let runtime_int_of_nonce nonce =
@@ -384,11 +476,34 @@ let error_to_string = function
   | Corrupt_current corruption -> corruption_to_string corruption
   | Head_read_failed failure ->
     "lifecycle nonce HEAD read failed: " ^ head_failure_to_string failure
+  | Head_read_settlement_failed { observed_nonce; warnings; _ } ->
+    Printf.sprintf
+      "lifecycle nonce HEAD read retained cursor evidence but resource settlement \
+       failed observed_nonce=%s warning_count=%d"
+      (Option.fold ~none:"unknown" ~some:Int64.to_string observed_nonce)
+      (List.length warnings)
   | Head_write_failed failure ->
     "lifecycle nonce HEAD write failed: " ^ head_failure_to_string failure
-  | Publication_indeterminate failure ->
-    "lifecycle nonce publication is indeterminate: "
-    ^ head_failure_to_string failure
+  | Contention_exhausted { attempts; last_failure } ->
+    Printf.sprintf
+      "lifecycle nonce HEAD contention exhausted after %d attempts: %s"
+      attempts
+      (head_failure_to_string last_failure)
+  | Published_with_warnings { nonce; warnings; _ } ->
+    Printf.sprintf
+      "lifecycle nonce %Ld was published with %d settlement warning(s)"
+      nonce
+      (List.length warnings)
+  | Published_with_failure { nonce; failure } ->
+    Printf.sprintf
+      "lifecycle nonce %Ld was published but the operation failed: %s"
+      nonce
+      (head_failure_to_string failure)
+  | Publication_indeterminate { nonce; failure } ->
+    Printf.sprintf
+      "lifecycle nonce %Ld publication is indeterminate: %s"
+      nonce
+      (head_failure_to_string failure)
   | Nonce_exhausted -> "lifecycle nonce int64 authority is exhausted"
   | Runtime_nonce_out_of_range nonce ->
     Printf.sprintf
@@ -399,4 +514,113 @@ let error_to_string = function
 module For_testing = struct
   let root_path_for_base_path = root_path_for_base_path
   let authority_leaf = authority_leaf
+
+  let with_read_settlement_warning
+        ~base_path
+        ~keeper_id
+        ~owner_id
+        ?floor
+        ()
+    =
+    let snapshot_warnings snapshot =
+      Head.snapshot_settlement_warnings snapshot
+      @ [ Head.Resource_settlement_failed
+            { operation = Head.Settle_resources
+            ; detail = "injected lifecycle nonce read settlement warning"
+            }
+        ]
+    in
+    next_for_base_path_with_hooks
+      ~snapshot_warnings
+      ~compare_and_swap:Head.compare_and_swap
+      ~base_path
+      ~keeper_id
+      ~owner_id
+      ?floor
+      ()
+  ;;
+
+  let with_publication_settlement_warning
+        ~base_path
+        ~keeper_id
+        ~owner_id
+        ?floor
+        ()
+    =
+    let hooks =
+      Head.For_testing.hooks
+        ~on_resource_settlement:(fun () ->
+          failwith "injected lifecycle nonce publication settlement warning")
+        ()
+    in
+    next_for_base_path_with_hooks
+      ~snapshot_warnings:Head.snapshot_settlement_warnings
+      ~compare_and_swap:(Head.For_testing.compare_and_swap hooks)
+      ~base_path
+      ~keeper_id
+      ~owner_id
+      ?floor
+      ()
+  ;;
+
+  let with_published_failure
+        ~base_path
+        ~keeper_id
+        ~owner_id
+        ?floor
+        ()
+    =
+    let hooks =
+      Head.For_testing.hooks
+        ~after_verified:(fun () ->
+          failwith "injected lifecycle nonce post-publication failure")
+        ()
+    in
+    next_for_base_path_with_hooks
+      ~snapshot_warnings:Head.snapshot_settlement_warnings
+      ~compare_and_swap:(Head.For_testing.compare_and_swap hooks)
+      ~base_path
+      ~keeper_id
+      ~owner_id
+      ?floor
+      ()
+  ;;
+
+  let with_forced_conflicts
+        ~base_path
+        ~keeper_id
+        ~owner_id
+        ?floor
+        ()
+    =
+    let compare_and_swap ~secure_random ~parent ~leaf ~expected ~row =
+      let competing_random =
+        Eio.Flow.string_source (Crypto_rng.generate head_entropy_bytes)
+      in
+      match
+        Head.compare_and_swap
+          ~secure_random:competing_random
+          ~parent
+          ~leaf
+          ~expected
+          ~row
+      with
+      | Error failure -> Error failure
+      | Ok _ ->
+        Head.compare_and_swap
+          ~secure_random
+          ~parent
+          ~leaf
+          ~expected
+          ~row
+    in
+    next_for_base_path_with_hooks
+      ~snapshot_warnings:Head.snapshot_settlement_warnings
+      ~compare_and_swap
+      ~base_path
+      ~keeper_id
+      ~owner_id
+      ?floor
+      ()
+  ;;
 end

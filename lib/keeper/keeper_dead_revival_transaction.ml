@@ -74,6 +74,11 @@ type error =
       }
   | Journal_read_settlement_failed of Head.settlement_warning list
   | Journal_write_failed of string
+  | Post_commit_cleanup_required of
+      { committed : keeper_meta
+      ; entry : Keeper_registry.registry_entry
+      ; cleanup_error : error
+      }
   | Durable_snapshot_missing
   | Durable_snapshot_changed
   | Registry_conflict of registry_conflict
@@ -88,7 +93,6 @@ type error =
 type success =
   { meta : keeper_meta
   ; entry : Keeper_registry.registry_entry
-  ; journal_cleanup_pending : string option
   }
 
 type journal_stage =
@@ -654,7 +658,7 @@ let rollback_error_to_string = function
   | Rollback_journal_clear_failed detail -> "journal clear failed: " ^ detail
 ;;
 
-let error_to_string = function
+let rec error_to_string = function
   | Reservation_conflict owner ->
     "keeper revival already owned: " ^ Keeper_lifecycle_reservation.snapshot_to_string owner
   | Nonce_allocation_failed error ->
@@ -677,6 +681,13 @@ let error_to_string = function
     "keeper revival journal read settled with warnings: "
     ^ settlement_warning_detail (List.length warnings)
   | Journal_write_failed detail -> "keeper revival journal write failed: " ^ detail
+  | Post_commit_cleanup_required { committed; cleanup_error; _ } ->
+    Printf.sprintf
+      "keeper %s launch committed at lifecycle nonce %d but journal cleanup \
+       requires recovery: %s"
+      committed.name
+      committed.runtime.nonce
+      (error_to_string cleanup_error)
   | Durable_snapshot_missing -> "keeper durable metadata disappeared before revival commit"
   | Durable_snapshot_changed -> "keeper durable metadata changed before revival commit"
   | Registry_conflict conflict -> registry_conflict_to_string conflict
@@ -837,6 +848,7 @@ let revive (ctx : _ context) ~original ~candidate =
   | Ok token ->
     observe "acquire" original.name (Keeper_lifecycle_reservation.owner_id token);
     let journal_for_cleanup = ref None in
+    let launch_committed = ref false in
     let cleanup_pre_journal_cancellation () =
       Eio.Cancel.protect (fun () ->
         (match !journal_for_cleanup with
@@ -1040,19 +1052,24 @@ let revive (ctx : _ context) ~original ~candidate =
                                   (error_to_string error)
                                   error
                               | Ok () ->
-                                let journal_cleanup_pending =
-                                  match clear_journal ctx.config launch_journal with
-                                  | Ok () -> None
-                                  | Error error -> Some (error_to_string error)
+                                launch_committed := true;
+                                let cleanup_result =
+                                  Eio.Cancel.protect (fun () ->
+                                    let result =
+                                      clear_journal ctx.config launch_journal
+                                    in
+                                    release_observed token committed.name;
+                                    result)
                                 in
-                                observe
-                                  (match journal_cleanup_pending with
-                                   | None -> "commit"
-                                   | Some _ -> "commit_journal_cleanup_pending")
-                                  committed.name
-                                  "lane started";
-                                release_observed token committed.name;
-                                Ok { meta = committed; entry; journal_cleanup_pending })
+                                (match cleanup_result with
+                                 | Error cleanup_error ->
+                                   Error
+                                     (Post_commit_cleanup_required
+                                        { committed; entry; cleanup_error })
+                                 | Ok () ->
+                                   Eio.Fiber.check ();
+                                   observe "commit" committed.name "lane started";
+                                   Ok { meta = committed; entry }))
                            | rejected ->
                              fail_with_rollback
                                token
@@ -1065,17 +1082,19 @@ let revive (ctx : _ context) ~original ~candidate =
        try run () with
        | Eio.Cancel.Cancelled _ as cancelled ->
          let backtrace = Printexc.get_raw_backtrace () in
-         Eio.Cancel.protect (fun () ->
-           let errors =
-             rollback token ctx.config journal !original_entry_for_rollback
-           in
-           if errors <> []
-           then
-             Log.Keeper.error
-               "keeper lifecycle cancellation rollback failed keeper=%s errors=%s"
-               original.name
-               (String.concat "; " (List.map rollback_error_to_string errors));
-           release_observed token original.name);
+         if not !launch_committed
+         then
+           Eio.Cancel.protect (fun () ->
+             let errors =
+               rollback token ctx.config journal !original_entry_for_rollback
+             in
+             if errors <> []
+             then
+               Log.Keeper.error
+                 "keeper lifecycle cancellation rollback failed keeper=%s errors=%s"
+                 original.name
+                 (String.concat "; " (List.map rollback_error_to_string errors));
+             release_observed token original.name);
          Printexc.raise_with_backtrace cancelled backtrace)
 ;;
 

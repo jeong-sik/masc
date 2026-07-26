@@ -38,6 +38,11 @@ type error =
   | Journal_read_settlement_failed of
       Fs_compat.Capability_head.settlement_warning list
   | Journal_write_failed of string
+  | Post_commit_cleanup_required of
+      { committed : Keeper_meta_contract.keeper_meta
+      ; entry : Keeper_registry.registry_entry
+      ; cleanup_error : error
+      }
   | Durable_snapshot_missing
   | Durable_snapshot_changed
   | Registry_conflict of registry_conflict
@@ -52,7 +57,6 @@ type error =
 type success =
   { meta : Keeper_meta_contract.keeper_meta
   ; entry : Keeper_registry.registry_entry
-  ; journal_cleanup_pending : string option
   }
 
 val error_to_string : error -> string

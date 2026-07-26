@@ -1,6 +1,7 @@
 open Alcotest
 
 module Nonce = Masc.Keeper_lifecycle_nonce
+module Head = Fs_compat.Capability_head
 
 let rec remove_tree path =
   match Unix.lstat path with
@@ -224,6 +225,104 @@ let test_legacy_generation_is_ignored () =
   check int64 "legacy generation is not an input" 1L allocated
 ;;
 
+let test_read_settlement_warning_fails_closed () =
+  with_base "masc_lifecycle_nonce_read_warning_" @@ fun base_path ->
+  (match
+     Nonce.For_testing.with_read_settlement_warning
+       ~base_path
+       ~keeper_id:"keeper-a"
+       ~owner_id:"trace-a"
+       ()
+   with
+   | Error
+       (Nonce.Head_read_settlement_failed
+          { row = None; observed_nonce = Some 0L; warnings = _ :: _; _ }) ->
+     ()
+   | Error error ->
+     failf "unexpected read settlement error: %s" (Nonce.error_to_string error)
+   | Ok nonce -> failf "read settlement warning allocated nonce %Ld" nonce);
+  check
+    int64
+    "read warning did not consume nonce"
+    1L
+    (next ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-a" ())
+;;
+
+let test_publication_warning_retains_consumed_nonce () =
+  with_base "masc_lifecycle_nonce_publish_warning_" @@ fun base_path ->
+  (match
+     Nonce.For_testing.with_publication_settlement_warning
+       ~base_path
+       ~keeper_id:"keeper-a"
+       ~owner_id:"trace-a"
+       ()
+   with
+   | Error (Nonce.Published_with_warnings { nonce = 1L; warnings = _ :: _; _ }) ->
+     ()
+   | Error error ->
+     failf "unexpected publication settlement error: %s" (Nonce.error_to_string error)
+   | Ok nonce -> failf "publication warning returned clean nonce %Ld" nonce);
+  check
+    int64
+    "published warning consumed nonce"
+    2L
+    (next ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-a" ())
+;;
+
+let test_published_failure_retains_consumed_nonce () =
+  with_base "masc_lifecycle_nonce_published_failure_" @@ fun base_path ->
+  (match
+     Nonce.For_testing.with_published_failure
+       ~base_path
+       ~keeper_id:"keeper-a"
+       ~owner_id:"trace-a"
+       ()
+   with
+   | Error
+       (Nonce.Published_with_failure
+          { nonce = 1L
+          ; failure = { Head.target_effect = Head.Published _; _ }
+          }) ->
+     ()
+   | Error error ->
+     failf "unexpected published failure: %s" (Nonce.error_to_string error)
+   | Ok nonce -> failf "published failure returned clean nonce %Ld" nonce);
+  check
+    int64
+    "published failure consumed nonce"
+    2L
+    (next ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-a" ())
+;;
+
+let test_contention_retry_budget_is_finite () =
+  with_base "masc_lifecycle_nonce_contention_" @@ fun base_path ->
+  (match
+     Nonce.For_testing.with_forced_conflicts
+       ~base_path
+       ~keeper_id:"keeper-a"
+       ~owner_id:"trace-a"
+       ()
+   with
+   | Error
+       (Nonce.Contention_exhausted
+          { attempts = 3
+          ; last_failure =
+              { Head.error = Head.Conflict _
+              ; target_effect = Head.Unchanged
+              ; _
+              }
+          }) ->
+     ()
+   | Error error ->
+     failf "unexpected contention result: %s" (Nonce.error_to_string error)
+   | Ok nonce -> failf "contention exhaustion returned nonce %Ld" nonce);
+  check
+    int64
+    "three bounded attempts published three competing nonces"
+    4L
+    (next ~base_path ~keeper_id:"keeper-a" ~owner_id:"trace-a" ())
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -258,6 +357,22 @@ let () =
             "legacy generation ignored"
             `Quick
             test_legacy_generation_is_ignored
+        ; test_case
+            "read settlement warning fails closed"
+            `Quick
+            test_read_settlement_warning_fails_closed
+        ; test_case
+            "publication warning retains consumed nonce"
+            `Quick
+            test_publication_warning_retains_consumed_nonce
+        ; test_case
+            "published failure retains consumed nonce"
+            `Quick
+            test_published_failure_retains_consumed_nonce
+        ; test_case
+            "contention retry budget is finite"
+            `Quick
+            test_contention_retry_budget_is_finite
         ] )
     ]
 ;;

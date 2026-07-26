@@ -29,8 +29,30 @@ type error =
   | Entropy_source_failed of string
   | Corrupt_current of corruption
   | Head_read_failed of Fs_compat.Capability_head.failure
+  | Head_read_settlement_failed of
+      { cursor : Fs_compat.Capability_head.cursor
+      ; row : string option
+      ; observed_nonce : int64 option
+      ; warnings : Fs_compat.Capability_head.settlement_warning list
+      }
   | Head_write_failed of Fs_compat.Capability_head.failure
-  | Publication_indeterminate of Fs_compat.Capability_head.failure
+  | Contention_exhausted of
+      { attempts : int
+      ; last_failure : Fs_compat.Capability_head.failure
+      }
+  | Published_with_warnings of
+      { nonce : int64
+      ; evidence : Fs_compat.Capability_head.publication_evidence
+      ; warnings : Fs_compat.Capability_head.settlement_warning list
+      }
+  | Published_with_failure of
+      { nonce : int64
+      ; failure : Fs_compat.Capability_head.failure
+      }
+  | Publication_indeterminate of
+      { nonce : int64
+      ; failure : Fs_compat.Capability_head.failure
+      }
   | Nonce_exhausted
   | Runtime_nonce_out_of_range of int64
 
@@ -54,4 +76,36 @@ val runtime_int_of_nonce : int64 -> (int, error) result
 module For_testing : sig
   val root_path_for_base_path : base_path:string -> string
   val authority_leaf : keeper_id:string -> string
+
+  val with_read_settlement_warning :
+    base_path:string ->
+    keeper_id:string ->
+    owner_id:string ->
+    ?floor:int64 ->
+    unit ->
+    (int64, error) result
+
+  val with_publication_settlement_warning :
+    base_path:string ->
+    keeper_id:string ->
+    owner_id:string ->
+    ?floor:int64 ->
+    unit ->
+    (int64, error) result
+
+  val with_published_failure :
+    base_path:string ->
+    keeper_id:string ->
+    owner_id:string ->
+    ?floor:int64 ->
+    unit ->
+    (int64, error) result
+
+  val with_forced_conflicts :
+    base_path:string ->
+    keeper_id:string ->
+    owner_id:string ->
+    ?floor:int64 ->
+    unit ->
+    (int64, error) result
 end

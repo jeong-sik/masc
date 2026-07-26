@@ -110,13 +110,17 @@ let test_classify_resource_wins_over_transient_rate_limit () =
       assert (detail = Some "429 rate limit: memory exhausted")
   | _ -> assert false
 
-let test_classify_hard_quota_resource_exhausted () =
-  match R.classify_string "rate limit: resource exhausted, top up credits" with
-  | R.ResourceExhausted { resource; consumed; limit; _ } ->
-      assert (resource = `Cost);
-      assert (consumed = None);
-      assert (limit = None)
-  | _ -> assert false
+let test_untyped_pricing_text_has_no_resource_authority () =
+  [ "token budget exhausted";
+    "hard quota exhausted";
+    "credit balance depleted";
+    "cost ceiling exceeded";
+    "resource exhausted";
+  ]
+  |> List.iter (fun rendered ->
+    match R.classify_string rendered with
+    | R.PermanentError { fallback_strategy = R.HumanHandoff _; _ } -> ()
+    | _ -> assert false)
 
 let test_classify_permanent_fallback () =
   let require_permanent_handoff = function
@@ -351,7 +355,7 @@ let () =
   test_classify_transient_rate_limit ();
   test_rendered_capacity_is_not_resource ();
   test_classify_resource_wins_over_transient_rate_limit ();
-  test_classify_hard_quota_resource_exhausted ();
+  test_untyped_pricing_text_has_no_resource_authority ();
   test_classify_permanent_fallback ();
   test_strategy_for_transient_is_retry ();
   test_strategy_for_permanent_default_string ();

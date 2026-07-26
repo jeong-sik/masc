@@ -220,19 +220,17 @@ let test_pipeline_classifies_permanent_handoff () =
       assert (strat = `String "Handoff")
   | _ -> assert false
 
-let test_pipeline_classifies_resource_token () =
+let test_pipeline_pricing_text_has_no_resource_authority () =
   let outcome =
     KB.apply_post_turn_resilience witness ~now:4.0 ~working_context:None
-      ~maybe_error:(Some "429 rate limit: token budget exhausted") ()
+      ~maybe_error:(Some "token budget exhausted") ()
   in
   match outcome.resilience_meta with
   | Some (`Assoc kv) ->
       let kind = List.assoc "classified_kind" kv in
-      (* Resource exhaustion must win over generic transient/rate-limit
-         wording so hard quota failures do not enter the retry strategy. *)
-      assert (kind = `String "ResourceExhausted");
+      assert (kind = `String "Permanent");
       let strat = List.assoc "default_strategy_class" kv in
-      assert (strat = `String "Abort")
+      assert (strat = `String "Handoff")
   | _ -> assert false
 
 let test_pipeline_upserts_into_working_context () =
@@ -353,7 +351,7 @@ let () =
   test_pipeline_executes_strategy_when_executor_supplied ();
   test_pipeline_reports_strategy_execution_failure ();
   test_pipeline_classifies_permanent_handoff ();
-  test_pipeline_classifies_resource_token ();
+  test_pipeline_pricing_text_has_no_resource_authority ();
   test_pipeline_upserts_into_working_context ();
   test_pipeline_writes_audit_when_store_supplied ();
   test_pipeline_writes_attempted_then_outcome_audit_when_executor_supplied ();

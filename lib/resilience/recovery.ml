@@ -263,11 +263,6 @@ let transient_phrases =
 let resource_phrases =
   [ ("memory", `Memory);
     ("disk", `Disk);
-    ("quota", `Cost);
-    ("credit", `Cost);
-    ("resource exhausted", `Cost);
-    ("budget", `Cost);
-    ("cost", `Cost);
   ]
 
 let classify_string (s : string) : error_mode =

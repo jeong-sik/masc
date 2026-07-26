@@ -17,22 +17,26 @@ open Keeper_turn_up_args
    crash recovery. Retry on CAS conflict while keeping heartbeat-owned
    cursors from disk. *)
 let write_initial_meta permit witness config meta =
-  Keeper_meta_store.create_meta permit witness config meta
+  match
+    Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
+      permit
+      ~base_path:config.Workspace.base_path
+      meta.Keeper_meta_contract.name
+      (fun () ->
+         Keeper_meta_store.create_meta permit witness config meta)
+  with
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_completed
+      result ->
+    result
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_denied ->
+    Error "keeper initial metadata write lost durable lifecycle admission"
 
-let create_keeper_admitted
+let create_keeper_admitted_body
       (permit : Keeper_lifecycle_admission.Durable_transaction.permit)
       (ctx : _ context)
       (p : parsed_args)
   : tool_result
   =
-  if
-    not
-      (Keeper_lifecycle_admission.Durable_transaction.permit_matches
-         permit
-         ~base_path:ctx.config.Workspace.base_path
-         p.name)
-  then tool_result_error "keeper creation lost durable lifecycle admission"
-  else
   match Keeper_meta_store.read_meta ctx.config p.name with
   | Error detail -> tool_result_error detail
   | Ok (Some _) -> tool_result_error ("keeper already exists: " ^ p.name)
@@ -429,6 +433,21 @@ let create_keeper_admitted
              (Printf.sprintf
                 "keeper metadata was created but lane launch failed: %s"
                 (start_keepalive_outcome_to_string rejected))))
+;;
+
+let create_keeper_admitted permit ctx p =
+  match
+    Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
+      permit
+      ~base_path:ctx.config.Workspace.base_path
+      p.name
+      (fun () -> create_keeper_admitted_body permit ctx p)
+  with
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_completed
+      result ->
+    result
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_denied ->
+    tool_result_error "keeper creation lost durable lifecycle admission"
 ;;
 
 let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =

@@ -666,20 +666,25 @@ let launch_supervised_fiber_under_admission
       (meta : keeper_meta)
       reg
   =
-  if
-    not
-      (Keeper_lifecycle_admission.Durable_transaction.permit_matches
-         permit
-         ~base_path:ctx.config.Workspace.base_path
-         meta.name)
-  then Error Supervised_launch_permit_mismatch
-  else
-    launch_supervised_fiber_admitted
-      ~proactive_warmup_sec
-      ctx
-      meta
-      reg
-    |> Result.map_error (fun error -> Supervised_launch_rejected error)
+  match
+    Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
+      permit
+      ~base_path:ctx.config.Workspace.base_path
+      meta.name
+      (fun () ->
+         launch_supervised_fiber_admitted
+           ~proactive_warmup_sec
+           ctx
+           meta
+           reg
+         |> Result.map_error (fun error ->
+           Supervised_launch_rejected error))
+  with
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_completed
+      result ->
+    result
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_denied ->
+    Error Supervised_launch_permit_mismatch
 ;;
 
 (* #10993: persona drift visibility.

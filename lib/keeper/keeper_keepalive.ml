@@ -71,16 +71,8 @@ let persist_directive_meta_update
   if not (String.equal config.Workspace.base_path entry.base_path)
   then Error "directive metadata config does not match the registry scope"
   else
-  let persist permit =
-    if
-      not
-        (Keeper_lifecycle_admission.Durable_transaction.permit_matches
-           permit
-           ~base_path:config.Workspace.base_path
-           entry.name)
-    then Error "directive metadata admission scope is invalid"
-    else
-      match
+  let persist_admitted () =
+    match
         Keeper_meta_store.update_meta_if_identity
           config
           ~name:entry.name
@@ -101,6 +93,20 @@ let persist_directive_meta_update
         if installed
         then Ok persisted
         else Error "directive metadata registry identity changed"
+  in
+  let persist permit =
+    match
+      Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
+        permit
+        ~base_path:config.Workspace.base_path
+        entry.name
+        persist_admitted
+    with
+    | Keeper_lifecycle_admission.Durable_transaction
+      .Permit_lease_completed result ->
+      result
+    | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_denied ->
+      Error "directive metadata admission scope is invalid"
   in
   match
     Keeper_lifecycle_admission.Durable_transaction
@@ -1212,18 +1218,22 @@ let start_keepalive_under_admission
       (ctx : _ context)
       (meta : keeper_meta)
   =
-  if
-    Keeper_lifecycle_admission.Durable_transaction.permit_matches
+  match
+    Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
       permit
       ~base_path:ctx.config.Workspace.base_path
       meta.name
-  then
-    start_keepalive_admitted
-      ~proactive_warmup_sec
-      ?lifecycle_token
-      ctx
-      meta
-  else
+      (fun () ->
+         start_keepalive_admitted
+           ~proactive_warmup_sec
+           ?lifecycle_token
+           ctx
+           meta)
+  with
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_completed
+      outcome ->
+    outcome
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_denied ->
     Keepalive_transaction_admission_denied
       (Keeper_lifecycle_admission.Durable_transaction.Authority_invalid
          { keeper_name = meta.name

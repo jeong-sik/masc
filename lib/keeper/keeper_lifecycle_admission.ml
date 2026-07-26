@@ -147,6 +147,10 @@ module Durable_transaction = struct
     | Admission_completed_with_attention of 'a * authority_failure
     | Admission_blocked of blocked_reason
 
+  type 'a permit_lease_result =
+    | Permit_lease_completed of 'a
+    | Permit_lease_denied
+
   let active_permit_scope_key : permit Eio.Fiber.key = Eio.Fiber.create_key ()
   let active_permit_lease_key : permit_lease Eio.Fiber.key =
     Eio.Fiber.create_key ()
@@ -596,6 +600,15 @@ module Durable_transaction = struct
       || lease_is_live_for_permit permit active_lease)
   ;;
 
+  let with_permit_lease permit ~base_path keeper_name fn =
+    if not (permit_scope_matches permit ~base_path keeper_name)
+    then Permit_lease_denied
+    else
+      match try_with_reentrant_lease permit (fun _ -> fn ()) with
+      | Some value -> Permit_lease_completed value
+      | None -> Permit_lease_denied
+  ;;
+
   let with_durable_lifecycle_admission config ~keeper_name fn =
     let acquire_fresh () =
       match authority_lock_path config keeper_name with
@@ -643,9 +656,15 @@ module Durable_transaction = struct
              permit
              ~base_path:config.Workspace.base_path
              keeper_name ->
-      (match try_with_reentrant_lease permit fn with
-       | Some value -> Admission_completed value
-       | None -> acquire_fresh ())
+      (match
+         with_permit_lease
+           permit
+           ~base_path:config.Workspace.base_path
+           keeper_name
+           (fun () -> fn permit)
+       with
+       | Permit_lease_completed value -> Admission_completed value
+       | Permit_lease_denied -> acquire_fresh ())
     | Some _ | None -> acquire_fresh ()
   ;;
 
@@ -883,6 +902,8 @@ module Durable_transaction = struct
   ;;
 
   module For_testing = struct
+    let permit_matches = permit_matches
+
     let replace_current_row ~config ~keeper_name ~row =
       match journal_parent config, journal_entropy () with
       | Error _, _ | _, Error _ -> Error "test authority unavailable"

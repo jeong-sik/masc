@@ -415,10 +415,11 @@ let test_reentrant_lease_drains_before_admission_release () =
            let exception_released =
              try
                ignore
-                 (Admission.with_durable_lifecycle_admission
-                    config
-                    ~keeper_name:"keeper-a"
-                    (fun _ -> raise Nested_admission_failure));
+                 (Admission.with_permit_lease
+                    permit
+                    ~base_path
+                    "keeper-a"
+                    (fun () -> raise Nested_admission_failure));
                false
              with Nested_admission_failure -> true
            in
@@ -433,10 +434,11 @@ let test_reentrant_lease_drains_before_admission_release () =
              try
                Eio.Cancel.sub (fun context ->
                  ignore
-                   (Admission.with_durable_lifecycle_admission
-                      config
-                      ~keeper_name:"keeper-a"
-                      (fun _ ->
+                   (Admission.with_permit_lease
+                      permit
+                      ~base_path
+                      "keeper-a"
+                      (fun () ->
                          Eio.Cancel.cancel
                            context
                            cancellation_reason;
@@ -452,16 +454,17 @@ let test_reentrant_lease_drains_before_admission_release () =
              cancellation_released;
            Eio.Fiber.fork ~sw (fun () ->
              let first_reentry =
-               Admission.with_durable_lifecycle_admission
-                 config
-                 ~keeper_name:"keeper-a"
-                 (fun leased_permit ->
+               Admission.with_permit_lease
+                 permit
+                 ~base_path
+                 "keeper-a"
+                 (fun () ->
                     Eio.Promise.resolve resolve_child_entered ();
                     Eio.Promise.await observe_after_close;
                     Eio.Promise.resolve
                       resolve_lease_observed
-                      (Admission.permit_matches
-                         leased_permit
+                      (Admission.For_testing.permit_matches
+                         permit
                          ~base_path
                          "keeper-a");
                     Eio.Promise.await release_child_body)
@@ -471,7 +474,7 @@ let test_reentrant_lease_drains_before_admission_release () =
                first_reentry;
              Eio.Promise.await allow_fresh_reentry;
              let inherited_permit_is_live =
-               Admission.permit_matches
+               Admission.For_testing.permit_matches
                  permit
                  ~base_path
                  "keeper-a"
@@ -481,11 +484,11 @@ let test_reentrant_lease_drains_before_admission_release () =
                  config
                  ~keeper_name:"keeper-a"
                  (fun fresh_permit ->
-                    ( Admission.permit_matches
+                    ( Admission.For_testing.permit_matches
                         permit
                         ~base_path
                         "keeper-a"
-                    , Admission.permit_matches
+                    , Admission.For_testing.permit_matches
                         fresh_permit
                         ~base_path
                         "keeper-a" ))
@@ -510,12 +513,9 @@ let test_reentrant_lease_drains_before_admission_release () =
     (Eio.Promise.await lease_observed);
   Eio.Promise.resolve resolve_release_child_body ();
   (match Eio.Promise.await first_reentry_done with
-   | Admission.Admission_completed () -> ()
-   | Admission.Admission_completed_with_attention ((), _) ->
-     fail "reentrant admission reported impossible lock-release attention"
-   | Admission.Admission_blocked reason ->
-     fail
-       (Admission.blocked_reason_to_wire reason));
+   | Admission.Permit_lease_completed () -> ()
+   | Admission.Permit_lease_denied ->
+     fail "direct permit operation lost its in-flight lease");
   (match Eio.Promise.await_exn outer_result with
    | Admission.Admission_completed () -> ()
    | Admission.Admission_completed_with_attention ((), _) ->

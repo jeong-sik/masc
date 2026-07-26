@@ -104,7 +104,19 @@ module Durable_transaction : sig
     | Admission_completed_with_attention of 'a * authority_failure
     | Admission_blocked of blocked_reason
 
-  val permit_matches : permit -> base_path:string -> string -> bool
+  type 'a permit_lease_result =
+    | Permit_lease_completed of 'a
+    | Permit_lease_denied
+
+  val with_permit_lease :
+    permit ->
+    base_path:string ->
+    string ->
+    (unit -> 'a) ->
+    'a permit_lease_result
+  (** Execute one permit-authorized operation under a counted lease. The
+      enclosing durable admission cannot release its authority lock until the
+      operation returns, raises, or is cancelled and the lease is released. *)
 
   val with_durable_lifecycle_admission :
     Workspace.config ->
@@ -143,6 +155,8 @@ module Durable_transaction : sig
   val projection_to_yojson : projection -> Yojson.Safe.t
 
   module For_testing : sig
+    val permit_matches : permit -> base_path:string -> string -> bool
+
     val replace_current_row :
       config:Workspace.config ->
       keeper_name:string ->

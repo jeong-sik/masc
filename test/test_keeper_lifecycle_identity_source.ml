@@ -58,10 +58,12 @@ let test_repairs_share_typed_transition () =
   check_contains tools "Keeper_identity_transition.replace_or_recover_exact";
   check_contains heartbeat "with_durable_lifecycle_admission";
   check_contains tools "with_durable_lifecycle_admission";
-  check_contains transition "permit_matches";
+  check_contains transition "with_permit_lease";
   check_contains transition "Keeper_meta_store.replace_meta";
   check_contains transition "Keeper_meta_store.recover_meta_exact";
-  check_contains meta_store "identity_write_admitted";
+  check_contains meta_store "with_identity_write_admission";
+  check_not_contains transition "permit_matches";
+  check_not_contains meta_store "permit_matches";
   check_not_contains heartbeat "nonce + 1";
   check_not_contains tools "nonce + 1"
 ;;

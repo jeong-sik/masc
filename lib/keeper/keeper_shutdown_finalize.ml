@@ -746,18 +746,7 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
               (Keeper_approval_queue.summary_owner_retirement_error_to_string
                  error)))
   in
-  let finish ~permit ~lifecycle_token registry_unregistered =
-    if
-      not
-        (Keeper_lifecycle_admission.Durable_transaction.permit_matches
-           permit
-           ~base_path:config.Workspace.base_path
-           operation.keeper_name)
-    then
-      Error
-        (Finalization_draining
-           (operation, "shutdown finalization lost durable lifecycle admission"))
-    else
+  let finish_admitted ~lifecycle_token registry_unregistered =
     match publish_generation_floor_before_meta_removal ~config operation with
     | Error detail -> block ~config operation Meta_remove detail
     | Ok () ->
@@ -806,6 +795,23 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
          match replace ~config finalized with
          | Error _ as error -> error
          | Ok persisted_finalized -> Ok persisted_finalized))
+  in
+  let finish ~permit ~lifecycle_token registry_unregistered =
+    match
+      Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
+        permit
+        ~base_path:config.Workspace.base_path
+        operation.keeper_name
+        (fun () ->
+           finish_admitted ~lifecycle_token registry_unregistered)
+    with
+    | Keeper_lifecycle_admission.Durable_transaction
+      .Permit_lease_completed result ->
+      result
+    | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_denied ->
+      Error
+        (Finalization_draining
+           (operation, "shutdown finalization lost durable lifecycle admission"))
   in
   match begin_exact_retirement ~base_path:config.base_path operation entry with
   | Error detail -> block ~config operation Registry_unregister detail

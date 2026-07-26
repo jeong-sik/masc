@@ -551,10 +551,16 @@ let immutable_ref_of_bytes raw =
   else Error Noncanonical_ref
 ;;
 
-let immutable_ref_authority_leaf reference = reference.authority_leaf
-let immutable_ref_transaction_leaf reference = reference.transaction_leaf
-let immutable_ref_sha256 reference = reference.sha256
-let immutable_ref_byte_count reference = reference.byte_count
+let immutable_ref_authority_leaf (reference : immutable_ref) =
+  reference.authority_leaf
+;;
+
+let immutable_ref_transaction_leaf (reference : immutable_ref) =
+  reference.transaction_leaf
+;;
+
+let immutable_ref_sha256 (reference : immutable_ref) = reference.sha256
+let immutable_ref_byte_count (reference : immutable_ref) = reference.byte_count
 
 let authority_shard_for_keeper ~keeper_name =
   if String.equal (String.trim keeper_name) ""

@@ -542,47 +542,67 @@ let write_meta_for_lifecycle token config m =
   |> Result.map_error write_meta_error_to_string
 ;;
 
-let identity_write_admitted permit config m =
-  Keeper_lifecycle_admission.Durable_transaction.permit_matches
-    permit
-    ~base_path:config.Workspace.base_path
-    m.Keeper_meta_contract.name
+let with_identity_write_admission permit config m ~denied fn =
+  match
+    Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
+      permit
+      ~base_path:config.Workspace.base_path
+      m.Keeper_meta_contract.name
+      fn
+  with
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_completed
+      result ->
+    result
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_denied ->
+    Error denied
 ;;
 
 let create_meta ?lifecycle_token permit witness config m =
-  if not (identity_write_admitted permit config m)
-  then Error "Keeper identity creation requires the active durable lifecycle admission"
-  else
+  with_identity_write_admission
+    permit
+    config
+    m
+    ~denied:
+      "Keeper identity creation requires the active durable lifecycle admission"
+    (fun () ->
     write_meta_typed
       ?lifecycle_token
       ~identity_authority:(Create_witness witness)
       config
       m
-    |> Result.map_error write_meta_error_to_string
+    |> Result.map_error write_meta_error_to_string)
 ;;
 
 let replace_meta ?lifecycle_token permit witness config m =
-  if not (identity_write_admitted permit config m)
-  then Error "Keeper identity replacement requires the active durable lifecycle admission"
-  else
+  with_identity_write_admission
+    permit
+    config
+    m
+    ~denied:
+      "Keeper identity replacement requires the active durable lifecycle admission"
+    (fun () ->
     write_meta_typed
       ?lifecycle_token
       ~identity_authority:(Replace_witness witness)
       config
       m
-    |> Result.map_error write_meta_error_to_string
+    |> Result.map_error write_meta_error_to_string)
 ;;
 
 let recover_meta_exact ?lifecycle_token permit witness config m =
-  if not (identity_write_admitted permit config m)
-  then Error "Keeper identity recovery requires the active durable lifecycle admission"
-  else
+  with_identity_write_admission
+    permit
+    config
+    m
+    ~denied:
+      "Keeper identity recovery requires the active durable lifecycle admission"
+    (fun () ->
     write_meta_typed
       ?lifecycle_token
       ~identity_authority:(Recover_exact_witness witness)
       config
       m
-    |> Result.map_error write_meta_error_to_string
+    |> Result.map_error write_meta_error_to_string)
 ;;
 
 let is_version_conflict_error msg =

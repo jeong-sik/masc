@@ -5,20 +5,12 @@ type publication =
 
 let ( let* ) result fn = match result with Ok value -> fn value | Error error -> Error error
 
-let replace_or_recover_exact
+let replace_or_recover_exact_admitted
       (permit : Keeper_lifecycle_admission.Durable_transaction.permit)
       ~(config : Workspace.config)
       (meta : Keeper_meta_contract.keeper_meta)
       ~expected_agent_name
   =
-  if
-    not
-      (Keeper_lifecycle_admission.Durable_transaction.permit_matches
-         permit
-         ~base_path:config.Workspace.base_path
-         meta.name)
-  then Error "keeper identity transition lost durable lifecycle admission"
-  else
   let previous_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let* source =
     Keeper_lifecycle_nonce.identity
@@ -109,4 +101,24 @@ let replace_or_recover_exact
         updated
   in
   Ok updated
+;;
+
+let replace_or_recover_exact permit ~config meta ~expected_agent_name =
+  match
+    Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
+      permit
+      ~base_path:config.Workspace.base_path
+      meta.Keeper_meta_contract.name
+      (fun () ->
+         replace_or_recover_exact_admitted
+           permit
+           ~config
+           meta
+           ~expected_agent_name)
+  with
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_completed
+      result ->
+    result
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_denied ->
+    Error "keeper identity transition lost durable lifecycle admission"
 ;;

@@ -544,18 +544,22 @@ let floor_for_create ~base_path ~keeper_id =
     else Ok (Int64.succ generation)
 ;;
 
-let mutation_admitted permit ~base_path ~keeper_id =
-  if
-    Keeper_lifecycle_admission.Durable_transaction.permit_matches
+let with_mutation_admission permit ~base_path ~keeper_id fn =
+  match
+    Keeper_lifecycle_admission.Durable_transaction.with_permit_lease
       permit
       ~base_path
       keeper_id
-  then Ok ()
-  else Error Lifecycle_admission_mismatch
+      fn
+  with
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_completed
+      result ->
+    result
+  | Keeper_lifecycle_admission.Durable_transaction.Permit_lease_denied ->
+    Error Lifecycle_admission_mismatch
 ;;
 
-let create permit ~base_path ~keeper_id ~owner_id () =
-  let* () = mutation_admitted permit ~base_path ~keeper_id in
+let create_admitted ~base_path ~keeper_id ~owner_id () =
   let* floor = floor_for_create ~base_path ~keeper_id in
   let* nonce =
     next_for_base_path_with_hooks
@@ -568,6 +572,11 @@ let create permit ~base_path ~keeper_id ~owner_id () =
       ()
   in
   Ok (witness_of_nonce ~base_path ~keeper_id ~source:None ~owner_id nonce)
+;;
+
+let create permit ~base_path ~keeper_id ~owner_id () =
+  with_mutation_admission permit ~base_path ~keeper_id (fun () ->
+    create_admitted ~base_path ~keeper_id ~owner_id ())
 ;;
 
 let replace ~base_path ~keeper_id ~source ~owner_id () =
@@ -626,8 +635,7 @@ let replace ~base_path ~keeper_id ~source ~owner_id () =
   Ok (witness_of_nonce ~base_path ~keeper_id ~source:(Some source) ~owner_id nonce)
 ;;
 
-let recover_exact permit ~base_path ~keeper_id ~source ~target () =
-  let* () = mutation_admitted permit ~base_path ~keeper_id in
+let recover_exact_admitted ~base_path ~keeper_id ~source ~target () =
   if Filename.is_relative base_path
   then Error (Invalid_base_path base_path)
   else
@@ -679,6 +687,16 @@ let recover_exact permit ~base_path ~keeper_id ~source ~target () =
            if forward
            then Ok { base_path; keeper_id; source; target }
            else Error Authority_identity_mismatch)
+;;
+
+let recover_exact permit ~base_path ~keeper_id ~source ~target () =
+  with_mutation_admission permit ~base_path ~keeper_id (fun () ->
+    recover_exact_admitted
+      ~base_path
+      ~keeper_id
+      ~source
+      ~target
+      ())
 ;;
 
 let recover_published_replace ~base_path ~keeper_id ~source () =
@@ -756,8 +774,7 @@ let settle_published_replace
   | error -> Error error
 ;;
 
-let replace_settled permit ~base_path ~keeper_id ~source ~owner_id () =
-  let* () = mutation_admitted permit ~base_path ~keeper_id in
+let replace_settled_admitted ~base_path ~keeper_id ~source ~owner_id () =
   match replace ~base_path ~keeper_id ~source ~owner_id () with
   | Ok witness -> Ok (Settled_allocated witness)
   | Error
@@ -776,6 +793,16 @@ let replace_settled permit ~base_path ~keeper_id ~source ~owner_id () =
     recover_published_replace ~base_path ~keeper_id ~source ()
     |> Result.map (fun witness -> Settled_recovered (witness, None))
   | Error error -> Error error
+;;
+
+let replace_settled permit ~base_path ~keeper_id ~source ~owner_id () =
+  with_mutation_admission permit ~base_path ~keeper_id (fun () ->
+    replace_settled_admitted
+      ~base_path
+      ~keeper_id
+      ~source
+      ~owner_id
+      ())
 ;;
 
 let runtime_int_of_nonce nonce =

@@ -3229,7 +3229,8 @@ let test_create_runtime_meta_crash_recovery_removes_dangling_runtime () =
                   Keeper_turn_up_create.create_keeper ctx parsed));
           false
         with
-        | Failure "injected create process crash" -> true
+        | Failure message ->
+          String.equal message "injected create process crash"
       in
       Alcotest.(check bool)
         "create crash hook escaped before metadata publication"
@@ -3279,7 +3280,8 @@ let test_update_runtime_meta_crash_recovery_retries_durable_intent () =
               Keeper_turn_up_update.update_keeper ctx parsed original));
       false
     with
-    | Failure "injected update process crash" -> true
+    | Failure message ->
+      String.equal message "injected update process crash"
   in
   Alcotest.(check bool)
     "update crash hook escaped before metadata publication"

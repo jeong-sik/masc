@@ -1274,8 +1274,43 @@ let verify_payload config (journal : journal) =
     ~expected_generation:journal.expected_generation
 ;;
 
+exception Cancellation_recovery_failed of
+  { original : exn
+  ; recovery_errors : rollback_error list
+  }
+
+let cancellation_with_recovery_errors cancelled recovery_errors =
+  if recovery_errors = []
+  then cancelled
+  else
+    match cancelled with
+    | Eio.Cancel.Cancelled
+        (Cancellation_recovery_failed
+           { original; recovery_errors = existing }) ->
+      Eio.Cancel.Cancelled
+        (Cancellation_recovery_failed
+           { original
+           ; recovery_errors = existing @ recovery_errors
+           })
+    | Eio.Cancel.Cancelled original ->
+      Eio.Cancel.Cancelled
+        (Cancellation_recovery_failed { original; recovery_errors })
+    | exception_ ->
+      Eio.Cancel.Cancelled
+        (Cancellation_recovery_failed
+           { original = exception_
+           ; recovery_errors
+           })
+;;
+
 module For_testing = struct
   include Boundary_hooks_for_testing
+
+  let cancellation_with_runtime_recovery_failure ~detail cancelled =
+    cancellation_with_recovery_errors
+      cancelled
+      [ Rollback_runtime_assignment_failed detail ]
+  ;;
 
   let reserved_journal_row ~owner_id ~original ~candidate =
     match
@@ -1852,47 +1887,6 @@ let fail_with_rollback permit token config journal payload original_entry cause 
   | [] -> Error error
   | _ -> Error (Rollback_failed { cause; errors })
 ;;
-
-exception Cancellation_recovery_failed of
-  { original : exn
-  ; recovery_errors : rollback_error list
-  }
-
-let cancellation_with_recovery_errors cancelled recovery_errors =
-  if recovery_errors = []
-  then cancelled
-  else
-    match cancelled with
-    | Eio.Cancel.Cancelled
-        (Cancellation_recovery_failed
-           { original; recovery_errors = existing }) ->
-      Eio.Cancel.Cancelled
-        (Cancellation_recovery_failed
-           { original
-           ; recovery_errors = existing @ recovery_errors
-           })
-    | Eio.Cancel.Cancelled original ->
-      Eio.Cancel.Cancelled
-        (Cancellation_recovery_failed { original; recovery_errors })
-    | exception_ ->
-      Eio.Cancel.Cancelled
-        (Cancellation_recovery_failed
-           { original = exception_
-           ; recovery_errors
-           })
-;;
-
-module Previous_for_testing = For_testing
-
-module For_testing = struct
-  include Previous_for_testing
-
-  let cancellation_with_runtime_recovery_failure ~detail cancelled =
-    cancellation_with_recovery_errors
-      cancelled
-      [ Rollback_runtime_assignment_failed detail ]
-  ;;
-end
 
 let validate_registry_snapshot config original =
   match Keeper_registry.get ~base_path:config.Workspace.base_path original.name with

@@ -508,7 +508,8 @@ let same_intent left right =
     (row_to_bytes (Active right))
 ;;
 
-let observed_as expected = function
+let observed_as observed expected =
+  match observed, expected with
   | Active observed, Active expected ->
     same_intent observed expected
   | Cleared observed, Cleared expected ->
@@ -609,4 +610,3 @@ let admission_decision config keeper_name =
   | Ok (Some (Cleared _ as row)) ->
     Admitted (Some (row_evidence row))
 ;;
-

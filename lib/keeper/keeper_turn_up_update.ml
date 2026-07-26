@@ -216,7 +216,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
   match resolve_active_goal_ids ctx.config p old.active_goal_ids with
   | Error msg -> tool_result_error msg
   | Ok validated_active_goal_ids ->
-  let active_goal_ids_for source_meta =
+  let active_goal_ids_for (source_meta : keeper_meta) =
     match p.active_goal_ids_opt with
     | Some _ -> validated_active_goal_ids
     | None ->

@@ -75,13 +75,6 @@ val resolved_max_context_for_turn
   -> Keeper_context_runtime.max_context_resolution
   -> int
 
-(** Ensure local-provider discovery is refreshed before a turn when the
-    selected labels depend on runtime discovery. Exposed for targeted tests. *)
-val ensure_local_discovery_ready
-  :  ?refresh:(string list -> bool)
-  -> string list
-  -> (unit, string) result
-
 (* runtime→Runtime 숙청: phase-buffer liveness probe 기계 재export 제거
    (단일 runtime 에서 죽은 코드였으므로 제거됨). *)
 

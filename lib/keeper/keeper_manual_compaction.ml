@@ -16,12 +16,12 @@ type applied_receipt =
   }
 
 type success =
-  { recovery : Keeper_context_runtime.compaction_recovery
+  { recovery : Keeper_post_turn.compaction_recovery
   ; receipt : applied_receipt
   }
 
 type committed =
-  { recovery : Keeper_context_runtime.compaction_recovery
+  { recovery : Keeper_post_turn.compaction_recovery
   ; installation : Keeper_checkpoint_store.installed_checkpoint
   ; lifecycle : post_install_lifecycle
   }
@@ -29,6 +29,11 @@ type committed =
 type operation_outcome =
   | Compacted of committed
   | No_compaction of Keeper_post_turn.no_compaction
+
+type uncommitted_resolution =
+  | Uncommitted_no_compaction of Keeper_post_turn.no_compaction
+  | Uncommitted_observed_commit of Keeper_post_turn.compaction_recovery
+  | Uncommitted_resolution_failed of Keeper_post_turn.compaction_recovery_error
 
 type pre_install_lifecycle_stage =
   | Operator_request
@@ -209,7 +214,7 @@ let append_manifest
     ~(installation : Keeper_checkpoint_store.installed_checkpoint)
     ~lifecycle
     recovery =
-  let trigger = recovery.Keeper_context_runtime.trigger in
+  let trigger = recovery.Keeper_post_turn.trigger in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let context : Keeper_runtime_manifest.turn_context =
     { manifest_keeper_name = meta.name
@@ -310,19 +315,21 @@ let run_start_lifecycle ~config ~meta =
 ;;
 
 let run_commit ~config ~meta prepared =
-  match Keeper_context_runtime.commit_prepared_compaction prepared with
-  | Error (Keeper_post_turn.No_compaction no_compaction as error) ->
+  let terminal no_compaction =
+    let error = Keeper_post_turn.No_compaction no_compaction in
     let failure_dispatch =
       dispatch_failed ~config ~meta (Keeper_post_turn.compaction_recovery_error_to_tag error)
     in
     observe_terminal_dispatch_failure ~meta failure_dispatch;
     Ok (No_compaction no_compaction)
-  | Error error ->
+  in
+  let failed error =
     let failure_dispatch =
       dispatch_failed ~config ~meta (Keeper_post_turn.compaction_recovery_error_to_tag error)
     in
     Error (Recovery (error, failure_dispatch))
-  | Ok recovery ->
+  in
+  let committed (recovery : Keeper_post_turn.compaction_recovery) =
     (match recovery.checkpoint_installation with
      | Keeper_checkpoint_store.Not_installed not_installed ->
        let error = Keeper_post_turn.Checkpoint_cas_failed not_installed.cause in
@@ -364,6 +371,39 @@ let run_commit ~config ~meta prepared =
          ~name:meta.name
          recovery;
        Ok (Compacted { recovery; installation = installed; lifecycle }))
+  in
+  let completed = function
+    | Keeper_post_turn.Commit_completion_committed recovery ->
+      committed recovery
+    | Keeper_post_turn.Commit_completion_rejected no_compaction ->
+      terminal no_compaction
+    | Keeper_post_turn.Commit_completion_failed
+        { error; committed = None } ->
+      failed error
+    | Keeper_post_turn.Commit_completion_failed
+        { error; committed = Some recovery } ->
+      Log.Keeper.error
+        ~keeper_name:meta.name
+        "manual compaction observed a committed checkpoint with failed exact-domain finalization: %s"
+        (Keeper_post_turn.compaction_recovery_error_to_string error);
+      committed recovery
+  in
+  match Keeper_context_runtime.commit_prepared_compaction prepared with
+  | Keeper_post_turn.Committed recovery
+  | Keeper_post_turn.Already_committed recovery ->
+    committed recovery
+  | Keeper_post_turn.Already_rejected no_compaction ->
+    terminal no_compaction
+  | Keeper_post_turn.Commit_failed { error; committed = None } ->
+    failed error
+  | Keeper_post_turn.Commit_failed { error; committed = Some recovery } ->
+    Log.Keeper.error
+      ~keeper_name:meta.name
+      "manual compaction committed checkpoint but exact-domain finalization failed: %s"
+      (Keeper_post_turn.compaction_recovery_error_to_string error);
+    committed recovery
+  | Keeper_post_turn.Commit_in_progress waiter ->
+    Eio.Promise.await waiter |> completed
 ;;
 
 let finish_preparation ~config ~meta = function
@@ -390,29 +430,12 @@ let finish_preparation ~config ~meta = function
 
 let prepare_with ~prepare_compaction ~config ~meta =
   let base_dir = Keeper_types_profile.session_base_dir config in
-  let projection_request =
-    Keeper_compaction_projection_target.request
-      ~assignment_id:(runtime_id_of_meta meta)
-      ~resolve_context_window:(fun runtime ->
-        match
-          Keeper_context_runtime.resolve_max_context_resolution_for_runtime
-            ~requested_override:meta.max_context_override
-            runtime
-        with
-        | Ok resolution ->
-          Keeper_compaction_projection_target.Resolved_context_window
-            resolution.effective_budget
-        | Error (Invalid_requested_context_override value) ->
-          Keeper_compaction_projection_target.Invalid_context_window value
-        | Error (Runtime_context_window_unavailable _) ->
-          Keeper_compaction_projection_target.Context_window_not_resolved)
-  in
   ( base_dir
   , prepare_compaction
+      ~base_path:config.base_path
       ~base_dir
       ~meta
-      ~trigger:Compaction_trigger.Manual
-      ~projection_request )
+      ~trigger:Compaction_trigger.Manual )
 ;;
 
 let observe_manifest ~keeper_name = function
@@ -436,6 +459,45 @@ let preserve_no_compaction_after_final_admission_busy = function
   | Keeper_event_queue_state.Structurally_unchanged
   | Keeper_event_queue_state.Checkpoint_not_reduced ->
     false
+;;
+
+let resolve_uncommitted = function
+  | Keeper_post_turn.Uncommitted_terminalized no_compaction ->
+    Uncommitted_no_compaction no_compaction
+  | Keeper_post_turn.Uncommitted_already_committed recovery ->
+    Uncommitted_observed_commit recovery
+  | Keeper_post_turn.Uncommitted_failed error ->
+    Uncommitted_resolution_failed error
+  | Keeper_post_turn.Uncommitted_commit_in_progress waiter ->
+    (match Eio.Promise.await waiter with
+     | Keeper_post_turn.Commit_completion_committed recovery ->
+       Uncommitted_observed_commit recovery
+     | Keeper_post_turn.Commit_completion_rejected no_compaction ->
+       Uncommitted_no_compaction no_compaction
+     | Keeper_post_turn.Commit_completion_failed
+         { error; committed = None } ->
+       Uncommitted_resolution_failed error
+     | Keeper_post_turn.Commit_completion_failed
+         { committed = Some recovery; _ } ->
+       Uncommitted_observed_commit recovery)
+;;
+
+let operation_of_observed_commit
+      (recovery : Keeper_post_turn.compaction_recovery)
+  =
+  match recovery.Keeper_post_turn.checkpoint_installation with
+  | Keeper_checkpoint_store.Installed installation ->
+    Ok
+      (Compacted
+         { recovery
+         ; installation
+         ; lifecycle = Completion_applied
+         })
+  | Keeper_checkpoint_store.Not_installed not_installed ->
+    Error
+      (Recovery
+         ( Keeper_post_turn.Checkpoint_cas_failed not_installed.cause
+         , Ok () ))
 ;;
 
 let run_admitted_with
@@ -463,18 +525,7 @@ let run_admitted_with
         ~keeper_name:meta.name
         (fun () ->
           match run_start_lifecycle ~config ~meta with
-          | Error failure ->
-            (match preparation with
-             | Ok prepared ->
-               Ok
-                 (No_compaction
-                    (Keeper_post_turn.no_compaction_of_uncommitted_prepared
-                       ~cause:
-                         Keeper_event_queue_state.Lifecycle_transition_failed_after_dispatch
-                       prepared))
-             | Error (Keeper_post_turn.No_compaction no_compaction) ->
-               Ok (No_compaction no_compaction)
-             | Error _ -> Error failure)
+          | Error failure -> Error failure
           | Ok () ->
             finish_preparation
               ~config
@@ -487,13 +538,84 @@ let run_admitted_with
      | `Busy block ->
        (match preparation with
         | Ok prepared ->
-          `No_compaction
-            (Keeper_post_turn.no_compaction_of_uncommitted_prepared prepared)
+          (match
+             Keeper_post_turn.no_compaction_of_uncommitted_prepared prepared
+             |> resolve_uncommitted
+           with
+           | Uncommitted_no_compaction no_compaction ->
+             `No_compaction no_compaction
+           | Uncommitted_observed_commit recovery ->
+             (match operation_of_observed_commit recovery with
+              | Ok (Compacted committed) ->
+                let manifest =
+                  append_compaction_manifest
+                    ~config
+                    ~base_dir
+                    ~meta
+                    ~installation:committed.installation
+                    ~lifecycle:committed.lifecycle
+                    committed.recovery
+                in
+                observe_manifest ~keeper_name:meta.name manifest;
+                `Applied
+                  { recovery = committed.recovery
+                  ; receipt =
+                      { installation = committed.installation
+                      ; lifecycle = committed.lifecycle
+                      ; manifest
+                      }
+                  }
+              | Ok (No_compaction no_compaction) ->
+                `No_compaction no_compaction
+              | Error failure -> `Compaction_failed failure)
+           | Uncommitted_resolution_failed error ->
+             `Compaction_failed (Recovery (error, Ok ())))
         | Error (Keeper_post_turn.No_compaction no_compaction)
           when preserve_no_compaction_after_final_admission_busy no_compaction.reason ->
           `No_compaction no_compaction
         | Error _ -> `Busy block)
-     | `Ran (Error failure) -> `Compaction_failed failure
+     | `Ran (Error failure) ->
+       (match preparation with
+        | Ok prepared ->
+          (match
+             Keeper_post_turn.no_compaction_of_uncommitted_prepared
+               ~cause:
+                 Keeper_event_queue_state.Lifecycle_transition_failed_after_dispatch
+               prepared
+             |> resolve_uncommitted
+           with
+           | Uncommitted_no_compaction no_compaction ->
+             `No_compaction no_compaction
+           | Uncommitted_observed_commit recovery ->
+             (match operation_of_observed_commit recovery with
+              | Ok (Compacted committed) ->
+                let manifest =
+                  append_compaction_manifest
+                    ~config
+                    ~base_dir
+                    ~meta
+                    ~installation:committed.installation
+                    ~lifecycle:committed.lifecycle
+                    committed.recovery
+                in
+                observe_manifest ~keeper_name:meta.name manifest;
+                `Applied
+                  { recovery = committed.recovery
+                  ; receipt =
+                      { installation = committed.installation
+                      ; lifecycle = committed.lifecycle
+                      ; manifest
+                      }
+                  }
+              | Ok (No_compaction no_compaction) ->
+                `No_compaction no_compaction
+              | Error observed_failure ->
+                `Compaction_failed observed_failure)
+           | Uncommitted_resolution_failed _ ->
+             `Compaction_failed failure)
+        | Error (Keeper_post_turn.No_compaction no_compaction) ->
+          `No_compaction no_compaction
+        | Error _ -> `Compaction_failed failure)
      | `Ran (Ok (Compacted committed)) ->
        let manifest =
          append_compaction_manifest
@@ -523,13 +645,13 @@ let run_admitted
     () =
   run_admitted_with
     ~append_compaction_manifest:append_manifest
-    ~prepare_compaction:(fun ~base_dir ~meta ~trigger ~projection_request ->
+    ~prepare_compaction:(fun ~base_path ~base_dir ~meta ~trigger ->
       Keeper_context_runtime.prepare_compaction
         ?exact_execution_guard
+        ~base_path
         ~base_dir
         ~meta
         ~trigger
-        ~projection_request
         ())
     ~config
     ~meta

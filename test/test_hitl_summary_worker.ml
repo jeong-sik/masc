@@ -37,9 +37,29 @@ let with_temp_dir prefix f =
 
 let install_queue base_path =
   Q.For_testing.reset_runtime_state ();
+  Masc.Keeper_registry.For_testing.clear ();
   match Q.install_persistence ~base_path with
   | Ok _ -> ()
   | Error error -> fail (Q.install_error_to_string error)
+;;
+
+let ensure_registered_keeper ~base_path keeper_name =
+  match Masc.Keeper_registry.get ~base_path keeper_name with
+  | Some _ -> ()
+  | None ->
+    let meta =
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_name
+          ; "trace_id", `String ("trace-" ^ keeper_name)
+          ])
+      |> Result.get_ok
+    in
+    ignore
+      (Masc.Keeper_registry.register_offline
+         ~base_path
+         keeper_name
+         meta)
 ;;
 
 let pending_entry
@@ -85,7 +105,9 @@ let pending_entry
    | Ok false -> fail "summary did not enter pending state"
    | Error error -> fail (Q.summary_transition_error_to_string error));
   match Q.get_pending_entry ~id with
-  | Some entry -> entry
+  | Some entry ->
+    ensure_registered_keeper ~base_path entry.keeper_name;
+    entry
   | None -> fail "pending approval disappeared"
 ;;
 
@@ -132,25 +154,10 @@ let prepare_exn entry =
   | Error detail -> fail detail
 ;;
 
-let test_readiness_rejects_lane_without_json_guarantee () =
-  Prompt_registry.set_markdown_dir
-    (Masc_test_deps.source_path "config/prompts");
-  let slot_id = "hitl-readiness-no-json" in
-  publish_lane
-    [ slot_id ]
-    (F.resolver_snapshot
-       ~supports_response_format_json:false
-       ~supports_structured_output:false
-       ~source:"hitl-readiness-no-json"
-       [ { id = slot_id; base_url = "http://127.0.0.1:9" } ]);
-  match Worker.readiness () with
-  | Ok () -> fail "readiness admitted a lane without the HITL output guarantee"
-  | Error detail ->
-    check
-      string
-      "readiness reports OAS admission rejection"
-      "HITL exact-output flow admitted no candidates"
-      detail
+let require_executed = function
+  | Worker.Executed -> ()
+  | Worker.Deferred_unregistered ->
+    fail "registered HITL exact-flow owner was unexpectedly deferred"
 ;;
 
 let visible_after_rename_writer path body =
@@ -169,6 +176,14 @@ exception Unknown_writer_failure
 exception Cancel_after_request_arrived
 
 let unknown_writer _path _body = raise Unknown_writer_failure
+
+let[@inline never] raise_injected_cancellation expected_backtrace payload =
+  try raise (Eio.Cancel.Cancelled payload) with
+  | Eio.Cancel.Cancelled _ as cancellation ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    expected_backtrace := Some backtrace;
+    Printexc.raise_with_backtrace cancellation backtrace
+;;
 
 let rec await_condition ~clock ~remaining ~failure predicate =
   if predicate ()
@@ -293,7 +308,8 @@ let test_json_mode_request_carries_canonical_domain_schema () =
          ~net
          ~clock
          ~on_summary:(fun _ -> ())
-         (prepare_exn entry);
+         (prepare_exn entry)
+       |> require_executed;
        let request_body =
          match F.request_bodies server with
          | [ body ] -> Yojson.Safe.from_string body
@@ -329,8 +345,12 @@ let test_json_mode_request_carries_canonical_domain_schema () =
 ;;
 
 let admission_id = function
-  | EO.Candidate_admitted candidate -> candidate.identity.candidate_id
-  | EO.Candidate_rejected { identity; _ } -> identity.candidate_id
+  | EO.Candidate_admitted candidate -> candidate.visit.identity.candidate_id
+  | EO.Candidate_rejected rejection ->
+    (EO.candidate_rejection_identity rejection).candidate_id
+;;
+
+let candidate_id (identity : EO.flow_candidate_identity) = identity.candidate_id
 ;;
 
 let test_flow_order_completion_and_replay () =
@@ -370,15 +390,27 @@ let test_flow_order_completion_and_replay () =
        let evidence = Worker.For_testing.flow_evidence prepared in
        check
          (list string)
-         "immutable admission order"
+         "immutable candidate order"
          [ "hitl-first"; "hitl-second" ]
+         (List.map candidate_id evidence.candidate_snapshot);
+       check
+         (list string)
+         "admission is deferred until execution"
+         []
          (List.map admission_id evidence.admissions);
        let delivered = ref None in
        Worker.For_testing.execute_prepared_flow
          ~net
          ~clock
          ~on_summary:(fun summary -> delivered := Some summary)
-         prepared;
+         prepared
+       |> require_executed;
+       check
+         (list string)
+         "only the reached candidate is admitted"
+         [ "hitl-first" ]
+         ((Worker.For_testing.flow_evidence prepared).admissions
+          |> List.map admission_id);
        check int "first candidate posted once" 1 (F.post_count first);
        check int "second candidate not used" 0 (F.post_count second);
        (match Q.get_pending_entry ~id:entry.id with
@@ -396,7 +428,8 @@ let test_flow_order_completion_and_replay () =
          ~net
          ~clock
          ~on_summary:(fun _ -> fail "replay delivered a second summary")
-         prepared;
+         prepared
+       |> require_executed;
        check int "replay made no second POST" 1 (F.post_count first))
 ;;
 
@@ -429,7 +462,8 @@ let test_predispatch_failure_advances_only_to_oas_successor () =
          ~net
          ~clock
          ~on_summary:(fun _ -> ())
-         (prepare_exn entry);
+         (prepare_exn entry)
+       |> require_executed;
        check int "OAS-selected successor posted once" 1 (F.post_count successor);
        match Q.get_pending_entry ~id:entry.id with
        | Some
@@ -476,6 +510,7 @@ let incapable_snapshot base_url =
 ;;
 
 let test_all_candidates_rejected_before_network () =
+  run_eio @@ fun ~sw:_ ~net ~clock ->
   with_temp_dir "hitl-all-rejected" @@ fun base_path ->
   Fun.protect
     ~finally:Q.For_testing.reset_runtime_state
@@ -487,14 +522,38 @@ let test_all_candidates_rejected_before_network () =
          [ "hitl-incapable" ]
          (incapable_snapshot "http://127.0.0.1:1");
        let entry = pending_entry ~base_path () in
-       match Worker.For_testing.prepare_flow ~entry with
-       | Ok _ -> fail "incapable candidate unexpectedly admitted"
-       | Error detail ->
-         check bool "admission failure is explicit" true
-           (Astring.String.is_infix ~affix:"admitted no candidates" detail);
-         (match Q.get_pending_entry ~id:entry.id with
-          | Some { exact_attempt = Q.Exact_unbound; _ } -> ()
-          | _ -> fail "admission failure mutated the exact queue binding"))
+       let prepared = prepare_exn entry in
+       let before = Worker.For_testing.flow_evidence prepared in
+       check
+         (list string)
+         "incapable topology remains frozen"
+         [ "hitl-incapable" ]
+         (List.map candidate_id before.candidate_snapshot);
+       check
+         (list string)
+         "incapable candidate is not pre-admitted"
+         []
+         (List.map admission_id before.admissions);
+       Worker.For_testing.execute_prepared_flow
+         ~net
+         ~clock
+         ~on_summary:(fun _ -> fail "incapable candidate delivered a summary")
+         prepared
+       |> require_executed;
+       check
+         (list string)
+         "execution records the rejected candidate"
+         [ "hitl-incapable" ]
+         ((Worker.For_testing.flow_evidence prepared).admissions
+          |> List.map admission_id);
+       match Q.get_pending_entry ~id:entry.id with
+       | Some
+           { exact_attempt = Q.Exact_unbound
+           ; summary_status = Q.Summary_failed { retryable = false; _ }
+           ; _
+           } ->
+         ()
+       | _ -> fail "pre-network rejection was not durably terminal")
 ;;
 
 let test_visible_bind_blocks_dispatch () =
@@ -524,7 +583,8 @@ let test_visible_bind_blocks_dispatch () =
          ~net
          ~clock
          ~on_summary:(fun _ -> fail "unconfirmed bind delivered a summary")
-         (prepare_exn entry);
+         (prepare_exn entry)
+       |> require_executed;
        check int "unconfirmed bind forbids POST" 0 (F.post_count server);
        match Q.get_pending_entry ~id:entry.id with
        | Some
@@ -570,7 +630,8 @@ let test_visible_advance_blocks_successor () =
          ~net
          ~clock
          ~on_summary:(fun _ -> fail "unconfirmed release advanced the flow")
-         (prepare_exn entry);
+         (prepare_exn entry)
+       |> require_executed;
        check int "unconfirmed release forbids successor POST" 0 (F.post_count successor);
        match Q.get_pending_entry ~id:entry.id with
        | Some
@@ -618,6 +679,7 @@ let test_visible_completion_blocks_gate_delivery () =
             ~clock
             ~on_summary:(fun _ -> delivered := true)
             (prepare_exn entry)
+          |> require_executed
         with
         | exception Worker.Exact_terminalization_persistence_failed _ -> ()
         | () -> fail "visible completion did not signal persistence uncertainty");
@@ -678,7 +740,8 @@ let test_flow_execution_failure_quarantines_and_blocks_owner () =
          ~net
          ~clock
          ~on_summary:(fun _ -> fail "flow execution failure delivered a summary")
-         (prepare_exn entry);
+         (prepare_exn entry)
+       |> require_executed;
        check int "failed candidate dispatched once" 1 (F.post_count failed);
        (match Q.get_pending_entry ~id:entry.id with
         | Some
@@ -730,6 +793,77 @@ let test_flow_execution_failure_quarantines_and_blocks_owner () =
            } ->
          ()
        | _ -> fail "quarantined owner did not preserve its unbound successor")
+;;
+
+let test_owner_replacement_during_post_defers_terminal_mutation () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-owner-replacement" @@ fun base_path ->
+  Fun.protect
+    ~finally:Q.For_testing.reset_runtime_state
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       let entry = pending_entry ~base_path () in
+       let old_owner =
+         match Masc.Keeper_registry.get ~base_path entry.keeper_name with
+         | Some owner -> owner
+         | None -> fail "HITL owner was not registered"
+       in
+       let replace_owner () =
+         (match Masc.Keeper_registry.unregister_exact old_owner with
+          | Masc.Keeper_registry.Exact_unregistered -> ()
+          | _ -> fail "HITL old owner was not unregistered");
+         let replacement_meta =
+           Masc_test_deps.meta_of_json_fixture
+             (`Assoc
+               [ "name", `String entry.keeper_name
+               ; "trace_id", `String "trace-hitl-owner-replacement"
+               ])
+           |> Result.get_ok
+         in
+         ignore
+           (Masc.Keeper_registry.register_offline
+              ~base_path
+              entry.keeper_name
+              replacement_meta)
+       in
+       let server =
+         F.start_server
+           ~on_request_before_reply:replace_owner
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "approve")))
+       in
+       publish_lane
+         [ "hitl-owner-replacement" ]
+         (F.resolver_snapshot
+            ~source:"hitl-owner-replacement"
+            [ { id = "hitl-owner-replacement"; base_url = server.base_url } ]);
+       let prepared = prepare_exn entry in
+       (match
+          Worker.For_testing.execute_prepared_flow
+            ~net
+            ~clock
+            ~on_summary:(fun _ ->
+              fail "stale HITL owner delivered a terminal summary")
+            prepared
+        with
+        | Worker.Deferred_unregistered -> ()
+        | Worker.Executed ->
+          fail "stale HITL owner crossed the terminal generation fence");
+       check int "real POST crossed the replacement hook once" 1 (F.post_count server);
+       match Q.get_pending_entry ~id:entry.id with
+       | Some
+           { exact_attempt =
+               Q.Exact_bound
+                 { status = Q.Exact_dispatch_uncertain; _ }
+           ; summary_status = Q.Summary_pending
+           ; _
+           } ->
+         ()
+       | _ -> fail "stale HITL result mutated the bound pending summary")
 ;;
 
 let test_manual_resolution_race_is_conclusive () =
@@ -793,7 +927,9 @@ let test_manual_resolution_race_is_conclusive () =
          true
          (match !finish_outcome with
           | Some Worker.Conclusive_terminalization -> true
-          | Some Worker.Terminalization_persistence_uncertain | None -> false);
+          | Some Worker.Terminalization_persistence_uncertain
+          | Some Worker.Owner_unregistered_deferred
+          | None -> false);
        check bool
          "manually resolved source left pending queue"
          true
@@ -830,7 +966,8 @@ let test_cancellation_after_dispatch_is_terminal () =
                  ~net
                  ~clock
                  ~on_summary:(fun _ -> fail "cancelled flow delivered a summary")
-                 (prepare_exn entry))
+                 (prepare_exn entry)
+               |> require_executed)
             (fun () ->
                F.await_first_request server;
                raise Cancel_after_request_arrived)
@@ -846,6 +983,291 @@ let test_cancellation_after_dispatch_is_terminal () =
            } ->
          ()
        | _ -> fail "post-dispatch cancellation was not terminally quarantined")
+;;
+
+let test_spawn_preserves_cancellation_origin_backtrace () =
+  let previous_backtrace_status = Printexc.backtrace_status () in
+  Fun.protect
+    ~finally:(fun () -> Printexc.record_backtrace previous_backtrace_status)
+    (fun () ->
+       Printexc.record_backtrace true;
+       run_eio @@ fun ~sw ~net ~clock ->
+       with_temp_dir "hitl-cancellation-backtrace" @@ fun base_path ->
+       Fun.protect
+         ~finally:Q.For_testing.reset_runtime_state
+         (fun () ->
+            install_queue base_path;
+            Prompt_registry.set_markdown_dir
+              (Masc_test_deps.source_path "config/prompts");
+            let server =
+              F.start_server
+                ~sw
+                ~net
+                ~clock
+                (F.Reply (F.openai_response (judgment_json "approve")))
+            in
+            publish_lane
+              [ "hitl-cancellation-backtrace" ]
+              (F.resolver_snapshot
+                 ~source:"hitl-cancellation-backtrace"
+                 [ { id = "hitl-cancellation-backtrace"
+                   ; base_url = server.base_url
+                   }
+                 ]);
+            let entry = pending_entry ~base_path () in
+            let expected_backtrace = ref None in
+            let finish_outcome = ref None in
+            let payload = Failure "injected HITL cancellation origin" in
+            let bind_writer _path _body =
+              raise_injected_cancellation expected_backtrace payload
+            in
+            let observed_payload, observed_backtrace =
+              match
+                Eio.Switch.run
+                @@ fun worker_sw ->
+                match
+                  Worker.For_testing.spawn_with_writers
+                    ~bind_writer
+                    ~sw:worker_sw
+                    ~entry
+                    ~on_summary:(fun _ ->
+                      fail "cancelled worker delivered a summary")
+                    ~on_finish:(fun outcome -> finish_outcome := Some outcome)
+                    ()
+                with
+                | Ok () -> ()
+                | Error detail -> fail detail
+              with
+              | exception Eio.Cancel.Cancelled observed_payload ->
+                observed_payload, Printexc.get_raw_backtrace ()
+              | () -> fail "injected cancellation did not leave the worker"
+            in
+            check bool
+              "cancellation payload identity is preserved"
+              true
+              (observed_payload == payload);
+            let expected_backtrace =
+              match !expected_backtrace with
+              | Some backtrace -> backtrace
+              | None -> fail "injected cancellation origin was not captured"
+            in
+            check string
+              "cancellation origin raw backtrace is preserved"
+              (Printexc.raw_backtrace_to_string expected_backtrace)
+              (Printexc.raw_backtrace_to_string observed_backtrace);
+            check bool
+              "pre-bind cancellation reports non-conclusive uncertainty"
+              true
+              (match !finish_outcome with
+               | Some Worker.Terminalization_persistence_uncertain -> true
+               | Some Worker.Conclusive_terminalization
+               | Some Worker.Owner_unregistered_deferred
+               | None -> false);
+            check int
+              "cancelled before-dispatch callback made no request"
+              0
+              (F.post_count server)))
+;;
+
+let test_prebind_cancellation_withholds_production_gate_drain () =
+  let previous_backtrace_status = Printexc.backtrace_status () in
+  Fun.protect
+    ~finally:(fun () -> Printexc.record_backtrace previous_backtrace_status)
+    (fun () ->
+       Printexc.record_backtrace true;
+       run_eio @@ fun ~sw ~net ~clock ->
+       with_temp_dir "hitl-prebind-cancellation-gate" @@ fun base_path ->
+       Fun.protect
+         ~finally:Q.For_testing.reset_runtime_state
+         (fun () ->
+            install_queue base_path;
+            Prompt_registry.set_markdown_dir
+              (Masc_test_deps.source_path "config/prompts");
+            let server =
+              F.start_server
+                ~sw
+                ~net
+                ~clock
+                (F.Reply (F.openai_response (judgment_json "approve")))
+            in
+            publish_lane
+              [ "hitl-prebind-cancellation-gate" ]
+              (F.resolver_snapshot
+                 ~source:"hitl-prebind-cancellation-gate"
+                 [ { id = "hitl-prebind-cancellation-gate"
+                   ; base_url = server.base_url
+                   }
+                 ]);
+            select_auto_judge_mode base_path;
+            let cancelled =
+              pending_entry ~input_tag:"cancelled" ~base_path ()
+            in
+            let successor =
+              pending_entry ~input_tag:"successor" ~base_path ()
+            in
+            let bind_calls = ref 0 in
+            let expected_backtrace = ref None in
+            let payload =
+              Failure "injected Gate pre-bind cancellation origin"
+            in
+            let observed_payload, observed_backtrace =
+              match
+                Eio.Switch.run
+                @@ fun worker_sw ->
+                match
+                  Gate.For_testing.spawn_auto_judge_entry_with_worker
+                    ~spawn_worker:
+                      (fun ~sw ~entry ~on_summary ~on_finish () ->
+                         Worker.For_testing.spawn_with_writers
+                           ~bind_writer:(fun _path _body ->
+                             incr bind_calls;
+                             raise_injected_cancellation
+                               expected_backtrace
+                               payload)
+                           ~sw
+                           ~entry
+                           ~on_summary
+                           ~on_finish
+                           ())
+                    cancelled
+                with
+                | Ok true -> ()
+                | Ok false -> fail "production Gate did not claim oldest work"
+                | Error detail -> fail detail
+              with
+              | exception Eio.Cancel.Cancelled observed_payload ->
+                observed_payload, Printexc.get_raw_backtrace ()
+              | () -> fail "Gate worker cancellation did not reach its supervisor"
+            in
+            check bool
+              "Gate cancellation payload identity is preserved"
+              true
+              (observed_payload == payload);
+            let expected_backtrace =
+              match !expected_backtrace with
+              | Some backtrace -> backtrace
+              | None -> fail "Gate cancellation origin was not captured"
+            in
+            check string
+              "Gate cancellation raw backtrace is preserved"
+              (Printexc.raw_backtrace_to_string expected_backtrace)
+              (Printexc.raw_backtrace_to_string observed_backtrace);
+            check int "Gate invokes the cancelled bind exactly once" 1 !bind_calls;
+            check int
+              "pre-bind Gate cancellation performs no provider POST"
+              0
+              (F.post_count server);
+            (match Q.get_pending_entry ~id:cancelled.id with
+             | Some
+                 { exact_attempt = Q.Exact_unbound
+                 ; summary_status = Q.Summary_pending
+                 ; _
+                 } ->
+               ()
+             | _ -> fail "Gate drained or mutated the cancelled pending entry");
+            match Q.get_pending_entry ~id:successor.id with
+            | Some
+                { exact_attempt = Q.Exact_unbound
+                ; summary_status = Q.Summary_pending
+                ; _
+                } ->
+              ()
+            | _ -> fail "Gate drained or dispatched successor work"))
+;;
+
+let test_bound_cancellation_cleanup_uncertainty_preserves_origin () =
+  let previous_backtrace_status = Printexc.backtrace_status () in
+  Fun.protect
+    ~finally:(fun () -> Printexc.record_backtrace previous_backtrace_status)
+    (fun () ->
+       Printexc.record_backtrace true;
+       run_eio @@ fun ~sw ~net ~clock ->
+       with_temp_dir "hitl-bound-cancellation-uncertain" @@ fun base_path ->
+       Fun.protect
+         ~finally:Q.For_testing.reset_runtime_state
+         (fun () ->
+            install_queue base_path;
+            Prompt_registry.set_markdown_dir
+              (Masc_test_deps.source_path "config/prompts");
+            let server =
+              F.start_server
+                ~sw
+                ~net
+                ~clock
+                (F.Reply (F.openai_response (judgment_json "approve")))
+            in
+            publish_lane
+              [ "hitl-bound-cancellation-uncertain" ]
+              (F.resolver_snapshot
+                 ~source:"hitl-bound-cancellation-uncertain"
+                 [ { id = "hitl-bound-cancellation-uncertain"
+                   ; base_url = server.base_url
+                   }
+                 ]);
+            let entry = pending_entry ~base_path () in
+            let expected_backtrace = ref None in
+            let finish_outcome = ref None in
+            let payload =
+              Failure "injected bound HITL cancellation origin"
+            in
+            let observed_payload, observed_backtrace =
+              match
+                Eio.Switch.run
+                @@ fun worker_sw ->
+                match
+                  Worker.For_testing.spawn_with_writers
+                    ~quarantine_writer:unknown_writer
+                    ~after_bind:(fun () ->
+                      raise_injected_cancellation expected_backtrace payload)
+                    ~sw:worker_sw
+                    ~entry
+                    ~on_summary:(fun _ ->
+                      fail "cancelled worker delivered a summary")
+                    ~on_finish:(fun outcome -> finish_outcome := Some outcome)
+                    ()
+                with
+                | Ok () -> ()
+                | Error detail -> fail detail
+              with
+              | exception Eio.Cancel.Cancelled observed_payload ->
+                observed_payload, Printexc.get_raw_backtrace ()
+              | () -> fail "injected cancellation did not leave the worker"
+            in
+            check bool
+              "bound cancellation payload identity is preserved"
+              true
+              (observed_payload == payload);
+            let expected_backtrace =
+              match !expected_backtrace with
+              | Some backtrace -> backtrace
+              | None -> fail "bound cancellation origin was not captured"
+            in
+            check string
+              "bound cancellation raw backtrace is preserved"
+              (Printexc.raw_backtrace_to_string expected_backtrace)
+              (Printexc.raw_backtrace_to_string observed_backtrace);
+            check bool
+              "failed bound cleanup reports persistence uncertainty"
+              true
+              (match !finish_outcome with
+               | Some Worker.Terminalization_persistence_uncertain -> true
+               | Some Worker.Conclusive_terminalization
+               | Some Worker.Owner_unregistered_deferred
+               | None -> false);
+            check int
+              "cancellation before dispatch performs no provider POST"
+              0
+              (F.post_count server);
+            match Q.get_pending_entry ~id:entry.id with
+            | Some
+                { exact_attempt = Q.Exact_bound _
+                ; summary_status = Q.Summary_pending
+                ; _
+                } ->
+              ()
+            | _ ->
+              fail
+                "failed cancellation cleanup did not preserve the durable binding"))
 ;;
 
 let test_pre_worker_start_failure_is_retryable () =
@@ -1063,6 +1485,180 @@ let test_gate_judgment_prompt_comes_from_registry () =
   | Ok prompt -> check bool "prompt is non-empty" true (String.trim prompt <> "")
 ;;
 
+let test_shutdown_drains_inflight_worker_then_retires () =
+  run_eio @@ fun ~sw ~net ~clock ->
+  with_temp_dir "hitl-shutdown-drain" @@ fun base_path ->
+  Fun.protect
+    ~finally:(fun () ->
+      Q.For_testing.reset_runtime_state ();
+      Masc.Keeper_shutdown_finalize.For_testing.reset_completion_handler ();
+      Masc.Keeper_turn_admission.For_testing.reset ();
+      Masc.Keeper_registry.For_testing.clear ();
+      Masc.Keeper_exact_flow_scope.clear ())
+    (fun () ->
+       install_queue base_path;
+       Prompt_registry.set_markdown_dir
+         (Masc_test_deps.source_path "config/prompts");
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let approval =
+         pending_entry
+           ~keeper_name:"hitl-shutdown-drain-owner"
+           ~base_path
+           ()
+       in
+       let owner =
+         match
+           Masc.Keeper_registry.get
+             ~base_path
+             approval.keeper_name
+         with
+         | Some owner -> owner
+         | None -> fail "HITL shutdown owner was not registered"
+       in
+       (match Masc.Keeper_meta_store.write_meta config owner.meta with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       let release_response, resolve_release_response = Eio.Promise.create () in
+       let server =
+         F.start_server
+           ~on_request_before_reply:(fun () ->
+             Eio.Promise.await release_response)
+           ~sw
+           ~net
+           ~clock
+           (F.Reply (F.openai_response (judgment_json "approve")))
+       in
+       publish_lane
+         [ "hitl-shutdown-drain" ]
+         (F.resolver_snapshot
+            ~source:"hitl-shutdown-drain"
+            [ { id = "hitl-shutdown-drain"; base_url = server.base_url } ]);
+       let prepared = prepare_exn approval in
+       let summaries = ref 0 in
+       let worker_result, resolve_worker_result = Eio.Promise.create () in
+       Eio.Fiber.fork ~sw (fun () ->
+         let result =
+           try
+             `Returned
+               (Worker.For_testing.execute_prepared_flow
+                  ~net
+                  ~clock
+                  ~on_summary:(fun _ -> incr summaries)
+                  prepared)
+           with
+           | exn -> `Raised exn
+         in
+         Eio.Promise.resolve resolve_worker_result result);
+       F.await_first_request server;
+       let backlog_version =
+         match Masc.Workspace.read_backlog_r config with
+         | Ok backlog -> backlog.version
+         | Error detail -> fail detail
+       in
+       let operation_id =
+         Masc.Keeper_shutdown_types.Operation_id.generate ()
+       in
+       let operation : Masc.Keeper_shutdown_types.t =
+         { schema_version = Masc.Keeper_shutdown_types.schema_version
+         ; revision = 0
+         ; operation_id
+         ; keeper_name = approval.keeper_name
+         ; lane_ownership =
+             Masc.Keeper_shutdown_types.Registered_lane
+               (Masc.Keeper_lane.id owner.lane)
+         ; trace_id = owner.meta.runtime.trace_id
+         ; generation = owner.meta.runtime.nonce
+         ; actor = "operator"
+         ; cleanup_intent =
+             { reason =
+                 Masc.Keeper_shutdown_types.Operator_stop_remove_meta
+             ; remove_session = false
+             }
+         ; turn_disposition =
+             Masc.Keeper_shutdown_types.No_inflight_turn
+         ; expected_backlog_version = backlog_version
+         ; owned_task_ids = []
+         ; join_evidence = None
+         ; phase =
+             Masc.Keeper_shutdown_types.Cleanup_ready
+               { settled_task_ids = []
+               ; pending_confirms_removed = 0
+               }
+         ; created_at = Masc_domain.now_iso ()
+         ; updated_at = Masc_domain.now_iso ()
+         }
+       in
+       (match
+          Masc.Keeper_shutdown_store.persist_new
+            ~config
+            operation
+        with
+        | Ok () -> ()
+        | Error error ->
+          fail
+            (Masc.Keeper_shutdown_store.error_to_string error));
+       let draining =
+         match
+           Masc.Keeper_shutdown_finalize.run
+             ~config
+             ~entry:(Some owner)
+             operation
+         with
+         | Error
+             (Masc.Keeper_shutdown_finalize.Finalization_draining
+                (draining, _)) ->
+           draining
+         | Error error ->
+           fail
+             (Masc.Keeper_shutdown_finalize.error_to_string error)
+         | Ok _ ->
+           fail "in-flight HITL worker skipped the Draining boundary"
+       in
+       Eio.Promise.resolve resolve_release_response ();
+       (match Eio.Promise.await worker_result with
+        | `Returned Worker.Executed -> ()
+        | `Returned Worker.Deferred_unregistered ->
+          fail "Draining generation rejected its bound HITL settlement"
+        | `Raised exn -> raise exn);
+       let finalized =
+         match
+           Masc.Keeper_shutdown_finalize.run
+             ~config
+             ~entry:(Some owner)
+             draining
+         with
+         | Ok finalized -> finalized
+         | Error error ->
+           fail
+             (Masc.Keeper_shutdown_finalize.error_to_string error)
+       in
+       (match finalized.phase with
+        | Masc.Keeper_shutdown_types.Finalized _ -> ()
+        | _ -> fail "settled HITL shutdown retry did not reach Retired");
+       check int "in-flight worker dispatched once" 1 (F.post_count server);
+       check int "in-flight worker projected one summary" 1 !summaries;
+       check bool
+         "Retired owner left no registry identity"
+         true
+         (Option.is_none
+            (Masc.Keeper_registry.get
+               ~base_path
+               approval.keeper_name));
+       (match
+          Worker.For_testing.execute_prepared_flow
+            ~net
+            ~clock
+            ~on_summary:(fun _ -> incr summaries)
+            prepared
+        with
+        | Worker.Deferred_unregistered -> ()
+        | Worker.Executed ->
+          fail "Retired HITL generation redispatched stale work");
+       check int "Retired retry dispatched nothing" 1 (F.post_count server);
+       check int "Retired retry mutated no summary" 1 !summaries)
+;;
+
 let () =
   run
     "Hitl_summary_worker"
@@ -1086,10 +1682,6 @@ let () =
             "prompt is registry-owned"
             `Quick
             test_gate_judgment_prompt_comes_from_registry
-        ; test_case
-            "readiness requires JSON admission"
-            `Quick
-            test_readiness_rejects_lane_without_json_guarantee
         ] )
     ; ( "production exact flow"
       , [ test_case
@@ -1121,6 +1713,10 @@ let () =
             `Quick
             test_flow_execution_failure_quarantines_and_blocks_owner
         ; test_case
+            "owner replacement during POST defers terminal mutation"
+            `Quick
+            test_owner_replacement_during_post_defers_terminal_mutation
+        ; test_case
             "manual resolution race is conclusive"
             `Quick
             test_manual_resolution_race_is_conclusive
@@ -1128,6 +1724,18 @@ let () =
             "post-dispatch cancellation is terminal"
             `Quick
             test_cancellation_after_dispatch_is_terminal
+        ; test_case
+            "spawn preserves cancellation origin backtrace"
+            `Quick
+            test_spawn_preserves_cancellation_origin_backtrace
+        ; test_case
+            "pre-bind cancellation withholds production Gate drain"
+            `Quick
+            test_prebind_cancellation_withholds_production_gate_drain
+        ; test_case
+            "bound cancellation cleanup uncertainty preserves origin"
+            `Quick
+            test_bound_cancellation_cleanup_uncertainty_preserves_origin
         ; test_case
             "pre-worker start failure is retryable"
             `Quick
@@ -1140,6 +1748,10 @@ let () =
             "owner FIFO atomic drain is non-sharing"
             `Quick
             test_owner_fifo_atomic_drain_is_nonsharing
+        ; test_case
+            "shutdown drains in-flight worker then retires"
+            `Quick
+            test_shutdown_drains_inflight_worker_then_retires
         ] )
     ]
 ;;

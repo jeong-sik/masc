@@ -485,7 +485,36 @@ let rec spawn_claimed_auto_judge_entry_with
                  ~keeper_name:entry.keeper_name
                  "Auto Judge owner drain withheld after persistence uncertainty \
                   approval=%s"
-                 entry.id)
+                 entry.id
+             | Hitl_summary_worker.Owner_unregistered_deferred ->
+               Keeper_approval_queue.audit_approval_event
+                 ~base_path:entry.audit_base_path
+                 ~event_type:"auto_judge_owner_generation_deferred"
+                 ~id:entry.id
+                 ~keeper_name:entry.keeper_name
+                 ~tool_name:entry.tool_name
+                 ();
+               let wake =
+                 Keeper_registry.wakeup_running
+                   ~intent:Keeper_registry.Hitl_resolution
+                   ~base_path:entry.audit_base_path
+                   entry.keeper_name
+               in
+               let wake_outcome =
+                 match wake with
+                 | Keeper_registry.Signaled -> "signaled"
+                 | Keeper_registry.Deferred_unregistered ->
+                   "deferred_unregistered"
+                 | Keeper_registry.Deferred_not_running _ ->
+                   "deferred_not_running"
+                 | Keeper_registry.Deferred_lifecycle _ ->
+                   "deferred_lifecycle"
+               in
+               Log.Keeper.warn
+                 ~keeper_name:entry.keeper_name
+                 "Auto Judge exact owner generation deferred; durable pending approval retained and owner wake requested approval=%s wake=%s"
+                 entry.id
+                 wake_outcome)
            ()
        with
        | Ok () -> Ok Started
@@ -878,7 +907,7 @@ let request_operator_auto_judge_recovery ~base_path =
   | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
     Error "operator Auto Judge recovery requires auto_judge mode"
   | Ok Keeper_gate_mode.Auto_judge ->
-    (match Hitl_summary_worker.readiness () with
+    (match Hitl_summary_worker.snapshot_topology_readiness () with
      | Error detail -> Error detail
      | Ok () ->
       (match Keeper_approval_queue.restart_failed_summaries ~base_path with

@@ -8,6 +8,7 @@ type compaction_rejection =
   | Exact_target_selection_failed
   | Exact_admission_failed
   | Exact_attempt_start_failed
+  | Exact_owner_unregistered_deferred
   | Exact_execution_context_unavailable
   | Exact_execution_guard_absent
   | Exact_execution_bind_failed
@@ -54,6 +55,7 @@ type compaction_preparation =
     The caller owns the durable save and promotion from [Prepared] to [Applied]. *)
 val compact_for_request_typed
   :  ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard
+  -> base_path:string
   -> meta:Keeper_meta_contract.keeper_meta
   -> trigger:Compaction_trigger.t
   -> Keeper_context_core.working_context

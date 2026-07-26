@@ -41,6 +41,8 @@ blocking_lints() {
   run_lint "Raw font-size px" bash scripts/lint/no-raw-font-size-px.sh
   run_lint "OCaml comment terminator trap" bash scripts/lint/no-ocaml-comment-terminator-trap.sh
   run_lint "Timeout env knob ceiling (RFC-0138)" bash scripts/lint/timeout-env-ceiling.sh
+  run_lint "Opam cache freshness ratchet" bash scripts/ci/opam-cache-freshness.sh --check
+  run_lint "Opam cache freshness self-test" bash scripts/ci/opam-cache-freshness.sh --self-test
   run_lint "No actionable-signal bool context" bash scripts/lint/no-actionable-signal-bool-context.sh
   run_lint "Provider name hardcoding ratchet" bash scripts/lint/no-provider-name-hardcoding.sh --fail
   run_lint "Keeper behavior hardcoding" bash scripts/lint/no-keeper-behavior-hardcoding.sh
@@ -51,6 +53,8 @@ blocking_lints() {
   run_lint "Tool substrate adapter surface" bash scripts/lint/no-tool-substrate-adapter-surface.sh --fail
   run_lint "Tool -> Keeper dependency-direction ratchet (RFC-0194)" bash scripts/lint/tool-keeper-boundary-ratchet.sh --fail
   run_lint "MASC domain ownership ratchet" bash scripts/lint/masc-domain-boundary-ratchet.sh --fail
+  run_lint "Keeper turn content boundary self-test" bash scripts/check-keeper-turn-content-boundary.sh --self-test
+  run_lint "Keeper turn content boundary" bash scripts/check-keeper-turn-content-boundary.sh --check
   run_lint "Compaction exact-flow boundary self-test" bash scripts/check-compaction-exact-flow-boundary.sh --self-test
   run_lint "Compaction exact-flow boundary" bash scripts/check-compaction-exact-flow-boundary.sh
   run_lint "No Tool_result.error + Printexc (RFC-0148)" bash scripts/lint/no-tool-result-error-printexc.sh

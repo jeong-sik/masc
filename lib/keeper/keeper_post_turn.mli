@@ -34,7 +34,6 @@ type compaction_recovery =
   ; trigger : Compaction_trigger.t
   ; evidence : Keeper_compaction_evidence.t
   ; turn_generation : int
-  ; projection_target : Keeper_compaction_projection_target.committed
   } [@@warning "-69"]
 
 type no_compaction = Keeper_event_queue_state.no_compaction =
@@ -57,6 +56,23 @@ type compaction_recovery_error =
           stops the one bounded LLM attempt each new stimulus still paid.
           [Manual] prepares bypass the gate: an operator-committed compaction
           resets the streak and lifts the suspension. *)
+
+type prepared_commit_failure =
+  { error : compaction_recovery_error
+  ; committed : compaction_recovery option
+  }
+
+type prepared_commit_completion =
+  | Commit_completion_committed of compaction_recovery
+  | Commit_completion_rejected of no_compaction
+  | Commit_completion_failed of prepared_commit_failure
+
+type prepared_commit_outcome =
+  | Committed of compaction_recovery
+  | Commit_in_progress of prepared_commit_completion Eio.Promise.t
+  | Already_committed of compaction_recovery
+  | Already_rejected of no_compaction
+  | Commit_failed of prepared_commit_failure
 
 val compaction_recovery_error_to_tag : compaction_recovery_error -> string
 val compaction_recovery_error_to_string : compaction_recovery_error -> string
@@ -105,51 +121,69 @@ type prepared_compaction
     Keeper's metadata. It also owns the real post-dispatch observation and
     durable terminalizer used by every uncommitted terminal path. *)
 
+type uncommitted_prepared_outcome =
+  | Uncommitted_terminalized of no_compaction
+  | Uncommitted_commit_in_progress of
+      prepared_commit_completion Eio.Promise.t
+  | Uncommitted_already_committed of compaction_recovery
+  | Uncommitted_failed of compaction_recovery_error
+
 (** Phase 1: load the durable source and run the policy + LLM planner.
     Admission-free by contract; the caller must not hold the keeper's turn
     slot while this runs. *)
 val prepare_compaction :
   ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard ->
+  base_path:string ->
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   trigger:Compaction_trigger.t ->
-  projection_request:Keeper_compaction_projection_target.request ->
   unit ->
   (prepared_compaction, compaction_recovery_error) result
 
 (** Phase 2: source-CAS commit of a fully-planned compaction.  The caller
     decides which admission (if any) guards this phase. *)
 val commit_prepared_compaction :
-  prepared_compaction ->
-  (compaction_recovery, compaction_recovery_error) result
+  prepared_compaction -> prepared_commit_outcome
 
 module For_testing : sig
+  type domain_valid_failure =
+    | Domain_valid_error of string
+    | Domain_valid_exception of exn
+
   val commit_prepared_compaction_with_history :
+    ?after_checkpoint_installed:(unit -> unit) ->
+    ?domain_valid_failure:domain_valid_failure ->
     save_oas_history:
       (session_dir:string -> Agent_sdk.Checkpoint.t -> unit) ->
     prepared_compaction ->
-    (compaction_recovery, compaction_recovery_error) result
+    prepared_commit_outcome
+
+  val post_success_snapshot :
+    prepared_compaction ->
+    Keeper_compaction_llm_summarizer.post_success_snapshot
+
+  val claim_post_success_commit :
+    prepared_compaction ->
+    Keeper_compaction_llm_summarizer.post_success_commit_claim
 end
 
-(** Terminal source-bound disposition for a prepared exact-output result that
-    cannot enter its commit admission. The provider execution has completed,
-    so the owning stimulus must never be requeued into another exact call.
-    The exact attempt is durably quarantined before this function returns. *)
+(** Affine disposition for a prepared exact-output result that cannot enter
+    its commit admission. A reject owner durably quarantines; a commit loser
+    receives the canonical completion waiter/evidence and must not redispatch
+    the provider. *)
 val no_compaction_of_uncommitted_prepared :
   ?cause:Keeper_event_queue_state.exact_execution_terminal_cause ->
-  prepared_compaction ->
-  no_compaction
+  prepared_compaction -> uncommitted_prepared_outcome
 
 (** Reload the canonical OAS checkpoint and apply an explicit typed
-    compaction request. Returns success only after a structurally changed
-    [Prepared] candidate has been durably saved; every other outcome is a
-    typed [Error].  Composition of {!prepare_compaction} and
-    {!commit_prepared_compaction} for callers that stay synchronous. *)
+    compaction request. Composition of {!prepare_compaction} and
+    {!commit_prepared_compaction}; all affine ownership outcomes remain
+    explicit. *)
 val recover_latest_checkpoint_for_compaction :
   ?exact_execution_guard:Keeper_compaction_llm_summarizer.exact_execution_guard ->
+  base_path:string ->
   base_dir:string ->
   meta:Keeper_meta_contract.keeper_meta ->
   trigger:Compaction_trigger.t ->
-  projection_request:Keeper_compaction_projection_target.request ->
   unit ->
-  (compaction_recovery, compaction_recovery_error) result
+  prepared_commit_outcome

@@ -1,4 +1,4 @@
-(** Provider-neutral exact-output execution for one durable Board candidate.
+(** Opaque-runtime exact-output execution for one durable Board candidate.
 
     MASC owns the immutable Board input, strict domain decoder, and durable
     callbacks. OAS owns lane admission, affine attempts, dispatch, and
@@ -16,7 +16,7 @@ type setup_error =
       { position : int
       ; slot_id : string
       }
-  | Flow_admission_failed
+  | Flow_snapshot_failed
   | Flow_start_failed
 
 type attempt_provenance =
@@ -25,11 +25,30 @@ type attempt_provenance =
   ; plan_fingerprint : string
   ; request_body_sha256 : string
   }
-(** Provider-neutral identity of one admitted attempt. It deliberately excludes
-    the raw OAS receipt, effect phase, dispatch count, target, and provider
-    failure cause. *)
+(** Opaque identity of one admitted attempt. It deliberately excludes the raw
+    OAS receipt, effect phase, dispatch count, target, and execution cause. *)
+
+type candidate_visit =
+  { flow_id : string
+  ; ordinal : int
+  ; slot_id : string
+  ; catalog_generation_fingerprint : string
+  ; catalog_evidence_sha256 : string
+  ; target_identity_fingerprint : string
+  }
+(** Opaque projection of the immutable OAS-selected successor visit. No
+    execution receipt exists yet, so this type contains no call id, request
+    plan, or body hash. *)
+
+type advance_source =
+  | Executed_failure of attempt_provenance
+  | Predispatch_rejection of candidate_visit
+(** Opaque source of one OAS-selected advancement. Predispatch rejection
+    carries only the immutable candidate visit because no attempt receipt
+    exists. *)
 
 type 'callback_error execution_error =
+  | Owner_unregistered_deferred
   | Flow_already_started of attempt_provenance list
   | Before_dispatch_persistence_failed of
       { cause : 'callback_error
@@ -38,22 +57,25 @@ type 'callback_error execution_error =
       }
   | Before_advance_persistence_failed of
       { cause : 'callback_error
-      ; failed : attempt_provenance
-      ; next : attempt_provenance
+      ; failed : advance_source
+      ; next : candidate_visit
       ; evidence : attempt_provenance list
       }
   | Exact_execution_failed of attempt_provenance list
   | Provenance_mismatch of string
   | Domain_output_invalid of string
+  | Domain_settlement_failed
 
 type prepared
 
 val lane_id : string
 
-(** Admit only an effective resumable pending candidate. Quarantined and
+(** Snapshot only an effective resumable pending candidate. Quarantined and
     requeue-requested candidates are not executable; a durably requeued pending
     candidate is executable through the same exact flow as a normal pending one. *)
 val prepare :
+  base_path:string ->
+  keeper_name:string ->
   net:Eio_context.eio_net option ->
   Keeper_board_attention_candidate.candidate ->
   (prepared, setup_error) result
@@ -65,8 +87,8 @@ val execute :
   before_dispatch:
     (attempt_provenance -> (unit, 'callback_error) result) ->
   before_advance:
-    (failed:attempt_provenance ->
-     next:attempt_provenance ->
+    (failed:advance_source ->
+     next:candidate_visit ->
      (unit, 'callback_error) result) ->
   prepared ->
   ( Keeper_board_attention_candidate.judgment
@@ -80,3 +102,17 @@ val execute :
 (** Cancellation is propagated promptly without protected partition I/O.
     Durable [Bound] or [Advancing] progress is quarantined only by the subsequent
     process-start recovery path. *)
+
+val with_current_generation
+  :  prepared
+  -> (unit -> 'a)
+  -> 'a Keeper_exact_flow_scope.current_boundary
+(** Fence a local durable projection against Keeper owner replacement. The
+    callback must not perform network I/O or re-enter the lifecycle key lock. *)
+
+val with_settlement_generation
+  :  prepared
+  -> (unit -> 'a)
+  -> 'a Keeper_exact_flow_scope.current_boundary
+(** Fence the terminal durable projection of an already-bound attempt. Unlike
+    admission, this remains available while shutdown is draining the owner. *)

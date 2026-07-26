@@ -41,6 +41,79 @@ let with_temp_keepers_dir f =
   Memory_io.For_testing.with_keepers_dir marker (fun () -> f marker)
 ;;
 
+let exact_flow_base_path = "/tmp/masc-librarian-exact-flow"
+
+let ensure_registered_keeper keeper_id =
+  match Masc.Keeper_registry.get ~base_path:exact_flow_base_path keeper_id with
+  | Some _ -> ()
+  | None ->
+    let meta =
+      Masc_test_deps.meta_of_json_fixture
+        (`Assoc
+          [ "name", `String keeper_id
+          ; "trace_id", `String ("trace-" ^ keeper_id)
+          ])
+      |> Result.get_ok
+    in
+    ignore
+      (Masc.Keeper_registry.register_offline
+         ~base_path:exact_flow_base_path
+         keeper_id
+         meta)
+;;
+
+let extract_with_exact_output_classified
+      ?clock
+      ~net
+      ~keeper_id
+      ~generation
+      input
+  =
+  ensure_registered_keeper keeper_id;
+  Librarian_runtime.extract_with_exact_output_classified
+    ?clock
+    ~base_path:exact_flow_base_path
+    ~net
+    ~keeper_id
+    ~generation
+    input
+;;
+
+let extract_with_exact_output
+      ?clock
+      ~net
+      ~keeper_id
+      ~generation
+      input
+  =
+  match
+    extract_with_exact_output_classified
+      ?clock
+      ~net
+      ~keeper_id
+      ~generation
+      input
+  with
+  | Ok episode -> Ok episode
+  | Error error ->
+    Error (Librarian_runtime.extraction_error_to_string error)
+;;
+
+let extract_and_append_with_exact_output ?clock ~net ~keeper_id input =
+  ensure_registered_keeper keeper_id;
+  match
+    Librarian_runtime.extract_and_append_with_exact_output_classified
+      ?clock
+      ~base_path:exact_flow_base_path
+      ~net
+      ~keeper_id
+      input
+  with
+  | Ok episode -> Ok episode
+  | Error error ->
+    Error (Librarian_runtime.extraction_error_to_string error)
+;;
+
 let text_message text =
   Agent_sdk.Types.make_message
     ~role:Agent_sdk.Types.User
@@ -107,42 +180,44 @@ let json_object_response_format body =
   | _ -> false
 ;;
 
-let exact_journal_state ~keeper_id =
+let exact_journal_path ~keeper_id ~trace_id ~generation =
   let exact_output_dir =
     Memory_io.episodes_dir ~keeper_id
     |> Filename.dirname
     |> fun keeper_dir -> Filename.concat keeper_dir "exact-output"
   in
-  let journals =
-    exact_output_dir
-    |> Sys.readdir
-    |> Array.to_list
-    |> List.filter (String.equal "librarian-exact-state.json")
+  let generation_key =
+    String.concat "\000" [ trace_id; string_of_int generation ]
+    |> Digestif.SHA256.digest_string
+    |> Digestif.SHA256.to_hex
   in
-  match journals with
-  | [ journal ] ->
-    let path = Filename.concat exact_output_dir journal in
-    let json =
-      In_channel.with_open_bin path In_channel.input_all
-      |> Yojson.Safe.from_string
-    in
-    Yojson.Safe.Util.(json |> member "state" |> to_string)
-  | _ -> Alcotest.failf "expected one exact journal, got %d" (List.length journals)
+  Filename.concat
+    exact_output_dir
+    ("librarian-exact-state-v2-" ^ generation_key ^ ".json")
 ;;
 
-let write_exact_journal ~keeper_id ~state =
-  let exact_output_dir =
+let exact_journal_state ~keeper_id ~trace_id ~generation =
+  let path = exact_journal_path ~keeper_id ~trace_id ~generation in
+  let json =
+    In_channel.with_open_bin path In_channel.input_all
+    |> Yojson.Safe.from_string
+  in
+  Yojson.Safe.Util.(json |> member "state" |> to_string)
+;;
+
+let write_exact_journal ~keeper_id ~trace_id ~generation ~state =
+  let (_ : string) =
     Memory_io.episodes_dir ~keeper_id
     |> Filename.dirname
     |> fun keeper_dir -> Filename.concat keeper_dir "exact-output"
     |> Keeper_fs.ensure_dir
   in
-  let path = Filename.concat exact_output_dir "librarian-exact-state.json" in
+  let path = exact_journal_path ~keeper_id ~trace_id ~generation in
   let payload =
     `Assoc
-      [ "schema_version", `Int 1
-      ; "trace_id", `String "prior-trace"
-      ; "generation", `Int 41
+      [ "schema_version", `Int 2
+      ; "trace_id", `String trace_id
+      ; "generation", `Int generation
       ; "state", `String state
       ]
     |> Yojson.Safe.to_string
@@ -173,7 +248,7 @@ let test_json_only_target_is_admitted_and_persisted () =
         publish_lane [ slot ];
         let keeper_id = "librarian-json-only-keeper" in
         match
-          Librarian_runtime.extract_and_append_with_exact_output
+          extract_and_append_with_exact_output
             ~clock
             ~net
             ~keeper_id
@@ -202,7 +277,10 @@ let test_json_only_target_is_admitted_and_persisted () =
           Alcotest.(check string)
             "exact receipt journal reached domain-valid terminal"
             "domain_valid"
-            (exact_journal_state ~keeper_id))))
+            (exact_journal_state
+               ~keeper_id
+               ~trace_id:"trace-json-only"
+               ~generation:1))))
 ;;
 
 let test_missing_json_capability_fails_before_dispatch () =
@@ -219,14 +297,16 @@ let test_missing_json_capability_fails_before_dispatch () =
         ~supports_structured_output:false
         [ slot ];
       match
-        Librarian_runtime.extract_with_exact_output_classified
+        extract_with_exact_output_classified
           ~clock
           ~net
           ~keeper_id:"librarian-no-json-keeper"
           ~generation:1
           (librarian_input "trace-no-json")
       with
-      | Error (Librarian_runtime.Exact_setup_failed _) ->
+      | Error error
+        when Librarian_runtime.extraction_error_kind error
+             = Librarian_runtime.Exact_setup_failure ->
         Alcotest.(check int) "no provider request" 0 (Fixture.post_count server)
       | Error error ->
         Alcotest.failf
@@ -262,14 +342,16 @@ let test_domain_invalid_output_does_not_fail_over () =
       in
       publish_lane slots;
       match
-        Librarian_runtime.extract_with_exact_output_classified
+        extract_with_exact_output_classified
           ~clock
           ~net
           ~keeper_id:"librarian-domain-invalid-keeper"
           ~generation:1
           (librarian_input "trace-domain-invalid")
       with
-      | Error (Librarian_runtime.Provider_unparseable_response _) ->
+      | Error error
+        when Librarian_runtime.extraction_error_kind error
+             = Librarian_runtime.Domain_output_invalid ->
         Alcotest.(check int)
           "first exact candidate dispatched once"
           1
@@ -281,7 +363,10 @@ let test_domain_invalid_output_does_not_fail_over () =
         Alcotest.(check string)
           "domain-invalid terminal is durable"
           "domain_invalid"
-          (exact_journal_state ~keeper_id:"librarian-domain-invalid-keeper")
+          (exact_journal_state
+             ~keeper_id:"librarian-domain-invalid-keeper"
+             ~trace_id:"trace-domain-invalid"
+             ~generation:1)
       | Error error ->
         Alcotest.failf
           "expected domain validation failure, got %s"
@@ -305,22 +390,22 @@ let test_unsettled_restart_state_fails_before_dispatch () =
       in
       publish_lane [ slot ];
       let keeper_id = "librarian-restart-guard-keeper" in
-      write_exact_journal ~keeper_id ~state:"candidate_bound";
+      write_exact_journal
+        ~keeper_id
+        ~trace_id:"trace-after-restart"
+        ~generation:42
+        ~state:"candidate_bound";
       match
-        Librarian_runtime.extract_with_exact_output_classified
+        extract_with_exact_output_classified
           ~clock
           ~net
           ~keeper_id
           ~generation:42
           (librarian_input "trace-after-restart")
       with
-      | Error
-          (Librarian_runtime.Exact_setup_failed
-             (Librarian_runtime.Exact_previous_attempt_unsettled
-                { state = "candidate_bound"
-                ; trace_id = "prior-trace"
-                ; generation = 41
-                })) ->
+      | Error error
+        when Librarian_runtime.extraction_error_kind error
+             = Librarian_runtime.Exact_setup_failure ->
         Alcotest.(check int) "restart guard dispatched nothing" 0 (Fixture.post_count server)
       | Error error ->
         Alcotest.failf
@@ -345,9 +430,13 @@ let test_oas_success_restart_state_starts_fresh_flow () =
       in
       publish_lane [ slot ];
       let keeper_id = "librarian-oas-success-restart-keeper" in
-      write_exact_journal ~keeper_id ~state:"oas_success";
+      write_exact_journal
+        ~keeper_id
+        ~trace_id:"trace-after-oas-success"
+        ~generation:42
+        ~state:"oas_success";
       match
-        Librarian_runtime.extract_with_exact_output_classified
+        extract_with_exact_output_classified
           ~clock
           ~net
           ~keeper_id
@@ -366,7 +455,10 @@ let test_oas_success_restart_state_starts_fresh_flow () =
         Alcotest.(check string)
           "fresh flow reached domain-valid terminal"
           "domain_valid"
-          (exact_journal_state ~keeper_id))))
+          (exact_journal_state
+             ~keeper_id
+             ~trace_id:"trace-after-oas-success"
+             ~generation:42))))
 ;;
 
 let test_missing_clock_fails_before_dispatch () =
@@ -385,13 +477,15 @@ let test_missing_clock_fails_before_dispatch () =
       in
       publish_lane [ slot ];
       match
-        Librarian_runtime.extract_with_exact_output_classified
+        extract_with_exact_output_classified
           ~net
           ~keeper_id:"librarian-clock-guard-keeper"
           ~generation:1
           (librarian_input "trace-clock-guard")
       with
-      | Error Librarian_runtime.Provider_clock_unavailable ->
+      | Error error
+        when Librarian_runtime.extraction_error_kind error
+             = Librarian_runtime.Execution_clock_unavailable ->
         Alcotest.(check int) "missing clock dispatched nothing" 0 (Fixture.post_count server)
       | Error error ->
         Alcotest.failf
@@ -418,7 +512,7 @@ let test_fact_upsert_failure_does_not_publish_episode () =
       let keeper_id = "librarian-fact-write-failure-keeper" in
       Unix.mkdir (Memory_io.facts_path ~keeper_id) 0o700;
       match
-        Librarian_runtime.extract_and_append_with_exact_output
+        extract_and_append_with_exact_output
           ~clock
           ~net
           ~keeper_id
@@ -455,7 +549,7 @@ let test_zero_dispatch_failure_advances_to_next_candidate () =
       publish_lane slots;
       let keeper_id = "librarian-safe-failover-keeper" in
       match
-        Librarian_runtime.extract_with_exact_output
+        extract_with_exact_output
           ~clock
           ~net
           ~keeper_id
@@ -471,7 +565,132 @@ let test_zero_dispatch_failure_advances_to_next_candidate () =
         Alcotest.(check string)
           "failover receipt journal reached terminal"
           "domain_valid"
-          (exact_journal_state ~keeper_id))))
+          (exact_journal_state
+             ~keeper_id
+             ~trace_id:"trace-safe-failover"
+             ~generation:1))))
+;;
+
+let test_owner_replacement_during_post_defers_settlement () =
+  with_prompt_registry (fun () ->
+  with_temp_keepers_dir (fun _ ->
+    run_eio (fun ~sw ~net ~clock ->
+      let keeper_id = "librarian-owner-replaced-keeper" in
+      ensure_registered_keeper keeper_id;
+      let old_entry =
+        match Keeper_registry.get ~base_path:exact_flow_base_path keeper_id with
+        | Some entry -> entry
+        | None -> Alcotest.fail "librarian owner was not registered"
+      in
+      let replace_owner () =
+        (match Keeper_registry.unregister_exact old_entry with
+         | Keeper_registry.Exact_unregistered -> ()
+         | _ -> Alcotest.fail "librarian old owner was not fenced");
+        let replacement_meta =
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc
+              [ "name", `String keeper_id
+              ; "trace_id", `String "trace-librarian-owner-replacement"
+              ])
+          |> Result.get_ok
+        in
+        ignore
+          (Keeper_registry.register_offline
+             ~base_path:exact_flow_base_path
+             keeper_id
+             replacement_meta)
+      in
+      let server =
+        Fixture.start_server
+          ~on_request_before_reply:replace_owner
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (Fixture.openai_response valid_output))
+      in
+      publish_lane
+        [ { id = "librarian-owner-replaced"; base_url = server.base_url } ];
+      (match
+         extract_with_exact_output_classified
+           ~clock
+           ~net
+           ~keeper_id
+           ~generation:1
+           (librarian_input "trace-librarian-owner-replaced")
+       with
+       | Error error
+         when Librarian_runtime.extraction_error_kind error
+              = Librarian_runtime.Exact_setup_failure ->
+         Alcotest.(check int)
+           "network dispatch completed once"
+           1
+           (Fixture.post_count server);
+         Alcotest.(check string)
+           "stale generation commits no success settlement"
+           "candidate_bound"
+           (exact_journal_state
+              ~keeper_id
+              ~trace_id:"trace-librarian-owner-replaced"
+              ~generation:1)
+       | Error error ->
+         Alcotest.failf
+           "owner replacement returned wrong typed boundary: %s"
+           (Librarian_runtime.extraction_error_to_string error)
+       | Ok _ ->
+         Alcotest.fail "replaced librarian owner committed stale success");
+      let successor =
+        Fixture.start_server
+          ~sw
+          ~net
+          ~clock
+          (Fixture.Reply (Fixture.openai_response valid_output))
+      in
+      publish_lane
+        [ { id = "librarian-owner-successor"; base_url = successor.base_url } ];
+      (match
+         extract_with_exact_output_classified
+           ~clock
+           ~net
+           ~keeper_id
+           ~generation:2
+           (librarian_input "trace-librarian-owner-replaced")
+       with
+       | Ok _ ->
+         Alcotest.(check int)
+           "new generation dispatched once"
+           1
+           (Fixture.post_count successor);
+         Alcotest.(check string)
+           "new generation reached terminal"
+           "domain_valid"
+           (exact_journal_state
+              ~keeper_id
+              ~trace_id:"trace-librarian-owner-replaced"
+              ~generation:2)
+       | Error error ->
+         Alcotest.failf
+           "historical bound state blocked the new generation: %s"
+           (Librarian_runtime.extraction_error_to_string error));
+      (match
+         extract_with_exact_output_classified
+           ~clock
+           ~net
+           ~keeper_id
+           ~generation:1
+           (librarian_input "trace-librarian-owner-replaced")
+       with
+       | Error error
+         when Librarian_runtime.extraction_error_kind error
+              = Librarian_runtime.Exact_setup_failure ->
+         Alcotest.(check int)
+           "same generation was not dispatched twice"
+           1
+           (Fixture.post_count server)
+       | Error error ->
+         Alcotest.failf
+           "same-generation replay returned wrong typed boundary: %s"
+           (Librarian_runtime.extraction_error_to_string error)
+       | Ok _ -> Alcotest.fail "same-generation bound attempt was replayed"))))
 ;;
 
 let () =
@@ -510,6 +729,10 @@ let () =
             "zero-dispatch failure advances to next candidate"
             `Quick
             test_zero_dispatch_failure_advances_to_next_candidate
+        ; Alcotest.test_case
+            "owner replacement during POST defers settlement"
+            `Quick
+            test_owner_replacement_during_post_defers_settlement
         ] )
     ]
 ;;

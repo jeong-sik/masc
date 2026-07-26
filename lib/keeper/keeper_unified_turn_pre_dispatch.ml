@@ -36,63 +36,42 @@ let build_runtime_execution
   if String.equal runtime_id "" then
     Error (Agent_sdk.Error.Internal "runtime_id must be non-empty")
   else
-  let model_labels =
-    Keeper_context_runtime.effective_model_labels_for_turn meta
-  in
   let log_pre_dispatch_error ~site detail =
-    let model_labels_detail =
-      match model_labels with
-      | [] -> "none"
-      | labels -> String.concat "," labels
-    in
     Log.Keeper.error
-      "%s: pre_dispatch: %s failed for runtime_id=%s model_labels=[%s]: %s"
+      "%s: pre_dispatch: %s failed for runtime_id=%s: %s"
       meta.name
       site
       runtime_id
-      model_labels_detail
       detail
   in
-  match Keeper_types_support.ensure_api_keys_for_labels model_labels with
-  | Error e ->
-    log_pre_dispatch_error ~site:"ensure_api_keys_for_labels" e;
-    Error (Agent_sdk.Error.Internal e)
-  | Ok () ->
-    (match
-       Keeper_turn_helpers.ensure_local_discovery_ready model_labels
-     with
-     | Error e ->
-       log_pre_dispatch_error ~site:"ensure_local_discovery_ready" e;
-       Error (Agent_sdk.Error.Internal e)
-     | Ok () ->
-       (match
-          Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
-            ~requested_override:meta.max_context_override
-            ~runtime_id
-        with
-        | Error error ->
-          let detail =
-            Keeper_context_runtime.max_context_resolution_error_to_string error
-          in
-          log_pre_dispatch_error ~site:"resolve_context_window" detail;
-          Error
-            (Agent_sdk.Error.Config
-               (Agent_sdk.Error.InvalidConfig
-                  { field = "runtime.context_window"; detail }))
-        | Ok max_context_resolution ->
-          let max_context =
-            Keeper_turn_runtime_budget.resolved_max_context_for_turn
-              ~meta
-              max_context_resolution
-          in
-          let temperature =
-            Runtime_inference.resolve_temperature
-              ~runtime_id
-              ~fallback:Keeper_config.keeper_unified_temperature
-          in
-          Ok
-            { Keeper_turn_runtime_budget.runtime_id
-            ; max_context_resolution
-            ; max_context
-            ; temperature
-            }))
+  match
+    Keeper_context_runtime.resolve_max_context_resolution_for_runtime_id
+      ~requested_override:meta.max_context_override
+      ~runtime_id
+  with
+  | Error error ->
+    let detail =
+      Keeper_context_runtime.max_context_resolution_error_to_string error
+    in
+    log_pre_dispatch_error ~site:"resolve_context_window" detail;
+    Error
+      (Agent_sdk.Error.Config
+         (Agent_sdk.Error.InvalidConfig
+            { field = "runtime.context_window"; detail }))
+  | Ok max_context_resolution ->
+    let max_context =
+      Keeper_turn_runtime_budget.resolved_max_context_for_turn
+        ~meta
+        max_context_resolution
+    in
+    let temperature =
+      Runtime_inference.resolve_temperature
+        ~runtime_id
+        ~fallback:Keeper_config.keeper_unified_temperature
+    in
+    Ok
+      { Keeper_turn_runtime_budget.runtime_id
+      ; max_context_resolution
+      ; max_context
+      ; temperature
+      }

@@ -18,6 +18,8 @@ function queueItem(overrides: Partial<KeeperApprovalQueueItem> & { id: string })
   return {
     keeper_name: 'keeper-x',
     tool_name: 'fs_write',
+    input_hash: 'a'.repeat(64),
+    sequence: 1,
     waiting_s: 92,
     input_preview: '{"path":"config.json","content":"hello"}',
     task_id: 'T-1',
@@ -57,10 +59,14 @@ function responseWithQueue(
   hitl: DashboardGateResponse['hitl'] = {
     gate_mode: { mode: 'manual', configured: true, state: 'ready' },
   },
+  approval_queue_state: DashboardGateResponse['approval_queue_state'] = {
+    state: 'ready',
+  },
 ): DashboardGateResponse {
   return {
     generated_at: '2026-06-19T00:00:00Z',
     approval_queue,
+    approval_queue_state,
     recent_resolved,
     approval_rules,
     hitl,
@@ -74,6 +80,9 @@ async function loadSurface(
   recent_resolved: KeeperResolvedApprovalItem[] = [],
   approval_rules: KeeperApprovalRule[] = [],
   hitl?: DashboardGateResponse['hitl'],
+  approval_queue_state: DashboardGateResponse['approval_queue_state'] = {
+    state: 'ready',
+  },
 ) {
   vi.resetModules()
   const resolveGateApproval = vi
@@ -97,8 +106,20 @@ async function loadSurface(
       queued: 0,
     })
   const response = hitl
-    ? responseWithQueue(approval_queue, recent_resolved, approval_rules, hitl)
-    : responseWithQueue(approval_queue, recent_resolved, approval_rules)
+    ? responseWithQueue(
+        approval_queue,
+        recent_resolved,
+        approval_rules,
+        hitl,
+        approval_queue_state,
+      )
+    : responseWithQueue(
+        approval_queue,
+        recent_resolved,
+        approval_rules,
+        undefined,
+        approval_queue_state,
+      )
   const apiMock = () => ({
     fetchDashboardGate: vi.fn().mockResolvedValue(response),
     resolveGateApproval,
@@ -295,7 +316,19 @@ describe('ApprovalsSurface', () => {
       .querySelector<HTMLButtonElement>('[data-approval-id="appr-retry"] .ap-act.retry')
       ?.click()
     await flushUi()
-    expect(retryGateAutoJudge).toHaveBeenCalledWith('appr-retry')
+    expect(retryGateAutoJudge).toHaveBeenCalledWith(
+      'appr-retry',
+      {
+        input_hash: 'a'.repeat(64),
+        sequence: 1,
+        exact_attempt: { state: 'unbound' },
+        summary_attempt_disposition: {
+          code: 'identity_unbound',
+          operator_detail:
+            'Exact-output terminalization stopped before an attempt identity was bound.',
+        },
+      },
+    )
   }, 20000)
 
   it('does not offer rearm for a terminal exact Auto Judge failure', async () => {
@@ -323,22 +356,25 @@ describe('ApprovalsSurface', () => {
     expect(retryGateAutoJudge).not.toHaveBeenCalled()
   }, 20000)
 
-  it('renders an explicit contract failure when typed durable state is absent', async () => {
-    const { ApprovalsSurface } = await loadSurface([
-      queueItem({
-        id: 'appr-nosummary',
-        summary_status: null,
-        exact_attempt: null,
-        summary_attempt_disposition: null,
-      }),
-    ])
+  it('renders an explicit unavailable state instead of an empty queue', async () => {
+    const { ApprovalsSurface } = await loadSurface(
+      [],
+      [],
+      [],
+      undefined,
+      {
+        state: 'unavailable',
+        code: 'reset_required',
+        operator_detail: 'pending store requires reset',
+      },
+    )
 
     render(html`<${ApprovalsSurface} />`, container)
     await flushUi()
 
-    expect(container.querySelector('[data-testid="approval-card"]')).not.toBeNull()
-    expect(container.querySelector('[data-summary-state="contract_unavailable"]')).not.toBeNull()
-    expect(container.textContent).toContain('durable state 확인 불가')
+    expect(container.querySelector('[data-testid="approvals-empty"]')).toBeNull()
+    expect(container.querySelector('[data-testid="approvals-queue-unavailable"]')).not.toBeNull()
+    expect(container.textContent).toContain('runtime reset required')
   }, 20000)
 
   it('reports the observed Keeper count without classifying the queue', async () => {

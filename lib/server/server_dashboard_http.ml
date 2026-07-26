@@ -416,12 +416,87 @@ let dashboard_gate_resolve_http_json ~base_path ~created_by ~(args : Yojson.Safe
 ;;
 
 let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe.t) =
-  match Safe_ops.json_string_opt "id" args with
-  | None -> Error "id is required"
-  | Some id ->
-    (match Keeper_gate.retry_blocked_auto_judge ~base_path ~requested_by id with
-     | Error _ as error -> error
-     | Ok () -> Ok (`Assoc [ "ok", `Bool true; "id", `String id ]))
+  let ( let* ) = Result.bind in
+  let* fields =
+    match args with
+    | `Assoc fields -> Ok fields
+    | _ -> Error "retry request must be an object"
+  in
+  let allowed =
+    [ "id"
+    ; "input_hash"
+    ; "sequence"
+    ; "exact_attempt"
+    ; "summary_attempt_disposition"
+    ]
+  in
+  let rec duplicate seen = function
+    | [] -> None
+    | (key, _) :: rest ->
+      if List.mem key seen then Some key else duplicate (key :: seen) rest
+  in
+  let* () =
+    match duplicate [] fields with
+    | Some field -> Error ("retry request contains duplicate field " ^ field)
+    | None ->
+      (match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
+       | Some (field, _) ->
+         Error ("retry request contains unsupported field " ^ field)
+       | None -> Ok ())
+  in
+  let required field =
+    match List.assoc_opt field fields with
+    | Some value -> Ok value
+    | None -> Error ("retry request." ^ field ^ " is required")
+  in
+  let* id_json = required "id" in
+  let* id =
+    match id_json with
+    | `String value when String.trim value <> "" -> Ok value
+    | _ -> Error "retry request.id must be a non-blank string"
+  in
+  let* input_hash_json = required "input_hash" in
+  let* expected_input_hash =
+    match input_hash_json with
+    | `String value when Keeper_approval_queue.is_lowercase_sha256 value ->
+      Ok value
+    | _ -> Error "retry request.input_hash must be a lowercase SHA-256"
+  in
+  let* sequence_json = required "sequence" in
+  let* expected_sequence =
+    match sequence_json with
+    | `Int value when value > 0 -> Ok value
+    | _ -> Error "retry request.sequence must be a positive integer"
+  in
+  let* exact_attempt_json = required "exact_attempt" in
+  let* expected_exact_attempt =
+    Keeper_approval_queue.exact_attempt_state_of_yojson_with_error
+      exact_attempt_json
+  in
+  let* disposition_json = required "summary_attempt_disposition" in
+  let* expected_disposition =
+    Keeper_approval_queue.summary_attempt_disposition_of_yojson_with_error
+      disposition_json
+  in
+  let* () =
+    match expected_disposition with
+    | Keeper_approval_queue.Summary_attempt_identity_unbound
+    | Keeper_approval_queue.Summary_attempt_persistence_uncertain ->
+      Ok ()
+    | _ -> Error "retry request disposition is not operator-rearmable"
+  in
+  match
+    Keeper_gate.retry_blocked_auto_judge
+      ~base_path
+      ~requested_by
+      ~expected_input_hash
+      ~expected_sequence
+      ~expected_exact_attempt
+      ~expected_disposition
+      id
+  with
+  | Error _ as error -> error
+  | Ok () -> Ok (`Assoc [ "ok", `Bool true; "id", `String id ])
 ;;
 
 let dashboard_gate_rule_delete_http_json ~base_path ~(args : Yojson.Safe.t)

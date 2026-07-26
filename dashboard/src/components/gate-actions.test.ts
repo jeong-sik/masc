@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   refreshGate: vi.fn(),
   setGateMode: vi.fn(),
+  retryGateAutoJudge: vi.fn(),
   showToast: vi.fn(),
 }))
 
@@ -13,7 +14,7 @@ vi.mock('./common/toast', () => ({
 vi.mock('../api/dashboard-gate', () => ({
   deleteGateApprovalRule: vi.fn(),
   resolveGateApproval: vi.fn(),
-  retryGateAutoJudge: vi.fn(),
+  retryGateAutoJudge: mocks.retryGateAutoJudge,
   setGateMode: mocks.setGateMode,
 }))
 
@@ -21,7 +22,7 @@ vi.mock('./gate-refresh', () => ({
   refreshGate: mocks.refreshGate,
 }))
 
-import { setKeeperGateMode } from './gate-actions'
+import { retryKeeperAutoJudge, setKeeperGateMode } from './gate-actions'
 import { gateApprovalActing, gateError } from './gate-signals'
 
 const baseResponse = {
@@ -39,9 +40,29 @@ const baseResponse = {
 beforeEach(() => {
   mocks.refreshGate.mockReset().mockResolvedValue(undefined)
   mocks.setGateMode.mockReset()
+  mocks.retryGateAutoJudge.mockReset().mockResolvedValue({ ok: true, id: 'appr-1' })
   mocks.showToast.mockReset()
   gateApprovalActing.value = null
   gateError.value = ''
+})
+
+describe('retryKeeperAutoJudge exact observation', () => {
+  it('forwards the complete observed row identity', async () => {
+    const expected = {
+      input_hash: 'a'.repeat(64),
+      sequence: 7,
+      exact_attempt: { state: 'unbound' as const },
+      summary_attempt_disposition: {
+        code: 'identity_unbound' as const,
+        operator_detail:
+          'Exact-output terminalization stopped before an attempt identity was bound.',
+      },
+    }
+
+    await retryKeeperAutoJudge('appr-1', expected)
+
+    expect(mocks.retryGateAutoJudge).toHaveBeenCalledWith('appr-1', expected)
+  })
 })
 
 describe('setKeeperGateMode recovery result', () => {

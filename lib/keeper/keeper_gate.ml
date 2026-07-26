@@ -41,21 +41,94 @@ type decision =
       }
   | Unavailable of unavailable_reason
 
+type auto_judge_completion_rejection =
+  | Completion_not_found
+  | Completion_key_mismatch
+  | Completion_invalid_identity
+  | Completion_summary_not_pending
+  | Completion_unbound_state
+  | Completion_disposition_conflict
+  | Completion_identity_conflict
+  | Completion_status_conflict
+  | Completion_provenance_mismatch
+  | Completion_content_conflict
+
 type auto_judge_resume_failure_code =
   | Resume_worker_start_failed
   | Resume_identity_unbound
   | Resume_completion_persistence_uncertain
-  | Resume_completion_failed
+  | Resume_completion_rejected of auto_judge_completion_rejection
   | Resume_judgment_resolution_failed
   | Resume_exact_state_not_completed
+
+let auto_judge_completion_rejection_to_string = function
+  | Completion_not_found -> "not_found"
+  | Completion_key_mismatch -> "key_mismatch"
+  | Completion_invalid_identity -> "invalid_identity"
+  | Completion_summary_not_pending -> "summary_not_pending"
+  | Completion_unbound_state -> "unbound_state"
+  | Completion_disposition_conflict -> "disposition_conflict"
+  | Completion_identity_conflict -> "identity_conflict"
+  | Completion_status_conflict -> "status_conflict"
+  | Completion_provenance_mismatch -> "provenance_mismatch"
+  | Completion_content_conflict -> "content_conflict"
+;;
 
 let auto_judge_resume_failure_code_to_string = function
   | Resume_worker_start_failed -> "worker_start_failed"
   | Resume_identity_unbound -> "identity_unbound"
   | Resume_completion_persistence_uncertain -> "completion_persistence_uncertain"
-  | Resume_completion_failed -> "completion_failed"
+  | Resume_completion_rejected rejection ->
+    "completion_rejected:"
+    ^ auto_judge_completion_rejection_to_string rejection
   | Resume_judgment_resolution_failed -> "judgment_resolution_failed"
   | Resume_exact_state_not_completed -> "exact_state_not_completed"
+;;
+
+let completion_rejection_of_exact_attempt = function
+  | Keeper_approval_queue.Exact_attempt_not_found _ ->
+    Completion_not_found
+  | Keeper_approval_queue.Exact_attempt_key_mismatch _ ->
+    Completion_key_mismatch
+  | Keeper_approval_queue.Exact_attempt_invalid_identity _ ->
+    Completion_invalid_identity
+  | Keeper_approval_queue.Exact_attempt_summary_not_pending _ ->
+    Completion_summary_not_pending
+  | Keeper_approval_queue.Exact_attempt_unbound_state _ ->
+    Completion_unbound_state
+  | Keeper_approval_queue.Exact_attempt_disposition_conflict _ ->
+    Completion_disposition_conflict
+  | Keeper_approval_queue.Exact_attempt_identity_conflict _ ->
+    Completion_identity_conflict
+  | Keeper_approval_queue.Exact_attempt_status_conflict _ ->
+    Completion_status_conflict
+  | Keeper_approval_queue.Exact_attempt_provenance_mismatch _ ->
+    Completion_provenance_mismatch
+  | Keeper_approval_queue.Exact_attempt_content_conflict _ ->
+    Completion_content_conflict
+;;
+
+let completion_rejection_operator_detail = function
+  | Completion_not_found ->
+    "Exact completion was rejected because the approval no longer exists."
+  | Completion_key_mismatch ->
+    "Exact completion was rejected because the durable row identity changed."
+  | Completion_invalid_identity ->
+    "Exact completion was rejected because its identity is invalid."
+  | Completion_summary_not_pending ->
+    "Exact completion was rejected because the summary is not pending."
+  | Completion_unbound_state ->
+    "Exact completion was rejected because no attempt identity is bound."
+  | Completion_disposition_conflict ->
+    "Exact completion was rejected because the durable disposition changed."
+  | Completion_identity_conflict ->
+    "Exact completion was rejected because a different attempt is bound."
+  | Completion_status_conflict ->
+    "Exact completion was rejected by the durable attempt status."
+  | Completion_provenance_mismatch ->
+    "Exact completion was rejected because its provenance does not match."
+  | Completion_content_conflict ->
+    "Exact completion was rejected because different summary content is already durable."
 ;;
 
 type auto_judge_resume_failure =
@@ -560,14 +633,20 @@ and spawn_auto_judge_entry entry =
 
 and retry_auto_judge_entry
       ~requested_by
+      ~expected_input_hash
+      ~expected_sequence
+      ~expected_exact_attempt
+      ~expected_disposition
       (entry : Keeper_approval_queue.pending_approval)
   =
   match
     Keeper_approval_queue.rearm_summary_attempt
       ~base_path:entry.audit_base_path
       ~id:entry.id
-      ~input_hash:entry.input_hash
-      ~sequence:entry.sequence
+      ~input_hash:expected_input_hash
+      ~sequence:expected_sequence
+      ~expected_exact_attempt
+      ~expected_disposition
       ~requested_by
   with
   | Error error ->
@@ -770,7 +849,15 @@ let observe_recovered_work kind (entry : Keeper_approval_queue.pending_approval)
     ()
 ;;
 
-let retry_blocked_auto_judge ~base_path ~requested_by approval_id =
+let retry_blocked_auto_judge
+      ~base_path
+      ~requested_by
+      ~expected_input_hash
+      ~expected_sequence
+      ~expected_exact_attempt
+      ~expected_disposition
+      approval_id
+  =
   match Keeper_gate_mode.read ~base_path with
   | Error detail -> Error detail
   | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
@@ -781,7 +868,15 @@ let retry_blocked_auto_judge ~base_path ~requested_by approval_id =
   | Some entry when not (String.equal entry.audit_base_path base_path) ->
     Error ("pending approval not found: " ^ approval_id)
   | Some entry ->
-    (match retry_auto_judge_entry ~requested_by entry with
+    (match
+       retry_auto_judge_entry
+         ~requested_by
+         ~expected_input_hash
+         ~expected_sequence
+         ~expected_exact_attempt
+         ~expected_disposition
+         entry
+     with
      | Error reason -> Error reason
      | Ok Retry_skipped ->
        Error
@@ -871,11 +966,16 @@ let finalize_recovered_judgment
        Error
          ( Resume_completion_persistence_uncertain
          , "Exact completion is visible but durability is not confirmed; finalization is withheld." )
-     | Error _error ->
+     | Error (Keeper_approval_queue.Exact_attempt_storage_error _error) ->
        persistence_uncertain ();
        Error
-         ( Resume_completion_failed
-         , "Exact completion durability confirmation failed; finalization is withheld." ))
+         ( Resume_completion_persistence_uncertain
+         , "Exact completion durability is not confirmed; finalization is withheld." )
+     | Error (Keeper_approval_queue.Exact_attempt_rejected rejection) ->
+       let rejection = completion_rejection_of_exact_attempt rejection in
+       Error
+         ( Resume_completion_rejected rejection
+         , completion_rejection_operator_detail rejection ))
   | Keeper_approval_queue.Exact_bound _ ->
     Error
       ( Resume_exact_state_not_completed

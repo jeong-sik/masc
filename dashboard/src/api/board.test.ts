@@ -223,11 +223,13 @@ describe('normalizeKeeperApprovalQueueItem', () => {
       id: 'q-1',
       keeper_name: 'janitor',
       tool_name: 'shell_exec',
+      input_hash: 'a'.repeat(64),
       requested_at: 1_776_427_200,
       waiting_s: 30,
       sequence: 7,
       input: { cmd: 'ls' },
       input_preview: 'ls -la',
+      summary_status: 'not_requested',
       exact_attempt: { state: 'unbound' },
       summary_attempt_disposition: { code: 'ready' },
     })
@@ -244,11 +246,28 @@ describe('normalizeKeeperApprovalQueueItem', () => {
     id: 'q-summary',
     keeper_name: 'janitor',
     tool_name: 'shell_exec',
+    input_hash: 'a'.repeat(64),
+    sequence: 3,
+    exact_attempt: { state: 'unbound' },
+    summary_attempt_disposition: { code: 'ready' },
   }
 
   it('parses an available summary into the typed union', () => {
     const result = normalizeKeeperApprovalQueueItem({
       ...baseItem,
+      exact_attempt: {
+        state: 'bound',
+        approval_id: baseItem.id,
+        input_hash: baseItem.input_hash,
+        sequence: baseItem.sequence,
+        slot_id: 'slot-available',
+        call_id: 'run-9',
+        plan_fingerprint: 'plan-available',
+        request_body_sha256: 'b'.repeat(64),
+        status: 'completed',
+        quarantine_cause: null,
+      },
+      summary_attempt_disposition: { code: 'settled' },
       summary_status: {
         status: 'available',
         summary: {
@@ -290,6 +309,19 @@ describe('normalizeKeeperApprovalQueueItem', () => {
     expect(
       normalizeKeeperApprovalQueueItem({
         ...baseItem,
+        exact_attempt: {
+          state: 'bound',
+          approval_id: baseItem.id,
+          input_hash: baseItem.input_hash,
+          sequence: baseItem.sequence,
+          slot_id: 'slot-failed',
+          call_id: 'call-failed',
+          plan_fingerprint: 'plan-failed',
+          request_body_sha256: 'b'.repeat(64),
+          status: 'quarantined',
+          quarantine_cause: 'flow_execution_failed',
+        },
+        summary_attempt_disposition: { code: 'settled' },
         summary_status: { status: 'failed', reason: 'exact attempt quarantined', retryable: false },
       })!.summary_status,
     ).toEqual({ status: 'failed', reason: 'exact attempt quarantined' })
@@ -297,18 +329,17 @@ describe('normalizeKeeperApprovalQueueItem', () => {
       normalizeKeeperApprovalQueueItem({
         ...baseItem,
         summary_status: { status: 'failed', reason: 'provider down', retryable: true },
-      })!.summary_status,
+      }),
     ).toBeNull()
   })
 
   it('parses exact attempt and blocked disposition without defaults', () => {
     const result = normalizeKeeperApprovalQueueItem({
       ...baseItem,
-      sequence: 3,
       exact_attempt: {
         state: 'bound',
         approval_id: baseItem.id,
-        input_hash: 'a'.repeat(64),
+        input_hash: baseItem.input_hash,
         sequence: 3,
         slot_id: 'slot-3',
         call_id: 'call-3',
@@ -321,6 +352,7 @@ describe('normalizeKeeperApprovalQueueItem', () => {
         code: 'persistence_uncertain',
         operator_detail: 'Exact-output terminalization durability is not confirmed.',
       },
+      summary_status: 'pending',
     })
     expect(result!.exact_attempt).toMatchObject({
       state: 'bound',
@@ -333,21 +365,20 @@ describe('normalizeKeeperApprovalQueueItem', () => {
     })
   })
 
-  it('returns null summary_status for absent or malformed shapes (no fabricated state)', () => {
-    expect(normalizeKeeperApprovalQueueItem(baseItem)!.summary_status).toBeNull()
+  it('rejects absent or malformed current queue state without fabricating defaults', () => {
+    expect(normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: undefined })).toBeNull()
     expect(
-      normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: 'garbage' })!.summary_status,
+      normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: 'garbage' }),
     ).toBeNull()
     expect(
-      normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: { status: 'weird' } })!
-        .summary_status,
+      normalizeKeeperApprovalQueueItem({ ...baseItem, summary_status: { status: 'weird' } }),
     ).toBeNull()
     // available with an empty summary body carries no operator value -> null
     expect(
       normalizeKeeperApprovalQueueItem({
         ...baseItem,
         summary_status: { status: 'available', summary: { context_summary: '  ' } },
-      })!.summary_status,
+      }),
     ).toBeNull()
   })
 })

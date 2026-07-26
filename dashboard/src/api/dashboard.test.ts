@@ -1472,7 +1472,11 @@ describe('fetchDashboardMemory', () => {
 describe('fetchDashboardGate', () => {
   it('requests a forced Gate snapshot when asked', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ approval_queue: [], recent_resolved: [] }), {
+      new Response(JSON.stringify({
+        approval_queue: [],
+        approval_queue_state: { state: 'ready' },
+        recent_resolved: [],
+      }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -1489,6 +1493,7 @@ describe('fetchDashboardGate', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         approval_queue: [],
+        approval_queue_state: { state: 'ready' },
         recent_resolved: [
           {
             id: 'appr-done',
@@ -1544,6 +1549,7 @@ describe('fetchDashboardGate', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({
         approval_queue: [],
+        approval_queue_state: { state: 'ready' },
         recent_resolved: [],
         approval_rules: [{
           id: 'rule-1',
@@ -1567,6 +1573,33 @@ describe('fetchDashboardGate', () => {
         created_at: '2026-07-04T00:00:00.000Z',
       }),
     ])
+  })
+
+  it('preserves typed unavailable queue state without fabricating an empty ready queue', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        approval_queue: null,
+        approval_queue_state: {
+          state: 'unavailable',
+          code: 'reset_required',
+          operator_detail: 'pending store requires reset',
+        },
+        recent_resolved: [],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardGate()
+
+    expect(result.approval_queue).toEqual([])
+    expect(result.approval_queue_state).toEqual({
+      state: 'unavailable',
+      code: 'reset_required',
+      operator_detail: 'pending store requires reset',
+    })
   })
 
   it('does not retry structured computation timeouts', async () => {

@@ -1628,6 +1628,7 @@ let pending_entry_json_fields
   [ "id", `String entry.id
   ; "keeper_name", `String entry.keeper_name
   ; "tool_name", `String entry.tool_name
+  ; "input_hash", `String entry.input_hash
   ; "sequence", `Int entry.sequence
   ; "requested_at", `Float entry.requested_at
   ; "waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at)
@@ -2431,8 +2432,20 @@ let rearm_summary_attempt
       ~id
       ~input_hash
       ~sequence
+      ~expected_exact_attempt
+      ~expected_disposition
       ~requested_by
   =
+  let exact_attempt_state_equal left right =
+    match left, right with
+    | Exact_unbound, Exact_unbound -> true
+    | Exact_bound left, Exact_bound right ->
+      exact_attempt_identity_matches left right
+      && left.status = right.status
+    | Exact_unbound, Exact_bound _
+    | Exact_bound _, Exact_unbound ->
+      false
+  in
   if String.trim requested_by = ""
   then
     Error
@@ -2445,29 +2458,37 @@ let rearm_summary_attempt
       ~input_hash
       ~sequence
       (fun (entry : pending_approval) ->
-         match
-           entry.summary_attempt_disposition,
-           entry.exact_attempt,
-           entry.summary_status
-         with
-         | Summary_attempt_identity_unbound, Exact_unbound,
-           Summary_pending
-         | Summary_attempt_persistence_uncertain, Exact_unbound,
-           Summary_pending ->
-           Some
-             { entry with
-               summary_attempt_disposition = Summary_attempt_ready
-             }
-         | Summary_attempt_persistence_uncertain,
-           Exact_bound
-             { status = Exact_released_recovery_required; _ },
-           Summary_pending ->
-           Some
-             { entry with
-               exact_attempt = Exact_unbound
-             ; summary_attempt_disposition = Summary_attempt_ready
-             }
-         | _ -> None)
+         if
+           entry.summary_attempt_disposition <> expected_disposition
+           || not
+                (exact_attempt_state_equal
+                   entry.exact_attempt
+                   expected_exact_attempt)
+         then None
+         else
+           match
+             entry.summary_attempt_disposition,
+             entry.exact_attempt,
+             entry.summary_status
+           with
+           | Summary_attempt_identity_unbound, Exact_unbound,
+             Summary_pending
+           | Summary_attempt_persistence_uncertain, Exact_unbound,
+             Summary_pending ->
+             Some
+               { entry with
+                 summary_attempt_disposition = Summary_attempt_ready
+               }
+           | Summary_attempt_persistence_uncertain,
+             Exact_bound
+               { status = Exact_released_recovery_required; _ },
+             Summary_pending ->
+             Some
+               { entry with
+                 exact_attempt = Exact_unbound
+               ; summary_attempt_disposition = Summary_attempt_ready
+               }
+           | _ -> None)
 ;;
 
 let record_resolution_delivery_failure ~keeper_name ~approval_id reason =
@@ -3221,15 +3242,15 @@ let list_pending_json () : Yojson.Safe.t =
   |> fun entries -> `List entries
 ;;
 
+let list_pending_entries () : pending_approval list =
+  pending_entries_in_sequence_order ()
+;;
+
 let list_pending_dashboard_json () : Yojson.Safe.t =
   pending_entries_in_sequence_order ()
   |> List.map (fun entry ->
     `Assoc (pending_entry_json_fields ~include_input:true entry))
   |> fun entries -> `List entries
-;;
-
-let list_pending_entries () : pending_approval list =
-  pending_entries_in_sequence_order ()
 ;;
 
 let list_pending_entries_for_workspace ~base_path =
@@ -3241,6 +3262,15 @@ let list_pending_entries_for_workspace ~base_path =
       |> List.filter (fun (entry : pending_approval) ->
         String.equal entry.audit_base_path base_path)
       |> fun entries -> Ok entries)
+;;
+
+let list_pending_dashboard_json_for_workspace ~base_path =
+  list_pending_entries_for_workspace ~base_path
+  |> Result.map (fun entries ->
+    entries
+    |> List.map (fun entry ->
+      `Assoc (pending_entry_json_fields ~include_input:true entry))
+    |> fun json -> `List json)
 ;;
 
 let pending_count_for_keeper ~keeper_name : int =

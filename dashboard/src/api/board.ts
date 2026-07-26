@@ -1,5 +1,5 @@
 import { currentDashboardActor, get, post, del, put, withRetries, defaultBoardVoter } from './core'
-import { isRecord, asNullableString, asString, asNumber, asInt, asStringList, asBoolean } from '../components/common/normalize'
+import { isRecord, asNullableString, asString, asNumber, asInt, asStringList } from '../components/common/normalize'
 import { normalizePendingConfirmation } from '../pending-confirm'
 import { timeBoardRequest } from '../board-metrics'
 import type {
@@ -235,7 +235,11 @@ function normalizeKeeperSummaryAttemptDisposition(
     case 'identity_unbound':
     case 'persistence_uncertain': {
       const operatorDetail = asString(raw.operator_detail, '').trim()
-      return operatorDetail && hasOnlyKeys(raw, ['code', 'operator_detail'])
+      const expectedDetail = raw.code === 'identity_unbound'
+        ? 'Exact-output terminalization stopped before an attempt identity was bound.'
+        : 'Exact-output terminalization durability is not confirmed.'
+      return operatorDetail === expectedDetail
+        && hasOnlyKeys(raw, ['code', 'operator_detail'])
         ? { code: raw.code, operator_detail: operatorDetail }
         : null
     }
@@ -249,18 +253,65 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
   const id = asString(raw.id, '').trim()
   const keeperName = asString(raw.keeper_name, '').trim()
   const toolName = asString(raw.tool_name, '').trim()
-  if (!id || !keeperName || !toolName) return null
+  const inputHash = asString(raw.input_hash, '').trim()
   const sequence = asInt(raw.sequence)
+  if (
+    !id
+    || !keeperName
+    || !toolName
+    || !/^[0-9a-f]{64}$/.test(inputHash)
+    || typeof sequence !== 'number'
+    || sequence <= 0
+  ) return null
+  const summaryStatus = normalizeHitlSummaryStatus(raw.summary_status)
   const exactAttempt = normalizeKeeperExactAttempt(raw.exact_attempt)
-  const exactAttemptForRow =
-    exactAttempt?.state === 'bound'
-    && (exactAttempt.approval_id !== id || exactAttempt.sequence !== sequence)
-      ? null
-      : exactAttempt
+  const disposition =
+    normalizeKeeperSummaryAttemptDisposition(raw.summary_attempt_disposition)
+  if (!summaryStatus || !exactAttempt || !disposition) return null
+  if (
+    exactAttempt.state === 'bound'
+    && (
+      exactAttempt.approval_id !== id
+      || exactAttempt.input_hash !== inputHash
+      || exactAttempt.sequence !== sequence
+    )
+  ) return null
+  const validPair = (() => {
+    switch (disposition.code) {
+      case 'ready':
+        return exactAttempt.state === 'unbound'
+          && (summaryStatus.status === 'not_requested' || summaryStatus.status === 'pending')
+      case 'identity_unbound':
+        return exactAttempt.state === 'unbound'
+          && (summaryStatus.status === 'pending' || summaryStatus.status === 'available')
+      case 'in_flight':
+        return exactAttempt.state === 'bound'
+          && summaryStatus.status === 'pending'
+          && exactAttempt.status !== 'completed'
+          && exactAttempt.status !== 'quarantined'
+      case 'settled':
+        return exactAttempt.state === 'bound'
+          && (
+            (exactAttempt.status === 'completed' && summaryStatus.status === 'available')
+            || (exactAttempt.status === 'quarantined' && summaryStatus.status === 'failed')
+          )
+      case 'persistence_uncertain':
+        if (exactAttempt.state === 'unbound') return summaryStatus.status === 'pending'
+        if (exactAttempt.status === 'completed') return summaryStatus.status === 'available'
+        if (exactAttempt.status === 'quarantined') return summaryStatus.status === 'failed'
+        return summaryStatus.status === 'pending'
+      default: {
+        const _never: never = disposition
+        return _never
+      }
+    }
+  })()
+  if (!validPair) return null
   return {
     id,
     keeper_name: keeperName,
     tool_name: toolName,
+    input_hash: inputHash,
     sequence,
     requested_at: asNullableIsoTimestamp(raw.requested_at),
     waiting_s: asNumber(raw.waiting_s),
@@ -270,10 +321,9 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
     goal_ids: asStringList(raw.goal_ids),
     input: raw.input,
     input_preview: asNullableString(raw.input_preview),
-    summary_status: normalizeHitlSummaryStatus(raw.summary_status),
-    exact_attempt: exactAttemptForRow,
-    summary_attempt_disposition:
-      normalizeKeeperSummaryAttemptDisposition(raw.summary_attempt_disposition),
+    summary_status: summaryStatus,
+    exact_attempt: exactAttempt,
+    summary_attempt_disposition: disposition,
   }
 }
 

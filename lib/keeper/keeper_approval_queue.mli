@@ -333,6 +333,8 @@ val resolve_with_policy :
 
 val list_pending_json : unit -> Yojson.Safe.t
 val list_pending_dashboard_json : unit -> Yojson.Safe.t
+val list_pending_dashboard_json_for_workspace :
+  base_path:string -> (Yojson.Safe.t, storage_error) result
 val list_pending_entries : unit -> pending_approval list
 val list_pending_entries_for_workspace :
   base_path:string -> (pending_approval list, storage_error) result
@@ -442,11 +444,14 @@ val rearm_summary_attempt :
   id:string ->
   input_hash:string ->
   sequence:int ->
+  expected_exact_attempt:exact_attempt_state ->
+  expected_disposition:summary_attempt_disposition ->
   requested_by:string ->
   (bool, exact_attempt_error) result
-(** Explicit operator CAS for a blocked row. Identity-unbound work becomes
-    ready; a restart-classified released binding may return to unbound only
-    after its complete row identity matches. Terminal exact quarantine is never
-    rearmed. *)
+(** Explicit operator CAS for a blocked row. The caller-observed row identity,
+    exact attempt, and disposition must still match atomically.
+    Identity-unbound work becomes ready; a restart-classified released binding
+    may return to unbound only after its complete identity matches. Terminal
+    exact quarantine is never rearmed. *)
 
 val pending_count_for_keeper : keeper_name:string -> int

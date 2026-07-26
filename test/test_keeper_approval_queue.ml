@@ -6,6 +6,8 @@ let rearm_exact ~base_path (entry : AQ.pending_approval) =
     ~id:entry.id
     ~input_hash:entry.input_hash
     ~sequence:entry.sequence
+    ~expected_exact_attempt:entry.exact_attempt
+    ~expected_disposition:entry.summary_attempt_disposition
     ~requested_by:"operator"
 ;;
 
@@ -1914,6 +1916,39 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
            actual_summary.model_run_id;
          Ok { AQ.changed = false; write_outcome }
        in
+       let deterministic_report =
+         Gate.For_testing.resume_persisted_auto_judges_with_exact_completion
+           ~complete_summary_exact_attempt:
+             (fun
+               ~id:_
+               ~input_hash:_
+               ~sequence:_
+               ~slot_id:_
+               ~call_id:_
+               ~plan_fingerprint:_
+               ~request_body_sha256:_
+               ~summary:_ ->
+              Error
+                (AQ.Exact_attempt_rejected
+                   (AQ.Exact_attempt_content_conflict id)))
+           ~base_path
+       in
+       (match deterministic_report.failures with
+        | [ { Gate.code =
+                Gate.Resume_completion_rejected
+                  Gate.Completion_content_conflict
+            ; _
+            } ] ->
+          ()
+        | _ ->
+          Alcotest.fail
+            "deterministic completion rejection lost its typed recovery code");
+       (match AQ.get_pending_entry ~id with
+        | Some { summary_attempt_disposition = AQ.Summary_attempt_settled; _ } ->
+          ()
+        | _ ->
+          Alcotest.fail
+            "deterministic completion rejection changed durable disposition");
        let visible_report =
          Gate.For_testing.resume_persisted_auto_judges_with_exact_completion
            ~complete_summary_exact_attempt:

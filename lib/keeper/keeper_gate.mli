@@ -49,11 +49,23 @@ type decision =
       }
   | Unavailable of unavailable_reason
 
+type auto_judge_completion_rejection =
+  | Completion_not_found
+  | Completion_key_mismatch
+  | Completion_invalid_identity
+  | Completion_summary_not_pending
+  | Completion_unbound_state
+  | Completion_disposition_conflict
+  | Completion_identity_conflict
+  | Completion_status_conflict
+  | Completion_provenance_mismatch
+  | Completion_content_conflict
+
 type auto_judge_resume_failure_code =
   | Resume_worker_start_failed
   | Resume_identity_unbound
   | Resume_completion_persistence_uncertain
-  | Resume_completion_failed
+  | Resume_completion_rejected of auto_judge_completion_rejection
   | Resume_judgment_resolution_failed
   | Resume_exact_state_not_completed
 
@@ -114,7 +126,14 @@ val resume_persisted_auto_judges :
   base_path:string -> auto_judge_resume_report
 
 val retry_blocked_auto_judge :
-  base_path:string -> requested_by:string -> string -> (unit, string) result
+  base_path:string ->
+  requested_by:string ->
+  expected_input_hash:string ->
+  expected_sequence:int ->
+  expected_exact_attempt:Keeper_approval_queue.exact_attempt_state ->
+  expected_disposition:Keeper_approval_queue.summary_attempt_disposition ->
+  string ->
+  (unit, string) result
 (** Explicitly rearm one typed blocked Auto Judge summary. The configured Gate
     mode, authenticated workspace, non-blank operator identity, and exact
     approval row identity must all match. No cadence or restart hook calls it. *)

@@ -19,7 +19,7 @@ import type {
   GateDecisionSource,
   GateMode,
   HitlContextSummary,
-  HitlSummaryStatus,
+  KeeperAutoJudgeRearmExpectation,
   KeeperExactAttemptState,
   KeeperSummaryAttemptDisposition,
 } from '../../types'
@@ -251,18 +251,35 @@ function exactAttemptLabel(attempt: KeeperExactAttemptState): string {
     : `exact ${attempt.slot_id} · ${attempt.status}`
 }
 
-function canRearmSummaryAttempt(item: KeeperApprovalQueueItem): boolean {
+function summaryRearmExpectation(
+  item: KeeperApprovalQueueItem,
+): KeeperAutoJudgeRearmExpectation | null {
   const disposition = item.summary_attempt_disposition
   const exactAttempt = item.exact_attempt
-  if (!disposition || !exactAttempt || item.summary_status?.status !== 'pending') {
-    return false
-  }
+  if (item.summary_status.status !== 'pending') return null
   if (disposition.code === 'identity_unbound') {
     return exactAttempt.state === 'unbound'
+      ? {
+          input_hash: item.input_hash,
+          sequence: item.sequence,
+          exact_attempt: exactAttempt,
+          summary_attempt_disposition: disposition,
+        }
+      : null
   }
-  if (disposition.code !== 'persistence_uncertain') return false
-  return exactAttempt.state === 'unbound'
-    || exactAttempt.status === 'released_recovery_required'
+  if (
+    disposition.code !== 'persistence_uncertain'
+    || (
+      exactAttempt.state === 'bound'
+      && exactAttempt.status !== 'released_recovery_required'
+    )
+  ) return null
+  return {
+    input_hash: item.input_hash,
+    sequence: item.sequence,
+    exact_attempt: exactAttempt,
+    summary_attempt_disposition: disposition,
+  }
 }
 
 function blockedSummaryAttempt(
@@ -293,18 +310,6 @@ function approvalSummaryBlock(item: KeeperApprovalQueueItem) {
   const status = item.summary_status
   const disposition = item.summary_attempt_disposition
   const exactAttempt = item.exact_attempt
-  if (!status || !disposition || !exactAttempt) {
-    return html`
-      <div
-        class="ap-summary ap-summary-failed"
-        data-testid="approval-summary"
-        data-summary-state="contract_unavailable"
-      >
-        <span class="ap-summary-label">Auto Judge durable state 확인 불가</span>
-        <span class="ap-summary-reason">현재 queue contract를 다시 확인해야 합니다.</span>
-      </div>
-    `
-  }
   if (
     disposition.code === 'identity_unbound'
     || disposition.code === 'persistence_uncertain'
@@ -346,7 +351,7 @@ function ApprovalCard({
   const busy = actingId === item.id
   const anyBusy = Boolean(actingId)
   const title = approvalTitle(item)
-  const canRearm = canRearmSummaryAttempt(item)
+  const rearmExpectation = summaryRearmExpectation(item)
 
   return html`
     <article
@@ -401,11 +406,11 @@ function ApprovalCard({
           </div>
         </div>
         <div class="ap-actions">
-          ${canRearm
+          ${rearmExpectation
             ? html`<button
                 type="button"
                 class="ap-act retry"
-                onClick=${() => void retryKeeperAutoJudge(item.id)}
+                onClick=${() => void retryKeeperAutoJudge(item.id, rearmExpectation)}
                 title="durable blocked state를 operator CAS로 한 번 재개합니다"
                 disabled=${anyBusy}
               >${busy ? '요청 중…' : 'Auto Judge 재개'}</button>`
@@ -602,6 +607,10 @@ export function ApprovalsSurface() {
   }, [])
 
   const items = gateData.value?.approval_queue ?? []
+  const queueUnavailable =
+    gateData.value?.approval_queue_state?.state === 'unavailable'
+      ? gateData.value.approval_queue_state
+      : null
   const resolvedItems = gateData.value?.recent_resolved ?? []
   const rules = gateData.value?.approval_rules ?? []
   const error = gateError.value
@@ -655,6 +664,14 @@ export function ApprovalsSurface() {
         </header>
 
         ${error ? html`<div class="ap-error" role="alert" data-testid="approvals-error">${error}</div>` : null}
+        ${queueUnavailable
+          ? html`
+              <div class="ap-error" role="alert" data-testid="approvals-queue-unavailable">
+                <strong>Gate durable queue unavailable · runtime reset required</strong>
+                <span>${queueUnavailable.operator_detail}</span>
+              </div>
+            `
+          : null}
 
         ${firstLoad
           ? html`<${LoadingState}>Gate 큐 불러오는 중...<//>`
@@ -701,7 +718,7 @@ export function ApprovalsSurface() {
               </div>
             `
           : null}
-        ${items.length === 0 && !error
+        ${items.length === 0 && !error && !queueUnavailable
           ? html`
               <div class="ap-clear" data-testid="approvals-empty">
                 <div class="ico">${'✓'}</div>

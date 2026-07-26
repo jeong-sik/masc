@@ -98,11 +98,24 @@ export type KeeperSummaryAttemptDisposition =
   | { code: 'identity_unbound'; operator_detail: string }
   | { code: 'persistence_uncertain'; operator_detail: string }
 
+export type KeeperBlockedSummaryAttemptDisposition = Extract<
+  KeeperSummaryAttemptDisposition,
+  { code: 'identity_unbound' | 'persistence_uncertain' }
+>
+
+export interface KeeperAutoJudgeRearmExpectation {
+  input_hash: string
+  sequence: number
+  exact_attempt: KeeperExactAttemptState
+  summary_attempt_disposition: KeeperBlockedSummaryAttemptDisposition
+}
+
 export interface KeeperApprovalQueueItem {
   id: string
   keeper_name: string
   tool_name: string
-  sequence?: number | null
+  input_hash: string
+  sequence: number
   requested_at?: string | null
   waiting_s?: number
   turn_id?: number | null
@@ -111,12 +124,18 @@ export interface KeeperApprovalQueueItem {
   goal_ids?: string[]
   input?: unknown
   input_preview?: string | null
-  /** HITL operator briefing state. `null` when the backend payload omits it or
-   *  the wire shape violates the contract — never coerced into a fake state. */
-  summary_status?: HitlSummaryStatus | null
-  exact_attempt?: KeeperExactAttemptState | null
-  summary_attempt_disposition?: KeeperSummaryAttemptDisposition | null
+  summary_status: HitlSummaryStatus
+  exact_attempt: KeeperExactAttemptState
+  summary_attempt_disposition: KeeperSummaryAttemptDisposition
 }
+
+export type KeeperApprovalQueueState =
+  | { state: 'ready' }
+  | {
+      state: 'unavailable'
+      code: 'reset_required'
+      operator_detail: string
+    }
 
 export interface KeeperResolvedApprovalItem {
   id: string
@@ -158,7 +177,8 @@ export interface GateModeStatus {
 export interface DashboardGateResponse {
   generated_at?: string
   note?: string
-  approval_queue?: KeeperApprovalQueueItem[]
+  approval_queue: KeeperApprovalQueueItem[]
+  approval_queue_state: KeeperApprovalQueueState
   recent_resolved?: KeeperResolvedApprovalItem[]
   approval_rules?: KeeperApprovalRule[]
   hitl?: {

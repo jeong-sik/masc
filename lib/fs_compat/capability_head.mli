@@ -56,6 +56,9 @@ type error =
   | Unsupported of string
   | Io_error of diagnostic
 
+(** In publication evidence, [intended_sha256] and [intended_length] describe
+    the exact on-disk HEAD payload: the caller-provided row followed by one LF.
+    They do not describe the row string before LF framing. *)
 type publication_evidence =
   { expected_cursor : cursor
   ; intended_sha256 : string

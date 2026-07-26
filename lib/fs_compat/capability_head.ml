@@ -99,7 +99,6 @@ let publication_settlement_warnings publication = publication.settlement_warning
 let max_row_bytes = 64 * 1024
 let max_lock_marker_bytes = 128
 let lock_magic = "MASC-CAPABILITY-HEAD-LOCK-v2"
-let stage_counter = Atomic.make 0
 
 let ( let* ) result fn =
   match result with
@@ -481,25 +480,26 @@ let read_current ~sw ~parent ~parent_stat ~leaf ~lock =
 let cursor_equal left right =
   left = right
 
-let stage_leaf ~leaf ~payload =
-  let serial = Atomic.fetch_and_add stage_counter 1 in
-  let digest = sha256 (Printf.sprintf "%s\000%s\000%d" leaf payload serial) in
-  ".masc-capability-head-stage-" ^ String.sub digest 0 32
+let fresh_stage_leaf secure_random =
+  protect_io Create_stage (fun () ->
+    let entropy = Cstruct.create 32 in
+    Eio.Flow.read_exact secure_random entropy;
+    ".masc-capability-head-stage-" ^ sha256 (Cstruct.to_string entropy))
 
-let rec create_stage ~sw ~parent ~leaf ~payload attempts =
+let rec create_stage ~sw ~secure_random ~parent attempts =
   if attempts = 0
   then Error (Io_error { operation = Create_stage; detail = "stage namespace exhausted" })
   else
-    let stage_leaf = stage_leaf ~leaf ~payload in
+    let* stage_leaf = fresh_stage_leaf secure_random in
     let path = Eio.Path.(parent / stage_leaf) in
-    try
-      let file = Eio.Path.open_out ~sw ~create:(`Exclusive 0o600) path in
-      Ok (path, file)
-    with
-    | Eio.Io (Eio.Fs.E (Eio.Fs.Already_exists _), _) ->
-      create_stage ~sw ~parent ~leaf ~payload (attempts - 1)
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Error (Io_error (diagnostic Create_stage exn))
+    (try
+       let file = Eio.Path.open_out ~sw ~create:(`Exclusive 0o600) path in
+       Ok (path, file)
+     with
+     | Eio.Io (Eio.Fs.E (Eio.Fs.Already_exists _), _) ->
+       create_stage ~sw ~secure_random ~parent (attempts - 1)
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> Error (Io_error (diagnostic Create_stage exn)))
 
 let write_stage ~path file payload =
   let* () = protect_io Write_stage (fun () -> Eio.Flow.copy_string payload file) in
@@ -662,7 +662,7 @@ let compare_and_swap_internal ~hooks ~secure_random ~parent ~leaf ~expected ~row
             }
           in
           let* stage_path, stage_file =
-            match create_stage ~sw ~parent ~leaf ~payload 32 with
+            match create_stage ~sw ~secure_random ~parent 32 with
             | Ok stage -> Ok stage
             | Error error -> fail error
           in

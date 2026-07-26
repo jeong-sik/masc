@@ -724,10 +724,11 @@ let keeper_names_or_error_rows config =
   | Error err ->
     ( []
     , [ read_error_row
-          ~waiting_on:"keeper_meta_store"
-          ~next_action:"repair_keeper_meta_store"
-          (`Assoc [ "error", `String err ])
-      ] )
+      ~waiting_on:"keeper_meta_store"
+      ~next_action:"repair_keeper_meta_store"
+      (`Assoc
+        [ "error", Keeper_meta_store.current_meta_unavailable_to_yojson err ])
+    ] )
 ;;
 
 let row_state rows =

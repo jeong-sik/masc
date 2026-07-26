@@ -43,8 +43,10 @@ type create_reconciliation_failure =
       Fs_compat.Capability_exact_read.failure
   | Reconciliation_read_settlement_failed of
       Fs_compat.Capability_exact_read.settlement_warning list
+  | Reconciliation_read_injected of string
   | Reconciliation_parent_sync_failed of
       Fs_compat.capability_directory_sync_error
+  | Reconciliation_parent_sync_injected of string
 
 type error =
   | Invalid_binding of string
@@ -92,14 +94,16 @@ let authority_leaf_prefix = "revival-"
 let transaction_leaf_prefix = "transaction-"
 let json_leaf_suffix = ".json"
 
+type testing_boundary_decision =
+  [ `Fail of string
+  | `Use_production
+  ]
+
 type testing_hooks =
   { create_target_effect :
       Fs_compat.capability_write_target_effect option
-  ; before_create_stage :
-      Fs_compat.capability_write_stage -> unit
-  ; before_reconciliation_read : unit -> unit
-  ; before_parent_sync_stage :
-      Fs_compat.capability_write_stage -> unit
+  ; reconciliation_read : unit -> testing_boundary_decision
+  ; parent_sync : unit -> testing_boundary_decision
   }
 
 let testing_hooks_key : testing_hooks Eio.Fiber.key =
@@ -690,17 +694,14 @@ let create_exclusive ~parent ~leaf ~permissions bytes =
       ~leaf
       ~permissions
       bytes
-  | Some hooks ->
-    (match hooks.create_target_effect with
-     | Some target_effect ->
-       Error (injected_create_failure target_effect)
-     | None ->
-       Fs_compat.Capability_write_for_testing.create_capability_file_exclusive
-         ~before_stage:hooks.before_create_stage
-         ~parent
-         ~leaf
-         ~permissions
-         bytes)
+  | Some { create_target_effect = Some target_effect; _ } ->
+    Error (injected_create_failure target_effect)
+  | Some { create_target_effect = None; _ } ->
+    Fs_compat.create_capability_file_exclusive
+      ~parent
+      ~leaf
+      ~permissions
+      bytes
 ;;
 
 type observation_failure =
@@ -708,6 +709,7 @@ type observation_failure =
       Fs_compat.Capability_exact_read.failure
   | Observation_settlement_failed of
       Fs_compat.Capability_exact_read.settlement_warning list
+  | Observation_injected_read_failed of string
 
 let observe_reference
       ?(for_reconciliation = false)
@@ -715,50 +717,50 @@ let observe_reference
       reference
   =
   let read () =
-    match Eio.Fiber.get testing_hooks_key, for_reconciliation with
-    | Some hooks, true ->
-      let exact_read_hooks =
-        Fs_compat.Capability_exact_read.For_testing.hooks
-          ~before_open:hooks.before_reconciliation_read
-          ()
-      in
-      Fs_compat.Capability_exact_read.For_testing.read
-        ~hooks:exact_read_hooks
-        ~parent
-        ~leaf:reference.transaction_leaf
-        ~expected_length:reference.byte_count
-        ~max_length:(Int64.of_int Sys.max_string_length)
-    | (None | Some _), false
-    | None, true ->
-      Fs_compat.Capability_exact_read.read
-        ~parent
-        ~leaf:reference.transaction_leaf
-        ~expected_length:reference.byte_count
-        ~max_length:(Int64.of_int Sys.max_string_length)
+    Fs_compat.Capability_exact_read.read
+      ~parent
+      ~leaf:reference.transaction_leaf
+      ~expected_length:reference.byte_count
+      ~max_length:(Int64.of_int Sys.max_string_length)
   in
-  match
-    read ()
-  with
-  | Error failure -> Error (Observation_read_failed failure)
-  | Ok observation ->
-    let warnings =
-      Fs_compat.Capability_exact_read.observation_settlement_warnings
-        observation
-    in
-    if warnings = []
-    then
-      Ok
-        (Fs_compat.Capability_exact_read.observation_bytes observation)
-    else Error (Observation_settlement_failed warnings)
+  let observe () =
+    match read () with
+    | Error failure -> Error (Observation_read_failed failure)
+    | Ok observation ->
+      let warnings =
+        Fs_compat.Capability_exact_read.observation_settlement_warnings
+          observation
+      in
+      if warnings = []
+      then
+        Ok
+          (Fs_compat.Capability_exact_read.observation_bytes observation)
+      else Error (Observation_settlement_failed warnings)
+  in
+  match Eio.Fiber.get testing_hooks_key with
+  | Some hooks when for_reconciliation ->
+    (match hooks.reconciliation_read () with
+     | `Fail detail -> Error (Observation_injected_read_failed detail)
+     | `Use_production -> observe ())
+  | None | Some _ -> observe ()
 ;;
 
+type parent_sync_failure =
+  | Parent_sync_failed of
+      Fs_compat.capability_directory_sync_error
+  | Parent_sync_injected of string
+
 let sync_parent_for_reconciliation parent =
+  let sync () =
+    Fs_compat.sync_directory_capability parent
+    |> Result.map_error (fun failure -> Parent_sync_failed failure)
+  in
   match Eio.Fiber.get testing_hooks_key with
-  | None -> Fs_compat.sync_directory_capability parent
+  | None -> sync ()
   | Some hooks ->
-    Fs_compat.Capability_write_for_testing.sync_directory_capability
-      ~before_stage:hooks.before_parent_sync_stage
-      parent
+    (match hooks.parent_sync () with
+     | `Fail detail -> Error (Parent_sync_injected detail)
+     | `Use_production -> sync ())
 ;;
 
 let create config prepared =
@@ -795,13 +797,21 @@ let create config prepared =
                Ok
                  (Reconciled_created
                     { prepared; initial_failure })
-             | Error failure ->
+             | Error (Parent_sync_failed failure) ->
                Error
                  (Create_reconciliation_failed
                     { prepared
                     ; initial_failure
                     ; reconciliation_failure =
                         Reconciliation_parent_sync_failed failure
+                    })
+             | Error (Parent_sync_injected detail) ->
+               Error
+                 (Create_reconciliation_failed
+                    { prepared
+                    ; initial_failure
+                    ; reconciliation_failure =
+                        Reconciliation_parent_sync_injected detail
                     }))
           | Ok _ ->
             Error (Create_conflict { prepared; initial_failure })
@@ -824,6 +834,14 @@ let create config prepared =
                  ; initial_failure
                  ; reconciliation_failure =
                      Reconciliation_read_settlement_failed warnings
+                 }))
+          | Error (Observation_injected_read_failed detail) ->
+            Error
+              (Create_reconciliation_failed
+                 { prepared
+                 ; initial_failure
+                 ; reconciliation_failure =
+                     Reconciliation_read_injected detail
                  })))
 ;;
 
@@ -1151,9 +1169,13 @@ let create_reconciliation_failure_to_string = function
     Printf.sprintf
       "exact reread settlement failed warning_count=%d"
       (List.length warnings)
+  | Reconciliation_read_injected detail ->
+    "exact reread injected failure: " ^ detail
   | Reconciliation_parent_sync_failed failure ->
     "parent durability sync failed: "
     ^ Fs_compat.capability_directory_sync_error_to_string failure
+  | Reconciliation_parent_sync_injected detail ->
+    "parent durability sync injected failure: " ^ detail
 ;;
 
 let error_to_string = function
@@ -1206,15 +1228,13 @@ module For_testing = struct
 
   let hooks
       ?create_target_effect
-      ?(before_create_stage = fun _ -> ())
-      ?(before_reconciliation_read = fun () -> ())
-      ?(before_parent_sync_stage = fun _ -> ())
+      ?(reconciliation_read = fun () -> `Use_production)
+      ?(parent_sync = fun () -> `Use_production)
       ()
     =
     { create_target_effect
-    ; before_create_stage
-    ; before_reconciliation_read
-    ; before_parent_sync_stage
+    ; reconciliation_read
+    ; parent_sync
     }
   ;;
 

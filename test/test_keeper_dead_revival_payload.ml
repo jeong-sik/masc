@@ -703,10 +703,12 @@ let test_target_created_reconciles_with_retained_evidence () =
   let hooks =
     Payload.For_testing.hooks
       ~create_target_effect:Fs_compat.Target_created
-      ~before_reconciliation_read:(fun () ->
-        reconciliation_read_observed := true)
-      ~before_parent_sync_stage:(fun _ ->
-        parent_sync_observed := true)
+      ~reconciliation_read:(fun () ->
+        reconciliation_read_observed := true;
+        `Use_production)
+      ~parent_sync:(fun () ->
+        parent_sync_observed := true;
+        `Use_production)
       ()
   in
   let outcome =
@@ -833,9 +835,9 @@ let test_create_reconciliation_read_failure () =
   let hooks =
     Payload.For_testing.hooks
       ~create_target_effect:Fs_compat.Target_created
-      ~before_reconciliation_read:(fun () ->
+      ~reconciliation_read:(fun () ->
         read_hook_observed := true;
-        failwith "injected reconciliation read failure")
+        `Fail "injected reconciliation read failure")
       ()
   in
   let outcome =
@@ -848,7 +850,7 @@ let test_create_reconciliation_read_failure () =
           { prepared
           ; initial_failure
           ; reconciliation_failure =
-              Payload.Reconciliation_read_failed _
+              Payload.Reconciliation_read_injected _
           }) ->
      check
        bool
@@ -879,9 +881,9 @@ let test_create_reconciliation_parent_sync_failure () =
   let hooks =
     Payload.For_testing.hooks
       ~create_target_effect:Fs_compat.Target_created
-      ~before_parent_sync_stage:(fun _ ->
+      ~parent_sync:(fun () ->
         parent_sync_hook_observed := true;
-        failwith "injected reconciliation parent sync failure")
+        `Fail "injected reconciliation parent sync failure")
       ()
   in
   let outcome =
@@ -894,7 +896,7 @@ let test_create_reconciliation_parent_sync_failure () =
           { prepared
           ; initial_failure
           ; reconciliation_failure =
-              Payload.Reconciliation_parent_sync_failed _
+              Payload.Reconciliation_parent_sync_injected _
           }) ->
      check
        bool
@@ -933,10 +935,12 @@ let test_target_created_classifies_same_leaf_conflict () =
   let hooks =
     Payload.For_testing.hooks
       ~create_target_effect:Fs_compat.Target_created
-      ~before_reconciliation_read:(fun () ->
-        reconciliation_read_observed := true)
-      ~before_parent_sync_stage:(fun _ ->
-        parent_sync_observed := true)
+      ~reconciliation_read:(fun () ->
+        reconciliation_read_observed := true;
+        `Use_production)
+      ~parent_sync:(fun () ->
+        parent_sync_observed := true;
+        `Use_production)
       ()
   in
   let outcome =

@@ -18,8 +18,10 @@ type create_reconciliation_failure =
       Fs_compat.Capability_exact_read.failure
   | Reconciliation_read_settlement_failed of
       Fs_compat.Capability_exact_read.settlement_warning list
+  | Reconciliation_read_injected of string
   | Reconciliation_parent_sync_failed of
       Fs_compat.capability_directory_sync_error
+  | Reconciliation_parent_sync_injected of string
 
 type error =
   | Invalid_binding of string
@@ -171,9 +173,10 @@ module For_testing : sig
 
   val hooks :
     ?create_target_effect:Fs_compat.capability_write_target_effect ->
-    ?before_create_stage:(Fs_compat.capability_write_stage -> unit) ->
-    ?before_reconciliation_read:(unit -> unit) ->
-    ?before_parent_sync_stage:(Fs_compat.capability_write_stage -> unit) ->
+    ?reconciliation_read:
+      (unit -> [ `Fail of string | `Use_production ]) ->
+    ?parent_sync:
+      (unit -> [ `Fail of string | `Use_production ]) ->
     unit ->
     hooks
 

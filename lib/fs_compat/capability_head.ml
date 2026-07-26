@@ -50,7 +50,8 @@ type snapshot =
 
 let snapshot_row snapshot = snapshot.row
 let snapshot_cursor snapshot = snapshot.cursor
-let snapshot_settlement_warnings snapshot = snapshot.settlement_warnings
+let snapshot_settlement_warnings (snapshot : snapshot) =
+  snapshot.settlement_warnings
 
 type error =
   | Invalid_leaf of string
@@ -536,11 +537,11 @@ let verify_lock_binding lock =
 
 let normalize_result ~warnings ~set_success_warnings = function
   | Ok value -> Ok (set_success_warnings value warnings)
-  | Error failure ->
-    Error
-      { failure with
-        settlement_warnings = failure.settlement_warnings @ warnings
-      }
+    | Error (failed : failure) ->
+      Error
+        { failed with
+          settlement_warnings = failed.settlement_warnings @ warnings
+        }
 
 let run_transaction ~hooks ~parent ~leaf ~publication_state ~set_success_warnings transaction =
   Eio.Fiber.check ();

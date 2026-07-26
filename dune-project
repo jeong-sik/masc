@@ -86,6 +86,7 @@
   (eio_posix (>= 0.16))
   (cstruct (>= 6.0))
   (digestif (>= 1.1))
+  (optint)
   (ocaml-protoc-plugin (>= 4.0))
   (pbrt (and (>= 3.0) (< 4.0)))
   ; [ctypes] + [ctypes-foreign] removed: zero callers in lib/ bin/ test/

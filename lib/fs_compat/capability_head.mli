@@ -92,6 +92,10 @@ val read :
   leaf:string ->
   (snapshot, failure) result
 
+(** Pending caller cancellation is checked before dispatch. Once the protected
+    transaction begins, parent cancellation is deferred until one typed
+    publication outcome is settled; no cancellation check occurs after
+    publication. *)
 val compare_and_swap :
   secure_random:Eio.Flow.source_ty Eio.Resource.t ->
   parent:Eio.Fs.dir_ty Eio.Path.t ->

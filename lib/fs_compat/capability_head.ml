@@ -99,6 +99,7 @@ let publication_settlement_warnings publication = publication.settlement_warning
 let max_row_bytes = 64 * 1024
 let max_lock_marker_bytes = 128
 let lock_magic = "MASC-CAPABILITY-HEAD-LOCK-v2"
+let internal_leaf_prefix = ".masc-capability-head-"
 
 let ( let* ) result fn =
   match result with
@@ -214,6 +215,7 @@ let validate_leaf leaf =
   if String.equal leaf ""
      || String.equal leaf "."
      || String.equal leaf ".."
+     || String.starts_with ~prefix:internal_leaf_prefix leaf
      || String.exists (fun char -> Char.equal char '/' || Char.equal char '\000') leaf
   then Error (Invalid_leaf leaf)
   else Ok ()
@@ -228,7 +230,7 @@ let validate_row row =
   else Ok ()
 
 let lock_leaf leaf =
-  ".masc-capability-head-" ^ sha256 leaf ^ ".lock"
+  internal_leaf_prefix ^ sha256 leaf ^ ".lock"
 
 let marker epoch =
   Printf.sprintf "%s %s\n" lock_magic epoch
@@ -484,7 +486,7 @@ let fresh_stage_leaf secure_random =
   protect_io Create_stage (fun () ->
     let entropy = Cstruct.create 32 in
     Eio.Flow.read_exact secure_random entropy;
-    ".masc-capability-head-stage-" ^ sha256 (Cstruct.to_string entropy))
+    internal_leaf_prefix ^ "stage-" ^ sha256 (Cstruct.to_string entropy))
 
 let rec create_stage ~sw ~secure_random ~parent attempts =
   if attempts = 0

@@ -13,6 +13,10 @@ let with_parent ~fs directory f =
   Eio.Path.with_open_dir Eio.Path.(fs / directory) f
 ;;
 
+let directory_entries directory =
+  Sys.readdir directory |> Array.to_list |> List.sort String.compare
+;;
+
 let require_read label = function
   | Ok snapshot -> snapshot
   | Error _ -> failf "%s: HEAD read failed" label
@@ -54,6 +58,31 @@ let require_invalid_row label = function
     ()
   | Error _ -> failf "%s: expected an unchanged typed invalid-row failure" label
   | Ok _ -> failf "%s: invalid row unexpectedly published" label
+;;
+
+let require_invalid_leaf ~expected label = function
+  | Error
+      ({ error = Head.Invalid_leaf observed
+       ; target_effect = Head.Unchanged
+       ; _
+       } : Head.failure) ->
+    check string (label ^ " rejected leaf") expected observed
+  | Error _ -> failf "%s: expected an unchanged typed invalid-leaf failure" label
+  | Ok _ -> failf "%s: reserved leaf unexpectedly dispatched" label
+;;
+
+let require_unchanged_io_error ~operation label = function
+  | Error
+      ({ error =
+           Head.Io_error
+             ({ operation = observed_operation; _ } : Head.diagnostic)
+       ; target_effect = Head.Unchanged
+       ; _
+       } : Head.failure)
+    when observed_operation = operation ->
+    ()
+  | Error _ -> failf "%s: expected the exact unchanged typed IO failure" label
+  | Ok _ -> failf "%s: entropy exhaustion unexpectedly succeeded" label
 ;;
 
 let require_unchanged_failure label = function
@@ -287,6 +316,64 @@ let test_strict_row_shape_rejection ~fs ~secure_random () =
        "valid row after rejections");
   read ~secure_random ~parent ~leaf "valid row post-read"
   |> check_row "invalid attempts do not poison later publication" (Some "valid-row")
+;;
+
+let test_reserved_namespace_is_rejected_before_dispatch ~fs () =
+  with_tmp_dir "masc_capability_head_reserved_leaf_" @@ fun directory ->
+  let leaf = ".masc-capability-head-forbidden" in
+  with_parent ~fs directory @@ fun parent ->
+  Head.read
+    ~secure_random:(Eio.Flow.string_source "")
+    ~parent
+    ~leaf
+  |> require_invalid_leaf ~expected:leaf "reserved capability HEAD namespace";
+  check (list string)
+    "reserved leaf creates neither target nor stable lock"
+    []
+    (directory_entries directory)
+;;
+
+let test_first_read_entropy_eof_is_unchanged_and_recoverable
+      ~fs
+      ~secure_random
+      ()
+  =
+  with_tmp_dir "masc_capability_head_lock_entropy_" @@ fun directory ->
+  let leaf = "HEAD" in
+  let target = Filename.concat directory leaf in
+  with_parent ~fs directory @@ fun parent ->
+  Head.read
+    ~secure_random:(Eio.Flow.string_source (String.make 31 'x'))
+    ~parent
+    ~leaf
+  |> require_unchanged_io_error
+       ~operation:Head.Initialize_lock_marker
+       "finite lock-marker entropy";
+  check bool "lock-marker entropy EOF leaves HEAD absent" false (Sys.file_exists target);
+  Head.read ~secure_random ~parent ~leaf
+  |> require_read "fresh entropy after lock-marker EOF"
+  |> check_row "fresh entropy recovers an absent HEAD" None
+;;
+
+let test_stage_entropy_eof_is_unchanged ~fs ~secure_random () =
+  with_tmp_dir "masc_capability_head_stage_entropy_" @@ fun directory ->
+  let leaf = "HEAD" in
+  let target = Filename.concat directory leaf in
+  with_parent ~fs directory @@ fun parent ->
+  let absent = read ~secure_random ~parent ~leaf "initialized lock read" in
+  Head.compare_and_swap
+    ~secure_random:(Eio.Flow.string_source "")
+    ~parent
+    ~leaf
+    ~expected:(Head.snapshot_cursor absent)
+    ~row:"must-not-stage"
+  |> require_unchanged_io_error
+       ~operation:Head.Create_stage
+       "empty stage entropy";
+  check bool "stage entropy EOF leaves HEAD absent" false (Sys.file_exists target);
+  Head.read ~secure_random ~parent ~leaf
+  |> require_read "exact read after stage entropy EOF"
+  |> check_row "stage entropy EOF leaves authority unchanged" None
 ;;
 
 let test_same_directory_contention_is_busy ~fs ~secure_random () =
@@ -697,6 +784,14 @@ let () =
             (test_cross_root_absent_cursor_conflicts ~fs ~secure_random)
         ; test_case "strict one-row shape" `Quick
             (test_strict_row_shape_rejection ~fs ~secure_random)
+        ; test_case "reserved namespace rejected before dispatch" `Quick
+            (test_reserved_namespace_is_rejected_before_dispatch ~fs)
+        ; test_case "lock entropy EOF is unchanged and recoverable" `Quick
+            (test_first_read_entropy_eof_is_unchanged_and_recoverable
+               ~fs
+               ~secure_random)
+        ; test_case "stage entropy EOF is unchanged" `Quick
+            (test_stage_entropy_eof_is_unchanged ~fs ~secure_random)
         ] )
     ; ( "concurrency"
       , [ test_case "same-directory contention is busy" `Quick

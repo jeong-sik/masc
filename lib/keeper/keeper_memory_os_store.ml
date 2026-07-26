@@ -2936,18 +2936,23 @@ let authority_token_of_json json =
   | _ -> Error ("unknown authority kind " ^ kind)
 ;;
 
+let publication_obligation_payload_fields
+      (value : publication_obligation)
+  =
+  [ "schema", `String publication_obligation_schema
+  ; "owner_id", `String value.owner_id
+  ; "store_id", `String value.store_id
+  ; "expected", authority_token_to_json value.expected
+  ; "desired", authority_token_to_json (Head_authority value.desired)
+  ; "operation_id", `String value.operation_id
+  ; "state_sha256", `String (Sha256.to_string value.state_sha256)
+  ]
+;;
+
 let publication_obligation_payload_to_json
       (value : publication_obligation)
   =
-  `Assoc
-    [ "schema", `String publication_obligation_schema
-    ; "owner_id", `String value.owner_id
-    ; "store_id", `String value.store_id
-    ; "expected", authority_token_to_json value.expected
-    ; "desired", authority_token_to_json (Head_authority value.desired)
-    ; "operation_id", `String value.operation_id
-    ; "state_sha256", `String (Sha256.to_string value.state_sha256)
-    ]
+  `Assoc (publication_obligation_payload_fields value)
 ;;
 
 let publication_obligation_checksum value =
@@ -2957,17 +2962,14 @@ let publication_obligation_checksum value =
 ;;
 
 let publication_obligation_to_bytes value =
-  match publication_obligation_payload_to_json value with
-  | `Assoc fields ->
-    canonical_json
-      (`Assoc
-         (fields
-          @ [ ( "checksum_sha256"
-              , `String
-                  (Sha256.to_string
-                     (publication_obligation_checksum value)) )
-            ]))
-  | _ -> assert false
+  canonical_json
+    (`Assoc
+       (publication_obligation_payload_fields value
+        @ [ ( "checksum_sha256"
+            , `String
+                (Sha256.to_string
+                   (publication_obligation_checksum value)) )
+          ]))
 ;;
 
 let validate_publication_obligation

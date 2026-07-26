@@ -195,7 +195,8 @@ let decode_exact raw =
              in
              let* expected_generation =
                match List.assoc_opt "expected_generation" fields with
-               | Some (`Int value) -> Ok value
+               | Some (`Int value) when value > 0 -> Ok value
+               | Some (`Int _) -> Error ()
                | Some _ | None -> Error ()
              in
              let* () =

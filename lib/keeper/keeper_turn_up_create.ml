@@ -367,20 +367,38 @@ let create_keeper_admitted_body
         Progress.stop_tracking task_id;
         tool_result_error (Printf.sprintf "initial checkpoint save failed: %s" detail)
       | Ok _ ->
+      Eio.Cancel.protect (fun () ->
       let previous_runtime = Runtime.runtime_id_for_keeper p.name in
       let runtime_assignment_changed = ref false in
+      let same_runtime_target target =
+        Option.equal
+          String.equal
+          (Runtime.runtime_id_for_keeper p.name)
+          target
+      in
+      let converge_runtime_assignment target =
+        if same_runtime_target target
+        then Ok ()
+        else
+          let result =
+            match target with
+            | Some runtime_id ->
+              Runtime.set_runtime_id_for_keeper
+                ~keeper_name:p.name
+                ~runtime_id
+                ()
+            | None ->
+              Runtime.clear_runtime_id_for_keeper ~keeper_name:p.name ()
+          in
+          match result with
+          | Ok () -> Ok ()
+          | Error detail ->
+            if same_runtime_target target then Ok () else Error detail
+      in
       let restore_runtime_assignment () =
         if not !runtime_assignment_changed
         then Ok ()
-        else
-          match previous_runtime with
-          | Some runtime_id ->
-            Runtime.set_runtime_id_for_keeper
-              ~keeper_name:p.name
-              ~runtime_id
-              ()
-          | None ->
-            Runtime.clear_runtime_id_for_keeper ~keeper_name:p.name ()
+        else converge_runtime_assignment previous_runtime
       in
       let runtime_assignment_result =
         match p.runtime_id_opt with
@@ -389,16 +407,25 @@ let create_keeper_admitted_body
           when Option.equal String.equal previous_runtime (Some runtime_id) ->
           Ok ()
         | Some runtime_id ->
+          runtime_assignment_changed := true;
           (match
              Runtime.set_runtime_id_for_keeper
                ~keeper_name:p.name
                ~runtime_id
                ()
            with
-           | Ok () ->
-             runtime_assignment_changed := true;
-             Ok ()
-           | Error _ as error -> error)
+           | Ok () -> Ok ()
+           | Error detail ->
+             if same_runtime_target (Some runtime_id)
+             then Ok ()
+             else
+               (match restore_runtime_assignment () with
+                | Ok () -> Error detail
+                | Error rollback_detail ->
+                  Error
+                    (detail
+                     ^ "; runtime assignment rollback failed: "
+                     ^ rollback_detail)))
       in
       (match runtime_assignment_result with
        | Error e ->
@@ -414,7 +441,37 @@ let create_keeper_admitted_body
          tool_result_error e
        | Ok () ->
       Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
-      match write_initial_meta permit nonce_witness ctx.config meta with
+      let committed_meta = { meta with meta_version = 1 } in
+      let same_committed_meta current =
+        String.equal
+          (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json current))
+          (Yojson.Safe.to_string
+             (Keeper_meta_json.meta_to_json committed_meta))
+      in
+      let write_result =
+        match write_initial_meta permit nonce_witness ctx.config meta with
+        | Ok () -> Ok ()
+        | Error initial_error ->
+          (match Keeper_meta_store.read_meta ctx.config p.name with
+           | Ok (Some current) when same_committed_meta current ->
+             Log.Keeper.warn
+               "create_keeper: metadata write returned error after exact \
+                candidate publication name=%s error=%s"
+               p.name
+               initial_error;
+             Ok ()
+           | Ok None -> Error initial_error
+           | Ok (Some _) ->
+             Error
+               (initial_error
+                ^ "; metadata authority differs after failed write")
+           | Error reread_error ->
+             Error
+               (initial_error
+                ^ "; metadata publication could not be reconciled: "
+                ^ reread_error))
+      in
+      match write_result with
       | Error e ->
         Otel_metric_store.inc_counter Keeper_metrics.(to_string WriteMetaFailures)
           ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();
@@ -423,12 +480,27 @@ let create_keeper_admitted_body
           match restore_runtime_assignment () with
           | Ok () -> e
           | Error rollback ->
-            e ^ "; runtime assignment rollback failed: " ^ rollback
+            let candidate_retained =
+              match
+                write_initial_meta permit nonce_witness ctx.config meta
+              with
+              | Ok () -> true
+              | Error _ ->
+                (match Keeper_meta_store.read_meta ctx.config p.name with
+                 | Ok (Some current) -> same_committed_meta current
+                 | Ok None | Error _ -> false)
+            in
+            e
+            ^ "; runtime assignment rollback failed: "
+            ^ rollback
+            ^
+            if candidate_retained
+            then "; exact candidate metadata retained"
+            else "; candidate metadata could not be retained"
         in
         Progress.stop_tracking task_id;
         tool_result_error detail
       | Ok () ->
-        let committed_meta = { meta with meta_version = 1 } in
         Log.Keeper.debug "create_keeper: metadata written for name=%s trace_id=%s"
           p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
         Progress.Tracker.step tracker ~message:"Starting keepalive loop" ();
@@ -490,30 +562,70 @@ let create_keeper_admitted_body
                     ^ Keeper_lifecycle_reservation.snapshot_to_string owner)
                    :: !cleanup_errors)
             | Some _ | None -> ());
-           let meta_removed =
-             match
-               Keeper_meta_store.remove_meta_if_identity
-                 ctx.config
-                 ~name:meta.name
-                 ~trace_id:meta.runtime.trace_id
-                 ~generation:meta.runtime.nonce
-             with
-             | Ok () -> true
-             | Error error ->
-               cleanup_errors :=
-                 ("candidate metadata rollback failed: "
-                  ^ Keeper_meta_store.identity_remove_error_to_string error)
-                 :: !cleanup_errors;
-               false
+           let retain_candidate_runtime () =
+             match p.runtime_id_opt with
+             | None -> Ok ()
+             | Some runtime_id ->
+               converge_runtime_assignment (Some runtime_id)
            in
-           (if meta_removed
-            then
-              match restore_runtime_assignment () with
-              | Ok () -> ()
-              | Error detail ->
-                cleanup_errors :=
-                  ("runtime assignment rollback failed: " ^ detail)
-                  :: !cleanup_errors);
+           (match restore_runtime_assignment () with
+            | Error detail ->
+              cleanup_errors :=
+                ("runtime assignment rollback failed; candidate metadata \
+                  retained: "
+                 ^ detail)
+                :: !cleanup_errors;
+              (match retain_candidate_runtime () with
+               | Ok () -> ()
+               | Error forward_detail ->
+                 cleanup_errors :=
+                   ("candidate runtime could not be retained: "
+                    ^ forward_detail)
+                   :: !cleanup_errors)
+            | Ok () ->
+              (match
+                 Keeper_meta_store.remove_meta_if_identity
+                   ctx.config
+                   ~name:meta.name
+                   ~trace_id:meta.runtime.trace_id
+                   ~generation:meta.runtime.nonce
+               with
+               | Ok () -> ()
+               | Error error ->
+                 let rollback_detail =
+                   Keeper_meta_store.identity_remove_error_to_string error
+                 in
+                 (match Keeper_meta_store.read_meta ctx.config meta.name with
+                  | Ok None -> ()
+                  | Ok (Some current) when same_committed_meta current ->
+                    (match retain_candidate_runtime () with
+                     | Ok () ->
+                       cleanup_errors :=
+                         ("candidate metadata removal failed; exact candidate \
+                           state retained: "
+                          ^ rollback_detail)
+                         :: !cleanup_errors
+                     | Error forward_detail ->
+                       cleanup_errors :=
+                         ("candidate metadata removal failed and candidate \
+                           runtime could not be retained: "
+                          ^ rollback_detail
+                          ^ "; "
+                          ^ forward_detail)
+                         :: !cleanup_errors)
+                  | Ok (Some _) ->
+                    cleanup_errors :=
+                      ("candidate metadata rollback settled to different \
+                        authority: "
+                       ^ rollback_detail)
+                      :: !cleanup_errors
+                  | Error reread_detail ->
+                    cleanup_errors :=
+                      ("candidate metadata rollback could not be reconciled: "
+                       ^ rollback_detail
+                       ^ "; "
+                       ^ reread_detail)
+                      :: !cleanup_errors)));
            Progress.stop_tracking task_id;
            let cleanup_detail =
              match List.rev !cleanup_errors with
@@ -525,7 +637,7 @@ let create_keeper_admitted_body
              (Printf.sprintf
                 "keeper creation lane launch failed: %s%s"
                 (start_keepalive_outcome_to_string rejected)
-                cleanup_detail)))
+                cleanup_detail))))
 ;;
 
 let create_keeper_admitted permit ctx p =

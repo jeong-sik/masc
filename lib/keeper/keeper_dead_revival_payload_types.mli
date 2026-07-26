@@ -1,11 +1,19 @@
 (** Private concrete state shared by immutable revival payload helpers. *)
 
+type runtime_transition =
+  | Runtime_unchanged
+  | Runtime_changed of
+      { before : string option
+      ; after : string
+      }
+
 type payload =
   { transaction_id : string
   ; owner_id : string
   ; keeper_name : string
   ; expected_trace_id : Keeper_id.Trace_id.t
   ; expected_generation : int
+  ; runtime_transition : runtime_transition
   ; original : Keeper_meta_contract.keeper_meta
   ; candidate : Keeper_meta_contract.keeper_meta
   }

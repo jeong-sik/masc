@@ -140,6 +140,22 @@ let validate_payload (payload : payload) =
   else if payload.expected_generation <= 0
   then Error (Invalid_binding "expected_generation must be strictly positive")
   else if
+    match payload.runtime_transition with
+    | Runtime_unchanged -> false
+    | Runtime_changed { before; after } ->
+      String.equal (String.trim after) ""
+      || not (String.equal after (String.trim after))
+      || Option.exists
+           (fun runtime_id ->
+              String.equal (String.trim runtime_id) ""
+              || not (String.equal runtime_id (String.trim runtime_id))
+              || String.equal runtime_id after)
+           before
+  then
+    Error
+      (Invalid_binding
+         "runtime transition must bind distinct canonical runtime ids")
+  else if
     not (String.equal payload.original.name payload.keeper_name)
     || not (String.equal payload.candidate.name payload.keeper_name)
   then Error (Invalid_binding "metadata does not match keeper_name")

@@ -39,6 +39,10 @@ let runtime_rollback_failure_hook_key : string Eio.Fiber.key =
   Eio.Fiber.create_key ()
 ;;
 
+let candidate_write_failure_hook_key : string Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
 let invoke_after_stop_join_hook () =
   Option.iter
     (fun after_stop_join -> after_stop_join ())
@@ -81,6 +85,10 @@ module For_testing = struct
 
   let with_runtime_rollback_failure ~detail fn =
     Eio.Fiber.with_binding runtime_rollback_failure_hook_key detail fn
+  ;;
+
+  let with_candidate_write_failure ~detail fn =
+    Eio.Fiber.with_binding candidate_write_failure_hook_key detail fn
   ;;
 end
 
@@ -549,8 +557,9 @@ let update_keeper ?(preserve_prompt_defaults = false)
            let run_transaction () =
              match phase_a with
              | Error result -> result
-             | Ok (phase_a_meta, stop_ticket, update_token) ->
+  | Ok (_phase_a_meta, stop_ticket, update_token) ->
                let token_released = ref false in
+               let restart_current_requested = ref None in
                let release_update_token () =
                  if not !token_released
                  then (
@@ -569,6 +578,10 @@ let update_keeper ?(preserve_prompt_defaults = false)
                        updated.name
                        (Keeper_lifecycle_reservation.snapshot_to_string owner))
                in
+               let request_current_restart failure =
+                 restart_current_requested := Some failure;
+                 tool_result_error failure
+               in
                Option.iter
                  (fun (entry : Keeper_registry.registry_entry) ->
                    let _lane_exit = Keeper_lane.await_exit entry.lane in
@@ -585,7 +598,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                      ()
                  with
                  | Error owner ->
-                   tool_result_error
+                   request_current_restart
                      ("keeper update phase-B lost lifecycle reservation: "
                       ^ Keeper_lifecycle_reservation.snapshot_to_string owner)
                  | Ok () ->
@@ -658,8 +671,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                              updated.name
                        with
                        | Error detail ->
-                         fail_and_restart
-                           phase_a_meta
+                         request_current_restart
                            ("keeper update durable revalidation failed: "
                             ^ detail)
                        | Ok None ->
@@ -726,7 +738,16 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                         | None ->
                                           Runtime.clear_runtime_id_for_keeper
                                             ~keeper_name:candidate.name
-                                            ())
+                                        ())
+                                 in
+                                 let persisted_candidate_matches current =
+                                   Int.equal
+                                     current.meta_version
+                                     (candidate.meta_version + 1)
+                                   && { current with
+                                        meta_version = candidate.meta_version
+                                      }
+                                      = candidate
                                  in
                                  let settle_registered_lane () =
                                    Option.iter abort_launch_gate !gate;
@@ -813,12 +834,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                            candidate.name
                                        with
                                        | Ok (Some current)
-                                         when Keeper_id.Trace_id.equal
-                                                current.runtime.trace_id
-                                                candidate.runtime.trace_id
-                                              && Int.equal
-                                                   current.runtime.nonce
-                                                   candidate.runtime.nonce ->
+                                         when persisted_candidate_matches current ->
                                          (match restart_meta current with
                                           | Ok () -> ()
                                           | Error restart_detail ->
@@ -826,7 +842,64 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                               ("candidate lane recovery: "
                                                ^ restart_detail)
                                               :: !errors)
-                                       | Ok _ | Error _ -> ())
+                                       | Ok (Some current) when current = latest ->
+                                         (match
+                                            write_meta_for_lifecycle
+                                              permit
+                                              update_token
+                                              ctx.config
+                                              { candidate with
+                                                meta_version =
+                                                  current.meta_version
+                                              }
+                                          with
+                                          | Error forward_detail ->
+                                            errors :=
+                                              ("candidate metadata forward recovery: "
+                                               ^ forward_detail)
+                                              :: !errors
+                                          | Ok () ->
+                                            (match
+                                               Keeper_meta_store.read_meta
+                                                 ctx.config
+                                                 candidate.name
+                                             with
+                                             | Ok (Some committed)
+                                               when persisted_candidate_matches
+                                                      committed ->
+                                               (match restart_meta committed with
+                                                | Ok () -> ()
+                                                | Error restart_detail ->
+                                                  errors :=
+                                                    ("candidate lane recovery: "
+                                                     ^ restart_detail)
+                                                    :: !errors)
+                                             | Ok _ ->
+                                               errors :=
+                                                 "candidate metadata forward recovery \
+                                                  did not publish the exact payload"
+                                                 :: !errors
+                                             | Error reread_detail ->
+                                               errors :=
+                                                 ("candidate metadata forward recovery \
+                                                   reread: "
+                                                  ^ reread_detail)
+                                                 :: !errors))
+                                       | Ok (Some _) ->
+                                         errors :=
+                                           "runtime rollback failed after durable \
+                                            authority changed to a non-candidate payload"
+                                           :: !errors
+                                       | Ok None ->
+                                         errors :=
+                                           "runtime rollback failed and durable metadata \
+                                            is missing"
+                                           :: !errors
+                                       | Error reread_detail ->
+                                         errors :=
+                                           ("runtime rollback durable reread: "
+                                            ^ reread_detail)
+                                           :: !errors)
                                     | Ok () ->
                                       (match restore_durable_meta () with
                                        | Error detail ->
@@ -882,12 +955,20 @@ let update_keeper ?(preserve_prompt_defaults = false)
                                         ^ detail)
                                    | Ok () ->
                                      meta_write_attempted := true;
-                                     (match
-                                        write_meta_for_lifecycle
-                                          permit
-                                          update_token
-                                          ctx.config
-                                          candidate
+                                     let candidate_write =
+                                       match
+                                         Eio.Fiber.get
+                                           candidate_write_failure_hook_key
+                                       with
+                                       | Some detail -> Error detail
+                                       | None ->
+                                         write_meta_for_lifecycle
+                                           permit
+                                           update_token
+                                           ctx.config
+                                           candidate
+                                     in
+                                     (match candidate_write
                                       with
                                       | Error detail ->
                                         Otel_metric_store.inc_counter
@@ -1050,17 +1131,82 @@ let update_keeper ?(preserve_prompt_defaults = false)
                    Eio.Cancel.protect release_update_token;
                    Printexc.raise_with_backtrace exception_ backtrace
                in
-               let restart_after_admission_failure detail =
+               let restart_current_after_failure detail =
                  release_update_token ();
-                 match start_keepalive ctx phase_a_meta with
-                 | Keepalive_started _
-                 | Keepalive_already_registered _ ->
-                   tool_result_error detail
-                 | rejected ->
+                 let restart_current permit =
+                   match
+                     Keeper_meta_store.read_meta
+                       ctx.config
+                       updated.name
+                   with
+                   | Error reread_detail ->
+                     Error
+                       ("exact current metadata reread failed: "
+                        ^ reread_detail)
+                   | Ok None ->
+                     Error "exact current metadata is missing"
+                   | Ok (Some current) ->
+                     if not (autonomous_admitted current)
+                     then Ok ()
+                     else
+                       (match
+                          start_keepalive_under_admission
+                            ~durable_meta_bootstrap:
+                              Durable_meta_already_committed
+                            permit
+                            ctx
+                            current
+                        with
+                        | Keepalive_started _
+                        | Keepalive_already_registered _ ->
+                          Ok ()
+                        | Keepalive_registration_rejected
+                            (Keeper_registry
+                             .Registration_shutdown_reserved _) ->
+                          Ok ()
+                        | rejected ->
+                          Error
+                            (start_keepalive_outcome_to_string rejected))
+                 in
+                 let restart_result =
+                   match
+                     Keeper_lifecycle_admission.Durable_transaction
+                     .with_durable_lifecycle_admission
+                       ctx.config
+                       ~keeper_name:updated.name
+                       restart_current
+                   with
+                   | Keeper_lifecycle_admission.Durable_transaction
+                     .Admission_completed result ->
+                     result
+                   | Keeper_lifecycle_admission.Durable_transaction
+                     .Admission_completed_with_attention
+                       (result, failure) ->
+                     Log.Keeper.error
+                       "keeper update exact-current restart admission release \
+                        requires attention keeper=%s failure=%s"
+                       updated.name
+                       (Keeper_lifecycle_admission.Durable_transaction
+                        .authority_failure_to_wire
+                          failure);
+                     result
+                   | Keeper_lifecycle_admission.Durable_transaction
+                     .Admission_blocked reason ->
+                     Error
+                       (Keeper_lifecycle_admission.Durable_transaction
+                        .blocked_reason_to_wire
+                          reason)
+                 in
+                 match restart_result with
+                 | Ok () -> tool_result_error detail
+                 | Error restart_detail ->
                    tool_result_error
                      (detail
-                      ^ "; exact lane restart failed: "
-                      ^ start_keepalive_outcome_to_string rejected)
+                      ^ "; exact current lane restart failed: "
+                      ^ restart_detail)
+               in
+               let restart_after_admission_failure detail =
+                 restart_current_after_failure detail
                in
                let phase_b =
                  match Eio.Fiber.get phase_b_admission_failure_hook_key with
@@ -1080,7 +1226,9 @@ let update_keeper ?(preserve_prompt_defaults = false)
                | `Admission
                    (Keeper_lifecycle_admission.Durable_transaction
                     .Admission_completed result) ->
-                 result
+                 (match !restart_current_requested with
+                  | None -> result
+                  | Some detail -> restart_current_after_failure detail)
                | `Admission
                    (Keeper_lifecycle_admission.Durable_transaction
                     .Admission_completed_with_attention (result, failure)) ->
@@ -1091,7 +1239,9 @@ let update_keeper ?(preserve_prompt_defaults = false)
                    (Keeper_lifecycle_admission.Durable_transaction
                     .authority_failure_to_wire
                       failure);
-                 result
+                 (match !restart_current_requested with
+                  | None -> result
+                  | Some detail -> restart_current_after_failure detail)
                | `Admission
                    (Keeper_lifecycle_admission.Durable_transaction
                     .Admission_blocked reason) ->

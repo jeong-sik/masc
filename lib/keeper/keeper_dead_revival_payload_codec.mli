@@ -8,6 +8,7 @@ val make_payload :
   keeper_name:string ->
   expected_trace_id:Keeper_id.Trace_id.t ->
   expected_generation:int ->
+  runtime_transition:runtime_transition ->
   original:Keeper_meta_contract.keeper_meta ->
   candidate:Keeper_meta_contract.keeper_meta ->
   (payload, error) result
@@ -20,6 +21,7 @@ val payload_owner_id : payload -> string
 val payload_keeper_name : payload -> string
 val payload_expected_trace_id : payload -> Keeper_id.Trace_id.t
 val payload_expected_generation : payload -> int
+val payload_runtime_transition : payload -> runtime_transition
 val payload_original : payload -> Keeper_meta_contract.keeper_meta
 val payload_candidate : payload -> Keeper_meta_contract.keeper_meta
 

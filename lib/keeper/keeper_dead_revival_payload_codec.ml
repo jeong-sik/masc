@@ -7,6 +7,7 @@ let make_payload
       ~keeper_name
       ~expected_trace_id
       ~expected_generation
+      ~runtime_transition
       ~original
       ~candidate
   =
@@ -16,12 +17,76 @@ let make_payload
     ; keeper_name
     ; expected_trace_id
     ; expected_generation
+    ; runtime_transition
     ; original
     ; candidate
     }
   in
   let* () = validate_payload payload in
   Ok payload
+;;
+
+let runtime_transition_to_json = function
+  | Runtime_unchanged -> `Assoc [ "kind", `String "unchanged" ]
+  | Runtime_changed { before; after } ->
+    `Assoc
+      [ "kind", `String "changed"
+      ; ( "before"
+        , match before with
+          | None -> `Null
+          | Some runtime_id -> `String runtime_id )
+      ; "after", `String after
+      ]
+;;
+
+let runtime_transition_of_json json =
+  let malformed detail = Error (Malformed_payload detail) in
+  let* fields =
+    match json with
+    | `Assoc fields -> Ok fields
+    | _ -> malformed "revival payload runtime_transition must be an object"
+  in
+  let* kind =
+    required_string ~kind:"revival payload runtime_transition" "kind" fields
+    |> Result.map_error (fun detail -> Malformed_payload detail)
+  in
+  match kind with
+  | "unchanged" ->
+    let* _ =
+      exact_fields
+        ~kind:"revival payload runtime_transition"
+        [ "kind" ]
+        json
+      |> Result.map_error (fun detail -> Malformed_payload detail)
+    in
+    Ok Runtime_unchanged
+  | "changed" ->
+    let* fields =
+      exact_fields
+        ~kind:"revival payload runtime_transition"
+        [ "kind"; "before"; "after" ]
+        json
+      |> Result.map_error (fun detail -> Malformed_payload detail)
+    in
+    let* before =
+      match List.assoc_opt "before" fields with
+      | Some `Null -> Ok None
+      | Some (`String runtime_id) -> Ok (Some runtime_id)
+      | Some _ | None ->
+        malformed
+          "revival payload runtime_transition field before must be a string or null"
+    in
+    let* after =
+      required_string
+        ~kind:"revival payload runtime_transition"
+        "after"
+        fields
+      |> Result.map_error (fun detail -> Malformed_payload detail)
+    in
+    Ok (Runtime_changed { before; after })
+  | unsupported ->
+    malformed
+      ("revival payload runtime_transition kind is unsupported: " ^ unsupported)
 ;;
 
 let payload_to_json payload =
@@ -34,6 +99,7 @@ let payload_to_json payload =
       , `String
           (Keeper_id.Trace_id.to_string payload.expected_trace_id) )
     ; "expected_generation", `Int payload.expected_generation
+    ; "runtime_transition", runtime_transition_to_json payload.runtime_transition
     ; "original", Keeper_meta_json.meta_to_json payload.original
     ; "candidate", Keeper_meta_json.meta_to_json payload.candidate
     ]
@@ -54,6 +120,7 @@ let payload_of_json json =
       ; "keeper_name"
       ; "expected_trace_id"
       ; "expected_generation"
+      ; "runtime_transition"
       ; "original"
       ; "candidate"
       ]
@@ -92,6 +159,13 @@ let payload_of_json json =
       required_int ~kind:"revival payload" "expected_generation" fields
       |> Result.map_error (fun detail -> Malformed_payload detail)
     in
+    let* runtime_transition_json =
+      required_field ~kind:"revival payload" "runtime_transition" fields
+      |> Result.map_error (fun detail -> Malformed_payload detail)
+    in
+    let* runtime_transition =
+      runtime_transition_of_json runtime_transition_json
+    in
     let* original_json =
       required_field ~kind:"revival payload" "original" fields
       |> Result.map_error (fun detail -> Malformed_payload detail)
@@ -117,6 +191,7 @@ let payload_of_json json =
         ~keeper_name
         ~expected_trace_id
         ~expected_generation
+        ~runtime_transition
         ~original
         ~candidate
     with
@@ -142,6 +217,7 @@ let payload_owner_id payload = payload.owner_id
 let payload_keeper_name (payload : payload) = payload.keeper_name
 let payload_expected_trace_id payload = payload.expected_trace_id
 let payload_expected_generation payload = payload.expected_generation
+let payload_runtime_transition payload = payload.runtime_transition
 let payload_original payload = payload.original
 let payload_candidate payload = payload.candidate
 

@@ -84,4 +84,5 @@ module For_testing : sig
   val with_phase_b_admission_failure : detail:string -> (unit -> 'a) -> 'a
   val with_durable_revalidation_failure : detail:string -> (unit -> 'a) -> 'a
   val with_runtime_rollback_failure : detail:string -> (unit -> 'a) -> 'a
+  val with_candidate_write_failure : detail:string -> (unit -> 'a) -> 'a
 end

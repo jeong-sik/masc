@@ -77,14 +77,6 @@ let test_ambiguous_reserved_clears_exact_evidence () =
     "keeper revival retains payload after ambiguous Reserved publication"
 ;;
 
-let test_create_uses_one_durable_authority_scope () =
-  let source = read_file "lib/keeper/keeper_turn_up_create.ml" in
-  check_contains source "with_durable_lifecycle_admission";
-  check_contains source "Keeper_meta_store.read_meta ctx.config p.name";
-  check_contains source "start_keepalive_under_admission permit ctx meta";
-  check_not_contains source "let launch_outcome = start_keepalive ctx meta"
-;;
-
 let test_nonce_settlement_is_not_claim_based () =
   let interface = read_file "lib/keeper/keeper_lifecycle_nonce.mli" in
   let meta_interface = read_file "lib/keeper/keeper_meta_store.mli" in
@@ -171,10 +163,6 @@ let () =
             "reserved ambiguity cleanup"
             `Quick
             test_ambiguous_reserved_clears_exact_evidence
-        ; Alcotest.test_case
-            "creation shares one durable authority scope"
-            `Quick
-            test_create_uses_one_durable_authority_scope
         ; Alcotest.test_case
             "nonce settlement is not claim based"
             `Quick

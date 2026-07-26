@@ -585,6 +585,11 @@ let journal_of_json = function
         let* trace_id_raw = required_string "expected_trace_id" fields in
         let* expected_trace_id = Keeper_id.Trace_id.of_string trace_id_raw in
         let* expected_generation = required_int "expected_generation" fields in
+        let* () =
+          if expected_generation > 0
+          then Ok ()
+          else Error "journal field expected_generation must be positive"
+        in
         let* payload_ref = required_payload_ref "payload_ref" fields in
         let* shard =
           Payload.authority_shard_for_keeper ~keeper_name
@@ -1220,7 +1225,12 @@ let make_reserved_journal ~owner_id ~original ~candidate ~payload_ref =
   }
 ;;
 
-let make_prepared_journal ~owner_id ~original ~candidate =
+let make_prepared_journal
+      ~runtime_transition
+      ~owner_id
+      ~original
+      ~candidate
+  =
   let transaction_id =
     journal_transaction_id
       ~owner_id
@@ -1237,6 +1247,7 @@ let make_prepared_journal ~owner_id ~original ~candidate =
       ~keeper_name:original.name
       ~expected_trace_id:original.runtime.trace_id
       ~expected_generation:original.runtime.nonce
+      ~runtime_transition
       ~original
       ~candidate
   in
@@ -1267,7 +1278,13 @@ module For_testing = struct
   include Boundary_hooks_for_testing
 
   let reserved_journal_row ~owner_id ~original ~candidate =
-    match make_prepared_journal ~owner_id ~original ~candidate with
+    match
+      make_prepared_journal
+        ~runtime_transition:Payload.Runtime_unchanged
+        ~owner_id
+        ~original
+        ~candidate
+    with
     | Ok (journal, _) -> journal_to_bytes journal
     | Error failure -> invalid_arg (Payload.error_to_string failure)
   ;;
@@ -1646,6 +1663,37 @@ let delete_payload config (journal : journal) =
     journal.payload_ref
 ;;
 
+let same_runtime_target left right =
+  Option.equal String.equal left right
+;;
+
+let converge_runtime_target ~keeper_name target =
+  if same_runtime_target (Runtime.runtime_id_for_keeper keeper_name) target
+  then Ok ()
+  else
+    let mutation =
+      match target with
+      | Some runtime_id ->
+        Runtime.set_runtime_id_for_keeper ~keeper_name ~runtime_id ()
+      | None -> Runtime.clear_runtime_id_for_keeper ~keeper_name ()
+    in
+    match mutation with
+    | Ok () -> Ok ()
+    | Error detail ->
+      if same_runtime_target (Runtime.runtime_id_for_keeper keeper_name) target
+      then Ok ()
+      else Error detail
+;;
+
+let converge_payload_runtime ~keeper_name ~forward payload =
+  match Payload.payload_runtime_transition payload with
+  | Payload.Runtime_unchanged -> Ok ()
+  | Payload.Runtime_changed { before; after } ->
+    converge_runtime_target
+      ~keeper_name
+      (if forward then Some after else before)
+;;
+
 let rollback_cleanup_stage = function
   | Reserved | Rollback_reserved ->
     Ok (Rollback_cleanup_pending Rollback_from_reserved)
@@ -1663,6 +1711,14 @@ let rollback_cleanup_stage = function
 ;;
 
 let rollback permit token config (journal : journal) payload _original_entry =
+  match
+    converge_payload_runtime
+      ~keeper_name:journal.keeper_name
+      ~forward:false
+      payload
+  with
+  | Error detail -> [ Rollback_runtime_assignment_failed detail ]
+  | Ok () ->
   let original = Payload.payload_original payload in
   let candidate = Payload.payload_candidate payload in
   let meta_errors =
@@ -2057,14 +2113,21 @@ let preflight_journal_authority config keeper_name =
 
 type runtime_assignment =
   | Runtime_assignment_unchanged
-  | Runtime_assignment_changed of string option
+  | Runtime_assignment_changed of
+      { previous : string option
+      ; assigned : string
+      }
 
 let restore_runtime_assignment ~keeper_name = function
   | Runtime_assignment_unchanged -> Ok ()
-  | Runtime_assignment_changed (Some runtime_id) ->
-    Runtime.set_runtime_id_for_keeper ~keeper_name ~runtime_id ()
-  | Runtime_assignment_changed None ->
-    Runtime.clear_runtime_id_for_keeper ~keeper_name ()
+  | Runtime_assignment_changed { previous; _ } ->
+    converge_runtime_target ~keeper_name previous
+;;
+
+let runtime_transition_of_assignment = function
+  | Runtime_assignment_unchanged -> Payload.Runtime_unchanged
+  | Runtime_assignment_changed { previous; assigned } ->
+    Payload.Runtime_changed { before = previous; after = assigned }
 ;;
 
 let apply_runtime_assignment ~keeper_name = function
@@ -2074,20 +2137,28 @@ let apply_runtime_assignment ~keeper_name = function
     if Option.equal String.equal previous (Some runtime_id)
     then Ok Runtime_assignment_unchanged
     else
-      let assignment = Runtime_assignment_changed previous in
+      let assignment =
+        Runtime_assignment_changed { previous; assigned = runtime_id }
+      in
       (match Runtime.set_runtime_id_for_keeper ~keeper_name ~runtime_id () with
        | Ok () -> Ok assignment
        | Error detail ->
-         (match restore_runtime_assignment ~keeper_name assignment with
-          | Ok () -> Error (Runtime_assignment_failed detail)
-          | Error rollback_detail ->
-            Error
-              (Rollback_failed
-                 { cause =
-                     error_to_string (Runtime_assignment_failed detail)
-                 ; errors =
-                     [ Rollback_runtime_assignment_failed rollback_detail ]
-                 })))
+         if
+           same_runtime_target
+             (Runtime.runtime_id_for_keeper keeper_name)
+             (Some runtime_id)
+         then Ok assignment
+         else
+           (match restore_runtime_assignment ~keeper_name assignment with
+            | Ok () -> Error (Runtime_assignment_failed detail)
+            | Error rollback_detail ->
+              Error
+                (Rollback_failed
+                   { cause =
+                       error_to_string (Runtime_assignment_failed detail)
+                   ; errors =
+                       [ Rollback_runtime_assignment_failed rollback_detail ]
+                   })))
 ;;
 
 let settle_runtime_assignment ~keeper_name assignment result =
@@ -2203,6 +2274,8 @@ let revive_locked
              | Ok candidate ->
                (match
                   make_prepared_journal
+                    ~runtime_transition:
+                      (runtime_transition_of_assignment assignment)
                     ~owner_id:(Keeper_lifecycle_reservation.owner_id token)
                     ~original
                     ~candidate
@@ -2827,23 +2900,40 @@ let recover_one_locked permit config leaf =
   | Ok (_, _, None) -> Error "journal authority disappeared during recovery"
   | Ok (_, _, Some (Cleared_tombstone _)) -> Ok false
   | Ok (_, _, Some (Active_journal journal)) ->
-    let recover_forward journal =
+    let complete_forward_cleanup journal =
       match forward_cleanup config journal with
       | Ok () ->
-        observe "recovery_forward_commit" journal.keeper_name "payload and journal cleared";
+        observe
+          "recovery_forward_commit"
+          journal.keeper_name
+          "runtime assignment, payload, and journal converged";
         Ok false
       | Error error ->
         Error
           ("forward-commit journal cleanup failed: "
            ^ error_to_string error)
     in
-    let recover_forward_without_live_reservation journal =
+    let recover_forward journal =
+      match verify_payload config journal with
+      | Error failure -> Error (recovery_payload_error failure)
+      | Ok payload ->
+        (match
+           converge_payload_runtime
+             ~keeper_name:journal.keeper_name
+             ~forward:true
+             payload
+         with
+         | Error detail ->
+           Error ("forward runtime assignment recovery failed: " ^ detail)
+         | Ok () -> complete_forward_cleanup journal)
+    in
+    let without_live_reservation recover journal =
       match
         Keeper_lifecycle_reservation.current
           ~base_path:config.Workspace.base_path
           ~keeper_name:journal.keeper_name
       with
-      | None -> recover_forward journal
+      | None -> recover journal
       | Some owner ->
         Error
           ("forward recovery reservation conflict: "
@@ -2851,9 +2941,9 @@ let recover_one_locked permit config leaf =
     in
     (match journal.stage with
      | Launch_committed ->
-       recover_forward_without_live_reservation journal
+       without_live_reservation recover_forward journal
      | Forward_cleanup_pending ->
-       recover_forward_without_live_reservation journal
+       without_live_reservation complete_forward_cleanup journal
      | Rollback_cleanup_pending origin ->
        finish_rollback_cleanup config journal origin
      | Reserved

@@ -167,6 +167,7 @@ let test_candidate_lifecycle_binding_rejections () =
     ~keeper_name:fixture.keeper_name
     ~expected_trace_id:fixture.expected_trace_id
     ~expected_generation:fixture.expected_generation
+    ~runtime_transition:Payload.Runtime_unchanged
     ~original:fixture.original
     ~candidate:candidate_with_changed_trace
   |> expect_error
@@ -192,6 +193,7 @@ let test_candidate_lifecycle_binding_rejections () =
       ~keeper_name:fixture.keeper_name
       ~expected_trace_id:fixture.expected_trace_id
       ~expected_generation:fixture.expected_generation
+      ~runtime_transition:Payload.Runtime_unchanged
       ~original:fixture.original
       ~candidate
     |> expect_error
@@ -227,6 +229,7 @@ let test_candidate_lifecycle_binding_rejections () =
     ~keeper_name:fixture.keeper_name
     ~expected_trace_id:fixture.expected_trace_id
     ~expected_generation:zero_generation
+    ~runtime_transition:Payload.Runtime_unchanged
     ~original
     ~candidate
   |> expect_error
@@ -244,6 +247,7 @@ let test_candidate_lifecycle_binding_rejections () =
     ~keeper_name:fixture.keeper_name
     ~expected_trace_id:fixture.expected_trace_id
     ~expected_generation:fixture.expected_generation
+    ~runtime_transition:Payload.Runtime_unchanged
     ~original:fixture.original
     ~candidate:fixture.candidate
   |> expect_error

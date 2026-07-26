@@ -1241,6 +1241,7 @@ let create_unjournaled_revival_payload
       ~keeper_name:original.name
       ~expected_trace_id:original.runtime.trace_id
       ~expected_generation:original.runtime.nonce
+      ~runtime_transition:Revival_payload.Runtime_unchanged
       ~original
       ~candidate
     |> require_revival_payload_ok "make unjournaled revival payload"
@@ -1573,6 +1574,49 @@ let test_dead_revival_indeterminate_launch_releases_for_recovery () =
     Alcotest.fail
       ("same-process recovery could not restart committed keeper: "
        ^ Keeper_keepalive.start_keepalive_outcome_to_string rejected)
+;;
+
+let test_dead_revival_precommit_recovery_restores_runtime_assignment () =
+  let keeper_name = "dead-revival-precommit-runtime-recovery" in
+  with_settled_dead_revival_fixture ~keeper_name
+  @@ fun _base_dir config original _dead_entry ctx ->
+  let candidate_runtime = "runtime.revival-candidate" in
+  let candidate =
+    { original with
+      paused = false
+    ; latched_reason = None
+    }
+  in
+  let result =
+    Keeper_dead_revival_transaction.For_testing
+    .with_launch_publication_reread_attention
+      ~detail:"injected unchanged launch reread attention"
+      (fun () ->
+        Keeper_dead_revival_transaction.For_testing
+        .with_launch_publication_unchanged
+          (fun () ->
+            Keeper_dead_revival_transaction.revive
+              ~runtime_id:candidate_runtime
+              ctx
+              ~original
+              ~candidate))
+  in
+  (match result with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "precommit launch uncertainty reported success");
+  Alcotest.(check (option string))
+    "unresolved transaction retains candidate runtime before recovery"
+    (Some candidate_runtime)
+    (Runtime.runtime_id_for_keeper keeper_name);
+  let recovery = Keeper_dead_revival_transaction.recover_pending config in
+  Alcotest.(check int)
+    "precommit recovery is fully resolved"
+    0
+    (List.length recovery.unresolved);
+  Alcotest.(check (option string))
+    "rollback recovery restores the prior runtime assignment"
+    None
+    (Runtime.runtime_id_for_keeper keeper_name)
 ;;
 
 let test_dead_revival_launch_publication_warning_preserves_commit () =
@@ -2996,6 +3040,50 @@ let test_update_keeper_runtime_rollback_failure_keeps_candidate_consistent () =
   | Some entry when not (Keeper_registry.lane_has_exited entry) -> ()
   | Some _ -> Alcotest.fail "candidate recovery retained only an exited lane"
   | None -> Alcotest.fail "candidate recovery did not restore a live lane"
+;;
+
+let test_update_keeper_precommit_failure_forwards_candidate_authority () =
+  let keeper_name = "update-precommit-runtime-rollback-failure" in
+  with_running_ordinary_update_fixture ~keeper_name
+  @@ fun base_dir config original ctx ->
+  let candidate_runtime = "runtime.precommit-candidate" in
+  let parsed =
+    { (ordinary_update_args keeper_name) with
+      runtime_id_opt = Some candidate_runtime
+    ; proactive_enabled_opt = Some false
+    }
+  in
+  let result =
+    Keeper_turn_up_update.For_testing.with_runtime_rollback_failure
+      ~detail:"injected precommit runtime rollback failure"
+      (fun () ->
+        Keeper_turn_up_update.For_testing.with_candidate_write_failure
+          ~detail:"injected candidate metadata write failure"
+          (fun () ->
+            Keeper_turn_up_update.update_keeper ctx parsed original))
+  in
+  Alcotest.(check bool)
+    "precommit failure remains explicit"
+    false
+    (Keeper_types_profile.tool_result_success result);
+  Alcotest.(check (option string))
+    "candidate runtime remains paired after forward publication"
+    (Some candidate_runtime)
+    (Runtime.runtime_id_for_keeper keeper_name);
+  let persisted =
+    match Keeper_meta_store.read_meta config keeper_name with
+    | Ok (Some meta) -> meta
+    | Ok None -> Alcotest.fail "forward candidate metadata disappeared"
+    | Error detail -> Alcotest.fail detail
+  in
+  Alcotest.(check bool)
+    "candidate metadata was forward-published"
+    false
+    persisted.proactive.enabled;
+  match Keeper_registry.get ~base_path:base_dir keeper_name with
+  | Some entry when not (Keeper_registry.lane_has_exited entry) -> ()
+  | Some _ -> Alcotest.fail "forward recovery retained only an exited lane"
+  | None -> Alcotest.fail "forward recovery did not restore a live lane"
 ;;
 
 let test_create_keeper_fork_rejection_removes_candidate_state () =
@@ -4628,6 +4716,10 @@ let () =
             `Quick
             test_dead_revival_indeterminate_launch_releases_for_recovery;
           Alcotest.test_case
+            "precommit recovery restores runtime assignment"
+            `Quick
+            test_dead_revival_precommit_recovery_restores_runtime_assignment;
+          Alcotest.test_case
             "launch publication warning preserves committed revival"
             `Quick
             test_dead_revival_launch_publication_warning_preserves_commit;
@@ -4729,6 +4821,10 @@ let () =
             "runtime rollback failure retains a consistent candidate lane"
             `Quick
             test_update_keeper_runtime_rollback_failure_keeps_candidate_consistent;
+          Alcotest.test_case
+            "precommit rollback failure forwards candidate authority"
+            `Quick
+            test_update_keeper_precommit_failure_forwards_candidate_authority;
           Alcotest.test_case
             "create fork rejection removes candidate durable state"
             `Quick

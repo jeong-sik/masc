@@ -212,6 +212,7 @@ let make_fixture
       ~keeper_name
       ~expected_trace_id
       ~expected_generation
+      ~runtime_transition:Payload.Runtime_unchanged
       ~original
       ~candidate
     |> require_payload_ok "make payload"

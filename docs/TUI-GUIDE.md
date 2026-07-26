@@ -53,10 +53,10 @@ Press `Tab` to switch. Shows all registered keepers with status.
 ```
 MASC Keepers (5 registered)
 
-> dm-keeper        gen=0  model=qwen3.5  proactive=true
-  qa-ui-smoke      gen=0  model=qwen3.5  proactive=true
-  qa-surface       gen=0  model=qwen3.5  proactive=true
-  qa-harness       gen=0  model=qwen3.5  proactive=true
+> dm-keeper        gen=1  model=qwen3.5  proactive=true
+  qa-ui-smoke      gen=1  model=qwen3.5  proactive=true
+  qa-surface       gen=1  model=qwen3.5  proactive=true
+  qa-harness       gen=1  model=qwen3.5  proactive=true
   sangsu           gen=1  model=qwen3.5  proactive=true
 
 [j/k] Navigate  [Enter] Detail  [Tab] Dashboard  [q] Quit

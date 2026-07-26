@@ -3,6 +3,54 @@ module Types = Masc_domain
 open Masc
 open Test_operator_control_support
 
+let seed_current_keeper_meta
+      config
+      (meta : Keeper_meta_contract.keeper_meta)
+  =
+  match
+    Keeper_lifecycle_admission.Durable_transaction
+    .with_durable_lifecycle_admission
+      config
+      ~keeper_name:meta.name
+      (fun permit ->
+         match
+           Keeper_lifecycle_nonce.create
+             permit
+             ~base_path:config.Workspace.base_path
+             ~keeper_id:meta.name
+             ~owner_id:
+               (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+             ()
+         with
+         | Error error ->
+           Error (Keeper_lifecycle_nonce.error_to_string error)
+         | Ok witness ->
+           Keeper_meta_store.create_meta
+             permit
+             witness
+             config
+             meta)
+  with
+  | Keeper_lifecycle_admission.Durable_transaction.Admission_completed result ->
+    result
+  | Keeper_lifecycle_admission.Durable_transaction
+    .Admission_completed_with_attention (Error detail, _) ->
+    Error detail
+  | Keeper_lifecycle_admission.Durable_transaction
+    .Admission_completed_with_attention
+      (Ok (), failure) ->
+    Error
+      ("fresh fixture lifecycle admission release failed: "
+       ^ Keeper_lifecycle_admission.Durable_transaction
+         .authority_failure_to_wire
+           failure)
+  | Keeper_lifecycle_admission.Durable_transaction.Admission_blocked reason ->
+    Error
+      (Keeper_lifecycle_admission.Durable_transaction
+       .blocked_reason_to_wire
+         reason)
+;;
+
 let last_substring_index haystack needle =
   let h_len = String.length haystack in
   let n_len = String.length needle in
@@ -569,7 +617,7 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
           };
       }
   in
-  (match Keeper_meta_store.write_meta config seeded with
+    (match seed_current_keeper_meta config seeded with
   | Ok () -> ()
   | Error err -> Alcotest.fail err);
   let persisted_seed = read_meta "seeded tombstone" in
@@ -778,7 +826,7 @@ let test_lifecycle_owner_gates_meta_and_registry_mutations () =
         | Ok meta -> meta
         | Error detail -> Alcotest.fail detail
       in
-      (match Keeper_meta_store.write_meta config meta with
+       (match seed_current_keeper_meta config meta with
        | Ok () -> ()
        | Error detail -> Alcotest.fail detail);
       let persisted =
@@ -944,7 +992,7 @@ let test_dead_revival_launch_failure_rolls_back_both_authorities () =
           ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
           }
       in
-      (match Keeper_meta_store.write_meta config original_seed with
+       (match seed_current_keeper_meta config original_seed with
        | Ok () -> ()
        | Error detail -> Alcotest.fail detail);
       let original =
@@ -1058,7 +1106,7 @@ let with_settled_dead_revival_fixture ~keeper_name fn =
           ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
           }
       in
-      (match Keeper_meta_store.write_meta config original_seed with
+       (match seed_current_keeper_meta config original_seed with
        | Ok () -> ()
        | Error detail -> Alcotest.fail detail);
       let original =
@@ -2599,7 +2647,7 @@ let test_update_keeper_rebases_intent_after_join_race () =
         | Error detail -> Alcotest.fail detail
         | Ok meta -> { meta with instructions = "before-race" }
       in
-      (match Keeper_meta_store.write_meta config seed with
+      (match seed_current_keeper_meta config seed with
        | Ok () -> ()
        | Error detail -> Alcotest.fail detail);
       let original =
@@ -2755,7 +2803,7 @@ let with_running_ordinary_update_fixture ~keeper_name fn =
         | Error detail -> Alcotest.fail detail
         | Ok meta -> { meta with instructions = "before-update" }
       in
-      (match Keeper_meta_store.write_meta config seed with
+      (match seed_current_keeper_meta config seed with
        | Ok () -> ()
        | Error detail -> Alcotest.fail detail);
       let persisted =
@@ -3563,10 +3611,13 @@ let test_keeper_lifecycle_transaction_admission_current_schema () =
        persisted.instructions
    | Ok None -> Alcotest.fail "blocked ordinary write removed metadata"
    | Error detail -> Alcotest.fail detail);
-  let blocked_stages =
-    [ "Reserved", `Assoc [ "reserved", `Bool true ]
-    ; "Durable_committed", `Assoc [ "durable_committed", `Bool true ]
-    ; "Rollback_reserved", `Assoc [ "rollback_reserved", `Bool true ]
+   let blocked_stages =
+     [ "Reserved", `Assoc [ "reserved", `Bool true ]
+     ; "Durable_committed", `Assoc [ "durable_committed", `Bool true ]
+     ; "Launch_committed", `Assoc [ "launch_committed", `Bool true ]
+     ; ( "Forward_cleanup_pending"
+       , `Assoc [ "forward_cleanup_pending", `Bool true ] )
+     ; "Rollback_reserved", `Assoc [ "rollback_reserved", `Bool true ]
     ; ( "Rollback_durable_committed"
       , `Assoc [ "rollback_durable_committed", `Bool true ] )
     ; ( "Rollback_cleanup_pending_from_reserved"
@@ -3589,21 +3640,7 @@ let test_keeper_lifecycle_transaction_admission_current_schema () =
          (replace_revival_journal_stage reserved stage);
        expect_durable_start_blocked ~config ~keeper_name label)
     blocked_stages;
-  let admitted_stages =
-    [ "Launch_committed", `Assoc [ "launch_committed", `Bool true ]
-    ; ( "Forward_cleanup_pending"
-      , `Assoc [ "forward_cleanup_pending", `Bool true ] )
-    ]
-  in
-  List.iter
-    (fun (label, stage) ->
-       replace_durable_admission_row
-         ~config
-         ~keeper_name
-         (replace_revival_journal_stage reserved stage);
-       expect_durable_start_admitted ~config ~keeper_name label)
-    admitted_stages;
-  let reserved_json = Yojson.Safe.from_string reserved in
+   let reserved_json = Yojson.Safe.from_string reserved in
   let transaction_id =
     Yojson.Safe.Util.(reserved_json |> member "transaction_id" |> to_string)
   in
@@ -3867,10 +3904,10 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
           }
         | Error err -> Alcotest.fail ("keeper meta fixture failed: " ^ err)
       in
-      (match Keeper_meta_store.write_meta config meta with
-      | Ok () -> ()
-      | Error err -> Alcotest.fail err);
-      Dated_jsonl.append
+       (match seed_current_keeper_meta config meta with
+       | Ok () -> ()
+       | Error err -> Alcotest.fail err);
+       Dated_jsonl.append
         (Keeper_types_support.keeper_execution_receipt_store config keeper_name)
         (`Assoc
           [

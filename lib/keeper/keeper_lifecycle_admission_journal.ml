@@ -323,10 +323,11 @@ let read_locked config keeper_name =
               | Rollback_reserved
               | Rollback_durable_committed
               | Rollback_cleanup_pending_from_reserved
-              | Rollback_cleanup_pending_from_durable_committed ->
-                Blocked (Rollback_capable_authority evidence)
-              | Launch_committed
-              | Forward_cleanup_pending
-              | Cleared ->
-                Admitted (Some evidence)))))
+                | Rollback_cleanup_pending_from_durable_committed ->
+                  Blocked (Rollback_capable_authority evidence)
+                | Launch_committed
+                | Forward_cleanup_pending ->
+                  Blocked (Forward_cleanup_authority evidence)
+                | Cleared ->
+                  Admitted (Some evidence)))))
 ;;

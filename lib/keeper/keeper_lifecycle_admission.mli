@@ -84,8 +84,9 @@ module Durable_transaction : sig
         { keeper_name : string
         ; failure : authority_failure
         }
-    | Rollback_capable_authority of evidence
-    | Revival_transaction_mismatch of
+      | Rollback_capable_authority of evidence
+      | Forward_cleanup_authority of evidence
+      | Revival_transaction_mismatch of
         { keeper_name : string
         ; observed : evidence option
         }

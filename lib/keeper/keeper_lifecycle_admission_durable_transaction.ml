@@ -111,7 +111,9 @@ let with_recovery_lifecycle_admission
                      { keeper_name; observed = Some evidence })
             in
             match read_locked config keeper_name with
-            | Blocked (Rollback_capable_authority evidence) -> admit evidence
+              | Blocked (Rollback_capable_authority evidence)
+              | Blocked (Forward_cleanup_authority evidence) ->
+                admit evidence
             | Admitted (Some evidence) -> admit evidence
             | Blocked reason -> Error reason
             | Admitted None ->
@@ -250,6 +252,8 @@ let blocked_reason_to_wire = function
     "authority_invalid:" ^ authority_failure_to_wire failure
   | Rollback_capable_authority evidence ->
     "rollback_capable:" ^ stage_to_wire evidence.stage
+  | Forward_cleanup_authority evidence ->
+    "forward_cleanup:" ^ stage_to_wire evidence.stage
   | Revival_transaction_mismatch _ ->
     "revival_transaction_mismatch"
 ;;
@@ -278,6 +282,11 @@ let blocked_reason_to_yojson = function
   | Rollback_capable_authority evidence ->
     `Assoc
       [ "kind", `String "rollback_capable_authority"
+      ; "evidence", evidence_to_yojson evidence
+      ]
+  | Forward_cleanup_authority evidence ->
+    `Assoc
+      [ "kind", `String "forward_cleanup_authority"
       ; "evidence", evidence_to_yojson evidence
       ]
   | Revival_transaction_mismatch { keeper_name; observed } ->

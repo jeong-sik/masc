@@ -37,6 +37,7 @@ type blocked_reason =
       ; failure : authority_failure
       }
   | Rollback_capable_authority of evidence
+  | Forward_cleanup_authority of evidence
   | Revival_transaction_mismatch of
       { keeper_name : string
       ; observed : evidence option

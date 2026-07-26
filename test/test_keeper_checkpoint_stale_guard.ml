@@ -998,6 +998,53 @@ let test_exact_snapshot_preserves_locked_canonical_bytes () =
              (Keeper_checkpoint_store.exact_snapshot_reference decoded))
       | Error _ -> fail "exact snapshot bytes did not decode")
 
+let test_stampless_generation_is_not_generation_zero () =
+  (* keeper_generation_of_context returned 0 for both "the stamp says 0" and "there is
+     no stamp", so the history snapshot id spelled them the same. The strict reader in
+     the same module already errors on absence (Generation_missing), so one key had two
+     readers with opposite policies and the lenient one won wherever it was called. *)
+  let stamped_zero =
+    with_generation 0 (make_checkpoint ~session_id:"gen-zero" ~turn_count:1 ~marker:"z")
+  in
+  let stampless =
+    make_checkpoint ~session_id:"gen-absent" ~turn_count:1 ~marker:"a"
+  in
+  let id_of ?fallback_generation ckpt =
+    Keeper_checkpoint_store.oas_history_snapshot_id_of_checkpoint
+      ?fallback_generation
+      ckpt
+  in
+  check bool
+    "a stampless checkpoint does not produce the generation-0 id"
+    false
+    (id_of stampless = id_of stamped_zero);
+  (* Both remain valid history filenames — the prefix and suffix are what listing and
+     pruning walk, and only the generation field differs. *)
+  let shares_envelope a b =
+    let split id =
+      match String.index_opt id 'g' with
+      | None -> id, ""
+      | Some at -> String.sub id 0 at, String.sub id at (String.length id - at)
+    in
+    fst (split a) = fst (split b)
+  in
+  check bool
+    "the stampless id keeps the history filename envelope"
+    true
+    (shares_envelope (id_of stampless) (id_of stamped_zero));
+  (* A caller that knows the generation answers for the checkpoint, rather than the id
+     carrying a substituted value: this is what the dashboard route now passes. *)
+  check string
+    "a supplied fallback fills the field for a stampless checkpoint"
+    (id_of (with_generation 7 stampless))
+    (id_of ~fallback_generation:7 stampless);
+  (* And a fallback never overrides a stamp the checkpoint carries. *)
+  check string
+    "a stamp wins over a supplied fallback"
+    (id_of stamped_zero)
+    (id_of ~fallback_generation:7 stamped_zero)
+;;
+
 let () =
   run "Keeper_checkpoint_store checkpoint watermark (RFC-0225 §3.2)"
     [
@@ -1045,5 +1092,7 @@ let () =
             test_checkpoint_ref_requires_generation;
           test_case "exact snapshot preserves canonical bytes" `Quick
             test_exact_snapshot_preserves_locked_canonical_bytes;
+          test_case "a stampless generation is not generation zero" `Quick
+            test_stampless_generation_is_not_generation_zero;
         ] );
     ]

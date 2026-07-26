@@ -33,9 +33,18 @@ val oas_history_path :
 val keeper_generation_context_key : string
 
 (** Compose an OAS history archive snapshot id from a checkpoint
-    (created_at_ms + keeper_generation suffix). *)
+    (created_at_ms + keeper_generation suffix).
+
+    [?fallback_generation] is used only when the checkpoint carries no
+    [keeper_generation] stamp. Supply it from what the caller knows — the
+    keeper's runtime nonce — rather than leaving the field to a substituted
+    number: a stampless checkpoint previously produced "-g0", which is
+    indistinguishable from a genuine generation 0. With no fallback the field
+    reads [gunstamped], which no real generation can produce. The prefix and
+    suffix are unchanged either way, so the id remains a filename that
+    {!list_oas_history_files} lists and pruning walks. *)
 val oas_history_snapshot_id_of_checkpoint :
-  Agent_sdk.Checkpoint.t -> string
+  ?fallback_generation:int -> Agent_sdk.Checkpoint.t -> string
 
 (** Save [ckpt] to the OAS history archive in [session_dir],
     pruning to [max_oas_history_retained] entries. Logs and

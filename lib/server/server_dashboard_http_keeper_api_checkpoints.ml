@@ -56,7 +56,12 @@ let inventory_json (config : Workspace.config) (name : string)
       match Keeper_checkpoint_store.load_oas ~session_dir ~session_id:trace_id with
       | Ok checkpoint ->
         let current_history_snapshot_id =
-          Keeper_checkpoint_store.oas_history_snapshot_id_of_checkpoint checkpoint
+          (* This route already holds the keeper's runtime nonce for the summary's
+             own fallback, so it can answer for a stampless checkpoint instead of
+             letting the id carry a substituted number. *)
+          Keeper_checkpoint_store.oas_history_snapshot_id_of_checkpoint
+            ~fallback_generation:meta.runtime.nonce
+            checkpoint
         in
         oas_checkpoint_summary_json
           ~source_kind:"oas_current"

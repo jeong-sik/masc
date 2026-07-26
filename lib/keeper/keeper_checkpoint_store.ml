@@ -81,20 +81,48 @@ let encode_checkpoint_string_off_scheduler (ckpt : Agent_sdk.Checkpoint.t) :
 
 let keeper_generation_context_key = "keeper_generation"
 
-let keeper_generation_of_context (context : Agent_sdk.Context.t) : int =
+(* Absence and zero are different answers and this returned 0 for both. The strict
+   reader below ([checkpoint_generation_strict]) already errors on a missing stamp, so
+   the same key had two readers with opposite policies, and the lenient one silently
+   won wherever it was called. Returning [option] makes each call site state its own
+   policy where a reader can see it. *)
+let keeper_generation_of_context (context : Agent_sdk.Context.t) : int option =
   match
     Agent_sdk.Context.get_scoped context Agent_sdk.Context.Session
       keeper_generation_context_key
   with
-  | Some (`Int n) -> n
-  | Some (`Intlit raw) -> Option.value ~default:0 (int_of_string_opt raw)
-  | _ -> 0
+  | Some (`Int n) -> Some n
+  | Some (`Intlit raw) -> int_of_string_opt raw
+  | _ -> None
 
-let oas_history_snapshot_id_of_checkpoint (ckpt : Agent_sdk.Checkpoint.t) : string =
-  let generation = keeper_generation_of_context ckpt.context in
+let oas_history_snapshot_id_of_checkpoint
+      ?fallback_generation
+      (ckpt : Agent_sdk.Checkpoint.t)
+  : string
+  =
+  (* [fallback_generation] is what the CALLER knows when the checkpoint carries no
+     stamp. Only a caller holding the keeper's runtime nonce can answer that; the
+     0 this used to substitute was not an answer, and it is indistinguishable from a
+     genuine generation 0 in the emitted filename.
+
+     Without a fallback the id still has to be a valid history filename — the prefix
+     and suffix are what [list_oas_history_files] globs and what pruning walks — so
+     the generation field carries [unstamped] rather than a number. That string cannot
+     collide with a real generation, which "-g0" could. *)
+  let generation =
+    match keeper_generation_of_context ckpt.context, fallback_generation with
+    | Some generation, _ -> `Generation generation
+    | None, Some fallback -> `Generation fallback
+    | None, None -> `Unstamped
+  in
   let created_ms = max 0 (int_of_float (ckpt.created_at *. 1000.0)) in
-  Printf.sprintf "%s%013d-g%d%s"
-    oas_history_prefix created_ms generation oas_history_suffix
+  match generation with
+  | `Generation generation ->
+    Printf.sprintf "%s%013d-g%d%s"
+      oas_history_prefix created_ms generation oas_history_suffix
+  | `Unstamped ->
+    Printf.sprintf "%s%013d-gunstamped%s"
+      oas_history_prefix created_ms oas_history_suffix
 
 let prune_oas_history ~(session_dir : string) : unit =
   let files = list_oas_history_files ~session_dir in

@@ -41,9 +41,17 @@ type decision =
       }
   | Unavailable of unavailable_reason
 
+type auto_judge_resume_failure_code =
+  | Resume_worker_start_failed
+  | Resume_identity_unbound
+  | Resume_completion_persistence_uncertain
+  | Resume_completion_failed
+  | Resume_exact_state_not_completed
+
 type auto_judge_resume_failure =
   { approval_id : string
-  ; reason : string
+  ; code : auto_judge_resume_failure_code
+  ; operator_detail : string
   }
 
 type auto_judge_resume_report =
@@ -344,23 +352,30 @@ type auto_judge_entry_class =
 let classify_auto_judge_entry
       (entry : Keeper_approval_queue.pending_approval)
   =
-  match entry.exact_attempt, entry.summary_status with
-  | Keeper_approval_queue.Exact_unbound,
+  match
+    entry.summary_attempt_disposition,
+    entry.exact_attempt,
+    entry.summary_status
+  with
+  | Keeper_approval_queue.Summary_attempt_ready,
+    Keeper_approval_queue.Exact_unbound,
     Keeper_approval_queue.Summary_not_requested ->
     Auto_judge_not_requested
-  | Keeper_approval_queue.Exact_unbound,
+  | Keeper_approval_queue.Summary_attempt_ready,
+    Keeper_approval_queue.Exact_unbound,
     Keeper_approval_queue.Summary_pending ->
     Auto_judge_pending_unbound
-  | Keeper_approval_queue.Exact_unbound,
+  | Keeper_approval_queue.Summary_attempt_identity_unbound,
+    Keeper_approval_queue.Exact_unbound,
     Keeper_approval_queue.Summary_available summary ->
     Auto_judge_finalizable summary
-  | Keeper_approval_queue.Exact_bound
+  | ( Keeper_approval_queue.Summary_attempt_settled
+    | Keeper_approval_queue.Summary_attempt_persistence_uncertain ),
+    Keeper_approval_queue.Exact_bound
       { status = Keeper_approval_queue.Exact_completed; _ },
     Keeper_approval_queue.Summary_available summary ->
     Auto_judge_finalizable summary
-  | Keeper_approval_queue.Exact_unbound,
-    Keeper_approval_queue.Summary_failed _
-  | Keeper_approval_queue.Exact_bound _, _ ->
+  | _ ->
     Auto_judge_ineligible
 ;;
 
@@ -533,10 +548,20 @@ and spawn_auto_judge_entry entry =
     ~spawn_worker:Hitl_summary_worker.spawn
     entry
 
-and retry_auto_judge_entry (entry : Keeper_approval_queue.pending_approval) =
-  match Keeper_approval_queue.restart_failed_summary ~id:entry.id with
+and retry_auto_judge_entry
+      ~requested_by
+      (entry : Keeper_approval_queue.pending_approval)
+  =
+  match
+    Keeper_approval_queue.rearm_summary_attempt
+      ~base_path:entry.audit_base_path
+      ~id:entry.id
+      ~input_hash:entry.input_hash
+      ~sequence:entry.sequence
+      ~requested_by
+  with
   | Error error ->
-    Error (Keeper_approval_queue.summary_transition_error_to_string error)
+    Error (Keeper_approval_queue.exact_attempt_error_to_string error)
   | Ok false -> Ok Retry_skipped
   | Ok true ->
     (match
@@ -735,16 +760,23 @@ let observe_recovered_work kind (entry : Keeper_approval_queue.pending_approval)
     ()
 ;;
 
-let retry_failed_auto_judge ~base_path ~requested_by approval_id =
-  match Keeper_approval_queue.get_pending_entry ~id:approval_id with
+let retry_blocked_auto_judge ~base_path ~requested_by approval_id =
+  match Keeper_gate_mode.read ~base_path with
+  | Error detail -> Error detail
+  | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
+    Error "Auto Judge retry requires auto_judge mode"
+  | Ok Keeper_gate_mode.Auto_judge ->
+    (match Keeper_approval_queue.get_pending_entry ~id:approval_id with
   | None -> Error ("pending approval not found: " ^ approval_id)
   | Some entry when not (String.equal entry.audit_base_path base_path) ->
     Error ("pending approval not found: " ^ approval_id)
   | Some entry ->
-    (match retry_auto_judge_entry entry with
+    (match retry_auto_judge_entry ~requested_by entry with
      | Error reason -> Error reason
      | Ok Retry_skipped ->
-       Error ("approval summary is not failed or is already active: " ^ approval_id)
+       Error
+         ("approval summary is not blocked or is already active: "
+          ^ approval_id)
      | Ok Retry_queued ->
        Log.Keeper.info
          ~keeper_name:entry.keeper_name
@@ -774,9 +806,9 @@ let retry_failed_auto_judge ~base_path ~requested_by approval_id =
          ?task_id:entry.task_id
          ?goal_id:entry.goal_id
          ~goal_ids:entry.goal_ids
-         ~actor:requested_by
-         ();
-       Ok ())
+       ~actor:requested_by
+       ();
+       Ok ()))
 ;;
 
 let finalize_recovered_judgment
@@ -784,10 +816,20 @@ let finalize_recovered_judgment
       (entry : Keeper_approval_queue.pending_approval)
       summary
   =
+  let persistence_uncertain () =
+    ignore
+      (Keeper_approval_queue.mark_summary_attempt_persistence_uncertain
+         ~base_path:entry.audit_base_path
+         ~id:entry.id
+         ~input_hash:entry.input_hash
+         ~sequence:entry.sequence
+       : (bool, Keeper_approval_queue.exact_attempt_error) result)
+  in
   match entry.exact_attempt with
   | Keeper_approval_queue.Exact_unbound ->
     Error
-      "recovered Auto Judge summary has no exact attempt identity; finalization withheld"
+      ( Resume_identity_unbound
+      , "Recovered Auto Judge output has no exact attempt identity; finalization is withheld." )
   | Keeper_approval_queue.Exact_bound
       ({ status = Keeper_approval_queue.Exact_completed; _ } as binding) ->
     (match
@@ -805,25 +847,26 @@ let finalize_recovered_judgment
          { Keeper_approval_queue.write_outcome =
              Keeper_approval_queue.Fsync_completed
          ; _
-         } ->
+          } ->
        resolve_judgment entry ~approval_id:entry.id summary
-     | Ok
-         { write_outcome =
-             Keeper_approval_queue.Visible_sync_unconfirmed detail
-         ; _
-         } ->
+      | Ok
+          { write_outcome =
+              Keeper_approval_queue.Visible_sync_unconfirmed _detail
+          ; _
+          } ->
+       persistence_uncertain ();
        Error
-         ("exact completion is visible but fsync remains unconfirmed; Gate \
-           finalization withheld: "
-          ^ detail)
-     | Error error ->
+         ( Resume_completion_persistence_uncertain
+         , "Exact completion is visible but durability is not confirmed; finalization is withheld." )
+     | Error _error ->
+       persistence_uncertain ();
        Error
-         ("exact completion durability confirmation failed; Gate finalization \
-           withheld: "
-          ^ Keeper_approval_queue.exact_attempt_error_to_string error))
+         ( Resume_completion_failed
+         , "Exact completion durability confirmation failed; finalization is withheld." ))
   | Keeper_approval_queue.Exact_bound _ ->
     Error
-      "recovered Auto Judge entry is not a completed exact judgment"
+      ( Resume_exact_state_not_completed
+      , "Recovered Auto Judge entry is not a completed exact judgment." )
 ;;
 
 let resume_persisted_auto_judges_with
@@ -856,11 +899,20 @@ let resume_persisted_auto_judges_with
            started_ids, entry.id :: finalized_ids, skipped_ids, failures
          | `Start (Ok Skipped) | `Finalize (Ok Judgment_skipped) ->
            started_ids, finalized_ids, entry.id :: skipped_ids, failures
-         | `Start (Error reason) | `Finalize (Error reason) ->
+         | `Start (Error _reason) ->
            ( started_ids
            , finalized_ids
            , skipped_ids
-           , { approval_id = entry.id; reason } :: failures ))
+           , { approval_id = entry.id
+             ; code = Resume_worker_start_failed
+             ; operator_detail = "Auto Judge worker did not start."
+             }
+             :: failures )
+         | `Finalize (Error (code, operator_detail)) ->
+           ( started_ids
+           , finalized_ids
+           , skipped_ids
+           , { approval_id = entry.id; code; operator_detail } :: failures ))
       ([], [], [], [])
       recovered
   in
@@ -893,22 +945,18 @@ let request_operator_auto_judge_recovery ~base_path =
     (match Hitl_summary_worker.snapshot_topology_readiness () with
      | Error detail -> Error detail
      | Ok () ->
-      (match Keeper_approval_queue.restart_failed_summaries ~base_path with
-       | Error error ->
-         Error (Keeper_approval_queue.summary_transition_error_to_string error)
-       | Ok reopened_ids ->
        let started_ids = drain_auto_judges ~base_path in
        let queued =
          Keeper_approval_queue.list_pending_entries ()
          |> List.fold_left
-                (fun count (entry : Keeper_approval_queue.pending_approval) ->
-                   if String.equal entry.audit_base_path base_path
-                      && auto_judge_entry_ready entry
-                   then count + 1
-                   else count)
+              (fun count (entry : Keeper_approval_queue.pending_approval) ->
+                 if String.equal entry.audit_base_path base_path
+                    && auto_judge_entry_ready entry
+                 then count + 1
+                 else count)
               0
        in
-       Ok { reopened_ids; started_ids; queued }))
+       Ok { reopened_ids = []; started_ids; queued })
 ;;
 
 let defer request reason =

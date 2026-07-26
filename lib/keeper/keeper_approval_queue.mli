@@ -18,10 +18,6 @@ type summary_transition_error =
   | Summary_transition_storage_error of storage_error
   | Summary_transition_rejected of summary_transition_rejection
 
-type summary_owner_retirement_error =
-  | Summary_owner_retirement_storage_error of storage_error
-  | Summary_owner_retirement_exact_attempt_unsettled of exact_attempt_binding
-
 type exact_attempt_rejection =
   | Exact_attempt_not_found of string
   | Exact_attempt_key_mismatch of
@@ -105,7 +101,6 @@ type install_error = Install_storage_failed of storage_error
 
 val storage_error_to_string : storage_error -> string
 val summary_transition_error_to_string : summary_transition_error -> string
-val summary_owner_retirement_error_to_string : summary_owner_retirement_error -> string
 val exact_attempt_error_to_string : exact_attempt_error -> string
 val grant_error_to_string : grant_error -> string
 val install_error_to_string : install_error -> string
@@ -414,31 +409,36 @@ val mark_summary_pending : id:string -> (bool, summary_transition_error) result
       so a Gate can prevent duplicate judge workers. A bound or quarantined
       exact attempt is rejected explicitly. *)
 
-(** Durably transition any [Summary_failed] state back to the in-flight marker.
-    Only explicit operator action calls this CAS, so the diagnostic [retryable]
-    classification never controls work. A restart-classified
-    [Exact_released_recovery_required] with [Summary_pending] is also reset to
-    [Exact_unbound] without changing its pending summary marker. A live
-    [Exact_released_before_dispatch] with [Summary_pending] is never accepted.
-    There is no timer or retry count. *)
-val restart_failed_summary : id:string -> (bool, summary_transition_error) result
-
-(** Explicit operator recovery: transition every failed summary for this
-    workspace in one durable transaction. Non-exact failures return to
-    [Summary_not_requested]. Released exact failures return to [Summary_pending]
-    with [Exact_unbound]. Restart-classified released pending work also returns
-    to [Exact_unbound] while remaining [Summary_pending], so only this operator
-    action permits a new exact attempt. Returns the reopened approval ids. *)
-val restart_failed_summaries :
-  base_path:string -> (string list, summary_transition_error) result
-
-(** Fail closed when permanently retiring a Keeper that still owns an exact
-    summary attempt. Otherwise terminalize every unbound pending summary in one
-    durable snapshot, leaving already terminal summaries unchanged. *)
-val retire_summary_owner :
+val mark_summary_attempt_identity_unbound :
   base_path:string ->
-  keeper_name:string ->
-  reason:string ->
-  (string list, summary_owner_retirement_error) result
+  id:string ->
+  input_hash:string ->
+  sequence:int ->
+  (bool, exact_attempt_error) result
+(** Durably block an unbound pending summary with the stable
+    [Summary_attempt_identity_unbound] fact. The row identity is an exact CAS;
+    no caller supplies diagnostic text. *)
+
+val mark_summary_attempt_persistence_uncertain :
+  base_path:string ->
+  id:string ->
+  input_hash:string ->
+  sequence:int ->
+  (bool, exact_attempt_error) result
+(** Durably record terminalization durability uncertainty without changing the
+    summary or exact binding. The stored operator detail is fixed by the queue
+    serializer and cannot contain runtime/provider exception text. *)
+
+val rearm_summary_attempt :
+  base_path:string ->
+  id:string ->
+  input_hash:string ->
+  sequence:int ->
+  requested_by:string ->
+  (bool, exact_attempt_error) result
+(** Explicit operator CAS for a blocked row. Identity-unbound work becomes
+    ready; a restart-classified released binding may return to unbound only
+    after its complete row identity matches. Terminal exact quarantine is never
+    rearmed. *)
 
 val pending_count_for_keeper : keeper_name:string -> int

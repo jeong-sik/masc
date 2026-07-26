@@ -1,4 +1,19 @@
 module AQ = Masc.Keeper_approval_queue
+
+let rearm_exact ~base_path (entry : AQ.pending_approval) =
+  AQ.rearm_summary_attempt
+    ~base_path
+    ~id:entry.id
+    ~input_hash:entry.input_hash
+    ~sequence:entry.sequence
+    ~requested_by:"operator"
+;;
+
+let check_rearm label expected = function
+  | Ok actual -> Alcotest.(check bool) label expected actual
+  | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
+;;
+
 module Gate = Masc.Keeper_gate
 module Registry_queue = Masc.Keeper_registry_event_queue
 module Queue_state = Keeper_event_queue_state
@@ -439,7 +454,7 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 7
+             [ "version", `Int 8
             ; "next_sequence", `Int 1
             ; "pending", `List []
             ; "deliveries", `List []
@@ -1054,7 +1069,7 @@ let test_exact_binding_codec_validates_entry_identity () =
          (run_exact_transition AQ.bind_summary_exact_attempt identity);
        let snapshot = read_pending_snapshot ~base_path in
        let open Yojson.Safe.Util in
-       Alcotest.(check int) "v7 snapshot" 7 (snapshot |> member "version" |> to_int);
+       Alcotest.(check int) "v8 snapshot" 8 (snapshot |> member "version" |> to_int);
        let exact_json =
          snapshot
          |> member "pending"
@@ -1257,9 +1272,10 @@ let test_exact_attempt_binding_release_and_conflicts () =
          "new identity replaces released attempt"
          true
          (run_exact_transition AQ.bind_summary_exact_attempt replacement);
-       expect_summary_rejection
-         "bound restart"
-         (AQ.restart_failed_summary ~id);
+       check_rearm
+         "bound restart is not rearmed"
+         false
+         (rearm_exact ~base_path (pending_entry_exn id));
        let quarantine_cause = AQ.Exact_domain_invalid_output in
        check_exact_update
          "quarantine replacement"
@@ -1342,11 +1358,10 @@ let test_restart_classifies_uncertain_and_released_recovery () =
          (run_exact_transition
             AQ.release_summary_exact_attempt_before_dispatch
             released_identity);
-       (match AQ.restart_failed_summary ~id:released_id with
-        | Ok true ->
-          Alcotest.fail
-            "live released pending work entered restart-only recovery"
-        | Ok false | Error _ -> ());
+       check_rearm
+         "live released pending work does not enter restart-only recovery"
+         false
+         (rearm_exact ~base_path (pending_entry_exn released_id));
        (match pending_entry_exn released_id with
         | { exact_attempt =
               AQ.Exact_bound
@@ -1414,10 +1429,10 @@ let test_restart_classifies_uncertain_and_released_recovery () =
          "second install does not rewrite stable exact states"
          first_snapshot
          second_snapshot;
-       check_update
+       check_rearm
          "explicit operator recovery clears restart-only released binding"
          true
-         (AQ.restart_failed_summary ~id:released_id);
+         (rearm_exact ~base_path (pending_entry_exn released_id));
        (match pending_entry_exn released_id with
         | { summary_status = AQ.Summary_pending
           ; exact_attempt = AQ.Exact_unbound
@@ -1436,14 +1451,10 @@ let test_restart_classifies_uncertain_and_released_recovery () =
             bulk_identity);
        AQ.For_testing.reset_runtime_state ();
        ignore (install_exn ~base_path);
-       (match AQ.restart_failed_summaries ~base_path with
-        | Ok reopened_ids ->
-          Alcotest.(check (list string))
-            "bulk operator recovery selects only restart-classified release"
-            [ bulk_id ]
-            reopened_ids
-        | Error error ->
-          Alcotest.fail (AQ.summary_transition_error_to_string error));
+       check_rearm
+         "operator recovery rearms the selected restart-classified release"
+         true
+         (rearm_exact ~base_path (pending_entry_exn bulk_id));
        match pending_entry_exn bulk_id with
        | { summary_status = AQ.Summary_pending
          ; exact_attempt = AQ.Exact_unbound
@@ -1971,6 +1982,104 @@ let test_exact_completed_restart_requires_fsync_confirmation () =
        drop_resolution ~base_path ~keeper_name resolution)
 ;;
 
+let test_recovered_exact_unbound_is_rejected_without_completion () =
+  let base_path = temp_dir () in
+  let keeper_name = "queue-recovered-exact-unbound" in
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_runtime_state ();
+      cleanup_dir base_path)
+    (fun () ->
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let id =
+         submit
+           ~base_path
+           ~keeper_name
+           ~input:(`Assoc [ "request", `String "recovered-unbound" ])
+       in
+       check_update
+         "mark recovered-unbound summary pending"
+         true
+         (AQ.mark_summary_pending ~id);
+       let entry = pending_entry_exn id in
+       check_exact_update
+         "persist identity-unbound disposition"
+         true
+         (AQ.mark_summary_attempt_identity_unbound
+            ~base_path
+            ~id
+            ~input_hash:entry.input_hash
+            ~sequence:entry.sequence);
+       let summary = exact_summary "recovered-unbound-call" in
+       let snapshot =
+         match read_pending_snapshot ~base_path with
+         | `Assoc fields ->
+           let pending =
+             match List.assoc_opt "pending" fields with
+             | Some (`List entries) ->
+               List.map
+                 (function
+                   | `Assoc entry_fields as entry_json ->
+                     if
+                       List.assoc_opt "id" entry_fields
+                       = Some (`String id)
+                     then
+                       `Assoc
+                         (("summary_status",
+                            AQ.summary_status_to_yojson
+                              (AQ.Summary_available summary))
+                          :: List.remove_assoc "summary_status" entry_fields)
+                     else entry_json
+                   | entry_json -> entry_json)
+                 entries
+             | _ -> Alcotest.fail "pending snapshot omitted its pending rows"
+           in
+           `Assoc
+             (("pending", `List pending) :: List.remove_assoc "pending" fields)
+         | _ -> Alcotest.fail "pending snapshot root was not an object"
+       in
+       write_pending_snapshot ~base_path snapshot;
+       AQ.For_testing.reset_runtime_state ();
+       ignore (install_exn ~base_path);
+       let completion_calls = ref 0 in
+       let report =
+         Gate.For_testing.resume_persisted_auto_judges_with_exact_completion
+           ~complete_summary_exact_attempt:
+             (fun
+               ~id:_
+               ~input_hash:_
+               ~sequence:_
+               ~slot_id:_
+               ~call_id:_
+               ~plan_fingerprint:_
+               ~request_body_sha256:_
+               ~summary:_ ->
+              incr completion_calls;
+              Alcotest.fail
+                "recovered Exact_unbound row reached exact completion")
+           ~base_path
+       in
+       Alcotest.(check int) "recovered identity-unbound candidate" 1 report.requested;
+       Alcotest.(check int) "recovered identity-unbound finalizes zero" 0
+         (List.length report.finalized_ids);
+       Alcotest.(check int) "recovered identity-unbound completion calls" 0
+         !completion_calls;
+       (match report.failures with
+        | [ { Gate.approval_id
+            ; code = Gate.Resume_identity_unbound
+            ; operator_detail
+            } ] ->
+          Alcotest.(check string) "identity-unbound approval id" id approval_id;
+          Alcotest.(check bool) "identity-unbound operator detail is explicit" true
+            (String.trim operator_detail <> "")
+        | _ ->
+          Alcotest.fail
+            "recovered Exact_unbound row lacked its typed failure report");
+       Alcotest.(check bool) "recovered identity-unbound remains pending" true
+         (Option.is_some (AQ.get_pending_entry ~id)))
+;;
+
 let test_operator_recovery_skips_terminal_exact_failure () =
   let base_path = temp_dir () in
   let keeper_name = "queue-summary-operator-recovery" in
@@ -2005,16 +2114,10 @@ let test_operator_recovery_skips_terminal_exact_failure () =
          (quarantine_exact
             quarantined_identity
             AQ.Exact_flow_execution_failed);
-       let reopened =
-         match AQ.restart_failed_summaries ~base_path with
-         | Ok ids -> List.sort String.compare ids
-         | Error error ->
-           Alcotest.fail (AQ.summary_transition_error_to_string error)
-       in
-       Alcotest.(check (list string))
+       check_rearm
          "explicit operator action cannot reopen exact quarantine"
-         []
-         reopened;
+         false
+         (rearm_exact ~base_path (pending_entry_exn quarantined_id));
        (match AQ.get_pending_entry ~id:quarantined_id with
         | Some
             { summary_status = AQ.Summary_failed { retryable = false; _ }
@@ -2032,71 +2135,6 @@ let test_operator_recovery_skips_terminal_exact_failure () =
        reject_and_cleanup ~base_path quarantined_id)
 ;;
 
-let test_summary_owner_retirement_is_atomic_and_owner_scoped () =
-  let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () ->
-      AQ.For_testing.reset_runtime_state ();
-      cleanup_dir base_path)
-    (fun () ->
-       ignore (install_exn ~base_path);
-       let pending keeper_name value =
-         let id = submit ~base_path ~keeper_name ~input:(`String value) in
-         check_update "mark pending" true (AQ.mark_summary_pending ~id);
-         id
-       in
-       let owner = "retirement-blocked" in
-       let bound = pending owner "bound" in
-       let sibling = pending owner "sibling" in
-       let retirable = pending "retirement-unbound" "retire" in
-       check_exact_update
-         "bind blocker"
-         true
-         (run_exact_transition
-            AQ.bind_summary_exact_attempt
-            (exact_identity ~slot_id:"slot" ~call_id:"call" bound));
-       (match
-          AQ.retire_summary_owner
-            ~base_path
-            ~keeper_name:owner
-            ~reason:"retired"
-        with
-        | Error (AQ.Summary_owner_retirement_exact_attempt_unsettled _) -> ()
-       | Error error ->
-          Alcotest.fail (AQ.summary_owner_retirement_error_to_string error)
-        | Ok _ -> Alcotest.fail "bound owner retirement succeeded");
-       (match AQ.get_pending_entry ~id:bound with
-        | Some
-            { summary_status = AQ.Summary_pending
-            ; exact_attempt = AQ.Exact_bound binding
-            ; _
-            } ->
-          Alcotest.(check string) "bound call unchanged" "call" binding.call_id
-        | Some _ | None ->
-          Alcotest.fail "bound entry changed on failed retirement");
-       (match AQ.get_pending_entry ~id:sibling with
-        | Some { summary_status = AQ.Summary_pending; _ } -> ()
-        | Some _ | None ->
-          Alcotest.fail "blocked retirement partially mutated");
-       (match
-          AQ.retire_summary_owner
-            ~base_path
-            ~keeper_name:"retirement-unbound"
-            ~reason:"retired"
-        with
-        | Error error ->
-          Alcotest.fail (AQ.summary_owner_retirement_error_to_string error)
-        | Ok ids ->
-          Alcotest.(check (list string)) "retired ids" [ retirable ] ids);
-       match AQ.get_pending_entry ~id:retirable with
-       | Some
-           { summary_status =
-               AQ.Summary_failed { reason = "retired"; retryable = false }
-           ; _
-           } ->
-         ()
-       | Some _ | None -> Alcotest.fail "pending summary was not terminalized")
-;;
 
 let test_dashboard_resolve_rejects_cross_workspace_approval () =
   let base_a = temp_dir () in
@@ -2167,7 +2205,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 7
+            [ "version", `Int 8
             ; "next_sequence", `Int 1
             ; "pending", `List [ `String "malformed-entry" ]
             ; "deliveries", `List []
@@ -2198,7 +2236,7 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
          (Yojson.Safe.equal
             persisted
             (`Assoc
-               [ "version", `Int 7
+               [ "version", `Int 8
                ; "next_sequence", `Int 1
                ; "pending", `List [ `String "malformed-entry" ]
                ; "deliveries", `List []
@@ -2223,7 +2261,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-            [ "version", `Int 6
+            [ "version", `Int 7
             ; "pending", `List []
             ; "deliveries", `List []
             ]);
@@ -2233,7 +2271,7 @@ let test_unsupported_version_snapshot_requires_runtime_reset () =
         | Error
             (AQ.Install_storage_failed
               { reason =
-                  "gate_pending.version 6 is unsupported (current 7); reset \
+                  "gate_pending.version 7 is unsupported (current 8); reset \
                    runtime state before restarting MASC"
               ; _
               }) ->
@@ -2295,7 +2333,7 @@ let test_persisted_delivery_replays_before_origin_wake () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 7
+             [ "version", `Int 8
             ; "next_sequence", `Int 2
             ; "pending", `List []
             ; ( "deliveries"
@@ -2389,7 +2427,7 @@ let test_one_delivery_replay_failure_does_not_stop_others () =
        write_pending_snapshot
          ~base_path
          (`Assoc
-             [ "version", `Int 7
+             [ "version", `Int 8
             ; "next_sequence", `Int 4
             ; "pending", `List []
             ; ( "deliveries"
@@ -2481,9 +2519,15 @@ let test_default_auto_judge_defers_without_blocking () =
          Alcotest.(check bool) "unavailable reason is explicit" true
            (String.length detail > 0);
          (match AQ.get_pending_entry ~id:approval_id with
-          | Some { summary_status = AQ.Summary_failed { retryable = true; _ }; _ } ->
+          | Some
+              { summary_status = AQ.Summary_pending
+              ; exact_attempt = AQ.Exact_unbound
+              ; summary_attempt_disposition = AQ.Summary_attempt_ready
+              ; _
+              } ->
             ()
-          | Some _ -> Alcotest.fail "Auto Judge failure was not durably retryable"
+          | Some _ ->
+            Alcotest.fail "Auto Judge pre-worker failure mutated the pending row"
           | None -> Alcotest.fail "Auto Judge request was not durably queued");
          reject_and_cleanup ~base_path approval_id
        | Gate.Deferred { reason = Gate.Judge_requested; _ } ->
@@ -2695,13 +2739,13 @@ let () =
             `Quick
             test_operator_recovery_skips_terminal_exact_failure
         ; Alcotest.test_case
-            "summary owner retirement is atomic and owner scoped"
-            `Quick
-            test_summary_owner_retirement_is_atomic_and_owner_scoped
-          ; Alcotest.test_case
               "exact restart finalization requires fsync"
               `Quick
               test_exact_completed_restart_requires_fsync_confirmation
+        ; Alcotest.test_case
+            "recovered Exact_unbound rejects completion"
+            `Quick
+            test_recovered_exact_unbound_is_rejected_without_completion
         ; Alcotest.test_case
             "malformed snapshot is explicit"
             `Quick

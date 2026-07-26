@@ -49,9 +49,17 @@ type decision =
       }
   | Unavailable of unavailable_reason
 
+type auto_judge_resume_failure_code =
+  | Resume_worker_start_failed
+  | Resume_identity_unbound
+  | Resume_completion_persistence_uncertain
+  | Resume_completion_failed
+  | Resume_exact_state_not_completed
+
 type auto_judge_resume_failure =
   { approval_id : string
-  ; reason : string
+  ; code : auto_judge_resume_failure_code
+  ; operator_detail : string
   }
 
 type auto_judge_resume_report =
@@ -101,12 +109,11 @@ val decide :
 val resume_persisted_auto_judges :
   base_path:string -> auto_judge_resume_report
 
-val retry_failed_auto_judge :
+val retry_blocked_auto_judge :
   base_path:string -> requested_by:string -> string -> (unit, string) result
-(** Explicitly retry one failed Auto Judge summary. The stored [retryable]
-    classification is diagnostic only; operator authority controls this state
-    transition. The approval must belong to the authenticated workspace exactly.
-    No cadence, restart hook, or retry budget calls it. *)
+(** Explicitly rearm one typed blocked Auto Judge summary. The configured Gate
+    mode, authenticated workspace, non-blank operator identity, and exact
+    approval row identity must all match. No cadence or restart hook calls it. *)
 
 type operator_recovery_report =
   { reopened_ids : string list

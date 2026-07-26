@@ -156,6 +156,8 @@ let prepare_exn entry =
 
 let require_executed = function
   | Worker.Executed -> ()
+  | Worker.Identity_unbound_blocked ->
+    fail "registered HITL exact-flow owner stopped before binding an identity"
   | Worker.Deferred_unregistered ->
     fail "registered HITL exact-flow owner was unexpectedly deferred"
 ;;
@@ -541,9 +543,7 @@ let test_all_candidates_rejected_before_network () =
             ~on_summary:(fun _ -> fail "incapable candidate delivered a summary")
             prepared
         with
-        | exception Worker.Exact_terminalization_identity_unbound detail ->
-          check bool "identityless terminalization is explicit" true
-            (String.trim detail <> "")
+        | Worker.Identity_unbound_blocked -> ()
         | Worker.Executed ->
           fail "identityless candidate exhaustion reported terminal success"
         | Worker.Deferred_unregistered ->
@@ -558,6 +558,7 @@ let test_all_candidates_rejected_before_network () =
        | Some
            { exact_attempt = Q.Exact_unbound
            ; summary_status = Q.Summary_pending
+           ; summary_attempt_disposition = Q.Summary_attempt_identity_unbound
            ; _
            } ->
          ()
@@ -859,6 +860,8 @@ let test_owner_replacement_during_post_defers_terminal_mutation () =
             prepared
         with
         | Worker.Deferred_unregistered -> ()
+        | Worker.Identity_unbound_blocked ->
+          fail "stale HITL owner was misclassified as identity-unbound"
         | Worker.Executed ->
           fail "stale HITL owner crossed the terminal generation fence");
        check int "real POST crossed the replacement hook once" 1 (F.post_count server);
@@ -1065,7 +1068,7 @@ let test_spawn_preserves_cancellation_origin_backtrace () =
               (Printexc.raw_backtrace_to_string expected_backtrace)
               (Printexc.raw_backtrace_to_string observed_backtrace);
             check bool
-              "pre-bind cancellation reports non-conclusive uncertainty"
+              "pre-bind cancellation reports identity-unbound"
                true
                (match !finish_outcome with
                 | Some Worker.Terminalization_identity_unbound -> true
@@ -1171,6 +1174,8 @@ let test_prebind_cancellation_withholds_production_gate_drain () =
              | Some
                  { exact_attempt = Q.Exact_unbound
                  ; summary_status = Q.Summary_pending
+                 ; summary_attempt_disposition =
+                     Q.Summary_attempt_identity_unbound
                  ; _
                  } ->
                ()
@@ -1179,6 +1184,7 @@ let test_prebind_cancellation_withholds_production_gate_drain () =
             | Some
                 { exact_attempt = Q.Exact_unbound
                 ; summary_status = Q.Summary_pending
+                ; summary_attempt_disposition = Q.Summary_attempt_ready
                 ; _
                 } ->
               ()
@@ -1309,6 +1315,7 @@ let test_pre_worker_start_failure_preserves_unbound_pending () =
        | Some
            { exact_attempt = Q.Exact_unbound
            ; summary_status = Q.Summary_pending
+           ; summary_attempt_disposition = Q.Summary_attempt_ready
            ; _
            } ->
          ()
@@ -1393,6 +1400,8 @@ let test_visible_uncertainty_withholds_production_drain () =
            { exact_attempt =
                Q.Exact_bound { status = Q.Exact_completed; _ }
            ; summary_status = Q.Summary_available _
+           ; summary_attempt_disposition =
+               Q.Summary_attempt_persistence_uncertain
            ; _
            } ->
          ()
@@ -1625,6 +1634,8 @@ let test_shutdown_drains_inflight_worker_then_retires () =
        Eio.Promise.resolve resolve_release_response ();
        (match Eio.Promise.await worker_result with
         | `Returned Worker.Executed -> ()
+        | `Returned Worker.Identity_unbound_blocked ->
+          fail "bound HITL settlement lost its attempt identity"
         | `Returned Worker.Deferred_unregistered ->
           fail "Draining generation rejected its bound HITL settlement"
         | `Raised exn -> raise exn);
@@ -1660,6 +1671,8 @@ let test_shutdown_drains_inflight_worker_then_retires () =
             prepared
         with
         | Worker.Deferred_unregistered -> ()
+        | Worker.Identity_unbound_blocked ->
+          fail "Retired HITL generation was misclassified as identity-unbound"
         | Worker.Executed ->
           fail "Retired HITL generation redispatched stale work");
        check int "Retired retry dispatched nothing" 1 (F.post_count server);

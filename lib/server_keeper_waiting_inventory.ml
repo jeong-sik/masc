@@ -503,6 +503,10 @@ let hitl_rows keeper_name pending =
           [ "approval_id", `String entry.id
           ; "tool_name", `String entry.tool_name
           ; "summary_status", Keeper_approval_queue.summary_status_to_yojson entry.summary_status
+          ; "exact_attempt", Keeper_approval_queue.exact_attempt_state_to_yojson entry.exact_attempt
+          ; ( "summary_attempt_disposition"
+            , Keeper_approval_queue.summary_attempt_disposition_to_yojson
+                entry.summary_attempt_disposition )
           ; "turn_id", Json_util.int_opt_to_json entry.turn_id
           ; "task_id", Json_util.string_opt_to_json entry.task_id
           ; "goal_id", Json_util.string_opt_to_json entry.goal_id

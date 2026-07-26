@@ -485,17 +485,33 @@ let exact_attempt_source_resolved (entry : pending_approval) = function
 
 exception Exact_terminalization_persistence_failed of string
 exception Cancelled_uncertain of exn * Printexc.raw_backtrace * string
-
 exception Exact_terminalization_identity_unbound of string
+exception Cancelled_identity_unbound of exn * Printexc.raw_backtrace
 
 type exact_settlement_error =
   | Exact_settlement_identity_unbound of string
   | Exact_settlement_persistence_failed of string
 
-let exact_settlement_error_to_string = function
-  | Exact_settlement_identity_unbound detail
-  | Exact_settlement_persistence_failed detail ->
-    detail
+type cancellation_settlement =
+  | Cancellation_settled
+  | Cancellation_owner_generation_deferred
+  | Cancellation_exact_settlement_failed of exact_settlement_error
+  | Cancellation_settlement_raised of string
+
+let mark_identity_unbound (entry : pending_approval) =
+  Keeper_approval_queue.mark_summary_attempt_identity_unbound
+    ~base_path:entry.audit_base_path
+    ~id:entry.id
+    ~input_hash:entry.input_hash
+    ~sequence:entry.sequence
+;;
+
+let mark_persistence_uncertain (entry : pending_approval) =
+  Keeper_approval_queue.mark_summary_attempt_persistence_uncertain
+    ~base_path:entry.audit_base_path
+    ~id:entry.id
+    ~input_hash:entry.input_hash
+    ~sequence:entry.sequence
 ;;
 
 let signal_terminalization_persistence_failure
@@ -503,6 +519,13 @@ let signal_terminalization_persistence_failure
       operation
       detail
   =
+  (match mark_persistence_uncertain entry with
+   | Ok _ -> ()
+   | Error marker_error ->
+     log_exact_error
+       entry
+       "persistence uncertainty observation"
+       (Keeper_approval_queue.exact_attempt_error_to_string marker_error));
   record_outcome "exact_terminal_persistence_failure";
   log_exact_error entry operation detail;
   raise
@@ -633,9 +656,16 @@ let settle_current ?quarantine_writer (entry : pending_approval) ~reason ~cause 
 
 let signal_settlement_error (entry : pending_approval) = function
   | Exact_settlement_identity_unbound detail ->
-    record_outcome "exact_identity_unbound";
-    log_exact_error entry "terminalization blocked" detail;
-    raise (Exact_terminalization_identity_unbound detail)
+    (match mark_identity_unbound entry with
+     | Ok _ ->
+       record_outcome "exact_identity_unbound";
+       log_exact_error entry "terminalization blocked" detail;
+       raise (Exact_terminalization_identity_unbound detail)
+     | Error error ->
+       signal_terminalization_persistence_failure
+         entry
+         "identity-unbound observation"
+         (Keeper_approval_queue.exact_attempt_error_to_string error))
   | Exact_settlement_persistence_failed detail ->
     signal_terminalization_persistence_failure
       entry
@@ -852,6 +882,7 @@ let handle_flow_error (prepared : prepared_flow) = function
 
 type execution_boundary =
   | Executed
+  | Identity_unbound_blocked
   | Deferred_unregistered
 
 let with_current_generation (prepared : prepared_flow) callback =
@@ -937,8 +968,31 @@ let execute_prepared_flow_with_queue_writers_current
   with
   | Eio.Cancel.Cancelled _ as cancellation ->
     let cancellation_backtrace = Printexc.get_raw_backtrace () in
+    let cancelled_uncertain detail =
+      (match mark_persistence_uncertain prepared.entry with
+       | Ok _ -> ()
+       | Error marker_error ->
+         log_exact_error
+           prepared.entry
+           "cancellation uncertainty observation"
+           (Keeper_approval_queue.exact_attempt_error_to_string marker_error));
+      raise
+        (Cancelled_uncertain
+           (cancellation, cancellation_backtrace, detail))
+    in
     if not !bound
-    then Printexc.raise_with_backtrace cancellation cancellation_backtrace
+    then (
+      match
+        Eio.Cancel.protect
+        @@ fun () -> mark_identity_unbound prepared.entry
+      with
+      | Ok _ ->
+        raise
+          (Cancelled_identity_unbound
+             (cancellation, cancellation_backtrace))
+      | Error error ->
+        cancelled_uncertain
+          (Keeper_approval_queue.exact_attempt_error_to_string error))
     else (
       let settlement =
         try
@@ -954,29 +1008,45 @@ let execute_prepared_flow_with_queue_writers_current
                 ~cause:Exact_cancellation)
           with
           | Keeper_exact_flow_scope.Owner_unregistered_deferred ->
-            Error
-              "exact owner generation was replaced before cancellation settlement"
-          | Keeper_exact_flow_scope.Current result -> result
+            Cancellation_owner_generation_deferred
+          | Keeper_exact_flow_scope.Current (Ok ()) ->
+            Cancellation_settled
+          | Keeper_exact_flow_scope.Current (Error error) ->
+            Cancellation_exact_settlement_failed error
         with
         | exn ->
-          Error
+          Cancellation_settlement_raised
             ("cancellation settlement raised: " ^ Printexc.to_string exn)
       in
       match settlement with
-      | Ok () ->
+      | Cancellation_settled ->
         Printexc.raise_with_backtrace cancellation cancellation_backtrace
-      | Error settlement_error ->
-        let detail = exact_settlement_error_to_string settlement_error in
+      | Cancellation_exact_settlement_failed
+          (Exact_settlement_identity_unbound _) ->
+        (match mark_identity_unbound prepared.entry with
+         | Ok _ ->
+           raise
+             (Cancelled_identity_unbound
+                (cancellation, cancellation_backtrace))
+         | Error error ->
+           cancelled_uncertain
+             (Keeper_approval_queue.exact_attempt_error_to_string error))
+      | Cancellation_exact_settlement_failed
+          (Exact_settlement_persistence_failed detail)
+      | Cancellation_settlement_raised detail ->
         record_outcome "exact_cancellation_settlement_failed";
         log_exact_error
           prepared.entry
           "cancellation terminalization persistence"
           detail;
-        raise
-          (Cancelled_uncertain
-             (cancellation, cancellation_backtrace, detail)))
+        cancelled_uncertain detail
+      | Cancellation_owner_generation_deferred ->
+        cancelled_uncertain
+          "exact owner generation was replaced before cancellation settlement")
   | Exact_terminalization_persistence_failed _ as persistence_failure ->
     raise persistence_failure
+  | Exact_terminalization_identity_unbound _ ->
+    Identity_unbound_blocked
   | exn ->
     let detail = Printexc.to_string exn in
     record_outcome "crashed";
@@ -1077,8 +1147,13 @@ let spawn_with
             prepared
         with
         | Executed -> `Completed
+        | Identity_unbound_blocked -> `Identity_unbound
         | Deferred_unregistered -> `Owner_unregistered
       with
+      | Cancelled_identity_unbound
+          (cancellation, cancellation_backtrace) ->
+        `Cancelled_identity_unbound
+          (cancellation, cancellation_backtrace)
       | Cancelled_uncertain (cancellation, cancellation_backtrace, detail) ->
         `Cancelled_uncertain
           (cancellation, cancellation_backtrace, detail)
@@ -1086,8 +1161,6 @@ let spawn_with
         `Cancelled (cancellation, Printexc.get_raw_backtrace ())
       | Exact_terminalization_persistence_failed _ as uncertainty ->
         `Uncertain uncertainty
-      | Exact_terminalization_identity_unbound _ as blocked ->
-        `Identity_unbound blocked
       | exn -> `Uncertain exn
     in
     match execution_outcome with
@@ -1099,9 +1172,12 @@ let spawn_with
         (cancellation, cancellation_backtrace, _detail) ->
       on_finish Terminalization_persistence_uncertain;
       Printexc.raise_with_backtrace cancellation cancellation_backtrace
-    | `Identity_unbound blocked ->
+    | `Cancelled_identity_unbound
+        (cancellation, cancellation_backtrace) ->
       on_finish Terminalization_identity_unbound;
-      raise blocked
+      Printexc.raise_with_backtrace cancellation cancellation_backtrace
+    | `Identity_unbound ->
+      on_finish Terminalization_identity_unbound
     | `Owner_unregistered -> on_finish Owner_unregistered_deferred
     | `Uncertain uncertainty ->
       on_finish Terminalization_persistence_uncertain;

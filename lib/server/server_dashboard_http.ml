@@ -419,7 +419,7 @@ let dashboard_gate_retry_http_json ~base_path ~requested_by ~(args : Yojson.Safe
   match Safe_ops.json_string_opt "id" args with
   | None -> Error "id is required"
   | Some id ->
-    (match Keeper_gate.retry_failed_auto_judge ~base_path ~requested_by id with
+    (match Keeper_gate.retry_blocked_auto_judge ~base_path ~requested_by id with
      | Error _ as error -> error
      | Ok () -> Ok (`Assoc [ "ok", `Bool true; "id", `String id ]))
 ;;

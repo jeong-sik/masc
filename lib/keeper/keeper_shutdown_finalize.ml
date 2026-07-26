@@ -693,34 +693,28 @@ let deliver_finalized_completion ~config operation =
 ;;
 
 let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
-  let retire_summary_owner () =
+  let require_released_summary_owner () =
     match operation.cleanup_intent.reason with
     | Operator_stop_retain_meta -> Ok ()
     | Operator_stop_remove_meta
     | Dead_tombstone_cleanup
     | Dashboard_keeper_purge _ ->
       (match
-         Keeper_approval_queue.retire_summary_owner
-           ~base_path:config.base_path
-           ~keeper_name:operation.keeper_name
-           ~reason:
-             (Printf.sprintf
-                "Keeper permanently retired before HITL context summary completed (%s)"
-                (cleanup_reason_label operation.cleanup_intent.reason))
+         Keeper_approval_queue.list_pending_entries ()
+         |> List.find_opt
+              (fun (pending : Keeper_approval_queue.pending_approval) ->
+                 String.equal pending.audit_base_path config.base_path
+                 && String.equal
+                      pending.keeper_name
+                      operation.keeper_name)
        with
-       | Ok _ -> Ok ()
-       | Error
-           (Keeper_approval_queue.Summary_owner_retirement_exact_attempt_unsettled
-              _ as error) ->
+       | None -> Ok ()
+       | Some pending ->
          Error
            (`Draining
-              (Keeper_approval_queue.summary_owner_retirement_error_to_string
-                 error))
-       | Error error ->
-         Error
-           (`Failed
-              (Keeper_approval_queue.summary_owner_retirement_error_to_string
-                 error)))
+              (Printf.sprintf
+                 "Keeper cleanup is blocked by pending approval %s; resolve the approval before permanent retirement"
+                 pending.id)))
   in
   let finish registry_unregistered =
     match remove_meta_file ~config operation with
@@ -773,7 +767,7 @@ let complete_cleanup ~(config : Workspace.config) ~entry operation cleanup =
   match begin_exact_retirement ~base_path:config.base_path operation entry with
   | Error detail -> block ~config operation Registry_unregister detail
   | Ok () ->
-    (match retire_summary_owner () with
+    (match require_released_summary_owner () with
      | Error (`Draining detail) ->
        Error (Finalization_draining (operation, detail))
      | Error (`Failed detail) ->

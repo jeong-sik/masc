@@ -732,6 +732,16 @@ let operation_failure stage exception_ backtrace =
   { stage; cause = Operation_failed { exception_; backtrace } }
 ;;
 
+let reraise_fatal_or_cancelled exception_ backtrace =
+  match exception_ with
+  | Out_of_memory
+  | Stack_overflow
+  | Sys.Break
+  | Eio.Cancel.Cancelled _ ->
+    Printexc.raise_with_backtrace exception_ backtrace
+  | _ -> ()
+;;
+
 let raise_failure stage cause =
   raise (Capability_write_failed ({ stage; cause }, []))
 ;;
@@ -741,10 +751,13 @@ let run_stage ~before_stage stage f =
     before_stage stage;
     f ()
   with
-  | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+  | Eio.Cancel.Cancelled _ as cancellation ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Printexc.raise_with_backtrace cancellation backtrace
   | Capability_write_failed _ as failure -> raise failure
   | exception_ ->
     let backtrace = Printexc.get_raw_backtrace () in
+    reraise_fatal_or_cancelled exception_ backtrace;
     raise
       (Capability_write_failed
          (operation_failure stage exception_ backtrace, []))
@@ -759,6 +772,7 @@ let capture_cleanup ~before_stage stage f =
   | Capability_write_failed (failure, additional) -> failure :: additional
   | exception_ ->
     let backtrace = Printexc.get_raw_backtrace () in
+    reraise_fatal_or_cancelled exception_ backtrace;
     [ operation_failure stage exception_ backtrace ]
 ;;
 
@@ -855,6 +869,7 @@ let write_open_file_payload ~before_stage file content =
     | Error
         (Blocking_write.Open_file_operation_failed
           { exception_; backtrace; bytes_written }) ->
+      reraise_fatal_or_cancelled exception_ backtrace;
       raise
         (Capability_write_failed
            ( { stage = Write_payload
@@ -878,6 +893,7 @@ let sync_parent_capability ~before_stage ~stage ~sw parent =
         with
         | exception_ ->
           let backtrace = Printexc.get_raw_backtrace () in
+          reraise_fatal_or_cancelled exception_ backtrace;
           [ operation_failure stage exception_ backtrace ]
       in
       directory_file := None;
@@ -916,6 +932,7 @@ let sync_parent_capability ~before_stage ~stage ~sw parent =
          (failure, additional @ close_failures))
   | exception_ ->
     let backtrace = Printexc.get_raw_backtrace () in
+    reraise_fatal_or_cancelled exception_ backtrace;
     let close_failures = close_directory () in
     raise
       (Capability_write_failed
@@ -1108,6 +1125,7 @@ let capture_recovery_cleanup ~recovery_phase operation =
       ]
   with
   | Eio.Cancel.Cancelled reason ->
+    let backtrace = Printexc.get_raw_backtrace () in
     let original_reason, store_effect, cleanup_failures =
       match reason with
       | Recovery.Recovery_store_cancelled
@@ -1115,13 +1133,18 @@ let capture_recovery_cleanup ~recovery_phase operation =
         original_reason, store_effect, cleanup_failures
       | original_reason -> original_reason, Recovery.No_record_change, []
     in
-    [ Recovery_cleanup_failure
-        (recovery_interruption
-           recovery_phase
-           store_effect
-           original_reason
-           cleanup_failures)
-    ]
+    let interruption =
+      recovery_interruption
+        recovery_phase
+        store_effect
+        original_reason
+        cleanup_failures
+    in
+    Printexc.raise_with_backtrace
+      (Eio.Cancel.Cancelled
+         (Capability_recovery_operation_cancelled
+            (original_reason, interruption)))
+      backtrace
 ;;
 
 let cleanup_owned_staging_directory
@@ -1602,11 +1625,13 @@ let replace_capability_file_with
              before_publish entry;
              try Eio.Path.rename entry target_path with
              | Eio.Cancel.Cancelled _ as cancellation ->
+               let backtrace = Printexc.get_raw_backtrace () in
                target_effect := Target_state_unknown;
-               raise cancellation
+               Printexc.raise_with_backtrace cancellation backtrace
              | exception_ ->
                let backtrace = Printexc.get_raw_backtrace () in
                target_effect := Target_state_unknown;
+               reraise_fatal_or_cancelled exception_ backtrace;
                raise
                  (Capability_write_failed
                     ( operation_failure
@@ -1714,6 +1739,7 @@ let replace_capability_file_with
          (write_cleanup_failures additional)
      | exception_ ->
        let backtrace = Printexc.get_raw_backtrace () in
+       reraise_fatal_or_cancelled exception_ backtrace;
        error
          (Write_primary_failure
             (operation_failure Create_staging_directory exception_ backtrace))
@@ -1724,7 +1750,8 @@ let replace_capability_file_with
     result
   with
   | Eio.Cancel.Cancelled (Capability_write_cancelled _) as cancellation ->
-    raise cancellation
+    let backtrace = Printexc.get_raw_backtrace () in
+    Printexc.raise_with_backtrace cancellation backtrace
   | Eio.Cancel.Cancelled reason as cancellation ->
     let backtrace = Printexc.get_raw_backtrace () in
     (match !callback_result with
@@ -1773,6 +1800,7 @@ let replace_capability_file_with
          })
   | exception_ ->
     let backtrace = Printexc.get_raw_backtrace () in
+    reraise_fatal_or_cancelled exception_ backtrace;
     let release_failure = operation_failure Cleanup_close exception_ backtrace in
     (match !callback_result with
      | Some (Error error) ->
@@ -1899,6 +1927,7 @@ let create_capability_file_exclusive_with
        error failure additional
      | exception_ ->
        let backtrace = Printexc.get_raw_backtrace () in
+       reraise_fatal_or_cancelled exception_ backtrace;
        error
          (operation_failure Create_target_entry exception_ backtrace)
          []
@@ -1908,7 +1937,8 @@ let create_capability_file_exclusive_with
     result
   with
   | Eio.Cancel.Cancelled (Capability_write_cancelled _) as cancellation ->
-    raise cancellation
+    let backtrace = Printexc.get_raw_backtrace () in
+    Printexc.raise_with_backtrace cancellation backtrace
   | Eio.Cancel.Cancelled reason as cancellation ->
     let backtrace = Printexc.get_raw_backtrace () in
     (match !callback_result with
@@ -1957,6 +1987,7 @@ let create_capability_file_exclusive_with
          })
   | exception_ ->
     let backtrace = Printexc.get_raw_backtrace () in
+    reraise_fatal_or_cancelled exception_ backtrace;
     let release_failure = operation_failure Cleanup_close exception_ backtrace in
     (match !callback_result with
      | Some (Error error) ->
@@ -2012,7 +2043,8 @@ let replace_capability_file_through_access
         }
   with
   | Eio.Cancel.Cancelled (Capability_write_cancelled _) as cancellation ->
-    raise cancellation
+    let backtrace = Printexc.get_raw_backtrace () in
+    Printexc.raise_with_backtrace cancellation backtrace
   | Eio.Cancel.Cancelled reason as cancellation ->
     let backtrace = Printexc.get_raw_backtrace () in
     (match !callback_result with
@@ -2070,11 +2102,14 @@ let sync_directory_capability_with ~before_stage directory =
     Eio.Fiber.check ();
     result
   with
-  | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
+  | Eio.Cancel.Cancelled _ as cancellation ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Printexc.raise_with_backtrace cancellation backtrace
   | Capability_write_failed (failure, cleanup_failures) ->
     Error { failure; cleanup_failures }
   | exception_ ->
     let backtrace = Printexc.get_raw_backtrace () in
+    reraise_fatal_or_cancelled exception_ backtrace;
     Error
       { failure = operation_failure Sync_parent exception_ backtrace
       ; cleanup_failures = []

@@ -158,6 +158,120 @@ let require_append_file = function
   | Error error -> fail (Fs_compat.capability_append_open_error_to_string error)
 ;;
 
+let nonrecoverable_write_exceptions () =
+  [ "out_of_memory", Out_of_memory
+  ; "stack_overflow", Stack_overflow
+  ; "sys_break", Sys.Break
+  ; "cancellation", Eio.Cancel.Cancelled Exit
+  ]
+;;
+
+let check_same_exception_and_backtrace
+      ~label
+      ~expected_exception
+      ~expected_backtrace
+      operation
+  =
+  let observed =
+    try
+      operation ();
+      None
+    with
+    | exception_ ->
+      Some (exception_, Printexc.get_raw_backtrace ())
+  in
+  match observed with
+  | None -> failf "%s unexpectedly entered the typed result channel" label
+  | Some (exception_, backtrace) ->
+    check bool (label ^ " preserves exception identity") true
+      (exception_ == expected_exception);
+    check string (label ^ " preserves raw backtrace")
+      (Printexc.raw_backtrace_to_string expected_backtrace)
+      (Printexc.raw_backtrace_to_string backtrace)
+;;
+
+let test_replace_nonrecoverable_exceptions_preserve_backtrace ~fs () =
+  with_tmp_dir @@ fun directory ->
+  let target = Filename.concat directory "target" in
+  write_file target "old";
+  with_replace_context ~fs directory @@ fun parent recovery ->
+  List.iter
+    (fun (name, exception_) ->
+       let backtrace = Printexc.get_callstack 32 in
+       check_same_exception_and_backtrace
+         ~label:("replace " ^ name)
+         ~expected_exception:exception_
+         ~expected_backtrace:backtrace
+         (fun () ->
+            ignore
+              (replace_capability_file_for_testing
+                 ~before_stage:(function
+                   | Fs_compat.Acquire_mutation_lease ->
+                     Printexc.raise_with_backtrace exception_ backtrace
+                   | _ -> ())
+                 ~recovery
+                 ~allowed_root_path:directory
+                 ~parent
+                 ~leaf:"target"
+                 ~permissions:0o640
+                 "new"
+               : (unit, Fs_compat.capability_write_error) result)))
+    (nonrecoverable_write_exceptions ());
+  check string "fatal replace attempts leave target unchanged" "old"
+    (read_file target)
+;;
+
+let test_create_nonrecoverable_exceptions_preserve_backtrace ~fs () =
+  with_tmp_dir @@ fun directory ->
+  with_parent_capability ~fs directory @@ fun parent ->
+  List.iter
+    (fun (name, exception_) ->
+       let backtrace = Printexc.get_callstack 32 in
+       check_same_exception_and_backtrace
+         ~label:("exclusive create " ^ name)
+         ~expected_exception:exception_
+         ~expected_backtrace:backtrace
+         (fun () ->
+            ignore
+              (Capability_write_test.create_capability_file_exclusive
+                 ~before_stage:(function
+                   | Fs_compat.Validate_leaf ->
+                     Printexc.raise_with_backtrace exception_ backtrace
+                   | _ -> ())
+                 ~parent
+                 ~leaf:"target"
+                 ~permissions:0o640
+                 "new"
+               : (unit, Fs_compat.capability_write_error) result)))
+    (nonrecoverable_write_exceptions ());
+  check bool "fatal create attempts do not publish target" false
+    (Sys.file_exists (Filename.concat directory "target"))
+;;
+
+let test_cleanup_fatal_exception_preserves_backtrace ~fs () =
+  with_tmp_dir @@ fun directory ->
+  with_parent_capability ~fs directory @@ fun parent ->
+  let fatal = Out_of_memory in
+  let backtrace = Printexc.get_callstack 32 in
+  check_same_exception_and_backtrace
+    ~label:"exclusive create cleanup"
+    ~expected_exception:fatal
+    ~expected_backtrace:backtrace
+    (fun () ->
+       ignore
+         (Capability_write_test.create_capability_file_exclusive
+            ~before_stage:(function
+              | Fs_compat.Write_payload -> raise Exit
+              | Fs_compat.Cleanup_close ->
+                Printexc.raise_with_backtrace fatal backtrace
+              | _ -> ())
+            ~parent
+            ~leaf:"target"
+            ~permissions:0o640
+            "new"
+          : (unit, Fs_compat.capability_write_error) result))
+;;
+
 let test_atomic_replace_preserves_requested_mode ~fs () =
   with_tmp_dir @@ fun directory ->
   let target = Filename.concat directory "target" in
@@ -1892,6 +2006,12 @@ let () =
             (test_atomic_replace_replaces_symlink_not_referent ~fs)
         ; test_case "large payload complete" `Quick
             (test_atomic_replace_writes_complete_large_payload ~fs)
+        ; test_case "replace fatal and cancellation preserve backtrace" `Quick
+            (test_replace_nonrecoverable_exceptions_preserve_backtrace ~fs)
+        ; test_case "create fatal and cancellation preserve backtrace" `Quick
+            (test_create_nonrecoverable_exceptions_preserve_backtrace ~fs)
+        ; test_case "cleanup fatal preserves backtrace" `Quick
+            (test_cleanup_fatal_exception_preserves_backtrace ~fs)
         ; test_case "typed parent components" `Quick
             (test_atomic_replace_uses_typed_parent_components ~fs)
         ; test_case "owned restrictive staging directory" `Quick

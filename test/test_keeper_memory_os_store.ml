@@ -213,6 +213,7 @@ let replace_json_field name replacement = function
 ;;
 
 let head_path root = Filename.concat root "HEAD"
+let store_identity_path root = Filename.concat root "store-identity.json"
 
 let load_head root =
   load_raw (head_path root) |> Yojson.Safe.from_string
@@ -1315,7 +1316,7 @@ let test_long_episode_claims_publish_reopen ~fs () =
 ;;
 
 let test_genesis_obligation_recovers_not_published_after_reopen ~fs () =
-  with_root ~fs "masc_memory_os_recover_genesis_" @@ fun _root_path root ->
+  with_root ~fs "masc_memory_os_recover_genesis_" @@ fun root_path root ->
   let bytes =
     within_store ~root ~owner:"keeper-a" @@ fun store ->
     let empty = require_ok (Store.load store) in
@@ -1324,6 +1325,7 @@ let test_genesis_obligation_recovers_not_published_after_reopen ~fs () =
     in
     obligation_bytes store prepared
   in
+  let identity_before = load_raw (store_identity_path root_path) in
   within_store ~seed:31 ~root ~owner:"keeper-a" @@ fun reopened ->
   let obligation =
     require_ok (Store.publication_obligation_of_bytes bytes)
@@ -1333,7 +1335,11 @@ let test_genesis_obligation_recovers_not_published_after_reopen ~fs () =
     check int64
       "reopened genesis expected authority remains current"
       0L
-      (Store.snapshot_generation current)
+      (Store.snapshot_generation current);
+    check string
+      "reopening the original root preserves its exact store identity"
+      identity_before
+      (load_raw (store_identity_path root_path))
   | Store.Recovered_committed _ ->
     fail "unpublished genesis obligation recovered as committed"
   | Store.Recovered_superseded _ ->
@@ -1446,7 +1452,7 @@ let test_foreign_empty_root_obligation_fails_closed ~fs () =
   in
   expect_error_tag
     "same-owner foreign empty root lacks the desired commit scope proof"
-    Store.For_testing.Immutable_read_failed_error
+    Store.For_testing.Publication_obligation_store_mismatch_error
     (Store.recover_publication store obligation)
 ;;
 
@@ -1470,8 +1476,89 @@ let test_foreign_populated_root_obligation_fails_closed ~fs () =
   in
   expect_error_tag
     "same-owner foreign populated root lacks the desired commit scope proof"
-    Store.For_testing.Immutable_read_failed_error
+    Store.For_testing.Publication_obligation_store_mismatch_error
     (Store.recover_publication store obligation)
+;;
+
+let test_cloned_desired_commit_foreign_root_fails_closed ~fs () =
+  with_root ~fs "masc_memory_os_recover_clone_source_"
+  @@ fun source_path source ->
+  let bytes, desired_commit_leaf =
+    within_store ~root:source ~owner:"keeper-a" @@ fun store ->
+    let empty = require_ok (Store.load store) in
+    let prepared =
+      prepare_new store empty "clone-scope" (state "source")
+    in
+    let bytes = obligation_bytes store prepared in
+    let desired_commit_leaf =
+      Yojson.Safe.from_string bytes
+      |> json_field "desired"
+      |> json_field "commit"
+      |> json_field "leaf"
+      |> json_string "desired obligation commit leaf"
+    in
+    bytes, desired_commit_leaf
+  in
+  let desired_commit =
+    load_raw (Filename.concat source_path desired_commit_leaf)
+  in
+  with_root ~fs "masc_memory_os_recover_clone_foreign_"
+  @@ fun foreign_path foreign ->
+  within_store ~seed:45 ~root:foreign ~owner:"keeper-a" (fun _ -> ());
+  save_raw
+    (Filename.concat foreign_path desired_commit_leaf)
+    desired_commit;
+  within_store ~seed:46 ~root:foreign ~owner:"keeper-a" @@ fun store ->
+  let obligation =
+    require_ok (Store.publication_obligation_of_bytes bytes)
+  in
+  expect_error_tag
+    "cloning the desired commit does not clone the private store identity"
+    Store.For_testing.Publication_obligation_store_mismatch_error
+    (Store.recover_publication store obligation)
+;;
+
+let test_store_identity_tamper_fails_closed ~fs () =
+  with_root ~fs "masc_memory_os_store_identity_tamper_"
+  @@ fun root_path root ->
+  within_store ~root ~owner:"keeper-a" (fun _ -> ());
+  let path = store_identity_path root_path in
+  let tampered =
+    load_raw path
+    |> Yojson.Safe.from_string
+    |> replace_json_field "store_id" (`String (String.make 64 'a'))
+    |> Yojson.Safe.to_string
+  in
+  save_raw path tampered;
+  let result =
+    Store.with_store
+      ~secure_random:(entropy_source 47)
+      ~root
+      ~owner_id:"keeper-a"
+      (fun _ -> Ok ())
+  in
+  expect_error_tag
+    "canonical marker tamper without matching checksum is rejected"
+    Store.For_testing.Invalid_store_identity_error
+    result
+;;
+
+let test_missing_store_identity_never_adopts_nonfresh_root ~fs () =
+  with_root ~fs "masc_memory_os_store_identity_missing_"
+  @@ fun root_path root ->
+  ignore (seed_commit ~root "nonfresh" : Store.commit_receipt);
+  Sys.remove (store_identity_path root_path);
+  let result =
+    Store.with_store
+      ~secure_random:(entropy_source 48)
+      ~root
+      ~owner_id:"keeper-a"
+      (fun _ -> Ok ())
+  in
+  expect_error_tag
+    "store data without its identity marker is not adopted or migrated"
+    Store.For_testing.Store_identity_missing_from_non_fresh_root_error
+    result
 ;;
 
 let test_lower_authority_relation_fails_closed ~fs () =
@@ -1702,6 +1789,12 @@ let () =
             (test_foreign_empty_root_obligation_fails_closed ~fs)
         ; test_case "foreign populated root obligation fails closed" `Quick
             (test_foreign_populated_root_obligation_fails_closed ~fs)
+        ; test_case "cloned desired commit foreign root fails closed" `Quick
+            (test_cloned_desired_commit_foreign_root_fails_closed ~fs)
+        ; test_case "store identity tamper fails closed" `Quick
+            (test_store_identity_tamper_fails_closed ~fs)
+        ; test_case "missing store identity does not adopt nonfresh root" `Quick
+            (test_missing_store_identity_never_adopts_nonfresh_root ~fs)
         ; test_case "lower authority relation fails closed" `Quick
             (test_lower_authority_relation_fails_closed ~fs)
         ; test_case "same receipt different authority fails closed" `Quick

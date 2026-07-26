@@ -10,9 +10,11 @@ let episode_schema = "masc-memory-os-episode-v2"
 let manifest_schema = "masc-memory-os-manifest-v2"
 let commit_schema = "masc-memory-os-commit-v2"
 let state_schema = "masc-memory-os-state-v2"
+let store_identity_schema = "masc-memory-os-store-identity-v1"
 let publication_obligation_schema =
   "masc-memory-os-publication-obligation-v1"
 let head_leaf = "HEAD"
+let store_identity_leaf = "store-identity.json"
 (* Private guard for one contiguous OCaml string allocation. This is not a
    product capacity, admission/routing limit, provider/model capability,
    pricing input, or public configuration. *)
@@ -96,6 +98,7 @@ type settlement_warning =
   | Head_effect_warning of Head.error
   | Head_indeterminate_warning of Head.error
   | Immutable_settlement_warning of immutable_ref * Exact_read.settlement_warning
+  | Store_identity_settlement_warning of Exact_read.settlement_warning
 
 type error_kind =
   | Invalid_layout of string
@@ -134,10 +137,18 @@ type error_kind =
       }
   | Head_row_too_large of int
   | Pending_publication_mismatch
+  | Store_identity_missing_from_non_fresh_root of int
+  | Store_identity_create_failed of Fs_compat.capability_write_error
+  | Store_identity_read_failed of Exact_read.error
+  | Invalid_store_identity of string
   | Invalid_publication_obligation of string
   | Publication_obligation_owner_mismatch of
       { obligation_owner_id : string
       ; store_owner_id : string
+      }
+  | Publication_obligation_store_mismatch of
+      { obligation_store_id : string
+      ; opened_store_id : string
       }
   | Publication_obligation_mismatch of string
 
@@ -202,11 +213,18 @@ type commit_record =
   ; receipt_id : Sha256.t
   }
 
+type store_identity =
+  { store_id : string
+  ; owner_binding_sha256 : Sha256.t
+  }
+
 type t =
   { binding : binding
   ; secure_random : Eio.Flow.source_ty Eio.Resource.t
   ; root : Eio.Fs.dir_ty Eio.Path.t
   ; owner_id : string
+  ; store_id : string
+  ; opening_warnings : settlement_warning list
   }
 
 type snapshot =
@@ -271,6 +289,7 @@ type authority_token =
 
 type publication_obligation =
   { owner_id : string
+  ; store_id : string
   ; expected : authority_token
   ; desired : authority_token
   ; operation_id : string
@@ -898,6 +917,13 @@ let settlement_warning_to_string = function
       (artifact_kind_token reference.kind)
       reference.leaf
       (exact_read_diagnostic_to_string diagnostic)
+  | Store_identity_settlement_warning (Exact_read.Close_failed diagnostic) ->
+    "store identity close failed: "
+    ^ exact_read_diagnostic_to_string diagnostic
+  | Store_identity_settlement_warning
+      (Exact_read.Settle_resources diagnostic) ->
+    "store identity parent resource settlement warning: "
+    ^ exact_read_diagnostic_to_string diagnostic
 ;;
 
 let error_settlement_warnings (value : error) = value.settlement_warnings
@@ -1000,6 +1026,19 @@ let error_to_string (value : error) =
       Head.max_row_bytes
   | Pending_publication_mismatch ->
     "settled Memory OS HEAD does not match the pending publication receipt"
+  | Store_identity_missing_from_non_fresh_root entry_count ->
+    Printf.sprintf
+      "Memory OS store identity is missing from a non-fresh private root with \
+       %d entries"
+      entry_count
+  | Store_identity_create_failed failure ->
+    "failed to create Memory OS store identity: "
+    ^ Fs_compat.capability_write_error_to_string failure
+  | Store_identity_read_failed failure ->
+    "failed to read Memory OS store identity: "
+    ^ exact_read_error_to_string failure
+  | Invalid_store_identity detail ->
+    "invalid Memory OS store identity: " ^ detail
   | Invalid_publication_obligation detail ->
     "invalid Memory OS publication obligation: " ^ detail
   | Publication_obligation_owner_mismatch
@@ -1008,6 +1047,12 @@ let error_to_string (value : error) =
       "Memory OS publication obligation owner %S does not match opened owner %S"
       obligation_owner_id
       store_owner_id
+  | Publication_obligation_store_mismatch
+      { obligation_store_id; opened_store_id } ->
+    Printf.sprintf
+      "Memory OS publication obligation store %S does not match opened store %S"
+      obligation_store_id
+      opened_store_id
   | Publication_obligation_mismatch detail ->
     "Memory OS publication obligation does not match current authority: "
     ^ detail
@@ -1571,10 +1616,10 @@ let read_object
   | Error error -> Error (prepend_warnings warnings error)
 ;;
 
-let random_token (store : t) purpose =
+let random_token_from_source secure_random purpose =
   try
     let entropy = Cstruct.create 32 in
-    Eio.Flow.read_exact store.secure_random entropy;
+    Eio.Flow.read_exact secure_random entropy;
     Ok (hash_domain purpose (Cstruct.to_string entropy))
   with
   | (Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow | Sys.Break)
@@ -1586,6 +1631,213 @@ let random_token (store : t) purpose =
     Error
       (make_error
          (Entropy_source_failed { purpose; exception_; backtrace }))
+;;
+
+let random_token (store : t) purpose =
+  random_token_from_source store.secure_random purpose
+;;
+
+let store_identity_owner_binding owner_id =
+  hash_domain "store-owner-binding" owner_id
+;;
+
+let store_identity_payload_to_json (identity : store_identity) =
+  `Assoc
+    [ "schema", `String store_identity_schema
+    ; "store_id", `String identity.store_id
+    ; "owner_binding_sha256",
+      `String (Sha256.to_string identity.owner_binding_sha256)
+    ]
+;;
+
+let store_identity_checksum identity =
+  store_identity_payload_to_json identity
+  |> canonical_json
+  |> hash_domain "store-identity"
+;;
+
+let store_identity_to_bytes identity =
+  match store_identity_payload_to_json identity with
+  | `Assoc fields ->
+    canonical_json
+      (`Assoc
+         (fields
+          @ [ ( "checksum_sha256"
+              , `String (Sha256.to_string (store_identity_checksum identity)) )
+            ]))
+  | _ -> assert false
+;;
+
+let store_identity_byte_count =
+  let placeholder : store_identity =
+    { store_id = String.make 64 '0'
+    ; owner_binding_sha256 = String.make 64 '0'
+    }
+  in
+  Int64.of_int (String.length (store_identity_to_bytes placeholder))
+;;
+
+let decode_store_identity raw =
+  try
+    let json = Yojson.Safe.from_string raw in
+    let* fields =
+      exact_assoc
+        [ "schema"
+        ; "store_id"
+        ; "owner_binding_sha256"
+        ; "checksum_sha256"
+        ]
+        json
+    in
+    let* () = validate_schema store_identity_schema fields in
+    let* store_id = string_field "store_id" fields in
+    let* owner_binding_raw =
+      string_field "owner_binding_sha256" fields
+    in
+    let* owner_binding_sha256 =
+      match Sha256.of_string owner_binding_raw with
+      | Some digest -> Ok digest
+      | None ->
+        Error
+          "owner_binding_sha256 must be canonical lowercase SHA-256 hex"
+    in
+    let* checksum_raw = string_field "checksum_sha256" fields in
+    let* checksum =
+      match Sha256.of_string checksum_raw with
+      | Some digest -> Ok digest
+      | None ->
+        Error "checksum_sha256 must be canonical lowercase SHA-256 hex"
+    in
+    if not (valid_store_id store_id)
+    then Error "store_id must be canonical lowercase SHA-256 hex"
+    else
+      let identity : store_identity = { store_id; owner_binding_sha256 } in
+      if not (Sha256.equal checksum (store_identity_checksum identity))
+      then Error "checksum_sha256 does not bind the canonical store identity"
+      else if not (String.equal raw (store_identity_to_bytes identity))
+      then Error "store identity bytes are not exact canonical JSON"
+      else Ok identity
+  with
+  | Yojson.Json_error detail -> Error detail
+;;
+
+let store_identity_warnings values =
+  List.map
+    (fun value -> Store_identity_settlement_warning value)
+    values
+;;
+
+let read_store_identity ~root ~owner_id =
+  match
+    Exact_read.read
+      ~parent:root
+      ~leaf:store_identity_leaf
+      ~expected_length:store_identity_byte_count
+      ~max_length:store_identity_byte_count
+  with
+  | Error failure ->
+    let failure : Exact_read.failure = failure in
+    (match failure.error with
+     | Exact_read.Missing -> Ok None
+     | failure_kind ->
+       Error
+         (make_error
+            ~settlement_warnings:
+              (store_identity_warnings failure.settlement_warnings)
+            (Store_identity_read_failed failure_kind)))
+  | Ok observation ->
+    let warnings =
+      store_identity_warnings
+        (Exact_read.observation_settlement_warnings observation)
+    in
+    let raw = Exact_read.observation_bytes observation in
+    (match decode_store_identity raw with
+     | Error detail ->
+       Error
+         (make_error
+            ~settlement_warnings:warnings
+            (Invalid_store_identity detail))
+     | Ok identity ->
+       let expected_owner_binding =
+         store_identity_owner_binding owner_id
+       in
+       if
+         not
+           (Sha256.equal
+              identity.owner_binding_sha256
+              expected_owner_binding)
+       then
+         Error
+           (make_error
+              ~settlement_warnings:warnings
+              (Invalid_store_identity
+                 "owner binding does not match the opened owner"))
+       else Ok (Some (identity, warnings)))
+;;
+
+let private_root_entries root =
+  try Ok (Eio.Path.read_dir root) with
+  | (Eio.Cancel.Cancelled _ | Out_of_memory | Stack_overflow | Sys.Break)
+    as exception_ ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Printexc.raise_with_backtrace exception_ backtrace
+  | exception_ ->
+    Error
+      (make_error
+         (Invalid_layout
+            ("failed to inventory private store root: "
+             ^ Printexc.to_string exception_)))
+;;
+
+let create_store_identity ~secure_random ~root ~owner_id =
+  let* store_id = random_token_from_source secure_random "store-id" in
+  let identity : store_identity =
+    { store_id
+    ; owner_binding_sha256 = store_identity_owner_binding owner_id
+    }
+  in
+  match
+    Fs_compat.create_capability_file_exclusive
+      ~parent:root
+      ~leaf:store_identity_leaf
+      ~permissions:0o600
+      (store_identity_to_bytes identity)
+  with
+  | Ok () -> Ok (identity, [])
+  | Error failure ->
+    if failure.target_effect = Fs_compat.Target_unchanged
+    then
+      (match read_store_identity ~root ~owner_id with
+       | Ok (Some observed) -> Ok observed
+       | Ok None ->
+         Error (make_error (Store_identity_create_failed failure))
+       | Error error -> Error error)
+    else Error (make_error (Store_identity_create_failed failure))
+;;
+
+let open_store_identity ~secure_random ~root ~owner_id =
+  let* observed = read_store_identity ~root ~owner_id in
+  match observed with
+  | Some identity -> Ok identity
+  | None ->
+    let* entries = private_root_entries root in
+    if List.mem store_identity_leaf entries
+    then
+      (match read_store_identity ~root ~owner_id with
+       | Ok (Some identity) -> Ok identity
+       | Ok None ->
+         Error
+           (make_error
+              (Invalid_store_identity
+                 "identity disappeared during private-root initialization"))
+       | Error error -> Error error)
+    else if entries <> []
+    then
+      Error
+        (make_error
+           (Store_identity_missing_from_non_fresh_root
+              (List.length entries)))
+    else create_store_identity ~secure_random ~root ~owner_id
 ;;
 
 let fresh_leaf (store : t) (kind : artifact_kind) =
@@ -1667,8 +1919,8 @@ let placeholder_digest = String.make 64 '0'
 
 (* These canonical lowercase 64-hex placeholders are byte-sizing witnesses
    only. They are never persisted and never feed state, object, receipt, or
-   identity digests; real genesis identity and object references are generated
-   only after authority revalidation. *)
+   identity digests; the root store identity is established before the callback
+   and real object references are generated only after authority revalidation. *)
 let placeholder_leaf kind =
   "memory-os-"
   ^ artifact_kind_token kind
@@ -1768,11 +2020,7 @@ let preflight_graph
   then Error (make_error Generation_exhausted)
   else
     let generation = Int64.succ expected.generation in
-    let planned_store_id =
-      match expected.store_id with
-      | Some store_id -> store_id
-      | None -> placeholder_digest
-    in
+    let planned_store_id = store.store_id in
     let facts_value : facts_object =
       { store_id = planned_store_id
       ; owner_id = store.owner_id
@@ -1848,8 +2096,8 @@ let same_head_authority (left : snapshot) (right : snapshot) =
   && left.head_row = right.head_row
 ;;
 
-let empty_snapshot (binding : binding) (head_snapshot : Head.snapshot) =
-  ({ binding
+let empty_snapshot (store : t) (head_snapshot : Head.snapshot) =
+  ({ binding = store.binding
    ; cursor = Head.snapshot_cursor head_snapshot
    ; head_row = None
    ; store_id = None
@@ -1861,18 +2109,20 @@ let empty_snapshot (binding : binding) (head_snapshot : Head.snapshot) =
    ; episode_objects = []
    ; state = { facts = []; episodes = [] }
    ; settlement_warnings =
-       warnings_of_head
-         (Head.snapshot_settlement_warnings head_snapshot)
+       store.opening_warnings
+       @ warnings_of_head
+           (Head.snapshot_settlement_warnings head_snapshot)
    }
    : snapshot)
 ;;
 
 let load_from_head (store : t) (head_snapshot : Head.snapshot) =
   let head_warnings =
-    warnings_of_head (Head.snapshot_settlement_warnings head_snapshot)
+    store.opening_warnings
+    @ warnings_of_head (Head.snapshot_settlement_warnings head_snapshot)
   in
   match Head.snapshot_row head_snapshot with
-  | None -> Ok (empty_snapshot store.binding head_snapshot)
+  | None -> Ok (empty_snapshot store head_snapshot)
   | Some row ->
     let* (head : head_record) =
       head_of_row row |> with_prior_warnings head_warnings
@@ -1884,6 +2134,13 @@ let load_from_head (store : t) (head_snapshot : Head.snapshot) =
            ~settlement_warnings:head_warnings
            (Persisted_store_binding_mismatch
               "HEAD owner_id does not match the opened owner"))
+    else if not (String.equal head.store_id store.store_id)
+    then
+      Error
+        (make_error
+           ~settlement_warnings:head_warnings
+           (Persisted_store_binding_mismatch
+              "HEAD store_id does not match the private root identity"))
     else
       let commit_artifact = "commit:" ^ head.commit_ref.leaf in
       let* ((commit : commit_record), commit_warnings) =
@@ -2075,11 +2332,22 @@ let with_store ~secure_random ~root ~owner_id fn =
   if String.trim owner_id = ""
   then Error (make_error (Invalid_layout "owner_id must be non-empty"))
   else
+    let* identity, opening_warnings =
+      open_store_identity ~secure_random ~root ~owner_id
+    in
     Eio.Switch.run (fun sw ->
       let binding : binding = { active = Atomic.make true } in
       Eio.Switch.on_release sw (fun () ->
         Atomic.set binding.active false);
-      fn ({ binding; secure_random; root; owner_id } : t))
+      fn
+        ({ binding
+         ; secure_random
+         ; root
+         ; owner_id
+         ; store_id = identity.store_id
+         ; opening_warnings
+         }
+         : t))
 ;;
 
 let load store =
@@ -2096,7 +2364,8 @@ let load store =
     Error
       (make_error
          ~settlement_warnings:
-           (warnings_of_head failure.settlement_warnings)
+           (store.opening_warnings
+            @ warnings_of_head failure.settlement_warnings)
          (Head_operation_failed
             { phase = "read"; failure = failure.error }))
 ;;
@@ -2337,6 +2606,7 @@ let publication_obligation_payload_to_json
   `Assoc
     [ "schema", `String publication_obligation_schema
     ; "owner_id", `String value.owner_id
+    ; "store_id", `String value.store_id
     ; "expected", authority_token_to_json value.expected
     ; "desired", authority_token_to_json value.desired
     ; "operation_id", `String value.operation_id
@@ -2369,6 +2639,8 @@ let validate_publication_obligation
   =
   if String.trim value.owner_id = ""
   then Error "owner_id must be non-empty"
+  else if not (valid_store_id value.store_id)
+  then Error "store_id must be canonical lowercase SHA-256 hex"
   else if String.trim value.operation_id = ""
   then Error "operation_id must be non-empty"
   else
@@ -2376,11 +2648,17 @@ let validate_publication_obligation
     | Empty_authority, _ ->
       Error "desired authority must name a HEAD commit"
     | Head_authority desired, Empty_authority ->
-      if Int64.equal desired.generation 1L
+      if not (String.equal desired.store_id value.store_id)
+      then Error "desired authority store identifier differs from scope"
+      else if Int64.equal desired.generation 1L
       then Ok ()
       else Error "genesis desired generation must be one"
     | Head_authority desired, Head_authority expected ->
-      if not (String.equal desired.store_id expected.store_id)
+      if
+        not (String.equal desired.store_id value.store_id)
+        || not (String.equal expected.store_id value.store_id)
+      then Error "authority store identifier differs from scope"
+      else if not (String.equal desired.store_id expected.store_id)
       then Error "expected and desired store identifiers differ"
       else if Int64.equal expected.generation Int64.max_int
       then Error "expected authority generation is exhausted"
@@ -2400,6 +2678,7 @@ let decode_publication_obligation raw =
       exact_assoc
         [ "schema"
         ; "owner_id"
+        ; "store_id"
         ; "expected"
         ; "desired"
         ; "operation_id"
@@ -2410,6 +2689,7 @@ let decode_publication_obligation raw =
     in
     let* () = validate_schema publication_obligation_schema fields in
     let* owner_id = string_field "owner_id" fields in
+    let* store_id = string_field "store_id" fields in
     let* expected_json = required_field "expected" fields in
     let* expected = authority_token_of_json expected_json in
     let* desired_json = required_field "desired" fields in
@@ -2418,7 +2698,13 @@ let decode_publication_obligation raw =
     let* state_sha256 = sha256_field "state_sha256" fields in
     let* checksum = sha256_field "checksum_sha256" fields in
     let value : publication_obligation =
-      { owner_id; expected; desired; operation_id; state_sha256 }
+      { owner_id
+      ; store_id
+      ; expected
+      ; desired
+      ; operation_id
+      ; state_sha256
+      }
     in
     let* () = validate_publication_obligation value in
     let expected_checksum = publication_obligation_checksum value in
@@ -2453,6 +2739,7 @@ let publication_obligation_of_prepared
   let* expected = authority_of_snapshot prepared.previous in
   let value : publication_obligation =
     { owner_id = store.owner_id
+    ; store_id = store.store_id
     ; expected
     ; desired = authority_of_prepared prepared
     ; operation_id = prepared.operation_id
@@ -2526,7 +2813,7 @@ let validate_superseding_authority
   match obligation.expected, obligation.desired, current_authority with
   | _, Empty_authority, _ ->
     mismatch "desired authority is unexpectedly empty"
-  | Empty_authority, Head_authority desired, Empty_authority ->
+  | Empty_authority, Head_authority _, Empty_authority ->
     mismatch "empty authority should have matched the genesis expectation"
   | Empty_authority, Head_authority desired, Head_authority observed ->
     if Sha256.equal observed.receipt_id desired.receipt_id
@@ -2560,6 +2847,14 @@ let recover_publication
          (Publication_obligation_owner_mismatch
             { obligation_owner_id = obligation.owner_id
             ; store_owner_id = store.owner_id
+            }))
+  else if not (String.equal obligation.store_id store.store_id)
+  then
+    Error
+      (make_error
+         (Publication_obligation_store_mismatch
+            { obligation_store_id = obligation.store_id
+            ; opened_store_id = store.store_id
             }))
   else
     let* current = load store in
@@ -2718,11 +3013,7 @@ let prepare_with_implementation_ceiling
                      ; requested_state_sha256
                      })))
       | Some _ | None ->
-          let* store_id =
-            match current.store_id with
-            | Some store_id -> Ok store_id
-            | None -> random_token store "store-id"
-          in
+          let store_id = store.store_id in
           let generation = preflight.generation in
           let facts_value : facts_object =
             { store_id
@@ -3067,8 +3358,13 @@ module For_testing = struct
     | Head_operation_failed_error
     | Head_row_too_large_error
     | Pending_publication_mismatch_error
+    | Store_identity_missing_from_non_fresh_root_error
+    | Store_identity_create_failed_error
+    | Store_identity_read_failed_error
+    | Invalid_store_identity_error
     | Invalid_publication_obligation_error
     | Publication_obligation_owner_mismatch_error
+    | Publication_obligation_store_mismatch_error
     | Publication_obligation_mismatch_error
 
   type warning_tag =
@@ -3076,6 +3372,7 @@ module For_testing = struct
     | Head_effect_warning_tag
     | Head_indeterminate_warning_tag
     | Immutable_settlement_warning_tag
+    | Store_identity_settlement_warning_tag
 
   let error_tag (value : error) =
     match value.kind with
@@ -3101,10 +3398,17 @@ module For_testing = struct
     | Head_operation_failed _ -> Head_operation_failed_error
     | Head_row_too_large _ -> Head_row_too_large_error
     | Pending_publication_mismatch -> Pending_publication_mismatch_error
+    | Store_identity_missing_from_non_fresh_root _ ->
+      Store_identity_missing_from_non_fresh_root_error
+    | Store_identity_create_failed _ -> Store_identity_create_failed_error
+    | Store_identity_read_failed _ -> Store_identity_read_failed_error
+    | Invalid_store_identity _ -> Invalid_store_identity_error
     | Invalid_publication_obligation _ ->
       Invalid_publication_obligation_error
     | Publication_obligation_owner_mismatch _ ->
       Publication_obligation_owner_mismatch_error
+    | Publication_obligation_store_mismatch _ ->
+      Publication_obligation_store_mismatch_error
     | Publication_obligation_mismatch _ ->
       Publication_obligation_mismatch_error
   ;;
@@ -3114,6 +3418,8 @@ module For_testing = struct
     | Head_effect_warning _ -> Head_effect_warning_tag
     | Head_indeterminate_warning _ -> Head_indeterminate_warning_tag
     | Immutable_settlement_warning _ -> Immutable_settlement_warning_tag
+    | Store_identity_settlement_warning _ ->
+      Store_identity_settlement_warning_tag
   ;;
 
   let publish_with_head_hooks hooks store prepared =

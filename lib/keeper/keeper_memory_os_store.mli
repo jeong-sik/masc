@@ -10,10 +10,12 @@
     [pending_publication] carries an opaque runtime store binding. Passing a
     value to a different store instance fails closed.
 
-    The winning genesis publication creates an opaque persisted store
-    identifier. Every later HEAD and commit preserves that exact identifier,
-    which distinguishes independently created stores and participates in every
-    commit receipt commitment. *)
+    Opening a genuinely fresh private root exclusively creates one immutable,
+    canonical, random store-identity marker before the callback begins. Every
+    HEAD and commit preserves that exact identifier, which distinguishes
+    independently created roots and participates in every commit receipt
+    commitment. A root containing canonical store data without the marker is
+    rejected rather than adopted or migrated. *)
 
 module Sha256 : sig
   type t
@@ -134,11 +136,12 @@ val prepare :
 
     An obligation contains no facts or episodes, is not a Memory OS read
     authority, and provides no publish, delete, fallback, or migration
-    operation. Its desired immutable commit reference is a restart-stable scope
-    proof: recovery must find and validate that exact prepared commit below the
-    opened private root before classifying an expected or superseding HEAD.
-    Unlike runtime-bound prepared and pending values, its canonical bytes are
-    intended to survive callback and process restart. *)
+    operation. Its checksum binds the private root's immutable random store
+    identity and its desired immutable commit reference. Recovery must match
+    the opened root identity and find and validate that exact prepared commit
+    before classifying an expected or superseding HEAD. Unlike runtime-bound
+    prepared and pending values, its canonical bytes are intended to survive
+    callback and process restart. *)
 val publication_obligation_of_prepared :
   t ->
   prepared_commit ->
@@ -146,8 +149,8 @@ val publication_obligation_of_prepared :
 
 (** Encode or decode only the exact current obligation schema. The checksum is
     domain-separated and binds owner, expected and desired HEAD publication
-    evidence (including the exact immutable commit references), desired
-    operation, and desired state digest. *)
+    evidence (including the exact immutable commit references), private store
+    identity, desired operation, and desired state digest. *)
 val publication_obligation_to_bytes : publication_obligation -> string
 
 val publication_obligation_of_bytes :
@@ -229,8 +232,13 @@ module For_testing : sig
     | Head_operation_failed_error
     | Head_row_too_large_error
     | Pending_publication_mismatch_error
+    | Store_identity_missing_from_non_fresh_root_error
+    | Store_identity_create_failed_error
+    | Store_identity_read_failed_error
+    | Invalid_store_identity_error
     | Invalid_publication_obligation_error
     | Publication_obligation_owner_mismatch_error
+    | Publication_obligation_store_mismatch_error
     | Publication_obligation_mismatch_error
 
   type warning_tag =
@@ -238,6 +246,7 @@ module For_testing : sig
     | Head_effect_warning_tag
     | Head_indeterminate_warning_tag
     | Immutable_settlement_warning_tag
+    | Store_identity_settlement_warning_tag
 
   val error_tag : error -> error_tag
   val warning_tag : settlement_warning -> warning_tag

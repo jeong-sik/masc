@@ -91,7 +91,8 @@ let keeper_sandbox_status_fleet_names ctx =
     Keeper_registry.all ~base_path:ctx.config.base_path ()
     |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
   in
-  registry_names @ configured_keeper_names ctx.config @ keeper_names ctx.config
+  let discovery = keeper_names ctx.config in
+  registry_names @ configured_keeper_names ctx.config @ discovery.names
   |> dedupe_sorted_strings
 
 type sandbox_status_fleet_item =

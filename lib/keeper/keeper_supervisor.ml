@@ -30,7 +30,7 @@ let empty_sweep_acc =
 
 let pending_hitl_approval_counts config =
   let pending_entries = Keeper_approval_queue.list_pending_entries () in
-  keeper_names config
+  (keeper_names config).names
   |> List.filter_map (fun name ->
        let pending_count =
          List.fold_left

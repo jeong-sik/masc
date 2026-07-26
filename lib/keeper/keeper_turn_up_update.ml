@@ -15,15 +15,48 @@ let after_stop_join_hook_key : (unit -> unit) Eio.Fiber.key =
   Eio.Fiber.create_key ()
 ;;
 
+let after_candidate_write_hook_key : (unit -> unit) Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
+let launch_failure_hook_key : string Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
+let supersession_failure_hook_key : string Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
 let invoke_after_stop_join_hook () =
   Option.iter
     (fun after_stop_join -> after_stop_join ())
     (Eio.Fiber.get after_stop_join_hook_key)
 ;;
 
+let invoke_after_candidate_write_hook () =
+  Option.iter
+    (fun after_candidate_write -> after_candidate_write ())
+    (Eio.Fiber.get after_candidate_write_hook_key)
+;;
+
 module For_testing = struct
   let with_after_stop_join ~after_stop_join fn =
     Eio.Fiber.with_binding after_stop_join_hook_key after_stop_join fn
+  ;;
+
+  let with_after_candidate_write ~after_candidate_write fn =
+    Eio.Fiber.with_binding
+      after_candidate_write_hook_key
+      after_candidate_write
+      fn
+  ;;
+
+  let with_launch_failure ~detail fn =
+    Eio.Fiber.with_binding launch_failure_hook_key detail fn
+  ;;
+
+  let with_supersession_failure ~detail fn =
+    Eio.Fiber.with_binding supersession_failure_hook_key detail fn
   ;;
 end
 
@@ -143,7 +176,9 @@ let update_keeper ?(preserve_prompt_defaults = false)
         p.profile_defaults.active_goal_ids
   in
   let allowed_paths_for source_meta =
-    Option.value ~default:source_meta.allowed_paths p.allowed_paths_opt
+    match p.allowed_paths_opt with
+    | Some allowed_paths -> allowed_paths
+    | None -> source_meta.allowed_paths
   in
   match
     match p.sandbox_profile_opt with
@@ -283,34 +318,6 @@ let update_keeper ?(preserve_prompt_defaults = false)
         p.name err;
       tool_result_error err
   | Ok () ->
-         let runtime_assignment () =
-           match p.runtime_id_opt with
-           | None -> Ok ()
-           | Some runtime_id ->
-             Runtime.set_runtime_id_for_keeper
-               ~keeper_name:p.name
-               ~runtime_id
-               ()
-         in
-         let with_runtime_assignment fn =
-           match runtime_assignment () with
-           | Error err ->
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string TurnUpUpdateFailures)
-              ~labels:
-                [ ( "keeper", p.name )
-                ; ( "site"
-                  , Keeper_turn_up_update_failure_site.(to_label Runtime_assignment)
-                  )
-                ]
-              ();
-            Log.Keeper.warn
-              "update_keeper failed runtime assignment for %s: %s"
-              p.name
-              err;
-            tool_result_error err
-           | Ok () -> fn ()
-         in
          let enqueue_goal_assignment_wakes ~old_ids (meta : keeper_meta) =
            let (_ : string list) =
              Keeper_goal_assignment_wake.enqueue_goal_assigned_wakes
@@ -359,34 +366,62 @@ let update_keeper ?(preserve_prompt_defaults = false)
                success.meta;
              tool_result_ok_data
                (Keeper_meta_json.meta_to_json success.meta)
-         else
-           let stop_outcome =
-             stop_keepalive_and_await
-               ~base_path:ctx.config.base_path
-               updated.name
+          else
+           let same_lane
+                 (left : Keeper_registry.registry_entry)
+                 (right : Keeper_registry.registry_entry)
+             =
+             Keeper_lane.Id.equal
+               (Keeper_lane.id left.lane)
+               (Keeper_lane.id right.lane)
            in
-           invoke_after_stop_join_hook ();
-           let run_update permit =
+           let same_identity
+                 (entry : Keeper_registry.registry_entry)
+                 (meta : keeper_meta)
+             =
+             Keeper_id.Trace_id.equal
+               entry.meta.runtime.trace_id
+               meta.runtime.trace_id
+             && Int.equal entry.meta.runtime.nonce meta.runtime.nonce
+           in
+           let autonomous_admitted (meta : keeper_meta) =
              match
-               Keeper_registry.get
-                 ~base_path:ctx.config.base_path
-                 updated.name
+               Keeper_lifecycle_admission.state
+                 ~paused:meta.paused
+                 ~latched_reason:meta.latched_reason
+               |> Keeper_lifecycle_admission.admit_autonomous
              with
-             | Some replacement ->
-               tool_result_error
-                 (Printf.sprintf
-                    "keeper update rejected because a replacement lane raced \
-                     the stopped lane: %s"
-                    (start_keepalive_outcome_to_string
-                       (Keepalive_already_registered replacement)))
+             | Keeper_lifecycle_admission.Autonomous_admitted -> true
+             | Keeper_lifecycle_admission.Autonomous_denied _ -> false
+           in
+           let admission_error reason =
+             tool_result_error
+               ("keeper update blocked by lifecycle authority: "
+                ^ Keeper_lifecycle_admission.Durable_transaction
+                  .blocked_reason_to_wire
+                    reason)
+           in
+           let prepare_exact_stop _permit =
+             match
+               Keeper_lifecycle_reservation.current
+                 ~base_path:ctx.config.base_path
+                 ~keeper_name:updated.name
+             with
+             | Some owner ->
+               Error
+                 (tool_result_error
+                    ("keeper update blocked by lifecycle reservation: "
+                     ^ Keeper_lifecycle_reservation.snapshot_to_string owner))
              | None ->
                (match Keeper_meta_store.read_meta ctx.config updated.name with
                 | Error detail ->
-                  tool_result_error
-                    ("keeper update durable revalidation failed: " ^ detail)
+                  Error
+                    (tool_result_error
+                       ("keeper update durable pre-stop read failed: " ^ detail))
                 | Ok None ->
-                  tool_result_error
-                    "keeper update durable revalidation found no metadata"
+                  Error
+                    (tool_result_error
+                       "keeper update durable pre-stop read found no metadata")
                 | Ok (Some latest) ->
                   let latest_revival =
                     revival_decision
@@ -395,116 +430,513 @@ let update_keeper ?(preserve_prompt_defaults = false)
                   in
                   if latest_revival.dead_revival_requested
                   then
-                    tool_result_error
-                      "keeper update durable state became Dead; retry through \
-                       the dead-revival transaction"
+                    Error
+                      (tool_result_error
+                         "keeper update durable state became Dead; retry through \
+                          the dead-revival transaction")
                   else
-                  let updated =
-                    build_updated ~clear_pause_state:false latest
-                  in
-                  (match
-                     validate_sandbox_settings
-                       ~allowed_paths:updated.allowed_paths
-                   with
-                   | Error detail -> tool_result_error detail
-                   | Ok () ->
-               with_runtime_assignment (fun () ->
-            (* The lane join intentionally happens before durable admission.
-               Re-read and re-derive the caller's explicit intent after admission
-               so a concurrent lifecycle mutation cannot be overwritten by the
-               stale pre-join snapshot. Any later CAS conflict fails closed. *)
-            (match
-               Keeper_shutdown_supersession.preflight
-                 ~config:ctx.config
-                 ~keeper_name:updated.name
-                 ~actor:ctx.agent_name
-             with
-             | Error error ->
-               tool_result_error
-                 (Keeper_shutdown_supersession.error_to_string error)
-             | Ok supersession ->
-               (match
-                  write_meta ctx.config updated
-                with
-                | Error e ->
-                    Otel_metric_store.inc_counter
-                      Keeper_metrics.(to_string WriteMetaFailures)
-                      ~labels:[("keeper", updated.name); ("phase", "update_keeper")]
-                      ();
-                    tool_result_error e
-                | Ok () ->
-                  (match
-                     Keeper_shutdown_supersession.commit_after_metadata_update
-                       ~config:ctx.config
-                       supersession
-                   with
-                   | Error error ->
-                     tool_result_error
-                       (Keeper_shutdown_supersession.error_to_string error)
-                   | Ok
-                       ( Keeper_shutdown_supersession.No_shutdown_admission
-                       | Keeper_shutdown_supersession.Shutdown_superseded _ ) ->
-               (* RFC-0315 P3 W0: goals that newly entered active_goal_ids
-                  wake the keeper once at the assignment edge. Enqueue is
-                  durable, so the keepalive restart below delivers it on the
-                  new fiber's first cycle. Removals never wake. *)
-               enqueue_goal_assignment_wakes
-                 ~old_ids:latest.active_goal_ids
-                 updated;
-               let launch_outcome =
-                 start_keepalive_under_admission permit ctx updated
-               in
-               (match launch_outcome with
-                | Keepalive_started _ ->
-                  tool_result_ok_data (Keeper_meta_json.meta_to_json updated)
-                | Keepalive_already_registered entry ->
-                  let stop_detail =
-                    match stop_outcome with
-                    | Keeper_not_registered -> "keeper was not registered before restart"
-                    | Keeper_joined _ -> "previous keeper lane joined"
-                  in
-                  tool_result_error
-                    (Printf.sprintf
-                       "keeper update launch conflicted after %s: %s"
-                       stop_detail
-                       (start_keepalive_outcome_to_string
-                          (Keepalive_already_registered entry)))
-                | ( Keepalive_lifecycle_denied _
-                  | Keepalive_transaction_admission_denied _
-                  | Keepalive_identity_unrepairable
-                  | Keepalive_registration_rejected _
-                  | Keepalive_fiber_start_rejected _
-                  | Keepalive_lane_ownership_lost
-                  | Keepalive_fork_rejected _ ) as rejected ->
-                  tool_result_error
-                    (Printf.sprintf
-                       "keeper metadata was updated but lane restart failed: %s"
-                       (start_keepalive_outcome_to_string rejected))))))))
+                    let candidate =
+                      build_updated ~clear_pause_state:false latest
+                    in
+                    (match
+                       validate_sandbox_settings
+                         ~allowed_paths:candidate.allowed_paths
+                     with
+                     | Error detail -> Error (tool_result_error detail)
+                     | Ok () ->
+                       (match
+                          Keeper_registry.get
+                            ~base_path:ctx.config.base_path
+                            updated.name
+                        with
+                        | None -> Ok (latest, None)
+                        | Some entry when same_identity entry latest ->
+                          request_entry_stop entry;
+                          Ok (latest, Some entry)
+                        | Some replacement ->
+                          Error
+                            (tool_result_error
+                               (Printf.sprintf
+                                  "keeper update refused to stop a lane with \
+                                   different durable identity: %s"
+                                  (start_keepalive_outcome_to_string
+                                     (Keepalive_already_registered
+                                        replacement)))))))
            in
-           (match
-              Keeper_lifecycle_admission.Durable_transaction
-              .with_durable_lifecycle_admission
-                ctx.config
-                ~keeper_name:updated.name
-                run_update
-            with
-            | Keeper_lifecycle_admission.Durable_transaction
-              .Admission_completed result ->
-              result
-            | Keeper_lifecycle_admission.Durable_transaction
-              .Admission_completed_with_attention (result, failure) ->
-              Log.Keeper.error
-                "keeper update lifecycle admission release requires attention \
-                 keeper=%s failure=%s"
-                updated.name
-                (Keeper_lifecycle_admission.Durable_transaction
-                 .authority_failure_to_wire
-                   failure);
-              result
-            | Keeper_lifecycle_admission.Durable_transaction.Admission_blocked
-                reason ->
-              tool_result_error
-                ("keeper update blocked by lifecycle authority: "
-                 ^ Keeper_lifecycle_admission.Durable_transaction
-                   .blocked_reason_to_wire
-                     reason))
+           let phase_a =
+             match
+               Keeper_lifecycle_admission.Durable_transaction
+               .with_durable_lifecycle_admission
+                 ctx.config
+                 ~keeper_name:updated.name
+                 prepare_exact_stop
+             with
+             | Keeper_lifecycle_admission.Durable_transaction
+               .Admission_completed result ->
+               result
+             | Keeper_lifecycle_admission.Durable_transaction
+               .Admission_completed_with_attention (result, failure) ->
+               Log.Keeper.error
+                 "keeper update pre-stop admission release requires attention \
+                  keeper=%s failure=%s"
+                 updated.name
+                 (Keeper_lifecycle_admission.Durable_transaction
+                  .authority_failure_to_wire
+                    failure);
+               result
+             | Keeper_lifecycle_admission.Durable_transaction.Admission_blocked
+                 reason ->
+               Error (admission_error reason)
+           in
+           let run_transaction () =
+             match phase_a with
+             | Error result -> result
+             | Ok (phase_a_meta, stop_ticket) ->
+               Option.iter
+                 (fun (entry : Keeper_registry.registry_entry) ->
+                   ignore (Keeper_lane.await_exit entry.lane : Keeper_lane.exit);
+                   ignore
+                     (Eio.Promise.await entry.done_p
+                       : Keeper_registry.done_resolution))
+                 stop_ticket;
+               invoke_after_stop_join_hook ();
+               let run_update permit =
+                 match
+                   Keeper_lifecycle_reservation.current
+                     ~base_path:ctx.config.base_path
+                     ~keeper_name:updated.name
+                 with
+                 | Some owner ->
+                   tool_result_error
+                     ("keeper update phase-B blocked by lifecycle reservation: "
+                      ^ Keeper_lifecycle_reservation.snapshot_to_string owner)
+                 | None ->
+                   let replacement =
+                     match
+                       Keeper_registry.get
+                         ~base_path:ctx.config.base_path
+                         updated.name,
+                       stop_ticket
+                     with
+                     | None, _ -> None
+                     | Some current, Some expected
+                       when same_lane current expected ->
+                       None
+                     | Some current, _ -> Some current
+                   in
+                   (match replacement with
+                    | Some current ->
+                      tool_result_error
+                        (Printf.sprintf
+                           "keeper update rejected because a replacement lane \
+                            won after the exact join: %s"
+                           (start_keepalive_outcome_to_string
+                              (Keepalive_already_registered current)))
+                    | None ->
+                      let restart_meta (meta : keeper_meta) =
+                        if not (autonomous_admitted meta)
+                        then Ok ()
+                        else
+                          match
+                            start_keepalive_under_admission
+                              permit
+                              ctx
+                              meta
+                          with
+                          | Keepalive_started _ -> Ok ()
+                          | Keepalive_already_registered entry
+                            when not
+                                   (Keeper_registry.lane_has_exited entry) ->
+                            Ok ()
+                          | Keepalive_registration_rejected
+                              (Keeper_registry
+                               .Registration_shutdown_reserved _) ->
+                            Ok ()
+                          | rejected ->
+                            Error
+                              (start_keepalive_outcome_to_string rejected)
+                      in
+                      let fail_and_restart meta failure =
+                        match restart_meta meta with
+                        | Ok () -> tool_result_error failure
+                        | Error detail ->
+                          tool_result_error
+                            (failure
+                             ^ "; lane rollback failed: "
+                             ^ detail)
+                      in
+                      (match
+                         Keeper_meta_store.read_meta
+                           ctx.config
+                           updated.name
+                       with
+                       | Error detail ->
+                         fail_and_restart
+                           phase_a_meta
+                           ("keeper update durable revalidation failed: "
+                            ^ detail)
+                       | Ok None ->
+                         tool_result_error
+                           "keeper update durable revalidation found no metadata"
+                       | Ok (Some latest) ->
+                         let latest_revival =
+                           revival_decision
+                             ~latched_reason:latest.latched_reason
+                             ~paused:latest.paused
+                         in
+                         if latest_revival.dead_revival_requested
+                         then
+                           tool_result_error
+                             "keeper update durable state became Dead; retry \
+                              through the dead-revival transaction"
+                         else
+                           let candidate =
+                             build_updated ~clear_pause_state:false latest
+                           in
+                           (match
+                              validate_sandbox_settings
+                                ~allowed_paths:candidate.allowed_paths
+                            with
+                            | Error detail ->
+                              fail_and_restart latest detail
+                            | Ok () ->
+                              (match
+                                 Keeper_shutdown_supersession.preflight
+                                   ~config:ctx.config
+                                   ~keeper_name:candidate.name
+                                   ~actor:ctx.agent_name
+                               with
+                               | Error error ->
+                                 fail_and_restart
+                                   latest
+                                   (Keeper_shutdown_supersession
+                                    .error_to_string
+                                      error)
+                               | Ok supersession ->
+                                 let previous_runtime =
+                                   Runtime.runtime_id_for_keeper candidate.name
+                                 in
+                                 let runtime_assignment_changed = ref false in
+                                 let meta_write_attempted = ref false in
+                                 let gate = ref None in
+                                 let launch_committed = ref false in
+                                 let restore_runtime_assignment () =
+                                   if not !runtime_assignment_changed
+                                   then Ok ()
+                                   else
+                                     match previous_runtime with
+                                     | Some runtime_id ->
+                                       Runtime.set_runtime_id_for_keeper
+                                         ~keeper_name:candidate.name
+                                         ~runtime_id
+                                         ()
+                                     | None ->
+                                       Runtime.clear_runtime_id_for_keeper
+                                         ~keeper_name:candidate.name
+                                         ()
+                                 in
+                                 let settle_registered_lane () =
+                                   Option.iter abort_launch_gate !gate;
+                                   match
+                                     Keeper_registry.get
+                                       ~base_path:ctx.config.base_path
+                                       candidate.name
+                                   with
+                                   | None -> ()
+                                   | Some entry ->
+                                     request_entry_stop entry;
+                                     ignore
+                                       (Keeper_lane.await_exit entry.lane
+                                         : Keeper_lane.exit);
+                                     ignore
+                                       (Eio.Promise.await entry.done_p
+                                         : Keeper_registry.done_resolution)
+                                 in
+                                 let restore_durable_meta () =
+                                   match
+                                     Keeper_meta_store.read_meta
+                                       ctx.config
+                                       latest.name
+                                   with
+                                   | Error detail -> Error detail
+                                   | Ok None ->
+                                     Error
+                                       "rollback found no durable metadata"
+                                   | Ok (Some current)
+                                     when current = latest ->
+                                     Ok current
+                                   | Ok (Some current)
+                                     when !meta_write_attempted
+                                          && Int.equal
+                                               current.meta_version
+                                               (latest.meta_version + 1) ->
+                                     let rollback =
+                                       { latest with
+                                         meta_version =
+                                           current.meta_version
+                                       }
+                                     in
+                                     (match
+                                        write_meta ctx.config rollback
+                                      with
+                                      | Error detail -> Error detail
+                                      | Ok () ->
+                                        (match
+                                           Keeper_meta_store.read_meta
+                                             ctx.config
+                                             latest.name
+                                         with
+                                         | Ok (Some restored) ->
+                                           Ok restored
+                                         | Ok None ->
+                                           Error
+                                             "rollback metadata disappeared \
+                                              after commit"
+                                         | Error detail -> Error detail))
+                                   | Ok (Some current) ->
+                                     Error
+                                       (Printf.sprintf
+                                          "rollback authority changed from \
+                                           meta_version=%d to %d"
+                                          latest.meta_version
+                                          current.meta_version)
+                                 in
+                                 let recover failure =
+                                   settle_registered_lane ();
+                                   let errors = ref [] in
+                                   (match restore_runtime_assignment () with
+                                    | Ok () -> ()
+                                    | Error detail ->
+                                      errors :=
+                                        ("runtime rollback: " ^ detail)
+                                        :: !errors);
+                                   (match restore_durable_meta () with
+                                    | Error detail ->
+                                      errors :=
+                                        ("metadata rollback: " ^ detail)
+                                        :: !errors
+                                    | Ok restored ->
+                                      (match
+                                         restart_meta restored
+                                       with
+                                       | Ok () -> ()
+                                       | Error detail ->
+                                         errors :=
+                                           ("lane rollback: " ^ detail)
+                                           :: !errors));
+                                   let detail =
+                                     match List.rev !errors with
+                                     | [] -> failure
+                                     | errors ->
+                                       failure
+                                       ^ "; recovery failed: "
+                                       ^ String.concat "; " errors
+                                   in
+                                   tool_result_error detail
+                                 in
+                                 let apply_runtime_assignment () =
+                                   match p.runtime_id_opt with
+                                   | None -> Ok ()
+                                   | Some runtime_id
+                                     when Option.equal
+                                            String.equal
+                                            previous_runtime
+                                            (Some runtime_id) ->
+                                     Ok ()
+                                   | Some runtime_id ->
+                                     (match
+                                        Runtime.set_runtime_id_for_keeper
+                                          ~keeper_name:candidate.name
+                                          ~runtime_id
+                                          ()
+                                      with
+                                      | Ok () ->
+                                        runtime_assignment_changed := true;
+                                        Ok ()
+                                      | Error _ as error -> error)
+                                 in
+                                 let commit_candidate () =
+                                   match apply_runtime_assignment () with
+                                   | Error detail ->
+                                     recover
+                                       ("keeper update runtime assignment \
+                                         failed: "
+                                        ^ detail)
+                                   | Ok () ->
+                                     meta_write_attempted := true;
+                                     (match
+                                        write_meta ctx.config candidate
+                                      with
+                                      | Error detail ->
+                                        Otel_metric_store.inc_counter
+                                          Keeper_metrics.(
+                                            to_string WriteMetaFailures)
+                                          ~labels:
+                                            [ "keeper", candidate.name
+                                            ; "phase", "update_keeper"
+                                            ]
+                                          ();
+                                        recover detail
+                                      | Ok () ->
+                                        invoke_after_candidate_write_hook ();
+                                        let supersession_result =
+                                          match
+                                            Eio.Fiber.get
+                                              supersession_failure_hook_key
+                                          with
+                                          | Some detail ->
+                                            `Injected_failure detail
+                                          | None ->
+                                            (match
+                                               Keeper_shutdown_supersession
+                                               .commit_after_metadata_update
+                                                 ~config:ctx.config
+                                                 supersession
+                                             with
+                                             | Ok committed ->
+                                               `Committed committed
+                                             | Error
+                                                 (Keeper_shutdown_supersession
+                                                  .Metadata_committed_admission_owned_by_other
+                                                    operation_id) ->
+                                               `Newer_shutdown operation_id
+                                             | Error error ->
+                                               `Failure
+                                                 (Keeper_shutdown_supersession
+                                                  .error_to_string
+                                                    error))
+                                        in
+                                        (match supersession_result with
+                                         | `Injected_failure detail
+                                         | `Failure detail ->
+                                           recover detail
+                                         | `Newer_shutdown operation_id ->
+                                           launch_committed := true;
+                                           tool_result_error
+                                             (Printf.sprintf
+                                                "keeper metadata was updated, \
+                                                 but newer shutdown operation \
+                                                 %s owns lane admission"
+                                                (Keeper_shutdown_types
+                                                 .Operation_id.to_string
+                                                   operation_id))
+                                         | `Committed
+                                             (Keeper_shutdown_supersession
+                                              .No_shutdown_admission
+                                             | Keeper_shutdown_supersession
+                                               .Shutdown_superseded _) ->
+                                           (match
+                                              Keeper_meta_store.read_meta
+                                                ctx.config
+                                                candidate.name
+                                            with
+                                            | Error detail ->
+                                              recover
+                                                ("committed keeper update \
+                                                  could not be reread: "
+                                                 ^ detail)
+                                            | Ok None ->
+                                              recover
+                                                "committed keeper update \
+                                                 disappeared before launch"
+                                            | Ok (Some committed) ->
+                                              if
+                                                not
+                                                  (autonomous_admitted
+                                                     committed)
+                                              then (
+                                                launch_committed := true;
+                                                enqueue_goal_assignment_wakes
+                                                  ~old_ids:
+                                                    latest.active_goal_ids
+                                                  committed;
+                                                tool_result_ok_data
+                                                  (Keeper_meta_json
+                                                   .meta_to_json
+                                                     committed))
+                                              else
+                                                (match
+                                                   Eio.Fiber.get
+                                                     launch_failure_hook_key
+                                                 with
+                                                 | Some detail ->
+                                                   recover
+                                                     ("keeper update launch \
+                                                       failed: "
+                                                      ^ detail)
+                                                 | None ->
+                                                   let launch_gate =
+                                                     create_launch_gate ()
+                                                   in
+                                                   gate := Some launch_gate;
+                                                   (match
+                                                      start_keepalive_under_admission
+                                                        ~launch_gate
+                                                        permit
+                                                        ctx
+                                                        committed
+                                                    with
+                                                    | Keepalive_started _ ->
+                                                      commit_launch_gate
+                                                        launch_gate;
+                                                      launch_committed := true;
+                                                      gate := None;
+                                                      enqueue_goal_assignment_wakes
+                                                        ~old_ids:
+                                                          latest.active_goal_ids
+                                                        committed;
+                                                      tool_result_ok_data
+                                                        (Keeper_meta_json
+                                                         .meta_to_json
+                                                           committed)
+                                                    | rejected ->
+                                                      recover
+                                                        (Printf.sprintf
+                                                           "keeper update \
+                                                            launch failed: %s"
+                                                           (start_keepalive_outcome_to_string
+                                                              rejected)))))))
+                                 in
+                                 (try commit_candidate () with
+                                  | Eio.Cancel.Cancelled _ as cancelled ->
+                                    let backtrace =
+                                      Printexc.get_raw_backtrace ()
+                                    in
+                                    if not !launch_committed
+                                    then
+                                      ignore
+                                        (recover
+                                           "keeper update cancelled before \
+                                            launch commit"
+                                          : tool_result);
+                                    Printexc.raise_with_backtrace
+                                      cancelled
+                                      backtrace))))))
+               in
+               match
+                 Keeper_lifecycle_admission.Durable_transaction
+                 .with_durable_lifecycle_admission
+                   ctx.config
+                   ~keeper_name:updated.name
+                   run_update
+               with
+               | Keeper_lifecycle_admission.Durable_transaction
+                 .Admission_completed result ->
+                 result
+               | Keeper_lifecycle_admission.Durable_transaction
+                 .Admission_completed_with_attention (result, failure) ->
+                 Log.Keeper.error
+                   "keeper update lifecycle admission release requires \
+                    attention keeper=%s failure=%s"
+                   updated.name
+                   (Keeper_lifecycle_admission.Durable_transaction
+                    .authority_failure_to_wire
+                      failure);
+                 result
+               | Keeper_lifecycle_admission.Durable_transaction
+                 .Admission_blocked reason ->
+                 admission_error reason
+           in
+           let result = Eio.Cancel.protect run_transaction in
+           Eio.Fiber.check ();
+           result

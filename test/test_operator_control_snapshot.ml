@@ -2609,6 +2609,280 @@ let test_update_keeper_rebases_intent_after_join_race () =
         persisted.proactive.enabled)
 ;;
 
+let ordinary_update_args keeper_name =
+  { Keeper_turn_up_args.name = keeper_name
+  ; runtime_id_opt = None
+  ; allowed_paths_opt = None
+  ; autoboot_enabled_opt = None
+  ; mention_targets_opt = None
+  ; active_goal_ids_opt = None
+  ; max_context_override_opt = None
+  ; max_context_override_present = false
+  ; proactive_enabled_opt = None
+  ; sandbox_profile_opt = None
+  ; network_mode_opt = None
+  ; instructions_arg = Some "candidate-update"
+  ; profile_defaults = Keeper_types_profile.empty_keeper_profile_defaults
+  ; instructions_opt = None
+  }
+;;
+
+let with_running_ordinary_update_fixture ~keeper_name fn =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
+      Keeper_registry.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let seed =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc
+              [ "name", `String keeper_name
+              ; "agent_name"
+              , `String (Keeper_identity.keeper_agent_name keeper_name)
+              ; "trace_id", `String ("trace-" ^ keeper_name)
+              ; "runtime_id", `String "runtime.primary"
+              ; "generation", `Int 1
+              ])
+        with
+        | Error detail -> Alcotest.fail detail
+        | Ok meta -> { meta with instructions = "before-update" }
+      in
+      (match Keeper_meta_store.write_meta config seed with
+       | Ok () -> ()
+       | Error detail -> Alcotest.fail detail);
+      let persisted =
+        match Keeper_meta_store.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "ordinary update fixture metadata disappeared"
+        | Error detail -> Alcotest.fail detail
+      in
+      let ctx : _ Keeper_tool_surface.context =
+        { config
+        ; agent_name = "operator"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config)
+        }
+      in
+      (match Keeper_keepalive.start_keepalive ctx persisted with
+       | Keeper_keepalive.Keepalive_started _ -> ()
+       | outcome ->
+         Alcotest.fail
+           (Keeper_keepalive.start_keepalive_outcome_to_string outcome));
+      fn base_dir config persisted ctx)
+;;
+
+let assert_ordinary_update_rolled_back_and_live
+      ~base_dir
+      ~config
+      ~keeper_name
+  =
+  let persisted =
+    match Keeper_meta_store.read_meta config keeper_name with
+    | Ok (Some meta) -> meta
+    | Ok None -> Alcotest.fail "ordinary update rollback removed metadata"
+    | Error detail -> Alcotest.fail detail
+  in
+  Alcotest.(check string)
+    "candidate metadata rolled back"
+    "before-update"
+    persisted.instructions;
+  match Keeper_registry.get ~base_path:base_dir keeper_name with
+  | Some entry when not (Keeper_registry.lane_has_exited entry) -> ()
+  | Some _ -> Alcotest.fail "ordinary update rollback retained only an exited lane"
+  | None -> Alcotest.fail "ordinary update rollback did not restore a live lane"
+;;
+
+let test_update_keeper_refuses_reserved_gated_lane () =
+  let keeper_name = "update-refuses-reserved-gated-lane" in
+  with_running_ordinary_update_fixture ~keeper_name
+  @@ fun base_dir config original ctx ->
+  let original_entry =
+    match Keeper_registry.get ~base_path:base_dir keeper_name with
+    | Some entry -> entry
+    | None -> Alcotest.fail "reserved gate fixture has no original lane"
+  in
+  Keeper_keepalive.request_entry_stop original_entry;
+  ignore (Keeper_lane.await_exit original_entry.lane : Keeper_lane.exit);
+  ignore
+    (Eio.Promise.await original_entry.done_p
+      : Keeper_registry.done_resolution);
+  let token, gate, gated_entry =
+    match
+      Keeper_lifecycle_admission.Durable_transaction
+      .with_durable_lifecycle_admission
+        config
+        ~keeper_name
+        (fun permit ->
+          match
+            Keeper_lifecycle_reservation.acquire
+              ~base_path:base_dir
+              ~keeper_name
+              ~expected_generation:original.runtime.nonce
+              ~purpose:Keeper_lifecycle_reservation.Dead_revival
+          with
+          | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
+            Error (Keeper_lifecycle_reservation.snapshot_to_string owner)
+          | Ok token ->
+            let gate = Keeper_keepalive.create_launch_gate () in
+            (match
+               Keeper_keepalive.start_keepalive_under_admission
+                 ~lifecycle_token:token
+                 ~launch_gate:gate
+                 permit
+                 ctx
+                 original
+             with
+             | Keeper_keepalive.Keepalive_started entry ->
+               Ok (token, gate, entry)
+             | rejected ->
+               Keeper_keepalive.abort_launch_gate gate;
+               ignore (Keeper_lifecycle_reservation.release token);
+               Error
+                 (Keeper_keepalive.start_keepalive_outcome_to_string
+                    rejected)))
+    with
+    | Keeper_lifecycle_admission.Durable_transaction.Admission_completed
+        (Ok value)
+    | Keeper_lifecycle_admission.Durable_transaction
+      .Admission_completed_with_attention (Ok value, _) ->
+      value
+    | Keeper_lifecycle_admission.Durable_transaction.Admission_completed
+        (Error detail)
+    | Keeper_lifecycle_admission.Durable_transaction
+      .Admission_completed_with_attention (Error detail, _) ->
+      Alcotest.fail detail
+    | Keeper_lifecycle_admission.Durable_transaction.Admission_blocked reason ->
+      Alcotest.fail
+        (Keeper_lifecycle_admission.Durable_transaction.blocked_reason_to_wire
+           reason)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.abort_launch_gate gate;
+      Keeper_keepalive.request_entry_stop gated_entry;
+      ignore (Keeper_lane.await_exit gated_entry.lane : Keeper_lane.exit);
+      ignore
+        (Eio.Promise.await gated_entry.done_p
+          : Keeper_registry.done_resolution);
+      ignore (Keeper_lifecycle_reservation.release token))
+    (fun () ->
+      let result =
+        Keeper_turn_up_update.update_keeper
+          ctx
+          (ordinary_update_args keeper_name)
+          original
+      in
+      Alcotest.(check bool)
+        "reserved gated lane rejects ordinary update"
+        false
+        (Keeper_types_profile.tool_result_success result);
+      Alcotest.(check bool)
+        "ordinary update did not settle the foreign gate"
+        false
+        (Keeper_keepalive.launch_gate_is_committed gate);
+      Alcotest.(check bool)
+        "foreign gated lane remains pending"
+        true
+        (Option.is_none (Keeper_lane.peek_exit gated_entry.lane));
+      Alcotest.(check bool)
+        "foreign reservation remains owned"
+        true
+        (Option.is_some
+           (Keeper_lifecycle_reservation.current
+              ~base_path:base_dir
+              ~keeper_name)))
+;;
+
+let test_update_keeper_launch_failure_rolls_back_and_restarts () =
+  let keeper_name = "update-launch-failure-rollback" in
+  with_running_ordinary_update_fixture ~keeper_name
+  @@ fun base_dir config original ctx ->
+  let result =
+    Keeper_turn_up_update.For_testing.with_launch_failure
+      ~detail:"injected post-write launch failure"
+      (fun () ->
+        Keeper_turn_up_update.update_keeper
+          ctx
+          (ordinary_update_args keeper_name)
+          original)
+  in
+  Alcotest.(check bool)
+    "launch failure remains an error"
+    false
+    (Keeper_types_profile.tool_result_success result);
+  assert_ordinary_update_rolled_back_and_live
+    ~base_dir
+    ~config
+    ~keeper_name
+;;
+
+let test_update_keeper_supersession_failure_rolls_back_and_restarts () =
+  let keeper_name = "update-supersession-failure-rollback" in
+  with_running_ordinary_update_fixture ~keeper_name
+  @@ fun base_dir config original ctx ->
+  let result =
+    Keeper_turn_up_update.For_testing.with_supersession_failure
+      ~detail:"injected metadata-committed supersession failure"
+      (fun () ->
+        Keeper_turn_up_update.update_keeper
+          ctx
+          (ordinary_update_args keeper_name)
+          original)
+  in
+  Alcotest.(check bool)
+    "supersession failure remains an error"
+    false
+    (Keeper_types_profile.tool_result_success result);
+  assert_ordinary_update_rolled_back_and_live
+    ~base_dir
+    ~config
+    ~keeper_name
+;;
+
+let test_update_keeper_cancellation_rolls_back_and_restarts () =
+  let keeper_name = "update-cancellation-rollback" in
+  with_running_ordinary_update_fixture ~keeper_name
+  @@ fun base_dir config original ctx ->
+  let cancelled =
+    try
+      ignore
+        (Keeper_turn_up_update.For_testing.with_after_candidate_write
+           ~after_candidate_write:(fun () ->
+             raise
+               (Eio.Cancel.Cancelled
+                  (Failure "injected ordinary update cancellation")))
+           (fun () ->
+             Keeper_turn_up_update.update_keeper
+               ctx
+               (ordinary_update_args keeper_name)
+               original));
+      false
+    with
+    | Eio.Cancel.Cancelled _ -> true
+  in
+  Alcotest.(check bool)
+    "ordinary update cancellation propagated"
+    true
+    cancelled;
+  assert_ordinary_update_rolled_back_and_live
+    ~base_dir
+    ~config
+    ~keeper_name
+;;
+
 type dead_revival_cancellation_boundary =
   | After_nonce_allocation
   | After_journal_write
@@ -4207,6 +4481,22 @@ let () =
             "keeper update rebases intent after joined-lane race"
             `Quick
             test_update_keeper_rebases_intent_after_join_race;
+          Alcotest.test_case
+            "keeper update refuses a foreign reserved launch gate"
+            `Quick
+            test_update_keeper_refuses_reserved_gated_lane;
+          Alcotest.test_case
+            "keeper update launch failure rolls back and restarts"
+            `Quick
+            test_update_keeper_launch_failure_rolls_back_and_restarts;
+          Alcotest.test_case
+            "keeper update supersession failure rolls back and restarts"
+            `Quick
+            test_update_keeper_supersession_failure_rolls_back_and_restarts;
+          Alcotest.test_case
+            "keeper update cancellation rolls back and restarts"
+            `Quick
+            test_update_keeper_cancellation_rolls_back_and_restarts;
           Alcotest.test_case
             "nonce-boundary cancellation releases revival reservation"
             `Quick

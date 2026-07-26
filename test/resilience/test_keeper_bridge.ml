@@ -131,7 +131,7 @@ let test_pipeline_no_op_when_no_error () =
   assert (outcome.audit_envelope_id = None);
   assert (outcome.strategy_execution = None)
 
-let test_pipeline_classifies_transient () =
+let test_pipeline_untyped_error_fails_closed () =
   let outcome =
     KB.apply_post_turn_resilience witness ~now:2.0 ~working_context:None
       ~maybe_error:(Some "Connection timeout while fetching") ()
@@ -139,9 +139,9 @@ let test_pipeline_classifies_transient () =
   match outcome.resilience_meta with
   | Some (`Assoc kv) ->
       let kind = List.assoc "classified_kind" kv in
-      assert (kind = `String "Transient");
+      assert (kind = `String "Permanent");
       let strat = List.assoc "default_strategy_class" kv in
-      assert (strat = `String "Retry")
+      assert (strat = `String "Handoff")
   | _ -> assert false
 
 let test_pipeline_marks_execution_not_configured () =
@@ -157,15 +157,12 @@ let test_pipeline_marks_execution_not_configured () =
      = Some (`String "not_configured"))
 
 let test_pipeline_executes_strategy_when_executor_supplied () =
-  let attempts = ref [] in
-  let sleeps = ref [] in
+  let requested = ref None in
   let executor =
     make_executor
-      ~run_retry_attempt:(fun ~attempt ->
-        attempts := attempt :: !attempts;
-        if attempt < 2 then R.Retryable_failure "not yet"
-        else R.Retry_success)
-      ~sleep:(fun delay -> sleeps := delay :: !sleeps)
+      ~request_handoff:(fun ~message ~preserve_state ->
+        requested := Some (message, preserve_state);
+        Ok ())
       ()
   in
   let outcome =
@@ -176,11 +173,11 @@ let test_pipeline_executes_strategy_when_executor_supplied () =
   (match outcome.strategy_execution with
    | Some
        (KB.Strategy_execution_completed
-          (R.RetrySucceeded { attempts = 2 })) ->
-       ()
+          (R.HandoffRequested { message; preserve_state })) ->
+       assert (message = "Connection timeout while fetching");
+       assert preserve_state
    | _ -> assert false);
-  assert (!attempts = [ 2; 1 ]);
-  assert (List.length !sleeps = 1);
+  assert (!requested = Some ("Connection timeout while fetching", true));
   assert
     (strategy_execution_status outcome.resilience_meta
      = Some (`String "completed"))
@@ -223,7 +220,7 @@ let test_pipeline_classifies_permanent_handoff () =
 let test_pipeline_pricing_text_has_no_resource_authority () =
   let outcome =
     KB.apply_post_turn_resilience witness ~now:4.0 ~working_context:None
-      ~maybe_error:(Some "token budget exhausted") ()
+      ~maybe_error:(Some "429 rate limit: token budget exhausted") ()
   in
   match outcome.resilience_meta with
   | Some (`Assoc kv) ->
@@ -346,7 +343,7 @@ let () =
   test_upsert_preserves_autonomous_meta ();
   test_upsert_replaces_prior_resilience_meta ();
   test_pipeline_no_op_when_no_error ();
-  test_pipeline_classifies_transient ();
+  test_pipeline_untyped_error_fails_closed ();
   test_pipeline_marks_execution_not_configured ();
   test_pipeline_executes_strategy_when_executor_supplied ();
   test_pipeline_reports_strategy_execution_failure ();

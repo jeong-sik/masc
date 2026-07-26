@@ -207,9 +207,8 @@ let compaction_recovery_error_to_string = function
    site below — do not reorder.
 
    When [MASC_RESILIENCE] is off (default), this is a pure pass-
-   through. When on, [Recovery.classify_string] runs against any
-   error signal surfaced by the turn's compaction or handoff steps,
-   and a [`Assoc] meta tree is upserted into
+   through. When on, untyped compaction or handoff error text is
+   fail-closed to operator handoff, and a [`Assoc] meta tree is upserted into
    [working_context["resilience_meta"]].
 
    Failures inside the wire-in do not propagate — they are logged

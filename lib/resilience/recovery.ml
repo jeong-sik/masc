@@ -231,53 +231,8 @@ let degradation_required ~detail ~recommended_level =
 
 (* ── Heuristic classification ─────────────────────────────────── *)
 
-let lowercased_contains haystack needle =
-  let h = String.lowercase_ascii haystack in
-  let n = String.lowercase_ascii needle in
-  let h_len = String.length h in
-  let n_len = String.length n in
-  if n_len = 0 then true
-  else if n_len > h_len then false
-  else
-    let rec loop i =
-      if i + n_len > h_len then false
-      else if String.sub h i n_len = n then true
-      else loop (i + 1)
-    in
-    loop 0
-
-let transient_phrases =
-  [ "timeout";
-    "timed out";
-    "rate limit";
-    "rate-limit";
-    "too many requests";
-    "connection reset";
-    "connection refused";
-    "temporarily unavailable";
-    "temporary";
-    "try again";
-    "transient";
-  ]
-
-let resource_phrases =
-  [ ("memory", `Memory);
-    ("disk", `Disk);
-  ]
-
 let classify_string (s : string) : error_mode =
-  match
-    List.find_opt
-      (fun (p, _) -> lowercased_contains s p)
-      resource_phrases
-  with
-  | Some (_, resource) ->
-      resource_exhausted_unknown ~resource ~detail:s
-  | None ->
-      if List.exists (fun p -> lowercased_contains s p) transient_phrases then
-        transient ~detail:s ~max_retries:3 ~backoff_ms:250 ()
-      else
-        permanent ~detail:s ~fallback:(HumanHandoff s)
+  permanent ~detail:s ~fallback:(HumanHandoff s)
 
 (* ── Default strategy selection ───────────────────────────────── *)
 

@@ -1673,17 +1673,20 @@ let test_obligation_codec_is_exact_and_tamper_evident ~fs () =
 ;;
 
 let test_foreign_owner_obligation_fails_closed ~fs () =
-  with_root ~fs "masc_memory_os_obligation_owner_"
-  @@ fun _root_path root ->
+  with_root ~fs "masc_memory_os_obligation_owner_source_"
+  @@ fun _source_path source ->
   let bytes =
-    within_store ~root ~owner:"keeper-a" @@ fun store ->
+    within_store ~root:source ~owner:"keeper-a" @@ fun store ->
     let empty = require_ok (Store.load store) in
     let prepared =
       prepare_new store empty "foreign-owner" (state "foreign")
     in
     obligation_bytes store prepared
   in
-  within_store ~seed:38 ~root ~owner:"keeper-b" @@ fun foreign_store ->
+  with_root ~fs "masc_memory_os_obligation_owner_foreign_"
+  @@ fun _foreign_path foreign ->
+  within_store ~seed:38 ~root:foreign ~owner:"keeper-b"
+  @@ fun foreign_store ->
   let obligation =
     require_ok (Store.publication_obligation_of_bytes bytes)
   in

@@ -122,9 +122,9 @@ let test_grpc_tool_arguments_fail_closed_before_dispatch () =
         (Masc_test_deps.Server_grpc_tool_dispatch.error_message error);
       Alcotest.(check int)
         (label ^ " invalid-params code")
-        (Mcp_error_code.to_wire_code Mcp_error_code.Invalid_params)
+        (Masc.Mcp_error_code.to_wire_code Masc.Mcp_error_code.Invalid_params)
         (Masc_test_deps.Server_grpc_tool_dispatch.error_code error
-         |> Mcp_error_code.to_wire_code)
+         |> Masc.Mcp_error_code.to_wire_code)
     | Ok _ -> Alcotest.failf "%s arguments reached the dispatcher" label);
   Alcotest.(check int) "rejected dispatcher calls" 0 !dispatch_calls;
   (match

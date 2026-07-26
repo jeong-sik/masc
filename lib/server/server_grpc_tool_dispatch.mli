@@ -2,7 +2,7 @@
     invoking the production dispatcher. *)
 type error
 
-val error_code : error -> Mcp_error_code.t
+val error_code : error -> Masc.Mcp_error_code.t
 val error_message : error -> string
 
 val dispatch :

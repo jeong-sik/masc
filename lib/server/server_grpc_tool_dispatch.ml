@@ -2,7 +2,7 @@
    [Mcp_server_eio_execute.execute_tool_eio], which owns request, audit, and
    tool-span telemetry; rejected input performs no tool action. *)
 type error =
-  { code : Mcp_error_code.t
+  { code : Masc.Mcp_error_code.t
   ; message : string
   }
 
@@ -22,12 +22,12 @@ let dispatch ~dispatch arguments_json =
   match parsed with
   | Error () ->
     Error
-      { code = Mcp_error_code.Invalid_params
+      { code = Masc.Mcp_error_code.Invalid_params
       ; message = "Invalid params: expected object"
       }
   | Ok arguments ->
     (match dispatch arguments with
      | Ok _ as result -> result
      | Error message ->
-       Error { code = Mcp_error_code.Internal_error; message })
+       Error { code = Masc.Mcp_error_code.Internal_error; message })
 ;;

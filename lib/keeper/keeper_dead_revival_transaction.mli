@@ -24,6 +24,7 @@ type rollback_error =
 
 type error =
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
+  | Nonce_allocation_failed of Keeper_lifecycle_nonce.error
   | Journal_write_failed of string
   | Durable_snapshot_missing
   | Durable_snapshot_changed

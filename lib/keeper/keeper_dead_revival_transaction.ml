@@ -25,6 +25,7 @@ type rollback_error =
 
 type error =
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
+  | Nonce_allocation_failed of Keeper_lifecycle_nonce.error
   | Journal_write_failed of string
   | Durable_snapshot_missing
   | Durable_snapshot_changed
@@ -214,6 +215,9 @@ let rollback_error_to_string = function
 let error_to_string = function
   | Reservation_conflict owner ->
     "keeper revival already owned: " ^ Keeper_lifecycle_reservation.snapshot_to_string owner
+  | Nonce_allocation_failed error ->
+    "keeper revival lifecycle nonce allocation failed: "
+    ^ Keeper_lifecycle_nonce.error_to_string error
   | Journal_write_failed detail -> "keeper revival journal write failed: " ^ detail
   | Durable_snapshot_missing -> "keeper durable metadata disappeared before revival commit"
   | Durable_snapshot_changed -> "keeper durable metadata changed before revival commit"
@@ -373,13 +377,24 @@ let revive (ctx : _ context) ~original ~candidate =
     Error (Reservation_conflict owner)
   | Ok token ->
     observe "acquire" original.name (Keeper_lifecycle_reservation.owner_id token);
-    let nonce =
-      Keeper_memory_os_io.next_generation_with_floor_for_base_path
+    let nonce_result =
+      Keeper_lifecycle_nonce.next_for_base_path
         ~base_path:ctx.config.base_path
-        ~floor:(original.runtime.nonce + 1)
+        ~floor:(Int64.succ (Int64.of_int original.runtime.nonce))
         ~keeper_id:original.name
-        ~trace_id:(Keeper_id.Trace_id.to_string original.runtime.trace_id)
+        ~owner_id:(Keeper_id.Trace_id.to_string original.runtime.trace_id)
+        ()
+      |> Result.bind Keeper_lifecycle_nonce.runtime_int_of_nonce
     in
+    match nonce_result with
+    | Error error ->
+      observe
+        "nonce_allocation_failed"
+        original.name
+        (Keeper_lifecycle_nonce.error_to_string error);
+      release_observed token original.name;
+      Error (Nonce_allocation_failed error)
+    | Ok nonce ->
     let candidate =
       { candidate with
         runtime = { candidate.runtime with nonce }

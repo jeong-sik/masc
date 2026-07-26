@@ -201,17 +201,31 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       let ctx0 =
         Keeper_context_runtime.create ~eio:true ~system_prompt
       in
-      (* next_generation keys the per-(keeper, trace) counter by the trace_id
-         string; episodes live under that same string dir (ensure_dir/of
-         session_id above), so pass the raw [trace_id] string, not the typed
-         [trace_id_t]. Reuse the reservation for metadata and checkpoint
-         creation so they cannot diverge. *)
-      let nonce =
-        Keeper_memory_os_io.next_generation_for_base_path
+      (* Lifecycle identity has its own durable authority. Reuse the exact
+         reservation for metadata and checkpoint creation so they cannot
+         diverge. *)
+      let nonce_result =
+        Keeper_lifecycle_nonce.next_for_base_path
           ~base_path:ctx.config.base_path
           ~keeper_id:p.name
-          ~trace_id
+          ~owner_id:trace_id
+          ()
+        |> Result.bind Keeper_lifecycle_nonce.runtime_int_of_nonce
       in
+      match nonce_result with
+      | Error error ->
+        let detail = Keeper_lifecycle_nonce.error_to_string error in
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string LifecycleDispatchRejections)
+          ~labels:[ "keeper", p.name; "event", "create_lifecycle_nonce" ]
+          ();
+        Log.Keeper.error
+          "create_keeper failed lifecycle nonce allocation name=%s: %s"
+          p.name
+          detail;
+        Progress.stop_tracking task_id;
+        tool_result_error detail
+      | Ok nonce ->
       let meta = {
         id = None;
         name = p.name;

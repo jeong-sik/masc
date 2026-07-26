@@ -754,14 +754,10 @@ let test_repo_runtime_toml_loads () =
       "Memory OS consolidation runtime"
       (Some "ollama_cloud_native.minimax-m3-native-structured")
       memory_os_consolidation;
-    (* A lane id, not a runtime id: the failure-judgment boundary needs a successor
-       because the only failure it can hit is how a runtime chose to format its
-       reply. The lane keeps the previously pinned runtime as its first candidate,
-       so routing for a healthy reply is unchanged. *)
     check
       (option string)
       "structured judge runtime"
-      (Some "judgment_lane")
+      (Some "ollama_cloud_native.minimax-m3-native-structured")
       structured_judge;
     (match Runtime_toml.parse_file path with
      | Error _ -> fail "repo runtime.toml exact-output lanes must parse"

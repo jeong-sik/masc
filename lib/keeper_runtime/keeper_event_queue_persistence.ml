@@ -639,11 +639,6 @@ let load_pending_result ~base_path ~keeper_name =
   load_state_result ~base_path ~keeper_name |> Result.map State.pending
 ;;
 
-type snapshot_pair =
-  { pending : Keeper_event_queue.t
-  ; inflight : Keeper_event_queue.t
-  }
-
 type snapshot_pair_with_errors =
   { pending : Keeper_event_queue.t
   ; inflight : Keeper_event_queue.t
@@ -691,11 +686,6 @@ let load_snapshot_pair_with_errors ~base_path ~keeper_name =
     ; inflight = Keeper_event_queue.empty
     ; read_errors = diagnose_snapshot_read_error ~base_path ~keeper_name message
     }
-;;
-
-let load_snapshot_pair ~base_path ~keeper_name =
-  let snapshot = load_snapshot_pair_with_errors ~base_path ~keeper_name in
-  { pending = snapshot.pending; inflight = snapshot.inflight }
 ;;
 
 type snapshot_discovery =

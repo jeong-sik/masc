@@ -57,6 +57,37 @@ let write_file path contents =
   let oc = open_out_bin path in
   Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc contents)
 
+let read_file path =
+  let input = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr input)
+    (fun () -> really_input_string input (in_channel_length input))
+
+let remove_payload_field ~kind ~field json =
+  let removed = ref 0 in
+  let rec rewrite = function
+    | `Assoc fields ->
+      let fields =
+        match List.assoc_opt "kind" fields with
+        | Some (`String observed_kind) when String.equal observed_kind kind ->
+          if List.mem_assoc field fields
+          then (
+            incr removed;
+            List.remove_assoc field fields)
+          else fields
+        | _ -> fields
+      in
+      `Assoc (List.map (fun (name, value) -> name, rewrite value) fields)
+    | `List values -> `List (List.map rewrite values)
+    | other -> other
+  in
+  let rewritten = rewrite json in
+  Alcotest.(check int)
+    (Printf.sprintf "removed exactly one %s field from %s payload" field kind)
+    1
+    !removed;
+  rewritten
+
 let latest_log_seq () =
   match Log.Ring.recent ~limit:1 () with
   | (entry : Log.Ring.entry) :: _ -> entry.seq
@@ -763,7 +794,7 @@ let () =
       Keeper_event_queue_persistence.persist ~base_path ~keeper_name rest;
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
 
-  (* --- health snapshot reads stay quiet; live hydration still announces replay. --- *)
+  (* --- operator snapshot reads stay quiet; live hydration still announces replay. --- *)
   let base_path = temp_dir "keeper-event-queue-restore-log-gate" in
   Fun.protect
     ~finally:(fun () -> rm_rf base_path)
@@ -772,16 +803,15 @@ let () =
       let keeper_name = "keeper-event-queue-restore-log-gate-test" in
       let q = enqueue empty board_stim |> fun q -> enqueue q bootstrap_stim in
       Keeper_event_queue_persistence.persist ~base_path ~keeper_name q;
-      let before_health_reads = latest_log_seq () in
-      ignore (Keeper_event_queue_persistence.load_snapshot_pair ~base_path ~keeper_name);
+      let before_operator_read = latest_log_seq () in
       ignore
         (Keeper_event_queue_persistence.load_snapshot_pair_with_errors
            ~base_path
            ~keeper_name);
       Alcotest.(check (list string))
-        "health snapshot reads do not emit restore log"
+        "operator snapshot read does not emit restore log"
         []
-        (restored_log_messages_since before_health_reads);
+        (restored_log_messages_since before_operator_read);
       let before_live_load = latest_log_seq () in
       ignore (Keeper_event_queue_persistence.load ~base_path ~keeper_name);
       Alcotest.(check bool)
@@ -791,6 +821,80 @@ let () =
            (contains_substring
               ~needle:"keeper=keeper-event-queue-restore-log-gate-test")
            (restored_log_messages_since before_live_load)));
+
+  (* --- strict persisted load rejects current payloads missing required
+         terminal provenance and preserves the operator-reset evidence. --- *)
+  let failure_judgment : failure_judgment =
+    { fj_runtime_id = "strict-persisted-runtime"
+    ; fj_judgment = Keeper_runtime_failure_route.Protocol_error
+    ; fj_provenance = Keeper_runtime_failure_route.Oas_mcp_error
+    ; fj_detail = "strict persisted fixture"
+    }
+  in
+  let strict_queue =
+    empty
+    |> fun queue ->
+    enqueue
+      queue
+      { post_id = "strict-persisted-fusion"
+      ; urgency = Normal
+      ; arrived_at = 10.0
+      ; payload = fusion_payload ()
+      }
+    |> fun queue ->
+    enqueue
+      queue
+      { post_id = failure_judgment_post_id failure_judgment
+      ; urgency = Normal
+      ; arrived_at = 11.0
+      ; payload = Failure_judgment failure_judgment
+      }
+  in
+  let assert_strict_persisted_missing_field ~kind ~field =
+    let base_path = temp_dir ("keeper-event-queue-missing-" ^ field) in
+    Fun.protect
+      ~finally:(fun () -> rm_rf base_path)
+      (fun () ->
+        let keeper_name = "strict-persisted-required-fields" in
+        Keeper_event_queue_persistence.persist
+          ~base_path
+          ~keeper_name
+          strict_queue;
+        let path = snapshot_path ~base_path ~keeper_name in
+        let malformed =
+          read_file path
+          |> Yojson.Safe.from_string
+          |> remove_payload_field ~kind ~field
+          |> Yojson.Safe.to_string
+        in
+        write_file path malformed;
+        (match
+           Keeper_event_queue_persistence.load_state_result
+             ~base_path
+             ~keeper_name
+         with
+         | Ok _ ->
+           Alcotest.failf "persisted %s payload without %s loaded" kind field
+         | Error detail ->
+           Alcotest.(check bool)
+             (Printf.sprintf "%s error requires reset" field)
+             true
+             (contains_substring ~needle:"reset required" detail);
+           Alcotest.(check bool)
+             (Printf.sprintf "%s error names missing field" field)
+             true
+             (contains_substring ~needle:field detail));
+        Alcotest.(check string)
+          (Printf.sprintf "%s evidence is not rewritten" field)
+          malformed
+          (read_file path))
+  in
+  assert_strict_persisted_missing_field
+    ~kind:"fusion_completed"
+    ~field:"terminal";
+  assert_strict_persisted_missing_field
+    ~kind:"failure_judgment"
+    ~field:"provenance";
 
   (* --- durable snapshot load collapses legacy duplicates that differ only by
          arrival time. --- *)

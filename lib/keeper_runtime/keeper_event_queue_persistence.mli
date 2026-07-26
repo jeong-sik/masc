@@ -233,11 +233,6 @@ val load_pending : base_path:string -> keeper_name:string -> Keeper_event_queue.
 val load_pending_result :
   base_path:string -> keeper_name:string -> (Keeper_event_queue.t, string) result
 
-type snapshot_pair =
-  { pending : Keeper_event_queue.t
-  ; inflight : Keeper_event_queue.t
-  }
-
 type snapshot_read_error_kind =
   | Invalid_path
   | Read_failed
@@ -262,7 +257,6 @@ type snapshot_discovery =
 
 val snapshot_read_error_kind_to_string : snapshot_read_error_kind -> string
 val discover_keeper_names_with_snapshots : base_path:string -> snapshot_discovery
-val load_snapshot_pair : base_path:string -> keeper_name:string -> snapshot_pair
 val load_snapshot_pair_with_errors :
   base_path:string -> keeper_name:string -> snapshot_pair_with_errors
 

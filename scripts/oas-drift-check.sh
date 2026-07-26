@@ -147,6 +147,30 @@ extract_http_error_variants() {
   ' "${file}" | sort -u
 }
 
+# Retry.invalid_request_reason constructors from the .mli type.
+#
+# MASC reads this type as a control decision, not as telemetry:
+# keeper_turn_runtime_budget.ml classifies Request_body_too_large as a capacity
+# refusal that requests a compaction, and Json_parse_error / Unknown_invalid_request
+# as a defect in what was built, which must not. A new constructor therefore changes
+# what MASC does, not just what it prints — and it can be satisfied by the wire
+# renderer alone (keeper_event_bridge_error_json.ml) while the control classifier
+# still answers None for it, which compiles. That is the telemetry-without-control
+# shape this repository refuses, so the surface belongs in this fingerprint.
+extract_invalid_request_reasons() {
+  local src="$1"
+  local file="${src}/lib/llm_provider/retry.mli"
+  [[ -f "${file}" ]] || { echo "missing ${file}" >&2; return 1; }
+  awk '
+    /^type invalid_request_reason/ { inblock=1; next }
+    inblock && /^(and|type|val|let|module) / { inblock=0 }
+    inblock && /^  \| [A-Z]/ {
+      sub(/^  \| /, ""); sub(/[[:space:]].*/, "");
+      print
+    }
+  ' "${file}" | sort -u
+}
+
 # Metrics.t record fields from the .mli type t.
 extract_metrics_fields() {
   local src="$1"
@@ -297,9 +321,10 @@ lines_to_json_array() {
 
 build_fingerprint() {
   local src="$1"
-  local ebv hev mf eod eor
+  local ebv hev irr mf eod eor
   ebv="$(extract_event_bus_variants   "${src}" | lines_to_json_array)"
   hev="$(extract_http_error_variants  "${src}" | lines_to_json_array)"
+  irr="$(extract_invalid_request_reasons "${src}" | lines_to_json_array)"
   mf="$( extract_metrics_fields       "${src}" | lines_to_json_array)"
   eod="$(extract_exact_output_declarations "${src}" | lines_to_json_array)"
   eor="$(extract_exact_output_reexport_declarations "${src}" | lines_to_json_array)"
@@ -309,6 +334,7 @@ build_fingerprint() {
     --arg ver "${OAS_AGENT_SDK_BASE_VERSION}" \
     --argjson ebv "${ebv}" \
     --argjson hev "${hev}" \
+    --argjson irr "${irr}" \
     --argjson mf  "${mf}" \
     --argjson eod "${eod}" \
     --argjson eor "${eor}" \
@@ -318,6 +344,7 @@ build_fingerprint() {
        surfaces: {
          event_bus_payload_variants: $ebv,
          http_error_variants:        $hev,
+         invalid_request_reasons:    $irr,
          metrics_fields:             $mf,
          exact_output_declarations:  $eod,
          exact_output_reexport_declarations: $eor
@@ -338,6 +365,23 @@ diff_arrays_removed() {
 
 report_diff() {
   local section_name="$1" prev_arr="$2" curr_arr="$3"
+  # A section the committed fingerprint does not carry is drift, not a match. jq
+  # reported "array and null cannot be subtracted" here and the run still ended with
+  # "OAS API surface matches fingerprint": the subtraction failed, both counts parsed
+  # as zero, and the section was skipped. Adding a surface to this script therefore
+  # produced a green check that had compared nothing — the failure this script exists
+  # to prevent, in the script itself.
+  if [[ "${prev_arr}" == "null" || "${curr_arr}" == "null" ]]; then
+    echo
+    echo "  [${section_name}]"
+    if [[ "${prev_arr}" == "null" ]]; then
+      echo "    absent from the committed fingerprint — run --regenerate after review"
+    else
+      echo "    absent from the current source — the extractor found no such surface"
+    fi
+    return 1
+  fi
+
   local added removed
   added="$(diff_arrays_added   "${prev_arr}" "${curr_arr}")"
   removed="$(diff_arrays_removed "${prev_arr}" "${curr_arr}")"
@@ -417,7 +461,7 @@ case "${MODE}" in
     if ! report_metadata_diff "${prev}" "${current}"; then
       drift=1
     fi
-    for section in event_bus_payload_variants http_error_variants metrics_fields exact_output_declarations exact_output_reexport_declarations; do
+    for section in event_bus_payload_variants http_error_variants invalid_request_reasons metrics_fields exact_output_declarations exact_output_reexport_declarations; do
       prev_arr="$(jq ".surfaces.${section}" <<<"${prev}")"
       curr_arr="$(jq ".surfaces.${section}" <<<"${current}")"
       if ! report_diff "${section}" "${prev_arr}" "${curr_arr}"; then

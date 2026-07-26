@@ -25,6 +25,11 @@
       "ProviderTerminal",
       "TimeoutError"
     ],
+    "invalid_request_reasons": [
+      "Json_parse_error",
+      "Request_body_too_large",
+      "Unknown_invalid_request"
+    ],
     "metrics_fields": [
       "on_cache_hit",
       "on_cache_miss",

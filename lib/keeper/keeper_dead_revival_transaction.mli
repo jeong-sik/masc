@@ -96,6 +96,10 @@ module For_testing : sig
     (unit -> 'a) ->
     'a
 
+  val with_durable_publication_settlement_warning :
+    (unit -> 'a) ->
+    'a
+
   val with_launch_publication_settlement_warning :
     (unit -> 'a) ->
     'a

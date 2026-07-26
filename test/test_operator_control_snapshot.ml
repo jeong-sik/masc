@@ -1321,6 +1321,86 @@ let test_dead_revival_launch_publication_warning_preserves_commit () =
     (List.length recovery.unresolved)
 ;;
 
+let test_dead_revival_durable_publication_warning_clears_actual_stage () =
+  let keeper_name = "dead-revival-durable-publication-warning" in
+  with_settled_dead_revival_fixture ~keeper_name
+  @@ fun _base_dir config original dead_entry ctx ->
+  let candidate =
+    { original with
+      paused = false
+    ; latched_reason = None
+    }
+  in
+  (match
+     Keeper_dead_revival_transaction.For_testing
+     .with_durable_publication_settlement_warning
+       (fun () ->
+         Keeper_dead_revival_transaction.revive
+           ctx
+           ~original
+           ~candidate)
+   with
+   | Error
+       (Keeper_dead_revival_transaction.Journal_published_with_warnings
+          { warnings; _ })
+     when warnings <> [] -> ()
+   | Error error ->
+     Alcotest.fail
+       ("unexpected durable publication warning result: "
+        ^ Keeper_dead_revival_transaction.error_to_string error)
+   | Ok _ ->
+     Alcotest.fail
+       "publish-then-warning durable transition was collapsed to revival success");
+  let persisted =
+    match Keeper_meta_store.read_meta config keeper_name with
+    | Ok (Some meta) -> meta
+    | Ok None ->
+      Alcotest.fail "durable publish-then-warning rollback removed metadata"
+    | Error error -> Alcotest.fail error
+  in
+  let persisted =
+    { persisted with meta_version = original.meta_version }
+  in
+  Alcotest.(check string)
+    "durable publish-then-warning restores original metadata"
+    (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json original))
+    (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json persisted));
+  let current_entry =
+    match Keeper_registry.get ~base_path:config.base_path keeper_name with
+    | Some entry -> entry
+    | None ->
+      Alcotest.fail "durable publish-then-warning rollback lost registry lane"
+  in
+  Alcotest.(check bool)
+    "durable publish-then-warning restores the dead lane"
+    true
+    (Keeper_lane.Id.equal
+       (Keeper_lane.id dead_entry.lane)
+       (Keeper_lane.id current_entry.lane));
+  Alcotest.(check bool)
+    "durable publish-then-warning restores the Dead phase"
+    true
+    (current_entry.phase = Keeper_state_machine.Dead);
+  (match
+     Keeper_dead_revival_transaction.For_testing.current_journal_stage
+       ~config
+       ~keeper_name
+   with
+   | Ok `Cleared -> ()
+   | Ok _ ->
+     Alcotest.fail
+       "durable publish-then-warning rollback did not clear actual authority stage"
+   | Error error ->
+     Alcotest.fail (Keeper_dead_revival_transaction.error_to_string error));
+  Alcotest.(check bool)
+    "durable publish-then-warning releases lifecycle reservation"
+    true
+    (Option.is_none
+       (Keeper_lifecycle_reservation.current
+          ~base_path:config.base_path
+          ~keeper_name))
+;;
+
 let test_dead_revival_recovery_waits_for_forward_fence () =
   let keeper_name = "dead-revival-forward-fence" in
   with_settled_dead_revival_fixture ~keeper_name
@@ -1501,6 +1581,14 @@ let test_update_keeper_surfaces_committed_cleanup_required () =
     "launch success is explicit"
     true
     (data |> member "launch_committed" |> to_bool);
+  Alcotest.(check bool)
+    "transaction cleanup requirement is explicit"
+    true
+    (data |> member "transaction_cleanup_required" |> to_bool);
+  Alcotest.(check bool)
+    "journal-only cleanup field is absent"
+    true
+    (data |> member "journal_cleanup_required" = `Null);
   Alcotest.(check string)
     "cleanup error retains typed constructor"
     "journal_write_failed"
@@ -2670,6 +2758,10 @@ let () =
             "launch publication warning preserves committed revival"
             `Quick
             test_dead_revival_launch_publication_warning_preserves_commit;
+          Alcotest.test_case
+            "durable publication warning clears actual authority stage"
+            `Quick
+            test_dead_revival_durable_publication_warning_clears_actual_stage;
           Alcotest.test_case
             "recovery waits for the live revival durability fence"
             `Quick

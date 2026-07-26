@@ -19,6 +19,10 @@ let before_recovery_claim_hook : (unit -> unit) Atomic.t =
   Atomic.make (fun () -> ())
 ;;
 
+let durable_compare_and_swap_hook =
+  Atomic.make Head.compare_and_swap
+;;
+
 let launch_compare_and_swap_hook =
   Atomic.make Head.compare_and_swap
 ;;
@@ -83,6 +87,23 @@ module Boundary_hooks_for_testing = struct
     in
     Fun.protect
       ~finally:(fun () -> Atomic.set before_recovery_claim_hook previous)
+      fn
+  ;;
+
+  let with_durable_publication_settlement_warning fn =
+    let hooks =
+      Head.For_testing.hooks
+        ~on_resource_settlement:(fun () ->
+          failwith "injected revival durable publication settlement warning")
+        ()
+    in
+    let previous =
+      Atomic.exchange
+        durable_compare_and_swap_hook
+        (Head.For_testing.compare_and_swap hooks)
+    in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set durable_compare_and_swap_hook previous)
       fn
   ;;
 
@@ -637,12 +658,52 @@ let same_transaction (left : journal) (right : journal) =
   && Int.equal left.candidate.runtime.nonce right.candidate.runtime.nonce
 ;;
 
+type durable_publication_observation =
+  | Durable_publication_rollback_from of journal
+  | Durable_publication_attention of error
+
+let observe_durable_publication config (expected : journal) =
+  match
+    read_current_journal
+      ~invalid:(fun detail -> Journal_ownership_changed detail)
+      config
+      expected.keeper_name
+  with
+  | Error error -> Durable_publication_attention error
+  | Ok (_, _, None) ->
+    Durable_publication_attention
+      (Journal_ownership_changed
+         "durable publication journal authority disappeared")
+  | Ok (_, _, Some (Cleared_tombstone _)) ->
+    Durable_publication_attention
+      (Journal_ownership_changed
+         "durable publication settled to a cleared transaction")
+  | Ok (_, _, Some (Active_journal (current : journal)))
+    when not (same_transaction current expected) ->
+    Durable_publication_attention
+      (Journal_ownership_changed
+         "durable publication settled to another active transaction")
+  | Ok (_, _, Some (Active_journal (current : journal))) ->
+    (match current.stage with
+     | Reserved
+     | Durable_committed ->
+       Durable_publication_rollback_from current
+     | Launch_committed
+     | Rollback_reserved
+     | Rollback_durable_committed
+     | Cleared ->
+       Durable_publication_attention
+         (Journal_ownership_changed
+            ("durable publication settled to conflicting stage "
+             ^ Yojson.Safe.to_string (journal_stage_to_json current.stage))))
+;;
+
 type launch_publication_observation =
   | Launch_publication_committed
   | Launch_publication_not_committed
   | Launch_publication_attention of error
 
-let observe_launch_publication config expected =
+let observe_launch_publication config (expected : journal) =
   match
     read_current_journal
       ~invalid:(fun detail -> Journal_ownership_changed detail)
@@ -662,12 +723,12 @@ let observe_launch_publication config expected =
     Launch_publication_attention
       (Journal_ownership_changed
          "launch publication settled to another cleared transaction")
-  | Ok (_, _, Some (Active_journal current))
+  | Ok (_, _, Some (Active_journal (current : journal)))
     when not (same_transaction current expected) ->
     Launch_publication_attention
       (Journal_ownership_changed
          "launch publication settled to another active transaction")
-  | Ok (_, _, Some (Active_journal current)) ->
+  | Ok (_, _, Some (Active_journal (current : journal))) ->
     (match current.stage with
      | Launch_committed -> Launch_publication_committed
      | Durable_committed -> Launch_publication_not_committed
@@ -738,7 +799,11 @@ let save_journal config journal =
   match journal.stage with
   | Reserved -> reserve_journal config journal
   | Durable_committed ->
-    transition_journal config ~expected_stage:Reserved journal
+    transition_journal
+      ~compare_and_swap:(Atomic.get durable_compare_and_swap_hook)
+      config
+      ~expected_stage:Reserved
+      journal
   | Launch_committed ->
     transition_journal config ~expected_stage:Durable_committed journal
   | Rollback_reserved | Rollback_durable_committed ->
@@ -1430,14 +1495,29 @@ let revive_locked (ctx : _ context) ~original ~candidate =
                          { journal with candidate = committed; stage = Durable_committed }
                        in
                        (match save_journal ctx.config committed_journal with
-                        | Error error ->
-                          fail_with_rollback
-                            token
-                            ctx.config
-                            journal
-                            original_entry
-                            (error_to_string error)
-                            error
+                        | Error publication_error ->
+                          (match
+                             observe_durable_publication
+                               ctx.config
+                               committed_journal
+                           with
+                           | Durable_publication_rollback_from observed ->
+                             fail_with_rollback
+                               token
+                               ctx.config
+                               observed
+                               original_entry
+                               (error_to_string publication_error)
+                               publication_error
+                           | Durable_publication_attention attention ->
+                             Log.Keeper.error
+                               "keeper revival durable publication requires \
+                                attention keeper=%s publication=%s observation=%s"
+                               committed.name
+                               (error_to_string publication_error)
+                               (error_to_string attention);
+                             release_observed token committed.name;
+                             Error attention)
                         | Ok () ->
                           (match
                              Keeper_keepalive.start_keepalive

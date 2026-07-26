@@ -95,7 +95,7 @@ let committed_with_cleanup_required_json
   `Assoc
     [ "outcome", `String "dead_revival_committed_with_cleanup_required"
     ; "launch_committed", `Bool true
-    ; "journal_cleanup_required", `Bool true
+    ; "transaction_cleanup_required", `Bool true
     ; "retry_disposition", `String "do_not_retry_revival"
     ; "committed", Keeper_meta_json.meta_to_json committed
     ; "registry_entry", registry_entry_commit_evidence_json entry

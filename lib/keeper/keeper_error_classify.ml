@@ -735,15 +735,26 @@ let degraded_rotation_after_recoverable_error
 
     Drift boundary: the typed arm is authoritative.  The string arms exist
     for string-rendered shapes of the same condition; the only rendering the
-    pinned SDK (oas 5851df2e) produces with one of these prefixes is
+    pinned SDK produces with one of these prefixes is
     [Llm_provider.Retry.error_message (InvalidRequest _)] =
     ["Invalid request (%s): %s"] (oas lib/llm_provider/retry.ml), whose
     classification shape is produced by [Llm_provider.Retry.classify_error]
     for HTTP 400/422.  At the pin no [sdk_error] rendering starts with
-    ["Bad Request"] or ["oas-ollama_cloud"] — those arms are defensive
-    legacy shapes.  [test_keeper_invalid_request_auto_recover.ml] pins the
-    SDK classification+rendering shape so an SDK drift fails the test
-    instead of silently deadening the matcher. *)
+    ["Bad Request"] — that arm is a defensive legacy shape.
+    [test_keeper_invalid_request_auto_recover.ml] pins the SDK
+    classification+rendering shape so an SDK drift fails the test instead of
+    silently deadening the matcher.
+
+    A third arm matched ["oas-ollama_cloud"] with [String.contains msg '4'].
+    Removed: it named a provider inside role code, which the
+    runtime-indifference spec forbids, and it matched nothing — that string
+    occurs nowhere in the pinned SDK's lib, and both this docstring and the
+    drift-guard test already recorded it as having no producer.  The digit
+    test was also far looser than the "4xx" it read as, since it accepted a 4
+    anywhere in the message.  ["Bad Request"] is kept: the same sentence calls
+    it producerless, but it is a generic HTTP status phrase rather than a
+    provider identity, so removing it would be a separate judgment about
+    defensive code on weaker evidence than this one. *)
 let is_invalid_request_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (InvalidRequest _) -> true
@@ -753,9 +764,7 @@ let is_invalid_request_error (err : Agent_sdk.Error.sdk_error) : bool =
       let len_p = String.length prefix in
       String.length str >= len_p && String.sub str 0 len_p = prefix
     in
-    has_prefix msg "Invalid request"
-    || has_prefix msg "Bad Request"
-    || has_prefix msg "oas-ollama_cloud" && String.contains msg '4'
+    has_prefix msg "Invalid request" || has_prefix msg "Bad Request"
 
 (** [true] when a structured error indicates context overflow. *)
 let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =

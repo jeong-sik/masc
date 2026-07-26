@@ -113,8 +113,10 @@ let test_counters_are_per_keeper () =
    product and asserts the predicate catches it and the rendering keeps the
    matched prefix, so an SDK-side shape change fails here instead of
    silently deadening the matcher.  At the pin no [sdk_error] rendering
-   starts with ["Bad Request"] or ["oas-ollama_cloud"]; those string arms
-   are defensive legacy shapes with no SDK producer to pin. *)
+   starts with ["Bad Request"]; that string arm is a defensive legacy shape
+   with no SDK producer to pin.  A third arm matching ["oas-ollama_cloud"]
+   was removed for naming a provider inside role code while matching nothing
+   (see [Keeper_error_classify.is_invalid_request_error]). *)
 let test_sdk_invalid_request_shape_drift_guard () =
   let api_error =
     Llm_provider.Retry.classify_error

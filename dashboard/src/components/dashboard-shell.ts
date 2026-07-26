@@ -37,6 +37,7 @@ import {
 } from '../config/navigation'
 import { ObservatoryFilterBar } from './common/observatory-filter-bar'
 import { ChevronRight, ChevronLeft } from 'lucide-preact'
+import type { LucideIcon } from 'lucide-preact'
 import { ExternalLink } from 'lucide-preact'
 import { ScrollToTopButton } from './common/scroll-to-top'
 import { CopyIdButton } from './common/copy-id-button'
@@ -54,6 +55,11 @@ import {
   WidgetSoloBar,
   widgetSoloUrlForRoute,
 } from './widget-solo'
+import {
+  CURRENT_KEEPER_FLEET_FACT_INVALID,
+  keeperFleetOperatorFactPresentation,
+  keeperFleetOperatorFacts,
+} from './keeper-fleet-operator-fact'
 
 const buildIdentityOpen = signal(false)
 const shellRuntimeProviderProbe = signal<DashboardRuntimeProbePayload | null>(null)
@@ -211,6 +217,7 @@ interface DashboardHealthChip {
   label: string
   detail: string
   tone: DashboardHealthChipTone
+  Icon?: LucideIcon
   // Optional drill-down route. When set, DashboardHealthStrip renders this
   // chip as a RouteLink so operators can jump from "Source mismatch" /
   // "일시정지 keeper N" / "Reaction ledger pending N" straight to the page
@@ -257,80 +264,46 @@ interface DashboardHealthInput {
 function fleetSafetyHealthChip(fleetSafety: DashboardFleetSafetyHealth | null): DashboardHealthChip | null {
   if (!fleetSafety) return null
   const fleet = fleetSafety.keeper_fleet_safety
-  const fleetStatus =
-    fleet?.status === 'ok' || fleet?.status === 'degraded' || fleet?.status === 'blocked'
-      ? fleet.status
-      : null
-  const executableValue = fleet?.executable_keeper_fiber_count
-  const executableFibers =
-    typeof executableValue === 'number'
-    && Number.isInteger(executableValue)
-    && executableValue >= 0
-      ? executableValue
-      : null
-  if (!fleet || fleetStatus == null || executableFibers == null) {
-    return {
-      key: 'fleet-liveness-risk',
-      label: 'Fleet execution unavailable',
-      detail: 'canonical keeper_fleet_safety executable snapshot unavailable; no liveness or operator action inferred.',
-      tone: 'warn',
-    }
-  }
-  const pausedKeepers = fleet.paused_keeper_count
-  const failingKeepers = fleet.failing_keeper_fiber_count
-  const recoveringKeepers = fleet.recovering_keeper_fiber_count
-  const pausedAutobootKeepers = fleet?.paused_autoboot_enabled_keeper_count ?? null
-  const targetCapacity = fleet?.target_reaction_capacity_count ?? null
-  const bootableKeepers = fleet?.bootable_keeper_count ?? null
-  const capacityShortfall = fleet?.reaction_capacity_shortfall_count ?? null
-  if (fleetStatus === 'blocked') {
-    const blocker = fleet.blocker?.trim() || null
-    const capacityDetail = [
-      `status=${fleetStatus}`,
-      `executable_keeper_fiber_count=${executableFibers}`,
-      pausedKeepers != null ? `paused_keeper_count=${pausedKeepers}` : null,
-      failingKeepers != null ? `failing_keeper_fiber_count=${failingKeepers}` : null,
-      recoveringKeepers != null ? `recovering_keeper_fiber_count=${recoveringKeepers}` : null,
-      pausedAutobootKeepers != null ? `paused_autoboot_enabled_keeper_count=${pausedAutobootKeepers}` : null,
-      bootableKeepers != null ? `bootable_keeper_count=${bootableKeepers}` : null,
-      targetCapacity != null ? `target_reaction_capacity_count=${targetCapacity}` : null,
-      blocker != null ? `blocker=${blocker}` : null,
-    ].filter((item): item is string => item != null).join(', ')
-    const operatorAction = (pausedKeepers ?? 0) > 0
-      ? 'resume selected paused keepers or confirm an intentional operator pause policy.'
-      : (failingKeepers ?? 0) > 0
-        ? 'inspect and recover failing keepers before retrying scheduled activation.'
-        : (recoveringKeepers ?? 0) > 0
-          ? 'keeper recovery is in progress; wait for executable capacity before intervening.'
-          : blocker != null
-            ? `blocked by ${blocker}; inspect canonical fleet evidence before choosing an operator action.`
-            : 'blocked cause unavailable; no operator action inferred.'
-    return {
-      key: 'fleet-liveness-risk',
-      label: 'P0 fleet blocked',
-      detail: `${capacityDetail}; ${operatorAction}`,
-      tone: 'bad',
-    }
-  }
-  if (fleetStatus === 'degraded') {
-    const capacityDetail = [
-      `status=${fleetStatus}`,
-      `executable_keeper_fiber_count=${executableFibers}`,
-      fleet.failing_keeper_fiber_count != null
+  if (fleet?.status === 'ok') return null
+  const fact = keeperFleetOperatorFacts(fleet)[0] ?? CURRENT_KEEPER_FLEET_FACT_INVALID
+  const presentation = keeperFleetOperatorFactPresentation(fact, fleet?.status)
+  return {
+    key: 'fleet-liveness-risk',
+    label: presentation.label,
+    detail: [
+      `status=${fleet?.status ?? 'current_fact_invalid'}`,
+      fleet?.executable_keeper_fiber_count != null
+        ? `executable_keeper_fiber_count=${fleet.executable_keeper_fiber_count}`
+        : null,
+      fleet?.paused_keeper_count != null
+        ? `paused_keeper_count=${fleet.paused_keeper_count}`
+        : null,
+      fleet?.failing_keeper_fiber_count != null
         ? `failing_keeper_fiber_count=${fleet.failing_keeper_fiber_count}`
         : null,
-      targetCapacity != null ? `target_reaction_capacity_count=${targetCapacity}` : null,
-      capacityShortfall != null ? `reaction_capacity_shortfall_count=${capacityShortfall}` : null,
+      fleet?.recovering_keeper_fiber_count != null
+        ? `recovering_keeper_fiber_count=${fleet.recovering_keeper_fiber_count}`
+        : null,
+      fleet?.paused_autoboot_enabled_keeper_count != null
+        ? `paused_autoboot_enabled_keeper_count=${fleet.paused_autoboot_enabled_keeper_count}`
+        : null,
+      fleet?.bootable_keeper_count != null
+        ? `bootable_keeper_count=${fleet.bootable_keeper_count}`
+        : null,
+      fleet?.target_reaction_capacity_count != null
+        ? `target_reaction_capacity_count=${fleet.target_reaction_capacity_count}`
+        : null,
+      fleet?.reaction_capacity_shortfall_count != null
+        ? `reaction_capacity_shortfall_count=${fleet.reaction_capacity_shortfall_count}`
+        : null,
       fleet?.blocker ? `blocker=${fleet.blocker}` : null,
-    ].filter((item): item is string => item != null).join(', ')
-    return {
-      key: 'fleet-liveness-risk',
-      label: 'Fleet capacity degraded',
-      detail: `${capacityDetail}; restore missing keeper fibers or confirm a reduced target capacity.`,
-      tone: 'warn',
-    }
+      `keeper=${presentation.keeper}`,
+      `reason=${presentation.reason}`,
+      `operator_action=${presentation.action}`,
+    ].filter((item): item is string => item != null).join(', '),
+    tone: presentation.tone,
+    Icon: presentation.Icon,
   }
-  return null
 }
 
 function ledgerCount(value: number | null | undefined): number {
@@ -719,18 +692,18 @@ export function DashboardHealthStrip({ hidden = false }: { hidden?: boolean }) {
           key=${chip.key}
           tab=${chip.route.tab}
           params=${chip.route.params}
-          class=${`dashboard-health-chip inline-flex min-h-6 items-center rounded-[var(--r-1)] border px-2 py-0.5 font-medium transition-opacity hover:opacity-80 ${healthChipClass(chip.tone)}`}
+          class=${`dashboard-health-chip inline-flex min-h-6 items-center gap-1.5 rounded-[var(--r-1)] border px-2 py-0.5 font-medium transition-opacity hover:opacity-80 ${healthChipClass(chip.tone)}`}
           title=${chip.detail}
           data-testid=${`dashboard-health-chip-${chip.key}`}
-        >${chip.label}<//>
+        >${chip.Icon ? html`<${chip.Icon} size=${13} aria-hidden="true" />` : null}${chip.label}<//>
       ` : html`
         <span
           key=${chip.key}
-          class=${`dashboard-health-chip inline-flex min-h-6 items-center rounded-[var(--r-1)] border px-2 py-0.5 font-medium ${healthChipClass(chip.tone)}`}
+          class=${`dashboard-health-chip inline-flex min-h-6 items-center gap-1.5 rounded-[var(--r-1)] border px-2 py-0.5 font-medium ${healthChipClass(chip.tone)}`}
           title=${chip.detail}
           data-testid=${`dashboard-health-chip-${chip.key}`}
         >
-          ${chip.label}
+          ${chip.Icon ? html`<${chip.Icon} size=${13} aria-hidden="true" />` : null}${chip.label}
         </span>
       `)}
     </div>

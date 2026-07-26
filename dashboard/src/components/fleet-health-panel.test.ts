@@ -164,10 +164,22 @@ describe('FleetHealthPanel', () => {
           }],
         },
         keeper_fleet_safety: {
+          schema: 'masc.keeper_fleet_operator.v1',
           status: 'degraded',
           reason: null,
           blocker: 'reaction_capacity_below_target',
-          blocked_keeper_count: null,
+          blocked_keeper_count: 1,
+          blocked_keepers: [{
+            keeper_name: 'capacity-missing',
+            agent_name: null,
+            task_id: null,
+            task_status: null,
+            reason: 'phase_failing',
+            action: 'repair_failing_keeper',
+            operator_action_type: null,
+            operator_tool_name: null,
+            operator_action_confirm_required: null,
+          }],
           running_keeper_fiber_count: 8,
           executable_keeper_fiber_count: 13,
           target_reaction_capacity_count: 17,
@@ -186,6 +198,11 @@ describe('FleetHealthPanel', () => {
     expect(screen.getByText('capacity 13/17')).toBeTruthy()
     expect(screen.getByText('일시정지 3')).toBeTruthy()
     expect(screen.getByTestId('runtime-blocker-board')).toBeTruthy()
+    const operatorFact = screen.getByTestId('keeper-fleet-operator-fact-0')
+    expect(operatorFact.getAttribute('data-tone')).toBe('warn')
+    expect(operatorFact.querySelector('[data-icon="Wrench"]')).toBeTruthy()
+    expect(operatorFact.textContent).toContain('Keeper failing')
+    expect(operatorFact.textContent).toContain('inspect and recover failing keepers')
     expect(screen.getByText('13/17')).toBeTruthy()
     expect(screen.getByText('analyst')).toBeTruthy()
     expect(screen.getByText('operator_paused')).toBeTruthy()
@@ -203,10 +220,12 @@ describe('FleetHealthPanel', () => {
         keeper_reaction_ledger: null,
         paused_keepers_health: { count: 0, names: [], durable_count: 0, durable_names: [], autoboot_enabled_count: 0, autoboot_enabled_names: [], read_error_count: 0, read_errors: [], details: [] },
         keeper_fleet_safety: {
+          schema: 'masc.keeper_fleet_operator.v1',
           status: 'ok',
           reason: null,
           blocker: null,
-          blocked_keeper_count: null,
+          blocked_keeper_count: 0,
+          blocked_keepers: [],
           running_keeper_fiber_count: 8,
           executable_keeper_fiber_count: 8,
           target_reaction_capacity_count: 8,

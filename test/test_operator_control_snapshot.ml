@@ -1231,6 +1231,96 @@ let test_dead_revival_final_clear_failure_preserves_commit () =
     persisted_after_recovery.runtime.nonce
 ;;
 
+let test_dead_revival_launch_publication_warning_preserves_commit () =
+  let keeper_name = "dead-revival-launch-publication-warning" in
+  with_settled_dead_revival_fixture ~keeper_name
+  @@ fun _base_dir config original _dead_entry ctx ->
+  let candidate =
+    { original with
+      paused = false
+    ; latched_reason = None
+    }
+  in
+  let committed, entry =
+    match
+      Keeper_dead_revival_transaction.For_testing
+      .with_launch_publication_settlement_warning
+        (fun () ->
+          Keeper_dead_revival_transaction.revive
+            ctx
+            ~original
+            ~candidate)
+    with
+    | Error
+        (Keeper_dead_revival_transaction.Post_commit_cleanup_required
+           { committed
+           ; entry
+           ; cleanup_error =
+               Keeper_dead_revival_transaction.Journal_published_with_warnings
+                 { warnings; _ }
+           })
+      when warnings <> [] ->
+      committed, entry
+    | Error error ->
+      Alcotest.fail
+        ("unexpected launch publication warning result: "
+         ^ Keeper_dead_revival_transaction.error_to_string error)
+    | Ok _ ->
+      Alcotest.fail
+        "publish-then-warning launch was collapsed to clean revival success"
+  in
+  Alcotest.(check bool)
+    "publish-then-warning metadata remains live"
+    true
+    (not committed.paused && Option.is_none committed.latched_reason);
+  Alcotest.(check bool)
+    "publish-then-warning registry lane remains installed"
+    true
+    (match Keeper_registry.get ~base_path:config.base_path keeper_name with
+     | Some current ->
+       Keeper_lane.Id.equal
+         (Keeper_lane.id entry.lane)
+         (Keeper_lane.id current.lane)
+     | None -> false);
+  (match
+     Keeper_dead_revival_transaction.For_testing.current_journal_stage
+       ~config
+       ~keeper_name
+   with
+   | Ok `Launch_committed -> ()
+   | Ok _ ->
+     Alcotest.fail
+       "publish-then-warning journal did not retain Launch_committed authority"
+   | Error error ->
+     Alcotest.fail (Keeper_dead_revival_transaction.error_to_string error));
+  let persisted =
+    match Keeper_meta_store.read_meta config keeper_name with
+    | Ok (Some meta) -> meta
+    | Ok None ->
+      Alcotest.fail "publish-then-warning committed metadata disappeared"
+    | Error error -> Alcotest.fail error
+  in
+  Alcotest.(check int)
+    "publish-then-warning durable nonce remains committed"
+    committed.runtime.nonce
+    persisted.runtime.nonce;
+  let recovery =
+    Keeper_dead_revival_transaction.recover_pending config
+  in
+  Alcotest.(check int)
+    "publish-then-warning recovery does not roll back"
+    0
+    recovery.recovered;
+  Alcotest.(check int)
+    "publish-then-warning recovery forward-clears"
+    1
+    recovery.cleared;
+  Alcotest.(check int)
+    "publish-then-warning recovery is resolved"
+    0
+    (List.length recovery.unresolved)
+;;
+
 let test_dead_revival_recovery_waits_for_forward_fence () =
   let keeper_name = "dead-revival-forward-fence" in
   with_settled_dead_revival_fixture ~keeper_name
@@ -2576,6 +2666,10 @@ let () =
             "final clear failure preserves committed revival"
             `Quick
             test_dead_revival_final_clear_failure_preserves_commit;
+          Alcotest.test_case
+            "launch publication warning preserves committed revival"
+            `Quick
+            test_dead_revival_launch_publication_warning_preserves_commit;
           Alcotest.test_case
             "recovery waits for the live revival durability fence"
             `Quick

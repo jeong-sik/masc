@@ -19,6 +19,10 @@ let before_recovery_claim_hook : (unit -> unit) Atomic.t =
   Atomic.make (fun () -> ())
 ;;
 
+let launch_compare_and_swap_hook =
+  Atomic.make Head.compare_and_swap
+;;
+
 let fd_backed_parent_opening_key : unit Eio.Fiber.key =
   Eio.Fiber.create_key ()
 ;;
@@ -79,6 +83,23 @@ module Boundary_hooks_for_testing = struct
     in
     Fun.protect
       ~finally:(fun () -> Atomic.set before_recovery_claim_hook previous)
+      fn
+  ;;
+
+  let with_launch_publication_settlement_warning fn =
+    let hooks =
+      Head.For_testing.hooks
+        ~on_resource_settlement:(fun () ->
+          failwith "injected revival launch publication settlement warning")
+        ()
+    in
+    let previous =
+      Atomic.exchange
+        launch_compare_and_swap_hook
+        (Head.For_testing.compare_and_swap hooks)
+    in
+    Fun.protect
+      ~finally:(fun () -> Atomic.set launch_compare_and_swap_hook previous)
       fn
   ;;
 
@@ -571,14 +592,20 @@ let publication_error ~conflict (failure : Head.failure) =
     Journal_publication_indeterminate failure
 ;;
 
-let publish_row ~conflict ~parent ~snapshot ~row =
+let publish_row
+      ?(compare_and_swap = Head.compare_and_swap)
+      ~conflict
+      ~parent
+      ~snapshot
+      ~row
+  =
   let keeper_name = journal_row_keeper_name row in
   match journal_entropy () with
   | Error error -> Error error
   | Ok secure_random ->
     (match
        with_head_parent parent (fun parent ->
-         Head.compare_and_swap
+         compare_and_swap
            ~secure_random
            ~parent
            ~leaf:(journal_leaf keeper_name)
@@ -609,6 +636,50 @@ let same_transaction left right =
   && Int.equal left.candidate.runtime.nonce right.candidate.runtime.nonce
 ;;
 
+type launch_publication_observation =
+  | Launch_publication_committed
+  | Launch_publication_not_committed
+  | Launch_publication_attention of error
+
+let observe_launch_publication config expected =
+  match
+    read_current_journal
+      ~invalid:(fun detail -> Journal_ownership_changed detail)
+      config
+      expected.keeper_name
+  with
+  | Error error -> Launch_publication_attention error
+  | Ok (_, _, None) ->
+    Launch_publication_attention
+      (Journal_ownership_changed
+         "launch publication journal authority disappeared")
+  | Ok (_, _, Some (Cleared_tombstone tombstone))
+    when String.equal tombstone.transaction_id expected.transaction_id
+         && String.equal tombstone.keeper_name expected.keeper_name ->
+    Launch_publication_committed
+  | Ok (_, _, Some (Cleared_tombstone _)) ->
+    Launch_publication_attention
+      (Journal_ownership_changed
+         "launch publication settled to another cleared transaction")
+  | Ok (_, _, Some (Active_journal current))
+    when not (same_transaction current expected) ->
+    Launch_publication_attention
+      (Journal_ownership_changed
+         "launch publication settled to another active transaction")
+  | Ok (_, _, Some (Active_journal current)) ->
+    (match current.stage with
+     | Launch_committed -> Launch_publication_committed
+     | Durable_committed -> Launch_publication_not_committed
+     | Reserved
+     | Rollback_reserved
+     | Rollback_durable_committed
+     | Cleared ->
+       Launch_publication_attention
+         (Journal_ownership_changed
+            ("launch publication settled to conflicting stage "
+             ^ Yojson.Safe.to_string (journal_stage_to_json current.stage))))
+;;
+
 let reserve_journal config journal =
   match
     read_current_journal
@@ -633,7 +704,7 @@ let reserve_journal config journal =
       ~row:(Active_journal journal)
 ;;
 
-let transition_journal config ~expected_stage journal =
+let transition_journal ?compare_and_swap config ~expected_stage journal =
   match
     read_current_journal
       ~invalid:(fun detail -> Journal_ownership_changed detail)
@@ -653,6 +724,7 @@ let transition_journal config ~expected_stage journal =
          "journal authority is not the expected transaction stage")
   | Ok (parent, snapshot, Some (Active_journal _)) ->
     publish_row
+      ?compare_and_swap
       ~conflict:(fun detail -> Journal_ownership_changed detail)
       ~parent
       ~snapshot
@@ -672,6 +744,14 @@ let save_journal config journal =
          "rollback claim stages are owned by startup recovery")
   | Cleared ->
     Error (Journal_write_failed "Cleared is not a publishable revival stage")
+;;
+
+let save_launch_journal config journal =
+  transition_journal
+    ~compare_and_swap:(Atomic.get launch_compare_and_swap_hook)
+    config
+    ~expected_stage:Durable_committed
+    journal
 ;;
 
 let clear_journal config ~expected_stage journal =
@@ -1362,15 +1442,42 @@ let revive_locked (ctx : _ context) ~original ~candidate =
                              let launch_journal =
                                { committed_journal with stage = Launch_committed }
                              in
-                             (match save_journal ctx.config launch_journal with
-                              | Error error ->
-                                fail_with_rollback
-                                  token
-                                  ctx.config
-                                  committed_journal
-                                  original_entry
-                                  (error_to_string error)
-                                  error
+                             let committed_with_attention cleanup_error =
+                               launch_committed := true;
+                               release_observed token committed.name;
+                               Error
+                                 (Post_commit_cleanup_required
+                                    { committed
+                                    ; entry
+                                    ; cleanup_error
+                                    })
+                             in
+                             (match save_launch_journal ctx.config launch_journal with
+                              | Error publication_error ->
+                                (match
+                                   observe_launch_publication
+                                     ctx.config
+                                     committed_journal
+                                 with
+                                 | Launch_publication_not_committed ->
+                                   fail_with_rollback
+                                     token
+                                     ctx.config
+                                     committed_journal
+                                     original_entry
+                                     (error_to_string publication_error)
+                                     publication_error
+                                 | Launch_publication_committed ->
+                                   committed_with_attention publication_error
+                                 | Launch_publication_attention attention ->
+                                   Log.Keeper.error
+                                     "keeper revival launch publication requires \
+                                      attention keeper=%s publication=%s \
+                                      observation=%s"
+                                     committed.name
+                                     (error_to_string publication_error)
+                                     (error_to_string attention);
+                                   committed_with_attention attention)
                               | Ok () ->
                                 launch_committed := true;
                                 let cleanup_result =

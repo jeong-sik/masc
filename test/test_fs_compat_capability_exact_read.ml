@@ -1014,6 +1014,38 @@ let test_static_surface_and_raw_openat () =
     call
 ;;
 
+(* The flags this stub needs only exist if the headers declare them, and on
+   Darwin O_NOFOLLOW / O_NOCTTY / O_CLOEXEC sit behind __DARWIN_C_LEVEL:
+   defining _POSIX_C_SOURCE alone lowers that level below their declarations and
+   the stub's own #error fires. That is a compile break, so no behavioural test
+   can reach it — and the symlink cases above cannot either, because on glibc
+   _GNU_SOURCE exposes everything and they pass whatever the macros say. CI is
+   Linux, so #25734 shipped a stub that no macOS checkout could compile and every
+   local test target linking fs_compat failed; #25745 fixed the stub but nothing
+   pinned the ordering it depends on. This asserts that ordering: the Darwin
+   level is raised, and it is raised before <fcntl.h>. *)
+let test_darwin_feature_level_precedes_fcntl () =
+  let stub = load_workspace_file "lib/fs_compat/capability_exact_read_stubs.c" in
+  let offset_of needle =
+    match find_substring stub needle with
+    | Some offset -> offset
+    | None -> failf "capability exact read stub does not contain %S" needle
+  in
+  let darwin_level = offset_of "_DARWIN_C_SOURCE" in
+  let fcntl_include = offset_of "#include <fcntl.h>" in
+  check
+    bool
+    "Darwin feature level is raised before <fcntl.h>"
+    true
+    (darwin_level < fcntl_include);
+  (* Raised under an __APPLE__ guard so other platforms keep their own level. *)
+  check
+    bool
+    "the Darwin level is guarded to Apple"
+    true
+    (offset_of "defined(__APPLE__)" < darwin_level)
+;;
+
 let () =
   run_helper_if_requested ();
   Eio_main.run @@ fun env ->
@@ -1060,6 +1092,8 @@ let () =
                ~process_mgr)
         ; test_case "static public surface and raw openat" `Quick
             test_static_surface_and_raw_openat
+        ; test_case "Darwin feature level precedes fcntl.h" `Quick
+            test_darwin_feature_level_precedes_fcntl
         ] )
     ]
 ;;

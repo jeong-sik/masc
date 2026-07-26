@@ -86,6 +86,8 @@ val recover_exact :
   target:identity ->
   unit ->
   (recover_exact witness, error) result
+(** Recover only the exact published forward transition from [source] to
+    [target]. This never authorizes an identity rewind. *)
 
 val recover_published_replace :
   base_path:string ->

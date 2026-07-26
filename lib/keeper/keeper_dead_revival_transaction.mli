@@ -18,7 +18,6 @@ type rollback_error =
   | Rollback_meta_payload_changed
   | Rollback_meta_write_failed of string
   | Rollback_registry_occupied of Keeper_registry.registry_entry
-  | Rollback_registry_invalid of Keeper_registry.registry_entry_validation_error
   | Rollback_registry_reservation_changed of Keeper_lifecycle_reservation.snapshot
   | Rollback_payload_delete_failed of Keeper_dead_revival_payload.error
   | Rollback_journal_clear_failed of string

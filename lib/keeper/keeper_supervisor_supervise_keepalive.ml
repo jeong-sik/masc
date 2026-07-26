@@ -122,7 +122,6 @@ let supervise_keepalive
         Log.Keeper.error "supervisor presence sync failed: %s" (Printexc.to_string exn);
         meta
     in
-    Keeper_registry.update_meta ~base_path meta.name live_meta;
     match launch_supervised_fiber ~proactive_warmup_sec ctx live_meta reg with
     | Error _ -> ()
     | Ok () ->

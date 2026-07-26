@@ -612,13 +612,7 @@ let recover_exact ~base_path ~keeper_id ~source ~target () =
              Option.equal equal_identity source row_source
              && equal_identity target row_target
            in
-           let reverse =
-             match source, row_source with
-             | Some current, Some original ->
-               equal_identity current row_target && equal_identity target original
-             | None, None | None, Some _ | Some _, None -> false
-           in
-           if forward || reverse
+           if forward
            then Ok { base_path; keeper_id; source; target }
            else Error Authority_identity_mismatch)
 ;;

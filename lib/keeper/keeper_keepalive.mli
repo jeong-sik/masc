@@ -94,6 +94,16 @@ type start_keepalive_outcome =
 
 val start_keepalive_outcome_to_string : start_keepalive_outcome -> string
 
+(** Launch while the caller continuously holds the matching durable lifecycle
+    admission scope. The permit is rejected after that scope exits. *)
+val start_keepalive_under_admission :
+  ?proactive_warmup_sec:int ->
+  ?lifecycle_token:Keeper_lifecycle_reservation.token ->
+  Keeper_lifecycle_admission.Durable_transaction.permit ->
+  'a context ->
+  keeper_meta ->
+  start_keepalive_outcome
+
 (** Launch one keeper lane and return the exact typed admission/launch
     outcome. Rejections remain logged and observable, but are never collapsed
     into [unit]; lifecycle transactions use the result to commit or roll back. *)

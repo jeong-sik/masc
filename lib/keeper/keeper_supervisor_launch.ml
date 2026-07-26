@@ -655,45 +655,6 @@ let launch_supervised_fiber_admitted
     launch_supervised_fiber_body ~proactive_warmup_sec ctx meta reg
 ;;
 
-type supervised_launch_error =
-  | Supervised_transition_rejected of Keeper_state_machine.transition_error
-  | Supervised_transaction_admission_denied of
-      Keeper_lifecycle_admission.Durable_transaction.blocked_reason
-
-let launch_supervised_fiber ~proactive_warmup_sec ctx meta reg =
-  match
-    Keeper_lifecycle_admission.Durable_transaction
-    .with_durable_start_admission
-      ctx.config
-      ~keeper_name:meta.name
-      (fun _permit ->
-         launch_supervised_fiber_admitted
-           ~proactive_warmup_sec
-           ctx
-           meta
-           reg)
-  with
-  | Keeper_lifecycle_admission.Durable_transaction.Admission_completed
-      (Ok ())
-  | Keeper_lifecycle_admission.Durable_transaction
-    .Admission_completed_with_attention (Ok (), _) ->
-    Ok ()
-  | Keeper_lifecycle_admission.Durable_transaction.Admission_completed
-      (Error error)
-  | Keeper_lifecycle_admission.Durable_transaction
-    .Admission_completed_with_attention (Error error, _) ->
-    Error (Supervised_transition_rejected error)
-  | Keeper_lifecycle_admission.Durable_transaction.Admission_blocked
-      reason ->
-    Log.Keeper.error
-      "supervisor lane start denied by durable lifecycle authority keeper=%s \
-       reason=%s"
-      meta.name
-      (Keeper_lifecycle_admission.Durable_transaction.blocked_reason_to_wire
-         reason);
-    Error (Supervised_transaction_admission_denied reason)
-;;
-
 (* #10993: persona drift visibility.
 
    [Keeper_identity.normalize_all_names ~check_persona:true] runs on
@@ -726,12 +687,37 @@ let persona_profile_path_for_drift_check =
 let log_persona_drift_if_missing = Startup_helpers.log_persona_drift_if_missing
 
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context) (meta : keeper_meta) =
-  Keeper_supervisor_supervise_keepalive.supervise_keepalive
-    ~publish_lifecycle
-    ~launch_supervised_fiber
-    ~proactive_warmup_sec
-    ctx
-    meta
+  match
+    Keeper_lifecycle_admission.Durable_transaction
+    .with_durable_lifecycle_admission
+      ctx.config
+      ~keeper_name:meta.name
+      (fun _permit ->
+         Keeper_supervisor_supervise_keepalive.supervise_keepalive
+           ~publish_lifecycle
+           ~launch_supervised_fiber:launch_supervised_fiber_admitted
+           ~proactive_warmup_sec
+           ctx
+           meta)
+  with
+  | Keeper_lifecycle_admission.Durable_transaction.Admission_completed () ->
+    ()
+  | Keeper_lifecycle_admission.Durable_transaction
+    .Admission_completed_with_attention ((), failure) ->
+    Log.Keeper.error
+      "supervisor lifecycle admission release requires attention keeper=%s \
+       failure=%s"
+      meta.name
+      (Keeper_lifecycle_admission.Durable_transaction
+       .authority_failure_to_wire
+         failure)
+  | Keeper_lifecycle_admission.Durable_transaction.Admission_blocked reason ->
+    Log.Keeper.error
+      "supervisor launch denied before mutation by durable lifecycle authority \
+       keeper=%s reason=%s"
+      meta.name
+      (Keeper_lifecycle_admission.Durable_transaction.blocked_reason_to_wire
+         reason)
 ;;
 
 (* ── Sweep and recover ───────────────────────────────────── *)

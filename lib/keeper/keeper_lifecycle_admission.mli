@@ -106,7 +106,7 @@ module Durable_transaction : sig
 
   val permit_matches : permit -> string -> bool
 
-  val with_durable_start_admission :
+  val with_durable_lifecycle_admission :
     Workspace.config ->
     keeper_name:string ->
     (permit -> 'a) ->
@@ -114,11 +114,12 @@ module Durable_transaction : sig
   (** The point read and callback execute under the same per-Keeper durable
       authority lock used by revival and recovery. *)
 
-  val admit_revival_launch_under_lock :
+  val with_revival_launch_admission_under_lock :
     Workspace.config ->
     keeper_name:string ->
     owner_id:string ->
-    (permit, blocked_reason) result
+    (permit -> 'a) ->
+    ('a, blocked_reason) result
   (** Admit only the exact active [Durable_committed] row owned by the supplied
       lifecycle reservation. The caller already holds the durable authority
       lock continuously through launch. *)

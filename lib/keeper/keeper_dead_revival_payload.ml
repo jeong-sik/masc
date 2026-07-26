@@ -842,7 +842,7 @@ let create config prepared =
                  ; initial_failure
                  ; reconciliation_failure =
                      Reconciliation_read_injected detail
-                 })))
+                 }))))
 ;;
 
 let validate_reference reference =

@@ -64,62 +64,65 @@ let with_keeper_entry_by_identity ~identity ~on_missing f =
 
 let persist_directive_meta_update
       (entry : Keeper_registry.registry_entry)
-      ~(updated_meta : keeper_meta)
-  : (unit, string) result
+      ~(update : keeper_meta -> keeper_meta)
+  : (keeper_meta, string) result
   =
-  let keeper_filename =
-    Keeper_runtime_root_entry.keeper_basename
-      ~keeper_name:entry.name
-      Keeper_runtime_root_entry.Metadata
-  in
-  let masc_root = Workspace_utils.masc_dir_from_base_path ~base_path:entry.base_path in
-  let default_path =
-    Filename.concat (Filename.concat masc_root "keepers") keeper_filename
-  in
-  let persisted_path =
-    if Fs_compat.file_exists default_path
-    then default_path
-    else (
-      let clusters_dir = Filename.concat masc_root "clusters" in
-      let cluster_paths =
-        match Safe_ops.list_dir_safe clusters_dir with
-        | Ok names ->
-          names
-          |> List.map (fun cluster_name ->
-            Filename.concat
-              (Filename.concat (Filename.concat clusters_dir cluster_name) "keepers")
-              keeper_filename)
-          |> List.filter Fs_compat.file_exists
-        | Error _ -> []
-      in
-      match cluster_paths with
-      | [] -> default_path
-      | [ path ] -> path
-      | paths ->
-        let by_mtime_desc a b =
-          let a_mtime = Option.value ~default:0.0 (Fs_compat.file_mtime a) in
-          let b_mtime = Option.value ~default:0.0 (Fs_compat.file_mtime b) in
-          Float.compare b_mtime a_mtime
+  let config = Workspace.default_config entry.base_path in
+  let persist permit =
+    if
+      not
+        (Keeper_lifecycle_admission.Durable_transaction.permit_matches
+           permit
+           entry.name)
+    then Error "directive metadata admission scope is invalid"
+    else
+      match
+        Keeper_meta_store.update_meta_if_identity
+          config
+          ~name:entry.name
+          ~trace_id:entry.meta.runtime.trace_id
+          ~generation:entry.meta.runtime.nonce
+          update
+      with
+      | Error error ->
+        Error (Keeper_meta_store.identity_update_error_to_string error)
+      | Ok persisted ->
+        let installed =
+          Keeper_registry.update_entry_exact entry (fun current ->
+            { current with meta = persisted })
+          |> Keeper_registry.exact_update_succeeded
+               entry
+               ~site:"directive_meta_update"
         in
-        (match List.sort by_mtime_desc paths with
-         | latest_path :: _ -> latest_path
-         | [] -> default_path))
+        if installed
+        then Ok persisted
+        else Error "directive metadata registry identity changed"
   in
-  match Keeper_fs.save_json_atomic persisted_path (Keeper_meta_json.meta_to_json updated_meta) with
-  | Ok () ->
-    Keeper_registry.update_meta ~base_path:entry.base_path entry.name updated_meta;
-    Ok ()
-  | Error msg ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string WriteMetaFailures)
-      ~labels:[ "keeper", entry.name; "site", "directive_persist" ]
-      ();
-    Log.Keeper.emit
-      Log.Warn
-      ~category:Log.Heartbeat
-      ~details:(`Assoc [ "keeper", `String entry.name; "error", `String msg ])
-      (Printf.sprintf "directive meta persist failed for %s: %s" entry.name msg);
-    Error msg
+  match
+    Keeper_lifecycle_admission.Durable_transaction
+    .with_durable_lifecycle_admission
+      config
+      ~keeper_name:entry.name
+      persist
+  with
+  | Keeper_lifecycle_admission.Durable_transaction.Admission_completed result ->
+    result
+  | Keeper_lifecycle_admission.Durable_transaction
+    .Admission_completed_with_attention (result, failure) ->
+    (match result with
+     | Error _ -> result
+     | Ok _ ->
+       Error
+         ("directive metadata admission release failed: "
+          ^ Keeper_lifecycle_admission.Durable_transaction
+            .authority_failure_to_wire
+              failure))
+  | Keeper_lifecycle_admission.Durable_transaction.Admission_blocked reason ->
+    Error
+      ("directive metadata blocked by lifecycle authority: "
+       ^ Keeper_lifecycle_admission.Durable_transaction
+         .blocked_reason_to_wire
+           reason)
 ;;
 
 let directive_paused_meta (meta : keeper_meta) paused =
@@ -294,8 +297,11 @@ let set_keeper_paused_state ~agent_name paused =
             entry.name)
        else (
          let previous_failure_reason = entry.last_failure_reason in
-         let updated_meta = directive_paused_meta entry.meta paused in
-         match persist_directive_meta_update entry ~updated_meta with
+         match
+           persist_directive_meta_update
+             entry
+             ~update:(fun latest -> directive_paused_meta latest paused)
+         with
          | Error err ->
            Keeper_registry.set_failure_reason
              ~base_path:entry.base_path
@@ -311,7 +317,7 @@ let set_keeper_paused_state ~agent_name paused =
              (if paused then "pause" else "resume")
              entry.name
              err
-         | Ok () ->
+         | Ok _ ->
            Keeper_registry.dispatch_event_unit
              ~base_path:entry.base_path
              entry.name
@@ -351,10 +357,12 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
       log_directive_agent_not_in_registry ~agent_name ~action:"claim")
     (fun entry ->
        let task_id_string = Keeper_id.Task_id.to_string task_id in
-       let updated_meta =
-         { entry.meta with current_task_id = Some task_id; updated_at = now_iso () }
-       in
-       match persist_directive_meta_update entry ~updated_meta with
+       match
+         persist_directive_meta_update
+           entry
+           ~update:(fun latest ->
+             { latest with current_task_id = Some task_id; updated_at = now_iso () })
+       with
        | Error err ->
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string DirectiveFailures)
@@ -365,13 +373,13 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
            entry.name
            task_id_string
            err
-       | Ok () ->
+       | Ok persisted ->
          (* Cycle 44: KeeperTaskAcquisition.tla SubmitTask post-action
             guard pins that the directive successfully attached the
             [task_id] to the keeper's meta. The [@@fsm_guard] PPX
             routes the assertion through [wrap_unit ~stage:"guard"]
             automatically. *)
-         post_submit_task ~meta:updated_meta ~task_id;
+         post_submit_task ~meta:persisted ~task_id;
          wakeup_keeper ~base_path:entry.base_path entry.name)
 ;;
 
@@ -1192,19 +1200,39 @@ type joined_stop_result =
   | Keeper_not_registered
   | Keeper_joined of joined_stop
 
+let start_keepalive_under_admission
+      ?(proactive_warmup_sec = 0)
+      ?lifecycle_token
+      permit
+      (ctx : _ context)
+      (meta : keeper_meta)
+  =
+  if
+    Keeper_lifecycle_admission.Durable_transaction.permit_matches
+      permit
+      meta.name
+  then
+    start_keepalive_admitted
+      ~proactive_warmup_sec
+      ?lifecycle_token
+      ctx
+      meta
+  else
+    Keepalive_transaction_admission_denied
+      (Keeper_lifecycle_admission.Durable_transaction.Authority_invalid
+         { keeper_name = meta.name
+         ; failure =
+             Keeper_lifecycle_admission.Durable_transaction
+             .Invalid_current_schema
+         })
+;;
+
 let start_keepalive
       ?(proactive_warmup_sec = 0)
       ?lifecycle_token
       (ctx : _ context)
       (meta : keeper_meta)
   =
-  let start () =
-    start_keepalive_admitted
-      ~proactive_warmup_sec
-      ?lifecycle_token
-      ctx
-      meta
-  in
   let denied reason =
     Log.Keeper.error
       "start_keepalive denied by durable lifecycle authority keeper=%s reason=%s"
@@ -1218,33 +1246,32 @@ let start_keepalive
   | Some token ->
     (match
        Keeper_lifecycle_admission.Durable_transaction
-       .admit_revival_launch_under_lock
+       .with_revival_launch_admission_under_lock
          ctx.config
          ~keeper_name:meta.name
          ~owner_id:(Keeper_lifecycle_reservation.owner_id token)
+         (fun permit ->
+            start_keepalive_under_admission
+              ~proactive_warmup_sec
+              ~lifecycle_token:token
+              permit
+              ctx
+              meta)
      with
-     | Ok permit
-       when
-         Keeper_lifecycle_admission.Durable_transaction.permit_matches
-           permit
-           meta.name ->
-       start ()
-     | Ok _ ->
-       denied
-         (Keeper_lifecycle_admission.Durable_transaction.Authority_invalid
-            { keeper_name = meta.name
-            ; failure =
-                Keeper_lifecycle_admission.Durable_transaction
-                .Invalid_current_schema
-            })
+     | Ok outcome -> outcome
      | Error reason -> denied reason)
   | None ->
     (match
        Keeper_lifecycle_admission.Durable_transaction
-       .with_durable_start_admission
+       .with_durable_lifecycle_admission
          ctx.config
          ~keeper_name:meta.name
-         (fun _permit -> start ())
+         (fun permit ->
+            start_keepalive_under_admission
+              ~proactive_warmup_sec
+              permit
+              ctx
+              meta)
      with
      | Keeper_lifecycle_admission.Durable_transaction.Admission_completed
          outcome ->

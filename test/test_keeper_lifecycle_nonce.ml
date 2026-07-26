@@ -115,6 +115,18 @@ let test_recover_exact_does_not_allocate () =
     |> require_ok
   in
   check int64 "exact recovery retains nonce" 2L (target_nonce recovered);
+  (match
+     Nonce.recover_exact
+       ~base_path
+       ~keeper_id:"keeper-a"
+       ~source:(Some target)
+       ~target:source
+       ()
+   with
+   | Error Nonce.Authority_identity_mismatch -> ()
+   | Error error ->
+     failf "unexpected reverse recovery error: %s" (Nonce.error_to_string error)
+   | Ok _ -> fail "reverse identity recovery was authorized");
   let next =
     Nonce.replace
       ~base_path

@@ -111,6 +111,7 @@ module Durable_transaction = struct
   type permit =
     { keeper_name : string
     ; evidence : evidence option
+    ; scope_id : int
     }
 
   type decision =
@@ -131,6 +132,15 @@ module Durable_transaction = struct
     | Admission_completed of 'a
     | Admission_completed_with_attention of 'a * authority_failure
     | Admission_blocked of blocked_reason
+
+  let active_permit_scope_key : int Eio.Fiber.key = Eio.Fiber.create_key ()
+  let next_permit_scope = Atomic.make 0
+
+  let with_active_permit ~keeper_name ~evidence fn =
+    let scope_id = Atomic.fetch_and_add next_permit_scope 1 in
+    let permit = { keeper_name; evidence; scope_id } in
+    Eio.Fiber.with_binding active_permit_scope_key scope_id (fun () -> fn permit)
+  ;;
 
   let journal_schema = "masc.keeper-dead-revival-journal.v3"
   let head_entropy_bytes = 32 * 33
@@ -461,9 +471,13 @@ module Durable_transaction = struct
 
   let permit_matches permit keeper_name =
     String.equal permit.keeper_name keeper_name
+    &&
+    match Eio.Fiber.get active_permit_scope_key with
+    | Some active_scope -> Int.equal active_scope permit.scope_id
+    | None -> false
   ;;
 
-  let with_durable_start_admission config ~keeper_name fn =
+  let with_durable_lifecycle_admission config ~keeper_name fn =
     match authority_lock_path config keeper_name with
     | Error failure ->
       Admission_blocked
@@ -476,7 +490,7 @@ module Durable_transaction = struct
               match read_locked config keeper_name with
               | Blocked reason -> Error reason
               | Admitted evidence ->
-                Ok (fn { keeper_name; evidence }))
+                Ok (with_active_permit ~keeper_name ~evidence fn))
        with
        | File_lock_eio.Lock_not_acquired _ ->
          Admission_blocked
@@ -499,7 +513,12 @@ module Durable_transaction = struct
            (value, Durable_lock_release_failed))
   ;;
 
-  let admit_revival_launch_under_lock config ~keeper_name ~owner_id =
+  let with_revival_launch_admission_under_lock
+        config
+        ~keeper_name
+        ~owner_id
+        fn
+    =
     match read_locked config keeper_name with
     | Blocked
         (Rollback_capable_authority
@@ -529,7 +548,11 @@ module Durable_transaction = struct
                 | Ok { owner_id = Some observed; evidence = current }
                   when String.equal observed owner_id
                        && current.stage = Durable_committed ->
-                  Ok { keeper_name; evidence = Some current }
+                  Ok
+                    (with_active_permit
+                       ~keeper_name
+                       ~evidence:(Some current)
+                       fn)
                 | Ok _ | Error () ->
                   Error
                     (Revival_transaction_mismatch
@@ -554,7 +577,7 @@ module Durable_transaction = struct
   let inspect config ~keeper_name =
     let projection decision = { keeper_name; decision } in
     match
-      with_durable_start_admission
+      with_durable_lifecycle_admission
         config
         ~keeper_name
         (fun permit -> permit.evidence)

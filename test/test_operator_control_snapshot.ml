@@ -954,19 +954,12 @@ let test_dead_revival_launch_failure_rolls_back_both_authorities () =
         rolled_back.paused;
       Alcotest.(check bool) "rollback restores Dead tombstone" true
         (rolled_back.latched_reason = Some Keeper_latched_reason.Dead_tombstone);
-      Alcotest.(check int) "rollback restores original generation"
-        original.runtime.nonce rolled_back.runtime.nonce;
-      let restored_entry =
-        match Keeper_registry.get ~base_path:base_dir keeper_name with
-        | Some entry -> entry
-        | None -> Alcotest.fail "rollback did not restore Dead registry entry"
-      in
-      Alcotest.(check bool) "rollback restores exact Dead lane" true
-        (Keeper_lane.Id.equal
-           (Keeper_lane.id restored_entry.lane)
-           (Keeper_lane.id dead_entry.lane));
-      Alcotest.(check bool) "rollback registry phase is Dead" true
-        (restored_entry.phase = Keeper_state_machine.Dead);
+      Alcotest.(check bool) "rollback preserves forward generation" true
+        (rolled_back.runtime.nonce > original.runtime.nonce);
+      Alcotest.(check bool)
+        "rollback does not restore stale Dead registry identity"
+        true
+        (Option.is_none (Keeper_registry.get ~base_path:base_dir keeper_name));
       (match
          Keeper_dead_revival_transaction.For_testing.current_journal_stage
            ~config
@@ -1511,29 +1504,30 @@ let test_dead_revival_durable_publication_warning_clears_actual_stage () =
       Alcotest.fail "durable publish-then-warning rollback removed metadata"
     | Error error -> Alcotest.fail error
   in
-  let persisted =
-    { persisted with meta_version = original.meta_version }
+  let persisted_content =
+    { persisted with
+      meta_version = original.meta_version
+    ; runtime =
+        { persisted.runtime with
+          trace_id = original.runtime.trace_id
+        ; trace_history = original.runtime.trace_history
+        ; nonce = original.runtime.nonce
+        }
+    }
   in
   Alcotest.(check string)
-    "durable publish-then-warning restores original metadata"
+    "durable publish-then-warning restores original content"
     (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json original))
-    (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json persisted));
-  let current_entry =
-    match Keeper_registry.get ~base_path:config.base_path keeper_name with
-    | Some entry -> entry
-    | None ->
-      Alcotest.fail "durable publish-then-warning rollback lost registry lane"
-  in
+    (Yojson.Safe.to_string (Keeper_meta_json.meta_to_json persisted_content));
   Alcotest.(check bool)
-    "durable publish-then-warning restores the dead lane"
+    "durable publish-then-warning preserves forward generation"
     true
-    (Keeper_lane.Id.equal
-       (Keeper_lane.id dead_entry.lane)
-       (Keeper_lane.id current_entry.lane));
+    (persisted.runtime.nonce > original.runtime.nonce);
   Alcotest.(check bool)
-    "durable publish-then-warning restores the Dead phase"
+    "durable publish-then-warning does not restore stale Dead registry identity"
     true
-    (current_entry.phase = Keeper_state_machine.Dead);
+    (Option.is_none
+       (Keeper_registry.get ~base_path:config.base_path keeper_name));
   (match
      Keeper_dead_revival_transaction.For_testing.current_journal_stage
        ~config
@@ -2506,7 +2500,7 @@ let replace_durable_admission_row ~config ~keeper_name row =
 
 let expect_durable_start_admitted ~config ~keeper_name label =
   match
-    Durable_admission.with_durable_start_admission
+    Durable_admission.with_durable_lifecycle_admission
       config
       ~keeper_name
       (fun _permit -> ())
@@ -2522,7 +2516,7 @@ let expect_durable_start_admitted ~config ~keeper_name label =
 
 let expect_durable_start_blocked ~config ~keeper_name label =
   match
-    Durable_admission.with_durable_start_admission
+    Durable_admission.with_durable_lifecycle_admission
       config
       ~keeper_name
       (fun _permit -> ())
@@ -2624,7 +2618,7 @@ let test_keeper_lifecycle_transaction_admission_current_schema () =
     ~keeper_name
     {|{"schema":"invalid-current-row"}|};
   (match
-     Durable_admission.with_durable_start_admission
+     Durable_admission.with_durable_lifecycle_admission
        config
        ~keeper_name
        (fun _permit -> ())
@@ -2702,7 +2696,7 @@ let test_keeper_lifecycle_transaction_admission_waits_for_cleanup () =
     Eio.Promise.resolve admission_started_u ();
     Eio.Promise.resolve
       admission_done_u
-      (Durable_admission.with_durable_start_admission
+      (Durable_admission.with_durable_lifecycle_admission
          config
          ~keeper_name
          (fun _permit -> ())));

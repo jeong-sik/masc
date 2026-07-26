@@ -35,7 +35,9 @@ let test_meta_store_is_witness_boundary () =
   check_contains source
     "Keeper_lifecycle_nonce.replace Keeper_lifecycle_nonce.witness";
   check_contains source
-    "Keeper_lifecycle_nonce.recover_exact Keeper_lifecycle_nonce.witness"
+    "Keeper_lifecycle_nonce.recover_exact Keeper_lifecycle_nonce.witness";
+  check_contains source
+    "authorize_identity_write\n                    config\n                    Ordinary\n                    (Some latest)\n                    caller"
 ;;
 
 let test_generation_is_required_and_positive () =
@@ -64,6 +66,13 @@ let test_ambiguous_reserved_clears_exact_evidence () =
     "keeper revival retains payload after ambiguous Reserved publication"
 ;;
 
+let test_directives_use_current_meta_single_surface () =
+  let source = read_file "lib/keeper/keeper_keepalive.ml" in
+  check_contains source "Keeper_meta_store.update_meta_if_identity";
+  check_contains source "with_durable_lifecycle_admission";
+  check_not_contains source "Keeper_fs.save_json_atomic persisted_path"
+;;
+
 let () =
   Alcotest.run
     "keeper lifecycle identity source"
@@ -84,6 +93,10 @@ let () =
             "reserved ambiguity cleanup"
             `Quick
             test_ambiguous_reserved_clears_exact_evidence
+        ; Alcotest.test_case
+            "directives use current meta single surface"
+            `Quick
+            test_directives_use_current_meta_single_surface
         ] )
     ]
 ;;

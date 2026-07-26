@@ -191,7 +191,6 @@ type rollback_error =
   | Rollback_meta_payload_changed
   | Rollback_meta_write_failed of string
   | Rollback_registry_occupied of Keeper_registry.registry_entry
-  | Rollback_registry_invalid of Keeper_registry.registry_entry_validation_error
   | Rollback_registry_reservation_changed of Keeper_lifecycle_reservation.snapshot
   | Rollback_payload_delete_failed of Payload.error
   | Rollback_journal_clear_failed of string
@@ -1315,9 +1314,6 @@ let rollback_error_to_string = function
       "registry rollback preserved occupied lane phase=%s lane=%s"
       (Keeper_state_machine.phase_to_string entry.phase)
       (Keeper_lane.Id.to_string (Keeper_lane.id entry.lane))
-  | Rollback_registry_invalid error ->
-    "registry rollback rejected original entry: "
-    ^ Keeper_registry.registry_entry_validation_error_to_string error
   | Rollback_registry_reservation_changed owner ->
     "registry rollback lost reservation ownership: "
     ^ Keeper_lifecycle_reservation.snapshot_to_string owner
@@ -1431,29 +1427,6 @@ let clear_candidate_registry token config journal candidate =
   | Some _ -> []
 ;;
 
-let restore_registry
-      token
-      (original_entry : Keeper_registry.registry_entry option)
-  =
-  match original_entry with
-  | None -> []
-  | Some entry ->
-    (match Keeper_registry.get ~base_path:entry.base_path entry.name with
-     | Some occupied
-       when Keeper_lane.Id.equal
-              (Keeper_lane.id occupied.lane)
-              (Keeper_lane.id entry.lane) -> []
-     | Some occupied -> [ Rollback_registry_occupied occupied ]
-     | None ->
-       (match Keeper_registry.restore_entry_if_absent_for_lifecycle token entry with
-        | Keeper_registry.Entry_restored -> []
-        | Keeper_registry.Entry_restore_occupied occupied ->
-          [ Rollback_registry_occupied occupied ]
-        | Keeper_registry.Entry_restore_invalid error -> [ Rollback_registry_invalid error ]
-        | Keeper_registry.Entry_restore_lifecycle_reserved owner ->
-          [ Rollback_registry_reservation_changed owner ]))
-;;
-
 let transition_cleanup_pending
       config
       ~expected_stage
@@ -1511,22 +1484,35 @@ let rollback_cleanup_stage = function
          "rollback cleanup has no rollback-capable origin")
 ;;
 
-let rollback token config journal payload original_entry =
+let rollback token config (journal : journal) payload _original_entry =
   let original = Payload.payload_original payload in
   let candidate = Payload.payload_candidate payload in
   let meta_errors =
     match Keeper_meta_store.read_meta config journal.keeper_name with
     | Error detail -> [ Rollback_meta_write_failed detail ]
     | Ok None -> [ Rollback_meta_missing ]
-    | Ok (Some current)
-      when same_persisted_payload current original -> []
-    | Ok (Some current) when not (same_identity current candidate) ->
-      [ Rollback_meta_identity_changed ]
-    | Ok (Some current)
-      when not (same_persisted_payload current candidate) ->
-      [ Rollback_meta_payload_changed ]
     | Ok (Some current) ->
-      let restored = { original with meta_version = current.meta_version } in
+      let restored =
+        { original with
+          meta_version = current.meta_version
+        ; runtime =
+            { original.runtime with
+              trace_id = candidate.runtime.trace_id
+            ; trace_history = candidate.runtime.trace_history
+            ; nonce = candidate.runtime.nonce
+            }
+        }
+      in
+      if same_persisted_payload current restored
+      then []
+      else if
+        (not (same_persisted_payload current original))
+        && not (same_persisted_payload current candidate)
+      then
+        if same_identity current candidate
+        then [ Rollback_meta_payload_changed ]
+        else [ Rollback_meta_identity_changed ]
+      else
       let nonce_error result =
         Result.map_error Keeper_lifecycle_nonce.error_to_string result
       in
@@ -1534,15 +1520,15 @@ let rollback token config journal payload original_entry =
         Result.bind
           (nonce_error
              (Keeper_lifecycle_nonce.identity
-                ~owner_id:(Keeper_id.Trace_id.to_string current.runtime.trace_id)
-                ~nonce:(Int64.of_int current.runtime.nonce)))
+                ~owner_id:(Keeper_id.Trace_id.to_string original.runtime.trace_id)
+                ~nonce:(Int64.of_int original.runtime.nonce)))
           (fun source ->
             Result.bind
               (nonce_error
                  (Keeper_lifecycle_nonce.identity
                     ~owner_id:
-                      (Keeper_id.Trace_id.to_string restored.runtime.trace_id)
-                    ~nonce:(Int64.of_int restored.runtime.nonce)))
+                      (Keeper_id.Trace_id.to_string candidate.runtime.trace_id)
+                    ~nonce:(Int64.of_int candidate.runtime.nonce)))
               (fun target ->
                 Result.bind
                   (nonce_error
@@ -1553,8 +1539,18 @@ let rollback token config journal payload original_entry =
                         ~target
                         ()))
                   (fun witness ->
-                    Keeper_meta_store.recover_meta_exact
-                      ~lifecycle_token:token witness config restored)))
+                    if same_persisted_payload current original
+                    then
+                      Keeper_meta_store.recover_meta_exact
+                        ~lifecycle_token:token
+                        witness
+                        config
+                        restored
+                    else
+                      Keeper_meta_store.write_meta_for_lifecycle
+                        token
+                        config
+                        restored)))
       in
       (match restored_result with
        | Ok () -> []
@@ -1562,7 +1558,6 @@ let rollback token config journal payload original_entry =
   in
   let registry_errors =
     clear_candidate_registry token config journal candidate
-    @ restore_registry token original_entry
   in
   let errors = meta_errors @ registry_errors in
   if errors <> []

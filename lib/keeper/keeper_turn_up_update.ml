@@ -237,7 +237,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
         p.name err;
       tool_result_error err
   | Ok () ->
-         let runtime_assignment_result =
+         let runtime_assignment () =
            match p.runtime_id_opt with
            | None -> Ok ()
            | Some runtime_id ->
@@ -246,8 +246,9 @@ let update_keeper ?(preserve_prompt_defaults = false)
                ~runtime_id
                ()
          in
-         (match runtime_assignment_result with
-          | Error err ->
+         let with_runtime_assignment fn =
+           match runtime_assignment () with
+           | Error err ->
             Otel_metric_store.inc_counter
               Keeper_metrics.(to_string TurnUpUpdateFailures)
               ~labels:
@@ -262,47 +263,55 @@ let update_keeper ?(preserve_prompt_defaults = false)
               p.name
               err;
             tool_result_error err
-          | Ok () ->
-            let enqueue_goal_assignment_wakes (meta : keeper_meta) =
-              let (_ : string list) =
-                Keeper_goal_assignment_wake.enqueue_goal_assigned_wakes
-                  ~config:ctx.config
-                  ~keeper_name:meta.name
-                  ~assigned_by:"keeper_up"
-                  ~old_ids:old.active_goal_ids
-                  ~new_ids:meta.active_goal_ids
-                  ()
-              in
-              ()
-            in
-            if dead_revival_requested
-            then
-              (match
-                 Keeper_dead_revival_transaction.revive
-                   ctx
-                   ~original:old
-                   ~candidate:updated
-               with
-               | Error
-                   (Keeper_dead_revival_transaction.Post_commit_cleanup_required
-                      { committed; entry; cleanup_error }) ->
-                 enqueue_goal_assignment_wakes committed;
-                 tool_result_ok_data
-                   (committed_with_cleanup_required_json
-                      ~committed
-                      ~entry
-                      ~cleanup_error)
-               | Error error ->
-                 Otel_metric_store.inc_counter
-                   Keeper_metrics.(to_string TurnUpUpdateFailures)
-                   ~labels:[ "keeper", updated.name; "site", "dead_revival_transaction" ]
-                   ();
-                 tool_result_error
-                   (Keeper_dead_revival_transaction.error_to_string error)
-               | Ok success ->
-                 enqueue_goal_assignment_wakes success.meta;
-                 tool_result_ok_data (Keeper_meta_json.meta_to_json success.meta))
-            else
+           | Ok () -> fn ()
+         in
+         let enqueue_goal_assignment_wakes (meta : keeper_meta) =
+           let (_ : string list) =
+             Keeper_goal_assignment_wake.enqueue_goal_assigned_wakes
+               ~config:ctx.config
+               ~keeper_name:meta.name
+               ~assigned_by:"keeper_up"
+               ~old_ids:old.active_goal_ids
+               ~new_ids:meta.active_goal_ids
+               ()
+           in
+           ()
+         in
+         if dead_revival_requested
+         then
+           with_runtime_assignment (fun () ->
+             match
+               Keeper_dead_revival_transaction.revive
+                 ctx
+                 ~original:old
+                 ~candidate:updated
+             with
+             | Error
+                 (Keeper_dead_revival_transaction.Post_commit_cleanup_required
+                    { committed; entry; cleanup_error }) ->
+               enqueue_goal_assignment_wakes committed;
+               tool_result_ok_data
+                 (committed_with_cleanup_required_json
+                    ~committed
+                    ~entry
+                    ~cleanup_error)
+             | Error error ->
+               Otel_metric_store.inc_counter
+                 Keeper_metrics.(to_string TurnUpUpdateFailures)
+                 ~labels:
+                   [ "keeper", updated.name
+                   ; "site", "dead_revival_transaction"
+                   ]
+                 ();
+               tool_result_error
+                 (Keeper_dead_revival_transaction.error_to_string error)
+             | Ok success ->
+               enqueue_goal_assignment_wakes success.meta;
+               tool_result_ok_data
+                 (Keeper_meta_json.meta_to_json success.meta))
+         else
+           let run_update permit =
+             with_runtime_assignment (fun () ->
             (* CAS-merge instead of a force write: a dashboard/turn-up edit
                builds [updated] from a meta snapshot ([old]), so a concurrent
                keeper turn that bumped cumulative usage counters between the
@@ -354,7 +363,9 @@ let update_keeper ?(preserve_prompt_defaults = false)
                    ~base_path:ctx.config.base_path
                    updated.name
                in
-               let launch_outcome = start_keepalive ctx updated in
+               let launch_outcome =
+                 start_keepalive_under_admission permit ctx updated
+               in
                (match launch_outcome with
                 | Keepalive_started _ ->
                   tool_result_ok_data (Keeper_meta_json.meta_to_json updated)
@@ -380,4 +391,32 @@ let update_keeper ?(preserve_prompt_defaults = false)
                   tool_result_error
                     (Printf.sprintf
                        "keeper metadata was updated but lane restart failed: %s"
-                       (start_keepalive_outcome_to_string rejected)))))))
+                       (start_keepalive_outcome_to_string rejected))))))
+           in
+           (match
+              Keeper_lifecycle_admission.Durable_transaction
+              .with_durable_lifecycle_admission
+                ctx.config
+                ~keeper_name:updated.name
+                run_update
+            with
+            | Keeper_lifecycle_admission.Durable_transaction
+              .Admission_completed result ->
+              result
+            | Keeper_lifecycle_admission.Durable_transaction
+              .Admission_completed_with_attention (result, failure) ->
+              Log.Keeper.error
+                "keeper update lifecycle admission release requires attention \
+                 keeper=%s failure=%s"
+                updated.name
+                (Keeper_lifecycle_admission.Durable_transaction
+                 .authority_failure_to_wire
+                   failure);
+              result
+            | Keeper_lifecycle_admission.Durable_transaction.Admission_blocked
+                reason ->
+              tool_result_error
+                ("keeper update blocked by lifecycle authority: "
+                 ^ Keeper_lifecycle_admission.Durable_transaction
+                   .blocked_reason_to_wire
+                     reason))

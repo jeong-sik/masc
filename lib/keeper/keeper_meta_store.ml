@@ -748,10 +748,24 @@ let update_meta_if_identity
              then Error Identity_changed
              else
                let caller = update latest in
-               let persisted = { caller with meta_version = latest.meta_version + 1 } in
-               (match persist_meta config path persisted with
-                | Ok () -> Ok persisted
-                | Error detail -> Error (Identity_write_failed detail))))
+               (match
+                  authorize_identity_write
+                    config
+                    Ordinary
+                    (Some latest)
+                    caller
+                with
+                | Error _ -> Error Identity_changed
+                | Ok () ->
+                  (match Keeper_meta_contract.terminal_latch_pause_violation caller with
+                   | Some detail -> Error (Identity_write_failed detail)
+                   | None ->
+                     let persisted =
+                       { caller with meta_version = latest.meta_version + 1 }
+                     in
+                     (match persist_meta config path persisted with
+                      | Ok () -> Ok persisted
+                      | Error detail -> Error (Identity_write_failed detail)))))
 ;;
 
 type identity_remove_error =

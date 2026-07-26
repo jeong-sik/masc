@@ -418,7 +418,10 @@ end
 let create_server
       ~(port : int)
       ~(workspace_config : Workspace_utils_backend_setup.config)
-      ~(tool_dispatcher : string -> string -> (string, string) result)
+      ~(tool_dispatcher :
+         string ->
+         string ->
+         (string, Server_grpc_tool_dispatch.error) result)
       ~(lsp_dispatcher :
           language_id:string
           -> jsonrpc_request_json:string
@@ -481,7 +484,10 @@ let start
       ~(sw : Eio.Switch.t)
       ~(env : Eio_unix.Stdenv.base)
       ~(workspace_config : Workspace_utils_backend_setup.config)
-      ~(tool_dispatcher : string -> string -> (string, string) result)
+      ~(tool_dispatcher :
+         string ->
+         string ->
+         (string, Server_grpc_tool_dispatch.error) result)
   : unit
   =
   if not (is_enabled ())

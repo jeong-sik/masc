@@ -115,13 +115,27 @@ let test_grpc_tool_arguments_fail_closed_before_dispatch () =
     match
           Masc_test_deps.Server_grpc_tool_dispatch.dispatch ~dispatch arguments_json
     with
-    | Error message ->
+    | Error error ->
       Alcotest.(check string)
         (label ^ " typed error")
         "Invalid params: expected object"
-        message
+        (Masc_test_deps.Server_grpc_tool_dispatch.error_message error);
+      Alcotest.(check int)
+        (label ^ " invalid-params code")
+        (Mcp_error_code.to_wire_code Mcp_error_code.Invalid_params)
+        (Masc_test_deps.Server_grpc_tool_dispatch.error_code error
+         |> Mcp_error_code.to_wire_code)
     | Ok _ -> Alcotest.failf "%s arguments reached the dispatcher" label);
-  Alcotest.(check int) "dispatcher calls" 0 !dispatch_calls
+  Alcotest.(check int) "rejected dispatcher calls" 0 !dispatch_calls;
+  (match
+     Masc_test_deps.Server_grpc_tool_dispatch.dispatch ~dispatch ""
+   with
+   | Ok "{}" -> ()
+   | Ok result -> Alcotest.failf "unexpected omitted-arguments result: %s" result
+   | Error error ->
+     Alcotest.fail
+       (Masc_test_deps.Server_grpc_tool_dispatch.error_message error));
+  Alcotest.(check int) "omitted arguments dispatch once" 1 !dispatch_calls
 ;;
 
 let canonical_path path =

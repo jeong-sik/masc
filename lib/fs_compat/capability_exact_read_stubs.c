@@ -2,6 +2,17 @@
 #define _GNU_SOURCE
 #endif
 
+/* Darwin gates O_NOFOLLOW, O_NOCTTY and O_CLOEXEC behind __DARWIN_C_LEVEL, and
+   defining _POSIX_C_SOURCE alone lowers that level below the point where the
+   headers declare them. The guard further down then fires and the build stops
+   with "capability exact read requires ...". glibc never showed it because
+   _GNU_SOURCE exposes everything, so CI stayed green while every macOS checkout
+   could not compile this stub — and therefore could not build any test target
+   that links fs_compat. Raise the Darwin level explicitly, before <fcntl.h>. */
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+#define _DARWIN_C_SOURCE
+#endif
+
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #endif

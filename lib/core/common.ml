@@ -39,6 +39,19 @@ let protect ~module_name ~finally_label ~finally f =
 
 let masc_dirname = ".masc"
 
+(* The storage namespace is DERIVED from the row schema version rather than
+   tracked beside it as a second constant. #25197 was caused by exactly that
+   drift: the namespace string and the row schema were independent literals, so
+   one could advance without the other. Deriving removes the pair. *)
+let generation_namespaced_dir ~parent_dir ~schema_version =
+  if schema_version < 1
+  then
+    invalid_arg
+      (Printf.sprintf
+         "Common.generation_namespaced_dir: schema_version must be >= 1, got %d"
+         schema_version);
+  Filename.concat parent_dir (Printf.sprintf "v%d" schema_version)
+
 (* OUTPUT root segment for server-written keeper runtime state (meta json +
    metrics/memory/decisions/receipts sidecars). The SINGLE literal behind both
    keeper-dir SSOT functions; the input/output relocation (RFC) flips this one

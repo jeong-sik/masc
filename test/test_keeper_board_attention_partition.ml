@@ -1056,6 +1056,50 @@ let test_predispatch_rejection_chain_binds_oas_selected_third_slot () =
   | _ -> Alcotest.fail "third OAS-selected slot was not bindable"
 ;;
 
+(* #25287 5th instance: a v6 reader met a ledger of v5 rows at the same path and
+   raised Candidate_unavailable on every keeper cycle (2026-07-26, sangsu: 157
+   of 157 cycle exceptions). The ledger path must therefore carry the schema
+   version, so a bump relocates the store rather than rejecting the old rows
+   where they lie. *)
+let test_ledger_path_is_namespaced_by_schema_version () =
+  let path = P.For_testing.path ~base_path:"/tmp/base" ~keeper_name:"sangsu" in
+  let parent = Filename.dirname path in
+  Alcotest.(check string)
+    "the ledger sits directly under a version segment"
+    (Printf.sprintf "v%d" P.schema_version)
+    (Filename.basename parent);
+  Alcotest.(check string)
+    "and that segment sits under the store family directory"
+    "board_attention_partitions"
+    (Filename.basename (Filename.dirname parent))
+
+(* The reader must not merely reject retired rows — it must not reach them. A
+   v5 ledger left at the pre-namespace path is invisible, so load reports an
+   empty store rather than the fatal decode error that took the cycle down. *)
+let test_retired_namespace_is_never_read_in_place () =
+  with_temp_base "board-attention-partition-retired" @@ fun base_path ->
+  let active = P.For_testing.path ~base_path ~keeper_name:"sangsu" in
+  (* The pre-namespace layout: the ledger lived directly in the family dir. *)
+  let retired_dir = Filename.dirname (Filename.dirname active) in
+  let retired = Filename.concat retired_dir "sangsu.jsonl" in
+  Unix.mkdir (Filename.dirname retired_dir) 0o700;
+  Unix.mkdir retired_dir 0o700;
+  let oc = open_out retired in
+  output_string
+    oc
+    {|{"schema_version":5,"partition_id":"p1","keeper_name":"sangsu","context_key":"k","candidate_id":"c1","created_at":1.0,"state":"ready"}
+|};
+  close_out oc;
+  Alcotest.(check bool)
+    "the retired ledger is still on disk — retirement never deletes"
+    true
+    (Sys.file_exists retired);
+  Alcotest.(check (list string))
+    "and the active namespace reports an empty store, not a decode failure"
+    []
+    (ok "load over a retired namespace" (P.load ~base_path ~keeper_name:"sangsu")
+     |> List.map (fun (_ : P.t) -> "unexpected partition"))
+
 let () =
   Alcotest.run
     "keeper_board_attention_partition"
@@ -1112,6 +1156,14 @@ let () =
             "invalid or mismatched provenance never rewrites"
             `Quick
             test_invalid_or_mismatched_provenance_never_rewrites
+        ; Alcotest.test_case
+            "ledger path is namespaced by schema version"
+            `Quick
+            test_ledger_path_is_namespaced_by_schema_version
+        ; Alcotest.test_case
+            "a retired namespace is never read in place"
+            `Quick
+            test_retired_namespace_is_never_read_in_place
         ] )
     ]
 ;;

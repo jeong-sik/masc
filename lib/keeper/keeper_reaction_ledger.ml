@@ -33,9 +33,13 @@ module Event_id_set = Set.Make (String)
 
 (* The storage namespace and row schema advance together.  A generation hard
    cut never scans or writes an older namespace, so retired data cannot remain
-   on the exact-evidence hot path or become a second authority. *)
-let storage_generation = "v4"
-let schema = "keeper.reaction_ledger." ^ storage_generation
+   on the exact-evidence hot path or become a second authority.
+
+   Both are now derived from one integer rather than kept as a namespace string
+   beside a row schema string. #25197 was that drift: two independent literals,
+   one of which could advance alone. *)
+let schema_version = 4
+let schema = Printf.sprintf "keeper.reaction_ledger.v%d" schema_version
 
 let stimulus_kind_to_string = function
   | Board_signal -> "board_signal"
@@ -139,11 +143,12 @@ let urgency_to_string = function
 ;;
 
 let store_dir ~masc_root ~keeper_name =
-  Filename.concat
-    (Filename.concat
-       (Filename.concat (Filename.concat masc_root "keepers") keeper_name)
-       "reaction-ledger")
-    storage_generation
+  Common.generation_namespaced_dir
+    ~parent_dir:
+      (Filename.concat
+         (Filename.concat (Filename.concat masc_root "keepers") keeper_name)
+         "reaction-ledger")
+    ~schema_version
 ;;
 
 let store_for_base_path ~base_path ~keeper_name =

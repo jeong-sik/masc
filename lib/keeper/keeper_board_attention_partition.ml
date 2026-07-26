@@ -576,8 +576,17 @@ let of_yojson json =
     }
 ;;
 
+(* Namespaced by [schema_version] so a bump relocates the store instead of
+   making the new reader reject the old rows where they lie. The v5 rows this
+   reader used to reject in place stay under the parent directory; every one of
+   them was a terminal partition, so nothing in flight is left behind. *)
 let partition_dir base_path =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "board_attention_partitions"
+  Common.generation_namespaced_dir
+    ~parent_dir:
+      (Filename.concat
+         (Common.masc_dir_from_base_path ~base_path)
+         "board_attention_partitions")
+    ~schema_version
 ;;
 
 let path ~base_path ~keeper_name =

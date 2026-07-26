@@ -10,6 +10,14 @@
 module Candidate = Keeper_board_attention_candidate
 module Generation = Keeper_board_attention_partition_generation
 
+val schema_version : int
+(** Row schema this module reads and writes. The store's directory is derived
+    from it via {!Common.generation_namespaced_dir}, so bumping this constant
+    relocates the whole ledger and the new reader starts on an empty namespace
+    instead of rejecting the previous version's rows in place. Exposed so a
+    test can assert the path carries this version rather than restating the
+    integer. *)
+
 module Worker_epoch : sig
   type t
 

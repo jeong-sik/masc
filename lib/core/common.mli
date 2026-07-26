@@ -45,6 +45,33 @@ val masc_dir_from_base_path : base_path:string -> string
     [Filename.concat base_path masc_dirname]. Canonical way to spell
     [<base_path>/.masc]. *)
 
+val generation_namespaced_dir : parent_dir:string -> schema_version:int -> string
+(** [<parent_dir>/v<schema_version>]: the storage namespace a durable store must
+    use, derived from the row schema version it reads and writes.
+
+    A store that spells its directory this way cannot present bytes of one
+    schema version to a reader compiled for another: bumping [schema_version]
+    relocates the whole store, so the new reader starts on an empty namespace
+    instead of rejecting the old rows in place. That in-place rejection is the
+    repeated failure tracked by #25287 — five instances in 2026-07 (#25078,
+    #25197, #25231, #25135, and the board-attention partition v5/v6 hard cut
+    this function is introduced for), each of which took live state off the hot
+    path with no reader that could still decode it.
+
+    Retirement is NON-DESTRUCTIVE and this function performs no I/O: rows of a
+    retired version stay exactly where they were written, directly under
+    [parent_dir]. Nothing here deletes, moves, or rewrites them, and nothing
+    here reports them — a store whose retired namespace may hold rows an
+    operator still needs must provide its own drain or export path.
+
+    Raises [Invalid_argument] when [schema_version < 1]; version 0 is the
+    [Safe_ops.json_int ~default:0] miss value and must never name a namespace.
+
+    Adopting this in a store that already holds live rows at the flat path is
+    only safe when those rows are of the CURRENT version — they would otherwise
+    be relocated out from under a reader that can still decode them. Such a
+    store needs a relocation step first, not just this function. *)
+
 val keepers_runtime_dirname : string
 (** OUTPUT root segment for server-written keeper runtime state. Single literal
     behind both keeper-dir SSOT functions; the input/output relocation flips it. *)

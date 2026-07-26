@@ -2590,6 +2590,15 @@
  (deps
   (source_tree ../lib)
   (source_tree ../bin)))
+
+(test
+ (name test_fs_compat_capability_exact_read)
+ (modules test_fs_compat_capability_exact_read)
+ (libraries alcotest fs_compat fs_compat_test_support eio eio_main eio.unix unix)
+ (deps
+  ../lib/fs_compat/fs_compat.mli
+  ../lib/fs_compat/capability_exact_read_stubs.c))
+
 (include stanzas/test_keeper_turn_attempt_observer.inc)
 (include stanzas/test_keeper_gate_effect_coverage.inc)
 (include stanzas/test_keeper_hitl_resolution_prompt.inc)

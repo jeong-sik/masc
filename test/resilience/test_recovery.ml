@@ -91,26 +91,23 @@ let test_classify_transient_rate_limit () =
   | R.TransientError _ -> ()
   | _ -> assert false
 
-let test_classify_resource_token () =
-  match R.classify_string "token budget exhausted" with
-  | R.TransientError _ ->
-      (* "exhausted" is not in transient phrases; "token" would
-         match resource. But "budget" matches Cost first depending
-         on iteration order — accept either resource. *)
-      assert false
-  | R.ResourceExhausted { consumed; limit; detail; _ } ->
-      assert (consumed = None);
-      assert (limit = None);
-      assert (detail = Some "token budget exhausted")
-  | _ -> assert false
+let test_rendered_capacity_is_not_resource () =
+  [ "token capacity exhausted";
+    "context window exhausted";
+    "context length exceeded";
+  ]
+  |> List.iter (fun rendered ->
+    match R.classify_string rendered with
+    | R.PermanentError { fallback_strategy = R.HumanHandoff _; _ } -> ()
+    | _ -> assert false)
 
 let test_classify_resource_wins_over_transient_rate_limit () =
-  match R.classify_string "429 rate limit: token budget exhausted" with
+  match R.classify_string "429 rate limit: memory exhausted" with
   | R.ResourceExhausted { resource; consumed; limit; detail } ->
-      assert (resource = `Tokens);
+      assert (resource = `Memory);
       assert (consumed = None);
       assert (limit = None);
-      assert (detail = Some "429 rate limit: token budget exhausted")
+      assert (detail = Some "429 rate limit: memory exhausted")
   | _ -> assert false
 
 let test_classify_hard_quota_resource_exhausted () =
@@ -169,7 +166,7 @@ let test_strategy_for_resource_is_abort () =
   | _ -> assert false
 
 let test_strategy_for_unknown_resource_does_not_fake_zeroes () =
-  let mode = R.classify_string "token budget exhausted" in
+  let mode = R.classify_string "memory exhausted" in
   match R.default_strategy mode with
   | R.Abort { reason; _ } ->
       assert (contains reason "measurement=unknown");
@@ -352,7 +349,7 @@ let () =
   test_degradation_required_level ();
   test_classify_transient_timeout ();
   test_classify_transient_rate_limit ();
-  test_classify_resource_token ();
+  test_rendered_capacity_is_not_resource ();
   test_classify_resource_wins_over_transient_rate_limit ();
   test_classify_hard_quota_resource_exhausted ();
   test_classify_permanent_fallback ();

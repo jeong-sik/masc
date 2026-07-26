@@ -261,10 +261,7 @@ let transient_phrases =
   ]
 
 let resource_phrases =
-  [ ("token", `Tokens);
-    ("context window", `Tokens);
-    ("context length", `Tokens);
-    ("memory", `Memory);
+  [ ("memory", `Memory);
     ("disk", `Disk);
     ("quota", `Cost);
     ("credit", `Cost);

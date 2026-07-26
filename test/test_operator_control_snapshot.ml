@@ -1971,6 +1971,182 @@ let test_dead_revival_exact_orphan_payload_is_deleted () =
     (Sys.file_exists payload_path)
 ;;
 
+type cleanup_test_direction =
+  | Forward_cleanup
+  | Rollback_cleanup
+
+type cleanup_test_boundary =
+  | After_cleanup_pending
+  | After_cleanup_payload_delete
+
+let test_dead_revival_cleanup_pending_recovery
+      direction
+      boundary
+      ()
+  =
+  let keeper_name =
+    match direction, boundary with
+    | Forward_cleanup, After_cleanup_pending ->
+      "dead-revival-forward-after-cleanup-pending"
+    | Forward_cleanup, After_cleanup_payload_delete ->
+      "dead-revival-forward-after-payload-delete"
+    | Rollback_cleanup, After_cleanup_pending ->
+      "dead-revival-rollback-after-cleanup-pending"
+    | Rollback_cleanup, After_cleanup_payload_delete ->
+      "dead-revival-rollback-after-payload-delete"
+  in
+  with_settled_dead_revival_fixture ~keeper_name
+  @@ fun _base_dir config original _dead_entry _ctx ->
+  let candidate =
+    { original with
+      paused = false
+    ; latched_reason = None
+    ; runtime =
+        { original.runtime with
+          nonce = original.runtime.nonce + 1
+        ; last_blocker = None
+        }
+    }
+  in
+  (match
+     Keeper_dead_revival_transaction.For_testing.reserve_journal
+       ~config
+       ~owner_id:"cleanup-boundary-owner"
+       ~original
+       ~candidate
+   with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.fail
+       (Keeper_dead_revival_transaction.error_to_string error));
+  (match direction with
+   | Forward_cleanup ->
+     (match Keeper_meta_store.write_meta config candidate with
+      | Ok () -> ()
+      | Error detail -> Alcotest.fail detail);
+     (match
+        Keeper_dead_revival_transaction.For_testing.advance_to_launch_committed
+          ~config
+          ~keeper_name
+      with
+      | Ok () -> ()
+      | Error error ->
+        Alcotest.fail
+          (Keeper_dead_revival_transaction.error_to_string error))
+   | Rollback_cleanup -> ());
+  let active =
+    current_active_revival_journal ~config ~keeper_name
+  in
+  let payload_path = revival_payload_path config active.payload_ref in
+  let expected_direction =
+    match direction with
+    | Forward_cleanup -> `Forward
+    | Rollback_cleanup -> `Rollback
+  in
+  let failure_detail =
+    "injected cleanup boundary failure"
+  in
+  let after_cleanup_pending observed =
+    if
+      observed = expected_direction
+      && boundary = After_cleanup_pending
+    then Some failure_detail
+    else None
+  in
+  let after_payload_delete observed =
+    if
+      observed = expected_direction
+      && boundary = After_cleanup_payload_delete
+    then Some failure_detail
+    else None
+  in
+  let first_recovery =
+    Keeper_dead_revival_transaction.For_testing.with_cleanup_boundary_hooks
+      ~after_cleanup_pending
+      ~after_payload_delete
+      (fun () ->
+         Keeper_dead_revival_transaction.recover_pending config)
+  in
+  Alcotest.(check bool)
+    "injected cleanup boundary remains unresolved"
+    true
+    (first_recovery.unresolved <> []);
+  let expected_stage =
+    match direction with
+    | Forward_cleanup -> `Forward_cleanup_pending
+    | Rollback_cleanup -> `Rollback_cleanup_pending
+  in
+  (match
+     Keeper_dead_revival_transaction.For_testing.current_journal_stage
+       ~config
+       ~keeper_name
+   with
+   | Ok stage when stage = expected_stage -> ()
+   | Ok _ -> Alcotest.fail "cleanup boundary did not retain pending stage"
+   | Error error ->
+     Alcotest.fail
+       (Keeper_dead_revival_transaction.error_to_string error));
+  Alcotest.(check bool)
+    "cleanup boundary retains exact payload state"
+    (boundary = After_cleanup_pending)
+    (Sys.file_exists payload_path);
+  let recovery =
+    Keeper_dead_revival_transaction.recover_pending config
+  in
+  Alcotest.(check int)
+    "cleanup retry has no unresolved transaction"
+    0
+    (List.length recovery.unresolved);
+  (match direction with
+   | Forward_cleanup ->
+     Alcotest.(check int)
+       "forward cleanup retry never rolls back"
+       0
+       recovery.recovered;
+     Alcotest.(check int)
+       "forward cleanup retry clears journal"
+       1
+       recovery.cleared
+   | Rollback_cleanup ->
+     Alcotest.(check int)
+       "rollback cleanup retry completes recovery"
+       1
+       recovery.recovered;
+     Alcotest.(check int)
+       "rollback cleanup retry is not a forward clear"
+       0
+       recovery.cleared);
+  (match
+     Keeper_dead_revival_transaction.For_testing.current_journal_stage
+       ~config
+       ~keeper_name
+   with
+   | Ok `Cleared -> ()
+   | Ok _ -> Alcotest.fail "cleanup retry did not clear journal"
+   | Error error ->
+     Alcotest.fail
+       (Keeper_dead_revival_transaction.error_to_string error));
+  Alcotest.(check bool)
+    "cleanup retry leaves payload absent"
+    false
+    (Sys.file_exists payload_path);
+  let persisted =
+    match Keeper_meta_store.read_meta config keeper_name with
+    | Ok (Some meta) -> meta
+    | Ok None -> Alcotest.fail "cleanup retry removed durable metadata"
+    | Error detail -> Alcotest.fail detail
+  in
+  let expected_generation =
+    match direction with
+    | Forward_cleanup -> candidate.runtime.nonce
+    | Rollback_cleanup -> original.runtime.nonce
+  in
+  Alcotest.(check int)
+    "cleanup retry preserves direction-authoritative metadata"
+    expected_generation
+    persisted.runtime.nonce
+;;
+
 let test_update_keeper_surfaces_committed_cleanup_required () =
   let keeper_name = "dead-revival-update-cleanup" in
   with_settled_dead_revival_fixture ~keeper_name
@@ -3227,6 +3403,30 @@ let () =
             "exact no-journal payload orphan is deleted"
             `Quick
             test_dead_revival_exact_orphan_payload_is_deleted;
+          Alcotest.test_case
+            "forward cleanup resumes after pending-stage failure"
+            `Quick
+            (test_dead_revival_cleanup_pending_recovery
+               Forward_cleanup
+               After_cleanup_pending);
+          Alcotest.test_case
+            "forward cleanup resumes after payload deletion"
+            `Quick
+            (test_dead_revival_cleanup_pending_recovery
+               Forward_cleanup
+               After_cleanup_payload_delete);
+          Alcotest.test_case
+            "rollback cleanup resumes after pending-stage failure"
+            `Quick
+            (test_dead_revival_cleanup_pending_recovery
+               Rollback_cleanup
+               After_cleanup_pending);
+          Alcotest.test_case
+            "rollback cleanup resumes after payload deletion"
+            `Quick
+            (test_dead_revival_cleanup_pending_recovery
+               Rollback_cleanup
+               After_cleanup_payload_delete);
           Alcotest.test_case
             "keeper update preserves committed cleanup-required outcome"
             `Quick

@@ -103,9 +103,9 @@ module For_testing : sig
 
   val with_cleanup_boundary_hooks :
     ?after_cleanup_pending:
-      ([ `Forward | `Rollback ] -> unit) ->
+      ([ `Forward | `Rollback ] -> string option) ->
     ?after_payload_delete:
-      ([ `Forward | `Rollback ] -> unit) ->
+      ([ `Forward | `Rollback ] -> string option) ->
     (unit -> 'a) ->
     'a
 

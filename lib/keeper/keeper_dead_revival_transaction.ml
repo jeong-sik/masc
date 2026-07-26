@@ -23,8 +23,8 @@ type cleanup_direction =
   ]
 
 type cleanup_boundary_hooks =
-  { after_cleanup_pending : cleanup_direction -> unit
-  ; after_payload_delete : cleanup_direction -> unit
+  { after_cleanup_pending : cleanup_direction -> string option
+  ; after_payload_delete : cleanup_direction -> string option
   }
 
 let cleanup_boundary_hooks_key : cleanup_boundary_hooks Eio.Fiber.key =
@@ -71,13 +71,13 @@ let invoke_after_journal_write_hook () =
 
 let invoke_after_cleanup_pending_hook direction =
   match Eio.Fiber.get cleanup_boundary_hooks_key with
-  | None -> ()
+  | None -> None
   | Some hooks -> hooks.after_cleanup_pending direction
 ;;
 
 let invoke_after_payload_delete_hook direction =
   match Eio.Fiber.get cleanup_boundary_hooks_key with
-  | None -> ()
+  | None -> None
   | Some hooks -> hooks.after_payload_delete direction
 ;;
 
@@ -106,8 +106,8 @@ module Boundary_hooks_for_testing = struct
   ;;
 
   let with_cleanup_boundary_hooks
-        ?(after_cleanup_pending = fun _ -> ())
-        ?(after_payload_delete = fun _ -> ())
+        ?(after_cleanup_pending = fun _ -> None)
+        ?(after_payload_delete = fun _ -> None)
         fn
     =
     Eio.Fiber.with_binding
@@ -1495,20 +1495,26 @@ let rollback token config journal payload original_entry =
     | Error error ->
       [ Rollback_journal_clear_failed (error_to_string error) ]
     | Ok cleanup ->
-      invoke_after_cleanup_pending_hook `Rollback;
-      (match delete_payload config cleanup with
-       | Error failure -> [ Rollback_payload_delete_failed failure ]
-       | Ok () ->
-         invoke_after_payload_delete_hook `Rollback;
-         (match
-            clear_journal
-              config
-              ~expected_stage:Rollback_cleanup_pending
-              cleanup
-          with
-          | Ok () -> []
-          | Error error ->
-            [ Rollback_journal_clear_failed (error_to_string error) ]))
+      (match invoke_after_cleanup_pending_hook `Rollback with
+       | Some detail -> [ Rollback_journal_clear_failed detail ]
+       | None ->
+         (match delete_payload config cleanup with
+          | Error failure -> [ Rollback_payload_delete_failed failure ]
+          | Ok () ->
+            (match invoke_after_payload_delete_hook `Rollback with
+             | Some detail -> [ Rollback_journal_clear_failed detail ]
+             | None ->
+               (match
+                  clear_journal
+                    config
+                    ~expected_stage:Rollback_cleanup_pending
+                    cleanup
+                with
+                | Ok () -> []
+                | Error error ->
+                  [ Rollback_journal_clear_failed
+                      (error_to_string error)
+                  ]))))
 ;;
 
 let fail_with_rollback token config journal payload original_entry cause error =
@@ -1633,16 +1639,24 @@ let forward_cleanup config (journal : journal) =
   match cleanup_result with
   | Error _ as error -> error
   | Ok (cleanup, cleanup_published) ->
-    if cleanup_published
-    then invoke_after_cleanup_pending_hook `Forward;
-    (match delete_payload config cleanup with
-     | Error failure -> Error (payload_failure Payload_delete failure)
-     | Ok () ->
-       invoke_after_payload_delete_hook `Forward;
-       clear_journal
-         config
-         ~expected_stage:Forward_cleanup_pending
-         cleanup)
+    let pending_failure =
+      if cleanup_published
+      then invoke_after_cleanup_pending_hook `Forward
+      else None
+    in
+    (match pending_failure with
+     | Some detail -> Error (Journal_write_failed detail)
+     | None ->
+       (match delete_payload config cleanup with
+        | Error failure -> Error (payload_failure Payload_delete failure)
+        | Ok () ->
+          (match invoke_after_payload_delete_hook `Forward with
+           | Some detail -> Error (Journal_write_failed detail)
+           | None ->
+             clear_journal
+               config
+               ~expected_stage:Forward_cleanup_pending
+               cleanup)))
 ;;
 
 let revive_locked (ctx : _ context) ~original ~candidate =
@@ -2118,15 +2132,17 @@ let finish_rollback_cleanup config journal =
       (rollback_error_to_string
        (Rollback_payload_delete_failed failure))
   | Ok () ->
-    invoke_after_payload_delete_hook `Rollback;
-    (match
-       clear_journal
-         config
-         ~expected_stage:Rollback_cleanup_pending
-         journal
-     with
-     | Ok () -> Ok true
-     | Error error -> Error (error_to_string error))
+    (match invoke_after_payload_delete_hook `Rollback with
+     | Some detail -> Error detail
+     | None ->
+       (match
+          clear_journal
+            config
+            ~expected_stage:Rollback_cleanup_pending
+            journal
+        with
+        | Ok () -> Ok true
+        | Error error -> Error (error_to_string error)))
 ;;
 
 let recover_one_locked config leaf =

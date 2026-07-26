@@ -138,7 +138,7 @@ module Boundary_hooks_for_testing = struct
     let hooks =
       Head.For_testing.hooks
         ~on_resource_settlement:(fun () ->
-          failwith "injected revival durable publication settlement warning")
+          raise Injected_durable_publication_settlement_warning)
         ()
     in
     let previous =
@@ -155,7 +155,7 @@ module Boundary_hooks_for_testing = struct
     let hooks =
       Head.For_testing.hooks
         ~on_resource_settlement:(fun () ->
-          failwith "injected revival launch publication settlement warning")
+          raise Injected_launch_publication_settlement_warning)
         ()
     in
     let previous =
@@ -881,7 +881,7 @@ let reserve_journal config (journal : journal) =
         let hooks =
           Head.For_testing.hooks
             ~after_verified:(fun () ->
-              failwith "injected Reserved journal post-publication failure")
+              raise Injected_reserved_post_publication_failure)
             ()
         in
         Head.For_testing.compare_and_swap hooks
@@ -1141,6 +1141,10 @@ let verify_payload config (journal : journal) =
 ;;
 
 module For_testing = struct
+  exception Injected_durable_publication_settlement_warning
+  exception Injected_launch_publication_settlement_warning
+  exception Injected_reserved_post_publication_failure
+
   include Boundary_hooks_for_testing
 
   let reserved_journal_row ~owner_id ~original ~candidate =

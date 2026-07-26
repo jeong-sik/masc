@@ -1091,13 +1091,15 @@ let sync_meta_if_registered
       loop ()
 ;;
 
+exception Runtime_meta_sync_installation_failed of string
+
 let () =
   match
     Keeper_meta_runtime_sync_internal.install_once
       sync_meta_if_registered
   with
   | Ok () -> ()
-  | Error detail -> failwith detail
+  | Error detail -> raise (Runtime_meta_sync_installation_failed detail)
 ;;
 
 let mark_dead ~base_path name ~at =

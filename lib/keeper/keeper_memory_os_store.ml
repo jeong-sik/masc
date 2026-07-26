@@ -1786,9 +1786,9 @@ let store_identity_warnings values =
     values
 ;;
 
-let read_store_identity ~root ~owner_id =
+let read_store_identity_with_exact_read exact_read ~root ~owner_id =
   match
-    Exact_read.read
+    exact_read
       ~parent:root
       ~leaf:store_identity_leaf
       ~expected_length:store_identity_byte_count
@@ -1797,7 +1797,17 @@ let read_store_identity ~root ~owner_id =
   | Error failure ->
     let failure : Exact_read.failure = failure in
     (match failure.error with
-     | Exact_read.Missing -> Ok None
+     | Exact_read.Missing ->
+       let warnings =
+         store_identity_warnings failure.settlement_warnings
+       in
+       (match warnings with
+        | [] -> Ok None
+        | _ ->
+          Error
+            (make_error
+               ~settlement_warnings:warnings
+               (Store_identity_read_failed Exact_read.Missing)))
      | failure_kind ->
        Error
          (make_error
@@ -1832,6 +1842,10 @@ let read_store_identity ~root ~owner_id =
               (Invalid_store_identity
                  "owner binding does not match the opened owner"))
        else Ok (Some (identity, warnings)))
+;;
+
+let read_store_identity =
+  read_store_identity_with_exact_read Exact_read.read
 ;;
 
 let private_root_entries root =
@@ -3740,6 +3754,18 @@ module For_testing = struct
       Store_identity_settlement_warning_tag
     | Current_head_settlement_warning _ ->
       Current_head_settlement_warning_tag
+  ;;
+
+  let read_store_identity_with_exact_hooks hooks ~root ~owner_id =
+    match
+      read_store_identity_with_exact_read
+        (Exact_read.For_testing.read ~hooks)
+        ~root
+        ~owner_id
+    with
+    | Ok None -> Ok false
+    | Ok (Some _) -> Ok true
+    | Error error -> Error error
   ;;
 
   let publish_with_head_hooks hooks store prepared =

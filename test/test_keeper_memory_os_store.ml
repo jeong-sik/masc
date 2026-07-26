@@ -3,6 +3,7 @@ open Alcotest
 module Store = Masc.Keeper_memory_os_store
 module Types = Masc.Keeper_memory_os_types
 module Head = Fs_compat.Capability_head
+module Exact_read = Fs_compat.Capability_exact_read
 
 let require_ok = function
   | Ok value -> value
@@ -294,6 +295,36 @@ let test_existing_read_absent_is_effect_free ~fs () =
     "identity-free empty root remains byte-for-byte unchanged"
     before
     (root_snapshot empty_path)
+;;
+
+let test_missing_identity_preserves_settlement_warning ~fs () =
+  with_root ~fs "masc_memory_os_identity_missing_warning_"
+  @@ fun _root_path root ->
+  let hooks =
+    Exact_read.For_testing.hooks
+      ~on_settle_resources:(fun () ->
+        raise (Failure "injected parent settlement failure"))
+      ()
+  in
+  match
+    Store.For_testing.read_store_identity_with_exact_hooks
+      hooks
+      ~root
+      ~owner_id:"keeper-a"
+  with
+  | Ok _ ->
+    fail "identity absence silently discarded a settlement warning"
+  | Error error ->
+    check
+      bool
+      "missing identity with a settlement warning fails typed"
+      true
+      (Store.For_testing.error_tag error
+       = Store.For_testing.Store_identity_read_failed_error);
+    expect_single_warning_tag
+      "missing identity preserves the settlement warning"
+      Store.For_testing.Store_identity_settlement_warning_tag
+      (Store.error_settlement_warnings error)
 ;;
 
 let test_existing_read_empty_store_is_read_only ~fs () =
@@ -1928,6 +1959,8 @@ let () =
     [ ( "store"
       , [ test_case "existing absent read is effect-free" `Quick
             (test_existing_read_absent_is_effect_free ~fs)
+        ; test_case "missing identity preserves settlement warning" `Quick
+            (test_missing_identity_preserves_settlement_warning ~fs)
         ; test_case "existing empty store read is read-only" `Quick
             (test_existing_read_empty_store_is_read_only ~fs)
         ; test_case "existing populated projection is exact" `Quick

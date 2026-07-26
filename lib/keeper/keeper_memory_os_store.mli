@@ -285,6 +285,12 @@ module For_testing : sig
   val error_tag : error -> error_tag
   val warning_tag : settlement_warning -> warning_tag
 
+  val read_store_identity_with_exact_hooks :
+    Fs_compat.Capability_exact_read.For_testing.hooks ->
+    root:Eio.Fs.dir_ty Eio.Path.t ->
+    owner_id:string ->
+    (bool, error) result
+
   (** Exercise the production publication state machine with deterministic
       hooks from the underlying capability-relative HEAD primitive. *)
   val publish_with_head_hooks :

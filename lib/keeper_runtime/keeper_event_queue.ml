@@ -737,6 +737,12 @@ let payload_of_yojson json =
     let* channel = continuation_channel_field fields in
     Ok (Hitl_resolved { approval_id; decision; channel })
   | "failure_judgment" ->
+    let* () =
+      exact_fields
+        ~context
+        ~expected:[ "kind"; "runtime_id"; "judgment_class"; "provenance"; "detail" ]
+        fields
+    in
     let* runtime_id = string_field ~context "runtime_id" fields in
     let* judgment_label = string_field ~context "judgment_class" fields in
     let* judgment =
@@ -781,6 +787,12 @@ let stimulus_to_yojson (stimulus : stimulus) =
 let stimulus_of_yojson json =
   let context = "stimulus" in
   let* fields = assoc_fields ~context json in
+  let* () =
+    exact_fields
+      ~context
+      ~expected:[ "post_id"; "urgency"; "arrived_at_unix"; "payload" ]
+      fields
+  in
   let* post_id = string_field ~context "post_id" fields in
   let* urgency_s = string_field ~context "urgency" fields in
   let* urgency = urgency_of_string urgency_s in

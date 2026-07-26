@@ -812,6 +812,24 @@ let () =
     ; fj_detail = "strict persisted fixture"
     }
   in
+  (match
+     stimulus_to_yojson
+       { post_id = "duplicate-payload"
+       ; urgency = Normal
+       ; arrived_at = 9.0
+       ; payload = fusion_payload ()
+       }
+   with
+   | `Assoc fields ->
+     let malformed =
+       `Assoc
+         (fields
+          @ [ "payload", `Assoc [ "kind", `String "bootstrap" ] ])
+     in
+     (match stimulus_of_yojson malformed with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "stimulus with duplicate payload loaded")
+   | _ -> Alcotest.fail "stimulus serializer did not emit an object");
   let strict_queue =
     empty
     |> fun queue ->
@@ -881,6 +899,26 @@ let () =
     ~label:"missing-provenance"
     ~rewrite:(remove_payload_field ~kind:"failure_judgment" ~field:"provenance")
     ~expected_detail:(Some "provenance");
+  let rewrite_failure_judgment_payload ~label rewrite_fields =
+    rewrite_payload_fields ~kind:"failure_judgment" ~label rewrite_fields
+  in
+  assert_strict_persisted_rejected
+    ~label:"failure-judgment-duplicate-provenance"
+    ~rewrite:
+      (rewrite_failure_judgment_payload
+         ~label:"duplicate provenance"
+         (fun fields ->
+            match List.assoc_opt "provenance" fields with
+            | Some provenance -> ("provenance", provenance) :: fields
+            | None -> Alcotest.fail "failure judgment fixture has no provenance"))
+    ~expected_detail:None;
+  assert_strict_persisted_rejected
+    ~label:"failure-judgment-extra-field"
+    ~rewrite:
+      (rewrite_failure_judgment_payload
+         ~label:"extra compatibility field"
+         (fun fields -> ("legacy_provenance", `String "ignored") :: fields))
+    ~expected_detail:None;
   let rewrite_fusion_payload ~label rewrite_fields =
     rewrite_payload_fields ~kind:"fusion_completed" ~label rewrite_fields
   in

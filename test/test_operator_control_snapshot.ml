@@ -972,6 +972,7 @@ let test_dead_revival_launch_failure_rolls_back_both_authorities () =
 type dead_revival_cancellation_boundary =
   | After_nonce_allocation
   | After_journal_write
+  | After_journal_write_ownership_swap
 
 let test_dead_revival_cancellation_releases_reservation boundary () =
   Eio_main.run @@ fun env ->
@@ -982,6 +983,8 @@ let test_dead_revival_cancellation_releases_reservation boundary () =
     match boundary with
     | After_nonce_allocation -> "dead-revival-cancel-after-nonce"
     | After_journal_write -> "dead-revival-cancel-after-journal"
+    | After_journal_write_ownership_swap ->
+      "dead-revival-cancel-ownership-swap"
   in
   Fun.protect
     ~finally:(fun () ->
@@ -1014,6 +1017,20 @@ let test_dead_revival_cancellation_releases_reservation boundary () =
         ; latched_reason = None
         }
       in
+      let competing_candidate =
+        { candidate with
+          runtime =
+            { candidate.runtime with
+              nonce = original.runtime.nonce + 100
+            }
+        }
+      in
+      let competing_row =
+        Keeper_dead_revival_transaction.For_testing.reserved_journal_row
+          ~owner_id:"competing-revival-owner"
+          ~original
+          ~candidate:competing_candidate
+      in
       let ctx : _ Keeper_tool_surface.context =
         { config
         ; agent_name = "operator"
@@ -1041,6 +1058,23 @@ let test_dead_revival_cancellation_releases_reservation boundary () =
             ~after_journal_write:cancel
             (fun () ->
               Keeper_dead_revival_transaction.revive ctx ~original ~candidate)
+        | After_journal_write_ownership_swap ->
+          Keeper_dead_revival_transaction.For_testing.with_boundary_hooks
+            ~after_journal_write:(fun () ->
+              (match
+                 Keeper_dead_revival_transaction.For_testing.replace_with_reserved_journal
+                   ~config
+                   ~owner_id:"competing-revival-owner"
+                   ~original
+                   ~candidate:competing_candidate
+               with
+               | Ok () -> ()
+               | Error error ->
+                 Alcotest.fail
+                   (Keeper_dead_revival_transaction.error_to_string error));
+              cancel ())
+            (fun () ->
+              Keeper_dead_revival_transaction.revive ctx ~original ~candidate)
       in
       let cancelled =
         try
@@ -1057,14 +1091,145 @@ let test_dead_revival_cancellation_releases_reservation boundary () =
            (Keeper_lifecycle_reservation.current
               ~base_path:base_dir
               ~keeper_name));
-      let journal_path =
-        List.fold_left Filename.concat base_dir
-          [ ".masc"; "keeper-lifecycle-transactions"; keeper_name ^ ".json" ]
+      let current_stage =
+        match
+          Keeper_dead_revival_transaction.For_testing.current_journal_stage
+            ~config
+            ~keeper_name
+        with
+        | Ok stage -> stage
+        | Error error ->
+          Alcotest.fail
+            (Keeper_dead_revival_transaction.error_to_string error)
       in
       Alcotest.(check bool)
-        "cancellation left no Reserved journal"
-        false
-        (Fs_compat.file_exists journal_path))
+        "cancellation preserves only the transaction it owns"
+        true
+        (match boundary, current_stage with
+         | After_nonce_allocation, `Missing -> true
+         | After_journal_write, `Cleared -> true
+         | After_journal_write_ownership_swap, `Reserved -> true
+         | _ -> false);
+      (match boundary with
+       | After_journal_write_ownership_swap ->
+         (match
+            Keeper_dead_revival_transaction.For_testing.current_journal_row
+              ~config
+              ~keeper_name
+          with
+          | Ok (Some observed) ->
+            Alcotest.(check string)
+              "competing journal row is preserved byte-for-byte"
+              competing_row
+              observed
+          | Ok None -> Alcotest.fail "competing journal authority disappeared"
+          | Error error ->
+            Alcotest.fail
+              (Keeper_dead_revival_transaction.error_to_string error))
+       | After_nonce_allocation | After_journal_write -> ()))
+;;
+
+let test_dead_revival_existing_reserved_journal_blocks () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "dead-revival-existing-journal" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
+      Keeper_registry.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let original =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc
+              [ "name", `String keeper_name
+              ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
+              ; "trace_id", `String "trace-dead-revival-existing-journal"
+              ; "runtime_id", `String "runtime.primary"
+              ])
+        with
+        | Error detail -> Alcotest.fail detail
+        | Ok meta ->
+          { meta with
+            paused = true
+          ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
+          }
+      in
+      let candidate =
+        { original with
+          paused = false
+        ; latched_reason = None
+        }
+      in
+      let seeded_candidate =
+        { candidate with
+          runtime =
+            { candidate.runtime with
+              nonce = original.runtime.nonce + 50
+            }
+        }
+      in
+      let seeded_row =
+        match
+          Keeper_dead_revival_transaction.For_testing.reserve_journal
+            ~config
+            ~owner_id:"seeded-unresolved-owner"
+            ~original
+            ~candidate:seeded_candidate
+        with
+        | Ok row -> row
+        | Error error ->
+          Alcotest.fail
+            (Keeper_dead_revival_transaction.error_to_string error)
+      in
+      let ctx : _ Keeper_tool_surface.context =
+        { config
+        ; agent_name = "operator"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config)
+        }
+      in
+      (match
+         Keeper_dead_revival_transaction.revive ctx ~original ~candidate
+       with
+       | Error (Keeper_dead_revival_transaction.Journal_conflict _) -> ()
+       | Error error ->
+         Alcotest.fail
+           ("unexpected existing journal failure: "
+            ^ Keeper_dead_revival_transaction.error_to_string error)
+       | Ok _ ->
+         Alcotest.fail "unresolved current-schema journal was overwritten");
+      (match
+         Keeper_dead_revival_transaction.For_testing.current_journal_row
+           ~config
+           ~keeper_name
+       with
+       | Ok (Some observed) ->
+         Alcotest.(check string)
+           "pre-existing unresolved row remains byte-for-byte exact"
+           seeded_row
+           observed
+       | Ok None -> Alcotest.fail "pre-existing journal disappeared"
+       | Error error ->
+         Alcotest.fail
+           (Keeper_dead_revival_transaction.error_to_string error));
+      Alcotest.(check bool)
+        "blocked transaction releases process reservation"
+        true
+        (Option.is_none
+           (Keeper_lifecycle_reservation.current
+              ~base_path:base_dir
+              ~keeper_name)))
 ;;
 
 let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
@@ -1962,6 +2127,15 @@ let () =
             `Quick
             (test_dead_revival_cancellation_releases_reservation
                After_journal_write);
+          Alcotest.test_case
+            "cancellation cannot clear a competing journal transaction"
+            `Quick
+            (test_dead_revival_cancellation_releases_reservation
+               After_journal_write_ownership_swap);
+          Alcotest.test_case
+            "pre-existing current-schema journal blocks revival"
+            `Quick
+            test_dead_revival_existing_reserved_journal_blocks;
           Alcotest.test_case
             "operator resume clears persisted dead-tombstone state"
             `Quick

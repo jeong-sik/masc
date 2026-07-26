@@ -20,11 +20,23 @@ type rollback_error =
   | Rollback_registry_occupied of Keeper_registry.registry_entry
   | Rollback_registry_invalid of Keeper_registry.registry_entry_validation_error
   | Rollback_registry_reservation_changed of Keeper_lifecycle_reservation.snapshot
-  | Rollback_journal_delete_failed of string
+  | Rollback_journal_clear_failed of string
 
 type error =
   | Reservation_conflict of Keeper_lifecycle_reservation.snapshot
   | Nonce_allocation_failed of Keeper_lifecycle_nonce.error
+  | Journal_conflict of string
+  | Journal_ownership_changed of string
+  | Journal_publication_indeterminate of
+      Fs_compat.Capability_head.failure
+  | Journal_published_with_failure of
+      Fs_compat.Capability_head.failure
+  | Journal_published_with_warnings of
+      { evidence : Fs_compat.Capability_head.publication_evidence
+      ; warnings : Fs_compat.Capability_head.settlement_warning list
+      }
+  | Journal_read_settlement_failed of
+      Fs_compat.Capability_head.settlement_warning list
   | Journal_write_failed of string
   | Durable_snapshot_missing
   | Durable_snapshot_changed
@@ -68,4 +80,41 @@ module For_testing : sig
     ?after_journal_write:(unit -> unit) ->
     (unit -> 'a) ->
     'a
+
+  val reserved_journal_row :
+    owner_id:string ->
+    original:Keeper_meta_contract.keeper_meta ->
+    candidate:Keeper_meta_contract.keeper_meta ->
+    string
+
+  val reserve_journal :
+    config:Workspace.config ->
+    owner_id:string ->
+    original:Keeper_meta_contract.keeper_meta ->
+    candidate:Keeper_meta_contract.keeper_meta ->
+    (string, error) result
+
+  val current_journal_row :
+    config:Workspace.config ->
+    keeper_name:string ->
+    (string option, error) result
+
+  val current_journal_stage :
+    config:Workspace.config ->
+    keeper_name:string ->
+    ( [ `Missing
+      | `Reserved
+      | `Durable_committed
+      | `Launch_committed
+      | `Cleared
+      ]
+    , error )
+    result
+
+  val replace_with_reserved_journal :
+    config:Workspace.config ->
+    owner_id:string ->
+    original:Keeper_meta_contract.keeper_meta ->
+    candidate:Keeper_meta_contract.keeper_meta ->
+    (unit, error) result
 end

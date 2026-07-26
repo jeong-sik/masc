@@ -207,8 +207,8 @@ let target_effect_of_transaction = function
   | Renamed evidence -> Publication_indeterminate evidence
   | Durable evidence -> Published evidence
 
-let failure_for_effect effect error =
-  failure ~target_effect:(target_effect_of_transaction effect) error
+let failure_for_effect publication_state error =
+  failure ~target_effect:(target_effect_of_transaction publication_state) error
 
 let validate_leaf leaf =
   if String.equal leaf ""
@@ -542,7 +542,7 @@ let normalize_result ~warnings ~set_success_warnings = function
         settlement_warnings = failure.settlement_warnings @ warnings
       }
 
-let run_transaction ~hooks ~parent ~leaf ~effect ~set_success_warnings transaction =
+let run_transaction ~hooks ~parent ~leaf ~publication_state ~set_success_warnings transaction =
   Eio.Fiber.check ();
   let token = ref None in
   let completed = ref None in
@@ -580,7 +580,7 @@ let run_transaction ~hooks ~parent ~leaf ~effect ~set_success_warnings transacti
             result)
       with
       | Eio.Cancel.Cancelled _ as exn
-        when !effect = Before_publication && Option.is_none !completed ->
+        when !publication_state = Before_publication && Option.is_none !completed ->
         raise exn
       | exn ->
         let detail = diagnostic_of_exception Settle_resources exn in
@@ -595,7 +595,7 @@ let run_transaction ~hooks ~parent ~leaf ~effect ~set_success_warnings transacti
              }
          | None ->
            Error
-             { (failure_for_effect !effect (Io_error detail)) with
+             { (failure_for_effect !publication_state (Io_error detail)) with
                settlement_warnings = List.rev !warnings
              }))
 
@@ -603,12 +603,12 @@ let read ~secure_random ~parent ~leaf =
   match validate_leaf leaf with
   | Error error -> Error (failure error)
   | Ok () ->
-    let effect = ref Before_publication in
+    let publication_state = ref Before_publication in
     run_transaction
       ~hooks:no_hooks
       ~parent
       ~leaf
-      ~effect
+      ~publication_state
       ~set_success_warnings:(fun snapshot warnings ->
         { snapshot with settlement_warnings = snapshot.settlement_warnings @ warnings })
       (fun ~sw ~parent ~parent_stat ~warnings:_ ->
@@ -620,18 +620,18 @@ let compare_and_swap_internal ~hooks ~secure_random ~parent ~leaf ~expected ~row
   match validate_leaf leaf, validate_row row with
   | Error error, _ | _, Error error -> Error (failure error)
   | Ok (), Ok () ->
-    let effect = ref Before_publication in
+    let publication_state = ref Before_publication in
     run_transaction
       ~hooks
       ~parent
       ~leaf
-      ~effect
+      ~publication_state
       ~set_success_warnings:(fun publication warnings ->
         { publication with
           settlement_warnings = publication.settlement_warnings @ warnings
         })
       (fun ~sw ~parent ~parent_stat ~warnings ->
-        let fail error = Error (failure_for_effect !effect error) in
+        let fail error = Error (failure_for_effect !publication_state error) in
         let* lock =
           match open_lock ~sw ~secure_random ~parent ~leaf with
           | Ok lock -> Ok lock
@@ -714,7 +714,7 @@ let compare_and_swap_internal ~hooks ~secure_random ~parent ~leaf ~expected ~row
                   | Error error -> fail error
                 in
                 cleanup_stage := false;
-                effect := Renamed indeterminate;
+                publication_state := Renamed indeterminate;
                 invoke_hook Rename_head hooks.after_rename;
                 let* () =
                   match sync_parent parent with
@@ -727,7 +727,7 @@ let compare_and_swap_internal ~hooks ~secure_random ~parent ~leaf ~expected ~row
                   | Ok published -> Ok published
                   | Error error -> fail error
                 in
-                effect :=
+                publication_state :=
                   Renamed { indeterminate with observed = Some published.cursor };
                 match published.row, published.cursor.target with
                 | Some observed_row, Some observed_target
@@ -741,7 +741,7 @@ let compare_and_swap_internal ~hooks ~secure_random ~parent ~leaf ~expected ~row
                     ; published_cursor = published.cursor
                     }
                   in
-                  effect := Durable evidence;
+                  publication_state := Durable evidence;
                   invoke_hook Verify_publication hooks.after_verified;
                   Ok { evidence; settlement_warnings = [] }
                 | _ -> fail (Corrupt_head "published HEAD does not match the staged row"))))

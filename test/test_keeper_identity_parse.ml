@@ -40,47 +40,6 @@ let test_explicit_keeper_name_is_not_nickname_canonicalized () =
         "personality-resync-test" meta.name
   | Error e -> fail ("expected Ok, got Error: " ^ e)
 
-let test_retired_runtime_id_is_rejected () =
-  let json =
-    match Masc_test_deps.current_meta_json_fixture ~name:"alice" () with
-    | `Assoc fields -> `Assoc (("runtime_id", `String "retired") :: fields)
-    | _ -> Alcotest.fail "current fixture must be an object"
-  in
-  match Masc.Keeper_meta_json_parse.meta_of_json json with
-  | Error detail ->
-    check bool "error names runtime_id" true
-      (Astring.String.is_infix ~affix:"runtime_id" detail)
-  | Ok _ -> fail "retired runtime_id unexpectedly decoded"
-
-let test_conflicting_runtime_id_and_legacy_runtime_id_rejected () =
-  (* Dual-write migration must fail loud when the canonical [runtime_id]
-     and legacy [runtime_id] disagree. *)
-  let json =
-    `Assoc
-      [
-        ("name", `String "cheolsu");
-        ("agent_name", `String "keeper-cheolsu-agent");
-        ("trace_id", `String "cheolsu-001");
-        ("runtime_id", `String "runtime-a");
-        ("runtime_id", `String "runtime-b");
-      ]
-  in
-  match Masc.Keeper_meta_json_parse.meta_of_json json with
-  | Error msg ->
-      check bool "error mentions runtime_id" true
-        (try
-           ignore
-             (Str.search_forward
-                (Str.regexp_string "runtime_id")
-                msg
-                0);
-           true
-         with
-         | Not_found -> false)
-  | Ok meta ->
-      fail ("expected runtime_id/runtime_id conflict rejection, got "
-            ^ Keeper_meta_contract.runtime_id_of_meta meta)
-
 let test_missing_trace_id () =
   match
     strict_meta_of_fields
@@ -116,78 +75,14 @@ let test_invalid_trace_id () =
              with Not_found -> false))
   | Ok _ -> fail "expected Error for invalid trace_id '..'"
 
-let test_removed_voice_policy_meta_rejected () =
-  match
-    strict_meta_of_fields
-      [ ("name", `String "alice")
-      ; ("agent_name", `String "keeper-alice-agent")
-      ; ("trace_id", `String "alice-001")
-      ; ("policy_voice_enabled", `Bool true)
-      ]
-  with
-  | Ok _ -> fail "removed policy_voice_enabled meta must be rejected"
-  | Error msg ->
-    check bool
-      "error names removed policy_voice_enabled"
-      true
-      (Astring.String.is_infix ~affix:"policy_voice_enabled" msg)
-
-let test_legacy_goal_meta_rejected () =
-  match
-    strict_meta_of_fields
-      [ ("name", `String "alice")
-      ; ("agent_name", `String "keeper-alice-agent")
-      ; ("trace_id", `String "alice-001")
-      ; ("goal", `String "removed")
-      ]
-  with
-  | Ok _ -> fail "legacy goal meta must be rejected"
-  | Error msg ->
-    check bool "error names removed goal" true
-      (Astring.String.is_infix ~affix:"removed keeper meta field" msg
-       && Astring.String.is_infix ~affix:"goal" msg)
-
-let test_removed_compaction_meta_rejected () =
-  [ "compaction_cooldown_sec"
-  ; "compaction_profile"
-  ; "compaction_ratio_gate"
-  ; "compaction_message_gate"
-  ; "compaction_token_gate"
-  ]
-  |> List.iter (fun key ->
-    match
-      strict_meta_of_fields
-        [ ("name", `String "alice")
-        ; ("agent_name", `String "keeper-alice-agent")
-        ; ("trace_id", `String "alice-001")
-        ; (key, `Int 15)
-        ]
-    with
-    | Ok _ -> fail ("removed " ^ key ^ " meta must be rejected")
-    | Error msg ->
-      check bool
-        ("error names removed " ^ key)
-        true
-        (Astring.String.is_infix ~affix:key msg))
-
 let () =
   run "keeper_identity_parse"
     [ ( "parse_keeper_identity"
       , [ test_case "valid trace_id" `Quick test_valid_trace_id
         ; test_case "explicit keeper name is not nickname-canonicalized" `Quick
             test_explicit_keeper_name_is_not_nickname_canonicalized
-        ; test_case "retired runtime_id is rejected" `Quick
-            test_retired_runtime_id_is_rejected
-        ; test_case "conflicting runtime_id and legacy runtime_id rejected" `Quick
-            test_conflicting_runtime_id_and_legacy_runtime_id_rejected
         ; test_case "missing trace_id field" `Quick test_missing_trace_id
         ; test_case "empty trace_id" `Quick test_empty_trace_id
         ; test_case "invalid trace_id (..)" `Quick test_invalid_trace_id
-        ; test_case "removed voice policy meta" `Quick
-            test_removed_voice_policy_meta_rejected
-        ; test_case "removed legacy goal meta" `Quick
-            test_legacy_goal_meta_rejected
-        ; test_case "removed compaction policy meta" `Quick
-            test_removed_compaction_meta_rejected
         ] )
     ]

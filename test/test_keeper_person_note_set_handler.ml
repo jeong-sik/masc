@@ -46,7 +46,6 @@ let make_meta () =
           ("name", `String keeper_name);
           ("agent_name", `String "person-note-handler-agent");
           ("trace_id", `String "trace-person-note");
-          ("runtime_id", `String "ollama_cloud.deepseek-v4-flash");
         ])
   with
   | Ok meta -> meta

@@ -85,7 +85,6 @@ let keeper_meta name =
           ("name", `String name);
           ("agent_name", `String (name ^ "-agent"));
           ("trace_id", `String ("trace-" ^ name));
-          ("runtime_id", `String Masc.(Keeper_config.default_runtime_id ()));
         ])
   with
   | Ok meta -> meta

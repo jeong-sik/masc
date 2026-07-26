@@ -2,7 +2,7 @@
 
 open Keeper_types_profile
 open Keeper_meta_contract
-open Keeper_meta_json_scrub
+open Keeper_meta_json_current_schema
 
 let ( let* ) = Result.bind
 
@@ -455,8 +455,9 @@ let decode_current_meta fields =
 
 let meta_of_json json =
   try
-    let* fields = validate_current_object json in
-    decode_current_meta fields
+    match validate_current_object json with
+    | Error error -> Error (validation_error_detail error)
+    | Ok fields -> decode_current_meta fields
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> invalidf "decoder raised: %s" (Printexc.to_string exn)

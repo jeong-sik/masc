@@ -1829,8 +1829,14 @@ let run_heartbeat_loop
       let t_presence_start = Time_compat.now () in
       let disk_meta_opt, new_meta_mtime =
         match read_meta_if_changed ctx.config m.name ~last_mtime:!last_meta_mtime with
-        | Some (latest, new_mtime) -> Some latest, Some new_mtime
-        | None -> None, None
+        | Ok (Some (latest, new_mtime)) -> Some latest, Some new_mtime
+        | Ok None -> None, None
+        | Error unavailable ->
+          Log.Keeper.error
+            "%s: heartbeat stopped on %s"
+            m.name
+            (Keeper_meta_store.current_meta_unavailable_message unavailable);
+          raise (Keeper_meta_store.Current_meta_unavailable unavailable)
       in
       Option.iter (fun new_mtime -> last_meta_mtime := new_mtime) new_meta_mtime;
       let meta_current =

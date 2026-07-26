@@ -397,13 +397,13 @@ active_goal_ids = ["goal-masc-improver"]
     | `Assoc fields ->
       fields
       |> List.filter_map (fun (key, _) ->
-        if List.mem key Masc.Keeper_meta_json_scrub.toml_only_field_names
-        then Some key
-        else None)
+        if List.mem key Masc.Keeper_meta_json.current_field_names
+        then None
+        else Some key)
     | _ -> Alcotest.fail "expected keeper meta JSON object"
   in
   Alcotest.(check (list string))
-    "disk meta excludes TOML-owned config keys"
+    "disk meta contains only current fields"
     []
     leaked_config_keys;
   Alcotest.(check (option string))

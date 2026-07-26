@@ -380,7 +380,8 @@ let health_status_rank = Health_status.rank_string
 let max_health_status = Health_status.max_string
 
 let full_health_operator_summary ~keeper_fleet_safety
-    ~keeper_identity_drift_json ~publication_recovery_activation_json
+    ~keeper_identity_drift_json ~keeper_current_meta_unavailable_json
+    ~publication_recovery_activation_json
     ~reaction_ledger_json ~turn_admission_json ~board_event_collection_json
     ~keeper_event_queue_json ~runtime_startup_degradation_json
     ~keeper_config_schema_status ~keeper_config_schema_blocking
@@ -427,6 +428,10 @@ let full_health_operator_summary ~keeper_fleet_safety
     (assoc_string_opt "blocker" keeper_fleet_safety);
   note_status "keeper_identity_drift" keeper_identity_drift_json
     (assoc_string_opt "terminal_reason" keeper_identity_drift_json);
+  note_status
+    "keeper_current_meta_unavailable"
+    keeper_current_meta_unavailable_json
+    (Some "current_meta_unavailable");
   note_status
     "publication_recovery_activation"
     publication_recovery_activation_json
@@ -494,6 +499,16 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
   let phase_counts = phase_snapshot.counts in
   let keeper_fibers = phase_counts.running in
   let server_state = current_server_state_opt () in
+  let keeper_current_meta_unavailable_json =
+    match server_state with
+    | Some state ->
+      state
+      |> Mcp_server.workspace_config
+      |> Keeper_meta_store.current_meta_unavailable_facts
+      |> Keeper_meta_store.current_meta_unavailable_collection_to_yojson
+    | None ->
+      Keeper_meta_store.current_meta_unavailable_collection_to_yojson []
+  in
   (* Single-pass fleet meta scan: reads each keeper meta file once,
      shared by paused-keepers and fleet-safety sections. *)
   let fleet_meta_scan =
@@ -624,6 +639,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     full_health_operator_summary
       ~keeper_fleet_safety
       ~keeper_identity_drift_json
+      ~keeper_current_meta_unavailable_json
       ~publication_recovery_activation_json
       ~reaction_ledger_json
       ~turn_admission_json
@@ -679,6 +695,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref
     ("server_hibernation", Server_hibernation.status_json ());
     ("keeper_fleet_safety", keeper_fleet_safety);
     ("keeper_identity_drift", keeper_identity_drift_json);
+    ("keeper_current_meta_unavailable", keeper_current_meta_unavailable_json);
     ("publication_recovery_activation", publication_recovery_activation_json);
     ("keeper_reaction_ledger", reaction_ledger_json);
     ("keeper_turn_admission", turn_admission_json);
@@ -785,6 +802,7 @@ let full_health_cached_field_names =
     "disk_observation";
     "keeper_fleet_safety";
     "keeper_identity_drift";
+    "keeper_current_meta_unavailable";
     "publication_recovery_activation";
     "keeper_reaction_ledger";
     "keeper_turn_admission";
@@ -849,6 +867,8 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
           ("next_action", `String "none");
           ("component_timed_out", `Bool component_timed_out);
         ] );
+    ( "keeper_current_meta_unavailable",
+      Keeper_meta_store.current_meta_unavailable_collection_to_yojson [] );
     ( "publication_recovery_activation",
       full_health_component_placeholder
         ?error

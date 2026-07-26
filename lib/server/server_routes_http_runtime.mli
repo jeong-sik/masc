@@ -144,7 +144,8 @@ val make_health_json :
     [overall_status] / [operator_action_required] /
     [operator_action_reasons] /
     [keeper_fibers] / [fd_observation] / [fd_accountant] / [disk_observation] /
-    [keeper_fleet_safety] / [publication_recovery_activation] /
+    [keeper_fleet_safety] / [keeper_current_meta_unavailable] /
+    [publication_recovery_activation] /
     [keeper_reaction_ledger] / [paused_keepers] /
     [keeper_config_error_count] / [keeper_config_errors] /
     [keeper_config_unknown_key_count] / [keeper_config_unknown_keys] /

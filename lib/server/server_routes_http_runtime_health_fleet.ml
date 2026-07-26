@@ -202,8 +202,9 @@ let keeper_fleet_runtime_resolution_base_fields
     () =
   let base_path = runtime_base_path_opt () in
   let phase_snapshot = keeper_phase_snapshot ?base_path () in
+  let server_state = current_server_state_opt () in
   let execution_snapshot =
-    match current_server_state_opt () with
+    match server_state with
     | Some state ->
       keeper_execution_snapshot (Mcp_server.workspace_config state)
     | None -> empty_keeper_execution_snapshot
@@ -256,6 +257,15 @@ let keeper_fleet_runtime_resolution_base_fields
           () )
     ; "disk_observation", disk_observation
     ; "keeper_fleet_safety", fleet_safety
+    ; ( "keeper_current_meta_unavailable"
+      , match server_state with
+        | Some state ->
+          state
+          |> Mcp_server.workspace_config
+          |> Keeper_meta_store.current_meta_unavailable_facts
+          |> Keeper_meta_store.current_meta_unavailable_collection_to_yojson
+        | None ->
+          Keeper_meta_store.current_meta_unavailable_collection_to_yojson [] )
     ; "keeper_turn_admission", keeper_turn_admission_health_json ()
     ; "keeper_board_event_collection", keeper_board_event_collection_health_json ()
     ]

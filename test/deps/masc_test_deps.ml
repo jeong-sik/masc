@@ -104,96 +104,181 @@ let current_meta_json_fixture ?(name = "fixture") () : Yojson.Safe.t =
     ; "meta_version", `Int 0
     ]
 
-(** Test fixture parser for [keeper_meta]. It first creates an exact current
-    persisted envelope, then applies fixture overrides. TOML-only values are
-    removed before the production parser and re-applied only to the test
-    record. *)
+(** Closed fixture builder for the current in-memory [keeper_meta] contract.
+    Persisted overrides are decoded by the production codec. Current
+    configuration-owned record fields are decoded here with exact types; no
+    field is ignored or defaulted after it is supplied. *)
 let meta_of_json_fixture (json : Yojson.Safe.t) =
-  let json' =
-    match json with
-    | `Assoc overrides ->
-      let name =
-        match List.assoc_opt "name" overrides with
-        | Some (`String value) -> value
-        | _ -> "fixture"
-      in
-      let base_fields =
-        match current_meta_json_fixture ~name () with
-        | `Assoc fields -> fields
-        | _ -> assert false
-      in
-      let persisted_overrides =
-        List.filter
-          (fun (key, _) ->
-             not
-               (List.mem
-                  key
-                  Masc.Keeper_meta_json_scrub.toml_only_field_names))
-          overrides
-      in
-      let fields =
-        List.fold_left
-          (fun fields ((key, _) as field) ->
-             field :: List.remove_assoc key fields)
-          base_fields
-          persisted_overrides
-      in
-      `Assoc fields
-    | other -> other
+  let overlay_field_names =
+    [ "sandbox_profile"
+    ; "sandbox_image"
+    ; "network_mode"
+    ; "allowed_paths"
+    ; "mention_targets"
+    ; "proactive_enabled"
+    ; "always_allow"
+    ; "autoboot_enabled"
+    ; "max_context_override"
+    ; "telemetry_feedback_enabled"
+    ; "telemetry_feedback_window_hours"
+    ]
   in
-  match Masc.Keeper_meta_json_parse.meta_of_json json' with
-  | Error _ as e -> e
-  | Ok meta ->
-    let open Masc.Keeper_meta_contract in
-    let bool_opt key = Safe_ops.json_bool_opt key json in
-    let apply_bool_opt key current =
-      match bool_opt key with Some _ as v -> v | None -> current
+  let find_duplicate fields =
+    let rec loop seen = function
+      | [] -> None
+      | (key, _) :: rest ->
+        if List.mem key seen then Some key else loop (key :: seen) rest
     in
-    let apply_bool key current =
-      match bool_opt key with Some v -> v | None -> current
+    loop [] fields
+  in
+  let string_list key = function
+    | `List values ->
+      let rec decode acc = function
+        | [] -> Ok (List.rev acc)
+        | `String value :: rest -> decode (value :: acc) rest
+        | _ ->
+          Error
+            (Printf.sprintf
+               "current keeper fixture field %s must be a string list"
+               key)
+      in
+      decode [] values
+    | _ ->
+      Error
+        (Printf.sprintf
+           "current keeper fixture field %s must be a string list"
+           key)
+  in
+  let apply_overlay
+      (meta : Masc.Keeper_meta_contract.keeper_meta)
+      (key, value)
+    =
+    let wrong expected =
+      Error
+        (Printf.sprintf
+           "current keeper fixture field %s must be %s"
+           key
+           expected)
     in
-    let apply_string_list key current =
-      match Safe_ops.json_string_list key json with [] -> current | xs -> xs
-    in
-    let sandbox_profile =
-      match Safe_ops.json_string_opt "sandbox_profile" json with
-      | Some raw ->
-        (match Masc.Keeper_types_profile.sandbox_profile_of_string raw with
-         | Some value -> value
-         | None -> meta.sandbox_profile)
-      | None -> meta.sandbox_profile
-    in
-    let network_mode =
-      match Safe_ops.json_string_opt "network_mode" json with
-      | Some raw ->
-        (match Masc.Keeper_types_profile.network_mode_of_string raw with
-         | Some value -> value
-         | None -> meta.network_mode)
-      | None -> meta.network_mode
-    in
-    Ok
-      { meta with
-        sandbox_profile
-      ; sandbox_image =
-          (match Safe_ops.json_string_opt "sandbox_image" json with
-           | Some _ as value -> value
-           | None -> meta.sandbox_image)
-      ; network_mode
-      ; allowed_paths = apply_string_list "allowed_paths" meta.allowed_paths
-      ; mention_targets = apply_string_list "mention_targets" meta.mention_targets
-      ; proactive =
-          (match bool_opt "proactive_enabled" with
-           | Some enabled -> { enabled }
-           | None -> meta.proactive)
-      ; always_allow = apply_bool_opt "always_allow" meta.always_allow
-      ; autoboot_enabled = apply_bool "autoboot_enabled" meta.autoboot_enabled
-      ; telemetry_feedback_enabled =
-          apply_bool_opt "telemetry_feedback_enabled" meta.telemetry_feedback_enabled
-      ; telemetry_feedback_window_hours =
-          (match Safe_ops.json_int_opt "telemetry_feedback_window_hours" json with
-           | Some _ as v -> v
-           | None -> meta.telemetry_feedback_window_hours)
-      }
+    match key, value with
+    | "sandbox_profile", `String raw ->
+      (match Masc.Keeper_types_profile.sandbox_profile_of_string raw with
+       | Some sandbox_profile -> Ok { meta with sandbox_profile }
+       | None -> wrong "a current sandbox profile")
+    | "sandbox_profile", _ -> wrong "a current sandbox profile"
+    | "sandbox_image", `String sandbox_image ->
+      Ok { meta with sandbox_image = Some sandbox_image }
+    | "sandbox_image", `Null -> Ok { meta with sandbox_image = None }
+    | "sandbox_image", _ -> wrong "a string or null"
+    | "network_mode", `String raw ->
+      (match Masc.Keeper_types_profile.network_mode_of_string raw with
+       | Some network_mode -> Ok { meta with network_mode }
+       | None -> wrong "a current network mode")
+    | "network_mode", _ -> wrong "a current network mode"
+    | "allowed_paths", value ->
+      Result.map
+        (fun allowed_paths -> { meta with allowed_paths })
+        (string_list key value)
+    | "mention_targets", value ->
+      Result.map
+        (fun mention_targets -> { meta with mention_targets })
+        (string_list key value)
+    | "proactive_enabled", `Bool enabled ->
+      Ok { meta with proactive = { enabled } }
+    | "proactive_enabled", _ -> wrong "a boolean"
+    | "always_allow", `Bool always_allow ->
+      Ok { meta with always_allow = Some always_allow }
+    | "always_allow", `Null -> Ok { meta with always_allow = None }
+    | "always_allow", _ -> wrong "a boolean or null"
+    | "autoboot_enabled", `Bool autoboot_enabled ->
+      Ok { meta with autoboot_enabled }
+    | "autoboot_enabled", _ -> wrong "a boolean"
+    | "max_context_override", `Int max_context_override ->
+      Ok { meta with max_context_override = Some max_context_override }
+    | "max_context_override", `Null ->
+      Ok { meta with max_context_override = None }
+    | "max_context_override", _ -> wrong "an integer or null"
+    | "telemetry_feedback_enabled", `Bool telemetry_feedback_enabled ->
+      Ok { meta with telemetry_feedback_enabled = Some telemetry_feedback_enabled }
+    | "telemetry_feedback_enabled", `Null ->
+      Ok { meta with telemetry_feedback_enabled = None }
+    | "telemetry_feedback_enabled", _ -> wrong "a boolean or null"
+    | "telemetry_feedback_window_hours", `Int telemetry_feedback_window_hours ->
+      Ok
+        { meta with
+          telemetry_feedback_window_hours = Some telemetry_feedback_window_hours
+        }
+    | "telemetry_feedback_window_hours", `Null ->
+      Ok { meta with telemetry_feedback_window_hours = None }
+    | "telemetry_feedback_window_hours", _ -> wrong "an integer or null"
+    | _ ->
+      Error
+        (Printf.sprintf
+           "field %s is outside the current keeper fixture contract"
+           key)
+  in
+  match json with
+  | `Assoc overrides ->
+    (match find_duplicate overrides with
+     | Some key ->
+       Error
+         (Printf.sprintf
+            "current keeper fixture has duplicate field %s"
+            key)
+     | None ->
+       let current_field_names = Masc.Keeper_meta_json.current_field_names in
+       let outside_contract =
+         overrides
+         |> List.filter_map (fun (key, _) ->
+           if
+             List.mem key current_field_names
+             || List.mem key overlay_field_names
+           then None
+           else Some key)
+       in
+       if outside_contract <> []
+       then
+         Error
+           (Printf.sprintf
+              "fields outside the current keeper fixture contract: %s"
+              (String.concat ", " outside_contract))
+       else
+         let name =
+           match List.assoc_opt "name" overrides with
+           | Some (`String value) -> value
+           | _ -> "fixture"
+         in
+         let base_fields =
+           match current_meta_json_fixture ~name () with
+           | `Assoc fields -> fields
+           | _ -> assert false
+         in
+         let persisted_overrides =
+           List.filter
+             (fun (key, _) -> List.mem key current_field_names)
+             overrides
+         in
+         let overlay_overrides =
+           List.filter
+             (fun (key, _) -> List.mem key overlay_field_names)
+             overrides
+         in
+         let fields =
+           List.fold_left
+             (fun fields ((key, _) as field) ->
+                field :: List.remove_assoc key fields)
+             base_fields
+             persisted_overrides
+         in
+         (match Masc.Keeper_meta_json_parse.meta_of_json (`Assoc fields) with
+          | Error _ as error -> error
+          | Ok meta ->
+            List.fold_left
+              (fun result field ->
+                 Result.bind result (fun meta -> apply_overlay meta field))
+              (Ok meta)
+              overlay_overrides))
+  | other -> Masc.Keeper_meta_json_parse.meta_of_json other
 
 (** Walk up the directory tree from [Sys.getcwd()] until [dune-project] is
     found, then return that directory.

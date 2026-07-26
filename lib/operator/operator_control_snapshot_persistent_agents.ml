@@ -2,14 +2,14 @@
     [operator_control_snapshot.ml] (godfile decomp).
 
     [persistent_agents_json ?keeper_names ?keeper_rows config]
-    produces a `{ count; items }` JSON object describing the
+    produces a `{ count; items; unavailable }` JSON object describing the
     persistent keeper agents:
 
     - When [keeper_rows] is given, projects the row fields onto the
       operator snapshot schema (lossless filter — values are forwarded
       through `field_or_null`, no field synthesis).
     - When [keeper_rows] is absent, walks
-      [Keeper_meta_store.persistent_agent_names config] (or the explicit
+      [Keeper_meta_store.discover_persistent_agents config] (or the explicit
       [?keeper_names]), reads each keeper meta, asks
       [Dashboard_cache.get_or_compute] for a 2s-cached
       [Keeper_status_runtime.parse_agent_status] view, and assembles the
@@ -21,6 +21,10 @@
 include Operator_control_context_snapshot
 
 let persistent_agents_json ?keeper_names ?keeper_rows config =
+  let unavailable = Keeper_meta_store.current_meta_unavailable_facts config in
+  let discovered_names () =
+    (Keeper_meta_store.discover_persistent_agents config).names
+  in
   let rows_from_keeper_rows names rows =
     let wanted = List.sort_uniq String.compare names in
     let wanted_tbl = Hashtbl.create (List.length wanted) in
@@ -76,14 +80,14 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
       let names =
         match keeper_names with
         | Some names -> names
-        | None -> Keeper_meta_store.persistent_agent_names config
+        | None -> discovered_names ()
       in
       rows_from_keeper_rows names rows
     | None ->
       let names =
         match keeper_names with
         | Some names -> names
-        | None -> Keeper_meta_store.persistent_agent_names config
+        | None -> discovered_names ()
       in
       let agent_status_cache_ttl_s = 2.0 in
       List.filter_map
@@ -131,5 +135,10 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                     @ keeper_context_snapshot_fields context_snapshot)))
         names
   in
-  `Assoc [ "count", `Int (List.length rows); "items", `List rows ]
+  `Assoc
+    [ "count", `Int (List.length rows)
+    ; "items", `List rows
+    ; ( "unavailable"
+      , Keeper_meta_store.current_meta_unavailable_collection_to_yojson unavailable )
+    ]
 ;;

@@ -171,7 +171,6 @@ let test_compute_context_ratio_resolves_budget_and_clamps_at_ceiling () =
             ("name", `String "ctx-ratio-demo");
             ("agent_name", `String "keeper-ctx-ratio-demo-agent");
             ("trace_id", `String "trace-ctx-ratio-demo");
-            ("runtime_id", `String "primary");
           ])
     with
     | Ok meta -> meta
@@ -343,7 +342,6 @@ let context_test_meta ~name ~last_input_tokens =
           [ "name", `String name
           ; "agent_name", `String (name ^ "-agent")
           ; "trace_id", `String ("trace-" ^ name)
-          ; "runtime_id", `String "primary"
           ])
     with
     | Ok meta -> meta
@@ -545,7 +543,6 @@ let test_keeper_up_clears_dead_tombstone_resume_state () =
             ("name", `String keeper_name);
             ("agent_name", `String (Keeper_identity.keeper_agent_name keeper_name));
             ("trace_id", `String "trace-dead-tombstone-operator-resume");
-            ("runtime_id", `String "runtime.primary");
           ])
     with
     | Error err -> Alcotest.fail ("keeper meta fixture failed: " ^ err)
@@ -764,7 +761,6 @@ let test_lifecycle_owner_gates_meta_and_registry_mutations () =
               [ "name", `String "reserved-dead"
               ; "agent_name", `String (Keeper_identity.keeper_agent_name "reserved-dead")
               ; "trace_id", `String "trace-reserved-dead"
-              ; "runtime_id", `String "runtime.primary"
               ])
         with
         | Ok meta -> meta
@@ -874,7 +870,6 @@ let test_dead_revival_launch_failure_rolls_back_both_authorities () =
               [ "name", `String keeper_name
               ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
               ; "trace_id", `String "trace-dead-revival-rollback"
-              ; "runtime_id", `String "runtime.primary"
               ])
         with
         | Error detail -> Alcotest.fail detail
@@ -993,7 +988,6 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
                 ("name", `String keeper_name);
                 ("agent_name", `String (Keeper_identity.keeper_agent_name keeper_name));
                 ("trace_id", `String "trace-paused-runtime-trust");
-                ("runtime_id", `String "runtime.primary");
               ])
         with
         | Ok meta ->

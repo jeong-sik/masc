@@ -41,7 +41,6 @@ let with_source_terminal_lane f =
               [ "name", `String keeper_name
               ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
               ; "trace_id", `String "trace-paused-source-terminal-owner"
-              ; "runtime_id", `String "runtime.primary"
               ; "autoboot_enabled", `Bool false
               ])
          |> require_ok "parse Keeper metadata fixture"

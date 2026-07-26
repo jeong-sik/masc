@@ -56,7 +56,6 @@ let meta_with_persisted_error ~proactive_ts ~last_turn_ts =
         [ ("name", `String "stalekeeper")
         ; ("agent_name", `String "keeper-stalekeeper-agent")
         ; ("trace_id", `String "trace-stalekeeper")
-        ; ("runtime_id", `String "ollama_cloud.deepseek-v4-flash")
         ; ("last_proactive_outcome", `String "error")
         ; ("last_proactive_reason", `String error_reason)
         ; ("last_proactive_ts", `Float proactive_ts)

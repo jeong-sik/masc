@@ -637,7 +637,12 @@ let snapshot_json
     in
     let persistent_keeper_names =
       if initialized && include_keepers
-      then Keeper_meta_store.persistent_agent_names config
+      then (Keeper_meta_store.discover_persistent_agents config).names
+      else []
+    in
+    let keeper_current_meta_unavailable =
+      if initialized && include_keepers
+      then Keeper_meta_store.current_meta_unavailable_facts config
       else []
     in
   let board_attention_quarantines =
@@ -655,6 +660,9 @@ in
          ; "server_profile", operator_server_profile_json
          ; "judgment_owner", `String "fallback_read_model"
          ; "authoritative_judgment_available", `Bool false
+         ; ( "keeper_current_meta_unavailable"
+           , Keeper_meta_store.current_meta_unavailable_collection_to_yojson
+               keeper_current_meta_unavailable )
          ; "inference_inflight", Inference_inflight_observation.snapshot_json ()
          ; "workspace", workspace_json config
          ; "board_attention_quarantines", board_attention_quarantines

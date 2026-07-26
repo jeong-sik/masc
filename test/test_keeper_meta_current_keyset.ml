@@ -1,9 +1,4 @@
-(** Drift gate for [canonical_keeper_meta_key_names].
-
-    Persisted keeper meta JSON is runtime-only; config fields live in TOML.
-    The reflection-via-roundtrip pattern in [keeper_meta_json.ml] derives the
-    canonical runtime key list by parsing a minimal seed JSON and
-    re-serialising it. *)
+(** Drift gate for the explicit current Keeper-meta key set. *)
 
 open Masc
 
@@ -32,14 +27,8 @@ let test_canonical_includes_runtime_keys () =
         (List.mem key canonical))
     target_keys
 
-(* Regression: the persisted identity-counter JSON key stays ["generation"]
-   even though the OCaml field is [nonce] (every other JSON surface — keeper
-   status, dashboard — already keeps this key while reading [rt.nonce]).
-   Renaming the wire key would load every pre-rename on-disk meta file as
-   [nonce = 0] and silently reset the fencing counter. The round-trip pins both
-   sides: a [generation:7] input must load its counter (not default to 0 when a
-   ["nonce"] key is absent) and re-serialise under ["generation"] (not
-   ["nonce"]). *)
+(* The current persisted identity-counter key is ["generation"] while the
+   in-memory field is [nonce]. The exact round-trip pins that current mapping. *)
 let test_persisted_identity_counter_key_is_generation () =
   let input =
     match Masc_test_deps.current_meta_json_fixture ~name:"meta-wire-key" () with
@@ -73,7 +62,7 @@ let test_persisted_identity_counter_key_is_generation () =
 
 let () =
   Alcotest.run
-    "keeper_meta_canonical_seed"
+    "keeper_meta_current_keyset"
     [ ( "drift_gate"
       , [ Alcotest.test_case
             "runtime keys present"

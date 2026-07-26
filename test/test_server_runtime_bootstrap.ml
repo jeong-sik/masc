@@ -1195,9 +1195,7 @@ let make_keeper_meta_json ?(name = "sangsu")
           ("name", `String name);
           ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
           ("trace_id", `String trace_id);
-          ("runtime_id", `String (fixture_runtime_id ()));
           ("updated_at", `String updated_at);
-          ("last_model_used", `String "llama:auto");
         ])
   with
   | Ok meta -> Keeper_meta_json.meta_to_json meta |> Yojson.Safe.pretty_to_string
@@ -1213,9 +1211,7 @@ let make_keeper_meta ?(paused = false) ?(name = "sangsu")
           ("name", `String name);
           ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
           ("trace_id", `String trace_id);
-          ("runtime_id", `String (fixture_runtime_id ()));
           ("updated_at", `String updated_at);
-          ("last_model_used", `String "llama:auto");
         ])
   with
   | Ok meta ->

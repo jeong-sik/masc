@@ -18,10 +18,12 @@ let reconcile_keepalive_keepers
   (ctx : _ context)
   =
   let base_path = ctx.config.base_path in
-  let names = Keeper_meta_store.keepalive_keeper_names ctx.config in
+  let discovery = Keeper_meta_store.discover_keepalive_keepers ctx.config in
+  let names = discovery.names in
   Log.Keeper.debug
-    "reconcile_keepalive_keepers: started (candidates=%d)"
-    (List.length names);
+    "reconcile_keepalive_keepers: started (candidates=%d unavailable=%d)"
+    (List.length names)
+    (List.length discovery.unavailable);
   let t0 = Time_compat.now () in
   let reconcile_ym = Eio_guard.create_yield_meter () in
   let inc_reconcile_failure ~name ~operation =
@@ -36,6 +38,15 @@ let reconcile_keepalive_keepers
       ~labels:[ "keeper", name; "operation", "reconcile_materialize" ]
       ()
   in
+  List.iter
+    (fun unavailable ->
+       inc_reconcile_failure
+         ~name:unavailable.Keeper_meta_store.keeper_name
+         ~operation:"current_meta_unavailable";
+       Log.Keeper.warn
+         "reconcile: %s"
+         (Keeper_meta_store.current_meta_unavailable_message unavailable))
+    discovery.unavailable;
   let reconcile_meta meta =
     let dominated_by_sweep =
       match Keeper_registry.get ~base_path meta.name with

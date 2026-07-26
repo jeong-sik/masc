@@ -6,7 +6,7 @@
 
 open Keeper_types_profile
 open Keeper_meta_contract
-include Keeper_meta_json_scrub
+include Keeper_meta_json_current_schema
 
 let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
   let rt = m.runtime in
@@ -99,29 +99,3 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
 include Keeper_meta_json_parse
 
 let canonical_keeper_meta_key_names = current_field_names
-
-let unknown_keeper_meta_keys (json : Yojson.Safe.t) : string list =
-  match json with
-  | `Assoc fields ->
-    fields
-    |> List.filter_map (fun (key, _) ->
-      if List.mem key canonical_keeper_meta_key_names
-      then None
-      else Some key)
-    |> dedupe_keep_order
-  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> []
-;;
-
-let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
-  match unknown_keeper_meta_keys json with
-  | [] -> ()
-  | unknown ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string MetaJsonFailures)
-      ~labels:[("site", "unknown_keys")]
-      ();
-    Log.Keeper.warn
-      "keeper meta %s has unknown keys: %s"
-      path
-      (String.concat ", " unknown)
-;;

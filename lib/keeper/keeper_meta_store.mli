@@ -1,9 +1,31 @@
-(** Keeper meta store I/O and CAS write helpers.
+(** Keeper meta store I/O and CAS write helpers. *)
 
-    Included by [Keeper_types] so existing [Keeper_types.*] callers
-    keep their public API while durable meta storage is separated
-    from the compatibility facade. *)
+type current_meta_unavailable_reason =
+  | Invalid_current
+  | Read_failed
 
+type current_meta_unavailable =
+  { keeper_name : string
+  ; path_identity : string
+  ; reason : current_meta_unavailable_reason
+  ; detail : string
+  }
+
+type keeper_name_discovery =
+  { names : string list
+  ; unavailable : current_meta_unavailable list
+  }
+
+exception Current_meta_unavailable of current_meta_unavailable
+
+val current_meta_unavailable_reason_to_string :
+  current_meta_unavailable_reason -> string
+
+val current_meta_unavailable_message : current_meta_unavailable -> string
+val current_meta_unavailable_to_yojson : current_meta_unavailable -> Yojson.Safe.t
+
+val current_meta_unavailable_collection_to_yojson :
+  current_meta_unavailable list -> Yojson.Safe.t
 
 (** Hook invoked after each successful [write_meta] /
     [write_meta_with_merge]. Reset by the runtime to keep
@@ -26,6 +48,10 @@ val version_conflict_re : Re.re
 val read_meta_file_path :
   string -> (Keeper_meta_contract.keeper_meta option, string) result
 
+val read_meta_file_path_current :
+  string ->
+  (Keeper_meta_contract.keeper_meta option, current_meta_unavailable) result
+
 (** [true] when [f] has an exact canonical Keeper-metadata interpretation. *)
 val is_keeper_meta_file : string -> bool
 
@@ -41,21 +67,23 @@ val configured_keeper_names : Workspace.config -> string list
 val keeper_names_result : Workspace.config -> (string list, string) result
 val keeper_names : Workspace.config -> string list
 
+val current_meta_unavailable_facts :
+  Workspace.config -> current_meta_unavailable list
+
 (** Default autoboot policy when a keeper has TOML config but no
     persisted JSON yet. *)
 val declarative_autoboot_enabled_by_default : Workspace.config -> string -> bool
 val effective_autoboot_enabled :
   Workspace.config -> string -> Keeper_meta_contract.keeper_meta -> bool
 
-(** Names of keepers eligible for the keepalive fiber set —
-    autoboot enabled, not paused. Logs and excludes on read failure
-    (issue #8377). *)
-val keepalive_keeper_names : Workspace.config -> string list
+(** Keepers eligible for the keepalive fiber set plus every current-meta fact
+    that prevented an eligibility decision. *)
+val discover_keepalive_keepers :
+  Workspace.config -> keeper_name_discovery
 
-(** Names of keepers expected to persist across sessions. Mirrors
-    [keepalive_keeper_names] for readers caring about durability
-    rather than the keepalive fiber. *)
-val persistent_agent_names : Workspace.config -> string list
+(** Persistent keeper discovery without collapsing unavailable rows. *)
+val discover_persistent_agents :
+  Workspace.config -> keeper_name_discovery
 
 (** Read the keeper meta for [name]. The name is the canonical keeper
     filename component; agent-name aliases are not retried here. Callers
@@ -82,13 +110,13 @@ val read_effective_meta :
   Workspace.config -> string -> (Keeper_meta_contract.keeper_meta option, string) result
 
 (** Read keeper meta only if the canonical [name] file's mtime exceeds
-    [last_mtime]. Returns [Some (meta, mtime)] when changed, [None] when
-    unchanged, missing, or unparsable (logs the parse-failure case). *)
+    [last_mtime]. Unchanged/missing is [Ok None]; an unreadable current row is
+    a typed error and can never masquerade as unchanged. *)
 val read_meta_if_changed :
   Workspace.config ->
   string ->
   last_mtime:float ->
-  (Keeper_meta_contract.keeper_meta * float) option
+  ((Keeper_meta_contract.keeper_meta * float) option, current_meta_unavailable) result
 
 (** Atomic write of [persisted] to [path]; runs the
     [runtime_meta_write_sync_hook] on success. *)
@@ -257,5 +285,5 @@ val persist_transcript_corruption_pause :
   ([ `Persisted | `No_durable_meta ], string) result
 (** CAS-merge the existing fail-closed pause surface after structural
     transcript corruption. A dead tombstone remains stronger and every other
-    live/pause state becomes typed reset-required state. No decoder, migration,
-    or automatic retry state is created. *)
+    live/pause state becomes typed reset-required state. No decoder or
+    automatic retry state is created. *)

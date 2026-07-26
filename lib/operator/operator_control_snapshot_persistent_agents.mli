@@ -5,4 +5,5 @@ val persistent_agents_json :
   ?keeper_rows:Yojson.Safe.t list ->
   Workspace.config ->
   Yojson.Safe.t
-(** Build the persistent keeper-agent `{ count; items }` JSON object. *)
+(** Build the persistent keeper-agent `{ count; items; unavailable }` JSON
+    object. Unavailable current metadata is never synthesized as a keeper row. *)

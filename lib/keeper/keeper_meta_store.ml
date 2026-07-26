@@ -9,6 +9,97 @@ open Keeper_types_profile
 open Keeper_meta_contract
 open Keeper_meta_json
 
+type current_meta_unavailable_reason =
+  | Invalid_current
+  | Read_failed
+
+type current_meta_unavailable =
+  { keeper_name : string
+  ; path_identity : string
+  ; reason : current_meta_unavailable_reason
+  ; detail : string
+  }
+
+type keeper_name_discovery =
+  { names : string list
+  ; unavailable : current_meta_unavailable list
+  }
+
+exception Current_meta_unavailable of current_meta_unavailable
+
+let current_meta_unavailable_reason_to_string = function
+  | Invalid_current -> "invalid_current"
+  | Read_failed -> "read_failed"
+;;
+
+let current_meta_unavailable_message unavailable =
+  Printf.sprintf
+    "keeper current meta unavailable keeper=%s path=%s reason=%s detail=%s"
+    unavailable.keeper_name
+    unavailable.path_identity
+    (current_meta_unavailable_reason_to_string unavailable.reason)
+    unavailable.detail
+;;
+
+let () =
+  Printexc.register_printer (function
+    | Current_meta_unavailable unavailable ->
+      Some (current_meta_unavailable_message unavailable)
+    | _ -> None)
+;;
+
+let current_meta_unavailable_to_yojson unavailable =
+  `Assoc
+    [ "keeper_name", `String unavailable.keeper_name
+    ; "path_identity", `String unavailable.path_identity
+    ; ( "reason"
+      , `String (current_meta_unavailable_reason_to_string unavailable.reason) )
+    ; "detail", `String unavailable.detail
+    ; "reset_required", `Bool (unavailable.reason = Invalid_current)
+    ]
+;;
+
+let current_meta_unavailable_collection_to_yojson unavailable =
+  let unavailable =
+    List.sort
+      (fun left right -> String.compare left.keeper_name right.keeper_name)
+      unavailable
+  in
+  let reset_required =
+    List.exists (fun item -> item.reason = Invalid_current) unavailable
+  in
+  `Assoc
+    [ "schema", `String "masc.keeper_current_meta_unavailable.v1"
+    ; ( "status"
+      , `String
+          (if unavailable = []
+           then "ok"
+           else if reset_required
+           then "blocked"
+           else "unavailable") )
+    ; "operator_action_required", `Bool (unavailable <> [])
+    ; "reset_required", `Bool reset_required
+    ; "count", `Int (List.length unavailable)
+    ; "items", `List (List.map current_meta_unavailable_to_yojson unavailable)
+    ]
+;;
+
+let current_meta_unavailable ~path ~reason ~detail:_ =
+  let path_identity = Filename.basename path in
+  let keeper_name =
+    match Keeper_runtime_root_entry.metadata_keeper_name path_identity with
+    | Some name -> name
+    | None -> "unidentified"
+  in
+  let detail =
+    match reason with
+    | Invalid_current ->
+      "keeper current metadata does not match the current schema; runtime reset required"
+    | Read_failed -> "keeper current metadata could not be read"
+  in
+  { keeper_name; path_identity; reason; detail }
+;;
+
 let runtime_meta_write_sync_hook_atomic
     : (Workspace.config -> Keeper_meta_contract.keeper_meta -> unit) Atomic.t
   =
@@ -23,36 +114,58 @@ let register_runtime_meta_write_sync f =
 
 let version_conflict_re = Re.Pcre.re "meta version conflict" |> Re.compile
 
-let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string) result =
+let read_meta_file_path_current path
+    : (Keeper_meta_contract.keeper_meta option, current_meta_unavailable) result =
   if not (Fs_compat.file_exists path)
   then Ok None
   else (
-    match Safe_ops.read_json_file_safe path with
-    | Error e -> Error e
-    | Ok json ->
-      (match unknown_keeper_meta_keys json with
-       | unknown :: rest ->
-         let unknown = unknown :: rest in
-         warn_unknown_keeper_meta_keys ~path json;
+    match Safe_ops.read_file_safe path with
+    | Error raw_detail ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string MetaReadFailures)
+        ~labels:[("keeper", "aggregate"); ("site", "meta_read")]
+        ();
+      Log.Keeper.warn "keeper current meta read failed for %s: %s" path raw_detail;
+      Error
+        (current_meta_unavailable
+           ~path
+           ~reason:Read_failed
+           ~detail:raw_detail)
+    | Ok raw_json ->
+      (match Yojson.Safe.from_string raw_json with
+       | exception Yojson.Json_error raw_detail ->
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string MetaReadFailures)
-           ~labels:[("keeper", "aggregate"); ("site", "meta_schema_unknown_keys")]
+           ~labels:[("keeper", "aggregate"); ("site", "meta_parse")]
            ();
+         Log.Keeper.warn
+           "keeper current meta JSON parse failed for %s: %s"
+           path
+           raw_detail;
          Error
-           (Printf.sprintf
-              "keeper meta schema is incompatible at %s (unknown keys: %s); runtime reset required"
-              path
-              (String.concat ", " unknown))
-       | [] ->
-         (match meta_of_json json with
-          | Ok meta -> Ok (Some meta)
-          | Error e ->
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string MetaReadFailures)
-              ~labels:[("keeper", "aggregate"); ("site", "meta_parse")]
-              ();
-            Log.Keeper.warn "keeper meta parse failed for %s: %s" path e;
-            Error e)))
+           (current_meta_unavailable
+              ~path
+              ~reason:Invalid_current
+              ~detail:raw_detail)
+       | json ->
+      (match meta_of_json json with
+       | Ok meta -> Ok (Some meta)
+       | Error detail ->
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string MetaReadFailures)
+           ~labels:[("keeper", "aggregate"); ("site", "meta_parse")]
+           ();
+         Log.Keeper.warn "keeper current meta parse failed for %s: %s" path detail;
+         Error
+           (current_meta_unavailable
+              ~path
+              ~reason:Invalid_current
+              ~detail))))
+;;
+
+let read_meta_file_path path : (Keeper_meta_contract.keeper_meta option, string) result =
+  read_meta_file_path_current path
+  |> Result.map_error current_meta_unavailable_message
 ;;
 
 let is_keeper_meta_file f =
@@ -101,13 +214,24 @@ let keeper_names config =
      JSON files are scoped to the server's base_path, so test isolation works.
      Overlay keepers (from .masc/config/keepers/*.toml) are materialized to
      JSON at boot by load_or_materialize_boot_meta, so they appear here too.
-     Every canonical root [.json] is metadata authority; retired dataset
-     exports no longer compete for the same basename. *)
+     Every canonical root [.json] is metadata authority. *)
   match keeper_names_result config with
   | Ok names -> names
   | Error msg ->
     Log.Keeper.warn "keeper_names: %s" msg;
     []
+;;
+
+let current_meta_unavailable_facts config =
+  let names =
+    dedupe_keep_order (configured_keeper_names config @ keeper_names config)
+  in
+  List.filter_map
+    (fun name ->
+       match read_meta_file_path_current (keeper_meta_path config name) with
+       | Ok _ -> None
+       | Error unavailable -> Some unavailable)
+    names
 ;;
 
 let declarative_autoboot_enabled_by_default config name =
@@ -136,64 +260,40 @@ let effective_autoboot_enabled config name meta =
      | None -> meta.autoboot_enabled)
 ;;
 
-let keepalive_keeper_names config =
+let discover_configured_keepers config ~include_missing =
   configured_keeper_names config
-  |> List.filter_map (fun name ->
-    match read_meta_file_path (keeper_meta_path config name) with
-    | Ok (Some meta)
-      when (not meta.paused) && effective_autoboot_enabled config name meta ->
-        Some meta.name
-    | Ok (Some _) -> None
-    | Ok None ->
-      if declarative_autoboot_enabled_by_default config name then Some name
-      else None
-    | Error msg ->
-      (* Issue #8377: was [_ -> None] which collapsed read/parse
-         failures silently into "name disappeared". Discovery would
-         treat a corrupt meta file as if the keeper was deleted,
-         hiding the operational issue. Now logs and excludes so the
-         degraded state is operator-visible. *)
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string MetaReadFailures)
-        ~labels:[("keeper", name); ("site", "keepalive_read")]
-        ();
-      Log.Keeper.warn
-        "keepalive_keeper_names: meta read failed for %s, dropping from keepalive set: %s"
-        name
-        msg;
-      None)
+  |> List.fold_left
+       (fun discovery name ->
+          match read_meta_file_path_current (keeper_meta_path config name) with
+          | Ok (Some meta)
+            when (not meta.paused) && effective_autoboot_enabled config name meta ->
+            { discovery with names = meta.name :: discovery.names }
+          | Ok (Some _) -> discovery
+          | Ok None when include_missing config name ->
+            { discovery with names = name :: discovery.names }
+          | Ok None -> discovery
+          | Error unavailable ->
+            Log.Keeper.warn
+              "keeper discovery observed %s"
+              (current_meta_unavailable_message unavailable);
+            { discovery with
+              unavailable = unavailable :: discovery.unavailable
+            })
+       { names = []; unavailable = [] }
+  |> fun discovery ->
+  { names = List.rev discovery.names
+  ; unavailable = List.rev discovery.unavailable
+  }
 ;;
 
-(** Names of keepers that should be running across sessions.
-    A keeper is "persistent" when its on-disk meta has autoboot enabled
-    and is not currently paused - i.e. the operator expects the runtime
-    to keep it alive after restart.
+let discover_keepalive_keepers config =
+  discover_configured_keepers
+    config
+    ~include_missing:declarative_autoboot_enabled_by_default
+;;
 
-    Mirrors [keepalive_keeper_names] for readers that care about
-    durability rather than the keepalive fiber. *)
-let persistent_agent_names config =
-  configured_keeper_names config
-  |> List.filter_map (fun name ->
-    match read_meta_file_path (keeper_meta_path config name) with
-    | Ok (Some meta)
-      when (not meta.paused) && effective_autoboot_enabled config name meta ->
-        Some meta.name
-    | Ok (Some _) -> None
-    | Ok None -> None
-    | Error msg ->
-      (* Issue #8377: same anti-pattern as keepalive_keeper_names:
-         Error was silently collapsed into None. Operator can't
-         distinguish "keeper intentionally not persistent" from
-         "meta file is corrupt and we couldn't read it". *)
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string MetaReadFailures)
-        ~labels:[("keeper", name); ("site", "persistent_read")]
-        ();
-      Log.Keeper.warn
-        "persistent_agent_names: meta read failed for %s, treating as non-persistent: %s"
-        name
-        msg;
-      None)
+let discover_persistent_agents config =
+  discover_configured_keepers config ~include_missing:(fun _ _ -> false)
 ;;
 
 let read_meta_resolved config name : ((string * Keeper_meta_contract.keeper_meta) option, string) result =
@@ -244,37 +344,22 @@ let read_effective_meta config name
   | Error _ as err -> err
 ;;
 
-(** Read keeper meta only if the file's mtime has changed since [last_mtime].
-    Returns [Some (meta, new_mtime)] when the file changed, [None] when
-    unchanged. Avoids parsing JSON on every heartbeat cycle when no
-    operator has modified the meta file. *)
-let read_meta_if_changed config name ~(last_mtime : float) : (Keeper_meta_contract.keeper_meta * float) option =
+(** Read keeper meta only if the file's mtime has changed since [last_mtime]. *)
+let read_meta_if_changed config name ~(last_mtime : float)
+    : ((Keeper_meta_contract.keeper_meta * float) option, current_meta_unavailable) result =
   let requested_name = String.trim name in
   let read_candidate candidate =
     let path = keeper_meta_path config candidate in
     if not (Fs_compat.file_exists path)
-    then None
+    then Ok None
     else (
       match Fs_compat.file_mtime path with
       | Some mtime when mtime > last_mtime ->
-        (match read_meta_file_path path with
-         | Ok (Some meta) -> Some (meta, mtime)
-         | Ok None -> None
-         | Error msg ->
-           (* Issue #8377: was [_ -> None] which silently treated a
-              read/parse failure as "no change". Now logs so an
-              operator can correlate stale UI with bad meta JSON. *)
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string MetaReadFailures)
-             ~labels:[("keeper", "aggregate"); ("site", "changed_parse")]
-             ();
-           Log.Keeper.warn
-             "read_meta_if_changed: parse failed for %s (mtime=%.0f): %s"
-             path
-             mtime
-             msg;
-           None)
-      | _ -> None)
+        (match read_meta_file_path_current path with
+         | Ok (Some meta) -> Ok (Some (meta, mtime))
+         | Ok None -> Ok None
+         | Error unavailable -> Error unavailable)
+      | _ -> Ok None)
   in
   read_candidate requested_name
 ;;

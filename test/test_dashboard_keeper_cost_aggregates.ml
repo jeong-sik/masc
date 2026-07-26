@@ -28,8 +28,6 @@ let make_meta name =
           ("name", `String name);
           ("agent_name", `String name);
           ("trace_id", `String ("trace-" ^ name));
-          ("runtime_id", `String "test-runtime");
-          ("last_model_used", `String "test-model");
         ])
   with
   | Ok meta -> meta

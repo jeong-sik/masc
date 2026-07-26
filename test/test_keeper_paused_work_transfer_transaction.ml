@@ -32,7 +32,6 @@ let write_meta config ~keeper_name ~trace_id ~generation ~paused =
          [ "name", `String keeper_name
          ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
          ; "trace_id", `String trace_id
-         ; "runtime_id", `String "runtime.primary"
          ; "autoboot_enabled", `Bool false
          ])
     |> require_ok "parse Keeper metadata fixture"

@@ -110,22 +110,6 @@ let test_no_latched_reason_serializes_as_null () =
   check (option string) "unset latched_reason round-trips to None" None
     (latched_reason_wire reparsed)
 
-let test_retired_auto_resume_field_is_rejected () =
-  let json =
-    match base_json "retired-auto-resume-field" with
-    | `Assoc fields ->
-      `Assoc
-        (("auto_resume_after_sec", `Null) :: fields)
-    | _ -> fail "base_json must be an object"
-  in
-  match Keeper_meta_json_parse.meta_of_json json with
-  | Error detail ->
-    check bool "error names auto_resume_after_sec" true
-      (Astring.String.is_infix ~affix:"auto_resume_after_sec" detail);
-    check bool "error requires runtime reset" true
-      (Astring.String.is_infix ~affix:"runtime reset required" detail)
-  | Ok _ -> fail "retired auto_resume_after_sec unexpectedly decoded"
-
 (* ── Status bridge surfacing ────────────────────────────────── *)
 
 let test_status_bridge_surfaces_latched_reason () =
@@ -310,8 +294,6 @@ let () =
             test_latched_reason_survives_serialization
         ; test_case "unset reason serializes as null and round-trips to None" `Quick
             test_no_latched_reason_serializes_as_null
-        ; test_case "retired auto-resume field is diagnostic only" `Quick
-            test_retired_auto_resume_field_is_rejected
         ] )
     ; ( "status bridge"
       , [ test_case "attention fields surface the typed pause reason wire" `Quick

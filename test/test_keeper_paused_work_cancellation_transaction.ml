@@ -44,7 +44,6 @@ let with_seeded_owner ?(registered = true) ?latched_reason ~paused ~generation f
               [ "name", `String keeper_name
               ; "agent_name", `String (Keeper_identity.keeper_agent_name keeper_name)
               ; "trace_id", `String "trace-paused-cancel-owner"
-              ; "runtime_id", `String "runtime.primary"
               ; "autoboot_enabled", `Bool false
               ])
          |> require_ok "parse Keeper metadata fixture"

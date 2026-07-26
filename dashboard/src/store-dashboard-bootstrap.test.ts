@@ -93,6 +93,7 @@ describe('refreshDashboard bootstrap', () => {
       },
       goals: {
         generated_at: '2026-05-14T06:00:03Z',
+        approval_queue_state: { state: 'ready' },
         tree: [],
         summary: { total_goals: 0 },
       },
@@ -183,6 +184,7 @@ describe('refreshDashboard bootstrap', () => {
     })
     apiMocks.fetchDashboardGoalsTree.mockResolvedValue({
       generated_at: '2026-06-25T00:00:01Z',
+      approval_queue_state: { state: 'ready' },
       tree: [],
       summary: { total_goals: 7, total_tasks: 124 },
     })
@@ -206,7 +208,12 @@ describe('refreshDashboard bootstrap', () => {
       rollup: {},
       workspace_fsm: null,
     })
-    const treePayload = { generated_at: '2026-06-25T00:00:01Z', tree: [], summary: { total_goals: 1 } }
+    const treePayload = {
+      generated_at: '2026-06-25T00:00:01Z',
+      approval_queue_state: { state: 'ready' as const },
+      tree: [],
+      summary: { total_goals: 1 },
+    }
     let resolveTree: (value: unknown) => void = () => {}
     apiMocks.fetchDashboardGoalsTree.mockImplementation(() => new Promise(resolve => {
       resolveTree = resolve
@@ -252,6 +259,7 @@ describe('refreshDashboard bootstrap', () => {
     apiMocks.fetchDashboardPlanning.mockRejectedValue(new Error('planning offline'))
     apiMocks.fetchDashboardGoalsTree.mockResolvedValue({
       generated_at: '2026-06-25T00:00:01Z',
+      approval_queue_state: { state: 'ready' },
       tree: [],
       summary: { total_goals: 1, active_goals: 1, total_tasks: 2 },
     })
@@ -281,6 +289,7 @@ describe('refreshDashboard bootstrap', () => {
     })
     apiMocks.fetchDashboardGoalsTree.mockResolvedValue({
       generated_at: '2026-06-25T00:00:01Z',
+      approval_queue_state: { state: 'ready' },
       tree: null,
       summary: { total_goals: 1, active_goals: 1, total_tasks: 2 },
     })

@@ -282,8 +282,10 @@ export function App() {
 
   const approvalsBadge =
     gateData.value?.approval_queue_state?.state === 'ready'
-      ? gateData.value.approval_queue?.length
-      : undefined
+      ? { state: 'ready' as const, count: gateData.value.approval_queue?.length ?? 0 }
+      : gateData.value?.approval_queue_state?.state === 'unavailable'
+        ? gateData.value.approval_queue_state
+        : undefined
 
   // Body grid columns. Desktop: nav rail (58px) + single content column. Mobile:
   // a single 1fr column — the nav becomes a fixed bottom tab bar (.v2-nav.is-mnav),

@@ -85,8 +85,7 @@ function showGateModeSaved(result: SetGateModeResponse): void {
     case 'completed':
       showToast(
         `${saved} · Auto Judge backlog recovery 요청 처리 완료`
-        + ` (reopened ${result.reopened.toLocaleString()},`
-        + ` started ${result.started.toLocaleString()},`
+        + ` (started ${result.started.toLocaleString()},`
         + ` queued ${result.queued.toLocaleString()})`,
         'success',
       )

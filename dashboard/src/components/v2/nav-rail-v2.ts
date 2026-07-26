@@ -6,7 +6,7 @@
 import { html } from 'htm/preact'
 import { useState, useEffect } from 'preact/hooks'
 import { navigate, route } from '../../router'
-import type { TabId } from '../../types'
+import type { KeeperApprovalQueueState, TabId } from '../../types'
 import { ICONS, ICON_MORE, type IconKey } from './icons-v2'
 
 interface SurfaceEntry {
@@ -41,7 +41,9 @@ const SURFACES = [
 ] as const satisfies readonly NavEntry[]
 
 export interface NavBadges {
-  readonly approvals?: number
+  readonly approvals?:
+    | { readonly state: 'ready'; readonly count: number }
+    | Extract<KeeperApprovalQueueState, { state: 'unavailable' }>
 }
 
 type RailEntry = Exclude<(typeof SURFACES)[number], 'sep'>
@@ -77,9 +79,27 @@ const SURFACE_ENTRIES: readonly SurfaceEntry[] = SURFACES.filter((entry): entry 
 
 export function NavRailV2({ badges, mobile = false }: { badges?: NavBadges; mobile?: boolean }) {
   const active = route.value.tab
-  const badgeFor = (tab: TabId): number | undefined => {
-    if (tab === 'approvals') return badges?.approvals || undefined
+  const badgeFor = (tab: TabId): NavBadges['approvals'] => {
+    if (tab === 'approvals') return badges?.approvals
     return undefined
+  }
+  const badgeCount = (badge: NavBadges['approvals']): number =>
+    badge?.state === 'ready' ? badge.count : 0
+  const renderBadge = (badge: NavBadges['approvals']) => {
+    if (!badge) return null
+    if (badge.state === 'unavailable') {
+      return html`
+        <span
+          class="nav-badge"
+          data-severity=${badge.severity}
+          title=${`${badge.title}: ${badge.operator_detail}`}
+          aria-label=${`${badge.title}: ${badge.operator_detail}`}
+        >${badge.icon}</span>
+      `
+    }
+    return badge.count > 0
+      ? html`<span class="nav-badge">${badge.count}</span>`
+      : null
   }
 
   const [moreOpen, setMoreOpen] = useState(false)
@@ -90,13 +110,13 @@ export function NavRailV2({ badges, mobile = false }: { badges?: NavBadges; mobi
     const primary = MOBILE_PRIMARY.map((t) => byTab.get(t)).filter((e): e is SurfaceEntry => !!e)
     const hidden = SURFACE_ENTRIES.filter((e) => !MOBILE_PRIMARY.includes(e.tab))
     const moreActive = !MOBILE_PRIMARY.includes(active)
-    const hiddenBadge = hidden.reduce((n, e) => n + (badgeFor(e.tab) ?? 0), 0)
+    const hiddenBadge = hidden.reduce((n, e) => n + badgeCount(badgeFor(e.tab)), 0)
     const Tab = (e: SurfaceEntry) => {
       const badge = badgeFor(e.tab)
       return html`
         <button key=${e.tab} class=${`nav-item ${active === e.tab ? 'on' : ''}`} onClick=${() => navigate(e.tab)} title=${e.label}>
           ${ICONS[e.icon]}<span class="nlbl">${e.label}</span>
-          ${badge ? html`<span class="nav-badge">${badge}</span>` : null}
+          ${renderBadge(badge)}
         </button>
       `
     }
@@ -121,7 +141,7 @@ export function NavRailV2({ badges, mobile = false }: { badges?: NavBadges; mobi
                       <button key=${e.tab} class=${`mnav-tile ${active === e.tab ? 'on' : ''}`} onClick=${() => { navigate(e.tab); setMoreOpen(false) }}>
                         <span class="mnav-ic">${ICONS[e.icon]}</span>
                         <span class="mnav-lbl">${e.label}</span>
-                        ${badge ? html`<span class="nav-badge">${badge}</span>` : null}
+                        ${renderBadge(badge)}
                       </button>
                     `
                   })}
@@ -156,7 +176,7 @@ export function NavRailV2({ badges, mobile = false }: { badges?: NavBadges; mobi
                   title=${entry.label}
                 >
                   ${ICONS[entry.icon]}<span class="nlbl">${entry.label}</span>
-                  ${badge ? html`<span class="nav-badge">${badge}</span>` : null}
+                  ${renderBadge(badge)}
                 </button>
               `
             })(),

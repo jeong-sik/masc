@@ -12,6 +12,7 @@ import {
   goalTreeData as treeData,
   goalTreeError as treeError,
   goalTreeLoading as treeLoading,
+  hydrateGoalTreeError,
   hydrateGoalTreeSnapshot,
 } from '../../goal-tree-state'
 import { workspaceFsmSnapshot } from '../../store'
@@ -275,7 +276,10 @@ async function refreshTree() {
   try {
     hydrateGoalTreeSnapshot(await fetchDashboardGoalsTree())
   } catch (err) {
-    treeError.value = errorToString(err)
+    if (!hydrateGoalTreeError(err)) {
+      treeData.value = null
+      treeError.value = errorToString(err)
+    }
   } finally {
     treeLoading.value = false
   }

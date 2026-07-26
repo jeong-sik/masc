@@ -21,7 +21,18 @@ import type {
   GoalTreeNode,
   GoalTreeSummary,
   GoalTreeTask,
+  KeeperApprovalQueueState,
 } from '../types'
+
+export class DashboardGoalsApprovalQueueUnavailableError extends Error {
+  readonly approval_queue_state: Extract<KeeperApprovalQueueState, { state: 'unavailable' }>
+
+  constructor(state: Extract<KeeperApprovalQueueState, { state: 'unavailable' }>) {
+    super(`${state.icon} ${state.title}: ${state.operator_detail}`)
+    this.name = 'DashboardGoalsApprovalQueueUnavailableError'
+    this.approval_queue_state = state
+  }
+}
 
 function decodeGoalTreeTask(raw: unknown): GoalTreeTask | null {
   if (!isRecord(raw)) return null
@@ -320,14 +331,15 @@ function decodeGoalTreeSummary(raw: unknown): GoalTreeSummary | null {
   }
 }
 
-function requireReadyApprovalQueue(raw: Record<string, unknown>): void {
+function requireReadyApprovalQueue(raw: Record<string, unknown>) {
   const state = decodeKeeperApprovalQueueState(raw.approval_queue_state)
   if (!state) {
     throw new Error('유효하지 않은 dashboard goals approval_queue_state payload')
   }
   if (state.state === 'unavailable') {
-    throw new Error(`${state.icon} ${state.title}: ${state.operator_detail}`)
+    throw new DashboardGoalsApprovalQueueUnavailableError(state)
   }
+  return state
 }
 
 function decodeGoalDetailKeeper(raw: unknown): GoalDetailKeeper | null {
@@ -376,7 +388,7 @@ function decodeGoalDetailTimelineEvent(raw: unknown): GoalDetailTimelineEvent | 
 
 function decodeDashboardGoalsTreeResponse(raw: unknown): DashboardGoalsTreeResponse | null {
   if (!isRecord(raw)) return null
-  requireReadyApprovalQueue(raw)
+  const approvalQueueState = requireReadyApprovalQueue(raw)
   if (!Array.isArray(raw.tree)) return null
   const tree = asRecordArray(raw.tree)
     .map(decodeGoalTreeNode)
@@ -385,8 +397,8 @@ function decodeDashboardGoalsTreeResponse(raw: unknown): DashboardGoalsTreeRespo
   if (!summary) return null
   const generatedAt = asString(raw.generated_at)
   return generatedAt
-    ? { generated_at: generatedAt, tree, summary }
-    : { tree, summary }
+    ? { generated_at: generatedAt, approval_queue_state: approvalQueueState, tree, summary }
+    : { approval_queue_state: approvalQueueState, tree, summary }
 }
 
 function decodeDashboardGoalDetailResponse(raw: unknown): DashboardGoalDetailResponse | null {

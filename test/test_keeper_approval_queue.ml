@@ -503,7 +503,11 @@ let test_install_serializes_snapshot_read_with_same_base_mutation () =
        (match report with
         | Error error -> Alcotest.fail (AQ.install_error_to_string error)
         | Ok report -> Alcotest.(check int) "empty snapshot installed" 0 report.loaded_pending);
-       Alcotest.(check int) "mutation remains in memory" 1 (List.length (AQ.list_pending_entries ()));
+       let pending =
+         AQ.list_pending_entries_for_workspace ~base_path
+         |> require_ok "read installed workspace queue"
+       in
+       Alcotest.(check int) "mutation remains in memory" 1 (List.length pending);
        Alcotest.(check bool)
          "mutation id remains addressable"
          true
@@ -669,11 +673,18 @@ let test_same_owner_drain_uses_sequence_not_wall_clock () =
          then [ first.id; second.id; other ]
          else [ other; first.id; second.id ]
        in
+       let actual_global =
+         [ base_path; other_base_path ]
+         |> List.sort String.compare
+         |> List.concat_map (fun base_path ->
+              AQ.list_pending_entries_for_workspace ~base_path
+              |> require_ok "read workspace-local FIFO")
+         |> List.map (fun (entry : AQ.pending_approval) -> entry.id)
+       in
        Alcotest.(check (list string))
-         "global projection groups deterministic workspace-local FIFO"
+         "workspace projections compose deterministic FIFO"
          expected_global
-         (AQ.list_pending_entries ()
-          |> List.map (fun (entry : AQ.pending_approval) -> entry.id));
+         actual_global;
        match
          Gate.For_testing.ready_auto_judges_for_owner
            ~base_path
@@ -1643,6 +1654,9 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
          false
          (run_exact_transition AQ.bind_summary_exact_attempt bind_identity);
        let before_id, before_identity = prepare "before-rename" in
+       let revision_before_failure =
+         AQ.store_revision_for_workspace ~base_path
+       in
        (match
           run_exact_transition_with_writer
             AQ.For_testing.bind_summary_exact_attempt_with_writer
@@ -1652,6 +1666,18 @@ let test_exact_attempt_staged_durability_and_idempotent_rewrite () =
         | Error (AQ.Exact_attempt_storage_error _) -> ()
         | Error error -> Alcotest.fail (AQ.exact_attempt_error_to_string error)
         | Ok _ -> Alcotest.fail "pre-rename binding failure reported success");
+         Alcotest.(check bool)
+           "runtime write failure advances queue authority"
+           true
+           (AQ.store_revision_for_workspace ~base_path
+            > revision_before_failure);
+         (match AQ.list_pending_entries_for_workspace ~base_path with
+          | Error _ -> ()
+          | Ok _ ->
+            Alcotest.fail
+              "runtime write failure did not latch workspace unavailable");
+         AQ.For_testing.reset_runtime_state ();
+         ignore (install_exn ~base_path);
          (match pending_entry_exn before_id with
           | { exact_attempt = AQ.Exact_unbound; _ } -> ()
           | _ -> Alcotest.fail "pre-rename failure mutated exact binding memory");
@@ -2085,10 +2111,6 @@ let test_current_snapshot_rejects_unbound_available_summary () =
        AQ.For_testing.reset_runtime_state ();
        (match AQ.install_persistence ~base_path with
         | Error (AQ.Install_storage_failed _) -> ()
-        | Error error ->
-          Alcotest.fail
-            ("impossible current snapshot returned the wrong error: "
-             ^ AQ.install_error_to_string error)
         | Ok _ ->
           Alcotest.fail
             "current snapshot installed Exact_unbound with an available summary");
@@ -2307,7 +2329,11 @@ let test_malformed_snapshot_fails_install_and_is_observed () =
         | Ok _ -> Alcotest.fail "malformed snapshot must not install"
        | Error (AQ.Install_storage_failed _) -> ()
         );
-       Alcotest.(check int) "no partial install" 0 (List.length (AQ.list_pending_entries ()));
+       Alcotest.(check bool)
+         "failed install leaves workspace unavailable"
+         true
+         (Result.is_error
+            (AQ.list_pending_entries_for_workspace ~base_path));
        (match
           AQ.submit_pending
             ~keeper_name:"queue-invalid-store"
@@ -2576,7 +2602,12 @@ let test_submit_surfaces_storage_failure () =
            ()
        with
        | Ok _ -> Alcotest.fail "submission must not succeed without durable storage"
-       | Error _ -> Alcotest.(check int) "memory not mutated" 0 (List.length (AQ.list_pending_entries ())))
+       | Error _ ->
+         (match AQ.list_pending_entries_for_workspace ~base_path with
+          | Ok entries ->
+            Alcotest.(check int) "memory not mutated" 0 (List.length entries)
+          | Error error ->
+            Alcotest.fail (AQ.storage_error_to_string error)))
 ;;
 
 let test_default_auto_judge_defers_without_blocking () =

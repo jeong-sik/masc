@@ -32,7 +32,6 @@ const baseResponse = {
   actor: 'operator',
   changed_at: '2026-07-16T00:00:00Z',
   recovery_error: null,
-  reopened: 0,
   started: 0,
   queued: 0,
 } as const
@@ -88,7 +87,6 @@ describe('setKeeperGateMode recovery result', () => {
     mocks.setGateMode.mockResolvedValue({
       ...baseResponse,
       recovery_status: 'completed',
-      reopened: 2,
       started: 1,
       queued: 1,
     })
@@ -97,7 +95,7 @@ describe('setKeeperGateMode recovery result', () => {
 
     expect(mocks.showToast).toHaveBeenCalledWith(
       'Gate 모드를 Auto Judge(으)로 저장했습니다 · Auto Judge backlog recovery 요청 처리 완료'
-      + ' (reopened 2, started 1, queued 1)',
+      + ' (started 1, queued 1)',
       'success',
     )
     expect(mocks.refreshGate).toHaveBeenCalledWith({ force: true })

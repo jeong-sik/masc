@@ -81,11 +81,10 @@ let test_approval_summary_empty () =
 let test_json_shape () =
   inject ~tool:"bash" ~reason:"policy" ();
   let json =
-    GM.gate_tool_events_json
+    GM.gate_tool_events_json_with_pending_result_for_testing
       ~now_ts:(now +. 1.0)
-      ~base_path:"/tmp/masc-gate-metrics-json"
       ~window_minutes:60
-      ()
+      (Ok [])
   in
   let open Yojson.Safe.Util in
   let rejections = json |> member "tool_rejections" |> to_list in
@@ -99,7 +98,7 @@ let test_json_shape () =
   check int "window propagated" 60 window
 
 let test_unavailable_queue_is_not_projected_as_empty () =
-  let error : Keeper_approval_queue.storage_error =
+  let error : Masc.Keeper_approval_queue.storage_error =
     { path = "/tmp/masc-gate-metrics-unavailable"
     ; reason = "current snapshot requires reset"
     }

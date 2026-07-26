@@ -109,22 +109,20 @@ let build_goal_events_projection ~(config : Workspace.config) goals =
     Option.value (Hashtbl.find_opt events_table goal_id) ~default:[]
 
 let emit_all_goal_attainment_metrics ~(config : Workspace.config) =
-  match
-    Keeper_approval_queue.list_pending_dashboard_json_for_workspace
-      ~base_path:config.base_path
-  with
-  | Error _ -> ()
-  | Ok pending_approvals ->
-      let goals = Goal_store.list_goals config () in
-      let tasks = Workspace.get_tasks_safe config in
-      let forest = build_forest ~config ~goals ~tasks ~pending_approvals in
-      let all_nodes = flatten_tree [] forest in
-      List.iter
-        (fun (node : tree_node) ->
-          let goal = node.goal in
-          let attainment = goal_attainment_to_json goal node in
-          observe_goal_attainment_metrics goal attainment)
-        all_nodes
+  let goals = Goal_store.list_goals config () in
+  let tasks = Workspace.get_tasks_safe config in
+  (* Goal attainment is derived from goals and linked tasks. Approval rows are
+     not an attainment input, so queue unavailability must not freeze these
+     independent gauges. The empty projection remains internal to this
+     attainment-only traversal and is never emitted as queue state. *)
+  let forest = build_forest ~config ~goals ~tasks ~pending_approvals:[] in
+  let all_nodes = flatten_tree [] forest in
+  List.iter
+    (fun (node : tree_node) ->
+      let goal = node.goal in
+      let attainment = goal_attainment_to_json goal node in
+      observe_goal_attainment_metrics goal attainment)
+    all_nodes
 
 let rec tree_node_to_json ?(events_for_goal = fun _ -> []) node =
   let goal = node.goal in

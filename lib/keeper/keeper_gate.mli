@@ -84,6 +84,7 @@ type auto_judge_resume_report =
   ; finalized_ids : string list
   ; skipped_ids : string list
   ; failures : auto_judge_resume_failure list
+  ; queue_error : Keeper_approval_queue.storage_error option
   }
 
 (** Mutable only to serialize consumption inside one Keeper cycle. The durable
@@ -139,16 +140,14 @@ val retry_blocked_auto_judge :
     approval row identity must all match. No cadence or restart hook calls it. *)
 
 type operator_recovery_report =
-  { reopened_ids : string list
-  ; started_ids : string list
+  { started_ids : string list
   ; queued : int
   }
 
-(** Reopen recoverable request-local judgments after an explicit operator
-    selection of Auto Judge, then activate one FIFO drain for each Keeper owner
-    with eligible unbound work in the workspace. Restart-classified released
-    work is first durably reset to unbound; every other exact-bound entry
-    remains operator-visible but is never queued. *)
+(** After an explicit operator selection of Auto Judge, activate one FIFO drain
+    for each Keeper owner with eligible current-schema work in the workspace.
+    Exact-bound entries remain operator-visible but are never reconstructed or
+    reopened. *)
 val request_operator_auto_judge_recovery :
   base_path:string -> (operator_recovery_report, string) result
 

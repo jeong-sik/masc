@@ -52,7 +52,13 @@ import { setCanonicalDashboardActor } from './lib/dashboard-session-actor'
 import { timeBoardRequest } from './board-metrics'
 import { namespaceTruth, namespaceTruthError, namespaceTruthInitializing } from './namespace-truth-signals'
 import { normalizeNamespaceTruth } from './namespace-truth-normalizers'
-import { goalTreeData, goalTreeError, goalTreeLoading, hydrateGoalTreeSnapshot } from './goal-tree-state'
+import {
+  goalTreeData,
+  goalTreeError,
+  goalTreeLoading,
+  hydrateGoalTreeError,
+  hydrateGoalTreeSnapshot,
+} from './goal-tree-state'
 import {
   WORK_GOAL_LOAD_ERROR,
   WORK_GOAL_LOAD_PARTIAL_ERROR,
@@ -1272,6 +1278,7 @@ export async function refreshGoals(): Promise<void> {
       }
     } else {
       console.warn('[Goals] tree fetch error:', tree.reason)
+      hydrateGoalTreeError(tree.reason)
       const message = errorMessageOr(tree.reason, 'Goal Store tree failed to load')
       goalTreeError.value = message
       errors.push(message)

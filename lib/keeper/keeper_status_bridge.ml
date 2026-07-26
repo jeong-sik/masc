@@ -183,24 +183,23 @@ let runtime_state_fields_json (config : Workspace_utils.config) (meta : keeper_m
   [ "pause_state", `String pause_state; "runtime_blocker_state", `String blocker_state ]
 ;;
 
-let attention_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =
-  let approval_queue =
-    match
-      Keeper_approval_queue.pending_count_for_keeper_in_workspace
-        ~base_path:config.base_path
-        ~keeper_name:meta.name
-    with
-    | Ok count -> `Ready count
-    | Error error -> `Unavailable error
-  in
+type approval_queue_attention =
+  | Approval_queue_ready of int
+  | Approval_queue_unavailable of Keeper_approval_queue.storage_error
+
+let attention_fields_json_with_approval_queue
+      (config : Workspace_utils.config)
+      (meta : keeper_meta)
+      approval_queue
+  =
   let runtime_blocker = runtime_blocker_surface_opt config meta in
   let needs_attention, attention_reason, next_human_action =
     match approval_queue with
-    | `Unavailable _ ->
+    | Approval_queue_unavailable _ ->
       true, Some "approval_queue_unavailable", Some "reset_runtime_state"
-    | `Ready pending_approval_count when pending_approval_count > 0 ->
+    | Approval_queue_ready pending_approval_count when pending_approval_count > 0 ->
       true, Some "approval_pending", Some "resolve_approval"
-    | `Ready _ ->
+    | Approval_queue_ready _ ->
       match runtime_blocker with
       | Some _ when meta.paused ->
         true, Some "paused", Some "inspect_blocker_before_resume"
@@ -218,9 +217,9 @@ let attention_fields_json (config : Workspace_utils.config) (meta : keeper_meta)
   in
   let approval_queue_state, pending_approval_count =
     match approval_queue with
-    | `Ready count ->
+    | Approval_queue_ready count ->
       Keeper_approval_queue.approval_queue_ready_state_json, `Int count
-    | `Unavailable error ->
+    | Approval_queue_unavailable error ->
       ( Keeper_approval_queue.approval_queue_unavailable_state_json error
       , `Null )
   in
@@ -239,6 +238,19 @@ let attention_fields_json (config : Workspace_utils.config) (meta : keeper_meta)
       | Some reason -> `String (Keeper_latched_reason.to_wire reason)
       | None -> `Null )
   ]
+;;
+
+let attention_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =
+  let approval_queue =
+    match
+      Keeper_approval_queue.pending_count_for_keeper_in_workspace
+        ~base_path:config.base_path
+        ~keeper_name:meta.name
+    with
+    | Ok count -> Approval_queue_ready count
+    | Error error -> Approval_queue_unavailable error
+  in
+  attention_fields_json_with_approval_queue config meta approval_queue
 ;;
 
 let json_string_opt_member = Json_util.get_string_nonempty

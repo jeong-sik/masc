@@ -201,8 +201,16 @@ let dashboard_gate_http_json request ~base_path : Yojson.Safe.t =
   in
   let status_filter = None in
   let force = bool_query_param request "force" ~default:false in
+  let approval_queue_revision =
+    Keeper_approval_queue.store_revision_for_workspace ~base_path
+  in
   let cache_key =
-    Printf.sprintf "gate:%s;%d;%d" base_path limit offset
+    Printf.sprintf
+      "gate:%s;%d;%d;%d"
+      base_path
+      limit
+      offset
+      approval_queue_revision
   in
   let compute () =
     Domain_pool_ref.submit_io_or_inline (fun () ->

@@ -1639,7 +1639,6 @@ describe('setGateMode', () => {
     changed_at: '2026-07-12T00:00:00Z',
     recovery_status: 'completed',
     recovery_error: null,
-    reopened: 2,
     started: 1,
     queued: 1,
   } as const
@@ -1662,7 +1661,6 @@ describe('setGateMode', () => {
     expect(result).toMatchObject({
       recovery_status: 'completed',
       recovery_error: null,
-      reopened: 2,
       started: 1,
       queued: 1,
     })
@@ -1676,7 +1674,6 @@ describe('setGateMode', () => {
         ...completedResponse,
         recovery_status: 'failed',
         recovery_error: 'judge worker unavailable',
-        reopened: 0,
         started: 0,
         queued: 0,
       },
@@ -1689,7 +1686,6 @@ describe('setGateMode', () => {
         mode: 'manual',
         recovery_status: 'not_requested',
         recovery_error: null,
-        reopened: 0,
         started: 0,
         queued: 0,
         replaced_read_error: 'replaced invalid persisted mode',
@@ -1715,11 +1711,10 @@ describe('setGateMode', () => {
     ['failed recovery without error', {
       ...completedResponse,
       recovery_status: 'failed',
-      reopened: 0,
       started: 0,
       queued: 0,
     }],
-    ['negative count', { ...completedResponse, reopened: -1 }],
+    ['negative count', { ...completedResponse, started: -1 }],
     ['non-zero not-requested outcome', {
       ...completedResponse,
       recovery_status: 'not_requested',

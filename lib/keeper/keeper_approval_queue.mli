@@ -336,13 +336,15 @@ val resolve_with_policy :
 
 (** {1 Query} *)
 
-val list_pending_json : unit -> Yojson.Safe.t
-val list_pending_dashboard_json : unit -> Yojson.Safe.t
 val list_pending_dashboard_json_for_workspace :
   base_path:string -> (Yojson.Safe.t list, storage_error) result
-val list_pending_entries : unit -> pending_approval list
 val list_pending_entries_for_workspace :
   base_path:string -> (pending_approval list, storage_error) result
+
+val store_revision_for_workspace : base_path:string -> int
+(** Monotonic process-local revision of the workspace queue authority.
+    Installation and every transition to unavailable advance the revision so
+    projections cannot reuse a cache entry from an older authority state. *)
 (** Read one workspace's pending rows without collapsing an unavailable,
     malformed, or reset-required durable store into an empty projection. *)
 val get_pending_entry : id:string -> pending_approval option

@@ -143,6 +143,7 @@ type auto_judge_resume_report =
   ; finalized_ids : string list
   ; skipped_ids : string list
   ; failures : auto_judge_resume_failure list
+  ; queue_error : Keeper_approval_queue.storage_error option
   }
 
 type cycle_grant_entry =
@@ -714,14 +715,17 @@ and drain_auto_judge_owner_queue ?exclude_id ~base_path ~keeper_name () =
            reason;
          loop ((entry.id, reason) :: failures) rest)
   in
-  Keeper_approval_queue.list_pending_entries ()
-  |> ready_auto_judges_for_owner ?exclude_id ~base_path ~keeper_name
-  |> loop []
+  Keeper_approval_queue.list_pending_entries_for_workspace ~base_path
+  |> Result.map (fun entries ->
+    entries
+    |> ready_auto_judges_for_owner ?exclude_id ~base_path ~keeper_name
+    |> loop [])
 
 and drain_auto_judge_owner ?exclude_id ~base_path ~keeper_name () =
   match Keeper_gate_mode.read ~base_path with
   | Ok Keeper_gate_mode.Auto_judge ->
-    Ok (drain_auto_judge_owner_queue ?exclude_id ~base_path ~keeper_name ())
+    drain_auto_judge_owner_queue ?exclude_id ~base_path ~keeper_name ()
+    |> Result.map_error Keeper_approval_queue.storage_error_to_string
   | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) ->
     Ok { started_id = None; failures = [] }
   | Error detail ->
@@ -739,30 +743,39 @@ and drain_auto_judges ~base_path =
       "Auto Judge workspace drain unavailable workspace=%s: %s"
       base_path
       detail;
-    []
-  | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) -> []
+    Error detail
+  | Ok (Keeper_gate_mode.Manual | Keeper_gate_mode.Always_allow) -> Ok []
   | Ok Keeper_gate_mode.Auto_judge ->
-    let owners =
-      Keeper_approval_queue.list_pending_entries ()
-      |> List.fold_left
+    (match Keeper_approval_queue.list_pending_entries_for_workspace ~base_path with
+     | Error error ->
+       Error (Keeper_approval_queue.storage_error_to_string error)
+     | Ok entries ->
+       let owners =
+         List.fold_left
            (fun owners (entry : Keeper_approval_queue.pending_approval) ->
-              if String.equal entry.audit_base_path base_path
-                 && auto_judge_entry_ready entry
+              if auto_judge_entry_ready entry
               then Auto_judge_owner_set.add (auto_judge_owner entry) owners
               else owners)
            Auto_judge_owner_set.empty
-    in
-    Auto_judge_owner_set.fold
-      (fun (_, keeper_name) started_ids ->
-         let outcome =
-           drain_auto_judge_owner_queue ~base_path ~keeper_name ()
-         in
-         match outcome.started_id with
-         | Some id -> id :: started_ids
-         | None -> started_ids)
-      owners
-      []
-    |> List.rev
+           entries
+       in
+       let rec drain started_ids = function
+         | [] -> Ok (List.rev started_ids)
+         | (_, keeper_name) :: rest ->
+           (match
+              drain_auto_judge_owner_queue ~base_path ~keeper_name ()
+            with
+            | Error error ->
+              Error (Keeper_approval_queue.storage_error_to_string error)
+            | Ok outcome ->
+              let started_ids =
+                match outcome.started_id with
+                | Some id -> id :: started_ids
+                | None -> started_ids
+              in
+              drain started_ids rest)
+       in
+       drain [] (Auto_judge_owner_set.elements owners))
 ;;
 
 type recovered_work =
@@ -784,15 +797,14 @@ let recovered_work_for_base_path ~base_path =
       false
   in
   if not enabled
-  then []
-  else (
-    let entries = Keeper_approval_queue.list_pending_entries () in
+  then Ok []
+  else
+    Keeper_approval_queue.list_pending_entries_for_workspace ~base_path
+    |> Result.map (fun entries ->
     let owners =
       List.fold_left
         (fun owners (entry : Keeper_approval_queue.pending_approval) ->
-           if String.equal entry.audit_base_path base_path
-           then Auto_judge_owner_set.add (auto_judge_owner entry) owners
-           else owners)
+           Auto_judge_owner_set.add (auto_judge_owner entry) owners)
         Auto_judge_owner_set.empty
         entries
     in
@@ -987,11 +999,20 @@ let resume_persisted_auto_judges_with
       ~complete_summary_exact_attempt
       ~base_path
   =
-  let recovered = recovered_work_for_base_path ~base_path in
-  let requested = List.length recovered in
-  let started_ids, finalized_ids, skipped_ids, failures =
-    List.fold_left
-      (fun (started_ids, finalized_ids, skipped_ids, failures) work ->
+  match recovered_work_for_base_path ~base_path with
+  | Error queue_error ->
+    { requested = 0
+    ; started_ids = []
+    ; finalized_ids = []
+    ; skipped_ids = []
+    ; failures = []
+    ; queue_error = Some queue_error
+    }
+  | Ok recovered ->
+    let requested = List.length recovered in
+    let started_ids, finalized_ids, skipped_ids, failures =
+      List.fold_left
+        (fun (started_ids, finalized_ids, skipped_ids, failures) work ->
          let entry, result =
            match work with
            | Activate_worker entry ->
@@ -1027,15 +1048,16 @@ let resume_persisted_auto_judges_with
            , finalized_ids
            , skipped_ids
            , { approval_id = entry.id; code; operator_detail } :: failures ))
-      ([], [], [], [])
-      recovered
-  in
-  { requested
-  ; started_ids = List.rev started_ids
-  ; finalized_ids = List.rev finalized_ids
-  ; skipped_ids = List.rev skipped_ids
-  ; failures = List.rev failures
-  }
+        ([], [], [], [])
+        recovered
+    in
+    { requested
+    ; started_ids = List.rev started_ids
+    ; finalized_ids = List.rev finalized_ids
+    ; skipped_ids = List.rev skipped_ids
+    ; failures = List.rev failures
+    ; queue_error = None
+    }
 ;;
 
 let resume_persisted_auto_judges =
@@ -1045,8 +1067,7 @@ let resume_persisted_auto_judges =
 ;;
 
 type operator_recovery_report =
-  { reopened_ids : string list
-  ; started_ids : string list
+  { started_ids : string list
   ; queued : int
   }
 
@@ -1059,18 +1080,23 @@ let request_operator_auto_judge_recovery ~base_path =
     (match Hitl_summary_worker.snapshot_topology_readiness () with
      | Error detail -> Error detail
      | Ok () ->
-       let started_ids = drain_auto_judges ~base_path in
-       let queued =
-         Keeper_approval_queue.list_pending_entries ()
-         |> List.fold_left
-              (fun count (entry : Keeper_approval_queue.pending_approval) ->
-                 if String.equal entry.audit_base_path base_path
-                    && auto_judge_entry_ready entry
-                 then count + 1
-                 else count)
-              0
-       in
-       Ok { reopened_ids = []; started_ids; queued })
+       (match drain_auto_judges ~base_path with
+        | Error detail -> Error detail
+        | Ok started_ids ->
+          (match
+             Keeper_approval_queue.list_pending_entries_for_workspace ~base_path
+           with
+           | Error error ->
+             Error (Keeper_approval_queue.storage_error_to_string error)
+           | Ok entries ->
+             let queued =
+               List.fold_left
+                 (fun count (entry : Keeper_approval_queue.pending_approval) ->
+                    if auto_judge_entry_ready entry then count + 1 else count)
+                 0
+                 entries
+             in
+             Ok { started_ids; queued }))
 ;;
 
 let defer request reason =

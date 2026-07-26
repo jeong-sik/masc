@@ -14,6 +14,7 @@ module Snapshot_cache = struct
     ; keeper_name : string
     ; generation : int
     ; last_turn_ts : float
+    ; approval_queue_revision : int
     }
 
   type entry =
@@ -263,6 +264,19 @@ let pending_approval_projection ~base_path ~keeper_name =
       Keeper_approval_queue.list_pending_dashboard_json_for_workspace
     ~base_path ~keeper_name
 
+let approval_queue_attention_of_projection
+      ~base_path
+      (projection : pending_approval_projection)
+  =
+  match projection.count, projection.error with
+  | Some count, None -> Keeper_status_bridge.Approval_queue_ready count
+  | _, Some error -> Keeper_status_bridge.Approval_queue_unavailable error
+  | None, None ->
+    Keeper_status_bridge.Approval_queue_unavailable
+      { path = Keeper_gate_path.pending ~base_path
+      ; reason = "approval queue projection has no current state"
+      }
+
 let disposition_of_snapshot ~pending_approval_projection
     ~runtime_blocker_fields =
   let blocker_class = assoc_string_opt "runtime_blocker_class" runtime_blocker_fields in
@@ -320,9 +334,14 @@ let receipt_operator_disposition receipt =
   | Some disposition, None -> Some (disposition, "")
   | None, _ -> None
 
-let effective_disposition_fields ~fallback_disposition ~fallback_reason
+let effective_disposition_fields ~approval_queue_available
+    ~fallback_disposition ~fallback_reason
     latest_receipt =
-  match Option.bind latest_receipt receipt_operator_disposition with
+  match
+    if approval_queue_available
+    then Option.bind latest_receipt receipt_operator_disposition
+    else None
+  with
   | Some (operator_disposition, operator_disposition_reason) ->
       let disposition, disposition_reason =
         display_disposition_of_operator ~operator_disposition
@@ -371,7 +390,9 @@ let disposition_fields_json ~(config : Workspace.config) ~(meta : keeper_meta) :
   in
   let latest_receipt = Keeper_execution_receipt.latest_json config meta.name in
   let disposition, disposition_reason, _, _ =
-    effective_disposition_fields ~fallback_disposition:disposition
+    effective_disposition_fields
+      ~approval_queue_available:(Option.is_none pending_approval_projection.error)
+      ~fallback_disposition:disposition
       ~fallback_reason:disposition_reason latest_receipt
   in
   `Assoc
@@ -714,7 +735,12 @@ let summary_json ~(config : Workspace.config) ~(meta : keeper_meta) =
     Option.bind latest_terminal_reason (fun reason -> reason.next_action)
   in
   let attention_fields =
-    Keeper_status_bridge.attention_fields_json config meta
+    Keeper_status_bridge.attention_fields_json_with_approval_queue
+      config
+      meta
+      (approval_queue_attention_of_projection
+         ~base_path:config.base_path
+         pending_approval_projection)
   in
   let fallback_disposition, fallback_disposition_reason =
     disposition_of_snapshot ~pending_approval_projection
@@ -723,6 +749,7 @@ let summary_json ~(config : Workspace.config) ~(meta : keeper_meta) =
   let disposition, disposition_reason, operator_disposition,
       operator_disposition_reason =
     effective_disposition_fields ~fallback_disposition
+      ~approval_queue_available:(Option.is_none pending_approval_projection.error)
       ~fallback_reason:fallback_disposition_reason
       latest_receipt_for_runtime_state
   in
@@ -915,7 +942,12 @@ let snapshot_json_inner_with_pending_reader
     selected_model_of_latest_decision_or_receipt latest_decision latest_receipt
   in
   let attention_fields =
-    Keeper_status_bridge.attention_fields_json config meta
+    Keeper_status_bridge.attention_fields_json_with_approval_queue
+      config
+      meta
+      (approval_queue_attention_of_projection
+         ~base_path:config.base_path
+         pending_approval_projection)
   in
   let runtime_phase =
     match registry_entry with
@@ -932,6 +964,7 @@ let snapshot_json_inner_with_pending_reader
   let disposition, disposition_reason, operator_disposition,
       operator_disposition_reason =
     effective_disposition_fields ~fallback_disposition
+      ~approval_queue_available:(Option.is_none pending_approval_projection.error)
       ~fallback_reason:fallback_disposition_reason
       latest_receipt_for_runtime_state
   in
@@ -1027,6 +1060,9 @@ let snapshot_json ~(config : Workspace.config) ~(meta : keeper_meta) =
     ; keeper_name = meta.name
     ; generation = meta.runtime.nonce
     ; last_turn_ts = meta.runtime.usage.last_turn_ts
+    ; approval_queue_revision =
+        Keeper_approval_queue.store_revision_for_workspace
+          ~base_path:config.base_path
     }
   in
   let now = Time_compat.now () in

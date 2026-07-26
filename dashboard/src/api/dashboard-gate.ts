@@ -234,7 +234,6 @@ export interface SetGateModeResponse {
   changed_at: string
   recovery_status: 'completed' | 'failed' | 'not_requested'
   recovery_error: string | null
-  reopened: number
   started: number
   queued: number
   replaced_read_error?: string
@@ -248,7 +247,6 @@ const SET_GATE_MODE_RESPONSE_FIELDS = new Set([
   'changed_at',
   'recovery_status',
   'recovery_error',
-  'reopened',
   'started',
   'queued',
   'replaced_read_error',
@@ -303,7 +301,6 @@ function decodeSetGateModeResponse(raw: unknown, requestedMode: GateMode): SetGa
     : typeof raw.recovery_error === 'string' && raw.recovery_error.trim() !== ''
       ? raw.recovery_error
       : gateModeProtocolDrift('recovery_error must be null or a non-empty string')
-  const reopened = nonNegativeSafeInteger(raw.reopened, 'reopened')
   const started = nonNegativeSafeInteger(raw.started, 'started')
   const queued = nonNegativeSafeInteger(raw.queued, 'queued')
 
@@ -312,12 +309,12 @@ function decodeSetGateModeResponse(raw: unknown, requestedMode: GateMode): SetGa
   }
   if (status === 'failed'
       && (mode !== 'auto_judge' || recoveryError === null
-        || reopened !== 0 || started !== 0 || queued !== 0)) {
+        || started !== 0 || queued !== 0)) {
     return gateModeProtocolDrift('failed recovery requires auto_judge mode, an error, and zero counts')
   }
   if (status === 'not_requested'
       && (mode === 'auto_judge' || recoveryError !== null
-        || reopened !== 0 || started !== 0 || queued !== 0)) {
+        || started !== 0 || queued !== 0)) {
     return gateModeProtocolDrift('not_requested recovery requires a non-auto mode and zero outcome')
   }
 
@@ -335,7 +332,6 @@ function decodeSetGateModeResponse(raw: unknown, requestedMode: GateMode): SetGa
     changed_at: changedAt,
     recovery_status: status,
     recovery_error: recoveryError,
-    reopened,
     started,
     queued,
     ...(typeof replacedReadError === 'string'

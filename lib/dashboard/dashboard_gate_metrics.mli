@@ -30,7 +30,7 @@ val record_tool_skipped :
     without failing the SSE broadcast path. *)
 
 val approval_queue_summary :
-  ?now_ts:float ->
+  now_ts:float ->
   base_path:string ->
   unit ->
   (approval_summary, Keeper_approval_queue.storage_error) result
@@ -38,14 +38,13 @@ val approval_queue_summary :
     percentiles. Durable store unavailability remains explicit. *)
 
 val gate_tool_events_json :
-  ?now_ts:float ->
   base_path:string ->
   window_minutes:int ->
   unit ->
   Yojson.Safe.t
 (** Top-level HTTP endpoint payload combining tool-rejection counts
     over the [window_minutes] window with the approval queue summary.
-    [now_ts] is injectable for testing. *)
+    The production boundary samples its clock exactly once. *)
 
 (** {1 Test hooks} *)
 
@@ -81,7 +80,7 @@ val record_tool_skipped_with_append_for_testing :
     on an actual mutex failure. *)
 
 val gate_tool_events_json_with_pending_result_for_testing :
-  ?now_ts:float ->
+  now_ts:float ->
   window_minutes:int ->
   ( Keeper_approval_queue.pending_approval list
   , Keeper_approval_queue.storage_error )
@@ -91,7 +90,7 @@ val gate_tool_events_json_with_pending_result_for_testing :
     ready/unavailable JSON boundary. *)
 
 val tool_rejection_counts :
-  ?now_ts:float ->
+  now_ts:float ->
   window_minutes:int ->
   unit ->
   (string * string * int) list

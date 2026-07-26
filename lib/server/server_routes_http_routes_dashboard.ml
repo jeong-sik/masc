@@ -379,22 +379,20 @@ type gate_mode_recovery =
   | Recovery_not_requested
 
 let gate_mode_change_json change recovery =
-  let recovery_status, recovery_error, reopened, started, queued =
+  let recovery_status, recovery_error, started, queued =
     match recovery with
     | Recovery_completed report ->
       ( "completed"
       , `Null
-      , List.length report.reopened_ids
       , List.length report.started_ids
       , report.queued )
-    | Recovery_failed detail -> "failed", `String detail, 0, 0, 0
-    | Recovery_not_requested -> "not_requested", `Null, 0, 0, 0
+    | Recovery_failed detail -> "failed", `String detail, 0, 0
+    | Recovery_not_requested -> "not_requested", `Null, 0, 0
   in
   let `Assoc fields = Keeper_gate_mode.change_json change in
   `Assoc
     (("recovery_status", `String recovery_status)
      :: ("recovery_error", recovery_error)
-     :: ("reopened", `Int reopened)
      :: ("started", `Int started)
      :: ("queued", `Int queued)
      :: fields)

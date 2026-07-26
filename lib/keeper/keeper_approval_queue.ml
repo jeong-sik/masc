@@ -234,6 +234,7 @@ let pending_store_surface = "keeper_gate_pending"
 let pending_store_mutex = Cross_context_mutex.create ()
 let deliveries : persisted_delivery SMap.t Atomic.t = Atomic.make SMap.empty
 let unavailable_stores : storage_error SMap.t Atomic.t = Atomic.make SMap.empty
+let store_revisions : int SMap.t Atomic.t = Atomic.make SMap.empty
 (** Process projection of the next value persisted in each workspace snapshot. *)
 let next_sequences : int SMap.t Atomic.t = Atomic.make SMap.empty
 let first_sequence = 1
@@ -251,16 +252,30 @@ let with_pending_store_lock f =
   Cross_context_mutex.with_durable_lock pending_store_mutex f
 ;;
 
+let bump_store_revision_unlocked ~base_path =
+  let revisions = Atomic.get store_revisions in
+  let revision = Option.value (SMap.find_opt base_path revisions) ~default:0 in
+  Atomic.set store_revisions (SMap.add base_path (revision + 1) revisions)
+;;
+
 let mark_store_unavailable_unlocked ~base_path error =
   Atomic.set
     unavailable_stores
-    (SMap.add base_path error (Atomic.get unavailable_stores))
+    (SMap.add base_path error (Atomic.get unavailable_stores));
+  bump_store_revision_unlocked ~base_path
 ;;
 
 let clear_store_unavailable_unlocked ~base_path =
   Atomic.set
     unavailable_stores
-    (SMap.remove base_path (Atomic.get unavailable_stores))
+    (SMap.remove base_path (Atomic.get unavailable_stores));
+  bump_store_revision_unlocked ~base_path
+;;
+
+let store_revision_for_workspace ~base_path =
+  Option.value
+    (SMap.find_opt base_path (Atomic.get store_revisions))
+    ~default:0
 ;;
 
 let pending_store_path ~base_path =
@@ -417,11 +432,17 @@ let persist_snapshot_with_sequence_unlocked
   match SMap.find_opt base_path (Atomic.get unavailable_stores) with
   | Some error -> Error error
   | None ->
-    save_snapshot_file_unlocked
-      ~base_path
-      ~next_sequence
-      ~pending_map
-      ~delivery_map
+    (match
+       save_snapshot_file_unlocked
+         ~base_path
+         ~next_sequence
+         ~pending_map
+         ~delivery_map
+     with
+     | Ok () as ok -> ok
+     | Error error ->
+       mark_store_unavailable_unlocked ~base_path error;
+       Error error)
 ;;
 
 type store_lifecycle =
@@ -464,12 +485,18 @@ let persist_snapshot_exact_unlocked
   =
   match next_sequence_lifecycle ~base_path with
   | Ready next_sequence ->
-    save_snapshot_file_strict_staged_unlocked
-      ~save_file_atomic_strict_staged
-      ~base_path
-      ~next_sequence
-      ~pending_map
-      ~delivery_map
+    (match
+       save_snapshot_file_strict_staged_unlocked
+         ~save_file_atomic_strict_staged
+         ~base_path
+         ~next_sequence
+         ~pending_map
+         ~delivery_map
+     with
+     | Ok _ as ok -> ok
+     | Error error ->
+       mark_store_unavailable_unlocked ~base_path error;
+       Error error)
   | Uninstalled ->
     Error
       { path = pending_store_path ~base_path
@@ -3153,6 +3180,7 @@ module For_testing = struct
       Atomic.set pending SMap.empty;
       Atomic.set deliveries SMap.empty;
       Atomic.set unavailable_stores SMap.empty;
+      Atomic.set store_revisions SMap.empty;
       Atomic.set next_sequences SMap.empty)
   ;;
 
@@ -3248,27 +3276,9 @@ let resolve_with_policy
 
 (* ── Query ────────────────────────────────────────────────── *)
 
-(** List all pending approvals as JSON. *)
 let pending_entries_in_sequence_order () =
   SMap.fold (fun _id entry acc -> entry :: acc) (Atomic.get pending) []
   |> List.sort compare_pending_order
-;;
-
-let list_pending_json () : Yojson.Safe.t =
-  pending_entries_in_sequence_order ()
-  |> List.map (fun entry -> `Assoc (pending_entry_json_fields entry))
-  |> fun entries -> `List entries
-;;
-
-let list_pending_entries () : pending_approval list =
-  pending_entries_in_sequence_order ()
-;;
-
-let list_pending_dashboard_json () : Yojson.Safe.t =
-  pending_entries_in_sequence_order ()
-  |> List.map (fun entry ->
-    `Assoc (pending_entry_json_fields ~include_input:true entry))
-  |> fun entries -> `List entries
 ;;
 
 let list_pending_entries_for_workspace ~base_path =

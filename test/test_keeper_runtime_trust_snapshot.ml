@@ -803,6 +803,19 @@ let test_approval_queue_failure_remains_typed_unavailable () =
     (fun () ->
        let config = Masc.Workspace.default_config base_dir in
        let meta = make_meta "runtime-trust-approval-unavailable" in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store
+           config
+           meta.name
+       in
+       Dated_jsonl.append
+         receipt_store
+         (`Assoc
+            [ "ended_at", `String "2026-06-01T00:00:00Z"
+            ; "operator_disposition", `String "pass"
+            ; "operator_disposition_reason", `String "healthy"
+            ; "terminal_reason_code", `String "success"
+            ]);
        let read_pending ~base_path =
          let error : Masc.Keeper_approval_queue.storage_error =
            {
@@ -849,6 +862,10 @@ let test_approval_queue_failure_remains_typed_unavailable () =
          "unavailable queue keeps typed reason"
          "approval_queue_unavailable"
          (snapshot |> member "disposition_reason" |> to_string);
+       Alcotest.(check string)
+         "unavailable queue overrides stale receipt disposition"
+         "unknown"
+         (snapshot |> member "operator_disposition" |> to_string);
        Alcotest.(check bool)
          "unavailable queue needs attention"
          true

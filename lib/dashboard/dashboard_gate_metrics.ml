@@ -7,7 +7,7 @@
        to capture the same (tool_name, reason_code) emitted on SSE. The ring
        gives operators a "last N minutes" view without tailing JSONL.
     2. Live approval queue state returned by
-       [Keeper_approval_queue.list_pending_json ()]. Approval queue metrics
+       [Keeper_approval_queue.list_pending_entries_for_workspace]. Approval queue metrics
        are computed from the current pending set; this module does not parse
        the approval audit JSONL.
 
@@ -119,7 +119,7 @@ let record_tool_skipped_with_append_for_testing
 (** Aggregate [(tool_name, reason_code) -> count] over the supplied window.
     [now_ts] is injectable for testing.  Returns a deterministic ordering:
     count desc, then tool_name asc, then reason_code asc. *)
-let tool_rejection_counts ?(now_ts = Unix.gettimeofday ()) ~window_minutes () :
+let tool_rejection_counts ~now_ts ~window_minutes () :
     (string * string * int) list =
   let since = now_ts -. (float_of_int window_minutes *. 60.0) in
   let module SMap = Map.Make (struct
@@ -195,7 +195,7 @@ let approval_queue_summary_of_entries ~now_ts entries : approval_summary =
       oldest_pending_sec = Some oldest;
     }
 
-let approval_queue_summary ?(now_ts = Unix.gettimeofday ()) ~base_path ()
+let approval_queue_summary ~now_ts ~base_path ()
   : (approval_summary, Keeper_approval_queue.storage_error) result
   =
   Keeper_approval_queue.list_pending_entries_for_workspace ~base_path
@@ -206,7 +206,7 @@ let approval_queue_summary ?(now_ts = Unix.gettimeofday ()) ~base_path ()
 let json_of_float_opt = Json_util.float_opt_to_json
 
 let tool_rejections_json ?(top_n = 20)
-    ~window_minutes ?(now_ts = Unix.gettimeofday ()) () : Yojson.Safe.t list =
+    ~window_minutes ~now_ts () : Yojson.Safe.t list =
   tool_rejection_counts ~now_ts ~window_minutes ()
   |> (fun ls ->
        if List.length ls <= top_n then ls
@@ -227,7 +227,7 @@ let approval_queue_json (summary : approval_summary) : Yojson.Safe.t =
   ]
 
 let gate_tool_events_json_with_pending_result
-      ?(now_ts = Unix.gettimeofday ())
+      ~now_ts
       ~window_minutes
       pending_result
   =
@@ -251,12 +251,13 @@ let gate_tool_events_json_with_pending_result
   ]
 
 (** Top-level endpoint payload. *)
-let gate_tool_events_json ?now_ts ~base_path ~window_minutes () : Yojson.Safe.t =
+let gate_tool_events_json ~base_path ~window_minutes () : Yojson.Safe.t =
+  let now_ts = Unix.gettimeofday () in
   let pending_result =
     Keeper_approval_queue.list_pending_entries_for_workspace ~base_path
   in
   gate_tool_events_json_with_pending_result
-    ?now_ts
+    ~now_ts
     ~window_minutes
     pending_result
 

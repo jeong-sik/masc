@@ -395,11 +395,11 @@ describe('dashboardHealthChips', () => {
 
     const chip = chips.find(c => c.key === 'fleet-liveness-risk')
     expect(chip).toEqual(expect.objectContaining({
-      label: 'Fleet execution unavailable',
-      tone: 'warn',
+      label: 'Current Keeper fact invalid',
+      tone: 'bad',
     }))
-    expect(chip?.detail).toContain('canonical keeper_fleet_safety executable snapshot unavailable')
-    expect(chip?.detail).toContain('no liveness or operator action inferred')
+    expect(chip?.detail).toContain('reason=current_fact_invalid')
+    expect(chip?.detail).toContain('restore a canonical current snapshot')
   })
 
   it('surfaces a P0 blocked fleet when health reports zero executable keeper fibers', () => {
@@ -415,6 +415,11 @@ describe('dashboardHealthChips', () => {
           paused_keepers: 13,
           keeper_fleet_safety: {
             status: 'blocked',
+            blocked_keepers: [{
+              keeper_name: 'paused-keeper',
+              reason: 'durable_paused_autoboot_enabled',
+              action: 'resume_or_leave_paused',
+            }],
             reason: null,
             blocker: 'no_executable_keeper_fibers',
             blocked_keeper_count: 14,
@@ -440,7 +445,7 @@ describe('dashboardHealthChips', () => {
 
     const chip = chips.find(c => c.key === 'fleet-liveness-risk')
     expect(chip).toEqual(expect.objectContaining({
-      label: 'P0 fleet blocked',
+      label: 'Keeper paused',
       tone: 'bad',
     }))
     expect(chip?.detail).toContain('status=blocked')
@@ -466,6 +471,11 @@ describe('dashboardHealthChips', () => {
           paused_keepers: 3,
           keeper_fleet_safety: {
             status: 'blocked',
+            blocked_keepers: [{
+              keeper_name: 'paused-keeper',
+              reason: 'durable_paused_autoboot_enabled',
+              action: 'resume_or_leave_paused',
+            }],
             reason: null,
             blocker: 'no_executable_keeper_fibers',
             blocked_keeper_count: 3,
@@ -491,7 +501,7 @@ describe('dashboardHealthChips', () => {
 
     const chip = chips.find(c => c.key === 'fleet-liveness-risk')
     expect(chip).toEqual(expect.objectContaining({
-      label: 'P0 fleet blocked',
+      label: 'Keeper paused',
       tone: 'bad',
     }))
     expect(chip?.detail).toContain('paused_keeper_count=3')
@@ -503,6 +513,11 @@ describe('dashboardHealthChips', () => {
       'failing-only',
       {
         status: 'blocked',
+        blocked_keepers: [{
+          keeper_name: 'failing-keeper',
+          reason: 'phase_failing',
+          action: 'repair_failing_keeper',
+        }],
         reason: null,
         blocker: 'no_executable_keeper_fibers',
         blocked_keeper_count: 2,
@@ -519,6 +534,11 @@ describe('dashboardHealthChips', () => {
       'recovering-only',
       {
         status: 'blocked',
+        blocked_keepers: [{
+          keeper_name: 'recovering-keeper',
+          reason: 'phase_restarting',
+          action: 'wait_for_keeper_restart',
+        }],
         reason: null,
         blocker: 'no_executable_keeper_fibers',
         blocked_keeper_count: 2,
@@ -535,6 +555,11 @@ describe('dashboardHealthChips', () => {
       'unknown',
       {
         status: 'blocked',
+        blocked_keepers: [{
+          keeper_name: null,
+          reason: 'current_fact_invalid',
+          action: 'inspect_current_keeper_fact',
+        }],
         reason: null,
         blocker: 'no_executable_keeper_fibers',
         blocked_keeper_count: 2,
@@ -545,7 +570,7 @@ describe('dashboardHealthChips', () => {
         target_reaction_capacity_count: 2,
       },
       'blocker=no_executable_keeper_fibers',
-      'blocked by no_executable_keeper_fibers',
+      'restore a canonical current snapshot',
     ],
   ] as const)('uses canonical %s evidence for blocked fleet operator advice', (
     _caseName,
@@ -589,6 +614,11 @@ describe('dashboardHealthChips', () => {
           paused_keepers: 14,
           keeper_fleet_safety: {
             status: 'blocked',
+            blocked_keepers: [{
+              keeper_name: 'paused-keeper',
+              reason: 'durable_paused_autoboot_enabled',
+              action: 'resume_or_leave_paused',
+            }],
             reason: null,
             blocker: 'no_executable_keeper_fibers',
             blocked_keeper_count: 16,
@@ -613,7 +643,7 @@ describe('dashboardHealthChips', () => {
 
     const chip = chips.find(c => c.key === 'fleet-liveness-risk')
     expect(chip).toEqual(expect.objectContaining({
-      label: 'P0 fleet blocked',
+      label: 'Keeper paused',
       tone: 'bad',
     }))
     expect(chip?.detail).toContain('paused_autoboot_enabled_keeper_count=13')
@@ -633,6 +663,11 @@ describe('dashboardHealthChips', () => {
           paused_keepers: 2,
           keeper_fleet_safety: {
             status: 'degraded',
+            blocked_keepers: [{
+              keeper_name: 'failing-keeper',
+              reason: 'phase_failing',
+              action: 'repair_failing_keeper',
+            }],
             reason: null,
             blocker: 'reaction_capacity_below_target',
             blocked_keeper_count: 10,
@@ -657,7 +692,7 @@ describe('dashboardHealthChips', () => {
 
     const chip = chips.find(c => c.key === 'fleet-liveness-risk')
     expect(chip).toEqual(expect.objectContaining({
-      label: 'Fleet capacity degraded',
+      label: 'Keeper failing',
       tone: 'warn',
     }))
     expect(chip?.detail).toContain('status=degraded')
@@ -681,6 +716,11 @@ describe('dashboardHealthChips', () => {
           paused_keepers: 0,
           keeper_fleet_safety: {
             status: 'degraded',
+            blocked_keepers: [{
+              keeper_name: 'running-keeper',
+              reason: 'phase_running',
+              action: 'inspect_capacity_accounting',
+            }],
             reason: null,
             blocker: 'reaction_capacity_below_target',
             blocked_keeper_count: 24,
@@ -705,7 +745,7 @@ describe('dashboardHealthChips', () => {
 
     const chip = chips.find(c => c.key === 'fleet-liveness-risk')
     expect(chip).toEqual(expect.objectContaining({
-      label: 'Fleet capacity degraded',
+      label: 'Keeper capacity fact inconsistent',
       tone: 'warn',
     }))
     expect(chip?.detail).not.toContain('FD pressure')
@@ -745,12 +785,11 @@ describe('dashboardHealthChips', () => {
       })
       const chip = chips.find(c => c.key === 'fleet-liveness-risk')
       expect(chip).toEqual(expect.objectContaining({
-        label: 'Fleet execution unavailable',
-        tone: 'warn',
+        label: 'Current Keeper fact invalid',
+        tone: 'bad',
       }))
-      expect(chip?.detail).toContain('canonical keeper_fleet_safety executable snapshot unavailable')
-      expect(chip?.detail).toContain('no liveness or operator action inferred')
-      expect(chip?.detail).not.toContain('executable_keeper_fiber_count=4')
+      expect(chip?.detail).toContain('reason=current_fact_invalid')
+      expect(chip?.detail).toContain('restore a canonical current snapshot')
     }
   })
 

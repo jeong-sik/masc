@@ -1971,6 +1971,15 @@ let test_health_json_ignores_stale_active_task_alias_when_agent_executable () =
         Alcotest.(check bool) "health does not require operator action" false
           (fleet_safety |> member "operator_action_required" |> to_bool)))
 
+let canonical_blocked_keeper_rows json =
+  let open Yojson.Safe.Util in
+  json |> member "blocked_keepers" |> to_list
+
+let canonical_blocked_keeper_names json =
+  let open Yojson.Safe.Util in
+  canonical_blocked_keeper_rows json
+  |> List.filter_map (fun row -> row |> member "keeper_name" |> to_string_option)
+
 let test_health_json_degrades_on_active_task_owner_without_keeper_binding () =
   with_temp_dir "health-active-task-owner-without-binding" (fun dir ->
     let config_root = make_config_root dir in
@@ -2030,9 +2039,11 @@ let test_health_json_degrades_on_active_task_owner_without_keeper_binding () =
         Alcotest.(check int) "health exposes missing binding task row" 1
           (List.length active_owner_tasks);
         let active_owner_task = List.hd active_owner_tasks in
-        Alcotest.(check bool) "missing binding row keeper null" true
+        Alcotest.(check bool) "missing binding row keeper_name null" true
+          (active_owner_task |> member "keeper_name" = `Null);
+        Alcotest.(check bool) "missing binding row keeper alias absent" true
           (active_owner_task |> member "keeper" = `Null);
-        Alcotest.(check bool) "missing binding row name null" true
+        Alcotest.(check bool) "missing binding row name alias absent" true
           (active_owner_task |> member "name" = `Null);
         Alcotest.(check string) "missing binding row agent" assignee
           (active_owner_task |> member "agent_name" |> to_string);
@@ -2042,14 +2053,13 @@ let test_health_json_degrades_on_active_task_owner_without_keeper_binding () =
         Alcotest.(check string) "missing binding action"
           "create_keeper_or_reassign_task"
           (active_owner_task |> member "action" |> to_string);
-        Alcotest.(check (list string)) "health names missing binding assignee"
-          [ assignee ]
-          (fleet_safety |> member "blocked_keeper_names" |> to_list
-           |> List.map to_string);
+        Alcotest.(check (list string)) "health does not invent Keeper identity"
+          []
+          (canonical_blocked_keeper_names fleet_safety);
         Alcotest.(check (list (pair string string)))
           "health explains missing binding blocker"
           [ (assignee, "no_keeper_binding") ]
-          (fleet_safety |> member "blocked_keeper_reasons" |> to_list
+          (fleet_safety |> member "blocked_keepers" |> to_list
            |> List.map (fun row ->
                 ( row |> member "agent_name" |> to_string
                 , row |> member "reason" |> to_string )));
@@ -2127,8 +2137,7 @@ let test_health_json_reports_non_keeper_active_task_owner_as_advisory () =
           (owner |> member "fleet_blocking" |> to_bool);
         Alcotest.(check (list string)) "health has no blocked keeper names"
           []
-          (fleet_safety |> member "blocked_keeper_names" |> to_list
-           |> List.map to_string);
+          (canonical_blocked_keeper_names fleet_safety);
         Alcotest.(check bool) "health does not ask operator action" false
           (fleet_safety |> member "operator_action_required" |> to_bool)))
 
@@ -2505,24 +2514,27 @@ let test_health_json_degrades_when_only_one_running_phase_lane_is_live () =
             (fleet_safety |> member "blocked_keeper_count" |> to_int);
           Alcotest.(check (list string)) "health exposes blocked keeper names"
             [ "capacity-missing"; "capacity-running-b"; "example" ]
-            (fleet_safety |> member "blocked_keeper_names" |> to_list
-             |> List.map to_string);
+            (canonical_blocked_keeper_names fleet_safety);
           Alcotest.(check (list (pair string string)))
             "health explains blocked keeper reasons"
             [ ("capacity-missing", "not_registered")
             ; ("capacity-running-b", "phase_Running")
             ; ("example", "not_registered")
             ]
-            (fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            (fleet_safety |> member "blocked_keepers" |> to_list
              |> List.map (fun row ->
-                  (row |> member "keeper" |> to_string, row |> member "reason" |> to_string)));
+                  (row |> member "keeper_name" |> to_string, row |> member "reason" |> to_string)));
           let blocked_detail name =
-            fleet_safety |> member "blocked_keeper_reasons" |> to_list
-            |> List.find (fun row -> row |> member "keeper" |> to_string = name)
+            fleet_safety |> member "blocked_keepers" |> to_list
+            |> List.find (fun row -> row |> member "keeper_name" |> to_string = name)
           in
-          Alcotest.(check string) "health keeps typed row name alias"
+          Alcotest.(check string) "health keeps canonical keeper_name"
             "capacity-missing"
-            (blocked_detail "capacity-missing" |> member "name" |> to_string);
+            (blocked_detail "capacity-missing" |> member "keeper_name" |> to_string);
+          Alcotest.(check bool) "health omits keeper alias" true
+            (blocked_detail "capacity-missing" |> member "keeper" = `Null);
+          Alcotest.(check bool) "health omits name alias" true
+            (blocked_detail "capacity-missing" |> member "name" = `Null);
           Alcotest.(check string) "health suggests missing target action"
             "start_or_recover_keeper"
             (blocked_detail "capacity-missing" |> member "action" |> to_string);
@@ -2597,8 +2609,7 @@ let test_health_json_blocked_count_matches_blocked_names_with_non_target_capacit
               (fleet_safety |> member "reaction_capacity_shortfall_count" |> to_int);
             Alcotest.(check (list string)) "health names blocked target keepers"
               [ "example"; "target-missing" ]
-              (fleet_safety |> member "blocked_keeper_names" |> to_list
-               |> List.map to_string);
+              (canonical_blocked_keeper_names fleet_safety);
             Alcotest.(check int) "blocked count matches blocked keeper names" 2
               (fleet_safety |> member "blocked_keeper_count" |> to_int))))
 
@@ -2660,8 +2671,8 @@ let test_health_json_exposes_disabled_keeper_bootstrap_blocker () =
           "keeper_bootstrap_disabled"
           (fleet_safety |> member "keeper_bootstrap_blocker" |> to_string);
         let blocked_detail name =
-          fleet_safety |> member "blocked_keeper_reasons" |> to_list
-          |> List.find (fun row -> row |> member "keeper" |> to_string = name)
+          fleet_safety |> member "blocked_keepers" |> to_list
+          |> List.find (fun row -> row |> member "keeper_name" |> to_string = name)
         in
         let detail = blocked_detail "boot-disabled" in
         Alcotest.(check string) "health explains disabled bootstrap row"
@@ -2706,14 +2717,13 @@ let test_health_json_ignores_persisted_only_keeper_for_capacity_target () =
         Alcotest.(check (list string))
           "health excludes persisted-only keepers from blocked target"
           [ "example" ]
-          (fleet_safety |> member "blocked_keeper_names" |> to_list
-           |> List.map to_string);
+          (canonical_blocked_keeper_names fleet_safety);
         Alcotest.(check (list (pair string string)))
           "health explains remaining configured blocked target"
           [ ("example", "not_registered") ]
-          (fleet_safety |> member "blocked_keeper_reasons" |> to_list
+          (fleet_safety |> member "blocked_keepers" |> to_list
            |> List.map (fun row ->
-                ( row |> member "keeper" |> to_string
+                ( row |> member "keeper_name" |> to_string
                 , row |> member "reason" |> to_string )))))
 
 let test_health_json_explains_phase_paused_capacity_blocker () =
@@ -2752,14 +2762,13 @@ let test_health_json_explains_phase_paused_capacity_blocker () =
           Alcotest.(check (list string))
             "health includes phase-paused keeper in blocked targets"
             [ "example"; "phase-paused" ]
-            (fleet_safety |> member "blocked_keeper_names" |> to_list
-             |> List.map to_string);
+            (canonical_blocked_keeper_names fleet_safety);
           Alcotest.(check (list (pair string string)))
             "health explains phase-paused blocked keeper"
             [ ("example", "not_registered"); ("phase-paused", "phase_paused") ]
-            (fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            (fleet_safety |> member "blocked_keepers" |> to_list
              |> List.map (fun row ->
-	                  ( row |> member "keeper" |> to_string
+	                  ( row |> member "keeper_name" |> to_string
 	                  , row |> member "reason" |> to_string ))))))
 
 let test_health_json_exposes_dead_keeper_registry_cause () =
@@ -2788,8 +2797,8 @@ let test_health_json_exposes_dead_keeper_registry_cause () =
           let open Yojson.Safe.Util in
           let fleet_safety = json |> member "keeper_fleet_safety" in
           let blocked_detail name =
-            fleet_safety |> member "blocked_keeper_reasons" |> to_list
-            |> List.find (fun row -> row |> member "keeper" |> to_string = name)
+            fleet_safety |> member "blocked_keepers" |> to_list
+            |> List.find (fun row -> row |> member "keeper_name" |> to_string = name)
           in
           let detail = blocked_detail "phase-dead" in
           Alcotest.(check string) "health explains dead keeper reason" "phase_dead"
@@ -2877,20 +2886,19 @@ let test_health_json_explains_terminal_capacity_blocker
           Alcotest.(check (list string))
             "health includes terminal keeper in blocked targets"
             (List.sort String.compare [ keeper_name; "example" ])
-            (fleet_safety |> member "blocked_keeper_names" |> to_list
-             |> List.map to_string);
+            (canonical_blocked_keeper_names fleet_safety);
           Alcotest.(check (list (pair string string)))
             "health explains terminal blocked keeper"
             (List.sort compare
                [ (keeper_name, "phase_" ^ expected_phase); ("example", "not_registered") ])
-            (fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            (fleet_safety |> member "blocked_keepers" |> to_list
              |> List.map (fun row ->
-                  ( row |> member "keeper" |> to_string
+                  ( row |> member "keeper_name" |> to_string
                   , row |> member "reason" |> to_string )));
           let terminal_detail =
-            fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            fleet_safety |> member "blocked_keepers" |> to_list
             |> List.find (fun row ->
-                 row |> member "keeper" |> to_string = keeper_name)
+                 row |> member "keeper_name" |> to_string = keeper_name)
           in
           Alcotest.(check string) "health reports typed terminal phase"
             expected_phase
@@ -3015,21 +3023,20 @@ let test_health_json_explains_nonrecoverable_failing_keeper () =
           Alcotest.(check (list string))
             "health includes nonrecoverable failing keeper in blocked targets"
             [ "capacity-failing"; "example" ]
-            (fleet_safety |> member "blocked_keeper_names" |> to_list
-             |> List.map to_string);
+            (canonical_blocked_keeper_names fleet_safety);
           Alcotest.(check (list (pair string string)))
             "health explains nonrecoverable failing keeper"
             [ ("capacity-failing", "phase_dead"); ("example", "not_registered") ]
-            (fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            (fleet_safety |> member "blocked_keepers" |> to_list
              |> List.map (fun row ->
-                  ( row |> member "keeper" |> to_string
+                  ( row |> member "keeper_name" |> to_string
                   , row |> member "reason" |> to_string )));
           let capacity_row =
-            fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            fleet_safety |> member "blocked_keepers" |> to_list
             |> List.find_opt (fun row ->
                  String.equal
                    "capacity-failing"
-                   (row |> member "keeper" |> to_string))
+                   (row |> member "keeper_name" |> to_string))
           in
           match capacity_row with
           | None -> Alcotest.fail "missing capacity-failing blocked row"
@@ -3103,11 +3110,11 @@ let test_health_json_redacts_registry_failure_reason () =
           let open Yojson.Safe.Util in
           let fleet_safety = json |> member "keeper_fleet_safety" in
           let failing_row =
-            fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            fleet_safety |> member "blocked_keepers" |> to_list
             |> List.find_opt (fun row ->
                  String.equal
                    "secret-failing"
-                   (row |> member "keeper" |> to_string))
+                   (row |> member "keeper_name" |> to_string))
           in
           match failing_row with
           | None -> Alcotest.fail "missing secret-failing blocked row"
@@ -3173,11 +3180,11 @@ let test_health_json_uses_crash_log_when_restore_clears_failure_reason () =
           let open Yojson.Safe.Util in
           let fleet_safety = json |> member "keeper_fleet_safety" in
           let restored_row =
-            fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            fleet_safety |> member "blocked_keepers" |> to_list
             |> List.find_opt (fun row ->
                  String.equal
                    "restored-crash-log"
-                   (row |> member "keeper" |> to_string))
+                   (row |> member "keeper_name" |> to_string))
           in
           match restored_row with
           | None -> Alcotest.fail "missing restored-crash-log blocked row"

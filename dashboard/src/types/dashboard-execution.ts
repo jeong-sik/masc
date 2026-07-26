@@ -200,11 +200,82 @@ export interface DashboardKeeperReactionLedgerHealth {
   pending_by_keeper: DashboardKeeperReactionLedgerPendingKeeper[]
 }
 
+export const DASHBOARD_KEEPER_FLEET_OPERATOR_SCHEMA = 'masc.keeper_fleet_operator.v1' as const
+
+export const DASHBOARD_BLOCKED_KEEPER_REASONS = [
+  'durable_paused_autoboot_enabled',
+  'meta_read_error',
+  'not_bootable',
+  'missing_meta',
+  'config_invalid',
+  'sandbox_profile_required',
+  'materialization_failed',
+  'phase_offline',
+  'phase_running',
+  'phase_failing',
+  'phase_overflowed',
+  'phase_compacting',
+  'phase_handing_off',
+  'phase_draining',
+  'phase_paused',
+  'phase_stopped',
+  'phase_crashed',
+  'phase_restarting',
+  'phase_dead',
+  'keeper_bootstrap_disabled',
+  'not_registered',
+  'not_running',
+  'no_keeper_binding',
+  'current_fact_invalid',
+] as const
+
+export const DASHBOARD_KEEPER_FLEET_OPERATOR_ACTIONS = [
+  'resume_or_leave_paused',
+  'repair_keeper_meta_file',
+  'add_keeper_toml_or_disable_stale_autoboot_meta',
+  'run_keeper_up_or_recreate_meta',
+  'repair_keeper_toml_config',
+  'add_sandbox_profile_to_keeper_toml',
+  'inspect_keeper_autoboot_logs',
+  'enable_keeper_bootstrap_or_start_manually',
+  'inspect_dead_keeper_root_cause',
+  'restart_or_disable_stopped_keeper',
+  'start_or_recover_keeper',
+  'inspect_capacity_accounting',
+  'repair_failing_keeper',
+  'recover_context_overflow',
+  'wait_for_compaction',
+  'wait_for_handoff',
+  'wait_for_keeper_drain',
+  'inspect_crashed_keeper',
+  'wait_for_keeper_restart',
+  'create_keeper_or_reassign_task',
+  'inspect_current_keeper_fact',
+] as const
+
+export type DashboardBlockedKeeperReason = typeof DASHBOARD_BLOCKED_KEEPER_REASONS[number]
+export type DashboardKeeperFleetOperatorAction =
+  typeof DASHBOARD_KEEPER_FLEET_OPERATOR_ACTIONS[number]
+
+export interface DashboardBlockedKeeperFact {
+  keeper_name: string | null
+  agent_name: string | null
+  task_id: string | null
+  task_status: string | null
+  reason: DashboardBlockedKeeperReason
+  action: DashboardKeeperFleetOperatorAction
+  operator_action_type: string | null
+  operator_tool_name: string | null
+  operator_action_confirm_required: boolean | null
+}
+
 export interface DashboardFleetPressureHealth {
-  status: 'ok' | 'degraded' | 'blocked' | null
+  schema: typeof DASHBOARD_KEEPER_FLEET_OPERATOR_SCHEMA
+  status: 'ok' | 'degraded' | 'blocked'
   reason: string | null
   blocker?: string | null
-  blocked_keeper_count: number | null
+  blocked_keeper_count: number
+  blocked_keepers: DashboardBlockedKeeperFact[]
   bootable_keeper_count?: number | null
   running_keeper_fiber_count?: number | null
   failing_keeper_fiber_count?: number | null

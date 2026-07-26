@@ -1,5 +1,7 @@
 (** Private inventory operations for immutable revival payloads. *)
 
+open Keeper_dead_revival_payload_types
+
 val inventory_authority_shards :
   Workspace.config ->
   (authority_shard list, error) result

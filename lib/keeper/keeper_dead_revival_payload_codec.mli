@@ -1,5 +1,7 @@
 (** Private canonical codec for immutable revival payloads. *)
 
+open Keeper_dead_revival_payload_types
+
 val make_payload :
   transaction_id:string ->
   owner_id:string ->

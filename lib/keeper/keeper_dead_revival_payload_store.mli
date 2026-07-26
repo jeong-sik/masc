@@ -1,5 +1,7 @@
 (** Private durable storage operations for immutable revival payloads. *)
 
+open Keeper_dead_revival_payload_types
+
 val create :
   Workspace.config ->
   prepared ->

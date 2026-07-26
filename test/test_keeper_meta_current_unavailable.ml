@@ -9,13 +9,35 @@ let current_with_outside_field name key =
   | _ -> Alcotest.fail "current fixture must be an object"
 ;;
 
-let with_temp_json json f =
-  let path = Filename.temp_file "keeper-current-meta-" ".json" in
+let current_name = function
+  | `Assoc fields ->
+    (match List.assoc_opt "name" fields with
+     | Some (`String name) -> name
+     | _ -> Alcotest.fail "current fixture must have a string name")
+  | _ -> Alcotest.fail "current fixture must be an object"
+;;
+
+let with_temp_json_as ~file_name json f =
+  let dir = Filename.temp_file "keeper-current-meta-" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o700;
+  let path = Filename.concat dir (file_name ^ ".json") in
   Fun.protect
-    ~finally:(fun () -> if Sys.file_exists path then Sys.remove path)
+    ~finally:(fun () ->
+      if Sys.file_exists path then Sys.remove path;
+      Unix.rmdir dir)
     (fun () ->
        Fs_compat.save_file path (Yojson.Safe.to_string json);
        f path)
+;;
+
+let with_temp_json json f =
+  with_temp_json_as ~file_name:(current_name json) json f
+;;
+
+let replace_field key value = function
+  | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+  | _ -> Alcotest.fail "current fixture must be an object"
 ;;
 
 let assoc_field key = function
@@ -105,6 +127,28 @@ let test_all_outside_fields_share_one_reason () =
          | Ok _ -> Alcotest.failf "%s unexpectedly decoded" key))
 ;;
 
+let test_embedded_name_must_match_canonical_path () =
+  let json = Masc_test_deps.current_meta_json_fixture ~name:"embedded-name" () in
+  with_temp_json_as ~file_name:"path-name" json (fun path ->
+    match Keeper_meta_store.read_meta_file_path_current path with
+    | Error { reason = Keeper_meta_store.Invalid_current; _ } -> ()
+    | Error _ -> Alcotest.fail "identity mismatch had the wrong typed reason"
+    | Ok _ -> Alcotest.fail "identity mismatch unexpectedly decoded")
+;;
+
+let test_terminal_latch_requires_pause () =
+  let json =
+    Masc_test_deps.current_meta_json_fixture ~name:"unpaused-terminal" ()
+    |> replace_field "latched_reason" (`String "dead_tombstone")
+    |> replace_field "paused" (`Bool false)
+  in
+  with_temp_json json (fun path ->
+    match Keeper_meta_store.read_meta_file_path_current path with
+    | Error { reason = Keeper_meta_store.Invalid_current; _ } -> ()
+    | Error _ -> Alcotest.fail "terminal latch violation had the wrong typed reason"
+    | Ok _ -> Alcotest.fail "unpaused terminal latch unexpectedly decoded")
+;;
+
 let () =
   run
     "keeper_meta_current_unavailable"
@@ -113,6 +157,10 @@ let () =
             test_invalid_current_is_typed_and_byte_preserving
         ; test_case "outside fields share Invalid_current" `Quick
             test_all_outside_fields_share_one_reason
+        ; test_case "canonical path owns keeper identity" `Quick
+            test_embedded_name_must_match_canonical_path
+        ; test_case "terminal latch requires pause" `Quick
+            test_terminal_latch_requires_pause
         ] )
     ]
 ;;

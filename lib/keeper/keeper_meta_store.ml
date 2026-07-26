@@ -163,7 +163,22 @@ let read_meta_file_path_current path
               ~detail:raw_detail)
        | json ->
       (match meta_of_json json with
-       | Ok meta -> Ok (Some meta)
+       | Ok meta ->
+         (match
+            Keeper_runtime_root_entry.metadata_keeper_name
+              (Filename.basename path)
+          with
+          | Some expected_name when not (String.equal expected_name meta.name) ->
+            let detail =
+              "keeper current metadata identity does not match its canonical path"
+            in
+            Log.Keeper.warn "keeper current meta parse failed for %s: %s" path detail;
+            Error
+              (current_meta_unavailable
+                 ~path
+                 ~reason:Invalid_current
+                 ~detail)
+          | Some _ | None -> Ok (Some meta))
        | Error detail ->
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string MetaReadFailures)
@@ -410,7 +425,12 @@ let read_meta_if_changed config name ~(last_mtime : float)
   let read_candidate candidate =
     let path = keeper_meta_path config candidate in
     if not (Fs_compat.file_exists path)
-    then Ok None
+    then
+      Error
+        (current_meta_unavailable
+           ~path
+           ~reason:Missing_current
+           ~detail:"keeper current metadata is missing")
     else (
       match Fs_compat.file_mtime path with
       | Some mtime when mtime > last_mtime ->

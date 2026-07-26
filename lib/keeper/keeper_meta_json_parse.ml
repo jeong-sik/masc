@@ -457,7 +457,13 @@ let meta_of_json json =
   try
     match validate_current_object json with
     | Error error -> Error (validation_error_detail error)
-    | Ok fields -> decode_current_meta fields
+    | Ok fields ->
+      (match decode_current_meta fields with
+       | Error _ as error -> error
+       | Ok meta ->
+         (match Keeper_meta_contract.terminal_latch_pause_violation meta with
+          | None -> Ok meta
+          | Some detail -> Error detail))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> invalidf "decoder raised: %s" (Printexc.to_string exn)

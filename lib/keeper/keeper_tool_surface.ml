@@ -26,9 +26,9 @@ let keeper_list_body ~(config : Workspace.config) args : tool_result =
           Keeper_registry.all ~base_path:config.base_path ()
           |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
         in
-        let discovery = keeper_names config in
+        let discovery = discover_current_meta config in
         let names =
-          registry_names @ discovery.names
+          registry_names @ discovery.keeper_names
           |> List.map String.trim
           |> List.filter (fun name -> not (String.equal name ""))
           |> List.sort_uniq String.compare

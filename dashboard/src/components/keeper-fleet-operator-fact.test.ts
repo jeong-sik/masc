@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { CirclePause } from 'lucide-preact'
 import type { DashboardBlockedKeeperFact } from '../types'
 import {
   CURRENT_KEEPER_FLEET_FACT_INVALID,
@@ -29,7 +30,7 @@ describe('keeper fleet operator fact presentation', () => {
 
     expect(presentation.label).toBe('Keeper paused')
     expect(presentation.tone).toBe('warn')
-    expect(presentation.Icon).toBeTypeOf('object')
+    expect(presentation.Icon).toBe(CirclePause)
     expect(presentation.action).toContain('resume selected paused keepers')
     expect(presentation.reason).toBe('durable_paused_autoboot_enabled')
   })

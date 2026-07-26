@@ -200,7 +200,7 @@ describe('FleetHealthPanel', () => {
     expect(screen.getByTestId('runtime-blocker-board')).toBeTruthy()
     const operatorFact = screen.getByTestId('keeper-fleet-operator-fact-0')
     expect(operatorFact.getAttribute('data-tone')).toBe('warn')
-    expect(operatorFact.querySelector('svg')).toBeTruthy()
+    expect(operatorFact.querySelector('[data-icon="Wrench"]')).toBeTruthy()
     expect(operatorFact.textContent).toContain('Keeper failing')
     expect(operatorFact.textContent).toContain('inspect and recover failing keepers')
     expect(screen.getByText('13/17')).toBeTruthy()

@@ -306,42 +306,162 @@ let test_current_replay_and_conflict ~fs () =
        ~state:(state "different"))
 ;;
 
-let test_stale_prepare_and_publish_one_winner ~fs () =
-  with_root ~fs "masc_memory_os_stale_" @@ fun _root root ->
-  within_store ~root ~owner:"keeper-a" @@ fun store ->
-  let empty = require_ok (Store.load store) in
-  let winner =
-    prepare_new store empty "winner-operation" (state "winner")
+let test_concurrent_publish_has_single_cas_winner ~fs ~clock () =
+  with_root ~fs "masc_memory_os_concurrent_cas_" @@ fun _root root ->
+  let winner_receipt_id, winner_state_sha256 =
+    require_ok
+      (Store.with_store
+         ~secure_random:(entropy_source 31)
+         ~root
+         ~owner_id:"keeper-a"
+         (fun store_a ->
+            Store.with_store
+              ~secure_random:(entropy_source 67)
+              ~root
+              ~owner_id:"keeper-a"
+              (fun store_b ->
+                 let empty_a = require_ok (Store.load store_a) in
+                 let empty_b = require_ok (Store.load store_b) in
+                 let prepared_a =
+                   prepare_new
+                     store_a
+                     empty_a
+                     "concurrent-a"
+                     (state "winner-a")
+                 in
+                 let prepared_b =
+                   prepare_new
+                     store_b
+                     empty_b
+                     "concurrent-b"
+                     (state "loser-b")
+                 in
+                 let lock_held, resolve_lock_held =
+                   Eio.Promise.create ()
+                 in
+                 let release_a, resolve_release_a =
+                   Eio.Promise.create ()
+                 in
+                 let hooks =
+                   Head.For_testing.hooks
+                     ~after_lock_acquired:(fun () ->
+                       Eio.Promise.resolve resolve_lock_held ();
+                       match
+                         Eio.Time.with_timeout clock 2.0 (fun () ->
+                           Eio.Promise.await release_a)
+                       with
+                       | Ok () -> ()
+                       | Error `Timeout ->
+                         failwith
+                           "timed out waiting for the contended CAS")
+                     ()
+                 in
+                 let winner_result, contended_result =
+                   match
+                     Eio.Time.with_timeout clock 3.0 (fun () ->
+                       Eio.Fiber.both
+                         (fun () ->
+                            Store.For_testing.publish_with_head_hooks
+                              hooks
+                              store_a
+                              prepared_a)
+                         (fun () ->
+                            Eio.Promise.await lock_held;
+                            Fun.protect
+                              ~finally:(fun () ->
+                                Eio.Promise.resolve resolve_release_a ())
+                              (fun () ->
+                                 Store.publish store_b prepared_b)))
+                   with
+                   | Ok results -> results
+                   | Error `Timeout ->
+                     fail "concurrent CAS did not settle within 3s"
+                 in
+                 let committed_count =
+                   List.fold_left
+                     (fun count -> function
+                        | Ok (Store.Committed _) -> count + 1
+                        | Ok (Store.Stale _ | Store.Indeterminate _)
+                        | Error _ -> count)
+                     0
+                     [ winner_result; contended_result ]
+                 in
+                 check int "exactly one overlapping CAS committed" 1
+                   committed_count;
+                 let winner_receipt =
+                   match winner_result with
+                   | Ok (Store.Committed receipt) -> receipt
+                   | Ok (Store.Stale _) ->
+                     fail "lock holder became stale"
+                   | Ok (Store.Indeterminate _) ->
+                     fail "lock holder became indeterminate"
+                   | Error error ->
+                     failf
+                       "lock holder failed: %s"
+                       (Store.error_to_string error)
+                 in
+                 (match contended_result with
+                  | Error error ->
+                    check
+                      bool
+                      "contender observed typed Busy with unchanged HEAD"
+                      true
+                      (Store.For_testing.error_tag error
+                       = Store.For_testing.Head_busy_unchanged_error)
+                  | Ok (Store.Committed _) ->
+                    fail "contender committed while the lock was held"
+                  | Ok (Store.Stale _) ->
+                    fail "contender observed stale instead of lock contention"
+                  | Ok (Store.Indeterminate _) ->
+                    fail "contender became indeterminate before dispatch");
+                 (match require_ok (Store.publish store_b prepared_b) with
+                  | Store.Stale current ->
+                    check int64 "loser retry observes winner generation" 1L
+                      (Store.snapshot_generation current);
+                    check_state_claim
+                      "loser retry observes winner authority"
+                      "winner-a"
+                      current
+                  | Store.Committed _ ->
+                    fail "loser retry overwrote the winner"
+                  | Store.Indeterminate _ ->
+                    fail "loser retry became indeterminate");
+                 Ok
+                   ( sha256_string
+                       (Store.commit_receipt_id winner_receipt)
+                   , sha256_string
+                       (Store.commit_receipt_state_sha256
+                          winner_receipt) ))))
   in
-  let loser =
-    prepare_new store empty "loser-operation" (state "loser")
-  in
-  ignore (publish_committed store winner : Store.commit_receipt);
-  (match require_ok (Store.publish store loser) with
-   | Store.Stale current ->
-     check int64 "stale publish observes winner generation" 1L
-       (Store.snapshot_generation current);
-     check_state_claim "stale publish authority" "winner" current
-   | Store.Committed _ -> fail "stale prepared commit overwrote HEAD"
-   | Store.Indeterminate _ ->
-     fail "conflicting stale publication became indeterminate");
-  (match
-     require_ok
-       (Store.prepare
-          store
-          ~expected:empty
-          ~operation_id:"third-operation"
-          ~state:(state "third"))
-   with
-   | Store.Stale_expected current ->
-     check int64 "stale prepare observes winner generation" 1L
-       (Store.snapshot_generation current);
-     check_state_claim "stale prepare authority" "winner" current
-   | Store.Prepared _ -> fail "stale expected snapshot prepared a commit"
-   | Store.Current_commit_replay _ ->
-     fail "unrelated stale operation replayed");
-  let current = require_ok (Store.load store) in
-  check_state_claim "one winner remains current" "winner" current
+  within_store ~seed:89 ~root ~owner:"keeper-a" @@ fun reopened ->
+  let current = require_ok (Store.load reopened) in
+  check int64 "reopen preserves winner generation" 1L
+    (Store.snapshot_generation current);
+  check_state_claim
+    "reopen ignores the loser immutable orphan"
+    "winner-a"
+    current;
+  match
+    require_ok
+      (Store.prepare
+         reopened
+         ~expected:current
+         ~operation_id:"concurrent-a"
+         ~state:(state "winner-a"))
+  with
+  | Store.Current_commit_replay receipt ->
+    check string "reopen preserves winner receipt"
+      winner_receipt_id
+      (sha256_string (Store.commit_receipt_id receipt));
+    check string "reopen preserves winner state digest"
+      winner_state_sha256
+      (sha256_string (Store.commit_receipt_state_sha256 receipt));
+    check int64 "replayed winner generation" 1L
+      (Store.commit_receipt_generation receipt)
+  | Store.Prepared _ ->
+    fail "reopen did not recognize the current winner"
+  | Store.Stale_expected _ ->
+    fail "reopen snapshot became stale without another publication"
 ;;
 
 let test_runtime_binding_rejections ~fs () =
@@ -850,6 +970,7 @@ let test_non_current_operation_is_not_replayed ~fs () =
 let () =
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
+  let clock = Eio.Stdenv.clock env in
   run
     "keeper memory os canonical store"
     [ ( "store"
@@ -857,8 +978,8 @@ let () =
             (test_genesis_roundtrip_reopen ~fs)
         ; test_case "current replay and conflict" `Quick
             (test_current_replay_and_conflict ~fs)
-        ; test_case "stale prepare and publish one winner" `Quick
-            (test_stale_prepare_and_publish_one_winner ~fs)
+        ; test_case "concurrent publish has one CAS winner" `Quick
+            (test_concurrent_publish_has_single_cas_winner ~fs ~clock)
         ; test_case "runtime binding rejections" `Quick
             (test_runtime_binding_rejections ~fs)
         ; test_case "same-length digest before decode" `Quick

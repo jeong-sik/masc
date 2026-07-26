@@ -1837,6 +1837,7 @@ module For_testing = struct
     | Immutable_read_failed_error
     | Immutable_digest_mismatch_error
     | Invalid_store_json_error
+    | Head_busy_unchanged_error
     | Head_operation_failed_error
     | Head_row_too_large_error
     | Pending_publication_mismatch_error
@@ -1864,6 +1865,8 @@ module For_testing = struct
     | Immutable_read_failed _ -> Immutable_read_failed_error
     | Immutable_digest_mismatch _ -> Immutable_digest_mismatch_error
     | Invalid_store_json _ -> Invalid_store_json_error
+    | Head_operation_failed { failure = Head.Busy; _ } ->
+      Head_busy_unchanged_error
     | Head_operation_failed _ -> Head_operation_failed_error
     | Head_row_too_large _ -> Head_row_too_large_error
     | Pending_publication_mismatch -> Pending_publication_mismatch_error

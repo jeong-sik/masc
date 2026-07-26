@@ -152,6 +152,7 @@ module For_testing : sig
     | Immutable_read_failed_error
     | Immutable_digest_mismatch_error
     | Invalid_store_json_error
+    | Head_busy_unchanged_error
     | Head_operation_failed_error
     | Head_row_too_large_error
     | Pending_publication_mismatch_error

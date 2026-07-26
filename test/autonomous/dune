@@ -1,3 +1,5 @@
 (tests
- (names test_autonomous_phase test_transition)
+ (names
+  test_autonomous_phase
+  test_transition)
  (libraries autonomous shared_types yojson))

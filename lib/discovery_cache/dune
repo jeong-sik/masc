@@ -5,4 +5,8 @@
  (public_name masc.discovery_cache)
  (wrapped false)
  (modules discovery_cache)
- (libraries agent_sdk.llm_provider eio time_compat yojson))
+ (libraries
+  agent_sdk.llm_provider
+  eio
+  time_compat
+  yojson))

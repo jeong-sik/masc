@@ -66,6 +66,17 @@ let validate_completion_invariant goal =
     Ok ()
 ;;
 
+let generic_completion_error =
+  "generic Goal mutation cannot persist Completed; use the operation-bound \
+   semantic-review completion authority"
+;;
+
+let validate_generic_goal_mutation ~before:_ after =
+  if after.phase = Goal_phase.Completed
+  then Error generic_completion_error
+  else validate_completion_invariant after
+;;
+
 type state = {
   version : int;
   updated_at : string;
@@ -410,7 +421,7 @@ let read_state config =
   else
     default_state ()
 
-let write_state_result config state =
+let write_state_unchecked config state =
   ensure_dirs config;
   let json = state_to_yojson state in
   let* () = Workspace_utils.write_json_result config (goals_path config) json in
@@ -422,6 +433,22 @@ let write_state_result config state =
        (goals_recovery_path config)
        msg);
   Ok ()
+
+let write_state_result config state =
+  if List.exists
+       (fun goal -> goal.phase = Goal_phase.Completed)
+       state.goals
+  then Error generic_completion_error
+  else
+    let rec validate = function
+      | [] -> Ok ()
+      | goal :: rest ->
+        let* () = validate_completion_invariant goal in
+        validate rest
+    in
+    let* () = validate state.goals in
+    write_state_unchecked config state
+;;
 
 let write_state config state =
   match write_state_result config state with
@@ -441,6 +468,20 @@ let gen_goal_id () =
 let find_goal goals id =
   List.find_opt (fun goal -> String.equal goal.id id) goals
 
+let validate_state_mutation before after =
+  let rec validate = function
+    | [] -> Ok ()
+    | goal :: rest ->
+      let* () = validate_completion_invariant goal in
+      (match goal.phase, find_goal before.goals goal.id with
+       | Goal_phase.Completed, Some previous when previous = goal ->
+         validate rest
+       | Goal_phase.Completed, _ -> Error generic_completion_error
+       | _ -> validate rest)
+  in
+  validate after.goals
+;;
+
 let replace_goal goals updated =
   List.map (fun goal -> if String.equal goal.id updated.id then updated else goal) goals
 
@@ -449,11 +490,17 @@ let update_state config f =
   Workspace_utils.with_file_lock config lock_path (fun () ->
       let state = read_state config in
       let next_state = f state in
-      let* () = write_state_result config next_state in
+      let* () = validate_state_mutation state next_state in
+      let* () = write_state_unchecked config next_state in
       Ok next_state)
 
 let get_goal config ~goal_id =
   read_state config |> fun state -> find_goal state.goals goal_id
+
+let get_goal_with_version config ~goal_id =
+  let state = read_state config in
+  Option.map (fun goal -> goal, state.version) (find_goal state.goals goal_id)
+;;
 
 let update_goal config ~goal_id f =
   let lock_path = goals_path config in
@@ -464,7 +511,9 @@ let update_goal config ~goal_id f =
       | Some goal ->
           let now = Masc_domain.now_iso () in
           let updated_goal = f { goal with updated_at = now } in
-          let* () = validate_completion_invariant updated_goal in
+          let* () =
+            validate_generic_goal_mutation ~before:goal updated_goal
+          in
           let next_state =
             {
               version = state.version + 1;
@@ -472,7 +521,7 @@ let update_goal config ~goal_id f =
               goals = replace_goal state.goals updated_goal;
             }
           in
-          let* () = write_state_result config next_state in
+          let* () = write_state_unchecked config next_state in
           Ok updated_goal)
 
 type conditional_update_error =
@@ -485,6 +534,8 @@ let conditional_update_error_to_string = function
   | Goal_snapshot_changed ->
     "Goal changed while completion was being reviewed; obtain a new verdict \
      for the current Goal snapshot"
+  | Goal_approval_invalid ->
+    "Goal completion approval does not authorize this exact operation"
   | Goal_persistence_failed msg -> msg
 ;;
 
@@ -498,7 +549,7 @@ let update_goal_if_unchanged config ~(expected : goal) f =
     | Some current ->
       let now = Masc_domain.now_iso () in
       let updated_goal = f { current with updated_at = now } in
-      (match validate_completion_invariant updated_goal with
+      (match validate_generic_goal_mutation ~before:current updated_goal with
        | Error msg -> Error (Goal_persistence_failed msg)
        | Ok () ->
          let next_state =
@@ -507,9 +558,71 @@ let update_goal_if_unchanged config ~(expected : goal) f =
            ; goals = replace_goal state.goals updated_goal
            }
          in
-         (match write_state_result config next_state with
+         (match write_state_unchecked config next_state with
           | Ok () -> Ok updated_goal
           | Error msg -> Error (Goal_persistence_failed msg))))
+
+let complete_goal
+      config
+      ~(expected : goal)
+      ~expected_state_version
+      ~operation_id
+      ~completion_digest
+      ~approval
+  =
+  Workspace_utils.with_file_lock config (goals_path config) (fun () ->
+    let state = read_state config in
+    match find_goal state.goals expected.id with
+    | None -> Error Goal_not_found
+    | Some current
+      when state.version <> expected_state_version || current <> expected ->
+      Error Goal_snapshot_changed
+    | Some current ->
+      if
+        not
+          (Goal_completion_reviewer.approval_authorizes
+             approval
+             ~goal_id:current.id
+             ~goal_version:state.version
+             ~operation_id
+             ~completion_digest)
+      then Error Goal_approval_invalid
+      else
+        let metadata =
+          Goal_completion_reviewer.approval_metadata approval
+        in
+        let receipt =
+          { evaluator_runtime = metadata.evaluator_runtime
+          ; reviewed_at = metadata.reviewed_at
+          ; reviewed_goal_updated_at = current.updated_at
+          ; review_prompt_sha256 = metadata.review_prompt_sha256
+          ; completion_claim = metadata.completion_claim
+          ; linked_task_ids = metadata.linked_task_ids
+          }
+        in
+        let now = Masc_domain.now_iso () in
+        let updated_goal =
+          { current with
+            phase = Goal_phase.Completed
+          ; last_review_note = Some "Configured LLM approved Goal completion"
+          ; last_review_at = Some metadata.reviewed_at
+          ; completion_review_failure = None
+          ; completion_receipt = Some receipt
+          ; updated_at = now
+          }
+        in
+        (match validate_completion_invariant updated_goal with
+         | Error msg -> Error (Goal_persistence_failed msg)
+         | Ok () ->
+           let next_state =
+             { version = state.version + 1
+             ; updated_at = now
+             ; goals = replace_goal state.goals updated_goal
+             }
+           in
+           (match write_state_unchecked config next_state with
+            | Ok () -> Ok updated_goal
+            | Error msg -> Error (Goal_persistence_failed msg))))
 
 type delete_goal_outcome =
   | Deleted
@@ -531,7 +644,7 @@ let delete_goal config ~goal_id =
         Error (Unknown_goal "Goal not found")
       else (
         match
-          write_state_result
+          write_state_unchecked
             config
             { version = state.version + 1
             ; goals =

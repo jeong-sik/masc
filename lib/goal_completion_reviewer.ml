@@ -4,11 +4,15 @@
     one structured [report_goal_completion_verdict] tool call. *)
 
 type review_request =
-  { goal : Goal_store.goal
+  { goal_id : string
+  ; goal_version : int
+  ; operation_id : string
+  ; goal_json : Yojson.Safe.t
   ; completion_claim : string
   ; agent_name : string
-  ; linked_tasks : Masc_domain.task list
-  ; child_goals : Goal_store.goal list
+  ; linked_tasks_json : Yojson.Safe.t
+  ; linked_task_ids : string list
+  ; child_goals_json : Yojson.Safe.t
   }
 
 type verdict =
@@ -25,28 +29,54 @@ type gate =
   | Invalid_verdict
   | Evaluator_unavailable
 
+type approval =
+  { goal_id : string
+  ; goal_version : int
+  ; operation_id : string
+  ; completion_digest : string
+  ; evaluator_runtime : string
+  ; reviewed_at : string
+  ; completion_claim : string
+  ; linked_task_ids : string list
+  }
+
+type approval_metadata =
+  { evaluator_runtime : string
+  ; reviewed_at : string
+  ; review_prompt_sha256 : string
+  ; completion_claim : string
+  ; linked_task_ids : string list
+  }
+
 type review_result =
   { verdict : verdict option
+  ; approval : approval option
   ; evaluator_runtime : string
   ; review_prompt_sha256 : string option
   ; gate : gate
   ; fallback_reason : string option
   }
 
-let run_llm_reviewer_fn
-  : (?sw:Eio.Switch.t ->
-     evaluator_runtime:string ->
-     prompt:string ->
-     report_tool_schema:Types_core.tool_schema ->
-     unit ->
-     (verdict option, Agent_sdk.Error.sdk_error) result)
-      Atomic.t
+let approval_authorizes
+      approval
+      ~goal_id
+      ~goal_version
+      ~operation_id
+      ~completion_digest
   =
-  Atomic.make
-    (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
-       Error
-         (Agent_sdk.Error.Internal
-            "Goal_completion_reviewer.run_llm_reviewer_fn is not connected"))
+  String.equal approval.goal_id goal_id
+  && approval.goal_version = goal_version
+  && String.equal approval.operation_id operation_id
+  && String.equal approval.completion_digest completion_digest
+;;
+
+let approval_metadata approval =
+  { evaluator_runtime = approval.evaluator_runtime
+  ; reviewed_at = approval.reviewed_at
+  ; review_prompt_sha256 = approval.completion_digest
+  ; completion_claim = approval.completion_claim
+  ; linked_task_ids = approval.linked_task_ids
+  }
 ;;
 
 let report_tool_schema : Masc_domain.tool_schema =
@@ -113,18 +143,75 @@ let parse_verdict_from_json = function
 
 let build_prompt request =
   let vars =
-    [ "goal_json", Goal_store.goal_to_yojson request.goal |> Yojson.Safe.to_string
+    [ "goal_json", Yojson.Safe.to_string request.goal_json
     ; "completion_claim", request.completion_claim
     ; "agent_name", request.agent_name
-    ; ( "linked_tasks_json"
-      , `List (List.map Masc_domain.task_to_yojson request.linked_tasks)
-        |> Yojson.Safe.to_string )
-    ; ( "child_goals_json"
-      , `List (List.map Goal_store.goal_to_yojson request.child_goals)
-        |> Yojson.Safe.to_string )
+    ; "linked_tasks_json", Yojson.Safe.to_string request.linked_tasks_json
+    ; "child_goals_json", Yojson.Safe.to_string request.child_goals_json
     ]
   in
   Prompt_registry.render_prompt_template "verification.goal_completion" vars
+;;
+
+let run_configured_reviewer ~evaluator_runtime ~prompt =
+  let verdict_ref = ref None in
+  let protocol_error_ref = ref None in
+  let dispatch ~name ~args =
+    let start_time = Time_compat.now () in
+    match !verdict_ref with
+    | Some verdict ->
+      let detail =
+        Printf.sprintf
+          "Goal completion verdict already recorded (%s); \
+           report_goal_completion_verdict must be called exactly once"
+          (verdict_constructor_name verdict)
+      in
+      protocol_error_ref := Some detail;
+      Tool_result.error ~tool_name:name ~start_time detail
+    | None ->
+      (match parse_verdict_from_json args with
+       | Ok verdict ->
+         verdict_ref := Some verdict;
+         Tool_result.ok
+           ~tool_name:name
+           ~start_time
+           (match verdict with
+            | Approve -> "Goal completion verdict recorded: APPROVE"
+            | Reject reason -> "Goal completion verdict recorded: REJECT: " ^ reason)
+       | Error msg ->
+         protocol_error_ref := Some msg;
+         Log.Workspace.warn
+           "Goal completion structured verdict parse failed: %s"
+           msg;
+         Tool_result.error
+           ~tool_name:name
+           ~start_time
+           ("Invalid Goal completion verdict format: " ^ msg))
+  in
+  let apply_completion_verdict_config provider_cfg =
+    Ok
+      (Keeper_structured_output_schema.completion_verdict_tool_provider_config
+         provider_cfg)
+  in
+  match
+    Masc_oas_bridge.run_safe ~caller:Masc_oas_bridge.Goal_completion (fun () ->
+      Keeper_turn_driver_wrappers.run_named_with_masc_tools
+        ~runtime_id:evaluator_runtime
+        ~base_path:(Env_config_core.base_path ())
+        ~goal:prompt
+        ~masc_tools:[ report_tool_schema ]
+        ~dispatch
+        ~provider_config_transform:apply_completion_verdict_config
+        ())
+  with
+  | Ok _ ->
+    (match !protocol_error_ref with
+     | Some detail ->
+       Error
+         (Agent_sdk.Error.Internal
+            ("Goal completion verdict protocol violation: " ^ detail))
+     | None -> Ok !verdict_ref)
+  | Error err -> Error err
 ;;
 
 let resolve_evaluator_runtime () =
@@ -152,6 +239,7 @@ let unavailable ~runtime reason =
     runtime
     reason;
   { verdict = None
+  ; approval = None
   ; evaluator_runtime = runtime
   ; review_prompt_sha256 = None
   ; gate = Evaluator_unavailable
@@ -171,11 +259,7 @@ let review request =
        in
        let reviewer_result =
          try
-           (Atomic.get run_llm_reviewer_fn)
-             ~evaluator_runtime
-             ~prompt
-             ~report_tool_schema
-             ()
+           run_configured_reviewer ~evaluator_runtime ~prompt
          with
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->
@@ -187,7 +271,23 @@ let review request =
        in
        match reviewer_result with
        | Ok (Some verdict) ->
+         let approval =
+           match verdict with
+           | Reject _ -> None
+           | Approve ->
+             Some
+               { goal_id = request.goal_id
+               ; goal_version = request.goal_version
+               ; operation_id = request.operation_id
+               ; completion_digest = review_prompt_sha256
+               ; evaluator_runtime
+               ; reviewed_at = Masc_domain.now_iso ()
+               ; completion_claim = request.completion_claim
+               ; linked_task_ids = request.linked_task_ids
+               }
+         in
          { verdict = Some verdict
+         ; approval
          ; evaluator_runtime
          ; review_prompt_sha256 = Some review_prompt_sha256
          ; gate = Structured_tool
@@ -199,6 +299,7 @@ let review request =
             report_goal_completion_verdict exactly once"
          in
          { verdict = None
+         ; approval = None
          ; evaluator_runtime
          ; review_prompt_sha256 = Some review_prompt_sha256
          ; gate = Invalid_verdict

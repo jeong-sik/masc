@@ -277,40 +277,23 @@ let test_list_goals_filters_by_phase () =
     match Goal_store.upsert_goal config ~title () with
     | Error msg -> fail msg
     | Ok (goal, _) ->
-      let completion_receipt =
-        match phase with
-        | Goal_phase.Completed ->
-          Some
-            { Goal_store.evaluator_runtime = "test.goal-completion-reviewer"
-            ; reviewed_at = iso_now ()
-            ; reviewed_goal_updated_at = goal.updated_at
-            ; review_prompt_sha256 = String.make 64 'a'
-            ; completion_claim = "fixture proof"
-            ; linked_task_ids = []
-            }
-        | Goal_phase.Executing
-        | Goal_phase.Blocked
-        | Goal_phase.Paused
-        | Goal_phase.Dropped ->
-          None
-      in
       (match
          Goal_store.update_goal config ~goal_id:goal.id (fun current ->
-           { current with phase; completion_receipt })
+           { current with phase })
        with
        | Ok _ -> ()
        | Error msg -> fail msg)
   in
   make "Executing goal" Goal_phase.Executing;
-  make "Completed goal" Goal_phase.Completed;
   make "Blocked goal" Goal_phase.Blocked;
+  make "Paused goal" Goal_phase.Paused;
   let goals =
-    Goal_store.list_goals config ~phase:Goal_phase.Completed ()
+    Goal_store.list_goals config ~phase:Goal_phase.Blocked ()
   in
   check int "one completed goal" 1 (List.length goals);
   match goals with
   | [ goal ] ->
-      check string "filtered phase preserved" "completed"
+      check string "filtered phase preserved" "blocked"
         (Goal_phase.to_string goal.phase)
   | _ -> fail "expected one filtered goal"
 
@@ -344,9 +327,9 @@ let test_update_cannot_complete_without_receipt () =
    | Error msg ->
      check
        bool
-       "rejection names missing completion receipt"
+       "rejection names dedicated completion authority"
        true
-       (String.starts_with ~prefix:"completed Goal requires" msg));
+       (String.starts_with ~prefix:"generic Goal mutation cannot" msg));
   let after = Goal_store.read_state config in
   check int "rejected completion does not bump version" before.version after.version;
   match Goal_store.get_goal config ~goal_id:goal.id with

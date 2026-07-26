@@ -300,6 +300,8 @@ let conditional_goal_error_result
     match error with
     | Goal_store.Goal_not_found | Goal_store.Goal_snapshot_changed ->
       Tool_result.Workflow_rejection
+    | Goal_store.Goal_approval_invalid ->
+      Tool_result.Workflow_rejection
     | Goal_store.Goal_persistence_failed _ -> Tool_result.Runtime_failure
   in
   error_result_typed
@@ -315,6 +317,7 @@ let handle_goal_completion_request
       ~start_time
       (ctx : context)
       (goal : Goal_store.goal)
+      ~goal_version
       ~completion_claim
   =
   Log.Workspace.info
@@ -344,42 +347,48 @@ let handle_goal_completion_request
          ~code:Precondition_failed
          (msg ^ "; Goal remains nonterminal"))
   | Ok (linked_tasks, child_goals) ->
+    let operation_id =
+      Digestif.SHA256.(
+        digest_string
+          (Printf.sprintf
+             "%s\000%d\000%s\000%.17g"
+             goal.id
+             goal_version
+             ctx.agent_name
+             (Time_compat.now ()))
+        |> to_hex)
+    in
     let request : Goal_completion_reviewer.review_request =
-      { goal
+      { goal_id = goal.id
+      ; goal_version
+      ; operation_id
+      ; goal_json = Goal_store.goal_to_yojson goal
       ; completion_claim
       ; agent_name = ctx.agent_name
-      ; linked_tasks
-      ; child_goals
+      ; linked_tasks_json =
+          `List (List.map Masc_domain.task_to_yojson linked_tasks)
+      ; linked_task_ids =
+          List.map (fun (task : Masc_domain.task) -> task.id) linked_tasks
+      ; child_goals_json =
+          `List (List.map Goal_store.goal_to_yojson child_goals)
       }
     in
     let review = Goal_completion_reviewer.review request in
-    (match review.verdict, review.gate, review.review_prompt_sha256 with
+    (match
+       review.verdict, review.gate, review.review_prompt_sha256, review.approval
+     with
      | Some Goal_completion_reviewer.Approve,
        Goal_completion_reviewer.Structured_tool,
-       Some review_prompt_sha256 ->
-       let reviewed_at = Masc_domain.now_iso () in
-       let receipt : Goal_store.completion_receipt =
-         { evaluator_runtime = review.evaluator_runtime
-         ; reviewed_at
-         ; reviewed_goal_updated_at = goal.updated_at
-         ; review_prompt_sha256
-         ; completion_claim
-         ; linked_task_ids =
-             List.map (fun (task : Masc_domain.task) -> task.id) linked_tasks
-         }
-       in
+       Some completion_digest,
+       Some approval ->
        (match
-          Goal_store.update_goal_if_unchanged
+          Goal_store.complete_goal
             ctx.config
             ~expected:goal
-            (fun current ->
-               { current with
-                 phase = Goal_phase.Completed
-               ; last_review_note = Some "Configured LLM approved Goal completion"
-               ; last_review_at = Some reviewed_at
-               ; completion_review_failure = None
-               ; completion_receipt = Some receipt
-               })
+            ~expected_state_version:goal_version
+            ~operation_id
+            ~completion_digest
+            ~approval
         with
         | Error error ->
           conditional_goal_error_result ~tool_name ~start_time error
@@ -398,7 +407,7 @@ let handle_goal_completion_request
               (`Assoc
                  [ "actor", `String ctx.agent_name
                  ; "evaluator_runtime", `String review.evaluator_runtime
-                 ; "reviewed_at", `String reviewed_at
+                 ; "reviewed_at", `String (Masc_domain.now_iso ())
                  ]);
           ok_result
             ~tool_name
@@ -409,6 +418,7 @@ let handle_goal_completion_request
             ])
      | Some (Goal_completion_reviewer.Reject reason),
        Goal_completion_reviewer.Structured_tool,
+       _,
        _ ->
        (match
           persist_nonterminal_goal_review
@@ -433,6 +443,7 @@ let handle_goal_completion_request
      | None,
        ( Goal_completion_reviewer.Invalid_verdict
        | Goal_completion_reviewer.Evaluator_unavailable ),
+       _,
        _ ->
        let reason =
          Option.value
@@ -461,11 +472,12 @@ let handle_goal_completion_request
             ~code:Precondition_failed
             (reason ^ "; Goal remains nonterminal"))
      | Some _, (Goal_completion_reviewer.Invalid_verdict
-               | Goal_completion_reviewer.Evaluator_unavailable), _
-     | None, Goal_completion_reviewer.Structured_tool, _
+               | Goal_completion_reviewer.Evaluator_unavailable), _, _
+     | None, Goal_completion_reviewer.Structured_tool, _, _
      | Some Goal_completion_reviewer.Approve,
        Goal_completion_reviewer.Structured_tool,
-       None ->
+       _,
+       _ ->
        error_result_typed
          ~class_:Tool_result.Runtime_failure
          ~tool_name
@@ -561,10 +573,10 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
     validation_error_result ~tool_name ~start_time [ err ]
   | Ok goal_id, Ok (Some action) ->
     let note = get_string_opt args "note" in
-    (match Goal_store.get_goal ctx.config ~goal_id with
+    (match Goal_store.get_goal_with_version ctx.config ~goal_id with
      | None ->
        error_result_typed ~tool_name ~start_time ~code:Not_found "goal not found"
-     | Some goal ->
+     | Some (goal, goal_version) ->
        (match Goal_phase.decide_transition ~phase:goal.phase ~action with
         | Error msg ->
           error_result_typed ~tool_name ~start_time ~code:Conflict msg
@@ -576,6 +588,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args
                ~start_time
                ctx
                goal
+               ~goal_version
                ~completion_claim
            | None | Some _ ->
              error_result_typed

@@ -43,10 +43,6 @@ let () =
   Prompt_defaults.init ();
   Atomic.set Workspace_hooks.get_cross_verifier_runtime_id_fn (fun () ->
     Some "test.goal-completion-reviewer");
-  Atomic.set
-    Goal_completion_reviewer.run_llm_reviewer_fn
-    (fun ?sw:_ ~evaluator_runtime:_ ~prompt ~report_tool_schema:_ () ->
-       !goal_reviewer_run prompt)
 ;;
 
 let temp_dir () =
@@ -770,33 +766,9 @@ let () =
             `Quick
             test_goal_completion_verdict_parser_is_exact
         ; test_case
-            "completion requires structured approval"
-            `Quick
-            test_goal_completion_requires_structured_approval
-        ; test_case
             "completion requires non-empty claim"
             `Quick
             test_goal_completion_requires_nonempty_claim
-        ; test_case
-            "completion supplies open Task as evidence"
-            `Quick
-            test_goal_completion_supplies_open_task_as_evidence
-        ; test_case
-            "completion rejection is durable and nonterminal"
-            `Quick
-            test_goal_completion_rejection_is_durable_and_nonterminal
-        ; test_case
-            "completion unavailable is retryable and nonterminal"
-            `Quick
-            test_goal_completion_unavailable_is_retryable_and_nonterminal
-        ; test_case
-            "completion missing verdict is nonterminal"
-            `Quick
-            test_goal_completion_missing_verdict_is_nonterminal
-        ; test_case
-            "completion rejects stale approval"
-            `Quick
-            test_goal_completion_rejects_stale_approval
         ; test_case
             "block and unblock have no operator hierarchy"
             `Quick

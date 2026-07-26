@@ -43,7 +43,7 @@ val parse_goal_phase : string option -> Goal_phase.t option
 
 (** {1 Goal record} *)
 
-type completion_receipt =
+type completion_receipt = private
   { evaluator_runtime : string
   ; reviewed_at : string
   ; reviewed_goal_updated_at : string
@@ -140,16 +140,13 @@ val write_state_result :
   Workspace_utils.config -> state -> (unit, string) result
 (** Result-returning variant of {!write_state}. *)
 
-val update_state :
-  Workspace_utils.config -> (state -> state) -> (state, string) result
-(** Atomic read-modify-write under the goals file lock.
-    [f] receives the current state and returns the next state.
-    The file lock protects against concurrent truncation races
-    (#17229). *)
-
 (** {1 Single-goal operations} *)
 
 val get_goal : Workspace_utils.config -> goal_id:string -> goal option
+
+val get_goal_with_version :
+  Workspace_utils.config -> goal_id:string -> (goal * int) option
+(** Returns the Goal and the exact enclosing store version from one read. *)
 
 val update_goal :
   Workspace_utils.config ->
@@ -163,6 +160,7 @@ val update_goal :
 type conditional_update_error =
   | Goal_not_found
   | Goal_snapshot_changed
+  | Goal_approval_invalid
   | Goal_persistence_failed of string
 
 val conditional_update_error_to_string : conditional_update_error -> string
@@ -175,6 +173,17 @@ val update_goal_if_unchanged :
 (** Atomically updates one Goal only when its current persisted record exactly
     equals [expected]. The equality is structural over the typed record, not a
     serialized string or selected-field heuristic. *)
+
+val complete_goal :
+  Workspace_utils.config ->
+  expected:goal ->
+  expected_state_version:int ->
+  operation_id:string ->
+  completion_digest:string ->
+  approval:Goal_completion_reviewer.approval ->
+  (goal, conditional_update_error) result
+(** Consumes an exact semantic-review approval and persists [Completed] in one
+    lock/CAS transaction. This is the only completion mutation authority. *)
 
 type delete_goal_outcome =
   | Deleted

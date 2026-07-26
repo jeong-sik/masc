@@ -853,7 +853,7 @@ let manifest_of_json json =
   then Error "manifest facts ref has the wrong kind"
   else if
     List.exists
-      (fun reference -> reference.kind <> Episode_object)
+      (fun (reference : immutable_ref) -> reference.kind <> Episode_object)
       episode_refs
   then Error "manifest episode ref has the wrong kind"
   else

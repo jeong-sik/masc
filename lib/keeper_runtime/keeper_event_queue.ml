@@ -612,6 +612,17 @@ let continuation_channel_field fields =
 let payload_of_yojson json =
   let context = "stimulus.payload" in
   let* fields = assoc_fields ~context json in
+  let kind_count =
+    List.fold_left
+      (fun count (name, _) -> if String.equal name "kind" then count + 1 else count)
+      0
+      fields
+  in
+  let* () =
+    if kind_count = 1
+    then Ok ()
+    else Error (Printf.sprintf "%s.kind must occur exactly once" context)
+  in
   let* kind = string_field ~context "kind" fields in
   let parse_board_stimulus () =
     let* board_kind = string_field ~context "board_kind" fields in

@@ -830,6 +830,27 @@ let () =
       | Error _ -> ()
       | Ok _ -> Alcotest.fail "stimulus with duplicate payload loaded")
    | _ -> Alcotest.fail "stimulus serializer did not emit an object");
+  let duplicate_discriminator =
+    stimulus_to_yojson
+      { post_id = "duplicate-discriminator"
+      ; urgency = Normal
+      ; arrived_at = 9.5
+      ; payload = Failure_judgment failure_judgment
+      }
+    |> function
+    | `Assoc stimulus_fields ->
+      `Assoc
+        (List.map
+           (function
+             | "payload", `Assoc payload_fields ->
+               "payload", `Assoc (("kind", `String "bootstrap") :: payload_fields)
+             | field -> field)
+           stimulus_fields)
+    | _ -> Alcotest.fail "stimulus serializer did not emit an object"
+  in
+  (match stimulus_of_yojson duplicate_discriminator with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "stimulus with duplicate payload kind loaded");
   let strict_queue =
     empty
     |> fun queue ->

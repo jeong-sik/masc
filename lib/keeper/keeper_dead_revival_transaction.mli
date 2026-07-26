@@ -81,7 +81,11 @@ val revive :
 
 type recovery_summary =
   { recovered : int
+    (** Transactions whose candidate metadata had durably committed and was
+        rolled back during recovery. *)
   ; cleared : int
+    (** Transactions or orphan payloads cleared without rolling back a
+        durably committed candidate. *)
   ; unresolved : (string * string) list
   }
 

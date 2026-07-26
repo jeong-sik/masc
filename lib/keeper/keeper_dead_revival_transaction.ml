@@ -241,6 +241,10 @@ type success =
   ; entry : Keeper_registry.registry_entry
   }
 
+type rollback_origin =
+  | Rollback_from_reserved
+  | Rollback_from_durable_committed
+
 type journal_stage =
   | Reserved
   | Durable_committed
@@ -248,7 +252,7 @@ type journal_stage =
   | Rollback_reserved
   | Rollback_durable_committed
   | Forward_cleanup_pending
-  | Rollback_cleanup_pending
+  | Rollback_cleanup_pending of rollback_origin
   | Cleared
 
 type journal =
@@ -280,7 +284,7 @@ let journal_dir config =
   Filename.concat (Workspace.masc_root_dir config) "keeper-lifecycle-transactions"
 ;;
 
-let journal_schema = "masc.keeper-dead-revival-journal.v2"
+let journal_schema = "masc.keeper-dead-revival-journal.v3"
 let head_entropy_bytes = 32 * 33
 
 let sha256 value =
@@ -327,8 +331,16 @@ let journal_stage_to_json = function
     `Assoc [ "rollback_durable_committed", `Bool true ]
   | Forward_cleanup_pending ->
     `Assoc [ "forward_cleanup_pending", `Bool true ]
-  | Rollback_cleanup_pending ->
-    `Assoc [ "rollback_cleanup_pending", `Bool true ]
+  | Rollback_cleanup_pending Rollback_from_reserved ->
+    `Assoc
+      [ ( "rollback_cleanup_pending"
+        , `Assoc [ "from_reserved", `Bool true ] )
+      ]
+  | Rollback_cleanup_pending Rollback_from_durable_committed ->
+    `Assoc
+      [ ( "rollback_cleanup_pending"
+        , `Assoc [ "from_durable_committed", `Bool true ] )
+      ]
   | Cleared -> `Assoc [ "cleared", `Bool true ]
 ;;
 
@@ -451,8 +463,20 @@ let required_stage fields =
     Ok Rollback_durable_committed
   | Some (`Assoc [ ("forward_cleanup_pending", `Bool true) ]) ->
     Ok Forward_cleanup_pending
-  | Some (`Assoc [ ("rollback_cleanup_pending", `Bool true) ]) ->
-    Ok Rollback_cleanup_pending
+  | Some
+      (`Assoc
+        [ ( "rollback_cleanup_pending"
+          , `Assoc [ ("from_reserved", `Bool true) ] )
+        ]) ->
+    Ok (Rollback_cleanup_pending Rollback_from_reserved)
+  | Some
+      (`Assoc
+        [ ( "rollback_cleanup_pending"
+          , `Assoc [ ("from_durable_committed", `Bool true) ] )
+        ]) ->
+    Ok
+      (Rollback_cleanup_pending
+         Rollback_from_durable_committed)
   | Some (`Assoc [ ("cleared", `Bool true) ]) -> Ok Cleared
   | Some _ -> Error "journal stage must contain exactly one known constructor"
   | None -> Error "journal field stage is missing"
@@ -486,7 +510,7 @@ let journal_of_json = function
         | Rollback_reserved
         | Rollback_durable_committed
         | Forward_cleanup_pending
-        | Rollback_cleanup_pending ) as stage ->
+        | Rollback_cleanup_pending _ ) as stage ->
         let* () = exact_active_journal_fields fields in
         let* transaction_id = required_sha256 "transaction_id" fields in
         let* owner_id = required_string "owner_id" fields in
@@ -772,7 +796,7 @@ let observe_durable_publication config (expected : journal) =
      | Forward_cleanup_pending
      | Rollback_reserved
      | Rollback_durable_committed
-     | Rollback_cleanup_pending
+     | Rollback_cleanup_pending _
      | Cleared ->
        Durable_publication_attention
          (Journal_ownership_changed
@@ -818,7 +842,7 @@ let observe_launch_publication config (expected : journal) =
      | Reserved
      | Rollback_reserved
      | Rollback_durable_committed
-     | Rollback_cleanup_pending
+     | Rollback_cleanup_pending _
      | Cleared ->
        Launch_publication_attention
          (Journal_ownership_changed
@@ -907,7 +931,7 @@ let save_journal config (journal : journal) =
     Error
       (Journal_write_failed
          "rollback claim stages are owned by startup recovery")
-  | Forward_cleanup_pending | Rollback_cleanup_pending ->
+  | Forward_cleanup_pending | Rollback_cleanup_pending _ ->
     Error
       (Journal_write_failed
          "cleanup claim stages require an exact predecessor")
@@ -1007,9 +1031,18 @@ let rec claim_recovery_rollback config journal attempts =
     | Ok (_, _, Some (Active_journal current))
       when current.stage = Rollback_durable_committed ->
       Ok (Recovery_rollback_claimed (current.stage, true))
-    | Ok (_, _, Some (Active_journal current))
-      when current.stage = Rollback_cleanup_pending ->
-      Ok (Recovery_rollback_claimed (current.stage, true))
+    | Ok
+        ( _,
+          _,
+          Some
+            (Active_journal
+               ({ stage = Rollback_cleanup_pending origin; _ } as current)) ) ->
+      Ok
+        (Recovery_rollback_claimed
+           ( current.stage
+           , match origin with
+             | Rollback_from_reserved -> false
+             | Rollback_from_durable_committed -> true ))
     | Ok (parent, snapshot, Some (Active_journal current)) ->
       let claimed_stage, durable_committed =
         match current.stage with
@@ -1019,7 +1052,7 @@ let rec claim_recovery_rollback config journal attempts =
         | Forward_cleanup_pending
         | Rollback_reserved
         | Rollback_durable_committed
-        | Rollback_cleanup_pending
+        | Rollback_cleanup_pending _
         | Cleared ->
           assert false
       in
@@ -1172,7 +1205,12 @@ module For_testing = struct
       Ok `Rollback_durable_committed
     | Ok (_, _, Some (Active_journal { stage = Forward_cleanup_pending; _ })) ->
       Ok `Forward_cleanup_pending
-    | Ok (_, _, Some (Active_journal { stage = Rollback_cleanup_pending; _ })) ->
+    | Ok
+        ( _,
+          _,
+          Some
+            (Active_journal
+               { stage = Rollback_cleanup_pending _; _ }) ) ->
       Ok `Rollback_cleanup_pending
     | Ok (_, _, Some (Active_journal { stage = Cleared; _ })) ->
       Error
@@ -1457,6 +1495,22 @@ let delete_payload config (journal : journal) =
     journal.payload_ref
 ;;
 
+let rollback_cleanup_stage = function
+  | Reserved | Rollback_reserved ->
+    Ok (Rollback_cleanup_pending Rollback_from_reserved)
+  | Durable_committed | Rollback_durable_committed ->
+    Ok
+      (Rollback_cleanup_pending
+         Rollback_from_durable_committed)
+  | Launch_committed
+  | Forward_cleanup_pending
+  | Rollback_cleanup_pending _
+  | Cleared ->
+    Error
+      (Rollback_journal_clear_failed
+         "rollback cleanup has no rollback-capable origin")
+;;
+
 let rollback token config journal payload original_entry =
   let original = Payload.payload_original payload in
   let candidate = Payload.payload_candidate payload in
@@ -1485,36 +1539,39 @@ let rollback token config journal payload original_entry =
   if errors <> []
   then errors
   else
-    match
-      transition_cleanup_pending
-        config
-        ~expected_stage:journal.stage
-        ~cleanup_stage:Rollback_cleanup_pending
-        journal
-    with
-    | Error error ->
-      [ Rollback_journal_clear_failed (error_to_string error) ]
-    | Ok cleanup ->
-      (match invoke_after_cleanup_pending_hook `Rollback with
-       | Some detail -> [ Rollback_journal_clear_failed detail ]
-       | None ->
-         (match delete_payload config cleanup with
-          | Error failure -> [ Rollback_payload_delete_failed failure ]
-          | Ok () ->
-            (match invoke_after_payload_delete_hook `Rollback with
-             | Some detail -> [ Rollback_journal_clear_failed detail ]
-             | None ->
-               (match
-                  clear_journal
-                    config
-                    ~expected_stage:Rollback_cleanup_pending
-                    cleanup
-                with
-                | Ok () -> []
-                | Error error ->
-                  [ Rollback_journal_clear_failed
-                      (error_to_string error)
-                  ]))))
+    match rollback_cleanup_stage journal.stage with
+    | Error error -> [ error ]
+    | Ok cleanup_stage ->
+      (match
+         transition_cleanup_pending
+           config
+           ~expected_stage:journal.stage
+           ~cleanup_stage
+           journal
+       with
+       | Error error ->
+         [ Rollback_journal_clear_failed (error_to_string error) ]
+       | Ok cleanup ->
+         (match invoke_after_cleanup_pending_hook `Rollback with
+          | Some detail -> [ Rollback_journal_clear_failed detail ]
+          | None ->
+            (match delete_payload config cleanup with
+             | Error failure -> [ Rollback_payload_delete_failed failure ]
+             | Ok () ->
+               (match invoke_after_payload_delete_hook `Rollback with
+                | Some detail -> [ Rollback_journal_clear_failed detail ]
+                | None ->
+                  (match
+                     clear_journal
+                       config
+                       ~expected_stage:cleanup.stage
+                       cleanup
+                   with
+                   | Ok () -> []
+                   | Error error ->
+                     [ Rollback_journal_clear_failed
+                         (error_to_string error)
+                     ])))))
 ;;
 
 let fail_with_rollback token config journal payload original_entry cause error =
@@ -1659,18 +1716,43 @@ let forward_cleanup config (journal : journal) =
                cleanup)))
 ;;
 
-let revive_locked (ctx : _ context) ~original ~candidate =
+let preflight_journal_authority config keeper_name =
   match
-    Keeper_lifecycle_reservation.acquire
-      ~base_path:ctx.config.base_path
-      ~keeper_name:original.name
-      ~expected_generation:original.runtime.nonce
-      ~purpose:Keeper_lifecycle_reservation.Dead_revival
+    read_current_journal
+      ~invalid:(fun detail -> Journal_conflict detail)
+      config
+      keeper_name
   with
-  | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
-    observe "conflict" original.name (Keeper_lifecycle_reservation.snapshot_to_string owner);
-    Error (Reservation_conflict owner)
-  | Ok token ->
+  | Error error -> Error error
+  | Ok (_, _, None)
+  | Ok (_, _, Some (Cleared_tombstone _)) -> Ok ()
+  | Ok (_, _, Some (Active_journal existing)) ->
+    Error
+      (Journal_conflict
+         (Printf.sprintf
+            "unresolved journal transaction=%s remains stage=%s"
+            existing.transaction_id
+            (Yojson.Safe.to_string
+               (journal_stage_to_json existing.stage))))
+;;
+
+let revive_locked (ctx : _ context) ~original ~candidate =
+  match preflight_journal_authority ctx.config original.name with
+  | Error error ->
+    observe "conflict" original.name (error_to_string error);
+    Error error
+  | Ok () ->
+    (match
+       Keeper_lifecycle_reservation.acquire
+         ~base_path:ctx.config.base_path
+         ~keeper_name:original.name
+         ~expected_generation:original.runtime.nonce
+         ~purpose:Keeper_lifecycle_reservation.Dead_revival
+     with
+     | Error (Keeper_lifecycle_reservation.Already_reserved owner) ->
+       observe "conflict" original.name (Keeper_lifecycle_reservation.snapshot_to_string owner);
+       Error (Reservation_conflict owner)
+     | Ok token ->
     observe "acquire" original.name (Keeper_lifecycle_reservation.owner_id token);
     let journal_for_cleanup = ref None in
     let verified_payload_for_cleanup = ref None in
@@ -2077,7 +2159,7 @@ let revive_locked (ctx : _ context) ~original ~candidate =
                  original.name
                  (String.concat "; " (List.map rollback_error_to_string errors));
              release_observed token original.name);
-         Printexc.raise_with_backtrace cancelled backtrace)
+         Printexc.raise_with_backtrace cancelled backtrace))
 ;;
 
 let revive (ctx : _ context) ~original ~candidate =
@@ -2125,7 +2207,7 @@ let recovery_payload_error failure =
   "recovery payload verification failed: " ^ Payload.error_to_string failure
 ;;
 
-let finish_rollback_cleanup config journal =
+let finish_rollback_cleanup config journal origin =
   match delete_payload config journal with
   | Error failure ->
     Error
@@ -2138,10 +2220,14 @@ let finish_rollback_cleanup config journal =
        (match
           clear_journal
             config
-            ~expected_stage:Rollback_cleanup_pending
+            ~expected_stage:journal.stage
             journal
         with
-        | Ok () -> Ok true
+        | Ok () ->
+          Ok
+            (match origin with
+             | Rollback_from_reserved -> false
+             | Rollback_from_durable_committed -> true)
         | Error error -> Error (error_to_string error)))
 ;;
 
@@ -2170,8 +2256,8 @@ let recover_one_locked config leaf =
     (match journal.stage with
      | Launch_committed -> recover_forward journal
      | Forward_cleanup_pending -> recover_forward journal
-     | Rollback_cleanup_pending ->
-       finish_rollback_cleanup config journal
+     | Rollback_cleanup_pending origin ->
+       finish_rollback_cleanup config journal origin
      | Reserved
      | Durable_committed
      | Rollback_reserved
@@ -2209,10 +2295,23 @@ let recover_one_locked config leaf =
                     recover_forward { journal with stage }
                   | Ok
                       (Recovery_rollback_claimed
-                         (Rollback_cleanup_pending, _)) ->
+                         (Rollback_cleanup_pending origin, durable_committed)) ->
+                    let origin_is_durable =
+                      match origin with
+                      | Rollback_from_reserved -> false
+                      | Rollback_from_durable_committed -> true
+                    in
+                    if not (Bool.equal origin_is_durable durable_committed)
+                    then
+                      Error
+                        "rollback cleanup origin differs from claimed durability"
+                    else
                     finish_rollback_cleanup
                       config
-                      { journal with stage = Rollback_cleanup_pending }
+                      { journal with
+                        stage = Rollback_cleanup_pending origin
+                      }
+                      origin
                   | Ok
                       (Recovery_rollback_claimed
                          (stage, durable_committed)) ->
@@ -2243,7 +2342,7 @@ let recover_one_locked config leaf =
                 result)
            | Launch_committed
            | Forward_cleanup_pending
-           | Rollback_cleanup_pending
+           | Rollback_cleanup_pending _
            | Cleared -> assert false))
      | Cleared ->
        Error "active journal unexpectedly carries Cleared stage")

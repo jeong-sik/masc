@@ -364,7 +364,6 @@ describe('ApprovalsSurface', () => {
           keeper_name: 'keeper-a',
           tool_name: 'fs_write',
           decision: 'reject',
-          decision_kind: 'reject',
           resolved_at: '2026-07-27T00:00:00Z',
         },
       ],

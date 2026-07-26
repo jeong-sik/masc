@@ -468,7 +468,7 @@ let valid_transaction_leaf =
   valid_digest_leaf ~prefix:transaction_leaf_prefix
 ;;
 
-let immutable_ref_to_json reference =
+let immutable_ref_to_json (reference : immutable_ref) =
   `Assoc
     [ "schema", `String ref_schema
     ; "authority_leaf", `String reference.authority_leaf

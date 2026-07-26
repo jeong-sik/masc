@@ -1896,7 +1896,7 @@ let revive_locked (ctx : _ context) ~original ~candidate =
                   | Ok (_, _, Some (Active_journal _)) ->
                     Error
                       (Journal_ownership_changed
-                         "reservation publication settled to an unexpected active transaction"))))))
+                         "reservation publication settled to an unexpected active transaction")))))))
     in
     (match journal_result with
      | Error error ->

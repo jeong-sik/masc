@@ -11,6 +11,22 @@ open Keeper_types_profile
 open Keeper_keepalive
 open Keeper_turn_up_args
 
+let after_stop_join_hook_key : (unit -> unit) Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
+let invoke_after_stop_join_hook () =
+  Option.iter
+    (fun after_stop_join -> after_stop_join ())
+    (Eio.Fiber.get after_stop_join_hook_key)
+;;
+
+module For_testing = struct
+  let with_after_stop_join ~after_stop_join fn =
+    Eio.Fiber.with_binding after_stop_join_hook_key after_stop_join fn
+  ;;
+end
+
 let resolve_active_goal_ids config p old_ids =
   let active_goal_ids =
     match p.active_goal_ids_opt with
@@ -117,48 +133,42 @@ let update_keeper ?(preserve_prompt_defaults = false)
     =
   match resolve_active_goal_ids ctx.config p old.active_goal_ids with
   | Error msg -> tool_result_error msg
-  | Ok active_goal_ids ->
-  let allowed_paths =
-    Option.value ~default:old.allowed_paths p.allowed_paths_opt
+  | Ok validated_active_goal_ids ->
+  let active_goal_ids_for source_meta =
+    match p.active_goal_ids_opt with
+    | Some _ -> validated_active_goal_ids
+    | None ->
+      Option.value
+        ~default:source_meta.active_goal_ids
+        p.profile_defaults.active_goal_ids
+  in
+  let allowed_paths_for source_meta =
+    Option.value ~default:source_meta.allowed_paths p.allowed_paths_opt
   in
   match
     match p.sandbox_profile_opt with
-    | None -> Ok old.sandbox_profile
+    | None -> Ok None
     | Some raw ->
       match sandbox_profile_of_string raw with
-      | Some sp -> Ok sp
+      | Some sp -> Ok (Some sp)
       | None ->
         Error
           (Printf.sprintf "invalid sandbox_profile: %S (expected: local or docker)" raw)
   with
   | Error msg -> tool_result_error msg
-  | Ok sandbox_profile ->
+  | Ok sandbox_profile_override ->
   match
     match p.network_mode_opt with
-    | None -> Ok old.network_mode
+    | None -> Ok None
     | Some raw ->
       match network_mode_of_string raw with
-      | Some nm -> Ok nm
+      | Some nm -> Ok (Some nm)
       | None ->
         Error
           (Printf.sprintf "invalid network_mode: %S (expected: inherit or none)" raw)
   with
   | Error msg -> tool_result_error msg
-  | Ok network_mode ->
-  let autoboot_enabled =
-    match p.autoboot_enabled_opt, p.profile_defaults.autoboot_enabled with
-    | Some value, _ -> value
-    | None, Some value -> value
-    | None, None -> old.autoboot_enabled
-  in
-  let mention_targets =
-    resolve_mention_targets
-      ~mention_targets_opt:p.mention_targets_opt
-      ~fallback_targets:
-        (if old.mention_targets <> [] then old.mention_targets
-         else p.profile_defaults.mention_targets)
-      ~name:p.name
-  in
+  | Ok network_mode_override ->
   let { dead_revival_requested; clear_pause_state } =
     revival_decision ~latched_reason:old.latched_reason ~paused:old.paused
   in
@@ -172,62 +182,97 @@ let update_keeper ?(preserve_prompt_defaults = false)
       "update_keeper reviving dead keeper %s; clearing \
        last_blocker.klass=%s last_blocker.detail=%S"
       old.name blocker_class blocker_detail);
-  let source_meta = old in
-  let updated = { source_meta with
-    instructions =
-      (match p.instructions_arg with
-       | Some v -> v
-       | None ->
-           if preserve_prompt_defaults then old.instructions
+  let build_updated ~clear_pause_state source_meta =
+    let allowed_paths = allowed_paths_for source_meta in
+    let sandbox_profile =
+      Option.value
+        ~default:source_meta.sandbox_profile
+        sandbox_profile_override
+    in
+    let network_mode =
+      Option.value
+        ~default:source_meta.network_mode
+        network_mode_override
+    in
+    let autoboot_enabled =
+      match p.autoboot_enabled_opt, p.profile_defaults.autoboot_enabled with
+      | Some value, _ -> value
+      | None, Some value -> value
+      | None, None -> source_meta.autoboot_enabled
+    in
+    let mention_targets =
+      resolve_mention_targets
+        ~mention_targets_opt:p.mention_targets_opt
+        ~fallback_targets:
+          (if source_meta.mention_targets <> []
+           then source_meta.mention_targets
+           else p.profile_defaults.mention_targets)
+        ~name:p.name
+    in
+    { source_meta with
+      instructions =
+        (match p.instructions_arg with
+         | Some value -> value
+         | None ->
+           if preserve_prompt_defaults
+           then source_meta.instructions
            else
              Option.value
                ~default:
-                 (if String.trim old.instructions <> "" then old.instructions
-                  else Option.value ~default:"" p.profile_defaults.instructions)
-               p.instructions_opt);
-    allowed_paths;
-    sandbox_profile;
-    network_mode;
-    autoboot_enabled;
-    active_goal_ids;
-    paused = if clear_pause_state then false else old.paused;
-    (* The dedicated Dead-tombstone revival clears the terminal latch together
-       with [paused]. Ordinary keeper_up reconfiguration preserves both fields;
-       it cannot impersonate the receipt-first Resume_owner transaction. *)
-    latched_reason =
-      if clear_pause_state then None else source_meta.latched_reason;
-    runtime =
-      (if clear_pause_state then
-         {
-           source_meta.runtime with
-           last_blocker = None;
-         }
-       else source_meta.runtime);
-    mention_targets;
-    telemetry_feedback_enabled =
-      Dashboard_utils.first_some p.profile_defaults.telemetry_feedback_enabled
-        old.telemetry_feedback_enabled;
-    telemetry_feedback_window_hours =
-      Dashboard_utils.first_some p.profile_defaults.telemetry_feedback_window_hours
-        old.telemetry_feedback_window_hours;
-    always_allow =
-      Dashboard_utils.first_some p.profile_defaults.always_allow old.always_allow;
-    proactive = {
-      enabled =
-        (match p.proactive_enabled_opt with
-         | Some v -> v
-         | None ->
-             (match p.profile_defaults.proactive_enabled with
-              | Some v -> v
-              | None -> old.proactive.enabled));
-    };
-    max_context_override =
-      (if p.max_context_override_present then p.max_context_override_opt
-       else old.max_context_override);
-    updated_at = now_iso ();
-  } in
+                 (if String.trim source_meta.instructions <> ""
+                  then source_meta.instructions
+                  else
+                    Option.value
+                      ~default:""
+                      p.profile_defaults.instructions)
+               p.instructions_opt)
+    ; allowed_paths
+    ; sandbox_profile
+    ; network_mode
+    ; autoboot_enabled
+    ; active_goal_ids = active_goal_ids_for source_meta
+    ; paused = if clear_pause_state then false else source_meta.paused
+    ; (* The dedicated Dead-tombstone revival clears the terminal latch together
+         with [paused]. Ordinary keeper_up reconfiguration preserves both fields;
+         it cannot impersonate the receipt-first Resume_owner transaction. *)
+      latched_reason =
+        if clear_pause_state then None else source_meta.latched_reason
+    ; runtime =
+        (if clear_pause_state
+         then { source_meta.runtime with last_blocker = None }
+         else source_meta.runtime)
+    ; mention_targets
+    ; telemetry_feedback_enabled =
+        Dashboard_utils.first_some
+          p.profile_defaults.telemetry_feedback_enabled
+          source_meta.telemetry_feedback_enabled
+    ; telemetry_feedback_window_hours =
+        Dashboard_utils.first_some
+          p.profile_defaults.telemetry_feedback_window_hours
+          source_meta.telemetry_feedback_window_hours
+    ; always_allow =
+        Dashboard_utils.first_some
+          p.profile_defaults.always_allow
+          source_meta.always_allow
+    ; proactive =
+        { enabled =
+            (match p.proactive_enabled_opt with
+             | Some value -> value
+             | None ->
+               Option.value
+                 ~default:source_meta.proactive.enabled
+                 p.profile_defaults.proactive_enabled)
+        }
+    ; max_context_override =
+        (if p.max_context_override_present
+         then p.max_context_override_opt
+         else source_meta.max_context_override)
+    ; updated_at = now_iso ()
+    }
+  in
+  let updated = build_updated ~clear_pause_state old in
   match
-    validate_sandbox_settings ~allowed_paths
+    validate_sandbox_settings ~allowed_paths:updated.allowed_paths
   with
   | Error err ->
       Otel_metric_store.inc_counter
@@ -266,13 +311,13 @@ let update_keeper ?(preserve_prompt_defaults = false)
             tool_result_error err
            | Ok () -> fn ()
          in
-         let enqueue_goal_assignment_wakes (meta : keeper_meta) =
+         let enqueue_goal_assignment_wakes ~old_ids (meta : keeper_meta) =
            let (_ : string list) =
              Keeper_goal_assignment_wake.enqueue_goal_assigned_wakes
                ~config:ctx.config
                ~keeper_name:meta.name
                ~assigned_by:"keeper_up"
-               ~old_ids:old.active_goal_ids
+               ~old_ids
                ~new_ids:meta.active_goal_ids
                ()
            in
@@ -290,7 +335,9 @@ let update_keeper ?(preserve_prompt_defaults = false)
            | Error
                (Keeper_dead_revival_transaction.Post_commit_cleanup_required
                   { committed; entry; cleanup_error }) ->
-             enqueue_goal_assignment_wakes committed;
+             enqueue_goal_assignment_wakes
+               ~old_ids:old.active_goal_ids
+               committed;
              tool_result_ok_data
                (committed_with_cleanup_required_json
                   ~committed
@@ -307,7 +354,9 @@ let update_keeper ?(preserve_prompt_defaults = false)
              tool_result_error
                (Keeper_dead_revival_transaction.error_to_string error)
            | Ok success ->
-             enqueue_goal_assignment_wakes success.meta;
+             enqueue_goal_assignment_wakes
+               ~old_ids:old.active_goal_ids
+               success.meta;
              tool_result_ok_data
                (Keeper_meta_json.meta_to_json success.meta)
          else
@@ -316,6 +365,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                ~base_path:ctx.config.base_path
                updated.name
            in
+           invoke_after_stop_join_hook ();
            let run_update permit =
              match
                Keeper_registry.get
@@ -330,14 +380,39 @@ let update_keeper ?(preserve_prompt_defaults = false)
                     (start_keepalive_outcome_to_string
                        (Keepalive_already_registered replacement)))
              | None ->
+               (match Keeper_meta_store.read_meta ctx.config updated.name with
+                | Error detail ->
+                  tool_result_error
+                    ("keeper update durable revalidation failed: " ^ detail)
+                | Ok None ->
+                  tool_result_error
+                    "keeper update durable revalidation found no metadata"
+                | Ok (Some latest) ->
+                  let latest_revival =
+                    revival_decision
+                      ~latched_reason:latest.latched_reason
+                      ~paused:latest.paused
+                  in
+                  if latest_revival.dead_revival_requested
+                  then
+                    tool_result_error
+                      "keeper update durable state became Dead; retry through \
+                       the dead-revival transaction"
+                  else
+                  let updated =
+                    build_updated ~clear_pause_state:false latest
+                  in
+                  (match
+                     validate_sandbox_settings
+                       ~allowed_paths:updated.allowed_paths
+                   with
+                   | Error detail -> tool_result_error detail
+                   | Ok () ->
                with_runtime_assignment (fun () ->
-            (* CAS-merge instead of a force write: a dashboard/turn-up edit
-               builds [updated] from a meta snapshot ([old]), so a concurrent
-               keeper turn that bumped cumulative usage counters between the
-               read and this write would otherwise be silently rewound
-               (total_turns 385->370, 2026-06-10). This operator lifecycle edit
-               preserves the observed pause disposition while taking cumulative
-               counters as [max latest caller]. *)
+            (* The lane join intentionally happens before durable admission.
+               Re-read and re-derive the caller's explicit intent after admission
+               so a concurrent lifecycle mutation cannot be overwritten by the
+               stale pre-join snapshot. Any later CAS conflict fails closed. *)
             (match
                Keeper_shutdown_supersession.preflight
                  ~config:ctx.config
@@ -349,10 +424,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                  (Keeper_shutdown_supersession.error_to_string error)
              | Ok supersession ->
                (match
-                  write_meta_with_merge
-                    ~merge:Keeper_meta_merge.monotonic_usage_counters
-                    ctx.config
-                    updated
+                  write_meta ctx.config updated
                 with
                 | Error e ->
                     Otel_metric_store.inc_counter
@@ -376,7 +448,9 @@ let update_keeper ?(preserve_prompt_defaults = false)
                   wake the keeper once at the assignment edge. Enqueue is
                   durable, so the keepalive restart below delivers it on the
                   new fiber's first cycle. Removals never wake. *)
-               enqueue_goal_assignment_wakes updated;
+               enqueue_goal_assignment_wakes
+                 ~old_ids:latest.active_goal_ids
+                 updated;
                let launch_outcome =
                  start_keepalive_under_admission permit ctx updated
                in
@@ -405,7 +479,7 @@ let update_keeper ?(preserve_prompt_defaults = false)
                   tool_result_error
                     (Printf.sprintf
                        "keeper metadata was updated but lane restart failed: %s"
-                       (start_keepalive_outcome_to_string rejected)))))))
+                       (start_keepalive_outcome_to_string rejected))))))))
            in
            (match
               Keeper_lifecycle_admission.Durable_transaction

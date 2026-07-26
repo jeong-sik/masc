@@ -138,6 +138,16 @@ module For_testing : sig
     (unit -> 'a) ->
     'a
 
+  val with_launch_publication_reread_attention :
+    detail:string ->
+    (unit -> 'a) ->
+    'a
+
+  val with_after_launch_publication :
+    after_launch_publication:(unit -> unit) ->
+    (unit -> 'a) ->
+    'a
+
   val with_fd_backed_parent_opening : (unit -> 'a) -> 'a
 
   val reserved_journal_row :

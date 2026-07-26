@@ -52,6 +52,14 @@ let launch_compare_and_swap_hook =
   Atomic.make Head.compare_and_swap
 ;;
 
+let launch_publication_reread_attention_key : string Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
+let after_launch_publication_key : (unit -> unit) Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
 let fd_backed_parent_opening_key : unit Eio.Fiber.key =
   Eio.Fiber.create_key ()
 ;;
@@ -187,6 +195,17 @@ module Boundary_hooks_for_testing = struct
     in
     Fun.protect
       ~finally:(fun () -> Atomic.set launch_compare_and_swap_hook previous)
+      fn
+  ;;
+
+  let with_launch_publication_reread_attention ~detail fn =
+    Eio.Fiber.with_binding launch_publication_reread_attention_key detail fn
+  ;;
+
+  let with_after_launch_publication ~after_launch_publication fn =
+    Eio.Fiber.with_binding
+      after_launch_publication_key
+      after_launch_publication
       fn
   ;;
 
@@ -840,44 +859,107 @@ type launch_publication_observation =
   | Launch_publication_attention of error
 
 let observe_launch_publication config (expected : journal) =
-  match
-    read_current_journal
-      ~invalid:(fun detail -> Journal_ownership_changed detail)
-      config
-      expected.keeper_name
-  with
-  | Error error -> Launch_publication_attention error
-  | Ok (_, _, None) ->
-    Launch_publication_attention
-      (Journal_ownership_changed
-         "launch publication journal authority disappeared")
-  | Ok (_, _, Some (Cleared_tombstone tombstone))
-    when String.equal tombstone.transaction_id expected.transaction_id
-         && String.equal tombstone.keeper_name expected.keeper_name ->
-    Launch_publication_committed
-  | Ok (_, _, Some (Cleared_tombstone _)) ->
-    Launch_publication_attention
-      (Journal_ownership_changed
-         "launch publication settled to another cleared transaction")
-  | Ok (_, _, Some (Active_journal (current : journal)))
-    when not (same_transaction current expected) ->
-    Launch_publication_attention
-      (Journal_ownership_changed
-         "launch publication settled to another active transaction")
-  | Ok (_, _, Some (Active_journal (current : journal))) ->
-    (match current.stage with
-     | Launch_committed
-     | Forward_cleanup_pending -> Launch_publication_committed
-     | Durable_committed -> Launch_publication_not_committed
-     | Reserved
-     | Rollback_reserved
-     | Rollback_durable_committed
-     | Rollback_cleanup_pending _
-     | Cleared ->
+  match Eio.Fiber.get launch_publication_reread_attention_key with
+  | Some detail ->
+    Launch_publication_attention (Journal_write_failed detail)
+  | None ->
+    (match
+       read_current_journal
+         ~invalid:(fun detail -> Journal_ownership_changed detail)
+         config
+         expected.keeper_name
+     with
+     | Error error -> Launch_publication_attention error
+     | Ok (_, _, None) ->
        Launch_publication_attention
          (Journal_ownership_changed
-            ("launch publication settled to conflicting stage "
-             ^ Yojson.Safe.to_string (journal_stage_to_json current.stage))))
+            "launch publication journal authority disappeared")
+     | Ok (_, _, Some (Cleared_tombstone tombstone))
+       when String.equal tombstone.transaction_id expected.transaction_id
+            && String.equal tombstone.keeper_name expected.keeper_name ->
+       Launch_publication_committed
+     | Ok (_, _, Some (Cleared_tombstone _)) ->
+       Launch_publication_attention
+         (Journal_ownership_changed
+            "launch publication settled to another cleared transaction")
+     | Ok (_, _, Some (Active_journal (current : journal)))
+       when not (same_transaction current expected) ->
+       Launch_publication_attention
+         (Journal_ownership_changed
+            "launch publication settled to another active transaction")
+     | Ok (_, _, Some (Active_journal (current : journal))) ->
+       (match current.stage with
+        | Launch_committed
+        | Forward_cleanup_pending -> Launch_publication_committed
+        | Durable_committed -> Launch_publication_not_committed
+        | Reserved
+        | Rollback_reserved
+        | Rollback_durable_committed
+        | Rollback_cleanup_pending _
+        | Cleared ->
+          Launch_publication_attention
+            (Journal_ownership_changed
+               ("launch publication settled to conflicting stage "
+                ^ Yojson.Safe.to_string
+                    (journal_stage_to_json current.stage)))))
+;;
+
+type launch_publication_attempt =
+  | Launch_publication_not_attempted
+  | Launch_publication_in_progress
+  | Launch_publication_completed of (unit, error) result
+
+type launch_publication_reconciliation =
+  | Launch_reconciled_committed
+  | Launch_reconciled_precommit
+  | Launch_reconciliation_unresolved of error
+
+let launch_attempt_proves_commit = function
+  | Launch_publication_completed (Ok ())
+  | Launch_publication_completed
+      (Error
+        ( Journal_published_with_failure _
+        | Journal_published_with_warnings _ )) ->
+    true
+  | Launch_publication_not_attempted
+  | Launch_publication_in_progress
+  | Launch_publication_completed
+      (Error
+        ( Reservation_conflict _
+        | Nonce_allocation_failed _
+        | Journal_conflict _
+        | Journal_ownership_changed _
+        | Journal_publication_indeterminate _
+        | Journal_read_settlement_failed _
+        | Journal_write_failed _
+        | Runtime_assignment_failed _
+        | Payload_operation_failed _
+        | Transaction_lock_failed _
+        | Post_commit_cleanup_required _
+        | Durable_snapshot_missing
+        | Durable_snapshot_changed
+        | Registry_conflict _
+        | Durable_commit_failed _
+        | Durable_commit_unreadable _
+        | Launch_failed _
+        | Rollback_failed _ )) ->
+    false
+;;
+
+let reconcile_launch_publication config expected attempt =
+  let commit_proved = launch_attempt_proves_commit attempt in
+  match observe_launch_publication config expected with
+  | Launch_publication_committed -> Launch_reconciled_committed
+  | Launch_publication_not_committed when not commit_proved ->
+    Launch_reconciled_precommit
+  | Launch_publication_not_committed ->
+    Launch_reconciliation_unresolved
+      (Journal_ownership_changed
+         "launch publication evidence conflicts with durable pre-commit authority")
+  | Launch_publication_attention _ when commit_proved ->
+    Launch_reconciled_committed
+  | Launch_publication_attention error ->
+    Launch_reconciliation_unresolved error
 ;;
 
 let reserve_journal config (journal : journal) =
@@ -2012,6 +2094,7 @@ let revive_locked
       ~runtime_id
       ~runtime_assignment
       ~launch_gate
+      ~launch_reconciliation_unresolved
   =
   let allocate_or_recover_replacement =
     allocate_or_recover_replacement permit
@@ -2237,6 +2320,10 @@ let revive_locked
        let original_entry_for_rollback = ref None in
        let rollback_journal = ref journal in
        let pending_launch_entry = ref None in
+       let pending_launch_journal = ref None in
+       let launch_publication_attempt =
+         ref Launch_publication_not_attempted
+       in
        let abort_pending_launch () =
          match !pending_launch_entry with
          | None -> Keeper_keepalive.abort_launch_gate launch_gate
@@ -2251,6 +2338,33 @@ let revive_locked
              (Eio.Promise.await entry.done_p
                : Keeper_registry.done_resolution);
            pending_launch_entry := None
+       in
+       let settle_pending_launch () =
+         Eio.Cancel.protect (fun () ->
+           match !pending_launch_entry, !pending_launch_journal with
+           | Some _, Some committed_journal ->
+             let reconciliation =
+               reconcile_launch_publication
+                 ctx.config
+                 committed_journal
+                 !launch_publication_attempt
+             in
+             (match reconciliation with
+              | Launch_reconciled_committed ->
+                Keeper_keepalive.commit_launch_gate launch_gate;
+                pending_launch_entry := None;
+                launch_reconciliation_unresolved := false
+              | Launch_reconciled_precommit ->
+                abort_pending_launch ();
+                launch_reconciliation_unresolved := false
+              | Launch_reconciliation_unresolved _ ->
+                launch_reconciliation_unresolved := true);
+             reconciliation
+           | None, _
+           | _, None ->
+             abort_pending_launch ();
+             launch_reconciliation_unresolved := false;
+             Launch_reconciled_precommit)
        in
        let run () =
          match Keeper_meta_store.read_meta ctx.config original.name with
@@ -2425,12 +2539,11 @@ let revive_locked
                            with
                            | Keeper_keepalive.Keepalive_started entry ->
                              pending_launch_entry := Some entry;
+                             pending_launch_journal := Some committed_journal;
                              let launch_journal =
                                { committed_journal with stage = Launch_committed }
                              in
                              let committed_with_attention cleanup_error =
-                               Keeper_keepalive.commit_launch_gate launch_gate;
-                               pending_launch_entry := None;
                                release_observed token committed.name;
                                Error
                                  (Post_commit_cleanup_required
@@ -2439,39 +2552,27 @@ let revive_locked
                                     ; cleanup_error
                                     })
                              in
-                             (match save_launch_journal ctx.config launch_journal with
-                              | Error publication_error ->
-                                (match
-                                   observe_launch_publication
-                                     ctx.config
-                                     committed_journal
-                                 with
-                                 | Launch_publication_not_committed ->
-                                   abort_pending_launch ();
-                                   fail_with_rollback
-                                     token
-                                     ctx.config
-                                     committed_journal
-                                     verified_payload
-                                     original_entry
-                                     (error_to_string publication_error)
-                                     publication_error
-                                 | Launch_publication_committed ->
-                                   committed_with_attention publication_error
-                                 | Launch_publication_attention attention ->
-                                   abort_pending_launch ();
-                                   Log.Keeper.error
-                                     "keeper revival launch publication requires \
-                                      attention keeper=%s publication=%s \
-                                      observation=%s"
-                                     committed.name
-                                     (error_to_string publication_error)
-                                     (error_to_string attention);
-                                   release_observed token committed.name;
-                                   Error attention)
+                             launch_publication_attempt :=
+                               Launch_publication_in_progress;
+                             let publication_result =
+                               save_launch_journal ctx.config launch_journal
+                             in
+                             launch_publication_attempt :=
+                               Launch_publication_completed publication_result;
+                             (match publication_result with
                               | Ok () ->
-                                Keeper_keepalive.commit_launch_gate launch_gate;
-                                pending_launch_entry := None;
+                                Option.iter
+                                  (fun after_launch_publication ->
+                                    after_launch_publication ())
+                                  (Eio.Fiber.get after_launch_publication_key)
+                              | Error _ -> ());
+                             (match
+                                settle_pending_launch (),
+                                publication_result
+                              with
+                              | Launch_reconciled_committed, Error publication_error ->
+                                committed_with_attention publication_error
+                              | Launch_reconciled_committed, Ok () ->
                                 let cleanup_result =
                                   Eio.Cancel.protect (fun () ->
                                     let result =
@@ -2494,7 +2595,46 @@ let revive_locked
                                  | Ok () ->
                                    Eio.Fiber.check ();
                                    observe "commit" committed.name "lane started";
-                                   Ok { meta = committed; entry }))
+                                   Ok { meta = committed; entry })
+                              | Launch_reconciled_precommit, Error publication_error ->
+                                fail_with_rollback
+                                  token
+                                  ctx.config
+                                  committed_journal
+                                  verified_payload
+                                  original_entry
+                                  (error_to_string publication_error)
+                                  publication_error
+                              | Launch_reconciled_precommit, Ok () ->
+                                let contradiction =
+                                  Journal_ownership_changed
+                                    "successful launch publication reconciled to pre-commit authority"
+                                in
+                                fail_with_rollback
+                                  token
+                                  ctx.config
+                                  committed_journal
+                                  verified_payload
+                                  original_entry
+                                  (error_to_string contradiction)
+                                  contradiction
+                              | ( Launch_reconciliation_unresolved attention,
+                                  publication_result ) ->
+                                let publication_detail =
+                                  match publication_result with
+                                  | Ok () -> "publication returned success"
+                                  | Error publication_error ->
+                                    error_to_string publication_error
+                                in
+                                Log.Keeper.error
+                                  "keeper revival launch reconciliation remains \
+                                   unresolved keeper=%s publication=%s \
+                                   observation=%s; retaining reservation and \
+                                   gated lane for restart recovery"
+                                  committed.name
+                                  publication_detail
+                                  (error_to_string attention);
+                                Error attention)
                            | rejected ->
                              Keeper_keepalive.abort_launch_gate launch_gate;
                              fail_with_rollback
@@ -2511,23 +2651,35 @@ let revive_locked
          let backtrace = Printexc.get_raw_backtrace () in
          if not (Keeper_keepalive.launch_gate_is_committed launch_gate)
          then
-           Eio.Cancel.protect (fun () ->
-             abort_pending_launch ();
-             let errors =
-               rollback
-                 token
-                 ctx.config
-                 !rollback_journal
-                 verified_payload
-                 !original_entry_for_rollback
-             in
-             if errors <> []
-             then
-               Log.Keeper.error
-                 "keeper lifecycle cancellation rollback failed keeper=%s errors=%s"
-                 original.name
-                 (String.concat "; " (List.map rollback_error_to_string errors));
-             release_observed token original.name);
+           (match settle_pending_launch () with
+            | Launch_reconciled_committed ->
+              release_observed token original.name
+            | Launch_reconciled_precommit ->
+              Eio.Cancel.protect (fun () ->
+                let errors =
+                  rollback
+                    token
+                    ctx.config
+                    !rollback_journal
+                    verified_payload
+                    !original_entry_for_rollback
+                in
+                if errors <> []
+                then
+                  Log.Keeper.error
+                    "keeper lifecycle cancellation rollback failed keeper=%s errors=%s"
+                    original.name
+                    (String.concat
+                       "; "
+                       (List.map rollback_error_to_string errors));
+                release_observed token original.name)
+            | Launch_reconciliation_unresolved attention ->
+              Log.Keeper.error
+                "keeper lifecycle cancellation left launch reconciliation \
+                 unresolved keeper=%s error=%s; retaining reservation and \
+                 gated lane for restart recovery"
+                original.name
+                (error_to_string attention));
          Printexc.raise_with_backtrace cancelled backtrace)))
 ;;
 
@@ -2540,22 +2692,32 @@ let revive ?runtime_id (ctx : _ context) ~original ~candidate =
       (fun permit ->
            let runtime_assignment = ref Runtime_assignment_unchanged in
            let launch_gate = Keeper_keepalive.create_launch_gate () in
+           let launch_reconciliation_unresolved = ref false in
            try
-             revive_locked
-               permit
-               ctx
-               ~original
-               ~candidate
-               ~runtime_id
-               ~runtime_assignment
-               ~launch_gate
-             |> settle_runtime_assignment
-                  ~keeper_name:original.name
-                  !runtime_assignment
+             let result =
+               revive_locked
+                 permit
+                 ctx
+                 ~original
+                 ~candidate
+                 ~runtime_id
+                 ~runtime_assignment
+                 ~launch_gate
+                 ~launch_reconciliation_unresolved
+             in
+             if !launch_reconciliation_unresolved
+             then result
+             else
+               settle_runtime_assignment
+                 ~keeper_name:original.name
+                 !runtime_assignment
+                 result
            with
            | Eio.Cancel.Cancelled _ as cancelled ->
              let backtrace = Printexc.get_raw_backtrace () in
-             if not (Keeper_keepalive.launch_gate_is_committed launch_gate)
+             if
+               not (Keeper_keepalive.launch_gate_is_committed launch_gate)
+               && not !launch_reconciliation_unresolved
              then
                Eio.Cancel.protect (fun () ->
                  match
@@ -2656,9 +2818,23 @@ let recover_one_locked permit config leaf =
           ("forward-commit journal cleanup failed: "
            ^ error_to_string error)
     in
+    let recover_forward_without_live_reservation journal =
+      match
+        Keeper_lifecycle_reservation.current
+          ~base_path:config.Workspace.base_path
+          ~keeper_name:journal.keeper_name
+      with
+      | None -> recover_forward journal
+      | Some owner ->
+        Error
+          ("forward recovery reservation conflict: "
+           ^ Keeper_lifecycle_reservation.snapshot_to_string owner)
+    in
     (match journal.stage with
-     | Launch_committed -> recover_forward journal
-     | Forward_cleanup_pending -> recover_forward journal
+     | Launch_committed ->
+       recover_forward_without_live_reservation journal
+     | Forward_cleanup_pending ->
+       recover_forward_without_live_reservation journal
      | Rollback_cleanup_pending origin ->
        finish_rollback_cleanup config journal origin
      | Reserved

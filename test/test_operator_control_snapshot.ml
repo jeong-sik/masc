@@ -1532,12 +1532,16 @@ let test_dead_revival_launch_publication_warning_preserves_commit () =
   let committed, entry =
     match
       Keeper_dead_revival_transaction.For_testing
-      .with_launch_publication_settlement_warning
+      .with_launch_publication_reread_attention
+        ~detail:"injected launch publication reread attention"
         (fun () ->
-          Keeper_dead_revival_transaction.revive
-            ctx
-            ~original
-            ~candidate)
+          Keeper_dead_revival_transaction.For_testing
+          .with_launch_publication_settlement_warning
+            (fun () ->
+              Keeper_dead_revival_transaction.revive
+                ctx
+                ~original
+                ~candidate))
     with
     | Error
         (Keeper_dead_revival_transaction.Post_commit_cleanup_required
@@ -1607,6 +1611,76 @@ let test_dead_revival_launch_publication_warning_preserves_commit () =
     "publish-then-warning recovery is resolved"
     0
     (List.length recovery.unresolved)
+;;
+
+let test_dead_revival_cancellation_after_launch_publication_preserves_commit () =
+  let keeper_name = "dead-revival-cancel-after-launch-publication" in
+  with_settled_dead_revival_fixture ~keeper_name
+  @@ fun base_dir config original _dead_entry ctx ->
+  let candidate =
+    { original with
+      paused = false
+    ; latched_reason = None
+    }
+  in
+  let cancelled =
+    try
+      ignore
+        (Keeper_dead_revival_transaction.For_testing
+         .with_after_launch_publication
+           ~after_launch_publication:(fun () ->
+             raise
+               (Eio.Cancel.Cancelled
+                  (Failure
+                     "injected cancellation after launch publication")))
+           (fun () ->
+             Keeper_dead_revival_transaction.revive
+               ctx
+               ~original
+               ~candidate));
+      false
+    with
+    | Eio.Cancel.Cancelled _ -> true
+  in
+  Alcotest.(check bool)
+    "post-publication cancellation propagated"
+    true
+    cancelled;
+  Alcotest.(check bool)
+    "post-publication cancellation preserves launched lane"
+    true
+    (Option.is_some
+       (Keeper_registry.get ~base_path:base_dir keeper_name));
+  Alcotest.(check bool)
+    "committed launch releases revival reservation"
+    true
+    (Option.is_none
+       (Keeper_lifecycle_reservation.current
+          ~base_path:base_dir
+          ~keeper_name));
+  (match
+     Keeper_dead_revival_transaction.For_testing.current_journal_stage
+       ~config
+       ~keeper_name
+   with
+   | Ok `Launch_committed -> ()
+   | Ok _ ->
+     Alcotest.fail
+       "post-publication cancellation lost Launch_committed authority"
+   | Error error ->
+     Alcotest.fail
+       (Keeper_dead_revival_transaction.error_to_string error));
+  let persisted =
+    match Keeper_meta_store.read_meta config keeper_name with
+    | Ok (Some meta) -> meta
+    | Ok None ->
+      Alcotest.fail "post-publication cancellation removed committed metadata"
+    | Error detail -> Alcotest.fail detail
+  in
+  Alcotest.(check bool)
+    "post-publication cancellation preserves live metadata"
+    true
+    (not persisted.paused && Option.is_none persisted.latched_reason)
 ;;
 
 let test_dead_revival_unchanged_launch_aborts_before_rollback () =
@@ -2394,6 +2468,145 @@ let test_update_keeper_surfaces_committed_cleanup_required () =
     (Yojson.Safe.to_string (data |> member "committed"))
     (Yojson.Safe.to_string
        (data |> member "registry_entry" |> member "meta"))
+;;
+
+let test_update_keeper_rebases_intent_after_join_race () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let keeper_name = "update-rebase-after-join-race" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_keepalive.stop_keepalive ~base_path:base_dir keeper_name;
+      Keeper_registry.For_testing.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let seed =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc
+              [ "name", `String keeper_name
+              ; "agent_name"
+              , `String (Keeper_identity.keeper_agent_name keeper_name)
+              ; "trace_id", `String ("trace-" ^ keeper_name)
+              ; "runtime_id", `String "runtime.primary"
+              ; "generation", `Int 1
+              ])
+        with
+        | Error detail -> Alcotest.fail detail
+        | Ok meta -> { meta with instructions = "before-race" }
+      in
+      (match Keeper_meta_store.write_meta config seed with
+       | Ok () -> ()
+       | Error detail -> Alcotest.fail detail);
+      let original =
+        match Keeper_meta_store.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "ordinary update fixture metadata disappeared"
+        | Error detail -> Alcotest.fail detail
+      in
+      let ctx : _ Keeper_tool_surface.context =
+        { config
+        ; agent_name = "operator"
+        ; sw
+        ; clock = Eio.Stdenv.clock env
+        ; proc_mgr = Some (Eio.Stdenv.process_mgr env)
+        ; net = None
+        ; publication_recovery_provider =
+            Masc_test_deps.publication_recovery_provider
+              (publication_recovery_registry env sw config)
+        }
+      in
+      (match Keeper_keepalive.start_keepalive ctx original with
+       | Keeper_keepalive.Keepalive_started _ -> ()
+       | outcome ->
+         Alcotest.fail
+           (Keeper_keepalive.start_keepalive_outcome_to_string outcome));
+      let old =
+        match Keeper_meta_store.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "running update fixture metadata disappeared"
+        | Error detail -> Alcotest.fail detail
+      in
+      let parsed : Keeper_turn_up_args.parsed_args =
+        { name = keeper_name
+        ; runtime_id_opt = None
+        ; allowed_paths_opt = None
+        ; autoboot_enabled_opt = None
+        ; mention_targets_opt = None
+        ; active_goal_ids_opt = None
+        ; max_context_override_opt = None
+        ; max_context_override_present = false
+        ; proactive_enabled_opt = Some true
+        ; sandbox_profile_opt = None
+        ; network_mode_opt = None
+        ; instructions_arg = None
+        ; profile_defaults =
+            Keeper_types_profile.empty_keeper_profile_defaults
+        ; instructions_opt = None
+        }
+      in
+      let injected = ref false in
+      let inject_concurrent_lifecycle_meta () =
+        if not !injected
+        then (
+          injected := true;
+          let latest =
+            match Keeper_meta_store.read_meta config keeper_name with
+            | Ok (Some meta) -> meta
+            | Ok None ->
+              Alcotest.fail
+                "concurrent lifecycle mutation found no durable metadata"
+            | Error detail -> Alcotest.fail detail
+          in
+          let concurrent =
+            { latest with
+              paused = true
+            ; latched_reason =
+                Some
+                  Keeper_latched_reason
+                  .Transcript_corruption_reset_required
+            ; instructions = "concurrent-preserved"
+            }
+          in
+          match Keeper_meta_store.write_meta config concurrent with
+          | Ok () -> ()
+          | Error detail -> Alcotest.fail detail)
+      in
+      ignore
+        (Keeper_turn_up_update.For_testing.with_after_stop_join
+           ~after_stop_join:inject_concurrent_lifecycle_meta
+           (fun () ->
+             Keeper_turn_up_update.update_keeper ctx parsed old));
+      Alcotest.(check bool) "race hook executed" true !injected;
+      let persisted =
+        match Keeper_meta_store.read_meta config keeper_name with
+        | Ok (Some meta) -> meta
+        | Ok None -> Alcotest.fail "rebased update removed durable metadata"
+        | Error detail -> Alcotest.fail detail
+      in
+      Alcotest.(check bool)
+        "concurrent pause preserved"
+        true
+        persisted.paused;
+      Alcotest.(check bool)
+        "concurrent typed latch preserved"
+        true
+        (persisted.latched_reason
+         = Some
+             Keeper_latched_reason
+             .Transcript_corruption_reset_required);
+      Alcotest.(check string)
+        "concurrent configuration preserved"
+        "concurrent-preserved"
+        persisted.instructions;
+      Alcotest.(check bool)
+        "outer explicit intent applied"
+        true
+        persisted.proactive.enabled)
 ;;
 
 type dead_revival_cancellation_boundary =
@@ -3921,6 +4134,10 @@ let () =
             `Quick
             test_dead_revival_launch_publication_warning_preserves_commit;
           Alcotest.test_case
+            "post-publication cancellation preserves committed revival"
+            `Quick
+            test_dead_revival_cancellation_after_launch_publication_preserves_commit;
+          Alcotest.test_case
             "unchanged launch aborts gated lane before rollback"
             `Quick
             test_dead_revival_unchanged_launch_aborts_before_rollback;
@@ -3986,6 +4203,10 @@ let () =
             "keeper update preserves committed cleanup-required outcome"
             `Quick
             test_update_keeper_surfaces_committed_cleanup_required;
+          Alcotest.test_case
+            "keeper update rebases intent after joined-lane race"
+            `Quick
+            test_update_keeper_rebases_intent_after_join_race;
           Alcotest.test_case
             "nonce-boundary cancellation releases revival reservation"
             `Quick

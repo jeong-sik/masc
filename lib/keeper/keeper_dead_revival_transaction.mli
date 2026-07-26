@@ -38,6 +38,7 @@ type error =
   | Journal_read_settlement_failed of
       Fs_compat.Capability_head.settlement_warning list
   | Journal_write_failed of string
+  | Transaction_lock_failed of File_lock_eio.durable_lock_error
   | Post_commit_cleanup_required of
       { committed : Keeper_meta_contract.keeper_meta
       ; entry : Keeper_registry.registry_entry

@@ -65,6 +65,7 @@ let dead_revival_error_kind error =
   | Journal_published_with_warnings _ -> "journal_published_with_warnings"
   | Journal_read_settlement_failed _ -> "journal_read_settlement_failed"
   | Journal_write_failed _ -> "journal_write_failed"
+  | Transaction_lock_failed _ -> "transaction_lock_failed"
   | Post_commit_cleanup_required _ -> "post_commit_cleanup_required"
   | Durable_snapshot_missing -> "durable_snapshot_missing"
   | Durable_snapshot_changed -> "durable_snapshot_changed"

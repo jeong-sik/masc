@@ -1160,13 +1160,22 @@ let test_dead_revival_final_clear_failure_preserves_commit () =
      let fields =
        match Yojson.Safe.from_string raw with
        | `Assoc fields -> List.map fst fields |> List.sort String.compare
-       | _ -> Alcotest.fail "cleared journal tombstone is not an object"
+       | _ -> Alcotest.fail "active launch journal is not an object"
      in
      Alcotest.(check (list string))
-       "cleared tombstone retains no metadata payload"
-       [ "keeper_name"; "schema"; "stage"; "transaction_id" ]
+       "active launch journal retains recovery payload"
+       [ "candidate"
+       ; "expected_generation"
+       ; "expected_trace_id"
+       ; "keeper_name"
+       ; "original"
+       ; "owner_id"
+       ; "schema"
+       ; "stage"
+       ; "transaction_id"
+       ]
        fields
-   | Ok None -> Alcotest.fail "cleared journal tombstone disappeared"
+   | Ok None -> Alcotest.fail "active launch journal disappeared"
    | Error error ->
      Alcotest.fail (Keeper_dead_revival_transaction.error_to_string error));
   Alcotest.(check bool)
@@ -1192,6 +1201,24 @@ let test_dead_revival_final_clear_failure_preserves_commit () =
    | Ok _ -> Alcotest.fail "startup recovery did not forward-clear journal"
    | Error error ->
      Alcotest.fail (Keeper_dead_revival_transaction.error_to_string error));
+  (match
+     Keeper_dead_revival_transaction.For_testing.current_journal_row
+       ~config
+       ~keeper_name
+   with
+   | Ok (Some raw) ->
+     let fields =
+       match Yojson.Safe.from_string raw with
+       | `Assoc fields -> List.map fst fields |> List.sort String.compare
+       | _ -> Alcotest.fail "cleared journal tombstone is not an object"
+     in
+     Alcotest.(check (list string))
+       "cleared tombstone retains no metadata payload"
+       [ "keeper_name"; "schema"; "stage"; "transaction_id" ]
+       fields
+   | Ok None -> Alcotest.fail "cleared journal tombstone disappeared"
+   | Error error ->
+     Alcotest.fail (Keeper_dead_revival_transaction.error_to_string error));
   let persisted_after_recovery =
     match Keeper_meta_store.read_meta config keeper_name with
     | Ok (Some meta) -> meta
@@ -1202,6 +1229,75 @@ let test_dead_revival_final_clear_failure_preserves_commit () =
     "forward recovery preserves committed nonce"
     committed.runtime.nonce
     persisted_after_recovery.runtime.nonce
+;;
+
+let test_dead_revival_recovery_waits_for_forward_fence () =
+  let keeper_name = "dead-revival-forward-fence" in
+  with_settled_dead_revival_fixture ~keeper_name
+  @@ fun _base_dir config original _dead_entry ctx ->
+  let candidate =
+    { original with
+      paused = false
+    ; latched_reason = None
+    }
+  in
+  let journal_written_p, journal_written_u = Eio.Promise.create () in
+  let release_forward_p, release_forward_u = Eio.Promise.create () in
+  let revival_done_p, revival_done_u = Eio.Promise.create () in
+  let recovery_started_p, recovery_started_u = Eio.Promise.create () in
+  let recovery_done_p, recovery_done_u = Eio.Promise.create () in
+  let recovery_waited, revival, recovery =
+    Keeper_dead_revival_transaction.For_testing.with_boundary_hooks
+      ~after_journal_write:(fun () ->
+        Eio.Promise.resolve journal_written_u ();
+        Eio.Promise.await release_forward_p)
+      (fun () ->
+        Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+          Eio.Promise.resolve
+            revival_done_u
+            (Keeper_dead_revival_transaction.revive
+               ctx
+               ~original
+               ~candidate));
+        Eio.Promise.await journal_written_p;
+        Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+          Eio.Promise.resolve recovery_started_u ();
+          let recovery =
+            Keeper_dead_revival_transaction.recover_pending config
+          in
+          Eio.Promise.resolve recovery_done_u recovery);
+        Eio.Promise.await recovery_started_p;
+        Eio.Fiber.yield ();
+        let recovery_waited =
+          Option.is_none (Eio.Promise.peek recovery_done_p)
+        in
+        Eio.Promise.resolve release_forward_u ();
+        ( recovery_waited
+        , Eio.Promise.await revival_done_p
+        , Eio.Promise.await recovery_done_p ))
+  in
+  Alcotest.(check bool)
+    "recovery waits while forward transaction holds durable fence"
+    true
+    recovery_waited;
+  (match revival with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.fail
+       ("fenced revival failed: "
+        ^ Keeper_dead_revival_transaction.error_to_string error));
+  Alcotest.(check int)
+    "serialized recovery does not roll back committed revival"
+    0
+    recovery.recovered;
+  Alcotest.(check int)
+    "serialized recovery observes the cleared transaction"
+    1
+    recovery.cleared;
+  Alcotest.(check int)
+    "serialized recovery has no unresolved transaction"
+    0
+    (List.length recovery.unresolved)
 ;;
 
 let test_dead_revival_recovery_forwards_concurrent_launch_commit () =
@@ -2480,6 +2576,10 @@ let () =
             "final clear failure preserves committed revival"
             `Quick
             test_dead_revival_final_clear_failure_preserves_commit;
+          Alcotest.test_case
+            "recovery waits for the live revival durability fence"
+            `Quick
+            test_dead_revival_recovery_waits_for_forward_fence;
           Alcotest.test_case
             "recovery forward-completes a concurrent launch commit"
             `Quick

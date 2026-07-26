@@ -122,6 +122,7 @@ type error =
       }
   | Journal_read_settlement_failed of Head.settlement_warning list
   | Journal_write_failed of string
+  | Transaction_lock_failed of File_lock_eio.durable_lock_error
   | Post_commit_cleanup_required of
       { committed : keeper_meta
       ; entry : Keeper_registry.registry_entry
@@ -352,7 +353,7 @@ let journal_of_json = function
     let* stage = required_stage fields in
     if not (String.equal schema journal_schema)
     then Error ("unsupported keeper lifecycle journal schema: " ^ schema)
-    else
+    else (
       match stage with
       | Cleared ->
         let* () = exact_cleared_journal_fields fields in
@@ -404,7 +405,7 @@ let journal_of_json = function
                  ; original
                  ; candidate
                  ; stage
-                 })
+                 }))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     Error "keeper lifecycle journal must be a JSON object"
 ;;
@@ -426,6 +427,28 @@ let reraise_fatal exception_ backtrace =
   | Out_of_memory | Stack_overflow | Sys.Break ->
     Printexc.raise_with_backtrace exception_ backtrace
   | _ -> ()
+;;
+
+let revival_authority_lock_path config leaf =
+  try
+    let dir = Keeper_fs.ensure_dir (journal_dir config) in
+    let lock_leaf =
+      "authority-"
+      ^ sha256
+          ("keeper-dead-revival-authority-lock-v1\000"
+           ^ length_delimited leaf)
+      ^ ".lock"
+    in
+    Ok (Filename.concat dir lock_leaf)
+  with
+  | Eio.Cancel.Cancelled _ as cancelled -> raise cancelled
+  | exception_ ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    reraise_fatal exception_ backtrace;
+    Error
+      (Journal_write_failed
+         ("transaction lock directory preparation failed: "
+          ^ Printexc.to_string exception_))
 ;;
 
 let journal_parent config =
@@ -951,10 +974,13 @@ let rec error_to_string = function
     "keeper revival journal read settled with warnings: "
     ^ settlement_warning_detail (List.length warnings)
   | Journal_write_failed detail -> "keeper revival journal write failed: " ^ detail
+  | Transaction_lock_failed failure ->
+    "keeper revival transaction lock failed: "
+    ^ File_lock_eio.durable_lock_error_to_string failure
   | Post_commit_cleanup_required { committed; cleanup_error; _ } ->
     Printf.sprintf
-      "keeper %s launch committed at lifecycle nonce %d but journal cleanup \
-       requires recovery: %s"
+      "keeper %s launch committed at lifecycle nonce %d but transaction cleanup \
+       requires attention: %s"
       committed.name
       committed.runtime.nonce
       (error_to_string cleanup_error)
@@ -1104,7 +1130,21 @@ let validate_registry_snapshot config original =
   | Some entry -> Ok (Some entry)
 ;;
 
-let revive (ctx : _ context) ~original ~candidate =
+let reserve_validated_journal config ~original journal =
+  match Keeper_meta_store.read_meta config original.name with
+  | Error _ -> Error Durable_snapshot_changed
+  | Ok None -> Error Durable_snapshot_missing
+  | Ok (Some latest)
+    when latest.meta_version <> original.meta_version
+         || not (same_persisted_payload latest original) ->
+    Error Durable_snapshot_changed
+  | Ok (Some _) ->
+    (match validate_registry_snapshot config original with
+     | Error conflict -> Error (Registry_conflict conflict)
+     | Ok _ -> save_journal config journal)
+;;
+
+let revive_locked (ctx : _ context) ~original ~candidate =
   match
     Keeper_lifecycle_reservation.acquire
       ~base_path:ctx.config.base_path
@@ -1183,7 +1223,12 @@ let revive (ctx : _ context) ~original ~candidate =
     let journal_result =
       protect_pre_journal (fun () ->
         journal_for_cleanup := Some journal;
-        let result = save_journal ctx.config journal in
+        let result =
+          reserve_validated_journal
+            ctx.config
+            ~original
+            journal
+        in
         invoke_after_journal_write_hook ();
         result)
     in
@@ -1380,7 +1425,42 @@ let revive (ctx : _ context) ~original ~candidate =
          Printexc.raise_with_backtrace cancelled backtrace)
 ;;
 
-let recover_one config leaf =
+let revive (ctx : _ context) ~original ~candidate =
+  let leaf = journal_leaf original.name in
+  match revival_authority_lock_path ctx.config leaf with
+  | Error error -> Error error
+  | Ok lock_path ->
+    (match
+       File_lock_eio.with_durable_lock_observed
+         ~lock_path
+         (fun () -> revive_locked ctx ~original ~candidate)
+     with
+     | File_lock_eio.Lock_not_acquired failure ->
+       Error (Transaction_lock_failed failure)
+     | File_lock_eio.Body_completed { value; release_error = None } -> value
+     | File_lock_eio.Body_completed
+         { value = Ok { meta = committed; entry }
+         ; release_error = Some failure
+         } ->
+       Error
+         (Post_commit_cleanup_required
+            { committed
+            ; entry
+            ; cleanup_error = Transaction_lock_failed failure
+            })
+     | File_lock_eio.Body_completed
+         { value = Error error
+         ; release_error = Some failure
+         } ->
+       Log.Keeper.error
+         "keeper revival transaction lock release failed after body error \
+          keeper=%s error=%s"
+         original.name
+         (File_lock_eio.durable_lock_error_to_string failure);
+       Error error)
+;;
+
+let recover_one_locked config leaf =
   match
     read_journal_leaf
       ~invalid:(fun detail -> Journal_ownership_changed detail)
@@ -1469,6 +1549,33 @@ let recover_one config leaf =
         rollback_recovery ()
       | Cleared ->
         Error "active journal unexpectedly carries Cleared stage"
+;;
+
+let recover_one config leaf =
+  match revival_authority_lock_path config leaf with
+  | Error error -> Error (error_to_string error)
+  | Ok lock_path ->
+    (match
+       File_lock_eio.with_durable_lock_observed
+         ~lock_path
+         (fun () -> recover_one_locked config leaf)
+     with
+     | File_lock_eio.Lock_not_acquired failure ->
+       Error
+         ("recovery transaction lock failed: "
+          ^ File_lock_eio.durable_lock_error_to_string failure)
+     | File_lock_eio.Body_completed { value; release_error = None } -> value
+     | File_lock_eio.Body_completed
+         { value
+         ; release_error = Some failure
+         } ->
+       let release_detail =
+         "recovery transaction lock release failed: "
+         ^ File_lock_eio.durable_lock_error_to_string failure
+       in
+       (match value with
+        | Ok _ -> Error ("recovery completed; " ^ release_detail)
+        | Error detail -> Error (detail ^ "; " ^ release_detail)))
 ;;
 
 let recover_pending config =

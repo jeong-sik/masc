@@ -1,14 +1,25 @@
 (** Fusion — 심판. 패널 답들을 judge 모델에 넘겨 구조화 종합({!Fusion_types.judge_synthesis})을 받는다.
 
-    Judge 출력 계약은 typed 2-tier다 (구현부 [apply_fusion_judge_output_contract]
-    주석 참조): OAS capability facts가 native structured output을 허용하면 JsonSchema를
-    provider config에 싣고(Native tier), 아니면 schema 없이 프롬프트의
-    {!Fusion_judge_parse.expected_json_doc} 지시에 의존한다(Prompt tier — 결정은
-    로그로 관측). 어느 tier든 응답은 {!Fusion_judge_parse.of_string}의 strict 파싱을
-    통과해야 하며 위반은 [Parse_error]로 fail-loud한다. [JsonMode]로의 silent
-    downgrade는 없다.
+    Judge 출력 계약은 **단일 tier**다. [apply_fusion_judge_output_contract]
+    (fusion_judge.ml:165-166)는 capability를 읽지 않고
+    [Keeper_structured_output_schema.without_response_format]를 무조건 적용한다 —
+    [response_format = Off], [output_schema = None]. 계약은 프롬프트의
+    {!Fusion_judge_parse.expected_json_doc} 지시로만 나가고, 응답은
+    {!Fusion_judge_parse.of_string}의 strict 파싱을 통과해야 하며 위반은
+    [Parse_error]로 fail-loud한다.
 
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.2 *)
+    2026-07-26까지 이 문서는 "OAS capability facts가 native structured output을
+    허용하면 JsonSchema를 싣는다(Native tier)"와 "tier 결정은 로그로 관측"을
+    적고 있었다. 구현에는 그 분기도 tier 로그도 없다. 그리고 실제 위험은 문서가
+    부인했던 [JsonMode] silent downgrade가 아니라 그 반대다: 아무 형식도 요청하지
+    않으므로 provider가 마크다운 펜스를 붙이면 strict 파싱이 실패한다. 라이브에서
+    관측된 형태이며(keeper rondo, event-queue.json last_settlement,
+    2026-07-25T10:44Z, ``Invalid token '```json``) tier 기록이 없어 실패한 뒤
+    settlement에서만 보였다.
+
+    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.2 —
+    RFC가 tier를 요구한다면 구현이 빠진 것이고, 요구하지 않는다면 RFC 쪽을
+    맞춰야 한다. 어느 쪽인지는 확인하지 않았다. *)
 
 (** 질문 + 패널 답들로 심판 프롬프트를 구성한다
     ({!Fusion_judge_parse.expected_json_doc} 지시 포함). 순수 — 테스트 가능. *)

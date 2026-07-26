@@ -2496,7 +2496,7 @@ let authority_of_prepared (prepared : prepared_commit) =
     }
 ;;
 
-let same_immutable_ref left right =
+let same_immutable_ref (left : immutable_ref) (right : immutable_ref) =
   left.kind = right.kind
   && String.equal left.leaf right.leaf
   && Sha256.equal left.sha256 right.sha256

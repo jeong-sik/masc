@@ -741,7 +741,7 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Api (InputCapacity _) -> false
   | Agent_sdk.Error.Agent
       (UnrecognizedStopReason
-         { reason = "model_context_window_exceeded" }) ->
+         { reason = "model_context_window_exceeded"; _ }) ->
       true
   | _ -> false
 
